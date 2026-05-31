@@ -194,6 +194,22 @@ pub struct ToolAnnotations {
     /// Explicit escape hatch for tools whose results are always complete
     /// inline, even though they are execute-like.
     pub inline_result: bool,
+    /// MCP `readOnlyHint`. This remains advisory; policy decides whether
+    /// the server that supplied it is trusted enough to rely on it.
+    #[serde(rename = "readOnlyHint", skip_serializing_if = "Option::is_none")]
+    pub read_only_hint: Option<bool>,
+    /// MCP `destructiveHint`. This remains advisory; policy decides whether
+    /// the server that supplied it is trusted enough to rely on it.
+    #[serde(rename = "destructiveHint", skip_serializing_if = "Option::is_none")]
+    pub destructive_hint: Option<bool>,
+    /// MCP `idempotentHint`. This remains advisory; policy decides whether
+    /// the server that supplied it is trusted enough to rely on it.
+    #[serde(rename = "idempotentHint", skip_serializing_if = "Option::is_none")]
+    pub idempotent_hint: Option<bool>,
+    /// MCP `openWorldHint`. This remains advisory; policy decides whether
+    /// the server that supplied it is trusted enough to rely on it.
+    #[serde(rename = "openWorldHint", skip_serializing_if = "Option::is_none")]
+    pub open_world_hint: Option<bool>,
 }
 
 #[cfg(test)]
@@ -283,5 +299,24 @@ mod tests {
         assert!(!annotations.emits_artifacts);
         assert!(annotations.result_readers.is_empty());
         assert!(!annotations.inline_result);
+    }
+
+    #[test]
+    fn mcp_annotation_hints_round_trip() {
+        let annotations: ToolAnnotations = serde_json::from_value(serde_json::json!({
+            "readOnlyHint": true,
+            "destructiveHint": false,
+            "idempotentHint": true,
+            "openWorldHint": false
+        }))
+        .expect("MCP hints should deserialize");
+        assert_eq!(annotations.read_only_hint, Some(true));
+        assert_eq!(annotations.destructive_hint, Some(false));
+        assert_eq!(annotations.idempotent_hint, Some(true));
+        assert_eq!(annotations.open_world_hint, Some(false));
+
+        let encoded = serde_json::to_value(&annotations).expect("serialize annotations");
+        assert_eq!(encoded["readOnlyHint"], true);
+        assert_eq!(encoded["idempotentHint"], true);
     }
 }

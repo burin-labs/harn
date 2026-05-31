@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use std::collections::BTreeSet;
 
 use crate::agent_events::{ToolCallErrorCategory, ToolCallStatus, ToolExecutor};
 use crate::tool_annotations::{SideEffectLevel, ToolAnnotations};
@@ -178,6 +179,10 @@ pub struct CompositionChildResult {
     pub executor: Option<ToolExecutor>,
     pub duration_ms: Option<u64>,
     pub execution_duration_ms: Option<u64>,
+    pub attempt: u32,
+    pub retry_attempts: u32,
+    pub retry_errors: Vec<String>,
+    pub retry_delays_ms: Vec<u64>,
 }
 
 impl Default for CompositionChildResult {
@@ -194,6 +199,10 @@ impl Default for CompositionChildResult {
             executor: None,
             duration_ms: None,
             execution_duration_ms: None,
+            attempt: 1,
+            retry_attempts: 0,
+            retry_errors: Vec::new(),
+            retry_delays_ms: Vec::new(),
         }
     }
 }
@@ -204,6 +213,8 @@ pub struct CompositionExecutionLimits {
     pub max_operations: u64,
     pub timeout_ms: Option<u64>,
     pub max_output_bytes: u64,
+    pub max_concurrent_operations: usize,
+    pub max_concurrent_per_server: usize,
 }
 
 impl Default for CompositionExecutionLimits {
@@ -212,8 +223,39 @@ impl Default for CompositionExecutionLimits {
             max_operations: 64,
             timeout_ms: Some(10_000),
             max_output_bytes: 64 * 1024,
+            max_concurrent_operations: 16,
+            max_concurrent_per_server: 4,
         }
     }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct CompositionRetryPolicy {
+    pub max_attempts: u32,
+    pub base_delay_ms: u64,
+    pub max_delay_ms: u64,
+    pub honor_retry_after: bool,
+}
+
+impl Default for CompositionRetryPolicy {
+    fn default() -> Self {
+        Self {
+            max_attempts: 3,
+            base_delay_ms: 100,
+            max_delay_ms: 2_000,
+            honor_retry_after: true,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct CompositionMcpPolicy {
+    pub trusted_servers: BTreeSet<String>,
+    pub trust_annotations: bool,
+    pub retry: CompositionRetryPolicy,
+    pub call_timeout_ms: Option<u64>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -226,6 +268,7 @@ pub struct CompositionExecutionRequest {
     pub manifest: BindingManifest,
     pub requested_side_effect_ceiling: SideEffectLevel,
     pub limits: CompositionExecutionLimits,
+    pub mcp_policy: CompositionMcpPolicy,
     pub metadata: Value,
 }
 
@@ -239,6 +282,7 @@ impl Default for CompositionExecutionRequest {
             manifest: BindingManifest::default(),
             requested_side_effect_ceiling: SideEffectLevel::ReadOnly,
             limits: CompositionExecutionLimits::default(),
+            mcp_policy: CompositionMcpPolicy::default(),
             metadata: Value::Object(serde_json::Map::new()),
         }
     }

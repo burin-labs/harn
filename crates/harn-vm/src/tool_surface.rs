@@ -233,6 +233,22 @@ fn parse_tool_annotations(map: &serde_json::Map<String, serde_json::Value>) -> T
             .get("inline_result")
             .and_then(|value| value.as_bool())
             .unwrap_or(false),
+        read_only_hint: map
+            .get("readOnlyHint")
+            .or_else(|| policy.get("readOnlyHint"))
+            .and_then(|value| value.as_bool()),
+        destructive_hint: map
+            .get("destructiveHint")
+            .or_else(|| policy.get("destructiveHint"))
+            .and_then(|value| value.as_bool()),
+        idempotent_hint: map
+            .get("idempotentHint")
+            .or_else(|| policy.get("idempotentHint"))
+            .and_then(|value| value.as_bool()),
+        open_world_hint: map
+            .get("openWorldHint")
+            .or_else(|| policy.get("openWorldHint"))
+            .and_then(|value| value.as_bool()),
     }
 }
 

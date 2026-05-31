@@ -79,7 +79,23 @@ fn __composition_mcp_servers(manifest) {
 
 fn __composition_execute_options(opts, dispatcher) {
   var out = {dispatcher: dispatcher}
-  for key in ["session_id", "run_id", "max_operations", "timeout_ms", "max_output_bytes"] {
+  for key in [
+    "session_id",
+    "run_id",
+    "max_operations",
+    "timeout_ms",
+    "max_output_bytes",
+    "max_concurrent_operations",
+    "max_concurrent",
+    "max_concurrent_per_server",
+    "per_server_concurrency",
+    "trusted_servers",
+    "trusted_mcp_servers",
+    "trust_annotations",
+    "trust_mcp_annotations",
+    "call_timeout_ms",
+    "retry",
+  ] {
     if opts?[key] != nil {
       out = out + {[key]: opts[key]}
     }
@@ -251,6 +267,12 @@ pub fn composition_mcp_tools(registry = nil, options = nil) {
         max_operations: {type: "integer", required: false},
         timeout_ms: {type: "integer", required: false},
         max_output_bytes: {type: "integer", required: false},
+        max_concurrent: {type: "integer", required: false},
+        max_concurrent_per_server: {type: "integer", required: false},
+        trusted_servers: {type: "array", required: false},
+        trust_annotations: {type: "boolean", required: false},
+        call_timeout_ms: {type: "integer", required: false},
+        retry: {type: "object", required: false},
         tools: {type: "array", required: false},
         include_report: {type: "boolean", required: false},
       },

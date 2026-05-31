@@ -5,11 +5,14 @@
 //! opaque "execute code" blob, so policy, transcript, replay, and host approval
 //! surfaces can keep reasoning about each child call normally.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::sync::Arc;
+use std::time::Duration;
 
+use futures::stream::{FuturesUnordered, StreamExt};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
+use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 
 use crate::agent_events::{ToolCallErrorCategory, ToolCallStatus};
 use crate::tool_annotations::SideEffectLevel;
@@ -39,8 +42,8 @@ pub use manifest::{
 pub use types::{
     CompositionChildCall, CompositionChildResult, CompositionExecutionLimits,
     CompositionExecutionReport, CompositionExecutionRequest, CompositionFailureCategory,
-    CompositionRunEnvelope, CompositionToolHost, CompositionToolOutput,
-    COMPOSITION_EXECUTION_SCHEMA_VERSION,
+    CompositionMcpPolicy, CompositionRetryPolicy, CompositionRunEnvelope, CompositionToolHost,
+    CompositionToolOutput, COMPOSITION_EXECUTION_SCHEMA_VERSION,
 };
 pub use typescript::composition_typescript_declarations;
 
@@ -164,13 +167,17 @@ impl ExecutionState {
             executor: Some(crate::agent_events::ToolExecutor::HarnBuiltin),
             duration_ms: Some(0),
             execution_duration_ms: Some(0),
+            attempt: 1,
+            retry_attempts: 0,
+            retry_errors: Vec::new(),
+            retry_delays_ms: Vec::new(),
         });
     }
 
     fn push_result(
         &mut self,
         call: &CompositionChildCall,
-        output: &CompositionToolOutput,
+        outcome: &CompositionDispatchOutcome,
         elapsed_ms: u64,
     ) {
         if self
@@ -185,19 +192,89 @@ impl ExecutionState {
             tool_call_id: call.tool_call_id.clone(),
             tool_name: call.tool_name.clone(),
             operation_index: call.operation_index,
-            status: if output.error.is_some() {
+            status: if outcome.output.error.is_some() {
                 ToolCallStatus::Failed
             } else {
                 ToolCallStatus::Completed
             },
-            raw_output: output.value.clone(),
-            error: output.error.clone(),
-            error_category: output.error_category,
-            executor: output.executor.clone(),
+            raw_output: outcome.output.value.clone(),
+            error: outcome.output.error.clone(),
+            error_category: outcome.output.error_category,
+            executor: outcome.output.executor.clone(),
             duration_ms: Some(elapsed_ms),
             execution_duration_ms: Some(elapsed_ms),
+            attempt: outcome.attempt,
+            retry_attempts: outcome.retry_attempts,
+            retry_errors: outcome.retry_errors.clone(),
+            retry_delays_ms: outcome.retry_delays_ms.clone(),
         });
     }
+}
+
+#[derive(Clone)]
+struct CompositionRuntime {
+    state: Arc<parking_lot::Mutex<ExecutionState>>,
+    host: Arc<dyn CompositionToolHost>,
+    bulkheads: Arc<CompositionBulkheads>,
+}
+
+struct CompositionBulkheads {
+    global: Arc<Semaphore>,
+    per_server: parking_lot::Mutex<HashMap<String, Arc<Semaphore>>>,
+    per_server_limit: usize,
+}
+
+impl CompositionBulkheads {
+    fn new(limits: &CompositionExecutionLimits) -> Self {
+        Self {
+            global: Arc::new(Semaphore::new(
+                limits
+                    .max_concurrent_operations
+                    .clamp(1, Semaphore::MAX_PERMITS),
+            )),
+            per_server: parking_lot::Mutex::new(HashMap::new()),
+            per_server_limit: limits
+                .max_concurrent_per_server
+                .clamp(1, Semaphore::MAX_PERMITS),
+        }
+    }
+
+    async fn acquire(
+        &self,
+        binding: &BindingManifestEntry,
+    ) -> Result<(OwnedSemaphorePermit, Option<OwnedSemaphorePermit>), VmError> {
+        let global = self
+            .global
+            .clone()
+            .acquire_owned()
+            .await
+            .map_err(|_| VmError::Runtime("composition bulkhead closed".to_string()))?;
+        let server = mcp_server_name(binding);
+        let per_server = match server {
+            Some(server) => {
+                let semaphore = {
+                    let mut semaphores = self.per_server.lock();
+                    semaphores
+                        .entry(server)
+                        .or_insert_with(|| Arc::new(Semaphore::new(self.per_server_limit)))
+                        .clone()
+                };
+                Some(semaphore.acquire_owned().await.map_err(|_| {
+                    VmError::Runtime("composition per-server bulkhead closed".to_string())
+                })?)
+            }
+            None => None,
+        };
+        Ok((global, per_server))
+    }
+}
+
+struct CompositionDispatchOutcome {
+    output: CompositionToolOutput,
+    attempt: u32,
+    retry_attempts: u32,
+    retry_errors: Vec<String>,
+    retry_delays_ms: Vec<u64>,
 }
 
 /// Execute a read-only Harn-native composition snippet against a manifest.
@@ -356,7 +433,14 @@ async fn execute_harn_composition_inner(
     }));
     let mut vm = Vm::new();
     crate::register_core_stdlib(&mut vm);
-    register_composition_call_builtin(&mut vm, state.clone(), host);
+    let limits = state.lock().request.limits.clone();
+    let runtime = CompositionRuntime {
+        state: state.clone(),
+        host,
+        bulkheads: Arc::new(CompositionBulkheads::new(&limits)),
+    };
+    register_composition_call_builtin(&mut vm, runtime.clone());
+    register_composition_map_bounded_builtin(&mut vm, runtime);
     if let Some(timeout_ms) = state.lock().request.limits.timeout_ms {
         vm.push_deadline_after(std::time::Duration::from_millis(timeout_ms));
     }
@@ -415,14 +499,9 @@ async fn execute_harn_composition_inner(
     }
 }
 
-fn register_composition_call_builtin(
-    vm: &mut Vm,
-    state: Arc<parking_lot::Mutex<ExecutionState>>,
-    host: Arc<dyn CompositionToolHost>,
-) {
+fn register_composition_call_builtin(vm: &mut Vm, runtime: CompositionRuntime) {
     vm.register_async_builtin("__composition_call", move |_ctx, args| {
-        let state = state.clone();
-        let host = host.clone();
+        let runtime = runtime.clone();
         async move {
             let tool_name = args
                 .first()
@@ -433,24 +512,389 @@ fn register_composition_call_builtin(
                 .map(crate::llm::vm_value_to_json)
                 .unwrap_or_else(|| serde_json::json!({}));
             let (binding, call, clock) = {
-                let mut state = state.lock();
+                let mut state = runtime.state.lock();
                 let (binding, call) = state.next_call(&tool_name, input.clone())?;
                 (binding, call, state.clock.clone())
             };
             let started_ms = clock.monotonic_ms();
-            let output = host.call(&binding, input).await;
+            let outcome = dispatch_binding_with_policy(&runtime, &binding, input).await?;
             {
-                let mut state = state.lock();
-                state.push_result(&call, &output, elapsed_ms(&*clock, started_ms));
+                let mut state = runtime.state.lock();
+                state.push_result(&call, &outcome, elapsed_ms(&*clock, started_ms));
             }
-            if let Some(error) = output.error {
+            if let Some(error) = outcome.output.error {
                 return Err(VmError::Runtime(error));
             }
             Ok(crate::json_to_vm_value(
-                &output.value.unwrap_or(Value::Null),
+                &outcome.output.value.unwrap_or(Value::Null),
             ))
         }
     });
+}
+
+async fn dispatch_binding_with_policy(
+    runtime: &CompositionRuntime,
+    binding: &BindingManifestEntry,
+    input: Value,
+) -> Result<CompositionDispatchOutcome, VmError> {
+    let policy = runtime.state.lock().request.mcp_policy.clone();
+    let retry = policy.retry.clone();
+    let max_attempts = retry.max_attempts.max(1);
+    let can_retry = retry_allowed(binding, &input, &policy);
+    let mut attempt = 1u32;
+    let mut retry_errors = Vec::new();
+    let mut retry_delays_ms = Vec::new();
+
+    loop {
+        let (_global_permit, _server_permit) = runtime.bulkheads.acquire(binding).await?;
+        let call = runtime.host.call(binding, input.clone());
+        let mut output = if let Some(timeout_ms) = policy.call_timeout_ms.filter(|ms| *ms > 0) {
+            match tokio::time::timeout(Duration::from_millis(timeout_ms), call).await {
+                Ok(output) => output,
+                Err(_) => CompositionToolOutput::error(
+                    format!(
+                        "composition binding '{}' timed out after {timeout_ms}ms",
+                        binding.name
+                    ),
+                    ToolCallErrorCategory::Timeout,
+                ),
+            }
+        } else {
+            call.await
+        };
+        drop((_global_permit, _server_permit));
+
+        if output.error.is_none() {
+            if let Some(value) = output.value.take() {
+                match validate_binding_output(binding, value) {
+                    Ok(value) => output.value = Some(value),
+                    Err(message) => {
+                        output = CompositionToolOutput::error(
+                            message,
+                            ToolCallErrorCategory::SchemaValidation,
+                        );
+                    }
+                }
+            }
+        }
+
+        if output.error.is_none()
+            || attempt >= max_attempts
+            || !can_retry
+            || !is_retryable_child_error(&output)
+        {
+            return Ok(CompositionDispatchOutcome {
+                output,
+                attempt,
+                retry_attempts: attempt.saturating_sub(1),
+                retry_errors,
+                retry_delays_ms,
+            });
+        }
+
+        let error = output
+            .error
+            .clone()
+            .unwrap_or_else(|| "composition child call failed".to_string());
+        let delay_ms = compute_retry_delay_ms(binding, &input, attempt, &retry, &error);
+        retry_errors.push(error);
+        retry_delays_ms.push(delay_ms);
+        if delay_ms > 0 {
+            tokio::time::sleep(Duration::from_millis(delay_ms)).await;
+        }
+        attempt = attempt.saturating_add(1);
+    }
+}
+
+fn validate_binding_output(binding: &BindingManifestEntry, value: Value) -> Result<Value, String> {
+    let Some(schema) = &binding.output_schema else {
+        return Ok(value);
+    };
+    let value_vm = crate::json_to_vm_value(&value);
+    let schema_vm = crate::json_to_vm_value(schema);
+    crate::schema::schema_expect_value(&value_vm, &schema_vm, false)
+        .map(|value| crate::llm::vm_value_to_json(&value))
+        .map_err(|error| {
+            format!(
+                "composition binding '{}' outputSchema validation failed: {error}",
+                binding.name
+            )
+        })
+}
+
+fn retry_allowed(
+    binding: &BindingManifestEntry,
+    input: &Value,
+    policy: &CompositionMcpPolicy,
+) -> bool {
+    if idempotency_key_present(input) {
+        return true;
+    }
+    if binding.source == "mcp_server" {
+        if !mcp_binding_trusted(binding, policy) {
+            return false;
+        }
+        return binding.annotations.destructive_hint != Some(true)
+            && (binding.annotations.read_only_hint == Some(true)
+                || binding.annotations.idempotent_hint == Some(true));
+    }
+    binding.side_effect_level == SideEffectLevel::ReadOnly
+        && binding.annotations.kind.is_read_only()
+}
+
+fn mcp_binding_trusted(binding: &BindingManifestEntry, policy: &CompositionMcpPolicy) -> bool {
+    policy.trust_annotations
+        || mcp_server_name(binding)
+            .as_ref()
+            .is_some_and(|server| policy.trusted_servers.contains(server))
+}
+
+fn mcp_server_name(binding: &BindingManifestEntry) -> Option<String> {
+    binding
+        .metadata
+        .get("_mcp_server")
+        .or_else(|| binding.metadata.get("mcp_server"))
+        .or_else(|| binding.metadata.pointer("/server/name"))
+        .and_then(Value::as_str)
+        .filter(|server| !server.is_empty())
+        .map(ToOwned::to_owned)
+}
+
+fn idempotency_key_present(input: &Value) -> bool {
+    for pointer in [
+        "/idempotency_key",
+        "/idempotencyKey",
+        "/_idempotency_key",
+        "/_meta/idempotencyKey",
+        "/_meta/harn/idempotencyKey",
+    ] {
+        if input.pointer(pointer).is_some_and(|value| match value {
+            Value::String(value) => !value.trim().is_empty(),
+            Value::Null => false,
+            _ => true,
+        }) {
+            return true;
+        }
+    }
+    false
+}
+
+fn is_retryable_child_error(output: &CompositionToolOutput) -> bool {
+    if matches!(
+        output.error_category,
+        Some(
+            ToolCallErrorCategory::Network
+                | ToolCallErrorCategory::Timeout
+                | ToolCallErrorCategory::McpServerError
+        )
+    ) {
+        return true;
+    }
+    let Some(error) = &output.error else {
+        return false;
+    };
+    let error = error.to_ascii_lowercase();
+    [
+        "429",
+        "503",
+        "retry-after",
+        "rate limit",
+        "rate-limit",
+        "timeout",
+        "timed out",
+        "transient",
+        "overloaded",
+        "server closed connection",
+        "disconnected",
+        "mcp read error",
+        "mcp write error",
+        "connection reset",
+    ]
+    .iter()
+    .any(|needle| error.contains(needle))
+}
+
+fn compute_retry_delay_ms(
+    binding: &BindingManifestEntry,
+    input: &Value,
+    attempt: u32,
+    retry: &CompositionRetryPolicy,
+    error: &str,
+) -> u64 {
+    if retry.max_delay_ms == 0 {
+        return 0;
+    }
+    if retry.honor_retry_after {
+        if let Some(delay) = retry_after_ms_from_error(error) {
+            return delay.min(retry.max_delay_ms);
+        }
+    }
+    let shift = attempt.saturating_sub(1).min(20);
+    let multiplier = 1u64.checked_shl(shift).unwrap_or(u64::MAX);
+    let base = retry.base_delay_ms.saturating_mul(multiplier);
+    if base == 0 {
+        return 0;
+    }
+    let jitter_span = (base / 2).max(1);
+    let mut hasher = Sha256::new();
+    hasher.update(binding.name.as_bytes());
+    hasher.update(b"\0");
+    hasher.update(attempt.to_le_bytes());
+    hasher.update(b"\0");
+    if let Ok(bytes) = serde_json::to_vec(input) {
+        hasher.update(bytes);
+    }
+    let digest = hasher.finalize();
+    let jitter = u64::from_le_bytes(digest[..8].try_into().unwrap_or([0; 8])) % (jitter_span + 1);
+    base.saturating_add(jitter).min(retry.max_delay_ms)
+}
+
+fn retry_after_ms_from_error(error: &str) -> Option<u64> {
+    let lower = error.to_ascii_lowercase();
+    let (_, tail) = lower.split_once("retry-after")?;
+    let value = tail
+        .trim_start_matches(|c: char| c == ':' || c == '=' || c.is_whitespace())
+        .split(|c: char| !c.is_ascii_digit())
+        .next()
+        .filter(|value| !value.is_empty())?;
+    value
+        .parse::<u64>()
+        .ok()
+        .map(|seconds| seconds.saturating_mul(1000))
+}
+
+fn register_composition_map_bounded_builtin(vm: &mut Vm, runtime: CompositionRuntime) {
+    vm.register_async_builtin("map_bounded", move |ctx, args| {
+        let runtime = runtime.clone();
+        async move {
+            let items = match args.first() {
+                Some(VmValue::List(items)) => items.as_ref().clone(),
+                Some(other) => {
+                    return Err(VmError::TypeError(format!(
+                        "map_bounded: first argument must be a list, got {}",
+                        other.type_name()
+                    )))
+                }
+                None => {
+                    return Err(VmError::Runtime(
+                        "map_bounded: first argument must be a list".to_string(),
+                    ))
+                }
+            };
+            let closure = match args.get(1) {
+                Some(VmValue::Closure(closure)) => closure.clone(),
+                Some(other) => {
+                    return Err(VmError::TypeError(format!(
+                        "map_bounded: second argument must be a closure, got {}",
+                        other.type_name()
+                    )))
+                }
+                None => {
+                    return Err(VmError::Runtime(
+                        "map_bounded: second argument must be a closure".to_string(),
+                    ))
+                }
+            };
+            let options = args
+                .get(2)
+                .map(crate::llm::vm_value_to_json)
+                .unwrap_or_else(|| serde_json::json!({}));
+            let default_cap = runtime
+                .state
+                .lock()
+                .request
+                .limits
+                .max_concurrent_operations
+                .max(1);
+            let cap = options
+                .get("concurrency")
+                .or_else(|| options.get("max_concurrent"))
+                .and_then(Value::as_u64)
+                .map(|value| value.max(1) as usize)
+                .unwrap_or(default_cap)
+                .min(items.len().max(1));
+
+            let total = items.len();
+            let mut pending = items.into_iter().enumerate();
+            let mut in_flight = FuturesUnordered::new();
+            let mut results: Vec<Option<VmValue>> = vec![None; total];
+            let mut succeeded = 0i64;
+            let mut failed = 0i64;
+
+            while in_flight.len() < cap {
+                let Some((index, item)) = pending.next() else {
+                    break;
+                };
+                in_flight.push(run_map_bounded_item(
+                    ctx.clone(),
+                    closure.clone(),
+                    index,
+                    item,
+                ));
+            }
+            while let Some((index, output, result)) = in_flight.next().await {
+                ctx.forward_output(&output);
+                match result {
+                    Ok(value) => {
+                        succeeded += 1;
+                        results[index] = Some(VmValue::enum_variant("Result", "Ok", vec![value]));
+                    }
+                    Err(error) => {
+                        failed += 1;
+                        results[index] = Some(VmValue::enum_variant(
+                            "Result",
+                            "Err",
+                            vec![VmValue::String(std::sync::Arc::from(error.to_string()))],
+                        ));
+                    }
+                }
+                if let Some((next_index, next_item)) = pending.next() {
+                    in_flight.push(run_map_bounded_item(
+                        ctx.clone(),
+                        closure.clone(),
+                        next_index,
+                        next_item,
+                    ));
+                }
+            }
+
+            let mut dict = BTreeMap::new();
+            dict.insert(
+                "results".to_string(),
+                VmValue::List(std::sync::Arc::new(
+                    results
+                        .into_iter()
+                        .map(|value| {
+                            value.unwrap_or_else(|| {
+                                VmValue::enum_variant(
+                                    "Result",
+                                    "Err",
+                                    vec![VmValue::String(std::sync::Arc::from(
+                                        "map_bounded: task did not produce a result",
+                                    ))],
+                                )
+                            })
+                        })
+                        .collect(),
+                )),
+            );
+            dict.insert("succeeded".to_string(), VmValue::Int(succeeded));
+            dict.insert("failed".to_string(), VmValue::Int(failed));
+            Ok(VmValue::Dict(std::sync::Arc::new(dict)))
+        }
+    });
+}
+
+async fn run_map_bounded_item(
+    ctx: crate::vm::AsyncBuiltinCtx,
+    closure: std::sync::Arc<crate::VmClosure>,
+    index: usize,
+    item: VmValue,
+) -> (usize, String, Result<VmValue, VmError>) {
+    let mut vm = ctx.child_vm();
+    let result = vm.call_closure_pub(&closure, &[item]).await;
+    let output = vm.take_output();
+    (index, output, result)
 }
 
 fn elapsed_ms(clock: &dyn harn_clock::Clock, started_ms: i64) -> u64 {
@@ -608,6 +1052,7 @@ const PURE_COMPOSITION_CALLS: &[&str] = &[
     "keys",
     "len",
     "lower",
+    "map_bounded",
     "parse_float_or",
     "parse_int_or",
     "split",
@@ -791,6 +1236,64 @@ pub fn register_composition_builtins(vm: &mut Vm) {
             if let Some(max_output_bytes) = options.get("max_output_bytes").and_then(Value::as_u64)
             {
                 request.limits.max_output_bytes = max_output_bytes;
+            }
+            if let Some(max_concurrent) = options
+                .get("max_concurrent_operations")
+                .or_else(|| options.get("max_concurrent"))
+                .and_then(Value::as_u64)
+            {
+                request.limits.max_concurrent_operations =
+                    usize::try_from(max_concurrent).unwrap_or(usize::MAX).max(1);
+            }
+            if let Some(per_server) = options
+                .get("max_concurrent_per_server")
+                .or_else(|| options.get("per_server_concurrency"))
+                .and_then(Value::as_u64)
+            {
+                request.limits.max_concurrent_per_server =
+                    usize::try_from(per_server).unwrap_or(usize::MAX).max(1);
+            }
+            let trusted_servers = string_set_option(&options, "trusted_servers");
+            let trusted_mcp_servers = string_set_option(&options, "trusted_mcp_servers");
+            if !trusted_servers.is_empty() || !trusted_mcp_servers.is_empty() {
+                request
+                    .mcp_policy
+                    .trusted_servers
+                    .extend(trusted_servers.into_iter().chain(trusted_mcp_servers));
+            }
+            if let Some(trust_annotations) = options
+                .get("trust_annotations")
+                .or_else(|| options.get("trust_mcp_annotations"))
+                .and_then(Value::as_bool)
+            {
+                request.mcp_policy.trust_annotations = trust_annotations;
+            }
+            if let Some(call_timeout_ms) = options.get("call_timeout_ms").and_then(Value::as_u64) {
+                request.mcp_policy.call_timeout_ms = Some(call_timeout_ms);
+            }
+            if let Some(retry_options) = options.get("retry") {
+                if let Some(max_attempts) =
+                    retry_options.get("max_attempts").and_then(Value::as_u64)
+                {
+                    request.mcp_policy.retry.max_attempts =
+                        u32::try_from(max_attempts).unwrap_or(u32::MAX).max(1);
+                }
+                if let Some(base_delay_ms) =
+                    retry_options.get("base_delay_ms").and_then(Value::as_u64)
+                {
+                    request.mcp_policy.retry.base_delay_ms = base_delay_ms;
+                }
+                if let Some(max_delay_ms) =
+                    retry_options.get("max_delay_ms").and_then(Value::as_u64)
+                {
+                    request.mcp_policy.retry.max_delay_ms = max_delay_ms;
+                }
+                if let Some(honor_retry_after) = retry_options
+                    .get("honor_retry_after")
+                    .and_then(Value::as_bool)
+                {
+                    request.mcp_policy.retry.honor_retry_after = honor_retry_after;
+                }
             }
         }
         let host: Arc<dyn CompositionToolHost> = match dispatcher {

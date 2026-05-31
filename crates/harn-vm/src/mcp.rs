@@ -1946,6 +1946,9 @@ pub(crate) async fn call_mcp_tool_with_hint(
     }
 
     let cache_hint = McpCacheHint::from_result(&result);
+    if let Some(structured) = result.get("structuredContent") {
+        return Ok((structured.clone(), cache_hint));
+    }
     let content = result
         .get("content")
         .and_then(|c| c.as_array())

@@ -161,6 +161,7 @@ fn read_only_annotations(capability: &str, ops: &[&str]) -> ToolAnnotations {
         emits_artifacts: false,
         result_readers: Vec::new(),
         inline_result: true,
+        ..ToolAnnotations::default()
     }
 }
 
@@ -176,6 +177,7 @@ fn think_annotations() -> ToolAnnotations {
         emits_artifacts: false,
         result_readers: Vec::new(),
         inline_result: true,
+        ..ToolAnnotations::default()
     }
 }
 

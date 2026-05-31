@@ -58,4 +58,18 @@ pipeline main() {
   )
   __io_println(full_report.child_calls[0].tool_name)
   __io_println(contains(full_report.child_results[0].raw_output, "Harn docs"))
+  let settled = composition_mcp_execute(
+    "let result = map_bounded([\"runtime\", \"stdlib\"], { q -> docs_search({query: q}) }, {concurrency: 2})\nreturn {succeeded: result.succeeded, failed: result.failed}",
+    tools,
+    {
+      run_id: "mcp-code-mode-bounded",
+      max_concurrent: 2,
+      max_concurrent_per_server: 1,
+      trusted_servers: ["docs"],
+      retry: {max_attempts: 2, base_delay_ms: 0, max_delay_ms: 0},
+    },
+  )
+  __io_println(settled.ok)
+  __io_println(settled.result.succeeded)
+  __io_println(settled.result.failed)
 }

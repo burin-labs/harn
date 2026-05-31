@@ -539,6 +539,12 @@ pub enum McpWorldFault {
     },
 }
 
+impl McpWorldFault {
+    fn has_effect(&self) -> bool {
+        matches!(self, Self::PartialWrite { .. })
+    }
+}
+
 fn default_partial_write_message() -> String {
     "simulated partial write".to_string()
 }
@@ -548,6 +554,7 @@ pub struct McpWorldRuntime {
     spec: McpWorldSpec,
     state: JsonValue,
     tool_calls: BTreeMap<String, u64>,
+    idempotency_results: BTreeMap<String, JsonValue>,
     total_tool_calls: u64,
 }
 
@@ -558,6 +565,7 @@ impl McpWorldRuntime {
             spec,
             state,
             tool_calls: BTreeMap::new(),
+            idempotency_results: BTreeMap::new(),
             total_tool_calls: 0,
         }
     }
@@ -665,6 +673,13 @@ impl McpWorldRuntime {
             .get("arguments")
             .cloned()
             .unwrap_or_else(|| json!({}));
+        let idempotency_key =
+            idempotency_key_from_arguments(&arguments).map(|key| format!("{name}:{key}"));
+        if let Some(key) = &idempotency_key {
+            if let Some(structured) = self.idempotency_results.get(key) {
+                return successful_tool_response(id, structured.clone());
+            }
+        }
         let Some(tool) = self
             .spec
             .tools
@@ -692,11 +707,28 @@ impl McpWorldRuntime {
             .find(|fault| fault.applies_to(name, call_number))
             .cloned()
         {
-            return self.apply_fault(id, &fault.fault, &arguments);
+            let response = self.apply_fault(id, &fault.fault, &arguments);
+            if fault.fault.has_effect() {
+                if let Some(key) = idempotency_key {
+                    self.idempotency_results.insert(
+                        key,
+                        json!({
+                            "ok": true,
+                            "idempotentReplay": true,
+                        }),
+                    );
+                }
+            }
+            return response;
         }
 
         match self.apply_operation(&tool.operation, &arguments) {
-            Ok(structured) => successful_tool_response(id, structured),
+            Ok(structured) => {
+                if let Some(key) = idempotency_key {
+                    self.idempotency_results.insert(key, structured.clone());
+                }
+                successful_tool_response(id, structured)
+            }
             Err(message) => tool_error_response(id, message, None),
         }
     }
@@ -985,6 +1017,23 @@ fn argument_value(arguments: &JsonValue, name: &str) -> Result<JsonValue, String
         .get(name)
         .cloned()
         .ok_or_else(|| format!("missing argument `{name}`"))
+}
+
+fn idempotency_key_from_arguments(arguments: &JsonValue) -> Option<String> {
+    [
+        "/idempotency_key",
+        "/idempotencyKey",
+        "/_idempotency_key",
+        "/_meta/idempotencyKey",
+        "/_meta/harn/idempotencyKey",
+    ]
+    .iter()
+    .find_map(|pointer| match arguments.pointer(pointer) {
+        Some(JsonValue::String(value)) if !value.trim().is_empty() => Some(value.clone()),
+        Some(JsonValue::Number(value)) => Some(value.to_string()),
+        Some(JsonValue::Bool(value)) => Some(value.to_string()),
+        _ => None,
+    })
 }
 
 fn render_state_path(path: &str, arguments: &JsonValue) -> Result<String, String> {
@@ -1421,5 +1470,62 @@ mod tests {
             .expect("response");
         assert_eq!(response["result"]["isError"], true);
         assert_eq!(runtime.state().pointer("/rows/a/count"), Some(&json!(1)));
+    }
+
+    #[test]
+    fn world_idempotency_key_replays_after_partial_write_fault() {
+        let spec = McpWorldSpec {
+            initial_state: json!({ "rows": [] }),
+            tools: vec![McpWorldToolSpec {
+                name: "append".to_string(),
+                description: String::new(),
+                input_schema: default_input_schema(),
+                output_schema: None,
+                annotations: None,
+                operation: McpWorldOperation::Append {
+                    path: "/rows".to_string(),
+                    value_arg: "row".to_string(),
+                    id_field: None,
+                    id_prefix: None,
+                },
+            }],
+            faults: vec![McpWorldFaultSpec {
+                tool: "append".to_string(),
+                at_call: Some(1),
+                every: None,
+                fault: McpWorldFault::PartialWrite {
+                    path: "/rows".to_string(),
+                    value: json!([{ "id": "r1" }]),
+                    message: "write failed after commit".to_string(),
+                },
+            }],
+            ..McpWorldSpec::default()
+        };
+        let mut runtime = McpWorldRuntime::new(spec);
+        let request = |id| {
+            json!({
+                "jsonrpc": "2.0",
+                "id": id,
+                "method": "tools/call",
+                "params": {
+                    "name": "append",
+                    "arguments": {
+                        "row": {"id": "r1"},
+                        "idempotency_key": "append-r1"
+                    }
+                }
+            })
+        };
+
+        let first = runtime.handle_json_rpc(request(1)).expect("first response");
+        assert_eq!(first["result"]["isError"], true);
+        let second = runtime
+            .handle_json_rpc(request(2))
+            .expect("second response");
+        assert_eq!(second["result"]["isError"], false);
+        assert_eq!(
+            runtime.state().pointer("/rows"),
+            Some(&json!([{ "id": "r1" }]))
+        );
     }
 }
