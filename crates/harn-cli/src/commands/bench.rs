@@ -15,6 +15,8 @@ use crate::parse_source_file;
 struct BenchRun {
     iteration: usize,
     wall_time_ms: f64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    rss_bytes: Option<u64>,
     llm_time_ms: i64,
     input_tokens: i64,
     output_tokens: i64,
@@ -177,6 +179,7 @@ pub(crate) async fn run_bench(path: &str, iterations: usize, profile: RunProfile
                 runs.push(BenchRun {
                     iteration: iteration + 1,
                     wall_time_ms,
+                    rss_bytes: harn_vm::harness_system::current_process_memory_bytes(),
                     llm_time_ms,
                     input_tokens,
                     output_tokens,
@@ -679,6 +682,7 @@ mod tests {
         BenchRun {
             iteration,
             wall_time_ms,
+            rss_bytes: None,
             llm_time_ms: 0,
             input_tokens: 0,
             output_tokens: 0,

@@ -1,0 +1,6 @@
+let payload = "x" * 4000000
+
+/** Touch the module payload so imported closures capture module state. */
+pub fn touch() {
+  return len(payload)
+}

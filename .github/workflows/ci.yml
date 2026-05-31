@@ -186,6 +186,7 @@ jobs:
           make check-docs-model-refs
           make check-docs-snippets
           make check-diagnostics-catalog
+          make check-vm-rss-soak
 
   audit-scripts:
     name: Audit scripts

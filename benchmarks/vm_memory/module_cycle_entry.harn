@@ -1,0 +1,8 @@
+import { touch } from "module_cycle_lib"
+
+pipeline default() {
+  let size = touch()
+  if size < 4000000 {
+    throw "module payload was not initialized"
+  }
+}

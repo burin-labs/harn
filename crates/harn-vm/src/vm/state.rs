@@ -450,7 +450,7 @@ impl Vm {
         &self,
         closure: &crate::value::VmClosure,
     ) -> VmEnv {
-        if closure.module_state.is_some() {
+        if closure.module_state().is_some() {
             return closure.env.clone();
         }
         let call_env = Self::closure_call_env(&self.env, closure);

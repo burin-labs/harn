@@ -1151,8 +1151,8 @@ impl super::super::Vm {
             fn_name: closure.func.name.clone(),
             argc: args_len,
             saved_source_dir,
-            module_functions: closure.module_functions.clone(),
-            module_state: closure.module_state.clone(),
+            module_functions: closure.module_functions(),
+            module_state: closure.module_state(),
             local_slots,
             local_scope_base: self.env.scope_depth().saturating_sub(1),
             local_scope_depth: 0,
@@ -1286,13 +1286,13 @@ impl super::super::Vm {
             module_functions: self
                 .frames
                 .last()
-                .and_then(|frame| frame.module_functions.clone()),
+                .and_then(|frame| frame.module_functions.as_ref().map(Arc::downgrade)),
             // Inherit module state so closures created inside a module function
             // see and mutate the same module-level vars.
             module_state: self
                 .frames
                 .last()
-                .and_then(|frame| frame.module_state.clone()),
+                .and_then(|frame| frame.module_state.as_ref().map(Arc::downgrade)),
         };
         self.stack.push(VmValue::Closure(Arc::new(closure)));
     }
