@@ -1,0 +1,81 @@
+import { agent_reminder_providers_fire } from "std/agent/state"
+
+pipeline main() {
+  let opts = {
+    reminders: {
+      providers: [
+        "-token_pressure",
+        "-idle_nudge",
+        "-tool_output_truncated",
+        "-post_compact_recap",
+        "-resume_continuity",
+        "-project_facts",
+        "-workspace_anchor",
+      ],
+    },
+  }
+  let session = agent_session_open("reminder-provider-grounded-review")
+  agent_session_reset(session)
+  let report = agent_reminder_providers_fire(
+    session,
+    "post_tool_use",
+    {
+      session: {id: session},
+      iteration: 3,
+      tool_name: "exec_command",
+      tool: {name: "exec_command", args: {cmd: "cargo check -p demo"}},
+      result: {text: "error[E0425]: cannot find value `missing` in this scope\n --> src/lib.rs:2:5\n"},
+    },
+    opts,
+  )
+  let reminders = transcript_events_by_kind(agent_session_snapshot(session), "system_reminder")
+  let reminder = reminders[0].reminder
+  __io_println(report.fired_count)
+  __io_println(report.reports[0].provider)
+  __io_println(reminder.tags[0])
+  __io_println(reminder.tags[1])
+  __io_println(reminder.ttl_turns)
+  __io_println(reminder.role_hint)
+  __io_println(reminder.propagate)
+  __io_println(contains(reminder.body, "verified:typecheck"))
+  __io_println(contains(reminder.body, "cannot find value `missing`"))
+  __io_println(contains(reminder.body, "command=cargo check -p demo"))
+  let verifier_session = agent_session_open("reminder-provider-grounded-review-verifier")
+  agent_session_reset(verifier_session)
+  let verifier = agent_reminder_providers_fire(
+    verifier_session,
+    "post_agent_turn",
+    {
+      session: {id: verifier_session},
+      verifier_signals: [
+        {
+          name: "lint gate",
+          kind: "lint",
+          signal: "refine",
+          reason: "lint: forbidden pattern matched: unwrap()",
+        },
+        {name: "typecheck", kind: "typecheck", signal: "accept"},
+      ],
+    },
+    opts,
+  )
+  let verifier_reminder = transcript_events_by_kind(agent_session_snapshot(verifier_session), "system_reminder")[0].reminder
+  __io_println(verifier.fired_count)
+  __io_println(contains(verifier_reminder.body, "verified:verifier:lint"))
+  __io_println(contains(verifier_reminder.body, "forbidden pattern matched"))
+  __io_println(contains(verifier_reminder.body, "typecheck verifier returned accept"))
+  let clean_session = agent_session_open("reminder-provider-grounded-review-clean")
+  agent_session_reset(clean_session)
+  let clean = agent_reminder_providers_fire(
+    clean_session,
+    "post_tool_use",
+    {
+      session: {id: clean_session},
+      tool_name: "exec_command",
+      tool: {name: "exec_command", args: {cmd: "cargo test -p demo"}},
+      result: {text: "test result: ok. 12 passed; 0 failed\n"},
+    },
+    opts,
+  )
+  __io_println(clean.fired_count)
+}

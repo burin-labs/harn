@@ -20,6 +20,7 @@ const RESUME_CONTINUITY_ID: &str = "resume_continuity";
 const COMPASS_AST_EDITS_ID: &str = "compass_ast_edits";
 const PROJECT_FACTS_ID: &str = "project_facts";
 const WORKSPACE_ANCHOR_ID: &str = "workspace_anchor";
+const GROUNDED_REVIEW_ID: &str = "grounded_review";
 
 const TOKEN_PRESSURE_EVENTS: &[HookEvent] = &[HookEvent::OnBudgetThreshold];
 const IDLE_NUDGE_EVENTS: &[HookEvent] = &[HookEvent::SessionIdle];
@@ -30,6 +31,11 @@ const PROJECT_FACTS_EVENTS: &[HookEvent] = &[HookEvent::SessionStart, HookEvent:
 const WORKSPACE_ANCHOR_EVENTS: &[HookEvent] =
     &[HookEvent::SessionStart, HookEvent::OnBudgetThreshold];
 const COMPASS_AST_EDITS_EVENTS: &[HookEvent] = &[HookEvent::SessionStart, HookEvent::WorkerResumed];
+const GROUNDED_REVIEW_EVENTS: &[HookEvent] = &[
+    HookEvent::PostToolUse,
+    HookEvent::PostStep,
+    HookEvent::PostAgentTurn,
+];
 
 const PROJECT_FACTS_DEFAULT_NAMESPACE: &str = "project/facts";
 const PROJECT_FACTS_DEFAULT_MAX: i64 = 5;
@@ -38,6 +44,10 @@ const PROJECT_FACTS_DEFAULT_MIN_CONFIDENCE: f64 = 0.5;
 const PROJECT_FACTS_RECALL_MULTIPLIER: usize = 4;
 const PROJECT_FACTS_DEFAULT_QUERY: &str = "project decisions constraints architecture";
 const PROJECT_FACTS_REFRESH_RATIO: f64 = 0.70;
+const GROUNDED_REVIEW_DEFAULT_MAX_FINDINGS: usize = 6;
+const GROUNDED_REVIEW_HARD_MAX_FINDINGS: usize = 20;
+const GROUNDED_REVIEW_MAX_TEXT_BYTES: usize = 96 * 1024;
+const GROUNDED_REVIEW_SUMMARY_CHARS: usize = 220;
 
 /// Context passed to reminder providers.
 #[derive(Clone, Debug)]
@@ -73,6 +83,7 @@ struct PostCompactRecapProvider;
 struct ResumeContinuityProvider;
 struct ProjectFactsProvider;
 struct WorkspaceAnchorProvider;
+struct GroundedReviewProvider;
 
 impl ReminderProvider for TokenPressureProvider {
     fn id(&self) -> &'static str {
@@ -403,6 +414,743 @@ fn format_workspace_anchor_body(anchor: &crate::workspace_anchor::WorkspaceAncho
     body
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct GroundedReviewFinding {
+    source: String,
+    confidence: &'static str,
+    provenance: String,
+    summary: String,
+}
+
+impl ReminderProvider for GroundedReviewProvider {
+    fn id(&self) -> &'static str {
+        GROUNDED_REVIEW_ID
+    }
+
+    fn subscribes_to(&self) -> &'static [HookEvent] {
+        GROUNDED_REVIEW_EVENTS
+    }
+
+    fn evaluate(&self, ctx: &ProviderContext) -> Option<ReminderSpec> {
+        let mut findings = grounded_review_findings(ctx);
+        if findings.is_empty() {
+            return None;
+        }
+        let max_findings = grounded_review_max_findings(ctx);
+        let truncated_count = findings.len().saturating_sub(max_findings);
+        findings.truncate(max_findings);
+
+        let mut reminder = provider_reminder(
+            format_grounded_review_body(ctx, &findings, truncated_count),
+            GROUNDED_REVIEW_ID,
+            ctx,
+        );
+        reminder.tags = vec![GROUNDED_REVIEW_ID.to_string(), "code_review".to_string()];
+        reminder.dedupe_key = Some(grounded_review_dedupe_key(ctx.event, &findings));
+        reminder.ttl_turns = Some(2);
+        reminder.propagate = ReminderPropagate::None;
+        reminder.role_hint = ReminderRoleHint::Developer;
+        Some(reminder)
+    }
+}
+
+fn grounded_review_findings(ctx: &ProviderContext) -> Vec<GroundedReviewFinding> {
+    let include_warnings =
+        provider_config_bool(ctx, GROUNDED_REVIEW_ID, &["include_warnings"]).unwrap_or(false);
+    let text_scan = provider_config_bool(ctx, GROUNDED_REVIEW_ID, &["text_scan"]).unwrap_or(true);
+    let mut findings = Vec::new();
+    collect_explicit_error_finding(&ctx.payload, ctx.event, &mut findings);
+    collect_verifier_signal_findings(&ctx.payload, "$", &mut findings, 0);
+    collect_structured_review_findings(&ctx.payload, "$", include_warnings, &mut findings, 0);
+    if text_scan {
+        collect_text_review_findings(&ctx.payload, ctx.event, &mut findings);
+    }
+    dedupe_review_findings(findings)
+}
+
+fn grounded_review_max_findings(ctx: &ProviderContext) -> usize {
+    provider_config_i64(ctx, GROUNDED_REVIEW_ID, &["max_findings", "limit"])
+        .unwrap_or(GROUNDED_REVIEW_DEFAULT_MAX_FINDINGS as i64)
+        .clamp(1, GROUNDED_REVIEW_HARD_MAX_FINDINGS as i64) as usize
+}
+
+fn collect_explicit_error_finding(
+    payload: &JsonValue,
+    event: HookEvent,
+    findings: &mut Vec<GroundedReviewFinding>,
+) {
+    let status = json_str(payload, "status")
+        .or_else(|| json_path_str(payload, &["result", "status"]))
+        .map(|value| value.to_ascii_lowercase());
+    let ok = json_bool(payload, "ok").or_else(|| json_path_bool(payload, &["result", "ok"]));
+    let error_value = payload
+        .get("error")
+        .or_else(|| json_path(payload, &["result", "error"]))
+        .or_else(|| json_path(payload, &["result", "message"]));
+    let error_summary = error_value.and_then(error_value_summary);
+    let failed_status = status
+        .as_deref()
+        .is_some_and(|value| matches!(value, "error" | "failed" | "failure"));
+    if ok != Some(false) && !failed_status && error_summary.is_none() {
+        return;
+    }
+    let summary = error_summary
+        .or_else(|| status.map(|value| format!("status={value}")))
+        .unwrap_or_else(|| "runtime reported ok=false".to_string());
+    findings.push(GroundedReviewFinding {
+        source: "runtime_error".to_string(),
+        confidence: "verified",
+        provenance: format!("event={}", event.as_str()),
+        summary: truncate_review_summary(&summary),
+    });
+}
+
+fn collect_verifier_signal_findings(
+    value: &JsonValue,
+    path: &str,
+    findings: &mut Vec<GroundedReviewFinding>,
+    depth: usize,
+) {
+    if depth > 8 {
+        return;
+    }
+    match value {
+        JsonValue::Object(map) => {
+            if let Some(signals) = map.get("verifier_signals").and_then(JsonValue::as_array) {
+                for signal in signals {
+                    if let Some(finding) = verifier_signal_finding(signal, path) {
+                        findings.push(finding);
+                    }
+                }
+            }
+            if let Some(outcome) = map
+                .get("verifier_outcome")
+                .and_then(JsonValue::as_str)
+                .map(|value| value.trim().to_ascii_lowercase())
+                .filter(|value| !is_accept_signal(value))
+            {
+                findings.push(GroundedReviewFinding {
+                    source: "verifier".to_string(),
+                    confidence: "verified",
+                    provenance: path.to_string(),
+                    summary: format!("verifier outcome: {outcome}"),
+                });
+            }
+            for (key, child) in map {
+                let child_path = format!("{path}.{key}");
+                collect_verifier_signal_findings(child, &child_path, findings, depth + 1);
+            }
+        }
+        JsonValue::Array(items) => {
+            for (idx, child) in items.iter().enumerate() {
+                let child_path = format!("{path}[{idx}]");
+                collect_verifier_signal_findings(child, &child_path, findings, depth + 1);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn verifier_signal_finding(value: &JsonValue, path: &str) -> Option<GroundedReviewFinding> {
+    let signal = value
+        .get("signal")
+        .and_then(JsonValue::as_str)
+        .map(|value| value.trim().to_ascii_lowercase())?;
+    if is_accept_signal(&signal) {
+        return None;
+    }
+    let kind = value
+        .get("kind")
+        .and_then(JsonValue::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or("verifier");
+    let name = value
+        .get("name")
+        .and_then(JsonValue::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+    let reason = value
+        .get("reason")
+        .and_then(JsonValue::as_str)
+        .map(|value| clean_inline_text(value.to_string()))
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| format!("{kind} verifier returned {signal}"));
+    let provenance = match name {
+        Some(name) => format!("{path} name={name} signal={signal}"),
+        None => format!("{path} signal={signal}"),
+    };
+    Some(GroundedReviewFinding {
+        source: format!("verifier:{kind}"),
+        confidence: "verified",
+        provenance,
+        summary: truncate_review_summary(&reason),
+    })
+}
+
+fn collect_structured_review_findings(
+    value: &JsonValue,
+    path: &str,
+    include_warnings: bool,
+    findings: &mut Vec<GroundedReviewFinding>,
+    depth: usize,
+) {
+    if depth > 8 {
+        return;
+    }
+    match value {
+        JsonValue::Object(map) => {
+            for (key, child) in map {
+                if let Some(source) = structured_signal_source_for_key(key) {
+                    collect_structured_signal_items(
+                        child,
+                        source,
+                        &format!("{path}.{key}"),
+                        include_warnings,
+                        findings,
+                    );
+                }
+                let child_path = format!("{path}.{key}");
+                collect_structured_review_findings(
+                    child,
+                    &child_path,
+                    include_warnings,
+                    findings,
+                    depth + 1,
+                );
+            }
+        }
+        JsonValue::Array(items) => {
+            for (idx, child) in items.iter().enumerate() {
+                let child_path = format!("{path}[{idx}]");
+                collect_structured_review_findings(
+                    child,
+                    &child_path,
+                    include_warnings,
+                    findings,
+                    depth + 1,
+                );
+            }
+        }
+        _ => {}
+    }
+}
+
+fn structured_signal_source_for_key(key: &str) -> Option<&'static str> {
+    match key.to_ascii_lowercase().as_str() {
+        "parse_errors" | "parseerrors" => Some("parse_errors"),
+        "undefined_names" | "undefinednames" => Some("undefined_names"),
+        "diagnostics" | "issues" | "findings" => Some("diagnostic"),
+        "errors" | "failures" => Some("error"),
+        _ => None,
+    }
+}
+
+fn collect_structured_signal_items(
+    value: &JsonValue,
+    default_source: &str,
+    path: &str,
+    include_warnings: bool,
+    findings: &mut Vec<GroundedReviewFinding>,
+) {
+    match value {
+        JsonValue::Array(items) => {
+            for (idx, item) in items.iter().enumerate() {
+                if let Some(finding) = structured_signal_finding(
+                    item,
+                    default_source,
+                    &format!("{path}[{idx}]"),
+                    include_warnings,
+                ) {
+                    findings.push(finding);
+                }
+            }
+        }
+        JsonValue::Object(_) | JsonValue::String(_) => {
+            if let Some(finding) =
+                structured_signal_finding(value, default_source, path, include_warnings)
+            {
+                findings.push(finding);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn structured_signal_finding(
+    value: &JsonValue,
+    default_source: &str,
+    path: &str,
+    include_warnings: bool,
+) -> Option<GroundedReviewFinding> {
+    let summary = match value {
+        JsonValue::String(text) => clean_inline_text(text.clone()),
+        JsonValue::Object(_) => structured_signal_summary(value)?,
+        _ => return None,
+    };
+    if summary.is_empty()
+        || !include_structured_signal(value, default_source, &summary, include_warnings)
+    {
+        return None;
+    }
+    Some(GroundedReviewFinding {
+        source: structured_signal_source(value, default_source, &summary),
+        confidence: "verified",
+        provenance: structured_signal_provenance(value, path),
+        summary: truncate_review_summary(&summary),
+    })
+}
+
+fn include_structured_signal(
+    value: &JsonValue,
+    default_source: &str,
+    summary: &str,
+    include_warnings: bool,
+) -> bool {
+    if matches!(default_source, "parse_errors" | "undefined_names") {
+        return true;
+    }
+    if default_source == "error" {
+        return !looks_like_clean_error_summary(summary);
+    }
+    let severity = first_string_field(value, &["severity", "level", "status", "conclusion"])
+        .map(|value| value.to_ascii_lowercase());
+    if severity
+        .as_deref()
+        .is_some_and(|value| matches!(value, "error" | "fatal" | "fail" | "failed" | "failure"))
+    {
+        return true;
+    }
+    if include_warnings
+        && severity
+            .as_deref()
+            .is_some_and(|value| matches!(value, "warning" | "warn"))
+    {
+        return true;
+    }
+    is_strong_review_signal(summary)
+}
+
+fn structured_signal_summary(value: &JsonValue) -> Option<String> {
+    for key in [
+        "message",
+        "reason",
+        "summary",
+        "title",
+        "detail",
+        "description",
+        "text",
+    ] {
+        if let Some(text) = value
+            .get(key)
+            .and_then(JsonValue::as_str)
+            .map(|value| clean_inline_text(value.to_string()))
+            .filter(|value| !value.is_empty())
+        {
+            return Some(text);
+        }
+    }
+    value.get("error").and_then(error_value_summary)
+}
+
+fn structured_signal_source(value: &JsonValue, default_source: &str, summary: &str) -> String {
+    let lower = summary.to_ascii_lowercase();
+    if lower.contains("undefined name")
+        || lower.contains("undefined variable")
+        || lower.contains("undefined identifier")
+    {
+        return "undefined_names".to_string();
+    }
+    if lower.contains("parse error") || lower.contains("syntax error") {
+        return "parse_errors".to_string();
+    }
+    first_string_field(value, &["source", "kind", "category", "rule"])
+        .map(|source| source.trim().replace(' ', "_"))
+        .filter(|source| !source.is_empty())
+        .unwrap_or_else(|| default_source.to_string())
+}
+
+fn structured_signal_provenance(value: &JsonValue, path: &str) -> String {
+    let mut parts = vec![path.to_string()];
+    if let Some(file) = first_string_field(value, &["file", "path", "uri"]) {
+        parts.push(format!("file={file}"));
+    }
+    if let Some(line) = json_i64(value, "line")
+        .or_else(|| json_i64(value, "start_row").map(|value| value + 1))
+        .or_else(|| json_path_i64(value, &["span", "start", "line"]))
+    {
+        parts.push(format!("line={line}"));
+    }
+    if let Some(column) = json_i64(value, "column")
+        .or_else(|| json_i64(value, "start_col").map(|value| value + 1))
+        .or_else(|| json_path_i64(value, &["span", "start", "column"]))
+    {
+        parts.push(format!("column={column}"));
+    }
+    parts.join(" ")
+}
+
+fn collect_text_review_findings(
+    payload: &JsonValue,
+    event: HookEvent,
+    findings: &mut Vec<GroundedReviewFinding>,
+) {
+    let tool_name = json_str(payload, "tool_name")
+        .or_else(|| json_path_str(payload, &["tool", "name"]))
+        .unwrap_or_else(|| "unknown".to_string());
+    let command = review_payload_command(payload).unwrap_or_default();
+    let mut text_blocks = Vec::new();
+    collect_text_field(payload, &["result", "text"], &mut text_blocks);
+    collect_text_field(payload, &["result", "rendered_result"], &mut text_blocks);
+    collect_text_field(payload, &["rendered_result"], &mut text_blocks);
+    collect_text_field(payload, &["observation"], &mut text_blocks);
+    collect_text_field(payload, &["error"], &mut text_blocks);
+    for text in text_blocks {
+        let text = strip_ansi_codes(&truncate_bytes(&text, GROUNDED_REVIEW_MAX_TEXT_BYTES));
+        if !looks_like_verifier_output(&tool_name, &command, &text) {
+            continue;
+        }
+        let source = classify_text_review_source(&tool_name, &command, &text);
+        for line in text.lines().filter_map(review_failure_line) {
+            findings.push(GroundedReviewFinding {
+                source: source.clone(),
+                confidence: "verified",
+                provenance: format!(
+                    "event={} tool={}{}",
+                    event.as_str(),
+                    tool_name,
+                    command
+                        .is_empty()
+                        .then(String::new)
+                        .unwrap_or_else(|| format!(
+                            " command={}",
+                            truncate_review_summary(&command)
+                        ))
+                ),
+                summary: line,
+            });
+            if findings.len() >= GROUNDED_REVIEW_HARD_MAX_FINDINGS {
+                return;
+            }
+        }
+    }
+}
+
+fn review_payload_command(payload: &JsonValue) -> Option<String> {
+    for path in [
+        &["tool", "args", "cmd"][..],
+        &["tool", "args", "command"][..],
+        &["args", "cmd"][..],
+        &["args", "command"][..],
+        &["command"][..],
+        &["cmd"][..],
+    ] {
+        if let Some(command) = json_path(payload, path).and_then(command_value_string) {
+            return Some(command);
+        }
+    }
+    None
+}
+
+fn command_value_string(value: &JsonValue) -> Option<String> {
+    match value {
+        JsonValue::String(command) => Some(clean_inline_text(command.clone())),
+        JsonValue::Array(items) => {
+            let parts = items
+                .iter()
+                .filter_map(JsonValue::as_str)
+                .map(str::trim)
+                .filter(|part| !part.is_empty())
+                .collect::<Vec<_>>();
+            (!parts.is_empty()).then(|| parts.join(" "))
+        }
+        _ => None,
+    }
+}
+
+fn collect_text_field(payload: &JsonValue, path: &[&str], out: &mut Vec<String>) {
+    if let Some(text) = json_path(payload, path)
+        .and_then(JsonValue::as_str)
+        .map(str::to_string)
+        .filter(|value| !value.trim().is_empty())
+    {
+        out.push(text);
+    }
+}
+
+fn looks_like_verifier_output(tool_name: &str, command: &str, text: &str) -> bool {
+    let probe = format!("{tool_name} {command}").to_ascii_lowercase();
+    const COMMAND_MARKERS: &[&str] = &[
+        "cargo check",
+        "cargo test",
+        "cargo nextest",
+        "cargo clippy",
+        "cargo build",
+        "harn check",
+        "harn lint",
+        "harn test",
+        "make test",
+        "make all",
+        "make conformance",
+        "make lint",
+        "make fmt",
+        "npm test",
+        "npm run test",
+        "npm run lint",
+        "npm run build",
+        "pnpm test",
+        "pnpm lint",
+        "yarn test",
+        "pytest",
+        "go test",
+        "swift test",
+        "swift build",
+        "tsc",
+        "eslint",
+        "ruff",
+        "mypy",
+    ];
+    if COMMAND_MARKERS.iter().any(|marker| probe.contains(marker)) {
+        return true;
+    }
+    let lower = text.to_ascii_lowercase();
+    is_strong_review_signal(&lower)
+        || lower.contains("error[e")
+        || lower.contains("test result: failed")
+        || lower.contains("failed tests/")
+}
+
+fn classify_text_review_source(tool_name: &str, command: &str, text: &str) -> String {
+    let probe = format!("{tool_name} {command} {text}").to_ascii_lowercase();
+    if probe.contains("parse error") || probe.contains("syntaxerror") {
+        "parse_errors".to_string()
+    } else if probe.contains("undefined name")
+        || probe.contains("undefined variable")
+        || probe.contains("undefined identifier")
+    {
+        "undefined_names".to_string()
+    } else if probe.contains("lint")
+        || probe.contains("clippy")
+        || probe.contains("eslint")
+        || probe.contains("ruff")
+    {
+        "lint".to_string()
+    } else if probe.contains("test") || probe.contains("pytest") || probe.contains("nextest") {
+        "test".to_string()
+    } else if probe.contains("check")
+        || probe.contains("build")
+        || probe.contains("tsc")
+        || probe.contains("mypy")
+    {
+        "typecheck".to_string()
+    } else {
+        "verifier_output".to_string()
+    }
+}
+
+fn review_failure_line(line: &str) -> Option<String> {
+    let cleaned = clean_inline_text(line.to_string());
+    if cleaned.is_empty() {
+        return None;
+    }
+    let lower = cleaned.to_ascii_lowercase();
+    if lower.contains("0 failed")
+        || lower.contains("test result: ok")
+        || lower.contains("no parse error")
+        || lower.contains("no syntax error")
+        || lower.contains("no undefined name")
+        || lower.contains("no undefined variable")
+        || lower.contains("no undefined identifier")
+    {
+        return None;
+    }
+    let matched = lower.starts_with("error:")
+        || lower.contains(" error:")
+        || lower.contains("error[")
+        || lower.contains("syntaxerror:")
+        || lower.contains("typeerror:")
+        || lower.contains("referenceerror:")
+        || lower.contains("nameerror:")
+        || lower.contains("parseerror:")
+        || lower.contains("parse error")
+        || lower.contains("syntax error")
+        || lower.contains("undefined name")
+        || lower.contains("undefined variable")
+        || lower.contains("undefined identifier")
+        || lower.contains("cannot find")
+        || lower.contains("not found in this scope")
+        || lower.contains("test result: failed")
+        || lower.starts_with("failed ")
+        || lower.contains(" failed tests/")
+        || lower.starts_with("--- fail:")
+        || lower.contains("panicked at")
+        || lower.contains("compilation failed")
+        || lower.contains("build failed")
+        || (lower.contains("harn-") && lower.contains(" error "));
+    matched.then(|| truncate_review_summary(&cleaned))
+}
+
+fn is_strong_review_signal(value: &str) -> bool {
+    let lower = value.to_ascii_lowercase();
+    lower.contains("parse error")
+        || lower.contains("syntax error")
+        || lower.contains("undefined name")
+        || lower.contains("undefined variable")
+        || lower.contains("undefined identifier")
+        || lower.contains("not found in this scope")
+        || lower.contains("test result: failed")
+        || lower.contains("panicked at")
+}
+
+fn looks_like_clean_error_summary(value: &str) -> bool {
+    let lower = value.to_ascii_lowercase();
+    lower == "no errors"
+        || lower == "0 errors"
+        || lower.contains("0 errors")
+        || lower.contains("no errors found")
+}
+
+fn is_accept_signal(value: &str) -> bool {
+    matches!(
+        value,
+        "accept" | "accepted" | "pass" | "passed" | "ok" | "success" | "succeeded"
+    )
+}
+
+fn first_string_field(value: &JsonValue, keys: &[&str]) -> Option<String> {
+    keys.iter().find_map(|key| {
+        value
+            .get(*key)
+            .and_then(JsonValue::as_str)
+            .map(str::to_string)
+    })
+}
+
+fn error_value_summary(value: &JsonValue) -> Option<String> {
+    match value {
+        JsonValue::String(text) => Some(clean_inline_text(text.clone())),
+        JsonValue::Object(_) => {
+            first_string_field(value, &["message", "reason", "summary", "text"])
+        }
+        _ => None,
+    }
+    .filter(|value| !value.is_empty())
+}
+
+fn truncate_review_summary(value: &str) -> String {
+    let cleaned = clean_inline_text(value.to_string());
+    truncate_chars(&cleaned, GROUNDED_REVIEW_SUMMARY_CHARS)
+}
+
+fn truncate_chars(value: &str, max_chars: usize) -> String {
+    let mut chars = value.chars();
+    let mut out = String::new();
+    for _ in 0..max_chars {
+        let Some(ch) = chars.next() else {
+            return value.to_string();
+        };
+        out.push(ch);
+    }
+    if chars.next().is_some() {
+        out.push_str("...");
+    }
+    out
+}
+
+fn truncate_bytes(value: &str, max_bytes: usize) -> String {
+    if value.len() <= max_bytes {
+        return value.to_string();
+    }
+    let mut end = max_bytes;
+    while end > 0 && !value.is_char_boundary(end) {
+        end -= 1;
+    }
+    format!("{}...", &value[..end])
+}
+
+fn strip_ansi_codes(value: &str) -> String {
+    let mut out = String::with_capacity(value.len());
+    let mut chars = value.chars().peekable();
+    while let Some(ch) = chars.next() {
+        if ch == '\u{1b}' && chars.peek() == Some(&'[') {
+            chars.next();
+            for next in chars.by_ref() {
+                if next.is_ascii_alphabetic() {
+                    break;
+                }
+            }
+        } else {
+            out.push(ch);
+        }
+    }
+    out
+}
+
+fn dedupe_review_findings(findings: Vec<GroundedReviewFinding>) -> Vec<GroundedReviewFinding> {
+    let mut seen = BTreeSet::new();
+    let mut deduped = Vec::new();
+    for finding in findings {
+        let key = format!(
+            "{}\n{}\n{}",
+            finding.source, finding.provenance, finding.summary
+        );
+        if seen.insert(key) {
+            deduped.push(finding);
+        }
+    }
+    deduped
+}
+
+fn grounded_review_dedupe_key(event: HookEvent, findings: &[GroundedReviewFinding]) -> String {
+    use sha2::Digest as _;
+
+    let mut hasher = sha2::Sha256::new();
+    hasher.update(event.as_str().as_bytes());
+    for finding in findings {
+        hasher.update(b"\0");
+        hasher.update(finding.source.as_bytes());
+        hasher.update(b"\0");
+        hasher.update(finding.provenance.as_bytes());
+        hasher.update(b"\0");
+        hasher.update(finding.summary.as_bytes());
+    }
+    let digest = hex::encode(hasher.finalize());
+    format!("{GROUNDED_REVIEW_ID}:{}:{}", event.as_str(), &digest[..16])
+}
+
+fn format_grounded_review_body(
+    ctx: &ProviderContext,
+    findings: &[GroundedReviewFinding],
+    truncated_count: usize,
+) -> String {
+    let mut body = format!(
+        "Grounded adversarial review: {} concrete verifier/runtime signal(s) were observed at {}.",
+        findings.len(),
+        ctx.event.as_str(),
+    );
+    body.push_str(
+        " Treat these as advisory evidence; inspect the cited source, fix the root cause, and rerun the relevant verifier.",
+    );
+    body.push_str(" Do not apply critique-only rewrites without a concrete failing signal.");
+    for finding in findings {
+        body.push_str("\n- [");
+        body.push_str(finding.confidence);
+        body.push(':');
+        body.push_str(&finding.source);
+        body.push_str("] ");
+        body.push_str(&finding.summary);
+        body.push_str(" (provenance: ");
+        body.push_str(&finding.provenance);
+        body.push(')');
+    }
+    if truncated_count > 0 {
+        body.push_str(&format!(
+            "\n- [{GROUNDED_REVIEW_ID}] {truncated_count} additional signal(s) omitted; inspect the tool output for the full set."
+        ));
+    }
+    body
+}
+
 pub fn register_vm_provider(
     id: impl Into<String>,
     subscribes_to: Vec<HookEvent>,
@@ -545,7 +1293,7 @@ impl ReminderProvider for CompassAstEditsProvider {
     }
 }
 
-fn canonical_providers() -> [&'static dyn ReminderProvider; 8] {
+fn canonical_providers() -> [&'static dyn ReminderProvider; 9] {
     [
         &TokenPressureProvider,
         &IdleNudgeProvider,
@@ -554,6 +1302,7 @@ fn canonical_providers() -> [&'static dyn ReminderProvider; 8] {
         &ResumeContinuityProvider,
         &ProjectFactsProvider,
         &WorkspaceAnchorProvider,
+        &GroundedReviewProvider,
         &CompassAstEditsProvider,
     ]
 }
@@ -628,7 +1377,7 @@ fn enabled_provider_ids(
 /// compass (`COMPASS_AST_EDITS_ID`) is intentionally NOT listed: it is a
 /// registered canonical provider (see `canonical_providers`) but ships
 /// opt-in, activated per session via `reminders: {providers: [...]}`.
-fn canonical_provider_ids() -> [&'static str; 7] {
+fn canonical_provider_ids() -> [&'static str; 8] {
     [
         TOKEN_PRESSURE_ID,
         IDLE_NUDGE_ID,
@@ -637,6 +1386,7 @@ fn canonical_provider_ids() -> [&'static str; 7] {
         RESUME_CONTINUITY_ID,
         PROJECT_FACTS_ID,
         WORKSPACE_ANCHOR_ID,
+        GROUNDED_REVIEW_ID,
     ]
 }
 
@@ -803,6 +1553,11 @@ fn provider_config_i64(ctx: &ProviderContext, provider_id: &str, keys: &[&str]) 
     None
 }
 
+fn provider_config_bool(ctx: &ProviderContext, provider_id: &str, keys: &[&str]) -> Option<bool> {
+    let config = provider_config_json(ctx, provider_id)?;
+    keys.iter().find_map(|key| json_bool(config, key))
+}
+
 fn provider_config_json<'a>(ctx: &'a ProviderContext, provider_id: &str) -> Option<&'a JsonValue> {
     ctx.options
         .get("reminders")
@@ -852,6 +1607,10 @@ fn json_path_i64(value: &JsonValue, path: &[&str]) -> Option<i64> {
             .or_else(|| value.as_u64().and_then(|value| i64::try_from(value).ok()))
             .or_else(|| value.as_f64().map(|value| value as i64))
     })
+}
+
+fn json_path_bool(value: &JsonValue, path: &[&str]) -> Option<bool> {
+    json_path(value, path).and_then(JsonValue::as_bool)
 }
 
 fn json_bool(value: &JsonValue, key: &str) -> Option<bool> {
@@ -1233,5 +1992,143 @@ mod tests {
         assert!(reminder
             .body
             .contains("/workspace/lib (mount_mode: extend, mounted_at: 2026-05-24T00:00:01Z)"));
+    }
+
+    #[test]
+    fn grounded_review_provider_fires_on_verified_tool_failure() {
+        let payload = json!({
+            "tool_name": "exec_command",
+            "tool": {"name": "exec_command", "args": {"cmd": "cargo check -p demo"}},
+            "result": {
+                "text": "error[E0425]: cannot find value `missing` in this scope\n --> src/lib.rs:2:5\n"
+            },
+            "iteration": 2,
+        });
+        let reminder = GroundedReviewProvider
+            .evaluate(&ctx(HookEvent::PostToolUse, payload, JsonValue::Null))
+            .expect("verified compiler output should fire");
+
+        assert_eq!(reminder.tags[0], GROUNDED_REVIEW_ID);
+        assert_eq!(reminder.ttl_turns, Some(2));
+        assert_eq!(reminder.propagate, ReminderPropagate::None);
+        assert_eq!(reminder.role_hint, ReminderRoleHint::Developer);
+        assert!(reminder
+            .dedupe_key
+            .as_deref()
+            .is_some_and(|key| key.starts_with("grounded_review:PostToolUse:")));
+        assert!(reminder.body.contains("verified:typecheck"));
+        assert!(reminder.body.contains("cannot find value `missing`"));
+        assert!(reminder.body.contains("command=cargo check -p demo"));
+    }
+
+    #[test]
+    fn grounded_review_provider_surfaces_verifier_and_undefined_name_signals() {
+        let payload = json!({
+            "verifier_signals": [
+                {
+                    "name": "lint gate",
+                    "kind": "lint",
+                    "signal": "refine",
+                    "reason": "lint: forbidden pattern matched: unwrap\\(\\)",
+                },
+                {"name": "typecheck", "kind": "typecheck", "signal": "accept"},
+            ],
+            "result": {
+                "diagnostics": [
+                    {
+                        "message": "undefined name `missing_symbol`",
+                        "name": "missing_symbol",
+                        "line": 7,
+                    },
+                ],
+            },
+        });
+        let reminder = GroundedReviewProvider
+            .evaluate(&ctx(HookEvent::PostAgentTurn, payload, JsonValue::Null))
+            .expect("verifier and undefined-name findings should fire");
+
+        assert!(reminder.body.contains("verified:verifier:lint"));
+        assert!(reminder.body.contains("forbidden pattern matched"));
+        assert!(reminder.body.contains("verified:undefined_names"));
+        assert!(reminder.body.contains("line=7"));
+        assert!(
+            !reminder.body.contains("typecheck verifier returned accept"),
+            "accepted verifier signals should not become reminders"
+        );
+    }
+
+    #[test]
+    fn grounded_review_gold_set_stays_precision_first() {
+        #[derive(Clone, Copy, Eq, PartialEq)]
+        enum Label {
+            RealDefect,
+            StyleNit,
+            FalseAlarm,
+        }
+
+        let cases = [
+            (
+                Label::RealDefect,
+                json!({
+                    "tool_name": "exec_command",
+                    "tool": {"name": "exec_command", "args": {"cmd": "cargo test -p demo"}},
+                    "result": {"text": "test result: FAILED. 0 passed; 1 failed\n"},
+                }),
+            ),
+            (
+                Label::RealDefect,
+                json!({
+                    "result": {
+                        "parse_errors": [
+                            {"message": "syntax error: expected expression", "line": 3},
+                        ],
+                    },
+                }),
+            ),
+            (
+                Label::StyleNit,
+                json!({
+                    "tool_name": "exec_command",
+                    "tool": {"name": "exec_command", "args": {"cmd": "cargo check -p demo"}},
+                    "result": {"text": "warning: unused variable: `scratch`\n"},
+                }),
+            ),
+            (
+                Label::FalseAlarm,
+                json!({
+                    "tool_name": "exec_command",
+                    "tool": {"name": "exec_command", "args": {"cmd": "cargo test -p demo"}},
+                    "result": {"text": "test result: ok. 12 passed; 0 failed\n"},
+                }),
+            ),
+            (
+                Label::FalseAlarm,
+                json!({
+                    "tool_name": "exec_command",
+                    "tool": {"name": "exec_command", "args": {"cmd": "harn check demo.harn"}},
+                    "result": {"text": "demo.harn: ok, no parse error\n"},
+                }),
+            ),
+        ];
+
+        let mut true_positives = 0;
+        let mut false_positives = 0;
+        let mut non_defect_cases = 0;
+        for (label, payload) in cases {
+            let fired = GroundedReviewProvider
+                .evaluate(&ctx(HookEvent::PostToolUse, payload, JsonValue::Null))
+                .is_some();
+            match (label, fired) {
+                (Label::RealDefect, true) => true_positives += 1,
+                (Label::RealDefect, false) => panic!("missed real-defect gold case"),
+                (Label::StyleNit | Label::FalseAlarm, true) => false_positives += 1,
+                (Label::StyleNit | Label::FalseAlarm, false) => non_defect_cases += 1,
+            }
+        }
+
+        let precision = true_positives as f64 / (true_positives + false_positives) as f64;
+        let regression_rate = false_positives as f64 / (false_positives + non_defect_cases) as f64;
+        assert_eq!(precision, 1.0);
+        assert_eq!(regression_rate, 0.0);
     }
 }
