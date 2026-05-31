@@ -4,10 +4,10 @@ Every system prompt Harn sends to a model is the deterministic reduction of an
 ordered list of **fragments**. Host-provided parts (`system_preamble`,
 `system_prefix`, `system_context`, `system_prompt_parts`, `system_appendix`,
 `system_suffix`), the agent's primary system text, capability-gated tool
-guidance, and rendered [system reminders](./system-reminders.md) all flow
-through one reducer. There is no parallel string-concatenation path, and there
-is no place where an instruction is glued on by hand and silently drifts from
-the rest of the prompt.
+guidance, project context profiles, and rendered
+[system reminders](./system-reminders.md) all flow through one reducer. There is
+no parallel string-concatenation path, and there is no place where an
+instruction is glued on by hand and silently drifts from the rest of the prompt.
 
 Because assembly is a single reduction, it is also fully **auditable**: the
 runtime can answer "why is this sentence in the prompt?" and "what would the
@@ -68,6 +68,20 @@ names in prose.
 
 Guidance is prompt-side metadata: it is rendered into the system prompt but is
 never sent to the provider as part of the tool's schema.
+
+## Project profiles are fragments too
+
+[`project_context_profile`](./project-scan.md#context-profiles) resolves project
+signals such as Git remotes, language/build files, supplied code-librarian
+signals, and available credential aliases into reducer-ready fragments. Agent
+preflight forwards `context_profile.prompt_fragments` through `_system_fragments`;
+direct `llm_call` and `prompt_explain` users can pass `context_profile` or
+`project_context_profile` in options.
+
+Each profile fragment is capability-gated. For example, a Rust profile fragment
+carries `requires_caps: ["language.rust"]`; `prompt_explain(...)` then records
+the `profile:rust` trace with the capability reason instead of making the
+project guidance an opaque always-on paragraph.
 
 ## Inspecting the assembled prompt
 

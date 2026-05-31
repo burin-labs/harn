@@ -177,6 +177,34 @@ fn __active_from_ids(registry, ids) {
   return active
 }
 
+fn __context_profile_skill_ids(opts) {
+  return opts?.context_profile?.skills ?? opts?.project_context_profile?.skills ?? []
+}
+
+fn __active_from_context_profile(registry, opts) {
+  var active = []
+  for id in __context_profile_skill_ids(opts) {
+    let entry = __skill_find(registry, id)
+    if entry != nil {
+      active = active.push(entry + {id: id, score: 1.0, trigger: "context_profile"})
+    }
+  }
+  return active
+}
+
+fn __merge_active_skills(left, right) {
+  var active = left ?? []
+  var ids = __skill_ids(active)
+  for entry in right ?? [] {
+    let id = __skill_id(entry)
+    if id != "" && !contains(ids, id) {
+      active = active.push(entry)
+      ids = ids.push(id)
+    }
+  }
+  return active
+}
+
 fn __latest_user_text(session) {
   var latest = session?.task ?? ""
   for message in agent_session_messages(session.session_id) {
@@ -639,7 +667,13 @@ pub fn agent_skills_match(session, opts, iteration) {
     return opts
   }
   let tool_opts = __with_load_skill_tool(session, opts)
-  let prev = __active_from_ids(registry, agent_session_active_skills(session.session_id) ?? [])
+  let stored_prev = __active_from_ids(registry, agent_session_active_skills(session.session_id) ?? [])
+  let profile_active = __active_from_context_profile(registry, tool_opts)
+  let prev = __merge_active_skills(stored_prev, profile_active)
+  if !__skills_same_ids(stored_prev, prev) {
+    __record_activations(session, stored_prev, prev, iteration)
+    agent_session_set_active_skills(session.session_id, prev)
+  }
   if __match_strategy_manual(opts) {
     return __opts_with_active_skills(tool_opts, registry, prev)
   }
@@ -651,7 +685,7 @@ pub fn agent_skills_match(session, opts, iteration) {
   }
   let scored = __score_candidates(session, registry, tool_opts, iteration)
   __record_matched(session, tool_opts, iteration, scored)
-  let active = __top_active_from_scores(registry, scored, tool_opts)
+  let active = __merge_active_skills(__top_active_from_scores(registry, scored, tool_opts), profile_active)
   if !__skills_same_ids(prev, active) {
     __record_deactivations(session, prev, active, iteration)
     __record_activations(session, prev, active, iteration)

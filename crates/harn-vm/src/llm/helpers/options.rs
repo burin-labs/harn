@@ -1273,6 +1273,7 @@ pub(crate) fn assemble_system_prompt(
                 system,
             ));
         }
+        append_context_profile_fragments(&mut fragments, options);
     }
 
     // Capability-gated tool guidance: each active tool that declares a
@@ -1427,16 +1428,129 @@ fn append_decomposed_primary_fragments(
                 )));
             }
         };
-        fragments
-            .push(PromptFragment::new(id, source, bucket, body).requiring_tools(requires_tools));
+        let requires_caps = match dict.get("requires_caps") {
+            Some(VmValue::List(caps)) => caps.iter().map(VmValue::display).collect(),
+            _ => Vec::new(),
+        };
+        fragments.push(
+            PromptFragment::new(id, source, bucket, body)
+                .requiring_tools(requires_tools)
+                .requiring_caps(requires_caps),
+        );
     }
     Ok(true)
+}
+
+/// Expand a resolved project context profile into prompt fragments. Agent-loop
+/// preflight usually forwards these through `_system_fragments`; this path is
+/// for direct `llm_call` / `prompt_explain` users that pass `context_profile`.
+fn append_context_profile_fragments(
+    fragments: &mut Vec<crate::llm::prompt::PromptFragment>,
+    options: Option<&BTreeMap<String, VmValue>>,
+) {
+    use crate::llm::prompt::{FragmentBucket, PromptFragment};
+    let Some(profile) = options
+        .and_then(|options| {
+            options
+                .get("context_profile")
+                .or_else(|| options.get("project_context_profile"))
+        })
+        .and_then(VmValue::as_dict)
+    else {
+        return;
+    };
+    let Some(VmValue::List(items)) = profile.get("prompt_fragments") else {
+        return;
+    };
+    for (index, item) in items.iter().enumerate() {
+        let Some(dict) = item.as_dict() else {
+            continue;
+        };
+        let Some(body) = dict
+            .get("body")
+            .or_else(|| dict.get("content"))
+            .map(VmValue::display)
+            .map(|body| body.trim().to_string())
+            .filter(|body| !body.is_empty())
+        else {
+            continue;
+        };
+        let id = dict
+            .get("id")
+            .map(VmValue::display)
+            .filter(|id| !id.is_empty())
+            .unwrap_or_else(|| format!("profile[{index}]"));
+        let source = dict
+            .get("source")
+            .map(VmValue::display)
+            .filter(|source| !source.is_empty())
+            .unwrap_or_else(|| "profile".to_string());
+        let requires_tools = match dict.get("requires_tools") {
+            Some(VmValue::List(tools)) => tools.iter().map(VmValue::display).collect(),
+            _ => Vec::new(),
+        };
+        let requires_caps = match dict.get("requires_caps") {
+            Some(VmValue::List(caps)) => caps.iter().map(VmValue::display).collect(),
+            _ => Vec::new(),
+        };
+        fragments.push(
+            PromptFragment::new(id, source, FragmentBucket::Before, body)
+                .requiring_tools(requires_tools)
+                .requiring_caps(requires_caps),
+        );
+    }
 }
 
 fn assemble_ctx(options: Option<&BTreeMap<String, VmValue>>) -> crate::llm::prompt::AssembleCtx {
     crate::llm::prompt::AssembleCtx {
         tool_names: tool_names_from_options(options),
-        caps: std::collections::BTreeSet::new(),
+        caps: caps_from_options(options),
+    }
+}
+
+fn caps_from_options(
+    options: Option<&BTreeMap<String, VmValue>>,
+) -> std::collections::BTreeSet<String> {
+    let mut caps = std::collections::BTreeSet::new();
+    let Some(options) = options else {
+        return caps;
+    };
+    collect_caps(options.get("caps"), &mut caps);
+    collect_caps(options.get("capabilities"), &mut caps);
+    if let Some(profile) = options
+        .get("context_profile")
+        .or_else(|| options.get("project_context_profile"))
+        .and_then(VmValue::as_dict)
+    {
+        collect_caps(profile.get("caps"), &mut caps);
+    }
+    caps
+}
+
+fn collect_caps(value: Option<&VmValue>, out: &mut std::collections::BTreeSet<String>) {
+    match value {
+        Some(VmValue::List(items)) => {
+            for item in items.iter() {
+                let cap = item.display();
+                if !cap.is_empty() {
+                    out.insert(cap);
+                }
+            }
+        }
+        Some(VmValue::Dict(dict)) => {
+            for (key, value) in dict.iter() {
+                if !matches!(value, VmValue::Bool(false) | VmValue::Nil) {
+                    out.insert(key.clone());
+                }
+            }
+        }
+        Some(value) => {
+            let cap = value.display();
+            if !cap.is_empty() {
+                out.insert(cap);
+            }
+        }
+        None => {}
     }
 }
 
@@ -3041,6 +3155,38 @@ mod reminder_render_tests {
             error.to_string().contains("bucket must be"),
             "unexpected error: {error}"
         );
+    }
+
+    #[test]
+    fn context_profile_fragments_join_prompt_explain_provenance() {
+        let options = BTreeMap::from([(
+            "context_profile".to_string(),
+            dict(&[
+                ("caps", list(vec![s("remote.github")])),
+                (
+                    "prompt_fragments",
+                    list(vec![dict(&[
+                        ("id", s("profile:github")),
+                        ("source", s("profile:github")),
+                        ("body", s("Use GitHub-aware workflows.")),
+                        ("requires_caps", list(vec![s("remote.github")])),
+                    ])]),
+                ),
+            ]),
+        )]);
+
+        let assembled = assemble_system_prompt(None, Some(&options), &[]).expect("assembled");
+        assert_eq!(
+            assembled.system.as_deref(),
+            Some("Use GitHub-aware workflows.")
+        );
+        let trace = assembled
+            .provenance
+            .iter()
+            .find(|trace| trace.id == "profile:github")
+            .expect("profile trace");
+        assert!(trace.included);
+        assert!(trace.reason.contains("capabilit"));
     }
 }
 

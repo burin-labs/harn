@@ -10,7 +10,13 @@ pipeline default() {
   let first = agent_loop(
     "first",
     "Base system.",
-    {provider: "mock", model: "o3", session_id: session_id, max_iterations: 1},
+    {
+      provider: "mock",
+      model: "o3",
+      session_id: session_id,
+      max_iterations: 1,
+      auto_context_profile: false,
+    },
   )
   let changed = agent_session_set_workspace_anchor(
     session_id,
@@ -23,7 +29,13 @@ pipeline default() {
   let second = agent_loop(
     "second",
     nil,
-    {provider: "mock", model: "o3", session_id: session_id, max_iterations: 1},
+    {
+      provider: "mock",
+      model: "o3",
+      session_id: session_id,
+      max_iterations: 1,
+      auto_context_profile: false,
+    },
   )
   let calls = llm_mock_calls()
   let first_reminders = transcript_events_by_kind(first.transcript, "system_reminder")

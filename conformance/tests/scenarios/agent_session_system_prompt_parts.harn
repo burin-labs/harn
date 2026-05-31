@@ -23,7 +23,7 @@ pipeline default() {
   llm_mock_clear()
   let sid = "system-prompt-continuation-session"
   let opts = with_system_prompt_parts(
-    {provider: "mock", session_id: sid, max_iterations: 1},
+    {provider: "mock", session_id: sid, max_iterations: 1, auto_context_profile: false},
     [
       system_preamble("Persistent contract.", {label: "Session contract"}),
       {content: "disabled", enabled: false},
@@ -34,7 +34,7 @@ pipeline default() {
   let resumed_without_prompt = agent_loop(
     "resume without prompt options",
     nil,
-    {provider: "mock", session_id: sid, max_iterations: 1},
+    {provider: "mock", session_id: sid, max_iterations: 1, auto_context_profile: false},
   )
   let calls = llm_mock_calls()
   __io_println(first.status)

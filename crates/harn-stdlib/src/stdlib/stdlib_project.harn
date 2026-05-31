@@ -13,6 +13,20 @@ type ProjectFingerprint = {
   lockfile_paths: list<string>,
 }
 
+type ProjectContextProfile = {
+  schema_version: int,
+  path: string,
+  profile_ids: list<string>,
+  skills: list<string>,
+  tool_groups: list<string>,
+  mcp_presets: list<string>,
+  caps: list<string>,
+  prompt_fragments: list<dict>,
+  signals: dict,
+  profiles: list<dict>,
+  token_delta: dict,
+}
+
 /**
  * metadata_namespace.
  *
@@ -106,6 +120,19 @@ pub fn project_root_package() -> string {
  */
 pub fn project_scan(path = ".", options = nil) {
   return project_scan_native(path, options ?? {})
+}
+
+/**
+ * project_context_profile.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: experimental
+ * @example: project_context_profile(path, options)
+ */
+pub fn project_context_profile(path = ".", options = nil) -> ProjectContextProfile {
+  return project_context_profile_native(path, options ?? {})
 }
 
 /**

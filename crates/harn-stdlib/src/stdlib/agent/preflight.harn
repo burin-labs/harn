@@ -283,6 +283,28 @@ fn __agent_push_system_fragment(fragments, id, body) {
   return fragments.push({id: "primary:" + id, source: "primary", body: trimmed})
 }
 
+fn __agent_context_profile_fragments(opts) {
+  var fragments = []
+  let profile = opts?.context_profile ?? opts?.project_context_profile ?? {}
+  for fragment in profile?.prompt_fragments ?? [] {
+    let body = trim(fragment?.body ?? fragment?.content ?? "")
+    if body == "" {
+      continue
+    }
+    fragments = fragments
+      .push(
+      {
+        id: fragment?.id ?? "profile",
+        source: fragment?.source ?? "profile",
+        body: body,
+        requires_tools: fragment?.requires_tools ?? [],
+        requires_caps: fragment?.requires_caps ?? [],
+      },
+    )
+  }
+  return fragments
+}
+
 fn __agent_primary_system_text(session, opts) {
   if opts?.system != nil && opts.system != "" {
     return opts.system
@@ -321,6 +343,7 @@ pub fn agent_build_turn_system_fragments(session, opts, iteration) {
     "mcp_advisory",
     __agent_mcp_initialize_advisory_prompt(opts),
   )
+  fragments = fragments + __agent_context_profile_fragments(opts)
   fragments = __agent_push_system_fragment(
     fragments,
     "active_skills",

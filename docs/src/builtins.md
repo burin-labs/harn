@@ -2082,6 +2082,7 @@ without a `files` section load unchanged.
 | Function | Parameters | Returns | Description |
 |---|---|---|---|
 | `project_fingerprint(path?)` | path: string | `ProjectFingerprint` | Return a normalized shallow project profile for the current working directory or the supplied path |
+| `project_context_profile(path?, options?)` | path: string, options: `{signals?: dict, fingerprint?: dict, remote?: string \| dict, credentials?: list \| dict, include_env_credentials?: bool}` | `ProjectContextProfile` | Resolve project signals into active profile IDs, prompt fragments, skills, tool groups, MCP preset candidates, caps, redacted signal provenance, and token-delta metadata |
 
 `ProjectFingerprint` has these fields:
 
@@ -2104,6 +2105,16 @@ without a `files` section load unchanged.
 - `has_ci`: `true` when CI config such as `.github/workflows/` or `.gitlab-ci.yml` is present
 - `lockfile_paths`: relative paths to detected lockfiles such as `Cargo.lock`,
   `package-lock.json`, `pnpm-lock.yaml`, `uv.lock`, `go.sum`, or `Package.resolved`
+
+`ProjectContextProfile` has these top-level fields:
+
+- `profile_ids`: active profile IDs such as `"git"`, `"github"`, `"rust"`, `"node"`, `"python"`, and `"swift"`
+- `prompt_fragments`: fragments accepted by the prompt reducer and gated by `requires_caps`
+- `skills`, `tool_groups`, `mcp_presets`, and `mcp_preset_candidates`:
+  activation metadata for existing skill/tool/preset surfaces
+- `caps`: capability flags that explain profile-fragment inclusion in `prompt_explain(...)`
+- `signals`: normalized project fingerprint, redacted Git remote, signal source, and credential aliases
+- `token_delta`: estimated tokens/bytes for activated profile fragments versus the always-on profile catalog
 
 ## Secret scanning
 

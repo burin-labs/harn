@@ -1,6 +1,7 @@
 import { completion_judge_feedback_prompt, completion_judge_system_prompt } from "std/agent/prompts"
 import { agent_reasoning_apply } from "std/agent/reasoning"
 import { agent_scratchpad_options } from "std/agent/scratchpad"
+import { project_context_profile } from "std/project"
 
 fn __profile_defaults(profile) {
   if profile == "tool_using" {
@@ -407,6 +408,40 @@ fn __with_task_ledger_shorthand(opts) {
     return opts
   }
   return opts + {task_ledger: ledger}
+}
+
+fn __context_profile_root(opts) {
+  return opts?.context_profile_root ?? opts?.project_root ?? opts?.root ?? opts?.cwd ?? "."
+}
+
+fn __context_profile_options(opts) {
+  var profile_opts = opts?.context_profile_options ?? {}
+  if opts?.context_signals != nil {
+    profile_opts = profile_opts + {signals: opts.context_signals}
+  }
+  if opts?.code_librarian_signals != nil {
+    profile_opts = profile_opts + {signals: opts.code_librarian_signals}
+  }
+  return profile_opts
+}
+
+fn __context_profile_disabled(opts) {
+  let value = opts?.auto_context_profile
+  return type_of(value) == "bool" && !value
+}
+
+fn __with_project_context_profile(opts) {
+  if __has_key(opts, "context_profile") || __has_key(opts, "project_context_profile")
+    || __context_profile_disabled(opts) {
+    return opts
+  }
+  let resolved = try {
+    project_context_profile(__context_profile_root(opts), __context_profile_options(opts))
+  }
+  if is_err(resolved) {
+    return opts + {_context_profile_error: to_string(unwrap_err(resolved))}
+  }
+  return opts + {context_profile: unwrap(resolved)}
 }
 
 fn __validate_done_sentinel(value) {
@@ -988,6 +1023,7 @@ pub fn agent_loop_options(options = nil) {
   let profile = opts?.profile ?? "tool_using"
   let defaults = __profile_defaults(profile)
   opts = defaults + opts
+  opts = __with_project_context_profile(opts)
   let tool_format_resolution = agent_tool_format_resolution(opts)
   if __has_key(opts, "tool_format") || opts?.tools != nil {
     opts = __with_resolved_tool_format(opts, tool_format_resolution)

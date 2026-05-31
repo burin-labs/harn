@@ -139,6 +139,7 @@ fn builtin_effect_group(builtin: &str) -> Option<BuiltinEffectGroup> {
         | "file_exists"
         | "stat"
         | "project_fingerprint"
+        | "project_context_profile_native"
         | "project_scan_native"
         | "project_scan_tree_native"
         | "project_walk_tree_native"
