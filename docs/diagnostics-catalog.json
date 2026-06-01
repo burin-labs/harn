@@ -29,7 +29,7 @@
     {
       "id": "ORC",
       "title": "Orchestration constructs",
-      "count": 11
+      "count": 12
     },
     {
       "id": "STD",
@@ -955,6 +955,15 @@
       "code": "HARN-ORC-011",
       "category": "ORC",
       "summary": "a self-deadlock acquire would block forever",
+      "repairs": [],
+      "related": [],
+      "explanationPresent": true,
+      "apiStability": "stable"
+    },
+    {
+      "code": "HARN-ORC-012",
+      "category": "ORC",
+      "summary": "a wait-for graph cycle would block forever",
       "repairs": [],
       "related": [],
       "explanationPresent": true,

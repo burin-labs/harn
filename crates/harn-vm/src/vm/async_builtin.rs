@@ -60,6 +60,10 @@ impl AsyncBuiltinCtx {
         self.child.lock().pool_registry.clone()
     }
 
+    pub(crate) fn wait_for_graph(&self) -> Arc<crate::wait_for_graph::VmWaitForGraph> {
+        self.child.lock().wait_for_graph.clone()
+    }
+
     /// Create an independent context rooted at a fresh child VM. Long-lived
     /// local tasks use this instead of sharing the parent builtin's output
     /// buffer after the parent future has returned.

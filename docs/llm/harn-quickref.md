@@ -815,6 +815,11 @@ let results = parallel settle paths with { max_concurrent: 4 } { p ->
 `retry { } catch err { }`, channels, `select`, and `deadline` in
 `docs/src/concurrency.md`.
 
+Channel waits are guarded: if every active task is blocked on sends/receives
+that cannot match another task, the runtime raises `HARN-ORC-012` instead of
+hanging. Use `deadline { ... }`, `select timeout`, or `channel_select(...,
+timeout_ms)` when a channel wait is intentionally bounded by time.
+
 ## Iteration & lazy iterators
 
 Eager collection methods (`list.map`, `list.filter`, `list.flat_map`,

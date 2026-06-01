@@ -183,6 +183,8 @@ pub struct Vm {
     pub(crate) inline_caches: HashMap<u64, Vec<crate::chunk::InlineCacheEntry>>,
     /// VM-scoped pool registry inherited by child VMs and scoped into Tokio tasks.
     pub(crate) pool_registry: Arc<crate::stdlib::pool::PoolRegistry>,
+    /// Shared task/channel wait graph for this VM execution tree.
+    pub(crate) wait_for_graph: Arc<crate::wait_for_graph::VmWaitForGraph>,
     /// Permits acquired by lexical synchronization blocks in this VM.
     pub(crate) held_sync_guards: Vec<crate::synchronization::VmSyncHeldGuard>,
     /// `(kind, key)` of locks held by an ancestor VM that is *suspended on this
@@ -346,6 +348,7 @@ impl VmBaseline {
             shared_state_runtime: Arc::new(crate::shared_state::VmSharedStateRuntime::new()),
             inline_caches: HashMap::new(),
             pool_registry: crate::stdlib::pool::new_pool_registry(),
+            wait_for_graph: Arc::new(crate::wait_for_graph::VmWaitForGraph::new()),
             held_sync_guards: Vec::new(),
             inherited_held_keys: Arc::new(Vec::new()),
             task_scopes: Vec::new(),
@@ -573,6 +576,7 @@ impl Vm {
             shared_state_runtime: Arc::new(crate::shared_state::VmSharedStateRuntime::new()),
             inline_caches: HashMap::new(),
             pool_registry: crate::stdlib::pool::new_pool_registry(),
+            wait_for_graph: Arc::new(crate::wait_for_graph::VmWaitForGraph::new()),
             held_sync_guards: Vec::new(),
             inherited_held_keys: Arc::new(Vec::new()),
             task_scopes: Vec::new(),
@@ -724,6 +728,7 @@ impl Vm {
             shared_state_runtime: self.shared_state_runtime.clone(),
             inline_caches: HashMap::new(),
             pool_registry: self.pool_registry.clone(),
+            wait_for_graph: self.wait_for_graph.clone(),
             held_sync_guards: Vec::new(),
             inherited_held_keys: Arc::new(Vec::new()),
             task_scopes: Vec::new(),

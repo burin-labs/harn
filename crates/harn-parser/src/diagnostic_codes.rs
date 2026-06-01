@@ -239,6 +239,7 @@ diagnostic_codes! {
     FlowInvariantAttributeInvalid, "HARN-ORC-009", Orc, "Flow invariant attribute set is invalid";
     ExecutionTargetMissing, "HARN-ORC-010", Orc, "execution target path cannot be found";
     SelfDeadlockDetected, "HARN-ORC-011", Orc, "a self-deadlock acquire would block forever";
+    WaitForGraphDeadlockDetected, "HARN-ORC-012", Orc, "a wait-for graph cycle would block forever";
     DeprecatedStdlibSymbol, "HARN-STD-001", Std, "stdlib symbol has been renamed or deprecated";
     StdlibUsageInvalid, "HARN-STD-002", Std, "stdlib call is invalid";
     BuiltinArity, "HARN-STD-003", Std, "builtin call has invalid arity";
