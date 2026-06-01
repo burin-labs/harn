@@ -93,6 +93,41 @@ pub fn peek_total_tokens() -> u64 {
     LLM_ACCUMULATED_TOKENS.with(|acc| *acc.borrow())
 }
 
+/// Re-arm the live per-thread LLM **cost** ceiling in place, preserving the
+/// accumulated total. `None` clears the cap.
+///
+/// Unlike [`install_llm_cost_budget`] this returns no guard and does not reset
+/// the running total: it mutates the same `LLM_BUDGET` thread-local a dispatch
+/// already consults at preflight ([`check_llm_preflight_budget`]) and after
+/// each call ([`accumulate_cost_for_provider`]). A supervisor on the dispatch
+/// thread can therefore tighten or loosen the ceiling mid-run and have the next
+/// LLM call observe it — the basis for ACP `session/set_budget` re-arm
+/// (burin-labs/burin-code#1561). Callers that want fresh per-scope accounting
+/// (HTTP `@budget`, per-turn guards) keep using `install_*` instead.
+pub fn set_llm_cost_budget(max_cost_usd: Option<f64>) {
+    LLM_BUDGET.with(|b| *b.borrow_mut() = max_cost_usd.map(|max| max.max(0.0)));
+}
+
+/// Re-arm the live per-thread LLM **token** ceiling in place, preserving the
+/// accumulated total. `None` clears the cap. The token counterpart to
+/// [`set_llm_cost_budget`] — see that function for the re-arm semantics.
+pub fn set_llm_token_budget(max_tokens: Option<u64>) {
+    LLM_TOKEN_BUDGET.with(|b| *b.borrow_mut() = max_tokens);
+}
+
+/// The live per-thread LLM cost ceiling, or `None` when uncapped. Pairs with
+/// [`peek_total_cost`] so a supervisor (or a re-arm acknowledgement) can read
+/// back the ceiling it just set.
+pub fn peek_llm_cost_budget() -> Option<f64> {
+    LLM_BUDGET.with(|b| *b.borrow())
+}
+
+/// The live per-thread LLM token ceiling, or `None` when uncapped. The token
+/// counterpart to [`peek_llm_cost_budget`].
+pub fn peek_llm_token_budget() -> Option<u64> {
+    LLM_TOKEN_BUDGET.with(|b| *b.borrow())
+}
+
 #[derive(Clone, Debug, Default, PartialEq)]
 pub(crate) struct LlmBudgetEnvelope {
     pub max_cost_usd: Option<f64>,
@@ -717,9 +752,7 @@ pub(crate) fn register_cost_builtins(vm: &mut Vm) {
                 ))));
             }
         };
-        LLM_BUDGET.with(|budget| {
-            *budget.borrow_mut() = Some(max_cost);
-        });
+        set_llm_cost_budget(Some(max_cost));
         Ok(VmValue::Nil)
     });
 
@@ -1274,6 +1307,56 @@ mod tests {
         assert_eq!(peek_total_tokens(), 50);
         drop(outer);
         assert_eq!(peek_total_tokens(), 0);
+
+        reset_cost_state();
+    }
+
+    #[test]
+    fn set_budget_rearms_in_place_without_resetting_accumulation() {
+        let _guard_outer = crate::llm::env_lock().lock().unwrap();
+        reset_cost_state();
+
+        // Install a $1.00 cap and spend $0.60 against it.
+        let _budget = install_llm_cost_budget(1.0);
+        LLM_ACCUMULATED_COST.with(|a| *a.borrow_mut() = 0.60);
+
+        // Tighten the cap below current spend: the next preflight must trip,
+        // and the already-accumulated total must be preserved (not reset).
+        set_llm_cost_budget(Some(0.50));
+        assert!((peek_total_cost() - 0.60).abs() < f64::EPSILON);
+        LLM_BUDGET.with(|b| assert_eq!(*b.borrow(), Some(0.50)));
+
+        // Loosen the cap: spend stays, ceiling rises, room reopens.
+        set_llm_cost_budget(Some(2.0));
+        assert!((peek_total_cost() - 0.60).abs() < f64::EPSILON);
+        LLM_BUDGET.with(|b| assert_eq!(*b.borrow(), Some(2.0)));
+
+        // Clear the cap entirely.
+        set_llm_cost_budget(None);
+        LLM_BUDGET.with(|b| assert_eq!(*b.borrow(), None));
+
+        // Negative ceilings clamp to zero (a hard stop), matching `install_*`.
+        set_llm_cost_budget(Some(-5.0));
+        LLM_BUDGET.with(|b| assert_eq!(*b.borrow(), Some(0.0)));
+
+        reset_cost_state();
+    }
+
+    #[test]
+    fn set_token_budget_rearms_in_place_without_resetting_accumulation() {
+        let _guard_outer = crate::llm::env_lock().lock().unwrap();
+        reset_cost_state();
+
+        let _budget = install_llm_token_budget(100);
+        LLM_ACCUMULATED_TOKENS.with(|a| *a.borrow_mut() = 60);
+
+        set_llm_token_budget(Some(50));
+        assert_eq!(peek_total_tokens(), 60);
+        LLM_TOKEN_BUDGET.with(|b| assert_eq!(*b.borrow(), Some(50)));
+
+        set_llm_token_budget(None);
+        assert_eq!(peek_total_tokens(), 60);
+        LLM_TOKEN_BUDGET.with(|b| assert_eq!(*b.borrow(), None));
 
         reset_cost_state();
     }
