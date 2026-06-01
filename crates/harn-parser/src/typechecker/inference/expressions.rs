@@ -661,11 +661,24 @@ impl TypeChecker {
                     let iter_of = |ty: TypeExpr| TypeExpr::Iter(Box::new(ty));
                     match method.as_str() {
                         "iter" => return Some(result(iter_of(t))),
-                        "map" | "flat_map" => {
-                            // Closure-return inference is not threaded here;
-                            // fall back to a coarse `iter<any>` — matches the
-                            // list-return style the rest of the checker uses.
-                            return Some(result(TypeExpr::Named("iter".into())));
+                        "map" => {
+                            let r = args
+                                .first()
+                                .and_then(|a| {
+                                    self.infer_callable_return(a, std::slice::from_ref(&t), scope)
+                                })
+                                .unwrap_or_else(Self::wildcard_type);
+                            return Some(result(iter_of(r)));
+                        }
+                        "flat_map" => {
+                            let r = args
+                                .first()
+                                .and_then(|a| {
+                                    self.infer_callable_return(a, std::slice::from_ref(&t), scope)
+                                })
+                                .map(Self::flatten_one_level)
+                                .unwrap_or_else(Self::wildcard_type);
+                            return Some(result(iter_of(r)));
                         }
                         "filter" | "take" | "skip" | "take_while" | "skip_while" => {
                             return Some(result(iter_of(t)));
@@ -737,6 +750,29 @@ impl TypeChecker {
                 let is_dict = matches!(&obj_type, Some(TypeExpr::Named(n)) if n == "dict")
                     || matches!(&obj_type, Some(TypeExpr::DictType(..)))
                     || matches!(&obj_type, Some(TypeExpr::Shape(_)));
+                // Element / key / value types of the (eager) collection receiver,
+                // when parameterized. Eager list/dict combinators materialize a
+                // new collection, so they return `List<…>` / `dict<…>` rather than
+                // an `Iter`, but they preserve or transform the element type the
+                // same way the lazy `Iter` combinators above do. `None` falls back
+                // to the opaque `list`/`dict` type for unparameterized receivers.
+                let resolved_recv = obj_type.as_ref().map(|t| self.resolve_alias(t, scope));
+                let list_elem: Option<TypeExpr> = match &resolved_recv {
+                    Some(TypeExpr::List(inner)) => Some((**inner).clone()),
+                    _ => None,
+                };
+                let (dict_key, dict_val): (Option<TypeExpr>, Option<TypeExpr>) =
+                    match &resolved_recv {
+                        Some(TypeExpr::DictType(k, v)) => {
+                            (Some((**k).clone()), Some((**v).clone()))
+                        }
+                        _ => (None, None),
+                    };
+                let list_of = |t: TypeExpr| TypeExpr::List(Box::new(t));
+                let pair_of = |k: TypeExpr, v: TypeExpr| TypeExpr::Applied {
+                    name: "Pair".into(),
+                    args: vec![k, v],
+                };
                 match method.as_str() {
                     // Shared: bool-returning methods
                     "contains" | "starts_with" | "ends_with" | "empty" | "has" | "any" | "all" => {
@@ -750,16 +786,49 @@ impl TypeChecker {
                         Some(result(TypeExpr::Named("string".into())))
                     }
                     "split" | "chars" => Some(result(TypeExpr::Named("list".into()))),
-                    // filter returns dict for dicts, list for lists
+                    // filter returns dict for dicts, list for lists; the element
+                    // type is unchanged (filter only drops elements).
                     "filter" => {
                         if is_dict {
-                            Some(result(TypeExpr::Named("dict".into())))
+                            match (&dict_key, &dict_val) {
+                                (Some(k), Some(v)) => Some(result(TypeExpr::DictType(
+                                    Box::new(k.clone()),
+                                    Box::new(v.clone()),
+                                ))),
+                                _ => Some(result(TypeExpr::Named("dict".into()))),
+                            }
                         } else {
-                            Some(result(TypeExpr::Named("list".into())))
+                            match &list_elem {
+                                Some(e) => Some(result(list_of(e.clone()))),
+                                None => Some(result(TypeExpr::Named("list".into()))),
+                            }
                         }
                     }
-                    // List methods
-                    "map" | "flat_map" | "sort" => Some(result(TypeExpr::Named("list".into()))),
+                    // List methods. `map`/`flat_map` produce the closure's return
+                    // type per element (flat_map flattens one level); `sort` keeps
+                    // the element type.
+                    "map" => {
+                        let param = list_elem.unwrap_or_else(Self::wildcard_type);
+                        match args.first().and_then(|a| {
+                            self.infer_callable_return(a, std::slice::from_ref(&param), scope)
+                        }) {
+                            Some(r) => Some(result(list_of(r))),
+                            None => Some(result(TypeExpr::Named("list".into()))),
+                        }
+                    }
+                    "flat_map" => {
+                        let param = list_elem.unwrap_or_else(Self::wildcard_type);
+                        match args.first().and_then(|a| {
+                            self.infer_callable_return(a, std::slice::from_ref(&param), scope)
+                        }) {
+                            Some(r) => Some(result(list_of(Self::flatten_one_level(r)))),
+                            None => Some(result(TypeExpr::Named("list".into()))),
+                        }
+                    }
+                    "sort" => match &list_elem {
+                        Some(e) => Some(result(list_of(e.clone()))),
+                        None => Some(result(TypeExpr::Named("list".into()))),
+                    },
                     "window" | "each_cons" | "sliding_window" => match &obj_type {
                         Some(TypeExpr::List(inner)) => Some(result(TypeExpr::List(Box::new(
                             TypeExpr::List(Box::new((**inner).clone())),
@@ -767,8 +836,19 @@ impl TypeChecker {
                         _ => Some(result(TypeExpr::Named("list".into()))),
                     },
                     "reduce" | "find" | "first" | "last" => None,
-                    // Dict methods
-                    "keys" | "values" | "entries" => Some(result(TypeExpr::Named("list".into()))),
+                    // Dict methods — project the key/value type parameters.
+                    "keys" => match &dict_key {
+                        Some(k) => Some(result(list_of(k.clone()))),
+                        None => Some(result(TypeExpr::Named("list".into()))),
+                    },
+                    "values" => match &dict_val {
+                        Some(v) => Some(result(list_of(v.clone()))),
+                        None => Some(result(TypeExpr::Named("list".into()))),
+                    },
+                    "entries" => match (&dict_key, &dict_val) {
+                        (Some(k), Some(v)) => Some(result(list_of(pair_of(k.clone(), v.clone())))),
+                        _ => Some(result(TypeExpr::Named("list".into()))),
+                    },
                     "merge" | "map_values" | "rekey" | "map_keys" => {
                         // Rekey/map_keys transform keys; resulting dict still keys-by-string.
                         // Preserve the value-type parameter when known so downstream code can
@@ -1273,6 +1353,59 @@ impl TypeChecker {
             simplify_union(vec![ty, TypeExpr::Named("nil".into())])
         } else {
             ty
+        }
+    }
+
+    /// Infer the return type of a callable argument (a closure or a function
+    /// reference) given the parameter types the call site supplies. Powers
+    /// `map`/`flat_map` element typing: a closure's params are bound to
+    /// `param_types`, so an unannotated `{ x -> x * 2 }` still infers its body
+    /// against the real element type instead of collapsing to `any`. The
+    /// closure's own annotation, when present, wins over the contextual type.
+    pub(super) fn infer_callable_return(
+        &self,
+        arg: &SNode,
+        param_types: &[TypeExpr],
+        scope: &TypeScope,
+    ) -> InferredType {
+        match &arg.node {
+            Node::Closure { params, body, .. } => {
+                let mut closure_scope = scope.child();
+                for (i, param) in params.iter().enumerate() {
+                    let param_ty = param
+                        .type_expr
+                        .clone()
+                        .or_else(|| param_types.get(i).cloned());
+                    closure_scope.define_var(&param.name, param_ty);
+                }
+                self.infer_closure_body_return(body, &closure_scope)
+            }
+            // A function reference (`xs.map(double)`): use its declared/inferred
+            // return type.
+            _ => match self.infer_type(arg, scope) {
+                Some(TypeExpr::FnType { return_type, .. }) => Some(*return_type),
+                _ => None,
+            },
+        }
+    }
+
+    /// The type a callable body yields: the trailing expression, or the operand
+    /// of a trailing `return`.
+    fn infer_closure_body_return(&self, body: &[SNode], scope: &TypeScope) -> InferredType {
+        let last = body.last()?;
+        match &last.node {
+            Node::ReturnStmt { value: Some(v) } => self.infer_type(v, scope),
+            Node::ReturnStmt { value: None } => Some(TypeExpr::Named("nil".into())),
+            _ => self.infer_type(last, scope),
+        }
+    }
+
+    /// Unwrap one level of list/iter nesting — `flat_map`'s closure returns a
+    /// collection per element, which `flat_map` flattens by one level.
+    fn flatten_one_level(ty: TypeExpr) -> TypeExpr {
+        match ty {
+            TypeExpr::List(inner) | TypeExpr::Iter(inner) => *inner,
+            other => other,
         }
     }
 
