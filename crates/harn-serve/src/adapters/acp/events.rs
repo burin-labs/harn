@@ -477,6 +477,9 @@ impl AgentEventSink for AcpAgentEventSink {
                 reason,
                 removed_tools,
                 remaining_tools,
+                policy,
+                removed_tool_details,
+                kept_tool_details,
             } => {
                 let mut update = serde_json::json!({
                     "sessionUpdate": "skill_narrow",
@@ -494,6 +497,18 @@ impl AgentEventSink for AcpAgentEventSink {
                     "remainingTools".to_string(),
                     serde_json::to_value(remaining_tools).unwrap_or_default(),
                 );
+                if !policy.is_null() {
+                    harn_meta.insert("policy".to_string(), policy.clone());
+                }
+                if !removed_tool_details.is_null() {
+                    harn_meta.insert(
+                        "removedToolDetails".to_string(),
+                        removed_tool_details.clone(),
+                    );
+                }
+                if !kept_tool_details.is_null() {
+                    harn_meta.insert("keptToolDetails".to_string(), kept_tool_details.clone());
+                }
                 merge_harn_meta(&mut update, harn_meta);
                 self.write_notification(serde_json::json!({
                     "sessionId": session_id,

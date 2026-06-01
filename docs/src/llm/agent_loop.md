@@ -236,7 +236,7 @@ Same as `llm_call`, plus additional options:
 | `tool_backoff_ms` | int | `1000` | Base backoff delay in ms for tool retries (doubles each attempt) |
 | `max_concurrent_tools` | int | `1` | Maximum in-flight tool calls from one planner turn. Results are recorded in emitted order even when calls complete out of order |
 | `prefetch_next_turn` | bool | `false` | Start the next planner turn after tool results are recorded while local/custom audit receipt sinks flush in the background. The loop drains those flushes before returning |
-| `tool_surface_narrowing` | bool/dict | `{enabled: true, window_turns: 5}` | Between turns, remove model-visible tools that were unused across the rolling window. Dict configs may set `enabled`, `window_turns`, and `hard_keep`; explicit skill activation widens back to the skill-scoped surface |
+| `tool_surface_narrowing` | bool/dict | `{enabled: true, window_turns: 5, mode: "safe"}` | Between turns, remove model-visible tools that were unused across the rolling window. Safe mode narrows unused `read_only` tools while keeping mutating/control/unknown tools by class; dict configs may also set `mode: "aggressive"`, `hard_keep`, `prune_classes`, `keep_classes`, and `unknown_tool_policy` |
 | `progress_tool` | bool/dict | `false` | Opt in to a model-facing progress tool that emits `progress_reported` agent events. `true` exposes `agent_progress`; a dict may set `name`, `description`, and `system_prompt_nudge`. ACP clients receive task-list entries as canonical `plan` updates and message-only reports as Harn `progress` narration |
 | `policy` | dict | nil | Capability ceiling applied to this agent loop |
 | `daemon` | bool | `false` | Idle instead of terminating after text-only turns |
@@ -1030,8 +1030,21 @@ zero-candidate passes so replayers see the boundary), one
 `skill_activated` per activated skill, and one `skill_scope_tools`
 event per activation whose `allowed_tools` narrowed the surface. When
 `tool_surface_narrowing` removes unused tools between turns, the loop
-also emits `skill_narrow` with `removed_tools`, `remaining_tools`, and
-the narrowing reason.
+also emits `skill_narrow` with `removed_tools`, `remaining_tools`, the
+narrowing reason, policy details, removed-tool details, and kept-tool
+details.
+
+The default narrowing policy is safe by class: only tools classified as
+`read_only` are prunable. Tools classified as `mutating`, `approval`,
+`session_control`, `progress`, or `result_polling` remain visible even after
+long discovery windows, and host/custom tools with missing annotations are
+classified as `unknown` and kept. Host surfaces should annotate each tool with
+`annotations.side_effect_level` (`none`, `read_only`, `workspace_write`,
+`process_exec`, or `network`) plus a `kind` such as `read`, `search`, `edit`,
+or `execute`. Use `tool_surface_narrowing: {mode: "aggressive"}` only when a
+session intentionally wants usage-only pruning across all classes; callers can
+still override `prune_classes`, `keep_classes`, `unknown_tool_policy`, and
+`hard_keep` for narrower policies.
 
 ## Delegated workers
 

@@ -173,6 +173,9 @@ fn extension_fixture_events() -> Vec<AgentEvent> {
             reason: "unused across 5 turns".to_string(),
             removed_tools: vec!["write".to_string()],
             remaining_tools: vec!["read".to_string()],
+            policy: serde_json::Value::Null,
+            removed_tool_details: serde_json::Value::Null,
+            kept_tool_details: serde_json::Value::Null,
         },
         AgentEvent::ToolSearchQuery {
             session_id: "session-1".to_string(),
@@ -1153,6 +1156,9 @@ async fn forwarded_agent_events_serialize_as_session_updates() {
             reason: "unused across 5 turns".to_string(),
             removed_tools: vec!["write".to_string()],
             remaining_tools: vec!["read".to_string()],
+            policy: serde_json::Value::Null,
+            removed_tool_details: serde_json::Value::Null,
+            kept_tool_details: serde_json::Value::Null,
         },
         AgentEvent::ToolSearchQuery {
             session_id: "session-1".to_string(),
@@ -1241,6 +1247,32 @@ async fn forwarded_agent_events_serialize_as_session_updates() {
         assert_eq!(payload["params"]["sessionId"], "session-1");
         assert_eq!(payload["params"]["update"]["sessionUpdate"], expected);
     }
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn skill_narrow_serializes_policy_details_under_harn_meta() {
+    let (tx, mut rx) = mpsc::unbounded_channel();
+    let sink = AcpAgentEventSink::new(AcpOutput::Channel(tx));
+    sink.handle_event(&AgentEvent::SkillNarrow {
+        session_id: "session-1".to_string(),
+        reason: "unused across 5 turns".to_string(),
+        removed_tools: vec!["read_docs".to_string()],
+        remaining_tools: vec!["run".to_string()],
+        policy: serde_json::json!({"mode": "safe", "prune_classes": ["read_only"]}),
+        removed_tool_details: serde_json::json!([
+            {"name": "read_docs", "class": "read_only", "reason": "unused_prunable_class"}
+        ]),
+        kept_tool_details: serde_json::json!([
+            {"name": "run", "class": "mutating", "reason": "class_kept"}
+        ]),
+    });
+
+    let line = rx.recv().await.expect("ACP event notification");
+    let payload: serde_json::Value = serde_json::from_str(&line).expect("json");
+    let harn_meta = update_harn_meta(&payload);
+    assert_eq!(harn_meta["policy"]["mode"], "safe");
+    assert_eq!(harn_meta["removedToolDetails"][0]["name"], "read_docs");
+    assert_eq!(harn_meta["keptToolDetails"][0]["class"], "mutating");
 }
 
 #[tokio::test(flavor = "current_thread")]

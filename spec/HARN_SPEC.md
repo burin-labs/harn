@@ -2725,16 +2725,30 @@ diagnostics for workflow and stage surfaces.
 
 `agent_loop` narrows the model-visible tool surface between turns by
 default. The `tool_surface_narrowing` option accepts `false` to disable,
-`true` to use defaults, or a dict with `enabled`, `window_turns`, and
-`hard_keep`. After `window_turns` observed turns, tools that were not
-attempted in that rolling window are removed from the next model call
-unless listed in `hard_keep`. The default window is five turns.
+`true` to use defaults, or a dict with `enabled`, `window_turns`,
+`hard_keep`, `mode`, `prune_classes`, `keep_classes`, and
+`unknown_tool_policy`. After `window_turns` observed turns, tools in
+prunable classes that were not attempted in that rolling window are removed
+from the next model call unless listed in `hard_keep`. The default window
+is five turns.
 
 Narrowing is usage-based only; it does not inspect file extensions,
-languages, or project metadata. Explicit skill activation widens back to
-the skill-scoped surface, after which narrowing may run again. Every
-narrowing step emits a `skill_narrow` agent event with `reason`,
-`removed_tools`, and `remaining_tools`.
+languages, or project metadata. The default `mode: "safe"` prunes only
+`read_only` tools and keeps `mutating`, `approval`, `session_control`,
+`progress`, `result_polling`, and `unknown` tools by class. Host/custom
+tools with missing side-effect annotations are therefore kept by default.
+Set `mode: "aggressive"` to opt into usage-only pruning across tool classes,
+or override `prune_classes`, `keep_classes`, and `unknown_tool_policy` for a
+custom policy. Host surfaces should annotate tools with
+`annotations.side_effect_level` (`none`, `read_only`, `workspace_write`,
+`process_exec`, or `network`) and `annotations.kind` so narrowing can classify
+them intentionally.
+
+Explicit skill activation widens back to the skill-scoped surface, after
+which narrowing may run again. Every narrowing step emits a `skill_narrow`
+agent event with `reason`, `removed_tools`, `remaining_tools`, `policy`,
+`removed_tool_details`, and `kept_tool_details` so replayers and hosts can
+explain why a tool did or did not remain visible.
 
 #### Agent loop completion gates
 

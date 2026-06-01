@@ -918,7 +918,8 @@ variants into:
 - `sessionUpdate: "skill_activated"` — `{skillName, iteration, reason}`
 - `sessionUpdate: "skill_deactivated"` — `{skillName, iteration}`
 - `sessionUpdate: "skill_scope_tools"` — `{skillName, allowedTools}`
-- `sessionUpdate: "skill_narrow"` — `{reason, removedTools, remainingTools}`
+- `sessionUpdate: "skill_narrow"` — `{reason, removedTools, remainingTools,
+  policy, removedToolDetails, keptToolDetails}`
 
 `skill_matched` stays internal to the VM transcript — the candidate
 list can be large and host UIs typically only care about activation
