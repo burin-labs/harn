@@ -207,36 +207,18 @@ impl Drop for EmbeddedAgent {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::time::Duration;
 
-    fn recv_json(rx: &mut mpsc::UnboundedReceiver<String>) -> serde_json::Value {
-        let deadline = std::time::Instant::now() + Duration::from_secs(5);
-        loop {
-            match rx.try_recv() {
-                Ok(line) => return serde_json::from_str(&line).expect("valid JSON-RPC line"),
-                Err(mpsc::error::TryRecvError::Empty) => {
-                    assert!(
-                        std::time::Instant::now() < deadline,
-                        "timed out waiting for an ACP response line"
-                    );
-                    thread::sleep(Duration::from_millis(5));
-                }
-                Err(mpsc::error::TryRecvError::Disconnected) => {
-                    panic!("ACP response channel closed before a response arrived")
-                }
-            }
-        }
+    fn block_on<T>(future: impl std::future::Future<Output = T>) -> T {
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("test runtime")
+            .block_on(future)
     }
 
-    fn wait_until(deadline: Duration, mut predicate: impl FnMut() -> bool) -> bool {
-        let stop = std::time::Instant::now() + deadline;
-        while std::time::Instant::now() < stop {
-            if predicate() {
-                return true;
-            }
-            thread::sleep(Duration::from_millis(5));
-        }
-        predicate()
+    async fn recv_json(rx: &mut mpsc::UnboundedReceiver<String>) -> serde_json::Value {
+        let line = rx.recv().await.expect("ACP response channel closed");
+        serde_json::from_str(&line).expect("valid JSON-RPC line")
     }
 
     #[test]
@@ -245,10 +227,7 @@ mod tests {
         let requests = agent.requests();
         let mut responses = agent.take_responses().expect("responses receiver");
 
-        assert!(
-            wait_until(Duration::from_secs(5), || agent.handle().is_ready()),
-            "agent never became ready"
-        );
+        block_on(agent.handle().wait_ready());
 
         requests
             .send(serde_json::json!({
@@ -259,7 +238,7 @@ mod tests {
             }))
             .expect("send session/new");
 
-        let created = recv_json(&mut responses);
+        let created = block_on(recv_json(&mut responses));
         assert!(
             created["result"]["sessionId"].as_str().is_some(),
             "session/new should return a sessionId, got: {created}"
@@ -277,19 +256,13 @@ mod tests {
         let agent = EmbeddedAgent::spawn(AcpServerConfig::new(None));
         let handle = agent.handle().clone();
 
-        assert!(
-            wait_until(Duration::from_secs(5), || handle.is_ready()),
-            "agent never became ready"
-        );
+        block_on(handle.wait_ready());
         assert!(!handle.is_terminated());
 
         // A shutdown trigger from a cloned handle (a different owner than the
         // EmbeddedAgent) must stop an otherwise-idle server loop.
         handle.shutdown();
-        assert!(
-            wait_until(Duration::from_secs(5), || handle.is_terminated()),
-            "shutdown() did not terminate the idle agent loop"
-        );
+        block_on(handle.wait_terminated());
 
         drop(agent); // Drop joins the worker; must not hang.
         assert!(handle.is_shutdown());
@@ -304,17 +277,11 @@ mod tests {
         let agent = EmbeddedAgent::spawn(AcpServerConfig::new(None));
         let (requests, _responses, handle) = agent.into_parts();
 
-        assert!(
-            wait_until(Duration::from_secs(5), || handle.is_ready()),
-            "agent never became ready"
-        );
+        block_on(handle.wait_ready());
         assert!(!handle.is_terminated());
 
         drop(requests);
-        assert!(
-            wait_until(Duration::from_secs(5), || handle.is_terminated()),
-            "closing the request channel did not terminate the agent loop"
-        );
+        block_on(handle.wait_terminated());
         assert!(
             !handle.is_shutdown(),
             "EOF teardown must not set the shutdown flag"
@@ -327,10 +294,7 @@ mod tests {
         let (requests, responses, handle) = agent.into_parts();
         let mut responses = responses.expect("responses receiver");
 
-        assert!(
-            wait_until(Duration::from_secs(5), || handle.is_ready()),
-            "agent never became ready"
-        );
+        block_on(handle.wait_ready());
 
         requests
             .send(serde_json::json!({
@@ -340,13 +304,10 @@ mod tests {
                 "params": {"cwd": "."},
             }))
             .expect("send session/new");
-        let created = recv_json(&mut responses);
+        let created = block_on(recv_json(&mut responses));
         assert!(created["result"]["sessionId"].as_str().is_some());
 
         handle.shutdown();
-        assert!(
-            wait_until(Duration::from_secs(5), || handle.is_terminated()),
-            "detached agent did not terminate after shutdown()"
-        );
+        block_on(handle.wait_terminated());
     }
 }

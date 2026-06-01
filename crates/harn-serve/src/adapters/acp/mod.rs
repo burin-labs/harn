@@ -23,9 +23,11 @@ mod sessions;
 #[cfg(test)]
 mod tests;
 mod transport;
+mod types;
 
 use auth::acp_auth_request_for_method;
-use bridge::{AcpBridge, AcpOutput};
+use bridge::AcpBridge;
+pub use bridge::AcpOutput;
 #[cfg(test)]
 use schema::configured_llm_route_for_capabilities;
 use schema::{
@@ -45,6 +47,16 @@ pub(crate) use transport::run_acp_channel_server_with_existing_handle;
 pub use transport::{
     run_acp_channel_server, run_acp_channel_server_with_handle, run_acp_server,
     run_acp_websocket_server, AcpChannelHandle, AcpWebSocketServeOptions,
+};
+pub use types::{
+    AcpContentBlock, AcpEmbeddedResource, AcpHarnMeta, AcpJsonRpcError, AcpJsonRpcErrorResponse,
+    AcpJsonRpcId, AcpJsonRpcRequest, AcpJsonRpcResponse, AcpMeta, AcpSessionCancelToolCallParams,
+    AcpSessionIdParams, AcpSessionInjectContent, AcpSessionInjectMode, AcpSessionInjectParams,
+    AcpSessionMessageIdParams, AcpSessionNewParams, AcpSessionPromptParams, AcpSessionPromptResult,
+    AcpSessionReplaceInjectParams, AcpSessionRestoreResult, ACP_METHOD_INITIALIZE,
+    ACP_METHOD_SESSION_CANCEL, ACP_METHOD_SESSION_CANCEL_TOOL_CALL, ACP_METHOD_SESSION_CLOSE,
+    ACP_METHOD_SESSION_INJECT, ACP_METHOD_SESSION_NEW, ACP_METHOD_SESSION_PENDING_INJECTIONS,
+    ACP_METHOD_SESSION_PROMPT, ACP_METHOD_SESSION_REPLACE_INJECT, ACP_METHOD_SESSION_REVOKE_INJECT,
 };
 
 use std::collections::{BTreeMap, HashMap};
@@ -699,7 +711,13 @@ impl AcpServer {
         Self::new_with_output(config, AcpOutput::stdout())
     }
 
-    fn new_with_output(config: AcpServerConfig, output: AcpOutput) -> Self {
+    /// Create an ACP server that writes responses and notifications to a
+    /// caller-provided output sink.
+    ///
+    /// Prefer [`crate::EmbeddedAgent`] or [`run_acp_channel_server_with_handle`]
+    /// unless the host already owns the compatible current-thread runtime and
+    /// wants to drive incoming JSON-RPC messages directly.
+    pub fn new_with_output(config: AcpServerConfig, output: AcpOutput) -> Self {
         harn_vm::llm_config::set_user_overrides(config.llm_config_overrides.clone());
         harn_vm::llm::capabilities::set_user_overrides(config.llm_capability_overrides.clone());
         let llm_config_overrides = config.llm_config_overrides.clone();
@@ -3531,7 +3549,12 @@ impl AcpServer {
         }
     }
 
-    async fn handle_incoming_message(&mut self, msg: serde_json::Value) {
+    /// Dispatch one incoming ACP JSON-RPC message.
+    ///
+    /// The same router backs stdio, WebSocket, and in-process channel
+    /// transports. `msg` must be either a request/notification with `method`
+    /// or a response with `id` for a pending host callback.
+    pub async fn handle_incoming_message(&mut self, msg: serde_json::Value) {
         if msg.get("method").is_none() && msg.get("id").is_some() {
             if let Some(id) = msg["id"].as_u64() {
                 let mut pending = self.pending.lock().await;

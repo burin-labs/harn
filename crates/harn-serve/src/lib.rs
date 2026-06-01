@@ -34,8 +34,17 @@ pub use adapter::{AdapterDescriptor, TransportAdapter};
 pub use adapters::a2a::{A2aHttpServeOptions, A2aServer, A2aServerConfig, A2A_PROTOCOL_VERSION};
 pub use adapters::acp::{
     run_acp_channel_server, run_acp_channel_server_with_handle, run_acp_server,
-    run_acp_websocket_server, AcpChannelHandle, AcpProfileConfig, AcpRuntimeConfigurator,
-    AcpServer, AcpServerConfig, AcpWebSocketServeOptions, NoopAcpRuntimeConfigurator,
+    run_acp_websocket_server, AcpChannelHandle, AcpContentBlock, AcpEmbeddedResource, AcpHarnMeta,
+    AcpJsonRpcError, AcpJsonRpcErrorResponse, AcpJsonRpcId, AcpJsonRpcRequest, AcpJsonRpcResponse,
+    AcpMeta, AcpOutput, AcpProfileConfig, AcpRuntimeConfigurator, AcpServer, AcpServerConfig,
+    AcpSessionCancelToolCallParams, AcpSessionIdParams, AcpSessionInjectContent,
+    AcpSessionInjectMode, AcpSessionInjectParams, AcpSessionMessageIdParams, AcpSessionNewParams,
+    AcpSessionPromptParams, AcpSessionPromptResult, AcpSessionReplaceInjectParams,
+    AcpSessionRestoreResult, AcpWebSocketServeOptions, NoopAcpRuntimeConfigurator,
+    ACP_METHOD_INITIALIZE, ACP_METHOD_SESSION_CANCEL, ACP_METHOD_SESSION_CANCEL_TOOL_CALL,
+    ACP_METHOD_SESSION_CLOSE, ACP_METHOD_SESSION_INJECT, ACP_METHOD_SESSION_NEW,
+    ACP_METHOD_SESSION_PENDING_INJECTIONS, ACP_METHOD_SESSION_PROMPT,
+    ACP_METHOD_SESSION_REPLACE_INJECT, ACP_METHOD_SESSION_REVOKE_INJECT,
 };
 pub use adapters::api::{ApiHttpServeOptions, ApiServer, ApiServerConfig};
 pub use adapters::mcp::{

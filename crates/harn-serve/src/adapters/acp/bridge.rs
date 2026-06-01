@@ -45,17 +45,37 @@ pub(super) fn suppress_default_info_log(message: &str) -> bool {
 }
 
 #[derive(Clone)]
-pub(super) enum AcpOutput {
+#[non_exhaustive]
+pub enum AcpOutput {
+    /// Write ACP JSON-RPC lines to process stdout, one line per message.
     Stdout(Arc<std::sync::Mutex<()>>),
+    /// Send ACP JSON-RPC lines through an in-process channel.
     Channel(mpsc::UnboundedSender<String>),
+    /// Invoke a host callback for each ACP JSON-RPC line.
+    Callback(Arc<dyn Fn(&str) + Send + Sync + 'static>),
 }
 
 impl AcpOutput {
-    pub(super) fn stdout() -> Self {
+    /// Create an output sink that writes one JSON-RPC line per stdout line.
+    pub fn stdout() -> Self {
         Self::Stdout(Arc::new(std::sync::Mutex::new(())))
     }
 
-    pub(super) fn write_line(&self, line: &str) {
+    /// Create an output sink backed by a Tokio unbounded channel.
+    pub fn channel(tx: mpsc::UnboundedSender<String>) -> Self {
+        Self::Channel(tx)
+    }
+
+    /// Create an output sink backed by a host callback.
+    ///
+    /// The callback receives the serialized JSON-RPC message without a
+    /// trailing newline.
+    pub fn callback(write_line: impl Fn(&str) + Send + Sync + 'static) -> Self {
+        Self::Callback(Arc::new(write_line))
+    }
+
+    /// Write a serialized ACP JSON-RPC message to this sink.
+    pub fn write_line(&self, line: &str) {
         match self {
             Self::Stdout(lock) => {
                 let _guard = lock.lock().unwrap_or_else(|e| e.into_inner());
@@ -67,6 +87,7 @@ impl AcpOutput {
             Self::Channel(tx) => {
                 let _ = tx.send(line.to_string());
             }
+            Self::Callback(write_line) => write_line(line),
         }
     }
 }

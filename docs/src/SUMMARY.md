@@ -136,6 +136,7 @@
 - [Protocol support matrix](./protocol-support.md)
 - [MCP, ACP, and A2A integration](./mcp-and-acp.md)
 - [Outbound workflow server](./harn-serve.md)
+- [Embedding Harn in Rust](./embedding-rust.md)
 - [Bridge protocol](./bridge-protocol.md)
 - [Generated protocol artifacts](./protocol-artifacts.md)
 - [Host tools over the bridge](./bridge/host-tools.md)

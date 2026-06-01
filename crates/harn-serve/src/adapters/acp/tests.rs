@@ -123,6 +123,36 @@ async fn start_acp_code_session_with_config(
     (request_tx, response_rx, server, session_id)
 }
 
+#[tokio::test]
+async fn public_acp_output_callback_receives_server_lines() {
+    let lines = Arc::new(Mutex::new(Vec::<String>::new()));
+    let captured = lines.clone();
+    let mut server = AcpServer::new_with_output(
+        AcpServerConfig::new(None),
+        AcpOutput::callback(move |line| {
+            captured
+                .lock()
+                .unwrap_or_else(|error| error.into_inner())
+                .push(line.to_string());
+        }),
+    );
+
+    server
+        .handle_incoming_message(
+            AcpJsonRpcRequest::initialize(1)
+                .into_json_value()
+                .expect("initialize request serializes"),
+        )
+        .await;
+
+    let lines = lines.lock().unwrap_or_else(|error| error.into_inner());
+    let response: serde_json::Value =
+        serde_json::from_str(lines.first().expect("one ACP response line"))
+            .expect("response is JSON");
+    assert_eq!(response["id"], serde_json::json!(1));
+    assert_eq!(response["result"]["agentInfo"]["name"], "harn");
+}
+
 fn attach_test_host_bridge(
     server: &mut AcpServer,
     session_id: &str,
