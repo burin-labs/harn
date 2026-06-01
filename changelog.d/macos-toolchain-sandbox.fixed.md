@@ -1,1 +1,0 @@
-- Allow macOS process sandboxes to run Xcode/Swift toolchain commands that use `xcrun`, and route SwiftPM cache/security state into the workspace while Harn's outer sandbox remains active.

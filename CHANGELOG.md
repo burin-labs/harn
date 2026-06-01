@@ -8,6 +8,47 @@ highlights live in [CHANGELOG-pre-0.6.md](CHANGELOG-pre-0.6.md).
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.8.60
+
+### Added
+
+- **Feature-sliced the in-process embedding surface (#2781).** `harn-serve`
+  now ships lean by default: the code-intelligence grammars (tree-sitter +
+  the ~27 `ast`/`code_index` language families) and the VM's Postgres
+  (`pg.*`) builtins are opt-in. Embedders pick `hostlib-lean` (deterministic
+  tools, no grammars), `hostlib` (full code intelligence), `vm-postgres`, or
+  `full` (CLI parity). `harn-hostlib` exposes per-family grammar features
+  (`grammar-web`, `grammar-systems`, `grammar-scripting`, `grammar-jvm`,
+  `grammar-enterprise`, `grammar-data`), and `harn-vm` gates sqlx behind its
+  `postgres` feature. A lean `harn-serve` build now links 60 fewer crates
+  than the full CLI; `scripts/measure_lean_embedding.sh` reports and gates
+  the delta. `harn-cli` keeps the full feature set, so CLI behavior is
+  unchanged.
+- Add an ACP `session/set_budget` control frame so embedders can re-arm live
+  per-session LLM cost and token ceilings without restarting the engine.
+
+### Changed
+
+- **Harness dispatch hot paths (#2785).** Cached `harness.*` sub-handle reads
+  and cheap synchronous harness method calls now use VM inline-cache fast paths,
+  reducing overhead in tight orchestration loops while preserving mock and null
+  harness audit semantics.
+
+### Fixed
+
+- **Static Harn CLI checks no longer initialize Tokio's Unix signal driver in sandboxed child processes (#2777).**
+  `harn check`, `harn lint`, `harn fmt`, `harn parse`, and `harn tokens` now use a no-I/O runtime so
+  nested static-analysis commands can run under process-exec-only sandboxes without tripping denied
+  `socketpair` setup.
+- **Runtime, ACP, DAP, OAuth, and stdlib edge cases.** Fixed integer
+  division overflow panics, channel-select hangs on closed empty channels,
+  duplicate in-flight ACP request IDs, stale DAP output flushing, OAuth token
+  expiry validation, OAuth error-body secret leakage, and inconsistent
+  duration option coercion across stdlib modules.
+- Allow macOS process sandboxes to run Xcode/Swift toolchain commands that use
+  `xcrun`, and route SwiftPM cache/security state into the workspace while
+  Harn's outer sandbox remains active.
+
 ## v0.8.59
 
 ### Added
