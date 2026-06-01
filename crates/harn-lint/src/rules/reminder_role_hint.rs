@@ -161,7 +161,7 @@ fn make_diagnostic(route: &LlmRoute, span: Span) -> LintDiagnostic {
     };
     LintDiagnostic {
         code: Code::ReminderUnsupportedUserBlockRoleHint,
-        rule: RULE_NAME,
+        rule: RULE_NAME.into(),
         message: format!(
             "`role_hint: \"user_block\"` is provider-specific, but `{route_label}` cannot render it as an Anthropic user content block or an OpenAI developer message."
         ),

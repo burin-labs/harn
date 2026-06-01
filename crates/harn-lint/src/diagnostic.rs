@@ -2,6 +2,8 @@
 //! options. Kept separate from the linter's walk state so the public
 //! surface is easy to locate and audit.
 
+use std::borrow::Cow;
+
 use harn_lexer::{FixEdit, Span};
 use harn_parser::{DiagnosticCode as Code, Repair};
 
@@ -9,7 +11,10 @@ use harn_parser::{DiagnosticCode as Code, Repair};
 #[derive(Debug, Clone)]
 pub struct LintDiagnostic {
     pub code: Code,
-    pub rule: &'static str,
+    /// Stable rule identifier. Owned (`Cow`) so dynamically-registered
+    /// rules — engine patterns, `.harn`-authored rules — can carry a
+    /// runtime id, while built-in rules stay zero-cost `Cow::Borrowed`.
+    pub rule: Cow<'static, str>,
     pub message: String,
     pub span: Span,
     pub severity: LintSeverity,

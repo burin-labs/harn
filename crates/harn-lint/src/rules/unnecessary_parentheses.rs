@@ -39,7 +39,7 @@ pub(crate) fn check_unnecessary_parentheses(
                     let open = &tokens[open_idx];
                     diagnostics.push(LintDiagnostic {
                         code: Code::LintUnnecessaryParentheses,
-                        rule: "unnecessary-parentheses",
+                        rule: "unnecessary-parentheses".into(),
                         message: "unnecessary parentheses around a single value".to_string(),
                         span: Span::merge(open.span, token.span),
                         severity: LintSeverity::Warning,

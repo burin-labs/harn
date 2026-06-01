@@ -20,17 +20,8 @@ use crate::fixes::{
     append_sink_fix, is_pure_expression, remove_method_call_wrapper_fix,
     replace_identifier_text_fix, simple_ident_rename_fix,
 };
-use crate::harndoc::check_legacy_doc_comments;
 use crate::naming::{is_pascal_case, is_snake_case, to_pascal_case, to_snake_case};
-use crate::rules::blank_lines::check_blank_line_between_items;
-use crate::rules::deprecated_llm_options::check_deprecated_llm_options;
-use crate::rules::import_order::check_import_order;
-use crate::rules::optional_shorthand::check_prefer_optional_shorthand;
-use crate::rules::reminder_lifecycle::check_reminder_lifecycle_literals;
-use crate::rules::reminder_provider_count::check_reminder_provider_count;
-use crate::rules::reminder_role_hint::check_reminder_role_hint_capabilities;
-use crate::rules::trailing_comma::check_trailing_comma;
-use crate::rules::unnecessary_parentheses::check_unnecessary_parentheses;
+use crate::rule::{Rule, RuleCtx};
 
 mod walk;
 
@@ -146,10 +137,20 @@ pub(crate) struct Linter<'a> {
     /// suppression gate (which runs per public item) does not re-tokenize
     /// the whole source each time.
     pub(super) cached_comment_toks: Option<Vec<crate::harndoc::LegacyCommentTok>>,
+    /// Pluggable rules driven through the registry. Built-in source- and
+    /// AST-structural rules live here; engine-pattern and `.harn` rules
+    /// join the same list. The intricately-stateful core checks remain
+    /// intrinsic to the walk below.
+    pub(super) rules: Vec<Box<dyn Rule>>,
+    /// Cached `rules.iter().any(Rule::visits_nodes)` so the per-node walk
+    /// skips registry dispatch entirely when no rule opts in.
+    pub(super) rules_visit_nodes: bool,
 }
 
 impl<'a> Linter<'a> {
     pub(crate) fn new(source: Option<&'a str>) -> Self {
+        let rules = crate::rule::builtin_rules();
+        let rules_visit_nodes = rules.iter().any(|rule| rule.visits_nodes());
         Self {
             diagnostics: Vec::new(),
             scopes: vec![HashSet::new()],
@@ -188,7 +189,43 @@ impl<'a> Linter<'a> {
             mcp_registry_missing_annotation_spans: HashMap::new(),
             require_stdlib_metadata: false,
             cached_comment_toks: None,
+            rules,
+            rules_visit_nodes,
         }
+    }
+
+    /// Drive every registered rule through one phase `hook`, in
+    /// registration order. The rule list is moved out for the duration
+    /// so each rule can mutate its own state while still writing into
+    /// `self.diagnostics`.
+    fn run_rule_phase(
+        &mut self,
+        mut hook: impl FnMut(&mut dyn Rule, &RuleCtx<'_>, &mut Vec<LintDiagnostic>),
+    ) {
+        let mut rules = std::mem::take(&mut self.rules);
+        let ctx = RuleCtx {
+            source: self.source,
+        };
+        for rule in &mut rules {
+            hook(rule.as_mut(), &ctx, &mut self.diagnostics);
+        }
+        self.rules = rules;
+    }
+
+    /// Run every rule's whole-program hook, before the AST walk.
+    fn run_program_rules(&mut self, program: &[SNode]) {
+        self.run_rule_phase(|rule, ctx, out| rule.check_program(program, ctx, out));
+    }
+
+    /// Run every rule's per-node hook for `node`. Skipped wholesale
+    /// unless at least one rule opted into the walk phase.
+    pub(super) fn run_node_rules(&mut self, node: &SNode) {
+        self.run_rule_phase(|rule, ctx, out| rule.check_node(node, ctx, out));
+    }
+
+    /// Run every rule's post-walk hook.
+    fn run_finalize_rules(&mut self) {
+        self.run_rule_phase(|rule, ctx, out| rule.finalize(ctx, out));
     }
 
     /// Whether a public item on `item_line` is preceded by a wrong-format
@@ -252,7 +289,7 @@ impl<'a> Linter<'a> {
         };
         self.diagnostics.push(LintDiagnostic {
             code: Code::LintRenamedStdlibSymbol,
-            rule: "renamed-stdlib-symbol",
+            rule: "renamed-stdlib-symbol".into(),
             message: format!("`{name}` was renamed to `{replacement}`"),
             span,
             severity: LintSeverity::Warning,
@@ -392,7 +429,7 @@ impl<'a> Linter<'a> {
         };
         self.diagnostics.push(LintDiagnostic {
             code: lint.code,
-            rule: lint.rule,
+            rule: lint.rule.into(),
             message: format!(
                 "ambient `{}` is deprecated — capabilities now route through `harness.{}.*`",
                 lint.name, lint.sub_handle,
@@ -463,7 +500,7 @@ impl<'a> Linter<'a> {
         };
         self.diagnostics.push(LintDiagnostic {
             code: Code::LintMissingStdlibMetadata,
-            rule: "missing-stdlib-metadata",
+            rule: "missing-stdlib-metadata".into(),
             message,
             span,
             severity: LintSeverity::Warning,
@@ -489,7 +526,7 @@ impl<'a> Linter<'a> {
         }
         self.diagnostics.push(LintDiagnostic {
             code: Code::LintCyclomaticComplexity,
-            rule: "cyclomatic-complexity",
+            rule: "cyclomatic-complexity".into(),
             message: format!(
                 "function `{name}` has cyclomatic complexity {complexity} (> {threshold})"
             ),
@@ -508,7 +545,7 @@ impl<'a> Linter<'a> {
         }
         self.diagnostics.push(LintDiagnostic {
             code: Code::LintNamingConvention,
-            rule: "naming-convention",
+            rule: "naming-convention".into(),
             message: format!("function `{name}` should use snake_case"),
             span,
             severity: LintSeverity::Warning,
@@ -526,7 +563,7 @@ impl<'a> Linter<'a> {
         }
         self.diagnostics.push(LintDiagnostic {
             code: Code::LintNamingConvention,
-            rule: "naming-convention",
+            rule: "naming-convention".into(),
             message: format!("{kind} `{name}` should use PascalCase"),
             span,
             severity: LintSeverity::Warning,
@@ -687,7 +724,7 @@ impl<'a> Linter<'a> {
         let fix = append_sink_fix(value.span, sink);
         self.diagnostics.push(LintDiagnostic {
             code: Code::LintEagerCollectionConversion,
-            rule: "eager-collection-conversion",
+            rule: "eager-collection-conversion".into(),
             message,
             span: value.span,
             severity: LintSeverity::Warning,
@@ -727,7 +764,7 @@ impl<'a> Linter<'a> {
             let fix = remove_method_call_wrapper_fix(self.source, arg.span, receiver.span);
             self.diagnostics.push(LintDiagnostic {
                 code: Code::LintRedundantClone,
-                rule: "redundant-clone",
+                rule: "redundant-clone".into(),
                 message,
                 span: arg.span,
                 severity: LintSeverity::Warning,
@@ -853,7 +890,7 @@ impl<'a> Linter<'a> {
         }
         self.diagnostics.push(LintDiagnostic {
             code: Code::LintLongRunningWithoutCleanup,
-            rule: "long-running-without-cleanup",
+            rule: "long-running-without-cleanup".into(),
             message: format!(
                 "`{name}` starts long-running work without a defer/finally cleanup path"
             ),
@@ -1118,7 +1155,7 @@ impl<'a> Linter<'a> {
     fn warn_missing_mcp_tool_annotations(&mut self, span: Span) {
         self.diagnostics.push(LintDiagnostic {
             code: Code::LintMcpToolAnnotations,
-            rule: "mcp-tool-annotations",
+            rule: "mcp-tool-annotations".into(),
             message: "MCP-exposed `tool_define` registration has no `annotations`".to_string(),
             span,
             severity: LintSeverity::Warning,
@@ -1133,7 +1170,7 @@ impl<'a> Linter<'a> {
     fn warn_missing_secret_scan(&mut self, span: Span) {
         self.diagnostics.push(LintDiagnostic {
             code: Code::LintPrOpenWithoutSecretScan,
-            rule: "pr-open-without-secret-scan",
+            rule: "pr-open-without-secret-scan".into(),
             message: "PR-open flow calls `git::push_pr` without a preceding `secret_scan(...)` in the same handler".to_string(),
             span,
             severity: LintSeverity::Warning,
@@ -1397,7 +1434,7 @@ impl<'a> Linter<'a> {
                 if scope.contains(name) {
                     self.diagnostics.push(LintDiagnostic {
                         code: Code::LintShadowVariable,
-                        rule: "shadow-variable",
+                        rule: "shadow-variable".into(),
                         message: format!(
                             "cannot redeclare immutable variable `{name}` in the same scope"
                         ),
@@ -1417,7 +1454,7 @@ impl<'a> Linter<'a> {
             if outer.iter().any(|s| s.contains(name)) {
                 self.diagnostics.push(LintDiagnostic {
                     code: Code::LintShadowVariable,
-                    rule: "shadow-variable",
+                    rule: "shadow-variable".into(),
                     message: format!("variable `{name}` shadows a variable in an outer scope"),
                     span,
                     severity: LintSeverity::Warning,
@@ -1451,7 +1488,7 @@ impl<'a> Linter<'a> {
             if outer.iter().any(|s| s.contains(name)) {
                 self.diagnostics.push(LintDiagnostic {
                     code: Code::LintShadowVariable,
-                    rule: "shadow-variable",
+                    rule: "shadow-variable".into(),
                     message: format!("variable `{name}` shadows a variable in an outer scope"),
                     span,
                     severity: LintSeverity::Warning,
@@ -1473,18 +1510,7 @@ impl<'a> Linter<'a> {
 
     pub(crate) fn lint_program(&mut self, nodes: &[SNode]) {
         self.collect_persona_step_metadata(nodes);
-        if let Some(src) = self.source {
-            check_legacy_doc_comments(src, nodes, &mut self.diagnostics);
-            check_blank_line_between_items(src, nodes, &mut self.diagnostics);
-            check_trailing_comma(src, &mut self.diagnostics);
-            check_import_order(src, nodes, &mut self.diagnostics);
-            check_prefer_optional_shorthand(src, nodes, &mut self.diagnostics);
-            check_unnecessary_parentheses(src, nodes, &mut self.diagnostics);
-        }
-        check_deprecated_llm_options(nodes, &mut self.diagnostics);
-        check_reminder_lifecycle_literals(nodes, &mut self.diagnostics);
-        check_reminder_provider_count(nodes, &mut self.diagnostics);
-        check_reminder_role_hint_capabilities(nodes, &mut self.diagnostics);
+        self.run_program_rules(nodes);
         for node in nodes {
             self.lint_node(node);
         }
@@ -1744,7 +1770,7 @@ impl<'a> Linter<'a> {
         if matching_personas.is_empty() {
             self.diagnostics.push(LintDiagnostic {
                 code: Code::LintPersonaHookTarget,
-                rule: "persona-hook-target",
+                rule: "persona-hook-target".into(),
                 message: format!(
                     "`register_step_hook` pattern `{persona_pattern}` does not match a statically declared `@persona`"
                 ),
@@ -1764,7 +1790,7 @@ impl<'a> Linter<'a> {
         }
         self.diagnostics.push(LintDiagnostic {
             code: Code::LintPersonaHookTarget,
-            rule: "persona-hook-target",
+            rule: "persona-hook-target".into(),
             message: format!(
                 "`register_step_hook` targets step `{step_name}`, but it is not declared by persona(s): {}",
                 missing.join(", ")
@@ -1800,7 +1826,7 @@ impl<'a> Linter<'a> {
             if found_terminator {
                 self.diagnostics.push(LintDiagnostic {
                     code: Code::LintDeadCodeAfterReturn,
-                    rule: "dead-code-after-return",
+                    rule: "dead-code-after-return".into(),
                     message: "unreachable code after a terminating statement".to_string(),
                     span: node.span,
                     severity: LintSeverity::Warning,
@@ -1864,7 +1890,7 @@ impl<'a> Linter<'a> {
         });
         self.diagnostics.push(LintDiagnostic {
             code: Code::LintLetThenReturn,
-            rule: "let-then-return",
+            rule: "let-then-return".into(),
             message: format!("binding `{name}` is immediately returned"),
             span: Span::with_offsets(
                 node.span.start,
@@ -1897,7 +1923,7 @@ impl<'a> Linter<'a> {
         };
         self.diagnostics.push(LintDiagnostic {
             code: Code::LintUnhandledApprovalResult,
-            rule: "unhandled-approval-result",
+            rule: "unhandled-approval-result".into(),
             message: format!("approval result from `{name}` is discarded"),
             span: node.span,
             severity: LintSeverity::Warning,
@@ -1909,8 +1935,16 @@ impl<'a> Linter<'a> {
         });
     }
 
-    /// Run post-walk analysis and finalize diagnostics.
+    /// Run post-walk analysis and finalize diagnostics. The intrinsic
+    /// core checks (unused/undefined symbols) run first, then every
+    /// registered rule's finalize hook, regardless of the core's
+    /// early exits.
     pub(crate) fn finalize(&mut self) {
+        self.finalize_core();
+        self.run_finalize_rules();
+    }
+
+    fn finalize_core(&mut self) {
         for decl in &self.declarations {
             if decl.name.starts_with('_') {
                 continue;
@@ -1936,7 +1970,7 @@ impl<'a> Linter<'a> {
                 };
                 self.diagnostics.push(LintDiagnostic {
                     code,
-                    rule,
+                    rule: rule.into(),
                     message,
                     span: decl.span,
                     severity: LintSeverity::Warning,
@@ -1953,7 +1987,7 @@ impl<'a> Linter<'a> {
             if !self.references.contains(&decl.name) {
                 self.diagnostics.push(LintDiagnostic {
                     code: Code::LintUnusedParameter,
-                    rule: "unused-parameter",
+                    rule: "unused-parameter".into(),
                     message: format!("parameter `{}` is declared but never used", decl.name),
                     span: decl.span,
                     severity: LintSeverity::Warning,
@@ -2025,7 +2059,7 @@ impl<'a> Linter<'a> {
                 });
                 self.diagnostics.push(LintDiagnostic {
                     code: Code::LintUnusedImport,
-                    rule: "unused-import",
+                    rule: "unused-import".into(),
                     message: format!("imported name `{name}` is never used"),
                     span: import.span,
                     severity: LintSeverity::Warning,
@@ -2056,7 +2090,7 @@ impl<'a> Linter<'a> {
                 });
                 self.diagnostics.push(LintDiagnostic {
                     code: Code::LintMutableNeverReassigned,
-                    rule: "mutable-never-reassigned",
+                    rule: "mutable-never-reassigned".into(),
                     message: format!(
                         "variable `{}` is declared as `var` but never reassigned",
                         decl.name
@@ -2085,7 +2119,7 @@ impl<'a> Linter<'a> {
             if !self.function_references.contains(&decl.name) {
                 self.diagnostics.push(LintDiagnostic {
                     code: Code::LintUnusedFunction,
-                    rule: "unused-function",
+                    rule: "unused-function".into(),
                     message: format!("function `{}` is declared but never used", decl.name),
                     span: decl.span,
                     severity: LintSeverity::Warning,
@@ -2105,7 +2139,7 @@ impl<'a> Linter<'a> {
             if !self.type_references.contains(&decl.name) {
                 self.diagnostics.push(LintDiagnostic {
                     code: Code::LintUnusedType,
-                    rule: "unused-type",
+                    rule: "unused-type".into(),
                     message: format!(
                         "{} `{}` is declared but never referenced",
                         decl.kind, decl.name
@@ -2136,7 +2170,7 @@ impl<'a> Linter<'a> {
             }
             self.diagnostics.push(LintDiagnostic {
                 code: Code::LintPersonaBodyMustCallSteps,
-                rule: "persona-body-must-call-steps",
+                rule: "persona-body-must-call-steps".into(),
                 message: format!(
                     "`@persona` function `{persona_name}` calls `{name}`, which is not declared `@step`"
                 ),
@@ -2194,7 +2228,7 @@ impl<'a> Linter<'a> {
             };
             self.diagnostics.push(LintDiagnostic {
                 code: Code::LintUndefinedFunction,
-                rule: "undefined-function",
+                rule: "undefined-function".into(),
                 message: format!("function `{name}` is not defined"),
                 span: *span,
                 severity: LintSeverity::Warning,

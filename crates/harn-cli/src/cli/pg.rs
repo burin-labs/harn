@@ -17,7 +17,9 @@ pub(crate) enum PgCommand {
     /// mirroring the live column set. Annotate a query result with the
     /// generated type to type-check field access without a live database:
     ///
-    ///     let receipt: ReceiptRow = pg_query_one(pool, sql, params)
+    /// ```harn
+    /// let receipt: ReceiptRow = pg_query_one(pool, sql, params)
+    /// ```
     ///
     /// Pass `--check` to verify the `--out` file is current (for CI).
     Codegen(PgCodegenArgs),

@@ -102,7 +102,7 @@ fn build_code_actions(
                     })
                     .collect();
 
-                let title = match ld.rule {
+                let title = match ld.rule.as_ref() {
                     "mutable-never-reassigned" => "Change `var` to `let`".to_string(),
                     "comparison-to-bool" => "Simplify boolean comparison".to_string(),
                     "unnecessary-else-return" => "Remove unnecessary else".to_string(),

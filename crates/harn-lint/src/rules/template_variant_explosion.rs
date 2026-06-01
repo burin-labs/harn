@@ -57,7 +57,7 @@ pub(crate) fn check(
     );
     vec![LintDiagnostic {
         code: Code::LintTemplateVariantExplosion,
-        rule: RULE_NAME,
+        rule: RULE_NAME.into(),
         message,
         span,
         severity: LintSeverity::Warning,
