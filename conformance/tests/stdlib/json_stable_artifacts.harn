@@ -1,0 +1,16 @@
+import { write_json } from "std/fs"
+
+pipeline default() {
+  let value = {z: 1, a: {d: 4, b: 2}, items: [{y: 2, x: 1}]}
+  __io_println(json_stringify(value))
+  let parsed = json_parse("{\"z\":1,\"a\":2,\"nested\":{\"y\":2,\"x\":1}}")
+  __io_println(json_stringify(parsed))
+  let root = path_join(harness.fs.temp_dir(), "harn-json-stability-" + uuid_v7())
+  let compact_path = path_join(root, "compact.json")
+  write_json(compact_path, {b: 2, a: 1}, {pretty: false})
+  __io_println(json_stringify(harness.fs.read_text(compact_path)))
+  let pretty_path = path_join(root, "pretty.json")
+  write_json(pretty_path, {b: 2, a: 1}, {pretty: true})
+  __io_println(json_stringify(harness.fs.read_text(pretty_path)))
+  harness.fs.delete(root)
+}
