@@ -148,6 +148,10 @@ pub fn optional_string_list(
 }
 
 /// Optional list of integers. Missing/`Nil` returns `Vec::new()`.
+///
+/// Only the code-index trigram-query builtin consumes this, so it is gated
+/// on the `ast` feature to keep the lean (tools-only) build warning-clean.
+#[cfg(feature = "ast")]
 pub fn optional_int_list(
     builtin: &'static str,
     dict: &BTreeMap<String, VmValue>,

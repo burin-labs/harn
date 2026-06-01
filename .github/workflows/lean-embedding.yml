@@ -1,0 +1,43 @@
+# Regression guard for the lean in-process embedding surface (issue #2781).
+# Asserts that `harn-serve`'s default/lean feature configurations link no
+# tree-sitter grammar or sqlx crate, while the `full` config (CLI parity)
+# links both. Uses `cargo tree` only, so it is cheap — no full compile.
+#
+# IMPORTANT: this workflow is NOT yet wired into the required-status set in
+# `ci.yml`'s `CI status` job. It runs and reports a result but a red run
+# does not block the merge queue until promoted.
+
+name: Lean embedding surface
+
+on:
+  pull_request:
+    paths:
+      - 'crates/harn-vm/Cargo.toml'
+      - 'crates/harn-hostlib/Cargo.toml'
+      - 'crates/harn-serve/Cargo.toml'
+      - 'crates/harn-cli/Cargo.toml'
+      - 'crates/harn-hostlib/src/ast/language.rs'
+      - 'scripts/measure_lean_embedding.sh'
+      - '.github/workflows/lean-embedding.yml'
+  merge_group:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.event.merge_group.head_sha || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  lean-embedding:
+    name: Lean embedding surface
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+      - name: Measure lean vs full embedding surface
+        run: ./scripts/measure_lean_embedding.sh

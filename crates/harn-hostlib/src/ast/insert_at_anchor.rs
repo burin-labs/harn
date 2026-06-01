@@ -144,9 +144,22 @@ pub(super) fn run(args: &[VmValue]) -> Result<VmValue, HostlibError> {
         }
     };
 
+    // A recognized language whose grammar family was not compiled into this
+    // build degrades to the same graceful text-fallback response as an
+    // unrecognized one.
+    let ts_language = match language.ts_language() {
+        Some(l) => l,
+        None => {
+            return Ok(unsupported_language_response(
+                &path_str,
+                language_hint.as_deref(),
+            ));
+        }
+    };
+
     let source = read_source(BUILTIN, &path, session_id.as_deref(), max_bytes as usize)?;
 
-    let query = match Query::new(&language.ts_language(), &query_text) {
+    let query = match Query::new(&ts_language, &query_text) {
         Ok(q) => q,
         Err(err) => return Ok(invalid_query_response(&query_text, &err)),
     };

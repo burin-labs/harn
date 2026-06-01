@@ -89,9 +89,18 @@ pub(super) fn read_source(path: &str, max_bytes: usize) -> Result<String, Hostli
 /// Build a parser, point it at `language`'s grammar, and parse `source`.
 /// Tree-sitter parser construction is cheap; we don't bother pooling.
 pub(super) fn parse_source(source: &str, language: Language) -> Result<Tree, HostlibError> {
+    let ts_language = language
+        .ts_language()
+        .ok_or_else(|| HostlibError::Backend {
+            builtin: BUILTIN,
+            message: format!(
+                "grammar for `{}` is not compiled into this build",
+                language.name()
+            ),
+        })?;
     let mut parser = Parser::new();
     parser
-        .set_language(&language.ts_language())
+        .set_language(&ts_language)
         .map_err(|err| HostlibError::Backend {
             builtin: BUILTIN,
             message: format!("set tree-sitter language `{}`: {err}", language.name()),

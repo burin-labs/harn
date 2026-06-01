@@ -119,7 +119,7 @@ default = ["hostlib"]
 # server. Default-on so `harn run`-driven scripts that name a hostlib
 # builtin work without extra flags. Disable with `--no-default-features` if
 # you want a slimmer build that doesn't pull tree-sitter/notify/etc.
-hostlib = ["dep:harn-hostlib", "harn-serve/hostlib"]
+hostlib = ["dep:harn-hostlib", "harn-hostlib/full", "harn-serve/hostlib-full"]
 
 [dev-dependencies]
 harn-mcp-rc-compat = { path = "../harn-mcp-rc-compat" }

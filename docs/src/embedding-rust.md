@@ -23,6 +23,58 @@ crate setting:
 #![recursion_limit = "256"]
 ```
 
+## Choosing a feature set
+
+In-process embedding links `harn-serve` -> `harn-hostlib` -> `harn-vm`
+directly into the host binary, so the host pays the compile and link cost of
+whatever those crates pull in. `harn-serve` ships lean by default and lets the
+embedder opt into the heavyweight families it actually needs:
+
+| `harn-serve` feature | Adds | Use for |
+| --- | --- | --- |
+| *(default)* | Nothing beyond the core agent loop | Smallest build; host issues no hostlib tool calls and no Postgres queries |
+| `hostlib` | hostlib deterministic tools (file I/O, search, process, secret store) — **no** tree-sitter or grammars | Lightweight smoke evals; agent edits via text patches only |
+| `hostlib-full` | `hostlib` **+** the full code-intelligence surface (tree-sitter + all ~27 grammar families) | Parity-critical evals that exercise AST-precise edits, rename, the symbol index |
+| `vm-postgres` | The VM's `pg.*` builtins (`sqlx-postgres` and its ~130 transitive crates) | Hosts whose scripts talk to Postgres |
+| `full` | `hostlib-full` + `vm-postgres` | One-flag CLI parity |
+
+The split exists because the code-intelligence grammars are C-compiled crates:
+without it, every in-process client — including a tiny smoke eval — compiled
+all ~27 grammars and the entire sqlx tree before the first transcript could
+start.
+
+**Burin's Rust TUI** should select per eval tier:
+
+- **Parity-critical evals** (anything that may invoke AST-precise edits,
+  `rename_symbol`, or the code index) → `features = ["full"]` (or
+  `["hostlib-full"]` if the eval never touches Postgres). This matches
+  `harn-cli` exactly.
+- **Lightweight smoke tests** (cutover gate, startup checks, evals that only
+  read/write whole files) → default, or `["hostlib"]` if the script names a
+  deterministic tool builtin.
+
+```toml
+# Parity-critical eval harness
+harn-serve = { git = "...", tag = "v0.8.57", features = ["full"] }
+
+# Lean smoke-test harness
+harn-serve = { git = "...", tag = "v0.8.57", features = ["hostlib"] }
+```
+
+Finer control is available one layer down: `harn-hostlib` exposes per-family
+grammar features (`grammar-web`, `grammar-systems`, `grammar-scripting`,
+`grammar-jvm`, `grammar-enterprise`, `grammar-data`) so a client that only ever
+edits, say, TypeScript and Python can compile just those grammars. A language
+whose family is not compiled in still parses its name and extension; its
+AST-precise edits simply degrade to the text fallback.
+`scripts/measure_lean_embedding.sh` reports the dependency delta between the
+lean and full configurations and gates against regressions in CI.
+
+Note: Cargo unifies features across a build graph, so any binary that also
+depends on `harn-cli` (which enables the full set) gets the full surface
+regardless of what it requests from `harn-serve`. The lean configurations only
+take effect in builds that do **not** pull in the full CLI.
+
 ## Start an embedded agent
 
 `EmbeddedAgent` owns the required worker thread and current-thread Tokio

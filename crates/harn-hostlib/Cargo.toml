@@ -16,8 +16,87 @@ include = [
     "README.md",
 ]
 
+[features]
+# Full surface, matching the historical (pre-feature) build: every module
+# and every language grammar. This is the default so `cargo test
+# -p harn-hostlib` and full-fat embedders (harn-cli) keep their behavior.
+# Lean in-process clients depend on the crate with `default-features =
+# false` and opt into only the modules/grammars they need.
+default = ["full"]
+full = ["ast"]
+
+# Code-intelligence layer: tree-sitter parsing + AST edit primitives
+# (`ast`) and the symbol graph / cypher / cross-file rename built on top of
+# it (`code_index`). The two modules reference each other's types — the
+# index is projected from the AST and the AST dry-run path drives rename
+# through the index — so they compile as one unit behind a single feature.
+# Enabling it pulls tree-sitter and (via `grammars-all`) every grammar
+# family. Deterministic-tool-only clients leave it off.
+ast = [
+    "dep:tree-sitter",
+    "dep:streaming-iterator",
+    "grammars-all",
+]
+
+# Language grammar families. Each enables a set of C-compiled tree-sitter
+# grammar crates; the `ast` module's `Language::ts_language` match arms are
+# gated on the matching feature, so a family that is off simply has no
+# grammar binding (parse/edit for those languages degrades to the text
+# fallback). `grammars-all` is the umbrella the `ast` feature turns on for
+# parity; pick individual families instead for a trimmed grammar set.
+grammars-all = [
+    "grammar-web",
+    "grammar-systems",
+    "grammar-scripting",
+    "grammar-jvm",
+    "grammar-enterprise",
+    "grammar-data",
+]
+grammar-web = [
+    "dep:tree-sitter-typescript",
+    "dep:tree-sitter-javascript",
+    "dep:tree-sitter-html",
+    "dep:tree-sitter-css",
+]
+grammar-systems = [
+    "dep:tree-sitter-rust",
+    "dep:tree-sitter-c",
+    "dep:tree-sitter-cpp",
+    "dep:tree-sitter-go",
+    "dep:tree-sitter-zig",
+]
+grammar-scripting = [
+    "dep:tree-sitter-python",
+    "dep:tree-sitter-ruby",
+    "dep:tree-sitter-bash",
+    "dep:tree-sitter-lua",
+    "dep:tree-sitter-php",
+    "dep:tree-sitter-r",
+]
+grammar-jvm = [
+    "dep:tree-sitter-java",
+    "dep:tree-sitter-kotlin-ng",
+    "dep:tree-sitter-scala",
+]
+grammar-enterprise = [
+    "dep:tree-sitter-c-sharp",
+    "dep:tree-sitter-swift",
+    "dep:tree-sitter-elixir",
+    "dep:tree-sitter-haskell",
+]
+grammar-data = [
+    "dep:tree-sitter-json",
+    "dep:tree-sitter-yaml",
+    "dep:tree-sitter-toml-ng",
+    "dep:tree-sitter-sequel",
+    "dep:tree-sitter-md",
+]
+
 [dependencies]
-harn-vm = { path = "../harn-vm", version = "0.8" }
+# Hostlib never issues Postgres queries, so it takes the VM lean and lets
+# the full CLI re-enable `pg.*` through its own direct harn-vm edge (Cargo
+# unifies the feature across the build graph).
+harn-vm = { path = "../harn-vm", version = "0.8", default-features = false }
 async-trait = "0.1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
@@ -41,8 +120,11 @@ uuid = { version = "1", features = ["v7"] }
 # Issue C2 (the `tools/git` implementation) picks the version it needs
 # along with the toolchain bump; until then we shell out to the system
 # `git` if anything urgent comes up.
-tree-sitter = "0.26"
-streaming-iterator = "0.1"
+# tree-sitter and its grammars only back the `ast`/`code-index` modules; both
+# are gated behind the `ast` feature so deterministic-tool-only embedding
+# clients (file I/O, search, process, secret store) never compile them.
+tree-sitter = { version = "0.26", optional = true }
+streaming-iterator = { version = "0.1", optional = true }
 grep-searcher = "0.1"
 grep-matcher = "0.1"
 grep-regex = "0.1"
@@ -57,37 +139,43 @@ regex = "1"
 # Swift `ASTEngine` set verbatim — see the `ast` module for the language
 # table. Each crate exposes a `LANGUAGE` (or `LANGUAGE_*` for multi-grammar
 # crates) constant so we can construct `tree_sitter::Language` cheaply.
-tree-sitter-rust = "0.24"
-tree-sitter-typescript = "0.23"
-tree-sitter-javascript = "0.25"
-tree-sitter-python = "0.25"
-tree-sitter-go = "0.25"
-tree-sitter-java = "0.23"
-tree-sitter-c = "0.24"
-tree-sitter-cpp = "0.23"
-tree-sitter-c-sharp = "0.23"
-tree-sitter-ruby = "0.23"
-tree-sitter-kotlin-ng = "1.1"
-tree-sitter-php = "0.24"
-tree-sitter-scala = "0.26"
-tree-sitter-bash = "0.25"
-tree-sitter-swift = "0.7"
-tree-sitter-zig = "1.1"
-tree-sitter-elixir = "0.3"
-tree-sitter-lua = "0.5"
-tree-sitter-haskell = "0.23"
-tree-sitter-r = "1.2"
+#
+# Every grammar is optional and grouped into a `grammar-*` family feature
+# (see `[features]`). Each grammar is a C-compiled crate, so an embedding
+# client that only edits a few languages compiles only those families
+# instead of all ~27 — and adding a new grammar no longer raises the
+# compile/link cost for clients that don't enable its family.
+tree-sitter-rust = { version = "0.24", optional = true }
+tree-sitter-typescript = { version = "0.23", optional = true }
+tree-sitter-javascript = { version = "0.25", optional = true }
+tree-sitter-python = { version = "0.25", optional = true }
+tree-sitter-go = { version = "0.25", optional = true }
+tree-sitter-java = { version = "0.23", optional = true }
+tree-sitter-c = { version = "0.24", optional = true }
+tree-sitter-cpp = { version = "0.23", optional = true }
+tree-sitter-c-sharp = { version = "0.23", optional = true }
+tree-sitter-ruby = { version = "0.23", optional = true }
+tree-sitter-kotlin-ng = { version = "1.1", optional = true }
+tree-sitter-php = { version = "0.24", optional = true }
+tree-sitter-scala = { version = "0.26", optional = true }
+tree-sitter-bash = { version = "0.25", optional = true }
+tree-sitter-swift = { version = "0.7", optional = true }
+tree-sitter-zig = { version = "1.1", optional = true }
+tree-sitter-elixir = { version = "0.3", optional = true }
+tree-sitter-lua = { version = "0.5", optional = true }
+tree-sitter-haskell = { version = "0.23", optional = true }
+tree-sitter-r = { version = "1.2", optional = true }
 # Data / markup / config grammars (B.7). These have no symbol-graph
 # projection (no rename, empty symbol/outline extraction), but the
 # query-driven edit primitives (`apply_node`, `insert_at_anchor`) work
 # against them like any other grammar.
-tree-sitter-json = "0.24"
-tree-sitter-yaml = "0.7"
-tree-sitter-toml-ng = "0.7"
-tree-sitter-css = "0.25"
-tree-sitter-html = "0.23"
-tree-sitter-sequel = "0.3"
-tree-sitter-md = "0.5"
+tree-sitter-json = { version = "0.24", optional = true }
+tree-sitter-yaml = { version = "0.7", optional = true }
+tree-sitter-toml-ng = { version = "0.7", optional = true }
+tree-sitter-css = { version = "0.25", optional = true }
+tree-sitter-html = { version = "0.23", optional = true }
+tree-sitter-sequel = { version = "0.3", optional = true }
+tree-sitter-md = { version = "0.5", optional = true }
 
 # Per-OS secret-store backends. The file backend is always compiled in
 # (and is the universal fallback when `HARN_SECRET_STORE_BACKEND=file` is

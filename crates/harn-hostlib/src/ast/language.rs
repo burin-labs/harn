@@ -130,42 +130,88 @@ impl Language {
         }
     }
 
-    /// Tree-sitter grammar handle. Cheap; the underlying `LANGUAGE`
-    /// constants are static.
-    pub fn ts_language(self) -> TsLanguage {
-        match self {
+    /// Tree-sitter grammar handle, or `None` when this build was not
+    /// compiled with the grammar family that backs `self`.
+    ///
+    /// Each arm is gated on its `grammar-*` family feature, so a trimmed
+    /// build only links the grammars it asked for. The `name`/extension/
+    /// detection metadata above stays complete regardless of features — a
+    /// lean build still *recognizes* a `.py` file, it just returns `None`
+    /// here and the edit primitives degrade to the text fallback. The full
+    /// (default) build enables every family, so `None` never occurs there.
+    /// Cheap when present; the underlying `LANGUAGE` constants are static.
+    pub fn ts_language(self) -> Option<TsLanguage> {
+        Some(match self {
+            #[cfg(feature = "grammar-web")]
             Language::TypeScript => tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into(),
+            #[cfg(feature = "grammar-web")]
             Language::Tsx => tree_sitter_typescript::LANGUAGE_TSX.into(),
+            #[cfg(feature = "grammar-web")]
             Language::JavaScript | Language::Jsx => tree_sitter_javascript::LANGUAGE.into(),
-            Language::Python => tree_sitter_python::LANGUAGE.into(),
-            Language::Go => tree_sitter_go::LANGUAGE.into(),
-            Language::Rust => tree_sitter_rust::LANGUAGE.into(),
-            Language::Java => tree_sitter_java::LANGUAGE.into(),
-            Language::C => tree_sitter_c::LANGUAGE.into(),
-            Language::Cpp => tree_sitter_cpp::LANGUAGE.into(),
-            Language::CSharp => tree_sitter_c_sharp::LANGUAGE.into(),
-            Language::Ruby => tree_sitter_ruby::LANGUAGE.into(),
-            Language::Kotlin => tree_sitter_kotlin_ng::LANGUAGE.into(),
-            Language::Php => tree_sitter_php::LANGUAGE_PHP.into(),
-            Language::Scala => tree_sitter_scala::LANGUAGE.into(),
-            Language::Bash => tree_sitter_bash::LANGUAGE.into(),
-            Language::Swift => tree_sitter_swift::LANGUAGE.into(),
-            Language::Zig => tree_sitter_zig::LANGUAGE.into(),
-            Language::Elixir => tree_sitter_elixir::LANGUAGE.into(),
-            Language::Lua => tree_sitter_lua::LANGUAGE.into(),
-            Language::Haskell => tree_sitter_haskell::LANGUAGE.into(),
-            Language::R => tree_sitter_r::LANGUAGE.into(),
-            Language::Json => tree_sitter_json::LANGUAGE.into(),
-            Language::Yaml => tree_sitter_yaml::LANGUAGE.into(),
-            Language::Toml => tree_sitter_toml_ng::LANGUAGE.into(),
-            Language::Css => tree_sitter_css::LANGUAGE.into(),
+            #[cfg(feature = "grammar-web")]
             Language::Html => tree_sitter_html::LANGUAGE.into(),
+            #[cfg(feature = "grammar-web")]
+            Language::Css => tree_sitter_css::LANGUAGE.into(),
+
+            #[cfg(feature = "grammar-systems")]
+            Language::Rust => tree_sitter_rust::LANGUAGE.into(),
+            #[cfg(feature = "grammar-systems")]
+            Language::C => tree_sitter_c::LANGUAGE.into(),
+            #[cfg(feature = "grammar-systems")]
+            Language::Cpp => tree_sitter_cpp::LANGUAGE.into(),
+            #[cfg(feature = "grammar-systems")]
+            Language::Go => tree_sitter_go::LANGUAGE.into(),
+            #[cfg(feature = "grammar-systems")]
+            Language::Zig => tree_sitter_zig::LANGUAGE.into(),
+
+            #[cfg(feature = "grammar-scripting")]
+            Language::Python => tree_sitter_python::LANGUAGE.into(),
+            #[cfg(feature = "grammar-scripting")]
+            Language::Ruby => tree_sitter_ruby::LANGUAGE.into(),
+            #[cfg(feature = "grammar-scripting")]
+            Language::Bash => tree_sitter_bash::LANGUAGE.into(),
+            #[cfg(feature = "grammar-scripting")]
+            Language::Lua => tree_sitter_lua::LANGUAGE.into(),
+            #[cfg(feature = "grammar-scripting")]
+            Language::Php => tree_sitter_php::LANGUAGE_PHP.into(),
+            #[cfg(feature = "grammar-scripting")]
+            Language::R => tree_sitter_r::LANGUAGE.into(),
+
+            #[cfg(feature = "grammar-jvm")]
+            Language::Java => tree_sitter_java::LANGUAGE.into(),
+            #[cfg(feature = "grammar-jvm")]
+            Language::Kotlin => tree_sitter_kotlin_ng::LANGUAGE.into(),
+            #[cfg(feature = "grammar-jvm")]
+            Language::Scala => tree_sitter_scala::LANGUAGE.into(),
+
+            #[cfg(feature = "grammar-enterprise")]
+            Language::CSharp => tree_sitter_c_sharp::LANGUAGE.into(),
+            #[cfg(feature = "grammar-enterprise")]
+            Language::Swift => tree_sitter_swift::LANGUAGE.into(),
+            #[cfg(feature = "grammar-enterprise")]
+            Language::Elixir => tree_sitter_elixir::LANGUAGE.into(),
+            #[cfg(feature = "grammar-enterprise")]
+            Language::Haskell => tree_sitter_haskell::LANGUAGE.into(),
+
+            #[cfg(feature = "grammar-data")]
+            Language::Json => tree_sitter_json::LANGUAGE.into(),
+            #[cfg(feature = "grammar-data")]
+            Language::Yaml => tree_sitter_yaml::LANGUAGE.into(),
+            #[cfg(feature = "grammar-data")]
+            Language::Toml => tree_sitter_toml_ng::LANGUAGE.into(),
+            #[cfg(feature = "grammar-data")]
             Language::Sql => tree_sitter_sequel::LANGUAGE.into(),
             // tree-sitter-md ships a split block/inline grammar; the block
             // grammar is the structural tree the edit primitives operate
             // on (headings, lists, fenced code, …).
+            #[cfg(feature = "grammar-data")]
             Language::Markdown => tree_sitter_md::LANGUAGE.into(),
-        }
+
+            // Any language whose family was not compiled into this build.
+            // Unreachable under the default (all-families) build.
+            #[allow(unreachable_patterns)]
+            _ => return None,
+        })
     }
 
     /// Resolve a language from its canonical wire name. Accepts a few
@@ -409,12 +455,17 @@ impl Language {
 mod tests {
     use super::*;
 
+    // Only the all-families (default) build links every grammar; under a
+    // trimmed grammar set some languages intentionally resolve to `None`.
+    #[cfg(feature = "grammars-all")]
     #[test]
     fn every_language_is_loadable() {
         for &lang in Language::all() {
             // Constructing the tree-sitter Language must not panic and must
             // produce a non-trivial grammar.
-            let ts = lang.ts_language();
+            let ts = lang
+                .ts_language()
+                .unwrap_or_else(|| panic!("{} grammar not compiled", lang.name()));
             assert!(ts.node_kind_count() > 0, "{} grammar is empty", lang.name());
         }
     }
