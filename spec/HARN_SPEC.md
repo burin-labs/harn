@@ -6488,6 +6488,19 @@ network side-effect ceiling for this invocation. The CLI emits a
 warning when this escape hatch is used. `--deny` / `--allow` still
 apply when present.
 
+### --read-only-root
+
+```bash
+harn run --read-only-root /path/to/other-repo main.harn
+```
+
+Permit reads from additional filesystem roots while keeping the default
+`harn run` sandbox policy intact. Paths under each `--read-only-root`
+are allowed for read-style operations but rejected for writes. Use this
+when a script needs to consume files from a sibling checkout or shared
+assets without disabling sandboxing. `--read-only-root` cannot be
+combined with `--no-sandbox`.
+
 ### --deny
 
 ```bash

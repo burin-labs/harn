@@ -19,6 +19,7 @@ harn run -e 'log("hello")'
 harn run --deny shell,exec <file.harn>
 harn run --allow read_file,write_file <file.harn>
 harn run --no-sandbox <file.harn>
+harn run --read-only-root /path/to/other-repo main.harn
 harn run --yes <file.harn>
 harn run --explain-cost <file.harn>
 harn run --attest <file.harn>
@@ -40,6 +41,7 @@ harn run --resume .harn/workers/worker_...json
 | `--deny <builtins>` | Deny specific builtins (comma-separated) |
 | `--allow <builtins>` | Allow only specific builtins (comma-separated) |
 | `--no-sandbox` | Disable the default worktree filesystem/process sandbox and network side-effect ceiling |
+| `--read-only-root <path>` | Read from an extra filesystem root while keeping sandboxing enabled |
 | `--yes` | Accept first-run provider setup prompts, including local Ollama config seeding |
 | `--attest` | Emit a signed provenance receipt after execution |
 | `--receipt-out <path>` | Write the receipt to a specific JSON path |
@@ -186,8 +188,11 @@ the VM. Filesystem and subprocess cwd access are rooted at the nearest
 `harn.toml` project root, or at the invocation working directory when
 no project manifest is present. Network side effects are denied by the
 same default policy. Use `--no-sandbox` only for scripts that need the
-old unrestricted process behavior; the CLI emits a warning when this
-escape hatch is used.
+old unrestricted process behavior; use `--read-only-root` when a script
+needs read access to a sibling or shared directory and should remain in
+the sandboxed profile.
+The CLI emits a warning when `--no-sandbox` is used, and rejects
+`--read-only-root` when `--no-sandbox` is present.
 
 Before starting the VM, `harn run <file>` builds the cross-module
 graph for the entry file. When all imports resolve, unknown call

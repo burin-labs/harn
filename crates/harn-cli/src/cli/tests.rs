@@ -264,6 +264,38 @@ fn test_run_rejects_deny_allow_conflict() {
 }
 
 #[test]
+fn test_run_parses_read_only_roots_and_rejects_no_sandbox_conflict() {
+    let cli = Cli::parse_from([
+        "harn",
+        "run",
+        "--read-only-root",
+        "../shared",
+        "--read-only-root",
+        "/tmp/assets",
+        "main.harn",
+    ]);
+
+    let Command::Run(args) = cli.command.unwrap() else {
+        panic!("expected run command");
+    };
+    assert_eq!(
+        args.read_only_root,
+        vec![PathBuf::from("../shared"), PathBuf::from("/tmp/assets")]
+    );
+
+    let err = Cli::try_parse_from([
+        "harn",
+        "run",
+        "--no-sandbox",
+        "--read-only-root",
+        "../shared",
+        "main.harn",
+    ])
+    .unwrap_err();
+    assert_eq!(err.kind(), clap::error::ErrorKind::ArgumentConflict);
+}
+
+#[test]
 fn test_parses_run_llm_mock_flags() {
     let cli = Cli::parse_from(["harn", "run", "--llm-mock", "fixtures.jsonl", "main.harn"]);
 

@@ -112,6 +112,7 @@ fn run_sandbox_attestation_reports_effective_policy() {
     harn_vm::reset_thread_local_state();
     let policy = harn_vm::orchestration::CapabilityPolicy {
         workspace_roots: vec!["/tmp/workspace".to_string()],
+        read_only_roots: vec!["/tmp/shared".to_string()],
         sandbox_profile: harn_vm::orchestration::SandboxProfile::OsHardened,
         ..harn_vm::orchestration::CapabilityPolicy::default()
     };
@@ -122,8 +123,154 @@ fn run_sandbox_attestation_reports_effective_policy() {
     assert_eq!(metadata["run_default_enabled"], false);
     assert_eq!(metadata["active"], true);
     assert_eq!(metadata["workspace_roots"][0], "/tmp/workspace");
+    assert_eq!(metadata["read_only_roots"][0], "/tmp/shared");
     assert_eq!(metadata["profile"], "os_hardened");
     assert_eq!(metadata["egress"], "host_policy");
+    harn_vm::reset_thread_local_state();
+}
+
+#[tokio::test]
+async fn execute_run_allows_read_from_explicit_read_only_root_but_denies_write() {
+    harn_vm::reset_thread_local_state();
+    let temp = tempfile::TempDir::new().expect("temp dir");
+    let project = temp.path().join("project");
+    let read_only_root = temp.path().join("shared");
+    std::fs::create_dir(&project).expect("create project");
+    std::fs::create_dir(&read_only_root).expect("create read-only root");
+    std::fs::write(project.join("harn.toml"), "").expect("write manifest");
+    let secret = read_only_root.join("payload.txt");
+    let protected = read_only_root.join("prohibited.txt");
+    std::fs::write(&secret, "payload").expect("write payload");
+
+    let script = project.join("main.harn");
+    let secret_literal = secret.to_string_lossy().replace('\\', "\\\\");
+    let prohibited_literal = protected.to_string_lossy().replace('\\', "\\\\");
+    std::fs::write(
+        &script,
+        format!(
+            r#"
+pipeline main() {{
+  __io_println(read_file("{secret_literal}"))
+}}
+"#,
+        ),
+    )
+    .expect("write read script");
+
+    let sandbox_options =
+        || RunSandboxOptions::default().with_read_only_roots(vec![read_only_root.clone()]);
+    let read_outcome = execute_run_with_harnpack_and_sandbox_options(
+        &script.to_string_lossy(),
+        false,
+        HashSet::new(),
+        Vec::new(),
+        Vec::new(),
+        CliLlmMockMode::Off,
+        None,
+        RunProfileOptions::default(),
+        sandbox_options(),
+        HarnpackRunOptions::default(),
+    )
+    .await;
+
+    assert_eq!(
+        read_outcome.exit_code, 0,
+        "stderr:\n{}",
+        read_outcome.stderr
+    );
+    assert_eq!(read_outcome.stdout.trim(), "payload");
+
+    std::fs::write(
+        &script,
+        format!(
+            r#"
+pipeline main() {{
+  write_file("{prohibited_literal}", "should be denied")
+}}
+"#,
+        ),
+    )
+    .expect("write denial script");
+
+    let outcome = execute_run_with_harnpack_and_sandbox_options(
+        &script.to_string_lossy(),
+        false,
+        HashSet::new(),
+        Vec::new(),
+        Vec::new(),
+        CliLlmMockMode::Off,
+        None,
+        RunProfileOptions::default(),
+        sandbox_options(),
+        HarnpackRunOptions::default(),
+    )
+    .await;
+
+    assert_eq!(outcome.exit_code, 1, "stderr:\n{}", outcome.stderr);
+    assert!(
+        outcome.stderr.contains("under a read-only workspace root"),
+        "stderr:\n{}",
+        outcome.stderr
+    );
+    assert!(
+        !protected.exists(),
+        "write under read-only root must be denied"
+    );
+    harn_vm::reset_thread_local_state();
+}
+
+#[cfg(all(feature = "hostlib", unix))]
+#[tokio::test]
+async fn execute_run_allows_command_run_read_from_read_only_root() {
+    harn_vm::reset_thread_local_state();
+    let temp = tempfile::TempDir::new().expect("temp dir");
+    let project = temp.path().join("project");
+    let read_only_root = temp.path().join("shared");
+    std::fs::create_dir(&project).expect("create project");
+    std::fs::create_dir(&read_only_root).expect("create read-only root");
+    std::fs::write(project.join("harn.toml"), "").expect("write manifest");
+    let secret = read_only_root.join("payload.txt");
+    std::fs::write(&secret, "payload").expect("write payload");
+
+    let script = project.join("main.harn");
+    let secret_literal = secret.to_string_lossy().replace('\\', "\\\\");
+    std::fs::write(
+        &script,
+        format!(
+            r#"
+import {{ command_run }} from "std/command"
+
+pipeline main() {{
+  let result = command_run(
+    {{argv: ["cat", "{secret_literal}"]}},
+    {{capture: {{max_inline_bytes: 8}}, timeout_ms: 5000}},
+  )
+  if !result.success {{
+    throw "command_run failed: exit_code=${{result.exit_code}} stderr=${{result.stderr}}"
+  }}
+  __io_println(result.stdout)
+}}
+"#
+        ),
+    )
+    .expect("write script");
+
+    let outcome = execute_run_with_harnpack_and_sandbox_options(
+        &script.to_string_lossy(),
+        false,
+        HashSet::new(),
+        Vec::new(),
+        Vec::new(),
+        CliLlmMockMode::Off,
+        None,
+        RunProfileOptions::default(),
+        RunSandboxOptions::default().with_read_only_roots(vec![read_only_root.clone()]),
+        HarnpackRunOptions::default(),
+    )
+    .await;
+
+    assert_eq!(outcome.exit_code, 0, "stderr:\n{}", outcome.stderr);
+    assert_eq!(outcome.stdout.trim(), "payload");
     harn_vm::reset_thread_local_state();
 }
 
