@@ -55,6 +55,19 @@ pub fn read_password(prompt: string = "", timeout_ms: int? = nil) -> ReadLineRes
 }
 
 /**
+ * write_stdout writes text to stdout without appending a newline.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: write_stdout(text)
+ */
+pub fn write_stdout(text: string) {
+  __io_write_stdout(text)
+}
+
+/**
  * write_stderr writes text to stderr without appending a newline.
  *
  * @effects: []

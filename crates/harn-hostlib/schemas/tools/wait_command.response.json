@@ -1,0 +1,34 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harnlang.com/schemas/hostlib/tools/wait_command.response.json",
+  "title": "tools.wait_command response",
+  "type": "object",
+  "properties": {
+    "command_id": { "type": "string" },
+    "status": {
+      "type": "string",
+      "enum": ["completed", "running", "timed_out", "killed", "blocked", "spawn_failed"]
+    },
+    "handle_id": { "type": "string" },
+    "completed": { "type": "boolean" },
+    "feedback_kind": { "type": "string" },
+    "started_at": { "type": "string", "format": "date-time" },
+    "ended_at": { "type": ["string", "null"], "format": "date-time" },
+    "duration_ms": { "type": "integer", "minimum": 0 },
+    "exit_code": { "type": ["integer", "null"] },
+    "signal": { "type": ["string", "null"] },
+    "timed_out": { "type": "boolean" },
+    "stdout": { "type": "string" },
+    "stderr": { "type": "string" },
+    "output_path": { "type": "string" },
+    "stdout_path": { "type": "string" },
+    "stderr_path": { "type": "string" },
+    "line_count": { "type": "integer", "minimum": 0 },
+    "byte_count": { "type": "integer", "minimum": 0 },
+    "output_sha256": { "type": "string" },
+    "process_group_id": { "type": ["integer", "null"] },
+    "command_or_op_descriptor": { "type": "string" }
+  },
+  "required": ["handle_id", "status", "timed_out"],
+  "additionalProperties": false
+}

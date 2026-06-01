@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harnlang.com/schemas/hostlib/tools/wait_command.request.json",
+  "title": "tools.wait_command request",
+  "type": "object",
+  "properties": {
+    "handle_id": { "type": "string" },
+    "session_id": { "type": "string" },
+    "timeout_ms": { "type": "integer", "minimum": 0 }
+  },
+  "required": ["handle_id"],
+  "additionalProperties": false
+}

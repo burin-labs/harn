@@ -1332,6 +1332,9 @@ mod tests {
             .collect::<BTreeSet<_>>();
         for name in [
             "command_run",
+            "command_wait",
+            "command_cancel",
+            "command_run_streaming",
             "command_output_tail",
             "command_json",
             "command_json_step",

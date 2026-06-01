@@ -2,8 +2,9 @@
 //!
 //! Provides search (ripgrep via `grep-searcher` + `ignore`), file I/O,
 //! listing, file outline, git inspection, and
-//! process lifecycle (`run_command`, `run_test`, `run_build_command`,
-//! `inspect_test_results`, `manage_packages`, `cancel_handle`).
+//! process lifecycle (`run_command`, `wait_command`, `run_test`,
+//! `run_build_command`, `inspect_test_results`, `manage_packages`,
+//! `cancel_handle`).
 //!
 //! Implementation status:
 //!
@@ -17,6 +18,7 @@
 //! | `get_file_outline`      | implemented (regex extractor)   |
 //! | `git`                   | implemented (system git CLI)    |
 //! | `run_command`           | implemented                     |
+//! | `wait_command`          | implemented                     |
 //! | `run_test`              | implemented                     |
 //! | `run_build_command`     | implemented                     |
 //! | `inspect_test_results`  | implemented                     |
@@ -60,6 +62,7 @@ mod run_command;
 mod run_test;
 mod search;
 mod test_parsers;
+mod wait_command;
 
 pub use permissions::FEATURE_TOOLS_DETERMINISTIC;
 
@@ -121,6 +124,12 @@ impl HostlibCapability for ToolsCapability {
             read_command_output::NAME,
             "read_command_output",
             read_command_output::handle,
+        );
+        register_gated(
+            registry,
+            wait_command::NAME,
+            "wait_command",
+            wait_command::handle,
         );
         register_gated(
             registry,

@@ -335,6 +335,7 @@ fn tools_capability_registers_documented_methods() {
             // `hostlib_enable("tools:deterministic")`.
             "hostlib_tools_run_command",
             "hostlib_tools_read_command_output",
+            "hostlib_tools_wait_command",
             "hostlib_tools_run_test",
             "hostlib_tools_run_build_command",
             "hostlib_tools_inspect_test_results",
@@ -359,6 +360,7 @@ fn tools_capability_registers_documented_methods() {
         "hostlib_tools_git",
         "hostlib_tools_run_command",
         "hostlib_tools_read_command_output",
+        "hostlib_tools_wait_command",
         "hostlib_tools_run_test",
         "hostlib_tools_run_build_command",
         "hostlib_tools_inspect_test_results",
@@ -435,8 +437,8 @@ fn install_default_wires_every_module_into_a_vm() {
     );
     // Builtin count: 15 ast (incl. apply_node + insert_at_anchor) +
     // 27 code_index + 2 scanner + 4 fs + 4 fs_snapshot + 2 fs_watch
-    // + 13 tools + 1 hostlib_enable + 4 secret_store = 72.
-    assert!(registry.builtins().len() >= 72);
+    // + 14 tools + 1 hostlib_enable + 4 secret_store = 73.
+    assert!(registry.builtins().len() >= 73);
 }
 
 #[test]

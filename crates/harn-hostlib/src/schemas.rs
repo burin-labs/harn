@@ -924,6 +924,18 @@ pub const SCHEMAS: &[(&str, &str, SchemaKind, &str)] = &[
     ),
     (
         "tools",
+        "wait_command",
+        SchemaKind::Request,
+        include_str!("../schemas/tools/wait_command.request.json"),
+    ),
+    (
+        "tools",
+        "wait_command",
+        SchemaKind::Response,
+        include_str!("../schemas/tools/wait_command.response.json"),
+    ),
+    (
+        "tools",
         "run_test",
         SchemaKind::Request,
         include_str!("../schemas/tools/run_test.request.json"),
