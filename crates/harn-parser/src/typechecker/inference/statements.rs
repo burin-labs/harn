@@ -5,7 +5,7 @@
 //! construct's static rules call for. `check_block` chains it across a
 //! sequence of statements while tracking unreachable-code detection.
 //!
-//! Inline pattern helpers (`define_pattern_vars`,
+//! Inline pattern helpers (`define_pattern_vars_typed`,
 //! `check_pattern_defaults`) and `check_attributes` live here because
 //! they are only called from `check_node`'s arms.
 
@@ -77,33 +77,88 @@ impl TypeChecker {
         stmt_definitely_exits(stmt)
     }
 
-    fn define_pattern_vars(pattern: &BindingPattern, scope: &mut TypeScope, mutable: bool) {
-        let define = |scope: &mut TypeScope, name: &str| {
+    /// Define the variables introduced by a destructuring pattern, inferring
+    /// each binding's type **identically to the hand-written `?.`/`??` form** it
+    /// desugars to. `source_ty` is the inferred type of the value being
+    /// destructured (the dict/list on the RHS, or each element's type for a
+    /// `for`-`in` pattern).
+    ///
+    /// For a dict field `{ key = default }`, the binding type is computed as
+    /// `infer_binary_op_type("??", source?.key, default)` — the same pipeline
+    /// the desugared `let key = source?.key ?? default` would produce, including
+    /// the untyped-`dict` case where `source?.key` is unknown and the default's
+    /// type carries through. A field without a default keeps the optional
+    /// `source?.key` type (matching a bare `let key = source?.key`).
+    ///
+    /// `source_ty == &None` reproduces the previous behavior of leaving every
+    /// binding untyped.
+    fn define_pattern_vars_typed(
+        &mut self,
+        pattern: &BindingPattern,
+        source_ty: &InferredType,
+        scope: &mut TypeScope,
+        mutable: bool,
+    ) {
+        let define = |scope: &mut TypeScope, name: &str, ty: InferredType| {
             if mutable {
-                scope.define_var_mutable(name, None);
+                scope.define_var_mutable(name, ty);
             } else {
-                scope.define_var(name, None);
+                scope.define_var(name, ty);
             }
             scope.clear_nil_widenable(name);
         };
         match pattern {
             BindingPattern::Identifier(name) => {
-                define(scope, name);
+                // Not reached from let/var/for-in (those handle identifiers
+                // before delegating here), but the whole value is the binding.
+                define(scope, name, source_ty.clone());
             }
             BindingPattern::Dict(fields) => {
                 for field in fields {
                     let name = field.alias.as_deref().unwrap_or(&field.key);
-                    define(scope, name);
+                    let ty = if field.is_rest {
+                        Some(TypeExpr::Named("dict".into()))
+                    } else {
+                        // `source?.key` — optional access mirrors the runtime
+                        // "missing key binds nil" semantics.
+                        let field_ty = source_ty.as_ref().and_then(|t| {
+                            self.infer_property_type_from_type(t, &field.key, scope, true)
+                        });
+                        match &field.default_value {
+                            Some(default) => {
+                                let default_ty = self.infer_type(default, scope);
+                                infer_binary_op_type("??", &field_ty, &default_ty)
+                            }
+                            None => field_ty,
+                        }
+                    };
+                    define(scope, name, ty);
                 }
             }
             BindingPattern::List(elements) => {
+                // Homogeneous element type. Positional/tuple-precise element
+                // typing is deferred — see destructuring_inference @xfail.
+                let elem_ty = source_ty
+                    .as_ref()
+                    .and_then(|t| self.iterable_item_type(t, scope));
                 for elem in elements {
-                    define(scope, &elem.name);
+                    let ty = if elem.is_rest {
+                        Some(TypeExpr::Named("list".into()))
+                    } else {
+                        match &elem.default_value {
+                            Some(default) => {
+                                let default_ty = self.infer_type(default, scope);
+                                infer_binary_op_type("??", &elem_ty, &default_ty)
+                            }
+                            None => elem_ty.clone(),
+                        }
+                    };
+                    define(scope, &elem.name, ty);
                 }
             }
             BindingPattern::Pair(a, b) => {
-                define(scope, a);
-                define(scope, b);
+                define(scope, a, None);
+                define(scope, b, None);
             }
         }
     }
@@ -497,7 +552,7 @@ impl TypeChecker {
                     }
                 } else {
                     self.check_pattern_defaults(pattern, scope);
-                    Self::define_pattern_vars(pattern, scope, false);
+                    self.define_pattern_vars_typed(pattern, &inferred, scope, false);
                 }
             }
 
@@ -563,7 +618,7 @@ impl TypeChecker {
                     }
                 } else {
                     self.check_pattern_defaults(pattern, scope);
-                    Self::define_pattern_vars(pattern, scope, true);
+                    self.define_pattern_vars_typed(pattern, &inferred, scope, true);
                 }
             }
 
@@ -858,8 +913,14 @@ impl TypeChecker {
                     loop_scope.clear_nil_widenable(a);
                     loop_scope.clear_nil_widenable(b);
                 } else {
+                    // Each iteration binds the element; destructure against its
+                    // type so dict/list patterns in `for`-`in` gain the same
+                    // inference as in `let`/`var`.
+                    let elem_source = iter_type
+                        .as_ref()
+                        .and_then(|ty| self.iterable_item_type(ty, scope));
                     self.check_pattern_defaults(pattern, &mut loop_scope);
-                    Self::define_pattern_vars(pattern, &mut loop_scope, false);
+                    self.define_pattern_vars_typed(pattern, &elem_source, &mut loop_scope, false);
                 }
                 self.check_block(body, &mut loop_scope);
             }

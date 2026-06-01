@@ -911,7 +911,7 @@ impl TypeChecker {
         self.infer_property_type_from_type(&obj_type, property, scope, optional)
     }
 
-    fn infer_property_type_from_type(
+    pub(super) fn infer_property_type_from_type(
         &self,
         ty: &TypeExpr,
         property: &str,

@@ -207,6 +207,19 @@ const SCENARIOS: &[Scenario] = &[
         script: include_str!("../../assets/demo/prompt-guidance/scenario.harn"),
         tape: include_str!("../../assets/demo/prompt-guidance/tape.jsonl"),
     },
+    Scenario {
+        id: "destructure-with-defaults",
+        title: "destructuring-with-defaults collapses the `input?.x ?? default` idiom",
+        description: "Collapse the most-repeated idiom in our Harn corpus — \
+                      `let x = input?.field ?? default` (~5,700 sites across BurinCore alone) — \
+                      into a single destructuring bind: `let { path = \"\", namespace = nil } = \
+                      pipeline_input() ?? {}`. Present keys win, missing keys fall to their \
+                      defaults, and the type checker now infers each binding's type from \
+                      `field + default` exactly as the `?.`/`??` form did, so the migration is \
+                      lossless under the checker. Fully offline — no LLM, no network.",
+        script: include_str!("../../assets/demo/destructure-with-defaults/scenario.harn"),
+        tape: include_str!("../../assets/demo/destructure-with-defaults/tape.jsonl"),
+    },
 ];
 
 #[derive(Clone, Copy)]
