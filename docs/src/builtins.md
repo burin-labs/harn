@@ -401,6 +401,7 @@ Sets also support method syntax: `my_set.union(other)`.
 | `replace(str, old, new)` | str: string, old: string, new: string | string | Replace all occurrences |
 | `join(list, sep)` | list: list, sep: string | string | Join list elements with separator |
 | `substring(str, start, len?)` | str: string, start: int, len: int | string | Extract substring from start position |
+| `chars(str)` | str: string | list | Materialize a string into a list of single-character strings in one linear pass (ASCII chars are interned). Use this for cursor-style source scanning — see [Scanning large text](#scanning-large-text) — instead of repeated `substring`/`s[i]`, which are O(n) per call |
 | `unicode_normalize(str, form)` | str: string, form: `"NFC"\|"NFD"\|"NFKC"\|"NFKD"` | string | Normalize Unicode into the requested form |
 | `unicode_graphemes(str)` | str: string | list | Split a string into extended grapheme clusters |
 | `str_pad(str, width, char?, side?)` | str: string, width: int, char: string, side: `"left"\|"right"\|"both"` | string | Pad to a grapheme width using the given fill character |
@@ -431,6 +432,31 @@ These are called on string values with dot notation: `"hello".uppercase()`.
 | `.repeat(n)` | n: int | string | Repeat n times |
 | `.pad_left(width, char?)` | width: int, char: string | string | Pad to width with char (default space) |
 | `.pad_right(width, char?)` | width: int, char: string | string | Pad to width with char (default space) |
+
+### Scanning large text
+
+Strings are stored as UTF-8, so random character access — `s[i]`,
+`s[a:b]`, `s.count`, and `substring(s, i, n)` — is **O(n)** in the string
+length. A per-character cursor loop built from those calls is therefore
+O(n²) and stalls on multi-kilobyte source files.
+
+To scan source text, materialize the string **once** into a list of
+single-character strings with `chars(str)` (or `str.chars()`), then index
+the list — list access is O(1), and `chars` interns ASCII characters so
+the materialization does not allocate per character:
+
+```harn
+let cs = chars(src)
+var i = 0
+var braces = 0
+while i < cs.count {
+  if cs[i] == "{" { braces = braces + 1 }
+  i = i + 1
+}
+```
+
+Prefer `str.lines()`, `split(str, sep)`, or the `regex_*` builtins when a
+line-, token-, or pattern-oriented scan suffices.
 
 ### List methods (dot syntax)
 

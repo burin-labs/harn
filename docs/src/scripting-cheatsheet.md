@@ -63,6 +63,21 @@ let sub = xs[1:4]
 **length**, not an end index. Prefer the slice syntax to avoid that
 footgun.
 
+Strings are UTF-8, so `s[i]`, `s[a:b]`, `s.count`, and `substring(...)`
+are each O(n) in the string length — a per-character cursor loop over a
+large source file is O(n²). To scan source text, materialize once with
+`chars(s)` (ASCII characters are interned, so it does not allocate per
+char) and index the resulting list, which is O(1):
+
+```harn
+let cs = chars(src)
+var i = 0
+while i < cs.count {
+  if cs[i] == "{" { /* ... */ }
+  i = i + 1
+}
+```
+
 ## `if` is an expression
 
 `if` / `else` produces a value. Drop it straight into `let`, an

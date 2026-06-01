@@ -4693,6 +4693,13 @@ are not required to be present.
 | `lowercase()` | (none) | string |
 | `uppercase()` | (none) | string |
 | `substring(start, end?)` | int, int? | string -- character range |
+| `chars()` | (none) | list of single-character strings |
+
+`chars()` (also the `chars(text)` builtin) materializes a string into a list of
+single-character strings in one linear pass. Because a string is UTF-8, random
+character access (`s[i]`, `s[a:b]`, `.count`, `substring(...)`) is O(n) per call;
+materialize once with `chars()` and scan the list with O(1) indexing when writing
+cursor-style source scanners.
 
 ### List methods
 
