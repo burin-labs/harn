@@ -1468,6 +1468,18 @@ fn host_agent_session_record_skill_event_builtin(
                 reason,
                 removed_tools: string_list("removed_tools"),
                 remaining_tools: string_list("remaining_tools"),
+                policy: metadata_json
+                    .get("policy")
+                    .cloned()
+                    .unwrap_or(serde_json::Value::Null),
+                removed_tool_details: metadata_json
+                    .get("removed_tool_details")
+                    .cloned()
+                    .unwrap_or(serde_json::Value::Null),
+                kept_tool_details: metadata_json
+                    .get("kept_tool_details")
+                    .cloned()
+                    .unwrap_or(serde_json::Value::Null),
             });
         }
         _ => {}
@@ -1873,6 +1885,18 @@ fn build_agent_event(
                 reason: get_string("reason"),
                 removed_tools: string_list("removed_tools"),
                 remaining_tools: string_list("remaining_tools"),
+                policy: payload_obj
+                    .and_then(|m| m.get("policy"))
+                    .cloned()
+                    .unwrap_or(serde_json::Value::Null),
+                removed_tool_details: payload_obj
+                    .and_then(|m| m.get("removed_tool_details"))
+                    .cloned()
+                    .unwrap_or(serde_json::Value::Null),
+                kept_tool_details: payload_obj
+                    .and_then(|m| m.get("kept_tool_details"))
+                    .cloned()
+                    .unwrap_or(serde_json::Value::Null),
             })
         }
         "loop_control_decision" => Ok(AgentEvent::LoopControlDecision {

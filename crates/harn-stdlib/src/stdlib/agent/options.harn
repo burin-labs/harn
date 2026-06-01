@@ -706,16 +706,61 @@ fn __default_tool_surface_hard_keep() {
   ]
 }
 
+fn __tool_surface_safe_defaults() {
+  return {
+    enabled: true,
+    window_turns: 5,
+    mode: "safe",
+    hard_keep: __default_tool_surface_hard_keep(),
+    prune_classes: ["read_only"],
+    keep_classes: ["mutating", "approval", "session_control", "progress", "result_polling", "unknown"],
+    unknown_tool_policy: "keep",
+  }
+}
+
+fn __tool_surface_aggressive_defaults() {
+  return {
+    enabled: true,
+    window_turns: 5,
+    mode: "aggressive",
+    hard_keep: __default_tool_surface_hard_keep(),
+    prune_classes: ["read_only", "mutating", "approval", "session_control", "progress", "result_polling", "unknown"],
+    keep_classes: [],
+    unknown_tool_policy: "prune",
+  }
+}
+
+fn __validate_tool_surface_mode(mode) {
+  if mode == "safe" || mode == "aggressive" {
+    return
+  }
+  throw "agent_loop: `tool_surface_narrowing.mode` must be \"safe\" or \"aggressive\""
+}
+
+fn __validate_tool_surface_unknown_policy(policy) {
+  if policy == "keep" || policy == "prune" {
+    return
+  }
+  throw "agent_loop: `tool_surface_narrowing.unknown_tool_policy` must be \"keep\" or \"prune\""
+}
+
 fn __normalize_tool_surface_narrowing(value) {
-  let defaults = {enabled: true, window_turns: 5, hard_keep: __default_tool_surface_hard_keep()}
+  let safe_defaults = __tool_surface_safe_defaults()
   if value == nil {
-    return defaults
+    return safe_defaults
   }
   if type_of(value) == "bool" {
-    return defaults + {enabled: value}
+    return safe_defaults + {enabled: value}
   }
   if type_of(value) != "dict" {
     throw "agent_loop: `tool_surface_narrowing` must be a dict, bool, or nil; got " + type_of(value)
+  }
+  let requested_mode = value?.mode ?? safe_defaults.mode
+  __validate_tool_surface_mode(requested_mode)
+  let defaults = if requested_mode == "aggressive" {
+    __tool_surface_aggressive_defaults()
+  } else {
+    safe_defaults
   }
   let enabled = value?.enabled ?? defaults.enabled
   if type_of(enabled) != "bool" {
@@ -730,7 +775,23 @@ fn __normalize_tool_surface_narrowing(value) {
   }
   let hard_keep = value?.hard_keep ?? defaults.hard_keep
   __validate_string_list("agent_loop: `tool_surface_narrowing.hard_keep`", hard_keep)
-  return defaults + value + {enabled: enabled, window_turns: window_turns, hard_keep: hard_keep}
+  let prune_classes = value?.prune_classes ?? defaults.prune_classes
+  __validate_string_list("agent_loop: `tool_surface_narrowing.prune_classes`", prune_classes)
+  let keep_classes = value?.keep_classes ?? defaults.keep_classes
+  __validate_string_list("agent_loop: `tool_surface_narrowing.keep_classes`", keep_classes)
+  let unknown_tool_policy = value?.unknown_tool_policy ?? defaults.unknown_tool_policy
+  __validate_tool_surface_unknown_policy(unknown_tool_policy)
+  return defaults
+    + value
+    + {
+    enabled: enabled,
+    window_turns: window_turns,
+    mode: requested_mode,
+    hard_keep: hard_keep,
+    prune_classes: prune_classes,
+    keep_classes: keep_classes,
+    unknown_tool_policy: unknown_tool_policy,
+  }
 }
 
 fn __validate_removed_agent_loop_options(opts) {

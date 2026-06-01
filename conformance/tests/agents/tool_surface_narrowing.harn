@@ -13,11 +13,33 @@ fn has_tool(tools, name) {
   return false
 }
 
+fn detail_for(details, name) {
+  for detail in details ?? [] {
+    if detail?.name == name {
+      return detail
+    }
+  }
+  return nil
+}
+
+fn add_narrowing_tool(tools, name, annotations = nil) {
+  var config = {parameters: {}, handler: { _args -> "ok" }}
+  if annotations != nil {
+    config = config + {annotations: annotations}
+  }
+  return tool_define(tools, name, "test tool " + name, config)
+}
+
 fn narrowing_tools() {
   var tools = tool_registry()
-  for name in ["look", "search", "run", "replace_symbol", "done_sentinel"] {
-    tools = tool_define(tools, name, "test tool " + name, {parameters: {}, handler: { _args -> "ok" }})
-  }
+  tools = add_narrowing_tool(tools, "look", {kind: "read", side_effect_level: "read_only"})
+  tools = add_narrowing_tool(tools, "search", {kind: "search", side_effect_level: "read_only"})
+  tools = add_narrowing_tool(tools, "read_docs", {kind: "read", side_effect_level: "read_only"})
+  tools = add_narrowing_tool(tools, "run", {kind: "execute", side_effect_level: "process_exec"})
+  tools = add_narrowing_tool(tools, "scaffold", {kind: "scaffold", side_effect_level: "workspace_write"})
+  tools = add_narrowing_tool(tools, "replace_symbol", {kind: "edit", side_effect_level: "workspace_write"})
+  tools = add_narrowing_tool(tools, "custom_host")
+  tools = add_narrowing_tool(tools, "done_sentinel", {kind: "session_control"})
   return tools
 }
 
@@ -60,12 +82,23 @@ pipeline default() {
   let sixth_tools = calls[5].tools
   __io_println(captured.result.status)
   __io_println(len(narrow) >= 1)
-  __io_println(contains(first.removed_tools, "run"))
+  __io_println(contains(first.removed_tools, "read_docs"))
+  __io_println(detail_for(first.removed_tool_details, "read_docs").class)
+  __io_println(detail_for(first.kept_tool_details, "run").class)
+  __io_println(detail_for(first.kept_tool_details, "custom_host").class)
+  __io_println(!contains(first.removed_tools, "run"))
+  __io_println(!contains(first.removed_tools, "scaffold"))
   __io_println(!contains(first.removed_tools, "replace_symbol"))
-  __io_println(!contains(first.remaining_tools, "run"))
+  __io_println(!contains(first.removed_tools, "custom_host"))
+  __io_println(!contains(first.remaining_tools, "read_docs"))
+  __io_println(contains(first.remaining_tools, "run"))
+  __io_println(contains(first.remaining_tools, "scaffold"))
   __io_println(contains(first.remaining_tools, "replace_symbol"))
-  __io_println(!has_tool(sixth_tools, "run"))
+  __io_println(!has_tool(sixth_tools, "read_docs"))
+  __io_println(has_tool(sixth_tools, "run"))
+  __io_println(has_tool(sixth_tools, "scaffold"))
   __io_println(has_tool(sixth_tools, "replace_symbol"))
+  __io_println(has_tool(sixth_tools, "custom_host"))
   __io_println(has_tool(sixth_tools, "done_sentinel"))
   llm_mock_clear()
   llm_mock({tool_calls: [{id: "rewiden-look-1", name: "look", arguments: {}}]})
@@ -89,7 +122,7 @@ pipeline default() {
       stop_after_successful_tools: ["run"],
       skills: runner,
       skill_match: {strategy: "manual"},
-      tool_surface_narrowing: {enabled: true, window_turns: 5},
+      tool_surface_narrowing: {enabled: true, window_turns: 5, mode: "aggressive"},
     },
   )
   let rewiden_calls = llm_mock_calls()
