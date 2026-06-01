@@ -118,6 +118,14 @@ pub(crate) async fn handle_mcp_command(command: &McpCommand) {
             .await
             {
                 Ok(Some(token)) => {
+                    if server_ref.json {
+                        print_focused_status_report(&server, "connected", Some(&token), None)
+                            .unwrap_or_else(|error| {
+                                eprintln!("error: {error}");
+                                process::exit(1);
+                            });
+                        return;
+                    }
                     println!("Server: {}", server.name);
                     println!("URL: {}", server.url);
                     println!("Connected: yes");
@@ -134,11 +142,27 @@ pub(crate) async fn handle_mcp_command(command: &McpCommand) {
                     println!("Issuer: {}", token.issuer);
                 }
                 Ok(None) => {
+                    if server_ref.json {
+                        print_focused_status_report(&server, "auth_required", None, None)
+                            .unwrap_or_else(|error| {
+                                eprintln!("error: {error}");
+                                process::exit(1);
+                            });
+                        return;
+                    }
                     println!("Server: {}", server.name);
                     println!("URL: {}", server.url);
                     println!("Connected: no");
                 }
                 Err(error) => {
+                    if server_ref.json {
+                        print_focused_status_report(&server, "error", None, Some(error))
+                            .unwrap_or_else(|encode_error| {
+                                eprintln!("error: {encode_error}");
+                                process::exit(1);
+                            });
+                        return;
+                    }
                     eprintln!("error: {error}");
                     process::exit(1);
                 }
@@ -155,7 +179,7 @@ pub(crate) async fn handle_mcp_command(command: &McpCommand) {
 
 /// Schema version for `harn mcp status --json`. Bump when the
 /// `McpStatusReport` shape changes in a way agents must detect.
-pub(crate) const MCP_STATUS_SCHEMA_VERSION: u32 = 1;
+pub(crate) const MCP_STATUS_SCHEMA_VERSION: u32 = 2;
 
 /// Aggregate readiness report for every MCP server declared in the
 /// nearest `harn.toml`. Mirrors the `connect status` report shape: a
@@ -194,6 +218,12 @@ pub(crate) struct McpServerStatus {
     pub prompts: Option<usize>,
     /// Human-readable diagnostic when `state` is `error`, else `None`.
     pub last_error: Option<String>,
+    /// Stored OAuth token expiry as Unix seconds when known.
+    pub token_expires_at_unix: Option<i64>,
+    /// OAuth client id bound to the stored token when known.
+    pub token_client_id: Option<String>,
+    /// OAuth issuer bound to the stored token when known.
+    pub token_issuer: Option<String>,
 }
 
 /// Build and print the all-servers MCP status report.
@@ -298,7 +328,42 @@ async fn derive_server_status(server: &McpServerConfig) -> McpServerStatus {
         resources: None,
         prompts: None,
         last_error,
+        token_expires_at_unix: None,
+        token_client_id: None,
+        token_issuer: None,
     }
+}
+
+fn print_focused_status_report(
+    server: &ResolvedMcpServer,
+    state: &str,
+    token: Option<&mcp_oauth::StoredMcpToken>,
+    last_error: Option<String>,
+) -> Result<(), String> {
+    let report = McpStatusReport {
+        schema_version: MCP_STATUS_SCHEMA_VERSION,
+        manifest: None,
+        servers: vec![McpServerStatus {
+            name: server.name.clone(),
+            transport: "http".to_string(),
+            state: state.to_string(),
+            url: server.url.clone(),
+            lazy: false,
+            tools: None,
+            resources: None,
+            prompts: None,
+            last_error,
+            token_expires_at_unix: token.and_then(|token| token.expires_at_unix),
+            token_client_id: token.map(|token| token.client_id.clone()),
+            token_issuer: token.map(|token| token.issuer.clone()),
+        }],
+    };
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&report)
+            .map_err(|error| format!("failed to encode JSON output: {error}"))?
+    );
+    Ok(())
 }
 
 pub(crate) async fn resolve_auth_for_server(
@@ -748,10 +813,13 @@ mod tests {
                 resources: None,
                 prompts: None,
                 last_error: None,
+                token_expires_at_unix: None,
+                token_client_id: None,
+                token_issuer: None,
             }],
         };
         let value: serde_json::Value = serde_json::to_value(&report).expect("serialize");
-        assert_eq!(value["schema_version"], 1);
+        assert_eq!(value["schema_version"], 2);
         assert_eq!(value["manifest"], "/repo/harn.toml");
         assert_eq!(value["servers"][0]["name"], "fs");
         assert_eq!(value["servers"][0]["transport"], "stdio");
@@ -759,5 +827,6 @@ mod tests {
         assert_eq!(value["servers"][0]["lazy"], true);
         assert!(value["servers"][0]["tools"].is_null());
         assert!(value["servers"][0]["last_error"].is_null());
+        assert!(value["servers"][0]["token_expires_at_unix"].is_null());
     }
 }

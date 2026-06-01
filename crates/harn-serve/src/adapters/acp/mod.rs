@@ -70,6 +70,7 @@ use std::time::{Instant, SystemTime};
 use async_trait::async_trait;
 use harn_vm::agent_events::{clear_session_sinks, register_sink, AgentEventSink};
 use harn_vm::visible_text::{sanitize_visible_assistant_text, VisibleTextState};
+use serde::Deserialize;
 use tokio::io::AsyncBufReadExt;
 use tokio::sync::{mpsc, oneshot, Mutex, Notify};
 
@@ -89,6 +90,27 @@ const ACP_AUTH_REQUIRED_CODE: i64 = -32000;
 /// supply one. TUI/headless clients capture this with a loopback listener
 /// (matching `harn mcp login`); GUI clients pass their own URL scheme instead.
 const MCP_DEFAULT_OAUTH_REDIRECT_URI: &str = "http://127.0.0.1:9783/oauth/callback";
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct McpImportTokenParams {
+    #[serde(alias = "resource")]
+    url: String,
+    access_token: String,
+    #[serde(default)]
+    refresh_token: Option<String>,
+    #[serde(default)]
+    expires_at: Option<i64>,
+    #[serde(default)]
+    token_endpoint: Option<String>,
+    client_id: String,
+    #[serde(default)]
+    client_secret: Option<String>,
+    #[serde(default)]
+    token_endpoint_auth_method: Option<String>,
+    #[serde(default, alias = "scopes")]
+    scope: Option<String>,
+}
 
 /// Parse `state`, `code`, and the optional `iss` issuer out of a captured OAuth
 /// redirect URL (e.g. `burin://oauth/callback?code=…&state=…&iss=…`). Returns
@@ -2657,6 +2679,47 @@ impl AcpServer {
         }
     }
 
+    /// `mcp/import_token`: migrate a token minted by an older client-specific
+    /// OAuth implementation into harn's canonical MCP OAuth store. Discovery,
+    /// issuer binding, resource canonicalization, and keyring layout remain
+    /// harn-owned; clients only hand over the legacy token material once.
+    async fn handle_mcp_import_token(&self, id: &serde_json::Value, params: &serde_json::Value) {
+        let request: McpImportTokenParams = match serde_json::from_value(params.clone()) {
+            Ok(request) => request,
+            Err(error) => {
+                self.send_error(
+                    id,
+                    -32602,
+                    &format!("Invalid mcp/import_token params: {error}"),
+                );
+                return;
+            }
+        };
+        let import = harn_vm::mcp_oauth::ImportStoredToken {
+            server_url: request.url,
+            access_token: request.access_token,
+            refresh_token: request.refresh_token,
+            expires_at_unix: request.expires_at,
+            token_endpoint: request.token_endpoint,
+            client_id: request.client_id,
+            client_secret: request.client_secret,
+            token_endpoint_auth_method: request.token_endpoint_auth_method,
+            scopes: request.scope,
+        };
+        match harn_vm::mcp_oauth::import_stored_token(import).await {
+            Ok(token) => self.send_response(
+                id,
+                serde_json::json!({
+                    "ok": true,
+                    "resource": token.resource,
+                    "issuer": token.issuer,
+                    "expiresAt": token.expires_at_unix,
+                }),
+            ),
+            Err(error) => self.send_error(id, -32000, &error),
+        }
+    }
+
     async fn handle_hitl_respond(&self, id: &serde_json::Value, params: &serde_json::Value) {
         let session_cwd = params
             .get("sessionId")
@@ -3777,6 +3840,12 @@ impl AcpServer {
                     return;
                 }
                 self.handle_mcp_oauth_callback(&id, &params).await;
+            }
+            "mcp/import_token" | "harn.mcp.import_token" => {
+                if self.reject_unauthenticated(&id) {
+                    return;
+                }
+                self.handle_mcp_import_token(&id, &params).await;
             }
             _ => {
                 if !id.is_null() {

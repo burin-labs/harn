@@ -114,6 +114,23 @@ pub struct BeginAuthorization {
     pub scopes: Option<String>,
 }
 
+/// A legacy bearer/refresh token that a thin client found in an older
+/// surface-specific store. Discovery and canonical key selection still happen
+/// here so the imported token lands in the same Harn-owned store as a fresh
+/// [`begin_authorization`] / [`complete_authorization`] flow.
+#[derive(Clone, Debug)]
+pub struct ImportStoredToken {
+    pub server_url: String,
+    pub access_token: String,
+    pub refresh_token: Option<String>,
+    pub expires_at_unix: Option<i64>,
+    pub token_endpoint: Option<String>,
+    pub client_id: String,
+    pub client_secret: Option<String>,
+    pub token_endpoint_auth_method: Option<String>,
+    pub scopes: Option<String>,
+}
+
 /// The browser-facing result of [`begin_authorization`]: the URL to open and
 /// the `state` that the matching [`complete_authorization`] call must echo.
 #[derive(Clone, Debug, Serialize)]
@@ -315,6 +332,14 @@ pub async fn resolve_bearer(server_url: &str) -> Result<Option<String>, String> 
         stored = refresh_stored_token_with_store(&store, &stored, &discovery, None).await?;
     }
     Ok(Some(stored.access_token))
+}
+
+/// Import an existing token into the canonical Harn MCP OAuth store.
+pub async fn import_stored_token(request: ImportStoredToken) -> Result<StoredMcpToken, String> {
+    let discovery = discover(&request.server_url).await?;
+    let stored = stored_token_for_import(&request, &discovery)?;
+    save_stored_token(&stored).await?;
+    Ok(stored)
 }
 
 /// Discover the OAuth authorization server protecting an MCP server URL.
@@ -904,6 +929,75 @@ fn validate_token_store_binding(
     Ok(())
 }
 
+fn stored_token_for_import(
+    request: &ImportStoredToken,
+    discovery: &McpOAuthDiscovery,
+) -> Result<StoredMcpToken, String> {
+    let server_url = request.server_url.trim();
+    if server_url.is_empty() {
+        return Err("MCP token import requires server_url".to_string());
+    }
+    let access_token = request.access_token.trim();
+    if access_token.is_empty() {
+        return Err("MCP token import requires access_token".to_string());
+    }
+    let client_id = request.client_id.trim();
+    if client_id.is_empty() {
+        return Err("MCP token import requires client_id".to_string());
+    }
+
+    let resource = canonical_resource_indicator(server_url).map_err(|error| error.to_string())?;
+    let client_secret = request
+        .client_secret
+        .as_deref()
+        .filter(|secret| !secret.is_empty())
+        .map(str::to_string);
+    let token_endpoint_auth_method = request
+        .token_endpoint_auth_method
+        .as_deref()
+        .filter(|method| !method.is_empty())
+        .map(str::to_string)
+        .unwrap_or_else(|| {
+            if client_secret.is_some() {
+                "client_secret_post".to_string()
+            } else {
+                "none".to_string()
+            }
+        });
+    validate_token_endpoint_auth_method(&token_endpoint_auth_method)?;
+
+    Ok(StoredMcpToken {
+        access_token: access_token.to_string(),
+        refresh_token: request
+            .refresh_token
+            .as_deref()
+            .filter(|token| !token.is_empty())
+            .map(str::to_string),
+        expires_at_unix: request.expires_at_unix,
+        token_endpoint: request
+            .token_endpoint
+            .as_deref()
+            .filter(|endpoint| !endpoint.is_empty())
+            .map(str::to_string)
+            .unwrap_or_else(|| {
+                discovery
+                    .authorization_server_metadata
+                    .token_endpoint
+                    .clone()
+            }),
+        client_id: client_id.to_string(),
+        client_secret,
+        token_endpoint_auth_method,
+        issuer: discovery.authorization_server_issuer.clone(),
+        resource,
+        scopes: request
+            .scopes
+            .as_deref()
+            .filter(|scopes| !scopes.is_empty())
+            .map(str::to_string),
+    })
+}
+
 // --- crypto/util -------------------------------------------------------------
 
 fn generate_pkce_pair() -> (String, String) {
@@ -982,6 +1076,63 @@ mod tests {
         assert!(!token_needs_refresh(&token));
         token.expires_at_unix = Some(current_unix_timestamp() + TOKEN_REFRESH_SKEW_SECS - 1);
         assert!(token_needs_refresh(&token));
+    }
+
+    #[test]
+    fn token_import_uses_discovery_binding_and_legacy_auth_defaults() {
+        let discovery = McpOAuthDiscovery {
+            protected_resource_metadata_url: url::Url::parse(
+                "https://mcp.example/.well-known/oauth-protected-resource",
+            )
+            .unwrap(),
+            protected_resource_metadata: Default::default(),
+            authorization_server_issuer: "https://auth.example".to_string(),
+            authorization_server_metadata_url: url::Url::parse(
+                "https://auth.example/.well-known/oauth-authorization-server",
+            )
+            .unwrap(),
+            authorization_server_metadata_kind:
+                crate::mcp_auth::OAuthAuthorizationServerMetadataKind::OAuthAuthorizationServer,
+            authorization_server_metadata: OAuthAuthorizationServerMetadata {
+                issuer: "https://auth.example".to_string(),
+                authorization_endpoint: "https://auth.example/authorize".to_string(),
+                token_endpoint: "https://auth.example/token".to_string(),
+                registration_endpoint: None,
+                token_endpoint_auth_methods_supported: vec!["none".to_string()],
+                code_challenge_methods_supported: vec!["S256".to_string()],
+                scopes_supported: Vec::new(),
+                client_id_metadata_document_supported: false,
+                authorization_response_iss_parameter_supported: false,
+                extra: Default::default(),
+            },
+            challenge: None,
+            scopes: Vec::new(),
+        };
+        let token = stored_token_for_import(
+            &ImportStoredToken {
+                server_url: "https://mcp.example/mcp".to_string(),
+                access_token: "access".to_string(),
+                refresh_token: Some("refresh".to_string()),
+                expires_at_unix: Some(123),
+                token_endpoint: None,
+                client_id: "client".to_string(),
+                client_secret: Some("secret".to_string()),
+                token_endpoint_auth_method: None,
+                scopes: Some("read write".to_string()),
+            },
+            &discovery,
+        )
+        .unwrap();
+
+        assert_eq!(token.issuer, "https://auth.example");
+        assert_eq!(token.resource, "https://mcp.example/mcp");
+        assert_eq!(token.token_endpoint, "https://auth.example/token");
+        assert_eq!(token.client_id, "client");
+        assert_eq!(token.client_secret.as_deref(), Some("secret"));
+        assert_eq!(token.token_endpoint_auth_method, "client_secret_post");
+        assert_eq!(token.refresh_token.as_deref(), Some("refresh"));
+        assert_eq!(token.expires_at_unix, Some(123));
+        assert_eq!(token.scopes.as_deref(), Some("read write"));
     }
 
     #[tokio::test]

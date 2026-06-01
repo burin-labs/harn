@@ -3,6 +3,7 @@
 //! Supports stdio transport and streamable HTTP-style request/response transport.
 
 use std::collections::BTreeMap;
+use std::future::Future;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -1396,13 +1397,14 @@ async fn mcp_connect_http_impl(spec: &McpServerSpec) -> Result<VmMcpClientHandle
         .protocol_version
         .clone()
         .unwrap_or_else(|| default_protocol_version(protocol_mode).to_string());
+    let auth_token = resolve_http_auth_token(spec).await;
 
     let handle = VmMcpClientHandle {
         name: spec.name.clone(),
         inner: Arc::new(Mutex::new(Some(McpClientInner::Http(HttpMcpClientInner {
             client,
             url: spec.url.clone(),
-            auth_token: spec.auth_token.clone(),
+            auth_token,
             protocol_mode,
             protocol_version,
             session_id: None,
@@ -1418,6 +1420,27 @@ async fn mcp_connect_http_impl(spec: &McpServerSpec) -> Result<VmMcpClientHandle
 
     initialize_client(&handle).await?;
     Ok(handle)
+}
+
+async fn resolve_http_auth_token(spec: &McpServerSpec) -> Option<String> {
+    resolve_http_auth_token_with(spec, |server_url| async move {
+        crate::mcp_oauth::resolve_bearer(&server_url).await
+    })
+    .await
+}
+
+async fn resolve_http_auth_token_with<R, Fut>(spec: &McpServerSpec, resolver: R) -> Option<String>
+where
+    R: FnOnce(String) -> Fut,
+    Fut: Future<Output = Result<Option<String>, String>>,
+{
+    if let Some(token) = spec.auth_token.as_deref().filter(|token| !token.is_empty()) {
+        return Some(token.to_string());
+    }
+    if spec.url.is_empty() {
+        return None;
+    }
+    resolver(spec.url.clone()).await.unwrap_or(None)
 }
 
 async fn initialize_client(handle: &VmMcpClientHandle) -> Result<(), VmError> {
@@ -2792,24 +2815,59 @@ mod tests {
         LOCK.get_or_init(|| Mutex::new(())).lock().await
     }
 
+    fn http_spec(url: &str, auth_token: Option<&str>) -> McpServerSpec {
+        McpServerSpec {
+            name: "mock-http".to_string(),
+            transport: McpTransport::Http,
+            command: String::new(),
+            args: Vec::new(),
+            env: BTreeMap::new(),
+            url: url.to_string(),
+            auth_token: auth_token.map(str::to_string),
+            protocol_version: None,
+            protocol_mode: None,
+            proxy_server_name: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn http_auth_resolution_prefers_explicit_token() {
+        let spec = http_spec("https://mcp.example/mcp", Some("configured"));
+        let token = resolve_http_auth_token_with(&spec, |_| async {
+            panic!("resolver must not run when the config carries a bearer token")
+        })
+        .await;
+        assert_eq!(token.as_deref(), Some("configured"));
+    }
+
+    #[tokio::test]
+    async fn http_auth_resolution_uses_harn_store_when_config_omits_token() {
+        let spec = http_spec("https://mcp.example/mcp", Some(""));
+        let token = resolve_http_auth_token_with(&spec, |server_url| async move {
+            assert_eq!(server_url, "https://mcp.example/mcp");
+            Ok(Some("stored".to_string()))
+        })
+        .await;
+        assert_eq!(token.as_deref(), Some("stored"));
+    }
+
+    #[tokio::test]
+    async fn http_auth_resolution_leaves_unauthenticated_servers_probeable() {
+        let spec = http_spec("https://mcp.example/mcp", None);
+        let token = resolve_http_auth_token_with(&spec, |_| async {
+            Err("no protected-resource metadata".to_string())
+        })
+        .await;
+        assert_eq!(token, None);
+    }
+
     #[tokio::test(flavor = "current_thread")]
     async fn http_get_stream_dispatches_inbound_elicitation_response() {
         let _guard = http_mcp_test_guard().await;
         tokio::task::LocalSet::new()
             .run_until(async {
                 let (base_url, mut responses) = spawn_eliciting_http_mcp_server().await;
-                let spec = McpServerSpec {
-                    name: "mock-http".to_string(),
-                    transport: McpTransport::Http,
-                    command: String::new(),
-                    args: Vec::new(),
-                    env: BTreeMap::new(),
-                    url: format!("{base_url}/mcp"),
-                    auth_token: None,
-                    protocol_version: None,
-                    protocol_mode: None,
-                    proxy_server_name: None,
-                };
+                let spec = http_spec(&format!("{base_url}/mcp"), None);
 
                 let handle = connect_mcp_server_from_spec(&spec).await.unwrap();
                 let response = tokio::time::timeout(MCP_TIMEOUT, responses.recv())
