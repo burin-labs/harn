@@ -34,6 +34,10 @@
     // qmode experiment writes synthetic profile bullets here during eval runs;
     // these are not docs and shouldn't be linted as such.
     "experiments/**/.harn/**/*.md",
-    "experiments/**/USER_PROFILE.md"
+    "experiments/**/USER_PROFILE.md",
+    // GitHub PR/issue templates are forms, not prose docs — they lead with
+    // an HTML comment and h2 sections, which trips MD041 (first-line-h1).
+    ".github/pull_request_template.md",
+    ".github/ISSUE_TEMPLATE/**/*.md"
   ]
 }

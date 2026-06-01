@@ -1,0 +1,112 @@
+name: PR gates
+
+# Lightweight, diff-driven PR gates. Each gate AUTO-DETECTS from the diff
+# whether it applies and passes on its own when it doesn't — so you do NOT
+# need to add a bypass label preemptively. The `no-demo-needed` /
+# `no-changelog-needed` labels are last-resort overrides for the rare case
+# where a gate fires but the entry is genuinely unnecessary (hygiene, pure
+# refactor, dep bump). Detection logic lives in the per-gate scripts under
+# `.github/scripts/`; this workflow is the shared CI wrapper.
+#
+# Neither gate is wired into ci.yml's required "CI status" job yet — promote
+# to a required check via the merge-queue ruleset once the false-positive
+# rate has been observed on real PRs. The `merge_group` no-op branch keeps
+# that promotion painless.
+#
+# Consolidates the former demo-gate.yml + changelog-fragment-check.yml, which
+# were identical wrappers around two scripts. The two checks keep their
+# names ("Demo gate", "Changelog fragment") via the matrix job name, so any
+# future required-check ruleset keyed on those names is unaffected.
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, reopened, synchronize, labeled, unlabeled]
+  merge_group:
+
+permissions:
+  contents: read
+  pull-requests: read
+
+concurrency:
+  group: pr-gates-${{ github.event.pull_request.number || github.event.merge_group.head_sha || github.ref }}
+  # Only a new push supersedes an in-flight run. Label add/remove events
+  # spawn a fresh run (so a newly-added bypass label takes effect) WITHOUT
+  # cancelling the in-flight one — a cancelled run otherwise surfaces on the
+  # PR as a confusing "failing check".
+  cancel-in-progress: ${{ github.event_name == 'pull_request' && github.event.action == 'synchronize' }}
+
+jobs:
+  gate:
+    # The matrix value becomes the check-run name, so these render as
+    # "Demo gate" and "Changelog fragment" exactly as before.
+    name: ${{ matrix.gate.name }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        gate:
+          - name: Demo gate
+            script: .github/scripts/demo-gate.sh
+            label: no-demo-needed
+          - name: Changelog fragment
+            script: .github/scripts/changelog-fragment-check.sh
+            label: no-changelog-needed
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          # The scripts compute a merge-base between BASE_SHA and HEAD_SHA,
+          # so we need enough history to reach the base. Full history is the
+          # simplest reliable choice; the shallow-clone win on a ~5 s shell
+          # job is negligible.
+          fetch-depth: 0
+
+      - name: Resolve gate inputs
+        id: inputs
+        env:
+          EVENT: ${{ github.event_name }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PR_LABELS_JSON: ${{ toJSON(github.event.pull_request.labels.*.name) }}
+          BYPASS_LABEL: ${{ matrix.gate.label }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "$EVENT" = "merge_group" ]; then
+            # No-op pass: the gate already ran on the PR event. The merge
+            # queue needs a status output here so a future branch-protection
+            # rule can require this check.
+            echo "skip=1" >> "$GITHUB_OUTPUT"
+            echo "::notice title=PR gate::merge_group event — gate is a no-op pass."
+            exit 0
+          fi
+
+          # Read the labels array via jq so an empty array doesn't trip
+          # `set -u`, and match the per-gate bypass label by name.
+          bypass=""
+          if printf '%s' "$PR_LABELS_JSON" \
+            | jq -e --arg label "$BYPASS_LABEL" 'any(. == $label)' > /dev/null; then
+            bypass="PR carries the $BYPASS_LABEL label."
+          fi
+
+          {
+            echo "skip=0"
+            echo "base_sha=$PR_BASE_SHA"
+            echo "head_sha=$PR_HEAD_SHA"
+            echo "bypass_reason=$bypass"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Run gate
+        if: steps.inputs.outputs.skip != '1'
+        env:
+          BASE_SHA: ${{ steps.inputs.outputs.base_sha }}
+          HEAD_SHA: ${{ steps.inputs.outputs.head_sha }}
+          BYPASS_REASON: ${{ steps.inputs.outputs.bypass_reason }}
+          GATE_SCRIPT: ${{ matrix.gate.script }}
+        run: |
+          set -euo pipefail
+          # The checkout step already used fetch-depth: 0, so the base
+          # commit's tree and ancestry are present locally. An explicit
+          # shallow re-fetch would break `git merge-base` with a "no merge
+          # base" fatal — don't do it.
+          bash "$GATE_SCRIPT"
