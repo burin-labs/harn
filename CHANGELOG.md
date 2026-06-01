@@ -8,6 +8,243 @@ highlights live in [CHANGELOG-pre-0.6.md](CHANGELOG-pre-0.6.md).
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.8.61
+
+### Breaking
+
+- **`mutex { ... }` blocks are no longer one process-wide lock.** A bare
+  `mutex { ... }` now keys on its own lexical call-site, so two *distinct*
+  `mutex {}` blocks run concurrently instead of silently serializing against
+  each other. To guard a shared resource, name it: `mutex(resource) { ... }`
+  acquires a lock keyed on the resource's structural value, so every block
+  naming the same resource mutually excludes regardless of where it appears.
+  Code that relied on every `mutex {}` contending on a single global lock must
+  switch to an explicit shared key. Re-acquiring the *same* key on one task
+  still raises `HARN-ORC-011` (self-deadlock), and locks are still released
+  automatically on scope exit and on `throw`.
+
+### Added
+
+- **`harn run` now accepts `--read-only-root`.** CLI now accepts one or
+  more `--read-only-root <path>` arguments to allow read-only access to
+  additional filesystem roots while preserving default run sandbox and
+  network egress guards. This enables maintenance scripts to consume
+  resources outside the workspace without `--no-sandbox`. (#2779)
+- **Tool-policy and permission denials now carry a structured `denial`
+  record (#2780).** When a capability/policy ceiling, argument allow-list,
+  dynamic permission rule, approval decision, or pre-tool hook refuses an
+  agent tool call, the denied `tool_result` and the `PermissionDeny`
+  transcript event now include a `denial` object with the refusing `gate`
+  (`tool_ceiling`, `capability_ceiling`, `side_effect_ceiling`,
+  `arg_constraint`, `dynamic_permission`, `approval_policy`,
+  `approval_unavailable`, `host_rejected`, `hook_deny`), the exceeded
+  `capability`, any `denied_paths`, and a `retryable` flag (always `false`
+  today — these gates are terminal). Host harnesses can fail or pivot on a
+  terminal denial without spending another model call re-parsing prose, and
+  the loop's stall detector counts repeated terminal denials as a loop.
+- **Built-in `chars(text)` for linear-time source scanning (#2790).** Strings
+  are stored as UTF-8, so `s[i]`, `s[a:b]`, `s.count`, and `substring(...)` are
+  each O(n) in the string length — a per-character cursor loop built from them is
+  O(n²) and stalls on multi-kilobyte source files. `chars(text)` (and the
+  existing `text.chars()` method) materializes a string into a list of
+  single-character strings in one linear pass; ASCII characters are interned, so
+  the materialization is allocation-free and `s[i]` / `text.char_at(i)` no longer
+  allocate per access. Scan the resulting list with O(1) indexing. See the new
+  "Scanning large text" guidance in the builtins reference and cheatsheet.
+- **`verify_completion_judge` now caps repeated vetoes per session (#2791).**
+  A `max_invocations` (alias `max_feedback`, default `5`) ceiling stops a weak
+  model from burning paid completion-judge calls forever. Once the cap is hit
+  the judge stops firing and the loop ends with status `verify_capped` and
+  stop_reason `completion_judge_cap_reached`. The result now carries a
+  structured `completion_judge` block (`invocations`, `vetoes`,
+  `max_invocations`, `cap_reached`) so harnesses can report judge churn without
+  transcript mining. Set `max_invocations: 0` to disable the cap.
+- Detect provable channel wait-for deadlocks across tasks and raise `HARN-ORC-012` instead of hanging forever.
+- Added native `find_text` / `harness.fs.find_text` source-tree text search for pure-Harn lint and guard scripts.
+- Added `ast.search` / `std/ast` `ast_search` — read-only structural search that runs a tree-sitter query against a
+  file or inline source and returns every match with every capture (`@name`) bound (text + byte/row/col range). The
+  structural complement to `fs.find_text` and the read primitive of the rule engine.
+- Added `ast.batch_apply` / `std/edit` `edit_batch_apply` — a multi-file codemod runner that applies one
+  tree-sitter query→`replacement` across a list of paths, returning a per-file preview plus a roll-up summary.
+  Dry-run is the default (writing requires `dry_run: false`), the byte-splice preserves formatting outside each
+  match, per-file failures are isolated rather than aborting the batch, and re-running an applied codemod reports
+  zero further changes (the idempotency hook). Shares its span/select/splice machinery with `ast.apply_node`.
+- Added the `harn-rules` crate — the declarative structural rule engine core (Rule Engine Epic A). It ships the
+  atomic matching tier: a serde rule model (`id` / `language` / `severity` / `message` / `rule` block / `fix`), a
+  pattern compiler that lifts `$VAR` metavariable snippets into tree-sitter queries (operator-precise, with repeated
+  metavars unifying), `kind` and `regex` matchers, and a TOML rule-file / directory loader. Rules run through the same
+  tree-sitter machinery as `ast.search`, producing matches with metavariable bindings.
+- **Self-deadlock detection (`HARN-ORC-011`) now spans inline async-builtin
+  boundaries.** Acquiring a `mutex` that an ancestor already holds — when that
+  ancestor is parked awaiting the async builtin or closure you're running inline
+  — is a provably-unresolvable self-deadlock (the sole holder is blocked waiting
+  on you). The VM now propagates an ancestor's held-lock keys into such inline
+  children and raises `HARN-ORC-011` instead of hanging forever. New concurrent
+  tasks (`spawn`, `parallel`, triggers) deliberately do *not* inherit, since
+  blocking on a parent-held lock there is legitimately resolvable.
+- **The VM now detects deterministic self-deadlocks instead of hanging
+  forever (HARN-ORC-011).** Re-entering a `mutex { … }` block on a lock this
+  task already holds — directly or through a called function — and `await`ing
+  a task's own join handle previously blocked the VM indefinitely with no
+  diagnostic. Both now raise a clear, catchable error before blocking. Run
+  `harn explain HARN-ORC-011` for guidance. (Cross-task wait-for-graph and
+  builtin-`sync_*`-path detection remain follow-ups.)
+- **Single source of truth for generated-artifact drift checks.**
+  `scripts/generated_artifacts.toml` now registers every "source of truth ->
+  generated file + drift check" pair in one place, and `make
+  check-generated-registry` fails the build when the registry disagrees with
+  the Makefile `all:` recipe, the CI workflows, or the declared output files.
+  A new `gen-*`/`check-*` pair can no longer silently skip CI. Added a
+  cross-crate `make check-tree-sitter-keywords` guard (with `make
+  gen-tree-sitter-keywords`) so the tree-sitter grammar's reserved-word set
+  cannot drift from the lexer `KEYWORDS` const. Both guards run in CI and in
+  the pre-commit / pre-push hooks.
+- **`harn lint` and `harn fmt --check` now point you at the auto-fix flag.**
+  When findings are machine-fixable, lint prints an ESLint-style summary
+  ("All N finding(s) are auto-fixable — run `harn lint --fix` to apply them.",
+  or "M of N …" when only some are), and `fmt --check` reports that N files
+  would be reformatted and to re-run `harn fmt` without `--check`. The hint is
+  stderr-only and never prints once the fixes have been applied; the `--json`
+  report shape is unchanged.
+- harn-lsp adds a `harn.applyRepair` `workspace/executeCommand` that resolves a
+  code action's `repair_id` into a `WorkspaceEdit` on demand, so editors can
+  apply repair-backed fixes that ship without an inline edit.
+- **Structured concurrency: `scope { ... }` nurseries.** Tasks spawned inside a
+  `scope { }` block are joined when the block exits — so a spawned task can no
+  longer outlive its scope unnoticed, and an error in any of them is no longer
+  silently swallowed. At scope exit the first failing task's error propagates
+  out of the block (catchable with `try`) after its siblings are cancelled; on a
+  `throw`/`return`/`break` out of the block the bound tasks are cancelled rather
+  than leaked. Explicitly `await`-ing a task removes it from the nursery (no
+  double-join). A bare `spawn` with no enclosing `scope { }` keeps its previous
+  detached behavior, so this is additive. `scope` is a contextual keyword —
+  existing identifiers, dict keys, and properties named `scope` are unaffected.
+- **`std/testing` gains LLM-mock builders, error assertions, and
+  filesystem fixtures.** New helpers cut the boilerplate that kept most
+  fixtures on the raw, unscoped form:
+  - LLM turn builders — `llm_text`, `llm_done`, `llm_error`,
+    `llm_tool_call`, `llm_tool_calls`, and `with_llm_script` — make the
+    already-scoped `with_llm_mocks` readable, replacing the
+    `llm_mock_clear()` + sequential `llm_mock({...})` pattern.
+  - Error assertions — `assert_throws`, `assert_error_contains`, and
+    `assert_no_throw` — collapse the
+    `try {...}` + `is_err` + `unwrap_err` + `to_string` + `contains`
+    chain into one call.
+  - Filesystem fixtures — `with_temp_dir`, `with_fs`, and the unified
+    `with_scenario` — give a scoped temp workspace (optionally seeded
+    from a `{path: contents}` dict) with guaranteed recursive cleanup,
+    the fs counterpart to `with_host_mocks`.
+
+### Changed
+
+- **Much faster repo-scale text scans (#2796).** The regex builtins cached the
+  compiled pattern but handed each call a *deep clone* of `regex::Regex`, which
+  re-copies the compiled program and its match-cache pool (~3.5us/call) — the
+  dominant cost when running `regex_match` over every line of a source tree.
+  The cache now shares each compiled pattern via `Rc`, so a repeated lookup is
+  a refcount bump, and a single-slot memo skips the cache-key allocation when
+  the same pattern is reused in a loop. `regex_match` / `regex_replace` /
+  `regex_captures` / `regex_split` and the `contains` / `starts_with` /
+  `ends_with` / `split` / `replace` / `index_of` string methods also borrow
+  their subject/needle instead of cloning it. A line-oriented scan of the
+  repository (~740k `regex_match` calls) drops from ~4.0s to ~1.2s, making
+  TypeScript-style source-tree scanners practical to port to Harn.
+- **Iterator/collection combinators now infer their element type, and `map`/`flat_map`
+  thread the closure's return type.** Previously `xs.map(...)`, `xs.filter(...)`,
+  `xs.sort()` and `dict.keys()`/`values()`/`entries()` collapsed to the opaque
+  `list`/`dict` type — only the lazy `Iter` combinators carried `T`, so a single
+  eager combinator erased element typing for the rest of a chain. Now eager
+  combinators preserve or transform the element type (`list<T>.filter(…) →
+  list<T>`, `list<T>.map(f) → list<R>` where `R` is `f`'s inferred return,
+  `dict<K,V>.entries() → list<Pair<K,V>>`, …), matching what the equivalent
+  `.iter()`-bridged chain already produced. `map`/`flat_map` infer the closure
+  body's return type with the closure parameter bound to the receiver's element
+  type, so `[1,2,3].map({ n -> "v${n}" })` is now `list<string>`. Applies to both
+  eager (`list`/`dict`) and lazy (`iter`) receivers.
+- **Destructured rest patterns now preserve the source's element/value type.**
+  `let [head, ...rest] = xs` types `rest` as `list<T>` (was the opaque `list`),
+  and `let { a, ...rest } = d` keeps `dict<K, V>` when the source dict is
+  parameterized. Completes the destructuring type inference so iterating or
+  indexing a rest binding recovers a precise element type.
+- **Destructuring binds now infer the same types as the `?.`/`??` form they
+  desugar to.** A destructured binding such as `let { path = "", retries = 0 }
+  = opts` previously left `path` and `retries` untyped; the type checker now
+  infers each binding from `field + default` exactly as the equivalent
+  `opts?.path ?? ""` / `opts?.retries ?? 0` would — present shape fields keep
+  their declared type, a `nil` default stays optional (`T | nil`), and the
+  default's type carries through when the source dict is untyped. This makes
+  migrating the pervasive `let x = input?.field ?? default` idiom to a single
+  destructuring bind lossless under the type checker. Applies to `let`, `var`,
+  and `for`-`in` patterns. See the new "Destructure with defaults" cookbook.
+  (Positional/tuple-precise element types for list patterns remain a
+  follow-up.)
+- **Un-annotated function return types are now inferred from the body**, so
+  calling a helper without a `-> T` annotation recovers a precise type instead
+  of going untyped: `fn area(w: int, h: int) { w * h }` now returns `int` at its
+  call sites. Inference is sound by construction — it assigns a return type only
+  when *every* return path (and any implicit fall-through value) is concretely
+  known, otherwise the function stays dynamic. Recursion is self-guarding: a
+  self/mutual/forward call resolves to the hoisted placeholder signature, so the
+  function simply stays dynamic rather than looping. Inferred return types drive
+  call-site inference only; they never trigger the declared-return diagnostics
+  (fall-through / mismatch), which remain reserved for explicit annotations.
+- **`+`/`-`/`*`/`/` no longer report a spurious "can't …" error when an operand
+  has a gradual static type** (`any` / `unknown` / `_`). A gradual operand is
+  compatible with every operator and the real check is deferred to runtime,
+  matching how untyped operands were already treated. The gradual-top-type set
+  is now centralized in one `is_gradual_type_name` predicate.
+- **A local binding shadows a same-named function even when its static type is
+  unknown.** `var x = …` / `let x = …` that reuses a function's name now
+  resolves to the local, not the function reference, fixing a case where a
+  shadowing local with an unknown type was mis-typed as `fn(…) -> …`.
+- **Faster local-variable reads.** `GetLocalSlot` no longer clones the
+  binding's name `String` on every successful read — that per-instruction
+  heap allocation, used only to build a cold error message, is now deferred
+  to the error path. This removes the dominant allocation in tight
+  local-variable loops with no behavioral change.
+
+### Fixed
+
+- **In-process ACP `session/load` restores persisted saved sessions (#2793).**
+  A `session/load` for an id the running `harn serve` instance never created now
+  reconstructs it from persisted replay events — registering a live, promptable
+  session and replaying its history — instead of rejecting it as `unknown
+  session`. This is the in-process analogue of the WebSocket hub's persisted
+  fallback and unblocks the Rust TUI saved-session picker and `burin --continue
+  <id>`. Ids with no live session and no persisted events still fail loudly.
+- **Release container publishing now reuses released Linux archives (#2794).**
+  GHCR image assembly no longer recompiles Harn inside Docker after the release
+  binaries already exist, and the container publish leg has its own timeout.
+- **VM try/catch now observes throws from return expressions (#2821).**
+  `return f()` and `return value |> f` inside a `try` block no longer elide
+  the handler frame, so local catches run and typed-catch mismatches still
+  propagate correctly.
+- **Hostlib deterministic tools now reject malformed scalar payloads and report
+  process/file-watch edge cases correctly.** Shared VmValue parsing now rejects
+  non-finite or out-of-range numeric inputs, `run_command` no longer ignores
+  malformed `cwd`/`stdin` fields or wait failures, directory listing reports
+  symlinks without following their targets, inline command output preserves
+  invalid UTF-8 lossily, and file watches can subscribe to `access`/`other`
+  events.
+- **The public-function doc-comment auto-fixer now covers every wrong-format
+  case and no longer double-reports.** A `pub fn` preceded by a `//` / `///`
+  comment used to surface both the fixless `missing-harndoc` warning and the
+  auto-fixable `legacy-doc-comment` one; `missing-harndoc` is now suppressed
+  whenever an adjacent migratable comment exists, so you see a single
+  fixable finding. Plain `/* … */` block comments (single- and multi-line)
+  directly above a public item are now migrated to canonical `/** … */`
+  too, matching the existing `//` handling.
+- **Seven generated-artifact drift guards that never ran in CI now run on
+  every PR.** `check-protocol-artifacts`, `check-session-bundle-schema`,
+  `check-provider-catalog`, `check-provider-catalog-drift`,
+  `check-docs-workflow-quickstart`, `check-receipt-structs`, and the new
+  `check-tree-sitter-keywords` existed only in `make all`, so a contributor
+  could edit `spec/openapi.yaml` or the `SessionBundle` DTO and ship stale
+  bindings with green CI. They are now wired into the appropriate CI lanes.
+  Wiring `check-docs-workflow-quickstart` surfaced a pre-existing stale pin:
+  the workflow-authoring quickstart's `graph_digest` had drifted from the
+  runtime; the docs page and check are re-pinned to the current value.
+
 ## v0.8.60
 
 ### Added
