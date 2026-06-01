@@ -471,6 +471,9 @@ async fn run_acp_channel_server_inner(
                     if preempt_session_interruption(&cancellations, &msg) {
                         continue;
                     }
+                    if apply_session_budget_rearm(&msg) {
+                        continue;
+                    }
 
                     let _ = routed_tx.send(msg);
                 }
@@ -574,6 +577,9 @@ pub async fn run_acp_server(config: AcpServerConfig) {
 
                     prepare_session_prompt(&cancellations, &msg);
                     if preempt_session_interruption(&cancellations, &msg) {
+                        continue;
+                    }
+                    if apply_session_budget_rearm(&msg) {
                         continue;
                     }
 

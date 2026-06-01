@@ -40,8 +40,8 @@ pub use schema::{
     HARN_SESSION_UPDATE_EXTENSIONS, HARN_TOOL_LIFECYCLE_EXTENSION_FIELDS,
 };
 use sessions::{
-    lookup_session_cancellation, preempt_session_interruption, prepare_session_prompt, Session,
-    SessionBudget, SessionCancellation, SessionInfo,
+    apply_session_budget_rearm, lookup_session_cancellation, preempt_session_interruption,
+    prepare_session_prompt, Session, SessionBudget, SessionCancellation, SessionInfo,
 };
 pub(crate) use transport::run_acp_channel_server_with_existing_handle;
 pub use transport::{

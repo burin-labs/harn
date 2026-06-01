@@ -247,7 +247,8 @@ pub(crate) use self::call::{
 };
 pub use self::cost::{
     calculate_cost_for_provider, install_llm_cost_budget, install_llm_token_budget,
-    peek_total_cost, peek_total_tokens, LlmBudgetGuard, LlmTokenBudgetGuard,
+    peek_llm_cost_budget, peek_llm_token_budget, peek_total_cost, peek_total_tokens,
+    set_llm_cost_budget, set_llm_token_budget, LlmBudgetGuard, LlmTokenBudgetGuard,
 };
 pub use self::healthcheck::{
     build_healthcheck_url, run_provider_healthcheck, run_provider_healthcheck_with_options,

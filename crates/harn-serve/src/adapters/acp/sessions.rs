@@ -166,6 +166,54 @@ pub(super) fn preempt_session_interruption(
     }
 }
 
+/// Re-arm the live LLM `call_budget` ceilings on the engine thread out-of-band,
+/// so a prompt turn already in flight observes the new cap on its next LLM
+/// dispatch (burin-labs/burin-code#1561). Returns `true` when `msg` was a
+/// `session/set_budget` control frame (so the router drops it instead of
+/// queueing it behind the active turn).
+///
+/// This runs on the same router task / engine thread that drives the prompt
+/// turn. The cost/token ceilings are per-thread thread-locals
+/// (`harn_vm::set_llm_*_budget`), which is exactly why this reaches an in-flight
+/// turn: the blocked message loop would only process the frame after the turn
+/// unwinds. It mirrors how `session/cancel` preempts a running turn from the
+/// router.
+///
+/// Shape: `params = { llm_cost_usd?: number|null, llm_tokens?: number|null }`.
+/// An absent field leaves that ceiling unchanged; an explicit `null` clears the
+/// cap; a number re-arms it. The control re-arms the live ceiling **in place**,
+/// preserving accumulated spend — it deliberately does not touch
+/// `session.budget` (the per-turn `@budget` source), which would reset
+/// accumulation at the next turn.
+pub(super) fn apply_session_budget_rearm(msg: &serde_json::Value) -> bool {
+    if msg.get("method").and_then(|value| value.as_str()) != Some("session/set_budget") {
+        return false;
+    }
+    let params = msg.get("params").unwrap_or(&serde_json::Value::Null);
+    rearm_dimension(params.get("llm_cost_usd"), harn_vm::set_llm_cost_budget);
+    rearm_dimension(params.get("llm_tokens"), |cap| {
+        harn_vm::set_llm_token_budget(cap.map(|tokens| tokens.max(0.0) as u64));
+    });
+    true
+}
+
+/// Re-arm one `session/set_budget` ceiling dimension. An absent field
+/// (`None`) or a malformed value leaves the live ceiling untouched rather than
+/// guessing; an explicit JSON `null` clears the cap (`set(None)`); a finite
+/// number re-arms it (`set(Some(cap))`). The `set` closure adapts the `f64`
+/// ceiling to the dimension's thread-local setter.
+fn rearm_dimension(value: Option<&serde_json::Value>, set: impl FnOnce(Option<f64>)) {
+    match value {
+        Some(serde_json::Value::Null) => set(None),
+        Some(serde_json::Value::Number(number)) => {
+            if let Some(cap) = number.as_f64().filter(|n| n.is_finite()) {
+                set(Some(cap));
+            }
+        }
+        _ => {}
+    }
+}
+
 pub(super) fn prepare_session_prompt(
     cancellations: &Arc<std::sync::Mutex<HashMap<String, SessionCancellation>>>,
     msg: &serde_json::Value,
@@ -182,5 +230,61 @@ pub(super) fn prepare_session_prompt(
     };
     if let Some(cancellation) = lookup_session_cancellation(cancellations, session_id) {
         cancellation.prepare_prompt();
+    }
+}
+
+#[cfg(test)]
+mod budget_rearm_tests {
+    use super::*;
+    use serde_json::json;
+
+    fn set_budget_frame(params: serde_json::Value) -> serde_json::Value {
+        json!({ "jsonrpc": "2.0", "method": "session/set_budget", "params": params })
+    }
+
+    #[test]
+    fn rearms_cost_and_token_ceilings_and_clears_with_null() {
+        assert!(apply_session_budget_rearm(&set_budget_frame(
+            json!({ "llm_cost_usd": 1.5, "llm_tokens": 50_000 })
+        )));
+        assert_eq!(harn_vm::peek_llm_cost_budget(), Some(1.5));
+        assert_eq!(harn_vm::peek_llm_token_budget(), Some(50_000));
+
+        // An explicit null clears the cap on that dimension.
+        assert!(apply_session_budget_rearm(&set_budget_frame(
+            json!({ "llm_cost_usd": null, "llm_tokens": null })
+        )));
+        assert_eq!(harn_vm::peek_llm_cost_budget(), None);
+        assert_eq!(harn_vm::peek_llm_token_budget(), None);
+    }
+
+    #[test]
+    fn absent_field_leaves_that_dimension_untouched() {
+        apply_session_budget_rearm(&set_budget_frame(
+            json!({ "llm_cost_usd": 2.0, "llm_tokens": 100 }),
+        ));
+        // Re-arm cost only; the token ceiling must survive.
+        apply_session_budget_rearm(&set_budget_frame(json!({ "llm_cost_usd": 3.0 })));
+        assert_eq!(harn_vm::peek_llm_cost_budget(), Some(3.0));
+        assert_eq!(harn_vm::peek_llm_token_budget(), Some(100));
+        // Leave the thread-local clean for any test reusing this worker thread.
+        apply_session_budget_rearm(&set_budget_frame(
+            json!({ "llm_cost_usd": null, "llm_tokens": null }),
+        ));
+    }
+
+    #[test]
+    fn ignores_non_budget_frames_and_malformed_values() {
+        harn_vm::set_llm_cost_budget(Some(5.0));
+        // A malformed (non-number, non-null) value leaves the ceiling untouched.
+        assert!(apply_session_budget_rearm(&set_budget_frame(
+            json!({ "llm_cost_usd": "lots" })
+        )));
+        assert_eq!(harn_vm::peek_llm_cost_budget(), Some(5.0));
+        // A different method is not our control frame.
+        assert!(!apply_session_budget_rearm(&json!({
+            "method": "session/prompt", "params": {}
+        })));
+        harn_vm::set_llm_cost_budget(None);
     }
 }
