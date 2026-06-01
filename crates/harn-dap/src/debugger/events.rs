@@ -224,7 +224,9 @@ impl Debugger {
                         self.pending_pause = true;
                     }
                 }
-                WorkerEvent::WorkerCompleted | WorkerEvent::WorkerCancelled => {
+                WorkerEvent::WorkerCompleted
+                | WorkerEvent::WorkerStopped
+                | WorkerEvent::WorkerCancelled => {
                     self.subagent_tracker.mark_exited(&obs.worker_id);
                     let seq = self.next_seq();
                     out.push(DapResponse::event(

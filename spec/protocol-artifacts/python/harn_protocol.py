@@ -288,6 +288,7 @@ HARN_WORKER_STATUSES: tuple = (
     "suspended",
     "completed",
     "failed",
+    "stopped",
     "cancelled",
 )
 HARN_TOOL_CALL_RECEIPT_STATUSES: tuple = (
@@ -522,6 +523,7 @@ class HarnWorkerStatus(str, Enum):
     SUSPENDED = "suspended"
     COMPLETED = "completed"
     FAILED = "failed"
+    STOPPED = "stopped"
     CANCELLED = "cancelled"
 
 

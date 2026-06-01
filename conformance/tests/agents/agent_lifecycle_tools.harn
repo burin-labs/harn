@@ -10,6 +10,7 @@ pipeline main() {
   __io_println(tool_find(parent, "agent_await_resumption")?.name)
   __io_println(tool_find(parent, "subagent_pause")?.name)
   __io_println(tool_find(parent, "subagent_resume")?.name)
+  __io_println(tool_find(parent, "subagent_stop")?.name)
   let reapplied = agent_lifecycle_tools(parent, {subagents: true})
   __io_println(tool_count(reapplied) == tool_count(parent))
 }

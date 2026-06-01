@@ -12,6 +12,8 @@ type ResumeByResult = {handled: bool, mechanism: string, reason?: string}
 
 type ResumeByCallback = fn(Harness, dict) -> ResumeByResult | dict | nil
 
+type AgentStopOptions = {graceful?: bool, reason?: string}
+
 type AgentAwaitResumptionRequest = {
   reason: string,
   conditions: ResumeConditions?,
@@ -128,6 +130,19 @@ fn __worker_options(value, label) {
   throw label + ": options must be a dict or nil"
 }
 
+fn __agent_stop_options(options, label) {
+  let opts = __worker_options(options, label)
+  let graceful = opts?.graceful ?? false
+  if type_of(graceful) != "bool" {
+    throw label + ": options.graceful must be a bool"
+  }
+  if opts?.reason != nil && type_of(opts.reason) != "string" {
+    throw label + ": options.reason must be a string"
+  }
+  let reason = trim(to_string(opts?.reason ?? ""))
+  return filter_nil({graceful: graceful, reason: reason == "" ? nil : reason})
+}
+
 fn __worker_resume_options(options) {
   if options?.resume_when == nil {
     return options
@@ -215,6 +230,23 @@ fn __subagent_resume_tool(args) {
   return resume_agent(handle, args?.input, continue_transcript)
 }
 
+fn __subagent_stop_tool(args) {
+  let handle = args?.handle
+  if handle == nil || trim(to_string(handle)) == "" {
+    throw "subagent_stop: handle is required"
+  }
+  let graceful = args?.graceful ?? true
+  if type_of(graceful) != "bool" {
+    throw "subagent_stop: graceful must be a bool"
+  }
+  var reason = trim(to_string(args?.reason ?? "parent requested stop"))
+  if reason == "" {
+    reason = "parent requested stop"
+  }
+  __agent_lifecycle_tool_audit("subagent_stop", "parent", reason, handle)
+  return agent_stop(handle, {graceful: graceful, reason: reason})
+}
+
 fn __agent_await_resumption_tool(_args) {
   throw "HARN-SUS-005: agent_await_resumption is handled structurally by agent_loop and cannot be invoked directly"
 }
@@ -293,6 +325,27 @@ fn __agent_lifecycle_add_subagent_tools(registry) {
       },
     )
   }
+  if !__agent_tool_registry_has(tools, "subagent_stop") {
+    tools = tool_define(
+      tools,
+      "subagent_stop",
+      "Stop a subagent. Defaults to a graceful recursive handoff summary; pass graceful=false for a hard cancel.",
+      {
+        handler: __subagent_stop_tool,
+        parameters: {
+          handle: {type: "string", description: "Worker id or worker handle to stop."},
+          graceful: {
+            type: "boolean",
+            required: false,
+            description: "Collect a typed handoff before stopping; defaults to true.",
+          },
+          reason: {type: "string", required: false, description: "Why the child should stop."},
+        },
+        returns: {type: "object"},
+        annotations: {agent_lifecycle: true, initiator: "parent", handoff: true},
+      },
+    )
+  }
   return tools
 }
 
@@ -300,8 +353,8 @@ fn __agent_lifecycle_add_subagent_tools(registry) {
  * agent_lifecycle_tools adds model-facing suspend/resume lifecycle tools.
  *
  * Every returned registry includes `agent_await_resumption`. Parent-side
- * `subagent_pause` and `subagent_resume` are added only when the caller opts
- * into subagent lifecycle control with `{subagents: true}` or
+ * `subagent_pause`, `subagent_resume`, and `subagent_stop` are added only
+ * when the caller opts into subagent lifecycle control with `{subagents: true}` or
  * `{subagent_tools: true}`, or when the supplied registry already exposes a
  * `sub_agent_run` / `spawn_agent` tool.
  *
@@ -468,6 +521,23 @@ pub fn wait_agent(worker_or_workers) {
     return results
   }
   return __host_worker_wait(worker_or_workers)
+}
+
+/**
+ * agent_stop.
+ *
+ * Stop a worker. By default this is a hard cancel. Pass
+ * `{graceful: true}` to return a recursive typed handoff summary before the
+ * worker is stopped.
+ *
+ * @effects: [host]
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: experimental
+ * @example: agent_stop(worker, {graceful: true})
+ */
+pub fn agent_stop(worker, options: AgentStopOptions = nil) {
+  return __host_worker_stop(worker, __agent_stop_options(options, "agent_stop"))
 }
 
 /**

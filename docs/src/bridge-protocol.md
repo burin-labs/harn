@@ -390,7 +390,7 @@ scraping plain-text logs.
 
 ### Lifecycle states
 
-The runtime emits one of six typed lifecycle events per worker
+The runtime emits one of seven typed lifecycle events per worker
 transition. The wire `status` string is the same value harn writes to
 the worker's persisted state, so it round-trips through the bridge
 unchanged:
@@ -402,9 +402,10 @@ unchanged:
 | `WorkerWaitingForInput` | `awaiting_input` | A retriggerable worker has finished its current cycle and is parked waiting for the next host trigger payload.     |
 | `WorkerCompleted`       | `completed`      | A non-retriggerable worker has finished successfully (terminal).                                                   |
 | `WorkerFailed`          | `failed`         | A worker terminated with an error (terminal).                                                                      |
+| `WorkerStopped`         | `stopped`        | A worker stopped gracefully after emitting a typed handoff summary (terminal).                                     |
 | `WorkerCancelled`       | `cancelled`      | A worker was cancelled via `close_agent` or upstream cancellation (terminal).                                      |
 
-The three terminal events end the worker's lifetime. `Progressed` and
+The four terminal events end the worker's lifetime. `Progressed` and
 `WaitingForInput` are explicitly non-terminal — observers should
 expect more events on the same `worker_id` after they fire.
 

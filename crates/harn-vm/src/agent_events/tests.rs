@@ -588,11 +588,13 @@ fn worker_event_status_strings_cover_all_variants() {
     assert_eq!(WorkerEvent::WorkerResumed.as_status(), "running");
     assert_eq!(WorkerEvent::WorkerCompleted.as_status(), "completed");
     assert_eq!(WorkerEvent::WorkerFailed.as_status(), "failed");
+    assert_eq!(WorkerEvent::WorkerStopped.as_status(), "stopped");
     assert_eq!(WorkerEvent::WorkerCancelled.as_status(), "cancelled");
 
     for terminal in [
         WorkerEvent::WorkerCompleted,
         WorkerEvent::WorkerFailed,
+        WorkerEvent::WorkerStopped,
         WorkerEvent::WorkerCancelled,
     ] {
         assert!(terminal.is_terminal(), "{terminal:?} should be terminal");
@@ -627,6 +629,7 @@ fn worker_event_status_strings_cover_all_variants() {
             "running",
             "completed",
             "failed",
+            "stopped",
             "cancelled",
         ]
     );

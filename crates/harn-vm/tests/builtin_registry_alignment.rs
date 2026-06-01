@@ -143,6 +143,7 @@ const RUNTIME_ONLY_EXCEPTIONS: &[&str] = &[
     "__host_worker_resume",
     "__host_worker_send_input",
     "__host_worker_spawn",
+    "__host_worker_stop",
     "__host_worker_suspend",
     "__host_worker_trigger",
     "__host_worker_wait",

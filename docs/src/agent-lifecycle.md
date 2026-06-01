@@ -1,11 +1,11 @@
-# Agent lifecycle: suspend, resume, self-park
+# Agent lifecycle: suspend, resume, stop, self-park
 
 Harn agents are not just one-shot calls — they are cooperatively schedulable
-units that can park mid-loop, persist a resumable snapshot, and resume later
-in the same process, a different process, or another machine. This page is
-the long-form reference for the suspend/resume primitive: when to reach for
-it, who owns the resume responsibility, and how transcript continuity works
-across the pause.
+units that can park mid-loop, persist a resumable snapshot, resume later, or
+hand unfinished child work back to a parent with a typed stop handoff. This
+page is the long-form reference for lifecycle primitives: when to reach for
+them, who owns the resume responsibility, and how transcript continuity or
+stop handoffs work across the boundary.
 
 For a one-screen LLM quickref see the "Agent lifecycle: pause, resume,
 self-park" section in `docs/llm/harn-quickref.md`. For the upstream protocol
@@ -25,6 +25,7 @@ narrowest one that fits.
 | Wait for one specific external event | **Suspend/resume** with `agent_await_resumption(reason, conditions)` | Park the agent, declare what should wake it, keep the transcript. |
 | Park indefinitely until an operator resumes by hand | **Suspend/resume** with `agent_await_resumption(reason)` (no conditions) | Parent agent or operator owns the resume; no trigger gets registered. |
 | Park one agent while another runs to completion | Parent-driven `subagent_pause(handle, reason)` plus `subagent_resume(handle)` | The parent loop owns when the child resumes. |
+| Stop a child and take over its unfinished work | `agent_stop(handle, {graceful: true})` or parent-driven `subagent_stop(handle)` | The runtime folds the child transcript and descendant subagent summaries into a typed handoff artifact. |
 | Background-run an agent and rejoin it later | `spawn_agent({background: true})` + `wait_agent(handle)` | The agent is *running*, not parked. Use suspend/resume only when the agent itself should yield CPU. |
 
 Two anti-patterns worth calling out:
@@ -43,13 +44,13 @@ Two anti-patterns worth calling out:
 
 The suspend/resume primitive ships as three builtin layers:
 
-1. **Script-level** — `suspend_agent`, `resume_agent`, `parse_resume_conditions`,
-   `agent_await_resumption` from `std/agent/workers`. Operators and parent
+1. **Script-level** — `suspend_agent`, `resume_agent`, `agent_stop`,
+   `parse_resume_conditions`, `agent_await_resumption` from `std/agent/workers`. Operators and parent
    pipelines call these directly.
 2. **Model-facing tools** — `agent_loop(...)` automatically exposes
    `agent_await_resumption` as a callable tool to the model so an agent can
-   self-park. Pass `subagents: true` to also expose `subagent_pause` and
-   `subagent_resume`.
+   self-park. Pass `subagents: true` to also expose `subagent_pause`,
+   `subagent_resume`, and `subagent_stop`.
 3. **Resume-responsibility callbacks** — `ResumeBy.parent_llm`,
    `ResumeBy.local_runtime`, `ResumeBy.cloud_harness`, and
    `ResumeBy.pipeline_drain` from `std/agent/resume_by` name *who* owns
@@ -62,9 +63,10 @@ The suspend/resume primitive ships as three builtin layers:
 |---|---|
 | `suspend_agent(worker, reason?, options?)` | Cooperatively suspend a running worker. Persists a resumable snapshot, emits a `WorkerSuspended` lifecycle event, returns `status: "suspended"` with `suspension` metadata. Idempotent on already-suspended workers. |
 | `resume_agent(worker_or_snapshot, input?, continue_transcript?)` | Resume a suspended worker, optionally with new input. `continue_transcript` defaults to `true` (full transcript preserved); pass `false` to resume from prior summary plus new input only. Accepts either a live handle or a persisted snapshot dict. |
+| `agent_stop(worker, options?)` | Stop a worker. The default is a hard cancel; `{graceful: true}` emits `WorkerStopped` and returns `{status: "stopped", handoff, children, handoffs, worker}` where `handoff` is a normalized handoff artifact and `children` recursively folds descendant subagent handoffs. |
 | `agent_await_resumption(reason, conditions?, resume_by?)` | Build the normalized lifecycle-tool request. Inside an `agent_loop` running as a worker, the loop intercepts this call structurally and routes it through the same suspend path as `suspend_agent`. |
 | `parse_resume_conditions(conditions?)` | Validate and normalize a `ResumeConditions` dict without spawning a worker. Useful for input validation in handlers and pre-flight checks. |
-| `agent_lifecycle_tools(registry?, options?)` | Decorate a tool registry with `agent_await_resumption` (always) and, when `subagents: true`, `subagent_pause` / `subagent_resume`. `agent_loop` calls this internally; scripts compose it when they build registries by hand. |
+| `agent_lifecycle_tools(registry?, options?)` | Decorate a tool registry with `agent_await_resumption` (always) and, when `subagents: true`, `subagent_pause` / `subagent_resume` / `subagent_stop`. `agent_loop` calls this internally; scripts compose it when they build registries by hand. |
 
 ### Resume conditions
 
@@ -131,11 +133,12 @@ harn run --resume .harn/workers/worker_01HF...json
 continuity reminder onto the next turn, and continues the loop in the same
 session.
 
-## Parent-driven pause and resume
+## Parent-driven pause, resume, and stop
 
 For multi-agent setups, the parent loop owns pause/resume of its children.
 Pass `subagents: true` (or `subagent_tools: true`) to `agent_loop(...)` to
-expose `subagent_pause` and `subagent_resume` as model-callable tools:
+expose `subagent_pause`, `subagent_resume`, and `subagent_stop` as
+model-callable tools:
 
 ```harn,ignore
 import { agent_lifecycle_tools } from "std/agent/workers"
@@ -155,6 +158,7 @@ The parent's model can now call:
 |---|---|
 | `subagent_pause(handle, reason)` | Pause a running child after its current turn settles. Idempotent on already-suspended children. |
 | `subagent_resume(handle, input?, continue_transcript? = true)` | Resume a suspended child with optional new input. |
+| `subagent_stop(handle, graceful? = true, reason?)` | Stop a child. Graceful mode is the default and returns a recursive typed handoff summary; `graceful: false` preserves hard-cancel behavior. |
 
 Scripts can drive the same lifecycle directly without going through the
 model:
@@ -176,6 +180,11 @@ log(final.has_transcript) // true — transcript continuity preserved
 `subagent_pause` and `subagent_resume` emit `tool_call_audit` telemetry
 with `initiator: "parent"` so the trust graph can distinguish parent-
 driven pauses from self-parks.
+
+`subagent_stop` emits the same audit telemetry and, in graceful mode, returns
+a handoff artifact shaped for parent takeover. `handoff.metadata` includes
+the child `session_id`, workspace anchor, token budget/usage, snapshot path,
+and `child_handoffs` for recursively stopped descendant subagents.
 
 ## Conditioned resume
 
@@ -380,6 +389,10 @@ authoritative; the table above lists only the `HARN-SUS-*` namespace.
   suspended worker marks the snapshot rejected; a later `resume_agent`
   raises `HARN-SUS-010`. Closing is the correct call when the operator
   has decided the work is no longer relevant.
+- **Graceful stop is a handoff, not a resume checkpoint.** Use
+  `agent_stop(handle, {graceful: true})` when the parent should continue the
+  work itself. Use `suspend_agent`/`resume_agent` when the same child should
+  continue later.
 
 ## See also
 
