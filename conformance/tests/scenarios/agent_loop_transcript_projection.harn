@@ -1,3 +1,5 @@
+import { llm_text, with_llm_script } from "std/testing"
+
 /**
  * agent_loop applies transcript_projection at each turn boundary,
  * emits a transcript.projection event into the immutable raw transcript,
@@ -61,88 +63,94 @@ fn gc_tools() {
 }
 
 pipeline default() {
-  llm_mock_clear()
-  llm_mock({tool_calls: [{id: "call_1", name: "run", arguments: {}}]})
-  llm_mock({tool_calls: [{id: "call_2", name: "run", arguments: {}}]})
-  llm_mock({text: "Finished. ##DONE##"})
-  let result = agent_loop(
-    "kick it off",
-    "You are a test agent.",
-    {
-      provider: "mock",
-      tools: flaky_tool(),
-      tool_format: "native",
-      max_iterations: 6,
-      loop_until_done: true,
-      done_sentinel: "##DONE##",
-      transcript_projection: {policy: "clean_tool_repair"},
-    },
-  )
-  __io_println("status:" + result.status)
-  let raw_messages = transcript_messages(result.transcript)
-  __io_println("raw_message_count:" + to_string(len(raw_messages)))
-  let events = transcript_events_by_kind(result.transcript, "transcript.projection")
-  __io_println("projection_events:" + to_string(len(events) > 0))
-  __io_println("projection_policy:" + events[0].metadata.policy)
-  __io_println("projection_safety_blocked:" + to_string(events[0].metadata.provider_safety_blocked))
-  llm_mock_clear()
-  llm_mock(
-    {
-      tool_calls: [
-        {id: "read_stale_1", name: "read_stale", arguments: {}},
-        {id: "read_live_1", name: "read_live", arguments: {}},
-      ],
-    },
-  )
-  llm_mock(
-    {
-      text: json_stringify(
+  with_llm_script(
+    [
+      {tool_calls: [{id: "call_1", name: "run", arguments: {}}]},
+      {tool_calls: [{id: "call_2", name: "run", arguments: {}}]},
+      llm_text("Finished. ##DONE##"),
+    ],
+    { ->
+      let result = agent_loop(
+        "kick it off",
+        "You are a test agent.",
         {
-          schema: "harn.agent_scratchpad.v1",
-          goals: [{text: "complete projection GC task", source_ref: "user:initial"}],
-          open_items: [],
-          facts: [{text: "Continue from src/live.rs and LIVE_SENTINEL", source_ref: "turn:4"}],
-          refs: [
-            {id: "user:initial", kind: "user_input", label: "Initial task"},
-            {id: "turn:4", kind: "tool", label: "read_live returned src/live.rs"},
-          ],
+          provider: "mock",
+          tools: flaky_tool(),
+          tool_format: "native",
+          max_iterations: 6,
+          loop_until_done: true,
+          done_sentinel: "##DONE##",
+          transcript_projection: {policy: "clean_tool_repair"},
         },
+      )
+      __io_println("status:" + result.status)
+      let raw_messages = transcript_messages(result.transcript)
+      __io_println("raw_message_count:" + to_string(len(raw_messages)))
+      let events = transcript_events_by_kind(result.transcript, "transcript.projection")
+      __io_println("projection_events:" + to_string(len(events) > 0))
+      __io_println("projection_policy:" + events[0].metadata.policy)
+      __io_println("projection_safety_blocked:" + to_string(events[0].metadata.provider_safety_blocked))
+    },
+  )
+  with_llm_script(
+    [
+      {
+        tool_calls: [
+          {id: "read_stale_1", name: "read_stale", arguments: {}},
+          {id: "read_live_1", name: "read_live", arguments: {}},
+        ],
+      },
+      llm_text(
+        json_stringify(
+          {
+            schema: "harn.agent_scratchpad.v1",
+            goals: [{text: "complete projection GC task", source_ref: "user:initial"}],
+            open_items: [],
+            facts: [{text: "Continue from src/live.rs and LIVE_SENTINEL", source_ref: "turn:4"}],
+            refs: [
+              {id: "user:initial", kind: "user_input", label: "Initial task"},
+              {id: "turn:4", kind: "tool", label: "read_live returned src/live.rs"},
+            ],
+          },
+        ),
       ),
+      llm_text("Done with projection GC. ##DONE##"),
+    ],
+    { ->
+      let gc_result = agent_loop(
+        "complete projection GC task",
+        "You are a projection test agent.",
+        {
+          provider: "mock",
+          tools: gc_tools(),
+          tool_format: "native",
+          max_iterations: 3,
+          loop_until_done: true,
+          done_sentinel: "##DONE##",
+          transcript_projection: {policy: "reachability_gc", root_window: 1, min_chars: 100, require_write_barrier: true},
+          scratchpad: {enabled: true, reorganize_every: 1, reorganizer: {provider: "mock"}},
+        },
+      )
+      let gc_calls = llm_mock_calls()
+      let projected_stale_body = json_stringify(gc_calls[2].messages[2].content)
+      let projected_live_body = json_stringify(gc_calls[2].messages[3].content)
+      let gc_events = transcript_events_by_kind(gc_result.transcript, "transcript.projection")
+      let gc_projection = gc_events[len(gc_events) - 1]
+      __io_println("gc_status:" + gc_result.status)
+      __io_println("gc_scratchpad_barrier:" + to_string(gc_projection.metadata.redacted_count > 0))
+      __io_println(
+        "gc_has_scratchpad_root:"
+          + to_string(gc_projection.metadata.roots_consulted.contains("scratchpad")),
+      )
+      __io_println(
+        "gc_has_write_barrier:"
+          + to_string(gc_projection.metadata.roots_consulted.contains("write_barrier")),
+      )
+      __io_println(
+        "gc_projected_reclaimed:"
+          + to_string(contains(projected_stale_body, "reclaimed by reachability_gc")),
+      )
+      __io_println("gc_live_preserved:" + to_string(contains(projected_live_body, "LIVE_SENTINEL")))
     },
   )
-  llm_mock({text: "Done with projection GC. ##DONE##"})
-  let gc_result = agent_loop(
-    "complete projection GC task",
-    "You are a projection test agent.",
-    {
-      provider: "mock",
-      tools: gc_tools(),
-      tool_format: "native",
-      max_iterations: 3,
-      loop_until_done: true,
-      done_sentinel: "##DONE##",
-      transcript_projection: {policy: "reachability_gc", root_window: 1, min_chars: 100, require_write_barrier: true},
-      scratchpad: {enabled: true, reorganize_every: 1, reorganizer: {provider: "mock"}},
-    },
-  )
-  let gc_calls = llm_mock_calls()
-  let projected_stale_body = json_stringify(gc_calls[2].messages[2].content)
-  let projected_live_body = json_stringify(gc_calls[2].messages[3].content)
-  let gc_events = transcript_events_by_kind(gc_result.transcript, "transcript.projection")
-  let gc_projection = gc_events[len(gc_events) - 1]
-  __io_println("gc_status:" + gc_result.status)
-  __io_println("gc_scratchpad_barrier:" + to_string(gc_projection.metadata.redacted_count > 0))
-  __io_println(
-    "gc_has_scratchpad_root:"
-      + to_string(gc_projection.metadata.roots_consulted.contains("scratchpad")),
-  )
-  __io_println(
-    "gc_has_write_barrier:"
-      + to_string(gc_projection.metadata.roots_consulted.contains("write_barrier")),
-  )
-  __io_println(
-    "gc_projected_reclaimed:"
-      + to_string(contains(projected_stale_body, "reclaimed by reachability_gc")),
-  )
-  __io_println("gc_live_preserved:" + to_string(contains(projected_live_body, "LIVE_SENTINEL")))
 }

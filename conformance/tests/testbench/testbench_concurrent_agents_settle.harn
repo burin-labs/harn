@@ -1,3 +1,5 @@
+import { with_llm_script } from "std/testing"
+
 /**
  * 100 concurrent parallel-each agents each perform a mocked LLM call
  * and return their index. Validates deterministic settlement: every
@@ -7,17 +9,19 @@
  * clock guarantees same-fixture runs produce byte-identical output.
  */
 pipeline test(task) {
-  llm_mock_clear()
-  llm_mock({text: "ok", input_tokens: 1, output_tokens: 1, model: "mock"})
-  let inputs = range(0, 100).to_list()
-  let results = parallel each inputs with { max_concurrent: 10 } { i ->
-    let _resp = llm_call("task " + to_string(i), nil, {provider: "mock", model: "mock"})
-    return i
-  }
-  let sorted = results.sort()
-  __io_println(len(results) == 100)
-  __io_println(sorted[0] == 0)
-  __io_println(sorted[99] == 99)
-  __io_println(len(llm_mock_calls()) == 100)
-  llm_mock_clear()
+  with_llm_script(
+    [{text: "ok", input_tokens: 1, output_tokens: 1, model: "mock"}],
+    { ->
+      let inputs = range(0, 100).to_list()
+      let results = parallel each inputs with { max_concurrent: 10 } { i ->
+        let _resp = llm_call("task " + to_string(i), nil, {provider: "mock", model: "mock"})
+        return i
+      }
+      let sorted = results.sort()
+      __io_println(len(results) == 100)
+      __io_println(sorted[0] == 0)
+      __io_println(sorted[99] == 99)
+      __io_println(len(llm_mock_calls()) == 100)
+    },
+  )
 }

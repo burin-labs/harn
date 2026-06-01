@@ -4,51 +4,57 @@
 // approval request before any LLM work fires. Mirrors the trigger-side
 // `daily_autonomy_budget_exceeded` flow added in burin-labs/harn#928.
 import "std/hitl"
+import { with_llm_script } from "std/testing"
 
 pipeline test(task) {
-  llm_mock_clear()
-  llm_mock({text: "##DONE##", input_tokens: 5, output_tokens: 2, model: "mock-model"})
-  llm_mock({text: "##DONE##", input_tokens: 5, output_tokens: 2, model: "mock-model"})
-  let unique = to_string(to_int(harness.clock.timestamp())) + "-"
-    + to_string(harness.random.gen_range(100000, 999999))
-  let key = "agent.autonomy.budget." + unique
-  // First call burns the quota.
-  let first = agent_loop(
-    "First task",
-    "You are helpful",
-    {
-      provider: "mock",
-      model: "mock-model",
-      max_iterations: 1,
-      max_nudges: 0,
-      autonomy_budget: {per_day: 1, key: key},
+  with_llm_script(
+    [
+      {text: "##DONE##", input_tokens: 5, output_tokens: 2, model: "mock-model"},
+      {text: "##DONE##", input_tokens: 5, output_tokens: 2, model: "mock-model"},
+    ],
+    { ->
+      let unique = to_string(to_int(harness.clock.timestamp())) + "-"
+        + to_string(harness.random.gen_range(100000, 999999))
+      let key = "agent.autonomy.budget." + unique
+      let first = agent_loop(
+        "First task",
+        "You are helpful",
+        {
+          provider: "mock",
+          model: "mock-model",
+          max_iterations: 1,
+          max_nudges: 0,
+          autonomy_budget: {per_day: 1, key: key},
+        },
+      )
+      __io_println(first.status)
+      let second = agent_loop(
+        "Second task",
+        "You are helpful",
+        {
+          provider: "mock",
+          model: "mock-model",
+          max_iterations: 1,
+          max_nudges: 0,
+          autonomy_budget: {per_day: 1, key: key, reviewer: "oncall"},
+        },
+      )
+      __io_println(second.status)
+      __io_println(second.reason)
+      __io_println(second.approval_required)
+      __io_println(second.from_tier)
+      __io_println(second.requested_tier)
+      __io_println(second.reviewers[0])
+      __io_println(type_of(second.request_id) == "string" && len(second.request_id) > 0)
+      let pending = hitl_pending({}).filter({ row -> row.agent == key })
+      __io_println(len(pending) >= 1)
+      __io_println(pending[0].request_kind)
     },
   )
-  // Mock's `##DONE##` exits the loop cleanly -> status "done".
-  __io_println(first.status)
-  // Second call exceeds the daily quota and is routed to approval
-  // before the LLM is touched. The result envelope carries the same
-  // `approval_required` shape the trigger dispatcher emits.
-  let second = agent_loop(
-    "Second task",
-    "You are helpful",
-    {
-      provider: "mock",
-      model: "mock-model",
-      max_iterations: 1,
-      max_nudges: 0,
-      autonomy_budget: {per_day: 1, key: key, reviewer: "oncall"},
-    },
-  )
-  __io_println(second.status)
-  __io_println(second.reason)
-  __io_println(second.approval_required)
-  __io_println(second.from_tier)
-  __io_println(second.requested_tier)
-  __io_println(second.reviewers[0])
-  __io_println(type_of(second.request_id) == "string" && len(second.request_id) > 0)
-  // The approval request landed on hitl.approvals.
-  let pending = hitl_pending({}).filter({ row -> row.agent == key })
-  __io_println(len(pending) >= 1)
-  __io_println(pending[0].request_kind)
 }
+// First call burns the quota.
+// Mock's `##DONE##` exits the loop cleanly -> status "done".
+// Second call exceeds the daily quota and is routed to approval
+// before the LLM is touched. The result envelope carries the same
+// `approval_required` shape the trigger dispatcher emits.
+// The approval request landed on hitl.approvals.

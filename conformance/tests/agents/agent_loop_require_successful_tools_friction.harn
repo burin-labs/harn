@@ -1,3 +1,5 @@
+import { llm_text, with_llm_script } from "std/testing"
+
 /**
  * `require_successful_tools` is an active gate: when a required tool
  * never succeeds the agent_loop result carries a structured
@@ -24,58 +26,65 @@ fn tools() {
 
 pipeline main() {
   friction_clear()
-  llm_mock_clear()
-  llm_mock({tool_calls: [{id: "lookup_1", name: "lookup", arguments: {query: "x"}}]})
-  llm_mock({text: "Finished."})
-  let failed = agent_loop(
-    "Use one tool.",
-    nil,
-    {
-      provider: "mock",
-      tools: tools(),
-      tool_format: "native",
-      loop_until_done: true,
-      max_iterations: 3,
-      require_successful_tools: ["missing_tool"],
-      persona: "test_persona",
-      _preset_kind: "test",
+  with_llm_script(
+    [{tool_calls: [{id: "lookup_1", name: "lookup", arguments: {query: "x"}}]}, llm_text("Finished.")],
+    { ->
+      let failed = agent_loop(
+        "Use one tool.",
+        nil,
+        {
+          provider: "mock",
+          tools: tools(),
+          tool_format: "native",
+          loop_until_done: true,
+          max_iterations: 3,
+          require_successful_tools: ["missing_tool"],
+          persona: "test_persona",
+          _preset_kind: "test",
+        },
+      )
+      __io_println(failed.status)
+      __io_println(failed.stop_reason)
+      __io_println(failed.missing_required_tools[0])
+      __io_println(failed.error_envelope.schema_version)
+      __io_println(failed.error_envelope.kind)
+      __io_println(failed.error_envelope.missing[0])
+      __io_println(contains(failed.error_envelope.successful_tool_names, "lookup"))
+      let events = friction_events()
+      __io_println(len(events))
+      __io_println(events[0].kind)
+      __io_println(events[0].source)
+      __io_println(events[0].actor)
+      __io_println(events[0].metadata.preset_kind)
+      __io_println(contains(events[0].metadata.successful_tool_names, "lookup"))
+      __io_println(events[0].metadata.missing_required_tools[0])
+      friction_clear()
     },
   )
-  __io_println(failed.status)
-  __io_println(failed.stop_reason)
-  __io_println(failed.missing_required_tools[0])
-  // Structured error envelope shape.
-  __io_println(failed.error_envelope.schema_version)
-  __io_println(failed.error_envelope.kind)
-  __io_println(failed.error_envelope.missing[0])
-  __io_println(contains(failed.error_envelope.successful_tool_names, "lookup"))
-  // Friction event was recorded with kind=tool_gap and persona actor.
-  let events = friction_events()
-  __io_println(len(events))
-  __io_println(events[0].kind)
-  __io_println(events[0].source)
-  __io_println(events[0].actor)
-  __io_println(events[0].metadata.preset_kind)
-  __io_println(contains(events[0].metadata.successful_tool_names, "lookup"))
-  __io_println(events[0].metadata.missing_required_tools[0])
-  // No friction event when require_successful_tools is satisfied.
-  friction_clear()
-  llm_mock_clear()
-  llm_mock({tool_calls: [{id: "lookup_2", name: "lookup", arguments: {query: "y"}}]})
-  llm_mock({text: "<user_response>Done.</user_response>"})
-  let satisfied = agent_loop(
-    "Use one tool.",
-    nil,
-    {
-      provider: "mock",
-      tools: tools(),
-      tool_format: "native",
-      loop_until_done: true,
-      max_iterations: 3,
-      require_successful_tools: ["lookup"],
+  with_llm_script(
+    [
+      {tool_calls: [{id: "lookup_2", name: "lookup", arguments: {query: "y"}}]},
+      llm_text("<user_response>Done.</user_response>"),
+    ],
+    { ->
+      let satisfied = agent_loop(
+        "Use one tool.",
+        nil,
+        {
+          provider: "mock",
+          tools: tools(),
+          tool_format: "native",
+          loop_until_done: true,
+          max_iterations: 3,
+          require_successful_tools: ["lookup"],
+        },
+      )
+      __io_println(satisfied.status)
+      __io_println(satisfied?.error_envelope == nil)
+      __io_println(len(friction_events()))
     },
   )
-  __io_println(satisfied.status)
-  __io_println(satisfied?.error_envelope == nil)
-  __io_println(len(friction_events()))
 }
+// Structured error envelope shape.
+// Friction event was recorded with kind=tool_gap and persona actor.
+// No friction event when require_successful_tools is satisfied.

@@ -1,3 +1,5 @@
+import { llm_text, with_llm_script } from "std/testing"
+
 fn parent_tools(child_session) {
   var tools = tool_registry()
   tools = tool_define(
@@ -17,7 +19,6 @@ fn parent_tools(child_session) {
 }
 
 pipeline main() {
-  llm_mock_clear()
   let parent = agent_session_open("reminder-propagate-none-parent")
   let child = "reminder-propagate-none-child"
   agent_session_open(child)
@@ -29,22 +30,27 @@ pipeline main() {
       {body: "none reminder", tags: ["none"], dedupe_key: "none-key", propagate: "none"},
     ),
   )
-  llm_mock({tool_calls: [{id: "parent_delegate", name: "delegate_child", arguments: {}}]})
-  llm_mock({text: "child done"})
-  llm_mock({text: "parent done"})
-  agent_loop(
-    "Run child.",
-    nil,
-    {
-      provider: "mock",
-      session_id: parent,
-      tools: parent_tools(child),
-      tool_format: "native",
-      max_iterations: 2,
-      done_judge: nil,
+  with_llm_script(
+    [
+      {tool_calls: [{id: "parent_delegate", name: "delegate_child", arguments: {}}]},
+      llm_text("child done"),
+      llm_text("parent done"),
+    ],
+    { ->
+      agent_loop(
+        "Run child.",
+        nil,
+        {
+          provider: "mock",
+          session_id: parent,
+          tools: parent_tools(child),
+          tool_format: "native",
+          max_iterations: 2,
+          done_judge: nil,
+        },
+      )
+      let child_reminders = transcript_events_by_kind(agent_session_snapshot(child), "system_reminder")
+      __io_println(len(child_reminders))
     },
   )
-  let child_reminders = transcript_events_by_kind(agent_session_snapshot(child), "system_reminder")
-  __io_println(len(child_reminders))
-  llm_mock_clear()
 }

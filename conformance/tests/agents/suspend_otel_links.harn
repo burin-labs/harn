@@ -1,4 +1,5 @@
 import "std/agents"
+import { llm_text, with_llm_script } from "std/testing"
 
 /**
  * S-18 (#1867): the cooperative suspend path ends the in-flight
@@ -26,41 +27,45 @@ import "std/agents"
  */
 pipeline main() {
   enable_tracing(true)
-  llm_mock(
-    {
-      tool_calls: [
-        {id: "park_until_review", name: "agent_await_resumption", arguments: {reason: "waiting on review"}},
-      ],
-      input_tokens: 7,
-      output_tokens: 3,
+  with_llm_script(
+    [
+      {
+        tool_calls: [
+          {id: "park_until_review", name: "agent_await_resumption", arguments: {reason: "waiting on review"}},
+        ],
+        input_tokens: 7,
+        output_tokens: 3,
+      },
+      llm_text("resumed and finished"),
+    ],
+    { ->
+      let handle = sub_agent_run(
+        "Park until review.",
+        {provider: "mock", background: true, tool_format: "native", max_iterations: 3},
+      )
+      let suspended = wait_agent(handle)
+      __io_println(suspended?.status)
+      let resumed_handle = resume_agent(handle)
+      __io_println(resumed_handle?.status)
+      let resumed = wait_agent(handle)
+      __io_println(resumed?.status)
+      let spans = trace_spans()
+      let suspension_spans = spans.filter({ s -> s.kind == "suspension" })
+      let resume_spans = spans.filter({ s -> s.kind == "resume" })
+      __io_println(len(suspension_spans) >= 1)
+      __io_println(len(resume_spans) >= 1)
+      let suspension = suspension_spans[0]
+      let resume = resume_spans[0]
+      __io_println(suspension.metadata?.handle != nil)
+      __io_println(suspension.metadata?.reason != nil)
+      __io_println(suspension.metadata?.initiator != nil)
+      __io_println(resume.metadata?.handle != nil)
+      __io_println(resume.metadata?.continue_transcript != nil)
+      __io_println(resume.metadata?.had_resume_input != nil)
+      __io_println(resume.parent_id == nil)
+      __io_println(resume.links != nil)
+      __io_println(len(resume.links) >= 1)
+      enable_tracing(false)
     },
   )
-  llm_mock({text: "resumed and finished"})
-  let handle = sub_agent_run(
-    "Park until review.",
-    {provider: "mock", background: true, tool_format: "native", max_iterations: 3},
-  )
-  let suspended = wait_agent(handle)
-  __io_println(suspended?.status)
-  let resumed_handle = resume_agent(handle)
-  __io_println(resumed_handle?.status)
-  let resumed = wait_agent(handle)
-  __io_println(resumed?.status)
-  let spans = trace_spans()
-  let suspension_spans = spans.filter({ s -> s.kind == "suspension" })
-  let resume_spans = spans.filter({ s -> s.kind == "resume" })
-  __io_println(len(suspension_spans) >= 1)
-  __io_println(len(resume_spans) >= 1)
-  let suspension = suspension_spans[0]
-  let resume = resume_spans[0]
-  __io_println(suspension.metadata?.handle != nil)
-  __io_println(suspension.metadata?.reason != nil)
-  __io_println(suspension.metadata?.initiator != nil)
-  __io_println(resume.metadata?.handle != nil)
-  __io_println(resume.metadata?.continue_transcript != nil)
-  __io_println(resume.metadata?.had_resume_input != nil)
-  __io_println(resume.parent_id == nil)
-  __io_println(resume.links != nil)
-  __io_println(len(resume.links) >= 1)
-  enable_tracing(false)
 }

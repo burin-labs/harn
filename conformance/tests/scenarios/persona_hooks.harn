@@ -1,3 +1,5 @@
+import { llm_text, with_llm_script } from "std/testing"
+
 let hook_order = atomic(0)
 
 fn audit_tools() {
@@ -18,23 +20,28 @@ fn merge_captain(ctx) -> string {
 
 @step(name: "admin_merge")
 fn admin_merge(ctx) -> string {
-  llm_mock_clear()
-  llm_mock({tool_calls: [{id: "audit_1", name: "audit_tool", arguments: {}}]})
-  llm_mock({text: "<done>##DONE##</done>"})
-  let result = agent_loop(
-    "Run the audit tool",
-    nil,
-    {
-      provider: "mock",
-      tools: audit_tools(),
-      tool_format: "native",
-      max_iterations: 2,
-      loop_until_done: true,
-      session_id: "persona-hooks-composition",
+  return with_llm_script(
+    [
+      {tool_calls: [{id: "audit_1", name: "audit_tool", arguments: {}}]},
+      llm_text("<done>##DONE##</done>"),
+    ],
+    { ->
+      let result = agent_loop(
+        "Run the audit tool",
+        nil,
+        {
+          provider: "mock",
+          tools: audit_tools(),
+          tool_format: "native",
+          max_iterations: 2,
+          loop_until_done: true,
+          session_id: "persona-hooks-composition",
+        },
+      )
+      let saw_tool_hook = json_stringify(transcript_messages(result?.transcript)).contains("permission_denied")
+      return "merge:" + ctx + ":" + to_string(saw_tool_hook)
     },
   )
-  let saw_tool_hook = json_stringify(transcript_messages(result?.transcript)).contains("permission_denied")
-  return "merge:" + ctx + ":" + to_string(saw_tool_hook)
 }
 
 pipeline default() {

@@ -1,67 +1,73 @@
+import { llm_text, with_llm_script } from "std/testing"
+
 pipeline test(task) {
-  llm_mock_clear()
   let catalog = render_always_on_catalog(skills_catalog_entries(skills), 2000)
-  llm_mock(
-    {
-      text: "Load the signed instructions.",
-      tool_calls: [{id: "ls1", name: "load_skill", arguments: {name: "signed-review"}}],
-    },
-  )
-  llm_mock({text: "<done>##DONE##</done>"})
-  let result = agent_loop(
-    "Use the signed skill",
-    catalog,
-    {
-      provider: "mock",
-      model: "gpt-5.4",
-      tool_format: "native",
-      loop_until_done: true,
-      max_iterations: 3,
-      session_id: "skills-signed-accept",
-      skills: skills,
-    },
-  )
-  assert(result?.status == "done", "agent loop finishes")
-  let chain = skill_who_signed(skills, "signed-review")
-  assert(chain?.trusted, "who-signed query marks chain trusted")
-  assert(
-    chain?.author?.fingerprint == "6eaf8d0aae351c481ddbba5b06012b514f75065ab1e97a325ec65920086b8ccc",
-    "author fingerprint surfaces",
-  )
-  assert(
-    contains(json_stringify(chain), "84878ad03a6518f7bb8f5f4eff29591bb94cafa2ddf37ded6b5bba82cd8ddc60"),
-    "endorsement chain surfaces",
-  )
-  assert(
-    chain?.trust_policy_input?.action == "skill.provenance",
-    "trust-ranking policy input surfaces",
-  )
-  let calls = llm_mock_calls()
-  let second_messages = json_stringify(calls[1].messages)
-  assert(
-    contains(second_messages, "Always verify the signed skill body."),
-    "signed skill body is loaded",
-  )
-  let events = transcript_events(result?.transcript)
-  var saw_record = false
-  for ev in events {
-    if ev?.kind == "skill.loaded" && ev?.metadata?.skill_id == "signed-review" {
-      assert(ev?.metadata?.signed, "trust record marks skill as signed")
-      assert(ev?.metadata?.trusted, "trust record marks skill as trusted")
+  with_llm_script(
+    [
+      {
+        text: "Load the signed instructions.",
+        tool_calls: [{id: "ls1", name: "load_skill", arguments: {name: "signed-review"}}],
+      },
+      llm_text("<done>##DONE##</done>"),
+    ],
+    { ->
+      let result = agent_loop(
+        "Use the signed skill",
+        catalog,
+        {
+          provider: "mock",
+          model: "gpt-5.4",
+          tool_format: "native",
+          loop_until_done: true,
+          max_iterations: 3,
+          session_id: "skills-signed-accept",
+          skills: skills,
+        },
+      )
+      assert(result?.status == "done", "agent loop finishes")
+      let chain = skill_who_signed(skills, "signed-review")
+      assert(chain?.trusted, "who-signed query marks chain trusted")
       assert(
-        contains(
-          json_stringify(ev?.metadata),
-          "84878ad03a6518f7bb8f5f4eff29591bb94cafa2ddf37ded6b5bba82cd8ddc60",
-        ),
-        "trust record carries endorsements",
+        chain?.author?.fingerprint
+          == "6eaf8d0aae351c481ddbba5b06012b514f75065ab1e97a325ec65920086b8ccc",
+        "author fingerprint surfaces",
       )
       assert(
-        ev?.metadata?.trust_policy_input?.action == "skill.provenance",
-        "trust record carries trust policy input",
+        contains(json_stringify(chain), "84878ad03a6518f7bb8f5f4eff29591bb94cafa2ddf37ded6b5bba82cd8ddc60"),
+        "endorsement chain surfaces",
       )
-      saw_record = true
-    }
-  }
-  assert(saw_record, "skill.loaded trust record emitted")
-  log("load_skill_accepts_valid_signature passed")
+      assert(
+        chain?.trust_policy_input?.action == "skill.provenance",
+        "trust-ranking policy input surfaces",
+      )
+      let calls = llm_mock_calls()
+      let second_messages = json_stringify(calls[1].messages)
+      assert(
+        contains(second_messages, "Always verify the signed skill body."),
+        "signed skill body is loaded",
+      )
+      let events = transcript_events(result?.transcript)
+      var saw_record = false
+      for ev in events {
+        if ev?.kind == "skill.loaded" && ev?.metadata?.skill_id == "signed-review" {
+          assert(ev?.metadata?.signed, "trust record marks skill as signed")
+          assert(ev?.metadata?.trusted, "trust record marks skill as trusted")
+          assert(
+            contains(
+              json_stringify(ev?.metadata),
+              "84878ad03a6518f7bb8f5f4eff29591bb94cafa2ddf37ded6b5bba82cd8ddc60",
+            ),
+            "trust record carries endorsements",
+          )
+          assert(
+            ev?.metadata?.trust_policy_input?.action == "skill.provenance",
+            "trust record carries trust policy input",
+          )
+          saw_record = true
+        }
+      }
+      assert(saw_record, "skill.loaded trust record emitted")
+      log("load_skill_accepts_valid_signature passed")
+    },
+  )
 }

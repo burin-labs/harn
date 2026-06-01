@@ -1,3 +1,5 @@
+import { llm_text, with_llm_script } from "std/testing"
+
 /**
  * Fenced JSON inside a markdown code block: the envelope sets
  * extracted_json: true so callers can tell the model wrapped its
@@ -5,11 +7,15 @@
  */
 pipeline default() {
   let schema = {type: "object", required: ["k"], properties: {k: {type: "string"}}}
-  llm_mock({text: "Sure thing!\n```json\n{\"k\": \"v\"}\n```\nDone."})
-  let r = llm_call_structured_result("Q?", schema, {provider: "mock"})
-  __io_println(r.ok)
-  __io_println(r.data.k)
-  __io_println(r.extracted_json)
-  __io_println(r.attempts)
-  __io_println(r.repaired)
+  with_llm_script(
+    [llm_text("Sure thing!\n```json\n{\"k\": \"v\"}\n```\nDone.")],
+    { ->
+      let r = llm_call_structured_result("Q?", schema, {provider: "mock"})
+      __io_println(r.ok)
+      __io_println(r.data.k)
+      __io_println(r.extracted_json)
+      __io_println(r.attempts)
+      __io_println(r.repaired)
+    },
+  )
 }

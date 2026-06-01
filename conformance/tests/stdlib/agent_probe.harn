@@ -1,5 +1,6 @@
 import { recall_facts } from "std/agent/fact"
 import { probe, probe_eval, probe_typecheck } from "std/agent/probe"
+import { assert_error_contains } from "std/testing"
 import "../_common"
 
 pipeline test_agent_probe(_task) {
@@ -82,21 +83,9 @@ pipeline test_agent_probe(_task) {
   let inspect_stub = probe("Inspect", "anything", opts + {now: "2026-05-23T22:00:07Z"})
   assert_eq(inspect_stub.outcome, "unknown")
   // --- validation errors
-  let bad_kind = try {
-    probe("guess", "echo x", opts)
-  }
-  assert(is_err(bad_kind))
-  assert(contains(to_string(unwrap_err(bad_kind)), "HARN-PROBE-002"))
-  let bad_body = try {
-    probe("eval", "", opts)
-  }
-  assert(is_err(bad_body))
-  assert(contains(to_string(unwrap_err(bad_body)), "HARN-PROBE-004"))
-  let bad_lang = try {
-    probe_eval("echo x", opts + {lang: "python"})
-  }
-  assert(is_err(bad_lang))
-  assert(contains(to_string(unwrap_err(bad_lang)), "HARN-PROBE-003"))
+  assert_error_contains({ -> probe("guess", "echo x", opts) }, "HARN-PROBE-002")
+  assert_error_contains({ -> probe("eval", "", opts) }, "HARN-PROBE-004")
+  assert_error_contains({ -> probe_eval("echo x", opts + {lang: "python"}) }, "HARN-PROBE-003")
   harness.fs.delete(root)
   __io_println("agent probe ok")
 }

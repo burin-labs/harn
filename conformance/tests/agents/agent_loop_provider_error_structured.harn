@@ -1,3 +1,5 @@
+import { with_llm_script } from "std/testing"
+
 fn lookup_tools() {
   var tools = tool_registry()
   tools = tool_define(
@@ -15,44 +17,47 @@ fn lookup_tools() {
 }
 
 pipeline main() {
-  llm_mock_clear()
-  llm_mock({tool_calls: [{id: "lookup_1", name: "lookup", arguments: {query: "release"}}]})
-  llm_mock(
-    {
-      error: {
-        category: "generic",
-        message: "ollama HTTP 400 [invalid_request]: Value looks like object, but can't find closing '}' symbol",
+  with_llm_script(
+    [
+      {tool_calls: [{id: "lookup_1", name: "lookup", arguments: {query: "release"}}]},
+      {
+        error: {
+          category: "generic",
+          message: "ollama HTTP 400 [invalid_request]: Value looks like object, but can't find closing '}' symbol",
+        },
       },
+    ],
+    { ->
+      let transcript_dir = path_join(harness.fs.temp_dir(), "harn-agent-loop-provider-error-" + uuid())
+      let result = agent_loop(
+        "Inspect evidence and finish.",
+        nil,
+        {
+          provider: "mock",
+          model: "qwen-local",
+          tools: lookup_tools(),
+          tool_format: "native",
+          loop_until_done: true,
+          max_iterations: 4,
+          llm_transcript_dir: transcript_dir,
+        },
+      )
+      __io_println(result.status)
+      __io_println(result.stop_reason)
+      __io_println(result.error.category)
+      __io_println(result.error.reason)
+      __io_println(result.error.provider)
+      __io_println(result.error.model)
+      __io_println(result.error.phase)
+      __io_println(result.error.tool_format)
+      __io_println(result.error.after_tool_result)
+      __io_println(result.llm.iterations)
+      __io_println(result.tools.successful[0])
+      __io_println(contains(json_stringify(result.transcript), "agent_loop_terminal_error"))
+      let sidecar = harness.fs.read_text(path_join(transcript_dir, "llm_transcript.jsonl"))
+      __io_println(contains(sidecar, "\"type\":\"provider_call_error\""))
+      __io_println(contains(sidecar, "\"category\":\"generic\""))
+      __io_println(contains(sidecar, "\"reason\":\"invalid_request\""))
     },
   )
-  let transcript_dir = path_join(harness.fs.temp_dir(), "harn-agent-loop-provider-error-" + uuid())
-  let result = agent_loop(
-    "Inspect evidence and finish.",
-    nil,
-    {
-      provider: "mock",
-      model: "qwen-local",
-      tools: lookup_tools(),
-      tool_format: "native",
-      loop_until_done: true,
-      max_iterations: 4,
-      llm_transcript_dir: transcript_dir,
-    },
-  )
-  __io_println(result.status)
-  __io_println(result.stop_reason)
-  __io_println(result.error.category)
-  __io_println(result.error.reason)
-  __io_println(result.error.provider)
-  __io_println(result.error.model)
-  __io_println(result.error.phase)
-  __io_println(result.error.tool_format)
-  __io_println(result.error.after_tool_result)
-  __io_println(result.llm.iterations)
-  __io_println(result.tools.successful[0])
-  __io_println(contains(json_stringify(result.transcript), "agent_loop_terminal_error"))
-  let sidecar = harness.fs.read_text(path_join(transcript_dir, "llm_transcript.jsonl"))
-  __io_println(contains(sidecar, "\"type\":\"provider_call_error\""))
-  __io_println(contains(sidecar, "\"category\":\"generic\""))
-  __io_println(contains(sidecar, "\"reason\":\"invalid_request\""))
 }

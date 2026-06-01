@@ -1,22 +1,27 @@
+import { llm_text, with_llm_script } from "std/testing"
+
 pipeline test(task) {
-  llm_mock_clear()
-  llm_mock({text: "still working"})
-  // Run a loop-until-done agent loop against the mock provider with a small
-  // max_iterations budget. The fixture response intentionally omits the
-  // configured ##DONE## sentinel, so the loop exhausts its iteration budget
-  // rather than finishing naturally.
-  let result = agent_loop(
-    "Just keep replying",
-    "You are helpful",
-    {
-      provider: "mock",
-      loop_until_done: true,
-      done_sentinel: "##DONE##",
-      max_iterations: 1,
-      max_nudges: 5,
+  with_llm_script(
+    [llm_text("still working")],
+    { ->
+      let result = agent_loop(
+        "Just keep replying",
+        "You are helpful",
+        {
+          provider: "mock",
+          loop_until_done: true,
+          done_sentinel: "##DONE##",
+          max_iterations: 1,
+          max_nudges: 5,
+        },
+      )
+      __io_println(result.status)
+      assert(result.status == "budget_exhausted", "status should be budget_exhausted")
+      assert(result.llm.iterations >= 1, "should have run at least one iteration")
     },
   )
-  __io_println(result.status)
-  assert(result.status == "budget_exhausted", "status should be budget_exhausted")
-  assert(result.llm.iterations >= 1, "should have run at least one iteration")
 }
+// Run a loop-until-done agent loop against the mock provider with a small
+// max_iterations budget. The fixture response intentionally omits the
+// configured ##DONE## sentinel, so the loop exhausts its iteration budget
+// rather than finishing naturally.

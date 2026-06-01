@@ -1,3 +1,5 @@
+import { llm_text, with_llm_script } from "std/testing"
+
 fn child_tools() {
   var tools = tool_registry()
   tools = tool_define(
@@ -48,25 +50,27 @@ fn parent_tools() {
 }
 
 pipeline main() {
-  llm_mock(
-    {tool_calls: [{id: "parent_1", name: "delegate", arguments: {task: "Find the config path"}}]},
+  with_llm_script(
+    [
+      {tool_calls: [{id: "parent_1", name: "delegate", arguments: {task: "Find the config path"}}]},
+      {tool_calls: [{id: "child_1", name: "search", arguments: {query: "config path"}}]},
+      {tool_calls: [{id: "child_2", name: "read", arguments: {path: "crates/harn-vm/src/lib.rs"}}]},
+      llm_text("The config path is crates/harn-vm/src/lib.rs"),
+      llm_text("Delegation complete."),
+    ],
+    { ->
+      let result = agent_loop(
+        "Investigate the config path",
+        "You are helpful.",
+        {provider: "mock", tools: parent_tools(), tool_format: "native", max_iterations: 2},
+      )
+      let stats = transcript_stats(result?.transcript)
+      let transcript = json_stringify(transcript_messages(result?.transcript))
+      __io_println(stats?.tool_call_count == 1)
+      __io_println(stats?.tool_result_message_count == 1)
+      __io_println(contains(transcript, "delegate"))
+      __io_println(!contains(transcript, "\"search\""))
+      __io_println(!contains(transcript, "\"read\""))
+    },
   )
-  llm_mock({tool_calls: [{id: "child_1", name: "search", arguments: {query: "config path"}}]})
-  llm_mock(
-    {tool_calls: [{id: "child_2", name: "read", arguments: {path: "crates/harn-vm/src/lib.rs"}}]},
-  )
-  llm_mock({text: "The config path is crates/harn-vm/src/lib.rs"})
-  llm_mock({text: "Delegation complete."})
-  let result = agent_loop(
-    "Investigate the config path",
-    "You are helpful.",
-    {provider: "mock", tools: parent_tools(), tool_format: "native", max_iterations: 2},
-  )
-  let stats = transcript_stats(result?.transcript)
-  let transcript = json_stringify(transcript_messages(result?.transcript))
-  __io_println(stats?.tool_call_count == 1)
-  __io_println(stats?.tool_result_message_count == 1)
-  __io_println(contains(transcript, "delegate"))
-  __io_println(!contains(transcript, "\"search\""))
-  __io_println(!contains(transcript, "\"read\""))
 }

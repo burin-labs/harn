@@ -1,4 +1,5 @@
 import "std/agents"
+import { llm_text, with_llm_script } from "std/testing"
 
 fn resume_tools() {
   var tools = tool_registry()
@@ -12,43 +13,46 @@ fn resume_tools() {
 }
 
 pipeline main() {
-  llm_mock_clear()
-  llm_mock(
-    {
-      tool_calls: [{id: "park_1", name: "agent_await_resumption", arguments: {reason: "waiting on review"}}],
-      input_tokens: 7,
-      output_tokens: 3,
+  with_llm_script(
+    [
+      {
+        tool_calls: [{id: "park_1", name: "agent_await_resumption", arguments: {reason: "waiting on review"}}],
+        input_tokens: 7,
+        output_tokens: 3,
+      },
+      {tool_calls: [{id: "noop_1", name: "noop", arguments: {}}]},
+      llm_text("done"),
+    ],
+    { ->
+      let session_id = "resume-continuity-" + uuid()
+      let handle = sub_agent_run(
+        "Park until an operator resumes you.",
+        {
+          provider: "mock",
+          background: true,
+          session_id: session_id,
+          tools: resume_tools(),
+          tool_format: "native",
+          max_iterations: 3,
+        },
+      )
+      let suspended = wait_agent(handle)
+      let resumed = resume_agent(suspended, "operator says go", true)
+      let completed = wait_agent(handle)
+      let calls = llm_mock_calls()
+      let resumed_system = calls[1].system
+      let next_system = calls[2].system
+      let remaining = transcript_events_by_kind(completed.transcript, "system_reminder")
+        .filter({ event -> event.reminder.dedupe_key == "resume_continuity" })
+      __io_println(suspended.status)
+      __io_println(resumed.status)
+      __io_println(completed.status)
+      __io_println(contains(resumed_system, "You were suspended at turn"))
+      __io_println(contains(resumed_system, "waiting on review"))
+      __io_println(contains(resumed_system, "You have been resumed by the operator"))
+      __io_println(contains(resumed_system, "The resumer provided input: operator says go"))
+      __io_println(!contains(next_system, "You were suspended at turn"))
+      __io_println(len(remaining))
     },
   )
-  let session_id = "resume-continuity-" + uuid()
-  let handle = sub_agent_run(
-    "Park until an operator resumes you.",
-    {
-      provider: "mock",
-      background: true,
-      session_id: session_id,
-      tools: resume_tools(),
-      tool_format: "native",
-      max_iterations: 3,
-    },
-  )
-  let suspended = wait_agent(handle)
-  llm_mock({tool_calls: [{id: "noop_1", name: "noop", arguments: {}}]})
-  llm_mock({text: "done"})
-  let resumed = resume_agent(suspended, "operator says go", true)
-  let completed = wait_agent(handle)
-  let calls = llm_mock_calls()
-  let resumed_system = calls[1].system
-  let next_system = calls[2].system
-  let remaining = transcript_events_by_kind(completed.transcript, "system_reminder")
-    .filter({ event -> event.reminder.dedupe_key == "resume_continuity" })
-  __io_println(suspended.status)
-  __io_println(resumed.status)
-  __io_println(completed.status)
-  __io_println(contains(resumed_system, "You were suspended at turn"))
-  __io_println(contains(resumed_system, "waiting on review"))
-  __io_println(contains(resumed_system, "You have been resumed by the operator"))
-  __io_println(contains(resumed_system, "The resumer provided input: operator says go"))
-  __io_println(!contains(next_system, "You were suspended at turn"))
-  __io_println(len(remaining))
 }

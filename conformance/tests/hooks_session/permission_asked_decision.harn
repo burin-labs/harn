@@ -1,3 +1,5 @@
+import { llm_text, with_llm_script } from "std/testing"
+
 /**
  * `permission_asked` hooks can short-circuit the dynamic permission
  * policy by returning a `{decision: "allow"|"deny", reason}` dict.
@@ -35,21 +37,23 @@ pipeline default() {
       return nil
     },
   )
-  llm_mock_clear()
-  llm_mock({tool_calls: [{id: "call_1", name: "guarded_tool", arguments: {}}]})
-  llm_mock({text: "done"})
-  let result = agent_loop(
-    "use guarded tool",
-    nil,
-    {
-      provider: "mock",
-      tools: make_tools(),
-      tool_format: "native",
-      max_iterations: 2,
-      permissions: {deny: ["guarded_tool"], on_escalation: { _req -> return false }},
+  with_llm_script(
+    [{tool_calls: [{id: "call_1", name: "guarded_tool", arguments: {}}]}, llm_text("done")],
+    { ->
+      let result = agent_loop(
+        "use guarded tool",
+        nil,
+        {
+          provider: "mock",
+          tools: make_tools(),
+          tool_format: "native",
+          max_iterations: 2,
+          permissions: {deny: ["guarded_tool"], on_escalation: { _req -> return false }},
+        },
+      )
+      __io_println(result.status)
+      __io_println(atomic_get(replies))
+      clear_session_hooks()
     },
   )
-  __io_println(result.status)
-  __io_println(atomic_get(replies))
-  clear_session_hooks()
 }

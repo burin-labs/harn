@@ -1,3 +1,5 @@
+import { llm_text, with_llm_script } from "std/testing"
+
 fn tools() {
   var registry = tool_registry()
   registry = tool_define(
@@ -15,20 +17,25 @@ fn tools() {
 }
 
 pipeline main() {
-  llm_mock_clear()
-  llm_mock({tool_calls: [{id: "lookup_1", name: "lookup", arguments: {query: "native turn"}}]})
-  llm_mock({text: "<user_response>Native turn complete.</user_response>"})
-  llm_mock({text: "{\"verdict\":\"done\",\"reasoning\":\"answer is complete\"}"})
-  let result = agent_turn(
-    "Use the lookup tool and finish.",
-    {provider: "mock", tools: tools(), tool_format: "native", max_iterations: 3},
+  with_llm_script(
+    [
+      {tool_calls: [{id: "lookup_1", name: "lookup", arguments: {query: "native turn"}}]},
+      llm_text("<user_response>Native turn complete.</user_response>"),
+      llm_text("{\"verdict\":\"done\",\"reasoning\":\"answer is complete\"}"),
+    ],
+    { ->
+      let result = agent_turn(
+        "Use the lookup tool and finish.",
+        {provider: "mock", tools: tools(), tool_format: "native", max_iterations: 3},
+      )
+      let calls = llm_mock_calls()
+      __io_println(result.status)
+      __io_println(result.visible_text)
+      __io_println(result.llm.iterations)
+      __io_println(len(calls))
+      __io_println(!contains(calls[0].system, "##DONE##"))
+      __io_println(!contains(calls[1].system, "##DONE##"))
+      __io_println(result.judge_decisions[0].verdict)
+    },
   )
-  let calls = llm_mock_calls()
-  __io_println(result.status)
-  __io_println(result.visible_text)
-  __io_println(result.llm.iterations)
-  __io_println(len(calls))
-  __io_println(!contains(calls[0].system, "##DONE##"))
-  __io_println(!contains(calls[1].system, "##DONE##"))
-  __io_println(result.judge_decisions[0].verdict)
 }

@@ -1,3 +1,5 @@
+import { llm_text, with_llm_script } from "std/testing"
+
 fn lookup_tools() {
   var tools = tool_registry()
   tools = tool_define(
@@ -15,41 +17,49 @@ fn lookup_tools() {
 }
 
 pipeline main() {
-  llm_mock_clear()
-  llm_mock({tool_calls: [{id: "lookup_1", name: "lookup", arguments: {query: "release"}}]})
-  llm_mock({text: "<user_response>Release notes are ready.</user_response>"})
-  llm_mock({text: "{\"verdict\":\"done\",\"reasoning\":\"natural final text is complete\"}"})
-  let result = agent_loop(
-    "Inspect evidence and finish.",
-    nil,
-    {
-      provider: "mock",
-      tools: lookup_tools(),
-      tool_format: "native",
-      loop_until_done: true,
-      done_judge: true,
-      max_iterations: 4,
+  with_llm_script(
+    [
+      {tool_calls: [{id: "lookup_1", name: "lookup", arguments: {query: "release"}}]},
+      llm_text("<user_response>Release notes are ready.</user_response>"),
+      llm_text("{\"verdict\":\"done\",\"reasoning\":\"natural final text is complete\"}"),
+    ],
+    { ->
+      let result = agent_loop(
+        "Inspect evidence and finish.",
+        nil,
+        {
+          provider: "mock",
+          tools: lookup_tools(),
+          tool_format: "native",
+          loop_until_done: true,
+          done_judge: true,
+          max_iterations: 4,
+        },
+      )
+      let calls = llm_mock_calls()
+      __io_println(result.status)
+      __io_println(result.text)
+      __io_println(result.llm.iterations)
+      __io_println(len(calls))
+      __io_println(!contains(calls[0].system, "##DONE##"))
+      __io_println(!contains(calls[1].system, "##DONE##"))
+      __io_println(!contains(calls[0].system, "<user_response>"))
+      __io_println(contains(calls[0].system, "provider's native tool-calling channel"))
+      __io_println(contains(json_stringify(calls[1].messages), "evidence for release"))
     },
   )
-  let calls = llm_mock_calls()
-  __io_println(result.status)
-  __io_println(result.text)
-  __io_println(result.llm.iterations)
-  __io_println(len(calls))
-  __io_println(!contains(calls[0].system, "##DONE##"))
-  __io_println(!contains(calls[1].system, "##DONE##"))
-  __io_println(!contains(calls[0].system, "<user_response>"))
-  __io_println(contains(calls[0].system, "provider's native tool-calling channel"))
-  __io_println(contains(json_stringify(calls[1].messages), "evidence for release"))
-  llm_mock_clear()
-  llm_mock({text: "Plain final answer."})
-  agent_loop(
-    "Finish without tools.",
-    nil,
-    {provider: "mock", tools: tool_registry(), tool_format: "native", max_iterations: 1},
+  with_llm_script(
+    [llm_text("Plain final answer.")],
+    { ->
+      agent_loop(
+        "Finish without tools.",
+        nil,
+        {provider: "mock", tools: tool_registry(), tool_format: "native", max_iterations: 1},
+      )
+      let empty_calls = llm_mock_calls()
+      let empty_system = empty_calls[0].system ?? ""
+      __io_println(!contains(empty_system, "Native tool protocol"))
+      __io_println(!contains(empty_system, "<user_response>"))
+    },
   )
-  let empty_calls = llm_mock_calls()
-  let empty_system = empty_calls[0].system ?? ""
-  __io_println(!contains(empty_system, "Native tool protocol"))
-  __io_println(!contains(empty_system, "<user_response>"))
 }

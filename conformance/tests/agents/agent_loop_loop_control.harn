@@ -1,3 +1,5 @@
+import { llm_text, with_llm_script } from "std/testing"
+
 fn lookup_tools() {
   var tools = tool_registry()
   tools = tool_define(
@@ -27,101 +29,121 @@ fn lookup_tools() {
 
 pipeline default() {
   // Case A: required tool not yet succeeded near cap → default policy extends.
-  llm_mock_clear()
-  llm_mock({tool_calls: [{id: "look_a", name: "lookup", arguments: {query: "first"}}]})
-  llm_mock({tool_calls: [{id: "look_b", name: "lookup", arguments: {query: "second"}}]})
-  llm_mock({tool_calls: [{id: "release_x", name: "release_run", arguments: {}}]})
-  llm_mock({text: "<user_response>Released.</user_response>"})
-  let required_path = agent_loop(
-    "Run the release",
-    nil,
-    {
-      provider: "mock",
-      tools: lookup_tools(),
-      tool_format: "native",
-      loop_until_done: true,
-      iteration_budget: {mode: "adaptive", initial: 2, max: 6, extend_by: 2},
-      require_successful_tools: ["release_run"],
+  with_llm_script(
+    [
+      {tool_calls: [{id: "look_a", name: "lookup", arguments: {query: "first"}}]},
+      {tool_calls: [{id: "look_b", name: "lookup", arguments: {query: "second"}}]},
+      {tool_calls: [{id: "release_x", name: "release_run", arguments: {}}]},
+      llm_text("<user_response>Released.</user_response>"),
+    ],
+    { ->
+      let required_path = agent_loop(
+        "Run the release",
+        nil,
+        {
+          provider: "mock",
+          tools: lookup_tools(),
+          tool_format: "native",
+          loop_until_done: true,
+          iteration_budget: {mode: "adaptive", initial: 2, max: 6, extend_by: 2},
+          require_successful_tools: ["release_run"],
+        },
+      )
+      __io_println(required_path.status)
+      __io_println(required_path.adaptive_budget.extensions_used)
+      __io_println(required_path.adaptive_budget.final_limit >= 4)
+      __io_println(required_path?.missing_required_tools == nil)
     },
   )
-  __io_println(required_path.status)
-  __io_println(required_path.adaptive_budget.extensions_used)
-  __io_println(required_path.adaptive_budget.final_limit >= 4)
-  __io_println(required_path?.missing_required_tools == nil)
-  // Case B: caller-provided loop_control extends only when remaining=0,
-  // emits a custom reason, and inspects tool progress.
-  llm_mock_clear()
-  llm_mock({tool_calls: [{id: "tk1", name: "lookup", arguments: {query: "a"}}]})
-  llm_mock({tool_calls: [{id: "tk2", name: "lookup", arguments: {query: "b"}}]})
-  llm_mock({tool_calls: [{id: "tk3", name: "lookup", arguments: {query: "c"}}]})
-  llm_mock({text: "<user_response>Done by user.</user_response>"})
-  let custom_policy = agent_loop(
-    "Iterate until policy says stop",
-    nil,
-    {
-      provider: "mock",
-      tools: lookup_tools(),
-      tool_format: "native",
-      loop_until_done: true,
-      iteration_budget: {mode: "adaptive", initial: 2, max: 8, extend_by: 1},
-      loop_control: { state ->
-        if state.budget.remaining > 0 {
-          nil
-        } else if state.turn.tool_call_count > 0 {
-          {action: "extend", by: 1, reason: "user-policy: tool progress"}
-        } else {
-          nil
-        }
-      },
+  with_llm_script(
+    [
+      {tool_calls: [{id: "tk1", name: "lookup", arguments: {query: "a"}}]},
+      {tool_calls: [{id: "tk2", name: "lookup", arguments: {query: "b"}}]},
+      {tool_calls: [{id: "tk3", name: "lookup", arguments: {query: "c"}}]},
+      llm_text("<user_response>Done by user.</user_response>"),
+    ],
+    { ->
+      let custom_policy = agent_loop(
+        "Iterate until policy says stop",
+        nil,
+        {
+          provider: "mock",
+          tools: lookup_tools(),
+          tool_format: "native",
+          loop_until_done: true,
+          iteration_budget: {mode: "adaptive", initial: 2, max: 8, extend_by: 1},
+          loop_control: { state ->
+            if state.budget.remaining > 0 {
+              nil
+            } else if state.turn.tool_call_count > 0 {
+              {action: "extend", by: 1, reason: "user-policy: tool progress"}
+            } else {
+              nil
+            }
+          },
+        },
+      )
+      __io_println(custom_policy.status)
+      __io_println(custom_policy.adaptive_budget.extensions_used)
+      __io_println(custom_policy.adaptive_budget.decisions[0].reason)
     },
   )
-  __io_println(custom_policy.status)
-  __io_println(custom_policy.adaptive_budget.extensions_used)
-  __io_println(custom_policy.adaptive_budget.decisions[0].reason)
-  // Case C: nil loop_control return after we already converged — natural
-  // completion still wins, no adaptive_budget noise.
-  llm_mock_clear()
-  llm_mock({tool_calls: [{id: "t_nil", name: "lookup", arguments: {query: "noop"}}]})
-  llm_mock({text: "<user_response>quick stop</user_response>"})
-  let no_op_policy = agent_loop(
-    "Stop quickly",
-    nil,
-    {
-      provider: "mock",
-      tools: lookup_tools(),
-      tool_format: "native",
-      loop_until_done: true,
-      iteration_budget: {mode: "adaptive", initial: 4, max: 6, extend_by: 1},
-      loop_control: { _state -> nil },
+  with_llm_script(
+    [
+      {tool_calls: [{id: "t_nil", name: "lookup", arguments: {query: "noop"}}]},
+      llm_text("<user_response>quick stop</user_response>"),
+    ],
+    { ->
+      let no_op_policy = agent_loop(
+        "Stop quickly",
+        nil,
+        {
+          provider: "mock",
+          tools: lookup_tools(),
+          tool_format: "native",
+          loop_until_done: true,
+          iteration_budget: {mode: "adaptive", initial: 4, max: 6, extend_by: 1},
+          loop_control: { _state -> nil },
+        },
+      )
+      __io_println(no_op_policy.status)
+      __io_println(no_op_policy.adaptive_budget.extensions_used)
+      __io_println(len(no_op_policy.adaptive_budget.decisions))
     },
   )
-  __io_println(no_op_policy.status)
-  __io_println(no_op_policy.adaptive_budget.extensions_used)
-  __io_println(len(no_op_policy.adaptive_budget.decisions))
-  // Case D: until-style extension with explicit target.
-  llm_mock_clear()
-  llm_mock({tool_calls: [{id: "u1", name: "lookup", arguments: {query: "1"}}]})
-  llm_mock({tool_calls: [{id: "u2", name: "lookup", arguments: {query: "2"}}]})
-  llm_mock({tool_calls: [{id: "u3", name: "lookup", arguments: {query: "3"}}]})
-  llm_mock({text: "<user_response>final</user_response>"})
-  let until_policy = agent_loop(
-    "Until-target extension",
-    nil,
-    {
-      provider: "mock",
-      tools: lookup_tools(),
-      tool_format: "native",
-      loop_until_done: true,
-      iteration_budget: {mode: "adaptive", initial: 1, max: 10, extend_by: 1},
-      loop_control: { state ->
-        if state.budget.remaining > 0 {
-          nil
-        } else {
-          {action: "extend", until: 6, reason: "lift to 6"}
-        }
-      },
+  with_llm_script(
+    [
+      {tool_calls: [{id: "u1", name: "lookup", arguments: {query: "1"}}]},
+      {tool_calls: [{id: "u2", name: "lookup", arguments: {query: "2"}}]},
+      {tool_calls: [{id: "u3", name: "lookup", arguments: {query: "3"}}]},
+      llm_text("<user_response>final</user_response>"),
+    ],
+    { ->
+      let until_policy = agent_loop(
+        "Until-target extension",
+        nil,
+        {
+          provider: "mock",
+          tools: lookup_tools(),
+          tool_format: "native",
+          loop_until_done: true,
+          iteration_budget: {mode: "adaptive", initial: 1, max: 10, extend_by: 1},
+          loop_control: { state ->
+            if state.budget.remaining > 0 {
+              nil
+            } else {
+              {action: "extend", until: 6, reason: "lift to 6"}
+            }
+          },
+        },
+      )
+      __io_println(until_policy.status)
+      __io_println(until_policy.adaptive_budget.decisions[0].new_limit)
     },
   )
-  __io_println(until_policy.status)
-  __io_println(until_policy.adaptive_budget.decisions[0].new_limit)
 }
+// Case B: caller-provided loop_control extends only when remaining=0,
+// emits a custom reason, and inspects tool progress.
+// Case C: nil loop_control return after we already converged — natural
+// completion still wins, no adaptive_budget noise.
+// Case D: until-style extension with explicit target.

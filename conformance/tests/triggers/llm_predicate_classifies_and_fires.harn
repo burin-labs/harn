@@ -1,3 +1,4 @@
+import { with_llm_script } from "std/testing"
 import "std/triggers"
 
 fn handler(event: TriggerEvent) -> dict {
@@ -14,36 +15,39 @@ fn classify(event: TriggerEvent) -> bool {
 }
 
 pipeline test(task) {
-  llm_mock_clear()
-  llm_mock({text: "yes", input_tokens: 10, output_tokens: 5, model: "gpt-4o-mini"})
-  let unique = to_string(to_int(harness.clock.timestamp())) + "-"
-    + to_string(harness.random.gen_range(100000, 999999))
-  let handle: TriggerHandle = trigger_register(
-    {
-      id: "llm-predicate-fire-" + unique,
-      kind: "issue.opened",
-      provider: "github",
-      handler: handler,
-      when: classify,
-      when_budget: nil,
-      retry: nil,
-      match: {events: ["issue.opened"]},
-      events: nil,
-      dedupe_key: nil,
-      filter: nil,
-      budget: nil,
-      manifest_path: nil,
-      package_name: nil,
+  with_llm_script(
+    [{text: "yes", input_tokens: 10, output_tokens: 5, model: "gpt-4o-mini"}],
+    { ->
+      let unique = to_string(to_int(harness.clock.timestamp())) + "-"
+        + to_string(harness.random.gen_range(100000, 999999))
+      let handle: TriggerHandle = trigger_register(
+        {
+          id: "llm-predicate-fire-" + unique,
+          kind: "issue.opened",
+          provider: "github",
+          handler: handler,
+          when: classify,
+          when_budget: nil,
+          retry: nil,
+          match: {events: ["issue.opened"]},
+          events: nil,
+          dedupe_key: nil,
+          filter: nil,
+          budget: nil,
+          manifest_path: nil,
+          package_name: nil,
+        },
+      )
+      let fire: DispatchHandle = trigger_fire(
+        handle,
+        {provider: "github", kind: "issue.opened", headers: {x_delivery: "evt-fire-" + unique}},
+      )
+      let evaluated = trigger_inspect_lifecycle("predicate.evaluated")
+        .filter({ entry -> entry?.headers?.trigger_id == handle.id })
+      __io_println(fire.status == "dispatched")
+      __io_println(contains(json_stringify(fire.result ?? {}), "\"handled\":true"))
+      __io_println(len(evaluated) == 1 && evaluated[0]?.payload?.result)
+      __io_println(len(llm_mock_calls()) == 1)
     },
   )
-  let fire: DispatchHandle = trigger_fire(
-    handle,
-    {provider: "github", kind: "issue.opened", headers: {x_delivery: "evt-fire-" + unique}},
-  )
-  let evaluated = trigger_inspect_lifecycle("predicate.evaluated")
-    .filter({ entry -> entry?.headers?.trigger_id == handle.id })
-  __io_println(fire.status == "dispatched")
-  __io_println(contains(json_stringify(fire.result ?? {}), "\"handled\":true"))
-  __io_println(len(evaluated) == 1 && evaluated[0]?.payload?.result)
-  __io_println(len(llm_mock_calls()) == 1)
 }

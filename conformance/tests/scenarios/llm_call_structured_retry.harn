@@ -1,3 +1,5 @@
+import { llm_text, with_llm_script } from "std/testing"
+
 /**
  * `llm_call_structured` reuses the standard schema-retry loop. First
  * mock: invalid (missing `verdict`). Second mock: valid. One retry
@@ -9,20 +11,29 @@ pipeline default() {
     required: ["verdict"],
     properties: {verdict: {type: "string"}, improvement: {type: "string"}},
   }
-  llm_mock({text: "{\"improvement\": \"try again\"}"})
-  llm_mock({text: "{\"verdict\": \"YES\", \"improvement\": \"\"}"})
-  let result = llm_call_structured("Grade this", schema, {provider: "mock"})
-  __io_println(result.verdict)
-  __io_println(len(llm_mock_calls()))
-  // Exhaust the retry budget by setting `retries: 0` — the helper
-  // throws because `output_validation: "error"` is the forced default.
-  llm_mock_clear()
-  llm_mock({text: "{\"improvement\": \"still broken\"}"})
-  let err = try {
-    llm_call_structured("Grade again", schema, {provider: "mock", retries: 0})
-  }
-  __io_println(is_err(err))
-  // After #534 the thrown value is a {category, message, ...} dict
-  // — dispatch on category instead of string-matching the message.
-  __io_println(unwrap_err(err)?.category == "schema_validation")
+  with_llm_script(
+    [
+      llm_text("{\"improvement\": \"try again\"}"),
+      llm_text("{\"verdict\": \"YES\", \"improvement\": \"\"}"),
+    ],
+    { ->
+      let result = llm_call_structured("Grade this", schema, {provider: "mock"})
+      __io_println(result.verdict)
+      __io_println(len(llm_mock_calls()))
+    },
+  )
+  with_llm_script(
+    [llm_text("{\"improvement\": \"still broken\"}")],
+    { ->
+      let err = try {
+        llm_call_structured("Grade again", schema, {provider: "mock", retries: 0})
+      }
+      __io_println(is_err(err))
+      __io_println(unwrap_err(err)?.category == "schema_validation")
+    },
+  )
 }
+// Exhaust the retry budget by setting `retries: 0` — the helper
+// throws because `output_validation: "error"` is the forced default.
+// After #534 the thrown value is a {category, message, ...} dict
+// — dispatch on category instead of string-matching the message.

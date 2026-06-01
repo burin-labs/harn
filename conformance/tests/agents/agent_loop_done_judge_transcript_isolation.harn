@@ -1,39 +1,45 @@
 import { agent_capture_events } from "std/agent/events"
 import { agent_session_messages } from "std/agent/state"
+import { llm_text, with_llm_script } from "std/testing"
 
 fn judge_events(events) {
   return events.filter({ event -> event.type == "judge_decision" })
 }
 
 pipeline default() {
-  llm_mock_clear()
-  llm_mock({text: "<user_response>isolated final answer</user_response>"})
-  llm_mock({text: "{\"verdict\":\"done\",\"reasoning\":\"complete\"}"})
-  let session = "done-judge-isolation-" + uuid()
-  let captured = agent_capture_events(
-    session,
-    fn() { return agent_loop(
-      "Finish once.",
-      nil,
-      {
-        provider: "mock",
-        tools: tool_registry(),
-        tool_format: "native",
-        loop_until_done: true,
-        max_iterations: 2,
-        session_id: session,
-        done_judge: true,
-      },
-    ) },
+  with_llm_script(
+    [
+      llm_text("<user_response>isolated final answer</user_response>"),
+      llm_text("{\"verdict\":\"done\",\"reasoning\":\"complete\"}"),
+    ],
+    { ->
+      let session = "done-judge-isolation-" + uuid()
+      let captured = agent_capture_events(
+        session,
+        fn() { return agent_loop(
+          "Finish once.",
+          nil,
+          {
+            provider: "mock",
+            tools: tool_registry(),
+            tool_format: "native",
+            loop_until_done: true,
+            max_iterations: 2,
+            session_id: session,
+            done_judge: true,
+          },
+        ) },
+      )
+      let messages = agent_session_messages(session)
+      let encoded = json_stringify(messages)
+      let judges = judge_events(captured.events)
+      require len(judges) == 1, "done_judge should emit one decision"
+      __io_println(captured.result.status)
+      __io_println(len(messages))
+      __io_println(contains(encoded, "isolated final answer"))
+      __io_println(!contains(encoded, "\"verdict\""))
+      __io_println(!contains(encoded, "complete"))
+      __io_println(len(llm_mock_calls()))
+    },
   )
-  let messages = agent_session_messages(session)
-  let encoded = json_stringify(messages)
-  let judges = judge_events(captured.events)
-  require len(judges) == 1, "done_judge should emit one decision"
-  __io_println(captured.result.status)
-  __io_println(len(messages))
-  __io_println(contains(encoded, "isolated final answer"))
-  __io_println(!contains(encoded, "\"verdict\""))
-  __io_println(!contains(encoded, "complete"))
-  __io_println(len(llm_mock_calls()))
 }

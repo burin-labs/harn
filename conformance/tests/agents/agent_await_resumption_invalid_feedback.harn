@@ -1,34 +1,39 @@
+import { with_llm_script } from "std/testing"
+
 pipeline main() {
-  llm_mock_clear()
-  llm_mock(
-    {
-      tool_calls: [
+  with_llm_script(
+    [
+      {
+        tool_calls: [
+          {
+            id: "bad_await",
+            name: "agent_await_resumption",
+            arguments: {reason: "waiting on review", conditions: {trigger: "review.approved"}},
+          },
+        ],
+        input_tokens: 7,
+        output_tokens: 3,
+      },
+      {text: "Recovered. ##DONE##", input_tokens: 5, output_tokens: 2},
+    ],
+    { ->
+      let result = agent_loop(
+        "Finish without parking.",
+        nil,
         {
-          id: "bad_await",
-          name: "agent_await_resumption",
-          arguments: {reason: "waiting on review", conditions: {trigger: "review.approved"}},
+          provider: "mock",
+          tool_format: "native",
+          loop_until_done: true,
+          done_sentinel: "##DONE##",
+          max_iterations: 3,
         },
-      ],
-      input_tokens: 7,
-      output_tokens: 3,
+      )
+      let calls = llm_mock_calls()
+      let followup = json_stringify(calls[1]?.messages ?? [])
+      __io_println(result.status)
+      __io_println(len(calls))
+      __io_println(contains(followup, "HARN-SUS-002"))
+      __io_println(contains(followup, "conditions.trigger"))
     },
   )
-  llm_mock({text: "Recovered. ##DONE##", input_tokens: 5, output_tokens: 2})
-  let result = agent_loop(
-    "Finish without parking.",
-    nil,
-    {
-      provider: "mock",
-      tool_format: "native",
-      loop_until_done: true,
-      done_sentinel: "##DONE##",
-      max_iterations: 3,
-    },
-  )
-  let calls = llm_mock_calls()
-  let followup = json_stringify(calls[1]?.messages ?? [])
-  __io_println(result.status)
-  __io_println(len(calls))
-  __io_println(contains(followup, "HARN-SUS-002"))
-  __io_println(contains(followup, "conditions.trigger"))
 }

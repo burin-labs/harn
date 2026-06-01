@@ -1,13 +1,20 @@
+import { llm_text, with_llm_script } from "std/testing"
+
 pipeline default() {
-  llm_mock_clear()
   // The default tool_using profile gives agent_loop two transient retries
   // after the first attempt. This succeeds only if the third mock response
   // is reached.
-  llm_mock({error: {category: "rate_limit", message: "429 transient 1"}})
-  llm_mock({error: {category: "rate_limit", message: "429 transient 2"}})
-  llm_mock({text: "Recovered after default retries. ##DONE##"})
-  let result = agent_loop("finish", nil, {provider: "mock", llm_backoff_ms: 0})
-  __io_println(result.status)
-  __io_println(result.visible_text)
-  __io_println(len(llm_mock_calls()))
+  with_llm_script(
+    [
+      {error: {category: "rate_limit", message: "429 transient 1"}},
+      {error: {category: "rate_limit", message: "429 transient 2"}},
+      llm_text("Recovered after default retries. ##DONE##"),
+    ],
+    { ->
+      let result = agent_loop("finish", nil, {provider: "mock", llm_backoff_ms: 0})
+      __io_println(result.status)
+      __io_println(result.visible_text)
+      __io_println(len(llm_mock_calls()))
+    },
+  )
 }

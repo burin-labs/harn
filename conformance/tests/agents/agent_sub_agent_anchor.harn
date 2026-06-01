@@ -1,20 +1,24 @@
 import "std/agents"
+import { llm_text, with_llm_script } from "std/testing"
 
 pipeline main() {
-  llm_mock_clear()
-  llm_mock({text: "child done"})
-  let child = sub_agent_run(
-    "do the work",
-    {
-      provider: "mock",
-      tool_format: "native",
-      max_iterations: 1,
-      session_id: "sub-agent-anchor-child",
-      anchor: {primary: "/workspace/child", anchored_at: "2026-05-24T00:00:01Z"},
+  with_llm_script(
+    [llm_text("child done")],
+    { ->
+      let child = sub_agent_run(
+        "do the work",
+        {
+          provider: "mock",
+          tool_format: "native",
+          max_iterations: 1,
+          session_id: "sub-agent-anchor-child",
+          anchor: {primary: "/workspace/child", anchored_at: "2026-05-24T00:00:01Z"},
+        },
+      )
+      assert(child.ok, "sub_agent_run accepts an anchor option")
+      let child_anchor = agent_session_workspace_anchor("sub-agent-anchor-child")
+      assert(child_anchor?.primary == "/workspace/child", "child session carries the requested anchor")
+      __io_println("agent_sub_agent_anchor tests passed")
     },
   )
-  assert(child.ok, "sub_agent_run accepts an anchor option")
-  let child_anchor = agent_session_workspace_anchor("sub-agent-anchor-child")
-  assert(child_anchor?.primary == "/workspace/child", "child session carries the requested anchor")
-  __io_println("agent_sub_agent_anchor tests passed")
 }

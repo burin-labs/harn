@@ -1,4 +1,5 @@
 import { system_preamble, with_system_prompt_parts } from "std/llm/prompts"
+import { with_llm_script } from "std/testing"
 
 fn occurrences(text, needle) {
   return len(split(text, needle)) - 1
@@ -9,50 +10,58 @@ fn events_by_kind(transcript, kind) {
 }
 
 pipeline default() {
-  llm_mock_clear()
-  let direct = llm_call(
-    "direct prompt",
-    "Direct base.",
-    {provider: "mock", system_preamble: system_preamble("Direct preamble.", {label: "Direct contract"})},
+  with_llm_script(
+    [],
+    { ->
+      let direct = llm_call(
+        "direct prompt",
+        "Direct base.",
+        {provider: "mock", system_preamble: system_preamble("Direct preamble.", {label: "Direct contract"})},
+      )
+      __io_println(len(transcript_messages(direct.transcript)))
+      __io_println(len(events_by_kind(direct.transcript, "system_prompt")))
+      __io_println(transcript_events(direct.transcript)[0].kind == "system_prompt")
+      __io_println(direct.transcript.metadata.system_prompt.content.contains("Direct preamble."))
+      __io_println(occurrences(json_stringify(direct.transcript), "Direct preamble.") == 1)
+    },
   )
-  __io_println(len(transcript_messages(direct.transcript)))
-  __io_println(len(events_by_kind(direct.transcript, "system_prompt")))
-  __io_println(transcript_events(direct.transcript)[0].kind == "system_prompt")
-  __io_println(direct.transcript.metadata.system_prompt.content.contains("Direct preamble."))
-  __io_println(occurrences(json_stringify(direct.transcript), "Direct preamble.") == 1)
-  llm_mock_clear()
-  let sid = "system-prompt-continuation-session"
-  let opts = with_system_prompt_parts(
-    {provider: "mock", session_id: sid, max_iterations: 1, auto_context_profile: false},
-    [
-      system_preamble("Persistent contract.", {label: "Session contract"}),
-      {content: "disabled", enabled: false},
-    ],
-  )
-  let first = agent_loop("hello", "Base system.", opts)
-  let resumed = agent_loop("follow up", "Base system.", opts)
-  let resumed_without_prompt = agent_loop(
-    "resume without prompt options",
-    nil,
-    {provider: "mock", session_id: sid, max_iterations: 1, auto_context_profile: false},
-  )
-  let calls = llm_mock_calls()
-  __io_println(first.status)
-  __io_println(resumed.status)
-  __io_println(resumed_without_prompt.status)
-  __io_println(len(calls))
-  __io_println(occurrences(calls[0].system, "Persistent contract.") == 1)
-  __io_println(occurrences(calls[1].system, "Persistent contract.") == 1)
-  __io_println(occurrences(calls[2].system, "Persistent contract.") == 1)
-  __io_println(!json_stringify(calls[2].messages).contains("Persistent contract."))
-  __io_println(len(transcript_messages(resumed_without_prompt.transcript)))
-  __io_println(len(events_by_kind(resumed_without_prompt.transcript, "system_prompt")))
-  __io_println(transcript_events(resumed_without_prompt.transcript)[0].kind == "system_prompt")
-  __io_println(
-    occurrences(json_stringify(resumed_without_prompt.transcript), "Persistent contract.") == 1,
-  )
-  __io_println(agent_session_system_prompt(sid).contains("Persistent contract."))
-  __io_println(
-    resumed_without_prompt.transcript.metadata.system_prompt.content.contains("Persistent contract."),
+  with_llm_script(
+    [],
+    { ->
+      let sid = "system-prompt-continuation-session"
+      let opts = with_system_prompt_parts(
+        {provider: "mock", session_id: sid, max_iterations: 1, auto_context_profile: false},
+        [
+          system_preamble("Persistent contract.", {label: "Session contract"}),
+          {content: "disabled", enabled: false},
+        ],
+      )
+      let first = agent_loop("hello", "Base system.", opts)
+      let resumed = agent_loop("follow up", "Base system.", opts)
+      let resumed_without_prompt = agent_loop(
+        "resume without prompt options",
+        nil,
+        {provider: "mock", session_id: sid, max_iterations: 1, auto_context_profile: false},
+      )
+      let calls = llm_mock_calls()
+      __io_println(first.status)
+      __io_println(resumed.status)
+      __io_println(resumed_without_prompt.status)
+      __io_println(len(calls))
+      __io_println(occurrences(calls[0].system, "Persistent contract.") == 1)
+      __io_println(occurrences(calls[1].system, "Persistent contract.") == 1)
+      __io_println(occurrences(calls[2].system, "Persistent contract.") == 1)
+      __io_println(!json_stringify(calls[2].messages).contains("Persistent contract."))
+      __io_println(len(transcript_messages(resumed_without_prompt.transcript)))
+      __io_println(len(events_by_kind(resumed_without_prompt.transcript, "system_prompt")))
+      __io_println(transcript_events(resumed_without_prompt.transcript)[0].kind == "system_prompt")
+      __io_println(
+        occurrences(json_stringify(resumed_without_prompt.transcript), "Persistent contract.") == 1,
+      )
+      __io_println(agent_session_system_prompt(sid).contains("Persistent contract."))
+      __io_println(
+        resumed_without_prompt.transcript.metadata.system_prompt.content.contains("Persistent contract."),
+      )
+    },
   )
 }

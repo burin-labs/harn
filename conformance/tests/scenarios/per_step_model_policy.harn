@@ -1,3 +1,5 @@
+import { with_llm_script } from "std/testing"
+
 // `@step(model: ..., budget: ..., error_boundary: ...)` is consumed by
 // the runtime: each step's `llm_call` defaults to the configured model
 // when the call site doesn't override it; per-step token / cost
@@ -45,74 +47,69 @@ fn budget_exhausted_escalate_step(ctx) -> string {
 }
 
 pipeline default() {
-  llm_mock_clear()
-  llm_mock(
-    {
-      match: "classify*",
-      consume_match: false,
-      text: "low_priority",
-      input_tokens: 5,
-      output_tokens: 5,
-      model: "claude-haiku-4-5",
+  with_llm_script(
+    [
+      {
+        match: "classify*",
+        consume_match: false,
+        text: "low_priority",
+        input_tokens: 5,
+        output_tokens: 5,
+        model: "claude-haiku-4-5",
+      },
+      {
+        match: "judge*",
+        consume_match: false,
+        text: "balanced",
+        input_tokens: 12,
+        output_tokens: 18,
+        model: "claude-sonnet-4-6",
+      },
+      {
+        match: "decide*",
+        consume_match: false,
+        text: "merge",
+        input_tokens: 30,
+        output_tokens: 40,
+        model: "claude-opus-4-7",
+      },
+      {
+        match: "explode*",
+        consume_match: false,
+        text: "boom",
+        input_tokens: 50,
+        output_tokens: 100,
+        model: "claude-opus-4-7",
+      },
+      {
+        match: "escalate*",
+        consume_match: false,
+        text: "esc",
+        input_tokens: 50,
+        output_tokens: 100,
+        model: "claude-opus-4-7",
+      },
+    ],
+    { ->
+      let result = triage_captain("PR-42")
+      __io_println(result)
+      __io_println(len(llm_mock_calls()))
+      let escalation_caught = try {
+        budget_exhausted_escalate_step("PR-42")
+      }
+      let err = unwrap_err(escalation_caught)
+      __io_println(err.category)
+      __io_println(err.escalated)
+      __io_println(err.step)
     },
   )
-  llm_mock(
-    {
-      match: "judge*",
-      consume_match: false,
-      text: "balanced",
-      input_tokens: 12,
-      output_tokens: 18,
-      model: "claude-sonnet-4-6",
-    },
-  )
-  llm_mock(
-    {
-      match: "decide*",
-      consume_match: false,
-      text: "merge",
-      input_tokens: 30,
-      output_tokens: 40,
-      model: "claude-opus-4-7",
-    },
-  )
-  llm_mock(
-    {
-      match: "explode*",
-      consume_match: false,
-      text: "boom",
-      input_tokens: 50,
-      output_tokens: 100,
-      model: "claude-opus-4-7",
-    },
-  )
-  llm_mock(
-    {
-      match: "escalate*",
-      consume_match: false,
-      text: "esc",
-      input_tokens: 50,
-      output_tokens: 100,
-      model: "claude-opus-4-7",
-    },
-  )
-  // Routing: each `@step`'s configured model defaults onto its
-  // `llm_call`, the prompt-glob mocks return per-model fixtures, and
-  // the over-budget step is skipped (continue → nil).
-  let result = triage_captain("PR-42")
-  __io_println(result)
-  // 3 calls succeeded; the 4th was rejected pre-flight by the step's
-  // own max_tokens=5 budget.
-  __io_println(len(llm_mock_calls()))
-  // `escalate` re-tags the budget-exhausted error with category
-  // "handoff_escalation" and `escalated: true`, which the persona body
-  // can route on. The step's frame is unwound, so the throw exits the
-  // step function as a typed handoff escalation.
-  let escalation_caught = try {
-    budget_exhausted_escalate_step("PR-42")
-  }
-  let err = unwrap_err(escalation_caught)
-  __io_println(err.category)
-  __io_println(err.escalated)
-  __io_println(err.step)
 }
+// Routing: each `@step`'s configured model defaults onto its
+// `llm_call`, the prompt-glob mocks return per-model fixtures, and
+// the over-budget step is skipped (continue → nil).
+// 3 calls succeeded; the 4th was rejected pre-flight by the step's
+// own max_tokens=5 budget.
+// `escalate` re-tags the budget-exhausted error with category
+// "handoff_escalation" and `escalated: true`, which the persona body
+// can route on. The step's frame is unwound, so the throw exits the
+// step function as a typed handoff escalation.

@@ -1,11 +1,17 @@
+import { llm_text, with_llm_script } from "std/testing"
+
 /**
  * llm_call_safe wraps a successful llm_call in an {ok, response, error}
  * envelope with no throwing.
  */
 pipeline default(task) {
-  llm_mock({text: "ok"})
-  let r = llm_call_safe("hello", nil, {provider: "mock"})
-  __io_println(r.ok)
-  __io_println(r.response.text)
-  __io_println(r.error == nil)
+  with_llm_script(
+    [llm_text("ok")],
+    { ->
+      let r = llm_call_safe("hello", nil, {provider: "mock"})
+      __io_println(r.ok)
+      __io_println(r.response.text)
+      __io_println(r.error == nil)
+    },
+  )
 }

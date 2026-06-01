@@ -1,3 +1,5 @@
+import { llm_text, with_llm_script } from "std/testing"
+
 /**
  * SessionStart and SessionEnd hooks fire around an agent loop, can
  * observe the session id, and run in registration order.
@@ -24,10 +26,13 @@ pipeline default() {
       return nil
     },
   )
-  llm_mock_clear()
-  llm_mock({text: "ok"})
-  let result = agent_loop("hi", nil, {provider: "mock"})
-  __io_println(result.status)
-  __io_println(atomic_get(observed))
-  clear_session_hooks()
+  with_llm_script(
+    [llm_text("ok")],
+    { ->
+      let result = agent_loop("hi", nil, {provider: "mock"})
+      __io_println(result.status)
+      __io_println(atomic_get(observed))
+      clear_session_hooks()
+    },
+  )
 }

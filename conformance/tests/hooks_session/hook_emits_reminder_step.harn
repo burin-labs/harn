@@ -1,3 +1,5 @@
+import { llm_text, with_llm_script } from "std/testing"
+
 @step(name: "watched_step")
 fn watched_step(input) -> string {
   return "step:" + input
@@ -26,26 +28,31 @@ pipeline main() {
     "PreStep",
     { _ctx -> return {reminder: {body: "step hook reminder", tags: ["step"]}} },
   )
-  llm_mock_clear()
-  llm_mock({tool_calls: [{id: "step_1", name: "step_hook_tool", arguments: {}}]})
-  llm_mock({text: "<done>##DONE##</done>"})
-  let result = agent_loop(
-    "call the step hook tool",
-    nil,
-    {
-      provider: "mock",
-      tools: step_hook_tools(),
-      tool_format: "native",
-      max_iterations: 2,
-      loop_until_done: true,
-      session_id: "hook-reminder-step",
+  with_llm_script(
+    [
+      {tool_calls: [{id: "step_1", name: "step_hook_tool", arguments: {}}]},
+      llm_text("<done>##DONE##</done>"),
+    ],
+    { ->
+      let result = agent_loop(
+        "call the step hook tool",
+        nil,
+        {
+          provider: "mock",
+          tools: step_hook_tools(),
+          tool_format: "native",
+          max_iterations: 2,
+          loop_until_done: true,
+          session_id: "hook-reminder-step",
+        },
+      )
+      let events = transcript_events_by_kind(result.transcript, "system_reminder")
+      __io_println(result.status)
+      __io_println(len(events))
+      __io_println(events[0].reminder.body)
+      __io_println(events[0].reminder.source)
+      __io_println(events[0].reminder.tags[0])
+      clear_persona_hooks()
     },
   )
-  let events = transcript_events_by_kind(result.transcript, "system_reminder")
-  __io_println(result.status)
-  __io_println(len(events))
-  __io_println(events[0].reminder.body)
-  __io_println(events[0].reminder.source)
-  __io_println(events[0].reminder.tags[0])
-  clear_persona_hooks()
 }

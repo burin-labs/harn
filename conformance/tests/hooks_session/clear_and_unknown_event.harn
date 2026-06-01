@@ -1,3 +1,5 @@
+import { llm_text, with_llm_script } from "std/testing"
+
 /**
  * `clear_session_hooks()` removes all session-level hooks but leaves
  * tool/persona hooks alone. Unknown event names raise.
@@ -14,12 +16,15 @@ pipeline default() {
     },
   )
   clear_session_hooks()
-  llm_mock_clear()
-  llm_mock({text: "ok"})
-  agent_loop("hi", nil, {provider: "mock"})
-  __io_println(atomic_get(observed))
-  let err = try {
-    register_session_hook("PreToolUse", { _ev -> return nil })
-  }
-  __io_println(is_err(err))
+  with_llm_script(
+    [llm_text("ok")],
+    { ->
+      agent_loop("hi", nil, {provider: "mock"})
+      __io_println(atomic_get(observed))
+      let err = try {
+        register_session_hook("PreToolUse", { _ev -> return nil })
+      }
+      __io_println(is_err(err))
+    },
+  )
 }

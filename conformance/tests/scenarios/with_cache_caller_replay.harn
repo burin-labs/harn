@@ -13,6 +13,7 @@
  */
 import { cache_clear, mem_cache } from "std/cache"
 import { default_llm_caller, with_cache } from "std/llm/handlers"
+import { with_llm_script } from "std/testing"
 
 pipeline default() {
   let store = mem_cache({namespace: "with-cache-caller-" + uuid()})
@@ -34,32 +35,37 @@ pipeline default() {
       }
     },
   )
-  llm_mock_clear()
   // The mock surfaces input_tokens/output_tokens at the top level; the
   // LLM result wraps them into `usage` so the cache receipt reader sees
   // the right `tokens_saved` figure on hits.
-  llm_mock({text: "answer", input_tokens: 11, output_tokens: 7, model: "m", provider: "p"})
-  llm_mock({text: "fresh-if-uncached", model: "m", provider: "p"})
-  let opts = {provider: "p", model: "m", stream: false}
-  let call_one = {
-    prompt: "hello",
-    system: "sys",
-    opts: opts,
-    turn: {iteration: 0, session_id: session_id, attempt: 1},
-  }
-  let first = caller(call_one)
-  let second = caller(call_one)
-  __io_println("first.ok=" + to_string(first.ok))
-  __io_println("second.ok=" + to_string(second.ok))
-  __io_println(
-    "byte_identical=" + to_string(json_stringify(first.value) == json_stringify(second.value)),
+  with_llm_script(
+    [
+      {text: "answer", input_tokens: 11, output_tokens: 7, model: "m", provider: "p"},
+      {text: "fresh-if-uncached", model: "m", provider: "p"},
+    ],
+    { ->
+      let opts = {provider: "p", model: "m", stream: false}
+      let call_one = {
+        prompt: "hello",
+        system: "sys",
+        opts: opts,
+        turn: {iteration: 0, session_id: session_id, attempt: 1},
+      }
+      let first = caller(call_one)
+      let second = caller(call_one)
+      __io_println("first.ok=" + to_string(first.ok))
+      __io_println("second.ok=" + to_string(second.ok))
+      __io_println(
+        "byte_identical=" + to_string(json_stringify(first.value) == json_stringify(second.value)),
+      )
+      __io_println("mock_calls=" + to_string(len(llm_mock_calls())))
+      let tool_call = call_one + {opts: opts + {tools: []}}
+      let _ = caller(tool_call)
+      __io_println("after_tool_call_mock_calls=" + to_string(len(llm_mock_calls())))
+      __io_println("misses=" + to_string(atomic_get(misses)))
+      __io_println("hits=" + to_string(atomic_get(hits)))
+      __io_println("hit.tokens_saved=" + to_string(atomic_get(last_hit_tokens)))
+    },
   )
-  __io_println("mock_calls=" + to_string(len(llm_mock_calls())))
-  // Calls with tools opt out of the cache by default (skip_when).
-  let tool_call = call_one + {opts: opts + {tools: []}}
-  let _ = caller(tool_call)
-  __io_println("after_tool_call_mock_calls=" + to_string(len(llm_mock_calls())))
-  __io_println("misses=" + to_string(atomic_get(misses)))
-  __io_println("hits=" + to_string(atomic_get(hits)))
-  __io_println("hit.tokens_saved=" + to_string(atomic_get(last_hit_tokens)))
 }
+// Calls with tools opt out of the cache by default (skip_when).

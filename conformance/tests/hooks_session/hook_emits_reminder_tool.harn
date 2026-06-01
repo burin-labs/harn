@@ -1,3 +1,5 @@
+import { llm_text, with_llm_script } from "std/testing"
+
 fn hook_reminder_tools() {
   let registry = tool_registry()
   return tool_define(
@@ -20,27 +22,32 @@ pipeline main() {
       } },
     },
   )
-  llm_mock_clear()
-  llm_mock({tool_calls: [{id: "tool_1", name: "hooked_tool", arguments: {}}]})
-  llm_mock({text: "<done>##DONE##</done>"})
-  let result = agent_loop(
-    "call the hooked tool",
-    nil,
-    {
-      provider: "mock",
-      tools: hook_reminder_tools(),
-      tool_format: "native",
-      max_iterations: 2,
-      loop_until_done: true,
-      session_id: "hook-reminder-tool",
+  with_llm_script(
+    [
+      {tool_calls: [{id: "tool_1", name: "hooked_tool", arguments: {}}]},
+      llm_text("<done>##DONE##</done>"),
+    ],
+    { ->
+      let result = agent_loop(
+        "call the hooked tool",
+        nil,
+        {
+          provider: "mock",
+          tools: hook_reminder_tools(),
+          tool_format: "native",
+          max_iterations: 2,
+          loop_until_done: true,
+          session_id: "hook-reminder-tool",
+        },
+      )
+      let events = transcript_events_by_kind(result.transcript, "system_reminder")
+      __io_println(result.status)
+      __io_println(len(events))
+      __io_println(events[0].reminder.body)
+      __io_println(events[0].reminder.role_hint)
+      __io_println(events[1].reminder.body)
+      __io_println(events[1].reminder.source)
+      clear_tool_hooks()
     },
   )
-  let events = transcript_events_by_kind(result.transcript, "system_reminder")
-  __io_println(result.status)
-  __io_println(len(events))
-  __io_println(events[0].reminder.body)
-  __io_println(events[0].reminder.role_hint)
-  __io_println(events[1].reminder.body)
-  __io_println(events[1].reminder.source)
-  clear_tool_hooks()
 }

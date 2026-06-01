@@ -13,6 +13,7 @@ import {
   release_captain_agent,
   review_captain_agent,
 } from "std/agent/presets"
+import { llm_text, with_llm_script } from "std/testing"
 
 pipeline default() {
   // (1) merge_captain — long adaptive budget; tool_using profile;
@@ -79,16 +80,6 @@ pipeline default() {
   // (8) merge_captain default consent ALLOWS read-annotated tools and
   // BLOCKS unannotated/write tools. Drive a real agent_loop through
   // both paths to confirm short-circuit behavior.
-  llm_mock_clear()
-  llm_mock(
-    {
-      tool_calls: [
-        {id: "ok1", name: "lookup", arguments: {q: "x"}},
-        {id: "block1", name: "delete", arguments: {path: "/tmp/y"}},
-      ],
-    },
-  )
-  llm_mock({text: "<user_response>Done.</user_response>"})
   var registry = tool_registry()
   registry = tool_define(
     registry,
@@ -110,64 +101,83 @@ pipeline default() {
       annotations: {kind: "delete"},
     },
   )
-  let merge_run = merge_captain_agent(
-    "Try one read and one write.",
-    {provider: "mock", tools: registry, tool_format: "native", max_iterations: 3},
-  )
-  __io_println(merge_run.status)
-  // The read tool succeeded; the delete tool was denied by default
-  // consent and never reached the dispatch layer.
-  __io_println(contains(merge_run.tools.successful, "lookup"))
-  __io_println(!contains(merge_run.tools.successful, "delete"))
-  // (9) oncall_captain default rate-limit caps tool calls at 50.
-  // Verify the cap is wired by passing an absurdly small override.
-  llm_mock_clear()
-  llm_mock({tool_calls: [{id: "rl1", name: "lookup", arguments: {q: "1"}}]})
-  llm_mock({tool_calls: [{id: "rl2", name: "lookup", arguments: {q: "2"}}]})
-  llm_mock({tool_calls: [{id: "rl3", name: "lookup", arguments: {q: "3"}}]})
-  llm_mock({text: "<user_response>Stopping.</user_response>"})
-  let oncall_capped = oncall_captain_agent(
-    "Hammer the same tool.",
-    {
-      provider: "mock",
-      tools: registry,
-      tool_format: "native",
-      max_iterations: 5,
-      rate_limit: {max_calls: 1},
+  with_llm_script(
+    [
+      {
+        tool_calls: [
+          {id: "ok1", name: "lookup", arguments: {q: "x"}},
+          {id: "block1", name: "delete", arguments: {path: "/tmp/y"}},
+        ],
+      },
+      llm_text("<user_response>Done.</user_response>"),
+    ],
+    { ->
+      let merge_run = merge_captain_agent(
+        "Try one read and one write.",
+        {provider: "mock", tools: registry, tool_format: "native", max_iterations: 3},
+      )
+      __io_println(merge_run.status)
+      __io_println(contains(merge_run.tools.successful, "lookup"))
+      __io_println(!contains(merge_run.tools.successful, "delete"))
     },
   )
-  // Status may be done or stuck depending on whether the model
-  // recovers — what matters is that exactly one tool succeeded
-  // and the rest were rejected by the rate-limit layer.
-  __io_println(len(oncall_capped.tools.successful))
-  // (10) release_captain dry_run: opt-in via {dry_run: true}.
-  llm_mock_clear()
-  llm_mock({tool_calls: [{id: "dr1", name: "delete", arguments: {path: "/tmp/preview"}}]})
-  llm_mock({text: "<user_response>Dry run preview.</user_response>"})
-  let release_dry = release_captain_agent(
-    "Preview the action.",
-    {provider: "mock", tools: registry, tool_format: "native", max_iterations: 3, dry_run: true},
+  with_llm_script(
+    [
+      {tool_calls: [{id: "rl1", name: "lookup", arguments: {q: "1"}}]},
+      {tool_calls: [{id: "rl2", name: "lookup", arguments: {q: "2"}}]},
+      {tool_calls: [{id: "rl3", name: "lookup", arguments: {q: "3"}}]},
+      llm_text("<user_response>Stopping.</user_response>"),
+    ],
+    { ->
+      let oncall_capped = oncall_captain_agent(
+        "Hammer the same tool.",
+        {
+          provider: "mock",
+          tools: registry,
+          tool_format: "native",
+          max_iterations: 5,
+          rate_limit: {max_calls: 1},
+        },
+      )
+      __io_println(len(oncall_capped.tools.successful))
+    },
   )
-  __io_println(release_dry.status)
-  // Dry-run reports the tool call as successful (status=dry_run with ok=true).
-  __io_println(contains(release_dry.tools.successful, "delete"))
-  // (11) review_captain_agent runs with tool_using profile and an
-  // adaptive budget — exercise it end-to-end.
-  llm_mock_clear()
-  llm_mock({tool_calls: [{id: "rv1", name: "lookup", arguments: {q: "review"}}]})
-  llm_mock({text: "<user_response>Looks good.</user_response>"})
-  let review_run = review_captain_agent("Review this PR.", {provider: "mock", tools: registry, tool_format: "native"})
-  __io_println(review_run.status)
-  // (12) Explicit `false` opts the caller out of a per-captain default
-  // layer (here: merge_captain's default consent). With consent
-  // disabled the previously-blocked write tool succeeds.
-  llm_mock_clear()
-  llm_mock({tool_calls: [{id: "ow1", name: "delete", arguments: {path: "/tmp/yes"}}]})
-  llm_mock({text: "<user_response>Done.</user_response>"})
-  let merge_no_consent = merge_captain_agent(
-    "Delete with consent disabled.",
-    {provider: "mock", tools: registry, tool_format: "native", max_iterations: 3, consent: false},
+  with_llm_script(
+    [
+      {tool_calls: [{id: "dr1", name: "delete", arguments: {path: "/tmp/preview"}}]},
+      llm_text("<user_response>Dry run preview.</user_response>"),
+    ],
+    { ->
+      let release_dry = release_captain_agent(
+        "Preview the action.",
+        {provider: "mock", tools: registry, tool_format: "native", max_iterations: 3, dry_run: true},
+      )
+      __io_println(release_dry.status)
+      __io_println(contains(release_dry.tools.successful, "delete"))
+    },
   )
-  __io_println(merge_no_consent.status)
-  __io_println(contains(merge_no_consent.tools.successful, "delete"))
+  with_llm_script(
+    [
+      {tool_calls: [{id: "rv1", name: "lookup", arguments: {q: "review"}}]},
+      llm_text("<user_response>Looks good.</user_response>"),
+    ],
+    { ->
+      let review_run = review_captain_agent("Review this PR.", {provider: "mock", tools: registry, tool_format: "native"})
+      __io_println(review_run.status)
+    },
+  )
+  with_llm_script(
+    [
+      {tool_calls: [{id: "ow1", name: "delete", arguments: {path: "/tmp/yes"}}]},
+      llm_text("<user_response>Done.</user_response>"),
+    ],
+    { ->
+      let merge_no_consent = merge_captain_agent(
+        "Delete with consent disabled.",
+        {provider: "mock", tools: registry, tool_format: "native", max_iterations: 3, consent: false},
+      )
+      __io_println(merge_no_consent.status)
+      __io_println(contains(merge_no_consent.tools.successful, "delete"))
+    },
+  )
 }

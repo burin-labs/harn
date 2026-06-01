@@ -2,23 +2,25 @@
 // extract closure returns nil for every sample, the result reports
 // {ok: false, status: "no_extractable_answers"}.
 import { self_consistency } from "std/llm/ensemble"
+import { llm_text, with_llm_script } from "std/testing"
 
 pipeline default() {
-  llm_mock_clear()
-  llm_mock({text: "noise-1"})
-  llm_mock({text: "noise-2"})
-  llm_mock({text: "noise-3"})
-  let result = self_consistency(
-    "anything",
-    "",
-    {
-      n: 3,
-      parallel: false,
-      sampler_opts: {temperature: 1.2},
-      call_opts: {provider: "mock"},
-      extract: { _text -> nil },
+  with_llm_script(
+    [llm_text("noise-1"), llm_text("noise-2"), llm_text("noise-3")],
+    { ->
+      let result = self_consistency(
+        "anything",
+        "",
+        {
+          n: 3,
+          parallel: false,
+          sampler_opts: {temperature: 1.2},
+          call_opts: {provider: "mock"},
+          extract: { _text -> nil },
+        },
+      )
+      __io_println(result.ok)
+      __io_println(result.status)
     },
   )
-  __io_println(result.ok)
-  __io_println(result.status)
 }

@@ -1,26 +1,29 @@
 import { scripted_user, simulated_user_post_turn, simulated_user_status } from "std/agent/user"
+import { llm_text, with_llm_script } from "std/testing"
 
 pipeline main() {
-  llm_mock_clear()
-  llm_mock({text: "Which test runner should I use?"})
-  llm_mock({text: "Done. ##DONE##"})
-  let answerer = scripted_user(["Use Vitest."])
-  let result = agent_loop(
-    "Create index.test.ts with full edge coverage.",
-    nil,
-    {
-      provider: "mock",
-      loop_until_done: true,
-      done_sentinel: "##DONE##",
-      max_iterations: 3,
-      post_turn_callback: simulated_user_post_turn(answerer),
+  with_llm_script(
+    [llm_text("Which test runner should I use?"), llm_text("Done. ##DONE##")],
+    { ->
+      let answerer = scripted_user(["Use Vitest."])
+      let result = agent_loop(
+        "Create index.test.ts with full edge coverage.",
+        nil,
+        {
+          provider: "mock",
+          loop_until_done: true,
+          done_sentinel: "##DONE##",
+          max_iterations: 3,
+          post_turn_callback: simulated_user_post_turn(answerer),
+        },
+      )
+      let calls = llm_mock_calls()
+      let status = simulated_user_status(answerer)
+      __io_println(result.status)
+      __io_println(result.stop_reason)
+      __io_println(result.llm.iterations)
+      __io_println(status.state.replies)
+      __io_println(contains(json_stringify(calls[1].messages), "Use Vitest."))
     },
   )
-  let calls = llm_mock_calls()
-  let status = simulated_user_status(answerer)
-  __io_println(result.status)
-  __io_println(result.stop_reason)
-  __io_println(result.llm.iterations)
-  __io_println(status.state.replies)
-  __io_println(contains(json_stringify(calls[1].messages), "Use Vitest."))
 }

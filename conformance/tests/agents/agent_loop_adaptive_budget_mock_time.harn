@@ -1,3 +1,5 @@
+import { llm_text, with_llm_script } from "std/testing"
+
 /**
  * `iteration_budget` adaptive mode under mock_time. The budget logic
  * is decoupled from wall-clock — it counts turns and tool progress —
@@ -26,30 +28,35 @@ fn lookup_tools() {
 pipeline default() {
   mock_time(1700000000000)
   let start_ms = harness.clock.now_ms()
-  llm_mock_clear()
-  llm_mock({tool_calls: [{id: "t1", name: "lookup", arguments: {q: "1"}}]})
-  llm_mock({tool_calls: [{id: "t2", name: "lookup", arguments: {q: "2"}}]})
-  llm_mock({tool_calls: [{id: "t3", name: "lookup", arguments: {q: "3"}}]})
-  llm_mock({text: "<user_response>Done.</user_response>"})
-  let result = agent_loop(
-    "Inspect everything.",
-    nil,
-    {
-      provider: "mock",
-      tools: lookup_tools(),
-      tool_format: "native",
-      loop_until_done: true,
-      iteration_budget: {mode: "adaptive", initial: 2, max: 8, extend_by: 2},
+  with_llm_script(
+    [
+      {tool_calls: [{id: "t1", name: "lookup", arguments: {q: "1"}}]},
+      {tool_calls: [{id: "t2", name: "lookup", arguments: {q: "2"}}]},
+      {tool_calls: [{id: "t3", name: "lookup", arguments: {q: "3"}}]},
+      llm_text("<user_response>Done.</user_response>"),
+    ],
+    { ->
+      let result = agent_loop(
+        "Inspect everything.",
+        nil,
+        {
+          provider: "mock",
+          tools: lookup_tools(),
+          tool_format: "native",
+          loop_until_done: true,
+          iteration_budget: {mode: "adaptive", initial: 2, max: 8, extend_by: 2},
+        },
+      )
+      __io_println(result.status)
+      __io_println(result.adaptive_budget.mode)
+      __io_println(result.adaptive_budget.initial)
+      __io_println(result.adaptive_budget.max)
+      __io_println(result.adaptive_budget.extensions_used >= 1)
+      __io_println(result.adaptive_budget.decisions[0].action)
+      __io_println(harness.clock.now_ms() == start_ms)
+      unmock_time()
     },
   )
-  __io_println(result.status)
-  __io_println(result.adaptive_budget.mode)
-  __io_println(result.adaptive_budget.initial)
-  __io_println(result.adaptive_budget.max)
-  __io_println(result.adaptive_budget.extensions_used >= 1)
-  __io_println(result.adaptive_budget.decisions[0].action)
-  // Mock time stayed pinned: no opaque wall-clock observation lurks
-  // in the budget path.
-  __io_println(harness.clock.now_ms() == start_ms)
-  unmock_time()
 }
+// Mock time stayed pinned: no opaque wall-clock observation lurks
+// in the budget path.

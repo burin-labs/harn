@@ -13,6 +13,7 @@
  * handler is ever in-flight; with cap=4 all four reach in-flight=4.
  */
 import { compose_tool_callers, with_audit_log, with_required_reason } from "std/llm/tool_middleware"
+import { llm_text, with_llm_script } from "std/testing"
 
 let in_flight = atomic(0)
 
@@ -46,72 +47,78 @@ fn fanout_tools() {
 }
 
 fn run(cap) {
-  llm_mock_clear()
   atomic_set(in_flight, 0)
   atomic_set(peak, 0)
   atomic_set(observed, 0)
-  llm_mock(
-    {
-      tool_calls: [
-        {id: "c1", name: "fanout_echo", arguments: {msg: "alpha", reason: "first"}},
-        {id: "c2", name: "fanout_echo", arguments: {msg: "bravo", reason: "second"}},
-        {id: "c3", name: "fanout_echo", arguments: {msg: "charlie", reason: "third"}},
-        {id: "c4", name: "fanout_echo", arguments: {msg: "delta", reason: "fourth"}},
-      ],
+  return with_llm_script(
+    [
+      {
+        tool_calls: [
+          {id: "c1", name: "fanout_echo", arguments: {msg: "alpha", reason: "first"}},
+          {id: "c2", name: "fanout_echo", arguments: {msg: "bravo", reason: "second"}},
+          {id: "c3", name: "fanout_echo", arguments: {msg: "charlie", reason: "third"}},
+          {id: "c4", name: "fanout_echo", arguments: {msg: "delta", reason: "fourth"}},
+        ],
+      },
+      llm_text("##DONE##"),
+    ],
+    { ->
+      let mw = with_required_reason()
+      let counting_caller = { call, next ->
+        let _ = atomic_add(observed, 1)
+        return mw.caller(call, next)
+      }
+      let result = agent_loop(
+        "fan out",
+        nil,
+        {
+          provider: "mock",
+          tools: fanout_tools(),
+          tool_format: "native",
+          max_iterations: 3,
+          loop_until_done: true,
+          done_sentinel: "##DONE##",
+          max_concurrent_tools: cap,
+          tool_caller: counting_caller,
+        },
+      )
+      return {status: result.status, observed: atomic_get(observed), peak: atomic_get(peak)}
     },
   )
-  llm_mock({text: "##DONE##"})
-  let mw = with_required_reason()
-  let counting_caller = { call, next ->
-    let _ = atomic_add(observed, 1)
-    return mw.caller(call, next)
-  }
-  let result = agent_loop(
-    "fan out",
-    nil,
-    {
-      provider: "mock",
-      tools: fanout_tools(),
-      tool_format: "native",
-      max_iterations: 3,
-      loop_until_done: true,
-      done_sentinel: "##DONE##",
-      max_concurrent_tools: cap,
-      tool_caller: counting_caller,
-    },
-  )
-  return {status: result.status, observed: atomic_get(observed), peak: atomic_get(peak)}
 }
 
 fn run_without_middleware(cap) {
-  llm_mock_clear()
   atomic_set(in_flight, 0)
   atomic_set(peak, 0)
-  llm_mock(
-    {
-      tool_calls: [
-        {id: "n1", name: "fanout_echo", arguments: {msg: "one"}},
-        {id: "n2", name: "fanout_echo", arguments: {msg: "two"}},
-        {id: "n3", name: "fanout_echo", arguments: {msg: "three"}},
-        {id: "n4", name: "fanout_echo", arguments: {msg: "four"}},
-      ],
+  return with_llm_script(
+    [
+      {
+        tool_calls: [
+          {id: "n1", name: "fanout_echo", arguments: {msg: "one"}},
+          {id: "n2", name: "fanout_echo", arguments: {msg: "two"}},
+          {id: "n3", name: "fanout_echo", arguments: {msg: "three"}},
+          {id: "n4", name: "fanout_echo", arguments: {msg: "four"}},
+        ],
+      },
+      llm_text("##DONE##"),
+    ],
+    { ->
+      let result = agent_loop(
+        "fan out without middleware",
+        nil,
+        {
+          provider: "mock",
+          tools: fanout_tools(),
+          tool_format: "native",
+          max_iterations: 3,
+          loop_until_done: true,
+          done_sentinel: "##DONE##",
+          max_concurrent_tools: cap,
+        },
+      )
+      return {status: result.status, peak: atomic_get(peak)}
     },
   )
-  llm_mock({text: "##DONE##"})
-  let result = agent_loop(
-    "fan out without middleware",
-    nil,
-    {
-      provider: "mock",
-      tools: fanout_tools(),
-      tool_format: "native",
-      max_iterations: 3,
-      loop_until_done: true,
-      done_sentinel: "##DONE##",
-      max_concurrent_tools: cap,
-    },
-  )
-  return {status: result.status, peak: atomic_get(peak)}
 }
 
 let audit_receipt_count = atomic(0)
@@ -119,58 +126,61 @@ let audit_receipt_count = atomic(0)
 let audit_emit_order_bitmask = atomic(0)
 
 fn run_with_audit(cap) {
-  llm_mock_clear()
   atomic_set(in_flight, 0)
   atomic_set(peak, 0)
   atomic_set(observed, 0)
   atomic_set(audit_receipt_count, 0)
   atomic_set(audit_emit_order_bitmask, 0)
-  llm_mock(
-    {
-      tool_calls: [
-        {id: "a1", name: "fanout_echo", arguments: {msg: "first", reason: "r1"}},
-        {id: "a2", name: "fanout_echo", arguments: {msg: "second", reason: "r2"}},
-        {id: "a3", name: "fanout_echo", arguments: {msg: "third", reason: "r3"}},
-      ],
+  return with_llm_script(
+    [
+      {
+        tool_calls: [
+          {id: "a1", name: "fanout_echo", arguments: {msg: "first", reason: "r1"}},
+          {id: "a2", name: "fanout_echo", arguments: {msg: "second", reason: "r2"}},
+          {id: "a3", name: "fanout_echo", arguments: {msg: "third", reason: "r3"}},
+        ],
+      },
+      llm_text("##DONE##"),
+    ],
+    { ->
+      let reason = with_required_reason()
+      let audit_sink = { receipt ->
+        atomic_add(audit_receipt_count, 1)
+        var shifted = 1
+        var n = receipt.emit_order
+        while n > 0 {
+          shifted = shifted * 2
+          n = n - 1
+        }
+        atomic_add(audit_emit_order_bitmask, shifted)
+      }
+      let caller = compose_tool_callers([with_audit_log({sink: audit_sink}), reason.caller])
+      let result = agent_loop(
+        "audit fan-out",
+        nil,
+        {
+          provider: "mock",
+          tools: fanout_tools(),
+          tool_format: "native",
+          max_iterations: 3,
+          loop_until_done: true,
+          done_sentinel: "##DONE##",
+          max_concurrent_tools: cap,
+          tool_caller: caller,
+        },
+      )
+      return {
+        status: result.status,
+        receipt_count: atomic_get(audit_receipt_count),
+        emit_bitmask: atomic_get(audit_emit_order_bitmask),
+      }
     },
   )
-  llm_mock({text: "##DONE##"})
-  let reason = with_required_reason()
-  // Add each receipt's bit (1 << emit_order) to the bitmask atomic.
-  // For 3 unique calls the bits are disjoint, so atomic_add == OR. The
-  // expected mask for emit_orders {0, 1, 2} is 1+2+4 = 7.
-  let audit_sink = { receipt ->
-    atomic_add(audit_receipt_count, 1)
-    var shifted = 1
-    var n = receipt.emit_order
-    while n > 0 {
-      shifted = shifted * 2
-      n = n - 1
-    }
-    atomic_add(audit_emit_order_bitmask, shifted)
-  }
-  let caller = compose_tool_callers([with_audit_log({sink: audit_sink}), reason.caller])
-  let result = agent_loop(
-    "audit fan-out",
-    nil,
-    {
-      provider: "mock",
-      tools: fanout_tools(),
-      tool_format: "native",
-      max_iterations: 3,
-      loop_until_done: true,
-      done_sentinel: "##DONE##",
-      max_concurrent_tools: cap,
-      tool_caller: caller,
-    },
-  )
-  return {
-    status: result.status,
-    receipt_count: atomic_get(audit_receipt_count),
-    emit_bitmask: atomic_get(audit_emit_order_bitmask),
-  }
 }
 
+// Add each receipt's bit (1 << emit_order) to the bitmask atomic.
+// For 3 unique calls the bits are disjoint, so atomic_add == OR. The
+// expected mask for emit_orders {0, 1, 2} is 1+2+4 = 7.
 let prefetch_audit_finished = atomic(0)
 
 let prefetch_second_turn_before_audit = atomic(0)

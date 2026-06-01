@@ -1,27 +1,34 @@
+import { with_llm_script } from "std/testing"
+
 /**
  * A non-failover error (e.g. schema_validation) should stop the chain
  * immediately even when later links would succeed — failover rules
  * own the predicate that determines retryable categories.
  */
 pipeline test(task) {
-  llm_mock_clear()
-  llm_mock({error: {category: "auth", message: "missing API key"}, model: "mock", provider: "mock"})
-  llm_mock({text: "would never run", model: "mock", provider: "mock"})
-  let policy = routing_policy(
-    {
-      chain: [
-        {provider: "mock", model: "mock", label: "cheap"},
-        {provider: "mock", model: "mock-strong", label: "frontier"},
-      ],
-      failover: {on_status: [429], on_error_kinds: ["rate_limit"]},
-      label: "narrow-failover",
+  with_llm_script(
+    [
+      {error: {category: "auth", message: "missing API key"}, model: "mock", provider: "mock"},
+      {text: "would never run", model: "mock", provider: "mock"},
+    ],
+    { ->
+      let policy = routing_policy(
+        {
+          chain: [
+            {provider: "mock", model: "mock", label: "cheap"},
+            {provider: "mock", model: "mock-strong", label: "frontier"},
+          ],
+          failover: {on_status: [429], on_error_kinds: ["rate_limit"]},
+          label: "narrow-failover",
+        },
+      )
+      let envelope = try {
+        llm_call("hi", nil, {routing: policy})
+      } catch (e) {
+        {error_caught: true, category: e.category}
+      }
+      __io_println(envelope.error_caught)
+      __io_println(envelope.category)
     },
   )
-  let envelope = try {
-    llm_call("hi", nil, {routing: policy})
-  } catch (e) {
-    {error_caught: true, category: e.category}
-  }
-  __io_println(envelope.error_caught)
-  __io_println(envelope.category)
 }

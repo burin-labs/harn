@@ -12,7 +12,6 @@
  * then asserts the snapshot fields directly.
  */
 pipeline main() {
-  llm_mock_clear()
   let unique = to_string(to_int(harness.clock.timestamp())) + "-"
     + to_string(harness.random.gen_range(100000, 999999))
   let dir = path_join(harness.fs.temp_dir(), "harn-daemon-parity-" + unique)

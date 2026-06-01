@@ -1,3 +1,4 @@
+import { llm_text, with_llm_script } from "std/testing"
 import { preset_run_command } from "std/tool_hooks"
 
 /**
@@ -11,32 +12,35 @@ import { preset_run_command } from "std/tool_hooks"
 pipeline default() {
   pipeline_lifecycle_audit_log_take()
   __tool_hooks_classifier_cache_clear()
-  llm_mock_clear()
-  llm_mock(
-    {
-      text: "{\"kind\": \"deny\", \"confidence\": 0.95,"
-        + " \"explanation\": \"rm against /etc is dangerous\"}",
+  with_llm_script(
+    [
+      llm_text(
+        "{\"kind\": \"deny\", \"confidence\": 0.95,"
+          + " \"explanation\": \"rm against /etc is dangerous\"}",
+      ),
+    ],
+    { ->
+      let inner = { args -> {ok: true, ran: args.command} }
+      let wrapper = preset_run_command(
+        {llm_classifier: {model: "haiku", provider: "mock", threshold: 0.7}, inner: inner},
+      )
+      let result = wrapper({command: "rm -rf /etc/foo"})
+      __io_println(result.action)
+      __io_println(result.catalogue_id)
+      __io_println(result.severity)
+      __io_println(result.explanation)
+      __io_println(result.original_command)
+      __io_println(result.command)
+      __io_println(result?.result == nil)
+      let log = pipeline_lifecycle_audit_log_take()
+      __io_println(len(log))
+      __io_println(log[0].kind)
+      __io_println(log[0].payload.kind)
+      __io_println(log[0].payload.action)
+      __io_println(log[1].kind)
     },
   )
-  /* `inner` would record ran; we expect it to stay silent because the
-   * deny mode never invokes the underlying executor. */
-  let inner = { args -> {ok: true, ran: args.command} }
-  let wrapper = preset_run_command(
-    {llm_classifier: {model: "haiku", provider: "mock", threshold: 0.7}, inner: inner},
-  )
-  let result = wrapper({command: "rm -rf /etc/foo"})
-  __io_println(result.action)
-  __io_println(result.catalogue_id)
-  __io_println(result.severity)
-  __io_println(result.explanation)
-  __io_println(result.original_command)
-  __io_println(result.command)
-  /* `result.result` should be absent on deny since `inner` was not run. */
-  __io_println(result?.result == nil)
-  let log = pipeline_lifecycle_audit_log_take()
-  __io_println(len(log))
-  __io_println(log[0].kind)
-  __io_println(log[0].payload.kind)
-  __io_println(log[0].payload.action)
-  __io_println(log[1].kind)
 }
+/* `inner` would record ran; we expect it to stay silent because the
+       * deny mode never invokes the underlying executor. */
+/* `result.result` should be absent on deny since `inner` was not run. */

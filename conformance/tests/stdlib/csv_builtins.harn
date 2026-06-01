@@ -1,3 +1,5 @@
+import { assert_error_contains } from "std/testing"
+
 pipeline test(task) {
   let text = "name,age\nalice,30\nbob,25\n"
   // No headers: list of lists
@@ -16,14 +18,6 @@ pipeline test(task) {
   // round-trip list rows
   let listy = csv_stringify([["a", "b"], ["c", "d"]])
   log(listy)
-  let multi_delimiter = try {
-    csv_parse("a||b\n", {delimiter: "||"})
-  }
-  assert(is_err(multi_delimiter))
-  assert(contains(to_string(unwrap_err(multi_delimiter)), "exactly one ASCII"))
-  let unicode_delimiter = try {
-    csv_stringify([["a", "b"]], {delimiter: "é"})
-  }
-  assert(is_err(unicode_delimiter))
-  assert(contains(to_string(unwrap_err(unicode_delimiter)), "exactly one ASCII"))
+  assert_error_contains({ -> csv_parse("a||b\n", {delimiter: "||"}) }, "exactly one ASCII")
+  assert_error_contains({ -> csv_stringify([["a", "b"]], {delimiter: "é"}) }, "exactly one ASCII")
 }

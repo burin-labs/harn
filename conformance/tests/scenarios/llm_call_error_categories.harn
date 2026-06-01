@@ -1,3 +1,5 @@
+import { with_llm_script } from "std/testing"
+
 /**
  * Walk every canonical ErrorCategory string and verify the thrown
  * dict round-trips `category`, `message`, `provider`, and `model` on
@@ -22,21 +24,30 @@ pipeline default(task) {
     "generic",
   ]
   for category in categories {
-    llm_mock({error: {category: category, message: "synthetic-" + category}})
-    try {
-      llm_call("probe", nil, {provider: "mock", model: "mock-model", llm_retries: 0})
-    } catch (e) {
-      __io_println(
-        category + " thrown=" + e.category + " msg=" + e.message + " provider=" + e.provider
-          + " model="
-          + e.model,
-      )
-    }
-    // Parity: llm_call_safe wraps the exact same fields.
-    llm_mock({error: {category: category, message: "safe-" + category}})
-    let r = llm_call_safe("probe", nil, {provider: "mock", model: "mock-model", llm_retries: 0})
-    __io_println(
-      category + " safe=" + r.error.category + " msg=" + r.error.message + " ok=" + to_string(r.ok),
+    with_llm_script(
+      [{error: {category: category, message: "synthetic-" + category}}],
+      { ->
+        try {
+          llm_call("probe", nil, {provider: "mock", model: "mock-model", llm_retries: 0})
+        } catch (e) {
+          __io_println(
+            category + " thrown=" + e.category + " msg=" + e.message + " provider=" + e.provider
+              + " model="
+              + e.model,
+          )
+        }
+      },
+    )
+    with_llm_script(
+      [{error: {category: category, message: "safe-" + category}}],
+      { ->
+        let r = llm_call_safe("probe", nil, {provider: "mock", model: "mock-model", llm_retries: 0})
+        __io_println(
+          category + " safe=" + r.error.category + " msg=" + r.error.message + " ok="
+            + to_string(r.ok),
+        )
+      },
     )
   }
 }
+// Parity: llm_call_safe wraps the exact same fields.

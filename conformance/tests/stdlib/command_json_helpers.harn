@@ -5,6 +5,7 @@ import {
   command_result_ok,
   command_try,
 } from "std/command"
+import { assert_error_contains } from "std/testing"
 
 fn json_runner(text) {
   return { _spec, _options -> return command_result_ok(text) }
@@ -43,11 +44,10 @@ pipeline default() {
   assert_eq(malformed.error.category, "invalid_json")
   assert_eq(malformed.step.status, "invalid_json")
   assert(contains(malformed.error.message, "invalid JSON"))
-  let thrown = try {
-    command_json(["bad-json"], {runner: json_runner("{ nope")})
-  }
-  assert_eq(is_err(thrown), true)
-  assert(contains(to_string(unwrap_err(thrown)), "invalid JSON"))
+  assert_error_contains(
+    { -> command_json(["bad-json"], {runner: json_runner("{ nope")}) },
+    "invalid JSON",
+  )
   let step = command_json_step(
     "structured probe",
     ["fake-step"],

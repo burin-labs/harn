@@ -1,16 +1,22 @@
+import { llm_text, with_llm_script } from "std/testing"
+
 type GraderOut = {verdict: "pass" | "fail", summary: string}
 
 pipeline default() {
-  llm_mock({text: "{\"verdict\": \"pass\", \"summary\": \"ok\"}"})
-  let r = llm_call(
-    "Grade this",
-    nil,
-    {provider: "mock", output_schema: GraderOut, output_validation: "error", response_format: "json"},
+  with_llm_script(
+    [llm_text("{\"verdict\": \"pass\", \"summary\": \"ok\"}")],
+    { ->
+      let r = llm_call(
+        "Grade this",
+        nil,
+        {provider: "mock", output_schema: GraderOut, output_validation: "error", response_format: "json"},
+      )
+      let v: "pass" | "fail" = r.data.verdict
+      let s: string = r.data.summary
+      __io_println(v)
+      __io_println(s)
+    },
   )
-  // r.data is statically typed as GraderOut here — these accesses
-  // type-check without an explicit schema_is guard.
-  let v: "pass" | "fail" = r.data.verdict
-  let s: string = r.data.summary
-  __io_println(v)
-  __io_println(s)
 }
+// r.data is statically typed as GraderOut here — these accesses
+// type-check without an explicit schema_is guard.

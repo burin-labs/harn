@@ -1,20 +1,25 @@
+import { llm_text, with_llm_script } from "std/testing"
+
 pipeline main() {
-  llm_mock({text: "first carried answer"})
-  llm_mock({text: "second reset answer"})
-  let worker = sub_agent_run(
-    "Answer the first prompt.",
-    {provider: "mock", background: true, carry: {transcript_mode: "reset"}},
+  with_llm_script(
+    [llm_text("first carried answer"), llm_text("second reset answer")],
+    { ->
+      let worker = sub_agent_run(
+        "Answer the first prompt.",
+        {provider: "mock", background: true, carry: {transcript_mode: "reset"}},
+      )
+      let first = wait_agent(worker)
+      let first_snapshot = json_parse(harness.fs.read_text(first?.snapshot_path))
+      __io_println(first_snapshot?.carry_policy?.transcript_mode == "reset")
+      __io_println(
+        contains(json_stringify(first_snapshot?.transcript?.messages ?? []), "first carried answer"),
+      )
+      let resumed = send_input(first, "Answer the second prompt.")
+      let second = wait_agent(resumed)
+      let second_snapshot = json_parse(harness.fs.read_text(second?.snapshot_path))
+      let second_messages = json_stringify(second_snapshot?.transcript?.messages ?? [])
+      __io_println(contains(second_messages, "second reset answer"))
+      __io_println(!contains(second_messages, "first carried answer"))
+    },
   )
-  let first = wait_agent(worker)
-  let first_snapshot = json_parse(harness.fs.read_text(first?.snapshot_path))
-  __io_println(first_snapshot?.carry_policy?.transcript_mode == "reset")
-  __io_println(
-    contains(json_stringify(first_snapshot?.transcript?.messages ?? []), "first carried answer"),
-  )
-  let resumed = send_input(first, "Answer the second prompt.")
-  let second = wait_agent(resumed)
-  let second_snapshot = json_parse(harness.fs.read_text(second?.snapshot_path))
-  let second_messages = json_stringify(second_snapshot?.transcript?.messages ?? [])
-  __io_println(contains(second_messages, "second reset answer"))
-  __io_println(!contains(second_messages, "first carried answer"))
 }

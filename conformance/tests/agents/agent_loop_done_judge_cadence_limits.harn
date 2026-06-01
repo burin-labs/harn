@@ -1,86 +1,100 @@
 import { agent_capture_events } from "std/agent/events"
+import { llm_text, with_llm_script } from "std/testing"
 
 fn judge_events(events) {
   return events.filter({ event -> event.type == "judge_decision" })
 }
 
 pipeline default() {
-  llm_mock_clear()
-  llm_mock({text: "<user_response>healthy one</user_response>\n<done>##DONE##</done>"})
-  llm_mock({text: "<user_response>healthy two</user_response>\n<done>##DONE##</done>"})
-  llm_mock({text: "<user_response>healthy three</user_response>\n<done>##DONE##</done>"})
-  let stalled_session = "done-judge-stalled-" + uuid()
-  let stalled = agent_capture_events(
-    stalled_session,
-    fn() { return agent_loop(
-      "Do not judge unless stalled.",
-      nil,
-      {
-        provider: "mock",
-        loop_until_done: true,
-        max_iterations: 3,
-        max_nudges: 10,
-        session_id: stalled_session,
-        done_judge: {cadence: {when: "stalled"}},
-      },
-    ) },
-  )
-  __io_println(stalled.result.status)
-  __io_println(stalled.result.llm.iterations)
-  __io_println(len(judge_events(stalled.events)))
-  __io_println(len(llm_mock_calls()))
-  llm_mock_clear()
-  llm_mock({text: "<user_response>capped one</user_response>\n<done>##DONE##</done>"})
-  llm_mock(
-    {
-      text: "{\"verdict\":\"continue\",\"reasoning\":\"first and only judge fire\",\"next_step\":\"keep going\"}",
+  with_llm_script(
+    [
+      llm_text("<user_response>healthy one</user_response>\n<done>##DONE##</done>"),
+      llm_text("<user_response>healthy two</user_response>\n<done>##DONE##</done>"),
+      llm_text("<user_response>healthy three</user_response>\n<done>##DONE##</done>"),
+    ],
+    { ->
+      let stalled_session = "done-judge-stalled-" + uuid()
+      let stalled = agent_capture_events(
+        stalled_session,
+        fn() { return agent_loop(
+          "Do not judge unless stalled.",
+          nil,
+          {
+            provider: "mock",
+            loop_until_done: true,
+            max_iterations: 3,
+            max_nudges: 10,
+            session_id: stalled_session,
+            done_judge: {cadence: {when: "stalled"}},
+          },
+        ) },
+      )
+      __io_println(stalled.result.status)
+      __io_println(stalled.result.llm.iterations)
+      __io_println(len(judge_events(stalled.events)))
+      __io_println(len(llm_mock_calls()))
     },
   )
-  llm_mock({text: "<user_response>capped two</user_response>\n<done>##DONE##</done>"})
-  llm_mock({text: "<user_response>capped three</user_response>\n<done>##DONE##</done>"})
-  llm_mock({text: "<user_response>capped four</user_response>\n<done>##DONE##</done>"})
-  let capped_session = "done-judge-cap-" + uuid()
-  let capped = agent_capture_events(
-    capped_session,
-    fn() { return agent_loop(
-      "Judge once at most.",
-      nil,
-      {
-        provider: "mock",
-        loop_until_done: true,
-        max_iterations: 4,
-        max_nudges: 10,
-        session_id: capped_session,
-        done_judge: {cadence: {every: 1, max_invocations: 1}},
-      },
-    ) },
+  with_llm_script(
+    [
+      llm_text("<user_response>capped one</user_response>\n<done>##DONE##</done>"),
+      llm_text(
+        "{\"verdict\":\"continue\",\"reasoning\":\"first and only judge fire\",\"next_step\":\"keep going\"}",
+      ),
+      llm_text("<user_response>capped two</user_response>\n<done>##DONE##</done>"),
+      llm_text("<user_response>capped three</user_response>\n<done>##DONE##</done>"),
+      llm_text("<user_response>capped four</user_response>\n<done>##DONE##</done>"),
+    ],
+    { ->
+      let capped_session = "done-judge-cap-" + uuid()
+      let capped = agent_capture_events(
+        capped_session,
+        fn() { return agent_loop(
+          "Judge once at most.",
+          nil,
+          {
+            provider: "mock",
+            loop_until_done: true,
+            max_iterations: 4,
+            max_nudges: 10,
+            session_id: capped_session,
+            done_judge: {cadence: {every: 1, max_invocations: 1}},
+          },
+        ) },
+      )
+      __io_println(capped.result.status)
+      __io_println(capped.result.llm.iterations)
+      __io_println(len(judge_events(capped.events)))
+      __io_println(len(llm_mock_calls()))
+    },
   )
-  __io_println(capped.result.status)
-  __io_println(capped.result.llm.iterations)
-  __io_println(len(judge_events(capped.events)))
-  __io_println(len(llm_mock_calls()))
-  llm_mock_clear()
-  llm_mock({text: "<user_response>closure one</user_response>\n<done>##DONE##</done>"})
-  llm_mock({text: "<user_response>closure two</user_response>\n<done>##DONE##</done>"})
-  llm_mock({text: "{\"verdict\":\"done\",\"reasoning\":\"closure accepted on turn two\"}"})
-  let closure_session = "done-judge-closure-" + uuid()
-  let closure = agent_capture_events(
-    closure_session,
-    fn() { return agent_loop(
-      "Judge when the loop-state predicate says so.",
-      nil,
-      {
-        provider: "mock",
-        loop_until_done: true,
-        max_iterations: 3,
-        max_nudges: 10,
-        session_id: closure_session,
-        done_judge: {cadence: {when: { state -> state.iteration == 2 }}},
-      },
-    ) },
+  with_llm_script(
+    [
+      llm_text("<user_response>closure one</user_response>\n<done>##DONE##</done>"),
+      llm_text("<user_response>closure two</user_response>\n<done>##DONE##</done>"),
+      llm_text("{\"verdict\":\"done\",\"reasoning\":\"closure accepted on turn two\"}"),
+    ],
+    { ->
+      let closure_session = "done-judge-closure-" + uuid()
+      let closure = agent_capture_events(
+        closure_session,
+        fn() { return agent_loop(
+          "Judge when the loop-state predicate says so.",
+          nil,
+          {
+            provider: "mock",
+            loop_until_done: true,
+            max_iterations: 3,
+            max_nudges: 10,
+            session_id: closure_session,
+            done_judge: {cadence: {when: { state -> state.iteration == 2 }}},
+          },
+        ) },
+      )
+      __io_println(closure.result.status)
+      __io_println(closure.result.llm.iterations)
+      __io_println(len(judge_events(closure.events)))
+      __io_println(len(llm_mock_calls()))
+    },
   )
-  __io_println(closure.result.status)
-  __io_println(closure.result.llm.iterations)
-  __io_println(len(judge_events(closure.events)))
-  __io_println(len(llm_mock_calls()))
 }

@@ -1,3 +1,5 @@
+import { llm_text, with_llm_script } from "std/testing"
+
 /**
  * S-11 (#1847): nested suspend/resume. Two independent background
  * workers each self-park at turn 1 and can be resumed independently.
@@ -13,47 +15,44 @@
  * `wait_agent` and the first `resume_agent`.
  */
 pipeline main() {
-  llm_mock_clear()
   // Stage worker A: park, then complete.
-  llm_mock(
-    {
-      tool_calls: [{id: "park_a", name: "agent_await_resumption", arguments: {reason: "worker A parks"}}],
+  with_llm_script(
+    [
+      {
+        tool_calls: [{id: "park_a", name: "agent_await_resumption", arguments: {reason: "worker A parks"}}],
+      },
+      {
+        tool_calls: [{id: "park_b", name: "agent_await_resumption", arguments: {reason: "worker B parks"}}],
+      },
+      llm_text("worker A completed"),
+      llm_text("worker B completed"),
+    ],
+    { ->
+      let handle_a = sub_agent_run(
+        "Worker A: park until resumed.",
+        {provider: "mock", background: true, tool_format: "native", max_iterations: 3},
+      )
+      let suspended_a = wait_agent(handle_a)
+      let handle_b = sub_agent_run(
+        "Worker B: park until resumed.",
+        {provider: "mock", background: true, tool_format: "native", max_iterations: 3},
+      )
+      let suspended_b = wait_agent(handle_b)
+      __io_println("a_suspended=" + suspended_a.status)
+      __io_println("b_suspended=" + suspended_b.status)
+      __io_println("distinct_ids=" + to_string(suspended_a.id != suspended_b.id))
+      __io_println(
+        "distinct_snapshots=" + to_string(suspended_a.snapshot_path != suspended_b.snapshot_path),
+      )
+      let _resumed_a = resume_agent(handle_a)
+      let done_a = wait_agent(handle_a)
+      let still_b = wait_agent(handle_b)
+      __io_println("a_after_resume=" + done_a.status)
+      __io_println("b_still_suspended=" + still_b.status)
+      let _resumed_b = resume_agent(handle_b)
+      let done_b = wait_agent(handle_b)
+      __io_println("b_after_resume=" + done_b.status)
+      __io_println("a_unchanged=" + done_a.status)
     },
   )
-  let handle_a = sub_agent_run(
-    "Worker A: park until resumed.",
-    {provider: "mock", background: true, tool_format: "native", max_iterations: 3},
-  )
-  let suspended_a = wait_agent(handle_a)
-  // Stage worker B: park, then complete. Queue B's mocks only after
-  // A has reached suspension so the FIFO is unambiguous.
-  llm_mock(
-    {
-      tool_calls: [{id: "park_b", name: "agent_await_resumption", arguments: {reason: "worker B parks"}}],
-    },
-  )
-  let handle_b = sub_agent_run(
-    "Worker B: park until resumed.",
-    {provider: "mock", background: true, tool_format: "native", max_iterations: 3},
-  )
-  let suspended_b = wait_agent(handle_b)
-  __io_println("a_suspended=" + suspended_a.status)
-  __io_println("b_suspended=" + suspended_b.status)
-  __io_println("distinct_ids=" + to_string(suspended_a.id != suspended_b.id))
-  __io_println(
-    "distinct_snapshots=" + to_string(suspended_a.snapshot_path != suspended_b.snapshot_path),
-  )
-  // Resume A first. B must remain suspended.
-  llm_mock({text: "worker A completed"})
-  let _resumed_a = resume_agent(handle_a)
-  let done_a = wait_agent(handle_a)
-  let still_b = wait_agent(handle_b)
-  __io_println("a_after_resume=" + done_a.status)
-  __io_println("b_still_suspended=" + still_b.status)
-  // Resume B independently.
-  llm_mock({text: "worker B completed"})
-  let _resumed_b = resume_agent(handle_b)
-  let done_b = wait_agent(handle_b)
-  __io_println("b_after_resume=" + done_b.status)
-  __io_println("a_unchanged=" + done_a.status)
 }

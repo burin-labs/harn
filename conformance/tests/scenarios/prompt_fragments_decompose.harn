@@ -7,6 +7,7 @@
  * one opaque `primary` block.
  */
 import { agent_build_turn_system, agent_build_turn_system_fragments } from "std/agent/preflight"
+import { llm_text, with_llm_script } from "std/testing"
 
 fn contains_id(items, needle) {
   for item in items {
@@ -57,17 +58,20 @@ pipeline test(task) {
     when_to_use "Use when the user asks to reclaim disk space"
     prompt "Remove disk caches carefully."
   }
-  llm_mock_clear()
-  llm_mock({text: "Cleanup done."})
-  let res = agent_loop(
-    "run disk cleanup please",
-    "You are a careful operator.",
-    {provider: "mock", max_iterations: 1, skills: disk_cleanup, skill_match: {strategy: "metadata"}},
+  with_llm_script(
+    [llm_text("Cleanup done.")],
+    { ->
+      let res = agent_loop(
+        "run disk cleanup please",
+        "You are a careful operator.",
+        {provider: "mock", max_iterations: 1, skills: disk_cleanup, skill_match: {strategy: "metadata"}},
+      )
+      assert(res?.status == "done", "live loop completes")
+      let recorded = llm_mock_calls()[0].system
+      assert(contains(recorded, "## Active skills"), "live system surfaces active skills")
+      assert(contains(recorded, "You are a careful operator."), "live system surfaces primary text")
+      assert(!contains(recorded, "\n\n\n"), "no triple-newline runs in composed system")
+      log("prompt_fragments_decompose tests passed")
+    },
   )
-  assert(res?.status == "done", "live loop completes")
-  let recorded = llm_mock_calls()[0].system
-  assert(contains(recorded, "## Active skills"), "live system surfaces active skills")
-  assert(contains(recorded, "You are a careful operator."), "live system surfaces primary text")
-  assert(!contains(recorded, "\n\n\n"), "no triple-newline runs in composed system")
-  log("prompt_fragments_decompose tests passed")
 }

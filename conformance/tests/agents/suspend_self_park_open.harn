@@ -1,3 +1,5 @@
+import { llm_text, with_llm_script } from "std/testing"
+
 /**
  * S-11 (#1847): a subagent that self-parks via
  * `agent_await_resumption("blocked")` with no `conditions` enters the
@@ -16,29 +18,32 @@
  *     loop to completion.
  */
 pipeline main() {
-  llm_mock_clear()
-  llm_mock(
-    {
-      tool_calls: [{id: "park_open", name: "agent_await_resumption", arguments: {reason: "blocked"}}],
-      input_tokens: 7,
-      output_tokens: 3,
+  with_llm_script(
+    [
+      {
+        tool_calls: [{id: "park_open", name: "agent_await_resumption", arguments: {reason: "blocked"}}],
+        input_tokens: 7,
+        output_tokens: 3,
+      },
+      llm_text("resumed by operator"),
+    ],
+    { ->
+      let handle = sub_agent_run(
+        "Park open until an operator resumes.",
+        {provider: "mock", background: true, tool_format: "native", max_iterations: 3},
+      )
+      let suspended = wait_agent(handle)
+      __io_println("status=" + suspended.status)
+      __io_println("initiator=" + suspended?.suspension?.initiator ?? "")
+      __io_println("reason=" + suspended?.suspension?.reason ?? "")
+      __io_println("has_conditions=" + to_string(suspended?.suspension?.conditions != nil))
+      __io_println("has_auto_trigger=" + to_string(suspended?.suspension?.auto_resume_trigger != nil))
+      let resumed = resume_agent(handle)
+      let done = wait_agent(handle)
+      __io_println("resume_status=" + resumed.status)
+      __io_println("final_status=" + done.status)
+      __io_println("has_transcript=" + to_string(done.has_transcript))
     },
   )
-  llm_mock({text: "resumed by operator"})
-  let handle = sub_agent_run(
-    "Park open until an operator resumes.",
-    {provider: "mock", background: true, tool_format: "native", max_iterations: 3},
-  )
-  let suspended = wait_agent(handle)
-  __io_println("status=" + suspended.status)
-  __io_println("initiator=" + suspended?.suspension?.initiator ?? "")
-  __io_println("reason=" + suspended?.suspension?.reason ?? "")
-  __io_println("has_conditions=" + to_string(suspended?.suspension?.conditions != nil))
-  __io_println("has_auto_trigger=" + to_string(suspended?.suspension?.auto_resume_trigger != nil))
-  // Operator-style resume: no input, default continue_transcript=true.
-  let resumed = resume_agent(handle)
-  let done = wait_agent(handle)
-  __io_println("resume_status=" + resumed.status)
-  __io_println("final_status=" + done.status)
-  __io_println("has_transcript=" + to_string(done.has_transcript))
 }
+// Operator-style resume: no input, default continue_transcript=true.

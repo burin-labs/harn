@@ -1,3 +1,5 @@
+import { llm_text, with_llm_script } from "std/testing"
+
 /**
  * `session_idle` hooks fire whenever the daemon-mode loop enters an
  * idle wait. Advisory only: the hook can observe iteration count and
@@ -17,15 +19,17 @@ pipeline default() {
       return nil
     },
   )
-  llm_mock_clear()
-  llm_mock({text: "tick"})
-  llm_mock({text: "tock"})
-  let result = agent_loop(
-    "poll background",
-    nil,
-    {provider: "mock", daemon: true, max_iterations: 2, wake_interval_ms: 1},
+  with_llm_script(
+    [llm_text("tick"), llm_text("tock")],
+    { ->
+      let result = agent_loop(
+        "poll background",
+        nil,
+        {provider: "mock", daemon: true, max_iterations: 2, wake_interval_ms: 1},
+      )
+      __io_println(result.status)
+      __io_println(atomic_get(idle_seen) >= 1)
+      clear_session_hooks()
+    },
   )
-  __io_println(result.status)
-  __io_println(atomic_get(idle_seen) >= 1)
-  clear_session_hooks()
 }

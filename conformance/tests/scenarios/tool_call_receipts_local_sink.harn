@@ -6,6 +6,7 @@ import {
   with_audit_log,
   with_required_reason,
 } from "std/llm/tool_middleware"
+import { llm_text, with_llm_script } from "std/testing"
 
 fn receipt_tools() {
   let registry = tool_registry()
@@ -21,34 +22,37 @@ fn receipt_tools() {
 }
 
 fn run_receipt_agent(session, audit_options) {
-  llm_mock_clear()
-  llm_mock(
-    {
-      tool_calls: [
+  return with_llm_script(
+    [
+      {
+        tool_calls: [
+          {
+            id: "receipt-1",
+            name: "echo_receipt",
+            arguments: {message: "hello", secret: "hide-me", reason: "Need a receipt"},
+          },
+        ],
+      },
+      llm_text("Done. ##DONE##"),
+    ],
+    { ->
+      let reason = with_required_reason({schema_required: false})
+      let tools = tools_use_middleware(receipt_tools(), reason.schema_transform)
+      let caller = compose_tool_callers([with_audit_log(audit_options), reason.caller])
+      return agent_loop(
+        "emit a tool receipt",
+        nil,
         {
-          id: "receipt-1",
-          name: "echo_receipt",
-          arguments: {message: "hello", secret: "hide-me", reason: "Need a receipt"},
+          provider: "mock",
+          model: "mock",
+          session_id: session,
+          tools: tools,
+          tool_format: "native",
+          loop_until_done: true,
+          max_iterations: 3,
+          tool_caller: caller,
         },
-      ],
-    },
-  )
-  llm_mock({text: "Done. ##DONE##"})
-  let reason = with_required_reason({schema_required: false})
-  let tools = tools_use_middleware(receipt_tools(), reason.schema_transform)
-  let caller = compose_tool_callers([with_audit_log(audit_options), reason.caller])
-  return agent_loop(
-    "emit a tool receipt",
-    nil,
-    {
-      provider: "mock",
-      model: "mock",
-      session_id: session,
-      tools: tools,
-      tool_format: "native",
-      loop_until_done: true,
-      max_iterations: 3,
-      tool_caller: caller,
+      )
     },
   )
 }

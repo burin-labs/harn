@@ -2,14 +2,18 @@
 // omits the `DIFF: ...` trailer, the entire response becomes the
 // refined prompt and diff_summary is empty.
 import { refine_prompt } from "std/llm/refine"
+import { llm_text, with_llm_script } from "std/testing"
 
 pipeline default() {
-  llm_mock_clear()
-  llm_mock({text: "A short rewrite without a diff."})
-  let result = refine_prompt(
-    {user_prompt: "ramble ramble ramble", style: "concise", model: "mock-model", provider: "mock"},
+  with_llm_script(
+    [llm_text("A short rewrite without a diff.")],
+    { ->
+      let result = refine_prompt(
+        {user_prompt: "ramble ramble ramble", style: "concise", model: "mock-model", provider: "mock"},
+      )
+      __io_println(result.ok)
+      __io_println(result.refined)
+      __io_println("[" + result.diff_summary + "]")
+    },
   )
-  __io_println(result.ok)
-  __io_println(result.refined)
-  __io_println("[" + result.diff_summary + "]")
 }

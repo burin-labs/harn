@@ -1,5 +1,5 @@
 import "std/plan"
-import { clear_host_mocks, mock_host_response } from "std/testing"
+import { clear_host_mocks, llm_text, mock_host_response, with_llm_script } from "std/testing"
 
 pipeline main() {
   let tools = plan_tools()
@@ -26,38 +26,42 @@ pipeline main() {
   let approved = request_plan_approval(artifact, {reviewers: ["lead"]})
   require approved.approval.state == "approved", "plan approval should use HITL"
   require approved.approval.reviewers[0] == "lead", "reviewer should round-trip"
-  llm_mock(
-    {
-      tool_calls: [
-        {
-          id: "plan1",
-          name: "emit_plan",
-          arguments: {
-            summary: "Implement a small parser change.",
-            steps: [
-              {content: "Read parser tests.", status: "completed"},
-              {content: "Patch parser.", status: "pending"},
-            ],
-            verification_commands: ["cargo test -p harn-parser"],
+  with_llm_script(
+    [
+      {
+        tool_calls: [
+          {
+            id: "plan1",
+            name: "emit_plan",
+            arguments: {
+              summary: "Implement a small parser change.",
+              steps: [
+                {content: "Read parser tests.", status: "completed"},
+                {content: "Patch parser.", status: "pending"},
+              ],
+              verification_commands: ["cargo test -p harn-parser"],
+            },
           },
-        },
-      ],
+        ],
+      },
+      llm_text("Plan emitted."),
+    ],
+    { ->
+      let result = agent_loop(
+        "Plan a parser change",
+        nil,
+        {provider: "mock", tools: tools, max_iterations: 2, session_id: "plan-conformance"},
+      )
+      let events = transcript_events(result?.transcript)
+      var saw_plan = false
+      for event in events {
+        if event.kind == "plan" {
+          saw_plan = true
+          require event.metadata.plan.schema_version == "harn.plan.v1", "transcript plan metadata should be structured"
+        }
+      }
+      require saw_plan, "agent loop should persist an emitted plan event"
+      log("plan primitives tests passed")
     },
   )
-  llm_mock({text: "Plan emitted."})
-  let result = agent_loop(
-    "Plan a parser change",
-    nil,
-    {provider: "mock", tools: tools, max_iterations: 2, session_id: "plan-conformance"},
-  )
-  let events = transcript_events(result?.transcript)
-  var saw_plan = false
-  for event in events {
-    if event.kind == "plan" {
-      saw_plan = true
-      require event.metadata.plan.schema_version == "harn.plan.v1", "transcript plan metadata should be structured"
-    }
-  }
-  require saw_plan, "agent loop should persist an emitted plan event"
-  log("plan primitives tests passed")
 }

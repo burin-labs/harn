@@ -14,38 +14,42 @@
  *     reminder is consumed on the next turn, not re-applied).
  */
 import { agent_lifecycle_tools } from "std/agent/workers"
+import { llm_text, with_llm_script } from "std/testing"
 
 pipeline main() {
-  llm_mock_clear()
-  llm_mock(
-    {
-      tool_calls: [{id: "park_1", name: "agent_await_resumption", arguments: {reason: "park for parent"}}],
-      input_tokens: 7,
-      output_tokens: 3,
+  with_llm_script(
+    [
+      {
+        tool_calls: [{id: "park_1", name: "agent_await_resumption", arguments: {reason: "park for parent"}}],
+        input_tokens: 7,
+        output_tokens: 3,
+      },
+      llm_text("child finished after parent resume"),
+    ],
+    { ->
+      let handle = sub_agent_run(
+        "Park until parent resumes.",
+        {provider: "mock", background: true, tool_format: "native", max_iterations: 4},
+      )
+      let suspended = wait_agent(handle)
+      let lifecycle = agent_lifecycle_tools(tool_registry(), {subagents: true})
+      let pause_tool = tool_find(lifecycle, "subagent_pause")
+      let resume_tool = tool_find(lifecycle, "subagent_resume")
+      let pause_again = pause_tool.handler({handle: handle.id, reason: "parent re-pauses"})
+      let resumed = resume_tool.handler({handle: handle.id})
+      let done = wait_agent(handle)
+      __io_println("suspended_status=" + suspended.status)
+      __io_println("pause_again_status=" + pause_again.status)
+      __io_println("resume_status=" + resumed.status)
+      __io_println("final_status=" + done.status)
+      __io_println("has_transcript=" + to_string(done.has_transcript))
+      let continuity = transcript_events_by_kind(done.transcript, "system_reminder")
+        .filter({ event -> event.reminder.dedupe_key == "resume_continuity" })
+      __io_println("continuity_left=" + to_string(len(continuity)))
     },
   )
-  llm_mock({text: "child finished after parent resume"})
-  let handle = sub_agent_run(
-    "Park until parent resumes.",
-    {provider: "mock", background: true, tool_format: "native", max_iterations: 4},
-  )
-  let suspended = wait_agent(handle)
-  let lifecycle = agent_lifecycle_tools(tool_registry(), {subagents: true})
-  let pause_tool = tool_find(lifecycle, "subagent_pause")
-  let resume_tool = tool_find(lifecycle, "subagent_resume")
-  // Idempotent re-pause: already-suspended worker returns same summary.
-  let pause_again = pause_tool.handler({handle: handle.id, reason: "parent re-pauses"})
-  // Parent-driven resume drives the child to completion.
-  let resumed = resume_tool.handler({handle: handle.id})
-  let done = wait_agent(handle)
-  __io_println("suspended_status=" + suspended.status)
-  __io_println("pause_again_status=" + pause_again.status)
-  __io_println("resume_status=" + resumed.status)
-  __io_println("final_status=" + done.status)
-  __io_println("has_transcript=" + to_string(done.has_transcript))
-  // The resume-continuity reminder is single-shot: after the resumed
-  // turn it has been delivered and no longer rides on the transcript.
-  let continuity = transcript_events_by_kind(done.transcript, "system_reminder")
-    .filter({ event -> event.reminder.dedupe_key == "resume_continuity" })
-  __io_println("continuity_left=" + to_string(len(continuity)))
 }
+// Idempotent re-pause: already-suspended worker returns same summary.
+// Parent-driven resume drives the child to completion.
+// The resume-continuity reminder is single-shot: after the resumed
+// turn it has been delivered and no longer rides on the transcript.

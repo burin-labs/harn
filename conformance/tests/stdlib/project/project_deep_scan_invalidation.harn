@@ -1,47 +1,51 @@
 import "std/project"
+import { llm_text, with_llm_script } from "std/testing"
 
 pipeline test(task) {
   let namespace = "coding-enrichment-${uuid()}"
   let root = path_join(harness.fs.temp_dir(), "project-deep-scan-invalidation-" + uuid())
   harness.fs.mkdir(root)
   harness.fs.write_text(path_join(root, "README.md"), "# repo\n")
-  llm_mock({text: "{\"purpose\":\"root\"}"})
-  let first = project_deep_scan(
-    root,
-    {
-      namespace: namespace,
-      tiers: ["ambient", "config", "enriched"],
-      incremental: true,
-      depth: nil,
-      enrichment: {
-        prompt: "Return valid JSON only.",
-        provider: "mock",
-        schema: {purpose: "string"},
-        budget_tokens_per_dir: 256,
-      },
+  with_llm_script(
+    [llm_text("{\"purpose\":\"root\"}"), llm_text("{\"purpose\":\"root changed\"}")],
+    { ->
+      let first = project_deep_scan(
+        root,
+        {
+          namespace: namespace,
+          tiers: ["ambient", "config", "enriched"],
+          incremental: true,
+          depth: nil,
+          enrichment: {
+            prompt: "Return valid JSON only.",
+            provider: "mock",
+            schema: {purpose: "string"},
+            budget_tokens_per_dir: 256,
+          },
+        },
+      )
+      harness.fs.write_text(path_join(root, "README.md"), "# repo changed\n")
+      let second = project_deep_scan(
+        root,
+        {
+          namespace: namespace,
+          tiers: ["ambient", "config", "enriched"],
+          incremental: true,
+          depth: nil,
+          enrichment: {
+            prompt: "Return valid JSON only.",
+            provider: "mock",
+            schema: {purpose: "string"},
+            budget_tokens_per_dir: 256,
+          },
+        },
+      )
+      let second_status = project_deep_scan_status(namespace, root)
+      __io_println(first["."].enriched.purpose == "root")
+      __io_println(second["."].enriched.purpose == "root changed")
+      __io_println(second_status.cache_hits == 0)
+      __io_println(len(llm_mock_calls()) == 2)
+      harness.fs.delete(root)
     },
   )
-  harness.fs.write_text(path_join(root, "README.md"), "# repo changed\n")
-  llm_mock({text: "{\"purpose\":\"root changed\"}"})
-  let second = project_deep_scan(
-    root,
-    {
-      namespace: namespace,
-      tiers: ["ambient", "config", "enriched"],
-      incremental: true,
-      depth: nil,
-      enrichment: {
-        prompt: "Return valid JSON only.",
-        provider: "mock",
-        schema: {purpose: "string"},
-        budget_tokens_per_dir: 256,
-      },
-    },
-  )
-  let second_status = project_deep_scan_status(namespace, root)
-  __io_println(first["."].enriched.purpose == "root")
-  __io_println(second["."].enriched.purpose == "root changed")
-  __io_println(second_status.cache_hits == 0)
-  __io_println(len(llm_mock_calls()) == 2)
-  harness.fs.delete(root)
 }

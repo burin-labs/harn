@@ -1,3 +1,5 @@
+import { llm_text, with_llm_script } from "std/testing"
+
 /**
  * Schema-retry recovery: first response is missing the required key,
  * second response satisfies the schema. The envelope reports
@@ -9,12 +11,15 @@ pipeline default() {
     required: ["verdict"],
     properties: {verdict: {type: "string"}, note: {type: "string"}},
   }
-  llm_mock({text: "{\"note\": \"hmm\"}"})
-  llm_mock({text: "{\"verdict\": \"PASS\", \"note\": \"\"}"})
-  let r = llm_call_structured_result("Grade", schema, {provider: "mock"})
-  __io_println(r.ok)
-  __io_println(r.data.verdict)
-  __io_println(r.attempts)
-  __io_println(r.repaired)
-  __io_println(r.extracted_json)
+  with_llm_script(
+    [llm_text("{\"note\": \"hmm\"}"), llm_text("{\"verdict\": \"PASS\", \"note\": \"\"}")],
+    { ->
+      let r = llm_call_structured_result("Grade", schema, {provider: "mock"})
+      __io_println(r.ok)
+      __io_println(r.data.verdict)
+      __io_println(r.attempts)
+      __io_println(r.repaired)
+      __io_println(r.extracted_json)
+    },
+  )
 }

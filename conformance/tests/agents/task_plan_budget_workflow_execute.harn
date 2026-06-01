@@ -1,37 +1,41 @@
 import { task_plan_compile } from "std/agent/task_plan"
+import { with_llm_script } from "std/testing"
 
 pipeline main() {
-  llm_mock_clear()
-  llm_mock(
-    {
-      text: "still working",
-      provider: "openai",
-      model: "gpt-4o-mini",
-      input_tokens: 100000,
-      output_tokens: 100000,
+  with_llm_script(
+    [
+      {
+        text: "still working",
+        provider: "openai",
+        model: "gpt-4o-mini",
+        input_tokens: 100000,
+        output_tokens: 100000,
+      },
+    ],
+    { ->
+      let plan = {
+        schema_version: "1",
+        objective: "Budgeted workflow",
+        entry: "work",
+        nodes: {
+          work: {
+            kind: "agent_loop",
+            purpose: "Run budgeted loop",
+            prompt: "Spend one modeled call",
+            model: {provider: "mock", model: "gpt-4o-mini"},
+            agent_loop: {done_sentinel: "DONE"},
+          },
+        },
+        budgets: {total_cost_usd: 0.000001},
+      }
+      let compiled = task_plan_compile(plan)
+      let result = workflow_execute("Budgeted workflow", compiled.workflow, [], {max_steps: 1})
+      let stage = result.run.stages[0]
+      __io_println(result.status)
+      __io_println(stage.status)
+      __io_println(stage.outcome)
+      __io_println(stage.branch)
+      __io_println(stage.metadata.model_policy.iteration_budget.total_cost_usd == 0.000001)
     },
   )
-  let plan = {
-    schema_version: "1",
-    objective: "Budgeted workflow",
-    entry: "work",
-    nodes: {
-      work: {
-        kind: "agent_loop",
-        purpose: "Run budgeted loop",
-        prompt: "Spend one modeled call",
-        model: {provider: "mock", model: "gpt-4o-mini"},
-        agent_loop: {done_sentinel: "DONE"},
-      },
-    },
-    budgets: {total_cost_usd: 0.000001},
-  }
-  let compiled = task_plan_compile(plan)
-  let result = workflow_execute("Budgeted workflow", compiled.workflow, [], {max_steps: 1})
-  let stage = result.run.stages[0]
-  __io_println(result.status)
-  __io_println(stage.status)
-  __io_println(stage.outcome)
-  __io_println(stage.branch)
-  __io_println(stage.metadata.model_policy.iteration_budget.total_cost_usd == 0.000001)
 }

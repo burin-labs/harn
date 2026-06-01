@@ -1,3 +1,5 @@
+import { llm_text, with_llm_script } from "std/testing"
+
 type GraderOut = {verdict: "pass" | "fail", summary: string}
 
 /**
@@ -17,8 +19,12 @@ fn grade<T>(prompt: string, schema: Schema<T>) -> T {
 }
 
 pipeline default() {
-  llm_mock({text: "{\"verdict\": \"pass\", \"summary\": \"ok\"}"})
-  let out: GraderOut = grade("Grade this", schema_of(GraderOut))
-  __io_println(out.verdict)
-  __io_println(out.summary)
+  with_llm_script(
+    [llm_text("{\"verdict\": \"pass\", \"summary\": \"ok\"}")],
+    { ->
+      let out: GraderOut = grade("Grade this", schema_of(GraderOut))
+      __io_println(out.verdict)
+      __io_println(out.summary)
+    },
+  )
 }

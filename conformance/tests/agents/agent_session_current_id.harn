@@ -1,3 +1,5 @@
+import { llm_text, with_llm_script } from "std/testing"
+
 pipeline main(task) {
   assert(
     agent_session_current_id() == nil,
@@ -19,36 +21,40 @@ pipeline main(task) {
       returns: {type: "string"},
     },
   )
-  llm_mock(
-    {text: "Checking the session.", tool_calls: [{id: "sid1", name: "read_current_id", arguments: {}}]},
-  )
-  llm_mock({text: "<done>##DONE##</done>"})
-  let result = agent_loop(
-    "Report the current session id",
-    nil,
-    {
-      provider: "mock",
-      tools: tools,
-      tool_format: "native",
-      loop_until_done: true,
-      max_iterations: 4,
-      session_id: session,
+  with_llm_script(
+    [
+      {text: "Checking the session.", tool_calls: [{id: "sid1", name: "read_current_id", arguments: {}}]},
+      llm_text("<done>##DONE##</done>"),
+    ],
+    { ->
+      let result = agent_loop(
+        "Report the current session id",
+        nil,
+        {
+          provider: "mock",
+          tools: tools,
+          tool_format: "native",
+          loop_until_done: true,
+          max_iterations: 4,
+          session_id: session,
+        },
+      )
+      assert(result?.status == "done", "loop completes")
+      let calls = llm_mock_calls()
+      assert(len(calls) >= 2, "tool call produces a second turn")
+      let turn2_messages = calls[1].messages
+      var saw_session_feedback = false
+      for m in turn2_messages {
+        let content = m?.content
+        if content != nil && contains(content, session) {
+          saw_session_feedback = true
+        }
+      }
+      assert(
+        saw_session_feedback,
+        "next turn includes the tool result returned by agent_session_current_id()",
+      )
+      log("agent_session_current_id tests passed")
     },
   )
-  assert(result?.status == "done", "loop completes")
-  let calls = llm_mock_calls()
-  assert(len(calls) >= 2, "tool call produces a second turn")
-  let turn2_messages = calls[1].messages
-  var saw_session_feedback = false
-  for m in turn2_messages {
-    let content = m?.content
-    if content != nil && contains(content, session) {
-      saw_session_feedback = true
-    }
-  }
-  assert(
-    saw_session_feedback,
-    "next turn includes the tool result returned by agent_session_current_id()",
-  )
-  log("agent_session_current_id tests passed")
 }

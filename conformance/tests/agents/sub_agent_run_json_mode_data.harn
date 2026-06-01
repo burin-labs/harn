@@ -1,16 +1,26 @@
+import { llm_text, with_llm_script } from "std/testing"
+
 pipeline main() {
-  llm_mock({text: "{\"answer\":\"ok\"}"})
-  let direct = sub_agent_run("Return machine-readable JSON.", {provider: "mock", response_format: "json"})
-  __io_println(direct?.ok)
-  __io_println(direct?.summary == "{\"answer\":\"ok\"}")
-  __io_println(direct?.data?.answer == "ok")
-  llm_mock({text: "{\"answer\":\"background\"}"})
-  let handle = sub_agent_run(
-    "Return machine-readable JSON in the background.",
-    {provider: "mock", response_format: "json", background: true},
+  with_llm_script(
+    [llm_text("{\"answer\":\"ok\"}")],
+    { ->
+      let direct = sub_agent_run("Return machine-readable JSON.", {provider: "mock", response_format: "json"})
+      __io_println(direct?.ok)
+      __io_println(direct?.summary == "{\"answer\":\"ok\"}")
+      __io_println(direct?.data?.answer == "ok")
+    },
   )
-  let done = wait_agent(handle)
-  __io_println(done?.status == "completed")
-  __io_println(done?.result?.summary == "{\"answer\":\"background\"}")
-  __io_println(done?.result?.data?.answer == "background")
+  with_llm_script(
+    [llm_text("{\"answer\":\"background\"}")],
+    { ->
+      let handle = sub_agent_run(
+        "Return machine-readable JSON in the background.",
+        {provider: "mock", response_format: "json", background: true},
+      )
+      let done = wait_agent(handle)
+      __io_println(done?.status == "completed")
+      __io_println(done?.result?.summary == "{\"answer\":\"background\"}")
+      __io_println(done?.result?.data?.answer == "background")
+    },
+  )
 }

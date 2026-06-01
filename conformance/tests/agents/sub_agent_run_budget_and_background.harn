@@ -1,3 +1,5 @@
+import { llm_text, with_llm_script } from "std/testing"
+
 fn search_tools() {
   var tools = tool_registry()
   tools = tool_define(
@@ -14,49 +16,63 @@ fn search_tools() {
 }
 
 pipeline main() {
-  llm_mock(
-    {
-      tool_calls: [{id: "budget_1", name: "search", arguments: {query: "token budget"}}],
-      input_tokens: 20,
-      output_tokens: 12,
+  with_llm_script(
+    [
+      {
+        tool_calls: [{id: "budget_1", name: "search", arguments: {query: "token budget"}}],
+        input_tokens: 20,
+        output_tokens: 12,
+      },
+    ],
+    { ->
+      let budgeted = sub_agent_run(
+        "Investigate under a tiny budget.",
+        {
+          provider: "mock",
+          tools: search_tools(),
+          allowed_tools: ["search"],
+          tool_format: "native",
+          max_iterations: 3,
+          token_budget: 8,
+        },
+      )
+      __io_println(budgeted?.budget_exceeded)
+      __io_println(budgeted?.tokens_used >= 32)
     },
   )
-  let budgeted = sub_agent_run(
-    "Investigate under a tiny budget.",
-    {
-      provider: "mock",
-      tools: search_tools(),
-      allowed_tools: ["search"],
-      tool_format: "native",
-      max_iterations: 3,
-      token_budget: 8,
+  with_llm_script(
+    [llm_text("background summary")],
+    { ->
+      let handle = sub_agent_run("Summarize in the background.", {provider: "mock", background: true})
+      __io_println(handle?.mode == "sub_agent")
+      let done = wait_agent(handle)
+      __io_println(done?.status == "completed")
+      __io_println(done?.result?.ok)
+      __io_println(contains(done?.result?.summary ?? "", "background summary"))
     },
   )
-  __io_println(budgeted?.budget_exceeded)
-  __io_println(budgeted?.tokens_used >= 32)
-  llm_mock({text: "background summary"})
-  let handle = sub_agent_run("Summarize in the background.", {provider: "mock", background: true})
-  __io_println(handle?.mode == "sub_agent")
-  let done = wait_agent(handle)
-  __io_println(done?.status == "completed")
-  __io_println(done?.result?.ok)
-  __io_println(contains(done?.result?.summary ?? "", "background summary"))
-  llm_mock({tool_calls: [{id: "bg_search_1", name: "search", arguments: {query: "background tool"}}]})
-  llm_mock({text: "background tool summary"})
-  let tool_handle = sub_agent_run(
-    "Search in the background with a Harn-owned tool.",
-    {
-      provider: "mock",
-      background: true,
-      tools: search_tools(),
-      allowed_tools: ["search"],
-      tool_format: "native",
-      max_iterations: 3,
+  with_llm_script(
+    [
+      {tool_calls: [{id: "bg_search_1", name: "search", arguments: {query: "background tool"}}]},
+      llm_text("background tool summary"),
+    ],
+    { ->
+      let tool_handle = sub_agent_run(
+        "Search in the background with a Harn-owned tool.",
+        {
+          provider: "mock",
+          background: true,
+          tools: search_tools(),
+          allowed_tools: ["search"],
+          tool_format: "native",
+          max_iterations: 3,
+        },
+      )
+      __io_println(tool_handle?.mode == "sub_agent")
+      let tool_done = wait_agent(tool_handle)
+      __io_println(tool_done?.status == "completed")
+      __io_println(tool_done?.result?.ok)
+      __io_println(contains(tool_done?.result?.summary ?? "", "background tool summary"))
     },
   )
-  __io_println(tool_handle?.mode == "sub_agent")
-  let tool_done = wait_agent(tool_handle)
-  __io_println(tool_done?.status == "completed")
-  __io_println(tool_done?.result?.ok)
-  __io_println(contains(tool_done?.result?.summary ?? "", "background tool summary"))
 }

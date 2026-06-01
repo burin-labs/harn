@@ -1,29 +1,34 @@
 import "std/agents"
+import { llm_text, with_llm_script } from "std/testing"
 
 pipeline main() {
-  llm_mock({text: "background summary"})
-  let handle = sub_agent_run(
-    "Investigate worker provenance",
-    {
-      provider: "mock",
-      background: true,
-      request: {topic: "provenance", owner: "parent"},
-      research_questions: ["Which fields survive wait?"],
-      action_items: [{id: "action_1", title: "Read agents_workers"}],
-      workflow_stages: ["research", "implement"],
-      verification_steps: ["cargo test -p harn-vm agents_workers"],
+  with_llm_script(
+    [llm_text("background summary")],
+    { ->
+      let handle = sub_agent_run(
+        "Investigate worker provenance",
+        {
+          provider: "mock",
+          background: true,
+          request: {topic: "provenance", owner: "parent"},
+          research_questions: ["Which fields survive wait?"],
+          action_items: [{id: "action_1", title: "Read agents_workers"}],
+          workflow_stages: ["research", "implement"],
+          verification_steps: ["cargo test -p harn-vm agents_workers"],
+        },
+      )
+      __io_println(worker_request(handle)?.payload?.topic == "provenance")
+      __io_println(len(worker_research_questions(handle)) == 1)
+      __io_println(worker_action_items(handle)[0]?.id == "action_1")
+      __io_println(worker_workflow_stages(handle)[1] == "implement")
+      __io_println(worker_verification_steps(handle)[0] == "cargo test -p harn-vm agents_workers")
+      let done = wait_agent(handle)
+      __io_println(worker_request(done)?.task == "Investigate worker provenance")
+      __io_println(worker_provenance(done)?.worker_id == done?.id)
+      __io_println(contains(worker_result(done)?.summary ?? "", "background summary"))
+      let continued = send_input(done, "Follow up with implementation details")
+      __io_println(continued?.task == "Follow up with implementation details")
+      __io_println(worker_request(continued)?.task == "Investigate worker provenance")
     },
   )
-  __io_println(worker_request(handle)?.payload?.topic == "provenance")
-  __io_println(len(worker_research_questions(handle)) == 1)
-  __io_println(worker_action_items(handle)[0]?.id == "action_1")
-  __io_println(worker_workflow_stages(handle)[1] == "implement")
-  __io_println(worker_verification_steps(handle)[0] == "cargo test -p harn-vm agents_workers")
-  let done = wait_agent(handle)
-  __io_println(worker_request(done)?.task == "Investigate worker provenance")
-  __io_println(worker_provenance(done)?.worker_id == done?.id)
-  __io_println(contains(worker_result(done)?.summary ?? "", "background summary"))
-  let continued = send_input(done, "Follow up with implementation details")
-  __io_println(continued?.task == "Follow up with implementation details")
-  __io_println(worker_request(continued)?.task == "Investigate worker provenance")
 }

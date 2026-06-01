@@ -2,6 +2,7 @@ import {
   compact_preserving_test_failures,
   compact_retaining_current_plan,
 } from "std/agent/autocompact"
+import { llm_text, with_llm_script } from "std/testing"
 
 fn list_tools() {
   var tools = tool_registry()
@@ -138,65 +139,75 @@ pipeline test(task) {
     json_stringify(transcript_messages(stopped_after_tool_turn?.transcript))
       .contains("handoff now"),
   )
-  llm_mock_clear()
-  llm_mock({text: "", tool_calls: [{id: "hook_1", name: "list_directory", arguments: {path: "."}}]})
-  llm_mock({text: "Final answer from the model."})
-  let hook_driven_final = agent_loop(
-    "Inspect the workspace",
-    "You are helpful",
-    {
-      provider: "mock",
-      tools: list_tools(),
-      tool_format: "native",
-      loop_until_done: true,
-      max_iterations: 3,
-      post_turn_callback: { info ->
-        if len(info?.successful_tool_names ?? []) > 0 {
-          return {
-            message: "finalize now current=${info.successful_tool_names[0]} session=${info.session_successful_tools[0]} rejected=${len(info?.session_rejected_tools ?? [])}",
-            llm_options: {tool_choice: "none"},
-          }
-        }
-        return nil
-      },
+  with_llm_script(
+    [
+      {text: "", tool_calls: [{id: "hook_1", name: "list_directory", arguments: {path: "."}}]},
+      llm_text("Final answer from the model."),
+    ],
+    { ->
+      let hook_driven_final = agent_loop(
+        "Inspect the workspace",
+        "You are helpful",
+        {
+          provider: "mock",
+          tools: list_tools(),
+          tool_format: "native",
+          loop_until_done: true,
+          max_iterations: 3,
+          post_turn_callback: { info ->
+            if len(info?.successful_tool_names ?? []) > 0 {
+              return {
+                message: "finalize now current=${info.successful_tool_names[0]} session=${info.session_successful_tools[0]} rejected=${len(info?.session_rejected_tools ?? [])}",
+                llm_options: {tool_choice: "none"},
+              }
+            }
+            return nil
+          },
+        },
+      )
+      let hook_calls = llm_mock_calls()
+      let second_call = json_stringify(hook_calls[1].messages)
+      __io_println(hook_driven_final?.llm?.iterations == 2)
+      __io_println(second_call.contains("current=list_directory"))
+      __io_println(second_call.contains("session=list_directory"))
+      __io_println(second_call.contains("rejected=0"))
+      __io_println(hook_calls[1].tool_choice == "none")
+      __io_println(second_call.contains("finalize now"))
     },
   )
-  let hook_calls = llm_mock_calls()
-  let second_call = json_stringify(hook_calls[1].messages)
-  __io_println(hook_driven_final?.llm?.iterations == 2)
-  __io_println(second_call.contains("current=list_directory"))
-  __io_println(second_call.contains("session=list_directory"))
-  __io_println(second_call.contains("rejected=0"))
-  __io_println(hook_calls[1].tool_choice == "none")
-  __io_println(second_call.contains("finalize now"))
-  llm_mock_clear()
-  llm_mock({text: "", tool_calls: [{id: "hook_2", name: "list_directory", arguments: {path: "."}}]})
-  llm_mock({text: "Final answer after clearing tools."})
-  let final_tools = tool_registry()
-  let cleared_final = agent_loop(
-    "Inspect the workspace",
-    "You are helpful",
-    {
-      provider: "mock",
-      tools: list_tools(),
-      tool_format: "native",
-      loop_until_done: true,
-      max_iterations: 3,
-      max_nudges: 0,
-      post_turn_callback: { info ->
-        if len(info?.successful_tool_names ?? []) > 0 {
-          return {
-            message: "finalize without tools",
-            llm_options: {tool_choice: "none", tools: final_tools},
-            next_options: {tools: final_tools, loop_until_done: false, max_nudges: 0},
-          }
-        }
-        return nil
-      },
+  with_llm_script(
+    [
+      {text: "", tool_calls: [{id: "hook_2", name: "list_directory", arguments: {path: "."}}]},
+      llm_text("Final answer after clearing tools."),
+    ],
+    { ->
+      let final_tools = tool_registry()
+      let cleared_final = agent_loop(
+        "Inspect the workspace",
+        "You are helpful",
+        {
+          provider: "mock",
+          tools: list_tools(),
+          tool_format: "native",
+          loop_until_done: true,
+          max_iterations: 3,
+          max_nudges: 0,
+          post_turn_callback: { info ->
+            if len(info?.successful_tool_names ?? []) > 0 {
+              return {
+                message: "finalize without tools",
+                llm_options: {tool_choice: "none", tools: final_tools},
+                next_options: {tools: final_tools, loop_until_done: false, max_nudges: 0},
+              }
+            }
+            return nil
+          },
+        },
+      )
+      let cleared_calls = llm_mock_calls()
+      __io_println(cleared_final?.status == "done")
+      __io_println(cleared_final?.llm?.iterations == 2)
+      __io_println(len(cleared_calls[1]?.tools ?? []) == 0)
     },
   )
-  let cleared_calls = llm_mock_calls()
-  __io_println(cleared_final?.status == "done")
-  __io_println(cleared_final?.llm?.iterations == 2)
-  __io_println(len(cleared_calls[1]?.tools ?? []) == 0)
 }

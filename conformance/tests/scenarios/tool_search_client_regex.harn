@@ -1,3 +1,5 @@
+import { llm_text, with_llm_script } from "std/testing"
+
 /**
  * Client-executed `tool_search` fallback with the regex strategy.
  * Variant = regex means the model is shown a regex-flavoured prompt
@@ -5,7 +7,6 @@
  * no backreferences/lookaround).
  */
 pipeline test(task) {
-  llm_mock_clear()
   var registry = tool_registry()
   registry = tool_define(
     registry,
@@ -40,64 +41,64 @@ pipeline test(task) {
     {parameters: {cmd: {type: "string"}}, defer_loading: true, handler: { args -> "ran: " + args.cmd }},
   )
   // Turn 1: model runs a regex alternation.
-  llm_mock(
-    {
-      text: "Looking up edit/create tools via regex.",
-      tool_calls: [{id: "rgx1", name: "__harn_tool_search", arguments: {query: "edit|create"}}],
-    },
-  )
-  // Turn 2: call one of the promoted tools.
-  llm_mock(
-    {text: "Editing now.", tool_calls: [{id: "t2", name: "edit_file", arguments: {path: "hello.txt"}}]},
-  )
-  // Turn 3: done.
-  llm_mock({text: "<done>##DONE##</done>"})
-  let result = agent_loop(
-    "Refactor the file",
-    nil,
-    {
-      provider: "mock",
-      tools: registry,
-      tool_search: {variant: "regex", mode: "client"},
-      loop_until_done: true,
-      max_iterations: 5,
-    },
-  )
-  // Explicit `mode: "client"` keeps this test on the local fallback
-  // even when the mock provider uses a native-capable default model.
-  let events = transcript_events(result?.transcript)
-  var found_regex_strategy = false
-  var promoted_edit = false
-  var promoted_create = false
-  var promoted_run = false
-  for ev in events {
-    if ev.kind == "tool_search_query" {
-      assert(ev.metadata?.strategy == "regex", "strategy recorded as regex")
-      found_regex_strategy = true
-    }
-    if ev.kind == "tool_search_result" {
-      for name in ev.metadata?.promoted {
-        if name == "edit_file" {
-          promoted_edit = true
+  with_llm_script(
+    [
+      {
+        text: "Looking up edit/create tools via regex.",
+        tool_calls: [{id: "rgx1", name: "__harn_tool_search", arguments: {query: "edit|create"}}],
+      },
+      {text: "Editing now.", tool_calls: [{id: "t2", name: "edit_file", arguments: {path: "hello.txt"}}]},
+      llm_text("<done>##DONE##</done>"),
+    ],
+    { ->
+      let result = agent_loop(
+        "Refactor the file",
+        nil,
+        {
+          provider: "mock",
+          tools: registry,
+          tool_search: {variant: "regex", mode: "client"},
+          loop_until_done: true,
+          max_iterations: 5,
+        },
+      )
+      let events = transcript_events(result?.transcript)
+      var found_regex_strategy = false
+      var promoted_edit = false
+      var promoted_create = false
+      var promoted_run = false
+      for ev in events {
+        if ev.kind == "tool_search_query" {
+          assert(ev.metadata?.strategy == "regex", "strategy recorded as regex")
+          found_regex_strategy = true
         }
-        if name == "create_file" {
-          promoted_create = true
-        }
-        if name == "run_shell" {
-          promoted_run = true
+        if ev.kind == "tool_search_result" {
+          for name in ev.metadata?.promoted {
+            if name == "edit_file" {
+              promoted_edit = true
+            }
+            if name == "create_file" {
+              promoted_create = true
+            }
+            if name == "run_shell" {
+              promoted_run = true
+            }
+          }
         }
       }
-    }
-  }
-  assert(found_regex_strategy, "regex strategy tagged in transcript")
-  assert(promoted_edit, "regex `edit|create` matches `edit_file`")
-  assert(promoted_create, "regex `edit|create` matches `create_file`")
-  assert(!promoted_run, "regex `edit|create` must not match `run_shell`")
-  // Second LLM call sees the two edit/create tools but NOT run_shell.
-  let calls = llm_mock_calls()
-  let second_system = calls[1].system
-  assert(contains(second_system, "edit_file"), "edit_file surfaced in turn 2")
-  assert(contains(second_system, "create_file"), "create_file surfaced in turn 2")
-  assert(!contains(second_system, "run_shell"), "run_shell still deferred")
-  log("tool_search_client_regex tests passed")
+      assert(found_regex_strategy, "regex strategy tagged in transcript")
+      assert(promoted_edit, "regex `edit|create` matches `edit_file`")
+      assert(promoted_create, "regex `edit|create` matches `create_file`")
+      assert(!promoted_run, "regex `edit|create` must not match `run_shell`")
+      let calls = llm_mock_calls()
+      let second_system = calls[1].system
+      assert(contains(second_system, "edit_file"), "edit_file surfaced in turn 2")
+      assert(contains(second_system, "create_file"), "create_file surfaced in turn 2")
+      assert(!contains(second_system, "run_shell"), "run_shell still deferred")
+      log("tool_search_client_regex tests passed")
+    },
+  )
 }
+// Explicit `mode: "client"` keeps this test on the local fallback
+// even when the mock provider uses a native-capable default model.
+// Second LLM call sees the two edit/create tools but NOT run_shell.

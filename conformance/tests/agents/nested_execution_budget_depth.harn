@@ -1,3 +1,5 @@
+import { with_llm_script } from "std/testing"
+
 fn delegated_tools() {
   var tools = tool_registry()
   tools = tool_define(
@@ -25,44 +27,48 @@ fn delegated_tools() {
 }
 
 pipeline main() {
-  llm_mock({tool_calls: [{id: "delegate_1", name: "delegate", arguments: {}}]})
-  let parent = agent_loop(
-    "Ask the tool to delegate.",
-    nil,
-    {
-      provider: "mock",
-      tools: delegated_tools(),
-      allowed_tools: ["delegate"],
-      tool_format: "native",
-      max_iterations: 1,
-      policy: {recursion_limit: 0},
-    },
-  )
-  __io_println(contains(parent?.tools?.successful ?? [], "delegate"))
-  __io_println(len(parent?.tools?.rejected ?? []) == 0)
-  let flow = workflow_graph(
-    {
-      name: "budgeted_workflow",
-      entry: "act",
-      capability_policy: {recursion_limit: 0},
-      nodes: {
-        act: {
-          kind: "stage",
-          mode: "agent",
-          model_policy: {provider: "mock"},
-          output_contract: {output_kinds: ["summary"]},
+  with_llm_script(
+    [{tool_calls: [{id: "delegate_1", name: "delegate", arguments: {}}]}],
+    { ->
+      let parent = agent_loop(
+        "Ask the tool to delegate.",
+        nil,
+        {
+          provider: "mock",
+          tools: delegated_tools(),
+          allowed_tools: ["delegate"],
+          tool_format: "native",
+          max_iterations: 1,
+          policy: {recursion_limit: 0},
         },
-      },
-      edges: [],
+      )
+      __io_println(contains(parent?.tools?.successful ?? [], "delegate"))
+      __io_println(len(parent?.tools?.rejected ?? []) == 0)
+      let flow = workflow_graph(
+        {
+          name: "budgeted_workflow",
+          entry: "act",
+          capability_policy: {recursion_limit: 0},
+          nodes: {
+            act: {
+              kind: "stage",
+              mode: "agent",
+              model_policy: {provider: "mock"},
+              output_contract: {output_kinds: ["summary"]},
+            },
+          },
+          edges: [],
+        },
+      )
+      let workflow = workflow_execute("Nested workflow stage should be rejected.", flow, [], {max_steps: 1})
+      let stage = workflow?.run?.stages[0]
+      let artifact = stage?.artifacts[0]?.data
+      __io_println(stage?.status == "failed")
+      __io_println(stage?.outcome == "blocked")
+      __io_println(stage?.branch == "failed")
+      __io_println(artifact?.stop_reason == "nested_execution_budget_exhausted")
+      __io_println(artifact?.error?.category == "budget_exceeded")
+      __io_println(contains(artifact?.error?.message ?? "", "workflow_stage: act"))
     },
   )
-  let workflow = workflow_execute("Nested workflow stage should be rejected.", flow, [], {max_steps: 1})
-  let stage = workflow?.run?.stages[0]
-  let artifact = stage?.artifacts[0]?.data
-  __io_println(stage?.status == "failed")
-  __io_println(stage?.outcome == "blocked")
-  __io_println(stage?.branch == "failed")
-  __io_println(artifact?.stop_reason == "nested_execution_budget_exhausted")
-  __io_println(artifact?.error?.category == "budget_exceeded")
-  __io_println(contains(artifact?.error?.message ?? "", "workflow_stage: act"))
 }

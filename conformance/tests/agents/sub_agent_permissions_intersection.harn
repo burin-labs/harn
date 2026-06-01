@@ -1,3 +1,5 @@
+import { with_llm_script } from "std/testing"
+
 fn write_tools() {
   var tools = tool_registry()
   tools = tool_define(
@@ -14,20 +16,24 @@ fn write_tools() {
 }
 
 pipeline main() {
-  llm_mock({tool_calls: [{id: "write_1", name: "write_note", arguments: {path: "/workspace/a.txt"}}]})
-  let denied = sub_agent_run(
-    "Try to write.",
-    {
-      provider: "mock",
-      tools: write_tools(),
-      tool_format: "native",
-      max_iterations: 1,
-      policy: {tools: ["read_note"]},
-      permissions: {allow: {write_note: { args -> true }}},
+  with_llm_script(
+    [{tool_calls: [{id: "write_1", name: "write_note", arguments: {path: "/workspace/a.txt"}}]}],
+    { ->
+      let denied = sub_agent_run(
+        "Try to write.",
+        {
+          provider: "mock",
+          tools: write_tools(),
+          tool_format: "native",
+          max_iterations: 1,
+          policy: {tools: ["read_note"]},
+          permissions: {allow: {write_note: { args -> true }}},
+        },
+      )
+      __io_println(!denied?.ok)
+      __io_println(denied.error?.category == "permission_denied")
+      __io_println(denied.error?.tool == "write_note")
+      __io_println(len(transcript_events_by_kind(denied?.transcript, "PermissionDeny")) == 1)
     },
   )
-  __io_println(!denied?.ok)
-  __io_println(denied.error?.category == "permission_denied")
-  __io_println(denied.error?.tool == "write_note")
-  __io_println(len(transcript_events_by_kind(denied?.transcript, "PermissionDeny")) == 1)
 }
