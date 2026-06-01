@@ -63,6 +63,17 @@ impl HarnLsp {
                         work_done_progress_options: Default::default(),
                     },
                 )),
+                execute_command_provider: Some(ExecuteCommandOptions {
+                    // `harn.applyRepair` resolves a `data.repair_id` from a
+                    // code action back into a `WorkspaceEdit`. It exists so a
+                    // repair-backed code action that ships *without* an inline
+                    // `edit` (the rule-engine codemod path, where precomputing
+                    // every fix is too expensive) can still be applied: the
+                    // client calls `workspace/executeCommand` and the server
+                    // returns the edit on demand.
+                    commands: vec![crate::handlers::APPLY_REPAIR_COMMAND.to_string()],
+                    work_done_progress_options: Default::default(),
+                }),
                 rename_provider: Some(OneOf::Left(true)),
                 document_formatting_provider: Some(OneOf::Left(true)),
                 document_on_type_formatting_provider: Some(DocumentOnTypeFormattingOptions {

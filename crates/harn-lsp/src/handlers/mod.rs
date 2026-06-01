@@ -6,6 +6,7 @@
 //! topic-specific submodule.
 
 mod call_hierarchy;
+mod commands;
 mod completion;
 mod definition;
 mod folding;
@@ -13,6 +14,8 @@ mod formatting;
 mod hover;
 mod lifecycle;
 mod symbols;
+
+pub(crate) use commands::APPLY_REPAIR_COMMAND;
 
 use tower_lsp::jsonrpc::Result;
 use tower_lsp::lsp_types::request::{
@@ -135,6 +138,13 @@ impl tower_lsp::LanguageServer for HarnLsp {
 
     async fn formatting(&self, params: DocumentFormattingParams) -> Result<Option<Vec<TextEdit>>> {
         self.handle_formatting(params).await
+    }
+
+    async fn execute_command(
+        &self,
+        params: ExecuteCommandParams,
+    ) -> Result<Option<serde_json::Value>> {
+        self.handle_execute_command(params).await
     }
 
     async fn on_type_formatting(
