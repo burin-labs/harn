@@ -164,6 +164,78 @@ impl SandboxProfile {
     }
 }
 
+/// Named host filesystem presets granted only to child-process OS
+/// sandboxes. These do not widen Harn file builtins; they are used so
+/// subprocesses can load runtimes, compilers, and cache files that live
+/// outside the workspace while Harn's own read/write surface remains
+/// scoped by `workspace_roots` and `read_only_roots`.
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq, Hash, Ord, PartialOrd)]
+#[serde(rename_all = "snake_case")]
+pub enum ProcessSandboxPreset {
+    /// Minimal host runtime roots needed to execute common system binaries.
+    SystemRuntime,
+    /// OS/vendor developer toolchains such as Xcode, Command Line Tools,
+    /// Homebrew, and language runtimes installed under standard system paths.
+    DeveloperToolchains,
+    /// Per-user scratch/cache locations used by developer tools. Write access
+    /// is granted only when the active policy already allows workspace writes.
+    UserTemp,
+}
+
+impl ProcessSandboxPreset {
+    pub const fn default_presets() -> &'static [Self] {
+        &[
+            Self::SystemRuntime,
+            Self::DeveloperToolchains,
+            Self::UserTemp,
+        ]
+    }
+}
+
+/// Process-only filesystem policy layered onto the active sandbox profile.
+///
+/// `presets: None` means "use the runtime defaults"; `Some([])` is an
+/// explicit request for no named presets. Extra roots are process-only:
+/// they do not allow Harn file tools to read or write those paths.
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct ProcessSandboxPolicy {
+    pub presets: Option<Vec<ProcessSandboxPreset>>,
+    pub read_roots: Vec<String>,
+    pub write_roots: Vec<String>,
+}
+
+impl ProcessSandboxPolicy {
+    pub fn effective_presets(&self) -> Vec<ProcessSandboxPreset> {
+        self.presets
+            .clone()
+            .unwrap_or_else(|| ProcessSandboxPreset::default_presets().to_vec())
+    }
+
+    pub fn extend(&mut self, other: &Self) {
+        if let Some(presets) = other.presets.as_ref() {
+            self.presets = Some(presets.clone());
+        }
+        extend_unique(&mut self.read_roots, &other.read_roots);
+        extend_unique(&mut self.write_roots, &other.write_roots);
+    }
+
+    fn intersect(&self, requested: &Self) -> Self {
+        let presets = match (&self.presets, &requested.presets) {
+            (None, None) => None,
+            _ => Some(intersect_presets(
+                &self.effective_presets(),
+                &requested.effective_presets(),
+            )),
+        };
+        Self {
+            presets,
+            read_roots: intersect_roots(&self.read_roots, &requested.read_roots),
+            write_roots: intersect_roots(&self.write_roots, &requested.write_roots),
+        }
+    }
+}
+
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(default)]
 pub struct CapabilityPolicy {
@@ -201,6 +273,10 @@ pub struct CapabilityPolicy {
     /// refuse to run if the platform sandbox is unavailable.
     #[serde(default)]
     pub sandbox_profile: SandboxProfile,
+    /// Process-only filesystem allowances layered into OS subprocess
+    /// sandboxes without widening Harn file builtins.
+    #[serde(default)]
+    pub process_sandbox: ProcessSandboxPolicy,
 }
 
 impl CapabilityPolicy {
@@ -314,6 +390,7 @@ impl CapabilityPolicy {
         // yields os_hardened (the host gets the stricter of the two).
         let sandbox_profile =
             strictest_sandbox_profile(self.sandbox_profile, requested.sandbox_profile);
+        let process_sandbox = self.process_sandbox.intersect(&requested.process_sandbox);
 
         Ok(CapabilityPolicy {
             tools,
@@ -325,6 +402,7 @@ impl CapabilityPolicy {
             tool_arg_constraints,
             tool_annotations,
             sandbox_profile,
+            process_sandbox,
         })
     }
 }
@@ -362,6 +440,24 @@ fn strictest_sandbox_profile(left: SandboxProfile, right: SandboxProfile) -> San
         left
     } else {
         right
+    }
+}
+
+fn intersect_presets(
+    left: &[ProcessSandboxPreset],
+    right: &[ProcessSandboxPreset],
+) -> Vec<ProcessSandboxPreset> {
+    left.iter()
+        .filter(|preset| right.contains(preset))
+        .copied()
+        .collect()
+}
+
+fn extend_unique(target: &mut Vec<String>, roots: &[String]) {
+    for root in roots {
+        if !target.contains(root) {
+            target.push(root.clone());
+        }
     }
 }
 

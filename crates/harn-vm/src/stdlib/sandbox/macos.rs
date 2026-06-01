@@ -15,10 +15,11 @@ use std::path::Path;
 use std::process::Command;
 
 use super::{
-    policy_allows_network, policy_allows_workspace_write, process_sandbox_readonly_roots,
+    policy_allows_network, policy_allows_workspace_write, process_sandbox_policy_read_roots,
+    process_sandbox_policy_write_roots, process_sandbox_presets, process_sandbox_readonly_roots,
     process_sandbox_roots, unavailable, PrepareOutcome, SandboxBackend,
 };
-use crate::orchestration::{CapabilityPolicy, SandboxProfile};
+use crate::orchestration::{CapabilityPolicy, ProcessSandboxPreset, SandboxProfile};
 use crate::value::VmError;
 
 const SANDBOX_EXEC_PATH: &str = "/usr/bin/sandbox-exec";
@@ -70,16 +71,73 @@ fn wrap_with_sandbox_exec(
         "--".to_string(),
         program.to_string(),
     ];
-    wrapped_args.extend(args.iter().cloned());
+    wrapped_args.extend(macos_sandbox_compatible_args(program, args));
     Ok(PrepareOutcome::WrappedExec {
         wrapper: SANDBOX_EXEC_PATH.to_string(),
         args: wrapped_args,
     })
 }
 
+fn macos_sandbox_compatible_args(program: &str, args: &[String]) -> Vec<String> {
+    if is_swiftpm_invocation(program, args) {
+        return swiftpm_outer_sandbox_args(args);
+    }
+    args.to_vec()
+}
+
+fn is_swiftpm_invocation(program: &str, args: &[String]) -> bool {
+    Path::new(program)
+        .file_name()
+        .and_then(|name| name.to_str())
+        == Some("swift")
+        && matches!(
+            args.first().map(String::as_str),
+            Some("build" | "test" | "run" | "package")
+        )
+}
+
+fn swiftpm_outer_sandbox_args(args: &[String]) -> Vec<String> {
+    let mut rewritten = Vec::with_capacity(args.len() + 9);
+    rewritten.push(args[0].clone());
+    if !has_swiftpm_option(args, "--disable-sandbox") {
+        rewritten.push("--disable-sandbox".to_string());
+    }
+    if !has_swiftpm_option(args, "--manifest-cache") {
+        rewritten.extend(["--manifest-cache".to_string(), "local".to_string()]);
+    }
+    if !has_swiftpm_option(args, "--cache-path") {
+        rewritten.extend([
+            "--cache-path".to_string(),
+            ".build/harn/swiftpm/cache".to_string(),
+        ]);
+    }
+    if !has_swiftpm_option(args, "--config-path") {
+        rewritten.extend([
+            "--config-path".to_string(),
+            ".build/harn/swiftpm/config".to_string(),
+        ]);
+    }
+    if !has_swiftpm_option(args, "--security-path") {
+        rewritten.extend([
+            "--security-path".to_string(),
+            ".build/harn/swiftpm/security".to_string(),
+        ]);
+    }
+    rewritten.extend(args.iter().skip(1).cloned());
+    rewritten
+}
+
+fn has_swiftpm_option(args: &[String], option: &str) -> bool {
+    let equals_prefix = format!("{option}=");
+    args.iter()
+        .any(|arg| arg == option || arg.starts_with(&equals_prefix))
+}
+
 fn render_profile(policy: &CapabilityPolicy) -> String {
     let roots = process_sandbox_roots(policy);
     let read_only_roots = process_sandbox_readonly_roots(policy);
+    let policy_read_roots = process_sandbox_policy_read_roots(policy);
+    let policy_write_roots = process_sandbox_policy_write_roots(policy);
     let mut profile = String::from(
         "(version 1)\n\
          (deny default)\n\
@@ -87,30 +145,51 @@ fn render_profile(policy: &CapabilityPolicy) -> String {
          (allow sysctl-read)\n\
          (allow mach-lookup)\n\
          (allow file-read-metadata)\n\
-         (allow file-read-data (literal \"/\"))\n\
-         (allow file-read* (subpath \"/private/var/select\"))\n\
-         (allow file-read* (subpath \"/var/select\"))\n\
-         (allow file-read* (subpath \"/Library/Developer\"))\n",
+         (allow file-read-data (literal \"/\"))\n",
     );
     profile.push_str(standard_device_profile_rules());
-    for root in system_read_roots() {
+    for root in preset_read_roots(policy) {
         profile.push_str(&format!(
             "(allow file-read* (subpath \"{}\"))\n",
             sandbox_profile_escape(root)
         ));
     }
-    // Read-only roots are granted read but never write — the write block
-    // below iterates only the writable `roots`.
-    for root in roots.iter().chain(read_only_roots.iter()) {
+    // Process-only read roots and Harn read-only roots are granted read but
+    // never write — the write block below iterates only writable roots.
+    for root in roots
+        .iter()
+        .chain(read_only_roots.iter())
+        .chain(policy_read_roots.iter())
+    {
         profile.push_str(&format!(
             "(allow file-read* (subpath \"{}\"))\n",
             sandbox_profile_escape(&root.display().to_string())
         ));
     }
     if policy_allows_workspace_write(policy) {
-        profile.push_str(
-            "(allow file-write* (subpath \"/tmp\") (subpath \"/private/tmp\") (subpath \"/var/tmp\"))\n",
-        );
+        for root in preset_write_roots(policy) {
+            profile.push_str(&format!(
+                "(allow file-read* (subpath \"{}\"))\n",
+                sandbox_profile_escape(root)
+            ));
+        }
+        for root in &policy_write_roots {
+            profile.push_str(&format!(
+                "(allow file-read* (subpath \"{}\"))\n",
+                sandbox_profile_escape(&root.display().to_string())
+            ));
+        }
+        profile.push_str("(allow file-write*");
+        for root in preset_write_roots(policy) {
+            profile.push_str(&format!(" (subpath \"{}\")", sandbox_profile_escape(root)));
+        }
+        for root in &policy_write_roots {
+            profile.push_str(&format!(
+                " (subpath \"{}\")",
+                sandbox_profile_escape(&root.display().to_string())
+            ));
+        }
+        profile.push_str(")\n");
         for root in roots {
             profile.push_str(&format!(
                 "(allow file-write* (subpath \"{}\"))\n",
@@ -136,16 +215,46 @@ fn render_profile(policy: &CapabilityPolicy) -> String {
     profile
 }
 
-fn system_read_roots() -> &'static [&'static str] {
-    &[
-        "/bin",
-        "/etc",
-        "/Library",
-        "/opt/homebrew",
-        "/private/etc",
-        "/System",
-        "/usr",
-    ]
+fn preset_read_roots(policy: &CapabilityPolicy) -> Vec<&'static str> {
+    let mut roots = Vec::new();
+    for preset in process_sandbox_presets(policy) {
+        match preset {
+            ProcessSandboxPreset::SystemRuntime => roots.extend([
+                "/bin",
+                "/etc",
+                "/Library",
+                "/opt/homebrew",
+                "/private/etc",
+                "/private/var/select",
+                "/System",
+                "/usr",
+                "/var/select",
+            ]),
+            ProcessSandboxPreset::DeveloperToolchains => roots.extend([
+                "/Applications",
+                "/Library/Developer",
+                "/System/Library/Developer",
+            ]),
+            ProcessSandboxPreset::UserTemp => {}
+        }
+    }
+    roots.sort_unstable();
+    roots.dedup();
+    roots
+}
+
+fn preset_write_roots(policy: &CapabilityPolicy) -> Vec<&'static str> {
+    let mut roots = Vec::new();
+    if process_sandbox_presets(policy).contains(&ProcessSandboxPreset::UserTemp) {
+        roots.extend([
+            "/private/tmp",
+            "/private/var/folders",
+            "/tmp",
+            "/var/folders",
+            "/var/tmp",
+        ]);
+    }
+    roots
 }
 
 fn sandbox_profile_escape(value: &str) -> String {
@@ -190,6 +299,7 @@ mod tests {
             tool_arg_constraints: Vec::new(),
             tool_annotations: std::collections::BTreeMap::new(),
             sandbox_profile: SandboxProfile::Worktree,
+            process_sandbox: Default::default(),
         }
     }
 
@@ -214,12 +324,74 @@ mod tests {
     fn sandbox_profile_allows_tmp_write_only_with_workspace_write() {
         let read_only = render_profile(&macos_policy_with_workspace_ops(&["read_text"]));
         assert!(
-            !read_only.contains("(subpath \"/tmp\") (subpath \"/private/tmp\")"),
+            !read_only.contains("(allow file-write* (subpath \"/tmp\")"),
             "read-only profile must not grant temp writes"
         );
 
         let writable = render_profile(&macos_policy_with_workspace_ops(&["write_text"]));
-        assert!(writable.contains("(subpath \"/tmp\") (subpath \"/private/tmp\")"));
+        assert!(
+            writable.contains("(allow file-write*") && writable.contains("(subpath \"/tmp\")"),
+            "writable profile should grant temp writes: {writable}"
+        );
+        assert!(
+            writable.contains("(allow file-read* (subpath \"/private/var/folders\"))"),
+            "writable profile should let developer tools read per-user temp caches: {writable}"
+        );
+        assert!(
+            writable.contains("(allow file-write*")
+                && writable.contains("(subpath \"/private/var/folders\")"),
+            "writable profile should let developer tools update per-user temp caches: {writable}"
+        );
+    }
+
+    #[test]
+    fn sandbox_profile_allows_applications_for_xcode_toolchains() {
+        let profile = render_profile(&macos_policy_with_workspace_ops(&["read_text"]));
+        assert!(
+            profile.contains("(allow file-read* (subpath \"/Applications\"))"),
+            "Applications should be readable so Xcode toolchain bundles can load: {profile}"
+        );
+    }
+
+    #[test]
+    fn sandbox_profile_honors_explicit_process_presets() {
+        let mut policy = macos_policy_with_workspace_ops(&["write_text"]);
+        policy.process_sandbox.presets = Some(vec![ProcessSandboxPreset::SystemRuntime]);
+        let profile = render_profile(&policy);
+
+        assert!(
+            !profile.contains("(allow file-read* (subpath \"/Applications\"))"),
+            "disabling developer_toolchains should remove Xcode bundle access: {profile}"
+        );
+        assert!(
+            !profile.contains("(subpath \"/private/var/folders\")"),
+            "disabling user_temp should remove per-user temp cache access: {profile}"
+        );
+    }
+
+    #[test]
+    fn sandbox_profile_honors_process_only_roots() {
+        let mut policy = macos_policy_with_workspace_ops(&["write_text"]);
+        policy.process_sandbox.read_roots = vec!["/opt/vendor-sdk".to_string()];
+        policy.process_sandbox.write_roots = vec!["/opt/vendor-cache".to_string()];
+        let profile = render_profile(&policy);
+
+        assert!(
+            profile.contains("(allow file-read* (subpath \"/opt/vendor-sdk\"))"),
+            "process read roots should be readable: {profile}"
+        );
+        assert!(
+            profile.contains("(allow file-read* (subpath \"/opt/vendor-cache\"))"),
+            "process write roots should also be readable: {profile}"
+        );
+        assert!(
+            profile.contains("(subpath \"/opt/vendor-cache\")"),
+            "process write roots should be writable when workspace writes are allowed: {profile}"
+        );
+        assert!(
+            !profile.contains("(allow file-write* (subpath \"/opt/vendor-sdk\"))"),
+            "process read roots must not be writable: {profile}"
+        );
     }
 
     #[test]
@@ -271,6 +443,116 @@ mod tests {
             "standard device smoke should pass\nstdout:\n{}\nstderr:\n{}",
             String::from_utf8_lossy(&output.stdout),
             String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    #[test]
+    fn sandbox_exec_profile_allows_xcrun_to_resolve_swift() {
+        if !Path::new(SANDBOX_EXEC_PATH).exists() || !Path::new("/usr/bin/xcrun").exists() {
+            return;
+        }
+        let profile = render_profile(&macos_policy_with_workspace_ops(&["write_text"]));
+        let output = Command::new(SANDBOX_EXEC_PATH)
+            .args(["-p", &profile, "--", "/usr/bin/xcrun", "--find", "swift"])
+            .output()
+            .expect("run sandbox-exec xcrun smoke");
+        assert!(
+            output.status.success(),
+            "xcrun should resolve swift inside the sandbox\nstdout:\n{}\nstderr:\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(
+            !String::from_utf8_lossy(&output.stderr).contains("file system sandbox blocked open"),
+            "xcrun stderr must not expose a raw sandbox profile miss"
+        );
+    }
+
+    #[test]
+    fn swiftpm_invocations_use_outer_harn_sandbox() {
+        let args = strings(["test", "--filter", "SysMonCoreTests"]);
+        let rewritten = macos_sandbox_compatible_args("swift", &args);
+
+        assert_eq!(rewritten.first().map(String::as_str), Some("test"));
+        assert!(rewritten.iter().any(|arg| arg == "--disable-sandbox"));
+        assert!(has_adjacent(&rewritten, "--manifest-cache", "local"));
+        assert!(has_adjacent(
+            &rewritten,
+            "--cache-path",
+            ".build/harn/swiftpm/cache"
+        ));
+        assert!(has_adjacent(
+            &rewritten,
+            "--config-path",
+            ".build/harn/swiftpm/config"
+        ));
+        assert!(has_adjacent(
+            &rewritten,
+            "--security-path",
+            ".build/harn/swiftpm/security"
+        ));
+        assert!(has_adjacent(&rewritten, "--filter", "SysMonCoreTests"));
+
+        let explicit = strings([
+            "test",
+            "--disable-sandbox",
+            "--manifest-cache=none",
+            "--cache-path",
+            ".cache",
+        ]);
+        let rewritten = macos_sandbox_compatible_args("/usr/bin/swift", &explicit);
+        assert_eq!(
+            rewritten
+                .iter()
+                .filter(|arg| *arg == "--disable-sandbox")
+                .count(),
+            1
+        );
+        assert!(
+            !has_adjacent(&rewritten, "--manifest-cache", "local"),
+            "explicit SwiftPM cache policy must not be overwritten: {rewritten:?}"
+        );
+        assert!(
+            !has_adjacent(&rewritten, "--cache-path", ".build/harn/swiftpm/cache"),
+            "explicit SwiftPM cache path must not be overwritten: {rewritten:?}"
+        );
+    }
+
+    #[test]
+    fn sandbox_exec_profile_allows_swiftpm_test_to_use_outer_sandbox() {
+        if !Path::new(SANDBOX_EXEC_PATH).exists() || !Path::new("/usr/bin/swift").exists() {
+            return;
+        }
+        let temp = tempfile::TempDir::new().expect("temp Swift package");
+        write_swift_package(temp.path());
+        let policy = macos_policy_with_workspace_ops(&["write_text"]);
+        let args = strings(["test", "--filter", "SysMonCoreTests"]);
+        let PrepareOutcome::WrappedExec {
+            wrapper,
+            args: wrapped_args,
+        } = wrap_with_sandbox_exec("swift", &args, &policy, SandboxProfile::Worktree)
+            .expect("wrap swift test")
+        else {
+            panic!("macOS backend should wrap with sandbox-exec");
+        };
+
+        let output = Command::new(wrapper)
+            .args(wrapped_args)
+            .current_dir(temp.path())
+            .output()
+            .expect("run sandboxed swift test smoke");
+
+        assert!(
+            output.status.success(),
+            "swift test should run inside Harn's outer sandbox\nstdout:\n{}\nstderr:\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            !stderr.contains("sandbox_apply")
+                && !stderr.contains("file system sandbox blocked open"),
+            "SwiftPM should not expose nested or missing sandbox policy errors: {stderr}"
         );
     }
 
@@ -343,5 +625,61 @@ mod tests {
             !profile.contains("(deny file-write*"),
             "read-only profile must not emit spurious deny rules: {profile}"
         );
+    }
+
+    fn strings(values: impl IntoIterator<Item = &'static str>) -> Vec<String> {
+        values.into_iter().map(str::to_string).collect()
+    }
+
+    fn has_adjacent(values: &[String], first: &str, second: &str) -> bool {
+        values
+            .windows(2)
+            .any(|pair| pair[0] == first && pair[1] == second)
+    }
+
+    fn write_swift_package(root: &Path) {
+        std::fs::create_dir_all(root.join("Sources/SysMonCore")).expect("create source dir");
+        std::fs::create_dir_all(root.join("Tests/SysMonCoreTests")).expect("create test dir");
+        std::fs::write(
+            root.join("Package.swift"),
+            r#"// swift-tools-version: 6.0
+import PackageDescription
+
+let package = Package(
+    name: "SysMonSmoke",
+    products: [
+        .library(name: "SysMonCore", targets: ["SysMonCore"]),
+    ],
+    targets: [
+        .target(name: "SysMonCore"),
+        .testTarget(name: "SysMonCoreTests", dependencies: ["SysMonCore"]),
+    ]
+)
+"#,
+        )
+        .expect("write package manifest");
+        std::fs::write(
+            root.join("Sources/SysMonCore/Sample.swift"),
+            r"public enum SysMonSmoke {
+    public static func sample() -> Int {
+        42
+    }
+}
+",
+        )
+        .expect("write source");
+        std::fs::write(
+            root.join("Tests/SysMonCoreTests/SysMonCoreTests.swift"),
+            r"import XCTest
+@testable import SysMonCore
+
+final class SysMonCoreTests: XCTestCase {
+    func testSample() {
+        XCTAssertEqual(SysMonSmoke.sample(), 42)
+    }
+}
+",
+        )
+        .expect("write tests");
     }
 }

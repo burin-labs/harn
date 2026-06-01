@@ -544,14 +544,18 @@ pub struct AcpServerConfig {
     pub llm_capability_overrides: Option<harn_vm::llm::capabilities::CapabilitiesFile>,
     pub profile: AcpProfileConfig,
     pub budget: Option<BudgetSpec>,
-    /// Read-only sandbox roots the embedder grants on top of the user's
-    /// `workspace_roots`. Paths resolving under one of these are readable
-    /// during a turn even though they sit outside the user workspace, but
-    /// they are never writable or executable. Intended for an in-process
-    /// host (e.g. burin's Rust TUI) that ships bundled assets — pipelines
-    /// and their `@partials` — outside the user's project tree. Empty by
-    /// default so embedders that do not set it keep the stock sandbox.
+    pub sandbox: AcpSandboxConfig,
+}
+
+/// Filesystem policy the ACP embedder contributes to each sandboxed turn.
+///
+/// `read_only_roots` widens Harn file reads for host-owned assets such as
+/// bundled pipelines. `process` is process-only and affects the OS child
+/// process sandbox without granting Harn file builtins access to those paths.
+#[derive(Clone, Debug, Default)]
+pub struct AcpSandboxConfig {
     pub read_only_roots: Vec<String>,
+    pub process: harn_vm::orchestration::ProcessSandboxPolicy,
 }
 
 impl AcpServerConfig {
@@ -565,7 +569,7 @@ impl AcpServerConfig {
             llm_capability_overrides: None,
             profile: AcpProfileConfig::default(),
             budget: None,
-            read_only_roots: Vec::new(),
+            sandbox: AcpSandboxConfig::default(),
         }
     }
 
@@ -625,22 +629,39 @@ impl AcpServerConfig {
         self
     }
 
-    /// Register read-only sandbox roots that the embedder grants on top of
-    /// the user's `workspace_roots`. Each path is canonicalized so the
-    /// per-turn policy compares against the same normalized form the
-    /// sandbox scope check uses; entries that cannot be canonicalized
-    /// (e.g. they do not exist yet) fall back to their input string.
-    /// Empty/blank entries are dropped.
-    pub fn with_read_only_roots(mut self, roots: Vec<String>) -> Self {
-        self.read_only_roots = canonicalize_read_only_roots(roots);
+    pub fn with_sandbox(mut self, sandbox: AcpSandboxConfig) -> Self {
+        self.sandbox = sandbox.canonicalized();
         self
     }
 }
 
-/// Canonicalize embedder-supplied read-only roots, dropping blank entries.
+impl AcpSandboxConfig {
+    pub fn with_read_only_roots(roots: Vec<String>) -> Self {
+        Self {
+            read_only_roots: canonicalize_sandbox_roots(roots),
+            process: harn_vm::orchestration::ProcessSandboxPolicy::default(),
+        }
+    }
+
+    pub fn with_process(process: harn_vm::orchestration::ProcessSandboxPolicy) -> Self {
+        Self {
+            read_only_roots: Vec::new(),
+            process,
+        }
+    }
+
+    fn canonicalized(mut self) -> Self {
+        self.read_only_roots = canonicalize_sandbox_roots(self.read_only_roots);
+        self.process.read_roots = canonicalize_sandbox_roots(self.process.read_roots);
+        self.process.write_roots = canonicalize_sandbox_roots(self.process.write_roots);
+        self
+    }
+}
+
+/// Canonicalize embedder-supplied sandbox roots, dropping blank entries.
 /// Falls back to the trimmed input when canonicalization fails so a root
 /// that does not exist on disk yet is still carried verbatim.
-fn canonicalize_read_only_roots(roots: Vec<String>) -> Vec<String> {
+fn canonicalize_sandbox_roots(roots: Vec<String>) -> Vec<String> {
     roots
         .into_iter()
         .filter_map(|root| {
@@ -722,10 +743,7 @@ pub struct AcpServer {
     llm_capability_overrides: Option<harn_vm::llm::capabilities::CapabilitiesFile>,
     /// Server-level budget inherited by sessions unless they override it.
     default_budget: Option<BudgetSpec>,
-    /// Embedder-granted read-only sandbox roots, unioned into the per-turn
-    /// capability policy so bundled assets outside the user workspace stay
-    /// readable. Empty for embedders that do not opt in.
-    read_only_roots: Vec<String>,
+    sandbox: AcpSandboxConfig,
 }
 
 impl AcpServer {
@@ -768,7 +786,7 @@ impl AcpServer {
             llm_config_overrides,
             llm_capability_overrides,
             default_budget: config.budget,
-            read_only_roots: config.read_only_roots,
+            sandbox: config.sandbox,
         }
     }
 
@@ -1704,7 +1722,7 @@ impl AcpServer {
             })),
         );
         let profile_turn = self.begin_profile_turn(&session_id);
-        let _mode_guard = modes::ModePolicyGuard::enter(&current_mode_id, &self.read_only_roots);
+        let _mode_guard = modes::ModePolicyGuard::enter(&current_mode_id, &self.sandbox);
         let (vm_baseline, vm_baseline_cache_hit, vm_baseline_prepare_ms) = match self
             .prepare_vm_baseline_cached(
                 &source,

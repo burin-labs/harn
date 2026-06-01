@@ -235,6 +235,7 @@ fn scan_harn_script_ceiling(source: &str) -> CapabilityPolicy {
         tool_arg_constraints: Vec::new(),
         tool_annotations: std::collections::BTreeMap::new(),
         sandbox_profile: crate::orchestration::SandboxProfile::default(),
+        process_sandbox: Default::default(),
     }
 }
 
@@ -265,6 +266,7 @@ fn scan_burin_manifest_ceiling(manifest: &serde_json::Value) -> CapabilityPolicy
         tool_arg_constraints: Vec::new(),
         tool_annotations: std::collections::BTreeMap::new(),
         sandbox_profile: crate::orchestration::SandboxProfile::default(),
+        process_sandbox: Default::default(),
     }
 }
 
@@ -452,6 +454,7 @@ mod tests {
             tool_arg_constraints: Vec::new(),
             tool_annotations: BTreeMap::new(),
             sandbox_profile: crate::orchestration::SandboxProfile::default(),
+            process_sandbox: Default::default(),
         }
     }
 
@@ -475,6 +478,7 @@ mod tests {
             tool_arg_constraints: Vec::new(),
             tool_annotations: BTreeMap::new(),
             sandbox_profile: crate::orchestration::SandboxProfile::default(),
+            process_sandbox: Default::default(),
         }
     }
 

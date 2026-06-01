@@ -24,6 +24,7 @@ fn parent_ceiling_act_with_approval() -> CapabilityPolicy {
         tool_arg_constraints: Vec::new(),
         tool_annotations: BTreeMap::new(),
         sandbox_profile: crate::orchestration::SandboxProfile::default(),
+        process_sandbox: Default::default(),
     }
 }
 
@@ -40,6 +41,7 @@ fn parent_ceiling_read_only() -> CapabilityPolicy {
         tool_arg_constraints: Vec::new(),
         tool_annotations: BTreeMap::new(),
         sandbox_profile: crate::orchestration::SandboxProfile::default(),
+        process_sandbox: Default::default(),
     }
 }
 
