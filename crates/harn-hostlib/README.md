@@ -12,6 +12,28 @@ Opt-in host builtins for the Harn VM that provide:
 3. **Session filesystem staging** — per-session deferred writes, deletes,
    read-through overlays, status reporting, commit, and discard.
 
+## Cargo features
+
+The crate ships full by default (`default = ["full"]`) so `harn-cli` and
+standalone tests keep the entire surface. In-process embedding clients that
+want a lean build depend on it with `default-features = false` and opt back
+into what they need:
+
+- `ast` — the code-intelligence layer: tree-sitter parsing + AST edit
+  primitives **and** the `code_index` symbol graph built on top of them.
+  Pulls tree-sitter and (via `grammars-all`) every grammar family. The
+  deterministic tools, search, file staging, and secret store are always
+  compiled; only this code-intelligence layer is gated.
+- Grammar families — `grammar-web`, `grammar-systems`, `grammar-scripting`,
+  `grammar-jvm`, `grammar-enterprise`, `grammar-data`. Each is a set of
+  C-compiled tree-sitter grammars; enabling a subset compiles only those
+  languages. A language whose family is absent still parses by name and
+  extension but resolves no grammar, so its AST-precise edits degrade to the
+  text fallback. `ast` turns on the `grammars-all` umbrella for parity.
+
+See `docs/src/embedding-rust.md` for how `harn-serve` exposes these to
+embedders (`hostlib`, `hostlib-full`, `full`).
+
 ## Status
 
 [#563](https://github.com/burin-labs/harn/issues/563) introduced the

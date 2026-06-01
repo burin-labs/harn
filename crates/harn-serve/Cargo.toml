@@ -18,8 +18,13 @@ futures = "0.3"
 globset = "0.4"
 harn-clock = { path = "../harn-clock", version = "0.8" }
 harn-parser = { path = "../harn-parser", version = "0.8" }
-harn-vm = { path = "../harn-vm", version = "0.8" }
-harn-hostlib = { path = "../harn-hostlib", version = "0.8", optional = true }
+# `default-features = false` keeps the in-process embedding surface lean:
+# Postgres (sqlx) and the hostlib grammars are opt-in via this crate's
+# feature flags rather than dragged in unconditionally. harn-cli re-enables
+# the full set for CLI parity; Cargo's feature unification means any build
+# that includes harn-cli still gets everything.
+harn-vm = { path = "../harn-vm", version = "0.8", default-features = false }
+harn-hostlib = { path = "../harn-hostlib", version = "0.8", optional = true, default-features = false }
 hex = "0.4"
 hmac = "0.13"
 ipnet = "2"
@@ -44,7 +49,24 @@ uuid = { version = "1", features = ["v4", "v7"] }
 
 [features]
 default = []
+
+# Wire hostlib's deterministic tools (file I/O, search, process, secret
+# store) into the server. No tree-sitter or grammars — the right set for
+# lightweight smoke evals and any in-process client that never issues an
+# AST-precise edit. All of `harn-serve`'s hostlib integration gates on this
+# feature, so the richer sets below build on top of it.
 hostlib = ["dep:harn-hostlib"]
+
+# hostlib + the full code-intelligence surface (tree-sitter + every grammar
+# family). The parity-critical set Burin's Rust TUI uses for evals that
+# exercise AST-precise edits, rename, or the symbol index.
+hostlib-full = ["hostlib", "harn-hostlib/full"]
+
+# Re-enable the VM's Postgres (`pg.*`) builtins, dropped here by default.
+vm-postgres = ["harn-vm/postgres"]
+
+# Everything the full CLI ships, for consumers that want one-flag parity.
+full = ["hostlib-full", "vm-postgres"]
 
 [dependencies.jsonwebtoken]
 # Used by the a2a-push OIDC verifier to opt callers into a non-default

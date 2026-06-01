@@ -73,6 +73,7 @@ mod options;
 mod path;
 pub(crate) mod path_scope_guard;
 pub(crate) mod pool;
+#[cfg(feature = "postgres")]
 mod postgres;
 pub mod process;
 mod project;
@@ -195,6 +196,7 @@ fn register_agent_stdlib_before_llm(vm: &mut Vm) {
     skills::register_skill_builtins(vm);
     agents_daemon::register_daemon_builtins(vm);
     triggers_stdlib::register_trigger_builtins(vm);
+    #[cfg(feature = "postgres")]
     postgres::register_postgres_builtins(vm);
     waitpoints::register_waitpoint_builtins(vm);
     monitors::register_monitor_builtins(vm);
@@ -413,6 +415,7 @@ pub fn reset_stdlib_state() {
     agents::reset_agent_worker_state();
     agents::workflow::reset_workflow_run_states();
     pool::reset_pool_state();
+    #[cfg(feature = "postgres")]
     postgres::reset_postgres_state();
     supervisor::reset_supervisor_state();
     agents::records::reset_eval_metrics();

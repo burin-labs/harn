@@ -27,7 +27,9 @@
 #![deny(rust_2018_idioms)]
 #![warn(missing_docs)]
 
+#[cfg(feature = "ast")]
 pub mod ast;
+#[cfg(feature = "ast")]
 pub mod code_index;
 pub mod error;
 pub mod fs;
@@ -53,10 +55,18 @@ pub use registry::{BuiltinRegistry, HostlibCapability, HostlibRegistry, Register
 /// hostlib surface; pick-and-choose embedders should construct
 /// [`HostlibRegistry`] directly.
 pub fn install_default(vm: &mut harn_vm::Vm) -> HostlibRegistry {
-    let code_index = code_index::CodeIndexCapability::new();
-    let mut registry = HostlibRegistry::new()
-        .with(ast::AstCapabilityWithCodeIndex::new(code_index.shared()))
-        .with(code_index)
+    let mut registry = HostlibRegistry::new();
+    // The code-intelligence capabilities (`ast` + `code_index`) are only
+    // compiled when the `ast` feature is on. Lean clients that omit it get
+    // the deterministic tool surface without tree-sitter or any grammar.
+    #[cfg(feature = "ast")]
+    {
+        let code_index = code_index::CodeIndexCapability::new();
+        registry = registry
+            .with(ast::AstCapabilityWithCodeIndex::new(code_index.shared()))
+            .with(code_index);
+    }
+    registry = registry
         .with(scanner::ScannerCapability)
         .with(fs::FsCapability)
         .with(fs_snapshot::FsSnapshotCapability)
