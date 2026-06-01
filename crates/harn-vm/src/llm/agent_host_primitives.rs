@@ -654,13 +654,17 @@ async fn host_agent_dispatch_tool_call(
     }
 
     let mut permission_grants = permissions::take_session_grants(&session_id);
-    let permission_outcome = permissions::check_dynamic_permission(
+    // Box the permission-check future: this tool-dispatch async fn sits right at
+    // Clippy's `large_stack_frames` threshold, so moving this sizable nested
+    // future to the heap keeps the frame comfortably under it (matches the
+    // `Box::pin` treatment of the reminder-provider futures below).
+    let permission_outcome = Box::pin(permissions::check_dynamic_permission(
         Some(&ctx),
         &mut permission_grants,
         &tool_name,
         &tool_args,
         &session_id,
-    )
+    ))
     .await?;
     permissions::store_session_grants(&session_id, permission_grants);
     if let Some(permission) = permission_outcome {
