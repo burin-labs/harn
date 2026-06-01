@@ -206,9 +206,8 @@ fn substitute(snippet: &str) -> Result<Substituted, String> {
         i = j;
     }
 
-    if metavar_order.is_empty() {
-        return Err("pattern has no `$VAR` metavariables".into());
-    }
+    // A pattern with no metavars is a valid *literal* pattern (it matches a
+    // fixed structure), so we do not require one.
 
     Ok(Substituted {
         text,
@@ -234,8 +233,10 @@ struct QueryBuilder<'a> {
     placeholder_to_metavar: &'a HashMap<String, String>,
     /// occurrence count per metavar, to mint unification helper captures.
     occurrences: HashMap<String, usize>,
-    /// `(#eq? @X @X.2)` predicates for repeated metavars.
+    /// `(#eq? …)` predicates for repeated metavars and literal leaves.
     eq_predicates: Vec<String>,
+    /// counter for literal-leaf text-constraint captures.
+    literal_count: usize,
 }
 
 impl<'a> QueryBuilder<'a> {
@@ -245,6 +246,7 @@ impl<'a> QueryBuilder<'a> {
             placeholder_to_metavar,
             occurrences: HashMap::new(),
             eq_predicates: Vec::new(),
+            literal_count: 0,
         }
     }
 
@@ -256,7 +258,14 @@ impl<'a> QueryBuilder<'a> {
                 return format!("(_) @{}", self.capture_for(metavar));
             }
             if node.is_named() {
-                return format!("({})", node.kind());
+                // A literal named leaf (a specific identifier / literal in
+                // the snippet): constrain it to its exact text so `foo()`
+                // matches calls to `foo`, not any call.
+                let cap = format!("__lit_{}", self.literal_count);
+                self.literal_count += 1;
+                self.eq_predicates
+                    .push(format!("(#eq? @{cap} {})", quote_literal(text)));
+                return format!("({}) @{cap}", node.kind());
             }
             return quote_literal(text);
         }
@@ -456,8 +465,20 @@ mod tests {
     }
 
     #[test]
-    fn rejects_pattern_without_metavars() {
-        let err = compile_pattern("foo()", Language::TypeScript).unwrap_err();
-        assert!(err.contains("no `$VAR`"), "got: {err}");
+    fn literal_pattern_matches_exact_text() {
+        // A metavar-free pattern is a literal pattern: `foo()` matches calls
+        // to `foo`, not to other functions.
+        let snippet = "foo()";
+        let compiled = compile_pattern(snippet, Language::TypeScript).expect("compiles");
+        assert!(compiled.metavars.is_empty());
+        // It matches `foo()` …
+        let hit = run(snippet, Language::TypeScript, "foo();");
+        assert!(!hit.is_empty());
+        // … but not `bar()` (the literal identifier is constrained).
+        let miss = run(snippet, Language::TypeScript, "bar();");
+        assert!(
+            miss.is_empty(),
+            "bar() must not match foo()'s literal pattern: {miss:?}"
+        );
     }
 }

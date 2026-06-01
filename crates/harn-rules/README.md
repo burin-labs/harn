@@ -11,9 +11,12 @@ and produces matches with metavariable bindings — the structural complement
 to regex/glob search.
 
 This crate ships the **atomic matching tier**
-([harn#2832](https://github.com/burin-labs/harn/issues/2832)). Relational /
-composite matching (#2833) and `where` / `transform` / `fix` interpolation
-(#2834) build on it.
+([harn#2832](https://github.com/burin-labs/harn/issues/2832)), the
+**relational + composite algebra**
+([harn#2833](https://github.com/burin-labs/harn/issues/2833)), and the
+**predicate + rewrite layer**
+([harn#2834](https://github.com/burin-labs/harn/issues/2834)). The
+whole-project scan lifecycle (#2836) builds on it.
 
 ## Rule shape (TOML)
 
@@ -43,6 +46,79 @@ A rule's kind is derived from its shape: a `fix` makes it a **codemod**; a
   land with the relational tier (#2833).
 - `kind` — a bare tree-sitter node kind (e.g. `"call_expression"`).
 - `regex` — a regular expression over the source text.
+
+A metavar-free `pattern` is a **literal** pattern: `foo()` matches calls to
+`foo` specifically (every non-metavar identifier/literal is constrained to
+its exact text).
+
+### Relational + composite algebra
+
+Beyond the atomic leaf, a rule node can add relational and composite keys —
+all ANDed. A node matches iff its atomic part matches *and* every other key
+holds:
+
+```toml
+[rule]
+pattern = "let $NAME = $SRC?.$KEY ?? $DEF"
+[rule.inside]                  # ancestor must match this sub-rule
+kind = "statement_block"
+stopBy = "end"                 # neighbor (default) | end | <rule>
+[rule.not.inside]              # composite `not` of a relational `inside`
+kind = "try_statement"
+stopBy = "end"
+```
+
+- **Relational**: `inside` (ancestor), `has` (descendant), `follows` /
+  `precedes` (siblings), each a sub-rule tuned by `stopBy` and `field`
+  (restrict to a tree-sitter field).
+- **Composite**: `all` / `any` (lists of sub-rules), `not` (a sub-rule),
+  and `matches` (reference a `[utils.NAME]` utility rule by id).
+
+### `where` constraints, `transform`, and `fix`
+
+A rule can narrow matches with `where` predicates, synthesize new metavars
+with `transform`, and rewrite with `fix`:
+
+```toml
+id = "snakeify-getters"
+language = "typescript"
+fix = "$SNAKE()"                     # interpolates $VAR / ${VAR} (and $$ -> $)
+
+[rule]
+pattern = "$FN()"
+
+[[where]]                            # keep only matches that pass every predicate
+metavar = "FN"
+regex = "^get[A-Z]"                  # or: comparison = { op = ">", value = 100 }
+                                     # or: pattern = "..."  (recursive sub-pattern)
+
+[transform.SNAKE]                    # derive a new metavar before fixing
+source = "FN"
+convert = "snake"                    # or: replace = { regex, by } / substring = { start, end }
+```
+
+`CompiledRule::apply(source)` runs the rule, drops matches that fail any
+constraint, interpolates each match's `fix` (from its captured + transformed
+metavars), and splices the replacements in — format-preserving, the same
+byte-splice guarantee as `ast.batch_apply`. It returns the rewritten source
+plus the per-match edits; the caller decides whether to write.
+
+### Safety, applicability, and idempotency
+
+A rule declares a `safety` tier — `format-only` → `behavior-preserving` →
+`scope-local` (default) → `surface-changing` → `capability-changing` →
+`needs-human`. The two safest map to **machine-applicable**; the rest are
+**suggestions** (opt-in). The gate:
+
+- `apply` always computes the preview (and reports `safety`,
+  `applicability`, and whether the fix is `idempotent`).
+- `auto_apply` refuses anything above `behavior-preserving` — so the runner
+  never silently applies a risky fix.
+- `apply_checked` additionally fails if the fix is **not idempotent** (re-
+  running it produces further changes — it never reaches a fixed point).
+- `diagnostics(source)` emits one diagnostic per match (message, severity,
+  span, applicability, interpolated fix) — the mapping surface the linter
+  and LSP convert into `LintDiagnostic` / `FixEdit`.
 
 ## Usage
 

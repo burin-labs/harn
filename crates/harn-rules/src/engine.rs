@@ -10,13 +10,14 @@
 
 use std::collections::BTreeMap;
 
-use harn_hostlib::ast::{api, Language};
-use streaming_iterator::StreamingIterator;
-use tree_sitter::{Query, QueryCursor};
+use harn_hostlib::ast::Language;
 
+use crate::constraint::CompiledConstraint;
 use crate::error::RulesError;
-use crate::model::{AtomicMatcher, Rule};
-use crate::pattern::{compile_pattern, ROOT_CAPTURE};
+use crate::evaluator::CompiledRuleTree;
+use crate::fix::{interpolate, splice, AppliedEdit};
+use crate::model::{Applicability, Rule, Safety, Severity};
+use crate::transform::CompiledTransform;
 
 /// A byte + row/col span. Rows/cols are 0-based, matching the rest of the
 /// Harn AST wire format.
@@ -37,7 +38,7 @@ pub struct Span {
 }
 
 impl Span {
-    fn of(node: tree_sitter::Node<'_>) -> Self {
+    pub(crate) fn of(node: tree_sitter::Node<'_>) -> Self {
         let start = node.start_position();
         let end = node.end_position();
         Span {
@@ -74,19 +75,68 @@ pub struct RuleMatch {
     pub bindings: BTreeMap<String, Binding>,
 }
 
+/// The result of applying a codemod rule's `fix` to a source string.
+#[derive(Debug, Clone)]
+pub struct CodemodResult {
+    /// The rewritten source (equals the input when nothing matched).
+    pub rewritten: String,
+    /// The per-match edits that were spliced in, in document order.
+    pub edits: Vec<AppliedEdit>,
+    /// Whether the rewrite changed the source.
+    pub changed: bool,
+    /// The rule's declared safety tier.
+    pub safety: Safety,
+    /// Whether the fix may be auto-applied or is opt-in only.
+    pub applicability: Applicability,
+    /// Whether re-running the fix on `rewritten` yields no further change
+    /// (a fix should reach a fixed point).
+    pub idempotent: bool,
+}
+
 /// A rule whose matcher has been compiled and is ready to run.
 pub struct CompiledRule {
     rule_id: String,
     language: Language,
-    matcher: CompiledMatcher,
+    execution: Execution,
+    /// `where` predicates; a match survives only when all hold.
+    constraints: Vec<CompiledConstraint>,
+    /// `transform` definitions: (new metavar name, compiled transform).
+    transforms: Vec<(String, CompiledTransform)>,
+    /// The `fix` replacement template, if this is a codemod.
+    fix: Option<String>,
+    /// The fix's safety tier (gates auto-apply).
+    safety: Safety,
+    /// The diagnostic message (empty for search-only rules).
+    message: String,
+    /// The diagnostic severity.
+    severity: Severity,
 }
 
-enum CompiledMatcher {
-    /// A tree-sitter query plus the metavar names to extract. Covers both
-    /// `pattern` and `kind` forms.
-    Query { query: Query, metavars: Vec<String> },
-    /// A text regex over the whole source.
-    Regex(regex::Regex),
+/// A diagnostic produced by running a rule — the mapping surface onto the
+/// linter's `LintDiagnostic` / `FixEdit` (Epic C / the LSP reuse this).
+#[derive(Debug, Clone)]
+pub struct Diagnostic {
+    /// The rule id (also the diagnostic code).
+    pub rule_id: String,
+    /// The diagnostic message.
+    pub message: String,
+    /// The severity.
+    pub severity: Severity,
+    /// The flagged span.
+    pub span: Span,
+    /// Whether a fix, if present, is auto-applicable or a suggestion.
+    pub applicability: Applicability,
+    /// The interpolated fix replacement for this match, if the rule has a
+    /// `fix`.
+    pub fix: Option<String>,
+}
+
+enum Execution {
+    /// A top-level pure-`regex` rule: scan the raw source text (grep-style),
+    /// independent of the tree. Its match span is the regex match range.
+    SourceRegex(regex::Regex),
+    /// The full matching algebra (atomic + relational + composite).
+    Tree(Box<CompiledRuleTree>),
 }
 
 impl CompiledRule {
@@ -98,74 +148,50 @@ impl CompiledRule {
                 language: rule.language.clone(),
             })?;
 
-        let matcher = match rule
-            .rule
-            .resolve()
-            .map_err(|message| RulesError::PatternCompile {
-                rule: rule.id.clone(),
-                message,
-            })? {
-            AtomicMatcher::Pattern(snippet) => {
-                let ts_language =
-                    language
-                        .ts_language()
-                        .ok_or_else(|| RulesError::GrammarUnavailable {
-                            rule: rule.id.clone(),
-                            language: language.name().to_string(),
-                        })?;
-                let compiled = compile_pattern(&snippet, language).map_err(|message| {
-                    RulesError::PatternCompile {
-                        rule: rule.id.clone(),
-                        message,
-                    }
-                })?;
-                let query = Query::new(&ts_language, &compiled.query).map_err(|err| {
-                    RulesError::QueryRejected {
-                        rule: rule.id.clone(),
-                        message: err.to_string(),
-                        query: compiled.query.clone(),
-                    }
-                })?;
-                CompiledMatcher::Query {
-                    query,
-                    metavars: compiled.metavars,
+        // A top-level pure-`regex` rule greps the source text directly; any
+        // other shape (pattern / kind / relational / composite) compiles to
+        // the tree-walking algebra.
+        let execution = if rule.rule.is_pure_regex() {
+            let pattern = rule.rule.regex.as_ref().expect("pure regex");
+            Execution::SourceRegex(regex::Regex::new(pattern).map_err(|err| {
+                RulesError::PatternCompile {
+                    rule: rule.id.clone(),
+                    message: format!("invalid regex `{pattern}`: {err}"),
                 }
-            }
-            AtomicMatcher::Kind(kind) => {
-                let ts_language =
-                    language
-                        .ts_language()
-                        .ok_or_else(|| RulesError::GrammarUnavailable {
-                            rule: rule.id.clone(),
-                            language: language.name().to_string(),
-                        })?;
-                let query_text = format!("({kind}) @{ROOT_CAPTURE}");
-                let query = Query::new(&ts_language, &query_text).map_err(|err| {
-                    RulesError::QueryRejected {
-                        rule: rule.id.clone(),
-                        message: err.to_string(),
-                        query: query_text.clone(),
-                    }
-                })?;
-                CompiledMatcher::Query {
-                    query,
-                    metavars: Vec::new(),
-                }
-            }
-            AtomicMatcher::Regex(pattern) => {
-                let regex =
-                    regex::Regex::new(&pattern).map_err(|err| RulesError::PatternCompile {
-                        rule: rule.id.clone(),
-                        message: format!("invalid regex `{pattern}`: {err}"),
-                    })?;
-                CompiledMatcher::Regex(regex)
-            }
+            })?)
+        } else {
+            Execution::Tree(Box::new(CompiledRuleTree::compile(
+                &rule.id,
+                language,
+                &rule.rule,
+                &rule.utils,
+            )?))
         };
+
+        let constraints = rule
+            .where_constraints
+            .iter()
+            .map(|c| CompiledConstraint::compile(&rule.id, language, c))
+            .collect::<Result<Vec<_>, _>>()?;
+
+        let transforms = rule
+            .transform
+            .iter()
+            .map(|(name, t)| {
+                CompiledTransform::compile(&rule.id, name, t).map(|c| (name.clone(), c))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
 
         Ok(CompiledRule {
             rule_id: rule.id.clone(),
             language,
-            matcher,
+            execution,
+            constraints,
+            transforms,
+            fix: rule.fix.clone(),
+            safety: rule.safety,
+            message: rule.message.clone(),
+            severity: rule.severity,
         })
     }
 
@@ -174,64 +200,166 @@ impl CompiledRule {
         self.language
     }
 
-    /// Run the compiled rule against `source`, returning matches in
-    /// document order.
-    pub fn run(&self, source: &str) -> Result<Vec<RuleMatch>, RulesError> {
-        match &self.matcher {
-            CompiledMatcher::Query { query, metavars } => self.run_query(query, metavars, source),
-            CompiledMatcher::Regex(regex) => Ok(self.run_regex(regex, source)),
-        }
+    /// The fix's declared safety tier.
+    pub fn safety(&self) -> Safety {
+        self.safety
     }
 
-    fn run_query(
-        &self,
-        query: &Query,
-        metavars: &[String],
-        source: &str,
-    ) -> Result<Vec<RuleMatch>, RulesError> {
-        let tree =
-            api::parse_tree(source, self.language).map_err(|err| RulesError::SourceParse {
-                rule: self.rule_id.clone(),
-                message: err.to_string(),
-            })?;
-        let names: Vec<&str> = query.capture_names().to_vec();
-        let bytes = source.as_bytes();
+    /// Whether this rule's fix may be auto-applied (machine-applicable) or
+    /// is opt-in only (suggestion).
+    pub fn applicability(&self) -> Applicability {
+        self.safety.applicability()
+    }
 
-        let mut cursor = QueryCursor::new();
-        let mut it = cursor.matches(query, tree.root_node(), bytes);
-        let mut matches = Vec::new();
-        while let Some(m) = it.next() {
-            let mut root: Option<Span> = None;
-            let mut root_text = String::new();
-            let mut bindings: BTreeMap<String, Binding> = BTreeMap::new();
-            for cap in m.captures {
-                let name = names[cap.index as usize];
-                let span = Span::of(cap.node);
-                let text = source[cap.node.start_byte()..cap.node.end_byte()].to_string();
-                if name == ROOT_CAPTURE {
-                    root = Some(span);
-                    root_text = text;
-                } else if metavars.iter().any(|m| m == name) {
-                    // Canonical metavar capture; unification helpers carry a
-                    // `.` and never appear in `metavars`, so they are skipped.
-                    bindings
-                        .entry(name.to_string())
-                        .or_insert(Binding { text, span });
-                }
-            }
-            if let Some(span) = root {
-                matches.push(RuleMatch {
+    /// Run the compiled rule against `source`, returning matches in
+    /// document order. Matches that fail any `where` constraint are dropped.
+    pub fn run(&self, source: &str) -> Result<Vec<RuleMatch>, RulesError> {
+        let mut matches = match &self.execution {
+            Execution::SourceRegex(regex) => self.run_regex(regex, source),
+            Execution::Tree(tree) => tree
+                .find(&self.rule_id, self.language, source)?
+                .into_iter()
+                .map(|m| RuleMatch {
                     rule_id: self.rule_id.clone(),
-                    span,
-                    text: root_text,
-                    bindings,
-                });
-            }
+                    span: m.span,
+                    text: m.text,
+                    bindings: m.bindings,
+                })
+                .collect(),
+        };
+        if !self.constraints.is_empty() {
+            matches.retain(|m| self.satisfies_constraints(m));
         }
-        // Tree-sitter yields matches in query-eval order; sort to document
-        // order for a stable, intuitive result.
-        matches.sort_by_key(|m| (m.span.start_byte, m.span.end_byte));
         Ok(matches)
+    }
+
+    /// True when every `where` constraint holds for this match. A
+    /// constraint whose metavar is unbound (not captured) fails closed.
+    fn satisfies_constraints(&self, m: &RuleMatch) -> bool {
+        self.constraints.iter().all(|c| {
+            m.bindings
+                .get(&c.metavar)
+                .is_some_and(|b| c.evaluate(&b.text))
+        })
+    }
+
+    /// Apply this codemod rule's `fix` to `source`, returning the rewritten
+    /// text plus the per-match edits. Each match's `fix` template is
+    /// interpolated from its captured metavars plus any `transform`-derived
+    /// ones. Errors if the rule has no `fix`.
+    ///
+    /// This computes the preview only — it does not enforce the safety gate.
+    /// Use [`CompiledRule::auto_apply`] to refuse non-machine-applicable
+    /// fixes, or [`CompiledRule::apply_checked`] to also assert idempotency.
+    pub fn apply(&self, source: &str) -> Result<CodemodResult, RulesError> {
+        let (rewritten, edits) = self.rewrite(source)?;
+        let changed = rewritten != source;
+        // Idempotency: re-running the fix on its own output must not change
+        // it further (the fix should reach a fixed point).
+        let (twice, _) = self.rewrite(&rewritten)?;
+        let idempotent = twice == rewritten;
+        Ok(CodemodResult {
+            rewritten,
+            edits,
+            changed,
+            safety: self.safety,
+            applicability: self.applicability(),
+            idempotent,
+        })
+    }
+
+    /// Like [`CompiledRule::apply`], but refuses to apply a fix whose
+    /// `safety` is above the machine-applicable threshold (`scope-local` and
+    /// riskier). This is the gate `harn codemod --apply` uses by default.
+    pub fn auto_apply(&self, source: &str) -> Result<CodemodResult, RulesError> {
+        if !self.safety.is_auto_applicable() {
+            return Err(RulesError::NotAutoApplicable {
+                rule: self.rule_id.clone(),
+                safety: format!("{:?}", self.safety),
+            });
+        }
+        self.apply(source)
+    }
+
+    /// Like [`CompiledRule::apply`], but fails if the fix is not idempotent.
+    /// Used by the codemod runner and the rule-test harness to assert a fix
+    /// reaches a fixed point.
+    pub fn apply_checked(&self, source: &str) -> Result<CodemodResult, RulesError> {
+        let result = self.apply(source)?;
+        if !result.idempotent {
+            return Err(RulesError::NotIdempotent {
+                rule: self.rule_id.clone(),
+            });
+        }
+        Ok(result)
+    }
+
+    /// Run the rule and produce one [`Diagnostic`] per match — the surface
+    /// the linter (Epic C) and the LSP convert into `LintDiagnostic` /
+    /// `FixEdit`. Each diagnostic carries the interpolated fix (if any) and
+    /// its applicability tier.
+    pub fn diagnostics(&self, source: &str) -> Result<Vec<Diagnostic>, RulesError> {
+        let applicability = self.applicability();
+        let matches = self.run(source)?;
+        Ok(matches
+            .iter()
+            .map(|m| Diagnostic {
+                rule_id: self.rule_id.clone(),
+                message: self.message.clone(),
+                severity: self.severity,
+                span: m.span,
+                applicability,
+                fix: self.fix.as_ref().map(|template| {
+                    let vars = self.metavars_for(m);
+                    interpolate(template, &vars)
+                }),
+            })
+            .collect())
+    }
+
+    /// The core rewrite: run the rule and splice each match's interpolated
+    /// fix. Returns the rewritten text and the edits.
+    fn rewrite(&self, source: &str) -> Result<(String, Vec<AppliedEdit>), RulesError> {
+        let template = self
+            .fix
+            .as_ref()
+            .ok_or_else(|| RulesError::PatternCompile {
+                rule: self.rule_id.clone(),
+                message: "apply requires a `fix` template; this rule has none".into(),
+            })?;
+
+        let matches = self.run(source)?;
+        let edits: Vec<AppliedEdit> = matches
+            .iter()
+            .map(|m| {
+                let vars = self.metavars_for(m);
+                AppliedEdit {
+                    span: m.span,
+                    before: m.text.clone(),
+                    replacement: interpolate(template, &vars),
+                }
+            })
+            .collect();
+        Ok((splice(source, &edits), edits))
+    }
+
+    /// Build the full metavar map for a match: captured bindings plus the
+    /// `transform`-synthesized metavars (which may shadow captures).
+    fn metavars_for(&self, m: &RuleMatch) -> BTreeMap<String, String> {
+        let mut vars: BTreeMap<String, String> = m
+            .bindings
+            .iter()
+            .map(|(name, binding)| (name.clone(), binding.text.clone()))
+            .collect();
+        for (name, transform) in &self.transforms {
+            let input = m
+                .bindings
+                .get(&transform.source)
+                .map(|b| b.text.as_str())
+                .unwrap_or("");
+            vars.insert(name.clone(), transform.apply(input));
+        }
+        vars
     }
 
     fn run_regex(&self, regex: &regex::Regex, source: &str) -> Vec<RuleMatch> {
