@@ -1675,6 +1675,20 @@ anthropic_beta_features = ["fine-grained-tool-streaming-2025-05-14"]
     }
 
     #[test]
+    fn cerebras_gpt_oss_supports_reasoning_none() {
+        // Cerebras-hosted GPT-OSS accepts reasoning_effort ∈
+        // {none, low, medium, high} but rejects `minimal`. Advertising
+        // reasoning_none_supported makes the policy resolver materialize an
+        // "off" level as `none` instead of flooring at the rejected
+        // `minimal` (which 400s every no-tools/summarize turn).
+        reset();
+        let caps = lookup("cerebras", "gpt-oss-120b");
+        assert_eq!(caps.thinking_modes, vec!["effort"]);
+        assert!(caps.reasoning_effort_supported);
+        assert!(caps.reasoning_none_supported);
+    }
+
+    #[test]
     fn mock_with_claude_model_routes_to_anthropic() {
         reset();
         let caps = lookup("mock", "claude-sonnet-4-7");

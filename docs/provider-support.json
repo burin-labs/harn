@@ -197,7 +197,8 @@
         "streaming": true,
         "reasoning_knobs": [
           "effort",
-          "reasoning_effort"
+          "reasoning_effort",
+          "reasoning_none"
         ],
         "prompt_or_context_cache": false,
         "usage_accounting_confidence": "high"

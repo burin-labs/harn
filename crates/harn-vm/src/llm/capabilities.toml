@@ -1931,6 +1931,14 @@ thinking_block_style = "none"
 
 # ---------- Cerebras ----------------------------------------------------------
 
+# Cerebras-hosted GPT-OSS accepts top-level `reasoning_effort` ∈
+# {none, low, medium, high}. It does NOT accept `minimal` — sending it
+# returns `HTTP 400 reasoning_effort: Input should be 'none', 'low',
+# 'medium' or 'high' (wrong_api_format)`. Without `reasoning_none_supported`
+# the policy resolver floors an "off" reasoning level at `minimal`
+# (see thinking_for_reasoning_level), which breaks every no-tools /
+# summarize turn (e.g. the release-harness audit-finalize turn). Cerebras
+# does accept `none`, so advertise it as the true reasoning-off value.
 [[provider.cerebras]]
 model_match = "gpt-oss-*"
 native_tools = true
@@ -1938,6 +1946,7 @@ preferred_tool_format = "native"
 structured_output = "native"
 thinking_modes = ["effort"]
 reasoning_effort_supported = true
+reasoning_none_supported = true
 prefers_xml_scaffolding = false
 prefers_markdown_scaffolding = true
 structured_output_mode = "native_json"
