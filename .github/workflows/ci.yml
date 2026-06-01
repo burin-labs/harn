@@ -525,7 +525,17 @@ jobs:
     # Single `curl` to the Render deploy hook; running it on a self-hosted
     # runner adds no value.
     runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/main'
+    # `always()` is required: without it, this job is skipped whenever ANY job
+    # in the `ci-status` dependency graph is skipped (e2e is label-gated, and
+    # windows/rust-builds are path-filtered), even though `ci-status` itself
+    # succeeds. That GitHub Actions quirk silently disabled docs auto-deploy
+    # for weeks. See actions/runner#2205. We re-assert the success gate
+    # explicitly via `needs.ci-status.result`.
+    if: >-
+      always()
+      && github.ref == 'refs/heads/main'
+      && github.event_name == 'push'
+      && needs.ci-status.result == 'success'
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
@@ -534,7 +544,9 @@ jobs:
         id: docs-changed
         run: |
           BEFORE="${{ github.event.before }}"
-          if [ "$BEFORE" = "0000000000000000000000000000000000000000" ]; then
+          if [ -z "$BEFORE" ] || [ "$BEFORE" = "0000000000000000000000000000000000000000" ] \
+            || ! git cat-file -e "$BEFORE^{commit}" 2>/dev/null; then
+            # New branch, force-push, or unreachable base — deploy to be safe.
             echo "changed=true" >> "$GITHUB_OUTPUT"
           elif git diff --name-only "$BEFORE" HEAD | grep -Eq '^(docs/|scripts/build_docs_site\.sh$)'; then
             echo "changed=true" >> "$GITHUB_OUTPUT"
@@ -543,4 +555,13 @@ jobs:
           fi
       - name: Trigger Render deploy
         if: steps.docs-changed.outputs.changed == 'true'
-        run: curl -s "${{ secrets.RENDER_DEPLOY_HOOK_URL }}"
+        env:
+          RENDER_DEPLOY_HOOK_URL: ${{ secrets.RENDER_DEPLOY_HOOK_URL }}
+        run: |
+          if [ -z "${RENDER_DEPLOY_HOOK_URL:-}" ]; then
+            echo "::error::RENDER_DEPLOY_HOOK_URL secret is not set."
+            exit 1
+          fi
+          # `-f` so a rotated/invalid hook fails the job instead of passing
+          # silently (the previous `-s`-only call swallowed every error).
+          curl -fsS --retry 3 --retry-delay 5 "$RENDER_DEPLOY_HOOK_URL"
