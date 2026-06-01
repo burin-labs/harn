@@ -110,6 +110,8 @@ const ACP_DISPATCHED_METHODS: &[&str] = &[
     "harn.mcp.authorize",
     "mcp/oauth_callback",
     "harn.mcp.oauth_callback",
+    "mcp/import_token",
+    "harn.mcp.import_token",
 ];
 const ACP_AGENT_NOTIFICATIONS: &[&str] = &["session/message", "session/update", "terminal/output"];
 const ACP_CONTENT_BLOCK_TYPES: &[&str] = &["text", "resource_link", "resource", "image", "audio"];

@@ -378,6 +378,12 @@ pub enum AgentEvent {
         reason: String,
         removed_tools: Vec<String>,
         remaining_tools: Vec<String>,
+        #[serde(default, skip_serializing_if = "serde_json::Value::is_null")]
+        policy: serde_json::Value,
+        #[serde(default, skip_serializing_if = "serde_json::Value::is_null")]
+        removed_tool_details: serde_json::Value,
+        #[serde(default, skip_serializing_if = "serde_json::Value::is_null")]
+        kept_tool_details: serde_json::Value,
     },
     /// Emitted when a `tool_search` query is issued by the model. Carries
     /// the raw query args, the configured strategy, and a `mode` tag

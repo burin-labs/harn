@@ -189,6 +189,14 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
         TY_DICT,
     ),
     BuiltinSignature::simple(
+        "agent_stop",
+        &[
+            Param::new("worker", TY_ANY),
+            Param::optional("options", TY_DICT_OR_NIL),
+        ],
+        TY_DICT,
+    ),
+    BuiltinSignature::simple(
         "agent_turn",
         &[
             Param::new("prompt", TY_STRING),

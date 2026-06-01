@@ -40,6 +40,18 @@ pub const CLI_RUNTIME_STACK_SIZE: usize = 16 * 1024 * 1024;
 
 static BROKEN_PIPE_PANIC_HOOK: Once = Once::new();
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum CliRuntimeMode {
+    FullIo,
+    StaticAnalysis,
+}
+
+impl CliRuntimeMode {
+    fn enables_tokio_io(self) -> bool {
+        matches!(self, Self::FullIo)
+    }
+}
+
 /// Install the macro-emitted builtin signature slice into the
 /// `harn_parser` registry the first time any harn-cli entry point parses
 /// or typechecks a script.
@@ -78,18 +90,15 @@ pub fn run() {
 
     ensure_builtin_signatures_installed();
 
+    let raw_args = normalize_serve_args(env::args().collect());
+    let runtime_mode = cli_runtime_mode(&raw_args);
+
     let handle = thread::Builder::new()
         .name("harn-cli".to_string())
         .stack_size(CLI_RUNTIME_STACK_SIZE)
-        .spawn(|| {
-            let runtime = tokio::runtime::Builder::new_multi_thread()
-                .enable_all()
-                .build()
-                .unwrap_or_else(|error| {
-                    eprintln!("failed to start async runtime: {error}");
-                    process::exit(1);
-                });
-            runtime.block_on(async_main());
+        .spawn(move || {
+            let runtime = build_cli_runtime(runtime_mode);
+            runtime.block_on(async_main(raw_args, runtime_mode));
             // Drain any queued OTLP exports while the tokio runtime
             // is still alive. The auto-registered `OtelSink` uses a
             // batch processor with `runtime::Tokio`; if we let the
@@ -113,6 +122,71 @@ pub fn run() {
     }
 }
 
+fn cli_runtime_mode(raw_args: &[String]) -> CliRuntimeMode {
+    if raw_args.len() == 2 && raw_args[1].ends_with(".harn") {
+        return CliRuntimeMode::FullIo;
+    }
+
+    let Ok(cli) = Cli::try_parse_from(raw_args) else {
+        return CliRuntimeMode::StaticAnalysis;
+    };
+
+    if cli.json_schemas {
+        return CliRuntimeMode::StaticAnalysis;
+    }
+
+    match cli.command {
+        Some(
+            Command::Check(_)
+            | Command::Lint(_)
+            | Command::Fmt(_)
+            | Command::Parse(_)
+            | Command::Tokens(_),
+        ) => CliRuntimeMode::StaticAnalysis,
+        _ => CliRuntimeMode::FullIo,
+    }
+}
+
+fn build_cli_runtime(mode: CliRuntimeMode) -> tokio::runtime::Runtime {
+    let build = panic::catch_unwind(|| {
+        let mut builder = tokio::runtime::Builder::new_multi_thread();
+        if mode.enables_tokio_io() {
+            builder.enable_all();
+        } else {
+            // Static analysis commands use synchronous file/parser paths.
+            // Avoiding Tokio's I/O driver also avoids the Unix signal/process
+            // self-pipe that sandboxed child processes may be forbidden to
+            // create.
+            builder.enable_time();
+        }
+        builder.build()
+    });
+
+    match build {
+        Ok(Ok(runtime)) => runtime,
+        Ok(Err(error)) => {
+            eprintln!("failed to start async runtime: {error}");
+            process::exit(1);
+        }
+        Err(payload) => {
+            if let Some(message) = panic_payload_message(payload.as_ref())
+                .filter(|message| message.contains("failed to create UnixStream"))
+            {
+                eprintln!(
+                    "failed to start async runtime: Tokio signal driver unavailable in this environment: {message}"
+                );
+                if mode.enables_tokio_io() {
+                    eprintln!(
+                        "error: this harn command requires Tokio I/O support; run it outside a sandbox that denies socketpair"
+                    );
+                }
+                process::exit(1);
+            }
+            panic::resume_unwind(payload);
+        }
+    }
+}
+
 fn install_broken_pipe_panic_hook() {
     BROKEN_PIPE_PANIC_HOOK.call_once(|| {
         let previous = panic::take_hook();
@@ -125,12 +199,18 @@ fn install_broken_pipe_panic_hook() {
     });
 }
 
-fn is_broken_pipe_panic_payload(payload: &(dyn std::any::Any + Send)) -> bool {
-    let message = if let Some(message) = payload.downcast_ref::<String>() {
-        message.as_str()
+fn panic_payload_message(payload: &(dyn std::any::Any + Send)) -> Option<&str> {
+    if let Some(message) = payload.downcast_ref::<String>() {
+        Some(message.as_str())
     } else if let Some(message) = payload.downcast_ref::<&str>() {
-        message
+        Some(message)
     } else {
+        None
+    }
+}
+
+fn is_broken_pipe_panic_payload(payload: &(dyn std::any::Any + Send)) -> bool {
+    let Some(message) = panic_payload_message(payload) else {
         return false;
     };
 
@@ -143,18 +223,19 @@ fn is_broken_pipe_panic_payload(payload: &(dyn std::any::Any + Send)) -> bool {
 }
 
 #[allow(clippy::large_stack_frames)] // dispatch entrypoint owns full Args + per-feature locals.
-async fn async_main() {
+async fn async_main(raw_args: Vec<String>, runtime_mode: CliRuntimeMode) {
     // Install the OTLP exporter sink before any subcommand runs so a
     // 20+ minute autonomous session has spans streaming to the
     // configured collector from the first turn. When neither
     // `HARN_OTEL_ENDPOINT` nor `OTEL_EXPORTER_OTLP_ENDPOINT` is set
     // this is a no-op. A misconfigured endpoint logs and continues —
     // local observability is opt-in and must never fail the run.
-    if let Err(error) = harn_vm::events::install_otel_sink_from_env() {
-        eprintln!("[harn] OTel exporter disabled: {error}");
+    if runtime_mode.enables_tokio_io() {
+        if let Err(error) = harn_vm::events::install_otel_sink_from_env() {
+            eprintln!("[harn] OTel exporter disabled: {error}");
+        }
     }
 
-    let raw_args = normalize_serve_args(env::args().collect());
     if raw_args.len() == 2 && raw_args[1].ends_with(".harn") {
         provider_bootstrap::maybe_seed_ollama_for_run_file(Path::new(&raw_args[1]), false, false)
             .await;
@@ -3119,10 +3200,14 @@ fn connector_secret_namespace(base_dir: &Path) -> String {
 #[cfg(test)]
 mod main_tests {
     use super::{
-        is_broken_pipe_panic_payload, normalize_serve_args, serve_subcommand_names,
-        should_install_default_connector_clients,
+        cli_runtime_mode, is_broken_pipe_panic_payload, normalize_serve_args,
+        serve_subcommand_names, should_install_default_connector_clients, CliRuntimeMode,
     };
     use std::path::Path;
+
+    fn argv(args: &[&str]) -> Vec<String> {
+        args.iter().map(|arg| (*arg).to_string()).collect()
+    }
 
     #[test]
     fn normalize_serve_args_inserts_a2a_for_legacy_shape() {
@@ -3202,6 +3287,33 @@ mod main_tests {
             "__io_println(1)",
             Some(Path::new("examples/demo.harn"))
         ));
+    }
+
+    #[test]
+    fn static_analysis_commands_use_runtime_without_tokio_io_driver() {
+        for args in [
+            argv(&["harn", "check", "script.harn"]),
+            argv(&["harn", "lint", "script.harn"]),
+            argv(&["harn", "fmt", "--check", "script.harn"]),
+            argv(&["harn", "parse", "script.harn"]),
+            argv(&["harn", "tokens", "script.harn"]),
+            argv(&["harn", "--json-schemas"]),
+        ] {
+            assert_eq!(cli_runtime_mode(&args), CliRuntimeMode::StaticAnalysis);
+        }
+    }
+
+    #[test]
+    fn execution_commands_keep_full_tokio_io_runtime() {
+        for args in [
+            argv(&["harn", "run", "script.harn"]),
+            argv(&["harn", "script.harn"]),
+            argv(&["harn", "serve", "a2a", "script.harn"]),
+            argv(&["harn", "test", "conformance"]),
+        ] {
+            let normalized = normalize_serve_args(args);
+            assert_eq!(cli_runtime_mode(&normalized), CliRuntimeMode::FullIo);
+        }
     }
 
     #[test]

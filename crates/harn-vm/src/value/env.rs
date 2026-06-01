@@ -58,13 +58,12 @@ impl VmClosure {
 /// `Scope::vars` is wrapped in `Arc` so that `VmEnv::clone()` is cheap
 /// (Arc bump per scope) instead of a deep walk of every BTreeMap. The
 /// VM saves and restores `env` snapshots on every function call, and
-/// the call hot path dominates orchestration-heavy workloads (e.g.
-/// burin-code's PreToolUse hooks). With `Arc<BTreeMap<..>>` the
-/// per-scope clone collapses to a refcount bump, and `Arc::make_mut`
-/// only does a deep copy when the scope is still shared
-/// with a saved snapshot — which is exactly the case where the caller
-/// would have needed an isolated copy anyway. Reads still go through
-/// the `BTreeMap` directly via `Deref`.
+/// the call hot path dominates orchestration-heavy workloads. With
+/// `Arc<BTreeMap<..>>`, the per-scope clone collapses to a refcount
+/// bump, and `Arc::make_mut` only does a deep copy when the scope is
+/// still shared with a saved snapshot — which is exactly the case where
+/// the caller would have needed an isolated copy anyway. Reads still go
+/// through the `BTreeMap` directly via `Deref`.
 #[derive(Debug, Clone)]
 pub struct VmEnv {
     pub(crate) scopes: Vec<Scope>,

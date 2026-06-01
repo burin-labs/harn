@@ -3,3 +3,9 @@ raw_message_count:6
 projection_events:true
 projection_policy:clean_tool_repair
 projection_safety_blocked:false
+gc_status:done
+gc_scratchpad_barrier:true
+gc_has_scratchpad_root:true
+gc_has_write_barrier:true
+gc_projected_reclaimed:true
+gc_live_preserved:true

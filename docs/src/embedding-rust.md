@@ -1,0 +1,158 @@
+# Embedding Harn in Rust
+
+`harn-serve` exposes the same ACP agent loop used by `harn serve acp` as a
+Rust API. Use it when a host application wants Harn in-process instead of
+spawning the CLI as a child process.
+
+## Add the crate
+
+Until Harn is published on crates.io, depend on the repository tag you ship
+against:
+
+```toml
+[dependencies]
+harn-serve = { git = "https://github.com/burin-labs/harn", tag = "v0.8.57" }
+serde_json = "1"
+tokio = { version = "1", features = ["rt", "sync"] }
+```
+
+Harn uses deep generated and macro-expanded types. Embedders should match the
+crate setting:
+
+```rust
+#![recursion_limit = "256"]
+```
+
+## Start an embedded agent
+
+`EmbeddedAgent` owns the required worker thread and current-thread Tokio
+runtime. It returns typed control handles plus the ACP JSON-RPC channels:
+
+```rust
+#![recursion_limit = "256"]
+
+use harn_serve::{
+    AcpJsonRpcRequest, AcpServerConfig, AcpSessionNewParams, EmbeddedAgent,
+};
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let mut agent = EmbeddedAgent::spawn(AcpServerConfig::new(None));
+    let requests = agent.requests();
+    let _responses = agent
+        .take_responses()
+        .expect("responses are single-consumer");
+
+    let request = AcpJsonRpcRequest::session_new(
+        1,
+        AcpSessionNewParams::cwd("."),
+    )
+    .into_json_value()?;
+    if requests.send(request).is_err() {
+        return Err(std::io::Error::other("ACP worker stopped").into());
+    }
+
+    agent.shutdown();
+    if agent.join().is_err() {
+        return Err(std::io::Error::other("ACP worker panicked").into());
+    }
+    Ok(())
+}
+```
+
+The ACP channel server is `!Send` because it owns a `LocalSet` and uses
+`spawn_local`. `EmbeddedAgent` keeps that detail out of the host: the server
+future is built and driven entirely on the dedicated worker thread, while the
+host keeps `Send` channels and an `AcpChannelHandle`.
+
+## Send typed ACP requests
+
+Use `AcpJsonRpcRequest` plus the request param structs instead of hand-building
+JSON:
+
+```rust
+use harn_serve::{
+    AcpContentBlock, AcpJsonRpcRequest, AcpSessionInjectMode,
+    AcpSessionInjectParams, AcpSessionPromptParams,
+};
+
+let prompt = AcpJsonRpcRequest::session_prompt(
+    2,
+    AcpSessionPromptParams::text("session-id", "Summarize this workspace."),
+)
+.into_json_value()
+.expect("prompt request serializes");
+
+let inject = AcpJsonRpcRequest::session_inject(
+    3,
+    AcpSessionInjectParams::new(
+        "session-id",
+        AcpSessionInjectMode::Steer,
+        vec![AcpContentBlock::text("Stop after the current tool call.")],
+    ),
+)
+.into_json_value()
+.expect("inject request serializes");
+```
+
+The typed helpers preserve ACP wire names such as `sessionId`, `messageId`, and
+`toolCallId`, so serialized values can be sent directly to `EmbeddedAgent`,
+stdio ACP, or ACP WebSocket.
+
+## Own the runtime yourself
+
+Use `run_acp_channel_server_with_handle` when the host already owns a dedicated
+thread and current-thread Tokio runtime:
+
+```rust
+use harn_serve::{run_acp_channel_server_with_handle, AcpServerConfig};
+use tokio::sync::mpsc;
+
+let (request_tx, request_rx) = mpsc::unbounded_channel();
+let (response_tx, response_rx) = mpsc::unbounded_channel();
+let (server, handle) =
+    run_acp_channel_server_with_handle(AcpServerConfig::new(None), request_rx, response_tx);
+
+let runtime = tokio::runtime::Builder::new_current_thread()
+    .enable_all()
+    .build()
+    .expect("start ACP runtime");
+let control = handle.clone();
+control.shutdown();
+runtime.block_on(server);
+```
+
+`AcpChannelHandle::wait_ready()` resolves once the loop can receive requests.
+`shutdown()` asks the loop to drain and stop, and `wait_terminated()` resolves
+after the loop exits.
+
+## Custom output sinks
+
+Advanced embedders that already run on a compatible runtime can drive
+`AcpServer` directly and provide their own output sink:
+
+```rust
+use harn_serve::{AcpOutput, AcpServer, AcpServerConfig};
+
+let output = AcpOutput::callback(|line| {
+    eprintln!("ACP -> host: {line}");
+});
+let mut server = AcpServer::new_with_output(AcpServerConfig::new(None), output);
+```
+
+For most applications, prefer `EmbeddedAgent`; it packages the worker-thread
+lifecycle and prevents accidentally moving the `!Send` server future across
+threads.
+
+## Host callback surface
+
+During `session/prompt`, Harn may call back into the host over ACP JSON-RPC.
+Hosts should be prepared to answer these methods:
+
+- `host/capabilities`
+- `host/call`
+- `session/request_permission`
+- filesystem and process methods advertised through `initialize`
+
+If a host does not support a capability, return an empty capability response or
+the relevant JSON-RPC error. Harn times host callbacks out so an unresponsive
+host cannot block a prompt forever.

@@ -15,6 +15,7 @@ use crate::event_log::{
 };
 use crate::runtime_limits::RuntimeLimits;
 use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
+use crate::stdlib::options::{duration_from_value, ErrorKind};
 use crate::triggers::dispatcher::{
     current_dispatch_context, current_dispatch_is_replay, DispatchContext,
 };
@@ -1145,14 +1146,7 @@ fn optional_string(dict: &BTreeMap<String, VmValue>, key: &str) -> Option<String
 }
 
 fn parse_duration_value(value: &VmValue) -> Result<StdDuration, VmError> {
-    match value {
-        VmValue::Duration(ms) if *ms >= 0 => Ok(StdDuration::from_millis(*ms as u64)),
-        VmValue::Int(ms) if *ms >= 0 => Ok(StdDuration::from_millis(*ms as u64)),
-        VmValue::Float(ms) if *ms >= 0.0 => Ok(StdDuration::from_millis(*ms as u64)),
-        _ => Err(VmError::Runtime(
-            "waitpoint.wait: expected a duration or millisecond count".to_string(),
-        )),
-    }
+    duration_from_value(value, "waitpoint.wait", "timeout", ErrorKind::Runtime)
 }
 
 fn waitpoint_suspend_error(wait_id: &str) -> VmError {

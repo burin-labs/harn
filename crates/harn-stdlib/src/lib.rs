@@ -1420,6 +1420,17 @@ mod tests {
         assert_eq!(resume.required_params, 1);
         assert_eq!(resume.total_params, 3);
 
+        let stop = exports
+            .iter()
+            .find(|function| function.name == "agent_stop")
+            .expect("std/agent/workers should export agent_stop");
+        assert_eq!(
+            stop.signature,
+            "agent_stop(worker, options: AgentStopOptions = nil)"
+        );
+        assert_eq!(stop.required_params, 1);
+        assert_eq!(stop.total_params, 2);
+
         let parse_resume = exports
             .iter()
             .find(|function| function.name == "parse_resume_conditions")

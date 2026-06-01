@@ -23,6 +23,7 @@ use crate::llm::vm_value_to_json;
 use crate::stdlib::macros::{
     harn_builtin, BuiltinSignature, Param, VmBuiltinDef, TY_ANY, TY_BOOL, TY_DICT, TY_LIST,
 };
+use crate::stdlib::options::{non_negative_millis_from_value, ErrorKind};
 use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
 
@@ -1630,20 +1631,21 @@ fn option_int(options: Option<&BTreeMap<String, VmValue>>, key: &str) -> Option<
         .and_then(|opts| opts.get(key))
         .and_then(|value| match value {
             VmValue::Int(number) => Some(*number),
-            VmValue::Float(number) => Some(*number as i64),
+            VmValue::Float(number)
+                if number.is_finite()
+                    && *number >= i64::MIN as f64
+                    && *number <= i64::MAX as f64 =>
+            {
+                Some(*number as i64)
+            }
             _ => None,
         })
 }
 
 fn option_duration_ms(options: Option<&BTreeMap<String, VmValue>>, key: &str) -> Option<u64> {
-    options
-        .and_then(|opts| opts.get(key))
-        .and_then(|value| match value {
-            VmValue::Duration(ms) if *ms >= 0 => Some(*ms as u64),
-            VmValue::Int(ms) if *ms >= 0 => Some(*ms as u64),
-            VmValue::Float(ms) if *ms >= 0.0 => Some(*ms as u64),
-            _ => None,
-        })
+    options.and_then(|opts| opts.get(key)).and_then(|value| {
+        non_negative_millis_from_value(value, "postgres", key, ErrorKind::Runtime).ok()
+    })
 }
 
 pub(super) fn next_id(prefix: &str) -> String {

@@ -114,7 +114,7 @@ __all__ = [
     "is_notification",
 ]
 
-HARN_PROTOCOL_ARTIFACT_VERSION: str = "0.8.58"
+HARN_PROTOCOL_ARTIFACT_VERSION: str = "0.8.59"
 HARN_AGENT_EVENT_METHOD: str = "_harn/agentEvent"
 HARN_PROVIDER_CATALOG_METHOD: str = "_harn/providerCatalog"
 ACP_SCHEMA_COMPATIBILITY: str = "agentclientprotocol/agent-client-protocol schema v0.12.2"
@@ -288,6 +288,7 @@ HARN_WORKER_STATUSES: tuple = (
     "suspended",
     "completed",
     "failed",
+    "stopped",
     "cancelled",
 )
 HARN_TOOL_CALL_RECEIPT_STATUSES: tuple = (
@@ -522,6 +523,7 @@ class HarnWorkerStatus(str, Enum):
     SUSPENDED = "suspended"
     COMPLETED = "completed"
     FAILED = "failed"
+    STOPPED = "stopped"
     CANCELLED = "cancelled"
 
 

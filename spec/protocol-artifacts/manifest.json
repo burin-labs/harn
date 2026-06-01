@@ -212,10 +212,11 @@
       "suspended",
       "completed",
       "failed",
+      "stopped",
       "cancelled"
     ]
   },
-  "artifactVersion": "0.8.58",
+  "artifactVersion": "0.8.59",
   "bindings": {
     "go": {
       "artifact": "go/harnprotocol/harnprotocol.go",

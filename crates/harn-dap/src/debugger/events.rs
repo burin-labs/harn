@@ -224,7 +224,9 @@ impl Debugger {
                         self.pending_pause = true;
                     }
                 }
-                WorkerEvent::WorkerCompleted | WorkerEvent::WorkerCancelled => {
+                WorkerEvent::WorkerCompleted
+                | WorkerEvent::WorkerStopped
+                | WorkerEvent::WorkerCancelled => {
                     self.subagent_tracker.mark_exited(&obs.worker_id);
                     let seq = self.next_seq();
                     out.push(DapResponse::event(
@@ -274,7 +276,10 @@ impl Debugger {
     pub(crate) fn flush_output_into(&mut self, responses: &mut Vec<DapResponse>) {
         let output = self.vm.as_ref().unwrap().output().to_string();
         if !output.is_empty() && output != self.output {
-            let new_output = output[self.output.len()..].to_string();
+            let new_output = output
+                .strip_prefix(&self.output)
+                .unwrap_or(&output)
+                .to_string();
             if !new_output.is_empty() {
                 let seq = self.next_seq();
                 responses.push(DapResponse::event(

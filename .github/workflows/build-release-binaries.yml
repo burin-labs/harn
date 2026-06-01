@@ -221,9 +221,13 @@ jobs:
     name: Build ${{ matrix.target }}
     needs: setup
     if: needs.setup.outputs.should_build_binaries == 'true'
-    runs-on: ${{ matrix.os }}
+    # Warm-cache-only runs stay on the cheaper standard runners. Release runs
+    # use larger macOS runners only for the two native Apple artifact legs:
+    # they are the long pole, and the v0.8.58 recovery showed standard macOS
+    # could burn the whole 90-minute build step before link/sign/package.
+    runs-on: ${{ needs.setup.outputs.is_release == 'true' && matrix.release_os || matrix.os }}
     # Avoid GitHub's multi-hour default timeout for release artifacts. Native
-    # macOS x86_64 is the slowest leg; if it cannot finish inside this budget,
+    # macOS is the slowest surface; if it cannot finish inside this budget,
     # fail loudly so the release queue does not burn hours silently.
     timeout-minutes: 150
     strategy:
@@ -235,14 +239,29 @@ jobs:
             # on arm64 `macos-latest` repeatedly left sccache/rustc orphaned and
             # pushed the build past 85 minutes.
             os: macos-15-intel
+            release_os: macos-15-large
+            release_codegen_units: 8
+            use_sccache: "false"
           - target: aarch64-apple-darwin
             os: macos-latest
+            release_os: macos-15-xlarge
+            release_codegen_units: 8
+            use_sccache: "false"
           - target: x86_64-unknown-linux-gnu
             os: ubuntu-latest
+            release_os: ubuntu-latest
+            release_codegen_units: 1
+            use_sccache: "true"
           - target: aarch64-unknown-linux-gnu
             os: ubuntu-latest
+            release_os: ubuntu-latest
+            release_codegen_units: 1
+            use_sccache: "true"
           - target: x86_64-pc-windows-msvc
             os: windows-latest
+            release_os: windows-latest
+            release_codegen_units: 1
+            use_sccache: "false"
 
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -254,20 +273,22 @@ jobs:
           toolchain: stable
 
       - uses: mozilla-actions/sccache-action@9e7fa8a12102821edf02ca5dbea1acd0f89a2696 # v0.0.10
-        if: matrix.target != 'x86_64-pc-windows-msvc'
+        if: matrix.use_sccache == 'true'
         # sccache is a build-cache optimization, not a build requirement. The
         # upstream action sometimes fails on merge_group / restricted-token
         # events with "Bad credentials" when api.github.com gates the release
         # lookup; a cold build is a fine fallback, but the job shouldn't fail.
         continue-on-error: true
 
-      # Skip sccache on Windows: the GHA cache backend repeatedly drops the
-      # connection during the long single-rustc-call harn-vm compile
-      # (`os error 10054`), so harn-vm grew past a reliability threshold on
-      # ghac for Windows runners. Local rustc + Swatinem/rust-cache still
-      # cover incremental warmth for repeat builds.
+      # Skip sccache on Windows and macOS. Windows has repeatedly dropped the
+      # GHA cache connection during the long single-rustc-call harn-vm compile
+      # (`os error 10054`). On macOS, v0.8.58 recovery logs showed the server
+      # shutting down unexpectedly and final stats with 0 useful compile
+      # requests on arm64 and only 2 non-cacheable requests on x86_64. Local
+      # rustc + Swatinem/rust-cache still cover incremental warmth for repeat
+      # builds without the wrapper process churn.
       - name: Configure Cargo to use sccache
-        if: matrix.target != 'x86_64-pc-windows-msvc' && env.SCCACHE_PATH != ''
+        if: matrix.use_sccache == 'true' && env.SCCACHE_PATH != ''
         shell: bash
         run: echo "RUSTC_WRAPPER=${SCCACHE_PATH}" >> "$GITHUB_ENV"
 
@@ -304,14 +325,17 @@ jobs:
 
       - name: Build
         timeout-minutes: 90
+        shell: bash
         env:
           CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
           # Scope the compile-time optimization tradeoff to release CI only.
           CARGO_PROFILE_RELEASE_LTO: thin
+          CARGO_PROFILE_RELEASE_CODEGEN_UNITS: ${{ matrix.release_codegen_units }}
           HARN_RELEASE_TARGET: ${{ matrix.target }}
           HARN_RELEASE_REF: ${{ needs.setup.outputs.ref }}
           HARN_RELEASE_VERSION: ${{ needs.setup.outputs.version }}
           HARN_RELEASE_IS_RELEASE: ${{ needs.setup.outputs.is_release }}
+          HARN_RELEASE_RUNNER_LABEL: ${{ needs.setup.outputs.is_release == 'true' && matrix.release_os || matrix.os }}
         run: |
           set -euo pipefail
           start=$SECONDS
@@ -324,12 +348,14 @@ jobs:
             echo "| --- | --- |"
             echo "| Target | $HARN_RELEASE_TARGET |"
             echo "| Runner | ${RUNNER_OS}-${RUNNER_ARCH} |"
+            echo "| Runner label | $HARN_RELEASE_RUNNER_LABEL |"
             echo "| Ref | $HARN_RELEASE_REF |"
             echo "| Version | $HARN_RELEASE_VERSION |"
             echo "| Release mode | $HARN_RELEASE_IS_RELEASE |"
             echo "| Duration | ${duration}s |"
             echo "| Rust wrapper | ${RUSTC_WRAPPER:-<none>} |"
             echo "| Release LTO | ${CARGO_PROFILE_RELEASE_LTO:-<unset>} |"
+            echo "| Release codegen units | ${CARGO_PROFILE_RELEASE_CODEGEN_UNITS:-<unset>} |"
           } >> "$GITHUB_STEP_SUMMARY"
 
       # Sign the three Mach-O binaries with the Developer ID Application

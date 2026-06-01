@@ -1,6 +1,9 @@
 import { agent_tool_format } from "std/agent/options"
 import { loop_until_done_system_prompt, render_agent_prompt_id } from "std/agent/prompts"
-import { agent_scratchpad_recitation_fragment } from "std/agent/scratchpad"
+import {
+  agent_scratchpad_options,
+  agent_scratchpad_recitation_fragment,
+} from "std/agent/scratchpad"
 import { agent_session_messages, agent_session_project_turn } from "std/agent/state"
 
 fn __agent_done_sentinel(opts) {
@@ -406,8 +409,38 @@ fn __agent_projection_options(opts) {
   throw "agent_loop: `transcript_projection` must be a string, dict, or nil; got " + type_of(raw)
 }
 
+fn __agent_reachability_projection(policy) {
+  return policy == "reachability_gc" || policy == "context_gc" || policy == "tool_result_gc"
+}
+
+fn __agent_projection_with_scratchpad_barrier(session_id, projection_opts, opts) {
+  let policy_label = projection_opts?.policy ?? "raw"
+  if !__agent_reachability_projection(policy_label) {
+    return projection_opts
+  }
+  let scratchpad_cfg = agent_scratchpad_options(opts)
+  if !scratchpad_cfg.enabled {
+    return projection_opts
+  }
+  let snapshot = agent_session_snapshot(session_id) ?? {}
+  let scratchpad = snapshot?.scratchpad
+  if scratchpad == nil {
+    return projection_opts
+  }
+  let version = snapshot?.scratchpad_version ?? 0
+  return projection_opts
+    + {
+    scratchpad: [projection_opts?.scratchpad, scratchpad],
+    write_barrier_refs: [
+      projection_opts?.write_barrier_refs,
+      projection_opts?.barrier_refs,
+      "agent_scratchpad:v" + to_string(version),
+    ],
+  }
+}
+
 fn __agent_apply_projection(session_id, messages, opts) {
-  let projection_opts = __agent_projection_options(opts)
+  var projection_opts = __agent_projection_options(opts)
   if projection_opts == nil {
     return messages
   }
@@ -415,6 +448,7 @@ fn __agent_apply_projection(session_id, messages, opts) {
   if policy_label == "raw" {
     return messages
   }
+  projection_opts = __agent_projection_with_scratchpad_barrier(session_id, projection_opts, opts)
   let projection = agent_session_project_turn(session_id, projection_opts)
   return projection?.messages ?? messages
 }

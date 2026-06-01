@@ -85,6 +85,21 @@ fn stdout_text(responses: &[DapResponse]) -> String {
 }
 
 #[test]
+fn flush_output_recovers_when_cached_output_is_not_a_prefix() {
+    let mut dbg = Debugger::new();
+    let mut vm = Vm::new();
+    vm.append_output("new\n");
+    dbg.vm = Some(vm);
+    dbg.output = "stale and longer".to_string();
+
+    let mut responses = Vec::new();
+    dbg.flush_output_into(&mut responses);
+
+    assert_eq!(stdout_text(&responses), "new\n");
+    assert_eq!(dbg.output, "new\n");
+}
+
+#[test]
 fn test_initialize() {
     let mut dbg = Debugger::new();
     let responses = dbg.handle_message(make_request(1, "initialize", None));
@@ -1766,6 +1781,37 @@ mod subagent_bridge {
         assert_eq!(events[0].body.as_ref().unwrap()["reason"], "exception");
         assert_eq!(events[1].event.as_deref(), Some("thread"));
         assert_eq!(events[1].body.as_ref().unwrap()["reason"], "exited");
+    }
+
+    #[test]
+    fn drain_terminal_worker_events_emit_thread_exited() {
+        for (event, status) in [
+            (WorkerEvent::WorkerCompleted, "completed"),
+            (WorkerEvent::WorkerStopped, "stopped"),
+            (WorkerEvent::WorkerCancelled, "cancelled"),
+        ] {
+            let mut dbg = Debugger::new();
+            dbg.subagent_tracker
+                .upsert_thread("w-1", "demo", None, "running");
+            {
+                let mut guard = dbg.subagent_tracker.inner_for_test();
+                guard
+                    .pending
+                    .push(super::super::subagents::SubagentObservation {
+                        worker_id: "w-1".to_string(),
+                        worker_name: "demo".to_string(),
+                        event,
+                        status: status.to_string(),
+                        parent_worker_id: None,
+                        suspend_reason: None,
+                        suspension: None,
+                    });
+            }
+            let events = dbg.drain_subagent_events();
+            assert_eq!(events.len(), 1, "{event:?} should emit one DAP event");
+            assert_eq!(events[0].event.as_deref(), Some("thread"));
+            assert_eq!(events[0].body.as_ref().unwrap()["reason"], "exited");
+        }
     }
 
     #[test]

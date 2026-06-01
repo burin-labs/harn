@@ -114,6 +114,23 @@ pub struct BeginAuthorization {
     pub scopes: Option<String>,
 }
 
+/// A legacy bearer/refresh token that a thin client found in an older
+/// surface-specific store. Discovery and canonical key selection still happen
+/// here so the imported token lands in the same Harn-owned store as a fresh
+/// [`begin_authorization`] / [`complete_authorization`] flow.
+#[derive(Clone, Debug)]
+pub struct ImportStoredToken {
+    pub server_url: String,
+    pub access_token: String,
+    pub refresh_token: Option<String>,
+    pub expires_at_unix: Option<i64>,
+    pub token_endpoint: Option<String>,
+    pub client_id: String,
+    pub client_secret: Option<String>,
+    pub token_endpoint_auth_method: Option<String>,
+    pub scopes: Option<String>,
+}
+
 /// The browser-facing result of [`begin_authorization`]: the URL to open and
 /// the `state` that the matching [`complete_authorization`] call must echo.
 #[derive(Clone, Debug, Serialize)]
@@ -278,9 +295,7 @@ pub async fn complete_authorization(
     let stored = StoredMcpToken {
         access_token: token.access_token,
         refresh_token: token.refresh_token,
-        expires_at_unix: token
-            .expires_in
-            .map(|seconds| current_unix_timestamp().saturating_add(seconds)),
+        expires_at_unix: expires_at_from_expires_in(token.expires_in)?,
         token_endpoint: flow.token_endpoint,
         client_id: flow.client_id,
         client_secret: flow.client_secret,
@@ -315,6 +330,14 @@ pub async fn resolve_bearer(server_url: &str) -> Result<Option<String>, String> 
         stored = refresh_stored_token_with_store(&store, &stored, &discovery, None).await?;
     }
     Ok(Some(stored.access_token))
+}
+
+/// Import an existing token into the canonical Harn MCP OAuth store.
+pub async fn import_stored_token(request: ImportStoredToken) -> Result<StoredMcpToken, String> {
+    let discovery = discover(&request.server_url).await?;
+    let stored = stored_token_for_import(&request, &discovery)?;
+    save_stored_token(&stored).await?;
+    Ok(stored)
 }
 
 /// Discover the OAuth authorization server protecting an MCP server URL.
@@ -450,8 +473,10 @@ async fn dynamic_client_registration(
     if !response.status().is_success() {
         let status = response.status();
         let body = response.text().await.unwrap_or_default();
-        return Err(format!(
-            "Dynamic client registration failed: {status} {body}"
+        return Err(oauth_http_error(
+            "Dynamic client registration failed",
+            status,
+            &body,
         ));
     }
     response
@@ -496,9 +521,7 @@ async fn refresh_token(
         refresh_token: refreshed
             .refresh_token
             .or_else(|| token.refresh_token.clone()),
-        expires_at_unix: refreshed
-            .expires_in
-            .map(|seconds| current_unix_timestamp().saturating_add(seconds)),
+        expires_at_unix: expires_at_from_expires_in(refreshed.expires_in)?,
         token_endpoint,
         client_id: token.client_id.clone(),
         client_secret: token.client_secret.clone(),
@@ -541,7 +564,7 @@ async fn request_token(
     if !response.status().is_success() {
         let status = response.status();
         let body = response.text().await.unwrap_or_default();
-        return Err(format!("Token request failed: {status} {body}"));
+        return Err(oauth_http_error("Token request failed", status, &body));
     }
     response
         .json::<TokenResponse>()
@@ -555,6 +578,27 @@ fn token_needs_refresh(token: &StoredMcpToken) -> bool {
             expires_at <= current_unix_timestamp().saturating_add(TOKEN_REFRESH_SKEW_SECS)
         }
         None => false,
+    }
+}
+
+fn expires_at_from_expires_in(expires_in: Option<i64>) -> Result<Option<i64>, String> {
+    let Some(seconds) = expires_in else {
+        return Ok(None);
+    };
+    if seconds < 0 {
+        return Err("Token response `expires_in` must be non-negative".to_string());
+    }
+    Ok(Some(current_unix_timestamp().saturating_add(seconds)))
+}
+
+fn oauth_http_error(context: &str, status: reqwest::StatusCode, body: &str) -> String {
+    if body.trim().is_empty() {
+        format!("{context}: {status}")
+    } else {
+        format!(
+            "{context}: {status} ({} byte response body omitted)",
+            body.len()
+        )
     }
 }
 
@@ -904,6 +948,86 @@ fn validate_token_store_binding(
     Ok(())
 }
 
+fn stored_token_for_import(
+    request: &ImportStoredToken,
+    discovery: &McpOAuthDiscovery,
+) -> Result<StoredMcpToken, String> {
+    let server_url = request.server_url.trim();
+    if server_url.is_empty() {
+        return Err("MCP token import requires server_url".to_string());
+    }
+    let access_token = request.access_token.trim();
+    if access_token.is_empty() {
+        return Err("MCP token import requires access_token".to_string());
+    }
+    let client_id = request.client_id.trim();
+    if client_id.is_empty() {
+        return Err("MCP token import requires client_id".to_string());
+    }
+
+    let resource = canonical_resource_indicator(server_url).map_err(|error| error.to_string())?;
+    let client_secret = request
+        .client_secret
+        .as_deref()
+        .map(str::trim)
+        .filter(|secret| !secret.is_empty())
+        .map(str::to_string);
+    let token_endpoint_auth_method = request
+        .token_endpoint_auth_method
+        .as_deref()
+        .map(str::trim)
+        .filter(|method| !method.is_empty())
+        .map(str::to_string)
+        .unwrap_or_else(|| {
+            if client_secret.is_some() {
+                "client_secret_post".to_string()
+            } else {
+                "none".to_string()
+            }
+        });
+    validate_token_endpoint_auth_method(&token_endpoint_auth_method)?;
+
+    if request
+        .expires_at_unix
+        .is_some_and(|expires_at| expires_at < 0)
+    {
+        return Err("MCP token import expires_at must be non-negative".to_string());
+    }
+
+    Ok(StoredMcpToken {
+        access_token: access_token.to_string(),
+        refresh_token: request
+            .refresh_token
+            .as_deref()
+            .filter(|token| !token.is_empty())
+            .map(str::to_string),
+        expires_at_unix: request.expires_at_unix,
+        token_endpoint: request
+            .token_endpoint
+            .as_deref()
+            .map(str::trim)
+            .filter(|endpoint| !endpoint.is_empty())
+            .map(str::to_string)
+            .unwrap_or_else(|| {
+                discovery
+                    .authorization_server_metadata
+                    .token_endpoint
+                    .clone()
+            }),
+        client_id: client_id.to_string(),
+        client_secret,
+        token_endpoint_auth_method,
+        issuer: discovery.authorization_server_issuer.clone(),
+        resource,
+        scopes: request
+            .scopes
+            .as_deref()
+            .map(str::trim)
+            .filter(|scopes| !scopes.is_empty())
+            .map(str::to_string),
+    })
+}
+
 // --- crypto/util -------------------------------------------------------------
 
 fn generate_pkce_pair() -> (String, String) {
@@ -982,6 +1106,107 @@ mod tests {
         assert!(!token_needs_refresh(&token));
         token.expires_at_unix = Some(current_unix_timestamp() + TOKEN_REFRESH_SKEW_SECS - 1);
         assert!(token_needs_refresh(&token));
+    }
+
+    #[test]
+    fn token_response_rejects_negative_expiry() {
+        let error = expires_at_from_expires_in(Some(-1)).unwrap_err();
+        assert!(error.contains("expires_in"), "{error}");
+    }
+
+    #[test]
+    fn oauth_http_error_omits_response_body() {
+        let error = oauth_http_error(
+            "Token request failed",
+            reqwest::StatusCode::BAD_REQUEST,
+            r#"{"access_token":"secret","error_description":"bad"}"#,
+        );
+        assert!(error.contains("400 Bad Request"), "{error}");
+        assert!(error.contains("response body omitted"), "{error}");
+        assert!(!error.contains("secret"), "{error}");
+        assert!(!error.contains("bad"), "{error}");
+    }
+
+    fn test_discovery() -> McpOAuthDiscovery {
+        McpOAuthDiscovery {
+            protected_resource_metadata_url: url::Url::parse(
+                "https://mcp.example/.well-known/oauth-protected-resource",
+            )
+            .unwrap(),
+            protected_resource_metadata: Default::default(),
+            authorization_server_issuer: "https://auth.example".to_string(),
+            authorization_server_metadata_url: url::Url::parse(
+                "https://auth.example/.well-known/oauth-authorization-server",
+            )
+            .unwrap(),
+            authorization_server_metadata_kind:
+                crate::mcp_auth::OAuthAuthorizationServerMetadataKind::OAuthAuthorizationServer,
+            authorization_server_metadata: OAuthAuthorizationServerMetadata {
+                issuer: "https://auth.example".to_string(),
+                authorization_endpoint: "https://auth.example/authorize".to_string(),
+                token_endpoint: "https://auth.example/token".to_string(),
+                registration_endpoint: None,
+                token_endpoint_auth_methods_supported: vec!["none".to_string()],
+                code_challenge_methods_supported: vec!["S256".to_string()],
+                scopes_supported: Vec::new(),
+                client_id_metadata_document_supported: false,
+                authorization_response_iss_parameter_supported: false,
+                extra: Default::default(),
+            },
+            challenge: None,
+            scopes: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn token_import_uses_discovery_binding_and_legacy_auth_defaults() {
+        let discovery = test_discovery();
+        let token = stored_token_for_import(
+            &ImportStoredToken {
+                server_url: "https://mcp.example/mcp".to_string(),
+                access_token: "access".to_string(),
+                refresh_token: Some("refresh".to_string()),
+                expires_at_unix: Some(123),
+                token_endpoint: Some("  ".to_string()),
+                client_id: "client".to_string(),
+                client_secret: Some(" secret ".to_string()),
+                token_endpoint_auth_method: Some(" client_secret_post ".to_string()),
+                scopes: Some(" read write ".to_string()),
+            },
+            &discovery,
+        )
+        .unwrap();
+
+        assert_eq!(token.issuer, "https://auth.example");
+        assert_eq!(token.resource, "https://mcp.example/mcp");
+        assert_eq!(token.token_endpoint, "https://auth.example/token");
+        assert_eq!(token.client_id, "client");
+        assert_eq!(token.client_secret.as_deref(), Some("secret"));
+        assert_eq!(token.token_endpoint_auth_method, "client_secret_post");
+        assert_eq!(token.refresh_token.as_deref(), Some("refresh"));
+        assert_eq!(token.expires_at_unix, Some(123));
+        assert_eq!(token.scopes.as_deref(), Some("read write"));
+    }
+
+    #[test]
+    fn token_import_rejects_negative_expiry() {
+        let discovery = test_discovery();
+        let error = stored_token_for_import(
+            &ImportStoredToken {
+                server_url: "https://mcp.example/mcp".to_string(),
+                access_token: "access".to_string(),
+                refresh_token: None,
+                expires_at_unix: Some(-1),
+                token_endpoint: None,
+                client_id: "client".to_string(),
+                client_secret: None,
+                token_endpoint_auth_method: None,
+                scopes: None,
+            },
+            &discovery,
+        )
+        .unwrap_err();
+        assert!(error.contains("expires_at"), "{error}");
     }
 
     #[tokio::test]

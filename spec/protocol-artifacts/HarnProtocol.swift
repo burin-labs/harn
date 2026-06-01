@@ -4,7 +4,7 @@
 import Foundation
 
 public enum HarnProtocolConstants {
-    public static let artifactVersion = "0.8.58"
+    public static let artifactVersion = "0.8.59"
     public static let acpSchemaCompatibility = "agentclientprotocol/agent-client-protocol schema v0.12.2"
     public static let harnAgentEventMethod = "_harn/agentEvent"
     public static let harnProviderCatalogMethod = "_harn/providerCatalog"
@@ -371,6 +371,7 @@ public enum HarnWorkerStatus: String, Codable, Sendable, CaseIterable {
     case suspended = "suspended"
     case completed = "completed"
     case failed = "failed"
+    case stopped = "stopped"
     case cancelled = "cancelled"
 
     public static let allCases: [Self] = [
@@ -380,6 +381,7 @@ public enum HarnWorkerStatus: String, Codable, Sendable, CaseIterable {
         "suspended",
         "completed",
         "failed",
+        "stopped",
         "cancelled",
     ].map { Self(rawValue: $0)! }
 }

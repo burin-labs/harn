@@ -355,7 +355,7 @@ fn __tool_surface_name(entry) {
   return entry?.name ?? entry?.function?.name ?? ""
 }
 
-fn __tool_surface_current_names(opts) {
+fn __tool_surface_current_entries(opts) {
   let registry = opts?.tools
   let entries = if type_of(registry) == "dict" {
     registry?.tools ?? []
@@ -364,12 +364,22 @@ fn __tool_surface_current_names(opts) {
   } else {
     []
   }
+  var selected = []
   var names = []
   for entry in entries {
     let name = __tool_surface_name(entry)
     if name != "" && !contains(names, name) {
       names = names.push(name)
+      selected = selected.push(entry)
     }
+  }
+  return selected
+}
+
+fn __tool_surface_current_names(opts) {
+  var names = []
+  for entry in __tool_surface_current_entries(opts) {
+    names = names.push(__tool_surface_name(entry))
   }
   return names
 }
@@ -415,14 +425,169 @@ fn __tool_surface_window_used(history) {
   return used
 }
 
-fn __tool_surface_removed(candidates, used, hard_keep) {
+fn __tool_surface_annotations(entry) {
+  let direct = entry?.annotations
+  if type_of(direct) == "dict" {
+    return direct
+  }
+  let func = entry?.function
+  if type_of(func) == "dict" && type_of(func?.annotations) == "dict" {
+    return func.annotations
+  }
+  return {}
+}
+
+fn __tool_surface_text(value) {
+  if value == nil {
+    return ""
+  }
+  return lowercase(trim(to_string(value)))
+}
+
+fn __tool_surface_enabled(value) {
+  return type_of(value) == "bool" && value
+}
+
+fn __tool_surface_entry_class(entry) {
+  let annotations = __tool_surface_annotations(entry)
+  let side_effect = __tool_surface_text(
+    annotations?.side_effect_level ?? annotations?.sideEffectLevel ?? annotations?.side_effect
+      ?? annotations?.sideEffect,
+  )
+  let kind = __tool_surface_text(annotations?.kind ?? annotations?.tool_kind ?? annotations?.toolKind)
+  let name = __tool_surface_text(__tool_surface_name(entry))
+  if __tool_surface_enabled(annotations?.agent_lifecycle)
+    || __tool_surface_enabled(annotations?.structural)
+    || contains(["session_control", "lifecycle", "suspend", "resume"], kind)
+    || contains(
+    ["load_skill", "agent_await_resumption", "subagent_pause", "subagent_resume", "wait_for_user"],
+    name,
+  ) {
+    return "session_control"
+  }
+  if __tool_surface_enabled(annotations?.approval)
+    || __tool_surface_enabled(annotations?.requires_approval)
+    || contains(["approval", "human_gate"], kind) {
+    return "approval"
+  }
+  if __tool_surface_enabled(annotations?.progress) || kind == "progress" {
+    return "progress"
+  }
+  if __tool_surface_enabled(annotations?.result_reader)
+    || __tool_surface_enabled(annotations?.result_polling)
+    || kind == "result_polling"
+    || starts_with(name, "read_command_output") {
+    return "result_polling"
+  }
+  if side_effect != "" && side_effect != "none" && side_effect != "read_only" && side_effect != "read" {
+    return "mutating"
+  }
+  if contains(
+    [
+      "edit",
+      "write",
+      "execute",
+      "run",
+      "command",
+      "scaffold",
+      "delete",
+      "mutation",
+      "mutate",
+      "network",
+    ],
+    kind,
+  ) {
+    return "mutating"
+  }
+  if side_effect == "none" || side_effect == "read_only" || side_effect == "read" {
+    return "read_only"
+  }
+  if contains(["read", "search", "fetch", "think", "lookup", "inspect"], kind) {
+    return "read_only"
+  }
+  if __tool_surface_enabled(annotations?.readOnlyHint)
+    && !__tool_surface_enabled(annotations?.destructiveHint) {
+    return "read_only"
+  }
+  return "unknown"
+}
+
+fn __tool_surface_entry_detail(entry, class, reason) {
+  let annotations = __tool_surface_annotations(entry)
+  return {
+    name: __tool_surface_name(entry),
+    class: class,
+    kind: __tool_surface_text(annotations?.kind ?? annotations?.tool_kind ?? annotations?.toolKind),
+    side_effect_level: __tool_surface_text(
+      annotations?.side_effect_level ?? annotations?.sideEffectLevel ?? annotations?.side_effect
+        ?? annotations?.sideEffect,
+    ),
+    reason: reason,
+  }
+}
+
+fn __tool_surface_entry_prunable(entry, config) {
+  let class = __tool_surface_entry_class(entry)
+  let keep_classes = config?.keep_classes ?? []
+  if contains(keep_classes, class) {
+    return false
+  }
+  if class == "unknown" {
+    let unknown_tool_policy = config?.unknown_tool_policy ?? "keep"
+    return unknown_tool_policy == "prune"
+  }
+  let mode = config?.mode ?? "safe"
+  if mode == "aggressive" {
+    return true
+  }
+  return contains(config?.prune_classes ?? ["read_only"], class)
+}
+
+fn __tool_surface_removed(candidates, used, config) {
+  let hard_keep = config?.hard_keep ?? []
   var removed = []
-  for name in candidates {
-    if !contains(used, name) && !contains(hard_keep, name) {
-      removed = removed.push(name)
+  for entry in candidates {
+    let name = __tool_surface_name(entry)
+    if name == "" || contains(used, name) || contains(hard_keep, name) {
+      continue
+    }
+    let class = __tool_surface_entry_class(entry)
+    if __tool_surface_entry_prunable(entry, config) {
+      removed = removed.push(__tool_surface_entry_detail(entry, class, "unused_prunable_class"))
     }
   }
   return removed
+}
+
+fn __tool_surface_removed_names(details) {
+  var names = []
+  for detail in details {
+    let name = detail?.name ?? ""
+    if name != "" && !contains(names, name) {
+      names = names.push(name)
+    }
+  }
+  return names
+}
+
+fn __tool_surface_keep_details(candidates, removed, used, hard_keep) {
+  var details = []
+  for entry in candidates {
+    let name = __tool_surface_name(entry)
+    if name == "" || contains(removed, name) {
+      continue
+    }
+    let class = __tool_surface_entry_class(entry)
+    let reason = if contains(used, name) {
+      "used_in_window"
+    } else if contains(hard_keep, name) {
+      "hard_keep"
+    } else {
+      "class_kept"
+    }
+    details = details.push(__tool_surface_entry_detail(entry, class, reason))
+  }
+  return details
 }
 
 fn __tool_surface_remaining(candidates, removed) {
@@ -443,22 +608,39 @@ fn __tool_surface_narrowing_post_turn(session, llm_result, dispatch_results, opt
   let window_turns = config?.window_turns ?? 5
   let attempted = __tool_surface_attempted_names(llm_result, dispatch_results)
   let history = __tool_surface_append_history(opts?._tool_surface_narrowing_history ?? [], attempted, window_turns)
+  let candidate_entries = __tool_surface_current_entries(opts)
   let candidates = __tool_surface_current_names(opts)
   if len(candidates) == 0 || len(history) < window_turns {
     return {history: history, narrowed_tools: opts?._tool_surface_narrowed_tools, changed: false}
   }
   let used = __tool_surface_window_used(history)
   let hard_keep = config?.hard_keep ?? []
-  let removed = __tool_surface_removed(candidates, used, hard_keep)
+  let removed_details = __tool_surface_removed(candidate_entries, used, config)
+  let removed = __tool_surface_removed_names(removed_details)
   if len(removed) == 0 {
     return {history: history, narrowed_tools: opts?._tool_surface_narrowed_tools, changed: false}
   }
   let remaining = __tool_surface_remaining(candidates, removed)
+  let kept_details = __tool_surface_keep_details(candidate_entries, removed, used, hard_keep)
   let reason = "unused across last " + to_string(window_turns) + " turns"
   agent_session_record_skill_event(
     session.session_id,
     "skill_narrow",
-    {reason: reason, removed_tools: removed, remaining_tools: remaining, window_turns: window_turns},
+    {
+      reason: reason,
+      removed_tools: removed,
+      remaining_tools: remaining,
+      window_turns: window_turns,
+      policy: {
+        mode: config?.mode ?? "safe",
+        prune_classes: config?.prune_classes ?? ["read_only"],
+        keep_classes: config?.keep_classes ?? [],
+        unknown_tool_policy: config?.unknown_tool_policy ?? "keep",
+        hard_keep: hard_keep,
+      },
+      removed_tool_details: removed_details,
+      kept_tool_details: kept_details,
+    },
   )
   return {
     history: history,
@@ -466,6 +648,8 @@ fn __tool_surface_narrowing_post_turn(session, llm_result, dispatch_results, opt
     changed: true,
     removed_tools: removed,
     remaining_tools: remaining,
+    removed_tool_details: removed_details,
+    kept_tool_details: kept_details,
     reason: reason,
   }
 }

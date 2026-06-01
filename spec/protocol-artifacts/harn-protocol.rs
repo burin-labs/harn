@@ -11,7 +11,7 @@
 #![allow(dead_code)]
 
 /// Harn release that generated this binding.
-pub const HARN_PROTOCOL_ARTIFACT_VERSION: &str = "0.8.58";
+pub const HARN_PROTOCOL_ARTIFACT_VERSION: &str = "0.8.59";
 
 /// Upstream ACP schema version Harn tracks.
 pub const ACP_SCHEMA_COMPATIBILITY: &str = "agentclientprotocol/agent-client-protocol schema v0.12.2";
@@ -100,6 +100,8 @@ pub const ACP_DISPATCHED_METHOD_MCP_AUTHORIZE: &str = "mcp/authorize";
 pub const ACP_DISPATCHED_METHOD_HARN_MCP_AUTHORIZE: &str = "harn.mcp.authorize";
 pub const ACP_DISPATCHED_METHOD_MCP_OAUTH_CALLBACK: &str = "mcp/oauth_callback";
 pub const ACP_DISPATCHED_METHOD_HARN_MCP_OAUTH_CALLBACK: &str = "harn.mcp.oauth_callback";
+pub const ACP_DISPATCHED_METHOD_MCP_IMPORT_TOKEN: &str = "mcp/import_token";
+pub const ACP_DISPATCHED_METHOD_HARN_MCP_IMPORT_TOKEN: &str = "harn.mcp.import_token";
 
 /// Every JSON-RPC method the ACP adapter actually dispatches, including the workspace-management, workflow-control, and HITL methods the stable bindings do not yet expose as typed enums. Reconciled against the `match` arms in `harn-serve`'s ACP adapter.
 pub const ACP_DISPATCHED_METHODS: &[&str] = &[
@@ -146,6 +148,8 @@ pub const ACP_DISPATCHED_METHODS: &[&str] = &[
     "harn.mcp.authorize",
     "mcp/oauth_callback",
     "harn.mcp.oauth_callback",
+    "mcp/import_token",
+    "harn.mcp.import_token",
 ];
 
 pub const ACP_CLIENT_METHOD_FS_READ_TEXT_FILE: &str = "fs/read_text_file";

@@ -1633,7 +1633,9 @@ prompt. It keeps tool-call metadata and emits `redacted_indices`,
 transcript/audit content stays available by pointer. Useful options:
 `root_window`, `min_chars`, `roots`, `active_plan`, `scratchpad`,
 `pending_tool_args`, `unresolved_findings`, `write_barrier_refs`, and
-`require_write_barrier`.
+`require_write_barrier`. In `agent_loop`, enabling both `scratchpad` and a
+reachability-GC projection automatically supplies the current scratchpad as a
+root plus a scratchpad-version write barrier for that turn.
 
 ## Reminders
 
@@ -1964,22 +1966,23 @@ a `PermissionRequest` dict and return `false`, `true`, `{grant: "once"}`, or
 `{grant: "session"}`. Child agents still intersect with the parent capability
 policy; escalation cannot widen a parent ceiling.
 
-### Agent lifecycle: pause, resume, self-park
+### Agent lifecycle: pause, resume, stop, self-park
 
-`spawn_agent`, `wait_agent`, `resume_agent`, `suspend_agent`, and
+`spawn_agent`, `wait_agent`, `resume_agent`, `suspend_agent`, `agent_stop`, and
 `list_agents` from `std/agent/workers` are the script-level lifecycle
 surface for delegated work. Layered on top, `agent_loop(...)` exposes a
 model-facing **lifecycle tool** so the agent can park itself between turns
-and so a parent loop can pause/resume children. Full reference:
+and so a parent loop can pause/resume/stop children. Full reference:
 `docs/src/agent-lifecycle.md`.
 
-Three model-facing tools:
+Four model-facing tools:
 
 | Tool | Use |
 |---|---|
 | `agent_await_resumption(reason, conditions?)` | The current worker self-parks. Registered automatically by `agent_loop(...)`. |
 | `subagent_pause(handle, reason)` | Parent loop pauses a running child after its current turn settles. Opt-in via `subagents: true`. |
 | `subagent_resume(handle, input?, continue_transcript? = true)` | Parent loop resumes a suspended child. Opt-in via `subagents: true`. |
+| `subagent_stop(handle, graceful? = true, reason?)` | Parent loop stops a child. Graceful mode returns a recursive typed handoff summary; `graceful: false` hard-cancels. Opt-in via `subagents: true`. |
 
 When the model calls `agent_await_resumption(...)` inside an `agent_loop`
 running as a worker, the call is intercepted *before* normal tool dispatch:
@@ -2076,6 +2079,10 @@ Common gotchas:
   retry against the now-running handle.
 - **Closing a suspended worker is terminal** — a later `resume_agent`
   raises `HARN-SUS-010`.
+- **Graceful stop hands work back.** `agent_stop(handle, {graceful: true})`
+  returns `{status: "stopped", handoff, children, handoffs, worker}`. Use
+  hard cancel (`graceful: false` or `close_agent`) when no takeover summary is
+  needed.
 
 Diagnostic codes for the suspend/resume namespace are `HARN-SUS-001..010`
 — see `docs/src/agent-lifecycle.md#diagnostic-codes` for the full table.
