@@ -1,0 +1,11 @@
+// Destructured bindings infer the same type as the `?.`/`??` form they
+// desugar to. `count` here is `int` (carried through from the `= 0` default,
+// exactly like `opts?.count ?? 0`), so assigning it to a `string` is a type
+// error. Before typed destructuring the binding was untyped and this slipped
+// through unchecked.
+pipeline default() {
+  let opts = {}
+  let { count = 0 } = opts
+  let bad: string = count
+  __io_println(bad)
+}

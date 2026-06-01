@@ -15,6 +15,8 @@ For deeper topics that need their own pages, see:
 - [OAuth client + provider cookbook](./oauth.md) — connector OAuth
 - [Structured refactorings cookbook](./cookbooks/structured-refactorings.md) —
   extract function, change signature across callers, and friends
+- [Destructure with defaults cookbook](./cookbooks/destructure-with-defaults.md) —
+  collapse `input?.x ?? default` blocks into a single destructuring bind
 - [Extending the CLI in `.harn`](./cli-extending-in-harn.md) — add or
   port a `harn` subcommand without writing Rust
 
