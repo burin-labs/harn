@@ -91,8 +91,14 @@ fn run_harn_with_inline_cache_entries(source: &str) -> (Vec<InlineCacheEntry>, S
 
                 let mut vm = Vm::new();
                 register_vm_stdlib(&mut vm);
+                vm.set_harness(crate::Harness::real());
                 let result = vm.execute(&chunk).await.unwrap();
-                let inline_cache_entries = vm.inline_cache_entries_for_chunk(&chunk);
+                let mut inline_cache_entries = vm.inline_cache_entries_for_chunk(&chunk);
+                for (cache_id, entries) in &vm.inline_caches {
+                    if *cache_id != chunk.cache_id() {
+                        inline_cache_entries.extend(entries.clone());
+                    }
+                }
                 (inline_cache_entries, vm.output().to_string(), result)
             })
             .await
@@ -736,6 +742,57 @@ log(total)
         MethodCacheTarget::RangeFirst,
         MethodCacheTarget::SetCount,
         MethodCacheTarget::SetContains,
+    ] {
+        assert!(
+            entries.iter().any(|entry| matches!(
+                entry,
+                InlineCacheEntry::Method {
+                    target: cached_target,
+                    ..
+                } if *cached_target == target
+            )),
+            "missing {target:?} in {entries:?}"
+        );
+    }
+}
+
+#[test]
+fn test_inline_cache_warms_harness_property_and_method_sites() {
+    let (entries, out, result) = run_harn_with_inline_cache_entries(
+        r#"fn main(harness: Harness) {
+  var i = 0
+  var hits = 0
+  while i < 3 {
+    if harness.env.get_or("__HARN_TEST_MISSING__", "fallback") == "fallback" {
+      hits = hits + 1
+    }
+    let _ = harness.clock.monotonic_ms()
+    i = i + 1
+  }
+  return hits
+}"#,
+    );
+
+    assert_eq!(out.trim_end(), "");
+    assert!(matches!(result, VmValue::Int(3)));
+    for target in [
+        PropertyCacheTarget::HarnessSubHandle(crate::HarnessKind::Env),
+        PropertyCacheTarget::HarnessSubHandle(crate::HarnessKind::Clock),
+    ] {
+        assert!(
+            entries.iter().any(|entry| matches!(
+                entry,
+                InlineCacheEntry::Property {
+                    target: cached_target,
+                    ..
+                } if *cached_target == target
+            )),
+            "missing {target:?} in {entries:?}"
+        );
+    }
+    for target in [
+        MethodCacheTarget::Harness(crate::HarnessKind::Env),
+        MethodCacheTarget::Harness(crate::HarnessKind::Clock),
     ] {
         assert!(
             entries.iter().any(|entry| matches!(

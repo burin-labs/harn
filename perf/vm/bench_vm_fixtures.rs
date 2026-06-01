@@ -15,6 +15,8 @@ const FIXTURES: &[&str] = &[
     "dict_subscript_assign.harn",
     "filter_nil_loop.harn",
     "function_call_loop.harn",
+    "harness_chained_dispatch.harn",
+    "harness_prebound_dispatch.harn",
     "list_iteration.harn",
     "list_map_filter.harn",
     "local_variable_lookup.harn",
@@ -54,6 +56,7 @@ fn setup_vm(fixture: &Fixture) -> harn_vm::Vm {
     harn_vm::reset_thread_local_state();
     let mut vm = harn_vm::Vm::new();
     harn_vm::register_vm_stdlib(&mut vm);
+    vm.set_harness(harn_vm::Harness::real());
     vm.set_source_info(&fixture.path.to_string_lossy(), &fixture.source);
     if let Some(parent) = fixture.path.parent() {
         vm.set_source_dir(parent);

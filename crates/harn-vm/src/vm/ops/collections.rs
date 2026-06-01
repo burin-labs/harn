@@ -124,6 +124,9 @@ impl super::super::Vm {
             (PropertyCacheTarget::EnumFields, VmValue::EnumVariant(enum_variant)) => {
                 Some(VmValue::List(Arc::clone(&enum_variant.fields)))
             }
+            (PropertyCacheTarget::HarnessSubHandle(kind), VmValue::Harness(handle)) => {
+                handle.sub_handle_kind(*kind).map(VmValue::harness)
+            }
             _ => None,
         }
     }
@@ -161,6 +164,11 @@ impl super::super::Vm {
                 "fields" => Some(PropertyCacheTarget::EnumFields),
                 _ => None,
             },
+            VmValue::Harness(handle) if handle.kind() == crate::harness::HarnessKind::Root => {
+                crate::harness::HarnessKind::from_field_name(name)
+                    .map(PropertyCacheTarget::HarnessSubHandle)
+            }
+            VmValue::Harness(_) => None,
             _ => None,
         }
     }

@@ -1,0 +1,14 @@
+fn main(harness: Harness) {
+  let env = harness.env
+  let clock = harness.clock
+  var i = 0
+  var hits = 0
+  while i < 25000 {
+    if env.get_or("__HARN_VM_BENCH_MISSING__", "fallback") == "fallback" {
+      hits = hits + 1
+    }
+    let _ = clock.monotonic_ms()
+    i = i + 1
+  }
+  return hits
+}
