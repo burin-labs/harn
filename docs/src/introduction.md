@@ -1,7 +1,7 @@
 <!-- markdownlint-disable MD013 MD033 MD041 -->
 <div class="harn-hero">
 
-# Harn
+<h1 class="harn-hero-title">Harn</h1>
 
 <p class="tagline">A pipeline-oriented language for AI agent orchestration. LLM calls, tool use, concurrency, retries, and replay are built into the runtime.</p>
 
@@ -124,7 +124,7 @@ Read the [Concepts](./concepts/index.md) section: how `llm_call`, `agent_loop`, 
 
 ### Coming from elsewhere
 
-If you're arriving from LangGraph, OpenAI Agents SDK, Anthropic Agent SDK, Inngest, or Mastra, the [terminology cross-reference](./concepts/sota-comparison.md) is the fastest map.
+If you're arriving from agent SDKs or orchestrators like LangGraph, Inngest, or Mastra, use the [terminology reference](./concepts/sota-comparison.md) to get up to speed.
 
 </div>
 

@@ -3,6 +3,11 @@
  * Layered on top of the mdbook base themes (light / rust / navy / coal / ayu).
  * Adds Harn brand color, typography, and code-block polish; intentionally
  * conservative so existing pages remain readable across all five themes.
+ *
+ * NOTE ON UNITS: mdBook sets `html { font-size: 62.5% }`, so `1rem == 10px`
+ * and the base body text is `1.6rem == 16px`. Every font-size below is on
+ * that 10px scale. (An earlier version of this file used `1rem`-as-16px
+ * values, which rendered the whole site at ~62.5% of the intended size.)
  */
 
 :root {
@@ -24,6 +29,11 @@
 
   --harn-shadow-soft: 0 1px 2px rgba(26, 21, 48, 0.06),
     0 4px 12px rgba(26, 21, 48, 0.04);
+
+  /* Widen the default 750px column so the rich landing page and reference
+   * tables make better use of horizontal space on desktop. Loaded after
+   * variables.css, so this wins. */
+  --content-max-width: 1000px;
 }
 
 /* ---------- Typography ---------- */
@@ -53,30 +63,30 @@ body,
 }
 
 .content h1 {
-  font-size: 2.25rem;
+  font-size: 3.6rem;
   margin-top: 0;
   padding-bottom: 0.3em;
   border-bottom: 1px solid var(--sidebar-bg, rgba(0, 0, 0, 0.08));
 }
 
 .content h2 {
-  font-size: 1.6rem;
+  font-size: 2.6rem;
   margin-top: 2.5rem;
 }
 
 .content h3 {
-  font-size: 1.25rem;
+  font-size: 2rem;
   margin-top: 2rem;
 }
 
 .content h4 {
-  font-size: 1.05rem;
+  font-size: 1.7rem;
   margin-top: 1.6rem;
 }
 
 .content p,
 .content li {
-  font-size: 1rem;
+  font-size: 1.6rem;
 }
 
 .content a {
@@ -107,7 +117,7 @@ code {
 pre {
   border-radius: var(--harn-radius);
   padding: 1rem 1.1rem;
-  font-size: 0.88rem;
+  font-size: 1.4rem;
   line-height: 1.55;
   overflow-x: auto;
 }
@@ -131,7 +141,7 @@ pre > code.language-harn {
 /* ---------- Tables ---------- */
 
 .content table {
-  font-size: 0.95rem;
+  font-size: 1.5rem;
   border-collapse: collapse;
   margin: 1.2rem 0;
   width: 100%;
@@ -176,13 +186,13 @@ pre > code.language-harn {
 }
 
 .chapter li.chapter-item {
-  font-size: 0.9rem;
+  font-size: 1.45rem;
   line-height: 1.45;
   padding: 0.18em 0;
 }
 
 .chapter li.part-title {
-  font-size: 0.7rem;
+  font-size: 1.15rem;
   font-weight: 700;
   letter-spacing: 0;
   color: var(--harn-violet);
@@ -224,7 +234,7 @@ pre > code.language-harn {
   padding: 0 0.55rem;
   border-radius: var(--harn-radius-sm);
   color: inherit;
-  font-size: 0.86rem;
+  font-size: 1.4rem;
   font-weight: 600;
   text-decoration: none;
   white-space: nowrap;
@@ -259,7 +269,7 @@ pre > code.language-harn {
 
 .harn-hero {
   margin: 0 0 2.5rem 0;
-  padding: 2.4rem 2rem 2rem 2rem;
+  padding: 2.8rem 2.4rem 2.4rem 2.4rem;
   border-radius: 12px;
   background: linear-gradient(
     135deg,
@@ -270,32 +280,77 @@ pre > code.language-harn {
   box-shadow: var(--harn-shadow-soft);
 }
 
-.harn-hero h1 {
-  color: white;
+/* mdBook colors heading anchors with `.header:link { color: var(--fg) }`
+ * (specificity 0,2,0), which beats `.harn-hero h1`/`.harn-hero a` and turned
+ * the title near-black on the violet hero. Target the anchor at higher
+ * specificity to force it white. */
+.harn-hero h1,
+.harn-hero h1 a,
+.harn-hero h1 a.header,
+.harn-hero .header:link,
+.harn-hero .header:visited {
+  color: #ffffff;
   border-bottom: none;
+}
+
+.harn-hero h1 {
   margin: 0 0 0.4em 0;
-  font-size: 2.6rem;
-  letter-spacing: 0;
+  font-size: 4.2rem;
+  letter-spacing: -0.01em;
   font-weight: 700;
 }
 
 .harn-hero p.tagline {
   color: rgba(255, 255, 255, 0.92);
-  font-size: 1.15rem;
+  font-size: 1.85rem;
   margin: 0 0 1.4rem 0;
-  max-width: 56ch;
+  max-width: 60ch;
   line-height: 1.5;
 }
 
-.harn-hero pre {
-  background: rgba(0, 0, 0, 0.25);
-  border: 1px solid rgba(255, 255, 255, 0.15);
-  color: #f3f1ff;
-  margin: 0;
+/* Polished dark code card. The default highlight.js light palette is
+ * unreadable on the violet hero, so pin a dark background and a curated
+ * light-on-dark token palette here. */
+.harn-hero pre,
+.harn-hero pre > code,
+.harn-hero pre > code.hljs {
+  background: rgba(13, 10, 30, 0.78);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  color: #e9e6ff;
 }
 
-.harn-hero pre code {
-  color: #f3f1ff;
+.harn-hero pre > code.language-harn {
+  border-left: none;
+  margin-left: 0;
+  padding-left: 0;
+}
+
+.harn-hero pre .hljs-keyword,
+.harn-hero pre .hljs-meta {
+  color: #c9bcff;
+}
+
+.harn-hero pre .hljs-string,
+.harn-hero pre .hljs-regexp {
+  color: #9be7a4;
+}
+
+.harn-hero pre .hljs-built_in,
+.harn-hero pre .hljs-title,
+.harn-hero pre .hljs-title.function_,
+.harn-hero pre .hljs-section {
+  color: #8fd2ff;
+}
+
+.harn-hero pre .hljs-number,
+.harn-hero pre .hljs-literal,
+.harn-hero pre .hljs-symbol {
+  color: #ffc08a;
+}
+
+.harn-hero pre .hljs-comment,
+.harn-hero pre .hljs-punctuation {
+  color: #9a92c0;
 }
 
 .harn-hero a {
@@ -317,10 +372,10 @@ pre > code.language-harn {
 
 .harn-cta {
   display: inline-block;
-  padding: 0.55rem 1.05rem;
+  padding: 0.7rem 1.3rem;
   border-radius: var(--harn-radius);
   font-weight: 600;
-  font-size: 0.95rem;
+  font-size: 1.5rem;
   text-decoration: none !important;
   transition: transform 80ms ease, background 80ms ease;
 }
@@ -349,7 +404,7 @@ pre > code.language-harn {
 
 .harn-feature-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
   gap: 1rem;
   margin: 1.8rem 0 2.4rem 0;
 }
@@ -369,13 +424,13 @@ pre > code.language-harn {
 
 .harn-feature h3 {
   margin: 0 0 0.4rem 0;
-  font-size: 1rem;
+  font-size: 1.6rem;
   color: var(--harn-violet-dark);
 }
 
 .harn-feature p {
   margin: 0;
-  font-size: 0.9rem;
+  font-size: 1.45rem;
   line-height: 1.5;
 }
 
@@ -383,7 +438,7 @@ pre > code.language-harn {
 
 .harn-paths {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
   gap: 0.9rem;
   margin: 1.6rem 0 2rem 0;
 }
@@ -402,12 +457,12 @@ pre > code.language-harn {
 
 .harn-path-card h3 {
   margin: 0 0 0.35rem 0;
-  font-size: 0.98rem;
+  font-size: 1.55rem;
 }
 
 .harn-path-card p {
   margin: 0;
-  font-size: 0.88rem;
+  font-size: 1.4rem;
   color: inherit;
   opacity: 0.85;
 }
@@ -475,22 +530,22 @@ pre > code.language-harn {
   }
 
   .harn-section-nav a {
-    font-size: 0.8rem;
+    font-size: 1.3rem;
   }
 
   .harn-hero {
-    padding: 1.8rem 1.2rem;
+    padding: 1.8rem 1.4rem;
   }
 
   .harn-hero h1 {
-    font-size: 2rem;
+    font-size: 3.2rem;
   }
 
   .content h1 {
-    font-size: 1.75rem;
+    font-size: 2.8rem;
   }
 
   .content h2 {
-    font-size: 1.35rem;
+    font-size: 2.2rem;
   }
 }
