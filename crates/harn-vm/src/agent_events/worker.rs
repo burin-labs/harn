@@ -16,7 +16,7 @@ pub struct FsWatchEvent {
 /// from these variants, but the runtime no longer passes raw status
 /// strings around internally.
 ///
-/// `Spawned`/`Completed`/`Failed`/`Cancelled` are the four terminal-or-start
+/// `Spawned`/`Completed`/`Failed`/`Stopped`/`Cancelled` are the terminal-or-start
 /// states. `Progressed` is fired on intermediate milestones (e.g. a
 /// retriggerable worker resuming from `awaiting_input`, or a workflow
 /// stage completing without ending the worker). `WaitingForInput` covers
@@ -24,7 +24,7 @@ pub struct FsWatchEvent {
 /// next host-supplied trigger payload. `Suspended`/`Resumed` cover
 /// cooperative mid-loop pause and warm resume (harn#1836); the
 /// `agent_loop` honors the pause signal at the next turn boundary,
-/// distinct from a hard `Cancelled` interrupt.
+/// distinct from a graceful `Stopped` handoff or hard `Cancelled` interrupt.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash, Serialize, Deserialize)]
 pub enum WorkerEvent {
     WorkerSpawned,
@@ -34,6 +34,7 @@ pub enum WorkerEvent {
     WorkerResumed,
     WorkerCompleted,
     WorkerFailed,
+    WorkerStopped,
     WorkerCancelled,
 }
 
@@ -42,7 +43,7 @@ impl WorkerEvent {
     /// the pattern used by `ToolCallStatus::ALL` so the protocol-artifact
     /// dumper can enumerate worker status wire values without
     /// special-casing each lifecycle event.
-    pub const ALL: [Self; 8] = [
+    pub const ALL: [Self; 9] = [
         Self::WorkerSpawned,
         Self::WorkerProgressed,
         Self::WorkerWaitingForInput,
@@ -50,6 +51,7 @@ impl WorkerEvent {
         Self::WorkerResumed,
         Self::WorkerCompleted,
         Self::WorkerFailed,
+        Self::WorkerStopped,
         Self::WorkerCancelled,
     ];
 
@@ -68,6 +70,7 @@ impl WorkerEvent {
             Self::WorkerResumed => "running",
             Self::WorkerCompleted => "completed",
             Self::WorkerFailed => "failed",
+            Self::WorkerStopped => "stopped",
             Self::WorkerCancelled => "cancelled",
         }
     }
@@ -81,6 +84,7 @@ impl WorkerEvent {
             Self::WorkerResumed => "WorkerResumed",
             Self::WorkerCompleted => "WorkerCompleted",
             Self::WorkerFailed => "WorkerFailed",
+            Self::WorkerStopped => "WorkerStopped",
             Self::WorkerCancelled => "WorkerCancelled",
         }
     }
@@ -93,7 +97,10 @@ impl WorkerEvent {
     pub fn is_terminal(self) -> bool {
         matches!(
             self,
-            Self::WorkerCompleted | Self::WorkerFailed | Self::WorkerCancelled
+            Self::WorkerCompleted
+                | Self::WorkerFailed
+                | Self::WorkerStopped
+                | Self::WorkerCancelled
         )
     }
 }

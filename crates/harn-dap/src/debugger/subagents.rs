@@ -23,6 +23,7 @@
 //!   | `WorkerResumed`       | `continued { allThreadsContinued: false }`     |
 //!   | `WorkerCompleted`     | `thread { reason: "exited" }`                  |
 //!   | `WorkerFailed`        | `stopped { reason: "exception" }` + `thread exited` |
+//!   | `WorkerStopped`       | `thread { reason: "exited" }`                  |
 //!   | `WorkerCancelled`     | `thread { reason: "exited" }`                  |
 //!
 //! ## Privacy

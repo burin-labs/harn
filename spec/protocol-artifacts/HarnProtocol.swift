@@ -371,6 +371,7 @@ public enum HarnWorkerStatus: String, Codable, Sendable, CaseIterable {
     case suspended = "suspended"
     case completed = "completed"
     case failed = "failed"
+    case stopped = "stopped"
     case cancelled = "cancelled"
 
     public static let allCases: [Self] = [
@@ -380,6 +381,7 @@ public enum HarnWorkerStatus: String, Codable, Sendable, CaseIterable {
         "suspended",
         "completed",
         "failed",
+        "stopped",
         "cancelled",
     ].map { Self(rawValue: $0)! }
 }

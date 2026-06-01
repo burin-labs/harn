@@ -1102,6 +1102,7 @@ Worker lifecycle builtins:
 | `send_input(handle, task)` | Re-run a completed worker with a new task, carrying transcript/artifacts forward when applicable |
 | `suspend_agent(worker, reason?, options?)` | Cooperatively suspend a worker, persist a resumable snapshot, and return `status: "suspended"` with `suspension` metadata |
 | `resume_agent(worker_or_snapshot, resume_input?, continue_transcript?)` | Resume a suspended worker, optionally with new input; set `continue_transcript=false` to resume from the prior summary plus new input only |
+| `agent_stop(worker, options?)` | Stop a worker. `{graceful: true}` returns a normalized handoff artifact plus recursively folded child handoffs before emitting `WorkerStopped`; omitted or `false` preserves hard cancel |
 | `parse_resume_conditions(conditions?)` | Validate `trigger`, `timeout`, and `on_event` resume conditions for self-park and `spawn_agent({options: {resume_when}})` |
 | `agent_await_resumption(reason, conditions?)` | Normalize the lifecycle-tool request used by `agent_loop` and daemon idle; `agent_loop` performs the actual suspension when the model calls the tool |
 | `wait_agent(handle_or_list)` | Wait for one worker or a list of workers to finish |
@@ -1129,7 +1130,10 @@ Parent-side lifecycle control is opt-in. Pass `subagents: true` or
 `subagent_tools: true` in `agent_loop` options, or call
 `agent_lifecycle_tools(registry, {subagents: true})`, to add
 `subagent_pause(handle, reason)` and
-`subagent_resume(handle, input?, continue_transcript? = true)`.
+`subagent_resume(handle, input?, continue_transcript? = true)`, and
+`subagent_stop(handle, graceful? = true, reason?)`. Graceful stop returns
+`{status: "stopped", handoff, children, handoffs, worker}` for parent takeover;
+`graceful: false` keeps the old hard-cancel behavior.
 
 ### `sub_agent_run`
 

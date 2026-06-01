@@ -185,6 +185,7 @@ hook_events! {
     WorkerResumed           { kind: Worker },
     WorkerCompleted         { kind: Worker },
     WorkerFailed            { kind: Worker },
+    WorkerStopped           { kind: Worker },
     WorkerCancelled         { kind: Worker },
     PreStep                 { kind: Step },
     PostStep                { kind: Step, provider_parse: true },
@@ -231,6 +232,7 @@ impl HookEvent {
             WorkerEvent::WorkerResumed => Self::WorkerResumed,
             WorkerEvent::WorkerCompleted => Self::WorkerCompleted,
             WorkerEvent::WorkerFailed => Self::WorkerFailed,
+            WorkerEvent::WorkerStopped => Self::WorkerStopped,
             WorkerEvent::WorkerCancelled => Self::WorkerCancelled,
         }
     }

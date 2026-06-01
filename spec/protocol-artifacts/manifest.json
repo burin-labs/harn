@@ -212,6 +212,7 @@
       "suspended",
       "completed",
       "failed",
+      "stopped",
       "cancelled"
     ]
   },

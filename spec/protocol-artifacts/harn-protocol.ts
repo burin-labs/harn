@@ -213,6 +213,7 @@ export const HARN_WORKER_STATUSES = [
   "suspended",
   "completed",
   "failed",
+  "stopped",
   "cancelled",
 ] as const
 export type HarnWorkerStatus = (typeof HARN_WORKER_STATUSES)[number]

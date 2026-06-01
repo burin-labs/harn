@@ -267,6 +267,7 @@ var HarnWorkerStatuses = []HarnWorkerStatus{
 	"suspended",
 	"completed",
 	"failed",
+	"stopped",
 	"cancelled",
 }
 
