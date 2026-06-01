@@ -34,9 +34,10 @@ pub(crate) const NAME: &str = "hostlib_tools_run_command";
 pub(crate) fn handle(args: &[VmValue]) -> Result<VmValue, HostlibError> {
     let map = require_dict_arg(NAME, args)?;
     let (program, args_tail) = parse_command(&map)?;
-    let cwd = proc::parse_cwd(NAME, payload_str(&map, "cwd").as_deref())?;
+    let cwd_raw = optional_string(NAME, &map, "cwd")?;
+    let cwd = proc::parse_cwd(NAME, cwd_raw.as_deref())?;
     let env = optional_string_map(NAME, &map, "env")?.unwrap_or_default();
-    let stdin = payload_str(&map, "stdin");
+    let stdin = optional_string(NAME, &map, "stdin")?;
     let timeout = optional_timeout(NAME, &map, "timeout_ms")?;
     let capture = parse_capture(&map)?;
     let env_mode = parse_env_mode(&map, !env.is_empty())?;
@@ -195,14 +196,6 @@ fn initial_background_snapshot(
     VmValue::Dict(Arc::new(response))
 }
 
-fn payload_str(map: &std::collections::BTreeMap<String, VmValue>, key: &str) -> Option<String> {
-    match map.get(key)? {
-        VmValue::String(s) => Some(s.to_string()),
-        VmValue::Nil => None,
-        _ => None,
-    }
-}
-
 fn parse_command(
     map: &std::collections::BTreeMap<String, VmValue>,
 ) -> Result<(String, Vec<String>), HostlibError> {
@@ -299,10 +292,10 @@ fn parse_capture(
     if let Some(capture_value) = map.get("capture") {
         match capture_value {
             VmValue::Dict(dict) => {
-                capture.stdout = dict_bool(dict, "stdout")?.unwrap_or(true);
-                capture.stderr = dict_bool(dict, "stderr")?.unwrap_or(true);
-                capture.merge_stderr = dict_bool(dict, "merge_stderr")?.unwrap_or(false);
-                if let Some(bytes) = dict_u64(dict, "max_inline_bytes")? {
+                capture.stdout = optional_bool(NAME, dict, "stdout")?.unwrap_or(true);
+                capture.stderr = optional_bool(NAME, dict, "stderr")?.unwrap_or(true);
+                capture.merge_stderr = optional_bool(NAME, dict, "merge_stderr")?.unwrap_or(false);
+                if let Some(bytes) = optional_u64(NAME, dict, "max_inline_bytes")? {
                     capture.max_inline_bytes = usize::try_from(bytes).unwrap_or(usize::MAX);
                 }
             }
@@ -324,34 +317,4 @@ fn parse_capture(
         capture.max_inline_bytes = usize::try_from(max).unwrap_or(usize::MAX);
     }
     Ok(capture)
-}
-
-fn dict_bool(
-    dict: &std::collections::BTreeMap<String, VmValue>,
-    key: &'static str,
-) -> Result<Option<bool>, HostlibError> {
-    match dict.get(key) {
-        None | Some(VmValue::Nil) => Ok(None),
-        Some(VmValue::Bool(b)) => Ok(Some(*b)),
-        Some(other) => Err(HostlibError::InvalidParameter {
-            builtin: NAME,
-            param: key,
-            message: format!("expected bool, got {}", other.type_name()),
-        }),
-    }
-}
-
-fn dict_u64(
-    dict: &std::collections::BTreeMap<String, VmValue>,
-    key: &'static str,
-) -> Result<Option<u64>, HostlibError> {
-    match dict.get(key) {
-        None | Some(VmValue::Nil) => Ok(None),
-        Some(VmValue::Int(i)) if *i >= 0 => Ok(Some(*i as u64)),
-        Some(other) => Err(HostlibError::InvalidParameter {
-            builtin: NAME,
-            param: key,
-            message: format!("expected non-negative integer, got {}", other.type_name()),
-        }),
-    }
 }

@@ -12,6 +12,7 @@ use std::sync::Arc;
 use harn_vm::VmValue;
 
 use crate::error::HostlibError;
+use crate::value_args;
 
 /// Extract the first argument as a Dict. Tools always receive a single
 /// dict from Harn-side callers; if the caller passed nothing we treat it
@@ -41,18 +42,7 @@ pub fn require_string(
     dict: &BTreeMap<String, VmValue>,
     key: &'static str,
 ) -> Result<String, HostlibError> {
-    match dict.get(key) {
-        Some(VmValue::String(s)) => Ok(s.to_string()),
-        Some(other) => Err(HostlibError::InvalidParameter {
-            builtin,
-            param: key,
-            message: format!("expected string, got {}", other.type_name()),
-        }),
-        None => Err(HostlibError::MissingParameter {
-            builtin,
-            param: key,
-        }),
-    }
+    value_args::require_string(builtin, dict, key)
 }
 
 /// Optional string field. Missing/`Nil` returns `None`.
@@ -61,15 +51,7 @@ pub fn optional_string(
     dict: &BTreeMap<String, VmValue>,
     key: &'static str,
 ) -> Result<Option<String>, HostlibError> {
-    match dict.get(key) {
-        None | Some(VmValue::Nil) => Ok(None),
-        Some(VmValue::String(s)) => Ok(Some(s.to_string())),
-        Some(other) => Err(HostlibError::InvalidParameter {
-            builtin,
-            param: key,
-            message: format!("expected string, got {}", other.type_name()),
-        }),
-    }
+    value_args::optional_string(builtin, dict, key)
 }
 
 /// Optional `bool`. Defaults to `default` when missing or `Nil`.
@@ -79,15 +61,7 @@ pub fn optional_bool(
     key: &'static str,
     default: bool,
 ) -> Result<bool, HostlibError> {
-    match dict.get(key) {
-        None | Some(VmValue::Nil) => Ok(default),
-        Some(VmValue::Bool(b)) => Ok(*b),
-        Some(other) => Err(HostlibError::InvalidParameter {
-            builtin,
-            param: key,
-            message: format!("expected bool, got {}", other.type_name()),
-        }),
-    }
+    value_args::optional_bool(builtin, dict, key).map(|value| value.unwrap_or(default))
 }
 
 /// Optional integer. Defaults to `default` when missing or `Nil`.
@@ -100,16 +74,7 @@ pub fn optional_int(
     key: &'static str,
     default: i64,
 ) -> Result<i64, HostlibError> {
-    match dict.get(key) {
-        None | Some(VmValue::Nil) => Ok(default),
-        Some(VmValue::Int(n)) => Ok(*n),
-        Some(VmValue::Float(f)) if f.fract() == 0.0 => Ok(*f as i64),
-        Some(other) => Err(HostlibError::InvalidParameter {
-            builtin,
-            param: key,
-            message: format!("expected integer, got {}", other.type_name()),
-        }),
-    }
+    value_args::optional_i64(builtin, dict, key, default)
 }
 
 /// Optional list of strings. Missing/`Nil` returns `Vec::new()`.
@@ -118,33 +83,7 @@ pub fn optional_string_list(
     dict: &BTreeMap<String, VmValue>,
     key: &'static str,
 ) -> Result<Vec<String>, HostlibError> {
-    match dict.get(key) {
-        None | Some(VmValue::Nil) => Ok(Vec::new()),
-        Some(VmValue::List(items)) => {
-            let mut out = Vec::with_capacity(items.len());
-            for item in items.iter() {
-                match item {
-                    VmValue::String(s) => out.push(s.to_string()),
-                    other => {
-                        return Err(HostlibError::InvalidParameter {
-                            builtin,
-                            param: key,
-                            message: format!(
-                                "expected list of strings, got element {}",
-                                other.type_name()
-                            ),
-                        });
-                    }
-                }
-            }
-            Ok(out)
-        }
-        Some(other) => Err(HostlibError::InvalidParameter {
-            builtin,
-            param: key,
-            message: format!("expected list of strings, got {}", other.type_name()),
-        }),
-    }
+    value_args::optional_string_list(builtin, dict, key).map(|value| value.unwrap_or_default())
 }
 
 /// Optional list of integers. Missing/`Nil` returns `Vec::new()`.
@@ -162,27 +101,17 @@ pub fn optional_int_list(
         Some(VmValue::List(items)) => {
             let mut out = Vec::with_capacity(items.len());
             for item in items.iter() {
-                match item {
-                    VmValue::Int(n) => out.push(*n),
-                    VmValue::Float(f) if f.fract() == 0.0 => out.push(*f as i64),
-                    other => {
-                        return Err(HostlibError::InvalidParameter {
-                            builtin,
-                            param: key,
-                            message: format!(
-                                "expected list of integers, got element {}",
-                                other.type_name()
-                            ),
-                        });
-                    }
-                }
+                out.push(value_args::coerce_i64(builtin, key, item)?);
             }
             Ok(out)
         }
         Some(other) => Err(HostlibError::InvalidParameter {
             builtin,
             param: key,
-            message: format!("expected list of integers, got {}", other.type_name()),
+            message: format!(
+                "expected list of integers, got {}",
+                value_args::describe(other)
+            ),
         }),
     }
 }
@@ -204,4 +133,34 @@ where
 /// Convenience constructor for `VmValue::String` from a `&str`.
 pub fn str_value(s: impl AsRef<str>) -> VmValue {
     VmValue::String(Arc::from(s.as_ref()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn dict(entries: [(&'static str, VmValue); 1]) -> BTreeMap<String, VmValue> {
+        entries
+            .into_iter()
+            .map(|(key, value)| (key.to_string(), value))
+            .collect()
+    }
+
+    #[test]
+    fn optional_int_rejects_non_finite_float() {
+        let payload = dict([("limit", VmValue::Float(f64::INFINITY))]);
+        assert!(matches!(
+            optional_int("test", &payload, "limit", 0),
+            Err(HostlibError::InvalidParameter { param: "limit", .. })
+        ));
+    }
+
+    #[test]
+    fn optional_int_rejects_out_of_range_float() {
+        let payload = dict([("limit", VmValue::Float(1.0e100))]);
+        assert!(matches!(
+            optional_int("test", &payload, "limit", 0),
+            Err(HostlibError::InvalidParameter { param: "limit", .. })
+        ));
+    }
 }

@@ -39,6 +39,8 @@ pub struct MockProcessConfig {
     /// error instead of returning a handle. Used to exercise sandbox /
     /// invalid-argv error paths.
     pub spawn_error: Option<ProcessError>,
+    /// If non-`None`, force waits to fail with this I/O error.
+    pub wait_error: Option<String>,
 }
 
 impl Default for MockProcessConfig {
@@ -51,6 +53,7 @@ impl Default for MockProcessConfig {
             exit_status: Some(ExitStatus::from_code(0)),
             force_timeout: false,
             spawn_error: None,
+            wait_error: None,
         }
     }
 }
@@ -249,6 +252,7 @@ struct MockState {
     stderr_cv: Condvar,
     /// Force-timeout config copied from MockProcessConfig.
     force_timeout: bool,
+    wait_error: Option<String>,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -272,6 +276,7 @@ impl MockState {
             stdout_cv: Condvar::new(),
             stderr_cv: Condvar::new(),
             force_timeout: config.force_timeout,
+            wait_error: config.wait_error.clone(),
         }
     }
 
@@ -388,6 +393,9 @@ impl ProcessHandle for MockProcess {
         &mut self,
         timeout: Option<Duration>,
     ) -> io::Result<(Option<ExitStatus>, bool)> {
+        if let Some(error) = self.state.wait_error.as_ref() {
+            return Err(io::Error::other(error.clone()));
+        }
         if self.state.force_timeout {
             self.state.record_kill();
             return Ok((None, true));
@@ -409,6 +417,9 @@ impl ProcessHandle for MockProcess {
     }
 
     fn wait(&mut self) -> io::Result<ExitStatus> {
+        if let Some(error) = self.state.wait_error.as_ref() {
+            return Err(io::Error::other(error.clone()));
+        }
         let outcome = self
             .state
             .wait_for_exit(None)

@@ -43,6 +43,7 @@ pub mod secret_store;
 pub mod tools;
 
 mod registry;
+mod value_args;
 
 pub use error::HostlibError;
 pub use registry::{BuiltinRegistry, HostlibCapability, HostlibRegistry, RegisteredBuiltin};

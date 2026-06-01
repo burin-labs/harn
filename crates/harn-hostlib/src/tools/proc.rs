@@ -170,8 +170,10 @@ pub(crate) fn run(req: SpawnRequest) -> Result<SpawnOutcome, HostlibError> {
         })
     });
 
-    let (status, timed_out): (Option<process_handle::ExitStatus>, bool) =
-        handle.wait_with_timeout(req.timeout).unwrap_or_default();
+    let wait_result = handle.wait_with_timeout(req.timeout);
+    if wait_result.is_err() {
+        handle.killer().kill();
+    }
 
     if let Some(t) = stdout_thread {
         let _ = t.join();
@@ -182,6 +184,11 @@ pub(crate) fn run(req: SpawnRequest) -> Result<SpawnOutcome, HostlibError> {
 
     let stdout_bytes: Vec<u8> = out_rx.try_iter().flatten().collect();
     let stderr_bytes: Vec<u8> = err_rx.try_iter().flatten().collect();
+    let (status, timed_out): (Option<process_handle::ExitStatus>, bool) =
+        wait_result.map_err(|error| HostlibError::Backend {
+            builtin: req.builtin,
+            message: format!("wait failed: {error}"),
+        })?;
 
     let ended_at = Some(now_rfc3339());
 
@@ -395,7 +402,10 @@ fn lossy_prefix(bytes: &[u8], max_inline_bytes: usize) -> String {
     let cap = bytes.len().min(max_inline_bytes);
     match std::str::from_utf8(&bytes[..cap]) {
         Ok(text) => text.to_string(),
-        Err(error) => String::from_utf8_lossy(&bytes[..error.valid_up_to()]).into_owned(),
+        Err(error) if error.error_len().is_none() => {
+            String::from_utf8_lossy(&bytes[..error.valid_up_to()]).into_owned()
+        }
+        Err(_) => String::from_utf8_lossy(&bytes[..cap]).into_owned(),
     }
 }
 
@@ -487,6 +497,21 @@ mod tests {
         );
 
         assert_eq!(stdout, "alpha ");
+        assert_eq!(stderr, "");
+    }
+
+    #[test]
+    fn inline_output_preserves_lossy_text_after_invalid_byte() {
+        let (stdout, stderr) = inline_output(
+            b"a\xffb",
+            &[],
+            CaptureConfig {
+                max_inline_bytes: 3,
+                ..CaptureConfig::default()
+            },
+        );
+
+        assert_eq!(stdout, "a\u{fffd}b");
         assert_eq!(stderr, "");
     }
 

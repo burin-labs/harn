@@ -316,7 +316,7 @@ pub(super) fn list_directory(args: &[VmValue]) -> Result<VmValue, HostlibError> 
             if !include_hidden && name.starts_with('.') {
                 continue;
             }
-            let metadata = match entry.metadata() {
+            let metadata = match stdfs::symlink_metadata(entry.path()) {
                 Ok(m) => m,
                 Err(_) => continue,
             };

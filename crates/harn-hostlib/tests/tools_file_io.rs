@@ -279,6 +279,34 @@ fn list_directory_include_hidden_works() {
     }
 }
 
+#[cfg(unix)]
+#[test]
+fn list_directory_reports_symlink_itself_without_following_target() {
+    use std::os::unix::fs::symlink;
+
+    let dir = TempDir::new().unwrap();
+    let outside = TempDir::new().unwrap();
+    let target = outside.path().join("secret.txt");
+    fs::write(&target, "secret payload").unwrap();
+    let target_size = fs::metadata(&target).unwrap().len() as i64;
+    let link = dir.path().join("link.txt");
+    symlink(&target, &link).unwrap();
+
+    let reg = registry();
+    let entry = reg.find("hostlib_tools_list_directory").unwrap();
+    let result = (entry.handler)(&dict_arg(&[("path", vm_string(&path_str(dir.path())))])).unwrap();
+    let entries = match dict_get(&result, "entries") {
+        VmValue::List(rows) => rows,
+        other => panic!("expected list, got {other:?}"),
+    };
+    assert_eq!(entries.len(), 1);
+    assert!(matches!(
+        dict_get(&entries[0], "is_symlink"),
+        VmValue::Bool(true)
+    ));
+    assert!(matches!(dict_get(&entries[0], "size"), VmValue::Int(size) if *size != target_size));
+}
+
 #[test]
 fn list_directory_respects_max_entries_and_marks_truncated() {
     let dir = TempDir::new().unwrap();

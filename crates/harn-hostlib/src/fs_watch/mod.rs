@@ -26,6 +26,8 @@ use crate::tools::args::{
 const SUBSCRIBE_BUILTIN: &str = "hostlib_fs_watch_subscribe";
 const UNSUBSCRIBE_BUILTIN: &str = "hostlib_fs_watch_unsubscribe";
 const DEFAULT_DEBOUNCE_MS: u64 = 50;
+const DEFAULT_KINDS: &[&str] = &["create", "modify", "remove", "rename"];
+const SUPPORTED_KINDS: &[&str] = &["access", "create", "modify", "other", "remove", "rename"];
 
 static NEXT_SUBSCRIPTION_ID: AtomicU64 = AtomicU64::new(1);
 
@@ -447,26 +449,21 @@ fn normalize_kind(kind: &EventKind) -> &'static str {
 
 fn parse_kinds(dict: &BTreeMap<String, VmValue>) -> Result<BTreeSet<String>, HostlibError> {
     let values = optional_string_list(SUBSCRIBE_BUILTIN, dict, "kinds")?.unwrap_or_else(|| {
-        vec![
-            "create".to_string(),
-            "modify".to_string(),
-            "remove".to_string(),
-            "rename".to_string(),
-        ]
+        DEFAULT_KINDS
+            .iter()
+            .map(|kind| (*kind).to_string())
+            .collect()
     });
     let mut kinds = BTreeSet::new();
     for kind in values {
-        match kind.as_str() {
-            "create" | "modify" | "remove" | "rename" => {
-                kinds.insert(kind);
-            }
-            _ => {
-                return Err(HostlibError::InvalidParameter {
-                    builtin: SUBSCRIBE_BUILTIN,
-                    param: "kinds",
-                    message: format!("unsupported event kind `{kind}`"),
-                });
-            }
+        if SUPPORTED_KINDS.contains(&kind.as_str()) {
+            kinds.insert(kind);
+        } else {
+            return Err(HostlibError::InvalidParameter {
+                builtin: SUBSCRIBE_BUILTIN,
+                param: "kinds",
+                message: format!("unsupported event kind `{kind}`"),
+            });
         }
     }
     Ok(kinds)
@@ -668,6 +665,36 @@ mod tests {
 
         assert_eq!(events.len(), 1);
         assert_eq!(events[0].kind, "remove");
+    }
+
+    #[test]
+    fn kind_filter_allows_access_and_other_events() {
+        let root = std::env::current_dir().unwrap();
+        let mut config = BTreeMap::new();
+        config.insert(
+            "kinds".to_string(),
+            VmValue::List(std::sync::Arc::new(vec![
+                VmValue::String(std::sync::Arc::from("access")),
+                VmValue::String(std::sync::Arc::from("other")),
+            ])),
+        );
+        let mut filter = filter(root.clone(), None);
+        filter.kinds = parse_kinds(&config).unwrap();
+
+        let events = coalesce_events(
+            vec![
+                event(
+                    EventKind::Access(notify::event::AccessKind::Any),
+                    root.join("src/lib.rs"),
+                ),
+                event(EventKind::Other, root.join("README.md")),
+            ],
+            &filter,
+        );
+
+        assert_eq!(events.len(), 2);
+        assert_eq!(events[0].kind, "access");
+        assert_eq!(events[1].kind, "other");
     }
 
     #[test]
