@@ -221,6 +221,26 @@ fn print_text_report(report: &FmtReport) {
             FmtFileStatus::AlreadyFormatted | FmtFileStatus::Skipped => {}
         }
     }
+    // `--check` drift is always auto-fixable by running the formatter in
+    // write mode; point the user at it. In write mode these files get status
+    // `Formatted` (not `Error`/`FormatterWouldReformat`), so the hint stays
+    // silent — and genuine io/format errors are excluded.
+    let reformattable = report
+        .files
+        .iter()
+        .filter(|file| {
+            matches!(file.status, FmtFileStatus::Error)
+                && file
+                    .diagnostics
+                    .iter()
+                    .any(|d| d.code == Code::FormatterWouldReformat.to_string())
+        })
+        .count();
+    if reformattable > 0 {
+        eprintln!(
+            "\n{reformattable} file(s) would be reformatted — run `harn fmt` (without `--check`) to apply formatting."
+        );
+    }
 }
 
 fn diff_lines_changed(before: &str, after: &str) -> usize {

@@ -345,6 +345,10 @@ impl VmSyncLease {
     pub(crate) fn key(&self) -> &str {
         &self.key
     }
+
+    pub(crate) fn permits(&self) -> u32 {
+        self.permits
+    }
 }
 
 impl Drop for VmSyncLease {

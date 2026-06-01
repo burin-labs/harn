@@ -12,7 +12,7 @@ pub use core::{
 pub use env::{closest_match, ModuleFunctionRegistry, ModuleState, VmClosure, VmEnv};
 pub use error::{
     categorized_error, classify_error_message, error_to_category, ArgTypeMismatchError,
-    ArityExpect, ArityMismatchError, ErrorCategory, VmError,
+    ArityExpect, ArityMismatchError, DeadlockError, ErrorCategory, VmError,
 };
 pub use handles::{
     VmAtomicHandle, VmChannelHandle, VmGenerator, VmJoinHandle, VmRange, VmRngHandle, VmStream,

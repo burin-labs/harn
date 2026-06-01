@@ -55,11 +55,13 @@ pub(crate) fn lint_file_inner(
     let has_warning = diagnostics
         .iter()
         .any(|d| d.severity == LintSeverity::Warning);
-    let has_error = print_lint_diagnostics(&path_str, &source, &diagnostics);
+    let (has_error, fixable) = print_lint_diagnostics(&path_str, &source, &diagnostics);
 
     CommandOutcome {
         has_error,
         has_warning,
+        findings: diagnostics.len(),
+        fixable,
     }
 }
 
@@ -162,7 +164,7 @@ pub(crate) fn lint_fix_file(
         &config.disable_rules,
     ));
     if !remaining.is_empty() {
-        print_lint_diagnostics(&path_str, &source2, &remaining);
+        let _ = print_lint_diagnostics(&path_str, &source2, &remaining);
     }
 
     applied

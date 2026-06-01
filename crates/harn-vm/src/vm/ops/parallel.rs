@@ -2,7 +2,7 @@ use std::collections::{BTreeMap, VecDeque};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use crate::value::{VmError, VmStream, VmStreamCancel, VmTaskHandle, VmValue};
+use crate::value::{DeadlockError, VmError, VmStream, VmStreamCancel, VmTaskHandle, VmValue};
 
 use super::super::CallArgs;
 
@@ -410,6 +410,20 @@ impl super::super::Vm {
         Ok(())
     }
 
+    // Runtime self-deadlock guard. A lexical `mutex { }` block acquires a
+    // capacity-1 semaphore with no timeout. If this VM already holds a permit
+    // for the same `kind:key`, the acquire can never be granted (the sole
+    // permit holder IS the requester, and with no timeout it blocks forever)
+    // — a provably-unresolvable self-deadlock with zero false positives.
+    //
+    // Deferred follow-ups (not yet covered, to stay false-positive-free):
+    //   * Builtin-path detection (`sync_mutex_acquire`/`sync_rwlock_acquire`):
+    //     those run in a fresh `child_vm()` with an empty held-set and are
+    //     released manually, so a re-acquire is not provably unresolvable
+    //     without threading the parent held-set / holder task ids.
+    //   * Cross-task wait-for-graph cycle detection (A holds L1 waits L2; B
+    //     holds L2 waits L1): needs `VmSyncRuntime` to track per-key holder
+    //     task ids plus per-task "waiting on" edges and a cycle check.
     pub(super) async fn execute_sync_mutex_enter(&mut self) -> Result<(), VmError> {
         let (chunk, idx) = {
             let frame = self.frames.last_mut().unwrap();
@@ -418,6 +432,14 @@ impl super::super::Vm {
             (Arc::clone(&frame.chunk), idx)
         };
         let key = Self::const_str(&chunk.constants[idx])?;
+        if self.held_permits_for("mutex", key) >= 1 {
+            return Err(VmError::Deadlock(Box::new(DeadlockError {
+                kind: "mutex".to_string(),
+                key: key.to_string(),
+                detail: "re-entrant acquire of a non-reentrant mutex already held by this task"
+                    .to_string(),
+            })));
+        }
         let permit = self
             .sync_runtime
             .acquire("mutex", key, 1, 1, None, self.cancel_token.clone())

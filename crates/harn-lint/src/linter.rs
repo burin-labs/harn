@@ -142,6 +142,10 @@ pub(crate) struct Linter<'a> {
     /// `@effects` / `@allocation` / `@errors` / `@api_stability` /
     /// `@example` block. Enabled by callers linting stdlib sources.
     pub(crate) require_stdlib_metadata: bool,
+    /// Lazily-lexed comment tokens, cached so the `missing-harndoc`
+    /// suppression gate (which runs per public item) does not re-tokenize
+    /// the whole source each time.
+    pub(super) cached_comment_toks: Option<Vec<crate::harndoc::LegacyCommentTok>>,
 }
 
 impl<'a> Linter<'a> {
@@ -183,7 +187,24 @@ impl<'a> Linter<'a> {
             long_running_cleanup_stack: Vec::new(),
             mcp_registry_missing_annotation_spans: HashMap::new(),
             require_stdlib_metadata: false,
+            cached_comment_toks: None,
         }
+    }
+
+    /// Whether a public item on `item_line` is preceded by a wrong-format
+    /// comment run (`//` / `///` or a plain `/* */` block) that the
+    /// `legacy-doc-comment` rule will migrate to `/** */`. When true, the
+    /// `missing-harndoc` diagnostic is suppressed so the user sees a single
+    /// auto-fixable finding instead of a fixless "missing" alongside it.
+    pub(super) fn has_adjacent_migratable_comment(&mut self, item_line: usize) -> bool {
+        let Some(source) = self.source else {
+            return false;
+        };
+        if self.cached_comment_toks.is_none() {
+            self.cached_comment_toks = Some(crate::harndoc::collect_comment_tokens(source));
+        }
+        let comments = self.cached_comment_toks.as_deref().unwrap_or(&[]);
+        crate::harndoc::run_above_is_migratable(comments, item_line)
     }
 
     /// Return set of known builtin function names, derived from the VM's

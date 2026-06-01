@@ -52,6 +52,8 @@ impl LintFileReport {
         CommandOutcome {
             has_error: matches!(self.status, CheckFileStatus::Error),
             has_warning: matches!(self.status, CheckFileStatus::Warning),
+            findings: self.diagnostics.len(),
+            fixable: self.fixable,
         }
     }
 }

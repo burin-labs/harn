@@ -655,6 +655,8 @@ async fn async_main() {
                 }
             } else {
                 let mut should_fail = false;
+                let mut total_findings = 0usize;
+                let mut total_fixable = 0usize;
                 for file in &files {
                     let mut config = package::load_check_config(Some(file));
                     let lint_config = commands::check::load_harn_lint_config(file);
@@ -672,6 +674,8 @@ async fn async_main() {
                         complexity_threshold,
                         &lint_config.persona_step_allowlist,
                     );
+                    total_findings += outcome.findings;
+                    total_fixable += outcome.fixable;
                     should_fail |= outcome.should_fail(config.strict);
                 }
                 for file in &prompt_files {
@@ -682,7 +686,22 @@ async fn async_main() {
                         lint_config.template_variant_branch_threshold,
                         &lint_config.disabled,
                     );
+                    total_findings += outcome.findings;
+                    total_fixable += outcome.fixable;
                     should_fail |= outcome.should_fail(config.strict);
+                }
+                // ESLint-style hint: when findings are auto-fixable, point the
+                // user at `--fix`. Emphasized when *every* finding is fixable.
+                if total_fixable > 0 {
+                    if total_fixable == total_findings {
+                        eprintln!(
+                            "\nAll {total_fixable} finding(s) are auto-fixable — run `harn lint --fix` to apply them."
+                        );
+                    } else {
+                        eprintln!(
+                            "\n{total_fixable} of {total_findings} finding(s) are auto-fixable — run `harn lint --fix` to apply them."
+                        );
+                    }
                 }
                 if should_fail {
                     process::exit(1);

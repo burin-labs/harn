@@ -34,6 +34,16 @@ pub struct ArityMismatchError {
     pub span: Option<Span>,
 }
 
+/// Payload for [`VmError::Deadlock`]. `kind` is the primitive kind
+/// (`"mutex"`) or `"task"`; `key` is the primitive key or task id; `detail`
+/// names the specific footgun.
+#[derive(Debug, Clone)]
+pub struct DeadlockError {
+    pub kind: String,
+    pub key: String,
+    pub detail: String,
+}
+
 #[derive(Debug, Clone)]
 pub struct ArgTypeMismatchError {
     pub callee: String,
@@ -63,6 +73,13 @@ pub enum VmError {
         daemon_id: String,
         capacity: usize,
     },
+    /// A deterministic, provably-unresolvable self-deadlock caught before the
+    /// VM would block forever (Rust's borrow checker prevents data races but
+    /// not deadlocks; this is the Go-runtime "all goroutines asleep" analogue
+    /// for the cases we can prove). Boxed — like [`VmError::ArityMismatch`] —
+    /// so the rare three-`String` payload doesn't enlarge `VmError` on the
+    /// pervasive `Result<VmValue, VmError>` hot path. Carries `HARN-ORC-011`.
+    Deadlock(Box<DeadlockError>),
     Return(VmValue),
     InvalidInstruction(u8),
     /// Wrong number of arguments at a call site. Distinct from
@@ -205,6 +222,9 @@ pub fn error_to_category(err: &VmError) -> ErrorCategory {
             .unwrap_or(ErrorCategory::Generic),
         VmError::Thrown(VmValue::String(s)) => classify_error_message(s),
         VmError::Runtime(msg) => classify_error_message(msg),
+        // A deadlock is permanently non-retryable and not provider-related —
+        // `Generic` is the correct "surface it, don't back off" bucket.
+        VmError::Deadlock(_) => ErrorCategory::Generic,
         _ => ErrorCategory::Generic,
     }
 }
@@ -329,6 +349,11 @@ impl std::fmt::Display for VmError {
                 f,
                 "Daemon queue full: daemon '{daemon_id}' reached its event_queue_capacity of {capacity}"
             ),
+            VmError::Deadlock(err) => write!(
+                f,
+                "HARN-ORC-011: deadlock detected: {} ({} '{}') — this acquire can never succeed and would block forever",
+                err.detail, err.kind, err.key
+            ),
             VmError::Return(_) => write!(f, "Return from function"),
             VmError::InvalidInstruction(op) => write!(f, "Invalid instruction: 0x{op:02x}"),
             VmError::ArityMismatch(err) => {
@@ -383,6 +408,34 @@ mod tests {
         assert_eq!(
             classify_error_message("operation canceled by host"),
             ErrorCategory::Cancelled
+        );
+    }
+
+    #[test]
+    fn deadlock_renders_with_stable_code() {
+        let err = VmError::Deadlock(Box::new(DeadlockError {
+            kind: "mutex".to_string(),
+            key: "__default__".to_string(),
+            detail: "re-entrant acquire".to_string(),
+        }));
+        assert!(
+            err.to_string().starts_with("HARN-ORC-011"),
+            "deadlock Display must carry the stable code: {err}"
+        );
+    }
+
+    #[test]
+    fn deadlock_maps_to_generic_category() {
+        let err = VmError::Deadlock(Box::new(DeadlockError {
+            kind: "task".to_string(),
+            key: "task_1".to_string(),
+            detail: "self-join".to_string(),
+        }));
+        let category = error_to_category(&err);
+        assert_eq!(category, ErrorCategory::Generic);
+        assert!(
+            !category.is_transient(),
+            "a deadlock must not be treated as a retryable transient error"
         );
     }
 }

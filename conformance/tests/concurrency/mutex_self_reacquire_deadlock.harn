@@ -1,0 +1,7 @@
+pipeline test(task) {
+  mutex {
+    mutex {
+      log("unreachable: the inner acquire self-deadlocks")
+    }
+  }
+}

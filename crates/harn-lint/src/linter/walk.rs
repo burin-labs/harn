@@ -90,6 +90,7 @@ impl<'a> Linter<'a> {
                         .source
                         .and_then(|source| extract_harndoc(source, &snode.span))
                         .is_none()
+                    && !self.has_adjacent_migratable_comment(snode.span.line)
                 {
                     self.diagnostics.push(LintDiagnostic {
                         code: Code::LintMissingHarndoc,

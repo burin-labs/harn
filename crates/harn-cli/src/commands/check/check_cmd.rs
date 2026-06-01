@@ -34,6 +34,8 @@ impl CheckFileReport {
         CommandOutcome {
             has_error: matches!(self.status, CheckFileStatus::Error),
             has_warning: matches!(self.status, CheckFileStatus::Warning),
+            findings: self.diagnostics.len(),
+            ..CommandOutcome::default()
         }
     }
 }
@@ -198,7 +200,7 @@ fn check_file_report_inner(
         has_warning = true;
     }
     if emit_text {
-        if print_lint_diagnostics(&path_str, &source, &lint_diagnostics) {
+        if print_lint_diagnostics(&path_str, &source, &lint_diagnostics).0 {
             has_error = true;
         }
     } else if lint_diagnostics

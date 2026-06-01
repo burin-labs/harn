@@ -11,7 +11,11 @@ use crate::naming::{is_documentable_item, item_is_pub};
 /// A comment token recovered from a re-lex of the source.
 #[derive(Clone)]
 pub(crate) struct LegacyCommentTok {
+    /// 1-based line where the comment *ends* (the lexer's `span.line`).
     pub(crate) line: usize,
+    /// 1-based line where the comment *begins*. Equal to `line` for line
+    /// comments; smaller for a multi-line block comment.
+    pub(crate) start_line: usize,
     pub(crate) start_byte: usize,
     pub(crate) end_byte: usize,
     pub(crate) is_line: bool,
@@ -32,6 +36,7 @@ pub(crate) fn collect_comment_tokens(source: &str) -> Vec<LegacyCommentTok> {
             harn_lexer::TokenKind::LineComment { text, is_doc } => {
                 out.push(LegacyCommentTok {
                     line: tok.span.line,
+                    start_line: tok.span.line,
                     start_byte: tok.span.start,
                     end_byte: tok.span.end,
                     is_line: true,
@@ -40,8 +45,13 @@ pub(crate) fn collect_comment_tokens(source: &str) -> Vec<LegacyCommentTok> {
                 });
             }
             harn_lexer::TokenKind::BlockComment { text, is_doc } => {
+                // The lexer keeps internal newlines in `text` and stamps the
+                // span line at the comment's *end*, so the start line is the
+                // end line minus the number of contained newlines.
+                let newlines = text.matches('\n').count();
                 out.push(LegacyCommentTok {
                     line: tok.span.line,
+                    start_line: tok.span.line.saturating_sub(newlines),
                     start_byte: tok.span.start,
                     end_byte: tok.span.end,
                     is_line: false,
@@ -53,6 +63,51 @@ pub(crate) fn collect_comment_tokens(source: &str) -> Vec<LegacyCommentTok> {
         }
     }
     out
+}
+
+/// Collect the contiguous run of *migratable* comment tokens directly above
+/// `item_line` (1-based), returned in source order (top to bottom).
+///
+/// A run is the set of comments with no blank-line gap between them and the
+/// item. The walk stops at a blank line, a gap, or a canonical `/** */` doc
+/// block (already correct, never rewritten). The returned tokens are exactly
+/// the ones `legacy-doc-comment` will rewrite: `//` / `///` lines and plain
+/// `/* */` block comments.
+fn migratable_run_above<'c>(
+    by_line: &std::collections::HashMap<usize, &'c LegacyCommentTok>,
+    item_line: usize,
+) -> Vec<&'c LegacyCommentTok> {
+    let mut walked: Vec<&LegacyCommentTok> = Vec::new();
+    let mut cursor = item_line.saturating_sub(1);
+    while cursor > 0 {
+        let Some(tok) = by_line.get(&cursor) else {
+            break;
+        };
+        // A canonical `/** */` doc block is already correct; it stops the
+        // walk and is never collected for rewriting.
+        if !tok.is_line && tok.is_doc {
+            break;
+        }
+        walked.push(*tok);
+        // Step past the whole token (multi-line blocks span several lines).
+        cursor = tok.start_line.saturating_sub(1);
+    }
+    walked.reverse();
+    walked
+}
+
+/// Returns true when there is a contiguous run of wrong-format comments
+/// (`//` / `///` lines or a plain `/* */` block) directly above the item on
+/// `item_line` that `legacy-doc-comment` will migrate to `/** */`. Used to
+/// suppress the redundant fixless `missing-harndoc` diagnostic in that case
+/// — the migration already covers it with an actual autofix.
+pub(crate) fn run_above_is_migratable(comments: &[LegacyCommentTok], item_line: usize) -> bool {
+    if item_line == 0 || comments.is_empty() {
+        return false;
+    }
+    let by_line: std::collections::HashMap<usize, &LegacyCommentTok> =
+        comments.iter().map(|c| (c.line, c)).collect();
+    !migratable_run_above(&by_line, item_line).is_empty()
 }
 
 /// Produce the canonical `/** */` replacement text for a run of comment
@@ -191,28 +246,18 @@ fn check_one_item(
     if item_line == 0 {
         return;
     }
-    // Walk upward over line comments; an existing `/** */` block stops the
-    // walk since it doesn't need rewriting.
-    let mut walked: Vec<&LegacyCommentTok> = Vec::new();
-    let mut cursor = item_line.saturating_sub(1);
-    while cursor > 0 {
-        let Some(tok) = by_line.get(&cursor) else {
-            break;
-        };
-        if !tok.is_line {
-            break;
-        }
-        walked.push(*tok);
-        cursor -= 1;
-    }
+    // Contiguous run of wrong-format comments directly above the item. A
+    // canonical `/** */` block stops the walk (already correct); `//` / `///`
+    // lines and plain `/* */` blocks are collected for rewriting.
+    let walked = migratable_run_above(by_line, item_line);
     if walked.is_empty() {
         return;
     }
-    walked.reverse();
-    // Any contiguous run of `//` / `///` comments directly above the item
+    // Any contiguous run of wrong-format comments directly above the item
     // (no blank-line gap) is treated as its doc block.
     let any_doc = walked.iter().any(|c| c.is_doc);
     let any_plain = walked.iter().any(|c| !c.is_doc);
+    let all_block = walked.iter().all(|c| !c.is_line);
 
     // Replacement span starts at the first comment's line_start so we can
     // reset indentation, and ends at the last comment's byte so the trailing
@@ -223,34 +268,63 @@ fn check_one_item(
     let indent_cols = first.start_byte - line_start;
     let mut body_lines: Vec<String> = Vec::with_capacity(walked.len());
     for c in &walked {
-        let s = c.text.strip_prefix(' ').unwrap_or(&c.text);
-        body_lines.push(s.trim_end().to_string());
+        push_comment_body_lines(c, &mut body_lines);
     }
     let replacement = canonical_doc_block(&body_lines, indent_cols, 100);
-    let replace_span = Span::with_offsets(line_start, last.end_byte, first.line, 1);
+    // Render the diagnostic/replacement at the run's *start* line so a
+    // multi-line block comment's caret points where the comment begins.
+    let start_line = first.start_line;
+    let replace_span = Span::with_offsets(line_start, last.end_byte, start_line, 1);
     let fix = vec![FixEdit {
         span: replace_span,
         replacement,
     }];
-    let (prefix, suggestion_form): (&str, &str) = match (any_doc, any_plain) {
-        (true, false) => ("`///`", "/// lines"),
-        (false, true) => ("plain `//`", "// lines adjacent to the definition"),
-        _ => (
-            "adjacent `//` / `///`",
-            "line-comment block adjacent to the definition",
-        ),
+    let (prefix, suggestion_form): (&str, &str) = if all_block {
+        (
+            "plain `/* */`",
+            "/* */ block comment adjacent to the definition",
+        )
+    } else {
+        match (any_doc, any_plain) {
+            (true, false) => ("`///`", "/// lines"),
+            (false, true) => ("plain `//`", "// lines adjacent to the definition"),
+            _ => (
+                "adjacent `//` / `///`",
+                "line-comment block adjacent to the definition",
+            ),
+        }
     };
     diagnostics.push(LintDiagnostic {
         code: Code::LintLegacyDocComment,
         rule: "legacy-doc-comment",
         message: format!("{prefix} doc comment(s) above this item should use `/** */` form"),
-        span: Span::with_offsets(first.start_byte, last.end_byte, first.line, 1),
+        span: Span::with_offsets(first.start_byte, last.end_byte, start_line, 1),
         severity: LintSeverity::Warning,
         suggestion: Some(format!(
             "rewrite the {suggestion_form} as a canonical `/** ... */` block"
         )),
         fix: Some(fix),
     });
+}
+
+/// Append the body text line(s) of a wrong-format comment token, stripped of
+/// markers, to `out`. A line comment contributes one line; a plain block
+/// comment contributes one line per physical line, with leading `*` / `* `
+/// decoration removed so re-decoration by [`canonical_doc_block`] is clean.
+fn push_comment_body_lines(tok: &LegacyCommentTok, out: &mut Vec<String>) {
+    if tok.is_line {
+        let s = tok.text.strip_prefix(' ').unwrap_or(&tok.text);
+        out.push(s.trim_end().to_string());
+        return;
+    }
+    for raw in tok.text.split('\n') {
+        let t = raw.trim();
+        let stripped = t
+            .strip_prefix('*')
+            .map(|s| s.strip_prefix(' ').unwrap_or(s))
+            .unwrap_or(t);
+        out.push(stripped.trim_end().to_string());
+    }
 }
 
 /// Given a byte offset, walk backward to find the start-of-line byte.
