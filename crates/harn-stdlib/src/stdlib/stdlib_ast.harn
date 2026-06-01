@@ -1,0 +1,39 @@
+// std/ast - read-only structural search over tree-sitter grammars.
+/**
+ * Run a Tree-Sitter query against a file (`path`) or inline `source` and
+ * return every match with every capture (`@name`) bound — text plus
+ * byte/row/col range. This is the structural complement to `fs.find_text`
+ * (regex) and the read primitive the rule engine builds matching,
+ * `where`-predicates, and `fix` interpolation on top of.
+ *
+ * `params` is a dict:
+ *
+ * - `path` **or** `source` (exactly one). `path` is read from disk and its
+ *   extension drives grammar detection; `source` is inline text and so
+ *   requires `language`.
+ * - `query`: Tree-Sitter S-expression with at least one capture.
+ * - `language`: optional grammar override (required with `source`).
+ * - `max_matches`: optional cap on matches returned, in document order; `0`
+ *   (default) is unlimited. The response sets `truncated: true` when the cap
+ *   drops additional matches.
+ *
+ * On success `result == "ok"` and each entry in `matches` carries its
+ * bounding `range` plus a `captures` map keyed by bare capture name, e.g.
+ * `m.captures.target.text`. The query failing to compile yields
+ * `result == "invalid_query"`; an unknown grammar yields
+ * `result == "unsupported_language"`. Search never throws on syntax errors —
+ * it queries the partial tree and reports `had_errors`.
+ *
+ * @effects: [host]
+ * @allocation: heap
+ * @errors: [backend]
+ * @api_stability: experimental
+ * @example: ast_search({path: "src/lib.rs", query: "(let_declaration value: (_) @v)"})
+ */
+pub fn ast_search(params) -> dict {
+  let payload = hostlib_ast_search(params ?? {}) ?? {}
+  return payload
+    .merge(
+    {ok: payload?.result ?? "" == "ok", provenance: {module: "std/ast", helper: "ast_search"}},
+  )
+}

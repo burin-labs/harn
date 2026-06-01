@@ -99,6 +99,10 @@ the lowercase hostlib wire set
 `ast.structural_diff` uses the same coordinate convention for changed
 syntax-node spans and falls back to a unified line diff when parsing or
 size limits make structural comparison unsuitable.
+`ast.search` is the read-only structural complement to `fs.find_text`: it
+runs a tree-sitter query against a file (or inline `source`) and returns
+every match with every capture (`@name`) bound — text plus span — so rule
+authors can read the full capture map without writing.
 
 Per-language fixture goldens live at
 `tests/fixtures/ast/<language>/{source.<ext>,symbols.golden.json,outline.golden.json}`.
