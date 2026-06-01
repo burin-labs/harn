@@ -28,6 +28,8 @@
 //!   [`CompiledRule::apply`] / [`CompiledRule::auto_apply`] /
 //!   [`CompiledRule::apply_checked`] a codemod (safety-gated, idempotency
 //!   checked), and emit [`Diagnostic`]s.
+//! - [`recipe`] — the whole-project scan → accumulate → edit lifecycle,
+//!   with file create/delete ([`ScanningRecipe`], [`run_recipe`]).
 //! - [`loader`] — load rules from a TOML file or a directory.
 //!
 //! The whole-project scan lifecycle (#2836) layers onto this surface.
@@ -59,6 +61,7 @@ pub mod fix;
 pub mod loader;
 pub mod model;
 pub mod pattern;
+pub mod recipe;
 pub mod transform;
 
 pub use engine::{Binding, CodemodResult, CompiledRule, Diagnostic, RuleMatch, Span};
@@ -70,3 +73,4 @@ pub use model::{
     Safety, Severity, StopBy, StopKeyword, Transform,
 };
 pub use pattern::{compile_pattern, CompiledPattern};
+pub use recipe::{run_recipe, FileChange, RecipeRun, RuleRecipe, ScanningRecipe, SourceFile};
