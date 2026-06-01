@@ -1,7 +1,7 @@
 pipeline test(task) {
-  mutex {
-    mutex {
-      log("unreachable: the inner acquire self-deadlocks")
+  mutex("resource") {
+    mutex("resource") {
+      log("unreachable: re-acquiring the same keyed mutex self-deadlocks")
     }
   }
 }

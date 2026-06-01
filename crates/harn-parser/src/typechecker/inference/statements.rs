@@ -1506,7 +1506,15 @@ impl TypeChecker {
                 self.check_block(body, &mut block_scope);
             }
 
-            Node::MutexBlock { body } | Node::DeferStmt { body } => {
+            Node::MutexBlock { key, body } => {
+                if let Some(key) = key {
+                    self.check_node(key, scope);
+                }
+                let mut block_scope = scope.child();
+                self.check_block(body, &mut block_scope);
+            }
+
+            Node::DeferStmt { body } => {
                 let mut block_scope = scope.child();
                 self.check_block(body, &mut block_scope);
             }

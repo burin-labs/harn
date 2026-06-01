@@ -1602,7 +1602,7 @@ impl<'a> Linter<'a> {
             Node::TryExpr { body }
             | Node::SpawnExpr { body }
             | Node::DeferStmt { body }
-            | Node::MutexBlock { body }
+            | Node::MutexBlock { body, .. }
             | Node::Block(body)
             | Node::Closure { body, .. } => self.collect_persona_calls(persona_name, body),
             Node::DeadlineBlock { duration, body } => {

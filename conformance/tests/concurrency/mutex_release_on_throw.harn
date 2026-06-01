@@ -1,11 +1,14 @@
 pipeline test(task) {
   let result = try {
-    mutex {
+    mutex("L") {
       throw "boom"
     }
   }
   __io_println(is_err(result))
-  let permit = sync_mutex_acquire("__default__", 0)
-  __io_println(permit != nil)
-  sync_release(permit)
+  // If the throw above failed to release the "L" lock, re-acquiring the same
+  // keyed mutex would self-deadlock (HARN-ORC-011). Reaching the body proves
+  // the guard was released during unwind.
+  mutex("L") {
+    __io_println("reacquired")
+  }
 }

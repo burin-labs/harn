@@ -100,6 +100,9 @@ fn opening_is_required_by_context(tokens: &[Token], open_idx: usize) -> bool {
                 | TokenKind::DualControl
                 | TokenKind::AskUser
                 | TokenKind::EscalateTo
+                // `mutex(resource) { ... }`: the parens delimit the lock's
+                // resource key and are required grammar, not redundant grouping.
+                | TokenKind::Mutex
         )
     })
 }

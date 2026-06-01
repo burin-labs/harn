@@ -24,6 +24,22 @@ fn test_roundtrip_basic() {
 }
 
 #[test]
+fn test_roundtrip_mutex_bare() {
+    assert_roundtrip("pipeline default(task) { mutex { log(1) } }");
+}
+
+#[test]
+fn test_roundtrip_mutex_keyed_preserves_key() {
+    let source = "pipeline default(task) { mutex(\"acct\") { log(1) } }";
+    let formatted = format_source(source).unwrap();
+    assert!(
+        formatted.contains("mutex(\"acct\")"),
+        "keyed mutex must preserve its resource key:\n{formatted}"
+    );
+    assert_roundtrip(source);
+}
+
+#[test]
 fn test_roundtrip_fn_decl() {
     assert_roundtrip("pipeline default(task) { fn add(a, b) { return a + b }\nlog(add(1, 2)) }");
 }

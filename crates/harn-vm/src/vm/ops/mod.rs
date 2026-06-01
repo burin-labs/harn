@@ -116,7 +116,8 @@ harn_opcode_macros::define_opcodes! {
     ParallelMapStream { async_op(self.execute_parallel_map_stream().await), disasm: bare("PARALLEL_MAP_STREAM") };
     ParallelSettle { async_op(self.execute_parallel_settle().await), disasm: bare("PARALLEL_SETTLE") };
     Spawn { sync(self.execute_spawn()), disasm: bare("SPAWN") };
-    SyncMutexEnter { async_op(self.execute_sync_mutex_enter().await), disasm: const_pool_u16("SYNC_MUTEX_ENTER") };
+    SyncMutexEnter { async_op(self.execute_sync_mutex_enter().await), disasm: bare("SYNC_MUTEX_ENTER") };
+    SyncMutexEnterKeyed { async_op(self.execute_sync_mutex_enter_keyed().await), disasm: bare("SYNC_MUTEX_ENTER_KEYED") };
 
     // === Imports (async) ===
     Import { async_op(self.execute_import_op().await), disasm: const_pool_u16("IMPORT") };

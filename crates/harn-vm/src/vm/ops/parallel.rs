@@ -6,6 +6,18 @@ use crate::value::{DeadlockError, VmError, VmStream, VmStreamCancel, VmTaskHandl
 
 use super::super::CallArgs;
 
+/// Human-readable rendering of a `mutex(resource)` key for diagnostics
+/// (e.g. the HARN-ORC-011 deadlock message). Scalars render as themselves;
+/// anything structural falls back to the stable structural key.
+fn mutex_resource_display(v: &VmValue) -> String {
+    match v {
+        VmValue::String(s) => s.to_string(),
+        VmValue::Int(n) => n.to_string(),
+        VmValue::Bool(b) => b.to_string(),
+        _ => crate::value::value_structural_hash_key(v),
+    }
+}
+
 /// Decode the `cap_val` stack operand pushed by `parallel ... with
 /// { max_concurrent: N }`. A value of `0` (emitted when no option was
 /// given) and any negative integer both mean "unlimited"; returning
@@ -410,41 +422,64 @@ impl super::super::Vm {
         Ok(())
     }
 
-    // Runtime self-deadlock guard. A lexical `mutex { }` block acquires a
+    /// Bare `mutex { }`: acquire the lock keyed on this block's *lexical
+    /// call-site*. The `(chunk identity, instruction pointer)` pair is stable
+    /// across every execution of this site — including concurrent tasks that
+    /// share the cloned chunk `Arc` — so re-entries of the same block still
+    /// serialize, while two distinct `mutex {}` blocks no longer contend on one
+    /// process-wide lock.
+    pub(super) async fn execute_sync_mutex_enter(&mut self) -> Result<(), VmError> {
+        let frame = self.frames.last().unwrap();
+        let key = format!("@{:x}:{}", Arc::as_ptr(&frame.chunk) as usize, frame.ip);
+        self.sync_mutex_acquire_lexical(key, "<anonymous mutex block>".to_string())
+            .await
+    }
+
+    /// `mutex(resource) { }`: acquire the lock keyed on the resource's
+    /// structural value, so every block naming the same resource mutually
+    /// excludes regardless of where it appears in the source.
+    pub(super) async fn execute_sync_mutex_enter_keyed(&mut self) -> Result<(), VmError> {
+        let resource = self.pop()?;
+        let key = format!("v:{}", crate::value::value_structural_hash_key(&resource));
+        let display = mutex_resource_display(&resource);
+        self.sync_mutex_acquire_lexical(key, display).await
+    }
+
+    // Shared acquire path for both lexical `mutex` forms.
+    //
+    // Runtime self-deadlock guard: a lexical `mutex` block acquires a
     // capacity-1 semaphore with no timeout. If this VM already holds a permit
     // for the same `kind:key`, the acquire can never be granted (the sole
     // permit holder IS the requester, and with no timeout it blocks forever)
     // — a provably-unresolvable self-deadlock with zero false positives.
     //
-    // Deferred follow-ups (not yet covered, to stay false-positive-free):
-    //   * Builtin-path detection (`sync_mutex_acquire`/`sync_rwlock_acquire`):
-    //     those run in a fresh `child_vm()` with an empty held-set and are
-    //     released manually, so a re-acquire is not provably unresolvable
-    //     without threading the parent held-set / holder task ids.
-    //   * Cross-task wait-for-graph cycle detection (A holds L1 waits L2; B
-    //     holds L2 waits L1): needs `VmSyncRuntime` to track per-key holder
-    //     task ids plus per-task "waiting on" edges and a cycle check.
-    pub(super) async fn execute_sync_mutex_enter(&mut self) -> Result<(), VmError> {
-        let (chunk, idx) = {
-            let frame = self.frames.last_mut().unwrap();
-            let idx = frame.chunk.read_u16(frame.ip) as usize;
-            frame.ip += 2;
-            (Arc::clone(&frame.chunk), idx)
-        };
-        let key = Self::const_str(&chunk.constants[idx])?;
-        if self.held_permits_for("mutex", key) >= 1 {
+    // Deferred follow-ups (tracked under the async-safety epic, kept out here to
+    // stay false-positive-free):
+    //   * Cross-context detection across an inline `child_vm()` boundary — the
+    //     child starts with an empty held-set, so a re-acquire from inside an
+    //     async builtin invoked under a held lock is not yet caught. Tracked in
+    //     harn#2803 (propagate the held-set into same-task children).
+    //   * Builtin-path unification (`sync_mutex_acquire`/`sync_rwlock_acquire`):
+    //     harn#2802.
+    //   * Cross-task wait-for-graph cycle detection: harn#2806.
+    async fn sync_mutex_acquire_lexical(
+        &mut self,
+        key: String,
+        display: String,
+    ) -> Result<(), VmError> {
+        if self.held_permits_for("mutex", &key) >= 1 {
             return Err(VmError::Deadlock(Box::new(DeadlockError {
                 kind: "mutex".to_string(),
-                key: key.to_string(),
+                key: display,
                 detail: "re-entrant acquire of a non-reentrant mutex already held by this task"
                     .to_string(),
             })));
         }
         let permit = self
             .sync_runtime
-            .acquire("mutex", key, 1, 1, None, self.cancel_token.clone())
+            .acquire("mutex", &key, 1, 1, None, self.cancel_token.clone())
             .await?
-            .ok_or_else(|| VmError::Runtime(format!("mutex '{key}' timed out")))?;
+            .ok_or_else(|| VmError::Runtime(format!("mutex '{display}' timed out")))?;
         self.held_sync_guards
             .push(crate::synchronization::VmSyncHeldGuard {
                 _permit: permit,

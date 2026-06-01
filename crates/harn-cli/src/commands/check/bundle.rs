@@ -315,7 +315,7 @@ fn node_children_bundle(node: &SNode) -> Vec<&SNode> {
         | Node::Block(body)
         | Node::Closure { body, .. }
         | Node::TryExpr { body }
-        | Node::MutexBlock { body }
+        | Node::MutexBlock { body, .. }
         | Node::DeferStmt { body } => body.iter().collect(),
         Node::DeadlineBlock { duration, body } => {
             let mut children = vec![duration.as_ref()];

@@ -240,7 +240,7 @@ impl MermaidGraph {
             Node::DeadlineBlock { duration, body } => {
                 self.emit_named_block(&format!("deadline {}", inline_label(duration)), body)
             }
-            Node::MutexBlock { body } => self.emit_named_block("mutex", body),
+            Node::MutexBlock { body, .. } => self.emit_named_block("mutex", body),
             Node::Parallel {
                 mode,
                 expr,

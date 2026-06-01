@@ -75,7 +75,7 @@ impl TypeChecker {
                 | Node::CostRoute { body, .. }
                 | Node::WhileLoop { body, .. }
                 | Node::DeferStmt { body }
-                | Node::MutexBlock { body }
+                | Node::MutexBlock { body, .. }
                 | Node::DeadlineBlock { body, .. }
                 | Node::Pipeline { body, .. }
                 | Node::OverrideDecl { body, .. } => {

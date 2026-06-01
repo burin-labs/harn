@@ -494,9 +494,12 @@ fn child_nodes(node: &SNode) -> Vec<&SNode> {
         | Node::Retry { body, .. }
         | Node::TryExpr { body }
         | Node::DeferStmt { body }
-        | Node::MutexBlock { body }
         | Node::Block(body)
         | Node::OverrideDecl { body, .. } => children.extend(body.iter()),
+        Node::MutexBlock { key, body } => {
+            children.extend(key.as_deref());
+            children.extend(body.iter());
+        }
         Node::ImplBlock { methods, .. } => children.extend(methods.iter()),
         Node::IfElse {
             condition,

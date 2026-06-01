@@ -66,7 +66,7 @@ fn collect_ast_ranges(
         | Node::TryExpr { body }
         | Node::DeferStmt { body }
         | Node::DeadlineBlock { body, .. }
-        | Node::MutexBlock { body }
+        | Node::MutexBlock { body, .. }
         | Node::Closure { body, .. } => {
             push_span_range(ranges, seen, &node.span, Some(FoldingRangeKind::Region));
             collect_body_ranges(body, ranges, seen);

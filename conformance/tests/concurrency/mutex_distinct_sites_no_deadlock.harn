@@ -1,0 +1,9 @@
+pipeline test(task) {
+  // Two distinct bare `mutex {}` blocks key on their own lexical call-sites,
+  // so nesting them no longer self-deadlocks (they are independent locks).
+  mutex {
+    mutex {
+      log("nested bare blocks are independent locks")
+    }
+  }
+}

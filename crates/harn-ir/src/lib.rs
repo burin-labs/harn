@@ -1594,7 +1594,7 @@ impl<'a> HandlerIrBuilder<'a> {
             Node::TryExpr { body }
             | Node::SpawnExpr { body }
             | Node::DeferStmt { body }
-            | Node::MutexBlock { body }
+            | Node::MutexBlock { body, .. }
             | Node::Block(body) => self.build_block(body, incoming),
             Node::DeadlineBlock { duration, body } => {
                 let duration_exits = self.build_expr(duration, incoming);

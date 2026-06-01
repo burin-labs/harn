@@ -326,16 +326,29 @@ Atomic updates mutate the handle and return the previous integer value.
 ## Mutex
 
 `mutex { ... }` is a process-local, fair critical section inherited by
-`spawn` and `parallel` child tasks. It uses the default mutex key
-`"__default__"` and releases automatically when the lexical scope exits,
-including `throw`, `return`, `break`, and caught runtime errors.
+`spawn` and `parallel` child tasks. It releases automatically when the lexical
+scope exits, including `throw`, `return`, `break`, and caught runtime errors.
+
+A bare `mutex { ... }` keys on its own **lexical call-site**, so two distinct
+`mutex {}` blocks are independent locks and do not serialize against each other.
+To guard a shared resource across blocks, name it — `mutex(resource) { ... }`
+keys on the resource expression's structural value, so every block naming the
+same resource mutually excludes regardless of where it appears:
 
 ```harn
 mutex {
-  // only one task executes this block at a time
+  // only one task executes this particular block at a time
   var count = count + 1
 }
+
+mutex(account_id) {
+  // serializes only against other `mutex(account_id)` blocks for the same id
+  apply_charge(account_id)
+}
 ```
+
+Re-acquiring the same key on a single task (e.g. `mutex(x) { mutex(x) { } }`)
+raises `HARN-ORC-011` rather than deadlocking.
 
 Use the named primitives when a workflow needs separate keys, timeouts,
 or observable permits:
@@ -358,7 +371,8 @@ Harn synchronization is intentionally higher-level than OS locks:
 
 | Primitive | Scope | Fairness | Timeout/cancel | Use |
 |---|---|---|---|---|
-| `mutex { ... }` | process-local default key | FIFO | cancellable | Small critical-section updates |
+| `mutex { ... }` | process-local, per-call-site key | FIFO | cancellable | Small critical-section updates |
+| `mutex(resource) { ... }` | process-local, structural-value key | FIFO | cancellable | Guarding a named shared resource |
 | `sync_mutex_acquire(key, timeout?)` | process-local named key | FIFO | returns `nil` on timeout, throws on cancellation | Named critical sections |
 | `sync_rwlock_acquire(key, mode, timeout?)` | process-local named key | FIFO | returns `nil` on timeout, throws on cancellation | Shared readers / exclusive writers |
 | `sync_semaphore_acquire(key, capacity, permits?, timeout?)` | process-local named key | FIFO | returns `nil` on timeout, throws on cancellation | Bounded connector or model work |

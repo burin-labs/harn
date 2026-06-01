@@ -178,7 +178,7 @@ impl<'a, 'd> State<'a, 'd> {
             | Node::SpawnExpr { body }
             | Node::Block(body)
             | Node::DeferStmt { body }
-            | Node::MutexBlock { body } => self.visit_block(body),
+            | Node::MutexBlock { body, .. } => self.visit_block(body),
             Node::DeadlineBlock { duration, body } => {
                 self.visit_node(duration);
                 self.visit_block(body);

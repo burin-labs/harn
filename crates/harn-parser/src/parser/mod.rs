@@ -23,6 +23,33 @@ mod tests {
     }
 
     #[test]
+    fn parses_bare_and_keyed_mutex() {
+        fn first_mutex_has_key(source: &str) -> Option<bool> {
+            let program = parse_source(source).unwrap();
+            let mut has_key = None;
+            crate::visit::walk_program(&program, &mut |node| {
+                if has_key.is_none() {
+                    if let Node::MutexBlock { key, .. } = &node.node {
+                        has_key = Some(key.is_some());
+                    }
+                }
+            });
+            has_key
+        }
+
+        assert_eq!(
+            first_mutex_has_key("pipeline default(task) { mutex { log(1) } }"),
+            Some(false),
+            "bare `mutex {{}}` should parse with no key"
+        );
+        assert_eq!(
+            first_mutex_has_key("pipeline default(task) { mutex(\"acct\") { log(1) } }"),
+            Some(true),
+            "`mutex(resource) {{}}` should parse with a key"
+        );
+    }
+
+    #[test]
     fn parser_reports_expression_nesting_depth_limit() {
         let depth = state::MAX_NESTING_DEPTH + 1;
         let source = format!("let x = {}0{}", "(".repeat(depth), ")".repeat(depth));

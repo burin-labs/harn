@@ -633,7 +633,7 @@ fn collect_called_functions_node(node: &SNode, calls: &mut Vec<String>) {
         Node::TryExpr { body }
         | Node::SpawnExpr { body }
         | Node::DeferStmt { body }
-        | Node::MutexBlock { body }
+        | Node::MutexBlock { body, .. }
         | Node::Block(body)
         | Node::Closure { body, .. } => collect_many(body, calls),
         Node::DeadlineBlock { duration, body } => {
