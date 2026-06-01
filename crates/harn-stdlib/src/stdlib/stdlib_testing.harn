@@ -650,3 +650,289 @@ pub fn assert_golden_transcript(expected, actual, message = nil) {
   require __testing_golden_match(expected, actual), message ?? "golden transcript mismatch"
   return actual
 }
+
+// -------------------------------------------------------------------------------------------------
+
+// LLM mock turn builders
+//
+// `with_llm_mocks` / `with_mocks` already accept a list of LLM response
+// dicts, but hand-building `{tool_calls: [{id, name, arguments}]}` and
+// `{text: "##DONE##"}` literals is the reason most fixtures still reach
+// for the raw `llm_mock_clear()` + sequential `llm_mock(...)` form. These
+// constructors make a scoped script read as one ordered list of turns:
+//
+//   with_llm_mocks(
+//     [llm_tool_call("write_note", {path: "n.txt"}), llm_done()],
+//     { _ -> run_agent() },
+//   )
+
+// -------------------------------------------------------------------------------------------------
+
+/**
+ * Build a plain-text assistant turn for an LLM mock script.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: llm_text("Sure, here is the answer.")
+ */
+pub fn llm_text(text: string) -> dict {
+  return {text: text}
+}
+
+/**
+ * Build the terminal "done" turn for an agent-loop LLM mock script. The
+ * default marker matches the `##DONE##` sentinel agent loops recognize;
+ * pass a custom marker when the loop under test uses a different one.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: llm_done()
+ */
+pub fn llm_done(marker: string = "##DONE##") -> dict {
+  return {text: marker}
+}
+
+/**
+ * Build an assistant turn that fails the LLM call with `message`. Mirrors
+ * the `{error: ...}` shape `llm_mock` accepts so error-path tests can be
+ * scripted alongside successful turns.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: llm_error("rate limited")
+ */
+pub fn llm_error(message: string) -> dict {
+  return {error: message}
+}
+
+/**
+ * Build a single-tool-call assistant turn. `id` defaults to the tool name
+ * so simple scripts need not invent call ids; pass an explicit `id` when a
+ * test asserts on it or issues the same tool twice in one turn.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: llm_tool_call("write_note", {path: "n.txt"})
+ */
+pub fn llm_tool_call(name: string, args = {}, id = nil) -> dict {
+  return {tool_calls: [{id: id ?? name, name: name, arguments: args ?? {}}]}
+}
+
+/**
+ * Build an assistant turn that issues several tool calls in parallel.
+ * Each entry is `{name, args?, id?}`; a missing `id` falls back to
+ * `name + "_" + index` so parallel calls to the same tool stay distinct.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: llm_tool_calls([{name: "a", args: {}}, {name: "b"}])
+ */
+pub fn llm_tool_calls(calls) -> dict {
+  var out = []
+  var index = 0
+  for call in calls ?? [] {
+    let resolved_id = call?.id ?? (to_string(call?.name) + "_" + to_string(index))
+    out = out.push({id: resolved_id, name: call?.name, arguments: call?.args ?? {}})
+    index = index + 1
+  }
+  return {tool_calls: out}
+}
+
+/**
+ * Alias for `with_llm_mocks` that reads as scripting an ordered list of
+ * assistant turns. Pair it with the `llm_*` turn builders.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: with_llm_script([llm_text("hi"), llm_done()], body)
+ */
+pub fn with_llm_script(turns, body) {
+  return with_llm_mocks(turns, body)
+}
+
+// -------------------------------------------------------------------------------------------------
+
+// Error assertions
+//
+// Collapses the `try { ... }` + `is_err` + `unwrap_err` + `to_string` +
+// `contains` chain that fixtures hand-roll to assert a call rejects.
+
+// -------------------------------------------------------------------------------------------------
+
+/**
+ * Run `body` and assert it throws. Returns the thrown error so callers can
+ * make further assertions on it. Fails if the body returns normally.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: assert_throws({ -> parse("") })
+ */
+pub fn assert_throws(body, message = nil) -> any {
+  var threw = false
+  var captured = nil
+  try {
+    body()
+  } catch (e) {
+    threw = true
+    captured = e
+  }
+  require threw, message ?? "assert_throws: expected the body to throw, but it returned normally"
+  return captured
+}
+
+/**
+ * Run `body`, assert it throws, and assert the rendered error contains
+ * `substring`. Returns the thrown error. Replaces the
+ * try/is_err/unwrap_err/to_string/contains chain with one call.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: assert_error_contains({ -> connect("") }, "url is required")
+ */
+pub fn assert_error_contains(body, substring: string, message = nil) -> any {
+  let captured = assert_throws(body, message)
+  let rendered = to_string(captured)
+  require contains(rendered, substring), message
+    ?? ("assert_error_contains: expected thrown error to contain "
+    + to_string(substring)
+    + ", got: "
+    + rendered)
+  return captured
+}
+
+/**
+ * Run `body` and assert it does NOT throw, returning its value. Useful for
+ * pinning a regression where a previously-rejected input must now succeed.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: assert_no_throw({ -> parse("ok") })
+ */
+pub fn assert_no_throw(body, message = nil) -> any {
+  // NB: assign-then-return rather than `return body()` inside the try.
+  // A throw inside `return <expr>` within a try is not observed by the
+  // local catch, so the assign-then-return shape is required for the
+  // catch to fire.
+  var value = nil
+  try {
+    value = body()
+  } catch (e) {
+    require false, message ?? ("assert_no_throw: expected the body not to throw, but it threw: " + to_string(e))
+  }
+  return value
+}
+
+// -------------------------------------------------------------------------------------------------
+
+// Filesystem fixtures
+//
+// A scoped temp workspace with guaranteed cleanup — the fs counterpart to
+// `with_host_mocks`. `with_fs` additionally seeds the workspace from a
+// `{ relative_path: contents }` dict so a test states its starting tree
+// declaratively instead of hand-writing mkdir/write/cleanup.
+
+// -------------------------------------------------------------------------------------------------
+
+fn __testing_fs_content(value) -> string {
+  if type_of(value) == "string" {
+    return value
+  }
+  return json_stringify(value)
+}
+
+/**
+ * Create a unique temp directory, pass its path to `body`, and delete it
+ * recursively on exit — even if `body` throws. Returns whatever `body`
+ * returns.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: with_temp_dir({ dir -> harness.fs.write_text(dir + "/x", "1") })
+ */
+pub fn with_temp_dir(body) -> any {
+  let dir = harness.fs.temp_dir() + "/harn-test-" + uuid_v7()
+  harness.fs.mkdir(dir)
+  try {
+    let result = body(dir)
+    harness.fs.delete(dir)
+    return result
+  } catch (e) {
+    harness.fs.delete(dir)
+    throw e
+  }
+}
+
+/**
+ * Like `with_temp_dir`, but first seeds the workspace from `files`, a
+ * `{ relative_path: contents }` dict. String contents are written
+ * verbatim; any other value is JSON-encoded. Parent directories are
+ * created automatically, so `{ "a/b/c.txt": "hi" }` just works. The temp
+ * directory path is passed to `body` and removed on exit.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: with_fs({"in.txt": "hello"}, { dir -> harness.fs.read_text(dir + "/in.txt") })
+ */
+pub fn with_fs(files, body) -> any {
+  return with_temp_dir(
+    { dir ->
+      for entry in entries(files ?? {}) {
+        let full = dir + "/" + entry.key
+        harness.fs.mkdir(dirname(full))
+        harness.fs.write_text(full, __testing_fs_content(entry.value))
+      }
+      body(dir)
+    },
+  )
+}
+
+/**
+ * One declarative block for tests that mix mocks and a seeded workspace.
+ * `config` accepts:
+ *   * `host` — host-mock entries (same shape as `with_host_mocks`)
+ *   * `llm`  — LLM-mock turns (build them with the `llm_*` constructors)
+ *   * `fs`   — a `{ relative_path: contents }` seed dict (see `with_fs`)
+ *   * `temp_dir` — set `true` for an empty temp workspace without `fs`
+ *
+ * `body` receives a context dict `{dir}` (the temp directory, or nil when
+ * neither `fs` nor `temp_dir` is requested). All scopes are torn down in
+ * reverse order on exit, including on a thrown error.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: with_scenario({llm: [llm_done()], fs: {"a.txt": "1"}}, { s -> run(s.dir) })
+ */
+pub fn with_scenario(config, body) {
+  let mock_config = {host_mocks: config?.host ?? [], llm_mocks: config?.llm ?? []}
+  if config?.fs != nil {
+    return with_fs(config.fs, { dir -> with_mocks(mock_config, { _ -> body({dir: dir}) }) })
+  }
+  if config?.temp_dir {
+    return with_temp_dir({ dir -> with_mocks(mock_config, { _ -> body({dir: dir}) }) })
+  }
+  return with_mocks(mock_config, { _ -> body({dir: nil}) })
+}
