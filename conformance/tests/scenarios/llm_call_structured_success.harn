@@ -1,3 +1,5 @@
+import { llm_text, with_llm_script } from "std/testing"
+
 /**
  * `llm_call_structured(prompt, schema, options?)` returns the
  * validated data directly — no `.data` unwrap. The helper forces
@@ -10,18 +12,25 @@ pipeline default() {
     required: ["name", "age"],
     properties: {name: {type: "string"}, age: {type: "integer"}},
   }
-  llm_mock({text: "{\"name\": \"Ada\", \"age\": 36}"})
-  let summary = llm_call_structured("Summarize", schema, {provider: "mock"})
-  __io_println(summary.name)
-  __io_println(summary.age)
-  // A single call was made — no schema retry needed.
-  __io_println(len(llm_mock_calls()))
-  // The forced options are applied by the helper, so a user-provided
-  // `system` lands in the standard slot.
-  llm_mock_clear()
-  llm_mock({text: "{\"name\": \"Grace\", \"age\": 42}"})
-  let grace = llm_call_structured("Summarize", schema, {provider: "mock", system: "You are precise."})
-  __io_println(grace.name)
-  let calls = llm_mock_calls()
-  __io_println(calls[0].system)
+  with_llm_script(
+    [llm_text("{\"name\": \"Ada\", \"age\": 36}")],
+    { ->
+      let summary = llm_call_structured("Summarize", schema, {provider: "mock"})
+      __io_println(summary.name)
+      __io_println(summary.age)
+      __io_println(len(llm_mock_calls()))
+    },
+  )
+  with_llm_script(
+    [llm_text("{\"name\": \"Grace\", \"age\": 42}")],
+    { ->
+      let grace = llm_call_structured("Summarize", schema, {provider: "mock", system: "You are precise."})
+      __io_println(grace.name)
+      let calls = llm_mock_calls()
+      __io_println(calls[0].system)
+    },
+  )
 }
+// A single call was made — no schema retry needed.
+// The forced options are applied by the helper, so a user-provided
+// `system` lands in the standard slot.

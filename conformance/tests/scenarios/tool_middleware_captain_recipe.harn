@@ -16,6 +16,7 @@ import {
   with_summary,
   with_telemetry,
 } from "std/llm/tool_middleware"
+import { llm_text, with_llm_script } from "std/testing"
 
 let audit_records = atomic(0)
 
@@ -73,67 +74,70 @@ fn tools() {
 }
 
 pipeline default() {
-  llm_mock_clear()
-  llm_mock(
-    {
-      tool_calls: [
-        {id: "t1", name: "read", arguments: {path: "/tmp/a", reason: "inspect target file"}},
-        {id: "t2", name: "edit", arguments: {path: "/tmp/a", body: "x", reason: "fix typo"}},
-        {id: "t3", name: "escalate", arguments: {task: "Review fix", reason: "needs human eyes"}},
-      ],
-    },
-  )
-  llm_mock({text: "Done. ##DONE##"})
-  let reason_mw = with_required_reason()
-  let stack = compose_tool_callers(
+  with_llm_script(
     [
-      with_audit_log(
-        { _record ->
-          let _ = atomic_add(audit_records, 1)
-        },
-      ),
-      with_telemetry(
-        { _record ->
-          let _ = atomic_add(telemetry_records, 1)
-        },
-      ),
-      with_summary({ call, _result -> return call.tool_name + " ran" }),
-      reason_mw.caller,
-      with_handoff_artifact(
-        {
-          sink: { _record, _call ->
-            let _ = atomic_add(handoff_records, 1)
-          },
-        },
-      ),
-      with_rate_limit({max_calls: 10}),
-      with_dry_run({only: ["edit"], message: "preview"}),
+      {
+        tool_calls: [
+          {id: "t1", name: "read", arguments: {path: "/tmp/a", reason: "inspect target file"}},
+          {id: "t2", name: "edit", arguments: {path: "/tmp/a", body: "x", reason: "fix typo"}},
+          {id: "t3", name: "escalate", arguments: {task: "Review fix", reason: "needs human eyes"}},
+        ],
+      },
+      llm_text("Done. ##DONE##"),
     ],
-  )
-  let registry = tools()
-  let result = agent_loop(
-    "polish + handoff",
-    nil,
-    {
-      provider: "mock",
-      tools: registry,
-      tool_format: "native",
-      max_iterations: 3,
-      loop_until_done: true,
-      tool_caller: stack,
+    { ->
+      let reason_mw = with_required_reason()
+      let stack = compose_tool_callers(
+        [
+          with_audit_log(
+            { _record ->
+              let _ = atomic_add(audit_records, 1)
+            },
+          ),
+          with_telemetry(
+            { _record ->
+              let _ = atomic_add(telemetry_records, 1)
+            },
+          ),
+          with_summary({ call, _result -> return call.tool_name + " ran" }),
+          reason_mw.caller,
+          with_handoff_artifact(
+            {
+              sink: { _record, _call ->
+                let _ = atomic_add(handoff_records, 1)
+              },
+            },
+          ),
+          with_rate_limit({max_calls: 10}),
+          with_dry_run({only: ["edit"], message: "preview"}),
+        ],
+      )
+      let registry = tools()
+      let result = agent_loop(
+        "polish + handoff",
+        nil,
+        {
+          provider: "mock",
+          tools: registry,
+          tool_format: "native",
+          max_iterations: 3,
+          loop_until_done: true,
+          tool_caller: stack,
+        },
+      )
+      __io_println(result.status)
+      __io_println(atomic_get(audit_records))
+      __io_println(atomic_get(telemetry_records))
+      __io_println(atomic_get(handoff_records))
+      __io_println(len(result.tools.successful))
+      __io_println(contains(result.tools.successful, "read"))
+      __io_println(contains(result.tools.successful, "edit"))
+      __io_println(contains(result.tools.successful, "escalate"))
     },
   )
-  __io_println(result.status)
-  // Three tool dispatches: each fired audit + telemetry sinks once.
-  __io_println(atomic_get(audit_records))
-  __io_println(atomic_get(telemetry_records))
-  // Exactly one handoff was emitted (the third call).
-  __io_println(atomic_get(handoff_records))
-  // All three calls succeeded as far as the agent loop is concerned —
-  // the dry-run layer returns ok=true with status="dry_run" instead of
-  // dispatching the underlying handler.
-  __io_println(len(result.tools.successful))
-  __io_println(contains(result.tools.successful, "read"))
-  __io_println(contains(result.tools.successful, "edit"))
-  __io_println(contains(result.tools.successful, "escalate"))
 }
+// Three tool dispatches: each fired audit + telemetry sinks once.
+// Exactly one handoff was emitted (the third call).
+// All three calls succeeded as far as the agent loop is concerned —
+// the dry-run layer returns ok=true with status="dry_run" instead of
+// dispatching the underlying handler.

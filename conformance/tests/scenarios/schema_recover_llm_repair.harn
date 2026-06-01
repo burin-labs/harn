@@ -1,3 +1,5 @@
+import { llm_text, with_llm_script } from "std/testing"
+
 /**
  * `schema_recover` falls through to the LLM repair stage when the
  * three deterministic stages can't recover the value, and the mock
@@ -7,13 +9,17 @@
  */
 pipeline default() {
   let schema = {type: "object", required: ["verdict"], properties: {verdict: {type: "string"}}}
-  llm_mock({text: "{\"verdict\": \"pass\"}"})
-  let r = schema_recover("model said pass but failed to format it", schema, {provider: "mock"})
-  __io_println(r.ok)
-  __io_println(r.stage)
-  let data = r.data
-  if data != nil {
-    __io_println(data.verdict)
-  }
-  __io_println(r.repaired)
+  with_llm_script(
+    [llm_text("{\"verdict\": \"pass\"}")],
+    { ->
+      let r = schema_recover("model said pass but failed to format it", schema, {provider: "mock"})
+      __io_println(r.ok)
+      __io_println(r.stage)
+      let data = r.data
+      if data != nil {
+        __io_println(data.verdict)
+      }
+      __io_println(r.repaired)
+    },
+  )
 }

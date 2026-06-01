@@ -1,3 +1,5 @@
+import { with_llm_script } from "std/testing"
+
 fn note_tools() {
   var tools = tool_registry()
   tools = tool_define(
@@ -24,31 +26,35 @@ fn note_tools() {
 }
 
 pipeline main() {
-  llm_mock(
-    {
-      tool_calls: [
-        {id: "read_1", name: "read_note", arguments: {path: "/workspace/a.txt"}},
-        {id: "write_1", name: "write_note", arguments: {path: "/workspace/a.txt"}},
-      ],
-    },
-  )
-  let result = agent_loop(
-    "Read then write.",
-    "Use tools.",
-    {
-      provider: "mock",
-      tools: note_tools(),
-      tool_format: "native",
-      max_iterations: 1,
-      permissions: {
-        allow: {read_note: { args -> args.path.starts_with("/workspace/") }},
-        deny: {write_note: { args -> true }},
+  with_llm_script(
+    [
+      {
+        tool_calls: [
+          {id: "read_1", name: "read_note", arguments: {path: "/workspace/a.txt"}},
+          {id: "write_1", name: "write_note", arguments: {path: "/workspace/a.txt"}},
+        ],
       },
+    ],
+    { ->
+      let result = agent_loop(
+        "Read then write.",
+        "Use tools.",
+        {
+          provider: "mock",
+          tools: note_tools(),
+          tool_format: "native",
+          max_iterations: 1,
+          permissions: {
+            allow: {read_note: { args -> args.path.starts_with("/workspace/") }},
+            deny: {write_note: { args -> true }},
+          },
+        },
+      )
+      let events = transcript_events(result?.transcript)
+      __io_println(len(transcript_events_by_kind(result?.transcript, "PermissionGrant")) == 1)
+      __io_println(len(transcript_events_by_kind(result?.transcript, "PermissionDeny")) == 1)
+      __io_println(result?.tools?.rejected[0] == "write_note")
+      __io_println(json_stringify(events).contains("/workspace/a.txt"))
     },
   )
-  let events = transcript_events(result?.transcript)
-  __io_println(len(transcript_events_by_kind(result?.transcript, "PermissionGrant")) == 1)
-  __io_println(len(transcript_events_by_kind(result?.transcript, "PermissionDeny")) == 1)
-  __io_println(result?.tools?.rejected[0] == "write_note")
-  __io_println(json_stringify(events).contains("/workspace/a.txt"))
 }

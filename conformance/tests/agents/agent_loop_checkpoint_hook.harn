@@ -6,7 +6,6 @@
  */
 pipeline main() {
   clear_session_hooks()
-  llm_mock_clear()
   let observed = shared_cell({scope: "task_group", key: "checkpoint-kinds", initial: ""})
   register_checkpoint_hook(
     ["iteration_start", "pre_tool_dispatch", "loop_exit"],

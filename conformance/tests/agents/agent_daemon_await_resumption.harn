@@ -1,25 +1,30 @@
 import { agent_capture_events } from "std/agent/events"
+import { llm_text, with_llm_script } from "std/testing"
 
 pipeline test(task) {
   let session_id = "daemon-await-resumption-" + uuid()
-  llm_mock({text: "daemon idle"})
-  let captured = agent_capture_events(
-    session_id,
-    fn() { return agent_loop(
-      "Poll for background work",
-      nil,
-      {provider: "mock", daemon: true, max_iterations: 1, wake_interval_ms: 1, session_id: session_id},
-    ) },
+  with_llm_script(
+    [llm_text("daemon idle")],
+    { ->
+      let captured = agent_capture_events(
+        session_id,
+        fn() { return agent_loop(
+          "Poll for background work",
+          nil,
+          {provider: "mock", daemon: true, max_iterations: 1, wake_interval_ms: 1, session_id: session_id},
+        ) },
+      )
+      let audit = captured.events
+        .filter(
+        { event -> event.type == "tool_call_audit" && event.tool_name == "agent_await_resumption" },
+      )
+      __io_println(captured.result.status)
+      __io_println(len(audit) == 1)
+      __io_println(audit[0]?.audit?.status)
+      __io_println(audit[0]?.audit?.reason)
+      __io_println(audit[0]?.audit?.initiator)
+      __io_println(audit[0]?.audit?.conditions?.timeout?.duration_minutes)
+      __io_println(audit[0]?.audit?.conditions?.timeout?.on_timeout)
+    },
   )
-  let audit = captured.events
-    .filter(
-    { event -> event.type == "tool_call_audit" && event.tool_name == "agent_await_resumption" },
-  )
-  __io_println(captured.result.status)
-  __io_println(len(audit) == 1)
-  __io_println(audit[0]?.audit?.status)
-  __io_println(audit[0]?.audit?.reason)
-  __io_println(audit[0]?.audit?.initiator)
-  __io_println(audit[0]?.audit?.conditions?.timeout?.duration_minutes)
-  __io_println(audit[0]?.audit?.conditions?.timeout?.on_timeout)
 }

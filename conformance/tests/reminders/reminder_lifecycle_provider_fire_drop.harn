@@ -1,4 +1,5 @@
 import { agent_reminder_providers_fire, agent_session_messages } from "std/agent/state"
+import { llm_text, with_llm_script } from "std/testing"
 
 pipeline main() {
   clear_reminder_providers()
@@ -38,75 +39,76 @@ pipeline main() {
       },
     },
   )
-  llm_mock_clear()
-  llm_mock({text: "ok"})
-  llm_call(
-    "ignored",
-    nil,
-    {
-      provider: "mock",
-      model: "o3",
-      messages: agent_session_messages(session),
-      session_id: session,
-      _iteration: 4,
+  with_llm_script(
+    [llm_text("ok"), llm_text("ok"), llm_text("ok")],
+    { ->
+      llm_call(
+        "ignored",
+        nil,
+        {
+          provider: "mock",
+          model: "o3",
+          messages: agent_session_messages(session),
+          session_id: session,
+          _iteration: 4,
+        },
+      )
+      agent_session_reset(session)
+      agent_session_inject(
+        session,
+        {
+          id: "bad-reminder-event",
+          kind: "system_reminder",
+          role: "system",
+          visibility: "public",
+          text: "bad",
+          reminder: {id: "bad-reminder"},
+        },
+      )
+      llm_call("ignored", nil, {provider: "mock", model: "o3", session_id: session})
+      let after_first_drop = event_log.latest(topic)
+      llm_call("ignored", nil, {provider: "mock", model: "o3", session_id: session})
+      let drop_was_one_shot = event_log.latest(topic) == after_first_drop
+      let validation_session = agent_session_open("reminder-lifecycle-validation-no-fire")
+      agent_session_reset(validation_session)
+      agent_session_inject(validation_session, transcript_reminder_event({body: "do not fire"}))
+      let validation_cursor = event_log.latest(topic)
+      let rejected = try {
+        llm_call(
+          "ignored",
+          nil,
+          {provider: "mock", model: "o3", session_id: validation_session, transcript: {}},
+        )
+        false
+      } catch (e) {
+        contains(json_stringify(e), "transcript")
+      }
+      let validation_did_not_fire = event_log.latest(topic) == validation_cursor
+      let stream = event_log
+        .subscribe({topic: topic, from_cursor: cursor, kind_prefix: "transcript.reminder."})
+      let evaluated = stream.next().value
+      let injected = stream.next().value
+      let fired = stream.next().value
+      let dropped = stream.next().value
+      __io_println(report.fired_count)
+      __io_println(evaluated.kind)
+      __io_println(evaluated.payload.provider_id)
+      __io_println(evaluated.payload.event)
+      __io_println(evaluated.payload.fired)
+      __io_println(injected.kind)
+      __io_println(injected.payload.source)
+      __io_println(fired.kind)
+      __io_println(fired.payload.session_id == session)
+      __io_println(fired.payload.turn_number)
+      __io_println(fired.payload.rendered_role)
+      __io_println(dropped.kind)
+      __io_println(dropped.payload.session_id == session)
+      __io_println(dropped.payload.reminder_id)
+      __io_println(dropped.payload.reason)
+      __io_println(drop_was_one_shot)
+      __io_println(rejected)
+      __io_println(validation_did_not_fire)
+      clear_reminder_providers()
     },
   )
-  agent_session_reset(session)
-  agent_session_inject(
-    session,
-    {
-      id: "bad-reminder-event",
-      kind: "system_reminder",
-      role: "system",
-      visibility: "public",
-      text: "bad",
-      reminder: {id: "bad-reminder"},
-    },
-  )
-  llm_mock({text: "ok"})
-  llm_call("ignored", nil, {provider: "mock", model: "o3", session_id: session})
-  let after_first_drop = event_log.latest(topic)
-  llm_mock({text: "ok"})
-  llm_call("ignored", nil, {provider: "mock", model: "o3", session_id: session})
-  let drop_was_one_shot = event_log.latest(topic) == after_first_drop
-  let validation_session = agent_session_open("reminder-lifecycle-validation-no-fire")
-  agent_session_reset(validation_session)
-  agent_session_inject(validation_session, transcript_reminder_event({body: "do not fire"}))
-  let validation_cursor = event_log.latest(topic)
-  let rejected = try {
-    llm_call(
-      "ignored",
-      nil,
-      {provider: "mock", model: "o3", session_id: validation_session, transcript: {}},
-    )
-    false
-  } catch (e) {
-    contains(json_stringify(e), "transcript")
-  }
-  let validation_did_not_fire = event_log.latest(topic) == validation_cursor
-  let stream = event_log
-    .subscribe({topic: topic, from_cursor: cursor, kind_prefix: "transcript.reminder."})
-  let evaluated = stream.next().value
-  let injected = stream.next().value
-  let fired = stream.next().value
-  let dropped = stream.next().value
-  __io_println(report.fired_count)
-  __io_println(evaluated.kind)
-  __io_println(evaluated.payload.provider_id)
-  __io_println(evaluated.payload.event)
-  __io_println(evaluated.payload.fired)
-  __io_println(injected.kind)
-  __io_println(injected.payload.source)
-  __io_println(fired.kind)
-  __io_println(fired.payload.session_id == session)
-  __io_println(fired.payload.turn_number)
-  __io_println(fired.payload.rendered_role)
-  __io_println(dropped.kind)
-  __io_println(dropped.payload.session_id == session)
-  __io_println(dropped.payload.reminder_id)
-  __io_println(dropped.payload.reason)
-  __io_println(drop_was_one_shot)
-  __io_println(rejected)
-  __io_println(validation_did_not_fire)
-  clear_reminder_providers()
 }

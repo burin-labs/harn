@@ -1,41 +1,62 @@
+import { with_llm_script } from "std/testing"
+
 pipeline test(task) {
-  llm_mock_clear()
-  llm_call("disabled", nil, {provider: "mock", model: "mock-model", thinking: {mode: "disabled"}})
-  let disabled = llm_mock_calls()[0].thinking
-  assert(disabled.mode == "disabled", "disabled mode reaches mock provider")
-  llm_mock_clear()
-  llm_call(
-    "enabled",
-    nil,
-    {provider: "mock", model: "claude-opus-4-6", thinking: {mode: "enabled", budget_tokens: 8000}},
+  with_llm_script(
+    [],
+    { ->
+      llm_call("disabled", nil, {provider: "mock", model: "mock-model", thinking: {mode: "disabled"}})
+      let disabled = llm_mock_calls()[0].thinking
+      assert(disabled.mode == "disabled", "disabled mode reaches mock provider")
+    },
   )
-  let enabled = llm_mock_calls()[0].thinking
-  assert(enabled.mode == "enabled", "enabled mode reaches mock provider")
-  assert(enabled.budget_tokens == 8000, "enabled budget reaches mock provider")
-  llm_mock_clear()
-  llm_call(
-    "adaptive",
-    nil,
-    {provider: "mock", model: "claude-opus-4-7", thinking: {mode: "adaptive"}},
+  with_llm_script(
+    [],
+    { ->
+      llm_call(
+        "enabled",
+        nil,
+        {provider: "mock", model: "claude-opus-4-6", thinking: {mode: "enabled", budget_tokens: 8000}},
+      )
+      let enabled = llm_mock_calls()[0].thinking
+      assert(enabled.mode == "enabled", "enabled mode reaches mock provider")
+      assert(enabled.budget_tokens == 8000, "enabled budget reaches mock provider")
+    },
   )
-  let adaptive = llm_mock_calls()[0].thinking
-  assert(adaptive.mode == "adaptive", "adaptive mode reaches mock provider")
-  llm_mock_clear()
-  llm_call("effort", nil, {provider: "mock", model: "o3", thinking: {mode: "effort", level: "high"}})
-  let effort = llm_mock_calls()[0].thinking
-  assert(effort.mode == "effort", "effort mode reaches mock provider")
-  assert(effort.level == "high", "effort level reaches mock provider")
-  llm_mock_clear()
-  llm_mock({text: "reasoned answer", thinking_summary: "checked constraints"})
-  let openai_effort = llm_call(
-    "openai reasoning",
-    nil,
-    {provider: "openai", model: "o3", thinking: {mode: "effort", level: "high"}},
+  with_llm_script(
+    [],
+    { ->
+      llm_call(
+        "adaptive",
+        nil,
+        {provider: "mock", model: "claude-opus-4-7", thinking: {mode: "adaptive"}},
+      )
+      let adaptive = llm_mock_calls()[0].thinking
+      assert(adaptive.mode == "adaptive", "adaptive mode reaches mock provider")
+    },
   )
-  let openai_call = llm_mock_calls()[0].thinking
-  assert(openai_call.mode == "effort", "openai effort mode reaches mock transport")
-  assert(openai_call.level == "high", "openai effort level reaches mock transport")
-  assert(openai_effort.text == "reasoned answer", "openai effort call uses mock response")
-  assert(openai_effort.thinking_summary == "checked constraints", "mock summary surfaces on result")
-  log("llm_thinking_config tests passed")
+  with_llm_script(
+    [],
+    { ->
+      llm_call("effort", nil, {provider: "mock", model: "o3", thinking: {mode: "effort", level: "high"}})
+      let effort = llm_mock_calls()[0].thinking
+      assert(effort.mode == "effort", "effort mode reaches mock provider")
+      assert(effort.level == "high", "effort level reaches mock provider")
+    },
+  )
+  with_llm_script(
+    [{text: "reasoned answer", thinking_summary: "checked constraints"}],
+    { ->
+      let openai_effort = llm_call(
+        "openai reasoning",
+        nil,
+        {provider: "openai", model: "o3", thinking: {mode: "effort", level: "high"}},
+      )
+      let openai_call = llm_mock_calls()[0].thinking
+      assert(openai_call.mode == "effort", "openai effort mode reaches mock transport")
+      assert(openai_call.level == "high", "openai effort level reaches mock transport")
+      assert(openai_effort.text == "reasoned answer", "openai effort call uses mock response")
+      assert(openai_effort.thinking_summary == "checked constraints", "mock summary surfaces on result")
+      log("llm_thinking_config tests passed")
+    },
+  )
 }

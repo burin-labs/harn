@@ -1,3 +1,5 @@
+import { llm_text, with_llm_script } from "std/testing"
+
 /**
  * Mocked Gemini-native tool calls should drive normal agent_loop dispatch.
  *
@@ -24,61 +26,64 @@ fn lookup_tools() {
 }
 
 pipeline test(task) {
-  llm_mock_clear()
   atomic_set(lookups, 0)
-  llm_mock(
-    {
-      provider: "mock",
-      model: "gemini-2.5-flash",
-      text: "checking",
-      tool_calls: [
+  with_llm_script(
+    [
+      {
+        provider: "mock",
+        model: "gemini-2.5-flash",
+        text: "checking",
+        tool_calls: [
+          {
+            id: "gemini_call_1",
+            name: "lookup",
+            arguments: {query: "harn"},
+            thought_signature: "opaque-gemini-signature",
+          },
+        ],
+        blocks: [
+          {type: "output_text", text: "checking", visibility: "public"},
+          {
+            type: "tool_call",
+            id: "gemini_call_1",
+            name: "lookup",
+            arguments: {query: "harn"},
+            thought_signature: "opaque-gemini-signature",
+            visibility: "internal",
+          },
+        ],
+      },
+      llm_text("##DONE##"),
+    ],
+    { ->
+      let result = agent_loop(
+        "Use the lookup tool.",
+        nil,
         {
-          id: "gemini_call_1",
-          name: "lookup",
-          arguments: {query: "harn"},
-          thought_signature: "opaque-gemini-signature",
+          provider: "mock",
+          model: "gemini-2.5-flash",
+          tools: lookup_tools(),
+          tool_format: "native",
+          loop_until_done: true,
+          done_sentinel: "##DONE##",
+          max_iterations: 3,
         },
-      ],
-      blocks: [
-        {type: "output_text", text: "checking", visibility: "public"},
-        {
-          type: "tool_call",
-          id: "gemini_call_1",
-          name: "lookup",
-          arguments: {query: "harn"},
-          thought_signature: "opaque-gemini-signature",
-          visibility: "internal",
-        },
-      ],
+      )
+      assert(result.status == "done", "Gemini mock agent loop finishes")
+      assert(atomic_get(lookups) == 1, "Gemini mock tool call dispatches once")
+      let calls = llm_mock_calls()
+      assert(len(calls) == 2, "agent loop makes a follow-up model turn")
+      let followup = json_stringify(calls[1].messages)
+      assert(contains(followup, "functionCall"), "assistant history preserves Gemini functionCall")
+      assert(
+        contains(followup, "tool_call_id"),
+        "tool result keeps the Gemini call id for adapter lowering",
+      )
+      assert(contains(followup, "thoughtSignature"), "Gemini thought signature is preserved")
+      assert(contains(followup, "opaque-gemini-signature"), "signature bytes are unchanged")
+      __io_println(result.status)
+      __io_println(atomic_get(lookups))
+      __io_println(contains(followup, "functionCall"))
     },
   )
-  llm_mock({text: "##DONE##"})
-  let result = agent_loop(
-    "Use the lookup tool.",
-    nil,
-    {
-      provider: "mock",
-      model: "gemini-2.5-flash",
-      tools: lookup_tools(),
-      tool_format: "native",
-      loop_until_done: true,
-      done_sentinel: "##DONE##",
-      max_iterations: 3,
-    },
-  )
-  assert(result.status == "done", "Gemini mock agent loop finishes")
-  assert(atomic_get(lookups) == 1, "Gemini mock tool call dispatches once")
-  let calls = llm_mock_calls()
-  assert(len(calls) == 2, "agent loop makes a follow-up model turn")
-  let followup = json_stringify(calls[1].messages)
-  assert(contains(followup, "functionCall"), "assistant history preserves Gemini functionCall")
-  assert(
-    contains(followup, "tool_call_id"),
-    "tool result keeps the Gemini call id for adapter lowering",
-  )
-  assert(contains(followup, "thoughtSignature"), "Gemini thought signature is preserved")
-  assert(contains(followup, "opaque-gemini-signature"), "signature bytes are unchanged")
-  __io_println(result.status)
-  __io_println(atomic_get(lookups))
-  __io_println(contains(followup, "functionCall"))
 }

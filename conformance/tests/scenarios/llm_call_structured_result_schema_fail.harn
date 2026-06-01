@@ -1,3 +1,5 @@
+import { llm_text, with_llm_script } from "std/testing"
+
 /**
  * Schema-validation failure with no repair: ok=false,
  * error_category="schema_validation", raw_text preserved for
@@ -5,12 +7,16 @@
  */
 pipeline default() {
   let schema = {type: "object", required: ["verdict"], properties: {verdict: {type: "string"}}}
-  llm_mock({text: "{\"verdict\": 42}"})
-  let r = llm_call_structured_result("Grade", schema, {provider: "mock", retries: 0})
-  __io_println(r.ok)
-  __io_println(r.data == nil)
-  __io_println(r.error_category)
-  __io_println(contains(r.raw_text, "verdict"))
-  __io_println(r.repaired)
-  __io_println(r.attempts)
+  with_llm_script(
+    [llm_text("{\"verdict\": 42}")],
+    { ->
+      let r = llm_call_structured_result("Grade", schema, {provider: "mock", retries: 0})
+      __io_println(r.ok)
+      __io_println(r.data == nil)
+      __io_println(r.error_category)
+      __io_println(contains(r.raw_text, "verdict"))
+      __io_println(r.repaired)
+      __io_println(r.attempts)
+    },
+  )
 }

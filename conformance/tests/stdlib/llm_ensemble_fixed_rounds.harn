@@ -1,28 +1,33 @@
 import { debate } from "std/llm/ensemble"
-import { llm_call_count } from "std/testing"
+import { llm_call_count, llm_text, with_llm_script } from "std/testing"
 
 pipeline default() {
-  llm_mock_clear()
-  llm_mock({text: "Paris is the capital of France."})
-  llm_mock({text: "The answer is Paris, France."})
-  llm_mock({text: "Paris is the capital of France."})
-  llm_mock({text: "The answer is Paris, France."})
-  llm_mock({text: "Paris is the capital of France."})
-  llm_mock({text: "The answer is Paris, France."})
-  llm_mock({text: "Paris is the capital of France."})
-  llm_mock({text: "The answer is Paris, France."})
-  let result = debate(
-    {
-      prompt: "What is the capital of France?",
-      debaters: ["alpha", "beta"],
-      n_rounds: 4,
-      provider: "mock",
+  with_llm_script(
+    [
+      llm_text("Paris is the capital of France."),
+      llm_text("The answer is Paris, France."),
+      llm_text("Paris is the capital of France."),
+      llm_text("The answer is Paris, France."),
+      llm_text("Paris is the capital of France."),
+      llm_text("The answer is Paris, France."),
+      llm_text("Paris is the capital of France."),
+      llm_text("The answer is Paris, France."),
+    ],
+    { ->
+      let result = debate(
+        {
+          prompt: "What is the capital of France?",
+          debaters: ["alpha", "beta"],
+          n_rounds: 4,
+          provider: "mock",
+        },
+      )
+      __io_println(result.completed_rounds)
+      __io_println(result.stopped_early)
+      __io_println(result.stop_reason == nil)
+      __io_println(llm_call_count())
+      __io_println(len(result.stability))
+      __io_println(result.stability[0].stable)
     },
   )
-  __io_println(result.completed_rounds)
-  __io_println(result.stopped_early)
-  __io_println(result.stop_reason == nil)
-  __io_println(llm_call_count())
-  __io_println(len(result.stability))
-  __io_println(result.stability[0].stable)
 }

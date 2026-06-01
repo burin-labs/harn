@@ -1,12 +1,17 @@
+import { llm_text, with_llm_script } from "std/testing"
+
 /**
  * agent_loop with no llm_caller routes through __default_invoke_llm and
  * preserves existing behavior — golden parity test.
  */
 pipeline default() {
-  llm_mock_clear()
-  llm_mock({text: "all done"})
-  let result = agent_loop("hi", nil, {provider: "mock"})
-  __io_println(result.status)
-  __io_println(result.visible_text)
-  __io_println(len(llm_mock_calls()))
+  with_llm_script(
+    [llm_text("all done")],
+    { ->
+      let result = agent_loop("hi", nil, {provider: "mock"})
+      __io_println(result.status)
+      __io_println(result.visible_text)
+      __io_println(len(llm_mock_calls()))
+    },
+  )
 }

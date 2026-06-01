@@ -1,4 +1,5 @@
 import { agent_sitrep, agent_sitrep_append, agent_sitrep_preferred_routes } from "std/agent/sitrep"
+import { llm_text, with_llm_script } from "std/testing"
 
 pipeline test(task) {
   // Default route list is non-empty and contains anthropic+haiku at the head.
@@ -8,53 +9,54 @@ pipeline test(task) {
   __io_println(routes[0].model == "claude-haiku-4-5-20251001")
   // Mock provider is always available — pin opts.routes to it so the
   // test does not depend on which env keys are present in CI.
-  llm_mock_clear()
-  llm_mock(
-    {
-      text: "CURRENT STATE — investigating parser drift.\nWORK DONE — inspected lexer.rs and noted a missing fall-through case.\nNEXT ACTION — patch lexer.rs and re-run the conformance suite.",
-    },
-  )
   let messages = [
     {role: "user", content: "Investigate parser drift."},
     {role: "assistant", content: "Inspected the lexer entrypoint."},
     {role: "user", content: "Focus on diagnostics next."},
   ]
-  let result = agent_sitrep(messages, {routes: [{provider: "mock", model: "mock-sitrep"}]})
-  __io_println(!result.skipped)
-  __io_println(result.provider_used == "mock")
-  __io_println(len(result.lines) == 3)
-  __io_println(result.lines[0].starts_with("CURRENT STATE"))
-  __io_println(result.lines[1].starts_with("WORK DONE"))
-  __io_println(result.lines[2].starts_with("NEXT ACTION"))
-  // Verify the user prompt sent to the LLM contains a formatted
-  // transcript and the prompt template's 3-line contract.
-  let prompt = llm_mock_calls()[0].messages[0].content
-  __io_println(prompt.contains("[USER] Investigate parser drift."))
-  __io_println(prompt.contains("3 short sentences"))
-  // Empty transcript short-circuits without an LLM call.
-  llm_mock_clear()
-  llm_mock({text: "should not be reached"})
-  let empty_result = agent_sitrep([], {routes: [{provider: "mock", model: "mock-sitrep"}]})
-  __io_println(empty_result.skipped)
-  __io_println(empty_result.reason == "empty_transcript")
-  __io_println(len(llm_mock_calls()) == 0)
-  // No-available-provider case: pass a routes list with no mock entry
-  // and rely on the fact that the mock provider is not in the override.
-  llm_mock_clear()
+  with_llm_script(
+    [
+      llm_text(
+        "CURRENT STATE — investigating parser drift.\nWORK DONE — inspected lexer.rs and noted a missing fall-through case.\nNEXT ACTION — patch lexer.rs and re-run the conformance suite.",
+      ),
+    ],
+    { ->
+      let result = agent_sitrep(messages, {routes: [{provider: "mock", model: "mock-sitrep"}]})
+      __io_println(!result.skipped)
+      __io_println(result.provider_used == "mock")
+      __io_println(len(result.lines) == 3)
+      __io_println(result.lines[0].starts_with("CURRENT STATE"))
+      __io_println(result.lines[1].starts_with("WORK DONE"))
+      __io_println(result.lines[2].starts_with("NEXT ACTION"))
+      let prompt = llm_mock_calls()[0].messages[0].content
+      __io_println(prompt.contains("[USER] Investigate parser drift."))
+      __io_println(prompt.contains("3 short sentences"))
+    },
+  )
+  with_llm_script(
+    [llm_text("should not be reached")],
+    { ->
+      let empty_result = agent_sitrep([], {routes: [{provider: "mock", model: "mock-sitrep"}]})
+      __io_println(empty_result.skipped)
+      __io_println(empty_result.reason == "empty_transcript")
+      __io_println(len(llm_mock_calls()) == 0)
+    },
+  )
   let unavailable_result = agent_sitrep(messages, {routes: [{provider: "definitely-not-a-real-provider"}]})
   __io_println(unavailable_result.skipped)
   __io_println(unavailable_result.reason == "no_available_provider")
   // agent_sitrep_append wraps the summary in <sitrep>...</sitrep> and
   // appends as a system-role message.
-  llm_mock_clear()
-  llm_mock({text: "STATE — A.\nWORK — B.\nNEXT — C."})
-  let appended = agent_sitrep_append(messages, {routes: [{provider: "mock", model: "mock-sitrep"}]})
-  __io_println(len(appended) == len(messages) + 1)
-  __io_println(appended[len(appended) - 1].role == "system")
-  __io_println(appended[len(appended) - 1].content.contains("<sitrep>"))
-  __io_println(appended[len(appended) - 1].content.contains("STATE — A."))
-  // Skipped sitrep returns the input unchanged.
-  llm_mock_clear()
+  with_llm_script(
+    [llm_text("STATE — A.\nWORK — B.\nNEXT — C.")],
+    { ->
+      let appended = agent_sitrep_append(messages, {routes: [{provider: "mock", model: "mock-sitrep"}]})
+      __io_println(len(appended) == len(messages) + 1)
+      __io_println(appended[len(appended) - 1].role == "system")
+      __io_println(appended[len(appended) - 1].content.contains("<sitrep>"))
+      __io_println(appended[len(appended) - 1].content.contains("STATE — A."))
+    },
+  )
   let appended_skipped = agent_sitrep_append([], {routes: [{provider: "mock", model: "mock-sitrep"}]})
   __io_println(len(appended_skipped) == 0)
 }

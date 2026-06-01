@@ -5,8 +5,9 @@
 // is never consulted until a deterministic trip fires.
 import { agent_capture_events } from "std/agent/events"
 import { agent_stall_initial_state, agent_stall_observe_tool_calls } from "std/agent/stall"
+import { llm_text, with_llm_script } from "std/testing"
 
-/* A dispatch result envelope shaped like agent_dispatch_tool_batch output. */
+/** A dispatch result envelope shaped like agent_dispatch_tool_batch output. */
 fn ok_dispatch(name: string, payload) {
   return {results: [{tool_name: name, ok: true, status: "ok", result: payload}]}
 }
@@ -19,7 +20,7 @@ fn call(name: string, args) {
   return [{name: name, arguments: args}]
 }
 
-/*
+/**
  * Feed a sequence of (tool_call, prev_dispatch) steps through the detector and
  * return the pattern of the FIRST warning emitted, or "" if none tripped.
  */
@@ -203,33 +204,35 @@ pipeline default() {
       annotations: {kind: "read"},
     },
   )
-  llm_mock_clear()
-  llm_mock({text: "", tool_calls: [{id: "noop1", name: "noop", arguments: {}}]})
-  llm_mock({text: "Done. ##DONE##"})
-  let session = "thrash-judge-gate-" + uuid()
-  let captured = agent_capture_events(
-    session,
-    fn() { return agent_loop(
-      "Finish without stalling.",
-      nil,
-      {
-        provider: "mock",
-        tools: tools,
-        tool_format: "native",
-        loop_until_done: true,
-        max_iterations: 4,
-        session_id: session,
-        stall_diagnostics: {enabled: true, threshold: 3},
-        done_judge: {cadence: {when: "stalled"}},
-      },
-    ) },
+  with_llm_script(
+    [{text: "", tool_calls: [{id: "noop1", name: "noop", arguments: {}}]}, llm_text("Done. ##DONE##")],
+    { ->
+      let session = "thrash-judge-gate-" + uuid()
+      let captured = agent_capture_events(
+        session,
+        fn() { return agent_loop(
+          "Finish without stalling.",
+          nil,
+          {
+            provider: "mock",
+            tools: tools,
+            tool_format: "native",
+            loop_until_done: true,
+            max_iterations: 4,
+            session_id: session,
+            stall_diagnostics: {enabled: true, threshold: 3},
+            done_judge: {cadence: {when: "stalled"}},
+          },
+        ) },
+      )
+      let stalls = captured.events.filter({ event -> event.type == "agent_loop_stall_warning" })
+      let judges = captured.events.filter({ event -> event.type == "judge_decision" })
+      require len(stalls) == 0, "no stall warning should fire below threshold"
+      require len(judges) == 0, "advisory judge must not be consulted without a deterministic trip"
+      __io_println("gate_stalls=" + to_string(len(stalls)))
+      __io_println("gate_judges=" + to_string(len(judges)))
+    },
   )
-  let stalls = captured.events.filter({ event -> event.type == "agent_loop_stall_warning" })
-  let judges = captured.events.filter({ event -> event.type == "judge_decision" })
-  // Invariant: with no deterministic stall warning, the advisory judge must
-  // never be consulted (the gate at loop.harn's `stall_judge_due && stall_warning != nil`).
-  require len(stalls) == 0, "no stall warning should fire below threshold"
-  require len(judges) == 0, "advisory judge must not be consulted without a deterministic trip"
-  __io_println("gate_stalls=" + to_string(len(stalls)))
-  __io_println("gate_judges=" + to_string(len(judges)))
 }
+// Invariant: with no deterministic stall warning, the advisory judge must
+// never be consulted (the gate at loop.harn's `stall_judge_due && stall_warning != nil`).

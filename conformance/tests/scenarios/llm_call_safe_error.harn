@@ -1,12 +1,18 @@
+import { with_llm_script } from "std/testing"
+
 /**
  * llm_call_safe turns a categorized error into an envelope with
  * {ok: false, response: nil, error: {category, message}}.
  */
 pipeline default(task) {
-  llm_mock({error: {category: "rate_limit", message: "429 Too Many Requests"}})
-  let r = llm_call_safe("hello", nil, {provider: "mock", llm_retries: 0})
-  __io_println(r.ok)
-  __io_println(r.response == nil)
-  __io_println(r.error.category)
-  __io_println(r.error.message.contains("429"))
+  with_llm_script(
+    [{error: {category: "rate_limit", message: "429 Too Many Requests"}}],
+    { ->
+      let r = llm_call_safe("hello", nil, {provider: "mock", llm_retries: 0})
+      __io_println(r.ok)
+      __io_println(r.response == nil)
+      __io_println(r.error.category)
+      __io_println(r.error.message.contains("429"))
+    },
+  )
 }

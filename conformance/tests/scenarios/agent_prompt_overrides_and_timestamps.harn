@@ -1,72 +1,83 @@
 import { agent_prompt_overrides } from "std/agent/prompts"
+import { llm_text, with_llm_script } from "std/testing"
 
 pipeline test(task) {
-  llm_mock_clear()
-  llm_mock({text: "<done>##DONE##</done>"})
-  agent_loop(
-    "finish quickly",
-    "Base system.",
-    {
-      provider: "mock",
-      loop_until_done: true,
-      max_iterations: 2,
-      timestamp_messages: true,
-      prompts: {"agent.loop_contract": {text: "CUSTOM LOOP CONTRACT {{ done_sentinel }}"}},
+  with_llm_script(
+    [llm_text("<done>##DONE##</done>")],
+    { ->
+      agent_loop(
+        "finish quickly",
+        "Base system.",
+        {
+          provider: "mock",
+          loop_until_done: true,
+          max_iterations: 2,
+          timestamp_messages: true,
+          prompts: {"agent.loop_contract": {text: "CUSTOM LOOP CONTRACT {{ done_sentinel }}"}},
+        },
+      )
+      let calls = llm_mock_calls()
+      assert(contains(calls[0].system, "CUSTOM LOOP CONTRACT ##DONE##"), "prompt override rendered")
+      assert(!contains(calls[0].system, "Keep working until"), "default loop prompt was replaced")
+      assert(contains(calls[0].messages[0].content, "[harn timestamp:"), "message timestamp visible")
+      let bad_override = try {
+        agent_loop(
+          "bad prompt id",
+          "Base system.",
+          {
+            provider: "mock",
+            loop_until_done: true,
+            max_iterations: 1,
+            prompts: {"agent.loop_contractt": {text: "typo"}},
+          },
+        )
+      }
+      assert(is_err(bad_override), "unknown prompt id rejected")
+      assert(
+        contains(to_string(unwrap_err(bad_override)), "unknown prompt id"),
+        "unknown prompt id diagnostic",
+      )
     },
   )
-  let calls = llm_mock_calls()
-  assert(contains(calls[0].system, "CUSTOM LOOP CONTRACT ##DONE##"), "prompt override rendered")
-  assert(!contains(calls[0].system, "Keep working until"), "default loop prompt was replaced")
-  assert(contains(calls[0].messages[0].content, "[harn timestamp:"), "message timestamp visible")
-  let bad_override = try {
-    agent_loop(
-      "bad prompt id",
-      "Base system.",
-      {
-        provider: "mock",
-        loop_until_done: true,
-        max_iterations: 1,
-        prompts: {"agent.loop_contractt": {text: "typo"}},
-      },
-    )
-  }
-  assert(is_err(bad_override), "unknown prompt id rejected")
-  assert(
-    contains(to_string(unwrap_err(bad_override)), "unknown prompt id"),
-    "unknown prompt id diagnostic",
-  )
-  llm_mock_clear()
-  llm_mock({text: "<done>##DONE##</done>"})
-  let typed_prompt_values = {loop_contract: {text: "TYPED LOOP CONTRACT {{ done_sentinel }}"}}
-  let typed_prompt_options = agent_prompt_overrides(typed_prompt_values)
-  agent_loop(
-    "typed override",
-    "Base system.",
-    typed_prompt_options
-      + {provider: "mock", loop_until_done: true, max_iterations: 1},
-  )
-  let typed_calls = llm_mock_calls()
-  assert(
-    contains(typed_calls[0].system, "TYPED LOOP CONTRACT ##DONE##"),
-    "typed prompt helper rendered",
-  )
-  llm_mock_clear()
-  llm_mock({text: "<user_response>turn done</user_response>\n<done>##DONE##</done>"})
-  llm_mock({text: "{\"verdict\":\"done\",\"reasoning\":\"turn complete\"}"})
-  agent_turn(
-    "turn preamble override",
-    {
-      provider: "mock",
-      max_iterations: 2,
-      prompts: {"agent.turn_preamble": {text: "CUSTOM TURN PREAMBLE"}},
+  with_llm_script(
+    [llm_text("<done>##DONE##</done>")],
+    { ->
+      let typed_prompt_values = {loop_contract: {text: "TYPED LOOP CONTRACT {{ done_sentinel }}"}}
+      let typed_prompt_options = agent_prompt_overrides(typed_prompt_values)
+      agent_loop(
+        "typed override",
+        "Base system.",
+        typed_prompt_options
+          + {provider: "mock", loop_until_done: true, max_iterations: 1},
+      )
+      let typed_calls = llm_mock_calls()
+      assert(
+        contains(typed_calls[0].system, "TYPED LOOP CONTRACT ##DONE##"),
+        "typed prompt helper rendered",
+      )
     },
   )
-  let turn_calls = llm_mock_calls()
-  assert(
-    contains(turn_calls[0].system, "CUSTOM TURN PREAMBLE"),
-    "agent_turn preamble override rendered",
+  with_llm_script(
+    [
+      llm_text("<user_response>turn done</user_response>\n<done>##DONE##</done>"),
+      llm_text("{\"verdict\":\"done\",\"reasoning\":\"turn complete\"}"),
+    ],
+    { ->
+      agent_turn(
+        "turn preamble override",
+        {
+          provider: "mock",
+          max_iterations: 2,
+          prompts: {"agent.turn_preamble": {text: "CUSTOM TURN PREAMBLE"}},
+        },
+      )
+      let turn_calls = llm_mock_calls()
+      assert(
+        contains(turn_calls[0].system, "CUSTOM TURN PREAMBLE"),
+        "agent_turn preamble override rendered",
+      )
+    },
   )
-  llm_mock_clear()
   var tools = tool_registry()
   tools = tool_define(
     tools,
@@ -74,32 +85,36 @@ pipeline test(task) {
     "Say hello.",
     {handler: { args -> "hello " + args.name }, parameters: {name: {type: "string"}}},
   )
-  llm_mock({text: "<user_response>done</user_response>\n<done>##DONE##</done>"})
-  agent_loop(
-    "finish with a tool contract",
-    "Base system.",
-    {
-      provider: "mock",
-      tools: tools,
-      tool_format: "text",
-      loop_until_done: true,
-      max_iterations: 1,
-      done_judge: nil,
-      turn_policy: {require_action_or_yield: true},
-      prompts: {"agent.tool_contract_action_text": {text: "CUSTOM TEXT ACTION {{ done_sentinel }}"}},
+  with_llm_script(
+    [llm_text("<user_response>done</user_response>\n<done>##DONE##</done>")],
+    { ->
+      agent_loop(
+        "finish with a tool contract",
+        "Base system.",
+        {
+          provider: "mock",
+          tools: tools,
+          tool_format: "text",
+          loop_until_done: true,
+          max_iterations: 1,
+          done_judge: nil,
+          turn_policy: {require_action_or_yield: true},
+          prompts: {"agent.tool_contract_action_text": {text: "CUSTOM TEXT ACTION {{ done_sentinel }}"}},
+        },
+      )
+      let text_contract = llm_mock_calls()[0].system
+      assert(contains(text_contract, "name({ key: value })"), "text tool syntax is Harn-call shaped")
+      assert(contains(text_contract, "### greet"), "Harn-rendered tool listing included")
+      assert(
+        contains(text_contract, "CUSTOM TEXT ACTION ##DONE##"),
+        "text tool contract fragment override rendered",
+      )
+      assert(
+        !contains(text_contract, "This turn is action-gated"),
+        "default text action fragment was replaced",
+      )
+      assert(!contains(text_contract, "{\"name\": \"tool_name\""), "legacy JSON tool syntax removed")
+      log("agent_prompt_overrides_and_timestamps tests passed")
     },
   )
-  let text_contract = llm_mock_calls()[0].system
-  assert(contains(text_contract, "name({ key: value })"), "text tool syntax is Harn-call shaped")
-  assert(contains(text_contract, "### greet"), "Harn-rendered tool listing included")
-  assert(
-    contains(text_contract, "CUSTOM TEXT ACTION ##DONE##"),
-    "text tool contract fragment override rendered",
-  )
-  assert(
-    !contains(text_contract, "This turn is action-gated"),
-    "default text action fragment was replaced",
-  )
-  assert(!contains(text_contract, "{\"name\": \"tool_name\""), "legacy JSON tool syntax removed")
-  log("agent_prompt_overrides_and_timestamps tests passed")
 }

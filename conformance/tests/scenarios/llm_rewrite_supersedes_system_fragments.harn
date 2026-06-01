@@ -6,6 +6,7 @@
  * fragments and silently ignore the rewrite.
  */
 import { default_llm_caller, with_prompt_rewrite } from "std/llm/handlers"
+import { llm_text, with_llm_script } from "std/testing"
 
 pipeline test(task) {
   // The shape the agent loop hands a caller: a joined `system` string plus the
@@ -20,19 +21,25 @@ pipeline test(task) {
     turn: {iteration: 0, session_id: "", attempt: 1},
   }
   // Rewriting `system` supersedes the decomposed fragments.
-  llm_mock_clear()
-  llm_mock({text: "ok"})
-  let rewriter = with_prompt_rewrite(
-    default_llm_caller(),
-    fn(prompt, system, opts) { return {system: "REWRITTEN PRIMARY"} },
+  with_llm_script(
+    [llm_text("ok")],
+    { ->
+      let rewriter = with_prompt_rewrite(
+        default_llm_caller(),
+        fn(prompt, system, opts) { return {system: "REWRITTEN PRIMARY"} },
+      )
+      let _ = rewriter(call)
+      assert(llm_mock_calls()[0].system == "REWRITTEN PRIMARY", "system rewrite wins over fragments")
+    },
   )
-  let _ = rewriter(call)
-  assert(llm_mock_calls()[0].system == "REWRITTEN PRIMARY", "system rewrite wins over fragments")
-  // Leaving `system` untouched keeps the decomposed fragments authoritative.
-  llm_mock_clear()
-  llm_mock({text: "ok"})
-  let passthrough = with_prompt_rewrite(default_llm_caller(), fn(prompt, system, opts) { return {} })
-  let _ = passthrough(call)
-  assert(llm_mock_calls()[0].system == "ORIGINAL JOINED", "fragments retained when system untouched")
-  log("llm_rewrite_supersedes_system_fragments tests passed")
+  with_llm_script(
+    [llm_text("ok")],
+    { ->
+      let passthrough = with_prompt_rewrite(default_llm_caller(), fn(prompt, system, opts) { return {} })
+      let _ = passthrough(call)
+      assert(llm_mock_calls()[0].system == "ORIGINAL JOINED", "fragments retained when system untouched")
+      log("llm_rewrite_supersedes_system_fragments tests passed")
+    },
+  )
 }
+// Leaving `system` untouched keeps the decomposed fragments authoritative.

@@ -1,27 +1,32 @@
+import { with_llm_script } from "std/testing"
+
 pipeline default(task) {
-  llm_mock_clear()
-  llm_mock(
-    {
-      error: {
-        status: 503,
-        kind: "transient",
-        reason: "upstream_unavailable",
-        message: "upstream unavailable",
-        retry_after_ms: 120,
+  with_llm_script(
+    [
+      {
+        error: {
+          status: 503,
+          kind: "transient",
+          reason: "upstream_unavailable",
+          message: "upstream unavailable",
+          retry_after_ms: 120,
+        },
       },
+      {text: "recovered", tool_calls: []},
+    ],
+    { ->
+      let first = llm_call_safe("first", nil, {provider: "mock", model: "mock-model"})
+      __io_println(first.ok)
+      __io_println(first.response == nil)
+      __io_println(first.error.status)
+      __io_println(first.error.kind)
+      __io_println(first.error.reason)
+      __io_println(first.error.category)
+      __io_println(first.error.provider)
+      __io_println(first.error.model)
+      __io_println(first.error.retry_after_ms)
+      let second = llm_call("second", nil, {provider: "mock", model: "mock-model"})
+      __io_println(second.text)
     },
   )
-  llm_mock({text: "recovered", tool_calls: []})
-  let first = llm_call_safe("first", nil, {provider: "mock", model: "mock-model"})
-  __io_println(first.ok)
-  __io_println(first.response == nil)
-  __io_println(first.error.status)
-  __io_println(first.error.kind)
-  __io_println(first.error.reason)
-  __io_println(first.error.category)
-  __io_println(first.error.provider)
-  __io_println(first.error.model)
-  __io_println(first.error.retry_after_ms)
-  let second = llm_call("second", nil, {provider: "mock", model: "mock-model"})
-  __io_println(second.text)
 }

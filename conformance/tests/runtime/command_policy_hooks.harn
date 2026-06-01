@@ -1,3 +1,5 @@
+import { llm_text, with_llm_script } from "std/testing"
+
 pipeline default() {
   let root = path_join(harness.fs.temp_dir(), "harn_command_policy_hooks")
   if harness.fs.exists(root) {
@@ -50,7 +52,6 @@ pipeline default() {
   )
   assert(contains(approval?.stderr ?? "", "requires approval"), "approval reason is surfaced")
   command_policy_pop()
-  llm_mock_clear()
   var tools = tool_registry()
   tools = tool_define(
     tools,
@@ -62,28 +63,34 @@ pipeline default() {
       handler: { args -> host_call("process.exec", {mode: "argv", argv: ["sh", "-c", args.command], cwd: root}) },
     },
   )
-  llm_mock({tool_calls: [{id: "run_1", name: "run", arguments: {command: "echo agent-policy-deny"}}]})
-  llm_mock({text: "<done>##DONE##</done>"})
-  let loop = agent_loop(
-    "exercise command policy",
-    nil,
-    {
-      provider: "mock",
-      tools: tools,
-      max_iterations: 2,
-      command_policy: command_policy(policy + {deny_patterns: ["*agent-policy-deny*"]}),
-      session_id: "command-policy-hooks",
+  with_llm_script(
+    [
+      {tool_calls: [{id: "run_1", name: "run", arguments: {command: "echo agent-policy-deny"}}]},
+      llm_text("<done>##DONE##</done>"),
+    ],
+    { ->
+      let loop = agent_loop(
+        "exercise command policy",
+        nil,
+        {
+          provider: "mock",
+          tools: tools,
+          max_iterations: 2,
+          command_policy: command_policy(policy + {deny_patterns: ["*agent-policy-deny*"]}),
+          session_id: "command-policy-hooks",
+        },
+      )
+      assert(
+        contains(json_stringify(loop), "status: blocked"),
+        "agent_loop scoped command policy applies to run handlers",
+      )
+      let scan = command_llm_risk_scan(
+        {request: {argv: ["curl", "https://example.invalid/secret"]}},
+        {model: "cheap"},
+      )
+      assert(len(scan?.risk_labels ?? []) > 0, "risk scan helper returns structured labels")
+      harness.fs.delete(root)
+      __io_println("command_policy_hooks_ok")
     },
   )
-  assert(
-    contains(json_stringify(loop), "status: blocked"),
-    "agent_loop scoped command policy applies to run handlers",
-  )
-  let scan = command_llm_risk_scan(
-    {request: {argv: ["curl", "https://example.invalid/secret"]}},
-    {model: "cheap"},
-  )
-  assert(len(scan?.risk_labels ?? []) > 0, "risk scan helper returns structured labels")
-  harness.fs.delete(root)
-  __io_println("command_policy_hooks_ok")
 }

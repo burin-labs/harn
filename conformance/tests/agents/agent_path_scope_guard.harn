@@ -1,3 +1,5 @@
+import { llm_text, with_llm_script } from "std/testing"
+
 fn path_tools() {
   var tools = tool_registry()
   tools = tool_define(
@@ -14,19 +16,19 @@ fn path_tools() {
 }
 
 fn run_read(session, path) {
-  llm_mock_clear()
-  llm_mock({tool_calls: [{id: "call_Read", name: "Read", arguments: {path: path}}]})
-  llm_mock({text: "done"})
-  return agent_loop(
-    "Use Read",
-    nil,
-    {
-      session_id: session,
-      provider: "mock",
-      tools: path_tools(),
-      tool_format: "native",
-      max_iterations: 2,
-    },
+  return with_llm_script(
+    [{tool_calls: [{id: "call_Read", name: "Read", arguments: {path: path}}]}, llm_text("done")],
+    { -> return agent_loop(
+      "Use Read",
+      nil,
+      {
+        session_id: session,
+        provider: "mock",
+        tools: path_tools(),
+        tool_format: "native",
+        max_iterations: 2,
+      },
+    ) },
   )
 }
 

@@ -1,60 +1,66 @@
 import { with_circuit_breaker } from "std/llm/handlers"
+import { llm_text, with_llm_script } from "std/testing"
 
 pipeline default() {
-  llm_mock_clear()
   let raw_handler = fn(call) { return llm_call(call.prompt, call?.system, call.opts) }
   let pooled = with_circuit_breaker(raw_handler, {threshold: 2, reset_ms: 60000})
   let bad_call = {prompt: "bad route", system: nil, opts: {provider: "mock", model: "bad-model", llm_retries: 0}}
   let good_call = {prompt: "good route", system: nil, opts: {provider: "mock", model: "good-model", llm_retries: 0}}
-  llm_mock({error: {category: "server_error", message: "bad model failed once"}})
-  try {
-    pooled(bad_call)
-  } catch (e1) {
-    __io_println(error_category(e1))
-  }
-  __io_println(circuit_check("llm:mock:bad-model"))
-  llm_mock({error: {category: "server_error", message: "bad model failed twice"}})
-  try {
-    pooled(bad_call)
-  } catch (e2) {
-    __io_println(error_category(e2))
-  }
-  __io_println(circuit_check("llm:mock:bad-model"))
-  __io_println(circuit_check("llm:mock:good-model"))
-  llm_mock({text: "healthy"})
-  __io_println(pooled(good_call).text)
-  __io_println(circuit_check("llm:mock:good-model"))
-  try {
-    pooled(bad_call)
-  } catch (e3) {
-    __io_println(e3.category)
-    __io_println(e3.circuit)
-  }
-  __io_println(len(llm_mock_calls()))
-  let shared = with_circuit_breaker(raw_handler, {name: "shared-model-circuit", threshold: 1, reset_ms: 60000})
-  llm_mock({error: {category: "server_error", message: "shared circuit failed"}})
-  try {
-    shared(bad_call)
-  } catch (e4) {
-    __io_println(error_category(e4))
-  }
-  try {
-    shared(good_call)
-  } catch (e5) {
-    __io_println(e5.category)
-    __io_println(e5.circuit)
-  }
-  __io_println(len(llm_mock_calls()))
-  let unset = with_circuit_breaker(
-    fn(_call) {
-      throw "missing route failed"
+  with_llm_script(
+    [
+      {error: {category: "server_error", message: "bad model failed once"}},
+      {error: {category: "server_error", message: "bad model failed twice"}},
+      llm_text("healthy"),
+      {error: {category: "server_error", message: "shared circuit failed"}},
+    ],
+    { ->
+      try {
+        pooled(bad_call)
+      } catch (e1) {
+        __io_println(error_category(e1))
+      }
+      __io_println(circuit_check("llm:mock:bad-model"))
+      try {
+        pooled(bad_call)
+      } catch (e2) {
+        __io_println(error_category(e2))
+      }
+      __io_println(circuit_check("llm:mock:bad-model"))
+      __io_println(circuit_check("llm:mock:good-model"))
+      __io_println(pooled(good_call).text)
+      __io_println(circuit_check("llm:mock:good-model"))
+      try {
+        pooled(bad_call)
+      } catch (e3) {
+        __io_println(e3.category)
+        __io_println(e3.circuit)
+      }
+      __io_println(len(llm_mock_calls()))
+      let shared = with_circuit_breaker(raw_handler, {name: "shared-model-circuit", threshold: 1, reset_ms: 60000})
+      try {
+        shared(bad_call)
+      } catch (e4) {
+        __io_println(error_category(e4))
+      }
+      try {
+        shared(good_call)
+      } catch (e5) {
+        __io_println(e5.category)
+        __io_println(e5.circuit)
+      }
+      __io_println(len(llm_mock_calls()))
+      let unset = with_circuit_breaker(
+        fn(_call) {
+          throw "missing route failed"
+        },
+        {threshold: 1, reset_ms: 60000},
+      )
+      try {
+        unset({prompt: "missing route", opts: {}})
+      } catch (e6) {
+        __io_println(error_category(e6))
+      }
+      __io_println(circuit_check("llm:<unset>:<unset>"))
     },
-    {threshold: 1, reset_ms: 60000},
   )
-  try {
-    unset({prompt: "missing route", opts: {}})
-  } catch (e6) {
-    __io_println(error_category(e6))
-  }
-  __io_println(circuit_check("llm:<unset>:<unset>"))
 }

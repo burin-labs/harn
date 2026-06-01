@@ -1,4 +1,5 @@
 import "std/project"
+import { llm_text, with_llm_script } from "std/testing"
 
 pipeline test(task) {
   let suffix = uuid()
@@ -7,54 +8,57 @@ pipeline test(task) {
   let root = path_join(harness.fs.temp_dir(), "project-deep-scan-ns-" + suffix)
   harness.fs.mkdir(root)
   harness.fs.write_text(path_join(root, "README.md"), "# repo\n")
-  llm_mock({text: "{\"purpose\":\"alpha root\"}"})
-  let alpha = project_deep_scan(
-    root,
-    {
-      namespace: alpha_namespace,
-      tiers: ["ambient", "enriched"],
-      incremental: true,
-      depth: nil,
-      enrichment: {prompt: "Return valid JSON only.", provider: "mock", schema: {purpose: "string"}},
+  with_llm_script(
+    [llm_text("{\"purpose\":\"alpha root\"}"), llm_text("{\"purpose\":\"beta root\"}")],
+    { ->
+      let alpha = project_deep_scan(
+        root,
+        {
+          namespace: alpha_namespace,
+          tiers: ["ambient", "enriched"],
+          incremental: true,
+          depth: nil,
+          enrichment: {prompt: "Return valid JSON only.", provider: "mock", schema: {purpose: "string"}},
+        },
+      )
+      let beta = project_deep_scan(
+        root,
+        {
+          namespace: beta_namespace,
+          tiers: ["ambient", "enriched"],
+          incremental: true,
+          depth: nil,
+          enrichment: {prompt: "Return valid JSON only.", provider: "mock", schema: {purpose: "string"}},
+        },
+      )
+      let alpha_cached = project_deep_scan(
+        root,
+        {
+          namespace: alpha_namespace,
+          tiers: ["ambient", "enriched"],
+          incremental: true,
+          depth: nil,
+          enrichment: {prompt: "Return valid JSON only.", provider: "mock", schema: {purpose: "string"}},
+        },
+      )
+      let beta_cached = project_deep_scan(
+        root,
+        {
+          namespace: beta_namespace,
+          tiers: ["ambient", "enriched"],
+          incremental: true,
+          depth: nil,
+          enrichment: {prompt: "Return valid JSON only.", provider: "mock", schema: {purpose: "string"}},
+        },
+      )
+      __io_println(alpha["."].enriched.purpose == "alpha root")
+      __io_println(beta["."].enriched.purpose == "beta root")
+      __io_println(alpha_cached["."].enriched.purpose == "alpha root")
+      __io_println(beta_cached["."].enriched.purpose == "beta root")
+      __io_println(project_deep_scan_status(alpha_namespace, root).cache_hits == 1)
+      __io_println(project_deep_scan_status(beta_namespace, root).cache_hits == 1)
+      __io_println(len(llm_mock_calls()) == 2)
+      harness.fs.delete(root)
     },
   )
-  llm_mock({text: "{\"purpose\":\"beta root\"}"})
-  let beta = project_deep_scan(
-    root,
-    {
-      namespace: beta_namespace,
-      tiers: ["ambient", "enriched"],
-      incremental: true,
-      depth: nil,
-      enrichment: {prompt: "Return valid JSON only.", provider: "mock", schema: {purpose: "string"}},
-    },
-  )
-  let alpha_cached = project_deep_scan(
-    root,
-    {
-      namespace: alpha_namespace,
-      tiers: ["ambient", "enriched"],
-      incremental: true,
-      depth: nil,
-      enrichment: {prompt: "Return valid JSON only.", provider: "mock", schema: {purpose: "string"}},
-    },
-  )
-  let beta_cached = project_deep_scan(
-    root,
-    {
-      namespace: beta_namespace,
-      tiers: ["ambient", "enriched"],
-      incremental: true,
-      depth: nil,
-      enrichment: {prompt: "Return valid JSON only.", provider: "mock", schema: {purpose: "string"}},
-    },
-  )
-  __io_println(alpha["."].enriched.purpose == "alpha root")
-  __io_println(beta["."].enriched.purpose == "beta root")
-  __io_println(alpha_cached["."].enriched.purpose == "alpha root")
-  __io_println(beta_cached["."].enriched.purpose == "beta root")
-  __io_println(project_deep_scan_status(alpha_namespace, root).cache_hits == 1)
-  __io_println(project_deep_scan_status(beta_namespace, root).cache_hits == 1)
-  __io_println(len(llm_mock_calls()) == 2)
-  harness.fs.delete(root)
 }

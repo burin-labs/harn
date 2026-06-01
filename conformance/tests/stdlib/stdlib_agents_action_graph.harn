@@ -1,4 +1,5 @@
 import "std/agents"
+import { llm_text, with_llm_script } from "std/testing"
 
 pipeline default() {
   let normalized = action_graph(
@@ -45,19 +46,24 @@ pipeline default() {
   let flow = action_graph_flow(execution_plan, config)
   let report = workflow_validate(flow)
   __io_println(report.valid)
-  llm_mock_clear()
-  llm_mock({text: "Research complete."})
-  llm_mock({text: "Implementation batch complete."})
-  llm_mock({text: "Evaluation complete."})
-  let result = action_graph_run(
-    "Fix parser diagnostics",
-    execution_plan,
-    config,
-    {max_steps: 8, persist_path: "/tmp/harn-action-graph-runtime.json"},
+  with_llm_script(
+    [
+      llm_text("Research complete."),
+      llm_text("Implementation batch complete."),
+      llm_text("Evaluation complete."),
+    ],
+    { ->
+      let result = action_graph_run(
+        "Fix parser diagnostics",
+        execution_plan,
+        config,
+        {max_steps: 8, persist_path: "/tmp/harn-action-graph-runtime.json"},
+      )
+      __io_println(result.status == "completed")
+      __io_println(result.run?._type == "run_record")
+      __io_println(len(result.run.stages) == 4)
+      __io_println(result.run.stages[2].kind == "verify")
+      __io_println(result.batches[1].count == 2)
+    },
   )
-  __io_println(result.status == "completed")
-  __io_println(result.run?._type == "run_record")
-  __io_println(len(result.run.stages) == 4)
-  __io_println(result.run.stages[2].kind == "verify")
-  __io_println(result.batches[1].count == 2)
 }

@@ -1,3 +1,5 @@
+import { with_llm_script } from "std/testing"
+
 /**
  * `llm_call`'s catch value is a dict `{kind, reason, category,
  * message, retry_after_ms?, provider, model}` — the same shape
@@ -8,27 +10,35 @@
 pipeline default(task) {
   // `llm_retries: 0` disables the llm_call-internal transient retry so
   // a single injected error surfaces as a throw on the first attempt.
-  llm_mock({error: {category: "rate_limit", message: "429 Too Many Requests", retry_after_ms: 2500}})
-  try {
-    llm_call("hello", nil, {provider: "mock", model: "mock-model", llm_retries: 0})
-  } catch (e) {
-    __io_println(error_category(e))
-    __io_println(is_rate_limited(e))
-    __io_println(e.kind)
-    __io_println(e.reason)
-    __io_println(e.category)
-    __io_println(e.retry_after_ms)
-    __io_println(e.provider)
-    __io_println(e.model)
-  }
-  llm_mock({error: {category: "overloaded", message: "529 overloaded"}})
-  try {
-    llm_call("hello again", nil, {provider: "mock", llm_retries: 0})
-  } catch (e2) {
-    __io_println(error_category(e2))
-    __io_println(e2.kind)
-    __io_println(e2.reason)
-    // retry_after_ms is omitted when the provider didn't surface one.
-    __io_println(e2.retry_after_ms == nil)
-  }
+  with_llm_script(
+    [{error: {category: "rate_limit", message: "429 Too Many Requests", retry_after_ms: 2500}}],
+    { ->
+      try {
+        llm_call("hello", nil, {provider: "mock", model: "mock-model", llm_retries: 0})
+      } catch (e) {
+        __io_println(error_category(e))
+        __io_println(is_rate_limited(e))
+        __io_println(e.kind)
+        __io_println(e.reason)
+        __io_println(e.category)
+        __io_println(e.retry_after_ms)
+        __io_println(e.provider)
+        __io_println(e.model)
+      }
+    },
+  )
+  with_llm_script(
+    [{error: {category: "overloaded", message: "529 overloaded"}}],
+    { ->
+      try {
+        llm_call("hello again", nil, {provider: "mock", llm_retries: 0})
+      } catch (e2) {
+        __io_println(error_category(e2))
+        __io_println(e2.kind)
+        __io_println(e2.reason)
+        __io_println(e2.retry_after_ms == nil)
+      }
+    },
+  )
 }
+// retry_after_ms is omitted when the provider didn't surface one.

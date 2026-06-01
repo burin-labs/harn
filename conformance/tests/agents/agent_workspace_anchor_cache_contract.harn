@@ -1,70 +1,77 @@
+import { with_llm_script } from "std/testing"
+
 pipeline default() {
-  llm_mock_clear()
-  llm_mock({text: "first ##DONE##", input_tokens: 1, output_tokens: 1, model: "o3"})
-  llm_mock({text: "second ##DONE##", input_tokens: 1, output_tokens: 1, model: "o3"})
-  let session_id = "workspace-anchor-cache-" + uuid()
-  let _ = agent_session_open(
-    session_id,
-    {workspace_anchor: {primary: "/workspace/a", anchored_at: "2026-05-24T00:00:00Z"}},
-  )
-  let first = agent_loop(
-    "first",
-    "Base system.",
-    {
-      provider: "mock",
-      model: "o3",
-      session_id: session_id,
-      max_iterations: 1,
-      auto_context_profile: false,
+  with_llm_script(
+    [
+      {text: "first ##DONE##", input_tokens: 1, output_tokens: 1, model: "o3"},
+      {text: "second ##DONE##", input_tokens: 1, output_tokens: 1, model: "o3"},
+    ],
+    { ->
+      let session_id = "workspace-anchor-cache-" + uuid()
+      let _ = agent_session_open(
+        session_id,
+        {workspace_anchor: {primary: "/workspace/a", anchored_at: "2026-05-24T00:00:00Z"}},
+      )
+      let first = agent_loop(
+        "first",
+        "Base system.",
+        {
+          provider: "mock",
+          model: "o3",
+          session_id: session_id,
+          max_iterations: 1,
+          auto_context_profile: false,
+        },
+      )
+      let changed = agent_session_set_workspace_anchor(
+        session_id,
+        {
+          primary: "/workspace/b",
+          additional_roots: [{path: "/workspace/c", mount_mode: "read_only", mounted_at: "2026-05-24T00:00:01Z"}],
+          anchored_at: "2026-05-24T00:00:02Z",
+        },
+      )
+      let second = agent_loop(
+        "second",
+        nil,
+        {
+          provider: "mock",
+          model: "o3",
+          session_id: session_id,
+          max_iterations: 1,
+          auto_context_profile: false,
+        },
+      )
+      let calls = llm_mock_calls()
+      let first_reminders = transcript_events_by_kind(first.transcript, "system_reminder")
+      let second_reminders = transcript_events_by_kind(second.transcript, "system_reminder")
+      let first_body = first_reminders[len(first_reminders) - 1].reminder.body
+      let second_body = second_reminders[len(second_reminders) - 1].reminder.body
+      __io_println(changed)
+      __io_println(len(calls))
+      __io_println(calls[0].system == calls[1].system)
+      __io_println(
+        agent_session_system_prompt(session_id)
+          == first.transcript.metadata.system_prompt.content,
+      )
+      __io_println(calls[0].messages[0].role == "developer")
+      __io_println(contains(calls[0].messages[0].content, "<workspace-anchor>"))
+      __io_println(contains(calls[0].messages[0].content, "primary: /workspace/a"))
+      __io_println(contains(calls[1].messages[0].content, "primary: /workspace/b"))
+      __io_println(
+        contains(
+          calls[1].messages[0].content,
+          "/workspace/c (mount_mode: read_only, mounted_at: 2026-05-24T00:00:01Z)",
+        ),
+      )
+      __io_println(!contains(calls[1].system, "/workspace/a"))
+      __io_println(!contains(calls[1].system, "/workspace/b"))
+      __io_println(
+        first.transcript.metadata.system_prompt.sha256
+          == second.transcript.metadata.system_prompt.sha256,
+      )
+      __io_println(contains(first_body, "primary: /workspace/a"))
+      __io_println(contains(second_body, "primary: /workspace/b"))
     },
   )
-  let changed = agent_session_set_workspace_anchor(
-    session_id,
-    {
-      primary: "/workspace/b",
-      additional_roots: [{path: "/workspace/c", mount_mode: "read_only", mounted_at: "2026-05-24T00:00:01Z"}],
-      anchored_at: "2026-05-24T00:00:02Z",
-    },
-  )
-  let second = agent_loop(
-    "second",
-    nil,
-    {
-      provider: "mock",
-      model: "o3",
-      session_id: session_id,
-      max_iterations: 1,
-      auto_context_profile: false,
-    },
-  )
-  let calls = llm_mock_calls()
-  let first_reminders = transcript_events_by_kind(first.transcript, "system_reminder")
-  let second_reminders = transcript_events_by_kind(second.transcript, "system_reminder")
-  let first_body = first_reminders[len(first_reminders) - 1].reminder.body
-  let second_body = second_reminders[len(second_reminders) - 1].reminder.body
-  __io_println(changed)
-  __io_println(len(calls))
-  __io_println(calls[0].system == calls[1].system)
-  __io_println(
-    agent_session_system_prompt(session_id)
-      == first.transcript.metadata.system_prompt.content,
-  )
-  __io_println(calls[0].messages[0].role == "developer")
-  __io_println(contains(calls[0].messages[0].content, "<workspace-anchor>"))
-  __io_println(contains(calls[0].messages[0].content, "primary: /workspace/a"))
-  __io_println(contains(calls[1].messages[0].content, "primary: /workspace/b"))
-  __io_println(
-    contains(
-      calls[1].messages[0].content,
-      "/workspace/c (mount_mode: read_only, mounted_at: 2026-05-24T00:00:01Z)",
-    ),
-  )
-  __io_println(!contains(calls[1].system, "/workspace/a"))
-  __io_println(!contains(calls[1].system, "/workspace/b"))
-  __io_println(
-    first.transcript.metadata.system_prompt.sha256
-      == second.transcript.metadata.system_prompt.sha256,
-  )
-  __io_println(contains(first_body, "primary: /workspace/a"))
-  __io_println(contains(second_body, "primary: /workspace/b"))
 }

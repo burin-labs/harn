@@ -1,4 +1,5 @@
 import "std/agents"
+import { with_llm_script } from "std/testing"
 
 fn write_tools() {
   var tools = tool_registry()
@@ -16,22 +17,26 @@ fn write_tools() {
 }
 
 pipeline main() {
-  llm_mock({tool_calls: [{id: "write_1", name: "write_note", arguments: {path: "/workspace/a.txt"}}]})
-  let worker = spawn_agent(
-    {
-      name: "permission-worker",
-      task: "Try to write.",
-      wait: true,
-      permissions: {deny: ["write_note"]},
-      node: {
-        kind: "stage",
-        mode: "agent",
-        model_policy: {provider: "mock", tool_format: "native", max_iterations: 1},
-        tools: write_tools(),
-      },
+  with_llm_script(
+    [{tool_calls: [{id: "write_1", name: "write_note", arguments: {path: "/workspace/a.txt"}}]}],
+    { ->
+      let worker = spawn_agent(
+        {
+          name: "permission-worker",
+          task: "Try to write.",
+          wait: true,
+          permissions: {deny: ["write_note"]},
+          node: {
+            kind: "stage",
+            mode: "agent",
+            model_policy: {provider: "mock", tool_format: "native", max_iterations: 1},
+            tools: write_tools(),
+          },
+        },
+      )
+      __io_println(worker.status == "completed")
+      __io_println(worker.result?.result?.tools?.rejected[0] == "write_note")
+      __io_println(len(transcript_events_by_kind(worker.result?.transcript, "PermissionDeny")) == 1)
     },
   )
-  __io_println(worker.status == "completed")
-  __io_println(worker.result?.result?.tools?.rejected[0] == "write_note")
-  __io_println(len(transcript_events_by_kind(worker.result?.transcript, "PermissionDeny")) == 1)
 }

@@ -1,28 +1,28 @@
 // Conformance test for std/llm/ensemble::self_consistency — majority vote
 // across 5 mocked samples picks the answer with 3 votes.
 import { self_consistency } from "std/llm/ensemble"
+import { llm_text, with_llm_script } from "std/testing"
 
 pipeline default() {
-  llm_mock_clear()
-  llm_mock({text: "A"})
-  llm_mock({text: "B"})
-  llm_mock({text: "A"})
-  llm_mock({text: "C"})
-  llm_mock({text: "A"})
-  let result = self_consistency(
-    "Pick a letter",
-    "",
-    {
-      n: 5,
-      parallel: false,
-      sampler_opts: {temperature: 1.2},
-      call_opts: {provider: "mock"},
-      extract: { text -> text },
+  with_llm_script(
+    [llm_text("A"), llm_text("B"), llm_text("A"), llm_text("C"), llm_text("A")],
+    { ->
+      let result = self_consistency(
+        "Pick a letter",
+        "",
+        {
+          n: 5,
+          parallel: false,
+          sampler_opts: {temperature: 1.2},
+          call_opts: {provider: "mock"},
+          extract: { text -> text },
+        },
+      )
+      __io_println(result.ok)
+      __io_println(result.answer)
+      __io_println(result.answer_count)
+      __io_println(result.total)
+      __io_println(result.entropy > 0.0)
     },
   )
-  __io_println(result.ok)
-  __io_println(result.answer)
-  __io_println(result.answer_count)
-  __io_println(result.total)
-  __io_println(result.entropy > 0.0)
 }

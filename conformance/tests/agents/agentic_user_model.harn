@@ -1,32 +1,34 @@
 import { agentic_user, simulated_user_respond, simulated_user_status } from "std/agent/user"
+import { llm_text, with_llm_script } from "std/testing"
 
 pipeline main() {
-  llm_mock_clear()
-  llm_mock(
-    {text: "{\"action\":\"reply\",\"message\":\"Use node:test.\",\"reason\":\"no extra deps\"}"},
-  )
-  let answerer = agentic_user(
-    {
-      task: "Help a coding agent create a focused test file.",
-      behavior: "Answer clarification questions with plausible project preferences.",
-      provider: "mock",
-      max_replies: 2,
-      max_llm_calls: 2,
+  with_llm_script(
+    [llm_text("{\"action\":\"reply\",\"message\":\"Use node:test.\",\"reason\":\"no extra deps\"}")],
+    { ->
+      let answerer = agentic_user(
+        {
+          task: "Help a coding agent create a focused test file.",
+          behavior: "Answer clarification questions with plausible project preferences.",
+          provider: "mock",
+          max_replies: 2,
+          max_llm_calls: 2,
+        },
+      )
+      let decision = simulated_user_respond(
+        answerer,
+        {
+          question: "Which test runner should I use?",
+          context: "The package has no explicit test framework.",
+        },
+      )
+      let status = simulated_user_status(answerer)
+      let calls = llm_mock_calls()
+      __io_println(decision.action)
+      __io_println(decision.message)
+      __io_println(status.state.replies)
+      __io_println(status.state.llm_calls)
+      __io_println(contains(calls[0].system, "simulating the user"))
+      __io_println(contains(json_stringify(calls[0].messages), "Which test runner"))
     },
   )
-  let decision = simulated_user_respond(
-    answerer,
-    {
-      question: "Which test runner should I use?",
-      context: "The package has no explicit test framework.",
-    },
-  )
-  let status = simulated_user_status(answerer)
-  let calls = llm_mock_calls()
-  __io_println(decision.action)
-  __io_println(decision.message)
-  __io_println(status.state.replies)
-  __io_println(status.state.llm_calls)
-  __io_println(contains(calls[0].system, "simulating the user"))
-  __io_println(contains(json_stringify(calls[0].messages), "Which test runner"))
 }

@@ -1,31 +1,37 @@
+import { with_llm_script } from "std/testing"
+
 pipeline main() {
-  llm_mock_clear()
-  llm_mock({text: "done", input_tokens: 80, output_tokens: 0, model: "mock"})
-  let enabled = agent_loop(
-    "token pressure default",
-    nil,
-    {
-      provider: "mock",
-      model: "mock",
-      session_id: "reminder-provider-loop-defaults-enabled",
-      reminders: {config: {token_pressure: {context_window: 100}}},
+  with_llm_script(
+    [
+      {text: "done", input_tokens: 80, output_tokens: 0, model: "mock"},
+      {text: "done", input_tokens: 80, output_tokens: 0, model: "mock"},
+    ],
+    { ->
+      let enabled = agent_loop(
+        "token pressure default",
+        nil,
+        {
+          provider: "mock",
+          model: "mock",
+          session_id: "reminder-provider-loop-defaults-enabled",
+          reminders: {config: {token_pressure: {context_window: 100}}},
+        },
+      )
+      let enabled_reminders = transcript_events_by_kind(enabled.transcript, "system_reminder")
+      let disabled = agent_loop(
+        "token pressure disabled",
+        nil,
+        {
+          provider: "mock",
+          model: "mock",
+          session_id: "reminder-provider-loop-defaults-disabled",
+          reminders: {providers: ["-token_pressure"], config: {token_pressure: {context_window: 100}}},
+        },
+      )
+      let disabled_reminders = transcript_events_by_kind(disabled.transcript, "system_reminder")
+      __io_println(len(enabled_reminders))
+      __io_println(enabled_reminders[0].reminder.tags[0])
+      __io_println(len(disabled_reminders))
     },
   )
-  let enabled_reminders = transcript_events_by_kind(enabled.transcript, "system_reminder")
-  llm_mock_clear()
-  llm_mock({text: "done", input_tokens: 80, output_tokens: 0, model: "mock"})
-  let disabled = agent_loop(
-    "token pressure disabled",
-    nil,
-    {
-      provider: "mock",
-      model: "mock",
-      session_id: "reminder-provider-loop-defaults-disabled",
-      reminders: {providers: ["-token_pressure"], config: {token_pressure: {context_window: 100}}},
-    },
-  )
-  let disabled_reminders = transcript_events_by_kind(disabled.transcript, "system_reminder")
-  __io_println(len(enabled_reminders))
-  __io_println(enabled_reminders[0].reminder.tags[0])
-  __io_println(len(disabled_reminders))
 }

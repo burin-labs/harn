@@ -1,3 +1,5 @@
+import { llm_text, with_llm_script } from "std/testing"
+
 pipeline test(task) {
   let base = transcript_from_messages(
     [
@@ -30,107 +32,110 @@ pipeline test(task) {
   __io_println(
     transcript_events_by_kind(masked, "compaction")[0].metadata?.strategy == "observation_mask",
   )
-  llm_mock_clear()
-  llm_mock({text: "LLM compact summary"})
-  let llm_compacted = transcript_compact(
-    base,
-    {
-      provider: "mock",
-      strategy: "llm",
-      keep_last: 1,
-      summarize_prompt: "compact_transcript_summary.harn.prompt",
-    },
-  )
-  __io_println(transcript_summary(llm_compacted).contains("LLM compact summary"))
-  let llm_calls = llm_mock_calls()
-  let prompt = llm_calls[0].messages[0].content
-  __io_println(prompt.contains("Compact prompt from asset."))
-  __io_println(prompt.contains("Archived count: 2"))
-  llm_mock_clear()
-  llm_mock({text: "policy extension summary"})
-  let policy_extended = transcript_compact(
-    base,
-    {
-      provider: "mock",
-      strategy: "llm",
-      keep_last: 1,
-      instructions: "Preserve parser TODOs.",
-      author: "host",
-    },
-  )
-  let extended_prompt = llm_mock_calls()[0].messages[0].content
-  let extended_event = transcript_events_by_kind(policy_extended, "compaction")[0]
-  __io_println(extended_prompt.contains("Additional compaction instructions"))
-  __io_println(extended_event.metadata?.instruction_mode == "extend")
-  __io_println(extended_event.metadata?.instruction_source == "host")
-  __io_println(extended_event.metadata?.compaction_policy?.instructions == "Preserve parser TODOs.")
-  llm_mock_clear()
-  llm_mock({text: "policy replacement summary"})
-  let policy_replaced = transcript_compact(
-    base,
-    {
-      provider: "mock",
-      strategy: "llm",
-      keep_last: 1,
-      instructions: "Only keep failing verification details.",
-      extend_default_instructions: false,
-    },
-  )
-  let replacement_prompt = llm_mock_calls()[0].messages[0].content
-  __io_println(replacement_prompt.contains("according to these instructions"))
-  __io_println(!replacement_prompt.contains("Preserve goals, constraints"))
-  __io_println(
-    transcript_events_by_kind(policy_replaced, "compaction")[0].metadata?.instruction_mode
-      == "replace",
-  )
-  let stream_session = agent_session_open("compact-stream-session")
-  agent_session_inject(stream_session, {role: "user", content: "one"})
-  agent_session_inject(stream_session, {role: "assistant", content: "two"})
-  agent_session_inject(stream_session, {role: "user", content: "three"})
-  agent_subscribe(
-    stream_session,
-    { ev ->
-      if ev?.type == "transcript_compacted" {
-        agent_session_inject(stream_session, {role: "assistant", content: "LIVE_COMPACTION_EVENT"})
+  with_llm_script(
+    [
+      llm_text("LLM compact summary"),
+      llm_text("policy extension summary"),
+      llm_text("policy replacement summary"),
+    ],
+    { ->
+      let llm_compacted = transcript_compact(
+        base,
+        {
+          provider: "mock",
+          strategy: "llm",
+          keep_last: 1,
+          summarize_prompt: "compact_transcript_summary.harn.prompt",
+        },
+      )
+      __io_println(transcript_summary(llm_compacted).contains("LLM compact summary"))
+      let llm_calls = llm_mock_calls()
+      let prompt = llm_calls[0].messages[0].content
+      __io_println(prompt.contains("Compact prompt from asset."))
+      __io_println(prompt.contains("Archived count: 2"))
+      let policy_extended = transcript_compact(
+        base,
+        {
+          provider: "mock",
+          strategy: "llm",
+          keep_last: 1,
+          instructions: "Preserve parser TODOs.",
+          author: "host",
+        },
+      )
+      let extended_prompt = llm_mock_calls()[1].messages[0].content
+      let extended_event = transcript_events_by_kind(policy_extended, "compaction")[0]
+      __io_println(extended_prompt.contains("Additional compaction instructions"))
+      __io_println(extended_event.metadata?.instruction_mode == "extend")
+      __io_println(extended_event.metadata?.instruction_source == "host")
+      __io_println(extended_event.metadata?.compaction_policy?.instructions == "Preserve parser TODOs.")
+      let policy_replaced = transcript_compact(
+        base,
+        {
+          provider: "mock",
+          strategy: "llm",
+          keep_last: 1,
+          instructions: "Only keep failing verification details.",
+          extend_default_instructions: false,
+        },
+      )
+      let replacement_prompt = llm_mock_calls()[2].messages[0].content
+      __io_println(replacement_prompt.contains("according to these instructions"))
+      __io_println(!replacement_prompt.contains("Preserve goals, constraints"))
+      __io_println(
+        transcript_events_by_kind(policy_replaced, "compaction")[0].metadata?.instruction_mode
+          == "replace",
+      )
+      let stream_session = agent_session_open("compact-stream-session")
+      agent_session_inject(stream_session, {role: "user", content: "one"})
+      agent_session_inject(stream_session, {role: "assistant", content: "two"})
+      agent_session_inject(stream_session, {role: "user", content: "three"})
+      agent_subscribe(
+        stream_session,
+        { ev ->
+          if ev?.type == "transcript_compacted" {
+            agent_session_inject(stream_session, {role: "assistant", content: "LIVE_COMPACTION_EVENT"})
+          }
+        },
+      )
+      let session_snapshot = agent_session_snapshot(stream_session) ?? {}
+      let _ = transcript_compact(session_snapshot, {strategy: "truncate", keep_last: 1, target_tokens: 1})
+      __io_println(
+        json_stringify(transcript_messages(agent_session_snapshot(stream_session) ?? {}))
+          .contains("LIVE_COMPACTION_EVENT"),
+      )
+      let run = run_record(
+        {
+          _type: "run_record",
+          id: "compact-run",
+          workflow_id: "wf",
+          status: "completed",
+          stages: [
+            {id: "stage-truncate", node_id: "truncate", transcript: truncated},
+            {id: "stage-mask", node_id: "mask", transcript: masked},
+            {id: "stage-llm", node_id: "llm", transcript: llm_compacted},
+          ],
+        },
+      )
+      __io_println(run.observability?.schema_version == 4)
+      __io_println(len(run.observability?.compaction_events) == 3)
+      var saw_truncate = false
+      var saw_mask = false
+      var saw_llm = false
+      for ev in run.observability?.compaction_events {
+        if ev.stage_id == "stage-truncate" && ev.strategy == "truncate" && ev.available {
+          saw_truncate = true
+        }
+        if ev.stage_id == "stage-mask" && ev.strategy == "observation_mask" && ev.available {
+          saw_mask = true
+        }
+        if ev.stage_id == "stage-llm" && ev.strategy == "llm" && ev.available {
+          saw_llm = true
+        }
       }
+      __io_println(saw_truncate)
+      __io_println(saw_mask)
+      __io_println(saw_llm)
     },
   )
-  let session_snapshot = agent_session_snapshot(stream_session) ?? {}
-  let _ = transcript_compact(session_snapshot, {strategy: "truncate", keep_last: 1, target_tokens: 1})
-  __io_println(
-    json_stringify(transcript_messages(agent_session_snapshot(stream_session) ?? {}))
-      .contains("LIVE_COMPACTION_EVENT"),
-  )
-  let run = run_record(
-    {
-      _type: "run_record",
-      id: "compact-run",
-      workflow_id: "wf",
-      status: "completed",
-      stages: [
-        {id: "stage-truncate", node_id: "truncate", transcript: truncated},
-        {id: "stage-mask", node_id: "mask", transcript: masked},
-        {id: "stage-llm", node_id: "llm", transcript: llm_compacted},
-      ],
-    },
-  )
-  __io_println(run.observability?.schema_version == 4)
-  __io_println(len(run.observability?.compaction_events) == 3)
-  var saw_truncate = false
-  var saw_mask = false
-  var saw_llm = false
-  for ev in run.observability?.compaction_events {
-    if ev.stage_id == "stage-truncate" && ev.strategy == "truncate" && ev.available {
-      saw_truncate = true
-    }
-    if ev.stage_id == "stage-mask" && ev.strategy == "observation_mask" && ev.available {
-      saw_mask = true
-    }
-    if ev.stage_id == "stage-llm" && ev.strategy == "llm" && ev.available {
-      saw_llm = true
-    }
-  }
-  __io_println(saw_truncate)
-  __io_println(saw_mask)
-  __io_println(saw_llm)
 }

@@ -1,3 +1,5 @@
+import { assert_error_contains } from "std/testing"
+
 /**
  * `jsonrpc_batch` is HTTP-bound, so we can't exercise the round-trip
  * in a hermetic conformance test. Instead this fixture nails down
@@ -8,32 +10,20 @@
  * paths against a synthetic envelope.
  */
 pipeline test(task) {
-  let url_result = try {
-    jsonrpc_batch("", [{method: "ping"}])
-  }
-  assert_eq(is_err(url_result), true, "empty url is rejected")
-  assert_eq(
-    contains(to_string(unwrap_err(url_result)), "url is required"),
-    true,
-    "url-required error surfaces verbatim",
+  assert_error_contains(
+    { -> jsonrpc_batch("", [{method: "ping"}]) },
+    "url is required",
+    "empty url is rejected",
   )
-  let empty_calls = try {
-    jsonrpc_batch("http://example.invalid/rpc", [])
-  }
-  assert_eq(is_err(empty_calls), true, "empty calls is rejected")
-  assert_eq(
-    contains(to_string(unwrap_err(empty_calls)), "calls list cannot be empty"),
-    true,
-    "empty-list error surfaces verbatim",
+  assert_error_contains(
+    { -> jsonrpc_batch("http://example.invalid/rpc", []) },
+    "calls list cannot be empty",
+    "empty calls is rejected",
   )
-  let bad_call = try {
-    jsonrpc_batch("http://example.invalid/rpc", [{params: [1, 2]}])
-  }
-  assert_eq(is_err(bad_call), true, "missing method is rejected")
-  assert_eq(
-    contains(to_string(unwrap_err(bad_call)), "missing 'method'"),
-    true,
-    "missing-method error surfaces verbatim",
+  assert_error_contains(
+    { -> jsonrpc_batch("http://example.invalid/rpc", [{params: [1, 2]}]) },
+    "missing 'method'",
+    "missing method is rejected",
   )
   log("jsonrpc_batch validation: all tests passed")
 }

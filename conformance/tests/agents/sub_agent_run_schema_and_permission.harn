@@ -1,3 +1,5 @@
+import { llm_text, with_llm_script } from "std/testing"
+
 fn write_tools() {
   var tools = tool_registry()
   tools = tool_define(
@@ -14,34 +16,42 @@ fn write_tools() {
 }
 
 pipeline main() {
-  llm_mock({text: "{\"callers\":[\"crate::parse_config\",\"cli::parse_config\"]}"})
-  let typed = sub_agent_run(
-    "Find all callers of parse_config.",
-    {
-      provider: "mock",
-      returns: {
-        schema: {
-          type: "object",
-          properties: {callers: {type: "array", items: {type: "string"}}},
-          required: ["callers"],
+  with_llm_script(
+    [llm_text("{\"callers\":[\"crate::parse_config\",\"cli::parse_config\"]}")],
+    { ->
+      let typed = sub_agent_run(
+        "Find all callers of parse_config.",
+        {
+          provider: "mock",
+          returns: {
+            schema: {
+              type: "object",
+              properties: {callers: {type: "array", items: {type: "string"}}},
+              required: ["callers"],
+            },
+          },
         },
-      },
+      )
+      __io_println(typed?.ok)
+      __io_println(len(typed?.data?.callers ?? []) == 2)
     },
   )
-  __io_println(typed?.ok)
-  __io_println(len(typed?.data?.callers ?? []) == 2)
-  llm_mock({tool_calls: [{id: "deny_1", name: "write_note", arguments: {path: "notes.txt"}}]})
-  let denied = sub_agent_run(
-    "Try to write a note.",
-    {
-      provider: "mock",
-      tools: write_tools(),
-      allowed_tools: ["read"],
-      tool_format: "native",
-      max_iterations: 1,
+  with_llm_script(
+    [{tool_calls: [{id: "deny_1", name: "write_note", arguments: {path: "notes.txt"}}]}],
+    { ->
+      let denied = sub_agent_run(
+        "Try to write a note.",
+        {
+          provider: "mock",
+          tools: write_tools(),
+          allowed_tools: ["read"],
+          tool_format: "native",
+          max_iterations: 1,
+        },
+      )
+      __io_println(!denied?.ok)
+      __io_println(denied.error?.category == "permission_denied")
+      __io_println(denied.error?.tool == "write_note")
     },
   )
-  __io_println(!denied?.ok)
-  __io_println(denied.error?.category == "permission_denied")
-  __io_println(denied.error?.tool == "write_note")
 }

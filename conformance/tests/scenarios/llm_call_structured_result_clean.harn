@@ -1,3 +1,5 @@
+import { llm_text, with_llm_script } from "std/testing"
+
 /**
  * `llm_call_structured_result` happy path: clean JSON parses on the
  * first attempt, the envelope reports ok=true, attempts=1, and zero
@@ -9,16 +11,20 @@ pipeline default() {
     required: ["name", "age"],
     properties: {name: {type: "string"}, age: {type: "integer"}},
   }
-  llm_mock({text: "{\"name\": \"Ada\", \"age\": 36}"})
-  let r = llm_call_structured_result("Summarize", schema, {provider: "mock"})
-  __io_println(r.ok)
-  __io_println(r.data.name)
-  __io_println(r.data.age)
-  __io_println(r.attempts)
-  __io_println(r.repaired)
-  __io_println(r.extracted_json)
-  __io_println(r.error)
-  __io_println(r.error_category == nil)
-  __io_println(r.usage.input_tokens >= 0)
-  __io_println(r.provider)
+  with_llm_script(
+    [llm_text("{\"name\": \"Ada\", \"age\": 36}")],
+    { ->
+      let r = llm_call_structured_result("Summarize", schema, {provider: "mock"})
+      __io_println(r.ok)
+      __io_println(r.data.name)
+      __io_println(r.data.age)
+      __io_println(r.attempts)
+      __io_println(r.repaired)
+      __io_println(r.extracted_json)
+      __io_println(r.error)
+      __io_println(r.error_category == nil)
+      __io_println(r.usage.input_tokens >= 0)
+      __io_println(r.provider)
+    },
+  )
 }

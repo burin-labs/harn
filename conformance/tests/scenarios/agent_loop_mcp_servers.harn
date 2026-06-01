@@ -1,4 +1,5 @@
 import { process_shell } from "std/runtime"
+import { llm_text, with_llm_script } from "std/testing"
 
 fn wait_for_file(harness: Harness, path, attempts) {
   var remaining = attempts
@@ -27,39 +28,42 @@ pipeline default() {
   require start?.success, "MCP mock server started"
   wait_for_file(harness, port_path, 100)
   let base = "http://127.0.0.1:" + harness.fs.read_text(port_path).trim()
-  llm_mock_clear()
-  llm_mock(
-    {
-      text: "Calling MCP tools.",
-      tool_calls: [
-        {id: "mcp1", name: "remote__echo", arguments: {message: "hello from remote"}},
-        {id: "mcp2", name: "mirror__echo", arguments: {message: "hello from mirror"}},
-      ],
+  with_llm_script(
+    [
+      {
+        text: "Calling MCP tools.",
+        tool_calls: [
+          {id: "mcp1", name: "remote__echo", arguments: {message: "hello from remote"}},
+          {id: "mcp2", name: "mirror__echo", arguments: {message: "hello from mirror"}},
+        ],
+      },
+      llm_text("<done>##DONE##</done>"),
+    ],
+    { ->
+      let result = agent_loop(
+        "Use both MCP echo tools",
+        nil,
+        {
+          provider: "mock",
+          tool_format: "native",
+          max_iterations: 3,
+          mcp_servers: [
+            {name: "remote", transport: "http", url: base + "/mcp"},
+            {name: "mirror", transport: "http", url: base + "/mcp"},
+          ],
+        },
+      )
+      let state_response = harness.net.get(base + "/__state")
+      let state = json_parse(state_response.body)
+      let _stop = harness.net.post(base + "/__shutdown", "")
+      process_shell("kill $(cat \"" + pid_path + "\") >/dev/null 2>&1 || true")
+      __io_println(result?.tools.successful[0])
+      __io_println(result?.tools.successful[1])
+      __io_println(state.list_calls)
+      __io_println(state.tool_calls[0].name)
+      __io_println(state.tool_calls[0].arguments.message)
+      __io_println(state.tool_calls[1].name)
+      __io_println(state.tool_calls[1].arguments.message)
     },
   )
-  llm_mock({text: "<done>##DONE##</done>"})
-  let result = agent_loop(
-    "Use both MCP echo tools",
-    nil,
-    {
-      provider: "mock",
-      tool_format: "native",
-      max_iterations: 3,
-      mcp_servers: [
-        {name: "remote", transport: "http", url: base + "/mcp"},
-        {name: "mirror", transport: "http", url: base + "/mcp"},
-      ],
-    },
-  )
-  let state_response = harness.net.get(base + "/__state")
-  let state = json_parse(state_response.body)
-  let _stop = harness.net.post(base + "/__shutdown", "")
-  process_shell("kill $(cat \"" + pid_path + "\") >/dev/null 2>&1 || true")
-  __io_println(result?.tools.successful[0])
-  __io_println(result?.tools.successful[1])
-  __io_println(state.list_calls)
-  __io_println(state.tool_calls[0].name)
-  __io_println(state.tool_calls[0].arguments.message)
-  __io_println(state.tool_calls[1].name)
-  __io_println(state.tool_calls[1].arguments.message)
 }

@@ -1,16 +1,21 @@
+import { llm_text, with_llm_script } from "std/testing"
+
 pipeline default() {
-  llm_mock_clear()
-  llm_mock(
-    {
-      text: "Remember `<user_response>...</user_response>` is only an example wrapper.\nAudit: actual final answer.",
+  with_llm_script(
+    [
+      llm_text(
+        "Remember `<user_response>...</user_response>` is only an example wrapper.\nAudit: actual final answer.",
+      ),
+    ],
+    { ->
+      let result = agent_loop(
+        "Finish with a visible answer.",
+        nil,
+        {provider: "mock", loop_until_done: false, max_iterations: 1},
+      )
+      __io_println(result.status)
+      __io_println(result.visible_text)
+      __io_println(result.text)
     },
   )
-  let result = agent_loop(
-    "Finish with a visible answer.",
-    nil,
-    {provider: "mock", loop_until_done: false, max_iterations: 1},
-  )
-  __io_println(result.status)
-  __io_println(result.visible_text)
-  __io_println(result.text)
 }

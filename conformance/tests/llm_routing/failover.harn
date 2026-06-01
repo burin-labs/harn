@@ -1,37 +1,42 @@
+import { with_llm_script } from "std/testing"
+
 /**
  * Failover: the first link returns a 429 rate_limit error, the
  * second link succeeds. The chain should advance and the envelope
  * should surface both attempts.
  */
 pipeline test(task) {
-  llm_mock_clear()
-  llm_mock(
-    {
-      error: {category: "rate_limit", message: "HTTP 429 rate limit", retry_after_ms: 100},
-      model: "mock",
-      provider: "mock",
+  with_llm_script(
+    [
+      {
+        error: {category: "rate_limit", message: "HTTP 429 rate limit", retry_after_ms: 100},
+        model: "mock",
+        provider: "mock",
+      },
+      {text: "second link won", model: "mock-strong", provider: "mock"},
+    ],
+    { ->
+      let policy = routing_policy(
+        {
+          chain: [
+            {provider: "mock", model: "mock", label: "cheap"},
+            {provider: "mock", model: "mock-strong", label: "frontier"},
+          ],
+          failover: {on_status: [429, 500, 502, 503], max_attempts: 3},
+          label: "cheap-then-frontier",
+        },
+      )
+      let result = llm_call("hi", nil, {routing: policy})
+      __io_println(result.text)
+      __io_println(result.routing.policy)
+      let attempts = result.routing.attempts
+      __io_println(len(attempts))
+      __io_println(attempts[0].label)
+      __io_println(attempts[0].status)
+      __io_println(attempts[0].error.category)
+      __io_println(attempts[1].label)
+      __io_println(attempts[1].status)
+      __io_println(result.routing.selected)
     },
   )
-  llm_mock({text: "second link won", model: "mock-strong", provider: "mock"})
-  let policy = routing_policy(
-    {
-      chain: [
-        {provider: "mock", model: "mock", label: "cheap"},
-        {provider: "mock", model: "mock-strong", label: "frontier"},
-      ],
-      failover: {on_status: [429, 500, 502, 503], max_attempts: 3},
-      label: "cheap-then-frontier",
-    },
-  )
-  let result = llm_call("hi", nil, {routing: policy})
-  __io_println(result.text)
-  __io_println(result.routing.policy)
-  let attempts = result.routing.attempts
-  __io_println(len(attempts))
-  __io_println(attempts[0].label)
-  __io_println(attempts[0].status)
-  __io_println(attempts[0].error.category)
-  __io_println(attempts[1].label)
-  __io_println(attempts[1].status)
-  __io_println(result.routing.selected)
 }

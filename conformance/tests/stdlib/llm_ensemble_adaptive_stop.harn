@@ -1,8 +1,7 @@
 import { debate } from "std/llm/ensemble"
-import { llm_call_count } from "std/testing"
+import { llm_call_count, llm_text, with_llm_script } from "std/testing"
 
 pipeline default() {
-  llm_mock_clear()
   let topic = "llm.ensemble.debate"
   let cursor = event_log.latest(topic)
   let events = if cursor == nil {
@@ -10,32 +9,38 @@ pipeline default() {
   } else {
     event_log.subscribe({topic: topic, from_cursor: cursor})
   }
-  llm_mock({text: "Paris is the capital of France."})
-  llm_mock({text: "The answer is Paris, France."})
-  llm_mock({text: "Paris is the capital of France."})
-  llm_mock({text: "The answer is Paris, France."})
-  llm_mock({text: "Paris is the capital of France."})
-  llm_mock({text: "The answer is Paris, France."})
-  llm_mock({text: "unused round four a"})
-  llm_mock({text: "unused round four b"})
-  let result = debate(
-    {
-      prompt: "What is the capital of France?",
-      debaters: ["alpha", "beta"],
-      n_rounds: 5,
-      adaptive_stop: true,
-      stability_threshold: 0.15,
-      provider: "mock",
+  with_llm_script(
+    [
+      llm_text("Paris is the capital of France."),
+      llm_text("The answer is Paris, France."),
+      llm_text("Paris is the capital of France."),
+      llm_text("The answer is Paris, France."),
+      llm_text("Paris is the capital of France."),
+      llm_text("The answer is Paris, France."),
+      llm_text("unused round four a"),
+      llm_text("unused round four b"),
+    ],
+    { ->
+      let result = debate(
+        {
+          prompt: "What is the capital of France?",
+          debaters: ["alpha", "beta"],
+          n_rounds: 5,
+          adaptive_stop: true,
+          stability_threshold: 0.15,
+          provider: "mock",
+        },
+      )
+      let event = events.next().value
+      __io_println(result.completed_rounds)
+      __io_println(result.stopped_early)
+      __io_println(result.stop_reason)
+      __io_println(llm_call_count())
+      __io_println(event.kind)
+      __io_println(event.payload.round)
+      __io_println(event.payload.requested_rounds)
+      __io_println(event.payload.consecutive_stable_rounds)
+      __io_println(event.payload.max_round_drift < 0.15)
     },
   )
-  let event = events.next().value
-  __io_println(result.completed_rounds)
-  __io_println(result.stopped_early)
-  __io_println(result.stop_reason)
-  __io_println(llm_call_count())
-  __io_println(event.kind)
-  __io_println(event.payload.round)
-  __io_println(event.payload.requested_rounds)
-  __io_println(event.payload.consecutive_stable_rounds)
-  __io_println(event.payload.max_round_drift < 0.15)
 }

@@ -1,4 +1,5 @@
 import { audit_agent, repair_agent, summary_agent } from "std/agent/presets"
+import { llm_text, with_llm_script } from "std/testing"
 
 fn audit_tools() {
   var tools = tool_registry()
@@ -19,42 +20,58 @@ fn audit_tools() {
 pipeline default() {
   // audit_agent: native completion, no done sentinel; must complete on
   // final user_response text.
-  llm_mock_clear()
-  llm_mock({tool_calls: [{id: "i1", name: "inspect", arguments: {what: "release"}}]})
-  llm_mock({text: "<user_response>Audit complete.</user_response>"})
-  let audit = audit_agent("Audit the release", {provider: "mock", tools: audit_tools(), tool_format: "native"})
-  __io_println(audit.status)
-  __io_println(audit.text)
-  __io_println(audit.adaptive_budget.mode)
-  let calls = llm_mock_calls()
-  // No `##DONE##` sentinel should leak into the system prompt.
-  __io_println(!contains(calls[0].system, "##DONE##"))
-  // summary_agent: cheap one-shot, no tools, no looping.
-  llm_mock_clear()
-  llm_mock({text: "Just a summary."})
-  let summary = summary_agent("Summarize.", {provider: "mock"})
-  __io_println(summary.status)
-  __io_println(summary.text)
-  __io_println(summary.llm.iterations)
-  // summary_agent should not inject native-tool options when it has no tools.
-  // This keeps local/Ollama-style providers without native tool support usable.
-  llm_mock_clear()
-  llm_mock({text: "Local summary."})
-  let local_summary = summary_agent("Summarize locally.", {provider: "mock", model: "mystery-model-7b"})
-  __io_println(local_summary.status)
-  __io_println(local_summary.text)
-  let summary_calls = llm_mock_calls()
-  __io_println(summary_calls[0]?.tool_choice == nil)
-  // repair_agent: tool-using with adaptive budget defaults; ends on natural
-  // user_response.
-  llm_mock_clear()
-  llm_mock({tool_calls: [{id: "r1", name: "inspect", arguments: {what: "fix"}}]})
-  llm_mock({text: "<user_response>Fixed.</user_response>"})
-  let repair = repair_agent(
-    "Repair the regression",
-    {provider: "mock", tools: audit_tools(), tool_format: "native"},
+  with_llm_script(
+    [
+      {tool_calls: [{id: "i1", name: "inspect", arguments: {what: "release"}}]},
+      llm_text("<user_response>Audit complete.</user_response>"),
+    ],
+    { ->
+      let audit = audit_agent("Audit the release", {provider: "mock", tools: audit_tools(), tool_format: "native"})
+      __io_println(audit.status)
+      __io_println(audit.text)
+      __io_println(audit.adaptive_budget.mode)
+      let calls = llm_mock_calls()
+      __io_println(!contains(calls[0].system, "##DONE##"))
+    },
   )
-  __io_println(repair.status)
-  __io_println(repair.adaptive_budget.mode)
-  __io_println(repair.adaptive_budget.max >= repair.adaptive_budget.initial)
+  with_llm_script(
+    [llm_text("Just a summary.")],
+    { ->
+      let summary = summary_agent("Summarize.", {provider: "mock"})
+      __io_println(summary.status)
+      __io_println(summary.text)
+      __io_println(summary.llm.iterations)
+    },
+  )
+  with_llm_script(
+    [llm_text("Local summary.")],
+    { ->
+      let local_summary = summary_agent("Summarize locally.", {provider: "mock", model: "mystery-model-7b"})
+      __io_println(local_summary.status)
+      __io_println(local_summary.text)
+      let summary_calls = llm_mock_calls()
+      __io_println(summary_calls[0]?.tool_choice == nil)
+    },
+  )
+  with_llm_script(
+    [
+      {tool_calls: [{id: "r1", name: "inspect", arguments: {what: "fix"}}]},
+      llm_text("<user_response>Fixed.</user_response>"),
+    ],
+    { ->
+      let repair = repair_agent(
+        "Repair the regression",
+        {provider: "mock", tools: audit_tools(), tool_format: "native"},
+      )
+      __io_println(repair.status)
+      __io_println(repair.adaptive_budget.mode)
+      __io_println(repair.adaptive_budget.max >= repair.adaptive_budget.initial)
+    },
+  )
 }
+// No `##DONE##` sentinel should leak into the system prompt.
+// summary_agent: cheap one-shot, no tools, no looping.
+// summary_agent should not inject native-tool options when it has no tools.
+// This keeps local/Ollama-style providers without native tool support usable.
+// repair_agent: tool-using with adaptive budget defaults; ends on natural
+// user_response.

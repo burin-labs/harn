@@ -1,22 +1,30 @@
+import { llm_text, with_llm_script } from "std/testing"
+
 type GraderOut = {verdict: "pass" | "fail" | "unclear", summary: string}
 
 pipeline default() {
   // First mock returns an invalid enum value; schema retry kicks in.
-  llm_mock({text: "{\"verdict\": \"maybe\", \"summary\": \"x\"}"})
-  llm_mock({text: "{\"verdict\": \"pass\", \"summary\": \"ok\"}"})
-  let r = llm_call(
-    "Grade this",
-    nil,
-    {
-      provider: "mock",
-      output_schema: GraderOut,
-      output_validation: "error",
-      schema_retries: 2,
-      response_format: "json",
+  with_llm_script(
+    [
+      llm_text("{\"verdict\": \"maybe\", \"summary\": \"x\"}"),
+      llm_text("{\"verdict\": \"pass\", \"summary\": \"ok\"}"),
+    ],
+    { ->
+      let r = llm_call(
+        "Grade this",
+        nil,
+        {
+          provider: "mock",
+          output_schema: GraderOut,
+          output_validation: "error",
+          schema_retries: 2,
+          response_format: "json",
+        },
+      )
+      __io_println(r.data.verdict)
+      __io_println(r.data.summary)
+      __io_println(len(llm_mock_calls()))
     },
   )
-  __io_println(r.data.verdict)
-  __io_println(r.data.summary)
-  // Two calls happened: first invalid, second valid.
-  __io_println(len(llm_mock_calls()))
 }
+// Two calls happened: first invalid, second valid.

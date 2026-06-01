@@ -1,16 +1,21 @@
+import { with_llm_script } from "std/testing"
+
 /**
  * Basic routing_policy smoke test: a single-link chain should run
  * through the new executor and surface the routing block on the
  * envelope.
  */
 pipeline test(task) {
-  llm_mock_clear()
-  llm_mock({text: "hello from primary", model: "mock", provider: "mock"})
-  let policy = routing_policy({chain: [{provider: "mock", model: "mock"}], label: "smoke"})
-  let result = llm_call("hi", nil, {routing: policy})
-  __io_println(result.text)
-  __io_println(result.routing.policy)
-  __io_println(result.routing.attempts[0].provider)
-  __io_println(result.routing.attempts[0].status)
-  __io_println(result.routing.selected)
+  with_llm_script(
+    [{text: "hello from primary", model: "mock", provider: "mock"}],
+    { ->
+      let policy = routing_policy({chain: [{provider: "mock", model: "mock"}], label: "smoke"})
+      let result = llm_call("hi", nil, {routing: policy})
+      __io_println(result.text)
+      __io_println(result.routing.policy)
+      __io_println(result.routing.attempts[0].provider)
+      __io_println(result.routing.attempts[0].status)
+      __io_println(result.routing.selected)
+    },
+  )
 }

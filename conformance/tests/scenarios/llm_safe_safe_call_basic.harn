@@ -1,11 +1,15 @@
 // std/llm/safe.safe_call wraps a successful llm_call into the canonical
 // envelope shape against the mock provider.
 import { safe_call } from "std/llm/safe"
+import { llm_text, with_llm_script } from "std/testing"
 
 pipeline default() {
-  llm_mock_clear()
-  llm_mock({text: "ok"})
-  let r = safe_call("hi", nil, {provider: "mock", model: "mock-model"})
-  __io_println(r.ok)
-  __io_println(r.value.text)
+  with_llm_script(
+    [llm_text("ok")],
+    { ->
+      let r = safe_call("hi", nil, {provider: "mock", model: "mock-model"})
+      __io_println(r.ok)
+      __io_println(r.value.text)
+    },
+  )
 }

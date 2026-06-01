@@ -1,3 +1,4 @@
+import { with_llm_script } from "std/testing"
 import "std/triggers"
 
 fn handler(event: TriggerEvent) -> dict {
@@ -14,38 +15,41 @@ fn classify(event: TriggerEvent) -> bool {
 }
 
 pipeline test(task) {
-  llm_mock_clear()
-  llm_mock({text: "yes", input_tokens: 3000, output_tokens: 4000, model: "gpt-4o-mini"})
-  let unique = to_string(to_int(harness.clock.timestamp())) + "-"
-    + to_string(harness.random.gen_range(100000, 999999))
-  let handle: TriggerHandle = trigger_register(
-    {
-      id: "llm-predicate-budget-" + unique,
-      kind: "issue.opened",
-      provider: "github",
-      handler: handler,
-      when: classify,
-      when_budget: {max_cost_usd: 0.001, tokens_max: 500, timeout: "5s"},
-      retry: nil,
-      match: {events: ["issue.opened"]},
-      events: nil,
-      dedupe_key: nil,
-      filter: nil,
-      budget: nil,
-      manifest_path: nil,
-      package_name: nil,
+  with_llm_script(
+    [{text: "yes", input_tokens: 3000, output_tokens: 4000, model: "gpt-4o-mini"}],
+    { ->
+      let unique = to_string(to_int(harness.clock.timestamp())) + "-"
+        + to_string(harness.random.gen_range(100000, 999999))
+      let handle: TriggerHandle = trigger_register(
+        {
+          id: "llm-predicate-budget-" + unique,
+          kind: "issue.opened",
+          provider: "github",
+          handler: handler,
+          when: classify,
+          when_budget: {max_cost_usd: 0.001, tokens_max: 500, timeout: "5s"},
+          retry: nil,
+          match: {events: ["issue.opened"]},
+          events: nil,
+          dedupe_key: nil,
+          filter: nil,
+          budget: nil,
+          manifest_path: nil,
+          package_name: nil,
+        },
+      )
+      let fire: DispatchHandle = trigger_fire(
+        handle,
+        {provider: "github", kind: "issue.opened", headers: {x_delivery: "evt-budget-" + unique}},
+      )
+      let budget_events = trigger_inspect_lifecycle("predicate.budget_exceeded")
+        .filter({ entry -> entry?.headers?.trigger_id == handle.id })
+      let dispatches = trigger_inspect_lifecycle("DispatchStarted")
+        .filter({ entry -> entry?.headers?.trigger_id == handle.id })
+      __io_println(fire.status == "dispatched")
+      __io_println(contains(json_stringify(fire.result ?? {}), "\"reason\":\"budget_exceeded\""))
+      __io_println(len(budget_events) == 1 && budget_events[0]?.payload?.tokens == 7000)
+      __io_println(len(dispatches) == 0)
     },
   )
-  let fire: DispatchHandle = trigger_fire(
-    handle,
-    {provider: "github", kind: "issue.opened", headers: {x_delivery: "evt-budget-" + unique}},
-  )
-  let budget_events = trigger_inspect_lifecycle("predicate.budget_exceeded")
-    .filter({ entry -> entry?.headers?.trigger_id == handle.id })
-  let dispatches = trigger_inspect_lifecycle("DispatchStarted")
-    .filter({ entry -> entry?.headers?.trigger_id == handle.id })
-  __io_println(fire.status == "dispatched")
-  __io_println(contains(json_stringify(fire.result ?? {}), "\"reason\":\"budget_exceeded\""))
-  __io_println(len(budget_events) == 1 && budget_events[0]?.payload?.tokens == 7000)
-  __io_println(len(dispatches) == 0)
 }

@@ -1,5 +1,6 @@
 import { agent_capture_events } from "std/agent/events"
 import { agent_session_messages } from "std/agent/state"
+import { llm_text, with_llm_script } from "std/testing"
 
 fn events_of(events, kind) {
   return events.filter({ event -> event.type == kind })
@@ -28,38 +29,43 @@ pipeline default() {
       annotations: {kind: "read"},
     },
   )
-  llm_mock_clear()
-  llm_mock({text: "", tool_calls: [{id: "noop1", name: "noop", arguments: {}}]})
-  llm_mock({text: "", tool_calls: [{id: "noop2", name: "noop", arguments: {}}]})
-  llm_mock({text: "", tool_calls: [{id: "noop3", name: "noop", arguments: {}}]})
-  llm_mock({text: "{\"verdict\":\"done\",\"reasoning\":\"the repeated call is enough\"}"})
-  let session = "stall-judge-done-" + uuid()
-  let captured = agent_capture_events(
-    session,
-    fn() { return agent_loop(
-      "Stop when the stall judge accepts.",
-      nil,
-      {
-        provider: "mock",
-        tools: tools,
-        tool_format: "native",
-        loop_until_done: true,
-        max_iterations: 5,
-        session_id: session,
-        stall_diagnostics: {threshold: 3, inject_feedback: true, max_feedback: 1},
-        done_judge: {cadence: {when: "stalled"}},
-      },
-    ) },
+  with_llm_script(
+    [
+      {text: "", tool_calls: [{id: "noop1", name: "noop", arguments: {}}]},
+      {text: "", tool_calls: [{id: "noop2", name: "noop", arguments: {}}]},
+      {text: "", tool_calls: [{id: "noop3", name: "noop", arguments: {}}]},
+      llm_text("{\"verdict\":\"done\",\"reasoning\":\"the repeated call is enough\"}"),
+    ],
+    { ->
+      let session = "stall-judge-done-" + uuid()
+      let captured = agent_capture_events(
+        session,
+        fn() { return agent_loop(
+          "Stop when the stall judge accepts.",
+          nil,
+          {
+            provider: "mock",
+            tools: tools,
+            tool_format: "native",
+            loop_until_done: true,
+            max_iterations: 5,
+            session_id: session,
+            stall_diagnostics: {threshold: 3, inject_feedback: true, max_feedback: 1},
+            done_judge: {cadence: {when: "stalled"}},
+          },
+        ) },
+      )
+      let stalls = events_of(captured.events, "agent_loop_stall_warning")
+      let judges = events_of(captured.events, "judge_decision")
+      require len(stalls) == 1, "stall warning should fire once"
+      require len(judges) == 1, "stalled done_judge should fire once"
+      __io_println(captured.result.status)
+      __io_println(captured.result.stop_reason)
+      __io_println(judges[0].trigger)
+      __io_println(judges[0].verdict)
+      __io_println(judges[0].iteration == stalls[0].warning.iteration)
+      __io_println(tool_message_count(session))
+      __io_println(len(llm_mock_calls()))
+    },
   )
-  let stalls = events_of(captured.events, "agent_loop_stall_warning")
-  let judges = events_of(captured.events, "judge_decision")
-  require len(stalls) == 1, "stall warning should fire once"
-  require len(judges) == 1, "stalled done_judge should fire once"
-  __io_println(captured.result.status)
-  __io_println(captured.result.stop_reason)
-  __io_println(judges[0].trigger)
-  __io_println(judges[0].verdict)
-  __io_println(judges[0].iteration == stalls[0].warning.iteration)
-  __io_println(tool_message_count(session))
-  __io_println(len(llm_mock_calls()))
 }

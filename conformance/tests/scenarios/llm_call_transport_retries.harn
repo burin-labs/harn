@@ -1,66 +1,88 @@
+import { llm_text, with_llm_script } from "std/testing"
+
 pipeline default() {
-  llm_mock_clear()
-  llm_mock({error: {category: "server_error", message: "HTTP 503 Service Unavailable"}})
-  llm_mock({text: "ok after retry"})
-  let recovered = llm_call("retry once", nil, {provider: "mock", llm_retries: 2, llm_backoff_ms: 0})
-  __io_println(recovered.prose)
-  __io_println(len(llm_mock_calls()))
-  llm_mock_clear()
-  llm_mock({error: {category: "server_error", message: "HTTP 503 Service Unavailable"}})
-  llm_mock({error: {category: "server_error", message: "HTTP 503 Service Unavailable again"}})
-  llm_mock({text: "unreachable"})
-  let exhausted = try {
-    llm_call("retry budget exhausted", nil, {provider: "mock", llm_retries: 1, llm_backoff_ms: 0})
-  }
-  __io_println(is_err(exhausted))
-  __io_println(unwrap_err(exhausted)?.kind)
-  __io_println(unwrap_err(exhausted)?.reason)
-  __io_println(len(llm_mock_calls()))
-  llm_mock_clear()
-  llm_mock({error: {category: "server_error", message: "HTTP 503 default fail-fast"}})
-  llm_mock({text: "unreachable without explicit retries"})
-  let default_fail_fast = try {
-    llm_call("default retry budget", nil, {provider: "mock", llm_backoff_ms: 0})
-  }
-  __io_println(is_err(default_fail_fast))
-  __io_println(len(llm_mock_calls()))
-  let schema = {type: "object", required: ["answer"], properties: {answer: {type: "string"}}}
-  llm_mock_clear()
-  llm_mock({text: "{\"wrong\": true}"})
-  let schema_failure = try {
-    llm_call(
-      "schema failure is not a transport retry",
-      nil,
-      {
-        provider: "mock",
-        response_format: "json",
-        output_schema: schema,
-        output_validation: "error",
-        schema_retries: 0,
-        llm_retries: 2,
-        llm_backoff_ms: 0,
-      },
-    )
-  }
-  __io_println(is_err(schema_failure))
-  __io_println(unwrap_err(schema_failure)?.category)
-  __io_println(len(llm_mock_calls()))
-  llm_mock_clear()
-  llm_mock({text: "{\"wrong\": true}"})
-  llm_mock({text: "{\"answer\": \"fixed\"}"})
-  let structured = llm_call(
-    "schema retry",
-    nil,
-    {
-      provider: "mock",
-      response_format: "json",
-      output_schema: schema,
-      output_validation: "error",
-      schema_retries: 1,
-      llm_retries: 2,
-      llm_backoff_ms: 0,
+  with_llm_script(
+    [
+      {error: {category: "server_error", message: "HTTP 503 Service Unavailable"}},
+      llm_text("ok after retry"),
+    ],
+    { ->
+      let recovered = llm_call("retry once", nil, {provider: "mock", llm_retries: 2, llm_backoff_ms: 0})
+      __io_println(recovered.prose)
+      __io_println(len(llm_mock_calls()))
     },
   )
-  __io_println(structured.data.answer)
-  __io_println(len(llm_mock_calls()))
+  with_llm_script(
+    [
+      {error: {category: "server_error", message: "HTTP 503 Service Unavailable"}},
+      {error: {category: "server_error", message: "HTTP 503 Service Unavailable again"}},
+      llm_text("unreachable"),
+    ],
+    { ->
+      let exhausted = try {
+        llm_call("retry budget exhausted", nil, {provider: "mock", llm_retries: 1, llm_backoff_ms: 0})
+      }
+      __io_println(is_err(exhausted))
+      __io_println(unwrap_err(exhausted)?.kind)
+      __io_println(unwrap_err(exhausted)?.reason)
+      __io_println(len(llm_mock_calls()))
+    },
+  )
+  with_llm_script(
+    [
+      {error: {category: "server_error", message: "HTTP 503 default fail-fast"}},
+      llm_text("unreachable without explicit retries"),
+    ],
+    { ->
+      let default_fail_fast = try {
+        llm_call("default retry budget", nil, {provider: "mock", llm_backoff_ms: 0})
+      }
+      __io_println(is_err(default_fail_fast))
+      __io_println(len(llm_mock_calls()))
+    },
+  )
+  let schema = {type: "object", required: ["answer"], properties: {answer: {type: "string"}}}
+  with_llm_script(
+    [llm_text("{\"wrong\": true}")],
+    { ->
+      let schema_failure = try {
+        llm_call(
+          "schema failure is not a transport retry",
+          nil,
+          {
+            provider: "mock",
+            response_format: "json",
+            output_schema: schema,
+            output_validation: "error",
+            schema_retries: 0,
+            llm_retries: 2,
+            llm_backoff_ms: 0,
+          },
+        )
+      }
+      __io_println(is_err(schema_failure))
+      __io_println(unwrap_err(schema_failure)?.category)
+      __io_println(len(llm_mock_calls()))
+    },
+  )
+  with_llm_script(
+    [llm_text("{\"wrong\": true}"), llm_text("{\"answer\": \"fixed\"}")],
+    { ->
+      let structured = llm_call(
+        "schema retry",
+        nil,
+        {
+          provider: "mock",
+          response_format: "json",
+          output_schema: schema,
+          output_validation: "error",
+          schema_retries: 1,
+          llm_retries: 2,
+          llm_backoff_ms: 0,
+        },
+      )
+      __io_println(structured.data.answer)
+      __io_println(len(llm_mock_calls()))
+    },
+  )
 }

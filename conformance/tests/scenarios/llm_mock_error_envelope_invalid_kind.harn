@@ -1,3 +1,9 @@
+import { with_llm_script } from "std/testing"
+
 pipeline default(task) {
-  llm_mock({error: {status: 503, kind: "flaky"}})
+  with_llm_script(
+    [{error: {status: 503, kind: "flaky"}}],
+    { ->
+    },
+  )
 }

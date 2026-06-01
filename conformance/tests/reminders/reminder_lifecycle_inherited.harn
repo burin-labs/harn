@@ -1,55 +1,60 @@
+import { llm_text, with_llm_script } from "std/testing"
+
 pipeline main() {
   let topic = "transcript.reminder.lifecycle"
   let child = "reminder-lifecycle-inherited-child"
   agent_session_open(child)
   agent_session_reset(child)
   let cursor = event_log.latest(topic)
-  llm_mock_clear()
-  llm_mock({text: "child done"})
-  sub_agent_run(
-    "Child task.",
-    {
-      provider: "mock",
-      model: "mock",
-      session_id: child,
-      max_iterations: 1,
-      done_judge: nil,
-      reminder_propagation: [
+  with_llm_script(
+    [llm_text("child done")],
+    { ->
+      sub_agent_run(
+        "Child task.",
         {
-          id: "inherited-reminder-1",
-          tags: ["handoff"],
-          dedupe_key: "handoff-reminder",
-          ttl_turns: 2,
-          preserve_on_compact: false,
-          propagate: "all",
-          role_hint: "system",
-          source: "inherited",
-          body: "Carry parent context.",
-          fired_at_turn: 0,
-          originating_agent_id: "parent-agent",
+          provider: "mock",
+          model: "mock",
+          session_id: child,
+          max_iterations: 1,
+          done_judge: nil,
+          reminder_propagation: [
+            {
+              id: "inherited-reminder-1",
+              tags: ["handoff"],
+              dedupe_key: "handoff-reminder",
+              ttl_turns: 2,
+              preserve_on_compact: false,
+              propagate: "all",
+              role_hint: "system",
+              source: "inherited",
+              body: "Carry parent context.",
+              fired_at_turn: 0,
+              originating_agent_id: "parent-agent",
+            },
+          ],
         },
-      ],
+      )
+      let stream = event_log
+        .subscribe({topic: topic, from_cursor: cursor, kind_prefix: "transcript.reminder."})
+      fn next_reminder_event(source) {
+        var event = source.next().value
+        while event != nil && event.kind == "transcript.reminder.provider_evaluated" {
+          event = source.next().value
+        }
+        return event
+      }
+      let injected = next_reminder_event(stream)
+      let inherited = next_reminder_event(stream)
+      let fired = next_reminder_event(stream)
+      __io_println(injected.kind)
+      __io_println(injected.payload.reminder_id)
+      __io_println(inherited.kind)
+      __io_println(inherited.payload.originating_agent_id)
+      __io_println(inherited.payload.sub_agent_id)
+      __io_println(inherited.payload.propagate)
+      __io_println(fired.kind)
+      __io_println(fired.payload.session_id == child)
+      __io_println(fired.payload.rendered_role)
     },
   )
-  let stream = event_log
-    .subscribe({topic: topic, from_cursor: cursor, kind_prefix: "transcript.reminder."})
-  fn next_reminder_event(source) {
-    var event = source.next().value
-    while event != nil && event.kind == "transcript.reminder.provider_evaluated" {
-      event = source.next().value
-    }
-    return event
-  }
-  let injected = next_reminder_event(stream)
-  let inherited = next_reminder_event(stream)
-  let fired = next_reminder_event(stream)
-  __io_println(injected.kind)
-  __io_println(injected.payload.reminder_id)
-  __io_println(inherited.kind)
-  __io_println(inherited.payload.originating_agent_id)
-  __io_println(inherited.payload.sub_agent_id)
-  __io_println(inherited.payload.propagate)
-  __io_println(fired.kind)
-  __io_println(fired.payload.session_id == child)
-  __io_println(fired.payload.rendered_role)
 }

@@ -1,3 +1,5 @@
+import { llm_text, with_llm_script } from "std/testing"
+
 /**
  * Repair pass also fails: ok=false with error_category="repair_failed"
  * so callers can distinguish "tried and failed" from a baseline
@@ -5,17 +7,18 @@
  */
 pipeline default() {
   let schema = {type: "object", required: ["verdict"], properties: {verdict: {type: "string"}}}
-  // Main call: missing required key.
-  llm_mock({text: "{\"note\": \"nope\"}"})
-  // Repair call: still invalid.
-  llm_mock({text: "{\"note\": \"still nope\"}"})
-  let r = llm_call_structured_result("Grade", schema, {provider: "mock", retries: 0, repair: {enabled: true}})
-  __io_println(r.ok)
-  __io_println(r.data == nil)
-  __io_println(r.error_category)
-  __io_println(r.repaired)
-  // raw_text comes from the main call (the input the repair pass tried
-  // to fix), not the repair output.
-  __io_println(contains(r.raw_text, "nope"))
-  __io_println(len(llm_mock_calls()))
+  with_llm_script(
+    [llm_text("{\"note\": \"nope\"}"), llm_text("{\"note\": \"still nope\"}")],
+    { ->
+      let r = llm_call_structured_result("Grade", schema, {provider: "mock", retries: 0, repair: {enabled: true}})
+      __io_println(r.ok)
+      __io_println(r.data == nil)
+      __io_println(r.error_category)
+      __io_println(r.repaired)
+      __io_println(contains(r.raw_text, "nope"))
+      __io_println(len(llm_mock_calls()))
+    },
+  )
 }
+// Main call: missing required key.
+// Repair call: still invalid.

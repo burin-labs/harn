@@ -1,26 +1,38 @@
+import { llm_text, with_llm_script } from "std/testing"
+
 pipeline default() {
   let schema = {type: "object", required: ["answer"], properties: {answer: {type: "string"}}}
-  llm_mock({text: "{\"answer\":\"typed\"}"})
-  let typed = llm_call(
-    "Return JSON",
-    nil,
-    {
-      provider: "mock",
-      output_format: {kind: "json_schema", schema: schema, strict: true},
-      output_validation: "error",
+  with_llm_script(
+    [llm_text("{\"answer\":\"typed\"}")],
+    { ->
+      let typed = llm_call(
+        "Return JSON",
+        nil,
+        {
+          provider: "mock",
+          output_format: {kind: "json_schema", schema: schema, strict: true},
+          output_validation: "error",
+        },
+      )
+      __io_println(typed.data.answer)
     },
   )
-  __io_println(typed.data.answer)
-  llm_mock_clear()
-  llm_mock({text: "{\"answer\":\"legacy\"}"})
-  let legacy = llm_call(
-    "Return JSON",
-    nil,
-    {provider: "mock", response_format: "json", json_schema: schema, output_validation: "error"},
+  with_llm_script(
+    [llm_text("{\"answer\":\"legacy\"}")],
+    { ->
+      let legacy = llm_call(
+        "Return JSON",
+        nil,
+        {provider: "mock", response_format: "json", json_schema: schema, output_validation: "error"},
+      )
+      __io_println(legacy.data.answer)
+    },
   )
-  __io_println(legacy.data.answer)
-  llm_mock_clear()
-  llm_mock({text: "{\"answer\":\"loose\"}"})
-  let loose = llm_call("Return JSON", nil, {provider: "mock", output_format: {kind: "json_object"}})
-  __io_println(loose.data.answer)
+  with_llm_script(
+    [llm_text("{\"answer\":\"loose\"}")],
+    { ->
+      let loose = llm_call("Return JSON", nil, {provider: "mock", output_format: {kind: "json_object"}})
+      __io_println(loose.data.answer)
+    },
+  )
 }

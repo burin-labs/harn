@@ -1,3 +1,5 @@
+import { llm_text, with_llm_script } from "std/testing"
+
 /**
  * S-11 (#1847): a timeout-conditioned suspension auto-resumes when
  * the deadline elapses. With `on_timeout: "resume_with_summary"`
@@ -12,44 +14,47 @@
  * registration (see `register_auto_resume_trigger`).
  */
 pipeline main() {
-  llm_mock_clear()
   let _ = mock_time(1700000000000)
-  llm_mock(
-    {
-      tool_calls: [
-        {
-          id: "park_timeout",
-          name: "agent_await_resumption",
-          arguments: {
-            reason: "waiting on review",
-            conditions: {
-              trigger: {kind: "review.approved", provider: "github"},
-              timeout: {duration_minutes: 5, on_timeout: "resume_with_summary"},
+  with_llm_script(
+    [
+      {
+        tool_calls: [
+          {
+            id: "park_timeout",
+            name: "agent_await_resumption",
+            arguments: {
+              reason: "waiting on review",
+              conditions: {
+                trigger: {kind: "review.approved", provider: "github"},
+                timeout: {duration_minutes: 5, on_timeout: "resume_with_summary"},
+              },
             },
           },
-        },
-      ],
+        ],
+      },
+      llm_text("resumed after timeout"),
+    ],
+    { ->
+      let handle = sub_agent_run(
+        "Park until the review timeout fires.",
+        {provider: "mock", background: true, tool_format: "native", max_iterations: 3},
+      )
+      let suspended = wait_agent(handle)
+      __io_println("status=" + suspended.status)
+      __io_println("has_auto_trigger=" + to_string(suspended?.suspension?.auto_resume_trigger != nil))
+      let _ = advance_time(6 * 60 * 1000)
+      yield_now()
+      yield_now()
+      yield_now()
+      let resumed = wait_agent(handle)
+      __io_println("post_timeout_status=" + resumed.status)
+      __io_println("has_transcript=" + to_string(resumed.has_transcript))
+      let _ = unmock_time()
     },
   )
-  llm_mock({text: "resumed after timeout"})
-  let handle = sub_agent_run(
-    "Park until the review timeout fires.",
-    {provider: "mock", background: true, tool_format: "native", max_iterations: 3},
-  )
-  let suspended = wait_agent(handle)
-  __io_println("status=" + suspended.status)
-  __io_println("has_auto_trigger=" + to_string(suspended?.suspension?.auto_resume_trigger != nil))
-  // Advance the mock clock past the 5-minute timeout. The spawned
-  // auto-resume timeout task wakes from `clock::sleep`, fires the
-  // synthetic auto_resume.timeout event, and the agent loop resumes.
-  let _ = advance_time(6 * 60 * 1000)
-  // Yield so the timeout task can run, dispatch, and the resumed
-  // worker can complete its next turn.
-  yield_now()
-  yield_now()
-  yield_now()
-  let resumed = wait_agent(handle)
-  __io_println("post_timeout_status=" + resumed.status)
-  __io_println("has_transcript=" + to_string(resumed.has_transcript))
-  let _ = unmock_time()
 }
+// Advance the mock clock past the 5-minute timeout. The spawned
+// auto-resume timeout task wakes from `clock::sleep`, fires the
+// synthetic auto_resume.timeout event, and the agent loop resumes.
+// Yield so the timeout task can run, dispatch, and the resumed
+// worker can complete its next turn.

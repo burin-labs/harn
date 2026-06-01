@@ -1,3 +1,5 @@
+import { llm_text, with_llm_script } from "std/testing"
+
 /**
  * Hook invocations capture deterministic tape entries on the transcript:
  * `hook_call` before the closure runs, `hook_returned` after, and a
@@ -28,13 +30,16 @@ pipeline default() {
     },
   )
   register_session_hook("session_start", { _event -> return nil })
-  llm_mock_clear()
-  llm_mock({text: "ok"})
-  let result = agent_loop("hello vetome please", nil, {provider: "mock"})
-  let events = transcript_events(result?.transcript)
-  __io_println(result.status)
-  __io_println(count_kind(events, "hook_call") > 0)
-  __io_println(count_kind(events, "hook_returned") > 0)
-  __io_println(count_kind(events, "hook_vetoed") > 0)
-  clear_session_hooks()
+  with_llm_script(
+    [llm_text("ok")],
+    { ->
+      let result = agent_loop("hello vetome please", nil, {provider: "mock"})
+      let events = transcript_events(result?.transcript)
+      __io_println(result.status)
+      __io_println(count_kind(events, "hook_call") > 0)
+      __io_println(count_kind(events, "hook_returned") > 0)
+      __io_println(count_kind(events, "hook_vetoed") > 0)
+      clear_session_hooks()
+    },
+  )
 }

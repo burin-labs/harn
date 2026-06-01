@@ -1,3 +1,5 @@
+import { llm_text, with_llm_script } from "std/testing"
+
 fn child_tools() {
   return tool_registry()
 }
@@ -28,7 +30,6 @@ fn parent_tools(child_session) {
 }
 
 pipeline main() {
-  llm_mock_clear()
   let parent = agent_session_open("reminder-propagate-all-to-subagent-parent")
   let child = "reminder-propagate-all-to-subagent-child"
   agent_session_open(child)
@@ -40,25 +41,30 @@ pipeline main() {
       {body: "shared with subagent", tags: ["all"], dedupe_key: "all", propagate: "all"},
     ),
   )
-  llm_mock({tool_calls: [{id: "parent_delegate", name: "delegate_child", arguments: {}}]})
-  llm_mock({text: "child done"})
-  llm_mock({text: "parent done"})
-  agent_loop(
-    "Run child.",
-    nil,
-    {
-      provider: "mock",
-      session_id: parent,
-      tools: parent_tools(child),
-      tool_format: "native",
-      max_iterations: 2,
-      done_judge: nil,
+  with_llm_script(
+    [
+      {tool_calls: [{id: "parent_delegate", name: "delegate_child", arguments: {}}]},
+      llm_text("child done"),
+      llm_text("parent done"),
+    ],
+    { ->
+      agent_loop(
+        "Run child.",
+        nil,
+        {
+          provider: "mock",
+          session_id: parent,
+          tools: parent_tools(child),
+          tool_format: "native",
+          max_iterations: 2,
+          done_judge: nil,
+        },
+      )
+      let child_reminders = transcript_events_by_kind(agent_session_snapshot(child), "system_reminder")
+      __io_println(len(child_reminders))
+      __io_println(child_reminders[0].reminder.body)
+      __io_println(child_reminders[0].reminder.propagate)
+      __io_println(child_reminders[0].reminder.originating_agent_id == parent)
     },
   )
-  let child_reminders = transcript_events_by_kind(agent_session_snapshot(child), "system_reminder")
-  __io_println(len(child_reminders))
-  __io_println(child_reminders[0].reminder.body)
-  __io_println(child_reminders[0].reminder.propagate)
-  __io_println(child_reminders[0].reminder.originating_agent_id == parent)
-  llm_mock_clear()
 }

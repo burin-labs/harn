@@ -1,14 +1,21 @@
+import { llm_text, with_llm_script } from "std/testing"
+
 pipeline default() {
-  llm_mock_clear()
-  llm_mock({text: "<user_response>The answer is 4.</user_response>\n<done>##DONE##</done>"})
-  llm_mock({error: {category: "generic", message: "structured output is unavailable"}})
-  let result = agent_loop(
-    "What is 2 + 2?",
-    nil,
-    {provider: "mock", loop_until_done: true, max_iterations: 2, done_judge: {fail_open_on_error: true}},
+  with_llm_script(
+    [
+      llm_text("<user_response>The answer is 4.</user_response>\n<done>##DONE##</done>"),
+      {error: {category: "generic", message: "structured output is unavailable"}},
+    ],
+    { ->
+      let result = agent_loop(
+        "What is 2 + 2?",
+        nil,
+        {provider: "mock", loop_until_done: true, max_iterations: 2, done_judge: {fail_open_on_error: true}},
+      )
+      __io_println(result.status)
+      __io_println(result.visible_text)
+      __io_println(result.llm.iterations)
+      __io_println(len(llm_mock_calls()))
+    },
   )
-  __io_println(result.status)
-  __io_println(result.visible_text)
-  __io_println(result.llm.iterations)
-  __io_println(len(llm_mock_calls()))
 }

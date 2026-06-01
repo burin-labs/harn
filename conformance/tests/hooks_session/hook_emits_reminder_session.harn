@@ -1,3 +1,5 @@
+import { llm_text, with_llm_script } from "std/testing"
+
 pipeline main() {
   clear_session_hooks()
   register_session_hook(
@@ -7,14 +9,17 @@ pipeline main() {
       {reminder: {body: "session reminder fresh", dedupe_key: "session-hook", tags: ["session"]}},
     ] },
   )
-  llm_mock_clear()
-  llm_mock({text: "done"})
-  let result = agent_loop("session hook reminder", nil, {provider: "mock", session_id: "hook-reminder-session"})
-  let events = transcript_events_by_kind(result.transcript, "system_reminder")
-  __io_println(result.status)
-  __io_println(len(events))
-  __io_println(events[0].reminder.body)
-  __io_println(events[0].reminder.source)
-  __io_println(events[0].reminder.tags[0])
-  clear_session_hooks()
+  with_llm_script(
+    [llm_text("done")],
+    { ->
+      let result = agent_loop("session hook reminder", nil, {provider: "mock", session_id: "hook-reminder-session"})
+      let events = transcript_events_by_kind(result.transcript, "system_reminder")
+      __io_println(result.status)
+      __io_println(len(events))
+      __io_println(events[0].reminder.body)
+      __io_println(events[0].reminder.source)
+      __io_println(events[0].reminder.tags[0])
+      clear_session_hooks()
+    },
+  )
 }

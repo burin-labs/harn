@@ -1,3 +1,5 @@
+import { llm_text, with_llm_script } from "std/testing"
+
 fn tools() {
   var registry = tool_registry()
   registry = tool_define(
@@ -36,7 +38,6 @@ fn tools() {
 pipeline main() {
   // The handoff envelope must omit propagate=none reminders, keeping
   // only the propagate=all entry.
-  llm_mock_clear()
   let parent = agent_session_open("reminder-propagate-none-dropped-at-handoff")
   agent_session_reset(parent)
   agent_session_inject(
@@ -51,19 +52,19 @@ pipeline main() {
       {body: "dropped at handoff", tags: ["none"], dedupe_key: "none-key", propagate: "none"},
     ),
   )
-  llm_mock({tool_calls: [{id: "handoff_call", name: "emit_handoff", arguments: {}}]})
-  llm_mock({text: "done"})
-  agent_loop(
-    "Emit a handoff.",
-    nil,
-    {
-      provider: "mock",
-      session_id: parent,
-      tools: tools(),
-      tool_format: "native",
-      max_iterations: 2,
-      done_judge: nil,
-    },
+  with_llm_script(
+    [{tool_calls: [{id: "handoff_call", name: "emit_handoff", arguments: {}}]}, llm_text("done")],
+    { -> agent_loop(
+      "Emit a handoff.",
+      nil,
+      {
+        provider: "mock",
+        session_id: parent,
+        tools: tools(),
+        tool_format: "native",
+        max_iterations: 2,
+        done_judge: nil,
+      },
+    ) },
   )
-  llm_mock_clear()
 }

@@ -1,4 +1,5 @@
 import { agent_capture_events } from "std/agent/events"
+import { with_llm_script } from "std/testing"
 
 /**
  * A tool that the capability policy refuses comes back as a structured,
@@ -28,31 +29,36 @@ fn write_tools() {
 
 pipeline default() {
   let tools = write_tools()
-  llm_mock_clear()
-  llm_mock({text: "", tool_calls: [{id: "w1", name: "write_note", arguments: {path: "a"}}]})
-  llm_mock({text: "", tool_calls: [{id: "w2", name: "write_note", arguments: {path: "a"}}]})
-  llm_mock({text: "", tool_calls: [{id: "w3", name: "write_note", arguments: {path: "a"}}]})
-  llm_mock({text: "", tool_calls: [{id: "w4", name: "write_note", arguments: {path: "a"}}]})
-  llm_mock({text: "", tool_calls: [{id: "w5", name: "write_note", arguments: {path: "a"}}]})
-  let session = "denial-loop-" + uuid()
-  let captured = agent_capture_events(
-    session,
-    fn() { return agent_loop(
-      "Keep trying to write the note.",
-      nil,
-      {
-        provider: "mock",
-        tools: tools,
-        tool_format: "native",
-        max_iterations: 5,
-        session_id: session,
-        policy: {tools: ["read_only"]},
-        stall_diagnostics: {enabled: true, inject_feedback: false},
-      },
-    ) },
+  with_llm_script(
+    [
+      {text: "", tool_calls: [{id: "w1", name: "write_note", arguments: {path: "a"}}]},
+      {text: "", tool_calls: [{id: "w2", name: "write_note", arguments: {path: "a"}}]},
+      {text: "", tool_calls: [{id: "w3", name: "write_note", arguments: {path: "a"}}]},
+      {text: "", tool_calls: [{id: "w4", name: "write_note", arguments: {path: "a"}}]},
+      {text: "", tool_calls: [{id: "w5", name: "write_note", arguments: {path: "a"}}]},
+    ],
+    { ->
+      let session = "denial-loop-" + uuid()
+      let captured = agent_capture_events(
+        session,
+        fn() { return agent_loop(
+          "Keep trying to write the note.",
+          nil,
+          {
+            provider: "mock",
+            tools: tools,
+            tool_format: "native",
+            max_iterations: 5,
+            session_id: session,
+            policy: {tools: ["read_only"]},
+            stall_diagnostics: {enabled: true, inject_feedback: false},
+          },
+        ) },
+      )
+      let stalls = events_of(captured.events, "agent_loop_stall_warning")
+      require len(stalls) >= 1, "repeated terminal denials must trip the loop detector"
+      __io_println(stalls[0].warning.pattern)
+      __io_println(captured.result.suspected_loop)
+    },
   )
-  let stalls = events_of(captured.events, "agent_loop_stall_warning")
-  require len(stalls) >= 1, "repeated terminal denials must trip the loop detector"
-  __io_println(stalls[0].warning.pattern)
-  __io_println(captured.result.suspected_loop)
 }

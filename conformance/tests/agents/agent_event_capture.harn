@@ -1,19 +1,23 @@
 import { agent_capture_events } from "std/agent/events"
+import { llm_text, with_llm_script } from "std/testing"
 
 pipeline default() {
-  llm_mock_clear()
-  llm_mock({text: "Captured."})
-  let session = "capture-" + uuid()
-  let captured = agent_capture_events(
-    session,
-    fn() { return agent_loop(
-      "Say captured",
-      nil,
-      {provider: "mock", max_iterations: 1, session_id: session, done_judge: false},
-    ) },
+  with_llm_script(
+    [llm_text("Captured.")],
+    { ->
+      let session = "capture-" + uuid()
+      let captured = agent_capture_events(
+        session,
+        fn() { return agent_loop(
+          "Say captured",
+          nil,
+          {provider: "mock", max_iterations: 1, session_id: session, done_judge: false},
+        ) },
+      )
+      let types = captured.events.map({ event -> event.type })
+      __io_println(captured.result.status)
+      __io_println(len(captured.events) > 0)
+      __io_println(contains(types, "iteration_start"))
+    },
   )
-  let types = captured.events.map({ event -> event.type })
-  __io_println(captured.result.status)
-  __io_println(len(captured.events) > 0)
-  __io_println(contains(types, "iteration_start"))
 }

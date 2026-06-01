@@ -1,10 +1,16 @@
+import { llm_text, with_llm_script } from "std/testing"
+
 /** JSON embedded in plain prose (no code fence): extracted_json: true. */
 pipeline default() {
   let schema = {type: "object", required: ["verdict"], properties: {verdict: {type: "string"}}}
-  llm_mock({text: "Here is my judgment: {\"verdict\": \"PASS\"} — looks good to me."})
-  let r = llm_call_structured_result("Grade", schema, {provider: "mock"})
-  __io_println(r.ok)
-  __io_println(r.data.verdict)
-  __io_println(r.extracted_json)
-  __io_println(r.attempts)
+  with_llm_script(
+    [llm_text("Here is my judgment: {\"verdict\": \"PASS\"} — looks good to me.")],
+    { ->
+      let r = llm_call_structured_result("Grade", schema, {provider: "mock"})
+      __io_println(r.ok)
+      __io_println(r.data.verdict)
+      __io_println(r.extracted_json)
+      __io_println(r.attempts)
+    },
+  )
 }

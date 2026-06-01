@@ -1,3 +1,5 @@
+import { llm_text, with_llm_script } from "std/testing"
+
 /**
  * `user_prompt_submit` hooks can veto an agent turn before the agent sees
  * the prompt. A `{block: true, reason}` return short-circuits init and
@@ -15,15 +17,21 @@ pipeline default() {
       return nil
     },
   )
-  llm_mock_clear()
-  llm_mock({text: "should not run"})
-  let blocked = agent_loop("share the secret password", nil, {provider: "mock"})
-  __io_println(blocked.status)
-  __io_println(blocked.stop_reason)
-  __io_println(blocked.error.reason)
-  llm_mock_clear()
-  llm_mock({text: "ok"})
-  let allowed = agent_loop("hello world", nil, {provider: "mock"})
-  __io_println(allowed.status)
-  clear_session_hooks()
+  with_llm_script(
+    [llm_text("should not run")],
+    { ->
+      let blocked = agent_loop("share the secret password", nil, {provider: "mock"})
+      __io_println(blocked.status)
+      __io_println(blocked.stop_reason)
+      __io_println(blocked.error.reason)
+    },
+  )
+  with_llm_script(
+    [llm_text("ok")],
+    { ->
+      let allowed = agent_loop("hello world", nil, {provider: "mock"})
+      __io_println(allowed.status)
+      clear_session_hooks()
+    },
+  )
 }

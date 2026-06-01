@@ -1,6 +1,7 @@
 import { parallel_judge } from "std/llm/judge"
 import { optimize_prompt } from "std/llm/optimize"
 import { propose_instructions } from "std/llm/refine"
+import { llm_text, with_llm_script } from "std/testing"
 
 pipeline default() {
   let judged = parallel_judge("Prompt", [{id: "one"}], { _ctx -> 0.5 })
@@ -8,48 +9,51 @@ pipeline default() {
   let explicit = propose_instructions("Base", {instruction_proposals: "Tighten the answer."})
   __io_println(explicit[0] == "Base")
   __io_println(explicit[1] == "Tighten the answer.")
-  llm_mock_clear()
-  llm_mock({text: "{\"instructions\":[\"Plan first.\",\"Plan first.\"]}"})
-  let proposed = propose_instructions(
-    "Base",
-    {provider: "mock", proposal_count: 2, system: "Proposal sys", schema_retries: 0, repair: false},
-  )
-  __io_println(proposed[0] == "Base")
-  __io_println(proposed[1] == "Plan first.")
-  __io_println(len(proposed) == 2)
-  __io_println(llm_mock_calls()[0].system == "Proposal sys")
-  let result = optimize_prompt(
-    {
-      base_prompt: "Answer the question.",
-      eval_set: [{id: "add", input: "2 + 2", expected: "4"}, {id: "mul", input: "3 * 3", expected: "9"}],
-      metric: { ctx ->
-        var score = 0.0
-        if contains(lowercase(ctx.prompt), "calculate") {
-          score = score + 0.7
-        }
-        if len(ctx.candidate.demos) > 0 {
-          score = score + 0.3
-        }
-        if contains(lowercase(ctx.prompt), "verbose") {
-          score = score - 0.5
-        }
-        return {score: score, reason: ctx.case.id}
-      },
-      trials: 4,
-      budget: {max_concurrent: 2},
-      instruction_proposals: [
-        "Answer the question.",
-        "Calculate carefully and answer only with the result.",
-        "Be verbose and explain every intermediate thought.",
-      ],
-      demos: [[], [{input: "1 + 1", output: "2"}]],
+  with_llm_script(
+    [llm_text("{\"instructions\":[\"Plan first.\",\"Plan first.\"]}")],
+    { ->
+      let proposed = propose_instructions(
+        "Base",
+        {provider: "mock", proposal_count: 2, system: "Proposal sys", schema_retries: 0, repair: false},
+      )
+      __io_println(proposed[0] == "Base")
+      __io_println(proposed[1] == "Plan first.")
+      __io_println(len(proposed) == 2)
+      __io_println(llm_mock_calls()[0].system == "Proposal sys")
+      let result = optimize_prompt(
+        {
+          base_prompt: "Answer the question.",
+          eval_set: [{id: "add", input: "2 + 2", expected: "4"}, {id: "mul", input: "3 * 3", expected: "9"}],
+          metric: { ctx ->
+            var score = 0.0
+            if contains(lowercase(ctx.prompt), "calculate") {
+              score = score + 0.7
+            }
+            if len(ctx.candidate.demos) > 0 {
+              score = score + 0.3
+            }
+            if contains(lowercase(ctx.prompt), "verbose") {
+              score = score - 0.5
+            }
+            return {score: score, reason: ctx.case.id}
+          },
+          trials: 4,
+          budget: {max_concurrent: 2},
+          instruction_proposals: [
+            "Answer the question.",
+            "Calculate carefully and answer only with the result.",
+            "Be verbose and explain every intermediate thought.",
+          ],
+          demos: [[], [{input: "1 + 1", output: "2"}]],
+        },
+      )
+      __io_println(result.best_score == 1.0)
+      __io_println(contains(result.best_prompt, "Calculate carefully"))
+      __io_println(len(result.trace) == 4)
+      __io_println(result.trace[0].candidate.instruction == "Answer the question.")
+      __io_println(result.trace[-1].acquisition.kind == "expected_improvement")
+      __io_println(result.trace[-1].case_scores[0].case_id == "add")
+      __io_println(result.ranked[0].score == 1.0)
     },
   )
-  __io_println(result.best_score == 1.0)
-  __io_println(contains(result.best_prompt, "Calculate carefully"))
-  __io_println(len(result.trace) == 4)
-  __io_println(result.trace[0].candidate.instruction == "Answer the question.")
-  __io_println(result.trace[-1].acquisition.kind == "expected_improvement")
-  __io_println(result.trace[-1].case_scores[0].case_id == "add")
-  __io_println(result.ranked[0].score == 1.0)
 }

@@ -1,3 +1,5 @@
+import { with_llm_script } from "std/testing"
+
 fn policy_tools() {
   var tools = tool_registry()
   tools = tool_define(
@@ -56,18 +58,20 @@ fn capability_policy() {
 }
 
 fn one_call(name, args, approval_policy) {
-  llm_mock({tool_calls: [{id: "call_1", name: name, arguments: args}]})
-  return agent_loop(
-    "Use the requested tool.",
-    "Use tools.",
-    {
-      provider: "mock",
-      tools: policy_tools(),
-      tool_format: "native",
-      max_iterations: 1,
-      policy: capability_policy(),
-      approval_policy: approval_policy,
-    },
+  return with_llm_script(
+    [{tool_calls: [{id: "call_1", name: name, arguments: args}]}],
+    { -> agent_loop(
+      "Use the requested tool.",
+      "Use tools.",
+      {
+        provider: "mock",
+        tools: policy_tools(),
+        tool_format: "native",
+        max_iterations: 1,
+        policy: capability_policy(),
+        approval_policy: approval_policy,
+      },
+    ) },
   )
 }
 
@@ -111,27 +115,31 @@ pipeline main() {
   let mcp_events = json_stringify(transcript_events_by_kind(mcp?.transcript, "PermissionDeny"))
   __io_println(mcp?.tools?.rejected[0] == "github__create_issue")
   __io_println(mcp_events.contains("mcp_rule"))
-  llm_mock(
-    {
-      tool_calls: [
-        {id: "repeat_1", name: "run_command", arguments: {argv: ["echo", "ok"]}},
-        {id: "repeat_2", name: "run_command", arguments: {argv: ["echo", "ok"]}},
-      ],
+  with_llm_script(
+    [
+      {
+        tool_calls: [
+          {id: "repeat_1", name: "run_command", arguments: {argv: ["echo", "ok"]}},
+          {id: "repeat_2", name: "run_command", arguments: {argv: ["echo", "ok"]}},
+        ],
+      },
+    ],
+    { ->
+      let repeated = agent_loop(
+        "Run twice.",
+        "Use tools.",
+        {
+          provider: "mock",
+          tools: policy_tools(),
+          tool_format: "native",
+          max_iterations: 1,
+          policy: capability_policy(),
+          approval_policy: {allow_sensitive_paths: true, repeat_limit: 1, repeat_action: "deny"},
+        },
+      )
+      let repeat_events = json_stringify(transcript_events_by_kind(repeated?.transcript, "PermissionDeny"))
+      __io_println(repeated?.tools?.rejected[0] == "run_command")
+      __io_println(repeat_events.contains("repeated_call"))
     },
   )
-  let repeated = agent_loop(
-    "Run twice.",
-    "Use tools.",
-    {
-      provider: "mock",
-      tools: policy_tools(),
-      tool_format: "native",
-      max_iterations: 1,
-      policy: capability_policy(),
-      approval_policy: {allow_sensitive_paths: true, repeat_limit: 1, repeat_action: "deny"},
-    },
-  )
-  let repeat_events = json_stringify(transcript_events_by_kind(repeated?.transcript, "PermissionDeny"))
-  __io_println(repeated?.tools?.rejected[0] == "run_command")
-  __io_println(repeat_events.contains("repeated_call"))
 }

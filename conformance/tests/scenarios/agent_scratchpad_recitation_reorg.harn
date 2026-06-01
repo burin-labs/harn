@@ -3,6 +3,7 @@
  * and periodically reorganizes it into cited notes for the next turn.
  */
 import { agent_scratchpad_reorganize } from "std/agent/scratchpad"
+import { llm_text, with_llm_script } from "std/testing"
 
 fn observe_tools() {
   var tools = tool_registry()
@@ -16,43 +17,48 @@ fn observe_tools() {
 }
 
 pipeline default() {
-  llm_mock_clear()
-  llm_mock({tool_calls: [{id: "observe_1", name: "observe", arguments: {}}]})
-  llm_mock(
-    {
-      text: "{\"schema\":\"harn.agent_scratchpad.v1\",\"goals\":[{\"text\":\"complete the scratchpad task\",\"source_ref\":\"user:initial\"}],\"open_items\":[],\"facts\":[{\"text\":\"observe returned observed-value-42\",\"source_ref\":\"turn:3\"}],\"refs\":[{\"id\":\"user:initial\",\"kind\":\"user_input\",\"label\":\"Initial task\"},{\"id\":\"turn:3\",\"kind\":\"tool\",\"label\":\"observed-value-42\"}]}",
+  with_llm_script(
+    [
+      {tool_calls: [{id: "observe_1", name: "observe", arguments: {}}]},
+      llm_text(
+        "{\"schema\":\"harn.agent_scratchpad.v1\",\"goals\":[{\"text\":\"complete the scratchpad task\",\"source_ref\":\"user:initial\"}],\"open_items\":[],\"facts\":[{\"text\":\"observe returned observed-value-42\",\"source_ref\":\"turn:3\"}],\"refs\":[{\"id\":\"user:initial\",\"kind\":\"user_input\",\"label\":\"Initial task\"},{\"id\":\"turn:3\",\"kind\":\"tool\",\"label\":\"observed-value-42\"}]}",
+      ),
+      llm_text("Finished with the observation. ##DONE##"),
+    ],
+    { ->
+      let result = agent_loop(
+        "complete the scratchpad task",
+        "You are a test agent.",
+        {
+          provider: "mock",
+          tools: observe_tools(),
+          tool_format: "native",
+          loop_until_done: true,
+          done_sentinel: "##DONE##",
+          max_iterations: 3,
+          scratchpad: {enabled: true, reorganize_every: 1, reorganizer: {provider: "mock"}},
+        },
+      )
+      let calls = llm_mock_calls()
+      __io_println("status:" + result.status)
+      __io_println("calls:" + to_string(len(calls)))
+      __io_println("first_has_scratchpad:" + to_string(contains(calls[0].system, "## Agent scratchpad")))
+      __io_println(
+        "first_tail:"
+          + to_string(ends_with(calls[0].system, "user:initial (user_input): Initial task")),
+      )
+      __io_println(
+        "reorg_prompt:"
+          + to_string(contains(calls[1].messages[0].content, "Reorganize the live agent scratchpad")),
+      )
+      __io_println(
+        "second_has_fact:"
+          + to_string(contains(calls[2].system, "observe returned observed-value-42")),
+      )
+      __io_println("second_has_source:" + to_string(contains(calls[2].system, "[source_ref: turn:3]")))
+      __io_println("snapshot_fact:" + result.transcript.metadata.agent_scratchpad.facts[0].text)
     },
   )
-  llm_mock({text: "Finished with the observation. ##DONE##"})
-  let result = agent_loop(
-    "complete the scratchpad task",
-    "You are a test agent.",
-    {
-      provider: "mock",
-      tools: observe_tools(),
-      tool_format: "native",
-      loop_until_done: true,
-      done_sentinel: "##DONE##",
-      max_iterations: 3,
-      scratchpad: {enabled: true, reorganize_every: 1, reorganizer: {provider: "mock"}},
-    },
-  )
-  let calls = llm_mock_calls()
-  __io_println("status:" + result.status)
-  __io_println("calls:" + to_string(len(calls)))
-  __io_println("first_has_scratchpad:" + to_string(contains(calls[0].system, "## Agent scratchpad")))
-  __io_println(
-    "first_tail:" + to_string(ends_with(calls[0].system, "user:initial (user_input): Initial task")),
-  )
-  __io_println(
-    "reorg_prompt:"
-      + to_string(contains(calls[1].messages[0].content, "Reorganize the live agent scratchpad")),
-  )
-  __io_println(
-    "second_has_fact:" + to_string(contains(calls[2].system, "observe returned observed-value-42")),
-  )
-  __io_println("second_has_source:" + to_string(contains(calls[2].system, "[source_ref: turn:3]")))
-  __io_println("snapshot_fact:" + result.transcript.metadata.agent_scratchpad.facts[0].text)
   let manual_id = agent_session_open("scratchpad-invalid-source")
   agent_session_set_scratchpad(
     manual_id,
@@ -64,17 +70,20 @@ pipeline default() {
       refs: [{id: "user:initial", kind: "user_input", label: "Initial task"}],
     },
   )
-  llm_mock_clear()
-  llm_mock(
-    {
-      text: "{\"schema\":\"harn.agent_scratchpad.v1\",\"goals\":[{\"text\":\"manual task\",\"source_ref\":\"made-up\"}],\"open_items\":[],\"facts\":[{\"text\":\"uncited hallucination\",\"source_ref\":\"made-up\"}],\"refs\":[{\"id\":\"made-up\",\"kind\":\"unknown\",\"label\":\"not allowed\"}]}",
+  with_llm_script(
+    [
+      llm_text(
+        "{\"schema\":\"harn.agent_scratchpad.v1\",\"goals\":[{\"text\":\"manual task\",\"source_ref\":\"made-up\"}],\"open_items\":[],\"facts\":[{\"text\":\"uncited hallucination\",\"source_ref\":\"made-up\"}],\"refs\":[{\"id\":\"made-up\",\"kind\":\"unknown\",\"label\":\"not allowed\"}]}",
+      ),
+    ],
+    { ->
+      let rejected = agent_scratchpad_reorganize(
+        {session_id: manual_id, task: "manual task"},
+        {provider: "mock", scratchpad: {enabled: true, reorganizer: {provider: "mock"}}},
+        1,
+      )
+      __io_println("invalid_status:" + rejected.status)
+      __io_println("invalid_preserved:" + agent_session_scratchpad(manual_id).facts[0].text)
     },
   )
-  let rejected = agent_scratchpad_reorganize(
-    {session_id: manual_id, task: "manual task"},
-    {provider: "mock", scratchpad: {enabled: true, reorganizer: {provider: "mock"}}},
-    1,
-  )
-  __io_println("invalid_status:" + rejected.status)
-  __io_println("invalid_preserved:" + agent_session_scratchpad(manual_id).facts[0].text)
 }

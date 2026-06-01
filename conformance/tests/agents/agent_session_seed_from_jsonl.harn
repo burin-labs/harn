@@ -1,3 +1,5 @@
+import { llm_text, with_llm_script } from "std/testing"
+
 pipeline main() {
   let path = path_join(harness.fs.temp_dir(), "harn-seed-" + uuid() + ".jsonl")
   harness.fs
@@ -81,24 +83,27 @@ pipeline main() {
   __io_println(legacy.source_format)
   __io_println(len(legacy_snap.messages))
   __io_println(legacy_snap.messages[1].content)
-  llm_mock_clear()
-  llm_mock({text: "recorded assistant"})
-  let transcript_dir = path_join(harness.fs.temp_dir(), "harn-seed-sidecar-" + uuid())
-  let source_session = agent_session_open()
-  agent_loop(
-    "record this",
-    nil,
-    {
-      provider: "mock",
-      session_id: source_session,
-      max_iterations: 1,
-      llm_transcript_dir: transcript_dir,
+  with_llm_script(
+    [llm_text("recorded assistant")],
+    { ->
+      let transcript_dir = path_join(harness.fs.temp_dir(), "harn-seed-sidecar-" + uuid())
+      let source_session = agent_session_open()
+      agent_loop(
+        "record this",
+        nil,
+        {
+          provider: "mock",
+          session_id: source_session,
+          max_iterations: 1,
+          llm_transcript_dir: transcript_dir,
+        },
+      )
+      let sidecar = path_join(transcript_dir, "llm_transcript.jsonl")
+      __io_println(contains(harness.fs.read_text(sidecar), "\"type\":\"message\""))
+      let imported = agent_session_seed_from_jsonl(sidecar, {provider: "mock"})
+      __io_println(imported.ok)
+      __io_println(imported.source_format)
+      __io_println(imported.turns_loaded >= 2)
     },
   )
-  let sidecar = path_join(transcript_dir, "llm_transcript.jsonl")
-  __io_println(contains(harness.fs.read_text(sidecar), "\"type\":\"message\""))
-  let imported = agent_session_seed_from_jsonl(sidecar, {provider: "mock"})
-  __io_println(imported.ok)
-  __io_println(imported.source_format)
-  __io_println(imported.turns_loaded >= 2)
 }

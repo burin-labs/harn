@@ -1,30 +1,45 @@
+import { with_llm_script } from "std/testing"
+
 pipeline default() {
-  llm_mock_clear()
-  llm_mock({text: "Visible <think>hidden", stop_reason: "stop"})
-  llm_mock({text: "Visible <think>hidden", stop_reason: "stop"})
-  let chunks = stream
-    .collect(llm_stream_call("stream this", nil, {provider: "mock"}), {max: 4})
-  let direct = llm_call("non-stream this", nil, {provider: "mock"})
-  var raw = ""
-  for chunk in chunks {
-    raw = raw + chunk.delta
-  }
-  let final = chunks[len(chunks) - 1]
-  __io_println(raw == direct.text)
-  __io_println(chunks[0].visible_delta == "Visible")
-  __io_println(chunks[0].partial == "Visible")
-  __io_println(final.finish_reason)
-  __io_println(final.delta == "")
-  llm_mock({text: "early cancel text", stop_reason: "stop"})
-  let first = stream.first(llm_stream_call("cancel early", nil, {provider: "mock"}))
-  __io_println(first.delta == "early cancel text")
-  __io_println(first.finish_reason == nil)
-  llm_mock({text: "break cancel text", stop_reason: "stop"})
-  var broke_before_terminal = false
-  let cancel_stream = llm_stream_call("break early", nil, {provider: "mock"})
-  for chunk in cancel_stream {
-    broke_before_terminal = chunk.finish_reason == nil
-    break
-  }
-  __io_println(broke_before_terminal)
+  with_llm_script(
+    [
+      {text: "Visible <think>hidden", stop_reason: "stop"},
+      {text: "Visible <think>hidden", stop_reason: "stop"},
+    ],
+    { ->
+      let chunks = stream
+        .collect(llm_stream_call("stream this", nil, {provider: "mock"}), {max: 4})
+      let direct = llm_call("non-stream this", nil, {provider: "mock"})
+      var raw = ""
+      for chunk in chunks {
+        raw = raw + chunk.delta
+      }
+      let final = chunks[len(chunks) - 1]
+      __io_println(raw == direct.text)
+      __io_println(chunks[0].visible_delta == "Visible")
+      __io_println(chunks[0].partial == "Visible")
+      __io_println(final.finish_reason)
+      __io_println(final.delta == "")
+    },
+  )
+  with_llm_script(
+    [{text: "early cancel text", stop_reason: "stop"}],
+    { ->
+      let first = stream.first(llm_stream_call("cancel early", nil, {provider: "mock"}))
+      __io_println(first.delta == "early cancel text")
+      __io_println(first.finish_reason == nil)
+    },
+  )
+  with_llm_script(
+    [{text: "break cancel text", stop_reason: "stop"}],
+    { ->
+      var broke_before_terminal = false
+      let cancel_stream = llm_stream_call("break early", nil, {provider: "mock"})
+      for chunk in cancel_stream {
+        broke_before_terminal = chunk.finish_reason == nil
+        break
+      }
+      __io_println(broke_before_terminal)
+    },
+  )
 }

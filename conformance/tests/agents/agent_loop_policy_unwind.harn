@@ -1,4 +1,5 @@
 import { agent_session_finalize } from "std/agent/state"
+import { llm_text, with_llm_script } from "std/testing"
 
 pipeline main(task) {
   let failed = try {
@@ -21,11 +22,15 @@ pipeline main(task) {
     )
   }
   __io_println(is_err(stale_finalize))
-  llm_mock({text: "<done>##DONE##</done>"})
-  let result = agent_loop(
-    "A later loop should not inherit failed-loop state",
-    nil,
-    {provider: "mock", max_iterations: 1},
+  with_llm_script(
+    [llm_text("<done>##DONE##</done>")],
+    { ->
+      let result = agent_loop(
+        "A later loop should not inherit failed-loop state",
+        nil,
+        {provider: "mock", max_iterations: 1},
+      )
+      __io_println(result.status)
+    },
   )
-  __io_println(result.status)
 }

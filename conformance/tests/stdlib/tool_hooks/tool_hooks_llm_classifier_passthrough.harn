@@ -1,3 +1,4 @@
+import { llm_text, with_llm_script } from "std/testing"
 import { preset_run_command } from "std/tool_hooks"
 
 /**
@@ -11,51 +12,45 @@ import { preset_run_command } from "std/tool_hooks"
 pipeline default() {
   pipeline_lifecycle_audit_log_take()
   __tool_hooks_classifier_cache_clear()
-  llm_mock_clear()
   /* Scenario 1: below-threshold rewrite. The classifier says rewrite but
    * confidence (0.4) < threshold (0.8) so the wrapper falls through to
    * `inner` with the original command. */
-  llm_mock(
-    {
-      text: "{\"kind\": \"rewrite\", \"confidence\": 0.4,"
-        + " \"rewritten\": \"never-applied\", \"explanation\": \"low confidence\"}",
+  with_llm_script(
+    [
+      llm_text(
+        "{\"kind\": \"rewrite\", \"confidence\": 0.4,"
+          + " \"rewritten\": \"never-applied\", \"explanation\": \"low confidence\"}",
+      ),
+      llm_text("{\"kind\": \"allow\", \"confidence\": 0.99, \"explanation\": \"safe\"}"),
+    ],
+    { ->
+      let inner = { args -> {ok: true, ran: args.command} }
+      let wrapper = preset_run_command(
+        {
+          llm_classifier: {model: "haiku", provider: "mock", threshold: 0.8, cache: {ttl_ms: 60000}},
+          inner: inner,
+        },
+      )
+      let r1 = wrapper({command: "echo hello"})
+      __io_println(r1.ok)
+      __io_println(r1.ran)
+      let r2 = wrapper({command: "ls -la"})
+      __io_println(r2.ok)
+      __io_println(r2.ran)
+      let calls_before = len(llm_mock_calls())
+      let r3 = wrapper({command: "echo   hello"})
+      __io_println(r3.ok)
+      __io_println(r3.ran)
+      let calls_after = len(llm_mock_calls())
+      __io_println(calls_after - calls_before)
+      let log = pipeline_lifecycle_audit_log_take()
+      __io_println(len(log))
+      __io_println(log[0].payload.action)
+      __io_println(log[0].payload.cache_hit)
+      __io_println(log[1].payload.action)
+      __io_println(log[1].payload.cache_hit)
+      __io_println(log[2].payload.action)
+      __io_println(log[2].payload.cache_hit)
     },
   )
-  let inner = { args -> {ok: true, ran: args.command} }
-  let wrapper = preset_run_command(
-    {
-      llm_classifier: {model: "haiku", provider: "mock", threshold: 0.8, cache: {ttl_ms: 60000}},
-      inner: inner,
-    },
-  )
-  let r1 = wrapper({command: "echo hello"})
-  __io_println(r1.ok)
-  __io_println(r1.ran)
-  /* Scenario 2: explicit allow verdict — auditing the fact that the
-   * classifier ran and said allow, but no command rewrite. */
-  llm_mock({text: "{\"kind\": \"allow\", \"confidence\": 0.99, \"explanation\": \"safe\"}"})
-  let r2 = wrapper({command: "ls -la"})
-  __io_println(r2.ok)
-  __io_println(r2.ran)
-  /* Scenario 3: cache hit. Repeat scenario 1's command with different
-   * whitespace. The classifier cache should normalize it and return the
-   * prior low-confidence verdict without invoking the model again. */
-  let calls_before = len(llm_mock_calls())
-  let r3 = wrapper({command: "echo   hello"})
-  __io_println(r3.ok)
-  __io_println(r3.ran)
-  let calls_after = len(llm_mock_calls())
-  /* The mock recorder counts every invocation, so the delta must be
-   * zero on a cache hit. */
-  __io_println(calls_after - calls_before)
-  /* Each invocation (cache hit or miss) still audits a classifier
-   * verdict — that's the "audited even on passthrough" contract. */
-  let log = pipeline_lifecycle_audit_log_take()
-  __io_println(len(log))
-  __io_println(log[0].payload.action)
-  __io_println(log[0].payload.cache_hit)
-  __io_println(log[1].payload.action)
-  __io_println(log[1].payload.cache_hit)
-  __io_println(log[2].payload.action)
-  __io_println(log[2].payload.cache_hit)
 }

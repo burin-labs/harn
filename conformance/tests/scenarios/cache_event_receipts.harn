@@ -17,6 +17,7 @@
 import { agent_emit_event } from "std/agent/state"
 import { cache_clear, mem_cache } from "std/cache"
 import { with_cache } from "std/llm/handlers"
+import { with_llm_script } from "std/testing"
 
 pipeline default() {
   let session_id = "cache-event-receipts-" + uuid()
@@ -53,20 +54,25 @@ pipeline default() {
   // mock surfaces `input_tokens` + `output_tokens` at the top level
   // (the LLM result then exposes them through `usage` for the metric
   // reader).
-  llm_mock_clear()
-  llm_mock({text: "answer", input_tokens: 11, output_tokens: 7, model: "m", provider: "p"})
-  llm_mock({text: "would-recompute", model: "m", provider: "p"})
-  let store = mem_cache({namespace: "cache-event-receipts-direct-" + uuid()})
-  cache_clear({store: store})
-  let opts = {provider: "p", model: "m", stream: false, store: store, session_id: session_id}
-  let first = with_cache("hello", "sys", opts)
-  let second = with_cache("hello", "sys", opts)
-  __io_println("first.text=" + first.text)
-  __io_println("byte_identical=" + to_string(json_stringify(first) == json_stringify(second)))
-  __io_println("mock_calls=" + to_string(len(llm_mock_calls())))
-  // hits counter started at 1 from the direct emit above, so we expect 2.
-  __io_println("hits=" + to_string(atomic_get(hits)))
-  __io_println("misses=" + to_string(atomic_get(misses)))
-  __io_println("hit.tokens_saved=" + to_string(atomic_get(last_hit_tokens)))
-  __io_println("hit.model_calls_avoided=" + to_string(atomic_get(last_hit_calls_avoided)))
+  with_llm_script(
+    [
+      {text: "answer", input_tokens: 11, output_tokens: 7, model: "m", provider: "p"},
+      {text: "would-recompute", model: "m", provider: "p"},
+    ],
+    { ->
+      let store = mem_cache({namespace: "cache-event-receipts-direct-" + uuid()})
+      cache_clear({store: store})
+      let opts = {provider: "p", model: "m", stream: false, store: store, session_id: session_id}
+      let first = with_cache("hello", "sys", opts)
+      let second = with_cache("hello", "sys", opts)
+      __io_println("first.text=" + first.text)
+      __io_println("byte_identical=" + to_string(json_stringify(first) == json_stringify(second)))
+      __io_println("mock_calls=" + to_string(len(llm_mock_calls())))
+      __io_println("hits=" + to_string(atomic_get(hits)))
+      __io_println("misses=" + to_string(atomic_get(misses)))
+      __io_println("hit.tokens_saved=" + to_string(atomic_get(last_hit_tokens)))
+      __io_println("hit.model_calls_avoided=" + to_string(atomic_get(last_hit_calls_avoided)))
+    },
+  )
 }
+// hits counter started at 1 from the direct emit above, so we expect 2.

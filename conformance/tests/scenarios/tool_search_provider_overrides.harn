@@ -1,3 +1,5 @@
+import { llm_text, with_llm_script } from "std/testing"
+
 /**
  * Tool Vault phase 3 (harn#71): `provider_overrides.<name>.force_native_tool_search`
  * escape hatch for proxied OpenAI-compat endpoints. A self-hosted router
@@ -7,7 +9,6 @@
  * that capability and opt into the native path.
  */
 pipeline test(task) {
-  llm_mock_clear()
   var registry = tool_registry()
   registry = tool_define(
     registry,
@@ -47,22 +48,25 @@ pipeline test(task) {
   // With the override: the same config succeeds and emits the OpenAI
   // meta-tool. `provider_overrides` is keyed by provider name so the
   // same call can pass multiple provider-specific flags.
-  llm_mock_clear()
-  llm_mock({text: "ack"})
-  llm_call(
-    "x",
-    nil,
-    {
-      provider: "mock",
-      model: "my-internal-model",
-      tools: registry,
-      tool_search: {variant: "bm25", mode: "native"},
-      mock: {force_native_tool_search: true},
+  with_llm_script(
+    [llm_text("ack")],
+    { ->
+      llm_call(
+        "x",
+        nil,
+        {
+          provider: "mock",
+          model: "my-internal-model",
+          tools: registry,
+          tool_search: {variant: "bm25", mode: "native"},
+          mock: {force_native_tool_search: true},
+        },
+      )
+      let calls = llm_mock_calls()
+      let meta = calls[0].tools[0]
+      assert(meta.type == "tool_search", "escape hatch emits OpenAI meta-tool")
+      assert(meta.mode == "hosted", "defaults to hosted mode")
+      log("tool_search_provider_overrides tests passed")
     },
   )
-  let calls = llm_mock_calls()
-  let meta = calls[0].tools[0]
-  assert(meta.type == "tool_search", "escape hatch emits OpenAI meta-tool")
-  assert(meta.mode == "hosted", "defaults to hosted mode")
-  log("tool_search_provider_overrides tests passed")
 }
