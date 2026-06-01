@@ -30,6 +30,8 @@ conformance/tests/**/.harn/workflows/
 conformance/tests/**/.harn/events.sqlite
 conformance/tests/**/.harn/events.sqlite-shm
 conformance/tests/**/.harn/events.sqlite-wal
+# Per-run timing cache the `harn test` runner drops next to the suite.
+conformance/tests/**/.harn/test-timings.json
 .cargo/config.toml
 # .claude/ is local-only except for shared skill definitions
 .claude/*

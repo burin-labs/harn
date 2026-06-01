@@ -50,6 +50,7 @@ mod mutation;
 mod outline;
 mod parse;
 mod parse_errors;
+mod search;
 mod structural_diff;
 mod symbols;
 mod symbols_call;
@@ -260,6 +261,10 @@ fn register_ast_builtins(registry: &mut BuiltinRegistry, code_index: Option<Shar
         insert_at_anchor::run,
     );
     register_dry_run(registry, code_index);
+    // Read-only structural search: shares the query machinery with
+    // `apply_node` but never writes, so it carries no deterministic-tools
+    // gate.
+    register(registry, "hostlib_ast_search", "search", search::run);
     register(
         registry,
         "hostlib_ast_structural_diff",

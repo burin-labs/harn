@@ -207,6 +207,18 @@ pub const SCHEMAS: &[(&str, &str, SchemaKind, &str)] = &[
     ),
     (
         "ast",
+        "search",
+        SchemaKind::Request,
+        include_str!("../schemas/ast/search.request.json"),
+    ),
+    (
+        "ast",
+        "search",
+        SchemaKind::Response,
+        include_str!("../schemas/ast/search.response.json"),
+    ),
+    (
+        "ast",
         "structural_diff",
         SchemaKind::Request,
         include_str!("../schemas/ast/structural_diff.request.json"),

@@ -1,0 +1,106 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harnlang.com/schemas/hostlib/ast/search.response.json",
+  "title": "ast.search response",
+  "description": "Tagged `result` union. On `ok`, `matches` carries every query match with its bounding `range` and a `captures` map keyed by bare capture name (no leading `@`). `invalid_query` and `unsupported_language` report the failure and carry an empty `matches`.",
+  "type": "object",
+  "properties": {
+    "result": {
+      "type": "string",
+      "enum": ["ok", "invalid_query", "unsupported_language"]
+    },
+    "language": {
+      "type": ["string", "null"],
+      "description": "Resolved grammar name on `ok`; null on the error variants."
+    },
+    "match_count": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Number of matches in `matches` (after any `max_matches` truncation)."
+    },
+    "truncated": {
+      "type": "boolean",
+      "description": "True when `max_matches` dropped additional matches beyond those returned."
+    },
+    "had_errors": {
+      "type": "boolean",
+      "description": "True when the parsed tree contained ERROR/MISSING nodes. Search still runs against the partial tree; the caller decides whether to trust the results."
+    },
+    "matches": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/Match" }
+    },
+    "query": {
+      "type": "string",
+      "description": "Echo of the offending query on `invalid_query`."
+    },
+    "details": {
+      "type": "string",
+      "description": "Human-readable explanation on the error variants."
+    },
+    "error_row": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "0-based row of the query error on `invalid_query`."
+    },
+    "error_column": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "0-based column of the query error on `invalid_query`."
+    },
+    "fallback_suggestion": {
+      "type": "string",
+      "description": "Text-level fallback to reach for on `unsupported_language`."
+    }
+  },
+  "required": ["result", "language", "match_count", "truncated", "had_errors", "matches"],
+  "additionalProperties": false,
+  "$defs": {
+    "Span": {
+      "type": "object",
+      "properties": {
+        "start_byte": { "type": "integer", "minimum": 0 },
+        "end_byte": { "type": "integer", "minimum": 0 },
+        "start_row": { "type": "integer", "minimum": 0 },
+        "start_col": { "type": "integer", "minimum": 0 },
+        "end_row": { "type": "integer", "minimum": 0 },
+        "end_col": { "type": "integer", "minimum": 0 }
+      },
+      "required": [
+        "start_byte",
+        "end_byte",
+        "start_row",
+        "start_col",
+        "end_row",
+        "end_col"
+      ],
+      "additionalProperties": false
+    },
+    "Capture": {
+      "type": "object",
+      "properties": {
+        "text": { "type": "string" },
+        "range": { "$ref": "#/$defs/Span" }
+      },
+      "required": ["text", "range"],
+      "additionalProperties": false
+    },
+    "Match": {
+      "type": "object",
+      "properties": {
+        "range": { "$ref": "#/$defs/Span" },
+        "text": {
+          "type": "string",
+          "description": "Source slice spanning the match's bounding range."
+        },
+        "captures": {
+          "type": "object",
+          "description": "Map from bare capture name to its bound text and range.",
+          "additionalProperties": { "$ref": "#/$defs/Capture" }
+        }
+      },
+      "required": ["range", "text", "captures"],
+      "additionalProperties": false
+    }
+  }
+}

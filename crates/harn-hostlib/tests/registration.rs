@@ -42,6 +42,7 @@ fn ast_capability_registers_documented_methods() {
             "hostlib_ast_apply_node",
             "hostlib_ast_insert_at_anchor",
             "hostlib_ast_dry_run",
+            "hostlib_ast_search",
             "hostlib_ast_structural_diff",
             "hostlib_ast_capabilities",
         ]
@@ -68,6 +69,7 @@ fn ast_capability_registers_documented_methods() {
         ("hostlib_ast_apply_node", "path"),
         ("hostlib_ast_insert_at_anchor", "path"),
         ("hostlib_ast_dry_run", "plan"),
+        ("hostlib_ast_search", "query"),
         ("hostlib_ast_structural_diff", "path_a"),
     ];
     // `apply_node` / `insert_at_anchor` write edited source to disk and are
