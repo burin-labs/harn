@@ -168,9 +168,11 @@ bootstrap the portal frontend dependencies through
 ## Demo gate
 
 Every PR that introduces a new public Harn primitive must also register
-a `harn demo` scenario exercising it. The
-[`Demo gate` workflow](.github/workflows/demo-gate.yml) enforces this on
-every `pull_request` event.
+a `harn demo` scenario exercising it. The `Demo gate` job in the
+[`PR gates` workflow](.github/workflows/pr-gates.yml) enforces this on
+every `pull_request` event. The gate is diff-driven: it **auto-detects**
+whether your change adds a watched primitive and passes on its own when
+it doesn't, so most PRs need no action here and no label.
 
 ### What counts as "a new public primitive"
 
@@ -248,11 +250,16 @@ cargo nextest run -p harn-cli --test demo_cli      # in-process smoke
 
 ### Opting out
 
-If the PR is hygiene-only (formatting, dependency bumps, docs, generated
-files) or a pure refactor that doesn't add a primitive surface, add the
-`no-demo-needed` label. The workflow re-reads labels on
-`labeled`/`unlabeled` events, so the gate flips green within a minute of
-the label landing.
+You only need the `no-demo-needed` label when the gate **actually fires** —
+i.e. the detector flagged a primitive addition you've decided not to demo
+(a pure refactor that moves builtins between files, for example). For
+hygiene-only PRs that don't touch a primitive surface at all, the gate
+already passes on its own; adding the label is unnecessary noise.
+
+When you do add it, the gate re-reads labels on `labeled`/`unlabeled`
+events and flips green within a minute. The re-run no longer cancels other
+in-flight checks, so a label change won't leave a stray "cancelled" status
+on the PR.
 
 Use the opt-out sparingly. If you're unsure whether your PR introduces a
 primitive, ship a demo — the cost of an extra scenario is much lower

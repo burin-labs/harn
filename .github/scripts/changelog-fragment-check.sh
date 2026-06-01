@@ -62,7 +62,7 @@ fi
 # any change outside the ignorable-by-default paths counts as user-visible
 # and requires a fragment. This deliberately defaults strict so we don't
 # silently ship runtime changes without notes.
-ignored_pattern='^(\.github/|docs/|spec/|README(\.md)?$|AGENTS\.md$|CLAUDE\.md$|\.gitignore$|\.gitattributes$|\.editorconfig$|\.markdownlint\.yaml$|\.markdownlint-cli2\.yaml$|changelog\.d/(\.gitkeep|README\.md)$|tests?/|conformance/|benchmarks/|evals/|examples/|experiments/|test_fixtures/|perf/|playground/|tree-sitter-harn/|editors/)'
+ignored_pattern='^(\.github/|docs/|spec/|README(\.md)?$|AGENTS\.md$|CLAUDE\.md$|CONTRIBUTING\.md$|\.gitignore$|\.gitattributes$|\.editorconfig$|\.markdownlint[^/]*$|changelog\.d/(\.gitkeep|README\.md)$|tests?/|conformance/|benchmarks/|evals/|examples/|experiments/|test_fixtures/|perf/|playground/|tree-sitter-harn/|editors/)'
 nontrivial=$(printf '%s\n' "$changed_files" | grep -Ev "$ignored_pattern" || true)
 if [ -z "$nontrivial" ]; then
   echo "::notice title=Changelog fragment gate::only docs/test/CI paths touched; pass."

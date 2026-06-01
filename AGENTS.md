@@ -166,11 +166,13 @@ same way) lives in
 - See `changelog.d/README.md` for the format and examples.
 - At release time the fragments are assembled into `## Unreleased` and the
   fragment files are deleted in the same release commit.
-- The `Changelog fragment` GitHub Actions check is the soft gate. PRs that
-  genuinely need no entry (typos, internal refactors, dep bumps with no
-  user-visible effect) carry the `no-changelog-needed` label; the gate
-  treats that as a pass. Direct edits to `CHANGELOG.md` are also accepted
-  (legacy path).
+- The `Changelog fragment` job in the `PR gates` GitHub Actions workflow is
+  the soft gate. It is diff-driven and passes on its own when a PR only
+  touches docs/test/CI paths, so don't add a label preemptively. Add the
+  `no-changelog-needed` label only when the gate fires on a PR that
+  genuinely needs no entry (typos, internal refactors, dep bumps with no
+  user-visible effect); the gate treats that as a pass. Direct edits to
+  `CHANGELOG.md` are also accepted (legacy path).
 - Architecture: the assembler and the per-major archive helper live in
   `harn-bump-fleet/lib/changelog.harn`; release-time invocation lives in
   `harn-bump-fleet/release_harn.harn::apply_draft_release_notes`. Bump

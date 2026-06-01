@@ -193,9 +193,11 @@ work as soon as you `git mv` files into them.
 ## Demo gate
 
 The conformance suite is paired with — but separate from — the
-`harn demo` scenario gate. Any PR that adds a public primitive (stdlib
-builtin, host capability, orchestrator surface, language construct) must
-either register a `crates/harn-cli/assets/demo/<id>/` scenario or carry
-the `no-demo-needed` label. Conformance proves the primitive behaves;
-the demo proves the primitive is reachable from a realistic user
-workflow.
+`harn demo` scenario gate (the `Demo gate` job in the `PR gates`
+workflow). The gate is diff-driven: it auto-detects whether a PR adds a
+public primitive (stdlib builtin, host capability, orchestrator surface,
+language construct) and passes on its own otherwise. When it fires, the
+PR must either register a `crates/harn-cli/assets/demo/<id>/` scenario or
+carry the `no-demo-needed` label — don't add the label preemptively.
+Conformance proves the primitive behaves; the demo proves the primitive
+is reachable from a realistic user workflow.
