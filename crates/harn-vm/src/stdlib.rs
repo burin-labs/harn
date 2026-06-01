@@ -65,6 +65,7 @@ mod math;
 pub(crate) mod memory;
 mod monitors;
 mod multipart;
+mod net;
 mod net_policy;
 mod oauth_dynreg;
 mod oauth_storage;
@@ -170,6 +171,7 @@ pub fn register_io_stdlib(vm: &mut Vm) {
     vision::register_vision_builtins(vm);
     agent_state::register_agent_state_builtins(vm);
     memory::register_memory_builtins(vm);
+    net::register_net_builtins(vm);
     process::register_process_builtins(vm);
     process::register_path_builtins(vm);
     sandbox::register_sandbox_builtins(vm);
