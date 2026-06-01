@@ -28,6 +28,14 @@ pub(crate) struct RunArgs {
     /// network egress fail-closed guard for this run.
     #[arg(long = "no-sandbox", action = clap::ArgAction::SetTrue)]
     pub no_sandbox: bool,
+    /// Extra read-only filesystem roots. Repeatable; each path is
+    /// readable but never writable.
+    #[arg(
+        long = "read-only-root",
+        value_name = "PATH",
+        conflicts_with = "no_sandbox"
+    )]
+    pub read_only_root: Vec<PathBuf>,
     /// Evaluate inline Harn code instead of a file.
     #[arg(short = 'e')]
     pub eval: Option<String>,
