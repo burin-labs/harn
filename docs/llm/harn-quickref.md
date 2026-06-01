@@ -1633,7 +1633,9 @@ prompt. It keeps tool-call metadata and emits `redacted_indices`,
 transcript/audit content stays available by pointer. Useful options:
 `root_window`, `min_chars`, `roots`, `active_plan`, `scratchpad`,
 `pending_tool_args`, `unresolved_findings`, `write_barrier_refs`, and
-`require_write_barrier`.
+`require_write_barrier`. In `agent_loop`, enabling both `scratchpad` and a
+reachability-GC projection automatically supplies the current scratchpad as a
+root plus a scratchpad-version write barrier for that turn.
 
 ## Reminders
 
