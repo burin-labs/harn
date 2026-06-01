@@ -10,15 +10,13 @@
 
 use std::collections::BTreeMap;
 
-use harn_hostlib::ast::{api, Language};
-use streaming_iterator::StreamingIterator;
-use tree_sitter::{Query, QueryCursor};
+use harn_hostlib::ast::Language;
 
 use crate::constraint::CompiledConstraint;
 use crate::error::RulesError;
+use crate::evaluator::CompiledRuleTree;
 use crate::fix::{interpolate, splice, AppliedEdit};
-use crate::model::{AtomicMatcher, Rule};
-use crate::pattern::{compile_pattern, ROOT_CAPTURE};
+use crate::model::Rule;
 use crate::transform::CompiledTransform;
 
 /// A byte + row/col span. Rows/cols are 0-based, matching the rest of the
@@ -40,7 +38,7 @@ pub struct Span {
 }
 
 impl Span {
-    fn of(node: tree_sitter::Node<'_>) -> Self {
+    pub(crate) fn of(node: tree_sitter::Node<'_>) -> Self {
         let start = node.start_position();
         let end = node.end_position();
         Span {
@@ -92,7 +90,7 @@ pub struct CodemodResult {
 pub struct CompiledRule {
     rule_id: String,
     language: Language,
-    matcher: CompiledMatcher,
+    execution: Execution,
     /// `where` predicates; a match survives only when all hold.
     constraints: Vec<CompiledConstraint>,
     /// `transform` definitions: (new metavar name, compiled transform).
@@ -101,12 +99,12 @@ pub struct CompiledRule {
     fix: Option<String>,
 }
 
-enum CompiledMatcher {
-    /// A tree-sitter query plus the metavar names to extract. Covers both
-    /// `pattern` and `kind` forms.
-    Query { query: Query, metavars: Vec<String> },
-    /// A text regex over the whole source.
-    Regex(regex::Regex),
+enum Execution {
+    /// A top-level pure-`regex` rule: scan the raw source text (grep-style),
+    /// independent of the tree. Its match span is the regex match range.
+    SourceRegex(regex::Regex),
+    /// The full matching algebra (atomic + relational + composite).
+    Tree(Box<CompiledRuleTree>),
 }
 
 impl CompiledRule {
@@ -118,68 +116,24 @@ impl CompiledRule {
                 language: rule.language.clone(),
             })?;
 
-        let matcher = match rule
-            .rule
-            .resolve()
-            .map_err(|message| RulesError::PatternCompile {
-                rule: rule.id.clone(),
-                message,
-            })? {
-            AtomicMatcher::Pattern(snippet) => {
-                let ts_language =
-                    language
-                        .ts_language()
-                        .ok_or_else(|| RulesError::GrammarUnavailable {
-                            rule: rule.id.clone(),
-                            language: language.name().to_string(),
-                        })?;
-                let compiled = compile_pattern(&snippet, language).map_err(|message| {
-                    RulesError::PatternCompile {
-                        rule: rule.id.clone(),
-                        message,
-                    }
-                })?;
-                let query = Query::new(&ts_language, &compiled.query).map_err(|err| {
-                    RulesError::QueryRejected {
-                        rule: rule.id.clone(),
-                        message: err.to_string(),
-                        query: compiled.query.clone(),
-                    }
-                })?;
-                CompiledMatcher::Query {
-                    query,
-                    metavars: compiled.metavars,
+        // A top-level pure-`regex` rule greps the source text directly; any
+        // other shape (pattern / kind / relational / composite) compiles to
+        // the tree-walking algebra.
+        let execution = if rule.rule.is_pure_regex() {
+            let pattern = rule.rule.regex.as_ref().expect("pure regex");
+            Execution::SourceRegex(regex::Regex::new(pattern).map_err(|err| {
+                RulesError::PatternCompile {
+                    rule: rule.id.clone(),
+                    message: format!("invalid regex `{pattern}`: {err}"),
                 }
-            }
-            AtomicMatcher::Kind(kind) => {
-                let ts_language =
-                    language
-                        .ts_language()
-                        .ok_or_else(|| RulesError::GrammarUnavailable {
-                            rule: rule.id.clone(),
-                            language: language.name().to_string(),
-                        })?;
-                let query_text = format!("({kind}) @{ROOT_CAPTURE}");
-                let query = Query::new(&ts_language, &query_text).map_err(|err| {
-                    RulesError::QueryRejected {
-                        rule: rule.id.clone(),
-                        message: err.to_string(),
-                        query: query_text.clone(),
-                    }
-                })?;
-                CompiledMatcher::Query {
-                    query,
-                    metavars: Vec::new(),
-                }
-            }
-            AtomicMatcher::Regex(pattern) => {
-                let regex =
-                    regex::Regex::new(&pattern).map_err(|err| RulesError::PatternCompile {
-                        rule: rule.id.clone(),
-                        message: format!("invalid regex `{pattern}`: {err}"),
-                    })?;
-                CompiledMatcher::Regex(regex)
-            }
+            })?)
+        } else {
+            Execution::Tree(Box::new(CompiledRuleTree::compile(
+                &rule.id,
+                language,
+                &rule.rule,
+                &rule.utils,
+            )?))
         };
 
         let constraints = rule
@@ -199,7 +153,7 @@ impl CompiledRule {
         Ok(CompiledRule {
             rule_id: rule.id.clone(),
             language,
-            matcher,
+            execution,
             constraints,
             transforms,
             fix: rule.fix.clone(),
@@ -214,11 +168,18 @@ impl CompiledRule {
     /// Run the compiled rule against `source`, returning matches in
     /// document order. Matches that fail any `where` constraint are dropped.
     pub fn run(&self, source: &str) -> Result<Vec<RuleMatch>, RulesError> {
-        let mut matches = match &self.matcher {
-            CompiledMatcher::Query { query, metavars } => {
-                self.run_query(query, metavars, source)?
-            }
-            CompiledMatcher::Regex(regex) => self.run_regex(regex, source),
+        let mut matches = match &self.execution {
+            Execution::SourceRegex(regex) => self.run_regex(regex, source),
+            Execution::Tree(tree) => tree
+                .find(&self.rule_id, self.language, source)?
+                .into_iter()
+                .map(|m| RuleMatch {
+                    rule_id: self.rule_id.clone(),
+                    span: m.span,
+                    text: m.text,
+                    bindings: m.bindings,
+                })
+                .collect(),
         };
         if !self.constraints.is_empty() {
             matches.retain(|m| self.satisfies_constraints(m));
@@ -288,57 +249,6 @@ impl CompiledRule {
             vars.insert(name.clone(), transform.apply(input));
         }
         vars
-    }
-
-    fn run_query(
-        &self,
-        query: &Query,
-        metavars: &[String],
-        source: &str,
-    ) -> Result<Vec<RuleMatch>, RulesError> {
-        let tree =
-            api::parse_tree(source, self.language).map_err(|err| RulesError::SourceParse {
-                rule: self.rule_id.clone(),
-                message: err.to_string(),
-            })?;
-        let names: Vec<&str> = query.capture_names().to_vec();
-        let bytes = source.as_bytes();
-
-        let mut cursor = QueryCursor::new();
-        let mut it = cursor.matches(query, tree.root_node(), bytes);
-        let mut matches = Vec::new();
-        while let Some(m) = it.next() {
-            let mut root: Option<Span> = None;
-            let mut root_text = String::new();
-            let mut bindings: BTreeMap<String, Binding> = BTreeMap::new();
-            for cap in m.captures {
-                let name = names[cap.index as usize];
-                let span = Span::of(cap.node);
-                let text = source[cap.node.start_byte()..cap.node.end_byte()].to_string();
-                if name == ROOT_CAPTURE {
-                    root = Some(span);
-                    root_text = text;
-                } else if metavars.iter().any(|m| m == name) {
-                    // Canonical metavar capture; unification helpers carry a
-                    // `.` and never appear in `metavars`, so they are skipped.
-                    bindings
-                        .entry(name.to_string())
-                        .or_insert(Binding { text, span });
-                }
-            }
-            if let Some(span) = root {
-                matches.push(RuleMatch {
-                    rule_id: self.rule_id.clone(),
-                    span,
-                    text: root_text,
-                    bindings,
-                });
-            }
-        }
-        // Tree-sitter yields matches in query-eval order; sort to document
-        // order for a stable, intuitive result.
-        matches.sort_by_key(|m| (m.span.start_byte, m.span.end_byte));
-        Ok(matches)
     }
 
     fn run_regex(&self, regex: &regex::Regex, source: &str) -> Vec<RuleMatch> {
