@@ -10,6 +10,7 @@ Supported stdlib operations:
 - `walk_dir(path, {long_running: true, ...})`
 - `glob(pattern, base?, {long_running: true})`
 - `glob(pattern, {base: "...", long_running: true})`
+- `find_text(root, pattern, {long_running: true, ...})`
 
 Supported host tools:
 

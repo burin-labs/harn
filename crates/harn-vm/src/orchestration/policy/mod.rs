@@ -239,6 +239,15 @@ pub fn enforce_current_policy_for_builtin(name: &str, args: &[VmValue]) -> Resul
         return Ok(());
     };
     match name {
+        "find_text"
+            if !policy_allows_capability(&policy, "workspace", "read_text")
+                || !policy_allows_capability(&policy, "workspace", "list") =>
+        {
+            return reject_policy(
+                "builtin 'find_text' exceeds workspace.read_text/workspace.list ceiling"
+                    .to_string(),
+            );
+        }
         "read_file"
         | "read_file_result"
         | "read_file_bytes"
@@ -1012,6 +1021,7 @@ mod approval_policy_tests {
 
         for name in [
             "read_lines",
+            "find_text",
             "walk_dir",
             "glob",
             "project_context_profile_native",

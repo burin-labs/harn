@@ -26,6 +26,7 @@ surface.
 | `harness.fs.read_lines(path)` | `read_lines(path)` | `workspace.read_text` |
 | `harness.fs.walk(path, options?)` | `walk_dir(path, options?)` | `workspace.list` |
 | `harness.fs.glob(pattern, base_or_options?, options?)` | `glob(pattern, base_or_options?, options?)` | `workspace.list` |
+| `harness.fs.find_text(root, pattern, options?)` | `find_text(root, pattern, options?)` | `workspace.list` + `workspace.read_text` |
 
 `harness.fs.mkdtemp(prefix?)` creates a uniquely named directory under the host
 temporary directory and returns its absolute path. The directory is not
@@ -35,3 +36,17 @@ automatically removed; callers own cleanup with `harness.fs.delete(path)`.
 matches as `glob(...)`. Patterns are matched against forward-slash paths
 relative to the base directory, and `long_running` / `background` options return
 a long-running operation handle.
+
+`harness.fs.find_text(root, pattern, options?)` walks with gitignore-aware
+defaults and searches matching files in the VM. It returns a list of
+`{path, line, col, column, text}` hits by default. Set `mode: "exists"` for a
+boolean short-circuit or `mode: "count"` for an integer count. The search is
+fixed-string by default for lint/source-guard workloads; pass
+`{fixed_strings: false}` to treat `pattern` as a regular expression.
+`preset: "source"` adds common source-tree excludes (`node_modules`, `target`,
+`dist`, `.git`, `.harn-runs`, `vendor`) and a 1 MiB file-size ceiling;
+`preset: "all"` disables hidden-file and ignore filtering. Use `include`,
+`exclude`, `ignore`, or their `*_globs` forms with glob strings or lists for
+explicit overrides. Count mode is capped by `max_matches` (default 1000).
+Summary modes can set `parallel: true` and optional `threads` for a parallel
+walker.

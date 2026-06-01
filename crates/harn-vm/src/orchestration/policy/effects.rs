@@ -198,6 +198,7 @@ fn builtin_effect(name: &str) -> Option<EffectRecord> {
         | "render"
         | "render_prompt"
         | "render_with_provenance"
+        | "find_text"
         | "read_lines"
         | "list_dir"
         | "walk_dir"
