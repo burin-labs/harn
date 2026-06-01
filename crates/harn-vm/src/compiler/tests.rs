@@ -381,6 +381,10 @@ fn attributed_top_level_fn_does_not_emit_spurious_pop() {
 /// exactly. A bare `Op::Closure` leaves one value (`Some(1)`); pairing it
 /// with the matching bind (`Op::DefVar`) nets zero (`Some(0)`); and emitting
 /// a branch taints the span so the model declines to judge it (`None`).
+///
+/// The balance model and its assertion are `#[cfg(debug_assertions)]`, so this
+/// test (and the miswiring test below) only compile and run in debug builds.
+#[cfg(debug_assertions)]
 #[test]
 fn balance_model_tracks_straight_line_and_declines_branches() {
     let mut chunk = Chunk::new();
@@ -408,6 +412,7 @@ fn balance_model_tracks_straight_line_and_declines_branches() {
 /// which emits a balanced `Closure; DefVar` and leaves nothing to pop) and
 /// confirm the balance assertion panics instead of letting the compiler emit
 /// the unbalanced `Op::Pop` that #2610 only caught as a runtime underflow.
+#[cfg(debug_assertions)]
 #[test]
 fn miswired_produces_value_trips_balance_assertion() {
     struct ResetGuard;

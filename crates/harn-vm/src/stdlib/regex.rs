@@ -1,5 +1,6 @@
 use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap};
+use std::rc::Rc;
 
 use crate::runtime_limits::RuntimeLimits;
 use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
@@ -9,27 +10,51 @@ use crate::vm::Vm;
 const REGEX_CACHE_LIMIT: usize = RuntimeLimits::DEFAULT.max_regex_cache_entries;
 
 thread_local! {
-    static REGEX_CACHE: RefCell<HashMap<String, regex::Regex>> = RefCell::new(HashMap::new());
+    // `regex::Regex` is stored behind an `Rc` because `Regex::clone` deep-copies
+    // the compiled program and its match-cache pool — ~3.5us per call, which
+    // dominated repeated `regex_match` over a file's lines. Handing callers an
+    // `Rc<Regex>` makes each lookup a refcount bump instead.
+    static REGEX_CACHE: RefCell<HashMap<String, Rc<regex::Regex>>> = RefCell::new(HashMap::new());
+    // Scan loops almost always reuse the same pattern (e.g. `regex_match(p, line)`
+    // across every line of a file). This single-slot memo short-circuits those
+    // calls before the cache-key allocation and the HashMap hash, leaving only a
+    // string compare plus the `Rc` bump.
+    static LAST_REGEX: RefCell<Option<(String, String, Rc<regex::Regex>)>> =
+        const { RefCell::new(None) };
 }
 
-fn get_cached_regex(pattern: &str, flags: &str) -> Result<regex::Regex, VmError> {
-    let cache_key = format!("{flags}\0{pattern}");
-    REGEX_CACHE.with(|cache| {
+fn get_cached_regex(pattern: &str, flags: &str) -> Result<Rc<regex::Regex>, VmError> {
+    if let Some(re) = LAST_REGEX.with(|slot| {
+        slot.borrow()
+            .as_ref()
+            .filter(|(p, f, _)| p == pattern && f == flags)
+            .map(|(_, _, re)| Rc::clone(re))
+    }) {
+        return Ok(re);
+    }
+
+    let re = REGEX_CACHE.with(|cache| -> Result<Rc<regex::Regex>, VmError> {
+        let cache_key = format!("{flags}\0{pattern}");
         let mut cache = cache.borrow_mut();
         if let Some(re) = cache.get(&cache_key) {
-            return Ok(re.clone());
+            return Ok(Rc::clone(re));
         }
-        let re = build_regex(pattern, flags).map_err(|e| {
+        let re = Rc::new(build_regex(pattern, flags).map_err(|e| {
             VmError::Thrown(VmValue::String(std::sync::Arc::from(format!(
                 "Invalid regex: {e}"
             ))))
-        })?;
+        })?);
         if cache.len() >= REGEX_CACHE_LIMIT {
             cache.clear();
         }
-        cache.insert(cache_key, re.clone());
+        cache.insert(cache_key, Rc::clone(&re));
         Ok(re)
-    })
+    })?;
+
+    LAST_REGEX.with(|slot| {
+        *slot.borrow_mut() = Some((pattern.to_string(), flags.to_string(), Rc::clone(&re)));
+    });
+    Ok(re)
 }
 
 fn build_regex(pattern: &str, flags: &str) -> Result<regex::Regex, String> {
@@ -69,9 +94,9 @@ pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
 )]
 fn regex_match_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     if args.len() >= 2 {
-        let pattern = args[0].display();
-        let text = args[1].display();
-        let flags = args.get(2).map(VmValue::display).unwrap_or_default();
+        let pattern = args[0].as_str_cow();
+        let text = args[1].as_str_cow();
+        let flags = args.get(2).map(VmValue::as_str_cow).unwrap_or_default();
         let re = get_cached_regex(&pattern, &flags)?;
         let matches: Vec<VmValue> = re
             .find_iter(&text)
@@ -95,13 +120,13 @@ fn regex_match_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmEr
 )]
 fn regex_replace_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     if args.len() >= 3 {
-        let pattern = args[0].display();
-        let replacement = args[1].display();
-        let text = args[2].display();
-        let flags = args.get(3).map(VmValue::display).unwrap_or_default();
+        let pattern = args[0].as_str_cow();
+        let replacement = args[1].as_str_cow();
+        let text = args[2].as_str_cow();
+        let flags = args.get(3).map(VmValue::as_str_cow).unwrap_or_default();
         let re = get_cached_regex(&pattern, &flags)?;
         return Ok(VmValue::String(std::sync::Arc::from(
-            re.replace_all(&text, replacement.as_str()).into_owned(),
+            re.replace_all(&text, replacement.as_ref()).into_owned(),
         )));
     }
     Ok(VmValue::Nil)
@@ -115,8 +140,8 @@ fn regex_captures_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, V
     if args.len() < 2 {
         return Ok(VmValue::List(std::sync::Arc::new(Vec::new())));
     }
-    let pattern = args[0].display();
-    let text = args[1].display();
+    let pattern = args[0].as_str_cow();
+    let text = args[1].as_str_cow();
     let re = get_cached_regex(&pattern, "")?;
 
     let mut results: Vec<VmValue> = Vec::new();
@@ -161,9 +186,9 @@ fn regex_split_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmEr
     if args.len() < 2 {
         return Ok(VmValue::Nil);
     }
-    let text = args[0].display();
-    let pattern = args[1].display();
-    let flags = args.get(2).map(VmValue::display).unwrap_or_default();
+    let text = args[0].as_str_cow();
+    let pattern = args[1].as_str_cow();
+    let flags = args.get(2).map(VmValue::as_str_cow).unwrap_or_default();
     let re = get_cached_regex(&pattern, &flags)?;
     Ok(VmValue::List(std::sync::Arc::new(
         re.split(&text)
@@ -384,5 +409,17 @@ mod tests {
         }
         let re = get_cached_regex("pat0", "").unwrap();
         assert!(re.is_match("pat0"));
+    }
+
+    // A repeated lookup must hand back the *same* compiled regex, not a deep
+    // clone. `regex::Regex::clone` re-copies the compiled program and match
+    // cache (~3.5us/call), so cloning per call is what made line-oriented
+    // scans slow (#2796). Sharing via `Rc` keeps the hot path a refcount bump;
+    // this guards against a regression back to per-call cloning.
+    #[test]
+    fn cache_returns_shared_instance() {
+        let first = get_cached_regex("shared_pattern", "").unwrap();
+        let second = get_cached_regex("shared_pattern", "").unwrap();
+        assert!(Rc::ptr_eq(&first, &second));
     }
 }

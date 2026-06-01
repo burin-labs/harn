@@ -1,0 +1,41 @@
+/**
+ * Line-oriented source scan: the shape of repo-scale audit scripts that walk
+ * files, split them into lines, and run string + regex predicates over every
+ * line. Exercises the hot per-call path of `contains` and `regex_match`
+ * (subject borrowing + the shared compiled-regex cache) without touching the
+ * filesystem, so the fixture measures VM/builtin work only.
+ */
+pipeline default(task) {
+  let lines = [
+    "fn parse_config(path: string) -> Config {",
+    "    let raw = read_text(path)  // TODO: cache reads",
+    "    return raw.unwrap()",
+    "}",
+    "pub fn render(items: list) -> string {",
+    "    items.map({ it -> it.name }).join(\", \")",
+    "}",
+    "// FIXME: handle the empty case",
+    "let x = compute(42)",
+    "struct Widget { id: int, label: string }",
+  ]
+  var hits = 0
+  var iteration = 0
+  while iteration < 4000 {
+    for line in lines {
+      if line.contains("unwrap()") {
+        hits = hits + 1
+      }
+      if line.contains("TODO") {
+        hits = hits + 1
+      }
+      let m = regex_match("fn\\s+\\w+", line)
+      if m != nil {
+        hits = hits + 1
+      }
+    }
+    iteration = iteration + 1
+  }
+  if hits < 0 {
+    log("unreachable")
+  }
+}
