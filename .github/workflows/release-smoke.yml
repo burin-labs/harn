@@ -1,10 +1,11 @@
 name: Release smoke
 
 # Cross-platform release smoke matrix. For tag pushes, waits on the official
-# GitHub release artifacts and smokes those exact binaries; for scheduled/manual
-# source-health runs, builds a native release `harn` binary first. That keeps the
+# GitHub release artifacts and smokes those exact binaries; manual runs can pass
+# a tag to smoke already-published artifacts; scheduled/manual source-health
+# runs without a tag build a native release `harn` binary first. That keeps the
 # release gate tied to the bytes users download without paying a second compile
-# on every release tag.
+# on release artifact checks.
 #
 # The per-PR `windows` job in `ci.yml` covers Windows-specific compile
 # breaks and the curated unit slice. This job is the explicit
@@ -17,12 +18,17 @@ on:
   push:
     tags: ['v*']
   workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Optional release tag to artifact-smoke, e.g. v0.8.57. Empty keeps source-health mode.'
+        required: false
+        type: string
 
 permissions:
   contents: read
 
 concurrency:
-  group: release-smoke-${{ github.event.pull_request.number || github.event.merge_group.head_sha || github.ref }}
+  group: release-smoke-${{ inputs.tag || github.event.pull_request.number || github.event.merge_group.head_sha || github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
@@ -47,19 +53,24 @@ jobs:
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
+          INPUT_TAG: ${{ inputs.tag }}
           WAIT_SECONDS: ${{ env.HARN_RELEASE_ASSET_WAIT_SECONDS }}
         run: |
           set -euo pipefail
 
-          if [[ "${GITHUB_REF_TYPE}" != "tag" ]]; then
+          if [[ -n "${INPUT_TAG:-}" ]]; then
+            tag="$INPUT_TAG"
+          elif [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
+            tag="${GITHUB_REF_NAME}"
+          else
             echo "mode=source" >> "$GITHUB_OUTPUT"
             echo "tag=" >> "$GITHUB_OUTPUT"
             echo "::notice::Non-tag run; release smoke will build from source."
             exit 0
           fi
 
-          if [[ ! "${GITHUB_REF_NAME}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            echo "::error::Expected release tag vX.Y.Z, got '${GITHUB_REF_NAME}'"
+          if [[ ! "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::Expected release tag vX.Y.Z, got '$tag'"
             exit 1
           fi
 
@@ -68,7 +79,6 @@ jobs:
             exit 1
           fi
 
-          tag="${GITHUB_REF_NAME}"
           expected_assets=(
             harn-aarch64-apple-darwin.tar.gz
             harn-aarch64-unknown-linux-gnu.tar.gz
