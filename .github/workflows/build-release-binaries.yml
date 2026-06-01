@@ -483,7 +483,11 @@ jobs:
             extra_binaries+=(harn-container-probe)
           fi
           cd dist
-          tar czf "harn-${HARN_RELEASE_TARGET}.tar.gz" harn harn-dap harn-lsp "${extra_binaries[@]}"
+          # `${extra_binaries[@]+...}` guards the empty-array case: under
+          # `set -u`, macOS's bash 3.2 treats a plain "${extra_binaries[@]}"
+          # expansion of an empty array as an unbound variable and aborts the
+          # darwin packaging step (only linux-gnu populates the array).
+          tar czf "harn-${HARN_RELEASE_TARGET}.tar.gz" harn harn-dap harn-lsp ${extra_binaries[@]+"${extra_binaries[@]}"}
 
       - name: Package (windows)
         if: runner.os == 'Windows' && needs.setup.outputs.is_release == 'true'
