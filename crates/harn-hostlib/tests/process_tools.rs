@@ -90,6 +90,13 @@ fn require_bool(map: &BTreeMap<String, VmValue>, key: &str) -> bool {
     }
 }
 
+fn require_nested_dict(map: &BTreeMap<String, VmValue>, key: &str) -> BTreeMap<String, VmValue> {
+    match map.get(key) {
+        Some(VmValue::Dict(value)) => (**value).clone(),
+        other => panic!("expected dict at {key}, got {other:?}"),
+    }
+}
+
 /// Install a fresh `MockSpawner` for the calling thread and return both the
 /// spawner (for inspection / additional enqueues) and the `SpawnerGuard`
 /// that restores the previous spawner on drop. The guard must be kept
@@ -902,6 +909,55 @@ fn cancel_handle_kills_long_running_process() {
     assert!(
         items.is_empty(),
         "cancelled handle should not push feedback, got {} entries",
+        items.len()
+    );
+}
+
+#[test]
+fn cancel_handle_can_wait_for_timed_out_result() {
+    let session_id = unique_session_id("test-lr-cancel-wait-result");
+    let _session_guard = harn_vm::agent_sessions::enter_current_session(session_id.clone());
+    let _ = harn_vm::orchestration::agent_inbox::drain(&session_id);
+
+    let mut config = MockProcessConfig::running();
+    config.stdout = b"before timeout\n".to_vec();
+    let (_spawner, _controller, _guard) = install_mock_with(config);
+
+    let mut start_req = dict();
+    start_req.insert("argv".into(), vlist_str(&["sleep", "30"]));
+    start_req.insert("background".into(), VmValue::Bool(true));
+    start_req.insert("capture".into(), {
+        let mut capture = BTreeMap::new();
+        capture.insert("max_inline_bytes".into(), VmValue::Int(200));
+        VmValue::Dict(Arc::new(capture))
+    });
+    let start = require_dict(call("hostlib_tools_run_command", start_req).unwrap());
+    let handle_id = require_str(&start, "handle_id");
+
+    let mut cancel_req = dict();
+    cancel_req.insert("handle_id".into(), vstr(&handle_id));
+    cancel_req.insert("wait_result_ms".into(), VmValue::Int(500));
+    cancel_req.insert("timed_out".into(), VmValue::Bool(true));
+    let cancel = require_dict(call("hostlib_tools_cancel_handle", cancel_req).unwrap());
+
+    assert!(require_bool(&cancel, "cancelled"));
+    let result = require_nested_dict(&cancel, "result");
+    assert_eq!(require_str(&result, "handle_id"), handle_id);
+    assert_eq!(require_str(&result, "status"), "timed_out");
+    assert!(require_bool(&result, "timed_out"));
+    assert_eq!(require_int(&result, "exit_code"), -1);
+    assert_eq!(require_str(&result, "stdout"), "before timeout\n");
+    assert!(require_str(&result, "output_path").contains("combined.txt"));
+    assert_eq!(
+        std::fs::read_to_string(require_str(&result, "stdout_path")).unwrap(),
+        "before timeout\n"
+    );
+    assert!(require_int(&result, "byte_count") >= 15);
+
+    let items = harn_vm::orchestration::agent_inbox::drain(&session_id);
+    assert!(
+        items.is_empty(),
+        "cancel result should not also enqueue feedback, got {} entries",
         items.len()
     );
 }
