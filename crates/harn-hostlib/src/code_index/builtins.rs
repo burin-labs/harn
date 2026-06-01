@@ -25,6 +25,7 @@ use crate::tools::args::{
     build_dict, dict_arg, optional_bool, optional_int_list, optional_string, optional_string_list,
     require_string, str_value,
 };
+use crate::value_args;
 
 /// Shared, mutable cell carrying the (at most one) live workspace index.
 /// `Mutex` rather than `RwLock` because rebuilds flip the slot wholesale
@@ -1081,18 +1082,12 @@ fn require_non_negative_u64(
     dict: &BTreeMap<String, VmValue>,
     key: &'static str,
 ) -> Result<u64, HostlibError> {
-    match dict.get(key) {
-        Some(VmValue::Int(n)) if *n >= 0 => Ok(*n as u64),
-        Some(VmValue::Float(f)) if f.fract() == 0.0 && *f >= 0.0 => Ok(*f as u64),
-        Some(VmValue::Int(n)) => Err(HostlibError::InvalidParameter {
+    match value_args::optional_i64_no_default(builtin, dict, key)? {
+        Some(value) if value >= 0 => Ok(value as u64),
+        Some(value) => Err(HostlibError::InvalidParameter {
             builtin,
             param: key,
-            message: format!("must be >= 0, got {n}"),
-        }),
-        Some(other) => Err(HostlibError::InvalidParameter {
-            builtin,
-            param: key,
-            message: format!("expected integer, got {}", other.type_name()),
+            message: format!("must be >= 0, got {value}"),
         }),
         None => Err(HostlibError::MissingParameter {
             builtin,
@@ -1129,19 +1124,13 @@ fn optional_positive_i64(
     dict: &BTreeMap<String, VmValue>,
     key: &'static str,
 ) -> Result<Option<i64>, HostlibError> {
-    match dict.get(key) {
-        None | Some(VmValue::Nil) => Ok(None),
-        Some(VmValue::Int(n)) if *n >= 1 => Ok(Some(*n)),
-        Some(VmValue::Float(f)) if f.fract() == 0.0 && *f >= 1.0 => Ok(Some(*f as i64)),
-        Some(VmValue::Int(n)) => Err(HostlibError::InvalidParameter {
+    match value_args::optional_i64_no_default(builtin, dict, key)? {
+        None => Ok(None),
+        Some(value) if value >= 1 => Ok(Some(value)),
+        Some(value) => Err(HostlibError::InvalidParameter {
             builtin,
             param: key,
-            message: format!("must be >= 1, got {n}"),
-        }),
-        Some(other) => Err(HostlibError::InvalidParameter {
-            builtin,
-            param: key,
-            message: format!("expected integer, got {}", other.type_name()),
+            message: format!("must be >= 1, got {value}"),
         }),
     }
 }

@@ -163,19 +163,19 @@ impl ProcessHandle for RealProcess {
             let status = child.wait()?;
             return Ok((Some(decode_status(status)), false));
         };
-        let deadline = Instant::now() + timeout;
+        let start = Instant::now();
         loop {
             match child.try_wait()? {
                 Some(status) => return Ok((Some(decode_status(status)), false)),
                 None => {
-                    if Instant::now() >= deadline {
-                        let _ = child.kill();
+                    let elapsed = start.elapsed();
+                    if elapsed >= timeout {
+                        self.killer.kill();
                         let _ = child.wait();
                         return Ok((None, true));
                     }
-                    // Cheap poll. Real workloads are dominated by spawn cost
-                    // and pipe drain, not this sleep.
-                    thread::sleep(Duration::from_millis(20));
+                    let remaining = timeout.checked_sub(elapsed).unwrap_or_default();
+                    thread::sleep(remaining.min(Duration::from_millis(20)));
                 }
             }
         }

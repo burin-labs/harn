@@ -228,6 +228,22 @@ fn run_command_kills_child_when_timeout_elapses() {
 }
 
 #[test]
+fn run_command_surfaces_wait_errors() {
+    let config = MockProcessConfig {
+        wait_error: Some("wait blew up".to_string()),
+        ..MockProcessConfig::completed(0)
+    };
+    let (_spawner, _controller, _guard) = install_mock_with(config);
+
+    let mut req = dict();
+    req.insert("argv".into(), vlist_str(&["true"]));
+    let err = call("hostlib_tools_run_command", req).unwrap_err();
+    assert!(
+        matches!(err, HostlibError::Backend { message, .. } if message.contains("wait failed"))
+    );
+}
+
+#[test]
 fn run_command_capture_stderr_false_merges_into_stdout() {
     let config = MockProcessConfig {
         stdout: b"out\n".to_vec(),
@@ -387,6 +403,15 @@ fn run_command_rejects_nonexistent_cwd() {
 }
 
 #[test]
+fn run_command_rejects_malformed_cwd() {
+    let mut req = dict();
+    req.insert("argv".into(), vlist_str(&["true"]));
+    req.insert("cwd".into(), VmValue::Bool(true));
+    let err = call("hostlib_tools_run_command", req).unwrap_err();
+    assert!(matches!(err, HostlibError::InvalidParameter { param, .. } if param == "cwd"));
+}
+
+#[test]
 fn run_command_argv_must_be_strings() {
     let mut req = dict();
     req.insert(
@@ -395,6 +420,20 @@ fn run_command_argv_must_be_strings() {
     );
     let err = call("hostlib_tools_run_command", req).unwrap_err();
     assert!(matches!(err, HostlibError::InvalidParameter { param, .. } if param == "argv"));
+}
+
+#[test]
+fn run_command_rejects_out_of_range_capture_limit() {
+    let mut capture = BTreeMap::new();
+    capture.insert("max_inline_bytes".into(), VmValue::Float(1.0e100));
+
+    let mut req = dict();
+    req.insert("argv".into(), vlist_str(&["true"]));
+    req.insert("capture".into(), VmValue::Dict(Arc::new(capture)));
+    let err = call("hostlib_tools_run_command", req).unwrap_err();
+    assert!(
+        matches!(err, HostlibError::InvalidParameter { param, .. } if param == "max_inline_bytes")
+    );
 }
 
 // -------- run_test --------

@@ -11,6 +11,7 @@ use std::time::Duration;
 use harn_vm::VmValue;
 
 use crate::error::HostlibError;
+use crate::value_args;
 
 /// Pull the single dict argument from a builtin call's argv. The dict
 /// itself is the JSON request body; positional args are not used.
@@ -41,18 +42,7 @@ pub(crate) fn optional_string(
     map: &BTreeMap<String, VmValue>,
     key: &'static str,
 ) -> Result<Option<String>, HostlibError> {
-    let Some(value) = map.get(key) else {
-        return Ok(None);
-    };
-    match value {
-        VmValue::Nil => Ok(None),
-        VmValue::String(s) => Ok(Some(s.to_string())),
-        other => Err(HostlibError::InvalidParameter {
-            builtin,
-            param: key,
-            message: format!("expected string, got {}", describe(other)),
-        }),
-    }
+    value_args::optional_string(builtin, map, key)
 }
 
 /// Optional bool field on a request dict.
@@ -61,18 +51,7 @@ pub(crate) fn optional_bool(
     map: &BTreeMap<String, VmValue>,
     key: &'static str,
 ) -> Result<Option<bool>, HostlibError> {
-    let Some(value) = map.get(key) else {
-        return Ok(None);
-    };
-    match value {
-        VmValue::Nil => Ok(None),
-        VmValue::Bool(b) => Ok(Some(*b)),
-        other => Err(HostlibError::InvalidParameter {
-            builtin,
-            param: key,
-            message: format!("expected bool, got {}", describe(other)),
-        }),
-    }
+    value_args::optional_bool(builtin, map, key)
 }
 
 /// Optional non-negative integer field on a request dict.
@@ -81,23 +60,7 @@ pub(crate) fn optional_u64(
     map: &BTreeMap<String, VmValue>,
     key: &'static str,
 ) -> Result<Option<u64>, HostlibError> {
-    let Some(value) = map.get(key) else {
-        return Ok(None);
-    };
-    match value {
-        VmValue::Nil => Ok(None),
-        VmValue::Int(i) if *i >= 0 => Ok(Some(*i as u64)),
-        VmValue::Int(i) => Err(HostlibError::InvalidParameter {
-            builtin,
-            param: key,
-            message: format!("expected non-negative integer, got {i}"),
-        }),
-        other => Err(HostlibError::InvalidParameter {
-            builtin,
-            param: key,
-            message: format!("expected integer, got {}", describe(other)),
-        }),
-    }
+    value_args::optional_u64(builtin, map, key)
 }
 
 /// Convert an optional `timeout_ms` field into a `Duration`, treating zero
@@ -122,31 +85,7 @@ pub(crate) fn optional_string_list(
     map: &BTreeMap<String, VmValue>,
     key: &'static str,
 ) -> Result<Option<Vec<String>>, HostlibError> {
-    let Some(value) = map.get(key) else {
-        return Ok(None);
-    };
-    match value {
-        VmValue::Nil => Ok(None),
-        VmValue::List(list) => {
-            let mut out = Vec::with_capacity(list.len());
-            for (i, item) in list.iter().enumerate() {
-                let VmValue::String(s) = item else {
-                    return Err(HostlibError::InvalidParameter {
-                        builtin,
-                        param: key,
-                        message: format!("expected string at index {i}, got {}", describe(item)),
-                    });
-                };
-                out.push(s.to_string());
-            }
-            Ok(Some(out))
-        }
-        other => Err(HostlibError::InvalidParameter {
-            builtin,
-            param: key,
-            message: format!("expected list of strings, got {}", describe(other)),
-        }),
-    }
+    value_args::optional_string_list(builtin, map, key)
 }
 
 /// Optional `BTreeMap<String, String>` field on a request dict (e.g. `env`).
@@ -188,10 +127,7 @@ pub(crate) fn require_string(
     map: &BTreeMap<String, VmValue>,
     key: &'static str,
 ) -> Result<String, HostlibError> {
-    optional_string(builtin, map, key)?.ok_or(HostlibError::MissingParameter {
-        builtin,
-        param: key,
-    })
+    value_args::require_string(builtin, map, key)
 }
 
 /// Split an argv list into `(program, remaining_args)`. Errors if the list
@@ -219,16 +155,5 @@ pub(crate) fn parse_argv_program(
 }
 
 fn describe(value: &VmValue) -> &'static str {
-    match value {
-        VmValue::Int(_) => "int",
-        VmValue::Float(_) => "float",
-        VmValue::String(_) => "string",
-        VmValue::Bytes(_) => "bytes",
-        VmValue::Bool(_) => "bool",
-        VmValue::Nil => "nil",
-        VmValue::List(_) => "list",
-        VmValue::Dict(_) => "dict",
-        VmValue::Set(_) => "set",
-        _ => "other",
-    }
+    value_args::describe(value)
 }
