@@ -173,6 +173,14 @@ pub struct Vm {
     pub(crate) pool_registry: Arc<crate::stdlib::pool::PoolRegistry>,
     /// Permits acquired by lexical synchronization blocks in this VM.
     pub(crate) held_sync_guards: Vec<crate::synchronization::VmSyncHeldGuard>,
+    /// `(kind, key)` of locks held by an ancestor VM that is *suspended on this
+    /// VM's execution* — i.e. an inline async-builtin child runs while its
+    /// parent is parked mid-instruction still holding these permits. Re-acquiring
+    /// one of them here is a provably-unresolvable self-deadlock (the sole holder
+    /// is blocked awaiting us), so HARN-ORC-011 fires across the child boundary.
+    /// Empty for new concurrent tasks (`spawn`/`parallel`/triggers), where the
+    /// parent keeps running and the block is legitimately resolvable.
+    pub(crate) inherited_held_keys: Arc<Vec<(String, String)>>,
     /// Counter for generating unique task IDs.
     pub(crate) task_counter: u64,
     /// Counter for logical runtime-context task groups.
@@ -321,6 +329,7 @@ impl VmBaseline {
             inline_caches: HashMap::new(),
             pool_registry: crate::stdlib::pool::new_pool_registry(),
             held_sync_guards: Vec::new(),
+            inherited_held_keys: Arc::new(Vec::new()),
             task_counter: 0,
             runtime_context_counter: 0,
             runtime_context: crate::runtime_context::RuntimeContext::root(),
@@ -546,6 +555,7 @@ impl Vm {
             inline_caches: HashMap::new(),
             pool_registry: crate::stdlib::pool::new_pool_registry(),
             held_sync_guards: Vec::new(),
+            inherited_held_keys: Arc::new(Vec::new()),
             task_counter: 0,
             runtime_context_counter: 0,
             runtime_context: crate::runtime_context::RuntimeContext::root(),
@@ -695,6 +705,7 @@ impl Vm {
             inline_caches: HashMap::new(),
             pool_registry: self.pool_registry.clone(),
             held_sync_guards: Vec::new(),
+            inherited_held_keys: Arc::new(Vec::new()),
             task_counter: 0,
             runtime_context_counter: self.runtime_context_counter,
             runtime_context: self.runtime_context.clone(),
@@ -873,11 +884,49 @@ impl Vm {
     /// is cheap and only runs on the rare blocking-acquire path. Used by the
     /// runtime self-deadlock guard.
     pub(crate) fn held_permits_for(&self, kind: &str, key: &str) -> u32 {
-        self.held_sync_guards
+        let own: u32 = self
+            .held_sync_guards
             .iter()
             .filter(|guard| guard._permit.kind() == kind && guard._permit.key() == key)
             .map(|guard| guard._permit.permits())
-            .sum()
+            .sum();
+        // A lock held by a suspended ancestor (inline async-builtin parent)
+        // counts as held by this task: the ancestor cannot release until we
+        // return, so a re-acquire here can never be granted. Count it as one
+        // permit — enough to trip the capacity-1 self-deadlock guard.
+        let inherited = self
+            .inherited_held_keys
+            .iter()
+            .any(|(k, kk)| k == kind && kk == key) as u32;
+        own + inherited
+    }
+
+    /// `(kind, key)` of every lock held by this VM *and* its suspended
+    /// ancestors — the transitive held-set seen by an inline child.
+    pub(crate) fn combined_held_keys(&self) -> Vec<(String, String)> {
+        let mut keys: Vec<(String, String)> = self
+            .held_sync_guards
+            .iter()
+            .map(|guard| {
+                (
+                    guard._permit.kind().to_string(),
+                    guard._permit.key().to_string(),
+                )
+            })
+            .collect();
+        keys.extend(self.inherited_held_keys.iter().cloned());
+        keys
+    }
+
+    /// Clone a child VM for an **inline, same-task** execution (an async builtin
+    /// awaited while this VM is parked, or a user closure that builtin runs and
+    /// awaits). The child inherits this VM's transitive held-lock keys so a
+    /// re-acquire of a parent-held lock is caught as a self-deadlock
+    /// (HARN-ORC-011). Use plain `child_vm()` for new concurrent tasks.
+    pub(crate) fn child_vm_inline(&self) -> Vm {
+        let mut child = self.child_vm();
+        child.inherited_held_keys = Arc::new(self.combined_held_keys());
+        child
     }
 }
 
@@ -940,6 +989,42 @@ mod tests {
             .globals
             .get("stable_global")
             .is_some_and(|value| value.display() == "baseline"));
+    }
+
+    #[tokio::test]
+    async fn inline_child_inherits_held_lock_keys_but_concurrent_child_does_not() {
+        let mut parent = Vm::new();
+        let permit = parent
+            .sync_runtime
+            .acquire("mutex", "v:test", 1, 1, None, None)
+            .await
+            .unwrap()
+            .unwrap();
+        parent
+            .held_sync_guards
+            .push(crate::synchronization::VmSyncHeldGuard {
+                _permit: permit,
+                frame_depth: 0,
+                env_scope_depth: 0,
+            });
+        assert_eq!(parent.held_permits_for("mutex", "v:test"), 1);
+
+        // An inline child (async builtin awaited while the parent is parked, or
+        // a closure the builtin runs inline) inherits the held key, so a
+        // re-acquire is caught as a cross-context self-deadlock (HARN-ORC-011)
+        // — even transitively through a further inline child.
+        let inline = parent.child_vm_inline();
+        assert_eq!(inline.held_permits_for("mutex", "v:test"), 1);
+        assert_eq!(
+            inline.child_vm_inline().held_permits_for("mutex", "v:test"),
+            1
+        );
+
+        // A new concurrent task (spawn / parallel / trigger) does NOT inherit:
+        // blocking on a parent-held lock there is legitimately resolvable, so
+        // flagging it would be a false positive.
+        let concurrent = parent.child_vm();
+        assert_eq!(concurrent.held_permits_for("mutex", "v:test"), 0);
     }
 
     #[test]
