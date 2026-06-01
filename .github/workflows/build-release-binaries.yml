@@ -340,6 +340,9 @@ jobs:
           set -euo pipefail
           start=$SECONDS
           cargo build --release -p harn-cli -p harn-dap -p harn-lsp --target "$HARN_RELEASE_TARGET"
+          if [[ "$HARN_RELEASE_TARGET" == *unknown-linux-gnu ]]; then
+            cargo build --release -p harn-cli --bin harn-container-probe --target "$HARN_RELEASE_TARGET"
+          fi
           duration=$((SECONDS - start))
           {
             echo "### Release binary build"
@@ -466,13 +469,21 @@ jobs:
 
       - name: Package (unix)
         if: runner.os != 'Windows' && needs.setup.outputs.is_release == 'true'
+        env:
+          HARN_RELEASE_TARGET: ${{ matrix.target }}
         run: |
+          set -euo pipefail
           mkdir -p dist
-          cp target/${{ matrix.target }}/release/harn dist/harn
-          cp target/${{ matrix.target }}/release/harn-dap dist/harn-dap
-          cp target/${{ matrix.target }}/release/harn-lsp dist/harn-lsp
+          cp "target/${HARN_RELEASE_TARGET}/release/harn" dist/harn
+          cp "target/${HARN_RELEASE_TARGET}/release/harn-dap" dist/harn-dap
+          cp "target/${HARN_RELEASE_TARGET}/release/harn-lsp" dist/harn-lsp
+          extra_binaries=()
+          if [[ "$HARN_RELEASE_TARGET" == *unknown-linux-gnu ]]; then
+            cp "target/${HARN_RELEASE_TARGET}/release/harn-container-probe" dist/harn-container-probe
+            extra_binaries+=(harn-container-probe)
+          fi
           cd dist
-          tar czf harn-${{ matrix.target }}.tar.gz harn harn-dap harn-lsp
+          tar czf "harn-${HARN_RELEASE_TARGET}.tar.gz" harn harn-dap harn-lsp "${extra_binaries[@]}"
 
       - name: Package (windows)
         if: runner.os == 'Windows' && needs.setup.outputs.is_release == 'true'
@@ -501,9 +512,14 @@ jobs:
 
   container:
     name: Publish container
-    needs: setup
-    if: needs.setup.outputs.should_publish_container == 'true'
+    needs: [setup, release]
+    if: >-
+      always() &&
+      needs.setup.outputs.should_publish_container == 'true' &&
+      (needs.release.result == 'success' ||
+        (needs.release.result == 'skipped' && needs.setup.outputs.should_build_binaries == 'false'))
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     permissions:
       contents: read
       packages: write
@@ -517,6 +533,36 @@ jobs:
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd # v4.0.0
+
+      - name: Download Linux release archives
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REF: ${{ needs.setup.outputs.ref }}
+        run: |
+          set -euo pipefail
+
+          assets_dir="${RUNNER_TEMP}/harn-release-assets"
+          rm -rf "$assets_dir" release-container
+          mkdir -p "$assets_dir" release-container/amd64 release-container/arm64
+
+          gh release download "$REF" \
+            --repo "$GITHUB_REPOSITORY" \
+            --pattern harn-x86_64-unknown-linux-gnu.tar.gz \
+            --pattern harn-aarch64-unknown-linux-gnu.tar.gz \
+            --dir "$assets_dir"
+
+          cp "$assets_dir/harn-x86_64-unknown-linux-gnu.tar.gz" release-container/amd64/harn.tar.gz
+          cp "$assets_dir/harn-aarch64-unknown-linux-gnu.tar.gz" release-container/arm64/harn.tar.gz
+
+          for arch in amd64 arm64; do
+            archive="release-container/${arch}/harn.tar.gz"
+            for binary in harn harn-container-probe; do
+              if ! tar tzf "$archive" | grep -Fxq "$binary"; then
+                echo "::error::${archive} is missing ${binary}; container image must be assembled from release artifacts, not a Docker source rebuild."
+                exit 1
+              fi
+            done
+          done
 
       - name: Log in to GHCR
         uses: docker/login-action@4907a6ddec9925e35a0a9e82d7399ccc52663121 # v4.1.0
@@ -545,7 +591,7 @@ jobs:
         uses: docker/build-push-action@bcafcacb16a39f128d818304e6c9c0c18556b85f # v7.1.0
         with:
           context: .
-          file: ./Dockerfile
+          file: ./Dockerfile.release
           platforms: linux/amd64,linux/arm64
           push: true
           tags: ${{ steps.meta.outputs.tags }}

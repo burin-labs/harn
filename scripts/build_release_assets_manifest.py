@@ -58,12 +58,12 @@ TARGETS: dict[str, dict[str, object]] = {
     "x86_64-unknown-linux-gnu": {
         "filename": "harn-x86_64-unknown-linux-gnu.tar.gz",
         "format": "tar.gz",
-        "binaries": ["harn", "harn-dap", "harn-lsp"],
+        "binaries": ["harn", "harn-dap", "harn-lsp", "harn-container-probe"],
     },
     "aarch64-unknown-linux-gnu": {
         "filename": "harn-aarch64-unknown-linux-gnu.tar.gz",
         "format": "tar.gz",
-        "binaries": ["harn", "harn-dap", "harn-lsp"],
+        "binaries": ["harn", "harn-dap", "harn-lsp", "harn-container-probe"],
     },
     "x86_64-pc-windows-msvc": {
         "filename": "harn-x86_64-pc-windows-msvc.zip",

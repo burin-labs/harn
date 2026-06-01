@@ -37,6 +37,14 @@ fails the workflow early.
       "size":     12345678,
       "format":   "tar.gz",
       "binaries": ["harn", "harn-dap", "harn-lsp"]
+    },
+    "x86_64-unknown-linux-gnu": {
+      "filename": "harn-x86_64-unknown-linux-gnu.tar.gz",
+      "url":      "...",
+      "sha256":   "...",
+      "size":     12345678,
+      "format":   "tar.gz",
+      "binaries": ["harn", "harn-dap", "harn-lsp", "harn-container-probe"]
     }
   }
 }
@@ -54,6 +62,11 @@ fails the workflow early.
 | `assets[triple].size`              | Archive size in bytes. |
 | `assets[triple].format`            | `"tar.gz"` or `"zip"`. |
 | `assets[triple].binaries`          | List of files unpacked from the archive. |
+
+Linux archives also include `harn-container-probe`, which the release
+container image uses for its distroless health check. Installer scripts
+may ignore that extra binary unless they are assembling the container
+root filesystem.
 
 The currently published target triples are:
 
