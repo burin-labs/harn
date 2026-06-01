@@ -1,10 +1,10 @@
-.PHONY: setup install-hooks configure-merge-drivers build build-release sign-local check fmt fmt-harn fmt-harn-fix lint lint-md lint-actions lint-harn spec-lint test test-e2e test-cargo test-fast test-harn-scripts conformance protocol-conformance mcp-rc-conformance replay-oracle replay-bench eval-tool-calls bench-vm bench-vm-micro bench-vm-clone check-vm-rss-soak bench-llm bench-orchestration bench-cli-cold-start loadgen-postgres all release-gate release-smoke smoke-audit portal portal-check portal-demo gen-highlight check-highlight gen-protocol-artifacts check-protocol-artifacts check-burin-protocol-artifacts check-bindings gen-session-bundle-schema check-session-bundle-schema gen-trigger-quickref check-trigger-quickref gen-provider-matrix check-provider-matrix gen-provider-support check-provider-support gen-provider-catalog check-provider-catalog gen-connector-matrix check-connector-matrix check-trigger-examples check-docs-model-refs check-docs-snippets check-docs-workflow-quickstart sync-language-spec check-language-spec sync-diagnostics-catalog check-diagnostics-catalog lint-test-patterns lint-diagnostic-codes check-receipt-structs lint-no-rust-prompt-prose lint-no-xfail-regression check-provider-catalog-drift check-ported-handler-loc
+.PHONY: setup install-hooks configure-merge-drivers build build-release sign-local check fmt fmt-harn fmt-harn-fix lint lint-md lint-actions lint-harn spec-lint test test-e2e test-cargo test-fast test-harn-scripts conformance protocol-conformance mcp-rc-conformance replay-oracle replay-bench eval-tool-calls bench-vm bench-vm-micro bench-vm-clone check-vm-rss-soak bench-llm bench-orchestration bench-cli-cold-start loadgen-postgres all release-gate release-smoke smoke-audit portal portal-check portal-demo gen-highlight check-highlight gen-protocol-artifacts check-protocol-artifacts check-burin-protocol-artifacts check-bindings gen-session-bundle-schema check-session-bundle-schema gen-trigger-quickref check-trigger-quickref gen-provider-matrix check-provider-matrix gen-provider-support check-provider-support gen-provider-catalog check-provider-catalog gen-connector-matrix check-connector-matrix check-trigger-examples check-docs-model-refs check-docs-snippets check-docs-workflow-quickstart sync-language-spec check-language-spec sync-diagnostics-catalog check-diagnostics-catalog lint-test-patterns lint-diagnostic-codes check-receipt-structs lint-no-rust-prompt-prose lint-no-xfail-regression check-provider-catalog-drift check-ported-handler-loc gen-tree-sitter-keywords check-tree-sitter-keywords check-generated-registry
 
 # Full quality check: format first, then lint/test in parallel.
 # Usage: make all -j       (parallel checks after formatting)
 #        make all           (sequential, also works)
 all: fmt
-	$(MAKE) lint lint-md lint-actions lint-harn spec-lint fmt-harn test test-harn-scripts conformance protocol-conformance mcp-rc-conformance replay-oracle replay-bench check-highlight check-protocol-artifacts check-bindings check-session-bundle-schema check-language-spec check-trigger-quickref check-provider-matrix check-provider-support check-provider-catalog check-connector-matrix check-trigger-examples check-docs-model-refs check-docs-snippets check-docs-workflow-quickstart check-diagnostics-catalog lint-test-patterns lint-diagnostic-codes check-receipt-structs check-provider-catalog-drift portal-check
+	$(MAKE) lint lint-md lint-actions lint-harn spec-lint fmt-harn test test-harn-scripts conformance protocol-conformance mcp-rc-conformance replay-oracle replay-bench check-highlight check-protocol-artifacts check-bindings check-session-bundle-schema check-language-spec check-trigger-quickref check-provider-matrix check-provider-support check-provider-catalog check-connector-matrix check-trigger-examples check-docs-model-refs check-docs-snippets check-docs-workflow-quickstart check-diagnostics-catalog lint-test-patterns lint-diagnostic-codes check-receipt-structs check-provider-catalog-drift check-tree-sitter-keywords check-generated-registry portal-check
 
 check: all
 
@@ -537,3 +537,25 @@ lint-no-xfail-regression:
 # add new entries / adjust budgets.
 check-ported-handler-loc:
 	@cargo run --quiet --bin harn -- run scripts/check_ported_handler_loc.harn
+
+# Regenerate tree-sitter-harn/grammar/keywords.js from the lexer's
+# KEYWORDS const (the source of truth for reserved words). Run this
+# whenever a keyword is added, renamed, or retired.
+gen-tree-sitter-keywords:
+	@python3 scripts/sync_tree_sitter_keywords.py --write
+
+# CI guard: fail if the tree-sitter keyword list drifts from the lexer's
+# KEYWORDS const, so the editor grammar and the runtime parser agree on
+# the reserved-word set. `make gen-tree-sitter-keywords` fixes it.
+check-tree-sitter-keywords:
+	@echo "=== Checking tree-sitter keyword list matches the lexer ==="
+	@python3 scripts/sync_tree_sitter_keywords.py
+
+# Meta-guard: fail if scripts/generated_artifacts.toml (the single source
+# of truth for every gen/check drift pair) has drifted from its consumers
+# — the Makefile `all:` recipe, the CI workflows, and the declared output
+# files. Pure-Python; no harn build required. See the registry header for
+# the add-a-new-artifact checklist.
+check-generated-registry:
+	@echo "=== Checking generated-artifact registry is in sync ==="
+	@python3 scripts/check_generated_registry.py
