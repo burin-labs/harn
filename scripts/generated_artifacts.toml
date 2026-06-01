@@ -1,0 +1,278 @@
+# Generated-artifact registry — single source of truth for every
+# "source of truth -> generated/mirrored file + drift check" pair in the repo.
+#
+# WHY THIS FILE EXISTS
+# --------------------
+# The gen/check pairs used to be enumerated independently in FOUR places:
+#   1. the `all:` recipe in the Makefile
+#   2. the audit step(s) in .github/workflows/ci.yml
+#   3. .githooks/pre-commit
+#   4. .githooks/pre-push
+# Nothing forced those four lists to agree, and they drifted: several
+# `check-*` drift guards that exist in the Makefile (and were even
+# advertised in a CI comment as "promoted so a stale artifact fails the
+# PR") never actually ran in any workflow. A contributor could edit
+# spec/openapi.yaml, ship stale bindings, and still get green CI.
+#
+# This registry is the one list. `scripts/check_generated_registry.py`
+# (`make check-generated-registry`) audits the other consumers against
+# it, so a new gen/check pair cannot silently escape CI again, and a
+# generated output cannot lose its drift guard.
+#
+# HOW TO ADD A NEW GENERATED ARTIFACT
+# -----------------------------------
+#   1. Add `gen-<id>` (or `sync-<id>`) and `check-<id>` targets to the Makefile.
+#   2. Add an [[artifact]] block below describing them.
+#   3. Set the stage flags to where the check must run, then wire it:
+#        ci        -> add `make check-<id>` to .github/workflows/ci.yml (or another workflow)
+#        make_all  -> add `check-<id>` to the `all:` recipe in the Makefile
+#        pre_commit/pre_push are informational today (the hooks already
+#        run a curated fast subset); the audit does not force them.
+#   4. Run `make check-generated-registry` — it fails until the registry
+#      and the consumers agree.
+#
+# A `check-*` Makefile target that is NOT a generated-artifact drift guard
+# (a behavioural validator, a perf soak, a LOC ratchet, the registry
+# auditor itself) belongs in `[meta].exempt_checks` instead of an
+# [[artifact]] block, so the completeness audit stays meaningful.
+
+[meta]
+# `check-*` Makefile targets that are intentionally NOT generated-artifact
+# drift guards. Every `^check-*:` target in the Makefile must be either an
+# [[artifact]].check below or listed here, so a newly-added drift guard
+# cannot be forgotten.
+exempt_checks = [
+  "check",                          # the umbrella `check: all` alias
+  "check-vm-rss-soak",              # perf/RSS soak, not a sync guard
+  "check-ported-handler-loc",       # LOC ratchet (epic #2293), not a sync guard
+  "check-trigger-examples",         # validates example projects parse, not a mirror
+  "check-docs-model-refs",          # validates docs track provider aliases, not a mirror
+  "check-docs-snippets",            # validates ```harn blocks parse, not a mirror
+  "check-generated-registry",       # the auditor itself
+]
+
+# ---------------------------------------------------------------------------
+# Fully-wired mirrors (gen + check + CI + make all, several also hooked)
+# ---------------------------------------------------------------------------
+
+[[artifact]]
+id = "highlight"
+description = "mdBook syntax-highlight keyword list, from the live lexer + stdlib builtin names."
+gen = "gen-highlight"
+check = "check-highlight"
+outputs = ["docs/theme/harn-keywords.js"]
+sources = ["crates/harn-lexer/src/", "crates/harn-stdlib/src/stdlib/", "crates/harn-vm/src/stdlib.rs", "crates/harn-vm/src/lib.rs", "crates/harn-modules/"]
+ci = true
+make_all = true
+pre_commit = true
+pre_push = true
+
+[[artifact]]
+id = "language-spec"
+description = "docs/src/language-spec.md is a generated mirror of spec/HARN_SPEC.md (the authoring source)."
+gen = "sync-language-spec"
+check = "check-language-spec"
+outputs = ["docs/src/language-spec.md"]
+sources = ["spec/HARN_SPEC.md"]
+ci = true
+make_all = true
+pre_commit = true
+pre_push = true
+
+[[artifact]]
+id = "diagnostics-catalog"
+description = "Diagnostic-code catalog (markdown page + JSON sidecar) from the in-binary registry."
+gen = "sync-diagnostics-catalog"
+check = "check-diagnostics-catalog"
+outputs = ["docs/src/diagnostics.md", "docs/diagnostics-catalog.json"]
+sources = ["crates/harn-parser/src/diagnostic_codes.rs", "crates/harn-parser/src/diagnostic_codes/"]
+ci = true
+make_all = true
+pre_commit = false
+pre_push = true
+
+[[artifact]]
+id = "tree-sitter-keywords"
+description = "tree-sitter-harn keyword list mirrors the harn-lexer KEYWORDS const, so the editor grammar and the runtime parser agree on the reserved word set."
+gen = "gen-tree-sitter-keywords"
+check = "check-tree-sitter-keywords"
+outputs = ["tree-sitter-harn/grammar/keywords.js"]
+sources = ["crates/harn-lexer/src/token.rs"]
+ci = true
+make_all = true
+pre_commit = true
+pre_push = true
+
+# ---------------------------------------------------------------------------
+# Mirrors whose drift guard previously ran ONLY in `make all` (and so never
+# in any CI workflow). Flagged ci = true here; this PR wires them into CI.
+# ---------------------------------------------------------------------------
+
+[[artifact]]
+id = "protocol-artifacts"
+description = "Harn Agents Protocol bindings (Rust/TS/Swift + manifest) generated from spec/openapi.yaml and the wire vocabulary."
+gen = "gen-protocol-artifacts"
+check = "check-protocol-artifacts"
+outputs = [
+  "spec/protocol-artifacts/harn-protocol.rs",
+  "spec/protocol-artifacts/harn-protocol.ts",
+  "spec/protocol-artifacts/HarnProtocol.swift",
+  "spec/protocol-artifacts/manifest.json",
+]
+sources = ["spec/openapi.yaml", "crates/harn-cli/src/commands/"]
+ci = true
+make_all = true
+pre_commit = false
+pre_push = false
+
+[[artifact]]
+id = "session-bundle-schema"
+description = "JSON Schema for the session-bundle DTO, generated from the Rust SessionBundle type."
+gen = "gen-session-bundle-schema"
+check = "check-session-bundle-schema"
+outputs = ["spec/schemas/session-bundle.v1.schema.json"]
+sources = ["crates/harn-vm/src/sessions/", "crates/harn-cli/src/commands/session.rs"]
+ci = true
+make_all = true
+pre_commit = false
+pre_push = false
+
+[[artifact]]
+id = "provider-catalog"
+description = "Checked-in provider/model catalog JSON + schema + downstream TS/Swift bindings, exported from the live ProviderCatalog."
+gen = "gen-provider-catalog"
+check = "check-provider-catalog"
+outputs = [
+  "spec/provider-catalog/provider-catalog.json",
+  "spec/provider-catalog/provider-catalog.schema.json",
+  "spec/provider-catalog/harn-provider-catalog.ts",
+  "spec/provider-catalog/HarnProviderCatalog.swift",
+]
+sources = ["crates/harn-vm/src/llm_config.rs", "crates/harn-vm/src/provider_catalog.rs"]
+ci = true
+make_all = true
+pre_commit = false
+pre_push = false
+
+[[artifact]]
+id = "provider-catalog-drift"
+description = "Replays the provider-catalog refresh workflow against bundled HTTP fixtures and checks the rendered drift report + candidate TOML against committed goldens."
+gen = ""  # regenerate with: harn run scripts/update_provider_catalog.harn -- --check --update
+check = "check-provider-catalog-drift"
+outputs = [
+  "scripts/provider_catalog_fixtures/expected_candidate.toml",
+  "scripts/provider_catalog_fixtures/expected_drift_report.md",
+]
+sources = ["scripts/update_provider_catalog.harn", "scripts/provider_catalog_fixtures/", "crates/harn-vm/src/llm/"]
+ci = true
+make_all = true
+pre_commit = false
+pre_push = false
+
+[[artifact]]
+id = "docs-workflow-quickstart"
+description = "Verifies the workflow-authoring quickstart fixtures still produce the bundle digests, executed-node sequences, and connector-status shapes the docs claim."
+gen = ""  # no generated file; this is a docs<->runtime behavioural guard
+check = "check-docs-workflow-quickstart"
+outputs = ["scripts/check_docs_workflow_quickstart.sh"]
+sources = ["docs/src/", "scripts/check_docs_workflow_quickstart.sh"]
+ci = true
+make_all = true
+pre_commit = false
+pre_push = false
+
+[[artifact]]
+id = "receipt-structs"
+description = "Guards against duplicated/divergent copies of the receipt structs that must stay byte-identical across crates."
+gen = ""  # no generated file; structural duplication guard
+check = "check-receipt-structs"
+outputs = ["scripts/check_receipt_struct_duplication.py"]
+sources = ["crates/harn-vm/src/", "crates/harn-hostlib/src/"]
+ci = true
+make_all = true
+pre_commit = false
+pre_push = false
+
+# ---------------------------------------------------------------------------
+# Already-wired CI checks (verified present in a workflow).
+# ---------------------------------------------------------------------------
+
+[[artifact]]
+id = "protocol-bindings-roundtrip"
+description = "Round-trips the published JSON fixture through the Python and Go protocol bindings to catch wire-vocabulary drift."
+gen = ""  # python/go bindings are emitted by dump-protocol-artifacts; this is the roundtrip validator
+check = "check-bindings"
+outputs = [
+  "spec/protocol-artifacts/python/harn_protocol.py",
+  "spec/protocol-artifacts/go/harnprotocol/harnprotocol.go",
+]
+sources = ["spec/protocol-artifacts/python/", "spec/protocol-artifacts/go/", "scripts/check_protocol_bindings.py"]
+ci = true
+make_all = true
+pre_commit = false
+pre_push = false
+
+[[artifact]]
+id = "trigger-quickref"
+description = "LLM trigger quickref doc generated from the live ProviderCatalog metadata."
+gen = "gen-trigger-quickref"
+check = "check-trigger-quickref"
+outputs = ["docs/llm/harn-triggers-quickref.md"]
+sources = ["crates/harn-vm/src/llm/", "crates/harn-vm/src/provider_catalog.rs"]
+ci = true
+make_all = true
+pre_commit = false
+pre_push = false
+
+[[artifact]]
+id = "provider-matrix"
+description = "Provider/model capability matrix doc generated from capabilities.toml."
+gen = "gen-provider-matrix"
+check = "check-provider-matrix"
+outputs = ["docs/src/provider-matrix.md"]
+sources = ["crates/harn-cli/src/commands/provider_matrix.rs", "crates/harn-vm/src/llm/"]
+ci = true
+make_all = true
+pre_commit = false
+pre_push = false
+
+[[artifact]]
+id = "provider-support"
+description = "Provider support recommendations (markdown + JSON) generated from catalog/capabilities/notes."
+gen = "gen-provider-support"
+check = "check-provider-support"
+outputs = ["docs/src/provider-support.md", "docs/provider-support.json"]
+sources = ["crates/harn-cli/src/cli/providers.rs", "crates/harn-vm/src/llm/"]
+ci = true
+make_all = true
+pre_commit = false
+pre_push = false
+
+[[artifact]]
+id = "connector-matrix"
+description = "Connector capability parity matrix doc generated from package manifests."
+gen = "gen-connector-matrix"
+check = "check-connector-matrix"
+outputs = ["docs/src/connectors/parity-matrix.md"]
+sources = ["crates/harn-cli/portal/", "crates/harn-modules/"]
+ci = true
+make_all = true
+pre_commit = false
+pre_push = false
+
+# ---------------------------------------------------------------------------
+# Cross-repo guard — intentionally NOT in harn CI (needs a sibling
+# burin-code checkout). Runs in release / cross-repo jobs. ci = false.
+# ---------------------------------------------------------------------------
+
+[[artifact]]
+id = "burin-protocol-artifacts"
+description = "Confirms Burin Code's vendored Harn protocol bindings match this checkout. Source of truth is the harn protocol artifacts; the consumer is a sibling repo."
+gen = ""  # regenerate downstream by re-vendoring spec/protocol-artifacts into burin-code
+check = "check-burin-protocol-artifacts"
+outputs = ["spec/protocol-artifacts/HarnProtocol.swift", "spec/protocol-artifacts/harn-protocol.ts"]
+sources = ["spec/protocol-artifacts/"]
+ci = false  # requires BURIN_CODE_ROOT / a sibling burin-code checkout; runs in release + cross-repo jobs only
+make_all = false  # excluded from `make all` for the same reason (no sibling checkout locally)
+pre_commit = false
+pre_push = false

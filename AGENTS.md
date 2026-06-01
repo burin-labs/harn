@@ -118,6 +118,12 @@ polling loops, `SystemTime::now()`, or short `recv_timeout` calls to tests. Use
   and exercise bindings with `make check-bindings`.
 - Generated or local-only paths include `docs/dist/`, `.harn-runs/`, `.harn/`,
   `.harn/receipts/`, `.claude/`, `.burin/`, `target/`, and `node_modules/`.
+- `scripts/generated_artifacts.toml` is the single source of truth for every
+  gen/check drift pair. Adding a generated artifact means adding a `gen-*`/
+  `check-*` Makefile target *and* a registry entry; `make
+  check-generated-registry` fails until the registry, the `all:` recipe, and
+  the CI workflows agree, so a new drift guard can't silently skip CI. See the
+  registry file header for the checklist.
 
 ## Cross-surface changes
 

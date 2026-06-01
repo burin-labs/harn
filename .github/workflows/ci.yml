@@ -186,6 +186,18 @@ jobs:
           make check-docs-model-refs
           make check-docs-snippets
           make check-diagnostics-catalog
+          # Drift guards that previously existed only in `make all` and so
+          # never ran in any workflow — a contributor could edit
+          # spec/openapi.yaml or the SessionBundle DTO and ship stale
+          # generated artifacts with green CI. The generated-artifact
+          # registry (scripts/generated_artifacts.toml) now forces every
+          # ci = true check to be referenced here. Same warm binary, so
+          # they're effectively free.
+          make check-protocol-artifacts
+          make check-session-bundle-schema
+          make check-provider-catalog
+          make check-provider-catalog-drift
+          make check-docs-workflow-quickstart
           make check-vm-rss-soak
 
   audit-scripts:
@@ -208,6 +220,14 @@ jobs:
       - run: make check-bindings
       - run: make lint-test-patterns
       - run: make lint-diagnostic-codes
+      # Pure-Python sync guards. check-generated-registry is the meta-guard
+      # that keeps scripts/generated_artifacts.toml in agreement with the
+      # Makefile `all:` recipe and the workflows; check-receipt-structs and
+      # check-tree-sitter-keywords are cross-crate sync guards that need no
+      # harn build.
+      - run: make check-receipt-structs
+      - run: make check-tree-sitter-keywords
+      - run: make check-generated-registry
       - run: python3 scripts/verify_release_metadata.py
       - name: Check no retroactive CHANGELOG edits
         run: |

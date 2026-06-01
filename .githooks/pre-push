@@ -163,6 +163,25 @@ else
   echo "=== Pre-push: skipping highlight check (no lexer/stdlib changes) ==="
 fi
 
+if hook_paths_match "$changed" "$HOOK_TREESITTER_PATTERN"; then
+  echo "=== Pre-push: checking tree-sitter keyword mirror ==="
+  make -s check-tree-sitter-keywords
+  echo "    Tree-sitter keywords OK."
+else
+  echo "=== Pre-push: skipping tree-sitter keyword check (no lexer/grammar changes) ==="
+fi
+
+# Meta-guard: keep scripts/generated_artifacts.toml in agreement with the
+# Makefile `all:` recipe and the CI workflows, so a new gen/check pair
+# can't silently skip CI. Pure-Python; no harn build.
+if hook_paths_match "$changed" "$HOOK_GENREGISTRY_PATTERN"; then
+  echo "=== Pre-push: checking generated-artifact registry ==="
+  make -s check-generated-registry
+  echo "    Generated-artifact registry OK."
+else
+  echo "=== Pre-push: skipping generated-artifact registry check (no registry/Makefile/workflow/hook changes) ==="
+fi
+
 if hook_paths_match "$changed" "$HOOK_DIAGCATALOG_PATTERN"; then
   echo "=== Pre-push: checking diagnostic-code catalog ==="
   if ! make -s check-diagnostics-catalog >/tmp/harn-prepush-diagcatalog.log 2>&1; then
