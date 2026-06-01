@@ -304,6 +304,7 @@ jobs:
 
       - name: Build
         timeout-minutes: 90
+        shell: bash
         env:
           CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
           # Scope the compile-time optimization tradeoff to release CI only.
