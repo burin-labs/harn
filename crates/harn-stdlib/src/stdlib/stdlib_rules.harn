@@ -46,6 +46,60 @@ pub fn rules_report(params) -> dict {
 }
 
 /**
+ * Run a declarative rule and return its **diagnostics** — the lint surface of
+ * a rule that carries a `message`. On success `result == "ok"` and
+ * `diagnostics` is a list of `{path, rule_id, message, severity, start_row,
+ * start_col, end_row, end_col, applicability, fix}` (one per match; `fix` is
+ * `nil` unless the rule has a `fix` template).
+ *
+ * @effects: [host]
+ * @allocation: heap
+ * @errors: [backend]
+ * @api_stability: experimental
+ * @example: rules_diagnostics({rule: src, source: "foo();", language: "typescript"})
+ */
+pub fn rules_diagnostics(params) -> dict {
+  let payload = hostlib_rules_diagnostics(params ?? {}) ?? {}
+  return payload
+    .merge(
+    {ok: payload?.result ?? "" == "ok", provenance: {module: "std/rules", helper: "rules_diagnostics"}},
+  )
+}
+
+/**
+ * Run a rule's matcher, then call an **imperative** visitor `on_match(node,
+ * ctx)` once per match — the escape hatch for logic a declarative rule cannot
+ * express (compute a message or fix from the captured metavars, filter on
+ * arbitrary conditions). `params` is `{rule, source|paths, language?,
+ * on_match}` where `on_match` is `fn(node, ctx)`:
+ *
+ * - `node`: `{text, captures, start_row, start_col, end_row, end_col}` —
+ *   `captures` maps each metavar name to its bound text.
+ * - `ctx`: `{path, language, source, rule_id}` (read-only).
+ * - returns: `nil`/`false` to skip the match, `true` to flag it with the
+ *   rule's defaults, a `{message, fix, safety, severity}` dict, or a list of
+ *   such dicts (to report several findings on one node).
+ *
+ * Read-only — `visit` never writes; apply fixes with `rules_apply` or your own
+ * write. On success `result == "ok"` and `diagnostics` is a list in the same
+ * shape `rules_diagnostics` emits, so an imperative rule and its declarative
+ * equivalent produce identical diagnostics.
+ *
+ * @effects: [host]
+ * @allocation: heap
+ * @errors: [backend]
+ * @api_stability: experimental
+ * @example: rules_visit({rule: src, source: "f();", language: "typescript", on_match: fn(node, ctx) { return {message: "call"} }})
+ */
+pub fn rules_visit(params) -> dict {
+  let payload = hostlib_rules_visit(params ?? {}) ?? {}
+  return payload
+    .merge(
+    {ok: payload?.result ?? "" == "ok", provenance: {module: "std/rules", helper: "rules_visit"}},
+  )
+}
+
+/**
  * Apply a codemod rule's `fix`. **Dry-run by default** — pass `dry_run:
  * false` to write. Writes only when the rule's `safety` is machine-applicable
  * (`format-only` / `behavior-preserving`) or `allow_unsafe: true`. Each file
