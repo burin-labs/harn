@@ -879,6 +879,7 @@ impl<'a> Linter<'a> {
             name,
             "walk_dir"
                 | "glob"
+                | "find_text"
                 | "http_get"
                 | "http_request"
                 | "http_download"

@@ -5,7 +5,7 @@
 The lint fires on any call to `read_file`, `write_file`, `file_exists`,
 `delete_file`, `append_file`, `list_dir`, `mkdir`, `copy_file`,
 `temp_dir`, `mkdtemp`, `stat`, `move_file`, `read_lines`, `walk_dir`,
-or `glob`.
+`glob`, or `find_text`.
 These were ambient fs-capability builtins in the pre-`Harness` runtime.
 Filesystem access now routes through the `harness.fs.*` sub-handle so
 capability requirements appear in the type system instead of being

@@ -275,7 +275,7 @@ fn direct_capabilities(call: &harn_ir::CallSemantics) -> BTreeSet<String> {
         "read_file" | "read_file_bytes" | "read_file_result" | "read_lines" | "read_stdin" => {
             out.insert("workspace.read_text".to_string());
         }
-        "list_dir" | "walk_dir" | "glob" => {
+        "list_dir" | "walk_dir" | "glob" | "find_text" => {
             out.insert("workspace.list".to_string());
         }
         "file_exists" | "stat" => {
@@ -330,20 +330,19 @@ fn direct_capabilities(call: &harn_ir::CallSemantics) -> BTreeSet<String> {
         | "worker_trigger" => {
             out.insert("worker.dispatch".to_string());
         }
-        "request_approval" => {
-            out.insert("human.approval".to_string());
-        }
+        "request_approval" => out.extend(["human.approval".to_string()]),
         "connector_call" | "mcp_call" | "host_tool_call" => {
             out.insert("connector.call".to_string());
         }
-        "secret_get" => {
-            out.insert("connector.secret_get".to_string());
-        }
+        "secret_get" => out.extend(["connector.secret_get".to_string()]),
         "host_call" => insert_host_call_capability(call, &mut out),
         _ if call.name.starts_with("mcp_") => {
             out.insert("connector.call".to_string());
         }
         _ => {}
+    }
+    if call.name == "find_text" {
+        out.insert("workspace.read_text".to_string());
     }
     out
 }
