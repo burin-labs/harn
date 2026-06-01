@@ -1197,6 +1197,18 @@ pub(crate) fn disasm_u16(chunk: &Chunk, ip: &mut usize, label: &str) -> String {
     format!("{label} {arg:>4}")
 }
 
+pub(crate) fn disasm_try_catch_setup(chunk: &Chunk, ip: &mut usize, label: &str) -> String {
+    let catch_offset = chunk.read_u16(*ip);
+    *ip += 2;
+    let type_idx = chunk.read_u16(*ip);
+    *ip += 2;
+    if let Some(type_name) = chunk.constants.get(type_idx as usize) {
+        format!("{label} {catch_offset:>4} type {type_idx:>4} ({type_name})")
+    } else {
+        format!("{label} {catch_offset:>4} type {type_idx:>4}")
+    }
+}
+
 pub(crate) fn disasm_const_pool_u16(chunk: &Chunk, ip: &mut usize, label: &str) -> String {
     let idx = chunk.read_u16(*ip);
     *ip += 2;

@@ -439,3 +439,67 @@ fn miswired_produces_value_trips_balance_assertion() {
          must trip the #2622 stack-balance assertion",
     );
 }
+
+#[test]
+fn return_call_inside_handler_does_not_tail_call() {
+    let chunk = compile_source(
+        r"
+fn plain(body) {
+  return body()
+}
+
+fn guarded(body) {
+  try {
+    return body()
+  } catch (e) {
+    return nil
+  }
+}
+
+fn guarded_retry(body) {
+  retry(1) {
+    return body()
+  }
+}
+
+pipeline default() {}
+",
+    );
+
+    let plain = chunk
+        .functions
+        .iter()
+        .find(|func| func.name == "plain")
+        .expect("plain function compiled");
+    let plain_disasm = plain.chunk.disassemble("plain");
+    assert!(
+        plain_disasm.contains("TAIL_CALL"),
+        "plain return call should keep the tail-call optimization",
+    );
+
+    let guarded = chunk
+        .functions
+        .iter()
+        .find(|func| func.name == "guarded")
+        .expect("guarded function compiled");
+    let guarded_disasm = guarded.chunk.disassemble("guarded");
+    assert!(
+        !guarded_disasm.contains("TAIL_CALL"),
+        "active try/catch handlers must keep their owning frame alive",
+    );
+    assert!(
+        guarded_disasm.contains("CALL_BUILTIN"),
+        "the guarded return expression should still call the callee normally",
+    );
+
+    let guarded_retry = chunk
+        .functions
+        .iter()
+        .find(|func| func.name == "guarded_retry")
+        .expect("guarded_retry function compiled");
+    let guarded_retry_disasm = guarded_retry.chunk.disassemble("guarded_retry");
+    assert!(
+        !guarded_retry_disasm.contains("TAIL_CALL"),
+        "retry handlers must also keep their owning frame alive",
+    );
+}
