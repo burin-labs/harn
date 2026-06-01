@@ -1,0 +1,11 @@
+pipeline test(task) {
+  let left = channel("left", 1)
+  let right = channel("right", 1)
+  parallel 2 { i ->
+    if i == 0 {
+      receive(left)
+    } else {
+      receive(right)
+    }
+  }
+}

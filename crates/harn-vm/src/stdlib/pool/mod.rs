@@ -2329,6 +2329,7 @@ fn spawn_task(pool: Arc<parking_lot::Mutex<PoolEntry>>, pending: PendingTask) {
         context,
         ..
     } = pending;
+    let task_runtime_id = task_id.clone();
 
     // PoolDequeue span (PL-06). Opened detached so it stands on its own
     // in the trace tree — the dispatcher fires it from whatever caller
@@ -2403,10 +2404,18 @@ fn spawn_task(pool: Arc<parking_lot::Mutex<PoolEntry>>, pending: PendingTask) {
     dequeue_span.end();
 
     let registry = ctx.pool_registry();
+    let task_group_id = pool_id_for_span;
+    let scheduled_activity = ctx.wait_for_graph().register_task(task_runtime_id.clone());
     spawn_pool_worker(registry, async move {
+        let _scheduled_activity = scheduled_activity;
         tokio::task::yield_now().await;
         let outcome = std::panic::AssertUnwindSafe(async {
             let mut runner = ctx.child_vm();
+            runner.runtime_context = runner.runtime_context.child_task(
+                task_runtime_id,
+                "pool task",
+                Some(task_group_id),
+            );
             let outcome = runner
                 .call_closure_args(&closure, crate::vm::CallArgs::Empty)
                 .await
@@ -2486,20 +2495,22 @@ async fn pool_wait_builtin(
         .first()
         .ok_or_else(|| VmError::Runtime("pool_wait: task handle is required".to_string()))?;
     let registry = ctx.pool_registry();
+    let waiter = ctx.child_vm();
     match target {
         VmValue::List(items) => {
             let mut results = Vec::with_capacity(items.len());
             for item in items.iter() {
-                results.push(wait_single_task(&registry, item).await?);
+                results.push(wait_single_task(&registry, &waiter, item).await?);
             }
             Ok(VmValue::List(std::sync::Arc::new(results)))
         }
-        _ => wait_single_task(&registry, target).await,
+        _ => wait_single_task(&registry, &waiter, target).await,
     }
 }
 
 async fn wait_single_task(
     registry: &Arc<PoolRegistry>,
+    waiter: &Vm,
     value: &VmValue,
 ) -> Result<VmValue, VmError> {
     let (pool_id, task_id) = task_handle_from_value(value, "pool_wait")?;
@@ -2520,6 +2531,9 @@ async fn wait_single_task(
         state_ref.waiters.push(tx);
         rx
     };
+    let _wait = waiter
+        .wait_for_graph
+        .wait_for_tasks(&waiter.runtime_context.task_id, [task_id])?;
     // The sender is dropped on completion; both send() and drop wake the
     // receiver. Either is fine: we only care that the task reached a
     // terminal state, which `finalize_task` guarantees before signaling.

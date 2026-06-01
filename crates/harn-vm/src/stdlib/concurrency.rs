@@ -9,6 +9,7 @@ use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
 use crate::stdlib::options::{non_negative_millis_from_value, ErrorKind};
 use crate::value::{VmAtomicHandle, VmChannelHandle, VmError, VmValue};
 use crate::vm::Vm;
+use crate::wait_for_graph::{channel_target, ChannelTarget, WaitGuard};
 
 struct CircuitState {
     failures: usize,
@@ -324,6 +325,34 @@ fn scoped_from_handle_or_name(
 
 fn current_async_vm(ctx: &crate::vm::AsyncBuiltinCtx, _builtin: &str) -> Vm {
     ctx.child_vm()
+}
+
+fn channel_send_wait(vm: &Vm, target: ChannelTarget) -> Result<Option<WaitGuard>, VmError> {
+    if !vm.deadlines.is_empty() {
+        return Ok(None);
+    }
+    vm.wait_for_graph
+        .wait_for_channel_send(&vm.runtime_context.task_id, target)
+        .map(Some)
+}
+
+fn channel_receive_wait(vm: &Vm, channels: &[VmValue]) -> Result<Option<WaitGuard>, VmError> {
+    if !vm.deadlines.is_empty() {
+        return Ok(None);
+    }
+    let targets = channels
+        .iter()
+        .filter_map(|value| match value {
+            VmValue::Channel(ch) => Some(channel_target(ch)),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    if targets.is_empty() {
+        return Ok(None);
+    }
+    vm.wait_for_graph
+        .wait_for_channel_receive(&vm.runtime_context.task_id, targets)
+        .map(Some)
 }
 
 pub(crate) fn register_concurrency_builtins(vm: &mut Vm) {
@@ -1206,7 +1235,7 @@ async fn yield_now_builtin(
     doc = "Send a value to a channel."
 )]
 async fn send_builtin(
-    _ctx: crate::vm::AsyncBuiltinCtx,
+    ctx: crate::vm::AsyncBuiltinCtx,
     args: Vec<VmValue>,
 ) -> Result<VmValue, VmError> {
     if args.len() < 2 {
@@ -1215,12 +1244,28 @@ async fn send_builtin(
         ))));
     }
     if let VmValue::Channel(ch) = &args[0] {
+        let vm = current_async_vm(&ctx, "send");
+        let target = channel_target(ch);
         if ch.closed.load(Ordering::SeqCst) {
             return Ok(VmValue::Bool(false));
         }
         let val = args[1].clone();
+        let val = match ch.sender.try_send(val) {
+            Ok(()) => {
+                vm.wait_for_graph.notify_channel_send(&target);
+                return Ok(VmValue::Bool(true));
+            }
+            Err(tokio::sync::mpsc::error::TrySendError::Full(val)) => val,
+            Err(tokio::sync::mpsc::error::TrySendError::Closed(_)) => {
+                return Ok(VmValue::Bool(false));
+            }
+        };
+        let _wait = channel_send_wait(&vm, target.clone())?;
         match ch.sender.send(val).await {
-            Ok(()) => Ok(VmValue::Bool(true)),
+            Ok(()) => {
+                vm.wait_for_graph.notify_channel_send(&target);
+                Ok(VmValue::Bool(true))
+            }
             Err(_) => Ok(VmValue::Bool(false)),
         }
     } else {
@@ -1246,21 +1291,49 @@ async fn receive_builtin(
         ))));
     }
     if let VmValue::Channel(ch) = &args[0] {
+        let vm = current_async_vm(&ctx, "receive");
+        let target = channel_target(ch);
         if ch.closed.load(Ordering::SeqCst) {
             let mut rx = ch.receiver.lock().await;
             return match rx.try_recv() {
-                Ok(val) => Ok(val),
+                Ok(val) => {
+                    vm.wait_for_graph.notify_channel_receive(&target);
+                    Ok(val)
+                }
                 Err(_) => Ok(VmValue::Nil),
             };
         }
-        let mut rx = ch.receiver.lock().await;
-        let vm = ctx.child_vm();
+        let mut wait = None;
+        let mut rx = match ch.receiver.try_lock() {
+            Ok(rx) => rx,
+            Err(_) => {
+                wait = channel_receive_wait(&vm, std::slice::from_ref(&args[0]))?;
+                ch.receiver.lock().await
+            }
+        };
+        match rx.try_recv() {
+            Ok(val) => {
+                vm.wait_for_graph.notify_channel_receive(&target);
+                return Ok(val);
+            }
+            Err(tokio::sync::mpsc::error::TryRecvError::Disconnected) => {
+                return Ok(VmValue::Nil);
+            }
+            Err(tokio::sync::mpsc::error::TryRecvError::Empty) => {}
+        }
+        let _wait = match wait {
+            Some(wait) => Some(wait),
+            None => channel_receive_wait(&vm, std::slice::from_ref(&args[0]))?,
+        };
         let mut cancel_poll = tokio::time::interval(Duration::from_millis(10));
         loop {
             tokio::select! {
                 value = rx.recv() => {
                     return match value {
-                        Some(val) => Ok(val),
+                        Some(val) => {
+                            vm.wait_for_graph.notify_channel_receive(&target);
+                            Ok(val)
+                        }
                         None => Ok(VmValue::Nil),
                     };
                 }
@@ -1285,7 +1358,7 @@ async fn receive_builtin(
     doc = "Wait until one of the provided channels yields a value."
 )]
 async fn select_builtin(
-    _ctx: crate::vm::AsyncBuiltinCtx,
+    ctx: crate::vm::AsyncBuiltinCtx,
     args: Vec<VmValue>,
 ) -> Result<VmValue, VmError> {
     if args.is_empty() {
@@ -1300,6 +1373,8 @@ async fn select_builtin(
             ))));
         }
     }
+    let vm = current_async_vm(&ctx, "select");
+    let mut wait = None;
     loop {
         let (found, all_closed) = try_poll_channels(&args);
         if let Some((i, val, name)) = found {
@@ -1307,6 +1382,9 @@ async fn select_builtin(
         }
         if all_closed {
             return Ok(select_none());
+        }
+        if wait.is_none() {
+            wait = channel_receive_wait(&vm, &args)?;
         }
         tokio::time::sleep(tokio::time::Duration::from_millis(1)).await;
     }
@@ -1387,7 +1465,7 @@ async fn select_try_builtin(
     doc = "Wait until one channel in a list yields a value."
 )]
 async fn select_list_builtin(
-    _ctx: crate::vm::AsyncBuiltinCtx,
+    ctx: crate::vm::AsyncBuiltinCtx,
     args: Vec<VmValue>,
 ) -> Result<VmValue, VmError> {
     if args.is_empty() {
@@ -1403,6 +1481,8 @@ async fn select_list_builtin(
             ))));
         }
     };
+    let vm = current_async_vm(&ctx, "__select_list");
+    let mut wait = None;
     loop {
         let (found, all_closed) = try_poll_channels(&channels);
         if let Some((i, val, name)) = found {
@@ -1410,6 +1490,9 @@ async fn select_list_builtin(
         }
         if all_closed {
             return Ok(select_none());
+        }
+        if wait.is_none() {
+            wait = channel_receive_wait(&vm, &channels)?;
         }
         tokio::time::sleep(tokio::time::Duration::from_millis(1)).await;
     }
@@ -1422,13 +1505,15 @@ async fn select_list_builtin(
     doc = "Select over a list of channels with an optional timeout."
 )]
 async fn channel_select_builtin(
-    _ctx: crate::vm::AsyncBuiltinCtx,
+    ctx: crate::vm::AsyncBuiltinCtx,
     args: Vec<VmValue>,
 ) -> Result<VmValue, VmError> {
     let channels = require_channel_list(&args, "channel_select")?;
     let timeout_ms = optional_timeout_ms(args.get(1));
     let deadline =
         timeout_ms.map(|ms| tokio::time::Instant::now() + tokio::time::Duration::from_millis(ms));
+    let vm = current_async_vm(&ctx, "channel_select");
+    let mut wait = None;
     loop {
         let (found, all_closed) = try_poll_channels(&channels);
         if let Some((i, val, name)) = found {
@@ -1439,6 +1524,9 @@ async fn channel_select_builtin(
         }
         if deadline.is_some_and(|deadline| tokio::time::Instant::now() >= deadline) {
             return Ok(VmValue::Nil);
+        }
+        if deadline.is_none() && wait.is_none() {
+            wait = channel_receive_wait(&vm, &channels)?;
         }
         tokio::time::sleep(tokio::time::Duration::from_millis(1)).await;
     }

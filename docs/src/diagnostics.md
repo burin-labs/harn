@@ -40,7 +40,7 @@ Repairs are tagged with a six-level safety class so `harn fix --apply --safety <
 | [`NAM`](#nam--naming-and-resolution) | Naming and resolution | 13 |
 | [`CAP`](#cap--capabilities) | Capabilities | 9 |
 | [`LLM`](#llm--llm-calls) | LLM calls | 5 |
-| [`ORC`](#orc--orchestration-constructs) | Orchestration constructs | 11 |
+| [`ORC`](#orc--orchestration-constructs) | Orchestration constructs | 12 |
 | [`STD`](#std--stdlib-usage) | Stdlib usage | 4 |
 | [`PRM`](#prm--prompt-templates) | Prompt templates | 7 |
 | [`MOD`](#mod--modules-and-exports) | Modules and exports | 6 |
@@ -165,6 +165,7 @@ An orchestration construct — agent / workflow / pipeline / tool definition, or
 | [`HARN-ORC-009`](#harn-orc-009) | Flow invariant attribute set is invalid | — | — |
 | [`HARN-ORC-010`](#harn-orc-010) | execution target path cannot be found | — | — |
 | [`HARN-ORC-011`](#harn-orc-011) | a self-deadlock acquire would block forever | — | — |
+| [`HARN-ORC-012`](#harn-orc-012) | a wait-for graph cycle would block forever | — | — |
 
 ## STD — Stdlib usage
 
@@ -1396,6 +1397,33 @@ provable with no false positives.
   single lock around the whole critical section.
 - Never `await` the handle of the current task. Await it from the task that
   spawned it instead.
+
+This error is non-retryable: it indicates a structural concurrency bug, not a
+transient failure.
+
+### `HARN-ORC-012`
+
+**Category:** `ORC` (Orchestration constructs) &nbsp;·&nbsp; **API stability:** `stable`
+
+a wait-for graph cycle would block forever
+
+#### What it means
+
+The VM detected that every active task in the current execution tree is waiting,
+and the outstanding channel operations cannot match a sender with a receiver.
+Without this guard the run would block forever.
+
+This check only fires when the runtime can prove the wait is closed-world:
+running tasks, sleeping tasks, time-bounded selects, and `deadline { ... }`
+scopes keep the guard from reporting a deadlock.
+
+#### How to fix
+
+Make sure every blocking `receive` has a task that can still send to that
+channel, and every blocking `send` on a full channel has a task that can still
+receive from it. If the wait is intentionally optional, use `try_receive`,
+`select timeout`, `channel_select(..., timeout_ms)`, or wrap the operation in a
+`deadline { ... }` block.
 
 This error is non-retryable: it indicates a structural concurrency bug, not a
 transient failure.

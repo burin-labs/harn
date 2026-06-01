@@ -13,6 +13,8 @@ pub struct VmTaskHandle {
     pub handle: VmJoinHandle,
     /// Cooperative cancellation token. Set to true to request graceful shutdown.
     pub cancel_token: Arc<AtomicBool>,
+    /// Runtime-context task id used by the VM scheduler and wait-for graph.
+    pub wait_task_id: String,
 }
 
 /// A channel handle for the VM (uses tokio mpsc).

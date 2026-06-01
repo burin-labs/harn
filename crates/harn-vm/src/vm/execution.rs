@@ -40,6 +40,9 @@ impl Vm {
     }
 
     async fn execute_scoped(&mut self, chunk: &Chunk) -> Result<VmValue, VmError> {
+        let _execution_activity = self
+            .wait_for_graph
+            .register_task(self.runtime_context.task_id.clone());
         let span_id = crate::tracing::span_start(crate::tracing::SpanKind::Pipeline, "main".into());
         let result = self.run_chunk(chunk).await;
         let result = match result {
@@ -327,6 +330,9 @@ impl Vm {
         target_depth: usize,
         restore_on_final_pop: bool,
     ) -> Result<VmValue, VmError> {
+        let _task_activity = self
+            .wait_for_graph
+            .register_task(self.runtime_context.task_id.clone());
         loop {
             // Slow path only: the interrupt-handler future, deadline check,
             // and host-signal poll inside `pending_scope_interrupt` are all

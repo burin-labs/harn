@@ -1,0 +1,7 @@
+pipeline test(task) {
+  let ch = channel("full", 1)
+  send(ch, "buffered")
+  parallel 1 { _ ->
+    send(ch, "blocked")
+  }
+}

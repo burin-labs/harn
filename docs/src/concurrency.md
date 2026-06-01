@@ -224,6 +224,11 @@ Use `try_receive(ch)` for non-blocking reads -- it returns `nil`
 immediately if no message is available. Use `close_channel(ch)` to
 signal that no more messages will be sent.
 
+When every active task is blocked on channel operations that cannot match
+another sender or receiver, the runtime raises `HARN-ORC-012` instead of
+letting the run hang forever. Channel waits inside `deadline { ... }` or
+timeout-based selects still resolve through their timeout path.
+
 For dynamic fan-in, `channel_select([ch1, ch2, ...], timeout?)` mirrors the
 `select { ... }` statement but takes a runtime list of channels and returns the
 same `{index, value, channel}` dict.

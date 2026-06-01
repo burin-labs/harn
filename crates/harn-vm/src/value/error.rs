@@ -34,14 +34,58 @@ pub struct ArityMismatchError {
     pub span: Option<Span>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DeadlockDiagnostic {
+    SelfDeadlock,
+    WaitForGraph,
+}
+
+impl DeadlockDiagnostic {
+    fn code(self) -> &'static str {
+        match self {
+            Self::SelfDeadlock => "HARN-ORC-011",
+            Self::WaitForGraph => "HARN-ORC-012",
+        }
+    }
+}
+
 /// Payload for [`VmError::Deadlock`]. `kind` is the primitive kind
-/// (`"mutex"`) or `"task"`; `key` is the primitive key or task id; `detail`
-/// names the specific footgun.
+/// (`"mutex"`, `"channel"`) or `"task"`; `key` is the primitive key or task
+/// id; `detail` names the specific footgun.
 #[derive(Debug, Clone)]
 pub struct DeadlockError {
+    pub diagnostic: DeadlockDiagnostic,
     pub kind: String,
     pub key: String,
     pub detail: String,
+}
+
+impl DeadlockError {
+    pub(crate) fn self_deadlock(
+        kind: impl Into<String>,
+        key: impl Into<String>,
+        detail: impl Into<String>,
+    ) -> Self {
+        Self {
+            diagnostic: DeadlockDiagnostic::SelfDeadlock,
+            kind: kind.into(),
+            key: key.into(),
+            detail: detail.into(),
+        }
+    }
+
+    pub(crate) fn wait_for_graph(
+        kind: impl Into<String>,
+        key: impl Into<String>,
+        detail: impl Into<String>,
+    ) -> Self {
+        Self {
+            diagnostic: DeadlockDiagnostic::WaitForGraph,
+            kind: kind.into(),
+            key: key.into(),
+            detail: detail.into(),
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -349,11 +393,24 @@ impl std::fmt::Display for VmError {
                 f,
                 "Daemon queue full: daemon '{daemon_id}' reached its event_queue_capacity of {capacity}"
             ),
-            VmError::Deadlock(err) => write!(
-                f,
-                "HARN-ORC-011: deadlock detected: {} ({} '{}') — this acquire can never succeed and would block forever",
-                err.detail, err.kind, err.key
-            ),
+            VmError::Deadlock(err) => match err.diagnostic {
+                DeadlockDiagnostic::SelfDeadlock => write!(
+                    f,
+                    "{}: deadlock detected: {} ({} '{}') — this wait can never complete and would block forever",
+                    err.diagnostic.code(),
+                    err.detail,
+                    err.kind,
+                    err.key
+                ),
+                DeadlockDiagnostic::WaitForGraph => write!(
+                    f,
+                    "{}: wait-for deadlock detected: {} ({} '{}') — no active task can make progress",
+                    err.diagnostic.code(),
+                    err.detail,
+                    err.kind,
+                    err.key
+                ),
+            },
             VmError::Return(_) => write!(f, "Return from function"),
             VmError::InvalidInstruction(op) => write!(f, "Invalid instruction: 0x{op:02x}"),
             VmError::ArityMismatch(err) => {
@@ -413,11 +470,11 @@ mod tests {
 
     #[test]
     fn deadlock_renders_with_stable_code() {
-        let err = VmError::Deadlock(Box::new(DeadlockError {
-            kind: "mutex".to_string(),
-            key: "__default__".to_string(),
-            detail: "re-entrant acquire".to_string(),
-        }));
+        let err = VmError::Deadlock(Box::new(DeadlockError::self_deadlock(
+            "mutex",
+            "__default__",
+            "re-entrant acquire",
+        )));
         assert!(
             err.to_string().starts_with("HARN-ORC-011"),
             "deadlock Display must carry the stable code: {err}"
@@ -426,11 +483,11 @@ mod tests {
 
     #[test]
     fn deadlock_maps_to_generic_category() {
-        let err = VmError::Deadlock(Box::new(DeadlockError {
-            kind: "task".to_string(),
-            key: "task_1".to_string(),
-            detail: "self-join".to_string(),
-        }));
+        let err = VmError::Deadlock(Box::new(DeadlockError::self_deadlock(
+            "task",
+            "task_1",
+            "self-join",
+        )));
         let category = error_to_category(&err);
         assert_eq!(category, ErrorCategory::Generic);
         assert!(

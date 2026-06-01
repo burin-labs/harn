@@ -589,13 +589,28 @@ impl super::super::Vm {
                 // Awaiting one's own join handle can never complete — surface
                 // a deterministic self-join deadlock instead of blocking.
                 if id == self.runtime_context.task_id {
-                    return Err(VmError::Deadlock(Box::new(DeadlockError {
-                        kind: "task".to_string(),
-                        key: id,
-                        detail: "task is awaiting its own join handle (self-join)".to_string(),
-                    })));
+                    return Err(VmError::Deadlock(Box::new(DeadlockError::self_deadlock(
+                        "task",
+                        id,
+                        "task is awaiting its own join handle (self-join)",
+                    ))));
                 }
-                if let Some(handle) = self.spawned_tasks.remove(&id) {
+                if let Some(task) = self.spawned_tasks.get(&id) {
+                    if task.wait_task_id == self.runtime_context.task_id {
+                        return Err(VmError::Deadlock(Box::new(DeadlockError::self_deadlock(
+                            "task",
+                            id,
+                            "task is awaiting its own join handle (self-join)",
+                        ))));
+                    }
+                    let _wait = self.wait_for_graph.wait_for_tasks(
+                        &self.runtime_context.task_id,
+                        [task.wait_task_id.clone()],
+                    )?;
+                    let handle = self
+                        .spawned_tasks
+                        .remove(&id)
+                        .expect("spawned task was present before await wait registration");
                     // Explicitly awaited: drop it from any enclosing nursery so
                     // `scope {}` exit neither double-joins nor cancels it.
                     self.deregister_task_from_scopes(&id);

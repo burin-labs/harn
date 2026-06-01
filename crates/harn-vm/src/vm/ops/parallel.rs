@@ -170,13 +170,16 @@ impl super::super::Vm {
                 self.runtime_context.task_id, self.runtime_context_counter
             );
             let mut futures: Vec<_> = Vec::with_capacity(count);
+            let mut task_ids = Vec::with_capacity(count);
             for i in 0..count {
+                let task_id = format!("{task_group_id}:{i}");
                 let mut child = self.child_vm();
                 child.runtime_context = self.runtime_context.child_task(
-                    format!("{task_group_id}:{i}"),
+                    task_id.clone(),
                     "parallel",
                     Some(task_group_id.clone()),
                 );
+                task_ids.push(task_id);
                 let registry = child.pool_registry.clone();
                 let closure = closure.clone();
                 futures.push(crate::stdlib::pool::with_pool_registry_scope(
@@ -193,6 +196,9 @@ impl super::super::Vm {
                     },
                 ));
             }
+            let _wait = self
+                .wait_for_graph
+                .wait_for_tasks(&self.runtime_context.task_id, task_ids)?;
             let joined = run_capped_ordered(futures, cap, "Parallel task error").await?;
             let mut results = Vec::with_capacity(count);
             for entry in joined {
@@ -221,13 +227,16 @@ impl super::super::Vm {
                     self.runtime_context.task_id, self.runtime_context_counter
                 );
                 let mut futures = Vec::with_capacity(len);
+                let mut task_ids = Vec::with_capacity(len);
                 for (i, item) in items.iter().enumerate() {
+                    let task_id = format!("{task_group_id}:{i}");
                     let mut child = self.child_vm();
                     child.runtime_context = self.runtime_context.child_task(
-                        format!("{task_group_id}:{i}"),
+                        task_id.clone(),
                         "parallel each",
                         Some(task_group_id.clone()),
                     );
+                    task_ids.push(task_id);
                     let registry = child.pool_registry.clone();
                     let closure = closure.clone();
                     let item = item.clone();
@@ -244,6 +253,9 @@ impl super::super::Vm {
                         },
                     ));
                 }
+                let _wait = self
+                    .wait_for_graph
+                    .wait_for_tasks(&self.runtime_context.task_id, task_ids)?;
                 let joined = run_capped_ordered(futures, cap, "Parallel map error").await?;
                 let mut results = Vec::with_capacity(len);
                 for entry in joined {
@@ -326,13 +338,16 @@ impl super::super::Vm {
                     self.runtime_context.task_id, self.runtime_context_counter
                 );
                 let mut futures = Vec::with_capacity(len);
+                let mut task_ids = Vec::with_capacity(len);
                 for (i, item) in items.iter().enumerate() {
+                    let task_id = format!("{task_group_id}:{i}");
                     let mut child = self.child_vm();
                     child.runtime_context = self.runtime_context.child_task(
-                        format!("{task_group_id}:{i}"),
+                        task_id.clone(),
                         "parallel settle",
                         Some(task_group_id.clone()),
                     );
+                    task_ids.push(task_id);
                     let registry = child.pool_registry.clone();
                     let closure = closure.clone();
                     let item = item.clone();
@@ -347,6 +362,9 @@ impl super::super::Vm {
                         },
                     ));
                 }
+                let _wait = self
+                    .wait_for_graph
+                    .wait_for_tasks(&self.runtime_context.task_id, task_ids)?;
                 let joined = run_capped_ordered(futures, cap, "Parallel settle error").await?;
                 let mut results = Vec::with_capacity(len);
                 let mut succeeded = 0i64;
@@ -389,21 +407,22 @@ impl super::super::Vm {
         if let VmValue::Closure(closure) = closure {
             self.task_counter += 1;
             let task_id = format!("vm_task_{}", self.task_counter);
-            let mut child = self.child_vm();
-            child.runtime_context = self.runtime_context.child_task(
-                format!(
-                    "{}:spawn:{}",
-                    self.runtime_context.task_id, self.task_counter
-                ),
-                "spawn",
-                None,
+            let runtime_task_id = format!(
+                "{}:spawn:{}",
+                self.runtime_context.task_id, self.task_counter
             );
+            let mut child = self.child_vm();
+            child.runtime_context =
+                self.runtime_context
+                    .child_task(runtime_task_id.clone(), "spawn", None);
             let cancel_token = Arc::new(std::sync::atomic::AtomicBool::new(false));
             child.cancel_token = Some(cancel_token.clone());
             let registry = child.pool_registry.clone();
+            let scheduled_activity = self.wait_for_graph.register_task(runtime_task_id.clone());
             let handle = tokio::task::spawn_local(crate::stdlib::pool::with_pool_registry_scope(
                 registry,
                 async move {
+                    let _scheduled_activity = scheduled_activity;
                     let result = child.call_closure_args(&closure, CallArgs::Empty).await?;
                     Ok((result, std::mem::take(&mut child.output)))
                 },
@@ -413,6 +432,7 @@ impl super::super::Vm {
                 VmTaskHandle {
                     handle,
                     cancel_token,
+                    wait_task_id: runtime_task_id,
                 },
             );
             // Structured concurrency: bind this task to the innermost open
@@ -503,28 +523,17 @@ impl super::super::Vm {
     // for the same `kind:key`, the acquire can never be granted (the sole
     // permit holder IS the requester, and with no timeout it blocks forever)
     // — a provably-unresolvable self-deadlock with zero false positives.
-    //
-    // Deferred follow-ups (tracked under the async-safety epic, kept out here to
-    // stay false-positive-free):
-    //   * Cross-context detection across an inline `child_vm()` boundary — the
-    //     child starts with an empty held-set, so a re-acquire from inside an
-    //     async builtin invoked under a held lock is not yet caught. Tracked in
-    //     harn#2803 (propagate the held-set into same-task children).
-    //   * Builtin-path unification (`sync_mutex_acquire`/`sync_rwlock_acquire`):
-    //     harn#2802.
-    //   * Cross-task wait-for-graph cycle detection: harn#2806.
     async fn sync_mutex_acquire_lexical(
         &mut self,
         key: String,
         display: String,
     ) -> Result<(), VmError> {
         if self.held_permits_for("mutex", &key) >= 1 {
-            return Err(VmError::Deadlock(Box::new(DeadlockError {
-                kind: "mutex".to_string(),
-                key: display,
-                detail: "re-entrant acquire of a non-reentrant mutex already held by this task"
-                    .to_string(),
-            })));
+            return Err(VmError::Deadlock(Box::new(DeadlockError::self_deadlock(
+                "mutex",
+                display,
+                "re-entrant acquire of a non-reentrant mutex already held by this task",
+            ))));
         }
         let permit = self
             .sync_runtime
