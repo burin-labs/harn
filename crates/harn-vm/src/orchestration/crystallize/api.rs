@@ -147,10 +147,11 @@ pub fn crystallize_traces(
 /// (`build_crystallization_bundle`) and validates with the existing
 /// validator.
 ///
-/// `extra_parameters` and `extra_metadata` let callers seed parameters
-/// (e.g., release identity fields like `current_version` /
-/// `next_version`) and metadata (segment / recovery summaries) that the
-/// trace alone does not surface.
+/// The trace is treated as the source example and `options.shadow_traces`
+/// supply held-out siblings for replay/shadow gating. `extra_parameters`
+/// and `extra_metadata` let callers seed parameters (e.g., release identity
+/// fields like `current_version` / `next_version`) and metadata (segment /
+/// recovery summaries) that the trace alone does not surface.
 pub fn synthesize_candidate_from_trace(
     trace: CrystallizationTrace,
     options: CrystallizeOptions,
@@ -164,8 +165,20 @@ pub fn synthesize_candidate_from_trace(
         ));
     }
     let normalized = normalize_trace(trace);
+    let (shadow_traces, excluded_shadow) = partition_mineable_traces(
+        options
+            .shadow_traces
+            .iter()
+            .cloned()
+            .map(normalize_trace)
+            .collect(),
+    );
+    let mut shadow_pool = Vec::with_capacity(1 + shadow_traces.len());
+    shadow_pool.push(normalized.clone());
+    shadow_pool.extend(shadow_traces);
+
     let mut candidate = build_single_trace_candidate(&normalized, &options, extra_parameters);
-    candidate.shadow = shadow_candidate(&candidate, std::slice::from_ref(&normalized));
+    candidate.shadow = shadow_candidate(&candidate, &shadow_pool);
     if !candidate.shadow.pass {
         candidate
             .rejection_reasons
@@ -189,7 +202,7 @@ pub fn synthesize_candidate_from_trace(
         version: 1,
         generated_at: now_rfc3339(),
         source_trace_count: 1,
-        excluded_trace_count: 0,
+        excluded_trace_count: excluded_shadow.len(),
         selected_candidate_id: selected_id,
         candidates: accepted,
         rejected_candidates: rejected,
@@ -215,7 +228,7 @@ pub fn synthesize_candidate_from_trace(
         segment_summary,
         recovery_summary,
     };
-    refresh_skill_candidates(&mut report, std::slice::from_ref(&normalized));
+    refresh_skill_candidates(&mut report, &shadow_pool);
 
     Ok(CrystallizationArtifacts {
         report,

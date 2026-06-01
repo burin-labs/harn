@@ -672,6 +672,43 @@ fn plan_only_fixture_yields_plan_only_kind() {
 }
 
 #[test]
+fn single_trace_synthesis_uses_shadow_traces_for_skill_induction() {
+    let source = version_trace("trace_source", "0.9.1", "release-branch", false);
+    let heldout = version_trace("trace_heldout", "0.9.2", "release-branch", false);
+
+    let artifacts = synthesize_candidate_from_trace(
+        source,
+        CrystallizeOptions {
+            shadow_traces: vec![heldout],
+            workflow_name: Some("release_package_maintenance".to_string()),
+            package_name: Some("release-workflows".to_string()),
+            ..CrystallizeOptions::default()
+        },
+        Vec::new(),
+        None,
+        None,
+    )
+    .expect("single-trace synthesis");
+
+    let candidate = artifacts.report.candidates.first().expect("candidate");
+    assert!(candidate.shadow.pass);
+    assert_eq!(candidate.shadow.compared_traces, 2);
+
+    let skill = artifacts
+        .report
+        .skill_candidates
+        .first()
+        .expect("accepted skill candidate");
+    assert!(skill.replay_gate.receipt.accepted);
+    assert_eq!(skill.replay_gate.original_trace_count, 1);
+    assert_eq!(skill.replay_gate.heldout_trace_count, 1);
+    assert!(skill
+        .evidence_refs
+        .iter()
+        .any(|evidence| evidence.role == SkillCandidateEvidenceRole::HeldOut));
+}
+
+#[test]
 fn rejected_bundle_has_rejected_kind() {
     let traces = vec![
         version_trace("trace_a", "0.7.1", "release-branch", false),
