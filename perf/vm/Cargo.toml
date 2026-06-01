@@ -52,5 +52,10 @@ name = "bench_vm_hot_paths"
 path = "bench_vm_hot_paths.rs"
 harness = false
 
+[[bench]]
+name = "bench_string_scan"
+path = "bench_string_scan.rs"
+harness = false
+
 [lints]
 workspace = true

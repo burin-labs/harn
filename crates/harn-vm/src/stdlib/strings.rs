@@ -484,6 +484,17 @@ fn substring_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErro
     }
 }
 
+#[harn_builtin(sig = "chars(text: string?) -> list", category = "strings")]
+fn chars_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    match args.first() {
+        // Borrow the backing `Arc<str>` directly for the common string case so
+        // a full-file scan does not copy the source before materializing it.
+        Some(VmValue::String(text)) => Ok(VmValue::chars_list(text)),
+        Some(other) => Ok(VmValue::chars_list(&other.display())),
+        None => Ok(VmValue::List(std::sync::Arc::new(Vec::new()))),
+    }
+}
+
 #[harn_builtin(sig = "snake_to_camel(text: string?) -> string", category = "strings")]
 fn snake_to_camel_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let s = args.first().map(|a| a.display()).unwrap_or_default();
@@ -802,6 +813,7 @@ pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
     &REPLACE_IMPL_DEF,
     &JOIN_IMPL_DEF,
     &SUBSTRING_IMPL_DEF,
+    &CHARS_IMPL_DEF,
     &SNAKE_TO_CAMEL_IMPL_DEF,
     &SNAKE_TO_PASCAL_IMPL_DEF,
     &CAMEL_TO_SNAKE_IMPL_DEF,

@@ -17,11 +17,6 @@ impl super::super::Vm {
         result
     }
 
-    fn char_to_value(ch: char) -> VmValue {
-        let mut buffer = [0; 4];
-        VmValue::String(std::sync::Arc::from(ch.encode_utf8(&mut buffer)))
-    }
-
     fn index_from_end(index: i64) -> Option<usize> {
         index
             .checked_neg()?
@@ -40,7 +35,7 @@ impl super::super::Vm {
             };
             return pos
                 .and_then(|pos| s.as_bytes().get(pos))
-                .map(|byte| Self::char_to_value(*byte as char))
+                .map(|byte| VmValue::char_value(*byte as char))
                 .unwrap_or(VmValue::Nil);
         }
 
@@ -52,7 +47,7 @@ impl super::super::Vm {
                 .chars()
                 .rev()
                 .nth(index)
-                .map(Self::char_to_value)
+                .map(VmValue::char_value)
                 .unwrap_or(VmValue::Nil);
         }
         s.chars()
@@ -60,7 +55,7 @@ impl super::super::Vm {
                 Ok(index) => index,
                 Err(_) => return VmValue::Nil,
             })
-            .map(Self::char_to_value)
+            .map(VmValue::char_value)
             .unwrap_or(VmValue::Nil)
     }
 

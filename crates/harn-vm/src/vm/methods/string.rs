@@ -51,11 +51,7 @@ impl crate::vm::Vm {
                     .map(|byte_pos| s[..byte_pos].chars().count() as i64);
                 Ok(VmValue::Int(idx.unwrap_or(-1)))
             }
-            "chars" => Ok(VmValue::List(std::sync::Arc::new(
-                s.chars()
-                    .map(|c| VmValue::String(std::sync::Arc::from(c.to_string())))
-                    .collect(),
-            ))),
+            "chars" => Ok(VmValue::chars_list(s)),
             "repeat" => {
                 let n = args.first().and_then(|a| a.as_int()).unwrap_or(1);
                 Ok(VmValue::String(std::sync::Arc::from(
@@ -99,14 +95,13 @@ impl crate::vm::Vm {
             ))),
             "char_at" => {
                 let idx = args.first().and_then(|a| a.as_int()).unwrap_or(0);
-                let chars: Vec<char> = s.chars().collect();
-                if idx >= 0 && (idx as usize) < chars.len() {
-                    Ok(VmValue::String(std::sync::Arc::from(
-                        chars[idx as usize].to_string(),
-                    )))
-                } else {
-                    Ok(VmValue::Nil)
-                }
+                let Ok(idx) = usize::try_from(idx) else {
+                    return Ok(VmValue::Nil);
+                };
+                Ok(s.chars()
+                    .nth(idx)
+                    .map(VmValue::char_value)
+                    .unwrap_or(VmValue::Nil))
             }
             "last_index_of" => {
                 let needle = args.first().map(|a| a.display()).unwrap_or_default();

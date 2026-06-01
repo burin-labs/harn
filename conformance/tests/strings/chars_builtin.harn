@@ -1,0 +1,29 @@
+pipeline test(task) {
+  // `chars` materializes a string into a list of single-character strings,
+  // the linear-scan-friendly counterpart to repeated substring/index calls.
+  let cs = chars("a{b}")
+  assert_eq(len(cs), 4)
+  assert_eq(cs[0], "a")
+  assert_eq(cs[1], "{")
+  assert_eq(cs[3], "}")
+  // Method form yields the same list.
+  assert_eq("a{b}".chars(), cs)
+  // Unicode scalars stay one element each.
+  let unicode = chars("aé{")
+  assert_eq(len(unicode), 3)
+  assert_eq(unicode[1], "é")
+  // Empty / nil input yields an empty list.
+  assert_eq(len(chars("")), 0)
+  // Cursor-style scan over the materialized list counts braces in one pass.
+  let src = chars("{x{y}z}")
+  var i = 0
+  var depth = 0
+  while i < len(src) {
+    if src[i] == "{" {
+      depth = depth + 1
+    }
+    i = i + 1
+  }
+  assert_eq(depth, 2)
+  log("chars builtin ok")
+}

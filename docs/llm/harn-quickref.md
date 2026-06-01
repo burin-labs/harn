@@ -368,6 +368,33 @@ log(xs[1:4])       // [2, 3, 4]
 is a **length**, not an end index. Prefer the slice syntax to avoid
 that footgun.
 
+### Scanning large text (cursor loops)
+
+A `string` is UTF-8, so every random char access — `s[i]`, `s[a:b]`,
+`s.count`, `substring(s, i, n)` — is **O(n)** in the string length. A
+per-character cursor loop built from those is therefore O(n²) and stalls
+on multi-kilobyte source files (a real parser/lint script will feel it).
+
+For source scanners, materialize the string **once** into a list of
+single-character strings with `chars(...)`, then index the list — list
+access is O(1) and `chars(...)` interns ASCII characters so the
+materialization does not allocate per character:
+
+```harn
+let cs = chars(src)       // one linear pass; ASCII chars are interned
+let n = cs.count          // O(1) on a list
+var i = 0
+var braces = 0
+while i < n {
+  if cs[i] == "{" { braces = braces + 1 }   // O(1) list index
+  i = i + 1
+}
+```
+
+`src.chars()` (method form) is identical. Use `s.lines()` / `split(s, sep)`
+when line- or token-oriented scanning suffices, and reach for `regex_*`
+(see [Regex](#regex)) for pattern matching rather than hand-rolled cursors.
+
 ## Control flow: `if` is an expression
 
 `if` / `else` produces a value. Bind it directly into `let`, pass it

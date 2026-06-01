@@ -164,7 +164,41 @@ pub enum VmValue {
     Harness(Shared<VmHarness>),
 }
 
+/// Process-wide interned `Arc<str>` for every single-byte ASCII character.
+///
+/// Materializing source text into per-character string values — the supported
+/// idiom for cursor-style scanners (`chars`, `char_at`, `s[i]`) — would
+/// otherwise heap-allocate once per character. Source files are overwhelmingly
+/// ASCII, so interning the 128 single-char strings lets those paths clone a
+/// cheap `Arc` (a refcount bump) instead of allocating, keeping a full-file
+/// scan linear with a low constant factor.
+static ASCII_CHAR_STRINGS: std::sync::LazyLock<[Arc<str>; 128]> = std::sync::LazyLock::new(|| {
+    std::array::from_fn(|byte| {
+        let mut buffer = [0u8; 4];
+        Arc::from((byte as u8 as char).encode_utf8(&mut buffer))
+    })
+});
+
 impl VmValue {
+    /// Builds a `VmValue::String` holding a single character, reusing the
+    /// interned ASCII table (see [`ASCII_CHAR_STRINGS`]) so the common ASCII
+    /// path does not allocate.
+    pub fn char_value(ch: char) -> Self {
+        if ch.is_ascii() {
+            return VmValue::String(Arc::clone(&ASCII_CHAR_STRINGS[ch as usize]));
+        }
+        let mut buffer = [0u8; 4];
+        VmValue::String(Arc::from(ch.encode_utf8(&mut buffer)))
+    }
+
+    /// Materializes a string into a `VmValue::List` of single-character string
+    /// values in one linear pass. Backs both the `chars` builtin and the
+    /// `.chars()` method, and is the cursor-scanner-friendly counterpart to the
+    /// O(n)-per-call `substring` / slice / `s[i]` operations on a `string`.
+    pub fn chars_list(text: &str) -> Self {
+        VmValue::List(Shared::new(text.chars().map(VmValue::char_value).collect()))
+    }
+
     pub fn enum_variant(
         enum_name: impl Into<Shared<str>>,
         variant: impl Into<Shared<str>>,

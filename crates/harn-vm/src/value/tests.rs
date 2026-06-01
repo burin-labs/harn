@@ -224,3 +224,51 @@ fn vm_range_to_vec_matches_direct_iteration() {
         vec![-2, -1, 0, 1, 2]
     );
 }
+
+/// Helper: unwrap a `VmValue::String` to its backing `Arc<str>`.
+fn arc_of(value: &VmValue) -> &Arc<str> {
+    match value {
+        VmValue::String(s) => s,
+        other => panic!("expected string, got {other:?}"),
+    }
+}
+
+#[test]
+fn char_value_interns_ascii() {
+    // Two independent single-char values for the same ASCII char must share the
+    // interned allocation — this is the invariant that keeps materializing a
+    // large source file into `chars(...)` allocation-free on the common path.
+    let a = VmValue::char_value('{');
+    let b = VmValue::char_value('{');
+    assert!(Arc::ptr_eq(arc_of(&a), arc_of(&b)));
+    assert_eq!(arc_of(&a).as_ref(), "{");
+
+    // Distinct ASCII chars use distinct interned slots.
+    let nl = VmValue::char_value('\n');
+    assert!(!Arc::ptr_eq(arc_of(&a), arc_of(&nl)));
+}
+
+#[test]
+fn char_value_handles_non_ascii() {
+    let e = VmValue::char_value('é');
+    assert_eq!(arc_of(&e).as_ref(), "é");
+}
+
+#[test]
+fn chars_list_materializes_each_scalar() {
+    let cs = match VmValue::chars_list("a{é}") {
+        VmValue::List(items) => items,
+        other => panic!("expected list, got {other:?}"),
+    };
+    assert_eq!(cs.len(), 4);
+    assert_eq!(arc_of(&cs[0]).as_ref(), "a");
+    assert_eq!(arc_of(&cs[1]).as_ref(), "{");
+    assert_eq!(arc_of(&cs[2]).as_ref(), "é");
+    assert_eq!(arc_of(&cs[3]).as_ref(), "}");
+
+    // ASCII entries reuse the interned table rather than allocating per char.
+    let brace = VmValue::char_value('{');
+    assert!(Arc::ptr_eq(arc_of(&cs[1]), arc_of(&brace)));
+
+    assert!(matches!(VmValue::chars_list(""), VmValue::List(items) if items.is_empty()));
+}
