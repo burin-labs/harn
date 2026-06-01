@@ -2518,6 +2518,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "harn-rules"
+version = "0.8.60"
+dependencies = [
+ "harn-hostlib",
+ "regex",
+ "serde",
+ "serde_json",
+ "streaming-iterator",
+ "tempfile",
+ "thiserror 2.0.18",
+ "toml",
+ "tree-sitter",
+]
+
+[[package]]
 name = "harn-serve"
 version = "0.8.60"
 dependencies = [
