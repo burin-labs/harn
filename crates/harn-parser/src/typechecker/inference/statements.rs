@@ -117,7 +117,12 @@ impl TypeChecker {
                 for field in fields {
                     let name = field.alias.as_deref().unwrap_or(&field.key);
                     let ty = if field.is_rest {
-                        Some(TypeExpr::Named("dict".into()))
+                        // `...rest` collects the un-destructured keys into a new
+                        // dict; a parameterized source keeps its value typing.
+                        match source_ty.as_ref().map(|t| self.resolve_alias(t, scope)) {
+                            Some(TypeExpr::DictType(k, v)) => Some(TypeExpr::DictType(k, v)),
+                            _ => Some(TypeExpr::Named("dict".into())),
+                        }
                     } else {
                         // `source?.key` — optional access mirrors the runtime
                         // "missing key binds nil" semantics.
@@ -143,7 +148,12 @@ impl TypeChecker {
                     .and_then(|t| self.iterable_item_type(t, scope));
                 for elem in elements {
                     let ty = if elem.is_rest {
-                        Some(TypeExpr::Named("list".into()))
+                        // `...rest` collects the remaining elements into a new
+                        // list with the same element type as the source.
+                        match &elem_ty {
+                            Some(inner) => Some(TypeExpr::List(Box::new(inner.clone()))),
+                            None => Some(TypeExpr::Named("list".into())),
+                        }
                     } else {
                         match &elem.default_value {
                             Some(default) => {
