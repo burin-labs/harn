@@ -13,14 +13,17 @@ name: Build release binaries
 #      Skips sign/notarize/package/upload/release/container.
 #
 #      The setup job below short-circuits this mode unless the push
-#      changed Cargo.lock, any **/Cargo.toml, or rust-toolchain.toml —
-#      those are exactly the inputs Swatinem hashes into its exact
-#      cache key, so we re-warm precisely when a restore-keys fallback
-#      would otherwise be needed. (The check lives in the setup job
-#      rather than as a `paths:` trigger filter because GitHub's docs
-#      are ambiguous about how `paths:` interacts with `tags:` in the
-#      same push block — checking in-job is unambiguous and lets a
-#      single `push:` trigger cover both events.)
+#      changed Cargo.lock, any **/Cargo.toml, rust-toolchain.toml, or
+#      this workflow. The Cargo files are exactly the inputs Swatinem
+#      hashes into its exact cache key, and workflow edits can change
+#      runner labels, cache topology, or build flags without changing
+#      Cargo inputs. Re-warm in both cases so the next tag does not pay
+#      for a cold release build after release-CI topology changes. (The
+#      check lives in the setup job rather than as a `paths:` trigger
+#      filter because GitHub's docs are ambiguous about how `paths:`
+#      interacts with `tags:` in the same push block — checking in-job
+#      is unambiguous and lets a single `push:` trigger cover both
+#      events.)
 #
 #   3. schedule, daily — safety-net warm-up that refreshes the cache
 #      against GitHub's 7-day no-access eviction even during quiet
@@ -134,7 +137,7 @@ jobs:
             # changed something that rotates Swatinem's exact cache key.
             # For non-keying pushes the previous warm cache is still good
             # and a rebuild adds no signal.
-            CHANGED_KEYING_FILES="$(git diff --name-only HEAD^ HEAD -- Cargo.lock Cargo.toml '**/Cargo.toml' rust-toolchain.toml 2>/dev/null || true)"
+            CHANGED_KEYING_FILES="$(git diff --name-only HEAD^ HEAD -- Cargo.lock Cargo.toml '**/Cargo.toml' rust-toolchain.toml .github/workflows/build-release-binaries.yml 2>/dev/null || true)"
             if [[ -n "$CHANGED_KEYING_FILES" ]]; then
               SHOULD_BUILD_BINARIES=true
               VERSION="$(grep '^version' Cargo.toml | head -1 | sed 's/.*"\(.*\)".*/\1/')"
@@ -143,7 +146,7 @@ jobs:
               echo "::notice::Building release binaries to populate the per-target Swatinem rust-cache on main. No sign/notarize/package/upload/release/container."
             else
               VERSION="$(grep '^version' Cargo.toml | head -1 | sed 's/.*"\(.*\)".*/\1/')"
-              echo "::notice::Push to main did not change Cargo.lock / Cargo.toml / **/Cargo.toml / rust-toolchain.toml — existing warm cache still keys cleanly. Skipping build matrix."
+              echo "::notice::Push to main did not change Cargo.lock / Cargo.toml / **/Cargo.toml / rust-toolchain.toml / build-release-binaries.yml — existing warm cache still keys cleanly. Skipping build matrix."
             fi
           else
             VERSION="$(grep '^version' Cargo.toml | head -1 | sed 's/.*"\(.*\)".*/\1/')"
@@ -201,6 +204,18 @@ jobs:
             echo "should_build_binaries=$SHOULD_BUILD_BINARIES"
             echo "should_publish_container=$SHOULD_PUBLISH_CONTAINER"
           } >> "$GITHUB_OUTPUT"
+          {
+            echo "### Release binary context"
+            echo
+            echo "| Field | Value |"
+            echo "| --- | --- |"
+            echo "| Event | $EVENT_NAME |"
+            echo "| Ref | $REF |"
+            echo "| Version | $VERSION |"
+            echo "| Release mode | $IS_RELEASE |"
+            echo "| Build binaries | $SHOULD_BUILD_BINARIES |"
+            echo "| Publish container | $SHOULD_PUBLISH_CONTAINER |"
+          } >> "$GITHUB_STEP_SUMMARY"
 
   build:
     name: Build ${{ matrix.target }}
@@ -293,7 +308,29 @@ jobs:
           CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
           # Scope the compile-time optimization tradeoff to release CI only.
           CARGO_PROFILE_RELEASE_LTO: thin
-        run: cargo build --release -p harn-cli -p harn-dap -p harn-lsp --target ${{ matrix.target }}
+          HARN_RELEASE_TARGET: ${{ matrix.target }}
+          HARN_RELEASE_REF: ${{ needs.setup.outputs.ref }}
+          HARN_RELEASE_VERSION: ${{ needs.setup.outputs.version }}
+          HARN_RELEASE_IS_RELEASE: ${{ needs.setup.outputs.is_release }}
+        run: |
+          set -euo pipefail
+          start=$SECONDS
+          cargo build --release -p harn-cli -p harn-dap -p harn-lsp --target "$HARN_RELEASE_TARGET"
+          duration=$((SECONDS - start))
+          {
+            echo "### Release binary build"
+            echo
+            echo "| Field | Value |"
+            echo "| --- | --- |"
+            echo "| Target | $HARN_RELEASE_TARGET |"
+            echo "| Runner | ${RUNNER_OS}-${RUNNER_ARCH} |"
+            echo "| Ref | $HARN_RELEASE_REF |"
+            echo "| Version | $HARN_RELEASE_VERSION |"
+            echo "| Release mode | $HARN_RELEASE_IS_RELEASE |"
+            echo "| Duration | ${duration}s |"
+            echo "| Rust wrapper | ${RUSTC_WRAPPER:-<none>} |"
+            echo "| Release LTO | ${CARGO_PROFILE_RELEASE_LTO:-<unset>} |"
+          } >> "$GITHUB_STEP_SUMMARY"
 
       # Sign the three Mach-O binaries with the Developer ID Application
       # identity (hardened runtime + secure timestamp), then submit a zip
