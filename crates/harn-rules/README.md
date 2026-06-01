@@ -158,3 +158,15 @@ for change in &run.changes { /* the caller writes / formats them */ }
 
 `run_recipe` returns the changes; the caller (a CLI, the staged filesystem)
 decides whether to write and `harn fmt` them.
+
+### Data tables (report-only)
+
+`data_table(rule, files)` runs a rule across a project **without editing** and
+returns a columnar `DataTable` — one row per match (path, position, text,
+metavar bindings) plus a metrics summary (total findings, files, per-file
+counts). It serializes to JSON for inventory / impact analysis / audit:
+
+```rust
+let table = harn_rules::data_table(&compiled, &source_files)?;
+println!("{}", table.to_json());   // { rule_id, columns, rows, summary }
+```

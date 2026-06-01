@@ -211,6 +211,11 @@ impl CompiledRule {
         self.safety.applicability()
     }
 
+    /// The rule's id.
+    pub fn id(&self) -> &str {
+        &self.rule_id
+    }
+
     /// Run the compiled rule against `source`, returning matches in
     /// document order. Matches that fail any `where` constraint are dropped.
     pub fn run(&self, source: &str) -> Result<Vec<RuleMatch>, RulesError> {
