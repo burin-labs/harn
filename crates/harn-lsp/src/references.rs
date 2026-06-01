@@ -206,7 +206,7 @@ fn collect_references(snode: &SNode, target_name: &str, refs: &mut Vec<Span>) {
         }
         Node::Block(stmts)
         | Node::SpawnExpr { body: stmts }
-        | Node::MutexBlock { body: stmts }
+        | Node::MutexBlock { body: stmts, .. }
         | Node::DeferStmt { body: stmts } => {
             for s in stmts {
                 collect_references(s, target_name, refs);

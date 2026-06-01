@@ -371,7 +371,13 @@ impl Formatter<'_> {
                 let dur = self.format_expr(duration, indent);
                 self.format_block_expr(&format!("deadline {dur} {{"), body, indent)
             }
-            Node::MutexBlock { body } => self.format_block_expr("mutex {", body, indent),
+            Node::MutexBlock { key, body } => match key {
+                Some(key_expr) => {
+                    let k = self.format_expr(key_expr, indent);
+                    self.format_block_expr(&format!("mutex({k}) {{"), body, indent)
+                }
+                None => self.format_block_expr("mutex {", body, indent),
+            },
             Node::IfElse {
                 condition,
                 then_body,

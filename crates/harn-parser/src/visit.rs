@@ -151,9 +151,14 @@ fn collect_children<'a>(node: &'a SNode, children: &mut Vec<&'a SNode>) {
         Node::TryExpr { body }
         | Node::SpawnExpr { body }
         | Node::DeferStmt { body }
-        | Node::MutexBlock { body }
         | Node::Block(body)
         | Node::Closure { body, .. } => collect_nodes(body, children),
+        Node::MutexBlock { key, body } => {
+            if let Some(key) = key {
+                children.push(key);
+            }
+            collect_nodes(body, children);
+        }
         Node::FnDecl { body, .. } | Node::ToolDecl { body, .. } => {
             collect_nodes(body, children);
         }

@@ -23,6 +23,23 @@ fn test_unnecessary_parentheses_autofixes_ternary_list_branch() {
 }
 
 #[test]
+fn test_unnecessary_parentheses_ignores_keyed_mutex_parens() {
+    // `mutex(resource)` parens are required grammar (the lock key), not
+    // redundant grouping — stripping them would produce unparseable source.
+    let source = r#"pipeline default(task) {
+  mutex("a") {
+    log(1)
+  }
+}
+"#;
+    let diags = lint_source(source);
+    assert!(
+        !has_rule(&diags, "unnecessary-parentheses"),
+        "keyed mutex parens must not be flagged, got: {diags:?}"
+    );
+}
+
+#[test]
 fn test_unnecessary_parentheses_autofixes_simple_return_value() {
     let source = r"fn repo_arg(repo) {
   return ( repo )

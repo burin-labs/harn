@@ -111,7 +111,7 @@ fn visit_node(node: &SNode, diagnostics: &mut Vec<LintDiagnostic>) {
         Node::TryExpr { body }
         | Node::SpawnExpr { body }
         | Node::DeferStmt { body }
-        | Node::MutexBlock { body }
+        | Node::MutexBlock { body, .. }
         | Node::Block(body)
         | Node::Closure { body, .. } => visit_nodes(body, diagnostics),
         Node::FnDecl { body, .. } | Node::ToolDecl { body, .. } => visit_nodes(body, diagnostics),

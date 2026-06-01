@@ -309,7 +309,14 @@ pub enum Node {
         value: Box<SNode>,
     },
     /// Mutex block: mutual exclusion for concurrent access.
+    ///
+    /// `key` is the optional resource expression in `mutex(resource) { ... }`.
+    /// When present, all blocks acquiring the same structural key value
+    /// mutually exclude; when absent (`mutex { ... }`), the block keys on its
+    /// own lexical call-site, so two distinct `mutex {}` blocks no longer
+    /// serialize against each other.
     MutexBlock {
+        key: Option<Box<SNode>>,
         body: Vec<SNode>,
     },
     /// Break out of a loop.

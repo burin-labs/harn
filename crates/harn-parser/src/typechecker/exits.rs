@@ -28,7 +28,7 @@ pub fn stmt_definitely_exits(stmt: &SNode) -> bool {
         Node::Block(body)
         | Node::TryExpr { body }
         | Node::CostRoute { body, .. }
-        | Node::MutexBlock { body }
+        | Node::MutexBlock { body, .. }
         | Node::DeadlineBlock { body, .. }
         | Node::Retry { body, .. } => block_definitely_exits(body),
         Node::TryCatch {

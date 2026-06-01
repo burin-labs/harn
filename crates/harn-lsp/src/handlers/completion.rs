@@ -440,7 +440,7 @@ where
         | Node::Closure { body, .. }
         | Node::TryExpr { body }
         | Node::SpawnExpr { body }
-        | Node::MutexBlock { body }
+        | Node::MutexBlock { body, .. }
         | Node::DeferStmt { body } => visit_nodes(body, visitor),
         Node::MatchExpr { value, arms } => {
             visit_node(value, visitor);

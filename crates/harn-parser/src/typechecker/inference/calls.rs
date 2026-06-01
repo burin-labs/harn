@@ -849,7 +849,7 @@ impl TypeChecker {
             | Node::WhileLoop { body, .. }
             | Node::Retry { body, .. }
             | Node::DeferStmt { body }
-            | Node::MutexBlock { body }
+            | Node::MutexBlock { body, .. }
             | Node::Parallel { body, .. } => {
                 for s in body {
                     self.visit_for_deprecation(s);

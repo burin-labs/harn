@@ -801,11 +801,22 @@ impl Parser {
     pub(super) fn parse_mutex(&mut self) -> Result<SNode, ParserError> {
         let start = self.current_span();
         self.consume(&TokenKind::Mutex, "mutex")?;
+        // Optional resource key: `mutex(resource) { ... }`. Blocks sharing the
+        // same structural key value mutually exclude; a bare `mutex { ... }`
+        // keys on its lexical call-site instead of one process-wide lock.
+        let key = if self.check(&TokenKind::LParen) {
+            self.consume(&TokenKind::LParen, "(")?;
+            let expr = self.parse_expression()?;
+            self.consume(&TokenKind::RParen, ")")?;
+            Some(Box::new(expr))
+        } else {
+            None
+        };
         self.consume(&TokenKind::LBrace, "{")?;
         let body = self.parse_block()?;
         self.consume(&TokenKind::RBrace, "}")?;
         Ok(spanned(
-            Node::MutexBlock { body },
+            Node::MutexBlock { key, body },
             Span::merge(start, self.prev_span()),
         ))
     }

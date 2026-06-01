@@ -442,7 +442,7 @@ fn node_children(node: &SNode) -> Vec<&SNode> {
         | Node::Block(body)
         | Node::Closure { body, .. }
         | Node::TryExpr { body }
-        | Node::MutexBlock { body }
+        | Node::MutexBlock { body, .. }
         | Node::DeferStmt { body } => body.iter().collect(),
         Node::FnDecl { body, .. } | Node::ToolDecl { body, .. } => body.iter().collect(),
         Node::IfElse {

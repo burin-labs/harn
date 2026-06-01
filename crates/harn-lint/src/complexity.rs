@@ -109,7 +109,7 @@ pub(crate) fn cyclomatic_complexity(nodes: &[SNode]) -> usize {
                 duration: expr,
                 body,
             } => node_complexity(expr) + body_complexity(body),
-            Node::MutexBlock { body }
+            Node::MutexBlock { body, .. }
             | Node::TryExpr { body }
             | Node::DeferStmt { body }
             | Node::Block(body)

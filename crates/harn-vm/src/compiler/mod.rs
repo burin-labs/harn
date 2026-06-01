@@ -451,11 +451,23 @@ impl Compiler {
                 self.compile_scoped_block(body)?;
                 self.chunk.emit(Op::DeadlineEnd, self.line);
             }
-            Node::MutexBlock { body } => {
+            Node::MutexBlock { key, body } => {
                 self.begin_scope();
                 let finally_floor = self.finally_bodies.len();
-                let key_idx = self.string_constant("__default__");
-                self.chunk.emit_u16(Op::SyncMutexEnter, key_idx, self.line);
+                match key {
+                    // `mutex(resource) { ... }`: evaluate the resource and key
+                    // the lock on its structural value at runtime.
+                    Some(key_expr) => {
+                        self.compile_node(key_expr)?;
+                        self.chunk.emit(Op::SyncMutexEnterKeyed, self.line);
+                    }
+                    // `mutex { ... }`: key on the lexical call-site (computed in
+                    // the VM from the chunk + instruction pointer) so distinct
+                    // blocks don't contend on one global lock.
+                    None => {
+                        self.chunk.emit(Op::SyncMutexEnter, self.line);
+                    }
+                }
                 for sn in body {
                     self.compile_discarded_stmt(sn)?;
                 }

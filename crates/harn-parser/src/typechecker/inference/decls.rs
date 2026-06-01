@@ -52,7 +52,7 @@ impl TypeChecker {
             | Node::Retry { body, .. }
             | Node::CostRoute { body, .. }
             | Node::DeferStmt { body }
-            | Node::MutexBlock { body }
+            | Node::MutexBlock { body, .. }
             | Node::Parallel { body, .. }
             | Node::TryExpr { body } => Self::body_contains_yield(body),
             Node::IfElse {
@@ -309,7 +309,7 @@ impl TypeChecker {
             Node::Block(body)
             | Node::TryExpr { body }
             | Node::CostRoute { body, .. }
-            | Node::MutexBlock { body }
+            | Node::MutexBlock { body, .. }
             | Node::DeadlineBlock { body, .. }
             | Node::Retry { body, .. } => self.body_cannot_fall_through(body, scope),
             Node::TryCatch {
@@ -446,7 +446,7 @@ impl TypeChecker {
             Node::Block(body)
             | Node::TryExpr { body }
             | Node::CostRoute { body, .. }
-            | Node::MutexBlock { body }
+            | Node::MutexBlock { body, .. }
             | Node::DeadlineBlock { body, .. }
             | Node::Retry { body, .. } => {
                 let mut block_scope = scope.child();

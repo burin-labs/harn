@@ -307,7 +307,7 @@ fn visit_children_for_callables(node: &SNode, callables: &mut Vec<CallableInfo>)
         | Node::TryExpr { body: stmts }
         | Node::DeferStmt { body: stmts }
         | Node::DeadlineBlock { body: stmts, .. }
-        | Node::MutexBlock { body: stmts }
+        | Node::MutexBlock { body: stmts, .. }
         | Node::Closure { body: stmts, .. } => {
             for stmt in stmts {
                 collect_callables_in_node(stmt, callables);
@@ -416,7 +416,7 @@ fn visit_child_owners(node: &SNode, owner_span: Span, calls: &mut Vec<CallSite>)
         | Node::TryExpr { body }
         | Node::DeferStmt { body }
         | Node::DeadlineBlock { body, .. }
-        | Node::MutexBlock { body }
+        | Node::MutexBlock { body, .. }
         | Node::Closure { body, .. } => body_contains_owner(body, owner_span, calls),
         Node::TryCatch {
             has_catch: _,
@@ -553,7 +553,7 @@ fn collect_calls(node: &SNode, calls: &mut Vec<CallSite>) {
         | Node::TryExpr { body: stmts }
         | Node::DeferStmt { body: stmts }
         | Node::DeadlineBlock { body: stmts, .. }
-        | Node::MutexBlock { body: stmts }
+        | Node::MutexBlock { body: stmts, .. }
         | Node::Closure { body: stmts, .. } => collect_calls_in_body(stmts, calls),
         Node::Parallel {
             expr,

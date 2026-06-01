@@ -469,8 +469,14 @@ impl Formatter<'_> {
                 self.dedent();
                 self.writeln("}");
             }
-            Node::MutexBlock { body } => {
-                self.writeln("mutex {");
+            Node::MutexBlock { key, body } => {
+                match key {
+                    Some(key_expr) => {
+                        let k = self.format_expr(key_expr, self.indent);
+                        self.writeln(&format!("mutex({k}) {{"));
+                    }
+                    None => self.writeln("mutex {"),
+                }
                 self.indent();
                 self.format_body(body, node_line);
                 self.dedent();

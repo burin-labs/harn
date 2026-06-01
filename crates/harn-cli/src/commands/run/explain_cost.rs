@@ -98,7 +98,7 @@ impl CostAnalyzer {
             | Node::Block(body)
             | Node::Closure { body, .. }
             | Node::DeferStmt { body }
-            | Node::MutexBlock { body } => self.walk_nodes(body),
+            | Node::MutexBlock { body, .. } => self.walk_nodes(body),
             Node::SkillDecl { fields, .. } => {
                 for (_, value) in fields {
                     self.walk_node(value);

@@ -257,7 +257,7 @@ fn spawn_site_children(node: &SNode) -> Vec<&SNode> {
         | Node::Retry { body, .. }
         | Node::TryExpr { body }
         | Node::DeferStmt { body }
-        | Node::MutexBlock { body }
+        | Node::MutexBlock { body, .. }
         | Node::Block(body)
         | Node::OverrideDecl { body, .. } => children.extend(body.iter()),
         Node::IfElse {
@@ -481,7 +481,7 @@ fn collect_static_tool_surface_from_node(
         | Node::ToolDecl { body, .. }
         | Node::SpawnExpr { body }
         | Node::DeferStmt { body }
-        | Node::MutexBlock { body }
+        | Node::MutexBlock { body, .. }
         | Node::Block(body)
         | Node::Closure { body, .. }
         | Node::TryExpr { body } => {
@@ -1451,7 +1451,7 @@ fn scan_node_preflight(
         }
         Node::TryExpr { body }
         | Node::SpawnExpr { body }
-        | Node::MutexBlock { body }
+        | Node::MutexBlock { body, .. }
         | Node::DeferStmt { body } => {
             scan_children(
                 body,

@@ -866,7 +866,7 @@ fn collect_symbols(
             recurse!(true_expr, scope_span);
             recurse!(false_expr, scope_span);
         }
-        Node::SpawnExpr { body } | Node::MutexBlock { body } | Node::DeferStmt { body } => {
+        Node::SpawnExpr { body } | Node::MutexBlock { body, .. } | Node::DeferStmt { body } => {
             for s in body {
                 recurse!(s, scope_span);
             }
