@@ -344,7 +344,10 @@ jobs:
 
           echo "windows: cargo package args: ${package_args[*]}"
           if command -v cargo-nextest >/dev/null 2>&1; then
-            cargo nextest run "${package_args[@]}" -E "$windows_filter"
+            # Some affected crate sets compile Windows-only surfaces but have
+            # no tests matching the core unit filter; the compile itself is
+            # still the smoke gate for those PRs.
+            cargo nextest run "${package_args[@]}" -E "$windows_filter" --no-tests=warn
           else
             cargo test "${package_args[@]}" --no-run
             cargo test -p harn-lexer -p harn-parser -p harn-stdlib -p harn-vm -p harn-hostlib -p harn-fmt -p harn-lint -p harn-modules
