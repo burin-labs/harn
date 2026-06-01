@@ -1,0 +1,12 @@
+# The first Rule Engine customer (#2824 / burin-labs/burin-code#1629):
+# find every `src?.key ?? default` shape so the codemod can fold it into a
+# destructuring bind. `fix` makes this a codemod; `transform` + interpolation
+# of the bound metavars into the replacement land in #2834.
+id = "destructure-with-defaults"
+language = "typescript"
+severity = "warning"
+message = "Collapse `?.x ?? default` into a destructuring bind with a default"
+fix = "{ $KEY: $SRC }"
+
+[rule]
+pattern = "$SRC?.$KEY ?? $DEFAULT"

@@ -1,0 +1,25 @@
+[package]
+name = "harn-rules"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+description = "Declarative structural rule engine for Harn — rule model, pattern compiler, and matcher built on the harn-hostlib tree-sitter machinery."
+
+[dependencies]
+harn-hostlib = { path = "../harn-hostlib", default-features = false, features = ["ast"] }
+tree-sitter = "0.26"
+streaming-iterator = "0.1"
+regex = "1"
+serde = { version = "1", features = ["derive"] }
+toml = "1.1"
+thiserror = "2"
+
+[dev-dependencies]
+serde_json = "1"
+streaming-iterator = "0.1"
+tempfile = "3"
+
+[lints]
+workspace = true
