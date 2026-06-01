@@ -5,7 +5,11 @@
   "type": "object",
   "properties": {
     "handle_id": { "type": "string" },
-    "cancelled": { "type": "boolean" }
+    "cancelled": { "type": "boolean" },
+    "result": {
+      "type": "object",
+      "additionalProperties": true
+    }
   },
   "required": ["handle_id", "cancelled"],
   "additionalProperties": false

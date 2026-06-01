@@ -31,7 +31,9 @@
 //! in the entry and kill by PID when needed. On Unix we call `kill(2)`
 //! directly via an `extern "C"` declaration (no `libc` crate required).
 //! A shared `cancelled` flag suppresses the feedback push when the waiter
-//! sees an exit caused by cancellation.
+//! sees an exit caused by cancellation. Callers that need artifact-stable
+//! cancellation can opt into waiting for the waiter result through
+//! `cancel_handle`.
 
 use std::collections::BTreeMap;
 use std::io::{Read, Write};
@@ -54,6 +56,10 @@ struct CancelState {
     /// Set to `true` when `cancel_handle` / `cancel_session_handles` runs.
     /// The waiter checks this before pushing feedback.
     cancelled: AtomicBool,
+    /// Set by cancellation paths that represent a timeout rather than a
+    /// user-requested kill. The waiter uses this for the returned result
+    /// status while still suppressing inbox feedback.
+    timed_out: AtomicBool,
 }
 
 #[derive(Default)]
@@ -75,6 +81,9 @@ struct HandleEntry {
     /// feedback push is complete. `None` if the test-side hasn't asked
     /// to be notified.
     completion_tx: Option<std::sync::mpsc::SyncSender<()>>,
+    /// Optional one-shot result channel installed by `cancel_handle` when a
+    /// caller wants cancellation to wait until artifacts have been drained.
+    result_tx: Option<std::sync::mpsc::SyncSender<VmValue>>,
 }
 
 #[derive(Default)]
@@ -217,6 +226,7 @@ pub(crate) fn spawn_long_running_with_options(
 
     let cancel_state = Arc::new(CancelState {
         cancelled: AtomicBool::new(false),
+        timed_out: AtomicBool::new(false),
     });
 
     {
@@ -231,6 +241,7 @@ pub(crate) fn spawn_long_running_with_options(
                 session_id: options.session_id.clone(),
                 cancel_state: cancel_state.clone(),
                 completion_tx: None,
+                result_tx: None,
             },
         );
     }
@@ -357,16 +368,17 @@ fn waiter_thread(context: WaiterContext, cancel_state: Arc<CancelState>, capture
         (state.stdout.clone(), state.stderr.clone())
     };
 
-    // Remove our entry from the store, taking the completion notifier on
-    // the way out so we can signal it after the feedback push completes.
-    let completion_tx = {
+    // Remove our entry from the store, taking notifiers on the way out so we
+    // can signal them after the feedback/result path completes.
+    let (completion_tx, result_tx) = {
         let mut store = HANDLE_STORE
             .lock()
             .expect("long-running handle store poisoned");
-        store
+        let entry = store
             .entries
             .remove(&context.handle_id)
-            .and_then(|mut e| e.completion_tx.take())
+            .map(|mut e| (e.completion_tx.take(), e.result_tx.take()));
+        entry.unwrap_or((None, None))
     };
 
     let signal_done = move || {
@@ -375,17 +387,20 @@ fn waiter_thread(context: WaiterContext, cancel_state: Arc<CancelState>, capture
         }
     };
 
-    // If cancellation was requested, don't push feedback — the caller
-    // that cancelled doesn't want to receive a spurious tool_result.
-    if cancel_state.cancelled.load(Ordering::Acquire) {
-        signal_done();
-        return;
-    }
+    let cancelled = cancel_state.cancelled.load(Ordering::Acquire);
+    let timed_out = cancelled && cancel_state.timed_out.load(Ordering::Acquire);
 
     let (exit_code, signal_name) = match status {
         Some(s) => decode_exit_status(s),
         // wait() itself failed — treat as killed (extremely unusual).
         None => (-1, Some("SIGKILL".to_string())),
+    };
+    let command_status = if timed_out {
+        CommandStatus::TimedOut
+    } else if cancelled {
+        CommandStatus::Killed
+    } else {
+        CommandStatus::Completed
     };
     let duration = waiter_start.elapsed();
     let duration_ms = duration.as_millis() as i64;
@@ -407,7 +422,7 @@ fn waiter_thread(context: WaiterContext, cancel_state: Arc<CancelState>, capture
     );
     payload.insert(
         "status".into(),
-        serde_json::Value::String(CommandStatus::Completed.as_str().to_string()),
+        serde_json::Value::String(command_status.as_str().to_string()),
     );
     payload.insert(
         "handle_id".into(),
@@ -433,6 +448,7 @@ fn waiter_thread(context: WaiterContext, cancel_state: Arc<CancelState>, capture
         "exit_code".into(),
         serde_json::Value::Number(exit_code.into()),
     );
+    payload.insert("timed_out".into(), serde_json::Value::Bool(timed_out));
     payload.insert("stdout".into(), serde_json::Value::String(inline_stdout));
     payload.insert("stderr".into(), serde_json::Value::String(inline_stderr));
     payload.insert(
@@ -471,13 +487,19 @@ fn waiter_thread(context: WaiterContext, cancel_state: Arc<CancelState>, capture
         payload.insert("signal".into(), serde_json::Value::Null);
     }
 
-    let content = serde_json::to_string(&payload).unwrap_or_default();
-    harn_vm::orchestration::agent_inbox::push(
-        &context.session_id,
-        "tool_result",
-        &content,
-        "hostlib.long_running.exit",
-    );
+    if let Some(tx) = result_tx {
+        let value = serde_json::Value::Object(payload.clone());
+        let _ = tx.try_send(harn_vm::json_to_vm_value(&value));
+    }
+    if !cancelled {
+        let content = serde_json::to_string(&payload).unwrap_or_default();
+        harn_vm::orchestration::agent_inbox::push(
+            &context.session_id,
+            "tool_result",
+            &content,
+            "hostlib.long_running.exit",
+        );
+    }
     signal_done();
 }
 
@@ -570,47 +592,79 @@ fn spawn_progress_thread(context: ProgressThreadContext) -> std::thread::JoinHan
     })
 }
 
-/// Cancel a specific in-flight long-running handle. Kills the process and
-/// removes the entry. Returns `true` if the handle was found and cancelled.
+pub(crate) struct CancelOptions {
+    pub(crate) timed_out: bool,
+    pub(crate) wait_result: Option<Duration>,
+}
+
+pub(crate) struct CancelOutcome {
+    pub(crate) cancelled: bool,
+    pub(crate) result: Option<VmValue>,
+}
+
+/// Cancel a specific in-flight long-running handle. Kills the process and lets
+/// the waiter drain output/artifacts. Returns `true` if the handle was found
+/// and cancellation was newly requested.
 pub fn cancel_handle(handle_id: &str) -> bool {
-    let (handle_owned, killer, cancel_state, completion_tx) = {
+    cancel_handle_with_options(
+        handle_id,
+        CancelOptions {
+            timed_out: false,
+            wait_result: None,
+        },
+    )
+    .cancelled
+}
+
+pub(crate) fn cancel_handle_with_options(handle_id: &str, options: CancelOptions) -> CancelOutcome {
+    let (killer, cancel_state, result_rx) = {
         let mut store = HANDLE_STORE
             .lock()
             .expect("long-running handle store poisoned");
-        match store.entries.remove(handle_id) {
-            None => return false,
-            Some(mut entry) => (
-                entry.handle.take(),
-                entry.killer.clone(),
-                entry.cancel_state.clone(),
-                entry.completion_tx.take(),
-            ),
+        let Some(entry) = store.entries.get_mut(handle_id) else {
+            return CancelOutcome {
+                cancelled: false,
+                result: None,
+            };
+        };
+        if entry.cancel_state.cancelled.swap(true, Ordering::AcqRel) {
+            return CancelOutcome {
+                cancelled: false,
+                result: None,
+            };
         }
+        entry
+            .cancel_state
+            .timed_out
+            .store(options.timed_out, Ordering::Release);
+        let result_rx = options.wait_result.map(|_| {
+            let (tx, rx) = std::sync::mpsc::sync_channel::<VmValue>(1);
+            entry.result_tx = Some(tx);
+            rx
+        });
+        (entry.killer.clone(), entry.cancel_state.clone(), result_rx)
     };
-    do_kill(handle_owned, killer, cancel_state);
-    // If a test registered a completion notifier, signal it now — the
-    // waiter won't be able to (entry already removed) and we know the
-    // waiter will skip feedback because cancellation is set.
-    if let Some(tx) = completion_tx {
-        let _ = tx.try_send(());
+    do_kill(killer, cancel_state);
+    let result = match (options.wait_result, result_rx) {
+        (Some(timeout), Some(rx)) => rx.recv_timeout(timeout).ok(),
+        _ => None,
+    };
+    CancelOutcome {
+        cancelled: true,
+        result,
     }
-    true
 }
 
 /// Tuple shape used by `cancel_session_handles` to drain entries while
 /// holding the store lock for as little as possible. Boxed-trait fields
 /// make it noisy to inline as an unnamed type.
-type SessionKillEntry = (
-    Option<Box<dyn ProcessHandle>>,
-    Arc<dyn ProcessKiller>,
-    Arc<CancelState>,
-);
+type SessionKillEntry = (Arc<dyn ProcessKiller>, Arc<CancelState>);
 
 /// Cancel all in-flight handles for a given session. Called by the
 /// session-end hook to avoid orphaned processes.
 pub fn cancel_session_handles(session_id: &str) {
     let to_kill: Vec<SessionKillEntry> = {
-        let mut store = HANDLE_STORE
+        let store = HANDLE_STORE
             .lock()
             .expect("long-running handle store poisoned");
         let matching: Vec<String> = store
@@ -622,32 +676,27 @@ pub fn cancel_session_handles(session_id: &str) {
         matching
             .into_iter()
             .filter_map(|id| {
-                store.entries.remove(&id).map(|mut e| {
-                    let handle = e.handle.take();
-                    (handle, e.killer.clone(), e.cancel_state.clone())
-                })
+                let entry = store.entries.get(&id)?;
+                if entry.cancel_state.cancelled.swap(true, Ordering::AcqRel) {
+                    return None;
+                }
+                entry.cancel_state.timed_out.store(false, Ordering::Release);
+                Some((entry.killer.clone(), entry.cancel_state.clone()))
             })
             .collect()
     };
-    for (handle, killer, cancel_state) in to_kill {
-        do_kill(handle, killer, cancel_state);
+    for (killer, cancel_state) in to_kill {
+        do_kill(killer, cancel_state);
     }
 }
 
 /// Set the cancellation flag and kill the process. Used by both `cancel_handle`
 /// and `cancel_session_handles`.
-fn do_kill(
-    handle: Option<Box<dyn ProcessHandle>>,
-    killer: Arc<dyn ProcessKiller>,
-    cancel_state: Arc<CancelState>,
-) {
-    // Signal cancellation so the waiter (if still running) skips feedback.
-    cancel_state.cancelled.store(true, Ordering::Release);
+fn do_kill(killer: Arc<dyn ProcessKiller>, cancel_state: Arc<CancelState>) {
     // Kill via the handle's killer (works whether or not we still own
-    // the handle). If we still hold the handle, drop it after kill so the
-    // OS reaps the child.
+    // the handle). The waiter owns process reaping and artifact finalization.
     killer.kill();
-    drop(handle);
+    cancel_state.cancelled.store(true, Ordering::Release);
 }
 
 /// Register the session-cleanup hook with harn-vm. Uses a `OnceLock` so the

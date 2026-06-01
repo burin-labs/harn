@@ -4,7 +4,9 @@
   "title": "tools.cancel_handle request",
   "type": "object",
   "properties": {
-    "handle_id": { "type": "string" }
+    "handle_id": { "type": "string" },
+    "wait_result_ms": { "type": "integer", "minimum": 0 },
+    "timed_out": { "type": "boolean" }
   },
   "required": ["handle_id"],
   "additionalProperties": false

@@ -235,9 +235,17 @@ pub fn command_wait(locator, options = nil) -> dict {
  * @api_stability: stable
  * @example: command_cancel(result)
  */
-pub fn command_cancel(locator) -> dict {
+pub fn command_cancel(locator, options = nil) -> dict {
+  let opts = __command_options(options)
   let _enabled = hostlib_enable("tools:deterministic")
-  return hostlib_tools_cancel_handle({handle_id: __command_handle_id(locator, "command_cancel")})
+  var req = {handle_id: __command_handle_id(locator, "command_cancel")}
+  if opts?.wait_result_ms != nil {
+    req = req + {wait_result_ms: opts.wait_result_ms}
+  }
+  if opts?.timed_out != nil {
+    req = req + {timed_out: opts.timed_out}
+  }
+  return hostlib_tools_cancel_handle(req)
 }
 
 fn __command_positive_int(value, fallback: int) -> int {
@@ -334,6 +342,13 @@ fn __command_stream_timeout_result(start, elapsed_ms: int, options) -> dict {
   )
 }
 
+fn __command_stream_cancel_timeout(start, options) {
+  let opts = __command_options(options)
+  let wait_ms = __command_positive_int(opts?.cancel_wait_ms ?? opts?.wait_result_ms, 1000)
+  let cancelled = command_cancel(start, {wait_result_ms: wait_ms, timed_out: true})
+  return cancelled?.result
+}
+
 /**
  * command_run_streaming runs a command in the background, tees new output, and returns the final result.
  *
@@ -357,7 +372,12 @@ pub fn command_run_streaming(spec, options = nil) -> dict {
     stderr_offset = __command_stream_flush(start, "stderr", stderr_offset, read_bytes, opts)
     let elapsed_before_wait = harness.clock.monotonic_ms() - started_ms
     if timeout_ms > 0 && elapsed_before_wait >= timeout_ms {
-      command_cancel(start)
+      let timed_result = __command_stream_cancel_timeout(start, opts)
+      stdout_offset = __command_stream_flush(start, "stdout", stdout_offset, read_bytes, opts)
+      stderr_offset = __command_stream_flush(start, "stderr", stderr_offset, read_bytes, opts)
+      if timed_result != nil {
+        return __command_normalize_result(timed_result)
+      }
       return __command_stream_timeout_result(start, elapsed_before_wait, opts)
     }
     let result = command_wait(start, {timeout_ms: poll_interval_ms})
@@ -368,9 +388,12 @@ pub fn command_run_streaming(spec, options = nil) -> dict {
     }
     let elapsed_after_wait = harness.clock.monotonic_ms() - started_ms
     if timeout_ms > 0 && elapsed_after_wait >= timeout_ms {
-      command_cancel(start)
+      let timed_result = __command_stream_cancel_timeout(start, opts)
       stdout_offset = __command_stream_flush(start, "stdout", stdout_offset, read_bytes, opts)
       stderr_offset = __command_stream_flush(start, "stderr", stderr_offset, read_bytes, opts)
+      if timed_result != nil {
+        return __command_normalize_result(timed_result)
+      }
       return __command_stream_timeout_result(start, elapsed_after_wait, opts)
     }
   }
@@ -707,7 +730,7 @@ pub fn command_step(name: string, spec, options = nil) -> dict {
   let max_attempts = configured_max_attempts < 1 ? 1 : configured_max_attempts
   var attempts = []
   var attempt_number = 1
-  var final_step = nil
+  var final_step = {}
   while attempt_number <= max_attempts {
     let result = __command_invoke_runner(spec, opts)
     var step = __command_step_from_result(name, spec, result, opts, attempts)
