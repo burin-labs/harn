@@ -1,0 +1,24 @@
+import { command_run } from "std/command"
+import "../_common"
+
+/**
+ * A nested static Harn CLI command must not initialize Tokio's Unix
+ * signal/process driver before dispatch. Linux worktree sandboxes at the
+ * process_exec ceiling deny socket/socketpair, so enabling that driver would
+ * panic before `harn check` can inspect the target file.
+ */
+pipeline default() {
+  let repo_root = exec("git", "rev-parse", "--show-toplevel").stdout.trim()
+  let harn_bin = harness.env.get_or("HARN_CONFORMANCE_HARN_BIN", resolve_harn_bin(harness, repo_root))
+  let root = path_join(harness.fs.temp_dir(), "nested-harn-check-" + uuid_v7())
+  harness.fs.mkdir(root)
+  let script = path_join(root, "child.harn")
+  harness.fs.write_text(script, "__io_println(\"child ok\")\n")
+  let result = with_execution_policy(
+    {sandbox_profile: "worktree", workspace_roots: [repo_root, root], side_effect_level: "process_exec"},
+    { -> return command_run([harn_bin, "check", script], {cwd: root, capture: {max_inline_bytes: 200000}}) },
+  )
+  __io_println(result.success)
+  __io_println(!contains(result.stderr, "failed to create UnixStream"))
+  __io_println(!contains(result.stderr, "panicked at"))
+}
