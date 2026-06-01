@@ -72,4 +72,24 @@ pub enum RulesError {
         /// The parse failure detail.
         message: String,
     },
+
+    /// `auto_apply` was called on a rule whose `safety` is above the
+    /// machine-applicable threshold; it must be applied with explicit opt-in.
+    #[error(
+        "rule `{rule}`: refusing to auto-apply a `{safety}` fix (machine-applicable required)"
+    )]
+    NotAutoApplicable {
+        /// The offending rule id.
+        rule: String,
+        /// The rule's declared safety tier.
+        safety: String,
+    },
+
+    /// A fix did not reach a fixed point: re-running it after applying still
+    /// produced changes.
+    #[error("rule `{rule}`: fix is not idempotent (re-running it produced further changes)")]
+    NotIdempotent {
+        /// The offending rule id.
+        rule: String,
+    },
 }

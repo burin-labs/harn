@@ -8,8 +8,8 @@
 //! [`RuleMatch`]es with metavariable bindings.
 //!
 //! This crate delivers the **atomic matching tier** (#2832), the
-//! **relational + composite algebra** (#2833), and the **predicate +
-//! rewrite layer** (#2834):
+//! **relational + composite algebra** (#2833), the **predicate + rewrite
+//! layer** (#2834), and the **safety + idempotency gate** (#2835):
 //!
 //! - [`model`] — the serde rule data model: the recursive [`RuleNode`]
 //!   (atomic `pattern` / `kind` / `regex`, relational `inside` / `has` /
@@ -24,8 +24,10 @@
 //! - [`transform`] — synthesize new metavars (`replace` / `substring` /
 //!   `convert`) before fixing.
 //! - [`fix`] — `fix` template interpolation and format-preserving splice.
-//! - [`engine`] — compile a [`Rule`], run it to produce matches, and
-//!   [`CompiledRule::apply`] a codemod.
+//! - [`engine`] — compile a [`Rule`], run it to produce matches,
+//!   [`CompiledRule::apply`] / [`CompiledRule::auto_apply`] /
+//!   [`CompiledRule::apply_checked`] a codemod (safety-gated, idempotency
+//!   checked), and emit [`Diagnostic`]s.
 //! - [`loader`] — load rules from a TOML file or a directory.
 //!
 //! The whole-project scan lifecycle (#2836) layers onto this surface.
@@ -59,12 +61,12 @@ pub mod model;
 pub mod pattern;
 pub mod transform;
 
-pub use engine::{Binding, CodemodResult, CompiledRule, RuleMatch, Span};
+pub use engine::{Binding, CodemodResult, CompiledRule, Diagnostic, RuleMatch, Span};
 pub use error::RulesError;
 pub use fix::{interpolate, AppliedEdit};
 pub use loader::{load_rule_dir, load_rule_file};
 pub use model::{
-    AtomicMatcher, Comparison, Constraint, ConvertOp, Rule, RuleKind, RuleNode, Severity, StopBy,
-    StopKeyword, Transform,
+    Applicability, AtomicMatcher, Comparison, Constraint, ConvertOp, Rule, RuleKind, RuleNode,
+    Safety, Severity, StopBy, StopKeyword, Transform,
 };
 pub use pattern::{compile_pattern, CompiledPattern};

@@ -25,6 +25,57 @@ pub enum Severity {
     Error,
 }
 
+/// How risky a rule's `fix` is, mapped onto Burin's edit-safety taxonomy.
+/// Ordered least → most dangerous; the codemod runner auto-applies only the
+/// two safest tiers (see [`Safety::applicability`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Default, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum Safety {
+    /// Whitespace / formatting only.
+    FormatOnly,
+    /// Semantics-preserving rewrite.
+    BehaviorPreserving,
+    /// Changes behavior, but only within the matched scope. **Default** —
+    /// conservative, so an undeclared codemod does not silently auto-apply.
+    #[default]
+    ScopeLocal,
+    /// Changes an externally-visible surface (a signature, an export).
+    SurfaceChanging,
+    /// Changes capabilities / effects (I/O, permissions).
+    CapabilityChanging,
+    /// Always requires a human in the loop.
+    NeedsHuman,
+}
+
+/// Whether a fix may be auto-applied (clippy/ESLint `machine-applicable`)
+/// or is opt-in only (`suggestion`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Applicability {
+    /// Safe to auto-apply (`format-only` / `behavior-preserving`).
+    MachineApplicable,
+    /// Preview / opt-in only.
+    Suggestion,
+}
+
+impl Safety {
+    /// The applicability tier this safety level maps to. `format-only` and
+    /// `behavior-preserving` are machine-applicable; everything riskier is a
+    /// suggestion.
+    pub fn applicability(self) -> Applicability {
+        if self <= Safety::BehaviorPreserving {
+            Applicability::MachineApplicable
+        } else {
+            Applicability::Suggestion
+        }
+    }
+
+    /// True when the runner may auto-apply this rule's fix without an
+    /// explicit opt-in.
+    pub fn is_auto_applicable(self) -> bool {
+        self.applicability() == Applicability::MachineApplicable
+    }
+}
+
 /// What flavor of work a rule performs, derived from its shape rather than
 /// declared: a rule with a `fix` is a codemod; one with a `message` but no
 /// `fix` is a lint; a bare matcher is a search.
@@ -190,6 +241,9 @@ pub struct Rule {
     /// Human-readable diagnostic message. Empty for search-only rules.
     #[serde(default)]
     pub message: String,
+    /// How risky the `fix` is. Gates auto-apply. Defaults to `scope-local`.
+    #[serde(default)]
+    pub safety: Safety,
     /// The matcher block (atomic / relational / composite algebra).
     pub rule: RuleNode,
     /// Local utility rules referenced by `matches`, keyed by id.
