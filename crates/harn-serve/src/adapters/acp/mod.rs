@@ -2976,20 +2976,31 @@ impl AcpServer {
         )
     }
 
+    /// Extract the request's `sessionId`/`session_id` parameter, emitting a
+    /// JSON-RPC error and returning `None` when it is absent or non-string.
+    fn session_id_param<'a>(
+        &self,
+        id: &serde_json::Value,
+        params: &'a serde_json::Value,
+        method: &str,
+    ) -> Option<&'a str> {
+        let session_id = params
+            .get("sessionId")
+            .or_else(|| params.get("session_id"))
+            .and_then(serde_json::Value::as_str);
+        if session_id.is_none() {
+            self.send_error(id, -32602, &format!("{method} requires sessionId"));
+        }
+        session_id
+    }
+
     fn restored_session_id<'a>(
         &self,
         id: &serde_json::Value,
         params: &'a serde_json::Value,
         method: &str,
     ) -> Option<&'a str> {
-        let Some(session_id) = params
-            .get("sessionId")
-            .or_else(|| params.get("session_id"))
-            .and_then(serde_json::Value::as_str)
-        else {
-            self.send_error(id, -32602, &format!("{method} requires sessionId"));
-            return None;
-        };
+        let session_id = self.session_id_param(id, params, method)?;
 
         if !self.sessions.contains_key(session_id) {
             self.send_error(id, -32602, &format!("unknown session: {session_id}"));
@@ -3000,13 +3011,38 @@ impl AcpServer {
         Some(session_id)
     }
 
+    /// Register a session the live server never saw so its persisted
+    /// replay history can be restored into an interactive session. Used
+    /// by `session/load` when a client (e.g. the Rust TUI saved-session
+    /// picker) attaches a Burin saved session after a fresh `harn serve`
+    /// start. The in-process channel server spins prompt turns up on
+    /// demand, so the restored session is genuinely live — unlike the
+    /// WebSocket hub's `expired_replay_only` fallback, which has no
+    /// worker to re-attach to.
+    fn register_restored_session(&mut self, session_id: &str, params: &serde_json::Value) {
+        let cwd = params
+            .get("cwd")
+            .and_then(|value| value.as_str())
+            .map(PathBuf::from)
+            .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
+        self.insert_session(session_id.to_string(), cwd, SessionInfo::default());
+    }
+
     async fn handle_session_load(&mut self, id: &serde_json::Value, params: &serde_json::Value) {
-        let Some(session_id) = self.restored_session_id(id, params, "session/load") else {
+        let Some(session_id) = self
+            .session_id_param(id, params, "session/load")
+            .map(str::to_owned)
+        else {
             return;
         };
 
+        // Replay events are the durable source of truth for the in-process
+        // path, so load them before deciding whether the session is
+        // restorable. This mirrors the WebSocket hub's persisted fallback in
+        // `replay_persisted_acp_events`, but keeps the restored session live
+        // and promptable rather than replay-only.
         let replay_events =
-            match harn_vm::orchestration::load_agent_session_replay_events(session_id).await {
+            match harn_vm::orchestration::load_agent_session_replay_events(&session_id).await {
                 Ok(events) => events,
                 Err(error) => {
                     self.send_error(
@@ -3017,6 +3053,18 @@ impl AcpServer {
                     return;
                 }
             };
+
+        if self.sessions.contains_key(&session_id) {
+            harn_vm::agent_sessions::open_or_create(Some(session_id.clone()));
+        } else if replay_events.is_empty() {
+            // No live session and nothing persisted under this id: fail loudly
+            // so the client can distinguish a typo/stale id from a real load.
+            self.send_error(id, -32602, &format!("unknown session: {session_id}"));
+            return;
+        } else {
+            self.register_restored_session(&session_id, params);
+        }
+
         let replay_sink = AcpAgentEventSink::for_replay(self.output.clone());
         for replay_event in &replay_events {
             replay_sink.handle_event(&replay_event.event);
@@ -3035,7 +3083,7 @@ impl AcpServer {
             .collect();
 
         let mut result = self
-            .session_restore_result(session_id)
+            .session_restore_result(&session_id)
             .expect("validated session should still exist");
         result["replayed"] = serde_json::json!(replayed);
         self.send_response(id, result);
