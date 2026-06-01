@@ -320,6 +320,18 @@ impl VmValue {
         }
     }
 
+    /// Borrows the string contents without allocating when the value is
+    /// already a string. Non-string values are rendered with `display()`,
+    /// matching the coercion callers apply at string boundaries. Hot string
+    /// builtins (regex, split, contains) use this to avoid cloning the
+    /// subject text on every call.
+    pub fn as_str_cow(&self) -> std::borrow::Cow<'_, str> {
+        match self {
+            VmValue::String(s) => std::borrow::Cow::Borrowed(s),
+            other => std::borrow::Cow::Owned(other.display()),
+        }
+    }
+
     pub fn struct_name(&self) -> Option<&str> {
         match self {
             VmValue::StructInstance { layout, .. } => Some(layout.struct_name()),

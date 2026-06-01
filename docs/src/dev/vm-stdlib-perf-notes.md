@@ -85,6 +85,40 @@ canonical connector option-builder shape):
 Conformance was unchanged (`stdlib_collections`, `stdlib_json`, and the
 broader 933-test suite all pass).
 
+### 3. Regex builtins share compiled patterns via `Rc` instead of cloning
+
+Issue #2796 surfaced this while porting a TypeScript repo-audit script:
+a line-oriented scan of the repository was ~3.4× slower in Harn than the
+Node baseline. Decomposing the scan (file walk / `read_text` / line split
+/ `contains` / `regex_match`, each timed separately over ~740k lines)
+isolated the cost entirely to `regex_match` at ~4.4 µs/call — file I/O,
+splitting, and `contains` were all already cheap.
+
+The pattern was cached, but `get_cached_regex` returned `regex::Regex::clone`
+on every hit, and `regex::Regex::clone` deep-copies the compiled program and
+its lazy-DFA match-cache pool. A standalone Rust probe confirmed the cost:
+134k `find_iter` calls over a real file took 3.3 ms reusing one `Regex`,
+466 ms cloning the `Regex` per call, and 2.7 ms cloning an `Rc<Regex>` per
+call — i.e. the deep clone, not the match, was ~99% of the time.
+
+The fix stores `Rc<regex::Regex>` in the thread-local cache so a hit is a
+refcount bump, adds a single-slot "last pattern" memo that skips the
+cache-key `format!` and HashMap hash when a scan loop reuses one pattern,
+and switches the regex/`contains`/`split` family to borrow their subject and
+needle (`VmValue::as_str_cow`) instead of `display()`-cloning per call.
+
+Effect on `regex_scan_loop` (4,000 iterations × 10 lines of two `contains`
+plus one `regex_match` — the canonical line scan shape):
+
+| metric                    | baseline (Harn 0.8.60) | post-#2796 | delta  |
+|---------------------------|-----------------------:|-----------:|-------:|
+| `harn bench` 10-iter mean |                 367.9 ms |    36.6 ms | −90 %  |
+
+A full-repository scan (~740k `regex_match` calls over 1,409 files) drops
+its regex phase from ~4.0 s to ~1.2 s; the remaining cost is VM call
+dispatch and result-list construction, not the regex engine. Conformance
+(`regex*`, `string*`) was unchanged.
+
 ## Post-#2095 performance wave
 
 The #1426 profile left a second wave of runtime and typechecker work.

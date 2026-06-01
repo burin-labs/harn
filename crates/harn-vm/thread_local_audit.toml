@@ -508,7 +508,7 @@ plan = "task_local_or_explicit"
 
 [[thread_local]]
 path = "src/stdlib/regex.rs"
-statics = ["REGEX_CACHE"]
+statics = ["REGEX_CACHE", "LAST_REGEX"]
 category = "thread_private"
 plan = "thread_private_cache"
 

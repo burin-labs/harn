@@ -22,6 +22,7 @@ const FIXTURES: &[&str] = &[
     "local_variable_lookup.harn",
     "method_call_dispatch.harn",
     "recursive_countdown.harn",
+    "regex_scan_loop.harn",
     "string_interpolation_loop.harn",
     "struct_field_read.harn",
 ];

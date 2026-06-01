@@ -12,13 +12,16 @@ impl crate::vm::Vm {
             "count" => Ok(VmValue::Int(s.chars().count() as i64)),
             "empty" => Ok(VmValue::Bool(s.is_empty())),
             "contains" => Ok(VmValue::Bool(
-                s.contains(&*args.first().map(|a| a.display()).unwrap_or_default()),
+                s.contains(&*args.first().map(|a| a.as_str_cow()).unwrap_or_default()),
             )),
             "replace" if args.len() >= 2 => Ok(VmValue::String(std::sync::Arc::from(
-                s.replace(&args[0].display(), &args[1].display()),
+                s.replace(&*args[0].as_str_cow(), &args[1].as_str_cow()),
             ))),
             "split" => {
-                let sep = args.first().map(|a| a.display()).unwrap_or(",".into());
+                let sep = args
+                    .first()
+                    .map(|a| a.as_str_cow())
+                    .unwrap_or(std::borrow::Cow::Borrowed(","));
                 Ok(VmValue::List(std::sync::Arc::new(
                     s.split(&*sep)
                         .map(|p| VmValue::String(std::sync::Arc::from(p)))
@@ -27,10 +30,10 @@ impl crate::vm::Vm {
             }
             "trim" => Ok(VmValue::String(std::sync::Arc::from(s.trim()))),
             "starts_with" => Ok(VmValue::Bool(
-                s.starts_with(&*args.first().map(|a| a.display()).unwrap_or_default()),
+                s.starts_with(&*args.first().map(|a| a.as_str_cow()).unwrap_or_default()),
             )),
             "ends_with" => Ok(VmValue::Bool(
-                s.ends_with(&*args.first().map(|a| a.display()).unwrap_or_default()),
+                s.ends_with(&*args.first().map(|a| a.as_str_cow()).unwrap_or_default()),
             )),
             "lowercase" => Ok(VmValue::String(std::sync::Arc::from(s.to_lowercase()))),
             "uppercase" => Ok(VmValue::String(std::sync::Arc::from(s.to_uppercase()))),
@@ -45,9 +48,9 @@ impl crate::vm::Vm {
                 Ok(VmValue::String(std::sync::Arc::from(substr)))
             }
             "index_of" => {
-                let needle = args.first().map(|a| a.display()).unwrap_or_default();
+                let needle = args.first().map(|a| a.as_str_cow()).unwrap_or_default();
                 let idx = s
-                    .find(&needle)
+                    .find(&*needle)
                     .map(|byte_pos| s[..byte_pos].chars().count() as i64);
                 Ok(VmValue::Int(idx.unwrap_or(-1)))
             }
