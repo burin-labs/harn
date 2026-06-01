@@ -13,10 +13,13 @@ to regex/glob search.
 This crate ships the **atomic matching tier**
 ([harn#2832](https://github.com/burin-labs/harn/issues/2832)), the
 **relational + composite algebra**
-([harn#2833](https://github.com/burin-labs/harn/issues/2833)), and the
+([harn#2833](https://github.com/burin-labs/harn/issues/2833)), the
 **predicate + rewrite layer**
-([harn#2834](https://github.com/burin-labs/harn/issues/2834)). The
-whole-project scan lifecycle (#2836) builds on it.
+([harn#2834](https://github.com/burin-labs/harn/issues/2834)), the
+**safety + idempotency gate**
+([harn#2835](https://github.com/burin-labs/harn/issues/2835)), and the
+**whole-project scan lifecycle**
+([harn#2836](https://github.com/burin-labs/harn/issues/2836)).
 
 ## Rule shape (TOML)
 
@@ -136,3 +139,34 @@ for m in compiled.run(source)? {
 ```
 
 Load from disk with `load_rule_file(path)` or `load_rule_dir(dir)`.
+
+### Whole-project lifecycle
+
+For rules that must see the whole repo before editing — or that create /
+delete files (import insertion, codegen, dead-code removal) — implement a
+`ScanningRecipe` (OpenRewrite-style): a deterministic, path-sorted `scan`
+pass folds every file into a typed accumulator, then a `generate` pass turns
+that state into a set of `FileChange`s (`Edit` / `Create` / `Delete`).
+
+```rust
+use harn_rules::{run_recipe, RuleRecipe};
+
+// Run a declarative codemod across a project (per-file, no scan state):
+let run = run_recipe(&RuleRecipe { rule: &compiled }, source_files)?;
+for change in &run.changes { /* the caller writes / formats them */ }
+```
+
+`run_recipe` returns the changes; the caller (a CLI, the staged filesystem)
+decides whether to write and `harn fmt` them.
+
+### Data tables (report-only)
+
+`data_table(rule, files)` runs a rule across a project **without editing** and
+returns a columnar `DataTable` — one row per match (path, position, text,
+metavar bindings) plus a metrics summary (total findings, files, per-file
+counts). It serializes to JSON for inventory / impact analysis / audit:
+
+```rust
+let table = harn_rules::data_table(&compiled, &source_files)?;
+println!("{}", table.to_json());   // { rule_id, columns, rows, summary }
+```
