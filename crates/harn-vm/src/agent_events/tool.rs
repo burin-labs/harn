@@ -134,6 +134,128 @@ impl ToolCallErrorCategory {
     }
 }
 
+/// Which gate refused a tool call. Pairs with [`ToolDenial`] so host
+/// harnesses can distinguish a hard capability/policy ceiling (terminal —
+/// retrying the identical call can never succeed) from a user/host
+/// approval rejection, without re-parsing the human-readable reason
+/// string (harn#2780).
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DenialGate {
+    /// The tool is not in the policy's allowed-tool list.
+    ToolCeiling,
+    /// The tool requires a capability/operation the policy does not grant
+    /// (e.g. `workspace.write_text`, `process.exec`).
+    CapabilityCeiling,
+    /// The tool's side-effect level exceeds the policy ceiling
+    /// (e.g. a `process_exec` tool under a `read_only` policy).
+    SideEffectCeiling,
+    /// A `tool_arg_constraint` allow-list rejected the resolved argument
+    /// value (e.g. a `command` that does not match `cargo *`).
+    ArgConstraint,
+    /// A dynamic permission rule (`when`/`unless` predicate) denied the
+    /// call.
+    DynamicPermission,
+    /// A static approval policy decided `deny`.
+    ApprovalPolicy,
+    /// Approval was required (`ask`) but could not be requested because no
+    /// host bridge was available or the request transport failed.
+    ApprovalUnavailable,
+    /// The host/user rejected an approval request (`session/request_permission`).
+    HostRejected,
+    /// A registered pre-tool hook returned `deny`.
+    HookDeny,
+    /// Gate could not be classified.
+    #[default]
+    Unknown,
+}
+
+impl DenialGate {
+    pub const ALL: [Self; 10] = [
+        Self::ToolCeiling,
+        Self::CapabilityCeiling,
+        Self::SideEffectCeiling,
+        Self::ArgConstraint,
+        Self::DynamicPermission,
+        Self::ApprovalPolicy,
+        Self::ApprovalUnavailable,
+        Self::HostRejected,
+        Self::HookDeny,
+        Self::Unknown,
+    ];
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::ToolCeiling => "tool_ceiling",
+            Self::CapabilityCeiling => "capability_ceiling",
+            Self::SideEffectCeiling => "side_effect_ceiling",
+            Self::ArgConstraint => "arg_constraint",
+            Self::DynamicPermission => "dynamic_permission",
+            Self::ApprovalPolicy => "approval_policy",
+            Self::ApprovalUnavailable => "approval_unavailable",
+            Self::HostRejected => "host_rejected",
+            Self::HookDeny => "hook_deny",
+            Self::Unknown => "unknown",
+        }
+    }
+}
+
+/// Structured record of a tool call refused at the dispatch boundary —
+/// by a capability/policy ceiling, an argument allow-list, a permission
+/// rule, an approval decision, or a pre-tool hook. Carried on the denied
+/// `tool_result` and the `PermissionDeny` transcript event so host
+/// harnesses (and the loop's own stall detector) can fail or pivot early
+/// without re-parsing human-readable command output (harn#2780). The
+/// `denied_paths` field captures any workspace paths the refused call
+/// declared, so a path-scoped denial names the offending path.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ToolDenial {
+    /// Which gate refused the call.
+    pub gate: DenialGate,
+    /// Capability/operation that was exceeded, e.g. `workspace.read_text`
+    /// or `process.exec`, when the gate identified one.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub capability: Option<String>,
+    /// Workspace paths the denied call declared, when the tool annotates
+    /// path arguments. Empty for tools that declare no paths.
+    #[serde(skip_serializing_if = "Vec::is_empty", default)]
+    pub denied_paths: Vec<String>,
+    /// Whether re-issuing the identical call could ever succeed. Capability
+    /// and side-effect ceilings, argument allow-lists, and policy/approval
+    /// denials are terminal (`false`); a host harness should fail or pivot
+    /// rather than spend another model call retrying.
+    pub retryable: bool,
+    /// Human-readable explanation — the same text the model sees in the
+    /// tool result.
+    pub reason: String,
+}
+
+impl ToolDenial {
+    /// Build a terminal denial (`retryable: false`) with no declared paths
+    /// attached yet. Every gate Harn currently enforces is terminal —
+    /// re-issuing the identical call can never succeed — so the constructor
+    /// hard-codes `retryable: false`; the field exists so a future soft
+    /// denial can set it `true`. Callers at the dispatch boundary enrich
+    /// `denied_paths` from the tool's annotated path arguments.
+    pub fn terminal(
+        gate: DenialGate,
+        capability: Option<String>,
+        reason: impl Into<String>,
+    ) -> Self {
+        Self {
+            gate,
+            capability,
+            denied_paths: Vec::new(),
+            retryable: false,
+            reason: reason.into(),
+        }
+    }
+
+    pub fn to_json(&self) -> serde_json::Value {
+        serde_json::to_value(self).unwrap_or(serde_json::Value::Null)
+    }
+}
+
 /// Where a tool actually ran. Tags `ToolCallUpdate` so clients can render
 /// "via mcp:linear" / "via host bridge" badges, attribute latency by
 /// transport, and route errors to the right surface (harn#691).

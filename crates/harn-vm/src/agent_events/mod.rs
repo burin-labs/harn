@@ -42,5 +42,5 @@ pub use registry::{
     unregister_wildcard_sink, WildcardSinkHandle,
 };
 pub use sinks::{AgentEventSink, EventLogSink, JsonlEventSink, MultiSink, PersistedAgentEvent};
-pub use tool::{ToolCallErrorCategory, ToolCallStatus, ToolExecutor};
+pub use tool::{DenialGate, ToolCallErrorCategory, ToolCallStatus, ToolDenial, ToolExecutor};
 pub use worker::{FsWatchEvent, WorkerEvent};

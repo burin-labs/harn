@@ -210,9 +210,19 @@ fn agent_primitive_denied_tool(
     tool_args: &serde_json::Value,
     reason: impl Into<String>,
     category: crate::agent_events::ToolCallErrorCategory,
+    denial: Option<&crate::agent_events::ToolDenial>,
 ) -> serde_json::Value {
     let reason = reason.into();
-    let result = agent_tools::denied_tool_result(tool_name, reason.clone());
+    let mut result = agent_tools::denied_tool_result(tool_name, reason.clone());
+    // Mirror the structured denial onto the inner tool result so it rides
+    // along in the transcript the model sees, and onto the envelope so a
+    // host harness reading the dispatch outcome can fail or pivot early
+    // without re-parsing the rendered reason (harn#2780).
+    if let Some(denial) = denial {
+        if let Some(obj) = result.as_object_mut() {
+            obj.insert("denial".to_string(), denial.to_json());
+        }
+    }
     serde_json::json!({
         "ok": false,
         "status": "error",
@@ -223,8 +233,95 @@ fn agent_primitive_denied_tool(
         "rendered_result": agent_tools::render_tool_result(&result),
         "error": reason,
         "error_category": category.as_str(),
+        "denial": denial.map(crate::agent_events::ToolDenial::to_json),
         "executor": null,
     })
+}
+
+/// Append a `PermissionDeny` transcript event that carries the structured
+/// [`crate::agent_events::ToolDenial`] alongside the human-readable reason.
+/// Silent no-op for sessions that were never opened.
+fn emit_permission_deny_event(
+    session_id: &str,
+    tool_name: &str,
+    tool_args: &serde_json::Value,
+    denial: &crate::agent_events::ToolDenial,
+    escalated: bool,
+    policy_decision: Option<serde_json::Value>,
+) {
+    if !crate::agent_sessions::exists(session_id) {
+        return;
+    }
+    let event = permissions::permission_deny_transcript_event(
+        tool_name,
+        tool_args,
+        denial,
+        escalated,
+        policy_decision,
+    );
+    let _ = crate::agent_sessions::append_event(session_id, event);
+}
+
+/// Emit the `PermissionDeny` event and build the denied `tool_result` for a
+/// refused agent tool call. Centralizes the structured-denial plumbing so
+/// every gate (capability ceiling, argument allow-list, dynamic permission,
+/// approval policy, host rejection, pre-tool hook) produces an identical
+/// shape. Fills `denied_paths` from the tool's annotated path arguments when
+/// the caller left them empty. Returns the raw `serde_json::Value` so callers
+/// that need to enrich it further (e.g. attach hook-reminder audit) can do so
+/// before converting to a `VmValue`.
+fn deny_tool_call(
+    session_id: &str,
+    tool_name: &str,
+    tool_call_id: &str,
+    tool_args: &serde_json::Value,
+    mut denial: crate::agent_events::ToolDenial,
+    escalated: bool,
+    policy_decision: Option<serde_json::Value>,
+) -> serde_json::Value {
+    if denial.denied_paths.is_empty() {
+        denial.denied_paths =
+            crate::orchestration::current_tool_declared_paths(tool_name, tool_args);
+    }
+    emit_permission_deny_event(
+        session_id,
+        tool_name,
+        tool_args,
+        &denial,
+        escalated,
+        policy_decision,
+    );
+    agent_primitive_denied_tool(
+        tool_name,
+        tool_call_id,
+        tool_args,
+        denial.reason.clone(),
+        crate::agent_events::ToolCallErrorCategory::PermissionDenied,
+        Some(&denial),
+    )
+}
+
+/// `deny_tool_call` for the common case where no further enrichment is
+/// needed — emits the event, builds the denied result, and converts to a
+/// `VmValue` ready to return from the dispatch primitive.
+fn deny_tool_call_value(
+    session_id: &str,
+    tool_name: &str,
+    tool_call_id: &str,
+    tool_args: &serde_json::Value,
+    denial: crate::agent_events::ToolDenial,
+    escalated: bool,
+    policy_decision: Option<serde_json::Value>,
+) -> VmValue {
+    json_to_vm_value(&deny_tool_call(
+        session_id,
+        tool_name,
+        tool_call_id,
+        tool_args,
+        denial,
+        escalated,
+        policy_decision,
+    ))
 }
 
 /// Build the `tool_result` shape used when a call was preempted by
@@ -531,8 +628,8 @@ async fn host_agent_dispatch_tool_call(
     let bridge = current_host_bridge();
     let _policy_guard = agent_session_host::install_session_policy_guard(options)?;
 
-    if let Err(error) =
-        crate::orchestration::enforce_current_policy_for_tool(&tool_name).and_then(|_| {
+    if let Err(policy_denial) = crate::orchestration::enforce_current_policy_for_tool(&tool_name)
+        .and_then(|_| {
             crate::orchestration::enforce_tool_arg_constraints(
                 &crate::orchestration::current_execution_policy().unwrap_or_default(),
                 &tool_name,
@@ -540,22 +637,20 @@ async fn host_agent_dispatch_tool_call(
             )
         })
     {
-        let reason = error.to_string();
-        emit_permission_event(
-            &session_id,
-            "PermissionDeny",
-            &tool_name,
-            &tool_args,
-            &reason,
-            false,
+        let denial = crate::agent_events::ToolDenial::terminal(
+            policy_denial.gate,
+            policy_denial.capability,
+            policy_denial.reason,
         );
-        return Ok(json_to_vm_value(&agent_primitive_denied_tool(
+        return Ok(deny_tool_call_value(
+            &session_id,
             &tool_name,
             &tool_id,
             &tool_args,
-            reason,
-            crate::agent_events::ToolCallErrorCategory::PermissionDenied,
-        )));
+            denial,
+            false,
+            None,
+        ));
     }
 
     let mut permission_grants = permissions::take_session_grants(&session_id);
@@ -601,21 +696,20 @@ async fn host_agent_dispatch_tool_call(
                         true,
                     );
                 }
-                emit_permission_event(
-                    &session_id,
-                    "PermissionDeny",
-                    &tool_name,
-                    &tool_args,
-                    &reason,
-                    escalated,
+                let denial = crate::agent_events::ToolDenial::terminal(
+                    crate::agent_events::DenialGate::DynamicPermission,
+                    None,
+                    reason,
                 );
-                return Ok(json_to_vm_value(&agent_primitive_denied_tool(
+                return Ok(deny_tool_call_value(
+                    &session_id,
                     &tool_name,
                     &tool_id,
                     &tool_args,
-                    reason,
-                    crate::agent_events::ToolCallErrorCategory::PermissionDenied,
-                )));
+                    denial,
+                    escalated,
+                    None,
+                ));
             }
         }
     }
@@ -643,42 +737,37 @@ async fn host_agent_dispatch_tool_call(
             );
         }
         Some(decision) if decision.is_deny() => {
-            emit_permission_event_with_policy(
-                &session_id,
-                "PermissionDeny",
-                &tool_name,
-                &tool_args,
-                &decision.reason,
-                false,
-                Some(decision.receipt.clone()),
+            let denial = crate::agent_events::ToolDenial::terminal(
+                crate::agent_events::DenialGate::ApprovalPolicy,
+                None,
+                decision.reason,
             );
-            return Ok(json_to_vm_value(&agent_primitive_denied_tool(
+            return Ok(deny_tool_call_value(
+                &session_id,
                 &tool_name,
                 &tool_id,
                 &tool_args,
-                decision.reason,
-                crate::agent_events::ToolCallErrorCategory::PermissionDenied,
-            )));
+                denial,
+                false,
+                Some(decision.receipt),
+            ));
         }
         Some(decision) if decision.is_ask() => {
             let Some(bridge) = bridge.as_ref() else {
-                let reason = "approval required but no host bridge is available";
-                emit_permission_event_with_policy(
-                    &session_id,
-                    "PermissionDeny",
-                    &tool_name,
-                    &tool_args,
-                    reason,
-                    false,
-                    Some(decision.receipt.clone()),
+                let denial = crate::agent_events::ToolDenial::terminal(
+                    crate::agent_events::DenialGate::ApprovalUnavailable,
+                    None,
+                    "approval required but no host bridge is available",
                 );
-                return Ok(json_to_vm_value(&agent_primitive_denied_tool(
+                return Ok(deny_tool_call_value(
+                    &session_id,
                     &tool_name,
                     &tool_id,
                     &tool_args,
-                    reason,
-                    crate::agent_events::ToolCallErrorCategory::PermissionDenied,
-                )));
+                    denial,
+                    false,
+                    Some(decision.receipt.clone()),
+                ));
             };
             let approval_id = if tool_id.is_empty() {
                 format!("tool_call_{}", uuid::Uuid::now_v7())
@@ -727,43 +816,37 @@ async fn host_agent_dispatch_tool_call(
                         );
                     }
                     crate::llm::acp_permission::WireOutcome::Rejected { reason } => {
-                        emit_permission_event_with_policy(
-                            &session_id,
-                            "PermissionDeny",
-                            &tool_name,
-                            &tool_args,
-                            &reason,
-                            true,
-                            Some(decision.receipt.clone()),
+                        let denial = crate::agent_events::ToolDenial::terminal(
+                            crate::agent_events::DenialGate::HostRejected,
+                            None,
+                            reason,
                         );
-                        return Ok(json_to_vm_value(&agent_primitive_denied_tool(
+                        return Ok(deny_tool_call_value(
+                            &session_id,
                             &tool_name,
                             &tool_id,
                             &tool_args,
-                            reason,
-                            crate::agent_events::ToolCallErrorCategory::PermissionDenied,
-                        )));
+                            denial,
+                            true,
+                            Some(decision.receipt.clone()),
+                        ));
                     }
                 },
                 Err(_) => {
-                    let reason =
-                        "approval request failed or host does not implement session/request_permission";
-                    emit_permission_event_with_policy(
-                        &session_id,
-                        "PermissionDeny",
-                        &tool_name,
-                        &tool_args,
-                        reason,
-                        true,
-                        Some(decision.receipt.clone()),
+                    let denial = crate::agent_events::ToolDenial::terminal(
+                        crate::agent_events::DenialGate::ApprovalUnavailable,
+                        None,
+                        "approval request failed or host does not implement session/request_permission",
                     );
-                    return Ok(json_to_vm_value(&agent_primitive_denied_tool(
+                    return Ok(deny_tool_call_value(
+                        &session_id,
                         &tool_name,
                         &tool_id,
                         &tool_args,
-                        reason,
-                        crate::agent_events::ToolCallErrorCategory::PermissionDenied,
-                    )));
+                        denial,
+                        true,
+                        Some(decision.receipt.clone()),
+                    ));
                 }
             }
         }
@@ -788,12 +871,19 @@ async fn host_agent_dispatch_tool_call(
     .await;
     hook_reminder_reports.extend(reports);
     if let Some(reason) = pre_tool_result? {
-        let denied = agent_primitive_denied_tool(
+        let denial = crate::agent_events::ToolDenial::terminal(
+            crate::agent_events::DenialGate::HookDeny,
+            None,
+            reason,
+        );
+        let denied = deny_tool_call(
+            &session_id,
             &tool_name,
             &tool_id,
             &tool_args,
-            reason,
-            crate::agent_events::ToolCallErrorCategory::PermissionDenied,
+            denial,
+            false,
+            None,
         );
         let denied = attach_hook_reminder_audit(denied, hook_reminder_reports);
         return Ok(json_to_vm_value(&denied));
@@ -873,12 +963,15 @@ async fn host_agent_dispatch_tool_call(
 
     let tool_schemas = tools::collect_tool_schemas(tools, None);
     if let Err(message) = tools::validate_tool_args(&tool_name, &tool_args, &tool_schemas) {
+        // Schema validation is not a policy denial — the model can fix the
+        // arguments and retry — so no structured `ToolDenial` is attached.
         let denied = agent_primitive_denied_tool(
             &tool_name,
             &tool_id,
             &tool_args,
             message,
             crate::agent_events::ToolCallErrorCategory::SchemaValidation,
+            None,
         );
         let denied = attach_hook_reminder_audit(denied, hook_reminder_reports);
         return Ok(json_to_vm_value(&denied));

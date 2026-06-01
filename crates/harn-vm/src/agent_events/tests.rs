@@ -419,6 +419,59 @@ fn tool_call_error_category_serializes_as_snake_case() {
 }
 
 #[test]
+fn denial_gate_serializes_as_snake_case() {
+    use crate::agent_events::DenialGate;
+    let pairs = [
+        (DenialGate::ToolCeiling, "tool_ceiling"),
+        (DenialGate::CapabilityCeiling, "capability_ceiling"),
+        (DenialGate::SideEffectCeiling, "side_effect_ceiling"),
+        (DenialGate::ArgConstraint, "arg_constraint"),
+        (DenialGate::DynamicPermission, "dynamic_permission"),
+        (DenialGate::ApprovalPolicy, "approval_policy"),
+        (DenialGate::ApprovalUnavailable, "approval_unavailable"),
+        (DenialGate::HostRejected, "host_rejected"),
+        (DenialGate::HookDeny, "hook_deny"),
+        (DenialGate::Unknown, "unknown"),
+    ];
+    // Keep ALL exhaustive so a new gate forces a wire-string decision.
+    assert_eq!(pairs.len(), DenialGate::ALL.len());
+    for (variant, wire) in pairs {
+        let encoded = serde_json::to_string(&variant).unwrap();
+        assert_eq!(encoded, format!("\"{wire}\""));
+        assert_eq!(variant.as_str(), wire);
+        let decoded: DenialGate = serde_json::from_str(&encoded).unwrap();
+        assert_eq!(decoded, variant);
+    }
+}
+
+#[test]
+fn tool_denial_serializes_terminal_record_and_skips_empty_fields() {
+    use crate::agent_events::{DenialGate, ToolDenial};
+    // A capability ceiling: gate + capability present, no declared paths.
+    let denial = ToolDenial::terminal(
+        DenialGate::CapabilityCeiling,
+        Some("workspace.write_text".to_string()),
+        "tool 'edit' exceeds capability ceiling: workspace.write_text",
+    );
+    let json = denial.to_json();
+    assert_eq!(json["gate"], "capability_ceiling");
+    assert_eq!(json["capability"], "workspace.write_text");
+    assert_eq!(json["retryable"], false);
+    assert!(json["reason"]
+        .as_str()
+        .unwrap()
+        .contains("capability ceiling"));
+    // Empty `denied_paths` and absent `capability` are omitted from the wire.
+    let bare = ToolDenial::terminal(DenialGate::ToolCeiling, None, "exceeds tool ceiling");
+    let bare_json = bare.to_json();
+    assert!(bare_json.get("denied_paths").is_none());
+    assert!(bare_json.get("capability").is_none());
+    // Round-trips back to an equal value.
+    let recovered: ToolDenial = serde_json::from_value(denial.to_json()).unwrap();
+    assert_eq!(recovered, denial);
+}
+
+#[test]
 fn tool_executor_round_trips_with_adjacent_tag() {
     // Adjacent tagging keeps the wire shape uniform — every variant
     // is a JSON object with a `kind` discriminator. The ACP adapter

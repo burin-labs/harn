@@ -29,6 +29,11 @@ pipeline main() {
   let transcript = json_stringify(transcript_messages(denied?.transcript))
   __io_println(transcript.contains("permission_denied"))
   __io_println(transcript.contains("write_note"))
+  // The denial is structured: the gate that refused the call and a
+  // terminal `retryable: false` ride along so a host harness can fail or
+  // pivot without re-parsing the reason prose (#2780).
+  __io_println(transcript.contains("tool_ceiling"))
+  __io_println(transcript.contains("retryable"))
   let read_only_denied = agent_loop(
     "Try to write a note",
     "You are helpful",
