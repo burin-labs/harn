@@ -8,6 +8,38 @@ highlights live in [CHANGELOG-pre-0.6.md](CHANGELOG-pre-0.6.md).
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.8.58
+
+### Added
+
+- **Fast-apply edits with merge model roles (#2666).** Added
+  `std/edit::edit_fast_apply` / `fast_apply`, plus
+  `llm_call(..., {model_role: "merge"})` defaults from
+  `[model_roles.merge]` or `HARN_LLM_MERGE_*`, so broad edit intent can
+  route through a dedicated merge model before dry-run preview, syntax
+  validation, and hash-guarded commit.
+- **Agent loop scratchpads (#2715).** `agent_loop` can now keep a small
+  session-local scratchpad, recite it at the prompt tail every turn, and run a
+  periodic cited reorganization pass with a separate reorganizer model.
+- **Agents API permission spec.** The canonical OpenAPI spec now includes the
+  permission policy/rule/check endpoints already exposed by `harn-serve`.
+- **Project context profiles now auto-activate scoped agent context (#2719).**
+  `project_context_profile(...)` resolves Git/GitHub, Rust, Node, Python, and
+  Swift signals into reducer-ready prompt fragments, skill IDs, tool groups,
+  MCP preset candidates, redacted provenance, and token-delta metadata;
+  `agent_loop_options(...)` resolves the profile automatically from the active
+  project root unless a caller supplies or disables it.
+
+### Fixed
+
+- **Agent loop lifecycle calls recover from invalid self-suspension arguments.**
+  Malformed `agent_await_resumption` calls now inject corrective feedback and
+  let the model continue instead of aborting the whole turn with
+  `HARN-SUS-002`.
+- Release smoke now waits for the official GitHub release assets on tag pushes
+  and tests those downloaded binaries instead of recompiling native release
+  binaries in a second workflow.
+
 ## v0.8.57
 
 ### Added
