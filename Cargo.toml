@@ -21,6 +21,7 @@ members = [
     "crates/harn-lint",
     "crates/harn-hostlib",
     "crates/harn-rules",
+    "crates/harn-rules-hostlib",
     "crates/harn-mcp-rc-compat",
     "perf/llm",
     "perf/vm",

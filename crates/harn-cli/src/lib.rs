@@ -62,6 +62,10 @@ pub(crate) fn ensure_builtin_signatures_installed() {
 #[cfg(feature = "hostlib")]
 pub(crate) fn install_default_hostlib(vm: &mut harn_vm::Vm) {
     let _ = harn_hostlib::install_default(vm);
+    // The `rules` capability lives in its own crate (it depends on
+    // `harn-rules`, which depends on `harn-hostlib`, so it can't ship inside
+    // `install_default`). Wire it in alongside the defaults.
+    harn_rules_hostlib::install(vm);
 }
 
 #[cfg(not(feature = "hostlib"))]

@@ -1,0 +1,27 @@
+import { rules_apply, rules_report, rules_search } from "std/rules"
+
+/**
+ * End-to-end exercise of the `std/rules` surface (#2838): authoring a
+ * declarative rule as TOML *inside Harn* and running it through search,
+ * report-only data tables, and a dry-run codemod — no recompile needed.
+ */
+pipeline default() {
+  hostlib_enable("tools:deterministic")
+  let finder = "id = \"find-calls\"\nlanguage = \"typescript\"\n[rule]\npattern = \"$FN()\"\n"
+  // 1) Search returns matches with capture bindings.
+  let r = rules_search({rule: finder, source: "foo();\nbar();\n", language: "typescript"})
+  __io_println(r.ok && r.match_count == 2)
+  __io_println(r.matches[0].captures.FN == "foo")
+  __io_println(r.matches[1].captures.FN == "bar")
+  // 2) Report-only mode yields a data table with a per-match summary.
+  let rep = rules_report({rule: finder, source: "foo();\nbar();\n", language: "typescript", path: "a.ts"})
+  __io_println(rep.summary.total_rows == 2)
+  __io_println(rep.rule_id == "find-calls")
+  // 3) A codemod in dry-run previews without writing; the
+  //    `behavior-preserving` safety makes it machine-applicable.
+  let codemod = "id = \"rename\"\nlanguage = \"typescript\"\nsafety = \"behavior-preserving\"\nfix = \"bar()\"\n[rule]\npattern = \"foo()\"\n"
+  let ap = rules_apply({rule: codemod, source: "foo();\n", language: "typescript", dry_run: true})
+  __io_println(ap.ok && ap.files[0].changed && !ap.files[0].applied)
+  __io_println(ap.files[0].preview == "bar();\n")
+  __io_println(ap.auto_applicable)
+}

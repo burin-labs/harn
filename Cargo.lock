@@ -2260,6 +2260,7 @@ dependencies = [
  "harn-mcp-rc-compat",
  "harn-modules",
  "harn-parser",
+ "harn-rules-hostlib",
  "harn-serve",
  "harn-skills",
  "harn-stdlib",
@@ -2530,6 +2531,16 @@ dependencies = [
  "thiserror 2.0.18",
  "toml",
  "tree-sitter",
+]
+
+[[package]]
+name = "harn-rules-hostlib"
+version = "0.8.60"
+dependencies = [
+ "harn-hostlib",
+ "harn-rules",
+ "harn-vm",
+ "serde_json",
 ]
 
 [[package]]
