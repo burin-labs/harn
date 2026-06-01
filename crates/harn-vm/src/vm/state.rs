@@ -94,6 +94,18 @@ pub(crate) struct ExceptionHandler {
     pub(crate) error_type: Option<Arc<str>>,
 }
 
+/// A structured-concurrency nursery (`scope { }`). Tasks spawned while this
+/// scope is innermost record their id here; `TaskScopeExit` joins them.
+pub(crate) struct TaskScope {
+    /// Ids of tasks spawned in this scope that have not been explicitly
+    /// `await`ed away. Joined (normal exit) or cancelled (unwind) on close.
+    pub(crate) task_ids: Vec<String>,
+    /// Frame depth at which the scope was opened, for unwind pruning.
+    pub(crate) frame_depth: usize,
+    /// Env scope depth at open, for unwind pruning.
+    pub(crate) env_scope_depth: usize,
+}
+
 /// Iterator state for for-in loops.
 pub(crate) enum IterState {
     Vec {
@@ -181,6 +193,12 @@ pub struct Vm {
     /// Empty for new concurrent tasks (`spawn`/`parallel`/triggers), where the
     /// parent keeps running and the block is legitimately resolvable.
     pub(crate) inherited_held_keys: Arc<Vec<(String, String)>>,
+    /// Structured-concurrency nursery stack. Each `scope { }` block pushes a
+    /// `TaskScope`; tasks spawned while it is innermost register their id here.
+    /// On normal exit (`TaskScopeExit`) the scope's tasks are joined and the
+    /// first error propagates; on unwind they are cancelled. Modeled on
+    /// `held_sync_guards` (push on enter, prune/cancel on frame/handler exit).
+    pub(crate) task_scopes: Vec<TaskScope>,
     /// Counter for generating unique task IDs.
     pub(crate) task_counter: u64,
     /// Counter for logical runtime-context task groups.
@@ -330,6 +348,7 @@ impl VmBaseline {
             pool_registry: crate::stdlib::pool::new_pool_registry(),
             held_sync_guards: Vec::new(),
             inherited_held_keys: Arc::new(Vec::new()),
+            task_scopes: Vec::new(),
             task_counter: 0,
             runtime_context_counter: 0,
             runtime_context: crate::runtime_context::RuntimeContext::root(),
@@ -556,6 +575,7 @@ impl Vm {
             pool_registry: crate::stdlib::pool::new_pool_registry(),
             held_sync_guards: Vec::new(),
             inherited_held_keys: Arc::new(Vec::new()),
+            task_scopes: Vec::new(),
             task_counter: 0,
             runtime_context_counter: 0,
             runtime_context: crate::runtime_context::RuntimeContext::root(),
@@ -706,6 +726,7 @@ impl Vm {
             pool_registry: self.pool_registry.clone(),
             held_sync_guards: Vec::new(),
             inherited_held_keys: Arc::new(Vec::new()),
+            task_scopes: Vec::new(),
             task_counter: 0,
             runtime_context_counter: self.runtime_context_counter,
             runtime_context: self.runtime_context.clone(),
@@ -862,6 +883,9 @@ impl Vm {
         let depth = self.env.scope_depth();
         self.held_sync_guards
             .retain(|guard| guard.env_scope_depth < depth);
+        // A `scope { }` torn down without a normal `TaskScopeExit` (break /
+        // continue out of it) leaves a dangling nursery — cancel its tasks.
+        self.cancel_task_scopes_where(|s| s.env_scope_depth >= depth);
     }
 
     pub(crate) fn release_sync_guards_after_unwind(
@@ -872,11 +896,47 @@ impl Vm {
         self.held_sync_guards.retain(|guard| {
             guard.frame_depth <= frame_depth && guard.env_scope_depth <= env_scope_depth
         });
+        // Cancel nurseries opened above the catch handler (a `throw` unwound
+        // past their `TaskScopeExit`).
+        self.cancel_task_scopes_where(|s| {
+            !(s.frame_depth <= frame_depth && s.env_scope_depth <= env_scope_depth)
+        });
     }
 
     pub(crate) fn release_sync_guards_for_frame(&mut self, frame_depth: usize) {
         self.held_sync_guards
             .retain(|guard| guard.frame_depth != frame_depth);
+        // Cancel any nursery whose `scope {}` block belonged to the frame being
+        // torn down (e.g. a `return` jumped past its `TaskScopeExit`).
+        self.cancel_task_scopes_where(|s| s.frame_depth == frame_depth);
+    }
+
+    /// Deregister a task id from every open nursery (it was explicitly
+    /// `await`ed, so it must not be double-joined or cancelled at scope exit).
+    pub(crate) fn deregister_task_from_scopes(&mut self, id: &str) {
+        for scope in &mut self.task_scopes {
+            scope.task_ids.retain(|t| t != id);
+        }
+    }
+
+    /// Cancel and remove every task scope matching `doomed`, aborting its bound
+    /// tasks (used when a `scope {}` is torn down without a normal join).
+    fn cancel_task_scopes_where<F: Fn(&TaskScope) -> bool>(&mut self, doomed: F) {
+        let mut i = 0;
+        while i < self.task_scopes.len() {
+            if doomed(&self.task_scopes[i]) {
+                let scope = self.task_scopes.remove(i);
+                for id in &scope.task_ids {
+                    if let Some(task) = self.spawned_tasks.remove(id) {
+                        task.cancel_token
+                            .store(true, std::sync::atomic::Ordering::SeqCst);
+                        task.handle.abort();
+                    }
+                }
+            } else {
+                i += 1;
+            }
+        }
     }
 
     /// Total permits this VM already holds for `kind:key` via lexical sync

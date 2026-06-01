@@ -300,6 +300,7 @@ impl Formatter<'_> {
             }
             Node::DeferStmt { body } => self.format_block_expr("defer {", body, indent),
             Node::SpawnExpr { body } => self.format_block_expr("spawn {", body, indent),
+            Node::ScopeBlock { body } => self.format_block_expr("scope {", body, indent),
             Node::YieldExpr { value } => {
                 if let Some(val) = value {
                     format!("yield {}", self.format_expr(val, indent))

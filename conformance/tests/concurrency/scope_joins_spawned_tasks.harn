@@ -1,0 +1,14 @@
+pipeline test(task) {
+  let counter = atomic(0)
+  // The `scope { }` nursery joins every task spawned inside it before the
+  // block exits, so both increments are observable afterwards.
+  scope {
+    spawn {
+      atomic_add(counter, 1)
+    }
+    spawn {
+      atomic_add(counter, 1)
+    }
+  }
+  log(atomic_get(counter))
+}

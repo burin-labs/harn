@@ -150,6 +150,7 @@ fn collect_children<'a>(node: &'a SNode, children: &mut Vec<&'a SNode>) {
         }
         Node::TryExpr { body }
         | Node::SpawnExpr { body }
+        | Node::ScopeBlock { body }
         | Node::DeferStmt { body }
         | Node::Block(body)
         | Node::Closure { body, .. } => collect_nodes(body, children),

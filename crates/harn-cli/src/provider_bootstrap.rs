@@ -300,6 +300,7 @@ fn node_uses_provider_llm(node: &SNode, shadows: &HashSet<String>) -> bool {
         | Node::FnDecl { body, .. }
         | Node::ToolDecl { body, .. }
         | Node::SpawnExpr { body }
+        | Node::ScopeBlock { body }
         | Node::DeferStmt { body }
         | Node::MutexBlock { body, .. }
         | Node::TryExpr { body }

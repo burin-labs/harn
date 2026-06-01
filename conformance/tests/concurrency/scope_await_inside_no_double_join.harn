@@ -1,0 +1,11 @@
+pipeline test(task) {
+  // Awaiting a task explicitly deregisters it from the nursery, so scope exit
+  // neither double-joins nor cancels it.
+  scope {
+    let h = spawn {
+      42
+    }
+    log(await(h))
+  }
+  log("done")
+}

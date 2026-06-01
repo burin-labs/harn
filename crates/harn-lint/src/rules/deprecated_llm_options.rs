@@ -110,6 +110,7 @@ fn visit_node(node: &SNode, diagnostics: &mut Vec<LintDiagnostic>) {
         }
         Node::TryExpr { body }
         | Node::SpawnExpr { body }
+        | Node::ScopeBlock { body }
         | Node::DeferStmt { body }
         | Node::MutexBlock { body, .. }
         | Node::Block(body)

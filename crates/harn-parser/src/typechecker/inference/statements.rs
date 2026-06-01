@@ -1514,7 +1514,7 @@ impl TypeChecker {
                 self.check_block(body, &mut block_scope);
             }
 
-            Node::DeferStmt { body } => {
+            Node::ScopeBlock { body } | Node::DeferStmt { body } => {
                 let mut block_scope = scope.child();
                 self.check_block(body, &mut block_scope);
             }

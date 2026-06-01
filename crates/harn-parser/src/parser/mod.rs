@@ -23,6 +23,34 @@ mod tests {
     }
 
     #[test]
+    fn parses_scope_block_and_keeps_scope_identifier_contextual() {
+        fn count_scope_blocks(source: &str) -> usize {
+            let program = parse_source(source).unwrap();
+            let mut n = 0;
+            crate::visit::walk_program(&program, &mut |node| {
+                if matches!(&node.node, Node::ScopeBlock { .. }) {
+                    n += 1;
+                }
+            });
+            n
+        }
+
+        // `scope { }` at statement position parses to a ScopeBlock nursery.
+        assert_eq!(
+            count_scope_blocks("pipeline default(task) { scope { spawn { log(1) } } }"),
+            1,
+            "`scope {{}}` should parse to a ScopeBlock"
+        );
+        // `scope` stays a plain identifier as a dict key / property / variable —
+        // the keyword is contextual (only `scope {` triggers a nursery).
+        assert_eq!(
+            count_scope_blocks("pipeline default(task) { let d = {scope: 1}\nlog(d.scope) }"),
+            0,
+            "`scope` as a dict key / property must remain an identifier"
+        );
+    }
+
+    #[test]
     fn parses_bare_and_keyed_mutex() {
         fn first_mutex_has_key(source: &str) -> Option<bool> {
             let program = parse_source(source).unwrap();

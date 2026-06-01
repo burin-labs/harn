@@ -37,6 +37,7 @@ fn collect_mock_host_capabilities_from_node(
         | Node::FnDecl { body, .. }
         | Node::ToolDecl { body, .. }
         | Node::SpawnExpr { body }
+        | Node::ScopeBlock { body }
         | Node::TryExpr { body }
         | Node::MutexBlock { body, .. }
         | Node::DeferStmt { body }

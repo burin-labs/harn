@@ -61,6 +61,7 @@ fn collect_ast_ranges(
         | Node::FnDecl { body, .. }
         | Node::ToolDecl { body, .. }
         | Node::SpawnExpr { body }
+        | Node::ScopeBlock { body }
         | Node::WhileLoop { body, .. }
         | Node::Retry { body, .. }
         | Node::TryExpr { body }

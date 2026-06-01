@@ -949,6 +949,7 @@ impl<'a> Linter<'a> {
             | Node::CostRoute { body, .. }
             | Node::Block(body)
             | Node::SpawnExpr { body }
+            | Node::ScopeBlock { body }
             | Node::Closure { body, .. } => Self::body_has_long_running_cleanup(body),
             _ => false,
         }
@@ -1010,6 +1011,7 @@ impl<'a> Linter<'a> {
             | Node::CostRoute { body, .. }
             | Node::Block(body)
             | Node::SpawnExpr { body }
+            | Node::ScopeBlock { body }
             | Node::Closure { body, .. } => Self::block_calls_cancel_handle(body),
             Node::MethodCall { object, args, .. }
             | Node::OptionalMethodCall { object, args, .. } => {
@@ -1601,6 +1603,7 @@ impl<'a> Linter<'a> {
             }
             Node::TryExpr { body }
             | Node::SpawnExpr { body }
+            | Node::ScopeBlock { body }
             | Node::DeferStmt { body }
             | Node::MutexBlock { body, .. }
             | Node::Block(body)

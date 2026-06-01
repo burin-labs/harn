@@ -312,6 +312,7 @@ fn node_children_bundle(node: &SNode) -> Vec<&SNode> {
         Node::Pipeline { body, .. }
         | Node::OverrideDecl { body, .. }
         | Node::SpawnExpr { body }
+        | Node::ScopeBlock { body }
         | Node::Block(body)
         | Node::Closure { body, .. }
         | Node::TryExpr { body }

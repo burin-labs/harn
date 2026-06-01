@@ -58,6 +58,11 @@ impl Parser {
             TokenKind::Identifier(name) if name == "gen" && self.check_contextual_gen_fn() => {
                 self.parse_gen_fn_decl_with_pub(false)
             }
+            TokenKind::Identifier(name)
+                if name == "scope" && self.check_contextual_scope_block() =>
+            {
+                self.parse_scope_block()
+            }
             TokenKind::Tool => self.parse_tool_decl(false),
             TokenKind::Skill => self.parse_skill_decl(false),
             TokenKind::EvalPack => self.parse_eval_pack_decl(false),
@@ -794,6 +799,20 @@ impl Parser {
             Node::EmitExpr {
                 value: Box::new(value),
             },
+            Span::merge(start, self.prev_span()),
+        ))
+    }
+
+    pub(super) fn parse_scope_block(&mut self) -> Result<SNode, ParserError> {
+        let start = self.current_span();
+        // `scope` is a contextual keyword (an Identifier token), so consume it
+        // as such rather than as a reserved `TokenKind`.
+        self.consume_contextual_keyword("scope", "scope")?;
+        self.consume(&TokenKind::LBrace, "{")?;
+        let body = self.parse_block()?;
+        self.consume(&TokenKind::RBrace, "}")?;
+        Ok(spanned(
+            Node::ScopeBlock { body },
             Span::merge(start, self.prev_span()),
         ))
     }

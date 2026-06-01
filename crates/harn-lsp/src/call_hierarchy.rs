@@ -302,6 +302,7 @@ fn visit_children_for_callables(node: &SNode, callables: &mut Vec<CallableInfo>)
         }
         Node::Block(stmts)
         | Node::SpawnExpr { body: stmts }
+        | Node::ScopeBlock { body: stmts }
         | Node::WhileLoop { body: stmts, .. }
         | Node::Retry { body: stmts, .. }
         | Node::TryExpr { body: stmts }
@@ -411,6 +412,7 @@ fn visit_child_owners(node: &SNode, owner_span: Span, calls: &mut Vec<CallSite>)
         Node::ForIn { body, .. }
         | Node::Block(body)
         | Node::SpawnExpr { body }
+        | Node::ScopeBlock { body }
         | Node::WhileLoop { body, .. }
         | Node::Retry { body, .. }
         | Node::TryExpr { body }
@@ -548,6 +550,7 @@ fn collect_calls(node: &SNode, calls: &mut Vec<CallSite>) {
         }
         Node::Block(stmts)
         | Node::SpawnExpr { body: stmts }
+        | Node::ScopeBlock { body: stmts }
         | Node::WhileLoop { body: stmts, .. }
         | Node::Retry { body: stmts, .. }
         | Node::TryExpr { body: stmts }
