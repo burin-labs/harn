@@ -44,8 +44,14 @@ impl AsyncBuiltinCtx {
     /// Clone a fresh child VM from this context. The returned `Vm` shares the
     /// parent's heavy state, so each closure-invoking handler gets its own
     /// cheap execution context.
+    ///
+    /// Uses the *inline* clone: this child runs while the original parent is
+    /// parked awaiting the builtin, so it inherits the parent's held-lock keys
+    /// for cross-context self-deadlock detection (HARN-ORC-011). Long-lived /
+    /// detached contexts use [`AsyncBuiltinCtx::child_ctx`] instead, which does
+    /// not inherit, since the parent keeps running there.
     pub fn child_vm(&self) -> Vm {
-        self.child.lock().child_vm()
+        self.child.lock().child_vm_inline()
     }
 
     /// Pool tasks may execute on any Tokio worker thread, so pool lookup state
@@ -57,8 +63,13 @@ impl AsyncBuiltinCtx {
     /// Create an independent context rooted at a fresh child VM. Long-lived
     /// local tasks use this instead of sharing the parent builtin's output
     /// buffer after the parent future has returned.
+    ///
+    /// This is a *detached* context: the new task runs independently of the
+    /// original parent, so it must NOT inherit the parent's held-lock keys
+    /// (blocking on a parent-held lock is legitimately resolvable here). Uses
+    /// the plain, non-inheriting `child_vm()` rather than `Self::child_vm`.
     pub fn child_ctx(&self) -> Self {
-        Self::new(self.child_vm())
+        Self::new(self.child.lock().child_vm())
     }
 
     /// Forward captured output from a transient child VM (typically created via

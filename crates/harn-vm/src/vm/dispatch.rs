@@ -587,7 +587,7 @@ impl Vm {
                 // into the handler. Drain any output VM-side closures
                 // forwarded into the ctx back to the parent.
                 let (result, captured) =
-                    crate::vm::run_async_builtin_with(self.child_vm(), |ctx| {
+                    crate::vm::run_async_builtin_with(self.child_vm_inline(), |ctx| {
                         async_builtin(ctx, args)
                     })
                     .await;
