@@ -1394,7 +1394,11 @@ impl TypeChecker {
 
     /// The type a callable body yields: the trailing expression, or the operand
     /// of a trailing `return`.
-    fn infer_closure_body_return(&self, body: &[SNode], scope: &TypeScope) -> InferredType {
+    pub(in crate::typechecker) fn infer_closure_body_return(
+        &self,
+        body: &[SNode],
+        scope: &TypeScope,
+    ) -> InferredType {
         let last = body.last()?;
         match &last.node {
             Node::ReturnStmt { value: Some(v) } => self.infer_type(v, scope),

@@ -1,0 +1,7 @@
+fn keep_callback(f: fn(int) -> int) -> int {
+  return 0
+}
+
+pipeline default() {
+  __io_println(keep_callback({ x -> x + "oops" }))
+}

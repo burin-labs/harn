@@ -390,16 +390,18 @@ impl TypeChecker {
                 param.type_expr.clone()
             };
             let has_annotation = param.type_expr.is_some();
-            body_scope.define_var(&param.name, param_type);
+            body_scope.define_var(&param.name, param_type.clone());
             if has_annotation {
                 body_scope.mark_annotated(&param.name);
             }
             body_scope.clear_nil_widenable(&param.name);
             if let Some(default) = &param.default_value {
-                self.check_node(default, &mut body_scope);
+                self.check_node_with_expected(default, param_type.as_ref(), &mut body_scope);
             }
         }
-        self.check_block(body, &mut body_scope);
+        self.expected_return_types.push(return_type.clone());
+        self.check_block_with_expected_tail(body, return_type.as_ref(), &mut body_scope);
+        self.expected_return_types.pop();
         self.fn_depth -= 1;
 
         if let Some(ret_type) = return_type {
@@ -463,16 +465,18 @@ impl TypeChecker {
                 param.type_expr.clone()
             };
             let has_annotation = param.type_expr.is_some();
-            fn_scope.define_var(&param.name, param_type);
+            fn_scope.define_var(&param.name, param_type.clone());
             if has_annotation {
                 fn_scope.mark_annotated(&param.name);
             }
             fn_scope.clear_nil_widenable(&param.name);
             if let Some(default) = &param.default_value {
-                self.check_node(default, &mut fn_scope);
+                self.check_node_with_expected(default, param_type.as_ref(), &mut fn_scope);
             }
         }
-        self.check_block(body, &mut fn_scope);
+        self.expected_return_types.push(return_type.clone());
+        self.check_block_with_expected_tail(body, return_type.as_ref(), &mut fn_scope);
+        self.expected_return_types.pop();
 
         if is_stream && !matches!(return_type, None | Some(TypeExpr::Stream(_))) {
             if let Some(actual) = return_type {
@@ -573,6 +577,9 @@ impl TypeChecker {
     ) {
         match &snode.node {
             Node::ReturnStmt { value: Some(val) } => {
+                if self.can_check_contextual_closure(val, expected, scope) {
+                    return;
+                }
                 let inferred = self.infer_type(val, scope);
                 if let Some(actual) = &inferred {
                     if !self.types_compatible(expected, actual, scope) {

@@ -1,0 +1,7 @@
+fn make_callback() -> fn(int) -> int {
+  { x -> x + "oops" }
+}
+
+pipeline default() {
+  __io_println(0)
+}
