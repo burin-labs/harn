@@ -477,13 +477,13 @@ jobs:
           cp "target/${HARN_RELEASE_TARGET}/release/harn" dist/harn
           cp "target/${HARN_RELEASE_TARGET}/release/harn-dap" dist/harn-dap
           cp "target/${HARN_RELEASE_TARGET}/release/harn-lsp" dist/harn-lsp
-          extra_binaries=()
+          package_entries=(harn harn-dap harn-lsp)
           if [[ "$HARN_RELEASE_TARGET" == *unknown-linux-gnu ]]; then
             cp "target/${HARN_RELEASE_TARGET}/release/harn-container-probe" dist/harn-container-probe
-            extra_binaries+=(harn-container-probe)
+            package_entries+=(harn-container-probe)
           fi
           cd dist
-          tar czf "harn-${HARN_RELEASE_TARGET}.tar.gz" harn harn-dap harn-lsp "${extra_binaries[@]}"
+          tar czf "harn-${HARN_RELEASE_TARGET}.tar.gz" "${package_entries[@]}"
 
       - name: Package (windows)
         if: runner.os == 'Windows' && needs.setup.outputs.is_release == 'true'
