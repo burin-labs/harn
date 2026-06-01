@@ -1,8 +1,8 @@
 //! Source-aware lint rules that operate on raw source plus the AST,
 //! rather than on the stateful [`Linter`][crate::linter::Linter] walk.
-//! Each rule lives in its own submodule so the dispatch list in
-//! [`Linter::lint_program`][crate::linter::Linter::lint_program] stays
-//! legible.
+//! Each rule lives in its own submodule and is wrapped as a registry
+//! entry in [`crate::rule`]; the linter dispatches by iterating the
+//! registry rather than calling each rule by name.
 
 pub(crate) mod ast_walk;
 pub(crate) mod blank_lines;

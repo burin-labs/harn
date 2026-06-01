@@ -268,7 +268,10 @@ fn helper(ctx) {
             .iter()
             .any(|diag| diag.rule == "persona-body-must-call-steps"),
         "expected persona-body-must-call-steps diagnostic, got: {:?}",
-        diagnostics.iter().map(|d| d.rule).collect::<Vec<_>>()
+        diagnostics
+            .iter()
+            .map(|d| d.rule.as_ref())
+            .collect::<Vec<_>>()
     );
 }
 

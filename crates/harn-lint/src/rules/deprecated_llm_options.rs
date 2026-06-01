@@ -322,7 +322,7 @@ fn make_diagnostic(key: &str, span: Span) -> LintDiagnostic {
     ));
     LintDiagnostic {
         code: Code::LintDeprecatedLlmOptions,
-        rule: RULE_NAME,
+        rule: RULE_NAME.into(),
         message,
         span,
         severity: LintSeverity::Warning,

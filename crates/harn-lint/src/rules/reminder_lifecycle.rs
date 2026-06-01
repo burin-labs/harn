@@ -63,7 +63,7 @@ fn key_name(node: &SNode) -> Option<String> {
 fn make_diagnostic(span: Span) -> LintDiagnostic {
     LintDiagnostic {
         code: Code::ReminderInfiniteDiscardable,
-        rule: RULE_NAME,
+        rule: RULE_NAME.into(),
         message:
             "`preserve_on_compact: false` with no finite `ttl_turns` can leave a reminder alive indefinitely until compaction drops it."
                 .to_string(),

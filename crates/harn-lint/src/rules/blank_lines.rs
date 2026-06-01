@@ -69,7 +69,7 @@ pub(crate) fn check_blank_line_between_items(
             let span = Span::with_offsets(insert_offset, insert_offset, insert_line, 1);
             diagnostics.push(LintDiagnostic {
                 code: Code::LintBlankLineBetweenItems,
-                rule: "blank-line-between-items",
+                rule: "blank-line-between-items".into(),
                 message: "top-level items should be separated by a blank line".to_string(),
                 span,
                 severity: LintSeverity::Warning,

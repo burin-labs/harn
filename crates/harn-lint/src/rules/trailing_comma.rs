@@ -24,7 +24,7 @@ pub(crate) fn check_trailing_comma(source: &str, diagnostics: &mut Vec<LintDiagn
         };
         diagnostics.push(LintDiagnostic {
             code: Code::LintTrailingComma,
-            rule: "trailing-comma",
+            rule: "trailing-comma".into(),
             message: message.to_string(),
             span: issue.edit.span,
             severity: LintSeverity::Warning,

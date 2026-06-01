@@ -65,7 +65,7 @@ fn make_diagnostic(field: IdentityField, line: usize, col: usize, source: &str) 
     );
     LintDiagnostic {
         code: Code::LintTemplateProviderIdentityBranch,
-        rule: RULE_NAME,
+        rule: RULE_NAME.into(),
         message,
         span,
         severity: LintSeverity::Warning,

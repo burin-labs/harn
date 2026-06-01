@@ -129,7 +129,7 @@ fn literal_string(node: &SNode) -> Option<String> {
 fn make_diagnostic(count: usize, span: Span) -> LintDiagnostic {
     LintDiagnostic {
         code: Code::ReminderProviderBloat,
-        rule: RULE_NAME,
+        rule: RULE_NAME.into(),
         message: format!(
             "`agent_loop` enables {count} distinct reminder providers; this can add overlapping ambient context."
         ),

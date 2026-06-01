@@ -60,7 +60,7 @@ pub(crate) fn check_import_order(
     };
     diagnostics.push(LintDiagnostic {
         code: Code::LintImportOrder,
-        rule: "import-order",
+        rule: "import-order".into(),
         message: "imports are not in canonical order (stdlib first, then alphabetical by path)"
             .to_string(),
         span: replace_span,

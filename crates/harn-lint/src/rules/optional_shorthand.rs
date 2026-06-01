@@ -532,7 +532,7 @@ impl<'a, 'd> State<'a, 'd> {
         let replacement = format!("{inner_text}?");
         self.diagnostics.push(LintDiagnostic {
             code: Code::LintPreferOptionalShorthand,
-            rule: "prefer-optional-shorthand",
+            rule: "prefer-optional-shorthand".into(),
             message: format!("prefer `{inner_text}?` over `{inner_text} | nil`"),
             span,
             severity: LintSeverity::Warning,

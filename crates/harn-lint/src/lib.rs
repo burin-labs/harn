@@ -17,6 +17,7 @@ mod fixes;
 mod harndoc;
 mod linter;
 mod naming;
+mod rule;
 mod rules;
 
 #[cfg(test)]
@@ -50,7 +51,7 @@ pub fn lint_prompt_template(
         Err(message) => {
             return vec![LintDiagnostic {
                 code: Code::LintTemplateParse,
-                rule: "template-parse",
+                rule: "template-parse".into(),
                 message: format!("template did not parse: {message}"),
                 span: harn_lexer::Span::dummy(),
                 severity: LintSeverity::Error,
@@ -75,7 +76,7 @@ pub fn lint_prompt_template(
     } else {
         diagnostics
             .into_iter()
-            .filter(|d| !rule_disabled(d.rule, disabled_rules))
+            .filter(|d| !rule_disabled(&d.rule, disabled_rules))
             .collect()
     }
 }
@@ -210,7 +211,7 @@ fn lint_full(
         linter
             .diagnostics
             .into_iter()
-            .filter(|d| !rule_disabled(d.rule, disabled_rules))
+            .filter(|d| !rule_disabled(&d.rule, disabled_rules))
             .collect()
     }
 }
@@ -225,7 +226,7 @@ pub fn lint_diagnostics_from_type_diagnostics(
     diagnostics
         .iter()
         .filter_map(type_diagnostic_as_lint)
-        .filter(|diagnostic| !rule_disabled(diagnostic.rule, disabled_rules))
+        .filter(|diagnostic| !rule_disabled(&diagnostic.rule, disabled_rules))
         .collect()
 }
 
@@ -243,7 +244,7 @@ fn type_diagnostic_as_lint(diagnostic: &harn_parser::TypeDiagnostic) -> Option<L
     let span = diagnostic.span?;
     Some(LintDiagnostic {
         code: diagnostic.code,
-        rule,
+        rule: rule.into(),
         message: diagnostic.message.clone(),
         span,
         severity: match diagnostic.severity {

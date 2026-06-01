@@ -28,7 +28,7 @@ pub(crate) fn check_require_file_header(
     let span = Span::with_offsets(0, 0, 1, 1);
     diagnostics.push(LintDiagnostic {
         code: Code::LintRequireFileHeader,
-        rule: "require-file-header",
+        rule: "require-file-header".into(),
         message: "file is missing a `/** */` header doc block".to_string(),
         span,
         severity: LintSeverity::Warning,

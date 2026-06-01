@@ -296,7 +296,7 @@ fn check_one_item(
     };
     diagnostics.push(LintDiagnostic {
         code: Code::LintLegacyDocComment,
-        rule: "legacy-doc-comment",
+        rule: "legacy-doc-comment".into(),
         message: format!("{prefix} doc comment(s) above this item should use `/** */` form"),
         span: Span::with_offsets(first.start_byte, last.end_byte, start_line, 1),
         severity: LintSeverity::Warning,
