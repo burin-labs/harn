@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 use std::io;
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
 use crate::value::{VmError, VmValue};
@@ -54,12 +54,12 @@ fn insert_int(dict: &mut BTreeMap<String, VmValue>, key: &str, value: i64) {
     dict.insert(key.to_string(), VmValue::Int(value));
 }
 
-fn elapsed_ms(started: Instant) -> i64 {
-    i64::try_from(started.elapsed().as_millis()).unwrap_or(i64::MAX)
+fn elapsed_ms(started_ms: i64) -> i64 {
+    crate::stdlib::clock::now_monotonic_ms().saturating_sub(started_ms)
 }
 
 fn socket_result(
-    started: Instant,
+    started_ms: i64,
     path: &str,
     ok: bool,
     status: &str,
@@ -71,7 +71,7 @@ fn socket_result(
     out.insert("ok".to_string(), VmValue::Bool(ok));
     insert_string(&mut out, "status", status);
     insert_string(&mut out, "path", path);
-    insert_int(&mut out, "duration_ms", elapsed_ms(started));
+    insert_int(&mut out, "duration_ms", elapsed_ms(started_ms));
     if let Some(error) = error {
         insert_string(&mut out, "error", error);
     }
@@ -97,7 +97,7 @@ fn unix_socket_json_request(
     path: &str,
     request_json: &str,
     options: UnixSocketOptions,
-    started: Instant,
+    started_ms: i64,
 ) -> VmValue {
     use std::io::{BufRead, BufReader, Read, Write};
     use std::os::unix::net::UnixStream;
@@ -106,7 +106,7 @@ fn unix_socket_json_request(
         Ok(stream) => stream,
         Err(error) => {
             return socket_result(
-                started,
+                started_ms,
                 path,
                 false,
                 "connect_error",
@@ -121,7 +121,7 @@ fn unix_socket_json_request(
 
     if let Err(error) = stream.write_all(request_json.as_bytes()) {
         return socket_result(
-            started,
+            started_ms,
             path,
             false,
             io_status(&error),
@@ -132,7 +132,7 @@ fn unix_socket_json_request(
     }
     if let Err(error) = stream.write_all(b"\n") {
         return socket_result(
-            started,
+            started_ms,
             path,
             false,
             io_status(&error),
@@ -143,7 +143,7 @@ fn unix_socket_json_request(
     }
     if let Err(error) = stream.flush() {
         return socket_result(
-            started,
+            started_ms,
             path,
             false,
             io_status(&error),
@@ -158,7 +158,7 @@ fn unix_socket_json_request(
     match reader.read_until(b'\n', &mut response_bytes) {
         Ok(0) => {
             return socket_result(
-                started,
+                started_ms,
                 path,
                 false,
                 "eof",
@@ -170,7 +170,7 @@ fn unix_socket_json_request(
         Ok(_) => {}
         Err(error) => {
             return socket_result(
-                started,
+                started_ms,
                 path,
                 false,
                 io_status(&error),
@@ -182,7 +182,7 @@ fn unix_socket_json_request(
     }
     if response_bytes.len() > options.max_response_bytes {
         return socket_result(
-            started,
+            started_ms,
             path,
             false,
             "response_too_large",
@@ -202,7 +202,7 @@ fn unix_socket_json_request(
         Ok(text) => text,
         Err(error) => {
             return socket_result(
-                started,
+                started_ms,
                 path,
                 false,
                 "invalid_utf8",
@@ -216,7 +216,7 @@ fn unix_socket_json_request(
         Ok(value) => crate::schema::json_to_vm_value(&value),
         Err(error) => {
             return socket_result(
-                started,
+                started_ms,
                 path,
                 false,
                 "invalid_json",
@@ -227,7 +227,7 @@ fn unix_socket_json_request(
         }
     };
     socket_result(
-        started,
+        started_ms,
         path,
         true,
         "ok",
@@ -242,11 +242,11 @@ fn unix_socket_json_request(
     path: &str,
     _request_json: &str,
     options: UnixSocketOptions,
-    started: Instant,
+    started_ms: i64,
 ) -> VmValue {
     let _ = (options.timeout, options.max_response_bytes);
     socket_result(
-        started,
+        started_ms,
         path,
         false,
         "unsupported",
@@ -264,7 +264,7 @@ fn net_unix_socket_json_request_impl(
     args: &[VmValue],
     _out: &mut String,
 ) -> Result<VmValue, VmError> {
-    let started = Instant::now();
+    let started_ms = crate::stdlib::clock::now_monotonic_ms();
     let path = args.first().map(VmValue::display).unwrap_or_default();
     if path.is_empty() {
         return Err(VmError::Thrown(VmValue::String(Arc::from(
@@ -278,7 +278,7 @@ fn net_unix_socket_json_request_impl(
         &path,
         &request_json,
         options,
-        started,
+        started_ms,
     ))
 }
 
@@ -317,7 +317,7 @@ mod tests {
                 timeout: Duration::from_millis(500),
                 max_response_bytes: 1024,
             },
-            Instant::now(),
+            crate::stdlib::clock::now_monotonic_ms(),
         );
         server.join().expect("server thread");
 
@@ -357,7 +357,7 @@ mod tests {
                 timeout: Duration::from_millis(500),
                 max_response_bytes: 1024,
             },
-            Instant::now(),
+            crate::stdlib::clock::now_monotonic_ms(),
         );
         server.join().expect("server thread");
 
