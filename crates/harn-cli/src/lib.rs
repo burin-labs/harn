@@ -12,6 +12,7 @@ pub mod format;
 pub mod json_envelope;
 pub mod package;
 mod provider_bootstrap;
+mod runtime;
 pub mod skill_loader;
 pub mod skill_provenance;
 pub mod test_report;
@@ -35,22 +36,11 @@ use cli::{
 };
 use harn_lexer::Lexer;
 use harn_parser::{DiagnosticSeverity, Parser, TypeChecker};
+use runtime::{build_cli_runtime, cli_runtime_mode, CliRuntimeMode};
 
 pub const CLI_RUNTIME_STACK_SIZE: usize = 16 * 1024 * 1024;
 
 static BROKEN_PIPE_PANIC_HOOK: Once = Once::new();
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum CliRuntimeMode {
-    FullIo,
-    StaticAnalysis,
-}
-
-impl CliRuntimeMode {
-    fn enables_tokio_io(self) -> bool {
-        matches!(self, Self::FullIo)
-    }
-}
 
 /// Install the macro-emitted builtin signature slice into the
 /// `harn_parser` registry the first time any harn-cli entry point parses
@@ -115,75 +105,10 @@ pub fn run() {
         });
 
     if let Err(payload) = handle.join() {
-        if is_broken_pipe_panic_payload(payload.as_ref()) {
+        if runtime::is_broken_pipe_panic_payload(payload.as_ref()) {
             process::exit(0);
         }
         std::panic::resume_unwind(payload);
-    }
-}
-
-fn cli_runtime_mode(raw_args: &[String]) -> CliRuntimeMode {
-    if raw_args.len() == 2 && raw_args[1].ends_with(".harn") {
-        return CliRuntimeMode::FullIo;
-    }
-
-    let Ok(cli) = Cli::try_parse_from(raw_args) else {
-        return CliRuntimeMode::StaticAnalysis;
-    };
-
-    if cli.json_schemas {
-        return CliRuntimeMode::StaticAnalysis;
-    }
-
-    match cli.command {
-        Some(
-            Command::Check(_)
-            | Command::Lint(_)
-            | Command::Fmt(_)
-            | Command::Parse(_)
-            | Command::Tokens(_),
-        ) => CliRuntimeMode::StaticAnalysis,
-        _ => CliRuntimeMode::FullIo,
-    }
-}
-
-fn build_cli_runtime(mode: CliRuntimeMode) -> tokio::runtime::Runtime {
-    let build = panic::catch_unwind(|| {
-        let mut builder = tokio::runtime::Builder::new_multi_thread();
-        if mode.enables_tokio_io() {
-            builder.enable_all();
-        } else {
-            // Static analysis commands use synchronous file/parser paths.
-            // Avoiding Tokio's I/O driver also avoids the Unix signal/process
-            // self-pipe that sandboxed child processes may be forbidden to
-            // create.
-            builder.enable_time();
-        }
-        builder.build()
-    });
-
-    match build {
-        Ok(Ok(runtime)) => runtime,
-        Ok(Err(error)) => {
-            eprintln!("failed to start async runtime: {error}");
-            process::exit(1);
-        }
-        Err(payload) => {
-            if let Some(message) = panic_payload_message(payload.as_ref())
-                .filter(|message| message.contains("failed to create UnixStream"))
-            {
-                eprintln!(
-                    "failed to start async runtime: Tokio signal driver unavailable in this environment: {message}"
-                );
-                if mode.enables_tokio_io() {
-                    eprintln!(
-                        "error: this harn command requires Tokio I/O support; run it outside a sandbox that denies socketpair"
-                    );
-                }
-                process::exit(1);
-            }
-            panic::resume_unwind(payload);
-        }
     }
 }
 
@@ -191,35 +116,12 @@ fn install_broken_pipe_panic_hook() {
     BROKEN_PIPE_PANIC_HOOK.call_once(|| {
         let previous = panic::take_hook();
         panic::set_hook(Box::new(move |info| {
-            if is_broken_pipe_panic_payload(info.payload()) {
+            if runtime::is_broken_pipe_panic_payload(info.payload()) {
                 return;
             }
             previous(info);
         }));
     });
-}
-
-fn panic_payload_message(payload: &(dyn std::any::Any + Send)) -> Option<&str> {
-    if let Some(message) = payload.downcast_ref::<String>() {
-        Some(message.as_str())
-    } else if let Some(message) = payload.downcast_ref::<&str>() {
-        Some(message)
-    } else {
-        None
-    }
-}
-
-fn is_broken_pipe_panic_payload(payload: &(dyn std::any::Any + Send)) -> bool {
-    let Some(message) = panic_payload_message(payload) else {
-        return false;
-    };
-
-    let print_failure = message.contains("failed printing to stdout")
-        || message.contains("failed printing to stderr");
-    let broken_pipe = message.contains("Broken pipe")
-        || message.contains("os error 32")
-        || message.contains("EPIPE");
-    print_failure && broken_pipe
 }
 
 #[allow(clippy::large_stack_frames)] // dispatch entrypoint owns full Args + per-feature locals.
@@ -3200,14 +3102,9 @@ fn connector_secret_namespace(base_dir: &Path) -> String {
 #[cfg(test)]
 mod main_tests {
     use super::{
-        cli_runtime_mode, is_broken_pipe_panic_payload, normalize_serve_args,
-        serve_subcommand_names, should_install_default_connector_clients, CliRuntimeMode,
+        normalize_serve_args, serve_subcommand_names, should_install_default_connector_clients,
     };
     use std::path::Path;
-
-    fn argv(args: &[&str]) -> Vec<String> {
-        args.iter().map(|arg| (*arg).to_string()).collect()
-    }
 
     #[test]
     fn normalize_serve_args_inserts_a2a_for_legacy_shape() {
@@ -3287,44 +3184,5 @@ mod main_tests {
             "__io_println(1)",
             Some(Path::new("examples/demo.harn"))
         ));
-    }
-
-    #[test]
-    fn static_analysis_commands_use_runtime_without_tokio_io_driver() {
-        for args in [
-            argv(&["harn", "check", "script.harn"]),
-            argv(&["harn", "lint", "script.harn"]),
-            argv(&["harn", "fmt", "--check", "script.harn"]),
-            argv(&["harn", "parse", "script.harn"]),
-            argv(&["harn", "tokens", "script.harn"]),
-            argv(&["harn", "--json-schemas"]),
-        ] {
-            assert_eq!(cli_runtime_mode(&args), CliRuntimeMode::StaticAnalysis);
-        }
-    }
-
-    #[test]
-    fn execution_commands_keep_full_tokio_io_runtime() {
-        for args in [
-            argv(&["harn", "run", "script.harn"]),
-            argv(&["harn", "script.harn"]),
-            argv(&["harn", "serve", "a2a", "script.harn"]),
-            argv(&["harn", "test", "conformance"]),
-        ] {
-            let normalized = normalize_serve_args(args);
-            assert_eq!(cli_runtime_mode(&normalized), CliRuntimeMode::FullIo);
-        }
-    }
-
-    #[test]
-    fn broken_pipe_print_panic_is_classified_as_clean_consumer_close() {
-        let payload = String::from("failed printing to stdout: Broken pipe (os error 32)");
-        assert!(is_broken_pipe_panic_payload(&payload));
-    }
-
-    #[test]
-    fn unrelated_panic_is_not_classified_as_broken_pipe() {
-        let payload = String::from("assertion failed: expected true");
-        assert!(!is_broken_pipe_panic_payload(&payload));
     }
 }
