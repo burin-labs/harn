@@ -103,6 +103,23 @@ metavars), and splices the replacements in — format-preserving, the same
 byte-splice guarantee as `ast.batch_apply`. It returns the rewritten source
 plus the per-match edits; the caller decides whether to write.
 
+### Safety, applicability, and idempotency
+
+A rule declares a `safety` tier — `format-only` → `behavior-preserving` →
+`scope-local` (default) → `surface-changing` → `capability-changing` →
+`needs-human`. The two safest map to **machine-applicable**; the rest are
+**suggestions** (opt-in). The gate:
+
+- `apply` always computes the preview (and reports `safety`,
+  `applicability`, and whether the fix is `idempotent`).
+- `auto_apply` refuses anything above `behavior-preserving` — so the runner
+  never silently applies a risky fix.
+- `apply_checked` additionally fails if the fix is **not idempotent** (re-
+  running it produces further changes — it never reaches a fixed point).
+- `diagnostics(source)` emits one diagnostic per match (message, severity,
+  span, applicability, interpolated fix) — the mapping surface the linter
+  and LSP convert into `LintDiagnostic` / `FixEdit`.
+
 ## Usage
 
 ```rust

@@ -16,7 +16,7 @@ use crate::constraint::CompiledConstraint;
 use crate::error::RulesError;
 use crate::evaluator::CompiledRuleTree;
 use crate::fix::{interpolate, splice, AppliedEdit};
-use crate::model::Rule;
+use crate::model::{Applicability, Rule, Safety, Severity};
 use crate::transform::CompiledTransform;
 
 /// A byte + row/col span. Rows/cols are 0-based, matching the rest of the
@@ -84,6 +84,13 @@ pub struct CodemodResult {
     pub edits: Vec<AppliedEdit>,
     /// Whether the rewrite changed the source.
     pub changed: bool,
+    /// The rule's declared safety tier.
+    pub safety: Safety,
+    /// Whether the fix may be auto-applied or is opt-in only.
+    pub applicability: Applicability,
+    /// Whether re-running the fix on `rewritten` yields no further change
+    /// (a fix should reach a fixed point).
+    pub idempotent: bool,
 }
 
 /// A rule whose matcher has been compiled and is ready to run.
@@ -97,6 +104,31 @@ pub struct CompiledRule {
     transforms: Vec<(String, CompiledTransform)>,
     /// The `fix` replacement template, if this is a codemod.
     fix: Option<String>,
+    /// The fix's safety tier (gates auto-apply).
+    safety: Safety,
+    /// The diagnostic message (empty for search-only rules).
+    message: String,
+    /// The diagnostic severity.
+    severity: Severity,
+}
+
+/// A diagnostic produced by running a rule — the mapping surface onto the
+/// linter's `LintDiagnostic` / `FixEdit` (Epic C / the LSP reuse this).
+#[derive(Debug, Clone)]
+pub struct Diagnostic {
+    /// The rule id (also the diagnostic code).
+    pub rule_id: String,
+    /// The diagnostic message.
+    pub message: String,
+    /// The severity.
+    pub severity: Severity,
+    /// The flagged span.
+    pub span: Span,
+    /// Whether a fix, if present, is auto-applicable or a suggestion.
+    pub applicability: Applicability,
+    /// The interpolated fix replacement for this match, if the rule has a
+    /// `fix`.
+    pub fix: Option<String>,
 }
 
 enum Execution {
@@ -157,12 +189,26 @@ impl CompiledRule {
             constraints,
             transforms,
             fix: rule.fix.clone(),
+            safety: rule.safety,
+            message: rule.message.clone(),
+            severity: rule.severity,
         })
     }
 
     /// The language this rule targets.
     pub fn language(&self) -> Language {
         self.language
+    }
+
+    /// The fix's declared safety tier.
+    pub fn safety(&self) -> Safety {
+        self.safety
+    }
+
+    /// Whether this rule's fix may be auto-applied (machine-applicable) or
+    /// is opt-in only (suggestion).
+    pub fn applicability(&self) -> Applicability {
+        self.safety.applicability()
     }
 
     /// Run the compiled rule against `source`, returning matches in
@@ -201,13 +247,85 @@ impl CompiledRule {
     /// text plus the per-match edits. Each match's `fix` template is
     /// interpolated from its captured metavars plus any `transform`-derived
     /// ones. Errors if the rule has no `fix`.
+    ///
+    /// This computes the preview only — it does not enforce the safety gate.
+    /// Use [`CompiledRule::auto_apply`] to refuse non-machine-applicable
+    /// fixes, or [`CompiledRule::apply_checked`] to also assert idempotency.
     pub fn apply(&self, source: &str) -> Result<CodemodResult, RulesError> {
+        let (rewritten, edits) = self.rewrite(source)?;
+        let changed = rewritten != source;
+        // Idempotency: re-running the fix on its own output must not change
+        // it further (the fix should reach a fixed point).
+        let (twice, _) = self.rewrite(&rewritten)?;
+        let idempotent = twice == rewritten;
+        Ok(CodemodResult {
+            rewritten,
+            edits,
+            changed,
+            safety: self.safety,
+            applicability: self.applicability(),
+            idempotent,
+        })
+    }
+
+    /// Like [`CompiledRule::apply`], but refuses to apply a fix whose
+    /// `safety` is above the machine-applicable threshold (`scope-local` and
+    /// riskier). This is the gate `harn codemod --apply` uses by default.
+    pub fn auto_apply(&self, source: &str) -> Result<CodemodResult, RulesError> {
+        if !self.safety.is_auto_applicable() {
+            return Err(RulesError::NotAutoApplicable {
+                rule: self.rule_id.clone(),
+                safety: format!("{:?}", self.safety),
+            });
+        }
+        self.apply(source)
+    }
+
+    /// Like [`CompiledRule::apply`], but fails if the fix is not idempotent.
+    /// Used by the codemod runner and the rule-test harness to assert a fix
+    /// reaches a fixed point.
+    pub fn apply_checked(&self, source: &str) -> Result<CodemodResult, RulesError> {
+        let result = self.apply(source)?;
+        if !result.idempotent {
+            return Err(RulesError::NotIdempotent {
+                rule: self.rule_id.clone(),
+            });
+        }
+        Ok(result)
+    }
+
+    /// Run the rule and produce one [`Diagnostic`] per match — the surface
+    /// the linter (Epic C) and the LSP convert into `LintDiagnostic` /
+    /// `FixEdit`. Each diagnostic carries the interpolated fix (if any) and
+    /// its applicability tier.
+    pub fn diagnostics(&self, source: &str) -> Result<Vec<Diagnostic>, RulesError> {
+        let applicability = self.applicability();
+        let matches = self.run(source)?;
+        Ok(matches
+            .iter()
+            .map(|m| Diagnostic {
+                rule_id: self.rule_id.clone(),
+                message: self.message.clone(),
+                severity: self.severity,
+                span: m.span,
+                applicability,
+                fix: self.fix.as_ref().map(|template| {
+                    let vars = self.metavars_for(m);
+                    interpolate(template, &vars)
+                }),
+            })
+            .collect())
+    }
+
+    /// The core rewrite: run the rule and splice each match's interpolated
+    /// fix. Returns the rewritten text and the edits.
+    fn rewrite(&self, source: &str) -> Result<(String, Vec<AppliedEdit>), RulesError> {
         let template = self
             .fix
             .as_ref()
             .ok_or_else(|| RulesError::PatternCompile {
                 rule: self.rule_id.clone(),
-                message: "apply() requires a `fix` template; this rule has none".into(),
+                message: "apply requires a `fix` template; this rule has none".into(),
             })?;
 
         let matches = self.run(source)?;
@@ -222,14 +340,7 @@ impl CompiledRule {
                 }
             })
             .collect();
-
-        let rewritten = splice(source, &edits);
-        let changed = rewritten != source;
-        Ok(CodemodResult {
-            rewritten,
-            edits,
-            changed,
-        })
+        Ok((splice(source, &edits), edits))
     }
 
     /// Build the full metavar map for a match: captured bindings plus the
