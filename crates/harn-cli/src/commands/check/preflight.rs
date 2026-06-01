@@ -254,6 +254,7 @@ fn spawn_site_children(node: &SNode) -> Vec<&SNode> {
         | Node::FnDecl { body, .. }
         | Node::ToolDecl { body, .. }
         | Node::SpawnExpr { body }
+        | Node::ScopeBlock { body }
         | Node::Retry { body, .. }
         | Node::TryExpr { body }
         | Node::DeferStmt { body }
@@ -480,6 +481,7 @@ fn collect_static_tool_surface_from_node(
         | Node::FnDecl { body, .. }
         | Node::ToolDecl { body, .. }
         | Node::SpawnExpr { body }
+        | Node::ScopeBlock { body }
         | Node::DeferStmt { body }
         | Node::MutexBlock { body, .. }
         | Node::Block(body)
@@ -1451,6 +1453,7 @@ fn scan_node_preflight(
         }
         Node::TryExpr { body }
         | Node::SpawnExpr { body }
+        | Node::ScopeBlock { body }
         | Node::MutexBlock { body, .. }
         | Node::DeferStmt { body } => {
             scan_children(

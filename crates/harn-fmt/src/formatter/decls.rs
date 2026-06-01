@@ -427,6 +427,13 @@ impl Formatter<'_> {
                 self.dedent();
                 self.writeln("}");
             }
+            Node::ScopeBlock { body } => {
+                self.writeln("scope {");
+                self.indent();
+                self.format_body(body, node_line);
+                self.dedent();
+                self.writeln("}");
+            }
             Node::CostRoute { options, body } => {
                 self.writeln("cost_route {");
                 self.indent();

@@ -1,0 +1,12 @@
+pipeline test(task) {
+  // A task that throws inside a `scope { }` propagates its error out of the
+  // block at scope exit (after cancelling any siblings), so `try` catches it.
+  let result = try {
+    scope {
+      spawn {
+        throw "boom"
+      }
+    }
+  }
+  __io_println(is_err(result))
+}

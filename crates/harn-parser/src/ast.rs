@@ -274,6 +274,13 @@ pub enum Node {
     SpawnExpr {
         body: Vec<SNode>,
     },
+    /// Structured-concurrency nursery: `scope { ... }`. Tasks spawned while this
+    /// block is on the task-scope stack are joined when the block exits — the
+    /// first task error cancels its siblings and propagates out of the block, so
+    /// no spawned task is orphaned or has its error silently swallowed.
+    ScopeBlock {
+        body: Vec<SNode>,
+    },
     /// Duration literal: 500ms, 5s, 30m, 2h, 1d, 1w
     DurationLiteral(u64),
     /// Range expression: `start to end` (inclusive) or `start to end exclusive` (half-open)

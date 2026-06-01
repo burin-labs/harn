@@ -236,6 +236,7 @@ impl MermaidGraph {
             }
             Node::TryExpr { body } => self.emit_named_block("try expr", body),
             Node::SpawnExpr { body } => self.emit_named_block("spawn", body),
+            Node::ScopeBlock { body } => self.emit_named_block("scope", body),
             Node::DeferStmt { body } => self.emit_named_block("defer", body),
             Node::DeadlineBlock { duration, body } => {
                 self.emit_named_block(&format!("deadline {}", inline_label(duration)), body)
@@ -482,6 +483,7 @@ fn summarize_node(node: &SNode) -> String {
         Node::TryCatch { has_catch: _, .. } => "try/catch".to_string(),
         Node::TryExpr { .. } => "try expr".to_string(),
         Node::SpawnExpr { .. } => "spawn".to_string(),
+        Node::ScopeBlock { .. } => "scope".to_string(),
         Node::DeferStmt { .. } => "defer".to_string(),
         Node::DeadlineBlock { duration, .. } => format!("deadline {}", inline_label(duration)),
         Node::MutexBlock { .. } => "mutex".to_string(),

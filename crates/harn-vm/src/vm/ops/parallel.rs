@@ -415,11 +415,62 @@ impl super::super::Vm {
                     cancel_token,
                 },
             );
+            // Structured concurrency: bind this task to the innermost open
+            // `scope { }` so it is joined (and its error propagated) at scope
+            // exit. A bare `spawn` with no enclosing scope stays detached
+            // (backward-compatible) and is cancelled at VM drop.
+            if let Some(scope) = self.task_scopes.last_mut() {
+                scope.task_ids.push(task_id.clone());
+            }
             self.stack.push(VmValue::task_handle(task_id));
         } else {
             self.stack.push(VmValue::Nil);
         }
         Ok(())
+    }
+
+    /// `TaskScopeEnter`: open a structured-concurrency nursery.
+    pub(super) fn execute_task_scope_enter(&mut self) {
+        self.task_scopes.push(super::super::TaskScope {
+            task_ids: Vec::new(),
+            frame_depth: self.frames.len(),
+            env_scope_depth: self.env.scope_depth(),
+        });
+    }
+
+    /// `TaskScopeExit`: close the innermost nursery — join every task still
+    /// bound to it. The first task error cancels the remaining siblings and
+    /// propagates out of the `scope { }` block.
+    pub(super) async fn execute_task_scope_exit(&mut self) -> Result<(), VmError> {
+        let Some(scope) = self.task_scopes.pop() else {
+            return Ok(());
+        };
+        let mut first_error: Option<VmError> = None;
+        for id in &scope.task_ids {
+            let Some(task) = self.spawned_tasks.remove(id) else {
+                continue; // already awaited / cancelled
+            };
+            if first_error.is_some() {
+                // A sibling already failed: cancel the rest without awaiting.
+                task.cancel_token
+                    .store(true, std::sync::atomic::Ordering::SeqCst);
+                task.handle.abort();
+                continue;
+            }
+            match task.handle.await {
+                Ok(Ok((_result, output))) => {
+                    self.output.push_str(&output);
+                }
+                Ok(Err(e)) => first_error = Some(e),
+                Err(join_err) => {
+                    first_error = Some(VmError::Runtime(format!("Task join error: {join_err}")));
+                }
+            }
+        }
+        match first_error {
+            Some(e) => Err(e),
+            None => Ok(()),
+        }
     }
 
     /// Bare `mutex { }`: acquire the lock keyed on this block's *lexical

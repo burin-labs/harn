@@ -928,7 +928,7 @@ impl<'a> Linter<'a> {
                 self.pop_scope();
             }
 
-            Node::SpawnExpr { body } => {
+            Node::SpawnExpr { body } | Node::ScopeBlock { body } => {
                 self.push_scope();
                 self.lint_block(body);
                 self.pop_scope();

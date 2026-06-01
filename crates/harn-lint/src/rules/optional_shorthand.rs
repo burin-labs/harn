@@ -176,6 +176,7 @@ impl<'a, 'd> State<'a, 'd> {
             }
             Node::TryExpr { body }
             | Node::SpawnExpr { body }
+            | Node::ScopeBlock { body }
             | Node::Block(body)
             | Node::DeferStmt { body }
             | Node::MutexBlock { body, .. } => self.visit_block(body),

@@ -42,6 +42,46 @@ Each spawned task runs in an isolated interpreter instance. In runtime and ADR
 pages you may see this called a **child VM**; in day-to-day Harn code, read that
 as "the child task's interpreter."
 
+A bare `spawn` is detached: if you never `await` its handle, the task may
+outlive the code that launched it and any error it raises is lost. Reach for a
+`scope { }` nursery (below) whenever you want those guarantees back.
+
+## Structured concurrency: `scope`
+
+A `scope { }` block is a structured-concurrency *nursery*: every task spawned
+while it is open is **joined when the block exits**. You cannot accidentally
+leak a task past its scope, and a task's error is never silently swallowed —
+the first failing task's error propagates out of the block (so you can `try`
+it) after its siblings are cancelled.
+
+```harn
+fn fetch(url) {
+  log(url)
+}
+
+scope {
+  spawn {
+    fetch("https://a")
+  }
+  spawn {
+    fetch("https://b")
+  }
+}
+// Both fetches have finished here — the block did not exit until they did.
+```
+
+- **Joins on exit.** Reaching the end of the block waits for every task spawned
+  inside it.
+- **Errors propagate.** If a task throws, the block re-raises that error after
+  cancelling the remaining siblings; wrap the `scope { }` in `try { }` to handle
+  it.
+- **No leaks on early exit.** A `throw`, `return`, or `break` out of the block
+  cancels the tasks still bound to it rather than detaching them.
+- **`await` opts a task out.** Explicitly `await`-ing a handle inside the scope
+  removes it from the nursery, so it is not joined or cancelled a second time.
+- **Contextual keyword.** `scope` is only special as a statement-leading
+  `scope { }`; identifiers, dict keys, and properties named `scope` keep working.
+
 ## parallel
 
 Run N tasks concurrently and collect results in order:

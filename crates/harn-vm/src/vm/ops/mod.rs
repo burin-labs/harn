@@ -118,6 +118,8 @@ harn_opcode_macros::define_opcodes! {
     Spawn { sync(self.execute_spawn()), disasm: bare("SPAWN") };
     SyncMutexEnter { async_op(self.execute_sync_mutex_enter().await), disasm: bare("SYNC_MUTEX_ENTER") };
     SyncMutexEnterKeyed { async_op(self.execute_sync_mutex_enter_keyed().await), disasm: bare("SYNC_MUTEX_ENTER_KEYED") };
+    TaskScopeEnter { sync_void(self.execute_task_scope_enter()), disasm: bare("TASK_SCOPE_ENTER") };
+    TaskScopeExit { async_op(self.execute_task_scope_exit().await), disasm: bare("TASK_SCOPE_EXIT") };
 
     // === Imports (async) ===
     Import { async_op(self.execute_import_op().await), disasm: const_pool_u16("IMPORT") };

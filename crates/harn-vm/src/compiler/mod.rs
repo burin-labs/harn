@@ -475,6 +475,24 @@ impl Compiler {
                 self.chunk.emit(Op::Nil, self.line);
                 self.end_scope();
             }
+            Node::ScopeBlock { body } => {
+                // Structured-concurrency nursery. `TaskScopeEnter` pushes a task
+                // scope; tasks spawned inside register to it. `TaskScopeExit`
+                // joins them (propagating the first error, cancelling the rest).
+                // On `throw`/early exit the scope is unwound and its tasks
+                // cancelled by the frame/handler teardown, mirroring
+                // `held_sync_guards`.
+                self.begin_scope();
+                let finally_floor = self.finally_bodies.len();
+                self.chunk.emit(Op::TaskScopeEnter, self.line);
+                for sn in body {
+                    self.compile_discarded_stmt(sn)?;
+                }
+                self.drain_finallys_to_floor(finally_floor)?;
+                self.chunk.emit(Op::TaskScopeExit, self.line);
+                self.chunk.emit(Op::Nil, self.line);
+                self.end_scope();
+            }
             Node::DeferStmt { body } => {
                 // Register the body to run on return/throw/scope-exit. The
                 // statement emits no bytecode of its own — the deferred body

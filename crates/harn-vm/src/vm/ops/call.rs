@@ -596,6 +596,9 @@ impl super::super::Vm {
                     })));
                 }
                 if let Some(handle) = self.spawned_tasks.remove(&id) {
+                    // Explicitly awaited: drop it from any enclosing nursery so
+                    // `scope {}` exit neither double-joins nor cancels it.
+                    self.deregister_task_from_scopes(&id);
                     let mut awaiting = AwaitingTask::new(handle);
                     let joined = awaiting
                         .handle_mut()

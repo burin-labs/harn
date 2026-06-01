@@ -30,6 +30,6 @@ pub use state::{Vm, VmBaseline};
 
 pub(crate) use call_args::CallArgs;
 pub(crate) use state::{
-    CallFrame, ExceptionHandler, InterruptHandler, IterState, LocalSlot, ScopeSpan,
+    CallFrame, ExceptionHandler, InterruptHandler, IterState, LocalSlot, ScopeSpan, TaskScope,
     VmBuiltinDispatch, VmBuiltinEntry,
 };

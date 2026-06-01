@@ -256,6 +256,19 @@ impl Parser {
         )
     }
 
+    /// `scope` is contextual so existing identifiers named `scope` (including
+    /// dict keys and property names) keep working. It starts a structured
+    /// concurrency nursery only when immediately followed by `{`.
+    pub(super) fn check_contextual_scope_block(&self) -> bool {
+        if !self.check_identifier("scope") {
+            return false;
+        }
+        matches!(
+            self.tokens.get(self.pos + 1).map(|t| &t.kind),
+            Some(TokenKind::LBrace)
+        )
+    }
+
     pub(super) fn advance(&mut self) {
         if self.pos < self.tokens.len() {
             self.pos += 1;
