@@ -11,7 +11,8 @@ use crate::diagnostic_codes::Code;
 use harn_lexer::Span;
 
 use super::super::format::format_type;
-use super::super::scope::TypeScope;
+use super::super::scope::{InferredType, TypeScope};
+use super::super::union::simplify_union;
 use super::super::TypeChecker;
 
 impl TypeChecker {
@@ -35,6 +36,241 @@ impl TypeChecker {
             );
         }
         return_type.clone()
+    }
+
+    /// Infer the return type of a plain (non-stream, non-yield) function whose
+    /// return type is unannotated, from its body — so calling an un-annotated
+    /// helper recovers a precise type instead of going untyped.
+    ///
+    /// Sound by construction: every `return` path *and* the value the body
+    /// falls through to must be concretely known, otherwise the function stays
+    /// untyped (`None`). The inferred type is therefore always a faithful upper
+    /// bound of the actual returns, so it can only ever surface real call-site
+    /// type errors, never false positives. Recursion is self-guarding — a
+    /// self/mutual/forward call resolves to the hoisted placeholder signature
+    /// (return `None`), which trips the bail rule and leaves the function
+    /// untyped exactly as a checker without return inference would.
+    pub(in crate::typechecker) fn infer_unannotated_fn_return(
+        &self,
+        params: &[TypedParam],
+        body: &[SNode],
+    ) -> InferredType {
+        let mut scope = TypeScope::child_of(&self.scope);
+        for param in params {
+            let param_type = if param.rest {
+                param
+                    .type_expr
+                    .clone()
+                    .map(|inner| TypeExpr::List(Box::new(inner)))
+            } else {
+                param.type_expr.clone()
+            };
+            scope.define_var(&param.name, param_type);
+        }
+        let mut returns: Vec<TypeExpr> = Vec::new();
+        if !self.collect_block_returns(body, &mut scope, &mut returns) {
+            return None;
+        }
+        // A body that can fall through implicitly returns its trailing value.
+        if !self.body_cannot_fall_through(body, &scope) {
+            match self.infer_block_type(body, &scope) {
+                Some(ty) => returns.push(ty),
+                None => return None,
+            }
+        }
+        (!returns.is_empty()).then(|| simplify_union(returns))
+    }
+
+    fn collect_block_returns(
+        &self,
+        body: &[SNode],
+        scope: &mut TypeScope,
+        out: &mut Vec<TypeExpr>,
+    ) -> bool {
+        for stmt in body {
+            // Thread local `let`/`var`/`const` bindings into the scope *before*
+            // inferring later returns, mirroring `check_block`'s scoping. Without
+            // this, a `return localVar` resolves the name against the outer scope
+            // (e.g. to a function of the same name), mis-typing the return.
+            self.define_local_binding(stmt, scope);
+            if !self.collect_return_types(stmt, scope, out) {
+                return false;
+            }
+        }
+        true
+    }
+
+    /// Define the names a top-level body statement introduces, so subsequent
+    /// `return` expressions resolve locals correctly. Immutable `let`/`const`
+    /// bindings carry their inferred type; `var` and destructured bindings are
+    /// shadowed as unknown (`None`) — a `var` can be reassigned to another type,
+    /// so trusting its initializer would be unsound. Anything that depends on an
+    /// unknown local then makes the function stay dynamic via the bail rule.
+    fn define_local_binding(&self, stmt: &SNode, scope: &mut TypeScope) {
+        match &stmt.node {
+            Node::LetBinding {
+                pattern,
+                type_ann,
+                value,
+            } => match pattern {
+                BindingPattern::Identifier(name) => {
+                    let ty = type_ann.clone().or_else(|| self.infer_type(value, scope));
+                    scope.define_var(name, ty);
+                }
+                other => Self::shadow_pattern_names(other, scope),
+            },
+            Node::VarBinding { pattern, .. } => match pattern {
+                BindingPattern::Identifier(name) => scope.define_var(name, None),
+                other => Self::shadow_pattern_names(other, scope),
+            },
+            Node::ConstBinding {
+                name,
+                type_ann,
+                value,
+            } => {
+                let ty = type_ann.clone().or_else(|| self.infer_type(value, scope));
+                scope.define_var(name, ty);
+            }
+            _ => {}
+        }
+    }
+
+    fn shadow_pattern_names(pattern: &BindingPattern, scope: &mut TypeScope) {
+        match pattern {
+            BindingPattern::Identifier(name) => scope.define_var(name, None),
+            BindingPattern::Dict(fields) => {
+                for field in fields {
+                    scope.define_var(field.alias.as_deref().unwrap_or(&field.key), None);
+                }
+            }
+            BindingPattern::List(elements) => {
+                for element in elements {
+                    scope.define_var(&element.name, None);
+                }
+            }
+            BindingPattern::Pair(a, b) => {
+                scope.define_var(a, None);
+                scope.define_var(b, None);
+            }
+        }
+    }
+
+    /// Collect the value types of every `return` in `snode` that exits the
+    /// *enclosing* function. Mirrors `check_return_type`'s node coverage
+    /// exactly (closures and nested `fn`s are NOT traversed — their returns
+    /// belong to themselves). Returns `false` if any return value is not
+    /// concretely inferable, signalling the caller to stay untyped.
+    fn collect_return_types(
+        &self,
+        snode: &SNode,
+        scope: &mut TypeScope,
+        out: &mut Vec<TypeExpr>,
+    ) -> bool {
+        match &snode.node {
+            Node::ReturnStmt { value: Some(val) } => match self.infer_type(val, scope) {
+                Some(ty) => {
+                    out.push(ty);
+                    true
+                }
+                None => false,
+            },
+            Node::ReturnStmt { value: None } => {
+                out.push(TypeExpr::Named("nil".into()));
+                true
+            }
+            Node::IfElse {
+                then_body,
+                else_body,
+                ..
+            } => {
+                let mut then_scope = scope.child();
+                if !self.collect_block_returns(then_body, &mut then_scope, out) {
+                    return false;
+                }
+                match else_body {
+                    Some(eb) => {
+                        let mut else_scope = scope.child();
+                        self.collect_block_returns(eb, &mut else_scope, out)
+                    }
+                    None => true,
+                }
+            }
+            Node::MatchExpr { value, arms } => {
+                let value_type = self.infer_type(value, scope);
+                for arm in arms {
+                    let mut arm_scope = scope.child();
+                    self.define_match_pattern_bindings(
+                        &arm.pattern,
+                        value_type.as_ref(),
+                        &mut arm_scope,
+                    );
+                    if !self.collect_block_returns(&arm.body, &mut arm_scope, out) {
+                        return false;
+                    }
+                }
+                true
+            }
+            Node::Block(body)
+            | Node::TryExpr { body }
+            | Node::CostRoute { body, .. }
+            | Node::MutexBlock { body, .. }
+            | Node::DeadlineBlock { body, .. }
+            | Node::Retry { body, .. }
+            | Node::DeferStmt { body }
+            | Node::WhileLoop { body, .. } => {
+                let mut block_scope = scope.child();
+                self.collect_block_returns(body, &mut block_scope, out)
+            }
+            Node::ForIn {
+                pattern,
+                iterable,
+                body,
+            } => {
+                let mut loop_scope = scope.child();
+                if let crate::ast::BindingPattern::Identifier(variable) = pattern {
+                    let elem_type = self
+                        .infer_type(iterable, scope)
+                        .as_ref()
+                        .and_then(|ty| self.iterable_item_type(ty, scope));
+                    loop_scope.define_var(variable, elem_type);
+                }
+                self.collect_block_returns(body, &mut loop_scope, out)
+            }
+            Node::GuardStmt { else_body, .. } => {
+                let mut else_scope = scope.child();
+                self.collect_block_returns(else_body, &mut else_scope, out)
+            }
+            Node::TryCatch {
+                body,
+                error_var,
+                error_type,
+                catch_body,
+                finally_body,
+                ..
+            } => {
+                let mut try_scope = scope.child();
+                if !self.collect_block_returns(body, &mut try_scope, out) {
+                    return false;
+                }
+                let mut catch_scope = scope.child();
+                if let Some(var) = error_var {
+                    catch_scope.define_var(var, error_type.clone());
+                }
+                if !self.collect_block_returns(catch_body, &mut catch_scope, out) {
+                    return false;
+                }
+                match finally_body {
+                    Some(fb) => {
+                        let mut finally_scope = scope.child();
+                        self.collect_block_returns(fb, &mut finally_scope, out)
+                    }
+                    None => true,
+                }
+            }
+            // Leaf statements and nested callables (Closure / FnDecl) contain no
+            // `return` that exits this function.
+            _ => true,
+        }
     }
 
     pub(in crate::typechecker) fn body_contains_yield(nodes: &[SNode]) -> bool {

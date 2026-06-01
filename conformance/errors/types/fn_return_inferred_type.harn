@@ -1,0 +1,9 @@
+// An un-annotated function's return type is now inferred from its body, so
+// calling `area` yields `int` and binding it to a `string` is a static error.
+// Sound by construction: inference only assigns a return type when every
+// return path is concretely known.
+pipeline default() {
+  fn area(w: int, h: int) { return w * h }
+  let bad: string = area(2, 3)
+  __io_println(bad)
+}

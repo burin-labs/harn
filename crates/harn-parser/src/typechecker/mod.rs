@@ -778,6 +778,17 @@ fn actual_is_result_of(expected: &TypeExpr, actual: &TypeExpr) -> bool {
     )
 }
 
+/// The names of the gradual *top* types — values whose static type is
+/// deliberately unknown (`any`/`unknown`) or a wildcard (`_`). A gradual type
+/// is assignment- and operator-compatible with everything; the real check is
+/// deferred to runtime. Centralized so every site that special-cases "we don't
+/// statically know this type" agrees on the same set. Note this is the
+/// non-`nil` gradual set: callers that also want to treat `nil` leniently must
+/// check for it separately.
+pub(in crate::typechecker) fn is_gradual_type_name(name: &str) -> bool {
+    matches!(name, "any" | "unknown" | "_")
+}
+
 impl Default for TypeChecker {
     fn default() -> Self {
         Self::new()

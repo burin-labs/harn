@@ -142,7 +142,18 @@ impl TypeChecker {
                     is_stream,
                     ..
                 } => {
-                    let return_type = Self::callable_return_type(*is_stream, return_type, body);
+                    // `declared` is the user-written/`gen`-implied return type
+                    // (`None` when unannotated). The signature additionally
+                    // carries an *inferred* return type so callers recover a
+                    // precise type, but body-checking uses only `declared` —
+                    // an inferred type must never drive the
+                    // declared-return diagnostics (fall-through / mismatch),
+                    // since it was derived from the body and so cannot
+                    // contradict it.
+                    let declared = Self::callable_return_type(*is_stream, return_type, body);
+                    let sig_return = declared
+                        .clone()
+                        .or_else(|| self.infer_unannotated_fn_return(params, body));
                     let required_params =
                         params.iter().filter(|p| p.default_value.is_none()).count();
                     let sig = FnSignature {
@@ -150,7 +161,7 @@ impl TypeChecker {
                             .iter()
                             .map(|p| (p.name.clone(), p.type_expr.clone()))
                             .collect(),
-                        return_type: return_type.clone(),
+                        return_type: sig_return,
                         definition_span: Some(snode.span),
                         type_param_names: type_params.iter().map(|tp| tp.name.clone()).collect(),
                         required_params,
@@ -167,7 +178,7 @@ impl TypeChecker {
                     self.check_fn_body(
                         type_params,
                         params,
-                        &return_type,
+                        &declared,
                         body,
                         where_clauses,
                         *is_stream,
