@@ -7,6 +7,15 @@ import {
   agent_session_messages,
 } from "std/agent/state"
 
+// Conservative default cap on how many times the completion-judge LLM may
+// veto a proposed completion within one session. Each veto is a paid model
+// call plus an injected feedback message, so a weak model that never satisfies
+// the judge can otherwise burn calls up to `max_verify_attempts` (default 20)
+// with no structured signal. Callers raise it via
+// `verify_completion_judge.max_invocations` (or `max_feedback`), or disable the
+// cap entirely with `0`.
+const __VERIFY_COMPLETION_JUDGE_DEFAULT_CAP = 5
+
 fn __unique_names(names) {
   var unique = []
   for name in names {
@@ -131,6 +140,40 @@ fn __judge_invoke_structured(harness: Harness, judge_cfg, opts, payload) {
   }
 }
 
+/**
+ * Resolve the per-session veto cap for the completion judge. Returns nil when
+ * the cap is disabled (`max_invocations`/`max_feedback` set to 0), otherwise a
+ * positive integer ceiling on judge invocations.
+ */
+fn __verify_completion_judge_cap(judge_cfg) {
+  let configured = if type_of(judge_cfg) == "dict" {
+    judge_cfg?.max_invocations ?? judge_cfg?.max_feedback
+  } else {
+    nil
+  }
+  let cap = configured ?? __VERIFY_COMPLETION_JUDGE_DEFAULT_CAP
+  if cap <= 0 {
+    return nil
+  }
+  return cap
+}
+
+/**
+ * agent_verify_completion_judge_cap.
+ *
+ * Resolved completion-judge veto cap for a `verify_completion_judge` config,
+ * for surfacing in run records. Returns nil when the cap is disabled.
+ *
+ * @effects: []
+ * @allocation: stack
+ * @errors: []
+ * @api_stability: experimental
+ * @example: agent_verify_completion_judge_cap(opts?.verify_completion_judge)
+ */
+pub fn agent_verify_completion_judge_cap(judge_cfg) {
+  return __verify_completion_judge_cap(judge_cfg)
+}
+
 fn __emit_judge_decision(session_id, iteration, verdict) {
   agent_emit_event(
     session_id,
@@ -166,9 +209,23 @@ pub fn agent_verify_or_continue(session, opts, stop_reason, text, iteration = 0)
   if opts?.verify_completion != nil {
     verdict = __judge_invoke_closure(opts.verify_completion, payload)
   }
+  var completion_judge_invoked = false
+  var completion_judge_cap_reached = false
+  let prior_judge_invocations = opts?._verify_completion_judge_invocations ?? 0
   if !verdict.vetoed && opts?.verify_completion_judge != nil {
-    verdict = __judge_invoke_structured(harness, opts.verify_completion_judge, opts, payload)
-    __emit_judge_decision(session.session_id, iteration, verdict)
+    let cap = __verify_completion_judge_cap(opts.verify_completion_judge)
+    if cap != nil && prior_judge_invocations >= cap {
+      // Cap reached: stop firing the judge (and injecting its feedback). The
+      // loop surfaces this as stop_reason `completion_judge_cap_reached` plus a
+      // structured `completion_judge` block in the run record. The prior
+      // `judge_decision` events already record each veto for loop counting, so
+      // no extra event type is needed here.
+      completion_judge_cap_reached = true
+    } else {
+      verdict = __judge_invoke_structured(harness, opts.verify_completion_judge, opts, payload)
+      completion_judge_invoked = true
+      __emit_judge_decision(session.session_id, iteration, verdict)
+    }
   }
   let done_judge_due = opts?._done_judge_due ?? true
   let done_judge_applies = opts?.done_judge != nil
@@ -183,4 +240,8 @@ pub fn agent_verify_or_continue(session, opts, stop_reason, text, iteration = 0)
     agent_session_inject_feedback(session.session_id, "verify_completion", verdict.feedback)
   }
   return verdict
+    + {
+    verify_completion_judge_invoked: completion_judge_invoked,
+    verify_completion_judge_cap_reached: completion_judge_cap_reached,
+  }
 }

@@ -1,0 +1,118 @@
+/* Verifies the per-session cap on `verify_completion_judge` veto loops:
+   - a judge that always vetoes stops firing once `max_invocations` is hit,
+     finalizing as `verify_capped` with stop_reason `completion_judge_cap_reached`,
+   - the run record carries structured `completion_judge` counters so a
+     harness can report loop count and cap-hit status without transcript mining,
+   - a judge that approves completes normally with `cap_reached: false`,
+   - `max_invocations: 0` disables the cap and falls through to the generic
+     `max_verify_attempts` exhaustion path.
+   Mocks interleave model turns with the judge's structured-output call. */
+import { agent_capture_events } from "std/agent/events"
+
+fn events_of(events, kind) {
+  return events.filter({ event -> event.type == kind })
+}
+
+fn run_capped() {
+  llm_mock_clear()
+  llm_mock({text: "Round one. ##DONE##"})
+  llm_mock(
+    {text: "{\"verdict\":\"continue\",\"reasoning\":\"veto one\",\"next_step\":\"keep going\"}"},
+  )
+  llm_mock({text: "Round two. ##DONE##"})
+  llm_mock(
+    {text: "{\"verdict\":\"continue\",\"reasoning\":\"veto two\",\"next_step\":\"keep going\"}"},
+  )
+  llm_mock({text: "Round three. ##DONE##"})
+  let session_id = "verify-judge-cap-" + uuid()
+  let captured = agent_capture_events(
+    session_id,
+    fn() { return agent_loop(
+      "Judge keeps vetoing.",
+      nil,
+      {
+        provider: "mock",
+        loop_until_done: true,
+        max_iterations: 10,
+        max_nudges: 10,
+        session_id: session_id,
+        done_sentinel: "##DONE##",
+        verify_completion_judge: {max_invocations: 2},
+      },
+    ) },
+  )
+  let result = captured.result
+  __io_println("capped.status=${result.status}")
+  __io_println("capped.stop_reason=${result.stop_reason}")
+  __io_println("capped.invocations=${result.completion_judge.invocations}")
+  __io_println("capped.vetoes=${result.completion_judge.vetoes}")
+  __io_println("capped.max_invocations=${result.completion_judge.max_invocations}")
+  __io_println("capped.cap_reached=${result.completion_judge.cap_reached}")
+  __io_println("capped.judge_decisions=${len(events_of(captured.events, "judge_decision"))}")
+  __io_println("capped.calls=${len(llm_mock_calls())}")
+}
+
+fn run_approved() {
+  llm_mock_clear()
+  llm_mock({text: "Final answer. ##DONE##"})
+  llm_mock({text: "{\"verdict\":\"done\",\"reasoning\":\"looks complete\"}"})
+  let session_id = "verify-judge-approve-" + uuid()
+  let result = agent_loop(
+    "Judge approves on the first proposal.",
+    nil,
+    {
+      provider: "mock",
+      loop_until_done: true,
+      max_iterations: 10,
+      max_nudges: 10,
+      session_id: session_id,
+      done_sentinel: "##DONE##",
+      verify_completion_judge: true,
+    },
+  )
+  __io_println("approved.status=${result.status}")
+  __io_println("approved.invocations=${result.completion_judge.invocations}")
+  __io_println("approved.vetoes=${result.completion_judge.vetoes}")
+  __io_println("approved.max_invocations=${result.completion_judge.max_invocations}")
+  __io_println("approved.cap_reached=${result.completion_judge.cap_reached}")
+  __io_println("approved.calls=${len(llm_mock_calls())}")
+}
+
+fn run_cap_disabled() {
+  llm_mock_clear()
+  llm_mock({text: "Try one. ##DONE##"})
+  llm_mock({text: "{\"verdict\":\"continue\",\"reasoning\":\"veto one\"}"})
+  llm_mock({text: "Try two. ##DONE##"})
+  llm_mock({text: "{\"verdict\":\"continue\",\"reasoning\":\"veto two\"}"})
+  llm_mock({text: "Try three. ##DONE##"})
+  let session_id = "verify-judge-disabled-" + uuid()
+  let captured = agent_capture_events(
+    session_id,
+    fn() { return agent_loop(
+      "Cap disabled; rely on max_verify_attempts.",
+      nil,
+      {
+        provider: "mock",
+        loop_until_done: true,
+        max_iterations: 10,
+        max_nudges: 10,
+        session_id: session_id,
+        done_sentinel: "##DONE##",
+        max_verify_attempts: 2,
+        verify_completion_judge: {max_invocations: 0},
+      },
+    ) },
+  )
+  let result = captured.result
+  __io_println("disabled.status=${result.status}")
+  __io_println("disabled.stop_reason=${result.stop_reason}")
+  __io_println("disabled.invocations=${result.completion_judge.invocations}")
+  __io_println("disabled.cap_reached=${result.completion_judge.cap_reached}")
+  __io_println("disabled.judge_decisions=${len(events_of(captured.events, "judge_decision"))}")
+}
+
+pipeline default() {
+  run_capped()
+  run_approved()
+  run_cap_disabled()
+}
