@@ -142,6 +142,40 @@ pub(super) fn reject_policy(reason: String) -> Result<(), VmError> {
     })
 }
 
+/// Structured refusal produced by the agent-tool capability gates
+/// (`enforce_current_policy_for_tool`, `enforce_tool_arg_constraints`).
+/// Records the gate identity and the exceeded capability so the dispatch
+/// boundary can build a full [`crate::agent_events::ToolDenial`] for the
+/// model and host. `From<PolicyDenial> for VmError` keeps the legacy
+/// `?`-using callers — which only need the categorized error — unchanged.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PolicyDenial {
+    pub gate: crate::agent_events::DenialGate,
+    pub capability: Option<String>,
+    pub reason: String,
+}
+
+impl From<PolicyDenial> for VmError {
+    fn from(denial: PolicyDenial) -> Self {
+        VmError::CategorizedError {
+            message: denial.reason,
+            category: crate::value::ErrorCategory::ToolRejected,
+        }
+    }
+}
+
+pub(super) fn reject_tool(
+    gate: crate::agent_events::DenialGate,
+    capability: Option<String>,
+    reason: String,
+) -> Result<(), PolicyDenial> {
+    Err(PolicyDenial {
+        gate,
+        capability,
+        reason,
+    })
+}
+
 /// Mutation classification for a tool, derived from the pipeline's
 /// declared `ToolKind`. Used in telemetry and pre/post-bridge payloads
 /// while those methods still exist. Returns `"other"` for unannotated
@@ -413,20 +447,27 @@ pub fn enforce_current_policy_for_bridge_builtin(name: &str) -> Result<(), VmErr
     Ok(())
 }
 
-pub fn enforce_current_policy_for_tool(tool_name: &str) -> Result<(), VmError> {
+pub fn enforce_current_policy_for_tool(tool_name: &str) -> Result<(), PolicyDenial> {
+    use crate::agent_events::DenialGate;
     let Some(policy) = current_execution_policy() else {
         return Ok(());
     };
     if !policy_allows_tool(&policy, tool_name) {
-        return reject_policy(format!("tool '{tool_name}' exceeds tool ceiling"));
+        return reject_tool(
+            DenialGate::ToolCeiling,
+            None,
+            format!("tool '{tool_name}' exceeds tool ceiling"),
+        );
     }
     if let Some(annotations) = policy.tool_annotations.get(tool_name) {
         for (capability, ops) in &annotations.capabilities {
             for op in ops {
                 if !policy_allows_capability(&policy, capability, op) {
-                    return reject_policy(format!(
-                        "tool '{tool_name}' exceeds capability ceiling: {capability}.{op}"
-                    ));
+                    return reject_tool(
+                        DenialGate::CapabilityCeiling,
+                        Some(format!("{capability}.{op}")),
+                        format!("tool '{tool_name}' exceeds capability ceiling: {capability}.{op}"),
+                    );
                 }
             }
         }
@@ -434,10 +475,14 @@ pub fn enforce_current_policy_for_tool(tool_name: &str) -> Result<(), VmError> {
         if requested_level != SideEffectLevel::None
             && !policy_allows_side_effect(&policy, requested_level.as_str())
         {
-            return reject_policy(format!(
-                "tool '{tool_name}' exceeds side-effect ceiling: {}",
-                requested_level.as_str()
-            ));
+            return reject_tool(
+                DenialGate::SideEffectCeiling,
+                None,
+                format!(
+                    "tool '{tool_name}' exceeds side-effect ceiling: {}",
+                    requested_level.as_str()
+                ),
+            );
         }
     }
     Ok(())

@@ -1232,13 +1232,62 @@ fn reset_thread_local_state_clears_execution_policy_stack() {
 
 #[test]
 fn execution_policy_rejects_unlisted_tool() {
+    use crate::agent_events::DenialGate;
     push_execution_policy(CapabilityPolicy {
         tools: vec!["read".to_string()],
         ..Default::default()
     });
-    let result = enforce_current_policy_for_tool("edit");
+    let denial = enforce_current_policy_for_tool("edit").unwrap_err();
     pop_execution_policy();
-    assert!(result.is_err());
+    // The refusal is structured: gate identifies the tool ceiling and the
+    // reason carries the same text the model sees (#2780).
+    assert_eq!(denial.gate, DenialGate::ToolCeiling);
+    assert!(denial.capability.is_none());
+    assert!(denial.reason.contains("tool ceiling"));
+}
+
+#[test]
+fn execution_policy_capability_ceiling_records_gate_and_capability() {
+    use crate::agent_events::DenialGate;
+    let mut tool_annotations = BTreeMap::new();
+    tool_annotations.insert(
+        "edit".to_string(),
+        crate::tool_annotations::ToolAnnotations {
+            kind: crate::tool_annotations::ToolKind::Edit,
+            capabilities: BTreeMap::from([(
+                "workspace".to_string(),
+                vec!["write_text".to_string()],
+            )]),
+            ..Default::default()
+        },
+    );
+    push_execution_policy(CapabilityPolicy {
+        tools: vec!["edit".to_string()],
+        capabilities: BTreeMap::from([("workspace".to_string(), vec!["read_text".to_string()])]),
+        tool_annotations,
+        ..Default::default()
+    });
+    let denial = enforce_current_policy_for_tool("edit").unwrap_err();
+    pop_execution_policy();
+    assert_eq!(denial.gate, DenialGate::CapabilityCeiling);
+    assert_eq!(denial.capability.as_deref(), Some("workspace.write_text"));
+}
+
+#[test]
+fn arg_constraint_denial_records_arg_constraint_gate() {
+    use crate::agent_events::DenialGate;
+    let policy = CapabilityPolicy {
+        tool_arg_constraints: vec![ToolArgConstraint {
+            tool: "exec".to_string(),
+            arg_patterns: vec!["cargo *".to_string()],
+            arg_key: Some("command".to_string()),
+        }],
+        ..Default::default()
+    };
+    let denial =
+        enforce_tool_arg_constraints(&policy, "exec", &serde_json::json!({"command": "rm -rf /"}))
+            .unwrap_err();
+    assert_eq!(denial.gate, DenialGate::ArgConstraint);
 }
 
 #[test]

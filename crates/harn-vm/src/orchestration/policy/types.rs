@@ -8,9 +8,10 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 
 use super::super::glob_match;
-use super::reject_policy;
+use super::{reject_tool, PolicyDenial};
+use crate::agent_events::DenialGate;
 use crate::tool_annotations::ToolAnnotations;
-use crate::value::{VmError, VmValue};
+use crate::value::VmValue;
 
 /// Extended policy that supports argument-level constraints.
 ///
@@ -47,7 +48,7 @@ pub fn enforce_tool_arg_constraints(
     policy: &CapabilityPolicy,
     tool_name: &str,
     args: &serde_json::Value,
-) -> Result<(), VmError> {
+) -> Result<(), PolicyDenial> {
     for constraint in &policy.tool_arg_constraints {
         if !glob_match(&constraint.tool, tool_name) {
             continue;
@@ -101,12 +102,16 @@ pub fn enforce_tool_arg_constraints(
             .iter()
             .any(|pattern| glob_match(pattern, &candidate));
         if !matches {
-            return reject_policy(format!(
-                "tool '{tool_name}' {arg_key} '{candidate}' does not match allowed patterns: {:?}. \
-                 Only the {arg_key} argument is checked against this allow-list — other argument \
-                 values are not.",
-                constraint.arg_patterns
-            ));
+            return reject_tool(
+                DenialGate::ArgConstraint,
+                None,
+                format!(
+                    "tool '{tool_name}' {arg_key} '{candidate}' does not match allowed patterns: {:?}. \
+                     Only the {arg_key} argument is checked against this allow-list — other argument \
+                     values are not.",
+                    constraint.arg_patterns
+                ),
+            );
         }
     }
     Ok(())

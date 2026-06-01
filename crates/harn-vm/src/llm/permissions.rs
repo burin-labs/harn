@@ -114,6 +114,36 @@ pub(crate) fn permission_transcript_event_with_policy(
     crate::llm::helpers::transcript_event(kind, "tool", "internal", reason, Some(metadata))
 }
 
+/// Build a `PermissionDeny` transcript event that carries the structured
+/// [`crate::agent_events::ToolDenial`] alongside the human-readable reason,
+/// so host harnesses reading the event log can fail or pivot on a terminal
+/// denial without re-parsing prose (harn#2780).
+pub(crate) fn permission_deny_transcript_event(
+    tool_name: &str,
+    args: &serde_json::Value,
+    denial: &crate::agent_events::ToolDenial,
+    escalated: bool,
+    policy_decision: Option<serde_json::Value>,
+) -> VmValue {
+    let mut metadata = serde_json::json!({
+        "tool_name": tool_name,
+        "arguments": args,
+        "reason": denial.reason,
+        "escalated": escalated,
+        "denial": denial.to_json(),
+    });
+    if let Some(policy_decision) = policy_decision {
+        metadata["policy_decision"] = policy_decision;
+    }
+    crate::llm::helpers::transcript_event(
+        "PermissionDeny",
+        "tool",
+        "internal",
+        &denial.reason,
+        Some(metadata),
+    )
+}
+
 thread_local! {
     static DYNAMIC_PERMISSION_STACK: RefCell<Vec<DynamicPermissionPolicy>> = const { RefCell::new(Vec::new()) };
     static SESSION_PERMISSION_GRANTS: RefCell<BTreeMap<String, BTreeSet<String>>> = const {
