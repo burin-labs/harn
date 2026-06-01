@@ -1,5 +1,4 @@
 use std::collections::BTreeMap;
-use std::io;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -85,7 +84,10 @@ fn socket_result(
     VmValue::Dict(Arc::new(out))
 }
 
-fn io_status(error: &io::Error) -> &'static str {
+#[cfg(unix)]
+fn io_status(error: &std::io::Error) -> &'static str {
+    use std::io;
+
     match error.kind() {
         io::ErrorKind::TimedOut | io::ErrorKind::WouldBlock => "timeout",
         _ => "io_error",
@@ -282,13 +284,12 @@ fn net_unix_socket_json_request_impl(
     ))
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod tests {
     use std::io::{BufRead, BufReader, Write};
 
     use super::*;
 
-    #[cfg(unix)]
     #[test]
     fn unix_socket_json_request_round_trips_json_line() {
         use std::os::unix::net::UnixListener;
@@ -337,7 +338,6 @@ mod tests {
         );
     }
 
-    #[cfg(unix)]
     #[test]
     fn unix_socket_json_request_reports_invalid_json() {
         use std::os::unix::net::UnixListener;
