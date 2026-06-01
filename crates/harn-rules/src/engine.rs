@@ -14,9 +14,12 @@ use harn_hostlib::ast::{api, Language};
 use streaming_iterator::StreamingIterator;
 use tree_sitter::{Query, QueryCursor};
 
+use crate::constraint::CompiledConstraint;
 use crate::error::RulesError;
+use crate::fix::{interpolate, splice, AppliedEdit};
 use crate::model::{AtomicMatcher, Rule};
 use crate::pattern::{compile_pattern, ROOT_CAPTURE};
+use crate::transform::CompiledTransform;
 
 /// A byte + row/col span. Rows/cols are 0-based, matching the rest of the
 /// Harn AST wire format.
@@ -74,11 +77,28 @@ pub struct RuleMatch {
     pub bindings: BTreeMap<String, Binding>,
 }
 
+/// The result of applying a codemod rule's `fix` to a source string.
+#[derive(Debug, Clone)]
+pub struct CodemodResult {
+    /// The rewritten source (equals the input when nothing matched).
+    pub rewritten: String,
+    /// The per-match edits that were spliced in, in document order.
+    pub edits: Vec<AppliedEdit>,
+    /// Whether the rewrite changed the source.
+    pub changed: bool,
+}
+
 /// A rule whose matcher has been compiled and is ready to run.
 pub struct CompiledRule {
     rule_id: String,
     language: Language,
     matcher: CompiledMatcher,
+    /// `where` predicates; a match survives only when all hold.
+    constraints: Vec<CompiledConstraint>,
+    /// `transform` definitions: (new metavar name, compiled transform).
+    transforms: Vec<(String, CompiledTransform)>,
+    /// The `fix` replacement template, if this is a codemod.
+    fix: Option<String>,
 }
 
 enum CompiledMatcher {
@@ -162,10 +182,27 @@ impl CompiledRule {
             }
         };
 
+        let constraints = rule
+            .where_constraints
+            .iter()
+            .map(|c| CompiledConstraint::compile(&rule.id, language, c))
+            .collect::<Result<Vec<_>, _>>()?;
+
+        let transforms = rule
+            .transform
+            .iter()
+            .map(|(name, t)| {
+                CompiledTransform::compile(&rule.id, name, t).map(|c| (name.clone(), c))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+
         Ok(CompiledRule {
             rule_id: rule.id.clone(),
             language,
             matcher,
+            constraints,
+            transforms,
+            fix: rule.fix.clone(),
         })
     }
 
@@ -175,12 +212,82 @@ impl CompiledRule {
     }
 
     /// Run the compiled rule against `source`, returning matches in
-    /// document order.
+    /// document order. Matches that fail any `where` constraint are dropped.
     pub fn run(&self, source: &str) -> Result<Vec<RuleMatch>, RulesError> {
-        match &self.matcher {
-            CompiledMatcher::Query { query, metavars } => self.run_query(query, metavars, source),
-            CompiledMatcher::Regex(regex) => Ok(self.run_regex(regex, source)),
+        let mut matches = match &self.matcher {
+            CompiledMatcher::Query { query, metavars } => {
+                self.run_query(query, metavars, source)?
+            }
+            CompiledMatcher::Regex(regex) => self.run_regex(regex, source),
+        };
+        if !self.constraints.is_empty() {
+            matches.retain(|m| self.satisfies_constraints(m));
         }
+        Ok(matches)
+    }
+
+    /// True when every `where` constraint holds for this match. A
+    /// constraint whose metavar is unbound (not captured) fails closed.
+    fn satisfies_constraints(&self, m: &RuleMatch) -> bool {
+        self.constraints.iter().all(|c| {
+            m.bindings
+                .get(&c.metavar)
+                .is_some_and(|b| c.evaluate(&b.text))
+        })
+    }
+
+    /// Apply this codemod rule's `fix` to `source`, returning the rewritten
+    /// text plus the per-match edits. Each match's `fix` template is
+    /// interpolated from its captured metavars plus any `transform`-derived
+    /// ones. Errors if the rule has no `fix`.
+    pub fn apply(&self, source: &str) -> Result<CodemodResult, RulesError> {
+        let template = self
+            .fix
+            .as_ref()
+            .ok_or_else(|| RulesError::PatternCompile {
+                rule: self.rule_id.clone(),
+                message: "apply() requires a `fix` template; this rule has none".into(),
+            })?;
+
+        let matches = self.run(source)?;
+        let edits: Vec<AppliedEdit> = matches
+            .iter()
+            .map(|m| {
+                let vars = self.metavars_for(m);
+                AppliedEdit {
+                    span: m.span,
+                    before: m.text.clone(),
+                    replacement: interpolate(template, &vars),
+                }
+            })
+            .collect();
+
+        let rewritten = splice(source, &edits);
+        let changed = rewritten != source;
+        Ok(CodemodResult {
+            rewritten,
+            edits,
+            changed,
+        })
+    }
+
+    /// Build the full metavar map for a match: captured bindings plus the
+    /// `transform`-synthesized metavars (which may shadow captures).
+    fn metavars_for(&self, m: &RuleMatch) -> BTreeMap<String, String> {
+        let mut vars: BTreeMap<String, String> = m
+            .bindings
+            .iter()
+            .map(|(name, binding)| (name.clone(), binding.text.clone()))
+            .collect();
+        for (name, transform) in &self.transforms {
+            let input = m
+                .bindings
+                .get(&transform.source)
+                .map(|b| b.text.as_str())
+                .unwrap_or("");
+            vars.insert(name.clone(), transform.apply(input));
+        }
+        vars
     }
 
     fn run_query(

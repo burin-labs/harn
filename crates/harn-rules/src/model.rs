@@ -7,6 +7,8 @@
 //! matching (#2833) and `where`/`transform` (#2834) extend this model;
 //! this module is the atomic-tier surface they build on.
 
+use std::collections::BTreeMap;
+
 use serde::Deserialize;
 
 /// Diagnostic severity. Mirrors the `harn-lint` vocabulary so findings can
@@ -105,9 +107,113 @@ pub struct Rule {
     pub message: String,
     /// The atomic-tier matcher block.
     pub rule: Matcher,
+    /// Predicates on captured metavars; a match survives only when every
+    /// constraint holds. (TOML `[[where]]`.)
+    #[serde(default, rename = "where")]
+    pub where_constraints: Vec<Constraint>,
+    /// Derived metavars synthesized from captured ones before `fix`
+    /// interpolation, keyed by the new metavar name. (TOML `[transform.X]`.)
+    #[serde(default)]
+    pub transform: BTreeMap<String, Transform>,
     /// Replacement template. Its presence makes the rule a codemod.
     #[serde(default)]
     pub fix: Option<String>,
+}
+
+/// A `where` predicate on a captured metavar. Exactly one of `regex` /
+/// `comparison` / `pattern` is set.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Constraint {
+    /// The metavar this constraint applies to (without the leading `$`).
+    pub metavar: String,
+    /// The metavar's text must match this regex.
+    #[serde(default)]
+    pub regex: Option<String>,
+    /// The metavar's text, parsed as a number, must satisfy this
+    /// comparison (Semgrep `metavariable-comparison`).
+    #[serde(default)]
+    pub comparison: Option<Comparison>,
+    /// A sub-pattern (Semgrep `metavariable-pattern`) run against the
+    /// metavar's captured text; the constraint holds when it matches.
+    #[serde(default)]
+    pub pattern: Option<String>,
+    /// Optional language override for `pattern` — lets a captured string
+    /// literal be matched in a different grammar than the host file.
+    #[serde(default)]
+    pub language: Option<String>,
+}
+
+/// A numeric/string comparison for a [`Constraint`].
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Comparison {
+    /// One of `<` `<=` `>` `>=` `==` `!=`.
+    pub op: String,
+    /// The right-hand side. Numbers compare numerically; strings/bools
+    /// compare with `==` / `!=` only.
+    pub value: toml::Value,
+}
+
+/// A metavar transform: read `source`, apply exactly one operation, bind
+/// the result under a new metavar name (the map key).
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Transform {
+    /// The source metavar name (without `$`) whose text is transformed.
+    pub source: String,
+    /// Regex find/replace.
+    #[serde(default)]
+    pub replace: Option<ReplaceOp>,
+    /// A character-index slice.
+    #[serde(default)]
+    pub substring: Option<SubstringOp>,
+    /// A case conversion.
+    #[serde(default)]
+    pub convert: Option<ConvertOp>,
+}
+
+/// Regex find/replace transform op.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ReplaceOp {
+    /// The regex to find.
+    pub regex: String,
+    /// The replacement (supports `$1` capture refs).
+    pub by: String,
+}
+
+/// Character-slice transform op. Indices are 0-based char offsets; a
+/// negative or omitted bound clamps to the string end.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SubstringOp {
+    /// Inclusive start char index (default 0).
+    #[serde(default)]
+    pub start: Option<i64>,
+    /// Exclusive end char index (default: end of string).
+    #[serde(default)]
+    pub end: Option<i64>,
+}
+
+/// Case-conversion transform op.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ConvertOp {
+    /// `lowerCamelCase`.
+    LowerCamel,
+    /// `UpperCamelCase`.
+    UpperCamel,
+    /// `snake_case`.
+    Snake,
+    /// `SCREAMING_SNAKE_CASE`.
+    ScreamingSnake,
+    /// `kebab-case`.
+    Kebab,
+    /// `lowercase`.
+    Lower,
+    /// `UPPERCASE`.
+    Upper,
 }
 
 impl Rule {
