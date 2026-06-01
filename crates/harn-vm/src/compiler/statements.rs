@@ -212,20 +212,27 @@ impl Compiler {
         } else {
             // No pending finally — use tail-call optimization when possible.
             if let Some(val) = value {
-                if let Node::FunctionCall { name, args, .. } = &val.node {
-                    let name_idx = self.string_constant(name);
-                    self.chunk.emit_u16(Op::Constant, name_idx, self.line);
-                    for arg in args {
-                        self.compile_node(arg)?;
-                    }
-                    self.chunk
-                        .emit_u8(Op::TailCall, args.len() as u8, self.line);
-                } else if let Node::BinaryOp { op, left, right } = &val.node {
-                    if op == "|>" && !contains_pipe_placeholder(right) {
-                        self.compile_node(left)?;
-                        self.compile_node(right)?;
-                        self.chunk.emit(Op::Swap, self.line);
-                        self.chunk.emit_u8(Op::TailCall, 1, self.line);
+                // Active handlers store catch offsets into this frame. Keep
+                // the frame explicit until the return expression succeeds.
+                let allow_tail_call = self.handler_depth == 0;
+                if allow_tail_call {
+                    if let Node::FunctionCall { name, args, .. } = &val.node {
+                        let name_idx = self.string_constant(name);
+                        self.chunk.emit_u16(Op::Constant, name_idx, self.line);
+                        for arg in args {
+                            self.compile_node(arg)?;
+                        }
+                        self.chunk
+                            .emit_u8(Op::TailCall, args.len() as u8, self.line);
+                    } else if let Node::BinaryOp { op, left, right } = &val.node {
+                        if op == "|>" && !contains_pipe_placeholder(right) {
+                            self.compile_node(left)?;
+                            self.compile_node(right)?;
+                            self.chunk.emit(Op::Swap, self.line);
+                            self.chunk.emit_u8(Op::TailCall, 1, self.line);
+                        } else {
+                            self.compile_node(val)?;
+                        }
                     } else {
                         self.compile_node(val)?;
                     }

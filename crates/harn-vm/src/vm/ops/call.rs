@@ -1255,6 +1255,13 @@ impl super::super::Vm {
         Ok(())
     }
 
+    fn current_frame_has_exception_handler(&self) -> bool {
+        let current_depth = self.frames.len();
+        self.exception_handlers
+            .iter()
+            .any(|handler| handler.frame_depth == current_depth)
+    }
+
     /// Sync fast path for `Op::TailCall`. Peeks the callee on the stack
     /// **before** touching `ip`; if it resolves to a non-generator user
     /// closure and neither the current frame nor the callee is tracked
@@ -1279,6 +1286,9 @@ impl super::super::Vm {
     pub(super) fn execute_tail_call_sync(&mut self) -> Option<Result<(), VmError>> {
         let frame = self.frames.last().unwrap();
         if crate::step_runtime::is_tracked_function(&frame.fn_name) {
+            return None;
+        }
+        if self.current_frame_has_exception_handler() {
             return None;
         }
         let argc = frame.chunk.code[frame.ip] as usize;
@@ -1336,10 +1346,13 @@ impl super::super::Vm {
                 .unwrap_or_default();
             if crate::step_runtime::is_tracked_function(&current_fn_name)
                 || crate::step_runtime::is_tracked_function(&closure.func.name)
+                || self.current_frame_has_exception_handler()
             {
                 // Persona/step lifecycle state is frame-owned. Keep those
                 // frames explicit so PreStep/PostStep hooks see the same
-                // boundaries as a non-tail call.
+                // boundaries as a non-tail call. Exception handlers also
+                // store instruction pointers into their owning frame, so
+                // that frame cannot be elided while a handler is active.
                 let args = self.take_stack_args_from(args_start)?;
                 self.stack.truncate(callee_idx);
                 self.call_user_closure(closure, args).await?;

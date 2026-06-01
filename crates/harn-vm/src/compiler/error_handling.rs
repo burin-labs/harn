@@ -255,6 +255,7 @@ impl Compiler {
 
         let loop_start = self.chunk.current_offset();
 
+        self.handler_depth += 1;
         let catch_jump = self.chunk.emit_jump(Op::TryCatchSetup, self.line);
         // Empty type name → untyped catch.
         let empty_type = self.string_constant("");
@@ -269,6 +270,7 @@ impl Compiler {
 
         self.compile_block(body)?;
 
+        self.handler_depth -= 1;
         self.chunk.emit(Op::PopHandler, self.line);
         let end_jump = self.chunk.emit_jump(Op::Jump, self.line);
 

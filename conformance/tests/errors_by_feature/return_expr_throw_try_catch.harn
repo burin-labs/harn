@@ -1,0 +1,62 @@
+enum AppError {
+  Local(msg)
+}
+
+enum OtherError {
+  Remote(msg)
+}
+
+fn direct_return_catches(body) {
+  try {
+    return body()
+  } catch (e) {
+    return "direct:" + to_string(e)
+  }
+}
+
+fn pipe_fail(_value) {
+  throw "pipe"
+}
+
+fn pipe_return_catches() {
+  try {
+    return 1 |> pipe_fail
+  } catch (e) {
+    return "pipe:" + to_string(e)
+  }
+}
+
+fn other_error() -> OtherError {
+  return OtherError.Remote("body")
+}
+
+fn typed_catch_mismatch_propagates(body, _sample: AppError) {
+  try {
+    return body()
+  } catch (e: AppError) {
+    return "local:" + to_string(e)
+  }
+}
+
+pipeline default() {
+  __io_println(
+    direct_return_catches(
+      { ->
+        throw "body"
+      },
+    ),
+  )
+  __io_println(pipe_return_catches())
+  let propagated = try {
+    typed_catch_mismatch_propagates(
+      { ->
+        throw other_error()
+      },
+      AppError.Local("sample"),
+    )
+    "not propagated"
+  } catch (e) {
+    "outer:" + to_string(e)
+  }
+  __io_println(propagated)
+}
