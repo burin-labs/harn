@@ -7,6 +7,7 @@ use harn_parser::TypeExpr;
 use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
 
+use crate::harness::HarnessKind;
 use crate::runtime_guards::RuntimeParamGuard;
 
 /// Sentinel value stored in [`Chunk::inline_cache_index`] for code offsets
@@ -189,6 +190,7 @@ impl Eq for DirectCallState {}
 pub(crate) enum PropertyCacheTarget {
     DictField(Arc<str>),
     StructField { field_name: Arc<str>, index: usize },
+    HarnessSubHandle(HarnessKind),
     ListCount,
     ListEmpty,
     ListFirst,
@@ -203,6 +205,7 @@ pub(crate) enum PropertyCacheTarget {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum MethodCacheTarget {
+    Harness(HarnessKind),
     ListCount,
     ListEmpty,
     ListContains,

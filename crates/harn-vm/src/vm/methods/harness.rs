@@ -1,7 +1,7 @@
 //! Method dispatch for the `Harness` capability handle and its
 //! sub-handles. Every sub-handle (`stdio`, `clock`, `fs`, `env`,
-//! `random`, `net`, `process`, `crypto`, `system`, `llm`) is wired end-to-end in
-//! real, mock, and null modes;
+//! `random`, `net`, `process`, `crypto`, `system`, `llm`, `tenant`, and `obs`)
+//! is wired end-to-end in real, mock, and null modes;
 //! sandbox / egress rejections raised inside a sub-handle method are
 //! tagged with the `HARN-CAP-201` diagnostic code so callers can
 //! attribute the error to the active capability profile rather than an
@@ -57,6 +57,11 @@ impl crate::vm::Vm {
                 category: ErrorCategory::ToolRejected,
             });
         }
+        if let Some(result) =
+            Self::call_harness_method_sync_fast(&mut self.output, handle, method, args)
+        {
+            return result;
+        }
         // Enforce per-harness `NetPolicy` (issue #1913) ahead of mock
         // dispatch so audit_only / quarantine outcomes apply uniformly
         // to real and mock paths.
@@ -90,6 +95,416 @@ impl crate::vm::Vm {
             HarnessKind::Tenant => self.call_harness_tenant_method(handle, method, args),
             HarnessKind::Obs => self.call_harness_obs_method(handle, method, args).await,
         }
+    }
+
+    pub(in crate::vm) fn call_harness_method_sync_fast(
+        output: &mut String,
+        handle: &VmHarness,
+        method: &str,
+        args: &[VmValue],
+    ) -> Option<Result<VmValue, VmError>> {
+        if handle.kind() == HarnessKind::Root {
+            return None;
+        }
+        if let HarnessMode::Null(state) = handle.inner().mode() {
+            state.record_deny(handle.kind(), method, args);
+            return Some(Err(VmError::CategorizedError {
+                message: format!("NullHarness denied {}::{method}", handle.kind().type_name()),
+                category: ErrorCategory::ToolRejected,
+            }));
+        }
+        if matches!(handle.inner().mode(), HarnessMode::Mock(_)) {
+            return Self::call_mock_harness_method_sync_fast(handle, method, args);
+        }
+        match handle.kind() {
+            HarnessKind::Stdio => Self::call_harness_stdio_method_sync_fast(output, method, args),
+            HarnessKind::Term => Self::call_harness_term_method_sync_fast(method, args),
+            HarnessKind::Clock => Self::call_harness_clock_method_sync_fast(handle, method),
+            HarnessKind::Env => Self::call_harness_env_method_sync_fast(method, args),
+            HarnessKind::Random => Self::call_harness_random_method_sync_fast(method, args),
+            HarnessKind::Crypto => Self::call_harness_crypto_method_sync_fast(method, args),
+            HarnessKind::Tenant => Self::call_harness_tenant_method_sync_fast(method, args),
+            HarnessKind::Root
+            | HarnessKind::Fs
+            | HarnessKind::Net
+            | HarnessKind::Process
+            | HarnessKind::System
+            | HarnessKind::Llm
+            | HarnessKind::Obs => None,
+        }
+    }
+
+    fn call_harness_clock_method_sync_fast(
+        handle: &VmHarness,
+        method: &str,
+    ) -> Option<Result<VmValue, VmError>> {
+        let clock = handle.inner().clock();
+        match method {
+            "now_ms" => Some(Ok(VmValue::Int(crate::clock::now_wall_ms(clock.as_ref())))),
+            "timestamp" => Some(Ok(VmValue::Float(
+                crate::clock::now_wall_ms(clock.as_ref()) as f64 / 1_000.0,
+            ))),
+            "monotonic_ms" | "elapsed" => Some(Ok(VmValue::Int(clock.monotonic_ms()))),
+            "sleep_ms" => None,
+            _ => None,
+        }
+    }
+
+    fn call_harness_stdio_method_sync_fast(
+        output: &mut String,
+        method: &str,
+        args: &[VmValue],
+    ) -> Option<Result<VmValue, VmError>> {
+        match method {
+            "println" => {
+                let msg = args.first().map(|a| a.display()).unwrap_or_default();
+                write_stdout(output, &format!("{msg}\n"));
+                Some(Ok(VmValue::Nil))
+            }
+            "print" => {
+                let msg = args.first().map(|a| a.display()).unwrap_or_default();
+                write_stdout(output, &msg);
+                Some(Ok(VmValue::Nil))
+            }
+            "eprintln" => {
+                let msg = args.first().map(|a| a.display()).unwrap_or_default();
+                write_stderr(&format!("{msg}\n"));
+                Some(Ok(VmValue::Nil))
+            }
+            "eprint" => {
+                let msg = args.first().map(|a| a.display()).unwrap_or_default();
+                write_stderr(&msg);
+                Some(Ok(VmValue::Nil))
+            }
+            "read_line" => {
+                if args.is_empty() {
+                    Some(Ok(read_line_legacy_value()))
+                } else {
+                    Some(read_line_structured_value(args))
+                }
+            }
+            "prompt" => Some(prompt_user_value(args, output)),
+            _ => None,
+        }
+    }
+
+    fn call_harness_term_method_sync_fast(
+        method: &str,
+        args: &[VmValue],
+    ) -> Option<Result<VmValue, VmError>> {
+        match method {
+            "width" => Some(Ok(VmValue::Int(crate::term::width() as i64))),
+            "height" => Some(Ok(VmValue::Int(crate::term::height() as i64))),
+            "read_password" => {
+                let prompt = match optional_string_arg(args, 0, "HarnessTerm.read_password") {
+                    Ok(prompt) => prompt,
+                    Err(err) => return Some(Err(err)),
+                };
+                if args.len() > 1 {
+                    return Some(Err(VmError::TypeError(
+                        "HarnessTerm.read_password expects at most one prompt argument".to_string(),
+                    )));
+                }
+                Some(crate::stdlib::io::read_password_legacy_value(prompt))
+            }
+            _ => None,
+        }
+    }
+
+    fn call_harness_env_method_sync_fast(
+        method: &str,
+        args: &[VmValue],
+    ) -> Option<Result<VmValue, VmError>> {
+        match method {
+            "get" => {
+                let name = match string_arg(args, 0, "HarnessEnv.get") {
+                    Ok(name) => name,
+                    Err(err) => return Some(Err(err)),
+                };
+                Some(Ok(crate::stdlib::process::read_env_value(name)
+                    .map(vm_string)
+                    .unwrap_or(VmValue::Nil)))
+            }
+            "get_or" => {
+                let name = match string_arg(args, 0, "HarnessEnv.get_or") {
+                    Ok(name) => name,
+                    Err(err) => return Some(Err(err)),
+                };
+                let default = args.get(1).cloned().unwrap_or(VmValue::Nil);
+                Some(Ok(crate::stdlib::process::read_env_value(name)
+                    .map(vm_string)
+                    .unwrap_or(default)))
+            }
+            _ => None,
+        }
+    }
+
+    fn call_harness_random_method_sync_fast(
+        method: &str,
+        args: &[VmValue],
+    ) -> Option<Result<VmValue, VmError>> {
+        use rand::seq::SliceRandom;
+        use rand::RngExt;
+        match method {
+            "gen_f64" | "f64" | "random" => Some(Ok(VmValue::Float(rand::rng().random()))),
+            "gen_u64" | "u64" => {
+                let value: u64 = rand::rng().random();
+                Some(Ok(VmValue::Int(value.min(i64::MAX as u64) as i64)))
+            }
+            "gen_range" | "range" | "random_int" | "int" => {
+                let min = match args.first().and_then(|v| v.as_int()) {
+                    Some(min) => min,
+                    None => {
+                        return Some(Err(VmError::TypeError(
+                            "HarnessRandom.gen_range expects an integer min argument".to_string(),
+                        )))
+                    }
+                };
+                let max = match args.get(1).and_then(|v| v.as_int()) {
+                    Some(max) => max,
+                    None => {
+                        return Some(Err(VmError::TypeError(
+                            "HarnessRandom.gen_range expects an integer max argument".to_string(),
+                        )))
+                    }
+                };
+                if min > max {
+                    return Some(Ok(VmValue::Nil));
+                }
+                Some(Ok(VmValue::Int(rand::rng().random_range(min..=max))))
+            }
+            "choice" | "random_choice" => {
+                let Some(VmValue::List(items)) = args.first() else {
+                    return Some(Ok(VmValue::Nil));
+                };
+                if items.is_empty() {
+                    return Some(Ok(VmValue::Nil));
+                }
+                let idx = rand::rng().random_range(0..items.len());
+                Some(Ok(items[idx].clone()))
+            }
+            "shuffle" | "random_shuffle" => {
+                let Some(VmValue::List(items)) = args.first() else {
+                    return Some(Ok(VmValue::Nil));
+                };
+                let mut shuffled = items.as_ref().clone();
+                shuffled.shuffle(&mut rand::rng());
+                Some(Ok(VmValue::List(std::sync::Arc::new(shuffled))))
+            }
+            _ => None,
+        }
+    }
+
+    fn call_harness_crypto_method_sync_fast(
+        method: &str,
+        args: &[VmValue],
+    ) -> Option<Result<VmValue, VmError>> {
+        match method {
+            "sha256" => Some(Ok(crate::harness_crypto::sha256_hex_value(args))),
+            _ => None,
+        }
+    }
+
+    fn call_harness_tenant_method_sync_fast(
+        method: &str,
+        args: &[VmValue],
+    ) -> Option<Result<VmValue, VmError>> {
+        if !args.is_empty() {
+            return Some(Err(VmError::TypeError(format!(
+                "HarnessTenant.{method} takes no arguments"
+            ))));
+        }
+        match method {
+            "id" => Some(match crate::harness_tenant::current_tenant_id() {
+                Some(tenant) => Ok(vm_string(tenant.0)),
+                None => Err(VmError::CategorizedError {
+                    message: crate::harness_tenant::MISSING_TENANT_MESSAGE.to_string(),
+                    category: ErrorCategory::Auth,
+                }),
+            }),
+            "try_id" => Some(Ok(crate::harness_tenant::current_tenant_id()
+                .map(|tenant| vm_string(tenant.0))
+                .unwrap_or(VmValue::Nil))),
+            _ => None,
+        }
+    }
+
+    fn call_mock_harness_method_sync_fast(
+        handle: &VmHarness,
+        method: &str,
+        args: &[VmValue],
+    ) -> Option<Result<VmValue, VmError>> {
+        let HarnessMode::Mock(state) = handle.inner().mode() else {
+            unreachable!("mock sync fast path is only called for mock harnesses");
+        };
+        let result = match handle.kind() {
+            HarnessKind::Stdio => match method {
+                "println" => {
+                    let msg = args.first().map(|a| a.display()).unwrap_or_default();
+                    state.push_stdio(&format!("{msg}\n"));
+                    Some(Ok(VmValue::Nil))
+                }
+                "print" => {
+                    let msg = args.first().map(|a| a.display()).unwrap_or_default();
+                    state.push_stdio(&msg);
+                    Some(Ok(VmValue::Nil))
+                }
+                "eprintln" => {
+                    let msg = args.first().map(|a| a.display()).unwrap_or_default();
+                    state.push_stderr(&format!("{msg}\n"));
+                    Some(Ok(VmValue::Nil))
+                }
+                "eprint" => {
+                    let msg = args.first().map(|a| a.display()).unwrap_or_default();
+                    state.push_stderr(&msg);
+                    Some(Ok(VmValue::Nil))
+                }
+                "read_line" => Some(Ok(mock_read_line_value(state, args))),
+                "prompt" => {
+                    let msg = args.first().map(|a| a.display()).unwrap_or_default();
+                    state.push_stdio(&msg);
+                    Some(Ok(mock_read_line_value(state, &[])))
+                }
+                _ => None,
+            },
+            HarnessKind::Term => match method {
+                "width" => Some(Ok(VmValue::Int(
+                    mock_term_dimension(state.env_get("COLUMNS"), 80) as i64,
+                ))),
+                "height" => Some(Ok(VmValue::Int(
+                    mock_term_dimension(state.env_get("LINES"), 24) as i64,
+                ))),
+                "read_password" => {
+                    let prompt = match optional_string_arg(args, 0, "HarnessTerm.read_password") {
+                        Ok(prompt) => prompt,
+                        Err(err) => return Some(Err(err)),
+                    };
+                    if args.len() > 1 {
+                        return Some(Err(VmError::TypeError(
+                            "HarnessTerm.read_password expects at most one prompt argument"
+                                .to_string(),
+                        )));
+                    }
+                    if !prompt.is_empty() {
+                        state.push_stderr(prompt);
+                    }
+                    Some(state.pop_stdin_line().map(vm_string).ok_or_else(|| {
+                        VmError::Runtime("HarnessTerm.read_password: stdin reached EOF".to_string())
+                    }))
+                }
+                _ => None,
+            },
+            HarnessKind::Clock => {
+                let clock = handle.inner().clock();
+                match method {
+                    "now_ms" => Some(Ok(VmValue::Int(crate::clock::now_wall_ms(clock.as_ref())))),
+                    "timestamp" => Some(Ok(VmValue::Float(
+                        crate::clock::now_wall_ms(clock.as_ref()) as f64 / 1_000.0,
+                    ))),
+                    "monotonic_ms" | "elapsed" => Some(Ok(VmValue::Int(clock.monotonic_ms()))),
+                    "sleep_ms" => {
+                        let ms = match sleep_ms_arg(args) {
+                            Ok(ms) => ms,
+                            Err(err) => return Some(Err(err)),
+                        };
+                        if ms > 0 {
+                            state.advance_clock(Duration::from_millis(ms as u64));
+                        }
+                        Some(Ok(VmValue::Nil))
+                    }
+                    _ => None,
+                }
+            }
+            HarnessKind::Env => match method {
+                "get" => {
+                    let key = match string_arg(args, 0, "HarnessEnv.get") {
+                        Ok(key) => key,
+                        Err(err) => return Some(Err(err)),
+                    };
+                    Some(Ok(state
+                        .env_get(key)
+                        .map(vm_string)
+                        .unwrap_or(VmValue::Nil)))
+                }
+                "get_or" => {
+                    let key = match string_arg(args, 0, "HarnessEnv.get_or") {
+                        Ok(key) => key,
+                        Err(err) => return Some(Err(err)),
+                    };
+                    let default = args.get(1).cloned().unwrap_or(VmValue::Nil);
+                    Some(Ok(state.env_get(key).map(vm_string).unwrap_or(default)))
+                }
+                _ => None,
+            },
+            HarnessKind::Random => match method {
+                "u64" | "gen_u64" => Some(
+                    state
+                        .next_random_u64()
+                        .map(|value| VmValue::Int(value.min(i64::MAX as u64) as i64))
+                        .ok_or_else(|| VmError::CategorizedError {
+                            message: "MockHarness has no random_u64 response".to_string(),
+                            category: ErrorCategory::NotFound,
+                        }),
+                ),
+                _ => None,
+            },
+            HarnessKind::Crypto => match method {
+                "sha256" => Some(Ok(crate::harness_crypto::sha256_hex_value(args))),
+                _ => None,
+            },
+            HarnessKind::System => {
+                let json = match method {
+                    "cpu" => serde_json::json!({
+                        "count": 1,
+                        "physical_count": 1,
+                        "model": "mock-cpu",
+                        "frequency_mhz": 0u64,
+                        "usage_pct": 0.0,
+                    }),
+                    "memory" => serde_json::json!({
+                        "total_bytes": 0u64,
+                        "used_bytes": 0u64,
+                        "available_bytes": 0u64,
+                        "total_gb": 0.0,
+                        "used_gb": 0.0,
+                        "available_gb": 0.0,
+                        "pressure": "unknown",
+                    }),
+                    "gpus" | "gpu" => serde_json::Value::Array(Vec::new()),
+                    "temperature" => serde_json::json!({"components": []}),
+                    "platform" => serde_json::json!({
+                        "os": "mock",
+                        "arch": "mock",
+                        "version": "mock",
+                        "kernel": "mock",
+                        "long_os_version": "mock",
+                        "hostname": "mock",
+                    }),
+                    "processes" => serde_json::Value::Array(vec![serde_json::json!({
+                        "pid": 1,
+                        "parent_pid": serde_json::Value::Null,
+                        "name": "harn",
+                        "cpu_pct": 0.0,
+                        "mem_bytes": 0u64,
+                        "is_harn_owned": true,
+                        "is_self": true,
+                    })]),
+                    _ => return None,
+                };
+                Some(Ok(crate::stdlib::json_to_vm_value(&json)))
+            }
+            HarnessKind::Tenant => Self::call_harness_tenant_method_sync_fast(method, args),
+            HarnessKind::Root
+            | HarnessKind::Fs
+            | HarnessKind::Net
+            | HarnessKind::Process
+            | HarnessKind::Llm
+            | HarnessKind::Obs => None,
+        };
+        if result.is_some() {
+            state.record_call(handle.kind(), method, args);
+        }
+        result
     }
 
     /// Root-handle capability methods that bypass the null/mock-mode
@@ -294,24 +709,8 @@ impl crate::vm::Vm {
         method: &str,
         args: &[VmValue],
     ) -> Result<VmValue, VmError> {
-        if !args.is_empty() {
-            return Err(VmError::TypeError(format!(
-                "HarnessTenant.{method} takes no arguments"
-            )));
-        }
-        match method {
-            "id" => match crate::harness_tenant::current_tenant_id() {
-                Some(tenant) => Ok(vm_string(tenant.0)),
-                None => Err(VmError::CategorizedError {
-                    message: crate::harness_tenant::MISSING_TENANT_MESSAGE.to_string(),
-                    category: ErrorCategory::Auth,
-                }),
-            },
-            "try_id" => Ok(crate::harness_tenant::current_tenant_id()
-                .map(|tenant| vm_string(tenant.0))
-                .unwrap_or(VmValue::Nil)),
-            _ => Err(method_unsupported(handle, method)),
-        }
+        Self::call_harness_tenant_method_sync_fast(method, args)
+            .unwrap_or_else(|| Err(method_unsupported(handle, method)))
     }
 
     async fn call_harness_obs_method(
@@ -508,37 +907,8 @@ impl crate::vm::Vm {
         method: &str,
         args: &[VmValue],
     ) -> Result<VmValue, VmError> {
-        match method {
-            "println" => {
-                let msg = args.first().map(|a| a.display()).unwrap_or_default();
-                write_stdout(&mut self.output, &format!("{msg}\n"));
-                Ok(VmValue::Nil)
-            }
-            "print" => {
-                let msg = args.first().map(|a| a.display()).unwrap_or_default();
-                write_stdout(&mut self.output, &msg);
-                Ok(VmValue::Nil)
-            }
-            "eprintln" => {
-                let msg = args.first().map(|a| a.display()).unwrap_or_default();
-                write_stderr(&format!("{msg}\n"));
-                Ok(VmValue::Nil)
-            }
-            "eprint" => {
-                let msg = args.first().map(|a| a.display()).unwrap_or_default();
-                write_stderr(&msg);
-                Ok(VmValue::Nil)
-            }
-            "read_line" => {
-                if args.is_empty() {
-                    Ok(read_line_legacy_value())
-                } else {
-                    read_line_structured_value(args)
-                }
-            }
-            "prompt" => prompt_user_value(args, &mut self.output),
-            _ => Err(method_unsupported(handle, method)),
-        }
+        Self::call_harness_stdio_method_sync_fast(&mut self.output, method, args)
+            .unwrap_or_else(|| Err(method_unsupported(handle, method)))
     }
 
     fn call_harness_term_method(
@@ -547,20 +917,8 @@ impl crate::vm::Vm {
         method: &str,
         args: &[VmValue],
     ) -> Result<VmValue, VmError> {
-        match method {
-            "width" => Ok(VmValue::Int(crate::term::width() as i64)),
-            "height" => Ok(VmValue::Int(crate::term::height() as i64)),
-            "read_password" => {
-                let prompt = optional_string_arg(args, 0, "HarnessTerm.read_password")?;
-                if args.len() > 1 {
-                    return Err(VmError::TypeError(
-                        "HarnessTerm.read_password expects at most one prompt argument".to_string(),
-                    ));
-                }
-                crate::stdlib::io::read_password_legacy_value(prompt)
-            }
-            _ => Err(method_unsupported(handle, method)),
-        }
+        Self::call_harness_term_method_sync_fast(method, args)
+            .unwrap_or_else(|| Err(method_unsupported(handle, method)))
     }
 
     async fn call_harness_clock_method(
@@ -569,13 +927,11 @@ impl crate::vm::Vm {
         method: &str,
         args: &[VmValue],
     ) -> Result<VmValue, VmError> {
+        if let Some(result) = Self::call_harness_clock_method_sync_fast(handle, method) {
+            return result;
+        }
         let clock = handle.inner().clock();
         match method {
-            "now_ms" => Ok(VmValue::Int(crate::clock::now_wall_ms(clock.as_ref()))),
-            "timestamp" => Ok(VmValue::Float(
-                crate::clock::now_wall_ms(clock.as_ref()) as f64 / 1_000.0,
-            )),
-            "monotonic_ms" | "elapsed" => Ok(VmValue::Int(clock.monotonic_ms())),
             "sleep_ms" => {
                 let ms = sleep_ms_arg(args)?;
                 if ms > 0 {
@@ -619,22 +975,8 @@ impl crate::vm::Vm {
         method: &str,
         args: &[VmValue],
     ) -> Result<VmValue, VmError> {
-        match method {
-            "get" => {
-                let name = string_arg(args, 0, "HarnessEnv.get")?;
-                Ok(crate::stdlib::process::read_env_value(name)
-                    .map(vm_string)
-                    .unwrap_or(VmValue::Nil))
-            }
-            "get_or" => {
-                let name = string_arg(args, 0, "HarnessEnv.get_or")?;
-                let default = args.get(1).cloned().unwrap_or(VmValue::Nil);
-                Ok(crate::stdlib::process::read_env_value(name)
-                    .map(vm_string)
-                    .unwrap_or(default))
-            }
-            _ => Err(method_unsupported(handle, method)),
-        }
+        Self::call_harness_env_method_sync_fast(method, args)
+            .unwrap_or_else(|| Err(method_unsupported(handle, method)))
     }
 
     /// Dispatch `harness.random.*` in real mode. The handle is intentionally
@@ -647,50 +989,8 @@ impl crate::vm::Vm {
         method: &str,
         args: &[VmValue],
     ) -> Result<VmValue, VmError> {
-        use rand::seq::SliceRandom;
-        use rand::RngExt;
-        match method {
-            "gen_f64" | "f64" | "random" => Ok(VmValue::Float(rand::rng().random())),
-            "gen_u64" | "u64" => {
-                let value: u64 = rand::rng().random();
-                Ok(VmValue::Int(value.min(i64::MAX as u64) as i64))
-            }
-            "gen_range" | "range" | "random_int" | "int" => {
-                let min = args.first().and_then(|v| v.as_int()).ok_or_else(|| {
-                    VmError::TypeError(
-                        "HarnessRandom.gen_range expects an integer min argument".to_string(),
-                    )
-                })?;
-                let max = args.get(1).and_then(|v| v.as_int()).ok_or_else(|| {
-                    VmError::TypeError(
-                        "HarnessRandom.gen_range expects an integer max argument".to_string(),
-                    )
-                })?;
-                if min > max {
-                    return Ok(VmValue::Nil);
-                }
-                Ok(VmValue::Int(rand::rng().random_range(min..=max)))
-            }
-            "choice" | "random_choice" => {
-                let Some(VmValue::List(items)) = args.first() else {
-                    return Ok(VmValue::Nil);
-                };
-                if items.is_empty() {
-                    return Ok(VmValue::Nil);
-                }
-                let idx = rand::rng().random_range(0..items.len());
-                Ok(items[idx].clone())
-            }
-            "shuffle" | "random_shuffle" => {
-                let Some(VmValue::List(items)) = args.first() else {
-                    return Ok(VmValue::Nil);
-                };
-                let mut shuffled = items.as_ref().clone();
-                shuffled.shuffle(&mut rand::rng());
-                Ok(VmValue::List(std::sync::Arc::new(shuffled)))
-            }
-            _ => Err(method_unsupported(handle, method)),
-        }
+        Self::call_harness_random_method_sync_fast(method, args)
+            .unwrap_or_else(|| Err(method_unsupported(handle, method)))
     }
 
     /// Dispatch `harness.net.*` in real mode through the same egress
@@ -771,10 +1071,8 @@ impl crate::vm::Vm {
         method: &str,
         args: &[VmValue],
     ) -> Result<VmValue, VmError> {
-        match method {
-            "sha256" => Ok(crate::harness_crypto::sha256_hex_value(args)),
-            _ => Err(method_unsupported(handle, method)),
-        }
+        Self::call_harness_crypto_method_sync_fast(method, args)
+            .unwrap_or_else(|| Err(method_unsupported(handle, method)))
     }
 
     async fn call_mock_harness_method(
@@ -786,80 +1084,20 @@ impl crate::vm::Vm {
         let HarnessMode::Mock(state) = handle.inner().mode() else {
             unreachable!("mock dispatch is only called for mock harnesses");
         };
+        if let Some(result) = Self::call_mock_harness_method_sync_fast(handle, method, args) {
+            return result;
+        }
         state.record_call(handle.kind(), method, args);
         match handle.kind() {
-            HarnessKind::Root => Err(method_unsupported(handle, method)),
-            HarnessKind::Stdio => match method {
-                "println" => {
-                    let msg = args.first().map(|a| a.display()).unwrap_or_default();
-                    state.push_stdio(&format!("{msg}\n"));
-                    Ok(VmValue::Nil)
-                }
-                "print" => {
-                    let msg = args.first().map(|a| a.display()).unwrap_or_default();
-                    state.push_stdio(&msg);
-                    Ok(VmValue::Nil)
-                }
-                "eprintln" => {
-                    let msg = args.first().map(|a| a.display()).unwrap_or_default();
-                    state.push_stderr(&format!("{msg}\n"));
-                    Ok(VmValue::Nil)
-                }
-                "eprint" => {
-                    let msg = args.first().map(|a| a.display()).unwrap_or_default();
-                    state.push_stderr(&msg);
-                    Ok(VmValue::Nil)
-                }
-                "read_line" => Ok(mock_read_line_value(state, args)),
-                "prompt" => {
-                    let msg = args.first().map(|a| a.display()).unwrap_or_default();
-                    state.push_stdio(&msg);
-                    Ok(mock_read_line_value(state, &[]))
-                }
-                _ => Err(method_unsupported(handle, method)),
-            },
-            HarnessKind::Term => match method {
-                "width" => Ok(VmValue::Int(
-                    mock_term_dimension(state.env_get("COLUMNS"), 80) as i64,
-                )),
-                "height" => Ok(VmValue::Int(
-                    mock_term_dimension(state.env_get("LINES"), 24) as i64,
-                )),
-                "read_password" => {
-                    let prompt = optional_string_arg(args, 0, "HarnessTerm.read_password")?;
-                    if args.len() > 1 {
-                        return Err(VmError::TypeError(
-                            "HarnessTerm.read_password expects at most one prompt argument"
-                                .to_string(),
-                        ));
-                    }
-                    if !prompt.is_empty() {
-                        state.push_stderr(prompt);
-                    }
-                    state.pop_stdin_line().map(vm_string).ok_or_else(|| {
-                        VmError::Runtime("HarnessTerm.read_password: stdin reached EOF".to_string())
-                    })
-                }
-                _ => Err(method_unsupported(handle, method)),
-            },
-            HarnessKind::Clock => {
-                let clock = handle.inner().clock();
-                match method {
-                    "now_ms" => Ok(VmValue::Int(crate::clock::now_wall_ms(clock.as_ref()))),
-                    "timestamp" => Ok(VmValue::Float(
-                        crate::clock::now_wall_ms(clock.as_ref()) as f64 / 1_000.0,
-                    )),
-                    "monotonic_ms" | "elapsed" => Ok(VmValue::Int(clock.monotonic_ms())),
-                    "sleep_ms" => {
-                        let ms = sleep_ms_arg(args)?;
-                        if ms > 0 {
-                            state.advance_clock(Duration::from_millis(ms as u64));
-                        }
-                        Ok(VmValue::Nil)
-                    }
-                    _ => Err(method_unsupported(handle, method)),
-                }
-            }
+            HarnessKind::Root
+            | HarnessKind::Stdio
+            | HarnessKind::Term
+            | HarnessKind::Clock
+            | HarnessKind::Env
+            | HarnessKind::Random
+            | HarnessKind::Crypto
+            | HarnessKind::System
+            | HarnessKind::Tenant => Err(method_unsupported(handle, method)),
             HarnessKind::Fs => match method {
                 "read_file" | "read" => {
                     let path = string_arg(args, 0, "HarnessFs.read_file")?;
@@ -890,28 +1128,6 @@ impl crate::vm::Vm {
                 }
                 _ => Err(method_unsupported(handle, method)),
             },
-            HarnessKind::Env => match method {
-                "get" => {
-                    let key = string_arg(args, 0, "HarnessEnv.get")?;
-                    Ok(state.env_get(key).map(vm_string).unwrap_or(VmValue::Nil))
-                }
-                "get_or" => {
-                    let key = string_arg(args, 0, "HarnessEnv.get_or")?;
-                    let default = args.get(1).cloned().unwrap_or(VmValue::Nil);
-                    Ok(state.env_get(key).map(vm_string).unwrap_or(default))
-                }
-                _ => Err(method_unsupported(handle, method)),
-            },
-            HarnessKind::Random => match method {
-                "u64" | "gen_u64" => state
-                    .next_random_u64()
-                    .map(|value| VmValue::Int(value.min(i64::MAX as u64) as i64))
-                    .ok_or_else(|| VmError::CategorizedError {
-                        message: "MockHarness has no random_u64 response".to_string(),
-                        category: ErrorCategory::NotFound,
-                    }),
-                _ => Err(method_unsupported(handle, method)),
-            },
             HarnessKind::Net => match method {
                 "get" | "http_get" => {
                     let url = string_arg(args, 0, "HarnessNet.get")?;
@@ -931,64 +1147,7 @@ impl crate::vm::Vm {
                 }),
                 _ => Err(method_unsupported(handle, method)),
             },
-            HarnessKind::Crypto => match method {
-                "sha256" => Ok(crate::harness_crypto::sha256_hex_value(args)),
-                _ => Err(method_unsupported(handle, method)),
-            },
-            HarnessKind::System => {
-                // Mock mode returns deterministic synthetic snapshots so
-                // conformance fixtures can exercise the surface without
-                // observing the real host. Methods mirror the real names
-                // exactly, with the same JSON shape, but populated with
-                // fixed placeholder values.
-                let json = match method {
-                    "cpu" => serde_json::json!({
-                        "count": 1,
-                        "physical_count": 1,
-                        "model": "mock-cpu",
-                        "frequency_mhz": 0u64,
-                        "usage_pct": 0.0,
-                    }),
-                    "memory" => serde_json::json!({
-                        "total_bytes": 0u64,
-                        "used_bytes": 0u64,
-                        "available_bytes": 0u64,
-                        "total_gb": 0.0,
-                        "used_gb": 0.0,
-                        "available_gb": 0.0,
-                        "pressure": "unknown",
-                    }),
-                    "gpus" | "gpu" => serde_json::Value::Array(Vec::new()),
-                    "temperature" => serde_json::json!({"components": []}),
-                    "platform" => serde_json::json!({
-                        "os": "mock",
-                        "arch": "mock",
-                        "version": "mock",
-                        "kernel": "mock",
-                        "long_os_version": "mock",
-                        "hostname": "mock",
-                    }),
-                    "processes" => serde_json::Value::Array(vec![serde_json::json!({
-                        "pid": 1,
-                        "parent_pid": serde_json::Value::Null,
-                        "name": "harn",
-                        "cpu_pct": 0.0,
-                        "mem_bytes": 0u64,
-                        "is_harn_owned": true,
-                        "is_self": true,
-                    })]),
-                    _ => return Err(method_unsupported(handle, method)),
-                };
-                Ok(crate::stdlib::json_to_vm_value(&json))
-            }
             HarnessKind::Llm => self.call_harness_llm_method(handle, method, args).await,
-            HarnessKind::Tenant => {
-                // Mock mode shares the same ambient stack as real mode
-                // so conformance fixtures can drive `enter_tenant(...)`
-                // and assert `harness.tenant.id()` returns the pushed
-                // id. No mock-only state is needed.
-                self.call_harness_tenant_method(handle, method, args)
-            }
             HarnessKind::Obs => {
                 // Mock mode shares the same OBS_STATE thread-local as
                 // real mode — fixtures already drive `__obs_*` via

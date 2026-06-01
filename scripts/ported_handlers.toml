@@ -55,7 +55,9 @@ path = "crates/harn-cli/src/lib.rs"
 # Re-bumped to 3218: lib.rs reached 3213 on main via #2628 (fast-mode
 # speed/service_tier wiring into the live request path + cost calc) without a
 # matching budget bump, leaving the ratchet stale for every downstream PR.
-max_loc = 3218
+# Re-bumped to 3335: lib.rs reached 3330 on main via #2784 without a matching
+# budget bump, leaving the merge queue ratchet stale for downstream PRs.
+max_loc = 3335
 
 [[handler]]
 path = "crates/harn-cli/src/commands/models/list.rs"

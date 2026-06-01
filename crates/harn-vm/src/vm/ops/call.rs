@@ -423,8 +423,44 @@ impl super::super::Vm {
         }
     }
 
+    fn try_cached_harness_method(
+        cache: Option<(u16, usize, MethodCacheTarget)>,
+        name_idx: u16,
+        argc: usize,
+        obj: &VmValue,
+    ) -> Option<Arc<crate::harness::VmHarness>> {
+        let (cached_name_idx, cached_argc, target) = cache?;
+        if cached_name_idx != name_idx || cached_argc != argc {
+            return None;
+        }
+        let MethodCacheTarget::Harness(kind) = target else {
+            return None;
+        };
+        let VmValue::Harness(handle) = obj else {
+            return None;
+        };
+        if handle.kind() == kind {
+            Some(Arc::clone(handle))
+        } else {
+            None
+        }
+    }
+
+    fn try_harness_method_sync_fast(
+        output: &mut String,
+        obj: &VmValue,
+        method: &str,
+        args: &[VmValue],
+    ) -> Option<Result<VmValue, VmError>> {
+        let VmValue::Harness(handle) = obj else {
+            return None;
+        };
+        Self::call_harness_method_sync_fast(output, handle, method, args)
+    }
+
     fn method_cache_target(obj: &VmValue, method: &str, argc: usize) -> Option<MethodCacheTarget> {
         match obj {
+            VmValue::Harness(handle) => Self::harness_sync_method_cache_target(handle, method),
             VmValue::List(_) => match (method, argc) {
                 ("count", 0) => Some(MethodCacheTarget::ListCount),
                 ("empty", 0) => Some(MethodCacheTarget::ListEmpty),
@@ -459,6 +495,51 @@ impl super::super::Vm {
             },
             _ => None,
         }
+    }
+
+    fn harness_sync_method_cache_target(
+        handle: &crate::harness::VmHarness,
+        method: &str,
+    ) -> Option<MethodCacheTarget> {
+        let cacheable = match handle.kind() {
+            crate::harness::HarnessKind::Stdio => matches!(
+                method,
+                "print" | "println" | "eprint" | "eprintln" | "read_line" | "prompt"
+            ),
+            crate::harness::HarnessKind::Term => {
+                matches!(method, "width" | "height" | "read_password")
+            }
+            crate::harness::HarnessKind::Clock => {
+                matches!(method, "now_ms" | "timestamp" | "monotonic_ms" | "elapsed")
+            }
+            crate::harness::HarnessKind::Env => matches!(method, "get" | "get_or"),
+            crate::harness::HarnessKind::Random => matches!(
+                method,
+                "gen_f64"
+                    | "f64"
+                    | "random"
+                    | "gen_u64"
+                    | "u64"
+                    | "gen_range"
+                    | "range"
+                    | "random_int"
+                    | "int"
+                    | "choice"
+                    | "random_choice"
+                    | "shuffle"
+                    | "random_shuffle"
+            ),
+            crate::harness::HarnessKind::Crypto => matches!(method, "sha256"),
+            crate::harness::HarnessKind::Tenant => matches!(method, "id" | "try_id"),
+            crate::harness::HarnessKind::Root
+            | crate::harness::HarnessKind::Fs
+            | crate::harness::HarnessKind::Net
+            | crate::harness::HarnessKind::Process
+            | crate::harness::HarnessKind::System
+            | crate::harness::HarnessKind::Llm
+            | crate::harness::HarnessKind::Obs => false,
+        };
+        cacheable.then_some(MethodCacheTarget::Harness(handle.kind()))
     }
 
     fn stack_arg_start(&self, argc: usize) -> Result<usize, VmError> {
@@ -1331,12 +1412,30 @@ impl super::super::Vm {
         ) {
             self.stack.truncate(obj_idx);
             self.stack.push(result);
+        } else if let Some(handle) =
+            Self::try_cached_harness_method(cached_method, name_idx, argc, &obj)
+        {
+            let method = Self::const_str(&chunk.constants[name_idx as usize])?;
+            let args = self.take_stack_args_from(args_start)?;
+            self.stack.truncate(obj_idx);
+            let result = if let Some(result) =
+                Self::call_harness_method_sync_fast(&mut self.output, &handle, method, &args)
+            {
+                result?
+            } else {
+                self.call_method_async(obj, method, &args).await?
+            };
+            self.stack.push(result);
         } else {
             let method = Self::const_str(&chunk.constants[name_idx as usize])?;
             let cache_target = Self::method_cache_target(&obj, method, argc);
+            let args = &self.stack[args_start..];
             let result = if let Some(result) =
-                Self::call_method_sync(&obj, method, &self.stack[args_start..])
+                Self::try_harness_method_sync_fast(&mut self.output, &obj, method, args)
             {
+                self.stack.truncate(obj_idx);
+                result?
+            } else if let Some(result) = Self::call_method_sync(&obj, method, args) {
                 self.stack.truncate(obj_idx);
                 result?
             } else {
@@ -1415,6 +1514,32 @@ impl super::super::Vm {
             ));
         }
 
+        if let Some(handle) = Self::try_cached_harness_method(cached_method, name_idx, argc, obj) {
+            let method = match Self::const_str(&chunk.constants[name_idx as usize]) {
+                Ok(method) => method,
+                Err(err) => {
+                    return Some(self.finish_method_call_sync(
+                        &chunk,
+                        argc,
+                        Err(err),
+                        name_idx,
+                        None,
+                        None,
+                    ))
+                }
+            };
+            if let Some(result) = Self::call_harness_method_sync_fast(
+                &mut self.output,
+                &handle,
+                method,
+                &self.stack[args_start..],
+            ) {
+                return Some(
+                    self.finish_method_call_sync(&chunk, argc, result, name_idx, None, None),
+                );
+            }
+        }
+
         let (result, cache_target) = {
             let method = match Self::const_str(&chunk.constants[name_idx as usize]) {
                 Ok(method) => method,
@@ -1430,7 +1555,13 @@ impl super::super::Vm {
                 }
             };
             let args = &self.stack[args_start..];
-            let result = Self::call_method_sync(obj, method, args)?;
+            let result = if let Some(result) =
+                Self::try_harness_method_sync_fast(&mut self.output, obj, method, args)
+            {
+                result
+            } else {
+                Self::call_method_sync(obj, method, args)?
+            };
             let cache_target = Self::method_cache_target(obj, method, argc);
             (result, cache_target)
         };
@@ -1498,10 +1629,26 @@ impl super::super::Vm {
             Self::try_cached_method(cached_method, name_idx, args.len(), &obj, &args)
         {
             self.stack.push(result);
+        } else if let Some(handle) =
+            Self::try_cached_harness_method(cached_method, name_idx, args.len(), &obj)
+        {
+            let method = Self::const_str(&chunk.constants[name_idx as usize])?;
+            let result = if let Some(result) =
+                Self::call_harness_method_sync_fast(&mut self.output, &handle, method, &args)
+            {
+                result?
+            } else {
+                self.call_method_async(obj, method, &args).await?
+            };
+            self.stack.push(result);
         } else {
             let method = Self::const_str(&chunk.constants[name_idx as usize])?;
             let cache_target = Self::method_cache_target(&obj, method, args.len());
-            let result = if let Some(result) = Self::call_method_sync(&obj, method, &args) {
+            let result = if let Some(result) =
+                Self::try_harness_method_sync_fast(&mut self.output, &obj, method, &args)
+            {
+                result?
+            } else if let Some(result) = Self::call_method_sync(&obj, method, &args) {
                 result?
             } else {
                 self.call_method_async(obj, method, &args).await?

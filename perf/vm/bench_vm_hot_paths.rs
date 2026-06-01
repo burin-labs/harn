@@ -17,10 +17,24 @@ struct VmHotPathFixture {
     source: &'static str,
     path: PathBuf,
     chunk: Chunk,
+    uses_real_harness: bool,
 }
 
 impl VmHotPathFixture {
     fn new(name: &'static str, source: &'static str, runtime: &Runtime) -> Self {
+        Self::new_with_real_harness(name, source, runtime, false)
+    }
+
+    fn with_real_harness(name: &'static str, source: &'static str, runtime: &Runtime) -> Self {
+        Self::new_with_real_harness(name, source, runtime, true)
+    }
+
+    fn new_with_real_harness(
+        name: &'static str,
+        source: &'static str,
+        runtime: &Runtime,
+        uses_real_harness: bool,
+    ) -> Self {
         let path = Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("synthetic")
             .join(format!("{name}.harn"));
@@ -30,6 +44,7 @@ impl VmHotPathFixture {
             source,
             path,
             chunk,
+            uses_real_harness,
         };
         fixture.warm_inline_caches(runtime);
         fixture
@@ -39,6 +54,9 @@ impl VmHotPathFixture {
         harn_vm::reset_thread_local_state();
         let mut vm = Vm::new();
         harn_vm::register_vm_stdlib(&mut vm);
+        if self.uses_real_harness {
+            vm.set_harness(harn_vm::Harness::real());
+        }
         vm.set_source_info(&self.path.to_string_lossy(), self.source);
         if let Some(parent) = self.path.parent() {
             vm.set_source_dir(parent);
@@ -272,6 +290,44 @@ pipeline default(task) {
   if total < 0 {
     log("unreachable")
   }
+}
+"#,
+            runtime,
+        ),
+        VmHotPathFixture::with_real_harness(
+            "harness_chained_dispatch",
+            r#"
+fn main(harness: Harness) {
+  var i = 0
+  var hits = 0
+  while i < 2500 {
+    if harness.env.get_or("__HARN_VM_BENCH_MISSING__", "fallback") == "fallback" {
+      hits = hits + 1
+    }
+    let _ = harness.clock.monotonic_ms()
+    i = i + 1
+  }
+  return hits
+}
+"#,
+            runtime,
+        ),
+        VmHotPathFixture::with_real_harness(
+            "harness_prebound_dispatch",
+            r#"
+fn main(harness: Harness) {
+  let env = harness.env
+  let clock = harness.clock
+  var i = 0
+  var hits = 0
+  while i < 2500 {
+    if env.get_or("__HARN_VM_BENCH_MISSING__", "fallback") == "fallback" {
+      hits = hits + 1
+    }
+    let _ = clock.monotonic_ms()
+    i = i + 1
+  }
+  return hits
 }
 "#,
             runtime,

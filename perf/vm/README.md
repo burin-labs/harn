@@ -106,6 +106,7 @@ The microbench suite covers focused VM hot paths:
 - runtime parameter validation for typed user calls
 - property inline-cache hits for dicts, structs, lists, and strings
 - method inline-cache hits for list/string/dict/set helpers
+- harness sub-handle property reads and cached harness method dispatch
 - list callback dispatch through `.filter` and `.map`
 - std/collections dict helper builtins
 - many-part string interpolation and builtin-reference lookup

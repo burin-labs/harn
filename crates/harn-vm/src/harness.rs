@@ -879,6 +879,13 @@ impl VmHarness {
             return None;
         }
         let kind = HarnessKind::from_field_name(field)?;
+        self.sub_handle_kind(kind)
+    }
+
+    pub(crate) fn sub_handle_kind(&self, kind: HarnessKind) -> Option<VmHarness> {
+        if self.kind != HarnessKind::Root || kind == HarnessKind::Root {
+            return None;
+        }
         Some(VmHarness {
             inner: Arc::clone(&self.inner),
             kind,
@@ -1135,6 +1142,48 @@ fn main(harness: Harness) {
                 (HarnessKind::Net, "get".to_string()),
                 (HarnessKind::Crypto, "sha256".to_string()),
                 (HarnessKind::Llm, "catalog".to_string()),
+            ]
+        );
+    }
+
+    #[test]
+    fn mock_harness_records_repeated_cached_harness_method_calls() {
+        let harness = Harness::mock().env("KEY", "value").build();
+
+        run_harness_source(
+            r#"
+fn main(harness: Harness) {
+  var i = 0
+  while i < 3 {
+    let _ = harness.clock.elapsed()
+    let value = harness.env.get_or("KEY", "")
+    harness.stdio.println(value)
+    i = i + 1
+  }
+}
+"#,
+            harness.clone(),
+        )
+        .expect("mock harness run succeeds");
+
+        assert_eq!(harness.captured_stdio(), "value\nvalue\nvalue\n");
+        let observed: Vec<_> = harness
+            .calls()
+            .into_iter()
+            .map(|call| (call.sub_handle, call.method))
+            .collect();
+        assert_eq!(
+            observed,
+            vec![
+                (HarnessKind::Clock, "elapsed".to_string()),
+                (HarnessKind::Env, "get_or".to_string()),
+                (HarnessKind::Stdio, "println".to_string()),
+                (HarnessKind::Clock, "elapsed".to_string()),
+                (HarnessKind::Env, "get_or".to_string()),
+                (HarnessKind::Stdio, "println".to_string()),
+                (HarnessKind::Clock, "elapsed".to_string()),
+                (HarnessKind::Env, "get_or".to_string()),
+                (HarnessKind::Stdio, "println".to_string()),
             ]
         );
     }
