@@ -302,6 +302,7 @@ module.exports = grammar({
         $.guard_statement,
         $.require_statement,
         $.mutex_block,
+        $.scope_block,
         $.select_block,
         $.break_statement,
         $.continue_statement,
@@ -479,7 +480,19 @@ module.exports = grammar({
       ),
 
     mutex_block: ($) =>
-      seq("mutex", field("body", $.block)),
+      seq(
+        "mutex",
+        // Optional resource key: `mutex(resource) { ... }`. A bare
+        // `mutex { ... }` keys on its lexical call-site instead.
+        optional(seq("(", field("key", $._expression), ")")),
+        field("body", $.block)
+      ),
+
+    // Structured-concurrency nursery: `scope { ... }` joins every task
+    // spawned inside it before the block exits. `scope` is a contextual
+    // keyword in the Rust parser; mirror it here as a block construct.
+    scope_block: ($) =>
+      seq("scope", field("body", $.block)),
 
     select_block: ($) =>
       seq(
