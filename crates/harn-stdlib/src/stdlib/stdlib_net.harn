@@ -1,0 +1,28 @@
+/** std/net - local networking helpers for scripts. */
+type UnixSocketJsonOptions = {timeout_ms?: int, max_response_bytes?: int}
+
+type UnixSocketJsonResult = {
+  ok: bool,
+  status: string,
+  path: string,
+  duration_ms: int,
+  response?: any,
+  raw_response?: string,
+  bytes_read?: int,
+  error?: string,
+}
+
+/**
+ * Send one JSON request line to a Unix-domain socket and read one JSON response line.
+ *
+ * Expected readiness failures return `{ok: false, status, error?}` instead of throwing.
+ *
+ * @effects: [network]
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: unix_socket_json_request(path, {id: "ping", method: "ping"})
+ */
+pub fn unix_socket_json_request(path: string, request, options: UnixSocketJsonOptions = {}) -> UnixSocketJsonResult {
+  return __net_unix_socket_json_request(path, request, options ?? {})
+}
