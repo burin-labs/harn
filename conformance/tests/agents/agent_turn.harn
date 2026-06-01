@@ -1,16 +1,26 @@
+import { llm_text, with_llm_script } from "std/testing"
+
 pipeline default() {
-  llm_mock_clear()
-  llm_mock({text: "<user_response>Agent turn complete.</user_response>\n<done>##DONE##</done>"})
-  llm_mock({text: "{\"verdict\":\"done\",\"reasoning\":\"answer is complete\"}"})
-  let result = agent_turn("Do the task", {provider: "mock", system: "You are helpful.", max_iterations: 3})
-  __io_println(result.status)
-  __io_println(result.visible_text)
-  __io_println(len(result.judge_decisions))
-  __io_println(result.judge_decisions[0].verdict)
-  __io_println(result.llm.iterations)
-  __io_println(len(result.iterations) >= 1)
-  let calls = llm_mock_calls()
-  __io_println(len(calls))
-  __io_println(contains(calls[0].system, "Before each group of tool calls"))
-  __io_println(contains(calls[0].system, "You are helpful."))
+  // Scripted LLM turns via with_llm_script: the scope auto-clears the
+  // queue on entry and restores it on exit, replacing the imperative
+  // llm_mock_clear() + sequential llm_mock(...) form.
+  with_llm_script(
+    [
+      llm_text("<user_response>Agent turn complete.</user_response>\n<done>##DONE##</done>"),
+      llm_text("{\"verdict\":\"done\",\"reasoning\":\"answer is complete\"}"),
+    ],
+    { ->
+      let result = agent_turn("Do the task", {provider: "mock", system: "You are helpful.", max_iterations: 3})
+      __io_println(result.status)
+      __io_println(result.visible_text)
+      __io_println(len(result.judge_decisions))
+      __io_println(result.judge_decisions[0].verdict)
+      __io_println(result.llm.iterations)
+      __io_println(len(result.iterations) >= 1)
+      let calls = llm_mock_calls()
+      __io_println(len(calls))
+      __io_println(contains(calls[0].system, "Before each group of tool calls"))
+      __io_println(contains(calls[0].system, "You are helpful."))
+    },
+  )
 }
