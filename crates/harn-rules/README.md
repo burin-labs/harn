@@ -51,6 +51,15 @@ A metavar-free `pattern` is a **literal** pattern: `foo()` matches calls to
 `foo` specifically (every non-metavar identifier/literal is constrained to
 its exact text).
 
+A metavar can carry a **typed `$VAR:kind` constraint** (#2839) so it binds
+only to nodes of a syntactic class: `log($ARG:identifier)` matches `log(x)`
+but not `log(f())`. `:kind` is a semantic alias (`expr`/`expression`,
+`stmt`/`statement`, `ty`/`type`, `ident`/`identifier`, resolved to the
+grammar's supertype) or an exact tree-sitter kind. A constraint that names no
+kind in the target grammar is a compile error — the supertype aliases exist in
+some grammars (`expression` in TypeScript/JS/Python) but not others
+(Rust/Go), where an exact kind is used instead.
+
 ### Relational + composite algebra
 
 Beyond the atomic leaf, a rule node can add relational and composite keys —

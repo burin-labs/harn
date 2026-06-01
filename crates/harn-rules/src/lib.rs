@@ -16,7 +16,8 @@
 //!   `follows` / `precedes`, composite `all` / `any` / `not` / `matches`)
 //!   plus `where` / `transform` / `fix` and `utils`.
 //! - [`pattern`] — the snippet → tree-sitter-query compiler (`$VAR`
-//!   metavariable lifting, unification, literal patterns).
+//!   metavariable lifting, unification, literal patterns, and typed
+//!   `$VAR:kind` placeholders).
 //! - [`evaluator`] — the tree-walking match algebra (relational + composite
 //!   + utility-rule reuse).
 //! - [`constraint`] — `where` predicates on captured metavars (regex,

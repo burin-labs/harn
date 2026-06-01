@@ -35,6 +35,24 @@
 //!    helper captures plus an `(#eq? …)` predicate so `$X … $X` only matches
 //!    when both holes carry identical text.
 //!
+//! ## Typed placeholders (`$VAR:kind`, #2839)
+//!
+//! A metavariable may carry a **syntactic-class constraint** so it matches
+//! only nodes of a given kind (rust-analyzer SSR `$x:expr`):
+//!
+//! ```text
+//!   $FN($ARG:identifier)   // matches `f(x)`, not `f(g())`
+//!   $X:expression          // matches any expression-position node
+//! ```
+//!
+//! `:kind` is either a small **semantic alias** (`expr`/`expression`,
+//! `stmt`/`statement`, `ty`/`type`, `ident`/`identifier`) resolved to the
+//! grammar's supertype, or an **exact tree-sitter node kind**. The constraint
+//! lowers a `(_) @VAR` wildcard to `(kind) @VAR`, so it narrows what binds.
+//! A constraint that names no kind in the target grammar is a compile error
+//! (the alias supertypes exist only in some grammars — e.g. `expression` in
+//! TypeScript/JS/Python but not Rust/Go, where exact kinds are used instead).
+//!
 //! Variadic `$$$` holes are not yet supported (tracked for the relational
 //! tier, #2833); they compile to a clear error.
 
@@ -72,6 +90,15 @@ pub struct CompiledPattern {
 /// body for Rust/Go), and locate the snippet's own subtree by byte range.
 pub fn compile_pattern(snippet: &str, language: Language) -> Result<CompiledPattern, String> {
     let sub = substitute(snippet)?;
+
+    // Resolve each `$VAR:kind` constraint to its query node-pattern once,
+    // against the target grammar (so an invalid kind errors clearly here
+    // rather than as an opaque query-compile failure later).
+    let mut metavar_node_patterns: HashMap<String, String> = HashMap::new();
+    for (metavar, constraint) in &sub.metavar_constraints {
+        metavar_node_patterns.insert(metavar.clone(), resolve_constraint(constraint, language)?);
+    }
+
     let mut last_err: Option<String> = None;
 
     for (prefix, suffix) in contexts(language) {
@@ -102,7 +129,8 @@ pub fn compile_pattern(snippet: &str, language: Language) -> Result<CompiledPatt
         };
 
         let bytes = wrapped.as_bytes();
-        let mut builder = QueryBuilder::new(bytes, &sub.placeholder_to_metavar);
+        let mut builder =
+            QueryBuilder::new(bytes, &sub.placeholder_to_metavar, &metavar_node_patterns);
         let body = builder.build(pattern_root);
         let predicates = builder.predicates();
         let query = if predicates.is_empty() {
@@ -153,6 +181,9 @@ struct Substituted {
     placeholder_to_metavar: HashMap<String, String>,
     /// Metavar names in first-appearance order.
     metavar_order: Vec<String>,
+    /// metavar name → its `:kind` constraint (raw, before grammar
+    /// resolution), for metavars written `$VAR:kind`.
+    metavar_constraints: HashMap<String, String>,
 }
 
 fn substitute(snippet: &str) -> Result<Substituted, String> {
@@ -160,6 +191,7 @@ fn substitute(snippet: &str) -> Result<Substituted, String> {
     let mut placeholder_to_metavar = HashMap::new();
     let mut metavar_to_placeholder: HashMap<String, String> = HashMap::new();
     let mut metavar_order: Vec<String> = Vec::new();
+    let mut metavar_constraints: HashMap<String, String> = HashMap::new();
 
     let bytes = snippet.as_bytes();
     let mut i = 0;
@@ -193,6 +225,33 @@ fn substitute(snippet: &str) -> Result<Substituted, String> {
             continue;
         }
         let name = &snippet[name_start..j];
+        // Optional `:kind` syntactic-class constraint (`$X:expression`). It is
+        // a constraint only when `:` is immediately followed by an identifier,
+        // so `$X: $T` (a typed binding, space after `:`) and `$X::foo` (a Rust
+        // path) are left as literal snippet text.
+        let mut consumed_end = j;
+        if j < bytes.len() && bytes[j] == b':' {
+            let kind_start = j + 1;
+            if kind_start < bytes.len() && is_ident_start(bytes[kind_start]) {
+                let mut k = kind_start + 1;
+                while k < bytes.len() && is_ident_continue(bytes[k]) {
+                    k += 1;
+                }
+                let constraint = &snippet[kind_start..k];
+                match metavar_constraints.get(name) {
+                    Some(existing) if existing != constraint => {
+                        return Err(format!(
+                            "metavariable `${name}` has conflicting type constraints \
+                             `:{existing}` and `:{constraint}`"
+                        ));
+                    }
+                    _ => {
+                        metavar_constraints.insert(name.to_string(), constraint.to_string());
+                    }
+                }
+                consumed_end = k;
+            }
+        }
         let placeholder = metavar_to_placeholder
             .entry(name.to_string())
             .or_insert_with(|| {
@@ -203,7 +262,7 @@ fn substitute(snippet: &str) -> Result<Substituted, String> {
             .clone();
         placeholder_to_metavar.insert(placeholder.clone(), name.to_string());
         text.push_str(&placeholder);
-        i = j;
+        i = consumed_end;
     }
 
     // A pattern with no metavars is a valid *literal* pattern (it matches a
@@ -213,6 +272,43 @@ fn substitute(snippet: &str) -> Result<Substituted, String> {
         text,
         placeholder_to_metavar,
         metavar_order,
+        metavar_constraints,
+    })
+}
+
+/// Resolve a `$VAR:kind` constraint against the target grammar into the
+/// node-pattern atom the query uses in place of the `(_)` wildcard — `(kind)`
+/// for one kind, `[(k1) (k2)]` for an alias that maps to several. Errors when
+/// the constraint names no node kind in this grammar.
+fn resolve_constraint(constraint: &str, language: Language) -> Result<String, String> {
+    let ts = language
+        .ts_language()
+        .ok_or_else(|| format!("no grammar for `{}`", language.name()))?;
+    // A small set of cross-grammar semantic aliases map to the grammar's
+    // supertype; anything else is treated as an exact tree-sitter kind.
+    let candidates: Vec<&str> = match constraint {
+        "expr" | "expression" => vec!["expression"],
+        "stmt" | "statement" => vec!["statement"],
+        "ty" | "type" => vec!["type"],
+        "ident" | "identifier" => vec!["identifier"],
+        other => vec![other],
+    };
+    let valid: Vec<String> = candidates
+        .iter()
+        .filter(|kind| ts.id_for_node_kind(kind, true) != 0)
+        .map(|kind| format!("({kind})"))
+        .collect();
+    if valid.is_empty() {
+        return Err(format!(
+            "typed placeholder `:{constraint}` is not a node kind in `{}` \
+             (use an exact tree-sitter kind)",
+            language.name()
+        ));
+    }
+    Ok(if valid.len() == 1 {
+        valid.into_iter().next().unwrap()
+    } else {
+        format!("[{}]", valid.join(" "))
     })
 }
 
@@ -231,6 +327,9 @@ fn is_ident_continue(b: u8) -> bool {
 struct QueryBuilder<'a> {
     src: &'a [u8],
     placeholder_to_metavar: &'a HashMap<String, String>,
+    /// metavar name → resolved node-pattern atom (`(kind)` / `[(a) (b)]`) for
+    /// typed `$VAR:kind` placeholders. Absent metavars use the `(_)` wildcard.
+    metavar_node_patterns: &'a HashMap<String, String>,
     /// occurrence count per metavar, to mint unification helper captures.
     occurrences: HashMap<String, usize>,
     /// `(#eq? …)` predicates for repeated metavars and literal leaves.
@@ -240,10 +339,15 @@ struct QueryBuilder<'a> {
 }
 
 impl<'a> QueryBuilder<'a> {
-    fn new(src: &'a [u8], placeholder_to_metavar: &'a HashMap<String, String>) -> Self {
+    fn new(
+        src: &'a [u8],
+        placeholder_to_metavar: &'a HashMap<String, String>,
+        metavar_node_patterns: &'a HashMap<String, String>,
+    ) -> Self {
         QueryBuilder {
             src,
             placeholder_to_metavar,
+            metavar_node_patterns,
             occurrences: HashMap::new(),
             eq_predicates: Vec::new(),
             literal_count: 0,
@@ -255,7 +359,12 @@ impl<'a> QueryBuilder<'a> {
         if node.child_count() == 0 {
             let text = self.node_text(node);
             if let Some(metavar) = self.placeholder_to_metavar.get(text) {
-                return format!("(_) @{}", self.capture_for(metavar));
+                let node_pattern = self
+                    .metavar_node_patterns
+                    .get(metavar)
+                    .map(String::as_str)
+                    .unwrap_or("(_)");
+                return format!("{node_pattern} @{}", self.capture_for(metavar));
             }
             if node.is_named() {
                 // A literal named leaf (a specific identifier / literal in
@@ -462,6 +571,75 @@ mod tests {
     fn rejects_variadic_for_now() {
         let err = compile_pattern("foo($$$ARGS)", Language::TypeScript).unwrap_err();
         assert!(err.contains("variadic"), "got: {err}");
+    }
+
+    #[test]
+    fn typed_placeholder_narrows_to_kind() {
+        // `$ARG:identifier` binds only when the argument is an identifier.
+        let snippet = "$FN($ARG:identifier)";
+        let compiled = compile_pattern(snippet, Language::TypeScript).expect("compiles");
+        // The constraint is stripped from the metavar name.
+        assert_eq!(compiled.metavars, vec!["FN", "ARG"]);
+        // Matches `f(x)` …
+        let hit = run(snippet, Language::TypeScript, "f(x);");
+        assert_eq!(capture(&hit, "ARG"), ["x".to_string()]);
+        // … but not `f(g())` — `g()` is a call_expression, not an identifier.
+        let miss = run(snippet, Language::TypeScript, "f(g());");
+        assert!(
+            capture(&miss, "ARG").is_empty(),
+            "a call argument must not match `:identifier`: {miss:?}"
+        );
+    }
+
+    #[test]
+    fn typed_placeholder_expression_alias_matches_any_expression() {
+        // `:expression` (a supertype alias) matches expression-position nodes
+        // of any concrete kind — the #2839 acceptance: `$x:expr` matches only
+        // expression-position captures, but every expression kind qualifies.
+        let snippet = "$FN($ARG:expression)";
+        let ident = run(snippet, Language::TypeScript, "f(x);");
+        assert_eq!(capture(&ident, "ARG"), ["x".to_string()]);
+        let call = run(snippet, Language::TypeScript, "f(g());");
+        assert_eq!(capture(&call, "ARG"), ["g()".to_string()]);
+    }
+
+    #[test]
+    fn typed_placeholder_unknown_kind_is_an_error() {
+        let err = compile_pattern("$X:not_a_real_kind", Language::TypeScript).unwrap_err();
+        assert!(err.contains("not a node kind"), "got: {err}");
+    }
+
+    #[test]
+    fn typed_placeholder_alias_unavailable_in_grammar_errors() {
+        // Rust has no public `expression` supertype, so the alias must error
+        // (directing the author to an exact kind) rather than silently widen.
+        let err = compile_pattern("let $X = $V:expression;", Language::Rust).unwrap_err();
+        assert!(err.contains("not a node kind"), "got: {err}");
+    }
+
+    #[test]
+    fn typed_placeholder_unifies_and_constrains() {
+        // `$X:identifier + $X` must both unify AND keep the kind constraint.
+        let snippet = "$X:identifier + $X";
+        let same = run(snippet, Language::Rust, "fn f() { let _ = a + a; }");
+        assert_eq!(capture(&same, "X"), ["a".to_string()]);
+        let different = run(snippet, Language::Rust, "fn f() { let _ = a + b; }");
+        assert!(
+            capture(&different, "X").is_empty(),
+            "unification still holds"
+        );
+    }
+
+    #[test]
+    fn colon_without_constraint_is_left_literal() {
+        // `$KEY: $VAL` (space after the colon) is a normal object entry, not a
+        // typed placeholder — both metavars bind and `:` stays in the snippet.
+        let snippet = "{$KEY: $VAL}";
+        let compiled = compile_pattern(snippet, Language::TypeScript).expect("compiles");
+        assert_eq!(compiled.metavars, vec!["KEY", "VAL"]);
+        let binds = run(snippet, Language::TypeScript, "let o = {a: 1};");
+        assert_eq!(capture(&binds, "KEY"), ["a".to_string()]);
+        assert_eq!(capture(&binds, "VAL"), ["1".to_string()]);
     }
 
     #[test]
