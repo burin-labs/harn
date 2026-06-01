@@ -232,10 +232,10 @@ impl super::super::Vm {
             (AdaptiveBinaryOp::Div, BinaryShape::Int, VmValue::Int(_), VmValue::Int(0))
             | (AdaptiveBinaryOp::Mod, BinaryShape::Int, VmValue::Int(_), VmValue::Int(0)) => None,
             (AdaptiveBinaryOp::Div, BinaryShape::Int, VmValue::Int(x), VmValue::Int(y)) => {
-                Some(VmValue::Int(x / y))
+                Some(VmValue::Int(x.wrapping_div(*y)))
             }
             (AdaptiveBinaryOp::Mod, BinaryShape::Int, VmValue::Int(x), VmValue::Int(y)) => {
-                Some(VmValue::Int(x % y))
+                Some(VmValue::Int(x.wrapping_rem(*y)))
             }
             (AdaptiveBinaryOp::Add, BinaryShape::Float, VmValue::Float(x), VmValue::Float(y)) => {
                 Some(VmValue::Float(x + y))
@@ -334,7 +334,7 @@ impl super::super::Vm {
         if y == 0 {
             return Err(VmError::DivisionByZero);
         }
-        self.stack.push(VmValue::Int(x / y));
+        self.stack.push(VmValue::Int(x.wrapping_div(y)));
         Ok(())
     }
 
@@ -345,7 +345,7 @@ impl super::super::Vm {
         if y == 0 {
             return Err(VmError::DivisionByZero);
         }
-        self.stack.push(VmValue::Int(x % y));
+        self.stack.push(VmValue::Int(x.wrapping_rem(y)));
         Ok(())
     }
 
@@ -486,7 +486,7 @@ impl super::super::Vm {
     fn div(&self, a: VmValue, b: VmValue) -> Result<VmValue, VmError> {
         match (&a, &b) {
             (VmValue::Int(_), VmValue::Int(y)) if *y == 0 => Err(VmError::DivisionByZero),
-            (VmValue::Int(x), VmValue::Int(y)) => Ok(VmValue::Int(x / y)),
+            (VmValue::Int(x), VmValue::Int(y)) => Ok(VmValue::Int(x.wrapping_div(*y))),
             (VmValue::Float(x), VmValue::Float(y)) => Ok(VmValue::Float(x / y)),
             (VmValue::Int(x), VmValue::Float(y)) => Ok(VmValue::Float(*x as f64 / y)),
             (VmValue::Float(x), VmValue::Int(y)) => Ok(VmValue::Float(x / *y as f64)),
@@ -501,7 +501,7 @@ impl super::super::Vm {
     fn modulo(&self, a: VmValue, b: VmValue) -> Result<VmValue, VmError> {
         match (&a, &b) {
             (VmValue::Int(_), VmValue::Int(y)) if *y == 0 => Err(VmError::DivisionByZero),
-            (VmValue::Int(x), VmValue::Int(y)) => Ok(VmValue::Int(x % y)),
+            (VmValue::Int(x), VmValue::Int(y)) => Ok(VmValue::Int(x.wrapping_rem(*y))),
             (VmValue::Float(_), VmValue::Float(y)) if *y == 0.0 => Err(VmError::DivisionByZero),
             (VmValue::Float(x), VmValue::Float(y)) => Ok(VmValue::Float(x % y)),
             (VmValue::Int(_), VmValue::Float(y)) if *y == 0.0 => Err(VmError::DivisionByZero),

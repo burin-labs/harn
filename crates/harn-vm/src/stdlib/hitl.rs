@@ -19,6 +19,7 @@ use crate::runtime_limits::RuntimeLimits;
 use crate::schema::schema_expect_value;
 use crate::stdlib::host::dispatch_mock_host_call;
 use crate::stdlib::macros::{harn_builtin, BuiltinSignature, Param, VmBuiltinDef, TY_ANY, TY_DICT};
+use crate::stdlib::options::{duration_from_value, ErrorKind};
 use crate::stdlib::waitpoint::{
     cancel_waitpoint_on, complete_waitpoint_on, create_waitpoint_on, inspect_waitpoint_on,
     wait_on_waitpoints, WaitpointRecord, WaitpointStatus, WaitpointWaitFailure,
@@ -1647,14 +1648,7 @@ fn optional_string_list(value: Option<&VmValue>, builtin: &str) -> Result<Vec<St
 }
 
 fn parse_duration_value(value: &VmValue) -> Result<StdDuration, VmError> {
-    match value {
-        VmValue::Duration(ms) if *ms >= 0 => Ok(StdDuration::from_millis(*ms as u64)),
-        VmValue::Int(ms) if *ms >= 0 => Ok(StdDuration::from_millis(*ms as u64)),
-        VmValue::Float(ms) if *ms >= 0.0 => Ok(StdDuration::from_millis(*ms as u64)),
-        _ => Err(VmError::Runtime(
-            "expected a duration or millisecond count".to_string(),
-        )),
-    }
+    duration_from_value(value, "hitl", "timeout", ErrorKind::Runtime)
 }
 
 fn ensure_hitl_event_log() -> Arc<AnyEventLog> {

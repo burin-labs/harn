@@ -6,6 +6,7 @@ use std::time::Duration;
 
 use crate::shared_state::ScopedKey;
 use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
+use crate::stdlib::options::{non_negative_millis_from_value, ErrorKind};
 use crate::value::{VmAtomicHandle, VmChannelHandle, VmError, VmValue};
 use crate::vm::Vm;
 
@@ -128,7 +129,9 @@ fn try_poll_channels(channels: &[VmValue]) -> (Option<(usize, VmValue, String)>,
                 match rx.try_recv() {
                     Ok(val) => return (Some((i, val, ch.name.to_string())), false),
                     Err(tokio::sync::mpsc::error::TryRecvError::Empty) => {
-                        all_closed = false;
+                        if !ch.closed.load(Ordering::SeqCst) {
+                            all_closed = false;
+                        }
                     }
                     Err(tokio::sync::mpsc::error::TryRecvError::Disconnected) => {}
                 }
@@ -148,17 +151,31 @@ fn cancelled_vm_error() -> VmError {
 
 fn optional_timeout_ms(value: Option<&VmValue>) -> Option<u64> {
     match value {
-        Some(VmValue::Int(n)) => Some((*n).max(0) as u64),
-        Some(VmValue::Duration(ms)) => Some((*ms).max(0) as u64),
+        Some(VmValue::Int(_)) | Some(VmValue::Duration(_)) | Some(VmValue::Float(_)) => {
+            value.and_then(optional_timeout_scalar_ms)
+        }
         Some(VmValue::Dict(dict)) => dict
             .get("timeout_ms")
             .or_else(|| dict.get("max_wait_ms"))
-            .and_then(|v| match v {
-                VmValue::Int(n) => Some((*n).max(0) as u64),
-                VmValue::Duration(ms) => Some((*ms).max(0) as u64),
-                _ => None,
-            }),
+            .and_then(optional_timeout_scalar_ms),
         _ => None,
+    }
+}
+
+fn optional_timeout_scalar_ms(value: &VmValue) -> Option<u64> {
+    match non_negative_millis_from_value(value, "channel_select", "timeout_ms", ErrorKind::Runtime)
+    {
+        Ok(ms) => Some(ms),
+        Err(_) if is_negative_millis_value(value) => Some(0),
+        Err(_) => None,
+    }
+}
+
+fn is_negative_millis_value(value: &VmValue) -> bool {
+    match value {
+        VmValue::Duration(ms) | VmValue::Int(ms) => *ms < 0,
+        VmValue::Float(ms) => ms.is_finite() && *ms < 0.0,
+        _ => false,
     }
 }
 
@@ -1138,8 +1155,8 @@ async fn sleep_builtin(
     args: Vec<VmValue>,
 ) -> Result<VmValue, VmError> {
     let ms = match args.first() {
-        Some(VmValue::Duration(ms)) => (*ms).max(0) as u64,
-        Some(VmValue::Int(n)) => (*n).max(0) as u64,
+        Some(value) if is_negative_millis_value(value) => 0,
+        Some(value) => non_negative_millis_from_value(value, "sleep", "ms", ErrorKind::Runtime)?,
         _ => 0,
     };
     if ms == 0 {
@@ -1220,7 +1237,7 @@ async fn send_builtin(
     doc = "Receive one value from a channel."
 )]
 async fn receive_builtin(
-    _ctx: crate::vm::AsyncBuiltinCtx,
+    ctx: crate::vm::AsyncBuiltinCtx,
     args: Vec<VmValue>,
 ) -> Result<VmValue, VmError> {
     if args.is_empty() {
@@ -1237,9 +1254,22 @@ async fn receive_builtin(
             };
         }
         let mut rx = ch.receiver.lock().await;
-        match rx.recv().await {
-            Some(val) => Ok(val),
-            None => Ok(VmValue::Nil),
+        let vm = ctx.child_vm();
+        let mut cancel_poll = tokio::time::interval(Duration::from_millis(10));
+        loop {
+            tokio::select! {
+                value = rx.recv() => {
+                    return match value {
+                        Some(val) => Ok(val),
+                        None => Ok(VmValue::Nil),
+                    };
+                }
+                _ = cancel_poll.tick() => {
+                    if vm.is_cancel_requested() {
+                        return Err(cancelled_vm_error());
+                    }
+                }
+            }
         }
     } else {
         Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
@@ -1305,11 +1335,7 @@ async fn select_timeout_builtin(
             ))));
         }
     };
-    let timeout_ms = match &args[1] {
-        VmValue::Int(n) => (*n).max(0) as u64,
-        VmValue::Duration(ms) => (*ms).max(0) as u64,
-        _ => 5000,
-    };
+    let timeout_ms = optional_timeout_scalar_ms(&args[1]).unwrap_or(5000);
     let deadline = tokio::time::Instant::now() + tokio::time::Duration::from_millis(timeout_ms);
     loop {
         let (found, all_closed) = try_poll_channels(&channels);
@@ -1651,6 +1677,16 @@ mod tests {
         let err = call(&mut vm, "channel", vec![s("bad_channel"), VmValue::Int(0)])
             .expect_err("zero capacity must fail");
         assert!(err.to_string().contains("capacity"));
+    }
+
+    #[test]
+    fn closed_empty_channel_counts_as_closed_for_select() {
+        let mut vm = vm();
+        let channel = call(&mut vm, "channel", vec![s("done")]).unwrap();
+        call(&mut vm, "close_channel", vec![channel.clone()]).unwrap();
+        let (ready, all_closed) = try_poll_channels(&[channel]);
+        assert!(ready.is_none());
+        assert!(all_closed);
     }
 
     #[test]

@@ -21,6 +21,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Display;
+use std::time::Duration as StdDuration;
 
 use crate::value::{VmError, VmValue};
 
@@ -156,6 +157,53 @@ pub(crate) fn required_int_arg(
     args.get(idx)
         .and_then(VmValue::as_int)
         .ok_or_else(|| fn_err(fn_name, kind, format_args!("`{arg_name}` must be an int")))
+}
+
+/// Coerce a Harn duration-like value to non-negative milliseconds.
+///
+/// Several stdlib modules accept either a `duration`, an integer millisecond
+/// count, or a finite float millisecond count. Keep the conversion here so the
+/// edge cases stay consistent across waitpoints, monitors, HITL, and storage
+/// connectors.
+pub(crate) fn non_negative_millis_from_value(
+    value: &VmValue,
+    fn_name: &'static str,
+    value_name: &str,
+    kind: ErrorKind,
+) -> Result<u64, VmError> {
+    match value {
+        VmValue::Duration(ms) | VmValue::Int(ms) if *ms >= 0 => Ok(*ms as u64),
+        VmValue::Duration(_) | VmValue::Int(_) => Err(fn_err(
+            fn_name,
+            kind,
+            format_args!("`{value_name}` must be >= 0"),
+        )),
+        VmValue::Float(ms) if ms.is_finite() && *ms >= 0.0 && *ms <= u64::MAX as f64 => {
+            Ok(*ms as u64)
+        }
+        VmValue::Float(_) => Err(fn_err(
+            fn_name,
+            kind,
+            format_args!("`{value_name}` must be a finite non-negative millisecond count"),
+        )),
+        other => Err(fn_err(
+            fn_name,
+            kind,
+            format_args!(
+                "`{value_name}` must be a duration or millisecond count (got {})",
+                other.type_name()
+            ),
+        )),
+    }
+}
+
+pub(crate) fn duration_from_value(
+    value: &VmValue,
+    fn_name: &'static str,
+    value_name: &str,
+    kind: ErrorKind,
+) -> Result<StdDuration, VmError> {
+    non_negative_millis_from_value(value, fn_name, value_name, kind).map(StdDuration::from_millis)
 }
 
 /// Schema-driven parser for an option-bag dict.
@@ -458,6 +506,33 @@ mod tests {
         let d = dict(&[("forwarded", VmValue::Bool(true))]);
         let p = OptionsParser::new("daemon_spawn", &d, ErrorKind::Runtime);
         p.finish_strict(&["forwarded"]).unwrap();
+    }
+
+    #[test]
+    fn duration_coercion_rejects_infinite_float() {
+        let err = non_negative_millis_from_value(
+            &VmValue::Float(f64::INFINITY),
+            "waitpoint_wait",
+            "timeout",
+            ErrorKind::Runtime,
+        )
+        .unwrap_err();
+        match err {
+            VmError::Runtime(msg) => assert!(msg.contains("finite non-negative"), "{msg}"),
+            other => panic!("expected Runtime, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn duration_coercion_accepts_finite_float_millis() {
+        let millis = non_negative_millis_from_value(
+            &VmValue::Float(42.9),
+            "waitpoint_wait",
+            "timeout",
+            ErrorKind::Runtime,
+        )
+        .unwrap();
+        assert_eq!(millis, 42);
     }
 
     #[test]

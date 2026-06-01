@@ -85,6 +85,21 @@ fn stdout_text(responses: &[DapResponse]) -> String {
 }
 
 #[test]
+fn flush_output_recovers_when_cached_output_is_not_a_prefix() {
+    let mut dbg = Debugger::new();
+    let mut vm = Vm::new();
+    vm.append_output("new\n");
+    dbg.vm = Some(vm);
+    dbg.output = "stale and longer".to_string();
+
+    let mut responses = Vec::new();
+    dbg.flush_output_into(&mut responses);
+
+    assert_eq!(stdout_text(&responses), "new\n");
+    assert_eq!(dbg.output, "new\n");
+}
+
+#[test]
 fn test_initialize() {
     let mut dbg = Debugger::new();
     let responses = dbg.handle_message(make_request(1, "initialize", None));
