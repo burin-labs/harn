@@ -320,6 +320,11 @@ synthetic replay message. Updates append compact `agent_scratchpad` transcript
 events with action/version/count metadata; session snapshots and final
 transcripts expose `scratchpad`, `scratchpad_version`, and
 `metadata.agent_scratchpad`.
+When paired with `transcript_projection: {policy: "reachability_gc"}`, the loop
+automatically supplies the current scratchpad as a GC root and
+scratchpad-version write barrier for each provider turn. Referenced tool output
+stays visible; stale, unreferenced tool-result bodies can be reclaimed from the
+model-visible prefix while the raw transcript remains intact.
 
 Scripts can read and write the state directly with
 `agent_session_scratchpad(id)`, `agent_session_set_scratchpad(id, pad, opts?)`,

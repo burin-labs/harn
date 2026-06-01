@@ -103,6 +103,11 @@ material such as an active plan, scratchpad, pending tool args, unresolved
 review findings, or explicit `roots`. A tool result whose path, symbol, object
 ID, or call metadata appears in those roots is preserved. Error results are
 preserved by default; they are often still useful repair evidence.
+When `agent_loop` runs with both `scratchpad` enabled and a reachability-GC
+projection, the live scratchpad is automatically supplied as a root and
+scratchpad-version write barrier for that turn. This lets
+`require_write_barrier: true` reclaim only after the current working memory has
+been externalized.
 
 ```harn
 let view = transcript_project(transcript, {
