@@ -1614,6 +1614,227 @@ pipeline t(task) {
 }
 
 #[test]
+fn test_contextual_closure_typing_checks_annotated_binding_body() {
+    let errs = errors(
+        r#"pipeline t(task) {
+            let f: fn(int) -> int = { x -> x + "oops" }
+        }"#,
+    );
+    assert!(
+        errs.iter()
+            .any(|err| err.contains("can't add int and string")),
+        "expected contextual closure body error, got: {errs:?}"
+    );
+}
+
+#[test]
+fn test_contextual_closure_typing_checks_assignment_body() {
+    let errs = errors(
+        r#"pipeline t(task) {
+            var f: fn(int) -> int = { x -> x + 1 }
+            f = { x -> x + "oops" }
+        }"#,
+    );
+    assert!(
+        errs.iter()
+            .any(|err| err.contains("can't add int and string")),
+        "expected contextual closure assignment error, got: {errs:?}"
+    );
+}
+
+#[test]
+fn test_contextual_closure_typing_checks_call_argument_body() {
+    let errs = errors(
+        r#"fn keep_callback(f: fn(int) -> int) -> int { return 0 }
+
+pipeline t(task) {
+    keep_callback({ x -> x + "oops" })
+}"#,
+    );
+    assert!(
+        errs.iter()
+            .any(|err| err.contains("can't add int and string")),
+        "expected contextual closure argument error, got: {errs:?}"
+    );
+}
+
+#[test]
+fn test_contextual_closure_typing_uses_bound_generic_call_argument() {
+    let errs = errors(
+        r#"fn use_callback<T>(seed: T, f: fn(T) -> T) -> int { return 0 }
+
+pipeline t(task) {
+    use_callback(1, { x -> x + "oops" })
+}"#,
+    );
+    assert!(
+        errs.iter()
+            .any(|err| err.contains("can't add int and string")),
+        "expected contextual generic closure argument error, got: {errs:?}"
+    );
+}
+
+#[test]
+fn test_contextual_closure_typing_skips_unbound_generic_call_argument() {
+    let errs = errors(
+        r#"fn keep_callback<T>(f: fn(T) -> T) -> int { return 0 }
+
+pipeline t(task) {
+    keep_callback({ x -> x + "oops" })
+}"#,
+    );
+    assert!(
+        errs.is_empty(),
+        "unbound generic callback parameters should remain gradual: {errs:?}"
+    );
+}
+
+#[test]
+fn test_contextual_closure_typing_checks_default_param_body() {
+    let errs = errors(
+        r#"fn use_callback(f: fn(int) -> int = { x -> x + "oops" }) -> int {
+            return 0
+        }"#,
+    );
+    assert!(
+        errs.iter()
+            .any(|err| err.contains("can't add int and string")),
+        "expected contextual default parameter error, got: {errs:?}"
+    );
+}
+
+#[test]
+fn test_contextual_closure_typing_checks_return_slot_body() {
+    let errs = errors(
+        r#"fn make_callback() -> fn(int) -> int {
+            return { x -> x + "oops" }
+        }"#,
+    );
+    assert!(
+        errs.iter()
+            .any(|err| err.contains("can't add int and string")),
+        "expected contextual closure return error, got: {errs:?}"
+    );
+}
+
+#[test]
+fn test_contextual_closure_typing_checks_implicit_return_slot_body() {
+    let errs = errors(
+        r#"fn make_callback() -> fn(int) -> int {
+            { x -> x + "oops" }
+        }"#,
+    );
+    assert!(
+        errs.iter()
+            .any(|err| err.contains("can't add int and string")),
+        "expected contextual closure implicit return error, got: {errs:?}"
+    );
+}
+
+#[test]
+fn test_contextual_closure_typing_checks_pipeline_return_slot_body() {
+    let errs = errors(
+        r#"pipeline make_callback(task) -> fn(int) -> int {
+            return { x -> x + "oops" }
+        }"#,
+    );
+    assert!(
+        errs.iter()
+            .any(|err| err.contains("can't add int and string")),
+        "expected contextual pipeline return error, got: {errs:?}"
+    );
+}
+
+#[test]
+fn test_contextual_closure_typing_checks_pipeline_implicit_return_slot_body() {
+    let errs = errors(
+        r#"pipeline make_callback(task) -> fn(int) -> int {
+            { x -> x + "oops" }
+        }"#,
+    );
+    assert!(
+        errs.iter()
+            .any(|err| err.contains("can't add int and string")),
+        "expected contextual pipeline implicit return error, got: {errs:?}"
+    );
+}
+
+#[test]
+fn test_contextual_closure_typing_checks_shape_field_body() {
+    let errs = errors(
+        r#"pipeline t(task) {
+            let slot: { callback: fn(int) -> int } = { callback: { x -> x + "oops" } }
+        }"#,
+    );
+    assert!(
+        errs.iter()
+            .any(|err| err.contains("can't add int and string")),
+        "expected contextual closure field error, got: {errs:?}"
+    );
+}
+
+#[test]
+fn test_contextual_closure_typing_checks_collection_method_body() {
+    let errs = errors(
+        r#"pipeline t(task) {
+            let xs: list<int> = [1, 2, 3]
+            xs.map({ x -> x + "oops" })
+        }"#,
+    );
+    assert!(
+        errs.iter()
+            .any(|err| err.contains("can't add int and string")),
+        "expected contextual collection closure error, got: {errs:?}"
+    );
+}
+
+#[test]
+fn test_contextual_collection_method_keeps_unknown_parameter_lenient() {
+    let warns = warnings(
+        r#"fn grid_expand(state) {
+            let moves = [
+                {name: "right", x: state.x + 1},
+                {name: "left", x: state.x - 1},
+            ]
+            return moves.filter({ move -> move.x >= 0 && move.x <= 2 })
+        }"#,
+    );
+    assert!(
+        warns.iter().all(|warn| !warn.contains("Comparison")),
+        "unknown collection element types should not produce comparison warnings: {warns:?}"
+    );
+}
+
+#[test]
+fn test_contextual_collection_method_keeps_any_parameter_lenient() {
+    let errs = errors(
+        r"pipeline t(task) {
+            let xs = [1, 2, 3]
+            iter(xs).map({ x -> x * 10 }).to_list()
+        }",
+    );
+    assert!(
+        errs.is_empty(),
+        "`any` collection element types should remain gradual: {errs:?}"
+    );
+}
+
+#[test]
+fn test_contextual_closure_typing_skips_any_callback_parameter() {
+    let errs = errors(
+        r"fn wait_for(condition: fn(any) -> bool) -> int { return 0 }
+
+pipeline t(task) {
+    wait_for({ state -> state.ready })
+}",
+    );
+    assert!(
+        errs.is_empty(),
+        "`any` callback parameters should remain gradual: {errs:?}"
+    );
+}
+
+#[test]
 fn test_harness_term_methods_infer_concrete_types() {
     let errs = errors(
         r#"

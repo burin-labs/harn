@@ -57,8 +57,17 @@ impl UntypedAccessKind {
 
 impl TypeChecker {
     pub(in crate::typechecker) fn check_block(&mut self, stmts: &[SNode], scope: &mut TypeScope) {
+        self.check_block_with_expected_tail(stmts, None, scope);
+    }
+
+    pub(in crate::typechecker) fn check_block_with_expected_tail(
+        &mut self,
+        stmts: &[SNode],
+        expected_tail: Option<&TypeExpr>,
+        scope: &mut TypeScope,
+    ) {
         let mut definitely_exited = false;
-        for stmt in stmts {
+        for (idx, stmt) in stmts.iter().enumerate() {
             if definitely_exited {
                 self.warning_at(
                     Code::UnreachableCode,
@@ -67,7 +76,11 @@ impl TypeChecker {
                 );
                 break; // warn once per block
             }
-            self.check_node(stmt, scope);
+            if idx + 1 == stmts.len() && !matches!(stmt.node, Node::ReturnStmt { .. }) {
+                self.check_node_with_expected(stmt, expected_tail, scope);
+            } else {
+                self.check_node(stmt, scope);
+            }
             if Self::stmt_definitely_exits(stmt) {
                 definitely_exited = true;
             }
@@ -503,6 +516,332 @@ impl TypeChecker {
         }
     }
 
+    pub(in crate::typechecker) fn check_node_with_expected(
+        &mut self,
+        snode: &SNode,
+        expected: Option<&TypeExpr>,
+        scope: &mut TypeScope,
+    ) -> bool {
+        let Some(expected) = expected else {
+            self.check_node(snode, scope);
+            return false;
+        };
+        if self.check_contextual_closure(snode, expected, scope) {
+            return true;
+        }
+        if self.check_compound_node_with_expected(snode, expected, scope) {
+            return false;
+        }
+        self.check_node(snode, scope);
+        false
+    }
+
+    fn check_compound_node_with_expected(
+        &mut self,
+        snode: &SNode,
+        expected: &TypeExpr,
+        scope: &mut TypeScope,
+    ) -> bool {
+        match (&snode.node, self.resolve_alias(expected, scope)) {
+            (Node::DictLiteral(entries), TypeExpr::Shape(fields)) => {
+                for entry in entries {
+                    self.check_node(&entry.key, scope);
+                    let expected_field = match &entry.key.node {
+                        Node::StringLiteral(key) | Node::Identifier(key) => {
+                            fields.iter().find(|field| field.name == *key)
+                        }
+                        _ => None,
+                    };
+                    self.check_node_with_expected(
+                        &entry.value,
+                        expected_field.map(|field| &field.type_expr),
+                        scope,
+                    );
+                }
+                true
+            }
+            (Node::DictLiteral(entries), TypeExpr::DictType(_, value_type)) => {
+                for entry in entries {
+                    self.check_node(&entry.key, scope);
+                    self.check_node_with_expected(&entry.value, Some(&value_type), scope);
+                }
+                true
+            }
+            (Node::ListLiteral(items), TypeExpr::List(item_type)) => {
+                for item in items {
+                    self.check_node_with_expected(item, Some(&item_type), scope);
+                }
+                true
+            }
+            (_, TypeExpr::Union(members)) => {
+                let mut concrete_members = members
+                    .iter()
+                    .filter(|member| !self.type_is_nil(member, scope));
+                let Some(member) = concrete_members.next() else {
+                    self.check_node(snode, scope);
+                    return true;
+                };
+                if concrete_members.next().is_none() {
+                    let member = member.clone();
+                    return self.check_compound_node_with_expected(snode, &member, scope);
+                }
+                false
+            }
+            _ => false,
+        }
+    }
+
+    fn expected_fn_parts(
+        &self,
+        expected: &TypeExpr,
+        scope: &TypeScope,
+    ) -> Option<(Vec<TypeExpr>, TypeExpr)> {
+        let (params, mut return_type) = match self.resolve_alias(expected, scope) {
+            TypeExpr::FnType {
+                params,
+                return_type,
+            } => (params, *return_type),
+            TypeExpr::Union(members) => {
+                let mut fn_types = members.into_iter().filter_map(|member| match member {
+                    TypeExpr::FnType {
+                        params,
+                        return_type,
+                    } => Some((params, *return_type)),
+                    member if self.type_is_nil(&member, scope) => None,
+                    _ => None,
+                });
+                let first = fn_types.next()?;
+                if fn_types.next().is_some() {
+                    return None;
+                }
+                first
+            }
+            _ => return None,
+        };
+        if params
+            .iter()
+            .any(|param| self.contains_abstract_type(param, scope))
+        {
+            return None;
+        }
+        if self.contains_abstract_type(&return_type, scope) {
+            return_type = Self::wildcard_type();
+        }
+        Some((params, return_type))
+    }
+
+    pub(in crate::typechecker) fn can_check_contextual_closure(
+        &self,
+        snode: &SNode,
+        expected: &TypeExpr,
+        scope: &TypeScope,
+    ) -> bool {
+        matches!(snode.node, Node::Closure { .. })
+            && self.expected_fn_parts(expected, scope).is_some()
+    }
+
+    fn check_contextual_closure(
+        &mut self,
+        snode: &SNode,
+        expected: &TypeExpr,
+        scope: &mut TypeScope,
+    ) -> bool {
+        let Node::Closure { params, body, .. } = &snode.node else {
+            return false;
+        };
+        let Some((expected_params, expected_return)) = self.expected_fn_parts(expected, scope)
+        else {
+            return false;
+        };
+
+        let expected_fn = TypeExpr::FnType {
+            params: expected_params.clone(),
+            return_type: Box::new(expected_return.clone()),
+        };
+        let actual_fn = TypeExpr::FnType {
+            params: params
+                .iter()
+                .enumerate()
+                .map(|(idx, param)| {
+                    param
+                        .type_expr
+                        .clone()
+                        .or_else(|| expected_params.get(idx).cloned())
+                        .unwrap_or_else(Self::wildcard_type)
+                })
+                .collect(),
+            return_type: Box::new(expected_return.clone()),
+        };
+        if params.len() != expected_params.len()
+            || !self.types_compatible(&expected_fn, &actual_fn, scope)
+        {
+            self.type_mismatch_at(
+                Code::TypeMismatch,
+                "closure parameters",
+                &expected_fn,
+                &actual_fn,
+                snode.span,
+                (None, Some(snode.span)),
+                scope,
+            );
+        }
+
+        let mut closure_scope = scope.child();
+        for (idx, param) in params.iter().enumerate() {
+            let param_ty = param.type_expr.clone().or_else(|| {
+                expected_params
+                    .get(idx)
+                    .filter(|ty| !Self::contains_wildcard_type(ty))
+                    .cloned()
+            });
+            let is_typed = param_ty
+                .as_ref()
+                .is_some_and(|ty| !Self::contains_wildcard_type(ty));
+            closure_scope.define_var(&param.name, param_ty);
+            if is_typed {
+                closure_scope.mark_annotated(&param.name);
+            }
+            closure_scope.clear_nil_widenable(&param.name);
+        }
+
+        self.fn_depth += 1;
+        let saved_stream_depth = self.stream_fn_depth;
+        let saved_stream_emit_types = self.stream_emit_types.clone();
+        self.stream_fn_depth = 0;
+        self.stream_emit_types.clear();
+        self.expected_return_types
+            .push(Some(expected_return.clone()));
+        self.check_block(body, &mut closure_scope);
+        self.expected_return_types.pop();
+        self.stream_fn_depth = saved_stream_depth;
+        self.stream_emit_types = saved_stream_emit_types;
+        self.fn_depth -= 1;
+
+        let mut ret_scope = closure_scope.clone();
+        ret_scope.restore_narrowed_vars();
+        for stmt in body {
+            self.check_return_type(stmt, &expected_return, snode.span, &mut ret_scope);
+        }
+        if !matches!(
+            body.last().map(|stmt| &stmt.node),
+            Some(Node::ReturnStmt { .. })
+        ) {
+            let actual_return = self
+                .infer_closure_body_return(body, &ret_scope)
+                .unwrap_or_else(|| TypeExpr::Named("nil".into()));
+            if !self.types_compatible(&expected_return, &actual_return, &ret_scope) {
+                let value_span = body.last().map(|stmt| stmt.span).unwrap_or(snode.span);
+                self.type_mismatch_at(
+                    Code::ClosureReturnTypeMismatch,
+                    "closure return value",
+                    &expected_return,
+                    &actual_return,
+                    value_span,
+                    (
+                        Some((snode.span, "closure expected here".to_string())),
+                        Some(value_span),
+                    ),
+                    &ret_scope,
+                );
+            }
+        }
+
+        true
+    }
+
+    fn check_method_args_with_expected(
+        &mut self,
+        object: &SNode,
+        method: &str,
+        args: &[SNode],
+        scope: &mut TypeScope,
+    ) {
+        let expected_args = self.method_expected_arg_types(object, method, args, scope);
+        for (idx, arg) in args.iter().enumerate() {
+            self.check_node_with_expected(
+                arg,
+                expected_args
+                    .get(idx)
+                    .and_then(|expected| expected.as_ref()),
+                scope,
+            );
+        }
+    }
+
+    fn method_expected_arg_types(
+        &self,
+        object: &SNode,
+        method: &str,
+        args: &[SNode],
+        scope: &TypeScope,
+    ) -> Vec<Option<TypeExpr>> {
+        let mut expected = vec![None; args.len()];
+        let Some(object_type) = self.infer_type(object, scope) else {
+            return expected;
+        };
+        let resolved = self.resolve_alias(&object_type, scope);
+        let dict_value = Self::dict_value_type(&resolved);
+        let item_type = if dict_value.is_some() {
+            None
+        } else {
+            self.iterable_item_type(&resolved, scope)
+        };
+
+        let callback = |params: Vec<TypeExpr>, return_type: TypeExpr| TypeExpr::FnType {
+            params,
+            return_type: Box::new(return_type),
+        };
+        let wildcard = Self::wildcard_type;
+
+        if let Some(value_type) = dict_value {
+            match method {
+                "filter" | "any" | "all" | "find" if !expected.is_empty() => {
+                    expected[0] = Some(callback(vec![value_type], TypeExpr::Named("bool".into())));
+                }
+                "map_values" if !expected.is_empty() => {
+                    expected[0] = Some(callback(vec![value_type], wildcard()));
+                }
+                _ => {}
+            }
+            return expected;
+        }
+
+        let Some(item_type) = item_type else {
+            return expected;
+        };
+        match method {
+            "map" | "flat_map" | "for_each" if !expected.is_empty() => {
+                expected[0] = Some(callback(vec![item_type], wildcard()));
+            }
+            "filter" | "take_while" | "skip_while" | "any" | "all" | "find"
+                if !expected.is_empty() =>
+            {
+                expected[0] = Some(callback(vec![item_type], TypeExpr::Named("bool".into())));
+            }
+            "reduce" if expected.len() > 1 => {
+                let acc_type = args
+                    .first()
+                    .and_then(|arg| self.infer_type(arg, scope))
+                    .unwrap_or_else(wildcard);
+                expected[1] = Some(callback(vec![acc_type.clone(), item_type], acc_type));
+            }
+            _ => {}
+        }
+        expected
+    }
+
+    fn dict_value_type(ty: &TypeExpr) -> InferredType {
+        match ty {
+            TypeExpr::DictType(_, value) => Some((**value).clone()),
+            TypeExpr::Shape(fields) => {
+                let members = fields.iter().map(|field| field.type_expr.clone()).collect();
+                collapse_members_opt(members, TypeExpr::Union)
+            }
+            TypeExpr::Named(name) if name == "dict" => Some(Self::wildcard_type()),
+            _ => None,
+        }
+    }
+
     pub(in crate::typechecker) fn check_node(&mut self, snode: &SNode, scope: &mut TypeScope) {
         let span = snode.span;
         match &snode.node {
@@ -511,24 +850,27 @@ impl TypeChecker {
                 type_ann,
                 value,
             } => {
-                self.check_node(value, scope);
+                let context_checked =
+                    self.check_node_with_expected(value, type_ann.as_ref(), scope);
                 let inferred = self.infer_type(value, scope);
                 if let BindingPattern::Identifier(name) = pattern {
                     if let Some(expected) = type_ann {
-                        if let Some(actual) = &inferred {
-                            if !self.types_compatible(expected, actual, scope) {
-                                self.type_mismatch_at(
-                                    Code::VariableTypeMismatch,
-                                    format!("let binding `{name}`"),
-                                    expected,
-                                    actual,
-                                    value.span,
-                                    (
-                                        Some((span, "expected type declared here".to_string())),
-                                        Some(value.span),
-                                    ),
-                                    scope,
-                                );
+                        if !context_checked {
+                            if let Some(actual) = &inferred {
+                                if !self.types_compatible(expected, actual, scope) {
+                                    self.type_mismatch_at(
+                                        Code::VariableTypeMismatch,
+                                        format!("let binding `{name}`"),
+                                        expected,
+                                        actual,
+                                        value.span,
+                                        (
+                                            Some((span, "expected type declared here".to_string())),
+                                            Some(value.span),
+                                        ),
+                                        scope,
+                                    );
+                                }
                             }
                         }
                     }
@@ -572,24 +914,27 @@ impl TypeChecker {
                 type_ann,
                 value,
             } => {
-                self.check_node(value, scope);
+                let context_checked =
+                    self.check_node_with_expected(value, type_ann.as_ref(), scope);
                 let inferred = self.infer_type(value, scope);
                 if let BindingPattern::Identifier(name) = pattern {
                     if let Some(expected) = type_ann {
-                        if let Some(actual) = &inferred {
-                            if !self.types_compatible(expected, actual, scope) {
-                                self.type_mismatch_at(
-                                    Code::VariableTypeMismatch,
-                                    format!("var binding `{name}`"),
-                                    expected,
-                                    actual,
-                                    value.span,
-                                    (
-                                        Some((span, "expected type declared here".to_string())),
-                                        Some(value.span),
-                                    ),
-                                    scope,
-                                );
+                        if !context_checked {
+                            if let Some(actual) = &inferred {
+                                if !self.types_compatible(expected, actual, scope) {
+                                    self.type_mismatch_at(
+                                        Code::VariableTypeMismatch,
+                                        format!("var binding `{name}`"),
+                                        expected,
+                                        actual,
+                                        value.span,
+                                        (
+                                            Some((span, "expected type declared here".to_string())),
+                                            Some(value.span),
+                                        ),
+                                        scope,
+                                    );
+                                }
                             }
                         }
                     }
@@ -643,23 +988,26 @@ impl TypeChecker {
                 // still fire. The bounded const-eval pass below runs on
                 // top of that — its failures land as HARN-MET-* /
                 // HARN-CST-* diagnostics.
-                self.check_node(value, scope);
+                let context_checked =
+                    self.check_node_with_expected(value, type_ann.as_ref(), scope);
                 let inferred = self.infer_type(value, scope);
                 if let Some(expected) = type_ann {
-                    if let Some(actual) = &inferred {
-                        if !self.types_compatible(expected, actual, scope) {
-                            self.type_mismatch_at(
-                                Code::VariableTypeMismatch,
-                                format!("const binding `{name}`"),
-                                expected,
-                                actual,
-                                value.span,
-                                (
-                                    Some((span, "expected type declared here".to_string())),
-                                    Some(value.span),
-                                ),
-                                scope,
-                            );
+                    if !context_checked {
+                        if let Some(actual) = &inferred {
+                            if !self.types_compatible(expected, actual, scope) {
+                                self.type_mismatch_at(
+                                    Code::VariableTypeMismatch,
+                                    format!("const binding `{name}`"),
+                                    expected,
+                                    actual,
+                                    value.span,
+                                    (
+                                        Some((span, "expected type declared here".to_string())),
+                                        Some(value.span),
+                                    ),
+                                    scope,
+                                );
+                            }
                         }
                     }
                 }
@@ -993,13 +1341,24 @@ impl TypeChecker {
             Node::ReturnStmt {
                 value: Some(val), ..
             } => {
-                self.check_node(val, scope);
+                let expected_return = self.expected_return_types.last().and_then(|ty| ty.clone());
+                self.check_node_with_expected(val, expected_return.as_ref(), scope);
             }
 
             Node::Assignment {
                 target, value, op, ..
             } => {
-                self.check_node(value, scope);
+                let expected_value_type = if op.is_none() {
+                    if let Node::Identifier(name) = &target.node {
+                        scope.get_var(name).cloned().flatten()
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                };
+                let context_checked =
+                    self.check_node_with_expected(value, expected_value_type.as_ref(), scope);
                 if let Node::Identifier(name) = &target.node {
                     let mut widened_slot_type: Option<TypeExpr> = None;
                     // Compile-time immutability check
@@ -1020,36 +1379,38 @@ impl TypeChecker {
                         } else {
                             value_type
                         };
-                        if let Some(actual) = &assigned {
-                            // Check against the original (pre-narrowing) type if narrowed
-                            let check_type = scope
-                                .narrowed_vars
-                                .get(name)
-                                .and_then(|t| t.as_ref())
-                                .unwrap_or(var_type);
-                            if !self.types_compatible(check_type, actual, scope) {
-                                if scope.is_mutable(name)
-                                    && scope.is_nil_widenable(name)
-                                    && Self::is_nil_type(check_type)
-                                    && !Self::is_nil_type(actual)
-                                {
-                                    widened_slot_type = Some(Self::union_with_nil(actual));
-                                } else {
-                                    self.type_mismatch_at(
-                                        Code::AssignmentTypeMismatch,
-                                        format!("assignment to `{name}`"),
-                                        check_type,
-                                        actual,
-                                        value.span,
-                                        (
-                                            Some((
-                                                target.span,
-                                                format!("`{name}` has this expected type"),
-                                            )),
-                                            Some(value.span),
-                                        ),
-                                        scope,
-                                    );
+                        if !context_checked {
+                            if let Some(actual) = &assigned {
+                                // Check against the original (pre-narrowing) type if narrowed
+                                let check_type = scope
+                                    .narrowed_vars
+                                    .get(name)
+                                    .and_then(|t| t.as_ref())
+                                    .unwrap_or(var_type);
+                                if !self.types_compatible(check_type, actual, scope) {
+                                    if scope.is_mutable(name)
+                                        && scope.is_nil_widenable(name)
+                                        && Self::is_nil_type(check_type)
+                                        && !Self::is_nil_type(actual)
+                                    {
+                                        widened_slot_type = Some(Self::union_with_nil(actual));
+                                    } else {
+                                        self.type_mismatch_at(
+                                            Code::AssignmentTypeMismatch,
+                                            format!("assignment to `{name}`"),
+                                            check_type,
+                                            actual,
+                                            value.span,
+                                            (
+                                                Some((
+                                                    target.span,
+                                                    format!("`{name}` has this expected type"),
+                                                )),
+                                                Some(value.span),
+                                            ),
+                                            scope,
+                                        );
+                                    }
                                 }
                             }
                         }
@@ -1412,9 +1773,7 @@ impl TypeChecker {
                 if self.check_harness_method_call(object, method, args, scope, span) {
                     return;
                 }
-                for arg in args {
-                    self.check_node(arg, scope);
-                }
+                self.check_method_args_with_expected(object, method, args, scope);
                 self.check_generic_method_bound(object, method, scope, span);
             }
             Node::OptionalMethodCall {
@@ -1428,9 +1787,7 @@ impl TypeChecker {
                 if self.check_harness_method_call(object, method, args, scope, span) {
                     return;
                 }
-                for arg in args {
-                    self.check_node(arg, scope);
-                }
+                self.check_method_args_with_expected(object, method, args, scope);
                 self.check_generic_method_bound(object, method, scope, span);
             }
             Node::PropertyAccess { object, property } => {
@@ -1627,6 +1984,12 @@ impl TypeChecker {
                 let mut closure_scope = scope.child();
                 for p in params {
                     closure_scope.define_var(&p.name, p.type_expr.clone());
+                    if p.type_expr
+                        .as_ref()
+                        .is_some_and(|ty| !Self::contains_wildcard_type(ty))
+                    {
+                        closure_scope.mark_annotated(&p.name);
+                    }
                     closure_scope.clear_nil_widenable(&p.name);
                 }
                 self.fn_depth += 1;
@@ -1634,7 +1997,9 @@ impl TypeChecker {
                 let saved_stream_emit_types = self.stream_emit_types.clone();
                 self.stream_fn_depth = 0;
                 self.stream_emit_types.clear();
+                self.expected_return_types.push(None);
                 self.check_block(body, &mut closure_scope);
+                self.expected_return_types.pop();
                 self.stream_fn_depth = saved_stream_depth;
                 self.stream_emit_types = saved_stream_emit_types;
                 self.fn_depth -= 1;
@@ -1714,10 +2079,36 @@ impl TypeChecker {
             } => {
                 for entry in fields {
                     self.check_node(&entry.key, scope);
-                    self.check_node(&entry.value, scope);
                 }
                 if let Some(struct_info) = scope.get_struct(struct_name).cloned() {
                     let type_bindings = self.infer_struct_bindings(&struct_info, fields, scope);
+                    let type_param_set: std::collections::BTreeSet<String> = struct_info
+                        .type_params
+                        .iter()
+                        .map(|tp| tp.name.clone())
+                        .collect();
+                    let unbound_type_params: std::collections::BTreeSet<String> = type_param_set
+                        .iter()
+                        .filter(|name| !type_bindings.contains_key(*name))
+                        .cloned()
+                        .collect();
+                    let mut contextual_fields = vec![false; fields.len()];
+                    for (idx, entry) in fields.iter().enumerate() {
+                        let expected_type = match &entry.key.node {
+                            Node::StringLiteral(key) | Node::Identifier(key) => struct_info
+                                .fields
+                                .iter()
+                                .find(|field| field.name == *key)
+                                .and_then(|field| field.type_expr.as_ref())
+                                .map(|ty| Self::apply_type_bindings(ty, &type_bindings)),
+                            _ => None,
+                        };
+                        let contextual_expected = expected_type
+                            .as_ref()
+                            .filter(|ty| !Self::contains_type_param(ty, &unbound_type_params));
+                        contextual_fields[idx] =
+                            self.check_node_with_expected(&entry.value, contextual_expected, scope);
+                    }
                     // Warn on unknown fields
                     for entry in fields {
                         if let Node::StringLiteral(key) | Node::Identifier(key) = &entry.key.node {
@@ -1754,8 +2145,9 @@ impl TypeChecker {
                         let Some(expected_type) = &field.type_expr else {
                             continue;
                         };
-                        let Some(entry) = fields.iter().find(|entry| {
-                            matches!(&entry.key.node, Node::StringLiteral(key) | Node::Identifier(key) if key == &field.name)
+                        let Some((entry_idx, entry)) =
+                            fields.iter().enumerate().find(|(_, entry)| {
+                                matches!(&entry.key.node, Node::StringLiteral(key) | Node::Identifier(key) if key == &field.name)
                         }) else {
                             continue;
                         };
@@ -1763,7 +2155,9 @@ impl TypeChecker {
                             continue;
                         };
                         let expected = Self::apply_type_bindings(expected_type, &type_bindings);
-                        if !self.types_compatible(&expected, &actual_type, scope) {
+                        if !contextual_fields.get(entry_idx).copied().unwrap_or(false)
+                            && !self.types_compatible(&expected, &actual_type, scope)
+                        {
                             self.type_mismatch_at(
                                 Code::FieldTypeMismatch,
                                 format!("field `{}` in struct `{struct_name}`", field.name),
@@ -1779,6 +2173,9 @@ impl TypeChecker {
                         }
                     }
                 } else {
+                    for entry in fields {
+                        self.check_node(&entry.value, scope);
+                    }
                     let suggestion = crate::diagnostic::find_closest_match(
                         struct_name,
                         scope.all_struct_names().iter().map(|name| name.as_str()),
@@ -1815,9 +2212,6 @@ impl TypeChecker {
                 variant,
                 args,
             } => {
-                for arg in args {
-                    self.check_node(arg, scope);
-                }
                 if let Some(enum_info) = scope.get_enum(enum_name).cloned() {
                     let Some(enum_variant) = enum_info
                         .variants
@@ -1829,6 +2223,9 @@ impl TypeChecker {
                             format!("Unknown variant '{variant}' in enum '{enum_name}'"),
                             span,
                         );
+                        for arg in args {
+                            self.check_node(arg, scope);
+                        }
                         return;
                     };
                     if args.len() != enum_variant.fields.len() {
@@ -1869,7 +2266,27 @@ impl TypeChecker {
                             self.error_at(Code::GenericTypeArgumentMismatch, message, arg.span);
                         }
                     }
-                    for (field, arg) in enum_variant.fields.iter().zip(args.iter()) {
+                    let unbound_type_params: std::collections::BTreeSet<String> = type_param_set
+                        .iter()
+                        .filter(|name| !type_bindings.contains_key(*name))
+                        .cloned()
+                        .collect();
+                    let mut contextual_args = vec![false; args.len()];
+                    for (idx, arg) in args.iter().enumerate() {
+                        let expected_type = enum_variant
+                            .fields
+                            .get(idx)
+                            .and_then(|field| field.type_expr.as_ref())
+                            .map(|ty| Self::apply_type_bindings(ty, &type_bindings));
+                        let contextual_expected = expected_type
+                            .as_ref()
+                            .filter(|ty| !Self::contains_type_param(ty, &unbound_type_params));
+                        contextual_args[idx] =
+                            self.check_node_with_expected(arg, contextual_expected, scope);
+                    }
+                    for (idx, (field, arg)) in
+                        enum_variant.fields.iter().zip(args.iter()).enumerate()
+                    {
                         let Some(expected_type) = &field.type_expr else {
                             continue;
                         };
@@ -1877,7 +2294,9 @@ impl TypeChecker {
                             continue;
                         };
                         let expected = Self::apply_type_bindings(expected_type, &type_bindings);
-                        if !self.types_compatible(&expected, &actual_type, scope) {
+                        if !contextual_args.get(idx).copied().unwrap_or(false)
+                            && !self.types_compatible(&expected, &actual_type, scope)
+                        {
                             self.type_mismatch_at(
                                 Code::ArgumentTypeMismatch,
                                 format!("{}.{} argument `{}`", enum_name, variant, field.name),
@@ -1896,6 +2315,13 @@ impl TypeChecker {
                                 scope,
                             );
                         }
+                    }
+                    for arg in args.iter().skip(enum_variant.fields.len()) {
+                        self.check_node(arg, scope);
+                    }
+                } else {
+                    for arg in args {
+                        self.check_node(arg, scope);
                     }
                 }
             }

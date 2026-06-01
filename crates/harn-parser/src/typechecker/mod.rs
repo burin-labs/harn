@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::collections::{BTreeSet, HashSet};
 use std::rc::Rc;
 
 use crate::ast::*;
@@ -113,6 +113,10 @@ pub struct TypeChecker {
     stream_fn_depth: usize,
     /// Expected emitted value type for each enclosing `gen fn`.
     stream_emit_types: Vec<Option<TypeExpr>>,
+    /// Declared return type for the current function-like body. `None`
+    /// entries deliberately break propagation across untyped closures, where
+    /// an inner `return` belongs to the closure rather than the enclosing fn.
+    expected_return_types: Vec<Option<TypeExpr>>,
     /// Maps function name -> deprecation metadata `(since, use_hint)`. Populated
     /// when an `@deprecated` attribute is encountered on a top-level fn decl
     /// during the `check_inner` pre-pass; consulted at every `FunctionCall`
@@ -147,6 +151,112 @@ impl TypeChecker {
         matches!(ty, TypeExpr::Named(name) if name == "_")
     }
 
+    pub(in crate::typechecker) fn contains_wildcard_type(ty: &TypeExpr) -> bool {
+        match ty {
+            TypeExpr::Named(name) => name == "_",
+            TypeExpr::Union(members) | TypeExpr::Intersection(members) => {
+                members.iter().any(Self::contains_wildcard_type)
+            }
+            TypeExpr::Shape(fields) => fields
+                .iter()
+                .any(|field| Self::contains_wildcard_type(&field.type_expr)),
+            TypeExpr::List(inner)
+            | TypeExpr::Iter(inner)
+            | TypeExpr::Generator(inner)
+            | TypeExpr::Stream(inner)
+            | TypeExpr::Owned(inner) => Self::contains_wildcard_type(inner),
+            TypeExpr::DictType(key, value) => {
+                Self::contains_wildcard_type(key) || Self::contains_wildcard_type(value)
+            }
+            TypeExpr::Applied { args, .. } => args.iter().any(Self::contains_wildcard_type),
+            TypeExpr::FnType {
+                params,
+                return_type,
+            } => {
+                params.iter().any(Self::contains_wildcard_type)
+                    || Self::contains_wildcard_type(return_type)
+            }
+            TypeExpr::Never | TypeExpr::LitString(_) | TypeExpr::LitInt(_) => false,
+        }
+    }
+
+    pub(in crate::typechecker) fn contains_type_param(
+        ty: &TypeExpr,
+        type_params: &BTreeSet<String>,
+    ) -> bool {
+        match ty {
+            TypeExpr::Named(name) => type_params.contains(name),
+            TypeExpr::Union(members) | TypeExpr::Intersection(members) => members
+                .iter()
+                .any(|member| Self::contains_type_param(member, type_params)),
+            TypeExpr::Shape(fields) => fields
+                .iter()
+                .any(|field| Self::contains_type_param(&field.type_expr, type_params)),
+            TypeExpr::List(inner)
+            | TypeExpr::Iter(inner)
+            | TypeExpr::Generator(inner)
+            | TypeExpr::Stream(inner)
+            | TypeExpr::Owned(inner) => Self::contains_type_param(inner, type_params),
+            TypeExpr::DictType(key, value) => {
+                Self::contains_type_param(key, type_params)
+                    || Self::contains_type_param(value, type_params)
+            }
+            TypeExpr::Applied { args, .. } => args
+                .iter()
+                .any(|arg| Self::contains_type_param(arg, type_params)),
+            TypeExpr::FnType {
+                params,
+                return_type,
+            } => {
+                params
+                    .iter()
+                    .any(|param| Self::contains_type_param(param, type_params))
+                    || Self::contains_type_param(return_type, type_params)
+            }
+            TypeExpr::Never | TypeExpr::LitString(_) | TypeExpr::LitInt(_) => false,
+        }
+    }
+
+    pub(in crate::typechecker) fn contains_abstract_type(
+        &self,
+        ty: &TypeExpr,
+        scope: &TypeScope,
+    ) -> bool {
+        match ty {
+            TypeExpr::Named(name) => {
+                matches!(name.as_str(), "_" | "any" | "unknown")
+                    || scope.is_generic_type_param(name)
+            }
+            TypeExpr::Union(members) | TypeExpr::Intersection(members) => members
+                .iter()
+                .any(|member| self.contains_abstract_type(member, scope)),
+            TypeExpr::Shape(fields) => fields
+                .iter()
+                .any(|field| self.contains_abstract_type(&field.type_expr, scope)),
+            TypeExpr::List(inner)
+            | TypeExpr::Iter(inner)
+            | TypeExpr::Generator(inner)
+            | TypeExpr::Stream(inner)
+            | TypeExpr::Owned(inner) => self.contains_abstract_type(inner, scope),
+            TypeExpr::DictType(key, value) => {
+                self.contains_abstract_type(key, scope) || self.contains_abstract_type(value, scope)
+            }
+            TypeExpr::Applied { args, .. } => args
+                .iter()
+                .any(|arg| self.contains_abstract_type(arg, scope)),
+            TypeExpr::FnType {
+                params,
+                return_type,
+            } => {
+                params
+                    .iter()
+                    .any(|param| self.contains_abstract_type(param, scope))
+                    || self.contains_abstract_type(return_type, scope)
+            }
+            TypeExpr::Never | TypeExpr::LitString(_) | TypeExpr::LitInt(_) => false,
+        }
+    }
+
     pub(in crate::typechecker) fn base_type_name(ty: &TypeExpr) -> Option<&str> {
         match ty {
             TypeExpr::Named(name) => Some(name.as_str()),
@@ -165,6 +275,7 @@ impl TypeChecker {
             fn_depth: 0,
             stream_fn_depth: 0,
             stream_emit_types: Vec::new(),
+            expected_return_types: Vec::new(),
             deprecated_fns: std::collections::HashMap::new(),
             imported_names: None,
             imported_type_decls: Vec::new(),
@@ -185,6 +296,7 @@ impl TypeChecker {
             fn_depth: 0,
             stream_fn_depth: 0,
             stream_emit_types: Vec::new(),
+            expected_return_types: Vec::new(),
             deprecated_fns: std::collections::HashMap::new(),
             imported_names: None,
             imported_type_decls: Vec::new(),

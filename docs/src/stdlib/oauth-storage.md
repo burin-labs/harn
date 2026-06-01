@@ -116,7 +116,19 @@ platform-native keychain. `handlers` is a dict with three keys:
 ```harn
 import { custom } from "std/oauth/storage"
 
-let store = custom({
+fn vault_get(_path) {
+  return nil
+}
+
+fn vault_put(_path, _token_set, _options) {
+  return nil
+}
+
+fn vault_delete(_path) {
+  return nil
+}
+
+let _store = custom({
   get: { key -> vault_get("oauth/" + key) },
   set: { key, token_set, ttl_seconds = nil ->
     vault_put("oauth/" + key, token_set, {ttl: ttl_seconds})

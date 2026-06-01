@@ -98,7 +98,9 @@ impl TypeChecker {
                         child.clear_nil_widenable(p);
                     }
                     self.fn_depth += 1;
-                    self.check_block(body, &mut child);
+                    self.expected_return_types.push(return_type.clone());
+                    self.check_block_with_expected_tail(body, return_type.as_ref(), &mut child);
+                    self.expected_return_types.pop();
                     if let Some(ret_type) = return_type.as_ref() {
                         let mut ret_scope = child.clone();
                         ret_scope.restore_narrowed_vars();

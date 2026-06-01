@@ -1,0 +1,8 @@
+struct Handler {
+  callback: fn(int) -> int
+}
+
+pipeline default() {
+  let h = Handler {callback: { x -> x + "oops" }}
+  __io_println(0)
+}

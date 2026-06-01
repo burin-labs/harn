@@ -225,10 +225,6 @@ impl TypeChecker {
         scope: &mut TypeScope,
         span: Span,
     ) {
-        for arg in args {
-            self.check_node(arg, scope);
-        }
-
         if !type_args.is_empty() {
             if !sig.is_generic() {
                 self.error_at(
@@ -284,23 +280,6 @@ impl TypeChecker {
             }
         }
 
-        // `call_scope` only needs to differ from `scope` when the callee
-        // declares its own generic type params (which must be visible while
-        // we check this call's arguments). The common case — calling a
-        // non-generic builtin — borrows `scope` directly, sparing a clone
-        // per call. Otherwise we allocate a child that adds those names.
-        let call_scope_owned;
-        let call_scope: &TypeScope = if sig.type_params.is_empty() {
-            scope
-        } else {
-            let mut s = scope.child();
-            for tp_name in sig.type_params {
-                s.generic_type_params.insert((*tp_name).to_string());
-            }
-            call_scope_owned = s;
-            &call_scope_owned
-        };
-
         let type_param_names = sig.type_param_names();
         let type_param_set: std::collections::BTreeSet<String> =
             type_param_names.iter().cloned().collect();
@@ -326,36 +305,81 @@ impl TypeChecker {
             }
         }
 
+        let unbound_type_params: std::collections::BTreeSet<String> = type_param_set
+            .iter()
+            .filter(|name| !type_bindings.contains_key(*name))
+            .cloned()
+            .collect();
+        let mut expected_args: Vec<Option<TypeExpr>> = Vec::with_capacity(args.len());
+        let mut contextual_args = Vec::with_capacity(args.len());
+        for (i, arg) in args.iter().enumerate() {
+            let Some(param) = Self::builtin_param_for_arg(sig, i) else {
+                self.check_node(arg, scope);
+                expected_args.push(None);
+                contextual_args.push(false);
+                continue;
+            };
+            if param.ty.is_any() || matches!(param.ty, builtin_signatures::Ty::SchemaOf(_)) {
+                self.check_node(arg, scope);
+                expected_args.push(None);
+                contextual_args.push(false);
+                continue;
+            }
+            let expected = Self::apply_type_bindings(&param.ty.to_type_expr(), &type_bindings);
+            let contextual_expected =
+                (!Self::contains_type_param(&expected, &unbound_type_params)).then_some(&expected);
+            let context_checked = self.check_node_with_expected(arg, contextual_expected, scope);
+            expected_args.push(Some(expected));
+            contextual_args.push(context_checked);
+        }
+
+        // `call_scope` only needs to differ from `scope` when the callee
+        // declares its own generic type params (which must be visible while
+        // we check this call's arguments). The common case — calling a
+        // non-generic builtin — borrows `scope` directly, sparing a clone
+        // per call. Otherwise we allocate a child that adds those names.
+        let call_scope_owned;
+        let call_scope: &TypeScope = if sig.type_params.is_empty() {
+            scope
+        } else {
+            let mut s = scope.child();
+            for tp_name in sig.type_params {
+                s.generic_type_params.insert((*tp_name).to_string());
+            }
+            call_scope_owned = s;
+            &call_scope_owned
+        };
+
         for (i, arg) in args.iter().enumerate() {
             let Some(param) = Self::builtin_param_for_arg(sig, i) else {
                 continue;
             };
-            if param.ty.is_any() || matches!(param.ty, builtin_signatures::Ty::SchemaOf(_)) {
+            let Some(expected) = expected_args.get(i).and_then(|ty| ty.as_ref()) else {
                 continue;
-            }
+            };
             let actual = self.infer_type(arg, scope);
             if let Some(actual) = &actual {
-                let expected = Self::apply_type_bindings(&param.ty.to_type_expr(), &type_bindings);
-                self.check_strict_llm_option_keys(name, param.name, &expected, arg);
+                self.check_strict_llm_option_keys(name, param.name, expected, arg);
                 if !Self::builtin_uses_strict_llm_option_keys(name, param.name) {
                     self.check_unknown_option_bag_fields(
                         format!("argument {} `{}`", i + 1, param.name),
                         param.name,
-                        &expected,
+                        expected,
                         arg,
                         call_scope,
                     );
                 }
-                let compatible = self.types_compatible(&expected, actual, call_scope)
+                let compatible = contextual_args.get(i).copied().unwrap_or(false)
+                    || self.types_compatible(expected, actual, call_scope)
                     || (param.optional
                         && without_nil(actual).is_none_or(|non_nil| {
-                            self.types_compatible(&expected, &non_nil, call_scope)
+                            self.types_compatible(expected, &non_nil, call_scope)
                         }));
                 if !compatible {
                     self.type_mismatch_at(
                         Code::ArgumentTypeMismatch,
                         format!("argument {} `{}`", i + 1, param.name),
-                        &expected,
+                        expected,
                         actual,
                         arg.span,
                         (None, Some(arg.span)),
@@ -1237,21 +1261,6 @@ impl TypeChecker {
                     );
                 }
             }
-            // Most callees have no generic type params and can reuse the
-            // caller's scope by reference. The branch with a child scope
-            // is only allocated when generic names need to be visible
-            // during arg checking.
-            let call_scope_owned;
-            let call_scope: &TypeScope = if sig.type_param_names.is_empty() {
-                scope
-            } else {
-                let mut s = scope.child();
-                for tp_name in &sig.type_param_names {
-                    s.generic_type_params.insert(tp_name.clone());
-                }
-                call_scope_owned = s;
-                &call_scope_owned
-            };
             let mut type_bindings: BTreeMap<String, TypeExpr> = BTreeMap::new();
             let type_param_set: std::collections::BTreeSet<String> =
                 sig.type_param_names.iter().cloned().collect();
@@ -1276,26 +1285,71 @@ impl TypeChecker {
                     }
                 }
             }
+            let unbound_type_params: std::collections::BTreeSet<String> = type_param_set
+                .iter()
+                .filter(|name| !type_bindings.contains_key(*name))
+                .cloned()
+                .collect();
+            let mut expected_args: Vec<Option<(String, TypeExpr)>> = Vec::with_capacity(args.len());
+            let mut contextual_args = Vec::with_capacity(args.len());
             for (i, arg) in args.iter().enumerate() {
                 let Some((param_name, param_type)) = Self::function_param_for_arg(&sig, i) else {
+                    self.check_node(arg, scope);
+                    expected_args.push(None);
+                    contextual_args.push(false);
                     continue;
                 };
                 if let Some(expected) = param_type {
+                    let expected = Self::apply_type_bindings(expected, &type_bindings);
+                    let contextual_expected =
+                        (!Self::contains_type_param(&expected, &unbound_type_params))
+                            .then_some(&expected);
+                    let context_checked =
+                        self.check_node_with_expected(arg, contextual_expected, scope);
+                    expected_args.push(Some((param_name.to_string(), expected)));
+                    contextual_args.push(context_checked);
+                } else {
+                    self.check_node(arg, scope);
+                    expected_args.push(None);
+                    contextual_args.push(false);
+                }
+            }
+
+            // Most callees have no generic type params and can reuse the
+            // caller's scope by reference. The branch with a child scope
+            // is only allocated when generic names need to be visible
+            // during arg checking.
+            let call_scope_owned;
+            let call_scope: &TypeScope = if sig.type_param_names.is_empty() {
+                scope
+            } else {
+                let mut s = scope.child();
+                for tp_name in &sig.type_param_names {
+                    s.generic_type_params.insert(tp_name.clone());
+                }
+                call_scope_owned = s;
+                &call_scope_owned
+            };
+            for (i, arg) in args.iter().enumerate() {
+                if let Some((param_name, expected)) =
+                    expected_args.get(i).and_then(|entry| entry.as_ref())
+                {
                     let actual = self.infer_type(arg, scope);
                     if let Some(actual) = &actual {
-                        let expected = Self::apply_type_bindings(expected, &type_bindings);
                         self.check_unknown_option_bag_fields(
                             format!("argument {} `{}`", i + 1, param_name),
                             param_name,
-                            &expected,
+                            expected,
                             arg,
                             call_scope,
                         );
-                        if !self.types_compatible(&expected, actual, call_scope) {
+                        if !contextual_args.get(i).copied().unwrap_or(false)
+                            && !self.types_compatible(expected, actual, call_scope)
+                        {
                             self.type_mismatch_at(
                                 Code::ArgumentTypeMismatch,
                                 format!("argument {} `{}`", i + 1, param_name),
-                                &expected,
+                                expected,
                                 actual,
                                 arg.span,
                                 (
