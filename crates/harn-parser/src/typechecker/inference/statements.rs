@@ -20,6 +20,7 @@ use crate::diagnostic_codes::Code;
 use super::super::binary_ops::infer_binary_op_type;
 use super::super::exits::stmt_definitely_exits;
 use super::super::format::{format_type, is_obvious_type};
+use super::super::is_gradual_type_name;
 use super::super::schema_inference::schema_type_expr_from_node;
 use super::super::scope::{
     EnumDeclInfo, FnSignature, ImplMethodSig, InferredType, InterfaceDeclInfo, StructDeclInfo,
@@ -706,7 +707,8 @@ impl TypeChecker {
                 ..
             } => {
                 let callable_return_type =
-                    Self::callable_return_type(*is_stream, return_type, body);
+                    Self::callable_return_type(*is_stream, return_type, body)
+                        .or_else(|| self.infer_unannotated_fn_return(params, body));
                 let required_params = params.iter().filter(|p| p.default_value.is_none()).count();
                 let sig = FnSignature {
                     params: params
@@ -1296,7 +1298,17 @@ impl TypeChecker {
                 // Validate operator/type compatibility
                 let lt = self.infer_type(left, scope);
                 let rt = self.infer_type(right, scope);
-                if let (Some(TypeExpr::Named(l)), Some(TypeExpr::Named(r))) = (&lt, &rt) {
+                let named_pair = match (&lt, &rt) {
+                    // Gradual operands (`any`/`unknown`/`_`) are compatible with
+                    // every operator; the actual check happens at runtime.
+                    (Some(TypeExpr::Named(l)), Some(TypeExpr::Named(r)))
+                        if !is_gradual_type_name(l) && !is_gradual_type_name(r) =>
+                    {
+                        Some((l, r))
+                    }
+                    _ => None,
+                };
+                if let Some((l, r)) = named_pair {
                     match op.as_str() {
                         "-" | "/" | "%" | "**" => {
                             let numeric = ["int", "float"];

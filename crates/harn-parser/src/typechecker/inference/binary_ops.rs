@@ -11,7 +11,7 @@ use crate::diagnostic_codes::Code;
 use harn_lexer::{FixEdit, Span};
 
 use super::super::scope::TypeScope;
-use super::super::TypeChecker;
+use super::super::{is_gradual_type_name, TypeChecker};
 
 impl TypeChecker {
     /// Recursively validate binary operations in an expression tree.
@@ -24,7 +24,18 @@ impl TypeChecker {
                 self.check_binops(right, scope);
                 let lt = self.infer_type(left, scope);
                 let rt = self.infer_type(right, scope);
-                if let (Some(TypeExpr::Named(l)), Some(TypeExpr::Named(r))) = (&lt, &rt) {
+                let named_pair = match (&lt, &rt) {
+                    // Gradual operands (`any`/`unknown`/`_`) are compatible with
+                    // every operator — adding/concatenating a value of unknown
+                    // static type is a runtime concern, not a static error.
+                    (Some(TypeExpr::Named(l)), Some(TypeExpr::Named(r)))
+                        if !is_gradual_type_name(l) && !is_gradual_type_name(r) =>
+                    {
+                        Some((l, r))
+                    }
+                    _ => None,
+                };
+                if let Some((l, r)) = named_pair {
                     let span = snode.span;
                     match op.as_str() {
                         "+" => {

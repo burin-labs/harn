@@ -22,7 +22,7 @@ use super::super::binary_ops::infer_binary_op_type;
 use super::super::schema_inference::schema_type_expr_from_node;
 use super::super::scope::{builtin_return_type, InferredType, TypeScope};
 use super::super::union::simplify_union;
-use super::super::TypeChecker;
+use super::super::{is_gradual_type_name, TypeChecker};
 
 const UNNECESSARY_SAFE_NAVIGATION_RULE: &str = "unnecessary-safe-navigation";
 
@@ -357,8 +357,13 @@ impl TypeChecker {
             }
 
             Node::Identifier(name) => {
-                if let Some(ty) = scope.get_var(name).cloned().flatten() {
-                    return Some(ty);
+                // A defined local shadows a same-named function — return its
+                // type even when statically unknown (`None`), rather than
+                // falling through to the function reference below. (Flattening
+                // to `None` and falling through would mis-resolve a shadowing
+                // `var x = …` to a function `x` of the same name.)
+                if let Some(var_ty) = scope.get_var(name) {
+                    return var_ty.clone();
                 }
                 // When a bare identifier names a top-level or nested function,
                 // treat the reference as an `fn(...) -> R` value. Prior to this,
@@ -1004,8 +1009,7 @@ impl TypeChecker {
                 optional.then(|| TypeExpr::Named("nil".into()))
             }
             TypeExpr::Named(name)
-                if matches!(name.as_str(), "any" | "unknown" | "_")
-                    || scope.is_generic_type_param(name) =>
+                if is_gradual_type_name(name) || scope.is_generic_type_param(name) =>
             {
                 None
             }
@@ -1115,8 +1119,7 @@ impl TypeChecker {
                 optional.then(|| TypeExpr::Named("nil".into()))
             }
             TypeExpr::Named(name)
-                if matches!(name.as_str(), "any" | "unknown" | "_")
-                    || scope.is_generic_type_param(name) =>
+                if is_gradual_type_name(name) || scope.is_generic_type_param(name) =>
             {
                 None
             }
