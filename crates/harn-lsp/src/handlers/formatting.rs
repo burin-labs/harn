@@ -74,7 +74,7 @@ impl HarnLsp {
     }
 }
 
-fn build_code_actions(
+pub(crate) fn build_code_actions(
     uri: &Url,
     source: &str,
     lint_diags: &[harn_lint::LintDiagnostic],
