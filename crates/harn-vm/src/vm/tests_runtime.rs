@@ -1362,6 +1362,18 @@ fn test_division_by_zero() {
 }
 
 #[test]
+fn test_int_division_overflow_wraps_instead_of_panicking() {
+    let out = run_output(
+        r"pipeline default(task) {
+  let min = -9223372036854775807 - 1
+  log(min / -1)
+  log(min % -1)
+}",
+    );
+    assert_eq!(out, "[harn] -9223372036854775808\n[harn] 0");
+}
+
+#[test]
 fn test_float_division_by_zero_uses_ieee_values() {
     let out = run_vm(
         "pipeline default(task) { log(is_nan(0.0 / 0.0))\nlog(is_infinite(1.0 / 0.0))\nlog(is_infinite(-1.0 / 0.0)) }",

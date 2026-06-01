@@ -14,6 +14,7 @@ use crate::event_log::{
 use crate::llm::vm_value_to_json;
 use crate::runtime_limits::RuntimeLimits;
 use crate::stdlib::macros::{harn_builtin, BuiltinSignature, Param, VmBuiltinDef, TY_ANY, TY_DICT};
+use crate::stdlib::options::{duration_from_value, ErrorKind};
 use crate::triggers::dispatcher::{current_dispatch_context, current_dispatch_wait_lease};
 use crate::value::{VmError, VmValue};
 use crate::vm::{AsyncBuiltinCtx, Vm};
@@ -489,14 +490,7 @@ fn string_field(map: &BTreeMap<String, VmValue>, field: &str) -> Result<Option<S
 }
 
 fn parse_duration_value(value: &VmValue) -> Result<StdDuration, VmError> {
-    match value {
-        VmValue::Duration(ms) if *ms >= 0 => Ok(StdDuration::from_millis(*ms as u64)),
-        VmValue::Int(ms) if *ms >= 0 => Ok(StdDuration::from_millis(*ms as u64)),
-        VmValue::Float(ms) if *ms >= 0.0 => Ok(StdDuration::from_millis(*ms as u64)),
-        _ => Err(VmError::Runtime(
-            "waitpoint_wait: expected timeout duration or millisecond count".to_string(),
-        )),
-    }
+    duration_from_value(value, "waitpoint_wait", "timeout", ErrorKind::Runtime)
 }
 
 fn default_actor(explicit: Option<String>, dispatch_keys: Option<&DispatchKeys>) -> Option<String> {

@@ -16,6 +16,7 @@ use crate::event_log::{
 use crate::llm::vm_value_to_json;
 use crate::runtime_limits::RuntimeLimits;
 use crate::stdlib::macros::{harn_builtin, BuiltinSignature, Param, VmBuiltinDef, TY_ANY};
+use crate::stdlib::options::{duration_from_value, ErrorKind};
 use crate::triggers::dispatcher::{
     current_dispatch_context, current_dispatch_is_replay, current_dispatch_wait_lease,
 };
@@ -455,15 +456,12 @@ fn parse_required_duration(value: Option<&VmValue>, field: &str) -> Result<StdDu
 }
 
 fn parse_duration_value(value: &VmValue) -> Result<StdDuration, VmError> {
-    match value {
-        VmValue::Duration(ms) if *ms >= 0 => Ok(StdDuration::from_millis(*ms as u64)),
-        VmValue::Int(ms) if *ms >= 0 => Ok(StdDuration::from_millis(*ms as u64)),
-        VmValue::Float(ms) if *ms >= 0.0 => Ok(StdDuration::from_millis(*ms as u64)),
-        other => Err(VmError::Runtime(format!(
-            "monitor_wait_for_native: expected duration or non-negative millisecond count, got {}",
-            other.type_name()
-        ))),
-    }
+    duration_from_value(
+        value,
+        "monitor_wait_for_native",
+        "timeout",
+        ErrorKind::Runtime,
+    )
 }
 
 fn string_field(map: &BTreeMap<String, VmValue>, field: &str) -> Result<Option<String>, VmError> {
