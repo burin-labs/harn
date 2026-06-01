@@ -7,13 +7,18 @@
 //! against the tree-sitter machinery in [`harn_hostlib::ast`] and produces
 //! [`RuleMatch`]es with metavariable bindings.
 //!
-//! This crate delivers the **atomic matching tier** (issue #2832) plus the
-//! **predicate + rewrite layer** (issue #2834):
+//! This crate delivers the **atomic matching tier** (#2832), the
+//! **relational + composite algebra** (#2833), and the **predicate +
+//! rewrite layer** (#2834):
 //!
-//! - [`model`] — the serde rule data model (`id` / `language` / `severity`
-//!   / `message` / `rule` block / `where` / `transform` / `fix`).
+//! - [`model`] — the serde rule data model: the recursive [`RuleNode`]
+//!   (atomic `pattern` / `kind` / `regex`, relational `inside` / `has` /
+//!   `follows` / `precedes`, composite `all` / `any` / `not` / `matches`)
+//!   plus `where` / `transform` / `fix` and `utils`.
 //! - [`pattern`] — the snippet → tree-sitter-query compiler (`$VAR`
-//!   metavariable lifting + unification).
+//!   metavariable lifting, unification, literal patterns).
+//! - [`evaluator`] — the tree-walking match algebra (relational + composite
+//!   + utility-rule reuse).
 //! - [`constraint`] — `where` predicates on captured metavars (regex,
 //!   comparison, recursive sub-pattern).
 //! - [`transform`] — synthesize new metavars (`replace` / `substring` /
@@ -23,8 +28,7 @@
 //!   [`CompiledRule::apply`] a codemod.
 //! - [`loader`] — load rules from a TOML file or a directory.
 //!
-//! Relational/composite matching (#2833) and the whole-project scan
-//! lifecycle (#2836) layer onto this surface.
+//! The whole-project scan lifecycle (#2836) layers onto this surface.
 //!
 //! ```
 //! use harn_rules::{Rule, CompiledRule};
@@ -48,6 +52,7 @@
 pub mod constraint;
 pub mod engine;
 pub mod error;
+pub mod evaluator;
 pub mod fix;
 pub mod loader;
 pub mod model;
@@ -59,6 +64,7 @@ pub use error::RulesError;
 pub use fix::{interpolate, AppliedEdit};
 pub use loader::{load_rule_dir, load_rule_file};
 pub use model::{
-    AtomicMatcher, Comparison, Constraint, ConvertOp, Matcher, Rule, RuleKind, Severity, Transform,
+    AtomicMatcher, Comparison, Constraint, ConvertOp, Rule, RuleKind, RuleNode, Severity, StopBy,
+    StopKeyword, Transform,
 };
 pub use pattern::{compile_pattern, CompiledPattern};

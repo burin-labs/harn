@@ -39,18 +39,71 @@ pub enum RuleKind {
 }
 
 /// The atomic-tier matcher. Exactly one of `pattern` / `kind` / `regex`
-/// must be set; [`Matcher::resolve`] enforces that and yields the typed
-/// [`AtomicMatcher`].
+/// must be set on a node that carries one; [`RuleNode::atomic`] resolves it.
+///
+/// A `RuleNode` is the recursive matching algebra: an optional **atomic**
+/// leaf (`pattern` / `kind` / `regex`), **relational** constraints
+/// (`inside` / `has` / `follows` / `precedes`, each a sub-node tuned by
+/// `stop_by` / `field`), and **composite** combinators (`all` / `any` /
+/// `not` / `matches`). Every key set on a node is ANDed: the node matches a
+/// tree-sitter node iff its atomic part matches *and* every relational and
+/// composite part holds.
 #[derive(Debug, Clone, Default, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct Matcher {
-    /// A code snippet in the target grammar with `$VAR` (single-node) and
-    /// `$$$VAR` (variadic) metavariable holes.
+pub struct RuleNode {
+    /// A code snippet in the target grammar with `$VAR` metavariable holes.
     pub pattern: Option<String>,
-    /// A bare tree-sitter node kind to match (e.g. `"call_expression"`).
+    /// A bare tree-sitter node kind (e.g. `"call_expression"`).
     pub kind: Option<String>,
     /// A regular expression matched against node text.
     pub regex: Option<String>,
+
+    /// The node must be **inside** a node matching this sub-rule (ancestor).
+    pub inside: Option<Box<RuleNode>>,
+    /// The node must **have** a descendant matching this sub-rule.
+    pub has: Option<Box<RuleNode>>,
+    /// The node must **follow** a node matching this sub-rule (earlier).
+    pub follows: Option<Box<RuleNode>>,
+    /// The node must **precede** a node matching this sub-rule (later).
+    pub precedes: Option<Box<RuleNode>>,
+
+    /// Relational reach (used when this node is an `inside`/`has`/… target):
+    /// `neighbor` (direct only, default), `end` (transitive), or a rule that
+    /// halts the walk. (TOML `stopBy` or `stop_by`.)
+    #[serde(default, alias = "stopBy")]
+    pub stop_by: Option<StopBy>,
+    /// Restrict an `inside`/`has` relation to a specific tree-sitter field.
+    pub field: Option<String>,
+
+    /// Every sub-rule must match the node.
+    pub all: Option<Vec<RuleNode>>,
+    /// At least one sub-rule must match the node.
+    pub any: Option<Vec<RuleNode>>,
+    /// The sub-rule must NOT match the node.
+    pub not: Option<Box<RuleNode>>,
+    /// Reference a utility rule by id (resolved from `[utils]`).
+    pub matches: Option<String>,
+}
+
+/// How far a relational op (`inside` / `has` / `follows` / `precedes`)
+/// walks the tree looking for a match.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(untagged)]
+pub enum StopBy {
+    /// `"neighbor"` (direct parent/child/sibling only) or `"end"`
+    /// (transitive — walk to the tree boundary).
+    Keyword(StopKeyword),
+    /// Walk until a node matching this rule is reached, then stop.
+    Rule(Box<RuleNode>),
+}
+
+/// The keyword forms of [`StopBy`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum StopKeyword {
+    /// Only the immediate neighbor (default).
+    Neighbor,
+    /// Transitive — walk all the way to the tree boundary.
+    End,
 }
 
 /// The resolved, exactly-one atomic matcher.
@@ -64,10 +117,10 @@ pub enum AtomicMatcher {
     Regex(String),
 }
 
-impl Matcher {
-    /// Collapse the optional fields into the single atomic form, rejecting
-    /// the zero-or-many cases. Returns `Err` with a human-readable reason.
-    pub fn resolve(&self) -> Result<AtomicMatcher, String> {
+impl RuleNode {
+    /// Resolve this node's atomic leaf. `Ok(None)` when the node is purely
+    /// relational/composite; `Err` when more than one atomic key is set.
+    pub fn atomic(&self) -> Result<Option<AtomicMatcher>, String> {
         let set: Vec<&str> = [
             self.pattern.as_ref().map(|_| "pattern"),
             self.kind.as_ref().map(|_| "kind"),
@@ -77,17 +130,49 @@ impl Matcher {
         .flatten()
         .collect();
         match set.as_slice() {
-            [] => Err("rule block sets none of `pattern` / `kind` / `regex`".into()),
-            [one] => Ok(match *one {
+            [] => Ok(None),
+            [one] => Ok(Some(match *one {
                 "pattern" => AtomicMatcher::Pattern(self.pattern.clone().unwrap()),
                 "kind" => AtomicMatcher::Kind(self.kind.clone().unwrap()),
                 _ => AtomicMatcher::Regex(self.regex.clone().unwrap()),
-            }),
+            })),
             many => Err(format!(
-                "rule block sets multiple matchers ({}); set exactly one",
+                "rule node sets multiple atomic matchers ({}); set at most one",
                 many.join(", ")
             )),
         }
+    }
+
+    /// True when `regex` is the only key set — a top-level grep-style rule
+    /// that scans source text rather than the tree.
+    pub fn is_pure_regex(&self) -> bool {
+        self.regex.is_some()
+            && self.pattern.is_none()
+            && self.kind.is_none()
+            && self.inside.is_none()
+            && self.has.is_none()
+            && self.follows.is_none()
+            && self.precedes.is_none()
+            && self.all.is_none()
+            && self.any.is_none()
+            && self.not.is_none()
+            && self.matches.is_none()
+    }
+
+    /// True when the node sets no matching keys at all (an empty node, which
+    /// is a rule authoring error).
+    pub fn is_empty(&self) -> bool {
+        self.pattern.is_none()
+            && self.kind.is_none()
+            && self.regex.is_none()
+            && self.inside.is_none()
+            && self.has.is_none()
+            && self.follows.is_none()
+            && self.precedes.is_none()
+            && self.all.is_none()
+            && self.any.is_none()
+            && self.not.is_none()
+            && self.matches.is_none()
     }
 }
 
@@ -105,8 +190,12 @@ pub struct Rule {
     /// Human-readable diagnostic message. Empty for search-only rules.
     #[serde(default)]
     pub message: String,
-    /// The atomic-tier matcher block.
-    pub rule: Matcher,
+    /// The matcher block (atomic / relational / composite algebra).
+    pub rule: RuleNode,
+    /// Local utility rules referenced by `matches`, keyed by id.
+    /// (TOML `[utils.NAME]`.)
+    #[serde(default)]
+    pub utils: BTreeMap<String, RuleNode>,
     /// Predicates on captured metavars; a match survives only when every
     /// constraint holds. (TOML `[[where]]`.)
     #[serde(default, rename = "where")]
@@ -258,8 +347,8 @@ mod tests {
         assert_eq!(rule.severity, Severity::Warning);
         assert_eq!(rule.kind(), RuleKind::Codemod);
         assert_eq!(
-            rule.rule.resolve().unwrap(),
-            AtomicMatcher::Pattern("$SRC?.$KEY ?? $DEFAULT".into())
+            rule.rule.atomic().unwrap(),
+            Some(AtomicMatcher::Pattern("$SRC?.$KEY ?? $DEFAULT".into()))
         );
     }
 
@@ -293,8 +382,8 @@ mod tests {
         .unwrap();
         assert_eq!(rule.kind(), RuleKind::Lint);
         assert_eq!(
-            rule.rule.resolve().unwrap(),
-            AtomicMatcher::Regex("TODO".into())
+            rule.rule.atomic().unwrap(),
+            Some(AtomicMatcher::Regex("TODO".into()))
         );
     }
 
@@ -310,11 +399,11 @@ mod tests {
             "#,
         )
         .unwrap();
-        assert!(rule.rule.resolve().is_err());
+        assert!(rule.rule.atomic().is_err());
     }
 
     #[test]
-    fn rejects_empty_matcher() {
+    fn empty_matcher_is_detectable() {
         let rule = Rule::from_toml_str(
             r#"
             id = "x"
@@ -323,7 +412,31 @@ mod tests {
             "#,
         )
         .unwrap();
-        assert!(rule.rule.resolve().is_err());
+        // An empty node sets no atomic key (Ok(None)) and is flagged empty.
+        assert_eq!(rule.rule.atomic().unwrap(), None);
+        assert!(rule.rule.is_empty());
+    }
+
+    #[test]
+    fn parses_relational_and_composite_keys() {
+        let rule = Rule::from_toml_str(
+            r#"
+            id = "nested"
+            language = "typescript"
+            [rule]
+            pattern = "let $NAME = $INIT"
+            [rule.inside]
+            kind = "statement_block"
+            stopBy = "end"
+            [rule.not.inside]
+            kind = "try_statement"
+            stopBy = "end"
+            "#,
+        )
+        .expect("parses");
+        assert!(rule.rule.inside.is_some());
+        assert!(rule.rule.not.is_some());
+        assert!(rule.rule.not.as_ref().unwrap().inside.is_some());
     }
 
     #[test]
