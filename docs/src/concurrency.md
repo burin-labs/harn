@@ -336,9 +336,17 @@ keys on the resource expression's structural value, so every block naming the
 same resource mutually excludes regardless of where it appears:
 
 ```harn
+fn apply_charge(id) {
+  log(id)
+}
+
+let account_id = "acct-42"
+
+var count = 0
+
 mutex {
   // only one task executes this particular block at a time
-  var count = count + 1
+  count = count + 1
 }
 
 mutex(account_id) {
