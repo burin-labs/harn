@@ -1,0 +1,15 @@
+// `verify_completion_judge.max_invocations` caps the per-session veto loop and
+// must be a non-negative integer (0 disables the cap). A negative value is a
+// configuration error, surfaced loudly rather than silently clamped.
+pipeline test(task) {
+  agent_loop(
+    "do work",
+    nil,
+    {
+      provider: "mock",
+      loop_until_done: true,
+      max_iterations: 1,
+      verify_completion_judge: {max_invocations: -1},
+    },
+  )
+}

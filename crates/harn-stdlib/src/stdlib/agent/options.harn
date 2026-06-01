@@ -809,6 +809,18 @@ fn __validate_agent_loop_completion_options(opts) {
   }
   if __has_key(opts, "verify_completion_judge") {
     __validate_judge_dict_or_bool("verify_completion_judge", opts.verify_completion_judge)
+    if type_of(opts.verify_completion_judge) == "dict" {
+      __validate_optional_nonnegative_int(
+        "verify_completion_judge",
+        "max_invocations",
+        opts.verify_completion_judge?.max_invocations,
+      )
+      __validate_optional_nonnegative_int(
+        "verify_completion_judge",
+        "max_feedback",
+        opts.verify_completion_judge?.max_feedback,
+      )
+    }
   }
   if __has_key(opts, "done_judge") {
     __validate_judge_dict_or_bool("done_judge", opts.done_judge)

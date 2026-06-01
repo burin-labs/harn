@@ -436,7 +436,7 @@ async fn check_autonomy_budget(
 fn session_status_indicates_error(final_status: &str) -> bool {
     matches!(
         final_status,
-        "error" | "failed" | "provider_error" | "verify_exhausted" | "stuck"
+        "error" | "failed" | "provider_error" | "verify_exhausted" | "verify_capped" | "stuck"
     )
 }
 
