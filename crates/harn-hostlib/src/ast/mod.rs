@@ -37,6 +37,7 @@ use crate::error::HostlibError;
 use crate::registry::{BuiltinRegistry, HostlibCapability, RegisteredBuiltin, SyncHandler};
 
 mod apply_node;
+mod batch_apply;
 mod bracket_balance;
 mod capabilities;
 mod dry_run;
@@ -259,6 +260,14 @@ fn register_ast_builtins(registry: &mut BuiltinRegistry, code_index: Option<Shar
         "hostlib_ast_insert_at_anchor",
         "insert_at_anchor",
         insert_at_anchor::run,
+    );
+    // Multi-file codemod runner. Writes when `dry_run: false`, so it shares
+    // the deterministic-tools write gate with the other mutating builtins.
+    register_gated(
+        registry,
+        "hostlib_ast_batch_apply",
+        "batch_apply",
+        batch_apply::run,
     );
     register_dry_run(registry, code_index);
     // Read-only structural search: shares the query machinery with

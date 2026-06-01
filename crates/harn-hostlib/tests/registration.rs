@@ -41,6 +41,7 @@ fn ast_capability_registers_documented_methods() {
             "hostlib_ast_bracket_balance",
             "hostlib_ast_apply_node",
             "hostlib_ast_insert_at_anchor",
+            "hostlib_ast_batch_apply",
             "hostlib_ast_dry_run",
             "hostlib_ast_search",
             "hostlib_ast_structural_diff",
@@ -68,6 +69,7 @@ fn ast_capability_registers_documented_methods() {
         ("hostlib_ast_bracket_balance", "source"),
         ("hostlib_ast_apply_node", "path"),
         ("hostlib_ast_insert_at_anchor", "path"),
+        ("hostlib_ast_batch_apply", "paths"),
         ("hostlib_ast_dry_run", "plan"),
         ("hostlib_ast_search", "query"),
         ("hostlib_ast_structural_diff", "path_a"),
@@ -234,6 +236,7 @@ fn fs_and_ast_edit_primitives_require_deterministic_gate() {
         "hostlib_fs_read_text",
         "hostlib_ast_apply_node",
         "hostlib_ast_insert_at_anchor",
+        "hostlib_ast_batch_apply",
     ] {
         let entry = registry.find(name).expect("registered");
         let err = (entry.handler)(&[]).expect_err("gated before enable");

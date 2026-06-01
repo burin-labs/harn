@@ -1,0 +1,69 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harnlang.com/schemas/hostlib/ast/batch_apply.request.json",
+  "title": "ast.batch_apply request",
+  "description": "Run one Tree-Sitter `query` -> `replacement` codemod over every file in `paths`, returning a per-file preview plus a roll-up summary. Each file runs the same byte-splice as `ast.apply_node`, so formatting outside the matched span is preserved. Dry-run is the default: writing requires `dry_run: false`. A failure on one file is recorded as that file's `result` and does not abort the batch; path-scope is enforced for every path up front, so an out-of-scope file aborts before anything is written.",
+  "type": "object",
+  "properties": {
+    "paths": {
+      "type": "array",
+      "items": { "type": "string" },
+      "minItems": 1,
+      "description": "Files to run the codemod over. Non-empty. Duplicates are de-duplicated, preserving order."
+    },
+    "query": {
+      "type": "string",
+      "description": "Tree-Sitter S-expression query. Must declare at least one capture; the capture named by `target_capture` (default `target`) is the replaceable span. Single-capture queries are accepted regardless of capture name."
+    },
+    "replacement": {
+      "type": "string",
+      "description": "Replacement text spliced in for each selected node. Provide exactly one of `replacement` or `fix`."
+    },
+    "fix": {
+      "type": "string",
+      "description": "Alias for `replacement` (the rule model speaks `fix`). Provide exactly one of `replacement` or `fix`."
+    },
+    "language": {
+      "type": "string",
+      "description": "Optional grammar hint applied to every path; otherwise inferred per file from its extension."
+    },
+    "target_capture": {
+      "type": "string",
+      "default": "target",
+      "description": "Capture name to treat as the replaceable span. Defaults to `target`."
+    },
+    "select": {
+      "type": "string",
+      "enum": ["unique", "first", "all", "nth"],
+      "default": "unique",
+      "description": "Per-file multi-match policy. `unique` requires exactly one match (else that file's result is `ambiguous`); `first` picks the lowest byte offset; `all` rewrites every match; `nth` picks the 1-based index in document order."
+    },
+    "nth": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "1-based match index. Required when `select` is `\"nth\"`."
+    },
+    "dry_run": {
+      "type": "boolean",
+      "default": true,
+      "description": "When true (the default), no file is written but each `preview` carries the splice the call would produce. Pass `false` to apply."
+    },
+    "validate": {
+      "type": "boolean",
+      "default": true,
+      "description": "When true (default), each post-edit source is re-parsed and any ERROR/MISSING node sets that file's result to `syntax_error` (and skips its write)."
+    },
+    "session_id": {
+      "type": "string",
+      "description": "Hostlib session id for staged-fs routing. Reads and writes consult the staged overlay when staging is active for this session."
+    },
+    "max_bytes": {
+      "type": "integer",
+      "minimum": 0,
+      "default": 0,
+      "description": "Optional per-file read cap. `0` means unlimited."
+    }
+  },
+  "required": ["paths", "query"],
+  "additionalProperties": false
+}

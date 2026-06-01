@@ -35,14 +35,12 @@
 //! structured [`HostlibError::InvalidParameter`] before reaching the
 //! union since they are caller bugs, not edit outcomes.
 
-use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 
 use harn_vm::process_sandbox::FsAccess;
 use harn_vm::VmValue;
-use streaming_iterator::StreamingIterator;
-use tree_sitter::{Node, Query, QueryCursor, QueryError};
+use tree_sitter::{Query, QueryError};
 
 use crate::error::HostlibError;
 use crate::tools::args::{
@@ -51,59 +49,15 @@ use crate::tools::args::{
 use crate::tools::permissions::enforce_path_scope;
 
 use super::edit_common::{
-    first_syntax_error, format_query_error, read_source, resolve_target_capture, sha256_hex,
-    write_source,
+    collect_target_spans, first_syntax_error, format_query_error, read_source,
+    resolve_target_capture, select_spans, sha256_hex, splice, write_source, SelectFailure,
+    Selector, Span,
 };
 use super::language::{Language, TEXT_PATCH_FALLBACK};
 use super::parse::parse_source;
 
 const BUILTIN: &str = "hostlib_ast_apply_node";
 const DEFAULT_TARGET_CAPTURE: &str = "target";
-
-/// Multi-match selector.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Selector {
-    /// Require exactly one match; otherwise `ambiguous`.
-    Unique,
-    /// Apply to the first match in document order.
-    First,
-    /// Apply to every match.
-    All,
-    /// Apply to the nth (1-based) match in document order.
-    Nth(usize),
-}
-
-impl Selector {
-    fn parse(raw: Option<&str>, nth: Option<i64>) -> Result<Self, HostlibError> {
-        match raw.unwrap_or("unique") {
-            "unique" => Ok(Self::Unique),
-            "first" => Ok(Self::First),
-            "all" => Ok(Self::All),
-            "nth" => {
-                let n = nth.ok_or(HostlibError::InvalidParameter {
-                    builtin: BUILTIN,
-                    param: "nth",
-                    message: "`select: \"nth\"` requires a positive `nth` (1-based)".into(),
-                })?;
-                if n < 1 {
-                    return Err(HostlibError::InvalidParameter {
-                        builtin: BUILTIN,
-                        param: "nth",
-                        message: format!("`nth` must be >= 1, got {n}"),
-                    });
-                }
-                Ok(Self::Nth(n as usize))
-            }
-            other => Err(HostlibError::InvalidParameter {
-                builtin: BUILTIN,
-                param: "select",
-                message: format!(
-                    "expected one of [\"unique\", \"first\", \"all\", \"nth\"], got `{other}`"
-                ),
-            }),
-        }
-    }
-}
 
 pub(super) fn run(args: &[VmValue]) -> Result<VmValue, HostlibError> {
     let raw = dict_arg(BUILTIN, args)?;
@@ -127,7 +81,7 @@ pub(super) fn run(args: &[VmValue]) -> Result<VmValue, HostlibError> {
             });
         }
     };
-    let selector = Selector::parse(select_raw.as_deref(), nth_raw)?;
+    let selector = Selector::parse(BUILTIN, select_raw.as_deref(), nth_raw)?;
     let dry_run = optional_bool(BUILTIN, dict, "dry_run", false)?;
     let validate = optional_bool(BUILTIN, dict, "validate", true)?;
     let session_id = optional_string(BUILTIN, dict, "session_id")?;
@@ -201,9 +155,19 @@ pub(super) fn run(args: &[VmValue]) -> Result<VmValue, HostlibError> {
         ));
     }
 
-    let chosen = match select_spans(&spans, selector, &path_str, &query_text) {
+    let chosen = match select_spans(&spans, selector) {
         Ok(spans) => spans,
-        Err(reason) => return Ok(reason),
+        Err(SelectFailure::Ambiguous) => {
+            return Ok(ambiguous_response(spans.len(), &spans));
+        }
+        Err(SelectFailure::NthOutOfRange { requested }) => {
+            return Ok(no_nth_response(
+                spans.len(),
+                requested,
+                &path_str,
+                &query_text,
+            ));
+        }
     };
 
     let patched = splice(&source, &chosen, &replacement);
@@ -226,96 +190,6 @@ pub(super) fn run(args: &[VmValue]) -> Result<VmValue, HostlibError> {
         &replacement,
         dry_run,
     ))
-}
-
-#[derive(Debug, Clone)]
-struct Span {
-    start_byte: usize,
-    end_byte: usize,
-    start_row: usize,
-    start_col: usize,
-    end_row: usize,
-    end_col: usize,
-    original: String,
-}
-
-fn collect_target_spans(
-    query: &Query,
-    tree: &tree_sitter::Tree,
-    source_bytes: &[u8],
-    target_index: u32,
-) -> Vec<Span> {
-    let mut cursor = QueryCursor::new();
-    let mut matches = cursor.matches(query, tree.root_node(), source_bytes);
-    let mut seen: BTreeMap<(usize, usize), Span> = BTreeMap::new();
-
-    while let Some(m) = matches.next() {
-        for capture in m.captures {
-            if capture.index != target_index {
-                continue;
-            }
-            insert_span(&mut seen, capture.node, source_bytes);
-        }
-    }
-
-    let mut spans: Vec<Span> = seen.into_values().collect();
-    spans.sort_by_key(|s| s.start_byte);
-    spans
-}
-
-fn insert_span(into: &mut BTreeMap<(usize, usize), Span>, node: Node<'_>, source_bytes: &[u8]) {
-    let key = (node.start_byte(), node.end_byte());
-    into.entry(key).or_insert_with(|| {
-        let start = node.start_position();
-        let end = node.end_position();
-        let original = std::str::from_utf8(&source_bytes[node.start_byte()..node.end_byte()])
-            .unwrap_or_default()
-            .to_string();
-        Span {
-            start_byte: node.start_byte(),
-            end_byte: node.end_byte(),
-            start_row: start.row,
-            start_col: start.column,
-            end_row: end.row,
-            end_col: end.column,
-            original,
-        }
-    });
-}
-
-fn select_spans(
-    spans: &[Span],
-    selector: Selector,
-    path: &str,
-    query: &str,
-) -> Result<Vec<Span>, VmValue> {
-    match selector {
-        Selector::Unique => {
-            if spans.len() > 1 {
-                return Err(ambiguous_response(spans.len(), spans));
-            }
-            Ok(spans.to_vec())
-        }
-        Selector::First => Ok(spans.first().cloned().into_iter().collect()),
-        Selector::All => Ok(spans.to_vec()),
-        Selector::Nth(n) => match spans.get(n - 1) {
-            Some(span) => Ok(vec![span.clone()]),
-            None => Err(no_nth_response(spans.len(), n, path, query)),
-        },
-    }
-}
-
-/// Replace each chosen span's bytes with `replacement`. Spans are processed
-/// in reverse byte order so earlier offsets remain valid; the original
-/// `chosen` order is preserved by the caller.
-fn splice(source: &str, chosen: &[Span], replacement: &str) -> String {
-    let mut by_end: Vec<&Span> = chosen.iter().collect();
-    by_end.sort_by_key(|s| std::cmp::Reverse(s.start_byte));
-    let mut out = source.to_string();
-    for span in by_end {
-        out.replace_range(span.start_byte..span.end_byte, replacement);
-    }
-    out
 }
 
 // ---------------------------------------------------------------------------
@@ -477,6 +351,7 @@ fn span_to_value(span: &Span) -> VmValue {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::BTreeMap;
     use std::io::Write;
     use tempfile::NamedTempFile;
 

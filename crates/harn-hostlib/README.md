@@ -103,6 +103,12 @@ size limits make structural comparison unsuitable.
 runs a tree-sitter query against a file (or inline `source`) and returns
 every match with every capture (`@name`) bound — text plus span — so rule
 authors can read the full capture map without writing.
+`ast.batch_apply` is the multi-file codemod runner: it applies one
+query→`replacement` over a list of `paths`, returning a per-file preview
+plus a roll-up summary. It is the multi-file sibling of `ast.apply_node`
+and shares its format-preserving byte-splice. Dry-run is the default —
+writing requires `dry_run: false` — and a failure on one file is recorded
+as that file's `result` rather than aborting the batch.
 
 Per-language fixture goldens live at
 `tests/fixtures/ast/<language>/{source.<ext>,symbols.golden.json,outline.golden.json}`.
