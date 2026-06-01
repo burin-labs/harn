@@ -8,6 +8,39 @@ highlights live in [CHANGELOG-pre-0.6.md](CHANGELOG-pre-0.6.md).
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.8.59
+
+### Added
+
+- **Graceful subagent stop handoffs (#2724).** Added
+  `agent_stop(worker, {graceful: true})` and the `subagent_stop` lifecycle tool,
+  returning recursive typed handoff summaries before stopping subagents.
+
+### Changed
+
+- **ACP embedding helpers (#2636).** Expose typed Rust ACP request/result
+  helpers and direct ACP output hooks for in-process embedders.
+
+### Fixed
+
+- **MCP OAuth token handoff for ACP clients (#1430).** ACP MCP clients now
+  resolve Harn-stored OAuth tokens for HTTP servers and can import legacy
+  client-owned tokens into Harn's MCP OAuth store.
+- **Agent scratchpad + reachability GC integration (#2708).** Agent loops that
+  enable both session scratchpads and reachability-GC transcript projection now
+  pass the live scratchpad as a root and scratchpad-version write barrier, so
+  `require_write_barrier: true` can reclaim stale tool-result bodies only after
+  current working memory has been externalized.
+- **Skill induction with held-out sibling traces (#2709).** Fixed
+  `skill_induce(...)` so a single source trace with held-out sibling traces can
+  pass the replay-gated skill induction path instead of falling through to
+  repeated-trace mining.
+- **Agent tool-surface narrowing keeps write/control tools safe by default
+  (#2773).** The default policy only prunes unused read-only tools, keeps
+  mutating, approval, session-control, progress, result-polling, and unknown
+  host tools visible through long discovery windows, and adds an explicit
+  aggressive mode for callers that want usage-only pruning.
+
 ## v0.8.58
 
 ### Added
