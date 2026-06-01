@@ -49,6 +49,46 @@ fn capability_intersection_narrows_read_only_roots_to_common_set() {
 }
 
 #[test]
+fn capability_intersection_narrows_process_sandbox_policy() {
+    let ceiling = CapabilityPolicy {
+        process_sandbox: ProcessSandboxPolicy {
+            presets: Some(vec![
+                ProcessSandboxPreset::SystemRuntime,
+                ProcessSandboxPreset::DeveloperToolchains,
+            ]),
+            read_roots: vec!["/opt/sdk".to_string()],
+            write_roots: vec!["/opt/cache".to_string()],
+        },
+        ..Default::default()
+    };
+    let requested = CapabilityPolicy {
+        process_sandbox: ProcessSandboxPolicy {
+            presets: Some(vec![
+                ProcessSandboxPreset::DeveloperToolchains,
+                ProcessSandboxPreset::UserTemp,
+            ]),
+            read_roots: vec!["/opt/sdk".to_string(), "/opt/other".to_string()],
+            write_roots: vec!["/opt/cache".to_string(), "/opt/other-cache".to_string()],
+        },
+        ..Default::default()
+    };
+
+    let merged = ceiling.intersect(&requested).unwrap();
+    assert_eq!(
+        merged.process_sandbox.presets,
+        Some(vec![ProcessSandboxPreset::DeveloperToolchains])
+    );
+    assert_eq!(
+        merged.process_sandbox.read_roots,
+        vec!["/opt/sdk".to_string()]
+    );
+    assert_eq!(
+        merged.process_sandbox.write_roots,
+        vec!["/opt/cache".to_string()]
+    );
+}
+
+#[test]
 fn mutation_session_normalize_fills_defaults() {
     let normalized = MutationSessionRecord::default().normalize();
     assert!(normalized.session_id.starts_with("session_"));

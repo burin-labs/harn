@@ -402,6 +402,7 @@ pub fn bundle_capability_ceiling(bundle: &WorkflowBundle) -> CapabilityPolicy {
         tool_arg_constraints: Vec::new(),
         tool_annotations: BTreeMap::new(),
         sandbox_profile: crate::orchestration::SandboxProfile::default(),
+        process_sandbox: Default::default(),
     }
 }
 

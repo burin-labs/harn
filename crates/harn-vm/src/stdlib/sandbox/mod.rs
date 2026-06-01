@@ -39,6 +39,8 @@ use std::collections::BTreeSet;
 use std::path::{Component, Path, PathBuf};
 use std::process::{Command, Output, Stdio};
 
+#[cfg(target_os = "macos")]
+use crate::orchestration::ProcessSandboxPreset;
 use crate::orchestration::{CapabilityPolicy, SandboxProfile};
 use crate::value::{ErrorCategory, VmError, VmValue};
 use crate::vm::Vm;
@@ -719,6 +721,44 @@ pub(crate) fn process_sandbox_readonly_roots(policy: &CapabilityPolicy) -> Vec<P
     normalized_read_only_roots(policy)
 }
 
+#[cfg(any(
+    target_os = "linux",
+    target_os = "macos",
+    target_os = "openbsd",
+    target_os = "windows"
+))]
+pub(crate) fn process_sandbox_policy_read_roots(policy: &CapabilityPolicy) -> Vec<PathBuf> {
+    normalized_process_roots(&policy.process_sandbox.read_roots)
+}
+
+#[cfg(any(
+    target_os = "linux",
+    target_os = "macos",
+    target_os = "openbsd",
+    target_os = "windows"
+))]
+pub(crate) fn process_sandbox_policy_write_roots(policy: &CapabilityPolicy) -> Vec<PathBuf> {
+    normalized_process_roots(&policy.process_sandbox.write_roots)
+}
+
+#[cfg(target_os = "macos")]
+pub(crate) fn process_sandbox_presets(policy: &CapabilityPolicy) -> Vec<ProcessSandboxPreset> {
+    policy.process_sandbox.effective_presets()
+}
+
+#[cfg(any(
+    target_os = "linux",
+    target_os = "macos",
+    target_os = "openbsd",
+    target_os = "windows"
+))]
+fn normalized_process_roots(roots: &[String]) -> Vec<PathBuf> {
+    roots
+        .iter()
+        .map(|root| normalize_for_policy(&resolve_policy_path(root)))
+        .collect()
+}
+
 fn resolve_policy_path(path: &str) -> PathBuf {
     let candidate = PathBuf::from(path);
     if candidate.is_absolute() {
@@ -844,7 +884,12 @@ pub(crate) fn policy_allows_network(policy: &CapabilityPolicy) -> bool {
         .unwrap_or(true)
 }
 
-#[cfg(any(target_os = "macos", target_os = "openbsd", target_os = "windows"))]
+#[cfg(any(
+    target_os = "linux",
+    target_os = "macos",
+    target_os = "openbsd",
+    target_os = "windows"
+))]
 pub(crate) fn policy_allows_workspace_write(policy: &CapabilityPolicy) -> bool {
     policy.capabilities.is_empty()
         || policy_allows_capability(policy, "workspace", &["write_text", "delete"])

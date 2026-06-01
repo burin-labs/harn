@@ -6,6 +6,8 @@
 
 use harn_vm::{orchestration::CapabilityPolicy, AutonomyTier};
 
+use super::AcpSandboxConfig;
+
 /// Default mode id assigned to newly created sessions. `ask` is the
 /// conservative ACP default: the agent can inspect context, but side effects
 /// are held behind the approval-oriented autonomy tier until a client or user
@@ -391,15 +393,12 @@ fn split_provider_prefix(value: &str) -> Option<(&str, &str)> {
 /// Capability ceiling enforced while a prompt runs in this mode. Harn's
 /// autonomy-tier policy remains authoritative; ACP modes only select the tier.
 ///
-/// `read_only_roots` carries the embedder's extra read-only sandbox roots
-/// (see [`super::AcpServerConfig::with_read_only_roots`]). They are unioned
-/// into the per-turn policy's `read_only_roots` so they survive the push and
-/// are honored by `check_fs_path_scope`. Because they only populate the
-/// read-only dimension, they grant reads under those roots without widening
-/// write or exec scope.
+/// The ACP embedder contributes sandbox config for host-owned assets and
+/// process-only filesystem presets. Read-only roots widen Harn file reads;
+/// process roots/presets are carried only into OS child-process sandboxes.
 pub(super) fn policy_for_mode(
     mode_id: &str,
-    read_only_roots: &[String],
+    sandbox: &AcpSandboxConfig,
 ) -> Option<CapabilityPolicy> {
     let mode = definition(mode_id)?;
     if mode.autonomy_tier == AutonomyTier::ActAuto {
@@ -409,15 +408,14 @@ pub(super) fn policy_for_mode(
         return None;
     }
     let mut policy = harn_vm::policy_for_autonomy_tier(mode.autonomy_tier);
-    union_read_only_roots(&mut policy, read_only_roots);
+    apply_sandbox_config(&mut policy, sandbox);
     Some(policy)
 }
 
-/// Add `roots` to `policy.read_only_roots`, skipping duplicates. The autonomy
-/// tier seeds an empty read-only set, so this is the union that lets embedder
-/// bundled-asset roots survive the per-turn policy push.
-fn union_read_only_roots(policy: &mut CapabilityPolicy, roots: &[String]) {
-    for root in roots {
+/// Add embedder sandbox config to the per-turn policy, skipping duplicate
+/// Harn read roots and delegating process-only merging to the VM policy type.
+fn apply_sandbox_config(policy: &mut CapabilityPolicy, sandbox: &AcpSandboxConfig) {
+    for root in &sandbox.read_only_roots {
         if !policy
             .read_only_roots
             .iter()
@@ -426,6 +424,7 @@ fn union_read_only_roots(policy: &mut CapabilityPolicy, roots: &[String]) {
             policy.read_only_roots.push(root.clone());
         }
     }
+    policy.process_sandbox.extend(&sandbox.process);
 }
 
 /// RAII guard that pushes a CapabilityPolicy on construction and pops it on
@@ -435,8 +434,8 @@ pub(super) struct ModePolicyGuard {
 }
 
 impl ModePolicyGuard {
-    pub(super) fn enter(mode_id: &str, read_only_roots: &[String]) -> Self {
-        match policy_for_mode(mode_id, read_only_roots) {
+    pub(super) fn enter(mode_id: &str, sandbox: &AcpSandboxConfig) -> Self {
+        match policy_for_mode(mode_id, sandbox) {
             Some(policy) => {
                 harn_vm::orchestration::push_execution_policy(policy);
                 Self { pushed: true }
@@ -457,6 +456,7 @@ impl Drop for ModePolicyGuard {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::adapters::acp::AcpSandboxConfig;
 
     #[test]
     fn catalog_contains_expected_modes() {
@@ -638,31 +638,33 @@ mod tests {
 
     #[test]
     fn policy_for_code_is_none() {
-        assert!(policy_for_mode("code", &[]).is_none());
+        assert!(policy_for_mode("code", &AcpSandboxConfig::default()).is_none());
     }
 
     #[test]
     fn policy_for_architect_clamps_to_read_only() {
-        let policy = policy_for_mode("architect", &[]).expect("architect has policy");
+        let policy = policy_for_mode("architect", &AcpSandboxConfig::default())
+            .expect("architect has policy");
         assert_eq!(policy.side_effect_level.as_deref(), Some("read_only"));
     }
 
     #[test]
     fn policy_for_ask_clamps_to_read_only() {
-        let policy = policy_for_mode("ask", &[]).expect("ask has policy");
+        let policy = policy_for_mode("ask", &AcpSandboxConfig::default()).expect("ask has policy");
         assert_eq!(policy.side_effect_level.as_deref(), Some("read_only"));
     }
 
     #[test]
     fn policy_for_shadow_blocks_side_effects() {
-        let policy = policy_for_mode("shadow", &[]).expect("shadow has policy");
+        let policy =
+            policy_for_mode("shadow", &AcpSandboxConfig::default()).expect("shadow has policy");
         assert_eq!(policy.side_effect_level.as_deref(), Some("none"));
         assert_eq!(policy.recursion_limit, Some(0));
     }
 
     #[test]
     fn policy_for_unknown_mode_is_none() {
-        assert!(policy_for_mode("not-a-real-mode", &[]).is_none());
+        assert!(policy_for_mode("not-a-real-mode", &AcpSandboxConfig::default()).is_none());
     }
 
     #[test]
@@ -671,7 +673,8 @@ mod tests {
             "/opt/burin/pipelines".to_string(),
             "/opt/burin/pipelines/partials".to_string(),
         ];
-        let policy = policy_for_mode("architect", &roots).expect("architect has policy");
+        let sandbox = AcpSandboxConfig::with_read_only_roots(roots.clone());
+        let policy = policy_for_mode("architect", &sandbox).expect("architect has policy");
         // Embedder roots survive the per-turn push as read-only entries...
         assert_eq!(policy.read_only_roots, roots);
         // ...without widening the writable workspace or relaxing the side
@@ -686,7 +689,8 @@ mod tests {
             "/opt/burin/pipelines".to_string(),
             "/opt/burin/pipelines".to_string(),
         ];
-        let policy = policy_for_mode("ask", &roots).expect("ask has policy");
+        let sandbox = AcpSandboxConfig::with_read_only_roots(roots);
+        let policy = policy_for_mode("ask", &sandbox).expect("ask has policy");
         assert_eq!(
             policy.read_only_roots,
             vec!["/opt/burin/pipelines".to_string()]
@@ -694,10 +698,41 @@ mod tests {
     }
 
     #[test]
+    fn embedder_process_sandbox_config_unions_into_per_turn_policy() {
+        let process = harn_vm::orchestration::ProcessSandboxPolicy {
+            presets: Some(vec![
+                harn_vm::orchestration::ProcessSandboxPreset::SystemRuntime,
+            ]),
+            read_roots: vec!["/opt/vendor-sdk".to_string()],
+            write_roots: vec!["/opt/vendor-cache".to_string()],
+        };
+        let sandbox = AcpSandboxConfig::with_process(process);
+        let policy = policy_for_mode("architect", &sandbox).expect("architect has policy");
+
+        assert_eq!(
+            policy.process_sandbox.presets,
+            Some(vec![
+                harn_vm::orchestration::ProcessSandboxPreset::SystemRuntime
+            ])
+        );
+        assert_eq!(
+            policy.process_sandbox.read_roots,
+            vec!["/opt/vendor-sdk".to_string()]
+        );
+        assert_eq!(
+            policy.process_sandbox.write_roots,
+            vec!["/opt/vendor-cache".to_string()]
+        );
+        assert!(policy.read_only_roots.is_empty());
+    }
+
+    #[test]
     fn code_mode_ignores_embedder_read_only_roots() {
         // Full-access mode pushes no per-turn policy; the ambient sandbox is
         // already unrestricted so there is nothing to union into.
-        assert!(policy_for_mode("code", &["/opt/burin/pipelines".to_string()]).is_none());
+        let sandbox =
+            AcpSandboxConfig::with_read_only_roots(vec!["/opt/burin/pipelines".to_string()]);
+        assert!(policy_for_mode("code", &sandbox).is_none());
     }
 
     #[test]

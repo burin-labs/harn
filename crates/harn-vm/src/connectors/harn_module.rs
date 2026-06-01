@@ -89,7 +89,7 @@ enum WorkerCommand {
         name: String,
         args: Vec<JsonValue>,
         required: bool,
-        policy: Option<CapabilityPolicy>,
+        policy: Option<Box<CapabilityPolicy>>,
         resp: oneshot::Sender<Result<Option<JsonValue>, String>>,
     },
     Shutdown {
@@ -365,7 +365,7 @@ impl HarnConnectorWorker {
                 name,
                 args,
                 required,
-                policy,
+                policy: policy.map(Box::new),
                 resp: resp_tx,
             })
             .map_err(worker_send_error)?;
@@ -918,7 +918,7 @@ async fn call_provider_export(
     name: &str,
     args: Vec<JsonValue>,
     required: bool,
-    policy: Option<CapabilityPolicy>,
+    policy: Option<Box<CapabilityPolicy>>,
 ) -> Result<Option<JsonValue>, ConnectorError> {
     let Some(closure) = runtime.exports.get(name).cloned() else {
         if required {
@@ -950,9 +950,9 @@ struct ConnectorExecutionPolicyGuard {
 }
 
 impl ConnectorExecutionPolicyGuard {
-    fn push(policy: Option<CapabilityPolicy>) -> Self {
+    fn push(policy: Option<Box<CapabilityPolicy>>) -> Self {
         if let Some(policy) = policy {
-            crate::orchestration::push_execution_policy(policy);
+            crate::orchestration::push_execution_policy(*policy);
             Self { active: true }
         } else {
             Self { active: false }

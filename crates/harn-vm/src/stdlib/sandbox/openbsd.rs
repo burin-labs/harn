@@ -9,8 +9,9 @@ use std::os::unix::process::CommandExt;
 use std::process::Command;
 
 use super::{
-    policy_allows_network, policy_allows_workspace_write, process_sandbox_readonly_roots,
-    process_sandbox_roots, PrepareOutcome, SandboxBackend,
+    policy_allows_network, policy_allows_workspace_write, process_sandbox_policy_read_roots,
+    process_sandbox_policy_write_roots, process_sandbox_readonly_roots, process_sandbox_roots,
+    PrepareOutcome, SandboxBackend,
 };
 use crate::orchestration::{CapabilityPolicy, SandboxProfile};
 use crate::value::VmError;
@@ -87,6 +88,14 @@ fn profile_setup(policy: &CapabilityPolicy) -> Result<ProcessProfile, VmError> {
     // the policy otherwise allows workspace writes.
     for root in process_sandbox_readonly_roots(policy) {
         unveil_rules.push((root.display().to_string(), "rx".to_string()));
+    }
+    for root in process_sandbox_policy_read_roots(policy) {
+        unveil_rules.push((root.display().to_string(), "rx".to_string()));
+    }
+    if policy_allows_workspace_write(policy) {
+        for root in process_sandbox_policy_write_roots(policy) {
+            unveil_rules.push((root.display().to_string(), "rwcx".to_string()));
+        }
     }
 
     let mut promises = vec!["stdio", "rpath", "proc", "exec"];

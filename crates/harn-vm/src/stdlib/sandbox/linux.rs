@@ -11,9 +11,10 @@ use std::path::PathBuf;
 use std::process::Command;
 
 use super::{
-    policy_allows_capability, policy_allows_network, process_sandbox_readonly_roots,
-    process_sandbox_roots, sandbox_rejection, warn_once, PrepareOutcome, SandboxBackend,
-    SandboxFallback,
+    policy_allows_capability, policy_allows_network, policy_allows_workspace_write,
+    process_sandbox_policy_read_roots, process_sandbox_policy_write_roots,
+    process_sandbox_readonly_roots, process_sandbox_roots, sandbox_rejection, warn_once,
+    PrepareOutcome, SandboxBackend, SandboxFallback,
 };
 use crate::orchestration::{CapabilityPolicy, SandboxProfile};
 use crate::value::VmError;
@@ -174,6 +175,14 @@ fn landlock_profile(
     }
     for root in process_sandbox_readonly_roots(policy) {
         push_rule(&mut profile, root, read_only_access(), false)?;
+    }
+    for root in process_sandbox_policy_read_roots(policy) {
+        push_rule(&mut profile, root, read_only_access(), false)?;
+    }
+    if policy_allows_workspace_write(policy) {
+        for root in process_sandbox_policy_write_roots(policy) {
+            push_rule(&mut profile, root, workspace_access, false)?;
+        }
     }
     Ok(Some(profile))
 }
@@ -511,6 +520,7 @@ mod tests {
             tool_arg_constraints: Vec::new(),
             tool_annotations: std::collections::BTreeMap::new(),
             sandbox_profile: SandboxProfile::Worktree,
+            process_sandbox: Default::default(),
         }
     }
 

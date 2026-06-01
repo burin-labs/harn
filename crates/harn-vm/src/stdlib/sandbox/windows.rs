@@ -39,7 +39,8 @@ use windows_sys::Win32::System::Threading::{
 };
 
 use super::{
-    policy_allows_workspace_write, process_sandbox_readonly_roots, process_sandbox_roots,
+    policy_allows_workspace_write, process_sandbox_policy_read_roots,
+    process_sandbox_policy_write_roots, process_sandbox_readonly_roots, process_sandbox_roots,
     process_spawn_error, sandbox_rejection, unavailable, PrepareOutcome, ProcessCommandConfig,
     SandboxBackend,
 };
@@ -310,7 +311,22 @@ impl WorkspaceAclGrants {
         let read_only = process_sandbox_readonly_roots(policy)
             .into_iter()
             .map(|root| (root, "(OI)(CI)RX"));
-        for (root, permission) in writable.chain(read_only) {
+        let process_read = process_sandbox_policy_read_roots(policy)
+            .into_iter()
+            .map(|root| (root, "(OI)(CI)RX"));
+        let process_write = if policy_allows_workspace_write(policy) {
+            process_sandbox_policy_write_roots(policy)
+                .into_iter()
+                .map(|root| (root, workspace_permission))
+                .collect::<Vec<_>>()
+        } else {
+            Vec::new()
+        };
+        for (root, permission) in writable
+            .chain(read_only)
+            .chain(process_read)
+            .chain(process_write)
+        {
             if !root.exists() {
                 return Err(io::Error::new(
                     io::ErrorKind::NotFound,
