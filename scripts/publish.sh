@@ -81,6 +81,8 @@ WORKSPACE_CRATES=(
   harn-serve
   harn-lsp
   harn-hostlib
+  harn-rules
+  harn-rules-hostlib
   harn-cli
 )
 

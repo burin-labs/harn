@@ -1,0 +1,69 @@
+// std/rules - run declarative structural rules (the harn-rules engine) from
+// Harn. A rule is its TOML source, so an agent can author and run a rule
+// inline without recompiling the binary.
+/**
+ * Run a rule and return its matches.
+ *
+ * `params` is a dict:
+ *
+ * - `rule`: the rule's TOML source (id / language / `[rule]` block / `where`
+ *   / `transform` / `fix` / `safety`).
+ * - `source` **or** `paths`: inline text (with `language`) or a list of file
+ *   paths to read.
+ *
+ * On success `result == "ok"` and `matches` is a list of `{path, text,
+ * start_row, start_col, captures}` where `captures` maps each metavar name
+ * to its bound text.
+ *
+ * @effects: [host]
+ * @allocation: heap
+ * @errors: [backend]
+ * @api_stability: experimental
+ * @example: rules_search({rule: src, source: "foo();", language: "typescript"})
+ */
+pub fn rules_search(params) -> dict {
+  let payload = hostlib_rules_search(params ?? {}) ?? {}
+  return payload
+    .merge(
+    {ok: payload?.result ?? "" == "ok", provenance: {module: "std/rules", helper: "rules_search"}},
+  )
+}
+
+/**
+ * Run a rule in **report-only** mode and return a data table — columnar
+ * findings (`rows`) plus a metrics `summary` (total / files / per-file
+ * counts). Never edits anything.
+ *
+ * @effects: [host]
+ * @allocation: heap
+ * @errors: [backend]
+ * @api_stability: experimental
+ * @example: rules_report({rule: src, paths: ["a.ts", "b.ts"]})
+ */
+pub fn rules_report(params) -> dict {
+  let payload = hostlib_rules_report(params ?? {}) ?? {}
+  return payload.merge({provenance: {module: "std/rules", helper: "rules_report"}})
+}
+
+/**
+ * Apply a codemod rule's `fix`. **Dry-run by default** — pass `dry_run:
+ * false` to write. Writes only when the rule's `safety` is machine-applicable
+ * (`format-only` / `behavior-preserving`) or `allow_unsafe: true`. Each file
+ * entry reports `{path, changed, applied, idempotent, safety, preview}`.
+ *
+ * Requires the deterministic-tools gate
+ * (`hostlib_enable("tools:deterministic")`).
+ *
+ * @effects: [host, fs]
+ * @allocation: heap
+ * @errors: [backend]
+ * @api_stability: experimental
+ * @example: rules_apply({rule: src, paths: ["a.ts"], dry_run: false})
+ */
+pub fn rules_apply(params) -> dict {
+  let payload = hostlib_rules_apply(params ?? {}) ?? {}
+  return payload
+    .merge(
+    {ok: payload?.result ?? "" == "ok", provenance: {module: "std/rules", helper: "rules_apply"}},
+  )
+}
