@@ -4,7 +4,9 @@ use std::sync::Arc;
 
 use crate::chunk::{DirectCallState, DirectCallTarget, InlineCacheEntry, MethodCacheTarget};
 use crate::orchestration::HookEvent;
-use crate::value::{values_equal, VmClosure, VmError, VmJoinHandle, VmTaskHandle, VmValue};
+use crate::value::{
+    values_equal, DeadlockError, VmClosure, VmError, VmJoinHandle, VmTaskHandle, VmValue,
+};
 use crate::BuiltinId;
 
 use super::super::{CallArgs, CallFrame};
@@ -584,6 +586,15 @@ impl super::super::Vm {
                 _ => None,
             });
             if let Some(id) = task_id {
+                // Awaiting one's own join handle can never complete — surface
+                // a deterministic self-join deadlock instead of blocking.
+                if id == self.runtime_context.task_id {
+                    return Err(VmError::Deadlock(Box::new(DeadlockError {
+                        kind: "task".to_string(),
+                        key: id,
+                        detail: "task is awaiting its own join handle (self-join)".to_string(),
+                    })));
+                }
                 if let Some(handle) = self.spawned_tasks.remove(&id) {
                     let mut awaiting = AwaitingTask::new(handle);
                     let joined = awaiting

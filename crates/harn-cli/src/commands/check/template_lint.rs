@@ -38,6 +38,7 @@ pub(crate) fn lint_prompt_file_inner(
             return CommandOutcome {
                 has_error: true,
                 has_warning: false,
+                ..CommandOutcome::default()
             };
         }
     };
@@ -49,9 +50,13 @@ pub(crate) fn lint_prompt_file_inner(
     let has_warning = diagnostics
         .iter()
         .any(|d| d.severity == LintSeverity::Warning);
-    let has_error = print_lint_diagnostics(&path_str, &source, &diagnostics);
+    // Template lint rules carry no autofix edits, so `fixable` stays 0; the
+    // findings still count toward the run-wide "all fixable?" determination.
+    let (has_error, fixable) = print_lint_diagnostics(&path_str, &source, &diagnostics);
     CommandOutcome {
         has_error,
         has_warning,
+        findings: diagnostics.len(),
+        fixable,
     }
 }

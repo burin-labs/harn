@@ -60,6 +60,10 @@ impl VmSyncPermitHandle {
     pub(crate) fn key(&self) -> &str {
         self.lease.key()
     }
+
+    pub(crate) fn permits(&self) -> u32 {
+        self.lease.permits()
+    }
 }
 
 /// A lazy integer range — Python-style. Stores only `(start, end, inclusive)`

@@ -147,21 +147,27 @@ impl super::super::Vm {
         let frame = self.frames.last_mut().unwrap();
         let slot_idx = frame.chunk.read_u16(frame.ip) as usize;
         frame.ip += 2;
-        let name = frame
-            .chunk
-            .local_slots
-            .get(slot_idx)
-            .map(|info| info.name.clone())
-            .unwrap_or_else(|| format!("<slot {slot_idx}>"));
         let Some(slot) = frame.local_slots.get(slot_idx) else {
             return Err(VmError::Runtime(format!(
                 "Invalid local slot index: {slot_idx}"
             )));
         };
         if !slot.initialized {
+            // Only materialize the binding name on the cold error path.
+            // Cloning the slot's `String` name on every successful read was a
+            // per-instruction heap allocation — the dominant cost in the
+            // `local_variable_lookup` hot loop. SOTA interpreters never
+            // allocate on the fast read path.
+            let name = frame
+                .chunk
+                .local_slots
+                .get(slot_idx)
+                .map(|info| info.name.clone())
+                .unwrap_or_else(|| format!("<slot {slot_idx}>"));
             return Err(VmError::UndefinedVariable(name));
         }
-        self.stack.push(slot.value.clone());
+        let value = slot.value.clone();
+        self.stack.push(value);
         Ok(())
     }
 

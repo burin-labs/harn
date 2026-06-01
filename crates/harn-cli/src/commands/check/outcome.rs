@@ -4,6 +4,10 @@ use harn_lint::LintSeverity;
 pub(crate) struct CommandOutcome {
     pub has_error: bool,
     pub has_warning: bool,
+    /// Total findings emitted for this file.
+    pub findings: usize,
+    /// Findings carrying a machine-applicable autofix (`fix.is_some()`).
+    pub fixable: usize,
 }
 
 impl CommandOutcome {
@@ -12,13 +16,20 @@ impl CommandOutcome {
     }
 }
 
+/// Render each diagnostic to stderr. Returns `(has_error, fixable_count)`,
+/// where `fixable_count` mirrors the `diag.fix.is_some()` tally that the JSON
+/// report uses so the CLI and JSON surfaces agree on "fixable".
 pub(super) fn print_lint_diagnostics(
     path: &str,
     source: &str,
     diagnostics: &[harn_lint::LintDiagnostic],
-) -> bool {
+) -> (bool, usize) {
     let mut has_error = false;
+    let mut fixable = 0usize;
     for diag in diagnostics {
+        if diag.fix.is_some() {
+            fixable += 1;
+        }
         let severity = match diag.severity {
             LintSeverity::Info => "info",
             LintSeverity::Warning => "warning",
@@ -39,5 +50,5 @@ pub(super) fn print_lint_diagnostics(
         );
         eprint!("{rendered}");
     }
-    has_error
+    (has_error, fixable)
 }

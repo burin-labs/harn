@@ -29,7 +29,7 @@
     {
       "id": "ORC",
       "title": "Orchestration constructs",
-      "count": 10
+      "count": 11
     },
     {
       "id": "STD",
@@ -946,6 +946,15 @@
       "code": "HARN-ORC-010",
       "category": "ORC",
       "summary": "execution target path cannot be found",
+      "repairs": [],
+      "related": [],
+      "explanationPresent": true,
+      "apiStability": "stable"
+    },
+    {
+      "code": "HARN-ORC-011",
+      "category": "ORC",
+      "summary": "a self-deadlock acquire would block forever",
       "repairs": [],
       "related": [],
       "explanationPresent": true,

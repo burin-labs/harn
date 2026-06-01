@@ -867,6 +867,18 @@ impl Vm {
         self.held_sync_guards
             .retain(|guard| guard.frame_depth != frame_depth);
     }
+
+    /// Total permits this VM already holds for `kind:key` via lexical sync
+    /// blocks. The held-set is tiny (bounded by lexical nesting), so this scan
+    /// is cheap and only runs on the rare blocking-acquire path. Used by the
+    /// runtime self-deadlock guard.
+    pub(crate) fn held_permits_for(&self, kind: &str, key: &str) -> u32 {
+        self.held_sync_guards
+            .iter()
+            .filter(|guard| guard._permit.kind() == kind && guard._permit.key() == key)
+            .map(|guard| guard._permit.permits())
+            .sum()
+    }
 }
 
 impl Drop for Vm {
