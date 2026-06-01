@@ -1,0 +1,32 @@
+import { command_run, command_run_streaming, command_wait } from "std/command"
+
+fn mixed_command() {
+  if platform() == "windows" {
+    return ["cmd", "/C", "echo out&&echo err 1>&2"]
+  }
+  return ["sh", "-c", "printf out; printf err >&2"]
+}
+
+fn expect_eq(actual, expected, label: string) {
+  if actual != expected {
+    throw label + ": expected " + to_string(expected) + ", got " + to_string(actual)
+  }
+}
+
+pipeline default() {
+  let started = command_run(mixed_command(), {background: true, capture: {max_inline_bytes: 100}})
+  let waited = command_wait(started, {timeout_ms: 5000})
+  expect_eq(waited.status, "completed", "waited.status")
+  expect_eq(waited.exit_code, 0, "waited.exit_code")
+  expect_eq(waited.stdout, "out", "waited.stdout")
+  expect_eq(waited.stderr, "err", "waited.stderr")
+  let streamed = command_run_streaming(
+    mixed_command(),
+    {tee: false, poll_interval_ms: 10, capture: {max_inline_bytes: 100}},
+  )
+  expect_eq(streamed.status, "completed", "streamed.status")
+  expect_eq(streamed.exit_code, 0, "streamed.exit_code")
+  expect_eq(streamed.stdout, "out", "streamed.stdout")
+  expect_eq(streamed.stderr, "err", "streamed.stderr")
+  __io_println("ok")
+}

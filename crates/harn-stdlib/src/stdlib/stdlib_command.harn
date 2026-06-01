@@ -1,4 +1,5 @@
 /** std/command - deterministic command steps for Harn scripts. */
+import { write_stderr, write_stdout } from "std/io"
 import { truncate_text } from "std/text"
 
 fn __command_options(options) {
@@ -68,13 +69,13 @@ fn __command_apply_option_defaults(req, options) {
     "progress_max_inline_bytes",
     "policy_context",
   ] {
-    if out?[key] == nil && opts?[key] != nil {
+    if out?[key] == nil && opts[key] != nil {
       out = out + {[key]: opts[key]}
     }
   }
   if out.mode == "shell" {
     for key in ["shell", "shell_id", "login", "interactive"] {
-      if out?[key] == nil && opts?[key] != nil {
+      if out?[key] == nil && opts[key] != nil {
         out = out + {[key]: opts[key]}
       }
     }
@@ -187,6 +188,193 @@ fn __command_normalize_result(result) {
 pub fn command_run(spec, options = nil) -> dict {
   let _enabled = hostlib_enable("tools:deterministic")
   return __command_normalize_result(hostlib_tools_run_command(__command_request(spec, options)))
+}
+
+fn __command_handle_id(locator, builtin: string) -> string {
+  if type_of(locator) == "string" {
+    return locator
+  }
+  if type_of(locator) == "dict" && locator?.handle_id != nil {
+    return to_string(locator.handle_id)
+  }
+  throw builtin + ": pass a handle id string or a command result with handle_id"
+}
+
+fn __command_wait_request(locator, options) {
+  let opts = __command_options(options)
+  var req = {handle_id: __command_handle_id(locator, "command_wait")}
+  if opts?.timeout_ms != nil {
+    req = req + {timeout_ms: opts.timeout_ms}
+  }
+  if opts?.session_id != nil {
+    req = req + {session_id: opts.session_id}
+  }
+  return req
+}
+
+/**
+ * command_wait waits for one background command handle and returns a normalized command result.
+ *
+ * @effects: [process]
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: command_wait(result, {timeout_ms: 1000})
+ */
+pub fn command_wait(locator, options = nil) -> dict {
+  let _enabled = hostlib_enable("tools:deterministic")
+  return __command_normalize_result(hostlib_tools_wait_command(__command_wait_request(locator, options)))
+}
+
+/**
+ * command_cancel cancels one background command handle.
+ *
+ * @effects: [process]
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: command_cancel(result)
+ */
+pub fn command_cancel(locator) -> dict {
+  let _enabled = hostlib_enable("tools:deterministic")
+  return hostlib_tools_cancel_handle({handle_id: __command_handle_id(locator, "command_cancel")})
+}
+
+fn __command_positive_int(value, fallback: int) -> int {
+  let resolved = to_int(value) ?? fallback
+  if resolved > 0 {
+    return resolved
+  }
+  return fallback
+}
+
+fn __command_stream_target(source: string, options) -> string {
+  let opts = __command_options(options)
+  if opts.tee != nil && !opts.tee {
+    return "none"
+  }
+  if source == "stdout" {
+    return opts?.tee_stdout ?? "stdout"
+  }
+  if source == "stderr" {
+    return opts?.tee_stderr ?? "stderr"
+  }
+  return "none"
+}
+
+fn __command_stream_write(source: string, content: string, options) {
+  if content == "" {
+    return nil
+  }
+  let target = __command_stream_target(source, options)
+  if target == "none" {
+    return nil
+  }
+  if target == "stdout" {
+    write_stdout(content)
+    return nil
+  }
+  if target == "stderr" {
+    write_stderr(content)
+    return nil
+  }
+  throw "command_run_streaming: tee target must be stdout, stderr, or none"
+}
+
+fn __command_stream_drain_once(locator, source: string, offset: int, length: int, options) {
+  let read = try {
+    command_output_range(locator, {source: source, offset: offset, length: length})
+  } catch (_e) {
+    nil
+  }
+  if read == nil {
+    return {offset: offset, bytes_read: 0, eof: false}
+  }
+  if read.bytes_read > 0 {
+    __command_stream_write(source, read.content, options)
+  }
+  return {offset: read.offset + read.bytes_read, bytes_read: read.bytes_read, eof: read.eof}
+}
+
+fn __command_stream_flush(locator, source: string, offset: int, length: int, options) -> int {
+  var current = offset
+  while true {
+    let drained = __command_stream_drain_once(locator, source, current, length, options)
+    current = drained.offset
+    if drained.bytes_read == 0 || drained.eof {
+      return current
+    }
+  }
+  return current
+}
+
+fn __command_stream_read_inline(locator, source: string, options) -> string {
+  let opts = __command_options(options)
+  let length = __command_positive_int(opts?.max_inline_bytes ?? opts?.capture?.max_inline_bytes, 50000)
+  let read = try {
+    command_output_range(locator, {source: source, offset: 0, length: length})
+  } catch (_e) {
+    nil
+  }
+  return read?.content ?? ""
+}
+
+fn __command_stream_timeout_result(start, elapsed_ms: int, options) -> dict {
+  return __command_normalize_result(
+    start
+      + {
+      status: "timed_out",
+      timed_out: true,
+      exit_code: -1,
+      signal: "SIGKILL",
+      duration_ms: elapsed_ms,
+      stdout: __command_stream_read_inline(start, "stdout", options),
+      stderr: __command_stream_read_inline(start, "stderr", options),
+    },
+  )
+}
+
+/**
+ * command_run_streaming runs a command in the background, tees new output, and returns the final result.
+ *
+ * @effects: [process]
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: command_run_streaming(spec, {timeout_ms: 30000})
+ */
+pub fn command_run_streaming(spec, options = nil) -> dict {
+  let opts = __command_options(options)
+  let poll_interval_ms = __command_positive_int(opts?.poll_interval_ms, 100)
+  let read_bytes = __command_positive_int(opts?.read_bytes ?? opts?.read_length, 65536)
+  let timeout_ms = to_int(opts?.timeout_ms) ?? 0
+  let start = command_run(spec, __command_run_options(opts) + {background: true})
+  var stdout_offset = 0
+  var stderr_offset = 0
+  let started_ms = harness.clock.monotonic_ms()
+  while true {
+    stdout_offset = __command_stream_flush(start, "stdout", stdout_offset, read_bytes, opts)
+    stderr_offset = __command_stream_flush(start, "stderr", stderr_offset, read_bytes, opts)
+    let elapsed_before_wait = harness.clock.monotonic_ms() - started_ms
+    if timeout_ms > 0 && elapsed_before_wait >= timeout_ms {
+      command_cancel(start)
+      return __command_stream_timeout_result(start, elapsed_before_wait, opts)
+    }
+    let result = command_wait(start, {timeout_ms: poll_interval_ms})
+    stdout_offset = __command_stream_flush(start, "stdout", stdout_offset, read_bytes, opts)
+    stderr_offset = __command_stream_flush(start, "stderr", stderr_offset, read_bytes, opts)
+    if result.status != "running" {
+      return result
+    }
+    let elapsed_after_wait = harness.clock.monotonic_ms() - started_ms
+    if timeout_ms > 0 && elapsed_after_wait >= timeout_ms {
+      command_cancel(start)
+      stdout_offset = __command_stream_flush(start, "stdout", stdout_offset, read_bytes, opts)
+      stderr_offset = __command_stream_flush(start, "stderr", stderr_offset, read_bytes, opts)
+      return __command_stream_timeout_result(start, elapsed_after_wait, opts)
+    }
+  }
+  return start
 }
 
 fn __command_locator(locator, options) {
@@ -438,7 +626,7 @@ fn __command_run_options(options) {
     "login",
     "interactive",
   ] {
-    if opts?[key] != nil {
+    if opts[key] != nil {
       out = out + {[key]: opts[key]}
     }
   }
@@ -1026,7 +1214,7 @@ fn __command_try_attempt(attempt, index, total, options) {
     }
   }
   let envelope = __command_try_value(unwrap(raw_result), source)
-  if !(envelope?.ok ?? false) {
+  if !(envelope.ok ?? false) {
     return {
       ok: false,
       source: source,

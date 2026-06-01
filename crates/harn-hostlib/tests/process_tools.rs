@@ -1,5 +1,5 @@
 //! Integration tests for the process-lifecycle tool builtins
-//! (`run_command`, `run_test`, `run_build_command`,
+//! (`run_command`, `wait_command`, `run_test`, `run_build_command`,
 //! `inspect_test_results`, `manage_packages`, `cancel_handle`).
 //!
 //! These tests are **deterministic and mock-based**. Every spawn goes
@@ -770,6 +770,88 @@ fn run_command_long_running_feedback_fires_after_exit() {
         payload["duration_ms"].as_i64().unwrap() >= 0,
         "duration_ms must be non-negative"
     );
+}
+
+#[test]
+fn wait_command_returns_completed_background_result() {
+    let session_id = unique_session_id("test-wait-command-completed");
+    let _session_guard = harn_vm::agent_sessions::enter_current_session(session_id.clone());
+    let _ = harn_vm::orchestration::agent_inbox::drain(&session_id);
+    let (_spawner, controller, _guard) = install_mock_with(MockProcessConfig::running());
+
+    let mut req = dict();
+    req.insert("argv".into(), vlist_str(&["sh", "-c", "echo done"]));
+    req.insert("background".into(), VmValue::Bool(true));
+    let start = require_dict(call("hostlib_tools_run_command", req).unwrap());
+    let handle_id = require_str(&start, "handle_id");
+    let completion_rx =
+        register_completion_notifier(&handle_id).expect("handle should still be live");
+
+    controller.append_stdout(b"done\n");
+    controller.complete_with(ExitStatus::from_code(0));
+    completion_rx.recv().expect("waiter completion never fired");
+
+    let mut wait_req = dict();
+    wait_req.insert("handle_id".into(), vstr(&handle_id));
+    let waited = require_dict(call("hostlib_tools_wait_command", wait_req).unwrap());
+
+    assert_eq!(require_str(&waited, "status"), "completed");
+    assert_eq!(require_str(&waited, "feedback_kind"), "tool_result");
+    assert_eq!(require_str(&waited, "handle_id"), handle_id);
+    assert_eq!(require_int(&waited, "exit_code"), 0);
+    assert_eq!(require_str(&waited, "stdout"), "done\n");
+    assert!(!require_bool(&waited, "timed_out"));
+}
+
+#[test]
+fn wait_command_reports_running_when_handle_has_not_completed() {
+    let session_id = unique_session_id("test-wait-command-running");
+    let _session_guard = harn_vm::agent_sessions::enter_current_session(session_id.clone());
+    let _ = harn_vm::orchestration::agent_inbox::drain(&session_id);
+    let (_spawner, _controller, _guard) = install_mock_with(MockProcessConfig::running());
+
+    let mut req = dict();
+    req.insert("argv".into(), vlist_str(&["sleep", "10"]));
+    req.insert("background".into(), VmValue::Bool(true));
+    let start = require_dict(call("hostlib_tools_run_command", req).unwrap());
+    let handle_id = require_str(&start, "handle_id");
+    let completion_rx = register_completion_notifier(&handle_id);
+
+    let mut wait_req = dict();
+    wait_req.insert("handle_id".into(), vstr(&handle_id));
+    wait_req.insert("timeout_ms".into(), VmValue::Int(0));
+    let waited = require_dict(call("hostlib_tools_wait_command", wait_req).unwrap());
+
+    assert_eq!(require_str(&waited, "status"), "running");
+    assert_eq!(require_str(&waited, "handle_id"), handle_id);
+    assert!(!require_bool(&waited, "completed"));
+
+    let mut cancel_req = dict();
+    cancel_req.insert("handle_id".into(), vstr(&handle_id));
+    let cancel_resp = require_dict(call("hostlib_tools_cancel_handle", cancel_req).unwrap());
+    assert!(require_bool(&cancel_resp, "cancelled"));
+    if let Some(rx) = completion_rx {
+        let _ = rx.recv();
+    }
+}
+
+#[test]
+fn wait_command_requeues_unrelated_feedback() {
+    let session_id = unique_session_id("test-wait-command-requeue");
+    let _session_guard = harn_vm::agent_sessions::enter_current_session(session_id.clone());
+    let _ = harn_vm::orchestration::agent_inbox::drain(&session_id);
+    harn_vm::orchestration::agent_inbox::push(&session_id, "notice", "keep me", "test");
+
+    let mut wait_req = dict();
+    wait_req.insert("handle_id".into(), vstr("hto-missing"));
+    wait_req.insert("timeout_ms".into(), VmValue::Int(0));
+    let waited = require_dict(call("hostlib_tools_wait_command", wait_req).unwrap());
+
+    assert_eq!(require_str(&waited, "status"), "running");
+    let remaining = harn_vm::orchestration::agent_inbox::drain(&session_id);
+    assert_eq!(remaining.len(), 1);
+    assert_eq!(remaining[0].kind, "notice");
+    assert_eq!(remaining[0].content, "keep me");
 }
 
 #[test]
