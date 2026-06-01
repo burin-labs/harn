@@ -195,6 +195,18 @@ pub const SCHEMAS: &[(&str, &str, SchemaKind, &str)] = &[
     ),
     (
         "ast",
+        "batch_apply",
+        SchemaKind::Request,
+        include_str!("../schemas/ast/batch_apply.request.json"),
+    ),
+    (
+        "ast",
+        "batch_apply",
+        SchemaKind::Response,
+        include_str!("../schemas/ast/batch_apply.response.json"),
+    ),
+    (
+        "ast",
         "dry_run",
         SchemaKind::Request,
         include_str!("../schemas/ast/dry_run.request.json"),

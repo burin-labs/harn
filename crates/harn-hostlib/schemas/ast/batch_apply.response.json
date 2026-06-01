@@ -1,0 +1,114 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harnlang.com/schemas/hostlib/ast/batch_apply.response.json",
+  "title": "ast.batch_apply response",
+  "description": "Per-file codemod previews plus a roll-up summary. `result` is always `ok`; per-file success or failure is carried on each `files` entry.",
+  "type": "object",
+  "properties": {
+    "result": {
+      "type": "string",
+      "const": "ok",
+      "description": "Always `ok`; the batch ran. Per-file outcomes live on each `files` entry."
+    },
+    "dry_run": {
+      "type": "boolean",
+      "description": "Echo of the effective `dry_run`. When true, no file was written."
+    },
+    "summary": { "$ref": "#/$defs/Summary" },
+    "files": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/FileResult" },
+      "description": "One entry per (de-duplicated) input path, in input order."
+    }
+  },
+  "required": ["result", "dry_run", "summary", "files"],
+  "additionalProperties": false,
+  "$defs": {
+    "Summary": {
+      "type": "object",
+      "description": "Roll-up across every file in the batch.",
+      "properties": {
+        "files_total": {
+          "type": "integer",
+          "description": "Number of distinct input paths processed."
+        },
+        "files_matched": {
+          "type": "integer",
+          "description": "Files whose query produced at least one match."
+        },
+        "files_changed": {
+          "type": "integer",
+          "description": "Files the codemod alters (post-splice content differs from the original). Reported even in dry-run."
+        },
+        "files_written": {
+          "type": "integer",
+          "description": "Files actually persisted to disk. Always 0 in dry-run."
+        },
+        "files_failed": {
+          "type": "integer",
+          "description": "Files with a non-applying result (unsupported_language, invalid_query, ambiguous, syntax_error, read_error, parse_error)."
+        },
+        "match_count_total": {
+          "type": "integer",
+          "description": "Total selected matches across all files."
+        }
+      },
+      "required": [
+        "files_total",
+        "files_matched",
+        "files_changed",
+        "files_written",
+        "files_failed",
+        "match_count_total"
+      ],
+      "additionalProperties": false
+    },
+    "FileResult": {
+      "type": "object",
+      "description": "Outcome for a single file.",
+      "properties": {
+        "path": { "type": "string" },
+        "result": {
+          "type": "string",
+          "enum": [
+            "applied",
+            "no_match",
+            "ambiguous",
+            "invalid_query",
+            "unsupported_language",
+            "syntax_error",
+            "read_error",
+            "parse_error"
+          ],
+          "description": "Per-file outcome. `applied` even when `changed` is false (e.g. an idempotent re-run that matched but produced identical bytes)."
+        },
+        "match_count": {
+          "type": "integer",
+          "description": "Number of selected matches in this file."
+        },
+        "changed": {
+          "type": "boolean",
+          "description": "True when the post-edit content differs from the original."
+        },
+        "before_sha256": {
+          "type": "string",
+          "description": "Hex sha256 of the original source. Absent when the source could not be read."
+        },
+        "after_sha256": {
+          "type": "string",
+          "description": "Hex sha256 of the post-edit source (equals `before_sha256` for unchanged files). Absent when no splice was produced."
+        },
+        "preview": {
+          "type": "string",
+          "description": "Post-edit source (or the original, for non-applying results). Absent when the source could not be read."
+        },
+        "details": {
+          "type": "string",
+          "description": "Human-readable explanation for a non-applied result."
+        }
+      },
+      "required": ["path", "result", "match_count", "changed"],
+      "additionalProperties": false
+    }
+  }
+}

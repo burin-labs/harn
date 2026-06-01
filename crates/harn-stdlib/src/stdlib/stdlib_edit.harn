@@ -1041,6 +1041,54 @@ pub fn edit_insert_at_anchor(params) {
   }
 }
 
+/**
+ * Run one Tree-Sitter `query` -> `replacement` codemod over every file in
+ * `paths`, returning a per-file preview plus a roll-up `summary`.
+ *
+ * This is the multi-file sibling of `edit_apply_node`: each file goes
+ * through the same format-preserving byte-splice, so indentation and
+ * trivia outside each matched span survive untouched.
+ *
+ * `params` is a dict:
+ *
+ * - `paths`: non-empty list of files. Duplicates are collapsed.
+ * - `query`: Tree-Sitter S-expression with at least one capture; the
+ *   `target_capture` (default `"target"`) capture is the replaceable span.
+ * - `replacement` (alias `fix`): text spliced in for each selected node.
+ * - `select`: per-file multi-match policy (`"unique"` default, or
+ *   `"first" | "all" | "nth"` with `nth`).
+ * - `language`: optional grammar hint applied to every path.
+ * - `validate`: re-parse each edit and reject ERROR/MISSING nodes (default).
+ *
+ * **Dry-run is the default.** A plain call previews edits across every file
+ * without touching disk; pass `dry_run: false` to apply. A failure on one
+ * file (no match, a query invalid for that grammar, a post-edit syntax
+ * error, an unreadable path) is recorded as that file's `result` and does
+ * not abort the batch. Re-running an applied codemod reports zero further
+ * changes (`files_changed: 0`), which is the A6 idempotency hook.
+ *
+ * `ok` is true when no file failed. Each `files` entry carries `path`,
+ * `result`, `match_count`, `changed`, `before_sha256`, `after_sha256`, and
+ * `preview`; `summary` rolls up `files_total / files_matched /
+ * files_changed / files_written / files_failed / match_count_total`.
+ *
+ * @effects: [host, fs]
+ * @allocation: heap
+ * @errors: [backend]
+ * @api_stability: experimental
+ * @example: edit_batch_apply({paths: ["a.rs", "b.rs"], query: q, replacement: "{ 0 }"})
+ */
+pub fn edit_batch_apply(params) {
+  let payload = hostlib_ast_batch_apply(params ?? {}) ?? {}
+  return payload
+    .merge(
+    {
+      ok: payload?.summary?.files_failed ?? 1 == 0,
+      provenance: {module: "std/edit", helper: "edit_batch_apply", caller: params?.provenance},
+    },
+  )
+}
+
 fn __edit_safe_patch_telemetry(result, hunks_count, failed_hunk_index) {
   return {
     result: result,
