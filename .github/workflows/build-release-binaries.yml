@@ -556,8 +556,10 @@ jobs:
 
           for arch in amd64 arm64; do
             archive="release-container/${arch}/harn.tar.gz"
+            archive_list="${assets_dir}/${arch}.lst"
+            tar tzf "$archive" > "$archive_list"
             for binary in harn harn-container-probe; do
-              if ! tar tzf "$archive" | grep -Fxq "$binary"; then
+              if ! grep -Fxq "$binary" "$archive_list"; then
                 echo "::error::${archive} is missing ${binary}; container image must be assembled from release artifacts, not a Docker source rebuild."
                 exit 1
               fi
