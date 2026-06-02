@@ -216,6 +216,17 @@ impl CompiledRule {
         &self.rule_id
     }
 
+    /// The rule's diagnostic severity (the default for any diagnostic the
+    /// rule produces).
+    pub fn severity(&self) -> Severity {
+        self.severity
+    }
+
+    /// The rule's static diagnostic message (empty for a search-only rule).
+    pub fn message(&self) -> &str {
+        &self.message
+    }
+
     /// Run the compiled rule against `source`, returning matches in
     /// document order. Matches that fail any `where` constraint are dropped.
     pub fn run(&self, source: &str) -> Result<Vec<RuleMatch>, RulesError> {

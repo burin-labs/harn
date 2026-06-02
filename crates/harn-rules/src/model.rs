@@ -25,6 +25,18 @@ pub enum Severity {
     Error,
 }
 
+impl Severity {
+    /// The stable lowercase name (the inverse of the `Deserialize` rename),
+    /// used for diagnostics and JSON surfaces.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Severity::Info => "info",
+            Severity::Warning => "warning",
+            Severity::Error => "error",
+        }
+    }
+}
+
 /// How risky a rule's `fix` is, mapped onto Burin's edit-safety taxonomy.
 /// Ordered least → most dangerous; the codemod runner auto-applies only the
 /// two safest tiers (see [`Safety::applicability`]).
@@ -57,7 +69,30 @@ pub enum Applicability {
     Suggestion,
 }
 
+impl Applicability {
+    /// The stable name used for diagnostics and JSON surfaces.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Applicability::MachineApplicable => "machine-applicable",
+            Applicability::Suggestion => "suggestion",
+        }
+    }
+}
+
 impl Safety {
+    /// The stable kebab-case name (the inverse of the `Deserialize` rename),
+    /// used for diagnostics and JSON surfaces.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Safety::FormatOnly => "format-only",
+            Safety::BehaviorPreserving => "behavior-preserving",
+            Safety::ScopeLocal => "scope-local",
+            Safety::SurfaceChanging => "surface-changing",
+            Safety::CapabilityChanging => "capability-changing",
+            Safety::NeedsHuman => "needs-human",
+        }
+    }
+
     /// The applicability tier this safety level maps to. `format-only` and
     /// `behavior-preserving` are machine-applicable; everything riskier is a
     /// suggestion.

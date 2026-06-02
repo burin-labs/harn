@@ -11,19 +11,41 @@
 //! - `rules.search` (read-only) — run a rule and return its matches.
 //! - `rules.report` (read-only) — run a rule in report-only mode and return
 //!   a [`harn_rules::DataTable`] (counts + per-match rows).
+//! - `rules.diagnostics` (read-only) — run a **declarative** rule and return
+//!   its [`harn_rules::Diagnostic`]s (message + severity + span + fix).
+//! - `rules.visit` (read-only, **async**) — the **imperative** escape hatch:
+//!   run a rule's matcher, then invoke a `.harn` visitor
+//!   `on_match($node, $ctx)` once per match. The visitor returns its
+//!   report(s) — `nil`/`false` to skip, a `{message, fix, safety}` dict, or
+//!   a list of them — which the engine turns into diagnostics of the same
+//!   shape `rules.diagnostics` emits. The visitor has full programmatic
+//!   control (compute a message/fix from the captured metavars), which the
+//!   declarative form cannot.
 //! - `rules.apply` (write-gated) — apply a codemod rule's `fix`; writes only
 //!   when `dry_run: false` *and* the rule is safe to auto-apply (or
 //!   `allow_unsafe: true`). Shares the deterministic-tools gate with the
 //!   other mutating builtins.
 //!
 //! A rule is passed as its TOML source (`rule`), so an agent can author and
-//! run a rule entirely from `.harn` without recompiling the binary. The
-//! richer **imperative** `.harn` visitor (`on_match($node, ctx)`) needs a
-//! synchronous closure-callback from a Rust builtin, which the VM does not
-//! support today (only async builtins can call back) — tracked separately.
+//! run a rule — declarative *or* imperative — entirely from `.harn` without
+//! recompiling the binary.
+//!
+//! ### Why `rules.visit` is async, and why it returns rather than mutates
+//!
+//! A *synchronous* hostlib builtin cannot call a `.harn` closure: the VM's
+//! [`Vm::call_closure_pub`] is async-only. So the visitor is registered as an
+//! **async** builtin (directly on the VM via [`Vm::register_async_builtin`],
+//! bypassing the sync [`HostlibRegistry`]), which can obtain a child VM from
+//! its [`AsyncBuiltinCtx`] and call back per match.
+//!
+//! The visitor **returns** its reports instead of calling a mutating
+//! `ctx.report(...)`: Harn closures capture by value, so a Harn-side
+//! accumulator could not collect across calls, and `VmValue` has no callable
+//! variant that carries captured Rust state to embed a stateful `report`
+//! method in `ctx`. Returning is both the sound option and the simpler one.
 
 use std::collections::BTreeMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use harn_hostlib::ast::Language;
@@ -31,12 +53,17 @@ use harn_hostlib::tools::permissions::gated_handler;
 use harn_hostlib::{
     BuiltinRegistry, HostlibCapability, HostlibError, HostlibRegistry, RegisteredBuiltin,
 };
-use harn_vm::{Vm, VmValue};
+use harn_vm::{AsyncBuiltinCtx, Vm, VmError, VmValue};
 
-use harn_rules::{data_table, CompiledRule, Rule, RuleMatch, SourceFile};
+use harn_rules::{
+    data_table, Applicability, CompiledRule, Diagnostic, Rule, RuleMatch, Safety, Severity,
+    SourceFile, Span,
+};
 
 const SEARCH: &str = "hostlib_rules_search";
 const REPORT: &str = "hostlib_rules_report";
+const DIAGNOSTICS: &str = "hostlib_rules_diagnostics";
+const VISIT: &str = "hostlib_rules_visit";
 const APPLY: &str = "hostlib_rules_apply";
 
 /// The `rules` host capability.
@@ -61,6 +88,12 @@ impl HostlibCapability for RulesCapability {
             method: "report",
             handler: Arc::new(report_run),
         });
+        registry.register(RegisteredBuiltin {
+            name: DIAGNOSTICS,
+            module: "rules",
+            method: "diagnostics",
+            handler: Arc::new(diagnostics_run),
+        });
         // `apply` writes files, so it shares the deterministic-tools gate.
         registry.register(RegisteredBuiltin {
             name: APPLY,
@@ -77,6 +110,10 @@ pub fn install(vm: &mut Vm) {
     HostlibRegistry::new()
         .with(RulesCapability)
         .register_into_vm(vm);
+    // `rules.visit` invokes a `.harn` closure per match, which only an async
+    // builtin can do (`call_closure_pub` is async). It is therefore registered
+    // directly on the VM rather than through the sync `HostlibRegistry`.
+    vm.register_async_builtin(VISIT, visit_run);
 }
 
 // ---------------------------------------------------------------------------
@@ -107,6 +144,80 @@ fn report_run(args: &[VmValue]) -> Result<VmValue, HostlibError> {
     let files = load_files(REPORT, &dict)?;
     let table = data_table(&rule, &files).map_err(|e| backend(REPORT, &e))?;
     Ok(json_to_vm(&table.to_json_value()))
+}
+
+fn diagnostics_run(args: &[VmValue]) -> Result<VmValue, HostlibError> {
+    let dict = first_dict(DIAGNOSTICS, args)?;
+    let rule = compile_rule(DIAGNOSTICS, &dict)?;
+    let files = load_files(DIAGNOSTICS, &dict)?;
+
+    let mut diagnostics = Vec::new();
+    for file in &files {
+        for d in rule
+            .diagnostics(&file.source)
+            .map_err(|e| backend(DIAGNOSTICS, &e))?
+        {
+            diagnostics.push(diagnostic_vm(&file.path, &d));
+        }
+    }
+    Ok(dict_vm([
+        ("result", str_vm("ok")),
+        ("diagnostic_count", VmValue::Int(diagnostics.len() as i64)),
+        ("diagnostics", VmValue::List(Arc::new(diagnostics))),
+    ]))
+}
+
+/// The imperative escape hatch (#2878): run the rule's matcher, then call the
+/// `.harn` visitor `on_match($node, $ctx)` once per match. The visitor's
+/// return value becomes diagnostics of the same shape `rules.diagnostics`
+/// emits. Read-only — it never writes; the agent applies fixes itself.
+async fn visit_run(ctx: AsyncBuiltinCtx, args: Vec<VmValue>) -> Result<VmValue, VmError> {
+    let dict = first_dict(VISIT, &args).map_err(host_err)?;
+    let rule = compile_rule(VISIT, &dict).map_err(host_err)?;
+    let files = load_files(VISIT, &dict).map_err(host_err)?;
+    let visitor = match dict.get("on_match") {
+        Some(VmValue::Closure(c)) => c.clone(),
+        _ => {
+            return Err(VmError::Runtime(format!(
+                "{VISIT}: `on_match` must be a function `fn(node, ctx)`"
+            )))
+        }
+    };
+
+    let default_severity = rule.severity();
+    let default_safety = rule.safety();
+    let rule_id = rule.id().to_string();
+
+    let mut vm = ctx.child_vm();
+    let mut diagnostics = Vec::new();
+    for file in &files {
+        let matches = rule
+            .run(&file.source)
+            .map_err(|e| host_err(backend(VISIT, &e)))?;
+        let file_ctx = ctx_vm(&file.path, file.language, &file.source, &rule_id);
+        for m in &matches {
+            let node = node_vm(m);
+            let ret = vm
+                .call_closure_pub(&visitor, &[node, file_ctx.clone()])
+                .await?;
+            ctx.forward_output(&vm.take_output());
+            for report in reports_from_return(ret) {
+                diagnostics.push(report_to_diagnostic_vm(
+                    &file.path,
+                    &rule_id,
+                    m.span,
+                    report,
+                    default_severity,
+                    default_safety,
+                ));
+            }
+        }
+    }
+    Ok(dict_vm([
+        ("result", str_vm("ok")),
+        ("diagnostic_count", VmValue::Int(diagnostics.len() as i64)),
+        ("diagnostics", VmValue::List(Arc::new(diagnostics))),
+    ]))
 }
 
 fn apply_run(args: &[VmValue]) -> Result<VmValue, HostlibError> {
@@ -231,6 +342,165 @@ fn backend(builtin: &'static str, err: &harn_rules::RulesError) -> HostlibError 
     HostlibError::Backend {
         builtin,
         message: err.to_string(),
+    }
+}
+
+/// Lower a `HostlibError` into a `VmError` for the async `rules.visit` path
+/// (which must return `VmError`, not `HostlibError`).
+fn host_err(err: HostlibError) -> VmError {
+    VmError::Runtime(err.to_string())
+}
+
+/// One report a `.harn` visitor returned for a single match. Every field is
+/// optional: an empty report (e.g. the visitor returned `true`) flags the
+/// match using the rule's own defaults.
+#[derive(Default)]
+struct ReportSpec {
+    message: Option<String>,
+    fix: Option<String>,
+    safety: Option<Safety>,
+    severity: Option<Severity>,
+}
+
+/// The `node` value handed to a visitor: the matched text, its metavar
+/// captures, and its span.
+fn node_vm(m: &RuleMatch) -> VmValue {
+    let captures: BTreeMap<String, VmValue> = m
+        .bindings
+        .iter()
+        .map(|(name, b)| (name.clone(), str_vm(&b.text)))
+        .collect();
+    dict_vm([
+        ("text", str_vm(&m.text)),
+        ("captures", VmValue::Dict(Arc::new(captures))),
+        ("start_row", VmValue::Int(m.span.start_row as i64)),
+        ("start_col", VmValue::Int(m.span.start_col as i64)),
+        ("end_row", VmValue::Int(m.span.end_row as i64)),
+        ("end_col", VmValue::Int(m.span.end_col as i64)),
+    ])
+}
+
+/// The read-only `ctx` value handed to a visitor: where the match lives and
+/// what produced it.
+fn ctx_vm(path: &Path, language: Language, source: &str, rule_id: &str) -> VmValue {
+    dict_vm([
+        ("path", str_vm(path.display().to_string())),
+        ("language", str_vm(language.name())),
+        ("source", str_vm(source)),
+        ("rule_id", str_vm(rule_id)),
+    ])
+}
+
+/// Build a diagnostic dict — the one shape both `rules.diagnostics` and
+/// `rules.visit` emit, so an equivalent declarative and imperative rule
+/// produce identical output.
+fn diagnostic_dict(
+    path: &Path,
+    rule_id: &str,
+    message: &str,
+    severity: Severity,
+    span: Span,
+    fix: Option<String>,
+    applicability: Applicability,
+) -> VmValue {
+    dict_vm([
+        ("path", str_vm(path.display().to_string())),
+        ("rule_id", str_vm(rule_id)),
+        ("message", str_vm(message)),
+        ("severity", str_vm(severity.as_str())),
+        ("start_row", VmValue::Int(span.start_row as i64)),
+        ("start_col", VmValue::Int(span.start_col as i64)),
+        ("end_row", VmValue::Int(span.end_row as i64)),
+        ("end_col", VmValue::Int(span.end_col as i64)),
+        ("applicability", str_vm(applicability.as_str())),
+        ("fix", fix.map(str_vm).unwrap_or(VmValue::Nil)),
+    ])
+}
+
+fn diagnostic_vm(path: &Path, d: &Diagnostic) -> VmValue {
+    diagnostic_dict(
+        path,
+        &d.rule_id,
+        &d.message,
+        d.severity,
+        d.span,
+        d.fix.clone(),
+        d.applicability,
+    )
+}
+
+/// Turn a visitor's [`ReportSpec`] into the same diagnostic dict, located at
+/// the match's span and falling back to the rule's defaults.
+fn report_to_diagnostic_vm(
+    path: &Path,
+    rule_id: &str,
+    span: Span,
+    report: ReportSpec,
+    default_severity: Severity,
+    default_safety: Safety,
+) -> VmValue {
+    let severity = report.severity.unwrap_or(default_severity);
+    let safety = report.safety.unwrap_or(default_safety);
+    diagnostic_dict(
+        path,
+        rule_id,
+        report.message.as_deref().unwrap_or(""),
+        severity,
+        span,
+        report.fix,
+        safety.applicability(),
+    )
+}
+
+/// Interpret a visitor's return value: `nil`/`false` skips, `true` flags with
+/// rule defaults, a dict is one report, a list is many (skipping `nil`/`false`
+/// entries).
+fn reports_from_return(ret: VmValue) -> Vec<ReportSpec> {
+    match ret {
+        VmValue::Nil | VmValue::Bool(false) => Vec::new(),
+        VmValue::Bool(true) => vec![ReportSpec::default()],
+        VmValue::Dict(d) => vec![report_from_dict(&d)],
+        VmValue::List(items) => items.iter().filter_map(report_from_item).collect(),
+        _ => Vec::new(),
+    }
+}
+
+fn report_from_item(v: &VmValue) -> Option<ReportSpec> {
+    match v {
+        VmValue::Nil | VmValue::Bool(false) => None,
+        VmValue::Bool(true) => Some(ReportSpec::default()),
+        VmValue::Dict(d) => Some(report_from_dict(d)),
+        _ => None,
+    }
+}
+
+fn report_from_dict(d: &BTreeMap<String, VmValue>) -> ReportSpec {
+    ReportSpec {
+        message: optional_string(d, "message"),
+        fix: optional_string(d, "fix"),
+        safety: optional_string(d, "safety").and_then(|s| parse_safety(&s)),
+        severity: optional_string(d, "severity").and_then(|s| parse_severity(&s)),
+    }
+}
+
+fn parse_severity(s: &str) -> Option<Severity> {
+    match s {
+        "info" => Some(Severity::Info),
+        "warning" => Some(Severity::Warning),
+        "error" => Some(Severity::Error),
+        _ => None,
+    }
+}
+
+fn parse_safety(s: &str) -> Option<Safety> {
+    match s {
+        "format-only" => Some(Safety::FormatOnly),
+        "behavior-preserving" => Some(Safety::BehaviorPreserving),
+        "scope-local" => Some(Safety::ScopeLocal),
+        "surface-changing" => Some(Safety::SurfaceChanging),
+        "capability-changing" => Some(Safety::CapabilityChanging),
+        "needs-human" => Some(Safety::NeedsHuman),
+        _ => None,
     }
 }
 
@@ -429,6 +699,66 @@ mod tests {
     }
 
     #[test]
+    fn diagnostics_returns_lint_findings() {
+        let lint = r#"
+            id = "calls"
+            language = "typescript"
+            message = "function call"
+            [rule]
+            pattern = "$FN()"
+        "#;
+        let result = diagnostics_run(&[dict(&[
+            ("rule", str_vm(lint)),
+            ("source", str_vm("foo();\nbar();\n")),
+            ("language", str_vm("typescript")),
+            ("path", str_vm("a.ts")),
+        ])])
+        .unwrap();
+        assert_eq!(int(get(&result, "diagnostic_count")), 2);
+        let diags = match get(&result, "diagnostics") {
+            VmValue::List(l) => l.clone(),
+            _ => panic!(),
+        };
+        assert_eq!(s(get(&diags[0], "message")), "function call");
+        assert_eq!(s(get(&diags[0], "severity")), "warning");
+        // No `fix` and default safety → a suggestion, not machine-applicable.
+        assert_eq!(s(get(&diags[0], "applicability")), "suggestion");
+        assert_eq!(int(get(&diags[1], "start_row")), 1);
+        assert!(matches!(get(&diags[0], "fix"), VmValue::Nil));
+    }
+
+    #[test]
+    fn report_helpers_round_trip_severity_and_safety() {
+        // The string<->enum mapping used by `rules.visit` reports.
+        assert_eq!(parse_severity("error"), Some(Severity::Error));
+        assert_eq!(parse_severity("bogus"), None);
+        assert_eq!(parse_safety("format-only"), Some(Safety::FormatOnly));
+        assert_eq!(parse_safety("needs-human"), Some(Safety::NeedsHuman));
+        assert_eq!(parse_safety("nope"), None);
+        // `true` flags with defaults; nil/false skip; a dict carries fields.
+        assert_eq!(reports_from_return(VmValue::Bool(true)).len(), 1);
+        assert_eq!(reports_from_return(VmValue::Nil).len(), 0);
+        assert_eq!(reports_from_return(VmValue::Bool(false)).len(), 0);
+        let list = VmValue::List(Arc::new(vec![
+            dict(&[("message", str_vm("a"))]),
+            VmValue::Nil,
+            dict(&[("message", str_vm("b"))]),
+        ]));
+        assert_eq!(reports_from_return(list).len(), 2);
+    }
+
+    #[test]
+    fn capability_does_not_register_the_async_visitor() {
+        // `rules.visit` is async, so it is installed directly on the VM in
+        // `install`, not through the sync capability registry.
+        let mut registry = BuiltinRegistry::new();
+        RulesCapability.register_builtins(&mut registry);
+        let names: Vec<_> = registry.iter().map(|b| b.name).collect();
+        assert!(!names.contains(&VISIT));
+        assert!(names.contains(&DIAGNOSTICS));
+    }
+
+    #[test]
     fn missing_rule_is_an_error() {
         let err = search_run(&[dict(&[
             ("source", str_vm("x")),
@@ -441,10 +771,10 @@ mod tests {
     }
 
     #[test]
-    fn capability_registers_three_builtins() {
+    fn capability_registers_the_sync_builtins() {
         let mut registry = BuiltinRegistry::new();
         RulesCapability.register_builtins(&mut registry);
         let names: Vec<_> = registry.iter().map(|b| b.name).collect();
-        assert_eq!(names, vec![SEARCH, REPORT, APPLY]);
+        assert_eq!(names, vec![SEARCH, REPORT, DIAGNOSTICS, APPLY]);
     }
 }
