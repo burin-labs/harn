@@ -103,12 +103,30 @@ fn resolve_rule_pack(pack: &str) -> Result<Vec<RuleSpec>, String> {
     ))
 }
 
-/// The local directory of an installed package named `name`
-/// (`<project>/.harn/packages/<name>`), if it exists.
+/// The local directory of an installed package named by dependency alias or
+/// canonical registry name, if it exists.
 fn installed_package_dir(name: &str) -> Option<std::path::PathBuf> {
     let cwd = std::env::current_dir().ok()?;
     let (_, project_dir) = crate::package::find_nearest_manifest(&cwd)?;
-    let dir = project_dir.join(".harn").join("packages").join(name);
+    let packages_dir = project_dir.join(".harn").join("packages");
+    if crate::package::validate_package_alias(name).is_ok() {
+        let dir = packages_dir.join(name);
+        if dir.is_dir() {
+            return Some(dir);
+        }
+    }
+
+    let (registry_name, requested_version) = crate::package::parse_registry_package_spec(name)?;
+    let lock = crate::package::LockFile::load(&project_dir.join("harn.lock"))
+        .ok()
+        .flatten()?;
+    let entry = lock.packages.iter().find(|entry| {
+        entry.registry.as_ref().is_some_and(|registry| {
+            registry.name == registry_name
+                && requested_version.is_none_or(|version| registry.version == version)
+        })
+    })?;
+    let dir = packages_dir.join(&entry.name);
     dir.is_dir().then_some(dir)
 }
 

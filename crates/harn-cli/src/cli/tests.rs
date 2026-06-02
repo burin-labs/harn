@@ -9,9 +9,9 @@ use super::{
     OrchestratorQueueCommand, OrchestratorTenantCommand, PackageArtifactsCommand,
     PackageCacheCommand, PackageCommand, PackageScaffoldCommand, PersonaCommand, ProjectTemplate,
     ProviderCapabilitiesCommand, ProviderCommand, ProviderToolProbeModeArg, ProvidersCommand,
-    PublishArgs, RunsCommand, SessionCommand, SkillCommand, SkillKeyCommand, SkillTrustCommand,
-    SkillsCommand, ToolCommand, TraceCommand, TriggerCommand, TrustCommand, TrustOutcomeArg,
-    TrustTierArg,
+    PublishArgs, RuleCommand, RunsCommand, SessionCommand, SkillCommand, SkillKeyCommand,
+    SkillTrustCommand, SkillsCommand, ToolCommand, TraceCommand, TriggerCommand, TrustCommand,
+    TrustOutcomeArg, TrustTierArg,
 };
 use clap::{CommandFactory, Parser};
 
@@ -2503,6 +2503,51 @@ fn test_parses_publish_git_tag_flow_options() {
     assert_eq!(registry_name.as_deref(), Some("@burin/acme-lib"));
     assert!(skip_index_pr);
     assert!(json);
+}
+
+#[test]
+fn test_parses_rule_publish_and_search() {
+    let cli = Cli::parse_from([
+        "harn",
+        "rule",
+        "publish",
+        "pkg",
+        "--dry-run",
+        "--registry-name",
+        "@acme/rules",
+        "--skip-index-pr",
+        "--json",
+    ]);
+    let Command::Rule(args) = cli.command.unwrap() else {
+        panic!("expected rule command");
+    };
+    let RuleCommand::Publish(publish) = args.command else {
+        panic!("expected rule publish");
+    };
+    assert_eq!(publish.package, Some(PathBuf::from("pkg")));
+    assert!(publish.dry_run);
+    assert_eq!(publish.registry_name.as_deref(), Some("@acme/rules"));
+    assert!(publish.skip_index_pr);
+    assert!(publish.json);
+
+    let cli = Cli::parse_from([
+        "harn",
+        "rule",
+        "search",
+        "typescript",
+        "--registry",
+        "index.toml",
+        "--json",
+    ]);
+    let Command::Rule(args) = cli.command.unwrap() else {
+        panic!("expected rule command");
+    };
+    let RuleCommand::Search(search) = args.command else {
+        panic!("expected rule search");
+    };
+    assert_eq!(search.query.as_deref(), Some("typescript"));
+    assert_eq!(search.registry.as_deref(), Some("index.toml"));
+    assert!(search.json);
 }
 
 #[test]

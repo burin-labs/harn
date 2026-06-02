@@ -2304,6 +2304,22 @@ harn package search --registry ./harn-package-index.toml --json
 The registry source comes from `--registry`, `HARN_PACKAGE_REGISTRY`,
 `[registry].url` in `harn.toml`, or Harn's default hosted index.
 
+## harn rule publish / search
+
+Publish and discover structural rule packs through the package registry.
+
+```bash
+harn rule publish ./acme-rules --registry-name @acme/rules --dry-run
+harn rule search typescript
+harn rule search --registry ./harn-package-index.toml --json
+```
+
+`harn rule publish` is a rule-pack alias over `harn publish`: it requires the
+package manifest to declare `[rules] ruleDirs`, validates the rule files, and
+adds rule-pack metadata to the package-index row. `harn rule search` filters the
+package registry to rule packs and reports the pack description, languages, rule
+count, and safety summary.
+
 ## harn package info
 
 Show registry metadata for one package, optionally at a specific version.

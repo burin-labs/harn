@@ -14,6 +14,21 @@ fn project_with_installed_pack(name: &str) -> PathBuf {
     std::fs::create_dir_all(dir.join("src")).unwrap();
     // The consuming project.
     std::fs::write(dir.join("harn.toml"), "[package]\nname = \"app\"\n").unwrap();
+    std::fs::write(
+        dir.join("harn.lock"),
+        r#"version = 4
+
+[[package]]
+name = "my-rules"
+source = "git+https://github.com/acme/my-rules"
+
+[package.registry]
+source = "index.toml"
+name = "@acme/my-rules"
+version = "0.1.0"
+"#,
+    )
+    .unwrap();
     // The installed pack ships its own manifest declaring where its rules live.
     std::fs::write(
         dir.join(".harn/packages/my-rules/harn.toml"),
@@ -50,6 +65,44 @@ fn rule_pack_resolves_an_installed_package_by_name() {
     assert_eq!(code, 0, "stderr={stderr}");
     let json: serde_json::Value = serde_json::from_str(&stdout).expect("json");
     assert_eq!(json["summary"]["total"], 2);
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn rule_pack_resolves_an_installed_package_by_registry_name() {
+    let dir = project_with_installed_pack("scoped");
+    std::fs::write(dir.join("src/a.ts"), "foo();\nfoo();\n").unwrap();
+
+    let (stdout, stderr, code) = run(
+        &dir,
+        &["scan", "--rule-pack", "@acme/my-rules", "src", "--json"],
+    );
+    assert_eq!(code, 0, "stderr={stderr}");
+    let json: serde_json::Value = serde_json::from_str(&stdout).expect("json");
+    assert_eq!(json["summary"]["total"], 2);
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn rule_pack_resolves_an_installed_package_by_registry_name_and_version() {
+    let dir = project_with_installed_pack("scoped-version");
+    std::fs::write(dir.join("src/a.ts"), "foo();\n").unwrap();
+
+    let (stdout, stderr, code) = run(
+        &dir,
+        &[
+            "scan",
+            "--rule-pack",
+            "@acme/my-rules@0.1.0",
+            "src",
+            "--json",
+        ],
+    );
+    assert_eq!(code, 0, "stderr={stderr}");
+    let json: serde_json::Value = serde_json::from_str(&stdout).expect("json");
+    assert_eq!(json["summary"]["total"], 1);
 
     let _ = std::fs::remove_dir_all(&dir);
 }
