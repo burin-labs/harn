@@ -1,0 +1,18 @@
+# Collapse `const x = obj?.x ?? default` into a destructure with a default.
+#
+# Powers the #2824 / burin-code#1629 migration. The unified `$K` only matches
+# the *non-alias* case (binding name == property name); aliases are left alone.
+#
+# Safety is `scope-local` (a suggestion, not auto-applied): the rewrite assumes
+# `$X` is non-nullish. `obj?.x ?? d` yields `d` when `obj` is null/undefined,
+# but `const { x = d } = obj` throws on a null `obj`. Apply where `$X` is known
+# to be a present object (as in the #2824 sites).
+id = "destructure-defaults"
+language = "typescript"
+severity = "info"
+message = "Collapse `?.x ?? default` into a destructure with a default"
+fix = "const { $K = $D } = $X;"
+safety = "scope-local"
+
+[rule]
+pattern = "const $K = $X?.$K ?? $D"
