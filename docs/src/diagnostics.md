@@ -3158,10 +3158,11 @@ project rule-engine or native lint rule
 
 #### What it means
 
-A project-supplied rule matched here. This is not a built-in lint: it is either
-a structural rule (a `*.toml` pattern from the project's `[rules] ruleDirs`) run
-through the linter via the rule engine (`harn-rules`), or a trusted native rule
-library loaded from `[rules] nativeRuleDirs`.
+A project-supplied rule matched here. This is not a built-in lint: it is a
+structural rule (a `*.toml` pattern from the project's `[rules] ruleDirs`) run
+through the linter via the rule engine (`harn-rules`), a `.lint.harn` script
+rule loaded from `ruleDirs`, or a trusted native rule library loaded from
+`[rules] nativeRuleDirs`.
 
 The message, severity, and any suggested fix come from the matched rule. The
 diagnostic's reported rule id is the project rule's id, so you filter it with
@@ -3178,9 +3179,9 @@ nativeRuleDirs = ["native-rules"]
 ```
 
 and a rule in one of them matched this code. Declarative rules pair a structural
-`pattern` with a `message`; native rules emit diagnostics through the
-`harn_lint::native` ABI. Rules that carry a fix surface it as a
-machine-applicable lint fix.
+`pattern` with a `message`; script rules return findings from `lint(source)`;
+native rules emit diagnostics through the `harn_lint::native` ABI. Rules that
+carry a fix surface it as a machine-applicable lint fix.
 
 #### How to fix
 
