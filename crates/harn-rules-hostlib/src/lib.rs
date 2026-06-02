@@ -823,6 +823,6 @@ mod tests {
         let mut registry = BuiltinRegistry::new();
         RulesCapability.register_builtins(&mut registry);
         let names: Vec<_> = registry.iter().map(|b| b.name).collect();
-        assert_eq!(names, vec![SEARCH, REPORT, DIAGNOSTICS, APPLY]);
+        assert_eq!(names, vec![SEARCH, REPORT, DIAGNOSTICS, APPLY, FOLD]);
     }
 }
