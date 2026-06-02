@@ -8,6 +8,59 @@ highlights live in [CHANGELOG-pre-0.6.md](CHANGELOG-pre-0.6.md).
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.8.63
+
+### Breaking
+
+- **Synchronization permits and channel close now fail closed (#2800).**
+  Permits returned by `sync_*_acquire` are scope-owned RAII guards that release
+  on scope exit, `return`, and `throw`; `sync_release` remains idempotent for
+  earlier release. Direct blocking `send` now raises structured
+  `ChannelClosed` (`channel_closed`) after close, and direct `receive` drains
+  buffered values before raising `ChannelClosed` on a closed empty channel.
+
+### Added
+
+- Added the `harn-rules-hostlib` crate and the `std/rules` stdlib module. The
+  rule engine is now callable from Harn: `rules.search` returns capture-bound
+  matches, `rules.report` returns a data table, and `rules.apply` applies
+  dry-run-default, safety-aware codemods from TOML rule source.
+- `harn-rules` patterns gained **typed placeholders** `$VAR:kind` for syntax
+  class constraints such as `expr`, `stmt`, `ty`, and `ident`, including the
+  full declarative path through `rules.search` and `rules.apply`.
+- Added `harn scan`, a read-only structural search and lint command over
+  gitignore-aware filesets. It accepts inline patterns, saved rules, and rule
+  packs, and can print grep-style matches, per-file reports, or a JSON envelope.
+- Added `harn codemod`, a dry-run-default command for applying codemod rule
+  fixes across filesets. `--apply` writes changes behind the deterministic-tools
+  capability gate, and unsafe rules require `--allow-unsafe`.
+- Added a curated `rules/std` seed rule pack with the `destructure-defaults`
+  codemod and `no-console-log` lint, including annotation fixtures and seed-pack
+  tests.
+- Added the embedded `harn-rules` skill and rule engine cookbook for authoring,
+  searching, applying, and running rules from Harn scripts.
+- `std/rules` gained the imperative `rules.visit` visitor for per-match Harn
+  callbacks, plus `rules.diagnostics` for declarative rule diagnostics.
+- VM `match` list patterns now support a trailing `...rest` element, mirroring
+  `let` destructuring for at-least-N matches.
+
+### Fixed
+
+- **Release gates are more deterministic (#2887).** Unix-socket invalid-JSON
+  tests avoid client/server write races, hook-session file edit tests use
+  isolated temp files, release PR drift checks reject stale main pins, and the
+  `harn-rules-hostlib` lockfile entry matches the workspace version.
+- `harn-rules` codemod `apply` no longer panics or corrupts files when a rule
+  pattern produces nested or overlapping matches; the engine keeps the
+  outermost match and rewrites each region once.
+- VM fixed-arity `match` list patterns are now exact-length. Use `[a, ...rest]`
+  for at-least-N matching.
+- VM string-repeat, padding, and related repeat helpers now share an allocation
+  guard and return a clean runtime error for oversized output instead of
+  exhausting memory or panicking.
+- `harn-hostlib` session component sanitization no longer lets all-dot session
+  ids (`.`, `..`) pass through verbatim.
+
 ## v0.8.62
 
 ### Added
