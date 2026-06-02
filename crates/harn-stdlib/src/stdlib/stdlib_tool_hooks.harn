@@ -1,3 +1,5 @@
+import { tool_hooks_seed_registry } from "std/tool_hooks_catalogues"
+
 /**
  * std/tool_hooks — preset `run_command` wrapper for the catalogue-driven
  * "command faux-pas" library (epic #1884).

@@ -67,6 +67,26 @@ fn test_fix_unused_import_partial() {
 }
 
 #[test]
+fn test_import_used_in_destructuring_default_is_kept() {
+    let source = r#"import { seed_registry } from "mod"
+pipeline default(task) {
+  let { registry = seed_registry(task), custom_rules = [] } = {}
+  log(registry)
+  log(custom_rules)
+}
+"#;
+    let diags = lint_source(source);
+    assert!(
+        !has_rule(&diags, "unused-import"),
+        "imports used in destructuring defaults should not be removed: {diags:?}"
+    );
+    assert!(
+        !has_rule(&diags, "undefined-function"),
+        "destructuring default calls should register imported function references: {diags:?}"
+    );
+}
+
+#[test]
 fn test_import_order_fires_when_out_of_order() {
     let source = "import \"std/io\"\nimport \"std/fs\"\n\nfn a() -> int { return 1 }\n";
     let diags = lint_source(source);
