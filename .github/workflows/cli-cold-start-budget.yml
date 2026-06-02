@@ -44,6 +44,10 @@ env:
 jobs:
   cold-start-budget:
     name: Cold-start budget
+    # This advisory workflow can run on GitHub-hosted runners before it is part
+    # of the required CI aggregate. Keep an explicit ceiling so a wedged release
+    # build does not burn the platform default timeout after the PR has moved on.
+    timeout-minutes: 45
     # Bench is wall-clock sensitive, so a fixed-class runner is the
     # right long-term home. For now we stay on ubuntu-latest so the
     # workflow lights up for everyone without depending on the
@@ -66,8 +70,10 @@ jobs:
           shared-key: cli-cold-start-budget
           cache-bin: false
       - name: Build release harn
+        timeout-minutes: 40
         run: cargo build --release --bin harn
       - name: Run cold-start bench
+        timeout-minutes: 5
         # `--no-build` because we already built above; `--iterations` is
         # intentionally lower on CI than the local default (20) because
         # the ubuntu-latest noise floor makes a tighter loop misleading.
