@@ -78,4 +78,9 @@ pub struct LintOptions<'a> {
     /// (#2849), loaded from the project's `[rules] ruleDirs`. Each is compiled
     /// and wrapped as a `Rule`; an invalid one is skipped, not fatal.
     pub engine_rules: &'a [String],
+    /// Per-rule severity overrides (#2851): a rule id → the severity to report
+    /// its diagnostics at, applied after disable-filtering. Lets a project
+    /// promote a rule to `error` or demote one to `info` via `[lint]`. Owned
+    /// (not `&[..]`) because a `HashMap` reference has no const empty default.
+    pub severity_overrides: std::collections::HashMap<String, LintSeverity>,
 }

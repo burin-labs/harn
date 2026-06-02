@@ -84,6 +84,34 @@ pub(crate) fn harn_lint_persona_step_allowlist(path: &Path) -> Vec<String> {
     }
 }
 
+/// Per-rule severity overrides from `[lint.severity]` (#2851), parsed to
+/// [`harn_lint::LintSeverity`]. An unrecognized severity string is dropped
+/// with a warning rather than failing the run.
+pub(crate) fn harn_lint_severity_overrides(
+    path: &Path,
+) -> std::collections::HashMap<String, harn_lint::LintSeverity> {
+    let raw = match harn_config::load_for_path(path) {
+        Ok(cfg) => cfg.lint.severity,
+        Err(e) => {
+            eprintln!("warning: {e}");
+            return std::collections::HashMap::new();
+        }
+    };
+    raw.into_iter()
+        .filter_map(
+            |(rule, severity)| match severity.to_ascii_lowercase().as_str() {
+                "error" => Some((rule, harn_lint::LintSeverity::Error)),
+                "warning" | "warn" => Some((rule, harn_lint::LintSeverity::Warning)),
+                "info" => Some((rule, harn_lint::LintSeverity::Info)),
+                other => {
+                    eprintln!("warning: [lint.severity] `{rule}`: unknown severity `{other}`");
+                    None
+                }
+            },
+        )
+        .collect()
+}
+
 pub(crate) fn collect_harn_targets(targets: &[&str]) -> Vec<PathBuf> {
     super::super::collect_source_targets(targets, true, false).harn
 }

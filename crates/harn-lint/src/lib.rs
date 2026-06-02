@@ -213,7 +213,7 @@ fn lint_full(
         }
     }
     linter.finalize();
-    if disabled_rules.is_empty() {
+    let mut diagnostics: Vec<LintDiagnostic> = if disabled_rules.is_empty() {
         linter.diagnostics
     } else {
         linter
@@ -221,7 +221,16 @@ fn lint_full(
             .into_iter()
             .filter(|d| !rule_disabled(&d.rule, disabled_rules))
             .collect()
+    };
+    // Per-rule severity overrides (#2851), applied after disable-filtering.
+    if !options.severity_overrides.is_empty() {
+        for diagnostic in &mut diagnostics {
+            if let Some(&severity) = options.severity_overrides.get(diagnostic.rule.as_ref()) {
+                diagnostic.severity = severity;
+            }
+        }
     }
+    diagnostics
 }
 
 /// Convert type-checker diagnostics tagged as lint rules into ordinary

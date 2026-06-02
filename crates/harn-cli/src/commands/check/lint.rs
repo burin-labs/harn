@@ -77,6 +77,7 @@ pub(crate) fn lint_file_inner(
         persona_step_allowlist,
         require_stdlib_metadata: path_is_stdlib_source(path),
         engine_rules: &engine_rules,
+        severity_overrides: super::harn_lint_severity_overrides(path),
     };
     let mut diagnostics = harn_lint::lint_with_module_graph(
         &program,
@@ -136,6 +137,7 @@ pub(crate) fn lint_fix_file(
         persona_step_allowlist,
         require_stdlib_metadata: path_is_stdlib_source(path),
         engine_rules: &engine_rules,
+        severity_overrides: super::harn_lint_severity_overrides(path),
     };
     let lint_diags = harn_lint::lint_with_module_graph(
         &program,

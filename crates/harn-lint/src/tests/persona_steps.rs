@@ -47,12 +47,8 @@ fn helper(ctx) {
     let program = parser.parse().unwrap();
     let allow = vec!["helper".to_string()];
     let options = LintOptions {
-        file_path: None,
-        require_file_header: false,
-        complexity_threshold: None,
         persona_step_allowlist: &allow,
-        require_stdlib_metadata: false,
-        engine_rules: &[],
+        ..Default::default()
     };
     let diagnostics = lint_with_options(&program, &[], Some(source), &HashSet::new(), &options);
     assert!(!has_rule(&diagnostics, "persona-body-must-call-steps"));
