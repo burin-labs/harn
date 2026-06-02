@@ -504,21 +504,24 @@ jobs:
 
   deploy-docs:
     name: Deploy docs
-    needs: [ci-status]
+    # Gate ONLY on the docs site build, not the whole `ci-status` graph. The
+    # docs site is static content built solely from docs/src + website/, so it
+    # should publish whenever it builds green — independent of unrelated backend
+    # or test lanes. Gating on `ci-status` previously meant a docs change that
+    # merged while main was red elsewhere (e.g. a flaky Windows test) had its
+    # deploy silently skipped, and no later non-docs push ever re-fired it. This
+    # decouples docs delivery from the rest of CI so that can't recur.
+    needs: [docs-site]
     # Single `curl` to the Render deploy hook; running it on a self-hosted
     # runner adds no value.
     runs-on: ubuntu-latest
-    # `always()` is required: without it, this job is skipped whenever ANY job
-    # in the `ci-status` dependency graph is skipped (e2e is label-gated, and
-    # windows/rust-builds are path-filtered), even though `ci-status` itself
-    # succeeds. That GitHub Actions quirk silently disabled docs auto-deploy
-    # for weeks. See actions/runner#2205. We re-assert the success gate
-    # explicitly via `needs.ci-status.result`.
+    # `always()` keeps the job evaluable even if `docs-site` were ever skipped
+    # (the actions/runner#2205 quirk); the explicit success check is the gate.
     if: >-
       always()
       && github.ref == 'refs/heads/main'
       && github.event_name == 'push'
-      && needs.ci-status.result == 'success'
+      && needs['docs-site'].result == 'success'
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
