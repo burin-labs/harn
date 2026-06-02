@@ -880,12 +880,11 @@ impl Compiler {
         }
     }
 
-    pub(super) fn unwind_scopes_to(&mut self, target_depth: usize) {
-        while self.scope_depth > target_depth {
+    /// Emit cleanup for an abrupt control-flow path without changing the
+    /// compiler's lexical scope stacks for the source path that follows it.
+    pub(super) fn emit_scope_unwind_to(&mut self, target_depth: usize) {
+        for _ in target_depth..self.scope_depth {
             self.chunk.emit(Op::PopScope, self.line);
-            self.scope_depth -= 1;
-            self.type_scopes.pop();
-            self.local_scopes.pop();
         }
     }
 

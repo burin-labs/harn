@@ -292,6 +292,61 @@ fn test_compile_locals_to_slots() {
     assert!(!disasm.contains("SET_VAR"));
 }
 
+fn assert_loop_guard_keeps_local_slots(source: &str) {
+    let chunk = compile_source(source);
+    let disasm = chunk.disassemble("test");
+    assert!(
+        disasm.contains("GET_LOCAL_SLOT"),
+        "expected local-slot reads in disassembly:\n{disasm}"
+    );
+    assert!(
+        disasm.contains("SET_LOCAL_SLOT"),
+        "expected local-slot writes in disassembly:\n{disasm}"
+    );
+    assert!(
+        !disasm.contains("GET_VAR"),
+        "guarded loop control flow must not make later same-block reads dynamic:\n{disasm}"
+    );
+    assert!(
+        !disasm.contains("SET_VAR"),
+        "guarded loop control flow must not make later same-block writes dynamic:\n{disasm}"
+    );
+}
+
+#[test]
+fn loop_guard_break_keeps_later_bindings_in_local_slots() {
+    assert_loop_guard_keeps_local_slots(
+        r#"pipeline test(task) {
+  var index = 0
+  while index < 1 {
+    let name = "abc"
+    if name == "" {
+      break
+    }
+    let value = name + "!"
+    index = index + 1
+  }
+}"#,
+    );
+}
+
+#[test]
+fn loop_guard_continue_keeps_later_bindings_in_local_slots() {
+    assert_loop_guard_keeps_local_slots(
+        r#"pipeline test(task) {
+  var index = 0
+  while index < 1 {
+    let name = "abc"
+    if name == "" {
+      continue
+    }
+    let value = name + "!"
+    index = index + 1
+  }
+}"#,
+    );
+}
+
 #[test]
 fn test_compile_function_params_to_slots() {
     let chunk = compile_source(
