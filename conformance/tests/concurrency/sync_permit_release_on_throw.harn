@@ -1,0 +1,12 @@
+pipeline test(task) {
+  var escaped = nil
+  let result = try {
+    escaped = sync_mutex_acquire("raii-throw")
+    throw "boom"
+  }
+  __io_println(is_err(result))
+  let reacquired = sync_mutex_acquire("raii-throw", 0)
+  __io_println(reacquired != nil)
+  __io_println(sync_release(escaped))
+  __io_println(sync_release(reacquired))
+}

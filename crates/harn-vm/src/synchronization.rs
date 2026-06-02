@@ -52,6 +52,29 @@ pub(crate) struct VmSyncHeldGuard {
     pub(crate) env_scope_depth: usize,
 }
 
+impl Drop for VmSyncHeldGuard {
+    fn drop(&mut self) {
+        self._permit.release();
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct VmSyncHeldKey {
+    pub(crate) kind: String,
+    pub(crate) key: String,
+    pub(crate) permits: u32,
+}
+
+impl VmSyncHeldKey {
+    pub(crate) fn from_permit(permit: &VmSyncPermitHandle) -> Option<Self> {
+        (!permit.is_released()).then(|| Self {
+            kind: permit.kind().to_string(),
+            key: permit.key().to_string(),
+            permits: permit.permits(),
+        })
+    }
+}
+
 impl VmSyncRuntime {
     pub(crate) fn new() -> Self {
         Self::default()
@@ -348,6 +371,10 @@ impl VmSyncLease {
 
     pub(crate) fn permits(&self) -> u32 {
         self.permits
+    }
+
+    pub(crate) fn is_released(&self) -> bool {
+        self.released.load(Ordering::SeqCst)
     }
 }
 

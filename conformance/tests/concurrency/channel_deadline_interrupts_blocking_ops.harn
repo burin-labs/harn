@@ -1,0 +1,19 @@
+pipeline test(task) {
+  let recv_ch = channel("deadline-receive", 1)
+  let recv_result = try {
+    deadline 25ms {
+      receive(recv_ch)
+    }
+  }
+  __io_println(is_err(recv_result))
+  __io_println(is_timeout(unwrap_err(recv_result)))
+  let send_ch = channel("deadline-send", 1)
+  send(send_ch, "buffered")
+  let send_result = try {
+    deadline 25ms {
+      send(send_ch, "blocked")
+    }
+  }
+  __io_println(is_err(send_result))
+  __io_println(is_timeout(unwrap_err(send_result)))
+}

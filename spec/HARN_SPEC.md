@@ -1525,10 +1525,11 @@ low-level OS locks or spinlocks. The initial scope is process-local: spawned and
 parallel child VMs inherit the same synchronization runtime, while durable
 EventLog-backed variants are reserved for explicit future primitives.
 
-`mutex { ... }` acquires the fair process-local default mutex key
-`"__default__"` for the lexical block. The permit is released when the block's
-scope exits, including `throw`, `return`, `break`, `continue`, and caught
-runtime errors.
+`mutex { ... }` acquires a fair process-local mutex keyed by the lexical
+call-site of the block. Re-entering the same block serializes on the same key;
+different bare `mutex { ... }` blocks do not contend with each other. The permit
+is released when the block's scope exits, including `throw`, `return`, `break`,
+`continue`, and caught runtime errors.
 
 Named primitives return a permit value or `nil` on timeout:
 
@@ -1546,6 +1547,9 @@ let gate = sync_gate_acquire("workflow-runner", 8, 5s)
   from a named FIFO gate.
 - `sync_release(permit)` releases a named permit and returns `true` only for
   the first release.
+- Permits returned by `sync_*_acquire` are also owned by the current scope or
+  frame. They are released automatically on scope exit, `return`, and `throw`;
+  explicit `sync_release` is for earlier release and remains idempotent.
 - `sync_metrics(kind?, key?)` returns observability counters for matching
   primitives. A concrete `(kind, key)` returns a dict; partial or empty
   filters return a list.
@@ -1799,7 +1803,7 @@ Channels provide typed message-passing between concurrent tasks.
 
 ```harn
 let ch = channel("name", 10)   // buffered channel with capacity 10
-send(ch, "hello")               // send a value
+send(ch, "hello")               // send a value, returns true
 let msg = receive(ch)           // blocking receive
 ```
 
@@ -1826,8 +1830,9 @@ The loop exits once all items have been consumed.
 
 #### close_channel(ch)
 
-Closes a channel. After closing, `send` returns `false` and no new values
-are accepted. Buffered items can still be received.
+Closes a channel. After closing, `send` raises `ChannelClosed` and no new values
+are accepted. Buffered items can still be received. Direct `receive` raises
+`ChannelClosed` once the channel is closed and drained.
 
 #### try_receive(ch)
 

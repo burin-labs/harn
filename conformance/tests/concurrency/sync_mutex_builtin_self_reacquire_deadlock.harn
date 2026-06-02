@@ -1,0 +1,4 @@
+pipeline test(task) {
+  let _held = sync_mutex_acquire("builtin-self")
+  sync_mutex_acquire("builtin-self")
+}

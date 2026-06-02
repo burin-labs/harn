@@ -537,16 +537,16 @@ impl Vm {
         if let Some(id) = direct_id {
             if let Some(entry) = self.builtins_by_id.get(&id).cloned() {
                 if entry.name.as_ref() == name {
-                    return self.call_builtin_entry(entry.dispatch, args).await;
+                    return self.call_builtin_entry(name, entry.dispatch, args).await;
                 }
             }
         }
 
         if let Some(builtin) = self.builtins.get(name).cloned() {
-            self.call_builtin_entry(VmBuiltinDispatch::Sync(builtin), args)
+            self.call_builtin_entry(name, VmBuiltinDispatch::Sync(builtin), args)
                 .await
         } else if let Some(async_builtin) = self.async_builtins.get(name).cloned() {
-            self.call_builtin_entry(VmBuiltinDispatch::Async(async_builtin), args)
+            self.call_builtin_entry(name, VmBuiltinDispatch::Async(async_builtin), args)
                 .await
         } else if let Some(bridge) = &self.bridge {
             crate::orchestration::enforce_current_policy_for_bridge_builtin(name)?;
@@ -576,10 +576,11 @@ impl Vm {
 
     async fn call_builtin_entry(
         &mut self,
+        name: &str,
         dispatch: VmBuiltinDispatch,
         args: Vec<VmValue>,
     ) -> Result<VmValue, VmError> {
-        match dispatch {
+        let result = match dispatch {
             VmBuiltinDispatch::Sync(builtin) => builtin(&args, &mut self.output),
             VmBuiltinDispatch::Async(async_builtin) => {
                 // Bind a fresh child VM as the async-builtin context for the
@@ -596,7 +597,19 @@ impl Vm {
                 }
                 result
             }
+        }?;
+        if matches!(
+            name,
+            "sync_mutex_acquire"
+                | "sync_semaphore_acquire"
+                | "sync_gate_acquire"
+                | "sync_rwlock_acquire"
+        ) {
+            if let VmValue::SyncPermit(permit) = &result {
+                self.adopt_sync_permit_for_current_scope(permit.as_ref().clone());
+            }
         }
+        Ok(result)
     }
 }
 
