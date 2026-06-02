@@ -9,6 +9,7 @@ use harn_lexer::Lexer;
 use harn_parser::{Attribute, Node, Parser, SNode};
 
 use crate::env_guard::ScopedEnvVar;
+use crate::CLI_RUNTIME_STACK_SIZE;
 
 /// Drain `harn-hostlib`'s process-global fs-snapshot sessions between test
 /// cases. The snapshot map is keyed by session id and only drained
@@ -791,6 +792,7 @@ async fn execute_cases(
         let diagnose = options.diagnose;
         let handle = thread::Builder::new()
             .name(format!("harn-test-worker-{worker_idx}"))
+            .stack_size(CLI_RUNTIME_STACK_SIZE)
             .spawn(move || {
                 let runtime = match tokio::runtime::Builder::new_current_thread()
                     .enable_all()
