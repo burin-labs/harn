@@ -275,8 +275,7 @@ pub fn workflow_evaluate_condition(config = nil) {
  */
 pub fn workflow_classify_stage_outcome(config = nil) {
   let node_kind = __stage_string(config?.node_kind, "")
-  let result = config?.result ?? {}
-  let verification = config?.verification ?? {}
+  let {result = {}, verification = {}} = config ?? {}
   let verified_ok = __stage_bool(verification?.ok, true)
   let result_status = __stage_string(result?.status, "completed")
   let stage_succeeded = if node_kind == "verify" {
@@ -321,8 +320,7 @@ pub fn workflow_classify_stage_outcome(config = nil) {
  * @example: workflow_stage_attempt_outcome(config)
  */
 pub fn workflow_stage_attempt_outcome(config = nil) {
-  let node = config?.node ?? {}
-  let result = config?.result ?? {}
+  let {node = {}, result = {}} = config ?? {}
   let verification = if config?.verification != nil {
     config.verification
   } else {

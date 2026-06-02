@@ -292,8 +292,7 @@ fn __classifier_validate_config(cfg) {
     if type_of(cache) != "dict" {
       throw "preset_run_command: llm_classifier.cache must be a dict"
     }
-    let ttl_ms = cache?.ttl_ms ?? 0
-    let ttl_seconds = cache?.ttl_seconds ?? 0
+    let {ttl_ms = 0, ttl_seconds = 0} = cache ?? {}
     if type_of(ttl_ms) != "int" {
       throw "preset_run_command: llm_classifier.cache.ttl_ms must be an int"
     }
@@ -583,8 +582,7 @@ pub fn preset_run_command(config = nil) {
    * catalogue per opted-in stack. Callers that supply `registry:` keep
    * full control — tests, vendor overrides, and migration paths are
    * unaffected. (TH-04 #1897) */
-  let registry = cfg?.registry ?? tool_hooks_seed_registry(stacks)
-  let custom_rules = cfg?.custom_rules ?? []
+  let {registry = tool_hooks_seed_registry(stacks), custom_rules = []} = cfg ?? {}
   if type_of(custom_rules) != "list" {
     throw "preset_run_command: `custom_rules` must be a list of tool_rule values"
   }

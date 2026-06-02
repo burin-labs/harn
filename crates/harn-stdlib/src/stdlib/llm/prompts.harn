@@ -165,9 +165,7 @@ pub fn system_prelude(opts) {
   if persona == nil || to_string(persona) == "" {
     throw "system_prelude: opts.persona is required"
   }
-  let tone = opts?.tone ?? "professional"
-  let tools = opts?.tools ?? []
-  let constraints = opts?.constraints ?? []
+  let {tone = "professional", tools = [], constraints = []} = opts ?? {}
   let output_contract = opts?.output_contract
   let examples = opts?.examples ?? []
   var sections = [to_string(persona), __tone_voice(tone)]

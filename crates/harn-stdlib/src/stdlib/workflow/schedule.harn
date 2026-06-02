@@ -56,8 +56,7 @@ fn __schedule_required_inputs(node, incoming_count) {
  */
 pub fn workflow_join_readiness(config = nil) {
   let node_id = __schedule_string(config?.node_id, "")
-  let node = config?.node ?? {}
-  let graph = config?.graph ?? {}
+  let {node = {}, graph = {}} = config ?? {}
   let completed_nodes = __schedule_list(config?.completed_nodes)
   let incoming = __schedule_incoming_edges(graph, node_id)
   let required = __schedule_required_inputs(node, len(incoming))

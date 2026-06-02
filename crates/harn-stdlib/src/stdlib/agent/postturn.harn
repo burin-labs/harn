@@ -830,8 +830,7 @@ pub fn agent_compute_post_turn(session, llm_result, dispatch, opts, iteration) {
   if __native_tool_text_completion(opts, has_tool_calls, text) {
     return __post_turn_with_narrowing(__completion_result(opts, payload, "natural"), narrowing)
   }
-  let loop_until_done = opts?.loop_until_done ?? false
-  let daemon = opts?.daemon ?? false
+  let {loop_until_done = false, daemon = false} = opts ?? {}
   if !has_tool_calls && !loop_until_done && !daemon {
     return __post_turn_with_narrowing(__completion_result(opts, payload, "natural"), narrowing)
   }

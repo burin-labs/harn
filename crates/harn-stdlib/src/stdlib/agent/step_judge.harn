@@ -21,8 +21,7 @@ fn __step_judge_schema() {
 }
 
 fn __serialize_response(llm_result) {
-  let text = llm_result?.text ?? ""
-  let tool_calls = llm_result?.tool_calls ?? []
+  let {text = "", tool_calls = []} = llm_result ?? {}
   var parts = []
   if text != "" {
     parts = parts.push("text: " + text)
@@ -114,9 +113,7 @@ fn __invoke(harness: Harness, judge_cfg, opts, payload) {
     }
   }
   let result = checkpoint.data
-  let reasoning = result?.reasoning ?? ""
-  let critique = result?.critique ?? ""
-  let confidence = result?.confidence ?? 1.0
+  let {reasoning = "", critique = "", confidence = 1.0} = result ?? {}
   let pass_verdicts = ["pass", "yes", "ok", "advance", "proceed", "approve"]
   let feedback_default = judge_cfg?.feedback_fallback ?? "The previous response should be revised."
   let outcome = __judge_classify_verdict(
@@ -136,9 +133,7 @@ fn __invoke(harness: Harness, judge_cfg, opts, payload) {
 }
 
 fn __emit_decision(session_id, iteration, on_veto, verdict) {
-  let usage = verdict?.typed_checkpoint?.usage ?? {}
-  let provider = verdict?.typed_checkpoint?.provider ?? ""
-  let model = verdict?.typed_checkpoint?.model ?? ""
+  let {usage = {}, provider = "", model = ""} = verdict?.typed_checkpoint ?? {}
   let cost_est = if provider != "" && model != "" {
     estimate_call_cost(
       {

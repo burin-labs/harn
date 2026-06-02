@@ -159,8 +159,7 @@ fn __probe_typecheck_diagnostics(stdout) -> dict {
   }
   let envelope = unwrap(parsed)
   let summary = envelope?.data?.summary ?? envelope?.summary ?? {}
-  let errors = summary?.errors ?? -1
-  let warnings = summary?.warnings ?? -1
+  let {errors = -1, warnings = -1} = summary ?? {}
   return {parsed: true, errors: errors, warnings: warnings, envelope_ok: envelope?.ok ?? nil}
 }
 

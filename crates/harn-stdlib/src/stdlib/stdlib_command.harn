@@ -125,8 +125,7 @@ fn __command_success(result) -> bool {
   if result?.success != nil {
     return result.success ? true : false
   }
-  let status = result?.status ?? "completed"
-  let exit_code = result?.exit_code ?? -1
+  let {status = "completed", exit_code = -1} = result ?? {}
   return status == "completed" && exit_code == 0 && !(result?.timed_out ?? false)
 }
 
@@ -137,8 +136,7 @@ fn __command_combined(result) -> string {
   if result?.inline_output != nil {
     return result.inline_output
   }
-  let stdout = result?.stdout ?? ""
-  let stderr = result?.stderr ?? ""
+  let {stdout = "", stderr = ""} = result ?? {}
   return stdout + stderr
 }
 
@@ -936,8 +934,7 @@ pub fn command_failure_text(result, options = nil) -> string {
   let opts = __command_options(options)
   let max_stdout = opts?.max_stdout_chars ?? 8000
   let max_stderr = opts?.max_stderr_chars ?? 4000
-  let status = result?.status ?? "failed"
-  let exit_code = result?.exit_code ?? result?.status
+  let {status = "failed", exit_code = result?.status} = result ?? {}
   var lines = ["status=" + to_string(status) + " exit=" + to_string(exit_code)]
   if trim(result?.stdout ?? "") != "" {
     lines = lines + ["stdout:", truncate_text(result.stdout, max_stdout)]
