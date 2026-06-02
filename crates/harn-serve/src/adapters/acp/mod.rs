@@ -68,6 +68,7 @@ use std::sync::Arc;
 use std::time::{Instant, SystemTime};
 
 use async_trait::async_trait;
+use futures::StreamExt;
 use harn_vm::agent_events::{clear_session_sinks, register_sink, AgentEventSink};
 use harn_vm::visible_text::{sanitize_visible_assistant_text, VisibleTextState};
 use serde::Deserialize;
@@ -144,12 +145,43 @@ struct InjectControlRecord {
     status: String,
 }
 
-fn session_id_param(params: &serde_json::Value) -> Option<String> {
+struct TimelineSubscription {
+    session_id: Option<String>,
+    handle: tokio::task::JoinHandle<()>,
+}
+
+fn string_param(params: &serde_json::Value, camel: &str, snake: &str) -> Option<String> {
     params
-        .get("sessionId")
-        .or_else(|| params.get("session_id"))
+        .get(camel)
+        .or_else(|| params.get(snake))
         .and_then(|value| value.as_str())
         .map(str::to_string)
+}
+
+fn session_id_param(params: &serde_json::Value) -> Option<String> {
+    string_param(params, "sessionId", "session_id")
+}
+
+fn parse_session_timeline_query(
+    params: &serde_json::Value,
+) -> Result<harn_vm::session_timeline::SessionTimelineQuery, String> {
+    let source = params.get("query").unwrap_or(params);
+    let mut query: harn_vm::session_timeline::SessionTimelineQuery =
+        serde_json::from_value(source.clone())
+            .map_err(|error| format!("invalid session timeline query: {error}"))?;
+    if query.session_id.is_none() {
+        query.session_id = session_id_param(params);
+    }
+    if query.run_id.is_none() {
+        query.run_id = string_param(params, "runId", "run_id");
+    }
+    if query.run_path.is_none() {
+        query.run_path = string_param(params, "runPath", "run_path");
+    }
+    if query.project_id.is_none() {
+        query.project_id = string_param(params, "projectId", "project_id");
+    }
+    Ok(query)
 }
 
 fn harn_meta(params: &serde_json::Value) -> Option<&serde_json::Map<String, serde_json::Value>> {
@@ -722,6 +754,9 @@ pub struct AcpServer {
     /// ACP control-plane ownership for pending injected messages, keyed by
     /// session id then message id.
     inject_controls: HashMap<String, BTreeMap<String, InjectControlRecord>>,
+    /// Live timeline subscriptions created by Harn-specific ACP extension
+    /// methods. Each task fans event-log appends into notifications.
+    timeline_subscriptions: HashMap<String, TimelineSubscription>,
     /// Monotonically increasing JSON-RPC request ID for outgoing requests.
     next_id: AtomicU64,
     /// Pending outgoing request waiters, keyed by JSON-RPC id.
@@ -776,6 +811,7 @@ impl AcpServer {
             runtime_configurator: config.runtime_configurator,
             sessions: HashMap::new(),
             inject_controls: HashMap::new(),
+            timeline_subscriptions: HashMap::new(),
             next_id: AtomicU64::new(1),
             pending: Arc::new(Mutex::new(HashMap::new())),
             session_cancellations: Arc::new(std::sync::Mutex::new(HashMap::new())),
@@ -1050,6 +1086,143 @@ impl AcpServer {
                 self.llm_capability_overrides.as_ref(),
             ))
             .expect("provider catalog serializes"),
+        );
+    }
+
+    async fn handle_session_timeline_query(
+        &self,
+        id: &serde_json::Value,
+        params: &serde_json::Value,
+    ) {
+        let query = match parse_session_timeline_query(params) {
+            Ok(query) => query,
+            Err(message) => {
+                self.send_error(id, -32602, &message);
+                return;
+            }
+        };
+        let log = harn_vm::event_log::active_event_log();
+        match harn_vm::session_timeline::query_session_timeline(log.as_deref(), None, query).await {
+            Ok(snapshot) => self.send_response(
+                id,
+                serde_json::to_value(snapshot).expect("session timeline snapshot serializes"),
+            ),
+            Err(error) => self.send_error(id, -32000, &format!("session timeline query: {error}")),
+        }
+    }
+
+    async fn handle_session_timeline_subscribe(
+        &mut self,
+        id: &serde_json::Value,
+        params: &serde_json::Value,
+    ) {
+        let query = match parse_session_timeline_query(params) {
+            Ok(query) => query,
+            Err(message) => {
+                self.send_error(id, -32602, &message);
+                return;
+            }
+        };
+        let Some(log) = harn_vm::event_log::active_event_log() else {
+            self.send_error(
+                id,
+                -32000,
+                "session timeline subscribe: no active event log",
+            );
+            return;
+        };
+        let subscription_id = params
+            .get("subscriptionId")
+            .or_else(|| params.get("subscription_id"))
+            .and_then(serde_json::Value::as_str)
+            .filter(|value| !value.trim().is_empty())
+            .map(str::to_string)
+            .unwrap_or_else(|| format!("timeline_sub_{}", uuid::Uuid::now_v7().simple()));
+
+        let mut stream =
+            match harn_vm::session_timeline::subscribe_session_timeline(log, query.clone()).await {
+                Ok(stream) => stream,
+                Err(error) => {
+                    self.send_error(id, -32000, &format!("session timeline subscribe: {error}"));
+                    return;
+                }
+            };
+        if let Some(existing) = self.timeline_subscriptions.remove(&subscription_id) {
+            existing.handle.abort();
+        }
+
+        let output = self.output.clone();
+        let notification_subscription_id = subscription_id.clone();
+        let handle = tokio::spawn(async move {
+            while let Some(update) = stream.next().await {
+                let params = match update {
+                    Ok(update) => serde_json::json!({
+                        "subscriptionId": notification_subscription_id,
+                        "update": update,
+                    }),
+                    Err(error) => serde_json::json!({
+                        "subscriptionId": notification_subscription_id,
+                        "error": {
+                            "message": error.to_string(),
+                        },
+                    }),
+                };
+                let notification = harn_vm::jsonrpc::notification(
+                    harn_vm::session_timeline::SESSION_TIMELINE_UPDATE_METHOD,
+                    params,
+                );
+                if let Ok(line) = serde_json::to_string(&notification) {
+                    output.write_line(&line);
+                }
+            }
+        });
+        self.timeline_subscriptions.insert(
+            subscription_id.clone(),
+            TimelineSubscription {
+                session_id: query.session_id.clone(),
+                handle,
+            },
+        );
+        self.send_response(
+            id,
+            serde_json::json!({
+                "subscriptionId": subscription_id,
+                "updateMethod": harn_vm::session_timeline::SESSION_TIMELINE_UPDATE_METHOD,
+            }),
+        );
+    }
+
+    fn handle_session_timeline_unsubscribe(
+        &mut self,
+        id: &serde_json::Value,
+        params: &serde_json::Value,
+    ) {
+        let Some(subscription_id) = params
+            .get("subscriptionId")
+            .or_else(|| params.get("subscription_id"))
+            .and_then(serde_json::Value::as_str)
+        else {
+            self.send_error(
+                id,
+                -32602,
+                "session timeline unsubscribe requires subscriptionId",
+            );
+            return;
+        };
+        let removed = self
+            .timeline_subscriptions
+            .remove(subscription_id)
+            .map(|subscription| {
+                subscription.handle.abort();
+                true
+            })
+            .unwrap_or(false);
+        self.send_response(
+            id,
+            serde_json::json!({
+                "subscriptionId": subscription_id,
+                "removed": removed,
+            }),
         );
     }
 
@@ -1921,6 +2094,14 @@ impl AcpServer {
             .unwrap_or_else(|error| error.into_inner())
             .remove(session_id);
         self.inject_controls.remove(session_id);
+        self.timeline_subscriptions.retain(|_, subscription| {
+            if subscription.session_id.as_deref() == Some(session_id) {
+                subscription.handle.abort();
+                false
+            } else {
+                true
+            }
+        });
         clear_session_sinks(session_id);
         #[cfg(feature = "hostlib")]
         {
@@ -3714,6 +3895,24 @@ impl AcpServer {
                 }
                 self.handle_provider_catalog(&id);
             }
+            harn_vm::session_timeline::SESSION_TIMELINE_QUERY_METHOD => {
+                if self.reject_unauthenticated(&id) {
+                    return;
+                }
+                self.handle_session_timeline_query(&id, &params).await;
+            }
+            harn_vm::session_timeline::SESSION_TIMELINE_SUBSCRIBE_METHOD => {
+                if self.reject_unauthenticated(&id) {
+                    return;
+                }
+                self.handle_session_timeline_subscribe(&id, &params).await;
+            }
+            harn_vm::session_timeline::SESSION_TIMELINE_UNSUBSCRIBE_METHOD => {
+                if self.reject_unauthenticated(&id) {
+                    return;
+                }
+                self.handle_session_timeline_unsubscribe(&id, &params);
+            }
             "session/new" => {
                 if self.reject_unauthenticated(&id) {
                     return;
@@ -3918,6 +4117,14 @@ impl AcpServer {
                     self.send_error(&id, -32601, &format!("Method not found: {method}"));
                 }
             }
+        }
+    }
+}
+
+impl Drop for AcpServer {
+    fn drop(&mut self) {
+        for (_, subscription) in self.timeline_subscriptions.drain() {
+            subscription.handle.abort();
         }
     }
 }

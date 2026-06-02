@@ -609,6 +609,9 @@ The ACP server supports these JSON-RPC methods:
 | `session/stop` | Deprecated alias for `session/close` |
 | `session/set_mode` | Switch the active session mode |
 | `session/set_config_option` | Switch a preferred ACP session config option (`mode`, `model`, `thought_level`, or `budget`) |
+| `harn.session_timeline.query` | Return the Harn-owned redacted session timeline snapshot |
+| `harn.session_timeline.subscribe` | Subscribe to newly appended timeline events |
+| `harn.session_timeline.unsubscribe` | Stop a timeline subscription |
 | `workflow/signal` | Enqueue a workflow signal message in the current session workspace |
 | `workflow/query` | Read a named workflow query value from the current session workspace |
 | `workflow/update` | Send a workflow update request and wait for a response |
@@ -633,6 +636,65 @@ and `session.remind.pending = {list: true, revoke: true}` for host-side
 system-reminder queue controls. Harn-only methods such as
 `session/fork` remain documented extensions instead of being inserted into
 upstream `sessionCapabilities`.
+
+### Session timeline extension
+
+`harn.session_timeline.query` projects existing Harn observability records into
+one client-facing timeline shape. The query accepts `sessionId`/`session_id`,
+optional `runId`/`run_id`, optional `runPath`/`run_path`, optional
+`projectId`/`project_id`, optional `fromCursor`, and optional `limit`. The
+response includes:
+
+- `schemaVersion`
+- `cursor.topics`, a per-event-log-topic cursor map for later queries
+- `nodes`, ordered timeline entries with stable `id`, `parentId`, `children`,
+  `category`, `kind`, `status`, redacted `attributes`, source `references`, and
+  causal `links`
+
+Span nodes come from run trace spans when a run record is supplied to the VM API
+or when ACP can load a persisted run record from `runPath` or from `runId` in
+the default Harn run directory. ACP queries also use the active event log and
+include session agent events plus channel lifecycle/audit events. Channel match
+nodes link back to the matching channel emit node through
+`links.kind = "channel_emit"`. Batched channel match nodes also include
+`links.kind = "channel_batch_member"` entries for the recorded constituent event
+ids.
+
+```json
+{
+  "method": "harn.session_timeline.query",
+  "params": {
+    "sessionId": "sess_abc",
+    "runId": "run_123",
+    "fromCursor": {
+      "topics": {
+        "observability.agent_events.sess_abc": 42
+      }
+    }
+  }
+}
+```
+
+`harn.session_timeline.subscribe` accepts the same query fields plus an optional
+`subscriptionId`. It returns `{subscriptionId, updateMethod}` and then emits
+`harn.session_timeline.update` notifications:
+
+```json
+{
+  "method": "harn.session_timeline.update",
+  "params": {
+    "subscriptionId": "timeline-1",
+    "update": {
+      "schemaVersion": 1,
+      "cursor": {"topics": {"observability.agent_events.sess_abc": 43}},
+      "node": {"id": "event:observability.agent_events.sess_abc:43"}
+    }
+  }
+}
+```
+
+Use `harn.session_timeline.unsubscribe` with `subscriptionId` to stop the live
+stream. Closing a session also cancels subscriptions scoped to that session.
 
 ### Session forking
 
