@@ -239,53 +239,17 @@ jobs:
           fi
           python3 scripts/check_changelog_no_retroactive_edits.py
 
-  changes:
-    name: Detect code changes
-    runs-on: ubuntu-latest
-    outputs:
-      windows: ${{ steps.filter.outputs.windows }}
-    steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-      - id: filter
-        uses: dorny/paths-filter@fbd0ab8f3e69293af611ebaee6363fc25e6d187d # v4.0.1
-        with:
-          # The `windows` job is a Rust compile-break + smoke gate. It only
-          # cares about inputs that affect the Windows Rust build:
-          #   - .rs / build.rs source under crates/
-          #   - Cargo manifest changes (per-crate + workspace)
-          #   - Workspace-level cargo/toolchain config
-          #   - Makefile / scripts that occasionally affect how cargo is invoked
-          #   - This workflow itself (changes to the windows job definition)
-          #
-          # Notably NOT included:
-          #   - crates/**/*.harn        — pure runtime stdlib data; harn-cli's
-          #                               build.rs skips reading them on Windows
-          #                               (see `if cfg!(target_os = "windows")`)
-          #   - conformance/**          — pure .harn test fixtures, never read
-          #                               at compile time
-          #   - crates/**/*.md, *.json  — docs / test fixtures
-          #   - .github/workflows/!ci.yml — sibling workflows don't gate this job
-          #
-          # The `windows-nightly.yml` cron is the cross-platform safety net for
-          # everything not covered here.
-          filters: |
-            windows:
-              - 'crates/**/*.rs'
-              - 'crates/**/Cargo.toml'
-              - 'crates/**/build.rs'
-              - 'Cargo.toml'
-              - 'Cargo.lock'
-              - '.cargo/**'
-              - 'rust-toolchain.toml'
-              - 'Makefile'
-              - 'scripts/**'
-              - '.github/workflows/ci.yml'
-
   windows:
     name: Rust on Windows (build + smoke test)
     runs-on: windows-latest
-    needs: changes
-    if: needs.changes.outputs.windows == 'true' || github.event_name == 'push'
+    # Windows coverage is best-effort and OFF the blocking PR / merge-queue
+    # path: this job runs only on `push` to main (post-merge backstop) and via
+    # the `windows-nightly.yml` cron. On `pull_request` and `merge_group` it is
+    # skipped, so the 25-min Windows compile no longer gates an opened PR or the
+    # merge queue (it was the single long pole, ~2x the next-slowest job). A
+    # compile break or missing cfg-gate surfaces on the main push within minutes
+    # of merge and nightly on the full surface — acceptable pre-launch.
+    if: github.event_name == 'push'
     # Drop sccache on the Windows job. PR #2114 documented 0% cache-hit
     # rate on the harn-vm Windows compile plus periodic `os error 10054`
     # failures where the GHA backend dropped the rmeta upload mid-rustc.
@@ -488,10 +452,10 @@ jobs:
             ["GitHub Actions hygiene"]="${{ needs.actions.result }}"
           )
 
-          # The Windows job is gated on `changes.outputs.windows` and is skipped
-          # on PRs that don't touch Rust/workflow/platform-sensitive paths.
-          # Treat `skipped` as passing here; only an actual failure should fail
-          # the gate.
+          # The Windows job runs only on `push` to main (and nightly), so it is
+          # skipped on every `pull_request` and `merge_group` event. Treat
+          # `skipped` as passing here; only an actual failure should fail the
+          # gate.
           windows_result="${{ needs.windows.result }}"
           echo "Rust on Windows (build + smoke test): $windows_result"
           if [ "$windows_result" != "success" ] && [ "$windows_result" != "skipped" ]; then
