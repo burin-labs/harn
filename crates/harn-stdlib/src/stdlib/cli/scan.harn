@@ -1,0 +1,136 @@
+import { rules_report, rules_search } from "std/rules"
+
+/**
+ * `harn scan` — read-only structural search + lint over a fileset.
+ *
+ * The Rust shim (crates/harn-cli/src/commands/scan.rs) resolves the rule(s)
+ * and the matching files (walking directories, filtering by each rule's
+ * language) and hands this handler a *plan*. This handler runs the engine
+ * (`std/rules`) and formats human or `--json` output.
+ *
+ * Inputs:
+ *   HARN_SCAN_PLAN_JSON   — JSON array of {rule, language, files: [...]}.
+ *   HARN_SCAN_REPORT_ONLY — "1" for data-table counts, "0" for each match.
+ *   HARN_OUTPUT_JSON      — "1" for the JSON envelope, else human text.
+ */
+fn join_strs(parts: list, sep: string) -> string {
+  var out = ""
+  var first = true
+  for part in parts {
+    if first {
+      out = part
+      first = false
+    } else {
+      out = out + sep + part
+    }
+  }
+  return out
+}
+
+fn loc(m: dict) -> string {
+  // 1-based row/col, editor-friendly.
+  return to_string(m.start_row + 1) + ":" + to_string(m.start_col + 1)
+}
+
+fn captures_suffix(caps: dict) -> string {
+  let names = keys(caps)
+  if len(names) == 0 {
+    return ""
+  }
+  var parts = []
+  for name in names {
+    parts = parts.push(name + "=" + caps[name])
+  }
+  return "  [" + join_strs(parts, " ") + "]"
+}
+
+fn summary_line(total: int, files: int) -> string {
+  return to_string(total) + " match(es) in " + to_string(files) + " file(s)"
+}
+
+fn run_search(plan: list) -> dict {
+  var lines = []
+  var results = []
+  var total = 0
+  var seen = {}
+  for entry in plan {
+    if len(entry.files) == 0 {
+      continue
+    }
+    let res = rules_search({rule: entry.rule, paths: entry.files})
+    let matches = res.matches ?? []
+    total = total + len(matches)
+    for m in matches {
+      seen = seen.merge({[m.path]: true})
+      lines = lines.push(m.path + ":" + loc(m) + ": " + m.text + captures_suffix(m.captures ?? {}))
+    }
+    results = results.push({language: entry.language, match_count: len(matches), matches: matches})
+  }
+  return {lines: lines, results: results, total: total, files: len(keys(seen))}
+}
+
+fn run_report(plan: list) -> dict {
+  var lines = []
+  var tables = []
+  var total = 0
+  var seen = {}
+  for entry in plan {
+    if len(entry.files) == 0 {
+      continue
+    }
+    let table = rules_report({rule: entry.rule, paths: entry.files})
+    let summary = table.summary ?? {total_rows: 0, files: 0, per_file: {}}
+    total = total + summary.total_rows
+    let per_file = summary.per_file ?? {}
+    for path in keys(per_file) {
+      seen = seen.merge({[path]: true})
+      lines = lines.push(path + ": " + to_string(per_file[path]))
+    }
+    tables = tables.push(table)
+  }
+  return {lines: lines, tables: tables, total: total, files: len(keys(seen))}
+}
+
+fn main(harness: Harness) {
+  let raw = harness.env.get_or("HARN_SCAN_PLAN_JSON", "")
+  if raw == "" {
+    harness.stdio.eprintln("scan: internal error — HARN_SCAN_PLAN_JSON not set by the shim")
+    exit(70)
+  }
+  let plan = json_parse(raw)
+  let report_only = harness.env.get_or("HARN_SCAN_REPORT_ONLY", "0") == "1"
+  let json_mode = harness.env.get_or("HARN_OUTPUT_JSON", "0") == "1"
+  if report_only {
+    let out = run_report(plan)
+    if json_mode {
+      let envelope = {
+        schemaVersion: 1,
+        mode: "report",
+        tables: out.tables,
+        summary: {total: out.total, files: out.files},
+      }
+      harness.stdio.println(json_stringify_pretty(envelope))
+    } else {
+      for line in out.lines {
+        harness.stdio.println(line)
+      }
+      harness.stdio.println(summary_line(out.total, out.files))
+    }
+  } else {
+    let out = run_search(plan)
+    if json_mode {
+      let envelope = {
+        schemaVersion: 1,
+        mode: "search",
+        results: out.results,
+        summary: {total: out.total, files: out.files},
+      }
+      harness.stdio.println(json_stringify_pretty(envelope))
+    } else {
+      for line in out.lines {
+        harness.stdio.println(line)
+      }
+      harness.stdio.println(summary_line(out.total, out.files))
+    }
+  }
+}
