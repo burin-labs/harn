@@ -8,6 +8,45 @@ highlights live in [CHANGELOG-pre-0.6.md](CHANGELOG-pre-0.6.md).
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.8.66
+
+### Changed
+
+- **Docs deploys are decoupled from the rest of CI.** The `deploy-docs` job now gates on the
+  `docs-site` build succeeding instead of the whole `ci-status` graph, so a docs/site change
+  publishes to harnlang.com whenever the site builds green — independent of unrelated backend or
+  test lanes. Previously a docs change that merged while `main` was red elsewhere (e.g. a flaky
+  Windows test) had its Render deploy silently skipped and never re-fired. Added a `website/README.md`
+  documenting the site's stack, build, and deploy flow.
+- **harnlang.com is now a custom Vite + React + Tailwind site, replacing mdBook (full cutover).** The
+  Diataxis-structured Markdown under `docs/src/` is unchanged — it is now rendered by a new app in `website/`
+  with a Mintlify-style layout: a marketing landing page, full-width section tabs, a scoped sidebar, an
+  on-this-page TOC, ⌘K full-text search, light/dark themes, and a redesigned look-and-feel (teal + amber brand).
+  Harn code blocks are syntax-highlighted at build time using the same Rust-generated keyword table
+  (`docs/theme/harn-keywords.js`), and every page is statically prerendered to crawlable HTML with the raw `.md`
+  mirror and legacy redirects preserved. `scripts/build_docs_site.sh` now drives the Node build; mdBook
+  (`book.toml`, the bundled theme JS/CSS) is removed. Render must build with `./scripts/build_docs_site.sh`
+  (publish dir `docs/dist/`).
+
+### Fixed
+
+- De-flaked and de-slowed several tests that relied on wall-clock timing or
+  process-global state. The `ResourceGate` scheduler tests now assert gate
+  state in-process via a non-blocking `try_acquire` instead of
+  `thread::sleep`-coaxed thread ordering, the worker-snapshot round-trip test
+  uses an explicit path instead of mutating the global `HARN_WORKER_STATE_DIR`
+  env var, and diagnostic color in tests is forced off via a thread-local
+  override instead of the process-global `NO_COLOR` env var.
+- `harn test` can now fail passing tests that exceed explicit wall-clock or execute-phase budgets.
+- Increased `harn test --parallel` worker thread stack size so deep agent/runtime tests do not crash with a Rust stack overflow.
+- **File event log `flush()` no longer fails on Windows.** `sync_tree` opened each topic/consumer
+  file read-only and called `sync_all()`, which on Windows lowers to `FlushFileBuffers` — and that
+  requires a write-access handle, so it failed with "Access is denied" (on Unix, `fsync` on a
+  read-only descriptor is fine, which masked the bug). `flush()` now fsyncs through a hardened
+  `fsync_file` helper that opens for write, with a read-only fallback so a durability flush can never
+  hard-error on a genuinely read-only file. Fixes the `session_timeline::persisted_file_log_reads_agent_events`
+  failure that was red on the Windows CI lane (and blocking docs auto-deploys).
+
 ## v0.8.65
 
 ### Fixed
