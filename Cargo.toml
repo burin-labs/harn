@@ -23,6 +23,7 @@ members = [
     "crates/harn-rules",
     "crates/harn-rules-hostlib",
     "crates/harn-mcp-rc-compat",
+    "tree-sitter-harn",
     "perf/llm",
     "perf/vm",
     "perf/orchestration",

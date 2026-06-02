@@ -32,6 +32,36 @@ fn rule_test(dir: &Path, extra: &[&str]) -> (String, i32) {
 }
 
 #[test]
+fn no_path_discovers_project_ruledirs() {
+    // With no path, `harn rule test` uses the project's `[rules] ruleDirs`
+    // (#2843) — scoped to the declared dirs, so a stray non-rule `*.toml`
+    // elsewhere in the project is not swept up.
+    let dir = fixture_dir("discover");
+    std::fs::create_dir_all(dir.join("rules")).unwrap();
+    write(&dir, "harn.toml", "[rules]\nruleDirs = [\"rules\"]\n");
+    write(&dir, "rules/no-foo.toml", NO_FOO);
+    write(
+        &dir,
+        "rules/no-foo.ts",
+        "// ruleid: no-foo\nfoo();\n// ok: no-foo\nbar();\n",
+    );
+    // A non-rule TOML at the project root that must be ignored.
+    write(&dir, "other.toml", "[package]\nname = \"x\"\n");
+
+    let out = Command::new(env!("CARGO_BIN_EXE_harn"))
+        .current_dir(&dir)
+        .args(["rule", "test"])
+        .output()
+        .expect("spawn");
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert_eq!(out.status.code().unwrap_or(-1), 0, "stdout={stdout}");
+    assert!(stdout.contains("1 passed"), "stdout={stdout}");
+    assert!(!stdout.contains("other.toml"), "stray toml swept: {stdout}");
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn passing_fixture_exits_zero() {
     let dir = fixture_dir("pass");
     write(&dir, "no-foo.toml", NO_FOO);

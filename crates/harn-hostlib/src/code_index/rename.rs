@@ -1202,6 +1202,33 @@ mod tests {
     }
 
     #[test]
+    fn harn_workspace_rename() {
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+        fs::create_dir_all(root.join("src")).unwrap();
+        fs::write(
+            root.join("src/task.harn"),
+            "pub struct Task {\n  title: string\n}\n\nimpl Task {\n  fn summary(task: Task) -> string {\n    return task.title\n  }\n}\n\nfn summarize(task: Task) -> string {\n  return task.title\n}\n",
+        )
+        .unwrap();
+
+        let capability = build_index(root);
+        let symbol_ref = dict(&[
+            ("name", vm_string("Task")),
+            ("path", vm_string("src/task.harn")),
+            ("kind", vm_string("Type")),
+        ]);
+        let result = rename(&capability, symbol_ref, "Job", "workspace");
+        assert_eq!(s(field(&result, "result")), "applied");
+        let source = fs::read_to_string(root.join("src/task.harn")).unwrap();
+        assert!(source.contains("struct Job"));
+        assert!(source.contains("impl Job"));
+        assert!(source.contains("task: Job"));
+        assert!(source.contains("return task.title"));
+        assert!(!source.contains("Task"));
+    }
+
+    #[test]
     fn ambiguous_symbol_without_disambiguator() {
         let dir = tempdir().unwrap();
         let root = dir.path();

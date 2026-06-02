@@ -33,6 +33,7 @@ pub(super) fn extract(tree: &Tree, source: &str, language: Language) -> Vec<Symb
     let mut out: Vec<Symbol> = Vec::new();
 
     match language {
+        Language::Harn => extract_harn(root, source, &mut out),
         Language::TypeScript | Language::Tsx => extract_typescript(root, source, &mut out),
         Language::JavaScript | Language::Jsx => extract_javascript(root, source, &mut out),
         Language::Go => extract_go(root, source, &mut out),
@@ -1526,4 +1527,180 @@ fn extract_r(root: Node<'_>, source: &str, out: &mut Vec<Symbol>) {
         ));
         None
     });
+}
+
+// ---------------------------------------------------------------------------
+// Harn
+// ---------------------------------------------------------------------------
+
+fn extract_harn(root: Node<'_>, source: &str, out: &mut Vec<Symbol>) {
+    walk_named(root, None, &mut |node, container| {
+        let pos = point_pos(node);
+        match node.kind() {
+            "pipeline_declaration" => {
+                push_harn_callable(
+                    node,
+                    source,
+                    container,
+                    pos,
+                    SymbolKind::Function,
+                    "pipeline",
+                    out,
+                );
+                None
+            }
+            "fn_declaration" => {
+                let kind = if container.is_some() {
+                    SymbolKind::Method
+                } else {
+                    SymbolKind::Function
+                };
+                push_harn_callable(node, source, container, pos, kind, "fn", out);
+                None
+            }
+            "tool_declaration" => {
+                push_harn_callable(
+                    node,
+                    source,
+                    container,
+                    pos,
+                    SymbolKind::Function,
+                    "tool",
+                    out,
+                );
+                None
+            }
+            "override_declaration" | "interface_method" => {
+                push_harn_callable(node, source, container, pos, SymbolKind::Method, "fn", out);
+                None
+            }
+            "skill_declaration" => harn_named_decl(
+                node,
+                source,
+                container,
+                pos,
+                SymbolKind::Other,
+                "skill",
+                out,
+            ),
+            "eval_pack_declaration" => {
+                push_harn_eval_pack(node, source, container, pos, out);
+                None
+            }
+            "struct_declaration" => harn_named_decl(
+                node,
+                source,
+                container,
+                pos,
+                SymbolKind::Struct,
+                "struct",
+                out,
+            ),
+            "enum_declaration" => {
+                harn_named_decl(node, source, container, pos, SymbolKind::Enum, "enum", out)
+            }
+            "interface_declaration" => harn_named_decl(
+                node,
+                source,
+                container,
+                pos,
+                SymbolKind::Interface,
+                "interface",
+                out,
+            ),
+            "type_declaration" | "associated_type_declaration" => {
+                harn_named_decl(node, source, container, pos, SymbolKind::Type, "type", out)
+            }
+            "impl_block" => push_harn_impl(node, source, container, pos, out),
+            _ => None,
+        }
+    });
+}
+
+fn push_harn_callable(
+    node: Node<'_>,
+    source: &str,
+    container: Option<&str>,
+    pos: NodePos,
+    kind: SymbolKind,
+    keyword: &'static str,
+    out: &mut Vec<Symbol>,
+) {
+    let Some(name) = field_text(node, "name", source) else {
+        return;
+    };
+    let params = harn_parameter_text(node, source);
+    out.push(helpers::sym(
+        &name,
+        kind,
+        container,
+        format!("{keyword} {name}{}", truncate(&params, 80)),
+        pos,
+    ));
+}
+
+fn harn_named_decl(
+    node: Node<'_>,
+    source: &str,
+    container: Option<&str>,
+    pos: NodePos,
+    kind: SymbolKind,
+    keyword: &'static str,
+    out: &mut Vec<Symbol>,
+) -> Option<String> {
+    let name = field_text(node, "name", source)?;
+    out.push(helpers::sym(
+        &name,
+        kind,
+        container,
+        format!("{keyword} {name}"),
+        pos,
+    ));
+    kind.is_container().then_some(name)
+}
+
+fn push_harn_eval_pack(
+    node: Node<'_>,
+    source: &str,
+    container: Option<&str>,
+    pos: NodePos,
+    out: &mut Vec<Symbol>,
+) {
+    let name = field_text(node, "name", source)
+        .or_else(|| field_text(node, "id", source).map(|id| id.trim_matches('"').to_string()));
+    let Some(name) = name else {
+        return;
+    };
+    out.push(helpers::sym(
+        &name,
+        SymbolKind::Other,
+        container,
+        format!("eval_pack {name}"),
+        pos,
+    ));
+}
+
+fn push_harn_impl(
+    node: Node<'_>,
+    source: &str,
+    container: Option<&str>,
+    pos: NodePos,
+    out: &mut Vec<Symbol>,
+) -> Option<String> {
+    let name = field_text(node, "type_name", source)?;
+    out.push(helpers::sym(
+        &name,
+        SymbolKind::Module,
+        container,
+        format!("impl {name}"),
+        pos,
+    ));
+    Some(name)
+}
+
+fn harn_parameter_text(node: Node<'_>, source: &str) -> String {
+    helpers::children(node)
+        .find(|child| child.is_named() && child.kind() == "parameter_list")
+        .map(|child| format!("({})", helpers::node_text(child, source)))
+        .unwrap_or_else(|| "()".to_string())
 }

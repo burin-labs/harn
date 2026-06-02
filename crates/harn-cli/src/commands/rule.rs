@@ -24,19 +24,30 @@ pub(crate) async fn run(args: RuleArgs) {
 #[cfg(feature = "hostlib")]
 fn run_test(args: crate::cli::RuleTestArgs) {
     use std::fs;
-    use std::path::PathBuf;
+    use std::path::{Path, PathBuf};
 
     use harn_rules::{load_rule_file, run_inline_test, CompiledRule, InlineTestReport};
 
-    let root = PathBuf::from(args.path.as_deref().unwrap_or("."));
-    let rule_files = discover_rule_files(&root);
+    // An explicit path wins; otherwise discover the project's `[rules]
+    // ruleDirs` (#2843), falling back to the current directory. This makes
+    // `harn rule test` a zero-config CI gate for a project's rule pack.
+    let (rule_files, source): (Vec<PathBuf>, String) = match args.path.as_deref() {
+        Some(path) => (discover_rule_files(Path::new(path)), path.to_string()),
+        None => match project_rule_dirs() {
+            Some(dirs) => (
+                dirs.iter().flat_map(|d| discover_rule_files(d)).collect(),
+                "[rules] ruleDirs".to_string(),
+            ),
+            None => (discover_rule_files(Path::new(".")), ".".to_string()),
+        },
+    };
     if rule_files.is_empty() {
-        eprintln!(
-            "rule test: no `*.toml` rules found under `{}`",
-            root.display()
-        );
+        eprintln!("rule test: no `*.toml` rules found under `{source}`");
         std::process::exit(2);
     }
+    // A failed load of an explicitly-named rule file is a hard error; a stray
+    // non-rule `*.toml` swept from a directory is silently skipped.
+    let explicit_file = args.path.as_deref().is_some_and(|p| Path::new(p).is_file());
 
     struct Case {
         fixture: PathBuf,
@@ -52,7 +63,7 @@ fn run_test(args: crate::cli::RuleTestArgs) {
             // A non-rule `*.toml` in a scanned directory is silently skipped;
             // an explicit file argument that fails is a hard error.
             Err(err) => {
-                if root.is_file() {
+                if explicit_file {
                     errors.push(format!("{}: {err}", rule_path.display()));
                 }
                 continue;
@@ -152,4 +163,23 @@ fn discover_rule_files(root: &std::path::Path) -> Vec<std::path::PathBuf> {
     }
     out.sort();
     out
+}
+
+/// The project's `[rules] ruleDirs` (resolved relative to the manifest dir),
+/// or `None` when there is no manifest or it declares no `ruleDirs`.
+#[cfg(feature = "hostlib")]
+fn project_rule_dirs() -> Option<Vec<std::path::PathBuf>> {
+    let cwd = std::env::current_dir().ok()?;
+    let (manifest, dir) = crate::package::find_nearest_manifest(&cwd)?;
+    if manifest.rules.rule_dirs.is_empty() {
+        return None;
+    }
+    Some(
+        manifest
+            .rules
+            .rule_dirs
+            .iter()
+            .map(|rel| dir.join(rel))
+            .collect(),
+    )
 }
