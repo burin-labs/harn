@@ -48,6 +48,7 @@ mod provider;
 mod providers;
 mod quickstart;
 mod routes;
+mod rule;
 mod run;
 mod runs;
 mod scan;
@@ -174,6 +175,7 @@ pub(crate) use providers::{
 };
 pub(crate) use quickstart::QuickstartArgs;
 pub(crate) use routes::RoutesArgs;
+pub(crate) use rule::{RuleArgs, RuleCommand, RuleTestArgs};
 pub(crate) use run::RunArgs;
 pub(crate) use runs::{ReplayArgs, RunsArgs, RunsCommand};
 pub(crate) use scan::ScanArgs;
@@ -484,6 +486,9 @@ SCRIPTING
     /// Apply a codemod rule's `fix` across a fileset. Dry-run by default
     /// (unified diffs); `--apply` writes, safety- and capability-gated.
     Codemod(CodemodArgs),
+    /// Author and test structural rules (`harn rule test` runs a rule's
+    /// inline-annotation fixtures).
+    Rule(RuleArgs),
     /// One-shot agent_loop with a prompt. Routes through the configured
     /// provider (or `HARN_LLM_PROVIDER=mock` for offline use).
     #[command(name = "try")]

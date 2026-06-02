@@ -58,6 +58,7 @@ pub(crate) mod quickstart;
 pub(crate) mod repl;
 pub(crate) mod replay;
 pub(crate) mod routes;
+pub(crate) mod rule;
 pub(crate) mod rules_cli;
 pub mod run;
 pub(crate) mod scaffold_common;
