@@ -173,8 +173,7 @@ fn __agent_stall_config(value) -> AgentStallConfig {
   if type_of(value) != "dict" {
     throw "agent_loop: `stall_diagnostics` must be a dict, bool, or nil; got " + type_of(value)
   }
-  let threshold = value?.threshold ?? 3
-  let max_feedback = value?.max_feedback ?? 1
+  let {threshold = 3, max_feedback = 1} = value ?? {}
   let exempt_tools = if value?.exempt_tools != nil {
     __agent_stall_list(value.exempt_tools, "exempt_tools")
   } else {

@@ -90,8 +90,7 @@ pub fn process_shell(command: string, options = nil) {
  * @example: process_result_text(result)
  */
 pub fn process_result_text(result: dict) -> string {
-  let stdout = result?.stdout ?? ""
-  let stderr = result?.stderr ?? ""
+  let {stdout = "", stderr = ""} = result ?? {}
   if stdout && stderr {
     return "${stdout}\n${stderr}"
   }
@@ -117,8 +116,7 @@ pub fn process_result_success(result: dict) -> bool {
   if result?.success != nil {
     return result?.success ? true : false
   }
-  let status = result?.status ?? "completed"
-  let exit_code = result?.exit_code ?? -1
+  let {status = "completed", exit_code = -1} = result ?? {}
   return status == "completed" && exit_code == 0
 }
 

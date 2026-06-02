@@ -105,9 +105,7 @@ fn __prelude_receipt_id(opts, status, calls) -> string {
 
 fn __prelude_receipt(opts, status, result, error, calls, approvals, side_effects) {
   let options = opts ?? {}
-  let started_at = options?.started_at ?? date_iso()
-  let completed_at = options?.completed_at ?? started_at
-  let persona = options?.persona ?? "persona_prelude"
+  let {started_at = date_iso(), completed_at = started_at, persona = "persona_prelude"} = options ?? {}
   let input_digest = options?.inputs_digest ?? __prelude_digest(options?.input)
   let output_digest = options?.outputs_digest ?? __prelude_digest(result)
   return {
@@ -155,9 +153,7 @@ fn __prelude_call_record(name, status, value, error) {
  */
 pub fn verify_then_act(verifier, actor, options = nil) {
   let opts = options ?? {}
-  let started_at = opts?.started_at ?? date_iso()
-  let verifier_name = opts?.verifier_name ?? "verifier"
-  let actor_name = opts?.actor_name ?? "actor"
+  let {started_at = date_iso(), verifier_name = "verifier", actor_name = "actor"} = opts ?? {}
   let verified_raw = try {
     verifier()
   }
@@ -241,9 +237,7 @@ pub fn bounded_loop(state_init, step_fn, options = nil) {
   let opts = options ?? {}
   let started_at = opts?.started_at ?? date_iso()
   let started_ms = harness.clock.timestamp() * 1000
-  let max_iterations = opts?.max_iterations ?? 10
-  let max_duration_ms = opts?.max_duration_ms ?? opts?.max_duration
-  let progress_required = opts?.progress_required ?? false
+  let {max_iterations = 10, max_duration_ms = opts?.max_duration, progress_required = false} = opts ?? {}
   var state = nil
   if __prelude_is_callable(state_init) {
     let init_outcome = try {
@@ -390,8 +384,7 @@ pub fn cheap_classify_then_escalate(
   options = nil,
 ) {
   let opts = options ?? {}
-  let started_at = opts?.started_at ?? date_iso()
-  let min_confidence = opts?.min_confidence ?? 0.7
+  let {started_at = date_iso(), min_confidence = 0.7} = opts ?? {}
   let cheap_result = try {
     __prelude_invoke_model(input, cheap_model, opts?.cheap_options ?? {})
   }
@@ -867,8 +860,7 @@ fn __prelude_persona_patch_for_group(group, opts) -> string {
   let persona = __prelude_persona_identifier(group.persona)
   let kind = __prelude_persona_identifier(group.repair_kind)
   let downstream = __prelude_persona_identifier(group.downstream_action)
-  let step_name = opts?.step_name ?? "crystallized_${persona}_${kind}_${downstream}"
-  let function_name = opts?.function_name ?? (step_name + "_step")
+  let {step_name = "crystallized_${persona}_${kind}_${downstream}", function_name = step_name + "_step"} = opts ?? {}
   let key = group.key
   let input_digest = group.input_digest
   let output_digest = group.output_digest

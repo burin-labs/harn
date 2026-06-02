@@ -65,6 +65,7 @@ const REPORT: &str = "hostlib_rules_report";
 const DIAGNOSTICS: &str = "hostlib_rules_diagnostics";
 const VISIT: &str = "hostlib_rules_visit";
 const APPLY: &str = "hostlib_rules_apply";
+const FOLD: &str = "hostlib_rules_fold";
 
 /// The `rules` host capability.
 #[derive(Default)]
@@ -100,6 +101,13 @@ impl HostlibCapability for RulesCapability {
             module: "rules",
             method: "apply",
             handler: gated_handler(APPLY, apply_run),
+        });
+        // `fold` also writes; same gate.
+        registry.register(RegisteredBuiltin {
+            name: FOLD,
+            module: "rules",
+            method: "fold",
+            handler: gated_handler(FOLD, fold_run),
         });
     }
 }
@@ -256,6 +264,43 @@ fn apply_run(args: &[VmValue]) -> Result<VmValue, HostlibError> {
         ("result", str_vm("ok")),
         ("dry_run", VmValue::Bool(dry_run)),
         ("auto_applicable", VmValue::Bool(auto_applicable)),
+        ("files", VmValue::List(Arc::new(entries))),
+    ]))
+}
+
+/// `rules.fold` (#2824): fold consecutive `let x = src?.x ?? d` runs into a
+/// single destructure-with-defaults. A specialized, behavior-preserving
+/// codemod (the engine can't fold statement sequences declaratively). Writes
+/// only on a real apply (`dry_run: false`); shares the deterministic gate.
+fn fold_run(args: &[VmValue]) -> Result<VmValue, HostlibError> {
+    let dict = first_dict(FOLD, args)?;
+    let dry_run = optional_bool(&dict, "dry_run", true);
+    let files = load_files(FOLD, &dict)?;
+
+    let mut entries = Vec::new();
+    for file in &files {
+        let folded =
+            harn_rules::fold::fold_destructure_defaults(&file.source, file.language.name())
+                .map_err(|e| backend(FOLD, &e))?;
+        let changed = folded != file.source;
+        let applied = !dry_run && changed;
+        if applied {
+            std::fs::write(&file.path, &folded).map_err(|e| HostlibError::Backend {
+                builtin: FOLD,
+                message: format!("write `{}`: {e}", file.path.display()),
+            })?;
+        }
+        entries.push(dict_vm([
+            ("path", str_vm(file.path.display().to_string())),
+            ("changed", VmValue::Bool(changed)),
+            ("applied", VmValue::Bool(applied)),
+            ("before", str_vm(&file.source)),
+            ("preview", str_vm(folded)),
+        ]));
+    }
+    Ok(dict_vm([
+        ("result", str_vm("ok")),
+        ("dry_run", VmValue::Bool(dry_run)),
         ("files", VmValue::List(Arc::new(entries))),
     ]))
 }

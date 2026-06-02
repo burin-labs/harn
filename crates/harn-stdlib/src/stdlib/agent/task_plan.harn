@@ -268,8 +268,7 @@ fn __task_plan_collect_node_ids(plan) {
 
 fn __task_plan_validate_structure(plan, report) {
   var out = report
-  let nodes = plan?.nodes ?? {}
-  let edges = plan?.edges ?? []
+  let {nodes = {}, edges = []} = plan ?? {}
   let node_ids = __task_plan_collect_node_ids(plan)
   if len(node_ids) == 0 {
     out = __task_plan_push_error(out, "no_nodes", "nodes", "plan has no nodes")
@@ -565,8 +564,7 @@ fn __task_plan_validate_promotion(plan, report) {
 }
 
 fn __task_plan_reachability(plan) {
-  let nodes = plan?.nodes ?? {}
-  let edges = plan?.edges ?? []
+  let {nodes = {}, edges = []} = plan ?? {}
   let node_ids = __task_plan_collect_node_ids(plan)
   let entry = plan?.entry
   if entry == nil || !contains(node_ids, entry) {
@@ -758,8 +756,7 @@ fn __task_plan_model_policy(node, budget_policy) {
 }
 
 fn __task_plan_capability_policy(node) {
-  let tools = node?.tools ?? []
-  let effects = node?.effects ?? []
+  let {tools = [], effects = []} = node ?? {}
   var policy = {}
   if len(tools) > 0 {
     policy = policy + {tools: tools}

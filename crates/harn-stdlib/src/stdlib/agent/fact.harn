@@ -361,8 +361,7 @@ pub fn fact_validate(input) -> Fact {
 pub fn store_fact(input, options = nil) {
   let opts = __fact_options(options, "store_fact")
   let fact_value = fact(input, opts)
-  let namespace = opts?.namespace ?? fact_namespace(opts?.scope)
-  let key = opts?.key ?? fact_key(fact_value)
+  let {namespace = fact_namespace(opts?.scope), key = fact_key(fact_value)} = opts ?? {}
   let tags = fact_tags(fact_value, opts?.tags)
   return memory_store(
     namespace,

@@ -239,8 +239,7 @@ pub fn verdict_normalize(text, alias_groups) {
     return normalized
   }
   for group in alias_groups {
-    let canonical = group?.canonical ?? ""
-    let aliases = group?.aliases ?? []
+    let {canonical = "", aliases = []} = group ?? {}
     if canonical != "" && type_of(aliases) == "list" && contains(aliases, normalized) {
       return canonical
     }

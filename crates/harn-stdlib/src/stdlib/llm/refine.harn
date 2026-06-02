@@ -231,11 +231,9 @@ fn __refine_prompt_dict(opts) {
     throw "refine_prompt: opts.user_prompt is required"
   }
   let user_prompt = to_string(opts.user_prompt)
-  let style = opts?.style ?? "concise"
-  let model = opts?.model ?? ""
+  let {style = "concise", model = ""} = opts ?? {}
   let provider = opts?.provider
-  let keep = opts?.keep ?? []
-  let strip = opts?.strip ?? []
+  let {keep = [], strip = []} = opts ?? {}
   let est_before = estimate_text_tokens(user_prompt, model)
   let target_size = if opts?.target_size ?? "auto" == "auto" {
     __auto_target_size(est_before)

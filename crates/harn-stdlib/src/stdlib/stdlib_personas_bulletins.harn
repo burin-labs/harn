@@ -794,8 +794,7 @@ fn __bulletin_render_line(bulletin) -> string {
 pub fn bulletin_render_for_prompt(bulletins: list, options = nil) -> string {
   let opts = options ?? {}
   let now = __bulletin_text(opts?.now)
-  let active_only = opts?.active_only ?? true
-  let include_proposed = opts?.include_proposed ?? true
+  let {active_only = true, include_proposed = true} = opts ?? {}
   let parts = bulletin_partition(bulletins)
   let accepted_pool = if active_only {
     bulletin_active(parts.accepted, now == "" ? nil : now)

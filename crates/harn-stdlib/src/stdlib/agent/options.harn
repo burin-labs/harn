@@ -213,8 +213,7 @@ pub fn agent_tool_format_override_warning_text(event) {
     return nil
   }
   let payload = event?.metadata ?? event
-  let provider = payload?.provider ?? "unknown"
-  let model = payload?.model ?? "unknown"
+  let {provider = "unknown", model = "unknown"} = payload ?? {}
   let requested = payload?.requested_format ?? "unknown"
   let recommended = payload?.recommended_format ?? "unknown"
   let parity = payload?.catalog_parity ?? "unknown"

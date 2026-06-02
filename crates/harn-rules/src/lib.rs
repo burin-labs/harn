@@ -60,6 +60,7 @@ pub mod engine;
 pub mod error;
 pub mod evaluator;
 pub mod fix;
+pub mod fold;
 pub mod loader;
 pub mod model;
 pub mod pattern;

@@ -324,12 +324,7 @@ pub fn with_retry(next, opts = nil) {
     return __partial(with_retry, next)
   }
   let cfg = __opts_dict(opts)
-  let max_attempts = cfg?.max_attempts ?? 3
-  let base_ms = cfg?.base_ms ?? 250
-  let max_ms = cfg?.max_ms ?? 8000
-  let backoff = cfg?.backoff ?? "exponential"
-  let jitter = cfg?.jitter ?? "full"
-  let honor_retry_after = cfg?.honor_retry_after ?? true
+  let {max_attempts = 3, base_ms = 250, max_ms = 8000, backoff = "exponential", jitter = "full", honor_retry_after = true} = cfg ?? {}
   let predicate = cfg?.predicate
   return { call ->
     let base_turn = call?.turn ?? {iteration: 0, session_id: "", attempt: 1}
@@ -614,8 +609,7 @@ pub fn with_logging(next, opts = nil) {
     return __partial(with_logging, next)
   }
   let cfg = __opts_dict(opts)
-  let level = cfg?.level ?? "info"
-  let include_prompt = cfg?.include_prompt ?? false
+  let {level = "info", include_prompt = false} = cfg ?? {}
   let sink = cfg?.sink
   return { call ->
     let start_ms = harness.clock.now_ms()
@@ -942,8 +936,7 @@ pub fn with_circuit_breaker(handler, options = nil) {
     return __partial(with_circuit_breaker, handler)
   }
   let opts = options ?? {}
-  let threshold = opts?.threshold ?? 5
-  let reset_ms = opts?.reset_ms ?? 30000
+  let {threshold = 5, reset_ms = 30000} = opts ?? {}
   return { call ->
     let name = opts?.name ?? __circuit_name_for(call)
     __ensure_llm_handler_circuit(name, threshold, reset_ms)
@@ -1060,8 +1053,7 @@ pub fn with_repair(next, opts = nil) {
   let cfg = __opts_dict(opts)
   let enabled = cfg?.enabled ?? true
   let strategy = cfg?.strategy
-  let max_tokens = cfg?.max_tokens ?? 600
-  let temperature = cfg?.temperature ?? 0.0
+  let {max_tokens = 600, temperature = 0.0} = cfg ?? {}
   return { call ->
     let first = __safe_invoke(next, call)
     if !enabled {
@@ -1121,8 +1113,7 @@ pub fn with_coerce(next, opts = nil) {
     return __partial(with_coerce, next)
   }
   let cfg = __opts_dict(opts)
-  let lower_keys = cfg?.lower_keys ?? true
-  let on_text_json = cfg?.on_text_json ?? false
+  let {lower_keys = true, on_text_json = false} = cfg ?? {}
   return { call ->
     let envelope = __safe_invoke(next, call)
     if !(envelope?.ok ?? false) {

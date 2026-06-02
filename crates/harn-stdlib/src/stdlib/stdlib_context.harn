@@ -374,9 +374,7 @@ pub fn context_artifact(input = nil, options = nil) -> ContextArtifact {
       16,
     )
   }
-  let language = opts?.language ?? raw?.language
-  let role = opts?.role ?? raw?.role
-  let task = opts?.task ?? raw?.task
+  let {language = raw?.language, role = raw?.role, task = raw?.task} = opts ?? {}
   let applicability = __context_applicability(raw, opts, scope)
   let confidence = __context_confidence(opts?.confidence ?? raw?.confidence ?? raw?.relevance)
   let freshness = trim(__context_string(opts?.freshness ?? raw?.freshness ?? "unknown"))
