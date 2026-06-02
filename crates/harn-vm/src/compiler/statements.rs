@@ -297,7 +297,7 @@ impl Compiler {
         for fb in self.pending_finallys_down_to(finally_depth) {
             self.compile_finally_inline(&fb)?;
         }
-        self.unwind_scopes_to(scope_depth);
+        self.emit_scope_unwind_to(scope_depth);
         if has_iterator {
             self.chunk.emit(Op::PopIterator, self.line);
         }
@@ -328,7 +328,7 @@ impl Compiler {
         for fb in self.pending_finallys_down_to(finally_depth) {
             self.compile_finally_inline(&fb)?;
         }
-        self.unwind_scopes_to(scope_depth);
+        self.emit_scope_unwind_to(scope_depth);
         self.chunk.emit_u16(Op::Jump, loop_start as u16, self.line);
         Ok(())
     }

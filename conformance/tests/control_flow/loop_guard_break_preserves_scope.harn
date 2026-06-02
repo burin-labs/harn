@@ -1,0 +1,39 @@
+fn maybe_name(token: string) {
+  if token == "" {
+    return nil
+  }
+  return token
+}
+
+fn parse_env_assignment(token: string) {
+  if token == "" {
+    return nil
+  }
+  return {name: token, value: ""}
+}
+
+pipeline test(_task) {
+  let tokens = ["abc"]
+  var index = 0
+  while index < len(tokens) {
+    let token = tokens[index]
+    let name = maybe_name(token) ?? ""
+    if name == "" {
+      break
+    }
+    let value = token[len(name):]
+    assert(value == "", "name binding should remain visible after non-taken break branch")
+    break
+  }
+  index = 0
+  while index < len(tokens) {
+    let parsed = parse_env_assignment(tokens[index])
+    if parsed == nil {
+      break
+    }
+    let name = parsed.name
+    assert(name == "abc", "parsed binding should remain visible after non-taken break branch")
+    break
+  }
+  log("ok")
+}
