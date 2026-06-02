@@ -90,12 +90,35 @@ pub struct AppliedEdit {
 /// Apply `edits` to `source` by byte-splice. Edits are spliced in reverse
 /// start order so earlier offsets stay valid; whitespace outside each span
 /// is preserved verbatim.
+///
+/// Edits MUST be non-overlapping — the engine resolves overlaps up front (see
+/// `engine::dedupe_overlapping`) by keeping the outermost match. This function
+/// is a defensive backstop: an out-of-range, mis-aligned, or overlapping span
+/// is skipped rather than allowed to panic `replace_range`, so a buggy rule can
+/// never corrupt a file by splicing a stale offset.
 pub fn splice(source: &str, edits: &[AppliedEdit]) -> String {
     let mut ordered: Vec<&AppliedEdit> = edits.iter().collect();
     ordered.sort_by_key(|e| std::cmp::Reverse(e.span.start_byte));
     let mut out = source.to_string();
+    // Lowest start byte applied so far (we walk highest-start first). An edit
+    // overlaps an already-applied one when its end runs past this boundary.
+    let mut applied_low = usize::MAX;
     for edit in ordered {
-        out.replace_range(edit.span.start_byte..edit.span.end_byte, &edit.replacement);
+        let (start, end) = (edit.span.start_byte, edit.span.end_byte);
+        let in_range = start <= end
+            && end <= out.len()
+            && out.is_char_boundary(start)
+            && out.is_char_boundary(end);
+        let overlaps = end > applied_low;
+        debug_assert!(
+            !overlaps,
+            "splice received overlapping edits; engine should have deduped"
+        );
+        if !in_range || overlaps {
+            continue;
+        }
+        out.replace_range(start..end, &edit.replacement);
+        applied_low = start;
     }
     out
 }

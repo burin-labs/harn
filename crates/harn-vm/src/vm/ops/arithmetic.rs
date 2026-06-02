@@ -472,8 +472,12 @@ impl super::super::Vm {
             (VmValue::Int(x), VmValue::Float(y)) => Ok(VmValue::Float(*x as f64 * y)),
             (VmValue::Float(x), VmValue::Int(y)) => Ok(VmValue::Float(x * *y as f64)),
             (VmValue::String(s), VmValue::Int(n)) | (VmValue::Int(n), VmValue::String(s)) => {
+                // Guard script-controlled repeat counts so `"a" * 1_000_000_000`
+                // errors cleanly instead of OOM-ing / panicking `capacity overflow`.
                 let count = (*n).max(0) as usize;
-                Ok(VmValue::String(s.repeat(count).into()))
+                Ok(VmValue::String(
+                    crate::limits::checked_repeat(s, count)?.into(),
+                ))
             }
             _ => Err(VmError::TypeError(format!(
                 "Cannot multiply {} and {}",

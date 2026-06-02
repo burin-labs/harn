@@ -37,6 +37,7 @@ pub mod harness_system;
 pub mod harness_tenant;
 mod http;
 pub mod jsonrpc;
+pub(crate) mod limits;
 pub mod llm;
 pub mod llm_config;
 pub mod mcp;

@@ -1276,6 +1276,28 @@ let label = match x {
 // label == "big: 5"
 ```
 
+#### List patterns
+
+A list pattern `[p0, p1, …]` matches a list of **exactly** that length and binds
+each identifier element to the value at its position (literals are compared,
+`_` discards). A trailing `...rest` element makes the pattern match a list of
+**at least** the leading arity and binds the remainder as a new list (`..._`
+matches the tail without binding it):
+
+```harn
+match coords {
+  [x, y] -> { "2d: ${x},${y}" }          // matches ONLY length 2
+  [x, y, z] -> { "3d" }                   // matches ONLY length 3
+  [first, ...rest] -> { "${first}+${rest}" } // length >= 1; rest is a list
+  [] -> { "empty" }
+  _ -> { "other" }
+}
+```
+
+When the matched value is a `list<T>`, the leading bindings have type `T` and a
+`...rest` binding has type `list<T>`. Only one `...rest` is allowed and it must
+be last.
+
 ### retry
 
 ```harn

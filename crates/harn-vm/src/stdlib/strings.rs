@@ -390,9 +390,9 @@ fn str_pad_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError>
     };
     Ok(VmValue::String(std::sync::Arc::from(format!(
         "{}{}{}",
-        fill.repeat(left),
+        crate::limits::checked_repeat(fill, left)?,
         s,
-        fill.repeat(right)
+        crate::limits::checked_repeat(fill, right)?
     ))))
 }
 
@@ -740,17 +740,9 @@ fn repeat_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> 
         return Ok(VmValue::String(std::sync::Arc::from("")));
     }
     // Reject pathological sizes so a typo doesn't try to allocate
-    // multi-gigabyte strings inside a script.
-    const MAX_OUT: usize = 1 << 24;
-    let total = s.len().saturating_mul(count as usize);
-    if total > MAX_OUT {
-        return Err(VmError::Runtime(format!(
-            "repeat: output would be {total} bytes (limit {MAX_OUT})"
-        )));
-    }
-    Ok(VmValue::String(std::sync::Arc::from(
-        s.repeat(count as usize),
-    )))
+    // multi-gigabyte strings (or panic `capacity overflow`) inside a script.
+    let repeated = crate::limits::checked_repeat(&s, count as usize)?;
+    Ok(VmValue::String(std::sync::Arc::from(repeated)))
 }
 
 #[harn_builtin(

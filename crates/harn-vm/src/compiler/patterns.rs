@@ -144,6 +144,45 @@ impl Compiler {
         Ok(())
     }
 
+    /// Split a `match` list-pattern's elements into the leading element
+    /// patterns and an optional trailing `...rest` binding name (`None` for a
+    /// `..._` discard). Rejects a spread that is not last, or more than one.
+    fn split_match_list_pattern<'a>(
+        &self,
+        elements: &'a [SNode],
+    ) -> Result<(&'a [SNode], Option<String>), CompileError> {
+        let spread_count = elements
+            .iter()
+            .filter(|e| matches!(e.node, Node::Spread(_)))
+            .count();
+        if spread_count == 0 {
+            return Ok((elements, None));
+        }
+        let last_is_spread = matches!(elements.last().map(|e| &e.node), Some(Node::Spread(_)));
+        if spread_count > 1 || !last_is_spread {
+            return Err(CompileError {
+                message:
+                    "`...rest` must be the last element of a list pattern, and only one is allowed"
+                        .into(),
+                line: self.line,
+            });
+        }
+        let Some(Node::Spread(inner)) = elements.last().map(|e| &e.node) else {
+            unreachable!("checked last is a spread above")
+        };
+        let rest_bind = match &inner.node {
+            Node::Identifier(name) if name == "_" => None,
+            Node::Identifier(name) => Some(name.clone()),
+            _ => {
+                return Err(CompileError {
+                    message: "`...rest` in a list pattern must bind an identifier".into(),
+                    line: self.line,
+                });
+            }
+        };
+        Ok((&elements[..elements.len() - 1], rest_bind))
+    }
+
     /// Compile a `match` expression (`Node::MatchExpr`).
     pub(super) fn compile_match_expr(
         &mut self,
@@ -459,8 +498,14 @@ impl Compiler {
                     self.chunk.patch_jump_to(skip_type, type_fail_target);
                     self.chunk.patch_jump_to(next_arm_jump, next_arm_target);
                 }
-                // List pattern: [literal, binding, ...]
+                // List pattern: `[p0, p1, ...]` matches a list of EXACTLY that
+                // length; `[p0, ...rest]` matches a list of AT LEAST the leading
+                // arity and binds the remainder. The trailing `...rest` is the
+                // only spread allowed, mirroring `let`-destructuring.
                 Node::ListLiteral(elements) => {
+                    let (leading, rest_bind) = self.split_match_list_pattern(elements)?;
+                    let has_rest = leading.len() != elements.len();
+
                     self.chunk.emit(Op::Dup, self.line);
                     let typeof_idx = self.string_constant("type_of");
                     self.chunk.emit_u16(Op::Constant, typeof_idx, self.line);
@@ -477,18 +522,22 @@ impl Compiler {
                     self.chunk.emit_u16(Op::Constant, len_idx, self.line);
                     self.chunk.emit(Op::Swap, self.line);
                     self.chunk.emit_u8(Op::Call, 1, self.line);
-                    let count = self
-                        .chunk
-                        .add_constant(Constant::Int(elements.len() as i64));
+                    let count = self.chunk.add_constant(Constant::Int(leading.len() as i64));
                     self.chunk.emit_u16(Op::Constant, count, self.line);
-                    self.chunk.emit(Op::GreaterEqual, self.line);
+                    // Exact length with no rest; at-least length with `...rest`.
+                    let length_op = if has_rest {
+                        Op::GreaterEqual
+                    } else {
+                        Op::Equal
+                    };
+                    self.chunk.emit(length_op, self.line);
                     let skip_len = self.chunk.emit_jump(Op::JumpIfFalse, self.line);
                     self.chunk.emit(Op::Pop, self.line);
 
                     let mut constraint_skips = Vec::new();
                     let mut bindings = Vec::new();
                     self.begin_scope();
-                    for (i, elem) in elements.iter().enumerate() {
+                    for (i, elem) in leading.iter().enumerate() {
                         match &elem.node {
                             Node::Identifier(name) if name != "_" => {
                                 bindings.push((i, name.clone()));
@@ -514,6 +563,18 @@ impl Compiler {
                         self.chunk.emit_u16(Op::Constant, idx_const, self.line);
                         self.chunk.emit(Op::Subscript, self.line);
                         self.emit_binding_target(name, false);
+                    }
+
+                    // `...rest` binds the tail `list[leading..]`. `Dup` first so
+                    // the match value stays on the stack for the fail/Pop path.
+                    if let Some(rest_name) = &rest_bind {
+                        self.chunk.emit(Op::Dup, self.line);
+                        let start_idx =
+                            self.chunk.add_constant(Constant::Int(leading.len() as i64));
+                        self.chunk.emit_u16(Op::Constant, start_idx, self.line);
+                        self.chunk.emit(Op::Nil, self.line);
+                        self.chunk.emit(Op::Slice, self.line);
+                        self.emit_binding_target(rest_name, false);
                     }
 
                     // Optional guard

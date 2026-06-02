@@ -57,9 +57,8 @@ impl crate::vm::Vm {
             "chars" => Ok(VmValue::chars_list(s)),
             "repeat" => {
                 let n = args.first().and_then(|a| a.as_int()).unwrap_or(1);
-                Ok(VmValue::String(std::sync::Arc::from(
-                    s.repeat(n.max(0) as usize),
-                )))
+                let repeated = crate::limits::checked_repeat(s, n.max(0) as usize)?;
+                Ok(VmValue::String(std::sync::Arc::from(repeated)))
             }
             "reverse" => Ok(VmValue::String(std::sync::Arc::from(
                 s.chars().rev().collect::<String>(),
@@ -76,8 +75,12 @@ impl crate::vm::Vm {
                 if current_len >= width {
                     Ok(VmValue::String(Arc::clone(s)))
                 } else {
-                    let padding: String =
-                        std::iter::repeat_n(pad_char, width - current_len).collect();
+                    // Cap script-controlled pad widths so a huge `width` errors
+                    // cleanly instead of allocating gigabytes.
+                    let padding = crate::limits::checked_repeat(
+                        pad_char.encode_utf8(&mut [0u8; 4]),
+                        width - current_len,
+                    )?;
                     if left {
                         Ok(VmValue::String(std::sync::Arc::from(format!(
                             "{padding}{s}"

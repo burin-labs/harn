@@ -1554,7 +1554,13 @@ fn sanitize_component(input: &str) -> String {
             _ => '_',
         })
         .collect();
-    if sanitized == input {
+    // `.` is allowed inside a name, but a component that is empty or *only*
+    // dots (`.`, `..`, `...`) is a path-traversal / current-dir token, not a
+    // safe single component — `session_dir`'s `dir.push("..")` would escape
+    // the staged-state root. Force the hashed form so the result is always a
+    // genuine, traversal-free directory name.
+    let is_dotted = sanitized.is_empty() || sanitized.bytes().all(|b| b == b'.');
+    if sanitized == input && !is_dotted {
         sanitized
     } else {
         let hash = hex::encode(Sha256::digest(input.as_bytes()));
@@ -1674,4 +1680,48 @@ fn discard_result_to_value(result: DiscardResult) -> VmValue {
                 .collect(),
         )),
     )])
+}
+
+#[cfg(test)]
+mod sanitize_tests {
+    use super::{sanitize_component, session_dir, STATE_REL};
+    use std::path::{Component, Path};
+
+    #[test]
+    fn dotted_session_ids_are_never_traversal_tokens() {
+        // `.`, `..`, `...` must not survive verbatim — otherwise
+        // `session_dir`'s `dir.push(..)` escapes the staged-state root.
+        for evil in ["..", ".", "...", ""] {
+            let safe = sanitize_component(evil);
+            assert_ne!(safe, evil, "`{evil}` passed through unsanitized");
+            assert!(
+                !safe.bytes().all(|b| b == b'.'),
+                "`{evil}` -> `{safe}` is still all dots"
+            );
+            // The result is a single normal component (no ParentDir/CurDir).
+            let comps: Vec<_> = Path::new(&safe).components().collect();
+            assert!(
+                comps.iter().all(|c| matches!(c, Component::Normal(_))),
+                "`{safe}` contains a traversal component"
+            );
+        }
+    }
+
+    #[test]
+    fn ordinary_session_ids_pass_through() {
+        assert_eq!(sanitize_component("abc-123_v2.0"), "abc-123_v2.0");
+    }
+
+    #[test]
+    fn session_dir_stays_under_staged_root() {
+        let dir = session_dir(Path::new("/workspace"), "..");
+        // No path component resolves above the staged dir.
+        assert!(
+            !dir.components().any(|c| matches!(c, Component::ParentDir)),
+            "session_dir({dir:?}) escapes via `..`"
+        );
+        let mut staged = std::path::PathBuf::from("/workspace");
+        staged.extend(STATE_REL);
+        assert!(dir.starts_with(&staged), "{dir:?} not under {staged:?}");
+    }
 }

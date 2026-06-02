@@ -24,6 +24,55 @@ fn test_type_mismatch_let() {
 }
 
 #[test]
+fn test_match_list_rest_binds_element_and_list_types() {
+    // `[head, ...rest]` over `list<int>`: head: int, rest: list<int>.
+    let errs = errors(
+        r"pipeline t(task) {
+  let xs: list<int> = [1, 2, 3]
+  match xs {
+    [head, ...rest] -> { let h: int = head
+let r: list<int> = rest }
+    _ -> { }
+  }
+}",
+    );
+    assert!(errs.is_empty(), "expected no errors, got: {errs:?}");
+}
+
+#[test]
+fn test_match_list_rest_type_is_refined_not_gradual() {
+    // Assigning the rest binding to a non-list type must error — proving the
+    // rest var is refined to a `list<…>` (not left untyped/gradual). Likewise
+    // the leading binding is refined to the element type `int`.
+    let errs = errors(
+        r"pipeline t(task) {
+  let xs: list<int> = [1, 2, 3]
+  match xs {
+    [head, ...rest] -> { let r: int = rest }
+    _ -> { }
+  }
+}",
+    );
+    assert_eq!(errs.len(), 1, "expected one mismatch, got: {errs:?}");
+    assert!(errs[0].contains("int"), "{errs:?}");
+
+    let head_errs = errors(
+        r"pipeline t(task) {
+  let xs: list<int> = [1, 2, 3]
+  match xs {
+    [head, ...rest] -> { let h: string = head }
+    _ -> { }
+  }
+}",
+    );
+    assert_eq!(
+        head_errs.len(),
+        1,
+        "expected one mismatch, got: {head_errs:?}"
+    );
+}
+
+#[test]
 fn test_cyclic_type_aliases_do_not_recurse_forever() {
     let errs = errors(
         r"

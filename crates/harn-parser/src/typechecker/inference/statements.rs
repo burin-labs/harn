@@ -1643,6 +1643,25 @@ impl TypeChecker {
                             }
                         }
                     }
+                    // Bind the arm's pattern variables (list/dict destructuring,
+                    // including `[a, ...rest]`) with their refined types so the
+                    // guard and body are type-checked against them, not against
+                    // gradual `unknown`. Enum/variant patterns are excluded: a
+                    // variant field can be an unsubstituted generic parameter
+                    // (e.g. the `E` in `Result.Err(e)`), and binding it as a
+                    // concrete type here yields false positives — proper enum
+                    // binding needs type-argument substitution from the matched
+                    // value, which is not wired through this path.
+                    if !matches!(
+                        &arm.pattern.node,
+                        Node::EnumConstruct { .. } | Node::MethodCall { .. }
+                    ) {
+                        self.define_match_pattern_bindings(
+                            &arm.pattern,
+                            value_type.as_ref(),
+                            &mut arm_scope,
+                        );
+                    }
                     if let Some(ref guard) = arm.guard {
                         self.check_node(guard, &mut arm_scope);
                     }

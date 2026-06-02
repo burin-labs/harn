@@ -344,7 +344,7 @@ impl CompiledRule {
                 message: "apply requires a `fix` template; this rule has none".into(),
             })?;
 
-        let matches = self.run(source)?;
+        let matches = dedupe_overlapping(self.run(source)?);
         let edits: Vec<AppliedEdit> = matches
             .iter()
             .map(|m| {
@@ -391,6 +391,36 @@ impl CompiledRule {
         }
         matches
     }
+}
+
+/// Drop matches that overlap an already-kept match, keeping the **outermost**
+/// (and, among equal extents, the first). A tree query naturally yields nested
+/// matches — e.g. `$X + $Y` matches both `(a+b)+c` and its inner `a+b` — and
+/// splicing both would apply overlapping byte edits, corrupting the output or
+/// panicking `replace_range` on a stale offset. A codemod must rewrite each
+/// region once, so we keep the enclosing match and discard anything nested in
+/// or straddling it. Matches are returned in document (start-byte) order.
+fn dedupe_overlapping(mut matches: Vec<RuleMatch>) -> Vec<RuleMatch> {
+    // Outermost-first: smallest start, then largest end (widest span wins a tie
+    // on start). After filtering we restore document order.
+    matches.sort_by(|a, b| {
+        a.span
+            .start_byte
+            .cmp(&b.span.start_byte)
+            .then(b.span.end_byte.cmp(&a.span.end_byte))
+    });
+    let mut kept: Vec<RuleMatch> = Vec::with_capacity(matches.len());
+    let mut covered_to = 0usize; // exclusive end of the last kept span
+    for m in matches {
+        // Keep only when this match starts at or after the end of the last kept
+        // one (adjacency is fine; any earlier start means it is nested in, or
+        // straddles, an already-kept span).
+        if m.span.start_byte >= covered_to {
+            covered_to = m.span.end_byte.max(covered_to);
+            kept.push(m);
+        }
+    }
+    kept
 }
 
 /// Compute a [`Span`] for a byte range by counting rows/cols. Used by the
@@ -458,6 +488,55 @@ mod tests {
         assert_eq!(matches[0].text, "cfg?.timeout ?? 30");
         assert_eq!(matches[0].span.start_row, 0);
         assert_eq!(matches[1].span.start_row, 1);
+    }
+
+    #[test]
+    fn nested_matches_do_not_corrupt_or_panic_on_apply() {
+        // `$X + $Y` matches the outer `(a+b)+c` AND the inner `a+b` (distinct
+        // spans). Without overlap resolution, splicing both byte-edits panics
+        // `replace_range` on a stale offset or corrupts the output. The engine
+        // must keep the outermost match and rewrite the region exactly once.
+        let compiled = rule(
+            r#"
+            id = "sum-binop"
+            language = "typescript"
+            fix = "sum($X, $Y)"
+            [rule]
+            pattern = "$X + $Y"
+            "#,
+        );
+        // More than one match exists (outer + inner) before dedup.
+        assert!(compiled.run("const z = a + b + c;\n").unwrap().len() >= 2);
+        let result = compiled.apply("const z = a + b + c;\n").unwrap();
+        // Exactly one outer rewrite; inner `a + b` survives verbatim inside $X.
+        assert_eq!(result.rewritten, "const z = sum(a + b, c);\n");
+        assert_eq!(result.edits.len(), 1);
+        assert!(result.changed);
+    }
+
+    #[test]
+    fn dedupe_overlapping_keeps_outermost_in_document_order() {
+        let span = |s: usize, e: usize| Span {
+            start_byte: s,
+            end_byte: e,
+            start_row: 0,
+            start_col: s,
+            end_row: 0,
+            end_col: e,
+        };
+        let m = |s: usize, e: usize| RuleMatch {
+            rule_id: "r".into(),
+            span: span(s, e),
+            text: String::new(),
+            bindings: BTreeMap::new(),
+        };
+        // outer [0,9) contains inner [0,5); [10,14) is disjoint.
+        let kept = dedupe_overlapping(vec![m(0, 5), m(0, 9), m(10, 14)]);
+        let spans: Vec<_> = kept
+            .iter()
+            .map(|m| (m.span.start_byte, m.span.end_byte))
+            .collect();
+        assert_eq!(spans, vec![(0, 9), (10, 14)]);
     }
 
     #[test]
