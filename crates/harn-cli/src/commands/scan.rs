@@ -43,16 +43,19 @@ pub(crate) async fn run(args: ScanArgs) {
 fn build_plan(args: &ScanArgs) -> Result<String, String> {
     use crate::commands::rules_cli;
 
-    // With a saved rule/pack every positional is a path; otherwise the first
-    // positional is the inline pattern and the rest are paths.
-    let saved_rule = args.rule.is_some() || args.rule_pack.is_some();
-    let (pattern, paths): (Option<&str>, &[String]) = if saved_rule {
-        (None, &args.args)
-    } else {
+    // The first positional is an inline pattern only in inline mode — i.e.
+    // `--lang` is given and no saved rule (`--rule`/`--rule-pack`) is. With a
+    // saved rule, or in project-discovery mode (`[rules] ruleDirs`, signalled
+    // by no `--lang`), every positional is a path instead. An inline pattern
+    // always needs `--lang`, so its presence is the unambiguous signal.
+    let inline_mode = args.lang.is_some() && args.rule.is_none() && args.rule_pack.is_none();
+    let (pattern, paths): (Option<&str>, &[String]) = if inline_mode {
         (
             args.args.first().map(String::as_str),
             args.args.get(1..).unwrap_or(&[]),
         )
+    } else {
+        (None, &args.args)
     };
 
     let specs = rules_cli::resolve_rules(

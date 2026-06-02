@@ -84,6 +84,34 @@ pub struct Manifest {
     /// manifest-driven ingress surfaces.
     #[serde(default)]
     pub orchestrator: OrchestratorConfig,
+    /// `[rules]` table — `sgconfig`-style structural-rule discovery. Lists the
+    /// directories `harn scan` / `harn codemod` load rules from when no
+    /// explicit `--rule`/`--rule-pack` is given.
+    #[serde(default)]
+    pub rules: RulesConfig,
+}
+
+/// `[rules]` table — project-local structural-rule discovery (#2843).
+///
+/// ```toml
+/// [rules]
+/// ruleDirs = ["rules", "vendor/rules"]
+/// utilDirs = ["rules/util"]
+/// testConfigs = ["rules/tests"]
+/// ```
+///
+/// Paths are resolved relative to the manifest's directory.
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct RulesConfig {
+    /// Directories of rule `*.toml` files to load.
+    #[serde(default, alias = "rule-dirs", alias = "ruleDirs")]
+    pub rule_dirs: Vec<String>,
+    /// Directories of utility-rule `*.toml` files (referenced via `matches`).
+    #[serde(default, alias = "util-dirs", alias = "utilDirs")]
+    pub util_dirs: Vec<String>,
+    /// Directories holding rule-test fixtures (for `harn rule test`).
+    #[serde(default, alias = "test-configs", alias = "testConfigs")]
+    pub test_configs: Vec<String>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -1564,6 +1592,22 @@ impl PackageWorkspace {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn rules_table_parses_camel_and_kebab_dir_keys() {
+        // The documented `ruleDirs` camelCase form and the kebab alias both map
+        // to `rule_dirs` (#2843).
+        let camel: Manifest =
+            toml::from_str("[rules]\nruleDirs = [\"rules\", \"vendor/rules\"]\n").unwrap();
+        assert_eq!(camel.rules.rule_dirs, vec!["rules", "vendor/rules"]);
+
+        let kebab: Manifest = toml::from_str("[rules]\nrule-dirs = [\"r\"]\n").unwrap();
+        assert_eq!(kebab.rules.rule_dirs, vec!["r"]);
+
+        // No `[rules]` table → empty discovery, never an error.
+        let none: Manifest = toml::from_str("[package]\nname = \"x\"\n").unwrap();
+        assert!(none.rules.rule_dirs.is_empty());
+    }
 
     #[test]
     fn package_eval_pack_paths_use_package_manifest_entries() {
