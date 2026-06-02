@@ -8,6 +8,66 @@ highlights live in [CHANGELOG-pre-0.6.md](CHANGELOG-pre-0.6.md).
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.8.62
+
+### Added
+
+- `harn-rules`: added the relational + composite matching algebra (Rule Engine Epic A). A rule's `[rule]` block is now
+  a recursive node that combines an atomic leaf (`pattern` / `kind` / `regex`) with relational constraints (`inside`,
+  `has`, `follows`, `precedes` — each tuned by `stopBy` and `field`) and composite combinators (`all`, `any`, `not`,
+  and `matches` referencing a `[utils]` utility rule); every key is ANDed. A tree-walking evaluator threads metavar
+  bindings through the relational context. Metavar-free patterns are now valid literal patterns (`foo()` matches calls
+  to `foo`).
+- `harn-rules`: added the predicate + rewrite layer (Rule Engine Epic A). Rules can now narrow matches with `where`
+  constraints (metavar regex, numeric/string comparison, and recursive sub-pattern), synthesize new metavars with a
+  `transform` pipeline (regex `replace`, `substring`, and case `convert`), and rewrite with a `fix` template that
+  interpolates `$VAR` / `${VAR}` from captured and transformed metavars. `CompiledRule::apply` runs a codemod —
+  filtering by constraints and splicing per-match fixes format-preservingly, the same byte-splice as `ast.batch_apply`.
+- `harn-rules`: added fix safety classification and the apply gate (Rule Engine Epic A). A rule declares a `safety`
+  tier (`format-only` → `behavior-preserving` → `scope-local` (default) → `surface-changing` →
+  `capability-changing` → `needs-human`); the two safest are machine-applicable, the rest suggestions. `auto_apply`
+  refuses to silently apply anything riskier than `behavior-preserving`, `apply_checked` additionally asserts the fix
+  is idempotent (re-running it reaches a fixed point), and `diagnostics()` emits per-match diagnostics (message,
+  severity, span, applicability, interpolated fix) — the surface the linter and LSP convert into
+  `LintDiagnostic` / `FixEdit`.
+- `harn-rules`: added the whole-project scan → accumulate → edit lifecycle (Rule Engine Epic A), adapted from
+  OpenRewrite's `ScanningRecipe`. A `ScanningRecipe` reads the entire fileset into a typed accumulator in a `scan`
+  pass (deterministic, path-sorted), then a `generate` pass turns that state into `FileChange`s — edit, **create**, or
+  **delete** — so rules can act on a whole-project view (import insertion, codegen, cross-file dead-code removal), not
+  just in-place edits. Per-file declarative codemods plug in via the `RuleRecipe` adapter.
+- `harn-rules`: added report-only data tables (Rule Engine Epic A), adapted from OpenRewrite's first-class data
+  tables. `data_table(rule, files)` runs a rule across a project without editing and returns a columnar `DataTable` —
+  one row per match (path, position, matched text, metavar bindings) plus a metrics summary (total findings, files
+  touched, per-file counts). The envelope serializes to JSON (`to_json` / `to_json_value`) for inventory, impact
+  analysis, and audit — e.g. the destructuring rule's "sites / files / alias-count" measurement, produced
+  automatically.
+Added `std/command` helpers for waiting on background command handles and teeing command output while a process runs.
+- Added `std/net.unix_socket_json_request` for script-level JSON line requests over local Unix-domain sockets.
+
+### Changed
+
+`tools.cancel_handle` can now optionally wait for the background waiter to finish
+draining command artifacts and return the final canceled command result.
+Locked compact and pretty JSON artifact output to stable sorted object-key order with conformance coverage.
+
+### Fixed
+
+- **Contextual closure typing now checks closure bodies against expected function slots (#2859).**
+  Closures assigned to typed bindings, returned from typed functions, stored in typed
+  fields, or passed to typed callbacks now inherit parameter and return expectations
+  without making partially inferred `_` collection elements noisy.
+- **Cerebras GPT-OSS accepts `reasoning_effort="none"`.**
+  The Cerebras `gpt-oss-*` capability rule advertised `reasoning_effort_supported`
+  without `reasoning_none_supported`, so an "off" reasoning level floored at
+  `minimal` — which Cerebras rejects with `HTTP 400 reasoning_effort: Input
+  should be 'none', 'low', 'medium' or 'high'`. That broke every no-tools /
+  summarize turn on `cerebras/gpt-oss-120b` (e.g. the release-harness
+  audit-finalize turn). The route now advertises `none` as the true
+  reasoning-off value.
+- **Release artifact packaging now works on macOS Bash with strict shell mode.**
+  The release binary workflow no longer expands an empty optional-binaries array
+  when packaging non-Linux archives.
+
 ## v0.8.61
 
 ### Breaking
