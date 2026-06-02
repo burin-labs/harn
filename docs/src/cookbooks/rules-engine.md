@@ -189,8 +189,8 @@ report(s) (`nil`/`false` to skip, a `{message, fix, safety}` dict, or a list).
 
 For a project convention that a declarative rule can't capture, author an
 imperative rule in Harn — the ESLint-plugin equivalent. Drop a `*.lint.harn`
-module into a `ruleDirs` directory; it exports `lint(source)` and returns a list
-of findings:
+module into a `ruleDirs` directory; it exports `lint(source)` and returns either
+a finding, a list of findings, or a `rules_diagnostics(...)` result:
 
 ```harn,ignore
 // rules/no-todo.lint.harn
@@ -208,16 +208,26 @@ harn lint src             # discovers rules/*.lint.harn and runs them per file
 
 `harn lint` discovers these alongside the built-in rules and merges their
 findings into the normal output — same exit code, same `--json` report, same
-`disable` filtering. Each finding is a dict with a required `message` plus
-optional `severity` (`"error"`/`"warning"`/`"info"`, default `"warning"`),
-`line`/`column` (default `1`), and `start_byte`/`end_byte`. The fields mirror
-what `rules_diagnostics` emits, so a rule can delegate to the structural engine
-and `return` its output directly.
+`disable` filtering. A finding is a dict with a required `message` plus optional
+`severity` (`"error"`/`"warning"`/`"info"`, default `"warning"`), `line` /
+`column` (default `1`), and `start_byte` / `end_byte`.
+
+A script rule can also delegate to the structural engine and return the
+`rules_diagnostics(...)` result directly:
+
+```harn,ignore
+import { rules_diagnostics } from "std/rules"
+
+pub fn lint(source) {
+  let rule = "id = \"no-foo\"\nlanguage = \"harn\"\nmessage = \"no foo\"\n[rule]\npattern = \"foo()\"\n"
+  return rules_diagnostics({language: "harn", rule: rule, source: source})
+}
+```
 
 Rules run in a read-only sandbox — the language, stdlib, and the structural rule
 engine, but no filesystem / network / process access. A buggy rule **fails
-safe**: a load error or a runtime throw becomes a diagnostic attributed to the
-rule, never a linter crash.
+safe**: a load error, runtime throw, or malformed return becomes a diagnostic
+attributed to the rule, never a linter crash.
 
 ## How do I load a native lint rule library?
 

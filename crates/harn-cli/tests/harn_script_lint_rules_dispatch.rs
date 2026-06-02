@@ -1,5 +1,5 @@
-//! End-to-end coverage for `.harn`-authored custom lint rules (#2850): with a
-//! `[rules] ruleDirs` in `harn.toml`, `harn lint` discovers `*.lint.harn`
+//! End-to-end coverage for `.harn`-authored custom lint rules: with a `[rules]`
+//! `ruleDirs` in `harn.toml`, `harn lint` discovers `*.lint.harn`
 //! modules, runs their `pub fn lint(source)` over each linted file, and merges
 //! the findings into the normal lint output. A deliberately-buggy rule fails
 //! safe. Spawns the real `harn` binary with its cwd set to the project root.
@@ -13,6 +13,13 @@ fn project(name: &str) -> PathBuf {
     std::fs::create_dir_all(dir.join("rules")).expect("mkdir rules");
     std::fs::create_dir_all(dir.join("src")).expect("mkdir src");
     std::fs::write(dir.join("harn.toml"), "[rules]\nruleDirs = [\"rules\"]\n").unwrap();
+    dir
+}
+
+fn temp_root(name: &str) -> PathBuf {
+    let dir = std::env::temp_dir().join(format!("harn-scriptlint-{name}-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).expect("mkdir root");
     dir
 }
 
@@ -40,6 +47,14 @@ const TODO_RULE: &str = r#"pub fn lint(source) -> list {
     return [{column: 1, line: 1, message: "TODO markers are banned", severity: "error"}]
   }
   return []
+}
+"#;
+
+const DELEGATING_RULE: &str = r#"import { rules_diagnostics } from "std/rules"
+
+pub fn lint(source) {
+  let rule = "id = \"no-greet-call\"\nlanguage = \"harn\"\nmessage = \"greet calls are banned\"\nseverity = \"error\"\n[rule]\npattern = \"greet()\"\n"
+  return rules_diagnostics({language: "harn", path: "current.harn", rule: rule, source: source})
 }
 "#;
 
@@ -130,4 +145,84 @@ fn json_output_includes_script_rule_findings() {
     );
 
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn script_rule_can_return_rules_diagnostics_envelope() {
+    let dir = project("delegate");
+    write(&dir, "rules/no-greet.lint.harn", DELEGATING_RULE);
+    write(
+        &dir,
+        "src/main.harn",
+        "fn main() {\n  greet()\n}\n\nfn greet() {}\n",
+    );
+
+    let (stdout, stderr, code) = run(&dir, &["lint", "src/main.harn", "--json"]);
+    assert_ne!(code, 0, "delegated diagnostic must fail: stderr={stderr}");
+    let json: serde_json::Value = serde_json::from_str(&stdout).expect("json");
+    let blob = json.to_string();
+    assert!(
+        blob.contains("greet calls are banned"),
+        "json report should carry delegated structural diagnostics: {blob}"
+    );
+
+    write(
+        &dir,
+        "harn.toml",
+        "[rules]\nruleDirs = [\"rules\"]\n\n[lint]\ndisabled = [\"no-greet-call\"]\n",
+    );
+    let (stdout, stderr, code) = run(&dir, &["lint", "src/main.harn", "--json"]);
+    assert_eq!(
+        code, 0,
+        "disabling the delegated structural rule should pass: stdout={stdout} stderr={stderr}"
+    );
+    let json: serde_json::Value = serde_json::from_str(&stdout).expect("json");
+    let blob = json.to_string();
+    assert!(
+        !blob.contains("greet calls are banned"),
+        "disabled delegated structural diagnostic should be filtered: {blob}"
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn script_rules_do_not_leak_between_project_manifests() {
+    let root = temp_root("multi-project");
+    for project in ["a", "b"] {
+        std::fs::create_dir_all(root.join(project).join("src")).expect("mkdir src");
+    }
+    std::fs::create_dir_all(root.join("a").join("rules")).expect("mkdir rules");
+    write(&root, "a/harn.toml", "[rules]\nruleDirs = [\"rules\"]\n");
+    write(&root, "b/harn.toml", "[rules]\nruleDirs = []\n");
+    write(
+        &root,
+        "a/rules/no-project-a-marker.lint.harn",
+        r#"pub fn lint(source) -> list {
+  if source.contains("PROJECT_A_ONLY") {
+    return [{column: 1, line: 1, message: "project-a marker is banned", severity: "error"}]
+  }
+  return []
+}
+"#,
+    );
+    write(&root, "a/src/main.harn", CLEAN_SRC);
+    write(
+        &root,
+        "b/src/main.harn",
+        "pub fn greet() -> string {\n  // PROJECT_A_ONLY is allowed here.\n  return \"hi\"\n}\n",
+    );
+
+    let (stdout, stderr, code) = run(&root, &["lint", "a/src/main.harn", "b/src/main.harn"]);
+    let all = format!("{stdout}{stderr}");
+    assert_eq!(
+        code, 0,
+        "project a's script rule must not run against project b: {all}"
+    );
+    assert!(
+        !all.contains("project-a marker is banned"),
+        "sibling project should not receive the script-rule finding: {all}"
+    );
+
+    let _ = std::fs::remove_dir_all(&root);
 }

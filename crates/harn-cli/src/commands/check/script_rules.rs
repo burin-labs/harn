@@ -1,5 +1,5 @@
-//! `.harn`-authored custom lint rules (#2850) — the ESLint-plugin equivalent,
-//! but in Harn.
+//! `.harn`-authored custom lint rules — the ESLint-plugin equivalent, but in
+//! Harn.
 //!
 //! A project drops a `*.lint.harn` module into a `[rules] ruleDirs` directory.
 //! `harn lint` discovers it, runs its exported `pub fn lint(source)` over each
@@ -11,12 +11,12 @@
 //!
 //! ```harn
 //! // rules/no-foo.lint.harn
-//! pub fn lint(source) -> list {
-//!   // Inspect `source` (the raw text of the file being linted) and return a
-//!   // list of findings. The structural rule engine is available read-only,
-//!   // so a rule can delegate to `rules.diagnostics` / `rules.search` and
-//!   // return their output directly:
-//!   return rules_diagnostics(source, "<rule toml>") ?? []
+//! pub fn lint(source) {
+//!   // Inspect `source` (the raw text of the file being linted) and return
+//!   // findings. The structural rule engine is available read-only, so a rule
+//!   // can delegate to `rules_diagnostics` and return its diagnostics envelope
+//!   // directly:
+//!   return rules_diagnostics({rule: rule_src, source: source, language: "harn"})
 //! }
 //! ```
 //!
@@ -28,6 +28,9 @@
 //! - `line` / `column` — 1-based location (default `1` / `1`).
 //! - `start_byte` / `end_byte` — byte span for the underline (default `0`).
 //!
+//! A rule can also return the dict emitted by `rules_diagnostics(...)`; its
+//! `diagnostics` list is mapped onto the same lint output.
+//!
 //! ## Sandbox + fail-safe
 //!
 //! Rules run in a dedicated VM with the language, the standard library, and the
@@ -36,8 +39,7 @@
 //! findings; it has no business touching the host.
 //!
 //! A buggy rule **fails safe**: a load error, a runtime throw, or a malformed
-//! return becomes a diagnostic attributed to the rule, never a linter crash
-//! (the C1 acceptance criterion).
+//! return becomes a diagnostic attributed to the rule, never a linter crash.
 
 #[cfg(feature = "hostlib")]
 mod imp {
@@ -141,27 +143,43 @@ mod imp {
         if message.is_empty() {
             return None;
         }
-        let int = |key: &str, default: usize| {
+        let optional_int = |key: &str| {
             dict.get(key)
                 .and_then(VmValue::as_int)
                 .filter(|n| *n >= 0)
                 .map(|n| n as usize)
-                .unwrap_or(default)
         };
-        let line = int("line", 1).max(1);
-        let column = int("column", 1).max(1);
-        let start = int("start_byte", 0);
-        let end = int("end_byte", start).max(start);
+        let line = optional_int("line")
+            .or_else(|| optional_int("start_row").map(|row| row + 1))
+            .unwrap_or(1)
+            .max(1);
+        let column = optional_int("column")
+            .or_else(|| optional_int("start_col").map(|col| col + 1))
+            .unwrap_or(1)
+            .max(1);
+        let end_line = optional_int("end_line")
+            .or_else(|| optional_int("end_row").map(|row| row + 1))
+            .unwrap_or(line)
+            .max(line);
+        let start = optional_int("start_byte").unwrap_or(0);
+        let end = optional_int("end_byte").unwrap_or(start).max(start);
+        let rule_id = dict
+            .get("rule")
+            .or_else(|| dict.get("rule_id"))
+            .map(VmValue::as_str_cow)
+            .filter(|rule| !rule.is_empty())
+            .map(|rule| rule.into_owned())
+            .unwrap_or_else(|| id.to_string());
         Some(LintDiagnostic {
             code: DiagnosticCode::LintRuleEngine,
-            rule: std::borrow::Cow::Owned(id.to_string()),
+            rule: std::borrow::Cow::Owned(rule_id),
             message,
             span: Span {
                 start,
                 end,
                 line,
                 column,
-                end_line: line,
+                end_line,
             },
             severity: severity_from(dict.get("severity")),
             suggestion: None,
@@ -169,33 +187,63 @@ mod imp {
         })
     }
 
-    /// Map a rule's return value (expected: a list of finding dicts) onto
-    /// diagnostics. A non-list return (e.g. `nil`) yields nothing.
+    fn map_findings(id: &str, items: &[VmValue], out: &mut Vec<LintDiagnostic>) {
+        for item in items {
+            if let Some(diag) = finding_to_diagnostic(id, item) {
+                out.push(diag);
+            }
+        }
+    }
+
+    /// Map a rule's return value onto diagnostics. Rules can return a direct
+    /// finding dict, a list of finding dicts, or the `rules_diagnostics(...)`
+    /// envelope.
     fn map_return(id: &str, value: &VmValue, out: &mut Vec<LintDiagnostic>) {
-        if let VmValue::List(items) = value {
-            for item in items.iter() {
-                if let Some(diag) = finding_to_diagnostic(id, item) {
-                    out.push(diag);
+        match value {
+            VmValue::List(items) => map_findings(id, items, out),
+            VmValue::Dict(dict) => {
+                if dict.contains_key("message") {
+                    if let Some(diag) = finding_to_diagnostic(id, value) {
+                        out.push(diag);
+                    }
+                } else if let Some(VmValue::List(items)) = dict.get("diagnostics") {
+                    map_findings(id, items, out);
+                } else {
+                    out.push(rule_error_diagnostic(
+                        id,
+                        "lint(source) returned a dict without `message` or a `diagnostics` list",
+                    ));
                 }
             }
+            _ => out.push(rule_error_diagnostic(
+                id,
+                "lint(source) must return a finding, a list of findings, or a rules_diagnostics result",
+            )),
         }
     }
 
     pub(crate) async fn run(files: &[PathBuf]) -> HashMap<PathBuf, Vec<LintDiagnostic>> {
         let mut out: HashMap<PathBuf, Vec<LintDiagnostic>> = HashMap::new();
 
-        // The union of rule files across all targets. Most targets share a
-        // manifest, so this is usually a single small directory listing.
-        let mut rule_paths: Vec<PathBuf> = Vec::new();
+        // Discover rules per target file. A single `harn lint` invocation can
+        // span multiple packages, and a package's conventions must not leak
+        // into sibling packages just because their files were linted together.
+        let mut file_rule_paths: HashMap<PathBuf, Vec<PathBuf>> = HashMap::new();
+        let mut unique_rule_paths: Vec<PathBuf> = Vec::new();
         let mut seen = HashSet::new();
         for file in files {
-            for path in discover_rule_paths(file) {
+            let paths = discover_rule_paths(file);
+            if paths.is_empty() {
+                continue;
+            }
+            for path in &paths {
                 if seen.insert(path.clone()) {
-                    rule_paths.push(path);
+                    unique_rule_paths.push(path.clone());
                 }
             }
+            file_rule_paths.insert(file.clone(), paths);
         }
-        if rule_paths.is_empty() {
+        if unique_rule_paths.is_empty() {
             return out; // Common path: no project rules — near-zero cost.
         }
 
@@ -203,11 +251,21 @@ mod imp {
 
         // Load each rule's `lint` closure once. A `*.lint.harn` without a `lint`
         // export is a no-op (skipped); a module that won't load fails safe.
-        let mut rules: Vec<LoadedRule> = Vec::new();
-        for path in &rule_paths {
+        let mut loaded_rules: HashMap<PathBuf, LoadedRule> = HashMap::new();
+        for path in &unique_rule_paths {
             let id = rule_id_for(path);
-            let Ok(source) = std::fs::read_to_string(path) else {
-                continue;
+            let source = match std::fs::read_to_string(path) {
+                Ok(source) => source,
+                Err(error) => {
+                    loaded_rules.insert(
+                        path.clone(),
+                        LoadedRule::Failed {
+                            id,
+                            error: error.to_string(),
+                        },
+                    );
+                    continue;
+                }
             };
             match vm
                 .load_module_exports_from_source(path.clone(), &source)
@@ -215,28 +273,42 @@ mod imp {
             {
                 Ok(exports) => {
                     if let Some(lint) = exports.get("lint") {
-                        rules.push(LoadedRule::Ok {
-                            id,
-                            lint: lint.clone(),
-                        });
+                        loaded_rules.insert(
+                            path.clone(),
+                            LoadedRule::Ok {
+                                id,
+                                lint: lint.clone(),
+                            },
+                        );
                     }
                 }
-                Err(error) => rules.push(LoadedRule::Failed {
-                    id,
-                    error: error.to_string(),
-                }),
+                Err(error) => {
+                    loaded_rules.insert(
+                        path.clone(),
+                        LoadedRule::Failed {
+                            id,
+                            error: error.to_string(),
+                        },
+                    );
+                }
             }
         }
-        if rules.is_empty() {
+        if loaded_rules.is_empty() {
             return out;
         }
 
         for file in files {
+            let Some(rule_paths) = file_rule_paths.get(file) else {
+                continue;
+            };
             let Ok(source) = std::fs::read_to_string(file) else {
                 continue;
             };
             let mut diagnostics = Vec::new();
-            for rule in &rules {
+            for path in rule_paths {
+                let Some(rule) = loaded_rules.get(path) else {
+                    continue;
+                };
                 match rule {
                     LoadedRule::Failed { id, error } => {
                         diagnostics.push(rule_error_diagnostic(id, error));
@@ -282,6 +354,7 @@ mod imp {
                 "no-todo",
                 &finding(&[
                     ("message", s("nope")),
+                    ("rule_id", s("delegated-rule")),
                     ("severity", s("error")),
                     ("line", VmValue::Int(7)),
                     ("column", VmValue::Int(3)),
@@ -292,9 +365,47 @@ mod imp {
             .expect("maps");
             assert_eq!(d.message, "nope");
             assert_eq!(d.severity, LintSeverity::Error);
-            assert_eq!(d.rule.as_ref(), "no-todo");
+            assert_eq!(d.rule.as_ref(), "delegated-rule");
             assert_eq!((d.span.line, d.span.column), (7, 3));
             assert_eq!((d.span.start, d.span.end), (10, 14));
+        }
+
+        #[test]
+        fn maps_a_rules_diagnostics_envelope() {
+            let diagnostics = VmValue::List(Arc::new(vec![finding(&[
+                ("message", s("delegated")),
+                ("rule_id", s("structural-rule")),
+                ("severity", s("info")),
+                ("start_row", VmValue::Int(4)),
+                ("start_col", VmValue::Int(2)),
+                ("end_row", VmValue::Int(5)),
+            ])]));
+            let mut out = Vec::new();
+            map_return(
+                "script-rule",
+                &finding(&[("diagnostics", diagnostics)]),
+                &mut out,
+            );
+            assert_eq!(out.len(), 1);
+            assert_eq!(out[0].rule.as_ref(), "structural-rule");
+            assert_eq!(out[0].severity, LintSeverity::Info);
+            assert_eq!(
+                (out[0].span.line, out[0].span.column, out[0].span.end_line),
+                (5, 3, 6)
+            );
+        }
+
+        #[test]
+        fn maps_a_single_finding_dict() {
+            let mut out = Vec::new();
+            map_return(
+                "script-rule",
+                &finding(&[("message", s("single"))]),
+                &mut out,
+            );
+            assert_eq!(out.len(), 1);
+            assert_eq!(out[0].message, "single");
+            assert_eq!(out[0].rule.as_ref(), "script-rule");
         }
 
         #[test]
@@ -311,10 +422,12 @@ mod imp {
         }
 
         #[test]
-        fn non_list_return_yields_nothing() {
+        fn non_list_return_is_rule_error() {
             let mut out = Vec::new();
             map_return("r", &VmValue::Nil, &mut out);
-            assert!(out.is_empty());
+            assert_eq!(out.len(), 1);
+            assert_eq!(out[0].severity, LintSeverity::Error);
+            assert!(out[0].message.contains("must return a finding"));
         }
 
         #[test]
