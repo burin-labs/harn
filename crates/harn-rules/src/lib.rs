@@ -65,6 +65,7 @@ pub mod model;
 pub mod pattern;
 pub mod recipe;
 pub mod report;
+pub mod testing;
 pub mod transform;
 
 pub use engine::{Binding, CodemodResult, CompiledRule, Diagnostic, RuleMatch, Span};
@@ -78,3 +79,4 @@ pub use model::{
 pub use pattern::{compile_pattern, CompiledPattern};
 pub use recipe::{run_recipe, FileChange, RecipeRun, RuleRecipe, ScanningRecipe, SourceFile};
 pub use report::{data_table, DataTable, TableRow, TableSummary};
+pub use testing::{run_inline_test, Expectation, FailureKind, InlineTestReport, TestFailure};

@@ -38,6 +38,7 @@ harn-parser = { path = "../harn-parser", version = "0.8" }
 harn-ir = { path = "../harn-ir", version = "0.8" }
 harn-vm = { path = "../harn-vm", version = "0.8", features = ["otel", "testbench-wasi"] }
 harn-hostlib = { path = "../harn-hostlib", version = "0.8", optional = true }
+harn-rules = { path = "../harn-rules", version = "0.8", optional = true }
 harn-rules-hostlib = { path = "../harn-rules-hostlib", version = "0.8", optional = true }
 harn-lint = { path = "../harn-lint", version = "0.8" }
 harn-modules = { path = "../harn-modules", version = "0.8" }
@@ -122,6 +123,7 @@ default = ["hostlib"]
 # you want a slimmer build that doesn't pull tree-sitter/notify/etc.
 hostlib = [
     "dep:harn-hostlib",
+    "dep:harn-rules",
     "dep:harn-rules-hostlib",
     "harn-hostlib/full",
     "harn-serve/hostlib-full",

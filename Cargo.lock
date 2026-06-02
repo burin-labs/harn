@@ -2260,6 +2260,7 @@ dependencies = [
  "harn-mcp-rc-compat",
  "harn-modules",
  "harn-parser",
+ "harn-rules",
  "harn-rules-hostlib",
  "harn-serve",
  "harn-skills",
