@@ -7,8 +7,10 @@
 
 @theme {
   /* Teal accent palette — Harn's signature, deliberately distinct from the
-     Burin Code marketing site's violet. Amber (Tailwind's built-in `amber-*`)
-     is the secondary highlight, evoking a forge. */
+     Burin Code marketing site's engraver's vermilion. Amber (Tailwind's
+     built-in `amber-*`) is the secondary highlight, evoking a forge. The
+     semantic token NAMES below are shared with burincode.com so prose and
+     component rules port between the two sites — see docs-stack-conventions.md. */
   --color-accent-50: #f0fdfa;
   --color-accent-100: #ccfbf1;
   --color-accent-200: #99f6e4;
@@ -325,6 +327,54 @@ body {
   cursor: pointer;
   font-weight: 600;
   color: var(--color-foreground);
+}
+
+/* --------------------------------------------------------------------------
+   Callout component (shared `.callout` contract with burincode.com — see
+   docs-stack-conventions.md). harnlang.com authors these as GitHub-style alert
+   blockquotes (`> [!NOTE]`); burincode.com as the MDX `<Callout>` component.
+   Both render to this markup, so this block is identical in both repos.
+   -------------------------------------------------------------------------- */
+.callout {
+  display: flex;
+  gap: 0.75rem;
+  margin: 1.5rem 0;
+  border: 1px solid var(--color-card-border);
+  background-color: var(--color-card-bg);
+  border-radius: 0.75rem;
+  padding: 1rem;
+}
+.callout-icon {
+  margin-top: 0.125rem;
+  height: 1.25rem;
+  width: 1.25rem;
+  flex-shrink: 0;
+  color: var(--color-accent-600);
+}
+.dark .callout-icon {
+  color: var(--color-accent-400);
+}
+.callout-body {
+  min-width: 0;
+}
+.callout .callout-body > :last-child {
+  margin-bottom: 0;
+}
+.callout .callout-title {
+  margin-bottom: 0.25rem;
+  font-weight: 600;
+  color: var(--color-accent-600);
+}
+.dark .callout .callout-title {
+  color: var(--color-accent-400);
+}
+.callout-warning .callout-icon,
+.callout-warning .callout-title {
+  color: var(--color-accent-700);
+}
+.dark .callout-warning .callout-icon,
+.dark .callout-warning .callout-title {
+  color: var(--color-accent-400);
 }
 
 /* --------------------------------------------------------------------------

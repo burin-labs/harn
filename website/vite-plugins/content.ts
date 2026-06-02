@@ -21,7 +21,7 @@ import rehypeRaw from "rehype-raw"
 import rehypeSlug from "rehype-slug"
 import rehypeHighlight from "rehype-highlight"
 import rehypeStringify from "rehype-stringify"
-import { visit } from "unist-util-visit"
+import { visit, SKIP } from "unist-util-visit"
 import { toText } from "hast-util-to-text"
 
 export interface Heading {
@@ -242,6 +242,102 @@ function rehypeNormalizeCodeLang() {
   }
 }
 
+// GitHub-style alert blockquotes → the shared `.callout` markup/classes used by
+// burincode.com's <Callout> component (see website/docs-stack-conventions.md).
+// `> [!NOTE]` / `[!TIP]` / `[!IMPORTANT]` / `[!WARNING]` / `[!CAUTION]` become
+// styled callouts; every other blockquote is left untouched. Icon paths are kept
+// in sync with the burin Callout component.
+const ALERT_ICONS = {
+  note: "M12 9v4m0 4h.01M12 3a9 9 0 100 18 9 9 0 000-18z",
+  tip: "M9.663 17h4.673M12 3v1m0 12a4 4 0 01-2-7.465A4 4 0 1116 9a4 4 0 01-2 3.465V16a2 2 0 01-2 2 2 2 0 01-2-2v-.535",
+  info: "M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z",
+  warning:
+    "M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z",
+}
+
+// Marker → (callout style bucket, human label, icon).
+const ALERT_KINDS: Record<string, { cls: keyof typeof ALERT_ICONS; title: string }> = {
+  NOTE: { cls: "note", title: "Note" },
+  TIP: { cls: "tip", title: "Tip" },
+  IMPORTANT: { cls: "info", title: "Important" },
+  WARNING: { cls: "warning", title: "Warning" },
+  CAUTION: { cls: "warning", title: "Caution" },
+}
+
+function alertIcon(cls: keyof typeof ALERT_ICONS) {
+  return {
+    type: "element",
+    tagName: "svg",
+    properties: {
+      className: ["callout-icon"],
+      fill: "none",
+      viewBox: "0 0 24 24",
+      stroke: "currentColor",
+      strokeWidth: 1.8,
+      ariaHidden: "true",
+    },
+    children: [
+      {
+        type: "element",
+        tagName: "path",
+        properties: { strokeLinecap: "round", strokeLinejoin: "round", d: ALERT_ICONS[cls] },
+        children: [],
+      },
+    ],
+  }
+}
+
+function rehypeGithubAlerts() {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  return (tree: any) => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    visit(tree, "element", (node: any, index: number | undefined, parent: any) => {
+      if (node.tagName !== "blockquote" || parent == null || index == null) return
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const firstP = (node.children ?? []).find((c: any) => c.type === "element" && c.tagName === "p")
+      if (!firstP) return
+      const firstText = firstP.children?.[0]
+      if (!firstText || firstText.type !== "text") return
+      const match = /^\[!(NOTE|TIP|IMPORTANT|WARNING|CAUTION)\][ \t]*\r?\n?/.exec(firstText.value)
+      if (!match) return
+      const kind = ALERT_KINDS[match[1]]
+
+      // Strip the `[!TYPE]` marker from the leading text, then drop the first
+      // paragraph entirely if nothing but the marker was on it.
+      firstText.value = firstText.value.slice(match[0].length)
+      let body = node.children ?? []
+      if (toText(firstP).trim() === "") {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        body = body.filter((c: any) => c !== firstP)
+      }
+
+      parent.children[index] = {
+        type: "element",
+        tagName: "div",
+        properties: { className: ["callout", "callout-" + kind.cls] },
+        children: [
+          alertIcon(kind.cls),
+          {
+            type: "element",
+            tagName: "div",
+            properties: { className: ["callout-body"] },
+            children: [
+              {
+                type: "element",
+                tagName: "p",
+                properties: { className: ["callout-title"] },
+                children: [{ type: "text", value: kind.title }],
+              },
+              ...body,
+            ],
+          },
+        ],
+      }
+      return SKIP
+    })
+  }
+}
+
 function rehypeCollectHeadings(headings: Heading[]) {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   return (tree: any) => {
@@ -309,6 +405,7 @@ function buildProcessor(
     .use(remarkGfm)
     .use(remarkRehype, { allowDangerousHtml: true })
     .use(rehypeRaw)
+    .use(rehypeGithubAlerts)
     .use(rehypeNormalizeCodeLang)
     .use(rehypeHighlight, {
       detect: false,
