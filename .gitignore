@@ -10,6 +10,10 @@ __pycache__/
 .burin/
 .harn-runs/
 docs/dist/
+# harnlang.com site (website/) build + dependency artifacts.
+website/.ssr/
+website/dist/
+website/*.tsbuildinfo
 tree-sitter-harn/*.dylib
 tree-sitter-harn/*.so
 tree-sitter-harn/*.dll
