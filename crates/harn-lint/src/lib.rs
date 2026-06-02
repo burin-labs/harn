@@ -13,6 +13,7 @@ use harn_parser::{DiagnosticCode as Code, SNode};
 mod complexity;
 mod decls;
 mod diagnostic;
+mod engine_rule;
 mod fixes;
 mod harndoc;
 mod linter;
@@ -181,6 +182,13 @@ fn lint_full(
     module_graph: Option<(&harn_modules::ModuleGraph, &Path)>,
 ) -> Vec<LintDiagnostic> {
     let mut linter = Linter::new(source);
+    // Append project rule-engine rules (#2849) to the registry. They run in
+    // the whole-program phase over the source; a malformed one is skipped.
+    for engine_source in options.engine_rules {
+        if let Some(rule) = crate::engine_rule::EngineRule::from_toml(engine_source) {
+            linter.rules.push(Box::new(rule));
+        }
+    }
     linter
         .externally_imported_names
         .clone_from(externally_imported_names);

@@ -52,6 +52,7 @@ fn helper(ctx) {
         complexity_threshold: None,
         persona_step_allowlist: &allow,
         require_stdlib_metadata: false,
+        engine_rules: &[],
     };
     let diagnostics = lint_with_options(&program, &[], Some(source), &HashSet::new(), &options);
     assert!(!has_rule(&diagnostics, "persona-body-must-call-steps"));

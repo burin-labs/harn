@@ -74,4 +74,8 @@ pub struct LintOptions<'a> {
     /// block on every `pub fn`. Auto-enabled by `harn lint` for files
     /// under `crates/harn-stdlib/src/stdlib/`.
     pub require_stdlib_metadata: bool,
+    /// TOML sources of declarative rule-engine rules to run as lint rules
+    /// (#2849), loaded from the project's `[rules] ruleDirs`. Each is compiled
+    /// and wrapped as a `Rule`; an invalid one is skipped, not fatal.
+    pub engine_rules: &'a [String],
 }

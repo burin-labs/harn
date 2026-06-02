@@ -626,12 +626,14 @@ fn count_remaining_diagnostics(target: &Path) -> Result<RemainingDiagnostics, St
             .count();
 
         let persona_step_allowlist = commands::check::harn_lint_persona_step_allowlist(file);
+        let engine_rules = commands::check::project_engine_rule_sources(file);
         let options = harn_lint::LintOptions {
             file_path: Some(file),
             require_file_header: commands::check::harn_lint_require_file_header(file),
             complexity_threshold: commands::check::harn_lint_complexity_threshold(file),
             persona_step_allowlist: &persona_step_allowlist,
             require_stdlib_metadata: commands::check::path_is_stdlib_source(file),
+            engine_rules: &engine_rules,
         };
         count += harn_lint::lint_with_module_graph(
             &program,
@@ -703,12 +705,14 @@ fn collect_file_candidates(
     }
 
     let persona_step_allowlist = commands::check::harn_lint_persona_step_allowlist(file);
+    let engine_rules = commands::check::project_engine_rule_sources(file);
     let lint_options = harn_lint::LintOptions {
         file_path: Some(file),
         require_file_header: commands::check::harn_lint_require_file_header(file),
         complexity_threshold: commands::check::harn_lint_complexity_threshold(file),
         persona_step_allowlist: &persona_step_allowlist,
         require_stdlib_metadata: commands::check::path_is_stdlib_source(file),
+        engine_rules: &engine_rules,
     };
     let lint_diagnostics = harn_lint::lint_with_module_graph(
         &program,

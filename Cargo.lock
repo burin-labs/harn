@@ -2425,6 +2425,7 @@ dependencies = [
  "harn-lexer",
  "harn-modules",
  "harn-parser",
+ "harn-rules",
  "harn-vm",
 ]
 
