@@ -1,1 +1,0 @@
-- Increased `harn test --parallel` worker thread stack size so deep agent/runtime tests do not crash with a Rust stack overflow.
