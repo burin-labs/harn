@@ -35,6 +35,7 @@
 - [Pool cookbook](./cookbooks/pools.md)
 - [Rename a symbol cookbook](./cookbooks/rename-symbol.md)
 - [Structured refactorings cookbook](./cookbooks/structured-refactorings.md)
+- [Rule engine cookbook](./cookbooks/rules-engine.md)
 - [Destructure with defaults cookbook](./cookbooks/destructure-with-defaults.md)
 - [Burin compass cookbook](./cookbooks/burin-compass.md)
 - [Replay time-travel cookbook](./cookbooks/replay-time-travel.md)
