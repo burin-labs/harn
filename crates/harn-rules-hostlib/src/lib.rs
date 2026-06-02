@@ -56,8 +56,8 @@ use harn_hostlib::{
 use harn_vm::{AsyncBuiltinCtx, Vm, VmError, VmValue};
 
 use harn_rules::{
-    data_table, Applicability, CompiledRule, Diagnostic, Rule, RuleMatch, Safety, Severity,
-    SourceFile, Span,
+    data_table, Applicability, BindingMetadata, CompiledRule, Diagnostic, ResolvedBinding, Rule,
+    RuleMatch, Safety, Severity, SourceFile, Span,
 };
 
 const SEARCH: &str = "hostlib_rules_search";
@@ -330,6 +330,7 @@ fn match_to_vm(path: &std::path::Path, m: &RuleMatch) -> VmValue {
         .iter()
         .map(|(name, b)| (name.clone(), str_vm(&b.text)))
         .collect();
+    let capture_metadata = capture_metadata_vm(m);
     dict_vm([
         ("path", str_vm(path.display().to_string())),
         ("text", str_vm(&m.text)),
@@ -338,6 +339,7 @@ fn match_to_vm(path: &std::path::Path, m: &RuleMatch) -> VmValue {
         ("end_row", VmValue::Int(m.span.end_row as i64)),
         ("end_col", VmValue::Int(m.span.end_col as i64)),
         ("captures", VmValue::Dict(Arc::new(captures))),
+        ("capture_metadata", capture_metadata),
     ])
 }
 
@@ -373,13 +375,48 @@ fn node_vm(m: &RuleMatch) -> VmValue {
         .iter()
         .map(|(name, b)| (name.clone(), str_vm(&b.text)))
         .collect();
+    let capture_metadata = capture_metadata_vm(m);
     dict_vm([
         ("text", str_vm(&m.text)),
         ("captures", VmValue::Dict(Arc::new(captures))),
+        ("capture_metadata", capture_metadata),
         ("start_row", VmValue::Int(m.span.start_row as i64)),
         ("start_col", VmValue::Int(m.span.start_col as i64)),
         ("end_row", VmValue::Int(m.span.end_row as i64)),
         ("end_col", VmValue::Int(m.span.end_col as i64)),
+    ])
+}
+
+fn capture_metadata_vm(m: &RuleMatch) -> VmValue {
+    let metadata: BTreeMap<String, VmValue> = m
+        .bindings
+        .iter()
+        .filter(|(_, binding)| !binding.metadata.is_empty())
+        .map(|(name, binding)| (name.clone(), binding_metadata_vm(&binding.metadata)))
+        .collect();
+    VmValue::Dict(Arc::new(metadata))
+}
+
+fn binding_metadata_vm(metadata: &BindingMetadata) -> VmValue {
+    let mut entries = BTreeMap::new();
+    if let Some(ty) = &metadata.ty {
+        entries.insert("type".into(), str_vm(ty));
+    }
+    if let Some(resolved) = &metadata.resolved {
+        entries.insert("resolved".into(), resolved_binding_vm(resolved));
+    }
+    VmValue::Dict(Arc::new(entries))
+}
+
+fn resolved_binding_vm(resolved: &ResolvedBinding) -> VmValue {
+    dict_vm([
+        ("id", str_vm(&resolved.id)),
+        ("name", str_vm(&resolved.name)),
+        ("kind", str_vm(&resolved.kind)),
+        ("start_row", VmValue::Int(resolved.span.start_row as i64)),
+        ("start_col", VmValue::Int(resolved.span.start_col as i64)),
+        ("end_row", VmValue::Int(resolved.span.end_row as i64)),
+        ("end_col", VmValue::Int(resolved.span.end_col as i64)),
     ])
 }
 
@@ -660,6 +697,33 @@ mod tests {
             _ => panic!(),
         };
         assert_eq!(s(get(get(&matches[0], "captures"), "FN")), "foo");
+    }
+
+    #[test]
+    fn search_returns_harn_capture_metadata() {
+        let rule = r#"
+            id = "int-logs"
+            language = "harn"
+            [rule]
+            pattern = "log($VALUE)"
+        "#;
+        let result = search_run(&[dict(&[
+            ("rule", str_vm(rule)),
+            (
+                "source",
+                str_vm("fn main() {\n  let count: int = 1\n  log(count)\n}\n"),
+            ),
+            ("language", str_vm("harn")),
+        ])])
+        .unwrap();
+        let matches = match get(&result, "matches") {
+            VmValue::List(l) => l.clone(),
+            _ => panic!(),
+        };
+        let metadata = get(get(&matches[0], "capture_metadata"), "VALUE");
+        assert_eq!(s(get(metadata, "type")), "int");
+        assert_eq!(s(get(get(metadata, "resolved"), "name")), "count");
+        assert_eq!(s(get(get(metadata, "resolved"), "kind")), "let");
     }
 
     #[test]

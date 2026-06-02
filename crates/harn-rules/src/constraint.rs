@@ -11,8 +11,9 @@ use tree_sitter::{Query, QueryCursor};
 
 use harn_hostlib::ast::{api, Language};
 
+use crate::engine::{Binding, ResolvedBinding};
 use crate::error::RulesError;
-use crate::model::Constraint;
+use crate::model::{Constraint, ResolvedBindingConstraint};
 use crate::pattern::compile_pattern;
 
 /// A compiled `where` constraint bound to one metavar.
@@ -26,6 +27,8 @@ enum Kind {
     Regex(Regex),
     Comparison { op: CmpOp, value: toml::Value },
     SubPattern { language: Language, query: Query },
+    ResolvesTo(ResolvedBindingConstraint),
+    Type(String),
 }
 
 #[derive(Clone, Copy)]
@@ -69,13 +72,15 @@ impl CompiledConstraint {
             constraint.regex.is_some(),
             constraint.comparison.is_some(),
             constraint.pattern.is_some(),
+            constraint.resolves_to.is_some(),
+            constraint.type_.is_some(),
         ]
         .into_iter()
         .filter(|b| *b)
         .count();
         if set != 1 {
             return Err(err(format!(
-                "where-constraint on `{}` must set exactly one of `regex` / `comparison` / `pattern`",
+                "where-constraint on `{}` must set exactly one of `regex` / `comparison` / `pattern` / `resolves_to` / `type`",
                 constraint.metavar
             )));
         }
@@ -92,8 +97,7 @@ impl CompiledConstraint {
                 op,
                 value: cmp.value.clone(),
             }
-        } else {
-            let snippet = constraint.pattern.as_ref().unwrap();
+        } else if let Some(snippet) = &constraint.pattern {
             let language = match &constraint.language {
                 Some(name) => Language::from_name(name)
                     .ok_or_else(|| err(format!("unknown sub-pattern language `{name}`")))?,
@@ -107,6 +111,40 @@ impl CompiledConstraint {
             let query = Query::new(&ts_language, &compiled.query)
                 .map_err(|e| err(format!("sub-pattern query rejected: {e}")))?;
             Kind::SubPattern { language, query }
+        } else if let Some(resolves_to) = &constraint.resolves_to {
+            if default_language != Language::Harn {
+                return Err(err(format!(
+                    "`resolves_to` on `{}` is only supported for Harn rules",
+                    constraint.metavar
+                )));
+            }
+            if resolves_to.id.is_none()
+                && resolves_to.name.is_none()
+                && resolves_to.kind.is_none()
+                && resolves_to.line.is_none()
+                && resolves_to.column.is_none()
+            {
+                return Err(err(format!(
+                    "`resolves_to` on `{}` must set at least one identity field",
+                    constraint.metavar
+                )));
+            }
+            Kind::ResolvesTo(resolves_to.clone())
+        } else {
+            if default_language != Language::Harn {
+                return Err(err(format!(
+                    "`type` on `{}` is only supported for Harn rules",
+                    constraint.metavar
+                )));
+            }
+            let expected = constraint.type_.as_ref().unwrap();
+            if expected.trim().is_empty() {
+                return Err(err(format!(
+                    "`type` on `{}` must not be empty",
+                    constraint.metavar
+                )));
+            }
+            Kind::Type(expected.clone())
         };
 
         Ok(CompiledConstraint {
@@ -115,21 +153,49 @@ impl CompiledConstraint {
         })
     }
 
-    /// Evaluate the constraint against a metavar's captured `text`.
-    pub fn evaluate(&self, text: &str) -> bool {
+    /// Evaluate the constraint against a metavar binding.
+    pub fn evaluate(&self, binding: &Binding) -> bool {
         match &self.kind {
-            Kind::Regex(re) => re.is_match(text),
-            Kind::Comparison { op, value } => evaluate_comparison(*op, text, value),
+            Kind::Regex(re) => re.is_match(&binding.text),
+            Kind::Comparison { op, value } => evaluate_comparison(*op, &binding.text, value),
             Kind::SubPattern { language, query } => {
-                let Ok(tree) = api::parse_tree(text, *language) else {
+                let Ok(tree) = api::parse_tree(&binding.text, *language) else {
                     return false;
                 };
                 let mut cursor = QueryCursor::new();
-                let mut it = cursor.matches(query, tree.root_node(), text.as_bytes());
+                let mut it = cursor.matches(query, tree.root_node(), binding.text.as_bytes());
                 it.next().is_some()
             }
+            Kind::ResolvesTo(expected) => binding
+                .metadata
+                .resolved
+                .as_ref()
+                .is_some_and(|actual| resolved_matches(expected, actual)),
+            Kind::Type(expected) => binding
+                .metadata
+                .ty
+                .as_ref()
+                .is_some_and(|actual| actual == expected),
         }
     }
+}
+
+fn resolved_matches(expected: &ResolvedBindingConstraint, actual: &ResolvedBinding) -> bool {
+    expected.id.as_ref().is_none_or(|id| id == &actual.id)
+        && expected
+            .name
+            .as_ref()
+            .is_none_or(|name| name == &actual.name)
+        && expected
+            .kind
+            .as_ref()
+            .is_none_or(|kind| kind == &actual.kind)
+        && expected
+            .line
+            .is_none_or(|line| line == actual.span.start_row + 1)
+        && expected
+            .column
+            .is_none_or(|column| column == actual.span.start_col + 1)
 }
 
 fn evaluate_comparison(op: CmpOp, text: &str, value: &toml::Value) -> bool {
@@ -172,7 +238,23 @@ fn evaluate_comparison(op: CmpOp, text: &str, value: &toml::Value) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::engine::{BindingMetadata, Span};
     use crate::model::Comparison;
+
+    fn binding(text: &str) -> Binding {
+        Binding {
+            text: text.into(),
+            span: Span {
+                start_byte: 0,
+                end_byte: text.len(),
+                start_row: 0,
+                start_col: 0,
+                end_row: 0,
+                end_col: text.len(),
+            },
+            metadata: BindingMetadata::default(),
+        }
+    }
 
     fn regex_constraint(metavar: &str, re: &str) -> CompiledConstraint {
         let c = Constraint {
@@ -180,6 +262,8 @@ mod tests {
             regex: Some(re.into()),
             comparison: None,
             pattern: None,
+            resolves_to: None,
+            type_: None,
             language: None,
         };
         CompiledConstraint::compile("r", Language::Rust, &c).unwrap()
@@ -188,8 +272,8 @@ mod tests {
     #[test]
     fn regex_constraint_matches() {
         let c = regex_constraint("KEY", "^[a-z][a-zA-Z]*$");
-        assert!(c.evaluate("userId"));
-        assert!(!c.evaluate("0bad"));
+        assert!(c.evaluate(&binding("userId")));
+        assert!(!c.evaluate(&binding("0bad")));
     }
 
     #[test]
@@ -202,12 +286,14 @@ mod tests {
                 value: toml::Value::Integer(0),
             }),
             pattern: None,
+            resolves_to: None,
+            type_: None,
             language: None,
         };
         let c = CompiledConstraint::compile("r", Language::Rust, &c).unwrap();
-        assert!(c.evaluate("5"));
-        assert!(!c.evaluate("0"));
-        assert!(!c.evaluate("-3"));
+        assert!(c.evaluate(&binding("5")));
+        assert!(!c.evaluate(&binding("0")));
+        assert!(!c.evaluate(&binding("-3")));
     }
 
     #[test]
@@ -220,11 +306,13 @@ mod tests {
                 value: toml::Value::String("nil".into()),
             }),
             pattern: None,
+            resolves_to: None,
+            type_: None,
             language: None,
         };
         let c = CompiledConstraint::compile("r", Language::Rust, &c).unwrap();
-        assert!(c.evaluate("something"));
-        assert!(!c.evaluate("nil"));
+        assert!(c.evaluate(&binding("something")));
+        assert!(!c.evaluate(&binding("nil")));
     }
 
     #[test]
@@ -235,11 +323,13 @@ mod tests {
             regex: None,
             comparison: None,
             pattern: Some("$FN($ARG)".into()),
+            resolves_to: None,
+            type_: None,
             language: Some("typescript".into()),
         };
         let c = CompiledConstraint::compile("r", Language::TypeScript, &c).unwrap();
-        assert!(c.evaluate("compute(x)"));
-        assert!(!c.evaluate("42"));
+        assert!(c.evaluate(&binding("compute(x)")));
+        assert!(!c.evaluate(&binding("42")));
     }
 
     #[test]
@@ -249,6 +339,8 @@ mod tests {
             regex: None,
             comparison: None,
             pattern: None,
+            resolves_to: None,
+            type_: None,
             language: None,
         };
         assert!(CompiledConstraint::compile("r", Language::Rust, &none).is_err());

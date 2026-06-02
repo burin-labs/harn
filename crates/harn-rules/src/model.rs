@@ -299,7 +299,7 @@ pub struct Rule {
 }
 
 /// A `where` predicate on a captured metavar. Exactly one of `regex` /
-/// `comparison` / `pattern` is set.
+/// `comparison` / `pattern` / `resolves_to` / `type` is set.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Constraint {
@@ -316,10 +316,39 @@ pub struct Constraint {
     /// metavar's captured text; the constraint holds when it matches.
     #[serde(default)]
     pub pattern: Option<String>,
+    /// Harn-only semantic filter: the captured node must resolve to a
+    /// declaration/binding matching this identity.
+    #[serde(default, alias = "resolvesTo")]
+    pub resolves_to: Option<ResolvedBindingConstraint>,
+    /// Harn-only semantic filter: the capture's attributed type must equal
+    /// this label.
+    #[serde(default, rename = "type")]
+    pub type_: Option<String>,
     /// Optional language override for `pattern` — lets a captured string
     /// literal be matched in a different grammar than the host file.
     #[serde(default)]
     pub language: Option<String>,
+}
+
+/// A Harn resolved-binding predicate for [`Constraint::resolves_to`].
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ResolvedBindingConstraint {
+    /// Exact resolved id (`<kind>:<name>@<line>:<column>`), if supplied.
+    #[serde(default)]
+    pub id: Option<String>,
+    /// Binding/declaration name.
+    #[serde(default)]
+    pub name: Option<String>,
+    /// Binding kind (`fn`, `param`, `let`, ...).
+    #[serde(default)]
+    pub kind: Option<String>,
+    /// 1-based declaration/binding line.
+    #[serde(default)]
+    pub line: Option<usize>,
+    /// 1-based declaration/binding column.
+    #[serde(default)]
+    pub column: Option<usize>,
 }
 
 /// A numeric/string comparison for a [`Constraint`].
@@ -540,5 +569,33 @@ mod tests {
             "#,
         );
         assert!(err.is_err());
+    }
+
+    #[test]
+    fn parses_semantic_where_constraints() {
+        let rule = Rule::from_toml_str(
+            r#"
+            id = "x"
+            language = "harn"
+            [rule]
+            pattern = "$FN($ARG)"
+
+            [[where]]
+            metavar = "FN"
+            resolvesTo = { name = "target", kind = "fn", line = 1, column = 4 }
+
+            [[where]]
+            metavar = "ARG"
+            type = "int"
+            "#,
+        )
+        .unwrap();
+        assert_eq!(rule.where_constraints.len(), 2);
+        let resolved = rule.where_constraints[0].resolves_to.as_ref().unwrap();
+        assert_eq!(resolved.name.as_deref(), Some("target"));
+        assert_eq!(resolved.kind.as_deref(), Some("fn"));
+        assert_eq!(resolved.line, Some(1));
+        assert_eq!(resolved.column, Some(4));
+        assert_eq!(rule.where_constraints[1].type_.as_deref(), Some("int"));
     }
 }

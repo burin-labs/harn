@@ -59,6 +59,29 @@ See `crates/harn-rules/README.md` for the full model: relational keys
 (`inside` / `has` / `follows` / `precedes`), composite keys (`all` / `any` /
 `not` / `matches`), `[[where]]` predicates, and `[transform.NAME]`.
 
+For Harn source, `[[where]]` can also filter by resolved binding identity or
+capture type. This distinguishes two same-named call sites by the declaration
+they actually resolve to:
+
+```toml
+id = "global-target-call"
+language = "harn"
+
+[rule]
+pattern = "$FN($ARG)"
+
+[[where]]
+metavar = "FN"
+resolvesTo = { name = "target", kind = "fn", line = 1 }
+
+[[where]]
+metavar = "ARG"
+type = "int"
+```
+
+The JSON output keeps `captures` as text and adds `capture_metadata` with
+`resolved` and `type` entries when the Harn resolver can supply them.
+
 ## How do I apply a codemod?
 
 `harn codemod` is **dry-run by default** — it prints a unified diff per file

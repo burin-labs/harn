@@ -120,6 +120,47 @@ fn inline_pattern_search_supports_harn_sources() {
 }
 
 #[test]
+fn saved_harn_rule_surfaces_resolved_capture_metadata() {
+    let dir = fixture_dir("harn-semantic");
+    write(
+        &dir,
+        "calls.harn",
+        "fn target(value: int) -> int {\n  return value\n}\n\nfn call_shadowed(target: fn(int) -> int) {\n  target(1)\n}\n\nfn call_global() {\n  target(2)\n}\n",
+    );
+    write(
+        &dir,
+        "target_call.toml",
+        "id = \"target-call\"\nlanguage = \"harn\"\n[rule]\npattern = \"$FN($ARG)\"\n\n[[where]]\nmetavar = \"FN\"\nresolvesTo = { name = \"target\", kind = \"fn\", line = 1 }\n",
+    );
+
+    let out = scan(&[
+        "--rule",
+        dir.join("target_call.toml").to_str().unwrap(),
+        dir.to_str().unwrap(),
+        "--json",
+    ]);
+    assert_eq!(out.code, 0, "stderr={}", out.stderr);
+    let json: serde_json::Value = serde_json::from_str(&out.stdout).expect("valid json");
+    assert_eq!(json["summary"]["total"], 1);
+    let matched = &json["results"][0]["matches"][0];
+    assert_eq!(matched["text"], "target(2)");
+    assert_eq!(matched["captures"]["FN"], "target");
+    assert_eq!(matched["capture_metadata"]["FN"]["type"], "fn(int) -> int");
+    assert_eq!(
+        matched["capture_metadata"]["FN"]["resolved"]["name"],
+        "target"
+    );
+    assert_eq!(matched["capture_metadata"]["FN"]["resolved"]["kind"], "fn");
+    assert_eq!(
+        matched["capture_metadata"]["FN"]["resolved"]["start_row"],
+        0
+    );
+    assert_eq!(matched["capture_metadata"]["ARG"]["type"], "int");
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn report_only_emits_per_file_counts() {
     let dir = fixture_dir("report");
     write(&dir, "a.ts", "let p = a?.x ?? 1;\nlet q = b?.y ?? 2;\n");

@@ -12,8 +12,9 @@
  *   paths to read.
  *
  * On success `result == "ok"` and `matches` is a list of `{path, text,
- * start_row, start_col, captures}` where `captures` maps each metavar name
- * to its bound text.
+ * start_row, start_col, captures, capture_metadata}` where `captures` maps
+ * each metavar name to its bound text. For Harn rules, `capture_metadata`
+ * adds `resolved` and `type` entries when the resolver can supply them.
  *
  * @effects: [host]
  * @allocation: heap
@@ -73,8 +74,8 @@ pub fn rules_diagnostics(params) -> dict {
  * arbitrary conditions). `params` is `{rule, source|paths, language?,
  * on_match}` where `on_match` is `fn(node, ctx)`:
  *
- * - `node`: `{text, captures, start_row, start_col, end_row, end_col}` —
- *   `captures` maps each metavar name to its bound text.
+ * - `node`: `{text, captures, capture_metadata, start_row, start_col,
+ *   end_row, end_col}` — `captures` maps each metavar name to its bound text.
  * - `ctx`: `{path, language, source, rule_id}` (read-only).
  * - returns: `nil`/`false` to skip the match, `true` to flag it with the
  *   rule's defaults, a `{message, fix, safety, severity}` dict, or a list of

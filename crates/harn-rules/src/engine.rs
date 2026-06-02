@@ -11,17 +11,19 @@
 use std::collections::BTreeMap;
 
 use harn_hostlib::ast::Language;
+use serde::Serialize;
 
 use crate::constraint::CompiledConstraint;
 use crate::error::RulesError;
 use crate::evaluator::CompiledRuleTree;
 use crate::fix::{interpolate, splice, AppliedEdit};
 use crate::model::{Applicability, Rule, Safety, Severity};
+use crate::semantic::enrich_harn_matches;
 use crate::transform::CompiledTransform;
 
 /// A byte + row/col span. Rows/cols are 0-based, matching the rest of the
 /// Harn AST wire format.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub struct Span {
     /// Start byte offset.
     pub start_byte: usize,
@@ -52,6 +54,41 @@ impl Span {
     }
 }
 
+/// Semantic metadata for a Harn capture. Populated for Harn sources when the
+/// engine can resolve the captured node to a local declaration/binding or infer
+/// a simple static type.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+pub struct BindingMetadata {
+    /// Resolved Harn declaration/binding identity for this capture.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub resolved: Option<ResolvedBinding>,
+    /// Static type label for this capture.
+    #[serde(rename = "type", skip_serializing_if = "Option::is_none")]
+    pub ty: Option<String>,
+}
+
+impl BindingMetadata {
+    /// True when no semantic metadata is available.
+    pub fn is_empty(&self) -> bool {
+        self.resolved.is_none() && self.ty.is_none()
+    }
+}
+
+/// A resolved Harn declaration or binding identity.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ResolvedBinding {
+    /// Stable id: `<kind>:<name>@<line>:<column>` (1-based line/column).
+    pub id: String,
+    /// Binding name.
+    pub name: String,
+    /// Binding kind (`fn`, `pipeline`, `tool`, `struct`, `type`, `let`,
+    /// `var`, `const`, `param`, ...).
+    pub kind: String,
+    /// Span of the declaration/binding name.
+    #[serde(flatten)]
+    pub span: Span,
+}
+
 /// A metavariable binding: the captured text plus where it lives.
 #[derive(Debug, Clone)]
 pub struct Binding {
@@ -59,6 +96,18 @@ pub struct Binding {
     pub text: String,
     /// The captured node's span.
     pub span: Span,
+    /// Optional Harn semantic metadata for this capture.
+    pub metadata: BindingMetadata,
+}
+
+impl Binding {
+    pub(crate) fn new(text: String, span: Span) -> Self {
+        Binding {
+            text,
+            span,
+            metadata: BindingMetadata::default(),
+        }
+    }
 }
 
 /// One match of a rule against a file.
@@ -243,6 +292,14 @@ impl CompiledRule {
                 })
                 .collect(),
         };
+        if self.language == Language::Harn && !matches.is_empty() {
+            enrich_harn_matches(source, &mut matches).map_err(|message| {
+                RulesError::SourceParse {
+                    rule: self.rule_id.clone(),
+                    message,
+                }
+            })?;
+        }
         if !self.constraints.is_empty() {
             matches.retain(|m| self.satisfies_constraints(m));
         }
@@ -252,11 +309,9 @@ impl CompiledRule {
     /// True when every `where` constraint holds for this match. A
     /// constraint whose metavar is unbound (not captured) fails closed.
     fn satisfies_constraints(&self, m: &RuleMatch) -> bool {
-        self.constraints.iter().all(|c| {
-            m.bindings
-                .get(&c.metavar)
-                .is_some_and(|b| c.evaluate(&b.text))
-        })
+        self.constraints
+            .iter()
+            .all(|c| m.bindings.get(&c.metavar).is_some_and(|b| c.evaluate(b)))
     }
 
     /// Apply this codemod rule's `fix` to `source`, returning the rewritten
@@ -606,5 +661,113 @@ mod tests {
             CompiledRule::compile(&parsed),
             Err(RulesError::PatternCompile { .. })
         ));
+    }
+
+    #[test]
+    fn harn_resolves_same_named_call_sites_by_binding_identity() {
+        let compiled = rule(
+            r#"
+            id = "top-level-target"
+            language = "harn"
+            [rule]
+            pattern = "$FN($ARG)"
+
+            [[where]]
+            metavar = "FN"
+            resolvesTo = { name = "target", kind = "fn", line = 1 }
+            "#,
+        );
+        let source = r"fn target(value: int) -> int {
+  return value
+}
+
+fn call_shadowed(target: fn(int) -> int) {
+  target(1)
+}
+
+fn call_global() {
+  target(2)
+}
+";
+        let matches = compiled.run(source).unwrap();
+        assert_eq!(matches.len(), 1);
+        assert_eq!(matches[0].text, "target(2)");
+        let binding = &matches[0].bindings["FN"];
+        let resolved = binding.metadata.resolved.as_ref().unwrap();
+        assert_eq!(resolved.name, "target");
+        assert_eq!(resolved.kind, "fn");
+        assert_eq!(resolved.span.start_row, 0);
+        assert_eq!(binding.metadata.ty.as_deref(), Some("fn(int) -> int"));
+    }
+
+    #[test]
+    fn harn_capture_type_constraint_filters_matches() {
+        let compiled = rule(
+            r#"
+            id = "int-logs"
+            language = "harn"
+            [rule]
+            pattern = "log($VALUE)"
+
+            [[where]]
+            metavar = "VALUE"
+            type = "int"
+            "#,
+        );
+        let source = r#"fn main() {
+  let count: int = 1
+  let label: string = "one"
+  log(count)
+  log(label)
+}
+"#;
+        let matches = compiled.run(source).unwrap();
+        assert_eq!(matches.len(), 1);
+        let value = &matches[0].bindings["VALUE"];
+        assert_eq!(value.text, "count");
+        assert_eq!(value.metadata.ty.as_deref(), Some("int"));
+        assert_eq!(
+            value
+                .metadata
+                .resolved
+                .as_ref()
+                .map(|resolved| resolved.kind.as_str()),
+            Some("let")
+        );
+    }
+
+    #[test]
+    fn harn_initializer_uses_outer_binding_scope() {
+        let compiled = rule(
+            r#"
+            id = "outer-initializer"
+            language = "harn"
+            [rule]
+            pattern = "log($VALUE)"
+
+            [[where]]
+            metavar = "VALUE"
+            resolvesTo = { name = "value", kind = "let", line = 2 }
+            "#,
+        );
+        let source = r"fn main() {
+  let value: int = 1
+  if true {
+    let value: string = log(value)
+  }
+}
+";
+        let matches = compiled.run(source).unwrap();
+        assert_eq!(matches.len(), 1);
+        let value = &matches[0].bindings["VALUE"];
+        assert_eq!(value.text, "value");
+        assert_eq!(
+            value
+                .metadata
+                .resolved
+                .as_ref()
+                .map(|resolved| resolved.span.start_row),
+            Some(1)
+        );
     }
 }

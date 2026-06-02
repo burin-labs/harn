@@ -19,7 +19,9 @@ This crate ships the **atomic matching tier**
 **safety + idempotency gate**
 ([harn#2835](https://github.com/burin-labs/harn/issues/2835)), and the
 **whole-project scan lifecycle**
-([harn#2836](https://github.com/burin-labs/harn/issues/2836)).
+([harn#2836](https://github.com/burin-labs/harn/issues/2836)), with
+Harn-only semantic capture metadata for resolved bindings and simple static
+types ([harn#2882](https://github.com/burin-labs/harn/issues/2882)).
 
 ## Rule shape (TOML)
 
@@ -108,6 +110,32 @@ regex = "^get[A-Z]"                  # or: comparison = { op = ">", value = 100 
 source = "FN"
 convert = "snake"                    # or: replace = { regex, by } / substring = { start, end }
 ```
+
+For Harn rules, captures are also enriched with semantic metadata when the
+engine can resolve the node to a local declaration/binding or infer a simple
+type from an annotation/literal. The string captures stay in `captures`; the
+metadata is exposed separately as `capture_metadata`.
+
+```toml
+id = "global-target-call"
+language = "harn"
+
+[rule]
+pattern = "$FN($ARG)"
+
+[[where]]
+metavar = "FN"
+resolvesTo = { name = "target", kind = "fn", line = 1 } # 1-based line
+
+[[where]]
+metavar = "ARG"
+type = "int"
+```
+
+`resolvesTo` accepts any subset of `id`, `name`, `kind`, `line`, and `column`;
+`id` is `<kind>:<name>@<line>:<column>` using 1-based line/column. This is a
+Harn-only first cut: cross-language name/type resolvers are intentionally not
+invented here.
 
 `CompiledRule::apply(source)` runs the rule, drops matches that fail any
 constraint, interpolates each match's `fix` (from its captured + transformed
