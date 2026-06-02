@@ -74,6 +74,10 @@ conformance fixtures.
 - `harn codemod --rule <file> <paths>` — **dry-run by default** (a unified diff
   per file with safety + idempotency); `--apply` writes (capability-gated),
   `--allow-unsafe` applies above machine-applicable safety, `--json`.
+- `harn lint <paths>` — runs project lint rules. Declarative `language = "harn"`
+  rules and imperative `*.lint.harn` modules (a `pub fn lint(source) -> list` of
+  `{message, severity?, line?, column?}` findings) in `[rules] ruleDirs` merge
+  into the normal output. `.harn` rules run read-only and fail safe.
 
 ## From `.harn` (`std/rules`)
 

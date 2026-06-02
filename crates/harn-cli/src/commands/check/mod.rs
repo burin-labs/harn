@@ -12,6 +12,7 @@ mod mock_host;
 mod outcome;
 mod preflight;
 pub(crate) mod provider_matrix;
+mod script_rules;
 mod source;
 mod template_lint;
 
@@ -38,4 +39,5 @@ pub(crate) use lint::{
 };
 pub(crate) use lint_report::{lint_file_report, LintFileReport, LintReport, LINT_SCHEMA_VERSION};
 pub(crate) use preflight::{collect_preflight_diagnostics, is_preflight_allowed};
+pub(crate) use script_rules::run_project_script_rules;
 pub(crate) use template_lint::{collect_lint_targets, lint_prompt_file_inner};

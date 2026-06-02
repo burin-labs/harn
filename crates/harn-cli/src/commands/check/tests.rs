@@ -1617,6 +1617,7 @@ pipeline main(task) {
         false,
         None,
         &[],
+        &[],
     );
     assert!(
         outcome.has_warning,
@@ -1669,6 +1670,7 @@ pipeline main() {
         &module_graph,
         false,
         None,
+        &[],
         &[],
     );
     assert!(matches!(
