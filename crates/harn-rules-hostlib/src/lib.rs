@@ -225,17 +225,32 @@ fn apply_run(args: &[VmValue]) -> Result<VmValue, HostlibError> {
     let rule = compile_rule(APPLY, &dict)?;
     let dry_run = optional_bool(&dict, "dry_run", true);
     let allow_unsafe = optional_bool(&dict, "allow_unsafe", false);
+    // fmt post-pass (#2847): normalize rewritten `.harn` so a batch lands
+    // fmt-stable. On by default; `format: false` opts out.
+    let format = optional_bool(&dict, "format", true);
     let files = load_files(APPLY, &dict)?;
 
     let auto_applicable = rule.safety().is_auto_applicable();
     let mut entries = Vec::new();
     for file in &files {
         let outcome = rule.apply(&file.source).map_err(|e| backend(APPLY, &e))?;
+        // Only `.harn` has a formatter; harn_fmt is idempotent, so a later
+        // `harn fmt` is a no-op. A formatter error falls back to the raw
+        // rewrite rather than failing the codemod.
+        let formatted = format && outcome.changed && file.language == Language::Harn;
+        let rewritten = if formatted {
+            match harn_fmt::format_source(&outcome.rewritten) {
+                Ok(canonical) => canonical,
+                Err(_) => outcome.rewritten,
+            }
+        } else {
+            outcome.rewritten
+        };
         // Write only on a real apply, when the edit is safe to auto-apply
         // (or explicitly allowed), and the rule actually changed the file.
         let applied = !dry_run && outcome.changed && (auto_applicable || allow_unsafe);
         if applied {
-            std::fs::write(&file.path, &outcome.rewritten).map_err(|e| HostlibError::Backend {
+            std::fs::write(&file.path, &rewritten).map_err(|e| HostlibError::Backend {
                 builtin: APPLY,
                 message: format!("write `{}`: {e}", file.path.display()),
             })?;
@@ -245,11 +260,12 @@ fn apply_run(args: &[VmValue]) -> Result<VmValue, HostlibError> {
             ("changed", VmValue::Bool(outcome.changed)),
             ("applied", VmValue::Bool(applied)),
             ("idempotent", VmValue::Bool(outcome.idempotent)),
+            ("formatted", VmValue::Bool(formatted)),
             ("safety", str_vm(format!("{:?}", outcome.safety))),
             // The original source, so callers can render a diff without a
             // (sandboxed) re-read of the file.
             ("before", str_vm(&file.source)),
-            ("preview", str_vm(outcome.rewritten)),
+            ("preview", str_vm(rewritten)),
         ]));
     }
     Ok(dict_vm([
@@ -763,6 +779,61 @@ mod tests {
         assert!(b(get(&files[0], "changed")));
         assert!(!b(get(&files[0], "applied")));
         assert_eq!(s(get(&files[0], "preview")), "bar();\n");
+    }
+
+    const UGLY_HARN_CODEMOD: &str = r#"
+        id = "dd"
+        language = "harn"
+        safety = "scope-local"
+        fix = "let {$K=$D}=$X"
+        [rule]
+        pattern = "let $K = $X?.$K ?? $D"
+    "#;
+
+    #[test]
+    fn apply_formats_harn_output_by_default() {
+        // The fix template is deliberately ugly; the #2847 fmt post-pass
+        // normalizes the rewritten `.harn` (so a batch lands fmt-stable).
+        let result = apply_run(&[dict(&[
+            ("rule", str_vm(UGLY_HARN_CODEMOD)),
+            (
+                "source",
+                str_vm("fn main() {\n  let timeout = cfg?.timeout ?? 30\n}\n"),
+            ),
+            ("language", str_vm("harn")),
+            ("dry_run", VmValue::Bool(true)),
+        ])])
+        .unwrap();
+        let files = match get(&result, "files") {
+            VmValue::List(l) => l.clone(),
+            _ => panic!(),
+        };
+        assert!(b(get(&files[0], "changed")));
+        assert!(b(get(&files[0], "formatted")));
+        let preview = s(get(&files[0], "preview"));
+        assert!(preview.contains("= 30"), "preview not formatted: {preview}");
+    }
+
+    #[test]
+    fn apply_format_false_leaves_raw_output() {
+        let result = apply_run(&[dict(&[
+            ("rule", str_vm(UGLY_HARN_CODEMOD)),
+            (
+                "source",
+                str_vm("fn main() {\n  let timeout = cfg?.timeout ?? 30\n}\n"),
+            ),
+            ("language", str_vm("harn")),
+            ("dry_run", VmValue::Bool(true)),
+            ("format", VmValue::Bool(false)),
+        ])])
+        .unwrap();
+        let files = match get(&result, "files") {
+            VmValue::List(l) => l.clone(),
+            _ => panic!(),
+        };
+        assert!(!b(get(&files[0], "formatted")));
+        let preview = s(get(&files[0], "preview"));
+        assert!(preview.contains("{timeout=30}"), "expected raw: {preview}");
     }
 
     #[test]

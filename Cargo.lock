@@ -2540,6 +2540,7 @@ dependencies = [
 name = "harn-rules-hostlib"
 version = "0.8.63"
 dependencies = [
+ "harn-fmt",
  "harn-hostlib",
  "harn-rules",
  "harn-vm",
