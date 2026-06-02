@@ -18,11 +18,8 @@ pub(crate) async fn run(args: CodemodArgs) {
     use crate::dispatch;
     use crate::env_guard::ScopedEnvVar;
 
-    if args.rule.is_none() && args.rule_pack.is_none() {
-        eprintln!("codemod: provide `--rule <file>` or `--rule-pack <dir>`");
-        std::process::exit(2);
-    }
-
+    // No early `--rule` check: `resolve` falls back to the project's
+    // `[rules] ruleDirs` (#2843) and errors itself if nothing is found.
     let plan = match resolve(&args) {
         Ok(plan) => plan,
         Err(message) => {
@@ -49,5 +46,21 @@ fn resolve(args: &CodemodArgs) -> Result<String, String> {
 
     let specs =
         rules_cli::resolve_rules(None, None, args.rule.as_deref(), args.rule_pack.as_deref())?;
-    rules_cli::build_plan(specs, &args.paths)
+
+    // A codemod only applies rules that have a `fix`. Discovered packs mix in
+    // lint/search rules, which are silently skipped here; an explicitly given
+    // fix-less rule is a user error and reported as such.
+    let explicit = args.rule.is_some() || args.rule_pack.is_some();
+    let codemod_specs: Vec<_> = specs
+        .into_iter()
+        .filter(|s| rules_cli::rule_has_fix(&s.toml))
+        .collect();
+    if codemod_specs.is_empty() {
+        return Err(if explicit {
+            "the given rule has no `fix` template (it is a lint, not a codemod)".into()
+        } else {
+            "no codemod rules (rules with a `fix`) found in the project `[rules] ruleDirs`".into()
+        });
+    }
+    rules_cli::build_plan(codemod_specs, &args.paths)
 }

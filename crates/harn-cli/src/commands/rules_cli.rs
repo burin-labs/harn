@@ -64,8 +64,63 @@ pub(crate) fn resolve_rules(
         }
         Ok(specs)
     } else {
-        Err("provide an inline <pattern>, `--rule <file>`, or `--rule-pack <dir>`".into())
+        // No explicit rule given: fall back to the project's `[rules] ruleDirs`.
+        let discovered = discover_project_rules()?;
+        if discovered.is_empty() {
+            Err("no rule given: pass an inline `<pattern> --lang <lang>`, \
+                 `--rule <file>`, `--rule-pack <dir>`, or declare \
+                 `[rules] ruleDirs` in harn.toml"
+                .into())
+        } else {
+            Ok(discovered)
+        }
     }
+}
+
+/// Load the `*.toml` rules in `dir` as [`RuleSpec`]s, sorted by path.
+fn load_rule_dir_specs(dir: &std::path::Path) -> Result<Vec<RuleSpec>, String> {
+    use std::fs;
+
+    let mut paths: Vec<_> = fs::read_dir(dir)
+        .map_err(|e| format!("read rule dir `{}`: {e}", dir.display()))?
+        .filter_map(Result::ok)
+        .map(|e| e.path())
+        .filter(|p| p.extension().and_then(|e| e.to_str()) == Some("toml"))
+        .collect();
+    paths.sort();
+
+    let mut specs = Vec::new();
+    for path in paths {
+        let toml =
+            fs::read_to_string(&path).map_err(|e| format!("read `{}`: {e}", path.display()))?;
+        let language = rule_language(&toml)?;
+        specs.push(RuleSpec { toml, language });
+    }
+    Ok(specs)
+}
+
+/// Discover rules from the nearest project manifest's `[rules] ruleDirs`
+/// (resolved relative to the manifest's directory). Returns an empty vec when
+/// there is no manifest or it declares no `ruleDirs`, so callers fall through
+/// to their usual "no rule given" error.
+fn discover_project_rules() -> Result<Vec<RuleSpec>, String> {
+    let cwd = std::env::current_dir().map_err(|e| format!("current dir: {e}"))?;
+    let Some((manifest, manifest_dir)) = crate::package::find_nearest_manifest(&cwd) else {
+        return Ok(Vec::new());
+    };
+
+    let mut specs = Vec::new();
+    for rel in &manifest.rules.rule_dirs {
+        let rule_dir = manifest_dir.join(rel);
+        if !rule_dir.is_dir() {
+            return Err(format!(
+                "`[rules] ruleDirs` entry `{rel}` is not a directory ({})",
+                rule_dir.display()
+            ));
+        }
+        specs.extend(load_rule_dir_specs(&rule_dir)?);
+    }
+    Ok(specs)
 }
 
 /// Build the per-rule plan JSON: each rule paired with the files (recursively
@@ -89,6 +144,15 @@ pub(crate) fn build_plan(specs: Vec<RuleSpec>, paths: &[String]) -> Result<Strin
         })
         .collect();
     serde_json::to_string(&plan).map_err(|e| format!("serialize plan: {e}"))
+}
+
+/// True if a rule TOML declares a top-level `fix` (i.e. it is a codemod, not a
+/// lint/search). Used to filter discovered packs down to applicable rules.
+pub(crate) fn rule_has_fix(src: &str) -> bool {
+    toml::from_str::<toml::Value>(src)
+        .ok()
+        .and_then(|v| v.get("fix").map(toml::Value::is_str))
+        .unwrap_or(false)
 }
 
 /// Parse a rule TOML's declared `language` into a [`Language`].
