@@ -130,7 +130,7 @@ let answerer = agentic_user(
   "Provide a simple prompt to create ./index.test.ts with full edge coverage.",
   "Research the codebase only if needed. Answer clarification questions with plausible user preferences. If the agent is done, stop.",
   simulated_user_read_tools(),
-  "ollama:qwen3.6-coding",
+  "ollama:devstral-small-2",
   {max_replies: 4, max_llm_calls: 8, max_iterations: 4},
 )
 
@@ -192,7 +192,7 @@ import { read_line } from "std/io"
 let result = agent_chat_loop({
   session_id: "review-chat",
   provider: "ollama",
-  model: "qwen3.6-coding",
+  model: "devstral-small-2",
   tools: coding_tools,
   tool_format: "native",
   on_user_input: { state ->
@@ -311,7 +311,7 @@ agent_loop(task, system, {
   loop_until_done: true,
   scratchpad: {
     reorganize_every: 2,
-    reorganizer: {provider: "ollama", model: "qwen3.6-coding"},
+    reorganizer: {provider: "ollama", model: "devstral-small-2"},
   },
 })
 ```

@@ -653,7 +653,7 @@ fn assistant_tool_message_stringifies_ollama_arguments() {
             "arguments": {"path": "main.rs"},
         })],
         "ollama",
-        "qwen3.6:35b-a3b-coding-nvfp4",
+        "devstral-small-2:24b",
     );
 
     assert_eq!(message["role"], "assistant");

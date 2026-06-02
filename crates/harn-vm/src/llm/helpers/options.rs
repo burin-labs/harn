@@ -2082,7 +2082,7 @@ pub(crate) fn extract_llm_options(
     // signals "skip tool calls this turn") and providers like Ollama
     // forward it through. Gating only on `native_tools` blocked scripts
     // that legitimately request tool_choice on text-tool routes such as
-    // `ollama/qwen3.6:35b-a3b-coding-nvfp4`.
+    // `ollama/devstral-small-2:24b`.
     if enforce_capability_gates
         && tool_choice.is_some()
         && !caps.native_tools
@@ -3941,7 +3941,7 @@ mod routing_tests {
 
     #[test]
     fn tool_choice_accepted_on_text_tool_routes() {
-        // qwen3.6 on Ollama is native_tools=false but
+        // devstral-small-2 on Ollama is native_tools=false but
         // text_tool_wire_format_supported=true. tool_choice should not
         // be rejected on text-format routes (e.g. agent scripts that
         // pass tool_choice="none" to suppress further tool calls).
@@ -3956,9 +3956,7 @@ mod routing_tests {
             ),
             (
                 "model".to_string(),
-                VmValue::String(std::sync::Arc::from(
-                    "qwen3.6:35b-a3b-coding-nvfp4".to_string(),
-                )),
+                VmValue::String(std::sync::Arc::from("devstral-small-2:24b".to_string())),
             ),
             (
                 "tool_choice".to_string(),

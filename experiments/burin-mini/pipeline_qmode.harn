@@ -29,7 +29,7 @@ fn generator_model(harness: Harness) {
   return harness.env
     .get_or(
     "BURIN_MINI_GENERATOR_MODEL",
-    harness.env.get_or("HARN_LLM_MODEL", "qwen3.6:35b-a3b-coding-nvfp4"),
+    harness.env.get_or("HARN_LLM_MODEL", "devstral-small-2:24b"),
   )
 }
 
@@ -41,7 +41,7 @@ fn assert_local_only(harness: Harness) {
       return
     }
   }
-  throw "[qmode] provider '${p}' is not local-only. Allowed: ollama, local, mock. Set BURIN_MINI_PROVIDER=ollama and BURIN_MINI_GENERATOR_MODEL=qwen3.6:35b-a3b-coding-nvfp4."
+  throw "[qmode] provider '${p}' is not local-only. Allowed: ollama, local, mock. Set BURIN_MINI_PROVIDER=ollama and BURIN_MINI_GENERATOR_MODEL=devstral-small-2:24b."
 }
 
 // -------------------------------------------------------------------------------------------------

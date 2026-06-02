@@ -21,9 +21,9 @@
 //   harn run examples/task_plan/compare_strategies.harn -- \
 //     --out=examples/task_plan/results/runs.jsonl
 //   harn run examples/task_plan/compare_strategies.harn -- \
-//     --model=qwen3.6-coding --trials=2 --out=runs/comparison.jsonl
+//     --model=devstral-small-2 --trials=2 --out=runs/comparison.jsonl
 //   harn run examples/task_plan/compare_strategies.harn -- \
-//     --model=qwen3.6-coding \
+//     --model=devstral-small-2 \
 //     --max-tokens-baseline=1800 \
 //     --max-tokens-burin=2400 \
 //     --max-tokens-typed-ir=6000 \
@@ -32,14 +32,14 @@
 //     --retry-on-schema-error \
 //     --out=examples/task_plan/results/v2/runs_qwen35b_local.jsonl
 //
-// Default model is `qwen3.6-coding` (Ollama, ~$0 cost per call). Override
+// Default model is `devstral-small-2` (Ollama, ~$0 cost per call). Override
 // with --model=<alias> when re-running against a different provider; the
 // driver itself does not depend on the model choice.
 import { task_plan_compile, task_plan_schema, task_plan_validate } from "std/agent/task_plan"
 import { estimate_call_cost } from "std/llm/economics"
 import { plan_from } from "std/plan"
 
-const __DEFAULT_MODEL: string = "qwen3.6-coding"
+const __DEFAULT_MODEL: string = "devstral-small-2"
 
 const __DEFAULT_TRIALS: int = 1
 

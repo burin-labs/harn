@@ -112,7 +112,7 @@ ollama_models() {
     return
   fi
   printf '%s\n' \
-    "qwen3.6:35b-a3b-coding-nvfp4" \
+    "devstral-small-2:24b" \
     "gemma4:26b" \
     "gemma4-128k:latest"
 }

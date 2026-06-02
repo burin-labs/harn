@@ -1915,7 +1915,7 @@ temperature = 0.3
 
 [llm.model_roles.merge]
 provider = "ollama"
-model = "qwen3.6-coding"
+model = "devstral-small-2"
 temperature = 0.0
 ```
 

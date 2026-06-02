@@ -1195,7 +1195,7 @@ model is supplied, local runtime profile metadata is included for eval
 pipelines.
 
 ```bash
-harn provider-probe ollama --model qwen3.6-coding
+harn provider-probe ollama --model devstral-small-2
 harn provider-probe mlx --model mlx-qwen36-27b --base-url http://127.0.0.1:8002
 ```
 
@@ -1206,7 +1206,7 @@ Run a harmless one-tool conformance probe. The command asks the model to call
 emits JSON with native/text/disabled fallback classification.
 
 ```bash
-harn provider-tool-probe ollama --model qwen3.6-coding
+harn provider-tool-probe ollama --model devstral-small-2
 harn provider-tool-probe llamacpp --model local-qwen3.6 --mode non-streaming
 ```
 
@@ -1218,7 +1218,7 @@ network request. `harn local switch` can consume the JSON with `--probe-result`.
 Explain the local runtime risk profile for a model/provider route:
 
 ```bash
-harn local profile qwen3.6-coding --provider ollama
+harn local profile devstral-small-2 --provider ollama
 harn local profile ollama-gemma4 --json
 ```
 

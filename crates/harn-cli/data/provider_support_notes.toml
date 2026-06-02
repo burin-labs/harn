@@ -127,7 +127,7 @@ caveats = [
   "Some Ollama native tool parsers reject otherwise valid text-mode model output; the capability table records those routes as text-only.",
 ]
 local_setup_notes = [
-  "Run `harn models install devstral-small-2` or `harn models install qwen3.6-coding`, then verify with `harn provider-ready ollama --model <model>`.",
+  "Run `harn models install devstral-small-2`, then verify with `harn provider-ready ollama --model <model>`. For local qwen3.x, use the llamacpp provider (e.g. `local-qwen3.6`) — Ollama's qwen3.5-family tool-call parser 500s on text-tool output.",
 ]
 mcp_notes = [
   "MCP tools are local Harn tools; prefer the text tool contract unless a probe proves native calls work for the installed model.",

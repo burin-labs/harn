@@ -75,15 +75,15 @@ model_id = "ollama/qwen2.5:14b-instruct"
 ram_bucket = "32_plus"
 gpu = "mps"
 has_provider_key = false
-provider = "ollama"
-model_id = "qwen3.6-coding"
+provider = "llamacpp"
+model_id = "local-qwen3.6"
 
 [[recommendations]]
 ram_bucket = "32_plus"
 gpu = "cuda"
 has_provider_key = false
-provider = "ollama"
-model_id = "qwen3.6-coding"
+provider = "llamacpp"
+model_id = "local-qwen3.6"
 
 [[recommendations]]
 ram_bucket = "lt8"

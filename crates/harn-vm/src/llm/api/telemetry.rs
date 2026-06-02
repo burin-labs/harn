@@ -421,7 +421,7 @@ mod tests {
     #[test]
     fn ollama_done_frame_extracts_full_breakdown() {
         let frame = serde_json::json!({
-            "model": "qwen3.6:35b-a3b-coding-nvfp4",
+            "model": "devstral-small-2:24b",
             "total_duration": 7_400_000_000u64,
             "load_duration": 400_000_000u64,
             "prompt_eval_duration": 1_200_000_000u64,
@@ -441,7 +441,7 @@ mod tests {
         assert_eq!(telemetry.server_output_tokens, Some(64));
         assert_eq!(
             telemetry.runtime_loaded_model.as_deref(),
-            Some("qwen3.6:35b-a3b-coding-nvfp4")
+            Some("devstral-small-2:24b")
         );
         assert!(!telemetry.is_empty());
     }
@@ -449,7 +449,7 @@ mod tests {
     #[test]
     fn ollama_done_frame_leaves_missing_fields_as_none() {
         let frame = serde_json::json!({
-            "model": "qwen3.6:35b-a3b-coding-nvfp4",
+            "model": "devstral-small-2:24b",
             // Older Ollama builds omit duration fields on early frames.
         });
 
@@ -506,7 +506,7 @@ mod tests {
     #[test]
     fn ps_entry_pulls_context_length_from_top_level_or_details() {
         let entry = serde_json::json!({
-            "name": "qwen3.6:35b-a3b-coding-nvfp4",
+            "name": "devstral-small-2:24b",
             "size": 4_700_000_000u64,
             "size_vram": 4_500_000_000u64,
             "expires_at": "2026-05-14T10:30:00Z",
@@ -516,7 +516,7 @@ mod tests {
         assert_eq!(model.context_length, Some(32768));
 
         let entry_nested = serde_json::json!({
-            "name": "qwen3.6:35b-a3b-coding-nvfp4",
+            "name": "devstral-small-2:24b",
             "details": {"context_length": 16384}
         });
         let nested = OllamaPsModel::from_ps_entry(&entry_nested).expect("ps entry parses");

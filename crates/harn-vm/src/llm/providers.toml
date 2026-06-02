@@ -545,27 +545,9 @@ id = "gemma4:26b"
 provider = "ollama"
 tool_format = "text"
 
-# Qwen3.6 — Ollama (text tool calling is the safe default; the `-native`
-# variant opts into the experimental native path).
-[aliases."qwen3.6-coding"]
-id = "qwen3.6:35b-a3b-coding-nvfp4"
-provider = "ollama"
-tool_format = "text"
-
-[aliases."qwen3.6-35b-coding"]
-id = "qwen3.6:35b-a3b-coding-nvfp4"
-provider = "ollama"
-tool_format = "text"
-
-[aliases."qwen3.6-coding-nvfp4"]
-id = "qwen3.6:35b-a3b-coding-nvfp4"
-provider = "ollama"
-tool_format = "text"
-
-[aliases."qwen3.6-coding-native"]
-id = "qwen3.6:35b-a3b-coding-nvfp4"
-provider = "ollama"
-tool_format = "native"
+# qwen3.6 has no working Ollama route — Ollama's qwen3.5-family server-side
+# tool-call parser 500s on text-tool output (ollama/ollama#14986, #14570).
+# Use the llamacpp provider for local qwen3.x.
 
 # llama.cpp — Unsloth Dynamic 2.0 GGUF served by llama-server.
 [aliases."llamacpp-qwen3.6"]
@@ -679,18 +661,6 @@ tool_format = "native"
 # Per-alias overrides recording the last-observed native vs. text vs.
 # streaming tool-call probe outcome and the desired fallback. Hosts may
 # update these via providers.toml overlays as they re-probe a model.
-
-[alias_tool_calling."qwen3.6-coding"]
-native = "unknown"
-text = "unknown"
-streaming_native = "unknown"
-fallback_mode = "text"
-
-[alias_tool_calling."qwen3.6-coding-native"]
-native = "unknown"
-text = "unknown"
-streaming_native = "unknown"
-fallback_mode = "native"
 
 [alias_tool_calling.ollama-gemma4]
 native = "unknown"
@@ -1435,16 +1405,6 @@ capabilities = ["tools", "vision", "streaming", "thinking"]
 tier = "mid"
 open_weight = true
 strengths = ["vision", "tool_use"]
-[models."qwen3.6:35b-a3b-coding-nvfp4"]
-name = "Qwen3.6 35B A3B Coding (NVFP4)"
-provider = "ollama"
-context_window = 262144
-runtime_context_window = 32768
-stream_timeout = 900.0
-capabilities = ["tools", "streaming", "thinking"]
-tier = "mid"
-open_weight = true
-strengths = ["coding", "speed"]
 [models."devstral-small-2:24b"]
 name = "Devstral Small 2 24B"
 provider = "ollama"

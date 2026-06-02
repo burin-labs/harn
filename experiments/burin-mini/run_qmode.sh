@@ -18,14 +18,14 @@
 #
 # Env overrides:
 #   QMODE_PROVIDER (default: ollama)
-#   QMODE_MODEL    (default: qwen3.6:35b-a3b-coding-nvfp4)
+#   QMODE_MODEL    (default: devstral-small-2:24b)
 
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 EXPERIMENT_DIR="$REPO_ROOT/experiments/burin-mini"
 PROVIDER="${QMODE_PROVIDER:-ollama}"
-MODEL="${QMODE_MODEL:-qwen3.6:35b-a3b-coding-nvfp4}"
+MODEL="${QMODE_MODEL:-devstral-small-2:24b}"
 
 usage() {
   sed -n '2,18p' "${BASH_SOURCE[0]}"

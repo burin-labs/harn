@@ -1138,13 +1138,10 @@ mod tests {
         ];
         let (addr, server) = spawn_stub(
             vec![
+                (200, r#"{"models":[{"name":"devstral-small-2:24b"}]}"#),
                 (
                     200,
-                    r#"{"models":[{"name":"qwen3.6:35b-a3b-coding-nvfp4"}]}"#,
-                ),
-                (
-                    200,
-                    r#"{"models":[{"name":"qwen3.6:35b-a3b-coding-nvfp4","model":"qwen3.6:35b-a3b-coding-nvfp4","context_length":262144}]}"#,
+                    r#"{"models":[{"name":"devstral-small-2:24b","model":"devstral-small-2:24b","context_length":262144}]}"#,
                 ),
             ],
             Arc::new(Mutex::new(Vec::new())),
@@ -1154,7 +1151,7 @@ mod tests {
             .expect("runtime")
             .block_on(ollama_readiness(OllamaReadinessOptions {
                 observe_loaded: true,
-                ..readiness_options("qwen3.6:35b-a3b-coding-nvfp4", format!("http://{addr}"))
+                ..readiness_options("devstral-small-2:24b", format!("http://{addr}"))
             }));
 
         server.join().expect("stub server");
@@ -1181,17 +1178,17 @@ mod tests {
         crate::llm_config::clear_user_overrides();
         let mut overlay = crate::llm_config::ProvidersConfig::default();
         overlay.aliases.insert(
-            "qwen3.6-coding".to_string(),
+            "devstral-small-2".to_string(),
             crate::llm_config::AliasDef {
-                id: "qwen3.6:35b-a3b-coding-nvfp4".to_string(),
+                id: "devstral-small-2:24b".to_string(),
                 provider: "ollama".to_string(),
                 tool_format: None,
             },
         );
         overlay.models.insert(
-            "qwen3.6:35b-a3b-coding-nvfp4".to_string(),
+            "devstral-small-2:24b".to_string(),
             crate::llm_config::ModelDef {
-                name: "Qwen 3.6 Coding".to_string(),
+                name: "Devstral Small 2 24B".to_string(),
                 provider: "ollama".to_string(),
                 context_window: 262_144,
                 runtime_context_window: Some(98_304),
@@ -1216,16 +1213,13 @@ mod tests {
         );
         crate::llm_config::set_user_overrides(Some(overlay));
 
-        let (resolved, _) = crate::llm_config::resolve_model("qwen3.6-coding");
-        assert_eq!(resolved, "qwen3.6:35b-a3b-coding-nvfp4");
+        let (resolved, _) = crate::llm_config::resolve_model("devstral-small-2");
+        assert_eq!(resolved, "devstral-small-2:24b");
 
         let captured = Arc::new(Mutex::new(Vec::new()));
         let (addr, server) = spawn_stub(
             vec![
-                (
-                    200,
-                    r#"{"models":[{"name":"qwen3.6:35b-a3b-coding-nvfp4"}]}"#,
-                ),
+                (200, r#"{"models":[{"name":"devstral-small-2:24b"}]}"#),
                 (200, r#"{"response":"","done":true}"#),
             ],
             captured.clone(),

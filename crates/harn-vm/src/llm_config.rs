@@ -2356,10 +2356,7 @@ mod tests {
             model_lineage("anthropic", "claude-opus-4-8"),
             "claude-opus-adaptive"
         );
-        assert_eq!(
-            model_lineage("ollama", "qwen3.6:35b-a3b-coding-nvfp4"),
-            "qwen3"
-        );
+        assert_eq!(model_lineage("llamacpp", "qwen3.6-35b-a3b"), "qwen3");
     }
 
     #[test]
@@ -2675,10 +2672,10 @@ mod tests {
     fn test_local_ollama_catalog_metadata() {
         reset_overrides();
 
-        let qwen_coding = model_catalog_entry("qwen3.6:35b-a3b-coding-nvfp4")
-            .expect("qwen3.6 coding catalog entry");
-        assert_eq!(qwen_coding.context_window, 262_144);
-        assert!(!qwen_coding.capabilities.iter().any(|cap| cap == "vision"));
+        let devstral =
+            model_catalog_entry("devstral-small-2:24b").expect("devstral-small-2 catalog entry");
+        assert_eq!(devstral.context_window, 262_144);
+        assert!(!devstral.capabilities.iter().any(|cap| cap == "vision"));
 
         let gemma4 = model_catalog_entry("gemma4:26b").expect("gemma4 catalog entry");
         assert_eq!(gemma4.context_window, 262_144);
