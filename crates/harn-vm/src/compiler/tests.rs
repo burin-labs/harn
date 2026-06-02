@@ -15,6 +15,36 @@ fn compile_source_with_options(source: &str, options: CompilerOptions) -> Chunk 
     Compiler::with_options(options).compile(&program).unwrap()
 }
 
+fn try_compile(source: &str) -> Result<Chunk, CompileError> {
+    let mut lexer = Lexer::new(source);
+    let tokens = lexer.tokenize().unwrap();
+    let mut parser = Parser::new(tokens);
+    let program = parser.parse().unwrap();
+    Compiler::new().compile(&program)
+}
+
+#[test]
+fn match_list_pattern_rest_must_be_last() {
+    let err = try_compile(
+        r"pipeline t(task) { match [1, 2, 3] { [...rest, last] -> { log(last) } _ -> {} } }",
+    )
+    .unwrap_err();
+    assert!(err.message.contains("last element"), "{}", err.message);
+}
+
+#[test]
+fn match_list_pattern_rejects_two_rests() {
+    let err = try_compile(
+        r"pipeline t(task) { match [1, 2, 3] { [a, ...x, ...y] -> { log(a) } _ -> {} } }",
+    )
+    .unwrap_err();
+    assert!(
+        err.message.contains("last element") || err.message.contains("one is allowed"),
+        "{}",
+        err.message
+    );
+}
+
 fn disasm_opcodes(disasm: &str) -> Vec<&str> {
     disasm
         .lines()

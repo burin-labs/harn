@@ -203,10 +203,25 @@ impl TypeChecker {
                     _ => None,
                 });
                 for element in elements {
-                    if let Node::Identifier(name) = &element.node {
-                        if name != "_" {
+                    match &element.node {
+                        // Leading element pattern: binds the element type `T`.
+                        Node::Identifier(name) if name != "_" => {
                             scope.define_var(name, item_type.clone());
                         }
+                        // `...rest` collects the tail into a `list<T>` (parity
+                        // with `let`-destructuring rest typing).
+                        Node::Spread(inner) => {
+                            if let Node::Identifier(name) = &inner.node {
+                                if name != "_" {
+                                    let rest_ty = Some(match &item_type {
+                                        Some(t) => TypeExpr::List(Box::new(t.clone())),
+                                        None => TypeExpr::Named("list".into()),
+                                    });
+                                    scope.define_var(name, rest_ty);
+                                }
+                            }
+                        }
+                        _ => {}
                     }
                 }
             }

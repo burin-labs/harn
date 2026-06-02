@@ -500,6 +500,96 @@ log(d.has("z")) }"#,
 }
 
 #[test]
+fn test_string_repeat_operator_rejects_oversized_count() {
+    // `"a" * <huge>` must error cleanly, never OOM / panic `capacity overflow`.
+    let result = run_harn_result(r#"pipeline t(task) { let s = "ab" * 9999999999 }"#);
+    let err = result.unwrap_err().to_string();
+    assert!(err.contains("repeat") && err.contains("limit"), "{err}");
+}
+
+#[test]
+fn test_string_repeat_method_rejects_oversized_count() {
+    let result = run_harn_result(r#"pipeline t(task) { let s = "ab".repeat(9999999999) }"#);
+    let err = result.unwrap_err().to_string();
+    assert!(err.contains("repeat") && err.contains("limit"), "{err}");
+}
+
+#[test]
+fn test_str_pad_rejects_oversized_width() {
+    let result = run_harn_result(r#"pipeline t(task) { let s = str_pad("x", 9999999999, "-") }"#);
+    let err = result.unwrap_err().to_string();
+    assert!(err.contains("repeat") && err.contains("limit"), "{err}");
+}
+
+#[test]
+fn test_string_repeat_operator_small_count_ok() {
+    let out = run_output(r#"pipeline t(task) { log("ab" * 3) }"#);
+    assert_eq!(out, "[harn] ababab");
+}
+
+#[test]
+fn test_match_list_pattern_is_exact_length() {
+    // A fixed-arity list pattern matches ONLY that length: `[a, b]` must NOT
+    // match a 3-element list (previously it did via a `len >= 2` check).
+    let out = run_output(
+        r#"pipeline t(task) {
+match [1, 2, 3] {
+  [a, b] -> { log("two: ${a},${b}") }
+  _ -> { log("other") }
+} }"#,
+    );
+    assert_eq!(out, "[harn] other");
+}
+
+#[test]
+fn test_match_list_pattern_exact_match_binds() {
+    let out = run_output(
+        r#"pipeline t(task) {
+match [10, 20] {
+  [a, b] -> { log("${a},${b}") }
+  _ -> { log("other") }
+} }"#,
+    );
+    assert_eq!(out, "[harn] 10,20");
+}
+
+#[test]
+fn test_match_list_pattern_rest_binds_tail() {
+    let out = run_output(
+        r#"pipeline t(task) {
+match [1, 2, 3] {
+  [head, ...rest] -> { log("${head} :: ${rest}") }
+  _ -> { log("none") }
+} }"#,
+    );
+    assert_eq!(out, "[harn] 1 :: [2, 3]");
+}
+
+#[test]
+fn test_match_list_pattern_rest_empty_tail() {
+    let out = run_output(
+        r#"pipeline t(task) {
+match [42] {
+  [head, ...rest] -> { log("${head} :: ${rest}") }
+  _ -> { log("none") }
+} }"#,
+    );
+    assert_eq!(out, "[harn] 42 :: []");
+}
+
+#[test]
+fn test_match_list_pattern_discard_rest_matches_at_least() {
+    let out = run_output(
+        r#"pipeline t(task) {
+match [1, 2, 3, 4] {
+  [first, ..._] -> { log("first=${first}") }
+  _ -> { log("empty") }
+} }"#,
+    );
+    assert_eq!(out, "[harn] first=1");
+}
+
+#[test]
 fn test_pipe_operator() {
     let out = run_output(
         "pipeline t(task) { fn double(x) { return x * 2 }\nlet r = 5 |> double\nlog(r) }",
