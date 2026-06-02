@@ -165,11 +165,37 @@ pub(super) fn sync_tree(root: &Path) -> Result<(), LogError> {
             sync_tree(&path)?;
             continue;
         }
-        std::fs::File::open(&path)
-            .and_then(|file| file.sync_all())
+        fsync_file(&path)
             .map_err(|error| LogError::Io(format!("event log sync error: {error}")))?;
     }
     Ok(())
+}
+
+/// Flush a file's contents to durable storage in a cross-platform way.
+///
+/// `File::sync_all` lowers to `FlushFileBuffers` on Windows, which requires a
+/// handle opened with **write** access — calling it on a read-only handle
+/// (`File::open`) fails with `ERROR_ACCESS_DENIED` ("Access is denied"). On
+/// Unix, `fsync(2)` on a read-only descriptor is fine, which is why opening
+/// read-only "worked" everywhere except Windows. Always open for write so the
+/// sync succeeds on every platform.
+///
+/// If the file genuinely can't be opened for writing (e.g. read-only
+/// permissions), fall back to a read-only sync. That still flushes on Unix,
+/// and on Windows the OS write-back cache will persist the data on its own —
+/// so a durability *flush* must never become a hard error just because a file
+/// isn't writable.
+fn fsync_file(path: &Path) -> std::io::Result<()> {
+    match std::fs::OpenOptions::new().write(true).open(path) {
+        Ok(file) => file.sync_all(),
+        Err(write_err) => match std::fs::File::open(path) {
+            // Best-effort on a read-only file: succeeds on Unix; on Windows the
+            // access-denied here is expected and not worth failing the flush.
+            Ok(file) => file.sync_all().or(Ok(())),
+            // Surface the original write-open failure (e.g. the file vanished).
+            Err(_) => Err(write_err),
+        },
+    }
 }
 
 pub(super) fn now_ms() -> i64 {
