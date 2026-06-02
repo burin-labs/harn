@@ -774,21 +774,11 @@ fn append_suffix(path: &Path, suffix: &str) -> PathBuf {
 }
 
 fn sha256_hex(bytes: &[u8]) -> String {
-    let digest = Sha256::digest(bytes);
-    hex_encode(&digest)
+    hex::encode(Sha256::digest(bytes))
 }
 
 pub(crate) fn fingerprint_for_key(key: &VerifyingKey) -> String {
-    let digest = Sha256::digest(key.as_bytes());
-    hex_encode(&digest)
-}
-
-fn hex_encode(bytes: &[u8]) -> String {
-    let mut out = String::with_capacity(bytes.len() * 2);
-    for byte in bytes {
-        out.push_str(&format!("{byte:02x}"));
-    }
-    out
+    hex::encode(Sha256::digest(key.as_bytes()))
 }
 
 fn user_home_dir() -> Option<PathBuf> {

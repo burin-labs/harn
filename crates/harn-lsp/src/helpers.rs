@@ -191,9 +191,6 @@ fn line_byte_range(source: &str, line: usize) -> Option<(usize, usize)> {
     let mut current_line = 0usize;
     let mut line_start = 0usize;
     for (idx, ch) in source.char_indices() {
-        if current_line == line && ch == '\n' {
-            return Some((line_start, idx));
-        }
         if ch == '\n' {
             if current_line == line {
                 return Some((line_start, idx));

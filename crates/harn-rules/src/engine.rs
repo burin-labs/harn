@@ -435,11 +435,24 @@ impl CompiledRule {
 
     fn run_regex(&self, regex: &regex::Regex, source: &str) -> Vec<RuleMatch> {
         let mut matches = Vec::new();
+        // `find_iter` yields non-overlapping matches in ascending byte order, so
+        // a single forward-walking cursor computes every row/col without
+        // rescanning from the start of the document for each match (which made
+        // this O(matches × len) — quadratic on files with many hits).
+        let mut cursor = RowColCursor::new(source);
         for m in regex.find_iter(source) {
-            let span = byte_span(source, m.start(), m.end());
+            let (start_row, start_col) = cursor.advance_to(m.start());
+            let (end_row, end_col) = cursor.advance_to(m.end());
             matches.push(RuleMatch {
                 rule_id: self.rule_id.clone(),
-                span,
+                span: Span {
+                    start_byte: m.start(),
+                    end_byte: m.end(),
+                    start_row,
+                    start_col,
+                    end_row,
+                    end_col,
+                },
                 text: m.as_str().to_string(),
                 bindings: BTreeMap::new(),
             });
@@ -478,36 +491,42 @@ fn dedupe_overlapping(mut matches: Vec<RuleMatch>) -> Vec<RuleMatch> {
     kept
 }
 
-/// Compute a [`Span`] for a byte range by counting rows/cols. Used by the
-/// regex matcher, which has no tree-sitter node to read positions from.
-fn byte_span(source: &str, start: usize, end: usize) -> Span {
-    let (start_row, start_col) = row_col(source, start);
-    let (end_row, end_col) = row_col(source, end);
-    Span {
-        start_byte: start,
-        end_byte: end,
-        start_row,
-        start_col,
-        end_row,
-        end_col,
-    }
+/// Forward-only cursor that maps byte offsets to `(row, col)` while walking a
+/// document at most once. The regex matcher has no tree-sitter node to read
+/// positions from and visits offsets in ascending order, so advancing this
+/// cursor avoids the per-match rescan a stateless lookup would cost.
+struct RowColCursor<'a> {
+    source: &'a str,
+    byte: usize,
+    row: usize,
+    col: usize,
 }
 
-fn row_col(source: &str, byte: usize) -> (usize, usize) {
-    let mut row = 0;
-    let mut col = 0;
-    for (i, ch) in source.char_indices() {
-        if i >= byte {
-            break;
-        }
-        if ch == '\n' {
-            row += 1;
-            col = 0;
-        } else {
-            col += 1;
+impl<'a> RowColCursor<'a> {
+    fn new(source: &'a str) -> Self {
+        Self {
+            source,
+            byte: 0,
+            row: 0,
+            col: 0,
         }
     }
-    (row, col)
+
+    /// Advance to `target` (which must be `>=` the current position and a char
+    /// boundary) and return the row/col there. `row` counts preceding newlines;
+    /// `col` counts characters since the last newline.
+    fn advance_to(&mut self, target: usize) -> (usize, usize) {
+        for ch in self.source[self.byte..target].chars() {
+            if ch == '\n' {
+                self.row += 1;
+                self.col = 0;
+            } else {
+                self.col += 1;
+            }
+        }
+        self.byte = target;
+        (self.row, self.col)
+    }
 }
 
 #[cfg(test)]

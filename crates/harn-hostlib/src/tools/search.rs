@@ -134,7 +134,7 @@ pub(super) fn run(args: &[VmValue]) -> Result<VmValue, HostlibError> {
             continue;
         }
         let mut sink = CollectorSink {
-            matcher: matcher.clone(),
+            matcher: &matcher,
             rows: Vec::new(),
             pending_before: VecDeque::new(),
             context_before,
@@ -251,8 +251,12 @@ struct RowWithPath {
     row: MatchRow,
 }
 
-struct CollectorSink {
-    matcher: RegexMatcher,
+struct CollectorSink<'a> {
+    // Borrowed rather than owned: the compiled matcher is reused across every
+    // file in the walk, and `grep_regex::RegexMatcher::clone` deep-copies the
+    // compiled program — cloning it per file made a repo-wide scan pay that
+    // cost N times for no reason.
+    matcher: &'a RegexMatcher,
     rows: Vec<MatchRow>,
     /// Sliding window of recent before-context lines published by
     /// [`Sink::context`] before each [`Sink::matched`] call.
@@ -261,7 +265,7 @@ struct CollectorSink {
     remaining: usize,
 }
 
-impl Sink for CollectorSink {
+impl Sink for CollectorSink<'_> {
     type Error = std::io::Error;
 
     fn matched(

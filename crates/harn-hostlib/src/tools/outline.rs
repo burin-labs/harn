@@ -144,20 +144,7 @@ fn extract_rust(line: &str, idx: usize, total: usize) -> Option<OutlineItem> {
         ("pub type ", "type"),
         ("type ", "type"),
     ];
-    for (prefix, kind) in prefixes {
-        if let Some(rest) = line.strip_prefix(prefix) {
-            let name = take_ident(rest);
-            if !name.is_empty() {
-                return Some(OutlineItem {
-                    name,
-                    kind: kind.to_string(),
-                    start_row: idx,
-                    end_row: idx.min(total.saturating_sub(1)),
-                });
-            }
-        }
-    }
-    None
+    extract_with_prefixes(line, idx, total, prefixes)
 }
 
 fn extract_swift(line: &str, idx: usize, total: usize) -> Option<OutlineItem> {
