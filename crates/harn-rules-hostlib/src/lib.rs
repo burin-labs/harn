@@ -246,6 +246,9 @@ fn apply_run(args: &[VmValue]) -> Result<VmValue, HostlibError> {
             ("applied", VmValue::Bool(applied)),
             ("idempotent", VmValue::Bool(outcome.idempotent)),
             ("safety", str_vm(format!("{:?}", outcome.safety))),
+            // The original source, so callers can render a diff without a
+            // (sandboxed) re-read of the file.
+            ("before", str_vm(&file.source)),
             ("preview", str_vm(outcome.rewritten)),
         ]));
     }

@@ -12,6 +12,7 @@
 
 mod bench;
 mod check;
+mod codemod;
 mod completions;
 mod config_cmd;
 mod connect;
@@ -73,6 +74,7 @@ mod workflow;
 
 pub(crate) use bench::{BenchArgs, BenchCommand, BenchReplayArgs};
 pub(crate) use check::{CheckArgs, CheckOutputFormat};
+pub(crate) use codemod::CodemodArgs;
 pub(crate) use completions::{CompletionShell, CompletionsArgs};
 pub(crate) use config_cmd::{ConfigArgs, ConfigCommand, ConfigInspectArgs, ConfigValidateArgs};
 pub(crate) use connect::{
@@ -479,6 +481,9 @@ SCRIPTING
     /// Read-only structural search + lint: run a pattern, rule, or rule pack
     /// over a fileset and report matches or per-file counts (`--report-only`).
     Scan(ScanArgs),
+    /// Apply a codemod rule's `fix` across a fileset. Dry-run by default
+    /// (unified diffs); `--apply` writes, safety- and capability-gated.
+    Codemod(CodemodArgs),
     /// One-shot agent_loop with a prompt. Routes through the configured
     /// provider (or `HARN_LLM_PROVIDER=mock` for offline use).
     #[command(name = "try")]

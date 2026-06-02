@@ -1,0 +1,96 @@
+import { unified_diff } from "std/diff"
+import { rules_apply } from "std/rules"
+
+/**
+ * `harn codemod` — apply a codemod rule's `fix` across a fileset.
+ *
+ * **Dry-run by default**: prints a unified diff per file that would change.
+ * `--apply` writes the fixes (gated by the deterministic-tools capability);
+ * a rule above the machine-applicable safety tier additionally needs
+ * `--allow-unsafe`.
+ *
+ * The Rust shim (crates/harn-cli/src/commands/codemod.rs) resolves the rule(s)
+ * and the matching files and passes them as a plan; this handler runs the
+ * engine (`std/rules` `rules_apply`) and formats the diffs / summary.
+ *
+ * Inputs:
+ *   HARN_CODEMOD_PLAN_JSON     — JSON array of {rule, language, files: [...]}.
+ *   HARN_CODEMOD_APPLY         — "1" to write, "0" for a dry-run preview.
+ *   HARN_CODEMOD_ALLOW_UNSAFE  — "1" to apply above machine-applicable safety.
+ *   HARN_OUTPUT_JSON           — "1" for the JSON envelope, else human diffs.
+ */
+fn summary_line(changed: int, applied: int, apply: bool) -> string {
+  if apply {
+    return to_string(applied) + " file(s) rewritten (" + to_string(changed) + " changed)"
+  }
+  return to_string(changed) + " file(s) would change (dry run; pass --apply to write)"
+}
+
+fn run_codemod(plan: list, apply: bool, allow_unsafe: bool) -> dict {
+  var file_results = []
+  var changed = 0
+  var applied = 0
+  for entry in plan {
+    if len(entry.files) == 0 {
+      continue
+    }
+    let res = rules_apply({rule: entry.rule, paths: entry.files, dry_run: !apply, allow_unsafe: allow_unsafe})
+    for f in res.files ?? [] {
+      if f.changed {
+        changed = changed + 1
+        if f.applied {
+          applied = applied + 1
+        }
+        file_results = file_results.push(f)
+      }
+    }
+  }
+  return {files: file_results, changed: changed, applied: applied}
+}
+
+fn main(harness: Harness) {
+  let raw = harness.env.get_or("HARN_CODEMOD_PLAN_JSON", "")
+  if raw == "" {
+    harness.stdio.eprintln("codemod: internal error — HARN_CODEMOD_PLAN_JSON not set by the shim")
+    exit(70)
+  }
+  let plan = json_parse(raw)
+  let apply = harness.env.get_or("HARN_CODEMOD_APPLY", "0") == "1"
+  let allow_unsafe = harness.env.get_or("HARN_CODEMOD_ALLOW_UNSAFE", "0") == "1"
+  let json_mode = harness.env.get_or("HARN_OUTPUT_JSON", "0") == "1"
+  // `rules_apply` is a gated deterministic tool, so the capability is required
+  // even for a dry run (which still never writes — the engine's own
+  // `dry_run`/safety checks protect the files). `harn codemod` is a first-party
+  // command the user invoked directly, so enabling it here is the intended use.
+  hostlib_enable("tools:deterministic")
+  let out = run_codemod(plan, apply, allow_unsafe)
+  if json_mode {
+    let envelope = {
+      schemaVersion: 1,
+      mode: "codemod",
+      apply: apply,
+      files: out.files,
+      summary: {changed: out.changed, applied: out.applied},
+    }
+    harness.stdio.println(json_stringify_pretty(envelope))
+  } else {
+    for f in out.files {
+      if apply {
+        harness.stdio.println("rewrote " + f.path + "  [safety=" + f.safety + "]")
+      } else {
+        harness.stdio
+          .println(
+          "would change "
+            + f.path
+            + "  [safety="
+            + f.safety
+            + ", idempotent="
+            + to_string(f.idempotent)
+            + "]",
+        )
+        harness.stdio.println(unified_diff(f.before ?? "", f.preview))
+      }
+    }
+    harness.stdio.println(summary_line(out.changed, out.applied, apply))
+  }
+}

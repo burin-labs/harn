@@ -1008,6 +1008,7 @@ async fn async_main(raw_args: Vec<String>, runtime_mode: CliRuntimeMode) {
         },
         Command::Provider(args) => commands::provider_capabilities::run_or_exit(args),
         Command::Scan(args) => commands::scan::run(args).await,
+        Command::Codemod(args) => commands::codemod::run(args).await,
         Command::Try(args) => commands::try_cmd::run(args).await,
         Command::Quickstart(args) => {
             if let Err(error) = commands::quickstart::run_quickstart(&args).await {
