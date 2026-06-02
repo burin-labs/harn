@@ -60,24 +60,30 @@ pipeline main() {
       let resumed = resume_agent(handle, "operator brief: ship the patch", true)
       let done = wait_agent(handle)
       let calls = llm_mock_calls()
-      let resumed_system = calls[1].system
-      let next_system = calls[2].system
+      let resumed_msgs = calls[1].messages
+      let resumed_tail = resumed_msgs[len(resumed_msgs) - 1].content
+      let next_msgs = calls[2].messages
+      let next_tail = next_msgs[len(next_msgs) - 1].content
       __io_println("suspended_status=" + suspended.status)
       __io_println("resume_status=" + resumed.status)
       __io_println("final_status=" + done.status)
       __io_println(
         "input_in_reminder="
-          + to_string(contains(resumed_system, "operator brief: ship the patch")),
+          + to_string(contains(resumed_tail, "operator brief: ship the patch")),
       )
-      __io_println("reason_in_reminder=" + to_string(contains(resumed_system, "needs operator brief")))
+      __io_println("reason_in_reminder=" + to_string(contains(resumed_tail, "needs operator brief")))
       __io_println(
         "reminder_present_on_resumed_turn="
-          + to_string(contains(resumed_system, "You were suspended at turn")),
+          + to_string(contains(resumed_tail, "You were suspended at turn")),
       )
       __io_println(
         "reminder_consumed_after_one_turn="
-          + to_string(!contains(next_system, "You were suspended at turn")),
+          + to_string(!contains(next_tail, "You were suspended at turn")),
       )
     },
   )
 }
+// The resume-continuity reminder is a SystemText reminder, now delivered
+// as the trailing user message rather than folded into the system string
+// (keeps the system string byte-stable across turns). Its body and
+// single-shot lifecycle are unchanged at the new position.

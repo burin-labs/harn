@@ -28,11 +28,16 @@ pipeline main() {
         },
       )
       let call = llm_mock_calls()[0]
+      let last = call.messages[len(call.messages) - 1]
       __io_println(contains(call.system, "base system"))
-      __io_println(contains(call.system, "<system-reminder>"))
-      __io_println(contains(call.system, "gemini reminder"))
-      __io_println(call.messages[0].role)
+      __io_println(!contains(call.system, "<system-reminder>"))
+      __io_println(contains(last.content, "<system-reminder>"))
+      __io_println(contains(last.content, "gemini reminder"))
+      __io_println(last.role)
       clear_reminder_providers()
     },
   )
 }
+// The stable primary ("base system") stays in the system string, but the
+// XML-scaffolded reminder is moved to the trailing user message so the
+// system string is byte-stable across turns for the prefix cache.

@@ -23,11 +23,15 @@ pipeline main() {
         {provider: "mock", model: "mock", messages: agent_session_messages(session), session_id: session},
       )
       let call = llm_mock_calls()[0]
-      __io_println(contains(call.system, "System reminder:"))
-      __io_println(contains(call.system, "local reminder"))
-      __io_println(!contains(call.system, "<system-reminder>"))
-      __io_println(call.messages[0].role)
+      let last = call.messages[len(call.messages) - 1]
+      __io_println(!contains(call.system, "System reminder:"))
+      __io_println(contains(last.content, "System reminder:"))
+      __io_println(contains(last.content, "local reminder"))
+      __io_println(!contains(last.content, "<system-reminder>"))
+      __io_println(last.role)
       clear_reminder_providers()
     },
   )
 }
+// SystemText reminders move out of the system string into the trailing
+// user message; the plain-prose body is preserved at the new position.

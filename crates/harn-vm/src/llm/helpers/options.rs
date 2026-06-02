@@ -1207,21 +1207,82 @@ fn try_prepend_user_reminder(
     true
 }
 
+/// Append `text` to a message's `content`, preserving whatever shape the
+/// content already uses (string or array of content blocks). Mirrors the tail
+/// counterpart of [`prepend_content_blocks`].
+fn append_text_to_message_content(content: &mut serde_json::Value, text: &str) {
+    if let serde_json::Value::Array(existing) = content {
+        existing.push(serde_json::json!({"type": "text", "text": text}));
+        return;
+    }
+    if let serde_json::Value::String(existing) = content {
+        *existing = format!("{existing}\n\n{text}");
+        return;
+    }
+    if content.is_null() {
+        *content = serde_json::Value::String(text.to_string());
+        return;
+    }
+    *content = serde_json::Value::Array(vec![
+        std::mem::take(content),
+        serde_json::json!({"type": "text", "text": text}),
+    ]);
+}
+
+/// Fold the coalesced `SystemText` reminder block into the trailing message
+/// when that message is already a `user` turn, mirroring
+/// [`try_prepend_user_reminder`] but appending to the tail. Returns `false`
+/// when the last message is absent or not a `user` turn, so the caller can
+/// instead append a fresh trailing `user` message. Appending strictly after
+/// the final message also guarantees we never split a tool_call/tool_result
+/// pair.
+fn try_append_user_reminder_text(messages: &mut [serde_json::Value], text: &str) -> bool {
+    let Some(last) = messages.last_mut() else {
+        return false;
+    };
+    let Some(last_obj) = last.as_object_mut() else {
+        return false;
+    };
+    if last_obj.get("role").and_then(|role| role.as_str()) != Some("user") {
+        return false;
+    }
+    let content = last_obj
+        .entry("content".to_string())
+        .or_insert(serde_json::Value::Null);
+    append_text_to_message_content(content, text);
+    true
+}
+
 fn apply_rendered_reminder_messages(
     messages: Vec<serde_json::Value>,
     rendered: &[RenderedReminder],
 ) -> Vec<serde_json::Value> {
     let mut messages = messages;
     let mut prefix = Vec::new();
+    let mut system_text_blocks: Vec<&str> = Vec::new();
     for reminder in rendered {
-        let RenderedReminder::Message(message) = reminder else {
-            continue;
-        };
-        if !try_prepend_user_reminder(&mut messages, message) {
-            prefix.push(message.clone());
+        match reminder {
+            RenderedReminder::Message(message) => {
+                if !try_prepend_user_reminder(&mut messages, message) {
+                    prefix.push(message.clone());
+                }
+            }
+            // `SystemText` reminders used to be folded into the `system`
+            // string. They are now coalesced into a single trailing `user`
+            // message so the `system` string stays byte-identical across turns
+            // (keeping the llama.cpp / non-Anthropic KV prefix cache warm). The
+            // text is unchanged — `reminder_system_text` already wrapped each
+            // body in its `<system-reminder>` scaffolding.
+            RenderedReminder::SystemText(text) => system_text_blocks.push(text),
         }
     }
     prefix.extend(messages);
+    if !system_text_blocks.is_empty() {
+        let coalesced = system_text_blocks.join("\n\n");
+        if !try_append_user_reminder_text(&mut prefix, &coalesced) {
+            prefix.push(serde_json::json!({"role": "user", "content": coalesced}));
+        }
+    }
     prefix
 }
 
@@ -1329,16 +1390,15 @@ pub(crate) fn assemble_system_prompt(
     // cannot drift. Dormant until a tool actually carries `guidance`.
     append_tool_guidance_fragments(&mut fragments, options);
 
-    for reminder in rendered_reminders {
-        if let RenderedReminder::SystemText(text) = reminder {
-            fragments.push(PromptFragment::new(
-                "reminder",
-                "reminder",
-                FragmentBucket::Before,
-                text.clone(),
-            ));
-        }
-    }
+    // NB: `RenderedReminder::SystemText` reminders are intentionally NOT folded
+    // into the system fragments here. They are appended as a trailing `user`
+    // message in `apply_rendered_reminder_messages` so the assembled `system`
+    // string stays byte-identical across turns even as the live reminder set
+    // changes (token-pressure %, idle nudge, recap TTL), keeping the
+    // non-Anthropic prefix cache warm. `RenderedReminder::Message` reminders
+    // (Anthropic user blocks / OpenAI developer messages) are likewise handled
+    // on the message path with their `cache_control`, never here.
+    let _ = rendered_reminders;
 
     let ctx = assemble_ctx(options);
     Ok(assemble(&fragments, &ctx))
@@ -2889,7 +2949,7 @@ mod reminder_render_tests {
     }
 
     #[test]
-    fn compose_system_prompt_places_reminders_before_appendix() {
+    fn system_text_reminders_are_excluded_from_system_string() {
         let options = BTreeMap::from([
             (
                 "system_prompt_parts".to_string(),
@@ -2900,6 +2960,9 @@ mod reminder_render_tests {
                 VmValue::String(std::sync::Arc::from("appendix")),
             ),
         ]);
+        // A `SystemText` reminder must NOT appear in the assembled `system`
+        // string — it is routed to a trailing message instead so the system
+        // string stays cache-stable across turns.
         let prompt = compose_system_prompt_with_reminders(
             Some("base".to_string()),
             Some(&options),
@@ -2907,8 +2970,16 @@ mod reminder_render_tests {
         )
         .expect("system prompt")
         .expect("non-empty prompt");
+        assert_eq!(prompt, "parts\n\nbase\n\nappendix");
 
-        assert_eq!(prompt, "parts\n\nbase\n\nreminder\n\nappendix");
+        // The reminder text instead lands as the trailing user message.
+        let messages = apply_rendered_reminder_messages(
+            vec![serde_json::json!({"role": "assistant", "content": "ok"})],
+            &[RenderedReminder::SystemText("reminder".to_string())],
+        );
+        let last = messages.last().expect("trailing message");
+        assert_eq!(last["role"], "user");
+        assert_eq!(last["content"], "reminder");
     }
 
     fn s(text: &str) -> VmValue {
@@ -2946,8 +3017,121 @@ mod reminder_render_tests {
         .expect("system prompt")
         .expect("non-empty prompt");
         // Before bucket in declaration order (preamble, prefix, context,
-        // parts, primary, reminder), then After bucket (appendix, suffix).
-        assert_eq!(prompt, "P\n\nX\n\nC\n\nparts\n\nbase\n\nR\n\nA\n\nS");
+        // parts, primary), then After bucket (appendix, suffix). The
+        // `SystemText` reminder ("R") is no longer folded into the system
+        // string — it is appended as a trailing message instead.
+        assert_eq!(prompt, "P\n\nX\n\nC\n\nparts\n\nbase\n\nA\n\nS");
+        assert!(!prompt.contains('R'));
+    }
+
+    #[test]
+    fn system_string_is_byte_stable_across_changing_reminder_sets() {
+        // Same stable system fragments on both turns; the only difference is
+        // the live reminder set. Turn N has no reminders; turn N+1 fires a
+        // token-pressure reminder. The assembled `system` string must be
+        // byte-identical so the non-Anthropic prefix cache stays warm.
+        let options = BTreeMap::from([
+            ("system_prompt_parts".to_string(), s("parts")),
+            ("system_appendix".to_string(), s("appendix")),
+        ]);
+
+        let turn_n =
+            compose_system_prompt_with_reminders(Some("base".to_string()), Some(&options), &[])
+                .expect("system prompt")
+                .expect("non-empty prompt");
+
+        let pressure = "<system-reminder>\nContext is 82% full; wrap up.\n</system-reminder>";
+        let turn_n_plus_1 = compose_system_prompt_with_reminders(
+            Some("base".to_string()),
+            Some(&options),
+            &[RenderedReminder::SystemText(pressure.to_string())],
+        )
+        .expect("system prompt")
+        .expect("non-empty prompt");
+
+        assert_eq!(
+            turn_n, turn_n_plus_1,
+            "system string must not change when the reminder set changes"
+        );
+        assert!(!turn_n.contains("system-reminder"));
+
+        // The reminder is present on turn N+1 — as the trailing user message,
+        // not in the system string.
+        let base_messages = || vec![serde_json::json!({"role": "user", "content": "hello"})];
+        let msgs_n = apply_rendered_reminder_messages(base_messages(), &[]);
+        let msgs_n_plus_1 = apply_rendered_reminder_messages(
+            base_messages(),
+            &[RenderedReminder::SystemText(pressure.to_string())],
+        );
+        // Turn N: no reminder anywhere in the message array.
+        assert!(!serde_json::to_string(&msgs_n)
+            .unwrap()
+            .contains("system-reminder"));
+        // Turn N+1: reminder folded into the trailing user turn (merged with
+        // the existing user message rather than appended as a second user msg).
+        assert_eq!(msgs_n_plus_1.len(), 1);
+        let last = msgs_n_plus_1.last().expect("trailing message");
+        assert_eq!(last["role"], "user");
+        assert_eq!(last["content"], format!("hello\n\n{pressure}"));
+    }
+
+    #[test]
+    fn system_text_reminder_appends_new_user_message_after_assistant_tail() {
+        // When the conversation tail is an assistant turn (e.g. a tool_call),
+        // the reminder must be appended as a fresh trailing user message —
+        // never merged into the assistant turn and never inserted before it.
+        let messages = vec![
+            serde_json::json!({"role": "user", "content": "do it"}),
+            serde_json::json!({
+                "role": "assistant",
+                "content": null,
+                "tool_calls": [{"id": "c1", "type": "function"}],
+            }),
+            serde_json::json!({"role": "tool", "tool_call_id": "c1", "content": "result"}),
+            serde_json::json!({
+                "role": "assistant",
+                "content": null,
+                "tool_calls": [{"id": "c2", "type": "function"}],
+            }),
+        ];
+        let out = apply_rendered_reminder_messages(
+            messages,
+            &[RenderedReminder::SystemText(
+                "<system-reminder>\nR\n</system-reminder>".to_string(),
+            )],
+        );
+        assert_eq!(out.len(), 5);
+        // The original assistant tool_call/tool_result ordering is preserved.
+        assert_eq!(out[1]["role"], "assistant");
+        assert_eq!(out[2]["role"], "tool");
+        assert_eq!(out[3]["role"], "assistant");
+        // The reminder is a brand-new trailing user message.
+        assert_eq!(out[4]["role"], "user");
+        assert_eq!(
+            out[4]["content"],
+            "<system-reminder>\nR\n</system-reminder>"
+        );
+    }
+
+    #[test]
+    fn multiple_system_text_reminders_coalesce_into_one_trailing_message() {
+        let out = apply_rendered_reminder_messages(
+            vec![serde_json::json!({"role": "assistant", "content": "ok"})],
+            &[
+                RenderedReminder::SystemText(
+                    "<system-reminder>\nA\n</system-reminder>".to_string(),
+                ),
+                RenderedReminder::SystemText(
+                    "<system-reminder>\nB\n</system-reminder>".to_string(),
+                ),
+            ],
+        );
+        assert_eq!(out.len(), 2);
+        assert_eq!(out[1]["role"], "user");
+        assert_eq!(
+            out[1]["content"],
+            "<system-reminder>\nA\n</system-reminder>\n\n<system-reminder>\nB\n</system-reminder>"
+        );
     }
 
     #[test]

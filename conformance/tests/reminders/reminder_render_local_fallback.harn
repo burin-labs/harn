@@ -27,12 +27,18 @@ pipeline main() {
         {provider: "mock", model: "mock", messages: agent_session_messages(session), session_id: session},
       )
       let call = llm_mock_calls()[0]
-      __io_println(contains(call.system, "System reminder:"))
-      __io_println(contains(call.system, "local fallback reminder"))
-      __io_println(!contains(call.system, "<system-reminder>"))
-      __io_println(call.messages[0].role)
+      let last = call.messages[len(call.messages) - 1]
+      __io_println(!contains(call.system, "System reminder:"))
+      __io_println(contains(last.content, "System reminder:"))
+      __io_println(contains(last.content, "local fallback reminder"))
+      __io_println(!contains(last.content, "<system-reminder>"))
+      __io_println(last.role)
       clear_reminder_providers()
     },
   )
 }
-// Local fallback uses plain prose, not XML tags.
+// SystemText reminders are kept OUT of the system string (so it stays
+// byte-stable across turns for the non-Anthropic prefix cache) and
+// folded into the trailing user message instead. The plain-prose body
+// and "no XML scaffolding" invariants are preserved at the new position.
+// Local fallback uses plain prose, not XML tags, now in the trailing message.

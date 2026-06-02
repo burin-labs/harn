@@ -51,15 +51,16 @@ pipeline main() {
       let _resumed_keep = resume_agent(handle_keep, "operator says go", true)
       let done_keep = wait_agent(handle_keep)
       let kept_calls = llm_mock_calls()
-      let kept_resumed_system = kept_calls[1].system
+      let kept_msgs = kept_calls[1].messages
+      let kept_resumed_tail = kept_msgs[len(kept_msgs) - 1].content
       __io_println("keep_status=" + done_keep.status)
       __io_println(
         "keep_resumed_at_turn="
-          + to_string(contains(kept_resumed_system, "You were suspended at turn")),
+          + to_string(contains(kept_resumed_tail, "You were suspended at turn")),
       )
       __io_println(
         "keep_no_digest_marker="
-          + to_string(!contains(kept_resumed_system, "Prior conversation digest")),
+          + to_string(!contains(kept_resumed_tail, "Prior conversation digest")),
       )
       let session_reset = "continue-false-" + uuid()
       let handle_reset = sub_agent_run(
@@ -77,29 +78,33 @@ pipeline main() {
       let _resumed_reset = resume_agent(handle_reset, "operator says reset", false)
       let done_reset = wait_agent(handle_reset)
       let reset_calls = llm_mock_calls()
-      let reset_resumed_system = reset_calls[3].system
+      let reset_msgs = reset_calls[3].messages
+      let reset_resumed_tail = reset_msgs[len(reset_msgs) - 1].content
       __io_println("reset_status=" + done_reset.status)
       __io_println(
         "reset_resumed_at_turn="
-          + to_string(contains(reset_resumed_system, "You were suspended at turn")),
+          + to_string(contains(reset_resumed_tail, "You were suspended at turn")),
       )
       __io_println(
         "reset_continuity_emitted="
           + to_string(
-          contains(reset_resumed_system, "Prior conversation")
-            || contains(reset_resumed_system, "You were suspended at turn"),
+          contains(reset_resumed_tail, "Prior conversation")
+            || contains(reset_resumed_tail, "You were suspended at turn"),
         ),
       )
       __io_println(
         "paths_differ_in_input="
           + to_string(
-          contains(kept_resumed_system, "operator says go")
-            && contains(reset_resumed_system, "operator says reset"),
+          contains(kept_resumed_tail, "operator says go")
+            && contains(reset_resumed_tail, "operator says reset"),
         ),
       )
     },
   )
 }
+// The resume-continuity reminder is a SystemText reminder, now delivered
+// as the trailing user message instead of folded into the system string
+// (keeps the system string byte-stable across turns).
 // The Pre-suspend digest is only attached when the snapshot recorded
 // a non-empty digest at resume-time. Until S-09's digest provider is
 // wired into background subagents we assert the reset path differs
