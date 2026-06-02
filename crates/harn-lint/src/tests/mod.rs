@@ -92,6 +92,7 @@ mod break_loop;
 mod complexity;
 mod connector_effect_policy;
 mod empty_blocks;
+mod engine_rules;
 mod file_header;
 mod formatting;
 mod harndoc;

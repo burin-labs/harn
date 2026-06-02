@@ -59,7 +59,7 @@
     {
       "id": "LNT",
       "title": "Lint rules",
-      "count": 58
+      "count": 59
     },
     {
       "id": "FMT",
@@ -2249,6 +2249,15 @@
       "code": "HARN-LNT-058",
       "category": "LNT",
       "summary": "if / while / guard condition is statically known to always succeed or always fail",
+      "repairs": [],
+      "related": [],
+      "explanationPresent": true,
+      "apiStability": "stable"
+    },
+    {
+      "code": "HARN-LNT-059",
+      "category": "LNT",
+      "summary": "rule-engine structural lint (a declarative rule run through the linter)",
       "repairs": [],
       "related": [],
       "explanationPresent": true,

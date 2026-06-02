@@ -107,12 +107,14 @@ pub(crate) fn lint_file_report(
     let source = output.source;
     let program = output.program;
 
+    let engine_rules = super::lint::project_engine_rule_sources(path);
     let options = harn_lint::LintOptions {
         file_path: Some(path),
         require_file_header,
         complexity_threshold,
         persona_step_allowlist,
         require_stdlib_metadata: path_is_stdlib_source(path),
+        engine_rules: &engine_rules,
     };
     let lint_diagnostics = harn_lint::lint_with_module_graph(
         &program,

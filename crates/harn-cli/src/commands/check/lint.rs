@@ -10,6 +10,49 @@ use crate::package::CheckConfig;
 use super::analysis::{analyze_file, render_file_analysis_error_or_exit};
 use super::outcome::{print_lint_diagnostics, CommandOutcome};
 
+/// Collect the TOML sources of `language = "harn"` rules from the project's
+/// `[rules] ruleDirs` (#2849), to run as lint rules. Non-harn rules can't
+/// match `.harn` source and are skipped. Returns empty when no manifest or no
+/// `ruleDirs` is declared (the common case — near-zero cost).
+///
+/// Loaded per file for simplicity; the dirs are small and the common path is a
+/// single manifest lookup. Hoisting to once-per-run is a future optimization.
+pub(crate) fn project_engine_rule_sources(path: &Path) -> Vec<String> {
+    let Some((manifest, dir)) = crate::package::find_nearest_manifest(path) else {
+        return Vec::new();
+    };
+    let mut sources = Vec::new();
+    for rel in &manifest.rules.rule_dirs {
+        let Ok(entries) = std::fs::read_dir(dir.join(rel)) else {
+            continue;
+        };
+        let mut files: Vec<_> = entries
+            .filter_map(Result::ok)
+            .map(|entry| entry.path())
+            .filter(|p| p.extension().and_then(|e| e.to_str()) == Some("toml"))
+            .collect();
+        files.sort();
+        for file in files {
+            if let Ok(src) = std::fs::read_to_string(&file) {
+                if rule_targets_harn(&src) {
+                    sources.push(src);
+                }
+            }
+        }
+    }
+    sources
+}
+
+/// True when a rule TOML declares `language = "harn"`.
+fn rule_targets_harn(src: &str) -> bool {
+    toml::from_str::<toml::Value>(src)
+        .ok()
+        .as_ref()
+        .and_then(|v| v.get("language"))
+        .and_then(|l| l.as_str())
+        == Some("harn")
+}
+
 pub(crate) fn lint_file_inner(
     analysis: &mut AnalysisDatabase,
     path: &Path,
@@ -26,12 +69,14 @@ pub(crate) fn lint_file_inner(
     let source = output.source;
     let program = output.program;
 
+    let engine_rules = project_engine_rule_sources(path);
     let options = harn_lint::LintOptions {
         file_path: Some(path),
         require_file_header,
         complexity_threshold,
         persona_step_allowlist,
         require_stdlib_metadata: path_is_stdlib_source(path),
+        engine_rules: &engine_rules,
     };
     let mut diagnostics = harn_lint::lint_with_module_graph(
         &program,
@@ -83,12 +128,14 @@ pub(crate) fn lint_fix_file(
     let source = output.source;
     let program = output.program;
 
+    let engine_rules = project_engine_rule_sources(path);
     let options = harn_lint::LintOptions {
         file_path: Some(path),
         require_file_header,
         complexity_threshold,
         persona_step_allowlist,
         require_stdlib_metadata: path_is_stdlib_source(path),
+        engine_rules: &engine_rules,
     };
     let lint_diags = harn_lint::lint_with_module_graph(
         &program,

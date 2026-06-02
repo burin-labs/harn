@@ -46,7 +46,7 @@ Repairs are tagged with a six-level safety class so `harn fix --apply --safety <
 | [`MOD`](#mod--modules-and-exports) | Modules and exports | 6 |
 | [`RMD`](#rmd--reminder-lifecycle) | Reminder lifecycle | 8 |
 | [`SUS`](#sus--suspend--resume-lifecycle) | Suspend / resume lifecycle | 13 |
-| [`LNT`](#lnt--lint-rules) | Lint rules | 58 |
+| [`LNT`](#lnt--lint-rules) | Lint rules | 59 |
 | [`FMT`](#fmt--formatter) | Formatter | 3 |
 | [`IMP`](#imp--import-resolution) | Import resolution | 3 |
 | [`OWN`](#own--ownership-and-mutability) | Ownership and mutability | 4 |
@@ -304,6 +304,7 @@ Lints are not hard errors. The code compiles, but Harn flags the pattern as like
 | [`HARN-LNT-056`](#harn-lnt-056) | ambient random builtin replaced by `harness.random.*` | `bindings/thread-harness-random` | `scope-local` |
 | [`HARN-LNT-057`](#harn-lnt-057) | ambient net builtin replaced by `harness.net.*` | `bindings/thread-harness-net` | `scope-local` |
 | [`HARN-LNT-058`](#harn-lnt-058) | if / while / guard condition is statically known to always succeed or always fail | — | — |
+| [`HARN-LNT-059`](#harn-lnt-059) | rule-engine structural lint (a declarative rule run through the linter) | — | — |
 
 ## FMT — Formatter
 
@@ -3148,6 +3149,49 @@ predicate may still legitimately fail). The same shape is used by
 - If the variable is meant to come from an untrusted boundary, type it
   as `unknown` (or `any`) and validate at the boundary; the lint will
   then correctly stay silent.
+
+### `HARN-LNT-059`
+
+**Category:** `LNT` (Lint rules) &nbsp;·&nbsp; **API stability:** `stable`
+
+rule-engine structural lint (a declarative rule run through the linter)
+
+#### What it means
+
+A declarative **rule-engine rule** matched here. This is not a built-in lint:
+it is a structural rule (a `*.toml` pattern from the project's
+`[rules] ruleDirs`) run through the linter via the rule engine (`harn-rules`),
+so it appears in `harn lint` output alongside the built-in rules.
+
+The message, severity, and any suggested fix come from the matched rule's
+definition — the rule's own `message`, `severity`, and `fix` template. The
+diagnostic's reported rule id is the engine rule's `id`, so you filter it with
+`disable_rules` (or `[lint]` config) by that id, exactly like a built-in.
+
+#### Why it fires
+
+The project declared one or more rule directories:
+
+```toml
+[rules]
+ruleDirs = ["rules"]
+```
+
+and a rule in one of them matched this code. Each such rule pairs a structural
+`pattern` with a `message`; rules that also carry a `fix` are applied by
+`harn codemod` and surfaced here as a machine-applicable lint fix.
+
+#### How to fix
+
+- Address the issue the rule describes (see the rule's `message`).
+- If the rule carries a fix, `harn lint --fix` (or `harn codemod`) applies it.
+- To silence it, disable the rule by its id, or remove/adjust the rule in your
+  `ruleDirs`.
+
+#### See also
+
+- The rule engine: `harn scan`, `harn codemod`, and the `harn-rules` skill.
+- Project rule discovery: `[rules] ruleDirs` in `harn.toml`.
 
 ### `HARN-FMT-001`
 
