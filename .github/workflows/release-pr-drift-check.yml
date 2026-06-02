@@ -1,15 +1,17 @@
 name: Release PR drift check
 
-# Guards `release/v*.*.*` PRs against silent CHANGELOG `## Unreleased`
-# drift absorption. When a release PR sits on a frozen pin SHA and
-# another PR merges to main that appends bullets under `## Unreleased`,
-# GitHub's automatic 3-way merge folds those new bullets into the
-# release section. The merge is textually clean, `mergeable: MERGEABLE`,
-# and auto-merge would happily ship a CHANGELOG that lies about the
-# published artifact.
+# Guards `release/v*.*.*` PRs against stale release pins and silent
+# CHANGELOG `## Unreleased` drift absorption. When a release PR sits on
+# a frozen pin SHA and another PR merges to main, GitHub's automatic
+# 3-way merge can stay textually clean and `mergeable: MERGEABLE` while
+# still omitting the newer main commits from the published artifact. If
+# the newer PR also appends bullets under `## Unreleased`, the merge can
+# fold those bullets into the release section and ship a CHANGELOG that
+# lies about what's in the artifact.
 #
 # This workflow posts a `release-pr-drift-check` check_run on each
-# release PR's head SHA. It fails whenever the pin-time `## Unreleased`
+# release PR's head SHA. It fails whenever the release branch is not
+# parented at current `origin/main`, or when the pin-time `## Unreleased`
 # body (read from the release branch's merge-base with `main`) differs
 # from the current `main` `## Unreleased` body. Remediation: rerun
 # `release_harn.harn` from `burin-labs/harn-bump-fleet` — that re-pins
@@ -152,11 +154,48 @@ jobs:
 
             git fetch origin "$ref" --quiet || true
             pin=$(git merge-base "$sha" origin/main)
+            main_sha=$(git rev-parse origin/main)
+
+            summary_file=$(mktemp)
+            if [ "$pin" != "$main_sha" ]; then
+              new_commits=$(git log --oneline -50 "$pin..origin/main" || true)
+              cat > "$summary_file" <<EOF
+          This release PR is parented at \`$pin\`, but current \`origin/main\` is
+          \`$main_sha\`. Merging this PR would publish \`v$ver\` from a stale
+          main snapshot and omit commits that are already on \`main\`, even if
+          the merge is textually clean.
+
+          **Remediation:** rerun the release harness from \`harn-bump-fleet\`:
+
+          \`\`\`
+          harn run release_harn.harn -- --mode ship-pr --agent --yes-live-release
+          \`\`\`
+
+          The harness re-pins on fresh \`origin/main\`, smart-subtracts the
+          pin-time bullets, and force-pushes a clean release PR.
+
+          - Release branch: \`$ref\`
+          - Pin SHA: \`$pin\`
+          - Current main: \`$main_sha\`
+          - Background: [burin-labs/harn-bump-fleet#39](https://github.com/burin-labs/harn-bump-fleet/issues/39)
+
+          <details><summary>Commits on <code>main</code> after the release pin</summary>
+
+          \`\`\`text
+          $new_commits
+          \`\`\`
+
+          </details>
+          EOF
+              post_check "$sha" failure "Release PR is behind current main" "$summary_file"
+              drift_detected=1
+              echo "::error title=PR #$pr ($ref) — stale release pin::pin $pin is behind origin/main $main_sha; rerun release_harn.harn."
+              continue
+            fi
 
             pin_body=$(git show "$pin:CHANGELOG.md" | extract_unreleased)
             main_body=$(git show origin/main:CHANGELOG.md | extract_unreleased)
 
-            summary_file=$(mktemp)
             if [ "$pin_body" = "$main_body" ]; then
               cat > "$summary_file" <<EOF
           \`main\`'s \`## Unreleased\` matches the pin the release branch is parented at.
