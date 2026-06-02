@@ -177,6 +177,12 @@ if [[ -n "${target_dir}" ]]; then
   echo "Configured Cargo target dir -> ${target_dir}"
 fi
 
+# Reclaim per-worktree target dirs left behind by worktrees that have since
+# been removed. Best-effort; never fail setup over housekeeping.
+if [[ -x ./scripts/prune_stale_targets.sh ]]; then
+  ./scripts/prune_stale_targets.sh || true
+fi
+
 if command -v npm >/dev/null 2>&1; then
   echo "Installing repo-local Node tooling..."
   npm install
