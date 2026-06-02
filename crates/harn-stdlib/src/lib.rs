@@ -953,6 +953,10 @@ pub const STDLIB_CLI_SCRIPTS: &[StdlibCliScript] = &[
         source: include_str!("stdlib/cli/routes.harn"),
     },
     StdlibCliScript {
+        name: "scan",
+        source: include_str!("stdlib/cli/scan.harn"),
+    },
+    StdlibCliScript {
         name: "scaffold/init",
         source: include_str!("stdlib/cli/scaffold/init.harn"),
     },

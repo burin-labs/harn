@@ -49,6 +49,7 @@ mod quickstart;
 mod routes;
 mod run;
 mod runs;
+mod scan;
 mod serve;
 mod session;
 mod skill;
@@ -173,6 +174,7 @@ pub(crate) use quickstart::QuickstartArgs;
 pub(crate) use routes::RoutesArgs;
 pub(crate) use run::RunArgs;
 pub(crate) use runs::{ReplayArgs, RunsArgs, RunsCommand};
+pub(crate) use scan::ScanArgs;
 pub(crate) use serve::{
     A2aServeArgs, AcpServeTransport, ApiServeArgs, McpServeTransport, ServeAcpArgs, ServeArgs,
     ServeCommand, ServeMcpArgs, ServeObsMode, ServeTlsMode, SiteServeArgs,
@@ -474,6 +476,9 @@ SCRIPTING
     ProviderProbe(ProviderProbeArgs),
     /// Run one-tool provider conformance and classify native/text fallback.
     ProviderToolProbe(ProviderToolProbeArgs),
+    /// Read-only structural search + lint: run a pattern, rule, or rule pack
+    /// over a fileset and report matches or per-file counts (`--report-only`).
+    Scan(ScanArgs),
     /// One-shot agent_loop with a prompt. Routes through the configured
     /// provider (or `HARN_LLM_PROVIDER=mock` for offline use).
     #[command(name = "try")]

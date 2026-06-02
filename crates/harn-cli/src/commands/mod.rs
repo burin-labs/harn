@@ -59,6 +59,7 @@ pub(crate) mod replay;
 pub(crate) mod routes;
 pub mod run;
 pub(crate) mod scaffold_common;
+pub(crate) mod scan;
 pub(crate) mod serve;
 pub(crate) mod session;
 pub(crate) mod skill;
