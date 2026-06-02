@@ -148,8 +148,8 @@ pub(crate) use orchestrator::{
 pub use pack::{PackArgs, PackCommand, PackVerifyArgs};
 pub(crate) use package::{
     AddArgs, InstallArgs, PackageArgs, PackageArtifactsCommand, PackageCacheCommand,
-    PackageCommand, PackageScaffoldCommand, PackageScaffoldOpenapiArgs, PublishArgs, RemoveArgs,
-    UpdateArgs,
+    PackageCommand, PackageScaffoldCommand, PackageScaffoldOpenapiArgs, PackageSearchArgs,
+    PublishArgs, RemoveArgs, UpdateArgs,
 };
 pub(crate) use parse_tokens::{ParseArgs, TokensArgs};
 pub(crate) use persona::{

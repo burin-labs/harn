@@ -1,5 +1,7 @@
 use clap::{Args, Subcommand};
 
+use super::package::{PackageSearchArgs, PublishArgs};
+
 /// `harn rule` — author and test structural rules.
 #[derive(Debug, Args)]
 pub(crate) struct RuleArgs {
@@ -9,6 +11,10 @@ pub(crate) struct RuleArgs {
 
 #[derive(Debug, Subcommand)]
 pub(crate) enum RuleCommand {
+    /// Publish a rule pack package to the package registry.
+    Publish(PublishArgs),
+    /// Search the package registry for rule packs.
+    Search(PackageSearchArgs),
     /// Run a rule's inline-annotation tests (`// ruleid:` / `// ok:`).
     Test(RuleTestArgs),
 }

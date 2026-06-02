@@ -134,6 +134,35 @@ rules." `harn codemod` applies only the rules that have a `fix`; lint/search
 rules in the same pack are ignored. Paths are resolved relative to the
 `harn.toml` directory.
 
+## How do I publish and install a rule pack?
+
+A rule pack is a Harn package that declares its rule directories:
+
+```toml
+[package]
+name = "acme-rules"
+version = "0.1.0"
+
+[rules]
+ruleDirs = ["rules"]
+```
+
+Publish it through the rule-specific package alias:
+
+```console
+harn rule publish --registry-name @acme/rules
+harn rule search acme
+harn add @acme/rules@0.1.0
+harn scan --rule-pack @acme/rules src
+```
+
+`harn rule publish` uses the same tag + package-index PR flow as `harn
+publish`, but first validates the rule files and writes rule-pack metadata to
+the registry index. `harn rule search` lists only rule packs and includes the
+pack description, languages, rule count, and safety summary. After `harn add`,
+`--rule-pack` accepts either the dependency alias or the canonical registry name
+recorded in `harn.lock`.
+
 ## How do I run a rule from `.harn`?
 
 `std/rules` is the same engine, callable inline — an agent can author and run a

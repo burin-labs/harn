@@ -41,6 +41,8 @@ pub(crate) struct RegistryPackage {
     harn: Option<String>,
     #[serde(default)]
     exports: Vec<String>,
+    #[serde(default, alias = "rule-pack", alias = "rulePack")]
+    rule_pack: Option<RegistryRulePackInfo>,
     #[serde(default, alias = "connector-contract")]
     connector_contract: Option<String>,
     #[serde(default)]
@@ -51,6 +53,16 @@ pub(crate) struct RegistryPackage {
     provenance: Option<String>,
     #[serde(default, rename = "version")]
     versions: Vec<RegistryPackageVersion>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub(crate) struct RegistryRulePackInfo {
+    #[serde(default)]
+    pub(crate) rule_count: usize,
+    #[serde(default)]
+    pub(crate) languages: Vec<String>,
+    #[serde(default, alias = "safety-summary", alias = "safetySummary")]
+    pub(crate) safety_summary: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -669,6 +681,9 @@ pub(crate) fn validate_package_registry_index(
                 package.name
             )
         })?;
+        if let Some(rule_pack) = package.rule_pack.as_mut() {
+            normalize_rule_pack_info(rule_pack);
+        }
         let mut versions = HashSet::new();
         for version in &package.versions {
             if version.version.trim().is_empty() {
@@ -712,6 +727,19 @@ pub(crate) fn validate_package_registry_index(
     Ok(())
 }
 
+fn normalize_rule_pack_info(rule_pack: &mut RegistryRulePackInfo) {
+    rule_pack
+        .languages
+        .retain(|language| !language.trim().is_empty());
+    rule_pack.languages.sort();
+    rule_pack.languages.dedup();
+    rule_pack
+        .safety_summary
+        .retain(|entry| !entry.trim().is_empty());
+    rule_pack.safety_summary.sort();
+    rule_pack.safety_summary.dedup();
+}
+
 fn selected_git_ref_count(version: &RegistryPackageVersion) -> usize {
     usize::from(version.tag.is_some())
         + usize::from(version.tag.is_none() && version.rev.is_some())
@@ -743,6 +771,13 @@ pub(crate) fn registry_package_matches(package: &RegistryPackage, query: &str) -
             .exports
             .iter()
             .any(|export| export.to_ascii_lowercase().contains(&query))
+        || package.rule_pack.as_ref().is_some_and(|rule_pack| {
+            rule_pack
+                .languages
+                .iter()
+                .chain(rule_pack.safety_summary.iter())
+                .any(|value| value.to_ascii_lowercase().contains(&query))
+        })
 }
 
 pub(crate) fn latest_registry_version(
@@ -932,6 +967,28 @@ pub(crate) fn search_package_registry_in(
         .into_iter()
         .filter(|package| registry_package_matches(package, query.unwrap_or("")))
         .collect())
+}
+
+pub(crate) fn search_rule_package_registry_impl(
+    query: Option<&str>,
+    registry: Option<&str>,
+) -> Result<Vec<RegistryPackage>, PackageError> {
+    search_rule_package_registry_in(&PackageWorkspace::from_current_dir()?, query, registry)
+}
+
+pub(crate) fn search_rule_package_registry_in(
+    workspace: &PackageWorkspace,
+    query: Option<&str>,
+    registry: Option<&str>,
+) -> Result<Vec<RegistryPackage>, PackageError> {
+    Ok(search_package_registry_in(workspace, query, registry)?
+        .into_iter()
+        .filter(registry_package_is_rule_pack)
+        .collect())
+}
+
+fn registry_package_is_rule_pack(package: &RegistryPackage) -> bool {
+    package.rule_pack.is_some()
 }
 
 pub(crate) fn package_registry_info_impl(
@@ -1853,6 +1910,55 @@ pub fn search_package_registry(query: Option<&str>, registry: Option<&str>, json
     }
 }
 
+pub fn search_rule_package_registry(query: Option<&str>, registry: Option<&str>, json: bool) {
+    match search_rule_package_registry_impl(query, registry) {
+        Ok(packages) if json => {
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&packages)
+                    .unwrap_or_else(|error| format!(r#"{{"error":"{error}"}}"#))
+            );
+        }
+        Ok(packages) => {
+            if packages.is_empty() {
+                println!("No rule packs found.");
+                return;
+            }
+            println!("name\tlatest\tlanguages\trules\tsafety\tdescription");
+            for package in packages {
+                let latest = latest_registry_version(&package)
+                    .map(|version| version.version.as_str())
+                    .unwrap_or("-")
+                    .to_string();
+                let rule_pack = package.rule_pack.unwrap_or_default();
+                let languages = if rule_pack.languages.is_empty() {
+                    "-".to_string()
+                } else {
+                    rule_pack.languages.join(",")
+                };
+                let safety = if rule_pack.safety_summary.is_empty() {
+                    "-".to_string()
+                } else {
+                    rule_pack.safety_summary.join(",")
+                };
+                println!(
+                    "{}\t{}\t{}\t{}\t{}\t{}",
+                    package.name,
+                    latest,
+                    languages,
+                    rule_pack.rule_count,
+                    safety,
+                    package.description.as_deref().unwrap_or("")
+                );
+            }
+        }
+        Err(error) => {
+            eprintln!("error: {error}");
+            process::exit(1);
+        }
+    }
+}
+
 pub fn show_package_registry_info(spec: &str, registry: Option<&str>, json: bool) {
     match package_registry_info_impl(spec, registry) {
         Ok(info) if json => {
@@ -1889,6 +1995,16 @@ pub fn show_package_registry_info(spec: &str, registry: Option<&str>, json: bool
             }
             if !package.exports.is_empty() {
                 println!("exports: {}", package.exports.join(", "));
+            }
+            if let Some(rule_pack) = package.rule_pack.as_ref() {
+                println!("rule_pack: yes");
+                println!("rules: {}", rule_pack.rule_count);
+                if !rule_pack.languages.is_empty() {
+                    println!("languages: {}", rule_pack.languages.join(", "));
+                }
+                if !rule_pack.safety_summary.is_empty() {
+                    println!("safety: {}", rule_pack.safety_summary.join(", "));
+                }
             }
             if let Some(version) = info.selected_version {
                 println!("selected: {}", version.version);
@@ -2177,6 +2293,64 @@ abc123abc123abc123abc123abc123abc1234567\trefs/tags/v0.0.1\n";
                 .as_ref()
                 .map(|version| version.git.as_str()),
             Some(git.as_str())
+        );
+    }
+
+    #[test]
+    fn rule_registry_search_filters_to_rule_pack_metadata() {
+        let project_tmp = tempfile::tempdir().unwrap();
+        let root = project_tmp.path();
+        let workspace = TestWorkspace::new(root);
+        let registry_path = root.join("index.toml");
+        fs::write(
+            &registry_path,
+            r#"
+version = 1
+
+[[package]]
+name = "@acme/plain"
+description = "Plain package"
+repository = "https://github.com/acme/plain"
+
+[[package.version]]
+version = "1.0.0"
+git = "https://github.com/acme/plain"
+tag = "v1.0.0"
+
+[[package]]
+name = "@acme/rules"
+description = "TypeScript and Rust cleanup rules"
+repository = "https://github.com/acme/rules"
+
+[package.rule_pack]
+rule_count = 3
+languages = ["typescript", "rust", "typescript"]
+safety_summary = ["no-fix:1", "behavior-preserving:2"]
+
+[[package.version]]
+version = "1.0.0"
+git = "https://github.com/acme/rules"
+tag = "v1.0.0"
+"#,
+        )
+        .unwrap();
+        fs::write(root.join(MANIFEST), "[package]\nname = \"workspace\"\n").unwrap();
+
+        let matches = search_rule_package_registry_in(
+            workspace.env(),
+            Some("rust"),
+            Some(registry_path.to_string_lossy().as_ref()),
+        )
+        .unwrap();
+
+        assert_eq!(matches.len(), 1);
+        assert_eq!(matches[0].name, "@acme/rules");
+        let metadata = matches[0].rule_pack.as_ref().expect("rule pack metadata");
+        assert_eq!(metadata.rule_count, 3);
+        assert_eq!(metadata.languages, vec!["rust", "typescript"]);
+        assert_eq!(
+            metadata.safety_summary,
+            vec!["behavior-preserving:2", "no-fix:1"]
         );
     }
 

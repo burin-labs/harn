@@ -264,6 +264,67 @@ pub fn publish_package(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
+pub fn publish_rule_package(
+    anchor: Option<&Path>,
+    dry_run: bool,
+    remote: &str,
+    index_repo: &str,
+    index_path: &Path,
+    registry_name: Option<&str>,
+    skip_index_pr: bool,
+    registry: Option<&str>,
+    json: bool,
+) {
+    let options = PackagePublishOptions {
+        dry_run,
+        remote,
+        index_repo,
+        index_path,
+        registry_name,
+        skip_index_pr,
+        registry,
+    };
+
+    match publish_rule_package_impl(anchor, &options) {
+        Ok(report) => {
+            if json {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&report)
+                        .unwrap_or_else(|error| format!(r#"{{"error":"{error}"}}"#))
+                );
+            } else {
+                if report.dry_run {
+                    println!(
+                        "Rule-pack publish dry run to {} succeeded.",
+                        report.registry
+                    );
+                } else {
+                    println!("Published rule pack {}.", report.tag);
+                }
+                println!("tag: {}", report.tag);
+                println!("sha: {}", report.sha);
+                if let Some(command) = report.tag_command.as_deref() {
+                    println!("tag command: {command}");
+                }
+                if let Some(diff) = report.index_diff.as_deref() {
+                    println!("\nindex diff:\n{diff}");
+                }
+                if let Some(url) = report.index_pr_url.as_deref() {
+                    println!("index PR: {url}");
+                }
+                println!("artifact: {}", report.artifact_dir);
+                println!("files: {}", report.files.len());
+            }
+        }
+        Err(error) => {
+            eprintln!("error: {error}");
+            process::exit(1);
+        }
+    }
+}
+
 pub fn list_packages(json: bool) {
     match list_packages_impl() {
         Ok(report) if json => {
@@ -389,6 +450,7 @@ pub(crate) fn check_package_impl(
     if let Err(error) = validate_handoff_routes(&ctx.manifest.handoff_routes, &ctx.manifest) {
         push_error(&mut errors, "handoff_routes", error.to_string());
     }
+    validate_rule_pack_for_publish(&ctx, &mut errors);
     let exports = validate_exports_for_publish(&ctx, &mut errors, &mut warnings);
     let (tools, skills) = validate_package_interface_exports(&ctx, &mut errors, &mut warnings);
 
@@ -402,6 +464,124 @@ pub(crate) fn check_package_impl(
         exports,
         tools,
         skills,
+    })
+}
+
+fn validate_rule_pack_for_publish(ctx: &ManifestContext, errors: &mut Vec<PackageCheckDiagnostic>) {
+    if ctx.manifest.rules.rule_dirs.is_empty() {
+        return;
+    }
+    if let Err(error) = collect_rule_pack_metadata(ctx) {
+        push_error(errors, "[rules] ruleDirs", error.to_string());
+    }
+}
+
+pub(crate) fn collect_rule_pack_metadata(
+    ctx: &ManifestContext,
+) -> Result<Option<RegistryRulePackInfo>, PackageError> {
+    if ctx.manifest.rules.rule_dirs.is_empty() {
+        return Ok(None);
+    }
+
+    let mut rule_count = 0usize;
+    let mut languages = BTreeSet::new();
+    let mut safety = BTreeMap::<String, usize>::new();
+    for rel in &ctx.manifest.rules.rule_dirs {
+        let dir = safe_package_relative_path(&ctx.dir, rel)?;
+        if !dir.is_dir() {
+            return Err(PackageError::Validation(format!(
+                "`[rules] ruleDirs` entry `{rel}` is not a directory ({})",
+                dir.display()
+            )));
+        }
+        let mut paths: Vec<_> = fs::read_dir(&dir)
+            .map_err(|error| format!("failed to read rule dir {}: {error}", dir.display()))?
+            .filter_map(Result::ok)
+            .map(|entry| entry.path())
+            .filter(|path| {
+                path.is_file() && path.extension().and_then(|ext| ext.to_str()) == Some("toml")
+            })
+            .collect();
+        paths.sort();
+        for path in paths {
+            let rule = read_rule_file_metadata(&path)?;
+            rule_count += 1;
+            languages.insert(rule.language);
+            *safety.entry(rule.safety).or_default() += 1;
+        }
+    }
+
+    if rule_count == 0 {
+        return Err(PackageError::Validation(
+            "rule packs must contain at least one `*.toml` rule under `[rules] ruleDirs`"
+                .to_string(),
+        ));
+    }
+
+    Ok(Some(RegistryRulePackInfo {
+        rule_count,
+        languages: languages.into_iter().collect(),
+        safety_summary: safety
+            .into_iter()
+            .map(|(name, count)| format!("{name}:{count}"))
+            .collect(),
+    }))
+}
+
+struct RuleFileMetadata {
+    language: String,
+    safety: String,
+}
+
+#[cfg(feature = "hostlib")]
+fn read_rule_file_metadata(path: &Path) -> Result<RuleFileMetadata, PackageError> {
+    let source = fs::read_to_string(path)
+        .map_err(|error| format!("failed to read rule {}: {error}", path.display()))?;
+    let rule = harn_rules::Rule::from_toml_str(&source)
+        .map_err(|error| format!("failed to parse rule {}: {error}", path.display()))?;
+    let safety = if rule.fix.is_some() {
+        rule.safety.as_str()
+    } else {
+        "no-fix"
+    };
+    Ok(RuleFileMetadata {
+        language: rule.language,
+        safety: safety.to_string(),
+    })
+}
+
+#[cfg(not(feature = "hostlib"))]
+fn read_rule_file_metadata(path: &Path) -> Result<RuleFileMetadata, PackageError> {
+    #[derive(Deserialize)]
+    struct MinimalRule {
+        id: String,
+        language: String,
+        #[serde(default)]
+        safety: Option<String>,
+        #[serde(default)]
+        fix: Option<String>,
+        rule: toml::Value,
+    }
+
+    let source = fs::read_to_string(path)
+        .map_err(|error| format!("failed to read rule {}: {error}", path.display()))?;
+    let rule: MinimalRule = toml::from_str(&source)
+        .map_err(|error| format!("failed to parse rule {}: {error}", path.display()))?;
+    if rule.id.trim().is_empty() || rule.language.trim().is_empty() {
+        return Err(PackageError::Validation(format!(
+            "rule {} must declare non-empty `id` and `language`",
+            path.display()
+        )));
+    }
+    let safety = if rule.fix.is_some() {
+        rule.safety.unwrap_or_else(|| "scope-local".to_string())
+    } else {
+        "no-fix".to_string()
+    };
+    let _ = rule.rule;
+    Ok(RuleFileMetadata {
+        language: rule.language,
+        safety,
     })
 }
 
@@ -763,6 +943,27 @@ pub(crate) fn publish_package_impl(
     anchor: Option<&Path>,
     options: &PackagePublishOptions<'_>,
 ) -> Result<PackagePublishReport, PackageError> {
+    publish_package_impl_with_rule_pack(anchor, options, None)
+}
+
+pub(crate) fn publish_rule_package_impl(
+    anchor: Option<&Path>,
+    options: &PackagePublishOptions<'_>,
+) -> Result<PackagePublishReport, PackageError> {
+    let ctx = load_manifest_context_for_anchor(anchor)?;
+    let rule_pack = collect_rule_pack_metadata(&ctx)?.ok_or_else(|| {
+        PackageError::Validation(
+            "rule packs must declare `[rules] ruleDirs` in harn.toml".to_string(),
+        )
+    })?;
+    publish_package_impl_with_rule_pack(anchor, options, Some(rule_pack))
+}
+
+fn publish_package_impl_with_rule_pack(
+    anchor: Option<&Path>,
+    options: &PackagePublishOptions<'_>,
+    rule_pack: Option<RegistryRulePackInfo>,
+) -> Result<PackagePublishReport, PackageError> {
     let registry = options
         .registry
         .map(str::trim)
@@ -780,7 +981,7 @@ pub(crate) fn publish_package_impl(
     } else {
         fetch_package_index_from_github(options.index_repo, options.index_path)?
     };
-    let mut plan = prepare_publish_plan(anchor, options, index_content, &registry)?;
+    let mut plan = prepare_publish_plan(anchor, options, index_content, &registry, rule_pack)?;
     if !options.dry_run && !options.skip_index_pr {
         ensure_github_repo_writeable(options.index_repo)?;
     }
@@ -816,6 +1017,7 @@ fn prepare_publish_plan(
     options: &PackagePublishOptions<'_>,
     index_content: String,
     registry: &str,
+    rule_pack: Option<RegistryRulePackInfo>,
 ) -> Result<PackagePublishPlan, PackageError> {
     let pack = pack_package_impl(anchor, None, true)?;
     let ctx = load_manifest_context_for_anchor(anchor)?;
@@ -876,6 +1078,7 @@ fn prepare_publish_plan(
             &entry,
             &version,
             &git,
+            rule_pack.as_ref(),
         )?;
         parse_package_registry_index(registry, &updated)?;
         let diff = render_unified_diff(
@@ -1187,6 +1390,7 @@ fn add_registry_version_entry(
     version_entry: &str,
     version: &str,
     git: &str,
+    rule_pack: Option<&RegistryRulePackInfo>,
 ) -> Result<String, PackageError> {
     let snapshot = parse_publish_index_snapshot(content)?;
     if let Some(package) = snapshot
@@ -1203,7 +1407,12 @@ fn add_registry_version_entry(
                 "package index already contains {registry_name}@{version}"
             )));
         }
-        return insert_version_entry(content, registry_name, version_entry);
+        let updated = insert_version_entry(content, registry_name, version_entry)?;
+        return if let Some(rule_pack) = rule_pack {
+            upsert_rule_pack_metadata(&updated, registry_name, rule_pack)
+        } else {
+            Ok(updated)
+        };
     }
 
     let mut updated = content.trim_end().to_string();
@@ -1214,6 +1423,7 @@ fn add_registry_version_entry(
         registry_name,
         git,
         version_entry,
+        rule_pack,
     )?);
     Ok(updated)
 }
@@ -1240,6 +1450,83 @@ fn insert_version_entry(
     Err(PackageError::Registry(format!(
         "failed to locate package index block for {registry_name}"
     )))
+}
+
+fn upsert_rule_pack_metadata(
+    content: &str,
+    registry_name: &str,
+    rule_pack: &RegistryRulePackInfo,
+) -> Result<String, PackageError> {
+    let starts = package_block_offsets(content);
+    for (idx, start) in starts.iter().enumerate() {
+        let end = starts.get(idx + 1).copied().unwrap_or(content.len());
+        let block = &content[*start..end];
+        if block_has_registry_name(block, registry_name) {
+            let updated_block = upsert_rule_pack_metadata_in_block(block, rule_pack)?;
+            let mut updated = String::with_capacity(content.len() + updated_block.len());
+            updated.push_str(&content[..*start]);
+            updated.push_str(&updated_block);
+            updated.push_str(&content[end..]);
+            return Ok(updated);
+        }
+    }
+    Err(PackageError::Registry(format!(
+        "failed to locate package index block for {registry_name}"
+    )))
+}
+
+fn upsert_rule_pack_metadata_in_block(
+    block: &str,
+    rule_pack: &RegistryRulePackInfo,
+) -> Result<String, PackageError> {
+    let metadata = render_rule_pack_metadata(rule_pack)?;
+    let line_ranges = block_line_ranges(block);
+    let metadata_start = line_ranges
+        .iter()
+        .find(|(_, _, line)| line.trim() == "[package.rule_pack]")
+        .map(|(start, _, _)| *start);
+
+    if let Some(start) = metadata_start {
+        let end = line_ranges
+            .iter()
+            .find(|(line_start, _, line)| *line_start > start && line.trim_start().starts_with('['))
+            .map(|(line_start, _, _)| *line_start)
+            .unwrap_or(block.len());
+        let mut out = String::with_capacity(block.len() + metadata.len());
+        out.push_str(block[..start].trim_end());
+        out.push_str("\n\n");
+        out.push_str(&metadata);
+        out.push('\n');
+        out.push_str(block[end..].trim_start_matches('\n'));
+        return Ok(out);
+    }
+
+    let insert_at = line_ranges
+        .iter()
+        .find(|(_, _, line)| line.trim() == "[[package.version]]")
+        .map(|(start, _, _)| *start)
+        .unwrap_or(block.len());
+    let mut out = String::with_capacity(block.len() + metadata.len() + 2);
+    out.push_str(block[..insert_at].trim_end());
+    out.push_str("\n\n");
+    out.push_str(&metadata);
+    out.push_str("\n\n");
+    out.push_str(block[insert_at..].trim_start_matches('\n'));
+    Ok(out)
+}
+
+fn block_line_ranges(block: &str) -> Vec<(usize, usize, &str)> {
+    let mut ranges = Vec::new();
+    let mut cursor = 0;
+    for line in block.split_inclusive('\n') {
+        let end = cursor + line.len();
+        ranges.push((cursor, end, line.trim_end_matches('\n')));
+        cursor = end;
+    }
+    if cursor < block.len() {
+        ranges.push((cursor, block.len(), &block[cursor..]));
+    }
+    ranges
 }
 
 fn package_block_offsets(content: &str) -> Vec<usize> {
@@ -1299,6 +1586,7 @@ fn render_registry_package_block(
     registry_name: &str,
     git: &str,
     version_entry: &str,
+    rule_pack: Option<&RegistryRulePackInfo>,
 ) -> Result<String, PackageError> {
     let mut out = String::new();
     out.push_str("[[package]]\n");
@@ -1331,9 +1619,32 @@ fn render_registry_package_block(
     }
     push_toml_string_field(&mut out, "provenance", git)?;
     out.push('\n');
+    if let Some(rule_pack) = rule_pack {
+        out.push_str(&render_rule_pack_metadata(rule_pack)?);
+        out.push('\n');
+    }
     out.push_str(version_entry.trim_end());
     out.push('\n');
     Ok(out)
+}
+
+fn render_rule_pack_metadata(rule_pack: &RegistryRulePackInfo) -> Result<String, PackageError> {
+    let languages = rule_pack
+        .languages
+        .iter()
+        .map(|language| toml_string_literal(language))
+        .collect::<Result<Vec<_>, _>>()?
+        .join(", ");
+    let safety = rule_pack
+        .safety_summary
+        .iter()
+        .map(|entry| toml_string_literal(entry))
+        .collect::<Result<Vec<_>, _>>()?
+        .join(", ");
+    Ok(format!(
+        "[package.rule_pack]\nrule_count = {}\nlanguages = [{}]\nsafety_summary = [{}]\n",
+        rule_pack.rule_count, languages, safety
+    ))
 }
 
 fn render_registry_version_entry(
@@ -1675,11 +1986,13 @@ pub(crate) fn validate_exports_for_publish(
     warnings: &mut Vec<PackageCheckDiagnostic>,
 ) -> Vec<PackageExportReport> {
     if ctx.manifest.exports.is_empty() {
-        push_error(
-            errors,
-            "[exports]",
-            "publishable packages require at least one stable export",
-        );
+        if ctx.manifest.rules.rule_dirs.is_empty() {
+            push_error(
+                errors,
+                "[exports]",
+                "publishable packages require at least one stable export or `[rules] ruleDirs`",
+            );
+        }
         return Vec::new();
     }
 
@@ -2775,8 +3088,14 @@ rev = "feedface"
             registry: None,
         };
 
-        let plan =
-            prepare_publish_plan(Some(tmp.path()), &options, index.to_string(), "fixture").unwrap();
+        let plan = prepare_publish_plan(
+            Some(tmp.path()),
+            &options,
+            index.to_string(),
+            "fixture",
+            None,
+        )
+        .unwrap();
 
         assert!(plan.tag_command.contains("git -C"));
         assert!(plan.tag_command.contains("tag v0.1.0"));
@@ -2804,6 +3123,88 @@ rev = "feedface"
     }
 
     #[test]
+    fn rule_publish_marks_pure_rule_pack_in_index() {
+        let tmp = tempfile::tempdir().unwrap();
+        write_publishable_rule_pack(tmp.path());
+        write_release_changelog(tmp.path(), "0.1.0");
+        let _remote = init_publishable_repo(tmp.path());
+        let index_path = Path::new("package-index/harn-package-index.toml");
+        let options = PackagePublishOptions {
+            dry_run: true,
+            remote: "origin",
+            index_repo: "burin-labs/harn-cloud",
+            index_path,
+            registry_name: Some("@acme/rules"),
+            skip_index_pr: false,
+            registry: None,
+        };
+        let rule_pack = collect_rule_pack_metadata(
+            &load_manifest_context_for_anchor(Some(tmp.path())).unwrap(),
+        )
+        .unwrap()
+        .expect("rule pack metadata");
+
+        let plan = prepare_publish_plan(
+            Some(tmp.path()),
+            &options,
+            "version = 1\n".to_string(),
+            "fixture",
+            Some(rule_pack),
+        )
+        .unwrap();
+
+        assert!(plan.updated_index_content.contains("[package.rule_pack]"));
+        assert!(plan.updated_index_content.contains("rule_count = 2"));
+        assert!(plan
+            .updated_index_content
+            .contains("languages = [\"typescript\"]"));
+        assert!(plan
+            .updated_index_content
+            .contains("safety_summary = [\"behavior-preserving:1\", \"no-fix:1\"]"));
+        let registry_path = tmp.path().join("index.toml");
+        fs::write(&registry_path, &plan.updated_index_content).unwrap();
+        let workspace = TestWorkspace::new(tmp.path());
+        let matches = search_rule_package_registry_in(
+            workspace.env(),
+            Some("typescript"),
+            Some(registry_path.to_string_lossy().as_ref()),
+        )
+        .unwrap();
+        assert_eq!(matches.len(), 1);
+        let package = serde_json::to_value(&matches[0]).unwrap();
+        assert_eq!(package["name"], "@acme/rules");
+        assert_eq!(package["rule_pack"]["rule_count"], 2);
+        assert!(plan.index_diff.contains("+[package.rule_pack]"));
+    }
+
+    #[test]
+    fn rule_pack_metadata_upsert_marks_existing_package_block() {
+        let content = r#"version = 1
+
+[[package]]
+name = "@acme/rules"
+repository = "https://github.com/acme/rules"
+
+[[package.version]]
+version = "0.1.0"
+git = "https://github.com/acme/rules"
+tag = "v0.1.0"
+"#;
+        let metadata = RegistryRulePackInfo {
+            rule_count: 1,
+            languages: vec!["typescript".to_string()],
+            safety_summary: vec!["no-fix:1".to_string()],
+        };
+
+        let updated = upsert_rule_pack_metadata(content, "@acme/rules", &metadata).unwrap();
+
+        let marker = updated.find("[package.rule_pack]").unwrap();
+        let version = updated.find("[[package.version]]").unwrap();
+        assert!(marker < version, "{updated}");
+        parse_package_registry_index("fixture", &updated).unwrap();
+    }
+
+    #[test]
     fn publish_preflight_rejects_existing_tag_and_missing_changelog_entry() {
         let tmp = tempfile::tempdir().unwrap();
         write_publishable_package(tmp.path());
@@ -2824,6 +3225,7 @@ rev = "feedface"
             &options,
             "version = 1\n".to_string(),
             "fixture",
+            None,
         )
         .unwrap_err()
         .to_string();
@@ -2839,6 +3241,7 @@ rev = "feedface"
             &options,
             "version = 1\n".to_string(),
             "fixture",
+            None,
         )
         .unwrap_err()
         .to_string();
@@ -2868,6 +3271,7 @@ rev = "feedface"
             &options,
             "version = 1\n".to_string(),
             "fixture",
+            None,
         )
         .unwrap_err()
         .to_string();
@@ -3133,6 +3537,45 @@ name = "consumer"
             format!("# Changelog\n\n## {version}\n\n- Initial release.\n"),
         )
         .unwrap();
+    }
+
+    fn write_publishable_rule_pack(root: &Path) {
+        fs::create_dir_all(root.join("rules")).unwrap();
+        fs::create_dir_all(root.join("docs")).unwrap();
+        let harn_range = current_harn_range_example();
+        fs::write(
+            root.join(MANIFEST),
+            format!(
+                r#"[package]
+name = "acme-rules"
+version = "0.1.0"
+description = "Acme structural rules"
+license = "MIT"
+repository = "https://github.com/acme/acme-rules"
+harn = "{harn_range}"
+docs_url = "docs/api.md"
+
+[rules]
+ruleDirs = ["rules"]
+
+[dependencies]
+"#
+            ),
+        )
+        .unwrap();
+        fs::write(
+            root.join("rules/no-foo.toml"),
+            "id = \"no-foo\"\nlanguage = \"typescript\"\nmessage = \"no foo\"\n[rule]\npattern = \"foo()\"\n",
+        )
+        .unwrap();
+        fs::write(
+            root.join("rules/rename.toml"),
+            "id = \"rename\"\nlanguage = \"typescript\"\nfix = \"bar()\"\nsafety = \"behavior-preserving\"\n[rule]\npattern = \"foo()\"\n",
+        )
+        .unwrap();
+        fs::write(root.join("README.md"), "# acme-rules\n").unwrap();
+        fs::write(root.join("LICENSE"), "MIT\n").unwrap();
+        fs::write(root.join("docs/api.md"), "").unwrap();
     }
 
     fn init_publishable_repo(root: &Path) -> tempfile::TempDir {

@@ -17,8 +17,34 @@ pub(crate) async fn run(_args: RuleArgs) {
 #[cfg(feature = "hostlib")]
 pub(crate) async fn run(args: RuleArgs) {
     match args.command {
+        crate::cli::RuleCommand::Publish(publish) => run_publish(publish),
+        crate::cli::RuleCommand::Search(search) => run_search(search),
         crate::cli::RuleCommand::Test(test) => run_test(test),
     }
+}
+
+#[cfg(feature = "hostlib")]
+fn run_publish(args: crate::cli::PublishArgs) {
+    crate::package::publish_rule_package(
+        args.package.as_deref(),
+        args.dry_run,
+        &args.remote,
+        &args.index_repo,
+        &args.index_path,
+        args.registry_name.as_deref(),
+        args.skip_index_pr,
+        args.registry.as_deref(),
+        args.json,
+    );
+}
+
+#[cfg(feature = "hostlib")]
+fn run_search(args: crate::cli::PackageSearchArgs) {
+    crate::package::search_rule_package_registry(
+        args.query.as_deref(),
+        args.registry.as_deref(),
+        args.json,
+    );
 }
 
 #[cfg(feature = "hostlib")]

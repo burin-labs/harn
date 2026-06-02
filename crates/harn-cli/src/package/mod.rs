@@ -58,8 +58,8 @@ pub use maturity::{
 pub use package_ops::*;
 pub(crate) use registry::*;
 pub use registry::{
-    clean_package_cache, list_package_cache, search_package_registry, show_package_registry_info,
-    verify_package_cache,
+    clean_package_cache, list_package_cache, search_package_registry, search_rule_package_registry,
+    show_package_registry_info, verify_package_cache,
 };
 pub use skills::*;
 pub(crate) use validation::*;
