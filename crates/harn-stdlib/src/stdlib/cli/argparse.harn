@@ -325,8 +325,7 @@ fn __usage_token(arg) -> string {
 }
 
 fn __option_lhs(arg) -> string {
-  let short = arg?.short ?? ""
-  let long = arg?.long ?? ""
+  let {short = "", long = ""} = arg ?? {}
   let combined = if short != "" && long != "" {
     "${short}, ${long}"
   } else if long != "" {

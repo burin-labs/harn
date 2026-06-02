@@ -374,9 +374,7 @@ pub fn context_artifact(input = nil, options = nil) -> ContextArtifact {
       16,
     )
   }
-  let language = opts?.language ?? raw?.language
-  let role = opts?.role ?? raw?.role
-  let task = opts?.task ?? raw?.task
+  let {language = raw?.language, role = raw?.role, task = raw?.task} = opts ?? {}
   let applicability = __context_applicability(raw, opts, scope)
   let confidence = __context_confidence(opts?.confidence ?? raw?.confidence ?? raw?.relevance)
   let freshness = trim(__context_string(opts?.freshness ?? raw?.freshness ?? "unknown"))
@@ -554,9 +552,9 @@ fn __context_path_match(paths, query_paths) {
 pub fn context_artifact_rank(artifact, options = nil) {
   let item = context_artifact(artifact)
   let opts = options ?? {}
-  let confidence = __context_confidence(item?.confidence) ?? 0.5
-  let freshness = __context_freshness_rank(item?.freshness)
-  let authority = __context_authority_rank(item?.provenance?.authority)
+  let confidence = __context_confidence(item.confidence) ?? 0.5
+  let freshness = __context_freshness_rank(item.freshness)
+  let authority = __context_authority_rank(item.provenance.authority)
   let priority = __context_num(item?.priority, 0) * 1.0 / 100.0
   let relevance = __context_num(item?.relevance, confidence) * 1.0
   let pinned = if contains(__context_string_list(opts?.pinned_ids), item.id) {
@@ -569,15 +567,15 @@ pub fn context_artifact_rank(artifact, options = nil) {
   } else {
     0.0
   }
-  let role_score = __context_any_match(item?.applicability?.roles ?? item?.role, opts?.role ?? opts?.roles)
-  let task_score = __context_any_match(item?.applicability?.tasks ?? item?.task, opts?.task ?? opts?.tasks)
+  let role_score = __context_any_match(item.applicability.roles ?? item.role, opts?.role ?? opts?.roles)
+  let task_score = __context_any_match(item.applicability.tasks ?? item.task, opts?.task ?? opts?.tasks)
   let language_score = __context_any_match(
-    item?.applicability?.languages ?? item?.language,
+    item.applicability.languages ?? item.language,
     opts?.language ?? opts?.languages,
   )
-  let path_score = __context_path_match(item?.applicability?.paths ?? item?.path, opts?.path ?? opts?.paths)
-  let tag_score = __context_any_match(item?.applicability?.tags, opts?.tags)
-  let token_penalty = __context_num(item?.token_estimate, 0) * 1.0 / 10000.0
+  let path_score = __context_path_match(item.applicability.paths ?? item.path, opts?.path ?? opts?.paths)
+  let tag_score = __context_any_match(item.applicability.tags, opts?.tags)
+  let token_penalty = __context_num(item.token_estimate, 0) * 1.0 / 10000.0
   let score = pinned
     + kind_bonus
     + priority
@@ -595,7 +593,7 @@ pub fn context_artifact_rank(artifact, options = nil) {
 
 fn __context_artifact_key(artifact) {
   let item = context_artifact(artifact)
-  return "body:" + sha256(item.kind + "|" + __context_string(item?.path) + "|" + item.body)
+  return "body:" + sha256(item.kind + "|" + __context_string(item.path) + "|" + item.body)
 }
 
 fn __context_hashes_overlap(left, right) {
@@ -690,7 +688,7 @@ pub fn context_artifact_merge(left, right, options = nil) -> ContextArtifact {
       body: body,
       text: body,
       source_hashes: source_hashes,
-      provenance: __context_merge_provenance(l?.provenance, r?.provenance),
+      provenance: __context_merge_provenance(l.provenance, r.provenance),
       metadata: left_metadata + right_metadata,
       token_estimate: token_estimate,
     },
@@ -830,7 +828,7 @@ pub fn context_artifact_budget(artifacts = nil, options = nil) {
  * @example: context_artifact_select(artifacts, options)
  */
 pub fn context_artifact_select(artifacts = nil, options = nil) {
-  return context_artifact_budget(artifacts, options)?.artifacts ?? []
+  return context_artifact_budget(artifacts, options).artifacts ?? []
 }
 
 fn __context_render_caps(options) {

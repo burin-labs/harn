@@ -63,8 +63,7 @@ fn __workflow_artifact_body(artifact) {
 
 fn __workflow_render_artifact_xml(artifact) {
   let title = __workflow_artifact_title(artifact)
-  let source = artifact?.source ?? "unknown"
-  let freshness = artifact?.freshness ?? "normal"
+  let {source = "unknown", freshness = "normal"} = artifact ?? {}
   return "<artifact>\n"
     + "<title>"
     + __workflow_escape_prompt_text(title)

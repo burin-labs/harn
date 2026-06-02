@@ -129,6 +129,25 @@ log(results)
 }
 
 #[test]
+fn test_destructuring_defaults_mark_referenced_variables_used() {
+    let diags = lint_source(
+        r#"
+pipeline default(task) {
+let persona = "p"
+let kind = "repair"
+let downstream = "review"
+let { step_name = "crystallized_${persona}_${kind}_${downstream}", function_name = step_name + "_step" } = {}
+log(function_name)
+}
+"#,
+    );
+    assert!(
+        !has_rule(&diags, "unused-variable"),
+        "destructuring defaults should mark referenced variables used: {diags:?}"
+    );
+}
+
+#[test]
 fn test_multiple_rules() {
     let diags = lint_source(
         r#"

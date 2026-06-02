@@ -360,8 +360,7 @@ pub fn agent_chat_loop(opts = nil) {
   let session_id = agent_session_open(config?.session_id)
   let max_turns = config?.max_turns ?? 0
   let max_input_events = config?.max_input_events
-  let close_session = config?.close_session ?? true
-  let transcript_path = config?.transcript_path ?? config?.llm_transcript_dir
+  let {close_session = true, transcript_path = config?.llm_transcript_dir} = config ?? {}
   let user_input = config?.on_user_input
   if user_input != nil && type_of(user_input) != "closure" {
     throw "agent_chat_loop: on_user_input must be a closure or nil"

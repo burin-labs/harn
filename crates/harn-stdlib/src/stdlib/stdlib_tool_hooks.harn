@@ -1,5 +1,3 @@
-import { tool_hooks_seed_registry } from "std/tool_hooks_catalogues"
-
 /**
  * std/tool_hooks — preset `run_command` wrapper for the catalogue-driven
  * "command faux-pas" library (epic #1884).
@@ -292,8 +290,7 @@ fn __classifier_validate_config(cfg) {
     if type_of(cache) != "dict" {
       throw "preset_run_command: llm_classifier.cache must be a dict"
     }
-    let ttl_ms = cache?.ttl_ms ?? 0
-    let ttl_seconds = cache?.ttl_seconds ?? 0
+    let {ttl_ms = 0, ttl_seconds = 0} = cache ?? {}
     if type_of(ttl_ms) != "int" {
       throw "preset_run_command: llm_classifier.cache.ttl_ms must be an int"
     }
@@ -325,12 +322,14 @@ fn __classifier_validate_config(cfg) {
   }
 }
 
-/* Accept either ttl_ms (preferred for tests / determinism) or
-     * ttl_seconds (more readable for prod configs). The legacy spec
-     * mentions strings like "24h" — leave that as a follow-up so we
-     * don't smuggle a duration parser into stdlib here. */
-/* Forward `llm_options` verbatim so callers can pin temperature,
-     * seed, retries, etc. without us re-marshalling each knob. */
+/**
+ * Accept either ttl_ms (preferred for tests / determinism) or
+ * ttl_seconds (more readable for prod configs). The legacy spec
+ * mentions strings like "24h" — leave that as a follow-up so we
+ * don't smuggle a duration parser into stdlib here.
+ * Forward `llm_options` verbatim so callers can pin temperature,
+ * seed, retries, etc. without us re-marshalling each knob.
+ */
 fn __classifier_normalize_command(command) -> string {
   /* Collapse all whitespace runs so trivial reformatting doesn't bust the
    * cache (e.g. `cargo  build` vs `cargo build`). Trimmed for the same
@@ -503,8 +502,10 @@ fn __classifier_run(harness: Harness, classifier_cfg, args, inner) {
   return tool_hooks_mode_rewrite_with_audit(synth_rule, args, inner)
 }
 
-/* `llm_call_safe` keeps the wrapper resilient: on transport errors
-     * we audit + passthrough rather than blowing up the dispatch loop. */
+/**
+ * `llm_call_safe` keeps the wrapper resilient: on transport errors
+ * we audit + passthrough rather than blowing up the dispatch loop.
+ */
 fn __preset_custom_registry(custom_rules) {
   // Build a synthetic catalogue when the caller supplied custom rules.
   // The catalogue is stack-agnostic (no `stack` field) so it survives
@@ -583,8 +584,7 @@ pub fn preset_run_command(config = nil) {
    * catalogue per opted-in stack. Callers that supply `registry:` keep
    * full control — tests, vendor overrides, and migration paths are
    * unaffected. (TH-04 #1897) */
-  let registry = cfg?.registry ?? tool_hooks_seed_registry(stacks)
-  let custom_rules = cfg?.custom_rules ?? []
+  let {registry = tool_hooks_seed_registry(stacks), custom_rules = []} = cfg ?? {}
   if type_of(custom_rules) != "list" {
     throw "preset_run_command: `custom_rules` must be a list of tool_rule values"
   }

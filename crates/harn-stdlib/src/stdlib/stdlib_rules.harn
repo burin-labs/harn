@@ -122,3 +122,24 @@ pub fn rules_apply(params) -> dict {
     {ok: payload?.result ?? "" == "ok", provenance: {module: "std/rules", helper: "rules_apply"}},
   )
 }
+
+/**
+ * Fold consecutive `let x = src?.x ?? d` runs into one destructure-with-
+ * defaults (#2824). A specialized, behavior-preserving codemod (the source is
+ * coalesced to `?? {}` so a nil source can't crash the destructure). **Dry-run
+ * by default**; `dry_run: false` writes. Requires the deterministic-tools gate.
+ * Each file entry reports `{path, changed, applied, before, preview}`.
+ *
+ * @effects: [host, fs]
+ * @allocation: heap
+ * @errors: [backend]
+ * @api_stability: experimental
+ * @example: rules_fold({paths: ["a.harn"], dry_run: false})
+ */
+pub fn rules_fold(params) -> dict {
+  let payload = hostlib_rules_fold(params ?? {}) ?? {}
+  return payload
+    .merge(
+    {ok: payload?.result ?? "" == "ok", provenance: {module: "std/rules", helper: "rules_fold"}},
+  )
+}

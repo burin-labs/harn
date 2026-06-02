@@ -204,8 +204,7 @@ fn __auto_compact_summary(before, after) {
   if type_of(head) != "dict" {
     return ""
   }
-  let role = head?.role ?? ""
-  let content = head?.content ?? ""
+  let {role = "", content = ""} = head ?? {}
   if role != "user" || type_of(content) != "string" {
     return ""
   }

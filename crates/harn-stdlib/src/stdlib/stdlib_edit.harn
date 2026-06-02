@@ -798,8 +798,7 @@ pub fn edit_explain_whitespace_difference(needle, matched) {
  */
 pub fn edit_check_lazy_truncation(old_content, new_content, options = nil) {
   let opts = options ?? {}
-  let min_old_lines = opts?.min_old_lines ?? 10
-  let min_keep_pct = opts?.min_keep_pct ?? 35
+  let {min_old_lines = 10, min_keep_pct = 35} = opts ?? {}
   let old_text = old_content ?? ""
   let new_text = new_content ?? ""
   let old_lines = len(split(old_text, "\n"))
@@ -1214,11 +1213,9 @@ fn __edit_safe_patch_result(ctx, fields = nil) {
  */
 pub fn edit_safe_text_patch(params) {
   let opts = params ?? {}
-  let path = opts?.path ?? ""
-  let hunks = opts?.hunks ?? []
+  let {path = "", hunks = []} = opts ?? {}
   let session_id = opts?.session_id
-  let match_options = opts?.match_options ?? {}
-  let dry_run = opts?.dry_run ?? false
+  let {match_options = {}, dry_run = false} = opts ?? {}
   let expected_hash = opts?.expected_hash
   let read_response = hostlib_fs_read_text({path: path, session_id: session_id})
   let current_content = read_response?.content ?? ""
@@ -1562,8 +1559,8 @@ fn __edit_fast_apply_preview(path, before, after) {
       ops_rejected: 0,
     },
     ops: [],
-    errors: dry?.errors ?? [],
-    warnings: dry?.warnings ?? [],
+    errors: dry.errors ?? [],
+    warnings: dry.warnings ?? [],
   }
 }
 
@@ -1603,8 +1600,7 @@ fn __edit_fast_apply_telemetry(result, dry_run, validation_rejected) {
 
 fn __edit_fast_apply_result(ctx, fields = nil) {
   let extra = fields ?? {}
-  let result = extra?.result ?? "applied"
-  let validation_rejected = extra?.validation_rejected ?? 0
+  let {result = "applied", validation_rejected = 0} = extra ?? {}
   let base = {
     ok: result == "applied" || result == "no_op",
     applied: result == "applied" || result == "no_op",
@@ -1770,7 +1766,7 @@ pub fn edit_fast_apply(params) {
       {
         result: "dry_run_rejected",
         dry_run_bundle: preview,
-        errors: preview?.errors
+        errors: preview.errors
           ?? [{code: "dry_run_rejected", message: "edit_dry_run rejected the proposed content"}],
         llm: {provider: response?.provider, model: response?.model, content_source: extracted.source},
       },
@@ -2265,15 +2261,12 @@ pub fn edit_extract_variable(params) {
       "extract_variable has no local-declaration form for language `" + language + "`",
     )
   }
-  let path = p?.path ?? ""
-  let new_name = p?.new_name ?? ""
-  let range = p?.range ?? {}
+  let {path = "", new_name = "", range = {}} = p ?? {}
   if path == "" || new_name == "" {
     return __refactor_invalid("extract_variable", language, "`path` and `new_name` are required")
   }
   let start_line = range?.start_line
-  let end_line = range?.end_line ?? start_line
-  let start_col = range?.start_col ?? 0
+  let {end_line = start_line, start_col = 0} = range ?? {}
   let end_col = range?.end_col
   if start_line == nil || end_col == nil {
     return __refactor_invalid(
@@ -3068,9 +3061,7 @@ pub fn edit_extract_function(params) {
       "extract_function supports python/javascript/jsx/typescript/tsx/ruby",
     )
   }
-  let path = p?.path ?? ""
-  let new_name = p?.new_name ?? ""
-  let range = p?.range ?? {}
+  let {path = "", new_name = "", range = {}} = p ?? {}
   let start_line = range?.start_line
   let end_line = range?.end_line ?? start_line
   if path == "" || new_name == "" || start_line == nil || end_line == nil {
