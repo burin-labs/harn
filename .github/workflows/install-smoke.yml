@@ -1,0 +1,114 @@
+name: Install channels smoke
+
+# Weekly smoke of the *user-facing install channels* against the latest
+# published release:
+#   * `cargo install harn-cli` (crates.io)
+#   * the `install.sh` GitHub-release download path
+#
+# `release-smoke.yml` validates the exact release bytes at tag-cut time but
+# never re-installs afterwards, so it cannot see drift that appears *between*
+# releases: a transitive dependency that stops building on crates.io, a
+# yanked crate, or `install.sh` OS/arch detection regressing against a live
+# release. This job re-walks both install paths from scratch on a schedule
+# and then runs the cross-platform smoke driver against whatever got
+# installed (pinned to the matching release tag via
+# scripts/smoke_installed_binary.sh).
+#
+# Cold `cargo install` builds are slow, so this runs weekly rather than
+# daily and is deliberately kept off the PR critical path.
+on:
+  schedule:
+    - cron: '23 11 * * 1' # Mondays
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Optional release tag to install, e.g. v0.8.65. Empty installs the latest published release.'
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: install-smoke-${{ inputs.version || github.ref }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+  HARN_LLM_CALLS_DISABLED: "1"
+
+jobs:
+  cargo-install:
+    name: cargo install harn-cli (${{ matrix.platform }})
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 75
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux
+            runner: ubuntu-latest
+          - platform: macos
+            runner: macos-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+
+      # Mirror the documented `cargo install harn-cli`. No `--locked`: a user
+      # typing the documented command gets a fresh dependency resolution, and
+      # catching breakage in that resolution is the whole point of this gate.
+      - name: cargo install harn-cli
+        shell: bash
+        env:
+          VERSION_INPUT: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          if [[ -n "${VERSION_INPUT:-}" ]]; then
+            cargo install harn-cli --version "${VERSION_INPUT#v}"
+          else
+            cargo install harn-cli
+          fi
+          "$HOME/.cargo/bin/harn" --version
+
+      - name: Smoke the installed binary
+        shell: bash
+        run: HARN_BINARY="$HOME/.cargo/bin/harn" ./scripts/smoke_installed_binary.sh
+
+  install-sh:
+    name: install.sh (${{ matrix.platform }})
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux
+            runner: ubuntu-latest
+          - platform: macos
+            runner: macos-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      # Run the repo's own install.sh (identical to the bytes served at
+      # harnlang.com/install.sh) so the GitHub-release download, SHA256
+      # verification, and OS/arch detection are exercised against a live
+      # release. Install to a scratch dir and skip PATH edits — the smoke
+      # references the binary by absolute path.
+      - name: Run install.sh
+        shell: bash
+        env:
+          VERSION_INPUT: ${{ inputs.version }}
+          HARN_INSTALL_DIR: ${{ runner.temp }}/harn-install
+          HARN_NO_MODIFY_PATH: "1"
+        run: |
+          set -euo pipefail
+          export HARN_VERSION="${VERSION_INPUT:-}"
+          sh ./install.sh
+          "$HARN_INSTALL_DIR/harn" --version
+
+      - name: Smoke the installed binary
+        shell: bash
+        env:
+          HARN_BINARY: ${{ runner.temp }}/harn-install/harn
+        run: ./scripts/smoke_installed_binary.sh
