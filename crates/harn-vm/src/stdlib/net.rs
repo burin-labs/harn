@@ -287,6 +287,7 @@ fn net_unix_socket_json_request_impl(
 #[cfg(all(test, unix))]
 mod tests {
     use std::io::{BufRead, BufReader, Write};
+    use std::net::Shutdown;
 
     use super::*;
 
@@ -347,7 +348,15 @@ mod tests {
         let listener = UnixListener::bind(&socket_path).expect("bind unix listener");
         let server = std::thread::spawn(move || {
             let (mut stream, _) = listener.accept().expect("accept");
+            let mut request = String::new();
+            BufReader::new(stream.try_clone().expect("clone stream"))
+                .read_line(&mut request)
+                .expect("read request");
             stream.write_all(b"not-json\n").expect("write response");
+            stream.flush().expect("flush response");
+            stream
+                .shutdown(Shutdown::Write)
+                .expect("shutdown write half");
         });
 
         let result = unix_socket_json_request(

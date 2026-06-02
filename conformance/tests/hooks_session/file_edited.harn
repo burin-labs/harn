@@ -20,7 +20,7 @@ pipeline default() {
       return nil
     },
   )
-  let tmp = path_join(harness.fs.temp_dir(), "hooks_session_file_edited.txt")
+  let tmp = path_join(harness.fs.temp_dir(), "hooks_session_file_edited-" + uuid() + ".txt")
   harness.fs.write_text(tmp, "hello")
   harness.fs.append(tmp, " world")
   notify_file_edited(tmp, {operation: "append", bytes: 11})
@@ -30,7 +30,9 @@ pipeline default() {
       let result = agent_loop("touch some files", nil, {provider: "mock"})
       __io_println(result.status)
       __io_println(atomic_get(edits_seen))
-      harness.fs.delete(tmp)
+      if harness.fs.exists(tmp) {
+        harness.fs.delete(tmp)
+      }
       clear_session_hooks()
     },
   )
