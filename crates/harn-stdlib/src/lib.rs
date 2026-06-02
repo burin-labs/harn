@@ -870,6 +870,10 @@ pub struct StdlibCliScript {
 
 pub const STDLIB_CLI_SCRIPTS: &[StdlibCliScript] = &[
     StdlibCliScript {
+        name: "codemod",
+        source: include_str!("stdlib/cli/codemod.harn"),
+    },
+    StdlibCliScript {
         name: "doctor",
         source: include_str!("stdlib/cli/doctor.harn"),
     },

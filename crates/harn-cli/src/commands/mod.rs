@@ -1,6 +1,7 @@
 pub(crate) mod agents_conformance;
 pub(crate) mod bench;
 pub(crate) mod check;
+pub(crate) mod codemod;
 pub(crate) mod config_cmd;
 pub(crate) mod connect;
 pub(crate) mod connector;
@@ -57,6 +58,7 @@ pub(crate) mod quickstart;
 pub(crate) mod repl;
 pub(crate) mod replay;
 pub(crate) mod routes;
+pub(crate) mod rules_cli;
 pub mod run;
 pub(crate) mod scaffold_common;
 pub(crate) mod scan;
