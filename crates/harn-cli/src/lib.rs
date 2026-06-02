@@ -909,6 +909,8 @@ async fn async_main(raw_args: Vec<String>, runtime_mode: CliRuntimeMode) {
                         let run_args = commands::test::UserTestRunArgs {
                             filter: args.filter.as_deref(),
                             timeout_ms: args.timeout,
+                            max_test_ms: args.max_test_ms,
+                            max_execute_ms: args.max_execute_ms,
                             parallel: args.parallel,
                             jobs: args.jobs,
                             verbose: args.verbose,
@@ -944,6 +946,8 @@ async fn async_main(raw_args: Vec<String>, runtime_mode: CliRuntimeMode) {
                     let run_args = commands::test::UserTestRunArgs {
                         filter: args.filter.as_deref(),
                         timeout_ms: args.timeout,
+                        max_test_ms: args.max_test_ms,
+                        max_execute_ms: args.max_execute_ms,
                         parallel: args.parallel,
                         jobs: args.jobs,
                         verbose: args.verbose,

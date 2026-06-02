@@ -144,6 +144,8 @@ const LARGE_SEQUENTIAL_FILE_THRESHOLD: usize = 10;
 const DEFAULT_PARALLEL_JOBS_CAP: usize = 8;
 const TIMINGS_CACHE_RELATIVE_PATH: &str = ".harn/test-timings.json";
 const HARN_TEST_JOBS_ENV: &str = "HARN_TEST_JOBS";
+const HARN_TEST_MAX_MS_ENV: &str = "HARN_TEST_MAX_MS";
+const HARN_TEST_MAX_EXECUTE_MS_ENV: &str = "HARN_TEST_MAX_EXECUTE_MS";
 
 /// Per-worker memory budget (MiB) used to cap *auto-detected* parallelism on
 /// memory-constrained or oversubscribed hosts. Overridable via
@@ -172,6 +174,14 @@ const RESERVED_SYSTEM_MEMORY_MB: u64 = 1024;
 pub struct RunOptions {
     pub filter: Option<String>,
     pub timeout_ms: u64,
+    /// Optional hard budget for a passing test's total wall-clock duration.
+    /// Exceeding it converts the result to a failure without changing the
+    /// actual per-test timeout behavior.
+    pub max_test_ms: Option<u64>,
+    /// Optional hard budget for a passing test's `vm.execute` phase. This
+    /// catches tests whose assertions accidentally drive full agent loops or
+    /// other slow runtime behavior while ignoring setup/compile cold-start.
+    pub max_execute_ms: Option<u64>,
     /// When false, the scheduler runs with a single worker, preserving the
     /// historical "everything sequential" semantics that `harn test`
     /// defaulted to before `--parallel` was introduced.
@@ -246,6 +256,8 @@ pub async fn run_tests(
     let options = RunOptions {
         filter: filter.map(str::to_owned),
         timeout_ms,
+        max_test_ms: test_budget_ms_via_env(HARN_TEST_MAX_MS_ENV),
+        max_execute_ms: test_budget_ms_via_env(HARN_TEST_MAX_EXECUTE_MS_ENV),
         parallel,
         jobs: None,
         cli_skill_dirs: cli_skill_dirs.to_vec(),
@@ -267,6 +279,8 @@ pub async fn run_tests_with_progress(
     let options = RunOptions {
         filter: filter.map(str::to_owned),
         timeout_ms,
+        max_test_ms: test_budget_ms_via_env(HARN_TEST_MAX_MS_ENV),
+        max_execute_ms: test_budget_ms_via_env(HARN_TEST_MAX_EXECUTE_MS_ENV),
         parallel,
         jobs: None,
         cli_skill_dirs: cli_skill_dirs.to_vec(),
@@ -284,6 +298,13 @@ fn diagnose_enabled_via_env() -> bool {
         raw.to_ascii_lowercase().as_str(),
         "1" | "true" | "yes" | "on"
     )
+}
+
+fn test_budget_ms_via_env(name: &str) -> Option<u64> {
+    std::env::var(name)
+        .ok()
+        .and_then(|raw| raw.trim().parse::<u64>().ok())
+        .filter(|&value| value >= 1)
 }
 
 /// Run tests with full control over scheduling, worker count, and
@@ -764,6 +785,7 @@ async fn execute_cases(
             );
             let result =
                 execute_case(&case, &cwd, options.timeout_ms, &options.cli_skill_dirs).await;
+            let result = enforce_case_budgets(result, options.max_test_ms, options.max_execute_ms);
             if options.diagnose {
                 result.emit_diagnose();
             }
@@ -787,6 +809,8 @@ async fn execute_cases(
         let results = Arc::clone(&results);
         let completed = Arc::clone(&completed);
         let timeout_ms = options.timeout_ms;
+        let max_test_ms = options.max_test_ms;
+        let max_execute_ms = options.max_execute_ms;
         let cli_skill_dirs = options.cli_skill_dirs.clone();
         let progress = options.progress.clone();
         let diagnose = options.diagnose;
@@ -830,6 +854,7 @@ async fn execute_cases(
                     );
                     let result =
                         runtime.block_on(execute_case(&case, &cwd, timeout_ms, &cli_skill_dirs));
+                    let result = enforce_case_budgets(result, max_test_ms, max_execute_ms);
                     if diagnose {
                         result.emit_diagnose();
                     }
@@ -851,6 +876,50 @@ async fn execute_cases(
     Arc::try_unwrap(results)
         .map(|m| m.into_inner().unwrap_or_default())
         .unwrap_or_else(|arc| arc.lock().unwrap().clone())
+}
+
+fn enforce_case_budgets(
+    mut result: TestResult,
+    max_test_ms: Option<u64>,
+    max_execute_ms: Option<u64>,
+) -> TestResult {
+    if !result.passed {
+        return result;
+    }
+
+    let mut violations = Vec::new();
+    if let Some(max_ms) = max_test_ms {
+        if result.duration_ms > max_ms {
+            violations.push(format!(
+                "exceeded test wall-clock budget: {}ms > {}ms",
+                result.duration_ms, max_ms
+            ));
+        }
+    }
+    if let Some(max_ms) = max_execute_ms {
+        if result.phases.execute_ms > max_ms {
+            violations.push(format!(
+                "exceeded test execute budget: {}ms > {}ms",
+                result.phases.execute_ms, max_ms
+            ));
+        }
+    }
+
+    if violations.is_empty() {
+        return result;
+    }
+
+    violations.push(format!(
+        "phase timings: setup={}ms compile={}ms execute={}ms teardown={}ms total={}ms",
+        result.phases.setup_ms,
+        result.phases.compile_ms,
+        result.phases.execute_ms,
+        result.phases.teardown_ms,
+        result.duration_ms
+    ));
+    result.passed = false;
+    result.error = Some(violations.join("\n"));
+    result
 }
 
 fn next_test_index(counter: &Mutex<usize>) -> usize {
@@ -1319,6 +1388,58 @@ pipeline test_cli_skills(task) {
     #[test]
     fn cgroup_headroom_rejects_garbage() {
         assert_eq!(cgroup_headroom_mb("not-a-number", "123"), None);
+    }
+
+    fn passing_result_with_timings(total_ms: u64, execute_ms: u64) -> TestResult {
+        TestResult {
+            name: "test_budget".to_string(),
+            file: "tests/test_budget.harn".to_string(),
+            passed: true,
+            error: None,
+            duration_ms: total_ms,
+            phases: PhaseTimings {
+                setup_ms: 7,
+                compile_ms: 3,
+                execute_ms,
+                teardown_ms: 2,
+            },
+        }
+    }
+
+    #[test]
+    fn enforce_case_budgets_fails_slow_total_wall_time() {
+        let result = passing_result_with_timings(1_250, 100);
+
+        let result = enforce_case_budgets(result, Some(1_000), None);
+
+        assert!(!result.passed);
+        let error = result.error.unwrap_or_default();
+        assert!(error.contains("exceeded test wall-clock budget: 1250ms > 1000ms"));
+        assert!(error.contains("phase timings: setup=7ms compile=3ms execute=100ms"));
+    }
+
+    #[test]
+    fn enforce_case_budgets_fails_slow_execute_phase() {
+        let result = passing_result_with_timings(900, 750);
+
+        let result = enforce_case_budgets(result, Some(1_000), Some(500));
+
+        assert!(!result.passed);
+        let error = result.error.unwrap_or_default();
+        assert!(error.contains("exceeded test execute budget: 750ms > 500ms"));
+        assert!(!error.contains("exceeded test wall-clock budget"));
+    }
+
+    #[test]
+    fn enforce_case_budgets_preserves_existing_failure() {
+        let mut result = passing_result_with_timings(2_000, 1_000);
+        result.passed = false;
+        result.error = Some("assertion failed".to_string());
+
+        let result = enforce_case_budgets(result, Some(1), Some(1));
+
+        assert!(!result.passed);
+        assert_eq!(result.error.as_deref(), Some("assertion failed"));
     }
 
     #[test]
