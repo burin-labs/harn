@@ -221,11 +221,10 @@ jobs:
     name: Build ${{ matrix.target }}
     needs: setup
     if: needs.setup.outputs.should_build_binaries == 'true'
-    # Warm-cache-only runs stay on the cheaper standard runners. Release runs
-    # use larger macOS runners only for the two native Apple artifact legs:
-    # they are the long pole, and the v0.8.58 recovery showed standard macOS
-    # could burn the whole 90-minute build step before link/sign/package.
-    runs-on: ${{ needs.setup.outputs.is_release == 'true' && matrix.release_os || matrix.os }}
+    # Use standard GitHub-hosted runners for both warm-cache and release runs.
+    # Larger macOS runners are billed even for public repositories, so release
+    # recovery retries should not route to macOS Large / XLarge by default.
+    runs-on: ${{ matrix.os }}
     # Avoid GitHub's multi-hour default timeout for release artifacts. Native
     # macOS is the slowest surface; if it cannot finish inside this budget,
     # fail loudly so the release queue does not burn hours silently.
@@ -239,27 +238,22 @@ jobs:
             # on arm64 `macos-latest` repeatedly left sccache/rustc orphaned and
             # pushed the build past 85 minutes.
             os: macos-15-intel
-            release_os: macos-15-large
             release_codegen_units: 8
             use_sccache: "false"
           - target: aarch64-apple-darwin
             os: macos-latest
-            release_os: macos-15-xlarge
             release_codegen_units: 8
             use_sccache: "false"
           - target: x86_64-unknown-linux-gnu
             os: ubuntu-latest
-            release_os: ubuntu-latest
             release_codegen_units: 1
             use_sccache: "true"
           - target: aarch64-unknown-linux-gnu
             os: ubuntu-latest
-            release_os: ubuntu-latest
             release_codegen_units: 1
             use_sccache: "true"
           - target: x86_64-pc-windows-msvc
             os: windows-latest
-            release_os: windows-latest
             release_codegen_units: 1
             use_sccache: "false"
 
@@ -335,7 +329,7 @@ jobs:
           HARN_RELEASE_REF: ${{ needs.setup.outputs.ref }}
           HARN_RELEASE_VERSION: ${{ needs.setup.outputs.version }}
           HARN_RELEASE_IS_RELEASE: ${{ needs.setup.outputs.is_release }}
-          HARN_RELEASE_RUNNER_LABEL: ${{ needs.setup.outputs.is_release == 'true' && matrix.release_os || matrix.os }}
+          HARN_RELEASE_RUNNER_LABEL: ${{ matrix.os }}
         run: |
           set -euo pipefail
           start=$SECONDS
