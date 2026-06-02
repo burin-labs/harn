@@ -53,6 +53,7 @@ fn rule_targets_harn(src: &str) -> bool {
         == Some("harn")
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn lint_file_inner(
     analysis: &mut AnalysisDatabase,
     path: &Path,
@@ -62,6 +63,7 @@ pub(crate) fn lint_file_inner(
     require_file_header: bool,
     complexity_threshold: Option<usize>,
     persona_step_allowlist: &[String],
+    script_rule_diagnostics: &[harn_lint::LintDiagnostic],
 ) -> CommandOutcome {
     let path_str = path.to_string_lossy().into_owned();
     let output = analyze_file(analysis, path, config, module_graph)
@@ -92,6 +94,20 @@ pub(crate) fn lint_file_inner(
         &output.diagnostics,
         &config.disable_rules,
     ));
+    // `.harn`-authored custom lint rules (#2850), pre-computed in the async
+    // command handler (they need the VM) and merged here so they render and
+    // affect the exit code exactly like built-in rules.
+    diagnostics.extend(
+        script_rule_diagnostics
+            .iter()
+            .filter(|d| {
+                !config
+                    .disable_rules
+                    .iter()
+                    .any(|r| r.as_str() == d.rule.as_ref())
+            })
+            .cloned(),
+    );
 
     if diagnostics.is_empty() {
         println!("{path_str}: no issues found");

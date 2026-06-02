@@ -89,6 +89,7 @@ impl LintReport {
 /// [`super::lint::lint_file_inner`] but suppresses human-readable
 /// stderr rendering and captures every diagnostic into a serializable
 /// shape.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn lint_file_report(
     analysis: &mut AnalysisDatabase,
     path: &Path,
@@ -98,6 +99,7 @@ pub(crate) fn lint_file_report(
     require_file_header: bool,
     complexity_threshold: Option<usize>,
     persona_step_allowlist: &[String],
+    script_rule_diagnostics: &[harn_lint::LintDiagnostic],
 ) -> LintFileReport {
     let path_str = path.to_string_lossy().into_owned();
     let output = match analyze_file(analysis, path, config, module_graph) {
@@ -163,6 +165,30 @@ pub(crate) fn lint_file_report(
         }
         if diag.fix.is_some() {
             fixable += 1;
+        }
+        diagnostics.push(CheckDiagnostic {
+            source: "lint",
+            severity: lint_severity_label(diag.severity),
+            code: Some(diag.code.to_string()),
+            message: diag.message.clone(),
+            span: Some(check_span(diag.span)),
+            help: diag.suggestion.clone(),
+        });
+    }
+
+    // `.harn`-authored custom lint rules (#2850), pre-computed in the async
+    // command handler (they need the VM) and merged into the report so they
+    // appear and affect status exactly like built-in rules.
+    for diag in script_rule_diagnostics.iter().filter(|d| {
+        !config
+            .disable_rules
+            .iter()
+            .any(|r| r.as_str() == d.rule.as_ref())
+    }) {
+        match diag.severity {
+            LintSeverity::Error => has_error = true,
+            LintSeverity::Warning => has_warning = true,
+            LintSeverity::Info => {}
         }
         diagnostics.push(CheckDiagnostic {
             source: "lint",

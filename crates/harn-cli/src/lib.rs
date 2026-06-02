@@ -561,6 +561,17 @@ async fn async_main(raw_args: Vec<String>, runtime_mode: CliRuntimeMode) {
             let module_graph =
                 commands::check::build_module_graph_and_seed_analysis(&files, &mut analysis);
             let cross_file_imports = commands::check::collect_cross_file_imports(&module_graph);
+            // `.harn`-authored custom lint rules (#2850) run in a sandboxed VM,
+            // so they're computed once here in the async handler and merged into
+            // each file's diagnostics below. Empty (near-zero cost) when the
+            // project declares no `*.lint.harn` rules.
+            let script_rule_diags = commands::check::run_project_script_rules(&files).await;
+            let script_diags_for = |file: &std::path::Path| -> &[harn_lint::LintDiagnostic] {
+                script_rule_diags
+                    .get(file)
+                    .map(Vec::as_slice)
+                    .unwrap_or(&[])
+            };
             if args.json {
                 // `--json` always reports without modifying source — `--fix`
                 // is intentionally orthogonal to structured output so agents
@@ -584,6 +595,7 @@ async fn async_main(raw_args: Vec<String>, runtime_mode: CliRuntimeMode) {
                         require_header,
                         complexity_threshold,
                         &lint_config.persona_step_allowlist,
+                        script_diags_for(file.as_path()),
                     );
                     should_fail |= report.outcome().should_fail(config.strict);
                     json_files.push(report);
@@ -661,6 +673,7 @@ async fn async_main(raw_args: Vec<String>, runtime_mode: CliRuntimeMode) {
                         require_header,
                         complexity_threshold,
                         &lint_config.persona_step_allowlist,
+                        script_diags_for(file.as_path()),
                     );
                     total_findings += outcome.findings;
                     total_fixable += outcome.fixable;
