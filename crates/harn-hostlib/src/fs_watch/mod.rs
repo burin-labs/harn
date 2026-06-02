@@ -22,6 +22,7 @@ use crate::registry::{BuiltinRegistry, HostlibCapability, RegisteredBuiltin, Syn
 use crate::tools::args::{
     build_dict, dict_arg, optional_bool, optional_int, optional_string, str_value,
 };
+use crate::value_args::optional_string_list;
 
 const SUBSCRIBE_BUILTIN: &str = "hostlib_fs_watch_subscribe";
 const UNSUBSCRIBE_BUILTIN: &str = "hostlib_fs_watch_unsubscribe";
@@ -512,37 +513,6 @@ fn normalize_glob(glob: &str) -> String {
         glob
     } else {
         format!("**/{glob}")
-    }
-}
-
-fn optional_string_list(
-    builtin: &'static str,
-    dict: &BTreeMap<String, VmValue>,
-    key: &'static str,
-) -> Result<Option<Vec<String>>, HostlibError> {
-    let Some(value) = dict.get(key) else {
-        return Ok(None);
-    };
-    match value {
-        VmValue::Nil => Ok(None),
-        VmValue::List(items) => items
-            .iter()
-            .enumerate()
-            .map(|(idx, item)| match item {
-                VmValue::String(value) => Ok(value.to_string()),
-                other => Err(HostlibError::InvalidParameter {
-                    builtin,
-                    param: key,
-                    message: format!("item {idx} must be a string, got {}", other.type_name()),
-                }),
-            })
-            .collect::<Result<Vec<_>, _>>()
-            .map(Some),
-        other => Err(HostlibError::InvalidParameter {
-            builtin,
-            param: key,
-            message: format!("expected list of strings, got {}", other.type_name()),
-        }),
     }
 }
 

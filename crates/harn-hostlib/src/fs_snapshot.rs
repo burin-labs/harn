@@ -225,7 +225,7 @@ pub fn configure_session_byte_cap(session_id: &str, bytes: u64) -> u64 {
     let bundle = guard.entry(session_id.to_string()).or_default();
     let previous = bundle.byte_cap;
     bundle.byte_cap = bytes.max(1);
-    enforce_byte_cap(bundle, session_id);
+    enforce_byte_cap(bundle, session_id, None);
     previous
 }
 
@@ -313,12 +313,12 @@ pub fn snapshot(
             captured_paths.push(path.to_string_lossy().into_owned());
         }
     }
-    enforce_byte_cap(bundle, session_id);
+    enforce_byte_cap(bundle, session_id, Some(scope_id));
     let state = bundle
         .snapshots
         .iter()
         .find(|snap| snap.snapshot_id == scope_id)
-        .expect("snapshot just upserted");
+        .expect("snapshot just upserted is protected from byte-cap eviction");
     persist_manifest(state).map_err(|err| HostlibError::Backend {
         builtin: SNAPSHOT_BUILTIN,
         message: err,
@@ -488,7 +488,7 @@ pub(crate) fn auto_capture_for_write(builtin: &'static str, path: &Path) {
             );
         }
     }
-    enforce_byte_cap(bundle, &session_id);
+    enforce_byte_cap(bundle, &session_id, Some(&snapshot_id));
 }
 
 fn snapshot_builtin(args: &[VmValue]) -> Result<VmValue, HostlibError> {
@@ -770,6 +770,9 @@ fn atomic_write(path: &Path, bytes: &[u8]) -> Result<(), String> {
         Err(rename_err) => {
             let _ = stdfs::remove_file(path);
             stdfs::rename(&tmp, path).map_err(|retry| {
+                // Both renames failed; the temp file would otherwise linger
+                // and accumulate in the snapshot directory.
+                let _ = stdfs::remove_file(&tmp);
                 format!(
                     "rename {} to {}: {rename_err}; retry: {retry}",
                     tmp.display(),
@@ -780,9 +783,23 @@ fn atomic_write(path: &Path, bytes: &[u8]) -> Result<(), String> {
     }
 }
 
-fn enforce_byte_cap(bundle: &mut SessionSnapshots, session_id: &str) {
-    while bundle.byte_count > bundle.byte_cap && !bundle.snapshots.is_empty() {
-        let evicted = bundle.snapshots.remove(0);
+/// Evict snapshots oldest-first until the session is back under its byte
+/// cap. `protected` names the snapshot currently being written (if any);
+/// it is never evicted, even when it alone exceeds the cap — otherwise the
+/// caller would lose the very snapshot it just captured (and `snapshot`
+/// would panic re-fetching it). A snapshot larger than the whole cap is
+/// therefore retained: rollback for an in-flight write takes precedence
+/// over the soft budget.
+fn enforce_byte_cap(bundle: &mut SessionSnapshots, session_id: &str, protected: Option<&str>) {
+    while bundle.byte_count > bundle.byte_cap {
+        let Some(idx) = bundle
+            .snapshots
+            .iter()
+            .position(|snap| Some(snap.snapshot_id.as_str()) != protected)
+        else {
+            break;
+        };
+        let evicted = bundle.snapshots.remove(idx);
         bundle.byte_count = bundle.byte_count.saturating_sub(entry_byte_count(&evicted));
         tracing::info!(
             "fs_snapshot: evicting snapshot `{}` from session `{session_id}` (over byte cap {})",
@@ -1108,6 +1125,40 @@ mod tests {
             ids,
             vec![scope_b],
             "older snapshot must be evicted when the per-session byte cap is exceeded"
+        );
+    }
+
+    #[test]
+    fn snapshot_larger_than_cap_is_retained_not_evicted() {
+        // A single snapshot whose captured bytes exceed the whole cap must
+        // survive — evicting the snapshot we just took would lose rollback
+        // for the in-flight write (and previously panicked re-fetching it).
+        let dir = TempDir::new().unwrap();
+        let session = unique_session("snap-oversized");
+        let _session_guard = enter_session(&session);
+        configure_session_byte_cap(&session, 4);
+
+        let scope = unique_scope();
+        let file = dir.path().join("big.txt");
+        stdfs::write(&file, b"0123456789").unwrap();
+        let result = snapshot(
+            &session,
+            &scope,
+            &[file.to_string_lossy().into_owned()],
+            Some(dir.path()),
+        )
+        .unwrap();
+        assert_eq!(result.byte_count, 10);
+
+        let ids: Vec<String> = list_snapshots(&session)
+            .unwrap()
+            .into_iter()
+            .map(|summary| summary.snapshot_id)
+            .collect();
+        assert_eq!(
+            ids,
+            vec![scope],
+            "an oversized snapshot must be retained rather than evicting itself"
         );
     }
 

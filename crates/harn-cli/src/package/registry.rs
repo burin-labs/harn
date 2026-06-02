@@ -117,18 +117,7 @@ pub(crate) fn cache_root() -> Result<PathBuf, PackageError> {
 }
 
 pub(crate) fn sha256_hex(bytes: impl AsRef<[u8]>) -> String {
-    hex_bytes(Sha256::digest(bytes.as_ref()))
-}
-
-pub(crate) fn hex_bytes(bytes: impl AsRef<[u8]>) -> String {
-    const HEX: &[u8; 16] = b"0123456789abcdef";
-    let bytes = bytes.as_ref();
-    let mut out = String::with_capacity(bytes.len() * 2);
-    for &byte in bytes {
-        out.push(HEX[(byte >> 4) as usize] as char);
-        out.push(HEX[(byte & 0x0f) as usize] as char);
-    }
-    out
+    hex::encode(Sha256::digest(bytes.as_ref()))
 }
 
 pub(crate) fn git_cache_dir_in(
@@ -290,7 +279,7 @@ pub(crate) fn compute_content_hash(dir: &Path) -> Result<String, PackageError> {
         hasher.update([0]);
         hasher.update(sha256_hex(contents).as_bytes());
     }
-    Ok(format!("sha256:{}", hex_bytes(hasher.finalize())))
+    Ok(format!("sha256:{}", hex::encode(hasher.finalize())))
 }
 
 pub(crate) fn verify_content_hash_or_compute(
@@ -783,7 +772,7 @@ pub(crate) fn registry_package_matches(package: &RegistryPackage, query: &str) -
 pub(crate) fn latest_registry_version(
     package: &RegistryPackage,
 ) -> Option<&RegistryPackageVersion> {
-    package
+    let parsed: Vec<(Version, &RegistryPackageVersion)> = package
         .versions
         .iter()
         .filter(|version| !version.yanked)
@@ -792,8 +781,21 @@ pub(crate) fn latest_registry_version(
                 .ok()
                 .map(|semver| (semver, version))
         })
+        .collect();
+    // Match cargo/npm: a bare `harn add foo` (no constraint) resolves the
+    // highest *stable* release. Prereleases are only considered when the
+    // package has published nothing stable yet, so an `x.y.z-rc.1` tag never
+    // shadows a real release.
+    parsed
+        .iter()
+        .filter(|(semver, _)| semver.pre.is_empty())
         .max_by(|(left, _), (right, _)| left.cmp(right))
-        .map(|(_, version)| version)
+        .or_else(|| {
+            parsed
+                .iter()
+                .max_by(|(left, _), (right, _)| left.cmp(right))
+        })
+        .map(|(_, version)| *version)
 }
 
 impl PackageRegistryIndex {
@@ -2074,6 +2076,50 @@ abc123abc123abc123abc123abc123abc1234567\trefs/tags/v0.0.1\n";
     #[test]
     fn pick_ls_remote_commit_returns_none_on_empty_output() {
         assert_eq!(pick_ls_remote_commit(""), None);
+    }
+
+    fn registry_package_with_versions(versions: &[(&str, bool)]) -> RegistryPackage {
+        let entries: Vec<serde_json::Value> = versions
+            .iter()
+            .map(|(version, yanked)| {
+                serde_json::json!({
+                    "version": version,
+                    "git": "https://example.com/pkg.git",
+                    "yanked": yanked,
+                })
+            })
+            .collect();
+        serde_json::from_value(serde_json::json!({
+            "name": "@burin/pkg",
+            "repository": "https://example.com/pkg.git",
+            "version": entries,
+        }))
+        .expect("registry package fixture deserializes")
+    }
+
+    #[test]
+    fn latest_registry_version_prefers_stable_over_newer_prerelease() {
+        let package = registry_package_with_versions(&[
+            ("1.2.0", false),
+            ("2.0.0-rc.1", false),
+            ("1.3.0", false),
+        ]);
+        let latest = latest_registry_version(&package).expect("a version is selected");
+        assert_eq!(
+            latest.version, "1.3.0",
+            "a prerelease must not shadow the highest stable release"
+        );
+    }
+
+    #[test]
+    fn latest_registry_version_falls_back_to_prerelease_when_no_stable_exists() {
+        let package =
+            registry_package_with_versions(&[("0.1.0-alpha.1", false), ("0.1.0-alpha.2", false)]);
+        let latest = latest_registry_version(&package).expect("a version is selected");
+        assert_eq!(
+            latest.version, "0.1.0-alpha.2",
+            "packages with only prereleases still resolve to the highest prerelease"
+        );
     }
 
     #[cfg(unix)]
