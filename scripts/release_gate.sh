@@ -127,10 +127,10 @@ time_phase() {
 run_docs_audit() {
   time_phase "sync_language_spec" cargo run --quiet --bin harn -- run scripts/sync_language_spec.harn
   time_phase "markdownlint" npx markdownlint-cli2 "**/*.md"
-  if command -v mdbook >/dev/null 2>&1; then
-    time_phase "mdbook build" ./scripts/build_docs_site.sh
+  if command -v npm >/dev/null 2>&1; then
+    time_phase "docs site build" ./scripts/build_docs_site.sh
   else
-    echo "warning: mdbook not installed; skipping mdbook build"
+    echo "warning: npm (Node.js) not installed; skipping docs site build"
   fi
   time_phase "docs model refs" ./scripts/check_docs_model_refs.sh
   time_phase "docs snippets" ./scripts/check_docs_snippets.sh

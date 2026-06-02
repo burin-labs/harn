@@ -205,12 +205,13 @@ if command -v npm >/dev/null 2>&1; then
     echo "Building portal frontend..."
     npm run portal:build
   fi
-else
-  echo "warning: npm not found; skipping markdown, portal, tree-sitter, and VS Code extension dependencies"
-fi
 
-if ! command -v mdbook >/dev/null 2>&1; then
-  echo "warning: mdbook not found; docs builds will skip mdBook rendering"
+  if [[ -f website/package.json ]]; then
+    echo "Installing harnlang.com site dependencies..."
+    (cd website && npm install)
+  fi
+else
+  echo "warning: npm not found; skipping markdown, portal, tree-sitter, VS Code extension, and docs-site dependencies"
 fi
 
 echo "Running a quick workspace build check..."

@@ -57,7 +57,8 @@ broader `make test` gate before pushing.
 - `crates/harn-cli/portal/`: React/Vite persisted-run UI.
 - `conformance/tests/`: executable language/runtime spec.
 - `spec/HARN_SPEC.md`: canonical language spec.
-- `docs/src/`: mdBook sources.
+- `docs/src/`: Markdown docs (Diataxis IA), rendered by the `website/` site.
+- `website/`: Vite + React + Tailwind site for harnlang.com; builds to `docs/dist/`.
 - `tree-sitter-harn/`: tree-sitter grammar and tests.
 - `editors/vscode/`: VS Code extension.
 

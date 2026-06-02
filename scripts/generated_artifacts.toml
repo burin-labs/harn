@@ -57,7 +57,7 @@ exempt_checks = [
 
 [[artifact]]
 id = "highlight"
-description = "mdBook syntax-highlight keyword list, from the live lexer + stdlib builtin names."
+description = "Harn syntax-highlight keyword list, from the live lexer + stdlib builtin names. Consumed by the docs site highlighter."
 gen = "gen-highlight"
 check = "check-highlight"
 outputs = ["docs/theme/harn-keywords.js"]
