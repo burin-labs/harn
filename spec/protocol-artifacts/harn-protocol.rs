@@ -11,7 +11,7 @@
 #![allow(dead_code)]
 
 /// Harn release that generated this binding.
-pub const HARN_PROTOCOL_ARTIFACT_VERSION: &str = "0.8.61";
+pub const HARN_PROTOCOL_ARTIFACT_VERSION: &str = "0.8.62";
 
 /// Upstream ACP schema version Harn tracks.
 pub const ACP_SCHEMA_COMPATIBILITY: &str = "agentclientprotocol/agent-client-protocol schema v0.12.2";
