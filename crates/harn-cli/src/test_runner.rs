@@ -903,20 +903,44 @@ impl ResourceGate {
         let weight = weight.min(self.capacity).max(1);
         let mut state = self.state.lock().unwrap();
         loop {
-            let group_free = group.is_none_or(|g| !state.busy_groups.contains(g));
-            if state.available >= weight && group_free {
-                state.available -= weight;
-                if let Some(g) = group {
-                    state.busy_groups.insert(g.to_string());
-                }
-                return GateGuard {
-                    gate: self,
-                    weight,
-                    group: group.map(str::to_owned),
-                };
+            if let Some(guard) = self.try_grab_locked(&mut state, weight, group) {
+                return guard;
             }
             state = self.cond.wait(state).unwrap();
         }
+    }
+
+    /// Grab a permit if one is immediately available, holding the already-locked
+    /// state. Returns `None` without blocking when the pool is exhausted or the
+    /// group is busy. Shared by `acquire` (which retries) and `try_acquire`.
+    fn try_grab_locked<'a>(
+        &'a self,
+        state: &mut GateState,
+        weight: usize,
+        group: Option<&str>,
+    ) -> Option<GateGuard<'a>> {
+        let group_free = group.is_none_or(|g| !state.busy_groups.contains(g));
+        if state.available >= weight && group_free {
+            state.available -= weight;
+            if let Some(g) = group {
+                state.busy_groups.insert(g.to_string());
+            }
+            return Some(GateGuard {
+                gate: self,
+                weight,
+                group: group.map(str::to_owned),
+            });
+        }
+        None
+    }
+
+    /// Non-blocking variant of `acquire` used by tests to assert gate state
+    /// deterministically (in-process, no threads or wall-clock sleeps).
+    #[cfg(test)]
+    fn try_acquire(&self, weight: usize, group: Option<&str>) -> Option<GateGuard<'_>> {
+        let weight = weight.min(self.capacity).max(1);
+        let mut state = self.state.lock().unwrap();
+        self.try_grab_locked(&mut state, weight, group)
     }
 }
 
@@ -1097,7 +1121,6 @@ mod tests {
     use super::*;
 
     use std::sync::Arc;
-    use std::time::Duration;
 
     struct TempTestDir {
         inner: tempfile::TempDir,
@@ -1324,74 +1347,51 @@ pipeline test_cli_skills(task) {
 
     #[test]
     fn resource_gate_serializes_same_group() {
-        let gate = Arc::new(ResourceGate::new(4));
-        let trace = Arc::new(Mutex::new(Vec::<&'static str>::new()));
-
-        let g_a = {
-            let trace = Arc::clone(&trace);
-            let gate = Arc::clone(&gate);
-            thread::spawn(move || {
-                let _guard = gate.acquire(1, Some("login"));
-                trace.lock().unwrap().push("a-start");
-                thread::sleep(Duration::from_millis(50));
-                trace.lock().unwrap().push("a-end");
-            })
-        };
-        // Give thread A time to grab the lock first.
-        thread::sleep(Duration::from_millis(10));
-        let g_b = {
-            let trace = Arc::clone(&trace);
-            let gate = Arc::clone(&gate);
-            thread::spawn(move || {
-                let _guard = gate.acquire(1, Some("login"));
-                trace.lock().unwrap().push("b-start");
-                trace.lock().unwrap().push("b-end");
-            })
-        };
-        g_a.join().unwrap();
-        g_b.join().unwrap();
-
-        let trace = trace.lock().unwrap();
-        // B must not start until A ends.
-        let a_end = trace.iter().position(|t| *t == "a-end").unwrap();
-        let b_start = trace.iter().position(|t| *t == "b-start").unwrap();
-        assert!(a_end < b_start, "B started before A finished: {trace:?}");
+        // Deterministic, in-process: while one permit for a group is held, a
+        // second acquire for the SAME group cannot proceed; releasing frees it.
+        // (Previously this used two threads + `thread::sleep` to coax an
+        // ordering, which was both flaky and ~60ms of wall-clock per run.)
+        let gate = ResourceGate::new(4);
+        let g_a = gate.acquire(1, Some("login"));
+        assert!(
+            gate.try_acquire(1, Some("login")).is_none(),
+            "second acquire of a busy group must not proceed",
+        );
+        drop(g_a);
+        assert!(
+            gate.try_acquire(1, Some("login")).is_some(),
+            "group should be free once the holder releases",
+        );
     }
 
     #[test]
     fn resource_gate_allows_independent_groups_in_parallel() {
-        let gate = Arc::new(ResourceGate::new(4));
+        // Holding one group must never block an unrelated group, as long as
+        // permits remain. No threads needed — `try_acquire` proves it directly.
+        let gate = ResourceGate::new(4);
         let _guard_a = gate.acquire(1, Some("alpha"));
-        // Acquiring beta should not block — the other group is unrelated.
-        let acquired = std::sync::Mutex::new(false);
-        thread::scope(|s| {
-            s.spawn(|| {
-                let _ = gate.acquire(1, Some("beta"));
-                *acquired.lock().unwrap() = true;
-            });
-        });
-        assert!(*acquired.lock().unwrap());
+        assert!(
+            gate.try_acquire(1, Some("beta")).is_some(),
+            "an unrelated group must acquire without blocking",
+        );
     }
 
     #[test]
     fn resource_gate_caps_heavy_weight_at_capacity() {
         // A test that asks for more than the pool size must still be
-        // schedulable rather than deadlocking.
-        let gate = Arc::new(ResourceGate::new(2));
-        let _g = gate.acquire(99, None);
-        // Available is now 0; another single-weight task must still wait.
-        let started = Arc::new(Mutex::new(false));
-        let inner = Arc::clone(&started);
-        let gate2 = Arc::clone(&gate);
-        let handle = thread::spawn(move || {
-            let _guard = gate2.acquire(1, None);
-            *inner.lock().unwrap() = true;
-        });
-        thread::sleep(Duration::from_millis(20));
-        assert!(!*started.lock().unwrap(), "should still be waiting");
-        drop(_g);
-        handle.join().unwrap();
-        assert!(*started.lock().unwrap());
+        // schedulable (weight is capped to capacity) rather than deadlocking,
+        // and while it holds the whole pool no other task can acquire.
+        let gate = ResourceGate::new(2);
+        let g = gate.acquire(99, None);
+        assert!(
+            gate.try_acquire(1, None).is_none(),
+            "pool is fully consumed; a single-weight task must wait",
+        );
+        drop(g);
+        assert!(
+            gate.try_acquire(1, None).is_some(),
+            "permit becomes available once the heavy holder releases",
+        );
     }
 
     #[tokio::test]

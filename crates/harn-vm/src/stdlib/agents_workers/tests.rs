@@ -23,11 +23,15 @@ fn vm_dict(pairs: Vec<(&str, VmValue)>) -> VmValue {
 
 #[test]
 fn worker_snapshot_round_trip_preserves_resume_fields() {
+    // Use an explicit per-test snapshot path inside a unique temp dir instead of
+    // routing through the process-global `HARN_WORKER_STATE_DIR` env var. Mutating
+    // that var raced with any other test in this binary that reads it in parallel;
+    // `persist_worker_state_snapshot` writes `state.snapshot_path` directly and
+    // `load_worker_state_snapshot` accepts a full path, so the env var is unneeded.
     let dir = std::env::temp_dir().join(format!("harn-worker-test-{}", uuid::Uuid::now_v7()));
     std::fs::create_dir_all(&dir).unwrap();
-    unsafe { std::env::set_var("HARN_WORKER_STATE_DIR", &dir) };
 
-    let snapshot_path = worker_snapshot_path("worker_test");
+    let snapshot_path = dir.join("worker_test.json").to_string_lossy().into_owned();
     let state = WorkerState {
         id: "worker_test".to_string(),
         name: "worker".to_string(),
@@ -163,7 +167,6 @@ fn worker_snapshot_round_trip_preserves_resume_fields() {
     assert_eq!(loaded.audit.mutation_scope, "apply_worktree");
 
     let _ = std::fs::remove_dir_all(&dir);
-    unsafe { std::env::remove_var("HARN_WORKER_STATE_DIR") };
 }
 
 #[test]

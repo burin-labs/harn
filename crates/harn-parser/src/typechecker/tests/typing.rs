@@ -1422,7 +1422,7 @@ fn test_assignment_type_check() {
 
 #[test]
 fn test_type_mismatch_render_snapshot_with_coercion_help() {
-    std::env::set_var("NO_COLOR", "1");
+    crate::diagnostic::set_color_override(Some(false));
     let source = r"pipeline t(task) {
   let label: string = 42
 }";
@@ -1448,7 +1448,7 @@ fn test_type_mismatch_render_snapshot_with_coercion_help() {
 
 #[test]
 fn test_type_mismatch_render_snapshot_with_nested_note() {
-    std::env::set_var("NO_COLOR", "1");
+    crate::diagnostic::set_color_override(Some(false));
     let source = r"pipeline t(task) {
   let item: {name: string, count: int} = {name: 1, count: 2}
 }";
