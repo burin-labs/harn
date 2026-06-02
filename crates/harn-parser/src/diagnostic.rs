@@ -546,7 +546,26 @@ fn style_fragment(text: &str, color: Color, bold: bool) -> String {
     paint.to_string()
 }
 
+thread_local! {
+    /// Per-thread override for color output. When `Some`, it wins over the
+    /// `NO_COLOR` env var and TTY detection. This lets tests force colors off
+    /// deterministically without mutating the process-global `NO_COLOR` env
+    /// var, which races across parallel tests (each test runs on its own
+    /// thread, so the override is naturally isolated).
+    static COLOR_OVERRIDE: std::cell::Cell<Option<bool>> = const { std::cell::Cell::new(None) };
+}
+
+/// Force color output on (`Some(true)`), off (`Some(false)`), or restore the
+/// default env/TTY behavior (`None`) for the current thread only.
+#[cfg(test)]
+pub(crate) fn set_color_override(force: Option<bool>) {
+    COLOR_OVERRIDE.with(|cell| cell.set(force));
+}
+
 fn colors_enabled() -> bool {
+    if let Some(forced) = COLOR_OVERRIDE.with(std::cell::Cell::get) {
+        return forced;
+    }
     std::env::var_os("NO_COLOR").is_none() && std::io::stderr().is_terminal()
 }
 
@@ -602,9 +621,11 @@ mod tests {
     use super::*;
 
     /// Ensure ANSI colors are off so plain-text assertions work regardless
-    /// of whether the test runner's stderr is a TTY.
+    /// of whether the test runner's stderr is a TTY. Uses a thread-local
+    /// override rather than the process-global `NO_COLOR` env var so it can't
+    /// race with color-sensitive assertions in parallel tests.
     fn disable_colors() {
-        std::env::set_var("NO_COLOR", "1");
+        set_color_override(Some(false));
     }
 
     #[test]
