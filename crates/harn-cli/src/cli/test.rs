@@ -32,6 +32,18 @@ pub(crate) struct TestArgs {
     /// Per-test timeout in milliseconds.
     #[arg(long, default_value_t = 30_000)]
     pub timeout: u64,
+    /// Fail a passing user test whose total wall-clock time exceeds this
+    /// many milliseconds. Also honored via HARN_TEST_MAX_MS.
+    #[arg(long = "max-test-ms", value_name = "MS", env = "HARN_TEST_MAX_MS")]
+    pub max_test_ms: Option<u64>,
+    /// Fail a passing user test whose test-body execution phase exceeds this
+    /// many milliseconds. Also honored via HARN_TEST_MAX_EXECUTE_MS.
+    #[arg(
+        long = "max-execute-ms",
+        value_name = "MS",
+        env = "HARN_TEST_MAX_EXECUTE_MS"
+    )]
+    pub max_execute_ms: Option<u64>,
     /// Run user tests concurrently where supported.
     #[arg(long)]
     pub parallel: bool,

@@ -38,6 +38,8 @@ impl UserTestReportConfig<'_> {
 pub(crate) struct UserTestRunArgs<'a> {
     pub filter: Option<&'a str>,
     pub timeout_ms: u64,
+    pub max_test_ms: Option<u64>,
+    pub max_execute_ms: Option<u64>,
     pub parallel: bool,
     pub jobs: Option<usize>,
     pub verbose: bool,
@@ -1792,6 +1794,8 @@ async fn run_user_tests_once(path: &Path, args: UserTestRunArgs<'_>) -> test_run
     let options = test_runner::RunOptions {
         filter: args.filter.map(str::to_owned),
         timeout_ms: args.timeout_ms,
+        max_test_ms: args.max_test_ms,
+        max_execute_ms: args.max_execute_ms,
         parallel: args.parallel,
         jobs: args.jobs,
         cli_skill_dirs: args.cli_skill_dirs.to_vec(),
