@@ -528,7 +528,7 @@ pipeline default(task) {
 
 Drop `dry_run` to actually rewrite the files; pair the call with a
 `session_id` for full staged-fs atomicity across the rename plus any
-sibling writes. Supported languages on the first batch: Rust,
+sibling writes. Supported languages on the first batch: Harn, Rust,
 TypeScript/TSX, JavaScript/JSX, Python, Swift, Go.
 
 For the full result shape (`touched_files[*].edits[*]` with byte and

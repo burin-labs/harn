@@ -84,9 +84,8 @@ conformance fixtures.
 
 ## Gotchas
 
-- There is **no Harn tree-sitter grammar yet**, so `.harn` source can't be
-  scanned structurally — rules target TS/JS/Rust/Go/Python/etc. (tracked in
-  #2888).
+- Harn source is supported: pass `--lang harn`, set `language = "harn"`, or let
+  `.harn` paths resolve from their extension.
 - `rules_apply` is a gated deterministic tool: call
   `hostlib_enable("tools:deterministic")` before it (even for a dry run).
 - Format every rule run / fixture with both `cargo fmt` and `harn fmt`.

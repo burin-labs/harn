@@ -18,8 +18,8 @@
 //! ## Languages
 //!
 //! [`language::Language`] covers the general-purpose languages
-//! (TypeScript/TSX, JavaScript/JSX, Python, Go, Rust, Java, C, C++, C#,
-//! Ruby, Kotlin, PHP, Scala, Bash, Swift, Zig, Elixir, Lua, Haskell, R)
+//! (Harn, TypeScript/TSX, JavaScript/JSX, Python, Go, Rust, Java, C, C++,
+//! C#, Ruby, Kotlin, PHP, Scala, Bash, Swift, Zig, Elixir, Lua, Haskell, R)
 //! plus data/markup/config grammars (JSON, YAML, TOML, CSS, HTML, SQL,
 //! Markdown). The latter support the query-driven edit primitives but
 //! carry no symbol-graph projection — see

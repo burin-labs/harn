@@ -35,6 +35,7 @@ use tree_sitter::Language as TsLanguage;
 #[allow(missing_docs)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Language {
+    Harn,
     TypeScript,
     Tsx,
     JavaScript,
@@ -98,6 +99,7 @@ impl Language {
     /// Canonical wire name.
     pub fn name(self) -> &'static str {
         match self {
+            Language::Harn => "harn",
             Language::TypeScript => "typescript",
             Language::Tsx => "tsx",
             Language::JavaScript => "javascript",
@@ -142,6 +144,9 @@ impl Language {
     /// Cheap when present; the underlying `LANGUAGE` constants are static.
     pub fn ts_language(self) -> Option<TsLanguage> {
         Some(match self {
+            #[cfg(feature = "grammar-harn")]
+            Language::Harn => tree_sitter_harn::LANGUAGE.into(),
+
             #[cfg(feature = "grammar-web")]
             Language::TypeScript => tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into(),
             #[cfg(feature = "grammar-web")]
@@ -220,6 +225,7 @@ impl Language {
     pub fn from_name(name: &str) -> Option<Self> {
         let normalized = name.trim().to_ascii_lowercase();
         Some(match normalized.as_str() {
+            "harn" => Language::Harn,
             "typescript" | "ts" => Language::TypeScript,
             "tsx" => Language::Tsx,
             "javascript" | "js" => Language::JavaScript,
@@ -257,6 +263,7 @@ impl Language {
     pub fn from_extension(ext: &str) -> Option<Self> {
         let normalized = ext.trim_start_matches('.').to_ascii_lowercase();
         Some(match normalized.as_str() {
+            "harn" => Language::Harn,
             "ts" => Language::TypeScript,
             "tsx" => Language::Tsx,
             "js" | "mjs" | "cjs" => Language::JavaScript,
@@ -305,6 +312,7 @@ impl Language {
     /// extension [`Language::from_extension`] accepts.
     pub fn primary_extension(self) -> &'static str {
         match self {
+            Language::Harn => "harn",
             Language::TypeScript => "ts",
             Language::Tsx => "tsx",
             Language::JavaScript => "js",
@@ -346,6 +354,7 @@ impl Language {
     /// substrings. `None` means the language has no rename projection yet.
     pub fn rename_identifier_kinds(self) -> Option<&'static [&'static str]> {
         Some(match self {
+            Language::Harn => &["identifier"],
             Language::Rust => &[
                 "identifier",
                 "type_identifier",
@@ -418,6 +427,7 @@ impl Language {
     /// Every language we ship support for. Useful for tests + introspection.
     pub fn all() -> &'static [Language] {
         &[
+            Language::Harn,
             Language::TypeScript,
             Language::Tsx,
             Language::JavaScript,
@@ -473,6 +483,7 @@ mod tests {
     #[test]
     fn extension_detection_round_trips_canonical_extensions() {
         let cases: &[(&str, Language)] = &[
+            ("harn", Language::Harn),
             ("ts", Language::TypeScript),
             ("tsx", Language::Tsx),
             ("js", Language::JavaScript),

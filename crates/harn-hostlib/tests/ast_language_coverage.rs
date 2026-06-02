@@ -238,6 +238,8 @@ fn capabilities_matrix_covers_every_language_and_gates_rename() {
     };
     assert!(!b(field(&find("json"), "rename_symbol")));
     assert!(!b(field(&find("json"), "symbols")));
+    assert!(b(field(&find("harn"), "rename_symbol")));
+    assert!(b(field(&find("harn"), "symbols")));
     assert!(b(field(&find("rust"), "rename_symbol")));
     assert!(b(field(&find("rust"), "symbols")));
 }

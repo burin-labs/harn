@@ -1,0 +1,17 @@
+[
+  {"name":"Task", "kind":"struct", "signature":"struct Task", "start_row":0, "end_row":3, "children":[]},
+  {"name":"Runner", "kind":"interface", "signature":"interface Runner", "start_row":5, "end_row":7, "children":
+    [
+      {"name":"run", "kind":"method", "signature":"fn run(task: Task)", "start_row":6, "end_row":6, "children":[]}
+    ]
+  },
+  {"name":"_execute", "kind":"function", "signature":"fn _execute(runner: Runner, task: Task)", "start_row":9, "end_row":11, "children":[]},
+  {"name":"Task", "kind":"module", "signature":"impl Task", "start_row":13, "end_row":17, "children":
+    [
+      {"name":"summary", "kind":"method", "signature":"fn summary(title: string)", "start_row":14, "end_row":16, "children":[]}
+    ]
+  },
+  {"name":"normalize", "kind":"function", "signature":"fn normalize(task)", "start_row":19, "end_row":21, "children":[]},
+  {"name":"review", "kind":"function", "signature":"pipeline review(task)", "start_row":23, "end_row":26, "children":[]},
+  {"name":"_notify", "kind":"function", "signature":"tool _notify(message)", "start_row":28, "end_row":31, "children":[]}
+]

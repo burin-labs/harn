@@ -40,9 +40,9 @@ metadata_file="$tmp/cargo-metadata.json"
 printf '%s\n' "$metadata" >"$metadata_file"
 
 # Verify the candidate workspace as a coherent publish set instead of
-# resolving intra-Harn dependencies to whatever versions are already on
-# crates.io. That catches package-only failures without needing a prior
-# bootstrap publish for newly split crates.
+# resolving workspace-local dependencies to whatever versions are already
+# on crates.io. That catches package-only failures without needing a
+# prior bootstrap publish for newly split crates.
 local_harn_patches=()
 while IFS=$'\t' read -r crate manifest_path; do
   crate_dir="$(cd "$(dirname "$manifest_path")" && pwd)"
@@ -56,11 +56,7 @@ import sys
 metadata = json.loads(pathlib.Path(sys.argv[1]).read_text())
 members = set(metadata["workspace_members"])
 for package in sorted(metadata["packages"], key=lambda p: p["name"]):
-    if (
-        package["id"] in members
-        and package["name"].startswith("harn-")
-        and package.get("publish") != []
-    ):
+    if package["id"] in members and package.get("publish") != []:
         print(f'{package["name"]}\t{package["manifest_path"]}')
 PY
 )

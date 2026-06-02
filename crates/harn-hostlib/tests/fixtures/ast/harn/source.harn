@@ -1,0 +1,32 @@
+pub struct Task {
+  id: string
+  title: string
+}
+
+interface Runner {
+  fn run(task: Task) -> dict
+}
+
+fn _execute(runner: Runner, task: Task) {
+  return runner.run(task)
+}
+
+impl Task {
+  fn summary(title: string) -> string {
+    return title
+  }
+}
+
+fn normalize(task) {
+  return {id: task.id, title: task.title}
+}
+
+pipeline review(task) {
+  let _normalized = normalize(task)
+  return task?.title ?? "untitled"
+}
+
+tool _notify(message) {
+  description "Send a notification"
+  return {ok: true, message: message}
+}
