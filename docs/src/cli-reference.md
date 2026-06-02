@@ -692,6 +692,9 @@ HarnDoc on public functions, etc.).
 same pass and applies template-specific drift-prevention rules
 (`template-provider-identity-branch`,
 `template-variant-explosion` — see `docs/src/prompt-templating.md`).
+Project lint rules are discovered from `[rules]` in `harn.toml`: declarative
+`language = "harn"` TOML rules and `*.lint.harn` script rules use `ruleDirs`,
+while trusted native dynamic libraries use `nativeRuleDirs`.
 
 ```bash
 harn lint main.harn

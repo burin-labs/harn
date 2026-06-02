@@ -219,6 +219,34 @@ engine, but no filesystem / network / process access. A buggy rule **fails
 safe**: a load error or a runtime throw becomes a diagnostic attributed to the
 rule, never a linter crash.
 
+## How do I load a native lint rule library?
+
+Native lint rules are the trusted-code escape hatch for rare cases that need
+compiled Rust. Build a dynamic library that exports
+`harn_native_lint_register_v1`, then point `harn.toml` at the directory that
+contains the library:
+
+```toml
+[rules]
+nativeRuleDirs = ["native-rules"]
+```
+
+```console
+harn lint src             # loads native-rules/*.dylib|*.so|*.dll for this platform
+harn lint --fix src       # applies native rule fixes through the normal lint path
+```
+
+The native ABI lives in `harn_lint::native`. A library registers one or more
+`HarnNativeRuleDescriptor` values and emits `HarnNativeDiagnostic` values with
+the same message, severity, span, suggestion, and fix fields used by built-in
+and declarative lint rules. Diagnostics carry the registered rule id, so
+`[lint] disabled = ["your-rule-id"]` and `[lint.severity]` overrides work the
+same way.
+
+Loading native code is an explicit trust decision. Harn only loads libraries
+from configured `nativeRuleDirs`; it does not search environment variables,
+global plugin paths, or package caches.
+
 ## See also
 
 - [Structured refactorings cookbook](./structured-refactorings.md) — the

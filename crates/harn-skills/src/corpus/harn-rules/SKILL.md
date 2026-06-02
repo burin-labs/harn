@@ -77,7 +77,10 @@ conformance fixtures.
 - `harn lint <paths>` — runs project lint rules. Declarative `language = "harn"`
   rules and imperative `*.lint.harn` modules (a `pub fn lint(source) -> list` of
   `{message, severity?, line?, column?}` findings) in `[rules] ruleDirs` merge
-  into the normal output. `.harn` rules run read-only and fail safe.
+  into the normal output. `.harn` rules run read-only and fail safe. Trusted
+  native Rust rule libraries can also be loaded from `[rules] nativeRuleDirs`;
+  they export `harn_native_lint_register_v1` and emit the same diagnostic/fix
+  shape as built-ins.
 
 ## From `.harn` (`std/rules`)
 

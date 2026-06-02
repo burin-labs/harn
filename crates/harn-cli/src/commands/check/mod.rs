@@ -36,6 +36,7 @@ pub(crate) use fmt::{fmt_targets, fmt_targets_json, FmtMode, FMT_SCHEMA_VERSION}
 pub(crate) use host_capabilities::load_host_capabilities;
 pub(crate) use lint::{
     lint_file_inner, lint_fix_file, path_is_stdlib_source, project_engine_rule_sources,
+    project_native_rule_paths,
 };
 pub(crate) use lint_report::{lint_file_report, LintFileReport, LintReport, LINT_SCHEMA_VERSION};
 pub(crate) use preflight::{collect_preflight_diagnostics, is_preflight_allowed};

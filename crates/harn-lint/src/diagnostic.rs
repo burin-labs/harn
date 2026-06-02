@@ -3,6 +3,7 @@
 //! surface is easy to locate and audit.
 
 use std::borrow::Cow;
+use std::path::PathBuf;
 
 use harn_lexer::{FixEdit, Span};
 use harn_parser::{DiagnosticCode as Code, Repair};
@@ -74,13 +75,17 @@ pub struct LintOptions<'a> {
     /// block on every `pub fn`. Auto-enabled by `harn lint` for files
     /// under `crates/harn-stdlib/src/stdlib/`.
     pub require_stdlib_metadata: bool,
-    /// TOML sources of declarative rule-engine rules to run as lint rules
-    /// (#2849), loaded from the project's `[rules] ruleDirs`. Each is compiled
-    /// and wrapped as a `Rule`; an invalid one is skipped, not fatal.
+    /// TOML sources of declarative rule-engine rules to run as lint rules,
+    /// loaded from the project's `[rules] ruleDirs`. Each is compiled and
+    /// wrapped as a `Rule`; an invalid one is skipped, not fatal.
     pub engine_rules: &'a [String],
-    /// Per-rule severity overrides (#2851): a rule id → the severity to report
-    /// its diagnostics at, applied after disable-filtering. Lets a project
-    /// promote a rule to `error` or demote one to `info` via `[lint]`. Owned
-    /// (not `&[..]`) because a `HashMap` reference has no const empty default.
+    /// Trusted native rule libraries to load for this lint run. These are
+    /// discovered only from explicit `[rules] nativeRuleDirs` entries in project
+    /// config; loading native code is an opt-in capability decision.
+    pub native_rule_paths: &'a [PathBuf],
+    /// Per-rule severity overrides: a rule id → the severity to report its
+    /// diagnostics at, applied after disable-filtering. Lets a project promote
+    /// a rule to `error` or demote one to `info` via `[lint]`. Owned (not
+    /// `&[..]`) because a `HashMap` reference has no const empty default.
     pub severity_overrides: std::collections::HashMap<String, LintSeverity>,
 }

@@ -1,6 +1,6 @@
-//! Engine rules run as lint rules (#2849): a declarative `harn-rules` rule
-//! supplied via `LintOptions::engine_rules` shows up in lint output like a
-//! built-in, with its fix and `disable_rules` filtering.
+//! Engine rules run as lint rules: a declarative `harn-rules` rule supplied via
+//! `LintOptions::engine_rules` shows up in lint output like a built-in, with
+//! its fix and `disable_rules` filtering.
 
 use super::*;
 
@@ -25,7 +25,7 @@ fn lint_with_engine_rules(
 #[test]
 fn severity_override_remaps_a_rule() {
     // `no-foo` defaults to `warning`; a project override promotes it to `error`
-    // (#2851). Applied after disable-filtering, by rule id.
+    // after disable-filtering, by rule id.
     use std::collections::HashMap;
     let rules = vec![NO_FOO.to_string()];
     let mut overrides: HashMap<String, crate::diagnostic::LintSeverity> = HashMap::new();
