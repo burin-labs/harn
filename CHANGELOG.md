@@ -8,6 +8,17 @@ highlights live in [CHANGELOG-pre-0.6.md](CHANGELOG-pre-0.6.md).
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.8.65
+
+### Fixed
+
+- Fixed the built-in `destructure-defaults` codemod path so
+  `harn codemod --rule-pack std/rules/destructure-defaults` folds Harn
+  statement runs, including aliased bindings.
+- **Loop guard break/continue scope preservation.** Harn no longer loses
+  same-loop `let` bindings after an `if { break }` or `if { continue }` guard,
+  preventing spurious undefined-variable runtime errors.
+
 ## v0.8.64
 
 ### Added
