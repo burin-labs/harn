@@ -318,10 +318,23 @@ fn fold_run(args: &[VmValue]) -> Result<VmValue, HostlibError> {
 
     let mut entries = Vec::new();
     for file in &files {
-        let folded =
+        let raw_folded =
             harn_rules::fold::fold_destructure_defaults(&file.source, file.language.name())
                 .map_err(|e| backend(FOLD, &e))?;
+        let raw_changed = raw_folded != file.source;
+        let formatted = raw_changed && file.language == Language::Harn;
+        let folded = if formatted {
+            match harn_fmt::format_source(&raw_folded) {
+                Ok(canonical) => canonical,
+                Err(_) => raw_folded,
+            }
+        } else {
+            raw_folded
+        };
         let changed = folded != file.source;
+        let idempotent = harn_rules::fold::fold_destructure_defaults(&folded, file.language.name())
+            .map(|again| again == folded)
+            .unwrap_or(false);
         let applied = !dry_run && changed;
         if applied {
             std::fs::write(&file.path, &folded).map_err(|e| HostlibError::Backend {
@@ -333,6 +346,9 @@ fn fold_run(args: &[VmValue]) -> Result<VmValue, HostlibError> {
             ("path", str_vm(file.path.display().to_string())),
             ("changed", VmValue::Bool(changed)),
             ("applied", VmValue::Bool(applied)),
+            ("idempotent", VmValue::Bool(idempotent)),
+            ("formatted", VmValue::Bool(formatted)),
+            ("safety", str_vm("BehaviorPreserving")),
             ("before", str_vm(&file.source)),
             ("preview", str_vm(folded)),
         ]));

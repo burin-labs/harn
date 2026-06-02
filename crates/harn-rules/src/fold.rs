@@ -16,9 +16,8 @@
 //! `let { x = d } = nil` throws, whereas `cfg?.x ?? d` yields `d`. Coalescing
 //! the source to `{}` first reproduces the `?.`/`??` semantics exactly.
 //!
-//! Only the **non-alias** case (binding name == property name) is folded, via
-//! the engine's metavar unification (`let $K = $X?.$K ?? $D`); aliased sites
-//! (`let t = cfg?.timeout ?? d`) are left untouched. Only consecutive lines
+//! Aliased sites (`let t = cfg?.timeout ?? d`) are folded with the Harn dict
+//! pattern alias form (`{ timeout: t = d }`). Only consecutive statements
 //! sharing one source are merged; a blank line, comment, or other statement
 //! between two `let`s breaks the run.
 
@@ -26,36 +25,47 @@ use crate::engine::{CompiledRule, RuleMatch};
 use crate::error::RulesError;
 use crate::model::Rule;
 
-/// The matcher for a single migratable site. `$K` is unified (binding name ==
-/// property name), so aliased sites do not match.
+/// The matcher for a single migratable site.
 fn site_rule(language: &str) -> CompiledRule {
     let toml = format!(
-        "id = \"destructure-fold\"\nlanguage = \"{language}\"\n[rule]\npattern = \"let $K = $X?.$K ?? $D\"\n"
+        "id = \"destructure-fold\"\nlanguage = \"{language}\"\n[rule]\npattern = \"let $N:identifier = $X?.$K:identifier ?? $D\"\n"
     );
     let rule = Rule::from_toml_str(&toml).expect("internal fold rule parses");
     CompiledRule::compile(&rule).expect("internal fold rule compiles")
 }
 
-/// One captured site: the binding/property key, default, and source expression.
+/// One captured site: the binding name, property key, default, and source.
 struct Site {
+    binding: String,
     key: String,
     default: String,
     source: String,
     start_byte: usize,
     end_byte: usize,
     start_row: usize,
+    end_row: usize,
 }
 
 impl Site {
     fn from_match(m: &RuleMatch) -> Option<Self> {
         Some(Self {
+            binding: m.bindings.get("N")?.text.clone(),
             key: m.bindings.get("K")?.text.clone(),
             default: m.bindings.get("D")?.text.clone(),
             source: m.bindings.get("X")?.text.clone(),
             start_byte: m.span.start_byte,
             end_byte: m.span.end_byte,
             start_row: m.span.start_row,
+            end_row: m.span.end_row,
         })
+    }
+
+    fn field(&self) -> String {
+        if self.binding == self.key {
+            format!("{} = {}", self.key, self.default)
+        } else {
+            format!("{}: {} = {}", self.key, self.binding, self.default)
+        }
     }
 }
 
@@ -70,13 +80,15 @@ pub fn fold_destructure_defaults(source: &str, language: &str) -> Result<String,
     let mut sites: Vec<Site> = matches.iter().filter_map(Site::from_match).collect();
     sites.sort_by_key(|s| s.start_byte);
 
-    // Group consecutive sites: same source, and on the immediately next line.
+    // Group consecutive sites: same source, and starting on the line after the
+    // previous statement ends. This supports wrapped defaults/source
+    // expressions without merging across blank lines or comments.
     let mut groups: Vec<Vec<Site>> = Vec::new();
     for site in sites {
         match groups.last_mut() {
             Some(group)
                 if group.last().is_some_and(|prev| {
-                    prev.source == site.source && site.start_row == prev.start_row + 1
+                    prev.source == site.source && site.start_row == prev.end_row + 1
                 }) =>
             {
                 group.push(site);
@@ -90,12 +102,9 @@ pub fn fold_destructure_defaults(source: &str, language: &str) -> Result<String,
     let mut edits: Vec<(usize, usize, String)> = groups
         .into_iter()
         .filter(|group| group.len() >= 2)
+        .filter(|group| has_unique_keys(group))
         .map(|group| {
-            let fields = group
-                .iter()
-                .map(|s| format!("{} = {}", s.key, s.default))
-                .collect::<Vec<_>>()
-                .join(", ");
+            let fields = group.iter().map(Site::field).collect::<Vec<_>>().join(", ");
             let replacement = format!("let {{ {fields} }} = {} ?? {{}}", group[0].source);
             (
                 group[0].start_byte,
@@ -111,6 +120,11 @@ pub fn fold_destructure_defaults(source: &str, language: &str) -> Result<String,
         out.replace_range(start..end, &replacement);
     }
     Ok(out)
+}
+
+fn has_unique_keys(group: &[Site]) -> bool {
+    let mut seen = std::collections::BTreeSet::new();
+    group.iter().all(|site| seen.insert(&site.key))
 }
 
 #[cfg(test)]
@@ -163,9 +177,28 @@ mod tests {
     }
 
     #[test]
-    fn aliased_site_is_left_untouched() {
-        // Binding `t` != property `timeout`, so `$K` cannot unify → no match.
-        let src = "fn f() {\n  let t = cfg?.timeout ?? 30\n  let r = cfg?.retries ?? 3\n}\n";
+    fn folds_aliased_sites() {
+        let src = "fn f() {\n  let t = cfg?.timeout ?? 30\n  let retries = cfg?.retries ?? 3\n  let label = cfg?.name ?? \"anon\"\n}\n";
+        let out = fold(src);
+        assert_eq!(
+            out,
+            "fn f() {\n  let { timeout: t = 30, retries = 3, name: label = \"anon\" } = cfg ?? {}\n}\n"
+        );
+    }
+
+    #[test]
+    fn folds_after_a_wrapped_previous_site() {
+        let src = "fn f() {\n  let path = parse({name: \"x\"}, argv).ok?.path\n    ?? \"\"\n  let verbose = parse({name: \"x\"}, argv).ok?.verbose ?? false\n}\n";
+        let out = fold(src);
+        assert_eq!(
+            out,
+            "fn f() {\n  let { path = \"\", verbose = false } = parse({name: \"x\"}, argv).ok ?? {}\n}\n"
+        );
+    }
+
+    #[test]
+    fn leaves_duplicate_property_keys_untouched() {
+        let src = "fn f() {\n  let first = cfg?.value ?? 1\n  let second = cfg?.value ?? 2\n}\n";
         assert_eq!(fold(src), src);
     }
 }

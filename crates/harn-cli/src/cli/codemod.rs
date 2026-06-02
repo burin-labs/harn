@@ -13,8 +13,8 @@ pub(crate) struct CodemodArgs {
     /// Run a codemod rule from a TOML file (must declare a `fix`).
     #[arg(long = "rule", value_name = "FILE")]
     pub rule: Option<String>,
-    /// Run every `*.toml` rule in a directory (a rule pack).
-    #[arg(long = "rule-pack", value_name = "DIR", conflicts_with = "rule")]
+    /// Run every `*.toml` rule in a directory, installed package, or built-in pack.
+    #[arg(long = "rule-pack", value_name = "PACK", conflicts_with = "rule")]
     pub rule_pack: Option<String>,
     /// Write the fixes to disk. Without this, codemod is a dry-run preview.
     #[arg(long)]
