@@ -71,6 +71,55 @@ fn inline_pattern_search_reports_matches_and_skips_other_languages() {
 }
 
 #[test]
+fn inline_pattern_search_supports_harn_sources() {
+    let dir = fixture_dir("harn");
+    write(
+        &dir,
+        "rule_targets.harn",
+        "fn main() {\n  let timeout = cfg?.timeout ?? 30\n  let retries = opts?.retries ?? 3\n}\n",
+    );
+    write(&dir, "other.ts", "const timeout = cfg?.timeout ?? 30;\n");
+
+    let out = scan(&[
+        "$X?.$K ?? $D",
+        dir.to_str().unwrap(),
+        "--lang",
+        "harn",
+        "--json",
+    ]);
+    assert_eq!(out.code, 0, "stderr={}", out.stderr);
+
+    let json: serde_json::Value = serde_json::from_str(&out.stdout).expect("valid json envelope");
+    assert_eq!(json["mode"], "search");
+    assert_eq!(json["summary"]["total"], 2);
+    assert_eq!(json["summary"]["files"], 1);
+    let captures = &json["results"][0]["matches"][0]["captures"];
+    assert_eq!(captures["X"], "cfg");
+    assert_eq!(captures["K"], "timeout");
+    assert_eq!(captures["D"], "30");
+
+    write(
+        &dir,
+        "harn_default_rule.toml",
+        "id = \"harn-defaults\"\nlanguage = \"harn\"\n[rule]\npattern = \"$X?.$K ?? $D\"\n",
+    );
+    let rule_out = scan(&[
+        "--rule",
+        dir.join("harn_default_rule.toml").to_str().unwrap(),
+        dir.to_str().unwrap(),
+        "--json",
+    ]);
+    assert_eq!(rule_out.code, 0, "stderr={}", rule_out.stderr);
+    let rule_json: serde_json::Value =
+        serde_json::from_str(&rule_out.stdout).expect("valid rule json envelope");
+    assert_eq!(rule_json["mode"], "search");
+    assert_eq!(rule_json["summary"]["total"], 2);
+    assert_eq!(rule_json["summary"]["files"], 1);
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn report_only_emits_per_file_counts() {
     let dir = fixture_dir("report");
     write(&dir, "a.ts", "let p = a?.x ?? 1;\nlet q = b?.y ?? 2;\n");

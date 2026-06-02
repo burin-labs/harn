@@ -45,6 +45,7 @@ ast = [
 # fallback). `grammars-all` is the umbrella the `ast` feature turns on for
 # parity; pick individual families instead for a trimmed grammar set.
 grammars-all = [
+    "grammar-harn",
     "grammar-web",
     "grammar-systems",
     "grammar-scripting",
@@ -52,6 +53,7 @@ grammars-all = [
     "grammar-enterprise",
     "grammar-data",
 ]
+grammar-harn = ["dep:tree-sitter-harn"]
 grammar-web = [
     "dep:tree-sitter-typescript",
     "dep:tree-sitter-javascript",
@@ -176,6 +178,7 @@ tree-sitter-css = { version = "0.25", optional = true }
 tree-sitter-html = { version = "0.23", optional = true }
 tree-sitter-sequel = { version = "0.3", optional = true }
 tree-sitter-md = { version = "0.5", optional = true }
+tree-sitter-harn = { path = "../../tree-sitter-harn", version = "0.8", optional = true }
 
 # Per-OS secret-store backends. The file backend is always compiled in
 # (and is the universal fallback when `HARN_SECRET_STORE_BACKEND=file` is

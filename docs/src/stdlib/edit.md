@@ -711,7 +711,7 @@ Backed by the `hostlib_code_index_rename_symbol` builtin (issue
 | `dry_run` | no | When `true`, the host validates end-to-end (parse, conflict, syntax) and returns the planned edits without writing. |
 | `validate` | no, default `true` | Re-parse every rewritten file; reject on ERROR / MISSING nodes. |
 
-Supported languages (first batch): Rust, TypeScript/TSX, JavaScript/JSX,
+Supported languages (first batch): Harn, Rust, TypeScript/TSX, JavaScript/JSX,
 Python, Swift, Go. Other languages return `result ==
 "unsupported_language"` instead of silently misrewriting.
 

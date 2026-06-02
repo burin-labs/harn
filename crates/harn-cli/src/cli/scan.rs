@@ -14,7 +14,7 @@ pub(crate) struct ScanArgs {
     /// `<pattern> [paths...]`, or just `[paths...]` with `--rule`/`--rule-pack`.
     #[arg(value_name = "ARGS")]
     pub args: Vec<String>,
-    /// Target language for an inline pattern (e.g. `typescript`, `rust`).
+    /// Target language for an inline pattern (e.g. `harn`, `typescript`, `rust`).
     #[arg(long, value_name = "LANG")]
     pub lang: Option<String>,
     /// Run a rule from a TOML file instead of an inline pattern.

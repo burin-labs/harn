@@ -5,9 +5,8 @@ tree), not by regex. A rule is a small TOML file; you run it read-only with
 `harn scan`, or as a codemod with `harn codemod`. Under the hood it is the
 `harn-rules` crate, exposed to `.harn` as `std/rules`.
 
-> **Languages:** rules target a tree-sitter grammar — TypeScript/JS, Rust, Go,
-> Python, Java, C/C++, Ruby, and more. There is no Harn grammar yet, so `.harn`
-> source can't be scanned structurally ([#2888](https://github.com/burin-labs/harn/issues/2888)).
+> **Languages:** rules target a tree-sitter grammar: Harn, TypeScript/JS, Rust,
+> Go, Python, Java, C/C++, Ruby, and more.
 
 ## How do I search for a code shape?
 
@@ -19,6 +18,12 @@ $ harn scan '$X?.$K ?? $D' src --lang typescript
 src/config.ts:12:18: cfg?.timeout ?? 30   [D=30 K=timeout X=cfg]
 src/config.ts:13:18: cfg?.retries ?? 3    [D=3 K=retries X=cfg]
 2 match(es) in 1 file(s)
+```
+
+The same structural search works over Harn source:
+
+```console
+harn scan '$X?.$K ?? $D' crates/harn-stdlib --lang harn
 ```
 
 - `$X`, `$K`, `$D` are **metavariables** — each binds a sub-tree and is printed
@@ -96,8 +101,8 @@ ruleDirs = ["rules"]
 ```
 
 ```console
-$ harn scan src             # runs every rule under rules/ over src/
-$ harn codemod src          # applies the codemod rules; lints are skipped
+harn scan src             # runs every rule under rules/ over src/
+harn codemod src          # applies the codemod rules; lints are skipped
 ```
 
 With `[rules] ruleDirs` set, `harn scan <paths>` needs no inline pattern — a

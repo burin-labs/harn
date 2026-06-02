@@ -208,6 +208,23 @@ fn count_top_level_declarations(root: Node<'_>, language: Language) -> u32 {
 #[allow(clippy::type_complexity)]
 fn declaration_kinds(language: Language) -> (&'static [&'static str], &'static [&'static str]) {
     match language {
+        Language::Harn => (
+            &[
+                "pipeline_declaration",
+                "import_declaration",
+                "fn_declaration",
+                "tool_declaration",
+                "skill_declaration",
+                "eval_pack_declaration",
+                "struct_declaration",
+                "enum_declaration",
+                "interface_declaration",
+                "type_declaration",
+                "impl_block",
+                "attributed_declaration",
+            ],
+            &["attributed_declaration"],
+        ),
         Language::TypeScript | Language::Tsx => (
             &[
                 "function_declaration",

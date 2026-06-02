@@ -12,7 +12,7 @@ touched file lands in the overlay; one `hostlib_fs_commit_staged` flips them
 atomically. Without a session, the host still buffers the full plan in memory
 and only writes after pre-flight passes, so a clean run is all-or-nothing.
 
-Supported languages (first batch): Rust, TypeScript/TSX, JavaScript/JSX,
+Supported languages (first batch): Harn, Rust, TypeScript/TSX, JavaScript/JSX,
 Python, Swift, Go.
 
 ## Recipe — rename a Rust struct across the workspace

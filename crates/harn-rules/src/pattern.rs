@@ -492,6 +492,21 @@ mod tests {
     }
 
     #[test]
+    fn compiles_optional_chain_nil_coalescing_in_harn() {
+        let snippet = "$SRC?.$KEY ?? $DEFAULT";
+        let compiled = compile_pattern(snippet, Language::Harn).expect("compiles");
+        assert_eq!(compiled.metavars, vec!["SRC", "KEY", "DEFAULT"]);
+        let binds = run(
+            snippet,
+            Language::Harn,
+            "fn main() {\n  let timeout = cfg?.timeout ?? 30\n}\n",
+        );
+        assert_eq!(capture(&binds, "SRC"), ["cfg".to_string()]);
+        assert_eq!(capture(&binds, "KEY"), ["timeout".to_string()]);
+        assert_eq!(capture(&binds, "DEFAULT"), ["30".to_string()]);
+    }
+
+    #[test]
     fn operator_is_constrained_not_just_structure() {
         // The `??` literal in the query must reject a `||` with the same
         // structural shape — otherwise the codemod would be unsound.
