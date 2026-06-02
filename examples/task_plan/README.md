@@ -44,7 +44,7 @@ typed task-plan JSON) and emits one judge-free JSONL record per cell
 with parse/validate/wall-clock metrics.
 
 ```sh
-# Default: qwen3.6-coding (Ollama, free)
+# Default: devstral-small-2 (Ollama, free)
 harn run examples/task_plan/compare_strategies.harn -- \
   --out=examples/task_plan/results/runs.jsonl
 

@@ -319,7 +319,7 @@ fn logical_section_tools_and_output_format_use_section_args() {
     {
         let _guard = LlmRenderContextGuard::enter(LlmRenderContext::resolve(
             "ollama",
-            "qwen3.6:35b-a3b-coding-nvfp4",
+            "devstral-small-2:24b",
         ));
         let out = render("{{ section \"tools\" tools=tools }}{{ endsection }}", &b);
         assert!(out.contains("ReAct-style envelope"));

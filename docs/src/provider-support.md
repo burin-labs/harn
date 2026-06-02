@@ -226,7 +226,7 @@ MCP notes:
 
 Local setup:
 
-- Run `harn models install devstral-small-2` or `harn models install qwen3.6-coding`, then verify with `harn provider-ready ollama --model <model>`.
+- Run `harn models install devstral-small-2`, then verify with `harn provider-ready ollama --model <model>`. For local qwen3.x, use the llamacpp provider (e.g. `local-qwen3.6`) — Ollama's qwen3.5-family tool-call parser 500s on text-tool output.
 
 ### OpenAI
 

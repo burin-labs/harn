@@ -3693,76 +3693,6 @@ export const harnProviderCatalog: HarnProviderCatalog = {
       ]
     },
     {
-      "id": "qwen3.6:35b-a3b-coding-nvfp4",
-      "name": "Qwen3.6 35B A3B Coding (NVFP4)",
-      "provider": "ollama",
-      "aliases": [
-        "qwen3.6-35b-coding",
-        "qwen3.6-coding",
-        "qwen3.6-coding-native",
-        "qwen3.6-coding-nvfp4"
-      ],
-      "context_window": 262144,
-      "runtime_context_window": 32768,
-      "stream_timeout": 900.0,
-      "modalities": {
-        "input": [
-          "text"
-        ],
-        "output": [
-          "text"
-        ]
-      },
-      "tool_support": {
-        "native": false,
-        "text": true,
-        "preferred_format": "text",
-        "parity": "text_only",
-        "tool_search": []
-      },
-      "structured_output": "format_kw",
-      "format_preferences": {
-        "prefers_xml_scaffolding": false,
-        "prefers_markdown_scaffolding": true,
-        "structured_output_mode": "delimited",
-        "supports_assistant_prefill": false,
-        "prefers_role_developer": false,
-        "prefers_xml_tools": false,
-        "thinking_block_style": "inline"
-      },
-      "reasoning": {
-        "modes": [
-          "enabled"
-        ],
-        "effort_supported": false,
-        "none_supported": false,
-        "interleaved_supported": false,
-        "preserve_thinking": true
-      },
-      "prompt_cache": false,
-      "deprecation": {
-        "status": "active"
-      },
-      "availability": "serverless",
-      "quality_tags": [
-        "local"
-      ],
-      "capability_tags": [
-        "streaming",
-        "tools",
-        "thinking",
-        "structured_output"
-      ],
-      "family": "qwen",
-      "lineage": "qwen3",
-      "tier": "mid",
-      "open_weight": true,
-      "strengths": [
-        "coding",
-        "speed"
-      ]
-    },
-    {
       "id": "gpt-4-turbo",
       "name": "GPT-4 Turbo",
       "provider": "openai",
@@ -5977,42 +5907,6 @@ export const harnProviderCatalog: HarnProviderCatalog = {
       "provider": "anthropic"
     },
     {
-      "name": "qwen3.6-35b-coding",
-      "model_id": "qwen3.6:35b-a3b-coding-nvfp4",
-      "provider": "ollama",
-      "tool_format": "text"
-    },
-    {
-      "name": "qwen3.6-coding",
-      "model_id": "qwen3.6:35b-a3b-coding-nvfp4",
-      "provider": "ollama",
-      "tool_format": "text",
-      "tool_calling": {
-        "native": "unknown",
-        "text": "unknown",
-        "streaming_native": "unknown",
-        "fallback_mode": "text"
-      }
-    },
-    {
-      "name": "qwen3.6-coding-native",
-      "model_id": "qwen3.6:35b-a3b-coding-nvfp4",
-      "provider": "ollama",
-      "tool_format": "native",
-      "tool_calling": {
-        "native": "unknown",
-        "text": "unknown",
-        "streaming_native": "unknown",
-        "fallback_mode": "native"
-      }
-    },
-    {
-      "name": "qwen3.6-coding-nvfp4",
-      "model_id": "qwen3.6:35b-a3b-coding-nvfp4",
-      "provider": "ollama",
-      "tool_format": "text"
-    },
-    {
       "name": "small",
       "model_id": "Qwen/Qwen3.5-9B",
       "provider": "openrouter"
@@ -6067,7 +5961,7 @@ export const harnProviderCatalog: HarnProviderCatalog = {
       "id": "local",
       "label": "Local",
       "description": "Best local/offline model route in the checked-in catalog.",
-      "model_id": "qwen3.6:35b-a3b-coding-nvfp4",
+      "model_id": "gemma4:26b",
       "provider": "ollama",
       "source": "catalog"
     },

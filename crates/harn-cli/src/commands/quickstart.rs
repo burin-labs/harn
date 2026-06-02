@@ -834,12 +834,12 @@ mod tests {
 
     #[test]
     fn renders_starter_provider_overlay() {
-        let rendered = render_providers_toml(&selection("ollama", "qwen3.6-coding"));
+        let rendered = render_providers_toml(&selection("ollama", "devstral-small-2"));
         let parsed: toml::Value = toml::from_str(&rendered).unwrap();
         assert_eq!(parsed["default_provider"].as_str(), Some("ollama"));
         assert_eq!(
             parsed["aliases"][QUICKSTART_ALIAS]["id"].as_str(),
-            Some("qwen3.6:35b-a3b-coding-nvfp4")
+            Some("devstral-small-2:24b")
         );
         assert_eq!(
             parsed["aliases"][QUICKSTART_ALIAS]["tool_format"].as_str(),
@@ -943,7 +943,7 @@ mod tests {
         let choices = vec![
             ProviderChoice {
                 name: "ollama".to_string(),
-                model: "qwen3.6-coding".to_string(),
+                model: "devstral-small-2".to_string(),
                 auth_envs: Vec::new(),
                 auth_available: true,
             },
@@ -985,9 +985,6 @@ mod tests {
             ollama_selector_for_model("devstral-small-2:24b"),
             "devstral-small-2"
         );
-        assert_eq!(
-            ollama_selector_for_model("qwen3.6:35b-a3b-coding-nvfp4"),
-            "qwen3.6-coding"
-        );
+        assert_eq!(ollama_selector_for_model("gemma4:26b"), "ollama-gemma4");
     }
 }

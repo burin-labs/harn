@@ -157,10 +157,7 @@ mod tests {
             derive_family("openrouter", "google/gemini-1.5-pro"),
             "google-gemini"
         );
-        assert_eq!(
-            derive_family("ollama", "qwen3.6:35b-a3b-coding-nvfp4"),
-            "qwen"
-        );
+        assert_eq!(derive_family("llamacpp", "qwen3.6-35b-a3b"), "qwen");
     }
 
     #[test]

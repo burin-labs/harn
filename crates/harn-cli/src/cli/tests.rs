@@ -3157,7 +3157,7 @@ fn test_parses_local_profile_args() {
         "harn",
         "local",
         "profile",
-        "qwen3.6-coding",
+        "devstral-small-2",
         "--provider",
         "llamacpp",
         "--json",
@@ -3168,7 +3168,7 @@ fn test_parses_local_profile_args() {
     let LocalCommand::Profile(args) = args.command else {
         panic!("expected local profile command");
     };
-    assert_eq!(args.model, "qwen3.6-coding");
+    assert_eq!(args.model, "devstral-small-2");
     assert_eq!(args.provider.as_deref(), Some("llamacpp"));
     assert!(args.json);
 }
@@ -3388,7 +3388,7 @@ fn test_parses_provider_probe_args() {
         "provider-probe",
         "ollama",
         "--model",
-        "qwen3.6-coding",
+        "devstral-small-2",
         "--base-url",
         "http://127.0.0.1:11434",
     ]);
@@ -3397,7 +3397,7 @@ fn test_parses_provider_probe_args() {
         panic!("expected provider-probe command");
     };
     assert_eq!(args.provider, "ollama");
-    assert_eq!(args.model.as_deref(), Some("qwen3.6-coding"));
+    assert_eq!(args.model.as_deref(), Some("devstral-small-2"));
     assert_eq!(args.base_url.as_deref(), Some("http://127.0.0.1:11434"));
     // The probe is meant for eval pipelines; JSON output is the default
     // surface so an aggregator doesn't have to opt in.
@@ -3411,7 +3411,7 @@ fn test_parses_provider_tool_probe_args() {
         "provider-tool-probe",
         "ollama",
         "--model",
-        "qwen3.6-coding",
+        "devstral-small-2",
         "--base-url",
         "http://127.0.0.1:11434",
         "--mode",
@@ -3426,7 +3426,7 @@ fn test_parses_provider_tool_probe_args() {
         panic!("expected provider-tool-probe command");
     };
     assert_eq!(args.provider, "ollama");
-    assert_eq!(args.model, "qwen3.6-coding");
+    assert_eq!(args.model, "devstral-small-2");
     assert_eq!(args.base_url.as_deref(), Some("http://127.0.0.1:11434"));
     assert!(matches!(args.mode, ProviderToolProbeModeArg::NonStreaming));
     assert_eq!(args.marker, "marker");

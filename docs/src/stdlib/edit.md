@@ -601,7 +601,7 @@ special host glue:
 ```toml
 [model_roles.merge]
 provider = "ollama"
-model = "qwen3.6-coding"
+model = "devstral-small-2"
 temperature = 0.0
 max_tokens = 12000
 ```

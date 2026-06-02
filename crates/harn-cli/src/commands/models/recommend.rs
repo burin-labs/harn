@@ -456,9 +456,9 @@ mod tests {
     fn high_memory_mps_recommends_current_local_coding_alias() {
         let recommendation =
             recommend_model(snapshot(48, GpuKind::Mps), false, None).expect("recommendation");
-        assert_eq!(recommendation.model_id, "qwen3.6-coding");
-        assert_eq!(recommendation.harn_selector, "qwen3.6-coding");
-        assert_eq!(recommendation.provider, "ollama");
+        assert_eq!(recommendation.model_id, "local-qwen3.6");
+        assert_eq!(recommendation.harn_selector, "local-qwen3.6");
+        assert_eq!(recommendation.provider, "llamacpp");
     }
 
     #[test]

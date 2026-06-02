@@ -17,9 +17,11 @@ evidence that orders local provider/model presets for quickstart. The report
 reads the latest `harn eval coding-agent --include-local` output when present
 and falls back to bundled seed evidence, while keeping runtime transport
 failures separate from model task failures.
-Run `harn models install qwen3.6-coding`, `harn models install devstral-small-2`,
-or `harn models install ollama-gemma4` to resolve Harn aliases and pull the
-matching Ollama model. For non-Ollama local runtimes, `harn models install
+Run `harn models install devstral-small-2` or `harn models install
+ollama-gemma4` to resolve Harn aliases and pull the matching Ollama model.
+Ollama has no working qwen3.x route — its qwen3.5-family server-side tool-call
+parser 500s on Harn's text-tool output — so use the llamacpp provider for local
+qwen3.x. For non-Ollama local runtimes, `harn models install
 local-qwen3.6-gguf` and `harn models install local-qwen3.6-27b` print concrete
 llama.cpp / MLX download, launch, context-window, endpoint, and
 `provider-ready` verification commands.
@@ -39,7 +41,7 @@ family-level guidance, endpoint notes, and downstream JSON support data.
 | Azure OpenAI | `AZURE_OPENAI_API_KEY` or `AZURE_OPENAI_AD_TOKEN` | deployment name in `model` |
 | Gemini API | `GEMINI_API_KEY` or `GOOGLE_API_KEY` | `gemini-2.5-flash` or explicit Gemini model ID |
 | Vertex AI | `VERTEX_AI_ACCESS_TOKEN` or `GOOGLE_APPLICATION_CREDENTIALS` | Gemini model ID |
-| Ollama | `OLLAMA_HOST` (optional) | `qwen3.6-coding` when installed, otherwise `llama3.2` |
+| Ollama | `OLLAMA_HOST` (optional) | `devstral-small-2` when installed, otherwise `llama3.2` |
 | Local server | `LOCAL_LLM_BASE_URL` | `LOCAL_LLM_MODEL` or explicit `model` |
 | llama.cpp server | `LLAMACPP_BASE_URL` | explicit `model` from `/v1/models` |
 | MLX OpenAI-compatible server | `MLX_BASE_URL` | `MLX_MODEL_ID` or `mlx-qwen36-27b` |
@@ -99,7 +101,7 @@ harn local switch qwen36-coder --ctx 65536 --keep-alive 1h
 
 # Explain whether a model/runtime route is preferred, experimental, or
 # quarantined on this machine profile.
-harn local profile qwen3.6-coding --provider llamacpp --json
+harn local profile local-qwen3.6 --provider llamacpp --json
 
 # Unload via keep_alive=0 (Ollama) or SIGTERM tracked PIDs.
 harn local stop --all
@@ -122,7 +124,7 @@ Use the one-tool conformance probe to produce the JSON receipt consumed by
 local lifecycle gates and eval harnesses:
 
 ```bash
-harn provider-tool-probe ollama --model qwen3.6-coding --mode both --json
+harn provider-tool-probe ollama --model devstral-small-2 --mode both --json
 harn local switch ollama-gemma4 --probe-result gemma4-tool-probe.json
 ```
 
@@ -485,7 +487,7 @@ runner. That number is the **effective** context the runner will use, not
 the model's declared maximum.
 
 Common gotcha: a model whose Modelfile defaults to a large context (e.g.
-`qwen3.6:35b-a3b-coding-nvfp4` defaults to `262144`) will be loaded at
+`devstral-small-2:24b` defaults to `262144`) will be loaded at
 that maximum if the first request to load it does not pass an explicit
 `num_ctx`. Subsequent Harn calls with `HARN_OLLAMA_NUM_CTX=32768` then
 appear to be ignored — they are not, but Ollama is reusing the larger
@@ -494,7 +496,7 @@ runner.
 Inspect what is actually loaded vs. what Harn would request:
 
 ```bash
-harn model-info qwen3.6-coding --verify --warm
+harn model-info devstral-small-2 --verify --warm
 ```
 
 The JSON output includes:
@@ -508,8 +510,8 @@ The JSON output includes:
 If `context_drift` is set, force a reload with:
 
 ```bash
-ollama stop qwen3.6:35b-a3b-coding-nvfp4
-harn model-info qwen3.6-coding --verify --warm
+ollama stop devstral-small-2:24b
+harn model-info devstral-small-2 --verify --warm
 ```
 
 The new warmup correctly passes `options.num_ctx`, so the next load

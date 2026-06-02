@@ -1522,7 +1522,7 @@ mod tests {
     async fn ollama_ndjson_captures_server_telemetry_from_done_frame() {
         let body = b"{\"message\":{\"role\":\"assistant\",\"content\":\"ok\"},\"done\":false}\n\
             {\"message\":{\"role\":\"assistant\",\"content\":\"\"},\"done\":true,\
-            \"model\":\"qwen3.6:35b-a3b-coding-nvfp4\",\
+            \"model\":\"devstral-small-2:24b\",\
             \"total_duration\":4500000000,\"load_duration\":300000000,\
             \"prompt_eval_count\":42,\"prompt_eval_duration\":1100000000,\
             \"eval_count\":7,\"eval_duration\":3000000000}\n";
@@ -1531,7 +1531,7 @@ mod tests {
         let result = consume_ollama_ndjson_lines(
             &body[..],
             "ollama",
-            "qwen3.6:35b-a3b-coding-nvfp4",
+            "devstral-small-2:24b",
             tx,
             Duration::ZERO,
             &mut warmup_gate,
@@ -1548,7 +1548,7 @@ mod tests {
         assert_eq!(result.telemetry.server_output_tokens, Some(7));
         assert_eq!(
             result.telemetry.runtime_loaded_model.as_deref(),
-            Some("qwen3.6:35b-a3b-coding-nvfp4")
+            Some("devstral-small-2:24b")
         );
     }
 }

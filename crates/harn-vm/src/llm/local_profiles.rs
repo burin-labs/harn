@@ -393,11 +393,11 @@ mod tests {
 
     #[test]
     fn qwen_ollama_profile_is_preferred_and_llamacpp_is_experimental() {
-        let ollama = local_runtime_profile_report("qwen3.6-coding", None);
+        let ollama = local_runtime_profile_report("local-qwen3.6", Some("ollama"));
         assert_eq!(ollama.model_family, "qwen3.6-a3b-hybrid");
         assert_eq!(ollama.selected_status, RuntimeProfileStatus::Preferred);
 
-        let llamacpp = local_runtime_profile_report("qwen3.6-coding", Some("llamacpp"));
+        let llamacpp = local_runtime_profile_report("local-qwen3.6", Some("llamacpp"));
         assert_eq!(llamacpp.selected_status, RuntimeProfileStatus::Experimental);
         assert!(llamacpp
             .selected

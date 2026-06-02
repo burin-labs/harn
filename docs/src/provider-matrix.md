@@ -172,7 +172,6 @@ This section starts from the checked-in provider catalog. Recommended format fol
 | `ollama` | `devstral-small-2:24b` | `text` | `text_only` | - | - | - | - | - | `data not yet collected` |
 | `ollama` | `gemma4:26b` | `text` | `text_only` | - | - | - | - | - | `data not yet collected` |
 | `ollama` | `llama3.2` | `text` | `unknown` | - | - | - | - | - | `data not yet collected` |
-| `ollama` | `qwen3.6:35b-a3b-coding-nvfp4` | `text` | `text_only` | - | - | - | - | - | `data not yet collected` |
 | `openai` | `gpt-4-turbo` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `openai` | `gpt-4o` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `openai` | `gpt-4o-mini` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |

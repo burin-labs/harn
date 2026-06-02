@@ -166,7 +166,7 @@ existing routing layer instead of bypassing it:
 ```toml
 [model_roles.merge]
 provider = "ollama"
-model = "qwen3.6-coding"
+model = "devstral-small-2"
 temperature = 0.0
 route_policy = "manual"
 ```

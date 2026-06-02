@@ -645,8 +645,8 @@ mod tests {
                     "iterations": 2
                 },
                 {
-                    "run_id": "ollama_qwen__text",
-                    "selector": {"provider": "ollama", "model": "qwen3.6:35b-a3b-coding-nvfp4"},
+                    "run_id": "ollama_devstral_blocked__text",
+                    "selector": {"provider": "ollama", "model": "devstral-small-2:24b"},
                     "tool_format": "text",
                     "status": "infra_error",
                     "passed": false,
