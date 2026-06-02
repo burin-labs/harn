@@ -21,7 +21,7 @@
 //! - [`evaluator`] — the tree-walking match algebra (relational + composite
 //!   + utility-rule reuse).
 //! - [`constraint`] — `where` predicates on captured metavars (regex,
-//!   comparison, recursive sub-pattern).
+//!   comparison, recursive sub-pattern, and Harn-only semantic filters).
 //! - [`transform`] — synthesize new metavars (`replace` / `substring` /
 //!   `convert`) before fixing.
 //! - [`fix`] — `fix` template interpolation and format-preserving splice.
@@ -33,6 +33,8 @@
 //!   with file create/delete ([`ScanningRecipe`], [`run_recipe`]).
 //! - [`report`] — report-only [`DataTable`]s: columnar findings + metrics.
 //! - [`loader`] — load rules from a TOML file or a directory.
+//! - semantic capture metadata — Harn captures gain resolved binding identity
+//!   and simple static type labels when the local syntax provides them.
 //!
 //! The whole-project scan lifecycle (#2836) layers onto this surface.
 //!
@@ -65,16 +67,20 @@ pub mod model;
 pub mod pattern;
 pub mod recipe;
 pub mod report;
+mod semantic;
 pub mod testing;
 pub mod transform;
 
-pub use engine::{Binding, CodemodResult, CompiledRule, Diagnostic, RuleMatch, Span};
+pub use engine::{
+    Binding, BindingMetadata, CodemodResult, CompiledRule, Diagnostic, ResolvedBinding, RuleMatch,
+    Span,
+};
 pub use error::RulesError;
 pub use fix::{interpolate, AppliedEdit};
 pub use loader::{load_rule_dir, load_rule_file};
 pub use model::{
-    Applicability, AtomicMatcher, Comparison, Constraint, ConvertOp, Rule, RuleKind, RuleNode,
-    Safety, Severity, StopBy, StopKeyword, Transform,
+    Applicability, AtomicMatcher, Comparison, Constraint, ConvertOp, ResolvedBindingConstraint,
+    Rule, RuleKind, RuleNode, Safety, Severity, StopBy, StopKeyword, Transform,
 };
 pub use pattern::{compile_pattern, CompiledPattern};
 pub use recipe::{run_recipe, FileChange, RecipeRun, RuleRecipe, ScanningRecipe, SourceFile};

@@ -52,7 +52,10 @@ conformance fixtures.
 ## Predicates, rewrite, and safety
 
 - A `where` predicate narrows matches: `regex`, `comparison = { op, value }`,
-  or a recursive `pattern`.
+  a recursive `pattern`, or Harn-only semantic filters
+  `resolvesTo = { name, kind, line, column, id }` and `type = "int"`.
+  Harn match dictionaries keep text in `captures` and add
+  `capture_metadata` with `resolved` / `type` where available.
 - `[transform.NAME]` synthesizes a metavar before fixing (`convert = "snake"`,
   `replace = { regex, by }`, `substring = { start, end }`).
 - `fix` interpolates `$VAR` / `${VAR}` (`$$` → `$`) and splices

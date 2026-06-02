@@ -336,9 +336,8 @@ fn atomic_match(atomic: &CompiledAtomic, node: Node<'_>, ctx: &Ctx<'_>) -> Optio
                 for cap in m.captures {
                     let name = names[cap.index as usize];
                     if metavars.iter().any(|mv| mv == name) {
-                        bindings.entry(name.to_string()).or_insert_with(|| Binding {
-                            text: ctx.text(cap.node),
-                            span: Span::of(cap.node),
+                        bindings.entry(name.to_string()).or_insert_with(|| {
+                            Binding::new(ctx.text(cap.node), Span::of(cap.node))
                         });
                     }
                 }

@@ -12,7 +12,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use serde::Serialize;
 
-use crate::engine::CompiledRule;
+use crate::engine::{BindingMetadata, CompiledRule};
 use crate::error::RulesError;
 use crate::recipe::SourceFile;
 
@@ -42,6 +42,9 @@ pub struct TableRow {
     pub text: String,
     /// The metavar bindings, keyed by name.
     pub bindings: BTreeMap<String, String>,
+    /// Optional semantic metadata for Harn captures, keyed by metavar name.
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    pub capture_metadata: BTreeMap<String, BindingMetadata>,
 }
 
 /// Roll-up metrics for a [`DataTable`].
@@ -85,6 +88,12 @@ pub fn data_table(rule: &CompiledRule, files: &[SourceFile]) -> Result<DataTable
         let path = file.path.display().to_string();
         per_file.insert(path.clone(), matches.len());
         for m in matches {
+            let capture_metadata = m
+                .bindings
+                .iter()
+                .filter(|(_, binding)| !binding.metadata.is_empty())
+                .map(|(name, binding)| (name.clone(), binding.metadata.clone()))
+                .collect();
             rows.push(TableRow {
                 path: path.clone(),
                 start_row: m.span.start_row,
@@ -95,6 +104,7 @@ pub fn data_table(rule: &CompiledRule, files: &[SourceFile]) -> Result<DataTable
                     .into_iter()
                     .map(|(name, binding)| (name, binding.text))
                     .collect(),
+                capture_metadata,
             });
         }
     }
@@ -171,5 +181,31 @@ mod tests {
         assert_eq!(value["rule_id"], "r");
         assert_eq!(value["summary"]["total_rows"], 1);
         assert_eq!(value["rows"][0]["bindings"]["FN"], "go");
+    }
+
+    #[test]
+    fn table_serializes_harn_capture_metadata() {
+        let rule = rule(
+            r#"
+            id = "typed-log"
+            language = "harn"
+            [rule]
+            pattern = "log($VALUE)"
+            "#,
+        );
+        let table = data_table(
+            &rule,
+            &[ts(
+                "a.harn",
+                "fn main() {\n  let count: int = 1\n  log(count)\n}\n",
+            )],
+        )
+        .unwrap();
+        let value = table.to_json_value();
+        let metadata = &value["rows"][0]["capture_metadata"]["VALUE"];
+        assert_eq!(metadata["type"], "int");
+        assert_eq!(metadata["resolved"]["name"], "count");
+        assert_eq!(metadata["resolved"]["start_row"], 1);
+        assert!(metadata["resolved"]["span"].is_null());
     }
 }
