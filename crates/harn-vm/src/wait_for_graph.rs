@@ -1,9 +1,8 @@
 use std::cmp::Ordering as CmpOrdering;
 use std::collections::{BTreeMap, BTreeSet};
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
-use crate::value::{DeadlockError, VmChannelHandle, VmError};
+use crate::value::{DeadlockError, VmChannelCloseState, VmChannelHandle, VmError};
 use crate::VmValue;
 
 #[derive(Debug, Default)]
@@ -42,7 +41,7 @@ pub(crate) struct ChannelTarget {
     name: String,
     sender: Arc<tokio::sync::mpsc::Sender<VmValue>>,
     _receiver: Arc<tokio::sync::Mutex<tokio::sync::mpsc::Receiver<VmValue>>>,
-    closed: Arc<AtomicBool>,
+    close: Arc<VmChannelCloseState>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -281,7 +280,7 @@ pub(crate) fn channel_target(channel: &VmChannelHandle) -> ChannelTarget {
         name: channel.name.to_string(),
         sender: channel.sender.clone(),
         _receiver: channel.receiver.clone(),
-        closed: channel.closed.clone(),
+        close: channel.close.clone(),
     }
 }
 
@@ -333,13 +332,11 @@ impl ChannelTarget {
     }
 
     fn send_is_blocked(&self) -> bool {
-        !self.closed.load(Ordering::SeqCst)
-            && !self.sender.is_closed()
-            && self.sender.capacity() == 0
+        !self.close.is_closed() && !self.sender.is_closed() && self.sender.capacity() == 0
     }
 
     fn receive_is_blocked(&self) -> bool {
-        !self.closed.load(Ordering::SeqCst) && !self.sender.is_closed() && self.buffered_len() == 0
+        !self.close.is_closed() && !self.sender.is_closed() && self.buffered_len() == 0
     }
 }
 
@@ -374,7 +371,7 @@ mod tests {
             name: name.to_string(),
             sender: Arc::new(sender),
             _receiver: Arc::new(tokio::sync::Mutex::new(receiver)),
-            closed: Arc::new(AtomicBool::new(false)),
+            close: Arc::new(VmChannelCloseState::open()),
         }
     }
 

@@ -1,5 +1,3 @@
-use std::sync::atomic::Ordering;
-
 use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
 use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
@@ -194,7 +192,7 @@ fn drop_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let v = args.first().unwrap_or(&VmValue::Nil);
     match v {
         VmValue::Channel(ch) => {
-            ch.closed.store(true, Ordering::SeqCst);
+            ch.close();
         }
         VmValue::SyncPermit(permit) => {
             permit.release();

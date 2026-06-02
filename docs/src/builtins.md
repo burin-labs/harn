@@ -1676,9 +1676,9 @@ emitted by the resolver:
 | Function | Parameters | Returns | Description |
 |---|---|---|---|
 | `channel(name?)` | name: string (default `"default"`) | dict | Create a channel with `name`, `type`, and `messages` fields |
-| `send(ch, value)` | ch: dict, value: any | nil | Send a value to a channel |
-| `receive(ch)` | ch: dict | any | Receive a value from a channel (blocks until data available) |
-| `close_channel(ch)` | ch: channel | nil | Close a channel, preventing further sends |
+| `send(ch, value)` | ch: channel, value: any | bool | Send a value to a channel. Throws `ChannelClosed` after close |
+| `receive(ch)` | ch: channel | any | Receive a value from a channel. Blocks until data is available; after close, drains buffered values then throws `ChannelClosed` |
+| `close_channel(ch)` | ch: channel | nil | Close a channel, wake waiters, and prevent further sends |
 | `try_receive(ch)` | ch: channel | any or nil | Non-blocking receive. Returns nil if no data available |
 | `select(ch1, ch2, ...)` | channels: channel | dict or nil | Wait for data on any channel. Returns `{index, value, channel}` for the first ready channel, or nil if all closed |
 | `channel_select(channels, timeout?)` | channels: list[channel], timeout: int or duration | dict or nil | Select over a channel list with an optional timeout |

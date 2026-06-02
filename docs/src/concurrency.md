@@ -222,12 +222,17 @@ for chunk in stream {
 
 Use `try_receive(ch)` for non-blocking reads -- it returns `nil`
 immediately if no message is available. Use `close_channel(ch)` to
-signal that no more messages will be sent.
+signal that no more messages will be sent. After close, direct `send(ch, value)`
+raises `ChannelClosed`. Direct `receive(ch)` still drains buffered messages, then
+raises `ChannelClosed` once the channel is closed and empty. Channel iteration
+and `try_receive(ch)` stay probe/drain-oriented: iteration exits after the drain,
+and `try_receive(ch)` returns `nil` when no value is immediately available.
 
 When every active task is blocked on channel operations that cannot match
 another sender or receiver, the runtime raises `HARN-ORC-012` instead of
-letting the run hang forever. Channel waits inside `deadline { ... }` or
-timeout-based selects still resolve through their timeout path.
+letting the run hang forever. Channel waits inside `deadline { ... }` are
+interrupted by the deadline, and timeout-based selects still resolve through
+their timeout path.
 
 For dynamic fan-in, `channel_select([ch1, ch2, ...], timeout?)` mirrors the
 `select { ... }` statement but takes a runtime list of channels and returns the
@@ -432,7 +437,9 @@ Harn synchronization is intentionally higher-level than OS locks:
 | `sync_gate_acquire(key, limit, timeout?)` | process-local named key | FIFO | returns `nil` on timeout, throws on cancellation | Fair runner admission |
 
 All permits are parking primitives, not spinlocks. A permit returned by
-`sync_*_acquire` must be passed to `sync_release(permit)`. Releasing twice
+`sync_*_acquire` is owned by the current scope and is released automatically
+when that scope or frame exits, including `return` and `throw`. Pass the permit
+to `sync_release(permit)` when you need an earlier release. Releasing twice
 returns `false`; the first release returns `true`.
 
 `sync_rwlock_acquire(key, "read", timeout?)` takes one shared permit, while

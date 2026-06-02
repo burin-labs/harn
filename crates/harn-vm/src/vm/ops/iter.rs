@@ -54,7 +54,7 @@ impl super::super::Vm {
             VmValue::Channel(ch) => {
                 self.iterators.push(super::super::IterState::Channel {
                     receiver: ch.receiver.clone(),
-                    closed: ch.closed.clone(),
+                    close: ch.close.clone(),
                 });
             }
             VmValue::Generator(gen) => {
@@ -200,15 +200,19 @@ impl super::super::Vm {
         }
 
         match self.iterators.last_mut() {
-            Some(super::super::IterState::Channel { receiver, closed }) => {
+            Some(super::super::IterState::Channel { receiver, close }) => {
                 let rx = receiver.clone();
-                let is_closed = closed.load(std::sync::atomic::Ordering::Relaxed);
+                let mut closed_rx = close.subscribe();
+                let is_closed = close.is_closed() || *closed_rx.borrow();
                 let mut guard = rx.lock().await;
                 // Closed sender: drain without blocking.
                 let item = if is_closed {
                     guard.try_recv().ok()
                 } else {
-                    guard.recv().await
+                    tokio::select! {
+                        item = guard.recv() => item,
+                        _ = closed_rx.changed() => guard.try_recv().ok(),
+                    }
                 };
                 match item {
                     Some(val) => {

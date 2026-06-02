@@ -173,6 +173,8 @@ pub enum ErrorCategory {
     EgressBlocked,
     /// Operation was cancelled
     Cancelled,
+    /// Channel was closed before the operation could complete.
+    ChannelClosed,
     /// Resource not found
     NotFound,
     /// Circuit breaker is open
@@ -198,6 +200,7 @@ impl ErrorCategory {
             ErrorCategory::ToolRejected => "tool_rejected",
             ErrorCategory::EgressBlocked => "egress_blocked",
             ErrorCategory::Cancelled => "cancelled",
+            ErrorCategory::ChannelClosed => "channel_closed",
             ErrorCategory::NotFound => "not_found",
             ErrorCategory::CircuitOpen => "circuit_open",
             ErrorCategory::BudgetExceeded => "budget_exceeded",
@@ -219,6 +222,7 @@ impl ErrorCategory {
             "tool_rejected" => ErrorCategory::ToolRejected,
             "egress_blocked" => ErrorCategory::EgressBlocked,
             "cancelled" => ErrorCategory::Cancelled,
+            "channel_closed" => ErrorCategory::ChannelClosed,
             "not_found" => ErrorCategory::NotFound,
             "circuit_open" => ErrorCategory::CircuitOpen,
             "budget_exceeded" => ErrorCategory::BudgetExceeded,
@@ -285,6 +289,9 @@ pub fn classify_error_message(msg: &str) -> ErrorCategory {
     let lower = msg.to_lowercase();
     if lower.contains("cancelled") || lower.contains("canceled") {
         return ErrorCategory::Cancelled;
+    }
+    if msg.contains("ChannelClosed") || lower.contains("channel closed") {
+        return ErrorCategory::ChannelClosed;
     }
     if msg.contains("Deadline exceeded") || msg.contains("context deadline exceeded") {
         return ErrorCategory::Timeout;

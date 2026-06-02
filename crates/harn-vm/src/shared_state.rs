@@ -1,8 +1,8 @@
 use std::collections::BTreeMap;
-use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicI64, AtomicU64, Ordering};
 use std::sync::Arc;
 
-use crate::value::{values_equal, VmChannelHandle, VmValue};
+use crate::value::{values_equal, VmChannelCloseState, VmChannelHandle, VmValue};
 
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) struct ScopedKey {
@@ -221,7 +221,7 @@ impl VmSharedStateRuntime {
                     name: std::sync::Arc::from(scoped.key.clone()),
                     sender: Arc::new(sender),
                     receiver: Arc::new(tokio::sync::Mutex::new(receiver)),
-                    closed: Arc::new(AtomicBool::new(false)),
+                    close: Arc::new(VmChannelCloseState::open()),
                 };
                 Mailbox {
                     channel,
@@ -276,7 +276,13 @@ impl VmSharedStateRuntime {
         let Some(mailbox) = self.mailboxes.lock().get(scoped).cloned() else {
             return false;
         };
-        !mailbox.channel.closed.swap(true, Ordering::SeqCst)
+        if !mailbox.channel.close() {
+            return false;
+        }
+        if let Ok(mut rx) = mailbox.channel.receiver.try_lock() {
+            rx.close();
+        }
+        true
     }
 
     pub(crate) fn metrics(&self, kind: Option<&str>, scoped: Option<&ScopedKey>) -> VmValue {
@@ -430,7 +436,7 @@ fn mailbox_metrics_value(mailbox: &Mailbox) -> VmValue {
     );
     value.insert(
         "closed".to_string(),
-        VmValue::Bool(mailbox.channel.closed.load(Ordering::SeqCst)),
+        VmValue::Bool(mailbox.channel.is_closed()),
     );
     VmValue::Dict(std::sync::Arc::new(value))
 }

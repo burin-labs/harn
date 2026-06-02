@@ -126,6 +126,7 @@ impl ToolCallErrorCategory {
             Internal::Cancelled => Self::Cancelled,
             Internal::Auth
             | Internal::EgressBlocked
+            | Internal::ChannelClosed
             | Internal::NotFound
             | Internal::CircuitOpen
             | Internal::BudgetExceeded

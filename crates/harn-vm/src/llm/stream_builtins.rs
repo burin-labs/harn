@@ -1,7 +1,9 @@
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 
-use crate::value::{VmChannelHandle, VmError, VmStream, VmStreamCancel, VmValue};
+use crate::value::{
+    VmChannelCloseState, VmChannelHandle, VmError, VmStream, VmStreamCancel, VmValue,
+};
 
 use super::api;
 use super::call::build_llm_error_dict;
@@ -19,8 +21,8 @@ pub(super) async fn llm_stream_builtin(args: Vec<VmValue>) -> Result<VmValue, Vm
         .to_string();
 
     let (tx, rx) = tokio::sync::mpsc::channel::<VmValue>(64);
-    let closed = Arc::new(std::sync::atomic::AtomicBool::new(false));
-    let closed_clone = closed.clone();
+    let close = Arc::new(VmChannelCloseState::open());
+    let close_for_task = close.clone();
     #[allow(clippy::arc_with_non_send_sync)]
     let tx_arc = Arc::new(tx);
     let tx_for_task = tx_arc.clone();
@@ -33,17 +35,17 @@ pub(super) async fn llm_stream_builtin(args: Vec<VmValue>) -> Result<VmValue, Vm
                     .send(VmValue::String(std::sync::Arc::from(*word)))
                     .await;
             }
-            closed_clone.store(true, std::sync::atomic::Ordering::Relaxed);
+            close_for_task.close();
             return;
         }
 
         let result = vm_stream_llm(&opts, &tx_for_task).await;
-        closed_clone.store(true, std::sync::atomic::Ordering::Relaxed);
         if let Err(e) = result {
             let _ = tx_for_task
                 .send(VmValue::String(std::sync::Arc::from(format!("error: {e}"))))
                 .await;
         }
+        close_for_task.close();
     });
 
     #[allow(clippy::arc_with_non_send_sync)]
@@ -51,7 +53,7 @@ pub(super) async fn llm_stream_builtin(args: Vec<VmValue>) -> Result<VmValue, Vm
         name: Arc::from("llm_stream"),
         sender: tx_arc,
         receiver: Arc::new(tokio::sync::Mutex::new(rx)),
-        closed,
+        close,
     };
     Ok(VmValue::channel(handle))
 }

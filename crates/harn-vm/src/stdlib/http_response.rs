@@ -318,14 +318,11 @@ fn parse_headers(
 
 /// Drain a channel into a `Vec<VmValue>`, or pass a list through verbatim.
 ///
-/// The drain stops when the channel is closed and all queued values have
-/// been consumed. Note: `close_channel(chan)` sets a flag — it does
-/// **not** drop the channel's `Sender`, so a naive `rx.recv().await`
-/// would block forever for channel-typed sources. We instead poll with
-/// `try_recv` and observe the `closed` flag; when both report empty,
-/// the drain terminates.
+/// The drain stops when the channel is closed and all queued values have been
+/// consumed. Channel handles can close through a flag/signal pair without
+/// dropping every sender clone, so the drain polls with `try_recv` and observes
+/// the closed state; when both report empty, the drain terminates.
 async fn drain_to_list(value: VmValue, fn_name: &str) -> Result<Vec<VmValue>, VmError> {
-    use std::sync::atomic::Ordering;
     use tokio::sync::mpsc::error::TryRecvError;
 
     match value {
@@ -337,7 +334,7 @@ async fn drain_to_list(value: VmValue, fn_name: &str) -> Result<Vec<VmValue>, Vm
                 match rx.try_recv() {
                     Ok(value) => items.push(value),
                     Err(TryRecvError::Empty) => {
-                        if handle.closed.load(Ordering::SeqCst) {
+                        if handle.is_closed() {
                             break;
                         }
                         // Yield so the producer can deliver the next

@@ -22,9 +22,14 @@ pipeline default() {
   let ch3 = channel("test3", 5)
   let result = try_receive(ch3)
   __io_println(result)
-  // send after close returns false
+  // send after close raises a structured ChannelClosed error
   let ch4 = channel("test4", 5)
   close_channel(ch4)
-  let sent = send(ch4, "too_late")
-  __io_println(sent)
+  let sent = try {
+    send(ch4, "too_late")
+  }
+  __io_println(is_err(sent))
+  let err = unwrap_err(sent)
+  __io_println(err.type)
+  __io_println(error_category(err))
 }

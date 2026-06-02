@@ -772,13 +772,17 @@ impl VmIter {
                 Ok(Some(VmValue::List(std::sync::Arc::new(snapshot))))
             }
             VmIter::Chan { handle } => {
-                let is_closed = handle.closed.load(std::sync::atomic::Ordering::Relaxed);
+                let is_closed = handle.is_closed();
                 let rx = handle.receiver.clone();
+                let mut closed_rx = handle.subscribe_closed();
                 let mut guard = rx.lock().await;
                 let item = if is_closed {
                     guard.try_recv().ok()
                 } else {
-                    guard.recv().await
+                    tokio::select! {
+                        item = guard.recv() => item,
+                        _ = closed_rx.changed() => guard.try_recv().ok(),
+                    }
                 };
                 match item {
                     Some(v) => Ok(Some(v)),

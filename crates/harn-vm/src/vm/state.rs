@@ -119,7 +119,7 @@ pub(crate) enum IterState {
     },
     Channel {
         receiver: std::sync::Arc<tokio::sync::Mutex<tokio::sync::mpsc::Receiver<VmValue>>>,
-        closed: std::sync::Arc<std::sync::atomic::AtomicBool>,
+        close: std::sync::Arc<crate::value::VmChannelCloseState>,
     },
     Generator {
         gen: Arc<crate::value::VmGenerator>,
@@ -187,14 +187,14 @@ pub struct Vm {
     pub(crate) wait_for_graph: Arc<crate::wait_for_graph::VmWaitForGraph>,
     /// Permits acquired by lexical synchronization blocks in this VM.
     pub(crate) held_sync_guards: Vec<crate::synchronization::VmSyncHeldGuard>,
-    /// `(kind, key)` of locks held by an ancestor VM that is *suspended on this
-    /// VM's execution* — i.e. an inline async-builtin child runs while its
-    /// parent is parked mid-instruction still holding these permits. Re-acquiring
-    /// one of them here is a provably-unresolvable self-deadlock (the sole holder
-    /// is blocked awaiting us), so HARN-ORC-011 fires across the child boundary.
-    /// Empty for new concurrent tasks (`spawn`/`parallel`/triggers), where the
-    /// parent keeps running and the block is legitimately resolvable.
-    pub(crate) inherited_held_keys: Arc<Vec<(String, String)>>,
+    /// Locks held by an ancestor VM that is *suspended on this VM's execution*:
+    /// an inline async-builtin child runs while its parent is parked
+    /// mid-instruction still holding these permits. Re-acquiring more permits
+    /// than the primitive can grant is a provably-unresolvable self-deadlock, so
+    /// HARN-ORC-011 fires across the child boundary. Empty for new concurrent
+    /// tasks (`spawn`/`parallel`/triggers), where the parent keeps running and
+    /// blocking can be legitimately resolvable.
+    pub(crate) inherited_held_keys: Arc<Vec<crate::synchronization::VmSyncHeldKey>>,
     /// Structured-concurrency nursery stack. Each `scope { }` block pushes a
     /// `TaskScope`; tasks spawned while it is innermost register their id here.
     /// On normal exit (`TaskScopeExit`) the scope's tasks are joined and the
@@ -916,6 +916,26 @@ impl Vm {
         self.cancel_task_scopes_where(|s| s.frame_depth == frame_depth);
     }
 
+    pub(crate) fn adopt_sync_permit_for_current_scope(
+        &mut self,
+        permit: crate::value::VmSyncPermitHandle,
+    ) {
+        if permit.is_released()
+            || self
+                .held_sync_guards
+                .iter()
+                .any(|guard| guard._permit.same_lease(&permit))
+        {
+            return;
+        }
+        self.held_sync_guards
+            .push(crate::synchronization::VmSyncHeldGuard {
+                _permit: permit,
+                frame_depth: self.frames.len(),
+                env_scope_depth: self.env.scope_depth(),
+            });
+    }
+
     /// Deregister a task id from every open nursery (it was explicitly
     /// `await`ed, so it must not be double-joined or cancelled at scope exit).
     pub(crate) fn deregister_task_from_scopes(&mut self, id: &str) {
@@ -944,40 +964,36 @@ impl Vm {
         }
     }
 
-    /// Total permits this VM already holds for `kind:key` via lexical sync
-    /// blocks. The held-set is tiny (bounded by lexical nesting), so this scan
-    /// is cheap and only runs on the rare blocking-acquire path. Used by the
-    /// runtime self-deadlock guard.
+    /// Total live permits this VM already holds for `kind:key`. The held-set is
+    /// tiny (bounded by lexical nesting and explicit sync acquisitions), so this
+    /// scan is cheap and only runs on the rare blocking-acquire path.
     pub(crate) fn held_permits_for(&self, kind: &str, key: &str) -> u32 {
         let own: u32 = self
             .held_sync_guards
             .iter()
-            .filter(|guard| guard._permit.kind() == kind && guard._permit.key() == key)
+            .filter(|guard| {
+                !guard._permit.is_released()
+                    && guard._permit.kind() == kind
+                    && guard._permit.key() == key
+            })
             .map(|guard| guard._permit.permits())
             .sum();
-        // A lock held by a suspended ancestor (inline async-builtin parent)
-        // counts as held by this task: the ancestor cannot release until we
-        // return, so a re-acquire here can never be granted. Count it as one
-        // permit — enough to trip the capacity-1 self-deadlock guard.
-        let inherited = self
+        let inherited: u32 = self
             .inherited_held_keys
             .iter()
-            .any(|(k, kk)| k == kind && kk == key) as u32;
+            .filter(|held| held.kind == kind && held.key == key)
+            .map(|held| held.permits)
+            .sum();
         own + inherited
     }
 
-    /// `(kind, key)` of every lock held by this VM *and* its suspended
-    /// ancestors — the transitive held-set seen by an inline child.
-    pub(crate) fn combined_held_keys(&self) -> Vec<(String, String)> {
-        let mut keys: Vec<(String, String)> = self
+    /// Every live sync permit held by this VM *and* its suspended ancestors: the
+    /// transitive held-set seen by an inline child.
+    pub(crate) fn combined_held_keys(&self) -> Vec<crate::synchronization::VmSyncHeldKey> {
+        let mut keys: Vec<crate::synchronization::VmSyncHeldKey> = self
             .held_sync_guards
             .iter()
-            .map(|guard| {
-                (
-                    guard._permit.kind().to_string(),
-                    guard._permit.key().to_string(),
-                )
-            })
+            .filter_map(|guard| crate::synchronization::VmSyncHeldKey::from_permit(&guard._permit))
             .collect();
         keys.extend(self.inherited_held_keys.iter().cloned());
         keys

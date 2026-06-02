@@ -1,0 +1,11 @@
+fn escaped_lock() {
+  return sync_mutex_acquire("raii-return")
+}
+
+pipeline test(task) {
+  let escaped = escaped_lock()
+  let reacquired = sync_mutex_acquire("raii-return", 0)
+  __io_println(reacquired != nil)
+  __io_println(sync_release(escaped))
+  __io_println(sync_release(reacquired))
+}

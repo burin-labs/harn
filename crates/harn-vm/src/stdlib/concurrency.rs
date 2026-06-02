@@ -1,13 +1,15 @@
 use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap};
-use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
+use std::sync::atomic::{AtomicI64, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
 use crate::shared_state::ScopedKey;
 use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
 use crate::stdlib::options::{non_negative_millis_from_value, ErrorKind};
-use crate::value::{VmAtomicHandle, VmChannelHandle, VmError, VmValue};
+use crate::value::{
+    DeadlockError, VmAtomicHandle, VmChannelCloseState, VmChannelHandle, VmError, VmValue,
+};
 use crate::vm::Vm;
 use crate::wait_for_graph::{channel_target, ChannelTarget, WaitGuard};
 
@@ -130,7 +132,7 @@ fn try_poll_channels(channels: &[VmValue]) -> (Option<(usize, VmValue, String)>,
                 match rx.try_recv() {
                     Ok(val) => return (Some((i, val, ch.name.to_string())), false),
                     Err(tokio::sync::mpsc::error::TryRecvError::Empty) => {
-                        if !ch.closed.load(Ordering::SeqCst) {
+                        if !ch.is_closed() {
                             all_closed = false;
                         }
                     }
@@ -148,6 +150,53 @@ fn cancelled_vm_error() -> VmError {
     VmError::Thrown(VmValue::String(std::sync::Arc::from(
         "kind:cancelled:VM cancelled by host",
     )))
+}
+
+fn channel_closed_error(operation: &str, channel_name: &str) -> VmError {
+    VmError::Thrown(VmValue::Dict(std::sync::Arc::new(BTreeMap::from([
+        (
+            "type".to_string(),
+            VmValue::String(std::sync::Arc::from("ChannelClosed")),
+        ),
+        (
+            "kind".to_string(),
+            VmValue::String(std::sync::Arc::from("ChannelClosed")),
+        ),
+        (
+            "category".to_string(),
+            VmValue::String(std::sync::Arc::from("channel_closed")),
+        ),
+        (
+            "message".to_string(),
+            VmValue::String(std::sync::Arc::from(format!(
+                "{operation}: channel '{channel_name}' is closed"
+            ))),
+        ),
+    ]))))
+}
+
+fn guard_sync_self_deadlock(
+    vm: &Vm,
+    kind: &str,
+    key: &str,
+    capacity: u32,
+    permits: u32,
+    timeout_ms: Option<u64>,
+) -> Result<(), VmError> {
+    if timeout_ms.is_some() {
+        return Ok(());
+    }
+    let held = vm.held_permits_for(kind, key);
+    if held > 0 && held.saturating_add(permits) > capacity {
+        return Err(VmError::Deadlock(Box::new(DeadlockError::self_deadlock(
+            kind,
+            key,
+            format!(
+                "re-entrant acquire of {permits} permit(s) while this task already holds {held}/{capacity}"
+            ),
+        ))));
+    }
+    Ok(())
 }
 
 fn optional_timeout_ms(value: Option<&VmValue>) -> Option<u64> {
@@ -377,6 +426,7 @@ async fn sync_mutex_acquire_builtin(
         .map(|a| a.display())
         .unwrap_or_else(|| "__default__".to_string());
     let timeout_ms = optional_timeout_ms(args.get(1));
+    guard_sync_self_deadlock(&vm, "mutex", &key, 1, 1, timeout_ms)?;
     Ok(vm
         .sync_runtime
         .acquire("mutex", &key, 1, 1, timeout_ms, vm.cancel_token.clone())
@@ -403,6 +453,7 @@ async fn sync_semaphore_acquire_builtin(
     let capacity = positive_u32_arg(&args, 1, 1, "sync_semaphore_acquire")?;
     let permits = positive_u32_arg(&args, 2, 1, "sync_semaphore_acquire")?;
     let timeout_ms = optional_timeout_ms(args.get(3));
+    guard_sync_self_deadlock(&vm, "semaphore", &key, capacity, permits, timeout_ms)?;
     Ok(vm
         .sync_runtime
         .acquire(
@@ -435,6 +486,7 @@ async fn sync_gate_acquire_builtin(
         .unwrap_or_else(|| "default".to_string());
     let limit = positive_u32_arg(&args, 1, 1, "sync_gate_acquire")?;
     let timeout_ms = optional_timeout_ms(args.get(2));
+    guard_sync_self_deadlock(&vm, "gate", &key, limit, 1, timeout_ms)?;
     Ok(vm
         .sync_runtime
         .acquire("gate", &key, limit, 1, timeout_ms, vm.cancel_token.clone())
@@ -473,6 +525,7 @@ async fn sync_rwlock_acquire_builtin(
         }
     };
     let timeout_ms = optional_timeout_ms(args.get(2));
+    guard_sync_self_deadlock(&vm, "rwlock", &key, RWLOCK_CAPACITY, permits, timeout_ms)?;
     Ok(vm
         .sync_runtime
         .acquire(
@@ -489,7 +542,7 @@ async fn sync_rwlock_acquire_builtin(
 }
 
 #[harn_builtin(
-    sig = "sync_release(permit: any) -> nil",
+    sig = "sync_release(permit: any) -> bool",
     category = "concurrency",
     doc = "Release a synchronization permit."
 )]
@@ -860,7 +913,7 @@ async fn mailbox_lookup_builtin(
 }
 
 #[harn_builtin(
-    sig = "mailbox_send(target: any, value: any) -> nil",
+    sig = "mailbox_send(target: any, value: any) -> bool",
     kind = "async",
     category = "concurrency",
     doc = "Send a value to a mailbox."
@@ -880,7 +933,7 @@ async fn mailbox_send_builtin(
     let Some(channel) = shared_runtime.mailbox_channel(&scoped) else {
         return Ok(VmValue::Bool(false));
     };
-    if channel.closed.load(Ordering::SeqCst) {
+    if channel.is_closed() {
         shared_runtime.note_mailbox_send(&scoped, false);
         return Ok(VmValue::Bool(false));
     }
@@ -947,7 +1000,7 @@ async fn mailbox_receive_builtin(
         {
             return Err(cancelled_vm_error());
         }
-        if channel.closed.load(Ordering::SeqCst) {
+        if channel.is_closed() {
             let mut rx = channel.receiver.lock().await;
             return match rx.try_recv() {
                 Ok(value) => {
@@ -1029,7 +1082,7 @@ fn channel_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErr
         name: std::sync::Arc::from(name),
         sender: Arc::new(tx),
         receiver: Arc::new(tokio::sync::Mutex::new(rx)),
-        closed: Arc::new(AtomicBool::new(false)),
+        close: Arc::new(VmChannelCloseState::open()),
     }))
 }
 
@@ -1045,7 +1098,10 @@ fn close_channel_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue,
         ))));
     }
     if let VmValue::Channel(ch) = &args[0] {
-        ch.closed.store(true, Ordering::SeqCst);
+        ch.close();
+        if let Ok(mut rx) = ch.receiver.try_lock() {
+            rx.close();
+        }
         Ok(VmValue::Nil)
     } else {
         Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
@@ -1061,7 +1117,7 @@ fn close_channel_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue,
 )]
 fn channel_is_closed_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     match args.first() {
-        Some(VmValue::Channel(ch)) => Ok(VmValue::Bool(ch.closed.load(Ordering::SeqCst))),
+        Some(VmValue::Channel(ch)) => Ok(VmValue::Bool(ch.is_closed())),
         _ => Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
             "channel_is_closed: first argument must be a channel",
         )))),
@@ -1229,7 +1285,7 @@ async fn yield_now_builtin(
 }
 
 #[harn_builtin(
-    sig = "send(channel: any, value: any) -> nil",
+    sig = "send(channel: any, value: any) -> bool",
     kind = "async",
     category = "concurrency",
     doc = "Send a value to a channel."
@@ -1246,8 +1302,9 @@ async fn send_builtin(
     if let VmValue::Channel(ch) = &args[0] {
         let vm = current_async_vm(&ctx, "send");
         let target = channel_target(ch);
-        if ch.closed.load(Ordering::SeqCst) {
-            return Ok(VmValue::Bool(false));
+        let mut closed_rx = ch.subscribe_closed();
+        if ch.is_closed() || *closed_rx.borrow() {
+            return Err(channel_closed_error("send", ch.name.as_ref()));
         }
         let val = args[1].clone();
         let val = match ch.sender.try_send(val) {
@@ -1257,16 +1314,22 @@ async fn send_builtin(
             }
             Err(tokio::sync::mpsc::error::TrySendError::Full(val)) => val,
             Err(tokio::sync::mpsc::error::TrySendError::Closed(_)) => {
-                return Ok(VmValue::Bool(false));
+                return Err(channel_closed_error("send", ch.name.as_ref()));
             }
         };
         let _wait = channel_send_wait(&vm, target.clone())?;
-        match ch.sender.send(val).await {
-            Ok(()) => {
-                vm.wait_for_graph.notify_channel_send(&target);
-                Ok(VmValue::Bool(true))
+        tokio::select! {
+            biased;
+            _ = closed_rx.changed() => Err(channel_closed_error("send", ch.name.as_ref())),
+            result = ch.sender.send(val) => {
+                match result {
+                    Ok(()) => {
+                        vm.wait_for_graph.notify_channel_send(&target);
+                        Ok(VmValue::Bool(true))
+                    }
+                    Err(_) => Err(channel_closed_error("send", ch.name.as_ref())),
+                }
             }
-            Err(_) => Ok(VmValue::Bool(false)),
         }
     } else {
         Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
@@ -1293,14 +1356,15 @@ async fn receive_builtin(
     if let VmValue::Channel(ch) = &args[0] {
         let vm = current_async_vm(&ctx, "receive");
         let target = channel_target(ch);
-        if ch.closed.load(Ordering::SeqCst) {
+        let mut closed_rx = ch.subscribe_closed();
+        if ch.is_closed() || *closed_rx.borrow() {
             let mut rx = ch.receiver.lock().await;
             return match rx.try_recv() {
                 Ok(val) => {
                     vm.wait_for_graph.notify_channel_receive(&target);
                     Ok(val)
                 }
-                Err(_) => Ok(VmValue::Nil),
+                Err(_) => Err(channel_closed_error("receive", ch.name.as_ref())),
             };
         }
         let mut wait = None;
@@ -1317,9 +1381,12 @@ async fn receive_builtin(
                 return Ok(val);
             }
             Err(tokio::sync::mpsc::error::TryRecvError::Disconnected) => {
-                return Ok(VmValue::Nil);
+                return Err(channel_closed_error("receive", ch.name.as_ref()));
             }
             Err(tokio::sync::mpsc::error::TryRecvError::Empty) => {}
+        }
+        if ch.is_closed() || *closed_rx.borrow() {
+            return Err(channel_closed_error("receive", ch.name.as_ref()));
         }
         let _wait = match wait {
             Some(wait) => Some(wait),
@@ -1334,7 +1401,16 @@ async fn receive_builtin(
                             vm.wait_for_graph.notify_channel_receive(&target);
                             Ok(val)
                         }
-                        None => Ok(VmValue::Nil),
+                        None => Err(channel_closed_error("receive", ch.name.as_ref())),
+                    };
+                }
+                _ = closed_rx.changed() => {
+                    return match rx.try_recv() {
+                        Ok(val) => {
+                            vm.wait_for_graph.notify_channel_receive(&target);
+                            Ok(val)
+                        }
+                        Err(_) => Err(channel_closed_error("receive", ch.name.as_ref())),
                     };
                 }
                 _ = cancel_poll.tick() => {

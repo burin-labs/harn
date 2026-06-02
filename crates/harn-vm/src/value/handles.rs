@@ -23,7 +23,53 @@ pub struct VmChannelHandle {
     pub name: Arc<str>,
     pub sender: Arc<tokio::sync::mpsc::Sender<VmValue>>,
     pub receiver: Arc<tokio::sync::Mutex<tokio::sync::mpsc::Receiver<VmValue>>>,
-    pub closed: Arc<AtomicBool>,
+    pub close: Arc<VmChannelCloseState>,
+}
+
+#[derive(Debug)]
+pub struct VmChannelCloseState {
+    closed: AtomicBool,
+    signal: tokio::sync::watch::Sender<bool>,
+}
+
+impl VmChannelCloseState {
+    pub(crate) fn open() -> Self {
+        let (signal, _) = tokio::sync::watch::channel(false);
+        Self {
+            closed: AtomicBool::new(false),
+            signal,
+        }
+    }
+
+    pub(crate) fn close(&self) -> bool {
+        if self.closed.swap(true, Ordering::SeqCst) {
+            return false;
+        }
+        self.signal.send_replace(true);
+        true
+    }
+
+    pub(crate) fn is_closed(&self) -> bool {
+        self.closed.load(Ordering::SeqCst)
+    }
+
+    pub(crate) fn subscribe(&self) -> tokio::sync::watch::Receiver<bool> {
+        self.signal.subscribe()
+    }
+}
+
+impl VmChannelHandle {
+    pub(crate) fn close(&self) -> bool {
+        self.close.close()
+    }
+
+    pub(crate) fn is_closed(&self) -> bool {
+        self.close.is_closed()
+    }
+
+    pub(crate) fn subscribe_closed(&self) -> tokio::sync::watch::Receiver<bool> {
+        self.close.subscribe()
+    }
 }
 
 /// An atomic integer handle for the VM.
@@ -65,6 +111,14 @@ impl VmSyncPermitHandle {
 
     pub(crate) fn permits(&self) -> u32 {
         self.lease.permits()
+    }
+
+    pub(crate) fn is_released(&self) -> bool {
+        self.lease.is_released()
+    }
+
+    pub(crate) fn same_lease(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.lease, &other.lease)
     }
 }
 
