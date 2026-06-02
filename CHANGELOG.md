@@ -8,6 +8,116 @@ highlights live in [CHANGELOG-pre-0.6.md](CHANGELOG-pre-0.6.md).
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.8.64
+
+### Added
+
+- Added `harn rule test` and the `harn_rules::testing` harness (Rule Engine Epic B) — a first-class way to test
+  structural rules with **inline annotations** (the Semgrep convention, made language-agnostic): a fixture line
+  preceded by `// ruleid: <id>` must match the rule, a `// ok: <id>` line must not, and any un-annotated match is a
+  false positive. A rule `foo.toml` pairs with a fixture `foo.<ext>`; `harn rule test <dir>` runs every rule against
+  its fixture, prints per-fixture pass/fail (or a `--json` envelope), and exits non-zero on failure (a CI gate).
+- Added project-local rule discovery (Rule Engine Epic B) — declare `[rules] ruleDirs = ["rules"]` in `harn.toml` and
+  `harn scan` / `harn codemod` load every `*.toml` rule from those directories when no `--rule`/`--rule-pack` is given.
+  `harn scan src` runs the project's rules over `src` (no inline pattern needed — an inline pattern is signalled by
+  `--lang`); `harn codemod src` applies the codemod rules in the pack and silently skips lint/search rules. Resolved
+  relative to the manifest directory; `utilDirs`/`testConfigs` keys are parsed for forward-compat.
+- Added the rule-pack registry surface (Rule Engine Epic B): `harn rule publish` validates `[rules] ruleDirs`, marks the
+  package-index row with rule-pack metadata, and delegates to the existing package publish flow; `harn rule search`
+  filters the package registry to rule packs and shows languages, rule count, safety summary, and descriptions. `harn
+  scan` / `harn codemod --rule-pack <name>` now resolves both installed package aliases and canonical registry names
+  such as `@scope/name` from `harn.lock`, while local rule-pack directories still work.
+- `harn codemod` now runs a **`harn fmt` post-pass** on rewritten `.harn` files (Rule Engine Epic C), so a codemod
+  batch lands fmt-stable — dict-pattern key order, spacing, and trailing commas are normalized and a later `harn fmt`
+  is a no-op. Built into `rules.apply` (on by default; `format: false` opts out; the result reports a `formatted`
+  flag), so the dry-run preview shows the final formatted output and every caller — the CLI and the cloud worker —
+  gets it for free. Only `.harn` is formatted (it is the only language with a bundled formatter). The lint-`--fix`
+  interplay half of #2847 (running the linter after fmt) is tracked as a follow-on now that engine rules are lint
+  rules (#2849).
+- Rule-engine rules now run as **lint rules** (Rule Engine Epic C). A declarative `harn-rules` rule (a `*.toml`
+  pattern) placed in a project's `[rules] ruleDirs` and targeting `language = "harn"` shows up in `harn lint` output
+  indistinguishably from a built-in lint — same `disable_rules` filtering, same `--fix` plumbing, reported under
+  `HARN-LNT-059` with the rule's own message/severity and id. Built on the new Harn tree-sitter grammar (#2888), so
+  structural rules finally match `.harn` source. (`harn lint` / `harn lint --fix` / `harn fix` / the JSON report all
+  load them.)
+- Custom lint rules can now be authored in Harn (Rule Engine Epic C, #2850) — the ESLint-plugin equivalent. Drop a
+  `*.lint.harn` module exporting `pub fn lint(source) -> [finding]` into a `[rules] ruleDirs` directory and `harn lint`
+  discovers it, runs it over every linted file, and merges its findings into the normal output (same exit code, same
+  `--json` report, same `disable` filtering). Rules run in a read-only sandbox — the language, stdlib, and the
+  structural rule engine, but no filesystem / network / process access — and a buggy rule fails safe: its error
+  becomes a diagnostic instead of crashing the linter.
+- Exposed linting to the VM and gave projects per-rule control (Rule Engine Epic C, #2851). A new `lint.run` host
+  builtin (`std/lint` `lint_run`) lints a Harn source string and returns structured diagnostics — `{code, rule,
+  message, severity, line, column, …}`, the same findings `harn lint` emits — so an agent / IDE / cloud worker can
+  lint without shelling out. And `[lint.severity]` in `harn.toml` promotes/demotes any rule (built-in or engine) —
+  `unnecessary-parentheses = "error"` — applied after disable-filtering and reflected in both the CLI and `lint.run`.
+- **Native lint rule libraries (#2852).** `harn lint` can now load trusted
+  dynamic rule libraries from `[rules] nativeRuleDirs`, run their diagnostics
+  through the same lint output/JSON/fix path as built-ins, and expose the
+  authoring ABI as `harn_lint::native`.
+- Added Harn-only semantic rule captures with `resolvesTo` / `type` `[[where]]`
+  filters and `capture_metadata` output for resolved binding identity and
+  simple static type labels.
+- **Harn structural rule scanning.** The rule engine now ships the Harn
+  tree-sitter grammar through `harn-hostlib`, so `harn scan` and saved TOML
+  rules can structurally match `.harn` source with `language = "harn"` (#2888).
+- **Session timelines can now be queried and streamed from Harn-owned
+  observability data (#2913).** Harn projects persisted run spans, agent events,
+  and channel lifecycle/audit receipts into a redacted timeline shape with
+  parent/child span links, channel emit→match links, and ACP query/subscribe
+  methods for live clients.
+
+### Changed
+
+- Dogfooded destructuring-with-defaults across the `.harn` stdlib (Rule Engine): 26 files where runs of consecutive
+  `let x = src?.x ?? d` sharing one source are folded into a single `let { … } = src ?? {}` (net −45 lines).
+  Behavior-preserving — the `?? {}` guards a nil source (bare destructure of nil throws), conformance stays at
+  1548/0, and no new lints. Powered by a new reusable fold codemod: `harn_rules::fold::fold_destructure_defaults` +
+  the `rules.fold` host builtin / `std/rules` `rules_fold` (the engine can't fold statement runs declaratively, so
+  this is a specialized transform — the same one that drives burin-code#1629). Closes #2824.
+- `harn rule test` with no path now discovers the project's rules from `[rules] ruleDirs` in `harn.toml` (Rule Engine
+  Epic B) — `harn rule test` becomes a zero-config CI gate for a project's rule pack. Scoped to the declared dirs, so a
+  stray non-rule `*.toml` elsewhere in the tree is not swept up. An explicit `harn rule test <path>` is unchanged.
+- **Reminder prompts now preserve local model prefix-cache stability (#2903).**
+  Non-Anthropic reminder text is appended after the message history instead of
+  mutating the leading system prompt, so llama.cpp-style prefix caches stay warm
+  when reminder sets change.
+- DRY / leaky-abstraction cleanup alongside the fixes above:
+  - `harn-cli` now depends on the `hex` crate (as the rest of the workspace already does) and the two hand-rolled hex
+    encoders (`registry::hex_bytes`, `skill_provenance::hex_encode`) were removed in favour of `hex::encode`.
+  - `outline`'s `extract_rust` now delegates to the shared `extract_with_prefixes` helper instead of inlining a
+    verbatim copy of its prefix-matching loop, matching every other per-language extractor.
+  - `fs_watch` dropped its private re-implementation of `optional_string_list` and reuses `value_args::optional_string_list`.
+  - Removed a dead, fully-subsumed early-return branch in the LSP `line_byte_range` helper.
+
+### Removed
+
+- **Provider catalog no longer advertises the broken qwen3.6 Ollama routes (#2901).**
+  Local qwen3.x recommendations now point at the validated llama.cpp provider
+  path instead of Ollama aliases whose server-side tool-call parser fails.
+
+### Fixed
+
+- **Project script lint rules now stay scoped to their owning package (#2826).**
+  Multi-target `harn lint` runs no longer apply a sibling package's
+  `*.lint.harn` rules to unrelated files, and script rules can return direct
+  findings or `rules_diagnostics(...)` results without losing fail-safe
+  diagnostics.
+- Cross-cutting correctness + performance sweep:
+  - `fs_snapshot`: a snapshot whose captured bytes exceed the whole session byte cap is no longer evicted by the very
+    call that created it — `enforce_byte_cap` now protects the snapshot currently being written, fixing a panic in
+    `snapshot()` (it re-fetched the just-evicted snapshot) and silent loss of rollback for an in-flight write.
+  - `fs_snapshot`: `atomic_write` no longer leaks its temp file when both the rename and the
+    remove-then-rename retry fail.
+  - Package registry: `harn add <pkg>` with no version constraint now resolves the highest **stable** release rather
+    than letting an `x.y.z-rc.1` prerelease shadow it (matching cargo/npm); packages that have only ever published
+    prereleases still resolve to the highest prerelease.
+  - `harn scan` regex rules: row/column for each match is now computed with a single forward cursor instead of
+    rescanning the document from byte 0 per match — the matcher was O(matches × file length) on files with many hits.
+  - Deterministic `search` tool: the compiled `RegexMatcher` is now borrowed per file instead of deep-cloned, so a
+    repo-wide scan no longer re-copies the compiled regex program once per file.
+- Release container publishing now verifies packaged Linux archives without `pipefail` false negatives.
+
 ## v0.8.63
 
 ### Breaking
