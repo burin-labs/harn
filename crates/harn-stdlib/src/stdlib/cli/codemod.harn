@@ -1,5 +1,5 @@
 import { unified_diff } from "std/diff"
-import { rules_apply } from "std/rules"
+import { rules_apply, rules_fold } from "std/rules"
 
 /**
  * `harn codemod` — apply a codemod rule's `fix` across a fileset.
@@ -14,10 +14,12 @@ import { rules_apply } from "std/rules"
  * engine (`std/rules` `rules_apply`) and formats the diffs / summary.
  *
  * Inputs:
- *   HARN_CODEMOD_PLAN_JSON     — JSON array of {rule, language, files: [...]}.
- *   HARN_CODEMOD_APPLY         — "1" to write, "0" for a dry-run preview.
- *   HARN_CODEMOD_ALLOW_UNSAFE  — "1" to apply above machine-applicable safety.
- *   HARN_OUTPUT_JSON           — "1" for the JSON envelope, else human diffs.
+ *   HARN_CODEMOD_PLAN_JSON          — JSON array of {rule, language, files: [...]}.
+ *   HARN_CODEMOD_RECIPE             — Built-in recipe id, e.g. "destructure-defaults".
+ *   HARN_CODEMOD_RECIPE_FILES_JSON  — JSON array of files for the built-in recipe.
+ *   HARN_CODEMOD_APPLY              — "1" to write, "0" for a dry-run preview.
+ *   HARN_CODEMOD_ALLOW_UNSAFE       — "1" to apply above machine-applicable safety.
+ *   HARN_OUTPUT_JSON                — "1" for the JSON envelope, else human diffs.
  */
 fn summary_line(changed: int, applied: int, apply: bool) -> string {
   if apply {
@@ -48,13 +50,27 @@ fn run_codemod(plan: list, apply: bool, allow_unsafe: bool) -> dict {
   return {files: file_results, changed: changed, applied: applied}
 }
 
-fn main(harness: Harness) {
-  let raw = harness.env.get_or("HARN_CODEMOD_PLAN_JSON", "")
-  if raw == "" {
-    harness.stdio.eprintln("codemod: internal error — HARN_CODEMOD_PLAN_JSON not set by the shim")
-    exit(70)
+fn run_builtin_recipe(name: string, files: list, apply: bool) -> dict {
+  if name == "destructure-defaults" {
+    let res = rules_fold({paths: files, dry_run: !apply})
+    var file_results = []
+    var changed = 0
+    var applied = 0
+    for f in res.files ?? [] {
+      if f.changed {
+        changed = changed + 1
+        if f.applied {
+          applied = applied + 1
+        }
+        file_results = file_results.push(f)
+      }
+    }
+    return {files: file_results, changed: changed, applied: applied}
   }
-  let plan = json_parse(raw)
+  throw "unknown built-in codemod recipe: " + name
+}
+
+fn main(harness: Harness) {
   let apply = harness.env.get_or("HARN_CODEMOD_APPLY", "0") == "1"
   let allow_unsafe = harness.env.get_or("HARN_CODEMOD_ALLOW_UNSAFE", "0") == "1"
   let json_mode = harness.env.get_or("HARN_OUTPUT_JSON", "0") == "1"
@@ -63,7 +79,18 @@ fn main(harness: Harness) {
   // `dry_run`/safety checks protect the files). `harn codemod` is a first-party
   // command the user invoked directly, so enabling it here is the intended use.
   hostlib_enable("tools:deterministic")
-  let out = run_codemod(plan, apply, allow_unsafe)
+  let recipe = harness.env.get_or("HARN_CODEMOD_RECIPE", "")
+  let out = if recipe {
+    let files = json_parse(harness.env.get_or("HARN_CODEMOD_RECIPE_FILES_JSON", "[]"))
+    run_builtin_recipe(recipe, files, apply)
+  } else {
+    let raw = harness.env.get_or("HARN_CODEMOD_PLAN_JSON", "")
+    if raw == "" {
+      harness.stdio.eprintln("codemod: internal error — no codemod plan or recipe set by the shim")
+      exit(70)
+    }
+    run_codemod(json_parse(raw), apply, allow_unsafe)
+  }
   if json_mode {
     let envelope = {
       schemaVersion: 1,

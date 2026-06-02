@@ -40,6 +40,21 @@ fn codemod(dir: &Path, extra: &[&str]) -> Outcome {
     }
 }
 
+fn built_in_codemod(dir: &Path, extra: &[&str]) -> Outcome {
+    let mut cmd = Command::new(env!("CARGO_BIN_EXE_harn"));
+    cmd.arg("codemod")
+        .arg("--rule-pack")
+        .arg("std/rules/destructure-defaults")
+        .arg(dir)
+        .args(extra);
+    let output = cmd.output().expect("spawn harn codemod");
+    Outcome {
+        stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
+        stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
+        code: output.status.code().unwrap_or(-1),
+    }
+}
+
 #[test]
 fn dry_run_previews_without_writing() {
     let dir = fixture_dir("dry");
@@ -82,6 +97,53 @@ fn apply_writes_and_is_idempotent() {
     let again = codemod(&dir, &["--json"]);
     let json2: serde_json::Value = serde_json::from_str(&again.stdout).expect("valid json");
     assert_eq!(json2["summary"]["changed"], 0);
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn built_in_destructure_defaults_pack_folds_harn_alias_runs() {
+    let dir = fixture_dir("builtin-fold");
+    std::fs::create_dir_all(dir.join("src")).unwrap();
+    let file = dir.join("src/main.harn");
+    std::fs::write(
+        &file,
+        "fn f() {\n  let ready = intake?.ready ?? false\n  let metadata = intake?.metadata_ready_state ?? \"<none>\"\n}\n",
+    )
+    .unwrap();
+
+    let dry = built_in_codemod(&dir.join("src"), &["--json"]);
+    assert_eq!(dry.code, 0, "stderr={}", dry.stderr);
+    let json: serde_json::Value = serde_json::from_str(&dry.stdout).expect("valid json");
+    assert_eq!(json["mode"], "codemod");
+    assert_eq!(json["summary"]["changed"], 1);
+    assert_eq!(json["summary"]["applied"], 0);
+    let preview = json["files"][0]["preview"].as_str().expect("preview");
+    assert!(preview.contains("ready = false"), "preview={preview}");
+    assert!(
+        preview.contains("metadata_ready_state: metadata = \"<none>\""),
+        "preview={preview}",
+    );
+
+    let on_disk = std::fs::read_to_string(&file).unwrap();
+    assert!(on_disk.contains("let ready = intake?.ready ?? false"));
+
+    let applied = built_in_codemod(&dir.join("src"), &["--apply", "--json"]);
+    assert_eq!(applied.code, 0, "stderr={}", applied.stderr);
+    let applied_json: serde_json::Value =
+        serde_json::from_str(&applied.stdout).expect("valid json");
+    assert_eq!(applied_json["summary"]["applied"], 1);
+
+    let folded = std::fs::read_to_string(&file).unwrap();
+    assert!(folded.contains("ready = false"), "folded={folded}");
+    assert!(
+        folded.contains("metadata_ready_state: metadata = \"<none>\""),
+        "folded={folded}",
+    );
+
+    let again = built_in_codemod(&dir.join("src"), &["--json"]);
+    let again_json: serde_json::Value = serde_json::from_str(&again.stdout).expect("valid json");
+    assert_eq!(again_json["summary"]["changed"], 0);
 
     let _ = std::fs::remove_dir_all(&dir);
 }

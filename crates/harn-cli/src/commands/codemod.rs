@@ -20,15 +20,32 @@ pub(crate) async fn run(args: CodemodArgs) {
 
     // No early `--rule` check: `resolve` falls back to the project's
     // `[rules] ruleDirs` (#2843) and errors itself if nothing is found.
-    let plan = match resolve(&args) {
-        Ok(plan) => plan,
+    let resolved = match resolve(&args) {
+        Ok(resolved) => resolved,
         Err(message) => {
             eprintln!("codemod: {message}");
             std::process::exit(2);
         }
     };
 
-    let _plan = ScopedEnvVar::set("HARN_CODEMOD_PLAN_JSON", &plan);
+    let _plan;
+    let _recipe;
+    let _recipe_files;
+    match resolved {
+        ResolvedCodemod::RulePlan(plan) => {
+            _plan = Some(ScopedEnvVar::set("HARN_CODEMOD_PLAN_JSON", &plan));
+            _recipe = None;
+            _recipe_files = None;
+        }
+        ResolvedCodemod::BuiltinRecipe { name, files_json } => {
+            _plan = None;
+            _recipe = Some(ScopedEnvVar::set("HARN_CODEMOD_RECIPE", name));
+            _recipe_files = Some(ScopedEnvVar::set(
+                "HARN_CODEMOD_RECIPE_FILES_JSON",
+                &files_json,
+            ));
+        }
+    }
     let _apply = ScopedEnvVar::set("HARN_CODEMOD_APPLY", if args.apply { "1" } else { "0" });
     let _unsafe = ScopedEnvVar::set(
         "HARN_CODEMOD_ALLOW_UNSAFE",
@@ -41,8 +58,28 @@ pub(crate) async fn run(args: CodemodArgs) {
 }
 
 #[cfg(feature = "hostlib")]
-fn resolve(args: &CodemodArgs) -> Result<String, String> {
+enum ResolvedCodemod {
+    RulePlan(String),
+    BuiltinRecipe {
+        name: &'static str,
+        files_json: String,
+    },
+}
+
+#[cfg(feature = "hostlib")]
+fn resolve(args: &CodemodArgs) -> Result<ResolvedCodemod, String> {
     use crate::commands::rules_cli;
+    use harn_hostlib::ast::Language;
+
+    if let Some(recipe) = builtin_recipe(args.rule_pack.as_deref()) {
+        let files = rules_cli::collect_files_for_language(&args.paths, Language::Harn);
+        let files_json =
+            serde_json::to_string(&files).map_err(|e| format!("serialize recipe files: {e}"))?;
+        return Ok(ResolvedCodemod::BuiltinRecipe {
+            name: recipe,
+            files_json,
+        });
+    }
 
     let specs =
         rules_cli::resolve_rules(None, None, args.rule.as_deref(), args.rule_pack.as_deref())?;
@@ -62,5 +99,15 @@ fn resolve(args: &CodemodArgs) -> Result<String, String> {
             "no codemod rules (rules with a `fix`) found in the project `[rules] ruleDirs`".into()
         });
     }
-    rules_cli::build_plan(codemod_specs, &args.paths)
+    rules_cli::build_plan(codemod_specs, &args.paths).map(ResolvedCodemod::RulePlan)
+}
+
+#[cfg(feature = "hostlib")]
+fn builtin_recipe(pack: Option<&str>) -> Option<&'static str> {
+    match pack {
+        Some("std/rules/destructure-defaults") | Some("stdlib/destructure-defaults") => {
+            Some("destructure-defaults")
+        }
+        _ => None,
+    }
 }

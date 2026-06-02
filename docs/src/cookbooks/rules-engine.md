@@ -111,6 +111,15 @@ rewrote src/config.ts  [safety=BehaviorPreserving]
 
 Re-running a folded file changes nothing — fixes are checked for idempotency.
 Point `--rule-pack <dir>` at a directory to run every `*.toml` rule in it.
+Installed packages work by name, and built-in packs live under `std/rules`.
+
+```console
+harn codemod --rule-pack std/rules/destructure-defaults src --apply
+```
+
+The built-in `destructure-defaults` pack handles Harn statement runs such as
+`let x = input?.x ?? d` / `let alias = input?.field ?? d`, where a sequence fold
+needs more context than a single-node TOML rule can express.
 
 ## How do I run my project's rules without naming them?
 

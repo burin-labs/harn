@@ -195,6 +195,17 @@ pub(crate) fn build_plan(specs: Vec<RuleSpec>, paths: &[String]) -> Result<Strin
     serde_json::to_string(&plan).map_err(|e| format!("serialize plan: {e}"))
 }
 
+/// Collect files matching one language with the same gitignore-aware walker the
+/// rule-pack paths use.
+pub(crate) fn collect_files_for_language(paths: &[String], language: Language) -> Vec<String> {
+    let lang_name = language.name();
+    collect_files(paths)
+        .into_iter()
+        .filter(|path| Language::detect(path, None).map(|l| l.name()) == Some(lang_name))
+        .map(|path| path.display().to_string())
+        .collect()
+}
+
 /// True if a rule TOML declares a top-level `fix` (i.e. it is a codemod, not a
 /// lint/search). Used to filter discovered packs down to applicable rules.
 pub(crate) fn rule_has_fix(src: &str) -> bool {
