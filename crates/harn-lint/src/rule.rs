@@ -25,6 +25,7 @@
 //! `.harn` rules take.
 
 use harn_parser::SNode;
+use std::path::Path;
 
 use crate::diagnostic::LintDiagnostic;
 
@@ -33,6 +34,7 @@ use crate::diagnostic::LintDiagnostic;
 /// the original source for source-aware rules.
 pub(crate) struct RuleCtx<'a> {
     pub source: Option<&'a str>,
+    pub file_path: Option<&'a Path>,
 }
 
 /// A single lint rule plugged into the registry.

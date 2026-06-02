@@ -18,6 +18,8 @@ mod fixes;
 mod harndoc;
 mod linter;
 mod naming;
+pub mod native;
+mod native_rule;
 mod rule;
 mod rules;
 
@@ -182,13 +184,19 @@ fn lint_full(
     module_graph: Option<(&harn_modules::ModuleGraph, &Path)>,
 ) -> Vec<LintDiagnostic> {
     let mut linter = Linter::new(source);
-    // Append project rule-engine rules (#2849) to the registry. They run in
-    // the whole-program phase over the source; a malformed one is skipped.
+    // Append project rule-engine rules to the registry. They run in the
+    // whole-program phase over the source; a malformed one is skipped.
     for engine_source in options.engine_rules {
         if let Some(rule) = crate::engine_rule::EngineRule::from_toml(engine_source) {
             linter.rules.push(Box::new(rule));
         }
     }
+    let (mut native_rules, mut native_load_diagnostics) =
+        crate::native_rule::load_rules_from_paths(options.native_rule_paths);
+    linter.rules.append(&mut native_rules);
+    linter.rules_visit_nodes = linter.rules.iter().any(|rule| rule.visits_nodes());
+    linter.diagnostics.append(&mut native_load_diagnostics);
+    linter.file_path = options.file_path.map(Path::to_path_buf);
     linter
         .externally_imported_names
         .clone_from(externally_imported_names);
@@ -222,7 +230,7 @@ fn lint_full(
             .filter(|d| !rule_disabled(&d.rule, disabled_rules))
             .collect()
     };
-    // Per-rule severity overrides (#2851), applied after disable-filtering.
+    // Per-rule severity overrides apply after disable-filtering.
     if !options.severity_overrides.is_empty() {
         for diagnostic in &mut diagnostics {
             if let Some(&severity) = options.severity_overrides.get(diagnostic.rule.as_ref()) {

@@ -98,6 +98,7 @@ pub struct Manifest {
 /// ruleDirs = ["rules", "vendor/rules"]
 /// utilDirs = ["rules/util"]
 /// testConfigs = ["rules/tests"]
+/// nativeRuleDirs = ["target/harn-native-rules"]
 /// ```
 ///
 /// Paths are resolved relative to the manifest's directory.
@@ -112,6 +113,14 @@ pub struct RulesConfig {
     /// Directories holding rule-test fixtures (for `harn rule test`).
     #[serde(default, alias = "test-configs", alias = "testConfigs")]
     pub test_configs: Vec<String>,
+    /// Trusted directories of native lint-rule dynamic libraries.
+    #[serde(
+        default,
+        alias = "native-rule-dirs",
+        alias = "nativeRuleDirs",
+        alias = "native_rule_dirs"
+    )]
+    pub native_rule_dirs: Vec<String>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -1604,9 +1613,18 @@ mod tests {
         let kebab: Manifest = toml::from_str("[rules]\nrule-dirs = [\"r\"]\n").unwrap();
         assert_eq!(kebab.rules.rule_dirs, vec!["r"]);
 
+        let native: Manifest =
+            toml::from_str("[rules]\nnativeRuleDirs = [\"native-rules\"]\n").unwrap();
+        assert_eq!(native.rules.native_rule_dirs, vec!["native-rules"]);
+
+        let native_kebab: Manifest =
+            toml::from_str("[rules]\nnative-rule-dirs = [\"nr\"]\n").unwrap();
+        assert_eq!(native_kebab.rules.native_rule_dirs, vec!["nr"]);
+
         // No `[rules]` table → empty discovery, never an error.
         let none: Manifest = toml::from_str("[package]\nname = \"x\"\n").unwrap();
         assert!(none.rules.rule_dirs.is_empty());
+        assert!(none.rules.native_rule_dirs.is_empty());
     }
 
     #[test]

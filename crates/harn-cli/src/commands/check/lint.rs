@@ -1,5 +1,5 @@
 use std::collections::HashSet;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process;
 
 use harn_lint::LintSeverity;
@@ -43,6 +43,31 @@ pub(crate) fn project_engine_rule_sources(path: &Path) -> Vec<String> {
     sources
 }
 
+/// Collect native lint-rule dynamic libraries from the nearest manifest's
+/// `[rules] nativeRuleDirs`. These paths are trusted by configuration: Harn
+/// never searches ambient directories or environment variables for native code.
+pub(crate) fn project_native_rule_paths(path: &Path) -> Vec<PathBuf> {
+    let Some((manifest, dir)) = crate::package::find_nearest_manifest(path) else {
+        return Vec::new();
+    };
+    let mut paths = Vec::new();
+    for rel in &manifest.rules.native_rule_dirs {
+        let Ok(entries) = std::fs::read_dir(dir.join(rel)) else {
+            continue;
+        };
+        let mut files: Vec<_> = entries
+            .filter_map(Result::ok)
+            .map(|entry| entry.path())
+            .filter(|p| {
+                p.extension().and_then(|e| e.to_str()) == Some(std::env::consts::DLL_EXTENSION)
+            })
+            .collect();
+        files.sort();
+        paths.extend(files);
+    }
+    paths
+}
+
 /// True when a rule TOML declares `language = "harn"`.
 fn rule_targets_harn(src: &str) -> bool {
     toml::from_str::<toml::Value>(src)
@@ -72,6 +97,7 @@ pub(crate) fn lint_file_inner(
     let program = output.program;
 
     let engine_rules = project_engine_rule_sources(path);
+    let native_rule_paths = project_native_rule_paths(path);
     let options = harn_lint::LintOptions {
         file_path: Some(path),
         require_file_header,
@@ -79,6 +105,7 @@ pub(crate) fn lint_file_inner(
         persona_step_allowlist,
         require_stdlib_metadata: path_is_stdlib_source(path),
         engine_rules: &engine_rules,
+        native_rule_paths: &native_rule_paths,
         severity_overrides: super::harn_lint_severity_overrides(path),
     };
     let mut diagnostics = harn_lint::lint_with_module_graph(
@@ -146,6 +173,7 @@ pub(crate) fn lint_fix_file(
     let program = output.program;
 
     let engine_rules = project_engine_rule_sources(path);
+    let native_rule_paths = project_native_rule_paths(path);
     let options = harn_lint::LintOptions {
         file_path: Some(path),
         require_file_header,
@@ -153,6 +181,7 @@ pub(crate) fn lint_fix_file(
         persona_step_allowlist,
         require_stdlib_metadata: path_is_stdlib_source(path),
         engine_rules: &engine_rules,
+        native_rule_paths: &native_rule_paths,
         severity_overrides: super::harn_lint_severity_overrides(path),
     };
     let lint_diags = harn_lint::lint_with_module_graph(

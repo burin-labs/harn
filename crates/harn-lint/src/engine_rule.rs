@@ -1,7 +1,7 @@
-//! Adapter (#2849) that runs a declarative `harn-rules` engine rule as a
-//! `harn-lint` [`Rule`], so structural rules loaded from a project's
-//! `[rules] ruleDirs` show up in `harn lint` output indistinguishably from
-//! built-in rules — same `disable_rules` filtering, same `--fix` plumbing.
+//! Adapter that runs a declarative `harn-rules` engine rule as a `harn-lint`
+//! [`Rule`], so structural rules loaded from a project's `[rules] ruleDirs`
+//! show up in `harn lint` output indistinguishably from built-in rules — same
+//! `disable_rules` filtering, same `--fix` plumbing.
 //!
 //! An engine rule matches via tree-sitter over the raw source, so the adapter
 //! runs in the whole-program phase: given the source text (`RuleCtx::source`),

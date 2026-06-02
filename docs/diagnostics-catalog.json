@@ -2257,7 +2257,7 @@
     {
       "code": "HARN-LNT-059",
       "category": "LNT",
-      "summary": "rule-engine structural lint (a declarative rule run through the linter)",
+      "summary": "project rule-engine or native lint rule",
       "repairs": [],
       "related": [],
       "explanationPresent": true,

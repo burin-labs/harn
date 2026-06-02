@@ -4,6 +4,7 @@
 //! in the [`walk`] submodule.
 
 use std::collections::{HashMap, HashSet};
+use std::path::PathBuf;
 
 use harn_lexer::{FixEdit, Span};
 use harn_parser::diagnostic::{
@@ -91,6 +92,7 @@ pub(crate) struct Linter<'a> {
     /// Whether the current function is inside an impl block.
     pub(super) in_impl_block: bool,
     pub(super) source: Option<&'a str>,
+    pub(super) file_path: Option<PathBuf>,
     /// Function names imported by other files (cross-module analysis).
     /// Functions in this set are not flagged as unused even if they have
     /// no local references, because another file explicitly imports them.
@@ -175,6 +177,7 @@ impl<'a> Linter<'a> {
             function_references: HashSet::new(),
             in_impl_block: false,
             source,
+            file_path: None,
             externally_imported_names: HashSet::new(),
             test_pipeline_depth: 0,
             type_declarations: Vec::new(),
@@ -205,6 +208,7 @@ impl<'a> Linter<'a> {
         let mut rules = std::mem::take(&mut self.rules);
         let ctx = RuleCtx {
             source: self.source,
+            file_path: self.file_path.as_deref(),
         };
         for rule in &mut rules {
             hook(rule.as_mut(), &ctx, &mut self.diagnostics);

@@ -110,6 +110,7 @@ pub(crate) fn lint_file_report(
     let program = output.program;
 
     let engine_rules = super::lint::project_engine_rule_sources(path);
+    let native_rule_paths = super::lint::project_native_rule_paths(path);
     let options = harn_lint::LintOptions {
         file_path: Some(path),
         require_file_header,
@@ -117,6 +118,7 @@ pub(crate) fn lint_file_report(
         persona_step_allowlist,
         require_stdlib_metadata: path_is_stdlib_source(path),
         engine_rules: &engine_rules,
+        native_rule_paths: &native_rule_paths,
         severity_overrides: super::harn_lint_severity_overrides(path),
     };
     let lint_diagnostics = harn_lint::lint_with_module_graph(
