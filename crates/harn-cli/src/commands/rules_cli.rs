@@ -44,23 +44,10 @@ pub(crate) fn resolve_rules(
         let toml = fs::read_to_string(rule_file).map_err(|e| format!("read `{rule_file}`: {e}"))?;
         let language = rule_language(&toml)?;
         Ok(vec![RuleSpec { toml, language }])
-    } else if let Some(dir) = rule_pack {
-        let mut specs = Vec::new();
-        let entries = fs::read_dir(dir).map_err(|e| format!("read rule pack `{dir}`: {e}"))?;
-        let mut paths: Vec<_> = entries
-            .filter_map(Result::ok)
-            .map(|e| e.path())
-            .filter(|p| p.extension().and_then(|e| e.to_str()) == Some("toml"))
-            .collect();
-        paths.sort();
-        for path in paths {
-            let toml =
-                fs::read_to_string(&path).map_err(|e| format!("read `{}`: {e}", path.display()))?;
-            let language = rule_language(&toml)?;
-            specs.push(RuleSpec { toml, language });
-        }
+    } else if let Some(pack) = rule_pack {
+        let specs = resolve_rule_pack(pack)?;
         if specs.is_empty() {
-            return Err(format!("rule pack `{dir}` has no `*.toml` rules"));
+            return Err(format!("rule pack `{pack}` has no `*.toml` rules"));
         }
         Ok(specs)
     } else {
@@ -97,6 +84,50 @@ fn load_rule_dir_specs(dir: &std::path::Path) -> Result<Vec<RuleSpec>, String> {
         specs.push(RuleSpec { toml, language });
     }
     Ok(specs)
+}
+
+/// Resolve a `--rule-pack` value to its rules. The value is either a local
+/// directory, or the name of an **installed package** (#2846) — a package
+/// fetched with `harn add` and materialized under `<project>/.harn/packages/`.
+fn resolve_rule_pack(pack: &str) -> Result<Vec<RuleSpec>, String> {
+    let local = std::path::Path::new(pack);
+    if local.is_dir() {
+        return load_pack_rules(local);
+    }
+    if let Some(installed) = installed_package_dir(pack) {
+        return load_pack_rules(&installed);
+    }
+    Err(format!(
+        "rule pack `{pack}` is not a directory or an installed package \
+         (run `harn add {pack}` first?)"
+    ))
+}
+
+/// The local directory of an installed package named `name`
+/// (`<project>/.harn/packages/<name>`), if it exists.
+fn installed_package_dir(name: &str) -> Option<std::path::PathBuf> {
+    let cwd = std::env::current_dir().ok()?;
+    let (_, project_dir) = crate::package::find_nearest_manifest(&cwd)?;
+    let dir = project_dir.join(".harn").join("packages").join(name);
+    dir.is_dir().then_some(dir)
+}
+
+/// Load a rule pack's rules: from the pack's own `[rules] ruleDirs` when it
+/// ships a `harn.toml` that declares them, else from `*.toml` at the pack root.
+fn load_pack_rules(dir: &std::path::Path) -> Result<Vec<RuleSpec>, String> {
+    let manifest_path = dir.join("harn.toml");
+    if manifest_path.is_file() {
+        if let Ok(manifest) = crate::package::read_manifest_from_path(&manifest_path) {
+            if !manifest.rules.rule_dirs.is_empty() {
+                let mut specs = Vec::new();
+                for rel in &manifest.rules.rule_dirs {
+                    specs.extend(load_rule_dir_specs(&dir.join(rel))?);
+                }
+                return Ok(specs);
+            }
+        }
+    }
+    load_rule_dir_specs(dir)
 }
 
 /// Discover rules from the nearest project manifest's `[rules] ruleDirs`
