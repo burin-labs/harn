@@ -66,6 +66,7 @@ const DIAGNOSTICS: &str = "hostlib_rules_diagnostics";
 const VISIT: &str = "hostlib_rules_visit";
 const APPLY: &str = "hostlib_rules_apply";
 const FOLD: &str = "hostlib_rules_fold";
+const LINT_RUN: &str = "hostlib_lint_run";
 
 /// The `rules` host capability.
 #[derive(Default)]
@@ -112,11 +113,33 @@ impl HostlibCapability for RulesCapability {
     }
 }
 
-/// Install the `rules` capability into a VM. Call this alongside
+/// The `lint` host capability (#2851): runs the Harn linter for an
+/// agent/IDE/cloud caller, returning the same diagnostics the CLI emits.
+#[derive(Default)]
+pub struct LintCapability;
+
+impl HostlibCapability for LintCapability {
+    fn module_name(&self) -> &'static str {
+        "lint"
+    }
+
+    fn register_builtins(&self, registry: &mut BuiltinRegistry) {
+        // Read-only: lint.run parses + lints in memory, never writes.
+        registry.register(RegisteredBuiltin {
+            name: LINT_RUN,
+            module: "lint",
+            method: "run",
+            handler: Arc::new(lint_run),
+        });
+    }
+}
+
+/// Install the `rules` + `lint` capabilities into a VM. Call this alongside
 /// `harn_hostlib::install_default`.
 pub fn install(vm: &mut Vm) {
     HostlibRegistry::new()
         .with(RulesCapability)
+        .with(LintCapability)
         .register_into_vm(vm);
     // `rules.visit` invokes a `.harn` closure per match, which only an async
     // builtin can do (`call_closure_pub` is async). It is therefore registered
@@ -319,6 +342,83 @@ fn fold_run(args: &[VmValue]) -> Result<VmValue, HostlibError> {
         ("dry_run", VmValue::Bool(dry_run)),
         ("files", VmValue::List(Arc::new(entries))),
     ]))
+}
+
+/// `lint.run` (#2851): lint a Harn source string and return its diagnostics, so
+/// an agent / IDE / cloud caller gets the same findings as `harn lint` without
+/// shelling out. Read-only. Params: `{source, disabled?, severity?}` where
+/// `severity` maps a rule id to `"error"` / `"warning"` / `"info"`.
+fn lint_run(args: &[VmValue]) -> Result<VmValue, HostlibError> {
+    let dict = first_dict(LINT_RUN, args)?;
+    let source = require_string(LINT_RUN, &dict, "source")?;
+    let disabled = optional_string_list(&dict, "disabled");
+    let severity_overrides = parse_severity_overrides(&dict);
+
+    let program = harn_parser::parse_source(&source).map_err(|e| HostlibError::Backend {
+        builtin: LINT_RUN,
+        message: format!("parse error: {e}"),
+    })?;
+    let options = harn_lint::LintOptions {
+        severity_overrides,
+        ..Default::default()
+    };
+    let diagnostics = harn_lint::lint_with_options(
+        &program,
+        &disabled,
+        Some(&source),
+        &std::collections::HashSet::new(),
+        &options,
+    );
+    let items: Vec<VmValue> = diagnostics.iter().map(lint_diagnostic_vm).collect();
+    Ok(dict_vm([
+        ("result", str_vm("ok")),
+        ("diagnostic_count", VmValue::Int(items.len() as i64)),
+        ("diagnostics", VmValue::List(Arc::new(items))),
+    ]))
+}
+
+/// Parse a `severity` dict param (`{rule: "error"|"warning"|"info"}`) into the
+/// linter's override map. Unknown severities are skipped.
+fn parse_severity_overrides(
+    dict: &BTreeMap<String, VmValue>,
+) -> std::collections::HashMap<String, harn_lint::LintSeverity> {
+    let mut out = std::collections::HashMap::new();
+    if let Some(VmValue::Dict(map)) = dict.get("severity") {
+        for (rule, value) in map.iter() {
+            if let VmValue::String(s) = value {
+                let severity = match s.to_ascii_lowercase().as_str() {
+                    "error" => Some(harn_lint::LintSeverity::Error),
+                    "warning" | "warn" => Some(harn_lint::LintSeverity::Warning),
+                    "info" => Some(harn_lint::LintSeverity::Info),
+                    _ => None,
+                };
+                if let Some(severity) = severity {
+                    out.insert(rule.clone(), severity);
+                }
+            }
+        }
+    }
+    out
+}
+
+/// Marshal a [`harn_lint::LintDiagnostic`] into a VM dict, mirroring the
+/// fields the CLI renders (code, rule, message, severity, span).
+fn lint_diagnostic_vm(diag: &harn_lint::LintDiagnostic) -> VmValue {
+    let severity = match diag.severity {
+        harn_lint::LintSeverity::Error => "error",
+        harn_lint::LintSeverity::Warning => "warning",
+        harn_lint::LintSeverity::Info => "info",
+    };
+    dict_vm([
+        ("code", str_vm(diag.code.as_str())),
+        ("rule", str_vm(diag.rule.as_ref())),
+        ("message", str_vm(&diag.message)),
+        ("severity", str_vm(severity)),
+        ("start_byte", VmValue::Int(diag.span.start as i64)),
+        ("end_byte", VmValue::Int(diag.span.end as i64)),
+        ("line", VmValue::Int(diag.span.line as i64)),
+        ("column", VmValue::Int(diag.span.column as i64)),
+    ])
 }
 
 // ---------------------------------------------------------------------------
@@ -959,5 +1059,51 @@ mod tests {
         RulesCapability.register_builtins(&mut registry);
         let names: Vec<_> = registry.iter().map(|b| b.name).collect();
         assert_eq!(names, vec![SEARCH, REPORT, DIAGNOSTICS, APPLY, FOLD]);
+    }
+
+    #[test]
+    fn lint_capability_registers_run() {
+        let mut registry = BuiltinRegistry::new();
+        LintCapability.register_builtins(&mut registry);
+        let names: Vec<_> = registry.iter().map(|b| b.name).collect();
+        assert_eq!(names, vec![LINT_RUN]);
+    }
+
+    #[test]
+    fn lint_run_returns_the_linter_findings() {
+        let result =
+            lint_run(&[dict(&[("source", str_vm("fn f() {\n  let x = (1)\n}\n"))])]).unwrap();
+        assert_eq!(s(get(&result, "result")), "ok");
+        let diags = match get(&result, "diagnostics") {
+            VmValue::List(l) => l.clone(),
+            _ => panic!(),
+        };
+        assert!(
+            diags
+                .iter()
+                .any(|d| s(get(d, "rule")) == "unnecessary-parentheses"),
+            "expected unnecessary-parentheses, got {diags:?}"
+        );
+    }
+
+    #[test]
+    fn lint_run_applies_a_severity_override() {
+        let result = lint_run(&[dict(&[
+            ("source", str_vm("fn f() {\n  let x = (1)\n}\n")),
+            (
+                "severity",
+                dict(&[("unnecessary-parentheses", str_vm("error"))]),
+            ),
+        ])])
+        .unwrap();
+        let diags = match get(&result, "diagnostics") {
+            VmValue::List(l) => l.clone(),
+            _ => panic!(),
+        };
+        let d = diags
+            .iter()
+            .find(|d| s(get(d, "rule")) == "unnecessary-parentheses")
+            .expect("rule present");
+        assert_eq!(s(get(d, "severity")), "error");
     }
 }

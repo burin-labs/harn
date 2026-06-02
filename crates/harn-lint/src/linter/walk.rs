@@ -258,6 +258,7 @@ impl<'a> Linter<'a> {
                     self.check_eager_collection_conversion(ann, value);
                 }
                 self.declare_pattern_variables(pattern, snode.span, false);
+                self.lint_binding_pattern_defaults(pattern);
             }
 
             Node::VarBinding {
@@ -273,6 +274,7 @@ impl<'a> Linter<'a> {
                     self.check_eager_collection_conversion(ann, value);
                 }
                 self.declare_pattern_variables(pattern, snode.span, true);
+                self.lint_binding_pattern_defaults(pattern);
             }
 
             Node::ConstBinding {
@@ -1254,6 +1256,26 @@ impl<'a> Linter<'a> {
                     self.lint_node(alt);
                 }
             }
+        }
+    }
+
+    fn lint_binding_pattern_defaults(&mut self, pattern: &BindingPattern) {
+        match pattern {
+            BindingPattern::Dict(fields) => {
+                for field in fields {
+                    if let Some(default_value) = field.default_value.as_deref() {
+                        self.lint_node(default_value);
+                    }
+                }
+            }
+            BindingPattern::List(elements) => {
+                for element in elements {
+                    if let Some(default_value) = element.default_value.as_deref() {
+                        self.lint_node(default_value);
+                    }
+                }
+            }
+            BindingPattern::Identifier(_) | BindingPattern::Pair(_, _) => {}
         }
     }
 }

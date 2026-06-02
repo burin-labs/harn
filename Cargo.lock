@@ -2542,6 +2542,8 @@ version = "0.8.63"
 dependencies = [
  "harn-fmt",
  "harn-hostlib",
+ "harn-lint",
+ "harn-parser",
  "harn-rules",
  "harn-vm",
  "serde_json",

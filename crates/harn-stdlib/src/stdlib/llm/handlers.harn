@@ -171,7 +171,7 @@ fn __safe_invoke(next, call) {
   return value
 }
 
-/*
+/**
  * Partial-application support for the canonical `(next, opts) -> caller`
  * middleware shape. Every middleware in this module starts its body
  * with `if !__llm_handler_is_callable(first) { return __partial(impl,
@@ -1334,7 +1334,7 @@ pub fn with_routing(opts) {
   }
   return { call ->
     let pick = __routing_resolve(routes, call)
-    let chosen = if __llm_handler_is_callable(pick?.caller) {
+    let chosen = if __llm_handler_is_callable(pick.caller) {
       pick.caller
     } else {
       default_caller

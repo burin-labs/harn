@@ -1559,8 +1559,8 @@ fn __edit_fast_apply_preview(path, before, after) {
       ops_rejected: 0,
     },
     ops: [],
-    errors: dry?.errors ?? [],
-    warnings: dry?.warnings ?? [],
+    errors: dry.errors ?? [],
+    warnings: dry.warnings ?? [],
   }
 }
 
@@ -1766,7 +1766,7 @@ pub fn edit_fast_apply(params) {
       {
         result: "dry_run_rejected",
         dry_run_bundle: preview,
-        errors: preview?.errors
+        errors: preview.errors
           ?? [{code: "dry_run_rejected", message: "edit_dry_run rejected the proposed content"}],
         llm: {provider: response?.provider, model: response?.model, content_source: extracted.source},
       },

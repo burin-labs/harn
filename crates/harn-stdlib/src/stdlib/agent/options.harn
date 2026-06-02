@@ -360,7 +360,7 @@ pub fn agent_tool_format_resolution(options = nil) {
  */
 pub fn agent_tool_format(options = nil) {
   let resolved = agent_tool_format_resolution(options)
-  if resolved?.tool_format != nil {
+  if resolved.tool_format != nil {
     return resolved.tool_format
   }
   return __fallback_tool_format()

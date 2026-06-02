@@ -243,7 +243,7 @@ pub fn agent_stall_initial_state() -> AgentStallState {
   }
 }
 
-/*
+/**
  * Reset only the action-stream tracking (signatures, observation/error
  * streaks, ping-pong). Leaves the consecutive-trip escalation and feedback
  * counters alone. Used when an action is exempt or the turn made no tool call.
@@ -281,7 +281,7 @@ fn __agent_tool_call_signature(call) -> string {
   return __agent_tool_call_name(call) + "\n" + args_text
 }
 
-/* observation classification (the polling-exemption mechanism) */
+/** observation classification (the polling-exemption mechanism) */
 fn __agent_stall_result_ok(result) -> bool {
   if result?.ok != nil {
     return result.ok ? true : false
@@ -297,7 +297,7 @@ fn __agent_stall_result_name(result) -> string {
   return to_string(result?.tool_name ?? result?.name ?? "")
 }
 
-/*
+/**
  * A context-window / token-limit error is its own trip condition because
  * repeating it is never productive and never recovers on its own.
  */
@@ -313,7 +313,7 @@ fn __agent_stall_is_context_window_error(text: string) -> bool {
     || contains(lowered, "max_tokens")
 }
 
-/*
+/**
  * Outcome of a dispatched result, normalized for the detector: one of
  * "ok" / "error" / "context_window", plus a byte-stable signature of the
  * observation payload (for "ok") or the error text (for "error").
@@ -330,7 +330,7 @@ fn __agent_stall_result_outcome(result) -> dict {
   return {kind: "error", signature: "err:" + sha256(error_text)}
 }
 
-/*
+/**
  * Find the dispatch result for the given tool name. The detector tracks one
  * action at a time, so the first matching result is the relevant observation.
  */
@@ -455,7 +455,7 @@ fn __agent_stall_maybe_emit(
   }
 }
 
-/*
+/**
  * ping-pong tracking: track the two action signatures in a candidate A/B
  * alternation and the count of alternations. Two alternations (A->B->A) is one
  * cycle. Returns the updated state; the cycle count lives in
@@ -491,7 +491,7 @@ fn __agent_stall_update_ping_pong(state: AgentStallState, signature: string) -> 
   return state + {ping_pong_a: signature, ping_pong_b: "", ping_pong_alternations: 0}
 }
 
-/*
+/**
  * Apply a fired trip: bump the consecutive-trip escalation and decide whether
  * to flag a hard stop. Returns the state with the trip recorded.
  */
@@ -500,7 +500,7 @@ fn __agent_stall_register_trip(state: AgentStallState, config: AgentStallConfig)
   return state + {consecutive_trips: trips, hard_stop: trips >= config.hard_stop_after_trips}
 }
 
-/*
+/**
  * A non-tripping step recovers: reset the consecutive-trip escalation so the
  * hard stop only fires on genuinely uninterrupted thrashing.
  */
@@ -508,7 +508,7 @@ fn __agent_stall_register_recovery(state: AgentStallState) -> AgentStallState {
   return state + {consecutive_trips: 0, hard_stop: false}
 }
 
-/*
+/**
  * Detect a no-progress monologue turn (assistant produced text but no tool
  * call). Returns the observation when the streak crosses the threshold.
  */
@@ -552,13 +552,13 @@ fn __agent_stall_observe_no_progress(
     state: next_state,
     enabled: true,
     warning: warning,
-    feedback_deferred: emitted?.feedback_deferred ?? false,
+    feedback_deferred: emitted.feedback_deferred ?? false,
     config: config,
     hard_stop: next_state.hard_stop,
   }
 }
 
-/*
+/**
  * __agent_stall_process_call folds a single tool call (and the observation it
  * produced last turn) into the detector state and decides which condition, if
  * any, tripped. Extracted from `agent_stall_observe_tool_calls` to keep that
@@ -769,7 +769,7 @@ pub fn agent_stall_observe_tool_calls(
       if emitted_warning == nil {
         emitted_warning = warning
       }
-      feedback_deferred = feedback_deferred || emitted?.feedback_deferred ?? false
+      feedback_deferred = feedback_deferred || emitted.feedback_deferred ?? false
       next_state = next_state + {warnings: next_state.warnings.push(warning)}
     } else {
       next_state = __agent_stall_register_recovery(next_state)

@@ -488,7 +488,7 @@ pub fn bulletin_decide(bulletin: ProfileBulletin, action, options = nil) -> Prof
   let resolved_by = decided_by == "" ? "host" : decided_by
   let rationale = __bulletin_first([opts?.rationale])
   let supersedes_input = if resolved_action == "supersede" {
-    __bulletin_string_list(opts?.supersedes ?? bulletin?.supersedes)
+    __bulletin_string_list(opts?.supersedes ?? bulletin.supersedes)
   } else {
     []
   }
@@ -497,7 +497,7 @@ pub fn bulletin_decide(bulletin: ProfileBulletin, action, options = nil) -> Prof
   }
   let decision = {
     schema: BULLETIN_DECISION_SCHEMA,
-    bulletin_id: __bulletin_text(bulletin?.id),
+    bulletin_id: __bulletin_text(bulletin.id),
     action: resolved_action,
     status: status,
     decided_at: decided_at,
@@ -559,8 +559,8 @@ pub fn bulletin_emit_decision(decision: ProfileBulletinDecision, options = nil) 
  * @example: bulletin_memory_namespace(bulletin)
  */
 pub fn bulletin_memory_namespace(bulletin: ProfileBulletin) -> string {
-  let scope = __bulletin_text(bulletin?.scope)
-  let scope_key = __bulletin_text(bulletin?.scope_key)
+  let scope = __bulletin_text(bulletin.scope)
+  let scope_key = __bulletin_text(bulletin.scope_key)
   if scope == "" || scope_key == "" {
     throw "std/personas/bulletins: bulletin is missing scope or scope_key"
   }
@@ -571,10 +571,10 @@ fn __bulletin_remember_accepted(bulletin: ProfileBulletin, options) {
   let opts = options ?? {}
   let override_namespace = __bulletin_text(opts?.memory_namespace)
   let namespace = override_namespace != "" ? override_namespace : bulletin_memory_namespace(bulletin)
-  let subject = __bulletin_text(bulletin?.subject)
-  let assertion = __bulletin_text(bulletin?.assertion)
+  let subject = __bulletin_text(bulletin.subject)
+  let assertion = __bulletin_text(bulletin.assertion)
   let text = subject == "" ? assertion : subject + " — " + assertion
-  let persona = __bulletin_text(bulletin?.persona)
+  let persona = __bulletin_text(bulletin.persona)
   var tags = ["bulletin", __bulletin_text(bulletin.scope)]
   if persona != "" {
     tags = tags.push("persona:" + persona)
