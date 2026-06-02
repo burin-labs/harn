@@ -240,19 +240,35 @@ run_step "harn check --provider-matrix" smoke_provider_matrix
 # and `println` host call work end-to-end on this platform.
 run_step "harn run tests/smoke/hello.harn" "$HARN" run tests/smoke/hello.harn
 
-# Step 8: process tool. Spawns one short-lived child via std/command
+# Step 8: documented quickstart. Runs the literal first script from
+# docs/src/getting-started.md — the `fn main(harness: Harness)` entry
+# point plus a `harness.stdio.println` host call. CI only *typechecks*
+# that snippet (scripts/check_docs_snippets.sh runs `harn check`); running
+# it here freezes the documented first-run experience end-to-end against
+# the released binary and exercises the capability-aware entry path that
+# the `pipeline default()` hello fixture does not.
+run_step "harn run tests/smoke/quickstart.harn" "$HARN" run tests/smoke/quickstart.harn
+
+# Step 9: process tool. Spawns one short-lived child via std/command
 # with platform-appropriate argv. Confirms the sandboxed process
 # spawn path resolves on every platform — Seatbelt on macOS, Landlock
 # +seccomp on Linux, AppContainer/Job Objects on Windows. Failures
 # here usually mean the sandbox backend regressed for one platform.
 run_step "harn run tests/smoke/process.harn" "$HARN" run tests/smoke/process.harn
 
-# Step 9: no-credentials workflow. Drives the LLM call path through
+# Step 10: no-credentials workflow. Drives the LLM call path through
 # `provider: "mock"` so we touch the agent runtime without API keys,
 # secret stores, or network access.
 run_step "harn run tests/smoke/mock_workflow.harn" "$HARN" run tests/smoke/mock_workflow.harn
 
-# Step 10: file-watch boot. See smoke_watch_boot above.
+# Step 11: agent loop. Drives the headline `agent_loop` abstraction
+# through `provider: "mock"`: a scripted multi-turn loop that issues one
+# native tool call, consumes the deterministic tool result, then completes
+# naturally. Exercises the agent runtime, tool dispatch, and loop
+# termination that the flat mock_workflow `llm_call` cannot reach.
+run_step "harn run tests/smoke/agent_loop.harn" "$HARN" run tests/smoke/agent_loop.harn
+
+# Step 12: file-watch boot. See smoke_watch_boot above.
 run_step "harn watch boot" smoke_watch_boot
 
 if [[ "$FAILED" -ne 0 ]]; then

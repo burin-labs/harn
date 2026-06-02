@@ -1,0 +1,66 @@
+/**
+ * Agent-loop smoke fixture for the cross-platform release smoke matrix.
+ * Exercises the headline `agent_loop` abstraction end-to-end through the
+ * built-in `provider: "mock"` path: a scripted two-turn loop that issues
+ * one native tool call, consumes the deterministic tool result, then
+ * completes with a plain final turn (natural completion in native mode).
+ * Runs without API keys, network, or platform-specific secret stores.
+ *
+ * Complements mock_workflow.harn (a single flat `llm_call`) by covering
+ * the multi-iteration, tool-using loop that the flat fixture cannot: a
+ * regression in the agent runtime, tool dispatch, or loop termination
+ * lights up here before a release tag is cut. Mirrors
+ * conformance/tests/agents/agent_loop_native_natural_completion.harn but
+ * stays minimal and ASCII/LF-only so smoke output byte-compares on every
+ * platform.
+ */
+import { llm_text, llm_tool_call, with_llm_script } from "std/testing"
+
+fn smoke_tools() {
+  var tools = tool_registry()
+  tools = tool_define(
+    tools,
+    "add",
+    "Add two integers",
+    {
+      handler: { args -> args.lhs + args.rhs },
+      parameters: {
+        lhs: {type: "number", description: "Left addend"},
+        rhs: {type: "number", description: "Right addend"},
+      },
+      returns: {type: "number"},
+      annotations: {kind: "read"},
+    },
+  )
+  return tools
+}
+
+pipeline default() {
+  with_llm_script(
+    [llm_tool_call("add", {lhs: 2, rhs: 3}), llm_text("The sum is 5.")],
+    { ->
+      let result = agent_loop(
+        "Add 2 and 3 using the tool, then report the sum.",
+        nil,
+        {
+          provider: "mock",
+          tools: smoke_tools(),
+          tool_format: "native",
+          loop_until_done: true,
+          max_iterations: 4,
+          done_judge: nil,
+        },
+      )
+      if result.status != "done" {
+        throw "agent loop smoke failed: expected status=done, got ${result.status}"
+      }
+      if result.llm.iterations < 2 {
+        throw "agent loop smoke failed: expected >=2 LLM iterations, got ${result.llm.iterations}"
+      }
+      if !contains(result.tools.successful, "add") {
+        throw "agent loop smoke failed: expected the add tool to run, got ${result.tools.successful}"
+      }
+      __io_println("agent loop ok")
+    },
+  )
+}
