@@ -29,7 +29,7 @@ pub(crate) use config::{
     apply_harn_lint_config, apply_loaded_harn_lint_config, build_module_graph,
     build_module_graph_and_seed_analysis, collect_cross_file_imports, collect_harn_targets,
     harn_lint_complexity_threshold, harn_lint_persona_step_allowlist,
-    harn_lint_require_file_header, load_harn_lint_config,
+    harn_lint_require_file_header, harn_lint_severity_overrides, load_harn_lint_config,
 };
 pub(crate) use fmt::{fmt_targets, fmt_targets_json, FmtMode, FMT_SCHEMA_VERSION};
 pub(crate) use host_capabilities::load_host_capabilities;

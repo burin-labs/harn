@@ -23,6 +23,33 @@ fn lint_with_engine_rules(
 }
 
 #[test]
+fn severity_override_remaps_a_rule() {
+    // `no-foo` defaults to `warning`; a project override promotes it to `error`
+    // (#2851). Applied after disable-filtering, by rule id.
+    use std::collections::HashMap;
+    let rules = vec![NO_FOO.to_string()];
+    let mut overrides: HashMap<String, crate::diagnostic::LintSeverity> = HashMap::new();
+    overrides.insert("no-foo".to_string(), crate::diagnostic::LintSeverity::Error);
+
+    let source = "fn main() {\n  foo()\n}\n";
+    let mut lexer = Lexer::new(source);
+    let tokens = lexer.tokenize().unwrap();
+    let mut parser = Parser::new(tokens);
+    let program = parser.parse().unwrap();
+    let options = LintOptions {
+        engine_rules: &rules,
+        severity_overrides: overrides,
+        ..Default::default()
+    };
+    let diags = lint_with_options(&program, &[], Some(source), &HashSet::new(), &options);
+    let d = diags
+        .iter()
+        .find(|d| d.rule == "no-foo")
+        .expect("no-foo fired");
+    assert_eq!(d.severity, crate::diagnostic::LintSeverity::Error);
+}
+
+#[test]
 fn engine_rule_emits_a_lint_with_its_fix() {
     let rules = vec![NO_FOO.to_string()];
     let diags = lint_with_engine_rules("fn main() {\n  foo()\n}\n", &rules, &[]);

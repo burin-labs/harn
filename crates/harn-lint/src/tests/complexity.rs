@@ -107,12 +107,8 @@ pipeline default(task) {
     let program = parser.parse().unwrap();
     let externally_imported: HashSet<String> = HashSet::new();
     let options = LintOptions {
-        file_path: None,
-        require_file_header: false,
         complexity_threshold: Some(5),
-        persona_step_allowlist: &[],
-        require_stdlib_metadata: false,
-        engine_rules: &[],
+        ..Default::default()
     };
     let diags = lint_with_options(&program, &[], Some(source), &externally_imported, &options);
     let complexity_warnings: Vec<_> = diags
@@ -175,12 +171,8 @@ pipeline default(task) {
     let program = parser.parse().unwrap();
     let externally_imported: HashSet<String> = HashSet::new();
     let options = LintOptions {
-        file_path: None,
-        require_file_header: false,
         complexity_threshold: Some(100),
-        persona_step_allowlist: &[],
-        require_stdlib_metadata: false,
-        engine_rules: &[],
+        ..Default::default()
     };
     let diags = lint_with_options(&program, &[], Some(source), &externally_imported, &options);
     assert!(

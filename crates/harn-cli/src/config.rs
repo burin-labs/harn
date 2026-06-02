@@ -89,6 +89,11 @@ pub struct LintConfig {
     /// to [`harn_lint::DEFAULT_TEMPLATE_VARIANT_BRANCH_THRESHOLD`].
     #[serde(default, alias = "template-variant-branch-threshold")]
     pub template_variant_branch_threshold: Option<usize>,
+    /// `[lint.severity]` — per-rule severity overrides (#2851), a rule id →
+    /// `"error"` / `"warning"` / `"info"`. Applied after disable-filtering, so
+    /// a project can promote one rule to an error and demote another.
+    #[serde(default)]
+    pub severity: std::collections::HashMap<String, String>,
 }
 
 /// `[eval]` section of `harn.toml`. Reserves a `[eval.fleets.<name>]`

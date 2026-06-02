@@ -634,6 +634,7 @@ fn count_remaining_diagnostics(target: &Path) -> Result<RemainingDiagnostics, St
             persona_step_allowlist: &persona_step_allowlist,
             require_stdlib_metadata: commands::check::path_is_stdlib_source(file),
             engine_rules: &engine_rules,
+            severity_overrides: commands::check::harn_lint_severity_overrides(file),
         };
         count += harn_lint::lint_with_module_graph(
             &program,
@@ -713,6 +714,7 @@ fn collect_file_candidates(
         persona_step_allowlist: &persona_step_allowlist,
         require_stdlib_metadata: commands::check::path_is_stdlib_source(file),
         engine_rules: &engine_rules,
+        severity_overrides: commands::check::harn_lint_severity_overrides(file),
     };
     let lint_diagnostics = harn_lint::lint_with_module_graph(
         &program,
