@@ -1365,7 +1365,7 @@ path = "SKILL.md"
         let temp = tempfile::tempdir().unwrap();
         let mut bundle = WorkflowBundle::default();
         carry_extension_metadata(temp.path(), &mut bundle).unwrap();
-        assert!(bundle.metadata.get("contributes").is_none());
+        assert!(!bundle.metadata.contains_key("contributes"));
     }
 
     #[test]
