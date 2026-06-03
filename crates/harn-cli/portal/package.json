@@ -19,7 +19,7 @@
     "@uiw/react-codemirror": "^4.25.10",
     "react": "^19.2.6",
     "react-dom": "^19.2.6",
-    "react-intl": "^10.1.7",
+    "react-intl": "^10.1.9",
     "react-router-dom": "^7.15.1"
   },
   "devDependencies": {
