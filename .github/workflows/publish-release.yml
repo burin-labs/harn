@@ -199,8 +199,27 @@ jobs:
             # — so re-running is a no-op for crates that landed and a
             # recovery for those that didn't.
             if [[ "$EVENT_NAME" == "push" ]]; then
-              ASSET_COUNT="$(gh release view "$LATEST_TAG" --json assets --jq '.assets | length' 2>/dev/null || echo 0)"
-              if (( ASSET_COUNT >= 5 )); then
+              # Distinguish a genuine low asset count (recover) from a transient
+              # or eventually-consistent query failure. The old `|| echo 0`
+              # collapsed "gh could not answer" into "0 assets", forcing
+              # DRIFT=true → a doomed `release_ship.sh --finalize` from main HEAD
+              # when the tag is an older (squash-orphaned) commit. That produced
+              # a spurious red X on a routine main push right after the tag-first
+              # publish (harn#2964: a `gh release view` raced the release becoming
+              # visible). Retry briefly; only force a re-publish on a *confirmed*
+              # low count, and on a persistent query failure assume the tag-first
+              # publish already shipped (crates.io is the source of truth) and skip.
+              ASSET_COUNT=""
+              for _ in 1 2 3; do
+                if ASSET_COUNT="$(gh release view "$LATEST_TAG" --json assets --jq '.assets | length' 2>/dev/null)"; then
+                  break
+                fi
+                ASSET_COUNT=""
+                sleep 5
+              done
+              if [[ -z "$ASSET_COUNT" ]]; then
+                echo "::notice::Could not read $LATEST_TAG release assets after retries; assuming the tag-first publish already shipped and skipping (avoids a spurious finalize from main HEAD)."
+              elif (( ASSET_COUNT >= 5 )); then
                 echo "::notice::$LATEST_TAG already published — $ASSET_COUNT assets on https://github.com/$GITHUB_REPOSITORY/releases/tag/$LATEST_TAG. Publish job will skip; this is the intended behavior under tag-first publishing."
               else
                 DRIFT=true
