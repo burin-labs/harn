@@ -929,6 +929,53 @@ pub(crate) fn validate_static_trigger_configs(
     Ok(())
 }
 
+/// Validate the `[[contributes]]` block: namespaced kinds, non-empty + unique
+/// ids, and that every contribution `scope` is declared in
+/// `[package].permissions`. Fail-closed: a contribution may not request a
+/// capability the package did not declare up front, so install-time consent
+/// can enumerate the complete scope set from `[package].permissions` alone.
+pub(crate) fn validate_contributions(manifest: &Manifest) -> Result<(), PackageError> {
+    if manifest.contributes.is_empty() {
+        return Ok(());
+    }
+    let declared: BTreeSet<&str> = manifest
+        .package
+        .as_ref()
+        .map(|p| p.permissions.iter().map(String::as_str).collect())
+        .unwrap_or_default();
+    let mut seen_ids: BTreeSet<&str> = BTreeSet::new();
+    for entry in &manifest.contributes {
+        if entry.id.trim().is_empty() {
+            return Err(PackageError::Validation(
+                "[[contributes]] entry is missing a non-empty `id`".to_string(),
+            ));
+        }
+        if !entry.has_namespaced_kind() {
+            return Err(PackageError::Validation(format!(
+                "[[contributes]] entry `{}` has invalid `kind` \"{}\": expected a dot-namespaced \
+                 lowercase identifier such as `editor.language`",
+                entry.id, entry.kind
+            )));
+        }
+        if !seen_ids.insert(entry.id.as_str()) {
+            return Err(PackageError::Validation(format!(
+                "[[contributes]] has duplicate id `{}`; ids must be unique within a package",
+                entry.id
+            )));
+        }
+        for scope in &entry.scopes {
+            if !declared.contains(scope.as_str()) {
+                return Err(PackageError::Validation(format!(
+                    "[[contributes]] entry `{}` requests scope `{}` not declared in \
+                     [package].permissions; add it there so install-time consent surfaces it",
+                    entry.id, scope
+                )));
+            }
+        }
+    }
+    Ok(())
+}
+
 pub(crate) fn validate_handoff_routes(
     routes: &[harn_vm::HandoffRouteConfig],
     manifest: &Manifest,

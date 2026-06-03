@@ -311,6 +311,12 @@ pub struct WorkflowBundlePreview {
     pub environment: EnvironmentRequirements,
     pub nodes: Vec<WorkflowBundlePreviewNode>,
     pub edges: Vec<WorkflowEdge>,
+    /// Pass-through of the signed bundle's `metadata` map. Hosts read the
+    /// `contributes` and `extension` keys (populated by `harn pack`) to
+    /// discover host-surface extension contributions from the verified
+    /// preview without unpacking the archive.
+    #[serde(default)]
+    pub metadata: BTreeMap<String, serde_json::Value>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -1012,6 +1018,7 @@ pub fn preview_workflow_bundle(bundle: &WorkflowBundle) -> WorkflowBundlePreview
         environment: bundle.environment.clone(),
         nodes,
         edges: sorted_edges(&canonical),
+        metadata: bundle.metadata.clone(),
     }
 }
 

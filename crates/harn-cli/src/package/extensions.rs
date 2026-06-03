@@ -15,7 +15,8 @@ pub fn validate_runtime_manifest_extensions(anchor: &Path) -> Result<(), Package
     let Some((manifest, _manifest_dir)) = find_nearest_manifest(anchor) else {
         return Ok(());
     };
-    validate_handoff_routes(&manifest.handoff_routes, &manifest)
+    validate_handoff_routes(&manifest.handoff_routes, &manifest)?;
+    validate_contributions(&manifest)
 }
 
 /// Load the nearest project manifest plus any installed package manifests and

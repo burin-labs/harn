@@ -653,6 +653,16 @@ pub fn build(args: &BuildArgs) -> Result<PackOutcome, PackError> {
             })?,
         );
     }
+    // Carry host-surface extension data — the `[[contributes]]` block plus
+    // package identity/permissions — into the signed bundle's metadata so a
+    // host (e.g. Burin) can discover and gate contributions from the verified
+    // artifact alone, with no separate descriptor. Harn stays agnostic about
+    // the kind-specific payload; it only ferries it. See `docs` and the
+    // `ContributionEntry` schema.
+    // Also bundle files referenced by the `[[contributes]]` block (preview
+    // HTML, theme JSON, canon dir, skill, …) so an imported pack is
+    // self-contained for the host.
+    contents.extend(carry_extension_metadata(&project_root, &mut bundle)?);
     sort_sbom_doc(&mut bundle.sbom);
     let sbom_bytes = serde_json::to_vec_pretty(&bundle.sbom).map_err(|err| {
         PackError::new(
@@ -1022,6 +1032,138 @@ fn type_check_or_fail(
     Ok(())
 }
 
+/// Carry the package's host-surface extension data into the signed bundle's
+/// metadata. Reads the nearest `harn.toml`, serializing the `[[contributes]]`
+/// block under the `contributes` key and package identity/permissions under
+/// `extension`. No-op when there is no manifest, it fails to parse, or there
+/// are no contributions — packing a plain workflow is unaffected.
+fn carry_extension_metadata(
+    project_root: &Path,
+    bundle: &mut WorkflowBundle,
+) -> Result<Vec<HarnpackEntry>, PackError> {
+    let manifest_path = project_root.join("harn.toml");
+    if !manifest_path.is_file() {
+        return Ok(Vec::new());
+    }
+    let Ok(text) = std::fs::read_to_string(&manifest_path) else {
+        return Ok(Vec::new());
+    };
+    let manifest: crate::package::Manifest = match toml::from_str(&text) {
+        Ok(manifest) => manifest,
+        Err(_) => return Ok(Vec::new()),
+    };
+    // Validate before sealing into the signed bundle so a malformed
+    // `[[contributes]]` block fails the pack rather than shipping silently.
+    crate::package::validate_contributions(&manifest)
+        .map_err(|err| PackError::new("pack.invalid_contributes", err.message().to_string()))?;
+    if !manifest.contributes.is_empty() {
+        bundle.metadata.insert(
+            "contributes".to_string(),
+            serde_json::to_value(&manifest.contributes).map_err(|err| {
+                PackError::new(
+                    "pack.metadata_failed",
+                    format!("failed to render contributions: {err}"),
+                )
+            })?,
+        );
+    }
+    if let Some(pkg) = manifest.package.as_ref() {
+        bundle.metadata.insert(
+            "extension".to_string(),
+            serde_json::json!({
+                "name": pkg.name,
+                "version": pkg.version,
+                "publisher": pkg.publisher,
+                "contact": pkg.contact,
+                "created": pkg.created,
+                "description": pkg.description,
+                "license": pkg.license,
+                "permissions": pkg.permissions,
+                "host_requirements": pkg.host_requirements,
+            }),
+        );
+    }
+    collect_contribution_assets(project_root, &manifest.contributes)
+}
+
+/// Bundle files referenced by `[[contributes]]` config (`entry`/`file`/`path`)
+/// at their bundle-relative archive paths so a host can load them after import
+/// (the preview HTML, theme JSON, canon dir, skill, …). `harn pack` otherwise
+/// only walks the entrypoint's transitive imports, which never reach these.
+/// Paths must stay inside the archive root; `..` escapes are skipped.
+fn collect_contribution_assets(
+    project_root: &Path,
+    contributes: &[crate::package::ContributionEntry],
+) -> Result<Vec<HarnpackEntry>, PackError> {
+    const ASSET_KEYS: [&str; 3] = ["entry", "file", "path"];
+    let mut seen: std::collections::BTreeSet<PathBuf> = std::collections::BTreeSet::new();
+    let mut entries: Vec<HarnpackEntry> = Vec::new();
+    for contribution in contributes {
+        for key in ASSET_KEYS {
+            let Some(rel) = contribution.config.get(key).and_then(|v| v.as_str()) else {
+                continue;
+            };
+            let rel_path = PathBuf::from(rel);
+            // Reject absolute paths and `..` escapes.
+            if rel_path.is_absolute()
+                || rel_path
+                    .components()
+                    .any(|c| matches!(c, Component::ParentDir | Component::RootDir))
+            {
+                continue;
+            }
+            collect_path(project_root, &rel_path, &mut seen, &mut entries)?;
+        }
+    }
+    Ok(entries)
+}
+
+/// Recursively add `rel` (file or directory, relative to `project_root`) to the
+/// archive at its bundle-relative path. No-op when the path is missing.
+fn collect_path(
+    project_root: &Path,
+    rel: &Path,
+    seen: &mut std::collections::BTreeSet<PathBuf>,
+    entries: &mut Vec<HarnpackEntry>,
+) -> Result<(), PackError> {
+    let abs = project_root.join(rel);
+    let metadata = match std::fs::symlink_metadata(&abs) {
+        Ok(metadata) => metadata,
+        Err(_) => return Ok(()),
+    };
+    if metadata.file_type().is_symlink() {
+        return Ok(()); // never follow symlinks out of the archive root
+    }
+    if metadata.is_dir() {
+        let mut children: Vec<PathBuf> = std::fs::read_dir(&abs)
+            .map_err(|err| {
+                PackError::new(
+                    "asset.read_failed",
+                    format!("failed to read contribution dir {}: {err}", abs.display()),
+                )
+            })?
+            .filter_map(|e| e.ok().map(|e| e.file_name()))
+            .map(|name| rel.join(name))
+            .collect();
+        children.sort();
+        for child in children {
+            collect_path(project_root, &child, seen, entries)?;
+        }
+        return Ok(());
+    }
+    if !metadata.is_file() || !seen.insert(rel.to_path_buf()) {
+        return Ok(());
+    }
+    let bytes = std::fs::read(&abs).map_err(|err| {
+        PackError::new(
+            "asset.read_failed",
+            format!("failed to read contribution asset {}: {err}", abs.display()),
+        )
+    })?;
+    entries.push(HarnpackEntry::new(rel.to_path_buf(), bytes));
+    Ok(())
+}
+
 fn pack_archive_root(entrypoint: &Path) -> PathBuf {
     let parent = entrypoint.parent().unwrap_or_else(|| Path::new("."));
     harn_modules::asset_paths::find_project_root(parent).unwrap_or_else(|| parent.to_path_buf())
@@ -1121,6 +1263,109 @@ mod tests {
             exclude_secrets: false,
             json: true,
         }
+    }
+
+    #[test]
+    fn carry_extension_metadata_injects_contributes_and_identity() {
+        let temp = tempfile::tempdir().unwrap();
+        fs::write(
+            temp.path().join("harn.toml"),
+            r#"
+[package]
+name = "harn-latex"
+version = "0.1.0"
+publisher = "Burin Labs"
+permissions = ["workspace:read_text"]
+
+[[contributes]]
+kind = "editor.language"
+id = "latex"
+scopes = ["workspace:read_text"]
+languageId = "latex"
+"#,
+        )
+        .unwrap();
+        let mut bundle = WorkflowBundle::default();
+        carry_extension_metadata(temp.path(), &mut bundle).unwrap();
+
+        let contributes = bundle
+            .metadata
+            .get("contributes")
+            .expect("contributes carried");
+        assert_eq!(contributes.as_array().unwrap().len(), 1);
+        assert_eq!(contributes[0]["kind"], "editor.language");
+        // kind-specific keys are flattened into the contribution object
+        assert_eq!(contributes[0]["languageId"], "latex");
+
+        let ext = bundle.metadata.get("extension").expect("identity carried");
+        assert_eq!(ext["name"], "harn-latex");
+        assert_eq!(ext["publisher"], "Burin Labs");
+        assert_eq!(ext["permissions"][0], "workspace:read_text");
+    }
+
+    #[test]
+    fn carry_extension_metadata_bundles_contribution_assets() {
+        let temp = tempfile::tempdir().unwrap();
+        fs::create_dir_all(temp.path().join("assets")).unwrap();
+        fs::write(temp.path().join("assets/preview.html"), "<html></html>").unwrap();
+        fs::create_dir_all(temp.path().join("canon/latex")).unwrap();
+        fs::write(temp.path().join("canon/latex/invariants.harn"), "// rules").unwrap();
+        fs::write(temp.path().join("SKILL.md"), "# skill").unwrap();
+        fs::write(
+            temp.path().join("harn.toml"),
+            r#"
+[package]
+name = "harn-latex"
+permissions = ["workspace:read_text"]
+
+[[contributes]]
+kind = "editor.preview"
+id = "p"
+scopes = ["workspace:read_text"]
+entry = "assets/preview.html"
+
+[[contributes]]
+kind = "harn.canon"
+id = "c"
+path = "canon/latex"
+
+[[contributes]]
+kind = "harn.skill"
+id = "s"
+path = "SKILL.md"
+"#,
+        )
+        .unwrap();
+        let mut bundle = WorkflowBundle::default();
+        let assets = carry_extension_metadata(temp.path(), &mut bundle).unwrap();
+        let paths: std::collections::BTreeSet<String> = assets
+            .iter()
+            .map(|e| e.path.to_string_lossy().to_string())
+            .collect();
+        assert!(paths.contains("assets/preview.html"), "{paths:?}");
+        assert!(paths.contains("canon/latex/invariants.harn"), "{paths:?}");
+        assert!(paths.contains("SKILL.md"), "{paths:?}");
+    }
+
+    #[test]
+    fn carry_extension_metadata_skips_parent_escape_assets() {
+        let temp = tempfile::tempdir().unwrap();
+        fs::write(
+            temp.path().join("harn.toml"),
+            "[package]\nname = \"x\"\npermissions = []\n\n[[contributes]]\nkind = \"editor.preview\"\nid = \"p\"\nentry = \"../escape.html\"\n",
+        )
+        .unwrap();
+        let mut bundle = WorkflowBundle::default();
+        let assets = carry_extension_metadata(temp.path(), &mut bundle).unwrap();
+        assert!(assets.is_empty());
+    }
+
+    #[test]
+    fn carry_extension_metadata_is_noop_without_manifest() {
+        let temp = tempfile::tempdir().unwrap();
+        let mut bundle = WorkflowBundle::default();
+        carry_extension_metadata(temp.path(), &mut bundle).unwrap();
+        assert!(!bundle.metadata.contains_key("contributes"));
     }
 
     #[test]

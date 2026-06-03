@@ -89,6 +89,81 @@ pub struct Manifest {
     /// explicit `--rule`/`--rule-pack` is given.
     #[serde(default)]
     pub rules: RulesConfig,
+    /// `[[contributes]]` array-of-tables — host-surface extension
+    /// contributions (editor languages, preview panes, build profiles,
+    /// commands, themes, …). Harn treats `kind` as a host-owned, namespaced
+    /// string and validates only the envelope plus that each contribution's
+    /// declared `scopes` are covered by `[package].permissions`; the host
+    /// (e.g. Burin) interprets the kind-specific payload. New contribution
+    /// kinds therefore need no Harn release. This is the editor-layer twin of
+    /// the agent-layer blocks (`[[providers]]`, `[[personas]]`, `[[hooks]]`):
+    /// one signed package may populate any mix of both.
+    #[serde(default)]
+    pub contributes: Vec<ContributionEntry>,
+}
+
+/// A single `[[contributes]]` host-surface contribution.
+///
+/// ```toml
+/// [[contributes]]
+/// kind = "editor.language"          # host-owned namespaced vocabulary
+/// id = "latex"                      # unique within the package
+/// title = "LaTeX"
+/// when = "*.tex"                    # optional activation predicate (host-interpreted)
+/// scopes = ["workspace:read_text"]  # MUST be a subset of [package].permissions
+/// platforms = ["macos", "linux"]    # optional support/parity matrix; empty = all
+/// # kind-specific keys are captured into `config` and interpreted by the host:
+/// languageId = "latex"
+/// extensions = [".tex", ".sty"]
+/// ```
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct ContributionEntry {
+    /// Host-owned, namespaced contribution kind (e.g. `editor.language`,
+    /// `editor.preview`, `build.profile`, `editor.command`, `editor.theme`).
+    /// Harn does not enumerate kinds — new ones need no release; it only
+    /// requires the value be namespaced (`segment(.segment)+`).
+    pub kind: String,
+    /// Stable identifier, unique across the package's contributions.
+    pub id: String,
+    #[serde(default)]
+    pub title: Option<String>,
+    /// Optional activation predicate the host interprets (a glob, a
+    /// `languageId`, or a host-defined expression). Absent = always available.
+    #[serde(default)]
+    pub when: Option<String>,
+    /// Capability scopes this contribution exercises. Every entry MUST be
+    /// declared in `[package].permissions`; validation fails closed otherwise.
+    #[serde(default)]
+    pub scopes: Vec<String>,
+    /// Optional support/parity matrix — which surfaces/platforms this
+    /// contribution targets (e.g. `macos`, `linux`, `windows`, `ide`, `tui`).
+    /// Empty means "all".
+    #[serde(default)]
+    pub platforms: Vec<String>,
+    /// Kind-specific payload, captured verbatim and interpreted by the host.
+    #[serde(flatten)]
+    pub config: BTreeMap<String, toml::Value>,
+}
+
+impl ContributionEntry {
+    /// `true` when `kind` is a non-empty, dot-namespaced identifier such as
+    /// `editor.language`. Single-segment kinds are rejected so third parties
+    /// cannot squat unprefixed names.
+    pub fn has_namespaced_kind(&self) -> bool {
+        let mut segments = 0usize;
+        for segment in self.kind.split('.') {
+            if segment.is_empty()
+                || !segment
+                    .chars()
+                    .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit())
+                || !segment.starts_with(|c: char| c.is_ascii_lowercase())
+            {
+                return false;
+            }
+            segments += 1;
+        }
+        segments >= 2
+    }
 }
 
 /// `[rules]` table — project-local structural-rule discovery (#2843).
@@ -757,6 +832,16 @@ pub struct PackageInfo {
     pub docs_url: Option<String>,
     #[serde(default)]
     pub provenance: Option<String>,
+    /// Human-facing publisher / developer name shown in marketplace surfaces.
+    #[serde(default)]
+    pub publisher: Option<String>,
+    /// Publisher contact (email or URL) shown alongside the publisher name.
+    #[serde(default)]
+    pub contact: Option<String>,
+    /// Optional ISO-8601 authoring date. Mutation dates are better derived
+    /// from the registry/VCS, but a declared creation date is allowed.
+    #[serde(default)]
+    pub created: Option<String>,
     #[serde(default)]
     pub permissions: Vec<String>,
     #[serde(default, alias = "host-requirements")]

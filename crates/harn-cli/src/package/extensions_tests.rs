@@ -1476,3 +1476,98 @@ pub fn should_handle(event: TriggerEvent) -> bool {
         .unwrap_err();
     assert!(error.to_string().contains("when_budget.timeout"));
 }
+
+#[test]
+fn contributes_block_parses_and_validates() {
+    let source = r#"
+[package]
+name = "harn-latex"
+version = "0.1.0"
+publisher = "Burin Labs"
+contact = "ext@burincode.com"
+permissions = ["workspace:read_text", "process:exec"]
+
+[[contributes]]
+kind = "editor.language"
+id = "latex"
+title = "LaTeX"
+when = "*.tex"
+scopes = ["workspace:read_text"]
+platforms = ["macos", "linux"]
+languageId = "latex"
+extensions = [".tex", ".sty"]
+
+[[contributes]]
+kind = "build.profile"
+id = "latexmk"
+scopes = ["process:exec"]
+label = "latexmk -> PDF"
+"#;
+    let manifest: Manifest = toml::from_str(source).expect("manifest parses");
+    assert_eq!(manifest.contributes.len(), 2);
+    let lang = &manifest.contributes[0];
+    assert_eq!(lang.kind, "editor.language");
+    assert_eq!(lang.id, "latex");
+    assert_eq!(lang.when.as_deref(), Some("*.tex"));
+    assert_eq!(lang.platforms, vec!["macos", "linux"]);
+    // kind-specific keys land in the flattened host-interpreted payload
+    assert!(lang.config.contains_key("languageId"));
+    assert!(lang.config.contains_key("extensions"));
+    assert!(!lang.config.contains_key("kind"));
+    let pkg = manifest.package.as_ref().unwrap();
+    assert_eq!(pkg.publisher.as_deref(), Some("Burin Labs"));
+    validate_contributions(&manifest).expect("valid contributions pass");
+}
+
+#[test]
+fn contributes_rejects_non_namespaced_kind() {
+    let source = r#"
+[package]
+name = "x"
+permissions = []
+
+[[contributes]]
+kind = "language"
+id = "latex"
+"#;
+    let manifest: Manifest = toml::from_str(source).unwrap();
+    let err = validate_contributions(&manifest).unwrap_err();
+    assert!(err.to_string().contains("invalid `kind`"), "{err}");
+}
+
+#[test]
+fn contributes_rejects_undeclared_scope() {
+    let source = r#"
+[package]
+name = "x"
+permissions = ["workspace:read_text"]
+
+[[contributes]]
+kind = "editor.command"
+id = "do-thing"
+scopes = ["process:exec"]
+"#;
+    let manifest: Manifest = toml::from_str(source).unwrap();
+    let err = validate_contributions(&manifest).unwrap_err();
+    assert!(err.to_string().contains("not declared in"), "{err}");
+}
+
+#[test]
+fn contributes_rejects_duplicate_ids() {
+    let source = r#"
+[package]
+name = "x"
+permissions = []
+
+[[contributes]]
+kind = "editor.command"
+id = "dup"
+
+[[contributes]]
+kind = "editor.theme"
+id = "dup"
+"#;
+    let manifest: Manifest = toml::from_str(source).unwrap();
+    let err = validate_contributions(&manifest).unwrap_err();
+    assert!(err.to_string().contains("duplicate id"), "{err}");
+}
