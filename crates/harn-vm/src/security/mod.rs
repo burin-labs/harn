@@ -534,8 +534,10 @@ mod tests {
 
     #[test]
     fn off_mode_disables_every_layer() {
-        let mut cfg = SecurityConfig::default();
-        cfg.mode = SecurityMode::Off;
+        let cfg = SecurityConfig {
+            mode: SecurityMode::Off,
+            ..Default::default()
+        };
         let policy = SecurityPolicy::from_config(&cfg);
         assert!(!policy.spotlight_external);
         assert!(!policy.trifecta_gate);
@@ -553,8 +555,10 @@ mod tests {
             Some((TrustLevel::Untrusted, "mcp:linear".to_string()))
         );
 
-        let mut trusting = SecurityConfig::default();
-        trusting.trusted_mcp_servers = vec!["linear".to_string()];
+        let trusting = SecurityConfig {
+            trusted_mcp_servers: vec!["linear".to_string()],
+            ..Default::default()
+        };
         let policy = SecurityPolicy::from_config(&trusting);
         assert!(classify_result_trust(Some(&exec), None, "linear__list", &policy).is_none());
     }
@@ -645,16 +649,22 @@ mod tests {
     #[test]
     fn exfil_and_destructive_classification() {
         use crate::tool_annotations::ToolAnnotations;
-        let mut fetch = ToolAnnotations::default();
-        fetch.kind = ToolKind::Fetch;
+        let fetch = ToolAnnotations {
+            kind: ToolKind::Fetch,
+            ..Default::default()
+        };
         assert!(is_exfil_capable(Some(&fetch), "anything"));
 
-        let mut net = ToolAnnotations::default();
-        net.side_effect_level = SideEffectLevel::Network;
+        let net = ToolAnnotations {
+            side_effect_level: SideEffectLevel::Network,
+            ..Default::default()
+        };
         assert!(is_exfil_capable(Some(&net), "anything"));
 
-        let mut del = ToolAnnotations::default();
-        del.kind = ToolKind::Delete;
+        let del = ToolAnnotations {
+            kind: ToolKind::Delete,
+            ..Default::default()
+        };
         assert!(is_destructive(Some(&del)));
 
         let read = ToolAnnotations::default();
@@ -677,8 +687,10 @@ mod tests {
     fn policy_stack_push_pop() {
         clear_policy_stack();
         assert!(current_policy().trifecta_gate);
-        let mut cfg = SecurityConfig::default();
-        cfg.mode = SecurityMode::Off;
+        let cfg = SecurityConfig {
+            mode: SecurityMode::Off,
+            ..Default::default()
+        };
         push_policy(SecurityPolicy::from_config(&cfg));
         assert!(current_policy().is_off());
         pop_policy();
