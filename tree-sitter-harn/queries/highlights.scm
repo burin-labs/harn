@@ -10,6 +10,8 @@
 "for" @keyword.repeat
 "in" @keyword.repeat
 "while" @keyword.repeat
+"break" @keyword.repeat
+"continue" @keyword.repeat
 "match" @keyword.conditional
 "retry" @keyword
 "try" @keyword.exception
@@ -34,6 +36,7 @@
 "emit" @keyword
 "deadline" @keyword
 "guard" @keyword
+"require" @keyword
 "mutex" @keyword
 "select" @keyword
 "from" @keyword
@@ -45,6 +48,12 @@
 "not" @keyword.operator
 "to" @keyword.operator
 "exclusive" @keyword.operator
+
+; HITL primitives (reserved keywords parsed as call-like statements)
+"ask_user" @keyword
+"dual_control" @keyword
+"escalate_to" @keyword
+"request_approval" @keyword
 
 ; Literals
 (true) @boolean
