@@ -6,10 +6,12 @@ use tower_lsp::jsonrpc::Result;
 use tower_lsp::lsp_types::*;
 
 use crate::helpers::{
-    diagnostic_repair_code_action_data, diagnostic_repair_code_action_kind, extract_backtick_name,
-    find_word_in_region, lsp_position_to_offset, offset_to_position, repair_code_action_data,
-    repair_code_action_kind, span_to_range,
+    code_action_kind_for_safety_name, diagnostic_repair_code_action_data,
+    diagnostic_repair_code_action_kind, extract_backtick_name, find_word_in_region,
+    lsp_position_to_offset, offset_to_position, repair_code_action_data, repair_code_action_kind,
+    span_to_range,
 };
+use crate::rules::RuleDiagnostic;
 use crate::HarnLsp;
 
 impl HarnLsp {
@@ -55,7 +57,7 @@ impl HarnLsp {
     ) -> Result<Option<CodeActionResponse>> {
         let uri = &params.text_document.uri;
 
-        let (source, lint_diags, type_diags) = {
+        let (source, lint_diags, type_diags, rule_diags) = {
             let docs = self.documents.lock().unwrap();
             let state = match docs.get(uri) {
                 Some(s) => s,
@@ -65,10 +67,18 @@ impl HarnLsp {
                 state.source.clone(),
                 state.lint_diagnostics.clone(),
                 state.type_diagnostics.clone(),
+                state.rule_diagnostics.clone(),
             )
         };
 
-        let actions = build_code_actions(uri, &source, &lint_diags, &type_diags, &params.context);
+        let actions = build_code_actions(
+            uri,
+            &source,
+            &lint_diags,
+            &type_diags,
+            &rule_diags,
+            &params.context,
+        );
 
         Ok(Some(actions))
     }
@@ -79,11 +89,41 @@ pub(crate) fn build_code_actions(
     source: &str,
     lint_diags: &[harn_lint::LintDiagnostic],
     type_diags: &[harn_parser::TypeDiagnostic],
+    rule_diags: &[RuleDiagnostic],
     context: &CodeActionContext,
 ) -> CodeActionResponse {
     let mut actions = Vec::new();
 
     for diag in &context.diagnostics {
+        if let Some(rule_diag) = matching_rule_diagnostic(rule_diags, diag) {
+            if let (Some(text_edit), Some(repair_id)) = (&rule_diag.edit, &rule_diag.repair_id) {
+                let safety = diag
+                    .data
+                    .as_ref()
+                    .and_then(|data| data.get("safety"))
+                    .and_then(|value| value.as_str())
+                    .unwrap_or("scope-local");
+                let mut changes = HashMap::new();
+                changes.insert(uri.clone(), vec![text_edit.clone()]);
+                actions.push(CodeActionOrCommand::CodeAction(CodeAction {
+                    title: rule_diag.title.clone(),
+                    kind: Some(code_action_kind_for_safety_name(safety)),
+                    diagnostics: Some(vec![diag.clone()]),
+                    data: Some(serde_json::json!({
+                        "repair_id": repair_id,
+                        "safety": safety,
+                        "diagnostic_code": crate::helpers::diagnostic_code_string(diag.code.as_ref()),
+                    })),
+                    edit: Some(WorkspaceEdit {
+                        changes: Some(changes),
+                        ..Default::default()
+                    }),
+                    ..Default::default()
+                }));
+                continue;
+            }
+        }
+
         let msg = &diag.message;
 
         if let Some(ld) = lint_diags.iter().find(|ld| {
@@ -301,6 +341,22 @@ pub(crate) fn build_code_actions(
     actions
 }
 
+fn matching_rule_diagnostic<'a>(
+    rule_diags: &'a [RuleDiagnostic],
+    diagnostic: &Diagnostic,
+) -> Option<&'a RuleDiagnostic> {
+    let repair_id = diagnostic
+        .data
+        .as_ref()
+        .and_then(|data| data.get("repair_id"))
+        .and_then(|value| value.as_str());
+    rule_diags.iter().find(|item| {
+        item.diagnostic.range == diagnostic.range
+            && item.diagnostic.message == diagnostic.message
+            && item.repair_id.as_deref() == repair_id
+    })
+}
+
 fn format_whole_document_edit(source: &str) -> Option<TextEdit> {
     let formatted = harn_fmt::format_source(source).ok()?;
     if formatted == source {
@@ -433,6 +489,7 @@ mod tests {
             &state.source,
             &state.lint_diagnostics,
             &state.type_diagnostics,
+            &state.rule_diagnostics,
             &context,
         );
 

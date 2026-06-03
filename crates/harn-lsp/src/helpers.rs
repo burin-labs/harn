@@ -57,7 +57,7 @@ pub(crate) fn diagnostic_data_value(
 
 pub(crate) fn repair_code_action_kind(repair: Option<&Repair>) -> CodeActionKind {
     repair
-        .map(|repair| code_action_kind_for_safety(repair.safety))
+        .map(|repair| code_action_kind_for_repair_safety(repair.safety))
         .unwrap_or(CodeActionKind::QUICKFIX)
 }
 
@@ -80,7 +80,7 @@ pub(crate) fn diagnostic_repair_code_action_kind(diagnostic: &Diagnostic) -> Cod
         .and_then(|data| data.get("safety"))
         .and_then(|value| value.as_str())
         .and_then(|safety| RepairSafety::from_str(safety).ok())
-        .map(code_action_kind_for_safety)
+        .map(code_action_kind_for_repair_safety)
         .unwrap_or(CodeActionKind::QUICKFIX)
 }
 
@@ -97,7 +97,7 @@ pub(crate) fn diagnostic_repair_code_action_data(
     }))
 }
 
-fn diagnostic_code_string(code: Option<&NumberOrString>) -> Option<String> {
+pub(crate) fn diagnostic_code_string(code: Option<&NumberOrString>) -> Option<String> {
     match code {
         Some(NumberOrString::String(code)) => Some(code.clone()),
         Some(NumberOrString::Number(code)) => Some(code.to_string()),
@@ -112,15 +112,20 @@ fn diagnostic_code_string(code: Option<&NumberOrString>) -> Option<String> {
 /// they consume from `Diagnostic.data.safety`. `RepairSafety::as_str()`
 /// returns a stable `&'static str` so the kind constants below avoid an
 /// allocation on the diagnostic hot path.
-fn code_action_kind_for_safety(safety: RepairSafety) -> CodeActionKind {
-    CodeActionKind::new(match safety {
-        RepairSafety::FormatOnly => "quickfix.harn.format-only",
-        RepairSafety::BehaviorPreserving => "quickfix.harn.behavior-preserving",
-        RepairSafety::ScopeLocal => "quickfix.harn.scope-local",
-        RepairSafety::SurfaceChanging => "quickfix.harn.surface-changing",
-        RepairSafety::CapabilityChanging => "quickfix.harn.capability-changing",
-        RepairSafety::NeedsHuman => "quickfix.harn.needs-human",
-    })
+fn code_action_kind_for_repair_safety(safety: RepairSafety) -> CodeActionKind {
+    code_action_kind_for_safety_name(safety.as_str())
+}
+
+pub(crate) fn code_action_kind_for_safety_name(safety: &str) -> CodeActionKind {
+    match safety {
+        "format-only" => CodeActionKind::new("quickfix.harn.format-only"),
+        "behavior-preserving" => CodeActionKind::new("quickfix.harn.behavior-preserving"),
+        "scope-local" => CodeActionKind::new("quickfix.harn.scope-local"),
+        "surface-changing" => CodeActionKind::new("quickfix.harn.surface-changing"),
+        "capability-changing" => CodeActionKind::new("quickfix.harn.capability-changing"),
+        "needs-human" => CodeActionKind::new("quickfix.harn.needs-human"),
+        _ => CodeActionKind::QUICKFIX,
+    }
 }
 
 /// Convert a 1-based Span to a 0-based LSP Range.

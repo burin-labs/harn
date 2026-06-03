@@ -32,7 +32,7 @@ impl HarnLsp {
             return Ok(None);
         };
 
-        let (source, diagnostics, lint_diags, type_diags) = {
+        let (source, diagnostics, lint_diags, type_diags, rule_diags) = {
             let docs = self.documents.lock().unwrap();
             let Some(state) = docs.get(&uri) else {
                 return Ok(None);
@@ -42,6 +42,7 @@ impl HarnLsp {
                 state.diagnostics.clone(),
                 state.lint_diagnostics.clone(),
                 state.type_diagnostics.clone(),
+                state.rule_diagnostics.clone(),
             )
         };
 
@@ -51,6 +52,7 @@ impl HarnLsp {
             &diagnostics,
             &lint_diags,
             &type_diags,
+            &rule_diags,
             &repair_id,
         );
 
@@ -85,6 +87,7 @@ fn resolve_repair_edit(
     diagnostics: &[Diagnostic],
     lint_diags: &[harn_lint::LintDiagnostic],
     type_diags: &[harn_parser::TypeDiagnostic],
+    rule_diags: &[crate::rules::RuleDiagnostic],
     repair_id: &str,
 ) -> Option<WorkspaceEdit> {
     let context = CodeActionContext {
@@ -92,7 +95,7 @@ fn resolve_repair_edit(
         only: None,
         trigger_kind: None,
     };
-    let actions = build_code_actions(uri, source, lint_diags, type_diags, &context);
+    let actions = build_code_actions(uri, source, lint_diags, type_diags, rule_diags, &context);
     actions.into_iter().find_map(|action| match action {
         CodeActionOrCommand::CodeAction(action) => {
             let matches = action
@@ -141,6 +144,7 @@ mod tests {
             &state.diagnostics,
             &state.lint_diagnostics,
             &state.type_diagnostics,
+            &state.rule_diagnostics,
             &repair_id,
         )
         .expect("known repair_id should resolve to a workspace edit");
@@ -162,6 +166,7 @@ mod tests {
             &state.diagnostics,
             &state.lint_diagnostics,
             &state.type_diagnostics,
+            &state.rule_diagnostics,
             "no/such-repair",
         );
         assert!(edit.is_none());
