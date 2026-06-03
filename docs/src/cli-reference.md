@@ -681,6 +681,22 @@ contexts, but they are not preserved in formatter output.
   parenthesised) and for clarity when mixing `&&` / `||`
   (e.g. `a && b || c` becomes `(a && b) || c`).
 
+### Trailing comments and line width
+
+A trailing (same-line) comment is treated as an **unbreakable token that does
+not count toward the line width**. This matches `rustfmt`, Prettier, and
+`gofmt`, and is the least-surprising behaviour:
+
+- The formatter **never relocates** a trailing comment to its own line, and
+  **never reflows code to make room** for one. If `let x = compute() // why`
+  exceeds the width *because of the comment*, the line is simply left long.
+- Code still wraps on its **own** merits. The wrap decision is based on the
+  code alone; the comment is appended afterward, riding the **last** physical
+  line of a wrapped construct (e.g. the closing `]` of a wrapped list literal).
+
+There is no separate "line too long" lint — width is a formatter concern, so a
+trailing comment that overflows is never reported as a diagnostic.
+
 ## harn lint
 
 Lint one or more `.harn` files or directories for common issues (unused
