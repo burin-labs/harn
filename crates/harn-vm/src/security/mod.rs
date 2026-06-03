@@ -31,6 +31,7 @@
 
 use std::cell::RefCell;
 use std::collections::BTreeMap;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::OnceLock;
 
 use serde::{Deserialize, Serialize};
@@ -130,6 +131,9 @@ pub struct SecurityPolicy {
     pub detect_injection: bool,
     /// Flag threshold as a percent in `[0, 100]` (see [`SecurityConfig`]).
     pub guard_threshold_percent: u8,
+    /// Neural-classifier selector resolved by the host's lazy loader seam (see
+    /// [`set_injection_classifier_loader`]). Empty keeps the heuristic.
+    pub guard_model: String,
     /// MCP servers the operator has explicitly trusted (skip taint + pin).
     pub trusted_mcp_servers: Vec<String>,
 }
@@ -153,6 +157,7 @@ impl SecurityPolicy {
             detect_injection: enabled
                 && (config.detect_injection || matches!(config.mode, SecurityMode::LocalMl)),
             guard_threshold_percent: config.guard_threshold_percent.min(100),
+            guard_model: config.guard_model.clone(),
             trusted_mcp_servers: config.trusted_mcp_servers.clone(),
         }
     }
@@ -364,6 +369,56 @@ static HEURISTIC_CLASSIFIER: HeuristicClassifier = HeuristicClassifier;
 /// this, so it never links a model runtime.
 pub fn register_injection_classifier(classifier: Box<dyn InjectionClassifier>) -> bool {
     REGISTERED_CLASSIFIER.set(classifier).is_ok()
+}
+
+/// A lazy loader that materializes a neural classifier from a model selector
+/// (a `harn guard` catalog name or model directory). Installed by a host built
+/// with the guard inference backend; `harn-vm` calls it the first time a
+/// `local-ml` policy actually scores untrusted content, so the (heavy) model is
+/// loaded on demand, never at startup.
+pub type InjectionClassifierLoader =
+    Box<dyn Fn(&str) -> Option<Box<dyn InjectionClassifier>> + Send + Sync>;
+
+/// Process-global lazy loader installed by the host (e.g. `harn-cli` built with
+/// the guard inference backend, capturing the project base dir). `None` keeps
+/// the heuristic. Keeps `harn-vm` free of a dependency on `harn-guard`.
+static CLASSIFIER_LOADER: OnceLock<InjectionClassifierLoader> = OnceLock::new();
+
+/// Set once the loader has been invoked, so a missing/failed model is not
+/// re-attempted on every scored span (the load can stat the filesystem and read
+/// hundreds of MB). The model is process-global, so one attempt is sufficient.
+static LOADER_ATTEMPTED: AtomicBool = AtomicBool::new(false);
+
+/// Install the lazy neural-classifier loader. First install wins; returns
+/// `false` if one was already installed.
+pub fn set_injection_classifier_loader(loader: InjectionClassifierLoader) -> bool {
+    CLASSIFIER_LOADER.set(loader).is_ok()
+}
+
+/// Ensure a neural classifier is registered for `selector`, loading it via the
+/// installed loader on first use. Idempotent and cheap once resolved: returns
+/// immediately when a classifier is already registered, when no loader is
+/// installed (the default binary), or when `selector` is empty. Returns whether
+/// a neural backend is now active. A loader that returns `None` (model not
+/// installed, failed to load) leaves the heuristic in place.
+pub fn ensure_neural_classifier(selector: &str) -> bool {
+    if REGISTERED_CLASSIFIER.get().is_some() {
+        return true;
+    }
+    if selector.is_empty() {
+        return false;
+    }
+    let Some(loader) = CLASSIFIER_LOADER.get() else {
+        return false;
+    };
+    // Attempt the (potentially expensive) load at most once per process.
+    if LOADER_ATTEMPTED.swap(true, Ordering::SeqCst) {
+        return false;
+    }
+    match loader(selector) {
+        Some(classifier) => register_injection_classifier(classifier),
+        None => false,
+    }
 }
 
 /// The active classifier: the registered neural backend when present, else the
@@ -692,6 +747,9 @@ fn policy_from_dict(config: &BTreeMap<String, VmValue>) -> SecurityPolicy {
     if let Some(percent) = config.get("guard_threshold_percent").and_then(vm_u8) {
         base.guard_threshold_percent = percent;
     }
+    if let Some(VmValue::String(model)) = config.get("guard_model") {
+        base.guard_model = model.to_string();
+    }
     if let Some(VmValue::List(items)) = config.get("trusted_mcp_servers") {
         base.trusted_mcp_servers = items
             .iter()
@@ -733,6 +791,10 @@ fn policy_summary(policy: &SecurityPolicy) -> VmValue {
     map.insert(
         "guard_threshold_percent".to_string(),
         VmValue::Int(i64::from(policy.guard_threshold_percent)),
+    );
+    map.insert(
+        "guard_model".to_string(),
+        VmValue::String(std::sync::Arc::from(policy.guard_model.as_str())),
     );
     VmValue::Dict(std::sync::Arc::new(map))
 }
@@ -1018,6 +1080,18 @@ mod tests {
     #[test]
     fn active_classifier_defaults_to_heuristic() {
         // No backend is registered in the test binary, so the heuristic is active.
+        assert_eq!(active_classifier().model_id(), "heuristic-v1");
+    }
+
+    #[test]
+    fn ensure_neural_classifier_is_false_without_a_loader() {
+        // No loader is installed in the unit-test binary, so detection stays on
+        // the heuristic. (Both checks bail before mutating any global state.)
+        assert!(!ensure_neural_classifier(""), "empty selector is a no-op");
+        assert!(
+            !ensure_neural_classifier("deberta-v3-prompt-injection-v2"),
+            "absent loader keeps the heuristic"
+        );
         assert_eq!(active_classifier().model_id(), "heuristic-v1");
     }
 

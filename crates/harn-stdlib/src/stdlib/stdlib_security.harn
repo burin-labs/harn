@@ -67,14 +67,21 @@ pub fn strict() -> dict {
  * built-in heuristic by default, or a downloadable `harn-guard` neural model
  * when registered), and a flagged score tightens the trifecta gate.
  *
+ * Pass `model` to select a `harn guard` catalog name or model directory; the
+ * host loads it lazily when built with the guard inference backend. The empty
+ * default keeps the host's configured model (typically the ungated default).
+ *
  * @effects: [state]
  * @allocation: heap
  * @errors: []
  * @api_stability: stable
  * @example: local_ml()
  */
-pub fn local_ml() -> dict {
-  return security_policy({mode: "local-ml"})
+pub fn local_ml(model: string = "") -> dict {
+  if model == "" {
+    return security_policy({mode: "local-ml"})
+  }
+  return security_policy({mode: "local-ml", guard_model: model})
 }
 
 /**

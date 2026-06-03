@@ -60,6 +60,10 @@ pub enum GuardError {
         path: PathBuf,
         source: std::io::Error,
     },
+
+    /// The neural inference backend failed to load or run a model.
+    #[error("guard inference error: {0}")]
+    Inference(String),
 }
 
 /// Result alias for guard operations.

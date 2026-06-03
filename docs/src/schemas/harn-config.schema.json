@@ -418,6 +418,9 @@
           "minimum": 0,
           "type": "integer"
         },
+        "guard_model": {
+          "type": "string"
+        },
         "trusted_mcp_servers": {
           "items": {
             "type": "string"

@@ -311,9 +311,20 @@ pub struct SecurityConfig {
     /// which the classifier marks content as flagged. Kept as an integer so the
     /// config stays `Eq`-comparable and round-trips losslessly.
     pub guard_threshold_percent: u8,
+    /// Selector for the downloadable neural classifier used when
+    /// `detect_injection` is on: a `harn guard` catalog name (the default) or a
+    /// path to a model directory. Resolved lazily by the host's `harn-guard`
+    /// loader; an empty value or an uninstalled model keeps the built-in
+    /// heuristic. Ignored by binaries built without the guard inference backend.
+    pub guard_model: String,
     /// MCP servers the operator has explicitly trusted (skip taint + pinning).
     pub trusted_mcp_servers: Vec<String>,
 }
+
+/// Default neural-classifier selector: the ungated, Apache-2.0 catalog default.
+/// Mirrors `harn_guard::DEFAULT_MODEL` (asserted equal by a `harn-guard` test);
+/// kept here so `harn-vm` stays free of a dependency on `harn-guard`.
+pub const DEFAULT_GUARD_MODEL: &str = "deberta-v3-prompt-injection-v2";
 
 impl Default for SecurityConfig {
     fn default() -> Self {
@@ -325,6 +336,7 @@ impl Default for SecurityConfig {
             gate_secret_reads: true,
             detect_injection: false,
             guard_threshold_percent: 50,
+            guard_model: DEFAULT_GUARD_MODEL.to_owned(),
             trusted_mcp_servers: Vec::new(),
         }
     }
