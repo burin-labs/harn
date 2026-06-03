@@ -8,6 +8,86 @@ highlights live in [CHANGELOG-pre-0.6.md](CHANGELOG-pre-0.6.md).
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.8.68
+
+### Added
+
+- Live LSP diagnostics now run configured rule packs and expose rule fixes
+  through `harn.applyRepair`.
+- Canonical connector event schemas are now authored once as Harn `type`
+  declarations (`crates/harn-stdlib/src/stdlib/stdlib_event_schemas.harn`),
+  and the Rust normalized-event structs are generated from them by the new
+  hidden `harn connector-schema-codegen` command into a vendored
+  `crates/harn-vm/src/triggers/event/schemas_generated.rs`. This inverts the
+  source of truth so a `.harn` connector's output matches the Rust struct by
+  construction. Wired into CI via `make gen-connector-schemas` /
+  `make check-connector-schemas`. Proven end-to-end for GitHub with a
+  round-trip parity test against the hand-written `GitHubEventPayload` family;
+  the generated structs coexist with the hand-written ones, and switching the
+  trigger boundary to produce the typed payloads is a follow-up.
+- **`harn guard` - downloadable on-device injection-detection models (Layer 2,
+  management).** A new `harn-guard` crate and `harn guard
+  {list,install,status,remove}` CLI manage prompt-injection classifier models
+  under `~/.harn/guard/`. The catalog points at already-hosted upstream models
+  (Harn hosts nothing, bundles no weights); `install` fetches on the user's
+  machine, verifies SHA-256 against the catalog's pinned digests, and requires
+  explicit `--accept-license`. The default model
+  (`deberta-v3-prompt-injection-v2`) is Apache-2.0 and ungated; gated models
+  are opt-in and require the user's own `HF_TOKEN`. The neural inference
+  runtime is behind the off-by-default `guard-neural` cargo feature, so the
+  default binary stays lean and falls back to the built-in heuristic classifier.
+- **On-device neural injection classifier (Layer 2, inference).** `harn-guard`
+  gained the ONNX inference backend behind the off-by-default `guard-neural`
+  cargo feature: it loads an installed model package (`~/.harn/guard/<name>/` -
+  ONNX graph + `tokenizer.json` + `config.json`) and scores untrusted content
+  with a transformer sequence-classifier, superseding the built-in heuristic for
+  better recall. The runtime resolves the model named by the new
+  `[security] guard_model` config key lazily on the first scored span via a new
+  `harn-vm` loader seam (`set_injection_classifier_loader` /
+  `ensure_neural_classifier`) that keeps `harn-vm` free of any inference
+  dependency. A transient inference error degrades to the heuristic rather than
+  dropping detection. The default binary links no model runtime; CI never
+  downloads weights.
+
+### Fixed
+
+- **harn-guard store tests no longer share temp directories under nextest
+  (#2961).** The model-store tests now use owned temporary directories, avoiding
+  parallel release-gate collisions that could make corruption checks fail
+  nondeterministically.
+- **Multi-line `/* ... */` block comments now report their span at the opening
+  `/*` instead of the closing `*/`.** The lexer had stamped the span's start
+  line with the comment's end line, so every consumer that keys off it - the
+  `harn fmt` comment map, LSP positions, and the `legacy-doc-comment` lint
+  rule - misattributed multi-line block comments. The span now records the open
+  line/column with `end_line` at the close, mirroring how multi-line strings are
+  recorded.
+- **`harn fmt` no longer drops a trailing same-line comment on a top-level
+  statement or import.** A comment like `let x = 1 // note` at the top level was
+  silently discarded; block bodies already preserved these, but `format_program`
+  never attached them. Top-level items now keep their trailing comment inline.
+- **Pool `max_concurrent` could transiently over-admit under concurrent
+  dispatch.** A worker-pool dispatcher popped a queued task under the pool lock
+  but inserted it into the active set under a separate lock hold, so a `submit`
+  racing a finishing task's `finalize_task` could both admit into the same free
+  slot. Dispatchers now reserve the slot at pop time and the admission check
+  counts in-flight reservations, so the cap holds strictly.
+
+### Security
+
+- **On-device injection detection (`mode = "local-ml"`).** Untrusted content is
+  now scored by a pluggable injection classifier and the verdict (`model`,
+  `score`, `flagged`) is recorded on its taint record, so approval UI and audit
+  trails can show why a span looks risky. The built-in `heuristic-v1` classifier
+  is always available, dependency-free, and precision-first; a downloadable
+  neural model (`harn-guard`) can supersede it via
+  `register_injection_classifier` without the default binary linking a model
+  runtime. A flagged verdict tightens the trifecta gate: in addition to
+  exfil/destroy/secret-read, a flagged injection plus a workspace-mutating tool
+  is now gated too. Detection never weakens the gate. Configure via
+  `[security]` (`detect_injection`, `guard_threshold_percent`) or
+  `std/security::local_ml()`.
+
 ## v0.8.67
 
 ### Breaking
