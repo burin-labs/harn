@@ -53,9 +53,18 @@ debug = "line-tables-only"
 [profile.test]
 debug = 0
 
+# Default release profile mirrors the DISTRIBUTION build's shape: thin LTO +
+# 16 codegen units. This is the everyday / local "internal" release — fast to
+# build and identical in optimization to what ships (the release workflow only
+# adds `strip = symbols` on top for the distributed artifact). It was fat LTO +
+# 1 codegen unit, which nothing actually shipped — release CI already overrode
+# to thin via CARGO_PROFILE_RELEASE_* — and which made local `cargo build
+# --release` needlessly slow. Cold start is dominated by fixed process/init
+# overhead, not LTO inlining, so the cli-cold-start-budget gate (which now
+# triggers on this file) measures the real shipped shape here.
 [profile.release]
-lto = true
-codegen-units = 1
+lto = "thin"
+codegen-units = 16
 
 # Workspace-wide clippy floor. `pedantic` + `nursery` raised to `warn`; the
 # allow list below silences the noisy / stylistic / context-dependent lints

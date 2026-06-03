@@ -217,10 +217,58 @@ jobs:
             echo "| Publish container | $SHOULD_PUBLISH_CONTAINER |"
           } >> "$GITHUB_STEP_SUMMARY"
 
+  # Create the GitHub release up front as a PRERELEASE placeholder so each
+  # build leg can upload its own tarball the moment it finishes, instead of
+  # everything waiting on the slowest leg + a final aggregate job. A
+  # prerelease is publicly downloadable by tag but is NOT returned by
+  # /releases/latest, so install.sh / `harn upgrade` consumers that resolve
+  # "latest" keep seeing the previous version until the `release` job flips
+  # this to the canonical latest release (with checksums) once all legs land.
+  # Doing this in one job (not racing N build legs) keeps release creation
+  # single-writer.
+  prepare_release:
+    name: Ensure prerelease placeholder
+    needs: setup
+    # MUST match the `build` job's job-level `if` exactly. `build` needs this
+    # job; if the two conditions diverged, a skipped prepare_release would
+    # propagate a skip onto `build` and silently kill warm-cache builds.
+    if: needs.setup.outputs.should_build_binaries == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - name: Create prerelease if absent
+        # Only real releases author a GitHub release; warm-cache events still
+        # run this job (to keep the `if` aligned with `build`) but no-op here.
+        if: needs.setup.outputs.is_release == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REF: ${{ needs.setup.outputs.ref }}
+          VERSION: ${{ needs.setup.outputs.version }}
+        run: |
+          set -euo pipefail
+          if gh release view "$REF" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "::notice::Release $REF already exists; leaving it in place for incremental uploads."
+          else
+            gh release create "$REF" \
+              --repo "$GITHUB_REPOSITORY" \
+              --title "$VERSION" \
+              --prerelease \
+              --notes "Release $VERSION is building. Per-architecture archives are attached as each build finishes; SHA256SUMS, the asset manifest, and the canonical \"latest\" flag are set once every build completes."
+            echo "::notice::Created prerelease placeholder $REF for incremental per-arch uploads."
+          fi
+
   build:
     name: Build ${{ matrix.target }}
-    needs: setup
+    # prepare_release is skipped on warm-cache-only events (is_release=false);
+    # `needs` on a skipped job is satisfied, so warm-cache runs still build.
+    needs: [setup, prepare_release]
     if: needs.setup.outputs.should_build_binaries == 'true'
+    # contents: write so each leg can upload its own archive to the release
+    # as soon as it finishes (incremental per-arch publish).
+    permissions:
+      contents: write
     # Use standard GitHub-hosted runners for both warm-cache and release runs.
     # Larger macOS runners are billed even for public repositories, so release
     # recovery retries should not route to macOS Large / XLarge by default.
@@ -537,6 +585,30 @@ jobs:
           name: harn-${{ matrix.target }}
           path: dist/harn-${{ matrix.target }}.zip
 
+      # Publish THIS target's archive to the prerelease the moment it is built,
+      # so consumers that only need one architecture can fetch it without
+      # waiting for the slowest leg or the final aggregate job. --clobber makes
+      # it idempotent across release-recovery re-runs. SHA256SUMS / the asset
+      # manifest / the canonical "latest" flag are still added by the `release`
+      # job once every leg has landed.
+      - name: Publish archive to release (incremental)
+        if: needs.setup.outputs.is_release == 'true'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REF: ${{ needs.setup.outputs.ref }}
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          archives=(dist/harn-*.tar.gz dist/harn-*.zip)
+          if [ ${#archives[@]} -eq 0 ]; then
+            echo "::error::No archive found in dist/ to upload for ${{ matrix.target }}."
+            exit 1
+          fi
+          archive="${archives[0]}"
+          echo "Uploading $archive to release $REF"
+          gh release upload "$REF" "$archive" --repo "$GITHUB_REPOSITORY" --clobber
+
   container:
     name: Publish container
     needs: [setup, release]
@@ -698,11 +770,21 @@ jobs:
             --output artifacts/release-assets.json
           cat artifacts/release-assets.json
 
-      - name: Create or update GitHub release
+      - name: Finalize GitHub release
+        # Every leg has landed. Attach SHA256SUMS + the asset manifest, write
+        # the real notes, and flip the prerelease placeholder created by
+        # prepare_release into the canonical latest release. make_latest here
+        # is what moves /releases/latest (and thus install.sh / `harn upgrade`)
+        # onto this version — only now that checksums exist and all archives
+        # are present. The per-arch archives were already uploaded incrementally
+        # by each build leg; re-listing them here is a harmless idempotent
+        # overwrite that also covers any leg whose inline upload was retried.
         uses: softprops/action-gh-release@b4309332981a82ec1c5618f44dd2e27cc8bfbfda # v3.0.0
         with:
           tag_name: ${{ needs.setup.outputs.ref }}
           body_path: release-notes.md
+          prerelease: false
+          make_latest: true
           files: |
             artifacts/*.tar.gz
             artifacts/*.zip
