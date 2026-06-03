@@ -13,10 +13,93 @@ hook_write_staged_files "$changed"
 hook_disable_cargo_incremental_if_release_bump staged
 
 # Track whether the python prompt-prose ratchet has already run in this
-# hook, so the Rust and ratchet blocks don't pay for it twice when both
+# hook, so the ratchet and clippy blocks don't pay for it twice when both
 # patterns match (the common case for a Rust crate edit that also
-# touches scripts/ or Makefile).
+# touches scripts/ or Makefile). Whichever block runs first sets the flag.
 prompt_prose_done=0
+
+# ---------------------------------------------------------------------------
+# Phase 1 — fast, read-only validators (fail-fast).
+#
+# These are cheap (python / npx, sub-second) and never build Rust or the
+# `harn` binary, so a trivial failure (a stray markdown heading, a keyword
+# mirror drift) aborts the commit in seconds instead of after the
+# multi-minute clippy build that used to run first. None of them mutate the
+# tree, so they are safe to run against the originally-staged file set before
+# the formatters re-stage anything.
+#
+# Note on markdown vs. the generated language spec: `docs/src/language-spec.md`
+# is `spec/HARN_SPEC.md` behind a transparent HTML-comment banner, and the
+# source is markdown-linted here too, so linting the mirror before the
+# Phase-2 sync step yields the same result the sync would produce.
+# ---------------------------------------------------------------------------
+
+if hook_paths_match "$changed" "$HOOK_RATCHET_PATTERN"; then
+  echo "=== Pre-commit: checking CI ratchets ==="
+  if [ "$prompt_prose_done" -eq 0 ]; then
+    make lint-no-rust-prompt-prose
+    prompt_prose_done=1
+  fi
+  make lint-no-xfail-regression
+  echo "    CI ratchets OK."
+else
+  echo "=== Pre-commit: skipping CI ratchets (no protected paths changed) ==="
+fi
+
+# Pure-Python, sub-second, no harn build — cheap enough to check (not just
+# at push) so drift in the lexer<->tree-sitter keyword mirror or the
+# generated-artifact registry is caught at the moment it's introduced. We
+# check rather than auto-regenerate so the hand-curated grouping/comments
+# in keywords.js survive; the hint points at `make gen-tree-sitter-keywords`.
+if hook_paths_match "$changed" "$HOOK_TREESITTER_PATTERN"; then
+  echo "=== Pre-commit: checking tree-sitter keyword mirror ==="
+  make -s check-tree-sitter-keywords
+  echo "    Tree-sitter keywords OK."
+else
+  echo "=== Pre-commit: skipping tree-sitter keyword check (no lexer/grammar changes) ==="
+fi
+
+if hook_paths_match "$changed" "$HOOK_GENREGISTRY_PATTERN"; then
+  echo "=== Pre-commit: checking generated-artifact registry ==="
+  make -s check-generated-registry
+  echo "    Generated-artifact registry OK."
+else
+  echo "=== Pre-commit: skipping generated-artifact registry check (no registry/Makefile/workflow/hook changes) ==="
+fi
+
+if hook_paths_match "$changed" "$HOOK_MARKDOWN_PATTERN" && command -v npx >/dev/null 2>&1; then
+  echo "=== Pre-commit: checking markdown ==="
+  make lint-md
+  echo "    Markdown OK."
+elif hook_paths_match "$changed" "$HOOK_MARKDOWN_PATTERN"; then
+  echo "=== Pre-commit: skipping markdown lint (npx not found) ==="
+else
+  echo "=== Pre-commit: skipping markdown lint (no markdown changes) ==="
+fi
+
+if hook_paths_match "$changed" "$HOOK_ACTIONS_PATTERN"; then
+  echo "=== Pre-commit: checking GitHub Actions workflows ==="
+  make lint-actions
+  echo "    GitHub Actions workflows OK."
+else
+  echo "=== Pre-commit: skipping GitHub Actions lint (no workflow/hook changes) ==="
+fi
+
+if hook_paths_match "$changed" "$HOOK_PORTAL_PATTERN" && command -v npm >/dev/null 2>&1; then
+  echo "=== Pre-commit: linting portal frontend ==="
+  ./scripts/ensure_portal_deps.sh
+  npm run portal:lint
+  echo "    Portal lint OK."
+elif hook_paths_match "$changed" "$HOOK_PORTAL_PATTERN"; then
+  echo "=== Pre-commit: skipping portal lint (npm not found) ==="
+else
+  echo "=== Pre-commit: skipping portal lint (no portal changes) ==="
+fi
+
+# ---------------------------------------------------------------------------
+# Phase 2 — formatters, clippy, and generated-file sync (the expensive,
+# tree-mutating steps). Reached only once the fast validators above pass.
+# ---------------------------------------------------------------------------
 
 if hook_paths_match "$changed" "$HOOK_RUST_PATTERN"; then
   echo "=== Pre-commit: formatting Rust ==="
@@ -68,9 +151,11 @@ if hook_paths_match "$changed" "$HOOK_RUST_PATTERN"; then
   # `--all-targets` clippy is still enforced by the `Rust lint` CI job
   # and by `make lint` for ad-hoc local runs; pre-push catches
   # test-target compile errors via `cargo check --tests`.
-  echo "=== Pre-commit: lint-no-rust-prompt-prose ==="
-  make lint-no-rust-prompt-prose
-  prompt_prose_done=1
+  if [ "$prompt_prose_done" -eq 0 ]; then
+    echo "=== Pre-commit: lint-no-rust-prompt-prose ==="
+    make lint-no-rust-prompt-prose
+    prompt_prose_done=1
+  fi
 
   hook_write_changed_cargo_packages "$changed" "$changed_packages"
   if hook_paths_match "$changed" '(^Cargo\.toml$|^Cargo\.lock$|^Makefile$)'; then
@@ -95,17 +180,6 @@ else
   echo "=== Pre-commit: skipping clippy (no Rust/Cargo changes) ==="
 fi
 
-if hook_paths_match "$changed" "$HOOK_RATCHET_PATTERN"; then
-  echo "=== Pre-commit: checking CI ratchets ==="
-  if [ "$prompt_prose_done" -eq 0 ]; then
-    make lint-no-rust-prompt-prose
-  fi
-  make lint-no-xfail-regression
-  echo "    CI ratchets OK."
-else
-  echo "=== Pre-commit: skipping CI ratchets (no protected paths changed) ==="
-fi
-
 if hook_paths_match "$changed" "$HOOK_HIGHLIGHT_PATTERN"; then
   echo "=== Pre-commit: syncing generated highlight keywords ==="
   make gen-highlight
@@ -126,56 +200,6 @@ if hook_paths_match "$changed" "$HOOK_LANGSPEC_PATTERN"; then
   echo "    Language spec OK."
 else
   echo "=== Pre-commit: skipping language spec sync (no spec changes) ==="
-fi
-
-# Pure-Python, sub-second, no harn build — cheap enough to check (not just
-# at push) so drift in the lexer<->tree-sitter keyword mirror or the
-# generated-artifact registry is caught at the moment it's introduced. We
-# check rather than auto-regenerate so the hand-curated grouping/comments
-# in keywords.js survive; the hint points at `make gen-tree-sitter-keywords`.
-if hook_paths_match "$changed" "$HOOK_TREESITTER_PATTERN"; then
-  echo "=== Pre-commit: checking tree-sitter keyword mirror ==="
-  make -s check-tree-sitter-keywords
-  echo "    Tree-sitter keywords OK."
-else
-  echo "=== Pre-commit: skipping tree-sitter keyword check (no lexer/grammar changes) ==="
-fi
-
-if hook_paths_match "$changed" "$HOOK_GENREGISTRY_PATTERN"; then
-  echo "=== Pre-commit: checking generated-artifact registry ==="
-  make -s check-generated-registry
-  echo "    Generated-artifact registry OK."
-else
-  echo "=== Pre-commit: skipping generated-artifact registry check (no registry/Makefile/workflow/hook changes) ==="
-fi
-
-if hook_paths_match "$changed" "$HOOK_MARKDOWN_PATTERN" && command -v npx >/dev/null 2>&1; then
-  echo "=== Pre-commit: checking markdown ==="
-  make lint-md
-  echo "    Markdown OK."
-elif hook_paths_match "$changed" "$HOOK_MARKDOWN_PATTERN"; then
-  echo "=== Pre-commit: skipping markdown lint (npx not found) ==="
-else
-  echo "=== Pre-commit: skipping markdown lint (no markdown changes) ==="
-fi
-
-if hook_paths_match "$changed" "$HOOK_ACTIONS_PATTERN"; then
-  echo "=== Pre-commit: checking GitHub Actions workflows ==="
-  make lint-actions
-  echo "    GitHub Actions workflows OK."
-else
-  echo "=== Pre-commit: skipping GitHub Actions lint (no workflow/hook changes) ==="
-fi
-
-if hook_paths_match "$changed" "$HOOK_PORTAL_PATTERN" && command -v npm >/dev/null 2>&1; then
-  echo "=== Pre-commit: linting portal frontend ==="
-  ./scripts/ensure_portal_deps.sh
-  npm run portal:lint
-  echo "    Portal lint OK."
-elif hook_paths_match "$changed" "$HOOK_PORTAL_PATTERN"; then
-  echo "=== Pre-commit: skipping portal lint (npm not found) ==="
-else
-  echo "=== Pre-commit: skipping portal lint (no portal changes) ==="
 fi
 
 echo "=== All pre-commit checks passed. ==="
