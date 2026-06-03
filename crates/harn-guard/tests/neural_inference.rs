@@ -14,13 +14,18 @@
 //! Point `HARN_GUARD_MODEL_DIR` at any installed model directory (containing
 //! `model.onnx`, `tokenizer.json`, `config.json`). The test asserts that a
 //! blatant instruction-override scores strictly higher than benign build output.
+//!
+//! It is a normal default-suite test (no skip attribute — those are banned for
+//! silently hiding coverage): it runs by default and returns early (passing)
+//! when `HARN_GUARD_MODEL_DIR` is unset, only doing real work when a model is
+//! provided. It also only compiles under the `neural` feature, which CI does
+//! not build.
 #![cfg(feature = "neural")]
 
 use harn_guard::{ModelFormat, OnnxInjectionClassifier};
 use harn_vm::security::InjectionClassifier;
 
 #[test]
-#[ignore = "needs a downloaded model; set HARN_GUARD_MODEL_DIR"]
 fn real_model_scores_injection_above_benign() {
     let Some(dir) = std::env::var_os("HARN_GUARD_MODEL_DIR") else {
         eprintln!("skip: set HARN_GUARD_MODEL_DIR to an installed guard model directory");
