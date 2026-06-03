@@ -558,6 +558,108 @@ async fn host_agent_dispatch_tool_batch_impl(
     Ok(VmValue::List(std::sync::Arc::new(results)))
 }
 
+/// Resolve a tool's model-visible descriptor (description + inputSchema) from
+/// the dispatch catalog, plus the rug-pull `schemaChanged` flag, so the host
+/// can render the full tool text at approval time. `None` when the catalog has
+/// no usable entry.
+fn tool_descriptor_for(tools_val: Option<&VmValue>, tool_name: &str) -> Option<serde_json::Value> {
+    let dict = tools_val?.as_dict()?;
+    let tools_list = match dict.get("tools") {
+        Some(VmValue::List(list)) => list,
+        _ => return None,
+    };
+    for tool in tools_list.iter() {
+        let entry = match tool {
+            VmValue::Dict(entry) => entry,
+            _ => continue,
+        };
+        if entry.get("name").map(|v| v.display()).as_deref() != Some(tool_name) {
+            continue;
+        }
+        let mut out = serde_json::Map::new();
+        if let Some(value) = entry.get("description") {
+            out.insert(
+                "description".to_string(),
+                crate::mcp::vm_value_to_serde(value),
+            );
+        }
+        if let Some(value) = entry.get("inputSchema") {
+            out.insert(
+                "inputSchema".to_string(),
+                crate::mcp::vm_value_to_serde(value),
+            );
+        }
+        if let Some(value) = entry.get("_mcp_server") {
+            out.insert(
+                "mcpServer".to_string(),
+                crate::mcp::vm_value_to_serde(value),
+            );
+        }
+        if matches!(entry.get("_schema_changed"), Some(VmValue::Bool(true))) {
+            out.insert("schemaChanged".to_string(), serde_json::Value::Bool(true));
+        }
+        if out.is_empty() {
+            return None;
+        }
+        return Some(serde_json::Value::Object(out));
+    }
+    None
+}
+
+/// Build the confirmation message for a lethal-trifecta gate, or `None` if the
+/// tool is not a leak/destroy/secret-read vector. `taint` is non-empty.
+fn trifecta_gate_reason(
+    policy: &crate::security::SecurityPolicy,
+    annotations: Option<&crate::tool_annotations::ToolAnnotations>,
+    tool_name: &str,
+    tool_args: &serde_json::Value,
+    taint: &[crate::security::TaintRecord],
+) -> Option<String> {
+    let mut origins: Vec<String> = taint.iter().map(|record| record.origin.clone()).collect();
+    origins.sort();
+    origins.dedup();
+    let origins = origins.join(", ");
+    if crate::security::is_exfil_capable(annotations, tool_name) {
+        return Some(format!(
+            "Untrusted content from {origins} is in context and `{tool_name}` can send data to an external destination. Confirm this is intended (lethal-trifecta guard)."
+        ));
+    }
+    if crate::security::is_destructive(annotations) {
+        return Some(format!(
+            "Untrusted content from {origins} is in context and `{tool_name}` performs a destructive action. Confirm this is intended (lethal-trifecta guard)."
+        ));
+    }
+    if policy.gate_secret_reads && crate::security::args_reference_secret(tool_args) {
+        return Some(format!(
+            "Untrusted content from {origins} is in context and `{tool_name}` reads a secret/credential file. Confirm this is intended (lethal-trifecta guard)."
+        ));
+    }
+    None
+}
+
+/// Upgrade an auto-allow policy decision to an interactive ask for the
+/// lethal-trifecta gate. Keeps the audit receipt (sent to the host as
+/// `policyDecision`) in sync with the upgraded decision so it stays a faithful
+/// record and the approval UI can surface the reason + `lethal_trifecta` label.
+fn upgrade_to_trifecta_ask(decision: &mut crate::orchestration::PolicyEvaluation, reason: String) {
+    decision.action = "ask".to_string();
+    decision.reason = reason;
+    if !decision.risk_labels.iter().any(|l| l == "lethal_trifecta") {
+        decision.risk_labels.push("lethal_trifecta".to_string());
+    }
+    if let Some(receipt) = decision.receipt.as_object_mut() {
+        receipt.insert("action".to_string(), serde_json::Value::from("ask"));
+        receipt.insert(
+            "reason".to_string(),
+            serde_json::Value::from(decision.reason.clone()),
+        );
+        receipt.insert(
+            "risk_labels".to_string(),
+            serde_json::to_value(&decision.risk_labels).unwrap_or(serde_json::Value::Null),
+        );
+    }
+}
+
 /// Dispatch one normalized agent tool call through the host tool runtime.
 #[harn_builtin(
     sig = "__host_agent_dispatch_tool_call(call: dict, tools?: dict|nil, options?: dict|nil) -> dict",
@@ -718,7 +820,7 @@ async fn host_agent_dispatch_tool_call(
         }
     }
 
-    let approval = crate::orchestration::current_approval_policy().map(|policy| {
+    let mut approval = crate::orchestration::current_approval_policy().map(|policy| {
         let repeat_count = crate::orchestration::next_approval_policy_repeat_count(
             &session_id,
             &tool_name,
@@ -726,6 +828,34 @@ async fn host_agent_dispatch_tool_call(
         );
         policy.evaluate_detailed_with_repeat(&tool_name, &tool_args, repeat_count)
     });
+    // Lethal-trifecta gate (Layer 1): once untrusted content has entered the
+    // session's context, upgrade an auto-allow to an interactive confirmation
+    // for any tool that can carry that content outward (network/fetch),
+    // destroy state, or read secrets. Only acts where an approval policy is
+    // installed, so non-interactive embedders are unaffected.
+    {
+        let security_policy = crate::security::current_policy();
+        if security_policy.trifecta_gate {
+            if let Some(decision) = approval.as_mut() {
+                if decision.is_allow() {
+                    let taint = super::agent_session_host::session_taint_snapshot(&session_id);
+                    if !taint.is_empty() {
+                        let annotations =
+                            crate::orchestration::current_tool_annotations(&tool_name);
+                        if let Some(reason) = trifecta_gate_reason(
+                            &security_policy,
+                            annotations.as_ref(),
+                            &tool_name,
+                            &tool_args,
+                            &taint,
+                        ) {
+                            upgrade_to_trifecta_ask(decision, reason);
+                        }
+                    }
+                }
+            }
+        }
+    }
     let mut approval_status = None;
     match approval {
         None => {}
@@ -799,6 +929,7 @@ async fn host_agent_dispatch_tool_call(
                         &tool_args,
                         approval_request_json,
                         &decision.receipt,
+                        tool_descriptor_for(tools, &tool_name),
                     ),
                 )
                 .await;
@@ -1486,6 +1617,87 @@ async fn host_agent_reminder_providers_fire_impl(
     )
     .await?;
     Ok(json_to_vm_value(&report))
+}
+
+#[cfg(test)]
+mod security_gate_tests {
+    use super::{tool_descriptor_for, upgrade_to_trifecta_ask};
+    use crate::value::VmValue;
+    use std::collections::BTreeMap;
+    use std::sync::Arc;
+
+    fn allow_decision() -> crate::orchestration::PolicyEvaluation {
+        crate::orchestration::PolicyEvaluation {
+            action: "allow".to_string(),
+            reason: "auto-approved".to_string(),
+            matched_rule: None,
+            required_approval: None,
+            risk_labels: Vec::new(),
+            receipt: serde_json::json!({
+                "type": "policy_decision",
+                "action": "allow",
+                "reason": "auto-approved",
+                "risk_labels": [],
+            }),
+        }
+    }
+
+    #[test]
+    fn trifecta_upgrade_syncs_decision_and_receipt() {
+        let mut decision = allow_decision();
+        upgrade_to_trifecta_ask(&mut decision, "untrusted content + exfil tool".to_string());
+
+        assert_eq!(decision.action, "ask");
+        assert_eq!(decision.reason, "untrusted content + exfil tool");
+        assert!(decision.risk_labels.iter().any(|l| l == "lethal_trifecta"));
+
+        // The audit receipt (sent to the host as `policyDecision`) must agree
+        // with the upgraded decision so the approval UI can surface the reason.
+        assert_eq!(decision.receipt["action"], "ask");
+        assert_eq!(decision.receipt["reason"], "untrusted content + exfil tool");
+        assert_eq!(decision.receipt["risk_labels"][0], "lethal_trifecta");
+    }
+
+    #[test]
+    fn trifecta_upgrade_does_not_duplicate_label() {
+        let mut decision = allow_decision();
+        decision.risk_labels.push("lethal_trifecta".to_string());
+        upgrade_to_trifecta_ask(&mut decision, "reason".to_string());
+        let count = decision
+            .risk_labels
+            .iter()
+            .filter(|l| *l == "lethal_trifecta")
+            .count();
+        assert_eq!(count, 1);
+    }
+
+    fn vm_str(s: &str) -> VmValue {
+        VmValue::String(Arc::from(s))
+    }
+
+    #[test]
+    fn tool_descriptor_extracts_description_and_schema_changed() {
+        let mut tool = BTreeMap::new();
+        tool.insert("name".to_string(), vm_str("linear__create"));
+        tool.insert("description".to_string(), vm_str("Create an issue"));
+        tool.insert("_mcp_server".to_string(), vm_str("linear"));
+        tool.insert("_schema_changed".to_string(), VmValue::Bool(true));
+        let catalog = {
+            let mut dict = BTreeMap::new();
+            dict.insert(
+                "tools".to_string(),
+                VmValue::List(Arc::new(vec![VmValue::Dict(Arc::new(tool))])),
+            );
+            VmValue::Dict(Arc::new(dict))
+        };
+
+        let descriptor = tool_descriptor_for(Some(&catalog), "linear__create").expect("descriptor");
+        assert_eq!(descriptor["description"], "Create an issue");
+        assert_eq!(descriptor["mcpServer"], "linear");
+        assert_eq!(descriptor["schemaChanged"], true);
+
+        assert!(tool_descriptor_for(Some(&catalog), "unknown_tool").is_none());
+    }
 }
 
 #[cfg(test)]

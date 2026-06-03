@@ -387,6 +387,38 @@
       "const": 1,
       "type": "integer"
     },
+    "security": {
+      "additionalProperties": false,
+      "properties": {
+        "mode": {
+          "enum": [
+            "off",
+            "spotlight",
+            "strict",
+            "local-ml"
+          ]
+        },
+        "spotlight_external": {
+          "type": "boolean"
+        },
+        "trifecta_gate": {
+          "type": "boolean"
+        },
+        "pin_mcp_schemas": {
+          "type": "boolean"
+        },
+        "gate_secret_reads": {
+          "type": "boolean"
+        },
+        "trusted_mcp_servers": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "type": "object"
+    },
     "skills": {
       "additionalProperties": false,
       "properties": {

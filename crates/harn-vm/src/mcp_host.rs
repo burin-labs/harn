@@ -502,6 +502,29 @@ pub async fn tools(name: &str) -> Result<Vec<JsonValue>, VmError> {
                 .or_insert_with(|| JsonValue::String(name.to_string()));
         }
     }
+    // MCP tool-integrity (Layer 0b): pin each tool's schema and flag any whose
+    // description/inputSchema changed since first sighting (rug-pull defense).
+    // The flag rides on the tool dict so the host's approval UI can force
+    // re-approval; harn surfaces the fact, the host decides.
+    let security_policy = crate::security::current_policy();
+    if security_policy.pin_mcp_schemas && !security_policy.server_is_trusted(name) {
+        for tool in tools.iter_mut() {
+            let hash = crate::security::tool_schema_hash(tool);
+            let tool_name = tool
+                .get("name")
+                .and_then(|v| v.as_str())
+                .unwrap_or_default()
+                .to_string();
+            if tool_name.is_empty() {
+                continue;
+            }
+            if crate::security::pin_and_detect_change(name, &tool_name, &hash) {
+                if let Some(obj) = tool.as_object_mut() {
+                    obj.insert("_schema_changed".to_string(), JsonValue::Bool(true));
+                }
+            }
+        }
+    }
     Ok(tools)
 }
 

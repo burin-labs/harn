@@ -492,6 +492,7 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
         ],
         TY_STRING,
     ),
+    BuiltinSignature::simple("security_policy", &[Param::new("config", TY_DICT)], TY_DICT),
     BuiltinSignature::simple("sse_close", &[Param::new("stream", TY_STRING)], TY_BOOL),
     BuiltinSignature::simple(
         "sse_connect",

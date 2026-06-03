@@ -71,10 +71,23 @@ pub(crate) fn request_params(
     raw_input: &JsonValue,
     approval_request: JsonValue,
     policy_decision: &JsonValue,
+    tool_descriptor: Option<JsonValue>,
 ) -> JsonValue {
     let mut params = serde_json::Map::new();
     if let Some(session_id) = session_id {
         params.insert("sessionId".to_string(), json!(session_id));
+    }
+    // The full tool descriptor (description + inputSchema, plus the rug-pull
+    // `schemaChanged` flag) rides along so the host renders the *complete*
+    // model-visible tool text at approval time, closing the tool-poisoning
+    // visibility gap. Omitted when the catalog has no entry for the tool.
+    let mut harn_meta = json!({
+        "toolName": tool_name,
+        "approvalRequest": approval_request,
+        "policyDecision": policy_decision,
+    });
+    if let (Some(descriptor), Some(obj)) = (tool_descriptor, harn_meta.as_object_mut()) {
+        obj.insert("toolDescriptor".to_string(), descriptor);
     }
     params.insert(
         "toolCall".to_string(),
@@ -84,13 +97,7 @@ pub(crate) fn request_params(
             "title": tool_name,
             "kind": "other",
             "rawInput": raw_input,
-            "_meta": {
-                "harn": {
-                    "toolName": tool_name,
-                    "approvalRequest": approval_request,
-                    "policyDecision": policy_decision,
-                }
-            }
+            "_meta": { "harn": harn_meta }
         }),
     );
     params.insert("options".to_string(), canonical_options());
@@ -163,6 +170,7 @@ mod tests {
             &json!({"path": "src/lib.rs"}),
             json!({"id": "tool-1", "action": "edit"}),
             &json!({"decision": "ask"}),
+            None,
         );
         assert_eq!(params["sessionId"], "session-1");
         assert_eq!(params["toolCall"]["sessionUpdate"], "tool_call_update");

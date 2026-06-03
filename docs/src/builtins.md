@@ -1006,6 +1006,7 @@ pipeline summarize() {
 | `http_request(method, url, options?)` | method: string, url: string, options: dict | dict | Generic HTTP request |
 | `http_download(url, dst_path, options?)` | url: string, dst_path: string, options: dict | dict | Stream a response body to a file |
 | `egress_policy(config)` | config: dict | dict | Install the process egress policy used by HTTP, SSE, WebSocket, and connector outbound calls |
+| `security_policy(config)` | config: dict | dict | Install the prompt-injection defense policy (spotlighting of untrusted output + lethal-trifecta gate + MCP schema pinning). See `std/security`. |
 | `http_server_tls_plain()` | none | dict | Build HTTP-server TLS config for intentional cleartext/local listener mode |
 | `http_server_tls_edge(options?)` | options: dict | dict | Build HTTP-server TLS config for edge-terminated HTTPS; local listener stays plain and HSTS is enabled by default |
 | `http_server_tls_pem(cert_path, key_path)` | cert_path: string, key_path: string | dict | Build in-process HTTPS config from PEM files; missing files throw before startup |

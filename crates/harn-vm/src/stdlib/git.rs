@@ -659,6 +659,7 @@ async fn request_permission(
                 args,
                 approval_request_json,
                 &policy_decision.clone().unwrap_or(JsonValue::Null),
+                None,
             ),
         )
         .await?;
