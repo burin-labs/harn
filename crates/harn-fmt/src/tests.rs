@@ -1752,6 +1752,52 @@ fn test_trailing_block_comment_preserved_on_statement() {
 }
 
 #[test]
+fn test_trailing_line_comment_preserved_on_top_level_statement() {
+    // Regression: trailing same-line comments on *top-level* statements were
+    // silently dropped — `format_program` (unlike `format_body`) never
+    // attached them. Comments must never be lost by `harn fmt`.
+    let source = "let a = 1 // note\nlet b = 2\n";
+    let result = format_source(source).unwrap();
+    assert!(
+        result.contains("let a = 1") && result.contains("// note"),
+        "trailing comment should be preserved on the same line; got:\n{result}"
+    );
+    assert!(
+        !result.trim_end().ends_with("// note"),
+        "trailing comment must not be relocated to end-of-file; got:\n{result}"
+    );
+    let result2 = format_source(&result).unwrap();
+    assert_eq!(result, result2, "must be idempotent");
+}
+
+#[test]
+fn test_trailing_block_comment_preserved_on_top_level_statement() {
+    // Same regression as above, for a single-line block comment.
+    let source = "let a = 1 /* note */\nlet b = 2\n";
+    let result = format_source(source).unwrap();
+    assert!(
+        result.contains("let a = 1") && result.contains("/* note */"),
+        "trailing block comment should be preserved on the same line; got:\n{result}"
+    );
+    let result2 = format_source(&result).unwrap();
+    assert_eq!(result, result2, "must be idempotent");
+}
+
+#[test]
+fn test_top_level_trailing_comment_on_import_preserved() {
+    // Imports go through `format_sorted_import_block`, which also needs to
+    // attach trailing comments rather than drop them.
+    let source = "import { a } from \"std/io\" // why\n";
+    let result = format_source(source).unwrap();
+    assert!(
+        result.contains("// why"),
+        "trailing comment on an import should be preserved; got:\n{result}"
+    );
+    let result2 = format_source(&result).unwrap();
+    assert_eq!(result, result2, "must be idempotent");
+}
+
+#[test]
 fn test_method_call_args_dont_overcount_multiline_receiver() {
     // When the receiver of a method call wraps to multiple lines, the
     // method-call args should be laid out based on the new line's column,

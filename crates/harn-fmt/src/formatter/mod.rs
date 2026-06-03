@@ -246,6 +246,7 @@ impl<'a> Formatter<'a> {
             // Imports inside a sorted block stay tight — no blank line between them.
             self.emit_comments_in_range(comment_from, node.span.line);
             self.format_node(node);
+            self.attach_trailing_comment(node.span.end_line);
         }
     }
 
@@ -295,6 +296,11 @@ impl<'a> Formatter<'a> {
                 self.emit_top_level_comments_in_range(prev_end, node.span.line);
             }
             self.format_node(node);
+            // Preserve a trailing same-line comment on this top-level item.
+            // Without this, `let x = 1 // note` at the top level silently
+            // drops the comment — block bodies handle it via `format_body`,
+            // but `format_program` previously did not.
+            self.attach_trailing_comment(node.span.end_line);
         }
         if !self.comments.is_empty() {
             let max_line = *self.comments.keys().max().unwrap_or(&0);
