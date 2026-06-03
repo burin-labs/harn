@@ -2226,6 +2226,7 @@ dependencies = [
  "fs2",
  "futures",
  "harn-fmt",
+ "harn-guard",
  "harn-hostlib",
  "harn-ir",
  "harn-lexer",
@@ -2311,6 +2312,17 @@ version = "0.8.66"
 dependencies = [
  "harn-lexer",
  "harn-parser",
+]
+
+[[package]]
+name = "harn-guard"
+version = "0.8.66"
+dependencies = [
+ "harn-vm",
+ "serde",
+ "serde_json",
+ "sha2 0.11.0",
+ "thiserror 2.0.18",
 ]
 
 [[package]]

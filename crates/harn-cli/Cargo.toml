@@ -43,6 +43,10 @@ harn-rules-hostlib = { path = "../harn-rules-hostlib", version = "0.8", optional
 harn-lint = { path = "../harn-lint", version = "0.8" }
 harn-modules = { path = "../harn-modules", version = "0.8" }
 harn-fmt = { path = "../harn-fmt", version = "0.8" }
+# Management layer for downloadable injection-detection models (Layer 2). Light
+# (no model runtime); the heavy neural backend is behind `harn-guard/neural`,
+# pulled in only by the off-by-default `guard-neural` feature below.
+harn-guard = { path = "../harn-guard", version = "0.8" }
 harn-serve = { path = "../harn-serve", version = "0.8" }
 harn-skills = { path = "../harn-skills", version = "0.8" }
 harn-stdlib = { path = "../harn-stdlib", version = "0.8" }
@@ -129,6 +133,10 @@ hostlib = [
     "harn-hostlib/full",
     "harn-serve/hostlib-full",
 ]
+# Off by default: link the on-device neural injection classifier (candle/ONNX).
+# The default release binary stays lean — `harn guard` management works without
+# it, falling back to the built-in heuristic at runtime.
+guard-neural = ["harn-guard/neural"]
 
 [dev-dependencies]
 harn-mcp-rc-compat = { path = "../harn-mcp-rc-compat" }

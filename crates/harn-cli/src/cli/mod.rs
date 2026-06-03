@@ -28,6 +28,7 @@ mod explain;
 mod fix;
 mod flow;
 mod graph;
+mod guard;
 mod init;
 mod lint_fmt;
 mod local;
@@ -112,6 +113,9 @@ pub(crate) use flow::{
     FlowShipCommand, FlowShipWatchArgs,
 };
 pub(crate) use graph::GraphArgs;
+pub(crate) use guard::{
+    GuardArgs, GuardCommand, GuardInstallArgs, GuardListArgs, GuardRemoveArgs, GuardStatusArgs,
+};
 pub(crate) use init::{InitArgs, NewArgs, ProjectTemplate};
 pub(crate) use lint_fmt::{FmtArgs, PathTargetsArgs};
 pub(crate) use local::{
@@ -314,6 +318,8 @@ SCRIPTING
     Lint(PathTargetsArgs),
     /// Format .harn files or directories.
     Fmt(FmtArgs),
+    /// Manage downloadable on-device injection-detection models (Layer 2).
+    Guard(GuardArgs),
     /// Run user tests or the conformance suite.
     Test(TestArgs),
     /// Run a .harn script under a hermetic testbench (paused clock,

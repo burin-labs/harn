@@ -29,6 +29,7 @@ pub(crate) mod explain;
 pub(crate) mod fix;
 pub mod flow;
 pub(crate) mod graph;
+pub(crate) mod guard;
 pub(crate) mod hardware;
 pub(crate) mod init;
 pub(crate) mod json_schemas;
