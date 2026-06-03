@@ -219,14 +219,12 @@ impl GuardStore {
 mod tests {
     use super::*;
     use crate::catalog;
+    use tempfile::TempDir;
 
-    fn temp_root() -> PathBuf {
-        // A unique-enough dir without pulling a tempfile dep or a clock: the test
-        // thread id plus the test name embedded by callers keeps these distinct.
-        let mut p = std::env::temp_dir();
-        p.push(format!("harn-guard-test-{:?}", std::thread::current().id()));
-        let _ = fs::remove_dir_all(&p);
-        p
+    fn temp_store() -> (TempDir, GuardStore) {
+        let temp_dir = TempDir::new().unwrap();
+        let store = GuardStore::at_root(temp_dir.path().join("guard"));
+        (temp_dir, store)
     }
 
     fn payload(files: &[(&str, &[u8])]) -> Vec<(String, Vec<u8>)> {
@@ -247,7 +245,7 @@ mod tests {
 
     #[test]
     fn install_then_read_and_list_roundtrips() {
-        let store = GuardStore::at_root(temp_root());
+        let (_temp_dir, store) = temp_store();
         let model = catalog::default_model();
         // Provide bytes for every catalog file; the pinned model.onnx digest will
         // NOT match these stub bytes, so use a model with no pinned digests for a
@@ -260,13 +258,11 @@ mod tests {
         // default model pins model.onnx -> mismatch expected.
         let err = store.install(model, &stub, true).unwrap_err();
         assert!(matches!(err, GuardError::ChecksumMismatch { .. }));
-
-        let _ = fs::remove_dir_all(store.root());
     }
 
     #[test]
     fn install_requires_license_acceptance() {
-        let store = GuardStore::at_root(temp_root());
+        let (_temp_dir, store) = temp_store();
         let model = catalog::find("llama-prompt-guard-2-86m").unwrap();
         let stub = payload(&[
             ("model.onnx", b"a"),
@@ -275,12 +271,11 @@ mod tests {
         ]);
         let err = store.install(model, &stub, false).unwrap_err();
         assert!(matches!(err, GuardError::LicenseNotAccepted { .. }));
-        let _ = fs::remove_dir_all(store.root());
     }
 
     #[test]
     fn install_unpinned_model_roundtrips_and_verifies() {
-        let store = GuardStore::at_root(temp_root());
+        let (_temp_dir, store) = temp_store();
         // The gated entry pins nothing, so stub bytes install cleanly (TOFU).
         let model = catalog::find("llama-prompt-guard-2-86m").unwrap();
         let files = payload(&[
@@ -305,22 +300,20 @@ mod tests {
         assert!(store.remove("llama-prompt-guard-2-86m").unwrap());
         assert!(!store.is_installed("llama-prompt-guard-2-86m"));
         assert!(!store.remove("llama-prompt-guard-2-86m").unwrap());
-        let _ = fs::remove_dir_all(store.root());
     }
 
     #[test]
     fn missing_file_in_payload_errors() {
-        let store = GuardStore::at_root(temp_root());
+        let (_temp_dir, store) = temp_store();
         let model = catalog::find("llama-prompt-guard-2-86m").unwrap();
         let incomplete = payload(&[("model.onnx", b"weights")]);
         let err = store.install(model, &incomplete, true).unwrap_err();
         assert!(matches!(err, GuardError::MissingFile(f) if f == "tokenizer.json"));
-        let _ = fs::remove_dir_all(store.root());
     }
 
     #[test]
     fn verify_detects_corruption() {
-        let store = GuardStore::at_root(temp_root());
+        let (_temp_dir, store) = temp_store();
         let model = catalog::find("llama-prompt-guard-2-86m").unwrap();
         let files = payload(&[
             ("model.onnx", b"weights"),
@@ -331,6 +324,5 @@ mod tests {
         // Corrupt a file on disk.
         fs::write(store.model_dir(model.name).join("config.json"), b"tampered").unwrap();
         assert!(!store.verify_installed(model.name).unwrap());
-        let _ = fs::remove_dir_all(store.root());
     }
 }
