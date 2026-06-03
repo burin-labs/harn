@@ -261,9 +261,17 @@ impl Lexer {
         if depth > 0 {
             return Err(LexerError::UnterminatedBlockComment(start));
         }
+        // The span must point at the opening `/*` (line/column of `start`),
+        // with `end_line` at the closing `*/` — mirroring how multi-line
+        // strings record their span. Using `self.line` for the start line
+        // here would report the comment's *end* line, which misplaces
+        // multi-line block comments for every span consumer (`harn fmt`,
+        // the LSP, diagnostics).
+        let mut span = Span::with_offsets(start_byte, self.byte_pos, start.line, start.column);
+        span.end_line = self.line;
         Ok(Token::with_span(
             TokenKind::BlockComment { text, is_doc },
-            Span::with_offsets(start_byte, self.byte_pos, self.line, start.column),
+            span,
         ))
     }
 
@@ -1093,6 +1101,31 @@ mod tests {
         let mut lexer = Lexer::new("/* outer /* nested */ still */ 42");
         let tokens = lexer.tokenize().unwrap();
         assert_eq!(tokens[0].kind, TokenKind::IntLiteral(42));
+    }
+
+    #[test]
+    fn test_multiline_block_comment_span_starts_at_open() {
+        // A block comment that opens on line 2 and closes on line 4. Its span's
+        // `line`/`column` must point at the opening `/*` (line 2), and `end_line`
+        // at the closing `*/` (line 4) — matching how multi-line strings record
+        // their span. Downstream consumers (`harn fmt`, the LSP) key comments by
+        // `span.line`, so reporting the end line there misplaces the comment.
+        let src = "let a = 1\n/* block\n   spanning\n   lines */\nlet b = 2";
+        let mut lex = Lexer::new(src);
+        let tokens = lex.tokenize_with_comments().unwrap();
+        let block = tokens
+            .iter()
+            .find(|t| matches!(t.kind, TokenKind::BlockComment { .. }))
+            .expect("block comment token");
+        assert_eq!(block.span.line, 2, "start line should be the opening `/*`");
+        assert_eq!(
+            block.span.column, 1,
+            "start column should be the `/*` column"
+        );
+        assert_eq!(
+            block.span.end_line, 4,
+            "end line should be the closing `*/`"
+        );
     }
 
     #[test]

@@ -45,13 +45,14 @@ pub(crate) fn collect_comment_tokens(source: &str) -> Vec<LegacyCommentTok> {
                 });
             }
             harn_lexer::TokenKind::BlockComment { text, is_doc } => {
-                // The lexer keeps internal newlines in `text` and stamps the
-                // span line at the comment's *end*, so the start line is the
-                // end line minus the number of contained newlines.
-                let newlines = text.matches('\n').count();
+                // `line` is the comment's *bottom* line (adjacent to an item
+                // below it); `start_line` is its *top* line. The lexer records
+                // these as `span.end_line` and `span.line` respectively, so a
+                // multi-line block comment spans the inclusive range
+                // `[start_line, line]`.
                 out.push(LegacyCommentTok {
-                    line: tok.span.line,
-                    start_line: tok.span.line.saturating_sub(newlines),
+                    line: tok.span.end_line,
+                    start_line: tok.span.line,
                     start_byte: tok.span.start,
                     end_byte: tok.span.end,
                     is_line: false,
