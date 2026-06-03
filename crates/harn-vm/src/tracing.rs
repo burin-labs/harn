@@ -753,14 +753,26 @@ mod tests {
 
     #[test]
     fn test_span_event_offset_is_monotonic() {
+        // Use a mock clock so the test is deterministic under any load and
+        // requires zero wall-clock time. The mock is advanced by 10 ms
+        // between the two events, guaranteeing a strictly-increasing offset
+        // rather than relying on the OS scheduler to deliver >= 1 ms of
+        // real elapsed time between the two `record_event` calls.
+        let clock = crate::clock_mock::MockClock::at_wall_ms(1_000_000_000_000);
+        let _guard = crate::clock_mock::install_override(clock.clone());
         let mut c = SpanCollector::new();
         let id = c.start(SpanKind::UserTiming, "outer".into());
         assert!(c.record_event(id, "before".into(), BTreeMap::new()));
-        // Wait a beat so the offsets diverge on real Instant clocks.
-        std::thread::sleep(std::time::Duration::from_millis(2));
+        clock.advance_std_sync(std::time::Duration::from_millis(10));
         assert!(c.record_event(id, "after".into(), BTreeMap::new()));
         let closed = c.end(id).expect("open span");
         assert_eq!(closed.events.len(), 2);
-        assert!(closed.events[1].offset_ms >= closed.events[0].offset_ms);
+        assert!(
+            closed.events[1].offset_ms > closed.events[0].offset_ms,
+            "second event should have a strictly greater offset after a 10ms advance; \
+             before={} after={}",
+            closed.events[0].offset_ms,
+            closed.events[1].offset_ms
+        );
     }
 }

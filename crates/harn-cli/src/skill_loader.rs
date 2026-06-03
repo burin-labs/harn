@@ -611,6 +611,9 @@ mod tests {
 
     #[test]
     fn cli_dirs_produce_registry_entries() {
+        // Acquire the env lock: `load_skills` reads HOME and HARN_SKILLS_PATH,
+        // which sibling tests mutate while holding this same lock.
+        let _env = lock_env().blocking_lock();
         let tmp = tempfile::tempdir().unwrap();
         write_skill(tmp.path(), "deploy", "deploy", "body A");
         let loaded = load_skills(&SkillLoaderInputs {
