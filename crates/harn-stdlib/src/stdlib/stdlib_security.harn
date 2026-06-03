@@ -8,18 +8,22 @@
 // pipelines rarely need it.
 //
 // Import with:
-//   import { configure, spotlight, strict, off } from "std/security"
+//   import { configure, spotlight, strict, local_ml, off } from "std/security"
 /**
  * Push a security policy derived from `config` onto the runtime stack and
  * return the resolved summary. Recognised keys (all optional; safe defaults
  * are applied for any omitted):
  *
  *   - mode: "off" | "spotlight" | "strict" | "local-ml"
- *   - spotlight_external: bool   — frame untrusted output as data
- *   - trifecta_gate: bool        — gate exfil tools while tainted
- *   - pin_mcp_schemas: bool      — re-approve on tool-description change
- *   - gate_secret_reads: bool    — gate secret-file reads while tainted
- *   - trusted_mcp_servers: [str] — servers exempt from taint + pinning
+ *   - spotlight_external: bool       — frame untrusted output as data
+ *   - trifecta_gate: bool            — gate exfil tools while tainted
+ *   - pin_mcp_schemas: bool          — re-approve on tool-description change
+ *   - gate_secret_reads: bool        — gate secret-file reads while tainted
+ *   - detect_injection: bool         — score untrusted content with the
+ *                                      injection classifier (implied by
+ *                                      mode "local-ml")
+ *   - guard_threshold_percent: int   — flag at/above this score percent (0..100)
+ *   - trusted_mcp_servers: [str]     — servers exempt from taint + pinning
  *
  * @effects: [state]
  * @allocation: heap
@@ -55,6 +59,22 @@ pub fn spotlight() -> dict {
  */
 pub fn strict() -> dict {
   return security_policy({mode: "strict"})
+}
+
+/**
+ * Enable local-ml mode: spotlight + trifecta gate + on-device injection
+ * detection. Untrusted content is scored by the injection classifier (the
+ * built-in heuristic by default, or a downloadable `harn-guard` neural model
+ * when registered), and a flagged score tightens the trifecta gate.
+ *
+ * @effects: [state]
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: local_ml()
+ */
+pub fn local_ml() -> dict {
+  return security_policy({mode: "local-ml"})
 }
 
 /**

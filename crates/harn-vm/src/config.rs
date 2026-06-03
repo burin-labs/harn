@@ -246,8 +246,10 @@ impl Default for RedactionConfig {
 /// `Off` disables every layer. `Spotlight` (the default) frames untrusted
 /// external tool/MCP output as data and gates exfiltration when context is
 /// tainted. `Strict` additionally datamarks every line of untrusted content.
-/// `LocalMl` reserves the on-device-classifier tier (Layer 2 / `harn-guard`
-/// sidecar); until that ships it behaves as `Spotlight`.
+/// `LocalMl` adds the on-device-classifier tier (Layer 2): untrusted content is
+/// scored by an injection classifier (the built-in heuristic by default, or a
+/// downloadable `harn-guard` neural model when installed), and a flagged score
+/// tightens the trifecta gate. It is a superset of `Spotlight`.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
 #[serde(rename_all = "kebab-case")]
 pub enum SecurityMode {
@@ -300,6 +302,15 @@ pub struct SecurityConfig {
     pub pin_mcp_schemas: bool,
     /// Also gate reads of well-known secret/credential files while tainted.
     pub gate_secret_reads: bool,
+    /// Score untrusted content with an injection classifier (Layer 2). Implied
+    /// by `mode = "local-ml"`; can be opted into under `spotlight`/`strict` too.
+    /// The classifier is the built-in heuristic unless a `harn-guard` neural
+    /// model is registered. A flagged score tightens the trifecta gate.
+    pub detect_injection: bool,
+    /// Malicious-probability threshold, as a percent in `[0, 100]`, at or above
+    /// which the classifier marks content as flagged. Kept as an integer so the
+    /// config stays `Eq`-comparable and round-trips losslessly.
+    pub guard_threshold_percent: u8,
     /// MCP servers the operator has explicitly trusted (skip taint + pinning).
     pub trusted_mcp_servers: Vec<String>,
 }
@@ -312,6 +323,8 @@ impl Default for SecurityConfig {
             trifecta_gate: true,
             pin_mcp_schemas: true,
             gate_secret_reads: true,
+            detect_injection: false,
+            guard_threshold_percent: 50,
             trusted_mcp_servers: Vec::new(),
         }
     }

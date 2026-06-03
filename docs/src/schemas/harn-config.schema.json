@@ -410,6 +410,14 @@
         "gate_secret_reads": {
           "type": "boolean"
         },
+        "detect_injection": {
+          "type": "boolean"
+        },
+        "guard_threshold_percent": {
+          "maximum": 100,
+          "minimum": 0,
+          "type": "integer"
+        },
         "trusted_mcp_servers": {
           "items": {
             "type": "string"
