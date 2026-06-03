@@ -192,6 +192,14 @@ WASM.
 
 ### WASI subprocess sandbox
 
+> **Requires an opt-in build.** wasmtime + the cranelift JIT are *not*
+> compiled into the default/distributed `harn` binary (they add ~36 crates and
+> ~8.6 MB of the stripped binary, plus compile time, for this one mode). Build
+> with the feature to enable it:
+> `cargo install harn-cli --features testbench-wasi`. Without it,
+> `--process-wasi` returns `WasiToolchain requires the testbench-wasi Cargo
+> feature`. Every other testbench mode below works in the default binary.
+
 `--process-wasi <dir>` resolves every subprocess invocation against
 `<dir>/<program>.wasm`. Programs that match are run inside wasmtime
 with the testbench's mock clock virtualized into `clock_time_get` and

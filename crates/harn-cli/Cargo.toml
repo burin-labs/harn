@@ -36,7 +36,16 @@ path = "src/main.rs"
 harn-lexer = { path = "../harn-lexer", version = "0.8" }
 harn-parser = { path = "../harn-parser", version = "0.8" }
 harn-ir = { path = "../harn-ir", version = "0.8" }
-harn-vm = { path = "../harn-vm", version = "0.8", features = ["otel", "testbench-wasi"] }
+# testbench-wasi (wasmtime + the cranelift JIT, ~36 crates, ~8.6 MB of the
+# stripped binary plus real compile time) is NOT enabled by default — it only
+# backs the advanced `harn testbench run --process-wasi <dir>`
+# subprocess mode, which substitutes real subprocesses with pre-compiled
+# wasm32-wasi modules. Every other testbench path (record/replay tapes, FS
+# overlay, paused clock, LLM fixtures, fidelity, annotations, conformance
+# sidecars) works without it, so the default binary stays lean. Opt in with the
+# `testbench-wasi` feature below; without it `--process-wasi` returns a clear
+# "requires the testbench-wasi Cargo feature" error.
+harn-vm = { path = "../harn-vm", version = "0.8", features = ["otel"] }
 harn-hostlib = { path = "../harn-hostlib", version = "0.8", optional = true }
 harn-rules = { path = "../harn-rules", version = "0.8", optional = true }
 harn-rules-hostlib = { path = "../harn-rules-hostlib", version = "0.8", optional = true }
@@ -121,9 +130,11 @@ libc = "0.2"
 # purpose: resolver=2 isolates build- and runtime-dep feature sets, and a
 # divergent set would compile `harn-vm` twice with different cfgs. Keeping
 # the lists in sync lets Cargo dedupe and keeps clippy diagnostics aligned
-# across the two compile units.
+# across the two compile units. The build script never needs testbench-wasi
+# (it only compiles/encodes bytecode), so wasmtime stays out of this compile
+# unit; the optional `testbench-wasi` feature only toggles the runtime dep.
 [build-dependencies]
-harn-vm = { path = "../harn-vm", version = "0.8", features = ["otel", "testbench-wasi"] }
+harn-vm = { path = "../harn-vm", version = "0.8", features = ["otel"] }
 harn-stdlib = { path = "../harn-stdlib", version = "0.8" }
 
 [features]
@@ -143,6 +154,12 @@ hostlib = [
 # The default release binary stays lean — `harn guard` management works without
 # it, falling back to the built-in heuristic at runtime.
 guard-neural = ["harn-guard/neural"]
+# Off by default: link wasmtime + the cranelift JIT so `harn testbench run
+# --process-wasi <dir>` can run subprocesses as wasm32-wasi modules under a
+# virtualized clock. Adds ~36 crates / ~8.6 MB stripped. Every other testbench path
+# works without it, so the default distributed binary stays lean. Opt in for a
+# from-source build: `cargo install harn-cli --features testbench-wasi`.
+testbench-wasi = ["harn-vm/testbench-wasi"]
 
 [dev-dependencies]
 harn-mcp-rc-compat = { path = "../harn-mcp-rc-compat" }
