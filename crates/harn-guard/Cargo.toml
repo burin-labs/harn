@@ -1,0 +1,27 @@
+[package]
+name = "harn-guard"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+description = "Downloadable on-device prompt-injection classifier for Harn (Layer 2)"
+
+[dependencies]
+# Only the security seam (InjectionClassifier registration) and runtime paths are
+# needed; postgres and the other default features stay off to keep this lean.
+harn-vm = { path = "../harn-vm", version = "0.8", default-features = false }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.11"
+thiserror = "2"
+
+[features]
+# Management layer (catalog + store + resolve) is dependency-light and always on.
+default = []
+# `neural` pulls the on-device inference runtime (candle/ONNX) — slice 2b. Kept
+# off by default so the release binary never links a model runtime.
+neural = []
+
+[lints]
+workspace = true

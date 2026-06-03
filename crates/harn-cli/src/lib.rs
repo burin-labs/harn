@@ -29,10 +29,11 @@ use std::{env, fs, panic, process, thread};
 
 use cli::{
     refresh_provider_catalog_if_requested, Cli, Command, CompletionShell, EvalCommand,
-    MergeCaptainCommand, MergeCaptainMockCommand, ModelInfoArgs, PackageArtifactsCommand,
-    PackageCacheCommand, PackageCommand, PackageScaffoldCommand, PersonaCommand,
-    PersonaSupervisionCommand, PgCommand, ProvidersCommand, RunsCommand, ServeCommand,
-    SkillCommand, SkillKeyCommand, SkillTrustCommand, SkillsCommand, TimeCommand, ToolCommand,
+    GuardCommand, MergeCaptainCommand, MergeCaptainMockCommand, ModelInfoArgs,
+    PackageArtifactsCommand, PackageCacheCommand, PackageCommand, PackageScaffoldCommand,
+    PersonaCommand, PersonaSupervisionCommand, PgCommand, ProvidersCommand, RunsCommand,
+    ServeCommand, SkillCommand, SkillKeyCommand, SkillTrustCommand, SkillsCommand, TimeCommand,
+    ToolCommand,
 };
 use harn_lexer::Lexer;
 use harn_parser::{DiagnosticSeverity, Parser, TypeChecker};
@@ -212,6 +213,14 @@ async fn async_main(raw_args: Vec<String>, runtime_mode: CliRuntimeMode) {
                 SkillTrustCommand::List(list) => commands::skill::run_trust_list(&list),
             },
             SkillCommand::New(new_args) => commands::skills::run_new(&new_args),
+        },
+        Command::Guard(args) => match args.command {
+            GuardCommand::List(list_args) => commands::guard::run_list(&list_args),
+            GuardCommand::Install(install_args) => {
+                commands::guard::run_install(&install_args).await;
+            }
+            GuardCommand::Status(status_args) => commands::guard::run_status(&status_args),
+            GuardCommand::Remove(remove_args) => commands::guard::run_remove(&remove_args),
         },
         Command::Run(args) => {
             if !args.explain_cost {
