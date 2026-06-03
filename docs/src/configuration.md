@@ -182,11 +182,13 @@ it. Defaults are **on**, consistent with the safe defaults for `permissions`,
 
 | Key | Type | Default | Meaning |
 | --- | --- | --- | --- |
-| `mode` | `off` \| `spotlight` \| `strict` \| `local-ml` | `spotlight` | `off` disables every layer. `spotlight` frames untrusted output as data and gates the lethal trifecta. `strict` additionally datamarks every line of untrusted content. `local-ml` reserves the on-device-classifier tier (behaves as `spotlight` until that ships). |
+| `mode` | `off` \| `spotlight` \| `strict` \| `local-ml` | `spotlight` | `off` disables every layer. `spotlight` frames untrusted output as data and gates the lethal trifecta. `strict` additionally datamarks every line of untrusted content. `local-ml` is a superset of `spotlight` that also scores untrusted content with an on-device injection classifier (Layer 2). |
 | `spotlight_external` | bool | `true` | Wrap untrusted external tool/MCP output in delimiters + a provenance banner so the model treats it as data, never instructions. |
 | `trifecta_gate` | bool | `true` | Once untrusted content is in context, upgrade an auto-allowed tool that can exfiltrate (network/fetch), destroy state, or read a secret file to an interactive confirmation. Only takes effect where an approval policy is installed. |
 | `pin_mcp_schemas` | bool | `true` | Pin + hash each MCP tool's description/schema on `tools/list`; flag any that change after first sighting (rug-pull / tool-poisoning defense). |
 | `gate_secret_reads` | bool | `true` | Include reads of well-known secret/credential files in the trifecta gate. |
+| `detect_injection` | bool | `false` | Score untrusted content with the injection classifier and record the verdict on its taint record. Implied by `mode = "local-ml"`; can be opted into under `spotlight`/`strict`. A flagged score also gates a workspace-mutating tool (a write that a bare trifecta gate would miss). |
+| `guard_threshold_percent` | int `0..100` | `50` | Malicious-probability percent at or above which the classifier marks content flagged. |
 | `trusted_mcp_servers` | `[string]` | `[]` | Servers exempt from taint tracking and schema pinning. |
 
 **What "spotlighting" does.** Output that crossed a trust boundary — an external
@@ -212,12 +214,33 @@ middle leg (a per-session taint ledger) and, when present, requires confirmation
 before the third (an exfiltration-capable tool runs). Hosts wire the
 confirmation through the canonical `session/request_permission` flow.
 
+**Injection detection (Layer 2).** `local-ml` mode (or `detect_injection = true`)
+runs an injection classifier over untrusted content and records the verdict
+(`model`, `score`, `flagged`) on the taint ledger, so the approval UI and audit
+trail can show *why* a span looks risky. The classifier is pluggable:
+
+- The **built-in heuristic** (`heuristic-v1`) is always available and
+  dependency-free. It is precision-first — strong, rarely-benign markers
+  (instruction-override phrasing, concealment directives, hidden/bidi unicode) —
+  so a flag is a meaningful signal even though recall is limited. It ships in the
+  default binary at negligible size and needs no model, paid API, or network.
+- A **downloadable neural model** (`harn-guard`) supersedes the heuristic when
+  installed, for better recall. It lives behind an optional, feature-gated
+  backend, so the default release binary never links a model runtime — keeping
+  it lean for users who do not opt in.
+
+A flagged verdict tightens the trifecta gate: in addition to the exfil / destroy /
+secret-read vectors, a flagged injection plus a workspace-mutating tool (a file
+write) is gated too — catching injection→write attacks the bare trifecta misses.
+Detection never *weakens* the gate; it only adds confirmations.
+
 Configure programmatically with `std/security`:
 
 ```harn
-import { configure, strict, off } from "std/security"
+import { configure, strict, local_ml, off } from "std/security"
 
 configure({ mode: "spotlight", trusted_mcp_servers: ["internal-docs"] })
+local_ml() // spotlight + trifecta gate + on-device injection detection
 ```
 
 ## Compatibility

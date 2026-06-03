@@ -1110,7 +1110,17 @@ fn host_agent_session_record_tool_results_builtin(
                         } else {
                             tool_call_id.clone()
                         },
-                        detector: None,
+                        // Layer 2: score the untrusted content with the active
+                        // injection classifier when detection is enabled
+                        // (`local-ml` mode, or an explicit opt-in).
+                        detector: if security_policy.detect_injection {
+                            Some(crate::security::classify_injection(
+                                &raw_observation,
+                                security_policy.guard_threshold_percent,
+                            ))
+                        } else {
+                            None
+                        },
                         labels: crate::security::content_labels(&raw_observation),
                     },
                 );

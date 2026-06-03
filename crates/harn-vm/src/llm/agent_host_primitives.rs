@@ -606,33 +606,84 @@ fn tool_descriptor_for(tools_val: Option<&VmValue>, tool_name: &str) -> Option<s
     None
 }
 
+/// A fired trifecta gate: the human-facing `reason` plus whether an in-context
+/// injection verdict drove it (so the decision can carry a `prompt_injection`
+/// risk label in addition to `lethal_trifecta`).
+struct GateOutcome {
+    reason: String,
+    injection_flagged: bool,
+}
+
+/// The strongest flagged in-context detector score, as a rounded percent, or
+/// `None` when no in-context taint was flagged by the injection classifier.
+fn flagged_injection_percent(taint: &[crate::security::TaintRecord]) -> Option<u32> {
+    taint
+        .iter()
+        .filter_map(|record| record.detector.as_ref())
+        .filter(|verdict| verdict.flagged)
+        .map(|verdict| (verdict.score * 100.0).round() as u32)
+        .max()
+}
+
 /// Build the confirmation message for a lethal-trifecta gate, or `None` if the
-/// tool is not a leak/destroy/secret-read vector. `taint` is non-empty.
+/// tool is not a leak/destroy/secret-read vector (nor a workspace-mutating tool
+/// while flagged untrusted content is in context). `taint` is non-empty.
 fn trifecta_gate_reason(
     policy: &crate::security::SecurityPolicy,
     annotations: Option<&crate::tool_annotations::ToolAnnotations>,
     tool_name: &str,
     tool_args: &serde_json::Value,
     taint: &[crate::security::TaintRecord],
-) -> Option<String> {
+) -> Option<GateOutcome> {
     let mut origins: Vec<String> = taint.iter().map(|record| record.origin.clone()).collect();
     origins.sort();
     origins.dedup();
     let origins = origins.join(", ");
+    // When the in-context untrusted content was flagged by the injection
+    // classifier, append a confidence note and mark the decision so the UI can
+    // surface the distinct `prompt_injection` risk.
+    let flagged_percent = flagged_injection_percent(taint);
+    let injection_note = flagged_percent
+        .map(|pct| format!(" The untrusted content was flagged as a likely prompt injection ({pct}% confidence)."))
+        .unwrap_or_default();
+    let injection_flagged = flagged_percent.is_some();
+
     if crate::security::is_exfil_capable(annotations, tool_name) {
-        return Some(format!(
-            "Untrusted content from {origins} is in context and `{tool_name}` can send data to an external destination. Confirm this is intended (lethal-trifecta guard)."
-        ));
+        return Some(GateOutcome {
+            reason: format!(
+                "Untrusted content from {origins} is in context and `{tool_name}` can send data to an external destination.{injection_note} Confirm this is intended (lethal-trifecta guard)."
+            ),
+            injection_flagged,
+        });
     }
     if crate::security::is_destructive(annotations) {
-        return Some(format!(
-            "Untrusted content from {origins} is in context and `{tool_name}` performs a destructive action. Confirm this is intended (lethal-trifecta guard)."
-        ));
+        return Some(GateOutcome {
+            reason: format!(
+                "Untrusted content from {origins} is in context and `{tool_name}` performs a destructive action.{injection_note} Confirm this is intended (lethal-trifecta guard)."
+            ),
+            injection_flagged,
+        });
     }
     if policy.gate_secret_reads && crate::security::args_reference_secret(tool_args) {
-        return Some(format!(
-            "Untrusted content from {origins} is in context and `{tool_name}` reads a secret/credential file. Confirm this is intended (lethal-trifecta guard)."
-        ));
+        return Some(GateOutcome {
+            reason: format!(
+                "Untrusted content from {origins} is in context and `{tool_name}` reads a secret/credential file.{injection_note} Confirm this is intended (lethal-trifecta guard)."
+            ),
+            injection_flagged,
+        });
+    }
+    // Detection-expanded axis (Layer 2): a flagged injection plus a tool that
+    // mutates workspace files. Only fires when detection is on and the classifier
+    // actually flagged the content, so it never gates benign writes.
+    if policy.detect_injection && crate::security::mutates_workspace(annotations) {
+        if let Some(pct) = flagged_percent {
+            return Some(GateOutcome {
+                reason: format!(
+                    "Untrusted content from {origins} was flagged as a likely prompt injection ({pct}% confidence) and `{tool_name}` modifies workspace files. Confirm this is intended (injection guard)."
+                ),
+                injection_flagged: true,
+            });
+        }
     }
     None
 }
@@ -640,12 +691,20 @@ fn trifecta_gate_reason(
 /// Upgrade an auto-allow policy decision to an interactive ask for the
 /// lethal-trifecta gate. Keeps the audit receipt (sent to the host as
 /// `policyDecision`) in sync with the upgraded decision so it stays a faithful
-/// record and the approval UI can surface the reason + `lethal_trifecta` label.
-fn upgrade_to_trifecta_ask(decision: &mut crate::orchestration::PolicyEvaluation, reason: String) {
+/// record and the approval UI can surface the reason + risk labels. Always adds
+/// `lethal_trifecta`; `extra_labels` carries finer-grained tags (e.g.
+/// `prompt_injection`) without duplicating.
+fn upgrade_to_trifecta_ask(
+    decision: &mut crate::orchestration::PolicyEvaluation,
+    reason: String,
+    extra_labels: &[&str],
+) {
     decision.action = "ask".to_string();
     decision.reason = reason;
-    if !decision.risk_labels.iter().any(|l| l == "lethal_trifecta") {
-        decision.risk_labels.push("lethal_trifecta".to_string());
+    for label in std::iter::once("lethal_trifecta").chain(extra_labels.iter().copied()) {
+        if !decision.risk_labels.iter().any(|l| l == label) {
+            decision.risk_labels.push(label.to_string());
+        }
     }
     if let Some(receipt) = decision.receipt.as_object_mut() {
         receipt.insert("action".to_string(), serde_json::Value::from("ask"));
@@ -842,14 +901,19 @@ async fn host_agent_dispatch_tool_call(
                     if !taint.is_empty() {
                         let annotations =
                             crate::orchestration::current_tool_annotations(&tool_name);
-                        if let Some(reason) = trifecta_gate_reason(
+                        if let Some(outcome) = trifecta_gate_reason(
                             &security_policy,
                             annotations.as_ref(),
                             &tool_name,
                             &tool_args,
                             &taint,
                         ) {
-                            upgrade_to_trifecta_ask(decision, reason);
+                            let extra: &[&str] = if outcome.injection_flagged {
+                                &["prompt_injection"]
+                            } else {
+                                &[]
+                            };
+                            upgrade_to_trifecta_ask(decision, outcome.reason, extra);
                         }
                     }
                 }
@@ -1621,7 +1685,7 @@ async fn host_agent_reminder_providers_fire_impl(
 
 #[cfg(test)]
 mod security_gate_tests {
-    use super::{tool_descriptor_for, upgrade_to_trifecta_ask};
+    use super::{tool_descriptor_for, trifecta_gate_reason, upgrade_to_trifecta_ask};
     use crate::value::VmValue;
     use std::collections::BTreeMap;
     use std::sync::Arc;
@@ -1645,7 +1709,11 @@ mod security_gate_tests {
     #[test]
     fn trifecta_upgrade_syncs_decision_and_receipt() {
         let mut decision = allow_decision();
-        upgrade_to_trifecta_ask(&mut decision, "untrusted content + exfil tool".to_string());
+        upgrade_to_trifecta_ask(
+            &mut decision,
+            "untrusted content + exfil tool".to_string(),
+            &[],
+        );
 
         assert_eq!(decision.action, "ask");
         assert_eq!(decision.reason, "untrusted content + exfil tool");
@@ -1662,13 +1730,91 @@ mod security_gate_tests {
     fn trifecta_upgrade_does_not_duplicate_label() {
         let mut decision = allow_decision();
         decision.risk_labels.push("lethal_trifecta".to_string());
-        upgrade_to_trifecta_ask(&mut decision, "reason".to_string());
+        upgrade_to_trifecta_ask(&mut decision, "reason".to_string(), &[]);
         let count = decision
             .risk_labels
             .iter()
             .filter(|l| *l == "lethal_trifecta")
             .count();
         assert_eq!(count, 1);
+    }
+
+    #[test]
+    fn trifecta_upgrade_adds_extra_labels_without_dropping_trifecta() {
+        let mut decision = allow_decision();
+        upgrade_to_trifecta_ask(
+            &mut decision,
+            "flagged injection + write tool".to_string(),
+            &["prompt_injection"],
+        );
+        assert!(decision.risk_labels.iter().any(|l| l == "lethal_trifecta"));
+        assert!(decision.risk_labels.iter().any(|l| l == "prompt_injection"));
+        // Receipt mirrors the labels for the host/UI.
+        let labels = decision.receipt["risk_labels"]
+            .as_array()
+            .expect("risk_labels array");
+        assert!(labels.iter().any(|l| l == "prompt_injection"));
+    }
+
+    #[test]
+    fn flagged_injection_plus_write_tool_gates_via_detection_axis() {
+        use crate::config::{SecurityConfig, SecurityMode};
+        use crate::security::{DetectorVerdict, SecurityPolicy, TaintRecord, TrustLevel};
+        use crate::tool_annotations::{SideEffectLevel, ToolAnnotations};
+
+        let policy = SecurityPolicy::from_config(&SecurityConfig {
+            mode: SecurityMode::LocalMl,
+            ..Default::default()
+        });
+        assert!(policy.detect_injection, "local-ml enables detection");
+
+        let write_ann = ToolAnnotations {
+            side_effect_level: SideEffectLevel::WorkspaceWrite,
+            ..Default::default()
+        };
+        let taint = |flagged: bool, score: f64| {
+            vec![TaintRecord {
+                origin: "fetch:web_fetch".to_string(),
+                trust: TrustLevel::Untrusted,
+                introduced_by: "call-1".to_string(),
+                detector: Some(DetectorVerdict {
+                    model: "heuristic-v1".to_string(),
+                    score,
+                    flagged,
+                }),
+                labels: Vec::new(),
+            }]
+        };
+
+        // Flagged injection + a workspace-write tool trips the detection axis.
+        let outcome = trifecta_gate_reason(
+            &policy,
+            Some(&write_ann),
+            "write_file",
+            &serde_json::json!({}),
+            &taint(true, 0.85),
+        )
+        .expect("detection axis fires");
+        assert!(outcome.injection_flagged);
+        assert!(
+            outcome.reason.contains("85% confidence"),
+            "{}",
+            outcome.reason
+        );
+        assert!(outcome.reason.contains("modifies workspace files"));
+
+        // A benign (not-flagged) verdict does NOT gate a workspace write.
+        assert!(
+            trifecta_gate_reason(
+                &policy,
+                Some(&write_ann),
+                "write_file",
+                &serde_json::json!({}),
+                &taint(false, 0.10),
+            )
+            .is_none(),
+            "unflagged content must not gate benign writes"
+        );
     }
 
     fn vm_str(s: &str) -> VmValue {
