@@ -659,7 +659,10 @@ pub fn build(args: &BuildArgs) -> Result<PackOutcome, PackError> {
     // artifact alone, with no separate descriptor. Harn stays agnostic about
     // the kind-specific payload; it only ferries it. See `docs` and the
     // `ContributionEntry` schema.
-    carry_extension_metadata(&project_root, &mut bundle)?;
+    // Also bundle files referenced by the `[[contributes]]` block (preview
+    // HTML, theme JSON, canon dir, skill, …) so an imported pack is
+    // self-contained for the host.
+    contents.extend(carry_extension_metadata(&project_root, &mut bundle)?);
     sort_sbom_doc(&mut bundle.sbom);
     let sbom_bytes = serde_json::to_vec_pretty(&bundle.sbom).map_err(|err| {
         PackError::new(
@@ -1037,17 +1040,17 @@ fn type_check_or_fail(
 fn carry_extension_metadata(
     project_root: &Path,
     bundle: &mut WorkflowBundle,
-) -> Result<(), PackError> {
+) -> Result<Vec<HarnpackEntry>, PackError> {
     let manifest_path = project_root.join("harn.toml");
     if !manifest_path.is_file() {
-        return Ok(());
+        return Ok(Vec::new());
     }
     let Ok(text) = std::fs::read_to_string(&manifest_path) else {
-        return Ok(());
+        return Ok(Vec::new());
     };
     let manifest: crate::package::Manifest = match toml::from_str(&text) {
         Ok(manifest) => manifest,
-        Err(_) => return Ok(()),
+        Err(_) => return Ok(Vec::new()),
     };
     // Validate before sealing into the signed bundle so a malformed
     // `[[contributes]]` block fails the pack rather than shipping silently.
@@ -1080,6 +1083,84 @@ fn carry_extension_metadata(
             }),
         );
     }
+    collect_contribution_assets(project_root, &manifest.contributes)
+}
+
+/// Bundle files referenced by `[[contributes]]` config (`entry`/`file`/`path`)
+/// at their bundle-relative archive paths so a host can load them after import
+/// (the preview HTML, theme JSON, canon dir, skill, …). `harn pack` otherwise
+/// only walks the entrypoint's transitive imports, which never reach these.
+/// Paths must stay inside the archive root; `..` escapes are skipped.
+fn collect_contribution_assets(
+    project_root: &Path,
+    contributes: &[crate::package::ContributionEntry],
+) -> Result<Vec<HarnpackEntry>, PackError> {
+    const ASSET_KEYS: [&str; 3] = ["entry", "file", "path"];
+    let mut seen: std::collections::BTreeSet<PathBuf> = std::collections::BTreeSet::new();
+    let mut entries: Vec<HarnpackEntry> = Vec::new();
+    for contribution in contributes {
+        for key in ASSET_KEYS {
+            let Some(rel) = contribution.config.get(key).and_then(|v| v.as_str()) else {
+                continue;
+            };
+            let rel_path = PathBuf::from(rel);
+            // Reject absolute paths and `..` escapes.
+            if rel_path.is_absolute()
+                || rel_path
+                    .components()
+                    .any(|c| matches!(c, Component::ParentDir | Component::RootDir))
+            {
+                continue;
+            }
+            collect_path(project_root, &rel_path, &mut seen, &mut entries)?;
+        }
+    }
+    Ok(entries)
+}
+
+/// Recursively add `rel` (file or directory, relative to `project_root`) to the
+/// archive at its bundle-relative path. No-op when the path is missing.
+fn collect_path(
+    project_root: &Path,
+    rel: &Path,
+    seen: &mut std::collections::BTreeSet<PathBuf>,
+    entries: &mut Vec<HarnpackEntry>,
+) -> Result<(), PackError> {
+    let abs = project_root.join(rel);
+    let metadata = match std::fs::symlink_metadata(&abs) {
+        Ok(metadata) => metadata,
+        Err(_) => return Ok(()),
+    };
+    if metadata.file_type().is_symlink() {
+        return Ok(()); // never follow symlinks out of the archive root
+    }
+    if metadata.is_dir() {
+        let mut children: Vec<PathBuf> = std::fs::read_dir(&abs)
+            .map_err(|err| {
+                PackError::new(
+                    "asset.read_failed",
+                    format!("failed to read contribution dir {}: {err}", abs.display()),
+                )
+            })?
+            .filter_map(|e| e.ok().map(|e| e.file_name()))
+            .map(|name| rel.join(name))
+            .collect();
+        children.sort();
+        for child in children {
+            collect_path(project_root, &child, seen, entries)?;
+        }
+        return Ok(());
+    }
+    if !metadata.is_file() || !seen.insert(rel.to_path_buf()) {
+        return Ok(());
+    }
+    let bytes = std::fs::read(&abs).map_err(|err| {
+        PackError::new(
+            "asset.read_failed",
+            format!("failed to read contribution asset {}: {err}", abs.display()),
+        )
+    })?;
+    entries.push(HarnpackEntry::new(rel.to_path_buf(), bytes));
     Ok(())
 }
 
@@ -1220,6 +1301,63 @@ languageId = "latex"
         assert_eq!(ext["name"], "harn-latex");
         assert_eq!(ext["publisher"], "Burin Labs");
         assert_eq!(ext["permissions"][0], "workspace:read_text");
+    }
+
+    #[test]
+    fn carry_extension_metadata_bundles_contribution_assets() {
+        let temp = tempfile::tempdir().unwrap();
+        fs::create_dir_all(temp.path().join("assets")).unwrap();
+        fs::write(temp.path().join("assets/preview.html"), "<html></html>").unwrap();
+        fs::create_dir_all(temp.path().join("canon/latex")).unwrap();
+        fs::write(temp.path().join("canon/latex/invariants.harn"), "// rules").unwrap();
+        fs::write(temp.path().join("SKILL.md"), "# skill").unwrap();
+        fs::write(
+            temp.path().join("harn.toml"),
+            r#"
+[package]
+name = "harn-latex"
+permissions = ["workspace:read_text"]
+
+[[contributes]]
+kind = "editor.preview"
+id = "p"
+scopes = ["workspace:read_text"]
+entry = "assets/preview.html"
+
+[[contributes]]
+kind = "harn.canon"
+id = "c"
+path = "canon/latex"
+
+[[contributes]]
+kind = "harn.skill"
+id = "s"
+path = "SKILL.md"
+"#,
+        )
+        .unwrap();
+        let mut bundle = WorkflowBundle::default();
+        let assets = carry_extension_metadata(temp.path(), &mut bundle).unwrap();
+        let paths: std::collections::BTreeSet<String> = assets
+            .iter()
+            .map(|e| e.path.to_string_lossy().to_string())
+            .collect();
+        assert!(paths.contains("assets/preview.html"), "{paths:?}");
+        assert!(paths.contains("canon/latex/invariants.harn"), "{paths:?}");
+        assert!(paths.contains("SKILL.md"), "{paths:?}");
+    }
+
+    #[test]
+    fn carry_extension_metadata_skips_parent_escape_assets() {
+        let temp = tempfile::tempdir().unwrap();
+        fs::write(
+            temp.path().join("harn.toml"),
+            "[package]\nname = \"x\"\npermissions = []\n\n[[contributes]]\nkind = \"editor.preview\"\nid = \"p\"\nentry = \"../escape.html\"\n",
+        )
+        .unwrap();
+        let mut bundle = WorkflowBundle::default();
+        let assets = carry_extension_metadata(temp.path(), &mut bundle).unwrap();
+        assert!(assets.is_empty());
     }
 
     #[test]
