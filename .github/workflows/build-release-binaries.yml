@@ -233,28 +233,40 @@ jobs:
       fail-fast: true
       matrix:
         include:
+          # release_codegen_units: 16 across the board. A higher unit count
+          # parallelizes codegen, cuts wall-clock, AND lowers peak linker
+          # memory during the LTO final link — the latter is what was OOM-
+          # killing the aarch64 leg mid-link. The binary-size cost vs cgu=1
+          # is a few percent and is more than offset by `strip = symbols`
+          # (set in the Build step env below).
           - target: x86_64-apple-darwin
             # Build Intel artifacts on Intel hardware. Cross-building this leg
             # on arm64 `macos-latest` repeatedly left sccache/rustc orphaned and
             # pushed the build past 85 minutes.
             os: macos-15-intel
-            release_codegen_units: 8
+            release_codegen_units: 16
             use_sccache: "false"
           - target: aarch64-apple-darwin
             os: macos-latest
-            release_codegen_units: 8
+            release_codegen_units: 16
             use_sccache: "false"
           - target: x86_64-unknown-linux-gnu
             os: ubuntu-latest
-            release_codegen_units: 1
+            release_codegen_units: 16
             use_sccache: "true"
           - target: aarch64-unknown-linux-gnu
-            os: ubuntu-latest
-            release_codegen_units: 1
+            # Build arm64 Linux NATIVELY on a free public-repo arm64 runner
+            # instead of cross-compiling on x86. The x86 cross path repeatedly
+            # lost the runner during the memory-hungry cross LTO link (empty
+            # logs, all steps null, ~60 min in) — the chronic release blocker.
+            # Native build needs no cross gcc/linker and links with far less
+            # peak memory. ubuntu-24.04-arm is free + GA for public repos.
+            os: ubuntu-24.04-arm
+            release_codegen_units: 16
             use_sccache: "true"
           - target: x86_64-pc-windows-msvc
             os: windows-latest
-            release_codegen_units: 1
+            release_codegen_units: 16
             use_sccache: "false"
 
     steps:
@@ -311,20 +323,30 @@ jobs:
           rustup show active-toolchain || rustup show
           rustup target add ${{ matrix.target }}
 
-      - name: Install Linux ARM64 linker
-        if: matrix.target == 'aarch64-unknown-linux-gnu'
+      # Cross gcc/linker is ONLY needed when building arm64 Linux on an x86
+      # host. The arm64 Linux leg now runs on a native arm64 runner, so this
+      # install + the CARGO_TARGET_*_LINKER env below are gated on runner.arch
+      # == X64 and stay dormant on the native path. Kept (rather than deleted)
+      # so the cross fallback still works if the arm runner pool is ever
+      # unavailable and the leg is pointed back at ubuntu-latest.
+      - name: Install Linux ARM64 cross linker (x86 host only)
+        if: matrix.target == 'aarch64-unknown-linux-gnu' && runner.arch == 'X64'
         run: |
           sudo apt-get update
           sudo apt-get install -y gcc-aarch64-linux-gnu
+          echo "CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc" >> "$GITHUB_ENV"
 
       - name: Build
         timeout-minutes: 90
         shell: bash
         env:
-          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
           # Scope the compile-time optimization tradeoff to release CI only.
           CARGO_PROFILE_RELEASE_LTO: thin
           CARGO_PROFILE_RELEASE_CODEGEN_UNITS: ${{ matrix.release_codegen_units }}
+          # Strip symbols + debuginfo from the shipped binaries (~20 MB/binary
+          # on macOS arm64). Stripping happens at link time, before the macOS
+          # sign/notarize step, so signatures stay valid.
+          CARGO_PROFILE_RELEASE_STRIP: symbols
           HARN_RELEASE_TARGET: ${{ matrix.target }}
           HARN_RELEASE_REF: ${{ needs.setup.outputs.ref }}
           HARN_RELEASE_VERSION: ${{ needs.setup.outputs.version }}
