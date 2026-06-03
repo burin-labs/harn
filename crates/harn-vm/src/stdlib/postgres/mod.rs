@@ -11,6 +11,7 @@ use sqlx_core::connection::Connection;
 use sqlx_core::executor::Executor;
 use sqlx_core::query::{query, Query};
 use sqlx_core::row::Row;
+use sqlx_core::sql_str::AssertSqlSafe;
 use sqlx_core::transaction::Transaction;
 use sqlx_core::type_info::TypeInfo;
 use sqlx_core::value::ValueRef;
@@ -745,7 +746,7 @@ pub(super) async fn query_rows(
             let tx = tx
                 .as_mut()
                 .ok_or_else(|| runtime_error("pg_query: transaction is closed"))?;
-            let query = bind_params(query(sql), params);
+            let query = bind_params(query(AssertSqlSafe(sql)), params);
             let rows = query
                 .fetch_all(&mut **tx)
                 .await
@@ -758,7 +759,7 @@ pub(super) async fn query_rows(
     let record = pool_record_from_handle(target, "pg_query")?;
     let pool = pool_for_routing(&record, routing, "pg_query")?;
     let (probe, _) = enter_circuit(&record.circuit, "pg_query")?;
-    let query = bind_params(query(sql), params);
+    let query = bind_params(query(AssertSqlSafe(sql)), params);
     let result = query.fetch_all(pool.as_ref()).await;
     match result {
         Ok(rows) => {
@@ -797,7 +798,7 @@ pub(super) async fn execute_stmt(
         let tx = tx
             .as_mut()
             .ok_or_else(|| runtime_error("pg_execute: transaction is closed"))?;
-        let result = bind_params(query(sql), params)
+        let result = bind_params(query(AssertSqlSafe(sql)), params)
             .execute(&mut **tx)
             .await
             .map_err(|error| runtime_error(format!("pg_execute: {error}")))?;
@@ -805,7 +806,7 @@ pub(super) async fn execute_stmt(
     }
     let record = pool_record_from_handle(target, "pg_execute")?;
     let (probe, _) = enter_circuit(&record.circuit, "pg_execute")?;
-    let result = bind_params(query(sql), params)
+    let result = bind_params(query(AssertSqlSafe(sql)), params)
         .execute(record.pool.as_ref())
         .await;
     match result {
@@ -853,7 +854,7 @@ async fn savepoint_op(
         .ok_or_else(|| runtime_error(format!("{builtin}: transaction is closed")))?;
     let sql = render_savepoint_sql(op, &name);
     (&mut **tx)
-        .execute(sql.as_str())
+        .execute(AssertSqlSafe(sql))
         .await
         .map_err(|error| runtime_error(format!("{builtin}: {error}")))?;
     Ok(VmValue::Bool(true))

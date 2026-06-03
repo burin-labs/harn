@@ -44,6 +44,7 @@ use std::pin::Pin;
 
 use sqlx_core::query::query;
 use sqlx_core::row::Row;
+use sqlx_core::sql_str::AssertSqlSafe;
 use sqlx_postgres::PgPool;
 
 use crate::stdlib::macros::{
@@ -294,7 +295,7 @@ async fn pg_partition_attach_impl(
         "ALTER TABLE {} ATTACH PARTITION {} {bounds_clause}",
         parent.quoted, partition.quoted
     );
-    sqlx_core::raw_sql::raw_sql(&sql)
+    sqlx_core::raw_sql::raw_sql(AssertSqlSafe(sql))
         .execute(pool.as_ref())
         .await
         .map_err(|error| runtime_error(format!("pg_partition_attach: {error}")))?;
@@ -335,7 +336,7 @@ async fn pg_partition_detach_impl(
         "ALTER TABLE {} DETACH PARTITION {}{suffix}",
         parent.quoted, partition.quoted
     );
-    sqlx_core::raw_sql::raw_sql(&sql)
+    sqlx_core::raw_sql::raw_sql(AssertSqlSafe(sql))
         .execute(pool.as_ref())
         .await
         .map_err(|error| runtime_error(format!("pg_partition_detach: {error}")))?;
@@ -483,7 +484,7 @@ async fn pg_partition_create_for_window_impl(
                  FOR VALUES FROM ('{}') TO ('{}')",
                 parent.quoted, window.from, window.to
             );
-            sqlx_core::raw_sql::raw_sql(&sql)
+            sqlx_core::raw_sql::raw_sql(AssertSqlSafe(sql))
                 .execute(pool.as_ref())
                 .await
                 .map_err(|error| runtime_error(format!("{builtin}: {error}")))?;
@@ -580,7 +581,7 @@ fn prune_subtree<'a>(
                     );
                     if !dry_run {
                         let drop_sql = format!("DROP TABLE {quoted}");
-                        sqlx_core::raw_sql::raw_sql(&drop_sql)
+                        sqlx_core::raw_sql::raw_sql(AssertSqlSafe(drop_sql))
                             .execute(pool)
                             .await
                             .map_err(|error| runtime_error(format!("{builtin}: {error}")))?;
@@ -754,7 +755,7 @@ async fn rows_to_list(
     params: &[VmValue],
     builtin: &'static str,
 ) -> Result<VmValue, VmError> {
-    let rows = bind_params(query(sql), params)
+    let rows = bind_params(query(AssertSqlSafe(sql)), params)
         .fetch_all(pool)
         .await
         .map_err(|error| runtime_error(format!("{builtin}: {error}")))?;

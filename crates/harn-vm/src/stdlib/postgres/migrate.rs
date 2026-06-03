@@ -14,6 +14,7 @@ use std::time::Instant;
 
 use sqlx_core::executor::Executor;
 use sqlx_core::row::Row;
+use sqlx_core::sql_str::AssertSqlSafe;
 use sqlx_postgres::PgPool;
 
 use crate::value::{VmError, VmValue};
@@ -176,7 +177,7 @@ async fn ensure_migrations_table(pool: Arc<PgPool>, table: String) -> Result<(),
          )"
     );
     pool.as_ref()
-        .execute(sql.as_str())
+        .execute(AssertSqlSafe(sql))
         .await
         .map_err(|error| runtime_error(format!("pg_migrate: ensure table failed: {error}")))?;
     Ok(())
@@ -184,7 +185,7 @@ async fn ensure_migrations_table(pool: Arc<PgPool>, table: String) -> Result<(),
 
 async fn applied_set(pool: Arc<PgPool>, table: String) -> Result<BTreeSet<String>, VmError> {
     let sql = format!("SELECT name FROM \"{table}\"");
-    let rows = sqlx_core::query::query::<sqlx_postgres::Postgres>(&sql)
+    let rows = sqlx_core::query::query::<sqlx_postgres::Postgres>(AssertSqlSafe(sql))
         .fetch_all(pool.as_ref())
         .await
         .map_err(|error| runtime_error(format!("pg_migrate: select applied failed: {error}")))?;
@@ -209,12 +210,12 @@ async fn apply_one(pool: Arc<PgPool>, table: String, entry: MigrationEntry) -> R
         .map_err(|error| runtime_error(format!("pg_migrate: begin failed: {error}")))?;
 
     (&mut *tx)
-        .execute(sql.as_str())
+        .execute(AssertSqlSafe(sql))
         .await
         .map_err(|error| runtime_error(format!("pg_migrate: applying {}: {error}", entry.name)))?;
 
     let insert = format!("INSERT INTO \"{table}\" (name, checksum) VALUES ($1, $2)");
-    sqlx_core::query::query::<sqlx_postgres::Postgres>(&insert)
+    sqlx_core::query::query::<sqlx_postgres::Postgres>(AssertSqlSafe(insert))
         .bind(entry.name.clone())
         .bind(checksum)
         .execute(&mut *tx)
