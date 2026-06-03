@@ -653,6 +653,13 @@ pub fn build(args: &BuildArgs) -> Result<PackOutcome, PackError> {
             })?,
         );
     }
+    // Carry host-surface extension data — the `[[contributes]]` block plus
+    // package identity/permissions — into the signed bundle's metadata so a
+    // host (e.g. Burin) can discover and gate contributions from the verified
+    // artifact alone, with no separate descriptor. Harn stays agnostic about
+    // the kind-specific payload; it only ferries it. See `docs` and the
+    // `ContributionEntry` schema.
+    carry_extension_metadata(&project_root, &mut bundle)?;
     sort_sbom_doc(&mut bundle.sbom);
     let sbom_bytes = serde_json::to_vec_pretty(&bundle.sbom).map_err(|err| {
         PackError::new(
@@ -1022,6 +1029,54 @@ fn type_check_or_fail(
     Ok(())
 }
 
+/// Carry the package's host-surface extension data into the signed bundle's
+/// metadata. Reads the nearest `harn.toml`, serializing the `[[contributes]]`
+/// block under the `contributes` key and package identity/permissions under
+/// `extension`. No-op when there is no manifest, it fails to parse, or there
+/// are no contributions — packing a plain workflow is unaffected.
+fn carry_extension_metadata(
+    project_root: &Path,
+    bundle: &mut WorkflowBundle,
+) -> Result<(), PackError> {
+    let manifest_path = project_root.join("harn.toml");
+    if !manifest_path.is_file() {
+        return Ok(());
+    }
+    let Ok(text) = std::fs::read_to_string(&manifest_path) else {
+        return Ok(());
+    };
+    let manifest: crate::package::Manifest = match toml::from_str(&text) {
+        Ok(manifest) => manifest,
+        Err(_) => return Ok(()),
+    };
+    if !manifest.contributes.is_empty() {
+        bundle.metadata.insert(
+            "contributes".to_string(),
+            serde_json::to_value(&manifest.contributes).map_err(|err| {
+                PackError::new(
+                    "pack.metadata_failed",
+                    format!("failed to render contributions: {err}"),
+                )
+            })?,
+        );
+    }
+    if let Some(pkg) = manifest.package.as_ref() {
+        bundle.metadata.insert(
+            "extension".to_string(),
+            serde_json::json!({
+                "name": pkg.name,
+                "version": pkg.version,
+                "publisher": pkg.publisher,
+                "contact": pkg.contact,
+                "created": pkg.created,
+                "permissions": pkg.permissions,
+                "host_requirements": pkg.host_requirements,
+            }),
+        );
+    }
+    Ok(())
+}
+
 fn pack_archive_root(entrypoint: &Path) -> PathBuf {
     let parent = entrypoint.parent().unwrap_or_else(|| Path::new("."));
     harn_modules::asset_paths::find_project_root(parent).unwrap_or_else(|| parent.to_path_buf())
@@ -1121,6 +1176,52 @@ mod tests {
             exclude_secrets: false,
             json: true,
         }
+    }
+
+    #[test]
+    fn carry_extension_metadata_injects_contributes_and_identity() {
+        let temp = tempfile::tempdir().unwrap();
+        fs::write(
+            temp.path().join("harn.toml"),
+            r#"
+[package]
+name = "harn-latex"
+version = "0.1.0"
+publisher = "Burin Labs"
+permissions = ["workspace:read_text"]
+
+[[contributes]]
+kind = "editor.language"
+id = "latex"
+scopes = ["workspace:read_text"]
+languageId = "latex"
+"#,
+        )
+        .unwrap();
+        let mut bundle = WorkflowBundle::default();
+        carry_extension_metadata(temp.path(), &mut bundle).unwrap();
+
+        let contributes = bundle
+            .metadata
+            .get("contributes")
+            .expect("contributes carried");
+        assert_eq!(contributes.as_array().unwrap().len(), 1);
+        assert_eq!(contributes[0]["kind"], "editor.language");
+        // kind-specific keys are flattened into the contribution object
+        assert_eq!(contributes[0]["languageId"], "latex");
+
+        let ext = bundle.metadata.get("extension").expect("identity carried");
+        assert_eq!(ext["name"], "harn-latex");
+        assert_eq!(ext["publisher"], "Burin Labs");
+        assert_eq!(ext["permissions"][0], "workspace:read_text");
+    }
+
+    #[test]
+    fn carry_extension_metadata_is_noop_without_manifest() {
+        let temp = tempfile::tempdir().unwrap();
+        let mut bundle = WorkflowBundle::default();
+        carry_extension_metadata(temp.path(), &mut bundle).unwrap();
+        assert!(bundle.metadata.get("contributes").is_none());
     }
 
     #[test]
