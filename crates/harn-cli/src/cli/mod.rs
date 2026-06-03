@@ -97,8 +97,8 @@ pub(crate) use demo::DemoArgs;
 pub(crate) use dev::DevArgs;
 pub(crate) use doctor::DoctorArgs;
 pub(crate) use dump::{
-    DumpConnectorMatrixArgs, DumpHighlightKeywordsArgs, DumpProtocolArtifactsArgs,
-    DumpTriggerQuickrefArgs,
+    ConnectorSchemaCodegenArgs, DumpConnectorMatrixArgs, DumpHighlightKeywordsArgs,
+    DumpProtocolArtifactsArgs, DumpTriggerQuickrefArgs,
 };
 pub use eval::{
     EvalArgs, EvalCodingAgentArgs, EvalCommand, EvalContextArgs, EvalPromptArgs, EvalPromptMode,
@@ -535,6 +535,14 @@ SCRIPTING
     /// `make gen-protocol-artifacts` target.
     #[command(hide = true, name = "dump-protocol-artifacts")]
     DumpProtocolArtifacts(DumpProtocolArtifactsArgs),
+    /// Regenerate the Rust normalized-event structs from the canonical Harn
+    /// connector event schema module.
+    ///
+    /// Dev-only. Hidden from `--help` — invoke via
+    /// `cargo run -p harn-cli -- connector-schema-codegen` or the
+    /// `make gen-connector-schemas` target.
+    #[command(hide = true, name = "connector-schema-codegen")]
+    ConnectorSchemaCodegen(ConnectorSchemaCodegenArgs),
 }
 
 #[cfg(test)]

@@ -698,3 +698,243 @@ fn provider_normalizes_stream_payloads() {
     assert_eq!(payload.key.as_deref(), Some("AAPL"));
     assert_eq!(payload.timestamp.as_deref(), Some("2026-04-21T12:00:00Z"));
 }
+
+/// Parity between the hand-written `GitHubEventPayload` family in `payloads`
+/// and the structs generated from the canonical Harn schema module by
+/// `harn connector-schema-codegen` (see `schemas_generated`).
+///
+/// This is the test that will later license deleting the hand-written structs:
+/// it proves the Harn schema captures the same wire shape, so the same webhook
+/// JSON deserializes into either copy to the same logical value.
+mod schemas_generated_parity {
+    use crate::triggers::event::schemas_generated as gen;
+    use serde_json::{json, Value as JsonValue};
+
+    /// One representative normalized payload per GitHub event kind, shaped like
+    /// the connector's normalized output: the flattened common block
+    /// (`event`/`action`/`delivery_id`/`installation_id`/`topic`/`repository`/
+    /// `repo`/`raw`) plus the event-specific promoted fields.
+    fn github_fixtures() -> Vec<(&'static str, JsonValue)> {
+        let common = |event: &str| {
+            json!({
+                "event": event,
+                "action": "opened",
+                "delivery_id": "delivery-1",
+                "installation_id": 4242,
+                "topic": format!("github.{event}.opened"),
+                "repository": {"full_name": "octo-org/octo-repo"},
+                "repo": {"owner": "octo-org", "name": "octo-repo"},
+                "raw": {"event": event},
+            })
+        };
+        let with = |event: &str, extra: JsonValue| {
+            let mut base = common(event);
+            let obj = base.as_object_mut().unwrap();
+            for (k, v) in extra.as_object().unwrap() {
+                obj.insert(k.clone(), v.clone());
+            }
+            base
+        };
+        vec![
+            ("Issues", with("issues", json!({"issue": {"number": 1}}))),
+            (
+                "PullRequest",
+                with("pull_request", json!({"pull_request": {"number": 2}})),
+            ),
+            (
+                "IssueComment",
+                with(
+                    "issue_comment",
+                    json!({"issue": {"number": 1}, "comment": {"id": 9}}),
+                ),
+            ),
+            (
+                "PullRequestReview",
+                with(
+                    "pull_request_review",
+                    json!({"pull_request": {"number": 2}, "review": {"state": "approved"}}),
+                ),
+            ),
+            (
+                "Push",
+                with(
+                    "push",
+                    json!({"commits": [{"id": "abc"}], "distinct_size": 1}),
+                ),
+            ),
+            (
+                "WorkflowRun",
+                with("workflow_run", json!({"workflow_run": {"id": 7}})),
+            ),
+            (
+                "DeploymentStatus",
+                with(
+                    "deployment_status",
+                    json!({"deployment_status": {"state": "success"}, "deployment": {"id": 5}}),
+                ),
+            ),
+            (
+                "CheckRun",
+                with("check_run", json!({"check_run": {"id": 3}})),
+            ),
+            (
+                "CheckSuite",
+                with(
+                    "check_suite",
+                    json!({
+                        "check_suite": {"id": 8101},
+                        "check_suite_id": 8101,
+                        "head_sha": "deadbeef",
+                        "head_ref": "feature/x",
+                        "status": "queued",
+                    }),
+                ),
+            ),
+            (
+                "Status",
+                with(
+                    "status",
+                    json!({
+                        "commit_status": {"id": 9},
+                        "status_id": 9,
+                        "state": "success",
+                        "context": "ci",
+                    }),
+                ),
+            ),
+            (
+                "MergeGroup",
+                with(
+                    "merge_group",
+                    json!({
+                        "merge_group": {"id": 1},
+                        "merge_group_id": 9201,
+                        "head_sha": "cafef00d",
+                        "pull_requests": [{"number": 2}],
+                        "pull_request_numbers": [2],
+                    }),
+                ),
+            ),
+            (
+                "Installation",
+                with(
+                    "installation",
+                    json!({
+                        "installation": {"id": 1},
+                        "installation_state": "active",
+                        "suspended": false,
+                        "repositories": [{"id": 7}],
+                    }),
+                ),
+            ),
+            (
+                "InstallationRepositories",
+                with(
+                    "installation_repositories",
+                    json!({
+                        "installation": {"id": 1},
+                        "repository_selection": "selected",
+                        "repositories_added": [{"id": 7}],
+                        "repositories_removed": [],
+                    }),
+                ),
+            ),
+            // Unknown event kind -> the `Other` common-record fallback.
+            ("Other", common("label")),
+        ]
+    }
+
+    /// The variant name the generated enum resolves to, for a parity assertion
+    /// against the expected kind.
+    fn gen_variant(payload: &gen::GitHubEventPayload) -> &'static str {
+        match payload {
+            gen::GitHubEventPayload::Issues(_) => "Issues",
+            gen::GitHubEventPayload::PullRequest(_) => "PullRequest",
+            gen::GitHubEventPayload::IssueComment(_) => "IssueComment",
+            gen::GitHubEventPayload::PullRequestReview(_) => "PullRequestReview",
+            gen::GitHubEventPayload::Push(_) => "Push",
+            gen::GitHubEventPayload::WorkflowRun(_) => "WorkflowRun",
+            gen::GitHubEventPayload::DeploymentStatus(_) => "DeploymentStatus",
+            gen::GitHubEventPayload::CheckRun(_) => "CheckRun",
+            gen::GitHubEventPayload::CheckSuite(_) => "CheckSuite",
+            gen::GitHubEventPayload::Status(_) => "Status",
+            gen::GitHubEventPayload::MergeGroup(_) => "MergeGroup",
+            gen::GitHubEventPayload::Installation(_) => "Installation",
+            gen::GitHubEventPayload::InstallationRepositories(_) => "InstallationRepositories",
+            gen::GitHubEventPayload::Other(_) => "Other",
+        }
+    }
+
+    fn handwritten_variant(payload: &super::super::GitHubEventPayload) -> &'static str {
+        use super::super::GitHubEventPayload as P;
+        match payload {
+            P::Issues(_) => "Issues",
+            P::PullRequest(_) => "PullRequest",
+            P::IssueComment(_) => "IssueComment",
+            P::PullRequestReview(_) => "PullRequestReview",
+            P::Push(_) => "Push",
+            P::WorkflowRun(_) => "WorkflowRun",
+            P::DeploymentStatus(_) => "DeploymentStatus",
+            P::CheckRun(_) => "CheckRun",
+            P::CheckSuite(_) => "CheckSuite",
+            P::Status(_) => "Status",
+            P::MergeGroup(_) => "MergeGroup",
+            P::Installation(_) => "Installation",
+            P::InstallationRepositories(_) => "InstallationRepositories",
+            P::Other(_) => "Other",
+        }
+    }
+
+    /// (a) The generated structs deserialize the normalized GitHub webhook JSON
+    /// without loss, and (b) the SAME JSON deserializes into the generated and
+    /// the hand-written payloads, landing on the same variant and serializing
+    /// back to the same logical JSON value.
+    #[test]
+    fn generated_github_payloads_match_handwritten() {
+        for (want_variant, normalized) in github_fixtures() {
+            let gen_payload: gen::GitHubEventPayload = serde_json::from_value(normalized.clone())
+                .unwrap_or_else(|e| panic!("generated deserialize {want_variant}: {e}"));
+            let hand_payload: super::super::GitHubEventPayload =
+                serde_json::from_value(normalized.clone())
+                    .unwrap_or_else(|e| panic!("hand-written deserialize {want_variant}: {e}"));
+
+            assert_eq!(
+                gen_variant(&gen_payload),
+                want_variant,
+                "generated enum picked the wrong variant for {want_variant}"
+            );
+            assert_eq!(
+                handwritten_variant(&hand_payload),
+                want_variant,
+                "hand-written enum picked the wrong variant for {want_variant}"
+            );
+
+            // Logical-value parity: both serialize back to the same JSON. The
+            // fixtures populate every common field, so the one intentional
+            // serde divergence (generated common optionals carry
+            // `skip_serializing_if`, the hand-written ones do not) does not
+            // manifest here — every field is present.
+            let gen_json = serde_json::to_value(&gen_payload).expect("serialize generated");
+            let hand_json = serde_json::to_value(&hand_payload).expect("serialize hand-written");
+            assert_eq!(
+                gen_json, hand_json,
+                "generated vs hand-written JSON diverged for {want_variant}"
+            );
+        }
+    }
+
+    /// The canonical schema module embedded in `harn-stdlib` parses and yields
+    /// exactly the GitHub type declarations the generated file is built from —
+    /// a cheap guard that the source of truth stays well-formed.
+    #[test]
+    fn canonical_schema_module_parses() {
+        let program = harn_parser::parse_source(harn_stdlib::CONNECTOR_EVENT_SCHEMAS_SOURCE)
+            .expect("canonical connector schema module parses");
+        let type_decls = program
+            .iter()
+            .filter(|node| matches!(node.node, harn_parser::Node::TypeDecl { .. }))
+            .count();
+        // 1 common + 13 payload records + 1 union enum.
+        assert_eq!(type_decls, 15, "unexpected schema type-declaration count");
+    }
+}

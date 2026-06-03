@@ -5,6 +5,7 @@ pub(crate) mod codemod;
 pub(crate) mod config_cmd;
 pub(crate) mod connect;
 pub(crate) mod connector;
+pub(crate) mod connector_schema_codegen;
 pub(crate) mod contracts;
 pub(crate) mod counterfactual;
 pub(crate) mod crystallize;

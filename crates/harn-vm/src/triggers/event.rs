@@ -2,6 +2,14 @@ mod catalog;
 mod core;
 mod normalize;
 mod payloads;
+/// Rust normalized-event structs generated from the canonical Harn schema
+/// module (`crates/harn-stdlib/src/stdlib/stdlib_event_schemas.harn`) by
+/// `harn connector-schema-codegen`. These coexist with the hand-written
+/// `payloads` structs and are proven equivalent by the
+/// `schemas_generated_parity` tests; switching the trigger boundary to produce
+/// them is a follow-up.
+#[allow(dead_code)]
+mod schemas_generated;
 mod util;
 
 #[cfg(test)]
