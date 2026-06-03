@@ -496,19 +496,28 @@ fn extract_tarball(archive: &Path, dest: &Path) -> Result<(), String> {
 }
 
 fn install_binaries(staging: &Path, install_dir: &Path) -> Result<(), String> {
-    let mut names: Vec<&str> = vec![harn_binary_name()];
-    names.extend_from_slice(extra_binary_names());
-    for name in names {
+    let main = harn_binary_name();
+    let main_src = staging.join(main);
+    if !main_src.exists() {
+        return Err(format!("staging directory missing {main}"));
+    }
+    atomic_replace(&main_src, &install_dir.join(main))?;
+
+    // harn-lsp / harn-dap are the same multi-call `harn` binary reached via
+    // argv[0] dispatch. Install them as symlinks to `harn` so an upgrade
+    // leaves one real binary plus two tiny links rather than three full
+    // copies. Sibling tools are best-effort (skip if absent from staging).
+    // Windows lacks dependable unprivileged symlinks, so copy there — the
+    // staging dir already holds real per-name copies on that platform.
+    for name in extra_binary_names() {
         let src = staging.join(name);
         if !src.exists() {
-            // Only the main `harn` binary is required; sibling tools
-            // are best-effort.
-            if name == harn_binary_name() {
-                return Err(format!("staging directory missing {name}"));
-            }
             continue;
         }
         let dest = install_dir.join(name);
+        #[cfg(unix)]
+        atomic_symlink(main, &dest)?;
+        #[cfg(not(unix))]
         atomic_replace(&src, &dest)?;
     }
     Ok(())
@@ -546,6 +555,40 @@ fn atomic_replace(src: &Path, dest: &Path) -> Result<(), String> {
             let _ = fs::remove_file(&temp_in_dest);
             return Err(format!("failed to chmod staged binary: {error}"));
         }
+    }
+    if let Err(error) = fs::rename(&temp_in_dest, dest) {
+        let _ = fs::remove_file(&temp_in_dest);
+        return Err(format!("failed to replace {}: {error}", dest.display()));
+    }
+    Ok(())
+}
+
+/// Atomically place a relative symlink at `dest` pointing at `target_name`
+/// (a sibling in the same directory). Mirrors `atomic_replace`'s stage-then-
+/// rename so a concurrent reader never observes a half-written link.
+#[cfg(unix)]
+fn atomic_symlink(target_name: &str, dest: &Path) -> Result<(), String> {
+    use std::os::unix::fs::symlink;
+    let parent = dest
+        .parent()
+        .ok_or_else(|| format!("{} has no parent directory", dest.display()))?;
+    let dest_basename = dest
+        .file_name()
+        .and_then(|s| s.to_str())
+        .ok_or_else(|| format!("{} has no file name", dest.display()))?;
+    let temp_in_dest = parent.join(format!(
+        ".{dest_basename}.harn-upgrade-{pid}-{counter}",
+        pid = std::process::id(),
+        counter = next_upgrade_counter(),
+    ));
+    let _ = fs::remove_file(&temp_in_dest);
+    // Relative target so the link resolves to the sibling `harn` wherever the
+    // install dir lives.
+    if let Err(error) = symlink(target_name, &temp_in_dest) {
+        return Err(format!(
+            "failed to stage symlink {} -> {target_name}: {error}",
+            temp_in_dest.display(),
+        ));
     }
     if let Err(error) = fs::rename(&temp_in_dest, dest) {
         let _ = fs::remove_file(&temp_in_dest);
