@@ -704,8 +704,13 @@ module.exports = grammar({
     ternary_expression: ($) =>
       prec.right(2, seq($._expression, "?", $._expression, ":", $._expression)),
 
+    // `??` binds tighter than `+ -` but looser than `* / %`, matching the
+    // canonical parser (crates/harn-parser parse_nil_coalescing). Keeping the
+    // tree-sitter precedence in sync ensures structural tools see the same
+    // grouping the interpreter does, e.g. `a ?? b + c` is `(a ?? b) + c` and
+    // `a ?? b * c` is `a ?? (b * c)`.
     nil_coalescing_expression: ($) =>
-      prec.left(3, seq($._expression, repeat($._newline), "??", repeat($._newline), $._expression)),
+      prec.left(9, seq($._expression, repeat($._newline), "??", repeat($._newline), $._expression)),
 
     binary_expression: ($) =>
       choice(
@@ -717,21 +722,25 @@ module.exports = grammar({
         prec.left(7, seq($._expression, "not", "in", $._expression)),
         prec.left(8, seq($._expression, repeat($._newline), "+", repeat($._newline), $._expression)),
         prec.left(8, seq($._expression, "-", $._expression)),
-        prec.left(9, seq($._expression, repeat($._newline), "*", repeat($._newline), $._expression)),
-        prec.left(9, seq($._expression, repeat($._newline), "/", repeat($._newline), $._expression)),
-        prec.left(9, seq($._expression, repeat($._newline), "%", repeat($._newline), $._expression)),
-        prec.right(10, seq($._expression, repeat($._newline), "**", repeat($._newline), $._expression))
+        prec.left(10, seq($._expression, repeat($._newline), "*", repeat($._newline), $._expression)),
+        prec.left(10, seq($._expression, repeat($._newline), "/", repeat($._newline), $._expression)),
+        prec.left(10, seq($._expression, repeat($._newline), "%", repeat($._newline), $._expression)),
+        // `**` binds tighter than a unary prefix on its left operand, so
+        // `-2 ** 2` is `-(2 ** 2)` (see unary_expression below at prec 11).
+        prec.right(12, seq($._expression, repeat($._newline), "**", repeat($._newline), $._expression))
       ),
 
     range_expression: ($) =>
       prec.left(7, seq($._expression, "to", $._expression, optional("exclusive"))),
 
+    // Unary prefix binds looser than `**` (prec 12) so `-2 ** 2` parses as
+    // `-(2 ** 2)`, and tighter than `* / %` (prec 10) so `-a * b` is `(-a) * b`.
     unary_expression: ($) =>
-      prec.right(10, seq(choice("!", "-"), $._expression)),
+      prec.right(11, seq(choice("!", "-"), $._expression)),
 
     call_expression: ($) =>
       prec.left(
-        11,
+        13,
         seq(
           field("function", choice(
             $.identifier,
@@ -757,7 +766,7 @@ module.exports = grammar({
     // matching how generic calls are written in real Harn corpora.
     generic_call_expression: ($) =>
       prec.left(
-        11,
+        13,
         seq(
           field("function", choice(
             $.identifier,
@@ -781,7 +790,7 @@ module.exports = grammar({
     // `parse_hitl_expr` in crates/harn-parser/src/parser/expressions.rs.
     hitl_expression: ($) =>
       prec.left(
-        11,
+        13,
         seq(
           field("primitive", choice(
             "ask_user",
@@ -808,7 +817,7 @@ module.exports = grammar({
 
     method_call: ($) =>
       prec.left(
-        11,
+        13,
         seq(
           field("object", $._expression),
           repeat($._newline),
@@ -824,7 +833,7 @@ module.exports = grammar({
 
     property_access: ($) =>
       prec.left(
-        11,
+        13,
         seq(
           field("object", $._expression),
           repeat($._newline),
@@ -835,7 +844,7 @@ module.exports = grammar({
 
     subscript_expression: ($) =>
       prec.left(
-        11,
+        13,
         seq(
           field("object", $._expression),
           choice("[", "?["),
@@ -846,7 +855,7 @@ module.exports = grammar({
 
     slice_expression: ($) =>
       prec.left(
-        11,
+        13,
         seq(
           field("object", $._expression),
           "[",
@@ -858,7 +867,7 @@ module.exports = grammar({
       ),
 
     try_unwrap_expression: ($) =>
-      prec.left(11, seq($._expression, token.immediate("?"))),
+      prec.left(13, seq($._expression, token.immediate("?"))),
 
     parenthesized_expression: ($) => seq("(", $._expression, ")"),
 

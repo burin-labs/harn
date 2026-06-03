@@ -368,6 +368,16 @@ fn test_exponentiation() {
 }
 
 #[test]
+fn test_unary_minus_binds_looser_than_exponent() {
+    // `-2 ** 2` is `-(2 ** 2) = -4`, matching Python/Ruby/math notation rather
+    // than the spreadsheet `(-2) ** 2 = 4` reading. The exponent operand still
+    // accepts a unary prefix, so `2 ** -2` stays `2 ** (-2)`.
+    let out =
+        run_output("pipeline t(task) { log(-2 ** 2)\nlog(-2 ** 3)\nlog(2 ** -2)\nlog(-(2 ** 2)) }");
+    assert_eq!(out, "[harn] -4\n[harn] -8\n[harn] 0.25\n[harn] -4");
+}
+
+#[test]
 fn test_comparisons() {
     let out = run_output("pipeline t(task) { log(1 < 2)\nlog(2 > 3)\nlog(1 == 1)\nlog(1 != 2) }");
     assert_eq!(out, "[harn] true\n[harn] false\n[harn] true\n[harn] true");

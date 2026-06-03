@@ -199,6 +199,70 @@ pipeline test(task) {
           (identifier))))))
 
 ==================
+Unary Minus Binds Looser Than Exponentiation
+==================
+
+pipeline test(task) {
+  let a = -2 ** 2
+  let b = 2 ** -3
+}
+
+---
+
+(source_file
+  (pipeline_declaration
+    name: (identifier)
+    (parameter_list
+      (typed_parameter
+        name: (identifier)))
+    (block
+      (let_binding
+        name: (identifier)
+        value: (unary_expression
+          (binary_expression
+            (integer_literal)
+            (integer_literal))))
+      (let_binding
+        name: (identifier)
+        value: (binary_expression
+          (integer_literal)
+          (unary_expression
+            (integer_literal)))))))
+
+==================
+Nil Coalescing Versus Arithmetic
+==================
+
+pipeline test(task) {
+  let c = x ?? y + z
+  let d = x ?? y * z
+}
+
+---
+
+(source_file
+  (pipeline_declaration
+    name: (identifier)
+    (parameter_list
+      (typed_parameter
+        name: (identifier)))
+    (block
+      (let_binding
+        name: (identifier)
+        value: (binary_expression
+          (nil_coalescing_expression
+            (identifier)
+            (identifier))
+          (identifier)))
+      (let_binding
+        name: (identifier)
+        value: (nil_coalescing_expression
+          (identifier)
+          (binary_expression
+            (identifier)
+            (identifier)))))))
+
+==================
 Backslash Continued Expression
 ==================
 

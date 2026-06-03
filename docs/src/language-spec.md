@@ -615,9 +615,9 @@ comparison         ::= additive
                        (('<' | '>' | '<=' | '>=' | 'in' | 'not in') additive)*
 additive           ::= nil_coal_expr (('+' | '-') nil_coal_expr)*
 nil_coal_expr      ::= multiplicative ('??' multiplicative)*
-multiplicative     ::= power_expr (('*' | '/' | '%') power_expr)*
-power_expr         ::= unary ['**' power_expr]
-unary              ::= ('!' | '-') unary | postfix
+multiplicative     ::= unary (('*' | '/' | '%') unary)*
+unary              ::= ('!' | '-') unary | power_expr
+power_expr         ::= postfix ['**' unary]
 postfix            ::= primary (member_access
                                | optional_member_access
                                | subscript_access
@@ -700,9 +700,15 @@ From lowest to highest binding:
 | 7 | `+` `-` | Left | Additive |
 | 8 | `??` | Left | Nil coalescing |
 | 9 | `*` `/` `%` | Left | Multiplicative |
-| 10 | `**` | Right | Exponentiation |
-| 11 | `!` `-` (unary) | Right (prefix) | Unary |
+| 10 | `!` `-` (unary) | Right (prefix) | Unary |
+| 11 | `**` | Right | Exponentiation |
 | 12 | `.` `?.` `[]` `?[]` `[:]` `()` `?` | Left | Postfix |
+
+Exponentiation binds more tightly than a unary prefix on its **left** operand,
+so `-2 ** 2` parses as `-(2 ** 2)` (`-4`), matching Python, Ruby, and ordinary
+math notation rather than the spreadsheet `(-2) ** 2` reading. The **right**
+(exponent) operand still accepts a unary prefix, so `2 ** -3` is `2 ** (-3)`,
+and chained `**` remains right-associative (`2 ** 3 ** 2` is `2 ** (3 ** 2)`).
 
 ### Multiline expressions
 
@@ -1159,6 +1165,9 @@ division by zero.
 - Negative or very large integer exponents promote to `float`.
 - Any case involving a `float` returns `float`.
 - Non-numeric operands raise `TypeError`.
+- A unary minus on the base binds looser than `**`, so `-2 ** 2` is
+  `-(2 ** 2)` (`-4`), not `(-2) ** 2` (`4`). The exponent still accepts a
+  unary prefix, so `2 ** -3` is `2 ** (-3)`.
 
 ### Logical (`&&`, `||`)
 
