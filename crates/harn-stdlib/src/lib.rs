@@ -685,6 +685,10 @@ pub const STDLIB_SOURCES: &[StdlibSource] = &[
         module: "workflow/execute",
         source: include_str!("stdlib/workflow/execute.harn"),
     },
+    StdlibSource {
+        module: "security",
+        source: include_str!("stdlib/stdlib_security.harn"),
+    },
 ];
 
 pub const STDLIB_PROMPT_ASSETS: &[StdlibPromptAsset] = &[

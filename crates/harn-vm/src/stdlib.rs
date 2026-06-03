@@ -221,6 +221,7 @@ fn register_agent_stdlib_before_llm(vm: &mut Vm) {
     transcript_project::register_transcript_projection_builtins(vm);
     assemble::register_assemble_context_builtin(vm);
     crate::egress::register_egress_builtins(vm);
+    crate::security::register_security_builtins(vm);
     register_http_builtins(vm);
     jsonrpc::register_jsonrpc_builtins(vm);
 }

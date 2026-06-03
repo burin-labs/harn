@@ -1,0 +1,41 @@
+// std/security — prompt-injection defense configuration (Burin Layers 0/1).
+//
+// Scope: configure the runtime's spotlighting + lethal-trifecta gate. The
+// substrate lives in the VM (`crate::security`): untrusted external tool/MCP
+// output is framed as data, and exfiltration-capable tools are gated once
+// untrusted content has entered context. This module is the thin Harn surface
+// a host (Burin) calls from its resolved `[security]` config / feature flag;
+// pipelines rarely need it.
+//
+// Import with:
+//   import { configure, spotlight, strict, off } from "std/security"
+/**
+ * Push a security policy derived from `config` onto the runtime stack and
+ * return the resolved summary. Recognised keys (all optional; safe defaults
+ * are applied for any omitted):
+ *
+ *   - mode: "off" | "spotlight" | "strict" | "local-ml"
+ *   - spotlight_external: bool   — frame untrusted output as data
+ *   - trifecta_gate: bool        — gate exfil tools while tainted
+ *   - pin_mcp_schemas: bool      — re-approve on tool-description change
+ *   - gate_secret_reads: bool    — gate secret-file reads while tainted
+ *   - trusted_mcp_servers: [str] — servers exempt from taint + pinning
+ */
+pub fn configure(config: dict = {}) -> dict {
+  return security_policy(config)
+}
+
+/** Enable the default posture: spotlight untrusted content + trifecta gate. */
+pub fn spotlight() -> dict {
+  return security_policy({mode: "spotlight"})
+}
+
+/** Enable strict mode: spotlight + per-line datamarking of untrusted content. */
+pub fn strict() -> dict {
+  return security_policy({mode: "strict"})
+}
+
+/** Disable every prompt-injection defense layer for this run. */
+pub fn off() -> dict {
+  return security_policy({mode: "off"})
+}

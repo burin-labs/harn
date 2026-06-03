@@ -32,6 +32,7 @@ pub struct HarnConfig {
     pub replay: ReplayConfig,
     pub limits: RuntimeLimitsConfig,
     pub policy: ManagedPolicyConfig,
+    pub security: SecurityConfig,
 }
 
 impl Default for HarnConfig {
@@ -50,6 +51,7 @@ impl Default for HarnConfig {
             replay: ReplayConfig::default(),
             limits: RuntimeLimitsConfig::default(),
             policy: ManagedPolicyConfig::default(),
+            security: SecurityConfig::default(),
         }
     }
 }
@@ -235,6 +237,82 @@ impl Default for RedactionConfig {
             mode: RedactionMode::Standard,
             extra_fields: Vec::new(),
             extra_url_params: Vec::new(),
+        }
+    }
+}
+
+/// Prompt-injection defense posture for the runtime (Burin Layers 0/1).
+///
+/// `Off` disables every layer. `Spotlight` (the default) frames untrusted
+/// external tool/MCP output as data and gates exfiltration when context is
+/// tainted. `Strict` additionally datamarks every line of untrusted content.
+/// `LocalMl` reserves the on-device-classifier tier (Layer 2 / `harn-guard`
+/// sidecar); until that ships it behaves as `Spotlight`.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "kebab-case")]
+pub enum SecurityMode {
+    Off,
+    #[default]
+    Spotlight,
+    Strict,
+    LocalMl,
+}
+
+impl SecurityMode {
+    /// Parse from the stable wire string. Unknown values fall back to the
+    /// safe default (`Spotlight`).
+    pub fn parse(value: &str) -> Self {
+        match value {
+            "off" => Self::Off,
+            "spotlight" => Self::Spotlight,
+            "strict" => Self::Strict,
+            "local-ml" | "local_ml" => Self::LocalMl,
+            _ => Self::Spotlight,
+        }
+    }
+
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Off => "off",
+            Self::Spotlight => "spotlight",
+            Self::Strict => "strict",
+            Self::LocalMl => "local-ml",
+        }
+    }
+}
+
+/// `[security]` configuration. The runtime substrate lives in
+/// [`crate::security`]; this is the typed, layerable shape hosts persist and
+/// merge. Defaults are on (deterministic, free) so the runtime is
+/// secure-by-default; the trifecta gate only takes effect where an interactive
+/// approval policy is installed.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default, deny_unknown_fields)]
+pub struct SecurityConfig {
+    pub mode: SecurityMode,
+    /// Frame untrusted external tool/MCP output in spotlight delimiters.
+    pub spotlight_external: bool,
+    /// Apply the lethal-trifecta gate: force confirmation when tainted context
+    /// reaches an exfiltration-capable or destructive tool.
+    pub trifecta_gate: bool,
+    /// Pin + hash MCP tool schemas; require re-approval when a server mutates a
+    /// tool description after first approval (rug-pull defense).
+    pub pin_mcp_schemas: bool,
+    /// Also gate reads of well-known secret/credential files while tainted.
+    pub gate_secret_reads: bool,
+    /// MCP servers the operator has explicitly trusted (skip taint + pinning).
+    pub trusted_mcp_servers: Vec<String>,
+}
+
+impl Default for SecurityConfig {
+    fn default() -> Self {
+        Self {
+            mode: SecurityMode::Spotlight,
+            spotlight_external: true,
+            trifecta_gate: true,
+            pin_mcp_schemas: true,
+            gate_secret_reads: true,
+            trusted_mcp_servers: Vec::new(),
         }
     }
 }

@@ -74,6 +74,7 @@ pub mod runtime_paths;
 pub mod schema;
 pub(crate) mod secret_patterns;
 pub mod secrets;
+pub mod security;
 pub mod session_bundle;
 pub mod session_timeline;
 pub mod sessions;
@@ -438,6 +439,7 @@ pub fn reset_thread_local_state() {
     orchestration::agent_inbox::reset();
     tool_call_cancellations::reset_registry();
     redact::clear_policy_stack();
+    security::reset_thread_state();
     triggers::clear_dispatcher_state();
     triggers::clear_trigger_registry();
     events::reset_event_sinks();

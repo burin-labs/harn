@@ -84,6 +84,11 @@ struct AgentHostSession {
     /// the last call truncated due to its `max_tokens` parameter) and
     /// `refusal` (Anthropic refusal stop_reason).
     last_llm_stop_reason: Option<String>,
+    /// Lethal-trifecta taint ledger: untrusted external content (MCP servers,
+    /// `Fetch`-kind tools) that entered this session's context. Owned here so
+    /// it drops with the session — no cross-session leak. Read by the dispatch
+    /// gate to decide whether exfiltration-capable tools need confirmation.
+    taint: Vec<crate::security::TaintRecord>,
     /// Pops the per-session capability policy off the execution stack
     /// on drop. Declared last so it Drops last in `AgentHostSession`'s
     /// natural field-order drop, after every other cleanup completes.
@@ -135,6 +140,24 @@ fn with_session<R>(
         })?;
         f(session)
     })
+}
+
+/// Append a taint record to the session's lethal-trifecta ledger. No-op when
+/// the session is unknown (e.g. tool results recorded outside a host session).
+pub(crate) fn push_session_taint(session_id: &str, record: crate::security::TaintRecord) {
+    let _ = with_session(session_id, "record_session_taint", |session| {
+        session.taint.push(record);
+        Ok(())
+    });
+}
+
+/// Snapshot the session's taint ledger for the dispatch gate. Empty when the
+/// session is unknown or no untrusted content has entered context.
+pub(crate) fn session_taint_snapshot(session_id: &str) -> Vec<crate::security::TaintRecord> {
+    with_session(session_id, "snapshot_session_taint", |session| {
+        Ok(session.taint.clone())
+    })
+    .unwrap_or_default()
 }
 
 fn opts_dict(value: Option<&VmValue>) -> BTreeMap<String, VmValue> {
@@ -343,6 +366,7 @@ async fn host_agent_session_init(
         daemon_idle_backoff_ms: 100,
         host_bridge,
         last_llm_stop_reason: None,
+        taint: Vec::new(),
         nested_policy_guard,
     };
 
@@ -1013,6 +1037,7 @@ fn host_agent_session_record_tool_results_builtin(
             .cloned()
             .unwrap_or(VmValue::Nil),
     };
+    let security_policy = crate::security::current_policy();
     let mut successful = Vec::new();
     let mut rejected = Vec::new();
     for result in list_items(&results_value).iter() {
@@ -1020,12 +1045,37 @@ fn host_agent_session_record_tool_results_builtin(
             .or_else(|| dict_get(result, "name"))
             .map(|v| v.display())
             .unwrap_or_default();
-        let observation = dict_get(result, "observation")
+        let raw_observation = dict_get(result, "observation")
             .or_else(|| dict_get(result, "rendered_result"))
             .or_else(|| dict_get(result, "output"))
             .or_else(|| dict_get(result, "content"))
             .map(|v| v.display())
             .unwrap_or_default();
+        // Provenance / spotlighting (Layer 0): tag content that crossed a trust
+        // boundary (external MCP server, internet fetch) and frame it as data,
+        // not instructions, before it reaches the model's context. Skipped
+        // entirely when security is disabled.
+        let provenance = if security_policy.is_off() {
+            None
+        } else {
+            crate::security::classify_result_trust(
+                dict_get(result, "executor"),
+                crate::orchestration::current_tool_annotations(&name).as_ref(),
+                &name,
+                &security_policy,
+            )
+        };
+        let observation = match &provenance {
+            Some((trust, origin)) if security_policy.spotlight_external => {
+                crate::security::spotlight_wrap(
+                    &raw_observation,
+                    origin,
+                    *trust,
+                    security_policy.mode,
+                )
+            }
+            _ => raw_observation.clone(),
+        };
         let tool_call_id = dict_get(result, "tool_call_id")
             .or_else(|| dict_get(result, "tool_use_id"))
             .map(|v| v.display())
@@ -1044,6 +1094,27 @@ fn host_agent_session_record_tool_results_builtin(
             successful.push(name.clone());
         } else {
             rejected.push(name.clone());
+        }
+        // Lethal-trifecta ledger (Layer 1): note that untrusted content entered
+        // this session's context so the dispatch gate can require confirmation
+        // before an exfiltration-capable tool runs.
+        if let Some((trust, origin)) = &provenance {
+            if trust.is_untrusted() && !raw_observation.is_empty() {
+                push_session_taint(
+                    &session_id,
+                    crate::security::TaintRecord {
+                        origin: origin.clone(),
+                        trust: *trust,
+                        introduced_by: if tool_call_id.is_empty() {
+                            name.clone()
+                        } else {
+                            tool_call_id.clone()
+                        },
+                        detector: None,
+                        labels: crate::security::content_labels(&raw_observation),
+                    },
+                );
+            }
         }
         if ok && super::plan::is_plan_tool(&name) {
             if let Some(plan_value) = plan_artifact_from_result(result) {
