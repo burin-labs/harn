@@ -126,6 +126,21 @@ pre_commit = false
 pre_push = false
 
 [[artifact]]
+id = "connector-schemas"
+description = "Rust normalized-event payload structs generated from the canonical Harn connector event schema module (Harn-first source of truth). GitHub today; more providers follow."
+gen = "gen-connector-schemas"
+check = "check-connector-schemas"
+outputs = ["crates/harn-vm/src/triggers/event/schemas_generated.rs"]
+sources = [
+  "crates/harn-stdlib/src/stdlib/stdlib_event_schemas.harn",
+  "crates/harn-cli/src/commands/connector_schema_codegen/",
+]
+ci = true
+make_all = true
+pre_commit = false
+pre_push = false
+
+[[artifact]]
 id = "session-bundle-schema"
 description = "JSON Schema for the session-bundle DTO, generated from the Rust SessionBundle type."
 gen = "gen-session-bundle-schema"

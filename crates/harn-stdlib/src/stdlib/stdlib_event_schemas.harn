@@ -1,0 +1,135 @@
+// Canonical normalized connector event schemas, authored as Harn types.
+//
+// This module is the SOURCE OF TRUTH for the normalized-event shapes that
+// `.harn` connectors emit and the Rust runtime deserializes. The Rust structs
+// in `crates/harn-vm/src/triggers/event/schemas_generated.rs` are GENERATED
+// from these declarations by `harn connector-schema-codegen`, so a connector's
+// JSON output matches the Rust struct by construction.
+//
+// Regenerate the Rust structs with:  make gen-connector-schemas
+// Verify they are not stale with:     make check-connector-schemas
+//
+// Type mapping applied by the generator:
+//   string      -> String
+//   int         -> i64
+//   bool        -> bool
+//   any         -> serde_json::Value      (untyped JSON subtree)
+//   T?          -> Option<T>              (+ serde default + skip_serializing_if)
+//   list<T>     -> Vec<T>                 (+ serde default)
+//   dict<K, V>  -> BTreeMap<K, V>         (+ serde default)
+//   { ... }     -> a `#[serde(flatten)]` field named `common` when the field is
+//                  spelled `common: <Record>`; otherwise a nested struct.
+//
+// GITHUB. This PR proves the pipeline end-to-end for GitHub only; Slack,
+// Linear, Notion, and the stream providers follow in later PRs. Keep these
+// records a faithful mirror of the `GitHubEventPayload` family in
+// `crates/harn-vm/src/triggers/event/payloads.rs`.
+/**
+ * Stable common block shared by every GitHub normalized event. The generator
+ * recognizes a field named `common` whose type is a record and emits it as a
+ * `#[serde(flatten)]` field, matching the hand-written `GitHubEventCommon`.
+ */
+type GitHubEventCommon = {
+  event: string,
+  action?: string,
+  delivery_id?: string,
+  installation_id?: int,
+  topic?: string,
+  repository?: any,
+  repo?: any,
+  raw: any,
+}
+
+type GitHubIssuesEventPayload = {common: GitHubEventCommon, issue: any}
+
+type GitHubPullRequestEventPayload = {common: GitHubEventCommon, pull_request: any}
+
+type GitHubIssueCommentEventPayload = {common: GitHubEventCommon, issue: any, comment: any}
+
+type GitHubPullRequestReviewEventPayload = {
+  common: GitHubEventCommon,
+  pull_request: any,
+  review: any,
+}
+
+type GitHubPushEventPayload = {common: GitHubEventCommon, commits: list<any>, distinct_size?: int}
+
+type GitHubWorkflowRunEventPayload = {common: GitHubEventCommon, workflow_run: any}
+
+type GitHubDeploymentStatusEventPayload = {
+  common: GitHubEventCommon,
+  deployment_status: any,
+  deployment: any,
+}
+
+type GitHubCheckRunEventPayload = {common: GitHubEventCommon, check_run: any}
+
+type GitHubCheckSuiteEventPayload = {
+  common: GitHubEventCommon,
+  check_suite: any,
+  check_suite_id?: int,
+  pull_request_number?: int,
+  head_sha?: string,
+  head_ref?: string,
+  base_ref?: string,
+  status?: string,
+  conclusion?: string,
+}
+
+type GitHubStatusEventPayload = {
+  common: GitHubEventCommon,
+  commit_status?: any,
+  status_id?: int,
+  head_sha?: string,
+  head_ref?: string,
+  base_ref?: string,
+  state?: string,
+  context?: string,
+  target_url?: string,
+}
+
+type GitHubMergeGroupEventPayload = {
+  common: GitHubEventCommon,
+  merge_group: any,
+  merge_group_id?: any,
+  head_sha?: string,
+  head_ref?: string,
+  base_sha?: string,
+  base_ref?: string,
+  pull_requests: list<any>,
+  pull_request_numbers: list<int>,
+}
+
+type GitHubInstallationEventPayload = {
+  common: GitHubEventCommon,
+  installation?: any,
+  account?: any,
+  installation_state?: string,
+  suspended?: bool,
+  revoked?: bool,
+  repositories: list<any>,
+}
+
+type GitHubInstallationRepositoriesEventPayload = {
+  common: GitHubEventCommon,
+  installation?: any,
+  account?: any,
+  installation_state?: string,
+  suspended?: bool,
+  revoked?: bool,
+  repository_selection?: string,
+  repositories_added: list<any>,
+  repositories_removed: list<any>,
+}
+
+/**
+ * The dispatched GitHub event union, mirroring the hand-written
+ * `GitHubEventPayload` enum (an untagged-on-the-wire, `event`-dispatched enum).
+ *
+ * The generator emits one Rust enum variant per union member; the trailing
+ * `GitHubEventCommon` member is the catch-all `Other` variant the manual
+ * `Deserialize` falls back to when the `event` discriminator is unrecognized.
+ * Referencing every payload record here also keeps this schema module free of
+ * `unused-type` lint noise.
+ */
+type GitHubEventPayload = GitHubIssuesEventPayload | GitHubPullRequestEventPayload | GitHubIssueCommentEventPayload | GitHubPullRequestReviewEventPayload | GitHubPushEventPayload | GitHubWorkflowRunEventPayload | GitHubDeploymentStatusEventPayload | GitHubCheckRunEventPayload | GitHubCheckSuiteEventPayload | GitHubStatusEventPayload | GitHubMergeGroupEventPayload | GitHubInstallationEventPayload | GitHubInstallationRepositoriesEventPayload | GitHubEventCommon

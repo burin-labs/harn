@@ -194,6 +194,7 @@ jobs:
           # ci = true check to be referenced here. Same warm binary, so
           # they're effectively free.
           make check-protocol-artifacts
+          make check-connector-schemas
           make check-session-bundle-schema
           make check-provider-catalog
           make check-provider-catalog-drift

@@ -39,6 +39,22 @@ pub(crate) struct DumpConnectorMatrixArgs {
 }
 
 #[derive(Debug, Args)]
+pub(crate) struct ConnectorSchemaCodegenArgs {
+    /// Schema module to read. Defaults to the embedded canonical copy
+    /// (`harn_stdlib::CONNECTOR_EVENT_SCHEMAS_SOURCE`).
+    #[arg(long, value_name = "FILE")]
+    pub schema: Option<String>,
+    /// Path for the vendored generated Rust file (relative to the repo root).
+    #[arg(long, value_name = "FILE")]
+    pub out: Option<String>,
+    /// Verify the vendored file matches the generator output; exit non-zero if
+    /// stale. Used by CI to prevent drift between the Harn schema and the
+    /// generated Rust structs.
+    #[arg(long)]
+    pub check: bool,
+}
+
+#[derive(Debug, Args)]
 pub(crate) struct DumpProtocolArtifactsArgs {
     /// Directory for generated protocol schemas and bindings.
     #[arg(long, default_value = "spec/protocol-artifacts")]

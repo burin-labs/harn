@@ -1598,6 +1598,12 @@ async fn async_main(raw_args: Vec<String>, runtime_mode: CliRuntimeMode) {
         Command::DumpProtocolArtifacts(args) => {
             commands::dump_protocol_artifacts::run(&args.output_dir, args.check);
         }
+        Command::ConnectorSchemaCodegen(args) => {
+            let code = commands::connector_schema_codegen::run(&args);
+            if code != 0 {
+                process::exit(code);
+            }
+        }
         Command::Time(args) => match args.command {
             TimeCommand::Run(time_args) => commands::time::run(time_args).await,
         },

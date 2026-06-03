@@ -687,6 +687,17 @@ pub const STDLIB_SOURCES: &[StdlibSource] = &[
     },
 ];
 
+/// Canonical normalized connector event schemas, authored as Harn `type`
+/// declarations. This is the SOURCE OF TRUTH for the Rust event-payload
+/// structs in `crates/harn-vm/src/triggers/event/schemas_generated.rs`, which
+/// are generated from these declarations by `harn connector-schema-codegen`.
+///
+/// It is intentionally NOT registered in [`STDLIB_SOURCES`]: it is a codegen
+/// input (like `spec/openapi.yaml`), not a module loaded into every program.
+/// Exposing it as an embedded string keeps the generator independent of the
+/// current working directory.
+pub const CONNECTOR_EVENT_SCHEMAS_SOURCE: &str = include_str!("stdlib/stdlib_event_schemas.harn");
+
 pub const STDLIB_PROMPT_ASSETS: &[StdlibPromptAsset] = &[
     StdlibPromptAsset {
         path: "agent/prompts/tool_contract_text.harn.prompt",
