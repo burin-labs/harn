@@ -50,6 +50,12 @@ harn-guard = { path = "../harn-guard", version = "0.8" }
 harn-serve = { path = "../harn-serve", version = "0.8" }
 harn-skills = { path = "../harn-skills", version = "0.8" }
 harn-stdlib = { path = "../harn-stdlib", version = "0.8" }
+# LSP and DAP are linked into the single multi-call `harn` binary and reached
+# via argv[0] dispatch (when invoked as `harn-lsp` / `harn-dap`). This replaces
+# shipping two additional fully-linked binaries that each re-statically-linked
+# nearly the same dependency closure — collapsing 3 release binaries into 1.
+harn-lsp = { path = "../harn-lsp", version = "0.8" }
+harn-dap = { path = "../harn-dap", version = "0.8" }
 async-trait = "0.1"
 axum = { version = "0.8", features = ["ws"] }
 axum-server = { version = "0.8", features = ["tls-rustls"] }

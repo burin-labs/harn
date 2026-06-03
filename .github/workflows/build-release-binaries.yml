@@ -355,7 +355,11 @@ jobs:
         run: |
           set -euo pipefail
           start=$SECONDS
-          cargo build --release -p harn-cli -p harn-dap -p harn-lsp --target "$HARN_RELEASE_TARGET"
+          # One binary. harn-lsp / harn-dap are linked into `harn` and reached
+          # via argv[0] dispatch; we ship them as symlinks/copies at package
+          # time. Building only `harn` runs the expensive final LTO link once
+          # per target instead of three times.
+          cargo build --release -p harn-cli --bin harn --target "$HARN_RELEASE_TARGET"
           if [[ "$HARN_RELEASE_TARGET" == *unknown-linux-gnu ]]; then
             cargo build --release -p harn-cli --bin harn-container-probe --target "$HARN_RELEASE_TARGET"
           fi
@@ -377,12 +381,13 @@ jobs:
             echo "| Release codegen units | ${CARGO_PROFILE_RELEASE_CODEGEN_UNITS:-<unset>} |"
           } >> "$GITHUB_STEP_SUMMARY"
 
-      # Sign the three Mach-O binaries with the Developer ID Application
-      # identity (hardened runtime + secure timestamp), then submit a zip
-      # of the binaries to Apple's notary service. Stapling isn't supported
-      # for raw Mach-O binaries — Gatekeeper does an online ticket lookup
-      # against Apple's CDN at first launch on the user's machine instead,
-      # which is silent once the binary is notarized.
+      # Sign the single `harn` Mach-O binary with the Developer ID Application
+      # identity (hardened runtime + secure timestamp), then submit it to
+      # Apple's notary service. harn-lsp / harn-dap ship as symlinks to this
+      # binary, so notarizing `harn` covers them (Gatekeeper resolves the
+      # symlink and checks the real binary). Stapling isn't supported for raw
+      # Mach-O binaries — Gatekeeper does an online ticket lookup against
+      # Apple's CDN at first launch instead, silent once notarized.
       - name: Apple sign + notarize (macOS)
         if: runner.os == 'macOS' && needs.setup.outputs.is_release == 'true'
         timeout-minutes: 45
@@ -423,17 +428,14 @@ jobs:
           rm -f "$CERT_FILE"
 
           SIGN_ID="Developer ID Application: Burin Labs, LLC (${APPLE_TEAM_ID})"
-          for bin in target/${TARGET}/release/harn \
-                     target/${TARGET}/release/harn-dap \
-                     target/${TARGET}/release/harn-lsp; do
-            echo "Signing $bin"
-            codesign --force --options runtime --timestamp \
-              --sign "$SIGN_ID" \
-              "$bin"
-            codesign --verify --strict --verbose=2 "$bin"
-          done
+          bin="target/${TARGET}/release/harn"
+          echo "Signing $bin"
+          codesign --force --options runtime --timestamp \
+            --sign "$SIGN_ID" \
+            "$bin"
+          codesign --verify --strict --verbose=2 "$bin"
 
-          (cd "target/${TARGET}/release" && zip -j "$NOTARY_ZIP" harn harn-dap harn-lsp)
+          (cd "target/${TARGET}/release" && zip -j "$NOTARY_ZIP" harn)
           notary_submit_with_retry() {
             local attempt=1
             local max_attempts=4
@@ -491,8 +493,13 @@ jobs:
           set -euo pipefail
           mkdir -p dist
           cp "target/${HARN_RELEASE_TARGET}/release/harn" dist/harn
-          cp "target/${HARN_RELEASE_TARGET}/release/harn-dap" dist/harn-dap
-          cp "target/${HARN_RELEASE_TARGET}/release/harn-lsp" dist/harn-lsp
+          # harn-lsp / harn-dap are relative symlinks to the single `harn`
+          # binary (argv[0] dispatch). Editors that spawn `harn-lsp` /
+          # `harn-dap` by path keep working; the tarball carries one real
+          # binary instead of three. tar preserves symlinks; extraction
+          # recreates them pointing at the sibling `harn`.
+          ln -s harn dist/harn-lsp
+          ln -s harn dist/harn-dap
           package_entries=(harn harn-dap harn-lsp)
           if [[ "$HARN_RELEASE_TARGET" == *unknown-linux-gnu ]]; then
             cp "target/${HARN_RELEASE_TARGET}/release/harn-container-probe" dist/harn-container-probe
@@ -507,8 +514,12 @@ jobs:
         run: |
           mkdir -p dist
           cp target/${{ matrix.target }}/release/harn.exe dist/harn.exe
-          cp target/${{ matrix.target }}/release/harn-dap.exe dist/harn-dap.exe
-          cp target/${{ matrix.target }}/release/harn-lsp.exe dist/harn-lsp.exe
+          # Windows has no dependable unprivileged symlinks, so harn-lsp.exe /
+          # harn-dap.exe are copies of the single multi-call harn.exe (argv[0]
+          # dispatch still routes them). Editors that spawn them by name keep
+          # working; we still build only one binary, so the LTO-link win holds.
+          cp dist/harn.exe dist/harn-lsp.exe
+          cp dist/harn.exe dist/harn-dap.exe
           cd dist
           7z a "harn-${{ matrix.target }}.zip" harn.exe harn-dap.exe harn-lsp.exe
 

@@ -214,9 +214,14 @@ fi
 info "Extracting"
 tar -xzf "$WORKDIR/$ASSET" -C "$WORKDIR"
 
-for bin in harn harn-dap harn-lsp; do
-  [ -f "$WORKDIR/$bin" ] || continue
-  install -m 0755 "$WORKDIR/$bin" "$INSTALL_DIR/$bin"
+# Install the single multi-call `harn` binary, then point harn-lsp / harn-dap
+# at it with symlinks (they are the same binary, dispatched on argv[0]). An
+# install is one real binary plus two tiny links, mirroring the release
+# tarball, instead of three full copies.
+install -m 0755 "$WORKDIR/harn" "$INSTALL_DIR/harn"
+for alias in harn-dap harn-lsp; do
+  [ -e "$WORKDIR/$alias" ] || continue
+  ln -sf harn "$INSTALL_DIR/$alias"
 done
 
 ok "Installed harn ${VERSION} to ${INSTALL_DIR}"
