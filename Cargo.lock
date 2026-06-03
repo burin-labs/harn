@@ -2392,7 +2392,7 @@ dependencies = [
 
 [[package]]
 name = "harn-guard"
-version = "0.8.66"
+version = "0.8.67"
 dependencies = [
  "harn-vm",
  "ort",
