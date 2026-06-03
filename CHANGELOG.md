@@ -8,6 +8,51 @@ highlights live in [CHANGELOG-pre-0.6.md](CHANGELOG-pre-0.6.md).
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.8.67
+
+### Breaking
+
+- **`-2 ** 2` now evaluates to `-4`, not `4`.** A unary minus on the base of an
+  exponentiation now binds looser than `**`, so `-2 ** 2` parses as `-(2 ** 2)`,
+  matching Python, Ruby, and ordinary math notation rather than the spreadsheet
+  `(-2) ** 2` reading. The exponent operand still accepts a unary prefix
+  (`2 ** -3` is `2 ** (-3)`), and `**` stays right-associative. Wrap the base in
+  parentheses — `(-2) ** 2` — to keep the old result.
+
+### Fixed
+
+- **The tree-sitter grammar now matches the canonical parser's operator
+  precedence.** `??` was mis-ordered as looser than `||`/`&&`/`+`/`*` (it binds
+  tighter than `+ -` and looser than `* / %`), and unary prefixes were tied with
+  `**`. Structural tooling (Neovim highlighting, AST-based edits) now groups
+  `a ?? b + c` as `(a ?? b) + c` and `-2 ** 2` as `-(2 ** 2)`, the same as the
+  interpreter.
+- Tree-sitter highlighting now covers `break`, `continue`, `require`, and the
+  HITL keywords (`ask_user`, `dual_control`, `escalate_to`,
+  `request_approval`). They are valid grammar keywords but were silently
+  rendered as plain identifiers in Neovim and other tree-sitter editors.
+- The VS Code TextMate grammar now nests block comments, so a `*/` inside a
+  `/* ... */` no longer ends the comment early, and recognizes raw string
+  literals (`r"..."`), which previously orphaned the `r` prefix and
+  mis-highlighted backslashes as escape sequences.
+
+### Security
+
+- **Prompt-injection defense substrate (`[security]` config + `std/security`).** The runtime now
+  spotlights untrusted external content and gates the lethal trifecta. Tool/MCP output that crossed a
+  trust boundary (an external MCP server, or a `Fetch`-kind tool reaching the open internet) is framed
+  in datamarked delimiters with a provenance banner so the model treats it as data, never as
+  instructions (Microsoft "spotlighting"). A per-session taint ledger records that untrusted content
+  entered context; when it has, an auto-allowed tool that can exfiltrate (network/fetch), destroy
+  state, or read a secret file is upgraded to an interactive confirmation — but only where an approval
+  policy is installed, so headless embedders are unaffected. MCP tool schemas are pinned and hashed on
+  `tools/list`; a description/inputSchema that changes after first sighting is flagged
+  (`_schema_changed`) for re-approval (rug-pull defense), and `session/request_permission` now carries
+  the full tool descriptor so hosts can render the complete model-visible tool text at approval time
+  (closing the tool-poisoning visibility gap). Configure via `[security]` (`mode = off | spotlight |
+  strict | local-ml`, `trifecta_gate`, `pin_mcp_schemas`, `gate_secret_reads`, `trusted_mcp_servers`)
+  or `std/security::configure`. Defaults are on (spotlight + gate + pinning).
+
 ## v0.8.66
 
 ### Changed

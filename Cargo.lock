@@ -2188,7 +2188,7 @@ dependencies = [
 
 [[package]]
 name = "harn-builtin-macros"
-version = "0.8.66"
+version = "0.8.67"
 dependencies = [
  "harn-builtin-meta",
  "harn-builtin-registry",
@@ -2199,18 +2199,18 @@ dependencies = [
 
 [[package]]
 name = "harn-builtin-meta"
-version = "0.8.66"
+version = "0.8.67"
 
 [[package]]
 name = "harn-builtin-registry"
-version = "0.8.66"
+version = "0.8.67"
 dependencies = [
  "harn-builtin-meta",
 ]
 
 [[package]]
 name = "harn-cli"
-version = "0.8.66"
+version = "0.8.67"
 dependencies = [
  "async-trait",
  "axum",
@@ -2282,7 +2282,7 @@ dependencies = [
 
 [[package]]
 name = "harn-clock"
-version = "0.8.66"
+version = "0.8.67"
 dependencies = [
  "async-trait",
  "parking_lot",
@@ -2293,7 +2293,7 @@ dependencies = [
 
 [[package]]
 name = "harn-dap"
-version = "0.8.66"
+version = "0.8.67"
 dependencies = [
  "harn-modules",
  "harn-parser",
@@ -2307,7 +2307,7 @@ dependencies = [
 
 [[package]]
 name = "harn-fmt"
-version = "0.8.66"
+version = "0.8.67"
 dependencies = [
  "harn-lexer",
  "harn-parser",
@@ -2315,7 +2315,7 @@ dependencies = [
 
 [[package]]
 name = "harn-hostlib"
-version = "0.8.66"
+version = "0.8.67"
 dependencies = [
  "async-trait",
  "base64",
@@ -2378,7 +2378,7 @@ dependencies = [
 
 [[package]]
 name = "harn-ir"
-version = "0.8.66"
+version = "0.8.67"
 dependencies = [
  "harn-lexer",
  "harn-parser",
@@ -2386,14 +2386,14 @@ dependencies = [
 
 [[package]]
 name = "harn-lexer"
-version = "0.8.66"
+version = "0.8.67"
 dependencies = [
  "serde",
 ]
 
 [[package]]
 name = "harn-lint"
-version = "0.8.66"
+version = "0.8.67"
 dependencies = [
  "harn-fmt",
  "harn-lexer",
@@ -2414,7 +2414,7 @@ dependencies = [
 
 [[package]]
 name = "harn-lsp"
-version = "0.8.66"
+version = "0.8.67"
 dependencies = [
  "harn-fmt",
  "harn-ir",
@@ -2430,7 +2430,7 @@ dependencies = [
 
 [[package]]
 name = "harn-mcp-rc-compat"
-version = "0.8.66"
+version = "0.8.67"
 dependencies = [
  "axum",
  "harn-serve",
@@ -2444,7 +2444,7 @@ dependencies = [
 
 [[package]]
 name = "harn-modules"
-version = "0.8.66"
+version = "0.8.67"
 dependencies = [
  "blake3",
  "croner",
@@ -2458,7 +2458,7 @@ dependencies = [
 
 [[package]]
 name = "harn-opcode-macros"
-version = "0.8.66"
+version = "0.8.67"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -2478,7 +2478,7 @@ dependencies = [
 
 [[package]]
 name = "harn-parser"
-version = "0.8.66"
+version = "0.8.67"
 dependencies = [
  "harn-builtin-meta",
  "harn-builtin-registry",
@@ -2498,7 +2498,7 @@ dependencies = [
 
 [[package]]
 name = "harn-rules"
-version = "0.8.66"
+version = "0.8.67"
 dependencies = [
  "harn-hostlib",
  "regex",
@@ -2513,7 +2513,7 @@ dependencies = [
 
 [[package]]
 name = "harn-rules-hostlib"
-version = "0.8.66"
+version = "0.8.67"
 dependencies = [
  "harn-fmt",
  "harn-hostlib",
@@ -2526,7 +2526,7 @@ dependencies = [
 
 [[package]]
 name = "harn-serve"
-version = "0.8.66"
+version = "0.8.67"
 dependencies = [
  "async-compression",
  "async-trait",
@@ -2570,18 +2570,18 @@ dependencies = [
 
 [[package]]
 name = "harn-skills"
-version = "0.8.66"
+version = "0.8.67"
 dependencies = [
  "tempfile",
 ]
 
 [[package]]
 name = "harn-stdlib"
-version = "0.8.66"
+version = "0.8.67"
 
 [[package]]
 name = "harn-vm"
-version = "0.8.66"
+version = "0.8.67"
 dependencies = [
  "aes-gcm",
  "async-trait",
@@ -6242,7 +6242,7 @@ dependencies = [
 
 [[package]]
 name = "tree-sitter-harn"
-version = "0.8.66"
+version = "0.8.67"
 dependencies = [
  "cc",
  "tree-sitter",
