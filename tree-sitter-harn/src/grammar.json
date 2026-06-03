@@ -4879,7 +4879,7 @@
     },
     "nil_coalescing_expression": {
       "type": "PREC_LEFT",
-      "value": 3,
+      "value": 9,
       "content": {
         "type": "SEQ",
         "members": [
@@ -5185,7 +5185,7 @@
         },
         {
           "type": "PREC_LEFT",
-          "value": 9,
+          "value": 10,
           "content": {
             "type": "SEQ",
             "members": [
@@ -5220,7 +5220,7 @@
         },
         {
           "type": "PREC_LEFT",
-          "value": 9,
+          "value": 10,
           "content": {
             "type": "SEQ",
             "members": [
@@ -5255,7 +5255,7 @@
         },
         {
           "type": "PREC_LEFT",
-          "value": 9,
+          "value": 10,
           "content": {
             "type": "SEQ",
             "members": [
@@ -5290,7 +5290,7 @@
         },
         {
           "type": "PREC_RIGHT",
-          "value": 10,
+          "value": 12,
           "content": {
             "type": "SEQ",
             "members": [
@@ -5360,7 +5360,7 @@
     },
     "unary_expression": {
       "type": "PREC_RIGHT",
-      "value": 10,
+      "value": 11,
       "content": {
         "type": "SEQ",
         "members": [
@@ -5386,7 +5386,7 @@
     },
     "call_expression": {
       "type": "PREC_LEFT",
-      "value": 11,
+      "value": 13,
       "content": {
         "type": "SEQ",
         "members": [
@@ -5480,7 +5480,7 @@
     },
     "generic_call_expression": {
       "type": "PREC_LEFT",
-      "value": 11,
+      "value": 13,
       "content": {
         "type": "SEQ",
         "members": [
@@ -5582,7 +5582,7 @@
     },
     "hitl_expression": {
       "type": "PREC_LEFT",
-      "value": 11,
+      "value": 13,
       "content": {
         "type": "SEQ",
         "members": [
@@ -5768,7 +5768,7 @@
     },
     "method_call": {
       "type": "PREC_LEFT",
-      "value": 11,
+      "value": 13,
       "content": {
         "type": "SEQ",
         "members": [
@@ -5882,7 +5882,7 @@
     },
     "property_access": {
       "type": "PREC_LEFT",
-      "value": 11,
+      "value": 13,
       "content": {
         "type": "SEQ",
         "members": [
@@ -5936,7 +5936,7 @@
     },
     "subscript_expression": {
       "type": "PREC_LEFT",
-      "value": 11,
+      "value": 13,
       "content": {
         "type": "SEQ",
         "members": [
@@ -5974,7 +5974,7 @@
     },
     "slice_expression": {
       "type": "PREC_LEFT",
-      "value": 11,
+      "value": 13,
       "content": {
         "type": "SEQ",
         "members": [
@@ -6035,7 +6035,7 @@
     },
     "try_unwrap_expression": {
       "type": "PREC_LEFT",
-      "value": 11,
+      "value": 13,
       "content": {
         "type": "SEQ",
         "members": [

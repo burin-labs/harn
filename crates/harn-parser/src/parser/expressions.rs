@@ -270,7 +270,7 @@ impl Parser {
     }
 
     pub(super) fn parse_multiplicative(&mut self) -> Result<SNode, ParserError> {
-        let mut left = self.parse_exponent()?;
+        let mut left = self.parse_unary()?;
         while self.check_skip_newlines(&TokenKind::Star)
             || self.check_skip_newlines(&TokenKind::Slash)
             || self.check_skip_newlines(&TokenKind::Percent)
@@ -285,7 +285,7 @@ impl Parser {
             };
             self.advance();
             self.skip_newlines();
-            let right = self.parse_exponent()?;
+            let right = self.parse_unary()?;
             left = spanned(
                 Node::BinaryOp {
                     op: op.into(),
@@ -298,8 +298,14 @@ impl Parser {
         Ok(left)
     }
 
+    // `**` binds more tightly than a unary prefix on its *left* operand, so
+    // `-2 ** 2` parses as `-(2 ** 2)` (matching Python, Ruby, and ordinary math
+    // notation rather than the spreadsheet `(-2) ** 2` reading). The base is
+    // therefore a `postfix` expression, while the exponent recurses through
+    // `parse_unary` so a unary prefix on the *right* still works (`2 ** -3` is
+    // `2 ** (-3)`) and chained `**` stays right-associative.
     pub(super) fn parse_exponent(&mut self) -> Result<SNode, ParserError> {
-        let left = self.parse_unary()?;
+        let left = self.parse_postfix()?;
         if !self.check_skip_newlines(&TokenKind::Pow) {
             return Ok(left);
         }
@@ -307,7 +313,7 @@ impl Parser {
         let start = left.span;
         self.advance();
         self.skip_newlines();
-        let right = self.with_nesting("exponent expression", |parser| parser.parse_exponent())?;
+        let right = self.with_nesting("exponent expression", |parser| parser.parse_unary())?;
         Ok(spanned(
             Node::BinaryOp {
                 op: "**".into(),
@@ -343,7 +349,7 @@ impl Parser {
                 Span::merge(start, self.prev_span()),
             ));
         }
-        self.parse_postfix()
+        self.parse_exponent()
     }
 
     pub(super) fn parse_postfix(&mut self) -> Result<SNode, ParserError> {
