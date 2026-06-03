@@ -13,8 +13,10 @@ use crate::HarnLsp;
 impl HarnLsp {
     pub(super) async fn handle_initialize(
         &self,
-        _params: InitializeParams,
+        params: InitializeParams,
     ) -> Result<InitializeResult> {
+        *self.rule_workspace.lock().unwrap() =
+            crate::rules::RuleWorkspace::from_initialize(&params);
         Ok(InitializeResult {
             capabilities: ServerCapabilities {
                 text_document_sync: Some(TextDocumentSyncCapability::Kind(
@@ -107,8 +109,11 @@ impl HarnLsp {
     pub(super) async fn handle_did_open(&self, params: DidOpenTextDocumentParams) {
         let uri = params.text_document.uri.clone();
         let source = params.text_document.text.clone();
+        let language_id = params.text_document.language_id.clone();
 
-        let state = DocumentState::new(source);
+        let rule_workspace = self.rule_workspace.lock().unwrap().clone();
+        let state =
+            DocumentState::new_for_language_with_rules(source, language_id, &uri, &rule_workspace);
         let diagnostics = state.diagnostics.clone();
         self.documents.lock().unwrap().insert(uri.clone(), state);
 
@@ -151,7 +156,8 @@ impl HarnLsp {
                 let Some(entry) = docs.get_mut(&uri) else {
                     return;
                 };
-                entry.reparse_if_dirty();
+                let rule_workspace = self.rule_workspace.lock().unwrap().clone();
+                entry.reparse_if_dirty_with_rules(Some(&uri), Some(&rule_workspace));
                 diagnostics = entry.diagnostics.clone();
             }
             self.client
@@ -165,5 +171,33 @@ impl HarnLsp {
             .lock()
             .unwrap()
             .remove(&params.text_document.uri);
+    }
+
+    pub(super) async fn handle_did_change_configuration(
+        &self,
+        params: DidChangeConfigurationParams,
+    ) {
+        let rule_workspace = {
+            let mut workspace = self.rule_workspace.lock().unwrap();
+            workspace.reconfigure(Some(&params.settings));
+            workspace.clone()
+        };
+
+        let updates = {
+            let mut docs = self.documents.lock().unwrap();
+            docs.iter_mut()
+                .map(|(uri, state)| {
+                    state.dirty = true;
+                    state.reparse_if_dirty_with_rules(Some(uri), Some(&rule_workspace));
+                    (uri.clone(), state.diagnostics.clone())
+                })
+                .collect::<Vec<_>>()
+        };
+
+        for (uri, diagnostics) in updates {
+            self.client
+                .publish_diagnostics(uri, diagnostics, None)
+                .await;
+        }
     }
 }

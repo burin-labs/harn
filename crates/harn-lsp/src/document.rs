@@ -7,10 +7,12 @@ use tower_lsp::lsp_types::*;
 use crate::helpers::{
     diagnostic_data_value, lexer_error_to_diagnostic, parser_error_to_diagnostic, span_to_range,
 };
+use crate::rules::{RuleDiagnostic, RuleWorkspace};
 use crate::symbols::{build_symbol_table, SymbolInfo};
 
 pub(crate) struct DocumentState {
     pub(crate) source: String,
+    pub(crate) language_id: String,
     analysis: AnalysisDatabase,
     source_id: SourceId,
     version: SourceVersion,
@@ -19,6 +21,7 @@ pub(crate) struct DocumentState {
     pub(crate) diagnostics: Vec<Diagnostic>,
     pub(crate) lint_diagnostics: Vec<harn_lint::LintDiagnostic>,
     pub(crate) type_diagnostics: Vec<harn_parser::TypeDiagnostic>,
+    pub(crate) rule_diagnostics: Vec<RuleDiagnostic>,
     pub(crate) invariant_diagnostics: Vec<harn_ir::InvariantDiagnostic>,
     pub(crate) inlay_hints: Vec<harn_parser::InlayHintInfo>,
     pub(crate) dirty: bool,
@@ -26,11 +29,30 @@ pub(crate) struct DocumentState {
 
 impl DocumentState {
     pub(crate) fn new(source: String) -> Self {
+        let mut state = Self::new_unparsed(source, "harn");
+        state.reparse_if_dirty();
+        state
+    }
+
+    pub(crate) fn new_for_language_with_rules(
+        source: String,
+        language_id: impl Into<String>,
+        uri: &Url,
+        rule_workspace: &RuleWorkspace,
+    ) -> Self {
+        let mut state = Self::new_unparsed(source, language_id);
+        state.reparse_if_dirty_with_rules(Some(uri), Some(rule_workspace));
+        state
+    }
+
+    fn new_unparsed(source: String, language_id: impl Into<String>) -> Self {
+        let language_id = language_id.into();
         let mut analysis = AnalysisDatabase::new();
         let source_id = SourceId::new("document");
         analysis.set_source(source_id.clone(), source.clone(), SourceVersion(1));
-        let mut state = Self {
+        Self {
             source,
+            language_id,
             analysis,
             source_id,
             version: SourceVersion(1),
@@ -39,12 +61,11 @@ impl DocumentState {
             diagnostics: Vec::new(),
             lint_diagnostics: Vec::new(),
             type_diagnostics: Vec::new(),
+            rule_diagnostics: Vec::new(),
             invariant_diagnostics: Vec::new(),
             inlay_hints: Vec::new(),
             dirty: true,
-        };
-        state.reparse_if_dirty();
-        state
+        }
     }
 
     pub(crate) fn update_source(&mut self, source: String) {
@@ -56,6 +77,14 @@ impl DocumentState {
     }
 
     pub(crate) fn reparse_if_dirty(&mut self) {
+        self.reparse_if_dirty_with_rules(None, None);
+    }
+
+    pub(crate) fn reparse_if_dirty_with_rules(
+        &mut self,
+        uri: Option<&Url>,
+        rule_workspace: Option<&RuleWorkspace>,
+    ) {
         if !self.dirty {
             return;
         }
@@ -63,10 +92,17 @@ impl DocumentState {
         self.diagnostics.clear();
         self.lint_diagnostics.clear();
         self.type_diagnostics.clear();
+        self.rule_diagnostics.clear();
         self.invariant_diagnostics.clear();
         self.inlay_hints.clear();
         self.symbols.clear();
         self.cached_ast = None;
+
+        if self.language_id != "harn" {
+            self.append_rule_diagnostics(uri, rule_workspace);
+            self.dirty = false;
+            return;
+        }
 
         let analysis = match self
             .analysis
@@ -85,6 +121,7 @@ impl DocumentState {
                     }
                     AnalysisError::MissingSource(_) => {}
                 }
+                self.append_rule_diagnostics(uri, rule_workspace);
                 self.dirty = false;
                 return;
             }
@@ -159,13 +196,39 @@ impl DocumentState {
 
         self.symbols = build_symbol_table(&program, &self.source);
         self.cached_ast = Some(program);
+        self.append_rule_diagnostics(uri, rule_workspace);
         self.dirty = false;
+    }
+
+    fn append_rule_diagnostics(
+        &mut self,
+        uri: Option<&Url>,
+        rule_workspace: Option<&RuleWorkspace>,
+    ) {
+        let (Some(uri), Some(rule_workspace)) = (uri, rule_workspace) else {
+            return;
+        };
+        self.rule_diagnostics =
+            rule_workspace.diagnostics_for_document(uri, &self.language_id, &self.source);
+        self.diagnostics.extend(
+            self.rule_diagnostics
+                .iter()
+                .map(|item| item.diagnostic.clone()),
+        );
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::DocumentState;
+    use crate::rules::RuleWorkspace;
+    use std::path::Path;
+    use tower_lsp::lsp_types::Url;
+
+    fn write(path: &Path, content: &str) {
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, content).unwrap();
+    }
 
     #[test]
     fn update_source_marks_document_dirty_until_reparse() {
@@ -229,6 +292,46 @@ fn handler() {
                 .map(|diag| (&diag.source, &diag.message))
                 .collect::<Vec<_>>()
         );
+    }
+
+    #[test]
+    fn non_harn_documents_run_rules_without_harn_parse_diagnostics() {
+        let temp = tempfile::tempdir().unwrap();
+        write(
+            &temp.path().join("harn.toml"),
+            "[rules]\nruleDirs = [\"rules\"]\n",
+        );
+        write(
+            &temp.path().join("rules/no-debugger.toml"),
+            r#"
+id = "no-debugger"
+language = "typescript"
+message = "remove debugger statements"
+severity = "warning"
+safety = "behavior-preserving"
+fix = ""
+
+[rule]
+regex = "debugger;"
+"#,
+        );
+
+        let workspace = RuleWorkspace::from_root(temp.path());
+        let uri = Url::from_file_path(temp.path().join("src/main.ts")).unwrap();
+        let state = DocumentState::new_for_language_with_rules(
+            "function f() { debugger; }\n".to_string(),
+            "typescript",
+            &uri,
+            &workspace,
+        );
+
+        assert!(
+            state.cached_ast.is_none(),
+            "TypeScript should not parse as Harn"
+        );
+        assert_eq!(state.rule_diagnostics.len(), 1);
+        assert_eq!(state.diagnostics.len(), 1);
+        assert_eq!(state.diagnostics[0].source.as_deref(), Some("harn-rules"));
     }
 
     #[test]

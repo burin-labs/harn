@@ -52,6 +52,10 @@ impl tower_lsp::LanguageServer for HarnLsp {
         self.handle_did_close(params).await;
     }
 
+    async fn did_change_configuration(&self, params: DidChangeConfigurationParams) {
+        self.handle_did_change_configuration(params).await;
+    }
+
     async fn completion(&self, params: CompletionParams) -> Result<Option<CompletionResponse>> {
         self.handle_completion(params).await
     }

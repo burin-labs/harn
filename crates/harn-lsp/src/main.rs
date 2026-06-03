@@ -5,6 +5,7 @@ mod folding;
 mod handlers;
 mod helpers;
 mod references;
+mod rules;
 mod semantic_tokens;
 mod symbols;
 
@@ -19,6 +20,7 @@ struct HarnLsp {
     client: Client,
     documents: Mutex<HashMap<Url, DocumentState>>,
     pending_reparse_versions: Mutex<HashMap<Url, u64>>,
+    rule_workspace: Mutex<rules::RuleWorkspace>,
 }
 
 impl HarnLsp {
@@ -27,6 +29,7 @@ impl HarnLsp {
             client,
             documents: Mutex::new(HashMap::new()),
             pending_reparse_versions: Mutex::new(HashMap::new()),
+            rule_workspace: Mutex::new(rules::RuleWorkspace::default()),
         }
     }
 }
