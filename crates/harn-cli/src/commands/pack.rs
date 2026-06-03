@@ -1049,6 +1049,10 @@ fn carry_extension_metadata(
         Ok(manifest) => manifest,
         Err(_) => return Ok(()),
     };
+    // Validate before sealing into the signed bundle so a malformed
+    // `[[contributes]]` block fails the pack rather than shipping silently.
+    crate::package::validate_contributions(&manifest)
+        .map_err(|err| PackError::new("pack.invalid_contributes", err.message().to_string()))?;
     if !manifest.contributes.is_empty() {
         bundle.metadata.insert(
             "contributes".to_string(),
@@ -1069,6 +1073,8 @@ fn carry_extension_metadata(
                 "publisher": pkg.publisher,
                 "contact": pkg.contact,
                 "created": pkg.created,
+                "description": pkg.description,
+                "license": pkg.license,
                 "permissions": pkg.permissions,
                 "host_requirements": pkg.host_requirements,
             }),
