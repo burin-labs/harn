@@ -22,14 +22,33 @@
           "match": "//.*$"
         },
         {
-          "name": "comment.block.harn",
-          "begin": "/\\*",
-          "end": "\\*/"
+          "include": "#block-comment"
+        }
+      ]
+    },
+    "block-comment": {
+      "name": "comment.block.harn",
+      "begin": "/\\*",
+      "end": "\\*/",
+      "patterns": [
+        {
+          "include": "#block-comment"
         }
       ]
     },
     "strings": {
       "patterns": [
+        {
+          "name": "string.quoted.raw.harn",
+          "begin": "r\"",
+          "end": "\"",
+          "beginCaptures": {
+            "0": { "name": "punctuation.definition.string.begin.harn" }
+          },
+          "endCaptures": {
+            "0": { "name": "punctuation.definition.string.end.harn" }
+          }
+        },
         {
           "name": "string.quoted.double.harn",
           "begin": "\"",
