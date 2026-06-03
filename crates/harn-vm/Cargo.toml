@@ -93,7 +93,7 @@ subtle = "2.6"
 time = { version = "0.3", features = ["formatting", "parsing", "serde"] }
 uuid = { version = "1", features = ["serde", "v4", "v5", "v7"] }
 sqlx-core = { version = "0.9", default-features = false, features = ["_rt-tokio", "_tls-rustls-aws-lc-rs", "json"], optional = true }
-sqlx-postgres = { version = "0.8", default-features = false, features = ["json", "time", "uuid", "rust_decimal"], optional = true }
+sqlx-postgres = { version = "0.9", default-features = false, features = ["json", "time", "uuid", "rust_decimal"], optional = true }
 rust_decimal = { version = "1", optional = true }
 tokio-util = { version = "0.7", features = ["io"] }
 futures = "0.3"
