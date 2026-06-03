@@ -189,6 +189,13 @@ mod tests {
     }
 
     #[test]
+    fn default_model_matches_runtime_default_selector() {
+        // `harn-vm` carries the default guard-model selector independently (to
+        // stay free of a dependency on `harn-guard`); the two must not drift.
+        assert_eq!(DEFAULT_MODEL, harn_vm::config::DEFAULT_GUARD_MODEL);
+    }
+
+    #[test]
     fn catalog_entries_are_well_formed() {
         for model in all() {
             assert!(!model.name.is_empty());

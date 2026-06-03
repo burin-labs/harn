@@ -16,15 +16,26 @@ serde_json = "1"
 sha2 = "0.11"
 thiserror = "2"
 
+# Inference runtime — pulled in ONLY by the optional `neural` feature so the
+# default binary never links an ONNX runtime or a tokenizer. `ort` downloads a
+# prebuilt ONNX Runtime at build time (pyke CDN); `tokenizers` loads the model's
+# `tokenizer.json`. Both are off by default and never built in CI.
+ort = { version = "=2.0.0-rc.10", optional = true, default-features = false, features = [
+    "download-binaries",
+] }
+tokenizers = { version = "0.23", optional = true, default-features = false, features = [
+    "onig",
+] }
+
 [dev-dependencies]
 tempfile = "3"
 
 [features]
 # Management layer (catalog + store + resolve) is dependency-light and always on.
 default = []
-# `neural` pulls the on-device inference runtime (candle/ONNX) — slice 2b. Kept
-# off by default so the release binary never links a model runtime.
-neural = []
+# `neural` pulls the on-device inference runtime (ONNX) — slice 2b. Kept off by
+# default so the release binary never links a model runtime.
+neural = ["dep:ort", "dep:tokenizers"]
 
 [lints]
 workspace = true

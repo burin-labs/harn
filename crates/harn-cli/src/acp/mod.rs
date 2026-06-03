@@ -24,6 +24,21 @@ impl AcpRuntimeConfigurator for CliAcpRuntimeConfigurator {
             let _ = harn_hostlib::install_default(vm);
         }
 
+        // Install the lazy neural injection-classifier loader (Layer 2, guard
+        // backend). Built only under `guard-neural`; the runtime fires it the
+        // first time a `local-ml` policy scores untrusted content. Capturing the
+        // project base dir lets `harn-guard` resolve the installed model store.
+        #[cfg(feature = "guard-neural")]
+        {
+            let base_dir = source_path
+                .and_then(std::path::Path::parent)
+                .unwrap_or_else(|| std::path::Path::new("."))
+                .to_path_buf();
+            harn_vm::security::set_injection_classifier_loader(Box::new(move |selector| {
+                harn_guard::load_classifier(&base_dir, selector)
+            }));
+        }
+
         let Some(path) = source_path else {
             return Ok(());
         };

@@ -1112,8 +1112,12 @@ fn host_agent_session_record_tool_results_builtin(
                         },
                         // Layer 2: score the untrusted content with the active
                         // injection classifier when detection is enabled
-                        // (`local-ml` mode, or an explicit opt-in).
+                        // (`local-ml` mode, or an explicit opt-in). The neural
+                        // backend (if the host installed a loader) is materialized
+                        // lazily on this first scored span; otherwise the
+                        // dependency-free heuristic runs.
                         detector: if security_policy.detect_injection {
+                            crate::security::ensure_neural_classifier(&security_policy.guard_model);
                             Some(crate::security::classify_injection(
                                 &raw_observation,
                                 security_policy.guard_threshold_percent,

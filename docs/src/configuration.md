@@ -189,6 +189,7 @@ it. Defaults are **on**, consistent with the safe defaults for `permissions`,
 | `gate_secret_reads` | bool | `true` | Include reads of well-known secret/credential files in the trifecta gate. |
 | `detect_injection` | bool | `false` | Score untrusted content with the injection classifier and record the verdict on its taint record. Implied by `mode = "local-ml"`; can be opted into under `spotlight`/`strict`. A flagged score also gates a workspace-mutating tool (a write that a bare trifecta gate would miss). |
 | `guard_threshold_percent` | int `0..100` | `50` | Malicious-probability percent at or above which the classifier marks content flagged. |
+| `guard_model` | string | `"deberta-v3-prompt-injection-v2"` | Selector for the downloadable neural classifier: a `harn guard` catalog name or a path to a model directory. Resolved lazily; an empty value or an uninstalled model keeps the heuristic. Ignored by binaries built without the guard inference backend. |
 | `trusted_mcp_servers` | `[string]` | `[]` | Servers exempt from taint tracking and schema pinning. |
 
 **What "spotlighting" does.** Output that crossed a trust boundary — an external
@@ -225,9 +226,15 @@ trail can show *why* a span looks risky. The classifier is pluggable:
   so a flag is a meaningful signal even though recall is limited. It ships in the
   default binary at negligible size and needs no model, paid API, or network.
 - A **downloadable neural model** (`harn-guard`) supersedes the heuristic when
-  installed, for better recall. It lives behind an optional, feature-gated
-  backend, so the default release binary never links a model runtime — keeping
-  it lean for users who do not opt in.
+  installed, for better recall. Manage models with `harn guard`
+  (`list`/`install`/`status`/`remove`); the catalog points at already-hosted,
+  permissively-licensed upstreams (the ungated Apache-2.0
+  `deberta-v3-prompt-injection-v2` is the default) and installs are SHA-256
+  verified. The ONNX inference runtime lives behind the off-by-default
+  `guard-neural` cargo feature, so the default release binary never links a model
+  runtime — keeping it lean for users who do not opt in. The host loads the
+  model named by `guard_model` lazily, on the first scored span; a transient
+  inference error degrades to the heuristic rather than dropping detection.
 
 A flagged verdict tightens the trifecta gate: in addition to the exfil / destroy /
 secret-read vectors, a flagged injection plus a workspace-mutating tool (a file
