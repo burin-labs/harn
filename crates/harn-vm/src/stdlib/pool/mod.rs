@@ -155,6 +155,13 @@ struct PoolEntry {
     backpressure: BackpressureStrategy,
     round_robin_after: Option<String>,
     active: HashMap<String, Arc<parking_lot::Mutex<TaskState>>>,
+    /// Tasks popped from `queue` by a dispatcher but not yet inserted into
+    /// `active`. The pop (in `dispatch_ready`) and the insert (in `spawn_task`)
+    /// happen under separate lock holds, so without counting these reservations
+    /// two concurrent dispatchers — e.g. a `submit` racing a `finalize_task` —
+    /// could both admit into the same free slot and momentarily run more than
+    /// `max_concurrent` tasks. The admission check counts `active + reserved`.
+    reserved_slots: usize,
     tasks: BTreeMap<String, Arc<parking_lot::Mutex<TaskState>>>,
     space_waiters: Vec<tokio::sync::oneshot::Sender<()>>,
     /// Optional per-create user-supplied config (queue strategy, priority
@@ -1199,6 +1206,7 @@ async fn pool_create_sync(
         backpressure,
         round_robin_after: None,
         active: HashMap::new(),
+        reserved_slots: 0,
         tasks: BTreeMap::new(),
         space_waiters: Vec::new(),
         config: ordered_pool_config(&opts),
@@ -2057,11 +2065,15 @@ fn dispatch_ready(pool: &Arc<parking_lot::Mutex<PoolEntry>>) {
     loop {
         let next = {
             let mut pool_ref = pool.lock();
-            if pool_ref.active.len() >= pool_ref.max_concurrent {
+            // Reserve against tasks already popped by a concurrent dispatcher but
+            // not yet inserted into `active`, so two dispatchers can never admit
+            // into the same free slot (transient over-admission past the cap).
+            if pool_ref.active.len() + pool_ref.reserved_slots >= pool_ref.max_concurrent {
                 break;
             }
             let next = pop_next_task(&mut pool_ref);
             if next.is_some() {
+                pool_ref.reserved_slots += 1;
                 freed_queue_space = true;
             }
             next
@@ -2369,6 +2381,9 @@ fn spawn_task(pool: Arc<parking_lot::Mutex<PoolEntry>>, pending: PendingTask) {
     let dequeue_receipt = {
         let mut pool_ref = pool.lock();
         pool_ref.active.insert(task_id, state.clone());
+        // The reservation `dispatch_ready` made for this task is now realized as
+        // a live `active` entry.
+        pool_ref.reserved_slots = pool_ref.reserved_slots.saturating_sub(1);
         let slot_index = pool_ref.active.len().saturating_sub(1);
         let receipt = pool_dequeue_receipt(&pool_ref, &state.lock(), slot_index);
         persist_task_if_durable(&pool_ref, &state.lock());
