@@ -1797,6 +1797,83 @@ fn test_top_level_trailing_comment_on_import_preserved() {
     assert_eq!(result, result2, "must be idempotent");
 }
 
+// ---------------------------------------------------------------------------
+// Trailing comments vs. line width.
+//
+// Policy (matches rustfmt/Prettier/gofmt — see `docs/src/cli-reference.md`):
+// a trailing same-line comment is treated as an unbreakable token that does
+// NOT count toward `line_width`. The formatter never relocates a trailing
+// comment to its own line and never reflows code to "make room" for one — it
+// simply lets the line overflow. Code still wraps on its own merits (the
+// comment is appended afterward, to the last physical line).
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_trailing_comment_overflow_is_allowed_not_wrapped() {
+    // Short statement, long comment: the comment is left over-length on the
+    // same line — never moved up and never wrapped.
+    let source =
+        "let r = f(x) // this explanatory comment is long enough to push the whole line past one hundred columns\n";
+    let result = format_source(source).unwrap();
+    let line = result.lines().next().unwrap();
+    assert!(
+        line.starts_with("let r = f(x)") && line.contains("// this explanatory comment"),
+        "code and trailing comment must stay on one line; got:\n{result}"
+    );
+    assert_eq!(
+        result.lines().count(),
+        1,
+        "comment must not be relocated to its own line; got:\n{result}"
+    );
+    assert!(
+        line.len() > 100,
+        "the line is expected to overflow rather than be reflowed; got width {}",
+        line.len()
+    );
+    let result2 = format_source(&result).unwrap();
+    assert_eq!(result, result2, "must be idempotent");
+}
+
+#[test]
+fn test_trailing_comment_does_not_trigger_statement_wrap() {
+    // The code fits within `line_width` on its own; only the trailing comment
+    // pushes the line over. The formatter must NOT wrap the code to compensate
+    // (don't reflow code to fit a comment).
+    let source = "let xs = [alpha, beta, gamma, delta, epsilon, zeta, eta, theta] // greek letters that overflow\n";
+    let result = format_source(source).unwrap();
+    assert_eq!(
+        result.lines().count(),
+        1,
+        "code under the width must stay inline despite the comment; got:\n{result}"
+    );
+    assert!(
+        result.contains("[alpha, beta, gamma, delta, epsilon, zeta, eta, theta]"),
+        "list literal must remain inline; got:\n{result}"
+    );
+    let result2 = format_source(&result).unwrap();
+    assert_eq!(result, result2, "must be idempotent");
+}
+
+#[test]
+fn test_wrapped_statement_keeps_trailing_comment_on_last_line() {
+    // When the *code itself* exceeds the width it wraps one-item-per-line; the
+    // trailing comment then rides on the last physical line (the closer), still
+    // trailing — never promoted to its own line.
+    let source = "let xs = [alpha, beta, gamma, delta, epsilon, zeta, eta, theta, iota, kappa, lambda, mu, nu, xi, omicron, pi, rho] // greek\n";
+    let result = format_source(source).unwrap();
+    assert!(
+        result.lines().count() > 3,
+        "long list literal should wrap one item per line; got:\n{result}"
+    );
+    let last = result.trim_end().lines().last().unwrap();
+    assert!(
+        last.trim_start().starts_with(']') && last.contains("// greek"),
+        "trailing comment should ride the closing `]` line; got last line: {last:?}"
+    );
+    let result2 = format_source(&result).unwrap();
+    assert_eq!(result, result2, "must be idempotent");
+}
+
 #[test]
 fn test_method_call_args_dont_overcount_multiline_receiver() {
     // When the receiver of a method call wraps to multiple lines, the
