@@ -104,7 +104,7 @@ ignore = "0.4"
 unicode-normalization = "0.1"
 unicode-segmentation = "1"
 keyring = { version = "3", features = ["apple-native", "windows-native", "linux-native"] }
-rusqlite = { version = "0.39", features = ["bundled"] }
+rusqlite = { version = "0.40", features = ["bundled"] }
 sysinfo = { version = "0.39", default-features = false, features = ["system", "component"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt", "json", "registry"] }
