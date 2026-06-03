@@ -453,7 +453,10 @@ pipeline default() {
 
 /// A `WasiToolchain` testbench routes `command_output` to a WASI-compiled
 /// tool, virtualizes its clocks via the testbench `MockClock`, and surfaces
-/// the WASM module's stdout to the parent.
+/// the WASM module's stdout to the parent. Only meaningful when the
+/// `testbench-wasi` feature is built in; without it the `WasiToolchain`
+/// subprocess mode returns a "requires the feature" error by design.
+#[cfg(feature = "testbench-wasi")]
 #[test]
 fn wasi_toolchain_runs_module_with_virtualized_clock() {
     use harn_vm::process_sandbox::{command_output, ProcessCommandConfig};
