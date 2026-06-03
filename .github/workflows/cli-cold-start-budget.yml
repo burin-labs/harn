@@ -19,6 +19,10 @@ on:
       - 'crates/harn-stdlib/src/stdlib/cli/**'
       - 'crates/harn-stdlib/src/lib.rs'
       - 'crates/harn-vm/src/bytecode_cache.rs'
+      # Root Cargo.toml carries [profile.release]; a profile change (LTO,
+      # codegen-units, strip) shifts the shipped binary's cold start, so the
+      # budget must re-validate when it moves.
+      - 'Cargo.toml'
       - 'perf/cli/**'
       - 'scripts/bench_cli_cold_start.sh'
       - 'scripts/_bench_cli_cold_start.py'
