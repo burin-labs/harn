@@ -1874,11 +1874,30 @@ fn vm_string_list(value: &VmValue) -> Option<Vec<String>> {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::OnceLock;
+
+    use tokio::sync::Mutex;
+
     use super::{
         HITL_APPROVALS_TOPIC, HITL_DUAL_CONTROL_TOPIC, HITL_ESCALATIONS_TOPIC, HITL_QUESTIONS_TOPIC,
     };
     use crate::event_log::{install_default_for_base_dir, EventLog, Topic};
     use crate::{compile_source, register_vm_stdlib, reset_thread_local_state, Vm, VmError};
+
+    /// Serialize tests that exercise the request-approval path. Those tests
+    /// drive the Harn VM through its full HITL state machine and rely on
+    /// thread-local event-log handles that are set up by
+    /// `execute_hitl_script` → `reset_thread_local_state()`. Under heavy
+    /// parallel load the OS thread that a `current_thread` tokio runtime
+    /// runs on can be reused between tests; if the outgoing test's async
+    /// drop runs concurrently with the incoming test's reset the thread-
+    /// local event log is in a transitional state and events can be double-
+    /// counted or missed. Holding this mutex for the duration of each test
+    /// turns the hazard into a hard serialize.
+    fn hitl_lock() -> &'static Mutex<()> {
+        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        LOCK.get_or_init(|| Mutex::new(()))
+    }
 
     async fn execute_hitl_script(
         base_dir: &std::path::Path,
@@ -1967,8 +1986,10 @@ pipeline test(task) {
 
     #[tokio::test(flavor = "current_thread")]
     async fn request_approval_waits_for_quorum_and_emits_a_record() {
+        let _guard = hitl_lock().lock().await;
         tokio::task::LocalSet::new()
             .run_until(async {
+                reset_thread_local_state();
                 let dir = tempfile::tempdir().expect("tempdir");
                 let source = r#"
 pipeline test(task) {
@@ -2049,8 +2070,10 @@ pipeline test(task) {
 
     #[tokio::test(flavor = "current_thread")]
     async fn request_approval_surfaces_denials_as_typed_errors() {
+        let _guard = hitl_lock().lock().await;
         tokio::task::LocalSet::new()
             .run_until(async {
+                reset_thread_local_state();
                 let dir = tempfile::tempdir().expect("tempdir");
                 let source = r#"
 pipeline test(task) {

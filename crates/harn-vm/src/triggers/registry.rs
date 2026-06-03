@@ -1772,9 +1772,7 @@ mod tests {
     use super::*;
     use crate::event_log::{install_default_for_base_dir, reset_active_event_log};
     use crate::events::{add_event_sink, clear_event_sinks, CollectorSink, EventLevel};
-    use crate::triggers::test_util::timing::FILE_WATCH_FALLBACK_POLL;
     use std::rc::Rc;
-    use time::OffsetDateTime;
 
     fn manifest_spec(id: &str, fingerprint: &str) -> TriggerBindingSpec {
         TriggerBindingSpec {
@@ -2065,8 +2063,14 @@ mod tests {
         install_manifest_triggers(vec![manifest_spec("github-new-issue", "v1")])
             .await
             .expect("initial manifest trigger installs");
+        // Capture before_reload from real wall-clock. The event log's
+        // occurred_at_ms also uses the real wall-clock (util::now_ms via
+        // std::time::SystemTime), so the same reference frame applies.
+        // The 50ms sleep gives at least one full timer-tick on any POSIX
+        // platform (even those with a ~15ms tick), ensuring v2's event
+        // timestamp is strictly after before_reload.
         let before_reload = OffsetDateTime::now_utc();
-        std::thread::sleep(FILE_WATCH_FALLBACK_POLL);
+        std::thread::sleep(std::time::Duration::from_millis(50));
 
         install_manifest_triggers(vec![manifest_spec("github-new-issue", "v2")])
             .await
@@ -2106,8 +2110,11 @@ mod tests {
         install_manifest_triggers(vec![manifest_spec("github-new-issue", "v3")])
             .await
             .expect("install v3");
+        // received_at uses the real wall-clock (same reference frame as the
+        // event log's occurred_at_ms). The 50ms sleep guarantees v4's event
+        // timestamp is strictly after received_at on any POSIX platform.
         let received_at = OffsetDateTime::now_utc();
-        std::thread::sleep(FILE_WATCH_FALLBACK_POLL);
+        std::thread::sleep(std::time::Duration::from_millis(50));
         install_manifest_triggers(vec![manifest_spec("github-new-issue", "v4")])
             .await
             .expect("install v4");
