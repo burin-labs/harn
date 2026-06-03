@@ -20,22 +20,52 @@
  *   - pin_mcp_schemas: bool      — re-approve on tool-description change
  *   - gate_secret_reads: bool    — gate secret-file reads while tainted
  *   - trusted_mcp_servers: [str] — servers exempt from taint + pinning
+ *
+ * @effects: [state]
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: configure({ mode: "spotlight", trusted_mcp_servers: ["internal-docs"] })
  */
 pub fn configure(config: dict = {}) -> dict {
   return security_policy(config)
 }
 
-/** Enable the default posture: spotlight untrusted content + trifecta gate. */
+/**
+ * Enable the default posture: spotlight untrusted content + trifecta gate.
+ *
+ * @effects: [state]
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: spotlight()
+ */
 pub fn spotlight() -> dict {
   return security_policy({mode: "spotlight"})
 }
 
-/** Enable strict mode: spotlight + per-line datamarking of untrusted content. */
+/**
+ * Enable strict mode: spotlight + per-line datamarking of untrusted content.
+ *
+ * @effects: [state]
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: strict()
+ */
 pub fn strict() -> dict {
   return security_policy({mode: "strict"})
 }
 
-/** Disable every prompt-injection defense layer for this run. */
+/**
+ * Disable every prompt-injection defense layer for this run.
+ *
+ * @effects: [state]
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: off()
+ */
 pub fn off() -> dict {
   return security_policy({mode: "off"})
 }
