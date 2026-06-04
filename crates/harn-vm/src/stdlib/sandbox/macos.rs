@@ -17,7 +17,7 @@ use std::process::Command;
 use super::{
     policy_allows_network, policy_allows_workspace_write, process_sandbox_policy_read_roots,
     process_sandbox_policy_write_roots, process_sandbox_presets, process_sandbox_readonly_roots,
-    process_sandbox_roots, unavailable, PrepareOutcome, SandboxBackend,
+    process_sandbox_roots, toolchain_read_roots, unavailable, PrepareOutcome, SandboxBackend,
 };
 use crate::orchestration::{CapabilityPolicy, ProcessSandboxPreset, SandboxProfile};
 use crate::value::VmError;
@@ -138,6 +138,10 @@ fn render_profile(policy: &CapabilityPolicy) -> String {
     let read_only_roots = process_sandbox_readonly_roots(policy);
     let policy_read_roots = process_sandbox_policy_read_roots(policy);
     let policy_write_roots = process_sandbox_policy_write_roots(policy);
+    // Home-installed language toolchains (uv/pyenv CPython, rustup, nvm,
+    // GOROOT/GOPATH, SDKMAN JDKs). Read + execute only, never write — see
+    // `toolchain_read_roots` for the security rationale.
+    let toolchain_roots = toolchain_read_roots();
     let mut profile = String::from(
         "(version 1)\n\
          (deny default)\n\
@@ -160,6 +164,7 @@ fn render_profile(policy: &CapabilityPolicy) -> String {
         .iter()
         .chain(read_only_roots.iter())
         .chain(policy_read_roots.iter())
+        .chain(toolchain_roots.iter())
     {
         profile.push_str(&format!(
             "(allow file-read* (subpath \"{}\"))\n",
@@ -202,7 +207,7 @@ fn render_profile(policy: &CapabilityPolicy) -> String {
         // *after* every write allow re-asserts hermetic read-only scope
         // even when the lists are not disjoint. The deny is a no-op for
         // disjoint read-only roots (which never received a write allow).
-        for root in read_only_roots.iter() {
+        for root in read_only_roots.iter().chain(toolchain_roots.iter()) {
             profile.push_str(&format!(
                 "(deny file-write* (subpath \"{}\"))\n",
                 sandbox_profile_escape(&root.display().to_string())
@@ -624,6 +629,59 @@ mod tests {
         assert!(
             !profile.contains("(deny file-write*"),
             "read-only profile must not emit spurious deny rules: {profile}"
+        );
+    }
+
+    #[test]
+    fn sandbox_profile_grants_read_only_to_home_toolchain_roots() {
+        // Point a real toolchain env var at an existing temp dir so
+        // `toolchain_read_roots()` (consumed by render_profile) resolves it.
+        // GOROOT is env-only (no HOME fallback), so it is safe to set in a
+        // shared-process test without depending on the developer's actual
+        // toolchain layout.
+        let toolchain = tempfile::TempDir::new().expect("temp toolchain dir");
+        let toolchain_path = toolchain.path().to_string_lossy().into_owned();
+        let prior = std::env::var_os("GOROOT");
+        // SAFETY: test-only mutation of process env; restored below.
+        unsafe { std::env::set_var("GOROOT", &toolchain_path) };
+
+        let writable = render_profile(&macos_policy_with_workspace_ops(&["write_text"]));
+
+        // Restore the prior GOROOT before asserting so a failing assertion
+        // does not leak test state into other tests in the process.
+        // SAFETY: test-only mutation of process env.
+        unsafe {
+            match prior {
+                Some(value) => std::env::set_var("GOROOT", value),
+                None => std::env::remove_var("GOROOT"),
+            }
+        }
+
+        let read_allow = format!(
+            "(allow file-read* (subpath \"{}\"))",
+            sandbox_profile_escape(&toolchain_path)
+        );
+        assert!(
+            writable.contains(&read_allow),
+            "home toolchain root must be granted read+execute: {writable}"
+        );
+        let write_allow = format!(
+            "(allow file-write* (subpath \"{}\"))",
+            sandbox_profile_escape(&toolchain_path)
+        );
+        assert!(
+            !writable.contains(&write_allow),
+            "home toolchain root must never be granted write: {writable}"
+        );
+        // And even under a writable profile it is explicitly denied write so
+        // a nested layout cannot inherit the broad workspace write allow.
+        let write_deny = format!(
+            "(deny file-write* (subpath \"{}\"))",
+            sandbox_profile_escape(&toolchain_path)
+        );
+        assert!(
+            writable.contains(&write_deny),
+            "home toolchain root must get an explicit write deny: {writable}"
         );
     }
 

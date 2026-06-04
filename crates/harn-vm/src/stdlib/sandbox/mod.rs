@@ -746,6 +746,126 @@ pub(crate) fn process_sandbox_presets(policy: &CapabilityPolicy) -> Vec<ProcessS
     policy.process_sandbox.effective_presets()
 }
 
+/// Home-relative install locations for common language toolchains.
+///
+/// WHY: the process sandbox confines filesystem reads to the workspace
+/// roots, but most developers install their language runtimes under
+/// `$HOME` (uv-managed CPython, rustup toolchains, nvm/fnm/volta Node,
+/// SDKMAN JDKs, a user `GOPATH`). When an agent runs `uv run pytest`,
+/// `cargo test`, or `npm test`, the interpreter/linker then tries to
+/// open shared libraries and toolchain binaries that live outside the
+/// workspace and the kernel blocks the open — e.g.:
+///
+///   dyld: Library not loaded: @rpath/libpython3.13.dylib
+///     Reason: '~/.local/share/uv/python/.../libpython3.13.dylib'
+///       (file system sandbox blocked open())
+///
+/// Granting these directories **read + execute** (never write) lets
+/// home-installed toolchains load while keeping the sandbox otherwise
+/// tight.
+///
+/// SECURITY: every entry is an execution-relevant *runtime* subpath, not
+/// a tool's whole config root. We deliberately scope to install dirs
+/// (`~/.rustup/toolchains`, `$CARGO_HOME/bin`) rather than the parents
+/// (`~/.cargo`, which holds `credentials.toml`; `~/.gradle/caches`, which
+/// is large and may cache credentials). Access is read-only on every
+/// backend, so even a path that incidentally contains a secret cannot be
+/// modified or exfiltrated-by-write through these grants. Each candidate
+/// is resolved from its canonical environment variable first, then a
+/// `$HOME`-relative fallback, and is only emitted when the directory
+/// actually exists — so the profile never bloats with phantom paths.
+#[cfg(any(
+    target_os = "linux",
+    target_os = "macos",
+    target_os = "openbsd",
+    target_os = "windows"
+))]
+pub(crate) fn toolchain_read_roots() -> Vec<PathBuf> {
+    toolchain_read_roots_from(
+        |key| std::env::var_os(key).map(PathBuf::from),
+        std::env::var_os("HOME")
+            .or_else(|| std::env::var_os("USERPROFILE"))
+            .map(PathBuf::from),
+        |path| path.is_dir(),
+    )
+}
+
+/// Pure core of [`toolchain_read_roots`], parameterized over environment
+/// and filesystem lookups so it can be unit-tested with a temp `HOME` and
+/// synthetic env vars. `env` resolves an environment variable to a path,
+/// `home` is the resolved home directory (if any), and `exists` reports
+/// whether a candidate directory is present.
+#[cfg(any(
+    target_os = "linux",
+    target_os = "macos",
+    target_os = "openbsd",
+    target_os = "windows"
+))]
+fn toolchain_read_roots_from(
+    env: impl Fn(&str) -> Option<PathBuf>,
+    home: Option<PathBuf>,
+    exists: impl Fn(&Path) -> bool,
+) -> Vec<PathBuf> {
+    // Keep every entry execution-relevant and free of credential-bearing
+    // config files (see the doc comment above).
+    //
+    // Each row is `(env_var, home_fallback, narrow_suffix)`:
+    //   * `env_var`        — canonical env var naming the *root* dir.
+    //   * `home_fallback`  — `$HOME`-relative root used when the env var is
+    //                        unset, or `None` for env-only roots (GOROOT).
+    //   * `narrow_suffix`  — appended to the resolved root to reach the
+    //                        execution-relevant, credential-free leaf, or
+    //                        `""` to use the root as-is.
+    //
+    // Narrowing applies whether the root came from the env var or the home
+    // fallback, so a custom `CARGO_HOME` still scopes to its `bin/` only.
+    let candidates: &[(&str, Option<&str>, &str)] = &[
+        // Python / uv-managed CPython; the env var already points at the
+        // python install tree, so no suffix.
+        ("UV_PYTHON_INSTALL_DIR", Some(".local/share/uv/python"), ""),
+        // pyenv version installs (skip shims/config at the root).
+        ("PYENV_ROOT", Some(".pyenv"), "versions"),
+        // Rust: rustup toolchains, and the cargo *bin* dir only — NOT all
+        // of ~/.cargo, which holds credentials.toml.
+        ("RUSTUP_HOME", Some(".rustup"), "toolchains"),
+        ("CARGO_HOME", Some(".cargo"), "bin"),
+        // Node version managers.
+        ("NVM_DIR", Some(".nvm"), "versions"),
+        ("VOLTA_HOME", Some(".volta"), ""),
+        ("FNM_DIR", Some(".fnm"), ""),
+        // Go: GOROOT (toolchain tree, env-only) + GOPATH/bin (go install
+        // binaries). GOPATH defaults to ~/go.
+        ("GOROOT", None, ""),
+        ("GOPATH", Some("go"), "bin"),
+        // JVM toolchains via SDKMAN candidate installs (skip the broad
+        // ~/.gradle/caches, which is large and may cache credentials).
+        ("SDKMAN_DIR", Some(".sdkman"), "candidates"),
+    ];
+
+    let narrow = |root: PathBuf, suffix: &str| -> PathBuf {
+        if suffix.is_empty() {
+            root
+        } else {
+            root.join(suffix)
+        }
+    };
+
+    let mut roots: Vec<PathBuf> = Vec::new();
+    for (key, home_fallback, suffix) in candidates {
+        let root = match env(key) {
+            Some(path) => Some(path),
+            None => home_fallback.and_then(|fallback| home.as_ref().map(|h| h.join(fallback))),
+        };
+        if let Some(root) = root {
+            let candidate = narrow(root, suffix);
+            if exists(&candidate) && !roots.contains(&candidate) {
+                roots.push(candidate);
+            }
+        }
+    }
+    roots
+}
+
 #[cfg(any(
     target_os = "linux",
     target_os = "macos",
@@ -1226,6 +1346,100 @@ mod tests {
         assert!(
             result.is_some(),
             "Worktree profile must keep sandbox dispatch active"
+        );
+    }
+
+    #[test]
+    fn toolchain_read_roots_resolve_from_env_vars_when_set() {
+        let dir = tempfile::tempdir().unwrap();
+        let uv = dir.path().join("uv-python");
+        let cargo = dir.path().join("cargo-home");
+        let rustup = dir.path().join("rustup-home");
+        let goroot = dir.path().join("goroot");
+        for d in [&uv, &cargo.join("bin"), &rustup.join("toolchains"), &goroot] {
+            std::fs::create_dir_all(d).unwrap();
+        }
+
+        let env = |key: &str| -> Option<PathBuf> {
+            match key {
+                "UV_PYTHON_INSTALL_DIR" => Some(uv.clone()),
+                "CARGO_HOME" => Some(cargo.clone()),
+                "RUSTUP_HOME" => Some(rustup.clone()),
+                "GOROOT" => Some(goroot.clone()),
+                _ => None,
+            }
+        };
+        // No HOME fallback: only the env-resolved dirs should appear.
+        let roots = toolchain_read_roots_from(env, None, |p| p.is_dir());
+
+        assert!(
+            roots.contains(&uv),
+            "UV_PYTHON_INSTALL_DIR used whole: {roots:?}"
+        );
+        assert!(
+            roots.contains(&cargo.join("bin")),
+            "CARGO_HOME narrowed to bin/ (never the credential-bearing root): {roots:?}"
+        );
+        assert!(
+            !roots.contains(&cargo),
+            "the cargo root (holding credentials.toml) must not be granted: {roots:?}"
+        );
+        assert!(
+            roots.contains(&rustup.join("toolchains")),
+            "RUSTUP_HOME narrowed to toolchains/: {roots:?}"
+        );
+        assert!(roots.contains(&goroot), "GOROOT used whole: {roots:?}");
+    }
+
+    #[test]
+    fn toolchain_read_roots_fall_back_to_home_relative_dirs() {
+        let home = tempfile::tempdir().unwrap();
+        // Create a couple of standard home-relative toolchain trees.
+        let uv = home.path().join(".local/share/uv/python");
+        let pyenv_versions = home.path().join(".pyenv/versions");
+        let cargo_bin = home.path().join(".cargo/bin");
+        let go_bin = home.path().join("go/bin");
+        for d in [&uv, &pyenv_versions, &cargo_bin, &go_bin] {
+            std::fs::create_dir_all(d).unwrap();
+        }
+
+        // No env vars set; resolution must use the HOME fallbacks.
+        let roots =
+            toolchain_read_roots_from(|_| None, Some(home.path().to_path_buf()), |p| p.is_dir());
+
+        assert!(roots.contains(&uv), "uv python tree via HOME: {roots:?}");
+        assert!(
+            roots.contains(&pyenv_versions),
+            "pyenv narrowed to versions/ via HOME: {roots:?}"
+        );
+        assert!(
+            roots.contains(&cargo_bin),
+            "cargo bin via HOME (not all of ~/.cargo): {roots:?}"
+        );
+        assert!(roots.contains(&go_bin), "GOPATH bin via ~/go: {roots:?}");
+        // ~/.nvm/versions does not exist, so it must be filtered out.
+        assert!(
+            !roots.iter().any(|r| r.ends_with(".nvm/versions")),
+            "non-existent toolchain dirs must not bloat the profile: {roots:?}"
+        );
+    }
+
+    #[test]
+    fn toolchain_read_roots_only_include_existing_dirs() {
+        let home = tempfile::tempdir().unwrap();
+        // Nothing created under HOME and no env vars: zero roots.
+        let roots =
+            toolchain_read_roots_from(|_| None, Some(home.path().to_path_buf()), |p| p.is_dir());
+        assert!(
+            roots.is_empty(),
+            "no toolchain dirs exist, so none should be granted: {roots:?}"
+        );
+
+        // GOROOT env-only: never falls back to HOME.
+        let roots = toolchain_read_roots_from(|_| None, None, |_| true);
+        assert!(
+            roots.is_empty(),
+            "with no HOME and no env vars, env-only GOROOT yields nothing: {roots:?}"
         );
     }
 }

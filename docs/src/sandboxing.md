@@ -95,6 +95,45 @@ workload can read but cannot mutate. `CapabilityPolicy::intersect`
 narrows each list to the roots common to both sides, with an empty list
 on either side deferring to the other.
 
+### Home-installed language toolchains
+
+Most developers install their language runtimes under `$HOME` rather
+than in system locations: uv-managed CPython, pyenv versions, rustup
+toolchains, nvm/fnm/volta Node, a user `GOPATH`, SDKMAN JDKs. When an
+agent runs `uv run pytest`, `cargo test`, or `npm test`, the
+interpreter/linker then opens shared libraries and toolchain binaries
+that live outside the workspace — and the sandbox blocks the open
+(e.g. `dyld: Library not loaded: @rpath/libpython3.13.dylib … (file
+system sandbox blocked open())`).
+
+Every backend therefore grants a small set of **read + execute**
+(never write) toolchain runtime directories, resolved by
+`sandbox::toolchain_read_roots()`. Each candidate is resolved from its
+canonical environment variable first, then a `$HOME`-relative fallback,
+and is only emitted when the directory actually exists:
+
+| toolchain | env var (then `$HOME` fallback) | granted subpath |
+| --- | --- | --- |
+| Python (uv) | `UV_PYTHON_INSTALL_DIR` → `~/.local/share/uv/python` | the whole tree |
+| Python (pyenv) | `PYENV_ROOT` → `~/.pyenv` | `…/versions` |
+| Rust toolchains | `RUSTUP_HOME` → `~/.rustup` | `…/toolchains` |
+| Rust binaries | `CARGO_HOME` → `~/.cargo` | `…/bin` only (never the root — it holds `credentials.toml`) |
+| Node | `NVM_DIR` → `~/.nvm` | `…/versions` |
+| Node | `VOLTA_HOME` → `~/.volta`; `FNM_DIR` → `~/.fnm` | the whole tree |
+| Go | `GOROOT` (env-only) | the whole tree |
+| Go | `GOPATH` → `~/go` | `…/bin` |
+| JVM | `SDKMAN_DIR` → `~/.sdkman` | `…/candidates` |
+
+These are scoped to execution-relevant install dirs, never a tool's
+whole config root, so credential-bearing files (`~/.cargo/credentials.toml`)
+and large credential-cacheing dirs (`~/.gradle/caches`) are deliberately
+excluded. Access is read-only on every backend — macOS re-denies write
+after the broad workspace write allow, Linux/OpenBSD grant read+execute
+bits only, Windows grants `(OI)(CI)RX` — so even a path that incidentally
+contains a secret cannot be written through these grants. Roots are
+best-effort: a missing or vanished toolchain dir is skipped rather than
+failing the spawn.
+
 ## Selecting a profile
 
 ### From a pipeline

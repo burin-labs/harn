@@ -13,8 +13,8 @@ use std::process::Command;
 use super::{
     policy_allows_capability, policy_allows_network, policy_allows_workspace_write,
     process_sandbox_policy_read_roots, process_sandbox_policy_write_roots,
-    process_sandbox_readonly_roots, process_sandbox_roots, sandbox_rejection, warn_once,
-    PrepareOutcome, SandboxBackend, SandboxFallback,
+    process_sandbox_readonly_roots, process_sandbox_roots, sandbox_rejection, toolchain_read_roots,
+    warn_once, PrepareOutcome, SandboxBackend, SandboxFallback,
 };
 use crate::orchestration::{CapabilityPolicy, SandboxProfile};
 use crate::value::VmError;
@@ -178,6 +178,14 @@ fn landlock_profile(
     }
     for root in process_sandbox_policy_read_roots(policy) {
         push_rule(&mut profile, root, read_only_access(), false)?;
+    }
+    // Home-installed language toolchains (uv/pyenv CPython, rustup, nvm,
+    // GOROOT/GOPATH, SDKMAN JDKs): read + execute only, never write. These
+    // are best-effort (optional = true) — a missing toolchain dir is fine,
+    // and `toolchain_read_roots` already filters to existing dirs, but the
+    // dir could race away between resolution and ruleset install.
+    for root in toolchain_read_roots() {
+        push_rule(&mut profile, root, read_only_access(), true)?;
     }
     if policy_allows_workspace_write(policy) {
         for root in process_sandbox_policy_write_roots(policy) {

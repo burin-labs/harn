@@ -11,7 +11,7 @@ use std::process::Command;
 use super::{
     policy_allows_network, policy_allows_workspace_write, process_sandbox_policy_read_roots,
     process_sandbox_policy_write_roots, process_sandbox_readonly_roots, process_sandbox_roots,
-    PrepareOutcome, SandboxBackend,
+    toolchain_read_roots, PrepareOutcome, SandboxBackend,
 };
 use crate::orchestration::{CapabilityPolicy, SandboxProfile};
 use crate::value::VmError;
@@ -90,6 +90,12 @@ fn profile_setup(policy: &CapabilityPolicy) -> Result<ProcessProfile, VmError> {
         unveil_rules.push((root.display().to_string(), "rx".to_string()));
     }
     for root in process_sandbox_policy_read_roots(policy) {
+        unveil_rules.push((root.display().to_string(), "rx".to_string()));
+    }
+    // Home-installed language toolchains (uv/pyenv CPython, rustup, nvm,
+    // GOROOT/GOPATH, SDKMAN JDKs): read + execute only, never write — see
+    // `toolchain_read_roots` for the security rationale.
+    for root in toolchain_read_roots() {
         unveil_rules.push((root.display().to_string(), "rx".to_string()));
     }
     if policy_allows_workspace_write(policy) {

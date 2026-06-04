@@ -41,8 +41,8 @@ use windows_sys::Win32::System::Threading::{
 use super::{
     policy_allows_workspace_write, process_sandbox_policy_read_roots,
     process_sandbox_policy_write_roots, process_sandbox_readonly_roots, process_sandbox_roots,
-    process_spawn_error, sandbox_rejection, unavailable, PrepareOutcome, ProcessCommandConfig,
-    SandboxBackend,
+    process_spawn_error, sandbox_rejection, toolchain_read_roots, unavailable, PrepareOutcome,
+    ProcessCommandConfig, SandboxBackend,
 };
 use crate::orchestration::{CapabilityPolicy, SandboxProfile};
 use crate::value::VmError;
@@ -314,6 +314,16 @@ impl WorkspaceAclGrants {
         let process_read = process_sandbox_policy_read_roots(policy)
             .into_iter()
             .map(|root| (root, "(OI)(CI)RX"));
+        // Home-installed language toolchains (uv/pyenv CPython, rustup, nvm,
+        // GOROOT/GOPATH, SDKMAN JDKs): read + execute only, never write.
+        // AppContainer scoping is path-based here (per-path icacls grants),
+        // so the same read-execute model applies. These roots are advisory:
+        // a toolchain dir that vanished after resolution is skipped rather
+        // than failing the whole spawn.
+        let toolchain = toolchain_read_roots()
+            .into_iter()
+            .filter(|root| root.exists())
+            .map(|root| (root, "(OI)(CI)RX"));
         let process_write = if policy_allows_workspace_write(policy) {
             process_sandbox_policy_write_roots(policy)
                 .into_iter()
@@ -325,6 +335,7 @@ impl WorkspaceAclGrants {
         for (root, permission) in writable
             .chain(read_only)
             .chain(process_read)
+            .chain(toolchain)
             .chain(process_write)
         {
             if !root.exists() {
