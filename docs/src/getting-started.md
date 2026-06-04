@@ -84,8 +84,8 @@ red/yellow/green summary with the exact fix command for anything that needs
 attention.
 
 ```bash
-harn doctor                # full check incl. provider connectivity
-harn doctor --no-network   # skip remote /models probes (CI-friendly)
+harn doctor                # local checks; skips remote provider probes by default
+harn doctor --check-providers  # actively probe configured providers
 harn doctor --json         # machine-readable output for preflight automation
 ```
 
@@ -226,7 +226,7 @@ harn new my-agent --template agent
 cd my-agent
 harn quickstart --non-interactive
 source .env
-harn doctor --no-network
+harn doctor
 ```
 
 This creates a directory with `harn.toml` (project config) and starter files

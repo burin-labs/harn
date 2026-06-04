@@ -356,7 +356,7 @@ Run a pipeline against a Harn-native host module for fast local iteration.
 harn playground --host host.harn --script pipeline.harn --task "Explain this repo"
 harn playground --watch --task "Refine the prompt"
 harn playground --llm ollama:qwen2.5-coder:latest --task "Use a local model"
-harn try --yes --task "Use local Ollama"
+harn try "Use local Ollama"
 ```
 
 | Flag | Description |
@@ -1098,8 +1098,8 @@ command surfaces actionable, secret-free output for both humans and machine
 consumers (Burin Code preflight, Harn Cloud onboarding).
 
 ```bash
-harn doctor                # default: full check including provider /models probes
-harn doctor --no-network   # skip remote checks (CI-friendly)
+harn doctor                # local checks; skips remote provider probes by default
+harn doctor --check-providers  # actively probe configured providers
 harn doctor --json         # versioned machine-readable output
 ```
 
@@ -1135,7 +1135,7 @@ The command exits non-zero when at least one check is `fail`.
   triggers.
 - **Runtime state** — event log backend, metadata cache, loaded skills,
   Ollama presence and pulled models, hardware snapshot.
-- **Provider connectivity** (`--no-network` to skip) — for OpenAI-compatible
+- **Provider connectivity** (`--check-providers` to include) — for OpenAI-compatible
   local providers, `/v1/models` probes parse the listing and report missing
   configured models instead of only checking HTTP reachability.
 
@@ -1699,7 +1699,7 @@ curl http://127.0.0.1:8080/metrics
 harn orchestrator inspect --state-dir .harn/orchestrator
 
 # Inject a synthetic TriggerEvent to exercise a specific binding.
-harn orchestrator fire <trigger-id> --payload event.json
+harn orchestrator fire <trigger-id>
 
 # Replay a historical event through the dispatcher.
 harn orchestrator replay <event-id>
@@ -1819,7 +1819,7 @@ empty Flow store.
 ```bash
 harn flow replay-audit --since 2026-04-26
 harn flow replay-audit --since 2026-04-26T12:00:00Z --json
-harn flow replay-audit --store .harn/flow.sqlite --root . --target-dir crates/harn-vm --since 2026-04-26 --fail-on-drift
+harn flow replay-audit --store .harn/flow.sqlite --predicate-root . --touched-dir crates/harn-vm --since 2026-04-26 --fail-on-drift
 ```
 
 | Flag | Description |
@@ -2021,7 +2021,7 @@ Start a workflow server through one of the outbound transport adapters.
 ```bash
 harn serve a2a agent.harn                  # explicit A2A
 harn serve agent.harn                      # legacy A2A shorthand
-harn serve --port 3000 agent.harn          # legacy A2A shorthand with custom port
+harn serve a2a --port 3000 agent.harn      # A2A with custom port
 harn serve a2a --bind 0.0.0.0:3000 --api-key "$HARN_SERVE_API_KEY" agent.harn
 harn serve acp agent.harn                  # ACP session server over stdio
 harn serve acp --profile-json /tmp/acp.ndjson agent.harn

@@ -185,6 +185,7 @@ jobs:
           make check-trigger-examples
           make check-docs-model-refs
           make check-docs-snippets
+          make check-docs-cli-flags
           make check-diagnostics-catalog
           # Drift guards that previously existed only in `make all` and so
           # never ran in any workflow — a contributor could edit

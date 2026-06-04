@@ -50,8 +50,8 @@ harn test conformance
 # Filter by name (substring match)
 harn test conformance --filter workflow_runtime
 
-# Filter by tag (if test uses tags)
-harn test conformance --tag agent
+# Filter by name or path
+harn test conformance --filter agent
 
 # Verbose output
 harn test conformance --filter my_test -v

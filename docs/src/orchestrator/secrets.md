@@ -14,8 +14,8 @@ The default chain is:
 env -> keyring
 ```
 
-Use `harn doctor --no-network` to inspect the active chain and to verify
-that the keyring backend is reachable on the current machine.
+Use `harn doctor` to inspect the active chain and to verify that the keyring
+backend is reachable on the current machine.
 
 ## Secret model
 
