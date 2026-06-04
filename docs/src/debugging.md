@@ -91,7 +91,7 @@ token usage, timing, and final output.
 Compare a run against a baseline to identify regressions:
 
 ```bash
-harn runs inspect .harn-runs/new.json --baseline .harn-runs/old.json
+harn runs inspect .harn-runs/new.json --compare .harn-runs/old.json
 ```
 
 This highlights differences in tool calls, outputs, and token consumption.
