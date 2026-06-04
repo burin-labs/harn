@@ -5177,6 +5177,145 @@ public let harnProviderCatalogJSON = #"""
       ]
     },
     {
+      "id": "google/gemma-4-26b-a4b-it",
+      "name": "Gemma 4 26B MoE (OpenRouter)",
+      "provider": "openrouter",
+      "aliases": [
+        "openrouter-gemma4-26b"
+      ],
+      "context_window": 262144,
+      "modalities": {
+        "input": [
+          "text",
+          "image"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
+        "tool_search": []
+      },
+      "structured_output": "native",
+      "format_preferences": {
+        "prefers_xml_scaffolding": false,
+        "prefers_markdown_scaffolding": true,
+        "structured_output_mode": "native_json",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "none"
+      },
+      "reasoning": {
+        "modes": [],
+        "effort_supported": false,
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": false,
+      "pricing": {
+        "input_per_mtok": 0.06,
+        "output_per_mtok": 0.33,
+        "cache_read_per_mtok": null,
+        "cache_write_per_mtok": null
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "vision",
+        "structured_output"
+      ],
+      "family": "gemma",
+      "lineage": "gemma4",
+      "tier": "mid",
+      "open_weight": true,
+      "strengths": [
+        "vision",
+        "cheap",
+        "speed"
+      ]
+    },
+    {
+      "id": "google/gemma-4-31b-it",
+      "name": "Gemma 4 31B (OpenRouter)",
+      "provider": "openrouter",
+      "aliases": [
+        "openrouter-gemma4-31b"
+      ],
+      "context_window": 262144,
+      "modalities": {
+        "input": [
+          "text",
+          "image"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
+        "tool_search": []
+      },
+      "structured_output": "native",
+      "format_preferences": {
+        "prefers_xml_scaffolding": false,
+        "prefers_markdown_scaffolding": true,
+        "structured_output_mode": "native_json",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "none"
+      },
+      "reasoning": {
+        "modes": [],
+        "effort_supported": false,
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": false,
+      "pricing": {
+        "input_per_mtok": 0.12,
+        "output_per_mtok": 0.37,
+        "cache_read_per_mtok": null,
+        "cache_write_per_mtok": null
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "vision",
+        "structured_output"
+      ],
+      "family": "gemma",
+      "lineage": "gemma4",
+      "tier": "frontier",
+      "open_weight": true,
+      "strengths": [
+        "vision",
+        "reasoning",
+        "coding",
+        "cheap"
+      ]
+    },
+    {
       "id": "minimax/minimax-m2",
       "name": "MiniMax M2 (via OpenRouter)",
       "provider": "openrouter",
@@ -6106,6 +6245,16 @@ public let harnProviderCatalogJSON = #"""
       "provider": "anthropic"
     },
     {
+      "name": "gemini-gemma4-26b",
+      "model_id": "gemma-4-26b-a4b-it",
+      "provider": "gemini"
+    },
+    {
+      "name": "gemini-gemma4-31b",
+      "model_id": "gemma-4-31b-it",
+      "provider": "gemini"
+    },
+    {
       "name": "glm",
       "model_id": "glm-5.1",
       "provider": "zai"
@@ -6292,6 +6441,16 @@ public let harnProviderCatalogJSON = #"""
       "tool_format": "text"
     },
     {
+      "name": "openrouter-gemma4-26b",
+      "model_id": "google/gemma-4-26b-a4b-it",
+      "provider": "openrouter"
+    },
+    {
+      "name": "openrouter-gemma4-31b",
+      "model_id": "google/gemma-4-31b-it",
+      "provider": "openrouter"
+    },
+    {
       "name": "opus",
       "model_id": "claude-opus-4-8",
       "provider": "anthropic"
@@ -6320,6 +6479,11 @@ public let harnProviderCatalogJSON = #"""
       "name": "tier/small",
       "model_id": "Qwen/Qwen3.5-9B",
       "provider": "openrouter"
+    },
+    {
+      "name": "together-gemma4-31b",
+      "model_id": "google/gemma-4-31B-it",
+      "provider": "together"
     }
   ],
   "variants": [

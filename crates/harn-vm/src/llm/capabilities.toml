@@ -1736,6 +1736,24 @@ prefers_role_developer = false
 prefers_xml_tools = false
 thinking_block_style = "reasoning_summary"
 
+# Gemma 4 (26B MoE / 31B) served directly by the Gemini API. Multimodal
+# text+image with native function calling and thinking; no Gemini-only adaptive
+# effort modes. Ahead of the broader gemini rules (first match wins).
+[[provider.gemini]]
+model_match = "gemma-4*"
+native_tools = true
+preferred_tool_format = "native"
+structured_output = "native"
+thinking_modes = ["enabled"]
+vision_supported = true
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "native_json"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "inline"
+
 [[provider.gemini]]
 model_match = "gemini-2.5*"
 native_tools = true
@@ -1809,6 +1827,7 @@ thinking_block_style = "none"
 [[provider.openrouter]]
 model_match = "google/gemma-4*"
 native_tools = true
+vision_supported = true
 preferred_tool_format = "native"
 structured_output = "native"
 top_k_supported = true
@@ -1925,6 +1944,7 @@ thinking_block_style = "inline"
 [[provider.together]]
 model_match = "google/gemma-4*"
 native_tools = true
+vision_supported = true
 preferred_tool_format = "native"
 structured_output = "native"
 thinking_modes = ["enabled"]

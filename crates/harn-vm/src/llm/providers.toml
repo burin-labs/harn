@@ -559,6 +559,28 @@ tool_format = "text"
 id = "gemma-4-12b-it"
 provider = "local"
 
+# Gemma 4 26B/31B via hosted APIs (the 12B is on-device only). The Gemini API
+# serves Gemma under its bare id; OpenRouter/Together use org-prefixed ids.
+[aliases.gemini-gemma4-31b]
+id = "gemma-4-31b-it"
+provider = "gemini"
+
+[aliases.gemini-gemma4-26b]
+id = "gemma-4-26b-a4b-it"
+provider = "gemini"
+
+[aliases.openrouter-gemma4-31b]
+id = "google/gemma-4-31b-it"
+provider = "openrouter"
+
+[aliases.openrouter-gemma4-26b]
+id = "google/gemma-4-26b-a4b-it"
+provider = "openrouter"
+
+[aliases.together-gemma4-31b]
+id = "google/gemma-4-31B-it"
+provider = "together"
+
 # qwen3.6 has no working Ollama route — Ollama's qwen3.5-family server-side
 # tool-call parser 500s on text-tool output (ollama/ollama#14986, #14570).
 # Use the llamacpp provider for local qwen3.x.
@@ -1554,3 +1576,26 @@ capabilities = ["streaming", "thinking"]
 tier = "frontier"
 open_weight = true
 strengths = ["coding", "long_context"]
+# Gemma 4 — hosted (Apache 2.0, multimodal text+image, 256K context, native
+# thinking). The 12B is on-device only; the 26B MoE and 31B dense are also served
+# directly by hosted APIs. OpenRouter ids are org-prefixed (collision-free with
+# the bare `local` keys above); the Gemini API and Together routes are aliases
+# below since their wire ids match the bare keys.
+[models."google/gemma-4-31b-it"]
+name = "Gemma 4 31B (OpenRouter)"
+provider = "openrouter"
+context_window = 262144
+capabilities = ["tools", "vision", "streaming", "thinking"]
+pricing = { input_per_mtok = 0.12, output_per_mtok = 0.37 }
+tier = "frontier"
+open_weight = true
+strengths = ["vision", "reasoning", "coding", "cheap"]
+[models."google/gemma-4-26b-a4b-it"]
+name = "Gemma 4 26B MoE (OpenRouter)"
+provider = "openrouter"
+context_window = 262144
+capabilities = ["tools", "vision", "streaming", "thinking"]
+pricing = { input_per_mtok = 0.06, output_per_mtok = 0.33 }
+tier = "mid"
+open_weight = true
+strengths = ["vision", "cheap", "speed"]
