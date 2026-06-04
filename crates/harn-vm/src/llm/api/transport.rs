@@ -425,6 +425,11 @@ async fn vm_call_llm_api_with_body_inner(
             )
             .await
             {
+                // A `done_reason == "length"` truncation now returns Ok with an
+                // empty body and `stop_reason: Some("length")`, so it bypasses
+                // the retry guard below entirely — a deterministic token-cap cut
+                // would just re-truncate on every retry. Only the genuine
+                // empty-content parser bug (done_reason stop/absent) is retried.
                 Ok(result) => return Ok(result),
                 Err(err)
                     if is_ollama
@@ -1161,6 +1166,7 @@ pub(super) async fn consume_sse_lines<R: tokio::io::AsyncBufRead + Unpin>(
         output_tokens,
         cache_read_tokens,
         cache_write_tokens,
+        cache_supported: true,
         model: model.to_string(),
         provider: result_provider,
         thinking: if thinking_text.is_empty() {
@@ -1238,6 +1244,7 @@ where
     let mut blocks = Vec::new();
     let mut saw_done = false;
     let mut saw_chunk = false;
+    let mut done_reason: Option<String> = None;
     let mut telemetry = ProviderTelemetry::default();
 
     loop {
@@ -1303,6 +1310,10 @@ where
             if let Some(n) = json["eval_count"].as_i64() {
                 output_tokens = n;
             }
+            // Capture Ollama's `done_reason` so length-truncation is visible on
+            // the most-used local chat path. Without this the agent never learns
+            // it was cut off at the token cap.
+            done_reason = json["done_reason"].as_str().map(str::to_string);
             telemetry = ProviderTelemetry::from_ollama_done(&json, telemetry_source::OLLAMA_CHAT);
             saw_done = true;
             break;
@@ -1335,7 +1346,18 @@ where
     // nonzero but every delta and the done chunk are empty strings.
     // Silently returning empty text would make the agent loop burn
     // iterations on a no-op.
-    if text.is_empty() && tool_calls.is_empty() && output_tokens > 0 {
+    //
+    // BUT: `done_reason == "length"` is a deterministic token-cap
+    // truncation, not a parser bug. Re-running it just re-truncates, so we
+    // must NOT raise the retryable parser-bug error here. Surface the empty
+    // result carrying `stop_reason: Some("length")` so the caller sees a
+    // non-retryable truncation signal instead. The parser-bug error stays
+    // reserved for `done_reason` == stop/absent.
+    if text.is_empty()
+        && tool_calls.is_empty()
+        && output_tokens > 0
+        && done_reason.as_deref() != Some("length")
+    {
         return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(format!(
             "ollama model {model} reported eval_count={output_tokens} but delivered no content or thinking [ollama_empty_content_parser_bug]"
         )))));
@@ -1346,8 +1368,14 @@ where
         tool_calls,
         input_tokens,
         output_tokens,
+        // Native Ollama `/api/chat` NDJSON done frames carry no cache field;
+        // 0 is "unknown", not a real miss. The `/v1` shim on these hosts also
+        // omits `prompt_tokens_details`, so routing to `/v1` is not a fix.
+        // `cache_supported: false` keeps cost/telemetry from scoring a local
+        // model as a 100% cache miss.
         cache_read_tokens: 0,
         cache_write_tokens: 0,
+        cache_supported: false,
         model: result_model,
         // NDJSON is currently only consumed for Ollama's `/api/chat`, but
         // pass the caller-supplied provider through anyway so the result
@@ -1357,7 +1385,7 @@ where
         provider: provider.to_string(),
         thinking,
         thinking_summary: None,
-        stop_reason: None,
+        stop_reason: done_reason,
         // NDJSON (Ollama) has no accelerated-serving tier.
         served_fast: false,
         blocks,
@@ -1552,6 +1580,81 @@ mod tests {
         assert_eq!(
             result.telemetry.runtime_loaded_model.as_deref(),
             Some("devstral-small-2:24b")
+        );
+    }
+
+    #[tokio::test]
+    async fn ollama_ndjson_done_reason_stop_is_captured_as_stop_reason() {
+        // Fix 1: a normal `done_reason:"stop"` frame surfaces stop_reason.
+        let body = b"{\"message\":{\"role\":\"assistant\",\"content\":\"hi\"},\"done\":true,\
+            \"done_reason\":\"stop\",\"prompt_eval_count\":5,\"eval_count\":2}\n";
+        let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
+        let mut warmup_gate = false;
+        let result = consume_ollama_ndjson_lines(
+            &body[..],
+            "ollama",
+            "stub-model",
+            tx,
+            Duration::ZERO,
+            &mut warmup_gate,
+            None,
+        )
+        .await
+        .expect("ollama stream parses");
+        assert_eq!(result.stop_reason.as_deref(), Some("stop"));
+        // Fix 3: native Ollama reports no cache field — it is unsupported,
+        // not a real 0% cache hit.
+        assert!(!result.cache_supported);
+    }
+
+    #[tokio::test]
+    async fn ollama_ndjson_done_reason_length_surfaces_truncation_not_parser_bug() {
+        // Fix 1 + Fix 2: a length-capped frame with empty content must NOT
+        // raise the retryable parser-bug error; instead it returns Ok carrying
+        // stop_reason: Some("length") as a non-retryable truncation signal.
+        let body = b"{\"message\":{\"role\":\"assistant\",\"content\":\"\"},\"done\":true,\
+            \"done_reason\":\"length\",\"prompt_eval_count\":10,\"eval_count\":8}\n";
+        let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
+        let mut warmup_gate = false;
+        let result = consume_ollama_ndjson_lines(
+            &body[..],
+            "ollama",
+            "stub-model",
+            tx,
+            Duration::ZERO,
+            &mut warmup_gate,
+            None,
+        )
+        .await
+        .expect("length truncation should return Ok, not the parser-bug error");
+        assert_eq!(result.stop_reason.as_deref(), Some("length"));
+        assert!(result.text.is_empty());
+        assert!(result.tool_calls.is_empty());
+    }
+
+    #[tokio::test]
+    async fn ollama_ndjson_empty_content_without_done_reason_is_still_parser_bug() {
+        // Fix 2 guardrail: empty content with no `done_reason` (or stop) keeps
+        // the retryable parser-bug behavior — only "length" is special-cased.
+        let body = b"{\"message\":{\"role\":\"assistant\",\"content\":\"\"},\"done\":true,\
+            \"done_reason\":\"stop\",\"prompt_eval_count\":10,\"eval_count\":4}\n";
+        let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
+        let mut warmup_gate = false;
+        let err = consume_ollama_ndjson_lines(
+            &body[..],
+            "ollama",
+            "stub-model",
+            tx,
+            Duration::ZERO,
+            &mut warmup_gate,
+            None,
+        )
+        .await
+        .expect_err("empty content with done_reason=stop is still a parser bug");
+        assert!(
+            err.to_string()
+                .contains("[ollama_empty_content_parser_bug]"),
+            "err was: {err}"
         );
     }
 }

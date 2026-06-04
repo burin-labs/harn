@@ -458,6 +458,7 @@ async fn play_stream(
         output_tokens: 0,
         cache_read_tokens: 0,
         cache_write_tokens: 0,
+        cache_supported: true,
         model: request.model.clone(),
         provider: "fake".to_string(),
         thinking: None,

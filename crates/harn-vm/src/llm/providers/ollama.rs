@@ -402,8 +402,12 @@ async fn parse_raw_generate_response(
         tool_calls: Vec::new(),
         input_tokens,
         output_tokens,
+        // Native Ollama `/api/chat` done frames carry no cache field; 0 here
+        // means "unknown", not a real miss. `cache_supported: false` keeps the
+        // cost layer from scoring a local model as a 100% cache miss.
         cache_read_tokens: 0,
         cache_write_tokens: 0,
+        cache_supported: false,
         model: json
             .get("model")
             .and_then(|value| value.as_str())
@@ -505,8 +509,11 @@ async fn parse_raw_generate_stream(
         tool_calls: Vec::new(),
         input_tokens,
         output_tokens,
+        // Native Ollama `/api/generate` streaming reports no cache field;
+        // 0 is "unknown", not a real miss. See `cache_supported` on LlmResult.
         cache_read_tokens: 0,
         cache_write_tokens: 0,
+        cache_supported: false,
         model: result_model,
         provider: provider.to_string(),
         thinking: (!thinking.is_empty()).then_some(thinking),

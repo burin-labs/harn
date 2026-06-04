@@ -296,6 +296,7 @@ where
         output_tokens,
         cache_read_tokens: 0,
         cache_write_tokens: 0,
+        cache_supported: true,
         model: request.model.clone(),
         provider: request.provider.clone(),
         thinking: None,

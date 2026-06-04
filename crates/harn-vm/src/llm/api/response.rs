@@ -480,6 +480,7 @@ pub(crate) fn parse_openai_responses_response(
         output_tokens,
         cache_read_tokens,
         cache_write_tokens,
+        cache_supported: true,
         model: model.to_string(),
         provider: provider.to_string(),
         thinking: None,
@@ -623,6 +624,7 @@ pub(crate) fn parse_llm_response(
             output_tokens,
             cache_read_tokens,
             cache_write_tokens,
+            cache_supported: true,
             model: model.to_string(),
             provider: provider.to_string(),
             thinking: if thinking_text.is_empty() {
@@ -801,6 +803,7 @@ pub(crate) fn parse_llm_response(
             output_tokens,
             cache_read_tokens,
             cache_write_tokens,
+            cache_supported: true,
             model: model.to_string(),
             provider: provider.to_string(),
             thinking: if extracted_thinking.is_empty() {
