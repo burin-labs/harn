@@ -182,6 +182,9 @@ pub enum ProcessSandboxPreset {
     /// OS/vendor developer toolchains such as Xcode, Command Line Tools,
     /// Homebrew, and language runtimes installed under standard system paths.
     DeveloperToolchains,
+    /// Per-user package-manager config/cache roots used by npm, pip, cargo,
+    /// git credential helpers, and enterprise CA configuration.
+    PackageManagerConfig,
     /// Per-user scratch/cache locations used by developer tools. Write access
     /// is granted only when the active policy already allows workspace writes.
     UserTemp,
@@ -192,6 +195,7 @@ impl ProcessSandboxPreset {
         &[
             Self::SystemRuntime,
             Self::DeveloperToolchains,
+            Self::PackageManagerConfig,
             Self::UserTemp,
         ]
     }

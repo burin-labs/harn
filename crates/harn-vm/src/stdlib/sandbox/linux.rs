@@ -12,9 +12,9 @@ use std::process::Command;
 
 use super::{
     policy_allows_capability, policy_allows_network, policy_allows_workspace_write,
-    process_sandbox_policy_read_roots, process_sandbox_policy_write_roots,
-    process_sandbox_readonly_roots, process_sandbox_roots, sandbox_rejection, warn_once,
-    PrepareOutcome, SandboxBackend, SandboxFallback,
+    process_sandbox_package_manager_config_read_roots, process_sandbox_policy_read_roots,
+    process_sandbox_policy_write_roots, process_sandbox_readonly_roots, process_sandbox_roots,
+    sandbox_rejection, warn_once, PrepareOutcome, SandboxBackend, SandboxFallback,
 };
 use crate::orchestration::{CapabilityPolicy, SandboxProfile};
 use crate::value::VmError;
@@ -178,6 +178,9 @@ fn landlock_profile(
     }
     for root in process_sandbox_policy_read_roots(policy) {
         push_rule(&mut profile, root, read_only_access(), false)?;
+    }
+    for root in process_sandbox_package_manager_config_read_roots(policy) {
+        push_rule(&mut profile, root, read_only_access(), true)?;
     }
     if policy_allows_workspace_write(policy) {
         for root in process_sandbox_policy_write_roots(policy) {
@@ -552,6 +555,37 @@ mod tests {
             read_only_access() & WRITE_BITS,
             0,
             "read-only roots stay unwritable regardless of workspace write capability",
+        );
+    }
+
+    #[test]
+    fn package_manager_config_roots_are_read_only() {
+        let temp_home = tempfile::tempdir().expect("temp home");
+        std::fs::write(
+            temp_home.path().join(".npmrc"),
+            "registry=https://registry.example\n",
+        )
+        .expect("write npmrc");
+        let roots = super::super::package_manager_config_read_roots_for_home(temp_home.path());
+
+        assert!(
+            roots.iter().any(|path| path.ends_with(".npmrc")),
+            "npmrc should be part of the package-manager preset"
+        );
+        assert!(
+            roots
+                .iter()
+                .any(|path| path.ends_with(".cargo/config.toml")),
+            "cargo config should be part of the package-manager preset"
+        );
+        assert!(
+            roots.iter().all(|path| path.starts_with(temp_home.path())),
+            "package-manager roots must stay under HOME"
+        );
+        assert_eq!(
+            read_only_access() & WRITE_BITS,
+            0,
+            "package-manager Landlock rules use read-only access bits"
         );
     }
 

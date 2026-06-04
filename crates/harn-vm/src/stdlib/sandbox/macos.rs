@@ -15,7 +15,8 @@ use std::path::Path;
 use std::process::Command;
 
 use super::{
-    policy_allows_network, policy_allows_workspace_write, process_sandbox_policy_read_roots,
+    policy_allows_network, policy_allows_workspace_write,
+    process_sandbox_package_manager_config_read_roots, process_sandbox_policy_read_roots,
     process_sandbox_policy_write_roots, process_sandbox_presets, process_sandbox_readonly_roots,
     process_sandbox_roots, unavailable, PrepareOutcome, SandboxBackend,
 };
@@ -134,6 +135,14 @@ fn has_swiftpm_option(args: &[String], option: &str) -> bool {
 }
 
 fn render_profile(policy: &CapabilityPolicy) -> String {
+    let package_manager_read_roots = process_sandbox_package_manager_config_read_roots(policy);
+    render_profile_with_package_manager_read_roots(policy, &package_manager_read_roots)
+}
+
+fn render_profile_with_package_manager_read_roots(
+    policy: &CapabilityPolicy,
+    package_manager_read_roots: &[std::path::PathBuf],
+) -> String {
     let roots = process_sandbox_roots(policy);
     let read_only_roots = process_sandbox_readonly_roots(policy);
     let policy_read_roots = process_sandbox_policy_read_roots(policy);
@@ -160,6 +169,7 @@ fn render_profile(policy: &CapabilityPolicy) -> String {
         .iter()
         .chain(read_only_roots.iter())
         .chain(policy_read_roots.iter())
+        .chain(package_manager_read_roots.iter())
     {
         profile.push_str(&format!(
             "(allow file-read* (subpath \"{}\"))\n",
@@ -202,7 +212,10 @@ fn render_profile(policy: &CapabilityPolicy) -> String {
         // *after* every write allow re-asserts hermetic read-only scope
         // even when the lists are not disjoint. The deny is a no-op for
         // disjoint read-only roots (which never received a write allow).
-        for root in read_only_roots.iter() {
+        for root in read_only_roots
+            .iter()
+            .chain(package_manager_read_roots.iter())
+        {
             profile.push_str(&format!(
                 "(deny file-write* (subpath \"{}\"))\n",
                 sandbox_profile_escape(&root.display().to_string())
@@ -235,6 +248,7 @@ fn preset_read_roots(policy: &CapabilityPolicy) -> Vec<&'static str> {
                 "/Library/Developer",
                 "/System/Library/Developer",
             ]),
+            ProcessSandboxPreset::PackageManagerConfig => {}
             ProcessSandboxPreset::UserTemp => {}
         }
     }
@@ -366,6 +380,43 @@ mod tests {
         assert!(
             !profile.contains("(subpath \"/private/var/folders\")"),
             "disabling user_temp should remove per-user temp cache access: {profile}"
+        );
+    }
+
+    #[test]
+    fn sandbox_profile_allows_package_manager_config_read_only() {
+        let temp_home = tempfile::tempdir().expect("temp home");
+        std::fs::write(
+            temp_home.path().join(".npmrc"),
+            "registry=https://registry.example\n",
+        )
+        .expect("write npmrc");
+
+        let package_roots =
+            super::super::package_manager_config_read_roots_for_home(temp_home.path());
+        let profile = render_profile_with_package_manager_read_roots(
+            &macos_policy_with_workspace_ops(&["read_text", "write_text", "delete"]),
+            &package_roots,
+        );
+        let npmrc_path = super::super::package_manager_config_read_roots_for_home(temp_home.path())
+            .into_iter()
+            .find(|path| path.ends_with(".npmrc"))
+            .expect("npmrc root")
+            .display()
+            .to_string();
+        let escaped = sandbox_profile_escape(&npmrc_path);
+
+        assert!(
+            profile.contains(&format!("(allow file-read* (subpath \"{escaped}\"))")),
+            "package manager config should be readable: {profile}"
+        );
+        assert!(
+            profile.contains(&format!("(deny file-write* (subpath \"{escaped}\"))")),
+            "package manager config should be explicitly re-denied writes: {profile}"
+        );
+        assert!(
+            !profile.contains(&format!("(allow file-write* (subpath \"{escaped}\"))")),
+            "package manager config must not get direct write access: {profile}"
         );
     }
 

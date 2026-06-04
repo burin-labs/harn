@@ -39,7 +39,7 @@ use std::collections::BTreeSet;
 use std::path::{Component, Path, PathBuf};
 use std::process::{Command, Output, Stdio};
 
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 use crate::orchestration::ProcessSandboxPreset;
 use crate::orchestration::{CapabilityPolicy, SandboxProfile};
 use crate::value::{ErrorCategory, VmError, VmValue};
@@ -741,9 +741,58 @@ pub(crate) fn process_sandbox_policy_write_roots(policy: &CapabilityPolicy) -> V
     normalized_process_roots(&policy.process_sandbox.write_roots)
 }
 
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 pub(crate) fn process_sandbox_presets(policy: &CapabilityPolicy) -> Vec<ProcessSandboxPreset> {
     policy.process_sandbox.effective_presets()
+}
+
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+pub(crate) fn process_sandbox_package_manager_config_read_roots(
+    policy: &CapabilityPolicy,
+) -> Vec<PathBuf> {
+    if !process_sandbox_presets(policy).contains(&ProcessSandboxPreset::PackageManagerConfig) {
+        return Vec::new();
+    }
+    let Some(home) = package_manager_config_home_dir() else {
+        return Vec::new();
+    };
+    package_manager_config_read_roots_for_home(&home)
+}
+
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+fn package_manager_config_home_dir() -> Option<PathBuf> {
+    ["HOME", "USERPROFILE"]
+        .into_iter()
+        .filter_map(std::env::var_os)
+        .map(PathBuf::from)
+        .find(|path| path.is_absolute())
+}
+
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+pub(crate) fn package_manager_config_read_roots_for_home(home: &Path) -> Vec<PathBuf> {
+    let mut roots: Vec<_> = [
+        ".npmrc",
+        ".gitconfig",
+        ".netrc",
+        ".yarnrc.yml",
+        ".config",
+        ".npm",
+        ".cache",
+        ".pip",
+        ".pypirc",
+        ".cargo/config",
+        ".cargo/config.toml",
+        ".cargo/credentials",
+        ".cargo/credentials.toml",
+        ".cargo/registry",
+        ".cargo/git",
+    ]
+    .into_iter()
+    .map(|entry| normalize_for_policy(&home.join(entry)))
+    .collect();
+    roots.sort_unstable();
+    roots.dedup();
+    roots
 }
 
 #[cfg(any(

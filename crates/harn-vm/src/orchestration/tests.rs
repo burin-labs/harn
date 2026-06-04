@@ -89,6 +89,16 @@ fn capability_intersection_narrows_process_sandbox_policy() {
 }
 
 #[test]
+fn process_sandbox_defaults_include_package_manager_config() {
+    assert!(
+        ProcessSandboxPolicy::default()
+            .effective_presets()
+            .contains(&ProcessSandboxPreset::PackageManagerConfig),
+        "package-manager config roots should be part of the default process sandbox presets"
+    );
+}
+
+#[test]
 fn mutation_session_normalize_fills_defaults() {
     let normalized = MutationSessionRecord::default().normalize();
     assert!(normalized.session_id.starts_with("session_"));
