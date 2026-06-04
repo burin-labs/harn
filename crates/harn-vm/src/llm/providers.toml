@@ -545,6 +545,42 @@ id = "gemma4:26b"
 provider = "ollama"
 tool_format = "text"
 
+[aliases.ollama-gemma4-12b]
+id = "gemma4:12b-mlx"
+provider = "ollama"
+tool_format = "text"
+
+[aliases.ollama-gemma4-12b-nvfp4]
+id = "gemma4:12b-nvfp4"
+provider = "ollama"
+tool_format = "text"
+
+[aliases.local-gemma4-12b]
+id = "gemma-4-12b-it"
+provider = "local"
+
+# Gemma 4 26B/31B via hosted APIs (the 12B is on-device only). The Gemini API
+# serves Gemma under its bare id; OpenRouter/Together use org-prefixed ids.
+[aliases.gemini-gemma4-31b]
+id = "models/gemma-4-31b-it"
+provider = "gemini"
+
+[aliases.gemini-gemma4-26b]
+id = "models/gemma-4-26b-a4b-it"
+provider = "gemini"
+
+[aliases.openrouter-gemma4-31b]
+id = "google/gemma-4-31b-it"
+provider = "openrouter"
+
+[aliases.openrouter-gemma4-26b]
+id = "google/gemma-4-26b-a4b-it"
+provider = "openrouter"
+
+[aliases.together-gemma4-31b]
+id = "google/gemma-4-31B-it"
+provider = "together"
+
 # qwen3.6 has no working Ollama route — Ollama's qwen3.5-family server-side
 # tool-call parser 500s on text-tool output (ollama/ollama#14986, #14570).
 # Use the llamacpp provider for local qwen3.x.
@@ -663,6 +699,13 @@ tool_format = "native"
 # update these via providers.toml overlays as they re-probe a model.
 
 [alias_tool_calling.ollama-gemma4]
+native = "unknown"
+text = "unknown"
+streaming_native = "unknown"
+fallback_mode = "disabled"
+failure_reason = "requires_tool_probe"
+
+[alias_tool_calling.ollama-gemma4-12b]
 native = "unknown"
 text = "unknown"
 streaming_native = "unknown"
@@ -1405,6 +1448,43 @@ capabilities = ["tools", "vision", "streaming", "thinking"]
 tier = "mid"
 open_weight = true
 strengths = ["vision", "tool_use"]
+# Gemma 4 12B — encoder-free unified multimodal model (Apache 2.0), built to run
+# on a 16GB laptop. Published on Ollama only as quantized variants (no bare
+# `gemma4:12b` tag). Verified via `ollama show`: the quantized 12B builds expose
+# `tools` + native `thinking` but are TEXT-ONLY at 128K context — the vision
+# projector is dropped in these conversions, unlike the larger 26b/31b builds.
+# MLX is the Apple-Silicon path; nvfp4 targets NVIDIA Blackwell; mxfp8 is the
+# higher-fidelity quant.
+[models."gemma4:12b-mlx"]
+name = "Gemma 4 12B (MLX)"
+provider = "ollama"
+context_window = 131072
+runtime_context_window = 32768
+stream_timeout = 240.0
+capabilities = ["tools", "streaming", "thinking"]
+tier = "mid"
+open_weight = true
+strengths = ["speed", "cheap"]
+[models."gemma4:12b-nvfp4"]
+name = "Gemma 4 12B (NVFP4)"
+provider = "ollama"
+context_window = 131072
+runtime_context_window = 32768
+stream_timeout = 240.0
+capabilities = ["tools", "streaming", "thinking"]
+tier = "mid"
+open_weight = true
+strengths = ["cheap", "tool_use"]
+[models."gemma4:12b-mxfp8"]
+name = "Gemma 4 12B (MXFP8)"
+provider = "ollama"
+context_window = 131072
+runtime_context_window = 32768
+stream_timeout = 240.0
+capabilities = ["tools", "streaming", "thinking"]
+tier = "mid"
+open_weight = true
+strengths = ["cheap", "tool_use"]
 [models."devstral-small-2:24b"]
 name = "Devstral Small 2 24B"
 provider = "ollama"
@@ -1496,3 +1576,61 @@ capabilities = ["streaming", "thinking"]
 tier = "frontier"
 open_weight = true
 strengths = ["coding", "long_context"]
+[models."gemma-4-12b-it"]
+name = "Gemma 4 12B (local)"
+provider = "local"
+context_window = 131072
+stream_timeout = 300.0
+capabilities = ["streaming", "thinking"]
+tier = "mid"
+open_weight = true
+strengths = ["cheap", "speed"]
+# Gemma 4 — hosted (Apache 2.0, multimodal text+image, 256K context, native
+# thinking). The 12B is on-device only; the 26B MoE and 31B dense are also served
+# directly by hosted APIs. Each provider route is registered as its own catalog
+# row keyed by that provider's wire id (the alias-validation contract requires a
+# matching row): OpenRouter ids are org-prefixed and the Gemini API rows use the
+# `models/` REST resource name — both collision-free with the bare `local` keys.
+[models."google/gemma-4-31b-it"]
+name = "Gemma 4 31B (OpenRouter)"
+provider = "openrouter"
+context_window = 262144
+capabilities = ["tools", "vision", "streaming", "thinking"]
+pricing = { input_per_mtok = 0.12, output_per_mtok = 0.37 }
+tier = "frontier"
+open_weight = true
+strengths = ["vision", "reasoning", "coding", "cheap"]
+[models."google/gemma-4-26b-a4b-it"]
+name = "Gemma 4 26B MoE (OpenRouter)"
+provider = "openrouter"
+context_window = 262144
+capabilities = ["tools", "vision", "streaming", "thinking"]
+pricing = { input_per_mtok = 0.06, output_per_mtok = 0.33 }
+tier = "mid"
+open_weight = true
+strengths = ["vision", "cheap", "speed"]
+[models."models/gemma-4-31b-it"]
+name = "Gemma 4 31B (Gemini API)"
+provider = "gemini"
+context_window = 262144
+capabilities = ["tools", "vision", "streaming", "thinking"]
+tier = "frontier"
+open_weight = true
+strengths = ["vision", "reasoning", "coding", "cheap"]
+[models."models/gemma-4-26b-a4b-it"]
+name = "Gemma 4 26B MoE (Gemini API)"
+provider = "gemini"
+context_window = 262144
+capabilities = ["tools", "vision", "streaming", "thinking"]
+tier = "mid"
+open_weight = true
+strengths = ["vision", "cheap", "speed"]
+[models."google/gemma-4-31B-it"]
+name = "Gemma 4 31B (Together)"
+provider = "together"
+context_window = 262144
+capabilities = ["tools", "vision", "streaming", "thinking"]
+pricing = { input_per_mtok = 0.20, output_per_mtok = 0.50 }
+tier = "frontier"
+open_weight = true
+strengths = ["vision", "reasoning", "coding"]

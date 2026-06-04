@@ -932,6 +932,20 @@ prefers_role_developer = false
 prefers_xml_tools = false
 thinking_block_style = "reasoning_summary"
 
+# The Ollama-published Gemma 4 12B quants are TEXT-ONLY (vision projector dropped
+# in the conversion — verified via `ollama show gemma4:12b-mlx`), unlike the 26b/
+# 31b builds. Keep this ahead of the `gemma4*` family rule (first match wins).
+[[provider.ollama]]
+model_match = "gemma4:12b*"
+vision_supported = false
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "delimited"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "none"
+
 [[provider.ollama]]
 model_match = "gemma4*"
 vision_supported = true
@@ -1722,6 +1736,40 @@ prefers_role_developer = false
 prefers_xml_tools = false
 thinking_block_style = "reasoning_summary"
 
+# Gemma 4 (26B MoE / 31B) served directly by the Gemini API. Multimodal
+# text+image with native function calling and thinking; no Gemini-only adaptive
+# effort modes. Both the bare id and the `models/` REST resource name resolve to
+# the same model. Ahead of the broader gemini rules (first match wins).
+[[provider.gemini]]
+model_match = "gemma-4*"
+native_tools = true
+preferred_tool_format = "native"
+structured_output = "native"
+thinking_modes = ["enabled"]
+vision_supported = true
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "native_json"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "inline"
+
+[[provider.gemini]]
+model_match = "models/gemma-4*"
+native_tools = true
+preferred_tool_format = "native"
+structured_output = "native"
+thinking_modes = ["enabled"]
+vision_supported = true
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "native_json"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "inline"
+
 [[provider.gemini]]
 model_match = "gemini-2.5*"
 native_tools = true
@@ -1795,6 +1843,7 @@ thinking_block_style = "none"
 [[provider.openrouter]]
 model_match = "google/gemma-4*"
 native_tools = true
+vision_supported = true
 preferred_tool_format = "native"
 structured_output = "native"
 top_k_supported = true
@@ -1911,6 +1960,7 @@ thinking_block_style = "inline"
 [[provider.together]]
 model_match = "google/gemma-4*"
 native_tools = true
+vision_supported = true
 preferred_tool_format = "native"
 structured_output = "native"
 thinking_modes = ["enabled"]
