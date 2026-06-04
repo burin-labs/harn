@@ -170,7 +170,15 @@ impl ProcessHandle for RealProcess {
                 None => {
                     let elapsed = start.elapsed();
                     if elapsed >= timeout {
+                        // `killer.kill()` kills the whole process group on Unix
+                        // (negative pid) to reap grandchildren. That path is a
+                        // no-op on non-Unix targets, where `kill_pid_or_group`
+                        // cannot signal by bare pid — so also kill the child
+                        // handle directly (TerminateProcess on Windows) to
+                        // guarantee the subsequent `child.wait()` cannot block
+                        // forever on a timed-out process.
                         self.killer.kill();
+                        let _ = child.kill();
                         let _ = child.wait();
                         return Ok((None, true));
                     }
