@@ -793,10 +793,12 @@ jobs:
         # Scoop). See docs/src/dev/release-assets-manifest.md for the
         # schema and consumer contract.
         run: |
-          python3 scripts/build_release_assets_manifest.py \
+          tar xzf artifacts/harn-x86_64-unknown-linux-gnu.tar.gz harn
+          ./harn run scripts/build_release_assets_manifest.harn -- \
             --artifacts-dir artifacts \
             --tag "${{ needs.setup.outputs.ref }}" \
             --output artifacts/release-assets.json
+          rm -f harn
           cat artifacts/release-assets.json
 
       - name: Finalize GitHub release
