@@ -49,7 +49,7 @@ fn format_attribute_arg(arg: &AttributeArg) -> String {
 fn format_attribute_value(node: &SNode) -> String {
     match &node.node {
         Node::StringLiteral(s) => format!("\"{}\"", escape_string(s)),
-        Node::RawStringLiteral(s) => format!("r\"{s}\""),
+        Node::RawStringLiteral(s) => format_raw_string(s),
         Node::IntLiteral(i) => i.to_string(),
         Node::FloatLiteral(f) => format_float(*f),
         Node::BoolLiteral(b) => b.to_string(),
@@ -247,6 +247,38 @@ pub(crate) fn escape_string(s: &str) -> String {
         .replace('\t', "\\t")
         .replace('\0', "\\0")
         .replace("${", "\\${")
+}
+
+/// Render a raw-string literal value, choosing the narrowest delimiter that
+/// can safely contain it. A value with no `"` uses `r"..."`; otherwise it uses
+/// `r#"..."#` (or more `#`) so the body's quotes can't terminate the literal
+/// early. The hash count is `1 + the longest run of `#` that immediately
+/// follows a `"` in the body`, which is the minimal width that keeps the close
+/// delimiter (`"` + hashes) from appearing inside the body. Deterministic, so
+/// `fmt` is idempotent on its own output.
+pub(crate) fn format_raw_string(s: &str) -> String {
+    if !s.contains('"') {
+        return format!("r\"{s}\"");
+    }
+    let chars: Vec<char> = s.chars().collect();
+    let mut max_run = 0usize;
+    let mut i = 0;
+    while i < chars.len() {
+        if chars[i] == '"' {
+            let mut run = 0usize;
+            let mut j = i + 1;
+            while j < chars.len() && chars[j] == '#' {
+                run += 1;
+                j += 1;
+            }
+            if run > max_run {
+                max_run = run;
+            }
+        }
+        i += 1;
+    }
+    let hashes = "#".repeat(max_run + 1);
+    format!("r{hashes}\"{s}\"{hashes}")
 }
 
 /// Format the `(error_var: Type)` portion of a catch clause.

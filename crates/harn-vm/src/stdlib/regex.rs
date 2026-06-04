@@ -57,6 +57,18 @@ fn get_cached_regex(pattern: &str, flags: &str) -> Result<Rc<regex::Regex>, VmEr
     Ok(re)
 }
 
+/// Read an optional trailing `flags` argument. An absent arg *and* an explicit
+/// `nil` both mean "no flags": forwarding an unset optional (e.g.
+/// `regex_captures(p, t, opts?.flags)`) yields `nil`, and without this guard
+/// `Nil.as_str_cow()` stringifies to `"nil"`, which `build_regex` would then
+/// reject as bogus flag letters. Applies to every regex builtin's flags slot.
+fn optional_flags(args: &[VmValue], idx: usize) -> std::borrow::Cow<'_, str> {
+    match args.get(idx) {
+        None | Some(VmValue::Nil) => std::borrow::Cow::Borrowed(""),
+        Some(v) => v.as_str_cow(),
+    }
+}
+
 fn build_regex(pattern: &str, flags: &str) -> Result<regex::Regex, String> {
     let mut builder = regex::RegexBuilder::new(pattern);
     for flag in flags.chars() {
@@ -96,7 +108,7 @@ fn regex_match_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmEr
     if args.len() >= 2 {
         let pattern = args[0].as_str_cow();
         let text = args[1].as_str_cow();
-        let flags = args.get(2).map(VmValue::as_str_cow).unwrap_or_default();
+        let flags = optional_flags(args, 2);
         let re = get_cached_regex(&pattern, &flags)?;
         let matches: Vec<VmValue> = re
             .find_iter(&text)
@@ -123,7 +135,7 @@ fn regex_replace_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, Vm
         let pattern = args[0].as_str_cow();
         let replacement = args[1].as_str_cow();
         let text = args[2].as_str_cow();
-        let flags = args.get(3).map(VmValue::as_str_cow).unwrap_or_default();
+        let flags = optional_flags(args, 3);
         let re = get_cached_regex(&pattern, &flags)?;
         return Ok(VmValue::String(std::sync::Arc::from(
             re.replace_all(&text, replacement.as_ref()).into_owned(),
@@ -133,7 +145,7 @@ fn regex_replace_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, Vm
 }
 
 #[harn_builtin(
-    sig = "regex_captures(pattern: string?, text: string?) -> list",
+    sig = "regex_captures(pattern: string?, text: string?, flags?: string) -> list",
     category = "regex"
 )]
 fn regex_captures_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
@@ -142,7 +154,23 @@ fn regex_captures_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, V
     }
     let pattern = args[0].as_str_cow();
     let text = args[1].as_str_cow();
-    let re = get_cached_regex(&pattern, "")?;
+    let flags = optional_flags(args, 2);
+    let re = get_cached_regex(&pattern, &flags)?;
+
+    // `start`/`end` are *character* (code-point) offsets, not byte offsets, so
+    // they compose with Harn's char-based `substring`/`index_of`/`len` (and
+    // match Python's `re` offsets). `line` is the 1-based line of the match
+    // start — the equivalent of Python's `text.count("\n", 0, m.start()) + 1` —
+    // so callers can report diagnostics positionally without re-scanning the
+    // input in Harn.
+    //
+    // The `regex` crate reports byte offsets, so we walk a cursor forward over
+    // the gaps between successive matches (which arrive in ascending order),
+    // accumulating the char count and newline count of each gap. That keeps the
+    // whole pass O(n) rather than O(n * matches).
+    let mut scanned_byte: usize = 0;
+    let mut chars_before: usize = 0;
+    let mut newlines_before: usize = 0;
 
     let mut results: Vec<VmValue> = Vec::new();
     for caps in re.captures_iter(&text) {
@@ -163,6 +191,29 @@ fn regex_captures_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, V
             "groups".to_string(),
             VmValue::List(std::sync::Arc::new(groups)),
         );
+
+        if let Some(whole) = caps.get(0) {
+            let (start_byte, end_byte) = (whole.start(), whole.end());
+            // Advance the cursor to the match start, tallying chars + newlines.
+            // `captures_iter` never yields a start before a previous one, so the
+            // cursor only moves forward.
+            let gap = &text[scanned_byte..start_byte];
+            chars_before += gap.chars().count();
+            newlines_before += gap.bytes().filter(|&b| b == b'\n').count();
+            let start_char = chars_before;
+            let line = newlines_before + 1;
+            // Tally the match interior too, so a match that spans newlines does
+            // not throw off the line number of subsequent matches.
+            let matched = whole.as_str();
+            chars_before += matched.chars().count();
+            newlines_before += matched.bytes().filter(|&b| b == b'\n').count();
+            let end_char = chars_before;
+            scanned_byte = end_byte;
+
+            dict.insert("start".to_string(), VmValue::Int(start_char as i64));
+            dict.insert("end".to_string(), VmValue::Int(end_char as i64));
+            dict.insert("line".to_string(), VmValue::Int(line as i64));
+        }
 
         for name in re.capture_names().flatten() {
             if let Some(m) = caps.name(name) {
@@ -188,7 +239,7 @@ fn regex_split_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmEr
     }
     let text = args[0].as_str_cow();
     let pattern = args[1].as_str_cow();
-    let flags = args.get(2).map(VmValue::as_str_cow).unwrap_or_default();
+    let flags = optional_flags(args, 2);
     let re = get_cached_regex(&pattern, &flags)?;
     Ok(VmValue::List(std::sync::Arc::new(
         re.split(&text)
@@ -391,6 +442,94 @@ mod tests {
         let groups = unwrap_list(list[0].as_dict().unwrap().get("groups").unwrap());
         assert_eq!(groups[0].display(), "123");
         assert!(matches!(groups[1], VmValue::Nil));
+    }
+
+    #[test]
+    fn captures_expose_offsets_and_line() {
+        let mut vm = vm();
+        // Two matches across three lines; the second starts on line 3.
+        let result = call(
+            &mut vm,
+            "regex_captures",
+            vec![s(r"(\w+)=(\d+)"), s("a=1\n\nb=22\n")],
+        )
+        .unwrap();
+        let list = unwrap_list(&result);
+        assert_eq!(list.len(), 2);
+
+        let first = list[0].as_dict().unwrap();
+        assert_eq!(first.get("start").unwrap().as_int(), Some(0));
+        assert_eq!(first.get("end").unwrap().as_int(), Some(3));
+        assert_eq!(first.get("line").unwrap().as_int(), Some(1));
+
+        let second = list[1].as_dict().unwrap();
+        // "a=1\n\n" is 5 bytes, so the second match starts at offset 5 on line 3.
+        assert_eq!(second.get("start").unwrap().as_int(), Some(5));
+        assert_eq!(second.get("end").unwrap().as_int(), Some(9));
+        assert_eq!(second.get("line").unwrap().as_int(), Some(3));
+    }
+
+    #[test]
+    fn captures_line_counts_multibyte_prefix() {
+        let mut vm = vm();
+        // "café\nX": é is 2 bytes but 1 char. The match `X` is the 6th code
+        // point (char offset 5) on line 2 — offsets are char-based, not byte.
+        let result = call(&mut vm, "regex_captures", vec![s(r"X"), s("café\nX")]).unwrap();
+        let list = unwrap_list(&result);
+        assert_eq!(list.len(), 1);
+        let cap = list[0].as_dict().unwrap();
+        assert_eq!(cap.get("start").unwrap().as_int(), Some(5));
+        assert_eq!(cap.get("end").unwrap().as_int(), Some(6));
+        assert_eq!(cap.get("line").unwrap().as_int(), Some(2));
+    }
+
+    #[test]
+    fn captures_accepts_flags() {
+        let mut vm = vm();
+        // Case-insensitive flag parity with regex_match/replace/split.
+        let result = call(
+            &mut vm,
+            "regex_captures",
+            vec![s("foo"), s("FOO foo"), s("i")],
+        )
+        .unwrap();
+        let list = unwrap_list(&result);
+        assert_eq!(list.len(), 2);
+    }
+
+    #[test]
+    fn nil_flags_arg_means_no_flags() {
+        // Forwarding an unset optional (`opts?.flags`) lands a literal `nil` in
+        // the flags slot; it must behave like an absent arg, not stringify to
+        // "nil" and get rejected as bogus flag letters. Covers all four regex
+        // builtins, since they share `optional_flags`.
+        let mut vm = vm();
+        let caps = call(
+            &mut vm,
+            "regex_captures",
+            vec![s(r"\d+"), s("a1 b2"), VmValue::Nil],
+        )
+        .unwrap();
+        assert_eq!(unwrap_list(&caps).len(), 2);
+
+        let m = call(
+            &mut vm,
+            "regex_match",
+            vec![s(r"\d+"), s("a1 b2"), VmValue::Nil],
+        )
+        .unwrap();
+        assert_eq!(unwrap_list(&m).len(), 2);
+
+        let split = call(&mut vm, "regex_split", vec![s("a,b"), s(","), VmValue::Nil]).unwrap();
+        assert_eq!(unwrap_list(&split).len(), 2);
+
+        let replaced = call(
+            &mut vm,
+            "regex_replace",
+            vec![s(r"\d"), s("#"), s("a1b2"), VmValue::Nil],
+        )
+        .unwrap();
+        assert_eq!(replaced.display(), "a#b#");
     }
 
     #[test]

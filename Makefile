@@ -556,7 +556,7 @@ lint-diagnostic-codes:
 	@python3 scripts/check_diagnostic_codes.py
 
 check-receipt-structs:
-	@./scripts/check_receipt_struct_duplication.py
+	@cargo run --quiet --bin harn -- run scripts/check_receipt_struct_duplication.harn
 
 lint-no-rust-prompt-prose:
 	@./scripts/check_no_rust_prompt_prose.sh
@@ -575,14 +575,14 @@ check-ported-handler-loc:
 # KEYWORDS const (the source of truth for reserved words). Run this
 # whenever a keyword is added, renamed, or retired.
 gen-tree-sitter-keywords:
-	@python3 scripts/sync_tree_sitter_keywords.py --write
+	@cargo run --quiet --bin harn -- run scripts/sync_tree_sitter_keywords.harn -- --write
 
 # CI guard: fail if the tree-sitter keyword list drifts from the lexer's
 # KEYWORDS const, so the editor grammar and the runtime parser agree on
 # the reserved-word set. `make gen-tree-sitter-keywords` fixes it.
 check-tree-sitter-keywords:
 	@echo "=== Checking tree-sitter keyword list matches the lexer ==="
-	@python3 scripts/sync_tree_sitter_keywords.py
+	@cargo run --quiet --bin harn -- run scripts/sync_tree_sitter_keywords.harn
 
 # Meta-guard: fail if scripts/generated_artifacts.toml (the single source
 # of truth for every gen/check drift pair) has drifted from its consumers

@@ -139,6 +139,18 @@ impl Lexer {
                 continue;
             }
 
+            // Hashed raw string: r#"..."#, r##"..."##, etc. The `#` run lets
+            // the body hold literal `"` without escaping — the close is the
+            // first `"` followed by the matching number of `#`. Only treated
+            // as a raw string when the `#` run is actually followed by `"`;
+            // otherwise we fall through (no `r#`-identifier syntax in Harn).
+            if ch == 'r' && self.peek() == Some('#') {
+                if let Some(hashes) = self.raw_hash_count() {
+                    tokens.push(self.read_raw_string_hashed(hashes)?);
+                    continue;
+                }
+            }
+
             if ch == '"' {
                 tokens.push(self.read_string()?);
                 continue;
@@ -565,6 +577,67 @@ impl Lexer {
                 value.push(self.source[self.pos]);
                 self.advance();
             }
+        }
+        Err(LexerError::UnterminatedString(start))
+    }
+
+    /// If the current `r` is followed by one-or-more `#` and then a `"`,
+    /// return the `#` count (the opening delimiter width). Returns `None`
+    /// when the `#` run is not closed by a `"`, so the caller falls through
+    /// to ordinary tokenization. Pure lookahead — does not advance.
+    fn raw_hash_count(&self) -> Option<usize> {
+        let mut k = 1; // skip the leading `r`
+        let mut hashes = 0;
+        while self.source.get(self.pos + k) == Some(&'#') {
+            hashes += 1;
+            k += 1;
+        }
+        if hashes >= 1 && self.source.get(self.pos + k) == Some(&'"') {
+            Some(hashes)
+        } else {
+            None
+        }
+    }
+
+    /// Read a hashed raw string `r#"..."#` (with `hashes` `#` characters):
+    /// no escape processing, no interpolation. The body may contain `"`;
+    /// the literal ends at the first `"` followed by at least `hashes` `#`,
+    /// consuming exactly `hashes` of them (any extra `#` stay in the stream,
+    /// matching Rust's raw-string semantics). Like `r"..."`, the body may not
+    /// span a newline.
+    fn read_raw_string_hashed(&mut self, hashes: usize) -> Result<Token, LexerError> {
+        let start_byte = self.byte_pos;
+        let start = Span::with_offsets(start_byte, start_byte, self.line, self.column);
+        // Consume `r`, the `#` run, and the opening `"`.
+        self.advance(); // r
+        for _ in 0..hashes {
+            self.advance();
+        }
+        self.advance(); // opening quote
+
+        let mut value = String::new();
+        while self.pos < self.source.len() {
+            let ch = self.source[self.pos];
+            if ch == '"' {
+                // A closing quote only ends the literal if followed by the
+                // matching `#` run; otherwise it is a literal quote.
+                let closed = (1..=hashes).all(|k| self.source.get(self.pos + k) == Some(&'#'));
+                if closed {
+                    self.advance(); // closing quote
+                    for _ in 0..hashes {
+                        self.advance();
+                    }
+                    return Ok(Token::with_span(
+                        TokenKind::RawStringLiteral(value),
+                        Span::with_offsets(start_byte, self.byte_pos, start.line, start.column),
+                    ));
+                }
+            }
+            if ch == '\n' {
+                return Err(LexerError::UnterminatedString(start));
+            }
+            value.push(ch);
+            self.advance();
         }
         Err(LexerError::UnterminatedString(start))
     }
@@ -1352,5 +1425,59 @@ mod tests {
         assert_eq!(tokens[0].kind, TokenKind::IntLiteral(42));
         assert_eq!(tokens[1].kind, TokenKind::Dot);
         assert_eq!(tokens[2].kind, TokenKind::Identifier("method".into()));
+    }
+
+    #[test]
+    fn test_hashed_raw_string_basic() {
+        let mut lexer = Lexer::new("r#\"abc\"#");
+        let tokens = lexer.tokenize().unwrap();
+        assert_eq!(tokens[0].kind, TokenKind::RawStringLiteral("abc".into()));
+    }
+
+    #[test]
+    fn test_hashed_raw_string_embedded_quote() {
+        // r#"a"b"# — the inner quote is not followed by `#`, so it's literal.
+        let mut lexer = Lexer::new("r#\"a\"b\"#");
+        let tokens = lexer.tokenize().unwrap();
+        assert_eq!(tokens[0].kind, TokenKind::RawStringLiteral("a\"b".into()));
+    }
+
+    #[test]
+    fn test_hashed_raw_string_regex_with_quotes() {
+        // The motivating case: a regex matching quoted strings, no escaping.
+        let mut lexer = Lexer::new("r#\"\"([^\"\\]*)\"\"#");
+        let tokens = lexer.tokenize().unwrap();
+        assert_eq!(
+            tokens[0].kind,
+            TokenKind::RawStringLiteral("\"([^\"\\]*)\"".into())
+        );
+    }
+
+    #[test]
+    fn test_double_hashed_raw_string_holds_quote_hash() {
+        // r##"a"#b"## — the `"#` run is shorter than the 2-hash delimiter,
+        // so it stays literal.
+        let mut lexer = Lexer::new("r##\"a\"#b\"##");
+        let tokens = lexer.tokenize().unwrap();
+        assert_eq!(tokens[0].kind, TokenKind::RawStringLiteral("a\"#b".into()));
+    }
+
+    #[test]
+    fn test_plain_raw_string_still_works() {
+        let mut lexer = Lexer::new("r\"plain\"");
+        let tokens = lexer.tokenize().unwrap();
+        assert_eq!(tokens[0].kind, TokenKind::RawStringLiteral("plain".into()));
+    }
+
+    #[test]
+    fn test_hashed_raw_string_unterminated_errors() {
+        let mut lexer = Lexer::new("r#\"no close\"");
+        assert!(lexer.tokenize().is_err());
+    }
+
+    #[test]
+    fn test_hashed_raw_string_newline_errors() {
+        let mut lexer = Lexer::new("r#\"line1\nline2\"#");
+        assert!(lexer.tokenize().is_err());
     }
 }

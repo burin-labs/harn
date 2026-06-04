@@ -20,9 +20,7 @@ impl Formatter<'_> {
                     format!("\"{escaped}\"")
                 }
             }
-            Node::RawStringLiteral(s) => {
-                format!("r\"{s}\"")
-            }
+            Node::RawStringLiteral(s) => format_raw_string(s),
             Node::InterpolatedString(segments) => {
                 if node.span.line != node.span.end_line {
                     return self.source_slice(node).to_string();

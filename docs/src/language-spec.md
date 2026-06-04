@@ -186,6 +186,7 @@ after `\` produces a literal backslash followed by that character.
 
 ```javascript
 raw_string_literal ::= 'r"' char* '"'
+                     | 'r' '#'+ '"' char* '"' '#'+
 ```
 
 Raw strings use the `r"..."` prefix. No escape processing or interpolation is
@@ -198,6 +199,19 @@ common:
 ```harn
 let pattern = r"\d+\.\d+"
 let path = r"C:\Users\alice\docs"
+```
+
+To embed a literal double quote, use the *hashed* form `r#"..."#`. The literal
+ends at the first `"` followed by the same number of `#` as the opening
+delimiter, so the body may contain any `"` that is not followed by that many
+`#`. Add more `#` (`r##"..."##`, etc.) when the body itself contains a `"#`
+sequence. This mirrors Rust's raw string syntax and keeps quote-heavy patterns
+escape-free:
+
+```harn
+// A regex matching a double-quoted string body, with no backslash soup:
+let caps = regex_captures(r#""([^"\\]*)""#, "name=\"value\"")
+log("first body: ${caps[0].groups[0]}")
 ```
 
 #### Multi-line strings

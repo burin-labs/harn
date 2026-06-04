@@ -1,0 +1,55 @@
+// Tests for scripts/sync_tree_sitter_keywords.harn — exercise the pure
+// helpers on synthetic inputs (no filesystem dependency).
+import "../sync_tree_sitter_keywords.harn"
+
+@test
+pipeline test_quoted_strings_extracts_bodies(task) {
+  let text = "foo \"a\" bar \"bee\" \"\""
+  assert_eq(quoted_strings(text), ["a", "bee", ""])
+}
+
+@test
+pipeline test_dedup_preserves_first_seen_order(task) {
+  assert_eq(dedup(["x", "y", "x", "z", "y"]), ["x", "y", "z"])
+}
+
+@test
+pipeline test_difference(task) {
+  assert_eq(difference(["a", "b", "c"], ["b"]), ["a", "c"])
+  assert_eq(difference(["a"], ["a", "b"]), [])
+}
+
+@test
+pipeline test_lexer_keywords_parses_const(task) {
+  let src = "pub const KEYWORDS: &[&str] = &[\n  \"let\",\n  \"fn\",\n  \"if\",\n];\n"
+  assert_eq(lexer_keywords(src), ["let", "fn", "if"])
+}
+
+@test
+pipeline test_lexer_keywords_missing_returns_nil(task) {
+  assert_eq(lexer_keywords("no keywords const here"), nil)
+}
+
+@test
+pipeline test_grammar_keywords_strips_line_comments(task) {
+  // A `//`-commented string must not be scanned as a keyword.
+  let js = "module.exports = [\n  \"let\",\n  // \"ghost\",\n  \"fn\",\n];\n"
+  assert_eq(grammar_keywords(js), ["let", "fn"])
+}
+
+@test
+pipeline test_render_keywords_js_sorted_and_shaped(task) {
+  let out = render_keywords_js(["fn", "let", "if"])
+  // Sorted membership lines.
+  assert_eq(out.contains("module.exports = ["), true)
+  assert_eq(out.contains("  \"fn\","), true)
+  assert_eq(out.contains("  \"if\","), true)
+  assert_eq(out.contains("  \"let\","), true)
+  assert_eq(out.contains("];\n"), true)
+  // Alphabetical order: fn < if < let.
+  let fn_at = out.index_of("\"fn\"")
+  let if_at = out.index_of("\"if\"")
+  let let_at = out.index_of("\"let\"")
+  assert_eq(fn_at < if_at, true)
+  assert_eq(if_at < let_at, true)
+}
