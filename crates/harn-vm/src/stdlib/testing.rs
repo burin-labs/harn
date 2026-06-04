@@ -19,6 +19,8 @@ pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
     &THROW_ERROR_IMPL_DEF,
     &IS_TIMEOUT_IMPL_DEF,
     &IS_RATE_LIMITED_IMPL_DEF,
+    &ERROR_IS_IMPL_DEF,
+    &ERROR_IS_TRANSIENT_IMPL_DEF,
 ];
 
 #[harn_builtin(

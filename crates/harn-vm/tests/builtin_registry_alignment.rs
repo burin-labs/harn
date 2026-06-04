@@ -82,7 +82,6 @@ const RUNTIME_ONLY_EXCEPTIONS: &[&str] = &[
     "__assert_interface",
     "__assert_list",
     "__assert_schema",
-    "__assert_shape",
     "__agent_state_delete",
     "__agent_state_handoff",
     "__agent_state_init",
