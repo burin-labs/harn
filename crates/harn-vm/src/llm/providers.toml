@@ -1426,25 +1426,26 @@ pricing = { input_per_mtok = 0.14, output_per_mtok = 0.28, cache_read_per_mtok =
 deprecated = true
 deprecation_note = "Maps to deepseek-v4-flash thinking mode; retirement 2026-07-24 15:59 UTC per provider docs."
 
-# DeepSeek V4 OpenRouter mirrors. Same model, OR adds margin.
+# DeepSeek V4 OpenRouter mirrors. OpenRouter publishes an independent
+# rate card and a binary 1M-token context window for these routes.
 tier = "reasoning"
 open_weight = true
 strengths = ["reasoning", "coding"]
 [models."deepseek/deepseek-v4-flash"]
 name = "DeepSeek V4 Flash (via OpenRouter)"
 provider = "openrouter"
-context_window = 1000000
+context_window = 1048576
 capabilities = ["tools", "streaming"]
-pricing = { input_per_mtok = 0.10, output_per_mtok = 0.20 }
+pricing = { input_per_mtok = 0.0983, output_per_mtok = 0.1966, cache_read_per_mtok = 0.0197 }
 tier = "mid"
 open_weight = true
 strengths = ["speed", "cheap", "tool_use", "reasoning", "long_context"]
 [models."deepseek/deepseek-v4-pro"]
 name = "DeepSeek V4 Pro (via OpenRouter)"
 provider = "openrouter"
-context_window = 1000000
+context_window = 1048576
 capabilities = ["tools", "streaming"]
-pricing = { input_per_mtok = 0.435, output_per_mtok = 0.87 }
+pricing = { input_per_mtok = 0.435, output_per_mtok = 0.87, cache_read_per_mtok = 0.003625 }
 
 # Open-router Qwen3.5 9B (kept for the `small` tier alias).
 tier = "frontier"

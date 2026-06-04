@@ -5059,7 +5059,7 @@ export const harnProviderCatalog: HarnProviderCatalog = {
       "name": "DeepSeek V4 Flash (via OpenRouter)",
       "provider": "openrouter",
       "aliases": [],
-      "context_window": 1000000,
+      "context_window": 1048576,
       "modalities": {
         "input": [
           "text"
@@ -5097,9 +5097,9 @@ export const harnProviderCatalog: HarnProviderCatalog = {
       },
       "prompt_cache": true,
       "pricing": {
-        "input_per_mtok": 0.1,
-        "output_per_mtok": 0.2,
-        "cache_read_per_mtok": null,
+        "input_per_mtok": 0.0983,
+        "output_per_mtok": 0.1966,
+        "cache_read_per_mtok": 0.0197,
         "cache_write_per_mtok": null
       },
       "deprecation": {
@@ -5132,7 +5132,7 @@ export const harnProviderCatalog: HarnProviderCatalog = {
       "name": "DeepSeek V4 Pro (via OpenRouter)",
       "provider": "openrouter",
       "aliases": [],
-      "context_window": 1000000,
+      "context_window": 1048576,
       "modalities": {
         "input": [
           "text"
@@ -5172,7 +5172,7 @@ export const harnProviderCatalog: HarnProviderCatalog = {
       "pricing": {
         "input_per_mtok": 0.435,
         "output_per_mtok": 0.87,
-        "cache_read_per_mtok": null,
+        "cache_read_per_mtok": 0.003625,
         "cache_write_per_mtok": null
       },
       "deprecation": {
