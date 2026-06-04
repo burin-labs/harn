@@ -337,15 +337,72 @@ fn remap_tool_call_content(content: &serde_json::Value) -> serde_json::Value {
     }
 }
 
+/// Stateful canonicalizer for a streamed completion. The wire delimiter
+/// (`[[CALL]]`) usually arrives split across token deltas (`[[`, `CALL`, `]]`),
+/// so a per-chunk replace would miss it and leak the wire form into the
+/// transcript / live display. `push` returns the text safe to emit now —
+/// everything except a trailing tail that could still be the start of a
+/// delimiter — and `flush` returns the remainder at end-of-stream.
+#[derive(Default)]
+struct DeltaCanonicalizer {
+    buf: String,
+}
+
+impl DeltaCanonicalizer {
+    fn push(&mut self, chunk: &str) -> String {
+        use crate::llm::tool_delimiter::{
+            wire_to_canonical, WIRE_TOOL_CALL_CLOSE, WIRE_TOOL_CALL_OPEN,
+        };
+        self.buf.push_str(chunk);
+        let max = WIRE_TOOL_CALL_OPEN.len().max(WIRE_TOOL_CALL_CLOSE.len());
+        let blen = self.buf.len();
+        // The wire delimiters are pure ASCII, so any partial-delimiter tail is
+        // ASCII and lands on a char boundary — byte slicing is safe here.
+        let mut hold = 0;
+        for k in (1..=max.min(blen)).rev() {
+            let tail = &self.buf.as_bytes()[blen - k..];
+            if WIRE_TOOL_CALL_OPEN.as_bytes().starts_with(tail)
+                || WIRE_TOOL_CALL_CLOSE.as_bytes().starts_with(tail)
+            {
+                hold = k;
+                break;
+            }
+        }
+        let safe_end = blen - hold;
+        if safe_end == 0 {
+            return String::new();
+        }
+        let emit = wire_to_canonical(&self.buf[..safe_end]);
+        self.buf.drain(..safe_end);
+        emit
+    }
+
+    fn flush(&mut self) -> String {
+        if self.buf.is_empty() {
+            return String::new();
+        }
+        let out = crate::llm::tool_delimiter::wire_to_canonical(&self.buf);
+        self.buf.clear();
+        out
+    }
+}
+
 /// Wrap a delta sender so streamed chunks are mapped from the wire tool-call
-/// delimiter back to canonical before reaching the live display. The authoritative
-/// reverse map is on the final completion text; this keeps the streaming preview
-/// consistent (best-effort across chunk boundaries).
+/// delimiter back to canonical (across chunk boundaries) before reaching the
+/// live display / ACP text stream.
 fn canonicalizing_delta_tx(orig: DeltaSender) -> DeltaSender {
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<String>();
     tokio::spawn(async move {
+        let mut canon = DeltaCanonicalizer::default();
         while let Some(chunk) = rx.recv().await {
-            let _ = orig.send(crate::llm::tool_delimiter::wire_to_canonical(&chunk));
+            let emit = canon.push(&chunk);
+            if !emit.is_empty() {
+                let _ = orig.send(emit);
+            }
+        }
+        let tail = canon.flush();
+        if !tail.is_empty() {
+            let _ = orig.send(tail);
         }
     });
     tx
@@ -1081,6 +1138,40 @@ thinking_modes = ["enabled"]
             serialized.contains("[[CALL]]") && serialized.contains("[[/CALL]]"),
             "non-special wire delimiters must be present: {serialized}"
         );
+    }
+
+    #[test]
+    fn delta_canonicalizer_reassembles_split_wire_delimiters() {
+        // The wire delimiter arrives split across token deltas; the canonical
+        // form must still be emitted intact in order.
+        let mut c = DeltaCanonicalizer::default();
+        let chunks = [
+            "[[",
+            "CALL",
+            "]]",
+            "\nlook({ a: 1 })\n",
+            "[[",
+            "/CALL",
+            "]]",
+            " done",
+        ];
+        let mut out = String::new();
+        for ch in chunks {
+            out.push_str(&c.push(ch));
+        }
+        out.push_str(&c.flush());
+        assert_eq!(out, "<tool_call>\nlook({ a: 1 })\n</tool_call> done");
+    }
+
+    #[test]
+    fn delta_canonicalizer_passes_through_plain_text() {
+        let mut c = DeltaCanonicalizer::default();
+        let mut out = String::new();
+        for ch in ["Here is ", "some [pro", "se] text."] {
+            out.push_str(&c.push(ch));
+        }
+        out.push_str(&c.flush());
+        assert_eq!(out, "Here is some [prose] text.");
     }
 
     #[test]
