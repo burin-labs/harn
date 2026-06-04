@@ -588,3 +588,57 @@ pipeline default() {}
         "retry handlers must also keep their owning frame alive",
     );
 }
+
+#[test]
+fn inplace_list_concat_clears_binding_before_add() {
+    // `x = x + [i]` on a list compiles to the in-place accumulator form: the
+    // binding's reference is cleared (`NIL; SET_LOCAL_SLOT`) before the `ADD`
+    // so the runtime concat's `Arc::try_unwrap` extends the existing
+    // allocation rather than cloning it (O(n^2) -> O(1) amortized). The signal
+    // is a *single* assignment emitting *two* SET_LOCAL_SLOT (clear + store).
+    let chunk = compile_source("pipeline t(task) {\n  var x = []\n  x = x + [1]\n}");
+    let d = chunk.disassemble("t");
+    assert_eq!(
+        d.matches("SET_LOCAL_SLOT").count(),
+        2,
+        "in-place list concat should emit clear-binding + store:\n{d}"
+    );
+    assert!(
+        d.contains("NIL"),
+        "expected a NIL clear before the concat:\n{d}"
+    );
+    assert!(
+        !d.contains("ADD_INT"),
+        "a list concat must use the generic list ADD, not a scalar op:\n{d}"
+    );
+}
+
+#[test]
+fn inplace_list_concat_compound_assign_form() {
+    // `x += [i]` gets the same in-place treatment as `x = x + [i]`.
+    let chunk = compile_source("pipeline t(task) {\n  var x = []\n  x += [1]\n}");
+    let d = chunk.disassemble("t");
+    assert_eq!(
+        d.matches("SET_LOCAL_SLOT").count(),
+        2,
+        "compound `x += [..]` should also emit the in-place form:\n{d}"
+    );
+    assert!(d.contains("NIL"), "{d}");
+}
+
+#[test]
+fn inplace_concat_skips_scalar_compound_assign() {
+    // `i = i + 1` must NOT take the list peephole: it keeps the specialized
+    // ADD_INT fast path and a single store (no clear-binding doubling).
+    let chunk = compile_source("pipeline t(task) {\n  var i = 0\n  i = i + 1\n}");
+    let d = chunk.disassemble("t");
+    assert!(
+        d.contains("ADD_INT"),
+        "scalar compound-assign must keep the specialized ADD_INT:\n{d}"
+    );
+    assert_eq!(
+        d.matches("SET_LOCAL_SLOT").count(),
+        1,
+        "scalar assign should emit a single store, not the in-place doubling:\n{d}"
+    );
+}
