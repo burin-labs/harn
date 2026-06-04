@@ -3,8 +3,9 @@ use std::collections::BTreeSet;
 use super::super::{text_tool_call_block, TEXT_TOOL_CALL_TAG, TEXT_TOOL_CALL_TAG_COMPACT};
 use super::bare::parse_bare_calls_in_body;
 use super::syntax::{
-    collapse_blank_lines, ident_length, match_block, parse_ts_call_from, preview_str,
-    render_canonical_call, skip_heredoc_body, strip_thinking_tags,
+    collapse_blank_lines, find_close_tag, ident_length, match_block, match_tool_call_block,
+    parse_ts_call_from, preview_str, render_canonical_call, skip_heredoc_body, strip_thinking_tags,
+    CloseScan,
 };
 use super::TextToolParseResult;
 use crate::llm::tools::collect_tool_schemas;
@@ -38,10 +39,12 @@ pub(crate) fn parse_text_tool_calls_with_tools(
 ) -> TextToolParseResult {
     let cleaned = strip_thinking_tags(text);
     let src = cleaned.as_ref();
-    if let Some(result) = parse_mistral_marker_calls(src, tools_val) {
+    if let Some(mut result) = parse_mistral_marker_calls(src, tools_val) {
+        assign_turn_unique_ids(&mut result.calls);
         return result;
     }
-    if let Some(result) = parse_deepseek_dsml_calls(src, tools_val) {
+    if let Some(mut result) = parse_deepseek_dsml_calls(src, tools_val) {
+        assign_turn_unique_ids(&mut result.calls);
         return result;
     }
 
@@ -105,8 +108,8 @@ pub(crate) fn parse_text_tool_calls_with_tools(
             continue;
         }
 
-        if let Some((body, after)) = match_block(src, cursor, TEXT_TOOL_CALL_TAG)
-            .or_else(|| match_block(src, cursor, TEXT_TOOL_CALL_TAG_COMPACT))
+        if let Some((body, after)) = match_tool_call_block(src, cursor, TEXT_TOOL_CALL_TAG)
+            .or_else(|| match_tool_call_block(src, cursor, TEXT_TOOL_CALL_TAG_COMPACT))
         {
             match parse_single_tool_call(body, tools_val) {
                 Ok(call) => {
@@ -263,6 +266,7 @@ pub(crate) fn parse_text_tool_calls_with_tools(
         Some(user_response_parts.join("\n\n"))
     };
 
+    assign_turn_unique_ids(&mut calls);
     TextToolParseResult {
         calls,
         errors,
@@ -273,6 +277,24 @@ pub(crate) fn parse_text_tool_calls_with_tools(
         violations,
         done_marker,
         canonical: canonical_parts.join("\n\n"),
+    }
+}
+
+/// Overwrite every parsed call's `id` with a turn-unique `tc_{n}`. The per-body
+/// parsers mint ids against their *local* call vector, so a body with a single
+/// call always gets `tc_0` and the JSON path hard-codes `tc_json` — meaning two
+/// `<tool_call>` blocks in one turn collide on `tc_0` and their results can't be
+/// correlated in the run-event stream. This is the one place with the
+/// turn-global index, so it owns final id assignment (mirroring the streaming
+/// detector's globally-unique `text-cand-{seq}` ids).
+fn assign_turn_unique_ids(calls: &mut [serde_json::Value]) {
+    for (idx, call) in calls.iter_mut().enumerate() {
+        if let Some(obj) = call.as_object_mut() {
+            obj.insert(
+                "id".to_string(),
+                serde_json::Value::String(format!("tc_{idx}")),
+            );
+        }
     }
 }
 
@@ -702,7 +724,14 @@ fn unclosed_tool_call_open(src: &str, cursor: usize) -> Option<usize> {
     } else {
         return None;
     };
-    if src[cursor + open.len()..].contains(&close) {
+    // A `</tool_call>` buried in a heredoc body is not a real close, so scan
+    // heredoc-aware: only a `Found` close means the block is properly
+    // terminated. `NeedMore` (truncated mid-heredoc) and `NotFound` both mean
+    // the open tag was never closed.
+    if matches!(
+        find_close_tag(src, cursor + open.len(), &close),
+        CloseScan::Found(_)
+    ) {
         return None;
     }
     Some(open.len())

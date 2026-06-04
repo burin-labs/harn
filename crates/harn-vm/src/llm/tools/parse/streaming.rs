@@ -41,7 +41,7 @@ use super::super::{
     TEXT_TOOL_CALL_CLOSE, TEXT_TOOL_CALL_CLOSE_COMPACT, TEXT_TOOL_CALL_OPEN,
     TEXT_TOOL_CALL_OPEN_COMPACT,
 };
-use super::syntax::{ident_length, parse_ts_call_from};
+use super::syntax::{find_close_tag, ident_length, parse_ts_call_from, CloseScan};
 
 /// Streaming candidate detector for text-mode tool calls.
 ///
@@ -331,10 +331,13 @@ impl StreamingToolCallDetector {
             } => (*body_start, *close_tag, tool_call_id.clone()),
             _ => return false,
         };
-        let Some(close_rel) = self.buffer[body_start..].find(close_tag) else {
-            return false;
+        // Skip over complete heredoc bodies so a literal `</tool_call>` inside a
+        // multiline string argument doesn't fire an early close; an incomplete
+        // heredoc (`NeedMore`) means we wait for more deltas.
+        let body_end = match find_close_tag(&self.buffer, body_start, close_tag) {
+            CloseScan::Found(idx) => idx,
+            CloseScan::NeedMore | CloseScan::NotFound => return false,
         };
-        let body_end = body_start + close_rel;
         let after = body_end + close_tag.len();
         let body = self.buffer[body_start..body_end].trim().to_string();
         let parse_attempt = if body.is_empty() {

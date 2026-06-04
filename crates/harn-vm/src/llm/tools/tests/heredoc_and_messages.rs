@@ -1,7 +1,7 @@
 use super::{
     build_assistant_response_message, build_assistant_tool_message, json, known_tools_set,
     normalize_tool_args, parse_bare_calls_in_body, parse_native_json_tool_calls,
-    sample_tool_registry,
+    parse_text_tool_calls_with_tools, sample_tool_registry,
 };
 
 #[test]
@@ -813,4 +813,54 @@ fn read_file_offset_and_limit() {
     let result =
         handle_tool_locally("read_file", &json!({"path": path_str, "offset": 100})).unwrap();
     assert!(!result.contains("line"), "no content past end");
+}
+
+#[test]
+fn tagged_tool_call_keeps_literal_close_tag_inside_heredoc() {
+    // The response protocol tells models to write multiline string fields as
+    // `<<TAG ... TAG` heredocs with "raw content, no escaping" — so a heredoc
+    // body can legitimately contain the literal `</tool_call>`. The close-tag
+    // scan must step over the heredoc body and honor only the real terminator,
+    // otherwise the whole call is shredded into stray text.
+    let tools = sample_tool_registry();
+    let text = "<tool_call>edit({\n    action: \"create\",\n    path: \"doc.md\",\n    content: <<EOF\nWrap each call like </tool_call> here.\nMore body lines.\nEOF\n})</tool_call>";
+    let result = parse_text_tool_calls_with_tools(text, Some(&tools));
+    assert_eq!(
+        result.calls.len(),
+        1,
+        "expected exactly one edit call, errors={:?} violations={:?}",
+        result.errors,
+        result.violations
+    );
+    let content = result.calls[0]["arguments"]["content"].as_str().unwrap();
+    assert!(
+        content.contains("</tool_call>"),
+        "heredoc body should retain the literal close tag: {content:?}"
+    );
+    assert!(
+        content.contains("More body lines."),
+        "heredoc body should not be truncated mid-stream: {content:?}"
+    );
+}
+
+#[test]
+fn tagged_tool_calls_get_turn_unique_ids() {
+    // Two `<tool_call>` blocks in one turn must not collide on `tc_0`; each
+    // per-body parser only sees its local (single-call) vector, so the
+    // turn-global renumber is what keeps result correlation unambiguous.
+    let tools = sample_tool_registry();
+    let text = "<tool_call>run({ command: \"echo a\" })</tool_call>\n\
+                <tool_call>run({ command: \"echo b\" })</tool_call>";
+    let result = parse_text_tool_calls_with_tools(text, Some(&tools));
+    assert_eq!(
+        result.calls.len(),
+        2,
+        "expected two run calls, errors={:?}",
+        result.errors
+    );
+    let id0 = result.calls[0]["id"].as_str().unwrap();
+    let id1 = result.calls[1]["id"].as_str().unwrap();
+    assert_eq!(id0, "tc_0");
+    assert_eq!(id1, "tc_1");
+    assert_ne!(id0, id1, "tool-call ids must be unique within a turn");
 }

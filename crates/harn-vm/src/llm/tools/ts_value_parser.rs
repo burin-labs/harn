@@ -4,7 +4,7 @@
 //! the limited set of keywords (`true` / `false` / `null` / `undefined`)
 //! that models emit when transcribing tool calls.
 
-use super::parse::ident_length;
+use super::parse::{ident_length, scan_heredoc, HeredocError};
 
 /// Minimal recursive-descent parser for a TypeScript value expression. Handles
 /// object and array literals, string literals (double-quoted and single-quoted),
@@ -351,88 +351,25 @@ impl<'a> TsValueParser<'a> {
     /// makes heredocs ideal for multiline code that contains backticks, quotes,
     /// or backslashes (Go raw strings, shell scripts, YAML, etc.).
     fn parse_heredoc(&mut self) -> Result<serde_json::Value, String> {
-        // Consume "<<"
-        self.advance();
-        self.advance();
-        // Skip optional quotes around the heredoc tag. Models commonly
-        // emit <<'EOF' or <<"EOF" (bash-style quoting) instead of bare <<EOF.
-        let has_quote = matches!(self.peek(), Some(b'\'') | Some(b'"'));
-        let quote_char = self.peek();
-        if has_quote {
-            self.advance();
-        }
-        // Read tag: uppercase letters, digits, underscore
-        let tag_start = self.pos;
-        while let Some(b) = self.peek() {
-            if b.is_ascii_alphanumeric() || b == b'_' {
-                self.advance();
-            } else {
-                break;
+        // Both `<<'EOF'`/`<<"EOF"` quoting and the close-line word-boundary
+        // rule live in the shared `scan_heredoc` authority; anything after the
+        // tag on the closing line is left for the outer parser by rewinding
+        // `self.pos` to right after the tag.
+        match scan_heredoc(self.text, self.pos) {
+            Ok(span) => {
+                let content = self.text[span.content].to_string();
+                self.pos = span.end;
+                Ok(serde_json::Value::String(content))
             }
-        }
-        let tag = &self.text[tag_start..self.pos];
-        if tag.is_empty() {
-            return Err("heredoc requires a tag after << (e.g. <<EOF)".to_string());
-        }
-        // Skip closing quote if we had an opening one
-        if has_quote && self.peek() == quote_char {
-            self.advance();
-        }
-        // Consume the newline after the tag
-        if self.peek() == Some(b'\r') {
-            self.advance();
-        }
-        if self.peek() == Some(b'\n') {
-            self.advance();
-        } else {
-            return Err(format!("expected newline after heredoc tag <<{tag}"));
-        }
-        // Read content until a line consisting of exactly the tag
-        let content_start = self.pos;
-        loop {
-            // Find the start of the current line
-            let line_start = self.pos;
-            // Read to end of line
-            while let Some(b) = self.peek() {
-                if b == b'\n' {
-                    break;
-                }
-                self.advance();
+            Err(HeredocError::MissingTag) => {
+                Err("heredoc requires a tag after << (e.g. <<EOF)".to_string())
             }
-            let line = &self.text[line_start..self.pos];
-            // Match the closing tag: after leading whitespace, the line must
-            // start with the tag followed by a word boundary (end of line or
-            // any non-identifier character). Anything after the tag is handed
-            // back to the outer parser verbatim, which naturally absorbs
-            // trailing commas, closing brackets, parens, braces, etc. without
-            // the heredoc lexer maintaining a brittle allowlist of accepted
-            // punctuation.
-            let leading_ws_len = line.len() - line.trim_start().len();
-            let after_ws = &line[leading_ws_len..];
-            if let Some(rest) = after_ws.strip_prefix(tag) {
-                let at_word_boundary = rest
-                    .chars()
-                    .next()
-                    .is_none_or(|c| !(c.is_ascii_alphanumeric() || c == '_'));
-                if at_word_boundary {
-                    let content = &self.text[content_start..line_start];
-                    let content = content.strip_suffix('\n').unwrap_or(content);
-                    let content = content.strip_suffix('\r').unwrap_or(content);
-                    // Rewind position to right after the tag so the outer
-                    // parser sees whatever followed it on the same line.
-                    self.pos = line_start + leading_ws_len + tag.len();
-                    return Ok(serde_json::Value::String(content.to_string()));
-                }
+            Err(HeredocError::MissingNewline { tag }) => {
+                Err(format!("expected newline after heredoc tag <<{tag}"))
             }
-            // Consume the newline
-            if self.peek() == Some(b'\n') {
-                self.advance();
-            } else {
-                // End of input without finding closing tag
-                return Err(format!(
-                    "unterminated heredoc: expected closing {tag} at the start of a line"
-                ));
-            }
+            Err(HeredocError::Unterminated { tag }) => Err(format!(
+                "unterminated heredoc: expected closing {tag} at the start of a line"
+            )),
         }
     }
 

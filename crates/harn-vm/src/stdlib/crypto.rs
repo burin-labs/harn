@@ -764,11 +764,7 @@ pub(crate) fn register_crypto_builtins(vm: &mut Vm) {
     category = "crypto"
 )]
 fn base64_encode_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
-    let bytes = match args.first() {
-        Some(VmValue::Bytes(bytes)) => bytes.as_slice().to_vec(),
-        Some(other) => other.display().into_bytes(),
-        None => Vec::new(),
-    };
+    let bytes = bytes_or_string_input(args.first())?;
     use base64::Engine;
     Ok(VmValue::String(std::sync::Arc::from(
         base64::engine::general_purpose::STANDARD.encode(bytes),
@@ -792,10 +788,10 @@ fn base64_decode_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, Vm
     category = "crypto"
 )]
 fn base64url_encode_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
-    let val = display_arg(args);
+    let bytes = bytes_or_string_input(args.first())?;
     use base64::Engine;
     Ok(VmValue::String(std::sync::Arc::from(
-        base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(val.as_bytes()),
+        base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(bytes),
     )))
 }
 
@@ -820,11 +816,7 @@ fn base64url_decode_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue,
 )]
 fn bytes_to_base64url_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     use base64::Engine;
-    let bytes = match args.first() {
-        Some(VmValue::Bytes(bytes)) => bytes.as_slice().to_vec(),
-        Some(other) => other.display().into_bytes(),
-        None => Vec::new(),
-    };
+    let bytes = bytes_or_string_input(args.first())?;
     Ok(VmValue::String(std::sync::Arc::from(
         base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(bytes),
     )))
@@ -840,11 +832,7 @@ fn bytes_to_base64url_impl(args: &[VmValue], _out: &mut String) -> Result<VmValu
 fn sha256_base64url_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     use base64::Engine;
     use sha2::Digest;
-    let bytes = match args.first() {
-        Some(VmValue::Bytes(bytes)) => bytes.as_slice().to_vec(),
-        Some(other) => other.display().into_bytes(),
-        None => Vec::new(),
-    };
+    let bytes = bytes_or_string_input(args.first())?;
     let digest = sha2::Sha256::digest(&bytes);
     Ok(VmValue::String(std::sync::Arc::from(
         base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(digest),
@@ -881,11 +869,14 @@ fn crypto_random_bytes_impl(args: &[VmValue], _out: &mut String) -> Result<VmVal
     Ok(VmValue::Bytes(std::sync::Arc::new(out)))
 }
 
-#[harn_builtin(sig = "base32_encode(input: string) -> string", category = "crypto")]
+#[harn_builtin(
+    sig = "base32_encode(input: string | bytes) -> string",
+    category = "crypto"
+)]
 fn base32_encode_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
-    let val = display_arg(args);
+    let bytes = bytes_or_string_input(args.first())?;
     Ok(VmValue::String(std::sync::Arc::from(
-        data_encoding::BASE32.encode(val.as_bytes()),
+        data_encoding::BASE32.encode(&bytes),
     )))
 }
 
@@ -900,12 +891,13 @@ fn base32_decode_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, Vm
     }
 }
 
-#[harn_builtin(sig = "hex_encode(input: string) -> string", category = "crypto")]
+#[harn_builtin(
+    sig = "hex_encode(input: string | bytes) -> string",
+    category = "crypto"
+)]
 fn hex_encode_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
-    let val = display_arg(args);
-    Ok(VmValue::String(std::sync::Arc::from(hex::encode(
-        val.as_bytes(),
-    ))))
+    let bytes = bytes_or_string_input(args.first())?;
+    Ok(VmValue::String(std::sync::Arc::from(hex::encode(bytes))))
 }
 
 #[harn_builtin(sig = "hex_decode(text: string?) -> string", category = "crypto")]
@@ -933,58 +925,61 @@ fn hash_value_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErr
     Ok(VmValue::Int(hash as i64))
 }
 
-#[harn_builtin(sig = "sha256(input: string) -> string", category = "crypto")]
+#[harn_builtin(sig = "sha256(input: string | bytes) -> string", category = "crypto")]
 fn sha256_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     use sha2::Digest;
-    let val = display_arg(args);
-    let hash = sha2::Sha256::digest(val.as_bytes());
-    let hex: String = hash.iter().map(|b| format!("{b:02x}")).collect();
-    Ok(VmValue::String(std::sync::Arc::from(hex)))
+    let bytes = bytes_or_string_input(args.first())?;
+    Ok(VmValue::String(std::sync::Arc::from(hex::encode(
+        sha2::Sha256::digest(&bytes),
+    ))))
 }
 
-#[harn_builtin(sig = "sha224(input: string) -> string", category = "crypto")]
+#[harn_builtin(sig = "sha224(input: string | bytes) -> string", category = "crypto")]
 fn sha224_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     use sha2::Digest;
-    let val = display_arg(args);
-    let hash = sha2::Sha224::digest(val.as_bytes());
-    let hex: String = hash.iter().map(|b| format!("{b:02x}")).collect();
-    Ok(VmValue::String(std::sync::Arc::from(hex)))
+    let bytes = bytes_or_string_input(args.first())?;
+    Ok(VmValue::String(std::sync::Arc::from(hex::encode(
+        sha2::Sha224::digest(&bytes),
+    ))))
 }
 
-#[harn_builtin(sig = "sha384(input: string) -> string", category = "crypto")]
+#[harn_builtin(sig = "sha384(input: string | bytes) -> string", category = "crypto")]
 fn sha384_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     use sha2::Digest;
-    let val = display_arg(args);
-    let hash = sha2::Sha384::digest(val.as_bytes());
-    let hex: String = hash.iter().map(|b| format!("{b:02x}")).collect();
-    Ok(VmValue::String(std::sync::Arc::from(hex)))
+    let bytes = bytes_or_string_input(args.first())?;
+    Ok(VmValue::String(std::sync::Arc::from(hex::encode(
+        sha2::Sha384::digest(&bytes),
+    ))))
 }
 
-#[harn_builtin(sig = "sha512(input: string) -> string", category = "crypto")]
+#[harn_builtin(sig = "sha512(input: string | bytes) -> string", category = "crypto")]
 fn sha512_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     use sha2::Digest;
-    let val = display_arg(args);
-    let hash = sha2::Sha512::digest(val.as_bytes());
-    let hex: String = hash.iter().map(|b| format!("{b:02x}")).collect();
-    Ok(VmValue::String(std::sync::Arc::from(hex)))
+    let bytes = bytes_or_string_input(args.first())?;
+    Ok(VmValue::String(std::sync::Arc::from(hex::encode(
+        sha2::Sha512::digest(&bytes),
+    ))))
 }
 
-#[harn_builtin(sig = "sha512_256(input: string) -> string", category = "crypto")]
+#[harn_builtin(
+    sig = "sha512_256(input: string | bytes) -> string",
+    category = "crypto"
+)]
 fn sha512_256_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     use sha2::Digest;
-    let val = display_arg(args);
-    let hash = sha2::Sha512_256::digest(val.as_bytes());
-    let hex: String = hash.iter().map(|b| format!("{b:02x}")).collect();
-    Ok(VmValue::String(std::sync::Arc::from(hex)))
+    let bytes = bytes_or_string_input(args.first())?;
+    Ok(VmValue::String(std::sync::Arc::from(hex::encode(
+        sha2::Sha512_256::digest(&bytes),
+    ))))
 }
 
-#[harn_builtin(sig = "md5(input: string) -> string", category = "crypto")]
+#[harn_builtin(sig = "md5(input: string | bytes) -> string", category = "crypto")]
 fn md5_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     use md5::Digest;
-    let val = display_arg(args);
-    let hash = md5::Md5::digest(val.as_bytes());
-    let hex: String = hash.iter().map(|b| format!("{b:02x}")).collect();
-    Ok(VmValue::String(std::sync::Arc::from(hex)))
+    let bytes = bytes_or_string_input(args.first())?;
+    Ok(VmValue::String(std::sync::Arc::from(hex::encode(
+        md5::Md5::digest(&bytes),
+    ))))
 }
 
 // Top-level alias for `harness.crypto.sha256(...)`. It accepts `Bytes`
@@ -1468,6 +1463,49 @@ C/edCMRM78P8eQTBCDUTK1ywSYaszvQZvneiW6gNtWEJndSreEcyyUdVvg==\n\
         assert_eq!(encoded.display(), "aGVsbG8gd29ybGQ=");
         let decoded = call(&mut vm, "base64_decode", vec![encoded]).unwrap();
         assert_eq!(decoded.display(), "hello world");
+    }
+
+    #[test]
+    fn encode_and_hash_bytes_input_is_lossless_past_preview_cap() {
+        // Regression: byte-consuming builtins funneled `Bytes` through
+        // `display()`, which emits a hex preview truncated at 32 bytes — so the
+        // encode/hash of a long binary value silently corrupted it. They must
+        // now operate on the raw bytes and agree with the equivalent string.
+        let mut vm = vm();
+        // 40 bytes (past the 32-byte display preview cap), all printable ASCII
+        // so the string and bytes forms carry identical content.
+        let raw = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789abcd";
+        assert!(raw.len() > 32);
+        let bytes_val = VmValue::Bytes(std::sync::Arc::new(raw.as_bytes().to_vec()));
+        for name in [
+            "base64_encode",
+            "base64url_encode",
+            "base32_encode",
+            "hex_encode",
+            "sha256",
+            "sha224",
+            "sha384",
+            "sha512",
+            "sha512_256",
+            "md5",
+            "bytes_to_base64url",
+            "sha256_base64url",
+        ] {
+            let from_bytes = call(&mut vm, name, vec![bytes_val.clone()]).unwrap();
+            let from_string = call(&mut vm, name, vec![s(raw)]).unwrap();
+            assert_eq!(
+                from_bytes.display(),
+                from_string.display(),
+                "{name}: bytes and string inputs must agree (no truncation)"
+            );
+        }
+        // The encoding must cover all 40 bytes, not a 32-byte prefix.
+        let hex = call(&mut vm, "hex_encode", vec![bytes_val]).unwrap();
+        assert_eq!(
+            hex.display().len(),
+            raw.len() * 2,
+            "hex must cover all bytes"
+        );
     }
 
     #[test]
