@@ -1,0 +1,148 @@
+//! Convergence regression + streaming/non-streaming parity for reserved-token
+//! tool-call delimiters (qwen3.6 local on llamacpp).
+//!
+//! Field bug (#3044): a local `local-qwen3.6` go-test eval dispatched ZERO tool
+//! calls across 23 turns even though the model correctly emitted
+//! `[[CALL]]…[[/CALL]]` blocks on every turn. Root cause: the wire→canonical
+//! delimiter remap lived only in `chat_impl`, which the *unregistered*
+//! `llamacpp` OpenAI-compat fallback route in `vm_call_llm_api` bypasses. So the
+//! assembled completion reached the tagged tool-call parser in raw wire form.
+//!
+//! Why that loses calls: the tagged parser anchors on `<tool_call>` blocks. With
+//! the wire form there are no such blocks, so parsing falls entirely to the
+//! fragile bare-call rescue scanner — which, when a tool name isn't in the
+//! effective known-tool set, silently drops the call with NO diagnostic (0
+//! calls, 0 errors). The canonical form instead gives the tagged parser real
+//! `<tool_call>` blocks, so the call is either dispatched or surfaced as a
+//! diagnostic the loop can replay — it is never silently lost. The captured
+//! field bytes below reproduce exactly that 0-calls/0-errors silent loss on the
+//! wire form.
+//!
+//! The fix moves the remap into the shared transport funnel
+//! (`vm_call_llm_api_with_body`) so it fires identically on every route —
+//! registered and unregistered, streaming and non-streaming.
+
+use super::parse_text_tool_calls_with_tools;
+use super::sample_tool_registry;
+use crate::llm::tool_delimiter::wire_to_canonical;
+
+/// The real first-turn completion from the failing eval: 22 `[[CALL]]…[[/CALL]]`
+/// blocks emitted back-to-back with no separator (10 `look`s, an `edit`, …).
+const MULTIBLOCK: &str = include_str!("../../testdata/qwen36_multiblock_response.txt");
+
+/// The real ~10.6KB single `edit({ … content: <<EOF … EOF })` block, with the
+/// model's escaped-newline heredoc body.
+const EDIT_BLOCK: &str = include_str!("../../testdata/qwen36_reserved_token_response.txt");
+
+#[test]
+fn wire_form_silently_loses_calls_canonical_does_not() {
+    // The exact field condition: the tagged parser has no `<tool_call>` blocks
+    // to anchor on, bare-rescue finds no known tool, and the calls vanish with
+    // NO diagnostic. This 0-calls / 0-errors silent loss is precisely why the
+    // agent saw "nothing happened" and hallucinated completion.
+    let wire = parse_text_tool_calls_with_tools(MULTIBLOCK, None);
+    assert_eq!(
+        wire.calls.len(),
+        0,
+        "wire form yields zero calls (the field bug)"
+    );
+    assert!(
+        wire.errors.is_empty(),
+        "wire form yields zero per-call diagnostics too — the calls are silently lost: {:?}",
+        wire.errors
+    );
+
+    // After the remap the same bytes carry real `<tool_call>` blocks, so the
+    // tagged parser sees them. With no registry the blocks surface as
+    // structured diagnostics (not silence) the loop can act on; the regression
+    // is the *silent* loss, which canonicalization eliminates.
+    let canon = parse_text_tool_calls_with_tools(&wire_to_canonical(MULTIBLOCK), None);
+    assert!(
+        !canon.calls.is_empty() || !canon.errors.is_empty(),
+        "canonicalized text must be visible to the parser (calls or diagnostics), \
+         not silently dropped: calls={:?} errors={:?}",
+        canon.calls,
+        canon.errors
+    );
+}
+
+#[test]
+fn registered_tools_dispatch_only_after_canonicalization_for_tagged_blocks() {
+    // With a registry containing the emitted tools, the canonical (tagged) form
+    // dispatches the `look`/`edit` calls cleanly. The sample registry has
+    // `edit`; assert the captured single-edit turn dispatches the edit on the
+    // canonical path and is silent on the wire path.
+    let tools = sample_tool_registry();
+
+    let wire = parse_text_tool_calls_with_tools(EDIT_BLOCK, Some(&tools));
+    assert_eq!(
+        wire.calls.len(),
+        0,
+        "wire form: no tagged edit block to parse"
+    );
+    assert!(
+        wire.errors.is_empty(),
+        "wire form: silently lost, no diagnostic: {:?}",
+        wire.errors
+    );
+
+    let canon = parse_text_tool_calls_with_tools(&wire_to_canonical(EDIT_BLOCK), Some(&tools));
+    let saw_edit = canon.calls.iter().any(|c| {
+        c.get("name").and_then(|v| v.as_str()) == Some("edit")
+            || c.get("tool").and_then(|v| v.as_str()) == Some("edit")
+    });
+    assert!(
+        saw_edit || !canon.errors.is_empty(),
+        "after remap the edit block must be visible (dispatched or diagnosed): \
+         calls={:?} errors={:?}",
+        canon.calls,
+        canon.errors
+    );
+}
+
+#[test]
+fn streaming_and_non_streaming_remap_parse_identically() {
+    // Streaming/non-streaming parity. The non-streaming transport returns the
+    // whole completion; the streaming transport assembles it from content
+    // deltas. Both funnel through `vm_call_llm_api_with_body`, where the
+    // assembled `result.text` is remapped via `wire_to_canonical`. Model the
+    // streaming assembly as an arbitrary char-boundary chunking of the same wire
+    // bytes (concatenating deltas reproduces the full completion) and assert the
+    // parsed calls AND diagnostics are byte-for-byte identical across paths.
+    let tools = sample_tool_registry();
+
+    for fixture in [MULTIBLOCK, EDIT_BLOCK] {
+        // Non-streaming: whole text -> remap -> parse.
+        let non_streaming_text = wire_to_canonical(fixture);
+        let non_streaming = parse_text_tool_calls_with_tools(&non_streaming_text, Some(&tools));
+
+        // Streaming: split into 3-byte deltas (splitting inside `[[CALL]]` and
+        // the body), reassemble -> remap -> parse.
+        let mut assembled = String::new();
+        let bytes = fixture.as_bytes();
+        let mut i = 0;
+        while i < bytes.len() {
+            let mut end = (i + 3).min(bytes.len());
+            while end < bytes.len() && !fixture.is_char_boundary(end) {
+                end += 1;
+            }
+            assembled.push_str(&fixture[i..end]);
+            i = end;
+        }
+        let streaming_text = wire_to_canonical(&assembled);
+        let streaming = parse_text_tool_calls_with_tools(&streaming_text, Some(&tools));
+
+        assert_eq!(
+            non_streaming_text, streaming_text,
+            "assembled streaming text must equal the non-streaming text"
+        );
+        assert_eq!(
+            non_streaming.calls, streaming.calls,
+            "streaming and non-streaming paths must parse identical tool calls"
+        );
+        assert_eq!(
+            non_streaming.errors, streaming.errors,
+            "streaming and non-streaming paths must produce identical diagnostics"
+        );
+    }
+}

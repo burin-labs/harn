@@ -262,6 +262,39 @@ pub(crate) async fn vm_call_llm_api_with_body(
     let mut result =
         vm_call_llm_api_with_body_inner(opts, delta_tx, body, is_anthropic_style, is_ollama)
             .await?;
+    // Reserved-token tool-call delimiter remap (single boundary).
+    //
+    // For models that reserve `<tool_call>`/`</tool_call>` as special tokens
+    // (`reserved_tool_call_token` in capabilities.toml) the prompt is sent with
+    // the delimiters swapped for a non-special wire form (`[[CALL]]`; see
+    // `build_request_body` + `tool_delimiter`). The completion comes back in
+    // that same wire form and MUST be mapped back to canonical before the
+    // transcript and tagged tool-call parser ever see it.
+    //
+    // This lives in the shared transport funnel — not in `chat_impl` — so it
+    // fires identically for every route into this function: the registered
+    // OpenAI-compat path (`chat_impl`), the *unregistered* OpenAI-compat
+    // fallback in `vm_call_llm_api` (e.g. a `llamacpp` provider configured via
+    // providers.toml but never `provider_register`-ed), and both the streaming
+    // (SSE/NDJSON) and non-streaming transports. Previously the remap lived
+    // only in `chat_impl`, so an unregistered `llamacpp` qwen3.6 route returned
+    // raw `[[CALL]]` text, the parser found zero `<tool_call>` blocks, and the
+    // agent dispatched no tools (convergence-fatal). The streamed live deltas
+    // are canonicalized separately by `canonicalizing_delta_tx`; this remaps the
+    // assembled `result.text` that the parser/transcript consume.
+    if crate::llm::capabilities::lookup(&opts.provider, &opts.model).reserved_tool_call_token {
+        let wire_open = result.text.matches("[[CALL]]").count();
+        result.text = crate::llm::tool_delimiter::wire_to_canonical(&result.text);
+        let canon_open = result.text.matches("<tool_call>").count();
+        tracing::debug!(
+            target: "harn::llm::tool_delimiter",
+            provider = %opts.provider,
+            model = %opts.model,
+            wire_open_markers = wire_open,
+            canonical_open_blocks = canon_open,
+            "reserved-token wire->canonical remap applied to assembled completion",
+        );
+    }
     // Preserve a per-call wall clock regardless of provider. Server-side
     // timings (when available) cover only the model's view; client_wall_ms
     // captures network + streaming overhead the server cannot see, so eval

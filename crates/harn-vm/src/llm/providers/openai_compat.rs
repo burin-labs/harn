@@ -301,8 +301,12 @@ impl OpenAiCompatibleProvider {
         self.transform_request(&mut body);
 
         // For reserved-tool-call-token models the prompt was sent with the
-        // delimiters remapped (see `build_request_body`); map the response
-        // back to canonical `<tool_call>` before the parser/transcript see it.
+        // delimiters remapped (see `build_request_body`). The streamed live
+        // deltas are canonicalized here (across chunk boundaries) so the live
+        // display never shows the wire form; the assembled `result.text` is
+        // mapped back to canonical in the shared transport funnel
+        // (`vm_call_llm_api_with_body`), which is the single boundary covering
+        // every route — registered and unregistered, streaming and not.
         let remap_tool_call = crate::llm::capabilities::lookup(&request.provider, &request.model)
             .reserved_tool_call_token;
         let delta_tx = if remap_tool_call {
@@ -310,14 +314,11 @@ impl OpenAiCompatibleProvider {
         } else {
             delta_tx
         };
-        let mut result = crate::llm::api::vm_call_llm_api_with_body(
+        let result = crate::llm::api::vm_call_llm_api_with_body(
             request, delta_tx, body, false, // is_anthropic_style
             false, // is_ollama
         )
         .await?;
-        if remap_tool_call {
-            result.text = crate::llm::tool_delimiter::wire_to_canonical(&result.text);
-        }
         Ok(result)
     }
 }
@@ -1314,6 +1315,37 @@ thinking_modes = ["enabled"]
         }
         out.push_str(&c.flush());
         assert_eq!(out, "<tool_call>\nlook({ a: 1 })\n</tool_call> done");
+    }
+
+    #[test]
+    fn delta_canonicalizer_matches_whole_string_remap_on_real_response() {
+        // Streaming/non-streaming parity at the live-delta boundary: feeding the
+        // real captured wire-form completion through the streaming
+        // `DeltaCanonicalizer` (arbitrary chunk splits, including inside the
+        // `[[CALL]]` opener and the heredoc body) must yield exactly the same
+        // canonical text as the non-streaming whole-string `wire_to_canonical`.
+        let wire = include_str!("../testdata/qwen36_reserved_token_response.txt");
+        let expected = crate::llm::tool_delimiter::wire_to_canonical(wire);
+
+        let mut c = DeltaCanonicalizer::default();
+        let mut out = String::new();
+        let bytes = wire.as_bytes();
+        let mut i = 0;
+        while i < bytes.len() {
+            let mut end = (i + 5).min(bytes.len());
+            while end < bytes.len() && !wire.is_char_boundary(end) {
+                end += 1;
+            }
+            out.push_str(&c.push(&wire[i..end]));
+            i = end;
+        }
+        out.push_str(&c.flush());
+
+        assert_eq!(
+            out, expected,
+            "streamed delta canonicalization must equal the non-streaming whole-string remap"
+        );
+        assert!(out.contains("<tool_call>") && !out.contains("[[CALL]]"));
     }
 
     #[test]
