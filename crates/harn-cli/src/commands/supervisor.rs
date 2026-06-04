@@ -673,21 +673,19 @@ async fn wait_for_running_snapshot(
     Ok(SupervisorStartWait::TimedOut)
 }
 
-#[cfg(unix)]
+/// Whether `pid` is still a live process. Uses `sysinfo` (already a
+/// dependency) rather than shelling out to `kill -0`, so it works on every
+/// platform and avoids spawning a subprocess on the liveness-polling hot path
+/// in `wait_for_process_exit`.
 fn process_is_alive(pid: u32) -> bool {
-    Command::new("kill")
-        .arg("-0")
-        .arg(pid.to_string())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status()
-        .map(|status| status.success())
-        .unwrap_or(false)
-}
-
-#[cfg(not(unix))]
-fn process_is_alive(_pid: u32) -> bool {
-    false
+    let pid = sysinfo::Pid::from_u32(pid);
+    let mut sys = sysinfo::System::new();
+    sys.refresh_processes_specifics(
+        sysinfo::ProcessesToUpdate::Some(&[pid]),
+        true,
+        sysinfo::ProcessRefreshKind::nothing(),
+    );
+    sys.process(pid).is_some()
 }
 
 #[cfg(unix)]
