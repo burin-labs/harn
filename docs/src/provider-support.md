@@ -22,7 +22,7 @@ No benchmark summary is baked into this checked-in page. To layer local empirica
 | `Groq` | OpenAI-compatible chat completions | `groq` | `text` | no | yes | `none` / `none` | none | no | `provider_default` | `not_recorded` |
 | `Huggingface` | OpenAI-compatible chat completions | `huggingface:qwen/qwen3.6*` | `native` | yes | yes | `native` / `delimited` | `disable_directive:/no_think,enabled` | no | `provider_default` | `not_recorded` |
 | `llama.cpp server` | OpenAI-compatible llama-server | `llamacpp-qwen3.6-q4` | `text` | no | yes | `native` / `delimited` | `disable_directive:/no_think,enabled` | no | `medium` | `not_recorded` |
-| `OpenAI-compatible local server` | OpenAI-compatible chat completions | `local-gemma4` | `text` | no | yes | `none` / `delimited` | `enabled` | no | `low` | `not_recorded` |
+| `OpenAI-compatible local server` | OpenAI-compatible chat completions | `local-gemma4` | `text` | yes | yes | `native` / `delimited` | `enabled` | no | `low` | `not_recorded` |
 | `Minimax` | OpenAI-compatible chat completions | `minimax:MiniMax-M2.5-highspeed` | `native` | yes | yes | `delimited` / `delimited` | `enabled` | yes | `high` | `not_recorded` |
 | `Mistral via OpenRouter` | OpenAI-compatible chat completions through OpenRouter | `openrouter:mistralai/mistral-small-2603` | `native` | yes | yes | `native` / `native_json` | none | yes | `medium` | `not_recorded` |
 | `MLX OpenAI-compatible server` | OpenAI-compatible MLX server | `mlx-qwen3.6-27b` | `native` | yes | yes | `native` / `delimited` | `disable_directive:/no_think,enabled` | no | `medium` | `not_recorded` |

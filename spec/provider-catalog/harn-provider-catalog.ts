@@ -2903,13 +2903,13 @@ export const harnProviderCatalog: HarnProviderCatalog = {
         ]
       },
       "tool_support": {
-        "native": false,
+        "native": true,
         "text": true,
-        "preferred_format": "text",
-        "parity": "text_only",
+        "preferred_format": "native",
+        "parity": "unknown",
         "tool_search": []
       },
-      "structured_output": "none",
+      "structured_output": "native",
       "format_preferences": {
         "prefers_xml_scaffolding": false,
         "prefers_markdown_scaffolding": true,
@@ -2939,7 +2939,8 @@ export const harnProviderCatalog: HarnProviderCatalog = {
       "capability_tags": [
         "streaming",
         "tools",
-        "thinking"
+        "thinking",
+        "structured_output"
       ],
       "family": "gemma",
       "lineage": "gemma4",
@@ -2969,13 +2970,13 @@ export const harnProviderCatalog: HarnProviderCatalog = {
         ]
       },
       "tool_support": {
-        "native": false,
+        "native": true,
         "text": true,
-        "preferred_format": "text",
-        "parity": "text_only",
+        "preferred_format": "native",
+        "parity": "unknown",
         "tool_search": []
       },
-      "structured_output": "none",
+      "structured_output": "native",
       "format_preferences": {
         "prefers_xml_scaffolding": false,
         "prefers_markdown_scaffolding": true,
@@ -3005,7 +3006,8 @@ export const harnProviderCatalog: HarnProviderCatalog = {
       "capability_tags": [
         "streaming",
         "tools",
-        "thinking"
+        "thinking",
+        "structured_output"
       ],
       "family": "gemma",
       "lineage": "gemma4",
@@ -3033,13 +3035,13 @@ export const harnProviderCatalog: HarnProviderCatalog = {
         ]
       },
       "tool_support": {
-        "native": false,
+        "native": true,
         "text": true,
-        "preferred_format": "text",
-        "parity": "text_only",
+        "preferred_format": "native",
+        "parity": "unknown",
         "tool_search": []
       },
-      "structured_output": "none",
+      "structured_output": "native",
       "format_preferences": {
         "prefers_xml_scaffolding": false,
         "prefers_markdown_scaffolding": true,
@@ -3069,7 +3071,8 @@ export const harnProviderCatalog: HarnProviderCatalog = {
       "capability_tags": [
         "streaming",
         "tools",
-        "thinking"
+        "thinking",
+        "structured_output"
       ],
       "family": "gemma",
       "lineage": "gemma4",
@@ -3098,13 +3101,13 @@ export const harnProviderCatalog: HarnProviderCatalog = {
         ]
       },
       "tool_support": {
-        "native": false,
+        "native": true,
         "text": true,
-        "preferred_format": "text",
-        "parity": "text_only",
+        "preferred_format": "native",
+        "parity": "unknown",
         "tool_search": []
       },
-      "structured_output": "none",
+      "structured_output": "native",
       "format_preferences": {
         "prefers_xml_scaffolding": false,
         "prefers_markdown_scaffolding": true,
@@ -3134,7 +3137,8 @@ export const harnProviderCatalog: HarnProviderCatalog = {
       "capability_tags": [
         "streaming",
         "tools",
-        "thinking"
+        "thinking",
+        "structured_output"
       ],
       "family": "gemma",
       "lineage": "gemma4",
@@ -3163,13 +3167,13 @@ export const harnProviderCatalog: HarnProviderCatalog = {
         ]
       },
       "tool_support": {
-        "native": false,
+        "native": true,
         "text": true,
-        "preferred_format": "text",
-        "parity": "text_only",
+        "preferred_format": "native",
+        "parity": "unknown",
         "tool_search": []
       },
-      "structured_output": "none",
+      "structured_output": "native",
       "format_preferences": {
         "prefers_xml_scaffolding": false,
         "prefers_markdown_scaffolding": true,
@@ -3199,7 +3203,8 @@ export const harnProviderCatalog: HarnProviderCatalog = {
       "capability_tags": [
         "streaming",
         "tools",
-        "thinking"
+        "thinking",
+        "structured_output"
       ],
       "family": "gemma",
       "lineage": "gemma4",
@@ -3872,7 +3877,7 @@ export const harnProviderCatalog: HarnProviderCatalog = {
         "parity": "text_only",
         "tool_search": []
       },
-      "structured_output": "none",
+      "structured_output": "format_kw",
       "format_preferences": {
         "prefers_xml_scaffolding": false,
         "prefers_markdown_scaffolding": true,
@@ -3899,7 +3904,8 @@ export const harnProviderCatalog: HarnProviderCatalog = {
       ],
       "capability_tags": [
         "streaming",
-        "tools"
+        "tools",
+        "structured_output"
       ],
       "family": "gemma",
       "lineage": "gemma4",
@@ -3933,7 +3939,7 @@ export const harnProviderCatalog: HarnProviderCatalog = {
         "parity": "text_only",
         "tool_search": []
       },
-      "structured_output": "none",
+      "structured_output": "format_kw",
       "format_preferences": {
         "prefers_xml_scaffolding": false,
         "prefers_markdown_scaffolding": true,
@@ -3960,7 +3966,8 @@ export const harnProviderCatalog: HarnProviderCatalog = {
       ],
       "capability_tags": [
         "streaming",
-        "tools"
+        "tools",
+        "structured_output"
       ],
       "family": "gemma",
       "lineage": "gemma4",
@@ -3996,7 +4003,7 @@ export const harnProviderCatalog: HarnProviderCatalog = {
         "parity": "text_only",
         "tool_search": []
       },
-      "structured_output": "none",
+      "structured_output": "format_kw",
       "format_preferences": {
         "prefers_xml_scaffolding": false,
         "prefers_markdown_scaffolding": true,
@@ -4023,7 +4030,8 @@ export const harnProviderCatalog: HarnProviderCatalog = {
       ],
       "capability_tags": [
         "streaming",
-        "tools"
+        "tools",
+        "structured_output"
       ],
       "family": "gemma",
       "lineage": "gemma4",
@@ -4061,7 +4069,7 @@ export const harnProviderCatalog: HarnProviderCatalog = {
         "parity": "text_only",
         "tool_search": []
       },
-      "structured_output": "none",
+      "structured_output": "format_kw",
       "format_preferences": {
         "prefers_xml_scaffolding": false,
         "prefers_markdown_scaffolding": true,
@@ -4089,7 +4097,8 @@ export const harnProviderCatalog: HarnProviderCatalog = {
       "capability_tags": [
         "streaming",
         "tools",
-        "vision"
+        "vision",
+        "structured_output"
       ],
       "family": "gemma",
       "lineage": "gemma4",

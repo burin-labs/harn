@@ -259,7 +259,7 @@ vision = true
 audio_supported = true
 pdf_supported = true
 files_api_supported = true
-json_schema = "tool_use"
+structured_output = "tool_use"
 thinking_modes = ["enabled"]
 interleaved_thinking_supported = true
 vision_supported = true
@@ -456,7 +456,7 @@ vision = true
 audio_supported = true
 pdf_supported = true
 files_api_supported = true
-json_schema = "tool_use"
+structured_output = "tool_use"
 thinking_modes = ["enabled"]
 interleaved_thinking_supported = true
 vision_supported = true
@@ -909,7 +909,9 @@ structured_output_mode = "native_json"
 supports_assistant_prefill = false
 prefers_role_developer = false
 prefers_xml_tools = false
-thinking_block_style = "reasoning_summary"
+# Caption/vision model with no reasoning capability — match the llava sibling and
+# avoid emitting a spurious "## Reasoning" scaffold.
+thinking_block_style = "none"
 
 [[provider.ollama]]
 model_match = "llama3.2-vision*"
@@ -920,7 +922,8 @@ structured_output_mode = "native_json"
 supports_assistant_prefill = false
 prefers_role_developer = false
 prefers_xml_tools = false
-thinking_block_style = "reasoning_summary"
+# Caption/vision model with no reasoning capability — match the llava sibling.
+thinking_block_style = "none"
 
 [[provider.ollama]]
 model_match = "gemma3*"
@@ -931,7 +934,8 @@ structured_output_mode = "native_json"
 supports_assistant_prefill = false
 prefers_role_developer = false
 prefers_xml_tools = false
-thinking_block_style = "reasoning_summary"
+# Caption/vision model with no reasoning capability — match the llava sibling.
+thinking_block_style = "none"
 
 # The Ollama-published Gemma 4 12B quants are TEXT-ONLY (vision projector dropped
 # in the conversion — verified via `ollama show gemma4:12b-mlx`), unlike the 26b/
@@ -939,23 +943,35 @@ thinking_block_style = "reasoning_summary"
 [[provider.ollama]]
 model_match = "gemma4:12b*"
 vision_supported = false
+# Ollama honors the `format` kwarg for JSON/schema output (same as the ollama
+# qwen rules). Without the transport field, JSON/schema requests were blocked.
+native_tools = false
+preferred_tool_format = "text"
+structured_output = "format_kw"
 prefers_xml_scaffolding = false
 prefers_markdown_scaffolding = true
 structured_output_mode = "delimited"
 supports_assistant_prefill = false
 prefers_role_developer = false
 prefers_xml_tools = false
+# The Ollama gemma4 quant ships thinking-off (no reasoning trace in this build).
 thinking_block_style = "none"
 
 [[provider.ollama]]
 model_match = "gemma4*"
 vision_supported = true
+# Ollama honors the `format` kwarg for JSON/schema output (same as the ollama
+# qwen rules). Without the transport field, JSON/schema requests were blocked.
+native_tools = false
+preferred_tool_format = "text"
+structured_output = "format_kw"
 prefers_xml_scaffolding = false
 prefers_markdown_scaffolding = true
 structured_output_mode = "delimited"
 supports_assistant_prefill = false
 prefers_role_developer = false
 prefers_xml_tools = false
+# The Ollama gemma4 quant ships thinking-off (no reasoning trace in this build).
 thinking_block_style = "none"
 
 [[provider.ollama]]
@@ -1135,6 +1151,14 @@ thinking_block_style = "inline"
 
 [[provider.local]]
 model_match = "gemma-4*"
+# vLLM / SGLang serve Gemma 4 over the OpenAI-compatible surface, which exposes
+# native function calling + JSON-schema structured output — same as every hosted
+# gemma-4 sibling (gemini/openrouter/together). Without these explicit fields the
+# route silently degraded to text tools. (DISTINCT from the Ollama-native gemma4
+# quant rule, which ships text-only tools.)
+native_tools = true
+preferred_tool_format = "native"
+structured_output = "native"
 thinking_modes = ["enabled"]
 server_parser = "none"
 honors_chat_template_kwargs = false

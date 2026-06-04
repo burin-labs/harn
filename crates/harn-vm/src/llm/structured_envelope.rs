@@ -620,7 +620,10 @@ mod tests {
             ),
             (
                 "model".to_string(),
-                VmValue::String(std::sync::Arc::from("gemma4-128k:latest")),
+                // A capability rule with no structured_output transport, so native
+                // structured transport is unsupported and the loop must fall back to
+                // prompt-mode. (ollama gemma4/devstral now declare format_kw support.)
+                VmValue::String(std::sync::Arc::from("llava:latest")),
             ),
         ])));
         let mut args = crate::llm::rewrite_structured_args(vec![

@@ -62,7 +62,7 @@ Regenerate with `make gen-provider-matrix` and verify with `make check-provider-
 | `llamacpp` | `*devstral-small-2*` | `any` | no | no | no | no | no | yes | no | `native` | `markdown` | `delimited` | no | `system` | `json` | `none` | `text` | no | yes | `text_only` | yes | no |
 | `local` | `*qwen3.6*` | `any` | `enabled` | no | no | no | no | yes | no | `native` | `markdown` | `delimited` | no | `system` | `json` | `inline` | `native` | yes | yes | `unknown` | yes | no |
 | `local` | `*qwen3*` | `any` | `enabled` | no | no | no | no | yes | no | `native` | `markdown` | `delimited` | no | `system` | `json` | `inline` | `native` | yes | yes | `unknown` | yes | no |
-| `local` | `gemma-4*` | `any` | `enabled` | no | no | no | no | yes | no | no | `markdown` | `delimited` | no | `system` | `json` | `inline` | `text` | no | yes | `text_only` | yes | no |
+| `local` | `gemma-4*` | `any` | `enabled` | no | no | no | no | yes | no | `native` | `markdown` | `delimited` | no | `system` | `json` | `inline` | `native` | yes | yes | `unknown` | yes | no |
 | `minimax` | `minimax-m3*` | `any` | `adaptive` | yes | no | no | yes | yes | no | `delimited` | `markdown` | `delimited` | no | `system` | `json` | `inline` | `native` | yes | yes | `unknown` | yes | yes |
 | `minimax` | `minimax-m2.7*` | `any` | `enabled` | no | no | no | no | yes | no | `delimited` | `markdown` | `delimited` | no | `system` | `json` | `inline` | `native` | yes | yes | `unknown` | yes | yes |
 | `minimax` | `minimax-m2.5*` | `any` | `enabled` | no | no | no | no | yes | no | `delimited` | `markdown` | `delimited` | no | `system` | `json` | `inline` | `native` | yes | yes | `unknown` | yes | no |
@@ -71,11 +71,11 @@ Regenerate with `make gen-provider-matrix` and verify with `make check-provider-
 | `mlx` | `*qwen3.6*` | `any` | `enabled` | yes | no | no | no | yes | no | `native` | `markdown` | `delimited` | no | `system` | `json` | `inline` | `native` | yes | yes | `unknown` | yes | no |
 | `mlx` | `*qwen3*` | `any` | `enabled` | yes | no | no | no | yes | no | `native` | `markdown` | `delimited` | no | `system` | `json` | `inline` | `native` | yes | yes | `unknown` | yes | no |
 | `ollama` | `llava*` | `any` | no | yes | no | no | no | yes | no | no | `markdown` | `native_json` | no | `system` | `json` | `none` | `text` | no | yes | `text_only` | yes | no |
-| `ollama` | `bakllava*` | `any` | no | yes | no | no | no | yes | no | no | `markdown` | `native_json` | no | `system` | `json` | `reasoning_summary` | `text` | no | yes | `text_only` | yes | no |
-| `ollama` | `llama3.2-vision*` | `any` | no | yes | no | no | no | yes | no | no | `markdown` | `native_json` | no | `system` | `json` | `reasoning_summary` | `text` | no | yes | `text_only` | yes | no |
-| `ollama` | `gemma3*` | `any` | no | yes | no | no | no | yes | no | no | `markdown` | `native_json` | no | `system` | `json` | `reasoning_summary` | `text` | no | yes | `text_only` | yes | no |
-| `ollama` | `gemma4:12b*` | `any` | no | no | no | no | no | yes | no | no | `markdown` | `delimited` | no | `system` | `json` | `none` | `text` | no | yes | `text_only` | yes | no |
-| `ollama` | `gemma4*` | `any` | no | yes | no | no | no | yes | no | no | `markdown` | `delimited` | no | `system` | `json` | `none` | `text` | no | yes | `text_only` | yes | no |
+| `ollama` | `bakllava*` | `any` | no | yes | no | no | no | yes | no | no | `markdown` | `native_json` | no | `system` | `json` | `none` | `text` | no | yes | `text_only` | yes | no |
+| `ollama` | `llama3.2-vision*` | `any` | no | yes | no | no | no | yes | no | no | `markdown` | `native_json` | no | `system` | `json` | `none` | `text` | no | yes | `text_only` | yes | no |
+| `ollama` | `gemma3*` | `any` | no | yes | no | no | no | yes | no | no | `markdown` | `native_json` | no | `system` | `json` | `none` | `text` | no | yes | `text_only` | yes | no |
+| `ollama` | `gemma4:12b*` | `any` | no | no | no | no | no | yes | no | `format_kw` | `markdown` | `delimited` | no | `system` | `json` | `none` | `text` | no | yes | `text_only` | yes | no |
+| `ollama` | `gemma4*` | `any` | no | yes | no | no | no | yes | no | `format_kw` | `markdown` | `delimited` | no | `system` | `json` | `none` | `text` | no | yes | `text_only` | yes | no |
 | `ollama` | `qwen3.6*` | `any` | `enabled` | no | no | no | no | yes | no | `format_kw` | `markdown` | `delimited` | no | `system` | `json` | `inline` | `text` | no | yes | `text_only` | yes | no |
 | `ollama` | `qwen3*` | `any` | `enabled` | no | no | no | no | yes | no | `format_kw` | `markdown` | `delimited` | no | `system` | `json` | `inline` | `native` | yes | no | `native_only` | yes | no |
 | `ollama` | `devstral-small-2*` | `any` | no | no | no | no | no | yes | no | `format_kw` | `markdown` | `delimited` | no | `system` | `json` | `none` | `text` | no | yes | `text_only` | yes | no |
@@ -165,11 +165,11 @@ This section starts from the checked-in provider catalog. Recommended format fol
 | `llamacpp` | `qwen3.6-35b-a3b` | `text` | `text_only` | - | - | - | - | - | `data not yet collected` |
 | `llamacpp` | `qwen3.6-35b-a3b-ud-q4-k-xl` | `text` | `text_only` | - | - | - | - | - | `data not yet collected` |
 | `llamacpp` | `qwen3.6-35b-a3b-ud-q5-k-xl` | `text` | `text_only` | - | - | - | - | - | `data not yet collected` |
-| `local` | `gemma-4-12b-it` | `text` | `text_only` | - | - | - | - | - | `data not yet collected` |
-| `local` | `gemma-4-26b-a4b-it` | `text` | `text_only` | - | - | - | - | - | `data not yet collected` |
-| `local` | `gemma-4-31b-it` | `text` | `text_only` | - | - | - | - | - | `data not yet collected` |
-| `local` | `gemma-4-e2b-it` | `text` | `text_only` | - | - | - | - | - | `data not yet collected` |
-| `local` | `gemma-4-e4b-it` | `text` | `text_only` | - | - | - | - | - | `data not yet collected` |
+| `local` | `gemma-4-12b-it` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
+| `local` | `gemma-4-26b-a4b-it` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
+| `local` | `gemma-4-31b-it` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
+| `local` | `gemma-4-e2b-it` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
+| `local` | `gemma-4-e4b-it` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `minimax` | `MiniMax-M2` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `minimax` | `MiniMax-M2.5` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `minimax` | `MiniMax-M2.5-highspeed` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
