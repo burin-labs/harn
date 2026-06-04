@@ -1,0 +1,153 @@
+// Tests for scripts/verify_language_spec.harn — exercise the pure
+// fence-extraction / normalization helpers on synthetic markdown. No
+// filesystem or subprocess access; the verifier's `main` is not invoked.
+import "../verify_language_spec.harn"
+
+@test
+pipeline test_slugify_basic(task) {
+  assert_eq(slugify("Hello World"), "hello-world")
+}
+
+@test
+pipeline test_slugify_strips_punctuation(task) {
+  assert_eq(slugify("  Foo! Bar?? Baz  "), "foo-bar-baz")
+}
+
+@test
+pipeline test_slugify_strips_leading_trailing_dashes(task) {
+  assert_eq(slugify("--Foo--"), "foo")
+}
+
+@test
+pipeline test_slugify_empty_becomes_section(task) {
+  assert_eq(slugify("!!!"), "section")
+  assert_eq(slugify(""), "section")
+}
+
+@test
+pipeline test_heading_text_strips_hashes(task) {
+  assert_eq(heading_text("## My Heading"), "My Heading")
+  assert_eq(heading_text("#### Deep"), "Deep")
+  assert_eq(heading_text("#NoSpace"), "NoSpace")
+}
+
+@test
+pipeline test_is_word_char(task) {
+  assert(is_word_char("a"))
+  assert(is_word_char("Z"))
+  assert(is_word_char("5"))
+  assert(is_word_char("_"))
+  assert(!is_word_char("."))
+  assert(!is_word_char(" "))
+  assert(!is_word_char("!"))
+}
+
+@test
+pipeline test_normalize_standalone_ellipsis(task) {
+  assert_eq(normalize_snippet("let x = ..."), "let x = nil")
+  assert_eq(normalize_snippet("a ... b"), "a nil b")
+  assert_eq(normalize_snippet("(...)"), "(nil)")
+  assert_eq(normalize_snippet("..."), "nil")
+}
+
+@test
+pipeline test_normalize_preserves_spread(task) {
+  assert_eq(normalize_snippet("...rest"), "...rest")
+  assert_eq(normalize_snippet("foo.bar...baz"), "foo.bar...baz")
+  assert_eq(normalize_snippet("_..."), "_...")
+  assert_eq(normalize_snippet("..._"), "..._")
+  assert_eq(normalize_snippet("9..."), "9...")
+}
+
+@test
+pipeline test_normalize_preserves_dot_runs(task) {
+  assert_eq(normalize_snippet("...."), "....")
+  assert_eq(normalize_snippet("....."), ".....")
+}
+
+@test
+pipeline test_should_skip_snippet(task) {
+  assert(should_skip_snippet("let x = 1 // error: nope"))
+  assert(should_skip_snippet("# ERROR: documented failure"))
+  assert(!should_skip_snippet("let x = 1"))
+}
+
+@test
+pipeline test_fence_info_recognizes_boundaries(task) {
+  assert_eq(fence_info("```harn"), "harn")
+  assert_eq(fence_info("```harn,ignore"), "harn,ignore")
+  assert_eq(fence_info("```rust"), "rust")
+  assert_eq(fence_info("```"), "")
+  assert_eq(fence_info("```  HARN  "), "harn")
+}
+
+@test
+pipeline test_fence_info_rejects_non_boundaries(task) {
+  assert(fence_info("not a fence") == nil)
+  assert(fence_info("``inline``") == nil)
+  assert(fence_info("```with`backtick") == nil)
+}
+
+@test
+pipeline test_pad3(task) {
+  assert_eq(pad3(1), "001")
+  assert_eq(pad3(42), "042")
+  assert_eq(pad3(100), "100")
+  assert_eq(pad3(1234), "1234")
+}
+
+@test
+pipeline test_snippet_filename(task) {
+  assert_eq(snippet_filename(1, "Hello World", 39), "001_hello-world_L39.harn")
+  assert_eq(snippet_filename(12, "Foo!", 7), "012_foo_L7.harn")
+}
+
+@test
+pipeline test_extract_single_harn_fence(task) {
+  let md = "# Intro\n\n```harn\nlet x = 1\n```\n"
+  let fences = extract_harn_fences(md)
+  assert_eq(fences.count, 1)
+  assert_eq(fences[0].heading, "Intro")
+  assert_eq(fences[0].line, 4)
+  assert_eq(fences[0].snippet, "let x = 1\n")
+}
+
+@test
+pipeline test_extract_skips_other_languages(task) {
+  let md = "## A\n\n```rust\nfn main(){}\n```\n\n```ebnf\nrule = x\n```\n"
+  let fences = extract_harn_fences(md)
+  assert_eq(fences.count, 0)
+}
+
+@test
+pipeline test_extract_skips_harn_ignore(task) {
+  let md = "```harn,ignore\nbroken on purpose\n```\n"
+  let fences = extract_harn_fences(md)
+  assert_eq(fences.count, 0)
+}
+
+@test
+pipeline test_extract_multiple_with_headings(task) {
+  let md = "# First\n\n```harn\na\n```\n\n## Second\n\n```harn\nb\nc\n```\n"
+  let fences = extract_harn_fences(md)
+  assert_eq(fences.count, 2)
+  assert_eq(fences[0].heading, "First")
+  assert_eq(fences[0].snippet, "a\n")
+  assert_eq(fences[1].heading, "Second")
+  assert_eq(fences[1].snippet, "b\nc\n")
+}
+
+@test
+pipeline test_extract_empty_fence_dropped(task) {
+  let md = "```harn\n\n\n```\n"
+  let fences = extract_harn_fences(md)
+  assert_eq(fences.count, 0)
+}
+
+@test
+pipeline test_extract_default_heading_is_spec(task) {
+  let md = "```harn\nlet x = 1\n```\n"
+  let fences = extract_harn_fences(md)
+  assert_eq(fences.count, 1)
+  assert_eq(fences[0].heading, "spec")
+}

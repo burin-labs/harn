@@ -1,0 +1,185 @@
+// Tests for scripts/check_docs_links.harn — exercise the pure helpers on
+// synthetic inputs (no filesystem dependency).
+import "../check_docs_links.harn"
+
+@test
+pipeline test_strip_fenced_blocks_blanks_fences_keeps_lines(task) {
+  let text = "a [x](y.md)\n```\n[hidden](z.md)\n```\nb [w](v.md)"
+  let stripped = strip_fenced_blocks(text)
+  // Line count is preserved (4 newlines -> 5 lines).
+  assert_eq(stripped.split("\n").count, 5)
+  // Fence lines and the line inside are blanked.
+  assert_eq(stripped, "a [x](y.md)\n\n\n\nb [w](v.md)")
+}
+
+@test
+pipeline test_strip_fenced_blocks_tilde_marker(task) {
+  let text = "~~~\ninside\n~~~\nout"
+  assert_eq(strip_fenced_blocks(text), "\n\n\nout")
+}
+
+@test
+pipeline test_left_trim(task) {
+  assert_eq(left_trim("   \t hi"), "hi")
+  assert_eq(left_trim("nope"), "nope")
+}
+
+@test
+pipeline test_strip_chars(task) {
+  assert_eq(strip_chars("<foo>", "<>"), "foo")
+  assert_eq(strip_chars("  bar  ", " \t\r\n"), "bar")
+  assert_eq(strip_chars("<<a>>", "<>"), "a")
+}
+
+@test
+pipeline test_unquote_percent_decodes(task) {
+  assert_eq(unquote("a%20b.md"), "a b.md")
+  assert_eq(unquote("x%28y%29"), "x(y)")
+  // Non-escape text untouched; malformed escape left literal.
+  assert_eq(unquote("plain.md"), "plain.md")
+  assert_eq(unquote("100%done"), "100%done")
+}
+
+@test
+pipeline test_has_scheme(task) {
+  assert_eq(has_scheme("https://x.com"), true)
+  assert_eq(has_scheme("mailto:a@b.com"), true)
+  assert_eq(has_scheme("tel:123"), true)
+  // No scheme: relative paths, slash-before-colon, leading digit.
+  assert_eq(has_scheme("foo.md"), false)
+  assert_eq(has_scheme("a/b:c"), false)
+  assert_eq(has_scheme("1abc:x"), false)
+  assert_eq(has_scheme("../up.md"), false)
+}
+
+@test
+pipeline test_local_path_local_targets(task) {
+  assert_eq(local_path("foo.md"), "foo.md")
+  assert_eq(local_path("foo.md#section"), "foo.md")
+  assert_eq(local_path("../a/b.md"), "../a/b.md")
+  assert_eq(local_path("<foo.md>"), "foo.md")
+  assert_eq(local_path("a%20b.md"), "a b.md")
+}
+
+@test
+pipeline test_local_path_rejects_non_local(task) {
+  assert_eq(local_path(""), nil)
+  assert_eq(local_path("#anchor"), nil)
+  assert_eq(local_path("https://example.com/x"), nil)
+  assert_eq(local_path("mailto:a@b.com"), nil)
+  assert_eq(local_path("//host/path"), nil)
+  assert_eq(local_path("?q=1"), nil)
+}
+
+@test
+pipeline test_path_suffix(task) {
+  assert_eq(path_suffix("a/b.md"), ".md")
+  assert_eq(path_suffix("a/b.html"), ".html")
+  assert_eq(path_suffix("a/b"), "")
+  assert_eq(path_suffix("dir/"), "")
+  assert_eq(path_suffix(".hidden"), "")
+  assert_eq(path_suffix("foo.tar.gz"), ".gz")
+}
+
+@test
+pipeline test_with_md_suffix(task) {
+  assert_eq(with_md_suffix("docs/src/bar.html"), "docs/src/bar.md")
+  assert_eq(with_md_suffix("docs/src/bar"), "docs/src/bar.md")
+}
+
+@test
+pipeline test_candidate_rel_paths_extensionless(task) {
+  let c = candidate_rel_paths("docs/src/sub", "page", "docs/src")
+  assert_eq(c, ["docs/src/sub/page", "docs/src/sub/page.md", "docs/src/sub/page/index.md"])
+}
+
+@test
+pipeline test_candidate_rel_paths_html(task) {
+  let c = candidate_rel_paths("docs/src", "bar.html", "docs/src")
+  assert_eq(c, ["docs/src/bar.html", "docs/src/bar.md"])
+}
+
+@test
+pipeline test_candidate_rel_paths_md_only(task) {
+  let c = candidate_rel_paths("docs/src", "bar.md", "docs/src")
+  assert_eq(c, ["docs/src/bar.md"])
+}
+
+@test
+pipeline test_candidate_rel_paths_trailing_slash(task) {
+  // Trailing-slash with empty suffix takes the extensionless branch.
+  let c = candidate_rel_paths("docs/src", "dir/", "docs/src")
+  assert_eq(c, ["docs/src/dir", "docs/src/dir.md", "docs/src/dir/index.md"])
+}
+
+@test
+pipeline test_candidate_rel_paths_absolute_uses_docs_dir(task) {
+  let c = candidate_rel_paths("docs/src/sub", "/top.md", "docs/src")
+  assert_eq(c, ["docs/src/top.md"])
+}
+
+@test
+pipeline test_candidate_rel_paths_relative_parent(task) {
+  let c = candidate_rel_paths("docs/src/sub", "../up.md", "docs/src")
+  assert_eq(c, ["docs/src/sub/../up.md"])
+}
+
+@test
+pipeline test_normalize_path_collapses_dots(task) {
+  assert_eq(normalize_path("docs/src/sub/../builtins.md"), "docs/src/builtins.md")
+  assert_eq(normalize_path("docs/src/a/../../README.md"), "docs/README.md")
+  assert_eq(normalize_path("docs/src/./x/./y"), "docs/src/x/y")
+}
+
+@test
+pipeline test_normalize_path_absolute_clamps_at_root(task) {
+  assert_eq(normalize_path("/a/b/../../../../etc/passwd"), "/etc/passwd")
+  assert_eq(normalize_path("/repo/docs/../README.md"), "/repo/README.md")
+}
+
+@test
+pipeline test_within_repo(task) {
+  assert_eq(within_repo("/r", "/r/docs/x.md"), true)
+  assert_eq(within_repo("/r", "/r"), true)
+  assert_eq(within_repo("/r", "/etc/passwd"), false)
+  assert_eq(within_repo("/r", "/rother/x"), false)
+}
+
+@test
+pipeline test_rel_path_recovers_repo_relative(task) {
+  assert_eq(rel_path("/abs/root/./docs/src/foo.md"), "docs/src/foo.md")
+  assert_eq(rel_path("no-marker.md"), "no-marker.md")
+}
+
+@test
+pipeline test_dir_of(task) {
+  assert_eq(dir_of("docs/src/sub/a.md"), "docs/src/sub")
+  assert_eq(dir_of("a.md"), "")
+}
+
+@test
+pipeline test_collect_links_inline_reference_html(task) {
+  let text = "[a](one.md) and ![img](two.png)\n[ref]: three.md\n<a href=\"four.md\">x</a> <img src='five.png'>"
+  let links = collect_links(text)
+  assert_eq(links.count, 5)
+  // Source order is preserved by start offset.
+  assert_eq(links[0].target, "one.md")
+  assert_eq(links[1].target, "two.png")
+  assert_eq(links[2].target, "three.md")
+  assert_eq(links[3].target, "four.md")
+  assert_eq(links[4].target, "five.png")
+  // Line numbers are 1-based.
+  assert_eq(links[0].line, 1)
+  assert_eq(links[2].line, 2)
+  assert_eq(links[3].line, 3)
+}
+
+@test
+pipeline test_collect_links_reference_requires_low_indent(task) {
+  // Up to 3 leading spaces is a reference def; 4+ is not.
+  let ok = collect_links("   [r]: ok.md")
+  assert_eq(ok.count, 1)
+  assert_eq(ok[0].target, "ok.md")
+  let no = collect_links("    [r]: indented.md")
+  assert_eq(no.count, 0)
+}

@@ -143,7 +143,7 @@ run_grammar_audit() {
   fi
   time_phase "verify_release_metadata" ./scripts/verify_release_metadata.py
   time_phase "sync_language_spec" cargo run --quiet --bin harn -- run scripts/sync_language_spec.harn
-  time_phase "verify_language_spec" ./scripts/verify_language_spec.py
+  time_phase "verify_language_spec" cargo run --quiet --bin harn -- run scripts/verify_language_spec.harn
   if [[ ! -d tree-sitter-harn ]]; then
     echo "warning: tree-sitter-harn not present; skipping tree-sitter grammar audit"
     return 0

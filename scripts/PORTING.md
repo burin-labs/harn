@@ -15,6 +15,9 @@ It is a living tracker, not a spec. When you port a script, move its row to
 | --- | --- | --- |
 | `check_receipt_struct_duplication.harn` | `make check-receipt-structs` | Workspace `.rs` scan + brace matching. |
 | `sync_tree_sitter_keywords.harn` | `make {gen,check}-tree-sitter-keywords` | Lexer↔grammar keyword set sync (`--write`). |
+| `check_diagnostic_codes.harn` | `make lint-diagnostic-codes` | Registry + struct-literal/`Code::` scan; uses `regex_captures` `.line`/`.start`. |
+| `check_docs_links.harn` | `make check-docs-links` | Markdown local-link resolver; `..` resolved at `fs.exists` time. |
+| `verify_language_spec.harn` | `scripts/release_gate.sh` (`verify_language_spec` phase) | Extracts ```harn fences from the spec and type-checks each; resolves the checker binary via `cargo metadata`. |
 
 Each ported script has a paired `scripts/tests/<name>_test.harn` exercising its
 pure helpers, run by `make test-harn-scripts`.
@@ -26,9 +29,6 @@ left for follow-up waves to keep each PR reviewable.
 
 | Script | Why portable | Risk to watch |
 | --- | --- | --- |
-| `check_diagnostic_codes.py` | Rust-source regex + brace scan | Largest; uses match offsets/line (now in `regex_captures`). |
-| `check_docs_links.py` | Markdown link scan + `fs.exists` | Path-candidate resolution; OS resolves `..` at stat time. |
-| `verify_language_spec.py` | Spec mirror text compare | — |
 | `check_generated_registry.py` | Generated-artifact registry check | — |
 | `check_rust_prompt_prose.py` | Rust-source prose lint | Ratchet pattern in `.githooks/lib.sh`. |
 | `verify_release_metadata.py` | Cargo metadata validation | — |
@@ -96,6 +96,42 @@ stay DRY (no LOC blow-up vs. the Python original):
 2. **Hashed raw strings `r#"..."#`.** Raw strings can now embed literal `"`
    (Rust-style; add more `#` as needed). Quote-heavy regexes (matching string
    literals, JSON, etc.) no longer need backslash-escaped non-raw strings.
+
+### Known Harn limitations surfaced by the ports
+
+Not bugs — documented so future ports plan around them:
+
+- **Regex backreferences are unsupported** (the VM uses the Rust `regex`
+  crate). A pattern like `(['"])(.*?)\1` throws "Invalid regex". Rewrite with
+  explicit alternation (e.g. `"([^"]*)"|'([^']*)'` and read whichever group is
+  non-nil), as `check_docs_links.harn` does for HTML `href`/`src`.
+- **String literals don't recognize `\u{NN}`, `\xNN`, `\f`, `\v`** — they
+  produce multi-char literals (and `harn fmt` escapes the backslash). Match
+  whitespace via `ch.trim() == ""` (Rust `char::is_whitespace`, same set as
+  Python `str.isspace()` for source-legal bytes) rather than escape sequences.
+- **List slicing is `.slice(start, end)`** (not `.substring`, which is
+  string-only).
+
+### Round-2 stdlib groundwork (to keep complex ports DRY)
+
+The batch-2 ports (`check_diagnostic_codes`, `check_docs_links`,
+`verify_language_spec`) are behavior-identical and tested, but run ~1.8–2.8×
+the LOC of their Python originals because Python leans on rich stdlib the Harn
+ecosystem hasn't surfaced yet, so each port reimplements those primitives
+inline. The verbosity is the signal for the next groundwork wave — landing
+these would let the ports (and future ones) shrink toward parity:
+
+- **Indexed string ops:** `str.index_of(needle, from)` and
+  `str.starts_with(needle, from)` (Python's `str.find(x, i)` /
+  `str.startswith(x, i)`). `check_diagnostic_codes` hand-rolls `find_from` /
+  `starts_with_at`.
+- **`std/path` resolution:** `resolve`/`normalize` that collapses `.`/`..`, and
+  `with_suffix`/`suffix`. `check_docs_links` reimplements `pathlib.Path.resolve`
+  and `.with_suffix`.
+- **A `urllib.parse.unquote`-equivalent decode.** The existing `url_decode`
+  builtin decodes `+`→space (i.e. `unquote_plus` semantics), so it is *not* a
+  drop-in for Python's `unquote`; `check_docs_links` correctly hand-rolls the
+  percent-decode. A `+`-preserving variant would let it drop the helper.
 
 ### Groundwork follow-ups
 
