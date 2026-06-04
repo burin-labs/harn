@@ -24,7 +24,7 @@ Final user-facing answer. Required when no more tool calls are needed.
 - After `<tool_call>`, the next non-whitespace text must be the tool name, not another wrapper or a language label.
 - `<assistant_prose>` is optional and must be brief. Never paste source code, file contents, command transcripts, or long plans here; wrap those in the relevant tool call instead.
 - `<user_response>` is reserved for the final user-facing answer that hosts should surface. Emit it when the user should see a wrap-up or answer, and keep it concise and grounded.
-{{ if done_sentinel }}- `<done>{{ done_sentinel }}</done>` signals task completion. Emit it only after a successful verifying tool call; the runtime rejects it otherwise.
+{{ if done_sentinel }}- `<done>{{ done_sentinel }}</done>` signals task completion. Emit it once the work is verified — ideally after a test/build/lint command has succeeded. If you cannot run a clean verification (e.g. the toolchain is unavailable in this environment), state what you confirmed and still wrap up rather than looping.
 {{ end }}- Do not prefix calls with labels like `tool_code:`, `python:`, `shell:`, or any language tag, and do not wrap tool calls in Markdown fences.
 {{ if done_sentinel }}- Do not write `<tool_call>{{ done_sentinel }}</tool_call>`; completion sentinels are only valid in `<done>...</done>`.
 {{ end }}
