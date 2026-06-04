@@ -988,6 +988,58 @@ fn __next_text_only_count(tool_count, consecutive_text_only) {
 }
 
 /**
+ * "Turns since meaningful progress" — a decaying churn signal that, unlike
+ * `__next_text_only_count`, does NOT fully reset on a single tool dispatch.
+ * Meaningful progress = at least one SUCCESSFUL tool this turn (a mutating
+ * or verify call that actually applied), not a rejected/no-op one. A turn
+ * with no successful tool increments; a turn that made progress decays the
+ * streak by one. This keeps mixed prose+tool churn (a successful call every
+ * few turns interleaved with toolless narration) from evading the
+ * escalating progress nudge the way the zeroing counter does.
+ */
+fn __next_progress_count(made_progress, turns_since_progress) {
+  if made_progress {
+    return if turns_since_progress > 0 {
+      turns_since_progress - 1
+    } else {
+      0
+    }
+  }
+  return turns_since_progress + 1
+}
+
+/**
+ * Escalating, depth-keyed copy for the toolless/no-progress churn nudge
+ * (M1-1). Bounded: `__agent_loop_run` only invokes this below the hard
+ * `max_nudges` stop, so it never nudges forever, and only when the
+ * content-specific text-mode nudge (fence / named-but-not-called) did NOT
+ * fire this turn — the content nudge takes precedence so a turn is never
+ * double-injected; this streak nudge is the fallback for pure-prose churn.
+ * Depth is `turns_since_progress`.
+ */
+fn __progress_nudge_text(depth, has_tools) {
+  let action = if has_tools {
+    "Emit exactly one well-formed <tool_call> now, or state your final answer in <user_response> and stop."
+  } else {
+    "Make concrete progress in your reply now, or state your final answer and stop."
+  }
+  if depth >= 4 {
+    return "You have made no progress for "
+      + to_string(depth)
+      + " turns — you are stuck in a narration loop. "
+      + action
+      + " Do not restate the plan."
+  }
+  if depth >= 3 {
+    return "Still no progress after "
+      + to_string(depth)
+      + " turns. "
+      + action
+  }
+  return "No progress last turn. " + action
+}
+
+/**
  * Build the `iteration_info` payload for the `iteration_end` event from
  * the LLM result plus the loop's per-iteration aggregates. Carries `provider`,
  * `model`, `response_ms`, token counts, and `thinking_chars` so live
@@ -1770,6 +1822,7 @@ fn __agent_loop_run(message, session, initial_opts) {
     var step_judge_attempts = 0
     var structural_validator_attempts = 0
     var consecutive_text_only = 0
+    var turns_since_progress = 0
     var fallback_index = 0
     var successful_tools_seen = []
     var rejected_tools_seen = []
@@ -2292,6 +2345,7 @@ fn __agent_loop_run(message, session, initial_opts) {
           break
         }
         consecutive_text_only = __next_text_only_count(0, consecutive_text_only)
+        turns_since_progress = __next_progress_count(false, turns_since_progress)
         last_tool_count = 0
         continue
       }
@@ -2349,6 +2403,8 @@ fn __agent_loop_run(message, session, initial_opts) {
       last_tool_count = tool_count
       let turn_successful = __tool_names_by_status(dispatch, true)
       let turn_rejected = __tool_names_by_status(dispatch, false)
+      let made_progress = len(turn_successful) > 0
+      turns_since_progress = __next_progress_count(made_progress, turns_since_progress)
       let turn_max_nudges = turn_opts?.max_nudges ?? 8
       let turn_loop_until_done = turn_opts?.loop_until_done ?? false
       if turn_loop_until_done && tool_count == 0 && consecutive_text_only > turn_max_nudges {
@@ -2464,6 +2520,21 @@ fn __agent_loop_run(message, session, initial_opts) {
             tool_count: tool_count,
           },
         )
+        if turns_since_progress >= 2
+          && turns_since_progress <= turn_max_nudges
+          && !(outcome?.nudged_this_turn ?? false) {
+          let has_tools = len(opts?.tools?.tools ?? []) > 0
+          agent_session_inject_feedback(
+            session.session_id,
+            "no_progress_streak",
+            __progress_nudge_text(turns_since_progress, has_tools),
+          )
+          agent_emit_event(
+            session.session_id,
+            "no_progress_streak_nudge",
+            {iteration: iteration_index, turns_since_progress: turns_since_progress, has_tools: has_tools},
+          )
+        }
       }
       let loop_state = agent_loop_snapshot_state(
         {

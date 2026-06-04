@@ -196,10 +196,10 @@ fn __native_tool_text_completion(opts, has_tool_calls, text) {
  */
 fn __maybe_inject_completion_confirmation(session, opts, has_tool_calls, text, iteration) {
   if !__zero_tool_completion_context(opts, has_tool_calls, text) {
-    return
+    return false
   }
   if opts?._consecutive_text_only ?? 1 >= 2 {
-    return
+    return false
   }
   agent_session_inject_feedback(
     session.session_id,
@@ -211,6 +211,182 @@ fn __maybe_inject_completion_confirmation(session, opts, has_tool_calls, text, i
     "completion_confirmation_nudge",
     {iteration: iteration, visible_text_prefix: visible_text_excerpt(text)},
   )
+  return true
+}
+
+/**
+ * A turn is "toolless" in TEXT mode when the model dispatched no tools
+ * this turn, the loop is in text tool-format, and there is visible prose
+ * to inspect. Unlike `__native_completion_context`, this fires for the
+ * ~95% text-mode case the native gate excludes. Used to power the
+ * fenced-call and named-but-not-called corrective nudges below.
+ */
+fn __text_mode_toolless_turn(opts, has_tool_calls, text) {
+  if opts?.daemon {
+    return false
+  }
+  let fmt = lowercase(to_string(opts?.tool_format ?? ""))
+  if fmt != "text" {
+    return false
+  }
+  if has_tool_calls {
+    return false
+  }
+  return trim(text ?? "") != ""
+}
+
+/**
+ * Detect a fenced tool-call attempt: the model wrote the action inside a
+ * Markdown fence (```tool_code / ```call / ```edit / ```python / ```bash /
+ * ```run) instead of a bare `<tool_call>` block, so the parser saw no
+ * call. Generalizable — conditioned on the observed fence opener, not on
+ * any model name. Returns the offending fence language or nil.
+ */
+fn __detect_fenced_call_attempt(text) {
+  let lowered = lowercase(to_string(text ?? ""))
+  let openers = ["```tool_code", "```call", "```edit", "```python", "```bash", "```run", "```shell"]
+  for opener in openers {
+    if contains(lowered, opener) {
+      return opener[3:len(opener)]
+    }
+  }
+  return nil
+}
+
+/**
+ * Extract the bound tool names from the agent `tools` registry value.
+ * The registry carries a `.tools` list of entries each with a `.name`.
+ */
+fn __agent_bound_tool_names(tools) {
+  let entries = tools?.tools ?? []
+  var names = []
+  for entry in entries {
+    let name = entry?.name ?? ""
+    if name != "" {
+      names = names.push(name)
+    }
+  }
+  return names
+}
+
+/**
+ * Does the text already carry a real tool-call shape? Accepts BOTH the
+ * brace object-literal form `name({ ... })` and the braceless
+ * `name(key=...)` / `name(key: ...)` form so the named-but-not-called
+ * detector does not false-fire on a turn that DID emit a call (e.g. a
+ * recovered bare call or a Python-kwarg call the parser may still lift).
+ */
+fn __text_has_call_shape(text) {
+  let body = to_string(text ?? "")
+  if regex_match("[A-Za-z_][A-Za-z0-9_]*\\s*\\(\\s*\\{", body) != nil {
+    return true
+  }
+  if regex_match("[A-Za-z_][A-Za-z0-9_]*\\s*\\(\\s*[A-Za-z_][A-Za-z0-9_]*\\s*[=:]", body) != nil {
+    return true
+  }
+  return false
+}
+
+/**
+ * Detect "named-but-not-called": the prose announces a tool action
+ * ("I'll use edit...", "Let me run...") naming a bound tool, but the turn
+ * emitted no call syntax at all. Returns the named tool or nil.
+ */
+fn __detect_named_not_called(text, opts) {
+  if __text_has_call_shape(text) {
+    return nil
+  }
+  let tools = opts?.tools
+  if tools == nil {
+    return nil
+  }
+  let names = __agent_bound_tool_names(tools)
+  if len(names) == 0 {
+    return nil
+  }
+  let lowered = lowercase(to_string(text ?? ""))
+  let intent = [
+    "i'll ",
+    "i will ",
+    "let me ",
+    "let's ",
+    "lets ",
+    "i'm going to ",
+    "going to ",
+    "i am going to ",
+    "next i",
+    "now i",
+  ]
+  var has_intent = false
+  for phrase in intent {
+    if contains(lowered, phrase) {
+      has_intent = true
+    }
+  }
+  if !has_intent {
+    return nil
+  }
+  for name in names {
+    let n = lowercase(to_string(name))
+    if n == "" {
+      continue
+    }
+    if contains(lowered, n) {
+      return name
+    }
+  }
+  return nil
+}
+
+/**
+ * TEXT-mode corrective nudges that the native-gated completion
+ * confirmation never reaches. Two cases, in priority order:
+ *   1. fenced-call attempt → tell the model to emit the call bare.
+ *   2. named-but-not-called → tell the model to emit the call it described.
+ * One nudge per turn; both are bounded by the loop's `max_nudges` budget.
+ * Returns `true` if a content-specific nudge was injected this turn, so the
+ * loop can suppress the fallback progress-streak nudge and avoid
+ * double-injecting on the same turn.
+ */
+fn __maybe_inject_text_mode_action_nudge(session, opts, has_tool_calls, text, iteration) {
+  if !__text_mode_toolless_turn(opts, has_tool_calls, text) {
+    return false
+  }
+  let fenced = __detect_fenced_call_attempt(text)
+  if fenced != nil {
+    agent_session_inject_feedback(
+      session.session_id,
+      "fenced_call_attempt",
+      "You wrapped a tool call in a ```"
+        + fenced
+        + " fence — that is ignored. Emit the call bare inside <tool_call>...</tool_call>, e.g. <tool_call>\nedit({ ... })\n</tool_call>.",
+    )
+    agent_emit_event(
+      session.session_id,
+      "fenced_call_attempt_nudge",
+      {iteration: iteration, fence: fenced, visible_text_prefix: visible_text_excerpt(text)},
+    )
+    return true
+  }
+  let named = __detect_named_not_called(text, opts)
+  if named != nil {
+    agent_session_inject_feedback(
+      session.session_id,
+      "named_tool_not_called",
+      "You named `"
+        + to_string(named)
+        + "` but did not call it. Emit the call now: <tool_call>\n"
+        + to_string(named)
+        + "({ ... })\n</tool_call>. Do not describe the action again.",
+    )
+    agent_emit_event(
+      session.session_id,
+      "named_tool_not_called_nudge",
+      {iteration: iteration, tool: named, visible_text_prefix: visible_text_excerpt(text)},
+    )
+    return true
+  }
+  return false
 }
 
 fn __done_judge_config(opts) {
@@ -834,8 +1010,12 @@ pub fn agent_compute_post_turn(session, llm_result, dispatch, opts, iteration) {
   if !has_tool_calls && !loop_until_done && !daemon {
     return __post_turn_with_narrowing(__completion_result(opts, payload, "natural"), narrowing)
   }
-  __maybe_inject_completion_confirmation(session, opts, has_tool_calls, text, iteration)
-  return __post_turn_with_narrowing({kind: "continue", done_judge_due: false}, narrowing)
+  let confirmation_nudged = __maybe_inject_completion_confirmation(session, opts, has_tool_calls, text, iteration)
+  let action_nudged = __maybe_inject_text_mode_action_nudge(session, opts, has_tool_calls, text, iteration)
+  return __post_turn_with_narrowing(
+    {kind: "continue", done_judge_due: false, nudged_this_turn: confirmation_nudged || action_nudged},
+    narrowing,
+  )
 }
 
 fn visible_text_excerpt(text) {

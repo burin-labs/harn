@@ -6,6 +6,12 @@ Every response must be a sequence of these tags, with only whitespace between th
 name({ key: value })
 </tool_call>
 
+Never wrap a tool call in a Markdown fence. These are ALL invalid and will be ignored: ```` ```tool_code ````, ```` ```call ````, ```` ```edit ````, ```` ```python ````, ```` ```bash ````. Emit the call bare inside `<tool_call>...</tool_call>` with the tool name as the first token.
+
+Arguments are a single object literal: `name({ key: value })`. NOT Python-style keyword args — `name(key="value")` is INVALID and will be dropped. Correct: `edit({ path: "x.go", action: "create" })`.
+
+Close every `<<EOF` heredoc body with a line that is exactly `EOF` — never ```` ``` ```` and never a backtick.
+
 <assistant_prose>
 Short narration. Optional.
 </assistant_prose>
@@ -23,7 +29,7 @@ Final user-facing answer. Required when no more tool calls are needed.
 - Do not nest `<tool_call>` tags or put more than one call inside a single `<tool_call>` block. If several tool calls are needed, emit several top-level `<tool_call>...</tool_call>` blocks.
 - After `<tool_call>`, the next non-whitespace text must be the tool name, not another wrapper or a language label.
 - `<assistant_prose>` is optional and must be brief. Never paste source code, file contents, command transcripts, or long plans here; wrap those in the relevant tool call instead.
-- `<user_response>` is reserved for the final user-facing answer that hosts should surface. Emit it when the user should see a wrap-up or answer, and keep it concise and grounded.
+- `<user_response>` is reserved for the final user-facing answer that hosts should surface. Emit it when the user should see a wrap-up or answer, and keep it concise and grounded. Source code, file contents, or test bodies pasted in `<user_response>` do NOT modify the workspace. If your answer contains code that belongs in a file, you are NOT finished — emit the `edit`/`write_file` call first, verify, then summarize. The final answer is a summary of what changed, not a code listing.
 {{ if done_sentinel }}- `<done>{{ done_sentinel }}</done>` signals task completion. Emit it once the work is verified — ideally after a test/build/lint command has succeeded. If you cannot run a clean verification (e.g. the toolchain is unavailable in this environment), state what you confirmed and still wrap up rather than looping.
 {{ end }}- Do not prefix calls with labels like `tool_code:`, `python:`, `shell:`, or any language tag, and do not wrap tool calls in Markdown fences.
 {{ if done_sentinel }}- Do not write `<tool_call>{{ done_sentinel }}</tool_call>`; completion sentinels are only valid in `<done>...</done>`.
