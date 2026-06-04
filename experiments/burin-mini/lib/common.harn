@@ -458,7 +458,7 @@ fn collect_normalized_questions(profile, src) {
   }
   for (index, item) in iter(raw_questions).enumerate() {
     let normalized = normalize_question_entry(profile, item, index + 1)
-    if normalized != nil && normalized?.question ?? "" != "" {
+    if normalized != nil && normalized.question ?? "" != "" {
       questions = questions + [normalized]
     }
   }
@@ -473,7 +473,7 @@ fn collect_normalized_actions(profile, src) {
   }
   for (index, item) in iter(raw_actions).enumerate() {
     let normalized = normalize_action_entry(profile, item, index + 1)
-    if normalized != nil && normalized?.task ?? "" != "" {
+    if normalized != nil && normalized.task ?? "" != "" {
       actions = actions + [normalized]
     }
   }
@@ -543,8 +543,8 @@ pub fn normalize_plan(profile, plan) {
     nil
   }
   let stage_split = split_actions_for_stage(profile, actions, explicit_ready)
-  questions = questions + actions_as_questions(profile, stage_split?.questions ?? [])
-  actions = stage_split?.actions ?? []
+  questions = questions + actions_as_questions(profile, stage_split.questions ?? [])
+  actions = stage_split.actions ?? []
   if actions_are_preparatory(profile, actions, explicit_ready) {
     questions = questions + actions_as_questions(profile, actions)
     actions = []
@@ -695,7 +695,7 @@ pub fn render_action_results(results) {
         "- ${result?.data?.id}: ${result?.data?.summary} (changed: ${render_csv(result?.data?.changed_paths ?? [])})",
       ]
     } else {
-      lines = lines + ["- action failed: ${result?.error?.message ?? \"unknown failure\"}"]
+      lines = lines + ["- action failed: ${result?.error?.message ?? "unknown failure"}"]
     }
   }
   return join(lines, "\n")
