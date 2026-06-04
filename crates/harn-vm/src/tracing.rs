@@ -259,6 +259,22 @@ impl SpanCollector {
         }
     }
 
+    /// Attach metadata to an open or completed span unless the key exists.
+    pub fn attach_metadata_if_absent(&mut self, span_id: u64, key: &str, value: serde_json::Value) {
+        if let Some(span) = self.open.get_mut(&span_id) {
+            span.metadata.entry(key.to_string()).or_insert(value);
+            return;
+        }
+        if let Some(span) = self
+            .completed
+            .iter_mut()
+            .rev()
+            .find(|span| span.span_id == span_id)
+        {
+            span.metadata.entry(key.to_string()).or_insert(value);
+        }
+    }
+
     /// Append a sub-phase annotation to an open span. Returns `true` if
     /// the event was attached; `false` if `span_id` does not match any
     /// open span (already closed or never opened).
@@ -489,13 +505,24 @@ pub fn span_record_event(
     COLLECTOR.with(|c| c.borrow_mut().record_event(span_id, name, attributes))
 }
 
-/// Attach metadata to an open span. No-op when `span_id` is 0 or
-/// already closed.
+/// Attach metadata to an open span. No-op when `span_id` is 0 or already
+/// closed.
 pub fn span_attach_metadata(span_id: u64, key: &str, value: serde_json::Value) {
     if span_id == 0 {
         return;
     }
     COLLECTOR.with(|c| c.borrow_mut().set_metadata(span_id, key, value));
+}
+
+/// Attach metadata to an open or completed span unless the key already exists.
+pub fn span_attach_metadata_if_absent(span_id: u64, key: &str, value: serde_json::Value) {
+    if span_id == 0 {
+        return;
+    }
+    COLLECTOR.with(|c| {
+        c.borrow_mut()
+            .attach_metadata_if_absent(span_id, key, value);
+    });
 }
 
 /// Get the currently active span id, if tracing is enabled and a span is open.
@@ -672,6 +699,21 @@ mod tests {
         c.set_metadata(id, "tokens", serde_json::json!(100));
         c.end(id);
         assert_eq!(c.spans()[0].metadata["tokens"], serde_json::json!(100));
+    }
+
+    #[test]
+    fn test_completed_span_metadata_can_be_attached_late() {
+        let mut c = SpanCollector::new();
+        let id = c.start(SpanKind::LlmCall, "gpt-4".into());
+        c.end(id);
+
+        c.attach_metadata_if_absent(id, "first_token_ms", serde_json::json!(125));
+        c.attach_metadata_if_absent(id, "first_token_ms", serde_json::json!(250));
+
+        assert_eq!(
+            c.spans()[0].metadata["first_token_ms"],
+            serde_json::json!(125)
+        );
     }
 
     #[test]

@@ -122,6 +122,7 @@ pub(super) async fn llm_stream_call_impl(args: Vec<VmValue>) -> Result<VmValue, 
     let (delta_tx, mut delta_rx) = tokio::sync::mpsc::unbounded_channel::<String>();
     let cancel = VmStreamCancel::new();
     let mut cancel_rx = cancel.subscribe();
+    let mut first_token = super::first_token::FirstTokenTimer::for_current_span();
 
     tokio::task::spawn_local(async move {
         let mut visible = crate::visible_text::VisibleTextState::default();
@@ -144,6 +145,7 @@ pub(super) async fn llm_stream_call_impl(args: Vec<VmValue>) -> Result<VmValue, 
                 maybe_delta = delta_rx.recv(), if deltas_open => {
                     match maybe_delta {
                         Some(delta) => {
+                            first_token.observe_delta();
                             match forward_llm_stream_delta(&stream_tx, &mut visible, delta).await {
                                 Ok(next_partial) => partial = next_partial,
                                 Err(()) => {
@@ -157,6 +159,7 @@ pub(super) async fn llm_stream_call_impl(args: Vec<VmValue>) -> Result<VmValue, 
                 }
                 joined = &mut llm_task => {
                     while let Ok(delta) = delta_rx.try_recv() {
+                        first_token.observe_delta();
                         match forward_llm_stream_delta(&stream_tx, &mut visible, delta).await {
                             Ok(next_partial) => partial = next_partial,
                             Err(()) => break,
@@ -194,4 +197,96 @@ pub(super) async fn llm_stream_call_impl(args: Vec<VmValue>) -> Result<VmValue, 
         receiver: Arc::new(tokio::sync::Mutex::new(stream_rx)),
         cancel: Some(cancel),
     }))
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::BTreeMap;
+    use std::sync::Arc;
+    use std::time::Duration;
+
+    use crate::llm::fake::{install_fake_llm_script, FakeLlmEvent, FakeLlmScript, FakeStopReason};
+    use crate::tracing::SpanKind;
+    use crate::value::{VmError, VmValue};
+
+    use super::llm_stream_call_impl;
+
+    #[tokio::test(start_paused = true)]
+    async fn first_token_budget_records_streaming_ttft_under_virtual_time() {
+        crate::llm::reset_llm_state();
+        crate::tracing::set_tracing_enabled(true);
+        let local = tokio::task::LocalSet::new();
+        let stall = Duration::from_millis(1_500);
+
+        local
+            .run_until(async move {
+                let _guard = install_fake_llm_script(FakeLlmScript::streaming(vec![
+                    FakeLlmEvent::Stall(stall),
+                    FakeLlmEvent::Token("hello".into()),
+                    FakeLlmEvent::Done(FakeStopReason::EndTurn),
+                ]));
+
+                let span_id =
+                    crate::tracing::span_start(SpanKind::LlmCall, "llm_stream_call".into());
+                let stream = match llm_stream_call_impl(fake_stream_args()).await? {
+                    VmValue::Stream(stream) => stream,
+                    other => {
+                        return Err(VmError::Runtime(format!(
+                            "expected stream, got {}",
+                            other.type_name()
+                        )));
+                    }
+                };
+                crate::tracing::span_end(span_id);
+
+                let mut receiver = stream.receiver.lock().await;
+                let first_chunk =
+                    tokio::time::timeout(stall + Duration::from_millis(250), receiver.recv())
+                        .await
+                        .expect("first stream chunk should arrive within the TTFT budget")
+                        .expect("stream should produce first chunk")?;
+                assert_eq!(dict_string(&first_chunk, "delta").as_deref(), Some("hello"));
+                drop(first_chunk);
+
+                let profile = crate::profile::build(&crate::tracing::peek_spans());
+                let first_token_ms = profile
+                    .first_token_ms
+                    .expect("profile should include first_token_ms");
+                assert!(
+                    first_token_ms >= 1_500,
+                    "first token should include fake provider stall, got {first_token_ms}ms"
+                );
+                assert!(
+                    first_token_ms < 1_750,
+                    "stream assembly overhead should stay under 250ms, got {first_token_ms}ms"
+                );
+                Ok::<(), VmError>(())
+            })
+            .await
+            .expect("streaming first-token budget test should pass");
+    }
+
+    fn fake_stream_args() -> Vec<VmValue> {
+        let mut options = BTreeMap::new();
+        options.insert(
+            "provider".to_string(),
+            VmValue::String(Arc::from("fake".to_string())),
+        );
+        options.insert(
+            "model".to_string(),
+            VmValue::String(Arc::from("fake".to_string())),
+        );
+        vec![
+            VmValue::String(Arc::from("hello".to_string())),
+            VmValue::Nil,
+            VmValue::Dict(Arc::new(options)),
+        ]
+    }
+
+    fn dict_string(value: &VmValue, key: &str) -> Option<String> {
+        let VmValue::Dict(dict) = value else {
+            return None;
+        };
+        dict.get(key).map(VmValue::display)
+    }
 }
