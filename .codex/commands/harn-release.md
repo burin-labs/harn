@@ -3,21 +3,32 @@
 Run the merge-queue-safe Harn release workflow.
 
 The release is **one** human PR titled `Release vX.Y.Z`. It carries the
-changelog, code, docs, AND the `Cargo.toml`/`Cargo.lock` bump together. After
-it lands through the merge queue, the Publish release workflow auto-fires on
-tag drift and ships everything. No second PR.
+changelog, code, docs, AND the `Cargo.toml`/`Cargo.lock` bump together. After it
+lands through the merge queue, you push the `vX.Y.Z` **tag** at the release
+commit — and *that tag push* (not the merge to `main`) is what triggers the
+Publish release workflow to `cargo publish` and build binaries. No second PR.
+
+> **`publish-release.yml` does NOT tag `main` HEAD for you** (changed with the
+> release-pipeline modernization, #2971–#2973). If the tag is missing when the
+> release commit lands on `main`, the publish run fails fast:
+> `Cargo.toml=X is ahead of latest tag vY, but vX does not exist. Push vX at the
+> release commit`. The canonical orchestrator
+> (`release_harn.harn --mode ship-pr`) pushes the tag for you; the manual flow
+> below pushes it in the final step.
 
 ## End-state flow
 
 ```text
 human/agent: write & land "Release vX.Y.Z" PR (changelog + code + docs + bump)
         │  ↓ merge queue runs full audit set in CI
-bot:    Publish release workflow auto-fires on tag drift
-        │   pushes vX.Y.Z, runs cargo publish, creates GH release notes
+human/agent: push signed vX.Y.Z tag at the release commit
+        │   (orchestrator ship-pr does this; or push it by hand)
+        │  ↓ the TAG push (not the main push) triggers Publish release
+bot:    Publish release runs cargo publish + creates GH release notes
         │  ↓ tag push cascades
-bot:    Release workflow builds binaries + multi-arch container
+bot:    Build release binaries builds binaries + multi-arch container
         │  ↓
-        v0.7.X is shipped (binaries, container, crates.io, release notes)
+        v0.8.X is shipped (binaries, container, crates.io, release notes)
 ```
 
 ## What you (the agent) actually do
@@ -25,7 +36,7 @@ bot:    Release workflow builds binaries + multi-arch container
 The work is in the one release PR. After that, hands off.
 
 1. Branch off main: `git checkout -b release/vX.Y.Z`. Conventional name; the
-   workflow keys on tag drift, not branch name.
+   publish keys on the `vX.Y.Z` tag, not the branch name.
 2. Inspect the worktree first with `git status --short` and `git diff --stat`.
    Treat tracked and untracked changes as candidate release content unless
    the user scopes it differently.
@@ -84,18 +95,37 @@ The work is in the one release PR. After that, hands off.
    the PR as soon as CI is green so you don't have to babysit a queue
    that takes ~10-15 min cold-cache.
 
-That's it. Stop here. The bot takes over once the PR lands.
+10. **Push the `vX.Y.Z` tag at the release commit — this is the step that ships.**
+    The merge alone publishes nothing; `publish-release.yml` will not tag `main`
+    HEAD. After the `Release vX.Y.Z` PR squash-merges:
 
-## What happens automatically after the release PR lands
+    ```bash
+    git fetch origin main --tags
+    REL=$(git rev-parse origin/main)   # the squashed "Release vX.Y.Z (#N)" commit
+    git tag -s vX.Y.Z "$REL" -m "Release vX.Y.Z"   # signed (org rulesets); -a also works
+    git push origin vX.Y.Z
+    ```
+
+    The tag push triggers `publish-release.yml` (its `tags: ['v*']` trigger),
+    which skips drift detection and publishes from the tag.
+    `release_harn.harn --mode ship-pr` does this for you. **A transient red
+    `publish-release` run on the `main` push is expected** — it's the "tag
+    missing" guard; pushing the tag is what ships.
+
+## What happens automatically after you push the tag
 
 - **`Publish release`** workflow
-  (`.github/workflows/publish-release.yml`) detects tag drift
-  (`Cargo.toml` ahead of latest `vX.Y.Z` tag) and runs
+  (`.github/workflows/publish-release.yml`) fires on the `vX.Y.Z` **tag push**,
+  skips drift detection, and runs
   `./scripts/release_ship.sh --finalize` under the App identity:
-  portal-check + publish dry-run + push tag + `cargo publish` + render
+  portal-check + publish dry-run + `cargo publish` + render
   notes + create or update the GitHub release. **Audit is skipped** —
   the merge-queue CI of the just-landed Release PR proved the same
-  gates a few minutes ago.
+  gates a few minutes ago. `--finalize` no longer *creates* the tag — the tag
+  you pushed in step 10 is the trigger and the source of truth for what
+  publishes. The separate `main`-push run of `publish-release.yml` is only a
+  guard: it errors if the tag is missing or points at the wrong commit and never
+  tags `main` HEAD itself.
 - The tag push triggers **`Build release binaries`** workflow
   (`.github/workflows/build-release-binaries.yml`), which builds the darwin/linux ×
   x86/arm binary tarballs, publishes the multi-arch GHCR container,

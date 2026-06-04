@@ -9,13 +9,21 @@ Use the same workflow as [`harn-release`](../harn-release/SKILL.md).
 
 The release is **one** human PR titled `Release vX.Y.Z` carrying
 changelog + code + docs + Cargo.toml bump together. After it lands
-through the merge queue, two GitHub Actions workflows cascade
-automatically under the `harn-release-bot` App identity:
+through the merge queue, **push the `vX.Y.Z` tag at the release commit** — that
+tag push (not the merge) drives the rest:
 
 ```text
-land "Release vX.Y.Z" → publish-release pushes tag + cargo publish + GH release
+land "Release vX.Y.Z" PR  →  push signed vX.Y.Z tag at the release commit
+   (release_harn.harn --mode ship-pr does the tag push; or do it by hand)
+        → TAG push → publish-release runs cargo publish + GH release
         → tag push → build-release-binaries assembles binaries + GHCR container
 ```
+
+> **`publish-release.yml` does NOT tag `main` HEAD** (changed with the
+> release-pipeline modernization, #2971–#2973). A missing `vX.Y.Z` tag makes the
+> post-merge run fail with `… but vX.Y.Z does not exist. Push vX.Y.Z at the
+> release commit`. Push it after merge with
+> `git tag -s vX.Y.Z $(git rev-parse origin/main) -m "Release vX.Y.Z" && git push origin vX.Y.Z`.
 
 The repo source of truth (only invoke locally for recovery):
 
@@ -50,15 +58,20 @@ Commit pattern for a real release:
    1-15 min and main may have moved), landed through PR/merge queue
    with `gh pr merge --auto` enabled so it lands as soon as CI is green.
 
-That's it. The bot takes over once it lands.
+2. **Push the `vX.Y.Z` tag at the release commit** once the PR lands — this is
+   the step that ships. The bot does NOT auto-tag. Use `release_harn.harn --mode
+   ship-pr` (which pushes the tag for you) or push it by hand after merge.
 
 Workflows:
 
 - `.github/workflows/publish-release.yml` (display name: "Publish release")
-  — fires on push to main when `Cargo.toml` is ahead of the latest
-  `vX.Y.Z` tag (i.e. tag drift). Pushes the tag using the App token so
-  downstream cascades fire (a `GITHUB_TOKEN` tag push would be
-  suppressed by GHA).
+  — publishes on the `vX.Y.Z` **tag push** (`tags: ['v*']`), running
+  `cargo publish` from the tag. Its `push: branches:[main]` trigger is only a
+  **guard**: it errors if `Cargo.toml` is ahead of the latest tag but the
+  matching tag is missing or points at a different commit — it does **not** tag
+  `main` HEAD. Push the tag with the App token or your own creds (a
+  `GITHUB_TOKEN` tag push would be suppressed by GHA, so downstream wouldn't
+  fire).
 - `.github/workflows/build-release-binaries.yml` (display name: "Build
   release binaries") — fires on tag push. Also accepts a `tag` input via
   `workflow_dispatch` for re-running against an existing tag.
