@@ -1625,9 +1625,9 @@ impl PackageWorkspace {
             }
         }
 
-        let home = std::env::var_os("HOME")
-            .map(PathBuf::from)
-            .ok_or_else(|| "HOME is not set and HARN_CACHE_DIR was not provided".to_string())?;
+        let home = harn_vm::user_dirs::home_dir().ok_or_else(|| {
+            "neither HOME nor USERPROFILE is set and HARN_CACHE_DIR was not provided".to_string()
+        })?;
         if cfg!(target_os = "macos") {
             return Ok(home.join("Library/Caches/harn"));
         }

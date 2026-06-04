@@ -134,7 +134,14 @@ pub(crate) fn is_sensitive_path(path: &Path) -> bool {
 /// Returns `true` if the path looks like a credentials/secrets file that
 /// must never enter the index.
 pub(crate) fn is_sensitive(path: &Path) -> bool {
-    let lower = path.to_string_lossy().to_ascii_lowercase();
+    // Normalize Windows backslashes to `/` before the component scan below so
+    // the `split('/')` SENSITIVE_DIRS check sees directory parts on every
+    // platform. This mirrors the `to_posix`-style normalization already used
+    // elsewhere in this crate (walker.rs, state.rs, fs_watch.rs).
+    let lower = path
+        .to_string_lossy()
+        .replace('\\', "/")
+        .to_ascii_lowercase();
     let base = Path::new(&lower)
         .file_name()
         .and_then(|s| s.to_str())

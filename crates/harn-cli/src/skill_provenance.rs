@@ -782,9 +782,7 @@ pub(crate) fn fingerprint_for_key(key: &VerifyingKey) -> String {
 }
 
 fn user_home_dir() -> Option<PathBuf> {
-    std::env::var_os("HOME")
-        .map(PathBuf::from)
-        .or_else(|| std::env::var_os("USERPROFILE").map(PathBuf::from))
+    harn_vm::user_dirs::home_dir()
 }
 
 #[cfg(test)]

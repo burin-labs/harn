@@ -761,11 +761,9 @@ pub(crate) fn process_sandbox_package_manager_config_read_roots(
 
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 fn package_manager_config_home_dir() -> Option<PathBuf> {
-    ["HOME", "USERPROFILE"]
-        .into_iter()
-        .filter_map(std::env::var_os)
-        .map(PathBuf::from)
-        .find(|path| path.is_absolute())
+    // Only an absolute home grounds the package-manager read-roots below; a
+    // relative or unset home yields no extra roots (the safe direction).
+    crate::user_dirs::home_dir().filter(|path| path.is_absolute())
 }
 
 #[cfg(any(target_os = "linux", target_os = "macos"))]

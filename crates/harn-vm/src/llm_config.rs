@@ -2075,7 +2075,7 @@ fn glob_match(pattern: &str, input: &str) -> bool {
 }
 
 fn dirs_or_home() -> Option<String> {
-    std::env::var("HOME").ok()
+    crate::user_dirs::home_dir().map(|home| home.to_string_lossy().into_owned())
 }
 
 /// Resolve the effective base URL for a provider, checking the `base_url_env`

@@ -711,13 +711,9 @@ fn harn_home_dir() -> PathBuf {
     if let Some(path) = std::env::var_os(HARN_HOME_ENV) {
         return PathBuf::from(path);
     }
-    if let Some(home) = std::env::var_os("HOME") {
-        return PathBuf::from(home).join(".harn");
-    }
-    if let Some(home) = std::env::var_os("USERPROFILE") {
-        return PathBuf::from(home).join(".harn");
-    }
-    std::env::temp_dir().join("harn")
+    crate::user_dirs::home_dir()
+        .map(|home| home.join(".harn"))
+        .unwrap_or_else(|| std::env::temp_dir().join("harn"))
 }
 
 // --- keyring storage ---------------------------------------------------------

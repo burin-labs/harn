@@ -96,6 +96,7 @@ pub mod tracing;
 pub mod triggers;
 pub mod trust_graph;
 pub(crate) mod url_encoding;
+pub mod user_dirs;
 
 /// Crate-wide deterministic clock mock used by stdlib time builtins, the
 /// trigger dispatcher, the cron scheduler, and Rust-side tests. Re-exports

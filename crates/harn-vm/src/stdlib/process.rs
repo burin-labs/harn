@@ -303,8 +303,8 @@ fn arch_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
 
 #[harn_builtin(sig = "home_dir() -> string", category = "process")]
 fn home_dir_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
-    let home = std::env::var("HOME")
-        .or_else(|_| std::env::var("USERPROFILE"))
+    let home = crate::user_dirs::home_dir()
+        .map(|home| home.to_string_lossy().into_owned())
         .unwrap_or_default();
     Ok(VmValue::String(std::sync::Arc::from(home)))
 }
