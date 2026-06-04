@@ -30,6 +30,7 @@ CATEGORIES = {
     "Pol",
     "Met",
     "Cst",
+    "Cmp",
 }
 HELPERS = [
     "error_at_with_help",
@@ -122,6 +123,7 @@ def category_code(category: str) -> str:
         "Pol": "POL",
         "Met": "MET",
         "Cst": "CST",
+        "Cmp": "CMP",
     }[category]
 
 
