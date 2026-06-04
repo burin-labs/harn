@@ -8,6 +8,68 @@ highlights live in [CHANGELOG-pre-0.6.md](CHANGELOG-pre-0.6.md).
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.8.70
+
+### Added
+
+- **Observability:** Added `HARN_OTEL_SAMPLE_RATIO` so OTLP trace export can
+  downsample root traces at the source while keeping the default at full
+  fidelity.
+- **ACP staged-fs discard (#3017).** ACP clients can now call
+  `session/fs_discard_staged` to drop all pending staged filesystem writes, or
+  only selected `paths`, using the same session-scoped hostlib staged-FS store
+  as `session/fs_commit_staged`.
+
+### Fixed
+
+- **Homepage hero snippet validation (#2986).** The marketing-site hero now
+  renders a checked-in `.harn.txt` example that passes `harn check`, and the
+  site snippet fixtures are covered by a dedicated parse guard.
+- **Docs CLI flag validation (#2987).** Bash/sh Harn examples in the docs now
+  check their long flags against the live CLI help, and stale doctor/test/try
+  examples were updated to current syntax.
+- **Package-manager sandbox config (#2988).** OS-hardened process sandboxes now
+  read common per-user npm, pip, cargo, git, and CA config/cache roots by
+  default without making those paths writable or readable by Harn file builtins.
+- **Documented division- and modulo-by-zero semantics accurately (#3007).** The
+  language spec and `language-basics` tutorial previously claimed "division by
+  zero returns `nil`", which is wrong on every count. Integer division by zero
+  raises a catchable runtime error; float division by zero follows IEEE-754
+  (`±inf`, or `NaN` for `0.0 / 0.0`); and modulo by any zero divisor always
+  raises. The docs now state this, and new conformance fixtures
+  (`errors/runtime/{int_div,int_mod,float_mod}_by_zero` plus
+  `language/division_by_zero_float`) lock the runtime contract in.
+- **Release runbooks now document the tag-push contract (#3009).** After the
+  release-pipeline modernization (#2971–#2973), `publish-release.yml` no longer
+  auto-tags `main` HEAD — the `vX.Y.Z` tag must be pushed at the release commit,
+  and that tag push (not the merge) triggers `cargo publish` + binary builds. The
+  four agent-facing runbooks (`.claude/commands/release-harn.md`,
+  `.codex/commands/harn-release.md`, and both `.codex/skills/*/SKILL.md`) still
+  described the old auto-tag behavior; they now document the explicit
+  signed-tag-push step.
+- **Agent loop no longer drops recovered tool calls on protocol violations (#3011).**
+  When a model narrated prose before a tool call, the parser recovered the
+  call but flagged the stray prose as a protocol violation, and the structural
+  validator vetoed the whole turn — silently dropping the dispatchable call and
+  looping until the stall detector fired. The well-formed check now only vetoes
+  when no dispatchable call was recovered; genuine parse/schema errors still
+  veto. Also: decode multi-byte UTF-8 in quoted/template tool-argument string
+  values (was mojibaked one Latin-1 char per byte); flag the ollama `qwen3.6*`
+  and openrouter `qwen/qwen3-coder*` text routes as `reserved_tool_call_token`;
+  and soften the done-sentinel prompt's false "the runtime rejects it" claim.
+- **Truncated tool calls are flagged instead of silently stalling (#3016).**
+  When a model hit its output-token cap mid-argument while streaming a large
+  tool call, the closing `</tool_call>` never arrived; the parser treated the
+  unclosed open tag as an "unknown top-level tag" and the partial call body as
+  stray prose, so the turn produced zero tool calls and the agent loop stalled
+  (re-emitting until the stall detector fired, with no file written). The
+  tagged parser now detects an unclosed `<tool_call>` open, recovers the tool
+  name, and emits an actionable `TOOL CALL TRUNCATED … likely hit max output
+  token limit` error so the loop/model can react instead of silently looping.
+- **Harnpack and trigger budgets.** `harn run <bundle.harnpack>` now rejects
+  manifest entrypoints that are absolute or escape the unpacked source tree,
+  and trigger predicate cost averaging no longer overflows on large samples.
+
 ## v0.8.69
 
 ### Added
