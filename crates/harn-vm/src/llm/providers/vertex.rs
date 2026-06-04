@@ -94,13 +94,36 @@ impl VertexProvider {
         if let Some(stop) = request.stop.as_ref() {
             generation.insert("stopSequences".to_string(), serde_json::json!(stop));
         }
-        if request.response_format.as_deref() == Some("json") {
-            generation.insert(
-                "responseMimeType".to_string(),
-                serde_json::json!("application/json"),
-            );
-            if let Some(schema) = request.json_schema.as_ref() {
+        // The modern `output_format` is the source of truth; Vertex previously
+        // read only the legacy `response_format`/`json_schema` mirror, which is
+        // never backfilled from a nested `output_format.schema`, so a call using
+        // `output_format: {kind: "json_schema", schema}` silently produced no
+        // structured-output directive. Honor `output_format` first, falling back
+        // to the legacy mirror for callers that only set those.
+        match &request.output_format {
+            crate::llm::api::OutputFormat::JsonObject => {
+                generation.insert(
+                    "responseMimeType".to_string(),
+                    serde_json::json!("application/json"),
+                );
+            }
+            crate::llm::api::OutputFormat::JsonSchema { schema, .. } => {
+                generation.insert(
+                    "responseMimeType".to_string(),
+                    serde_json::json!("application/json"),
+                );
                 generation.insert("responseSchema".to_string(), schema.clone());
+            }
+            crate::llm::api::OutputFormat::Text => {
+                if request.response_format.as_deref() == Some("json") {
+                    generation.insert(
+                        "responseMimeType".to_string(),
+                        serde_json::json!("application/json"),
+                    );
+                    if let Some(schema) = request.json_schema.as_ref() {
+                        generation.insert("responseSchema".to_string(), schema.clone());
+                    }
+                }
             }
         }
         if !generation.is_empty() {
@@ -354,6 +377,26 @@ mod tests {
         assert_eq!(body["contents"][0]["role"], "user");
         assert_eq!(body["contents"][0]["parts"][0]["text"], "hello");
         assert_eq!(body["generationConfig"]["maxOutputTokens"], 32);
+    }
+
+    #[test]
+    fn build_request_honors_modern_output_format_json_schema() {
+        // Regression: Vertex read only the legacy response_format/json_schema
+        // mirror, so a modern `output_format` was silently dropped.
+        let mut request = base_request();
+        request.output_format = crate::llm::api::OutputFormat::JsonSchema {
+            schema: json!({"type": "object", "properties": {"answer": {"type": "string"}}}),
+            strict: true,
+        };
+        let body = VertexProvider::build_request_body(&request);
+        assert_eq!(
+            body["generationConfig"]["responseMimeType"],
+            "application/json"
+        );
+        assert_eq!(
+            body["generationConfig"]["responseSchema"]["properties"]["answer"]["type"],
+            "string"
+        );
     }
 
     #[test]

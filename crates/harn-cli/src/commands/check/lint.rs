@@ -194,7 +194,7 @@ pub(crate) fn lint_fix_file(
         &options,
     );
 
-    let mut edits: Vec<&harn_lexer::FixEdit> = lint_diags
+    let edits: Vec<harn_lexer::FixEdit> = lint_diags
         .iter()
         .filter_map(|d| d.fix.as_ref())
         .chain(
@@ -205,34 +205,18 @@ pub(crate) fn lint_fix_file(
                 .filter_map(|d| d.fix.as_ref()),
         )
         .flatten()
+        .cloned()
         .collect();
 
     if edits.is_empty() {
         return 0;
     }
 
-    // Descending by span.start so edits apply right-to-left without
-    // invalidating earlier offsets; drop overlaps in that same order.
-    edits.sort_by_key(|edit| std::cmp::Reverse(edit.span.start));
-
-    let mut accepted: Vec<&harn_lexer::FixEdit> = Vec::new();
-    for edit in &edits {
-        let overlaps = accepted
-            .iter()
-            .any(|prev| edit.span.start < prev.span.end && edit.span.end > prev.span.start);
-        if !overlaps {
-            accepted.push(edit);
-        }
-    }
-
-    let mut result = source;
-    for edit in &accepted {
-        let before = &result[..edit.span.start];
-        let after = &result[edit.span.end..];
-        result = format!("{before}{}{after}", edit.replacement);
-    }
-
-    let applied = accepted.len();
+    // Drop overlaps and splice right-to-left via the shared FixEdit policy, so
+    // the result is byte-for-byte what `harn fmt` and the LSP on-save fixer
+    // produce.
+    let applied = harn_lexer::FixEdit::dedupe_overlapping(&edits).len();
+    let result = harn_lexer::FixEdit::apply_all(&source, &edits);
     std::fs::write(path, &result).unwrap_or_else(|e| {
         eprintln!("Failed to write {path_str}: {e}");
         process::exit(1);

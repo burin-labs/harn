@@ -314,22 +314,8 @@ fn end_minus_one(span: Span) -> usize {
     span.end.saturating_sub(1)
 }
 
-fn apply_edits(source: &str, mut edits: Vec<FixEdit>) -> String {
-    edits.sort_by_key(|e| std::cmp::Reverse(e.span.start));
-    let mut out = source.to_string();
-    let mut accepted_start: Option<usize> = None;
-    for edit in edits {
-        if let Some(prev_start) = accepted_start {
-            if edit.span.end > prev_start {
-                continue;
-            }
-        }
-        let before = &out[..edit.span.start];
-        let after = &out[edit.span.end..];
-        out = format!("{before}{}{after}", edit.replacement);
-        accepted_start = Some(edit.span.start);
-    }
-    out
+fn apply_edits(source: &str, edits: Vec<FixEdit>) -> String {
+    FixEdit::apply_all(source, &edits)
 }
 
 fn span_at_offset(source: &str, start: usize, end: usize) -> Span {
