@@ -360,6 +360,7 @@ fn tokenize(text: &str) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::HashSet;
 
     #[test]
     fn bm25_ranks_deferred_registry_entries() {
@@ -408,5 +409,120 @@ mod tests {
             &serde_json::json!({"strategy": "hybrid"}),
         );
         assert_eq!(ranked[0].tool_name, "run_command");
+    }
+
+    #[test]
+    fn golden_fixture_has_realistic_tool_registry() {
+        let fixture = golden_fixture();
+        let tool_names = tool_names(&fixture);
+        let cases = fixture["cases"].as_array().expect("cases array");
+
+        assert!(
+            tool_names.len() >= 30,
+            "expected a realistic registry of at least 30 tools, got {}",
+            tool_names.len()
+        );
+        assert!(
+            cases.len() >= 12,
+            "expected at least 12 golden queries, got {}",
+            cases.len()
+        );
+
+        for case in cases {
+            let query = case["query"].as_str().expect("query string");
+            let expected = expected_names(case);
+            assert!(
+                !expected.is_empty(),
+                "golden query {query:?} must name at least one expected tool"
+            );
+            for expected in expected {
+                assert!(
+                    tool_names.contains(expected),
+                    "golden query {query:?} references missing tool {expected:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn golden_recall_at_five_stays_above_budget() {
+        let fixture = golden_fixture();
+        let bm25 = recall_at_five(&fixture, "bm25");
+        let hybrid = recall_at_five(&fixture, "hybrid");
+
+        assert!(
+            bm25.mean >= 0.8,
+            "bm25 recall@5 {:.3} below budget\n{}",
+            bm25.mean,
+            bm25.diagnostics
+        );
+        assert!(
+            hybrid.mean >= 0.8,
+            "hybrid recall@5 {:.3} below budget\n{}",
+            hybrid.mean,
+            hybrid.diagnostics
+        );
+        assert!(
+            hybrid.mean >= bm25.mean,
+            "hybrid recall@5 {:.3} regressed below bm25 {:.3}\nhybrid:\n{}\nbm25:\n{}",
+            hybrid.mean,
+            bm25.mean,
+            hybrid.diagnostics,
+            bm25.diagnostics
+        );
+    }
+
+    struct RecallReport {
+        mean: f64,
+        diagnostics: String,
+    }
+
+    fn golden_fixture() -> serde_json::Value {
+        serde_json::from_str(include_str!("testdata/tool_search_golden.json"))
+            .expect("tool search golden fixture parses")
+    }
+
+    fn tool_names(fixture: &serde_json::Value) -> HashSet<&str> {
+        fixture["tools"]
+            .as_array()
+            .expect("tools array")
+            .iter()
+            .map(|tool| tool["name"].as_str().expect("tool name"))
+            .collect()
+    }
+
+    fn expected_names(case: &serde_json::Value) -> Vec<&str> {
+        case["expected"]
+            .as_array()
+            .expect("expected array")
+            .iter()
+            .map(|name| name.as_str().expect("expected tool name"))
+            .collect()
+    }
+
+    fn recall_at_five(fixture: &serde_json::Value, strategy: &str) -> RecallReport {
+        let cases = fixture["cases"].as_array().expect("cases array");
+        let opts = serde_json::json!({"strategy": strategy, "max_results": 5});
+        let mut total = 0.0;
+        let mut diagnostics = String::new();
+
+        for case in cases {
+            let query = case["query"].as_str().expect("query string");
+            let expected = expected_names(case);
+            let ranked = score_tools(query, fixture, &opts);
+            let top: Vec<&str> = ranked.iter().map(|tool| tool.tool_name.as_str()).collect();
+            let hits = expected.iter().filter(|name| top.contains(name)).count();
+            let recall = hits as f64 / expected.len() as f64;
+            total += recall;
+
+            diagnostics.push_str(&format!(
+                "{strategy} query={query:?} recall@5={recall:.3} expected={expected:?} top={top:?}\n"
+            ));
+        }
+
+        RecallReport {
+            mean: total / cases.len() as f64,
+            diagnostics,
+        }
     }
 }

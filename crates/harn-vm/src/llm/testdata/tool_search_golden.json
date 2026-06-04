@@ -1,0 +1,421 @@
+{
+  "tools": [
+    {
+      "name": "read_file",
+      "description": "Read a UTF-8 text file from the workspace, with optional offset and line limit for focused inspection.",
+      "parameters": {
+        "properties": {
+          "path": { "description": "Workspace-relative file path to read" },
+          "offset": { "description": "First line offset for a partial read" },
+          "limit": { "description": "Maximum number of lines to return" }
+        }
+      }
+    },
+    {
+      "name": "list_files",
+      "description": "List files and directories under a workspace path, optionally filtered by glob.",
+      "parameters": {
+        "properties": {
+          "path": { "description": "Directory to list" },
+          "glob": { "description": "Optional filename glob filter" }
+        }
+      }
+    },
+    {
+      "name": "search_text",
+      "description": "Search repository files with ripgrep for a string, regex, symbol, or phrase match.",
+      "parameters": {
+        "properties": {
+          "query": { "description": "Literal text, regex, symbol, or phrase to find" },
+          "path": { "description": "Optional subtree to search" }
+        }
+      }
+    },
+    {
+      "name": "run_shell_command",
+      "description": "Execute a shell command such as cargo test, npm run, make, or a repo script and capture stdout and stderr.",
+      "parameters": {
+        "properties": {
+          "command": { "description": "Shell command to run" },
+          "working_directory": { "description": "Directory where the command should execute" }
+        }
+      }
+    },
+    {
+      "name": "test_runner",
+      "description": "Run focused unit, golden, snapshot, or integration test suites and summarize failures.",
+      "parameters": {
+        "properties": {
+          "filter": { "description": "Test name, package, or suite filter" },
+          "command": { "description": "Concrete test command to execute" }
+        }
+      }
+    },
+    {
+      "name": "edit_apply_node",
+      "description": "Replace a parsed syntax tree AST node with new source while preserving unrelated bytes.",
+      "parameters": {
+        "properties": {
+          "path": { "description": "Source file path" },
+          "selector": { "description": "Tree-sitter node selector or anchor" },
+          "replacement": { "description": "Replacement source for the node" }
+        }
+      }
+    },
+    {
+      "name": "edit_insert_at_anchor",
+      "description": "Insert a sibling or child declaration at a structural anchor in a parsed source file.",
+      "parameters": {
+        "properties": {
+          "path": { "description": "Source file path" },
+          "anchor": { "description": "Existing declaration or syntax node to insert near" },
+          "content": { "description": "Source text to insert as sibling or child" }
+        }
+      }
+    },
+    {
+      "name": "edit_rename_symbol",
+      "description": "Rename a symbol across files, imports, references, and callers with language-aware edits.",
+      "parameters": {
+        "properties": {
+          "old_name": { "description": "Existing symbol name" },
+          "new_name": { "description": "New symbol name" },
+          "root": { "description": "Workspace root for cross-file reference search" }
+        }
+      }
+    },
+    {
+      "name": "edit_safe_text_patch",
+      "description": "Apply an exact byte text patch for plain text or unparseable files using a hash guard.",
+      "parameters": {
+        "properties": {
+          "path": { "description": "File path to patch" },
+          "old": { "description": "Exact old text preimage" },
+          "new": { "description": "Exact replacement text" }
+        }
+      }
+    },
+    {
+      "name": "git_status",
+      "description": "Inspect branch, index, and uncommitted workspace changes before committing.",
+      "parameters": {
+        "properties": {
+          "repo": { "description": "Repository path" },
+          "porcelain": { "description": "Return short porcelain status output" }
+        }
+      }
+    },
+    {
+      "name": "git_diff",
+      "description": "Show unstaged, staged, or base branch diff for code review and change inspection.",
+      "parameters": {
+        "properties": {
+          "repo": { "description": "Repository path" },
+          "staged": { "description": "Whether to show staged diff" },
+          "base": { "description": "Optional base ref to diff against" }
+        }
+      }
+    },
+    {
+      "name": "git_commit",
+      "description": "Create a git commit from staged changes with an intentional message.",
+      "parameters": {
+        "properties": {
+          "message": { "description": "Commit subject and body" },
+          "repo": { "description": "Repository path" }
+        }
+      }
+    },
+    {
+      "name": "git_push",
+      "description": "Push the current branch to the remote repository.",
+      "parameters": {
+        "properties": {
+          "remote": { "description": "Remote name, usually origin" },
+          "branch": { "description": "Branch name to push" }
+        }
+      }
+    },
+    {
+      "name": "github_search_issues",
+      "description": "Search GitHub issues and pull requests by query, label, state, repository, or author.",
+      "parameters": {
+        "properties": {
+          "query": { "description": "GitHub search query such as launch hardening label or issue title" },
+          "repo": { "description": "Owner and repository" }
+        }
+      }
+    },
+    {
+      "name": "github_create_issue",
+      "description": "Create a new GitHub issue with title, body, labels, milestone, and assignees.",
+      "parameters": {
+        "properties": {
+          "title": { "description": "Issue title" },
+          "body": { "description": "Issue body markdown" },
+          "labels": { "description": "Labels to apply" }
+        }
+      }
+    },
+    {
+      "name": "github_create_pull_request",
+      "description": "Open a GitHub pull request from the current branch with title, body, reviewers, and labels.",
+      "parameters": {
+        "properties": {
+          "title": { "description": "Pull request title" },
+          "body": { "description": "Pull request body including closes references" },
+          "base": { "description": "Base branch for the PR" }
+        }
+      }
+    },
+    {
+      "name": "github_comment_pr",
+      "description": "Post a comment or reply on a GitHub pull request review thread.",
+      "parameters": {
+        "properties": {
+          "pull_request": { "description": "Pull request number or URL" },
+          "body": { "description": "Markdown comment body" }
+        }
+      }
+    },
+    {
+      "name": "browser_open",
+      "description": "Open a URL such as localhost, a file, or a remote web page in the in-app browser.",
+      "parameters": {
+        "properties": {
+          "url": { "description": "Target URL to navigate to" }
+        }
+      }
+    },
+    {
+      "name": "browser_click",
+      "description": "Click an element in the browser by selector, role, or screen coordinate.",
+      "parameters": {
+        "properties": {
+          "selector": { "description": "Element selector or accessible role" },
+          "x": { "description": "Optional screen x coordinate" },
+          "y": { "description": "Optional screen y coordinate" }
+        }
+      }
+    },
+    {
+      "name": "browser_type",
+      "description": "Type text into a focused browser input or a selected form field.",
+      "parameters": {
+        "properties": {
+          "selector": { "description": "Input selector" },
+          "text": { "description": "Text to type" }
+        }
+      }
+    },
+    {
+      "name": "browser_screenshot",
+      "description": "Capture a browser screenshot for visual regression, layout inspection, or proof of localhost state.",
+      "parameters": {
+        "properties": {
+          "path": { "description": "Optional output image path" },
+          "full_page": { "description": "Whether to capture the full page" }
+        }
+      }
+    },
+    {
+      "name": "notion_search",
+      "description": "Search Notion workspace pages, databases, and connected docs for planning or research context.",
+      "parameters": {
+        "properties": {
+          "query": { "description": "Semantic search query" },
+          "teamspace": { "description": "Optional Notion teamspace filter" }
+        }
+      }
+    },
+    {
+      "name": "notion_create_page",
+      "description": "Create or update a structured Notion page with markdown content and properties.",
+      "parameters": {
+        "properties": {
+          "parent": { "description": "Parent page or database" },
+          "title": { "description": "Page title" },
+          "content": { "description": "Markdown page content" }
+        }
+      }
+    },
+    {
+      "name": "slack_search_messages",
+      "description": "Search Slack messages by channel, author, date range, or keyword.",
+      "parameters": {
+        "properties": {
+          "query": { "description": "Slack search query" },
+          "channel": { "description": "Channel name or ID" }
+        }
+      }
+    },
+    {
+      "name": "slack_send_message",
+      "description": "Send or draft a Slack message to a channel, thread, or user.",
+      "parameters": {
+        "properties": {
+          "channel": { "description": "Channel, thread, or user destination" },
+          "message": { "description": "Message body to send" }
+        }
+      }
+    },
+    {
+      "name": "mcp_bootstrap",
+      "description": "Connect and bootstrap remote MCP servers, importing their advertised tools into the session.",
+      "parameters": {
+        "properties": {
+          "servers": { "description": "MCP server specifications to connect" },
+          "session_id": { "description": "Agent session identifier" }
+        }
+      }
+    },
+    {
+      "name": "mcp_call_tool",
+      "description": "Call a remote MCP tool on a connected server with JSON arguments.",
+      "parameters": {
+        "properties": {
+          "server": { "description": "Connected MCP server name" },
+          "tool": { "description": "Remote tool name to invoke" },
+          "arguments": { "description": "JSON arguments for the remote tool call" }
+        }
+      }
+    },
+    {
+      "name": "update_plan",
+      "description": "Update the task plan with pending, in-progress, and completed steps.",
+      "parameters": {
+        "properties": {
+          "steps": { "description": "Plan steps and statuses" }
+        }
+      }
+    },
+    {
+      "name": "request_user_input",
+      "description": "Ask the human to choose between options or answer a concise clarification question.",
+      "parameters": {
+        "properties": {
+          "question": { "description": "Question to ask the user" },
+          "options": { "description": "Mutually exclusive choices" }
+        }
+      }
+    },
+    {
+      "name": "request_approval",
+      "description": "Request human approval for a risky command, file mutation, network action, or external side effect.",
+      "parameters": {
+        "properties": {
+          "reason": { "description": "Approval reason and risk summary" },
+          "action": { "description": "Action awaiting approval" }
+        }
+      }
+    },
+    {
+      "name": "harn_check_script",
+      "description": "Type-check and lint a Harn script before running it.",
+      "parameters": {
+        "properties": {
+          "path": { "description": "Path to the .harn script" }
+        }
+      }
+    },
+    {
+      "name": "harn_run_script",
+      "description": "Run a Harn script with harness capabilities and capture transcript output.",
+      "parameters": {
+        "properties": {
+          "path": { "description": "Path to the .harn script" },
+          "args": { "description": "Command line arguments for the script" }
+        }
+      }
+    },
+    {
+      "name": "telemetry_query_spans",
+      "description": "Query OpenTelemetry traces, spans, attributes, errors, and latency for a run or service.",
+      "parameters": {
+        "properties": {
+          "trace_id": { "description": "Trace identifier" },
+          "service": { "description": "Service name filter" },
+          "attribute": { "description": "Span attribute filter" }
+        }
+      }
+    },
+    {
+      "name": "telemetry_export_otlp",
+      "description": "Export spans and metrics to an OTLP collector endpoint.",
+      "parameters": {
+        "properties": {
+          "endpoint": { "description": "OTLP collector URL" },
+          "headers": { "description": "Collector authentication headers" }
+        }
+      }
+    },
+    {
+      "name": "secret_reference",
+      "description": "Reference a named secret handle without printing or exfiltrating the secret value.",
+      "parameters": {
+        "properties": {
+          "name": { "description": "Secret name or handle" },
+          "purpose": { "description": "Why the secret is needed" }
+        }
+      }
+    }
+  ],
+  "cases": [
+    {
+      "query": "replace a syntax tree node without rewriting the whole file",
+      "expected": ["edit_apply_node"]
+    },
+    {
+      "query": "insert a sibling declaration after an anchor",
+      "expected": ["edit_insert_at_anchor"]
+    },
+    {
+      "query": "rename symbol across imports and callers",
+      "expected": ["edit_rename_symbol"]
+    },
+    {
+      "query": "exact byte patch for a plain text file",
+      "expected": ["edit_safe_text_patch"]
+    },
+    {
+      "query": "run cargo test in the shell and capture output",
+      "expected": ["run_shell_command", "test_runner"]
+    },
+    {
+      "query": "find every occurrence of a string in repository files",
+      "expected": ["search_text"]
+    },
+    {
+      "query": "inspect uncommitted changes before committing",
+      "expected": ["git_status", "git_diff"]
+    },
+    {
+      "query": "open a pull request on GitHub",
+      "expected": ["github_create_pull_request"]
+    },
+    {
+      "query": "search GitHub issues for launch hardening",
+      "expected": ["github_search_issues"]
+    },
+    {
+      "query": "open localhost in the browser and capture a screenshot",
+      "expected": ["browser_open", "browser_screenshot"]
+    },
+    {
+      "query": "ask the human to choose between options",
+      "expected": ["request_user_input"]
+    },
+    {
+      "query": "connect to MCP and call a remote tool",
+      "expected": ["mcp_bootstrap", "mcp_call_tool"]
+    },
+    {
+      "query": "send a summary to the Slack channel",
+      "expected": ["slack_send_message"]
+    },
+    {
+      "query": "query trace spans and latency from telemetry",
+      "expected": ["telemetry_query_spans"]
+    }
+  ]
+}
