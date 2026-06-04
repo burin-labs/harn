@@ -118,12 +118,23 @@ async fn step_run(ctx: &AsyncBuiltinCtx, args: Vec<VmValue>) -> Result<VmValue, 
     let topic = topic_for_namespace(&namespace)?;
     let sequence = next_sequence(&namespace, &request.key);
     let input_hash = input_hash(&request.input);
-    let identity = step_identity(&namespace, &request.key, sequence, &input_hash);
+    let identity = step_occurrence_identity(&namespace, &request.key, sequence);
     let log = ensure_step_event_log();
 
-    if let Some(record) = find_step_record(&log, &topic, &namespace, &request.key, sequence).await?
+    // Replay detection keys off the `step_identity` idempotency index the write
+    // path already maintains — an O(log N) lookup on SQLite — instead of
+    // rescanning the whole topic per step (which made a K-step workflow O(K^2)).
+    // The occurrence identity excludes the input hash so a re-run with changed
+    // input still resolves to the prior record and is caught as a deterministic
+    // mismatch (validated against the hash stored in the payload).
+    if let Some((event_id, event)) = log
+        .read_idempotent_by_header(&topic, "step_identity", &identity)
+        .await
+        .map_err(step_log_error)?
     {
-        return value_from_replay(record, &namespace, &request.key, sequence, &input_hash);
+        if let Some(record) = parse_step_record(event_id, event) {
+            return value_from_replay(record, &namespace, &request.key, sequence, &input_hash);
+        }
     }
 
     let call_args = call_args_for_handler(&request, &request.callable)?;
@@ -383,28 +394,18 @@ fn input_hash(input: &VmValue) -> String {
     format!("sha256:{}", sha256_hex(key.as_bytes()))
 }
 
-fn step_identity(namespace: &str, key: &str, sequence: u64, input_hash: &str) -> String {
-    let material = format!("{namespace}\u{0}{key}\u{0}{sequence}\u{0}{input_hash}");
+/// Durable identity of a step *occurrence* — `(namespace, key, sequence)`. The
+/// deterministic input hash is deliberately excluded: it is integrity-validation
+/// data (stored in the payload and checked on replay), not part of identity, so
+/// a re-run with changed input resolves to the same record and is flagged as a
+/// mismatch rather than silently appending a duplicate occurrence.
+fn step_occurrence_identity(namespace: &str, key: &str, sequence: u64) -> String {
+    let material = format!("{namespace}\u{0}{key}\u{0}{sequence}");
     format!("sha256:{}", sha256_hex(material.as_bytes()))
 }
 
 fn sha256_hex(bytes: &[u8]) -> String {
     hex::encode(Sha256::digest(bytes))
-}
-
-async fn find_step_record(
-    log: &Arc<AnyEventLog>,
-    topic: &Topic,
-    namespace: &str,
-    key: &str,
-    sequence: u64,
-) -> Result<Option<StepRecord>, VmError> {
-    for record in read_step_records(log, topic).await? {
-        if record.namespace == namespace && record.key == key && record.sequence == sequence {
-            return Ok(Some(record));
-        }
-    }
-    Ok(None)
 }
 
 async fn read_step_records(
@@ -514,11 +515,24 @@ mod tests {
 
     #[test]
     fn identities_include_the_raw_namespace() {
-        let hash = "sha256:abc";
-
         assert_ne!(
-            step_identity("tenant/a", "load", 1, hash),
-            step_identity("tenant_a", "load", 1, hash)
+            step_occurrence_identity("tenant/a", "load", 1),
+            step_occurrence_identity("tenant_a", "load", 1)
+        );
+    }
+
+    #[test]
+    fn occurrence_identity_excludes_the_input_hash() {
+        // Same occurrence, different input → same identity, so a changed input
+        // resolves to the prior record (and is caught as a mismatch at replay)
+        // rather than silently appending a duplicate occurrence event.
+        assert_eq!(
+            step_occurrence_identity("ns", "load", 1),
+            step_occurrence_identity("ns", "load", 1)
+        );
+        assert_ne!(
+            step_occurrence_identity("ns", "load", 1),
+            step_occurrence_identity("ns", "load", 2)
         );
     }
 

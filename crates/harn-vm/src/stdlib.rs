@@ -109,7 +109,7 @@ pub(crate) mod waitpoint;
 mod waitpoints;
 mod web;
 pub mod workflow_messages;
-mod xml;
+pub(crate) mod xml;
 
 use crate::http::register_http_builtins;
 use crate::llm::register_llm_builtins;

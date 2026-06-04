@@ -218,6 +218,16 @@ fn push_indent(out: &mut String, opts: &XmlOptions, depth: usize) {
     }
 }
 
+/// Escape the three XML-reserved characters (`&`, `<`, `>`) for embedding text
+/// into XML-ish prompt scaffolding — `<artifact>` bodies, `<system-reminder>`
+/// bodies, and the like. The single span-copy escaper for the whole crate, so
+/// the prompt-assembly surfaces can never drift apart on how they escape.
+pub(crate) fn escape_xml_text(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    escape_text(&mut out, text);
+    out
+}
+
 fn escape_text(out: &mut String, text: &str) {
     // Span-copy: the typical case is "lots of text, few escapables",
     // so push longest unescaped runs at once and only spell out the

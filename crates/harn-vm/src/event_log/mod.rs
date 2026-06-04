@@ -514,6 +514,27 @@ impl AnyEventLog {
             Self::Sqlite(log) => log.append_idempotent_by_header(topic, header, value, event),
         }
     }
+
+    /// Read the event previously appended under `(header, value)`, the read
+    /// counterpart of [`Self::append_idempotent_by_header`]. On the SQLite
+    /// backend this is an indexed JOIN; the memory/file dev backends scan.
+    pub async fn read_idempotent_by_header(
+        &self,
+        topic: &Topic,
+        header: &str,
+        value: &str,
+    ) -> Result<Option<(EventId, LogEvent)>, LogError> {
+        if header.trim().is_empty() {
+            return Err(LogError::Config(
+                "idempotent read header cannot be empty".to_string(),
+            ));
+        }
+        match self {
+            Self::Memory(log) => log.read_idempotent_by_header(topic, header, value).await,
+            Self::File(log) => log.read_idempotent_by_header(topic, header, value),
+            Self::Sqlite(log) => log.read_idempotent_by_header(topic, header, value),
+        }
+    }
 }
 
 impl EventLog for AnyEventLog {

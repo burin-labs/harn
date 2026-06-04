@@ -174,32 +174,123 @@ fn throw_error_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmEr
 
 #[harn_builtin(sig = "is_timeout(error: any) -> bool", category = "testing")]
 fn is_timeout_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
-    Ok(VmValue::Bool(check_error_category(
+    Ok(VmValue::Bool(error_has_category(
         args.first().unwrap_or(&VmValue::Nil),
-        "timeout",
         ErrorCategory::Timeout,
     )))
 }
 
 #[harn_builtin(sig = "is_rate_limited(error: any) -> bool", category = "testing")]
 fn is_rate_limited_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
-    Ok(VmValue::Bool(check_error_category(
+    Ok(VmValue::Bool(error_has_category(
         args.first().unwrap_or(&VmValue::Nil),
-        "rate_limit",
         ErrorCategory::RateLimit,
     )))
 }
 
-fn check_error_category(val: &VmValue, category_str: &str, category: ErrorCategory) -> bool {
+/// Parameterized over the whole `ErrorCategory` taxonomy — `is_timeout` /
+/// `is_rate_limited` are just the two pre-wired spellings of this. A harness
+/// author can assert any category (`cancelled`, `budget_exceeded`,
+/// `server_error`, ...) without the VM hand-wiring a predicate per variant.
+#[harn_builtin(
+    sig = "error_is(error: any, category: string) -> bool",
+    category = "testing"
+)]
+fn error_is_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let category_str = args.get(1).map(|a| a.display()).unwrap_or_default();
+    let category = ErrorCategory::parse(&category_str);
+    // `parse` is total (unknown → Generic); reject typos loudly rather than
+    // silently asserting against `generic`.
+    if category == ErrorCategory::Generic && category_str != "generic" {
+        return Err(VmError::Runtime(format!(
+            "error_is: unknown error category {category_str:?}"
+        )));
+    }
+    Ok(VmValue::Bool(error_has_category(
+        args.first().unwrap_or(&VmValue::Nil),
+        category,
+    )))
+}
+
+/// Whether the error's category is one the agent loop treats as a transient,
+/// worth-retrying provider failure — the exact `ErrorCategory::is_transient`
+/// oracle, surfaced so tests can assert the retry decision directly.
+#[harn_builtin(sig = "error_is_transient(error: any) -> bool", category = "testing")]
+fn error_is_transient_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    Ok(VmValue::Bool(
+        error_category_of(args.first().unwrap_or(&VmValue::Nil))
+            .map(|category| category.is_transient())
+            .unwrap_or(false),
+    ))
+}
+
+/// The category carried by an error value: a structured `{category}` dict's
+/// field, or the classification of a raw error string.
+fn error_category_of(val: &VmValue) -> Option<ErrorCategory> {
     match val {
         VmValue::Dict(d) => d
             .get("category")
-            .map(|v| v.display() == category_str)
-            .unwrap_or(false),
-        VmValue::String(s) => {
-            let err = VmError::Runtime(s.to_string());
-            error_to_category(&err) == category
+            .map(|v| ErrorCategory::parse(&v.display())),
+        VmValue::String(s) => Some(error_to_category(&VmError::Runtime(s.to_string()))),
+        _ => None,
+    }
+}
+
+fn error_has_category(val: &VmValue, category: ErrorCategory) -> bool {
+    error_category_of(val) == Some(category)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn dict_err(category: &str) -> VmValue {
+        VmValue::Dict(std::sync::Arc::new(std::collections::BTreeMap::from([(
+            "category".to_string(),
+            VmValue::String(std::sync::Arc::from(category)),
+        )])))
+    }
+
+    fn as_bool(result: Result<VmValue, VmError>) -> bool {
+        match result.unwrap() {
+            VmValue::Bool(matched) => matched,
+            other => panic!("expected bool, got {other:?}"),
         }
-        _ => false,
+    }
+
+    fn error_is(error: VmValue, category: &str) -> Result<VmValue, VmError> {
+        let mut out = String::new();
+        let args = [error, VmValue::String(std::sync::Arc::from(category))];
+        error_is_impl(&args, &mut out)
+    }
+
+    #[test]
+    fn error_is_matches_any_category_and_subsumes_the_legacy_predicates() {
+        assert!(as_bool(error_is(dict_err("cancelled"), "cancelled")));
+        assert!(as_bool(error_is(
+            dict_err("budget_exceeded"),
+            "budget_exceeded"
+        )));
+        assert!(!as_bool(error_is(dict_err("timeout"), "rate_limit")));
+        let mut out = String::new();
+        assert!(as_bool(is_timeout_impl(&[dict_err("timeout")], &mut out)));
+    }
+
+    #[test]
+    fn error_is_rejects_unknown_categories() {
+        assert!(error_is(dict_err("timeout"), "not_a_category").is_err());
+    }
+
+    #[test]
+    fn error_is_transient_uses_the_retry_oracle() {
+        let mut out = String::new();
+        assert!(as_bool(error_is_transient_impl(
+            &[dict_err("rate_limit")],
+            &mut out
+        )));
+        assert!(!as_bool(error_is_transient_impl(
+            &[dict_err("auth")],
+            &mut out
+        )));
     }
 }

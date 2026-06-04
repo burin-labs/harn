@@ -129,8 +129,31 @@ pub fn emit(event: RunEvent) {
         Err(poisoned) => poisoned.into_inner(),
     };
     if let Some(sink) = guard.as_ref() {
-        sink.emit(event);
+        sink.emit(redact_run_event(event));
     }
+}
+
+/// Scrub the secret-bearing JSON field of a `RunEvent` once, centrally, before
+/// it reaches any sink — so emitters can't forget (the `Hook` payload did, while
+/// the transcript/tool variants were only clean because `agent_observe`
+/// pre-scrubbed them). A second idempotent pass over a pre-scrubbed payload is
+/// cheap and makes the bus correct-by-construction for every future variant.
+/// `Stdout`/`Stderr` are the program's own raw output and pass through
+/// unredacted; they also take the fast path (no policy lookup) since `emit` runs
+/// on every `println`.
+fn redact_run_event(mut event: RunEvent) -> RunEvent {
+    let payload = match &mut event {
+        RunEvent::Transcript { payload, .. } => payload,
+        RunEvent::ToolCall { args, .. } => args,
+        RunEvent::ToolResult { result, .. } => result,
+        RunEvent::Hook { payload, .. } => payload,
+        RunEvent::Stdout { .. }
+        | RunEvent::Stderr { .. }
+        | RunEvent::PersonaStage { .. }
+        | RunEvent::PackRun { .. } => return event,
+    };
+    crate::redact::current_policy().redact_json_in_place(payload);
+    event
 }
 
 #[cfg(test)]

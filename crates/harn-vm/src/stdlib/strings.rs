@@ -437,6 +437,29 @@ fn contains_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError
 }
 
 #[harn_builtin(
+    sig = "index_of(haystack: string?, needle: string, from?: int) -> int",
+    category = "strings"
+)]
+fn index_of_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    // The missing sibling of `starts_with`/`ends_with`/`contains`. Char-indexed
+    // to pair with `substring`/`slice`: `from` is a char offset and the result
+    // is a char index (or -1 when absent).
+    let haystack = args.first().map(|a| a.display()).unwrap_or_default();
+    let needle = args.get(1).map(|a| a.display()).unwrap_or_default();
+    let chars: Vec<char> = haystack.chars().collect();
+    let from = args.get(2).and_then(|a| a.as_int()).unwrap_or(0).max(0) as usize;
+    let from = from.min(chars.len());
+    let byte_from: usize = chars[..from].iter().map(|c| c.len_utf8()).sum();
+    match haystack[byte_from..].find(&needle) {
+        Some(rel) => {
+            let char_idx = haystack[..byte_from + rel].chars().count();
+            Ok(VmValue::Int(char_idx as i64))
+        }
+        None => Ok(VmValue::Int(-1)),
+    }
+}
+
+#[harn_builtin(
     sig = "replace(text: string?, old: string, new: string) -> string",
     category = "strings"
 )]
@@ -960,5 +983,25 @@ mod tests {
     fn word_wrap_long_word_keeps_word_intact() {
         let result = word_wrap_str("aa supercalifragilistic bb", 5);
         assert_eq!(result, "aa\nsupercalifragilistic\nbb");
+    }
+
+    #[test]
+    fn index_of_is_char_indexed_with_from_and_miss() {
+        use crate::value::VmValue;
+        let s = |v: &str| VmValue::String(std::sync::Arc::from(v));
+        let call = |args: Vec<VmValue>| -> i64 {
+            let mut out = String::new();
+            match super::index_of_impl(&args, &mut out).unwrap() {
+                VmValue::Int(n) => n,
+                other => panic!("expected int, got {other:?}"),
+            }
+        };
+        assert_eq!(call(vec![s("hello world"), s("o")]), 4);
+        // `from` skips the first match and is a char offset, not a byte offset.
+        assert_eq!(call(vec![s("hello world"), s("o"), VmValue::Int(5)]), 7);
+        assert_eq!(call(vec![s("hello"), s("z")]), -1);
+        // A 2-byte char before the needle still yields a char index (5), not a
+        // byte index (6) — pairs with `substring`.
+        assert_eq!(call(vec![s("café x"), s("x")]), 5);
     }
 }

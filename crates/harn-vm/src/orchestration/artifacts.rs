@@ -5,6 +5,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use serde::{Deserialize, Serialize};
 
 use crate::stdlib::harn_entry::{call_harn_export_json, call_harn_export_typed};
+use crate::stdlib::xml::escape_xml_text;
 
 use super::{
     handoff_artifact_record, handoff_from_json_value, microcompact_tool_output, new_id,
@@ -349,16 +350,16 @@ pub fn render_artifacts_context(artifacts: &[ArtifactRecord], policy: &ContextPo
             _ => parts.push(format!(
                 "<artifact>\n<title>{}</title>\n<kind>{}</kind>\n<source>{}</source>\n\
 <freshness>{}</freshness>\n<priority>{}</priority>\n<body>\n{}\n</body>\n</artifact>",
-                escape_prompt_text(&title),
-                escape_prompt_text(&artifact.kind),
-                escape_prompt_text(
+                escape_xml_text(&title),
+                escape_xml_text(&artifact.kind),
+                escape_xml_text(
                     artifact
                         .source
                         .clone()
                         .unwrap_or_else(|| "unknown".to_string())
                         .as_str(),
                 ),
-                escape_prompt_text(
+                escape_xml_text(
                     artifact
                         .freshness
                         .clone()
@@ -463,12 +464,6 @@ fn workflow_prompt_string_field(
                 "workflow_prepare_stage_prompt must return string field '{field}'"
             ))
         })
-}
-
-fn escape_prompt_text(text: &str) -> String {
-    text.replace('&', "&amp;")
-        .replace('<', "&lt;")
-        .replace('>', "&gt;")
 }
 
 pub fn normalize_artifact(
