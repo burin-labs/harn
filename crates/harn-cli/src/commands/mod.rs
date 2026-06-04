@@ -217,7 +217,7 @@ pub(crate) fn is_harn_program_file(path: &Path) -> bool {
     if name.ends_with(".harn.prompt") || name.ends_with(".prompt") {
         return false;
     }
-    path.extension().is_some_and(|ext| ext == "harn")
+    name.ends_with(".harn") || name.ends_with(".harn.txt")
 }
 
 pub(crate) fn is_harn_prompt_file(path: &Path) -> bool {

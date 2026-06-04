@@ -48,6 +48,7 @@ exempt_checks = [
   "check-trigger-examples",         # validates example projects parse, not a mirror
   "check-docs-model-refs",          # validates docs track provider aliases, not a mirror
   "check-docs-snippets",            # validates ```harn blocks parse, not a mirror
+  "check-site-snippets",            # validates website Harn fixtures parse, not a mirror
   "check-generated-registry",       # the auditor itself
 ]
 
