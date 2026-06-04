@@ -1490,12 +1490,13 @@ mod tests {
         // A large tool result in the *kept* window must be clamped to honor
         // `tool_output_max_chars` — the engine previously ignored that config.
         let big = "x".repeat(4000);
+        let big_len = big.len();
         let mut messages = vec![
             serde_json::json!({"role": "user", "content": "old task"}),
             serde_json::json!({"role": "assistant", "content": "old reply"}),
             serde_json::json!({"role": "user", "content": "new task"}),
             serde_json::json!({"role": "assistant", "content": "calling tool"}),
-            serde_json::json!({"role": "tool", "tool_call_id": "call_1", "content": big.clone()}),
+            serde_json::json!({"role": "tool", "tool_call_id": "call_1", "content": big}),
         ];
         let config = AutoCompactConfig {
             token_threshold: 1,
@@ -1522,10 +1523,10 @@ mod tests {
         // ...and the oversized body was clamped well below its original size.
         let content = tool_msg["content"].as_str().expect("string content");
         assert!(
-            content.len() < big.len(),
+            content.len() < big_len,
             "tool output should be clamped: {} vs {}",
             content.len(),
-            big.len()
+            big_len
         );
         assert!(content.len() < 2000, "clamped near tool_output_max_chars");
     }
