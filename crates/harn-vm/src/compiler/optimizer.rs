@@ -3,7 +3,7 @@ use std::collections::BTreeMap;
 use harn_parser::{DictEntry, Node, SNode};
 
 use crate::runtime_limits::RuntimeLimits;
-use crate::value::{compare_values, values_equal, VmValue};
+use crate::value::{try_compare_values, values_equal, VmValue};
 
 const MAX_FOLDED_STRING_BYTES: usize = RuntimeLimits::DEFAULT.max_constant_folded_string_bytes;
 const MAX_FOLDED_COLLECTION_ITEMS: usize =
@@ -104,10 +104,20 @@ fn fold_binary(op: &str, left: VmValue, right: VmValue) -> Option<VmValue> {
         "**" => fold_pow(left, right),
         "==" => Some(VmValue::Bool(values_equal(&left, &right))),
         "!=" => Some(VmValue::Bool(!values_equal(&left, &right))),
-        "<" => Some(VmValue::Bool(compare_values(&left, &right) < 0)),
-        ">" => Some(VmValue::Bool(compare_values(&left, &right) > 0)),
-        "<=" => Some(VmValue::Bool(compare_values(&left, &right) <= 0)),
-        ">=" => Some(VmValue::Bool(compare_values(&left, &right) >= 0)),
+        // Mirror the runtime: NaN is unordered, so every relational operator is
+        // `false` when `try_compare_values` returns `None`.
+        "<" => Some(VmValue::Bool(
+            matches!(try_compare_values(&left, &right), Some(o) if o < 0),
+        )),
+        ">" => Some(VmValue::Bool(
+            matches!(try_compare_values(&left, &right), Some(o) if o > 0),
+        )),
+        "<=" => Some(VmValue::Bool(
+            matches!(try_compare_values(&left, &right), Some(o) if o <= 0),
+        )),
+        ">=" => Some(VmValue::Bool(
+            matches!(try_compare_values(&left, &right), Some(o) if o >= 0),
+        )),
         "&&" => Some(VmValue::Bool(left.is_truthy() && right.is_truthy())),
         "||" => Some(VmValue::Bool(left.is_truthy() || right.is_truthy())),
         "??" => {

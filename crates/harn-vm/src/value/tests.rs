@@ -272,3 +272,32 @@ fn chars_list_materializes_each_scalar() {
 
     assert!(matches!(VmValue::chars_list(""), VmValue::List(items) if items.is_empty()));
 }
+
+#[test]
+fn try_compare_orders_finite_numbers() {
+    let f = VmValue::Float;
+    assert_eq!(try_compare_values(&i(1), &i(2)), Some(-1));
+    assert_eq!(try_compare_values(&i(2), &i(2)), Some(0));
+    assert_eq!(try_compare_values(&f(2.5), &f(1.5)), Some(1));
+    // Mixed int/float still produces a total order.
+    assert_eq!(try_compare_values(&i(2), &f(2.5)), Some(-1));
+    assert_eq!(try_compare_values(&f(2.0), &i(2)), Some(0));
+}
+
+#[test]
+fn try_compare_reports_nan_as_unordered() {
+    let nan = VmValue::Float(f64::NAN);
+    // Any comparison involving NaN is unordered (`None`), so relational
+    // operators must treat it as false rather than "equal".
+    assert_eq!(try_compare_values(&nan, &VmValue::Float(5.0)), None);
+    assert_eq!(try_compare_values(&VmValue::Float(5.0), &nan), None);
+    assert_eq!(try_compare_values(&nan, &i(5)), None);
+    assert_eq!(try_compare_values(&nan, &nan), None);
+    // A NaN nested inside a pair propagates the unordered result.
+    let pair_a = VmValue::Pair(std::sync::Arc::new((i(1), nan.clone())));
+    let pair_b = VmValue::Pair(std::sync::Arc::new((i(1), VmValue::Float(5.0))));
+    assert_eq!(try_compare_values(&pair_a, &pair_b), None);
+
+    // The total-order wrapper keeps a sort-stable fallback of 0.
+    assert_eq!(compare_values(&nan, &VmValue::Float(5.0)), 0);
+}

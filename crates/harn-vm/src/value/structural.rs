@@ -219,41 +219,40 @@ pub fn values_equal(a: &VmValue, b: &VmValue) -> bool {
     }
 }
 
+/// Total-order comparison used for sorting, `min`/`max`, and similar reductions.
+///
+/// IEEE-754 NaN is *unordered*, so [`try_compare_values`] returns `None` for it;
+/// here we fall back to `0` (treat as equal) so a stray NaN does not destabilize
+/// a sort. Relational operators (`<`, `>`, `<=`, `>=`) must NOT use this fallback —
+/// they go through [`try_compare_values`] so that any comparison with NaN yields
+/// `false`, as the language spec and IEEE-754 require.
 pub fn compare_values(a: &VmValue, b: &VmValue) -> i32 {
+    try_compare_values(a, b).unwrap_or(0)
+}
+
+/// Ordered comparison for relational operators. Returns `None` when the two
+/// values are *unordered* — i.e. a floating-point NaN is involved (directly, via
+/// an int/float mix, or nested inside a pair). Callers implementing `<`, `>`,
+/// `<=`, `>=` must treat `None` as "comparison is false".
+pub fn try_compare_values(a: &VmValue, b: &VmValue) -> Option<i32> {
     match (a, b) {
-        (VmValue::Int(x), VmValue::Int(y)) => x.cmp(y) as i32,
-        (VmValue::Float(x), VmValue::Float(y)) => {
-            if x < y {
-                -1
-            } else {
-                i32::from(x > y)
-            }
-        }
-        (VmValue::Int(x), VmValue::Float(y)) => {
-            let x = *x as f64;
-            if x < *y {
-                -1
-            } else {
-                i32::from(x > *y)
-            }
-        }
-        (VmValue::Float(x), VmValue::Int(y)) => {
-            let y = *y as f64;
-            if *x < y {
-                -1
-            } else {
-                i32::from(*x > y)
-            }
-        }
-        (VmValue::String(x), VmValue::String(y)) => x.cmp(y) as i32,
+        (VmValue::Int(x), VmValue::Int(y)) => Some(x.cmp(y) as i32),
+        (VmValue::Float(x), VmValue::Float(y)) => float_ordering(*x, *y),
+        (VmValue::Int(x), VmValue::Float(y)) => float_ordering(*x as f64, *y),
+        (VmValue::Float(x), VmValue::Int(y)) => float_ordering(*x, *y as f64),
+        (VmValue::String(x), VmValue::String(y)) => Some(x.cmp(y) as i32),
         (VmValue::Pair(x), VmValue::Pair(y)) => {
-            let c = compare_values(&x.0, &y.0);
+            let c = try_compare_values(&x.0, &y.0)?;
             if c != 0 {
-                c
+                Some(c)
             } else {
-                compare_values(&x.1, &y.1)
+                try_compare_values(&x.1, &y.1)
             }
         }
-        _ => 0,
+        _ => Some(0),
     }
+}
+
+fn float_ordering(x: f64, y: f64) -> Option<i32> {
+    x.partial_cmp(&y).map(|ord| ord as i32)
 }

@@ -1,0 +1,13 @@
+pipeline test(task) {
+  // Ordinary integer sums stay integers.
+  log([100, 200, 300].sum())
+  // Summing past i64::MAX promotes to float instead of silently wrapping to a
+  // negative value — matching the overflow handling of `abs` / `pow`.
+  log([9223372036854775807, 1].sum())
+  // Float elements still force a float result.
+  log([1.5, 2.5].sum())
+  // The same overflow guard applies to iter().sum() (which previously even
+  // panicked on overflow in debug builds).
+  log(iter([1, 2, 3, 4]).sum())
+  log(iter([9223372036854775807, 1]).sum())
+}
