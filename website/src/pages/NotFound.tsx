@@ -1,6 +1,12 @@
+import { useEffect } from "react"
 import { Link } from "react-router"
+import { NOT_FOUND_PAGE_META } from "../lib/metadata"
 
 export function NotFound() {
+  useEffect(() => {
+    document.title = NOT_FOUND_PAGE_META.title
+  }, [])
+
   return (
     <div className="mx-auto flex min-h-[60vh] max-w-xl flex-col items-center justify-center px-4 text-center">
       <div className="text-6xl font-bold text-accent-500">404</div>

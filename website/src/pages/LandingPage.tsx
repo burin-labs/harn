@@ -1,11 +1,16 @@
-import type { ReactNode } from "react"
+import { useEffect, type ReactNode } from "react"
 import { Link } from "react-router"
 import { ExampleGallery } from "../components/ExampleGallery"
 import { HarnMockup } from "../components/HarnMockup"
+import { LANDING_PAGE_META } from "../lib/metadata"
 
 const GITHUB = "https://github.com/burin-labs/harn"
 
 export function LandingPage() {
+  useEffect(() => {
+    document.title = LANDING_PAGE_META.title
+  }, [])
+
   return (
     <div>
       {/* Hero */}
