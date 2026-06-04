@@ -13,8 +13,9 @@ name: Build release binaries
 #      Skips sign/notarize/package/upload/release/container.
 #
 #      The setup job below short-circuits this mode unless the push
-#      changed Cargo.lock, any **/Cargo.toml, rust-toolchain.toml, or
-#      this workflow. The Cargo files are exactly the inputs Swatinem
+#      changed Cargo.lock, any **/Cargo.toml, rust-toolchain.toml, this
+#      workflow, or the binary-size gate script. The Cargo files are exactly
+#      the inputs Swatinem
 #      hashes into its exact cache key, and workflow edits can change
 #      runner labels, cache topology, or build flags without changing
 #      Cargo inputs. Re-warm in both cases so the next tag does not pay
@@ -137,7 +138,7 @@ jobs:
             # changed something that rotates Swatinem's exact cache key.
             # For non-keying pushes the previous warm cache is still good
             # and a rebuild adds no signal.
-            CHANGED_KEYING_FILES="$(git diff --name-only HEAD^ HEAD -- Cargo.lock Cargo.toml '**/Cargo.toml' rust-toolchain.toml .github/workflows/build-release-binaries.yml 2>/dev/null || true)"
+            CHANGED_KEYING_FILES="$(git diff --name-only HEAD^ HEAD -- Cargo.lock Cargo.toml '**/Cargo.toml' rust-toolchain.toml scripts/check_binary_size.sh .github/workflows/build-release-binaries.yml 2>/dev/null || true)"
             if [[ -n "$CHANGED_KEYING_FILES" ]]; then
               SHOULD_BUILD_BINARIES=true
               VERSION="$(grep '^version' Cargo.toml | head -1 | sed 's/.*"\(.*\)".*/\1/')"
@@ -146,7 +147,7 @@ jobs:
               echo "::notice::Building release binaries to populate the per-target Swatinem rust-cache on main. No sign/notarize/package/upload/release/container."
             else
               VERSION="$(grep '^version' Cargo.toml | head -1 | sed 's/.*"\(.*\)".*/\1/')"
-              echo "::notice::Push to main did not change Cargo.lock / Cargo.toml / **/Cargo.toml / rust-toolchain.toml / build-release-binaries.yml — existing warm cache still keys cleanly. Skipping build matrix."
+              echo "::notice::Push to main did not change Cargo.lock / Cargo.toml / **/Cargo.toml / rust-toolchain.toml / scripts/check_binary_size.sh / build-release-binaries.yml — existing warm cache still keys cleanly. Skipping build matrix."
             fi
           else
             VERSION="$(grep '^version' Cargo.toml | head -1 | sed 's/.*"\(.*\)".*/\1/')"
@@ -364,6 +365,12 @@ jobs:
           cache-bin: false
           save-if: ${{ (github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name == 'schedule' }}
 
+      - name: Install cargo-bloat
+        if: matrix.target == 'x86_64-unknown-linux-gnu'
+        uses: taiki-e/install-action@8f531eaecd1898bc3da7d104ad91bee98d1b97bd # v2.79.9
+        with:
+          tool: cargo-bloat
+
       - name: Add cross-compile target to pinned toolchain
         run: |
           # rust-toolchain.toml pins the channel; `rustup show` triggers install
@@ -570,6 +577,22 @@ jobs:
           cp dist/harn.exe dist/harn-dap.exe
           cd dist
           7z a "harn-${{ matrix.target }}.zip" harn.exe harn-dap.exe harn-lsp.exe
+
+      - name: Check binary size
+        if: matrix.target == 'x86_64-unknown-linux-gnu'
+        shell: bash
+        env:
+          BINARY_SIZE_REPORT_DIR: dist/binary-size-${{ matrix.target }}
+          HARN_RELEASE_TARGET: ${{ matrix.target }}
+        run: ./scripts/check_binary_size.sh --no-build --target "$HARN_RELEASE_TARGET"
+
+      - name: Upload binary-size report
+        if: always() && matrix.target == 'x86_64-unknown-linux-gnu'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: harn-binary-size-${{ matrix.target }}
+          path: dist/binary-size-${{ matrix.target }}
+          if-no-files-found: ignore
 
       - name: Upload artifact (unix)
         if: needs.setup.outputs.is_release == 'true' && runner.os != 'Windows'
