@@ -227,12 +227,19 @@ impl crate::vm::Vm {
             "sum" => {
                 let items = drain(&handle, self).await?;
                 let mut has_float = false;
+                let mut overflowed = false;
                 let mut int_acc: i64 = 0;
                 let mut float_acc: f64 = 0.0;
                 for v in &items {
                     match v {
                         VmValue::Int(i) => {
-                            int_acc += i;
+                            // Promote to float on i64 overflow rather than
+                            // panicking (debug) / wrapping (release); the float
+                            // accumulator below is the fallback value.
+                            match int_acc.checked_add(*i) {
+                                Some(sum) => int_acc = sum,
+                                None => overflowed = true,
+                            }
                             float_acc += *i as f64;
                         }
                         VmValue::Float(f) => {
@@ -247,7 +254,7 @@ impl crate::vm::Vm {
                         }
                     }
                 }
-                if has_float {
+                if has_float || overflowed {
                     Ok(VmValue::Float(float_acc))
                 } else {
                     Ok(VmValue::Int(int_acc))

@@ -144,12 +144,19 @@ impl crate::vm::Vm {
             }
             "sum" => {
                 let mut int_sum: i64 = 0;
+                let mut overflowed = false;
                 let mut has_float = false;
                 let mut float_sum: f64 = 0.0;
                 for item in items.iter() {
                     match item {
                         VmValue::Int(n) => {
-                            int_sum = int_sum.wrapping_add(*n);
+                            // Promote to float on i64 overflow rather than
+                            // silently wrapping (matching `abs`/`pow`); the
+                            // float accumulator below is the fallback value.
+                            match int_sum.checked_add(*n) {
+                                Some(sum) => int_sum = sum,
+                                None => overflowed = true,
+                            }
                             float_sum += *n as f64;
                         }
                         VmValue::Float(n) => {
@@ -159,7 +166,7 @@ impl crate::vm::Vm {
                         _ => {}
                     }
                 }
-                if has_float {
+                if has_float || overflowed {
                     Ok(VmValue::Float(float_sum))
                 } else {
                     Ok(VmValue::Int(int_sum))

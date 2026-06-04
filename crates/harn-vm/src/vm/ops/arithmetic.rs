@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use crate::chunk::{AdaptiveBinaryOp, AdaptiveBinaryState, BinaryShape, InlineCacheEntry};
-use crate::value::{compare_values, values_equal, VmError, VmValue};
+use crate::value::{try_compare_values, values_equal, VmError, VmValue};
 
 const ADAPTIVE_QUICKEN_THRESHOLD: u8 = 3;
 
@@ -206,10 +206,20 @@ impl super::super::Vm {
             AdaptiveBinaryOp::Mod => vm.modulo(a, b),
             AdaptiveBinaryOp::Equal => Ok(VmValue::Bool(values_equal(&a, &b))),
             AdaptiveBinaryOp::NotEqual => Ok(VmValue::Bool(!values_equal(&a, &b))),
-            AdaptiveBinaryOp::Less => Ok(VmValue::Bool(compare_values(&a, &b) < 0)),
-            AdaptiveBinaryOp::Greater => Ok(VmValue::Bool(compare_values(&a, &b) > 0)),
-            AdaptiveBinaryOp::LessEqual => Ok(VmValue::Bool(compare_values(&a, &b) <= 0)),
-            AdaptiveBinaryOp::GreaterEqual => Ok(VmValue::Bool(compare_values(&a, &b) >= 0)),
+            // NaN is unordered: `try_compare_values` returns `None`, so every
+            // relational operator yields `false` (per IEEE-754 / the spec).
+            AdaptiveBinaryOp::Less => Ok(VmValue::Bool(
+                matches!(try_compare_values(&a, &b), Some(o) if o < 0),
+            )),
+            AdaptiveBinaryOp::Greater => Ok(VmValue::Bool(
+                matches!(try_compare_values(&a, &b), Some(o) if o > 0),
+            )),
+            AdaptiveBinaryOp::LessEqual => Ok(VmValue::Bool(
+                matches!(try_compare_values(&a, &b), Some(o) if o <= 0),
+            )),
+            AdaptiveBinaryOp::GreaterEqual => Ok(VmValue::Bool(
+                matches!(try_compare_values(&a, &b), Some(o) if o >= 0),
+            )),
         }
     }
 
@@ -264,8 +274,12 @@ impl super::super::Vm {
                 Self::specialized_ordering_result(op, ordering, x == y)
             }
             (_, BinaryShape::Float, VmValue::Float(x), VmValue::Float(y)) => {
-                let ordering = if x < y { -1 } else { i8::from(x > y) };
-                Self::specialized_ordering_result(op, ordering, x == y)
+                // NaN is unordered: `partial_cmp` is `None`, so relational
+                // operators must all yield `false` (matching IEEE-754).
+                match x.partial_cmp(y) {
+                    Some(ord) => Self::specialized_ordering_result(op, ord as i8, x == y),
+                    None => Self::specialized_unordered_result(op),
+                }
             }
             (_, BinaryShape::Bool, VmValue::Bool(x), VmValue::Bool(y)) => {
                 Self::specialized_equality_result(op, x == y)
@@ -289,6 +303,22 @@ impl super::super::Vm {
             AdaptiveBinaryOp::Greater => ordering > 0,
             AdaptiveBinaryOp::LessEqual => ordering <= 0,
             AdaptiveBinaryOp::GreaterEqual => ordering >= 0,
+            _ => return None,
+        };
+        Some(VmValue::Bool(result))
+    }
+
+    /// Result for an *unordered* comparison (a NaN operand): `==` is false,
+    /// `!=` is true, and every relational operator (`<`, `>`, `<=`, `>=`) is
+    /// false, matching IEEE-754 semantics.
+    fn specialized_unordered_result(op: AdaptiveBinaryOp) -> Option<VmValue> {
+        let result = match op {
+            AdaptiveBinaryOp::Equal => false,
+            AdaptiveBinaryOp::NotEqual => true,
+            AdaptiveBinaryOp::Less
+            | AdaptiveBinaryOp::Greater
+            | AdaptiveBinaryOp::LessEqual
+            | AdaptiveBinaryOp::GreaterEqual => false,
             _ => return None,
         };
         Some(VmValue::Bool(result))
