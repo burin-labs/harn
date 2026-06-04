@@ -8,6 +8,94 @@ highlights live in [CHANGELOG-pre-0.6.md](CHANGELOG-pre-0.6.md).
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.8.72
+
+### Added
+
+- Add a shared git-forge PR/MR lifecycle event contract for connector packages,
+  including GitHub/GitLab/Gitea normalization helpers and a provider-independent
+  status-comment writeback request.
+- **`index_of(haystack, needle, from?)` string builtin** - the missing sibling
+  of `starts_with`/`ends_with`/`contains`, char-indexed to pair with
+  `substring` (returns `-1` when absent).
+- **`error_is(error, category)` and `error_is_transient(error)` testing
+  builtins** - parameterized over the full error-category taxonomy, so a harness
+  can assert any category (`cancelled`, `budget_exceeded`, `server_error`, ...)
+  or the retry oracle directly. `is_timeout`/`is_rate_limited` are now the two
+  pre-wired spellings of `error_is`.
+- **MiniMax M3 provider catalog support.** Adds direct MiniMax and OpenRouter
+  catalog rows for MiniMax M3, exposes video input as a first-class LLM
+  capability/content block, and keeps static pricing on MiniMax's standard
+  non-promotional rate card.
+- **Hashed raw strings `r#"..."#`.** Raw string literals can now embed literal
+  double quotes using Rust-style `#` delimiters (`r#"..."#`, `r##"..."##`, ...),
+  so quote-heavy regexes and patterns no longer need backslash escaping. The
+  formatter picks the narrowest safe delimiter automatically.
+- **`regex_captures` reports match positions.** Each match record now carries
+  `start`/`end` (character offsets) and `line` (1-based), and the builtin
+  accepts an optional `flags` argument (`i`, `m`, `s`, `x`) for parity with
+  `regex_match`. This makes positional diagnostics (the equivalent of Python's
+  `m.start()` / line-of-offset) expressible without re-scanning the input.
+
+### Fixed
+
+- **Hostlib local sandbox npm smoke coverage (#2994).** Added a golden
+  integration test proving `LocalSandbox` can run `npm install --offline`
+  against a project `.npmrc` and a vendored `file:` tarball dependency without
+  requiring registry access.
+- **Docs CI now checks internal documentation links (#2995).** Broken local
+  links under `docs/src` are caught by a fast CI gate, including the prompt
+  assembly page's stale `agent_loop` target.
+- Inject prerendered website pages with per-page title, description, canonical,
+  social metadata, and JSON-LD.
+- **Portable user home-directory resolution (#3032).** Harn now resolves the
+  user home directory through a single `user_dirs` path that falls back to
+  `%USERPROFILE%` when `$HOME` is unset, fixing a class of silent Windows
+  degradations: a cwd-relative bytecode/pack cache, an unloaded
+  `~/.config/harn/providers.toml` overlay, and unresolved Bedrock AWS profiles.
+  It also collapses five drifted home-dir helpers into one tested
+  implementation.
+- **Cross-platform process timeout and liveness (#3033).** A timed-out child
+  process is now terminated through the cross-platform
+  `std::process::Child::kill()` so `wait_with_timeout` can no longer hang on
+  Windows, and supervisor liveness checks use `sysinfo` instead of shelling out
+  to `kill -0` (collapsing the prior `#[cfg(unix)]`/stub split into one portable
+  function).
+- **Tool-call parsing no longer shreds calls whose arguments contain the
+  protocol's own tags.** A literal `</tool_call>`, a `<<TAG ... TAG` heredoc, or
+  a bash `<<EOF` inside a quoted string argument is now treated as content, not
+  as the structural close, across the buffered parser, the streaming detector,
+  and the wrapper-stripper. Two `<tool_call>` blocks in one turn also get
+  turn-unique ids instead of both colliding on `tc_0`.
+- **`base64`/`base64url`/`base32`/`hex` encoding and the `sha2`/`md5` hashes are
+  lossless for `bytes` input.** They previously routed `bytes` through the
+  display form, silently truncating binary payloads at 32 bytes; they now accept
+  `string | bytes` and hash/encode the raw bytes.
+- **Durable `step.run` replay is no longer quadratic.** Replay detection uses an
+  indexed idempotency lookup instead of rescanning the whole step topic on every
+  step, so a K-step workflow stops doing O(K^2) work.
+- **Anthropic structured-output requests stop silently discarding a
+  caller-supplied `tool_choice`/tool set.** Structured output still wins, but it
+  warns once and preserves the caller's tools instead of dropping them with no
+  signal.
+- **Import errors name the directory a relative import was resolved against,**
+  so it's clear whether resolution was relative to the importing file or the
+  CWD.
+- **Gemini/Vertex thinking tokens + Vertex/Bedrock cache tokens in usage
+  accounting.** The Gemini and Vertex adapters now fold
+  `usageMetadata.thoughtsTokenCount` into `output_tokens`, so thinking-enabled
+  models no longer under-report billed output and cost. Vertex now also reads
+  `cachedContentTokenCount` into `cache_read_tokens` (previously dropped), and
+  the Bedrock Converse adapter surfaces `cacheReadInputTokens` and
+  `cacheWriteInputTokens` as `cache_read_tokens` / `cache_write_tokens`.
+
+### Security
+
+- **Run-event payloads are redacted at the bus boundary.** The redaction policy
+  is now applied once, centrally, as every `RunEvent` is emitted, so a hook
+  payload (and any future variant carrying free-form JSON) cannot leak secrets by
+  an emitter forgetting to scrub it first.
+
 ## v0.8.71
 
 ### Added
