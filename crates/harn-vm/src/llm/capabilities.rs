@@ -1354,6 +1354,46 @@ mod tests {
     }
 
     #[test]
+    fn every_catalogued_alias_has_explicit_tool_capabilities() {
+        // The model-level audit only covers priced catalog `models`, so a
+        // `[[provider.local]]` / Ollama alias (e.g. the local gemma-4 route in
+        // Fix A) could omit native_tools/preferred_tool_format and silently
+        // degrade to text tools without tripping a test. Walk every alias's
+        // (provider, id) through the same matcher and require explicit fields.
+        reset();
+        let catalog = crate::llm_config::parse_config_toml(BUILTIN_PROVIDERS_TOML)
+            .expect("providers.toml must parse at build time");
+        let builtin = builtin();
+        let mut gaps = Vec::new();
+        for (alias, def) in &catalog.aliases {
+            let matched = first_matching_rule(None, builtin, &def.provider, &def.id);
+            let explicit = matched
+                .as_ref()
+                .map(|matched| {
+                    matched.rule.native_tools.is_some()
+                        && matched.rule.preferred_tool_format.is_some()
+                })
+                .unwrap_or(false);
+            if !explicit {
+                gaps.push(format!(
+                    "{alias} -> {}:{} (rule={})",
+                    def.provider,
+                    def.id,
+                    matched
+                        .as_ref()
+                        .map(|matched| matched.rule.model_match.as_str())
+                        .unwrap_or("<none>")
+                ));
+            }
+        }
+        assert!(
+            gaps.is_empty(),
+            "aliases missing explicit native_tools/preferred_tool_format:\n- {}",
+            gaps.join("\n- ")
+        );
+    }
+
+    #[test]
     fn tool_capability_audit_reports_suggested_defaults() {
         reset();
         let capabilities: CapabilitiesFile = toml::from_str(
@@ -1597,6 +1637,66 @@ anthropic_beta_features = ["fine-grained-tool-streaming-2025-05-14"]
         assert!(lookup("ollama", "gemma4-128k:latest").vision_supported);
         assert!(!lookup("openai", "gpt-3.5-turbo").vision_supported);
         assert!(!lookup("ollama", "qwen3.5:35b-a3b-coding-nvfp4").vision_supported);
+    }
+
+    #[test]
+    fn local_gemma4_exposes_native_tools_and_structured_output() {
+        // Fix A: vLLM/SGLang serve Gemma 4 over the OpenAI-compatible surface,
+        // so the local route must declare native tools + native structured
+        // output like its hosted gemma-4 siblings — not silently fall back to
+        // text tools.
+        reset();
+        let caps = lookup("local", "gemma-4-26b-a4b-it");
+        assert!(caps.native_tools);
+        assert_eq!(caps.preferred_tool_format.as_deref(), Some("native"));
+        assert_eq!(caps.structured_output.as_deref(), Some("native"));
+    }
+
+    #[test]
+    fn ollama_vision_models_have_no_reasoning_scaffold() {
+        // Fix B: bakllava / llama3.2-vision / gemma3 are caption/vision models
+        // with no reasoning capability; they must resolve to the "none" thinking
+        // block style (like the llava sibling) so the template does not emit a
+        // spurious "## Reasoning" scaffold.
+        reset();
+        for model in ["bakllava:latest", "llama3.2-vision:11b", "gemma3:27b"] {
+            assert_eq!(
+                lookup("ollama", model).thinking_block_style,
+                "none",
+                "{model} should resolve to thinking_block_style=\"none\""
+            );
+        }
+        // Sibling sanity check.
+        assert_eq!(
+            lookup("ollama", "llava:latest").thinking_block_style,
+            "none"
+        );
+    }
+
+    #[test]
+    fn ollama_gemma4_supports_structured_output_and_text_tools() {
+        // Fix C: Ollama honors the `format` kwarg, so both gemma4 rules must
+        // declare structured_output="format_kw" (otherwise JSON/schema output
+        // was blocked) plus explicit text tools for parity with the qwen rules.
+        reset();
+        for model in ["gemma4:12b-mlx", "gemma4:26b"] {
+            let caps = lookup("ollama", model);
+            assert_eq!(
+                caps.structured_output.as_deref(),
+                Some("format_kw"),
+                "{model} should resolve structured_output=\"format_kw\""
+            );
+            assert!(!caps.native_tools, "{model} should use text tools");
+            assert_eq!(
+                caps.preferred_tool_format.as_deref(),
+                Some("text"),
+                "{model} should prefer text tool format"
+            );
+            assert_eq!(
+                caps.thinking_block_style, "none",
+                "{model} ships thinking-off"
+            );
+        }
     }
 
     #[test]
