@@ -52,8 +52,10 @@ pipeline default(task) {
 }
 
 #[test]
-fn test_pointless_self_comparison_autofix() {
-    let source = "pipeline default(task) {\n  let always = task == task\n  log(always)\n}";
+fn test_pointless_self_comparison_autofix_for_nan_free_operand() {
+    // String/int/bool/nil operands cannot be NaN, so the self-comparison is a
+    // genuine constant and the autofix is sound.
+    let source = "pipeline default(task) {\n  let always = \"x\" == \"x\"\n  log(always)\n}";
     let diags = lint_source(source);
     assert!(
         has_rule(&diags, "pointless-comparison"),
@@ -64,6 +66,35 @@ fn test_pointless_self_comparison_autofix() {
         fixed.contains("let always = true"),
         "expected self-comparison to become true, got: {fixed}"
     );
+}
+
+#[test]
+fn test_self_comparison_warns_but_does_not_autofix_possible_float() {
+    // `task` has unknown type and could be a NaN float, for which `task == task`
+    // is `false` — folding it to `true` would silently change behavior. The
+    // linter must warn but leave the source untouched. Mirrors the `!=` (NaN
+    // test) direction, which is `true` for NaN and must not fold to `false`.
+    for (op, label) in [("==", "eq"), ("!=", "ne")] {
+        let source = format!("pipeline default(task) {{\n  let v = task {op} task\n  log(v)\n}}");
+        let diags = lint_source(&source);
+        assert!(
+            has_rule(&diags, "pointless-comparison"),
+            "[{label}] expected pointless-comparison warning, got: {diags:?}"
+        );
+        let pointless = diags
+            .iter()
+            .find(|d| d.rule == "pointless-comparison")
+            .expect("pointless-comparison diagnostic");
+        assert!(
+            pointless.fix.is_none(),
+            "[{label}] self-comparison on a possibly-float operand must not carry an autofix"
+        );
+        let fixed = apply_fixes(&source, &diags);
+        assert!(
+            fixed.contains(&format!("task {op} task")),
+            "[{label}] expected source left untouched, got: {fixed}"
+        );
+    }
 }
 
 #[test]

@@ -9,7 +9,7 @@ use super::Linter;
 use crate::decls::{FnDeclaration, ImportInfo, TypeDeclaration};
 use crate::diagnostic::{LintDiagnostic, LintSeverity};
 use crate::fixes::{
-    empty_statement_removal_fix, is_pure_expression, nil_fallback_ternary_parts,
+    empty_statement_removal_fix, is_nan_free, is_pure_expression, nil_fallback_ternary_parts,
     unnecessary_cast_fix,
 };
 use crate::harndoc::extract_harndoc;
@@ -490,25 +490,46 @@ impl<'a> Linter<'a> {
                         }]),
                     });
                 }
-                let is_pointless_self_comparison = (op == "==" || op == "!=")
+                let is_self_comparison = (op == "==" || op == "!=")
                     && left.node == right.node
                     && is_pure_expression(&left.node);
-                if is_pointless_self_comparison {
+                if is_self_comparison {
                     let replacement = if op == "==" { "true" } else { "false" };
+                    // A float operand may be NaN, for which `x == x` is `false`
+                    // and `x != x` is `true` (the idiomatic NaN test). Folding
+                    // the comparison to a constant is only sound when the
+                    // operand provably cannot be a NaN float, so gate both the
+                    // autofix and the "replace with <const>" suggestion on
+                    // `is_nan_free`. Otherwise still flag the smell, but leave
+                    // the code untouched and point at `is_nan(...)`.
+                    let (suggestion, fix) = if is_nan_free(&left.node) {
+                        (
+                            format!("replace this comparison with `{replacement}`"),
+                            Some(vec![FixEdit {
+                                span: snode.span,
+                                replacement: replacement.to_string(),
+                            }]),
+                        )
+                    } else {
+                        (
+                            format!(
+                                "use `is_nan(...)` to test for NaN; this is otherwise \
+                                 always `{replacement}` for non-NaN values"
+                            ),
+                            None,
+                        )
+                    };
                     self.diagnostics.push(LintDiagnostic {
                         code: Code::LintPointlessComparison,
                         rule: "pointless-comparison".into(),
                         message: format!("expression is compared to itself with `{op}`"),
                         span: snode.span,
                         severity: LintSeverity::Warning,
-                        suggestion: Some(format!("replace this comparison with `{replacement}`")),
-                        fix: Some(vec![FixEdit {
-                            span: snode.span,
-                            replacement: replacement.to_string(),
-                        }]),
+                        suggestion: Some(suggestion),
+                        fix,
                     });
                 }
-                if (op == "==" || op == "!=") && !is_pointless_self_comparison {
+                if (op == "==" || op == "!=") && !is_self_comparison {
                     let is_bool_left = matches!(left.node, Node::BoolLiteral(_));
                     let is_bool_right = matches!(right.node, Node::BoolLiteral(_));
                     if is_bool_left || is_bool_right {
