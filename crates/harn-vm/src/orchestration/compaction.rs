@@ -1001,6 +1001,70 @@ async fn invoke_mask_callback(
         .collect())
 }
 
+/// Rewrite each tool-result message in `messages` whose content exceeds
+/// `config.tool_output_max_chars`, using `config.compress_callback` when set
+/// (and a VM context is available) else the deterministic
+/// [`microcompact_tool_output`]. Only the `content` text is replaced; the
+/// message's `role`/`tool_call_id` are left untouched so tool-call pairing is
+/// preserved. A `tool_output_max_chars` of 0 disables the pass.
+async fn clamp_tool_outputs(
+    ctx: Option<&AsyncBuiltinCtx>,
+    messages: &mut [serde_json::Value],
+    config: &AutoCompactConfig,
+) -> Result<(), VmError> {
+    if config.tool_output_max_chars == 0 {
+        return Ok(());
+    }
+    for message in messages.iter_mut() {
+        if message.get("role").and_then(|role| role.as_str()) != Some("tool") {
+            continue;
+        }
+        let Some(content) = message.get("content").and_then(|content| content.as_str()) else {
+            continue;
+        };
+        if content.len() <= config.tool_output_max_chars {
+            continue;
+        }
+        let content = content.to_string();
+        let replacement = match (config.compress_callback.as_ref(), ctx) {
+            (Some(callback), Some(ctx)) => {
+                invoke_compress_callback(ctx, callback, &content, config.tool_output_max_chars)
+                    .await?
+            }
+            _ => microcompact_tool_output(&content, config.tool_output_max_chars),
+        };
+        message["content"] = serde_json::Value::String(replacement);
+    }
+    Ok(())
+}
+
+/// Invoke `compress_callback(content, max_chars)` to replace one oversized
+/// tool-output body, mirroring [`invoke_mask_callback`]'s child-VM closure
+/// invocation. A non-string return falls back to the deterministic primitive.
+async fn invoke_compress_callback(
+    ctx: &AsyncBuiltinCtx,
+    callback: &VmValue,
+    content: &str,
+    max_chars: usize,
+) -> Result<String, VmError> {
+    let VmValue::Closure(closure) = callback.clone() else {
+        return Err(VmError::Runtime(
+            "compress_callback must be a closure".to_string(),
+        ));
+    };
+    let mut vm = ctx.child_vm();
+    let args = [
+        VmValue::String(std::sync::Arc::from(content)),
+        VmValue::Int(max_chars as i64),
+    ];
+    let result = vm.call_closure_pub(&closure, &args).await?;
+    ctx.forward_output(&vm.take_output());
+    match result {
+        VmValue::String(text) => Ok(text.to_string()),
+        _ => Ok(microcompact_tool_output(content, max_chars)),
+    }
+}
+
 #[derive(Clone, Copy)]
 struct CompactionStrategyInputs<'a> {
     ctx: Option<&'a AsyncBuiltinCtx>,
@@ -1163,6 +1227,16 @@ pub(crate) async fn auto_compact_messages_with_result_with_ctx(
     }
     let old_messages: Vec<_> = messages.drain(compact_start..split_at).collect();
     let archived_count = old_messages.len();
+
+    // Clamp oversized tool-result bodies in the *kept* window so the live
+    // context honors the policy's `tool_output_max_chars` (and the
+    // `compress_callback` override), not just the archived/summarized window —
+    // the two config fields were previously parsed and defaulted but never
+    // applied here. Runs before the hard-limit estimate so tier-2 escalation
+    // keys off the post-clamp size. Only the text body is rewritten; `role`
+    // and `tool_call_id` are preserved so tool_call/tool_result pairing stays
+    // intact.
+    clamp_tool_outputs(ctx, messages, config).await?;
 
     let (mut summary, mut strategy) = apply_compaction_strategy_with_fallback(
         CompactionStrategyInputs {
@@ -1409,5 +1483,51 @@ mod tests {
         assert_eq!(messages[2]["tool_calls"][0]["id"], "call_1");
         assert_eq!(messages[3]["role"], "tool");
         assert_eq!(messages[3]["tool_call_id"], "call_1");
+    }
+
+    #[test]
+    fn auto_compact_clamps_oversized_tool_output_to_max_chars() {
+        // A large tool result in the *kept* window must be clamped to honor
+        // `tool_output_max_chars` — the engine previously ignored that config.
+        let big = "x".repeat(4000);
+        let big_len = big.len();
+        let mut messages = vec![
+            serde_json::json!({"role": "user", "content": "old task"}),
+            serde_json::json!({"role": "assistant", "content": "old reply"}),
+            serde_json::json!({"role": "user", "content": "new task"}),
+            serde_json::json!({"role": "assistant", "content": "calling tool"}),
+            serde_json::json!({"role": "tool", "tool_call_id": "call_1", "content": big}),
+        ];
+        let config = AutoCompactConfig {
+            token_threshold: 1,
+            keep_last: 2,
+            tool_output_max_chars: 500,
+            ..Default::default()
+        };
+
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("runtime");
+        let result = runtime
+            .block_on(auto_compact_messages(&mut messages, &config, None))
+            .expect("compaction succeeds");
+        assert!(result.is_some(), "compaction should trigger");
+
+        let tool_msg = messages
+            .iter()
+            .find(|message| message["role"] == "tool")
+            .expect("tool message kept in window");
+        // Pairing preserved...
+        assert_eq!(tool_msg["tool_call_id"], "call_1");
+        // ...and the oversized body was clamped well below its original size.
+        let content = tool_msg["content"].as_str().expect("string content");
+        assert!(
+            content.len() < big_len,
+            "tool output should be clamped: {} vs {}",
+            content.len(),
+            big_len
+        );
+        assert!(content.len() < 2000, "clamped near tool_output_max_chars");
     }
 }
