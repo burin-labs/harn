@@ -139,6 +139,15 @@ newline-separated `key=value` entries:
 HARN_OTEL_HEADERS='authorization=Bearer token,x-tenant-id=acme'
 ```
 
+Set `HARN_OTEL_SAMPLE_RATIO` to downsample root traces at the source before
+export. The default is `1.0`, which keeps every trace. Values must be between
+`0.0` and `1.0`; sampled parent decisions continue to propagate through child
+spans.
+
+```bash
+HARN_OTEL_SAMPLE_RATIO=0.1 harn orchestrator serve
+```
+
 ## Dashboard
 
 An example Grafana dashboard is available at
