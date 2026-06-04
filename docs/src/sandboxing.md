@@ -81,6 +81,57 @@ workspace-write capability. `CapabilityPolicy::intersect` narrows presets and
 roots to their common set, so managed or parent ceilings can prevent a child
 policy from adding host filesystem reach.
 
+### Running real toolchains in the sandbox
+
+The local process sandbox is meant to run normal developer tools, including
+toolchains that depend on enterprise package-manager state. It constrains what
+the child process can open; it does not rewrite npm, pip, cargo, git, proxy, or
+CA configuration.
+
+With the default `package_manager_config` preset, the Linux and macOS backends
+grant child processes read-only access to these paths under the first absolute
+`$HOME` or `$USERPROFILE`: `.npmrc`, `.gitconfig`, `.netrc`, `.yarnrc.yml`,
+`.config`, `.npm`, `.cache`, `.pip`, `.pypirc`, `.cargo/config`,
+`.cargo/config.toml`, `.cargo/credentials`, `.cargo/credentials.toml`,
+`.cargo/registry`, and `.cargo/git`. These grants are process-only: Harn file
+builtins still need `workspace_roots` or `read_only_roots`, and the package
+manager paths are explicitly kept unwritable by the OS profile.
+
+Child processes spawned without env overrides inherit the parent environment.
+That includes corporate proxy and CA variables such as `HTTP_PROXY`,
+`HTTPS_PROXY`, `ALL_PROXY`, `NO_PROXY`, `NODE_EXTRA_CA_CERTS`,
+`SSL_CERT_FILE`, `SSL_CERT_DIR`, `REQUESTS_CA_BUNDLE`, `CURL_CA_BUNDLE`,
+`GIT_SSL_CAINFO`, and `CARGO_HTTP_CAINFO`. The sandbox does not special-case
+those variables; the paths they reference must already be readable through the
+workspace, the package-manager preset, a system read root, or an explicit
+`process_sandbox.read_roots` entry. Calls that pass an `env` map can use
+`env_mode` to replace or patch the inherited environment, and can remove
+individual variables with `env_remove`.
+
+For private registries, vendored SDKs, self-signed CA bundles outside the
+default roots, or offline caches, add process-only roots at the policy layer:
+
+```harn,ignore
+let policy = {
+  capabilities: {workspace: ["read_text"], process: ["exec"]},
+  workspace_roots: [project_root()],
+  process_sandbox: {
+    read_roots: [
+      "/opt/acme/npm-cache",
+      "/opt/acme/pip-wheelhouse",
+      "/opt/acme/certs",
+    ],
+  },
+}
+```
+
+`process_sandbox.read_roots` lets subprocesses read those paths without
+granting Harn file builtins access to them. In air-gapped environments, seed
+the registry config and cache before the run, point the inherited package
+manager/proxy/CA variables at readable files, and keep network side effects
+disabled; if a tool must reach a corporate proxy, the active policy still needs
+to allow network side effects.
+
 ### Writable vs. read-only roots
 
 A policy declares two root lists. `workspace_roots` are read-write: a
