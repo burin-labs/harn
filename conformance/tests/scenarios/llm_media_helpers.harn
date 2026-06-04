@@ -1,4 +1,10 @@
-import { image_content, image_message, media_type_for_path } from "std/llm/media"
+import {
+  image_content,
+  image_message,
+  media_type_for_path,
+  video_content,
+  video_message,
+} from "std/llm/media"
 
 pipeline test(task) {
   let png_path = "media_helper_fixture.png"
@@ -19,5 +25,12 @@ pipeline test(task) {
   assert(message.content[0].text == "caption", "text block created")
   assert(message.content[1].url == "https://example.com/image.webp", "url image kept as url")
   assert(media_type_for_path("clip.mp3") == "audio/mpeg", "audio type inferred")
+  assert(media_type_for_path("clip.mp4") == "video/mp4", "video type inferred")
+  let video = video_content("https://example.com/demo.webm")
+  assert(video.type == "video", "video block type")
+  assert(video.url == "https://example.com/demo.webm", "url video kept as url")
+  let video_msg = video_message("https://example.com/demo.mp4", "summarize", {})
+  assert(video_msg.content[0].text == "summarize", "video text block created")
+  assert(video_msg.content[1].type == "video", "video message block created")
   log("llm_media_helpers tests passed")
 }

@@ -231,6 +231,10 @@ pub struct ProviderRule {
     /// through Harn's LLM message path.
     #[serde(default, alias = "pdf_supported")]
     pub pdf: Option<bool>,
+    /// Whether this provider/model route accepts video input blocks
+    /// through Harn's LLM message path.
+    #[serde(default, alias = "video_supported")]
+    pub video: Option<bool>,
     /// Whether uploaded file references can be reused in message content.
     #[serde(default)]
     pub files_api_supported: Option<bool>,
@@ -332,7 +336,7 @@ pub struct ProviderRule {
     #[serde(default)]
     pub reasoning_none_supported: Option<bool>,
     /// Provider-specific reasoning request shape for OpenAI-compatible
-    /// transports. Known values are `openrouter` and `enabled`.
+    /// transports. Known values are `openrouter`, `enabled`, and `minimax`.
     #[serde(default)]
     pub reasoning_wire_format: Option<String>,
     #[serde(default)]
@@ -413,6 +417,7 @@ pub struct Capabilities {
     pub vision: bool,
     pub audio: bool,
     pub pdf: bool,
+    pub video: bool,
     pub files_api_supported: bool,
     pub file_upload_wire_format: Option<String>,
     pub structured_output: Option<String>,
@@ -474,6 +479,7 @@ impl Default for Capabilities {
             vision: false,
             audio: false,
             pdf: false,
+            video: false,
             files_api_supported: false,
             file_upload_wire_format: None,
             structured_output: None,
@@ -527,6 +533,7 @@ pub struct ProviderCapabilityMatrixRow {
     pub vision: bool,
     pub audio: bool,
     pub pdf: bool,
+    pub video: bool,
     pub streaming: bool,
     pub files_api_supported: bool,
     pub json_schema: Option<String>,
@@ -913,6 +920,7 @@ fn rule_to_matrix_row(
         vision: rule_vision(rule),
         audio: rule.audio.unwrap_or(false),
         pdf: rule.pdf.unwrap_or(false),
+        video: rule.video.unwrap_or(false),
         streaming: true,
         files_api_supported: rule.files_api_supported.unwrap_or(false),
         json_schema: rule_structured_output(rule),
@@ -1082,6 +1090,7 @@ fn defaults_to_caps(defaults: &ProviderDefaults) -> Capabilities {
         vision: None,
         audio: None,
         pdf: None,
+        video: None,
         files_api_supported: None,
         file_upload_wire_format: None,
         structured_output: None,
@@ -1153,6 +1162,7 @@ fn rule_to_caps(rule: &ProviderRule, defaults: &ProviderDefaults) -> Capabilitie
         vision: rule_vision(rule),
         audio: rule.audio.unwrap_or(false),
         pdf: rule.pdf.unwrap_or(false),
+        video: rule.video.unwrap_or(false),
         files_api_supported: rule
             .files_api_supported
             .or(defaults.files_api_supported)
@@ -1560,6 +1570,15 @@ anthropic_beta_features = ["fine-grained-tool-streaming-2025-05-14"]
     #[test]
     fn vision_capability_gates_known_multimodal_models() {
         reset();
+        let minimax_m3 = lookup("minimax", "MiniMax-M3");
+        assert!(minimax_m3.vision_supported);
+        assert!(minimax_m3.video);
+        assert_eq!(minimax_m3.thinking_modes, vec!["adaptive"]);
+        assert_eq!(minimax_m3.reasoning_wire_format.as_deref(), Some("minimax"));
+        assert!(minimax_m3.requires_completion_tokens);
+        let openrouter_m3 = lookup("openrouter", "minimax/minimax-m3");
+        assert!(openrouter_m3.vision_supported);
+        assert!(openrouter_m3.video);
         assert!(lookup("openai", "gpt-4o").vision_supported);
         assert!(lookup("openai", "gpt-5.4-preview").vision_supported);
         assert!(lookup("anthropic", "claude-sonnet-4-6").vision_supported);

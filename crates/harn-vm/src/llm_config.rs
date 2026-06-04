@@ -1639,6 +1639,9 @@ pub(crate) fn capability_tags_from_capabilities(
     if caps.pdf {
         tags.push("pdf".to_string());
     }
+    if caps.video {
+        tags.push("video".to_string());
+    }
     if caps.files_api_supported {
         tags.push("files".to_string());
     }

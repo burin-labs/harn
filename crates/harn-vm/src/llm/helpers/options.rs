@@ -1924,6 +1924,8 @@ pub(crate) fn extract_llm_options(
         || crate::llm::content::messages_contain_audio(&messages)?;
     let pdf = option_is_enabled(options.as_ref(), "pdf")
         || crate::llm::content::messages_contain_pdf(&messages)?;
+    let video = option_is_enabled(options.as_ref(), "video")
+        || crate::llm::content::messages_contain_videos(&messages)?;
     let uses_file_ids = crate::llm::content::messages_contain_file_ids(&messages)?;
     if enforce_capability_gates && vision && !caps.vision_supported {
         return Err(unsupported_option_error("vision", &provider, &model));
@@ -1933,6 +1935,9 @@ pub(crate) fn extract_llm_options(
     }
     if enforce_capability_gates && pdf && !caps.pdf {
         return Err(unsupported_option_error("pdf", &provider, &model));
+    }
+    if enforce_capability_gates && video && !caps.video {
+        return Err(unsupported_option_error("video", &provider, &model));
     }
     if enforce_capability_gates && uses_file_ids && !caps.files_api_supported {
         return Err(unsupported_option_error("files_api", &provider, &model));
@@ -4110,6 +4115,7 @@ mod routing_tests {
         assert_unsupported_local_option("vision", vec![("vision", VmValue::Bool(true))]);
         assert_unsupported_local_option("audio", vec![("audio", VmValue::Bool(true))]);
         assert_unsupported_local_option("pdf", vec![("pdf", VmValue::Bool(true))]);
+        assert_unsupported_local_option("video", vec![("video", VmValue::Bool(true))]);
         assert_unsupported_local_option(
             "reasoning_effort",
             vec![(
@@ -4654,5 +4660,85 @@ thinking_modes = ["effort"]
         .err()
         .expect("non-multimodal model should reject pdf/audio content");
         assert!(err.to_string().contains("option `audio` is not supported"));
+    }
+
+    #[test]
+    fn video_content_requires_capability() {
+        crate::llm::capabilities::set_user_overrides_toml(
+            r#"
+[[provider.local]]
+model_match = "video-model"
+video_supported = true
+"#,
+        )
+        .expect("capability override");
+        let video_block = VmValue::Dict(std::sync::Arc::new(BTreeMap::from([
+            (
+                "type".to_string(),
+                VmValue::String(std::sync::Arc::from("video")),
+            ),
+            (
+                "base64".to_string(),
+                VmValue::String(std::sync::Arc::from("AAAA")),
+            ),
+            (
+                "media_type".to_string(),
+                VmValue::String(std::sync::Arc::from("video/mp4")),
+            ),
+        ])));
+        let message = VmValue::Dict(std::sync::Arc::new(BTreeMap::from([
+            (
+                "role".to_string(),
+                VmValue::String(std::sync::Arc::from("user")),
+            ),
+            (
+                "content".to_string(),
+                VmValue::List(std::sync::Arc::new(vec![video_block])),
+            ),
+        ])));
+        let options = VmValue::Dict(std::sync::Arc::new(BTreeMap::from([
+            (
+                "provider".to_string(),
+                VmValue::String(std::sync::Arc::from("local")),
+            ),
+            (
+                "model".to_string(),
+                VmValue::String(std::sync::Arc::from("video-model")),
+            ),
+            (
+                "messages".to_string(),
+                VmValue::List(std::sync::Arc::new(vec![message.clone()])),
+            ),
+        ])));
+        extract_llm_options(&[
+            VmValue::String(std::sync::Arc::from("")),
+            VmValue::Nil,
+            options,
+        ])
+        .expect("video-capable route should accept video content");
+        crate::llm::capabilities::clear_user_overrides();
+
+        let bad_options = VmValue::Dict(std::sync::Arc::new(BTreeMap::from([
+            (
+                "provider".to_string(),
+                VmValue::String(std::sync::Arc::from("mock")),
+            ),
+            (
+                "model".to_string(),
+                VmValue::String(std::sync::Arc::from("gpt-4o")),
+            ),
+            (
+                "messages".to_string(),
+                VmValue::List(std::sync::Arc::new(vec![message])),
+            ),
+        ])));
+        let err = extract_llm_options(&[
+            VmValue::String(std::sync::Arc::from("")),
+            VmValue::Nil,
+            bad_options,
+        ])
+        .err()
+        .expect("non-video model should reject video content");
+        assert!(err.to_string().contains("option `video` is not supported"));
     }
 }

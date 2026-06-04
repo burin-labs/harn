@@ -219,11 +219,10 @@ latency_p50_ms = 1600
 method = "GET"
 path = "/models"
 
-# MiniMax — OpenAI-compatible endpoint for MiniMax-M2 family. The direct
-# API serves the open-weight `MiniMax-M2`, `MiniMax-M2.5`, and
-# `MiniMax-M2.7` (released 2026-03-18). All three sit on the same
-# /v1/chat/completions URL; the wire format mirrors OpenAI chat
-# completions with native tool calls and thinking blocks.
+# MiniMax — OpenAI-compatible endpoint for MiniMax M2/M3 models. The direct
+# API serves MiniMax-M3 plus the open-weight M2 family on the same
+# /v1/chat/completions URL; the wire format mirrors OpenAI chat completions
+# with native tool calls and model-specific thinking controls.
 [providers.minimax]
 base_url = "https://api.minimax.io/v1"
 base_url_env = "MINIMAX_BASE_URL"
@@ -231,8 +230,8 @@ auth_style = "bearer"
 auth_env = "MINIMAX_API_KEY"
 chat_endpoint = "/chat/completions"
 completion_endpoint = "/completions"
-cost_per_1k_in = 0.0003
-cost_per_1k_out = 0.0012
+cost_per_1k_in = 0.0006
+cost_per_1k_out = 0.0024
 latency_p50_ms = 1700
 
 [providers.minimax.healthcheck]
@@ -628,7 +627,7 @@ tool_format = "native"
 
 # MiniMax direct API aliases.
 [aliases.minimax]
-id = "MiniMax-M2.7"
+id = "MiniMax-M3"
 provider = "minimax"
 
 [aliases."minimax-m2"]
@@ -641,6 +640,10 @@ provider = "minimax"
 
 [aliases."minimax-m2.7"]
 id = "MiniMax-M2.7"
+provider = "minimax"
+
+[aliases."minimax-m3"]
+id = "MiniMax-M3"
 provider = "minimax"
 
 # Z.AI GLM aliases.
@@ -1201,13 +1204,23 @@ context_window = 131072
 capabilities = ["tools", "streaming"]
 pricing = { input_per_mtok = 0.85, output_per_mtok = 1.20 }
 
-# MiniMax-M2 family ─ pricing pages:
-#   https://platform.minimax.io/docs (token-plan), llm-stats.com/models/minimax-m2-7.
-#   M2.5 release Feb 2026, M2.7 release 2026-03-18.
-# 230B total / 10B active MoE shared across M2/M2.5/M2.7. Context windows
-# from artificialanalysis.ai/models/minimax-m2-7 (205K). Pricing reflects
-# the direct MiniMax API surface; OpenRouter mirrors are listed
-# separately below.
+# MiniMax family ─ pricing pages:
+#   https://platform.minimax.io/docs/guides/pricing-paygo
+#   https://platform.minimax.io/docs/guides/model-invocation
+#   https://platform.minimax.io/docs/api-reference/text-openai-api
+#   llm-stats.com/models/minimax-m2-7.
+# M3 standard pricing below uses the non-promotional <=512K-input rate:
+# $0.60/M input, $2.40/M output, $0.12/M cache-read. MiniMax publishes a
+# higher standard tier for >512K input ($1.20/M input, $4.80/M output,
+# $0.24/M cache-read), but this catalog's ModelPricing shape is a single
+# rate card, so the base standard tier is the source of truth for now.
+# OpenRouter's June 2026 launch promotion is intentionally not copied into
+# static TOML.
+#
+# MiniMax M2: 230B total / 10B active MoE shared across M2/M2.5/M2.7.
+# Context windows from artificialanalysis.ai/models/minimax-m2-7 (205K).
+# Pricing reflects the direct MiniMax API surface; OpenRouter mirrors are
+# listed separately below.
 #
 # Tool calls + thinking-mode are supported (release notes call out
 # "agentic harness" support); structured output is delimited (no native
@@ -1215,6 +1228,15 @@ pricing = { input_per_mtok = 0.85, output_per_mtok = 1.20 }
 tier = "mid"
 open_weight = true
 strengths = ["speed", "tool_use"]
+[models."MiniMax-M3"]
+name = "MiniMax M3"
+provider = "minimax"
+context_window = 1000000
+capabilities = ["tools", "vision", "video", "streaming", "thinking", "prompt_caching"]
+pricing = { input_per_mtok = 0.60, output_per_mtok = 2.40, cache_read_per_mtok = 0.12 }
+tier = "frontier"
+open_weight = false
+strengths = ["coding", "agentic", "tool_use", "reasoning", "long_context", "vision"]
 [models."MiniMax-M2"]
 name = "MiniMax M2"
 provider = "minimax"
@@ -1271,10 +1293,21 @@ pricing = { input_per_mtok = 0.20, output_per_mtok = 1.10 }
 
 # MiniMax mirror on OpenRouter — same family, OpenRouter adds margin and
 # bundles native-tools passthrough so the openai_chat_completions wire
-# format Just Works for callers without a direct MiniMax key.
+# format Just Works for callers without a direct MiniMax key. MiniMax M3
+# launch-promo rates shown by OpenRouter are excluded from this static
+# rate card; the M3 row uses the standard post-promo rate.
 tier = "mid"
 open_weight = true
 strengths = ["long_context"]
+[models."minimax/minimax-m3"]
+name = "MiniMax M3 (via OpenRouter)"
+provider = "openrouter"
+context_window = 1048576
+capabilities = ["tools", "vision", "video", "streaming", "thinking", "prompt_caching"]
+pricing = { input_per_mtok = 0.60, output_per_mtok = 2.40, cache_read_per_mtok = 0.12 }
+tier = "frontier"
+open_weight = false
+strengths = ["coding", "agentic", "tool_use", "reasoning", "long_context", "vision"]
 [models."minimax/minimax-m2.7"]
 name = "MiniMax M2.7 (via OpenRouter)"
 provider = "openrouter"

@@ -2,6 +2,7 @@
 //!
 //! Harn scripts represent multimodal inputs as content blocks:
 //! `{type: "image", url?: string, base64?: string, media_type: string, detail?: "low"|"high"|"auto"}`.
+//! `{type: "video", url?: string, base64?: string, media_type: string}`.
 //! `{type: "pdf", url?: string, base64?: string, file_id?: string}`.
 //! `{type: "audio", url?: string, base64?: string, file_id?: string, media_type: string}`.
 //! Provider serializers translate that one shape into their native wire format.
@@ -66,6 +67,63 @@ impl ImageContent {
             base64,
             media_type,
             detail,
+        }))
+    }
+
+    pub(crate) fn openai_url(&self) -> String {
+        self.url.clone().unwrap_or_else(|| {
+            format!(
+                "data:{};base64,{}",
+                self.media_type,
+                self.base64.as_deref().unwrap_or_default()
+            )
+        })
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct VideoContent {
+    pub url: Option<String>,
+    pub base64: Option<String>,
+    pub media_type: String,
+}
+
+impl VideoContent {
+    fn from_block(block: &serde_json::Value) -> Result<Option<Self>, VmError> {
+        let block_type = block.get("type").and_then(|value| value.as_str());
+        if !matches!(block_type, Some("video" | "video_url")) {
+            return Ok(None);
+        }
+        let nested_video_url = block.get("video_url");
+        let url = nested_video_url
+            .and_then(|value| value.get("url"))
+            .or_else(|| block.get("url"))
+            .or_else(|| block.get("file_uri"))
+            .and_then(|value| value.as_str())
+            .filter(|value| !value.is_empty())
+            .map(str::to_string);
+        let base64 = block
+            .get("base64")
+            .or_else(|| block.get("data"))
+            .and_then(|value| value.as_str())
+            .filter(|value| !value.is_empty())
+            .map(str::to_string);
+        if url.is_some() == base64.is_some() {
+            return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+                "llm_call video content requires exactly one of url or base64",
+            ))));
+        }
+        let media_type = block
+            .get("media_type")
+            .or_else(|| block.get("mime_type"))
+            .and_then(|value| value.as_str())
+            .filter(|value| !value.is_empty())
+            .map(str::to_string)
+            .unwrap_or_else(|| "video/mp4".to_string());
+        Ok(Some(Self {
+            url,
+            base64,
+            media_type,
         }))
     }
 
@@ -194,6 +252,12 @@ pub(crate) fn parse_file_block(block: &serde_json::Value) -> Result<Option<FileC
     FileContent::from_block(block)
 }
 
+pub(crate) fn parse_video_block(
+    block: &serde_json::Value,
+) -> Result<Option<VideoContent>, VmError> {
+    VideoContent::from_block(block)
+}
+
 pub(crate) fn messages_contain_images(messages: &[serde_json::Value]) -> Result<bool, VmError> {
     for message in messages {
         if message
@@ -214,6 +278,35 @@ pub(crate) fn messages_contain_images(messages: &[serde_json::Value]) -> Result<
             Some(content @ serde_json::Value::Object(_)) => {
                 let contains_image = parse_image_block(content)?.is_some();
                 if contains_image {
+                    return Ok(true);
+                }
+            }
+            _ => {}
+        }
+    }
+    Ok(false)
+}
+
+pub(crate) fn messages_contain_videos(messages: &[serde_json::Value]) -> Result<bool, VmError> {
+    for message in messages {
+        if message
+            .get("videos")
+            .and_then(|value| value.as_array())
+            .is_some_and(|videos| !videos.is_empty())
+        {
+            return Ok(true);
+        }
+        match message.get("content") {
+            Some(serde_json::Value::Array(blocks)) => {
+                for block in blocks {
+                    if parse_video_block(block)?.is_some() {
+                        return Ok(true);
+                    }
+                }
+            }
+            Some(content @ serde_json::Value::Object(_)) => {
+                let contains_video = parse_video_block(content)?.is_some();
+                if contains_video {
                     return Ok(true);
                 }
             }
@@ -329,6 +422,8 @@ pub(crate) fn anthropic_content(content: &serde_json::Value) -> serde_json::Valu
                         _ => continue,
                     };
                     out.push(serde_json::json!({"type": "image", "source": source}));
+                } else if parse_video_block(block).is_ok_and(|video| video.is_some()) {
+                    out.push(block.clone());
                 } else if let Ok(Some(file)) = parse_file_block(block) {
                     out.push(anthropic_file_block(block, file));
                 } else if let Some(text) = normalized_text_block(block) {
@@ -344,6 +439,8 @@ pub(crate) fn anthropic_content(content: &serde_json::Value) -> serde_json::Valu
                 anthropic_content(&serde_json::Value::Array(vec![serde_json::json!(
                     image_to_neutral_json(&image)
                 )]))
+            } else if parse_video_block(content).is_ok_and(|video| video.is_some()) {
+                content.clone()
             } else if let Ok(Some(file)) = parse_file_block(content) {
                 serde_json::Value::Array(vec![anthropic_file_block(content, file)])
             } else {
@@ -368,6 +465,13 @@ pub(crate) fn openai_content(content: &serde_json::Value) -> serde_json::Value {
                         "type": "image_url",
                         "image_url": image_url,
                     }));
+                } else if let Ok(Some(video)) = parse_video_block(block) {
+                    out.push(serde_json::json!({
+                        "type": "video_url",
+                        "video_url": {
+                            "url": video.openai_url(),
+                        },
+                    }));
                 } else if let Ok(Some(file)) = parse_file_block(block) {
                     out.push(openai_file_block(file));
                 } else if let Some(text) = normalized_text_block(block) {
@@ -387,6 +491,13 @@ pub(crate) fn openai_content(content: &serde_json::Value) -> serde_json::Value {
                 serde_json::Value::Array(vec![serde_json::json!({
                     "type": "image_url",
                     "image_url": image_url,
+                })])
+            } else if let Ok(Some(video)) = parse_video_block(content) {
+                serde_json::Value::Array(vec![serde_json::json!({
+                    "type": "video_url",
+                    "video_url": {
+                        "url": video.openai_url(),
+                    },
                 })])
             } else if let Ok(Some(file)) = parse_file_block(content) {
                 serde_json::Value::Array(vec![openai_file_block(file)])
@@ -496,6 +607,24 @@ pub(crate) fn gemini_parts(content: &serde_json::Value) -> Vec<serde_json::Value
                         return Some(serde_json::json!({
                             "file_data": {
                                 "mime_type": image.media_type,
+                                "file_uri": file_uri,
+                            }
+                        }));
+                    }
+                }
+                if let Ok(Some(video)) = parse_video_block(block) {
+                    if let Some(data) = video.base64 {
+                        return Some(serde_json::json!({
+                            "inline_data": {
+                                "mime_type": video.media_type,
+                                "data": data,
+                            }
+                        }));
+                    }
+                    if let Some(file_uri) = video.url {
+                        return Some(serde_json::json!({
+                            "file_data": {
+                                "mime_type": video.media_type,
                                 "file_uri": file_uri,
                             }
                         }));

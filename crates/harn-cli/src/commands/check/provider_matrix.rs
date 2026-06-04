@@ -18,6 +18,7 @@ const FEATURES: &[&str] = &[
     "vision",
     "audio",
     "pdf",
+    "video",
     "streaming",
     "files_api",
     "json_schema",
@@ -72,14 +73,14 @@ pub(crate) fn generate_markdown(
     );
     out.push_str("Regenerate with `make gen-provider-matrix` and verify with `make check-provider-matrix`.\n\n");
     out.push_str(
-        "| Provider | Model pattern | Version min | Thinking | Vision | Audio | PDF | Streaming | Files API | JSON schema | Prompt | Output mode | Prefill | Role | Tool prompt | Thinking blocks | Default tools | Native tools | Text tools | Parity | Tools | Cache |\n",
+        "| Provider | Model pattern | Version min | Thinking | Vision | Audio | PDF | Video | Streaming | Files API | JSON schema | Prompt | Output mode | Prefill | Role | Tool prompt | Thinking blocks | Default tools | Native tools | Text tools | Parity | Tools | Cache |\n",
     );
     out.push_str(
-        "|---|---|---|---|---:|---:|---:|---:|---:|---|---|---|---:|---|---|---|---|---:|---:|---|---:|---:|\n",
+        "|---|---|---|---|---:|---:|---:|---:|---:|---:|---|---|---|---:|---|---|---|---|---:|---:|---|---:|---:|\n",
     );
     for row in rows {
         out.push_str(&format!(
-            "| `{}` | `{}` | {} | {} | {} | {} | {} | {} | {} | {} | {} | `{}` | {} | `{}` | `{}` | `{}` | `{}` | {} | {} | `{}` | {} | {} |\n",
+            "| `{}` | `{}` | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | `{}` | {} | `{}` | `{}` | `{}` | `{}` | {} | {} | `{}` | {} | {} |\n",
             row.provider,
             row.model,
             markdown_cell(&version_min_cell(row)),
@@ -87,6 +88,7 @@ pub(crate) fn generate_markdown(
             yes_no(row.vision),
             yes_no(row.audio),
             yes_no(row.pdf),
+            yes_no(row.video),
             yes_no(row.streaming),
             yes_no(row.files_api_supported),
             markdown_cell(&json_schema_cell(row)),
@@ -218,6 +220,7 @@ fn row_supports_feature(row: &ProviderCapabilityMatrixRow, feature: &str) -> boo
         "vision" => row.vision,
         "audio" => row.audio,
         "pdf" => row.pdf,
+        "video" => row.video,
         "streaming" => row.streaming,
         "files_api" => row.files_api_supported,
         "json_schema" => row.json_schema.is_some(),
@@ -240,7 +243,7 @@ fn row_supports_feature(row: &ProviderCapabilityMatrixRow, feature: &str) -> boo
 }
 
 fn print_text(rows: &[ProviderCapabilityMatrixRow]) {
-    let table_rows: Vec<[String; 21]> = rows
+    let table_rows: Vec<[String; 22]> = rows
         .iter()
         .map(|row| {
             [
@@ -250,6 +253,7 @@ fn print_text(rows: &[ProviderCapabilityMatrixRow]) {
                 yes_no(row.vision).to_string(),
                 yes_no(row.audio).to_string(),
                 yes_no(row.pdf).to_string(),
+                yes_no(row.video).to_string(),
                 yes_no(row.streaming).to_string(),
                 yes_no(row.files_api_supported).to_string(),
                 json_schema_cell(row),
@@ -275,6 +279,7 @@ fn print_text(rows: &[ProviderCapabilityMatrixRow]) {
         "vision".to_string(),
         "audio".to_string(),
         "pdf".to_string(),
+        "video".to_string(),
         "streaming".to_string(),
         "files_api".to_string(),
         "json_schema".to_string(),
@@ -479,7 +484,7 @@ mod tests {
         assert!(markdown.contains("Source of truth"));
         assert!(markdown.contains("harn providers matrix"));
         assert!(markdown.contains(
-            "| Provider | Model pattern | Version min | Thinking | Vision | Audio | PDF | Streaming | Files API | JSON schema | Prompt | Output mode | Prefill | Role | Tool prompt | Thinking blocks | Default tools | Native tools | Text tools | Parity | Tools | Cache |"
+            "| Provider | Model pattern | Version min | Thinking | Vision | Audio | PDF | Video | Streaming | Files API | JSON schema | Prompt | Output mode | Prefill | Role | Tool prompt | Thinking blocks | Default tools | Native tools | Text tools | Parity | Tools | Cache |"
         ));
         assert!(markdown.contains("Tool-format recommendations by catalog model"));
     }

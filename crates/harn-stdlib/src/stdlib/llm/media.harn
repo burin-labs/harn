@@ -35,6 +35,18 @@ pub fn media_type_for_path(path, fallback = nil) {
   if ext == ".pdf" {
     return "application/pdf"
   }
+  if ext == ".mp4" || ext == ".m4v" {
+    return "video/mp4"
+  }
+  if ext == ".mov" {
+    return "video/quicktime"
+  }
+  if ext == ".webm" {
+    return "video/webm"
+  }
+  if ext == ".mkv" {
+    return "video/x-matroska"
+  }
   if ext == ".wav" {
     return "audio/wav"
   }
@@ -87,6 +99,28 @@ pub fn image_content(source, options = nil) {
   }
   if opts?.detail != nil {
     block = block + {detail: opts.detail}
+  }
+  return block
+}
+
+/**
+ * video_content creates an llm_call-compatible video block from a URL or local path.
+ *
+ * @effects: [llm.call]
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: video_content(source, options)
+ */
+pub fn video_content(source, options = nil) {
+  if type_of(source) == "dict" {
+    return source
+  }
+  let opts = options ?? {}
+  let media_type = opts?.media_type ?? opts?.mime_type ?? media_type_for_path(source, "video/mp4")
+  var block = {type: "video"} + __llm_media_source_field(harness, source, media_type)
+  if block?.media_type == nil {
+    block = block + {media_type: media_type}
   }
   return block
 }
@@ -157,6 +191,24 @@ pub fn image_message(source, prompt = "", options = nil) {
     prompt
   }
   return {role: "user", content: [text_content(text), image_content(source, options)]}
+}
+
+/**
+ * video_message builds a user message containing text plus one video.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: video_message(source, prompt, options)
+ */
+pub fn video_message(source, prompt = "", options = nil) {
+  let text = if prompt == nil || prompt == "" {
+    "Analyze this video."
+  } else {
+    prompt
+  }
+  return {role: "user", content: [text_content(text), video_content(source, options)]}
 }
 
 /**

@@ -3427,7 +3427,6 @@ export const harnProviderCatalog: HarnProviderCatalog = {
       "name": "MiniMax M2.7",
       "provider": "minimax",
       "aliases": [
-        "minimax",
         "minimax-m2.7"
       ],
       "context_window": 204800,
@@ -3566,6 +3565,86 @@ export const harnProviderCatalog: HarnProviderCatalog = {
         "speed",
         "coding",
         "agentic"
+      ]
+    },
+    {
+      "id": "MiniMax-M3",
+      "name": "MiniMax M3",
+      "provider": "minimax",
+      "aliases": [
+        "minimax",
+        "minimax-m3"
+      ],
+      "context_window": 1000000,
+      "modalities": {
+        "input": [
+          "text",
+          "image",
+          "video"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
+        "tool_search": []
+      },
+      "structured_output": "delimited",
+      "format_preferences": {
+        "prefers_xml_scaffolding": false,
+        "prefers_markdown_scaffolding": true,
+        "structured_output_mode": "delimited",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "inline"
+      },
+      "reasoning": {
+        "modes": [
+          "adaptive"
+        ],
+        "effort_supported": false,
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": true,
+      "pricing": {
+        "input_per_mtok": 0.6,
+        "output_per_mtok": 2.4,
+        "cache_read_per_mtok": 0.12,
+        "cache_write_per_mtok": null
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "vision",
+        "video",
+        "prompt_caching",
+        "thinking",
+        "extended_thinking",
+        "structured_output"
+      ],
+      "family": "minimax",
+      "lineage": "minimax",
+      "tier": "frontier",
+      "open_weight": false,
+      "strengths": [
+        "coding",
+        "agentic",
+        "tool_use",
+        "reasoning",
+        "long_context",
+        "vision"
       ]
     },
     {
@@ -5469,6 +5548,83 @@ export const harnProviderCatalog: HarnProviderCatalog = {
       ]
     },
     {
+      "id": "minimax/minimax-m3",
+      "name": "MiniMax M3 (via OpenRouter)",
+      "provider": "openrouter",
+      "aliases": [],
+      "context_window": 1048576,
+      "modalities": {
+        "input": [
+          "text",
+          "image",
+          "video"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
+        "tool_search": []
+      },
+      "structured_output": "delimited",
+      "format_preferences": {
+        "prefers_xml_scaffolding": false,
+        "prefers_markdown_scaffolding": true,
+        "structured_output_mode": "delimited",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "inline"
+      },
+      "reasoning": {
+        "modes": [
+          "adaptive"
+        ],
+        "effort_supported": false,
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": true,
+      "pricing": {
+        "input_per_mtok": 0.6,
+        "output_per_mtok": 2.4,
+        "cache_read_per_mtok": 0.12,
+        "cache_write_per_mtok": null
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "vision",
+        "video",
+        "prompt_caching",
+        "thinking",
+        "extended_thinking",
+        "structured_output"
+      ],
+      "family": "minimax",
+      "lineage": "minimax",
+      "tier": "frontier",
+      "open_weight": false,
+      "strengths": [
+        "coding",
+        "agentic",
+        "tool_use",
+        "reasoning",
+        "long_context",
+        "vision"
+      ]
+    },
+    {
       "id": "mistralai/mistral-large-2512",
       "name": "Mistral Large 3 2512",
       "provider": "openrouter",
@@ -6441,7 +6597,7 @@ export const harnProviderCatalog: HarnProviderCatalog = {
     },
     {
       "name": "minimax",
-      "model_id": "MiniMax-M2.7",
+      "model_id": "MiniMax-M3",
       "provider": "minimax"
     },
     {
@@ -6457,6 +6613,11 @@ export const harnProviderCatalog: HarnProviderCatalog = {
     {
       "name": "minimax-m2.7",
       "model_id": "MiniMax-M2.7",
+      "provider": "minimax"
+    },
+    {
+      "name": "minimax-m3",
+      "model_id": "MiniMax-M3",
       "provider": "minimax"
     },
     {
