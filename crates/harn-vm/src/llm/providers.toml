@@ -545,6 +545,20 @@ id = "gemma4:26b"
 provider = "ollama"
 tool_format = "text"
 
+[aliases.ollama-gemma4-12b]
+id = "gemma4:12b-mlx"
+provider = "ollama"
+tool_format = "text"
+
+[aliases.ollama-gemma4-12b-nvfp4]
+id = "gemma4:12b-nvfp4"
+provider = "ollama"
+tool_format = "text"
+
+[aliases.local-gemma4-12b]
+id = "gemma-4-12b-it"
+provider = "local"
+
 # qwen3.6 has no working Ollama route — Ollama's qwen3.5-family server-side
 # tool-call parser 500s on text-tool output (ollama/ollama#14986, #14570).
 # Use the llamacpp provider for local qwen3.x.
@@ -663,6 +677,13 @@ tool_format = "native"
 # update these via providers.toml overlays as they re-probe a model.
 
 [alias_tool_calling.ollama-gemma4]
+native = "unknown"
+text = "unknown"
+streaming_native = "unknown"
+fallback_mode = "disabled"
+failure_reason = "requires_tool_probe"
+
+[alias_tool_calling.ollama-gemma4-12b]
 native = "unknown"
 text = "unknown"
 streaming_native = "unknown"
@@ -1405,6 +1426,43 @@ capabilities = ["tools", "vision", "streaming", "thinking"]
 tier = "mid"
 open_weight = true
 strengths = ["vision", "tool_use"]
+# Gemma 4 12B — encoder-free unified multimodal model (Apache 2.0), built to run
+# on a 16GB laptop. Published on Ollama only as quantized variants (no bare
+# `gemma4:12b` tag). Verified via `ollama show`: the quantized 12B builds expose
+# `tools` + native `thinking` but are TEXT-ONLY at 128K context — the vision
+# projector is dropped in these conversions, unlike the larger 26b/31b builds.
+# MLX is the Apple-Silicon path; nvfp4 targets NVIDIA Blackwell; mxfp8 is the
+# higher-fidelity quant.
+[models."gemma4:12b-mlx"]
+name = "Gemma 4 12B (MLX)"
+provider = "ollama"
+context_window = 131072
+runtime_context_window = 32768
+stream_timeout = 240.0
+capabilities = ["tools", "streaming", "thinking"]
+tier = "mid"
+open_weight = true
+strengths = ["speed", "cheap"]
+[models."gemma4:12b-nvfp4"]
+name = "Gemma 4 12B (NVFP4)"
+provider = "ollama"
+context_window = 131072
+runtime_context_window = 32768
+stream_timeout = 240.0
+capabilities = ["tools", "streaming", "thinking"]
+tier = "mid"
+open_weight = true
+strengths = ["cheap", "tool_use"]
+[models."gemma4:12b-mxfp8"]
+name = "Gemma 4 12B (MXFP8)"
+provider = "ollama"
+context_window = 131072
+runtime_context_window = 32768
+stream_timeout = 240.0
+capabilities = ["tools", "streaming", "thinking"]
+tier = "mid"
+open_weight = true
+strengths = ["cheap", "tool_use"]
 [models."devstral-small-2:24b"]
 name = "Devstral Small 2 24B"
 provider = "ollama"

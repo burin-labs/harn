@@ -3392,6 +3392,193 @@
       ]
     },
     {
+      "id": "gemma4:12b-mlx",
+      "name": "Gemma 4 12B (MLX)",
+      "provider": "ollama",
+      "aliases": [
+        "ollama-gemma4-12b"
+      ],
+      "context_window": 131072,
+      "runtime_context_window": 32768,
+      "stream_timeout": 240.0,
+      "modalities": {
+        "input": [
+          "text"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": false,
+        "text": true,
+        "preferred_format": "text",
+        "parity": "text_only",
+        "tool_search": []
+      },
+      "structured_output": "none",
+      "format_preferences": {
+        "prefers_xml_scaffolding": false,
+        "prefers_markdown_scaffolding": true,
+        "structured_output_mode": "delimited",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "none"
+      },
+      "reasoning": {
+        "modes": [],
+        "effort_supported": false,
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": false,
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "serverless",
+      "quality_tags": [
+        "local"
+      ],
+      "capability_tags": [
+        "streaming",
+        "tools"
+      ],
+      "family": "gemma",
+      "lineage": "gemma4",
+      "tier": "mid",
+      "open_weight": true,
+      "strengths": [
+        "speed",
+        "cheap"
+      ]
+    },
+    {
+      "id": "gemma4:12b-mxfp8",
+      "name": "Gemma 4 12B (MXFP8)",
+      "provider": "ollama",
+      "aliases": [],
+      "context_window": 131072,
+      "runtime_context_window": 32768,
+      "stream_timeout": 240.0,
+      "modalities": {
+        "input": [
+          "text"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": false,
+        "text": true,
+        "preferred_format": "text",
+        "parity": "text_only",
+        "tool_search": []
+      },
+      "structured_output": "none",
+      "format_preferences": {
+        "prefers_xml_scaffolding": false,
+        "prefers_markdown_scaffolding": true,
+        "structured_output_mode": "delimited",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "none"
+      },
+      "reasoning": {
+        "modes": [],
+        "effort_supported": false,
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": false,
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "serverless",
+      "quality_tags": [
+        "local"
+      ],
+      "capability_tags": [
+        "streaming",
+        "tools"
+      ],
+      "family": "gemma",
+      "lineage": "gemma4",
+      "tier": "mid",
+      "open_weight": true,
+      "strengths": [
+        "cheap",
+        "tool_use"
+      ]
+    },
+    {
+      "id": "gemma4:12b-nvfp4",
+      "name": "Gemma 4 12B (NVFP4)",
+      "provider": "ollama",
+      "aliases": [
+        "ollama-gemma4-12b-nvfp4"
+      ],
+      "context_window": 131072,
+      "runtime_context_window": 32768,
+      "stream_timeout": 240.0,
+      "modalities": {
+        "input": [
+          "text"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": false,
+        "text": true,
+        "preferred_format": "text",
+        "parity": "text_only",
+        "tool_search": []
+      },
+      "structured_output": "none",
+      "format_preferences": {
+        "prefers_xml_scaffolding": false,
+        "prefers_markdown_scaffolding": true,
+        "structured_output_mode": "delimited",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "none"
+      },
+      "reasoning": {
+        "modes": [],
+        "effort_supported": false,
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": false,
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "serverless",
+      "quality_tags": [
+        "local"
+      ],
+      "capability_tags": [
+        "streaming",
+        "tools"
+      ],
+      "family": "gemma",
+      "lineage": "gemma4",
+      "tier": "mid",
+      "open_weight": true,
+      "strengths": [
+        "cheap",
+        "tool_use"
+      ]
+    },
+    {
       "id": "gemma4:26b",
       "name": "Gemma 4 26B MoE",
       "provider": "ollama",
@@ -5607,6 +5794,11 @@
       "provider": "local"
     },
     {
+      "name": "local-gemma4-12b",
+      "model_id": "gemma-4-12b-it",
+      "provider": "local"
+    },
+    {
       "name": "local-gemma4-26b",
       "model_id": "gemma-4-26b-a4b-it",
       "provider": "local"
@@ -5717,6 +5909,25 @@
         "fallback_mode": "disabled",
         "failure_reason": "requires_tool_probe"
       }
+    },
+    {
+      "name": "ollama-gemma4-12b",
+      "model_id": "gemma4:12b-mlx",
+      "provider": "ollama",
+      "tool_format": "text",
+      "tool_calling": {
+        "native": "unknown",
+        "text": "unknown",
+        "streaming_native": "unknown",
+        "fallback_mode": "disabled",
+        "failure_reason": "requires_tool_probe"
+      }
+    },
+    {
+      "name": "ollama-gemma4-12b-nvfp4",
+      "model_id": "gemma4:12b-nvfp4",
+      "provider": "ollama",
+      "tool_format": "text"
     },
     {
       "name": "ollama-gemma4-26b",
