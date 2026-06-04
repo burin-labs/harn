@@ -1,28 +1,73 @@
-// Canonical normalized connector event schemas, authored as Harn types.
-//
-// This module is the SOURCE OF TRUTH for the normalized-event shapes that
-// `.harn` connectors emit and the Rust runtime deserializes. The Rust structs
-// in `crates/harn-vm/src/triggers/event/schemas_generated.rs` are GENERATED
-// from these declarations by `harn connector-schema-codegen`, so a connector's
-// JSON output matches the Rust struct by construction.
-//
-// Regenerate the Rust structs with:  make gen-connector-schemas
-// Verify they are not stale with:     make check-connector-schemas
-//
-// Type mapping applied by the generator:
-//   string      -> String
-//   int         -> i64
-//   bool        -> bool
-//   any         -> serde_json::Value      (untyped JSON subtree)
-//   T?          -> Option<T>              (+ serde default + skip_serializing_if)
-//   list<T>     -> Vec<T>                 (+ serde default)
-//   dict<K, V>  -> BTreeMap<K, V>         (+ serde default)
-//   { ... }     -> a `#[serde(flatten)]` field named `common` when the field is
-//                  spelled `common: <Record>`; otherwise a nested struct.
-//
-// GITHUB. This PR proves the pipeline end-to-end for GitHub only; Slack,
-// Linear, Notion, and the stream providers follow in later PRs. Keep these
-// records a faithful mirror of the `GitHubEventPayload` family in
+/**
+ * Canonical normalized connector event schemas, authored as Harn types.
+ *
+ * This module is the SOURCE OF TRUTH for the normalized-event shapes that
+ * `.harn` connectors emit and the Rust runtime deserializes. The Rust structs
+ * in `crates/harn-vm/src/triggers/event/schemas_generated.rs` are GENERATED
+ * from these declarations by `harn connector-schema-codegen`, so a connector's
+ * JSON output matches the Rust struct by construction.
+ *
+ * Regenerate the Rust structs with:  make gen-connector-schemas
+ * Verify they are not stale with:     make check-connector-schemas
+ *
+ * Type mapping applied by the generator:
+ *   string      -> String
+ *   int         -> i64
+ *   bool        -> bool
+ *   any         -> serde_json::Value      (untyped JSON subtree)
+ *   T?          -> Option<T>              (+ serde default + skip_serializing_if)
+ *   list<T>     -> Vec<T>                 (+ serde default)
+ *   dict<K, V>  -> BTreeMap<K, V>         (+ serde default)
+ *   { ... }     -> a `#[serde(flatten)]` field named `common` when the field is
+ *                  spelled `common: <Record>`; otherwise a nested struct.
+ *
+ * GIT FORGE. Provider packages for GitHub, GitLab, Gitea, Forgejo, and other
+ * forges can emit these records onto the shared forge event-log topic while
+ * still preserving their native payload in `raw_payload`.
+ */
+type GitForgeRepositoryRef = {provider: string, full_name?: string, id?: string, web_url?: string}
+
+type GitForgePullRequestRef = {
+  number: int,
+  id?: string,
+  title?: string,
+  author?: string,
+  web_url?: string,
+  head_ref?: string,
+  head_sha?: string,
+  base_ref?: string,
+  base_sha?: string,
+  state?: string,
+  draft?: bool,
+  merged?: bool,
+}
+
+type GitForgeWritebackTarget = {
+  provider: string,
+  repository_full_name?: string,
+  repository_id?: string,
+  pull_request_number: int,
+  web_url?: string,
+}
+
+type GitForgePullRequestEvent = {
+  topic: string,
+  event: string,
+  kind: string,
+  provider: string,
+  lifecycle: string,
+  repository: GitForgeRepositoryRef,
+  pull_request: GitForgePullRequestRef,
+  writeback: GitForgeWritebackTarget,
+  delivery_id?: string,
+  signature_status?: any,
+  provider_metadata: dict<string, any>,
+  raw_payload: any,
+}
+
+// GITHUB. The provider-schema generator is exercised end-to-end for GitHub,
+// alongside the forge-agnostic records above. Keep the GitHub records a
+// faithful mirror of the `GitHubEventPayload` family in
 // `crates/harn-vm/src/triggers/event/payloads.rs`.
 /**
  * Stable common block shared by every GitHub normalized event. The generator

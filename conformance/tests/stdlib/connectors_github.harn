@@ -1,4 +1,9 @@
-import { github_repo, github_slug_from_remote } from "std/connectors/github"
+import {
+  forge_pull_request_event,
+  forge_writeback_request,
+  github_repo,
+  github_slug_from_remote,
+} from "std/connectors/github"
 
 pipeline test(task) {
   assert_eq(
@@ -30,5 +35,19 @@ pipeline test(task) {
   assert_eq(repo.owner, "octo-org", "repo owner")
   assert_eq(repo.name, "octo-repo", "repo name")
   assert_eq(repo.full_name, "octo-org/octo-repo", "repo full name")
+  let forge = unwrap(
+    forge_pull_request_event(
+      {
+        action: "opened",
+        repository: {full_name: "octo-org/octo-repo"},
+        pull_request: {number: 24, title: "Preview", head: {ref: "preview"}, base: {ref: "main"}},
+      },
+    ),
+  )
+  assert_eq(forge.lifecycle, "opened", "forge lifecycle")
+  assert_eq(forge.kind, "pull_request.opened", "forge event kind")
+  let writeback = forge_writeback_request(forge, "Preview ready")
+  assert_eq(writeback.method, "issues.create_comment", "forge writeback method")
+  assert_eq(writeback.params.issue_number, 24, "forge writeback issue number")
   log("github stdlib ok")
 }

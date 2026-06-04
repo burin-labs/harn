@@ -29,7 +29,8 @@ Harn core owns the primitives that every connector implementation needs:
 - connector hot-path effect policy for deterministic `normalize_inbound`
   exports
 - `std/connectors/shared` helpers for package-side HMAC checks, JWT/JWKS
-  verification, OAuth refresh, token buckets, and cursor pagination
+  verification, OAuth refresh, token buckets, cursor pagination, and the
+  forge-agnostic PR/MR lifecycle shape
 - shared HTTP, encoding, package-manager, and testkit surfaces that provider
   packages compose
 
@@ -89,6 +90,7 @@ surfaces exist and are tested:
 | Raw body, bytes, HMAC, encoding, JWT/JWKS, OAuth refresh, and constant-time helpers | `TriggerEvent.raw_body`, stdlib crypto/encoding builtins, `connectors::{hmac, shared}`, `std/connectors/shared` |
 | Durable inbox dedupe and dispatcher handoff | `crates/harn-vm/src/triggers/inbox.rs`, `triggers/dispatcher/` |
 | Rate-limit and cursor pagination behavior | connector clients, `RateLimiterFactory`, `connectors::shared::paginate_cursor`, `std/connectors/shared` |
+| Git forge PR/MR lifecycle event and writeback contract | `std/connectors/shared::git_forge_pull_request_event`, `GitForgePullRequestEvent` generated from `crates/harn-stdlib/src/stdlib/stdlib_event_schemas.harn` |
 | Harn connector contract, `NormalizeResult`, `poll_tick`, and effect policy | `crates/harn-vm/src/connectors/harn_module.rs`, `crates/harn-lint/src/tests/connector_effect_policy.rs` |
 | Connector package conformance harness | `harn connector test`, `harn connector check`, and connector contract fixtures |
 | Catalog, examples, and migration guidance | `docs/src/connectors/catalog.md`, `examples/triggers/`, `docs/src/migrations/rust-connectors-to-harn-packages.md` |
