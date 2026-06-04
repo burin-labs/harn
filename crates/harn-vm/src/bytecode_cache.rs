@@ -153,11 +153,8 @@ pub fn cache_dir() -> PathBuf {
             return xdg.join("harn").join("bytecode");
         }
     }
-    if let Some(home) = std::env::var_os("HOME") {
-        return PathBuf::from(home)
-            .join(".cache")
-            .join("harn")
-            .join("bytecode");
+    if let Some(home) = crate::user_dirs::home_dir() {
+        return home.join(".cache").join("harn").join("bytecode");
     }
     // Final fallback: a directory beside the binary's working dir. Mostly
     // hit in tests that scrub HOME from the environment.
@@ -178,11 +175,8 @@ pub fn packs_cache_dir() -> PathBuf {
             return xdg.join("harn").join("packs");
         }
     }
-    if let Some(home) = std::env::var_os("HOME") {
-        return PathBuf::from(home)
-            .join(".cache")
-            .join("harn")
-            .join("packs");
+    if let Some(home) = crate::user_dirs::home_dir() {
+        return home.join(".cache").join("harn").join("packs");
     }
     PathBuf::from(".harn-cache").join("packs")
 }

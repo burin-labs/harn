@@ -307,10 +307,10 @@ async fn resolve_aws_credentials() -> Result<AwsCredentials, VmError> {
 }
 
 fn read_aws_profile_value(file_kind: &str, profile: &str, key: &str) -> Option<String> {
-    let home = std::env::var("HOME").ok()?;
+    let home = crate::user_dirs::home_dir()?;
     let path = match file_kind {
-        "credentials" => format!("{home}/.aws/credentials"),
-        "config" => format!("{home}/.aws/config"),
+        "credentials" => home.join(".aws").join("credentials"),
+        "config" => home.join(".aws").join("config"),
         _ => return None,
     };
     let text = std::fs::read_to_string(path).ok()?;

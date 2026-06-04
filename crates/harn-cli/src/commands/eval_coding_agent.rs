@@ -2128,13 +2128,11 @@ fn unquote_env_value(value: &str) -> String {
 fn expand_home(path: &Path) -> PathBuf {
     let raw = path.to_string_lossy();
     if raw == "~" {
-        return std::env::var_os("HOME")
-            .map(PathBuf::from)
-            .unwrap_or_else(|| path.to_path_buf());
+        return harn_vm::user_dirs::home_dir().unwrap_or_else(|| path.to_path_buf());
     }
     if let Some(rest) = raw.strip_prefix("~/") {
-        if let Some(home) = std::env::var_os("HOME") {
-            return PathBuf::from(home).join(rest);
+        if let Some(home) = harn_vm::user_dirs::home_dir() {
+            return home.join(rest);
         }
     }
     path.to_path_buf()

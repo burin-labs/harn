@@ -124,13 +124,7 @@ fn env_nonempty(key: &str) -> Option<String> {
 }
 
 fn home_dir() -> Option<PathBuf> {
-    #[cfg(target_os = "windows")]
-    {
-        if let Some(userprofile) = env_nonempty("USERPROFILE") {
-            return Some(PathBuf::from(userprofile));
-        }
-    }
-    env_nonempty("HOME").map(PathBuf::from)
+    harn_vm::user_dirs::home_dir()
 }
 
 fn atomic_write(path: &Path, bytes: &[u8]) -> io::Result<()> {

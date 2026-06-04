@@ -12,10 +12,7 @@ use harn_guard::{catalog, GuardStore};
 use crate::cli::{GuardInstallArgs, GuardListArgs, GuardRemoveArgs, GuardStatusArgs};
 
 fn store() -> GuardStore {
-    let home = std::env::var("HOME")
-        .ok()
-        .filter(|home| !home.trim().is_empty())
-        .map_or_else(|| PathBuf::from("."), PathBuf::from);
+    let home = harn_vm::user_dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
     GuardStore::new(&home)
 }
 

@@ -257,8 +257,8 @@ fn repl_builtin_names() -> Vec<String> {
 }
 
 fn repl_history_path() -> PathBuf {
-    std::env::var_os("HOME")
-        .map(|home| PathBuf::from(home).join(".harn").join("repl_history"))
+    harn_vm::user_dirs::home_dir()
+        .map(|home| home.join(".harn").join("repl_history"))
         .unwrap_or_else(|| PathBuf::from(".harn").join("repl_history"))
 }
 

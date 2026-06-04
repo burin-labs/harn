@@ -305,8 +305,8 @@ fn harn_openapi_candidates(args: &PackageScaffoldOpenapiArgs) -> Vec<PathBuf> {
         candidates.push(cwd.join("../harn-openapi"));
         candidates.push(cwd.join("harn-openapi"));
     }
-    if let Some(home) = std::env::var_os("HOME") {
-        candidates.push(PathBuf::from(home).join("projects/harn-openapi"));
+    if let Some(home) = harn_vm::user_dirs::home_dir() {
+        candidates.push(home.join("projects/harn-openapi"));
     }
     candidates
 }
@@ -909,13 +909,11 @@ fn is_harn_reserved(value: &str) -> bool {
 
 fn expand_tilde(raw: &str) -> PathBuf {
     if raw == "~" {
-        return std::env::var_os("HOME")
-            .map(PathBuf::from)
-            .unwrap_or_else(|| PathBuf::from(raw));
+        return harn_vm::user_dirs::home_dir().unwrap_or_else(|| PathBuf::from(raw));
     }
     if let Some(rest) = raw.strip_prefix("~/") {
-        if let Some(home) = std::env::var_os("HOME") {
-            return PathBuf::from(home).join(rest);
+        if let Some(home) = harn_vm::user_dirs::home_dir() {
+            return home.join(rest);
         }
     }
     PathBuf::from(raw)

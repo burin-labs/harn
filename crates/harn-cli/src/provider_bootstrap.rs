@@ -129,10 +129,7 @@ fn project_llm_configured(anchor: &Path) -> bool {
 }
 
 fn default_providers_path() -> Option<PathBuf> {
-    std::env::var("HOME")
-        .ok()
-        .filter(|home| !home.trim().is_empty())
-        .map(|home| PathBuf::from(home).join(".config/harn/providers.toml"))
+    harn_vm::user_dirs::home_dir().map(|home| home.join(".config/harn/providers.toml"))
 }
 
 async fn ollama_tags_ready(url: &str) -> bool {

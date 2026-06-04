@@ -197,10 +197,7 @@ pub fn default_user_dir() -> Option<PathBuf> {
 }
 
 fn dirs_home() -> Option<PathBuf> {
-    std::env::var_os("HOME").map(PathBuf::from).or_else(|| {
-        // Windows fallback without pulling in the `dirs` crate.
-        std::env::var_os("USERPROFILE").map(PathBuf::from)
-    })
+    crate::user_dirs::home_dir()
 }
 
 #[cfg(test)]
