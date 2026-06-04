@@ -438,7 +438,10 @@ fn parse_response(
         .unwrap_or(0);
     let output_tokens = json["usageMetadata"]["candidatesTokenCount"]
         .as_i64()
-        .unwrap_or(0);
+        .unwrap_or(0)
+        + json["usageMetadata"]["thoughtsTokenCount"]
+            .as_i64()
+            .unwrap_or(0);
     let cache_read_tokens = json["usageMetadata"]["cachedContentTokenCount"]
         .as_i64()
         .unwrap_or(0);
@@ -911,6 +914,7 @@ mod tests {
             "usageMetadata": {
                 "promptTokenCount": 10,
                 "candidatesTokenCount": 3,
+                "thoughtsTokenCount": 5,
                 "cachedContentTokenCount": 7
             },
             "responseId": "resp-1"
@@ -925,6 +929,9 @@ mod tests {
         assert_eq!(result.tool_calls[0]["arguments"]["query"], "harn");
         assert_eq!(result.tool_calls[0]["thought_signature"], "sig-1");
         assert_eq!(result.tool_calls[1]["id"], "gemini_tool_1");
+        // output_tokens must fold in thinking tokens: candidates(3) + thoughts(5).
+        assert_eq!(result.output_tokens, 8);
+        assert_eq!(result.input_tokens, 10);
         assert_eq!(result.cache_read_tokens, 7);
         assert_eq!(
             result.telemetry.source,

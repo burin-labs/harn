@@ -243,6 +243,8 @@ fn parse_bedrock_converse_response(
     }
     result.input_tokens = json["usage"]["inputTokens"].as_i64().unwrap_or(0);
     result.output_tokens = json["usage"]["outputTokens"].as_i64().unwrap_or(0);
+    result.cache_read_tokens = json["usage"]["cacheReadInputTokens"].as_i64().unwrap_or(0);
+    result.cache_write_tokens = json["usage"]["cacheWriteInputTokens"].as_i64().unwrap_or(0);
     result.stop_reason = json["stopReason"].as_str().map(str::to_string);
     Ok(result)
 }
@@ -503,6 +505,26 @@ mod tests {
         assert_eq!(result.input_tokens, 2);
         assert_eq!(result.output_tokens, 3);
         assert_eq!(result.tool_calls[0]["name"], "lookup");
+    }
+
+    #[test]
+    fn parse_converse_response_surfaces_prompt_cache_tokens() {
+        let json = json!({
+            "output": {"message": {"content": [{"text": "hi"}]}},
+            "usage": {
+                "inputTokens": 5,
+                "outputTokens": 7,
+                "cacheReadInputTokens": 11,
+                "cacheWriteInputTokens": 13
+            },
+            "stopReason": "end_turn"
+        });
+        let result = parse_bedrock_converse_response(&json, "anthropic.claude-3-5-sonnet-v2:0")
+            .expect("result");
+        assert_eq!(result.input_tokens, 5);
+        assert_eq!(result.output_tokens, 7);
+        assert_eq!(result.cache_read_tokens, 11);
+        assert_eq!(result.cache_write_tokens, 13);
     }
 
     #[test]
