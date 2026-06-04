@@ -28,8 +28,15 @@ impl TypeChecker {
                     // Gradual operands (`any`/`unknown`/`_`) are compatible with
                     // every operator — adding/concatenating a value of unknown
                     // static type is a runtime concern, not a static error.
+                    // `number` is the `int | float` alias, so treat it as a
+                    // union operand (falls through to the gradual arm) instead
+                    // of a concrete name — matching how an explicit
+                    // `int | float` operand is already handled.
                     (Some(TypeExpr::Named(l)), Some(TypeExpr::Named(r)))
-                        if !is_gradual_type_name(l) && !is_gradual_type_name(r) =>
+                        if !is_gradual_type_name(l)
+                            && !is_gradual_type_name(r)
+                            && l != "number"
+                            && r != "number" =>
                     {
                         Some((l, r))
                     }

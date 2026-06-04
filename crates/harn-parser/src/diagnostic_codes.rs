@@ -13,7 +13,7 @@
 //!     [
 //!         "TYP", "PAR", "NAM", "CAP", "LLM", "ORC", "STD", "PRM",
 //!         "MOD", "RMD", "SUS", "LNT", "FMT", "IMP", "OWN", "RCV",
-//!         "MAT", "POL", "MET", "CST",
+//!         "MAT", "POL", "MET", "CST", "CMP",
 //!     ],
 //! );
 //! ```

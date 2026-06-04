@@ -483,6 +483,18 @@ impl TypeChecker {
     ) -> TypeExpr {
         match ty {
             TypeExpr::Named(name) => {
+                // `number` is a built-in alias for `int | float`. The runtime
+                // type guard already accepts both, so expanding it here makes
+                // the static checker treat `number` exactly like an explicit
+                // `int | float` everywhere alias resolution runs (assignment,
+                // argument, and return positions) instead of as an opaque name
+                // that unifies with neither.
+                if name == "number" {
+                    return TypeExpr::Union(vec![
+                        TypeExpr::Named("int".to_string()),
+                        TypeExpr::Named("float".to_string()),
+                    ]);
+                }
                 if let Some(resolved) = scope.resolve_type(name) {
                     if !visiting.insert(name.clone()) {
                         return ty.clone();
