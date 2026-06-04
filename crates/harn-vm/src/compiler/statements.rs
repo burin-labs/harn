@@ -1,4 +1,4 @@
-use harn_parser::{Node, SNode};
+use harn_parser::{Node, SNode, TypeExpr};
 
 use crate::chunk::Op;
 
@@ -19,6 +19,13 @@ impl Compiler {
                 let right_type = self.infer_expr_type(value);
                 let result_type =
                     self.infer_binary_result_type(op, left_type.as_ref(), right_type.as_ref());
+                // `x += list` — in-place concat (see try_emit_inplace_concat_assign).
+                if op == "+"
+                    && self.try_emit_inplace_concat_assign(name, value, left_type.as_ref())?
+                {
+                    self.assign_type_fact(name, result_type);
+                    return Ok(());
+                }
                 self.emit_get_binding(name);
                 self.compile_node(value)?;
                 if let Some(typed_op) = self
@@ -36,6 +43,32 @@ impl Compiler {
                 self.emit_set_binding(name);
                 self.assign_type_fact(name, result_type);
             } else {
+                // `x = x + list` — in-place concat (the common accumulator
+                // idiom). Detect the `Binary(+, x, e)` shape with the same
+                // target on the left and route to the in-place emitter.
+                if let Node::BinaryOp {
+                    op: bop,
+                    left,
+                    right,
+                } = &value.node
+                {
+                    if bop == "+" {
+                        if let Node::Identifier(lname) = &left.node {
+                            if lname == name {
+                                let left_type = self.infer_expr_type(target);
+                                let value_type = self.infer_expr_type(value);
+                                if self.try_emit_inplace_concat_assign(
+                                    name,
+                                    right,
+                                    left_type.as_ref(),
+                                )? {
+                                    self.assign_type_fact(name, value_type);
+                                    return Ok(());
+                                }
+                            }
+                        }
+                    }
+                }
                 let value_type = self.infer_expr_type(value);
                 self.compile_node(value)?;
                 self.emit_set_binding(name);
@@ -79,6 +112,52 @@ impl Compiler {
             }
         }
         Ok(())
+    }
+
+    /// Emit an in-place list/dict concat for `x = x + e` and `x += e`.
+    ///
+    /// The runtime `+` for two lists already extends the left operand's
+    /// `Vec` in place when its `Arc` is uniquely held (`Arc::try_unwrap`).
+    /// In the naive emission that uniqueness never holds: the accumulator's
+    /// binding keeps one reference while the operand-stack copy holds the
+    /// other, so every `+` clones the whole list — turning the ubiquitous
+    /// `out = out + [item]` loop into O(n^2).
+    ///
+    /// Here we clear the binding's reference (`Nil; SetBinding`) *after* `e`
+    /// is evaluated and *before* `Add`, so at concat time the value on the
+    /// stack is the sole owner and `try_unwrap` extends in place — O(1)
+    /// amortized. `e` is compiled while the binding is still live, so an
+    /// aliasing right-hand side (e.g. `x = x + x`) still observes the real
+    /// `x`; in that case the value is shared, `try_unwrap` fails, and the
+    /// runtime safely falls back to a clone.
+    ///
+    /// Gated to list/dict-typed operands so the scalar `i += 1` / `sum += x`
+    /// hot path keeps its specialized typed opcode and pays nothing for this.
+    /// Returns `Ok(true)` when the optimized form was emitted (the caller is
+    /// done) and `Ok(false)` when it does not apply.
+    fn try_emit_inplace_concat_assign(
+        &mut self,
+        name: &str,
+        rhs: &SNode,
+        left_type: Option<&TypeExpr>,
+    ) -> Result<bool, CompileError> {
+        fn is_collection(t: Option<&TypeExpr>) -> bool {
+            matches!(t, Some(TypeExpr::List(_)) | Some(TypeExpr::DictType(_, _)))
+        }
+        if !self.options.optimizations_enabled() {
+            return Ok(false);
+        }
+        let rhs_type = self.infer_expr_type(rhs);
+        if !is_collection(left_type) && !is_collection(rhs_type.as_ref()) {
+            return Ok(false);
+        }
+        self.emit_get_binding(name); // [x]
+        self.compile_node(rhs)?; // [x, e]  (binding live: aliasing rhs sees real x)
+        self.chunk.emit(Op::Nil, self.line); // [x, e, nil]
+        self.emit_set_binding(name); // [x, e]  binding <- nil; x uniquely held if unaliased
+        self.chunk.emit(Op::Add, self.line); // [x + e]  in-place extend when unique
+        self.emit_set_binding(name); // []
+        Ok(true)
     }
 
     pub(super) fn compile_if_else(
