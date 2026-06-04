@@ -864,3 +864,44 @@ fn tagged_tool_calls_get_turn_unique_ids() {
     assert_eq!(id1, "tc_1");
     assert_ne!(id0, id1, "tool-call ids must be unique within a turn");
 }
+
+#[test]
+fn tagged_tool_call_with_bash_heredoc_inside_a_string_arg() {
+    // A complete, well-formed call whose *string* argument contains a bash
+    // `<<EOF ... EOF` heredoc. That `<<EOF` is string content, not a Harn
+    // heredoc, so the close-tag scan must not treat it as one (else the call is
+    // dropped and falsely reported as truncated).
+    let tools = sample_tool_registry();
+    let text = "<tool_call>run({ command: \"cat <<EOF\nsome heredoc body\nEOF\" })</tool_call>";
+    let result = parse_text_tool_calls_with_tools(text, Some(&tools));
+    assert_eq!(
+        result.calls.len(),
+        1,
+        "expected one run call, errors={:?} violations={:?}",
+        result.errors,
+        result.violations
+    );
+    let command = result.calls[0]["arguments"]["command"].as_str().unwrap();
+    assert!(
+        command.contains("<<EOF") && command.contains("some heredoc body"),
+        "the string argument should retain its bash heredoc verbatim: {command:?}"
+    );
+}
+
+#[test]
+fn tagged_tool_call_with_close_tag_inside_a_string_arg() {
+    // A `</tool_call>` literal inside a quoted string argument is content, not
+    // the structural close — the call parses and the string keeps the literal.
+    let tools = sample_tool_registry();
+    let text = "<tool_call>run({ command: \"echo </tool_call> done\" })</tool_call>";
+    let result = parse_text_tool_calls_with_tools(text, Some(&tools));
+    assert_eq!(
+        result.calls.len(),
+        1,
+        "expected one run call, errors={:?} violations={:?}",
+        result.errors,
+        result.violations
+    );
+    let command = result.calls[0]["arguments"]["command"].as_str().unwrap();
+    assert_eq!(command, "echo </tool_call> done");
+}

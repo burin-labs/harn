@@ -227,7 +227,10 @@ fn error_is_transient_impl(args: &[VmValue], _out: &mut String) -> Result<VmValu
 }
 
 /// The category carried by an error value: a structured `{category}` dict's
-/// field, or the classification of a raw error string.
+/// field, or the classification of a raw error string. The dict field is run
+/// through `ErrorCategory::parse` so comparisons are by canonical variant (any
+/// non-taxonomy string normalizes to `Generic`), matching how `error_is`
+/// resolves its argument.
 fn error_category_of(val: &VmValue) -> Option<ErrorCategory> {
     match val {
         VmValue::Dict(d) => d

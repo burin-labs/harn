@@ -633,6 +633,35 @@ mod tests {
     }
 
     #[test]
+    fn tagged_candidate_waits_for_incomplete_heredoc_then_promotes() {
+        // The heredoc body arrives split across deltas, and its body even
+        // contains a literal `</tool_call>`. While `EOF` hasn't landed on its
+        // own line the close scan returns `NeedMore` and the detector must wait
+        // (not abort or fire early on the in-heredoc `</tool_call>`). Once the
+        // heredoc closes and the real `</tool_call>` arrives, it promotes.
+        let mut det = detector(&["edit"]);
+        let events = run(
+            &[
+                "<tool_call>\nedit({ path: \"d.md\", content: <<EOF\nline one",
+                "\nmore </tool_call> text\nEOF\n })</tool_call>",
+            ],
+            &mut det,
+        );
+        let (start_id, _, parsing) = unwrap_call(&events[0]);
+        assert_eq!(parsing, Some(true));
+        let terminal = events.last().expect("a terminal event");
+        let (terminal_id, name, status, parsing, cat) = unwrap_update(terminal);
+        assert_eq!(start_id, terminal_id, "ids match across promote");
+        assert_eq!(name, "edit");
+        assert_eq!(status, ToolCallStatus::Pending);
+        assert_eq!(parsing, Some(false));
+        assert!(
+            cat.is_none(),
+            "must not abort on the in-heredoc </tool_call>: events={events:#?}"
+        );
+    }
+
+    #[test]
     fn prose_inside_code_fence_does_not_trigger_candidate() {
         // `read(x)` inside a fenced code block must not emit a
         // candidate, even though `read` is in the known-tools set.

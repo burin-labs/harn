@@ -29,16 +29,12 @@ pub struct RuntimeLimits {
     pub max_schema_pattern_cache_entries: usize,
     /// Maximum canonical parameter schemas kept per VM thread.
     pub max_schema_guard_cache_entries: usize,
-    /// Maximum parsed runtime shape specs kept per VM thread.
-    pub max_shape_spec_cache_entries: usize,
     /// Default queue depth for memory/file/sqlite event-log subscribers.
     pub default_event_log_queue_depth: usize,
     /// Default concurrent agent-session cap per VM thread.
     pub max_agent_sessions: usize,
     /// Maximum directory descent for project fingerprint discovery.
     pub max_project_fingerprint_depth: usize,
-    /// Maximum nested runtime shape-spec validation depth.
-    pub max_shape_validation_depth: usize,
     /// Maximum nested YAML depth walked while extracting project enrichment hints.
     pub max_project_enrich_yaml_depth: usize,
     /// Maximum nested prompt-template AST/expression depth.
@@ -69,11 +65,9 @@ impl RuntimeLimits {
         max_regex_cache_entries: 128,
         max_schema_pattern_cache_entries: 256,
         max_schema_guard_cache_entries: 256,
-        max_shape_spec_cache_entries: 256,
         default_event_log_queue_depth: 128,
         max_agent_sessions: 128,
         max_project_fingerprint_depth: 4,
-        max_shape_validation_depth: 64,
         max_project_enrich_yaml_depth: 128,
         max_template_ast_depth: 128,
         max_constant_folded_collection_items: 4_096,
@@ -96,11 +90,9 @@ impl RuntimeLimits {
             "max_regex_cache_entries" => self.max_regex_cache_entries,
             "max_schema_pattern_cache_entries" => self.max_schema_pattern_cache_entries,
             "max_schema_guard_cache_entries" => self.max_schema_guard_cache_entries,
-            "max_shape_spec_cache_entries" => self.max_shape_spec_cache_entries,
             "default_event_log_queue_depth" => self.default_event_log_queue_depth,
             "max_agent_sessions" => self.max_agent_sessions,
             "max_project_fingerprint_depth" => self.max_project_fingerprint_depth,
-            "max_shape_validation_depth" => self.max_shape_validation_depth,
             "max_project_enrich_yaml_depth" => self.max_project_enrich_yaml_depth,
             "max_template_ast_depth" => self.max_template_ast_depth,
             "max_constant_folded_collection_items" => self.max_constant_folded_collection_items,
@@ -219,12 +211,6 @@ pub const RUNTIME_LIMIT_DESCRIPTIONS: &[RuntimeLimitDescription] = &[
         protects: "bounds per-thread memory held by canonical runtime parameter schemas",
     },
     RuntimeLimitDescription {
-        name: "max_shape_spec_cache_entries",
-        user_visible: false,
-        host_configurable: false,
-        protects: "bounds per-thread memory held by parsed runtime shape specs",
-    },
-    RuntimeLimitDescription {
         name: "default_event_log_queue_depth",
         user_visible: true,
         host_configurable: true,
@@ -241,12 +227,6 @@ pub const RUNTIME_LIMIT_DESCRIPTIONS: &[RuntimeLimitDescription] = &[
         user_visible: false,
         host_configurable: false,
         protects: "bounds project fingerprint discovery in large or adversarial directory trees",
-    },
-    RuntimeLimitDescription {
-        name: "max_shape_validation_depth",
-        user_visible: true,
-        host_configurable: false,
-        protects: "bounds runtime shape validation for nested dicts and structs",
     },
     RuntimeLimitDescription {
         name: "max_project_enrich_yaml_depth",
@@ -314,11 +294,9 @@ mod tests {
         assert_eq!(limits.max_regex_cache_entries, 128);
         assert_eq!(limits.max_schema_pattern_cache_entries, 256);
         assert_eq!(limits.max_schema_guard_cache_entries, 256);
-        assert_eq!(limits.max_shape_spec_cache_entries, 256);
         assert_eq!(limits.default_event_log_queue_depth, 128);
         assert_eq!(limits.max_agent_sessions, 128);
         assert_eq!(limits.max_project_fingerprint_depth, 4);
-        assert_eq!(limits.max_shape_validation_depth, 64);
         assert_eq!(limits.max_project_enrich_yaml_depth, 128);
         assert_eq!(limits.max_template_ast_depth, 128);
         assert_eq!(limits.max_constant_folded_collection_items, 4_096);
@@ -349,11 +327,9 @@ mod tests {
                 "max_regex_cache_entries",
                 "max_schema_pattern_cache_entries",
                 "max_schema_guard_cache_entries",
-                "max_shape_spec_cache_entries",
                 "default_event_log_queue_depth",
                 "max_agent_sessions",
                 "max_project_fingerprint_depth",
-                "max_shape_validation_depth",
                 "max_project_enrich_yaml_depth",
                 "max_template_ast_depth",
                 "max_constant_folded_collection_items",

@@ -55,15 +55,23 @@ pub(super) fn strip_tool_call_wrappers(text: &str) -> std::borrow::Cow<'_, str> 
     if !TAGS.iter().any(|tag| text.contains(tag)) {
         return std::borrow::Cow::Borrowed(text);
     }
-    // Replace each wrapper tag with a newline, but copy `<<TAG ... TAG` heredoc
-    // bodies through verbatim: a wrapper-tag literal inside a multiline string
-    // argument is file content, not structure, and stripping it would corrupt
-    // the value. This is the same heredoc-blindness `find_close_tag` avoids at
-    // the block boundary, applied here at the wrapper-stripping boundary.
+    // Replace each wrapper tag with a newline, but copy quoted string spans and
+    // `<<TAG ... TAG` heredoc bodies through verbatim: a wrapper-tag literal
+    // inside a string/heredoc argument is file content, not structure, and
+    // stripping it would corrupt the value. Same content-vs-structure rule
+    // `find_close_tag` applies at the block boundary, here at the
+    // wrapper-stripping boundary.
     let bytes = text.as_bytes();
     let mut out = String::with_capacity(text.len());
     let mut i = 0;
     while i < text.len() {
+        if matches!(bytes[i], b'"' | b'\'' | b'`') {
+            if let Some(after) = skip_string_span(text, i) {
+                out.push_str(&text[i..after]);
+                i = after;
+                continue;
+            }
+        }
         if bytes[i] == b'<' && bytes.get(i + 1) == Some(&b'<') {
             if let Some(after) = skip_heredoc_body(text, i) {
                 out.push_str(&text[i..after]);
@@ -312,18 +320,56 @@ pub(super) enum CloseScan {
     NotFound,
 }
 
-/// Find `needle` in `src[from..]`, stepping over complete `<<TAG ... TAG`
-/// heredoc bodies so a literal occurrence inside one (the protocol asks models
-/// to write multiline string arguments as heredocs) is ignored. A heredoc whose
-/// body is still incomplete yields [`CloseScan::NeedMore`]. This is the one
-/// place that knows "where does a tagged block really end", shared by the
-/// buffered matcher, the truncation detector, and the streaming scanner.
+/// Skip a `"..."`, `'...'`, or `` `...` `` string span starting at `start`
+/// (which must sit on the opening quote). Returns the byte offset just past the
+/// closing quote, honoring `\`-escapes, or `None` when the string is
+/// unterminated. Lets the close-tag scan treat a `<<TAG` or a `</tool_call>`
+/// *inside a quoted argument* as content, not structure.
+fn skip_string_span(src: &str, start: usize) -> Option<usize> {
+    let bytes = src.as_bytes();
+    let quote = *bytes.get(start)?;
+    if !matches!(quote, b'"' | b'\'' | b'`') {
+        return None;
+    }
+    let mut i = start + 1;
+    while i < src.len() {
+        match bytes[i] {
+            b'\\' => {
+                i += 1;
+                if i < src.len() {
+                    i += src[i..].chars().next().map_or(1, char::len_utf8);
+                }
+            }
+            byte if byte == quote => return Some(i + 1),
+            _ => i += src[i..].chars().next().map_or(1, char::len_utf8),
+        }
+    }
+    None
+}
+
+/// Find `needle` in `src[from..]`, stepping over quoted string spans and
+/// complete `<<TAG ... TAG` heredoc bodies so an occurrence inside either —
+/// a `</tool_call>` a model wrote as file content, or a bash `<<EOF` inside a
+/// `command` string — is treated as content, not as the structural close. A
+/// string or heredoc that is still incomplete yields [`CloseScan::NeedMore`].
+/// This is the one place that knows "where does a tagged block really end",
+/// shared by the buffered matcher, the truncation detector, and the streaming
+/// scanner.
 pub(super) fn find_close_tag(src: &str, from: usize, needle: &str) -> CloseScan {
     let bytes = src.as_bytes();
     let mut i = from;
     while i < src.len() {
-        if bytes[i] == b'<' && bytes.get(i + 1) == Some(&b'<') {
-            match scan_heredoc(src, i) {
+        match bytes[i] {
+            b'"' | b'\'' | b'`' => match skip_string_span(src, i) {
+                Some(after) => {
+                    i = after;
+                    continue;
+                }
+                // Unterminated string: streaming waits, a buffered caller treats
+                // the block as truncated mid-string.
+                None => return CloseScan::NeedMore,
+            },
+            b'<' if bytes.get(i + 1) == Some(&b'<') => match scan_heredoc(src, i) {
                 Ok(span) => {
                     i = span.end;
                     continue;
@@ -334,7 +380,8 @@ pub(super) fn find_close_tag(src: &str, from: usize, needle: &str) -> CloseScan 
                 }
                 // Not a heredoc (bare `<<`); fall through and treat as content.
                 Err(HeredocError::MissingTag) => {}
-            }
+            },
+            _ => {}
         }
         if src[i..].starts_with(needle) {
             return CloseScan::Found(i);
