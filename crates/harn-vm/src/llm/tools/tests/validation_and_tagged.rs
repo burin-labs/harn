@@ -540,3 +540,66 @@ fn tagged_parser_accepts_configured_done_body() {
     assert_eq!(result.done_marker.as_deref(), Some("PLAN_READY"));
     assert!(result.violations.is_empty());
 }
+
+// Regression (#3011 follow-up): a large `<tool_call>edit({ content: … })`
+// turn that the model truncated mid-argument (it hit its max output token
+// limit before emitting `</tool_call>`). Before the fix the unclosed open
+// tag fell through to the generic "unknown top-level tag" path and the
+// `edit(...)` body became stray text, so the turn parsed to ZERO tool calls
+// and the agent loop silently stalled as if the model had produced only
+// prose. The parser must now surface an actionable TOOL CALL TRUNCATED
+// error (naming the recovered tool) instead of dropping the signal.
+#[test]
+fn tagged_parser_flags_truncated_unclosed_tool_call() {
+    let tools = sample_tool_registry();
+    // Prose, then an opened-but-never-closed tool call cut off mid-string.
+    let text = "Now I'll create the error module.\n\
+                <tool_call>\n\
+                edit({ action: \"create\", path: \"src/error.rs\", content: \"//! Unified storage error types.\\nuse std::io;\\n\
+                pub enum StorageError {\\n    IoError(";
+    let result = parse_text_tool_calls_with_tools(text, Some(&tools));
+
+    // The truncated call cannot be dispatched (the argument string is
+    // unterminated), so there are no recovered calls...
+    assert!(
+        result.calls.is_empty(),
+        "truncated call must not dispatch: {:?}",
+        result.calls
+    );
+    // ...but the loop must see a precise, recoverable truncation error that
+    // names the tool, NOT a generic "unknown top-level tag" / "stray text".
+    assert!(
+        result
+            .errors
+            .iter()
+            .any(|e| e.contains("TOOL CALL TRUNCATED") && e.contains("edit")),
+        "expected a TOOL CALL TRUNCATED error naming `edit`, got errors={:?} violations={:?}",
+        result.errors,
+        result.violations
+    );
+    assert!(
+        !result
+            .violations
+            .iter()
+            .any(|v| v.contains("Unknown top-level tag")),
+        "must not misreport the truncated open tag as an unknown tag: {:?}",
+        result.violations
+    );
+}
+
+// A properly closed `<tool_call>` is unaffected by the truncation branch:
+// it still parses and dispatches normally.
+#[test]
+fn tagged_parser_closed_tool_call_unaffected_by_truncation_branch() {
+    let tools = sample_tool_registry();
+    let text =
+        "<tool_call>\nedit({ action: \"create\", path: \"a.rs\", content: \"x\" })\n</tool_call>";
+    let result = parse_text_tool_calls_with_tools(text, Some(&tools));
+    assert_eq!(result.calls.len(), 1, "errors={:?}", result.errors);
+    assert_eq!(result.calls[0]["name"], json!("edit"));
+    assert!(
+        !result.errors.iter().any(|e| e.contains("TRUNCATED")),
+        "closed call must not be flagged as truncated: {:?}",
+        result.errors
+    );
+}

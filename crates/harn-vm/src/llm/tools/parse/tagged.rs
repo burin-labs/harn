@@ -126,6 +126,41 @@ pub(crate) fn parse_text_tool_calls_with_tools(
                 Err(msg) => errors.push(msg),
             }
             cursor = after;
+        } else if let Some(open_len) = unclosed_tool_call_open(src, cursor) {
+            // A `<tool_call>` open tag with no matching `</tool_call>` anywhere
+            // ahead. This is the signature of an output truncated mid-tool-call
+            // — typically the model hit its `max_tokens` cap while emitting a
+            // large argument (e.g. a multi-hundred-line `edit({ content: … })`).
+            // Without this branch the open tag falls through to the generic
+            // "unknown top-level tag" path and the call body becomes "stray
+            // text", so the whole turn parses to zero tool calls and the agent
+            // loop silently stalls as if the model had only produced prose.
+            //
+            // Surface it as an actionable `error` (and recover the partial call
+            // name when possible) so the loop sees a truncated-tool-call signal
+            // rather than an empty text turn.
+            let body = &src[cursor + open_len..];
+            let recovered_name = leading_call_name(body, tools_val);
+            match recovered_name {
+                Some(name) => errors.push(format!(
+                    "TOOL CALL TRUNCATED: `<tool_call>` opening `{name}(...)` was never \
+                     closed — the response appears to have been cut off mid-call (likely \
+                     the model hit its max output token limit). Re-emit the complete \
+                     `<tool_call>{name}({{ ... }})</tool_call>` block; for very large \
+                     arguments, split the work into smaller calls."
+                )),
+                None => errors.push(
+                    "TOOL CALL TRUNCATED: a `<tool_call>` block was opened but never \
+                     closed — the response appears to have been cut off (likely the model \
+                     hit its max output token limit). Re-emit the complete \
+                     `<tool_call>name({ ... })</tool_call>` block, splitting very large \
+                     arguments into smaller calls if needed."
+                        .to_string(),
+                ),
+            }
+            // Consume the rest of the stream: everything after a truncated open
+            // tag is the unterminated call body, not further top-level blocks.
+            cursor = bytes.len();
         } else if let Some((body, after)) = match_block(src, cursor, "assistant_prose")
             .or_else(|| match_block(src, cursor, "assistantprose"))
         {
@@ -642,6 +677,53 @@ fn try_parse_angle_wrapped_call(
         "arguments": arguments,
     });
     Some((call, end))
+}
+
+/// If `cursor` sits on a `<tool_call>` / `<toolcall>` open tag that has no
+/// matching closing tag anywhere ahead in `src`, return the open tag's byte
+/// length. `None` when the cursor isn't on a tool-call open tag, or when the
+/// block is properly closed (the normal `match_block` path handles that).
+///
+/// This detects an output truncated mid-tool-call (the model hit its
+/// `max_tokens` cap while streaming a large argument), so the caller can emit
+/// a precise diagnostic instead of shredding the partial call into stray text.
+fn unclosed_tool_call_open(src: &str, cursor: usize) -> Option<usize> {
+    let rest = &src[cursor..];
+    let (open, close) = if rest.starts_with(&format!("<{TEXT_TOOL_CALL_TAG}>")) {
+        (
+            format!("<{TEXT_TOOL_CALL_TAG}>"),
+            format!("</{TEXT_TOOL_CALL_TAG}>"),
+        )
+    } else if rest.starts_with(&format!("<{TEXT_TOOL_CALL_TAG_COMPACT}>")) {
+        (
+            format!("<{TEXT_TOOL_CALL_TAG_COMPACT}>"),
+            format!("</{TEXT_TOOL_CALL_TAG_COMPACT}>"),
+        )
+    } else {
+        return None;
+    };
+    if src[cursor + open.len()..].contains(&close) {
+        return None;
+    }
+    Some(open.len())
+}
+
+/// Best-effort recovery of the tool name from a truncated `<tool_call>` body:
+/// the leading `name(` of an unterminated call, when `name` is a registered
+/// tool. Used only for a clearer truncation diagnostic — never to dispatch.
+fn leading_call_name(body: &str, tools_val: Option<&VmValue>) -> Option<String> {
+    let trimmed = body.trim_start();
+    let name_len = ident_length(trimmed.as_bytes())?;
+    if name_len == 0 || trimmed.as_bytes().get(name_len) != Some(&b'(') {
+        return None;
+    }
+    let name = &trimmed[..name_len];
+    let known: BTreeSet<String> = collect_tool_schemas(tools_val, None)
+        .into_iter()
+        .map(|schema| schema.name)
+        .chain(["ledger".to_string(), "load_skill".to_string()])
+        .collect();
+    known.contains(name).then(|| name.to_string())
 }
 
 fn is_top_level_tag_position(src: &str, cursor: usize) -> bool {
