@@ -1,0 +1,13 @@
+fenced.status=done
+fenced.nudge=true
+fenced.not_named=true
+named.status=done
+named.nudge=true
+named.not_fenced=true
+realcall.successful=["edit"]
+realcall.no_fenced=true
+realcall.no_named=true
+kwargshape.status=done
+kwargshape.no_named=true
+streak.none_after_progress=true
+streak.escalates=true

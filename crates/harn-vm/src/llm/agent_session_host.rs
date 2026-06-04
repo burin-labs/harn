@@ -2075,6 +2075,29 @@ fn build_agent_event(
             kind: "completion_confirmation_nudge".to_string(),
             content: get_string("visible_text_prefix"),
         }),
+        // Text-mode corrective nudges (cheap/local-model behavioral tips).
+        // `fenced_call_attempt_nudge` fires when the model wrapped a tool
+        // call in a Markdown fence (```tool_code/call/edit/python/…) that the
+        // parser ignores; `named_tool_not_called_nudge` fires when the model
+        // narrated a bound tool ("I'll use edit…") without emitting any call.
+        // `no_progress_streak_nudge` is the escalating fallback for pure-prose
+        // churn turns that made no successful tool progress for >= 2 turns.
+        // All three surface to operators on the FeedbackInjected stream.
+        "fenced_call_attempt_nudge" => Ok(AgentEvent::FeedbackInjected {
+            session_id: session_id.to_string(),
+            kind: "fenced_call_attempt_nudge".to_string(),
+            content: get_string("fence"),
+        }),
+        "named_tool_not_called_nudge" => Ok(AgentEvent::FeedbackInjected {
+            session_id: session_id.to_string(),
+            kind: "named_tool_not_called_nudge".to_string(),
+            content: get_string("tool"),
+        }),
+        "no_progress_streak_nudge" => Ok(AgentEvent::FeedbackInjected {
+            session_id: session_id.to_string(),
+            kind: "no_progress_streak_nudge".to_string(),
+            content: get_usize("turns_since_progress").to_string(),
+        }),
         other => Err(VmError::Runtime(format!(
             "{HOST_AGENT_EMIT_EVENT}: unsupported event type `{other}`"
         ))),

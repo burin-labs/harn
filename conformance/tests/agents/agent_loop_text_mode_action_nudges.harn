@@ -1,0 +1,193 @@
+import { llm_text, with_llm_script } from "std/testing"
+
+/**
+ * Cheap/local-model behavioral tips: TEXT-mode corrective nudges that the
+ * native-gated completion-confirmation path never reaches. The agent loop
+ * inspects each toolless TEXT-mode turn and injects ONE content-specific
+ * nudge, or — as a fallback for pure-prose churn — an escalating
+ * "no meaningful progress" streak nudge.
+ *
+ *  1. Fenced-call attempt: the model wraps a (Python-kwarg-style) call in a
+ *     ```tool_code fence that the parser does NOT lift, so the turn is
+ *     toolless → `fenced_call_attempt` nudge fires.
+ *  2. Named-but-not-called: the model narrates "I'll use edit(...)" naming a
+ *     bound tool but emits no call syntax → `named_tool_not_called` nudge.
+ *  3. Real call (bare `edit({...})` and braceless `edit(path=...)`) does NOT
+ *     false-fire either content nudge — the call dispatches and the loop
+ *     proceeds normally.
+ *  4. No-progress streak: 3 consecutive toolless prose turns in the DEFAULT
+ *     loop escalate to the `no_progress_streak` nudge; a successful tool call
+ *     decays the streak so a later toolless turn does not re-escalate at the
+ *     same depth.
+ */
+fn edit_tools() {
+  var tools = tool_registry()
+  tools = tool_define(
+    tools,
+    "edit",
+    "Edit a file.",
+    {
+      handler: { args -> "edited " + args?.path ?? "" },
+      parameters: {path: {type: "string", description: "Path to edit"}},
+      returns: {type: "string"},
+      annotations: {kind: "edit", side_effect_level: "workspace_write"},
+    },
+  )
+  return tools
+}
+
+fn injected_kind_in(calls, idx, marker) {
+  if idx >= len(calls) {
+    return false
+  }
+  return contains(json_stringify(calls[idx].messages), marker)
+}
+
+pipeline default() {
+  // 1. Fenced-call attempt → fenced_call_attempt nudge on the next turn.
+  //    The fenced body uses the Python-kwarg shape `edit(path=...)`, which the
+  //    parser does NOT lift from inside a fence, so the turn is genuinely
+  //    toolless and the fenced nudge fires.
+  with_llm_script(
+    [
+      llm_text("Here is the change:\n```tool_code\nedit(path=\"a.txt\")\n```"),
+      llm_text("<tool_call>\nedit({ path: \"a.txt\" })\n</tool_call>"),
+      llm_text("All set."),
+    ],
+    { ->
+      let r = agent_loop(
+        "Edit a.txt.",
+        nil,
+        {
+          provider: "mock",
+          tool_format: "text",
+          loop_until_done: true,
+          max_iterations: 4,
+          max_nudges: 4,
+          tools: edit_tools(),
+        },
+      )
+      let calls = llm_mock_calls()
+      __io_println("fenced.status=" + r.status)
+      __io_println("fenced.nudge=" + to_string(injected_kind_in(calls, 1, "fenced_call_attempt")))
+      __io_println("fenced.not_named=" + to_string(!injected_kind_in(calls, 1, "named_tool_not_called")))
+    },
+  )
+  // 2. Named-but-not-called → named_tool_not_called nudge on the next turn.
+  with_llm_script(
+    [
+      llm_text("I'll use edit to update the file now."),
+      llm_text("<tool_call>\nedit({ path: \"b.txt\" })\n</tool_call>"),
+      llm_text("Done."),
+    ],
+    { ->
+      let r = agent_loop(
+        "Edit b.txt.",
+        nil,
+        {
+          provider: "mock",
+          tool_format: "text",
+          loop_until_done: true,
+          max_iterations: 4,
+          max_nudges: 4,
+          tools: edit_tools(),
+        },
+      )
+      let calls = llm_mock_calls()
+      __io_println("named.status=" + r.status)
+      __io_println("named.nudge=" + to_string(injected_kind_in(calls, 1, "named_tool_not_called")))
+      __io_println("named.not_fenced=" + to_string(!injected_kind_in(calls, 1, "fenced_call_attempt")))
+    },
+  )
+  // 3a. A real bare object-literal call does NOT trip either content nudge.
+  with_llm_script(
+    [llm_text("<tool_call>\nedit({ path: \"c.txt\" })\n</tool_call>"), llm_text("Done.")],
+    { ->
+      let r = agent_loop(
+        "Edit c.txt.",
+        nil,
+        {
+          provider: "mock",
+          tool_format: "text",
+          loop_until_done: true,
+          max_iterations: 4,
+          max_nudges: 4,
+          tools: edit_tools(),
+        },
+      )
+      let calls = llm_mock_calls()
+      __io_println("realcall.successful=" + json_stringify(r.tools.successful))
+      __io_println("realcall.no_fenced=" + to_string(!injected_kind_in(calls, 1, "fenced_call_attempt")))
+      __io_println("realcall.no_named=" + to_string(!injected_kind_in(calls, 1, "named_tool_not_called")))
+    },
+  )
+  // 3b. A braceless `name(key=...)` call shape also does NOT false-fire the
+  //     named-but-not-called detector (it carries real call shape).
+  with_llm_script(
+    [
+      llm_text("I'll use edit(path=\"d.txt\") to do it."),
+      llm_text("<tool_call>\nedit({ path: \"d.txt\" })\n</tool_call>"),
+      llm_text("Done."),
+    ],
+    { ->
+      let r = agent_loop(
+        "Edit d.txt.",
+        nil,
+        {
+          provider: "mock",
+          tool_format: "text",
+          loop_until_done: true,
+          max_iterations: 4,
+          max_nudges: 4,
+          tools: edit_tools(),
+        },
+      )
+      let calls = llm_mock_calls()
+      __io_println("kwargshape.status=" + r.status)
+      __io_println(
+        "kwargshape.no_named=" + to_string(!injected_kind_in(calls, 1, "named_tool_not_called")),
+      )
+    },
+  )
+  // 4. No-progress streak in the DEFAULT loop (loop_until_done so the toolless
+  //    turns continue): a successful tool call decays the streak, then three
+  //    consecutive toolless prose turns escalate to the no_progress_streak
+  //    nudge. The prose avoids intent verbs / fences / bound-tool names so the
+  //    content nudges do NOT match and the fallback streak nudge is exercised.
+  with_llm_script(
+    [
+      llm_text("<tool_call>\nedit({ path: \"e.txt\" })\n</tool_call>"),
+      llm_text("The file was updated and the content looks consistent."),
+      llm_text("The surrounding context appears coherent on a second pass."),
+      llm_text("Everything reads as expected throughout the module."),
+      llm_text("Final summary of the result."),
+    ],
+    { ->
+      let r = agent_loop(
+        "Edit e.txt and review.",
+        nil,
+        {
+          provider: "mock",
+          tool_format: "text",
+          loop_until_done: true,
+          max_iterations: 8,
+          max_nudges: 8,
+          tools: edit_tools(),
+        },
+      )
+      let calls = llm_mock_calls()
+      __io_println(
+        "streak.none_after_progress=" + to_string(!injected_kind_in(calls, 1, "no_progress_streak")),
+      )
+      var streak_fired = false
+      for i in range(2, len(calls)) {
+        if injected_kind_in(calls, i, "no_progress_streak") {
+          streak_fired = true
+        }
+      }
+      __io_println("streak.escalates=" + to_string(streak_fired))
+    },
+  )
+}
+// Successful tool on turn 1 → no streak nudge on turn 2.
+// By a later turn (>= 2 consecutive toolless turns) the streak nudge fired.
