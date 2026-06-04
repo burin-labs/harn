@@ -45,6 +45,15 @@ families such as `issues`, `pull_request`, `issue_comment`,
 `check_run`, `check_suite`, `status`, `merge_group`, `installation`, or
 `installation_repositories`.
 
+For preview-environment workflows that should also work with GitLab merge
+requests and Gitea pull requests, normalize GitHub `pull_request` webhooks
+through `std/connectors/github::forge_pull_request_event(...)` or the shared
+`std/connectors/shared::git_forge_pull_request_event("github", ...)`. Connector
+packages can publish the returned `GitForgePullRequestEvent` to
+`git_forge_pull_request_topic()` and use
+`git_forge_writeback_request(event, body)` for provider-independent status
+comments.
+
 ## Verification
 
 ```sh

@@ -1,4 +1,7 @@
 import {
+  git_forge_pull_request_event,
+  git_forge_pull_request_topic,
+  git_forge_writeback_request,
   oauth2_token_refresh,
   paginate_cursor,
   rate_limit_token_bucket,
@@ -59,6 +62,74 @@ pipeline test(task) {
   __io_println(len(paged.items))
   __io_println(paged.items[1].id)
   __io_println(paged.complete)
+  let github_forge = unwrap(
+    git_forge_pull_request_event(
+      "github",
+      {
+        action: "closed",
+        repository: {full_name: "octo-org/octo-repo", id: 99, html_url: "https://github.com/octo-org/octo-repo"},
+        pull_request: {
+          number: 17,
+          title: "Preview me",
+          merged: true,
+          html_url: "https://github.com/octo-org/octo-repo/pull/17",
+          user: {login: "mona"},
+          head: {ref: "feature/preview", sha: "abc123"},
+          base: {ref: "main", sha: "def456"},
+        },
+      },
+    ),
+  )
+  __io_println(github_forge.topic == git_forge_pull_request_topic())
+  __io_println(github_forge.lifecycle)
+  __io_println(github_forge.repository.full_name)
+  __io_println(github_forge.pull_request.head_ref)
+  let github_writeback = git_forge_writeback_request(github_forge, "Preview ready")
+  __io_println(github_writeback.method)
+  __io_println(github_writeback.params.owner + "/" + github_writeback.params.repo)
+  __io_println(github_writeback.params.issue_number)
+  let gitlab_forge = unwrap(
+    git_forge_pull_request_event(
+      "gitlab",
+      {
+        object_kind: "merge_request",
+        user: {username: "alex"},
+        project: {id: 42, path_with_namespace: "group/project", web_url: "https://gitlab.example/group/project"},
+        object_attributes: {
+          iid: 9,
+          action: "update",
+          title: "Preview me",
+          source_branch: "preview",
+          target_branch: "main",
+          last_commit: {id: "feedface"},
+          url: "https://gitlab.example/group/project/-/merge_requests/9",
+        },
+      },
+    ),
+  )
+  __io_println(gitlab_forge.lifecycle)
+  __io_println(gitlab_forge.repository.full_name)
+  __io_println(gitlab_forge.pull_request.number)
+  let gitea_forge = unwrap(
+    git_forge_pull_request_event(
+      "gitea",
+      {
+        action: "closed",
+        repository: {full_name: "team/repo", id: 7, html_url: "https://gitea.example/team/repo"},
+        pull_request: {
+          number: 3,
+          merged: false,
+          html_url: "https://gitea.example/team/repo/pulls/3",
+          user: "sam",
+          head: {ref: "preview", sha: "aaaa"},
+          base: {ref: "main", sha: "bbbb"},
+        },
+      },
+    ),
+  )
+  __io_println(gitea_forge.lifecycle)
+  __io_println(gitea_forge.writeback.provider)
+  assert_eq(gitea_forge.pull_request.author, "sam", "forge author string")
   http_mock(
     "POST",
     "https://auth.example/token",

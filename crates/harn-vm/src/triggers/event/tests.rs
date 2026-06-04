@@ -934,7 +934,8 @@ mod schemas_generated_parity {
             .iter()
             .filter(|node| matches!(node.node, harn_parser::Node::TypeDecl { .. }))
             .count();
-        // 1 common + 13 payload records + 1 union enum.
-        assert_eq!(type_decls, 15, "unexpected schema type-declaration count");
+        // 1 common + 13 GitHub payload records + 1 GitHub union enum + 4
+        // forge-agnostic records.
+        assert_eq!(type_decls, 19, "unexpected schema type-declaration count");
     }
 }

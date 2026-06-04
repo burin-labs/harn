@@ -24,6 +24,8 @@ fn renders_the_canonical_github_schema() {
     // Required list maps to Vec with a serde default.
     assert!(rust.contains("#[serde(default)]\n    pub commits: Vec<JsonValue>,"));
     assert!(rust.contains("pub pull_request_numbers: Vec<i64>,"));
+    assert!(rust.contains("pub struct GitForgePullRequestEvent {"));
+    assert!(rust.contains("pub provider_metadata: BTreeMap<String, JsonValue>,"));
     // The dispatched enum and its manual Deserialize.
     assert!(rust.contains("pub enum GitHubEventPayload {"));
     assert!(rust.contains("Issues(GitHubIssuesEventPayload),"));

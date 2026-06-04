@@ -1,4 +1,9 @@
 import { filter_nil } from "std/collections"
+import {
+  git_forge_pull_request_event,
+  git_forge_writeback_comment,
+  git_forge_writeback_request,
+} from "std/connectors/shared"
 import { merge } from "std/json"
 import { wait_for } from "std/monitors"
 
@@ -99,7 +104,7 @@ fn __call(method: string, params: dict = {}) {
 /**
  * call dispatches one GitHub connector outbound method. Prefer typed helpers when one exists.
  *
- * @effects: []
+ * @effects: [net]
  * @allocation: heap
  * @errors: []
  * @api_stability: stable
@@ -677,6 +682,48 @@ pub fn github_close_pr(
   options: GitHubCallOptions = {},
 ) {
   return close_pr(owner + "/" + repo, pull_number, comment, options)
+}
+
+/**
+ * forge_pull_request_event normalizes a GitHub pull_request webhook into the
+ * shared git-forge PR/MR lifecycle shape.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: forge_pull_request_event(payload)
+ */
+pub fn forge_pull_request_event(payload, options: GitHubCallOptions = {}) {
+  return git_forge_pull_request_event("github", payload, options)
+}
+
+/**
+ * forge_writeback_request builds the GitHub connector call for a shared forge
+ * status comment.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: forge_writeback_request(event, body)
+ */
+pub fn forge_writeback_request(event, body: string, options: GitHubCallOptions = {}) {
+  return git_forge_writeback_request(event, body, options)
+}
+
+/**
+ * forge_writeback_comment posts a shared forge status comment through the
+ * active GitHub connector.
+ *
+ * @effects: [net]
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: forge_writeback_comment(event, body)
+ */
+pub fn forge_writeback_comment(event, body: string, options: GitHubCallOptions = {}) {
+  return git_forge_writeback_comment(event, body, options)
 }
 
 fn __github_auto_merge_failed(requested_method, pull_number, error) -> GitHubAutoMergeResult {

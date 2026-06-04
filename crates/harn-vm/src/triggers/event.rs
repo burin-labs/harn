@@ -42,3 +42,7 @@ pub use payloads::{
     SlackEventPayload, SlackMessageEventPayload, SlackReactionAddedEventPayload,
     StreamEventPayload,
 };
+pub use schemas_generated::{
+    GitForgePullRequestEvent, GitForgePullRequestRef, GitForgeRepositoryRef,
+    GitForgeWritebackTarget,
+};

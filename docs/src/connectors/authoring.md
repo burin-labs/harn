@@ -574,6 +574,9 @@ import {
   connector_http_json,
   connector_http_rate_limit,
   connector_http_request,
+  git_forge_pull_request_event,
+  git_forge_pull_request_topic,
+  git_forge_writeback_request,
   oauth2_token_refresh,
   paginate_cursor,
   rate_limit_token_bucket,
@@ -590,6 +593,51 @@ refresh, package-local token buckets, and cursor pagination.
 Existing providers that still sign with HMAC-SHA1 must call
 `verify_hmac_signature(..., "sha1", {allow_legacy_sha1: true})`; new
 connectors should use SHA-256 or a provider-specific verifier.
+
+## Git forge PR/MR lifecycle events
+
+Forge connector packages should emit provider-native trigger events and, for
+pull-request or merge-request lifecycle events, also emit the shared
+`GitForgePullRequestEvent` shape to `git_forge_pull_request_topic()`. The raw
+provider payload stays in `raw_payload`; consumers can subscribe to the shared
+topic without vendoring GitHub, GitLab, or Gitea webhook adapters.
+
+```harn
+import {
+  git_forge_pull_request_event,
+  git_forge_pull_request_topic,
+} from "std/connectors/shared"
+
+pub fn normalize_inbound(raw) {
+  let body = raw.body_json ?? json_parse(raw.body_text)
+  let forge = git_forge_pull_request_event("github", body)
+  if forge != nil {
+    event_log_emit(git_forge_pull_request_topic(), forge.kind, forge, {provider: "github"})
+  }
+  let kind = if body.action == nil {
+    "pull_request"
+  } else {
+    "pull_request." + body.action
+  }
+  return {
+    type: "event",
+    event: {
+      kind: kind,
+      dedupe_key: raw.headers["X-GitHub-Delivery"],
+      payload: body,
+      signature_status: {state: "verified"},
+    },
+  }
+}
+```
+
+`git_forge_pull_request_event(provider, payload)` accepts GitHub
+`pull_request`, GitLab `merge_request`, and Gitea/Forgejo `pull_request`
+payloads. It normalizes lifecycle values to `opened`, `reopened`,
+`synchronized`, `updated`, `ready_for_review`, `closed`, or `merged`, and
+returns a writeback target that `git_forge_writeback_request(event, body)` can
+turn into a connector call. GitHub maps to `issues.create_comment`; other forge
+packages should implement the shared `git_forge.comment` outbound method.
 
 ## Outbound HTTP policy
 
