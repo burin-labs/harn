@@ -1,87 +1,10 @@
 import type { ReactNode } from "react"
-import type { Mode } from "highlight.js"
-import { createLowlight, type LanguageFn } from "lowlight"
 import heroSnippetRaw from "../examples/hero.harn.txt?raw"
+import { highlightHarnSource } from "../lib/harn-highlight"
 
 // Hero mockup — a Harn pipeline source pane beside a live agent run, echoing the
 // Burin Code editor mockup but expressing what Harn itself is: orchestration code.
 export const heroSnippetSource = heroSnippetRaw.trimEnd()
-
-const harnLanguage: LanguageFn = (hljs) => {
-  const keywords = {
-    keyword: "agent_loop break continue each else fn for if in let parallel pipeline retry return spawn while",
-    literal: "false nil true",
-    built_in: "llm_call log read_file read_text tool_select",
-  }
-  const interpolation: Mode = {
-    className: "subst",
-    begin: /\$\{/,
-    end: /\}/,
-    keywords,
-    contains: [],
-  }
-  const string: Mode = {
-    className: "string",
-    begin: '"',
-    end: '"',
-    illegal: "\\n",
-    contains: [{ begin: "\\\\." }, interpolation],
-  }
-  const mainContains: Mode[] = [
-    hljs.C_LINE_COMMENT_MODE,
-    hljs.C_BLOCK_COMMENT_MODE,
-    string,
-    {
-      className: "number",
-      begin: /\b\d+(?:\.\d+)?(?:ms|s|m|h)?\b/,
-      relevance: 0,
-    },
-    {
-      className: "title.function",
-      beginKeywords: "fn pipeline",
-      end: /[(\s]/,
-      excludeEnd: true,
-      contains: [{ begin: /[a-z_][A-Za-z0-9_]*/ }],
-      relevance: 0,
-    },
-  ]
-  interpolation.contains = mainContains
-  return {
-    name: "Harn",
-    aliases: ["harn"],
-    keywords,
-    contains: mainContains,
-  }
-}
-
-type HighlightNode = {
-  type: string
-  value?: string
-  tagName?: string
-  properties?: { className?: string[] | string }
-  children?: HighlightNode[]
-}
-
-const harnLowlight = createLowlight({ harn: harnLanguage })
-
-function renderHighlightNode(node: HighlightNode, index: number): ReactNode {
-  if (node.type === "text") return node.value ?? ""
-  if (node.type !== "element") return null
-
-  const className = node.properties?.className
-  return (
-    <span
-      key={index}
-      className={Array.isArray(className) ? className.join(" ") : className}
-    >
-      {(node.children ?? []).map(renderHighlightNode)}
-    </span>
-  )
-}
-
-function highlightedHeroSource() {
-  return harnLowlight.highlight("harn", heroSnippetSource).children.map(renderHighlightNode)
-}
 
 function ChatRow({
   tone,
@@ -117,7 +40,7 @@ export function HarnMockup() {
         <div className="grid grid-cols-12 text-[13px] leading-relaxed">
           <div className="col-span-12 px-5 py-4 font-mono text-[12.5px] sm:col-span-7">
             <pre className="m-0 whitespace-pre text-white/80">
-              <code data-hero-snippet="true" className="language-harn">{highlightedHeroSource()}</code>
+              <code data-hero-snippet="true" className="language-harn">{highlightHarnSource(heroSnippetSource)}</code>
               <span className="ml-px inline-block h-3 w-1.5 -translate-y-px bg-accent-400 align-middle" />
             </pre>
           </div>

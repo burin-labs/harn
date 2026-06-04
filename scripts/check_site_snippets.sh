@@ -28,7 +28,15 @@ checked=0
 failures=0
 
 shopt -s nullglob
-for snippet in website/src/examples/*.harn.txt; do
+site_snippets=(website/src/examples/*.harn.txt)
+site_checked=${#site_snippets[@]}
+gallery_scenarios=(
+  crates/harn-cli/assets/demo/mcp-host/scenario.harn
+  crates/harn-cli/assets/demo/merge-captain/scenario.harn
+  crates/harn-cli/assets/demo/stdlib-toolkit/scenario.harn
+)
+
+for snippet in "${site_snippets[@]}" "${gallery_scenarios[@]}"; do
   checked=$((checked + 1))
   if ! "$HARN_BIN" check "$snippet"; then
     failures=$((failures + 1))
@@ -37,7 +45,7 @@ done
 
 echo
 echo "site snippets: $checked checked, $failures failed"
-if (( checked == 0 )); then
+if (( site_checked == 0 )); then
   echo "FAIL: no website/src/examples/*.harn.txt snippets found"
   exit 1
 fi
