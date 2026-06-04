@@ -116,7 +116,10 @@ pub(super) fn extract_openai_delta_field_str<'a>(
     ""
 }
 
-pub(super) fn normalize_openai_message_text(message: &serde_json::Value) -> (String, String) {
+pub(super) fn normalize_openai_message_text(
+    message: &serde_json::Value,
+    finish_reason: Option<&str>,
+) -> (String, String) {
     let raw_text = extract_openai_message_field_as_text(message, &["content"]);
     let reasoning_text = extract_openai_message_field_as_text(
         message,
@@ -130,7 +133,13 @@ pub(super) fn normalize_openai_message_text(message: &serde_json::Value) -> (Str
     let mut extracted_thinking = String::new();
     append_paragraph(&mut extracted_thinking, &reasoning_text);
     append_paragraph(&mut extracted_thinking, &inline_thinking);
-    if text.is_empty() && !extracted_thinking.is_empty() {
+    // When a reasoning model is cut off mid-thought (finish_reason == "length")
+    // with no committed content, the reasoning trace is a partial, garbage
+    // not-an-answer. Promoting it into `.text` surfaces that garbage as the
+    // final answer. Keep `text` empty and expose only the partial trace via
+    // `thinking`, so the caller can emit a clean truncation signal instead.
+    let truncated = finish_reason == Some("length");
+    if !truncated && text.is_empty() && !extracted_thinking.is_empty() {
         text = extracted_thinking.clone();
     }
     (text, extracted_thinking)
@@ -219,7 +228,7 @@ mod tests {
         let message = serde_json::json!({
             "reasoning": "hello from reasoning"
         });
-        let (visible, thinking) = normalize_openai_message_text(&message);
+        let (visible, thinking) = normalize_openai_message_text(&message, Some("stop"));
         assert_eq!(visible, "hello from reasoning");
         assert_eq!(thinking, "hello from reasoning");
     }
@@ -230,9 +239,40 @@ mod tests {
             "content": "<think>inline reasoning</think>visible answer",
             "reasoning": "separate reasoning"
         });
-        let (visible, thinking) = normalize_openai_message_text(&message);
+        let (visible, thinking) = normalize_openai_message_text(&message, Some("stop"));
         assert_eq!(visible, "visible answer");
         assert_eq!(thinking, "separate reasoning\ninline reasoning");
+    }
+
+    #[test]
+    fn normalize_openai_message_text_does_not_promote_reasoning_when_truncated() {
+        // A reasoning model cut off mid-thought (finish_reason == "length")
+        // with empty content must NOT have its partial reasoning trace
+        // promoted into `.text` — that garbage would surface as the answer.
+        let message = serde_json::json!({
+            "content": "",
+            "reasoning": "Let me think step by step about the problem. First I need to"
+        });
+        let (visible, thinking) = normalize_openai_message_text(&message, Some("length"));
+        assert_eq!(visible, "", "truncated reasoning leaked into visible text");
+        assert_eq!(
+            thinking,
+            "Let me think step by step about the problem. First I need to"
+        );
+    }
+
+    #[test]
+    fn normalize_openai_message_text_promotes_reasoning_on_clean_stop() {
+        // The same reasoning-only message on a clean finish (finish_reason
+        // != "length") still promotes the trace, preserving prior behaviour
+        // for models that legitimately answer inside the reasoning channel.
+        let message = serde_json::json!({
+            "content": "",
+            "reasoning": "the answer is 42"
+        });
+        let (visible, thinking) = normalize_openai_message_text(&message, Some("stop"));
+        assert_eq!(visible, "the answer is 42");
+        assert_eq!(thinking, "the answer is 42");
     }
 
     #[test]
@@ -241,7 +281,7 @@ mod tests {
             "content": "visible answer",
             "reasoning_details": "minimax private trace"
         });
-        let (visible, thinking) = normalize_openai_message_text(&message);
+        let (visible, thinking) = normalize_openai_message_text(&message, Some("stop"));
         assert_eq!(visible, "visible answer");
         assert_eq!(thinking, "minimax private trace");
     }

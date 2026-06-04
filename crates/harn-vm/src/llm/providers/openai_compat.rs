@@ -189,7 +189,18 @@ impl OpenAiCompatibleProvider {
         match caps.reasoning_wire_format.as_deref() {
             Some("openrouter") => {
                 if let Some(reasoning) = openrouter_reasoning_config(&opts.thinking) {
-                    body["reasoning"] = reasoning;
+                    // OpenRouter excludes every endpoint that doesn't support the
+                    // `reasoning` param when `require_parameters: true` is set
+                    // (which structured/top_k calls force below). For models that
+                    // declare NO reasoning capability, emitting a reasoning DISABLE
+                    // directive shrinks the candidate set to zero -> 404 "No
+                    // endpoints found" (e.g. qwen/qwen3-coder json_object calls).
+                    // The disable is a no-op for these models anyway, so skip it.
+                    let skip_disable = is_openrouter_reasoning_disable(&reasoning)
+                        && !model_declares_reasoning(&caps);
+                    if !skip_disable {
+                        body["reasoning"] = reasoning;
+                    }
                 }
             }
             Some("enabled") => {
@@ -476,6 +487,28 @@ fn sanitize_openai_tool_for_request(
     }
 
     tool
+}
+
+/// True when the OpenRouter `reasoning` body explicitly disables reasoning
+/// (`{"enabled": false}`). These are the directives that, on a model with no
+/// reasoning support, cause OpenRouter to drop every endpoint under
+/// `require_parameters: true`.
+fn is_openrouter_reasoning_disable(reasoning: &serde_json::Value) -> bool {
+    reasoning
+        .get("enabled")
+        .and_then(serde_json::Value::as_bool)
+        == Some(false)
+}
+
+/// True when the (provider, model) capability row advertises ANY reasoning
+/// support: a non-empty `thinking_modes` list, `reasoning_effort_supported`,
+/// or `reasoning_none_supported`. When all three are absent the model declares
+/// no reasoning capability and the `reasoning` request param must be omitted on
+/// OpenRouter to avoid the empty-endpoint 404.
+fn model_declares_reasoning(caps: &crate::llm::capabilities::Capabilities) -> bool {
+    !caps.thinking_modes.is_empty()
+        || caps.reasoning_effort_supported
+        || caps.reasoning_none_supported
 }
 
 fn openrouter_reasoning_config(thinking: &ThinkingConfig) -> Option<serde_json::Value> {
@@ -771,6 +804,47 @@ mod tests {
 
         assert_eq!(body["reasoning"]["enabled"], true);
         assert!(body.get("chat_template_kwargs").is_none());
+    }
+
+    #[test]
+    fn openrouter_no_reasoning_model_omits_reasoning_on_structured_disable() {
+        // Regression: qwen/qwen3-coder declares no reasoning capability. With
+        // a structured (json_object) call, `require_parameters: true` is set,
+        // which makes OpenRouter exclude any endpoint lacking the `reasoning`
+        // param. Emitting `reasoning: {enabled: false}` then drops every
+        // candidate -> 404 "No endpoints found". The disable must be omitted.
+        let mut payload = base_request_payload();
+        payload.provider = "openrouter".to_string();
+        payload.model = "qwen/qwen3-coder".to_string();
+        payload.thinking = ThinkingConfig::Disabled;
+        payload.output_format = crate::llm::api::OutputFormat::JsonObject;
+        let body = OpenAiCompatibleProvider::build_request_body(&payload, false);
+
+        assert!(
+            body.get("reasoning").is_none(),
+            "reasoning disable must be omitted for a no-reasoning model: {body}"
+        );
+        // The structured directive and require_parameters must still be present.
+        assert_eq!(body["response_format"]["type"], "json_object");
+        assert_eq!(body["provider"]["require_parameters"], true);
+    }
+
+    #[test]
+    fn openrouter_reasoning_capable_model_still_disables_on_directive() {
+        // Control: a reasoning-capable OpenRouter model (qwen/qwen3.6* declares
+        // thinking_modes + reasoning_none_supported) must keep the explicit
+        // disable so it doesn't fall back to unbounded thinking.
+        let mut payload = base_request_payload();
+        payload.provider = "openrouter".to_string();
+        payload.model = "qwen/qwen3.6-35b-a3b".to_string();
+        payload.thinking = ThinkingConfig::Disabled;
+        payload.output_format = crate::llm::api::OutputFormat::JsonObject;
+        let body = OpenAiCompatibleProvider::build_request_body(&payload, false);
+
+        assert_eq!(
+            body["reasoning"]["enabled"], false,
+            "reasoning-capable model must keep the explicit disable: {body}"
+        );
     }
 
     #[test]

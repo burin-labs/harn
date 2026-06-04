@@ -380,6 +380,12 @@ fn is_model_unavailable(lower: &str) -> bool {
         // so caller fallback logic routes around it instead of surfacing a
         // generic invalid_request to the agent.
         || lower.contains("non-serverless model")
+        // OpenRouter's HTTP-400 wording for an unknown model ID
+        // ("<id> is not a valid model ID"). Mirror the `not_found` mapping in
+        // `value::error::classify_error_message` so the reason taxonomy agrees
+        // across both classifiers and matches Cerebras's 404 path.
+        || lower.contains("is not a valid model id")
+        || lower.contains("invalid model id")
 }
 
 #[cfg(test)]
@@ -544,6 +550,32 @@ mod tests {
         );
         let info =
             classify_provider_http_error("together", reqwest::StatusCode::BAD_REQUEST, None, body);
+        assert_eq!(info.kind, LlmErrorKind::Terminal);
+        assert_eq!(info.reason, LlmErrorReason::ModelUnavailable);
+        assert!(
+            info.message.contains("[model_unavailable]"),
+            "msg was: {}",
+            info.message
+        );
+    }
+
+    #[test]
+    fn classifies_openrouter_invalid_model_id_as_model_unavailable() {
+        // OpenRouter returns HTTP 400 with a prose body for an unknown model
+        // ID rather than a typed `model_not_found`. Cerebras returns 404 for
+        // the same situation; both should land on `model_unavailable` so the
+        // reason taxonomy is uniform across providers.
+        let body = concat!(
+            r#"{"error":{"message":"#,
+            r#""qwen/qwen3-coder-bogus is not a valid model ID","#,
+            r#""code":400}}"#,
+        );
+        let info = classify_provider_http_error(
+            "openrouter",
+            reqwest::StatusCode::BAD_REQUEST,
+            None,
+            body,
+        );
         assert_eq!(info.kind, LlmErrorKind::Terminal);
         assert_eq!(info.reason, LlmErrorReason::ModelUnavailable);
         assert!(
