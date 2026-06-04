@@ -169,7 +169,7 @@ bench-vm-clone:
 	cargo bench -p harn-vm-perf --bench bench_vmenv_clone -- --output-format bencher
 
 check-vm-rss-soak:
-	python3 scripts/check_vm_rss_soak.py
+	cargo run --quiet --bin harn -- run scripts/check_vm_rss_soak.harn
 
 bench-llm:
 	cargo bench -p harn-llm-perf --bench bench_llm_options_roundtrip -- --output-format bencher
@@ -240,7 +240,7 @@ lint-harn:
 	if grep -q 'HARN-STD-101' "$$tmp"; then \
 		grep -E 'HARN-STD-101|^crates/' "$$tmp" | head -40; \
 		rm -f "$$tmp"; \
-		echo "HARN-STD-101 warnings found above — fix or backfill (see scripts/backfill_stdlib_metadata.py)"; \
+		echo "HARN-STD-101 warnings found above — fix or backfill (see scripts/backfill_stdlib_metadata.harn)"; \
 		exit 1; \
 	fi; \
 	rm -f "$$tmp"

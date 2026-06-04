@@ -1,0 +1,157 @@
+// Tests for scripts/backfill_stdlib_metadata.harn — exercise the pure
+// transform helpers on synthetic inputs (no filesystem dependency). Expected
+// values are byte-for-byte ground truth captured from the Python original
+// (scripts/backfill_stdlib_metadata.py) via process_file().
+import "../backfill_stdlib_metadata.harn"
+
+@test
+pipeline test_strip_helpers(task) {
+  assert_eq(lstrip_ws("  \t hi  "), "hi  ")
+  assert_eq(rstrip_ws("  hi \t "), "  hi")
+  assert_eq(strip_ws("  hi  "), "hi")
+  assert_eq(lstrip_char("***@x", "*"), "@x")
+  assert_eq(leading_indent("    code"), "    ")
+}
+
+@test
+pipeline test_match_pub_fn(task) {
+  assert_eq(match_pub_fn("pub fn foo("), "foo")
+  assert_eq(match_pub_fn("pub fn foo<T>("), "foo")
+  assert_eq(match_pub_fn("pub fn foo ("), "foo")
+  assert_eq(match_pub_fn("pub fn foo() -> int {"), "foo")
+  // Leading whitespace disqualifies (Python anchors at column 0).
+  assert_eq(match_pub_fn("  pub fn x("), "")
+  // Digit-leading name is invalid.
+  assert_eq(match_pub_fn("pub fn 9bad("), "")
+  // Not a pub fn.
+  assert_eq(match_pub_fn("fn foo("), "")
+}
+
+@test
+pipeline test_infer_allocation(task) {
+  // Untyped return defaults to heap.
+  assert_eq(infer_allocation("pub fn x() {"), "heap")
+  assert_eq(infer_allocation("pub fn x() -> int {"), "stack-only")
+  assert_eq(infer_allocation("pub fn x() -> bool {"), "stack-only")
+  assert_eq(infer_allocation("pub fn x() -> float {"), "stack-only")
+  assert_eq(infer_allocation("pub fn x() -> nil {"), "stack-only")
+  assert_eq(infer_allocation("pub fn x() -> void {"), "stack-only")
+  assert_eq(infer_allocation("pub fn x() -> StructuredText {"), "heap")
+  assert_eq(infer_allocation("pub fn x() -> list<int> {"), "heap")
+}
+
+@test
+pipeline test_derive_example(task) {
+  assert_eq(derive_example("f", "pub fn f() {"), "f()")
+  assert_eq(derive_example("f", "pub fn f(a, b) {"), "f(a, b)")
+  // Type annotations and defaults stripped to bare identifiers.
+  assert_eq(derive_example("f", "pub fn f(a: int, b = 3) -> X {"), "f(a, b)")
+  // Rest/ref sigils stripped.
+  assert_eq(derive_example("f", "pub fn f(url, *rest) {"), "f(url, rest)")
+  // Nested generics in a param do not split on inner commas.
+  assert_eq(derive_example("f", "pub fn f(m: Map<K, V>, n) {"), "f(m, n)")
+}
+
+@test
+pipeline test_infer_effects(task) {
+  assert_eq(infer_effects("return read_to_string(a)"), "[fs.read]")
+  assert_eq(infer_effects("return llm_call(name)"), "[llm.call]")
+  // Order follows the rule table: net before process.
+  assert_eq(infer_effects("http_get(u)\n command_run(u)"), "[net, process]")
+  // No matching builtin → empty list.
+  assert_eq(infer_effects("return a + b"), "[]")
+  // Dedup: two fs.read sources collapse to one label.
+  assert_eq(infer_effects("read_lines(a)\n read_bytes(b)"), "[fs.read]")
+}
+
+@test
+pipeline test_parse_existing_metadata(task) {
+  let block = ["/**", " * Prose.", " * @effects: [fs.read]", " * @allocation: heap", " */"]
+  let m = parse_existing_metadata(block)
+  assert_eq(m["effects"], "[fs.read]")
+  assert_eq(m["allocation"], "heap")
+  assert_eq(m.keys().contains("errors"), false)
+}
+
+@test
+pipeline test_find_doc_block_start(task) {
+  // Multi-line block directly above (no blank separator).
+  let out_a = ["/**", " * doc", " */"]
+  assert_eq(find_doc_block_start(out_a), 0)
+  // One tolerated trailing blank line between block and decl.
+  let out_b = ["/**", " * doc", " */", ""]
+  assert_eq(find_doc_block_start(out_b), 0)
+  // Single-line block form.
+  let out_c = ["/** doc */"]
+  assert_eq(find_doc_block_start(out_c), 0)
+  // No canonical block adjacent.
+  let out_d = ["let x = 1"]
+  assert_eq(find_doc_block_start(out_d), -1)
+  // Empty output.
+  assert_eq(find_doc_block_start([]), -1)
+}
+
+@test
+pipeline test_pct(task) {
+  assert_eq(pct(1150, 1211), "95.0%")
+  assert_eq(pct(1211, 1211), "100.0%")
+  assert_eq(pct(0, 1211), "0.0%")
+  assert_eq(pct(0, 0), "0.0%")
+  // .5 boundary cases (round to one decimal).
+  assert_eq(pct(3, 8), "37.5%")
+  assert_eq(pct(1, 8), "12.5%")
+}
+
+@test
+pipeline test_process_file_backfill_stable(task) {
+  let input = "/**\n * Partial fn.\n *\n * @effects: [fs.read]\n * @allocation: heap\n */\npub fn partial(a, b: int = 3) -> bool {\n  return read_to_string(a)\n}\n\n/** Single-line prose. */\npub fn one(name) -> StructuredText {\n  return llm_call(name)\n}\n"
+  let expected = "/**\n * Partial fn.\n *\n * @effects: [fs.read]\n * @allocation: heap\n *\n * @errors: []\n * @api_stability: stable\n * @example: partial(a, b)\n */\npub fn partial(a, b: int = 3) -> bool {\n  return read_to_string(a)\n}\n\n/**\n * Single-line prose.\n *\n * @effects: [llm.call]\n * @allocation: heap\n * @errors: []\n * @api_stability: stable\n * @example: one(name)\n */\npub fn one(name) -> StructuredText {\n  return llm_call(name)\n}\n"
+  let result = process_file(input, "/r/crates/harn-stdlib/src/stdlib/x.harn")
+  assert_eq(result["text"], expected)
+  let st = result["stats"]
+  assert_eq(st["total"], 2)
+  assert_eq(st["backfilled"], 2)
+  assert_eq(st["already_complete"], 0)
+  assert_eq(st["skipped_no_block"], 0)
+}
+
+@test
+pipeline test_process_file_experimental_path(task) {
+  let input = "/**\n * Partial fn.\n *\n * @effects: [fs.read]\n * @allocation: heap\n */\npub fn partial(a, b: int = 3) -> bool {\n  return read_to_string(a)\n}\n\n/** Single-line prose. */\npub fn one(name) -> StructuredText {\n  return llm_call(name)\n}\n"
+  let result = process_file(input, "/r/crates/harn-stdlib/src/stdlib/agent/x.harn")
+  // Under preview-tier paths api_stability flips to experimental.
+  assert_eq(result["text"].contains("@api_stability: experimental"), true)
+  assert_eq(result["text"].contains("@api_stability: stable"), false)
+}
+
+@test
+pipeline test_process_file_skip_no_block(task) {
+  // A pub fn with no doc block is counted but left untouched.
+  let input = "pub fn naked(z) {\n  return z\n}\n"
+  let result = process_file(input, "/r/crates/harn-stdlib/src/stdlib/x.harn")
+  assert_eq(result["text"], input)
+  let st = result["stats"]
+  assert_eq(st["total"], 1)
+  assert_eq(st["skipped_no_block"], 1)
+  assert_eq(st["backfilled"], 0)
+}
+
+@test
+pipeline test_process_file_already_complete(task) {
+  // A fn carrying every field is a no-op (idempotence at the unit level).
+  let input = "/**\n * Done.\n *\n * @effects: []\n * @allocation: heap\n * @errors: []\n * @api_stability: stable\n * @example: done(x)\n */\npub fn done(x) {\n  return x\n}\n"
+  let result = process_file(input, "/r/crates/harn-stdlib/src/stdlib/x.harn")
+  assert_eq(result["text"], input)
+  let st = result["stats"]
+  assert_eq(st["already_complete"], 1)
+  assert_eq(st["backfilled"], 0)
+}
+
+@test
+pipeline test_process_file_idempotent(task) {
+  // Running the transform twice yields the same text the second time.
+  let input = "/** Single-line prose. */\npub fn one(name) -> StructuredText {\n  return llm_call(name)\n}\n"
+  let once = process_file(input, "/r/crates/harn-stdlib/src/stdlib/x.harn")["text"]
+  let twice = process_file(once, "/r/crates/harn-stdlib/src/stdlib/x.harn")["text"]
+  assert_eq(twice, once)
+}

@@ -1,0 +1,231 @@
+// Port of scripts/check_vm_rss_soak.py.
+//
+// Runs the VM memory soak benchmark (`harn bench` over the
+// module_cycle_entry fixture, with --profile-json) and inspects the
+// per-iteration `rss_bytes` samples for a leak: after a warmup window,
+// the tail must not grow by more than the configured byte limit.
+//
+// The RSS magnitudes are inherently nondeterministic run-to-run, so only
+// the threshold/regression logic and exit-code decisions are exercised by
+// the paired @test (see scripts/tests/check_vm_rss_soak_test.harn). The
+// pure helpers below take synthetic sample sequences so the decision is
+// testable without spawning anything.
+//
+// Exits 0 on success (prints the `vm rss soak: OK ...` line); exits 1 with
+// an `error: ...` message on any failed check, mirroring the Python
+// `SystemExit` behavior.
+let FIXTURE = "benchmarks/vm_memory/module_cycle_entry.harn"
+
+let DEFAULT_ITERATIONS = 24
+
+/* 32 * 1024 * 1024 */
+let DEFAULT_MAX_TAIL_GROWTH_BYTES = 33554432
+
+/**
+ * Outcome of parsing a positive-integer environment variable.
+ *
+ * `ok` is true when `value` holds a positive integer. Otherwise `error`
+ * holds the canonical message (sans the `error: ` prefix that `main`
+ * adds), matching the Python `env_int` SystemExit text exactly.
+ */
+pub fn parse_env_int(name: string, raw: string, fallback: int) -> dict {
+  if raw == "" {
+    return {ok: true, value: fallback, error: ""}
+  }
+  let parsed = to_int(raw.trim())
+  if parsed == nil {
+    return {ok: false, value: 0, error: "${name} must be an integer, got '${raw}'"}
+  }
+  let value = parsed ?? 0
+  if value <= 0 {
+    return {ok: false, value: 0, error: "${name} must be positive"}
+  }
+  return {ok: true, value: value, error: ""}
+}
+
+/** Smallest element of a non-empty int list. */
+pub fn list_min(xs: list<int>) -> int {
+  var m = xs[0]
+  for x in xs {
+    if x < m {
+      m = x
+    }
+  }
+  return m
+}
+
+/**
+ * Extract the integer `rss_bytes` samples from a parsed bench profile
+ * (the JSON written by `harn bench --profile-json`). Non-integer or
+ * missing `rss_bytes` entries are skipped, mirroring the Python
+ * `isinstance(..., int)` filter.
+ */
+pub fn extract_rss_samples(report: dict) -> list<int> {
+  let iterations = report?.iterations ?? []
+  var samples = []
+  for iteration in iterations {
+    let rss = iteration?.rss_bytes
+    if rss != nil && is_int(rss) {
+      samples = samples + [rss]
+    }
+  }
+  return samples
+}
+
+fn is_int(v) -> bool {
+  /* json_parse renders whole numbers as ints; a JSON `1.0` arrives as a
+   * float, which `to_int` of its rendering would still accept, so guard
+   * on the runtime type instead. */
+  return type_of(v) == "int"
+}
+
+/**
+ * Decide the soak outcome from the collected samples + byte limit.
+ *
+ * Returns a dict:
+ *   ok               -> true when the soak passes (or has too few samples,
+ *                       in which case `too_few` is set so `main` can emit
+ *                       the distinct "not enough samples" error)
+ *   too_few          -> true when fewer than 3 samples were collected
+ *   tail_growth      -> max(0, tail[-1] - min(tail)) over the post-warmup tail
+ *   regressed        -> true when tail_growth exceeds `max_tail_growth`
+ *   sample_count     -> number of samples considered
+ *
+ * Mirrors the Python warmup/tail/tail_growth arithmetic exactly:
+ *   warmup = max(1, len // 3); tail = samples[warmup:]
+ *   tail_growth = max(0, tail[-1] - min(tail))
+ */
+pub fn soak_outcome(samples: list<int>, max_tail_growth: int) -> dict {
+  if samples.count < 3 {
+    return {ok: false, too_few: true, tail_growth: 0, regressed: false, sample_count: samples.count}
+  }
+  var warmup = samples.count / 3
+  if warmup < 1 {
+    warmup = 1
+  }
+  let tail = samples.slice(warmup, samples.count)
+  let last = tail[tail.count - 1]
+  var tail_growth = last - list_min(tail)
+  if tail_growth < 0 {
+    tail_growth = 0
+  }
+  let regressed = tail_growth > max_tail_growth
+  return {
+    ok: !regressed,
+    too_few: false,
+    tail_growth: tail_growth,
+    regressed: regressed,
+    sample_count: samples.count,
+  }
+}
+
+/**
+ * Resolve the harn binary used to run the benchmark. Honor
+ * HARN_CHECK_BIN, else ask `cargo metadata` for the workspace
+ * `target_directory` (respecting a redirected CARGO_TARGET_DIR) and use
+ * its `debug/harn`, else fall back to `cargo run --bin harn` which builds
+ * on demand. Mirrors the Python `harn_binary()` build-on-demand intent.
+ */
+fn harn_bench_argv() -> list<string> {
+  let bin_override = harness.env.get("HARN_CHECK_BIN")
+  if bin_override != nil && bin_override != "" {
+    return [bin_override ?? "", "bench"]
+  }
+  let meta = harness.process
+    .spawn_captured({cmd: "cargo", args: ["metadata", "--format-version=1", "--no-deps"]})
+  if meta.success {
+    let parsed = try {
+      json_parse(meta.stdout)
+    } catch (err) {
+      nil
+    }
+    let target_dir = parsed?.target_directory
+    if target_dir != nil && target_dir != "" {
+      let dir = target_dir ?? ""
+      let bin = dir + "/debug/harn"
+      if harness.fs.exists(bin) {
+        return [bin, "bench"]
+      }
+    }
+  }
+  return ["cargo", "run", "--quiet", "--bin", "harn", "--", "bench"]
+}
+
+pipeline main(task) {
+  let iter_res = parse_env_int(
+    "HARN_VM_RSS_SOAK_ITERATIONS",
+    harness.env.get("HARN_VM_RSS_SOAK_ITERATIONS") ?? "",
+    DEFAULT_ITERATIONS,
+  )
+  if !iter_res.ok {
+    __io_eprintln("error: ${iter_res.error}")
+    return 1
+  }
+  let iterations = iter_res.value
+  let growth_res = parse_env_int(
+    "HARN_VM_RSS_SOAK_MAX_TAIL_GROWTH_BYTES",
+    harness.env.get("HARN_VM_RSS_SOAK_MAX_TAIL_GROWTH_BYTES") ?? "",
+    DEFAULT_MAX_TAIL_GROWTH_BYTES,
+  )
+  if !growth_res.ok {
+    __io_eprintln("error: ${growth_res.error}")
+    return 1
+  }
+  let max_tail_growth = growth_res.value
+  /* The runtime sandbox only permits writes inside the workspace root, so
+   * the profile JSON lives there (and is removed afterward) rather than
+   * under the system temp dir the Python version used. */
+  let mk = harness.process
+    .spawn_captured({cmd: "mktemp", args: ["-d", "harn-vm-rss-soak-XXXXXX"]})
+  if !mk.success {
+    __io_eprintln("error: could not create temp directory")
+    return 1
+  }
+  let tmpbase = mk.stdout.trim()
+  let report_path = tmpbase + "/profile.json"
+  let argv_prefix = harn_bench_argv()
+  let bin = argv_prefix[0]
+  let bench_args = argv_prefix.slice(1, argv_prefix.count)
+    + [FIXTURE, "--iterations", "${iterations}", "--profile-json", report_path]
+  let bench = harness.process.spawn_captured({cmd: bin, args: bench_args})
+  /* Python inherits stdout/stderr for the bench child, so its (timing,
+   * nondeterministic) output streams through. Re-emit the captured streams
+   * to preserve that behavior and ordering before the verdict line. */
+  if bench.stdout != "" {
+    __io_println(bench.stdout.trim())
+  }
+  if bench.stderr != "" {
+    __io_eprintln(bench.stderr.trim())
+  }
+  if bench.exit_code != 0 {
+    harness.process.spawn_captured({cmd: "rm", args: ["-rf", tmpbase]})
+    return bench.exit_code
+  }
+  if !harness.fs.exists(report_path) {
+    harness.process.spawn_captured({cmd: "rm", args: ["-rf", tmpbase]})
+    __io_eprintln("error: benchmark profile did not contain enough rss_bytes samples")
+    return 1
+  }
+  let report = try {
+    json_parse(harness.fs.read_text(report_path))
+  } catch (err) {
+    {}
+  }
+  harness.process.spawn_captured({cmd: "rm", args: ["-rf", tmpbase]})
+  let samples = extract_rss_samples(report)
+  let outcome = soak_outcome(samples, max_tail_growth)
+  if outcome.too_few {
+    __io_eprintln("error: benchmark profile did not contain enough rss_bytes samples")
+    return 1
+  }
+  if outcome.regressed {
+    __io_eprintln(
+      "error: VM RSS soak grew by ${outcome.tail_growth} bytes after warmup, above ${max_tail_growth} bytes",
+    )
+    return 1
+  }
+  __io_println(
+    "vm rss soak: OK iterations=${outcome.sample_count} tail_growth_bytes=${outcome.tail_growth} limit_bytes=${max_tail_growth}",
+  )
+  return 0
+}

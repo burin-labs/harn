@@ -22,24 +22,33 @@ It is a living tracker, not a spec. When you port a script, move its row to
 | `verify_release_metadata.harn` | `ci.yml` + `release_gate.sh` | Cargo.toml↔CHANGELOG checks; reuses `std/semver`; imports `render_release_notes.harn` in-process for its render smoke check. |
 | `render_release_notes.harn` | `release_gate.sh` + `build-release-binaries.yml` | CHANGELOG section → GitHub notes; the release-asset job invokes the built linux-x64 release binary (no toolchain there). |
 | `sync_protocol_fixture_runtime_versions.harn` | `scripts/release_gate.sh` | Fixture runtime-version bump; `--write` produces byte-identical fixtures. |
+| `build_release_assets_manifest.harn` | `release_gate.sh` + `build-release-binaries.yml` | Release-asset manifest; byte-identical JSON vs Python `json.dumps(sort_keys)`. |
+| `backfill_stdlib_metadata.harn` | manual tool | Stdlib-metadata backfill (mutating); verified `diff -r`-identical mutation + idempotent (re-run = no-op). |
+| `check_vm_rss_soak.harn` | `make check-vm-rss-soak` (ci.yml) | Spawns `harn bench --profile-json`, checks tail RSS growth; analysis logic parity-tested (RSS magnitude is inherently nondeterministic). |
 
 Each ported script has a paired `scripts/tests/<name>_test.harn` exercising its
 pure helpers, run by `make test-harn-scripts`.
 
-## Queued — portable, not yet ported
+## Queued / deferred
 
-Pure-logic checks/codegen with no foreign-runtime coupling. Good Harn targets;
-left for follow-up waves to keep each PR reviewable.
-
-| Script | Why portable | Risk to watch |
+| Script | State | Why |
 | --- | --- | --- |
-| `check_rust_prompt_prose.py` | Rust-source prose lint | Ratchet pattern in `.githooks/lib.sh`. |
-| `build_release_assets_manifest.py` | Asset manifest build | Release path. |
-| `backfill_stdlib_metadata.py` | Metadata backfill | Mutating script; verify idempotence. |
-| `check_changelog_no_retroactive_edits.py` | git + regex | High blast radius: also a `pre-push` hook. |
-| `affected-crates.py` | git diff → crate set | **Critical CI path** (`ci.yml` test matrix); port last, parity-test hard. |
-| `check_vm_rss_soak.py` | spawns `harn`, samples RSS | Runtime soak; needs process spawn + sampling. |
-| Bash `check_*.sh` (e.g. `check_binary_size`, `check_docs_cli_flags`, `check_docs_snippets`, `lint_test_patterns`) | validation logic | Portable; lower priority than the Python checks. |
+| `check_changelog_no_retroactive_edits.py` | deferred → re-port | Ported + parity-verified, but was ~13s on the 472 KB CHANGELOG (O(n²) list build). Unblocked by the O(1)-accumulator fix; re-port once that's on `main` so its pre-push-hook run is fast. |
+| `check_rust_prompt_prose.py` | deferred → re-port | Same: ported + parity-verified but >49s scanning protected Rust files. Re-port post-O(1)-fix. |
+| Bash `check_*.sh` (`check_binary_size`, `check_docs_cli_flags`, `check_docs_snippets`, `lint_test_patterns`, …) | queued | Portable validation logic; lower priority than the Python checks. |
+
+## Kept in Python — toolchain reason
+
+- **`affected-crates.py`** — a Harn port exists and is parity-verified (matches
+  Python byte-for-byte across every `--base`/`--output` mode, with the
+  reverse-dependency closure validated against a captured `cargo metadata`), but
+  it is **not wired**. It is a CI-*bootstrap* tool: `ci.yml`'s Windows lane and
+  `make test-affected` run it *before* (and specifically to avoid) compiling
+  crates, to compute the nextest filter. Running it via `cargo run --bin harn`
+  would force a multi-minute `harn` build on every PR — including a cold
+  Windows build — purely to decide what to test, defeating its entire purpose.
+  Python3 is present on all runners with zero build cost. Revisit only if a
+  cheap prebuilt-`harn` is available in PR CI.
 
 ## Out of scope — stays in its current language
 
