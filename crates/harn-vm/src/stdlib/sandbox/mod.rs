@@ -786,7 +786,9 @@ pub(crate) fn toolchain_read_roots() -> Vec<PathBuf> {
         std::env::var_os("HOME")
             .or_else(|| std::env::var_os("USERPROFILE"))
             .map(PathBuf::from),
-        |path| path.is_dir(),
+        // Accept files too (not just dirs): cargo's `config.toml` is a file an
+        // agent's `cargo` invocation must be able to read.
+        |path| path.exists(),
     )
 }
 
@@ -834,6 +836,13 @@ fn toolchain_read_roots_from(
         ("CARGO_HOME", Some(".cargo"), "bin"),
         ("CARGO_HOME", Some(".cargo"), "registry"),
         ("CARGO_HOME", Some(".cargo"), "git"),
+        // cargo reads its global config on every invocation; without it
+        // `cargo build`/`check` aborts with "could not read config.toml:
+        // Operation not permitted". These are config, not secrets (auth tokens
+        // live in credentials.toml, which stays denied). Both the modern
+        // `config.toml` and the legacy extensionless `config` are granted.
+        ("CARGO_HOME", Some(".cargo"), "config.toml"),
+        ("CARGO_HOME", Some(".cargo"), "config"),
         // Node version managers.
         ("NVM_DIR", Some(".nvm"), "versions"),
         ("VOLTA_HOME", Some(".volta"), ""),
@@ -1370,6 +1379,14 @@ mod tests {
         ] {
             std::fs::create_dir_all(d).unwrap();
         }
+        // cargo's global config is a FILE; credentials.toml (also a file) holds
+        // auth tokens and must stay denied.
+        std::fs::write(cargo.join("config.toml"), "[build]\n").unwrap();
+        std::fs::write(
+            cargo.join("credentials.toml"),
+            "[registry]\ntoken=\"secret\"\n",
+        )
+        .unwrap();
 
         let env = |key: &str| -> Option<PathBuf> {
             match key {
@@ -1380,8 +1397,9 @@ mod tests {
                 _ => None,
             }
         };
-        // No HOME fallback: only the env-resolved dirs should appear.
-        let roots = toolchain_read_roots_from(env, None, |p| p.is_dir());
+        // No HOME fallback: only the env-resolved roots should appear. Use a
+        // real existence check (files + dirs) to match production.
+        let roots = toolchain_read_roots_from(env, None, |p| p.exists());
 
         assert!(
             roots.contains(&uv),
@@ -1396,8 +1414,16 @@ mod tests {
             "CARGO_HOME registry/ (package cache cargo build reads) granted: {roots:?}"
         );
         assert!(
+            roots.contains(&cargo.join("config.toml")),
+            "CARGO_HOME config.toml granted (cargo reads it every invocation): {roots:?}"
+        );
+        assert!(
+            !roots.contains(&cargo.join("credentials.toml")),
+            "credentials.toml (auth tokens) must NOT be granted: {roots:?}"
+        );
+        assert!(
             !roots.contains(&cargo),
-            "the cargo root (holding credentials.toml / config.toml) must not be granted: {roots:?}"
+            "the cargo root must not be granted whole (would expose credentials.toml): {roots:?}"
         );
         assert!(
             roots.contains(&rustup),
