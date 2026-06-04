@@ -55,13 +55,32 @@ pub(super) fn strip_tool_call_wrappers(text: &str) -> std::borrow::Cow<'_, str> 
     if !TAGS.iter().any(|tag| text.contains(tag)) {
         return std::borrow::Cow::Borrowed(text);
     }
-    let mut result = text.to_string();
-    for tag in TAGS {
-        if result.contains(tag) {
-            result = result.replace(tag, "\n");
+    // Replace each wrapper tag with a newline, but copy `<<TAG ... TAG` heredoc
+    // bodies through verbatim: a wrapper-tag literal inside a multiline string
+    // argument is file content, not structure, and stripping it would corrupt
+    // the value. This is the same heredoc-blindness `find_close_tag` avoids at
+    // the block boundary, applied here at the wrapper-stripping boundary.
+    let bytes = text.as_bytes();
+    let mut out = String::with_capacity(text.len());
+    let mut i = 0;
+    while i < text.len() {
+        if bytes[i] == b'<' && bytes.get(i + 1) == Some(&b'<') {
+            if let Some(after) = skip_heredoc_body(text, i) {
+                out.push_str(&text[i..after]);
+                i = after;
+                continue;
+            }
         }
+        if let Some(tag) = TAGS.iter().find(|tag| text[i..].starts_with(**tag)) {
+            out.push('\n');
+            i += tag.len();
+            continue;
+        }
+        let ch_len = text[i..].chars().next().map_or(1, char::len_utf8);
+        out.push_str(&text[i..i + ch_len]);
+        i += ch_len;
     }
-    std::borrow::Cow::Owned(result)
+    std::borrow::Cow::Owned(out)
 }
 
 /// Match a balanced `<tag>...</tag>` block starting at `start` in `src`.
