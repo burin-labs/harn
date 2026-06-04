@@ -49,6 +49,7 @@ exempt_checks = [
   "check-docs-model-refs",          # validates docs track provider aliases, not a mirror
   "check-docs-snippets",            # validates ```harn blocks parse, not a mirror
   "check-docs-cli-flags",           # validates docs bash/sh harn flags, not a mirror
+  "check-docs-links",               # validates docs/src local links resolve, not a mirror
   "check-site-snippets",            # validates website Harn fixtures parse, not a mirror
   "check-generated-registry",       # the auditor itself
 ]
