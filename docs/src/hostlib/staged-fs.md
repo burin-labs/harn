@@ -44,6 +44,7 @@ The ACP adapter exposes host controls for the same state:
 
 - `session/fs_mode` with `{ sessionId, mode }`
 - `session/fs_commit_staged` with `{ sessionId, paths? }`
+- `session/fs_discard_staged` with `{ sessionId, paths? }`
 
 Every staging mutation emits a `session/update` progress extension with
 `_meta.harn.kind = "staged_writes_pending"`, `_meta.harn.pendingCount`,

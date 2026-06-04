@@ -69,6 +69,7 @@ pub const ACP_DISPATCHED_METHOD_SESSION_SET_MODE: &str = "session/set_mode";
 pub const ACP_DISPATCHED_METHOD_SESSION_SET_CONFIG_OPTION: &str = "session/set_config_option";
 pub const ACP_DISPATCHED_METHOD_SESSION_FS_MODE: &str = "session/fs_mode";
 pub const ACP_DISPATCHED_METHOD_SESSION_FS_COMMIT_STAGED: &str = "session/fs_commit_staged";
+pub const ACP_DISPATCHED_METHOD_SESSION_FS_DISCARD_STAGED: &str = "session/fs_discard_staged";
 pub const ACP_DISPATCHED_METHOD_SESSION_RESTORE_TOOL_CALL: &str = "session/restore_tool_call";
 pub const ACP_DISPATCHED_METHOD_SESSION_PROMPT: &str = "session/prompt";
 pub const ACP_DISPATCHED_METHOD_SESSION_CANCEL: &str = "session/cancel";
@@ -117,6 +118,7 @@ pub const ACP_DISPATCHED_METHODS: &[&str] = &[
     "session/set_config_option",
     "session/fs_mode",
     "session/fs_commit_staged",
+    "session/fs_discard_staged",
     "session/restore_tool_call",
     "session/prompt",
     "session/cancel",

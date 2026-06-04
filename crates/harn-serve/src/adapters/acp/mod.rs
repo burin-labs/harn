@@ -162,6 +162,20 @@ fn session_id_param(params: &serde_json::Value) -> Option<String> {
     string_param(params, "sessionId", "session_id")
 }
 
+fn staged_fs_paths_param(params: &serde_json::Value) -> Vec<String> {
+    params
+        .get("paths")
+        .and_then(serde_json::Value::as_array)
+        .map(|values| {
+            values
+                .iter()
+                .filter_map(serde_json::Value::as_str)
+                .map(str::to_string)
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
 fn parse_session_timeline_query(
     params: &serde_json::Value,
 ) -> Result<harn_vm::session_timeline::SessionTimelineQuery, String> {
@@ -3498,30 +3512,16 @@ impl AcpServer {
         id: &serde_json::Value,
         params: &serde_json::Value,
     ) {
-        let Some(session_id) = params
-            .get("sessionId")
-            .or_else(|| params.get("session_id"))
-            .and_then(serde_json::Value::as_str)
-        else {
+        let Some(session_id) = session_id_param(params) else {
             self.send_error(id, -32602, "session/fs_commit_staged requires sessionId");
             return;
         };
-        if !self.sessions.contains_key(session_id) {
+        if !self.sessions.contains_key(session_id.as_str()) {
             self.send_error(id, -32602, &format!("Unknown session: {session_id}"));
             return;
         }
-        let paths = params
-            .get("paths")
-            .and_then(serde_json::Value::as_array)
-            .map(|values| {
-                values
-                    .iter()
-                    .filter_map(serde_json::Value::as_str)
-                    .map(str::to_string)
-                    .collect::<Vec<_>>()
-            })
-            .unwrap_or_default();
-        match harn_hostlib::fs::commit_staged(session_id, &paths) {
+        let paths = staged_fs_paths_param(params);
+        match harn_hostlib::fs::commit_staged(session_id.as_str(), &paths) {
             Ok(result) => {
                 self.send_response(
                     id,
@@ -3537,7 +3537,7 @@ impl AcpServer {
                             .collect::<Vec<_>>(),
                     }),
                 );
-                self.emit_staged_writes_update(session_id);
+                self.emit_staged_writes_update(session_id.as_str());
             }
             Err(error) => self.send_error(id, -32000, &error.to_string()),
         }
@@ -3553,6 +3553,48 @@ impl AcpServer {
             id,
             -32601,
             "session/fs_commit_staged requires the hostlib feature",
+        );
+    }
+
+    #[cfg(feature = "hostlib")]
+    fn handle_session_fs_discard_staged(
+        &mut self,
+        id: &serde_json::Value,
+        params: &serde_json::Value,
+    ) {
+        let Some(session_id) = session_id_param(params) else {
+            self.send_error(id, -32602, "session/fs_discard_staged requires sessionId");
+            return;
+        };
+        if !self.sessions.contains_key(session_id.as_str()) {
+            self.send_error(id, -32602, &format!("Unknown session: {session_id}"));
+            return;
+        }
+        let paths = staged_fs_paths_param(params);
+        match harn_hostlib::fs::discard_staged(session_id.as_str(), &paths) {
+            Ok(result) => {
+                self.send_response(
+                    id,
+                    serde_json::json!({
+                        "discardedPaths": result.discarded_paths,
+                    }),
+                );
+                self.emit_staged_writes_update(session_id.as_str());
+            }
+            Err(error) => self.send_error(id, -32000, &error.to_string()),
+        }
+    }
+
+    #[cfg(not(feature = "hostlib"))]
+    fn handle_session_fs_discard_staged(
+        &mut self,
+        id: &serde_json::Value,
+        _params: &serde_json::Value,
+    ) {
+        self.send_error(
+            id,
+            -32601,
+            "session/fs_discard_staged requires the hostlib feature",
         );
     }
 
@@ -3966,6 +4008,12 @@ impl AcpServer {
                     return;
                 }
                 self.handle_session_fs_commit_staged(&id, &params);
+            }
+            "session/fs_discard_staged" => {
+                if self.reject_unauthenticated(&id) {
+                    return;
+                }
+                self.handle_session_fs_discard_staged(&id, &params);
             }
             "session/restore_tool_call" => {
                 if self.reject_unauthenticated(&id) {
