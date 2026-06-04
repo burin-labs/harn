@@ -34,6 +34,7 @@ export interface DocMeta {
   slug: string
   url: string
   title: string
+  description: string
   navTitle: string
   sectionId: string
   sectionTitle: string
@@ -84,6 +85,46 @@ export interface LoadedDocs {
 }
 
 const GITHUB_EDIT_BASE = "https://github.com/burin-labs/harn/edit/main/docs/src/"
+const DESCRIPTION_LIMIT = 180
+
+function decodeEntity(value: string): string {
+  const named: Record<string, string> = {
+    amp: "&",
+    gt: ">",
+    lt: "<",
+    quot: '"',
+    apos: "'",
+    nbsp: " ",
+  }
+  if (value in named) return named[value]
+  const decimal = value.match(/^#(\d+)$/)
+  const hex = value.match(/^#x([0-9a-f]+)$/i)
+  const code = decimal ? Number(decimal[1]) : hex ? Number.parseInt(hex[1], 16) : NaN
+  if (!Number.isFinite(code) || code < 0 || code > 0x10ffff) return ""
+  return String.fromCodePoint(code)
+}
+
+function textFromHtml(html: string): string {
+  return html
+    .replace(/<script\b[\s\S]*?<\/script>/gi, " ")
+    .replace(/<style\b[\s\S]*?<\/style>/gi, " ")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&([a-z]+|#\d+|#x[0-9a-f]+);/gi, (_, entity: string) => decodeEntity(entity))
+    .replace(/\s+/g, " ")
+    .trim()
+}
+
+function truncateDescription(text: string): string {
+  if (text.length <= DESCRIPTION_LIMIT) return text
+  const clipped = text.slice(0, DESCRIPTION_LIMIT - 3)
+  const lastSpace = clipped.lastIndexOf(" ")
+  return `${clipped.slice(0, lastSpace > 80 ? lastSpace : clipped.length).trimEnd()}...`
+}
+
+function descriptionFromHtml(html: string, fallback: string): string {
+  const firstParagraph = html.match(/<p(?:\s[^>]*)?>([\s\S]*?)<\/p>/i)?.[1]
+  return truncateDescription(textFromHtml(firstParagraph ?? html) || fallback)
+}
 
 // Maps SUMMARY.md parts (the `# Heading` groups) to the top-level section tabs.
 // Mirrors docs/theme/harn-docs-nav.js, plus a Migrations tab so that part — which
@@ -566,6 +607,10 @@ export function loadAllDocs(repoRoot: string): LoadedDocs {
     const fmTitle = typeof fm.data.title === "string" ? fm.data.title : null
     const navTitle = navTitleBySlug.get(slug) ?? fmTitle ?? titleRef.title ?? slug
     const title = fmTitle ?? titleRef.title ?? navTitle
+    const description =
+      typeof fm.data.description === "string"
+        ? truncateDescription(fm.data.description)
+        : descriptionFromHtml(html, title)
     const section = sectionBySlug.get(slug) ?? { id: "reference", title: "Reference" }
     const url = "/" + slug + ".html"
 
@@ -573,6 +618,7 @@ export function loadAllDocs(repoRoot: string): LoadedDocs {
       slug,
       url,
       title,
+      description,
       navTitle,
       sectionId: section.id,
       sectionTitle: section.title,
@@ -589,10 +635,7 @@ export function loadAllDocs(repoRoot: string): LoadedDocs {
       next: null,
     })
 
-    const plain = html
-      .replace(/<[^>]+>/g, " ")
-      .replace(/\s+/g, " ")
-      .trim()
+    const plain = textFromHtml(html)
     search.push({
       slug,
       url,

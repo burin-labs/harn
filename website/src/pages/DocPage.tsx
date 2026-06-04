@@ -3,6 +3,7 @@ import { Link, useLocation, useNavigate } from "react-router"
 import { nav, meta } from "virtual:harn-docs"
 import type { NavItem, NavSection } from "../../vite-plugins/content"
 import type { PageData } from "../../vite-plugins/content"
+import { pageMetaForDoc } from "../lib/metadata"
 import { fetchPage, getCachedPage } from "../lib/page-store"
 
 export function DocPage({ slug }: { slug: string }) {
@@ -11,6 +12,10 @@ export function DocPage({ slug }: { slug: string }) {
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const navigate = useNavigate()
   const location = useLocation()
+
+  useEffect(() => {
+    document.title = pageMetaForDoc(docMeta).title
+  }, [docMeta])
 
   useEffect(() => {
     let cancelled = false

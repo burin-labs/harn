@@ -7,6 +7,7 @@ import type { PageData } from "../vite-plugins/content"
 
 export { loadAllDocs } from "../vite-plugins/content"
 export { REPO_ROOT } from "../vite-plugins/harn-docs-plugin"
+export { LANDING_PAGE_META, NOT_FOUND_PAGE_META, pageMetaForDoc } from "./lib/metadata"
 
 // Render one route to an HTML string. `pageData` (when supplied) is seeded into
 // the page cache so doc pages render their content synchronously.
