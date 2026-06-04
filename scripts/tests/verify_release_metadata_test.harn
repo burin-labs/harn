@@ -1,0 +1,201 @@
+// Tests for scripts/verify_release_metadata.harn — exercise the pure
+// content checks against synthetic Cargo.toml / CHANGELOG.md text without
+// touching the filesystem, subprocesses, or git.
+import {
+  changelog_section_body,
+  changelog_versions,
+  check_metadata,
+  current_version,
+  detect_misformatted_headings,
+  has_duplicates,
+  is_bump_ahead,
+  is_descending,
+  success_message,
+} from "../verify_release_metadata.harn"
+
+let CARGO = "[workspace]\nresolver = \"2\"\n\n[workspace.package]\nversion = \"0.8.71\"\nedition = \"2021\"\n"
+
+let CHANGELOG = "# Changelog\n\nintro text\n\n## v0.8.71\n\n- Added a thing.\n\n## v0.8.70\n\n- Fixed a thing.\n"
+
+@test
+pipeline test_current_version(task) {
+  assert_eq(current_version(CARGO), "0.8.71")
+}
+
+@test
+pipeline test_current_version_missing(task) {
+  let r = try {
+    current_version("[workspace]\nname = \"x\"\n")
+  } catch (e) {
+    e
+  }
+  assert_eq(r, "error: missing workspace version in Cargo.toml")
+}
+
+@test
+pipeline test_changelog_versions(task) {
+  assert_eq(changelog_versions(CHANGELOG), ["0.8.71", "0.8.70"])
+}
+
+@test
+pipeline test_changelog_versions_ignores_two_component(task) {
+  let text = "## v0.5 series (0.5.0)\n\n## v1.2.3\n"
+  assert_eq(changelog_versions(text), ["1.2.3"])
+}
+
+@test
+pipeline test_section_body(task) {
+  assert_eq(changelog_section_body(CHANGELOG, "0.8.71"), "- Added a thing.")
+  assert_eq(changelog_section_body(CHANGELOG, "0.8.70"), "- Fixed a thing.")
+}
+
+@test
+pipeline test_section_body_missing(task) {
+  assert_eq(changelog_section_body(CHANGELOG, "9.9.9"), "")
+}
+
+@test
+pipeline test_section_body_empty(task) {
+  let text = "## v1.0.0\n\n## v0.9.0\n\n- prior\n"
+  assert_eq(changelog_section_body(text, "1.0.0"), "")
+}
+
+@test
+pipeline test_detect_misformatted(task) {
+  assert_eq(detect_misformatted_headings("## v0.7.41 "), ["## v0.7.41 "])
+  assert_eq(detect_misformatted_headings("## v0.7.41-rc1"), ["## v0.7.41-rc1"])
+}
+
+@test
+pipeline test_detect_misformatted_clean(task) {
+  assert_eq(detect_misformatted_headings(CHANGELOG), [])
+  assert_eq(detect_misformatted_headings("## v0.5 series (0.5.0)"), [])
+}
+
+@test
+pipeline test_is_bump_ahead(task) {
+  assert_eq(is_bump_ahead("0.8.71", "0.8.72"), true)
+  assert_eq(is_bump_ahead("0.8.71", "0.9.0"), true)
+  assert_eq(is_bump_ahead("0.8.71", "1.0.0"), true)
+}
+
+@test
+pipeline test_is_bump_ahead_rejects(task) {
+  assert_eq(is_bump_ahead("0.8.71", "0.8.71"), false)
+  assert_eq(is_bump_ahead("0.8.71", "0.8.70"), false)
+  assert_eq(is_bump_ahead("0.8.71", "0.8.73"), false)
+  assert_eq(is_bump_ahead("0.8.71", "0.10.0"), false)
+  assert_eq(is_bump_ahead("0.8.71", "0.9.1"), false)
+}
+
+@test
+pipeline test_has_duplicates(task) {
+  assert_eq(has_duplicates(["1.0.1", "1.0.0"]), false)
+  assert_eq(has_duplicates(["1.0.1", "1.0.1"]), true)
+}
+
+@test
+pipeline test_is_descending(task) {
+  assert_eq(is_descending(["1.0.1", "1.0.0", "0.9.9"]), true)
+  assert_eq(is_descending(["1.0.0", "1.0.1"]), false)
+  assert_eq(is_descending(["1.0.0"]), true)
+}
+
+@test
+pipeline test_check_metadata_ok(task) {
+  assert_eq(check_metadata(CARGO, CHANGELOG), "0.8.71")
+}
+
+@test
+pipeline test_check_metadata_bump_ahead(task) {
+  let changelog = "# Changelog\n\n## v0.8.72\n\n- Next release.\n\n## v0.8.71\n\n- Prior.\n"
+  assert_eq(check_metadata(CARGO, changelog), "0.8.72")
+}
+
+@test
+pipeline test_check_metadata_no_versions(task) {
+  let r = try {
+    check_metadata(CARGO, "# Changelog\n\nno versions here\n")
+  } catch (e) {
+    e
+  }
+  assert_eq(r, "error: CHANGELOG.md does not contain any version headings")
+}
+
+@test
+pipeline test_check_metadata_empty_body(task) {
+  let changelog = "# Changelog\n\n## v0.8.71\n\n## v0.8.70\n\n- Prior.\n"
+  let r = try {
+    check_metadata(CARGO, changelog)
+  } catch (e) {
+    e
+  }
+  assert_eq(
+    r,
+    "error: CHANGELOG.md '## v0.8.71' section has no body content; release "
+      + "notes would be empty. Add bullet points describing the release.",
+  )
+}
+
+@test
+pipeline test_check_metadata_version_mismatch(task) {
+  let changelog = "# Changelog\n\n## v0.9.5\n\n- Far ahead.\n\n## v0.8.70\n\n- Prior.\n"
+  let r = try {
+    check_metadata(CARGO, changelog)
+  } catch (e) {
+    e
+  }
+  assert_eq(
+    r,
+    "error: Cargo.toml version 0.8.71 does not match top changelog entry 0.9.5 "
+      + "(and the delta is not a single patch/minor/major bump)",
+  )
+}
+
+@test
+pipeline test_check_metadata_duplicate(task) {
+  let changelog = "# Changelog\n\n## v0.8.71\n\n- A.\n\n## v0.8.71\n\n- B.\n"
+  let r = try {
+    check_metadata(CARGO, changelog)
+  } catch (e) {
+    e
+  }
+  assert_eq(r, "error: CHANGELOG.md contains duplicate version headings")
+}
+
+@test
+pipeline test_check_metadata_misformatted(task) {
+  let changelog = "# Changelog\n\n## v0.8.71 \n\n- A.\n"
+  let r = try {
+    check_metadata(CARGO, changelog)
+  } catch (e) {
+    e
+  }
+  assert_eq(
+    r,
+    "error: CHANGELOG.md has heading(s) that look like version markers but "
+      + "don't match the canonical `## vX.Y.Z` regex (no trailing whitespace, "
+      + "no suffix):\n  ## v0.8.71 ",
+  )
+}
+
+@test
+pipeline test_check_metadata_unsorted(task) {
+  let cargo = "[workspace.package]\nversion = \"0.8.70\"\n"
+  let changelog = "# Changelog\n\n## v0.8.70\n\n- A.\n\n## v0.8.71\n\n- B.\n"
+  let r = try {
+    check_metadata(cargo, changelog)
+  } catch (e) {
+    e
+  }
+  assert_eq(r, "error: CHANGELOG.md versions are not in descending semver order")
+}
+
+@test
+pipeline test_success_message(task) {
+  assert_eq(success_message("0.8.71", "0.8.71"), "verified release metadata for v0.8.71")
+  assert_eq(
+    success_message("0.8.71", "0.8.72"),
+    "verified release metadata for v0.8.72 (Cargo.toml still at v0.8.71; bump pending)",
+  )
+}

@@ -231,7 +231,7 @@ jobs:
       - run: make check-docs-links
       - run: make check-tree-sitter-keywords
       - run: make check-generated-registry
-      - run: python3 scripts/verify_release_metadata.py
+      - run: cargo run --quiet --bin harn -- run scripts/verify_release_metadata.harn
       - name: Check no retroactive CHANGELOG edits
         run: |
           # checkout already fetched full history + tags. Pass the PR base

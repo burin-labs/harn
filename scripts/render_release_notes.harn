@@ -1,0 +1,171 @@
+// Render GitHub release notes from CHANGELOG.md for a given version.
+//
+// Port of scripts/render_release_notes.py. Parses the matching
+// `## vX.Y.Z` section out of CHANGELOG.md, appends an install/upgrade
+// block, and (when the repo + a previous version are known) a
+// "Full Changelog" compare link. Writes to a file with --output or to
+// stdout otherwise.
+//
+// Usage: harn run scripts/render_release_notes.harn -- \
+//          --version X.Y.Z [--output PATH] [--repo owner/name]
+let CHANGELOG = "CHANGELOG.md"
+
+/** Drop a leading `v` so `v0.8.71` and `0.8.71` are equivalent. */
+pub fn normalize_version(version: string) -> string {
+  return if version.starts_with("v") {
+    version.substring(1, version.len())
+  } else {
+    version
+  }
+}
+
+/** Escape regex metacharacters so a version string matches literally. */
+pub fn escape_regex(text: string) -> string {
+  let specials = [".", "\\", "+", "*", "?", "(", ")", "[", "]", "{", "}", "^", "$", "|"]
+  return text.split("")
+    .map(
+    fn(ch) {
+      if specials.contains(ch) {
+        "\\" + ch
+      } else {
+        ch
+      }
+    },
+  ).to_list().join("")
+}
+
+/** Collect every `## vX.Y.Z` heading version, top to bottom. */
+pub fn changelog_versions(changelog: string) -> list<string> {
+  let caps = regex_captures(r"(?m)^## v(\d+\.\d+\.\d+)$", changelog)
+  return caps.map(fn(c) { c.groups[0] }).to_list()
+}
+
+/**
+ * Pull the body of the `## v<version>` section: everything after the
+ * heading line up to the next `## ` heading (or end of file), trimmed.
+ * Throws if no such section exists.
+ */
+pub fn extract_section(changelog: string, version: string) -> string {
+  let caps = regex_captures(r"(?ms)^## v" + escape_regex(version) + r"\n(.*)", changelog)
+  if caps.count == 0 {
+    throw "error: CHANGELOG.md does not contain a section for ## v${version}"
+  }
+  let rest = caps[0].groups[0]
+  let nexts = regex_captures(r"(?m)^## ", rest)
+  let body = if nexts.count > 0 {
+    rest.substring(0, nexts[0].start)
+  } else {
+    rest
+  }
+  return body.trim()
+}
+
+/**
+ * Find the version released just before `version` (the next heading
+ * down). Returns nil when `version` is absent or is the oldest entry.
+ */
+pub fn previous_version(versions: list<string>, version: string) -> string? {
+  let index = versions.index_of(version)
+  if index == -1 {
+    return nil
+  }
+  return if index + 1 < versions.count {
+    versions[index + 1]
+  } else {
+    nil
+  }
+}
+
+/** Extract `owner/name` from a GitHub remote URL, or nil. */
+pub fn parse_remote(url: string) -> string? {
+  let caps = regex_captures(r"github\.com[:/]([^/]+/[^/.]+)(?:\.git)?$", url.trim())
+  return if caps.count == 0 {
+    nil
+  } else {
+    caps[0].groups[0]
+  }
+}
+
+/**
+ * Assemble the final release notes body. Mirrors the Python join:
+ * trimmed section, the install block, and an optional compare link.
+ */
+pub fn render_notes(section: string, repo: string?, prev: string?, version: string) -> string {
+  let base = [section.trim(), "", "## Install / Upgrade", "", "```bash", "cargo install harn-cli", "```"]
+  let parts = if repo != nil && prev != nil {
+    base + ["", "**Full Changelog**: https://github.com/${repo}/compare/v${prev}...v${version}"]
+  } else {
+    base
+  }
+  return parts.join("\n") + "\n"
+}
+
+/**
+ * Read `--flag value` or `--flag=value` style options out of argv.
+ * Returns nil when the flag is absent.
+ */
+pub fn flag_value(args: list<string>, name: string) -> string? {
+  let prefix = name + "="
+  for item in args.enumerate() {
+    let a = item.value
+    if a == name && item.index + 1 < args.count {
+      return args[item.index + 1]
+    }
+    if a.starts_with(prefix) {
+      return a.substring(prefix.len(), a.len())
+    }
+  }
+  return nil
+}
+
+pipeline main(task) {
+  let raw_version = flag_value(argv, "--version")
+  if raw_version == nil {
+    __io_eprintln("usage: render_release_notes.harn --version VERSION [--output OUTPUT] [--repo REPO]")
+    __io_eprintln("error: the following arguments are required: --version")
+    return 2
+  }
+  let version = normalize_version(raw_version ?? "")
+  if !harness.fs.exists(CHANGELOG) {
+    __io_eprintln("error: missing ${CHANGELOG}")
+    return 1
+  }
+  let changelog = harness.fs.read_text(CHANGELOG)
+  let versions = changelog_versions(changelog)
+  let result = try {
+    extract_section(changelog, version)
+  } catch (e) {
+    __io_eprintln("${e}")
+    return 1
+  }
+  let section = result
+  let prev = previous_version(versions, version)
+  let repo = detect_repo(flag_value(argv, "--repo"))
+  let output = render_notes(section, repo, prev, version)
+  let out_path = flag_value(argv, "--output")
+  if out_path != nil {
+    harness.fs.write_text(out_path ?? "", output)
+  } else {
+    __io_print(output)
+  }
+  return 0
+}
+
+/**
+ * Resolve the repo slug: explicit --repo, else $GITHUB_REPOSITORY, else
+ * the GitHub `owner/name` parsed from `git remote get-url origin`.
+ */
+fn detect_repo(explicit: string?) -> string? {
+  if explicit != nil {
+    return explicit
+  }
+  let env_repo = harness.env.get("GITHUB_REPOSITORY")
+  if env_repo != nil && env_repo ?? "" != "" {
+    return env_repo
+  }
+  let remote = harness.process.spawn_captured({cmd: "git", args: ["remote", "get-url", "origin"]})
+  if !remote.success {
+    return nil
+  }
+  return parse_remote(remote.stdout)
+}

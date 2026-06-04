@@ -1,0 +1,248 @@
+// Tests for scripts/check_generated_registry.harn — exercise the pure
+// pub fns on synthetic inputs (no filesystem dependency).
+import "../check_generated_registry.harn"
+
+// --- whole_target_search --------------------------------------------------
+@test
+pipeline test_whole_target_plain_hit(task) {
+  assert_eq(whole_target_search("check-highlight", "  make check-highlight\n"), true)
+}
+
+@test
+pipeline test_whole_target_not_a_prefix(task) {
+  // `check-provider-catalog` must NOT match inside `-drift` suffix.
+  assert_eq(
+    whole_target_search("check-provider-catalog", "make check-provider-catalog-drift\n"),
+    false,
+  )
+}
+
+@test
+pipeline test_whole_target_full_name_hit(task) {
+  assert_eq(
+    whole_target_search("check-provider-catalog-drift", "make check-provider-catalog-drift\n"),
+    true,
+  )
+}
+
+@test
+pipeline test_whole_target_at_end_of_text(task) {
+  // Target at the very end (no trailing char) still matches.
+  assert_eq(whole_target_search("check-x", "run check-x"), true)
+}
+
+@test
+pipeline test_whole_target_word_char_suffix(task) {
+  // Followed by a word char (no hyphen) is also a non-match.
+  assert_eq(whole_target_search("check-x", "check-xy"), false)
+}
+
+@test
+pipeline test_whole_target_underscore_suffix(task) {
+  assert_eq(whole_target_search("check-x", "check-x_y"), false)
+}
+
+@test
+pipeline test_whole_target_empty_target(task) {
+  assert_eq(whole_target_search("", "anything"), false)
+}
+
+@test
+pipeline test_whole_target_absent(task) {
+  assert_eq(whole_target_search("check-missing", "make check-other\n"), false)
+}
+
+// --- makefile_targets -----------------------------------------------------
+@test
+pipeline test_makefile_targets_basic(task) {
+  let mk = "all: fmt\n\tmake check-x\ngen-foo:\n\techo hi\ncheck-foo:\n\techo\n"
+  assert_eq(makefile_targets(mk), ["all", "check-foo", "gen-foo"])
+}
+
+@test
+pipeline test_makefile_targets_skips_indented(task) {
+  // Indented (tab or space) lines are recipe bodies, not rule defs.
+  let mk = "real:\n\tnope: indented\n  alsonope: spaced\n"
+  assert_eq(makefile_targets(mk), ["real"])
+}
+
+@test
+pipeline test_makefile_targets_dedup_and_sort(task) {
+  let mk = "zeta:\n\tx\nalpha:\n\ty\nzeta:\n\tz\n"
+  assert_eq(makefile_targets(mk), ["alpha", "zeta"])
+}
+
+@test
+pipeline test_makefile_targets_empty(task) {
+  assert_eq(makefile_targets(""), [])
+}
+
+// --- make_all_recipe ------------------------------------------------------
+@test
+pipeline test_make_all_recipe_basic(task) {
+  let mk = "all: fmt\n\tmake check-x check-y\n\tmake check-z\nother:\n\techo no\n"
+  assert_eq(make_all_recipe(mk), "\tmake check-x check-y\n\tmake check-z")
+}
+
+@test
+pipeline test_make_all_recipe_blank_line_skipped(task) {
+  // A blank line inside the body is skipped, not a terminator.
+  let mk = "all:\n\tone\n\n\ttwo\nnext:\n\tx\n"
+  assert_eq(make_all_recipe(mk), "\tone\n\ttwo")
+}
+
+@test
+pipeline test_make_all_recipe_missing(task) {
+  assert_eq(make_all_recipe("build:\n\tx\n"), "")
+}
+
+// --- artifact_flag_errors -------------------------------------------------
+@test
+pipeline test_flag_errors_ci_true_not_in_workflow(task) {
+  let art = {id: "a", ci: true}
+  let errs = artifact_flag_errors(art, "check-a", "", "", [])
+  assert_eq(errs.count, 1)
+  assert_eq(errs[0].contains("ci = true but `check-a` is not referenced"), true)
+}
+
+@test
+pipeline test_flag_errors_ci_true_in_workflow_ok(task) {
+  let art = {id: "a", ci: true}
+  let errs = artifact_flag_errors(art, "check-a", "", "make check-a\n", [])
+  assert_eq(errs.count, 0)
+}
+
+@test
+pipeline test_flag_errors_ci_false_in_workflow(task) {
+  let art = {id: "a", ci: false}
+  let errs = artifact_flag_errors(art, "check-a", "", "make check-a\n", [])
+  assert_eq(errs.count, 1)
+  assert_eq(errs[0].contains("ci = false but `check-a` IS referenced"), true)
+}
+
+@test
+pipeline test_flag_errors_ci_missing_key_skips_both(task) {
+  // No `ci` key at all: neither the truthy nor the defensive branch fires.
+  let art = {id: "a"}
+  assert_eq(artifact_flag_errors(art, "check-a", "", "make check-a\n", []).count, 0)
+}
+
+@test
+pipeline test_flag_errors_make_all_missing_from_recipe(task) {
+  let art = {id: "a", make_all: true}
+  let errs = artifact_flag_errors(art, "check-a", "\tmake check-other\n", "", [])
+  assert_eq(errs.count, 1)
+  assert_eq(errs[0].contains("make_all = true but `check-a` is missing"), true)
+}
+
+@test
+pipeline test_flag_errors_make_all_present_ok(task) {
+  let art = {id: "a", make_all: true}
+  assert_eq(artifact_flag_errors(art, "check-a", "\tmake check-a\n", "", []).count, 0)
+}
+
+@test
+pipeline test_flag_errors_missing_output(task) {
+  let art = {id: "a", outputs: ["docs/gone.md"]}
+  let errs = artifact_flag_errors(art, "check-a", "", "", ["docs/gone.md"])
+  assert_eq(errs.count, 1)
+  assert_eq(errs[0], "[a] declared output does not exist: docs/gone.md")
+}
+
+@test
+pipeline test_flag_errors_empty_check_suppresses_flag_errors(task) {
+  // With an empty check, ci/make_all flag checks short-circuit (check != "").
+  let art = {id: "a", ci: true, make_all: true}
+  assert_eq(artifact_flag_errors(art, "", "", "", []).count, 0)
+}
+
+// --- completeness_errors --------------------------------------------------
+@test
+pipeline test_completeness_unregistered_gen(task) {
+  let errs = completeness_errors(["gen-foo"], [], [], [])
+  assert_eq(errs.count, 1)
+  assert_eq(errs[0].contains("Makefile target `gen-foo` generates an artifact"), true)
+}
+
+@test
+pipeline test_completeness_sync_prefix(task) {
+  let errs = completeness_errors(["sync-bar"], [], [], [])
+  assert_eq(errs.count, 1)
+  assert_eq(errs[0].contains("`sync-bar` generates an artifact"), true)
+}
+
+@test
+pipeline test_completeness_registered_gen_ok(task) {
+  assert_eq(completeness_errors(["gen-foo"], ["gen-foo"], [], []).count, 0)
+}
+
+@test
+pipeline test_completeness_unregistered_check(task) {
+  let errs = completeness_errors(["check-foo"], [], [], [])
+  assert_eq(errs.count, 1)
+  assert_eq(errs[0].contains("`check-foo` is a check but is neither registered"), true)
+}
+
+@test
+pipeline test_completeness_check_exempt_ok(task) {
+  assert_eq(completeness_errors(["check-foo"], [], [], ["check-foo"]).count, 0)
+}
+
+@test
+pipeline test_completeness_check_registered_ok(task) {
+  assert_eq(completeness_errors(["check-foo"], [], ["check-foo"], []).count, 0)
+}
+
+@test
+pipeline test_completeness_ignores_plain_targets(task) {
+  // Targets that are neither gen-/sync- nor check- are ignored entirely.
+  assert_eq(completeness_errors(["all", "build", "test"], [], [], []).count, 0)
+}
+
+// --- exempt_hygiene_errors ------------------------------------------------
+@test
+pipeline test_hygiene_overlap_flagged(task) {
+  let errs = exempt_hygiene_errors(["check-a", "check-b"], ["check-b"])
+  assert_eq(errs.count, 1)
+  assert_eq(errs[0].contains("`check-b` is both registered"), true)
+}
+
+@test
+pipeline test_hygiene_no_overlap(task) {
+  assert_eq(exempt_hygiene_errors(["check-a"], ["check-b"]).count, 0)
+}
+
+// --- validate (integration of the pure pieces) ----------------------------
+@test
+pipeline test_validate_clean(task) {
+  let artifacts = [{id: "h", check: "check-h", gen: "gen-h", ci: true, make_all: true, outputs: ["out.js"]}]
+  let errs = validate(artifacts, [], ["check-h", "gen-h"], "\tmake check-h\n", "make check-h\n", [])
+  assert_eq(errs, [])
+}
+
+@test
+pipeline test_validate_missing_check(task) {
+  let errs = validate([{id: "x"}], [], [], "", "", [])
+  assert_eq(errs.count, 1)
+  assert_eq(errs[0], "[x] missing required `check` target")
+}
+
+@test
+pipeline test_validate_missing_id_placeholder(task) {
+  // An artifact with no id uses the "<missing id>" placeholder.
+  let errs = validate([{check: "check-z"}], [], [], "", "", [])
+  assert_eq(errs[0], "[<missing id>] check target `check-z` is not defined in the Makefile")
+}
+
+@test
+pipeline test_validate_duplicate_id(task) {
+  let arts = [{id: "dup", check: "check-dup"}, {id: "dup", check: "check-dup"}]
+  let errs = validate(arts, [], ["check-dup"], "", "", [])
+  assert_eq(errs.contains("duplicate artifact id: dup"), true)
+}
+
+@test
+pipeline test_validate_gen_not_defined(task) {
+  let errs = validate([{id: "a", check: "check-a", gen: "gen-a"}], [], ["check-a"], "", "", [])
+  assert_eq(errs.contains("[a] gen target `gen-a` is not defined in the Makefile"), true)
+}

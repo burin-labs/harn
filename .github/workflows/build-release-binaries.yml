@@ -746,10 +746,16 @@ jobs:
           merge-multiple: true
 
       - name: Render release notes from changelog
+        # This job has no Rust toolchain (it only assembles artifacts), so
+        # run the Harn renderer with the just-built linux-x64 release binary
+        # rather than compiling from source. The tarball packs `harn` at its
+        # root; ubuntu-latest is x86_64.
         run: |
-          python3 scripts/render_release_notes.py \
+          tar xzf artifacts/harn-x86_64-unknown-linux-gnu.tar.gz harn
+          ./harn run scripts/render_release_notes.harn -- \
             --version "${{ needs.setup.outputs.version }}" \
             --output release-notes.md
+          rm -f harn
 
       - name: Generate SHA256SUMS
         # install.sh and `harn upgrade` fetch this manifest to verify the
