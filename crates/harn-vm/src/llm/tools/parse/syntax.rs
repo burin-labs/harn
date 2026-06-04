@@ -55,13 +55,40 @@ pub(super) fn strip_tool_call_wrappers(text: &str) -> std::borrow::Cow<'_, str> 
     if !TAGS.iter().any(|tag| text.contains(tag)) {
         return std::borrow::Cow::Borrowed(text);
     }
-    let mut result = text.to_string();
-    for tag in TAGS {
-        if result.contains(tag) {
-            result = result.replace(tag, "\n");
+    // Replace each wrapper tag with a newline, but copy quoted string spans and
+    // `<<TAG ... TAG` heredoc bodies through verbatim: a wrapper-tag literal
+    // inside a string/heredoc argument is file content, not structure, and
+    // stripping it would corrupt the value. Same content-vs-structure rule
+    // `find_close_tag` applies at the block boundary, here at the
+    // wrapper-stripping boundary.
+    let bytes = text.as_bytes();
+    let mut out = String::with_capacity(text.len());
+    let mut i = 0;
+    while i < text.len() {
+        if matches!(bytes[i], b'"' | b'\'' | b'`') {
+            if let Some(after) = skip_string_span(text, i) {
+                out.push_str(&text[i..after]);
+                i = after;
+                continue;
+            }
         }
+        if bytes[i] == b'<' && bytes.get(i + 1) == Some(&b'<') {
+            if let Some(after) = skip_heredoc_body(text, i) {
+                out.push_str(&text[i..after]);
+                i = after;
+                continue;
+            }
+        }
+        if let Some(tag) = TAGS.iter().find(|tag| text[i..].starts_with(**tag)) {
+            out.push('\n');
+            i += tag.len();
+            continue;
+        }
+        let ch_len = text[i..].chars().next().map_or(1, char::len_utf8);
+        out.push_str(&text[i..i + ch_len]);
+        i += ch_len;
     }
-    std::borrow::Cow::Owned(result)
+    std::borrow::Cow::Owned(out)
 }
 
 /// Match a balanced `<tag>...</tag>` block starting at `start` in `src`.
@@ -177,20 +204,40 @@ pub(super) fn strip_empty_fences(text: &str) -> String {
     re.replace_all(text, "").to_string()
 }
 
-/// Skip past a `<<TAG\n...\nTAG` heredoc body starting at `start` in `src`.
-/// Returns the byte position immediately after the closing tag (mirroring
-/// `Parser::parse_heredoc`'s rewind), or `None` when the heredoc is malformed
-/// or unterminated. Used by the top-level scanner so a stray-bytes chunker
-/// doesn't truncate bare `name({ key: <<EOF\n...\nEOF })` tool calls at the
-/// `<<` opener.
-pub(super) fn skip_heredoc_body(src: &str, start: usize) -> Option<usize> {
+/// A located `<<TAG ... TAG` heredoc body.
+pub(crate) struct HeredocSpan {
+    /// Byte range of the body content, with the trailing newline excluded
+    /// (matching `Parser::parse_heredoc`'s returned string).
+    pub content: std::ops::Range<usize>,
+    /// Byte offset immediately after the closing tag on its line.
+    pub end: usize,
+}
+
+/// Why a `<<` opener is not a complete heredoc. Carries the tag where one was
+/// read so the value parser can reproduce its precise model-facing diagnostics.
+pub(crate) enum HeredocError {
+    /// `<<` was not followed by an identifier tag (e.g. a bare shift operator).
+    MissingTag,
+    /// The opening `<<TAG` line was not terminated by a newline.
+    MissingNewline { tag: String },
+    /// End of input reached before a line opening with the closing tag.
+    Unterminated { tag: String },
+}
+
+/// The single authority for the `<<TAG\n...\nTAG` heredoc grammar shared by the
+/// TS value parser (`Parser::parse_heredoc`) and the top-level chunker
+/// (`skip_heredoc_body`). `start` must sit on the opening `<<`. The tag is any
+/// run of `[A-Za-z0-9_]`, optionally wrapped in `'`/`"`; the body runs to a
+/// line that — after leading whitespace — begins with the tag at a word
+/// boundary. Anything after the tag on the closing line is left to the caller.
+pub(crate) fn scan_heredoc(src: &str, start: usize) -> Result<HeredocSpan, HeredocError> {
     let bytes = src.as_bytes();
     if bytes.get(start) != Some(&b'<') || bytes.get(start + 1) != Some(&b'<') {
-        return None;
+        return Err(HeredocError::MissingTag);
     }
     let mut pos = start + 2;
-    let has_quote = matches!(bytes.get(pos), Some(b'\'') | Some(b'"'));
     let quote_char = bytes.get(pos).copied();
+    let has_quote = matches!(quote_char, Some(b'\'') | Some(b'"'));
     if has_quote {
         pos += 1;
     }
@@ -203,9 +250,9 @@ pub(super) fn skip_heredoc_body(src: &str, start: usize) -> Option<usize> {
         }
     }
     if pos == tag_start {
-        return None;
+        return Err(HeredocError::MissingTag);
     }
-    let tag = &src[tag_start..pos];
+    let tag = src[tag_start..pos].to_string();
     if has_quote && bytes.get(pos).copied() == quote_char {
         pos += 1;
     }
@@ -213,9 +260,10 @@ pub(super) fn skip_heredoc_body(src: &str, start: usize) -> Option<usize> {
         pos += 1;
     }
     if bytes.get(pos) != Some(&b'\n') {
-        return None;
+        return Err(HeredocError::MissingNewline { tag });
     }
     pos += 1;
+    let content_start = pos;
     while pos < bytes.len() {
         let line_start = pos;
         while let Some(byte) = bytes.get(pos) {
@@ -227,22 +275,142 @@ pub(super) fn skip_heredoc_body(src: &str, start: usize) -> Option<usize> {
         let line = &src[line_start..pos];
         let leading_ws_len = line.len() - line.trim_start().len();
         let after_ws = &line[leading_ws_len..];
-        if let Some(rest) = after_ws.strip_prefix(tag) {
+        if let Some(rest) = after_ws.strip_prefix(&tag) {
             let at_word_boundary = rest
                 .chars()
                 .next()
                 .is_none_or(|ch| !(ch.is_ascii_alphanumeric() || ch == '_'));
             if at_word_boundary {
-                return Some(line_start + leading_ws_len + tag.len());
+                let raw = &src[content_start..line_start];
+                let stripped = raw.strip_suffix('\n').unwrap_or(raw);
+                let stripped = stripped.strip_suffix('\r').unwrap_or(stripped);
+                return Ok(HeredocSpan {
+                    content: content_start..content_start + stripped.len(),
+                    end: line_start + leading_ws_len + tag.len(),
+                });
             }
         }
         if bytes.get(pos) == Some(&b'\n') {
             pos += 1;
         } else {
-            return None;
+            return Err(HeredocError::Unterminated { tag });
+        }
+    }
+    Err(HeredocError::Unterminated { tag })
+}
+
+/// Skip past a `<<TAG\n...\nTAG` heredoc body starting at `start` in `src`.
+/// Returns the byte position immediately after the closing tag, or `None` when
+/// the heredoc is malformed or unterminated. Used by the top-level scanner so a
+/// stray-bytes chunker doesn't truncate bare `name({ key: <<EOF\n...\nEOF })`
+/// tool calls at the `<<` opener.
+pub(super) fn skip_heredoc_body(src: &str, start: usize) -> Option<usize> {
+    scan_heredoc(src, start).ok().map(|span| span.end)
+}
+
+/// Outcome of searching for a tag while stepping over heredoc bodies.
+pub(super) enum CloseScan {
+    /// The tag begins at this byte offset, outside any heredoc body.
+    Found(usize),
+    /// A `<<TAG` heredoc opened but its closing tag line hasn't arrived yet —
+    /// the streaming caller must wait for more input; a buffered caller treats
+    /// this as "no usable close" (the block is truncated mid-heredoc).
+    NeedMore,
+    /// Scanned to the end without finding the tag outside a heredoc.
+    NotFound,
+}
+
+/// Skip a `"..."`, `'...'`, or `` `...` `` string span starting at `start`
+/// (which must sit on the opening quote). Returns the byte offset just past the
+/// closing quote, honoring `\`-escapes, or `None` when the string is
+/// unterminated. Lets the close-tag scan treat a `<<TAG` or a `</tool_call>`
+/// *inside a quoted argument* as content, not structure.
+fn skip_string_span(src: &str, start: usize) -> Option<usize> {
+    let bytes = src.as_bytes();
+    let quote = *bytes.get(start)?;
+    if !matches!(quote, b'"' | b'\'' | b'`') {
+        return None;
+    }
+    let mut i = start + 1;
+    while i < src.len() {
+        match bytes[i] {
+            b'\\' => {
+                i += 1;
+                if i < src.len() {
+                    i += src[i..].chars().next().map_or(1, char::len_utf8);
+                }
+            }
+            byte if byte == quote => return Some(i + 1),
+            _ => i += src[i..].chars().next().map_or(1, char::len_utf8),
         }
     }
     None
+}
+
+/// Find `needle` in `src[from..]`, stepping over quoted string spans and
+/// complete `<<TAG ... TAG` heredoc bodies so an occurrence inside either —
+/// a `</tool_call>` a model wrote as file content, or a bash `<<EOF` inside a
+/// `command` string — is treated as content, not as the structural close. A
+/// string or heredoc that is still incomplete yields [`CloseScan::NeedMore`].
+/// This is the one place that knows "where does a tagged block really end",
+/// shared by the buffered matcher, the truncation detector, and the streaming
+/// scanner.
+pub(super) fn find_close_tag(src: &str, from: usize, needle: &str) -> CloseScan {
+    let bytes = src.as_bytes();
+    let mut i = from;
+    while i < src.len() {
+        match bytes[i] {
+            b'"' | b'\'' | b'`' => match skip_string_span(src, i) {
+                Some(after) => {
+                    i = after;
+                    continue;
+                }
+                // Unterminated string: streaming waits, a buffered caller treats
+                // the block as truncated mid-string.
+                None => return CloseScan::NeedMore,
+            },
+            b'<' if bytes.get(i + 1) == Some(&b'<') => match scan_heredoc(src, i) {
+                Ok(span) => {
+                    i = span.end;
+                    continue;
+                }
+                Err(HeredocError::MissingNewline { .. })
+                | Err(HeredocError::Unterminated { .. }) => {
+                    return CloseScan::NeedMore;
+                }
+                // Not a heredoc (bare `<<`); fall through and treat as content.
+                Err(HeredocError::MissingTag) => {}
+            },
+            _ => {}
+        }
+        if src[i..].starts_with(needle) {
+            return CloseScan::Found(i);
+        }
+        i += src[i..].chars().next().map_or(1, char::len_utf8);
+    }
+    CloseScan::NotFound
+}
+
+/// Heredoc-aware variant of [`match_block`] for the `<tool_call>` tags: it skips
+/// `<<TAG ... TAG` bodies when locating `</tool_call>`, so a literal close tag
+/// inside a heredoc argument doesn't shred the call. Scoped to the tool-call
+/// tags — `match_block` stays a cheap `find` for the prose/done blocks that
+/// never carry heredocs.
+pub(super) fn match_tool_call_block<'a>(
+    src: &'a str,
+    start: usize,
+    tag: &str,
+) -> Option<(&'a str, usize)> {
+    let open = format!("<{tag}>");
+    if !src[start..].starts_with(&open) {
+        return None;
+    }
+    let body_start = start + open.len();
+    let close = format!("</{tag}>");
+    match find_close_tag(src, body_start, &close) {
+        CloseScan::Found(idx) => Some((&src[body_start..idx], idx + close.len())),
+        CloseScan::NeedMore | CloseScan::NotFound => None,
+    }
 }
 
 /// Length of a JavaScript-ish identifier starting at bytes[0]. Returns None

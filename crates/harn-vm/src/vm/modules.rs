@@ -356,9 +356,14 @@ impl Vm {
             self.imported_paths.push(canonical.clone());
 
             let source = std::fs::read_to_string(&file_path).map_err(|e| {
+                // Name the resolution base: relative imports resolve against the
+                // importing file's dir (or CWD when unset), so an error that
+                // prints only the joined path leaves the author guessing which
+                // base was used.
                 VmError::Runtime(format!(
-                    "Import error: cannot read '{}': {e}",
-                    file_path.display()
+                    "Import error: cannot read '{}' (resolved '{path}' relative to {}): {e}",
+                    file_path.display(),
+                    base.display()
                 ))
             })?;
             Arc::make_mut(&mut self.source_cache).insert(canonical.clone(), source.clone());

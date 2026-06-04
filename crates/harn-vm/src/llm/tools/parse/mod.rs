@@ -17,6 +17,7 @@ pub(crate) use bare::parse_bare_calls_in_body;
 pub(crate) use native_json::parse_native_json_tool_calls;
 pub(crate) use streaming::StreamingToolCallDetector;
 pub(crate) use syntax::ident_length;
+pub(crate) use syntax::{scan_heredoc, HeredocError};
 pub(crate) use tagged::parse_text_tool_calls_with_tools;
 
 /// Result of parsing a prose-interleaved TS tool-call stream.

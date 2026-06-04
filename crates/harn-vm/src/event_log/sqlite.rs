@@ -140,36 +140,9 @@ impl SqliteEventLog {
 
         let existing = tx
             .query_row(
-                "SELECT e.event_id, e.kind, e.payload, e.headers, e.occurred_at_ms
-                 FROM event_idempotency_keys k
-                 JOIN events e ON e.topic = k.topic AND e.event_id = k.event_id
-                 WHERE k.topic = ?1 AND k.key = ?2 AND k.value = ?3",
+                IDEMPOTENT_LOOKUP_SQL,
                 params![topic.as_str(), header, value],
-                |row| {
-                    let payload = sqlite_json_bytes_for_row(row, 2, "payload")?;
-                    let headers: String = row.get(3)?;
-                    Ok((
-                        sqlite_i64_to_event_id_for_row(row.get::<_, i64>(0)?)?,
-                        LogEvent {
-                            kind: row.get(1)?,
-                            payload: serde_json::from_slice(&payload).map_err(|error| {
-                                rusqlite::Error::FromSqlConversionFailure(
-                                    payload.len(),
-                                    rusqlite::types::Type::Blob,
-                                    Box::new(error),
-                                )
-                            })?,
-                            headers: serde_json::from_str(&headers).map_err(|error| {
-                                rusqlite::Error::FromSqlConversionFailure(
-                                    headers.len(),
-                                    rusqlite::types::Type::Text,
-                                    Box::new(error),
-                                )
-                            })?,
-                            occurred_at_ms: row.get(4)?,
-                        },
-                    ))
-                },
+                decode_id_event_row,
             )
             .optional()
             .map_err(|error| {
@@ -211,31 +184,7 @@ impl SqliteEventLog {
                  ORDER BY event_id DESC
                  LIMIT 1",
                 params![topic.as_str(), event_id_sql],
-                |row| {
-                    let payload = sqlite_json_bytes_for_row(row, 2, "payload")?;
-                    let headers: String = row.get(3)?;
-                    Ok((
-                        sqlite_i64_to_event_id_for_row(row.get::<_, i64>(0)?)?,
-                        LogEvent {
-                            kind: row.get(1)?,
-                            payload: serde_json::from_slice(&payload).map_err(|error| {
-                                rusqlite::Error::FromSqlConversionFailure(
-                                    payload.len(),
-                                    rusqlite::types::Type::Blob,
-                                    Box::new(error),
-                                )
-                            })?,
-                            headers: serde_json::from_str(&headers).map_err(|error| {
-                                rusqlite::Error::FromSqlConversionFailure(
-                                    headers.len(),
-                                    rusqlite::types::Type::Text,
-                                    Box::new(error),
-                                )
-                            })?,
-                            occurred_at_ms: row.get(4)?,
-                        },
-                    ))
-                },
+                decode_id_event_row,
             )
             .optional()
             .map_err(|error| LogError::Sqlite(format!("event log previous read error: {error}")))?;
@@ -282,6 +231,68 @@ impl SqliteEventLog {
             inserted: true,
         })
     }
+
+    /// Look up the event previously appended under `(header, value)` via the
+    /// indexed `event_idempotency_keys` JOIN — the read counterpart of
+    /// [`Self::append_idempotent_by_header`]. O(log N) on the index instead of
+    /// scanning the topic, which is what makes durable-step replay cheap.
+    pub(super) fn read_idempotent_by_header(
+        &self,
+        topic: &Topic,
+        header: &str,
+        value: &str,
+    ) -> Result<Option<(EventId, LogEvent)>, LogError> {
+        let connection = self
+            .connection
+            .lock()
+            .expect("sqlite event log connection poisoned");
+        connection
+            .query_row(
+                IDEMPOTENT_LOOKUP_SQL,
+                params![topic.as_str(), header, value],
+                decode_id_event_row,
+            )
+            .optional()
+            .map_err(|error| LogError::Sqlite(format!("event log idempotency read error: {error}")))
+    }
+}
+
+/// The `(topic, header, value) -> event` JOIN against the idempotency index,
+/// shared by the append-time existence check and the read counterpart.
+const IDEMPOTENT_LOOKUP_SQL: &str =
+    "SELECT e.event_id, e.kind, e.payload, e.headers, e.occurred_at_ms
+     FROM event_idempotency_keys k
+     JOIN events e ON e.topic = k.topic AND e.event_id = k.event_id
+     WHERE k.topic = ?1 AND k.key = ?2 AND k.value = ?3";
+
+/// Decode a `(event_id, kind, payload, headers, occurred_at_ms)` row (in that
+/// column order) into an `(EventId, LogEvent)`. Shared by the idempotency
+/// lookup, the previous-event read, and `read_idempotent_by_header` so the
+/// row-shape decode lives in exactly one place.
+fn decode_id_event_row(row: &rusqlite::Row) -> rusqlite::Result<(EventId, LogEvent)> {
+    let payload = sqlite_json_bytes_for_row(row, 2, "payload")?;
+    let headers: String = row.get(3)?;
+    Ok((
+        sqlite_i64_to_event_id_for_row(row.get::<_, i64>(0)?)?,
+        LogEvent {
+            kind: row.get(1)?,
+            payload: serde_json::from_slice(&payload).map_err(|error| {
+                rusqlite::Error::FromSqlConversionFailure(
+                    payload.len(),
+                    rusqlite::types::Type::Blob,
+                    Box::new(error),
+                )
+            })?,
+            headers: serde_json::from_str(&headers).map_err(|error| {
+                rusqlite::Error::FromSqlConversionFailure(
+                    headers.len(),
+                    rusqlite::types::Type::Text,
+                    Box::new(error),
+                )
+            })?,
+            occurred_at_ms: row.get(4)?,
+        },
+    ))
 }
 
 impl EventLog for SqliteEventLog {
@@ -329,31 +340,7 @@ impl EventLog for SqliteEventLog {
                  ORDER BY event_id DESC
                  LIMIT 1",
                 params![topic.as_str(), event_id_sql],
-                |row| {
-                    let payload = sqlite_json_bytes_for_row(row, 2, "payload")?;
-                    let headers: String = row.get(3)?;
-                    Ok((
-                        sqlite_i64_to_event_id_for_row(row.get::<_, i64>(0)?)?,
-                        LogEvent {
-                            kind: row.get(1)?,
-                            payload: serde_json::from_slice(&payload).map_err(|error| {
-                                rusqlite::Error::FromSqlConversionFailure(
-                                    payload.len(),
-                                    rusqlite::types::Type::Blob,
-                                    Box::new(error),
-                                )
-                            })?,
-                            headers: serde_json::from_str(&headers).map_err(|error| {
-                                rusqlite::Error::FromSqlConversionFailure(
-                                    headers.len(),
-                                    rusqlite::types::Type::Text,
-                                    Box::new(error),
-                                )
-                            })?,
-                            occurred_at_ms: row.get(4)?,
-                        },
-                    ))
-                },
+                decode_id_event_row,
             )
             .optional()
             .map_err(|error| LogError::Sqlite(format!("event log previous read error: {error}")))?;

@@ -80,6 +80,21 @@ async fn exercise_idempotent_append(log: Arc<AnyEventLog>) {
     let events = log.read_range(&topic, None, usize::MAX).await.unwrap();
     assert_eq!(events.len(), 1);
     assert_eq!(events[0].0, first.event_id);
+
+    // The indexed read counterpart resolves the same event by header...
+    let found = log
+        .read_idempotent_by_header(&topic, "harn.channel.id", "event-1")
+        .await
+        .unwrap();
+    let (found_id, found_event) = found.expect("idempotent read should find the appended event");
+    assert_eq!(found_id, first.event_id);
+    assert_eq!(found_event.payload, serde_json::json!({"n": 1}));
+    // ...and reports a miss for an unknown value rather than scanning forever.
+    let missing = log
+        .read_idempotent_by_header(&topic, "harn.channel.id", "event-404")
+        .await
+        .unwrap();
+    assert!(missing.is_none());
 }
 
 #[tokio::test(flavor = "current_thread")]

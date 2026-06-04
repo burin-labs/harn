@@ -162,6 +162,24 @@ impl FileEventLog {
         self.append_record_locked(topic, next_id, event)
     }
 
+    /// Read counterpart of [`Self::append_idempotent_by_header`]. The file
+    /// backend has no header index, so this scans the topic — acceptable for a
+    /// dev/test backend (SQLite is the durable default).
+    pub(super) fn read_idempotent_by_header(
+        &self,
+        topic: &Topic,
+        header: &str,
+        value: &str,
+    ) -> Result<Option<(EventId, LogEvent)>, LogError> {
+        let events = self.read_range_sync(topic, None, usize::MAX)?;
+        Ok(events.into_iter().find(|(_, event)| {
+            event
+                .headers
+                .get(header)
+                .is_some_and(|found| found == value)
+        }))
+    }
+
     fn append_record_locked(
         &self,
         topic: &Topic,

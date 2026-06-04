@@ -97,6 +97,30 @@ impl MemoryEventLog {
             inserted: true,
         })
     }
+
+    /// Read counterpart of [`Self::append_idempotent_by_header`]. The in-memory
+    /// backend has no header index, so this scans the topic — acceptable for a
+    /// dev/test backend (SQLite is the durable default).
+    pub(super) async fn read_idempotent_by_header(
+        &self,
+        topic: &Topic,
+        header: &str,
+        value: &str,
+    ) -> Result<Option<(EventId, LogEvent)>, LogError> {
+        let state = self.state()?;
+        Ok(state
+            .topics
+            .get(topic.as_str())
+            .into_iter()
+            .flat_map(|events| events.iter())
+            .find(|(_, event)| {
+                event
+                    .headers
+                    .get(header)
+                    .is_some_and(|found| found == value)
+            })
+            .map(|(event_id, event)| (*event_id, event.clone())))
+    }
 }
 
 impl EventLog for MemoryEventLog {

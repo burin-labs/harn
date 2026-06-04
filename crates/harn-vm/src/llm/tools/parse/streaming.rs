@@ -41,7 +41,7 @@ use super::super::{
     TEXT_TOOL_CALL_CLOSE, TEXT_TOOL_CALL_CLOSE_COMPACT, TEXT_TOOL_CALL_OPEN,
     TEXT_TOOL_CALL_OPEN_COMPACT,
 };
-use super::syntax::{ident_length, parse_ts_call_from};
+use super::syntax::{find_close_tag, ident_length, parse_ts_call_from, CloseScan};
 
 /// Streaming candidate detector for text-mode tool calls.
 ///
@@ -331,10 +331,13 @@ impl StreamingToolCallDetector {
             } => (*body_start, *close_tag, tool_call_id.clone()),
             _ => return false,
         };
-        let Some(close_rel) = self.buffer[body_start..].find(close_tag) else {
-            return false;
+        // Skip over complete heredoc bodies so a literal `</tool_call>` inside a
+        // multiline string argument doesn't fire an early close; an incomplete
+        // heredoc (`NeedMore`) means we wait for more deltas.
+        let body_end = match find_close_tag(&self.buffer, body_start, close_tag) {
+            CloseScan::Found(idx) => idx,
+            CloseScan::NeedMore | CloseScan::NotFound => return false,
         };
-        let body_end = body_start + close_rel;
         let after = body_end + close_tag.len();
         let body = self.buffer[body_start..body_end].trim().to_string();
         let parse_attempt = if body.is_empty() {
@@ -627,6 +630,35 @@ mod tests {
         assert_eq!(status, ToolCallStatus::Failed);
         assert_eq!(parsing, Some(false));
         assert_eq!(cat, Some(ToolCallErrorCategory::ParseAborted));
+    }
+
+    #[test]
+    fn tagged_candidate_waits_for_incomplete_heredoc_then_promotes() {
+        // The heredoc body arrives split across deltas, and its body even
+        // contains a literal `</tool_call>`. While `EOF` hasn't landed on its
+        // own line the close scan returns `NeedMore` and the detector must wait
+        // (not abort or fire early on the in-heredoc `</tool_call>`). Once the
+        // heredoc closes and the real `</tool_call>` arrives, it promotes.
+        let mut det = detector(&["edit"]);
+        let events = run(
+            &[
+                "<tool_call>\nedit({ path: \"d.md\", content: <<EOF\nline one",
+                "\nmore </tool_call> text\nEOF\n })</tool_call>",
+            ],
+            &mut det,
+        );
+        let (start_id, _, parsing) = unwrap_call(&events[0]);
+        assert_eq!(parsing, Some(true));
+        let terminal = events.last().expect("a terminal event");
+        let (terminal_id, name, status, parsing, cat) = unwrap_update(terminal);
+        assert_eq!(start_id, terminal_id, "ids match across promote");
+        assert_eq!(name, "edit");
+        assert_eq!(status, ToolCallStatus::Pending);
+        assert_eq!(parsing, Some(false));
+        assert!(
+            cat.is_none(),
+            "must not abort on the in-heredoc </tool_call>: events={events:#?}"
+        );
     }
 
     #[test]

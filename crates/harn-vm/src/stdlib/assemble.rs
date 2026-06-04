@@ -116,41 +116,24 @@ fn value_as_float(value: &VmValue) -> Option<f64> {
     }
 }
 
-/// Compact VM representation of a chunk for the ranker callback.
-fn chunk_to_ranker_vm(chunk: &AssembledChunk) -> VmValue {
+/// The one canonical `AssembledChunk` → VM dict builder, shared by the
+/// ranker-input representation and the `assemble_context` result so the chunk
+/// you score is key-for-key the chunk you get back. `with_score` adds the
+/// result-only `score` field; a key added here can never desync the two sites.
+fn chunk_to_vm(chunk: &AssembledChunk, with_score: bool) -> VmValue {
+    fn str_val(value: &str) -> VmValue {
+        VmValue::String(std::sync::Arc::from(value))
+    }
+    fn opt_str(value: Option<&String>) -> VmValue {
+        value.map(|value| str_val(value)).unwrap_or(VmValue::Nil)
+    }
     let mut map = BTreeMap::new();
-    map.insert(
-        "id".to_string(),
-        VmValue::String(std::sync::Arc::from(chunk.id.as_str())),
-    );
-    map.insert(
-        "artifact_id".to_string(),
-        VmValue::String(std::sync::Arc::from(chunk.artifact_id.as_str())),
-    );
-    map.insert(
-        "artifact_kind".to_string(),
-        VmValue::String(std::sync::Arc::from(chunk.artifact_kind.as_str())),
-    );
-    if let Some(title) = chunk.title.as_ref() {
-        map.insert(
-            "title".to_string(),
-            VmValue::String(std::sync::Arc::from(title.as_str())),
-        );
-    } else {
-        map.insert("title".to_string(), VmValue::Nil);
-    }
-    if let Some(source) = chunk.source.as_ref() {
-        map.insert(
-            "source".to_string(),
-            VmValue::String(std::sync::Arc::from(source.as_str())),
-        );
-    } else {
-        map.insert("source".to_string(), VmValue::Nil);
-    }
-    map.insert(
-        "text".to_string(),
-        VmValue::String(std::sync::Arc::from(chunk.text.as_str())),
-    );
+    map.insert("id".to_string(), str_val(&chunk.id));
+    map.insert("artifact_id".to_string(), str_val(&chunk.artifact_id));
+    map.insert("artifact_kind".to_string(), str_val(&chunk.artifact_kind));
+    map.insert("title".to_string(), opt_str(chunk.title.as_ref()));
+    map.insert("source".to_string(), opt_str(chunk.source.as_ref()));
+    map.insert("text".to_string(), str_val(&chunk.text));
     map.insert(
         "estimated_tokens".to_string(),
         VmValue::Int(chunk.estimated_tokens as i64),
@@ -163,7 +146,15 @@ fn chunk_to_ranker_vm(chunk: &AssembledChunk) -> VmValue {
         "chunk_count".to_string(),
         VmValue::Int(chunk.chunk_count as i64),
     );
+    if with_score {
+        map.insert("score".to_string(), VmValue::Float(chunk.score));
+    }
     VmValue::Dict(std::sync::Arc::new(map))
+}
+
+/// Compact VM representation of a chunk for the ranker callback (no score yet).
+fn chunk_to_ranker_vm(chunk: &AssembledChunk) -> VmValue {
+    chunk_to_vm(chunk, false)
 }
 
 async fn invoke_ranker_callback(
@@ -214,55 +205,7 @@ fn assembled_to_vm(assembled: &AssembledContext) -> VmValue {
     let chunks: Vec<VmValue> = assembled
         .chunks
         .iter()
-        .map(|chunk| {
-            let mut map = BTreeMap::new();
-            map.insert(
-                "id".to_string(),
-                VmValue::String(std::sync::Arc::from(chunk.id.as_str())),
-            );
-            map.insert(
-                "artifact_id".to_string(),
-                VmValue::String(std::sync::Arc::from(chunk.artifact_id.as_str())),
-            );
-            map.insert(
-                "artifact_kind".to_string(),
-                VmValue::String(std::sync::Arc::from(chunk.artifact_kind.as_str())),
-            );
-            map.insert(
-                "title".to_string(),
-                chunk
-                    .title
-                    .as_ref()
-                    .map(|title| VmValue::String(std::sync::Arc::from(title.as_str())))
-                    .unwrap_or(VmValue::Nil),
-            );
-            map.insert(
-                "source".to_string(),
-                chunk
-                    .source
-                    .as_ref()
-                    .map(|source| VmValue::String(std::sync::Arc::from(source.as_str())))
-                    .unwrap_or(VmValue::Nil),
-            );
-            map.insert(
-                "text".to_string(),
-                VmValue::String(std::sync::Arc::from(chunk.text.as_str())),
-            );
-            map.insert(
-                "estimated_tokens".to_string(),
-                VmValue::Int(chunk.estimated_tokens as i64),
-            );
-            map.insert(
-                "chunk_index".to_string(),
-                VmValue::Int(chunk.chunk_index as i64),
-            );
-            map.insert(
-                "chunk_count".to_string(),
-                VmValue::Int(chunk.chunk_count as i64),
-            );
-            map.insert("score".to_string(), VmValue::Float(chunk.score));
-            VmValue::Dict(std::sync::Arc::new(map))
-        })
+        .map(|chunk| chunk_to_vm(chunk, true))
         .collect();
 
     let included: Vec<VmValue> = assembled

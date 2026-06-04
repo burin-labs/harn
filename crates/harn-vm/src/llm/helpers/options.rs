@@ -4,6 +4,7 @@
 
 use std::collections::BTreeMap;
 
+use crate::stdlib::xml::escape_xml_text;
 use crate::value::{VmError, VmValue};
 
 use super::{
@@ -981,13 +982,6 @@ impl RenderedReminder {
                 .to_string(),
         }
     }
-}
-
-fn escape_xml_text(input: &str) -> String {
-    input
-        .replace('&', "&amp;")
-        .replace('<', "&lt;")
-        .replace('>', "&gt;")
 }
 
 fn reminder_xml_text(reminder: &SystemReminder) -> String {

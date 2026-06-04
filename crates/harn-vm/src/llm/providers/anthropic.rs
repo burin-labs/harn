@@ -17,6 +17,8 @@ thread_local! {
         RefCell::new(HashSet::new());
     static ANTHROPIC_ADAPTIVE_WARN_ONCE: RefCell<HashSet<String>> =
         RefCell::new(HashSet::new());
+    static ANTHROPIC_FORCED_JSON_WARN_ONCE: RefCell<HashSet<String>> =
+        RefCell::new(HashSet::new());
 }
 
 /// Parse the (major, minor) generation out of a Claude model ID. Handles
@@ -290,10 +292,11 @@ impl AnthropicProvider {
                         "type": "object",
                         "additionalProperties": true
                     }),
+                    &opts.model,
                 );
             }
             crate::llm::api::OutputFormat::JsonSchema { schema, .. } => {
-                force_json_via_tool_use(&mut body, schema);
+                force_json_via_tool_use(&mut body, schema, &opts.model);
             }
         }
         match &opts.thinking {
@@ -358,7 +361,21 @@ fn sanitize_anthropic_tool_for_request(tool: &serde_json::Value) -> serde_json::
     tool
 }
 
-fn force_json_via_tool_use(body: &mut serde_json::Value, schema: &serde_json::Value) {
+fn force_json_via_tool_use(body: &mut serde_json::Value, schema: &serde_json::Value, model: &str) {
+    // Forced structured output and open tool use are mutually exclusive on
+    // Anthropic: we pin `tool_choice` to the synthetic `json_response` tool,
+    // which overrides any caller-supplied `tool_choice` and makes the caller's
+    // own tools unreachable this turn. Structured output deliberately wins (the
+    // caller explicitly requested an `output_format`), but warn once per model
+    // so the override isn't silent — it used to clobber both with no signal.
+    let had_native_tools = body
+        .get("tools")
+        .and_then(|tools| tools.as_array())
+        .is_some_and(|tools| !tools.is_empty());
+    let had_tool_choice = body.get("tool_choice").is_some();
+    if had_native_tools || had_tool_choice {
+        warn_forced_json_overrides_tools(model);
+    }
     body["tools"] = {
         let mut tools = body["tools"].as_array().cloned().unwrap_or_default();
         tools.push(serde_json::json!({
@@ -369,6 +386,22 @@ fn force_json_via_tool_use(body: &mut serde_json::Value, schema: &serde_json::Va
         serde_json::json!(tools)
     };
     body["tool_choice"] = serde_json::json!({"type": "tool", "name": "json_response"});
+}
+
+fn warn_forced_json_overrides_tools(model: &str) {
+    ANTHROPIC_FORCED_JSON_WARN_ONCE.with(|seen| {
+        let mut seen = seen.borrow_mut();
+        if seen.insert(model.to_string()) {
+            crate::events::log_warn(
+                "llm.structured_output",
+                &format!(
+                    "structured output (output_format) requested for {model} alongside \
+                     native tools or a tool_choice; forcing the json_response tool, which \
+                     overrides tool_choice and makes the other tools unreachable this turn",
+                ),
+            );
+        }
+    });
 }
 
 #[cfg(test)]
@@ -596,6 +629,42 @@ mod tests {
         assert_eq!(
             json_tool["input_schema"]["properties"]["answer"]["type"],
             "string"
+        );
+    }
+
+    #[test]
+    fn forced_json_overrides_caller_tools_and_tool_choice() {
+        // Caller supplies their own native tool AND tool_choice, then also asks
+        // for structured output. Structured output wins (the documented
+        // precedence) instead of silently leaving the caller's tool_choice in
+        // place: tool_choice is pinned to json_response and that tool is added,
+        // while the caller's tool is preserved in the array (just unreachable).
+        let mut payload = base_payload();
+        payload.native_tools = Some(vec![serde_json::json!({
+            "name": "lookup",
+            "description": "look something up",
+            "input_schema": {"type": "object"},
+        })]);
+        payload.tool_choice = Some(serde_json::json!({"type": "auto"}));
+        payload.output_format = crate::llm::api::OutputFormat::JsonObject;
+
+        let body = AnthropicProvider::build_request_body(&payload);
+
+        assert_eq!(
+            body["tool_choice"],
+            serde_json::json!({"type": "tool", "name": "json_response"}),
+            "structured output must win over the caller's tool_choice"
+        );
+        let tool_names: Vec<&str> = body["tools"]
+            .as_array()
+            .expect("tools array")
+            .iter()
+            .filter_map(|tool| tool.get("name").and_then(|value| value.as_str()))
+            .collect();
+        assert!(tool_names.contains(&"json_response"));
+        assert!(
+            tool_names.contains(&"lookup"),
+            "the caller's tool is preserved, not dropped: {tool_names:?}"
         );
     }
 

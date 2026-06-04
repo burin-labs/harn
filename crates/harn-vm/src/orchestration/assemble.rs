@@ -15,6 +15,7 @@ use std::collections::BTreeSet;
 use sha2::{Digest, Sha256};
 
 use super::ArtifactRecord;
+use crate::stdlib::xml::escape_xml_text;
 
 /// Strategy used to order chunks when packing into the budget.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -712,10 +713,10 @@ pub fn render_assembled_chunks(assembled: &AssembledContext) -> String {
         parts.push(format!(
             "<artifact>\n<title>{}</title>\n<kind>{}</kind>\n<source>{}</source>\n\
 <chunk_id>{}</chunk_id>\n<chunk_index>{} of {}</chunk_index>\n<body>\n{}\n</body>\n</artifact>",
-            escape_xml(&title),
-            escape_xml(&chunk.artifact_kind),
-            escape_xml(chunk.source.as_deref().unwrap_or("unknown")),
-            escape_xml(&chunk.id),
+            escape_xml_text(&title),
+            escape_xml_text(&chunk.artifact_kind),
+            escape_xml_text(chunk.source.as_deref().unwrap_or("unknown")),
+            escape_xml_text(&chunk.id),
             chunk.chunk_index + 1,
             chunk.chunk_count,
             chunk.text,
@@ -729,12 +730,6 @@ pub fn render_assembled_chunks(assembled: &AssembledContext) -> String {
         assembled.dedup.as_str(),
     ));
     parts.join("\n\n")
-}
-
-fn escape_xml(text: &str) -> String {
-    text.replace('&', "&amp;")
-        .replace('<', "&lt;")
-        .replace('>', "&gt;")
 }
 
 #[cfg(test)]
