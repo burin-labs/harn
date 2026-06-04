@@ -1907,3 +1907,41 @@ fn test_optional_method_call_args_dont_overcount_multiline_receiver() {
     );
     assert_roundtrip(source);
 }
+
+#[test]
+fn test_roundtrip_plain_raw_string_keeps_no_hashes() {
+    // A raw string without `"` must not gain hashes.
+    let source = "pipeline default(task) { let p = r\"\\d+\" }";
+    let result = format_source(source).unwrap();
+    assert!(
+        result.contains("r\"\\d+\""),
+        "plain raw string should stay r\"...\":\n{result}"
+    );
+    assert_roundtrip(source);
+}
+
+#[test]
+fn test_roundtrip_hashed_raw_string_with_quote() {
+    // A raw string containing `"` must format with the hashed delimiter
+    // (otherwise the output would re-lex incorrectly).
+    let source = "pipeline default(task) { let p = r#\"\"([^\"]*)\"\"# }";
+    let result = format_source(source).unwrap();
+    assert!(
+        result.contains("r#\"\"([^\"]*)\"\"#"),
+        "raw string with quotes must keep the hashed delimiter:\n{result}"
+    );
+    assert_roundtrip(source);
+}
+
+#[test]
+fn test_raw_string_with_quote_never_emits_bare_delimiter() {
+    // Regression guard: a quote-bearing raw string must never be emitted as
+    // r"...", which would terminate at the inner quote and corrupt the source.
+    let source = "pipeline default(task) { let p = r#\"a\"b\"# }";
+    let result = format_source(source).unwrap();
+    assert!(
+        !result.contains("r\"a\"b\""),
+        "must not emit a bare r\"...\" around an embedded quote:\n{result}"
+    );
+    assert_roundtrip(source);
+}

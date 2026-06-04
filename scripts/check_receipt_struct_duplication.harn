@@ -1,0 +1,152 @@
+// Reject duplicated receipt envelope structs outside harn-vm receipts.
+//
+// A `pub struct` anywhere in the workspace that re-declares the full
+// `{parent_run_id, trace_id, cost_usd}` field trio is almost always a
+// hand-rolled copy of `harn_vm::receipts::Receipt`. Use the canonical
+// type (or a projection derived from it) instead.
+//
+// Ported from scripts/check_receipt_struct_duplication.py. The Harn
+// version is behavior-identical: same skip set, same canonical-dir
+// exclusion, same field trio, same `path:line: pub struct Name` output.
+let CANONICAL_DIR = "crates/harn-vm/src/receipts"
+
+// The trio that, taken together, identifies a receipt-envelope copy.
+let FIELD_NAMES = ["parent_run_id", "trace_id", "cost_usd"]
+
+// Directory components that never hold first-party source we should scan.
+let SKIP_PARTS = [".git", "target", "node_modules", "portal-dist", "docs"]
+
+/**
+ * True when any path component of `rel` (a repo-relative path) is in the
+ * skip set — mirrors Python's `any(part in SKIP_PARTS for part in parts)`.
+ */
+pub fn is_skipped(rel: string) -> bool {
+  for part in rel.split("/") {
+    if SKIP_PARTS.contains(part) {
+      return true
+    }
+  }
+  return false
+}
+
+/**
+ * Strip Rust line (`// ...`) and block (`/* ... */`) comments so field
+ * and struct matches don't fire inside commented-out code. Matches the
+ * Python `re.sub` pair (the block form uses the `s` flag for DOTALL).
+ */
+pub fn strip_comments(text: string) -> string {
+  let no_line = regex_replace_all(r"//.*", "", text)
+  return regex_replace_all(r"/\*.*?\*/", "", no_line, "s")
+}
+
+/**
+ * Given the comment-stripped source `text` and the char offset of an
+ * opening brace, return the substring from that brace up to (but not
+ * including) its matching close brace — or `nil` if unbalanced. Mirrors
+ * the depth-counting scan in the Python `find_public_structs`.
+ */
+pub fn brace_body(text: string, open_idx: int) -> string? {
+  var depth = 0
+  var i = open_idx
+  let n = text.len()
+  while i < n {
+    let ch = text.char_at(i)
+    if ch == "{" {
+      depth = depth + 1
+    } else if ch == "}" {
+      depth = depth - 1
+      if depth == 0 {
+        return text.substring(open_idx, i)
+      }
+    }
+    i = i + 1
+  }
+  return nil
+}
+
+/**
+ * Find every `pub struct Name { ... }` in `text` and return
+ * `{name, line, body}` records. `line` is 1-based (from the match's
+ * reported line) and `body` is the brace-matched struct body.
+ */
+pub fn find_public_structs(text: string) -> list {
+  var out: list = []
+  for m in regex_captures(r"\bpub\s+struct\s+([A-Za-z_][A-Za-z0-9_]*)\s*\{", text) {
+    let name = m.groups[0]
+    // The match ends at the opening brace, so `end - 1` is its index.
+    let open_idx = m.end - 1
+    let body = brace_body(text, open_idx)
+    if body != nil {
+      out = out + [{name: name, line: m.line, body: body}]
+    }
+  }
+  return out
+}
+
+/**
+ * True when `body` declares every field in `FIELD_NAMES` as `pub`.
+ * Equivalent to Python's `fields == FIELD_NAMES` set comparison.
+ */
+pub fn body_has_full_trio(body: string) -> bool {
+  for field in FIELD_NAMES {
+    if regex_captures(r"\bpub\s+" + field + r"\s*:", body).count == 0 {
+      return false
+    }
+  }
+  return true
+}
+
+/**
+ * Scan one file's `text` and return violation strings of the form
+ * `rel:line: pub struct Name`. Pure (no filesystem) so tests can drive it.
+ */
+pub fn violations_in_text(rel: string, text: string) -> list<string> {
+  var out: list<string> = []
+  let stripped = strip_comments(text)
+  for s in find_public_structs(stripped) {
+    if body_has_full_trio(s.body) {
+      out = out + ["${rel}:${s.line}: pub struct ${s.name}"]
+    }
+  }
+  return out
+}
+
+/**
+ * Repo-relative path for a recursive-glob result. Glob yields absolute
+ * paths with a `/./` marker between the search root and the matched
+ * suffix (e.g. `/abs/root/./crates/foo.rs`); the suffix is exactly the
+ * Python `relative_to(ROOT)` form. Falls back to the raw path if the
+ * marker is absent.
+ */
+pub fn rel_path(path: string) -> string {
+  let idx = path.index_of("/./")
+  if idx >= 0 {
+    return path.substring(idx + 3, path.len())
+  }
+  return path
+}
+
+pipeline main(task) {
+  var violations: list<string> = []
+  for path in harness.fs.glob("**/*.rs") {
+    let rel = rel_path(path)
+    if is_skipped(rel) {
+      continue
+    }
+    if rel.starts_with(CANONICAL_DIR) {
+      continue
+    }
+    let text = harness.fs.read_text(path)
+    violations = violations + violations_in_text(rel, text)
+  }
+  if violations.count == 0 {
+    return 0
+  }
+  __io_eprintln(
+    "Receipt envelope duplication detected. Use `harn_vm::receipts::Receipt` or a projection derived from it instead.",
+  )
+  for v in violations {
+    __io_eprintln("  ${v}")
+  }
+  return 1
+}

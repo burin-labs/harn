@@ -652,7 +652,7 @@ For interactive terminal presentation, import `std/tui`. It provides
 | `regex_match(pattern, text, flags?)` | pattern: string, text: string, flags: string | list or nil | Find all non-overlapping matches. Optional flags: `i`, `m`, `s`, `x` |
 | `regex_split(text, pattern, flags?)` | text: string, pattern: string, flags: string | list | Split text by regex matches |
 | `regex_replace(pattern, replacement, text, flags?)` | pattern: string, replacement: string, text: string, flags: string | string | Replace all matches. Optional flags: `i`, `m`, `s`, `x`. Throws on invalid regex |
-| `regex_captures(pattern, text)` | pattern: string, text: string | list | Find all matches with capture group details |
+| `regex_captures(pattern, text, flags?)` | pattern: string, text: string, flags: string | list | Find all matches with capture group details and positions. Optional flags: `i`, `m`, `s`, `x` |
 
 ### regex_captures
 
@@ -660,13 +660,17 @@ Returns a list of dicts, one per match. Each dict contains:
 
 - `match` -- the full matched string
 - `groups` -- a list of positional capture group values (from `(...)`)
+- `start` / `end` -- character (code-point) offsets of the match in `text`,
+  consistent with `substring`/`index_of`/`len`
+- `line` -- 1-based line of the match start (the equivalent of
+  `text.count("\n", 0, start) + 1`), for positional diagnostics
 - Named capture groups (from `(?P<name>...)`) appear as additional keys
 
 ```harn
 let results = regex_captures("(\\w+)@(\\w+)", "alice@example bob@test")
 // [
-//   {match: "alice@example", groups: ["alice", "example"]},
-//   {match: "bob@test", groups: ["bob", "test"]}
+//   {match: "alice@example", groups: ["alice", "example"], start: 0, end: 13, line: 1},
+//   {match: "bob@test", groups: ["bob", "test"], start: 14, end: 22, line: 1}
 // ]
 ```
 
