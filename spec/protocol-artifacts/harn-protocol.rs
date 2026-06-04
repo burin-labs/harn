@@ -83,6 +83,9 @@ pub const ACP_DISPATCHED_METHOD_SESSION_REMIND: &str = "session/remind";
 pub const ACP_DISPATCHED_METHOD_SESSION_PENDING_INJECTIONS: &str = "session/pending_injections";
 pub const ACP_DISPATCHED_METHOD_SESSION_REVOKE_REMINDER: &str = "session/revoke_reminder";
 pub const ACP_DISPATCHED_METHOD_SESSION_LIST: &str = "session/list";
+pub const ACP_DISPATCHED_METHOD_HARN_SESSION_WORKSPACE_ROOTS: &str = "harn.session_workspace_roots";
+pub const ACP_DISPATCHED_METHOD_HARN_SESSION_ADD_ROOT: &str = "harn.session_add_root";
+pub const ACP_DISPATCHED_METHOD_HARN_SESSION_REANCHOR: &str = "harn.session_reanchor";
 pub const ACP_DISPATCHED_METHOD_AGENT_RESUME: &str = "agent/resume";
 pub const ACP_DISPATCHED_METHOD_HARN_HITL_RESPOND: &str = "harn.hitl.respond";
 pub const ACP_DISPATCHED_METHOD_WORKFLOW_SIGNAL: &str = "workflow/signal";
@@ -132,6 +135,9 @@ pub const ACP_DISPATCHED_METHODS: &[&str] = &[
     "session/pending_injections",
     "session/revoke_reminder",
     "session/list",
+    "harn.session_workspace_roots",
+    "harn.session_add_root",
+    "harn.session_reanchor",
     "agent/resume",
     "harn.hitl.respond",
     "workflow/signal",

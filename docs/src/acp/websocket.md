@@ -126,6 +126,9 @@ surface as stdio ACP:
 - `session/fork`
 - `session/set_mode`
 - `session/set_config_option`
+- `harn.session_workspace_roots`
+- `harn.session_add_root`
+- `harn.session_reanchor`
 - `agent/resume`
 - `workflow/*`
 - `harn.hitl.respond`

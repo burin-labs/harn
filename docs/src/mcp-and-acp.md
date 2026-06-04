@@ -609,6 +609,9 @@ The ACP server supports these JSON-RPC methods:
 | `session/stop` | Deprecated alias for `session/close` |
 | `session/set_mode` | Switch the active session mode |
 | `session/set_config_option` | Switch a preferred ACP session config option (`mode`, `model`, `thought_level`, or `budget`) |
+| `harn.session_workspace_roots` | Return the live session's primary workspace anchor and mounted roots |
+| `harn.session_add_root` | Mount an additional root into the live session |
+| `harn.session_reanchor` | Replace the live session's primary workspace anchor |
 | `harn.session_timeline.query` | Return the Harn-owned redacted session timeline snapshot |
 | `harn.session_timeline.subscribe` | Subscribe to newly appended timeline events |
 | `harn.session_timeline.unsubscribe` | Stop a timeline subscription |
@@ -636,6 +639,57 @@ and `session.remind.pending = {list: true, revoke: true}` for host-side
 system-reminder queue controls. Harn-only methods such as
 `session/fork` remain documented extensions instead of being inserted into
 upstream `sessionCapabilities`.
+
+### Session workspace anchors
+
+The Harn workspace-anchor extension exposes the same live VM session state used
+by `agent_session_workspace_anchor`, `agent_session_add_root`, and
+`agent_session_reanchor`. All three methods require `sessionId`/`session_id`
+and return the current `workspaceAnchor`.
+
+`harn.session_workspace_roots` is a read path that also seeds a missing anchor
+from the live session's `cwd`, which preserves compatibility with sessions
+opened before first-class anchors were attached.
+
+```json
+{
+  "method": "harn.session_workspace_roots",
+  "params": { "sessionId": "sess_abc" }
+}
+```
+
+`harn.session_add_root` accepts `path` (or `root`), optional `mountMode`
+(`read_only`, `extend`, or `sandboxed`), and optional `reason`. It validates
+that the mounted path exists and is readable before mutating the session,
+records the canonical `RootMounted` transcript event, and clears session-local
+permission grants.
+
+```json
+{
+  "method": "harn.session_add_root",
+  "params": {
+    "sessionId": "sess_abc",
+    "path": "/workspace/tools",
+    "mountMode": "extend"
+  }
+}
+```
+
+`harn.session_reanchor` accepts `path` (or `primary`) plus optional `reason`,
+`carryTranscript`, and `compact`. The live ACP path currently supports the
+default `carryTranscript: true` and `compact: false` shape; richer fork/compact
+handoffs still belong to `agent_session_reanchor` until ACP has a host-visible
+session handoff envelope.
+
+```json
+{
+  "method": "harn.session_reanchor",
+  "params": {
+    "sessionId": "sess_abc",
+    "path": "/workspace/next"
+  }
+}
+```
 
 ### Session timeline extension
 
