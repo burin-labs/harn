@@ -12,6 +12,35 @@ trap 'rm -f "$changed" "$harn_format_files" "$harn_lint_files" "$changed_package
 hook_write_staged_files "$changed"
 hook_disable_cargo_incremental_if_release_bump staged
 
+# ── Guard: block accidental commits of throwaway / temporary code ──────────────
+# Mark scratch code so it can never be committed by accident:
+#   NOCOMMIT   @nocommit   DO NOT COMMIT   (case-insensitive; -/_ also accepted)
+# Only newly *added* staged lines are scanned; this hook excludes itself. Bypass
+# a false positive with `git commit --no-verify`. The regex literal is split so
+# this file's own definition is not itself a matchable marker.
+nocommit_re="NO""COMMIT|@no""commit|DO[ _-]NOT[ _-]COMMIT"
+staged_nocommit=$(git diff --cached --no-color -U0 --diff-filter=ACM \
+  -- . ":(exclude).githooks/pre-commit" \
+  | grep -E '^\+[^+]' | grep -inE "$nocommit_re" 2>/dev/null || true)
+if [ -n "$staged_nocommit" ]; then
+  echo "✖ Commit blocked: staged changes contain a no-commit marker:" >&2
+  printf '%s\n' "$staged_nocommit" | sed 's/^/    /' >&2
+  echo "  Remove the temporary code, or bypass intentionally: git commit --no-verify" >&2
+  exit 1
+fi
+
+# ── Guard: verify tagref cross-references resolve (when tagref is installed) ────
+# tagref links code via [tag:name] / [ref:name] comments; fails on a dangling
+# [ref:...] or duplicate [tag:...]. Respects .gitignore. Skipped (not failed)
+# when absent, keeping the hook portable. Install: `cargo install tagref`.
+if command -v tagref >/dev/null 2>&1; then
+  if ! tagref --path "$(git rev-parse --show-toplevel)" check >/dev/null 2>&1; then
+    echo "✖ tagref check failed: a [ref:...] has no matching [tag:...], or a tag is duplicated." >&2
+    echo "  Run \`tagref --path . check\` for details, or \`git commit --no-verify\` to bypass." >&2
+    exit 1
+  fi
+fi
+
 # Track whether the python prompt-prose ratchet has already run in this
 # hook, so the ratchet and clippy blocks don't pay for it twice when both
 # patterns match (the common case for a Rust crate edit that also
