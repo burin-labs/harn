@@ -72,6 +72,8 @@ use futures::StreamExt;
 use harn_vm::agent_events::{clear_session_sinks, register_sink, AgentEventSink};
 use harn_vm::visible_text::{sanitize_visible_assistant_text, VisibleTextState};
 use serde::Deserialize;
+use time::format_description::well_known::Rfc3339;
+use time::OffsetDateTime;
 use tokio::io::AsyncBufReadExt;
 use tokio::sync::{mpsc, oneshot, Mutex, Notify};
 
@@ -162,6 +164,7 @@ fn session_id_param(params: &serde_json::Value) -> Option<String> {
     string_param(params, "sessionId", "session_id")
 }
 
+#[cfg(feature = "hostlib")]
 fn staged_fs_paths_param(params: &serde_json::Value) -> Vec<String> {
     params
         .get("paths")
@@ -282,6 +285,12 @@ fn control_id() -> String {
     format!("ctrl_{}", uuid::Uuid::now_v7().simple())
 }
 
+fn now_rfc3339() -> String {
+    OffsetDateTime::now_utc()
+        .format(&Rfc3339)
+        .unwrap_or_else(|_| "1970-01-01T00:00:00Z".to_string())
+}
+
 fn session_list_filter<'a>(
     params: &'a serde_json::Value,
     camel: &str,
@@ -344,6 +353,20 @@ fn workspace_anchor_filter_matches(
     harn_vm::workspace_anchor::WorkspaceAnchor::from_json(filter).is_ok_and(|expected| {
         expected.primary == anchor.primary && expected.additional_roots == anchor.additional_roots
     })
+}
+
+fn mount_mode_param(
+    params: &serde_json::Value,
+) -> Result<Option<harn_vm::workspace_anchor::MountMode>, String> {
+    let Some(raw) = params
+        .get("mountMode")
+        .or_else(|| params.get("mount_mode"))
+        .and_then(serde_json::Value::as_str)
+    else {
+        return Ok(None);
+    };
+    let normalized = raw.trim().to_ascii_lowercase().replace('-', "_");
+    harn_vm::workspace_anchor::MountMode::parse(&normalized).map(Some)
 }
 
 fn live_state_filter_matches(live_state: &str, filter: Option<&[String]>) -> bool {
@@ -1432,6 +1455,168 @@ impl AcpServer {
         );
 
         self.emit_available_commands(&session_id);
+    }
+
+    fn ensure_workspace_anchor(
+        &self,
+        session_id: &str,
+    ) -> Result<harn_vm::workspace_anchor::WorkspaceAnchor, String> {
+        if let Some(anchor) = harn_vm::agent_sessions::workspace_anchor(session_id) {
+            return Ok(anchor);
+        }
+        let Some(session) = self.sessions.get(session_id) else {
+            return Err(format!("Unknown session: {session_id}"));
+        };
+        let anchor = harn_vm::workspace_anchor::WorkspaceAnchor {
+            primary: session.cwd.clone(),
+            additional_roots: Vec::new(),
+            anchored_at: now_rfc3339(),
+        };
+        harn_vm::agent_sessions::set_workspace_anchor(session_id, Some(anchor.clone()))?;
+        Ok(anchor)
+    }
+
+    fn handle_harn_session_workspace_roots(
+        &mut self,
+        id: &serde_json::Value,
+        params: &serde_json::Value,
+    ) {
+        let Some(session_id) = session_id_param(params) else {
+            self.send_error(id, -32602, "Missing session_id");
+            return;
+        };
+        let anchor = match self.ensure_workspace_anchor(&session_id) {
+            Ok(anchor) => anchor,
+            Err(message) => {
+                self.send_error(id, -32602, &message);
+                return;
+            }
+        };
+        self.send_response(
+            id,
+            serde_json::json!({
+                "sessionId": session_id,
+                "workspaceAnchor": anchor.to_json(),
+            }),
+        );
+    }
+
+    fn handle_harn_session_add_root(&mut self, id: &serde_json::Value, params: &serde_json::Value) {
+        let Some(session_id) = session_id_param(params) else {
+            self.send_error(id, -32602, "Missing session_id");
+            return;
+        };
+        if let Err(message) = self.ensure_workspace_anchor(&session_id) {
+            self.send_error(id, -32602, &message);
+            return;
+        }
+        let Some(path) =
+            string_param(params, "path", "path").or_else(|| string_param(params, "root", "root"))
+        else {
+            self.send_error(id, -32602, "Missing path");
+            return;
+        };
+        let mount_mode = match mount_mode_param(params) {
+            Ok(mount_mode) => mount_mode,
+            Err(message) => {
+                self.send_error(id, -32602, &message);
+                return;
+            }
+        };
+        let reason = string_param(params, "reason", "reason");
+        let mounted_at = match harn_vm::agent_sessions::add_workspace_root(
+            &session_id,
+            &path,
+            mount_mode,
+            reason,
+        ) {
+            Ok(mounted_at) => mounted_at,
+            Err(message) => {
+                self.send_error(id, -32602, &message);
+                return;
+            }
+        };
+        let workspace_anchor = harn_vm::agent_sessions::workspace_anchor(&session_id)
+            .map(|anchor| anchor.to_json())
+            .unwrap_or(serde_json::Value::Null);
+        self.send_response(
+            id,
+            serde_json::json!({
+                "sessionId": session_id,
+                "mountedAt": mounted_at,
+                "workspaceAnchor": workspace_anchor,
+            }),
+        );
+    }
+
+    fn handle_harn_session_reanchor(&mut self, id: &serde_json::Value, params: &serde_json::Value) {
+        let Some(session_id) = session_id_param(params) else {
+            self.send_error(id, -32602, "Missing session_id");
+            return;
+        };
+        if let Err(message) = self.ensure_workspace_anchor(&session_id) {
+            self.send_error(id, -32602, &message);
+            return;
+        }
+        let Some(path) = string_param(params, "path", "path")
+            .or_else(|| string_param(params, "primary", "primary"))
+        else {
+            self.send_error(id, -32602, "Missing path");
+            return;
+        };
+        let compact = params
+            .get("compact")
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(false);
+        if compact {
+            self.send_error(
+                id,
+                -32602,
+                "harn.session_reanchor does not support compact yet",
+            );
+            return;
+        }
+        let carry_transcript = params
+            .get("carryTranscript")
+            .or_else(|| params.get("carry_transcript"))
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(true);
+        if !carry_transcript {
+            self.send_error(
+                id,
+                -32602,
+                "harn.session_reanchor does not support carryTranscript=false yet",
+            );
+            return;
+        }
+        let reason = string_param(params, "reason", "reason");
+        let anchor = harn_vm::workspace_anchor::WorkspaceAnchor {
+            primary: PathBuf::from(path),
+            additional_roots: Vec::new(),
+            anchored_at: now_rfc3339(),
+        };
+        let outcome = match harn_vm::agent_sessions::reanchor_session(
+            &session_id,
+            anchor,
+            carry_transcript,
+            false,
+            reason,
+        ) {
+            Ok(outcome) => outcome,
+            Err(message) => {
+                self.send_error(id, -32602, &message);
+                return;
+            }
+        };
+        self.send_response(
+            id,
+            serde_json::json!({
+                "sessionId": session_id,
+                "changed": outcome.changed,
+                "previousWorkspaceAnchor": outcome.previous.map(|anchor| anchor.to_json()),
+                "workspaceAnchor": outcome.current.to_json(),
+            }),
+        );
     }
 
     /// Read the configured pipeline source for `session_id`. Returns
@@ -4135,6 +4320,24 @@ impl AcpServer {
                     return;
                 }
                 self.handle_session_list(&id, &params);
+            }
+            "harn.session_workspace_roots" => {
+                if self.reject_unauthenticated(&id) {
+                    return;
+                }
+                self.handle_harn_session_workspace_roots(&id, &params);
+            }
+            "harn.session_add_root" => {
+                if self.reject_unauthenticated(&id) {
+                    return;
+                }
+                self.handle_harn_session_add_root(&id, &params);
+            }
+            "harn.session_reanchor" => {
+                if self.reject_unauthenticated(&id) {
+                    return;
+                }
+                self.handle_harn_session_reanchor(&id, &params);
             }
             "mcp/catalog" | "harn.mcp.catalog" => {
                 if self.reject_unauthenticated(&id) {

@@ -124,6 +124,19 @@ async fn run_json_prompt(
     panic!("prompt {id} did not complete")
 }
 
+async fn recv_response_with_id(
+    response_rx: &mut mpsc::UnboundedReceiver<String>,
+    id: u64,
+) -> serde_json::Value {
+    for _ in 0..32 {
+        let message = recv_json(response_rx).await;
+        if message["id"].as_u64() == Some(id) {
+            return message;
+        }
+    }
+    panic!("timed out waiting for response {id}");
+}
+
 #[tokio::test(flavor = "current_thread")]
 async fn acp_session_timeline_query_and_subscribe_use_event_log() {
     let local = tokio::task::LocalSet::new();
@@ -615,6 +628,166 @@ async fn acp_session_list_filters_by_workspace_anchor_and_cwd() {
             assert_eq!(
                 loaded["result"]["session"]["_meta"]["harn"]["workspaceAnchor"]["primary"],
                 serde_json::json!(primary.display().to_string())
+            );
+
+            drop(request_tx);
+            server.await.expect("ACP channel server task");
+        })
+        .await;
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn acp_harn_workspace_anchor_methods_mutate_live_session() {
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            harn_vm::reset_thread_local_state();
+            let dir = tempfile::tempdir().expect("tempdir");
+            let primary = dir.path().join("project");
+            let sibling = dir.path().join("project-tools");
+            let target = dir.path().join("target");
+            std::fs::create_dir_all(&primary).expect("primary dir");
+            std::fs::create_dir_all(&sibling).expect("sibling dir");
+            std::fs::create_dir_all(&target).expect("target dir");
+            let canonical_sibling = sibling.canonicalize().expect("canonical sibling");
+
+            let (request_tx, mut response_rx, server, session_id) =
+                start_acp_channel_session_with_config(
+                    AcpServerConfig::new(None),
+                    serde_json::json!(primary.display().to_string()),
+                )
+                .await;
+
+            request_tx
+                .send(serde_json::json!({
+                    "jsonrpc": "2.0",
+                    "id": 2,
+                    "method": "harn.session_workspace_roots",
+                    "params": {"sessionId": session_id},
+                }))
+                .expect("send roots request");
+            let roots = recv_response_with_id(&mut response_rx, 2).await;
+            assert_eq!(
+                roots["result"]["workspaceAnchor"]["primary"],
+                serde_json::json!(primary.display().to_string())
+            );
+            assert_eq!(
+                harn_vm::agent_sessions::workspace_anchor(&session_id)
+                    .expect("live anchor")
+                    .primary,
+                primary
+            );
+
+            request_tx
+                .send(serde_json::json!({
+                    "jsonrpc": "2.0",
+                    "id": 3,
+                    "method": "harn.session_add_root",
+                    "params": {
+                        "sessionId": session_id,
+                        "path": sibling.display().to_string(),
+                        "mountMode": "extend",
+                    },
+                }))
+                .expect("send add-root request");
+            let added = recv_response_with_id(&mut response_rx, 3).await;
+            let additional = added["result"]["workspaceAnchor"]["additional_roots"]
+                .as_array()
+                .expect("additional roots");
+            assert_eq!(additional.len(), 1);
+            assert_eq!(
+                additional[0]["path"],
+                serde_json::json!(canonical_sibling.display().to_string())
+            );
+            assert_eq!(additional[0]["mount_mode"], serde_json::json!("extend"));
+
+            request_tx
+                .send(serde_json::json!({
+                    "jsonrpc": "2.0",
+                    "id": 4,
+                    "method": "harn.session_reanchor",
+                    "params": {
+                        "sessionId": session_id,
+                        "path": target.display().to_string(),
+                        "reason": "test reanchor",
+                    },
+                }))
+                .expect("send reanchor request");
+            let reanchored = recv_response_with_id(&mut response_rx, 4).await;
+            assert_eq!(reanchored["result"]["changed"], serde_json::json!(true));
+            assert_eq!(
+                reanchored["result"]["previousWorkspaceAnchor"]["primary"],
+                serde_json::json!(primary.display().to_string())
+            );
+            assert_eq!(
+                reanchored["result"]["workspaceAnchor"]["primary"],
+                serde_json::json!(target.display().to_string())
+            );
+
+            request_tx
+                .send(serde_json::json!({
+                    "jsonrpc": "2.0",
+                    "id": 5,
+                    "method": "session/list",
+                    "params": {
+                        "workspaceAnchor": {"primary": target.display().to_string()},
+                    },
+                }))
+                .expect("send filtered session/list");
+            let listed = recv_response_with_id(&mut response_rx, 5).await;
+            assert_eq!(
+                listed["result"]["sessions"][0]["sessionId"],
+                serde_json::json!(session_id)
+            );
+            assert_eq!(
+                listed["result"]["sessions"][0]["workspaceAnchor"]["primary"],
+                serde_json::json!(target.display().to_string())
+            );
+
+            drop(request_tx);
+            server.await.expect("ACP channel server task");
+        })
+        .await;
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn acp_harn_session_reanchor_seeds_missing_anchor_from_live_cwd() {
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            harn_vm::reset_thread_local_state();
+            let dir = tempfile::tempdir().expect("tempdir");
+            let primary = dir.path().join("project");
+            let target = dir.path().join("target");
+            std::fs::create_dir_all(&primary).expect("primary dir");
+            std::fs::create_dir_all(&target).expect("target dir");
+
+            let (request_tx, mut response_rx, server, session_id) =
+                start_acp_channel_session_with_config(
+                    AcpServerConfig::new(None),
+                    serde_json::json!(primary.display().to_string()),
+                )
+                .await;
+
+            request_tx
+                .send(serde_json::json!({
+                    "jsonrpc": "2.0",
+                    "id": 2,
+                    "method": "harn.session_reanchor",
+                    "params": {
+                        "sessionId": session_id,
+                        "path": target.display().to_string(),
+                    },
+                }))
+                .expect("send reanchor request");
+            let reanchored = recv_response_with_id(&mut response_rx, 2).await;
+            assert_eq!(
+                reanchored["result"]["previousWorkspaceAnchor"]["primary"],
+                serde_json::json!(primary.display().to_string())
+            );
+            assert_eq!(
+                reanchored["result"]["workspaceAnchor"]["primary"],
+                serde_json::json!(target.display().to_string())
             );
 
             drop(request_tx);
