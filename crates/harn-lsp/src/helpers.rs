@@ -406,6 +406,11 @@ pub(crate) fn lexer_error_to_diagnostic(err: &LexerError) -> Diagnostic {
             span.line,
             span.column,
         ),
+        LexerError::IntegerLiteralOutOfRange(lit, span) => (
+            format!("Integer literal `{lit}` is out of range for int (i64)"),
+            span.line,
+            span.column,
+        ),
     };
 
     Diagnostic {

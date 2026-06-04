@@ -265,9 +265,7 @@ impl Compiler {
             }
         }
 
-        for fb in self.all_pending_finallys() {
-            self.compile_finally_inline(&fb)?;
-        }
+        self.drain_finallys_to_floor(0)?;
         if !pipeline_emits_value {
             self.chunk.emit(Op::Nil, self.line);
         }
@@ -320,9 +318,7 @@ impl Compiler {
             }
         }
 
-        for fb in self.all_pending_finallys() {
-            self.compile_finally_inline(&fb)?;
-        }
+        self.drain_finallys_to_floor(0)?;
         self.chunk.emit(Op::Nil, self.line);
         self.chunk.emit(Op::Return, self.line);
         Ok(self.chunk)
@@ -367,7 +363,18 @@ impl Compiler {
                 let skip_jump = self.chunk.emit_jump(Op::JumpIfTrue, self.line);
                 // JumpIfTrue doesn't pop its boolean operand.
                 self.chunk.emit(Op::Pop, self.line);
-                self.compile_node(default_expr)?;
+                // Compile the default with this param and all *later* params
+                // hidden from local resolution. A default is evaluated left to
+                // right at call time: it may reference an earlier parameter,
+                // but a mention of its own name (or a later, not-yet-bound
+                // parameter) must resolve to the enclosing scope — e.g.
+                // `let n = 7; fn f(n = n * 2)` reads the outer `n`. Without the
+                // mask, `n` bound to the param's own unset slot and threw at
+                // runtime. Earlier params stay visible.
+                let masked = self.mask_param_names(&params[i..]);
+                let result = self.compile_node(default_expr);
+                self.restore_param_names(masked);
+                result?;
                 self.emit_init_or_define_binding(&param.name, false);
                 let end_jump = self.chunk.emit_jump(Op::Jump, self.line);
                 self.chunk.patch_jump(skip_jump);
@@ -740,26 +747,6 @@ impl Compiler {
         out
     }
 
-    /// Collect every pending finally body from the top of the stack down
-    /// to `floor` (an index produced by `finally_bodies.len()` at some
-    /// earlier point), skipping `CatchBarrier` markers. Used by `return`,
-    /// `break`, and `continue` lowering — they transfer control past local
-    /// handlers, so every `Finally` up to their target must run.
-    pub(super) fn pending_finallys_down_to(&self, floor: usize) -> Vec<Vec<SNode>> {
-        let mut out = Vec::new();
-        for entry in self.finally_bodies[floor..].iter().rev() {
-            if let FinallyEntry::Finally(body) = entry {
-                out.push(body.clone());
-            }
-        }
-        out
-    }
-
-    /// All pending finally bodies (entire stack), skipping barriers.
-    pub(super) fn all_pending_finallys(&self) -> Vec<Vec<SNode>> {
-        self.pending_finallys_down_to(0)
-    }
-
     /// True if there are any pending finally bodies (not just barriers).
     pub(super) fn has_pending_finally(&self) -> bool {
         self.finally_bodies
@@ -787,6 +774,32 @@ impl Compiler {
     pub(super) fn declare_param_slots(&mut self, params: &[TypedParam]) {
         for param in params {
             self.define_local_slot(&param.name, false);
+        }
+    }
+
+    /// Temporarily remove the given parameters' names from the innermost local
+    /// scope so that, while compiling a default-value expression, references to
+    /// them resolve to the enclosing scope instead of their not-yet-bound param
+    /// slots. Returns the removed bindings so [`Self::restore_param_names`] can
+    /// reinstate them afterward. See [`Self::emit_default_preamble`].
+    fn mask_param_names(&mut self, params: &[TypedParam]) -> Vec<(String, super::LocalBinding)> {
+        let mut removed = Vec::new();
+        if let Some(scope) = self.local_scopes.last_mut() {
+            for param in params {
+                if let Some(binding) = scope.remove(&param.name) {
+                    removed.push((param.name.clone(), binding));
+                }
+            }
+        }
+        removed
+    }
+
+    /// Reinstate parameter names removed by [`Self::mask_param_names`].
+    fn restore_param_names(&mut self, removed: Vec<(String, super::LocalBinding)>) {
+        if let Some(scope) = self.local_scopes.last_mut() {
+            for (name, binding) in removed {
+                scope.insert(name, binding);
+            }
         }
     }
 
@@ -927,6 +940,45 @@ impl Compiler {
             }
         }
         Ok(())
+    }
+
+    /// Run the pending finally/defer bodies a non-local transfer (`return`,
+    /// `break`, `continue`) crosses on its way down to `floor`, innermost
+    /// first, then restore the pending stack.
+    ///
+    /// Like [`Self::drain_finallys_to_floor`] each body is removed from the
+    /// stack *before* it is inlined, so a `return`/`break`/`continue` inside a
+    /// finally body runs only the finallys *outside* it instead of re-running
+    /// the one it is in — which otherwise recursed forever at compile time and
+    /// aborted the process with a stack overflow. Unlike that helper (used at
+    /// scope exit), the stack is restored afterward because a transfer is a
+    /// branch: the code the compiler emits after it still needs the pending
+    /// finallys for the fall-through and sibling paths.
+    pub(super) fn run_pending_finallys_for_transfer(
+        &mut self,
+        floor: usize,
+    ) -> Result<(), CompileError> {
+        if self.finally_bodies.len() <= floor {
+            return Ok(());
+        }
+        let saved = self.finally_bodies[floor..].to_vec();
+        let result = self.drain_finallys_to_floor(floor);
+        self.finally_bodies.extend(saved);
+        result
+    }
+
+    /// Like [`Self::run_pending_finallys_for_transfer`] but for a `throw`: run
+    /// only the finallys between here and the innermost `CatchBarrier` (the
+    /// ones the unwind actually crosses before a local `catch` halts it),
+    /// masking each while it is inlined and restoring the stack afterward.
+    pub(super) fn run_pending_finallys_until_barrier(&mut self) -> Result<(), CompileError> {
+        let floor = self
+            .finally_bodies
+            .iter()
+            .rposition(|e| matches!(e, FinallyEntry::CatchBarrier))
+            .map(|i| i + 1)
+            .unwrap_or(0);
+        self.run_pending_finallys_for_transfer(floor)
     }
 
     /// Register an auto-drop defer for an `owned<T>` binding. The drop runs

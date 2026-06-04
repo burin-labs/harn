@@ -1,0 +1,6 @@
+pipeline test(task) {
+  var a = [10, 20, 30]
+  a[-1] = 99
+  a[-3] = 11
+  log(a)
+}

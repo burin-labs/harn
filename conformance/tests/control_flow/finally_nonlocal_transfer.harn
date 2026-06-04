@@ -1,0 +1,27 @@
+pipeline test(task) {
+  // `return` inside a finally overrides the body's outcome (Java/JS semantics)
+  // rather than crashing the compiler with unbounded recursion.
+  fn ret_in_finally() {
+    try {
+      return "body"
+    } finally {
+      return "finally"
+    }
+  }
+  log(ret_in_finally())
+  // `break`/`continue` that escape a finally run it and transfer normally.
+  fn break_in_finally() {
+    var seen = []
+    for i in [1, 2, 3] {
+      try {
+        seen = seen + [i]
+      } finally {
+        if i == 2 {
+          break
+        }
+      }
+    }
+    return seen
+  }
+  log(break_in_finally())
+}

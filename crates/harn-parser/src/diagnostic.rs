@@ -450,6 +450,9 @@ pub fn lexer_error_code(err: &harn_lexer::LexerError) -> crate::diagnostic_codes
         harn_lexer::LexerError::UnterminatedBlockComment(_) => {
             crate::diagnostic_codes::Code::ParserUnterminatedBlockComment
         }
+        harn_lexer::LexerError::IntegerLiteralOutOfRange(_, _) => {
+            crate::diagnostic_codes::Code::ParserIntegerLiteralOutOfRange
+        }
     }
 }
 

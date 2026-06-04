@@ -184,6 +184,31 @@ impl Compiler {
     }
 
     /// Compile a `match` expression (`Node::MatchExpr`).
+    /// Reject a compound sub-pattern (a nested list/dict literal) appearing as
+    /// an element of a list pattern or the value of a dict pattern.
+    ///
+    /// The list/dict pattern compilers only destructure *flat* sub-patterns
+    /// (a bare identifier binding, `_`, or a literal equality constraint). A
+    /// nested `[..]`/`{..}` sub-pattern silently fell through to the equality
+    /// catch-all and was compiled as a *value expression* — so `match xs {
+    /// [[a, b], ...] -> ... }` compared against a freshly-built list using `a`
+    /// and `b` as variables (binding nothing, throwing "undefined variable" or,
+    /// if those names happened to exist, matching by structural equality and
+    /// binding the wrong values). The sibling `let`-destructure surface rejects
+    /// nested patterns at parse time; mirror that here with a clear compile
+    /// error instead of the silent miscompile.
+    fn reject_nested_match_subpattern(&self, node: &SNode) -> Result<(), CompileError> {
+        if matches!(&node.node, Node::ListLiteral(_) | Node::DictLiteral(_)) {
+            return Err(CompileError {
+                message: "nested list/dict patterns are not supported in match arms; \
+                          bind the element with an identifier and match it in a nested `match`"
+                    .to_string(),
+                line: node.span.line as u32,
+            });
+        }
+        Ok(())
+    }
+
     pub(super) fn compile_match_expr(
         &mut self,
         value: &SNode,
@@ -442,6 +467,7 @@ impl Compiler {
                                     bindings.push((key.clone(), binding.clone()));
                                 }
                                 _ => {
+                                    self.reject_nested_match_subpattern(&entry.value)?;
                                     // Complex expression constraint: dict[key] == expr.
                                     self.chunk.emit(Op::Dup, self.line);
                                     let key_idx = self.string_constant(key);
@@ -544,6 +570,7 @@ impl Compiler {
                             }
                             Node::Identifier(_) => {} // wildcard `_`
                             _ => {
+                                self.reject_nested_match_subpattern(elem)?;
                                 self.chunk.emit(Op::Dup, self.line);
                                 let idx_const = self.chunk.add_constant(Constant::Int(i as i64));
                                 self.chunk.emit_u16(Op::Constant, idx_const, self.line);

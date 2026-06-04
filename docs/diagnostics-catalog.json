@@ -9,7 +9,7 @@
     {
       "id": "PAR",
       "title": "Parser / lexer",
-      "count": 5
+      "count": 6
     },
     {
       "id": "NAM",
@@ -100,6 +100,11 @@
       "id": "CST",
       "title": "Const-eval sandbox",
       "count": 4
+    },
+    {
+      "id": "CMP",
+      "title": "Bytecode compilation",
+      "count": 1
     }
   ],
   "codes": [
@@ -479,6 +484,15 @@
       "code": "HARN-PAR-005",
       "category": "PAR",
       "summary": "block comment is unterminated",
+      "repairs": [],
+      "related": [],
+      "explanationPresent": true,
+      "apiStability": "stable"
+    },
+    {
+      "code": "HARN-PAR-006",
+      "category": "PAR",
+      "summary": "integer literal is out of range for int (i64)",
       "repairs": [],
       "related": [],
       "explanationPresent": true,
@@ -2539,6 +2553,15 @@
       "code": "HARN-CST-004",
       "category": "CST",
       "summary": "const initializer raised a runtime error during evaluation",
+      "repairs": [],
+      "related": [],
+      "explanationPresent": true,
+      "apiStability": "stable"
+    },
+    {
+      "code": "HARN-CMP-001",
+      "category": "CMP",
+      "summary": "the program failed to compile to bytecode",
       "repairs": [],
       "related": [],
       "explanationPresent": true,

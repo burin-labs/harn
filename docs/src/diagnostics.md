@@ -36,7 +36,7 @@ Repairs are tagged with a six-level safety class so `harn fix --apply --safety <
 | Category | Title | Codes |
 |---|---|---:|
 | [`TYP`](#typ--type-checker) | Type checker | 25 |
-| [`PAR`](#par--parser--lexer) | Parser / lexer | 5 |
+| [`PAR`](#par--parser--lexer) | Parser / lexer | 6 |
 | [`NAM`](#nam--naming-and-resolution) | Naming and resolution | 13 |
 | [`CAP`](#cap--capabilities) | Capabilities | 9 |
 | [`LLM`](#llm--llm-calls) | LLM calls | 5 |
@@ -55,6 +55,7 @@ Repairs are tagged with a six-level safety class so `harn fix --apply --safety <
 | [`POL`](#pol--runtime-policies) | Runtime policies | 2 |
 | [`MET`](#met--compile-time-meta-restrictions) | Compile-time meta restrictions | 1 |
 | [`CST`](#cst--const-eval-sandbox) | Const-eval sandbox | 4 |
+| [`CMP`](#cmp--bytecode-compilation) | Bytecode compilation | 1 |
 
 ## TYP — Type checker
 
@@ -99,6 +100,7 @@ The lexer or parser raises these before type checking begins. Harn cannot build 
 | [`HARN-PAR-003`](#harn-par-003) | lexer found an unexpected character | — | — |
 | [`HARN-PAR-004`](#harn-par-004) | string literal is unterminated | — | — |
 | [`HARN-PAR-005`](#harn-par-005) | block comment is unterminated | — | — |
+| [`HARN-PAR-006`](#harn-par-006) | integer literal is out of range for int (i64) | — | — |
 
 ## NAM — Naming and resolution
 
@@ -384,6 +386,14 @@ The bounded const-eval sandbox enforces step, recursion, and capability limits o
 | [`HARN-CST-002`](#harn-cst-002) | const initializer exceeded the recursion depth budget | — | — |
 | [`HARN-CST-003`](#harn-cst-003) | const initializer attempted a sandboxed capability | — | — |
 | [`HARN-CST-004`](#harn-cst-004) | const initializer raised a runtime error during evaluation | — | — |
+
+## CMP — Bytecode compilation
+
+The bytecode compiler rejected a program that parsed and type-checked. These are structural / codegen errors the type checker does not model — `harn check` runs the compile pass too, so anything that would stop `harn run` is reported up front.
+
+| Code | Summary | Repair | Safety |
+|---|---|---|---|
+| [`HARN-CMP-001`](#harn-cmp-001) | the program failed to compile to bytecode | — | — |
 
 ## Code reference
 
@@ -694,6 +704,28 @@ comment)
 
 - Re-read the source around the highlighted span and restore the missing token(s).
 - If the surrounding construct is a multi-line expression, check brace / bracket balance.
+
+### `HARN-PAR-006`
+
+**Category:** `PAR` (Parser / lexer) &nbsp;·&nbsp; **API stability:** `stable`
+
+integer literal is out of range for int (i64)
+
+An integer literal must fit in a 64-bit signed integer (`int`), i.e. be in the
+range `-9223372036854775808 ..= 9223372036854775807`. Harn does not silently
+widen an out-of-range integer literal to a float, because that would lose both
+the exact value (distinct literals collapse onto the same `float`) and the
+`int` type.
+
+#### How to fix
+
+- If you meant a floating-point value, write it with a decimal point or
+  exponent so it lexes as a `float` (e.g. `9223372036854775808.0`).
+- If you need the most negative `int`, build it by arithmetic — the sign is not
+  part of the literal, so `9223372036854775808` overflows on its own:
+  `-9223372036854775807 - 1`.
+- Otherwise the value genuinely does not fit in `int`; rework the computation to
+  stay within range.
 
 ### `HARN-NAM-001`
 
@@ -3713,3 +3745,27 @@ const BAD = "a" + 1
 - Inspect the offending operand and supply a valid value.
 - If the expression depends on a value that is only known at runtime,
   use `let` instead of `const`.
+
+### `HARN-CMP-001`
+
+**Category:** `CMP` (Bytecode compilation) &nbsp;·&nbsp; **API stability:** `stable`
+
+the program failed to compile to bytecode
+
+The program parsed and type-checked, but the bytecode compiler rejected it.
+These are structural or codegen errors the type checker does not model yet —
+for example an unsupported nested list/dict pattern in a `match` arm, a `break`
+or `continue` outside a loop, `try*` outside a function, or a malformed string
+interpolation hole.
+
+`harn check` runs this compilation pass (discarding the bytecode) so that any
+error which would stop `harn run` is reported up front, rather than only when
+the program is executed.
+
+#### How to fix
+
+- Read the message: it names the specific construct the compiler could not
+  lower and usually how to rewrite it.
+- For nested `match` patterns, bind the element with an identifier and match it
+  in a nested `match`.
+- For `break`/`continue`, ensure they appear inside a loop.

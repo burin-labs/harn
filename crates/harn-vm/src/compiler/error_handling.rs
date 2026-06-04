@@ -18,9 +18,9 @@ impl Compiler {
             self.temp_counter += 1;
             let temp_name = format!("__throw_val_{}__", self.temp_counter);
             self.emit_define_binding(&temp_name, true);
-            for fb in &pending {
-                self.compile_finally_inline(fb)?;
-            }
+            // Mask each finally while it runs so a `throw` inside a finally
+            // doesn't re-run the finally it is in (which recursed forever).
+            self.run_pending_finallys_until_barrier()?;
             self.emit_get_binding(&temp_name);
             self.chunk.emit(Op::Throw, self.line);
         } else {
@@ -59,9 +59,7 @@ impl Compiler {
             self.temp_counter += 1;
             let temp_name = format!("__try_star_err_{}__", self.temp_counter);
             self.emit_define_binding(&temp_name, true);
-            for fb in &pending {
-                self.compile_finally_inline(fb)?;
-            }
+            self.run_pending_finallys_until_barrier()?;
             self.emit_get_binding(&temp_name);
             self.chunk.emit(Op::Throw, self.line);
         }
@@ -115,13 +113,18 @@ impl Compiler {
 
             self.handler_depth -= 1;
             self.chunk.emit(Op::PopHandler, self.line);
-            // Body-success path: throw never fired, so pre-run did
-            // not happen. Run finally now.
-            self.compile_finally_inline(finally_body)?;
-            // Drop both finally and barrier — we're leaving the
-            // try body; the catch handler compiles without them.
+            // Drop both finally and barrier BEFORE inlining the
+            // success-path finally. If they were left on the stack, a
+            // `return`/`break`/`continue` inside the finally would call
+            // `pending_finallys_*` and re-enqueue the finally currently
+            // being inlined, recursing forever at compile time. The body
+            // was already compiled with them in place, so body throws
+            // still run the finally; the catch handler compiles without them.
             self.finally_bodies.pop(); // Finally
             self.finally_bodies.pop(); // CatchBarrier
+                                       // Body-success path: throw never fired, so pre-run did
+                                       // not happen. Run finally now.
+            self.compile_finally_inline(finally_body)?;
             let end_jump = self.chunk.emit_jump(Op::Jump, self.line);
 
             self.chunk.patch_jump(catch_jump);
@@ -169,6 +172,13 @@ impl Compiler {
 
             self.handler_depth -= 1;
             self.chunk.emit(Op::PopHandler, self.line);
+            // Drop our finally BEFORE inlining the success-path finally —
+            // otherwise a `return`/`break`/`continue` inside the finally
+            // re-enqueues the finally currently being inlined and recurses
+            // forever at compile time. The body was already compiled with
+            // it in place (so body throws still run it); the error path
+            // below re-throws without it (finally already pre-ran there).
+            self.finally_bodies.pop(); // Finally
             self.compile_finally_inline(finally_body)?;
             let end_jump = self.chunk.emit_jump(Op::Jump, self.line);
 
@@ -178,8 +188,6 @@ impl Compiler {
             self.compile_plain_rethrow()?;
 
             self.chunk.patch_jump(end_jump);
-
-            self.finally_bodies.pop(); // Finally
         } else {
             // try-catch without finally: install a barrier so
             // throws in the body don't pre-run outer finallys
@@ -299,8 +307,12 @@ impl Compiler {
         self.emit_get_binding(err_name);
         self.chunk.emit(Op::Throw, self.line);
 
+        // Body-success path lands here with the body's value on the stack —
+        // that value IS the value of the `retry` expression (mirroring `if`,
+        // `match` and `try`). The exhaustion path above always throws, so it
+        // never falls through; a trailing `Op::Nil` here would only shadow the
+        // body value with nil and leave it orphaned on the stack.
         self.chunk.patch_jump(end_jump);
-        self.chunk.emit(Op::Nil, self.line);
         Ok(())
     }
 }

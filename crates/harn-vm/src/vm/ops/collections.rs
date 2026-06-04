@@ -4,6 +4,21 @@ use std::sync::Arc;
 use crate::chunk::{InlineCacheEntry, PropertyCacheTarget};
 use crate::value::{VmError, VmValue};
 
+/// Resolve a (possibly negative) list-assignment index against `len`, erroring
+/// if it falls outside the list. A negative index counts from the end (`-1` is
+/// the last element). Out-of-range indices — in *either* direction — are an
+/// error: unlike reads/slices, an assignment cannot silently clamp, or it would
+/// corrupt an unrelated element (e.g. `a[-100] = x` writing to index 0).
+fn resolve_list_assign_index(i: i64, len: usize) -> Result<usize, VmError> {
+    let pos = if i < 0 { len as i64 + i } else { i };
+    if pos < 0 || pos as usize >= len {
+        return Err(VmError::Runtime(format!(
+            "Index {i} out of bounds for list of length {len}"
+        )));
+    }
+    Ok(pos as usize)
+}
+
 impl super::super::Vm {
     fn concat_display_values(parts: &[VmValue]) -> String {
         let all_strings_len = parts.iter().try_fold(0usize, |len, part| match part {
@@ -525,17 +540,7 @@ impl super::super::Vm {
             match &mut slot.value {
                 VmValue::List(items) => {
                     if let Some(i) = index.as_int() {
-                        let len = items.len();
-                        let idx = if i < 0 {
-                            (len as i64 + i).max(0) as usize
-                        } else {
-                            i as usize
-                        };
-                        if idx >= len {
-                            return Err(VmError::Runtime(format!(
-                                "Index {i} out of bounds for list of length {len}",
-                            )));
-                        }
+                        let idx = resolve_list_assign_index(i, items.len())?;
                         Arc::make_mut(items)[idx] = new_value;
                         slot.synced = false;
                     }
@@ -561,18 +566,7 @@ impl super::super::Vm {
                     if let Some(i) = index.as_int() {
                         let mut new_items =
                             Arc::try_unwrap(items).unwrap_or_else(|items| (*items).clone());
-                        let idx = if i < 0 {
-                            (new_items.len() as i64 + i).max(0) as usize
-                        } else {
-                            i as usize
-                        };
-                        if idx >= new_items.len() {
-                            return Err(VmError::Runtime(format!(
-                                "Index {} out of bounds for list of length {}",
-                                i,
-                                new_items.len()
-                            )));
-                        }
+                        let idx = resolve_list_assign_index(i, new_items.len())?;
                         new_items[idx] = new_value;
                         self.env
                             .assign(var_name, VmValue::List(std::sync::Arc::new(new_items)))?;

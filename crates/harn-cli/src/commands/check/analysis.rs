@@ -92,6 +92,7 @@ pub(crate) fn span_from_lexer_error(error: &harn_lexer::LexerError) -> harn_lexe
     match error {
         harn_lexer::LexerError::UnexpectedCharacter(_, span)
         | harn_lexer::LexerError::UnterminatedString(span)
+        | harn_lexer::LexerError::IntegerLiteralOutOfRange(_, span)
         | harn_lexer::LexerError::UnterminatedBlockComment(span) => *span,
     }
 }

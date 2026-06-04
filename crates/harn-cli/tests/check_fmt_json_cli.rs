@@ -101,6 +101,41 @@ fn check_json_reports_success_and_diagnostics() {
 }
 
 #[test]
+fn check_reports_bytecode_compile_errors_not_just_type_errors() {
+    // `harn check` is a "will this run?" gate: it must catch errors the type
+    // checker does not model but that stop `harn run`. A nested list pattern in
+    // a `match` arm type-checks clean yet fails bytecode compilation, so it
+    // must surface here as a HARN-CMP-001 diagnostic and a failed check.
+    let temp = tempfile::TempDir::new().expect("tempdir");
+    let script = temp.path().join("main.harn");
+    std::fs::write(
+        &script,
+        "pipeline main(task) {\n  let xs = [[1, 2]]\n  return match xs {\n    [[a, b]] -> { a + b }\n    _ -> { 0 }\n  }\n}\n",
+    )
+    .expect("write script");
+
+    let failed = Command::new(binary_path())
+        .args(["check", "--json", script.to_str().unwrap()])
+        .output()
+        .expect("spawn harn check --json");
+    assert!(
+        !failed.status.success(),
+        "a bytecode compile error should fail check; stderr:\n{}",
+        String::from_utf8_lossy(&failed.stderr)
+    );
+    let parsed = stdout_json(&failed);
+    assert_eq!(parsed["ok"], false);
+    assert!(
+        parsed["data"]["files"][0]["diagnostics"]
+            .as_array()
+            .expect("diagnostics")
+            .iter()
+            .any(|diag| diag["code"].as_str() == Some("HARN-CMP-001")),
+        "expected a HARN-CMP-001 compile diagnostic: {parsed}"
+    );
+}
+
+#[test]
 fn check_json_exits_successfully_when_stdout_consumer_closes_early() {
     let temp = tempfile::TempDir::new().expect("tempdir");
     for index in 0..300 {

@@ -407,6 +407,7 @@ fn error_span_from_lex(error: &harn_lexer::LexerError) -> harn_lexer::Span {
     match error {
         harn_lexer::LexerError::UnexpectedCharacter(_, span)
         | harn_lexer::LexerError::UnterminatedString(span)
+        | harn_lexer::LexerError::IntegerLiteralOutOfRange(_, span)
         | harn_lexer::LexerError::UnterminatedBlockComment(span) => *span,
     }
 }

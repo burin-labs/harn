@@ -180,6 +180,44 @@ fn check_file_report_inner(
         });
     }
 
+    // Bytecode compilation pass. `harn check` is a "will this run?" gate, so
+    // it must also catch errors the type checker does not model but that stop
+    // `harn run` — unsupported nested `match` patterns, `break`/`continue`
+    // outside a loop, `try*` outside a function, malformed string
+    // interpolation, etc. Mirror `run`'s ordering: only compile once the
+    // program is type-clean, so type errors surface first without a spurious
+    // compile-error cascade. The compiler takes the same `&program` `run`
+    // does (imports are AST nodes), so this introduces no new false positives.
+    if !has_error {
+        if let Err(compile_err) = harn_vm::Compiler::new().compile(&program) {
+            has_error = true;
+            diagnostic_count += 1;
+            let code = harn_parser::diagnostic_codes::Code::CompilerError;
+            let span = harn_lexer::Span::with_offsets(0, 0, compile_err.line as usize, 1);
+            if emit_text {
+                let rendered = harn_parser::diagnostic::render_diagnostic_with_code(
+                    &source,
+                    &path_str,
+                    &span,
+                    "error",
+                    code,
+                    &compile_err.message,
+                    None,
+                    None,
+                );
+                eprint!("{rendered}");
+            }
+            diagnostics.push(CheckDiagnostic {
+                source: "compile",
+                severity: "error",
+                code: Some(code.to_string()),
+                message: compile_err.message,
+                span: Some(check_span(span)),
+                help: None,
+            });
+        }
+    }
+
     let lint_diagnostics = harn_lint::lint_with_module_graph(
         &program,
         &config.disable_rules,

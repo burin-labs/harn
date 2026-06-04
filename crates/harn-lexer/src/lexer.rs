@@ -7,6 +7,9 @@ pub enum LexerError {
     UnexpectedCharacter(char, Span),
     UnterminatedString(Span),
     UnterminatedBlockComment(Span),
+    /// An integer literal whose magnitude does not fit in an `i64`. Reported
+    /// instead of silently degrading to a lossy float.
+    IntegerLiteralOutOfRange(String, Span),
 }
 
 impl fmt::Display for LexerError {
@@ -20,6 +23,12 @@ impl fmt::Display for LexerError {
             }
             LexerError::UnterminatedBlockComment(span) => {
                 write!(f, "Unterminated block comment at {span}")
+            }
+            LexerError::IntegerLiteralOutOfRange(lit, span) => {
+                write!(
+                    f,
+                    "Integer literal `{lit}` is out of range for int (i64) at {span}"
+                )
             }
         }
     }
@@ -136,7 +145,7 @@ impl Lexer {
             }
 
             if ch.is_ascii_digit() {
-                tokens.push(self.read_number());
+                tokens.push(self.read_number()?);
                 continue;
             }
 
@@ -563,7 +572,7 @@ impl Lexer {
         Err(LexerError::UnterminatedString(start))
     }
 
-    fn read_number(&mut self) -> Token {
+    fn read_number(&mut self) -> Result<Token, LexerError> {
         let start_byte = self.byte_pos;
         let start_col = self.column;
         let mut num_str = String::new();
@@ -592,32 +601,29 @@ impl Lexer {
 
         if !is_float {
             if let Some(ms) = self.try_duration_suffix(&num_str) {
-                return Token::with_span(
+                return Ok(Token::with_span(
                     TokenKind::DurationLiteral(ms),
                     Span::with_offsets(start_byte, self.byte_pos, self.line, start_col),
-                );
+                ));
             }
         }
 
+        let span = Span::with_offsets(start_byte, self.byte_pos, self.line, start_col);
         if is_float {
             let n: f64 = num_str.parse().unwrap_or(0.0);
-            Token::with_span(
-                TokenKind::FloatLiteral(n),
-                Span::with_offsets(start_byte, self.byte_pos, self.line, start_col),
-            )
+            Ok(Token::with_span(TokenKind::FloatLiteral(n), span))
         } else {
             match num_str.parse::<i64>() {
-                Ok(n) => Token::with_span(
-                    TokenKind::IntLiteral(n),
-                    Span::with_offsets(start_byte, self.byte_pos, self.line, start_col),
-                ),
+                Ok(n) => Ok(Token::with_span(TokenKind::IntLiteral(n), span)),
                 Err(_) => {
-                    // Integer overflow falls back to float to avoid losing magnitude.
-                    let n: f64 = num_str.parse().unwrap_or(0.0);
-                    Token::with_span(
-                        TokenKind::FloatLiteral(n),
-                        Span::with_offsets(start_byte, self.byte_pos, self.line, start_col),
-                    )
+                    // An integer literal that does not fit in i64 is a hard
+                    // error, not a silent degrade to a lossy float: the spec
+                    // grammar is `int_literal ::= digit+` with no documented
+                    // float promotion, and silently widening loses both value
+                    // (distinct literals collapse onto the same f64) and type.
+                    // The sign is applied later by the parser, so the most
+                    // negative i64 must be written as e.g. `-9223372036854775807 - 1`.
+                    Err(LexerError::IntegerLiteralOutOfRange(num_str, span))
                 }
             }
         }
@@ -969,6 +975,33 @@ mod tests {
         #[allow(clippy::approx_constant)]
         let expected = 3.14;
         assert_eq!(tokens[1].kind, TokenKind::FloatLiteral(expected));
+    }
+
+    #[test]
+    fn test_int_literal_max_is_exact_and_overflow_is_an_error() {
+        // i64::MAX lexes exactly as an int.
+        let mut lexer = Lexer::new("9223372036854775807");
+        let tokens = lexer.tokenize().unwrap();
+        assert_eq!(tokens[0].kind, TokenKind::IntLiteral(i64::MAX));
+
+        // i64::MAX + 1 (and anything larger) is rejected, not silently widened
+        // to a lossy float. The sign is applied by the parser, so the most
+        // negative i64 is unreachable as a bare literal and overflows here too.
+        for src in ["9223372036854775808", "99999999999999999999999"] {
+            let mut lexer = Lexer::new(src);
+            assert!(
+                matches!(
+                    lexer.tokenize(),
+                    Err(LexerError::IntegerLiteralOutOfRange(lit, _)) if lit == src
+                ),
+                "expected out-of-range error for {src}"
+            );
+        }
+
+        // A float literal of the same magnitude is still fine.
+        let mut lexer = Lexer::new("9223372036854775808.0");
+        let tokens = lexer.tokenize().unwrap();
+        assert!(matches!(tokens[0].kind, TokenKind::FloatLiteral(_)));
     }
 
     #[test]

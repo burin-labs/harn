@@ -50,6 +50,11 @@ pub enum Category {
     /// capability violations (steps, recursion depth, fs/net/env/process
     /// denial). Reserved by issue #1791.
     Cst,
+    /// Bytecode compilation — structural/codegen errors the type checker does
+    /// not catch but that prevent the program from running (e.g. unsupported
+    /// nested match patterns, `break` outside a loop, malformed string
+    /// interpolation). Surfaced by `harn check` as well as `harn run`.
+    Cmp,
 }
 
 impl Category {
@@ -74,6 +79,7 @@ impl Category {
         Category::Pol,
         Category::Met,
         Category::Cst,
+        Category::Cmp,
     ];
 
     pub const fn as_str(self) -> &'static str {
@@ -98,6 +104,7 @@ impl Category {
             Category::Pol => "POL",
             Category::Met => "MET",
             Category::Cst => "CST",
+            Category::Cmp => "CMP",
         }
     }
 }
@@ -202,6 +209,8 @@ diagnostic_codes! {
     ParserUnexpectedCharacter, "HARN-PAR-003", Par, "lexer found an unexpected character";
     ParserUnterminatedString, "HARN-PAR-004", Par, "string literal is unterminated";
     ParserUnterminatedBlockComment, "HARN-PAR-005", Par, "block comment is unterminated";
+    ParserIntegerLiteralOutOfRange, "HARN-PAR-006", Par, "integer literal is out of range for int (i64)";
+    CompilerError, "HARN-CMP-001", Cmp, "the program failed to compile to bytecode";
     UndefinedVariable, "HARN-NAM-001", Nam, "variable name cannot be resolved";
     UndefinedFunction, "HARN-NAM-002", Nam, "function name cannot be resolved";
     UnknownAttribute, "HARN-NAM-003", Nam, "attribute name is not recognized";

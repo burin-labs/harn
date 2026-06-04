@@ -1,0 +1,9 @@
+/**
+ * A list-assignment index out of range — in either direction — is an error.
+ * A very negative index must not silently clamp to 0 and corrupt element 0.
+ */
+pipeline test(task) {
+  var a = [10, 20, 30]
+  a[-100] = 999
+  log(a)
+}
