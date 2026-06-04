@@ -14,7 +14,7 @@
 # PR") never actually ran in any workflow. A contributor could edit
 # spec/openapi.yaml, ship stale bindings, and still get green CI.
 #
-# This registry is the one list. `scripts/check_generated_registry.py`
+# This registry is the one list. `scripts/check_generated_registry.harn`
 # (`make check-generated-registry`) audits the other consumers against
 # it, so a new gen/check pair cannot silently escape CI again, and a
 # generated output cannot lose its drift guard.

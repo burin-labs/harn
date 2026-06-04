@@ -1,0 +1,101 @@
+// Tests for scripts/render_release_notes.harn — exercise the pure pub
+// fns on synthetic changelogs / argv lists, never touching the real
+// CHANGELOG.md, git, or the environment.
+import "../render_release_notes.harn"
+
+let SAMPLE = "# Changelog\n\n## v0.8.71\n\n### Added\n\n- thing one\n- thing two\n\n## v0.8.70\n\nolder body\n\n## v0.8.69\n\noldest body\n"
+
+@test
+pipeline test_normalize_version(task) {
+  assert_eq(normalize_version("v0.8.71"), "0.8.71")
+  assert_eq(normalize_version("0.8.71"), "0.8.71")
+  assert_eq(normalize_version("v1.2.3"), "1.2.3")
+}
+
+@test
+pipeline test_escape_regex(task) {
+  assert_eq(escape_regex("0.8.71"), "0\\.8\\.71")
+  assert_eq(escape_regex("abc"), "abc")
+  assert_eq(escape_regex("a+b"), "a\\+b")
+}
+
+@test
+pipeline test_changelog_versions(task) {
+  assert_eq(changelog_versions(SAMPLE), ["0.8.71", "0.8.70", "0.8.69"])
+  assert_eq(changelog_versions("no versions here"), [])
+}
+
+@test
+pipeline test_extract_section_middle(task) {
+  /* Body stops at the next `## ` heading and is trimmed. */
+  assert_eq(extract_section(SAMPLE, "0.8.71"), "### Added\n\n- thing one\n- thing two")
+}
+
+@test
+pipeline test_extract_section_last(task) {
+  /* Last section runs to end of file. */
+  assert_eq(extract_section(SAMPLE, "0.8.69"), "oldest body")
+}
+
+@test
+pipeline test_extract_section_missing_throws(task) {
+  let r = try {
+    extract_section(SAMPLE, "9.9.9")
+  } catch (_) {
+    "caught"
+  }
+  assert_eq(r, "caught")
+}
+
+@test
+pipeline test_previous_version(task) {
+  let vs = ["0.8.71", "0.8.70", "0.8.69"]
+  assert_eq(previous_version(vs, "0.8.71"), "0.8.70")
+  assert_eq(previous_version(vs, "0.8.70"), "0.8.69")
+  assert_eq(previous_version(vs, "0.8.69"), nil)
+  assert_eq(previous_version(vs, "1.0.0"), nil)
+}
+
+@test
+pipeline test_parse_remote(task) {
+  assert_eq(parse_remote("git@github.com:owner/repo.git"), "owner/repo")
+  assert_eq(parse_remote("https://github.com/owner/repo.git"), "owner/repo")
+  assert_eq(parse_remote("https://github.com/owner/repo"), "owner/repo")
+  assert_eq(parse_remote("https://gitlab.com/owner/repo"), nil)
+}
+
+@test
+pipeline test_render_notes_with_link(task) {
+  let got = render_notes("body text", "owner/name", "0.8.70", "0.8.71")
+  let want = "body text\n\n## Install / Upgrade\n\n```bash\ncargo install harn-cli\n```\n\n**Full Changelog**: https://github.com/owner/name/compare/v0.8.70...v0.8.71\n"
+  assert_eq(got, want)
+}
+
+@test
+pipeline test_render_notes_no_link_when_no_repo(task) {
+  let got = render_notes("body text", nil, "0.8.70", "0.8.71")
+  let want = "body text\n\n## Install / Upgrade\n\n```bash\ncargo install harn-cli\n```\n"
+  assert_eq(got, want)
+}
+
+@test
+pipeline test_render_notes_no_link_when_no_prev(task) {
+  let got = render_notes("body text", "owner/name", nil, "0.8.0")
+  let want = "body text\n\n## Install / Upgrade\n\n```bash\ncargo install harn-cli\n```\n"
+  assert_eq(got, want)
+}
+
+@test
+pipeline test_flag_value(task) {
+  let args = ["--version", "0.8.71", "--repo=owner/name"]
+  assert_eq(flag_value(args, "--version"), "0.8.71")
+  assert_eq(flag_value(args, "--repo"), "owner/name")
+  assert_eq(flag_value(args, "--output"), nil)
+}
+
+@test
+pipeline test_flag_value_equals_form(task) {
+  let args = ["--version=v1.2.3", "--output=/tmp/notes.md"]
+  assert_eq(flag_value(args, "--version"), "v1.2.3")
+  assert_eq(flag_value(args, "--output"), "/tmp/notes.md")
+}

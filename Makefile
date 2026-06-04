@@ -591,4 +591,4 @@ check-tree-sitter-keywords:
 # the add-a-new-artifact checklist.
 check-generated-registry:
 	@echo "=== Checking generated-artifact registry is in sync ==="
-	@python3 scripts/check_generated_registry.py
+	@cargo run --quiet --bin harn -- run scripts/check_generated_registry.harn

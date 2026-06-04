@@ -1,0 +1,179 @@
+// Update generated protocol fixture runtime versions during release bumps.
+//
+// Ported from scripts/sync_protocol_fixture_runtime_versions.py. Behavior-
+// identical: same `--from`/`--to` semver-validated args, same "already target"
+// short-circuit when old == new, same recursive count of string-valued
+// occurrences (`replace_value`), the same JSON-string-literal text replacement
+// that preserves fixture formatting, the same post-replace JSON re-parse +
+// zero-remaining guard, and the same final summary line. Exit codes mirror the
+// Python: 0 on success, 1 on a semver/replace SystemExit, 2 on missing args.
+//
+// Pure logic lives in `pub fn`s driven by the paired test with no filesystem.
+// `main` does the globbing/reads/writes.
+let FIXTURE_ROOT = "conformance/protocols/fixtures"
+
+/** True iff `v` is exactly X.Y.Z — mirrors Python `SEMVER_RE.fullmatch`. */
+pub fn is_semver(v: string) -> bool {
+  return regex_captures(r"^\d+\.\d+\.\d+$", v, "").count > 0
+}
+
+/**
+ * Python `repr(value)` for a plain string: single-quoted. Used in the
+ * semver error message `... got '0.8'`.
+ */
+pub fn py_repr(value: string) -> string {
+  return "'" + value + "'"
+}
+
+/**
+ * Count of string VALUES equal to `old` reachable in a parsed-JSON value.
+ * Mirrors Python `replace_value(...)[1]`: only string leaves count; dict keys
+ * and non-string scalars never match.
+ */
+pub fn count_old_values(value: any, old: string) -> int {
+  let t = type_of(value)
+  if t == "string" {
+    if value == old {
+      return 1
+    }
+    return 0
+  }
+  if t == "list" {
+    var n = 0
+    for item in value {
+      n = n + count_old_values(item, old)
+    }
+    return n
+  }
+  if t == "dict" {
+    var n = 0
+    for key in value.keys() {
+      n = n + count_old_values(value[key], old)
+    }
+    return n
+  }
+  return 0
+}
+
+/**
+ * The JSON string literal for a version, i.e. Python `json.dumps(v)` for a
+ * plain semver string: the value wrapped in double quotes.
+ */
+pub fn json_literal(v: string) -> string {
+  return "\"" + v + "\""
+}
+
+/**
+ * Replace every `"old"` JSON string literal in `text` with `"new"`, preserving
+ * all other formatting. Mirrors `text.replace(json.dumps(old), json.dumps(new))`.
+ */
+pub fn replace_literals(text: string, old: string, new: string) -> string {
+  return text.replace(json_literal(old), json_literal(new))
+}
+
+pipeline main(task) {
+  let parsed = parse_args()
+  if parsed.error != nil {
+    __io_eprintln(parsed.error)
+    return parsed.code
+  }
+  let old = parsed.old
+  let new = parsed.new
+  if !is_semver(old) {
+    __io_eprintln("error: --from must be X.Y.Z, got ${py_repr(old)}")
+    return 1
+  }
+  if !is_semver(new) {
+    __io_eprintln("error: --to must be X.Y.Z, got ${py_repr(new)}")
+    return 1
+  }
+  if old == new {
+    __io_println("protocol fixture runtime versions already target ${new}")
+    return 0
+  }
+  if !harness.fs.exists(FIXTURE_ROOT) {
+    __io_println("protocol fixture root not found: ${FIXTURE_ROOT}")
+    return 0
+  }
+  var changed_files = 0
+  var changed_values = 0
+  for path in sorted_json_files(FIXTURE_ROOT) {
+    let text = harness.fs.read_text(path)
+    let data = json_parse(text)
+    let count = count_old_values(data, old)
+    if count == 0 {
+      continue
+    }
+    // The parsed rewrite above tells us this file has exact string-valued
+    // runtime versions; the text replacement updates only those JSON string
+    // literals without reflowing arrays.
+    let updated_text = replace_literals(text, old, new)
+    let reparsed = json_parse(updated_text)
+    if count_old_values(reparsed, old) != 0 {
+      __io_eprintln("error: failed to replace all ${py_repr(old)} values in ${path}")
+      return 1
+    }
+    harness.fs.write_text(path, updated_text)
+    changed_files = changed_files + 1
+    changed_values = changed_values + count
+  }
+  __io_println(
+    "synced protocol fixture runtime versions: ${changed_values} value(s) across ${changed_files} file(s)",
+  )
+  return 0
+}
+
+/**
+ * Parse `--from`/`--to` (both `--flag value` and `--flag=value` forms), both
+ * required. On missing args returns the argparse-style usage error with exit
+ * code 2; otherwise `{old, new, error: nil, code: 0}`.
+ */
+fn parse_args() -> any {
+  var old: string? = nil
+  var new: string? = nil
+  var i = 0
+  while i < argv.count {
+    let arg = argv[i]
+    if arg == "--from" {
+      i = i + 1
+      if i < argv.count {
+        old = argv[i]
+      }
+    } else if arg.starts_with("--from=") {
+      old = arg.substring(7, arg.len())
+    } else if arg == "--to" {
+      i = i + 1
+      if i < argv.count {
+        new = argv[i]
+      }
+    } else if arg.starts_with("--to=") {
+      new = arg.substring(5, arg.len())
+    }
+    i = i + 1
+  }
+  if old == nil || new == nil {
+    var missing: list<string> = []
+    if old == nil {
+      missing = missing + ["--from"]
+    }
+    if new == nil {
+      missing = missing + ["--to"]
+    }
+    let usage = "usage: sync_protocol_fixture_runtime_versions.py [-h] --from OLD --to NEW"
+    let err = "sync_protocol_fixture_runtime_versions.py: error: the following arguments are required: ${missing.join(", ")}"
+    return {old: "", new: "", error: usage + "\n" + err, code: 2}
+  }
+  return {old: old, new: new, error: nil, code: 0}
+}
+
+/**
+ * Recursively glob `*.json` beneath `root`, sorted, matching Python's
+ * `sorted(FIXTURE_ROOT.rglob("*.json"))`.
+ */
+fn sorted_json_files(root: string) -> list<string> {
+  var paths: list<string> = []
+  for path in harness.fs.glob("${root}/**/*.json") {
+    paths = paths + [path]
+  }
+  return paths.sort()
+}

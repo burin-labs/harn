@@ -141,7 +141,7 @@ run_grammar_audit() {
     echo "error: missing spec/HARN_SPEC.md"
     return 1
   fi
-  time_phase "verify_release_metadata" ./scripts/verify_release_metadata.py
+  time_phase "verify_release_metadata" cargo run --quiet --bin harn -- run scripts/verify_release_metadata.harn
   time_phase "sync_language_spec" cargo run --quiet --bin harn -- run scripts/sync_language_spec.harn
   time_phase "verify_language_spec" cargo run --quiet --bin harn -- run scripts/verify_language_spec.harn
   if [[ ! -d tree-sitter-harn ]]; then
@@ -316,7 +316,7 @@ cmd_prepare() {
   current="$(current_version)"
   next="$(next_version "$bump")"
   bump_version "$next"
-  python3 scripts/sync_protocol_fixture_runtime_versions.py --from "$current" --to "$next"
+  cargo run --quiet --bin harn -- run scripts/sync_protocol_fixture_runtime_versions.harn -- --from "$current" --to "$next"
   # The audit lanes that ran before prepare populate `target/debug/incremental/`
   # with object-file references keyed to the *old* version's crate hashes.
   # Once `bump_version` rewrites Cargo.toml the workspace crates rebuild with
@@ -393,10 +393,10 @@ cmd_notes() {
     version="$(current_version)"
   fi
   if [[ -n "$output" ]]; then
-    python3 scripts/render_release_notes.py --version "$version" --output "$output"
+    cargo run --quiet --bin harn -- run scripts/render_release_notes.harn -- --version "$version" --output "$output"
     echo "Rendered release notes for ${version#v} -> $output"
   else
-    python3 scripts/render_release_notes.py --version "$version"
+    cargo run --quiet --bin harn -- run scripts/render_release_notes.harn -- --version "$version"
   fi
 }
 

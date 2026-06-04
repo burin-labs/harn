@@ -1,0 +1,306 @@
+// Port of scripts/verify_release_metadata.py.
+//
+// Validates that Cargo.toml's workspace version is consistent with
+// CHANGELOG.md (canonical `## vX.Y.Z` headings, descending semver order,
+// non-empty top section), renders the release notes for the effective
+// version, and rejects git tag states that would silently re-release or
+// rewrite history.
+//
+// Exits 0 on success (prints a `verified release metadata ...` line);
+// exits non-zero with an `error: ...` message on any failed check.
+import { parse } from "std/semver"
+import {
+  extract_section,
+  normalize_version,
+  previous_version,
+  render_notes,
+} from "./render_release_notes.harn"
+
+let CARGO_PATH = "Cargo.toml"
+
+let CHANGELOG_PATH = "CHANGELOG.md"
+
+/**
+ * Pull the workspace `version = "X.Y.Z"` literal from Cargo.toml text.
+ * Throws the canonical error when the line is missing.
+ */
+pub fn current_version(cargo_text: string) -> string {
+  let caps = regex_captures(r#"(?m)^version = "([^"]+)""#, cargo_text)
+  if caps.count == 0 {
+    throw "error: missing workspace version in Cargo.toml"
+  }
+  return caps[0].groups[0]
+}
+
+/** Return every `## vX.Y.Z` heading version, in file order. */
+pub fn changelog_versions(text: string) -> list<string> {
+  let caps = regex_captures(r"(?m)^## v([0-9]+\.[0-9]+\.[0-9]+)$", text)
+  var out = []
+  for c in caps {
+    out = out + [c.groups[0]]
+  }
+  return out
+}
+
+/**
+ * Return the body content under `## vX.Y.Z` up to the next heading
+ * (any `## ` line) or end of file, with surrounding whitespace trimmed.
+ * Returns the empty string when the section is absent.
+ */
+pub fn changelog_section_body(text: string, version: string) -> string {
+  let heading = "## v" + version
+  let lines = text.lines()
+  var collecting = false
+  var body = []
+  for line in lines {
+    if collecting {
+      if line.starts_with("## ") {
+        break
+      }
+      body = body + [line]
+    } else if line == heading {
+      collecting = true
+    }
+  }
+  if !collecting {
+    return ""
+  }
+  return body.join("\n").trim()
+}
+
+/**
+ * Catch headings that look like version markers but won't parse. Flags
+ * lines that start with a full 3-component `## vX.Y.Z` prefix followed by
+ * extra characters (trailing whitespace or a suffix). Two-component
+ * historical headings like `## v0.5 series (...)` are ignored.
+ */
+pub fn detect_misformatted_headings(text: string) -> list<string> {
+  var suspicious = []
+  for line in text.lines() {
+    let m = regex_captures(r"^## v\d+\.\d+\.\d+", line)
+    if m.count == 0 {
+      continue
+    }
+    let matched = m[0].match
+    let rest = line.substring(matched.len(), line.len())
+    if rest != "" {
+      suspicious = suspicious + [line]
+    }
+  }
+  return suspicious
+}
+
+/**
+ * True when the top CHANGELOG entry is exactly one patch/minor/major step
+ * ahead of the Cargo.toml version — the intermediate "release content
+ * committed, version bump not yet applied" state the workflow produces.
+ */
+pub fn is_bump_ahead(cargo_version: string, changelog_version: string) -> bool {
+  let cur = parse(cargo_version)
+  let nxt = parse(changelog_version)
+  if cur == nil || nxt == nil {
+    return false
+  }
+  let le = nxt.major < cur.major
+    || (nxt.major == cur.major && nxt.minor < cur.minor)
+    || (nxt.major == cur.major && nxt.minor == cur.minor && nxt.patch <= cur.patch)
+  if le {
+    return false
+  }
+  let patch_bump = nxt.major == cur.major && nxt.minor == cur.minor && nxt.patch == cur.patch + 1
+  let minor_bump = nxt.major == cur.major && nxt.minor == cur.minor + 1 && nxt.patch == 0
+  let major_bump = nxt.major == cur.major + 1 && nxt.minor == 0 && nxt.patch == 0
+  return patch_bump || minor_bump || major_bump
+}
+
+/** Compare two parsed versions; -1 if a<b, 0 if equal, 1 if a>b. */
+fn cmp_version(a, b) -> int {
+  if a.major != b.major {
+    return a.major < b.major ? -1 : 1
+  }
+  if a.minor != b.minor {
+    return a.minor < b.minor ? -1 : 1
+  }
+  if a.patch != b.patch {
+    return a.patch < b.patch ? -1 : 1
+  }
+  return 0
+}
+
+/** True when `versions` is already in strictly/weakly descending semver order. */
+pub fn is_descending(versions: list<string>) -> bool {
+  var i = 1
+  while i < versions.count {
+    let prev = parse(versions[i - 1])
+    let curr = parse(versions[i])
+    if cmp_version(prev, curr) < 0 {
+      return false
+    }
+    i = i + 1
+  }
+  return true
+}
+
+/** True when any version appears more than once in the list. */
+pub fn has_duplicates(versions: list<string>) -> bool {
+  var seen = []
+  for v in versions {
+    if seen.contains(v) {
+      return true
+    }
+    seen = seen + [v]
+  }
+  return false
+}
+
+/**
+ * Run the pure content checks against Cargo.toml and CHANGELOG.md text.
+ * Returns the effective version (the version subsequent git/render checks
+ * should validate against). Throws the canonical `error: ...` string on
+ * any failed check.
+ */
+pub fn check_metadata(cargo_text: string, changelog_text: string) -> string {
+  let version = current_version(cargo_text)
+  let misformatted = detect_misformatted_headings(changelog_text)
+  if misformatted.count > 0 {
+    let joined = misformatted.join("\n  ")
+    throw "error: CHANGELOG.md has heading(s) that look like version markers but "
+      + "don't match the canonical `## vX.Y.Z` regex (no trailing whitespace, "
+      + "no suffix):\n  "
+      + joined
+  }
+  let versions = changelog_versions(changelog_text)
+  if versions.count == 0 {
+    throw "error: CHANGELOG.md does not contain any version headings"
+  }
+  let top = versions[0]
+  let body = changelog_section_body(changelog_text, top)
+  if body == "" {
+    throw "error: CHANGELOG.md '## v" + top + "' section has no body content; release "
+      + "notes would be empty. Add bullet points describing the release."
+  }
+  var effective_version = version
+  if top != version {
+    if is_bump_ahead(version, top) {
+      effective_version = top
+    } else {
+      throw "error: Cargo.toml version " + version + " does not match top changelog entry "
+        + top
+        + " (and the delta is not a single patch/minor/major bump)"
+    }
+  }
+  if has_duplicates(versions) {
+    throw "error: CHANGELOG.md contains duplicate version headings"
+  }
+  if !is_descending(versions) {
+    throw "error: CHANGELOG.md versions are not in descending semver order"
+  }
+  return effective_version
+}
+
+/** Build the success message for the given Cargo.toml + effective version. */
+pub fn success_message(version: string, effective_version: string) -> string {
+  if effective_version == version {
+    return "verified release metadata for v" + version
+  }
+  return "verified release metadata for v" + effective_version
+    + " (Cargo.toml still at v"
+    + version
+    + "; bump pending)"
+}
+
+/**
+ * Smoke-check that the release notes render for `version`, calling the
+ * render_release_notes module in-process (the Python spawned the script as
+ * a subprocess; both are Harn now, so we dogfood the module directly). The
+ * only failure mode is a missing/empty `## v<version>` section, which
+ * `extract_section` throws on — mirroring the non-zero subprocess exit.
+ */
+fn verify_release_notes(version: string) {
+  let changelog = harness.fs.read_text(CHANGELOG_PATH)
+  let normalized = normalize_version(version)
+  let section = try {
+    extract_section(changelog, normalized)
+  } catch (err) {
+    __io_eprintln("error: failed to render release notes for current version")
+    __io_eprintln("${err}")
+    throw "release-notes-failed"
+  }
+  // render_notes is total given a valid section; exercising it confirms the
+  // full render path the Python subprocess covered.
+  let prev = previous_version(changelog_versions(changelog), normalized)
+  let _ = render_notes(section, nil, prev, normalized)
+}
+
+/**
+ * Reject git tag states that would silently re-release or rewrite history.
+ * Passes when the tag is absent, HEAD is at/descends from the tagged
+ * commit, or HEAD carries an equivalent `Release vX.Y.Z` commit.
+ */
+fn verify_tag_state(version: string) {
+  let tag = "v" + version
+  let tag_lookup = harness.process
+    .spawn_captured({cmd: "git", args: ["rev-parse", "-q", "--verify", "refs/tags/" + tag]})
+  if !tag_lookup.success {
+    return
+  }
+  let head = harness.process
+    .spawn_captured({cmd: "git", args: ["rev-parse", "HEAD"]}).stdout
+    .trim()
+  let tag_commit = harness.process
+    .spawn_captured({cmd: "git", args: ["rev-list", "-n", "1", tag]}).stdout
+    .trim()
+  if head == tag_commit {
+    return
+  }
+  let is_descendant = harness.process
+    .spawn_captured({cmd: "git", args: ["merge-base", "--is-ancestor", tag_commit, head]})
+  if is_descendant.success {
+    return
+  }
+  let rebrand = harness.process
+    .spawn_captured(
+    {
+      cmd: "git",
+      args: [
+        "log",
+        "--format=%H",
+        "--grep=^Release " + tag + "( |$|\\()",
+        "--extended-regexp",
+        "-n",
+        "1",
+        "HEAD",
+      ],
+    },
+  )
+  if rebrand.success && rebrand.stdout.trim() != "" {
+    return
+  }
+  throw "error: current version " + version + " is already tagged at " + tag_commit
+    + ", but HEAD ("
+    + head
+    + ") does not include that commit and has no "
+    + "`Release "
+    + tag
+    + "` commit of its own; either bump the version or "
+    + "rebase onto the tagged commit before continuing"
+}
+
+pipeline main(task) {
+  try {
+    let cargo_text = harness.fs.read_text(CARGO_PATH)
+    let changelog_text = harness.fs.read_text(CHANGELOG_PATH)
+    let version = current_version(cargo_text)
+    let effective_version = check_metadata(cargo_text, changelog_text)
+    verify_release_notes(effective_version)
+    verify_tag_state(effective_version)
+    __io_println(success_message(version, effective_version))
+    return 0
+  } catch (e) {
+    if e == "release-notes-failed" {
+      return 1
+    }
+    __io_eprintln("${e}")
+    return 1
+  }
+}

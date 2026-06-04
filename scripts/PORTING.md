@@ -18,6 +18,10 @@ It is a living tracker, not a spec. When you port a script, move its row to
 | `check_diagnostic_codes.harn` | `make lint-diagnostic-codes` | Registry + struct-literal/`Code::` scan; uses `regex_captures` `.line`/`.start`. |
 | `check_docs_links.harn` | `make check-docs-links` | Markdown local-link resolver; `..` resolved at `fs.exists` time. |
 | `verify_language_spec.harn` | `scripts/release_gate.sh` (`verify_language_spec` phase) | Extracts ```harn fences from the spec and type-checks each; resolves the checker binary via `cargo metadata`. |
+| `check_generated_registry.harn` | `make check-generated-registry` | `toml_parse` + Makefile/workflow scan; whole-target match hand-rolled (no regex look-around). |
+| `verify_release_metadata.harn` | `ci.yml` + `release_gate.sh` | Cargo.toml↔CHANGELOG checks; reuses `std/semver`; imports `render_release_notes.harn` in-process for its render smoke check. |
+| `render_release_notes.harn` | `release_gate.sh` + `build-release-binaries.yml` | CHANGELOG section → GitHub notes; the release-asset job invokes the built linux-x64 release binary (no toolchain there). |
+| `sync_protocol_fixture_runtime_versions.harn` | `scripts/release_gate.sh` | Fixture runtime-version bump; `--write` produces byte-identical fixtures. |
 
 Each ported script has a paired `scripts/tests/<name>_test.harn` exercising its
 pure helpers, run by `make test-harn-scripts`.
@@ -29,12 +33,8 @@ left for follow-up waves to keep each PR reviewable.
 
 | Script | Why portable | Risk to watch |
 | --- | --- | --- |
-| `check_generated_registry.py` | Generated-artifact registry check | — |
 | `check_rust_prompt_prose.py` | Rust-source prose lint | Ratchet pattern in `.githooks/lib.sh`. |
-| `verify_release_metadata.py` | Cargo metadata validation | — |
-| `render_release_notes.py` | Changelog → notes render | Release path (`build-release-binaries.yml`). |
 | `build_release_assets_manifest.py` | Asset manifest build | Release path. |
-| `sync_protocol_fixture_runtime_versions.py` | Fixture version sync | — |
 | `backfill_stdlib_metadata.py` | Metadata backfill | Mutating script; verify idempotence. |
 | `check_changelog_no_retroactive_edits.py` | git + regex | High blast radius: also a `pre-push` hook. |
 | `affected-crates.py` | git diff → crate set | **Critical CI path** (`ci.yml` test matrix); port last, parity-test hard. |
@@ -105,6 +105,12 @@ Not bugs — documented so future ports plan around them:
   crate). A pattern like `(['"])(.*?)\1` throws "Invalid regex". Rewrite with
   explicit alternation (e.g. `"([^"]*)"|'([^']*)'` and read whichever group is
   non-nil), as `check_docs_links.harn` does for HTML `href`/`src`.
+- **Regex look-around is unsupported** (look-ahead `(?=...)`/`(?!...)`,
+  look-behind). This is a deliberate linear-time guarantee (RE2/ripgrep-style),
+  not a defect — see the regex-engine note below. Section extraction
+  (`(?=^## )`) and whole-token matching (`(?![\w-])`) are reimplemented with
+  small line/char scanners in `check_generated_registry.harn`,
+  `verify_release_metadata.harn`, and `render_release_notes.harn`.
 - **String literals don't recognize `\u{NN}`, `\xNN`, `\f`, `\v`** — they
   produce multi-char literals (and `harn fmt` escapes the backslash). Match
   whitespace via `ch.trim() == ""` (Rust `char::is_whitespace`, same set as
@@ -132,6 +138,20 @@ these would let the ports (and future ones) shrink toward parity:
   builtin decodes `+`→space (i.e. `unquote_plus` semantics), so it is *not* a
   drop-in for Python's `unquote`; `check_docs_links` correctly hand-rolls the
   percent-decode. A `+`-preserving variant would let it drop the helper.
+
+### Regex engine: linear-time by design
+
+The VM's regex builtins wrap the Rust `regex` crate, which guarantees
+linear-time matching and therefore **excludes look-around and backreferences**
+(the same trade-off RE2 and ripgrep make). For a runtime that may evaluate
+agent-authored patterns, that DoS-resistance is the SOTA-correct posture — not
+a gap to "fix" by bolting on a backtracking engine. The cutover's actual regex
+need was *positional* info, which landed in #3031 (`regex_captures` now returns
+`start`/`end`/`line` and takes `flags`). The look-around/backreference patterns
+are handled by small scanners, which is the right call. If a future use case
+genuinely needs fancy features, the considered option is an *opt-in* fallback
+(e.g. `fancy-regex`) scoped to patterns the linear engine rejects — a
+deliberate decision to accept backtracking, not a default.
 
 ### Groundwork follow-ups
 
