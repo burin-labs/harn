@@ -1,9 +1,86 @@
 import type { ReactNode } from "react"
+import type { Mode } from "highlight.js"
+import { createLowlight, type LanguageFn } from "lowlight"
+import heroSnippetRaw from "../examples/hero.harn.txt?raw"
 
 // Hero mockup — a Harn pipeline source pane beside a live agent run, echoing the
 // Burin Code editor mockup but expressing what Harn itself is: orchestration code.
-function Tok({ c, children }: { c: string; children: ReactNode }) {
-  return <span className={c}>{children}</span>
+export const heroSnippetSource = heroSnippetRaw.trimEnd()
+
+const harnLanguage: LanguageFn = (hljs) => {
+  const keywords = {
+    keyword: "agent_loop break continue each else fn for if in let parallel pipeline retry return spawn while",
+    literal: "false nil true",
+    built_in: "llm_call log read_file read_text tool_select",
+  }
+  const interpolation: Mode = {
+    className: "subst",
+    begin: /\$\{/,
+    end: /\}/,
+    keywords,
+    contains: [],
+  }
+  const string: Mode = {
+    className: "string",
+    begin: '"',
+    end: '"',
+    illegal: "\\n",
+    contains: [{ begin: "\\\\." }, interpolation],
+  }
+  const mainContains: Mode[] = [
+    hljs.C_LINE_COMMENT_MODE,
+    hljs.C_BLOCK_COMMENT_MODE,
+    string,
+    {
+      className: "number",
+      begin: /\b\d+(?:\.\d+)?(?:ms|s|m|h)?\b/,
+      relevance: 0,
+    },
+    {
+      className: "title.function",
+      beginKeywords: "fn pipeline",
+      end: /[(\s]/,
+      excludeEnd: true,
+      contains: [{ begin: /[a-z_][A-Za-z0-9_]*/ }],
+      relevance: 0,
+    },
+  ]
+  interpolation.contains = mainContains
+  return {
+    name: "Harn",
+    aliases: ["harn"],
+    keywords,
+    contains: mainContains,
+  }
+}
+
+type HighlightNode = {
+  type: string
+  value?: string
+  tagName?: string
+  properties?: { className?: string[] | string }
+  children?: HighlightNode[]
+}
+
+const harnLowlight = createLowlight({ harn: harnLanguage })
+
+function renderHighlightNode(node: HighlightNode, index: number): ReactNode {
+  if (node.type === "text") return node.value ?? ""
+  if (node.type !== "element") return null
+
+  const className = node.properties?.className
+  return (
+    <span
+      key={index}
+      className={Array.isArray(className) ? className.join(" ") : className}
+    >
+      {(node.children ?? []).map(renderHighlightNode)}
+    </span>
+  )
+}
+
+function highlightedHeroSource() {
+  return harnLowlight.highlight("harn", heroSnippetSource).children.map(renderHighlightNode)
 }
 
 function ChatRow({
@@ -40,30 +117,8 @@ export function HarnMockup() {
         <div className="grid grid-cols-12 text-[13px] leading-relaxed">
           <div className="col-span-12 px-5 py-4 font-mono text-[12.5px] sm:col-span-7">
             <pre className="m-0 whitespace-pre text-white/80">
-              <Tok c="text-amber-300">pipeline</Tok> <Tok c="text-teal-300">review</Tok>
-              {"(path: "}
-              <Tok c="text-cyan-300">String</Tok>
-              {") {\n  "}
-              <Tok c="text-amber-300">let</Tok>
-              {" diff = git.diff(path)\n  "}
-              <Tok c="text-amber-300">let</Tok>
-              {" notes = diff\n    |> "}
-              <Tok c="text-teal-300">llm_call</Tok>
-              {'(model: '}
-              <Tok c="text-emerald-300">"claude-opus-4-8"</Tok>
-              {")\n    |> "}
-              <Tok c="text-teal-300">tool_select</Tok>
-              {"(max: "}
-              <Tok c="text-rose-300">8</Tok>
-              {")\n\n  "}
-              <Tok c="text-amber-300">spawn</Tok>
-              {" agent(notes, deadline: "}
-              <Tok c="text-rose-300">30s</Tok>
-              {")\n  "}
-              <Tok c="text-amber-300">return</Tok>
-              {" notes"}
+              <code data-hero-snippet="true" className="language-harn">{highlightedHeroSource()}</code>
               <span className="ml-px inline-block h-3 w-1.5 -translate-y-px bg-accent-400 align-middle" />
-              {"\n}"}
             </pre>
           </div>
           <div className="col-span-12 border-t border-white/5 bg-[#060c0b] sm:col-span-5 sm:border-t-0 sm:border-l">

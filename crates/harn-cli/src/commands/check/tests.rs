@@ -1110,6 +1110,7 @@ fn collect_harn_targets_recurses_directories_and_deduplicates() {
     std::fs::create_dir_all(dir.join(".harn-eval-abc123")).unwrap();
     std::fs::create_dir_all(dir.join("node_modules").join("pkg")).unwrap();
     std::fs::write(dir.join("a.harn"), "pipeline a() {}\n").unwrap();
+    std::fs::write(dir.join("site.harn.txt"), "pipeline site() {}\n").unwrap();
     std::fs::write(dir.join("nested").join("b.harn"), "pipeline b() {}\n").unwrap();
     std::fs::write(
         dir.join("nested").join("skipped.harn"),
@@ -1157,8 +1158,9 @@ fn collect_harn_targets_recurses_directories_and_deduplicates() {
     let target_file = dir.join("a.harn").display().to_string();
     let files = collect_harn_targets(&[target_dir.as_str(), target_file.as_str()]);
 
-    assert_eq!(files.len(), 2);
+    assert_eq!(files.len(), 3);
     assert!(files.contains(&dir.join("a.harn")));
+    assert!(files.contains(&dir.join("site.harn.txt")));
     assert!(files.contains(&dir.join("nested").join("b.harn")));
     assert!(!files.contains(&dir.join("ignored_by_gitignore.harn")));
     assert!(!files.contains(&dir.join("nested").join("skipped.harn")));
@@ -1169,12 +1171,18 @@ fn collect_harn_targets_recurses_directories_and_deduplicates() {
         .join("skipped.harn")
         .display()
         .to_string();
-    let explicit_files = collect_harn_targets(&[ignored_file.as_str(), skipped_file.as_str()]);
+    let site_snippet = dir.join("site.harn.txt").display().to_string();
+    let explicit_files = collect_harn_targets(&[
+        ignored_file.as_str(),
+        skipped_file.as_str(),
+        site_snippet.as_str(),
+    ]);
     assert_eq!(
         explicit_files,
         vec![
             dir.join("ignored_by_gitignore.harn"),
             dir.join("nested").join("skipped.harn"),
+            dir.join("site.harn.txt"),
         ]
     );
     let explicit_generated_dir = dir.join(".harn-eval-abc123").display().to_string();

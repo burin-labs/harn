@@ -443,10 +443,10 @@ async fn async_main(raw_args: Vec<String>, runtime_mode: CliRuntimeMode) {
                 if args.json {
                     print_check_error(
                         "no_harn_files",
-                        "no .harn files found under the given target(s)",
+                        "no .harn or .harn.txt files found under the given target(s)",
                     );
                 }
-                command_error("no .harn files found under the given target(s)");
+                command_error("no .harn or .harn.txt files found under the given target(s)");
             }
             let mut analysis = harn_parser::analysis::AnalysisDatabase::new();
             let module_graph =
@@ -561,10 +561,12 @@ async fn async_main(raw_args: Vec<String>, runtime_mode: CliRuntimeMode) {
                 if args.json {
                     print_lint_error(
                         "no_lint_targets",
-                        "no .harn or .harn.prompt files found under the given target(s)",
+                        "no .harn, .harn.txt, or .harn.prompt files found under the given target(s)",
                     );
                 }
-                command_error("no .harn or .harn.prompt files found under the given target(s)");
+                command_error(
+                    "no .harn, .harn.txt, or .harn.prompt files found under the given target(s)",
+                );
             }
             let mut analysis = harn_parser::analysis::AnalysisDatabase::new();
             let module_graph =
