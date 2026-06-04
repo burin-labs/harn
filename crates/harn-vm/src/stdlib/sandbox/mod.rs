@@ -825,10 +825,15 @@ fn toolchain_read_roots_from(
         ("UV_PYTHON_INSTALL_DIR", Some(".local/share/uv/python"), ""),
         // pyenv version installs (skip shims/config at the root).
         ("PYENV_ROOT", Some(".pyenv"), "versions"),
-        // Rust: rustup toolchains, and the cargo *bin* dir only — NOT all
-        // of ~/.cargo, which holds credentials.toml.
-        ("RUSTUP_HOME", Some(".rustup"), "toolchains"),
+        // Rust: the whole rustup home (toolchains + settings.toml — rustup
+        // reads settings.toml FIRST to resolve the default toolchain, and it
+        // holds no credentials), plus the cargo bin/registry/git caches that
+        // `cargo build` reads — but NOT all of ~/.cargo, which holds
+        // credentials.toml (and config.toml), so those stay denied.
+        ("RUSTUP_HOME", Some(".rustup"), ""),
         ("CARGO_HOME", Some(".cargo"), "bin"),
+        ("CARGO_HOME", Some(".cargo"), "registry"),
+        ("CARGO_HOME", Some(".cargo"), "git"),
         // Node version managers.
         ("NVM_DIR", Some(".nvm"), "versions"),
         ("VOLTA_HOME", Some(".volta"), ""),
@@ -1356,7 +1361,13 @@ mod tests {
         let cargo = dir.path().join("cargo-home");
         let rustup = dir.path().join("rustup-home");
         let goroot = dir.path().join("goroot");
-        for d in [&uv, &cargo.join("bin"), &rustup.join("toolchains"), &goroot] {
+        for d in [
+            &uv,
+            &cargo.join("bin"),
+            &cargo.join("registry"),
+            &rustup.join("toolchains"),
+            &goroot,
+        ] {
             std::fs::create_dir_all(d).unwrap();
         }
 
@@ -1378,15 +1389,19 @@ mod tests {
         );
         assert!(
             roots.contains(&cargo.join("bin")),
-            "CARGO_HOME narrowed to bin/ (never the credential-bearing root): {roots:?}"
+            "CARGO_HOME bin/ granted: {roots:?}"
+        );
+        assert!(
+            roots.contains(&cargo.join("registry")),
+            "CARGO_HOME registry/ (package cache cargo build reads) granted: {roots:?}"
         );
         assert!(
             !roots.contains(&cargo),
-            "the cargo root (holding credentials.toml) must not be granted: {roots:?}"
+            "the cargo root (holding credentials.toml / config.toml) must not be granted: {roots:?}"
         );
         assert!(
-            roots.contains(&rustup.join("toolchains")),
-            "RUSTUP_HOME narrowed to toolchains/: {roots:?}"
+            roots.contains(&rustup),
+            "RUSTUP_HOME granted whole (settings.toml lives at the root, no credentials there): {roots:?}"
         );
         assert!(roots.contains(&goroot), "GOROOT used whole: {roots:?}");
     }
