@@ -60,6 +60,14 @@ const STALL_REPEAT_CONTEXT_WINDOW_ERROR = 2
 // nudging forever.
 const STALL_HARD_STOP_AFTER_TRIPS = 3
 
+// Tools that report progress without changing task state. A turn whose only
+// tool call is one of these is "narrating progress without making it": it is
+// counted as a no-progress turn for stall accounting, so a run of them (e.g. a
+// model spamming `agent_progress` after it gets stuck) trips the no-progress
+// detector instead of masquerading as activity. A turn that also makes a real
+// tool call is unaffected — the real call carries the action stream.
+const SOFT_PROGRESS_TOOLS = ["agent_progress"]
+
 type AgentStallConfig = {
   enabled: bool,
   threshold: int,
@@ -722,11 +730,17 @@ pub fn agent_stall_observe_tool_calls(
       hard_stop: false,
     }
   }
-  if len(tool_calls) == 0 {
-    // No tool call this turn. A turn with visible text but no tool call is a
-    // no-progress monologue candidate; a fully empty turn just resets the
-    // action stream.
-    if to_string(turn_text) != "" {
+  // Soft progress-report tools (e.g. `agent_progress`) report status without
+  // advancing task state, so they are excluded from the real-action stream: a
+  // turn whose only call is such a report is treated as no-progress.
+  let substantive_calls = tool_calls
+    .filter({ c -> !contains(SOFT_PROGRESS_TOOLS, __agent_tool_call_name(c)) })
+  if len(substantive_calls) == 0 {
+    // No substantive tool call this turn — either none at all, or only soft
+    // progress reports. With visible text or a progress report, that is a
+    // no-progress monologue candidate; a fully empty turn resets the action
+    // stream.
+    if to_string(turn_text) != "" || len(tool_calls) > 0 {
       return __agent_stall_observe_no_progress(session_id, iteration, config, state, defer_feedback)
     }
     return {
@@ -741,7 +755,7 @@ pub fn agent_stall_observe_tool_calls(
   var next_state = state + {no_progress_streak: 0}
   var emitted_warning = nil
   var feedback_deferred = false
-  for call in tool_calls {
+  for call in substantive_calls {
     let tool_name = __agent_tool_call_name(call)
     if tool_name == "" || contains(config.exempt_tools, tool_name) {
       next_state = __agent_stall_register_recovery(__agent_stall_reset_action(next_state))
