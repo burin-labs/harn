@@ -907,8 +907,9 @@ pub(super) async fn consume_sse_lines<R: tokio::io::AsyncBufRead + Unpin>(
                 }
             }
             // Streaming deltas for `reasoning` (Ollama OpenAI-compat,
-            // OpenRouter passthrough) and `reasoning_content` (DashScope,
-            // Together) arrive as token-sized fragments — `"Here"`,
+            // OpenRouter passthrough), `reasoning_content` (DashScope,
+            // Together), and `reasoning_details` (MiniMax) arrive as
+            // token-sized fragments — `"Here"`,
             // `"'s"`, `" a"`, `" thinking"`. Concatenate them verbatim;
             // `extract_openai_message_field_as_text` + `append_paragraph`
             // would `.trim()` each fragment (losing inter-token spaces)
@@ -917,8 +918,10 @@ pub(super) async fn consume_sse_lines<R: tokio::io::AsyncBufRead + Unpin>(
             // `"The\ntask\nis\nto\nextend"`. The non-streaming response
             // path still uses `append_paragraph` because there each
             // field arrives as a single complete block.
-            let reasoning_delta =
-                extract_openai_delta_field_str(delta, &["reasoning", "reasoning_content"]);
+            let reasoning_delta = extract_openai_delta_field_str(
+                delta,
+                &["reasoning", "reasoning_content", "reasoning_details"],
+            );
             if !reasoning_delta.is_empty() {
                 thinking_text.push_str(reasoning_delta);
                 blocks.push(serde_json::json!({"type": "reasoning", "text": reasoning_delta, "visibility": "private"}));

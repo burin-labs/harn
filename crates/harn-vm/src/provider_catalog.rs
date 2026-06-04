@@ -1658,6 +1658,9 @@ fn modalities_from_caps(caps: &llm::capabilities::Capabilities) -> ModelModaliti
     if caps.pdf {
         input.push("pdf".to_string());
     }
+    if caps.video {
+        input.push("video".to_string());
+    }
     ModelModalities {
         input,
         output: vec!["text".to_string()],

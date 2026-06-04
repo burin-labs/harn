@@ -197,6 +197,16 @@ impl OpenAiCompatibleProvider {
                     body["reasoning"] = reasoning;
                 }
             }
+            Some("minimax") => {
+                if let Some(thinking) = minimax_thinking_config(&opts.thinking) {
+                    let thinking_enabled = thinking.get("type").and_then(serde_json::Value::as_str)
+                        != Some("disabled");
+                    body["thinking"] = thinking;
+                    if thinking_enabled {
+                        body["reasoning_split"] = serde_json::json!(true);
+                    }
+                }
+            }
             _ => {}
         }
         if caps.reasoning_effort_supported {
@@ -520,6 +530,18 @@ fn enabled_reasoning_config(
             Some(serde_json::json!({ "enabled": true }))
         }
         ThinkingConfig::Effort { .. } => Some(serde_json::json!({ "enabled": true })),
+    }
+}
+
+fn minimax_thinking_config(thinking: &ThinkingConfig) -> Option<serde_json::Value> {
+    match thinking {
+        ThinkingConfig::Disabled
+        | ThinkingConfig::Effort {
+            level: crate::llm::api::ReasoningEffort::None,
+        } => Some(serde_json::json!({ "type": "disabled" })),
+        ThinkingConfig::Enabled { .. }
+        | ThinkingConfig::Adaptive
+        | ThinkingConfig::Effort { .. } => Some(serde_json::json!({ "type": "adaptive" })),
     }
 }
 
@@ -890,6 +912,37 @@ thinking_modes = ["enabled"]
     }
 
     #[test]
+    fn minimax_m3_uses_adaptive_thinking_and_completion_tokens() {
+        let mut payload = base_request_payload();
+        payload.provider = "minimax".to_string();
+        payload.model = "MiniMax-M3".to_string();
+        payload.thinking = ThinkingConfig::Enabled {
+            budget_tokens: Some(4096),
+        };
+
+        let body = OpenAiCompatibleProvider::build_request_body(&payload, false);
+
+        assert_eq!(body["thinking"]["type"], "adaptive");
+        assert_eq!(body["reasoning_split"], true);
+        assert_eq!(body["max_completion_tokens"], 64);
+        assert!(body.get("max_tokens").is_none());
+        assert!(body.get("reasoning").is_none());
+    }
+
+    #[test]
+    fn minimax_m3_disables_thinking_explicitly() {
+        let mut payload = base_request_payload();
+        payload.provider = "minimax".to_string();
+        payload.model = "MiniMax-M3".to_string();
+        payload.thinking = ThinkingConfig::Disabled;
+
+        let body = OpenAiCompatibleProvider::build_request_body(&payload, false);
+
+        assert_eq!(body["thinking"]["type"], "disabled");
+        assert!(body.get("reasoning_split").is_none());
+    }
+
+    #[test]
     fn together_gpt_oss_effort_uses_reasoning_effort() {
         let mut payload = base_request_payload();
         payload.provider = "together".to_string();
@@ -990,6 +1043,32 @@ thinking_modes = ["enabled"]
                 "image_url": {
                     "url": "https://example.com/image.png",
                     "detail": "high",
+                }
+            })
+        );
+    }
+
+    #[test]
+    fn video_content_maps_to_openai_video_url_block() {
+        let mut payload = base_request_payload();
+        payload.provider = "minimax".to_string();
+        payload.model = "MiniMax-M3".to_string();
+        payload.messages = vec![json!({
+            "role": "user",
+            "content": [
+                {"type": "text", "text": "summarize"},
+                {"type": "video", "base64": "AAAA", "media_type": "video/mp4"}
+            ],
+        })];
+
+        let body = OpenAiCompatibleProvider::build_request_body(&payload, false);
+        assert_eq!(body["messages"][0]["content"][0]["text"], "summarize");
+        assert_eq!(
+            body["messages"][0]["content"][1],
+            json!({
+                "type": "video_url",
+                "video_url": {
+                    "url": "data:video/mp4;base64,AAAA",
                 }
             })
         );

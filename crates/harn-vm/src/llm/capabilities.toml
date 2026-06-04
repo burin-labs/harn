@@ -50,6 +50,7 @@
 #   vision          : whether Harn can send visual input blocks on this route.
 #   audio_supported : whether Harn can send audio input blocks on this route.
 #   pdf_supported   : whether Harn can send PDF/document input blocks on this route.
+#   video_supported : whether Harn can send video input blocks on this route.
 #   files_api_supported:
 #                     whether file_id references from std/files::upload are accepted.
 #   file_upload_wire_format:
@@ -88,7 +89,7 @@
 #   reasoning_none_supported: whether reasoning_effort="none" is accepted.
 #   reasoning_wire_format:
 #                     OpenAI-compatible non-standard reasoning transport:
-#                     openrouter or enabled.
+#                     openrouter, enabled, or minimax.
 #   recommended_endpoint: preferred endpoint family for this route.
 #   text_tool_wire_format_supported: whether Harn text tool calls survive.
 #   preferred_tool_format:
@@ -2252,10 +2253,33 @@ prefers_xml_tools = false
 thinking_block_style = "inline"
 prompt_caching = true
 
-# ---------- MiniMax (open-weight, OpenAI-compatible /v1) ---------------------
-# MiniMax M2 family: 230B/10B MoE with native tool calls + thinking mode.
-# Prompt caching honored on M2.7+ at 20% of input. Highspeed variants
-# share the same wire shape, just skip the thinking-mode budget.
+# ---------- MiniMax (OpenAI-compatible /v1) ----------------------------------
+# MiniMax M3 adds adaptive thinking, 1M context, native tools, prompt
+# caching, and text/image/video input. The M2 family remains open-weight:
+# 230B/10B MoE with native tool calls + thinking mode. Prompt caching is
+# honored on M2.7+ at 20% of input. Highspeed variants share the same wire
+# shape, just skip the thinking-mode budget.
+
+[[provider.minimax]]
+model_match = "minimax-m3*"
+native_tools = true
+preferred_tool_format = "native"
+structured_output = "delimited"
+thinking_modes = ["adaptive"]
+reasoning_wire_format = "minimax"
+requires_completion_tokens = true
+vision = true
+vision_supported = true
+video_supported = true
+prompt_caching = true
+text_tool_wire_format_supported = true
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "delimited"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "inline"
 
 [[provider.minimax]]
 model_match = "minimax-m2.7*"
@@ -2358,6 +2382,25 @@ thinking_block_style = "inline"
 # overrides only need to set `native_tools` + `preferred_tool_format`.
 # The audit test trips on missing entries because provider_family
 # inheritance does not cover specific OR slugs by itself.
+
+[[provider.openrouter]]
+model_match = "minimax/minimax-m3*"
+native_tools = true
+preferred_tool_format = "native"
+text_tool_wire_format_supported = true
+structured_output = "delimited"
+thinking_modes = ["adaptive"]
+vision = true
+vision_supported = true
+video_supported = true
+prompt_caching = true
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "delimited"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "inline"
 
 [[provider.openrouter]]
 model_match = "minimax/minimax-m2.7*"

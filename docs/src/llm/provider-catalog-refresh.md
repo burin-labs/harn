@@ -13,6 +13,13 @@ The workflow never mutates the shipped catalog. The patch is a review
 aid: diff it against `crates/harn-vm/src/llm_config.rs` or your
 project's `harn.toml` overlay before landing changes.
 
+Static catalog pricing should reflect the provider's durable rate card,
+not launch promotions or short discount windows returned by aggregator
+APIs. When a provider publishes time-limited promotional rates, keep the
+normal post-promotion rate in `providers.toml` and capture the promotion
+only in human review notes unless the catalog schema grows an explicit
+promotion-period field.
+
 ## Running the workflow
 
 ```bash

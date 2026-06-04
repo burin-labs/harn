@@ -73,13 +73,16 @@ fn __capability_field(caps, capability) {
   if capability == "pdf" {
     return caps?.pdf ?? false
   }
+  if capability == "video" {
+    return caps?.video ?? false
+  }
   return false
 }
 
 /**
  * True if (model, capability) is supported per the runtime catalog.
  * capability is one of: "thinking", "tool_search", "interleaved_thinking",
- * "prompt_caching", "vision", "audio", "pdf", "files_api",
+ * "prompt_caching", "vision", "audio", "pdf", "video", "files_api",
  * "reasoning_effort", "native_tools". Returns false on unknown model.
  *
  * @effects: []

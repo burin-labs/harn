@@ -1106,6 +1106,7 @@ pub(crate) fn capabilities_to_vm_value(
     );
     dict.insert("audio".to_string(), VmValue::Bool(caps.audio));
     dict.insert("pdf".to_string(), VmValue::Bool(caps.pdf));
+    dict.insert("video".to_string(), VmValue::Bool(caps.video));
     dict.insert(
         "files_api_supported".to_string(),
         VmValue::Bool(caps.files_api_supported),

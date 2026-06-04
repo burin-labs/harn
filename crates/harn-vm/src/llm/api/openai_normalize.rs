@@ -1,6 +1,6 @@
 //! Message-shape normalization for OpenAI-style providers. Handles both
 //! string and structured `content` payloads, surfaces hidden reasoning
-//! fields (`reasoning` / `reasoning_content`), and splits inline
+//! fields (`reasoning` / `reasoning_content` / `reasoning_details`), and splits inline
 //! `<think>...</think>` blocks via [`super::thinking`].
 
 use super::thinking::split_openai_thinking_blocks;
@@ -118,8 +118,10 @@ pub(super) fn extract_openai_delta_field_str<'a>(
 
 pub(super) fn normalize_openai_message_text(message: &serde_json::Value) -> (String, String) {
     let raw_text = extract_openai_message_field_as_text(message, &["content"]);
-    let reasoning_text =
-        extract_openai_message_field_as_text(message, &["reasoning", "reasoning_content"]);
+    let reasoning_text = extract_openai_message_field_as_text(
+        message,
+        &["reasoning", "reasoning_content", "reasoning_details"],
+    );
     // Qwen3/3.5 emit inline `<think>...</think>` when
     // `chat_template_kwargs.enable_thinking` is set. Split them out so the
     // agent loop doesn't treat reasoning as output or parse tool calls
@@ -231,6 +233,17 @@ mod tests {
         let (visible, thinking) = normalize_openai_message_text(&message);
         assert_eq!(visible, "visible answer");
         assert_eq!(thinking, "separate reasoning\ninline reasoning");
+    }
+
+    #[test]
+    fn normalize_openai_message_text_uses_minimax_reasoning_details() {
+        let message = serde_json::json!({
+            "content": "visible answer",
+            "reasoning_details": "minimax private trace"
+        });
+        let (visible, thinking) = normalize_openai_message_text(&message);
+        assert_eq!(visible, "visible answer");
+        assert_eq!(thinking, "minimax private trace");
     }
 
     #[test]

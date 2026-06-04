@@ -36,19 +36,20 @@ let result = llm_call(
 log(result.text)
 ```
 
-With image content:
+With image or video content:
 
 ```harn
-import { image_content } from "std/llm/media"
+import { image_content, video_content } from "std/llm/media"
 
 let result = llm_call("", nil, {
-  provider: "openai",
-  model: "gpt-4o",
+  provider: "minimax",
+  model: "MiniMax-M3",
   messages: [{
     role: "user",
     content: [
-      {type: "text", text: "Summarize this diagram."},
+      {type: "text", text: "Summarize these inputs."},
       image_content("diagram.png", {detail: "auto"}),
+      video_content("demo.mp4"),
     ],
   }],
 })
@@ -64,6 +65,13 @@ only accepts base64 image data, so `url` image blocks are rejected for
 `provider: "ollama"`. `std/llm/media` also provides `image_message(...)`
 and `image_vision_context(...)` helpers when a harness wants the same image
 as both LLM content and deterministic `vision_ocr(...)` context.
+
+Video blocks use the provider-neutral shape
+`{type: "video", url?: string, base64?: string, media_type: string}`. Exactly
+one of `url` or `base64` is required. Harn translates video blocks to OpenAI
+compatible `video_url` content, and to Gemini `inline_data`/`file_data` parts
+for routes that declare video support. `std/llm/media` also provides
+`video_message(...)`.
 
 ### Parameters
 
