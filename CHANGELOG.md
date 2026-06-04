@@ -8,6 +8,106 @@ highlights live in [CHANGELOG-pre-0.6.md](CHANGELOG-pre-0.6.md).
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.8.73
+
+### Added
+
+- **Behavioral tips to cut cheap/local-model toolless churn and format
+  leakage.** The agent loop now recovers from the most common weak-model
+  failure habits without changing the wire protocol. New TEXT-mode corrective
+  nudges fire on the turns the native-gated completion confirmation never
+  reached: a `fenced_call_attempt` nudge when a call is wrapped in a
+  ```` ```tool_code ````/`call`/`edit`/`python` Markdown fence the parser
+  ignores, and a `named_tool_not_called` nudge when the model narrates a bound
+  tool ("I'll use `edit`...") but emits no call. A decaying "turns since
+  meaningful progress" counter drives an escalating `no_progress_streak` nudge
+  for pure-prose churn; it does not fully reset on a single dispatch, and the
+  content-specific nudges take precedence so a turn is never double-nudged. The
+  text response-protocol prompt also hoists an anti-fence rule, an
+  object-literal-vs-Python-kwarg rule, a heredoc-close reminder, and a
+  "no code in `<user_response>`" rule. All detectors are conditioned on observed
+  output shape, not on any model name.
+
+### Changed
+
+- **Provider catalog.** OpenRouter DeepSeek V4 Flash and V4 Pro now use the
+  current OpenRouter 1,048,576-token context windows, cache-read prices, and
+  standard rate cards while retaining the direct DeepSeek V4 entries and legacy
+  alias metadata.
+- **`harn fmt`, `harn lint --fix`, and the LSP on-save fixer share one autofix
+  apply/dedup policy.** The "drop overlapping fixes and splice right-to-left"
+  logic now lives in one place (`FixEdit::apply_all` / `dedupe_overlapping`), so
+  the three surfaces can no longer drift on which conflicting fixes win.
+- **List/dict accumulators are now O(1) amortized.** The common
+  `xs = xs + [item]` / `xs += [item]` and dict-merge accumulator patterns no
+  longer clone the whole collection on every step. A compiler optimization
+  clears the binding's reference before the concat so the runtime extends the
+  existing allocation in place. Building a 40 k-element list this way drops from
+  about 18 s to about 0.5 s. Behavior is unchanged, including aliasing like
+  `x = x + x`, and the scalar `i += 1` fast path is untouched.
+
+### Fixed
+
+- **Release finalization writes generated GitHub release notes inside the repo
+  workspace (#3046).** `release_ship.sh --finalize` no longer asks Harn to
+  write its default notes file under `/tmp`, avoiding sandbox rejection in the
+  publish-release recovery workflow.
+- **Corrected gemma-4 / vision / Opus capability declarations.** The local
+  (vLLM/SGLang) `gemma-4*` rule now declares native tools and native structured
+  output instead of silently degrading to text tools; the Ollama `bakllava`,
+  `llama3.2-vision`, and `gemma3` rules resolve to
+  `thinking_block_style = "none"` so caption models no longer emit a spurious
+  "## Reasoning" scaffold; both Ollama `gemma4` rules add
+  `structured_output = "format_kw"` plus explicit text tools so JSON/schema
+  output is no longer blocked; and the two Opus 4.6 rules use the canonical
+  `structured_output = "tool_use"` instead of the deprecated `json_schema`
+  alias. A new audit test walks every catalogued provider alias so future
+  tool-capability omissions trip in CI.
+- **Vertex honors the modern `output_format` for structured output.** It
+  previously read only the legacy `response_format`/`json_schema` mirror, so a
+  call using `output_format: {kind: "json_schema", schema}` silently produced no
+  structured-output directive on the Vertex backend.
+- **`number` is now a usable static type.** The runtime already accepted
+  `number` as `int | float`, but the static type checker treated it as an opaque
+  name, so `fn f(x: number) -> number { x + 1 }` raised spurious type errors at
+  every use and arithmetic site. `number` now resolves to `int | float`
+  everywhere (assignment, argument, return, and arithmetic), exactly like an
+  explicit `int | float` annotation.
+- **Ollama truncation visibility and cache mislabeling.** The `/api/chat` NDJSON
+  done-frame parser now captures Ollama's `done_reason` into `stop_reason`, so
+  length-truncation is visible on the most-used local chat path. A
+  `done_reason == "length"` cut-off no longer surfaces as the retryable
+  `[ollama_empty_content_parser_bug]` error; it returns cleanly with
+  `stop_reason: "length"`, a non-retryable signal, so the retry loop no longer
+  spins re-truncating a deterministic token cap. Native Ollama responses now
+  report cache as `cache_visibility: "unsupported"` with a null
+  `cache_hit_ratio` instead of a fabricated `0.0` ratio.
+- **OpenRouter structured calls to non-reasoning models no longer 404.** When a
+  model declares no reasoning capability, Harn no longer emits a
+  `reasoning: {enabled: false}` disable directive alongside
+  `require_parameters: true`; that combination made OpenRouter drop every
+  endpoint that does not support the reasoning param, such as
+  `qwen/qwen3-coder` JSON-schema calls.
+- **Truncated reasoning no longer leaks into the final answer.** On an
+  OpenAI-compatible response cut off at `finish_reason: "length"` with empty
+  content, Harn no longer promotes the partial reasoning trace into
+  `.text`/`.visible_text`; the surfaced answer stays empty/flagged and the
+  partial trace is exposed via `thinking` instead.
+- **Unknown-model errors classify uniformly.** OpenRouter reports an unknown
+  model as an HTTP-400 `"<id> is not a valid model ID"` body; Harn now maps that
+  prose to `NotFound`/`model_unavailable`, matching Cerebras's 404 path.
+- **Reserved-token tool-call delimiter remapping now runs in the shared
+  transport funnel.** The `[[CALL]]` to `<tool_call>` rewrite is no longer
+  limited to the registered OpenAI-compatible path, so unregistered providers
+  such as `llamacpp` get the same canonical parser input across streaming and
+  non-streaming calls.
+- **Streaming no longer idle-times-out during a slow prefill.** The time to the
+  first token is processed with no SSE bytes, so a slow model on a large context
+  could trip the short inter-token idle timeout before its first token. The
+  first token now gets a more generous budget: default 4x the idle timeout, min
+  120s, still bounded by the overall stream deadline and tunable with
+  `HARN_LLM_FIRST_TOKEN_TIMEOUT`.
+
 ## v0.8.72
 
 ### Added
