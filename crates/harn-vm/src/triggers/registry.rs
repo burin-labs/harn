@@ -886,9 +886,8 @@ pub fn expected_predicate_cost_usd_micros(binding: &TriggerBinding) -> u64 {
         .predicate_state
         .lock()
         .expect("trigger predicate state poisoned");
-    if !state.recent_cost_usd_micros.is_empty() {
-        let total: u64 = state.recent_cost_usd_micros.iter().copied().sum();
-        return total / state.recent_cost_usd_micros.len() as u64;
+    if let Some(average) = average_cost_sample_micros(&state.recent_cost_usd_micros) {
+        return average;
     }
     binding
         .when_budget
@@ -907,6 +906,14 @@ pub fn record_predicate_cost_sample(binding: &TriggerBinding, cost_usd_micros: u
     while state.recent_cost_usd_micros.len() > PREDICATE_COST_WINDOW {
         state.recent_cost_usd_micros.pop_front();
     }
+}
+
+fn average_cost_sample_micros(samples: &VecDeque<u64>) -> Option<u64> {
+    if samples.is_empty() {
+        return None;
+    }
+    let total: u128 = samples.iter().map(|sample| u128::from(*sample)).sum();
+    Some((total / samples.len() as u128) as u64)
 }
 
 pub fn usd_to_micros(value: f64) -> u64 {
@@ -1875,6 +1882,15 @@ mod tests {
         assert!(matches!(error, TriggerRegistryError::DuplicateId(_)));
 
         clear_trigger_registry();
+    }
+
+    #[test]
+    fn expected_predicate_cost_average_does_not_overflow() {
+        let binding = TriggerBinding::new(manifest_spec("costed", "v1"), 1);
+        record_predicate_cost_sample(&binding, u64::MAX);
+        record_predicate_cost_sample(&binding, u64::MAX);
+
+        assert_eq!(expected_predicate_cost_usd_micros(&binding), u64::MAX);
     }
 
     #[tokio::test(flavor = "current_thread")]
