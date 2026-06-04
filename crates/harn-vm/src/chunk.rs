@@ -44,6 +44,21 @@ pub enum Constant {
     Duration(i64),
 }
 
+/// Identity used for constant-pool deduplication.
+///
+/// This is stricter than `PartialEq` for floats: it compares `Constant::Float`
+/// operands by their raw bits, so `+0.0` and `-0.0` (which are `==` under IEEE
+/// 754) get distinct pool slots, and each distinct NaN bit-pattern is preserved.
+/// Collapsing `+0.0`/`-0.0` onto one slot makes signed zero — and therefore the
+/// sign of `1.0 / 0.0` vs `1.0 / -0.0` — depend on which literal happened to be
+/// interned first. The derived `PartialEq` is left intact for all other uses.
+fn constants_identical(a: &Constant, b: &Constant) -> bool {
+    match (a, b) {
+        (Constant::Float(x), Constant::Float(y)) => x.to_bits() == y.to_bits(),
+        _ => a == b,
+    }
+}
+
 /// Runtime-only inline-cache state for bytecode instructions that repeatedly
 /// see the same dynamic shape. Lookup caches stay monomorphic on a name and
 /// receiver shape. Adaptive caches warm on a stable operand or call target,
@@ -656,7 +671,7 @@ impl Chunk {
     /// Add a constant and return its index.
     pub fn add_constant(&mut self, constant: Constant) -> u16 {
         for (i, c) in self.constants.iter().enumerate() {
-            if c == &constant {
+            if constants_identical(c, &constant) {
                 return i as u16;
             }
         }
@@ -1328,8 +1343,8 @@ mod tests {
     use std::sync::Arc;
 
     use super::{
-        Chunk, DirectCallState, DirectCallTarget, InlineCacheEntry, MethodCacheTarget, Op,
-        PropertyCacheTarget,
+        Chunk, Constant, DirectCallState, DirectCallTarget, InlineCacheEntry, MethodCacheTarget,
+        Op, PropertyCacheTarget,
     };
     use crate::BuiltinId;
 
@@ -1962,6 +1977,25 @@ mod tests {
     // shapes is critical: a mis-extracted Method/Property/AdaptiveBinary slot
     // would have the dispatcher attempt a closure call with the wrong argc
     // or Arc::ptr_eq against an unrelated closure.
+
+    #[test]
+    fn add_constant_keeps_signed_zero_and_nan_distinct() {
+        let mut chunk = Chunk::new();
+        // +0.0 and -0.0 are `==` under IEEE 754 but must NOT share a pool slot,
+        // or the sign of `1.0 / 0.0` vs `1.0 / -0.0` would depend on intern order.
+        let pos = chunk.add_constant(Constant::Float(0.0));
+        let neg = chunk.add_constant(Constant::Float(-0.0));
+        assert_ne!(pos, neg, "+0.0 and -0.0 must get distinct constant slots");
+        // Re-adding the identical bit pattern still dedups.
+        assert_eq!(pos, chunk.add_constant(Constant::Float(0.0)));
+        assert_eq!(neg, chunk.add_constant(Constant::Float(-0.0)));
+        // Ordinary floats still dedup by value.
+        let a = chunk.add_constant(Constant::Float(1.5));
+        assert_eq!(a, chunk.add_constant(Constant::Float(1.5)));
+        // Non-float constants are unaffected.
+        let s = chunk.add_constant(Constant::Int(7));
+        assert_eq!(s, chunk.add_constant(Constant::Int(7)));
+    }
 
     #[test]
     fn peek_direct_call_state_returns_none_for_empty_slot() {

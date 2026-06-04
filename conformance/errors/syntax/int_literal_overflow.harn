@@ -1,0 +1,10 @@
+/**
+ * An integer literal that does not fit in i64 is a hard error, not a silent
+ * degrade to a lossy float (which lost both value and type, collapsing
+ * distinct literals onto the same f64). The sign is applied by the parser, so
+ * the most negative i64 must be written as `-9223372036854775807 - 1`.
+ */
+pipeline test(task) {
+  let too_big = 9223372036854775808
+  log(too_big)
+}

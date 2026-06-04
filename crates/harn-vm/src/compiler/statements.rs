@@ -203,10 +203,9 @@ impl Compiler {
             let temp_name = format!("__return_val_{}__", self.temp_counter);
             self.emit_define_binding(&temp_name, true);
             // Innermost finally first; skip catch barriers since
-            // return transfers past local handlers.
-            for fb in self.all_pending_finallys() {
-                self.compile_finally_inline(&fb)?;
-            }
+            // return transfers past local handlers. Each finally is masked
+            // while it runs, so a `return` inside a finally doesn't re-run it.
+            self.run_pending_finallys_for_transfer(0)?;
             self.emit_get_binding(&temp_name);
             self.chunk.emit(Op::Return, self.line);
         } else {
@@ -294,9 +293,7 @@ impl Compiler {
         for _ in handler_depth..self.handler_depth {
             self.chunk.emit(Op::PopHandler, self.line);
         }
-        for fb in self.pending_finallys_down_to(finally_depth) {
-            self.compile_finally_inline(&fb)?;
-        }
+        self.run_pending_finallys_for_transfer(finally_depth)?;
         self.emit_scope_unwind_to(scope_depth);
         if has_iterator {
             self.chunk.emit(Op::PopIterator, self.line);
@@ -325,9 +322,7 @@ impl Compiler {
         for _ in handler_depth..self.handler_depth {
             self.chunk.emit(Op::PopHandler, self.line);
         }
-        for fb in self.pending_finallys_down_to(finally_depth) {
-            self.compile_finally_inline(&fb)?;
-        }
+        self.run_pending_finallys_for_transfer(finally_depth)?;
         self.emit_scope_unwind_to(scope_depth);
         self.chunk.emit_u16(Op::Jump, loop_start as u16, self.line);
         Ok(())

@@ -1,0 +1,16 @@
+pipeline test(task) {
+  // A default expression is evaluated at call time and may reference the
+  // enclosing scope — including a binding with the same name as the parameter.
+  let n = 7
+  fn double_default(n = n * 2) {
+    return n
+  }
+  log(double_default())
+  log(double_default(100))
+  // A default may also reference an *earlier* parameter.
+  fn sum_default(a, b = a + 1) {
+    return a + b
+  }
+  log(sum_default(10))
+  log(sum_default(10, 5))
+}

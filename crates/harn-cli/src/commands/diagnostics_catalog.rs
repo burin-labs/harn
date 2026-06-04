@@ -416,6 +416,9 @@ const fn category_intro(category: Category) -> Option<&'static str> {
             the payload, tags, or scheduling do not match the documented contract.",
         Category::Sus => "Suspend / resume lifecycle errors are raised when a worker is suspended, \
             resumed, or queried outside the lifecycle states the operation supports.",
+        Category::Cmp => "The bytecode compiler rejected a program that parsed and type-checked. \
+            These are structural / codegen errors the type checker does not model — `harn check` \
+            runs the compile pass too, so anything that would stop `harn run` is reported up front.",
     };
     Some(intro)
 }
@@ -444,6 +447,7 @@ const fn category_title(category: Category) -> &'static str {
         Category::Pol => "Runtime policies",
         Category::Met => "Compile-time meta restrictions",
         Category::Cst => "Const-eval sandbox",
+        Category::Cmp => "Bytecode compilation",
     }
 }
 

@@ -90,6 +90,7 @@ impl PipelineError {
             PipelineError::Lex(e) => match e {
                 harn_lexer::LexerError::UnexpectedCharacter(_, span)
                 | harn_lexer::LexerError::UnterminatedString(span)
+                | harn_lexer::LexerError::IntegerLiteralOutOfRange(_, span)
                 | harn_lexer::LexerError::UnterminatedBlockComment(span) => Some(span),
             },
             PipelineError::Parse(e) => match e {

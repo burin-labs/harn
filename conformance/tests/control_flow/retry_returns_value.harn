@@ -1,0 +1,16 @@
+pipeline test(task) {
+  // A `retry` expression evaluates to its body's success value, like if/match/try.
+  let r = retry 3 {
+    42
+  }
+  log(r)
+  var attempts = 0
+  let r2 = retry 3 {
+    attempts = attempts + 1
+    if attempts < 2 {
+      throw "transient"
+    }
+    "ok at ${attempts}"
+  }
+  log(r2)
+}

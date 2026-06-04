@@ -32,9 +32,7 @@ impl Compiler {
         let is_gen = is_stream || body_contains_yield(body);
         fn_compiler.compile_block(body)?;
         // Run pending defers before implicit return
-        for fb in fn_compiler.all_pending_finallys() {
-            fn_compiler.compile_finally_inline(&fb)?;
-        }
+        fn_compiler.drain_finallys_to_floor(0)?;
         fn_compiler.chunk.emit(Op::Nil, self.line);
         fn_compiler.chunk.emit(Op::Return, self.line);
 
@@ -81,9 +79,7 @@ impl Compiler {
         fn_compiler.emit_type_checks(params);
         fn_compiler.compile_block(body)?;
         // Run pending defers before implicit return
-        for fb in fn_compiler.all_pending_finallys() {
-            fn_compiler.compile_finally_inline(&fb)?;
-        }
+        fn_compiler.drain_finallys_to_floor(0)?;
         fn_compiler.chunk.emit(Op::Return, self.line);
 
         let param_slots = crate::chunk::ParamSlot::vec_from_typed(params);
@@ -343,9 +339,7 @@ impl Compiler {
         let is_gen = body_contains_yield(body);
         fn_compiler.compile_block(body)?;
         // Run pending defers before implicit return
-        for fb in fn_compiler.all_pending_finallys() {
-            fn_compiler.compile_finally_inline(&fb)?;
-        }
+        fn_compiler.drain_finallys_to_floor(0)?;
         fn_compiler.chunk.emit(Op::Return, self.line);
 
         let param_slots = crate::chunk::ParamSlot::vec_from_typed(params);
