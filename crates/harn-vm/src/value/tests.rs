@@ -93,14 +93,68 @@ fn hash_key_nil() {
 }
 
 #[test]
-fn hash_key_float_zero_vs_neg_zero() {
-    let pos = VmValue::Float(0.0);
-    let neg = VmValue::Float(-0.0);
-    // 0.0 and -0.0 have different bit representations
-    assert_ne!(
-        value_structural_hash_key(&pos),
-        value_structural_hash_key(&neg)
+fn hash_key_signed_zero_and_int_zero_all_match() {
+    // `values_equal` treats `0.0 == -0.0 == 0`, so all three must hash alike
+    // even though `0.0` and `-0.0` have different bit patterns.
+    let pos = value_structural_hash_key(&VmValue::Float(0.0));
+    let neg = value_structural_hash_key(&VmValue::Float(-0.0));
+    let int = value_structural_hash_key(&i(0));
+    assert_eq!(pos, neg);
+    assert_eq!(pos, int);
+}
+
+#[test]
+fn hash_key_integral_float_matches_int() {
+    // `1 == 1.0` per `values_equal`, so they must share a hash key; `1.5` must
+    // not collide with any integer.
+    assert_eq!(
+        value_structural_hash_key(&i(1)),
+        value_structural_hash_key(&VmValue::Float(1.0))
     );
+    assert_ne!(
+        value_structural_hash_key(&i(1)),
+        value_structural_hash_key(&VmValue::Float(1.5))
+    );
+}
+
+#[test]
+fn hash_key_nan_is_not_an_int() {
+    // NaN is non-integral, so it keeps a float-shaped key (it must never alias
+    // an integer bucket).
+    let nan = value_structural_hash_key(&VmValue::Float(f64::NAN));
+    assert!(
+        nan.starts_with('f'),
+        "NaN key should be float-shaped: {nan}"
+    );
+    assert_ne!(nan, value_structural_hash_key(&i(0)));
+}
+
+#[test]
+fn dedup_values_matches_equality_operator() {
+    // `1 == 1.0` -> collapses; nested inside a pair too.
+    let collapsed = dedup_values(&[i(1), VmValue::Float(1.0), i(1)]);
+    assert_eq!(collapsed.len(), 1);
+
+    let pair = |a, b| VmValue::Pair(std::sync::Arc::new((a, b)));
+    let pairs = dedup_values(&[pair(i(1), s("x")), pair(VmValue::Float(1.0), s("x"))]);
+    assert_eq!(pairs.len(), 1, "Pair(1, x) and Pair(1.0, x) are ==");
+
+    // NaN != NaN, so two NaNs are both kept despite sharing a hash bucket.
+    let nans = dedup_values(&[VmValue::Float(f64::NAN), VmValue::Float(f64::NAN)]);
+    assert_eq!(nans.len(), 2);
+}
+
+#[test]
+fn dedup_values_preserves_first_occurrence_order() {
+    let out = dedup_values(&[i(3), i(1), i(3), i(2), i(1)]);
+    let got: Vec<i64> = out
+        .iter()
+        .map(|v| match v {
+            VmValue::Int(n) => *n,
+            other => panic!("expected int, got {other:?}"),
+        })
+        .collect();
+    assert_eq!(got, vec![3, 1, 2]);
 }
 
 #[test]

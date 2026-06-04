@@ -19,8 +19,8 @@ pub use handles::{
     VmRngHandle, VmStream, VmStreamCancel, VmSyncPermitHandle, VmTaskHandle,
 };
 pub use structural::{
-    compare_values, try_compare_values, value_identity_key, value_structural_hash_key,
-    values_equal, values_identical,
+    compare_values, dedup_values, try_compare_values, value_identity_key,
+    value_structural_hash_key, values_equal, values_identical,
 };
 
 #[cfg(test)]

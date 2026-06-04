@@ -63,22 +63,27 @@ fn write_structural_hash_key(v: &VmValue, out: &mut String) {
         VmValue::Bool(b) => {
             out.push(if *b { 'T' } else { 'F' });
         }
-        VmValue::Int(n) => {
-            out.push('i');
-            out.push_str(&n.to_string());
-            out.push(';');
-        }
+        VmValue::Int(n) => write_int_hash_key(*n, out),
         VmValue::Float(n) => {
-            out.push('f');
-            out.push_str(&n.to_bits().to_string());
-            out.push(';');
+            // A float that is numerically an integer must hash identically to
+            // that integer, because `values_equal` treats `1 == 1.0` (and
+            // `0.0 == -0.0`) as equal — otherwise hash-keyed de-duplication
+            // would disagree with `==`. Non-integral / non-finite floats keep
+            // their bit pattern (so distinct NaNs may collide, which is fine:
+            // dedup confirms every hash hit with `values_equal`).
+            match float_as_equivalent_int(*n) {
+                Some(i) => write_int_hash_key(i, out),
+                None => {
+                    out.push('f');
+                    out.push_str(&n.to_bits().to_string());
+                    out.push(';');
+                }
+            }
         }
         VmValue::String(s) => {
             // Length-prefixed: s<len>:<content> — no ambiguity from content
             out.push('s');
-            out.push_str(&s.len().to_string());
-            out.push(':');
-            out.push_str(s);
+            write_len_prefixed(s, out);
         }
         VmValue::Bytes(bytes) => {
             out.push('b');
@@ -103,10 +108,7 @@ fn write_structural_hash_key(v: &VmValue, out: &mut String) {
         VmValue::Dict(map) => {
             out.push('D');
             for (k, v) in map.iter() {
-                // Length-prefixed key
-                out.push_str(&k.len().to_string());
-                out.push(':');
-                out.push_str(k);
+                write_len_prefixed(k, out);
                 out.push('=');
                 write_structural_hash_key(v, out);
                 out.push(',');
@@ -124,18 +126,74 @@ fn write_structural_hash_key(v: &VmValue, out: &mut String) {
             }
             out.push('}');
         }
+        // Composite values that can contain numbers recurse through this
+        // function (rather than the display fallback below) so numeric
+        // normalization propagates — e.g. `Some(1)` and `Some(1.0)`, which
+        // `values_equal` treats as equal, must hash alike.
+        VmValue::Pair(pair) => {
+            out.push('P');
+            write_structural_hash_key(&pair.0, out);
+            out.push(',');
+            write_structural_hash_key(&pair.1, out);
+            out.push(';');
+        }
+        VmValue::EnumVariant(ev) => {
+            out.push('E');
+            write_len_prefixed(&ev.enum_name, out);
+            write_len_prefixed(&ev.variant, out);
+            for field in ev.fields.iter() {
+                write_structural_hash_key(field, out);
+                out.push(',');
+            }
+            out.push(';');
+        }
+        VmValue::StructInstance { layout, fields } => {
+            // Use the same name-keyed map `values_equal` compares, so field
+            // order in the layout never affects the key.
+            out.push('I');
+            write_len_prefixed(layout.struct_name(), out);
+            for (k, v) in super::struct_fields_to_map(layout, fields) {
+                write_len_prefixed(&k, out);
+                out.push('=');
+                write_structural_hash_key(&v, out);
+                out.push(',');
+            }
+            out.push('}');
+        }
         other => {
-            let tn = other.type_name();
+            // Identity-only values (handles, channels, …) that `values_equal`
+            // never reports equal. Keyed by type + display purely so distinct
+            // ones rarely collide; dedup still confirms with `values_equal`.
             out.push('o');
-            out.push_str(&tn.len().to_string());
-            out.push(':');
-            out.push_str(tn);
-            let d = other.display();
-            out.push_str(&d.len().to_string());
-            out.push(':');
-            out.push_str(&d);
+            write_len_prefixed(other.type_name(), out);
+            write_len_prefixed(&other.display(), out);
         }
     }
+}
+
+/// Length-prefixed `<len>:<content>` encoding, so variable-length content can
+/// never be confused with surrounding structure (e.g. `"a,b"` vs `"a", "b"`).
+fn write_len_prefixed(s: &str, out: &mut String) {
+    out.push_str(&s.len().to_string());
+    out.push(':');
+    out.push_str(s);
+}
+
+/// Canonical integer hash-key encoding, shared by `Int` and by any `Float`
+/// that is numerically an integer (see [`float_as_equivalent_int`]).
+fn write_int_hash_key(n: i64, out: &mut String) {
+    out.push('i');
+    out.push_str(&n.to_string());
+    out.push(';');
+}
+
+/// Returns `Some(i)` when `n` compares equal to the `i64` value `i` under the
+/// same coercion `values_equal` uses for `Int`/`Float` (`(i as f64) == n`).
+/// `None` for non-integral or non-finite floats (incl. NaN / ±inf). This is
+/// the single source of truth that keeps the hash key consistent with `==`.
+fn float_as_equivalent_int(n: f64) -> Option<i64> {
+    let candidate = n as i64; // saturating, and NaN -> 0
+    ((candidate as f64) == n).then_some(candidate)
 }
 
 pub fn values_equal(a: &VmValue, b: &VmValue) -> bool {
@@ -217,6 +275,32 @@ pub fn values_equal(a: &VmValue, b: &VmValue) -> bool {
         (VmValue::Harness(_), VmValue::Harness(_)) => false,
         _ => false,
     }
+}
+
+/// Structural de-duplication that honors `values_equal`, preserving
+/// first-occurrence order.
+///
+/// Candidates are bucketed by [`value_structural_hash_key`] (so the common
+/// case stays near-O(n)), then every hash hit is confirmed with
+/// [`values_equal`]. Because the hash key is consistent with `values_equal`,
+/// numerically-equal values that hash alike (e.g. `1` and `1.0`) collapse to a
+/// single entry, while hash collisions between unequal values (e.g. two `NaN`s
+/// sharing a bit pattern) never merge — matching the `==` operator exactly.
+pub fn dedup_values<'a, I>(items: I) -> Vec<VmValue>
+where
+    I: IntoIterator<Item = &'a VmValue>,
+{
+    use std::collections::HashMap;
+    let mut buckets: HashMap<String, Vec<VmValue>> = HashMap::new();
+    let mut result = Vec::new();
+    for item in items {
+        let bucket = buckets.entry(value_structural_hash_key(item)).or_default();
+        if !bucket.iter().any(|kept| values_equal(kept, item)) {
+            bucket.push(item.clone());
+            result.push(item.clone());
+        }
+    }
+    result
 }
 
 /// Total-order comparison used for sorting, `min`/`max`, and similar reductions.
