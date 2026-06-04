@@ -250,6 +250,12 @@ pub struct ProviderRule {
     /// `<task>` / `<examples>` over Markdown headings.
     #[serde(default)]
     pub prefers_xml_scaffolding: Option<bool>,
+    /// Whether this model's tokenizer reserves `<tool_call>` / `</tool_call>`
+    /// as single special tokens (the native Hermes tool-call markers). When
+    /// true, harn remaps those delimiters to a non-special bracket form on the
+    /// wire to avoid degenerate opener repetition; see [`crate::llm::tool_delimiter`].
+    #[serde(default)]
+    pub reserved_tool_call_token: Option<bool>,
     /// Whether prompt sections should prefer Markdown headings such as
     /// `## Task` / `## Examples`.
     #[serde(default)]
@@ -413,6 +419,8 @@ pub struct Capabilities {
     /// Legacy mirror for CLI display and older callers.
     pub json_schema: Option<String>,
     pub prefers_xml_scaffolding: bool,
+    /// See [`ProviderRule::reserved_tool_call_token`].
+    pub reserved_tool_call_token: bool,
     pub prefers_markdown_scaffolding: bool,
     pub structured_output_mode: String,
     pub supports_assistant_prefill: bool,
@@ -471,6 +479,7 @@ impl Default for Capabilities {
             structured_output: None,
             json_schema: None,
             prefers_xml_scaffolding: false,
+            reserved_tool_call_token: false,
             prefers_markdown_scaffolding: false,
             structured_output_mode: "none".to_string(),
             supports_assistant_prefill: false,
@@ -522,6 +531,7 @@ pub struct ProviderCapabilityMatrixRow {
     pub files_api_supported: bool,
     pub json_schema: Option<String>,
     pub prefers_xml_scaffolding: bool,
+    pub reserved_tool_call_token: bool,
     pub prefers_markdown_scaffolding: bool,
     pub structured_output_mode: String,
     pub supports_assistant_prefill: bool,
@@ -907,6 +917,7 @@ fn rule_to_matrix_row(
         files_api_supported: rule.files_api_supported.unwrap_or(false),
         json_schema: rule_structured_output(rule),
         prefers_xml_scaffolding: rule.prefers_xml_scaffolding.unwrap_or(false),
+        reserved_tool_call_token: rule.reserved_tool_call_token.unwrap_or(false),
         prefers_markdown_scaffolding: rule.prefers_markdown_scaffolding.unwrap_or(false),
         structured_output_mode: rule_structured_output_mode(rule),
         supports_assistant_prefill: rule.supports_assistant_prefill.unwrap_or(false),
@@ -1075,6 +1086,7 @@ fn defaults_to_caps(defaults: &ProviderDefaults) -> Capabilities {
         file_upload_wire_format: None,
         structured_output: None,
         prefers_xml_scaffolding: None,
+        reserved_tool_call_token: None,
         prefers_markdown_scaffolding: None,
         structured_output_mode: None,
         supports_assistant_prefill: None,
@@ -1152,6 +1164,7 @@ fn rule_to_caps(rule: &ProviderRule, defaults: &ProviderDefaults) -> Capabilitie
         structured_output: rule_structured_output(rule),
         json_schema: rule_structured_output(rule),
         prefers_xml_scaffolding: rule.prefers_xml_scaffolding.unwrap_or(false),
+        reserved_tool_call_token: rule.reserved_tool_call_token.unwrap_or(false),
         prefers_markdown_scaffolding: rule.prefers_markdown_scaffolding.unwrap_or(false),
         structured_output_mode: rule_structured_output_mode(rule),
         supports_assistant_prefill: rule.supports_assistant_prefill.unwrap_or(false),

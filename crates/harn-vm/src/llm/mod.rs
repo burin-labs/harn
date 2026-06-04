@@ -134,6 +134,7 @@ pub(crate) mod providers;
 pub(crate) mod rate_limit;
 pub mod receipts;
 mod stream;
+pub(crate) mod tool_delimiter;
 pub(crate) mod tools;
 mod trace;
 pub(crate) mod trigger_predicate;

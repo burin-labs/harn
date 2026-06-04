@@ -994,6 +994,10 @@ model_match = "*qwen3.6*"
 native_tools = false
 preferred_tool_format = "text"
 structured_output = "native"
+# Qwen3.6's tokenizer reserves <tool_call>/</tool_call> as single special
+# tokens; reusing them as text-format delimiters collapses the agent loop into
+# opener repetition. Remap to a non-special wire form (validated: 5/5 vs 0/5).
+reserved_tool_call_token = true
 thinking_modes = ["enabled"]
 auto_reasoning_overrides = { agent = "off", verify = "off", code = "off" }
 preserve_thinking = true
@@ -1015,6 +1019,9 @@ model_match = "*qwen3*"
 native_tools = false
 preferred_tool_format = "text"
 structured_output = "native"
+# Qwen3 family reserves <tool_call>/</tool_call> as special tokens; see the
+# qwen3.6 rule above. Remapped to a non-special wire delimiter.
+reserved_tool_call_token = true
 thinking_modes = ["enabled"]
 auto_reasoning_overrides = { agent = "off", verify = "off", code = "off" }
 server_parser = "none"

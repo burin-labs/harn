@@ -108,13 +108,28 @@ impl OpenAiCompatibleProvider {
         opts: &LlmRequestPayload,
         force_string_content: bool,
     ) -> serde_json::Value {
+        let caps = crate::llm::capabilities::lookup(&opts.provider, &opts.model);
+        // Models that reserve `<tool_call>` as a special token collapse when
+        // they meet it as instructional/wrapper text. Remap the colliding
+        // delimiters to a non-special wire form on every outgoing message
+        // (system + full history + prefill); the response is mapped back in
+        // `chat_impl`. This is the single, comprehensive boundary — it covers
+        // every prompt fragment that references the text tool-call paradigm
+        // because it operates on the assembled wire bytes, not per-template.
+        let remap_tool_call = caps.reserved_tool_call_token;
         let mut msgs = Vec::new();
         if let Some(ref sys) = opts.system {
+            let sys = maybe_remap_tool_call_text(sys, remap_tool_call);
             msgs.push(serde_json::json!({"role": "system", "content": sys}));
         }
         msgs.extend(opts.messages.iter().cloned().map(|mut message| {
             if let Some(object) = message.as_object_mut() {
                 if let Some(content) = object.get("content").cloned() {
+                    let content = if remap_tool_call {
+                        remap_tool_call_content(&content)
+                    } else {
+                        content
+                    };
                     object.insert(
                         "content".to_string(),
                         crate::llm::content::openai_content(&content),
@@ -124,6 +139,7 @@ impl OpenAiCompatibleProvider {
             message
         }));
         if let Some(ref prefill) = opts.prefill {
+            let prefill = maybe_remap_tool_call_text(prefill, remap_tool_call);
             msgs.push(serde_json::json!({
                 "role": "assistant",
                 "content": prefill,
@@ -135,7 +151,6 @@ impl OpenAiCompatibleProvider {
             "model": opts.model,
             "messages": msgs,
         });
-        let caps = crate::llm::capabilities::lookup(&opts.provider, &opts.model);
         if opts.max_tokens > 0 {
             let token_limit_field = if caps.requires_completion_tokens {
                 "max_completion_tokens"
@@ -263,12 +278,134 @@ impl OpenAiCompatibleProvider {
 
         let mut body = Self::build_request_body(request, false);
         self.transform_request(&mut body);
-        crate::llm::api::vm_call_llm_api_with_body(
+
+        // For reserved-tool-call-token models the prompt was sent with the
+        // delimiters remapped (see `build_request_body`); map the response
+        // back to canonical `<tool_call>` before the parser/transcript see it.
+        let remap_tool_call = crate::llm::capabilities::lookup(&request.provider, &request.model)
+            .reserved_tool_call_token;
+        let delta_tx = if remap_tool_call {
+            delta_tx.map(canonicalizing_delta_tx)
+        } else {
+            delta_tx
+        };
+        let mut result = crate::llm::api::vm_call_llm_api_with_body(
             request, delta_tx, body, false, // is_anthropic_style
             false, // is_ollama
         )
-        .await
+        .await?;
+        if remap_tool_call {
+            result.text = crate::llm::tool_delimiter::wire_to_canonical(&result.text);
+        }
+        Ok(result)
     }
+}
+
+/// Remap canonical `<tool_call>` delimiters to the non-special wire form for a
+/// reserved-token model (no-op when `remap` is false). Applied to every outgoing
+/// message; see [`crate::llm::tool_delimiter`].
+fn maybe_remap_tool_call_text(text: &str, remap: bool) -> String {
+    if remap {
+        crate::llm::tool_delimiter::canonical_to_wire(text)
+    } else {
+        text.to_string()
+    }
+}
+
+/// Apply the tool-call delimiter remap to an OpenAI `content` value, which may
+/// be a bare string or an array of typed parts (`{type:"text", text:"…"}`).
+fn remap_tool_call_content(content: &serde_json::Value) -> serde_json::Value {
+    use crate::llm::tool_delimiter::canonical_to_wire;
+    match content {
+        serde_json::Value::String(s) => serde_json::Value::String(canonical_to_wire(s)),
+        serde_json::Value::Array(parts) => serde_json::Value::Array(
+            parts
+                .iter()
+                .map(|part| {
+                    let mut part = part.clone();
+                    if let Some(text) = part.get("text").and_then(|t| t.as_str()) {
+                        let remapped = canonical_to_wire(text);
+                        if let Some(obj) = part.as_object_mut() {
+                            obj.insert("text".to_string(), serde_json::Value::String(remapped));
+                        }
+                    }
+                    part
+                })
+                .collect(),
+        ),
+        other => other.clone(),
+    }
+}
+
+/// Stateful canonicalizer for a streamed completion. The wire delimiter
+/// (`[[CALL]]`) usually arrives split across token deltas (`[[`, `CALL`, `]]`),
+/// so a per-chunk replace would miss it and leak the wire form into the
+/// transcript / live display. `push` returns the text safe to emit now —
+/// everything except a trailing tail that could still be the start of a
+/// delimiter — and `flush` returns the remainder at end-of-stream.
+#[derive(Default)]
+struct DeltaCanonicalizer {
+    buf: String,
+}
+
+impl DeltaCanonicalizer {
+    fn push(&mut self, chunk: &str) -> String {
+        use crate::llm::tool_delimiter::{
+            wire_to_canonical, WIRE_TOOL_CALL_CLOSE, WIRE_TOOL_CALL_OPEN,
+        };
+        self.buf.push_str(chunk);
+        let max = WIRE_TOOL_CALL_OPEN.len().max(WIRE_TOOL_CALL_CLOSE.len());
+        let blen = self.buf.len();
+        // The wire delimiters are pure ASCII, so any partial-delimiter tail is
+        // ASCII and lands on a char boundary — byte slicing is safe here.
+        let mut hold = 0;
+        for k in (1..=max.min(blen)).rev() {
+            let tail = &self.buf.as_bytes()[blen - k..];
+            if WIRE_TOOL_CALL_OPEN.as_bytes().starts_with(tail)
+                || WIRE_TOOL_CALL_CLOSE.as_bytes().starts_with(tail)
+            {
+                hold = k;
+                break;
+            }
+        }
+        let safe_end = blen - hold;
+        if safe_end == 0 {
+            return String::new();
+        }
+        let emit = wire_to_canonical(&self.buf[..safe_end]);
+        self.buf.drain(..safe_end);
+        emit
+    }
+
+    fn flush(&mut self) -> String {
+        if self.buf.is_empty() {
+            return String::new();
+        }
+        let out = crate::llm::tool_delimiter::wire_to_canonical(&self.buf);
+        self.buf.clear();
+        out
+    }
+}
+
+/// Wrap a delta sender so streamed chunks are mapped from the wire tool-call
+/// delimiter back to canonical (across chunk boundaries) before reaching the
+/// live display / ACP text stream.
+fn canonicalizing_delta_tx(orig: DeltaSender) -> DeltaSender {
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<String>();
+    tokio::spawn(async move {
+        let mut canon = DeltaCanonicalizer::default();
+        while let Some(chunk) = rx.recv().await {
+            let emit = canon.push(&chunk);
+            if !emit.is_empty() {
+                let _ = orig.send(emit);
+            }
+        }
+        let tail = canon.flush();
+        if !tail.is_empty() {
+            let _ = orig.send(tail);
+        }
+    });
+    tx
 }
 
 pub(crate) fn ensure_openrouter_require_parameters(body: &mut serde_json::Value) {
@@ -977,5 +1114,77 @@ thinking_modes = ["enabled"]
             prefill: None,
             reminder_lifecycle: Vec::new(),
         }
+    }
+
+    #[test]
+    fn build_request_body_remaps_reserved_tool_call_token() {
+        // llamacpp + qwen3.6 is flagged `reserved_tool_call_token` in
+        // capabilities.toml, so the colliding delimiters must be remapped off
+        // the wire across both system and history messages.
+        let mut payload = base_request_payload();
+        payload.provider = "llamacpp".to_string();
+        payload.model = "qwen3.6-35b-a3b-ud-q4-k-xl".to_string();
+        payload.system = Some("Use <tool_call>\nname({})\n</tool_call> blocks.".to_string());
+        payload.messages = vec![json!({
+            "role": "assistant",
+            "content": "<tool_call>\nlook({})\n</tool_call>"
+        })];
+        let serialized = OpenAiCompatibleProvider::build_request_body(&payload, false).to_string();
+        assert!(
+            !serialized.contains("<tool_call>") && !serialized.contains("</tool_call>"),
+            "canonical delimiters must be remapped off the wire: {serialized}"
+        );
+        assert!(
+            serialized.contains("[[CALL]]") && serialized.contains("[[/CALL]]"),
+            "non-special wire delimiters must be present: {serialized}"
+        );
+    }
+
+    #[test]
+    fn delta_canonicalizer_reassembles_split_wire_delimiters() {
+        // The wire delimiter arrives split across token deltas; the canonical
+        // form must still be emitted intact in order.
+        let mut c = DeltaCanonicalizer::default();
+        let chunks = [
+            "[[",
+            "CALL",
+            "]]",
+            "\nlook({ a: 1 })\n",
+            "[[",
+            "/CALL",
+            "]]",
+            " done",
+        ];
+        let mut out = String::new();
+        for ch in chunks {
+            out.push_str(&c.push(ch));
+        }
+        out.push_str(&c.flush());
+        assert_eq!(out, "<tool_call>\nlook({ a: 1 })\n</tool_call> done");
+    }
+
+    #[test]
+    fn delta_canonicalizer_passes_through_plain_text() {
+        let mut c = DeltaCanonicalizer::default();
+        let mut out = String::new();
+        for ch in ["Here is ", "some [pro", "se] text."] {
+            out.push_str(&c.push(ch));
+        }
+        out.push_str(&c.flush());
+        assert_eq!(out, "Here is some [prose] text.");
+    }
+
+    #[test]
+    fn build_request_body_keeps_canonical_for_normal_models() {
+        // openrouter gemini is not a reserved-token model: leave the canonical
+        // text tool-call delimiters exactly as authored.
+        let mut payload = base_request_payload();
+        payload.system = Some("Use <tool_call>\nname({})\n</tool_call> blocks.".to_string());
+        let serialized = OpenAiCompatibleProvider::build_request_body(&payload, false).to_string();
+        assert!(
+            serialized.contains("<tool_call>"),
+            "non-reserved model keeps canonical delimiter: {serialized}"
+        );
+        assert!(!serialized.contains("[[CALL]]"));
     }
 }
