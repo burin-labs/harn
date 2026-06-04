@@ -1,4 +1,51 @@
-use super::{json, parse_bare_calls_in_body, sample_tool_registry};
+use super::{
+    json, parse_bare_calls_in_body, parse_text_tool_calls_with_tools, sample_tool_registry,
+};
+
+// Non-ASCII tool-argument values must round-trip intact. `advance()` yields one
+// byte at a time, so pushing each byte of a multi-byte UTF-8 scalar as a `char`
+// used to produce one Latin-1 char per byte (mojibake) for quoted and template
+// string values, while heredocs and `\u{...}` escapes decoded correctly.
+#[test]
+fn nonascii_string_value_not_mangled() {
+    let tools = sample_tool_registry();
+    let result = parse_bare_calls_in_body(r#"run({ command: "café ☕ 日本" })"#, Some(&tools));
+    assert!(result.errors.is_empty(), "errors: {:?}", result.errors);
+    assert_eq!(result.calls.len(), 1);
+    assert_eq!(
+        result.calls[0]["arguments"]["command"],
+        json!("café ☕ 日本")
+    );
+}
+
+#[test]
+fn nonascii_template_value_not_mangled() {
+    let tools = sample_tool_registry();
+    let result = parse_bare_calls_in_body("run({ command: `café ☕ 日本` })", Some(&tools));
+    assert!(result.errors.is_empty(), "errors: {:?}", result.errors);
+    assert_eq!(
+        result.calls[0]["arguments"]["command"],
+        json!("café ☕ 日本")
+    );
+}
+
+#[test]
+fn nonascii_tagged_value_not_mangled() {
+    let tools = sample_tool_registry();
+    let text = "<tool_call>\nrun({ command: \"café ☕ 日本\" })\n</tool_call>";
+    let result = parse_text_tool_calls_with_tools(text, Some(&tools));
+    assert!(
+        result.errors.is_empty(),
+        "errors: {:?} violations: {:?}",
+        result.errors,
+        result.violations
+    );
+    assert_eq!(result.calls.len(), 1);
+    assert_eq!(
+        result.calls[0]["arguments"]["command"],
+        json!("café ☕ 日本")
+    );
+}
 
 #[test]
 fn parses_a_simple_object_literal_call() {
