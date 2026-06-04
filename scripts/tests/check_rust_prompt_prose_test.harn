@@ -1,0 +1,197 @@
+// Tests for scripts/check_rust_prompt_prose.harn — exercise the pure helpers
+// on synthetic inputs (no filesystem dependency). Expected digests / lengths
+// are computed from the Python reference (hashlib.sha256 of the
+// `re.sub(r"\s+", " ", text).strip()` normalization), so these lock in
+// byte-for-byte parity with the original gate.
+import "../check_rust_prompt_prose.harn"
+
+@test
+pipeline test_line_of_counts_newlines(task) {
+  let text = "a\nbb\nccc"
+  assert_eq(line_of(text, 0), 1)
+  assert_eq(line_of(text, 2), 2)
+  assert_eq(line_of(text, 6), 3)
+}
+
+@test
+pipeline test_normalize_collapses_whitespace(task) {
+  assert_eq(normalize("  a  b\n c "), "a b c")
+  assert_eq(normalize("\t\nfoo\r\n  bar\t"), "foo bar")
+  assert_eq(normalize(""), "")
+}
+
+@test
+pipeline test_normalized_length(task) {
+  assert_eq(normalized_length("  a  b\n c "), 5)
+  // 250 non-space chars normalize to themselves.
+  var s = ""
+  var i = 0
+  while i < 250 {
+    s = s + "x"
+    i = i + 1
+  }
+  assert_eq(normalized_length(s), 250)
+}
+
+@test
+pipeline test_digest_matches_python(task) {
+  // sha256("hello world")[:16] from hashlib.
+  assert_eq(digest("hello world"), "b94d27b9934d3e08")
+  // Normalization is applied first: "  a  b\n c " -> "a b c".
+  assert_eq(digest("  a  b\n c "), "0e9f64031fcb2bc7")
+}
+
+@test
+pipeline test_hex_val(task) {
+  assert_eq(hex_val("0"), 0)
+  assert_eq(hex_val("9"), 9)
+  assert_eq(hex_val("a"), 10)
+  assert_eq(hex_val("F"), 15)
+  assert_eq(hex_val("g"), -1)
+}
+
+@test
+pipeline test_is_octal(task) {
+  assert_eq(is_octal("0"), true)
+  assert_eq(is_octal("7"), true)
+  assert_eq(is_octal("8"), false)
+  assert_eq(is_octal("a"), false)
+}
+
+@test
+pipeline test_decode_normal_literal_escapes(task) {
+  // \n -> newline, then the surrounding quotes are stripped.
+  assert_eq(decode_normal_literal("\"foo\\nbar\""), "foo\nbar")
+  // \t and \" decode; \\ collapses to a single backslash.
+  assert_eq(decode_normal_literal("\"a\\tb\\\"c\""), "a\tb\"c")
+  assert_eq(decode_normal_literal("\"x\\\\y\""), "x\\y")
+  // No backslash -> identity (fast path).
+  assert_eq(decode_normal_literal("\"plain text\""), "plain text")
+}
+
+@test
+pipeline test_decode_normal_literal_unknown_escape(task) {
+  // Unknown escapes keep the backslash plus the following char, like the
+  // Python unicode_escape codec (`\s` stays `\s`).
+  assert_eq(decode_normal_literal("\"a\\sb\""), "a\\sb")
+}
+
+@test
+pipeline test_is_ident_char(task) {
+  assert_eq(is_ident_char("a"), true)
+  assert_eq(is_ident_char("Z"), true)
+  assert_eq(is_ident_char("0"), true)
+  assert_eq(is_ident_char("_"), true)
+  assert_eq(is_ident_char(" "), false)
+  assert_eq(is_ident_char("("), false)
+}
+
+@test
+pipeline test_find_raw_literals_basic(task) {
+  let src = "let a = r\"hello\"; let b = r#\"wo\"rld\"#;"
+  let raws = find_raw_literals(src)
+  assert_eq(raws.count, 2)
+  assert_eq(raws[0].body, "hello")
+  // The 1-hash body keeps an interior quote.
+  assert_eq(raws[1].body, "wo\"rld")
+}
+
+@test
+pipeline test_find_raw_literals_skips_ident_preceded(task) {
+  // `for"..."` is NOT a raw string (r preceded by an identifier char); the
+  // real raw string that follows must still be found.
+  let src = "for\"x\" then r#\"real\"#"
+  let raws = find_raw_literals(src)
+  assert_eq(raws.count, 1)
+  assert_eq(raws[0].body, "real")
+}
+
+@test
+pipeline test_iter_literals_raw_first_then_normal(task) {
+  // One raw and one normal literal: raw literals are emitted first, and the
+  // normal-string scan skips the text inside the raw span.
+  let src = "let a = r#\"raw body\"#; let b = \"normal\";"
+  let lits = iter_literals_text(src)
+  assert_eq(lits.count, 2)
+  assert_eq(lits[0].text, "raw body")
+  assert_eq(lits[1].text, "normal")
+}
+
+@test
+pipeline test_iter_literals_excludes_normal_inside_raw(task) {
+  // A quoted run inside a raw string must not be double-counted as a normal
+  // literal.
+  let src = "x r#\"has \"inner\" quotes\"# y"
+  let lits = iter_literals_text(src)
+  assert_eq(lits.count, 1)
+  assert_eq(lits[0].text, "has \"inner\" quotes")
+}
+
+@test
+pipeline test_make_preview_truncates(task) {
+  assert_eq(make_preview("  short  text "), "short text")
+  var s = ""
+  var i = 0
+  while i < 200 {
+    s = s + "z"
+    i = i + 1
+  }
+  let p = make_preview(s)
+  assert_eq(p.len(), 140)
+  assert_eq(p.ends_with("..."), true)
+}
+
+@test
+pipeline test_format_finding(task) {
+  let out = format_finding("a/b.rs:7", 42, "deadbeefdeadbeef", "the preview")
+  assert_eq(
+    out,
+    "a/b.rs:7: long Rust string literal (42 chars, hash deadbeefdeadbeef)\n  the preview",
+  )
+}
+
+@test
+pipeline test_parse_allowlist_ok(task) {
+  let text = "# comment\n\ncrates/x.rs:10 # a reason\ncrates/y.rs:20 # another\n"
+  let res = parse_allowlist(text, "scripts/allow.txt")
+  assert_eq(res.error, nil)
+  assert_eq(res.locations.count, 2)
+  assert_eq(res.locations[0], "crates/x.rs:10")
+  assert_eq(res.locations[1], "crates/y.rs:20")
+}
+
+@test
+pipeline test_parse_allowlist_dedups(task) {
+  let text = "crates/x.rs:1 # first\ncrates/x.rs:1 # dup\n"
+  let res = parse_allowlist(text, "scripts/allow.txt")
+  assert_eq(res.error, nil)
+  assert_eq(res.locations.count, 1)
+}
+
+@test
+pipeline test_parse_allowlist_malformed_reports_line(task) {
+  // Blank + comment lines are skipped; the bad line keeps its 1-based number.
+  let text = "crates/x.rs:1 # ok\n\nbad line\n"
+  let res = parse_allowlist(text, "scripts/allow.txt")
+  assert_eq(res.error, "scripts/allow.txt:3: expected '<path>:<line> # one-line justification'")
+}
+
+@test
+pipeline test_parse_allowlist_requires_justification(task) {
+  // A `path:line` with no `# justification` is malformed.
+  let text = "crates/x.rs:1\n"
+  let res = parse_allowlist(text, "f.txt")
+  assert_eq(res.error, "f.txt:1: expected '<path>:<line> # one-line justification'")
+}
+
+@test
+pipeline test_sort_by_path_parts(task) {
+  // Python sorts by Path components, so a directory sorts before a sibling file
+  // that shares its stem: `api/auth.rs` < `api.rs` even though `.` < `/` byte-wise.
+  let input = ["crates/api.rs", "crates/api/auth.rs", "crates/api2.rs", "crates/api/zzz.rs"]
+  let sorted = sort_by_path_parts(input)
+  assert_eq(sorted[0], "crates/api/auth.rs")
+  assert_eq(sorted[1], "crates/api/zzz.rs")
+  assert_eq(sorted[2], "crates/api.rs")
+  assert_eq(sorted[3], "crates/api2.rs")
+}

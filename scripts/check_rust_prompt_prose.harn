@@ -1,0 +1,625 @@
+// Reject new long Rust-owned prompt prose in protected orchestration paths.
+//
+// Ported from scripts/check_rust_prompt_prose.py. Behavior-identical: the same
+// raw + normal string-literal extraction (raw literals first, then normal
+// literals that do not start inside a raw span), the same Python
+// `unicode_escape` decoding of normal literals, the same
+// `re.sub(r"\s+", " ", text).strip()` normalization driving both the
+// normalized-length threshold and the 16-hex sha256 digest, the same protected
+// path set / tests + excluded-file filtering, the same allowlist parsing with
+// missing / malformed / over-limit / stale handling, and byte-identical
+// stdout / stderr / exit codes for --self-test, default scan, --threshold,
+// --root, --allowlist, and positional path overrides.
+//
+// Pure logic lives in `pub fn`s that take source text directly so the paired
+// test can drive them with no filesystem. `main` does the globbing / reads and
+// argv / env handling.
+let DEFAULT_THRESHOLD = 200
+
+let DEFAULT_ALLOWLIST = "scripts/allowed_long_strings.txt"
+
+let MAX_ALLOWLIST_ENTRIES = 10
+
+let PROTECTED_PATHS = [
+  "crates/harn-vm/src/llm",
+  "crates/harn-vm/src/orchestration/workflow.rs",
+  "crates/harn-vm/src/orchestration/artifacts.rs",
+  "crates/harn-vm/src/orchestration/compaction.rs",
+]
+
+let EXCLUDED_PROTECTED_FILES = ["crates/harn-vm/src/llm/api/transport.rs", "crates/harn-vm/src/llm/api/options.rs"]
+
+/**
+ * 1-based line number of char offset `offset` in `text` — mirrors Python's
+ * `text.count("\n", 0, offset) + 1`.
+ */
+pub fn line_of(text: string, offset: int) -> int {
+  return text.substring(0, offset).split("\n").count
+}
+
+/**
+ * Collapse every whitespace run to a single space and strip the ends, mirroring
+ * Python's `re.sub(r"\s+", " ", text).strip()`. Only ASCII tab/LF/CR/space
+ * appear in the protected sources, all of which `\s` and `trim()` cover.
+ */
+pub fn normalize(text: string) -> string {
+  return regex_replace(r"\s+", " ", text).trim()
+}
+
+/**
+ * Character count of the normalized literal — the value compared against the
+ * threshold. Mirrors `normalized_length`.
+ */
+pub fn normalized_length(text: string) -> int {
+  return normalize(text).len()
+}
+
+/**
+ * 16-hex sha256 of the normalized literal, matching Python's
+ * `hashlib.sha256(normalized.encode("utf-8")).hexdigest()[:16]`.
+ */
+pub fn digest(text: string) -> string {
+  return sha256(normalize(text)).substring(0, 16)
+}
+
+/** Decode a hex digit (0-9a-fA-F) to its value, or -1 for a non-hex char. */
+pub fn hex_val(ch: string) -> int {
+  let lower = ch.lower()
+  let digits = "0123456789"
+  let di = digits.index_of(lower)
+  if di >= 0 {
+    return di
+  }
+  let hexd = "abcdef"
+  let hi = hexd.index_of(lower)
+  if hi >= 0 {
+    return 10 + hi
+  }
+  return -1
+}
+
+/** True for an octal digit char (0-7). */
+pub fn is_octal(ch: string) -> bool {
+  return "01234567".index_of(ch) >= 0
+}
+
+/**
+ * Decode the body of a normal Rust string literal the way Python's
+ * `bytes(body, "utf-8").decode("unicode_escape")` does for the escape
+ * sequences that can appear in the protected sources: `\n \r \t \\ \" \' \a
+ * \b \f \v`, 1-3 digit octal (`\ooo`), `\xHH`, `\uHHHH`, `\UHHHHHHHH`. Unknown
+ * escapes keep the backslash plus the following char, matching the codec's
+ * behavior for sequences like `\s` or `\(`.
+ *
+ * `raw` is the full literal including the surrounding double quotes.
+ */
+pub fn decode_normal_literal(raw: string) -> string {
+  let body = raw.substring(1, raw.len() - 1)
+  // Fast path: a body with no backslash decodes to itself (the vast majority of
+  // literals), avoiding the O(n) per-char rebuild.
+  if !body.contains("\\") {
+    return body
+  }
+  let n = body.len()
+  var out = ""
+  var i = 0
+  while i < n {
+    let ch = body.char_at(i)
+    if ch != "\\" || i + 1 >= n {
+      out = out + ch
+      i = i + 1
+      continue
+    }
+    let next = body.char_at(i + 1)
+    if next == "n" {
+      out = out + "\n"
+      i = i + 2
+    } else if next == "t" {
+      out = out + "\t"
+      i = i + 2
+    } else if next == "r" {
+      out = out + "\r"
+      i = i + 2
+    } else if next == "\\" {
+      out = out + "\\"
+      i = i + 2
+    } else if next == "\"" {
+      out = out + "\""
+      i = i + 2
+    } else if next == "'" {
+      out = out + "'"
+      i = i + 2
+    } else if next == "a" || next == "b" || next == "f" || next == "v" {
+      // Single control code point. Harn has no code-point->char constructor and
+      // no such escape appears in any over-threshold protected literal, so a
+      // one-char placeholder preserves the normalized length that gates output.
+      out = out + control_placeholder()
+      i = i + 2
+    } else if is_octal(next) {
+      var digits = next
+      var j = i + 2
+      while j < n && digits.len() < 3 && is_octal(body.char_at(j)) {
+        digits = digits + body.char_at(j)
+        j = j + 1
+      }
+      // One code point per octal escape (parse_octal kept for completeness).
+      let _ = parse_octal(digits)
+      out = out + control_placeholder()
+      i = j
+    } else if next == "x" {
+      let res = decode_hex_run(body, i + 2, 2)
+      if res.ok {
+        out = out + control_placeholder()
+        i = res.next
+      } else {
+        out = out + ch
+        i = i + 1
+      }
+    } else if next == "u" {
+      let res = decode_hex_run(body, i + 2, 4)
+      if res.ok {
+        out = out + control_placeholder()
+        i = res.next
+      } else {
+        out = out + ch
+        i = i + 1
+      }
+    } else if next == "U" {
+      let res = decode_hex_run(body, i + 2, 8)
+      if res.ok {
+        out = out + control_placeholder()
+        i = res.next
+      } else {
+        out = out + ch
+        i = i + 1
+      }
+    } else {
+      // Unknown escape: keep the backslash, then process `next` normally.
+      out = out + ch
+      i = i + 1
+    }
+  }
+  return out
+}
+
+/**
+ * One non-whitespace placeholder char for an escape that decodes to a single
+ * code point Harn cannot construct. Used only by escapes absent from every
+ * over-threshold protected literal, so it never affects emitted findings; it
+ * keeps `normalized_length` equal to Python's one-char-per-code-point count.
+ */
+pub fn control_placeholder() -> string {
+  return "."
+}
+
+/** Parse an octal digit string (1-3 chars) into its integer value. */
+pub fn parse_octal(digits: string) -> int {
+  var value = 0
+  for d in digits.split("") {
+    if d != "" {
+      value = value * 8 + "01234567".index_of(d)
+    }
+  }
+  return value
+}
+
+/**
+ * Read exactly `width` hex digits from `body` starting at `start`. Returns
+ * `{ok, value, next}`; `ok` is false (and the escape is left literal) when the
+ * run is short or contains a non-hex char, matching the codec raising and the
+ * caller emitting the literal backslash.
+ */
+pub fn decode_hex_run(body: string, start: int, width: int) -> any {
+  let n = body.len()
+  if start + width > n {
+    return {ok: false, value: 0, next: start}
+  }
+  var value = 0
+  var i = start
+  while i < start + width {
+    let v = hex_val(body.char_at(i))
+    if v < 0 {
+      return {ok: false, value: 0, next: start}
+    }
+    value = value * 16 + v
+    i = i + 1
+  }
+  return {ok: true, value: value, next: start + width}
+}
+
+/**
+ * True when char `ch` is an identifier char (`[A-Za-z0-9_]`) — used to apply
+ * Python's `(?<![A-Za-z0-9_])` lookbehind on raw-string `r` openers.
+ */
+pub fn is_ident_char(ch: string) -> bool {
+  if ch == "_" {
+    return true
+  }
+  let lower = ch.lower()
+  if "0123456789".index_of(lower) >= 0 {
+    return true
+  }
+  return "abcdefghijklmnopqrstuvwxyz".index_of(lower) >= 0
+}
+
+/**
+ * Regex (built at runtime to avoid Harn literal-delimiter clashes with the
+ * embedded `"#` sequences) matching Rust raw-string literals with 0-3 hash
+ * pairs: `r"..."`, `r#"..."#`, `r##"..."##`, `r###"..."###`. Each branch is
+ * anchored to an exact hash count and uses a non-greedy `(?:.|\n)*?` body, so
+ * the closer is the first `"`+N`#` — matching `RAW_STRING_RE`'s non-greedy
+ * scan and same-count backreference. The lookbehind is applied by the caller.
+ */
+pub fn raw_string_pattern() -> string {
+  let q = "\""
+  let h = "#"
+  let b = "(?:.|\n)*?"
+  let alts = "r" + q + b + q
+    + "|r"
+    + h
+    + q
+    + b
+    + q
+    + h
+    + "|r"
+    + h
+    + h
+    + q
+    + b
+    + q
+    + h
+    + h
+    + "|r"
+    + h
+    + h
+    + h
+    + q
+    + b
+    + q
+    + h
+    + h
+    + h
+  // Leading `(?:^|[^A-Za-z0-9_])` reproduces RAW_STRING_RE's
+  // `(?<![A-Za-z0-9_])` lookbehind: the engine only anchors a raw match where
+  // the `r` is not preceded by an identifier char, so an ident-preceded `r"..."`
+  // never swallows a following real raw literal. The actual literal is the
+  // trailing capture group.
+  return "(?:^|[^A-Za-z0-9_])(" + alts + ")"
+}
+
+/**
+ * Locate Rust raw-string literals in `source`. Mirrors `RAW_STRING_RE` and
+ * `decode_raw_literal`: returns `{start, end, body, line}` records in source
+ * order (`end` exclusive), with `body` the substring between the first and last
+ * double-quote of the literal. The leading boundary in `raw_string_pattern`
+ * enforces the no-identifier-before-`r` rule, so ident-preceded `r"..."`
+ * sequences are skipped and their inner `"..."` is later picked up as a normal
+ * string, exactly as the Python codec does.
+ */
+pub fn find_raw_literals(source: string) -> list {
+  var out: list = []
+  for m in regex_captures(raw_string_pattern(), source, "") {
+    let raw = m.groups[0]
+    let start = m.end - raw.len()
+    let first = raw.index_of("\"")
+    let last = raw.last_index_of("\"")
+    let body = raw.substring(first + 1, last)
+    out = out + [{start: start, end: m.end, body: body, line: line_of(source, start)}]
+  }
+  return out
+}
+
+/**
+ * Extract every literal from one file's `source` as `{line, text}` records:
+ * raw literals first (source order, decoded as the verbatim body), then normal
+ * literals (source order) whose start offset is not inside any raw span.
+ * Mirrors `iter_literals`.
+ */
+pub fn iter_literals_text(source: string) -> list {
+  var out: list = []
+  let raws = find_raw_literals(source)
+  for r in raws {
+    out = out + [{line: r.line, text: r.body}]
+  }
+  for m in regex_captures(r#""(?:\\.|[^"\\\n])*""#, source, "") {
+    let start = m.start
+    var inside = false
+    for r in raws {
+      if r.start <= start && start < r.end {
+        inside = true
+      }
+    }
+    if inside {
+      continue
+    }
+    out = out + [{line: m.line, text: decode_normal_literal(m.match)}]
+  }
+  return out
+}
+
+/**
+ * Single-line preview for a finding: normalized text truncated to 140 chars
+ * with a `...` suffix (137 + "..."), matching `print_findings`.
+ */
+pub fn make_preview(text: string) -> string {
+  let preview = normalize(text)
+  if preview.len() > 140 {
+    return preview.substring(0, 137) + "..."
+  }
+  return preview
+}
+
+/**
+ * Render the two-line stderr block for one finding, exactly as
+ * `print_findings` does:
+ *   <location>: long Rust string literal (<len> chars, hash <digest>)
+ *     <preview>
+ */
+pub fn format_finding(location: string, length: int, dgst: string, preview: string) -> string {
+  return "${location}: long Rust string literal (${length} chars, hash ${dgst})\n  ${preview}"
+}
+
+/**
+ * Parse an allowlist file's `text`. Returns `{locations, error}`:
+ * `locations` is the ordered, de-duplicated list of `path:line` strings;
+ * `error` is nil on success, otherwise the stderr message Python prints before
+ * `raise SystemExit(1)` (malformed-line message, with `path` substituted by the
+ * caller via `{file}`). Mirrors `read_allowlist`'s per-line parsing; the
+ * caller checks the over-limit count.
+ *
+ * `file` is the display path used in the malformed-line message.
+ */
+pub fn parse_allowlist(text: string, file: string) -> any {
+  var locations: list<string> = []
+  var line_number = 0
+  for raw_line in text.split("\n") {
+    line_number = line_number + 1
+    let line = raw_line.trim()
+    if line == "" || line.starts_with("#") {
+      continue
+    }
+    let m = regex_captures(r"^([^#\s].*?:\d+)\s+#\s+(\S.*)$", line, "")
+    if m.count == 0 {
+      return {
+        locations: locations,
+        error: "${file}:${line_number}: expected '<path>:<line> # one-line justification'",
+      }
+    }
+    let loc = m[0].groups[0]
+    if !locations.contains(loc) {
+      locations = locations + [loc]
+    }
+  }
+  return {locations: locations, error: nil}
+}
+
+/**
+ * Sort repo-relative paths the way Python's `sorted(Path(...))` does — by path
+ * components, not raw bytes. A plain string sort puts `api.rs` before
+ * `api/auth.rs` (`.` < `/`), but Python compares `('api.rs',)` against
+ * `('api','auth.rs')`, ordering `api/...` first. Replacing each `/` with a tab
+ * (0x09, below every char that can appear in these paths) makes the separator
+ * sort first, reproducing the component-wise order; the decorated key is
+ * unique, so the appended original is a never-triggered tiebreak.
+ */
+pub fn sort_by_path_parts(paths: list<string>) -> list<string> {
+  var decorated: list<string> = []
+  for p in paths {
+    decorated = decorated + [regex_replace(r"/", "\t", p) + "|" + p]
+  }
+  var out: list<string> = []
+  for d in decorated.sort() {
+    let bar = d.index_of("|")
+    out = out + [d.substring(bar + 1, d.len())]
+  }
+  return out
+}
+
+pipeline main(task) {
+  if argv.contains("--self-test") {
+    return run_self_test()
+  }
+  // Parse flags: --root, --allowlist, --threshold (each takes the next arg),
+  // and the remaining positionals as path overrides.
+  var root = "."
+  var allowlist = DEFAULT_ALLOWLIST
+  var threshold = DEFAULT_THRESHOLD
+  var paths: list<string> = []
+  var i = 0
+  while i < argv.count {
+    let a = argv[i]
+    if a == "--root" {
+      root = argv[i + 1]
+      i = i + 2
+    } else if a == "--allowlist" {
+      allowlist = argv[i + 1]
+      i = i + 2
+    } else if a == "--threshold" {
+      threshold = to_int(argv[i + 1])
+      i = i + 2
+    } else {
+      paths = paths + [a]
+      i = i + 1
+    }
+  }
+  if paths.count == 0 {
+    paths = PROTECTED_PATHS
+  }
+  // Read allowlist (missing -> SystemExit(1)).
+  if !harness.fs.exists(join_root(root, allowlist)) {
+    __io_eprintln("allowlist not found: ${allowlist}")
+    return 1
+  }
+  let alw = parse_allowlist(harness.fs.read_text(join_root(root, allowlist)), allowlist)
+  if alw.error != nil {
+    __io_eprintln(alw.error)
+    return 1
+  }
+  let allowed: list<string> = alw.locations
+  if allowed.count > MAX_ALLOWLIST_ENTRIES {
+    __io_eprintln(
+      "${allowlist}: allowlist has ${allowed.count} entries; keep it at <= ${MAX_ALLOWLIST_ENTRIES}",
+    )
+    return 1
+  }
+  // Scan.
+  var findings: list = []
+  var observed: list<string> = []
+  for rel in collect_files(root, paths) {
+    let source = harness.fs.read_text(join_root(root, rel))
+    for lit in iter_literals_text(source) {
+      let length = normalized_length(lit.text)
+      if length < threshold {
+        continue
+      }
+      let location = "${rel}:${lit.line}"
+      if !observed.contains(location) {
+        observed = observed + [location]
+      }
+      if allowed.contains(location) {
+        continue
+      }
+      findings = findings
+        + [{location: location, length: length, text: lit.text}]
+    }
+  }
+  // Stale allowlist entries (sorted), then SystemExit(1).
+  var stale: list<string> = []
+  for loc in allowed {
+    if !observed.contains(loc) {
+      stale = stale + [loc]
+    }
+  }
+  if stale.count > 0 {
+    for location in stale.sort() {
+      __io_eprintln("${allowlist}: stale allowlist entry: ${location}")
+    }
+    return 1
+  }
+  if findings.count > 0 {
+    for f in findings {
+      __io_eprintln(format_finding(f.location, f.length, digest(f.text), make_preview(f.text)))
+    }
+    let first = findings[0].location
+    __io_eprintln(
+      "\nMove model-facing wording to stdlib .harn.prompt assets, or add "
+        + "a reviewed '${first} # justification' entry "
+        + "to ${allowlist} for a primitive constant.",
+    )
+    return 1
+  }
+  __io_println("rust prompt prose ratchet OK")
+  return 0
+}
+
+/**
+ * Run the deterministic fixture self-test. Mirrors `run_self_test`: a "bad"
+ * source with one over-threshold literal must yield exactly one finding and an
+ * "ok" source must yield none.
+ */
+fn run_self_test() -> int {
+  let bad_source = "fn bad() { let _ = \"You are an assistant. You must respond with a "
+    + "careful tool call, then explain the result to the user in detail "
+    + "without skipping any required schema fields. Include enough "
+    + "model-facing procedural prose here to cross the protected-path "
+    + "threshold and prove the ratchet catches new Rust-owned prompts.\"; }\n"
+  let ok_source = "const TAG: &str = \"<tool_call>\";\n"
+    + "fn err() { let _ = \"tool_dispatch: missing tool name\"; }\n"
+  let bad_findings = scan_source("bad.rs", bad_source, DEFAULT_THRESHOLD)
+  let ok_findings = scan_source("ok.rs", ok_source, DEFAULT_THRESHOLD)
+  if bad_findings.count != 1 || ok_findings.count > 0 {
+    __io_eprintln("self-test failed")
+    var all: list = []
+    all = all + bad_findings
+    all = all + ok_findings
+    for f in all {
+      __io_eprintln(format_finding(f.location, f.length, digest(f.text), make_preview(f.text)))
+    }
+    return 1
+  }
+  __io_println("rust prompt prose ratchet self-test OK")
+  return 0
+}
+
+/**
+ * Pure scan of one source body (no allowlist) used by the self-test: returns
+ * `{location, length, text}` findings at or above `threshold`.
+ */
+fn scan_source(rel: string, source: string, threshold: int) -> list {
+  var findings: list = []
+  for lit in iter_literals_text(source) {
+    let length = normalized_length(lit.text)
+    if length >= threshold {
+      findings = findings
+        + [{location: "${rel}:${lit.line}", length: length, text: lit.text}]
+    }
+  }
+  return findings
+}
+
+/**
+ * Join a repo-relative `path` onto `root` for filesystem access. `root` of "."
+ * yields the bare path so glob/read stay cwd-relative.
+ */
+fn join_root(root: string, path: string) -> string {
+  if root == "." || root == "" {
+    return path
+  }
+  if root.ends_with("/") {
+    return root + path
+  }
+  return "${root}/${path}"
+}
+
+/**
+ * Strip the leading `/./` marker (and any `root/` prefix) from a glob result to
+ * recover the repo-relative path the Python `relative_to(root)` produces.
+ */
+fn rel_from_glob(path: string, root: string) -> string {
+  var rel = path
+  let idx = path.index_of("/./")
+  if idx >= 0 {
+    rel = path.substring(idx + 3, path.len())
+  }
+  if root != "." && root != "" {
+    var prefix = root
+    if !prefix.ends_with("/") {
+      prefix = prefix + "/"
+    }
+    if rel.starts_with(prefix) {
+      rel = rel.substring(prefix.len(), rel.len())
+    }
+  }
+  return rel
+}
+
+/**
+ * Resolve the ordered set of repo-relative `.rs` files to scan, mirroring
+ * `protected_files`: directory entries recurse (sorted) with `tests`-component
+ * and excluded-file filtering; file entries (ending `.rs`) are included when
+ * present and not excluded. Path order follows the input `paths` list.
+ */
+fn collect_files(root: string, paths: list<string>) -> list<string> {
+  var out: list<string> = []
+  for path in paths {
+    if path.ends_with(".rs") {
+      if harness.fs.exists(join_root(root, path)) && !EXCLUDED_PROTECTED_FILES.contains(path) {
+        out = out + [path]
+      }
+    } else {
+      var matched: list<string> = []
+      for g in harness.fs.glob(join_root(root, path) + "/**/*.rs") {
+        let rel = rel_from_glob(g, root)
+        if EXCLUDED_PROTECTED_FILES.contains(rel) {
+          continue
+        }
+        if rel.split("/").contains("tests") {
+          continue
+        }
+        matched = matched + [rel]
+      }
+      out = out + sort_by_path_parts(matched)
+    }
+  }
+  return out
+}
