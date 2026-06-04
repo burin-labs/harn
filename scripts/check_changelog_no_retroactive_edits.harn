@@ -1,0 +1,414 @@
+/*
+ * Fail when this commit edits a CHANGELOG.md section for a published version.
+ *
+ * A `## vX.Y.Z` heading whose git tag `vX.Y.Z` already exists is "published"
+ * and must not change. New entries belong under `## Unreleased` (or the next
+ * unreleased `## vX.Y.Z` heading being prepared in a release PR).
+ *
+ * We only flag drift that this PR introduces -- pre-existing drift in main is
+ * left alone. Compares the CHANGELOG body between a base ref (default:
+ * `merge-base HEAD origin/main`) and HEAD, per `## vX.Y.Z` section.
+ *
+ * Bypass for genuine fix-ups (typos, broken links, cleaning up an
+ * already-merged retroactive entry): either set
+ * `ALLOW_CHANGELOG_RETROACTIVE_EDIT=1` in the environment, or include a
+ * `Allow-Retroactive-Changelog: <reason>` trailer in any commit between
+ * the base and HEAD. The trailer makes the bypass visible in PR review.
+ *
+ * Ported from scripts/check_changelog_no_retroactive_edits.py. Runs in the
+ * pre-push hook.
+ */
+let CHANGELOG_REL = "CHANGELOG.md"
+
+/**
+ * True when `line` is exactly a `## vX.Y.Z` version heading (anchored to the
+ * whole line, like Python's `^## v([0-9]+\.[0-9]+\.[0-9]+)$`). Returns the
+ * captured version (e.g. "0.8.72"), or nil when the line is not a heading.
+ */
+pub fn heading_version(line: string) -> string? {
+  let prefix = "## v"
+  if !line.starts_with(prefix) {
+    return nil
+  }
+  let rest = line.substring(prefix.len(), line.len())
+  // rest must be exactly N+.N+.N+ (three dot-separated non-empty digit runs).
+  let parts = rest.split(".")
+  if parts.count != 3 {
+    return nil
+  }
+  for part in parts {
+    if part.len() == 0 || !is_all_digits(part) {
+      return nil
+    }
+  }
+  return rest
+}
+
+/** True when every character of `s` is an ASCII digit and `s` is non-empty. */
+pub fn is_all_digits(s: string) -> bool {
+  if s.len() == 0 {
+    return false
+  }
+  let digits = "0123456789"
+  for ch in s.split("") {
+    if ch != "" && !digits.contains(ch) {
+      return false
+    }
+  }
+  return true
+}
+
+/**
+ * Collect every `## vX.Y.Z` version found in `text`, in document order.
+ * Mirrors `VERSION_HEADING.findall(head_text)`.
+ */
+pub fn version_headings(text: string) -> list<string> {
+  var versions = []
+  for line in text.split("\n") {
+    let v = heading_version(line)
+    if v != nil {
+      versions = versions + [v]
+    }
+  }
+  return versions
+}
+
+/**
+ * True when `line` starts a new top-level section, i.e. it begins with
+ * `## ` (two hashes and a space). This is the boundary used by the Python
+ * lookahead `(?=^## |\Z)`. Subheadings like `### Added` do NOT match
+ * because their third character is `#`, not a space.
+ */
+pub fn is_section_boundary(line: string) -> bool {
+  return line.starts_with("## ")
+}
+
+/**
+ * Extract the body of the `## vX.Y.Z` section for `version`, byte-identical
+ * to Python's `section_body`:
+ *
+ *   re.search(r"(?ms)^## v{version}\n(.*?)(?=^## |\Z)", text).group(1)
+ *
+ * The body is everything from immediately after the heading line's newline
+ * up to (but not including) the next line that begins with `## `, or the end
+ * of the text. Each retained line keeps its trailing newline. Returns nil
+ * when the section heading is absent.
+ */
+pub fn section_body(text: string, version: string) -> string? {
+  let target = "## v" + version
+  let lines = text.split("\n")
+  // Locate the heading line. The Python regex requires the heading to be on
+  // its own line followed by `\n`, so the heading cannot be the final line
+  // with no trailing newline. split("\n") yields the heading at index i with
+  // at least one element after it iff there was a `\n` after the heading.
+  var i = -1
+  for item in lines.enumerate() {
+    if item.value == target {
+      i = item.index
+      break
+    }
+  }
+  if i == -1 {
+    return nil
+  }
+  // The heading must be followed by a newline in the source. With split("\n"),
+  // a heading that is the very last line (no trailing newline) is the final
+  // element; in that case the regex `^## v..\n` cannot match.
+  if i == lines.count - 1 {
+    return nil
+  }
+  // Collect body lines until (not including) the next `## ` boundary line.
+  var body_lines = []
+  var j = i + 1
+  while j < lines.count {
+    let line = lines[j]
+    if is_section_boundary(line) {
+      break
+    }
+    body_lines = body_lines + [line]
+    j = j + 1
+  }
+  // Reconstruct the captured group. The original text after the heading's
+  // `\n` is body_lines joined by `\n`, with a trailing `\n` for every body
+  // line that was itself terminated by a `\n` in the source.
+  //
+  // If we stopped at a boundary line (j < lines.count), the last body line
+  // was followed by `\n` (the newline before the boundary), so every body
+  // line contributes "<line>\n".
+  //
+  // If we reached end of text (j == lines.count), the final split element is
+  // the trailing text after the last `\n`. If the source ended with `\n`,
+  // that element is "" and contributes nothing extra; otherwise it is the
+  // unterminated tail with no trailing `\n`.
+  if body_lines.count == 0 {
+    return ""
+  }
+  if j < lines.count {
+    // Stopped at a boundary: each body line ended with `\n`.
+    return body_lines.join("\n") + "\n"
+  }
+  // Reached end of text: join with `\n`; the last element carries no extra
+  // newline (it is the source tail or "" for a trailing-newline file).
+  return body_lines.join("\n")
+}
+
+/**
+ * Replicate `has_bypass_trailer`'s regex
+ * `^Allow-Retroactive-Changelog:\s*\S` (MULTILINE) over the concatenated
+ * commit messages. A bypass is present when some line begins with
+ * `Allow-Retroactive-Changelog:` and the remainder of the message (from the
+ * colon onward, possibly spanning whitespace/newlines) contains a
+ * non-whitespace character.
+ */
+pub fn has_bypass_trailer(messages: string) -> bool {
+  let prefix = "Allow-Retroactive-Changelog:"
+  let lines = messages.split("\n")
+  for item in lines.enumerate() {
+    if item.value.starts_with(prefix) {
+      // Everything from the colon onward across the rest of the message.
+      // Python's `\s*\S` lets the non-whitespace char appear after any run
+      // of whitespace (including newlines), so join the rest of the message.
+      var rest = item.value.substring(prefix.len(), item.value.len())
+      var k = item.index + 1
+      while k < lines.count {
+        rest = rest + "\n" + lines[k]
+        k = k + 1
+      }
+      if rest.trim() != "" {
+        return true
+      }
+    }
+  }
+  return false
+}
+
+/**
+ * Build a `version -> body` map for every `## vX.Y.Z` section in `text`, in a
+ * single linear pass (one `split("\n")`). Each body is byte-identical to
+ * `section_body(text, version)`. This is the hot path: the per-version
+ * `section_body` re-splits the whole 470KB+ CHANGELOG each call, so for the
+ * full version list we build all bodies once instead.
+ */
+pub fn section_bodies(text: string) -> dict {
+  return section_bodies_for(text, nil)
+}
+
+/**
+ * Like `section_bodies`, but when `wanted` is a non-nil list of version
+ * strings, only those sections' bodies are materialized (the body-line
+ * accumulation for every other section is skipped). `nil` means "all
+ * sections" and is equivalent to `section_bodies`.
+ *
+ * The drift check only ever compares published versions present in HEAD, so
+ * restricting the build to that handful of sections avoids accumulating and
+ * joining the body of every section in the ~470KB CHANGELOG twice.
+ */
+pub fn section_bodies_for(text: string, wanted: list<string>?) -> dict {
+  let lines = text.split("\n")
+  var bodies = {}
+  var idx = 0
+  while idx < lines.count {
+    let version = heading_version(lines[idx])
+    // A heading only starts a section if it is followed by a newline in the
+    // source, i.e. it is not the final split element (mirrors `^## v..\n`).
+    let key = version ?? ""
+    let needed = version != nil
+      && idx < lines.count - 1
+      && (wanted == nil || (wanted ?? []).contains(key))
+      && bodies[key] == nil
+    if needed {
+      var body_lines = []
+      var j = idx + 1
+      while j < lines.count {
+        if is_section_boundary(lines[j]) {
+          break
+        }
+        body_lines = body_lines + [lines[j]]
+        j = j + 1
+      }
+      // Reconstruct the captured group (see `section_body` for the rationale):
+      // body lines stopped at a boundary each carry a trailing newline; a run
+      // that reached end-of-text does not append one to the final element.
+      let body = if body_lines.count == 0 {
+        ""
+      } else if j < lines.count {
+        body_lines.join("\n") + "\n"
+      } else {
+        body_lines.join("\n")
+      }
+      // First occurrence wins, matching `re.search` (first match only).
+      bodies[key] = body
+    }
+    idx = idx + 1
+  }
+  return bodies
+}
+
+/**
+ * Pure drift computation. Given HEAD text, base text, and the set of existing
+ * tag names (e.g. ["v0.8.72", ...]), return the document-order list of
+ * published versions whose section body changed. Mirrors the loop in Python's
+ * `main`; section bodies are built once per text via `section_bodies`.
+ */
+pub fn compute_drift(head_text: string, base_text: string, tags: list<string>) -> list<string> {
+  // Only published versions present in HEAD can drift; restrict body building
+  // to that set so we don't reconstruct every section of the CHANGELOG twice.
+  let head_versions = version_headings(head_text)
+  var wanted = []
+  for version in head_versions {
+    if tags.contains("v" + version) && !wanted.contains(version) {
+      wanted = wanted + [version]
+    }
+  }
+  let head_bodies = section_bodies_for(head_text, wanted)
+  let base_bodies = section_bodies_for(base_text, wanted)
+  var drift = []
+  for version in head_versions {
+    let tag = "v" + version
+    if !tags.contains(tag) {
+      continue
+    }
+    let head_body = head_bodies[version]
+    let base_body = base_bodies[version]
+    if head_body == nil || base_body == nil {
+      continue
+    }
+    if head_body != base_body {
+      drift = drift + [version]
+    }
+  }
+  return drift
+}
+
+/**
+ * Build the multi-line stderr report that Python emits when drift is found.
+ * `base` is the resolved base ref shown in the header.
+ */
+pub fn drift_report(base: string, drift: list<string>) -> string {
+  var lines = []
+  lines = lines
+    + [
+    "error: CHANGELOG.md sections for already-published versions were modified in this change (compared against "
+      + base
+      + "):",
+  ]
+  for version in drift {
+    lines = lines + ["  - v" + version]
+  }
+  lines = lines + [""]
+  lines = lines + ["New entries belong under '## Unreleased' (or the next unreleased '## vX.Y.Z'"]
+  lines = lines + ["heading being prepared in a release PR), not under a section that has"]
+  lines = lines + ["already shipped. Move the entry, or — if this is a deliberate fix-up"]
+  lines = lines + ["(typo / broken link / cleaning up a previously-merged retroactive entry)"]
+  lines = lines + ["— bypass by adding a commit trailer:"]
+  lines = lines + ["    Allow-Retroactive-Changelog: <reason>"]
+  lines = lines + ["or set ALLOW_CHANGELOG_RETROACTIVE_EDIT=1 in the environment."]
+  return lines.join("\n")
+}
+
+/**
+ * Read `--flag value` or `--flag=value` style options out of argv.
+ * Returns nil when the flag is absent.
+ */
+pub fn flag_value(args: list<string>, name: string) -> string? {
+  let prefix = name + "="
+  for item in args.enumerate() {
+    let a = item.value
+    if a == name && item.index + 1 < args.count {
+      return args[item.index + 1]
+    }
+    if a.starts_with(prefix) {
+      return a.substring(prefix.len(), a.len())
+    }
+  }
+  return nil
+}
+
+fn git(args: list<string>) {
+  return harness.process.spawn_captured({cmd: "git", args: args})
+}
+
+/**
+ * Resolve the base ref: explicit --base, then CHANGELOG_GUARD_BASE env, then
+ * merge-base with origin/main (falling back to main, then HEAD~1).
+ */
+fn resolve_base(base: string?) -> string {
+  if base != nil && base != "" {
+    return base ?? ""
+  }
+  let env_base = harness.env.get("CHANGELOG_GUARD_BASE")
+  if env_base != nil && env_base != "" {
+    return env_base ?? ""
+  }
+  for candidate in ["origin/main", "main"] {
+    let result = git(["merge-base", "HEAD", candidate])
+    if result.success {
+      return result.stdout.trim()
+    }
+  }
+  return "HEAD~1"
+}
+
+/**
+ * List every existing tag name (e.g. "v0.8.72") in one git call. Membership in
+ * this list is equivalent to Python's per-tag
+ * `git rev-parse --verify --quiet refs/tags/<tag>` succeeding, but avoids one
+ * subprocess spawn per CHANGELOG version (~70 spawns on the real repo).
+ */
+fn existing_tags() -> list<string> {
+  let result = git(["tag", "-l"])
+  if !result.success {
+    return []
+  }
+  var tags = []
+  for line in result.stdout.split("\n") {
+    let name = line.trim()
+    if name != "" {
+      tags = tags + [name]
+    }
+  }
+  return tags
+}
+
+/**
+ * Concatenate commit messages between base and HEAD, with the shallow-clone
+ * fallback to the last 50 commits. Mirrors `commit_messages_since`.
+ */
+fn commit_messages_since(base: string) -> string {
+  let result = git(["log", "--format=%B%x00", base + "..HEAD"])
+  if result.success && result.stdout.trim() != "" {
+    return result.stdout
+  }
+  let fallback = git(["log", "-50", "--format=%B%x00", "HEAD"])
+  if fallback.success {
+    return fallback.stdout
+  }
+  return ""
+}
+
+pipeline main(task) {
+  if harness.env.get("ALLOW_CHANGELOG_RETROACTIVE_EDIT") == "1" {
+    __io_println("check_changelog_no_retroactive_edits: bypassed via env var")
+    return 0
+  }
+  let head_text = harness.fs.read_text(CHANGELOG_REL)
+  let base = resolve_base(flag_value(argv, "--base"))
+  let base_show = git(["show", base + ":" + CHANGELOG_REL])
+  if !base_show.success {
+    // No base to compare against -- nothing to enforce.
+    return 0
+  }
+  let base_text = base_show.stdout
+  if has_bypass_trailer(commit_messages_since(base)) {
+    __io_println(
+      "check_changelog_no_retroactive_edits: bypassed via Allow-Retroactive-Changelog trailer",
+    )
+    return 0
+  }
+  let drift = compute_drift(head_text, base_text, existing_tags())
+  if drift.count == 0 {
+    return 0
+  }
+  __io_eprintln(drift_report(base, drift))
+  return 1
+}

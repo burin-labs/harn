@@ -1,5 +1,5 @@
 #!/bin/sh
 set -eu
 
-python3 scripts/check_rust_prompt_prose.py --self-test
-python3 scripts/check_rust_prompt_prose.py
+cargo run --quiet --bin harn -- run scripts/check_rust_prompt_prose.harn -- --self-test
+cargo run --quiet --bin harn -- run scripts/check_rust_prompt_prose.harn

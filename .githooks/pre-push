@@ -101,7 +101,7 @@ fi
 # in a release PR), not under a section that already shipped under a tag.
 if hook_paths_match "$changed" '^CHANGELOG\.md$'; then
   echo "=== Pre-push: checking CHANGELOG for retroactive edits ==="
-  if ! python3 scripts/check_changelog_no_retroactive_edits.py; then
+  if ! cargo run --quiet --bin harn -- run scripts/check_changelog_no_retroactive_edits.harn; then
     echo "" >&2
     echo "  Bypass for genuine fix-ups (typos, broken links):" >&2
     echo "    ALLOW_CHANGELOG_RETROACTIVE_EDIT=1 git push" >&2
