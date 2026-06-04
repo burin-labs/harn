@@ -534,7 +534,7 @@ fn build_tracer_provider_from_env(
     use opentelemetry_otlp::{Protocol, WithExportConfig as _, WithHttpConfig as _};
     use opentelemetry_sdk::runtime;
     use opentelemetry_sdk::trace::span_processor_with_async_runtime::BatchSpanProcessor;
-    use opentelemetry_sdk::trace::SimpleSpanProcessor;
+    use opentelemetry_sdk::trace::{Sampler, SimpleSpanProcessor};
     use opentelemetry_sdk::Resource;
 
     let Some(raw_endpoint) = std::env::var("HARN_OTEL_ENDPOINT")
@@ -559,6 +559,13 @@ fn build_tracer_provider_from_env(
             .map(str::trim)
             .filter(|value| !value.is_empty()),
     )?;
+    let sample_ratio = parse_sample_ratio(
+        std::env::var("HARN_OTEL_SAMPLE_RATIO")
+            .ok()
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty()),
+    )?;
 
     let exporter = opentelemetry_otlp::SpanExporter::builder()
         .with_http()
@@ -575,6 +582,11 @@ fn build_tracer_provider_from_env(
 
     let mut builder = opentelemetry_sdk::trace::SdkTracerProvider::builder()
         .with_resource(Resource::builder().with_service_name(service_name).build());
+    if sample_ratio < 1.0 {
+        builder = builder.with_sampler(Sampler::ParentBased(Box::new(Sampler::TraceIdRatioBased(
+            sample_ratio,
+        ))));
+    }
     builder = match processor_kind {
         SpanProcessorKind::Batch => builder
             .with_span_processor(BatchSpanProcessor::builder(exporter, runtime::Tokio).build()),
@@ -589,6 +601,25 @@ fn build_tracer_provider_from_env(
     let provider = builder.build();
     global::set_tracer_provider(provider.clone());
     Ok(Some(provider))
+}
+
+#[cfg(feature = "otel")]
+fn parse_sample_ratio(value: Option<&str>) -> Result<f64, String> {
+    let Some(value) = value else {
+        return Ok(1.0);
+    };
+    let ratio = value.parse::<f64>().map_err(|error| {
+        format!(
+            "invalid HARN_OTEL_SAMPLE_RATIO value {value:?}; expected a number in [0, 1]: {error}"
+        )
+    })?;
+    if ratio.is_finite() && (0.0..=1.0).contains(&ratio) {
+        Ok(ratio)
+    } else {
+        Err(format!(
+            "invalid HARN_OTEL_SAMPLE_RATIO value {value:?}; expected a number in [0, 1]"
+        ))
+    }
 }
 
 #[cfg(feature = "otel")]
@@ -794,6 +825,27 @@ mod tests {
         assert!(error.contains("forwarder"), "{error}");
         assert!(error.contains("batch"), "{error}");
         assert!(error.contains("simple"), "{error}");
+    }
+
+    #[test]
+    fn parse_sample_ratio_defaults_to_keep_all() {
+        assert_eq!(parse_sample_ratio(None).unwrap(), 1.0);
+    }
+
+    #[test]
+    fn parse_sample_ratio_accepts_valid_ratio() {
+        assert_eq!(parse_sample_ratio(Some("0.1")).unwrap(), 0.1);
+        assert_eq!(parse_sample_ratio(Some("0")).unwrap(), 0.0);
+        assert_eq!(parse_sample_ratio(Some("1")).unwrap(), 1.0);
+    }
+
+    #[test]
+    fn parse_sample_ratio_rejects_invalid_values() {
+        for value in ["2.0", "-1", "x", "NaN", "inf"] {
+            let error = parse_sample_ratio(Some(value)).unwrap_err();
+            assert!(error.contains(value), "{error}");
+            assert!(error.contains("[0, 1]"), "{error}");
+        }
     }
 
     #[test]
