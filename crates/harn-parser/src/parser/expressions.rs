@@ -6,10 +6,22 @@ use super::state::Parser;
 
 impl Parser {
     /// Parse a single expression (for string interpolation).
+    ///
+    /// An interpolation hole (`${ ... }`) must contain exactly one expression.
+    /// After parsing it, require that the token stream is exhausted so leftover
+    /// tokens are reported as a parse error instead of being silently dropped —
+    /// otherwise `${a b}` would render just `a` and `${1e20}` just `1` (`e20`
+    /// is a separate identifier, since scientific notation is not a float
+    /// literal), masking the typo.
     pub fn parse_single_expression(&mut self) -> Result<SNode, ParserError> {
         self.check_token_nesting_limit()?;
         self.skip_newlines();
-        self.parse_expression()
+        let expr = self.parse_expression()?;
+        self.skip_newlines();
+        if !self.is_at_end() {
+            return Err(self.error("end of interpolated expression"));
+        }
+        Ok(expr)
     }
 
     pub(super) fn parse_nested_expression(

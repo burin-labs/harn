@@ -284,6 +284,103 @@ impl Lexer {
         ))
     }
 
+    /// Capture the raw source text of an interpolation hole `${ ... }`.
+    ///
+    /// Precondition: the lexer is positioned on the `$` of `${`. This consumes
+    /// the opening `${`, the hole's expression text, and the matching closing
+    /// `}`, returning the captured expression along with the line/column where
+    /// it began (used to anchor diagnostics when the hole is re-lexed).
+    ///
+    /// The scan is string-literal aware: a `}` or `{` that appears inside a
+    /// nested `"..."` string literal does not change brace depth, and a `\`
+    /// inside such a literal escapes the next character (so `\"` does not close
+    /// the nested string). This lets a hole contain string literals with braces
+    /// or quotes, e.g. `${ items["a}b"] }` or `${ x ?? "default" }`, instead of
+    /// terminating early at the first inner `}`.
+    fn capture_interpolation_expr(
+        &mut self,
+        start: Span,
+    ) -> Result<(String, usize, usize), LexerError> {
+        self.advance(); // consume '$'
+        self.advance(); // consume '{'
+        let expr_line = self.line;
+        let expr_col = self.column;
+        let mut depth = 1usize;
+        let mut expr = String::new();
+        let mut in_string = false;
+        while self.pos < self.source.len() && depth > 0 {
+            let ch = self.source[self.pos];
+            if in_string {
+                if ch == '\\' {
+                    // Preserve the backslash and the escaped char verbatim; an
+                    // escaped quote must not close the nested string literal.
+                    expr.push(ch);
+                    self.advance();
+                    if self.pos >= self.source.len() {
+                        return Err(LexerError::UnterminatedString(start));
+                    }
+                    let escaped = self.source[self.pos];
+                    if escaped == '\n' {
+                        self.line += 1;
+                        self.column = 0; // advance() restores column to 1
+                    }
+                    expr.push(escaped);
+                    self.advance();
+                    continue;
+                }
+                if ch == '"' {
+                    in_string = false;
+                }
+            } else {
+                match ch {
+                    // A backslash is never valid in expression position. The
+                    // usual cause is escaping the quotes of a nested string
+                    // literal (`${x ?? \"y\"}`); inside an interpolation hole,
+                    // string literals use bare double quotes (`${x ?? "y"}`).
+                    // Report it precisely here rather than scanning to EOF and
+                    // surfacing a misleading "unterminated string".
+                    '\\' => {
+                        return Err(LexerError::UnexpectedCharacter(
+                            '\\',
+                            Span::with_offsets(
+                                self.byte_pos,
+                                self.byte_pos + 1,
+                                self.line,
+                                self.column,
+                            ),
+                        ));
+                    }
+                    '"' => in_string = true,
+                    '{' => depth += 1,
+                    '}' => {
+                        depth -= 1;
+                        if depth == 0 {
+                            break;
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            if ch == '\n' {
+                self.line += 1;
+                self.column = 0; // advance() restores column to 1
+            }
+            expr.push(ch);
+            self.advance();
+        }
+        if self.pos >= self.source.len() {
+            return Err(LexerError::UnterminatedString(start));
+        }
+        if expr.trim().is_empty() {
+            return Err(LexerError::UnexpectedCharacter(
+                '}',
+                Span::with_offsets(self.byte_pos, self.byte_pos + 1, self.line, self.column),
+            ));
+        }
+        self.advance(); // consume closing '}'
+        Ok((expr, expr_line, expr_col))
+    }
+
     fn read_string(&mut self) -> Result<Token, LexerError> {
         let start_byte = self.byte_pos;
         let start = Span::with_offsets(start_byte, start_byte, self.line, self.column);
@@ -325,44 +422,7 @@ impl Lexer {
                 if !value.is_empty() {
                     segments.push(StringSegment::Literal(std::mem::take(&mut value)));
                 }
-                self.advance();
-                self.advance();
-                let expr_line = self.line;
-                let expr_col = self.column;
-                let mut depth = 1;
-                let mut expr = String::new();
-                while self.pos < self.source.len() && depth > 0 {
-                    if self.source[self.pos] == '{' {
-                        depth += 1;
-                    }
-                    if self.source[self.pos] == '}' {
-                        depth -= 1;
-                        if depth == 0 {
-                            break;
-                        }
-                    }
-                    if self.source[self.pos] == '\n' {
-                        self.line += 1;
-                        self.column = 0; // advance() restores column to 1
-                    }
-                    expr.push(self.source[self.pos]);
-                    self.advance();
-                }
-                if self.pos >= self.source.len() {
-                    return Err(LexerError::UnterminatedString(start));
-                }
-                if expr.trim().is_empty() {
-                    return Err(LexerError::UnexpectedCharacter(
-                        '}',
-                        Span::with_offsets(
-                            self.byte_pos,
-                            self.byte_pos + 1,
-                            self.line,
-                            self.column,
-                        ),
-                    ));
-                }
-                self.advance();
+                let (expr, expr_line, expr_col) = self.capture_interpolation_expr(start)?;
                 segments.push(StringSegment::Expression(expr, expr_line, expr_col));
                 continue;
             }
@@ -476,44 +536,7 @@ impl Lexer {
                 if !value.is_empty() {
                     segments.push(StringSegment::Literal(std::mem::take(&mut value)));
                 }
-                self.advance();
-                self.advance();
-                let expr_line = self.line;
-                let expr_col = self.column;
-                let mut depth = 1;
-                let mut expr = String::new();
-                while self.pos < self.source.len() && depth > 0 {
-                    if self.source[self.pos] == '{' {
-                        depth += 1;
-                    }
-                    if self.source[self.pos] == '}' {
-                        depth -= 1;
-                        if depth == 0 {
-                            break;
-                        }
-                    }
-                    if self.source[self.pos] == '\n' {
-                        self.line += 1;
-                        self.column = 0; // advance() restores column to 1
-                    }
-                    expr.push(self.source[self.pos]);
-                    self.advance();
-                }
-                if self.pos >= self.source.len() {
-                    return Err(LexerError::UnterminatedString(start));
-                }
-                if expr.trim().is_empty() {
-                    return Err(LexerError::UnexpectedCharacter(
-                        '}',
-                        Span::with_offsets(
-                            self.byte_pos,
-                            self.byte_pos + 1,
-                            self.line,
-                            self.column,
-                        ),
-                    ));
-                }
-                self.advance();
+                let (expr, expr_line, expr_col) = self.capture_interpolation_expr(start)?;
                 segments.push(StringSegment::Expression(expr, expr_line, expr_col));
                 continue;
             }
@@ -1046,6 +1069,55 @@ mod tests {
         } else {
             panic!("Expected interpolated string");
         }
+    }
+
+    /// Returns the captured text of the single interpolation hole in `src`.
+    fn single_interpolation_expr(src: &str) -> String {
+        let mut lexer = Lexer::new(src);
+        let tokens = lexer.tokenize().unwrap();
+        match &tokens[0].kind {
+            TokenKind::InterpolatedString(segs) => segs
+                .iter()
+                .find_map(|s| match s {
+                    StringSegment::Expression(e, _, _) => Some(e.clone()),
+                    _ => None,
+                })
+                .expect("expected an interpolation expression segment"),
+            other => panic!("expected interpolated string, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_interpolation_capture_is_string_literal_aware() {
+        // A `}` (or `{`) inside a nested string literal must not end the hole.
+        assert_eq!(
+            single_interpolation_expr(r#""${x ?? "a}b"}""#),
+            r#"x ?? "a}b""#
+        );
+        assert_eq!(single_interpolation_expr(r#""${f("}")}""#), r#"f("}")"#);
+        assert_eq!(
+            single_interpolation_expr(r#""${items["a}b"]}""#),
+            r#"items["a}b"]"#
+        );
+        // A `\"` inside the nested string is preserved verbatim so it does not
+        // close the literal early.
+        assert_eq!(
+            single_interpolation_expr(r#""${x ?? "a\"b"}""#),
+            r#"x ?? "a\"b""#
+        );
+    }
+
+    #[test]
+    fn test_interpolation_escaped_outer_quote_is_rejected() {
+        // Escaping the quotes of a nested string literal (`${x ?? \"y\"}`) is a
+        // common mistake: inside an interpolation hole, string literals use bare
+        // double quotes. A backslash is never valid in expression position, so
+        // it is reported precisely at the backslash rather than scanning to EOF.
+        let mut lexer = Lexer::new(r#""${x ?? \"y\"}""#);
+        assert!(matches!(
+            lexer.tokenize(),
+            Err(LexerError::UnexpectedCharacter('\\', _))
+        ));
     }
 
     #[test]

@@ -1,0 +1,10 @@
+/**
+ * Inside an interpolation hole, a nested string literal uses bare double
+ * quotes (`${x ?? "y"}`). Escaping the quotes (`${x ?? \"y\"}`) is a mistake:
+ * a backslash is never valid in expression position, so it is reported
+ * precisely at the backslash instead of silently rendering the raw text.
+ */
+pipeline test(task) {
+  let x = nil
+  log("value=${x ?? \"y\"}")
+}

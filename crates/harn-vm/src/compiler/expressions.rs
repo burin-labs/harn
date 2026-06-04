@@ -439,24 +439,27 @@ impl Compiler {
                     part_count += 1;
                 }
                 StringSegment::Expression(expr_str, expr_line, expr_col) => {
+                    // A malformed interpolation is a hard error, not silently
+                    // rendered as raw text: `\${...}` already escapes a literal
+                    // dollar-brace, so any unescaped `${...}` is intended as an
+                    // expression. `parse_single_expression` also requires the
+                    // whole hole to be consumed, so trailing tokens (`${a b}`)
+                    // surface here instead of being dropped.
                     let mut lexer =
                         harn_lexer::Lexer::with_position(expr_str, *expr_line, *expr_col);
-                    if let Ok(tokens) = lexer.tokenize() {
-                        let mut parser = harn_parser::Parser::new(tokens);
-                        if let Ok(snode) = parser.parse_single_expression() {
-                            self.compile_node(&snode)?;
-                            let to_str = self.string_constant("to_string");
-                            self.chunk.emit_u16(Op::Constant, to_str, self.line);
-                            self.chunk.emit(Op::Swap, self.line);
-                            self.chunk.emit_u8(Op::Call, 1, self.line);
-                            part_count += 1;
-                        } else {
-                            // Fallback: treat as literal.
-                            let idx = self.string_constant(expr_str);
-                            self.chunk.emit_u16(Op::Constant, idx, self.line);
-                            part_count += 1;
-                        }
-                    }
+                    let tokens = lexer
+                        .tokenize()
+                        .map_err(|e| self.interpolation_error(expr_str, *expr_line as u32, &e))?;
+                    let mut parser = harn_parser::Parser::new(tokens);
+                    let snode = parser
+                        .parse_single_expression()
+                        .map_err(|e| self.interpolation_error(expr_str, *expr_line as u32, &e))?;
+                    self.compile_node(&snode)?;
+                    let to_str = self.string_constant("to_string");
+                    self.chunk.emit_u16(Op::Constant, to_str, self.line);
+                    self.chunk.emit(Op::Swap, self.line);
+                    self.chunk.emit_u8(Op::Call, 1, self.line);
+                    part_count += 1;
                 }
             }
         }
@@ -464,5 +467,17 @@ impl Compiler {
             self.chunk.emit_u16(Op::Concat, part_count, self.line);
         }
         Ok(())
+    }
+
+    fn interpolation_error(
+        &self,
+        expr_str: &str,
+        line: u32,
+        cause: &dyn std::fmt::Display,
+    ) -> CompileError {
+        CompileError {
+            message: format!("invalid interpolation `${{{}}}`: {cause}", expr_str.trim()),
+            line,
+        }
     }
 }
