@@ -252,6 +252,33 @@ pub(crate) fn is_pure_expression(node: &Node) -> bool {
     }
 }
 
+/// Conservative NaN analysis for the self-comparison autofix. Returns true
+/// only when the expression provably cannot evaluate to a NaN float, nor to a
+/// list/dict transitively containing one.
+///
+/// `x == x` is `false` and `x != x` is `true` whenever `x` is a NaN float (and
+/// the same holds element-wise for containers holding a NaN), so folding a
+/// self-comparison to a constant is only sound for NaN-free operands. There is
+/// no NaN float *literal* syntax, so a `FloatLiteral` is always a real number;
+/// any computed value — an identifier, call, arithmetic, or field/index access
+/// — could be NaN and is therefore treated as unsafe.
+pub(crate) fn is_nan_free(node: &Node) -> bool {
+    match node {
+        Node::IntLiteral(_)
+        | Node::StringLiteral(_)
+        | Node::RawStringLiteral(_)
+        | Node::BoolLiteral(_)
+        | Node::NilLiteral
+        | Node::DurationLiteral(_)
+        | Node::FloatLiteral(_) => true,
+        Node::ListLiteral(items) => items.iter().all(|n| is_nan_free(&n.node)),
+        Node::DictLiteral(entries) => entries
+            .iter()
+            .all(|e| is_nan_free(&e.key.node) && is_nan_free(&e.value.node)),
+        _ => false,
+    }
+}
+
 /// Remove a whole statement including its leading indent and trailing
 /// newline. Returns `None` when the rewrite cannot be performed safely,
 /// in which case the lint still fires without an autofix.

@@ -25,6 +25,8 @@ const TOP_N: usize = 5;
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
 pub struct RunProfile {
     pub total_wall_ms: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub first_token_ms: Option<u64>,
     pub by_kind: Vec<KindBucket>,
     pub residual_ms: u64,
     pub top_llm_calls: Vec<SpanRef>,
@@ -96,9 +98,11 @@ pub fn build(spans: &[Span]) -> RunProfile {
     let top_llm_calls = top_n_by_duration(spans, "llm_call");
     let top_tool_calls = top_n_by_duration(spans, "tool_call");
     let steps = build_step_summaries(spans);
+    let first_token_ms = first_token_ms(spans);
 
     RunProfile {
         total_wall_ms,
+        first_token_ms,
         by_kind,
         residual_ms,
         top_llm_calls,
@@ -126,6 +130,18 @@ pub fn build_aggregate(span_groups: &[Vec<Span>]) -> RunProfile {
         next_offset += max_id + 1;
     }
     build(&merged)
+}
+
+fn first_token_ms(spans: &[Span]) -> Option<u64> {
+    spans
+        .iter()
+        .filter(|span| span.kind.as_str() == "llm_call")
+        .filter_map(|span| {
+            span.metadata
+                .get(crate::llm::first_token::FIRST_TOKEN_METADATA_KEY)
+                .and_then(serde_json::Value::as_u64)
+        })
+        .min()
 }
 
 fn is_pipeline_root(spans: &[Span], id: u64) -> bool {
@@ -267,6 +283,9 @@ pub fn render(profile: &RunProfile) -> String {
         "  Total wall time: {}",
         format_secs(profile.total_wall_ms)
     );
+    if let Some(first_token_ms) = profile.first_token_ms {
+        let _ = writeln!(out, "  First token:     {}", format_secs(first_token_ms));
+    }
     let _ = writeln!(out, "\n  By category:");
     for bucket in &profile.by_kind {
         let _ = writeln!(
@@ -388,6 +407,7 @@ mod tests {
     fn empty_spans_yield_default_profile() {
         let profile = build(&[]);
         assert_eq!(profile.total_wall_ms, 0);
+        assert_eq!(profile.first_token_ms, None);
         assert!(profile.by_kind.is_empty());
         assert_eq!(profile.residual_ms, 0);
     }
@@ -409,6 +429,53 @@ mod tests {
         assert_eq!(profile.by_kind[1].count, 2);
         // 1000 wall - (600 + 300) depth-1 = 100 ms residual
         assert_eq!(profile.residual_ms, 100);
+    }
+
+    #[test]
+    fn first_token_ms_uses_earliest_llm_span_metadata() {
+        let spans = vec![
+            span(1, None, SpanKind::Pipeline, "main", 1000),
+            span_with_meta(
+                2,
+                Some(1),
+                SpanKind::LlmCall,
+                "llm_call",
+                600,
+                &[("first_token_ms", serde_json::json!(350))],
+            ),
+            span_with_meta(
+                3,
+                Some(1),
+                SpanKind::LlmCall,
+                "llm_call",
+                300,
+                &[("first_token_ms", serde_json::json!(125))],
+            ),
+        ];
+
+        let profile = build(&spans);
+
+        assert_eq!(profile.first_token_ms, Some(125));
+    }
+
+    #[test]
+    fn render_includes_first_token_when_present() {
+        let mut profile = RunProfile {
+            total_wall_ms: 1000,
+            first_token_ms: Some(120),
+            ..RunProfile::default()
+        };
+        profile.by_kind.push(KindBucket {
+            kind: "llm_call".to_string(),
+            total_ms: 900,
+            count: 1,
+            pct_of_wall: 90.0,
+        });
+
+        let rendered = render(&profile);
+
+        assert!(rendered.contains("First token:"));
+        assert!(rendered.contains("120 ms"));
     }
 
     #[test]

@@ -452,6 +452,10 @@ NON_TEST_WALL_CLOCK_ALLOWLIST=(
   "crates/harn-vm/src/llm/api/transport.rs"
   "crates/harn-vm/src/llm/autonomy_budget.rs"
   "crates/harn-vm/src/llm/cache.rs"
+  # `first_token.rs` records host-observed elapsed time from LLM dispatch
+  # to the first streamed delta as RunProfile telemetry; real provider
+  # latency is the source of truth.
+  "crates/harn-vm/src/llm/first_token.rs"
   "crates/harn-vm/src/llm/mod.rs"
   "crates/harn-vm/src/llm/model_test.rs"
   # Ollama raw `/api/generate` bypasses the shared transport wrapper, so it
