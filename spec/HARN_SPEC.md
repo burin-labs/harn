@@ -1139,7 +1139,11 @@ Comparison between other types returns 0 (equal).
 | dict | dict | dict (merge, right wins) | **TypeError** | **TypeError** | **TypeError** |
 | other | other | **TypeError** | **TypeError** | **TypeError** | **TypeError** |
 
-Division by zero returns `nil`.
+Division by zero depends on the result type. Integer division by zero
+(`int / int`) raises a runtime error that propagates like any other thrown
+value (catchable with `try`/`catch`). Float division by zero follows
+IEEE-754: it yields `±inf` (or `NaN` for `0.0 / 0.0`) and never raises — this
+applies whenever either operand is a `float`, since the result is a `float`.
 `string * int` repeats the string; negative or zero counts return `""`.
 
 Type mismatches that are not listed as valid combinations above produce a
@@ -1150,8 +1154,8 @@ interpolation (`"${expr}"`) for explicit type conversion.
 ### Modulo (`%`)
 
 `%` is numeric-only. `int % int` returns `int`; any case involving a `float`
-returns `float`. Modulo by zero follows the same runtime error path as
-division by zero.
+returns `float`. Modulo by a zero divisor always raises a runtime error,
+regardless of operand types (unlike float division, it never yields `NaN`).
 
 ### Exponentiation (`**`)
 

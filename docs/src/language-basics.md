@@ -225,7 +225,9 @@ Ordered by precedence (lowest to highest):
 | 10 | `!` `-` | Unary not, negate |
 | 11 | `.` `?.` `[]` `[:]` `()` `?` | Member access, optional chaining, subscript, slice, call, try |
 
-Division by zero returns `nil`. Integer division truncates.
+Integer division truncates toward zero. Integer division (and any modulo) by
+zero raises a catchable runtime error, while float division by zero follows
+IEEE-754 (`±inf`, or `NaN` for `0.0 / 0.0`).
 Arithmetic operators are strictly typed — mismatched operands (e.g.
 `"hello" + 5`) produce a `TypeError`. Use `to_string()` or string
 interpolation (`"value=${x}"`) for explicit conversion.

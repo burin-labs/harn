@@ -1,0 +1,14 @@
+/**
+ * Float division by zero follows IEEE-754: it yields ±inf (or NaN for
+ * 0.0 / 0.0) and never raises. Integer division by zero raises instead —
+ * at runtime for a non-const divisor (see errors/runtime/int_div_by_zero)
+ * or at compile time when const-folded (see const_eval_division_by_zero).
+ * The divisor is a `let` (not a literal) so the float path is exercised at
+ * runtime rather than folded.
+ */
+pipeline test(task) {
+  let z = 0.0
+  log(1.0 / z)
+  log(-1.0 / z)
+  log(z / z)
+}

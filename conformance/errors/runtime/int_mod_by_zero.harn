@@ -1,0 +1,6 @@
+// Integer modulo by a zero divisor raises at runtime (a non-const divisor,
+// so this is the runtime path, not const-fold).
+pipeline default() {
+  let d = 0
+  let _ = 5 % d
+}
