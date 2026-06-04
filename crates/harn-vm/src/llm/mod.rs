@@ -30,6 +30,7 @@ pub(crate) mod daemon;
 pub mod eval;
 pub(crate) mod fake;
 pub(crate) mod fast_mode;
+pub(crate) mod first_token;
 pub(crate) mod helpers;
 pub mod introspection;
 pub mod jsonl;

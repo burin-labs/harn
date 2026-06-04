@@ -123,8 +123,24 @@ fn parse_displayed_categorized_error(message: &str) -> Option<(ErrorCategory, &s
 /// handling; non-streaming callers just drop the receiver.
 pub(crate) async fn vm_call_llm_full(opts: &LlmCallOptions) -> Result<LlmResult, VmError> {
     super::cost::check_llm_preflight_budget(opts)?;
-    let (delta_tx, _delta_rx) = tokio::sync::mpsc::unbounded_channel::<String>();
-    let result = vm_call_llm_full_inner(opts, Some(delta_tx)).await?;
+    let (delta_tx, mut delta_rx) = tokio::sync::mpsc::unbounded_channel::<String>();
+    let mut first_token = super::first_token::FirstTokenTimer::for_current_span();
+    let mut deltas_open = true;
+    let mut call = Box::pin(vm_call_llm_full_inner(opts, Some(delta_tx)));
+    let result = loop {
+        tokio::select! {
+            maybe_delta = delta_rx.recv(), if deltas_open => {
+                match maybe_delta {
+                    Some(_) => first_token.observe_delta(),
+                    None => deltas_open = false,
+                }
+            }
+            result = &mut call => break result?,
+        }
+    };
+    while delta_rx.try_recv().is_ok() {
+        first_token.observe_delta();
+    }
     super::cost::record_llm_usage_for_provider(
         &result.provider,
         &result.model,

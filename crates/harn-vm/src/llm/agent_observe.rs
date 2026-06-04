@@ -748,6 +748,7 @@ pub(super) fn spawn_progress_forwarder(
     call_id: String,
     user_visible: bool,
     detector_ctx: Option<StreamingDetectorContext>,
+    mut first_token: super::first_token::FirstTokenTimer,
 ) -> DeltaSender {
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<String>();
     let bridge = bridge.clone();
@@ -757,6 +758,7 @@ pub(super) fn spawn_progress_forwarder(
     tokio::task::spawn_local(async move {
         let mut token_count: u64 = 0;
         while let Some(delta) = rx.recv().await {
+            first_token.observe_delta();
             token_count += 1;
             bridge.send_call_progress(&call_id, &delta, token_count, user_visible);
             if let Some(d) = detector.as_mut() {
@@ -780,9 +782,12 @@ pub(super) fn spawn_progress_forwarder(
 /// one). Used so non-bridge callers (offthread VM, CLI loops without an
 /// attached host) still see candidate events when they have a
 /// `StreamingDetectorContext`.
-pub(super) fn spawn_detector_only_forwarder(detector_ctx: StreamingDetectorContext) -> DeltaSender {
+pub(super) fn spawn_detector_only_forwarder(
+    detector_ctx: StreamingDetectorContext,
+    first_token: super::first_token::FirstTokenTimer,
+) -> DeltaSender {
     let (tx, rx) = tokio::sync::mpsc::unbounded_channel::<String>();
-    tokio::task::spawn_local(run_detector_loop(detector_ctx, rx));
+    tokio::task::spawn_local(run_detector_loop(detector_ctx, rx, first_token));
     tx
 }
 
@@ -797,6 +802,7 @@ pub(super) fn spawn_detector_only_forwarder(detector_ctx: StreamingDetectorConte
 /// captures into a local buffer — sidestepping the global registry,
 /// which other tests in this binary mutate via `reset_all_sinks` and
 /// can race the per-session install.
+#[cfg(test)]
 async fn run_detector_loop_with_sink(
     detector_ctx: StreamingDetectorContext,
     mut rx: tokio::sync::mpsc::UnboundedReceiver<String>,
@@ -820,12 +826,22 @@ async fn run_detector_loop_with_sink(
 /// session sink registry so ACP / external sinks see them.
 async fn run_detector_loop(
     detector_ctx: StreamingDetectorContext,
-    rx: tokio::sync::mpsc::UnboundedReceiver<String>,
+    mut rx: tokio::sync::mpsc::UnboundedReceiver<String>,
+    mut first_token: super::first_token::FirstTokenTimer,
 ) {
-    run_detector_loop_with_sink(detector_ctx, rx, |event| {
-        crate::agent_events::emit_event(event);
-    })
-    .await;
+    let mut detector = crate::llm::tools::StreamingToolCallDetector::new(
+        detector_ctx.session_id,
+        detector_ctx.known_tools,
+    );
+    while let Some(delta) = rx.recv().await {
+        first_token.observe_delta();
+        for event in detector.push(&delta) {
+            crate::agent_events::emit_event(&event);
+        }
+    }
+    for event in detector.finalize() {
+        crate::agent_events::emit_event(&event);
+    }
 }
 
 /// Configuration for LLM call retries.
@@ -942,6 +958,7 @@ pub(crate) async fn observed_llm_call(
             opts,
         );
 
+        let first_token = super::first_token::FirstTokenTimer::for_current_span();
         let start = std::time::Instant::now();
         // The streaming detector runs once per LLM call. Move the
         // context into whichever forwarder we end up spawning so the
@@ -955,7 +972,13 @@ pub(crate) async fn observed_llm_call(
                 known_tools: c.known_tools.clone(),
             });
         let llm_result = if let Some(b) = bridge {
-            let delta_tx = spawn_progress_forwarder(b, call_id.clone(), user_visible, detector_ctx);
+            let delta_tx = spawn_progress_forwarder(
+                b,
+                call_id.clone(),
+                user_visible,
+                detector_ctx,
+                first_token,
+            );
             if offthread {
                 vm_call_llm_full_streaming_offthread(opts, delta_tx).await
             } else {
@@ -963,7 +986,7 @@ pub(crate) async fn observed_llm_call(
             }
         } else if offthread {
             let delta_tx = match detector_ctx {
-                Some(ctx) => spawn_detector_only_forwarder(ctx),
+                Some(ctx) => spawn_detector_only_forwarder(ctx, first_token),
                 None => {
                     let (tx, _rx) = tokio::sync::mpsc::unbounded_channel::<String>();
                     tx

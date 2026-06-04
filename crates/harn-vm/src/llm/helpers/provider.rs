@@ -423,6 +423,7 @@ pub fn resolve_api_key(provider: &str) -> Result<String, VmError> {
     use crate::llm_config;
 
     if provider == "mock"
+        || provider == "fake"
         || crate::llm::mock::cli_llm_mock_replay_active()
         || crate::llm::mock::builtin_llm_mock_active()
     {
