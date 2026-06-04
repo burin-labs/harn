@@ -111,6 +111,14 @@ categories. OTel exporters surface them as INTERNAL spans named after the
 by LLM and tool spans. Span attributes flow through the same redaction policy
 used for receipts, OTel attributes, and OAuth scopes.
 
+OTel exports keep only low-cardinality `harn.*` attributes as top-level span
+attributes. Stable exact keys include `harn.kind`, `harn.status`,
+`harn.duration_ms`, and `harn.span_id`; runtime-owned namespaces include
+`harn.llm.*`, `harn.tool.*`, `harn.worker.*`, `harn.step.*`,
+`harn.lifecycle.*`, `harn.cost.*`, `harn.token.*`, and `harn.timing.*`.
+Other timing metadata is preserved as JSON under `harn.meta_json` so dynamic
+keys such as UUIDs or file paths do not create unbounded OTel attribute names.
+
 ## When to skip a timing span
 
 - Tight inner loops (per-iteration spans are pure overhead).

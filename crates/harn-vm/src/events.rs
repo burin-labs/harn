@@ -359,6 +359,74 @@ fn normalize_otlp_traces_endpoint(endpoint: &str) -> String {
     }
 }
 
+/// Stable OTel span-end attribute keys exported as top-level attributes.
+///
+/// Keep this list narrow: span metadata can be script-controlled, and OTel
+/// backends charge or index by attribute key. Runtime code that needs another
+/// top-level key should add an exact `harn.*` key here rather than letting
+/// arbitrary metadata become a new exported attribute name.
+#[cfg(feature = "otel")]
+const ALLOWED_SPAN_ATTR_KEYS: &[&str] = &[
+    "harn.duration_ms",
+    "harn.error",
+    "harn.error.kind",
+    "harn.kind",
+    "harn.span_id",
+    "harn.status",
+];
+
+/// Runtime-owned low-cardinality attribute namespaces.
+///
+/// These prefixes are for stable schema families, not dynamic suffixes such as
+/// run ids, file paths, or UUIDs. Metadata outside this exact-key/prefix
+/// allowlist is folded into `harn.meta_json` so OTel sees one bounded key.
+#[cfg(feature = "otel")]
+const ALLOWED_SPAN_ATTR_PREFIXES: &[&str] = &[
+    "harn.cost.",
+    "harn.lifecycle.",
+    "harn.llm.",
+    "harn.step.",
+    "harn.timing.",
+    "harn.token.",
+    "harn.tool.",
+    "harn.worker.",
+];
+
+#[cfg(feature = "otel")]
+fn is_low_cardinality_attr_key(key: &str) -> bool {
+    ALLOWED_SPAN_ATTR_KEYS.contains(&key)
+        || ALLOWED_SPAN_ATTR_PREFIXES
+            .iter()
+            .any(|prefix| key.starts_with(prefix))
+}
+
+#[cfg(feature = "otel")]
+fn otel_span_end_attributes(
+    metadata: &BTreeMap<String, serde_json::Value>,
+) -> Vec<(String, String)> {
+    let policy = crate::redact::current_policy();
+    let mut attributes = Vec::new();
+    let mut meta_json = BTreeMap::new();
+
+    for (key, value) in metadata {
+        if is_low_cardinality_attr_key(key) {
+            let raw = format!("{value}");
+            let redacted = policy.redact_string(&raw).into_owned();
+            attributes.push((key.clone(), redacted));
+        } else {
+            meta_json.insert(key.clone(), value.clone());
+        }
+    }
+
+    if !meta_json.is_empty() {
+        let raw = serde_json::to_string(&meta_json).unwrap_or_else(|_| "{}".to_string());
+        let redacted = policy.redact_string(&raw).into_owned();
+        attributes.push(("harn.meta_json".to_string(), redacted));
+    }
+
+    attributes
+}
+
 /// Idempotency guard for [`install_otel_sink_from_env`]. The first
 /// caller wins; later ones become no-ops returning `Ok(false)`. The
 /// stored provider keeps the batch processor's runtime alive — and
@@ -499,13 +567,10 @@ impl EventSink for OtelSink {
         if let Some(mut span) = self.active_spans.borrow_mut().remove(&span_id) {
             // OTel span attributes are the fourth sink covered by the
             // OA-06 token-redaction policy (transcripts, audit
-            // receipts, OTel, and system reminders). Stringify the
-            // value, then route through the active redaction policy
-            // so a leaked Bearer token never reaches the collector.
-            let policy = crate::redact::current_policy();
-            for (key, value) in metadata {
-                let raw = format!("{value}");
-                let redacted = policy.redact_string(&raw).into_owned();
+            // receipts, OTel, and system reminders). The helper also
+            // bounds attribute-key cardinality by folding unknown
+            // metadata into `harn.meta_json`.
+            for (key, redacted) in otel_span_end_attributes(metadata) {
                 span.set_attribute(opentelemetry::KeyValue::new(key.clone(), redacted));
             }
             span.end();
@@ -615,6 +680,60 @@ mod tests {
         assert_eq!(logs[0].metadata["tokens"], serde_json::json!(42));
 
         reset_event_sinks();
+    }
+
+    #[cfg(feature = "otel")]
+    #[derive(Default)]
+    struct SpanAttrCollectorSink {
+        attrs: RefCell<Vec<(String, String)>>,
+    }
+
+    #[cfg(feature = "otel")]
+    impl EventSink for SpanAttrCollectorSink {
+        fn emit_log(&self, _event: &LogEvent) {}
+
+        fn emit_span_start(&self, _event: &SpanEvent) {}
+
+        fn emit_span_end(&self, _span_id: u64, metadata: &BTreeMap<String, serde_json::Value>) {
+            self.attrs
+                .borrow_mut()
+                .extend(otel_span_end_attributes(metadata));
+        }
+    }
+
+    #[cfg(feature = "otel")]
+    #[test]
+    fn span_attr_keys_are_low_cardinality() {
+        let sink = Rc::new(SpanAttrCollectorSink::default());
+        clear_event_sinks();
+        add_event_sink(sink.clone());
+
+        let rogue_key = "request.550e8400-e29b-41d4-a716-446655440000";
+        let mut metadata = BTreeMap::new();
+        metadata.insert("harn.kind".to_string(), serde_json::json!("llm_call"));
+        metadata.insert(rogue_key.to_string(), serde_json::json!("rogue-value"));
+
+        emit_span_end(42, metadata);
+        reset_event_sinks();
+
+        let attrs = sink.attrs.borrow();
+        assert!(
+            attrs
+                .iter()
+                .any(|(key, value)| key == "harn.kind" && value.contains("llm_call")),
+            "allowlisted harn.kind should remain a top-level OTel attribute: {attrs:?}",
+        );
+        assert!(
+            !attrs.iter().any(|(key, _)| key == rogue_key),
+            "rogue metadata key must not become a top-level OTel attribute: {attrs:?}",
+        );
+        let (_, meta_json) = attrs
+            .iter()
+            .find(|(key, _)| key == "harn.meta_json")
+            .expect("rogue metadata should be folded into harn.meta_json");
+        let blob: serde_json::Value =
+            serde_json::from_str(meta_json).expect("harn.meta_json should stay JSON");
+        assert_eq!(blob[rogue_key], serde_json::json!("rogue-value"));
     }
 
     #[cfg(feature = "otel")]
