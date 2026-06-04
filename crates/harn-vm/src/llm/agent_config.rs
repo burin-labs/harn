@@ -542,6 +542,7 @@ mod tests {
             output_tokens: 1,
             cache_read_tokens: 0,
             cache_write_tokens: 0,
+            cache_supported: true,
             model: "claude-sonnet-4-6".to_string(),
             provider: "anthropic".to_string(),
             thinking: None,

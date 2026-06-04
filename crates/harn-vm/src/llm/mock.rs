@@ -384,6 +384,7 @@ fn build_mock_result(mock: &LlmMock, last_msg_len: usize) -> LlmResult {
         output_tokens: mock.output_tokens.unwrap_or(30),
         cache_read_tokens: mock.cache_read_tokens.unwrap_or(0),
         cache_write_tokens: mock.cache_write_tokens.unwrap_or(0),
+        cache_supported: true,
         model: mock.model.clone(),
         provider: mock.provider.clone().unwrap_or_else(|| "mock".to_string()),
         thinking: mock.thinking.clone(),
@@ -825,6 +826,7 @@ pub(crate) fn load_fixture(hash: &str) -> Option<LlmResult> {
             .as_i64()
             .or_else(|| json["cache_creation_input_tokens"].as_i64())
             .unwrap_or(0),
+        cache_supported: json["cache_supported"].as_bool().unwrap_or(true),
         model: json["model"].as_str().unwrap_or("").to_string(),
         provider: json["provider"].as_str().unwrap_or("mock").to_string(),
         thinking: json["thinking"].as_str().map(|s| s.to_string()),
@@ -959,6 +961,7 @@ pub(crate) fn mock_llm_response(
                 output_tokens: 20,
                 cache_read_tokens: 0,
                 cache_write_tokens: 0,
+                cache_supported: true,
                 model: request.model.clone(),
                 provider: "mock".to_string(),
                 thinking: None,
@@ -1010,6 +1013,7 @@ pub(crate) fn mock_llm_response(
         output_tokens: 30,
         cache_read_tokens: 0,
         cache_write_tokens: 0,
+        cache_supported: true,
         model: request.model.clone(),
         provider: "mock".to_string(),
         thinking: None,

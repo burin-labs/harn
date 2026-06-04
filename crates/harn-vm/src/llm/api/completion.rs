@@ -148,6 +148,7 @@ async fn vm_call_completion_openai_style(
         output_tokens: json["usage"]["completion_tokens"].as_i64().unwrap_or(0),
         cache_read_tokens: extract_cache_read_tokens(&json["usage"]),
         cache_write_tokens: extract_cache_write_tokens(&json["usage"]),
+        cache_supported: true,
         model: opts.model.clone(),
         provider: opts.provider.clone(),
         thinking: None,
@@ -245,8 +246,12 @@ async fn vm_call_completion_ollama(
         tool_calls: Vec::new(),
         input_tokens: json["prompt_eval_count"].as_i64().unwrap_or(0),
         output_tokens: json["eval_count"].as_i64().unwrap_or(0),
+        // Native Ollama generate responses carry no cache field; 0 is
+        // "unknown", not a real miss. `cache_supported: false` keeps the cost
+        // layer from scoring a local model as a 100% cache miss.
         cache_read_tokens: 0,
         cache_write_tokens: 0,
+        cache_supported: false,
         model: opts.model.clone(),
         provider: opts.provider.clone(),
         thinking: None,

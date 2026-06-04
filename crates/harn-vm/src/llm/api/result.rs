@@ -6,6 +6,19 @@ use std::collections::BTreeMap;
 use super::telemetry::ProviderTelemetry;
 use crate::value::VmValue;
 
+fn default_true() -> bool {
+    true
+}
+
+/// `skip_serializing_if` for `cache_supported`: omit the field in the common
+/// (supported) case so recordings/replay tapes/transcripts only carry it for the
+/// rare unsupported (native-Ollama) result. Keeps serialized output byte-stable
+/// with pre-existing goldens; `default_true` restores `true` on deserialize.
+#[allow(clippy::trivially_copy_pass_by_ref)]
+fn is_true(value: &bool) -> bool {
+    *value
+}
+
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize, PartialEq)]
 pub(crate) struct LlmResult {
     pub text: String,
@@ -22,6 +35,16 @@ pub(crate) struct LlmResult {
     /// (Anthropic `usage.cache_creation_input_tokens`). Helps distinguish
     /// "warm-up" calls from cache hits.
     pub cache_write_tokens: i64,
+    /// Whether the provider reports prompt-cache accounting at all. Native
+    /// Ollama (`/api/chat`, `/api/generate`, the completion endpoint) sends no
+    /// cache field in its done frame — and the `/v1` shim on these hosts also
+    /// omits `prompt_tokens_details` — so `cache_read_tokens: 0` there means
+    /// "unknown", NOT a real 100% cache miss. When `false`, cache hit-ratio is
+    /// surfaced as `cache_visibility: "unsupported"` with a null ratio rather
+    /// than scoring a local model as a 0.0-ratio total miss. Defaults to `true`
+    /// for every provider that does report cache counts.
+    #[serde(default = "default_true", skip_serializing_if = "is_true")]
+    pub cache_supported: bool,
     pub model: String,
     pub provider: String,
     pub thinking: Option<String>,
@@ -76,10 +99,22 @@ fn build_usage_dict(result: &LlmResult) -> BTreeMap<String, VmValue> {
         "cache_creation_input_tokens".to_string(),
         VmValue::Int(result.cache_write_tokens),
     );
-    usage.insert(
-        "cache_hit_ratio".to_string(),
-        VmValue::Float(cache_hit_ratio),
-    );
+    if result.cache_supported {
+        usage.insert(
+            "cache_hit_ratio".to_string(),
+            VmValue::Float(cache_hit_ratio),
+        );
+        usage.insert("cache_visibility".to_string(), VmValue::Nil);
+    } else {
+        // Native local runtimes report no cache field; a 0.0 ratio here would
+        // mislabel a local model as a 100% cache miss. Surface the unknown
+        // explicitly instead of fabricating a number.
+        usage.insert("cache_hit_ratio".to_string(), VmValue::Nil);
+        usage.insert(
+            "cache_visibility".to_string(),
+            VmValue::String(std::sync::Arc::from("unsupported")),
+        );
+    }
     usage.insert(
         "cache_savings_usd".to_string(),
         VmValue::Float(cache_savings_usd),
@@ -134,6 +169,9 @@ pub(crate) fn vm_build_llm_result(
     let usage = build_usage_dict(result);
     if let Some(value) = usage.get("cache_hit_ratio") {
         dict.insert("cache_hit_ratio".to_string(), value.clone());
+    }
+    if let Some(value) = usage.get("cache_visibility") {
+        dict.insert("cache_visibility".to_string(), value.clone());
     }
     if let Some(value) = usage.get("cache_savings_usd") {
         dict.insert("cache_savings_usd".to_string(), value.clone());
@@ -345,6 +383,7 @@ pub(super) fn mock_completion_response(prefix: &str, suffix: Option<&str>) -> Ll
         output_tokens: 16,
         cache_read_tokens: 0,
         cache_write_tokens: 0,
+        cache_supported: true,
         model: "mock".to_string(),
         provider: "mock".to_string(),
         thinking: None,
@@ -357,5 +396,46 @@ pub(super) fn mock_completion_response(prefix: &str, suffix: Option<&str>) -> Ll
         })],
         logprobs: Vec::new(),
         telemetry: ProviderTelemetry::default(),
+    }
+}
+
+#[cfg(test)]
+mod cache_supported_serde_tests {
+    use super::mock_completion_response;
+    use super::LlmResult;
+
+    #[test]
+    fn cache_supported_true_is_omitted_from_serialization() {
+        // The common (cache-supported) case must serialize byte-identically to
+        // pre-`cache_supported` recordings / replay tapes, so the field is
+        // omitted when true and restored to true on deserialize via
+        // `default_true`. This keeps the testbench replay-fidelity golden stable.
+        let result = mock_completion_response("hi", None);
+        assert!(result.cache_supported);
+        let json = serde_json::to_value(&result).expect("serialize");
+        assert!(
+            json.get("cache_supported").is_none(),
+            "cache_supported=true must be omitted from serialized output, got: {json}"
+        );
+        let back: LlmResult = serde_json::from_value(json).expect("deserialize");
+        assert!(
+            back.cache_supported,
+            "missing field must default back to true"
+        );
+    }
+
+    #[test]
+    fn cache_supported_false_is_serialized_and_round_trips() {
+        let mut result = mock_completion_response("hi", None);
+        result.cache_supported = false;
+        let json = serde_json::to_value(&result).expect("serialize");
+        assert_eq!(
+            json.get("cache_supported")
+                .and_then(serde_json::Value::as_bool),
+            Some(false),
+            "the meaningful unsupported case must serialize the field"
+        );
+        let back: LlmResult = serde_json::from_value(json).expect("deserialize");
+        assert!(!back.cache_supported);
     }
 }
