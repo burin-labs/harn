@@ -1,0 +1,301 @@
+// Extract every ```harn fenced code block from spec/HARN_SPEC.md and
+// verify each one compiles via `harn check`. A behavior-identical port
+// of scripts/verify_language_spec.py.
+//
+// Usage:
+//   harn run scripts/verify_language_spec.harn
+//
+// The pure fence-extraction / normalization logic lives in `pub fn`s so
+// it is testable without touching the filesystem; only `main` reads the
+// spec, writes temp files, and shells out to the harn binary.
+let SPEC_PATH = "spec/HARN_SPEC.md"
+
+/** True if `c` is an ASCII word character ([A-Za-z0-9_]). */
+pub fn is_word_char(c: string) -> bool {
+  if c == "_" {
+    return true
+  }
+  return (c >= "0" && c <= "9")
+    || (c >= "a" && c <= "z")
+    || (c >= "A" && c <= "Z")
+}
+
+/** True if `c` is a word character or a literal dot. */
+fn is_word_or_dot(c: string) -> bool {
+  return c == "." || is_word_char(c)
+}
+
+/**
+ * Slugify a heading the same way the Python script does: lowercase,
+ * collapse any run of non-[a-z0-9] characters to a single dash, then
+ * strip leading/trailing dashes. Empty results become "section".
+ */
+pub fn slugify(value: string) -> string {
+  let lowered = value.trim().to_lower()
+  let dashed = regex_replace(r"[^a-z0-9]+", "-", lowered)
+  var start = 0
+  var end = dashed.len()
+  while start < end && dashed.char_at(start) == "-" {
+    start = start + 1
+  }
+  while end > start && dashed.char_at(end - 1) == "-" {
+    end = end - 1
+  }
+  let stripped = dashed.substring(start, end)
+  if stripped == "" {
+    return "section"
+  }
+  return stripped
+}
+
+/**
+ * Strip a leading run of `#` characters and following whitespace from a
+ * markdown heading line, mirroring Python's `re.sub(r"^#+\s*", "", line)`.
+ */
+pub fn heading_text(line: string) -> string {
+  var i = 0
+  let n = line.len()
+  while i < n && line.char_at(i) == "#" {
+    i = i + 1
+  }
+  while i < n {
+    let c = line.char_at(i)
+    if c == " " || c == "\t" || c == "\r" {
+      i = i + 1
+    } else {
+      break
+    }
+  }
+  return line.substring(i, n).trim()
+}
+
+/**
+ * Replace standalone `...` omission markers with `nil`, but leave spread
+ * syntax like `...rest` and dot runs like `....` untouched. Equivalent to
+ * Python's `re.sub(r"(?<![\w.])\.\.\.(?![\w.])", "nil", snippet)`.
+ */
+pub fn normalize_snippet(snippet: string) -> string {
+  var out = ""
+  var i = 0
+  let n = snippet.len()
+  while i < n {
+    if i + 3 <= n && snippet.substring(i, i + 3) == "..." {
+      let before_ok = if i == 0 {
+        true
+      } else {
+        !is_word_or_dot(snippet.char_at(i - 1))
+      }
+      let after_ok = if i + 3 >= n {
+        true
+      } else {
+        !is_word_or_dot(snippet.char_at(i + 3))
+      }
+      if before_ok && after_ok {
+        out = out + "nil"
+        i = i + 3
+        continue
+      }
+    }
+    out = out + snippet.char_at(i)
+    i = i + 1
+  }
+  return out
+}
+
+/**
+ * True if a snippet is intentionally non-compiling (it documents an
+ * error). Matches Python's case-insensitive check for `// error:` or
+ * `# error:`.
+ */
+pub fn should_skip_snippet(snippet: string) -> bool {
+  let lowered = snippet.to_lower()
+  return lowered.contains("// error:") || lowered.contains("# error:")
+}
+
+/**
+ * A CommonMark fence info-string line is exactly ``` followed by any run
+ * of non-backtick characters and nothing else. Returns the trimmed,
+ * lowercased info string when `line` is such a boundary, otherwise nil.
+ */
+pub fn fence_info(line: string) -> string? {
+  if !line.starts_with("```") {
+    return nil
+  }
+  let rest = line.substring(3, line.len())
+  if rest.contains("`") {
+    return nil
+  }
+  return rest.trim().to_lower()
+}
+
+/**
+ * Trim a trailing run of blank/whitespace-only handling is not needed;
+ * we mirror Python's `str.strip()` for the joined snippet body. Strips
+ * leading and trailing ASCII whitespace.
+ */
+pub fn strip_ws(s: string) -> string {
+  return s.trim()
+}
+
+/**
+ * Extract every bare ```harn fenced block from `markdown`. Returns a list
+ * of {heading, line, snippet} records where `line` is the 1-based source
+ * line of the first content line of the fence and `snippet` is the
+ * stripped block body with a trailing newline appended. Mirrors
+ * `extract_harn_fences` in the Python script.
+ */
+pub fn extract_harn_fences(markdown: string) -> list {
+  var fences = []
+  var current_heading = "spec"
+  var in_fence = false
+  var fence_lang = ""
+  var fence_start = 0
+  var fence_lines = []
+  let lines = markdown.split("\n")
+  var line_no = 0
+  for line in lines {
+    line_no = line_no + 1
+    if !in_fence && line.starts_with("#") {
+      let h = heading_text(line)
+      if h != "" {
+        current_heading = h
+      }
+      continue
+    }
+    let info = fence_info(line)
+    if info != nil {
+      if !in_fence {
+        in_fence = true
+        fence_lang = info
+        fence_start = line_no + 1
+        fence_lines = []
+      } else {
+        if fence_lang == "harn" {
+          let snippet = strip_ws(fence_lines.join("\n"))
+          if snippet != "" {
+            fences = fences
+              + [{heading: current_heading, line: fence_start, snippet: snippet + "\n"}]
+          }
+        }
+        in_fence = false
+        fence_lang = ""
+        fence_lines = []
+      }
+      continue
+    }
+    if in_fence {
+      fence_lines = fence_lines + [line]
+    }
+  }
+  return fences
+}
+
+/**
+ * Build the per-snippet temp filename stem (without directory), matching
+ * Python's `f"{idx:03d}_{slug}_L{line_no}.harn"`.
+ */
+pub fn snippet_filename(idx: int, heading: string, line_no: int) -> string {
+  return pad3(idx) + "_" + slugify(heading) + "_L" + "${line_no}" + ".harn"
+}
+
+/** Zero-pad a non-negative int to at least 3 digits. */
+pub fn pad3(n: int) -> string {
+  let s = "${n}"
+  if s.len() >= 3 {
+    return s
+  }
+  if s.len() == 2 {
+    return "0" + s
+  }
+  return "00" + s
+}
+
+/**
+ * Resolve the argv prefix (command + leading args, ending in `check`)
+ * used to type-check each extracted fence. Mirrors the Python
+ * `harn_check_command`: honor HARN_CHECK_BIN, else ask `cargo metadata`
+ * for the workspace `target_directory` (so a redirected `CARGO_TARGET_DIR`
+ * is respected) and use its `debug/harn`, else fall back to
+ * `cargo run --bin harn` which builds on demand.
+ */
+fn harn_check_argv() -> list<string> {
+  let bin_override = harness.env.get("HARN_CHECK_BIN")
+  if bin_override != nil && bin_override != "" {
+    return [bin_override, "check"]
+  }
+  let meta = harness.process
+    .spawn_captured({cmd: "cargo", args: ["metadata", "--format-version=1", "--no-deps"]})
+  if meta.success {
+    let parsed = try {
+      json_parse(meta.stdout)
+    } catch (err) {
+      nil
+    }
+    let target_dir = parsed?.target_directory
+    if target_dir != nil && target_dir != "" {
+      let bin = target_dir + "/debug/harn"
+      if harness.fs.exists(bin) {
+        return [bin, "check"]
+      }
+    }
+  }
+  return ["cargo", "run", "--quiet", "--bin", "harn", "--", "check"]
+}
+
+pipeline main(task) {
+  if !harness.fs.exists(SPEC_PATH) {
+    __io_eprintln("error: missing ${SPEC_PATH}")
+    return 1
+  }
+  let fences = extract_harn_fences(harness.fs.read_text(SPEC_PATH))
+  if fences.count == 0 {
+    __io_eprintln("error: no ```harn fences found in ${SPEC_PATH}")
+    return 1
+  }
+  /* The runtime sandbox only permits writes inside the workspace root,
+   * so the scratch directory lives there (and is removed afterward)
+   * rather than under the system temp dir the Python version used. */
+  let mk = harness.process
+    .spawn_captured({cmd: "mktemp", args: ["-d", "harn-spec-verify-XXXXXX"]})
+  if !mk.success {
+    __io_eprintln("error: could not create temp directory")
+    return 1
+  }
+  let tmpbase = mk.stdout.trim()
+  var manifest_lines = []
+  var idx = 0
+  for fence in fences {
+    idx = idx + 1
+    if should_skip_snippet(fence.snippet) {
+      continue
+    }
+    let name = snippet_filename(idx, fence.heading, fence.line)
+    let path = tmpbase + "/" + name
+    harness.fs.write_text(path, normalize_snippet(fence.snippet))
+    manifest_lines = manifest_lines
+      + ["${name}: ${fence.heading} (spec line ${fence.line})"]
+  }
+  let argv_prefix = harn_check_argv()
+  let bin = argv_prefix[0]
+  let check_args = argv_prefix.slice(1, argv_prefix.count) + [tmpbase]
+  let result = harness.process
+    .spawn_captured({cmd: bin, args: check_args})
+  harness.process.spawn_captured({cmd: "rm", args: ["-rf", tmpbase]})
+  if result.exit_code != 0 {
+    __io_eprintln("language spec verification failed")
+    __io_eprintln("")
+    __io_eprintln("Extracted examples:")
+    __io_eprintln(manifest_lines.join("\n"))
+    if result.stdout != "" {
+      __io_eprintln("")
+      __io_eprintln(result.stdout)
+    }
+    if result.stderr != "" {
+      __io_eprintln("")
+      __io_eprintln(result.stderr)
+    }
+    return result.exit_code
+  }
+  __io_println("verified ${fences.count} Harn code fences from spec/HARN_SPEC.md")
+  return 0
+}

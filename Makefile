@@ -533,7 +533,7 @@ check-docs-cli-flags:
 # file paths.
 check-docs-links:
 	@echo "=== Checking docs internal links ==="
-	@python3 scripts/check_docs_links.py
+	@cargo run --quiet --bin harn -- run scripts/check_docs_links.harn
 
 # CI guard: every checked-in Harn snippet used by website/src parses under
 # `harn check`.
@@ -553,7 +553,7 @@ lint-test-patterns:
 	@./scripts/lint_test_patterns.sh
 
 lint-diagnostic-codes:
-	@python3 scripts/check_diagnostic_codes.py
+	@cargo run --quiet --bin harn -- run scripts/check_diagnostic_codes.harn
 
 check-receipt-structs:
 	@cargo run --quiet --bin harn -- run scripts/check_receipt_struct_duplication.harn
