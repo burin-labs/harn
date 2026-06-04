@@ -35,7 +35,7 @@ included `after` fragments, joined by a blank line.
 The agent's per-turn primary system text is itself a composite — the base system
 prompt, MCP advisory context, active skills, the skill catalog, the progress-tool
 nudge, and the loop/tool contracts. Rather than glue these into one opaque
-`primary` string, [`agent_loop`](./agents.md) hands the assembler each part as its
+`primary` string, [`agent_loop`](./llm-and-agents.md) hands the assembler each part as its
 own fragment through the internal `_system_fragments` channel, so every part is
 traced on its own (`primary:system`, `primary:active_skills`,
 `primary:loop_contract`, …) and can be gated with `requires_tools` independently.
@@ -86,7 +86,7 @@ project guidance an opaque always-on paragraph.
 ## Inspecting the assembled prompt
 
 `prompt_explain(options)` assembles the system prompt from the same options you
-would hand [`agent_loop`](./agents.md) and returns the final string plus a
+would hand [`agent_loop`](./llm-and-agents.md) and returns the final string plus a
 provenance record for every fragment — included or excluded, with the reason and
 byte count:
 
