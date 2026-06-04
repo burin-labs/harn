@@ -1,5 +1,6 @@
 import type { ReactNode } from "react"
 import { Link } from "react-router"
+import { ExampleGallery } from "../components/ExampleGallery"
 import { HarnMockup } from "../components/HarnMockup"
 
 const GITHUB = "https://github.com/burin-labs/harn"
@@ -57,6 +58,22 @@ export function LandingPage() {
           <div className="mt-16 animate-fade-up-delay-4">
             <HarnMockup />
           </div>
+        </div>
+      </section>
+
+      {/* Examples */}
+      <section className="border-b border-border bg-surface-secondary">
+        <div className="mx-auto max-w-6xl px-4 py-20 sm:px-6 lg:px-8">
+          <div className="mb-10 max-w-2xl">
+            <h2 className="text-3xl font-bold tracking-tight text-foreground">
+              Runnable examples with real receipts
+            </h2>
+            <p className="mt-3 text-foreground-secondary">
+              The same checked scenario files ship in the CLI demo bundle and run locally with
+              deterministic fixtures.
+            </p>
+          </div>
+          <ExampleGallery />
         </div>
       </section>
 
