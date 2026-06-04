@@ -55,6 +55,7 @@ fn __chat_agent_option_keys() {
     "verify_completion_judge",
     "done_judge",
     "done_sentinel",
+    "final_wrapup",
     "max_verify_attempts",
     "llm_retries",
     "llm_backoff_ms",

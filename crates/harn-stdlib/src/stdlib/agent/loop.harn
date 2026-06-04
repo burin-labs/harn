@@ -64,7 +64,7 @@ import {
 import { omit } from "std/json"
 import { llm_call_options } from "std/llm/options"
 
-/*
+/**
  * Pipeline entrypoints execute agent loops without a lexical `Harness` binding,
  * so loop budget timing uses the ambient builtins that share the VM clock backend.
  */
@@ -1637,6 +1637,108 @@ fn __agent_loop_pop_structural_veto_turn(session_id) {
   return agent_session_pop_last_assistant(session_id)
 }
 
+/**
+ * Build the one-shot directive injected as a final system fragment when the
+ * loop terminates mid-tool-use. It tells the model the turn/budget is spent,
+ * that no more tool calls are possible, and how to wrap up — honoring the
+ * configured `done_sentinel` when present.
+ */
+fn __agent_loop_wrapup_directive(opts) {
+  let sentinel = opts?.done_sentinel
+  let base = "You have reached your turn/budget limit and cannot call any more tools. "
+    + "Provide your final answer now: briefly summarize what you accomplished and what you "
+    + "verified. Do not emit any tool call."
+  if sentinel == nil || to_string(sentinel) == "" {
+    return base
+      + " End with a concise `<user_response>...</user_response>` containing the final answer."
+  }
+  let tag = to_string(sentinel)
+  return base
+    + " Emit a concise `<user_response>...</user_response>` with the final answer, then end with "
+    + "`<done>"
+    + tag
+    + "</done>` exactly, as instructed by the response protocol."
+}
+
+/**
+ * True when the loop's terminal status is an exhaustion/cap (not a clean
+ * `done`, a suspension, a scope alert, or a hard provider/terminal error).
+ * These are the states where the model never produced a clean terminal
+ * response and a wrap-up turn is warranted.
+ */
+fn __agent_loop_wrapup_eligible_status(final_status) {
+  return final_status == "budget_exhausted"
+    || final_status == "verify_capped"
+    || final_status == "verify_exhausted"
+    || final_status == "stuck"
+}
+
+/**
+ * Forced terminal wrap-up turn. When the loop exits on exhaustion/cap while the
+ * last turn still called tools, the surfaced final text would otherwise be a
+ * dangling tool-call turn with no clean `<user_response>`/sentinel. This runs
+ * exactly one extra LLM call with tools DISABLED to elicit the model's final
+ * user-facing answer + completion sentinel, records it as the final assistant
+ * turn so `agent_session_finalize` surfaces it, and never mutates
+ * `final_status`/`stop_reason`. Defensive: any error falls back to existing
+ * behavior. Returns true when a wrap-up response was recorded.
+ */
+fn __agent_loop_final_wrapup(message, session, opts, final_status, stop_reason, iteration) {
+  let directive = __agent_loop_wrapup_directive(opts)
+  // Disable tools for this turn so the model cannot dispatch: empty tool
+  // surface + a system directive forbidding tool calls. Carry the tool format
+  // forward so the response protocol still matches what the model was trained
+  // on this run.
+  let wrapup_opts = opts
+    + {
+    tools: nil,
+    active_skills: nil,
+    skill_catalog_prompt: "",
+    _progress_tool_system_prompt_nudge: "",
+    transcript_projection: opts?.transcript_projection,
+  }
+  let base_fragments = agent_build_turn_system_fragments(session, wrapup_opts, iteration)
+  var turn_system_parts = []
+  for fragment in base_fragments {
+    turn_system_parts = turn_system_parts.push(fragment.body)
+  }
+  turn_system_parts = turn_system_parts.push(directive)
+  let turn_system = join(turn_system_parts, "\n\n")
+  let turn_messages = agent_build_turn_messages(session, wrapup_opts, iteration)
+  let llm_overrides = wrapup_opts?.llm_options ?? {}
+  let llm_opts = wrapup_opts
+    + llm_overrides
+    + {
+    messages: turn_messages,
+    session_id: session.session_id,
+    tool_format: wrapup_opts?.tool_format,
+    tools: nil,
+    _iteration: iteration + 1,
+    _final_wrapup: true,
+  }
+  let call = __invoke_llm(message, turn_system, llm_opts)
+  if !call.ok {
+    return false
+  }
+  let llm_result = call.value
+  let raw_text = llm_result?.text ?? ""
+  let parsed = agent_parse_tool_calls(raw_text, nil)
+  let visible_text = __visible_text(parsed, raw_text)
+  if to_string(visible_text) == "" {
+    return false
+  }
+  let normalized = llm_result + {text: visible_text, visible_text: visible_text}
+  agent_session_record_assistant(session.session_id, normalized)
+  let _ = try {
+    agent_emit_event(
+      session.session_id,
+      "final_wrapup",
+      {final_status: final_status, stop_reason: stop_reason ?? "", iteration: iteration},
+    )
+  }
+  return true
+}
+
 @complexity(allow)
 fn __agent_loop_run(message, session, initial_opts) {
   var opts = initial_opts
@@ -2423,6 +2525,16 @@ fn __agent_loop_run(message, session, initial_opts) {
       __agent_loop_emit_budget_exhausted(session.session_id, terminal_exhaustion)
       budget_exhausted_emitted = true
       budget_decisions = __agent_loop_record_budget_stop(budget_decisions, iteration, current_max, terminal_exhaustion.kind)
+    }
+    let wrapup_enabled = opts?.final_wrapup ?? true
+    if wrapup_enabled
+      && suspend_result == nil
+      && terminal_error == nil
+      && last_tool_count > 0
+      && __agent_loop_wrapup_eligible_status(final_status) {
+      let _ = try {
+        __agent_loop_final_wrapup(message, session, opts, final_status, stop_reason, iteration)
+      }
     }
     if opts?.daemon && final_status != "" {
       agent_daemon_snapshot(session, opts, final_status, iteration)
