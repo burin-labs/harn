@@ -69,6 +69,20 @@ pub(crate) async fn vm_stream_llm(
     });
     let idle_dur = std::time::Duration::from_secs(idle_timeout_secs);
 
+    // Prefill (time-to-first-token) streams no SSE bytes while the server
+    // processes the prompt, so a slow model on a large context would trip the
+    // short inter-token idle timeout *mid-prefill* (observed: a local 35B model
+    // idle-timing-out before its first token on a long context). Give the first
+    // token a more generous budget; subsequent inter-token gaps use the normal
+    // idle timeout. Still bounded by the overall deadline below. Configurable via
+    // HARN_LLM_FIRST_TOKEN_TIMEOUT; defaults to 4x the idle timeout, min 120s.
+    let first_token_timeout_secs = std::env::var("HARN_LLM_FIRST_TOKEN_TIMEOUT")
+        .ok()
+        .and_then(|v| v.parse::<u64>().ok())
+        .unwrap_or_else(|| idle_timeout_secs.saturating_mul(4).max(120));
+    let first_token_dur = std::time::Duration::from_secs(first_token_timeout_secs);
+    let mut got_first_token = false;
+
     // Bound total stream duration: a provider that dribbles bytes fast
     // enough to keep resetting the idle timer would otherwise hold the
     // stream open forever.
@@ -84,20 +98,33 @@ pub(crate) async fn vm_stream_llm(
             )))));
         }
         let remaining_overall = overall_dur.saturating_sub(stream_start.elapsed());
-        let wait = idle_dur.min(remaining_overall);
+        // Before the first token, allow the longer prefill budget; after, the
+        // normal inter-token idle timeout.
+        let active_idle = if got_first_token {
+            idle_dur
+        } else {
+            first_token_dur
+        };
+        let wait = active_idle.min(remaining_overall);
         let event = match tokio::time::timeout(wait, es.next()).await {
             Ok(Some(event)) => event,
             Ok(None) => break,
             Err(_) => {
                 es.close();
-                // Report as idle-timeout; overall-deadline is caught at loop top.
+                // Overall-deadline is caught at loop top; this is a gap timeout.
+                let (secs, phase) = if got_first_token {
+                    (idle_timeout_secs, "inter-token idle")
+                } else {
+                    (first_token_timeout_secs, "time-to-first-token (prefill)")
+                };
                 return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
-                    format!("stream idle timeout: no data received for {idle_timeout_secs}s"),
+                    format!("stream {phase} timeout: no data received for {secs}s"),
                 ))));
             }
         };
         match event {
             Ok(Event::Message(msg)) => {
+                got_first_token = true;
                 if msg.data == "[DONE]" {
                     break;
                 }
