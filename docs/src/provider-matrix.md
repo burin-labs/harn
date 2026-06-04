@@ -47,6 +47,8 @@ Regenerate with `make gen-provider-matrix` and verify with `make check-provider-
 | `fireworks` | `*qwen3.6*` | `any` | `enabled` | no | no | no | yes | no | `native` | `markdown` | `delimited` | no | `system` | `json` | `inline` | `native` | yes | yes | `unknown` | yes | no |
 | `fireworks` | `*qwen3p6*` | `any` | `enabled` | no | no | no | yes | no | `native` | `markdown` | `delimited` | no | `system` | `json` | `inline` | `native` | yes | yes | `unknown` | yes | no |
 | `fireworks` | `*qwen*` | `any` | `enabled` | no | no | no | yes | no | `native` | `markdown` | `delimited` | no | `system` | `json` | `inline` | `native` | yes | yes | `unknown` | yes | no |
+| `gemini` | `gemma-4*` | `any` | `enabled` | yes | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `inline` | `native` | yes | yes | `unknown` | yes | no |
+| `gemini` | `models/gemma-4*` | `any` | `enabled` | yes | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `inline` | `native` | yes | yes | `unknown` | yes | no |
 | `gemini` | `gemini-2.5*` | `any` | `enabled,adaptive,effort` | yes | yes | yes | yes | yes | `native` | `xml,markdown` | `native_json` | no | `system` | `json` | `reasoning_summary` | `native` | yes | yes | `unknown` | yes | no |
 | `gemini` | `models/gemini-2.5*` | `any` | `enabled,adaptive,effort` | yes | yes | yes | yes | yes | `native` | `xml,markdown` | `native_json` | no | `system` | `json` | `reasoning_summary` | `native` | yes | yes | `unknown` | yes | no |
 | `gemini` | `gemini-*` | `any` | no | yes | yes | yes | yes | yes | `native` | `xml,markdown` | `native_json` | no | `system` | `json` | `none` | `native` | yes | yes | `unknown` | yes | no |
@@ -71,6 +73,7 @@ Regenerate with `make gen-provider-matrix` and verify with `make check-provider-
 | `ollama` | `bakllava*` | `any` | no | yes | no | no | yes | no | no | `markdown` | `native_json` | no | `system` | `json` | `reasoning_summary` | `text` | no | yes | `text_only` | yes | no |
 | `ollama` | `llama3.2-vision*` | `any` | no | yes | no | no | yes | no | no | `markdown` | `native_json` | no | `system` | `json` | `reasoning_summary` | `text` | no | yes | `text_only` | yes | no |
 | `ollama` | `gemma3*` | `any` | no | yes | no | no | yes | no | no | `markdown` | `native_json` | no | `system` | `json` | `reasoning_summary` | `text` | no | yes | `text_only` | yes | no |
+| `ollama` | `gemma4:12b*` | `any` | no | no | no | no | yes | no | no | `markdown` | `delimited` | no | `system` | `json` | `none` | `text` | no | yes | `text_only` | yes | no |
 | `ollama` | `gemma4*` | `any` | no | yes | no | no | yes | no | no | `markdown` | `delimited` | no | `system` | `json` | `none` | `text` | no | yes | `text_only` | yes | no |
 | `ollama` | `qwen3.6*` | `any` | `enabled` | no | no | no | yes | no | `format_kw` | `markdown` | `delimited` | no | `system` | `json` | `inline` | `text` | no | yes | `text_only` | yes | no |
 | `ollama` | `qwen3*` | `any` | `enabled` | no | no | no | yes | no | `format_kw` | `markdown` | `delimited` | no | `system` | `json` | `inline` | `native` | yes | no | `native_only` | yes | no |
@@ -106,7 +109,7 @@ Regenerate with `make gen-provider-matrix` and verify with `make check-provider-
 | `openrouter` | `mistralai/devstral*` | `any` | no | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `none` | `native` | yes | yes | `unknown` | yes | no |
 | `openrouter` | `moonshotai/kimi-k2*` | `any` | `enabled` | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `inline` | `native` | yes | yes | `unknown` | yes | no |
 | `openrouter` | `google/gemini-2.5*` | `any` | `enabled,effort` | yes | yes | yes | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `reasoning_summary` | `native` | yes | yes | `unknown` | yes | yes |
-| `openrouter` | `google/gemma-4*` | `any` | no | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `none` | `native` | yes | yes | `unknown` | yes | no |
+| `openrouter` | `google/gemma-4*` | `any` | no | yes | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `none` | `native` | yes | yes | `unknown` | yes | no |
 | `openrouter` | `meta-llama/llama-4*` | `any` | no | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `none` | `native` | yes | yes | `unknown` | yes | no |
 | `openrouter` | `meta-llama/llama-3*` | `any` | no | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `none` | `native` | yes | yes | `unknown` | yes | no |
 | `openrouter` | `minimax/minimax-m2.7*` | `any` | no | no | no | no | yes | no | `delimited` | `plain` | `none` | no | `system` | `json` | `none` | `native` | yes | yes | `unknown` | yes | no |
@@ -121,7 +124,7 @@ Regenerate with `make gen-provider-matrix` and verify with `make check-provider-
 | `together` | `deepseek-ai/deepseek-v4*` | `any` | `enabled,effort` | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `reasoning_summary` | `native` | yes | yes | `unknown` | yes | yes |
 | `together` | `moonshotai/kimi-k2*` | `any` | `enabled` | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `inline` | `native` | yes | yes | `unknown` | yes | no |
 | `together` | `zai-org/glm-5*` | `any` | `enabled` | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `inline` | `native` | yes | yes | `unknown` | yes | no |
-| `together` | `google/gemma-4*` | `any` | `enabled` | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `inline` | `native` | yes | yes | `unknown` | yes | no |
+| `together` | `google/gemma-4*` | `any` | `enabled` | yes | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `inline` | `native` | yes | yes | `unknown` | yes | no |
 | `together` | `moonshotai/*` | `any` | no | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `none` | `native` | yes | yes | `unknown` | yes | no |
 | `vertex` | `gemini-*` | `any` | no | no | no | no | yes | no | no | `markdown` | `native_json` | no | `system` | `json` | `none` | `native` | yes | yes | `unknown` | yes | no |
 | `zai` | `glm-5.1*` | `any` | `enabled` | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `inline` | `native` | yes | yes | `unknown` | yes | yes |
@@ -155,9 +158,12 @@ This section starts from the checked-in provider catalog. Recommended format fol
 | `deepseek` | `deepseek-v4-pro` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `gemini` | `gemini-2.5-flash` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `gemini` | `gemini-2.5-pro` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
+| `gemini` | `models/gemma-4-26b-a4b-it` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
+| `gemini` | `models/gemma-4-31b-it` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `llamacpp` | `qwen3.6-35b-a3b` | `text` | `text_only` | - | - | - | - | - | `data not yet collected` |
 | `llamacpp` | `qwen3.6-35b-a3b-ud-q4-k-xl` | `text` | `text_only` | - | - | - | - | - | `data not yet collected` |
 | `llamacpp` | `qwen3.6-35b-a3b-ud-q5-k-xl` | `text` | `text_only` | - | - | - | - | - | `data not yet collected` |
+| `local` | `gemma-4-12b-it` | `text` | `text_only` | - | - | - | - | - | `data not yet collected` |
 | `local` | `gemma-4-26b-a4b-it` | `text` | `text_only` | - | - | - | - | - | `data not yet collected` |
 | `local` | `gemma-4-31b-it` | `text` | `text_only` | - | - | - | - | - | `data not yet collected` |
 | `local` | `gemma-4-e2b-it` | `text` | `text_only` | - | - | - | - | - | `data not yet collected` |
@@ -170,6 +176,9 @@ This section starts from the checked-in provider catalog. Recommended format fol
 | `minimax` | `MiniMax-Text-01` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `mlx` | `unsloth/Qwen3.6-27B-UD-MLX-4bit` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `ollama` | `devstral-small-2:24b` | `text` | `text_only` | - | - | - | - | - | `data not yet collected` |
+| `ollama` | `gemma4:12b-mlx` | `text` | `text_only` | - | - | - | - | - | `data not yet collected` |
+| `ollama` | `gemma4:12b-mxfp8` | `text` | `text_only` | - | - | - | - | - | `data not yet collected` |
+| `ollama` | `gemma4:12b-nvfp4` | `text` | `text_only` | - | - | - | - | - | `data not yet collected` |
 | `ollama` | `gemma4:26b` | `text` | `text_only` | - | - | - | - | - | `data not yet collected` |
 | `ollama` | `llama3.2` | `text` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `openai` | `gpt-4-turbo` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
@@ -187,6 +196,8 @@ This section starts from the checked-in provider catalog. Recommended format fol
 | `openrouter` | `deepseek/deepseek-v4-flash` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `openrouter` | `deepseek/deepseek-v4-pro` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `openrouter` | `google/gemini-2.5-flash` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
+| `openrouter` | `google/gemma-4-26b-a4b-it` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
+| `openrouter` | `google/gemma-4-31b-it` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `openrouter` | `minimax/minimax-m2` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `openrouter` | `minimax/minimax-m2.7` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `openrouter` | `mistralai/mistral-large-2512` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
@@ -198,5 +209,6 @@ This section starts from the checked-in provider catalog. Recommended format fol
 | `openrouter` | `z-ai/glm-5.1` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `openrouter` | `z-ai/glm-5v-turbo` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `together` | `Qwen/Qwen3-Coder-Next-FP8` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
+| `together` | `google/gemma-4-31B-it` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `zai` | `glm-5` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `zai` | `glm-5.1` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |

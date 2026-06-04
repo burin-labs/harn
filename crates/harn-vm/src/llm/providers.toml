@@ -562,11 +562,11 @@ provider = "local"
 # Gemma 4 26B/31B via hosted APIs (the 12B is on-device only). The Gemini API
 # serves Gemma under its bare id; OpenRouter/Together use org-prefixed ids.
 [aliases.gemini-gemma4-31b]
-id = "gemma-4-31b-it"
+id = "models/gemma-4-31b-it"
 provider = "gemini"
 
 [aliases.gemini-gemma4-26b]
-id = "gemma-4-26b-a4b-it"
+id = "models/gemma-4-26b-a4b-it"
 provider = "gemini"
 
 [aliases.openrouter-gemma4-31b]
@@ -1576,11 +1576,21 @@ capabilities = ["streaming", "thinking"]
 tier = "frontier"
 open_weight = true
 strengths = ["coding", "long_context"]
+[models."gemma-4-12b-it"]
+name = "Gemma 4 12B (local)"
+provider = "local"
+context_window = 131072
+stream_timeout = 300.0
+capabilities = ["streaming", "thinking"]
+tier = "mid"
+open_weight = true
+strengths = ["cheap", "speed"]
 # Gemma 4 — hosted (Apache 2.0, multimodal text+image, 256K context, native
 # thinking). The 12B is on-device only; the 26B MoE and 31B dense are also served
-# directly by hosted APIs. OpenRouter ids are org-prefixed (collision-free with
-# the bare `local` keys above); the Gemini API and Together routes are aliases
-# below since their wire ids match the bare keys.
+# directly by hosted APIs. Each provider route is registered as its own catalog
+# row keyed by that provider's wire id (the alias-validation contract requires a
+# matching row): OpenRouter ids are org-prefixed and the Gemini API rows use the
+# `models/` REST resource name — both collision-free with the bare `local` keys.
 [models."google/gemma-4-31b-it"]
 name = "Gemma 4 31B (OpenRouter)"
 provider = "openrouter"
@@ -1599,3 +1609,28 @@ pricing = { input_per_mtok = 0.06, output_per_mtok = 0.33 }
 tier = "mid"
 open_weight = true
 strengths = ["vision", "cheap", "speed"]
+[models."models/gemma-4-31b-it"]
+name = "Gemma 4 31B (Gemini API)"
+provider = "gemini"
+context_window = 262144
+capabilities = ["tools", "vision", "streaming", "thinking"]
+tier = "frontier"
+open_weight = true
+strengths = ["vision", "reasoning", "coding", "cheap"]
+[models."models/gemma-4-26b-a4b-it"]
+name = "Gemma 4 26B MoE (Gemini API)"
+provider = "gemini"
+context_window = 262144
+capabilities = ["tools", "vision", "streaming", "thinking"]
+tier = "mid"
+open_weight = true
+strengths = ["vision", "cheap", "speed"]
+[models."google/gemma-4-31B-it"]
+name = "Gemma 4 31B (Together)"
+provider = "together"
+context_window = 262144
+capabilities = ["tools", "vision", "streaming", "thinking"]
+pricing = { input_per_mtok = 0.20, output_per_mtok = 0.50 }
+tier = "frontier"
+open_weight = true
+strengths = ["vision", "reasoning", "coding"]
