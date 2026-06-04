@@ -1094,6 +1094,7 @@ unresolved import itself still surfaces via the runtime loader.
 | `bytes` | builtin-produced | Immutable byte buffer |
 | `int` | `42` | Platform-width integer |
 | `float` | `3.14` | Double-precision float |
+| `number` | `42` / `3.14` | Built-in alias for `int \| float` |
 | `bool` | `true` / `false` | Boolean |
 | `nil` | `nil` | Null value |
 | `list` | `[1, 2, 3]` | Ordered collection |

@@ -1,0 +1,15 @@
+fn add_one(x: number) -> number {
+  return x + 1
+}
+
+fn ops(a: number, b: number) -> number {
+  return a + b - a * b
+}
+
+pipeline test(task) {
+  let n: number = 3
+  log(n)
+  log(add_one(3))
+  log(add_one(7.5))
+  log(ops(4, 2))
+}
