@@ -1,0 +1,53 @@
+// Run: harn test tests/agent/stall_test.harn
+//
+// Unit tests for the stall detector's handling of soft progress-report tools.
+// A turn whose ONLY tool call is `agent_progress` reports status without
+// advancing the task, so it must count toward the no-progress streak — a model
+// that spams `agent_progress` after getting stuck should trip the detector
+// rather than masquerade as activity. A turn that also makes a real tool call
+// is unaffected.
+import { agent_stall_initial_state, agent_stall_observe_tool_calls } from "std/agent/stall"
+
+const CONFIG = {enabled: true, no_progress_messages: 3}
+
+fn _progress_only() {
+  return [{name: "agent_progress", arguments: {message: "still working"}}]
+}
+
+fn _real_only() {
+  return [{name: "edit", arguments: {path: "x.rs"}}]
+}
+
+fn _observe(state, calls, iteration) {
+  return agent_stall_observe_tool_calls("unit", calls, iteration, CONFIG, state, true, nil, "")
+}
+
+pipeline test_agent_progress_spam_trips_no_progress(task) {
+  // Three consecutive turns whose only call is agent_progress → trips at the
+  // third (no_progress_messages = 3). Before the fix these were treated as real
+  // tool calls and never tripped.
+  let o1 = _observe(agent_stall_initial_state(), _progress_only(), 1)
+  assert(o1.warning == nil)
+  let o2 = _observe(o1.state, _progress_only(), 2)
+  assert(o2.warning == nil)
+  let o3 = _observe(o2.state, _progress_only(), 3)
+  assert(o3.warning != nil)
+}
+
+pipeline test_real_tool_calls_do_not_trip_no_progress(task) {
+  // Real (substantive) tool calls are genuine activity — no no-progress trip.
+  let o1 = _observe(agent_stall_initial_state(), _real_only(), 1)
+  let o2 = _observe(o1.state, _real_only(), 2)
+  let o3 = _observe(o2.state, _real_only(), 3)
+  assert(o3.warning == nil)
+}
+
+pipeline test_mixed_turn_with_real_call_is_progress(task) {
+  // agent_progress alongside a real edit is progress — the real call carries the
+  // action stream, so the no-progress streak never accumulates.
+  let mixed = [{name: "agent_progress", arguments: {}}, {name: "edit", arguments: {path: "y.rs"}}]
+  let o1 = _observe(agent_stall_initial_state(), mixed, 1)
+  let o2 = _observe(o1.state, mixed, 2)
+  let o3 = _observe(o2.state, mixed, 3)
+  assert(o3.warning == nil)
+}
