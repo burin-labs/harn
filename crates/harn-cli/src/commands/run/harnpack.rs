@@ -142,7 +142,8 @@ pub fn prepare_harnpack<W: Write>(
         replay_archive(&cache_dir, &manifest, &contents)?;
     }
 
-    let entrypoint_path = cache_dir.join("sources").join(&manifest.entrypoint);
+    let entrypoint_rel = join_safe_nonempty(Path::new(""), &manifest.entrypoint)?;
+    let entrypoint_path = cache_dir.join("sources").join(entrypoint_rel);
     if !entrypoint_path.exists() {
         return Err(HarnpackError::new(
             "harnpack.missing_entrypoint",
@@ -335,6 +336,17 @@ fn join_safe(base: &Path, rel: &Path) -> Result<PathBuf, HarnpackError> {
     Ok(out)
 }
 
+fn join_safe_nonempty(base: &Path, rel: &Path) -> Result<PathBuf, HarnpackError> {
+    let out = join_safe(base, rel)?;
+    if out == base {
+        return Err(HarnpackError::new(
+            "harnpack.unsafe_path",
+            "refusing to use empty harnpack entrypoint",
+        ));
+    }
+    Ok(out)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -392,5 +404,66 @@ mod tests {
             join_safe(&base, Path::new("sources/hello.harn")).unwrap(),
             base.join("sources").join("hello.harn"),
         );
+    }
+
+    #[test]
+    fn prepare_harnpack_rejects_absolute_manifest_entrypoint() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let external = temp.path().join("outside.harn");
+        fs::write(&external, "fn main() {}\n").expect("external source");
+
+        let mut bundle = WorkflowBundle {
+            entrypoint: external,
+            ..WorkflowBundle::default()
+        };
+        bundle.harn_version = env!("CARGO_PKG_VERSION").to_string();
+        let bytes = harn_vm::orchestration::build_harnpack(
+            &bundle,
+            &[HarnpackEntry::new("sources/inside.harn", b"fn main() {}\n")],
+        )
+        .expect("build pack");
+        let pack_path = temp.path().join("unsafe.harnpack");
+        fs::write(&pack_path, bytes).expect("pack file");
+
+        let mut stderr = String::new();
+        let err = prepare_harnpack(
+            &pack_path,
+            &HarnpackRunOptions {
+                allow_unsigned: true,
+                dry_run_verify: false,
+            },
+            &mut stderr,
+        )
+        .expect_err("absolute entrypoint must be rejected");
+        assert_eq!(err.code, "harnpack.unsafe_path");
+    }
+
+    #[test]
+    fn prepare_harnpack_rejects_traversing_manifest_entrypoint() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let mut bundle = WorkflowBundle {
+            entrypoint: PathBuf::from("../outside.harn"),
+            ..WorkflowBundle::default()
+        };
+        bundle.harn_version = env!("CARGO_PKG_VERSION").to_string();
+        let bytes = harn_vm::orchestration::build_harnpack(
+            &bundle,
+            &[HarnpackEntry::new("outside.harn", b"fn main() {}\n")],
+        )
+        .expect("build pack");
+        let pack_path = temp.path().join("traversal.harnpack");
+        fs::write(&pack_path, bytes).expect("pack file");
+
+        let mut stderr = String::new();
+        let err = prepare_harnpack(
+            &pack_path,
+            &HarnpackRunOptions {
+                allow_unsigned: true,
+                dry_run_verify: false,
+            },
+            &mut stderr,
+        )
+        .expect_err("traversing entrypoint must be rejected");
+        assert_eq!(err.code, "harnpack.unsafe_path");
     }
 }
