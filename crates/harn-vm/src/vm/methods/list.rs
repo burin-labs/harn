@@ -119,17 +119,9 @@ impl crate::vm::Vm {
                     items[start..end].to_vec(),
                 )))
             }
-            "unique" => {
-                let mut seen = std::collections::HashSet::with_capacity(items.len());
-                let mut result = Vec::with_capacity(items.len());
-                for item in items.iter() {
-                    let key = crate::value::value_structural_hash_key(item);
-                    if seen.insert(key) {
-                        result.push(item.clone());
-                    }
-                }
-                Ok(VmValue::List(std::sync::Arc::new(result)))
-            }
+            "unique" => Ok(VmValue::List(std::sync::Arc::new(
+                crate::value::dedup_values(items.iter()),
+            ))),
             "take" => {
                 let n = args.first().and_then(|a| a.as_int()).unwrap_or(0).max(0) as usize;
                 Ok(VmValue::List(std::sync::Arc::new(
