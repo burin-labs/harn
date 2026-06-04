@@ -1047,7 +1047,7 @@ async fn session_inject_rejects_cross_actor_mutation() {
 
 #[cfg(feature = "hostlib")]
 #[tokio::test(flavor = "current_thread")]
-async fn acp_fs_mode_and_commit_staged_apply_deferred_hostlib_writes() {
+async fn acp_fs_mode_commit_and_discard_staged_hostlib_writes() {
     use harn_hostlib::{
         tools::{permissions, ToolsCapability},
         BuiltinRegistry, HostlibCapability,
@@ -1057,7 +1057,8 @@ async fn acp_fs_mode_and_commit_staged_apply_deferred_hostlib_writes() {
     permissions::enable_for_test();
 
     let dir = tempfile::TempDir::new().unwrap();
-    let file = dir.path().join("draft.txt");
+    let committed_file = dir.path().join("draft.txt");
+    let discarded_file = dir.path().join("discard.txt");
     let (tx, mut rx) = mpsc::unbounded_channel();
     let mut server = AcpServer::new_with_output(AcpServerConfig::new(None), AcpOutput::Channel(tx));
 
@@ -1098,27 +1099,68 @@ async fn acp_fs_mode_and_commit_staged_apply_deferred_hostlib_writes() {
 
     let mut registry = BuiltinRegistry::new();
     ToolsCapability.register_builtins(&mut registry);
-    let mut args = BTreeMap::new();
-    args.insert(
-        "session_id".to_string(),
-        VmValue::String(Arc::from(session_id.as_str())),
+    let stage_write = |path: &std::path::Path, content: &str| {
+        let mut args = BTreeMap::new();
+        args.insert(
+            "session_id".to_string(),
+            VmValue::String(Arc::from(session_id.as_str())),
+        );
+        args.insert(
+            "path".to_string(),
+            VmValue::String(Arc::from(path.to_string_lossy().as_ref())),
+        );
+        args.insert("content".to_string(), VmValue::String(Arc::from(content)));
+        (registry
+            .find("hostlib_tools_write_file")
+            .expect("write_file builtin")
+            .handler)(&[VmValue::Dict(Arc::new(args))])
+        .expect("stage write");
+    };
+    stage_write(&committed_file, "draft");
+    stage_write(&discarded_file, "scratch");
+    assert!(
+        !committed_file.exists(),
+        "ACP staged mode should defer disk writes"
     );
-    args.insert(
-        "path".to_string(),
-        VmValue::String(Arc::from(file.to_string_lossy().as_ref())),
+    assert!(
+        !discarded_file.exists(),
+        "ACP staged mode should defer disk writes"
     );
-    args.insert("content".to_string(), VmValue::String(Arc::from("draft")));
-    (registry
-        .find("hostlib_tools_write_file")
-        .expect("write_file builtin")
-        .handler)(&[VmValue::Dict(Arc::new(args))])
-    .expect("stage write");
-    assert!(!file.exists(), "ACP staged mode should defer disk writes");
 
     server
         .handle_incoming_message(serde_json::json!({
             "jsonrpc": "2.0",
             "id": 3,
+            "method": "session/fs_discard_staged",
+            "params": {
+                "sessionId": session_id.clone(),
+                "paths": [discarded_file.to_string_lossy()],
+            },
+        }))
+        .await;
+    let discard_response = recv_json(&mut rx).await;
+    assert_eq!(
+        discard_response["result"]["discardedPaths"],
+        serde_json::json!([discarded_file.to_string_lossy()])
+    );
+    assert!(
+        !discarded_file.exists(),
+        "discarding a staged write must not touch disk"
+    );
+    let discard_update = recv_json(&mut rx).await;
+    assert_eq!(
+        discard_update["params"]["update"]["_meta"]["harn"]["kind"],
+        "staged_writes_pending"
+    );
+    assert_eq!(
+        discard_update["params"]["update"]["_meta"]["harn"]["pendingCount"],
+        1
+    );
+
+    server
+        .handle_incoming_message(serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": 4,
             "method": "session/fs_commit_staged",
             "params": {"sessionId": session_id.clone()},
         }))
@@ -1131,7 +1173,11 @@ async fn acp_fs_mode_and_commit_staged_apply_deferred_hostlib_writes() {
             .len(),
         1
     );
-    assert_eq!(std::fs::read_to_string(&file).unwrap(), "draft");
+    assert_eq!(std::fs::read_to_string(&committed_file).unwrap(), "draft");
+    assert!(
+        !discarded_file.exists(),
+        "discarded staged writes stay absent"
+    );
 
     let commit_update = recv_json(&mut rx).await;
     assert_eq!(

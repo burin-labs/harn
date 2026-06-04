@@ -79,6 +79,7 @@ const ACP_DISPATCHED_METHODS: &[&str] = &[
     "session/set_config_option",
     "session/fs_mode",
     "session/fs_commit_staged",
+    "session/fs_discard_staged",
     "session/restore_tool_call",
     "session/prompt",
     "session/cancel",
