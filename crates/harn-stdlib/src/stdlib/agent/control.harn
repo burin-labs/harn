@@ -94,19 +94,53 @@ fn __agent_loop_state(args) -> AgentLoopState {
   }
 }
 
+/**
+ * Single source of truth for "the agent is still advancing the task."
+ * `progress.changed` (computed once in `agent_loop_snapshot_state`) already
+ * covers tool calls, successful tool results, AND visible text — so a turn that
+ * is pure planning/narration toward the next edit (no tool call *this* turn) is
+ * still forward progress. This is deliberately NOT re-gated on a tool call here:
+ * an earlier inline `progress.changed && tool_call_count > 0` denied the
+ * extension whenever the budget boundary happened to land on a planning turn,
+ * cutting a productive multi-file refactor off mid-work (a methodical model
+ * editing across ~6 files stopped at its initial cap because one interleaved
+ * planning turn was treated as "no progress"). Degenerate narration that never
+ * acts is bounded independently by the iteration max and the stall detector, so
+ * progress alone is the correct extension signal. Keep this the *only* place
+ * that defines "progress" so a second, competing notion can't be ANDed in.
+ */
+fn agent_loop_is_progressing(state: AgentLoopState) -> bool {
+  return state.progress.changed
+}
+
+/**
+ * Ordered extension policy for the default loop control: each entry pairs a
+ * named, eagerly-evaluated condition with the reason recorded on the resulting
+ * budget decision, and the first satisfied entry wins. Expressing the policy as
+ * an explicit table — rather than a chain of inline compound `if`s — keeps every
+ * extension trigger auditable in one place and forces each signal through a
+ * single definition (there is nowhere to silently AND an extra condition onto a
+ * rule, which is exactly the class of bug this replaced).
+ */
+fn __agent_loop_extension_rules(state: AgentLoopState) {
+  return [
+    {when: state.completion.vetoed, reason: "completion gate vetoed"},
+    {when: !state.session.required_tools_satisfied, reason: "required tools missing"},
+    {when: agent_loop_is_progressing(state), reason: "recent turn made progress"},
+  ]
+}
+
 fn __agent_default_loop_control(state: AgentLoopState) {
+  // Only decide at the budget boundary; below it, keep looping untouched.
   if state.budget.remaining > 0 {
     return nil
   }
-  if state.completion.vetoed {
-    return {action: "extend", reason: "completion gate vetoed"}
+  for rule in __agent_loop_extension_rules(state) {
+    if rule.when {
+      return {action: "extend", reason: rule.reason}
+    }
   }
-  if !state.session.required_tools_satisfied {
-    return {action: "extend", reason: "required tools missing"}
-  }
-  if state.progress.changed && state.turn.tool_call_count > 0 {
-    return {action: "extend", reason: "recent turn made progress"}
-  }
+  // No extension rule matched — let the loop stop at the current cap.
   return nil
 }
 
