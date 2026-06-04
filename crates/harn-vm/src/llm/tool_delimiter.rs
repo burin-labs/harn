@@ -91,4 +91,22 @@ mod tests {
         assert_eq!(wire.matches(WIRE_TOOL_CALL_CLOSE).count(), 2);
         assert_eq!(wire_to_canonical(&wire), canonical);
     }
+
+    // Convergence regression: a reserved-token completion arriving in raw wire
+    // form is invisible to the tagged tool-call parser (which looks for
+    // `<tool_call>`). The remap MUST run before the parser, and a single remap
+    // pass is sufficient and idempotent. The end-to-end parser-coupled
+    // regression + streaming/non-streaming parity tests live in
+    // `llm::tools::tests::reserved_token` where the tool-registry helpers exist.
+    #[test]
+    fn wire_form_is_invisible_until_canonicalized() {
+        let wire = include_str!("testdata/qwen36_reserved_token_response.txt");
+        assert!(wire.contains(WIRE_TOOL_CALL_OPEN) && !wire.contains(TEXT_TOOL_CALL_OPEN));
+        let canonical = wire_to_canonical(wire);
+        assert!(
+            canonical.contains(TEXT_TOOL_CALL_OPEN) && !canonical.contains(WIRE_TOOL_CALL_OPEN)
+        );
+        // Idempotent: a second pass is a no-op (covers accidental double-remap).
+        assert_eq!(wire_to_canonical(&canonical), canonical);
+    }
 }
