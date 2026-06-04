@@ -4,30 +4,43 @@ Run the merge-queue-safe Harn release workflow.
 
 The release is **one** human PR titled `Release vX.Y.Z`. It carries the
 changelog, code, docs, AND the `Cargo.toml`/`Cargo.lock` version bump together.
-After it lands through the merge queue, the Publish release workflow
-auto-fires on tag drift, ships to crates.io, tags `vX.Y.Z`, and triggers the
-binary/container build. No second PR.
+After it lands through the merge queue, the **`vX.Y.Z` tag is pushed at the
+release commit** — and *that tag push* (not the merge to `main`) is what triggers
+the Publish release workflow to `cargo publish` to crates.io and kick off the
+binary/container build.
+
+> **`publish-release.yml` does NOT tag `main` HEAD for you.** This changed with
+> the release-pipeline modernization (#2971–#2973). If the tag is missing when
+> the release commit lands on `main`, the publish run fails with
+> `Cargo.toml=X is ahead of latest tag vY, but vX does not exist. Push vX at the
+> release commit`. The canonical orchestrator
+> (`release_harn.harn --mode ship-pr`) pushes the tag as part of the ship; if you
+> run the steps by hand you push the tag yourself (step 10). No second PR.
 
 ```text
 human/agent: write & land "Release vX.Y.Z" PR
         │
         ▼  PR lands through merge queue (full audit ran in CI)
-bot:    Publish release workflow auto-fires on tag drift
-        │   pushes vX.Y.Z, runs cargo publish, creates GH release
+human/agent: push signed vX.Y.Z tag at the release commit
+        │   (orchestrator ship-pr does this; or push it by hand — step 10)
+        ▼  the TAG push (not the main push) triggers Publish release
+bot:    Publish release runs cargo publish + creates the GH release
+        │
         ▼  tag push cascades
-bot:    Release workflow builds binaries + multi-arch container
+bot:    Build release binaries builds binaries + multi-arch container
         │
         ▼
-        v0.7.X is shipped (binaries, container, crates.io, release notes)
+        v0.8.X is shipped (binaries, container, crates.io, release notes)
 ```
 
 ## What the human/agent owns
 
-Steps 1-9 are the only steps that need judgment. After step 9 you are done
-— do **not** run `release_ship.sh --finalize` locally as a default step.
+Steps 1-10 are the only steps that need judgment. After step 10 (the tag push)
+you are done — do **not** run `release_ship.sh --finalize` locally as a default
+step.
 
 1. Branch off main: `git checkout -b release/vX.Y.Z`. The branch name is
-   conventional; the workflow keys on tag drift, not branch name.
+   conventional; the publish keys on the `vX.Y.Z` tag, not the branch name.
 2. Inspect the worktree with `git status --short` and `git diff --stat`.
    Treat tracked and untracked changes as candidate release content unless the
    user scopes the release more narrowly.
@@ -90,18 +103,40 @@ Steps 1-9 are the only steps that need judgment. After step 9 you are done
    gh pr merge --auto         # merge-queue picks the strategy
    ```
 
-   Then walk away. The merge queue runs the full CI gate (`make lint`,
+   The merge queue runs the full CI gate (`make lint`,
    `make test`, `make conformance`, `make lint-harn`, `make fmt-harn`,
    `make check-highlight`, `make check-language-spec`,
    `make check-trigger-quickref`, `make check-trigger-examples`,
    `make check-docs-snippets`, `verify_release_metadata.py`, portal
-   lint+build, Windows smoke). Auto-merge fires it as soon as CI is
-   green; once it lands, Publish release fires on tag drift.
+   lint+build, Windows smoke). Auto-merge fires it as soon as CI is green.
+   Then go to step 10 — the merge alone does **not** publish.
 
    **Why rebase before push:** `--prepare` takes ~1-15 min depending on
    cache state; main may have moved while it ran. Rebasing now (instead
    of waiting for the merge queue to push back) catches CHANGELOG drift
    while the context is fresh and avoids a stale PR sitting in queue.
+
+10. **Push the `vX.Y.Z` tag at the release commit.** This is the step that
+    actually ships — `publish-release.yml` will not tag `main` HEAD for you, so
+    until the tag exists nothing is published (the post-merge `publish-release`
+    run on `main` fails fast with `… but vX.Y.Z does not exist. Push vX.Y.Z at
+    the release commit`). After the `Release vX.Y.Z` PR squash-merges, tag the
+    resulting `main` commit:
+
+    ```bash
+    git fetch origin main --tags
+    REL=$(git rev-parse origin/main)   # the squashed "Release vX.Y.Z (#N)" commit
+    git tag -s vX.Y.Z "$REL" -m "Release vX.Y.Z"   # signed (org rulesets); -a also works
+    git push origin vX.Y.Z
+    ```
+
+    The tag push (not the earlier main push) triggers `publish-release.yml` via
+    its `tags: ['v*']` trigger, which skips drift detection and publishes from
+    the tag. The canonical `release_harn.harn --mode ship-pr` orchestrator does
+    this tag push for you; the manual sequence above is the fallback when you ran
+    steps 1-9 by hand. **A transient red `publish-release` run on the `main` push
+    is expected** — it's the "tag missing" guard firing before you push the tag;
+    pushing the tag is what ships, and that run is the real signal.
 
    **Why `--auto`:** the merge queue gates a substantial CI suite, so
    the release sits in queue for ~10-15 min cold-cache. Auto-merge means
@@ -162,15 +197,20 @@ gh workflow run publish-release.yml -f bootstrap_new_crates=true
   --no-verify` step in `scripts/verify_crate_packages.sh` to catch
   packaging issues for the new crate as a separate audit signal.
 
-## What happens automatically after the release PR lands
+## What happens automatically after you push the tag (step 10)
 
-10. **Publish release** workflow (`.github/workflows/publish-release.yml`)
-    detects tag drift (`Cargo.toml` ahead of latest `vX.Y.Z` tag) and runs
-    `./scripts/release_ship.sh --finalize` under the App identity:
-    portal-check + publish dry-run + push tag + `cargo publish` + render
-    notes + create or update the GitHub release. **Audit is skipped** —
-    the merge-queue CI just proved it.
-11. The tag push triggers **Build release binaries** workflow
+11. **Publish release** workflow (`.github/workflows/publish-release.yml`) fires
+    on the `vX.Y.Z` **tag push** (its `tags: ['v*']` trigger), skips drift
+    detection, and runs `./scripts/release_ship.sh --finalize` under the App
+    identity: portal-check + publish dry-run + `cargo publish` + render notes +
+    create or update the GitHub release. **Audit is skipped** — the merge-queue
+    CI just proved it. Note: `--finalize` no longer *creates* the tag — the tag
+    you pushed in step 10 is the trigger and the source of truth for what
+    publishes (`ensure_tag_at_head` is a no-op when the tag already points at
+    HEAD). The separate `main`-push run of `publish-release.yml` is only a guard:
+    it errors if the tag is missing or points elsewhere and never tags `main`
+    HEAD itself.
+12. The tag push also triggers **Build release binaries** workflow
     (`.github/workflows/build-release-binaries.yml`), which builds darwin/linux × x86/arm
     binary tarballs, publishes a multi-arch GHCR container image, and
     attaches the binaries to the GitHub release.
@@ -226,9 +266,12 @@ When in doubt, prefer the repo scripts over re-inventing the steps:
   either a matching state (`Cargo.toml == CHANGELOG top`, the new
   consolidated baseline) or one-bump-ahead (the legacy intermediate
   state).
-- `release_ship.sh --finalize` pushes the tag **before** `cargo publish`
-  so binary build / GHCR / downstream fetchers (e.g. `burin-code`'s
-  `fetch-harn`) run in parallel with crates.io.
+- The `vX.Y.Z` tag is pushed in **step 10** (by `release_harn.harn --mode
+  ship-pr`, or by hand), *before* `publish-release.yml` runs `cargo publish`, so
+  binary build / GHCR / downstream fetchers (e.g. `burin-code`'s `fetch-harn`)
+  run in parallel with crates.io. `release_ship.sh --finalize` no longer pushes
+  the tag — it publishes from the existing tag (`ensure_tag_at_head` no-ops when
+  the tag already points at HEAD).
 - The release-bot App needs `Contents: write`, `Pull requests: write`,
   `Actions: write`, `Metadata: read` on the repo. Repo secrets:
   `RELEASE_APP_ID`, `RELEASE_APP_PRIVATE_KEY`, `CARGO_REGISTRY_TOKEN`.
