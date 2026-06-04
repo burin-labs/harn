@@ -645,6 +645,38 @@ pipeline test(task) {
     }
 
     #[test]
+    fn parse_single_expression_rejects_trailing_tokens() {
+        // An interpolation hole must hold exactly one expression. Leftover
+        // tokens (e.g. `${a b}`, or `${1e20}` where `e20` lexes as a separate
+        // identifier) must error rather than being silently dropped.
+        for src in ["a b", "1 2", "1e20", "40 + 2 zzz"] {
+            let mut lexer = Lexer::new(src);
+            let tokens = lexer.tokenize().expect("tokens");
+            let mut parser = Parser::new(tokens);
+            assert!(
+                parser.parse_single_expression().is_err(),
+                "expected trailing-token error for `{src}`"
+            );
+        }
+        // A single complete expression is still accepted in full.
+        for src in [
+            "a",
+            "1 + 2",
+            "x.y",
+            "obj?.field",
+            "items.map({ v -> v * 2 })",
+        ] {
+            let mut lexer = Lexer::new(src);
+            let tokens = lexer.tokenize().expect("tokens");
+            let mut parser = Parser::new(tokens);
+            assert!(
+                parser.parse_single_expression().is_ok(),
+                "expected `{src}` to parse as a single expression"
+            );
+        }
+    }
+
+    #[test]
     fn parses_semicolon_separated_statements_in_block() {
         let source = r"
 pipeline p(task) {

@@ -1,0 +1,10 @@
+/**
+ * An interpolation hole must contain exactly one expression. Trailing tokens
+ * (here `b` after `a`) are a hard error instead of being silently dropped,
+ * which previously rendered just the first expression's value.
+ */
+pipeline test(task) {
+  let a = 1
+  let b = 2
+  log("value=${a b}")
+}
