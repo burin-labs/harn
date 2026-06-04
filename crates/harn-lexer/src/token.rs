@@ -81,6 +81,74 @@ pub struct FixEdit {
     pub replacement: String,
 }
 
+impl FixEdit {
+    /// Sort edits right-to-left by start offset and drop any that overlap an
+    /// already-accepted edit, returning the survivors in descending-start
+    /// order — ready to splice right-to-left without invalidating earlier
+    /// offsets. This is the single source of truth for the "apply all fixes,
+    /// drop conflicts" policy that `harn fmt`, `harn lint --fix`, and the LSP
+    /// on-save fixer must agree on byte-for-byte.
+    pub fn dedupe_overlapping(edits: &[FixEdit]) -> Vec<FixEdit> {
+        let mut sorted = edits.to_vec();
+        sorted.sort_by_key(|edit| std::cmp::Reverse(edit.span.start));
+        let mut accepted: Vec<FixEdit> = Vec::new();
+        for edit in sorted {
+            let overlaps = accepted
+                .iter()
+                .any(|prev| edit.span.start < prev.span.end && edit.span.end > prev.span.start);
+            if !overlaps {
+                accepted.push(edit);
+            }
+        }
+        accepted
+    }
+
+    /// Apply `edits` to `source`, dropping overlaps via
+    /// [`Self::dedupe_overlapping`] and splicing right-to-left. Callers that
+    /// also need the accepted-edit list (e.g. to build LSP `TextEdit`s) should
+    /// call `dedupe_overlapping` directly.
+    pub fn apply_all(source: &str, edits: &[FixEdit]) -> String {
+        let mut out = source.to_string();
+        for edit in Self::dedupe_overlapping(edits) {
+            let before = &out[..edit.span.start];
+            let after = &out[edit.span.end..];
+            out = format!("{before}{}{after}", edit.replacement);
+        }
+        out
+    }
+}
+
+#[cfg(test)]
+mod fix_edit_tests {
+    use super::*;
+
+    fn edit(start: usize, end: usize, replacement: &str) -> FixEdit {
+        FixEdit {
+            span: Span::with_offsets(start, end, 1, start + 1),
+            replacement: replacement.to_string(),
+        }
+    }
+
+    #[test]
+    fn apply_all_splices_right_to_left() {
+        // Order-independent input; non-overlapping edits both apply.
+        let out = FixEdit::apply_all("0123456789", &[edit(2, 4, "AB"), edit(6, 8, "CD")]);
+        assert_eq!(out, "01AB45CD89");
+    }
+
+    #[test]
+    fn apply_all_drops_overlapping_edits_descending_start_wins() {
+        // Sorted descending by start, edit(4,8) is accepted and edit(2,6)
+        // overlaps it, so it's dropped — matching fmt/lsp/cli semantics.
+        let out = FixEdit::apply_all("0123456789", &[edit(2, 6, "XXXX"), edit(4, 8, "YYYY")]);
+        assert_eq!(out, "0123YYYY89");
+        assert_eq!(
+            FixEdit::dedupe_overlapping(&[edit(2, 6, "x"), edit(4, 8, "y")]).len(),
+            1
+        );
+    }
+}
+
 /// Canonical list of Harn language keywords. Single source of truth; the lexer's
 /// identifier-to-keyword match must stay in sync (enforced by
 /// `test_keywords_const_covers_lexer`). External tooling should consume this

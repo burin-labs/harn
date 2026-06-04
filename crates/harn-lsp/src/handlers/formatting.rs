@@ -300,19 +300,9 @@ pub(crate) fn build_code_actions(
                 all_edits.extend(fix.iter().cloned());
             }
         }
-        // Apply fixes right-to-left and drop overlaps to mirror the
-        // CLI's `harn lint --fix` semantics; this keeps the on-save
-        // path consistent with what `harn lint --fix` would produce.
-        all_edits.sort_by_key(|e| std::cmp::Reverse(e.span.start));
-        let mut accepted: Vec<harn_lexer::FixEdit> = Vec::new();
-        for edit in all_edits {
-            let overlaps = accepted
-                .iter()
-                .any(|prev| edit.span.start < prev.span.end && edit.span.end > prev.span.start);
-            if !overlaps {
-                accepted.push(edit);
-            }
-        }
+        // Drop overlaps via the shared policy so the on-save path produces
+        // byte-for-byte what `harn lint --fix` would.
+        let accepted = harn_lexer::FixEdit::dedupe_overlapping(&all_edits);
         if !accepted.is_empty() {
             let text_edits: Vec<TextEdit> = accepted
                 .iter()
