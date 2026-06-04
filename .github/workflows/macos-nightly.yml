@@ -1,0 +1,75 @@
+name: macOS nightly
+
+# Runs the full workspace nextest surface on macOS once per night, plus
+# on-demand from the Actions tab. This is the macOS analogue of
+# `windows-nightly.yml`: the per-PR Linux lanes in `ci.yml` build and test on
+# `ubuntu-latest`, but the macOS-only code paths — most notably the Seatbelt
+# sandbox profile generation in `crates/harn-vm/src/stdlib/sandbox/macos.rs`
+# and its `#[cfg(target_os = "macos")]` unit tests — compile and run nowhere
+# in CI today (only on a contributor's local Mac). This nightly closes that
+# gap and, because GitHub's `macos-latest` runner is Apple Silicon, also gives
+# incidental arm64 coverage.
+#
+# Failure is informational, not blocking — the nightly does not gate the
+# `ci-status` job. When something regresses, file an issue and either fix the
+# underlying portability bug or add a per-test `#[cfg(not(target_os = "macos"))]`
+# annotation with rationale.
+#
+# Tracking issue: harn#946 (cross-platform test coverage).
+
+on:
+  schedule:
+    # 07:30 UTC ≈ 23:30 Pacific the previous evening. Offset 30 minutes from
+    # the Windows nightly so the two don't contend for the same cache lookups.
+    - cron: "30 7 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+  SCCACHE_GHA_ENABLED: "true"
+  RUSTFLAGS: "-D warnings"
+
+jobs:
+  nextest:
+    name: Workspace nextest (macos-latest)
+    runs-on: macos-latest
+    # Don't run forks of the repo on a fork's own schedule.
+    if: github.repository == 'burin-labs/harn'
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+      - uses: mozilla-actions/sccache-action@9e7fa8a12102821edf02ca5dbea1acd0f89a2696 # v0.0.10
+        # sccache is a build-cache optimization, not a build requirement. The
+        # upstream action sometimes fails on merge_group / restricted-token
+        # events with "Bad credentials" when api.github.com gates the release
+        # lookup; a cold build is a fine fallback, but the job shouldn't fail.
+        continue-on-error: true
+      - name: Configure Cargo to use sccache
+        if: env.SCCACHE_PATH != ''
+        shell: bash
+        run: echo "RUSTC_WRAPPER=${SCCACHE_PATH}" >> "$GITHUB_ENV"
+      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+        continue-on-error: true
+        with:
+          shared-key: workspace-macos
+          cache-on-failure: true
+          cache-bin: false
+      - name: Install cargo-nextest
+        uses: taiki-e/install-action@8f531eaecd1898bc3da7d104ad91bee98d1b97bd # v2.79.9
+        with:
+          tool: nextest@0.9.133
+      - name: Run workspace nextest
+        shell: bash
+        # No package filter — the whole workspace runs. Tests gated to
+        # `#![cfg(unix)]` still run here (macOS is Unix); the macOS-specific
+        # surface is exactly what this nightly exists to exercise.
+        run: cargo nextest run --workspace --profile ci
+      - name: Smoke test harn run
+        shell: bash
+        run: |
+          echo 'fn main(harness: Harness) { harness.stdio.println("ok") }' > smoke.harn
+          ./target/debug/harn run smoke.harn

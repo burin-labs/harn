@@ -126,6 +126,15 @@ jobs:
           - platform: linux
             runner: ubuntu-latest
             harn_binary: target/release/harn
+          - platform: linux-arm64
+            # Activates the already-present `Linux-ARM64` case in the resolve
+            # step below (maps to harn-aarch64-unknown-linux-gnu.tar.gz, which
+            # build-release-binaries.yml already builds natively on
+            # ubuntu-24.04-arm and ships). `ubuntu-24.04-arm` is a free
+            # GitHub-hosted runner for public repos, so this needs no
+            # self-hosted infra and no driver changes.
+            runner: ubuntu-24.04-arm
+            harn_binary: target/release/harn
           - platform: macos
             runner: macos-latest
             harn_binary: target/release/harn
