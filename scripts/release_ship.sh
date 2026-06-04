@@ -744,7 +744,9 @@ log_step "Publish"
 ./scripts/release_gate.sh publish
 
 if [[ -z "$NOTES_OUTPUT" ]]; then
-  NOTES_OUTPUT="$(mktemp)"
+  NOTES_DIR="$ROOT_DIR/.harn/release-notes"
+  mkdir -p "$NOTES_DIR"
+  NOTES_OUTPUT="$(mktemp "$NOTES_DIR/notes.XXXXXX.md")"
   CLEANUP_NOTES=1
 else
   CLEANUP_NOTES=0
