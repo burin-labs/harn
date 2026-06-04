@@ -8,6 +8,193 @@ highlights live in [CHANGELOG-pre-0.6.md](CHANGELOG-pre-0.6.md).
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.8.69
+
+### Added
+
+- **`[[contributes]]` host-surface extension manifest block (#2969).** A package
+  manifest can now declare editor/host contributions (languages, preview panes,
+  build profiles, commands, themes, …) alongside the agent-layer blocks. Harn
+  treats `kind` as a host-owned, namespaced string and validates only the
+  envelope plus that each contribution's `scopes` are a subset of
+  `[package].permissions`, so new contribution kinds need no Harn release.
+  `harn pack` carries the `[[contributes]]` block, package identity, and any
+  contribution-referenced assets into the signed bundle (surfaced via
+  `WorkflowBundlePreview.metadata`) so a host can discover and gate extensions
+  from the verified artifact alone.
+- Added `first_token_ms` to run profiles so `harn run --profile-json` and
+  profile rendering expose LLM time-to-first-token when streaming deltas are
+  observed.
+- **Gemma 4 in the model catalog — local and hosted (#3000).** Google's Gemma 4
+  (encoder-free unified multimodal, Apache 2.0) is now wired across the board:
+  - **Local (Ollama):** the 12B on-device model as `gemma4:12b-mlx` (Apple
+    Silicon), `gemma4:12b-nvfp4` (NVIDIA Blackwell), and `gemma4:12b-mxfp8`. The
+    Ollama 12B quants are text-only at 128K (vision projector dropped, verified
+    via `ollama show`), so a `gemma4:12b*` rule keeps them out of vision routing.
+  - **Hosted:** the multimodal 26B MoE and 31B dense via the Gemini API
+    (`gemini-gemma4-26b`/`-31b`), OpenRouter (`google/gemma-4-26b-a4b-it`,
+    `google/gemma-4-31b-it` + aliases), and Together (`together-gemma4-31b`).
+  - Fixes a latent bug where the `google/gemma-4*` OpenRouter/Together capability
+    rules omitted `vision_supported`, so hosted Gemma 4 now correctly advertises
+    image input. The 12B is on-device only and is intentionally not given a
+    hosted route.
+
+### Changed
+
+- **`harn`, `harn-lsp`, and `harn-dap` are now one multi-call binary (#2972).**
+  `harn-lsp` and `harn-dap` previously shipped as separate binaries that each
+  re-linked nearly the same dependency closure as `harn`. They are now linked
+  into `harn` and selected by the name the binary is invoked as (`argv[0]`), so
+  the release ships a single binary with `harn-lsp` / `harn-dap` as symlinks to
+  it (copies on Windows). `install.sh` and `harn upgrade` place them as on-disk
+  symlinks too. Editors that spawn `harn-lsp` / `harn-dap` by path are
+  unaffected; the change cuts the uncompressed install footprint by ~210 MB per
+  Unix target and runs the release LTO link once per target instead of three
+  times.
+- **Release archives are now published per-architecture as each build finishes (#2973).**
+  The GitHub release is created up front as a prerelease and each platform's
+  archive is attached the moment that build leg completes, instead of waiting
+  for the slowest leg and a final aggregate step. `SHA256SUMS`, the asset
+  manifest, and the canonical "latest" flag are still applied only once every
+  build succeeds, so `install.sh` and `harn upgrade` (which resolve "latest")
+  are unaffected — but tooling that fetches a specific tag + architecture can
+  now grab it as soon as it lands.
+- **The default `release` profile builds faster (#2973).** `[profile.release]`
+  moved from fat LTO + 1 codegen unit to thin LTO + 16 codegen units — the same
+  optimization the release pipeline already ships — so local
+  `cargo build --release` no longer pays for a fat-LTO link that never reached
+  a published binary.
+- **`harn testbench run --process-wasi` is now an opt-in build (#2974).** wasmtime
+  and the cranelift JIT (~36 crates, ~8.6 MB of the stripped binary) are no longer
+  linked into the default `harn` binary; they only powered the WASI subprocess
+  toolchain mode. Every other testbench path — record/replay tapes, filesystem
+  overlay, paused clock, LLM fixtures, fidelity scoring, annotations, and the
+  conformance-test sidecars — is unchanged. To use `--process-wasi`, build with the
+  feature: `cargo install harn-cli --features testbench-wasi`. Without it the flag
+  returns a clear "requires the testbench-wasi Cargo feature" error.
+- **`harn check` now runs the bytecode-compilation pass** (#3002), making it a
+  true "will this run?" gate. Errors the type checker does not model but that
+  stop `harn run` — unsupported nested `match` patterns, `break`/`continue`
+  outside a loop, `try*` outside a function, malformed string interpolation —
+  are now reported by `harn check` under the new `CMP` diagnostic category
+  (`HARN-CMP-001`), instead of passing `check` and only failing at run time.
+  Compilation runs only once a file is type-clean, so type errors still surface
+  first.
+
+### Fixed
+
+- **`harn-lsp --version` / `harn-dap --version` print a version again (#2976).**
+  After the multi-call binary collapse (#2972) the argv[0] shim dispatched a
+  `--version`/`-V` probe straight into the stdio server, which hung waiting on
+  input. The shim now answers `--version`/`-V` and `--help`/`-h` before starting
+  the server, printing `<name> <version>` (matching `harn --version`). Normal
+  editor LSP/DAP usage, which speaks the protocol rather than passing flags, is
+  unchanged.
+- **NaN comparisons and `.sum()` integer overflow (#2977).** Relational
+  operators involving a floating-point NaN (`NaN <= x`, `NaN >= x`, and the
+  int/float-mixed forms) now correctly evaluate to `false` instead of `true`
+  at runtime and during constant folding, matching IEEE-754. `list.sum()` and
+  `iter().sum()` now promote to a float when an integer sum exceeds the i64
+  range — matching `abs`/`pow` — instead of silently wrapping (or panicking in
+  debug builds for `iter().sum()`).
+- **Models that reserve `<tool_call>` as a special token no longer collapse on the text tool format (#2978).**
+  Qwen3.x and other Hermes-tool finetunes encode `<tool_call>`/`</tool_call>` as
+  single special tokens. Reusing those exact strings as harn's text tool-call
+  delimiters — embedded as instructional and wrapper text throughout the system
+  prompt — drove such models into degenerate opener repetition
+  (`<tool_call>\n<tool_call>\n…`). A new `reserved_tool_call_token` capability
+  remaps the two colliding delimiters to a non-special bracket form on the wire
+  and maps the response back (across streamed chunk boundaries) before the
+  parser and transcript see it, so the canonical format is unchanged everywhere
+  except the bytes sent to the model. Flagged for the llamacpp Qwen3 / Qwen3.6
+  rules. Measured on Qwen3.6-35B-A3B: `<tool_call>` 0/5 no-collapse vs the
+  remapped delimiter 5/5.
+- **`list.unique()` now agrees with the `==` operator (#2979).** The
+  structural hash key is consistent with `values_equal`: a float that is
+  numerically an integer (and `-0.0` vs `0.0`) hashes like the equal integer,
+  and numeric normalization now propagates into pairs, enum variants, and
+  struct instances. De-duplication confirms hash hits with `values_equal`, so
+  `[1, 1.0].unique()` collapses to `[1]` while two distinct `NaN`s are both
+  kept — matching `==`, `contains`, and set membership.
+- **`lint --fix` no longer unsoundly folds float self-comparisons (#2980).**
+  The `pointless-comparison` lint (HARN-LNT-031) rewrote `x == x` to `true` and
+  `x != x` to `false` unconditionally. That is wrong for floats: when `x` is
+  NaN, `x == x` is `false` and `x != x` is `true` — and `x != x` is the
+  idiomatic NaN test — so `harn lint --fix` could silently flip program
+  behavior. The autofix is now gated on a conservative `is_nan_free` operand
+  check and only fires when the operand provably cannot be a NaN float (a
+  non-float literal, or a list/dict built only from such literals). For any
+  operand that could be a float the lint still warns — a self-comparison is
+  usually a typo — but leaves the source untouched and points at `is_nan(...)`.
+- **The adaptive agent loop no longer cuts a productive task off on a planning turn (#2983).**
+  The default loop-control policy extended the iteration budget only when a turn
+  both made progress *and* issued a tool call this turn. But "progress" already
+  includes visible text, so an interleaved planning/narration turn (no tool call)
+  at the budget boundary was treated as no-progress and denied an extension —
+  stopping a methodical model mid-way through a large multi-file task. The
+  extension now keys off a single `progress` definition (the only place that term
+  is defined), and the policy is expressed as an explicit, named, ordered rule
+  table instead of inline compound conditions, so a second competing notion of
+  "progress" can't be silently ANDed onto a rule again. Degenerate narration that
+  never acts is still bounded by the iteration max and the stall detector.
+- **String interpolation holes are parsed correctly (#2983).** An interpolation
+  hole `${ ... }` holds exactly one expression, but several cases were handled
+  wrongly:
+  - **Trailing tokens were silently dropped.** The compiler parsed only the
+    first expression and discarded the rest, so `"${a b}"` rendered just `a`,
+    `"${40 + 2 zzz}"` rendered `42`, and `"${1e20}"` rendered `1` (`e20` lexes as
+    a separate identifier — scientific notation is not a float literal).
+    `Parser::parse_single_expression` now requires the whole hole to be consumed,
+    and the VM compiler reports a malformed hole as a hard error
+    (`invalid interpolation \`${...}\`: ...`) instead of silently rendering the
+    raw text — `\${...}` already escapes a literal dollar-brace, so any
+    unescaped `${...}` is intended as an expression.
+  - **A `}` inside a nested string literal ended the hole early.** Hole capture
+    is now string-literal aware, so `"${ items["a}b"] }"` and `"${ x ?? "a}b" }"`
+    work instead of terminating at the first inner `}`.
+  - **Escaping the nested quotes is reported clearly.** Inside a hole, string
+    literals use bare double quotes (`${x ?? "y"}`); the escaped form
+    (`${x ?? \"y\"}`) is now reported precisely at the backslash rather than
+    being silently rendered as raw text.
+
+  Valid single-expression holes are unaffected.
+- **The stall detector now catches `agent_progress` spam (#3001).** A turn whose
+  only tool call is a soft progress-report tool (`agent_progress`) reports status
+  without advancing the task, but it was counted as real activity — so a model
+  that emitted `agent_progress` repeatedly after getting stuck never tripped the
+  no-progress detector. Such turns now count toward the no-progress streak (the
+  same as a text-only monologue), so a run of them trips and the loop can recover
+  or hard-stop. A turn that also makes a real tool call is unaffected.
+- **Seven correctness fixes from a cross-referenced bug hunt (#3002).** Each
+  mirrors a real defect in a comparable language runtime and was reproduced
+  against the spec before fixing:
+  - **Integer literals out of `i64` range are now an error** (`HARN-PAR-006`)
+    instead of silently degrading to a lossy float. `9223372036854775808`
+    previously became `9223372036854776000` typed `float`, and distinct
+    out-of-range literals collapsed onto the same value. Write floats with a
+    decimal point and the most-negative `int` as `-9223372036854775807 - 1`.
+  - **`-0.0` and `0.0` are kept distinct in the constant pool**, so the sign of
+    `1.0 / -0.0` (`-inf`) vs `1.0 / 0.0` (`inf`) no longer depends on which
+    literal appeared first in the source.
+  - **Out-of-range negative list-assignment is an error.** `a[-100] = x` used to
+    silently clamp to index 0 and overwrite an unrelated element; it now raises
+    the same out-of-bounds error as a too-large index. Reads and slices still
+    clamp as before.
+  - **`return`/`break`/`continue`/`throw` inside a `finally` no longer aborts
+    the process.** It previously recursed forever at compile time and crashed
+    with a stack overflow; non-local transfers now run each pending finally with
+    that finally masked, and `return` in a `finally` overrides the body's
+    outcome (Java/JS semantics).
+  - **A `retry` expression evaluates to its body's value.** `let r = retry 3 { 42 }`
+    returned `nil`; it now returns `42`, like `if`/`match`/`try`.
+  - **A default parameter may reference an enclosing binding of the same name.**
+    `let n = 7; fn f(n = n * 2)` threw `Undefined variable: n`; the default now
+    reads the enclosing `n`. Defaults may still reference earlier parameters.
+  - **Nested list/dict patterns in `match` arms are rejected with a clear error**
+    (`HARN-CMP-001`) instead of being silently miscompiled to an equality
+    comparison that bound nothing (or bound the wrong values). Bind the element
+    with an identifier and match it in a nested `match`.
+
 ## v0.8.68
 
 ### Added
