@@ -108,7 +108,7 @@ fn __sv_normalize_no_phantom_completion_catalog(value) {
   }
   var out = defaults
   for locale in raw.keys() {
-    out = out + {[locale]: __sv_merge_catalog_locale(out?[locale] ?? [], raw[locale])}
+    out = out + {[locale]: __sv_merge_catalog_locale(out[locale] ?? [], raw[locale])}
   }
   return out
 }
@@ -292,7 +292,7 @@ fn __sv_any_prior_write_tools(payload) -> bool {
 fn __sv_no_phantom_completion_phrases(cfg, rule_cfg) {
   let locale = __sv_locale(rule_cfg?.locale ?? cfg?.locale)
   let catalog = __sv_dict(cfg?.no_phantom_completion_catalog)
-  let phrases = __sv_string_list(catalog?[locale] ?? catalog?.en ?? [])
+  let phrases = __sv_string_list(catalog[locale] ?? catalog?.en ?? [])
   return __sv_merge_catalog_locale([], phrases)
 }
 
@@ -547,7 +547,19 @@ fn __sv_tool_calls_well_formed(payload) {
   } else {
     []
   }
-  let protocol_violations = if should_enforce_text_protocol {
+  // `protocol_violations` are the recoverable wrapper/stray-prose class
+  // (leading narration outside `<assistant_prose>`, a call emitted bare or
+  // angle-wrapped instead of in `<tool_call>` tags, etc.). The text parser
+  // already RECOVERS those calls and surfaces them in `tool_calls`, so when
+  // dispatchable calls exist the turn did real work — vetoing it here would
+  // silently drop a fully-parsed `edit({...})` and strand the model in a
+  // re-emit loop until the stall detector fires. Only let a
+  // protocol-violation complaint veto when no calls were recovered (a turn
+  // that was pure stray prose). Genuine `parse_errors` (a call that failed to
+  // parse) and `schema_violations` (a parsed call with bad args) still veto
+  // regardless, because those represent broken calls, not wrapper noise.
+  let has_dispatchable_calls = len(__sv_list(payload?.tool_calls)) > 0
+  let protocol_violations = if should_enforce_text_protocol && !has_dispatchable_calls {
     __sv_string_list(payload?.protocol_violations)
   } else {
     []

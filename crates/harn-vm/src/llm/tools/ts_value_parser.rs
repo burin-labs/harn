@@ -40,6 +40,25 @@ impl<'a> TsValueParser<'a> {
         Some(b)
     }
 
+    /// Append a character to `out`, decoding a full multi-byte UTF-8 scalar from
+    /// the source when `b` is a non-ASCII lead byte. `advance()` yields one byte
+    /// at a time, so pushing `b as char` for a lead byte emits one Latin-1 char
+    /// per byte and mojibakes any accented / emoji / CJK value. Heredoc bodies
+    /// and `\u{...}` escapes already decode correctly; this keeps quoted and
+    /// template string values consistent with them.
+    fn push_scalar(&mut self, out: &mut String, b: u8) {
+        if b < 0x80 {
+            out.push(b as char);
+            return;
+        }
+        // `advance()` already consumed the lead byte (pos is past it). Decode the
+        // whole scalar from the lead byte and resync pos to the scalar's end.
+        let start = self.pos - 1;
+        let ch = self.text[start..].chars().next().unwrap_or('\u{FFFD}');
+        out.push(ch);
+        self.pos = start + ch.len_utf8();
+    }
+
     pub(super) fn skip_ws_and_comments(&mut self) {
         loop {
             while let Some(b) = self.peek() {
@@ -245,7 +264,7 @@ impl<'a> TsValueParser<'a> {
                     // syntax error. We accept it anyway so weaker models that
                     // forget the heredoc/template-literal rule still get their
                     // content through rather than silently dropping the call.
-                    out.push(b as char);
+                    self.push_scalar(&mut out, b);
                 }
             }
         }
@@ -311,12 +330,12 @@ impl<'a> TsValueParser<'a> {
                                 depth -= 1;
                                 out.push('}');
                             }
-                            Some(b) => out.push(b as char),
+                            Some(b) => self.push_scalar(&mut out, b),
                         }
                     }
                 }
                 Some(b) => {
-                    out.push(b as char);
+                    self.push_scalar(&mut out, b);
                 }
             }
         }
