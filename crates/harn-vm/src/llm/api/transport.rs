@@ -1116,7 +1116,13 @@ pub(super) async fn consume_sse_lines<R: tokio::io::AsyncBufRead + Unpin>(
 
     let _ = in_thinking_block; // suppress unused warning
 
-    if text.is_empty() && !thinking_text.is_empty() {
+    // When the stream is cut off mid-thought (finish_reason == "length") with
+    // no committed visible content, the reasoning trace is a partial, garbage
+    // not-an-answer. Promoting it into `.text` surfaces that garbage as the
+    // final answer. Leave `text` empty and expose the partial trace only via
+    // `thinking`, mirroring `openai_normalize::normalize_openai_message_text`.
+    let truncated = stop_reason.as_deref() == Some("length");
+    if !truncated && text.is_empty() && !thinking_text.is_empty() {
         text = thinking_text.clone();
         blocks
             .push(serde_json::json!({"type": "output_text", "text": text, "visibility": "public"}));
@@ -1859,6 +1865,57 @@ mod streaming_tool_call_tests {
             first_raw.unwrap().contains("hello"),
             "raw_input_partial should carry the concatenated bytes verbatim"
         );
+
+        clear_session_sinks(&session_id);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn openai_stream_truncated_reasoning_does_not_leak_into_text() {
+        // A reasoning model cut off mid-thought streams only `reasoning`
+        // deltas with no committed `content`, then finish_reason="length".
+        // The partial trace must NOT be promoted into `.text` (that garbage
+        // would surface as the answer); it stays under `.thinking`.
+        let body = concat!(
+            "data: {\"choices\":[{\"index\":0,\"delta\":{\"reasoning\":\"Let me think step\"}}]}\n",
+            "data: {\"choices\":[{\"index\":0,\"delta\":{\"reasoning\":\" by step about\"}}]}\n",
+            "data: {\"choices\":[{\"index\":0,\"finish_reason\":\"length\",\"delta\":{}}],\"usage\":{\"prompt_tokens\":4,\"completion_tokens\":6}}\n",
+            "data: [DONE]\n",
+        );
+        let session_id = fresh_session_id("oai-trunc");
+        let (result, _events) = drive(body.as_bytes(), &session_id, false).await;
+
+        assert_eq!(result.stop_reason.as_deref(), Some("length"));
+        assert_eq!(
+            result.text, "",
+            "truncated reasoning leaked into visible text: {:?}",
+            result.text
+        );
+        assert_eq!(
+            result.thinking.as_deref(),
+            Some("Let me think step by step about"),
+            "partial reasoning trace must survive under thinking"
+        );
+
+        clear_session_sinks(&session_id);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn openai_stream_reasoning_promotes_to_text_on_clean_stop() {
+        // Control: the same reasoning-only stream on a clean finish
+        // (finish_reason != "length") still promotes the trace into `.text`,
+        // preserving behaviour for models that answer in the reasoning channel.
+        let body = concat!(
+            "data: {\"choices\":[{\"index\":0,\"delta\":{\"reasoning\":\"the answer\"}}]}\n",
+            "data: {\"choices\":[{\"index\":0,\"delta\":{\"reasoning\":\" is 42\"}}]}\n",
+            "data: {\"choices\":[{\"index\":0,\"finish_reason\":\"stop\",\"delta\":{}}],\"usage\":{\"prompt_tokens\":4,\"completion_tokens\":3}}\n",
+            "data: [DONE]\n",
+        );
+        let session_id = fresh_session_id("oai-clean");
+        let (result, _events) = drive(body.as_bytes(), &session_id, false).await;
+
+        assert_eq!(result.stop_reason.as_deref(), Some("stop"));
+        assert_eq!(result.text, "the answer is 42");
+        assert_eq!(result.thinking.as_deref(), Some("the answer is 42"));
 
         clear_session_sinks(&session_id);
     }

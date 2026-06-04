@@ -661,7 +661,8 @@ pub(crate) fn parse_llm_response(
                 "{provider} API response missing choices[0].message"
             ))))
         })?;
-        let (text, extracted_thinking) = normalize_openai_message_text(message);
+        let finish_reason = choice["finish_reason"].as_str();
+        let (text, extracted_thinking) = normalize_openai_message_text(message, finish_reason);
         let reasoning_summary = extract_openai_reasoning_summary(json, message);
         let mut blocks = if text.is_empty() {
             Vec::new()
@@ -766,7 +767,7 @@ pub(crate) fn parse_llm_response(
         let output_tokens = json["usage"]["completion_tokens"].as_i64().unwrap_or(0);
         let cache_read_tokens = extract_cache_read_tokens(&json["usage"]);
         let cache_write_tokens = extract_cache_write_tokens(&json["usage"]);
-        let stop_reason = choice["finish_reason"].as_str().map(|s| s.to_string());
+        let stop_reason = finish_reason.map(|s| s.to_string());
         let request_id = json["id"].as_str().filter(|value| !value.is_empty());
         let telemetry = ProviderTelemetry::from_openai_usage(&json["usage"], request_id);
 

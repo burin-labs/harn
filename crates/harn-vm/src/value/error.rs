@@ -314,6 +314,14 @@ pub fn classify_error_message(msg: &str) -> ErrorCategory {
     if msg.contains("not_found_error") || msg.contains("model_not_found") {
         return ErrorCategory::NotFound;
     }
+    // OpenRouter reports an unknown model as HTTP 400 with the body
+    // "<id> is not a valid model ID" — no status-code or typed-error signal
+    // that `classify_by_http_status` / the checks above can latch onto. Map
+    // the prose to NotFound so it lines up with Cerebras's 404 path (and with
+    // `errors::is_model_unavailable`'s reason taxonomy).
+    if lower.contains("is not a valid model id") || lower.contains("invalid model id") {
+        return ErrorCategory::NotFound;
+    }
     if msg.contains("circuit_open") {
         return ErrorCategory::CircuitOpen;
     }
@@ -472,6 +480,23 @@ mod tests {
         assert_eq!(
             classify_error_message("operation canceled by host"),
             ErrorCategory::Cancelled
+        );
+    }
+
+    #[test]
+    fn classifies_openrouter_invalid_model_id_as_not_found() {
+        // OpenRouter reports an unknown model as HTTP 400 + prose. The 400 is
+        // not classified by status, so the prose substring must lift it to
+        // NotFound to match Cerebras's 404 path.
+        assert_eq!(
+            classify_error_message(
+                "openrouter API error: qwen/qwen3-coder-bogus is not a valid model ID"
+            ),
+            ErrorCategory::NotFound
+        );
+        assert_eq!(
+            classify_error_message("invalid model id supplied"),
+            ErrorCategory::NotFound
         );
     }
 
