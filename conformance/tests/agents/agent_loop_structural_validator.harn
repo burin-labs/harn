@@ -25,6 +25,13 @@ fn write_tools() {
 pipeline default() {
   let tool_text = "<tool_call>\nwrite_note({ path: \"notes.txt\" })\n</tool_call>"
   let malformed_tool_text = "<tool_call>\nwrite_note({ path: })\n</tool_call>"
+  // Leading narration emitted as bare prose (NOT wrapped in
+  // <assistant_prose>) ahead of a well-formed wrapped call. The parser
+  // recovers the call AND flags the stray prose as a protocol violation.
+  // The turn did real work, so `tool_calls_well_formed` must NOT veto it —
+  // vetoing here drops the recovered call and strands the model in a
+  // re-emit loop until the stall detector fires (the create-heavy failure).
+  let stray_prose_with_call_text = "I'll create notes.txt now.\n" + tool_text
   with_llm_script(
     [
       llm_text("I fixed it already."),
@@ -249,6 +256,32 @@ pipeline default() {
       let well_formed_decisions = events_of(well_formed.events, "structural_validator_decision")
       __io_println(well_formed.result.status == "done")
       __io_println(len(well_formed_decisions) == 0)
+    },
+  )
+  with_llm_script(
+    [llm_text(stray_prose_with_call_text), llm_text("<done>##DONE##</done>")],
+    { ->
+      let stray_call_session = "structural-validator-stray-prose-call-" + uuid()
+      let stray_call = agent_capture_events(
+        stray_call_session,
+        fn() { return agent_loop(
+          "Update notes.txt and then finish.",
+          nil,
+          {
+            provider: "mock",
+            tool_format: "text",
+            loop_until_done: true,
+            max_iterations: 3,
+            tools: write_tools(),
+            session_id: stray_call_session,
+            structural_validator: with_structural_validator({rules: ["tool_calls_well_formed"]}),
+          },
+        ) },
+      )
+      let stray_call_decisions = events_of(stray_call.events, "structural_validator_decision")
+      __io_println(stray_call.result.status == "done")
+      __io_println(stray_call.result.tools.successful[0] == "write_note")
+      __io_println(len(stray_call_decisions) == 0)
     },
   )
   with_llm_script(
