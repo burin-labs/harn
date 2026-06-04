@@ -261,6 +261,12 @@ fn parse_vertex_response(json: &serde_json::Value, model: &str) -> Result<LlmRes
         .unwrap_or(0);
     result.output_tokens = json["usageMetadata"]["candidatesTokenCount"]
         .as_i64()
+        .unwrap_or(0)
+        + json["usageMetadata"]["thoughtsTokenCount"]
+            .as_i64()
+            .unwrap_or(0);
+    result.cache_read_tokens = json["usageMetadata"]["cachedContentTokenCount"]
+        .as_i64()
         .unwrap_or(0);
     result.stop_reason = json["candidates"][0]["finishReason"]
         .as_str()
@@ -367,6 +373,27 @@ mod tests {
         assert_eq!(result.input_tokens, 3);
         assert_eq!(result.output_tokens, 4);
         assert_eq!(result.tool_calls[0]["name"], "lookup");
+    }
+
+    #[test]
+    fn parse_response_folds_thinking_and_cache_tokens() {
+        let response = json!({
+            "candidates": [{
+                "content": {"parts": [{"text": "done"}]},
+                "finishReason": "STOP"
+            }],
+            "usageMetadata": {
+                "promptTokenCount": 12,
+                "candidatesTokenCount": 4,
+                "thoughtsTokenCount": 9,
+                "cachedContentTokenCount": 6
+            }
+        });
+        let result = parse_vertex_response(&response, "gemini-2.5-pro").expect("result");
+        assert_eq!(result.input_tokens, 12);
+        // candidates(4) + thoughts(9) so thinking tokens are billed as output.
+        assert_eq!(result.output_tokens, 13);
+        assert_eq!(result.cache_read_tokens, 6);
     }
 
     fn base_request() -> LlmRequestPayload {
