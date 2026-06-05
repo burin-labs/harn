@@ -87,6 +87,7 @@ described below (`std/text`, `std/json`, `std/math`, `std/collections`,
 `std/runtime`, `std/command`, `std/gha`, `std/tui`, `std/git`,
 `std/review`, `std/experiments`,
 `std/project`, `std/memory`, `std/prompt_library`, `std/monitors`,
+`std/postgres/query`, `std/sqlite`,
 `std/net_policy`,
 `std/oauth/providers`, `std/triage`, `std/worktree`, `std/checkpoint`,
 `std/personas/prelude`, `std/personas/bulletins`,
@@ -785,6 +786,25 @@ fragments easier to review:
 
 Dynamic values must still be passed through `params`; identifier helpers reject
 unsafe names and are only for source-controlled column identifiers.
+
+### std/sqlite
+
+SQLite persistence helpers for local state, offline demos, event-log
+inspection, and deterministic fixtures:
+
+| Function | Description |
+|---|---|
+| `sqlite_open(path, options?)` | Open `:memory:` or a file-backed SQLite database |
+| `sqlite_query(handle, sql, params?)` | Run a parameterized query and return rows as dictionaries |
+| `sqlite_query_one(handle, sql, params?)` | Return the first row, or `nil` when no rows match |
+| `sqlite_execute(handle, sql, params?)` | Run a statement and return `{rows_affected}` |
+| `sqlite_transaction(db, callback, options?)` | Run a closure with a scoped transaction handle, committing on success and rolling back on error |
+| `sqlite_migrate(db, options)` | Apply pending `.sql` migration files |
+| `sqlite_mock_db(fixtures)` | Create fixture-backed SQLite test handle |
+| `sqlite_mock_calls(mock)` | Inspect mock SQL calls |
+
+See [SQLite](./sqlite.md) for file-open safety, SQLite type affinity,
+transactions, migrations, mocks, and the comparison with `std/postgres`.
 
 ### std/io
 

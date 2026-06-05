@@ -88,6 +88,8 @@ pub mod secret_scan;
 mod sets;
 pub(crate) mod shapes;
 mod skills;
+#[cfg(feature = "sqlite")]
+mod sqlite;
 mod strings;
 pub(crate) mod supervisor;
 pub mod template;
@@ -200,6 +202,8 @@ fn register_agent_stdlib_before_llm(vm: &mut Vm) {
     triggers_stdlib::register_trigger_builtins(vm);
     #[cfg(feature = "postgres")]
     postgres::register_postgres_builtins(vm);
+    #[cfg(feature = "sqlite")]
+    sqlite::register_sqlite_builtins(vm);
     waitpoints::register_waitpoint_builtins(vm);
     monitors::register_monitor_builtins(vm);
     hitl::register_hitl_builtins(vm);
@@ -420,6 +424,8 @@ pub fn reset_stdlib_state() {
     pool::reset_pool_state();
     #[cfg(feature = "postgres")]
     postgres::reset_postgres_state();
+    #[cfg(feature = "sqlite")]
+    sqlite::reset_sqlite_state();
     supervisor::reset_supervisor_state();
     agents::records::reset_eval_metrics();
     agents::records::reset_friction_events();
