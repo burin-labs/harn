@@ -2169,14 +2169,14 @@ public let harnProviderCatalogJSON = #"""
           "effort"
         ],
         "effort_supported": true,
-        "none_supported": true,
+        "none_supported": false,
         "interleaved_supported": false,
         "preserve_thinking": false
       },
       "prompt_cache": false,
       "pricing": {
-        "input_per_mtok": 0.25,
-        "output_per_mtok": 0.69,
+        "input_per_mtok": 0.35,
+        "output_per_mtok": 0.75,
         "cache_read_per_mtok": null,
         "cache_write_per_mtok": null
       },
@@ -2194,7 +2194,7 @@ public let harnProviderCatalogJSON = #"""
       ],
       "family": "openai-gpt",
       "lineage": "openai-legacy",
-      "tier": "mid",
+      "tier": "frontier",
       "open_weight": true,
       "strengths": [
         "speed",
@@ -2204,7 +2204,7 @@ public let harnProviderCatalogJSON = #"""
     },
     {
       "id": "llama-3.3-70b",
-      "name": "Llama 3.3 70B (Cerebras)",
+      "name": "Llama 3.3 70B (Cerebras, dedicated legacy)",
       "provider": "cerebras",
       "aliases": [],
       "context_window": 131072,
@@ -2248,9 +2248,10 @@ public let harnProviderCatalogJSON = #"""
         "cache_write_per_mtok": null
       },
       "deprecation": {
-        "status": "active"
+        "status": "deprecated",
+        "note": "Cerebras no longer returns this model from public discovery; use a provisioned dedicated endpoint alias if your organization still serves these weights."
       },
-      "availability": "serverless",
+      "availability": "dedicated",
       "quality_tags": [],
       "capability_tags": [
         "streaming",
@@ -2264,6 +2265,77 @@ public let harnProviderCatalogJSON = #"""
       "strengths": [
         "speed",
         "tool_use"
+      ]
+    },
+    {
+      "id": "zai-glm-4.7",
+      "name": "Z.ai GLM 4.7 (Cerebras)",
+      "provider": "cerebras",
+      "aliases": [],
+      "context_window": 131072,
+      "modalities": {
+        "input": [
+          "text"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
+        "tool_search": []
+      },
+      "structured_output": "native",
+      "format_preferences": {
+        "prefers_xml_scaffolding": false,
+        "prefers_markdown_scaffolding": true,
+        "structured_output_mode": "native_json",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "inline"
+      },
+      "reasoning": {
+        "modes": [
+          "effort"
+        ],
+        "effort_supported": true,
+        "none_supported": true,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": false,
+      "pricing": {
+        "input_per_mtok": 2.25,
+        "output_per_mtok": 2.75,
+        "cache_read_per_mtok": null,
+        "cache_write_per_mtok": null
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "thinking",
+        "extended_thinking",
+        "structured_output"
+      ],
+      "family": "glm",
+      "lineage": "glm",
+      "tier": "frontier",
+      "open_weight": true,
+      "strengths": [
+        "speed",
+        "coding",
+        "agentic",
+        "tool_use",
+        "reasoning"
       ]
     },
     {

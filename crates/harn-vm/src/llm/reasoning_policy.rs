@@ -118,7 +118,7 @@ fn resolve_policy(
             level = override_level.clone();
         }
     }
-    let Some(thinking) = thinking_for_reasoning_level(&level, caps) else {
+    let Some((thinking, effective_level)) = thinking_for_reasoning_level(&level, caps) else {
         return Ok(None);
     };
     Ok(Some(ReasoningPolicyApplication {
@@ -126,7 +126,7 @@ fn resolve_policy(
         policy,
         task,
         scale,
-        level,
+        level: effective_level,
         provider: provider.to_string(),
         model: model.to_string(),
     }))
@@ -277,30 +277,39 @@ fn auto_reasoning_level(task: &str, scale: &str) -> String {
     }
 }
 
-fn thinking_for_reasoning_level(level: &str, caps: &Capabilities) -> Option<ThinkingConfig> {
+fn thinking_for_reasoning_level(
+    level: &str,
+    caps: &Capabilities,
+) -> Option<(ThinkingConfig, String)> {
     if level == "off" {
         if caps_supports(caps, "effort") || caps.reasoning_effort_supported {
             if caps.reasoning_none_supported {
-                return Some(ThinkingConfig::Effort {
-                    level: ReasoningEffort::None,
-                });
+                return Some((
+                    ThinkingConfig::Effort {
+                        level: ReasoningEffort::None,
+                    },
+                    "none".to_string(),
+                ));
             }
-            return Some(ThinkingConfig::Effort {
-                level: ReasoningEffort::Minimal,
-            });
+            let level = lowest_supported_effort(caps).unwrap_or(ReasoningEffort::Minimal);
+            return Some((ThinkingConfig::Effort { level }, level.as_str().to_string()));
         }
-        return Some(ThinkingConfig::Disabled);
+        return Some((ThinkingConfig::Disabled, "off".to_string()));
     }
     if caps_supports(caps, "effort") || caps.reasoning_effort_supported {
-        return reasoning_effort_from_level(level).map(|level| ThinkingConfig::Effort { level });
+        return reasoning_effort_from_level(level)
+            .map(|level| (ThinkingConfig::Effort { level }, level.as_str().to_string()));
     }
     if caps_supports(caps, "enabled") {
-        return Some(ThinkingConfig::Enabled {
-            budget_tokens: Some(budget_for_reasoning_level(level)),
-        });
+        return Some((
+            ThinkingConfig::Enabled {
+                budget_tokens: Some(budget_for_reasoning_level(level)),
+            },
+            level.to_string(),
+        ));
     }
     if caps_supports(caps, "adaptive") {
-        return Some(ThinkingConfig::Adaptive);
+        return Some((ThinkingConfig::Adaptive, level.to_string()));
     }
     None
 }
@@ -320,6 +329,18 @@ fn reasoning_effort_from_level(level: &str) -> Option<ReasoningEffort> {
         "xhigh" => ReasoningEffort::XHigh,
         _ => return None,
     })
+}
+
+fn lowest_supported_effort(caps: &Capabilities) -> Option<ReasoningEffort> {
+    ["minimal", "low", "medium", "high", "xhigh"]
+        .into_iter()
+        .find_map(|candidate| {
+            caps.reasoning_effort_levels
+                .iter()
+                .any(|supported| supported == candidate)
+                .then(|| reasoning_effort_from_level(candidate))
+                .flatten()
+        })
 }
 
 fn budget_for_reasoning_level(level: &str) -> u32 {
@@ -450,6 +471,49 @@ mod tests {
         assert_eq!(
             thinking.get("level").map(VmValue::display).as_deref(),
             Some("high")
+        );
+    }
+
+    #[test]
+    fn off_policy_floors_to_low_for_cerebras_gpt_oss() {
+        let opts = BTreeMap::from([
+            (
+                "provider".to_string(),
+                VmValue::String(std::sync::Arc::from("cerebras")),
+            ),
+            (
+                "model".to_string(),
+                VmValue::String(std::sync::Arc::from("gpt-oss-120b")),
+            ),
+            (
+                "reasoning_policy".to_string(),
+                VmValue::String(std::sync::Arc::from("off")),
+            ),
+        ]);
+        let out = apply(opts);
+        let thinking = out
+            .get("thinking")
+            .and_then(VmValue::as_dict)
+            .expect("thinking");
+        assert_eq!(
+            thinking.get("mode").map(VmValue::display).as_deref(),
+            Some("effort")
+        );
+        assert_eq!(
+            thinking.get("level").map(VmValue::display).as_deref(),
+            Some("low")
+        );
+        let applied = out
+            .get("_agent_reasoning_policy_applied")
+            .and_then(VmValue::as_dict)
+            .expect("applied metadata");
+        assert_eq!(
+            applied.get("policy").map(VmValue::display).as_deref(),
+            Some("off")
+        );
+        assert_eq!(
+            applied.get("level").map(VmValue::display).as_deref(),
+            Some("low")
         );
     }
 
