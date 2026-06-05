@@ -113,3 +113,117 @@ pipeline default(task) {
         "referenced aliases should not trigger unused-type: {diags:?}"
     );
 }
+
+#[test]
+fn test_unused_type_ignores_binding_annotation_reference() {
+    let diags = lint_source(
+        r"
+type Payload = {value: int}
+
+pipeline default(task) {
+  let item: Payload = {value: 1}
+  log(item.value)
+}
+",
+    );
+    assert!(
+        !has_rule(&diags, "unused-type"),
+        "types referenced by binding annotations should not trigger unused-type: {diags:?}"
+    );
+}
+
+#[test]
+fn test_unused_type_ignores_pipeline_return_annotation_reference() {
+    let diags = lint_source(
+        r"
+type Payload = {value: int}
+
+pipeline default(task) -> Payload {
+  return {value: 1}
+}
+",
+    );
+    assert!(
+        !has_rule(&diags, "unused-type"),
+        "types referenced by pipeline return annotations should not trigger unused-type: {diags:?}"
+    );
+}
+
+#[test]
+fn test_unused_type_ignores_closure_param_annotation_reference() {
+    let diags = lint_source(
+        r"
+type Payload = {value: int}
+
+pipeline default(task) {
+  let read_value = { item: Payload -> item.value }
+  log(read_value({value: 1}))
+}
+",
+    );
+    assert!(
+        !has_rule(&diags, "unused-type"),
+        "types referenced by closure parameter annotations should not trigger unused-type: {diags:?}"
+    );
+}
+
+#[test]
+fn test_unused_type_ignores_function_call_type_arg_reference() {
+    let diags = lint_source(
+        r"
+type Payload = {value: int}
+
+fn identity<T>(item: T) -> T {
+  return item
+}
+
+pipeline default(task) {
+  let item = identity<Payload>({value: 1})
+  log(item.value)
+}
+",
+    );
+    assert!(
+        !has_rule(&diags, "unused-type"),
+        "types referenced by call type arguments should not trigger unused-type: {diags:?}"
+    );
+}
+
+#[test]
+fn test_unused_type_ignores_schema_of_reference() {
+    let diags = lint_source(
+        r"
+type Payload = {value: int}
+
+pipeline default(task) {
+  let schema = schema_of(Payload)
+  log(schema)
+}
+",
+    );
+    assert!(
+        !has_rule(&diags, "unused-type"),
+        "types referenced by schema_of(T) should not trigger unused-type: {diags:?}"
+    );
+}
+
+#[test]
+fn test_unused_type_ignores_typed_catch_reference() {
+    let diags = lint_source(
+        r#"
+type AppError = {message: string}
+
+pipeline default(task) {
+  try {
+    throw {message: "boom"}
+  } catch (err: AppError) {
+    log(err.message)
+  }
+}
+"#,
+    );
+    assert!(
+        !has_rule(&diags, "unused-type"),
+        "types referenced by typed catch clauses should not trigger unused-type: {diags:?}"
+    );
+}

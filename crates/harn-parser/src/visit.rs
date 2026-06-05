@@ -21,7 +21,7 @@
 //! into its children (pre-order). To stop recursion at a particular
 //! node, prefer using [`walk_children`] directly.
 
-use crate::ast::{BindingPattern, DictEntry, MatchArm, Node, SNode, SelectCase};
+use crate::ast::{BindingPattern, DictEntry, MatchArm, Node, SNode, SelectCase, TypedParam};
 
 /// Walk every node in `program` in pre-order, invoking `visitor` on
 /// each.
@@ -83,14 +83,22 @@ fn collect_children<'a>(node: &'a SNode, children: &mut Vec<&'a SNode>) {
         Node::ConstBinding { value, .. } => {
             children.push(value);
         }
-        Node::EnumDecl { .. }
-        | Node::StructDecl { .. }
-        | Node::InterfaceDecl { .. }
+        Node::EnumDecl { variants, .. } => {
+            for variant in variants {
+                collect_typed_param_defaults(&variant.fields, children);
+            }
+        }
+        Node::StructDecl { .. }
         | Node::ImportDecl { .. }
         | Node::SelectiveImport { .. }
         | Node::TypeDecl { .. }
         | Node::BreakStmt
         | Node::ContinueStmt => {}
+        Node::InterfaceDecl { methods, .. } => {
+            for method in methods {
+                collect_typed_param_defaults(&method.params, children);
+            }
+        }
         Node::ImplBlock { methods, .. } => collect_nodes(methods, children),
         Node::IfElse {
             condition,
@@ -152,15 +160,19 @@ fn collect_children<'a>(node: &'a SNode, children: &mut Vec<&'a SNode>) {
         | Node::SpawnExpr { body }
         | Node::ScopeBlock { body }
         | Node::DeferStmt { body }
-        | Node::Block(body)
-        | Node::Closure { body, .. } => collect_nodes(body, children),
+        | Node::Block(body) => collect_nodes(body, children),
+        Node::Closure { params, body, .. } => {
+            collect_typed_param_defaults(params, children);
+            collect_nodes(body, children);
+        }
         Node::MutexBlock { key, body } => {
             if let Some(key) = key {
                 children.push(key);
             }
             collect_nodes(body, children);
         }
-        Node::FnDecl { body, .. } | Node::ToolDecl { body, .. } => {
+        Node::FnDecl { params, body, .. } | Node::ToolDecl { params, body, .. } => {
+            collect_typed_param_defaults(params, children);
             collect_nodes(body, children);
         }
         Node::SkillDecl { fields, .. } => collect_field_values(fields, children),
@@ -314,6 +326,14 @@ fn collect_option_values<'a>(options: &'a [(String, SNode)], children: &mut Vec<
     }
 }
 
+fn collect_typed_param_defaults<'a>(params: &'a [TypedParam], children: &mut Vec<&'a SNode>) {
+    for param in params {
+        if let Some(default) = &param.default_value {
+            children.push(default);
+        }
+    }
+}
+
 fn collect_match_arm<'a>(arm: &'a MatchArm, children: &mut Vec<&'a SNode>) {
     children.push(&arm.pattern);
     if let Some(guard) = &arm.guard {
@@ -350,7 +370,7 @@ fn collect_binding_pattern<'a>(pattern: &'a BindingPattern, children: &mut Vec<&
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ast::{spanned, Node};
+    use crate::ast::{spanned, Node, TypedParam};
     use harn_lexer::Span;
 
     fn dummy(node: Node) -> SNode {
@@ -397,5 +417,34 @@ mod tests {
         walk_node(&node, &mut |_| count += 1);
 
         assert_eq!(count, 10_001);
+    }
+
+    #[test]
+    fn walk_node_visits_typed_param_defaults() {
+        let default = dummy(Node::Identifier("fallback".to_string()));
+        let node = dummy(Node::FnDecl {
+            name: "load".to_string(),
+            type_params: Vec::new(),
+            params: vec![TypedParam {
+                name: "root".to_string(),
+                type_expr: None,
+                default_value: Some(Box::new(default)),
+                rest: false,
+            }],
+            return_type: None,
+            where_clauses: Vec::new(),
+            body: Vec::new(),
+            is_pub: false,
+            is_stream: false,
+        });
+        let mut seen = Vec::new();
+
+        walk_node(&node, &mut |node| {
+            if let Node::Identifier(name) = &node.node {
+                seen.push(name.clone());
+            }
+        });
+
+        assert_eq!(seen, vec!["fallback"]);
     }
 }

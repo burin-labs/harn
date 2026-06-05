@@ -30,6 +30,9 @@ impl<'a> Linter<'a> {
                 ..
             } => {
                 self.known_functions.insert(name.clone());
+                if let Some(type_expr) = return_type {
+                    self.record_type_expr_references(type_expr);
+                }
                 if return_type.is_none()
                     && *is_pub
                     && !Self::is_entry_pipeline_name(name)
@@ -112,10 +115,7 @@ impl<'a> Linter<'a> {
                 if *is_pub && self.require_stdlib_metadata {
                     self.check_stdlib_metadata(name, snode.span);
                 }
-                self.record_param_type_references(params);
-                if let Some(type_expr) = return_type {
-                    self.record_type_expr_references(type_expr);
-                }
+                self.record_callable_signature_type_references(params, return_type);
                 for clause in where_clauses {
                     self.type_references.insert(clause.bound.clone());
                 }
@@ -132,6 +132,7 @@ impl<'a> Linter<'a> {
                 if harn_vm::connector_export_effect_class(name).is_some() {
                     self.connector_effect_export_stack.push(name.clone());
                 }
+                self.lint_param_default_values(params);
                 let _ = self.analyze_secret_scan_block(body, false);
                 self.enter_long_running_body(body);
                 self.lint_block(body);
@@ -161,10 +162,7 @@ impl<'a> Linter<'a> {
                     is_pub: *is_pub,
                     is_method: false,
                 });
-                self.record_param_type_references(params);
-                if let Some(type_expr) = return_type {
-                    self.record_type_expr_references(type_expr);
-                }
+                self.record_callable_signature_type_references(params, return_type);
                 self.check_cyclomatic_complexity(name, body, snode.span);
                 self.push_scope();
                 let saved_loop_depth = self.loop_depth;
@@ -175,6 +173,7 @@ impl<'a> Linter<'a> {
                 self.return_type_stack.push(return_type.clone());
                 self.harness_param_stack
                     .push(Self::callable_harness_param(params));
+                self.lint_param_default_values(params);
                 let _ = self.analyze_secret_scan_block(body, false);
                 self.enter_long_running_body(body);
                 self.lint_block(body);
@@ -255,6 +254,7 @@ impl<'a> Linter<'a> {
                 }
                 self.lint_node(value);
                 if let Some(ann) = type_ann {
+                    self.record_type_expr_references(ann);
                     self.check_eager_collection_conversion(ann, value);
                 }
                 self.declare_pattern_variables(pattern, snode.span, false);
@@ -271,6 +271,7 @@ impl<'a> Linter<'a> {
                 }
                 self.lint_node(value);
                 if let Some(ann) = type_ann {
+                    self.record_type_expr_references(ann);
                     self.check_eager_collection_conversion(ann, value);
                 }
                 self.declare_pattern_variables(pattern, snode.span, true);
@@ -285,6 +286,7 @@ impl<'a> Linter<'a> {
                 self.record_mcp_registry_binding(name, value);
                 self.lint_node(value);
                 if let Some(ann) = type_ann {
+                    self.record_type_expr_references(ann);
                     self.check_eager_collection_conversion(ann, value);
                 }
                 let pattern = harn_parser::BindingPattern::Identifier(name.clone());
@@ -306,7 +308,11 @@ impl<'a> Linter<'a> {
                 self.function_references.insert(name.clone());
             }
 
-            Node::FunctionCall { name, args, .. } => {
+            Node::FunctionCall {
+                name,
+                type_args,
+                args,
+            } => {
                 self.check_renamed_stdlib_symbol(name, snode.span);
                 self.check_ambient_clock_builtin(name, snode.span);
                 self.check_ambient_stdio_builtin(name, snode.span);
@@ -394,6 +400,14 @@ impl<'a> Linter<'a> {
                 }
                 if Self::call_uses_long_running_flag(name, args) {
                     self.warn_unmanaged_long_running_call(name, snode.span);
+                }
+                for type_arg in type_args {
+                    self.record_type_expr_references(type_arg);
+                }
+                if name == "schema_of" && args.len() == 1 {
+                    if let Node::Identifier(type_name) = &args[0].node {
+                        self.type_references.insert(type_name.clone());
+                    }
                 }
                 for arg in args {
                     self.lint_node(arg);
@@ -836,10 +850,14 @@ impl<'a> Linter<'a> {
                 has_catch: _,
                 body,
                 error_var,
+                error_type,
                 catch_body,
                 finally_body,
                 ..
             } => {
+                if let Some(error_type) = error_type {
+                    self.record_type_expr_references(error_type);
+                }
                 if body.is_empty() {
                     self.diagnostics.push(LintDiagnostic {
                         code: Code::LintEmptyBlock,
@@ -941,12 +959,14 @@ impl<'a> Linter<'a> {
             }
 
             Node::Closure { params, body, .. } => {
+                self.record_param_type_references(params);
                 self.push_scope();
                 let saved_loop_depth = self.loop_depth;
                 self.loop_depth = 0;
                 for p in params {
                     self.declare_parameter(&p.name, snode.span);
                 }
+                self.lint_param_default_values(params);
                 self.enter_long_running_body(body);
                 self.lint_block(body);
                 self.exit_long_running_body();
@@ -1005,7 +1025,10 @@ impl<'a> Linter<'a> {
                 self.pop_scope();
             }
 
-            Node::MutexBlock { body, .. } => {
+            Node::MutexBlock { key, body } => {
+                if let Some(key) = key {
+                    self.lint_node(key);
+                }
                 self.push_scope();
                 self.lint_block(body);
                 self.pop_scope();

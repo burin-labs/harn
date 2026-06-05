@@ -87,6 +87,29 @@ pipeline default(task) {
 }
 
 #[test]
+fn test_import_used_in_parameter_default_is_kept() {
+    let source = r#"import { eval_repo_root } from "mod"
+
+fn load_cases(root = eval_repo_root()) {
+  return root
+}
+
+pipeline default(task) {
+  log(load_cases())
+}
+"#;
+    let diags = lint_source(source);
+    assert!(
+        !has_rule(&diags, "unused-import"),
+        "imports used in parameter defaults should not be removed: {diags:?}"
+    );
+    assert!(
+        !has_rule(&diags, "undefined-function"),
+        "parameter default calls should register imported function references: {diags:?}"
+    );
+}
+
+#[test]
 fn test_import_order_fires_when_out_of_order() {
     let source = "import \"std/io\"\nimport \"std/fs\"\n\nfn a() -> int { return 1 }\n";
     let diags = lint_source(source);
