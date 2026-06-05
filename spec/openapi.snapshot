@@ -26,6 +26,11 @@ POST /v1/sessions
 GET /v1/sessions/{session_id}
 PATCH /v1/sessions/{session_id}
 POST /v1/sessions/{session_id}/close
+GET /v1/sessions/{session_id}/live-clients
+POST /v1/sessions/{session_id}/attach
+POST /v1/sessions/{session_id}/takeover
+POST /v1/sessions/{session_id}/detach
+POST /v1/sessions/{session_id}/heartbeat
 POST /v1/sessions/{session_id}/fork
 POST /v1/sessions/{session_id}/truncate
 GET /v1/sessions/{session_id}/messages
@@ -118,6 +123,11 @@ UpdateSessionRequest
 ForkSessionRequest
 TruncateSessionRequest
 TruncateSessionResponse
+LiveSessionClient
+AttachSessionClientRequest
+SessionClientRequest
+LiveSessionClientChange
+LiveSessionClientList
 Task
 TaskStatus
 TaskList
