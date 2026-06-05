@@ -8,6 +8,24 @@ highlights live in [CHANGELOG-pre-0.6.md](CHANGELOG-pre-0.6.md).
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.8.76
+
+### Fixed
+
+- **Windows release binaries.** Fixed the Windows release binary build by
+  importing the process-sandbox preset type wherever the shared sandbox preset
+  helpers are compiled (#3068).
+- **Windows process sandbox cwd handling.** Sandboxed foreground process
+  launches now choose an allowed workspace cwd when the caller does not provide
+  one, avoiding inherited host cwd access that could stall AppContainer-backed
+  `shell()`/`exec()` calls on Windows (#3069).
+- **Windows process sandbox launches.** AppContainer-backed `shell()`/`exec()`
+  calls now run with AppContainer-owned `LOCALAPPDATA`, `TEMP`, and `TMP`
+  directories, no console desktop binding, and no implicit recursive ACL churn
+  over shared home-scoped Cargo/Rustup/package-manager caches, preventing
+  sandboxed process calls from hanging on Windows CI and release smoke jobs
+  (#3070).
+
 ## v0.8.75
 
 ### Added
