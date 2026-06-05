@@ -8,6 +8,32 @@ highlights live in [CHANGELOG-pre-0.6.md](CHANGELOG-pre-0.6.md).
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.8.74
+
+### Changed
+
+- **Cerebras model catalog tracks the current public endpoint set.**
+  `gpt-oss-120b` now uses Cerebras's public discovery pricing, `zai-glm-4.7`
+  is cataloged as the current public preview coding/agentic route with native
+  tools and `reasoning_effort="none"` support, and the stale Cerebras Llama row
+  is marked dedicated-only so clients do not present it as a one-click
+  serverless option.
+- Harn now models provider-specific `reasoning_effort` value sets so
+  Cerebras-hosted `gpt-oss-120b` floors `reasoning_policy: "off"` to the
+  endpoint's supported `low` effort instead of sending unsupported `none` or
+  `minimal` values, and structured LLM calls accept the same documented routing,
+  reasoning, timeout, fast-mode, and prompt-assembly option keys as `llm_call`.
+
+### Fixed
+
+- **Compaction honors its `tool_output_max_chars` / `compress_callback` policy.**
+  The compaction engine parsed, defaulted (16k), and documented these fields but
+  never applied them, so oversized tool-result bodies in the kept context window
+  stayed at full length. They are now clamped during compaction — via a custom
+  `compress_callback` when set, otherwise the built-in microcompactor — while
+  each message's `role` and `tool_call_id` are preserved so tool-call pairing
+  stays intact.
+
 ## v0.8.73
 
 ### Added
