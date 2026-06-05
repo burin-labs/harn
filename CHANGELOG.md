@@ -8,6 +8,58 @@ highlights live in [CHANGELOG-pre-0.6.md](CHANGELOG-pre-0.6.md).
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.8.75
+
+### Added
+
+- Added first-party CircleCI and Buildkite connector contract fixtures and
+  discovery docs, including signed webhook normalization coverage and connector
+  parity matrix entries.
+- Added a format-aware tool-call paradigm (`agent_tool_call_paradigm`,
+  `agent_render_tool_call_exemplar`, and a `body_hint` prompt binding) so
+  prompts and tool descriptions reference an abstract paradigm that maps to the
+  current model's format -- heredoc-bodied text or native JSON -- giving weak
+  models an escape-free body channel by default. `agent_progress` no longer
+  aborts a turn on an out-of-enum status/priority, and the value parser recovers
+  an object string value that closes early on an embedded unescaped quote.
+
+### Fixed
+
+- Expanded the default process sandbox `developer_toolchains` preset to cover
+  common home-dir runtimes such as `uv`, `rustup`/`cargo`, `pyenv`, `nvm`,
+  `volta`, and `~/go`, and extended the same home-scoped preset logic to the
+  Windows AppContainer backend so sandboxed child processes can load
+  user-managed toolchains without widening Harn's file builtins.
+- Kept `harn rule test` project discovery aligned with rule-pack loading:
+  missing `[rules] ruleDirs` now fail clearly, and nested utility directories
+  are no longer swept into the default rule-test gate.
+- **Cheap models no longer loop on JSON-escaped heredoc bodies; parse errors now
+  reach the model.** Two fixes for the failure where a model's `edit(...)` turn
+  yielded zero tool calls and then re-emitted the identical malformed call until
+  the loop exhausted. (1) Parser recovery: a `<<EOF` heredoc whose body uses
+  literal `\n` line breaks (the JSON-escaped one-liner form cheap models like
+  qwen3.6 emit) is now decoded and dispatched instead of hard-rejected with
+  "expected newline after heredoc tag"; real-newline heredocs are parsed exactly
+  as before. (2) Feedback fidelity: a turn whose tool calls were all dropped by
+  the parser now gets the purpose-built `parse_guidance` feedback (which names
+  the exact diagnostic and shows the heredoc syntax) and is excluded from the
+  no-progress stall streak, instead of the misleading "emit one well-formed tool
+  call" nudge. Both fire purely on the syntactic parse-error condition, so strong
+  models that emit clean calls never trigger them.
+- **Unused-symbol linting now counts references from callable defaults and
+  type-only positions.** Imports, parameters, locals, and types referenced from
+  default parameter expressions, keyed mutex expressions, binding annotations,
+  pipeline return annotations, closure parameter annotations, typed catch
+  clauses, explicit generic call type arguments, or `schema_of(T)` are no
+  longer reported as unused.
+- **Policy, parser, host process, and OAuth edge cases are now handled more
+  strictly.** Unix-socket JSON requests and provider file uploads now
+  participate in network/file policy gates and handoff effects, malformed
+  loopback OAuth requests no longer abort a pending valid callback, background
+  command handles preserve unavailable process-group IDs as `nil`, background
+  feedback peeks no longer restamp unrelated inbox entries, and generic and
+  `where` lists reject empty/trailing-comma forms.
+
 ## v0.8.74
 
 ### Changed
