@@ -10,7 +10,10 @@ name: Build release binaries
 #   2. push main — warm-cache-only mode. Runs the same build matrix to
 #      populate the per-target Swatinem rust-cache on main so the next
 #      tag push can restore warm via restore-keys prefix matching.
-#      Skips sign/notarize/package/upload/release/container.
+#      Skips sign/notarize/package/upload/release/container. Release PR
+#      merge commits are skipped here: their tag release is already running
+#      from the same source state, and an overlapping main warm cannot save
+#      a default-branch cache early enough to help that active tag run.
 #
 #      The setup job below short-circuits this mode unless the push
 #      changed Cargo.lock, any **/Cargo.toml, rust-toolchain.toml, this
@@ -134,20 +137,24 @@ jobs:
             VERSION="$(grep '^version' Cargo.toml | head -1 | sed 's/.*"\(.*\)".*/\1/')"
             echo "::notice::Warm-cache-only run (schedule). Building release binaries to populate the per-target Swatinem rust-cache on main. No sign/notarize/package/upload/release/container."
           elif [[ "$EVENT_NAME" == "push" && "$REF_NAME" == "main" ]]; then
-            # Push-to-main warm-cache run, but only when this push actually
-            # changed something that rotates Swatinem's exact cache key.
-            # For non-keying pushes the previous warm cache is still good
-            # and a rebuild adds no signal.
-            CHANGED_KEYING_FILES="$(git diff --name-only HEAD^ HEAD -- Cargo.lock Cargo.toml '**/Cargo.toml' rust-toolchain.toml scripts/check_binary_size.sh .github/workflows/build-release-binaries.yml 2>/dev/null || true)"
-            if [[ -n "$CHANGED_KEYING_FILES" ]]; then
-              SHOULD_BUILD_BINARIES=true
-              VERSION="$(grep '^version' Cargo.toml | head -1 | sed 's/.*"\(.*\)".*/\1/')"
-              echo "::notice::Warm-cache-only run (push main). Keying files changed:"
-              while IFS= read -r f; do printf '::notice::  %s\n' "$f"; done <<<"$CHANGED_KEYING_FILES"
-              echo "::notice::Building release binaries to populate the per-target Swatinem rust-cache on main. No sign/notarize/package/upload/release/container."
+            VERSION="$(grep '^version' Cargo.toml | head -1 | sed 's/.*"\(.*\)".*/\1/')"
+            COMMIT_SUBJECT="$(git log -1 --pretty=%s)"
+            if [[ "$COMMIT_SUBJECT" =~ ^Release[[:space:]]v[0-9]+\.[0-9]+\.[0-9]+ ]]; then
+              echo "::notice::Push to main is a release merge commit ('$COMMIT_SUBJECT'). The tag release builds the same source state, and an overlapping warm-cache run cannot help that active release. Skipping build matrix; the daily schedule will refresh the main cache."
             else
-              VERSION="$(grep '^version' Cargo.toml | head -1 | sed 's/.*"\(.*\)".*/\1/')"
-              echo "::notice::Push to main did not change Cargo.lock / Cargo.toml / **/Cargo.toml / rust-toolchain.toml / scripts/check_binary_size.sh / build-release-binaries.yml — existing warm cache still keys cleanly. Skipping build matrix."
+              # Push-to-main warm-cache run, but only when this push actually
+              # changed something that rotates Swatinem's exact cache key.
+              # For non-keying pushes the previous warm cache is still good
+              # and a rebuild adds no signal.
+              CHANGED_KEYING_FILES="$(git diff --name-only HEAD^ HEAD -- Cargo.lock Cargo.toml '**/Cargo.toml' rust-toolchain.toml scripts/check_binary_size.sh .github/workflows/build-release-binaries.yml 2>/dev/null || true)"
+              if [[ -n "$CHANGED_KEYING_FILES" ]]; then
+                SHOULD_BUILD_BINARIES=true
+                echo "::notice::Warm-cache-only run (push main). Keying files changed:"
+                while IFS= read -r f; do printf '::notice::  %s\n' "$f"; done <<<"$CHANGED_KEYING_FILES"
+                echo "::notice::Building release binaries to populate the per-target Swatinem rust-cache on main. No sign/notarize/package/upload/release/container."
+              else
+                echo "::notice::Push to main did not change Cargo.lock / Cargo.toml / **/Cargo.toml / rust-toolchain.toml / scripts/check_binary_size.sh / build-release-binaries.yml — existing warm cache still keys cleanly. Skipping build matrix."
+              fi
             fi
           else
             VERSION="$(grep '^version' Cargo.toml | head -1 | sed 's/.*"\(.*\)".*/\1/')"
@@ -366,7 +373,7 @@ jobs:
           save-if: ${{ (github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name == 'schedule' }}
 
       - name: Install cargo-bloat
-        if: matrix.target == 'x86_64-unknown-linux-gnu'
+        if: matrix.target == 'x86_64-unknown-linux-gnu' && needs.setup.outputs.is_release != 'true'
         uses: taiki-e/install-action@8f531eaecd1898bc3da7d104ad91bee98d1b97bd # v2.79.9
         with:
           tool: cargo-bloat
@@ -578,9 +585,18 @@ jobs:
           cd dist
           7z a "harn-${{ matrix.target }}.zip" harn.exe harn-dap.exe harn-lsp.exe
 
-      - name: Check binary size
+      - name: Check binary size budget
         if: matrix.target == 'x86_64-unknown-linux-gnu'
         shell: bash
+        env:
+          BINARY_SIZE_REPORT_DIR: dist/binary-size-${{ matrix.target }}
+          HARN_RELEASE_TARGET: ${{ matrix.target }}
+        run: ./scripts/check_binary_size.sh --no-build --target "$HARN_RELEASE_TARGET" --skip-bloat
+
+      - name: Generate cargo-bloat report (warm only)
+        if: matrix.target == 'x86_64-unknown-linux-gnu' && needs.setup.outputs.is_release != 'true'
+        shell: bash
+        continue-on-error: true
         env:
           BINARY_SIZE_REPORT_DIR: dist/binary-size-${{ matrix.target }}
           HARN_RELEASE_TARGET: ${{ matrix.target }}
@@ -600,6 +616,7 @@ jobs:
         with:
           name: harn-${{ matrix.target }}
           path: dist/harn-${{ matrix.target }}.tar.gz
+          compression-level: 0
 
       - name: Upload artifact (windows)
         if: needs.setup.outputs.is_release == 'true' && runner.os == 'Windows'
@@ -607,6 +624,7 @@ jobs:
         with:
           name: harn-${{ matrix.target }}
           path: dist/harn-${{ matrix.target }}.zip
+          compression-level: 0
 
       # Publish THIS target's archive to the prerelease the moment it is built,
       # so consumers that only need one architecture can fetch it without

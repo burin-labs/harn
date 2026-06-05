@@ -1,12 +1,13 @@
 #!/usr/bin/env bash
-# Build-or-check the shipped harn release binary against a size budget and
-# write a cargo-bloat report for follow-up analysis.
+# Build-or-check the shipped harn release binary against a size budget and,
+# unless disabled, write a cargo-bloat report for follow-up analysis.
 
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 build_release=1
+emit_bloat=1
 target="${HARN_RELEASE_TARGET:-}"
 harn_bin="${HARN_BIN:-}"
 budget_mb="${BINARY_SIZE_BUDGET_MB:-185}"
@@ -25,6 +26,7 @@ Options:
   --bin PATH           Override the harn binary path
   --budget-mb MB       Maximum binary size in MiB (default: 185)
   --report-dir DIR     Directory for binary-size and cargo-bloat reports
+  --skip-bloat         Only write binary-size.txt; do not run cargo-bloat
   -h, --help           Show this help
 
 Environment:
@@ -65,6 +67,10 @@ while [[ $# -gt 0 ]]; do
       fi
       budget_mb="${2:-}"
       shift 2
+      ;;
+    --skip-bloat)
+      emit_bloat=0
+      shift
       ;;
     --report-dir)
       if [[ $# -lt 2 ]]; then
@@ -123,27 +129,13 @@ if [[ ! -f "$harn_bin" ]]; then
   exit 1
 fi
 
-mkdir -p "$report_dir"
-
-# `cargo bloat` performs its own analysis build and can relink the target
-# binary with different metadata. Preserve the exact stripped binary whose size
-# we checked so the script is safe to run before a packaging step.
-restore_dir="$(mktemp -d "${TMPDIR:-/tmp}/harn-binary-size.XXXXXX")"
-checked_binary="$restore_dir/harn"
-cp -p "$harn_bin" "$checked_binary"
-restore_checked_binary() {
-  if [[ -f "$checked_binary" ]]; then
-    cp -p "$checked_binary" "$harn_bin"
-  fi
-  rm -rf "$restore_dir"
-}
-trap restore_checked_binary EXIT
-
 actual_bytes="$(wc -c < "$harn_bin" | tr -d '[:space:]')"
 actual_mib="$(awk -v bytes="$actual_bytes" 'BEGIN { printf "%.2f", bytes / 1024 / 1024 }')"
 budget_mib="$(awk -v bytes="$budget_bytes" 'BEGIN { printf "%.2f", bytes / 1024 / 1024 }')"
 size_report="$report_dir/binary-size.txt"
 bloat_report="$report_dir/cargo-bloat-crates.txt"
+
+mkdir -p "$report_dir"
 
 {
   echo "harn binary size"
@@ -162,30 +154,51 @@ if (( actual_bytes > budget_bytes )); then
   echo "error: harn binary is ${actual_mib} MiB, above budget ${budget_mib} MiB" >&2
 fi
 
-if ! command -v cargo-bloat >/dev/null 2>&1; then
-  echo "error: cargo-bloat is required to produce $bloat_report" >&2
-  exit 2
+if [[ "$emit_bloat" -eq 1 ]]; then
+  if ! command -v cargo-bloat >/dev/null 2>&1; then
+    echo "error: cargo-bloat is required to produce $bloat_report" >&2
+    exit 2
+  fi
+
+  # `cargo bloat` performs its own analysis build and can relink the target
+  # binary with different metadata. Preserve the exact stripped binary whose
+  # size we checked so the script is safe to run before a packaging step.
+  restore_dir="$(mktemp -d "${TMPDIR:-/tmp}/harn-binary-size.XXXXXX")"
+  checked_binary="$restore_dir/harn"
+  cp -p "$harn_bin" "$checked_binary"
+  restore_checked_binary() {
+    if [[ -f "$checked_binary" ]]; then
+      cp -p "$checked_binary" "$harn_bin"
+    fi
+    rm -rf "$restore_dir"
+  }
+  trap restore_checked_binary EXIT
+
+  cargo_bloat_target_dir_args=()
+  if [[ -n "${CARGO_TARGET_DIR:-}" ]]; then
+    cargo_bloat_target_dir_args=(--target-dir "$CARGO_TARGET_DIR")
+  fi
+
+  cargo bloat \
+    --release \
+    --crates \
+    -p harn-cli \
+    --bin harn \
+    "${target_args[@]}" \
+    "${cargo_bloat_target_dir_args[@]}" \
+    -n 40 \
+    > "$bloat_report"
+
+  {
+    echo
+    echo "cargo-bloat report: $bloat_report"
+  } | tee -a "$size_report"
+else
+  {
+    echo
+    echo "cargo-bloat report: skipped"
+  } | tee -a "$size_report"
 fi
-
-cargo_bloat_target_dir_args=()
-if [[ -n "${CARGO_TARGET_DIR:-}" ]]; then
-  cargo_bloat_target_dir_args=(--target-dir "$CARGO_TARGET_DIR")
-fi
-
-cargo bloat \
-  --release \
-  --crates \
-  -p harn-cli \
-  --bin harn \
-  "${target_args[@]}" \
-  "${cargo_bloat_target_dir_args[@]}" \
-  -n 40 \
-  > "$bloat_report"
-
-{
-  echo
-  echo "cargo-bloat report: $bloat_report"
-} | tee -a "$size_report"
 
 if [[ "$size_ok" -ne 1 ]]; then
   exit 1
