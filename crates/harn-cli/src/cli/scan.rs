@@ -4,7 +4,7 @@ use clap::Args;
 ///
 /// Two shapes:
 ///   * `harn scan '<pattern>' [paths...] --lang <lang>` — inline pattern.
-///   * `harn scan --rule <file>|--rule-pack <dir> [paths...]` — saved rule(s).
+///   * `harn scan --rule <file>|--rule-pack <pack> [paths...]` — saved rule(s).
 ///
 /// With `--rule`/`--rule-pack` every positional is a path; otherwise the first
 /// positional is the pattern and the rest are paths (the shim disambiguates,
@@ -20,8 +20,8 @@ pub(crate) struct ScanArgs {
     /// Run a rule from a TOML file instead of an inline pattern.
     #[arg(long = "rule", value_name = "FILE")]
     pub rule: Option<String>,
-    /// Run every `*.toml` rule in a directory (a rule pack).
-    #[arg(long = "rule-pack", value_name = "DIR", conflicts_with = "rule")]
+    /// Run every `*.toml` rule in a directory or installed package.
+    #[arg(long = "rule-pack", value_name = "PACK", conflicts_with = "rule")]
     pub rule_pack: Option<String>,
     /// Emit a JSON envelope instead of human-readable output.
     #[arg(long)]

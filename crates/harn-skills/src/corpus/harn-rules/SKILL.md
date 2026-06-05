@@ -69,7 +69,7 @@ conformance fixtures.
 ## From the CLI
 
 - `harn scan '<pattern>' <paths> --lang <lang>` — structural search; also
-  `--rule <file>` / `--rule-pack <dir>`, `--report-only` (per-file counts),
+  `--rule <file>` / `--rule-pack <pack>`, `--report-only` (per-file counts),
   `--json`.
 - `harn codemod --rule <file> <paths>` — **dry-run by default** (a unified diff
   per file with safety + idempotency); `--apply` writes (capability-gated),

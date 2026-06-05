@@ -62,6 +62,65 @@ fn no_path_discovers_project_ruledirs() {
 }
 
 #[test]
+fn no_path_validates_project_ruledirs() {
+    let dir = fixture_dir("missing-dir");
+    write(&dir, "harn.toml", "[rules]\nruleDirs = [\"missing\"]\n");
+
+    let out = Command::new(env!("CARGO_BIN_EXE_harn"))
+        .current_dir(&dir)
+        .args(["rule", "test"])
+        .output()
+        .expect("spawn");
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert_ne!(out.status.code().unwrap_or(-1), 0, "stderr={stderr}");
+    assert!(stderr.contains("not a directory"), "stderr={stderr}");
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn no_path_project_discovery_does_not_sweep_nested_utility_dirs() {
+    let dir = fixture_dir("nested-util");
+    std::fs::create_dir_all(dir.join("rules/util")).unwrap();
+    write(
+        &dir,
+        "harn.toml",
+        "[rules]\nruleDirs = [\"rules\"]\nutilDirs = [\"rules/util\"]\n",
+    );
+    write(&dir, "rules/no-foo.toml", NO_FOO);
+    write(
+        &dir,
+        "rules/no-foo.ts",
+        "// ruleid: no-foo\nfoo();\n// ok: no-foo\nbar();\n",
+    );
+    write(
+        &dir,
+        "rules/util/helper.toml",
+        "id = \"helper\"\nlanguage = \"typescript\"\n[rule]\npattern = \"helper()\"\n",
+    );
+
+    let out = Command::new(env!("CARGO_BIN_EXE_harn"))
+        .current_dir(&dir)
+        .args(["rule", "test"])
+        .output()
+        .expect("spawn");
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert_eq!(
+        out.status.code().unwrap_or(-1),
+        0,
+        "stdout={stdout} stderr={stderr}"
+    );
+    assert!(stdout.contains("1 passed"), "stdout={stdout}");
+    assert!(
+        !stdout.contains("helper"),
+        "nested utility rule should not be tested: {stdout}"
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn passing_fixture_exits_zero() {
     let dir = fixture_dir("pass");
     write(&dir, "no-foo.toml", NO_FOO);

@@ -179,7 +179,7 @@ impl ContributionEntry {
 /// Paths are resolved relative to the manifest's directory.
 #[derive(Debug, Clone, Default, Deserialize)]
 pub struct RulesConfig {
-    /// Directories of rule `*.toml` files to load.
+    /// Directories of top-level rule `*.toml` files to load.
     #[serde(default, alias = "rule-dirs", alias = "ruleDirs")]
     pub rule_dirs: Vec<String>,
     /// Directories of utility-rule `*.toml` files (referenced via `matches`).

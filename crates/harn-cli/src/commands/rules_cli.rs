@@ -2,10 +2,10 @@
 //! `harn codemod`).
 //!
 //! Both surfaces resolve a rule (an inline pattern, a `--rule` TOML file, or a
-//! `--rule-pack` directory) and walk a fileset in Rust — where the tree-sitter
-//! `Language` registry and the gitignore-aware walker live — then hand the
-//! `.harn` handler a per-rule *plan* (the rule TOML plus the files that match
-//! its language). The handler runs `std/rules` over the plan.
+//! `--rule-pack` directory/package) and walk a fileset in Rust — where the
+//! tree-sitter `Language` registry and the gitignore-aware walker live — then
+//! hand the `.harn` handler a per-rule *plan* (the rule TOML plus the files
+//! that match its language). The handler runs `std/rules` over the plan.
 
 #![cfg(feature = "hostlib")]
 
@@ -21,7 +21,7 @@ pub(crate) struct RuleSpec {
 
 /// Resolve the rule(s) to run. Exactly one source is used, in priority order:
 /// an inline `pattern` (requires `lang`), a `rule_file`, or a `rule_pack`
-/// directory of `*.toml` rules.
+/// directory/package of `*.toml` rules.
 pub(crate) fn resolve_rules(
     inline_pattern: Option<&str>,
     lang: Option<&str>,
@@ -55,7 +55,7 @@ pub(crate) fn resolve_rules(
         let discovered = discover_project_rules()?;
         if discovered.is_empty() {
             Err("no rule given: pass an inline `<pattern> --lang <lang>`, \
-                 `--rule <file>`, `--rule-pack <dir>`, or declare \
+                 `--rule <file>`, `--rule-pack <pack>`, or declare \
                  `[rules] ruleDirs` in harn.toml"
                 .into())
         } else {
@@ -64,20 +64,32 @@ pub(crate) fn resolve_rules(
     }
 }
 
-/// Load the `*.toml` rules in `dir` as [`RuleSpec`]s, sorted by path.
-fn load_rule_dir_specs(dir: &std::path::Path) -> Result<Vec<RuleSpec>, String> {
+/// Return the top-level `*.toml` rule files in `dir`, sorted by path.
+///
+/// Rule-pack `ruleDirs` are intentionally not recursive: nested directories
+/// are reserved for utility rules, fixtures, and other pack-local support
+/// files unless the manifest names them explicitly.
+pub(crate) fn collect_rule_files_in_dir(
+    dir: &std::path::Path,
+) -> Result<Vec<std::path::PathBuf>, String> {
     use std::fs;
 
     let mut paths: Vec<_> = fs::read_dir(dir)
         .map_err(|e| format!("read rule dir `{}`: {e}", dir.display()))?
         .filter_map(Result::ok)
         .map(|e| e.path())
-        .filter(|p| p.extension().and_then(|e| e.to_str()) == Some("toml"))
+        .filter(|p| p.is_file() && p.extension().and_then(|e| e.to_str()) == Some("toml"))
         .collect();
     paths.sort();
+    Ok(paths)
+}
+
+/// Load the top-level `*.toml` rules in `dir` as [`RuleSpec`]s, sorted by path.
+fn load_rule_dir_specs(dir: &std::path::Path) -> Result<Vec<RuleSpec>, String> {
+    use std::fs;
 
     let mut specs = Vec::new();
-    for path in paths {
+    for path in collect_rule_files_in_dir(dir)? {
         let toml =
             fs::read_to_string(&path).map_err(|e| format!("read `{}`: {e}", path.display()))?;
         let language = rule_language(&toml)?;
@@ -153,12 +165,23 @@ fn load_pack_rules(dir: &std::path::Path) -> Result<Vec<RuleSpec>, String> {
 /// there is no manifest or it declares no `ruleDirs`, so callers fall through
 /// to their usual "no rule given" error.
 fn discover_project_rules() -> Result<Vec<RuleSpec>, String> {
+    let mut specs = Vec::new();
+    for rule_dir in project_rule_dirs()? {
+        specs.extend(load_rule_dir_specs(&rule_dir)?);
+    }
+    Ok(specs)
+}
+
+/// Resolve the nearest project manifest's `[rules] ruleDirs` and validate that
+/// each entry names a directory. Returns an empty vec when no manifest or no
+/// rule directories are declared.
+pub(crate) fn project_rule_dirs() -> Result<Vec<PathBuf>, String> {
     let cwd = std::env::current_dir().map_err(|e| format!("current dir: {e}"))?;
     let Some((manifest, manifest_dir)) = crate::package::find_nearest_manifest(&cwd) else {
         return Ok(Vec::new());
     };
 
-    let mut specs = Vec::new();
+    let mut dirs = Vec::new();
     for rel in &manifest.rules.rule_dirs {
         let rule_dir = manifest_dir.join(rel);
         if !rule_dir.is_dir() {
@@ -167,9 +190,9 @@ fn discover_project_rules() -> Result<Vec<RuleSpec>, String> {
                 rule_dir.display()
             ));
         }
-        specs.extend(load_rule_dir_specs(&rule_dir)?);
+        dirs.push(rule_dir);
     }
-    Ok(specs)
+    Ok(dirs)
 }
 
 /// Build the per-rule plan JSON: each rule paired with the files (recursively

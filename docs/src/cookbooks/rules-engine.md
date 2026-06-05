@@ -110,7 +110,8 @@ rewrote src/config.ts  [safety=BehaviorPreserving]
 ```
 
 Re-running a folded file changes nothing — fixes are checked for idempotency.
-Point `--rule-pack <dir>` at a directory to run every `*.toml` rule in it.
+Point `--rule-pack <pack>` at a directory or installed package to run its
+top-level `*.toml` rules.
 Installed packages work by name, and built-in packs live under `std/rules`.
 
 ```console
@@ -141,7 +142,9 @@ With `[rules] ruleDirs` set, `harn scan <paths>` needs no inline pattern — a
 pattern is signalled by `--lang`, so its absence means "use the project's
 rules." `harn codemod` applies only the rules that have a `fix`; lint/search
 rules in the same pack are ignored. Paths are resolved relative to the
-`harn.toml` directory.
+`harn.toml` directory. Each `ruleDirs` entry loads top-level `*.toml` files;
+put utility rules or fixtures in nested directories unless the manifest names
+that directory explicitly.
 
 ## How do I publish and install a rule pack?
 
