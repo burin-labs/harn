@@ -23,12 +23,16 @@ hook_paths_match() {
   [ -s "$file_list" ] && grep -Eq "$pattern" "$file_list"
 }
 
-# Resolve the workspace target dir, matching the logic in
-# scripts/sign_local_macos.sh. Used by hook_run_harn to find the
-# freshly-built `harn` binary after `cargo build`.
+# Resolve the workspace target dir. Used by hook_run_harn and
+# scripts/sign_local_macos.sh to find freshly-built binaries after
+# `cargo build`.
 hook_target_dir() {
   if [ -n "${HARN_DEV_TARGET_DIR:-}" ]; then
     printf '%s\n' "$HARN_DEV_TARGET_DIR"
+    return
+  fi
+  if [ -n "${CARGO_TARGET_DIR:-}" ]; then
+    printf '%s\n' "$CARGO_TARGET_DIR"
     return
   fi
   if [ -f .cargo/config.toml ]; then
