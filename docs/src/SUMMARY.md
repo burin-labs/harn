@@ -209,6 +209,7 @@
 - [`std/cli/paths`](./cli-paths-reference.md)
 - [Builtin functions](./builtins.md)
 - [Postgres](./postgres.md)
+- [SQLite](./sqlite.md)
 - [Project scanning](./project-scan.md)
 - [Prompt templating](./prompt-templating.md)
 - [Editor integration](./editor-integration.md)

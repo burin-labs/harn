@@ -36,7 +36,8 @@ embedder opt into the heavyweight families it actually needs:
 | `hostlib` | hostlib deterministic tools (file I/O, search, process, secret store) — **no** tree-sitter or grammars | Lightweight smoke evals; agent edits via text patches only |
 | `hostlib-full` | `hostlib` **+** the full code-intelligence surface (tree-sitter + all ~27 grammar families) | Parity-critical evals that exercise AST-precise edits, rename, the symbol index |
 | `vm-postgres` | The VM's `pg.*` builtins (`sqlx-postgres` and its ~130 transitive crates) | Hosts whose scripts talk to Postgres |
-| `full` | `hostlib-full` + `vm-postgres` | One-flag CLI parity |
+| `vm-sqlite` | The VM's `sqlite_*` builtins | Hosts whose scripts inspect or write local SQLite databases |
+| `full` | `hostlib-full` + `vm-postgres` + `vm-sqlite` | One-flag CLI parity |
 
 The split exists because the code-intelligence grammars are C-compiled crates:
 without it, every in-process client — including a tiny smoke eval — compiled

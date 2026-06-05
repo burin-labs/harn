@@ -1,0 +1,15 @@
+mem.inserted=1
+mem.row=1:alpha
+mem.miss=true
+tx.rollback=caught
+tx.rollback.count=0
+tx.close=rejected
+savepoint.count=1
+file.reopen=durable
+migrate.dry_run=2/0
+migrate.first=2/2
+migrate.second=0/2
+migrate.row=seed
+mock.row=42
+mock.exec=1
+mock.call=select id from events where topic = ?:agent_events:false

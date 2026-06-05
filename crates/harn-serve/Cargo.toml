@@ -65,8 +65,11 @@ hostlib-full = ["hostlib", "harn-hostlib/full"]
 # Re-enable the VM's Postgres (`pg.*`) builtins, dropped here by default.
 vm-postgres = ["harn-vm/postgres"]
 
+# Re-enable the VM's SQLite (`sqlite_*`) builtins, dropped here by default.
+vm-sqlite = ["harn-vm/sqlite"]
+
 # Everything the full CLI ships, for consumers that want one-flag parity.
-full = ["hostlib-full", "vm-postgres"]
+full = ["hostlib-full", "vm-postgres", "vm-sqlite"]
 
 [dependencies.jsonwebtoken]
 # Used by the a2a-push OIDC verifier to opt callers into a non-default

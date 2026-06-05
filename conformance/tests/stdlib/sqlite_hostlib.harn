@@ -1,0 +1,102 @@
+import "std/sqlite"
+
+pipeline default() {
+  let mem = sqlite_open(":memory:")
+  sqlite_execute(mem, "create table notes(id integer primary key, body text not null)")
+  let inserted = sqlite_execute(mem, "insert into notes(id, body) values (?, ?)", [1, "alpha"])
+  __io_println("mem.inserted=" + to_string(inserted.rows_affected))
+  let rows = sqlite_query(mem, "select id, body from notes where id = ?", [1])
+  __io_println("mem.row=" + to_string(rows[0].id) + ":" + rows[0].body)
+  __io_println(
+    "mem.miss=" + to_string(sqlite_query_one(mem, "select id from notes where id = ?", [99]) == nil),
+  )
+  let rollback = try {
+    sqlite_transaction(
+      mem,
+      { tx ->
+        sqlite_execute(tx, "insert into notes(id, body) values (?, ?)", [2, "rolled-back"])
+        throw "rollback"
+      },
+    )
+  } catch (e) {
+    "caught"
+  }
+  __io_println("tx.rollback=" + rollback)
+  let after_rollback = sqlite_query_one(mem, "select count(*) as n from notes where id = ?", [2])
+  __io_println("tx.rollback.count=" + to_string(after_rollback.n))
+  let close_during_tx = try {
+    sqlite_transaction(mem, { tx -> sqlite_close(mem) })
+  } catch (e) {
+    "rejected"
+  }
+  __io_println("tx.close=" + close_during_tx)
+  sqlite_transaction(
+    mem,
+    { tx ->
+      sqlite_execute(tx, "insert into notes(id, body) values (?, ?)", [3, "outer"])
+      sqlite_savepoint(tx, "before_inner")
+      sqlite_execute(tx, "insert into notes(id, body) values (?, ?)", [4, "inner"])
+      sqlite_rollback_to_savepoint(tx, "before_inner")
+      sqlite_release_savepoint(tx, "before_inner")
+    },
+  )
+  let savepoint_count = sqlite_query_one(mem, "select count(*) as n from notes where id in (?, ?)", [3, 4])
+  __io_println("savepoint.count=" + to_string(savepoint_count.n))
+  let root = path_join(harness.fs.temp_dir(), "harn-sqlite-hostlib-" + uuid())
+  let db_path = path_join(root, "state", "app.sqlite")
+  let file_db = sqlite_open(db_path, {create: true, journal_mode: "wal"})
+  sqlite_execute(file_db, "create table persisted(id integer primary key, body text not null)")
+  sqlite_execute(file_db, "insert into persisted(id, body) values (?, ?)", [7, "durable"])
+  sqlite_close(file_db)
+  let reopened = sqlite_open(db_path, {read_only: true})
+  let persisted = sqlite_query_one(reopened, "select body from persisted where id = ?", [7])
+  __io_println("file.reopen=" + persisted.body)
+  sqlite_close(reopened)
+  let migrations = path_join(root, "migrations")
+  harness.fs.mkdir(migrations)
+  harness.fs
+    .write_text(
+    path_join(migrations, "0001_init.sql"),
+    "create table migrated(id integer primary key, body text not null);",
+  )
+  harness.fs
+    .write_text(
+    path_join(migrations, "0002_seed.sql"),
+    "insert into migrated(id, body) values (1, 'seed');",
+  )
+  harness.fs.write_text(path_join(migrations, "0002_seed.down.sql"), "drop table migrated;")
+  let migrate_db = sqlite_open(path_join(root, "migrate.sqlite"), {create: true})
+  let dry_run = sqlite_migrate(migrate_db, {dir: migrations, dry_run: true})
+  let dry_run_ledger = sqlite_query_one(
+    migrate_db,
+    "select count(*) as n from sqlite_master where type = 'table' and name = ?",
+    ["harn_sqlite_migrations"],
+  )
+  let first = sqlite_migrate(migrate_db, {dir: migrations})
+  let second = sqlite_migrate(migrate_db, {dir: migrations})
+  let migrated = sqlite_query_one(migrate_db, "select body from migrated where id = ?", [1])
+  __io_println(
+    "migrate.dry_run=" + to_string(len(dry_run.applied)) + "/" + to_string(dry_run_ledger.n),
+  )
+  __io_println(
+    "migrate.first=" + to_string(len(first.applied)) + "/" + to_string(len(first.available)),
+  )
+  __io_println(
+    "migrate.second=" + to_string(len(second.applied)) + "/" + to_string(len(second.skipped)),
+  )
+  __io_println("migrate.row=" + migrated.body)
+  let mock = sqlite_mock_db(
+    [
+      {sql: "select id from events where topic = ?", params: ["agent_events"], rows: [{id: 42}]},
+      {sql: "update events set seen = 1 where id = ?", params: [42], rows_affected: 1},
+    ],
+  )
+  let mock_rows = sqlite_query(mock, "select id from events where topic = ?", ["agent_events"])
+  let mock_exec = sqlite_execute(mock, "update events set seen = 1 where id = ?", [42])
+  let calls = sqlite_mock_calls(mock)
+  __io_println("mock.row=" + to_string(mock_rows[0].id))
+  __io_println("mock.exec=" + to_string(mock_exec.rows_affected))
+  __io_println(
+    "mock.call=" + calls[0].sql + ":" + calls[0].params[0] + ":" + to_string(calls[0].execute),
+  )
+}

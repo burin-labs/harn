@@ -13,7 +13,7 @@ description = "Async bytecode virtual machine for the Harn programming language"
 ignored = ["md-5"]
 
 [features]
-default = ["postgres"]
+default = ["postgres", "sqlite"]
 llm-bench-internals = []
 vm-bench-internals = []
 # PostgreSQL client builtins (the `pg.*` namespace + `stdlib/postgres`).
@@ -22,6 +22,10 @@ vm-bench-internals = []
 # embedding clients that never issue Postgres queries drop it with
 # `default-features = false` to shed the entire sqlx dependency tree.
 postgres = ["dep:sqlx-core", "dep:sqlx-postgres", "dep:rust_decimal"]
+# SQLite client builtins (`sqlite_*` + `stdlib/sqlite`). `rusqlite` is
+# already used by VM internals; this flag gates the public Harn scripting
+# surface so lean embedders can keep it unavailable.
+sqlite = []
 otel = [
     "dep:opentelemetry",
     "dep:opentelemetry_sdk",

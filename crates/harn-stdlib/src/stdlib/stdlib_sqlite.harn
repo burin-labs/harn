@@ -1,0 +1,39 @@
+/**
+ * std/sqlite — SQLite persistence helpers.
+ *
+ * The sqlite_* functions are VM builtins registered by the Rust stdlib.
+ * This module carries public handle and result shapes so import-aware
+ * tools and the typechecker know what scripts get back from the runtime.
+ *
+ * SQLite deliberately keeps its own module instead of sharing a lowest-
+ * common-denominator SQL API with Postgres. Parameter binding, type
+ * affinity, WAL pragmas, in-memory databases, and file-open modes are
+ * SQLite-specific behavior.
+ */
+type SqliteDb = {_type: "sqlite_db", id: string, read_only: bool, memory: bool, path?: string}
+
+type SqliteTx = {_type: "sqlite_tx", id: string}
+
+type SqliteMockDb = {_type: "sqlite_mock_db", id: string}
+
+type SqliteHandle = SqliteDb | SqliteTx | SqliteMockDb
+
+type SqliteExecuteResult = {rows_affected: int}
+
+type SqliteMigrateResult = {
+  applied: list<string>,
+  skipped: list<string>,
+  available: list<string>,
+  dry_run: bool,
+  table: string,
+}
+
+type SqlitePublicTypes = {
+  handle: SqliteHandle,
+  execute: SqliteExecuteResult,
+  migrate: SqliteMigrateResult,
+}
+
+fn __sqlite_public_types_marker(value: SqlitePublicTypes) -> SqlitePublicTypes {
+  return value
+}
