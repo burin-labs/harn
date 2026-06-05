@@ -22,6 +22,7 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
+. .githooks/lib.sh
 
 # The Apple-issued canonical name for the team's Developer ID Application
 # certificate. Resolves by exact CN; Team ID (8SXG5TMV2X) is embedded for
@@ -38,16 +39,7 @@ if [ "$mode" = "ad-hoc" ] && [ "${HARN_LOCAL_SIGN_QUIET:-0}" != "1" ]; then
   echo "  → Import the team .p12 from 1Password ('Developer ID Application: Burin Labs') to upgrade."
 fi
 
-# Resolve target dir: respect HARN_DEV_TARGET_DIR or the value baked into
-# .cargo/config.toml's [build] target-dir; otherwise default to ./target.
-target_dir="${HARN_DEV_TARGET_DIR:-}"
-if [ -z "$target_dir" ] && [ -f .cargo/config.toml ]; then
-  target_dir="$(awk -F'"' '
-    /^\[build\][[:space:]]*$/ { in_build = 1; next }
-    /^\[/ { in_build = 0 }
-    in_build && /^[[:space:]]*target-dir[[:space:]]*=/ { print $2; exit }
-  ' .cargo/config.toml)"
-fi
+target_dir="$(hook_target_dir)"
 target_dir="${target_dir:-target}"
 
 sign_one() {
