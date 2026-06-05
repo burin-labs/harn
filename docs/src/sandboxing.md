@@ -67,7 +67,9 @@ those paths unless they are also in `workspace_roots` or `read_only_roots`.
 
 - `system_runtime`: host runtime directories needed to launch common binaries.
 - `developer_toolchains`: standard compiler/toolchain locations such as Xcode,
-  Command Line Tools, Homebrew, and language runtime roots.
+  Command Line Tools, Homebrew, plus common home-dir toolchain managers and
+  runtimes such as `~/.local/share/uv`, `~/.rustup`, `~/.cargo`, `~/.pyenv`,
+  `~/.nvm`, `~/.volta`, and `~/go`.
 - `package_manager_config`: read-only per-user npm, pip, cargo, git, and CA
   config/cache roots under `$HOME`, such as `.npmrc`, `.gitconfig`, `.netrc`,
   `.config`, `.cache`, and cargo config/registry paths.
@@ -88,14 +90,18 @@ toolchains that depend on enterprise package-manager state. It constrains what
 the child process can open; it does not rewrite npm, pip, cargo, git, proxy, or
 CA configuration.
 
-With the default `package_manager_config` preset, the Linux and macOS backends
-grant child processes read-only access to these paths under the first absolute
-`$HOME` or `$USERPROFILE`: `.npmrc`, `.gitconfig`, `.netrc`, `.yarnrc.yml`,
-`.config`, `.npm`, `.cache`, `.pip`, `.pypirc`, `.cargo/config`,
-`.cargo/config.toml`, `.cargo/credentials`, `.cargo/credentials.toml`,
-`.cargo/registry`, and `.cargo/git`. These grants are process-only: Harn file
-builtins still need `workspace_roots` or `read_only_roots`, and the package
-manager paths are explicitly kept unwritable by the OS profile.
+With the default `developer_toolchains` and `package_manager_config` presets,
+the desktop backends grant child processes read-only access to common
+home-scoped toolchain and package-manager roots under the first absolute
+`$HOME` or `%USERPROFILE%`. That includes user-managed runtimes such as
+`.local/share/uv`, `.cargo`, `.rustup`, `.pyenv`, `.nvm`, `.volta`, and `go`,
+plus package-manager config/cache paths such as `.npmrc`, `.gitconfig`,
+`.netrc`, `.yarnrc.yml`, `.config`, `.npm`, `.cache`, `.pip`, `.pypirc`,
+`.cargo/config`, `.cargo/config.toml`, `.cargo/credentials`,
+`.cargo/credentials.toml`, `.cargo/registry`, and `.cargo/git`. These grants
+are process-only: Harn file builtins still need `workspace_roots` or
+`read_only_roots`, and the extra home-dir paths stay unwritable by the OS
+profile.
 
 Child processes spawned without env overrides inherit the parent environment.
 That includes corporate proxy and CA variables such as `HTTP_PROXY`,

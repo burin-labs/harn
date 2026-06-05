@@ -533,15 +533,19 @@ pub fn process_violation_error(output: &std::process::Output) -> Option<VmError>
             || stderr.contains("access is denied")
             || stdout.contains("operation not permitted"))
     {
-        return Some(sandbox_rejection(format!(
-            "sandbox violation: process was denied by the OS sandbox (status {})",
-            output.status.code().unwrap_or(-1)
+        return Some(sandbox_rejection(sandbox_process_violation_message(
+            format!(
+                "sandbox violation: process was denied by the OS sandbox (status {})",
+                output.status.code().unwrap_or(-1)
+            ),
         )));
     }
     if sandbox_signal_status(output) {
-        return Some(sandbox_rejection(format!(
-            "sandbox violation: process was terminated by the OS sandbox (status {})",
-            output.status
+        return Some(sandbox_rejection(sandbox_process_violation_message(
+            format!(
+                "sandbox violation: process was terminated by the OS sandbox (status {})",
+                output.status
+            ),
         )));
     }
     None
@@ -563,8 +567,8 @@ pub fn process_spawn_error(error: &std::io::Error) -> Option<VmError> {
         || message.contains("permission denied")
         || message.contains("access is denied")
     {
-        return Some(sandbox_rejection(format!(
-            "sandbox violation: process was denied by the OS sandbox before exec: {error}"
+        return Some(sandbox_rejection(sandbox_process_violation_message(
+            format!("sandbox violation: process was denied by the OS sandbox before exec: {error}"),
         )));
     }
     None
@@ -657,6 +661,12 @@ pub(crate) fn sandbox_rejection(message: String) -> VmError {
     }
 }
 
+fn sandbox_process_violation_message(summary: String) -> String {
+    format!(
+        "{summary}; if the command depends on a user-managed toolchain or cache outside the workspace, add that root to process_sandbox.read_roots or process_sandbox.write_roots"
+    )
+}
+
 /// Helper for backends that can't attach confinement at all (macOS
 /// without `/usr/bin/sandbox-exec`, Windows when called through the
 /// `Command`-returning entry points): either fail loudly under
@@ -741,32 +751,84 @@ pub(crate) fn process_sandbox_policy_write_roots(policy: &CapabilityPolicy) -> V
     normalized_process_roots(&policy.process_sandbox.write_roots)
 }
 
-#[cfg(any(target_os = "linux", target_os = "macos"))]
+#[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
 pub(crate) fn process_sandbox_presets(policy: &CapabilityPolicy) -> Vec<ProcessSandboxPreset> {
     policy.process_sandbox.effective_presets()
 }
 
-#[cfg(any(target_os = "linux", target_os = "macos"))]
+#[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
+pub(crate) fn process_sandbox_developer_toolchain_read_roots(
+    policy: &CapabilityPolicy,
+) -> Vec<PathBuf> {
+    if !process_sandbox_presets(policy).contains(&ProcessSandboxPreset::DeveloperToolchains) {
+        return Vec::new();
+    }
+    let Some(home) = sandbox_user_home_dir() else {
+        return Vec::new();
+    };
+    developer_toolchain_read_roots_for_home(&home)
+}
+
+#[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
 pub(crate) fn process_sandbox_package_manager_config_read_roots(
     policy: &CapabilityPolicy,
 ) -> Vec<PathBuf> {
     if !process_sandbox_presets(policy).contains(&ProcessSandboxPreset::PackageManagerConfig) {
         return Vec::new();
     }
-    let Some(home) = package_manager_config_home_dir() else {
+    let Some(home) = sandbox_user_home_dir() else {
         return Vec::new();
     };
     package_manager_config_read_roots_for_home(&home)
 }
 
-#[cfg(any(target_os = "linux", target_os = "macos"))]
-fn package_manager_config_home_dir() -> Option<PathBuf> {
-    // Only an absolute home grounds the package-manager read-roots below; a
+#[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
+fn sandbox_user_home_dir() -> Option<PathBuf> {
+    // Only an absolute home grounds the user-scope read-roots below; a
     // relative or unset home yields no extra roots (the safe direction).
     crate::user_dirs::home_dir().filter(|path| path.is_absolute())
 }
 
-#[cfg(any(target_os = "linux", target_os = "macos"))]
+#[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
+pub(crate) fn developer_toolchain_read_roots_for_home(home: &Path) -> Vec<PathBuf> {
+    let mut roots: Vec<_> = [
+        ".asdf",
+        ".bun",
+        ".cargo",
+        ".fnm",
+        ".juliaup",
+        ".local/bin",
+        ".local/share/mise",
+        ".local/share/uv",
+        ".nvm",
+        ".pyenv",
+        ".rbenv",
+        ".rustup",
+        ".sdkman",
+        ".swiftly",
+        ".volta",
+        "go",
+    ]
+    .into_iter()
+    .map(|entry| normalize_for_policy(&home.join(entry)))
+    .collect();
+    #[cfg(target_os = "windows")]
+    roots.extend(
+        [
+            "AppData/Local/Programs/Python",
+            "AppData/Local/uv",
+            "AppData/Roaming/uv",
+            "scoop",
+        ]
+        .into_iter()
+        .map(|entry| normalize_for_policy(&home.join(entry))),
+    );
+    roots.sort_unstable();
+    roots.dedup();
+    roots
+}
+
+#[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
 pub(crate) fn package_manager_config_read_roots_for_home(home: &Path) -> Vec<PathBuf> {
     let mut roots: Vec<_> = [
         ".npmrc",
@@ -1230,6 +1292,34 @@ mod tests {
             Path::new("/tmp/harn-root-other/file"),
             root
         ));
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
+    #[test]
+    fn developer_toolchain_roots_cover_common_home_managed_runtimes() {
+        let temp_home = tempfile::tempdir().expect("temp home");
+        let roots = developer_toolchain_read_roots_for_home(temp_home.path());
+        let normalized_home = normalize_for_policy(temp_home.path());
+
+        for suffix in [
+            Path::new(".cargo"),
+            Path::new(".rustup"),
+            Path::new(".pyenv"),
+            Path::new(".nvm"),
+            Path::new(".volta"),
+            Path::new(".local/share/uv"),
+            Path::new("go"),
+        ] {
+            assert!(
+                roots.iter().any(|path| path.ends_with(suffix)),
+                "expected a developer-toolchain grant for {}",
+                suffix.display()
+            );
+        }
+        assert!(
+            roots.iter().all(|path| path.starts_with(&normalized_home)),
+            "developer-toolchain roots must stay under HOME"
+        );
     }
 
     #[test]
