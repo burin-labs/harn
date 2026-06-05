@@ -905,7 +905,7 @@ pub(crate) async fn observed_llm_call(
         .unwrap_or_else(|| crate::llm_config::default_tool_format(&opts.model, &opts.provider));
     let mut attempt = 0usize;
     loop {
-        super::rate_limit::acquire_permit(&opts.provider).await;
+        let rate_limit_permit = super::rate_limit::acquire_permit_for_llm_call(opts).await;
 
         let call_id = next_call_id();
         let prompt_chars: usize = opts
@@ -996,6 +996,7 @@ pub(crate) async fn observed_llm_call(
         } else {
             super::api::vm_call_llm_full(opts).await
         };
+        drop(rate_limit_permit);
         let duration_ms = start.elapsed().as_millis() as u64;
 
         match llm_result {

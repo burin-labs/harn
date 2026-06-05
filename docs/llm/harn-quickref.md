@@ -3590,7 +3590,8 @@ let data = r.data
 // Scoped permit acquisition + backoff for flaky providers. Retries on
 // rate_limit / overloaded / transient_network / timeout categories with
 // exponential backoff (capped at 30s). Composes with
-// HARN_RATE_LIMIT_<PROVIDER> and the providers.toml `rpm` field.
+// HARN_RATE_LIMIT_<PROVIDER>_RPM/_TPM and provider/model catalog
+// `rate_limits` fields.
 let r = with_rate_limit("openai", fn() {
   llm_call(user_prompt, nil, {provider: "openai", llm_retries: 0})
 }, {max_retries: 5, backoff_ms: 500})
@@ -3973,19 +3974,22 @@ specifically for external interruption.
 
 ## Rate limiting
 
-Per-provider RPM limiting is built in:
+Per-provider and per-model rate limiting is built in:
 
-- Set `rpm: 600` in the provider entry in `providers.toml` /
-  `harn.toml`.
+- Set `rate_limits = { rpm = 600, tpm = 1000000 }` in the provider
+  or model entry in `providers.toml` / `harn.toml`.
 - Or `HARN_RATE_LIMIT_<PROVIDER>=600` env var (e.g.
-  `HARN_RATE_LIMIT_TOGETHER=600`, `HARN_RATE_LIMIT_LOCAL=60`). Env
-  overrides config.
-- Or `llm_rate_limit("provider", 600)` at runtime.
+  `HARN_RATE_LIMIT_TOGETHER=600`, `HARN_RATE_LIMIT_LOCAL=60`) for
+  legacy provider RPM. Env overrides config.
+- Or richer env overrides such as `HARN_RATE_LIMIT_MYPROVIDER_RPM=1000`
+  and `HARN_RATE_LIMIT_MYPROVIDER_TPM=1000000`.
+- Or `llm_rate_limit("provider", {rpm: 600, tpm: 1000000})` at runtime.
 - Wrap individual call sites in `with_rate_limit(provider, fn, opts?)`
   to acquire a permit and auto-retry retryable failures.
 
-RPM shapes sustained throughput; `max_concurrent` caps simultaneous
-in-flight work. Use both when batching LLM calls at scale.
+RPM/TPM shape sustained throughput; route `concurrency` and
+`max_concurrent` cap simultaneous in-flight work. Use both when
+batching LLM calls at scale.
 
 ## Cache (`std/cache`)
 

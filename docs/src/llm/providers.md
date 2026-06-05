@@ -636,22 +636,30 @@ logic can route around the dedicated-only model.
 
 ## Rate limiting
 
-Harn supports per-provider rate limiting (requests per minute):
+Harn supports catalog-driven per-provider and per-model rate limiting. The
+runtime enforces `rate_limits` metadata for requests per minute (`rpm`), total
+tokens per minute (`tpm`), split input/output token buckets, and published route
+concurrency before each provider call.
 
 ```bash
-# Set via environment
+# Legacy provider RPM override.
 export HARN_RATE_LIMIT_ANTHROPIC=60
 export HARN_RATE_LIMIT_OPENAI=120
+
+# Rich quota override for a paid or custom plan.
+export HARN_RATE_LIMIT_MYPROVIDER_RPM=1000
+export HARN_RATE_LIMIT_MYPROVIDER_TPM=1000000
 ```
 
 Or in code:
 
 ```harn
-llm_rate_limit("anthropic", {rpm: 60})
+llm_rate_limit("anthropic", {rpm: 60, tpm: 250000})
+let active = llm_rate_limit("anthropic", {details: true})
 ```
 
-The rate limiter uses a token-bucket algorithm and will pause before sending
-requests that would exceed the configured RPM.
+The limiter uses a sliding-window budget and pauses before sending requests
+that would exceed the configured request or token quota.
 
 ## Troubleshooting
 
@@ -659,7 +667,8 @@ requests that would exceed the configured RPM.
   set for your provider. Run `echo $ANTHROPIC_API_KEY` to verify.
 - **Wrong provider selected** — Set `HARN_LLM_PROVIDER` explicitly to
   override automatic detection.
-- **Rate limit errors** — Use `HARN_RATE_LIMIT_<PROVIDER>` to throttle
-  requests below your plan's limit.
+- **Rate limit errors** — Use `HARN_RATE_LIMIT_<PROVIDER>_RPM` and
+  `HARN_RATE_LIMIT_<PROVIDER>_TPM` to throttle requests below your plan's
+  applied limits. `HARN_RATE_LIMIT_<PROVIDER>` remains a legacy RPM shorthand.
 - **Debug message shapes** — Set `HARN_DEBUG_MESSAGE_SHAPES=1` to log
   the structure of messages sent to the LLM provider.
