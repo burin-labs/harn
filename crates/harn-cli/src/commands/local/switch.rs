@@ -57,7 +57,7 @@ struct SwitchResult {
 }
 
 #[derive(Debug, Serialize)]
-struct EvictionRecord {
+pub(crate) struct EvictionRecord {
     provider: String,
     target: String,
     outcome: String,
@@ -186,7 +186,7 @@ fn load_runtime_probe_evidence(args: &LocalSwitchArgs) -> Result<RuntimeProbeEvi
     Ok(evidence)
 }
 
-async fn evict_siblings(
+pub(crate) async fn evict_siblings(
     active_provider: &str,
     active_model: &str,
     base_dir: &Path,
@@ -253,7 +253,7 @@ fn ollama_name_matches(loaded_name: &str, requested: &str) -> bool {
         || loaded_name.starts_with(requested)
 }
 
-async fn warm_ollama(
+pub(crate) async fn warm_ollama(
     model: &str,
     base_url: &str,
     ctx: u64,
@@ -275,6 +275,9 @@ async fn warm_ollama(
     let mut probe = OllamaReadinessOptions::new(model);
     probe.base_url = Some(base_url.to_string());
     probe.warm = false;
+    let keep_alive_value =
+        normalize_ollama_keep_alive(keep_alive).unwrap_or_else(|| serde_json::json!(keep_alive));
+    probe.keep_alive = Some(keep_alive_value.clone());
     let first = ollama_readiness(probe.clone()).await;
     if !first.valid {
         return Ok((
@@ -289,8 +292,7 @@ async fn warm_ollama(
     //    the right KV cache at load time, not at the first chat request.
     let settings = OllamaRuntimeSettings {
         num_ctx: ctx,
-        keep_alive: normalize_ollama_keep_alive(keep_alive)
-            .unwrap_or_else(|| serde_json::json!(keep_alive)),
+        keep_alive: keep_alive_value,
     };
     if let Err(error) = warm_ollama_model_with_settings(model, Some(base_url), &settings).await {
         return Ok((
@@ -313,7 +315,7 @@ async fn warm_ollama(
     ))
 }
 
-async fn warm_openai_compatible(
+pub(crate) async fn warm_openai_compatible(
     provider: &str,
     model: &str,
     base_url: &str,

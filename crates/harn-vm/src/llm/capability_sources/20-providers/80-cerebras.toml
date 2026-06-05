@@ -1,0 +1,68 @@
+# ---------- Cerebras ----------------------------------------------------------
+
+# Cerebras-hosted GPT-OSS accepts top-level `reasoning_effort` only for
+# {low, medium, high}. It rejects `none` and `minimal` with
+# wrong_api_format. Harn's provider-neutral `reasoning_policy: "off"` therefore
+# floors to the lowest accepted effort (`low`) instead of sending a value the
+# endpoint cannot template.
+[[provider.cerebras]]
+model_match = "gpt-oss-*"
+native_tools = true
+preferred_tool_format = "native"
+structured_output = "native"
+thinking_modes = ["effort"]
+reasoning_effort_supported = true
+reasoning_effort_levels = ["low", "medium", "high"]
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "native_json"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "reasoning_summary"
+
+# Cerebras GLM 4.7 is a public preview model with native tools, native
+# structured output, and top-level `reasoning_effort`; `none` is the documented
+# no-thinking value, while the older `disable_reasoning` knob is deprecated.
+[[provider.cerebras]]
+model_match = "zai-glm-*"
+native_tools = true
+preferred_tool_format = "native"
+structured_output = "native"
+thinking_modes = ["effort"]
+reasoning_effort_supported = true
+reasoning_none_supported = true
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "native_json"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "inline"
+
+[[provider.cerebras]]
+model_match = "llama-*"
+native_tools = true
+preferred_tool_format = "native"
+structured_output = "native"
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "native_json"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "none"
+
+[[provider.cerebras]]
+model_match = "qwen-*"
+native_tools = true
+preferred_tool_format = "native"
+structured_output = "native"
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "native_json"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "none"
+

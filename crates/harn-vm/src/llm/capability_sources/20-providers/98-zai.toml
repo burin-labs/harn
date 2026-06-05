@@ -1,0 +1,36 @@
+# ---------- Z.AI / GLM-5 family (open-weight, OpenAI-compatible /v1) ---------
+# GLM-5.1 (754B open weights, April 2026) sustains long-horizon agentic
+# tasks; tool calling is native, prompt caching is honored, structured
+# output uses JSON mode (delimited fallback).
+
+[[provider.zai]]
+model_match = "glm-5.1*"
+native_tools = true
+preferred_tool_format = "native"
+structured_output = "native"
+thinking_modes = ["enabled"]
+text_tool_wire_format_supported = true
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "native_json"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "inline"
+prompt_caching = true
+
+[[provider.zai]]
+model_match = "glm-5*"
+native_tools = true
+preferred_tool_format = "native"
+structured_output = "native"
+thinking_modes = ["enabled"]
+text_tool_wire_format_supported = true
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "native_json"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "inline"
+

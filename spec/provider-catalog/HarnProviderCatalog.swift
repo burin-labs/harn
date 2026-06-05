@@ -35,6 +35,8 @@ public struct HarnCatalogProvider: Codable, Sendable, Equatable {
     public let features: [String]
     public let caveats: [String]
     public let rpm: Int?
+    public let rateLimits: HarnRateLimits?
+    public let localRuntime: HarnLocalRuntime?
     public let latencyP50Ms: Int?
 
     enum CodingKeys: String, CodingKey {
@@ -48,7 +50,55 @@ public struct HarnCatalogProvider: Codable, Sendable, Equatable {
         case features
         case caveats
         case rpm
+        case rateLimits = "rate_limits"
+        case localRuntime = "local_runtime"
         case latencyP50Ms = "latency_p50_ms"
+    }
+}
+
+public struct HarnLocalRuntime: Codable, Sendable, Equatable {
+    public let kind: String?
+    public let command: String?
+    public let modelSource: String?
+    public let modelSourceEnv: String?
+    public let defaultPort: Int?
+    public let modelArg: String?
+    public let servedModelArg: String?
+    public let hostArg: String?
+    public let portArg: String?
+    public let ctxArg: String?
+    public let parallelArg: String?
+    public let gpuLayersArg: String?
+    public let cacheTypeKArg: String?
+    public let cacheTypeVArg: String?
+    public let cacheRamArg: String?
+    public let defaultArgs: [String]?
+    public let stop: String?
+    public let sourceURL: String?
+    public let lastVerified: String?
+    public let notes: String?
+
+    enum CodingKeys: String, CodingKey {
+        case kind
+        case command
+        case modelSource = "model_source"
+        case modelSourceEnv = "model_source_env"
+        case defaultPort = "default_port"
+        case modelArg = "model_arg"
+        case servedModelArg = "served_model_arg"
+        case hostArg = "host_arg"
+        case portArg = "port_arg"
+        case ctxArg = "ctx_arg"
+        case parallelArg = "parallel_arg"
+        case gpuLayersArg = "gpu_layers_arg"
+        case cacheTypeKArg = "cache_type_k_arg"
+        case cacheTypeVArg = "cache_type_v_arg"
+        case cacheRamArg = "cache_ram_arg"
+        case defaultArgs = "default_args"
+        case stop
+        case sourceURL = "source_url"
+        case lastVerified = "last_verified"
+        case notes
     }
 }
 
@@ -113,6 +163,14 @@ public struct HarnCatalogModel: Codable, Sendable, Equatable {
     public let provider: String
     public let aliases: [String]
     public let contextWindow: Int
+    public let logicalModel: String?
+    public let equivalenceGroup: String?
+    public let servedVariant: String?
+    public let wireModel: String?
+    public let apiDialect: String?
+    public let rateLimits: HarnRateLimits?
+    public let architecture: HarnModelArchitecture?
+    public let localMemory: HarnLocalMemory?
     public let runtimeContextWindow: Int?
     public let streamTimeout: Double?
     public let modalities: HarnModelModalities
@@ -148,6 +206,14 @@ public struct HarnCatalogModel: Codable, Sendable, Equatable {
         case provider
         case aliases
         case contextWindow = "context_window"
+        case logicalModel = "logical_model"
+        case equivalenceGroup = "equivalence_group"
+        case servedVariant = "served_variant"
+        case wireModel = "wire_model"
+        case apiDialect = "api_dialect"
+        case rateLimits = "rate_limits"
+        case architecture
+        case localMemory = "local_memory"
         case runtimeContextWindow = "runtime_context_window"
         case streamTimeout = "stream_timeout"
         case modalities
@@ -179,6 +245,14 @@ public struct HarnCatalogModel: Codable, Sendable, Equatable {
         provider = try container.decode(String.self, forKey: .provider)
         aliases = try container.decode([String].self, forKey: .aliases)
         contextWindow = try container.decode(Int.self, forKey: .contextWindow)
+        logicalModel = try container.decodeIfPresent(String.self, forKey: .logicalModel)
+        equivalenceGroup = try container.decodeIfPresent(String.self, forKey: .equivalenceGroup)
+        servedVariant = try container.decodeIfPresent(String.self, forKey: .servedVariant)
+        wireModel = try container.decodeIfPresent(String.self, forKey: .wireModel)
+        apiDialect = try container.decodeIfPresent(String.self, forKey: .apiDialect)
+        rateLimits = try container.decodeIfPresent(HarnRateLimits.self, forKey: .rateLimits)
+        architecture = try container.decodeIfPresent(HarnModelArchitecture.self, forKey: .architecture)
+        localMemory = try container.decodeIfPresent(HarnLocalMemory.self, forKey: .localMemory)
         runtimeContextWindow = try container.decodeIfPresent(Int.self, forKey: .runtimeContextWindow)
         streamTimeout = try container.decodeIfPresent(Double.self, forKey: .streamTimeout)
         modalities = try container.decode(HarnModelModalities.self, forKey: .modalities)
@@ -300,6 +374,94 @@ public struct HarnModelPricing: Codable, Sendable, Equatable {
         case outputPerMTok = "output_per_mtok"
         case cacheReadPerMTok = "cache_read_per_mtok"
         case cacheWritePerMTok = "cache_write_per_mtok"
+    }
+}
+
+public struct HarnRateLimits: Codable, Sendable, Equatable {
+    public let rpm: Int?
+    public let rph: Int?
+    public let rpd: Int?
+    public let tpm: Int?
+    public let tph: Int?
+    public let tpd: Int?
+    public let inputTpm: Int?
+    public let outputTpm: Int?
+    public let concurrency: Int?
+    public let tier: String?
+    public let sourceURL: String?
+    public let lastVerified: String?
+    public let notes: String?
+
+    enum CodingKeys: String, CodingKey {
+        case rpm
+        case rph
+        case rpd
+        case tpm
+        case tph
+        case tpd
+        case inputTpm = "input_tpm"
+        case outputTpm = "output_tpm"
+        case concurrency
+        case tier
+        case sourceURL = "source_url"
+        case lastVerified = "last_verified"
+        case notes
+    }
+}
+
+public struct HarnModelArchitecture: Codable, Sendable, Equatable {
+    public let parameterCountB: Double?
+    public let activeParameterCountB: Double?
+    public let moe: Bool?
+    public let quantization: String?
+    public let precision: String?
+    public let license: String?
+    public let tokenizer: String?
+    public let knowledgeCutoff: String?
+    public let sourceURL: String?
+    public let lastVerified: String?
+
+    enum CodingKeys: String, CodingKey {
+        case parameterCountB = "parameter_count_b"
+        case activeParameterCountB = "active_parameter_count_b"
+        case moe
+        case quantization
+        case precision
+        case license
+        case tokenizer
+        case knowledgeCutoff = "knowledge_cutoff"
+        case sourceURL = "source_url"
+        case lastVerified = "last_verified"
+    }
+}
+
+public struct HarnLocalMemory: Codable, Sendable, Equatable {
+    public let measuredResidentGiB: Double?
+    public let measuredContextWindow: Int?
+    public let measuredCacheType: String?
+    public let baseResidentGiB: Double?
+    public let kvCacheGiBPer1KContext: Double?
+    public let cacheTypeMultipliers: [String: Double]?
+    public let defaultCacheType: String?
+    public let safetyMarginGiB: Double?
+    public let maxRecommendedContext: Int?
+    public let sourceURL: String?
+    public let lastVerified: String?
+    public let notes: String?
+
+    enum CodingKeys: String, CodingKey {
+        case measuredResidentGiB = "measured_resident_gib"
+        case measuredContextWindow = "measured_context_window"
+        case measuredCacheType = "measured_cache_type"
+        case baseResidentGiB = "base_resident_gib"
+        case kvCacheGiBPer1KContext = "kv_cache_gib_per_1k_ctx"
+        case cacheTypeMultipliers = "cache_type_multipliers"
+        case defaultCacheType = "default_cache_type"
+        case safetyMarginGiB = "safety_margin_gib"
+        case maxRecommendedContext = "max_recommended_context"
+        case sourceURL = "source_url"
+        case lastVerified = "last_verified"
+        case notes
     }
 }
 
@@ -466,6 +628,33 @@ public let harnProviderCatalogJSON = #"""
       "latency_p50_ms": 150
     },
     {
+      "id": "cohere",
+      "display_name": "Cohere",
+      "classification": "hosted",
+      "endpoint": {
+        "base_url": "https://api.cohere.ai/compatibility/v1",
+        "base_url_env": "COHERE_BASE_URL",
+        "chat_endpoint": "/chat/completions",
+        "completion_endpoint": "/completions"
+      },
+      "auth": {
+        "style": "bearer",
+        "env": [
+          "COHERE_API_KEY"
+        ],
+        "required": true
+      },
+      "protocols": [
+        "openai_chat_completions"
+      ],
+      "features": [
+        "native_tools",
+        "reasoning"
+      ],
+      "caveats": [],
+      "latency_p50_ms": 1900
+    },
+    {
       "id": "dashscope",
       "display_name": "Dashscope",
       "classification": "hosted",
@@ -630,6 +819,36 @@ public let harnProviderCatalogJSON = #"""
       ],
       "features": [],
       "caveats": [],
+      "local_runtime": {
+        "kind": "managed_process",
+        "command": "llama-server",
+        "model_source_env": "LLAMACPP_MODEL",
+        "default_port": 8001,
+        "model_arg": "--model",
+        "served_model_arg": "--alias",
+        "host_arg": "--host",
+        "port_arg": "--port",
+        "ctx_arg": "--ctx-size",
+        "parallel_arg": "--parallel",
+        "gpu_layers_arg": "--n-gpu-layers",
+        "cache_type_k_arg": "--cache-type-k",
+        "cache_type_v_arg": "--cache-type-v",
+        "cache_ram_arg": "--cache-ram",
+        "default_args": [
+          "--jinja",
+          "--reasoning",
+          "off",
+          "--reasoning-format",
+          "deepseek",
+          "--metrics",
+          "--flash-attn",
+          "on"
+        ],
+        "stop": "pid",
+        "source_url": "https://github.com/ggml-org/llama.cpp/blob/master/tools/server/README.md",
+        "last_verified": "2026-06-05",
+        "notes": "OpenAI-compatible HTTP server. Use --model-source or LLAMACPP_MODEL for the GGUF path; Harn records the launched PID for local stop."
+      },
       "latency_p50_ms": 900
     },
     {
@@ -679,6 +898,32 @@ public let harnProviderCatalogJSON = #"""
       "latency_p50_ms": 1700
     },
     {
+      "id": "mistral",
+      "display_name": "Mistral",
+      "classification": "hosted",
+      "endpoint": {
+        "base_url": "https://api.mistral.ai/v1",
+        "base_url_env": "MISTRAL_BASE_URL",
+        "chat_endpoint": "/chat/completions",
+        "completion_endpoint": "/completions"
+      },
+      "auth": {
+        "style": "bearer",
+        "env": [
+          "MISTRAL_API_KEY"
+        ],
+        "required": true
+      },
+      "protocols": [
+        "openai_chat_completions"
+      ],
+      "features": [
+        "native_tools"
+      ],
+      "caveats": [],
+      "latency_p50_ms": 1800
+    },
+    {
       "id": "mlx",
       "display_name": "Mlx",
       "classification": "local",
@@ -698,6 +943,19 @@ public let harnProviderCatalogJSON = #"""
       ],
       "features": [],
       "caveats": [],
+      "local_runtime": {
+        "kind": "managed_process",
+        "command": "mlx_lm.server",
+        "model_source_env": "MLX_MODEL",
+        "default_port": 8002,
+        "model_arg": "--model",
+        "host_arg": "--host",
+        "port_arg": "--port",
+        "stop": "pid",
+        "source_url": "https://github.com/ml-explore/mlx-lm/blob/main/mlx_lm/SERVER.md",
+        "last_verified": "2026-06-05",
+        "notes": "OpenAI-like MLX-LM server. Use --model-source or MLX_MODEL for an MLX-compatible path or Hugging Face repo id."
+      },
       "latency_p50_ms": 900
     },
     {
@@ -722,6 +980,15 @@ public let harnProviderCatalogJSON = #"""
       "caveats": [
         "Native Ollama chat returns NDJSON and can apply model-family parsers."
       ],
+      "local_runtime": {
+        "kind": "daemon_api",
+        "command": "ollama",
+        "default_port": 11434,
+        "stop": "keep_alive_zero",
+        "source_url": "https://github.com/ollama/ollama/blob/main/docs/api.md",
+        "last_verified": "2026-06-05",
+        "notes": "Load via Ollama generate/chat warmup; unload by posting an empty prompt with keep_alive=0."
+      },
       "latency_p50_ms": 1200
     },
     {
@@ -864,6 +1131,34 @@ public let harnProviderCatalogJSON = #"""
       "features": [],
       "caveats": [],
       "latency_p50_ms": 800
+    },
+    {
+      "id": "xai",
+      "display_name": "Xai",
+      "classification": "hosted",
+      "endpoint": {
+        "base_url": "https://api.x.ai/v1",
+        "base_url_env": "XAI_BASE_URL",
+        "chat_endpoint": "/chat/completions",
+        "completion_endpoint": "/completions"
+      },
+      "auth": {
+        "style": "bearer",
+        "env": [
+          "XAI_API_KEY"
+        ],
+        "required": true
+      },
+      "protocols": [
+        "openai_chat_completions"
+      ],
+      "features": [
+        "responses_api",
+        "native_tools",
+        "reasoning"
+      ],
+      "caveats": [],
+      "latency_p50_ms": 1600
     },
     {
       "id": "zai",
@@ -2139,6 +2434,28 @@ public let harnProviderCatalogJSON = #"""
       "provider": "cerebras",
       "aliases": [],
       "context_window": 131072,
+      "logical_model": "openai-gpt-oss-120b",
+      "equivalence_group": "openai-gpt-oss-120b",
+      "served_variant": "cerebras-wafer-scale",
+      "api_dialect": "openai_chat",
+      "rate_limits": {
+        "rpm": 5,
+        "tpm": 30000,
+        "tph": 1000000,
+        "tpd": 1000000,
+        "tier": "free",
+        "source_url": "https://inference-docs.cerebras.ai/support/rate-limits",
+        "last_verified": "2026-06-05",
+        "notes": "Published Free Trial row; Developer (Pay as You Go) lists 1K RPM and 1M TPM with no hourly/daily cap."
+      },
+      "architecture": {
+        "parameter_count_b": 117.0,
+        "active_parameter_count_b": 5.1,
+        "moe": true,
+        "license": "Apache-2.0",
+        "source_url": "https://developers.openai.com/api/docs/models/gpt-oss-120b",
+        "last_verified": "2026-06-05"
+      },
       "modalities": {
         "input": [
           "text"
@@ -2336,6 +2653,98 @@ public let harnProviderCatalogJSON = #"""
         "agentic",
         "tool_use",
         "reasoning"
+      ]
+    },
+    {
+      "id": "command-a-plus-05-2026",
+      "name": "Command A+",
+      "provider": "cohere",
+      "aliases": [
+        "cohere",
+        "command-a-plus"
+      ],
+      "context_window": 256000,
+      "logical_model": "command-a-plus-05-2026",
+      "equivalence_group": "command-a-plus-05-2026",
+      "api_dialect": "openai_chat_compat",
+      "rate_limits": {
+        "rpm": 20,
+        "tier": "trial",
+        "source_url": "https://docs.cohere.com/docs/rate-limits",
+        "last_verified": "2026-06-05",
+        "notes": "Command A+ trial keys are 20 RPM and 1,000 calls/month; production is sales-gated. Token pricing is the public Command A+ API tariff."
+      },
+      "architecture": {
+        "parameter_count_b": 111.0,
+        "moe": true,
+        "source_url": "https://docs.cohere.com/docs/command-a-plus",
+        "last_verified": "2026-06-05"
+      },
+      "modalities": {
+        "input": [
+          "text",
+          "image"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
+        "tool_search": []
+      },
+      "structured_output": "native",
+      "format_preferences": {
+        "prefers_xml_scaffolding": false,
+        "prefers_markdown_scaffolding": true,
+        "structured_output_mode": "native_json",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "reasoning_summary"
+      },
+      "reasoning": {
+        "modes": [
+          "adaptive"
+        ],
+        "effort_supported": false,
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": false,
+      "pricing": {
+        "input_per_mtok": 2.5,
+        "output_per_mtok": 10.0,
+        "cache_read_per_mtok": null,
+        "cache_write_per_mtok": null
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "vision",
+        "thinking",
+        "extended_thinking",
+        "structured_output"
+      ],
+      "family": "cohere",
+      "lineage": "cohere",
+      "tier": "frontier",
+      "open_weight": true,
+      "strengths": [
+        "agentic",
+        "tool_use",
+        "reasoning",
+        "multilingual",
+        "vision"
       ]
     },
     {
@@ -2939,6 +3348,261 @@ public let harnProviderCatalogJSON = #"""
       ]
     },
     {
+      "id": "groq/openai/gpt-oss-120b",
+      "name": "GPT-OSS 120B (Groq)",
+      "provider": "groq",
+      "aliases": [],
+      "context_window": 131072,
+      "logical_model": "openai-gpt-oss-120b",
+      "equivalence_group": "openai-gpt-oss-120b",
+      "served_variant": "groq-lpu",
+      "wire_model": "openai/gpt-oss-120b",
+      "api_dialect": "openai_chat",
+      "rate_limits": {
+        "rpm": 1000,
+        "tpm": 250000,
+        "tier": "developer",
+        "source_url": "https://console.groq.com/docs/models",
+        "last_verified": "2026-06-05"
+      },
+      "architecture": {
+        "parameter_count_b": 117.0,
+        "active_parameter_count_b": 5.1,
+        "moe": true,
+        "license": "Apache-2.0",
+        "source_url": "https://developers.openai.com/api/docs/models/gpt-oss-120b",
+        "last_verified": "2026-06-05"
+      },
+      "modalities": {
+        "input": [
+          "text"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
+        "tool_search": []
+      },
+      "structured_output": "native",
+      "format_preferences": {
+        "prefers_xml_scaffolding": false,
+        "prefers_markdown_scaffolding": true,
+        "structured_output_mode": "native_json",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "reasoning_summary"
+      },
+      "reasoning": {
+        "modes": [
+          "effort"
+        ],
+        "effort_supported": true,
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": false,
+      "pricing": {
+        "input_per_mtok": 0.15,
+        "output_per_mtok": 0.6,
+        "cache_read_per_mtok": null,
+        "cache_write_per_mtok": null
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "thinking",
+        "extended_thinking",
+        "structured_output"
+      ],
+      "family": "openai-gpt",
+      "lineage": "openai-legacy",
+      "tier": "frontier",
+      "open_weight": true,
+      "strengths": [
+        "speed",
+        "cheap",
+        "tool_use",
+        "reasoning"
+      ]
+    },
+    {
+      "id": "llama-3.1-8b-instant",
+      "name": "Llama 3.1 8B Instant (Groq)",
+      "provider": "groq",
+      "aliases": [],
+      "context_window": 131072,
+      "logical_model": "llama-3.1-8b-instruct",
+      "equivalence_group": "llama-3.1-8b-instruct",
+      "served_variant": "groq-lpu",
+      "api_dialect": "openai_chat",
+      "rate_limits": {
+        "rpm": 1000,
+        "tpm": 250000,
+        "tier": "developer",
+        "source_url": "https://console.groq.com/docs/models",
+        "last_verified": "2026-06-05"
+      },
+      "architecture": {
+        "parameter_count_b": 8.0,
+        "moe": false,
+        "license": "Llama 3.1 Community",
+        "source_url": "https://console.groq.com/docs/models",
+        "last_verified": "2026-06-05"
+      },
+      "modalities": {
+        "input": [
+          "text"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
+        "tool_search": []
+      },
+      "structured_output": "native",
+      "format_preferences": {
+        "prefers_xml_scaffolding": false,
+        "prefers_markdown_scaffolding": true,
+        "structured_output_mode": "native_json",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "none"
+      },
+      "reasoning": {
+        "modes": [],
+        "effort_supported": false,
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": false,
+      "pricing": {
+        "input_per_mtok": 0.05,
+        "output_per_mtok": 0.08,
+        "cache_read_per_mtok": null,
+        "cache_write_per_mtok": null
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "structured_output"
+      ],
+      "family": "llama",
+      "lineage": "llama",
+      "tier": "small",
+      "open_weight": true,
+      "strengths": [
+        "speed",
+        "cheap"
+      ]
+    },
+    {
+      "id": "llama-3.3-70b-versatile",
+      "name": "Llama 3.3 70B Versatile (Groq)",
+      "provider": "groq",
+      "aliases": [],
+      "context_window": 131072,
+      "logical_model": "llama-3.3-70b-instruct",
+      "equivalence_group": "llama-3.3-70b-instruct",
+      "served_variant": "groq-lpu",
+      "api_dialect": "openai_chat",
+      "rate_limits": {
+        "rpm": 1000,
+        "tpm": 300000,
+        "tier": "developer",
+        "source_url": "https://console.groq.com/docs/models",
+        "last_verified": "2026-06-05"
+      },
+      "architecture": {
+        "parameter_count_b": 70.0,
+        "moe": false,
+        "license": "Llama 3.3 Community",
+        "source_url": "https://console.groq.com/docs/models",
+        "last_verified": "2026-06-05"
+      },
+      "modalities": {
+        "input": [
+          "text"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
+        "tool_search": []
+      },
+      "structured_output": "native",
+      "format_preferences": {
+        "prefers_xml_scaffolding": false,
+        "prefers_markdown_scaffolding": true,
+        "structured_output_mode": "native_json",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "none"
+      },
+      "reasoning": {
+        "modes": [],
+        "effort_supported": false,
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": false,
+      "pricing": {
+        "input_per_mtok": 0.59,
+        "output_per_mtok": 0.79,
+        "cache_read_per_mtok": null,
+        "cache_write_per_mtok": null
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "structured_output"
+      ],
+      "family": "llama",
+      "lineage": "llama",
+      "tier": "mid",
+      "open_weight": true,
+      "strengths": [
+        "speed",
+        "cheap",
+        "tool_use"
+      ]
+    },
+    {
       "id": "qwen3.6-35b-a3b",
       "name": "Qwen3.6 35B (llama.cpp)",
       "provider": "llamacpp",
@@ -3014,6 +3678,26 @@ public let harnProviderCatalogJSON = #"""
         "local-qwen3.6-gguf"
       ],
       "context_window": 262144,
+      "local_memory": {
+        "measured_resident_gib": 19.5,
+        "measured_context_window": 8192,
+        "measured_cache_type": "q8_0",
+        "base_resident_gib": 19.0,
+        "kv_cache_gib_per_1k_ctx": 0.1,
+        "cache_type_multipliers": {
+          "f16": 2.0,
+          "q4_0": 0.5,
+          "q4_1": 0.5,
+          "q5_0": 0.625,
+          "q5_1": 0.625,
+          "q8_0": 1.0
+        },
+        "default_cache_type": "q8_0",
+        "safety_margin_gib": 4.0,
+        "max_recommended_context": 65536,
+        "last_verified": "2026-06-05",
+        "notes": "Empirical llama-server RSS was about 19.5 GiB at ctx=8192 with q8_0 KV on Apple Silicon. Treat as a conservative launch guard, not an exact allocator model."
+      },
       "runtime_context_window": 65536,
       "stream_timeout": 900.0,
       "modalities": {
@@ -3025,17 +3709,18 @@ public let harnProviderCatalogJSON = #"""
         ]
       },
       "tool_support": {
-        "native": false,
+        "native": true,
         "text": true,
-        "preferred_format": "text",
-        "parity": "text_only",
+        "preferred_format": "native",
+        "parity": "native",
+        "parity_notes": "Harn-managed llama.cpp launch plus one-tool probe passed native and streaming native on 2026-06-05.",
         "tool_search": []
       },
       "structured_output": "native",
       "format_preferences": {
         "prefers_xml_scaffolding": false,
         "prefers_markdown_scaffolding": true,
-        "structured_output_mode": "delimited",
+        "structured_output_mode": "native_json",
         "supports_assistant_prefill": false,
         "prefers_role_developer": false,
         "prefers_xml_tools": false,
@@ -3963,6 +4648,161 @@ public let harnProviderCatalogJSON = #"""
       "tier": "mid",
       "open_weight": true,
       "strengths": [
+        "long_context"
+      ]
+    },
+    {
+      "id": "mistral-large-2512",
+      "name": "Mistral Large 3 2512",
+      "provider": "mistral",
+      "aliases": [],
+      "context_window": 262144,
+      "logical_model": "mistral-large-3-2512",
+      "equivalence_group": "mistral-large-3-2512",
+      "api_dialect": "openai_chat_compat",
+      "architecture": {
+        "parameter_count_b": 675.0,
+        "active_parameter_count_b": 41.0,
+        "moe": true,
+        "license": "Apache-2.0",
+        "source_url": "https://docs.mistral.ai/models/model-cards/mistral-large-3-25-12",
+        "last_verified": "2026-06-05"
+      },
+      "modalities": {
+        "input": [
+          "text"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
+        "tool_search": []
+      },
+      "structured_output": "native",
+      "format_preferences": {
+        "prefers_xml_scaffolding": false,
+        "prefers_markdown_scaffolding": true,
+        "structured_output_mode": "native_json",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "none"
+      },
+      "reasoning": {
+        "modes": [],
+        "effort_supported": false,
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": false,
+      "pricing": {
+        "input_per_mtok": 0.5,
+        "output_per_mtok": 1.5,
+        "cache_read_per_mtok": 0.05,
+        "cache_write_per_mtok": null
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "structured_output"
+      ],
+      "family": "mistral",
+      "lineage": "mistral",
+      "tier": "frontier",
+      "open_weight": true,
+      "strengths": [
+        "coding",
+        "tool_use",
+        "long_context",
+        "vision"
+      ]
+    },
+    {
+      "id": "mistral-small-2603",
+      "name": "Mistral Small 4",
+      "provider": "mistral",
+      "aliases": [],
+      "context_window": 262144,
+      "logical_model": "mistral-small-4-2603",
+      "equivalence_group": "mistral-small-4-2603",
+      "api_dialect": "openai_chat_compat",
+      "architecture": {
+        "parameter_count_b": 119.0,
+        "active_parameter_count_b": 6.5,
+        "moe": true,
+        "license": "Apache-2.0",
+        "source_url": "https://docs.mistral.ai/models/model-cards/mistral-small-4-0-26-03",
+        "last_verified": "2026-06-05"
+      },
+      "modalities": {
+        "input": [
+          "text"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
+        "tool_search": []
+      },
+      "structured_output": "native",
+      "format_preferences": {
+        "prefers_xml_scaffolding": false,
+        "prefers_markdown_scaffolding": true,
+        "structured_output_mode": "native_json",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "none"
+      },
+      "reasoning": {
+        "modes": [],
+        "effort_supported": false,
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": false,
+      "pricing": {
+        "input_per_mtok": 0.15,
+        "output_per_mtok": 0.6,
+        "cache_read_per_mtok": 0.015,
+        "cache_write_per_mtok": null
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "structured_output"
+      ],
+      "family": "mistral",
+      "lineage": "mistral",
+      "tier": "mid",
+      "open_weight": true,
+      "strengths": [
+        "cheap",
+        "coding",
+        "speed",
+        "tool_use",
         "long_context"
       ]
     },
@@ -5890,6 +6730,18 @@ public let harnProviderCatalogJSON = #"""
       "provider": "openrouter",
       "aliases": [],
       "context_window": 262144,
+      "logical_model": "mistral-large-3-2512",
+      "equivalence_group": "mistral-large-3-2512",
+      "served_variant": "openrouter",
+      "api_dialect": "openai_chat",
+      "architecture": {
+        "parameter_count_b": 675.0,
+        "active_parameter_count_b": 41.0,
+        "moe": true,
+        "license": "Apache-2.0",
+        "source_url": "https://docs.mistral.ai/models/model-cards/mistral-large-3-25-12",
+        "last_verified": "2026-06-05"
+      },
       "modalities": {
         "input": [
           "text"
@@ -5955,6 +6807,18 @@ public let harnProviderCatalogJSON = #"""
       "provider": "openrouter",
       "aliases": [],
       "context_window": 262144,
+      "logical_model": "mistral-small-4-2603",
+      "equivalence_group": "mistral-small-4-2603",
+      "served_variant": "openrouter",
+      "api_dialect": "openai_chat",
+      "architecture": {
+        "parameter_count_b": 119.0,
+        "active_parameter_count_b": 6.5,
+        "moe": true,
+        "license": "Apache-2.0",
+        "source_url": "https://docs.mistral.ai/models/model-cards/mistral-small-4-0-26-03",
+        "last_verified": "2026-06-05"
+      },
       "modalities": {
         "input": [
           "text"
@@ -6101,6 +6965,18 @@ public let harnProviderCatalogJSON = #"""
       "provider": "openrouter",
       "aliases": [],
       "context_window": 131072,
+      "logical_model": "openai-gpt-oss-120b",
+      "equivalence_group": "openai-gpt-oss-120b",
+      "served_variant": "openrouter",
+      "api_dialect": "openai_chat",
+      "architecture": {
+        "parameter_count_b": 117.0,
+        "active_parameter_count_b": 5.1,
+        "moe": true,
+        "license": "Apache-2.0",
+        "source_url": "https://developers.openai.com/api/docs/models/gpt-oss-120b",
+        "last_verified": "2026-06-05"
+      },
       "modalities": {
         "input": [
           "text"
@@ -6569,6 +7445,93 @@ public let harnProviderCatalogJSON = #"""
       ]
     },
     {
+      "id": "grok-build-0.1",
+      "name": "Grok Build 0.1",
+      "provider": "xai",
+      "aliases": [
+        "grok-code",
+        "grok-code-fast"
+      ],
+      "context_window": 256000,
+      "logical_model": "grok-code-fast-1",
+      "equivalence_group": "grok-code-fast-1",
+      "api_dialect": "openai_chat_compat",
+      "rate_limits": {
+        "rpm": 1800,
+        "tpm": 10000000,
+        "tier": "us-east-1",
+        "source_url": "https://docs.x.ai/developers/models/grok-code-fast-1",
+        "last_verified": "2026-06-05"
+      },
+      "modalities": {
+        "input": [
+          "text",
+          "image"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
+        "tool_search": []
+      },
+      "structured_output": "native",
+      "format_preferences": {
+        "prefers_xml_scaffolding": false,
+        "prefers_markdown_scaffolding": true,
+        "structured_output_mode": "native_json",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "reasoning_summary"
+      },
+      "reasoning": {
+        "modes": [
+          "adaptive"
+        ],
+        "effort_supported": false,
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": true,
+      "pricing": {
+        "input_per_mtok": 1.0,
+        "output_per_mtok": 2.0,
+        "cache_read_per_mtok": 0.2,
+        "cache_write_per_mtok": null
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "vision",
+        "prompt_caching",
+        "thinking",
+        "extended_thinking",
+        "structured_output"
+      ],
+      "family": "xai",
+      "lineage": "xai",
+      "tier": "frontier",
+      "open_weight": false,
+      "strengths": [
+        "coding",
+        "agentic",
+        "tool_use",
+        "reasoning",
+        "vision"
+      ]
+    },
+    {
       "id": "glm-5",
       "name": "GLM 5",
       "provider": "zai",
@@ -6718,6 +7681,16 @@ public let harnProviderCatalogJSON = #"""
   ],
   "aliases": [
     {
+      "name": "cohere",
+      "model_id": "command-a-plus-05-2026",
+      "provider": "cohere"
+    },
+    {
+      "name": "command-a-plus",
+      "model_id": "command-a-plus-05-2026",
+      "provider": "cohere"
+    },
+    {
       "name": "deepseek",
       "model_id": "deepseek-v4-flash",
       "provider": "deepseek"
@@ -6779,6 +7752,16 @@ public let harnProviderCatalogJSON = #"""
       "provider": "zai"
     },
     {
+      "name": "grok-code",
+      "model_id": "grok-build-0.1",
+      "provider": "xai"
+    },
+    {
+      "name": "grok-code-fast",
+      "model_id": "grok-build-0.1",
+      "provider": "xai"
+    },
+    {
       "name": "haiku",
       "model_id": "claude-haiku-4-5-20251001",
       "provider": "anthropic"
@@ -6793,13 +7776,13 @@ public let harnProviderCatalogJSON = #"""
       "name": "llamacpp-qwen3.6-q4",
       "model_id": "qwen3.6-35b-a3b-ud-q4-k-xl",
       "provider": "llamacpp",
-      "tool_format": "text",
+      "tool_format": "native",
       "tool_calling": {
-        "native": "unknown",
+        "native": "pass",
         "text": "unknown",
-        "streaming_native": "unknown",
-        "fallback_mode": "text",
-        "failure_reason": "requires_tool_probe_and_cache_probe"
+        "streaming_native": "pass",
+        "fallback_mode": "native",
+        "last_probe_at": "2026-06-05"
       }
     },
     {
@@ -6836,7 +7819,14 @@ public let harnProviderCatalogJSON = #"""
       "name": "local-qwen3.6",
       "model_id": "qwen3.6-35b-a3b-ud-q4-k-xl",
       "provider": "llamacpp",
-      "tool_format": "text"
+      "tool_format": "native",
+      "tool_calling": {
+        "native": "pass",
+        "text": "unknown",
+        "streaming_native": "pass",
+        "fallback_mode": "native",
+        "last_probe_at": "2026-06-05"
+      }
     },
     {
       "name": "local-qwen3.6-27b",
@@ -6848,7 +7838,14 @@ public let harnProviderCatalogJSON = #"""
       "name": "local-qwen3.6-gguf",
       "model_id": "qwen3.6-35b-a3b-ud-q4-k-xl",
       "provider": "llamacpp",
-      "tool_format": "text"
+      "tool_format": "native",
+      "tool_calling": {
+        "native": "pass",
+        "text": "unknown",
+        "streaming_native": "pass",
+        "fallback_mode": "native",
+        "last_probe_at": "2026-06-05"
+      }
     },
     {
       "name": "mid",
@@ -7037,8 +8034,8 @@ public let harnProviderCatalogJSON = #"""
       "id": "cheap",
       "label": "Cheap",
       "description": "Lowest known hosted input+output token price.",
-      "model_id": "deepseek/deepseek-v4-flash",
-      "provider": "openrouter",
+      "model_id": "llama-3.1-8b-instant",
+      "provider": "groq",
       "source": "catalog"
     },
     {
@@ -7060,12 +8057,16 @@ public let harnProviderCatalogJSON = #"""
   ],
   "qc_defaults": {
     "anthropic": "claude-haiku-4-5-20251001",
+    "cohere": "command-a-plus-05-2026",
     "deepseek": "deepseek-v4-flash",
+    "groq": "llama-3.1-8b-instant",
     "local": "gpt-4o",
     "minimax": "MiniMax-M2.5-highspeed",
+    "mistral": "mistral-small-2603",
     "ollama": "llama3.2",
     "openai": "gpt-4o-mini",
     "openrouter": "google/gemini-2.5-flash",
+    "xai": "grok-build-0.1",
     "zai": "glm-5"
   }
 }

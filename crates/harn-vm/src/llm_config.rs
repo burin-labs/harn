@@ -129,6 +129,10 @@ pub struct ProviderDef {
     pub cwd: Option<String>,
     pub mcp_servers: Vec<serde_json::Value>,
     pub healthcheck: Option<HealthcheckDef>,
+    /// Local runtime lifecycle metadata used by `harn local launch/stop`.
+    /// This is intentionally separate from provider process fields such as
+    /// `command`/`args`, which are used for ACP or external provider adapters.
+    pub local_runtime: Option<LocalRuntimeDef>,
     pub features: Vec<String>,
     /// Fallback provider name to try if this provider fails.
     pub fallback: Option<String>,
@@ -138,6 +142,10 @@ pub struct ProviderDef {
     pub retry_delay_ms: Option<u64>,
     /// Maximum requests per minute. None = unlimited.
     pub rpm: Option<u32>,
+    /// Rich provider quota metadata. `rpm` remains as a legacy shorthand;
+    /// when both are present, this nested shape is the authoritative catalog
+    /// record and callers can still read the flattened `rpm`.
+    pub rate_limits: Option<RateLimitsDef>,
     /// Provider/catalog pricing in USD per 1k input tokens.
     pub cost_per_1k_in: Option<f64>,
     /// Provider/catalog pricing in USD per 1k output tokens.
@@ -185,6 +193,8 @@ struct ProviderDefWire {
     #[serde(default)]
     healthcheck: Option<HealthcheckDef>,
     #[serde(default)]
+    local_runtime: Option<LocalRuntimeDef>,
+    #[serde(default)]
     features: Vec<String>,
     #[serde(default)]
     fallback: Option<String>,
@@ -194,6 +204,8 @@ struct ProviderDefWire {
     retry_delay_ms: Option<u64>,
     #[serde(default)]
     rpm: Option<u32>,
+    #[serde(default)]
+    rate_limits: Option<RateLimitsDef>,
     #[serde(default)]
     cost_per_1k_in: Option<f64>,
     #[serde(default)]
@@ -227,11 +239,13 @@ impl<'de> Deserialize<'de> for ProviderDef {
             cwd: wire.cwd,
             mcp_servers: wire.mcp_servers,
             healthcheck: wire.healthcheck,
+            local_runtime: wire.local_runtime,
             features: wire.features,
             fallback: wire.fallback,
             retry_count: wire.retry_count,
             retry_delay_ms: wire.retry_delay_ms,
             rpm: wire.rpm,
+            rate_limits: wire.rate_limits,
             cost_per_1k_in: wire.cost_per_1k_in,
             cost_per_1k_out: wire.cost_per_1k_out,
             latency_p50_ms: wire.latency_p50_ms,
@@ -260,11 +274,13 @@ impl Default for ProviderDef {
             cwd: None,
             mcp_servers: Vec::new(),
             healthcheck: None,
+            local_runtime: None,
             features: Vec::new(),
             fallback: None,
             retry_count: None,
             retry_delay_ms: None,
             rpm: None,
+            rate_limits: None,
             cost_per_1k_in: None,
             cost_per_1k_out: None,
             latency_p50_ms: None,
@@ -302,11 +318,13 @@ impl ProviderDef {
         merge_option(&mut self.cwd, &overlay.cwd);
         merge_vec(&mut self.mcp_servers, &overlay.mcp_servers);
         merge_option(&mut self.healthcheck, &overlay.healthcheck);
+        merge_option(&mut self.local_runtime, &overlay.local_runtime);
         merge_vec(&mut self.features, &overlay.features);
         merge_option(&mut self.fallback, &overlay.fallback);
         merge_option(&mut self.retry_count, &overlay.retry_count);
         merge_option(&mut self.retry_delay_ms, &overlay.retry_delay_ms);
         merge_option(&mut self.rpm, &overlay.rpm);
+        merge_option(&mut self.rate_limits, &overlay.rate_limits);
         merge_option(&mut self.cost_per_1k_in, &overlay.cost_per_1k_in);
         merge_option(&mut self.cost_per_1k_out, &overlay.cost_per_1k_out);
         merge_option(&mut self.latency_p50_ms, &overlay.latency_p50_ms);
@@ -363,6 +381,121 @@ pub struct HealthcheckDef {
     pub body: Option<String>,
 }
 
+#[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq, Eq)]
+pub struct LocalRuntimeDef {
+    /// Lifecycle style: `daemon_api` for runtimes with their own resident
+    /// daemon (Ollama), `managed_process` for Harn-spawned servers.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kind: Option<String>,
+    /// Command Harn should execute for managed-process runtimes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub command: Option<String>,
+    /// Default model source/path/repo. User overlays may set this; embedded
+    /// catalog rows avoid machine-specific absolute paths except examples.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model_source: Option<String>,
+    /// Environment variable that can provide a model source.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model_source_env: Option<String>,
+    /// Default port when the provider base URL has none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default_port: Option<u16>,
+    /// Argument names used by the runtime CLI.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model_arg: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub served_model_arg: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub host_arg: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub port_arg: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ctx_arg: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parallel_arg: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub gpu_layers_arg: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cache_type_k_arg: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cache_type_v_arg: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cache_ram_arg: Option<String>,
+    /// Extra arguments Harn applies by default when launching this runtime.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub default_args: Vec<String>,
+    /// Stop strategy: `keep_alive_zero`, `pid`, or `external`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stop: Option<String>,
+    /// Official docs/source URL for the lifecycle contract.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_url: Option<String>,
+    /// YYYY-MM-DD date when the local runtime row was last verified.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_verified: Option<String>,
+    /// Short operational note surfaced by CLI docs/help.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub notes: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq)]
+pub struct LocalMemoryDef {
+    /// Empirical resident memory observed for this route/runtime.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub measured_resident_gib: Option<f64>,
+    /// Context size used for the empirical measurement.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub measured_context_window: Option<u64>,
+    /// KV-cache type used for the empirical measurement.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub measured_cache_type: Option<String>,
+    /// Approximate non-context resident footprint for this model/runtime.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub base_resident_gib: Option<f64>,
+    /// Approximate GiB consumed by KV cache per 1,000 context tokens at the
+    /// default cache type.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kv_cache_gib_per_1k_ctx: Option<f64>,
+    /// Cache-type multiplier relative to `kv_cache_gib_per_1k_ctx`.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub cache_type_multipliers: BTreeMap<String, f64>,
+    /// Cache type assumed when the launch command does not set K/V cache.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default_cache_type: Option<String>,
+    /// Minimum headroom Harn should leave for the OS and other apps.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub safety_margin_gib: Option<f64>,
+    /// Highest context Harn should recommend automatically from this row.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_recommended_context: Option<u64>,
+    /// Official or empirical source for the sizing row.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_url: Option<String>,
+    /// YYYY-MM-DD date when the sizing row was last verified.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_verified: Option<String>,
+    /// Short operational note surfaced by CLI diagnostics/docs.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub notes: Option<String>,
+}
+
+impl LocalMemoryDef {
+    pub fn is_empty(&self) -> bool {
+        self.measured_resident_gib.is_none()
+            && self.measured_context_window.is_none()
+            && self.measured_cache_type.is_none()
+            && self.base_resident_gib.is_none()
+            && self.kv_cache_gib_per_1k_ctx.is_none()
+            && self.cache_type_multipliers.is_empty()
+            && self.default_cache_type.is_none()
+            && self.safety_margin_gib.is_none()
+            && self.max_recommended_context.is_none()
+            && self.source_url.is_none()
+            && self.last_verified.is_none()
+            && self.notes.is_none()
+    }
+}
+
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
 pub struct AliasDef {
     pub id: String,
@@ -407,6 +540,128 @@ pub struct ModelPricing {
     pub cache_write_per_mtok: Option<f64>,
 }
 
+/// Provider or model quota metadata. Providers publish these along several
+/// axes, and any one exhausted bucket can trigger throttling.
+#[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq, Eq)]
+pub struct RateLimitsDef {
+    /// Requests per minute.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rpm: Option<u32>,
+    /// Requests per hour.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rph: Option<u32>,
+    /// Requests per day.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rpd: Option<u32>,
+    /// Total tokens per minute.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tpm: Option<u64>,
+    /// Total tokens per hour.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tph: Option<u64>,
+    /// Total tokens per day.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tpd: Option<u64>,
+    /// Input tokens per minute, when the provider splits input/output quotas.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub input_tpm: Option<u64>,
+    /// Output tokens per minute, when the provider splits input/output quotas.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub output_tpm: Option<u64>,
+    /// Concurrent in-flight requests, if published.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub concurrency: Option<u32>,
+    /// Account tier or route class these limits describe.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tier: Option<String>,
+    /// Official source URL for the row.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_url: Option<String>,
+    /// YYYY-MM-DD date when the row was last verified.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_verified: Option<String>,
+    /// Free-text caveat for account-dependent or burst limits.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub notes: Option<String>,
+}
+
+impl RateLimitsDef {
+    pub fn is_empty(&self) -> bool {
+        self.rpm.is_none()
+            && self.rph.is_none()
+            && self.rpd.is_none()
+            && self.tpm.is_none()
+            && self.tph.is_none()
+            && self.tpd.is_none()
+            && self.input_tpm.is_none()
+            && self.output_tpm.is_none()
+            && self.concurrency.is_none()
+            && self.tier.is_none()
+            && self.source_url.is_none()
+            && self.last_verified.is_none()
+            && self.notes.is_none()
+    }
+
+    pub fn with_rpm_fallback(mut self, rpm: Option<u32>) -> Option<Self> {
+        if self.rpm.is_none() {
+            self.rpm = rpm;
+        }
+        (!self.is_empty()).then_some(self)
+    }
+}
+
+/// Logical-model facts separated from provider serving routes. These fields
+/// describe the underlying weights or public model family, not Harn's alias or
+/// provider/model selector.
+#[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq)]
+pub struct ModelArchitectureDef {
+    /// Total parameter count in billions.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parameter_count_b: Option<f64>,
+    /// Active parameter count in billions for MoE models.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub active_parameter_count_b: Option<f64>,
+    /// True for mixture-of-experts models.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub moe: Option<bool>,
+    /// Quantization advertised by this route, if route-specific.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub quantization: Option<String>,
+    /// Numeric precision advertised by this route, if known.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub precision: Option<String>,
+    /// License identifier or short label.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub license: Option<String>,
+    /// Tokenizer family or implementation hint.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tokenizer: Option<String>,
+    /// Public knowledge cutoff claim, when published.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub knowledge_cutoff: Option<String>,
+    /// Official source URL for these facts.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_url: Option<String>,
+    /// YYYY-MM-DD date when these facts were last verified.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_verified: Option<String>,
+}
+
+impl ModelArchitectureDef {
+    pub fn is_empty(&self) -> bool {
+        self.parameter_count_b.is_none()
+            && self.active_parameter_count_b.is_none()
+            && self.moe.is_none()
+            && self.quantization.is_none()
+            && self.precision.is_none()
+            && self.license.is_none()
+            && self.tokenizer.is_none()
+            && self.knowledge_cutoff.is_none()
+            && self.source_url.is_none()
+            && self.last_verified.is_none()
+    }
+}
+
 /// Optional accelerated-serving ("fast mode") tier for a model. Off by
 /// default: its presence only *describes* that the provider offers a
 /// faster, premium-priced serving path running the same weights — callers
@@ -449,6 +704,37 @@ pub struct ModelDef {
     pub name: String,
     pub provider: String,
     pub context_window: u64,
+    /// Provider-independent logical model id, when multiple serving routes map
+    /// to the same weights or model family.
+    #[serde(default)]
+    pub logical_model: Option<String>,
+    /// Equivalence class for failover/escalation candidates. Entries in the
+    /// same group are capability-compatible alternatives, not byte-identical
+    /// APIs; callers must still re-render transcripts for the target provider.
+    #[serde(default)]
+    pub equivalence_group: Option<String>,
+    /// Serving-route detail such as "serverless", "priority", "fp8", or a
+    /// provider route slug. This is intentionally separate from `name`.
+    #[serde(default)]
+    pub served_variant: Option<String>,
+    /// Provider-native model id to send on the wire. Defaults to the catalog
+    /// key. Required when two providers expose the same native id and Harn
+    /// needs a unique catalog key for each route.
+    #[serde(default)]
+    pub wire_model: Option<String>,
+    /// Preferred API dialect for the route, e.g. `openai_chat`,
+    /// `openai_responses`, `anthropic_messages`, `gemini_generate_content`.
+    #[serde(default)]
+    pub api_dialect: Option<String>,
+    /// Route-specific token/request quota metadata.
+    #[serde(default)]
+    pub rate_limits: Option<RateLimitsDef>,
+    /// Underlying model architecture facts separated from the provider id.
+    #[serde(default)]
+    pub architecture: Option<ModelArchitectureDef>,
+    /// Local launch memory-sizing hints used by `harn local launch`.
+    #[serde(default)]
+    pub local_memory: Option<LocalMemoryDef>,
     #[serde(default)]
     pub runtime_context_window: Option<u64>,
     #[serde(default)]
@@ -1445,6 +1731,80 @@ pub fn model_catalog_entry(model_id: &str) -> Option<ModelDef> {
         })
 }
 
+pub fn model_rate_limits(model_id: &str) -> Option<RateLimitsDef> {
+    model_catalog_entry(model_id).and_then(|model| model.rate_limits)
+}
+
+pub fn wire_model_id(model_id: &str) -> String {
+    model_catalog_entry(model_id)
+        .and_then(|model| model.wire_model)
+        .unwrap_or_else(|| model_id.to_string())
+}
+
+pub fn provider_rate_limits(provider: &str) -> Option<RateLimitsDef> {
+    provider_config(provider).and_then(|provider| {
+        provider
+            .rate_limits
+            .unwrap_or_default()
+            .with_rpm_fallback(provider.rpm)
+    })
+}
+
+pub fn model_equivalence_group(model_id: &str) -> Option<String> {
+    model_catalog_entry(model_id).and_then(|model| {
+        model
+            .equivalence_group
+            .or(model.logical_model)
+            .filter(|group| !group.trim().is_empty())
+    })
+}
+
+/// Return same-logical-model routes that can be considered for explicit
+/// failover or cross-provider experiments. Equivalence is a catalog assertion
+/// about compatible model weights/family, not wire-level identity.
+pub fn equivalent_model_catalog_entries(selector: &str) -> Vec<(String, ModelDef)> {
+    let resolved = resolve_model_info(selector);
+    let Some(group) = model_equivalence_group(&resolved.id) else {
+        return Vec::new();
+    };
+    let config = effective_config();
+    let Some(source) = config.models.get(&resolved.id) else {
+        return Vec::new();
+    };
+    let source_caps = crate::llm::capabilities::lookup(&source.provider, &resolved.id);
+    let source_context = source
+        .runtime_context_window
+        .unwrap_or(source.context_window);
+
+    sorted_model_entries_with_config(&config)
+        .into_iter()
+        .filter(|(id, model)| !(id == &resolved.id && model.provider == resolved.provider))
+        .filter(|(_, model)| !model.deprecated)
+        .filter(|(_, model)| model.availability != ModelAvailability::Dedicated)
+        .filter(|(_, model)| {
+            model.equivalence_group.as_deref() == Some(group.as_str())
+                || model.logical_model.as_deref() == Some(group.as_str())
+        })
+        .filter(|(id, model)| {
+            let caps = crate::llm::capabilities::lookup(&model.provider, id);
+            let candidate_context = model.runtime_context_window.unwrap_or(model.context_window);
+            candidate_context >= source_context
+                && (!source_caps.native_tools || caps.native_tools)
+                && (!source_caps.text_tool_wire_format_supported
+                    || caps.text_tool_wire_format_supported)
+                && (!source_caps.reasoning_effort_supported || caps.reasoning_effort_supported)
+                && source_caps.structured_output_mode == caps.structured_output_mode
+        })
+        .map(|(id, model)| {
+            let provider = model.provider.clone();
+            (
+                id.clone(),
+                with_effective_capability_tags(id, provider, model),
+            )
+        })
+        .collect()
+}
+
 pub fn qc_default_model(provider: &str) -> Option<String> {
     std::env::var("BURIN_QC_MODEL")
         .ok()
@@ -2096,11 +2456,13 @@ pub fn resolve_base_url(pdef: &ProviderDef) -> String {
     pdef.base_url.clone()
 }
 
-/// Embedded copy of `llm/providers.toml`, the single source of truth for
-/// Harn's bundled provider/model catalog. Edit the TOML, not this string.
+/// Embedded copy of generated `llm/providers.toml`, built from
+/// `llm/catalog_sources/**/*.toml` by `harn providers build-config`.
+/// Edit the fragments, not this generated snapshot or this string.
 const EMBEDDED_PROVIDERS_TOML: &str = include_str!("llm/providers.toml");
 
-/// Parse the embedded `providers.toml` into the runtime `ProvidersConfig`.
+/// Parse the embedded generated `providers.toml` into the runtime
+/// `ProvidersConfig`.
 ///
 /// Hosts overlay this base via `HARN_PROVIDERS_CONFIG`,
 /// `~/.config/harn/providers.toml`, `harn.toml`, package-manifest
@@ -2263,6 +2625,35 @@ mod tests {
     }
 
     #[test]
+    fn test_equivalent_model_catalog_entries_use_capability_compatible_routes() {
+        reset_overrides();
+
+        assert_eq!(
+            wire_model_id("groq/openai/gpt-oss-120b"),
+            "openai/gpt-oss-120b"
+        );
+        assert_eq!(wire_model_id("gpt-oss-120b"), "gpt-oss-120b");
+
+        let equivalents = equivalent_model_catalog_entries("gpt-oss-120b");
+        let ids = equivalents
+            .iter()
+            .map(|(id, _)| id.as_str())
+            .collect::<Vec<_>>();
+
+        assert!(
+            ids.contains(&"groq/openai/gpt-oss-120b"),
+            "Cerebras GPT-OSS should surface the Groq serving variant"
+        );
+        assert!(
+            !ids.contains(&"gpt-oss-120b"),
+            "equivalence results should not include the source row"
+        );
+        assert!(equivalents.iter().all(|(_, model)| {
+            model.equivalence_group.as_deref() == Some("openai-gpt-oss-120b")
+        }));
+    }
+
+    #[test]
     fn test_user_catalog_overlay_re_homes_model_provider() {
         // Users can re-home a built-in model by overlaying a catalog row;
         // the exact-match catalog lookup must honor overlays as well as the
@@ -2275,6 +2666,14 @@ mod tests {
                 name: "GPT-4o via OpenRouter".to_string(),
                 provider: "openrouter".to_string(),
                 context_window: 128_000,
+                logical_model: None,
+                equivalence_group: None,
+                served_variant: None,
+                wire_model: None,
+                api_dialect: None,
+                rate_limits: None,
+                architecture: None,
+                local_memory: None,
                 runtime_context_window: None,
                 stream_timeout: None,
                 capabilities: Vec::new(),
@@ -2760,7 +3159,7 @@ mod tests {
 
         assert_eq!(
             default_tool_format("qwen3.6-35b-a3b-ud-q4-k-xl", "llamacpp"),
-            "text"
+            "native"
         );
         assert_eq!(
             default_tool_format("devstral-small-2:24b", "ollama"),
@@ -2794,6 +3193,14 @@ mod tests {
                 name: "Acme Fast".to_string(),
                 provider: "acme".to_string(),
                 context_window: 65_536,
+                logical_model: None,
+                equivalence_group: None,
+                served_variant: None,
+                wire_model: None,
+                api_dialect: None,
+                rate_limits: None,
+                architecture: None,
+                local_memory: None,
                 runtime_context_window: None,
                 stream_timeout: Some(42.0),
                 capabilities: vec!["tools".to_string(), "streaming".to_string()],

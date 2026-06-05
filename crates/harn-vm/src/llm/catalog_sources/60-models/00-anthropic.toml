@@ -1,0 +1,213 @@
+# ── Models ───────────────────────────────────────────────────────────────────
+# Canonical model metadata: display name, provider, context window,
+# capabilities, pricing (USD per 1M tokens), and deprecation status.
+# Pricing reflects public provider pages snapshotted at the comment
+# beside each section; edit the literal here and the change shows up in
+# `git blame`.
+
+# Anthropic ─ pricing pages: https://www.anthropic.com/pricing &
+# https://platform.claude.com/docs/en/about-claude/model-deprecations.
+# Sonnet 4.5 retired 2026-05-15; Sonnet 4 and Opus 4 retire 2026-06-15.
+
+[models."claude-3-5-haiku-20241022"]
+name = "Claude Haiku 3.5"
+provider = "anthropic"
+context_window = 200000
+capabilities = ["tools", "streaming", "prompt_caching", "thinking"]
+pricing = { input_per_mtok = 0.80, output_per_mtok = 4.00, cache_read_per_mtok = 0.08, cache_write_per_mtok = 1.00 }
+tier = "small"
+open_weight = false
+strengths = ["speed", "cheap", "summarization", "tool_use"]
+
+[models."claude-haiku-4-5-20251001"]
+name = "Claude Haiku 4.5"
+provider = "anthropic"
+context_window = 200000
+capabilities = ["tools", "streaming", "prompt_caching", "thinking"]
+pricing = { input_per_mtok = 1.00, output_per_mtok = 5.00, cache_read_per_mtok = 0.10, cache_write_per_mtok = 1.25 }
+tier = "mid"
+open_weight = false
+strengths = ["speed", "cheap", "coding", "tool_use", "summarization"]
+
+[models."claude-3-5-sonnet-20240620"]
+name = "Claude Sonnet 3.5 (2024-06-20)"
+provider = "anthropic"
+context_window = 200000
+capabilities = ["tools", "streaming", "prompt_caching", "thinking"]
+pricing = { input_per_mtok = 3.00, output_per_mtok = 15.00, cache_read_per_mtok = 0.30, cache_write_per_mtok = 3.75 }
+tier = "frontier"
+open_weight = false
+strengths = ["coding", "reasoning", "tool_use", "long_context"]
+[models."claude-3-5-sonnet-20241022"]
+name = "Claude Sonnet 3.5 (2024-10-22)"
+provider = "anthropic"
+context_window = 200000
+capabilities = ["tools", "streaming", "prompt_caching", "thinking"]
+pricing = { input_per_mtok = 3.00, output_per_mtok = 15.00, cache_read_per_mtok = 0.30, cache_write_per_mtok = 3.75 }
+tier = "frontier"
+open_weight = false
+strengths = ["coding", "reasoning", "tool_use", "long_context"]
+[models."claude-sonnet-4-20250514"]
+name = "Claude Sonnet 4"
+provider = "anthropic"
+context_window = 200000
+capabilities = ["tools", "streaming", "prompt_caching", "thinking"]
+pricing = { input_per_mtok = 3.00, output_per_mtok = 15.00, cache_read_per_mtok = 0.30, cache_write_per_mtok = 3.75 }
+deprecated = true
+deprecation_note = "Sunset 2026-06-15 per Anthropic deprecations page. Replaced by claude-sonnet-4-6."
+tier = "frontier"
+open_weight = false
+strengths = ["coding", "reasoning", "tool_use", "long_context", "agentic"]
+benchmarks = { swe_bench_verified = 49.0 }
+[models."claude-sonnet-4-5"]
+name = "Claude Sonnet 4.5"
+provider = "anthropic"
+context_window = 200000
+capabilities = ["tools", "streaming", "prompt_caching", "thinking"]
+pricing = { input_per_mtok = 3.00, output_per_mtok = 15.00, cache_read_per_mtok = 0.30, cache_write_per_mtok = 3.75 }
+deprecated = true
+deprecation_note = "Sunset 2026-05-15 per Anthropic deprecations page. Replaced by claude-sonnet-4-6."
+tier = "frontier"
+open_weight = false
+strengths = ["coding", "reasoning", "tool_use", "long_context", "agentic"]
+benchmarks = { swe_bench_verified = 77.2 }
+[models."claude-sonnet-4-6"]
+name = "Claude Sonnet 4.6"
+provider = "anthropic"
+context_window = 200000
+capabilities = ["tools", "streaming", "prompt_caching", "thinking"]
+pricing = { input_per_mtok = 3.00, output_per_mtok = 15.00, cache_read_per_mtok = 0.30, cache_write_per_mtok = 3.75 }
+tier = "frontier"
+open_weight = false
+strengths = ["coding", "reasoning", "tool_use", "long_context", "agentic"]
+benchmarks = { swe_bench_verified = 79.6 }
+complementary_with = ["openai-gpt", "google-gemini", "qwen", "deepseek", "kimi"]
+[models."claude-sonnet-4-7"]
+name = "Claude Sonnet 4.7"
+provider = "anthropic"
+context_window = 200000
+capabilities = ["tools", "streaming", "prompt_caching", "thinking"]
+pricing = { input_per_mtok = 3.00, output_per_mtok = 15.00, cache_read_per_mtok = 0.30, cache_write_per_mtok = 3.75 }
+
+# OpenRouter-routed Anthropic models. Kept as distinct catalog entries
+# so `openrouter:anthropic/claude-*` resolves with the right capability
+# matrix — without these, native-tools requests fail with `option `tools`
+# is not supported by ... (provider openrouter)` because the lookup
+# falls back to a no-tools shape. OpenRouter passes Anthropic's
+# native-tools API through verbatim, including prompt-caching headers
+# (cache attribution surface differs — tracked separately in #2320).
+# Pricing matches the direct Anthropic API; OpenRouter adds its own
+# margin at request time.
+tier = "frontier"
+open_weight = false
+strengths = ["coding", "reasoning", "tool_use", "long_context", "agentic"]
+benchmarks = { swe_bench_verified = 81.0 }
+[models."anthropic/claude-haiku-4-5"]
+name = "Claude Haiku 4.5 (via OpenRouter)"
+provider = "openrouter"
+context_window = 200000
+capabilities = ["tools", "streaming", "prompt_caching"]
+pricing = { input_per_mtok = 1.00, output_per_mtok = 5.00, cache_read_per_mtok = 0.10, cache_write_per_mtok = 1.25 }
+tier = "mid"
+open_weight = false
+strengths = ["speed", "cheap", "coding", "tool_use", "summarization"]
+[models."anthropic/claude-sonnet-4-6"]
+name = "Claude Sonnet 4.6 (via OpenRouter)"
+provider = "openrouter"
+context_window = 200000
+capabilities = ["tools", "streaming", "prompt_caching"]
+pricing = { input_per_mtok = 3.00, output_per_mtok = 15.00, cache_read_per_mtok = 0.30, cache_write_per_mtok = 3.75 }
+tier = "frontier"
+open_weight = false
+strengths = ["coding", "reasoning", "tool_use", "long_context", "agentic"]
+complementary_with = ["openai-gpt", "google-gemini", "qwen", "deepseek", "kimi"]
+[models."claude-3-opus-20240229"]
+name = "Claude Opus 3"
+provider = "anthropic"
+context_window = 200000
+capabilities = ["tools", "streaming", "prompt_caching", "thinking"]
+pricing = { input_per_mtok = 15.00, output_per_mtok = 75.00, cache_read_per_mtok = 1.50, cache_write_per_mtok = 18.75 }
+tier = "frontier"
+open_weight = false
+strengths = ["reasoning", "long_context"]
+[models."claude-opus-4-20250514"]
+name = "Claude Opus 4"
+provider = "anthropic"
+context_window = 200000
+capabilities = ["tools", "streaming", "prompt_caching", "thinking"]
+pricing = { input_per_mtok = 15.00, output_per_mtok = 75.00, cache_read_per_mtok = 1.50, cache_write_per_mtok = 18.75 }
+deprecated = true
+deprecation_note = "Sunset 2026-06-15 per Anthropic deprecations page. Replaced by claude-opus-4-8."
+superseded_by = "claude-opus-4-8"
+tier = "frontier"
+open_weight = false
+strengths = ["reasoning", "coding", "long_context", "agentic"]
+benchmarks = { swe_bench_verified = 77.6 }
+[models."claude-opus-4-1-20250805"]
+name = "Claude Opus 4.1"
+provider = "anthropic"
+context_window = 200000
+capabilities = ["tools", "streaming", "prompt_caching", "thinking"]
+pricing = { input_per_mtok = 15.00, output_per_mtok = 75.00, cache_read_per_mtok = 1.50, cache_write_per_mtok = 18.75 }
+deprecated = true
+deprecation_note = "Superseded by claude-opus-4-8. No formal sunset yet; switch when convenient."
+superseded_by = "claude-opus-4-8"
+tier = "frontier"
+open_weight = false
+strengths = ["reasoning", "coding", "long_context", "agentic"]
+benchmarks = { swe_bench_verified = 78.9 }
+[models."claude-opus-4-6"]
+name = "Claude Opus 4.6"
+provider = "anthropic"
+context_window = 200000
+capabilities = ["tools", "streaming", "prompt_caching", "thinking"]
+pricing = { input_per_mtok = 5.00, output_per_mtok = 25.00, cache_read_per_mtok = 0.50, cache_write_per_mtok = 6.25 }
+deprecated = true
+deprecation_note = "Superseded by claude-opus-4-8. No formal sunset yet; switch when convenient."
+superseded_by = "claude-opus-4-8"
+tier = "frontier"
+open_weight = false
+strengths = ["reasoning", "coding", "long_context", "agentic"]
+benchmarks = { swe_bench_verified = 80.8, swe_bench_pro = 53.4 }
+# Fast mode DEPRECATED at the Opus 4.8 launch; removed ~30 days later.
+fast_mode = { param = "speed", value = "fast", beta_header = "fast-mode-2026-02-01", otps_speedup = 2.5, status = "deprecated", pricing = { input_per_mtok = 30.00, output_per_mtok = 150.00, cache_read_per_mtok = 3.00, cache_write_per_mtok = 37.50 }, note = "Deprecated at the Opus 4.8 launch; removed ~30 days later, after which speed=fast silently falls back to standard speed/pricing. Migrate to Opus 4.8 or 4.7 fast mode." }
+[models."claude-opus-4-7"]
+name = "Claude Opus 4.7"
+provider = "anthropic"
+context_window = 200000
+capabilities = ["tools", "streaming", "prompt_caching", "thinking"]
+pricing = { input_per_mtok = 5.00, output_per_mtok = 25.00, cache_read_per_mtok = 0.50, cache_write_per_mtok = 6.25 }
+deprecated = true
+deprecation_note = "Superseded by claude-opus-4-8. No formal sunset yet; switch when convenient."
+superseded_by = "claude-opus-4-8"
+tier = "frontier"
+open_weight = false
+strengths = ["reasoning", "coding", "long_context", "agentic"]
+benchmarks = { swe_bench_verified = 87.6, swe_bench_pro = 64.3 }
+# Fast mode (research preview): 6x standard pricing, ~2.5x output tok/s.
+fast_mode = { param = "speed", value = "fast", beta_header = "fast-mode-2026-02-01", otps_speedup = 2.5, status = "research_preview", pricing = { input_per_mtok = 30.00, output_per_mtok = 150.00, cache_read_per_mtok = 3.00, cache_write_per_mtok = 37.50 }, note = "Claude API + Managed Agents only. Migrate to Opus 4.8 fast mode for the cheaper 2x rate." }
+
+# Claude Opus 4.8 (released 2026-05-28) — Anthropic's most capable model
+# for complex reasoning, long-horizon agentic coding, and high-autonomy
+# work; the current `opus` alias target. Adaptive thinking only (extended
+# thinking budgets return 400); the `effort` parameter controls reasoning
+# depth and defaults to `high` on every surface. Sampling params
+# (temperature/top_p/top_k) are rejected — steer via prompting instead.
+# Natively a 1M-token context window (via the long-context beta); the
+# catalog keeps the standard-tier 200k convention shared by every other
+# Claude row. Pricing per the Anthropic models overview: $5 / $25 per
+# MTok in/out (cache read 0.1x, 5-min cache write 1.25x).
+[models."claude-opus-4-8"]
+name = "Claude Opus 4.8"
+provider = "anthropic"
+context_window = 200000
+capabilities = ["tools", "streaming", "prompt_caching", "thinking"]
+pricing = { input_per_mtok = 5.00, output_per_mtok = 25.00, cache_read_per_mtok = 0.50, cache_write_per_mtok = 6.25 }
+tier = "frontier"
+open_weight = false
+strengths = ["reasoning", "coding", "long_context", "agentic"]
+benchmarks = { swe_bench_verified = 88.6, swe_bench_pro = 69.2 }
+complementary_with = ["openai-gpt", "google-gemini", "qwen", "deepseek", "kimi"]
+# Fast mode (research preview): 2x standard pricing, ~2.5x output tok/s.
+fast_mode = { param = "speed", value = "fast", beta_header = "fast-mode-2026-02-01", otps_speedup = 2.5, status = "research_preview", pricing = { input_per_mtok = 10.00, output_per_mtok = 50.00, cache_read_per_mtok = 1.00, cache_write_per_mtok = 12.50 }, note = "Claude API + Managed Agents only (not Bedrock/Vertex/Foundry); excluded from Batch and Priority Tier. Switching speed invalidates the prompt cache. Waitlist/account-manager gated." }
+

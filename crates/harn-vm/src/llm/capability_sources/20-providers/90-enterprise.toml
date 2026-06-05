@@ -1,0 +1,130 @@
+# ---------- Enterprise cloud providers ---------------------------------------
+
+# Bedrock Converse normalizes native tool calling across Anthropic, Meta,
+# Amazon, Mistral, and other Bedrock-hosted model families. Tool-search and
+# prompt-cache semantics remain provider/model-specific, so don't advertise
+# those through the generic Bedrock route yet.
+# Bedrock-hosted Claude keeps Anthropic's prompt-format preferences while
+# using Bedrock Converse transport. The `anthropic.claude-*` rule must
+# come before the broader `*claude*` fallback so the canonical Bedrock
+# model identifiers pick up the anthropic wire-format fields.
+[[provider.bedrock]]
+model_match = "anthropic.claude-*"
+native_tools = true
+preferred_tool_format = "native"
+message_wire_format = "anthropic"
+native_tool_wire_format = "anthropic"
+recommended_endpoint = "/model/{model}/converse"
+text_tool_wire_format_supported = true
+prefers_xml_scaffolding = true
+prefers_markdown_scaffolding = false
+structured_output_mode = "xml_tagged"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = true
+thinking_block_style = "thinking_blocks"
+
+[[provider.bedrock]]
+model_match = "*claude*"
+native_tools = true
+preferred_tool_format = "native"
+recommended_endpoint = "/model/{model}/converse"
+text_tool_wire_format_supported = true
+prefers_xml_scaffolding = true
+prefers_markdown_scaffolding = false
+structured_output_mode = "xml_tagged"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = true
+thinking_block_style = "thinking_blocks"
+
+[[provider.bedrock]]
+model_match = "*"
+native_tools = true
+preferred_tool_format = "native"
+recommended_endpoint = "/model/{model}/converse"
+text_tool_wire_format_supported = true
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "delimited"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "none"
+
+# Azure OpenAI uses deployment-name routing but keeps the OpenAI chat
+# completions tool-call body. Do not inherit OpenAI Responses API
+# tool_search flags: this shim targets Azure's chat-completions endpoint.
+[[provider.azure_openai]]
+model_match = "gpt-*"
+native_tools = true
+preferred_tool_format = "native"
+recommended_endpoint = "/openai/deployments/{deployment}/chat/completions"
+text_tool_wire_format_supported = true
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "native_json"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "none"
+
+[[provider.azure_openai]]
+model_match = "o1*"
+native_tools = true
+preferred_tool_format = "native"
+recommended_endpoint = "/openai/deployments/{deployment}/chat/completions"
+text_tool_wire_format_supported = true
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "native_json"
+supports_assistant_prefill = false
+prefers_role_developer = true
+prefers_xml_tools = false
+thinking_block_style = "reasoning_summary"
+
+[[provider.azure_openai]]
+model_match = "o3*"
+native_tools = true
+preferred_tool_format = "native"
+recommended_endpoint = "/openai/deployments/{deployment}/chat/completions"
+text_tool_wire_format_supported = true
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "native_json"
+supports_assistant_prefill = false
+prefers_role_developer = true
+prefers_xml_tools = false
+thinking_block_style = "reasoning_summary"
+
+[[provider.azure_openai]]
+model_match = "o4*"
+native_tools = true
+preferred_tool_format = "native"
+recommended_endpoint = "/openai/deployments/{deployment}/chat/completions"
+text_tool_wire_format_supported = true
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "native_json"
+supports_assistant_prefill = false
+prefers_role_developer = true
+prefers_xml_tools = false
+thinking_block_style = "reasoning_summary"
+
+# Vertex Gemini exposes function declarations in generateContent. Harn maps
+# native tool schemas to that shape, but leaves provider-specific cached
+# content / thinking flags off until they are wired as first-class options.
+[[provider.vertex]]
+model_match = "gemini-*"
+native_tools = true
+preferred_tool_format = "native"
+recommended_endpoint = "/projects/{project}/locations/{location}/publishers/google/models/{model}:generateContent"
+text_tool_wire_format_supported = true
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "native_json"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "none"
+

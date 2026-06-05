@@ -119,8 +119,8 @@ pub(crate) use guard::{
 pub(crate) use init::{InitArgs, NewArgs, ProjectTemplate};
 pub(crate) use lint_fmt::{FmtArgs, PathTargetsArgs};
 pub(crate) use local::{
-    LocalArgs, LocalCommand, LocalListArgs, LocalProfileArgs, LocalStatusArgs, LocalStopArgs,
-    LocalSwitchArgs,
+    LocalArgs, LocalCommand, LocalLaunchArgs, LocalListArgs, LocalProfileArgs, LocalStatusArgs,
+    LocalStopArgs, LocalSwitchArgs,
 };
 pub(crate) use mcp::{
     McpArgs, McpCommand, McpLoginArgs, McpMockCommand, McpMockEvalArgs, McpMockRecordArgs,
@@ -174,8 +174,9 @@ pub(crate) use provider::{
     ProviderToolProbeModeArg,
 };
 pub(crate) use providers::{
-    ProvidersArgs, ProvidersCommand, ProvidersExportArgs, ProvidersMatrixArgs,
-    ProvidersRecommendArgs, ProvidersRefreshArgs, ProvidersSupportArgs, ProvidersValidateArgs,
+    ProvidersArgs, ProvidersBuildCapabilitiesArgs, ProvidersBuildConfigArgs, ProvidersCommand,
+    ProvidersExportArgs, ProvidersMatrixArgs, ProvidersRecommendArgs, ProvidersRefreshArgs,
+    ProvidersSupportArgs, ProvidersValidateArgs,
 };
 pub(crate) use quickstart::QuickstartArgs;
 pub(crate) use routes::RoutesArgs;

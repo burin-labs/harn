@@ -1,0 +1,45 @@
+[provider_defaults.anthropic]
+message_wire_format = "anthropic"
+native_tool_wire_format = "anthropic"
+file_upload_wire_format = "anthropic"
+files_api_supported = true
+seed_supported = false
+frequency_penalty_supported = false
+presence_penalty_supported = false
+
+[provider_defaults.openai]
+top_k_supported = false
+
+[provider_defaults.openrouter]
+reasoning_wire_format = "openrouter"
+top_k_supported = false
+
+[provider_defaults.huggingface]
+top_k_supported = false
+
+[provider_defaults.local]
+top_k_supported = false
+
+[provider_defaults.together]
+reasoning_wire_format = "enabled"
+
+[provider_defaults.ollama]
+message_wire_format = "ollama"
+image_url_input_supported = false
+frequency_penalty_supported = false
+presence_penalty_supported = false
+
+[provider_defaults.gemini]
+message_wire_format = "gemini"
+file_upload_wire_format = "gemini"
+files_api_supported = true
+
+[provider_defaults.mistral]
+top_k_supported = false
+
+[provider_defaults.cohere]
+top_k_supported = false
+
+[provider_defaults.xai]
+top_k_supported = false
+

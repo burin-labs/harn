@@ -1013,6 +1013,17 @@ async fn async_main(raw_args: Vec<String>, runtime_mode: CliRuntimeMode) {
                     command_error(&error);
                 }
             }
+            ProvidersCommand::BuildConfig(build_config) => {
+                if let Err(error) = commands::providers::run_build_config(&build_config) {
+                    command_error(&error);
+                }
+            }
+            ProvidersCommand::BuildCapabilities(build_capabilities) => {
+                if let Err(error) = commands::providers::run_build_capabilities(&build_capabilities)
+                {
+                    command_error(&error);
+                }
+            }
             ProvidersCommand::Export(export) => {
                 if let Err(error) = commands::providers::run_export(&export) {
                     command_error(&error);

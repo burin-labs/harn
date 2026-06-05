@@ -5,12 +5,14 @@
 //! the underlying CLIs keep churning. Subcommands:
 //!
 //! - `list`   — survey every local provider Harn knows about
+//! - `launch` — start a Harn-managed local server process
 //! - `status` — show the active selection plus a brief summary of all
 //! - `switch` — make a model the active local runtime (warm + persist)
 //! - `stop`   — unload loaded models / stop Harn-managed servers
 //!
 //! All state lives under `<state_root>/local/` (see `super::local::state`).
 
+pub(crate) mod launch;
 pub(crate) mod list;
 pub(crate) mod profile;
 pub(crate) mod runtime;
@@ -27,6 +29,7 @@ pub(crate) async fn run(args: LocalArgs) {
     let base_dir = current_base_dir();
     let result = match args.command {
         LocalCommand::List(args) => list::run(args, &base_dir).await,
+        LocalCommand::Launch(args) => launch::run(*args, &base_dir).await,
         LocalCommand::Status(args) => status::run(args, &base_dir).await,
         LocalCommand::Switch(args) => switch::run(args, &base_dir).await,
         LocalCommand::Profile(args) => profile::run(args),

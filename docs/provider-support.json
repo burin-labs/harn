@@ -226,6 +226,58 @@
       "local_setup_notes": []
     },
     {
+      "id": "cohere",
+      "display_name": "Cohere",
+      "catalog_provider": "cohere",
+      "endpoint_style": "OpenAI-compatible chat completions",
+      "classification": "hosted",
+      "auth_env": [
+        "COHERE_API_KEY"
+      ],
+      "recommended": {
+        "selector": "cohere:command-a-plus-05-2026",
+        "provider": "cohere",
+        "model": "command-a-plus-05-2026",
+        "display_name": "Command A+",
+        "tool_format": "native",
+        "harn_options": [
+          "provider = \"cohere\"",
+          "model = \"command-a-plus-05-2026\"",
+          "tool_format = \"native\"",
+          "structured_output_mode = \"native_json\""
+        ]
+      },
+      "capabilities": {
+        "native_tools": true,
+        "text_tools": true,
+        "preferred_tool_format": "native",
+        "tool_mode_parity": "unknown",
+        "structured_output_transport": "native",
+        "structured_output_mode": "native_json",
+        "streaming": true,
+        "reasoning_knobs": [
+          "adaptive"
+        ],
+        "prompt_or_context_cache": false,
+        "usage_accounting_confidence": "high"
+      },
+      "empirical": {
+        "status": "not_recorded",
+        "sources": [],
+        "total_runs": 0,
+        "passed_runs": 0,
+        "failed_runs": 0,
+        "skipped_runs": 0,
+        "best_tool_format": null,
+        "native_text_parity": null,
+        "evidence": []
+      },
+      "notes": [],
+      "caveats": [],
+      "mcp_notes": [],
+      "local_setup_notes": []
+    },
+    {
       "id": "dashscope",
       "display_name": "Dashscope",
       "catalog_provider": "dashscope",
@@ -453,26 +505,29 @@
         "GROQ_API_KEY"
       ],
       "recommended": {
-        "selector": "groq",
+        "selector": "groq:llama-3.1-8b-instant",
         "provider": "groq",
-        "model": "*",
-        "display_name": null,
-        "tool_format": "text",
+        "model": "llama-3.1-8b-instant",
+        "display_name": "Llama 3.1 8B Instant (Groq)",
+        "tool_format": "native",
         "harn_options": [
-          "provider = \"groq\""
+          "provider = \"groq\"",
+          "model = \"llama-3.1-8b-instant\"",
+          "tool_format = \"native\"",
+          "structured_output_mode = \"native_json\""
         ]
       },
       "capabilities": {
-        "native_tools": false,
+        "native_tools": true,
         "text_tools": true,
-        "preferred_tool_format": "auto",
+        "preferred_tool_format": "native",
         "tool_mode_parity": "unknown",
-        "structured_output_transport": "none",
-        "structured_output_mode": "none",
+        "structured_output_transport": "native",
+        "structured_output_mode": "native_json",
         "streaming": true,
         "reasoning_knobs": [],
         "prompt_or_context_cache": false,
-        "usage_accounting_confidence": "provider_default"
+        "usage_accounting_confidence": "high"
       },
       "empirical": {
         "status": "not_recorded",
@@ -555,21 +610,21 @@
         "provider": "llamacpp",
         "model": "qwen3.6-35b-a3b-ud-q4-k-xl",
         "display_name": "Qwen3.6 35B (Unsloth Q4_K_XL, llama.cpp)",
-        "tool_format": "text",
+        "tool_format": "native",
         "harn_options": [
           "provider = \"llamacpp\"",
           "model = \"llamacpp-qwen3.6-q4\"",
-          "tool_format = \"text\"",
+          "tool_format = \"native\"",
           "thinking = \"off\""
         ]
       },
       "capabilities": {
-        "native_tools": false,
+        "native_tools": true,
         "text_tools": true,
-        "preferred_tool_format": "text",
-        "tool_mode_parity": "text_only",
+        "preferred_tool_format": "native",
+        "tool_mode_parity": "native",
         "structured_output_transport": "native",
-        "structured_output_mode": "delimited",
+        "structured_output_mode": "native_json",
         "streaming": true,
         "reasoning_knobs": [
           "disable_directive:/no_think",
@@ -593,7 +648,8 @@
         "llama.cpp gets its own provider so Harn can model Qwen chat-template and thinking behavior separately from generic local OpenAI-compatible servers."
       ],
       "caveats": [
-        "Run both provider readiness and tool probes after changing GGUF, context, KV-cache, or chat-template settings."
+        "Run both provider readiness and tool probes after changing GGUF, context, KV-cache, or chat-template settings.",
+        "Harn-managed llama.cpp launch plus one-tool probe passed native and streaming native on 2026-06-05."
       ],
       "mcp_notes": [],
       "local_setup_notes": [
@@ -1162,6 +1218,58 @@
         "reasoning_knobs": [],
         "prompt_or_context_cache": false,
         "usage_accounting_confidence": "local_zero_cost"
+      },
+      "empirical": {
+        "status": "not_recorded",
+        "sources": [],
+        "total_runs": 0,
+        "passed_runs": 0,
+        "failed_runs": 0,
+        "skipped_runs": 0,
+        "best_tool_format": null,
+        "native_text_parity": null,
+        "evidence": []
+      },
+      "notes": [],
+      "caveats": [],
+      "mcp_notes": [],
+      "local_setup_notes": []
+    },
+    {
+      "id": "xai",
+      "display_name": "Xai",
+      "catalog_provider": "xai",
+      "endpoint_style": "OpenAI-compatible chat completions",
+      "classification": "hosted",
+      "auth_env": [
+        "XAI_API_KEY"
+      ],
+      "recommended": {
+        "selector": "xai:grok-build-0.1",
+        "provider": "xai",
+        "model": "grok-build-0.1",
+        "display_name": "Grok Build 0.1",
+        "tool_format": "native",
+        "harn_options": [
+          "provider = \"xai\"",
+          "model = \"grok-build-0.1\"",
+          "tool_format = \"native\"",
+          "structured_output_mode = \"native_json\""
+        ]
+      },
+      "capabilities": {
+        "native_tools": true,
+        "text_tools": true,
+        "preferred_tool_format": "native",
+        "tool_mode_parity": "unknown",
+        "structured_output_transport": "native",
+        "structured_output_mode": "native_json",
+        "streaming": true,
+        "reasoning_knobs": [
+          "adaptive"
+        ],
+        "prompt_or_context_cache": true,
+        "usage_accounting_confidence": "high"
       },
       "empirical": {
         "status": "not_recorded",

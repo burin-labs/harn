@@ -387,6 +387,10 @@ NON_TEST_WALL_CLOCK_ALLOWLIST=(
   # `harn local switch` stamps the selection record with the actual host
   # wall clock so `harn local status` can show "selection age" to users
   # debugging a long-running session.
+  # `harn local launch` stamps process metadata and log filenames with the
+  # actual host wall clock so users can correlate local model lifecycle events
+  # against their terminal, OS process table, and provider logs.
+  "crates/harn-cli/src/commands/local/launch.rs"
   "crates/harn-cli/src/commands/local/state.rs"
   "crates/harn-cli/src/commands/mcp/mod.rs"
   "crates/harn-cli/src/commands/mcp/oauth_resource.rs"

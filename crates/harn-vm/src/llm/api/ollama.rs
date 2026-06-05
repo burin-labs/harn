@@ -444,14 +444,14 @@ pub async fn ollama_readiness(options: OllamaReadinessOptions) -> OllamaReadines
     result.matched_model = Some(matched.clone());
 
     let settings = OllamaRuntimeSettings::from_env_overrides_and_model(None, Some(&matched));
-    result.expected = Some(OllamaExpectedRequest {
-        num_ctx: settings.num_ctx,
-        keep_alive: settings.keep_alive.clone(),
-    });
     let keep_alive = options
         .keep_alive
         .clone()
         .unwrap_or_else(|| settings.keep_alive.clone());
+    result.expected = Some(OllamaExpectedRequest {
+        num_ctx: settings.num_ctx,
+        keep_alive: keep_alive.clone(),
+    });
     result.keep_alive = Some(keep_alive.clone());
 
     result.message = format!("Ollama is reachable and model '{matched}' is available");
@@ -837,6 +837,14 @@ mod tests {
                 name: "Qwen Test".to_string(),
                 provider: "ollama".to_string(),
                 context_window: 100_000,
+                logical_model: None,
+                equivalence_group: None,
+                served_variant: None,
+                wire_model: None,
+                api_dialect: None,
+                rate_limits: None,
+                architecture: None,
+                local_memory: None,
                 runtime_context_window: None,
                 stream_timeout: None,
                 capabilities: vec![],
@@ -940,6 +948,14 @@ mod tests {
                 name: "Qwen Test".to_string(),
                 provider: "ollama".to_string(),
                 context_window: 100_000,
+                logical_model: None,
+                equivalence_group: None,
+                served_variant: None,
+                wire_model: None,
+                api_dialect: None,
+                rate_limits: None,
+                architecture: None,
+                local_memory: None,
                 runtime_context_window: Some(32_768),
                 stream_timeout: None,
                 capabilities: vec![],
@@ -1043,6 +1059,7 @@ mod tests {
         assert!(result.warmup.as_ref().is_some_and(|warm| warm.valid));
         let expected = result.expected.as_ref().expect("expected request");
         assert_eq!(expected.num_ctx, 65_536);
+        assert_eq!(expected.keep_alive, serde_json::json!(-1));
 
         let requests = captured.lock().expect("captured requests");
         assert!(requests[0].starts_with("GET /api/tags "));
@@ -1191,6 +1208,14 @@ mod tests {
                 name: "Devstral Small 2 24B".to_string(),
                 provider: "ollama".to_string(),
                 context_window: 262_144,
+                logical_model: None,
+                equivalence_group: None,
+                served_variant: None,
+                wire_model: None,
+                api_dialect: None,
+                rate_limits: None,
+                architecture: None,
+                local_memory: None,
                 runtime_context_window: Some(98_304),
                 stream_timeout: None,
                 capabilities: vec![],

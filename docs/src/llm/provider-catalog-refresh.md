@@ -10,15 +10,17 @@ signals from provider sources, normalizes them, and emits:
   `.harn-runs/provider_catalog/candidate.toml`.
 
 The workflow never mutates the shipped catalog. The patch is a review
-aid: diff it against `crates/harn-vm/src/llm_config.rs` or your
-project's `harn.toml` overlay before landing changes.
+aid: diff it against the TOML fragments under
+`crates/harn-vm/src/llm/catalog_sources/`, the capability fragments under
+`crates/harn-vm/src/llm/capability_sources/`, or your project's
+`harn.toml` overlay before landing changes.
 
 Static catalog pricing should reflect the provider's durable rate card,
 not launch promotions or short discount windows returned by aggregator
 APIs. When a provider publishes time-limited promotional rates, keep the
-normal post-promotion rate in `providers.toml` and capture the promotion
-only in human review notes unless the catalog schema grows an explicit
-promotion-period field.
+normal post-promotion rate in the catalog source fragments and capture
+the promotion only in human review notes unless the catalog schema grows
+an explicit promotion-period field.
 
 ## Running the workflow
 
@@ -43,11 +45,35 @@ harn run scripts/update_provider_catalog.harn -- --check --update
 The CI gate is wired into `make check-provider-catalog-drift` and runs
 from `make all`.
 
-## Generated catalog artifacts
+## Catalog source and generated artifacts
 
-The runtime provider config remains the source of truth, but Harn also
-checks in generated artifacts under `spec/provider-catalog/` so
-downstream hosts do not need to parse Harn internals:
+Harn authors edit small TOML fragments under
+`crates/harn-vm/src/llm/catalog_sources/`. Harn generates the embedded
+runtime snapshot at `crates/harn-vm/src/llm/providers.toml` from those
+fragments. Provider capability rules use the same pattern:
+`crates/harn-vm/src/llm/capability_sources/` generates
+`crates/harn-vm/src/llm/capabilities.toml`.
+
+```bash
+# Regenerate the embedded provider/model TOML snapshot.
+harn providers build-config
+
+# CI gate: fail if providers.toml drifted from catalog_sources/.
+harn providers build-config --check
+
+# Regenerate and check the embedded provider capability TOML snapshot.
+harn providers build-capabilities
+harn providers build-capabilities --check
+```
+
+Direct edits to `crates/harn-vm/src/llm/providers.toml` and
+`crates/harn-vm/src/llm/capabilities.toml` are invalid. The files are
+checked in so Harn can still embed known-good offline snapshots with
+`include_str!`, but `make check-provider-config` and
+`make check-provider-capabilities` prove they match the fragments.
+
+Harn also checks in generated artifacts under `spec/provider-catalog/`
+so downstream hosts do not need to parse Harn internals:
 
 - `provider-catalog.json` — normalized providers, models, aliases,
   variants, QC defaults, capabilities, pricing, family/lineage
@@ -67,7 +93,7 @@ downstream hosts do not need to parse Harn internals:
 Use the `providers` command group for the artifact lifecycle:
 
 ```bash
-# Regenerate all checked-in artifacts.
+# Regenerate the embedded TOML snapshot and all checked-in artifacts.
 harn providers export
 
 # Validate logical catalog invariants, JSON Schema compatibility, and
@@ -84,12 +110,12 @@ harn providers matrix
 harn providers matrix --check
 ```
 
-`make gen-provider-catalog` runs `harn providers export`, and
-`make check-provider-catalog` runs
-`harn providers validate --check-artifacts`. The full `make all` gate
-includes `check-provider-catalog`, `check-provider-matrix`,
-`check-provider-support`, and the
-refresh workflow drift gate.
+`make gen-provider-catalog` runs `harn providers build-config` followed
+by `harn providers export`, and `make check-provider-catalog` checks both
+the embedded TOML snapshot and the public catalog artifacts. The full
+`make all` gate includes `check-provider-config`,
+`check-provider-catalog`, `check-provider-matrix`,
+`check-provider-support`, and the refresh workflow drift gate.
 
 For local or private models, pass a providers-style TOML overlay to
 `harn providers validate --overlay <path>` or
@@ -120,8 +146,9 @@ baseline. Product and user overlays should be composed in this order,
 with later layers winning per key:
 
 1. Harn's bundled provider catalog (`crates/harn-vm/src/llm/providers.toml`,
-   or the generated `provider-catalog.json` when the client cannot load
-   TOML directly)
+   generated from `crates/harn-vm/src/llm/catalog_sources/`, or the
+   generated `provider-catalog.json` when the client cannot load TOML
+   directly)
 2. product or managed `providers.toml` overlay
 3. user-global `providers.toml` (`HARN_PROVIDERS_CONFIG` or
    `~/.config/harn/providers.toml`)

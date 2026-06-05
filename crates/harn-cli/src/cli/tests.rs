@@ -3197,6 +3197,82 @@ fn test_parses_local_switch_args_with_machine_overrides() {
 }
 
 #[test]
+fn test_parses_local_launch_args() {
+    let cli = Cli::parse_from([
+        "harn",
+        "local",
+        "launch",
+        "local-qwen3.6",
+        "--provider",
+        "llamacpp",
+        "--model-path",
+        "/models/qwen.gguf",
+        "--server-command",
+        "llama-server",
+        "--host",
+        "127.0.0.1",
+        "--port",
+        "8001",
+        "--ctx",
+        "8192",
+        "--parallel",
+        "1",
+        "--gpu-layers",
+        "auto",
+        "--cache-type-k",
+        "q8_0",
+        "--cache-type-v",
+        "q8_0",
+        "--cache-ram",
+        "0",
+        "--reasoning",
+        "off",
+        "--reasoning-format",
+        "deepseek",
+        "--flash-attn",
+        "on",
+        "--jinja",
+        "--metrics",
+        "--server-arg",
+        "--no-warmup",
+        "--timeout-secs",
+        "60",
+        "--log",
+        "/tmp/qwen.log",
+        "--no-evict",
+        "--json",
+    ]);
+    let Command::Local(args) = cli.command.unwrap() else {
+        panic!("expected local command");
+    };
+    let LocalCommand::Launch(args) = args.command else {
+        panic!("expected local launch command");
+    };
+    assert_eq!(args.model, "local-qwen3.6");
+    assert_eq!(args.provider.as_deref(), Some("llamacpp"));
+    assert_eq!(args.model_source.as_deref(), Some("/models/qwen.gguf"));
+    assert_eq!(args.server_command.as_deref(), Some("llama-server"));
+    assert_eq!(args.host.as_deref(), Some("127.0.0.1"));
+    assert_eq!(args.port, Some(8001));
+    assert_eq!(args.ctx, Some(8192));
+    assert_eq!(args.parallel, 1);
+    assert_eq!(args.gpu_layers, "auto");
+    assert_eq!(args.cache_type_k.as_deref(), Some("q8_0"));
+    assert_eq!(args.cache_type_v.as_deref(), Some("q8_0"));
+    assert_eq!(args.cache_ram, Some(0));
+    assert_eq!(args.reasoning.as_deref(), Some("off"));
+    assert_eq!(args.reasoning_format.as_deref(), Some("deepseek"));
+    assert_eq!(args.flash_attn.as_deref(), Some("on"));
+    assert!(args.jinja);
+    assert!(args.metrics);
+    assert_eq!(args.server_args, vec!["--no-warmup".to_string()]);
+    assert_eq!(args.timeout_secs, 60);
+    assert_eq!(args.log, Some(PathBuf::from("/tmp/qwen.log")));
+    assert!(args.no_evict);
+    assert!(args.json);
+}
+
+#[test]
 fn test_parses_local_profile_args() {
     let cli = Cli::parse_from([
         "harn",
@@ -3309,6 +3385,63 @@ fn test_parses_providers_export_args() {
         panic!("expected providers export command");
     };
     assert_eq!(args.output_dir, std::path::PathBuf::from("tmp/catalog"));
+    assert!(args.check);
+}
+
+#[test]
+fn test_parses_providers_build_config_args() {
+    let cli = Cli::parse_from([
+        "harn",
+        "providers",
+        "build-config",
+        "--source-dir",
+        "tmp/catalog_sources",
+        "--output",
+        "tmp/providers.toml",
+        "--check",
+    ]);
+
+    let Command::Providers(args) = cli.command.unwrap() else {
+        panic!("expected providers command");
+    };
+    let ProvidersCommand::BuildConfig(args) = args.command else {
+        panic!("expected providers build-config command");
+    };
+    assert_eq!(
+        args.source_dir,
+        std::path::PathBuf::from("tmp/catalog_sources")
+    );
+    assert_eq!(args.output, std::path::PathBuf::from("tmp/providers.toml"));
+    assert!(args.check);
+}
+
+#[test]
+fn test_parses_providers_build_capabilities_args() {
+    let cli = Cli::parse_from([
+        "harn",
+        "providers",
+        "build-capabilities",
+        "--source-dir",
+        "tmp/capability_sources",
+        "--output",
+        "tmp/capabilities.toml",
+        "--check",
+    ]);
+
+    let Command::Providers(args) = cli.command.unwrap() else {
+        panic!("expected providers command");
+    };
+    let ProvidersCommand::BuildCapabilities(args) = args.command else {
+        panic!("expected providers build-capabilities command");
+    };
+    assert_eq!(
+        args.source_dir,
+        std::path::PathBuf::from("tmp/capability_sources")
+    );
+    assert_eq!(
+        args.output,
+        std::path::PathBuf::from("tmp/capabilities.toml")
+    );
     assert!(args.check);
 }
 

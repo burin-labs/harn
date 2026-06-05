@@ -135,18 +135,13 @@ fn llamacpp_setup_plan(selector: &str, model_id: &str) -> SetupPlan {
     } else {
         "$HOME/models/model.gguf"
     };
-    let alias = if model_id.contains("qwen3.6") {
-        "qwen3.6-35b-a3b-ud-q4-k-xl"
-    } else {
-        model_id
-    };
     SetupPlan {
         title: "llama.cpp setup",
         steps: vec![
             "Install runtime tools: `brew install llama.cpp hf`".to_string(),
             "Download Qwen3.6 GGUF: `hf download unsloth/Qwen3.6-35B-A3B-GGUF --include \"Qwen3.6-35B-A3B-UD-Q4_K_XL.gguf\" --local-dir ~/models/qwen3.6`".to_string(),
             format!(
-                "Launch server: `llama-server --model {model_path} --alias {alias} --host 127.0.0.1 --port 8001 --ctx-size 65536 --parallel 1 --cache-type-k q4_0 --cache-type-v q4_0 --cache-ram 0 --n-gpu-layers 99 --jinja --chat-template-kwargs '{{\"enable_thinking\":false}}'`"
+                "Launch through Harn: `harn local launch {selector} --provider llamacpp --model-source {model_path} --ctx 65536 --parallel 1 --cache-type-k q8_0 --cache-type-v q8_0 --cache-ram 0 --gpu-layers auto --reasoning off`"
             ),
             "Export endpoint: `export LLAMACPP_BASE_URL=http://127.0.0.1:8001`".to_string(),
             format!("Verify: `harn provider-ready llamacpp --model {selector}`"),
@@ -158,10 +153,10 @@ fn mlx_setup_plan(selector: &str, _model_id: &str) -> SetupPlan {
     SetupPlan {
         title: "MLX vision-language setup",
         steps: vec![
-            "Create runtime: `python3 -m venv ~/.harn/mlx-vlm && ~/.harn/mlx-vlm/bin/pip install -U pip mlx-vlm huggingface_hub`".to_string(),
-            "Download Qwen3.6 MLX: `~/.harn/mlx-vlm/bin/hf download unsloth/Qwen3.6-27B-UD-MLX-4bit --local-dir ~/models/qwen3.6-27b/Qwen3.6-27B-UD-MLX-4bit`".to_string(),
-            "Launch server: `~/.harn/mlx-vlm/bin/python -m mlx_vlm.server --model ~/models/qwen3.6-27b/Qwen3.6-27B-UD-MLX-4bit --host 127.0.0.1 --port 8002 --max-tokens 81920`".to_string(),
-            "If `python -m mlx_vlm.server --help` lists `--served-model-name`, add `--served-model-name unsloth/Qwen3.6-27B-UD-MLX-4bit` so `/v1/models` reports the Harn alias target.".to_string(),
+            "Create runtime: `python3 -m venv ~/.harn/mlx-lm && ~/.harn/mlx-lm/bin/pip install -U pip mlx-lm huggingface_hub`".to_string(),
+            "Download Qwen3.6 MLX: `~/.harn/mlx-lm/bin/hf download unsloth/Qwen3.6-27B-UD-MLX-4bit --local-dir ~/models/qwen3.6-27b/Qwen3.6-27B-UD-MLX-4bit`".to_string(),
+            "Launch through Harn: `harn local launch mlx-qwen36-27b --provider mlx --server-command ~/.harn/mlx-lm/bin/mlx_lm.server --model-source ~/models/qwen3.6-27b/Qwen3.6-27B-UD-MLX-4bit`".to_string(),
+            "If `mlx_lm.server` is on PATH, omit `--server-command`; the provider catalog supplies that default.".to_string(),
             "Export endpoint: `export MLX_BASE_URL=http://127.0.0.1:8002`".to_string(),
             format!("Verify: `harn provider-ready mlx --model {selector}`"),
         ],
@@ -223,10 +218,7 @@ mod tests {
             .steps
             .iter()
             .any(|step| step.contains("harn provider-ready llamacpp")));
-        assert!(plan
-            .steps
-            .iter()
-            .any(|step| step.contains("--ctx-size 65536")));
+        assert!(plan.steps.iter().any(|step| step.contains("--ctx 65536")));
     }
 
     #[test]
@@ -235,9 +227,6 @@ mod tests {
         let plan = setup_plan_for("local-qwen3.6-27b", &resolved.provider, &resolved.id)
             .expect("MLX setup plan");
         assert_eq!(plan.title, "MLX vision-language setup");
-        assert!(plan
-            .steps
-            .iter()
-            .any(|step| step.contains("mlx_vlm.server")));
+        assert!(plan.steps.iter().any(|step| step.contains("mlx_lm.server")));
     }
 }

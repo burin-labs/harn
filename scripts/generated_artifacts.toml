@@ -156,6 +156,40 @@ pre_commit = false
 pre_push = false
 
 [[artifact]]
+id = "provider-config"
+description = "Generated embedded provider/model TOML snapshot, built from small catalog source fragments."
+gen = "gen-provider-config"
+check = "check-provider-config"
+outputs = ["crates/harn-vm/src/llm/providers.toml"]
+sources = [
+  "crates/harn-vm/src/llm/catalog_sources/",
+  "crates/harn-cli/src/cli/providers.rs",
+  "crates/harn-cli/src/commands/providers.rs",
+  "crates/harn-vm/src/llm_config.rs",
+]
+ci = false
+make_all = true
+pre_commit = false
+pre_push = false
+
+[[artifact]]
+id = "provider-capabilities"
+description = "Generated embedded provider capability TOML snapshot, built from small capability source fragments."
+gen = "gen-provider-capabilities"
+check = "check-provider-capabilities"
+outputs = ["crates/harn-vm/src/llm/capabilities.toml"]
+sources = [
+  "crates/harn-vm/src/llm/capability_sources/",
+  "crates/harn-cli/src/cli/providers.rs",
+  "crates/harn-cli/src/commands/providers.rs",
+  "crates/harn-vm/src/llm/capabilities.rs",
+]
+ci = false
+make_all = true
+pre_commit = false
+pre_push = false
+
+[[artifact]]
 id = "provider-catalog"
 description = "Checked-in provider/model catalog JSON + schema + downstream TS/Swift bindings, exported from the live ProviderCatalog."
 gen = "gen-provider-catalog"
@@ -166,7 +200,14 @@ outputs = [
   "spec/provider-catalog/harn-provider-catalog.ts",
   "spec/provider-catalog/HarnProviderCatalog.swift",
 ]
-sources = ["crates/harn-vm/src/llm_config.rs", "crates/harn-vm/src/provider_catalog.rs"]
+sources = [
+  "crates/harn-vm/src/llm/catalog_sources/",
+  "crates/harn-vm/src/llm/providers.toml",
+  "crates/harn-vm/src/llm/capability_sources/",
+  "crates/harn-vm/src/llm/capabilities.toml",
+  "crates/harn-vm/src/llm_config.rs",
+  "crates/harn-vm/src/provider_catalog.rs",
+]
 ci = true
 make_all = true
 pre_commit = false
@@ -248,7 +289,11 @@ description = "Provider/model capability matrix doc generated from capabilities.
 gen = "gen-provider-matrix"
 check = "check-provider-matrix"
 outputs = ["docs/src/provider-matrix.md"]
-sources = ["crates/harn-cli/src/commands/provider_matrix.rs", "crates/harn-vm/src/llm/"]
+sources = [
+  "crates/harn-cli/src/commands/provider_matrix.rs",
+  "crates/harn-vm/src/llm/capability_sources/",
+  "crates/harn-vm/src/llm/capabilities.toml",
+]
 ci = true
 make_all = true
 pre_commit = false
@@ -260,7 +305,13 @@ description = "Provider support recommendations (markdown + JSON) generated from
 gen = "gen-provider-support"
 check = "check-provider-support"
 outputs = ["docs/src/provider-support.md", "docs/provider-support.json"]
-sources = ["crates/harn-cli/src/cli/providers.rs", "crates/harn-vm/src/llm/"]
+sources = [
+  "crates/harn-cli/src/cli/providers.rs",
+  "crates/harn-vm/src/llm/catalog_sources/",
+  "crates/harn-vm/src/llm/capability_sources/",
+  "crates/harn-vm/src/llm/providers.toml",
+  "crates/harn-vm/src/llm/capabilities.toml",
+]
 ci = true
 make_all = true
 pre_commit = false

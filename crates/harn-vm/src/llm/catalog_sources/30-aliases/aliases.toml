@@ -1,0 +1,242 @@
+# ── Aliases ──────────────────────────────────────────────────────────────────
+# Short symbolic names → (model id, provider, optional tool_format). The
+# tier-resolution path (`resolve_tier_model("frontier", None)`) reads
+# `frontier`, `mid`, `small`; provider-scoped tiers like `tier/mid` let
+# callers force a specific resolution per provider.
+
+# Short flagship aliases — these track whatever the current
+# generation is. Bump these when a successor lands.
+[aliases.sonnet]
+id = "claude-sonnet-4-6"
+provider = "anthropic"
+
+[aliases.opus]
+id = "claude-opus-4-8"
+provider = "anthropic"
+
+[aliases.haiku]
+id = "claude-haiku-4-5-20251001"
+provider = "anthropic"
+
+[aliases.frontier]
+id = "claude-sonnet-4-6"
+provider = "anthropic"
+
+[aliases."tier/frontier"]
+id = "claude-sonnet-4-6"
+provider = "anthropic"
+
+[aliases.mid]
+id = "gpt-4o-mini"
+provider = "openai"
+
+[aliases."tier/mid"]
+id = "gpt-4o-mini"
+provider = "openai"
+
+[aliases.small]
+id = "Qwen/Qwen3.5-9B"
+provider = "openrouter"
+
+[aliases."tier/small"]
+id = "Qwen/Qwen3.5-9B"
+provider = "openrouter"
+
+# Local Gemma 4 variants (vLLM / OpenAI-compat backend at `providers.local`).
+[aliases.local-gemma4]
+id = "gemma-4-26b-a4b-it"
+provider = "local"
+
+[aliases.local-gemma4-26b]
+id = "gemma-4-26b-a4b-it"
+provider = "local"
+
+[aliases.local-gemma4-31b]
+id = "gemma-4-31b-it"
+provider = "local"
+
+[aliases.local-gemma4-e4b]
+id = "gemma-4-e4b-it"
+provider = "local"
+
+[aliases.local-gemma4-e2b]
+id = "gemma-4-e2b-it"
+provider = "local"
+
+[aliases.ollama-gemma4]
+id = "gemma4:26b"
+provider = "ollama"
+tool_format = "text"
+
+[aliases.ollama-gemma4-26b]
+id = "gemma4:26b"
+provider = "ollama"
+tool_format = "text"
+
+[aliases.ollama-gemma4-12b]
+id = "gemma4:12b-mlx"
+provider = "ollama"
+tool_format = "text"
+
+[aliases.ollama-gemma4-12b-nvfp4]
+id = "gemma4:12b-nvfp4"
+provider = "ollama"
+tool_format = "text"
+
+[aliases.local-gemma4-12b]
+id = "gemma-4-12b-it"
+provider = "local"
+
+# Gemma 4 26B/31B via hosted APIs (the 12B is on-device only). The Gemini API
+# serves Gemma under its bare id; OpenRouter/Together use org-prefixed ids.
+[aliases.gemini-gemma4-31b]
+id = "models/gemma-4-31b-it"
+provider = "gemini"
+
+[aliases.gemini-gemma4-26b]
+id = "models/gemma-4-26b-a4b-it"
+provider = "gemini"
+
+[aliases.openrouter-gemma4-31b]
+id = "google/gemma-4-31b-it"
+provider = "openrouter"
+
+[aliases.openrouter-gemma4-26b]
+id = "google/gemma-4-26b-a4b-it"
+provider = "openrouter"
+
+[aliases.together-gemma4-31b]
+id = "google/gemma-4-31B-it"
+provider = "together"
+
+# qwen3.6 has no working Ollama route — Ollama's qwen3.5-family server-side
+# tool-call parser 500s on text-tool output (ollama/ollama#14986, #14570).
+# Use the llamacpp provider for local qwen3.x.
+
+# llama.cpp — Unsloth Dynamic 2.0 GGUF served by llama-server.
+[aliases."llamacpp-qwen3.6"]
+id = "qwen3.6-35b-a3b"
+provider = "llamacpp"
+tool_format = "text"
+
+[aliases."llamacpp-qwen3.6-q4"]
+id = "qwen3.6-35b-a3b-ud-q4-k-xl"
+provider = "llamacpp"
+tool_format = "native"
+
+[aliases."local-qwen3.6"]
+id = "qwen3.6-35b-a3b-ud-q4-k-xl"
+provider = "llamacpp"
+tool_format = "native"
+
+[aliases."local-qwen3.6-gguf"]
+id = "qwen3.6-35b-a3b-ud-q4-k-xl"
+provider = "llamacpp"
+tool_format = "native"
+
+# MLX (Apple Silicon).
+[aliases.mlx-qwen36-27b]
+id = "unsloth/Qwen3.6-27B-UD-MLX-4bit"
+provider = "mlx"
+
+[aliases."mlx-qwen3.6-27b"]
+id = "unsloth/Qwen3.6-27B-UD-MLX-4bit"
+provider = "mlx"
+tool_format = "native"
+
+[aliases."mlx-qwen3.6-27b-q4"]
+id = "unsloth/Qwen3.6-27B-UD-MLX-4bit"
+provider = "mlx"
+tool_format = "native"
+
+[aliases."local-qwen3.6-27b"]
+id = "unsloth/Qwen3.6-27B-UD-MLX-4bit"
+provider = "mlx"
+tool_format = "native"
+
+# MiniMax direct API aliases.
+[aliases.minimax]
+id = "MiniMax-M3"
+provider = "minimax"
+
+[aliases."minimax-m2"]
+id = "MiniMax-M2"
+provider = "minimax"
+
+[aliases."minimax-m2.5"]
+id = "MiniMax-M2.5"
+provider = "minimax"
+
+[aliases."minimax-m2.7"]
+id = "MiniMax-M2.7"
+provider = "minimax"
+
+[aliases."minimax-m3"]
+id = "MiniMax-M3"
+provider = "minimax"
+
+# Z.AI GLM aliases.
+[aliases.glm]
+id = "glm-5.1"
+provider = "zai"
+
+[aliases."glm-5"]
+id = "glm-5"
+provider = "zai"
+
+[aliases."glm-5.1"]
+id = "glm-5.1"
+provider = "zai"
+
+# DeepSeek V4 direct API aliases.
+[aliases.deepseek]
+id = "deepseek-v4-flash"
+provider = "deepseek"
+
+[aliases."deepseek-flash"]
+id = "deepseek-v4-flash"
+provider = "deepseek"
+
+[aliases."deepseek-pro"]
+id = "deepseek-v4-pro"
+provider = "deepseek"
+
+[aliases."deepseek-v4-flash"]
+id = "deepseek-v4-flash"
+provider = "deepseek"
+
+[aliases."deepseek-v4-pro"]
+id = "deepseek-v4-pro"
+provider = "deepseek"
+
+[aliases.cohere]
+id = "command-a-plus-05-2026"
+provider = "cohere"
+
+[aliases."command-a-plus"]
+id = "command-a-plus-05-2026"
+provider = "cohere"
+
+[aliases.grok-code]
+id = "grok-build-0.1"
+provider = "xai"
+
+[aliases."grok-code-fast"]
+id = "grok-build-0.1"
+provider = "xai"
+
+# Devstral (Mistral's agentic-coding tune).
+[aliases.devstral-small-2]
+id = "devstral-small-2:24b"
+provider = "ollama"
+tool_format = "text"
+
+[aliases.ollama-devstral-small-2]
+id = "devstral-small-2:24b"
+provider = "ollama"
+tool_format = "text"
+
+[aliases.ollama-devstral-small-2-native]
+id = "devstral-small-2:24b"
+provider = "ollama"
+tool_format = "native"

@@ -16,10 +16,11 @@ pub(crate) async fn vm_stream_llm(
 
     let resolved = ResolvedProvider::resolve(provider);
     let is_anthropic = super::provider::provider_uses_anthropic_messages(provider, &opts.model);
+    let wire_model = crate::llm_config::wire_model_id(&opts.model);
 
     let body = if is_anthropic {
         let mut body = serde_json::json!({
-            "model": opts.model,
+            "model": wire_model,
             "messages": opts.messages,
             "max_tokens": opts.max_tokens,
             "stream": true,
@@ -38,7 +39,7 @@ pub(crate) async fn vm_stream_llm(
         }
         msgs.extend(opts.messages.iter().cloned());
         let mut body = serde_json::json!({
-            "model": opts.model,
+            "model": wire_model,
             "messages": msgs,
             "max_tokens": opts.max_tokens,
             "stream": true,

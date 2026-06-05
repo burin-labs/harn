@@ -66,20 +66,18 @@ For llama.cpp / `llama-server`, Harn has a separate `llamacpp` provider so Qwen
 thinking-template quirks can be modeled independently from other local
 OpenAI-compatible servers. Set `LLAMACPP_BASE_URL` when it is not listening on
 `http://127.0.0.1:8001`. `harn models install local-qwen3.6-gguf` prints the
-recommended Qwen3.6 GGUF download and `llama-server` command. The generated
-launch command uses a 65,536-token context, one server slot, quantized KV cache,
-and the Harn text-tool contract by default.
+recommended Qwen3.6 GGUF download. Use `harn local launch local-qwen3.6
+--provider llamacpp --model-source <path-to-gguf>` to start a Harn-managed
+server, record its PID/log, verify readiness, and make `harn local stop`
+responsible for cleanup.
 
 For an Apple Silicon MLX OpenAI-compatible server, Harn uses
 `MLX_BASE_URL` with a default of `http://127.0.0.1:8002`. Run
 `harn provider-ready mlx --model mlx-qwen36-27b` to probe `/v1/models`
-and verify that the configured model or alias is currently served. Harn
-does not launch MLX scripts itself; `harn models install local-qwen3.6-27b`
-prints the venv, model download, `mlx_vlm.server`, endpoint, and readiness
-commands. `mlx-vlm` server flags vary by release; only add
-`--served-model-name` when `python -m mlx_vlm.server --help` advertises it.
-Hosts that support auto-start should run their launcher, report launcher
-failures, then call the Harn readiness probe again.
+and verify that the configured model or alias is currently served. `harn local
+launch mlx-qwen36-27b --provider mlx --model-source <mlx-path-or-hf-repo>`
+uses the catalog's MLX launch shape (`mlx_lm.server`, host, port, readiness)
+and stores a tracked PID for `harn local stop`.
 
 ### `harn local` runtime lifecycle
 
@@ -93,6 +91,12 @@ harn local list
 
 # Active selection + machine profile defaults derived from RAM/GPU.
 harn local status
+
+# Bring up a model through the provider's cataloged lifecycle:
+# Ollama warms the daemon; llama.cpp/MLX launch a tracked process.
+harn local launch devstral-small-2:24b --provider ollama
+harn local launch local-qwen3.6 --provider llamacpp --model-source ~/models/qwen3.6/Qwen3.6-35B-A3B-UD-Q4_K_XL.gguf --ctx 8192
+harn local launch mlx-qwen36-27b --provider mlx --model-source unsloth/Qwen3.6-27B-UD-MLX-4bit
 
 # Warm a model on its provider, evict conflicting local runtimes
 # (drains Ollama's loaded set, stops tracked llama.cpp/MLX PIDs), and
@@ -112,6 +116,22 @@ RAM and accelerator presence — a 48 GB Apple Silicon laptop picks a
 wider context window than a low-RAM Linux box. Override either by
 passing the flag explicitly. State lives under
 `<state_root>/local/` (`HARN_STATE_DIR` honored).
+
+Model-specific local memory hints live under
+`[models.<id>.local_memory]`. Harn treats them as conservative launch
+guardrails: base resident GiB plus an approximate KV-cache GiB-per-1K-context
+term, scaled by cache type and a safety margin. `harn local launch` uses those
+facts to block obviously risky starts before spawning a process, recommends a
+smaller `--ctx` when it can, and includes the `memory_plan` in `--json` output.
+Pass `--allow-memory-risk` only when you have manually freed RAM or know the
+catalog estimate is too conservative for your runtime build.
+
+Local runtime launch mechanics live in the provider catalog under
+`[providers.<id>.local_runtime]`, not in CLI-only code. The bundled rows cover
+Ollama's daemon API, llama.cpp's `llama-server`, and MLX-LM's
+`mlx_lm.server`; user or project provider overlays can change command names,
+default ports, arg names, and model-source environment variables for local
+runtime versions or platform-specific installs.
 
 Harn maintains local runtime risk profiles for hybrid-cache families
 (Qwen3.6, Gemma4). The profile table records preferred runtimes,

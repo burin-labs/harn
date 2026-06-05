@@ -156,6 +156,21 @@ pub fn complementary_reviewer(opts) {
 }
 
 /**
+ * Return same-logical-model provider routes for explicit failover or
+ * side-by-side experiments. Equivalence is not wire identity: callers must
+ * still let Harn re-render messages/tools for the selected provider.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: ["llm_equivalent_models: ..."]
+ * @api_stability: experimental
+ * @example: equivalent_models("cerebras/gpt-oss-120b")
+ */
+pub fn equivalent_models(selector) {
+  return llm_equivalent_models(selector)
+}
+
+/**
  * ── Selector helpers ─────────────────────────────────────────────────
  *
  * `models_with({tier, strengths, min_benchmark, open_weight, provider,
@@ -246,15 +261,68 @@ fn __score_model(model) {
   return score
 }
 
+fn __model_matches_identity_filters(model, opts) {
+  let want_tier = opts?.tier
+  let want_provider = opts?.provider
+  let want_equivalence = opts?.equivalence_group
+  let want_logical_model = opts?.logical_model
+  let want_api_dialect = opts?.api_dialect
+  if want_tier != nil && to_string(model?.tier ?? "") != to_string(want_tier) {
+    return false
+  }
+  if want_provider != nil && to_string(model?.provider ?? "") != to_string(want_provider) {
+    return false
+  }
+  if want_equivalence != nil
+    && to_string(model?.equivalence_group ?? "") != to_string(want_equivalence) {
+    return false
+  }
+  if want_logical_model != nil
+    && to_string(model?.logical_model ?? "") != to_string(want_logical_model) {
+    return false
+  }
+  if want_api_dialect != nil && to_string(model?.api_dialect ?? "") != to_string(want_api_dialect) {
+    return false
+  }
+  return true
+}
+
+fn __model_matches_catalog_constraints(model, opts, available) {
+  let want_open_weight = opts?.open_weight
+  if want_open_weight != nil && model?.open_weight ?? nil != want_open_weight {
+    return false
+  }
+  let min_tpm = opts?.min_tpm
+  if min_tpm != nil {
+    let tpm = model?.rate_limits?.tpm
+    if tpm == nil || to_float(tpm) < to_float(min_tpm) {
+      return false
+    }
+  }
+  if opts?.exclude_deprecated ?? true && model?.deprecated ?? false {
+    return false
+  }
+  let max_input = opts?.max_input_per_mtok
+  if max_input != nil {
+    let price = model?.pricing?.input_per_mtok
+    if price != nil && to_float(price) > to_float(max_input) {
+      return false
+    }
+  }
+  if !__strengths_match(model?.strengths, opts?.strengths ?? []) {
+    return false
+  }
+  if !__benchmark_match(model?.benchmarks, opts?.min_benchmark ?? {}) {
+    return false
+  }
+  if available != nil && !available[to_string(model?.provider ?? "")] {
+    return false
+  }
+  return true
+}
+
 fn __filter_models(opts) {
   let catalog = llm_catalog()
-  let want_tier = opts?.tier
-  let want_strengths = opts?.strengths ?? []
-  let want_benchmark = opts?.min_benchmark ?? {}
-  let want_open_weight = opts?.open_weight
-  let want_provider = opts?.provider
-  let exclude_deprecated = opts?.exclude_deprecated ?? true
-  let max_input = opts?.max_input_per_mtok
   let available = if opts?.available_only ?? false {
     __available_provider_set()
   } else {
@@ -262,31 +330,10 @@ fn __filter_models(opts) {
   }
   var out = []
   for model in catalog {
-    if want_tier != nil && to_string(model?.tier ?? "") != to_string(want_tier) {
+    if !__model_matches_identity_filters(model, opts) {
       continue
     }
-    if want_provider != nil && to_string(model?.provider ?? "") != to_string(want_provider) {
-      continue
-    }
-    if want_open_weight != nil && model?.open_weight ?? nil != want_open_weight {
-      continue
-    }
-    if exclude_deprecated && model?.deprecated ?? false {
-      continue
-    }
-    if max_input != nil {
-      let price = model?.pricing?.input_per_mtok
-      if price != nil && to_float(price) > to_float(max_input) {
-        continue
-      }
-    }
-    if !__strengths_match(model?.strengths, want_strengths) {
-      continue
-    }
-    if !__benchmark_match(model?.benchmarks, want_benchmark) {
-      continue
-    }
-    if available != nil && !available[to_string(model?.provider ?? "")] {
+    if !__model_matches_catalog_constraints(model, opts, available) {
       continue
     }
     out = out + [model + {_score: __score_model(model)}]
@@ -305,6 +352,10 @@ fn __filter_models(opts) {
  *   min_benchmark     — dict of {benchmark_key: minimum_score}
  *   open_weight       — true | false (None means "no claim")
  *   provider          — provider id (e.g. "anthropic")
+ *   equivalence_group — logical failover group id
+ *   logical_model     — provider-independent model identity
+ *   api_dialect       — preferred API dialect for the route
+ *   min_tpm           — minimum published tokens/minute quota
  *   max_input_per_mtok — cap on pricing.input_per_mtok
  *   exclude_deprecated — defaults to true
  *   available_only    — true means filter to providers whose env keys

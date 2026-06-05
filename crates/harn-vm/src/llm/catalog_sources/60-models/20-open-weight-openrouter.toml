@@ -1,0 +1,68 @@
+# Open-weight executor candidates (<$2/Mtok with function calling). Use
+# these via OpenRouter or Fireworks for fast secondary-model dispatch.
+# Pricing snapshot 2026-05 from OpenRouter / Artificial Analysis.
+tier = "mid"
+open_weight = true
+strengths = ["cheap", "coding", "speed"]
+[models."qwen/qwen3-coder"]
+name = "Qwen3 Coder 480B A35B"
+provider = "openrouter"
+context_window = 262144
+capabilities = ["tools", "streaming"]
+pricing = { input_per_mtok = 0.22, output_per_mtok = 1.80 }
+availability = "serverless"
+
+# Together lists Qwen3-Coder-Next-FP8 in GET /v1/models alongside its
+# serverless catalog, but normal chat-completion calls fail with
+# `model_not_available` and instruct the caller to create a dedicated
+# endpoint. Carry the catalog row so price/route metadata is preserved,
+# but mark `availability = "dedicated"` so hosts don't surface it as a
+# one-click serverless option.
+tier = "frontier"
+open_weight = true
+strengths = ["coding", "long_context", "agentic", "tool_use"]
+benchmarks = { swe_bench_verified = 67.0 }
+[models."Qwen/Qwen3-Coder-Next-FP8"]
+name = "Qwen3 Coder Next FP8 (Together, dedicated)"
+provider = "together"
+context_window = 262144
+capabilities = ["tools", "streaming"]
+pricing = { input_per_mtok = 0.18, output_per_mtok = 0.18 }
+availability = "dedicated"
+tier = "frontier"
+open_weight = true
+strengths = ["coding", "long_context", "agentic"]
+complementary_with = ["anthropic-claude", "openai-gpt", "google-gemini", "deepseek", "kimi"]
+[models."deepseek/deepseek-v3.2"]
+name = "DeepSeek V3.2"
+provider = "openrouter"
+context_window = 131072
+capabilities = ["tools", "streaming"]
+pricing = { input_per_mtok = 0.28, output_per_mtok = 0.42 }
+tier = "mid"
+open_weight = true
+strengths = ["coding", "tool_use", "cheap"]
+complementary_with = ["anthropic-claude", "openai-gpt", "google-gemini", "qwen", "kimi"]
+[models."moonshotai/kimi-k2.6"]
+name = "Kimi K2.6"
+provider = "openrouter"
+context_window = 262144
+capabilities = ["tools", "streaming"]
+pricing = { input_per_mtok = 0.73, output_per_mtok = 3.49 }
+tier = "frontier"
+open_weight = true
+strengths = ["coding", "agentic", "long_context", "tool_use", "reasoning"]
+benchmarks = { swe_bench_pro = 58.6, humanitys_last_exam_with_tools = 54.0 }
+complementary_with = ["anthropic-claude", "openai-gpt", "google-gemini", "qwen", "deepseek"]
+[models."openai/gpt-oss-120b"]
+name = "GPT-OSS 120B"
+provider = "openrouter"
+context_window = 131072
+logical_model = "openai-gpt-oss-120b"
+equivalence_group = "openai-gpt-oss-120b"
+served_variant = "openrouter"
+api_dialect = "openai_chat"
+capabilities = ["tools", "streaming"]
+pricing = { input_per_mtok = 0.15, output_per_mtok = 0.60 }
+architecture = { parameter_count_b = 117.0, active_parameter_count_b = 5.1, moe = true, license = "Apache-2.0", source_url = "https://developers.openai.com/api/docs/models/gpt-oss-120b", last_verified = "2026-06-05" }
+

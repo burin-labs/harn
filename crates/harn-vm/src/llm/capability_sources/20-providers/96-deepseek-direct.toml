@@ -1,0 +1,68 @@
+# ---------- DeepSeek V4 direct (OpenAI-compatible /v1) ------------------------
+# V4-Flash + V4-Pro support native tool calls, thinking mode, prompt
+# caching, and JSON output. `deepseek-chat`/`deepseek-reasoner` are
+# deprecated aliases mapping to V4-Flash non-thinking/thinking modes.
+
+[[provider.deepseek]]
+model_match = "deepseek-v4-pro*"
+native_tools = true
+preferred_tool_format = "native"
+structured_output = "native"
+thinking_modes = ["enabled"]
+text_tool_wire_format_supported = true
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "native_json"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "inline"
+prompt_caching = true
+
+[[provider.deepseek]]
+model_match = "deepseek-v4-flash*"
+native_tools = true
+preferred_tool_format = "native"
+structured_output = "native"
+thinking_modes = ["enabled"]
+text_tool_wire_format_supported = true
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "native_json"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "inline"
+prompt_caching = true
+
+[[provider.deepseek]]
+model_match = "deepseek-chat*"
+native_tools = true
+preferred_tool_format = "native"
+structured_output = "native"
+text_tool_wire_format_supported = true
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "native_json"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "none"
+prompt_caching = true
+
+[[provider.deepseek]]
+model_match = "deepseek-reasoner*"
+native_tools = true
+preferred_tool_format = "native"
+structured_output = "native"
+thinking_modes = ["enabled"]
+text_tool_wire_format_supported = true
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "native_json"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "inline"
+prompt_caching = true
+

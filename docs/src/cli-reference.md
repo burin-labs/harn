@@ -1232,6 +1232,27 @@ harn provider-tool-probe llamacpp --model local-qwen3.6 --mode non-streaming
 Use `--response-fixture` to classify a saved provider response without making a
 network request. `harn local switch` can consume the JSON with `--probe-result`.
 
+## harn local launch
+
+Bring a local model up through Harn's provider catalog:
+
+```bash
+harn local launch devstral-small-2:24b --provider ollama --json
+harn local launch local-qwen3.6 --provider llamacpp --model-source ~/models/qwen3.6/Qwen3.6-35B-A3B-UD-Q4_K_XL.gguf --ctx 8192
+harn local launch mlx-qwen36-27b --provider mlx --model-source unsloth/Qwen3.6-27B-UD-MLX-4bit
+```
+
+Ollama launch warms the daemon and persists the active selection. llama.cpp
+and MLX launch the cataloged server command, record a PID/log under
+`<state_root>/local/`, wait for `/v1/models`, and then let `harn local stop`
+clean up the process. Provider mechanics are data-driven from
+`[providers.<id>.local_runtime]` in the generated provider catalog, so local
+overlays can adjust command names, ports, arg names, or model-source env vars.
+When a model row includes `[models.<id>.local_memory]`, launch preflights the
+requested context against current available RAM and returns a `memory_plan` in
+JSON mode. Use a smaller `--ctx` or free RAM when the guard trips; pass
+`--allow-memory-risk` only to override an intentionally conservative estimate.
+
 ## harn local profile
 
 Explain the local runtime risk profile for a model/provider route:

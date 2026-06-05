@@ -1,0 +1,18 @@
+# ── QC defaults ──────────────────────────────────────────────────────────────
+# Default low-cost model per provider for cheap quality-check / repair
+# passes. Scripts read these via `qc_default_model(provider)`.
+
+[qc_defaults]
+anthropic = "claude-haiku-4-5-20251001"
+openai = "gpt-4o-mini"
+openrouter = "google/gemini-2.5-flash"
+ollama = "llama3.2"
+local = "gpt-4o"
+mistral = "mistral-small-2603"
+cohere = "command-a-plus-05-2026"
+xai = "grok-build-0.1"
+groq = "llama-3.1-8b-instant"
+minimax = "MiniMax-M2.5-highspeed"
+zai = "glm-5"
+deepseek = "deepseek-v4-flash"
+

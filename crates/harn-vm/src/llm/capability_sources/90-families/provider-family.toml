@@ -1,0 +1,20 @@
+[provider_family]
+openrouter = "openai"
+together = "openai"
+groq = "openai"
+cerebras = "openai"
+deepseek = "openai"
+fireworks = "openai"
+huggingface = "openai"
+local = "openai"
+# New April 2026 routes for Qwen3.6:
+dashscope = "openai"
+llamacpp = "openai"
+mlx = "openai"
+# New 2026-05 routes (open-weight frontier additions). MiniMax + Z.AI
+# both speak the OpenAI chat-completions wire format on their
+# advertised compat endpoints, so the openai family rules cover the
+# baseline. Model-specific tweaks live in `[[provider.minimax]]` /
+# `[[provider.zai]]` blocks above.
+minimax = "openai"
+zai = "openai"

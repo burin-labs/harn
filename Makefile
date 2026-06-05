@@ -1,10 +1,10 @@
-.PHONY: setup clean-stale-targets install-hooks configure-merge-drivers build build-release sign-local check fmt fmt-harn fmt-harn-fix lint lint-md lint-actions lint-harn spec-lint test test-e2e test-cargo test-fast test-harn-scripts conformance protocol-conformance mcp-rc-conformance replay-oracle replay-bench eval-tool-calls bench-vm bench-vm-micro bench-vm-clone check-vm-rss-soak bench-llm bench-orchestration bench-cli-cold-start loadgen-postgres all release-gate release-smoke smoke-audit portal portal-check portal-demo gen-highlight check-highlight gen-protocol-artifacts check-protocol-artifacts gen-connector-schemas check-connector-schemas check-burin-protocol-artifacts check-bindings gen-session-bundle-schema check-session-bundle-schema gen-trigger-quickref check-trigger-quickref gen-provider-matrix check-provider-matrix check-provider-support check-provider-catalog check-connector-matrix check-trigger-examples check-docs-model-refs check-docs-snippets check-docs-cli-flags check-docs-links check-site-snippets check-docs-workflow-quickstart sync-language-spec check-language-spec sync-diagnostics-catalog check-diagnostics-catalog lint-test-patterns lint-diagnostic-codes check-receipt-structs lint-no-rust-prompt-prose lint-no-xfail-regression check-provider-catalog-drift check-ported-handler-loc gen-tree-sitter-keywords check-tree-sitter-keywords check-generated-registry
+.PHONY: setup clean-stale-targets install-hooks configure-merge-drivers build build-release sign-local check fmt fmt-harn fmt-harn-fix lint lint-md lint-actions lint-harn spec-lint test test-e2e test-cargo test-fast test-harn-scripts conformance protocol-conformance mcp-rc-conformance replay-oracle replay-bench eval-tool-calls bench-vm bench-vm-micro bench-vm-clone check-vm-rss-soak bench-llm bench-orchestration bench-cli-cold-start loadgen-postgres all release-gate release-smoke smoke-audit portal portal-check portal-demo gen-highlight check-highlight gen-protocol-artifacts check-protocol-artifacts gen-connector-schemas check-connector-schemas check-burin-protocol-artifacts check-bindings gen-session-bundle-schema check-session-bundle-schema gen-trigger-quickref check-trigger-quickref gen-provider-capabilities check-provider-capabilities gen-provider-matrix check-provider-matrix check-provider-support gen-provider-config check-provider-config check-provider-catalog check-connector-matrix check-trigger-examples check-docs-model-refs check-docs-snippets check-docs-cli-flags check-docs-links check-site-snippets check-docs-workflow-quickstart sync-language-spec check-language-spec sync-diagnostics-catalog check-diagnostics-catalog lint-test-patterns lint-diagnostic-codes check-receipt-structs lint-no-rust-prompt-prose lint-no-xfail-regression check-provider-catalog-drift check-ported-handler-loc gen-tree-sitter-keywords check-tree-sitter-keywords check-generated-registry
 
 # Full quality check: format first, then lint/test in parallel.
 # Usage: make all -j       (parallel checks after formatting)
 #        make all           (sequential, also works)
 all: fmt
-	$(MAKE) lint lint-md lint-actions lint-harn spec-lint fmt-harn test test-harn-scripts conformance protocol-conformance mcp-rc-conformance replay-oracle replay-bench check-highlight check-protocol-artifacts check-connector-schemas check-bindings check-session-bundle-schema check-language-spec check-trigger-quickref check-provider-matrix check-provider-support check-provider-catalog check-connector-matrix check-trigger-examples check-docs-model-refs check-docs-snippets check-docs-cli-flags check-docs-links check-site-snippets check-docs-workflow-quickstart check-diagnostics-catalog lint-test-patterns lint-diagnostic-codes check-receipt-structs check-provider-catalog-drift check-tree-sitter-keywords check-generated-registry portal-check
+	$(MAKE) lint lint-md lint-actions lint-harn spec-lint fmt-harn test test-harn-scripts conformance protocol-conformance mcp-rc-conformance replay-oracle replay-bench check-highlight check-protocol-artifacts check-connector-schemas check-bindings check-session-bundle-schema check-language-spec check-trigger-quickref check-provider-capabilities check-provider-matrix check-provider-support check-provider-config check-provider-catalog check-connector-matrix check-trigger-examples check-docs-model-refs check-docs-snippets check-docs-cli-flags check-docs-links check-site-snippets check-docs-workflow-quickstart check-diagnostics-catalog lint-test-patterns lint-diagnostic-codes check-receipt-structs check-provider-catalog-drift check-tree-sitter-keywords check-generated-registry portal-check
 
 check: all
 
@@ -419,31 +419,57 @@ check-trigger-quickref:
 
 # Regenerate the provider/model capability matrix from capabilities.toml.
 gen-provider-matrix:
+	$(MAKE) gen-provider-capabilities
 	cargo run --quiet --bin harn -- providers matrix
 
 # CI guard: fail if the provider matrix docs drift from capabilities.toml.
 check-provider-matrix:
 	@echo "=== Checking docs/src/provider-matrix.md is up to date ==="
+	@cargo run --quiet --bin harn -- providers build-capabilities --check
 	@cargo run --quiet --bin harn -- providers matrix --check
 	@echo "    Harn provider matrix OK."
 
 # Regenerate provider support recommendations from catalog/capabilities/notes.
 gen-provider-support:
+	$(MAKE) gen-provider-capabilities
 	cargo run --quiet --bin harn -- providers support
 
 # CI guard: fail if provider support markdown or JSON drift.
 check-provider-support:
 	@echo "=== Checking provider support artifacts are up to date ==="
+	@cargo run --quiet --bin harn -- providers build-capabilities --check
 	@cargo run --quiet --bin harn -- providers support --check
 	@echo "    Harn provider support OK."
 
+# Regenerate the embedded provider capability TOML snapshot from source fragments.
+gen-provider-capabilities:
+	cargo run --quiet --bin harn -- providers build-capabilities
+
+# CI guard: fail if the embedded provider capability snapshot drifted from fragments.
+check-provider-capabilities:
+	@echo "=== Checking provider capability snapshot ==="
+	@cargo run --quiet --bin harn -- providers build-capabilities --check
+	@echo "    Harn provider capability snapshot OK."
+
+# Regenerate the embedded provider/model TOML snapshot from source fragments.
+gen-provider-config:
+	cargo run --quiet --bin harn -- providers build-config
+
+# CI guard: fail if the embedded provider/model TOML snapshot drifted from fragments.
+check-provider-config:
+	@echo "=== Checking provider config snapshot ==="
+	@cargo run --quiet --bin harn -- providers build-config --check
+	@echo "    Harn provider config snapshot OK."
+
 # Regenerate the checked-in provider/model catalog JSON, schema, and downstream bindings.
 gen-provider-catalog:
+	$(MAKE) gen-provider-config
 	cargo run --quiet --bin harn -- providers export
 
 # CI guard: fail if checked-in provider/model catalog artifacts drift.
 check-provider-catalog:
 	@echo "=== Checking provider catalog artifacts ==="
+	@cargo run --quiet --bin harn -- providers build-config --check
 	@cargo run --quiet --bin harn -- providers validate --check-artifacts
 	@echo "    Harn provider catalog artifacts OK."
 
