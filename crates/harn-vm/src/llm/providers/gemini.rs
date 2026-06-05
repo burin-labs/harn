@@ -173,10 +173,8 @@ impl GeminiProvider {
             .as_ref()
             .map(crate::llm_config::resolve_base_url)
             .unwrap_or_else(|| "https://generativelanguage.googleapis.com".to_string());
-        let model = request
-            .model
-            .strip_prefix("models/")
-            .unwrap_or(&request.model);
+        let wire_model = crate::llm_config::wire_model_id(&request.model);
+        let model = wire_model.strip_prefix("models/").unwrap_or(&wire_model);
         let url = format!("{base_url}/v1beta/models/{model}:generateContent");
         let client = crate::llm::shared_blocking_client().clone();
         let req = client

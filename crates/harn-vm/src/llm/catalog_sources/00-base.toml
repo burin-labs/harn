@@ -1,0 +1,25 @@
+# Harn's built-in LLM provider/model catalog source fragments.
+#
+# The files under catalog_sources/ are the source of truth for Harn's
+# bundled defaults:
+# providers, model aliases, inference + tier routing rules, canonical
+# model metadata + pricing, qc defaults, and per-pattern hyperparameter
+# overrides. `harn providers build-config` concatenates these fragments into
+# llm/providers.toml, which deserializes into `ProvidersConfig` via the same
+# Serde pipeline that loads HARN_PROVIDERS_CONFIG /
+# ~/.config/harn/providers.toml / harn.toml [providers] /
+# package-manifest [llm] sections at runtime.
+#
+# Resolution order at startup (later overlays win on per-key basis):
+#   1. Generated llm/providers.toml (embedded into the VM via include_str!)
+#   2. ~/.config/harn/providers.toml (user-global override)
+#   3. HARN_PROVIDERS_CONFIG env var (explicit per-process override)
+#   4. Per-run programmatic overlays installed by hosts via
+#      llm_config::set_user_overrides()
+#
+# Edit these fragments to change defaults, then run
+# `harn providers build-config` and `harn providers export`. Do not re-add
+# equivalent data as Rust literals in llm_config.rs — that creates the
+# parallel system this catalog exists to eliminate.
+
+default_provider = "anthropic"

@@ -1,0 +1,362 @@
+# ---------- Local / Ollama ----------------------------------------------------
+#
+# Local providers don't advertise native tool_search or prompt caching.
+# Native-tools coverage depends on the specific model. Qwen 3 / 3.5
+# packages on Ollama expose native tool calling and thinking on the
+# official docs + model pages. Qwen 3.6 adds `preserve_thinking` which
+# Alibaba recommends for multi-turn agentic / coding workflows (the
+# flagship use case we're building for) — keep it on by default.
+
+[[provider.ollama]]
+model_match = "llava*"
+vision_supported = true
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "native_json"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "none"
+
+[[provider.ollama]]
+model_match = "bakllava*"
+vision_supported = true
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "native_json"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+# Caption/vision model with no reasoning capability — match the llava sibling and
+# avoid emitting a spurious "## Reasoning" scaffold.
+thinking_block_style = "none"
+
+[[provider.ollama]]
+model_match = "llama3.2-vision*"
+vision_supported = true
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "native_json"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+# Caption/vision model with no reasoning capability — match the llava sibling.
+thinking_block_style = "none"
+
+[[provider.ollama]]
+model_match = "gemma3*"
+vision_supported = true
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "native_json"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+# Caption/vision model with no reasoning capability — match the llava sibling.
+thinking_block_style = "none"
+
+# The Ollama-published Gemma 4 12B quants are TEXT-ONLY (vision projector dropped
+# in the conversion — verified via `ollama show gemma4:12b-mlx`), unlike the 26b/
+# 31b builds. Keep this ahead of the `gemma4*` family rule (first match wins).
+[[provider.ollama]]
+model_match = "gemma4:12b*"
+vision_supported = false
+# Ollama honors the `format` kwarg for JSON/schema output (same as the ollama
+# qwen rules). Without the transport field, JSON/schema requests were blocked.
+native_tools = false
+preferred_tool_format = "text"
+structured_output = "format_kw"
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "delimited"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+# The Ollama gemma4 quant ships thinking-off (no reasoning trace in this build).
+thinking_block_style = "none"
+
+[[provider.ollama]]
+model_match = "gemma4*"
+vision_supported = true
+# Ollama honors the `format` kwarg for JSON/schema output (same as the ollama
+# qwen rules). Without the transport field, JSON/schema requests were blocked.
+native_tools = false
+preferred_tool_format = "text"
+structured_output = "format_kw"
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "delimited"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+# The Ollama gemma4 quant ships thinking-off (no reasoning trace in this build).
+thinking_block_style = "none"
+
+[[provider.ollama]]
+model_match = "qwen3.6*"
+native_tools = false
+preferred_tool_format = "text"
+# Qwen3.x reserves <tool_call> as a single special token; serving text-format
+# without the wire remap re-exposes the opener-repetition collapse #2978 fixed.
+reserved_tool_call_token = true
+structured_output = "format_kw"
+thinking_modes = ["enabled"]
+auto_reasoning_overrides = { agent = "off", verify = "off", code = "off" }
+preserve_thinking = true
+server_parser = "none"
+honors_chat_template_kwargs = false
+recommended_endpoint = "/api/chat"
+text_tool_wire_format_supported = true
+thinking_disable_directive = "/no_think"
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "delimited"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "inline"
+
+[[provider.ollama]]
+model_match = "qwen3*"
+native_tools = true
+preferred_tool_format = "native"
+structured_output = "format_kw"
+thinking_modes = ["enabled"]
+auto_reasoning_overrides = { agent = "off", verify = "off", code = "off" }
+server_parser = "ollama_qwen3coder"
+honors_chat_template_kwargs = false
+recommended_endpoint = "/api/generate-raw"
+text_tool_wire_format_supported = false
+thinking_disable_directive = "/no_think"
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "delimited"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "inline"
+
+# Exact Qwen3.6 Q4 route validated with `harn local launch` +
+# `harn provider-tool-probe` on 2026-06-05: native and streaming native passed
+# with llama-server `--jinja --reasoning off --reasoning-format deepseek`.
+[[provider.llamacpp]]
+model_match = "qwen3.6-35b-a3b-ud-q4-k-xl"
+native_tools = true
+preferred_tool_format = "native"
+structured_output = "native"
+reserved_tool_call_token = true
+thinking_modes = ["enabled"]
+auto_reasoning_overrides = { agent = "off", verify = "off", code = "off" }
+preserve_thinking = true
+server_parser = "llamacpp"
+honors_chat_template_kwargs = true
+recommended_endpoint = "/v1/chat/completions"
+text_tool_wire_format_supported = true
+thinking_disable_directive = "/no_think"
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "native_json"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "inline"
+tool_mode_parity = "native"
+tool_mode_parity_notes = "Harn-managed llama.cpp launch plus one-tool probe passed native and streaming native on 2026-06-05."
+
+# llama.cpp / llama-server speaks OpenAI-compat but is a separate provider
+# entry from Ollama. Broader Qwen/Devstral routes remain on the text-tool
+# contract until their exact runtime/model/template combinations are probed.
+[[provider.llamacpp]]
+model_match = "*qwen3.6*"
+native_tools = false
+preferred_tool_format = "text"
+structured_output = "native"
+# Qwen3.6's tokenizer reserves <tool_call>/</tool_call> as single special
+# tokens; reusing them as text-format delimiters collapses the agent loop into
+# opener repetition. Remap to a non-special wire form (validated: 5/5 vs 0/5).
+reserved_tool_call_token = true
+thinking_modes = ["enabled"]
+auto_reasoning_overrides = { agent = "off", verify = "off", code = "off" }
+preserve_thinking = true
+server_parser = "none"
+honors_chat_template_kwargs = true
+recommended_endpoint = "/v1/chat/completions"
+text_tool_wire_format_supported = true
+thinking_disable_directive = "/no_think"
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "delimited"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "inline"
+
+[[provider.llamacpp]]
+model_match = "*qwen3*"
+native_tools = false
+preferred_tool_format = "text"
+structured_output = "native"
+# Qwen3 family reserves <tool_call>/</tool_call> as special tokens; see the
+# qwen3.6 rule above. Remapped to a non-special wire delimiter.
+reserved_tool_call_token = true
+thinking_modes = ["enabled"]
+auto_reasoning_overrides = { agent = "off", verify = "off", code = "off" }
+server_parser = "none"
+honors_chat_template_kwargs = true
+recommended_endpoint = "/v1/chat/completions"
+text_tool_wire_format_supported = true
+thinking_disable_directive = "/no_think"
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "delimited"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "inline"
+
+[[provider.llamacpp]]
+model_match = "*devstral-small-2*"
+native_tools = false
+preferred_tool_format = "text"
+structured_output = "native"
+server_parser = "none"
+honors_chat_template_kwargs = true
+recommended_endpoint = "/v1/chat/completions"
+text_tool_wire_format_supported = true
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "delimited"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "none"
+
+[[provider.ollama]]
+model_match = "devstral-small-2*"
+native_tools = false
+preferred_tool_format = "text"
+structured_output = "format_kw"
+server_parser = "none"
+honors_chat_template_kwargs = false
+recommended_endpoint = "/api/chat"
+text_tool_wire_format_supported = true
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "delimited"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "none"
+
+# Local vLLM / SGLang — same story. The capability rules here gate
+# chat_template_kwargs emission in openai_compat; the actual model has
+# to have been launched with the matching --chat-template.
+[[provider.local]]
+model_match = "*qwen3.6*"
+native_tools = true
+preferred_tool_format = "native"
+structured_output = "native"
+thinking_modes = ["enabled"]
+auto_reasoning_overrides = { agent = "off", verify = "off", code = "off" }
+preserve_thinking = true
+server_parser = "none"
+honors_chat_template_kwargs = true
+recommended_endpoint = "/v1/chat/completions"
+text_tool_wire_format_supported = true
+thinking_disable_directive = "/no_think"
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "delimited"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "inline"
+
+[[provider.local]]
+model_match = "*qwen3*"
+native_tools = true
+preferred_tool_format = "native"
+structured_output = "native"
+thinking_modes = ["enabled"]
+auto_reasoning_overrides = { agent = "off", verify = "off", code = "off" }
+server_parser = "none"
+honors_chat_template_kwargs = true
+recommended_endpoint = "/v1/chat/completions"
+text_tool_wire_format_supported = true
+thinking_disable_directive = "/no_think"
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "delimited"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "inline"
+
+[[provider.local]]
+model_match = "gemma-4*"
+# vLLM / SGLang serve Gemma 4 over the OpenAI-compatible surface, which exposes
+# native function calling + JSON-schema structured output — same as every hosted
+# gemma-4 sibling (gemini/openrouter/together). Without these explicit fields the
+# route silently degraded to text tools. (DISTINCT from the Ollama-native gemma4
+# quant rule, which ships text-only tools.)
+native_tools = true
+preferred_tool_format = "native"
+structured_output = "native"
+thinking_modes = ["enabled"]
+server_parser = "none"
+honors_chat_template_kwargs = false
+recommended_endpoint = "/v1/chat/completions"
+text_tool_wire_format_supported = true
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "delimited"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "inline"
+
+# Apple Silicon MLX server (mlx-vlm). OpenAI-compat with vision; honors
+# the same `chat_template_kwargs.preserve_thinking` knob as vLLM, since
+# mlx-vlm reuses HF tokenizers / chat templates.
+[[provider.mlx]]
+model_match = "*qwen3.6*"
+native_tools = true
+preferred_tool_format = "native"
+vision = true
+structured_output = "native"
+thinking_modes = ["enabled"]
+auto_reasoning_overrides = { agent = "off", verify = "off", code = "off" }
+preserve_thinking = true
+server_parser = "none"
+honors_chat_template_kwargs = true
+recommended_endpoint = "/v1/chat/completions"
+text_tool_wire_format_supported = true
+thinking_disable_directive = "/no_think"
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "delimited"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "inline"
+
+[[provider.mlx]]
+model_match = "*qwen3*"
+native_tools = true
+preferred_tool_format = "native"
+vision = true
+structured_output = "native"
+thinking_modes = ["enabled"]
+auto_reasoning_overrides = { agent = "off", verify = "off", code = "off" }
+server_parser = "none"
+honors_chat_template_kwargs = true
+recommended_endpoint = "/v1/chat/completions"
+text_tool_wire_format_supported = true
+thinking_disable_directive = "/no_think"
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "delimited"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "inline"

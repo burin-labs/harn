@@ -34,6 +34,7 @@ const LLM_CONFIG_DEFS: &[&VmBuiltinDef] = &[
     &PROVIDER_REGISTER_BUILTIN_DEF,
     &LLM_CONFIG_BUILTIN_DEF,
     &LLM_CATALOG_BUILTIN_DEF,
+    &LLM_EQUIVALENT_MODELS_BUILTIN_DEF,
     &LLM_CATALOG_REFRESH_BUILTIN_DEF,
     &LLM_PROVIDER_STATUS_BUILTIN_DEF,
     &LLM_RATE_LIMIT_BUILTIN_DEF,
@@ -383,6 +384,31 @@ pub(crate) fn llm_catalog_value() -> VmValue {
 #[harn_builtin(sig_expr = harn_builtin_meta::signatures::LLM_CATALOG, category = "llm.config")]
 fn llm_catalog_builtin(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     Ok(llm_catalog_value())
+}
+
+/// Return same-logical-model routes suitable for explicit failover or
+/// experiment comparison. The result intentionally excludes the selected
+/// source route and only includes non-deprecated, non-dedicated catalog rows
+/// with compatible context/tool/structured-output capabilities.
+#[harn_builtin(
+    sig = "llm_equivalent_models(selector: string) -> list",
+    category = "llm.config"
+)]
+fn llm_equivalent_models_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let selector = args
+        .first()
+        .map(|value| value.display())
+        .unwrap_or_default();
+    if selector.trim().is_empty() {
+        return Err(VmError::Runtime(
+            "llm_equivalent_models: selector is required".to_string(),
+        ));
+    }
+    let entries = llm_config::equivalent_model_catalog_entries(selector.trim())
+        .into_iter()
+        .map(|(id, model)| model_def_to_vm_value(&id, &model))
+        .collect();
+    Ok(VmValue::List(std::sync::Arc::new(entries)))
 }
 
 /// Refresh the process-wide provider/model catalog overlay from the configured
@@ -872,6 +898,17 @@ fn provider_def_to_vm_value(
     if let Some(rpm) = pdef.rpm {
         dict.insert("rpm".to_string(), VmValue::Int(rpm as i64));
     }
+    let rate_limits = pdef
+        .rate_limits
+        .clone()
+        .unwrap_or_default()
+        .with_rpm_fallback(pdef.rpm);
+    if let Some(rate_limits) = rate_limits {
+        dict.insert(
+            "rate_limits".to_string(),
+            rate_limits_to_vm_value(&rate_limits),
+        );
+    }
     if let Some(cost) = pdef.cost_per_1k_in {
         dict.insert("cost_per_1k_in".to_string(), VmValue::Float(cost));
     }
@@ -1274,6 +1311,64 @@ fn model_def_to_vm_value(id: &str, model: &llm_config::ModelDef) -> VmValue {
         VmValue::Int(model.context_window as i64),
     );
     dict.insert(
+        "logical_model".to_string(),
+        model
+            .logical_model
+            .as_deref()
+            .map(|value| VmValue::String(std::sync::Arc::from(value)))
+            .unwrap_or(VmValue::Nil),
+    );
+    dict.insert(
+        "equivalence_group".to_string(),
+        model
+            .equivalence_group
+            .as_deref()
+            .map(|value| VmValue::String(std::sync::Arc::from(value)))
+            .unwrap_or(VmValue::Nil),
+    );
+    dict.insert(
+        "served_variant".to_string(),
+        model
+            .served_variant
+            .as_deref()
+            .map(|value| VmValue::String(std::sync::Arc::from(value)))
+            .unwrap_or(VmValue::Nil),
+    );
+    dict.insert(
+        "wire_model".to_string(),
+        model
+            .wire_model
+            .as_deref()
+            .map(|value| VmValue::String(std::sync::Arc::from(value)))
+            .unwrap_or(VmValue::Nil),
+    );
+    dict.insert(
+        "api_dialect".to_string(),
+        model
+            .api_dialect
+            .as_deref()
+            .map(|value| VmValue::String(std::sync::Arc::from(value)))
+            .unwrap_or(VmValue::Nil),
+    );
+    dict.insert(
+        "rate_limits".to_string(),
+        model
+            .rate_limits
+            .as_ref()
+            .filter(|limits| !limits.is_empty())
+            .map(rate_limits_to_vm_value)
+            .unwrap_or(VmValue::Nil),
+    );
+    dict.insert(
+        "architecture".to_string(),
+        model
+            .architecture
+            .as_ref()
+            .filter(|architecture| !architecture.is_empty())
+            .map(architecture_to_vm_value)
+            .unwrap_or(VmValue::Nil),
+    );
+    dict.insert(
         "runtime_context_window".to_string(),
         model
             .runtime_context_window
@@ -1376,6 +1471,14 @@ fn model_def_to_vm_value(id: &str, model: &llm_config::ModelDef) -> VmValue {
             .unwrap_or(VmValue::Nil),
     );
     VmValue::Dict(std::sync::Arc::new(dict))
+}
+
+fn rate_limits_to_vm_value(rate_limits: &llm_config::RateLimitsDef) -> VmValue {
+    json_to_vm_value(&serde_json::to_value(rate_limits).unwrap_or_else(|_| serde_json::json!({})))
+}
+
+fn architecture_to_vm_value(architecture: &llm_config::ModelArchitectureDef) -> VmValue {
+    json_to_vm_value(&serde_json::to_value(architecture).unwrap_or_else(|_| serde_json::json!({})))
 }
 
 fn pricing_to_vm_value(pricing: &llm_config::ModelPricing) -> VmValue {

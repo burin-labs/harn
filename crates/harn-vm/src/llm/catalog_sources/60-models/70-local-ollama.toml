@@ -1,0 +1,70 @@
+# Ollama / local models — no `pricing` (free); context_window reflects
+# model card ceiling. `runtime_context_window` caps what Harn will
+# actually feed the runtime (host memory budget).
+tier = "small"
+open_weight = true
+strengths = ["cheap", "speed"]
+[models."llama3.2"]
+name = "Llama 3.2"
+provider = "ollama"
+context_window = 32000
+stream_timeout = 300.0
+capabilities = ["tools", "streaming"]
+tier = "small"
+open_weight = true
+strengths = ["cheap", "speed"]
+[models."gemma4:26b"]
+name = "Gemma 4 26B MoE"
+provider = "ollama"
+context_window = 262144
+runtime_context_window = 32768
+stream_timeout = 300.0
+capabilities = ["tools", "vision", "streaming", "thinking"]
+tier = "mid"
+open_weight = true
+strengths = ["vision", "tool_use"]
+# Gemma 4 12B — encoder-free unified multimodal model (Apache 2.0), built to run
+# on a 16GB laptop. Published on Ollama only as quantized variants (no bare
+# `gemma4:12b` tag). Verified via `ollama show`: the quantized 12B builds expose
+# `tools` + native `thinking` but are TEXT-ONLY at 128K context — the vision
+# projector is dropped in these conversions, unlike the larger 26b/31b builds.
+# MLX is the Apple-Silicon path; nvfp4 targets NVIDIA Blackwell; mxfp8 is the
+# higher-fidelity quant.
+[models."gemma4:12b-mlx"]
+name = "Gemma 4 12B (MLX)"
+provider = "ollama"
+context_window = 131072
+runtime_context_window = 32768
+stream_timeout = 240.0
+capabilities = ["tools", "streaming", "thinking"]
+tier = "mid"
+open_weight = true
+strengths = ["speed", "cheap"]
+[models."gemma4:12b-nvfp4"]
+name = "Gemma 4 12B (NVFP4)"
+provider = "ollama"
+context_window = 131072
+runtime_context_window = 32768
+stream_timeout = 240.0
+capabilities = ["tools", "streaming", "thinking"]
+tier = "mid"
+open_weight = true
+strengths = ["cheap", "tool_use"]
+[models."gemma4:12b-mxfp8"]
+name = "Gemma 4 12B (MXFP8)"
+provider = "ollama"
+context_window = 131072
+runtime_context_window = 32768
+stream_timeout = 240.0
+capabilities = ["tools", "streaming", "thinking"]
+tier = "mid"
+open_weight = true
+strengths = ["cheap", "tool_use"]
+[models."devstral-small-2:24b"]
+name = "Devstral Small 2 24B"
+provider = "ollama"
+context_window = 262144
+runtime_context_window = 32768
+stream_timeout = 600.0
+capabilities = ["tools", "streaming"]
+

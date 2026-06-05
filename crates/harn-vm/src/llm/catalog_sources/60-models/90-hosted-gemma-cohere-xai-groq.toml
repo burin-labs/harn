@@ -1,0 +1,131 @@
+# Gemma 4 — hosted (Apache 2.0, multimodal text+image, 256K context, native
+# thinking). The 12B is on-device only; the 26B MoE and 31B dense are also served
+# directly by hosted APIs. Each provider route is registered as its own catalog
+# row keyed by that provider's wire id (the alias-validation contract requires a
+# matching row): OpenRouter ids are org-prefixed and the Gemini API rows use the
+# `models/` REST resource name — both collision-free with the bare `local` keys.
+[models."google/gemma-4-31b-it"]
+name = "Gemma 4 31B (OpenRouter)"
+provider = "openrouter"
+context_window = 262144
+capabilities = ["tools", "vision", "streaming", "thinking"]
+pricing = { input_per_mtok = 0.12, output_per_mtok = 0.37 }
+tier = "frontier"
+open_weight = true
+strengths = ["vision", "reasoning", "coding", "cheap"]
+[models."google/gemma-4-26b-a4b-it"]
+name = "Gemma 4 26B MoE (OpenRouter)"
+provider = "openrouter"
+context_window = 262144
+capabilities = ["tools", "vision", "streaming", "thinking"]
+pricing = { input_per_mtok = 0.06, output_per_mtok = 0.33 }
+tier = "mid"
+open_weight = true
+strengths = ["vision", "cheap", "speed"]
+[models."models/gemma-4-31b-it"]
+name = "Gemma 4 31B (Gemini API)"
+provider = "gemini"
+context_window = 262144
+capabilities = ["tools", "vision", "streaming", "thinking"]
+tier = "frontier"
+open_weight = true
+strengths = ["vision", "reasoning", "coding", "cheap"]
+[models."models/gemma-4-26b-a4b-it"]
+name = "Gemma 4 26B MoE (Gemini API)"
+provider = "gemini"
+context_window = 262144
+capabilities = ["tools", "vision", "streaming", "thinking"]
+tier = "mid"
+open_weight = true
+strengths = ["vision", "cheap", "speed"]
+[models."google/gemma-4-31B-it"]
+name = "Gemma 4 31B (Together)"
+provider = "together"
+context_window = 262144
+capabilities = ["tools", "vision", "streaming", "thinking"]
+pricing = { input_per_mtok = 0.20, output_per_mtok = 0.50 }
+tier = "frontier"
+open_weight = true
+strengths = ["vision", "reasoning", "coding"]
+
+[models."groq/openai/gpt-oss-120b"]
+name = "GPT-OSS 120B (Groq)"
+provider = "groq"
+context_window = 131072
+logical_model = "openai-gpt-oss-120b"
+equivalence_group = "openai-gpt-oss-120b"
+served_variant = "groq-lpu"
+wire_model = "openai/gpt-oss-120b"
+api_dialect = "openai_chat"
+capabilities = ["tools", "streaming", "thinking"]
+pricing = { input_per_mtok = 0.15, output_per_mtok = 0.60 }
+rate_limits = { rpm = 1000, tpm = 250000, tier = "developer", source_url = "https://console.groq.com/docs/models", last_verified = "2026-06-05" }
+architecture = { parameter_count_b = 117.0, active_parameter_count_b = 5.1, moe = true, license = "Apache-2.0", source_url = "https://developers.openai.com/api/docs/models/gpt-oss-120b", last_verified = "2026-06-05" }
+tier = "frontier"
+open_weight = true
+strengths = ["speed", "cheap", "tool_use", "reasoning"]
+
+[models."llama-3.3-70b-versatile"]
+name = "Llama 3.3 70B Versatile (Groq)"
+provider = "groq"
+context_window = 131072
+logical_model = "llama-3.3-70b-instruct"
+equivalence_group = "llama-3.3-70b-instruct"
+served_variant = "groq-lpu"
+api_dialect = "openai_chat"
+capabilities = ["tools", "streaming"]
+pricing = { input_per_mtok = 0.59, output_per_mtok = 0.79 }
+rate_limits = { rpm = 1000, tpm = 300000, tier = "developer", source_url = "https://console.groq.com/docs/models", last_verified = "2026-06-05" }
+architecture = { parameter_count_b = 70.0, moe = false, license = "Llama 3.3 Community", source_url = "https://console.groq.com/docs/models", last_verified = "2026-06-05" }
+tier = "mid"
+open_weight = true
+strengths = ["speed", "cheap", "tool_use"]
+
+[models."llama-3.1-8b-instant"]
+name = "Llama 3.1 8B Instant (Groq)"
+provider = "groq"
+context_window = 131072
+logical_model = "llama-3.1-8b-instruct"
+equivalence_group = "llama-3.1-8b-instruct"
+served_variant = "groq-lpu"
+api_dialect = "openai_chat"
+capabilities = ["tools", "streaming"]
+pricing = { input_per_mtok = 0.05, output_per_mtok = 0.08 }
+rate_limits = { rpm = 1000, tpm = 250000, tier = "developer", source_url = "https://console.groq.com/docs/models", last_verified = "2026-06-05" }
+architecture = { parameter_count_b = 8.0, moe = false, license = "Llama 3.1 Community", source_url = "https://console.groq.com/docs/models", last_verified = "2026-06-05" }
+tier = "small"
+open_weight = true
+strengths = ["speed", "cheap"]
+
+# Cohere and xAI first-party routes. Both are OpenAI-compatible enough for
+# Harn's chat-completions adapter, but their economics are unusual: Command A+
+# is free up to account limits, while xAI's coding model exposes very high TPM
+# on regional clusters.
+[models."command-a-plus-05-2026"]
+name = "Command A+"
+provider = "cohere"
+context_window = 256000
+logical_model = "command-a-plus-05-2026"
+equivalence_group = "command-a-plus-05-2026"
+api_dialect = "openai_chat_compat"
+capabilities = ["tools", "streaming", "thinking", "vision"]
+pricing = { input_per_mtok = 2.50, output_per_mtok = 10.00 }
+rate_limits = { rpm = 20, tier = "trial", source_url = "https://docs.cohere.com/docs/rate-limits", last_verified = "2026-06-05", notes = "Command A+ trial keys are 20 RPM and 1,000 calls/month; production is sales-gated. Token pricing is the public Command A+ API tariff." }
+architecture = { parameter_count_b = 111.0, moe = true, source_url = "https://docs.cohere.com/docs/command-a-plus", last_verified = "2026-06-05" }
+tier = "frontier"
+open_weight = true
+strengths = ["agentic", "tool_use", "reasoning", "multilingual", "vision"]
+
+[models."grok-build-0.1"]
+name = "Grok Build 0.1"
+provider = "xai"
+context_window = 256000
+logical_model = "grok-code-fast-1"
+equivalence_group = "grok-code-fast-1"
+api_dialect = "openai_chat_compat"
+capabilities = ["tools", "streaming", "thinking", "vision", "prompt_caching"]
+pricing = { input_per_mtok = 1.00, output_per_mtok = 2.00, cache_read_per_mtok = 0.20 }
+rate_limits = { rpm = 1800, tpm = 10000000, tier = "us-east-1", source_url = "https://docs.x.ai/developers/models/grok-code-fast-1", last_verified = "2026-06-05" }
+tier = "frontier"
+open_weight = false
+strengths = ["coding", "agentic", "tool_use", "reasoning", "vision"]

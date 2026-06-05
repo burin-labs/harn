@@ -1,0 +1,99 @@
+# ---------- Together reasoning models ----------------------------------------
+#
+# Together exposes three reasoning surfaces today:
+#   - Qwen uses `chat_template_kwargs.thinking` / `enable_thinking`.
+#   - Hybrid Kimi/GLM/Gemma models use `reasoning.enabled`.
+#   - GPT-OSS uses top-level `reasoning_effort`.
+# Keep each host-specific rule explicit so the generic OpenAI fallback does
+# not accidentally claim the wrong wire format.
+
+[[provider.together]]
+model_match = "openai/gpt-oss-*"
+structured_output = "native"
+thinking_modes = ["effort"]
+reasoning_effort_supported = true
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "native_json"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "reasoning_summary"
+
+[[provider.together]]
+model_match = "deepseek-ai/deepseek-v4*"
+native_tools = true
+preferred_tool_format = "native"
+thinking_modes = ["enabled", "effort"]
+reasoning_effort_supported = true
+prompt_caching = true
+structured_output = "native"
+server_parser = "none"
+honors_chat_template_kwargs = false
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "native_json"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "reasoning_summary"
+
+[[provider.together]]
+model_match = "moonshotai/kimi-k2*"
+native_tools = true
+preferred_tool_format = "native"
+structured_output = "native"
+thinking_modes = ["enabled"]
+honors_chat_template_kwargs = false
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "native_json"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "inline"
+
+[[provider.together]]
+model_match = "zai-org/glm-5*"
+native_tools = true
+preferred_tool_format = "native"
+structured_output = "native"
+thinking_modes = ["enabled"]
+honors_chat_template_kwargs = false
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "native_json"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "inline"
+
+[[provider.together]]
+model_match = "google/gemma-4*"
+native_tools = true
+vision_supported = true
+preferred_tool_format = "native"
+structured_output = "native"
+thinking_modes = ["enabled"]
+honors_chat_template_kwargs = false
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "native_json"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "inline"
+
+[[provider.together]]
+model_match = "moonshotai/*"
+native_tools = true
+preferred_tool_format = "native"
+structured_output = "native"
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "native_json"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "none"
+

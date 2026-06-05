@@ -150,14 +150,15 @@ impl VertexProvider {
             .map(crate::llm_config::resolve_base_url)
             .unwrap_or_else(|| "https://aiplatform.googleapis.com/v1".to_string());
         let base_url = base_url.trim_end_matches('/');
-        let model = if request.model.starts_with("projects/") {
-            request.model.clone()
+        let wire_model = crate::llm_config::wire_model_id(&request.model);
+        let model = if wire_model.starts_with("projects/") {
+            wire_model
         } else {
             format!(
                 "projects/{}/locations/{}/publishers/google/models/{}",
                 percent_encode_component(&project),
                 percent_encode_component(&location),
-                percent_encode_component(&request.model)
+                percent_encode_component(&wire_model)
             )
         };
         Ok(format!("{base_url}/{model}:generateContent"))

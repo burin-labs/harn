@@ -147,8 +147,9 @@ impl OpenAiCompatibleProvider {
         }
         msgs = crate::llm::api::normalize_openai_style_messages(msgs, force_string_content);
 
+        let wire_model = crate::llm_config::wire_model_id(&opts.model);
         let mut body = serde_json::json!({
-            "model": opts.model,
+            "model": wire_model,
             "messages": msgs,
         });
         if opts.max_tokens > 0 {
@@ -876,6 +877,17 @@ mod tests {
             "Qwen3.6 should request preserve_thinking so <think> blocks survive across agentic turns"
         );
         assert_eq!(body["chat_template_kwargs"]["enable_thinking"], true);
+    }
+
+    #[test]
+    fn build_request_body_uses_wire_model_for_catalog_key() {
+        let mut payload = base_request_payload();
+        payload.provider = "groq".to_string();
+        payload.model = "groq/openai/gpt-oss-120b".to_string();
+
+        let body = OpenAiCompatibleProvider::build_request_body(&payload, false);
+
+        assert_eq!(body["model"], "openai/gpt-oss-120b");
     }
 
     #[test]

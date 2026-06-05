@@ -226,8 +226,9 @@ impl AnthropicProvider {
                 warn_anthropic_prefill_skipped(&opts.model);
             }
         }
+        let wire_model = crate::llm_config::wire_model_id(&opts.model);
         let mut body = serde_json::json!({
-            "model": opts.model,
+            "model": wire_model,
             "messages": messages,
             "max_tokens": anthropic_max,
         });

@@ -2,7 +2,8 @@
 //!
 //! The per-(provider, model) capability matrix (native tools, deferred
 //! tool loading, tool-search variants, prompt caching, extended thinking,
-//! max tool count) lives in the shipped `capabilities.toml` and is
+//! max tool count) lives in `capability_sources/**/*.toml`, which generates
+//! the shipped `capabilities.toml` snapshot, and is
 //! overridable per-project via `[[capabilities.provider.<name>]]` blocks
 //! in `harn.toml`. This module owns:
 //!
@@ -27,8 +28,9 @@ use serde::{Deserialize, Serialize};
 use super::providers::anthropic::claude_generation;
 use super::providers::openai_compat::gpt_generation;
 
-/// Shipped default rules. Compiled into the binary at build time.
+/// Generated shipped default rules. Compiled into the binary at build time.
 const BUILTIN_TOML: &str = include_str!("capabilities.toml");
+/// Generated provider/model snapshot built from catalog_sources/**/*.toml.
 const BUILTIN_PROVIDERS_TOML: &str = include_str!("providers.toml");
 
 /// Parsed on-disk capabilities schema. Public so harn-cli can
@@ -1429,6 +1431,14 @@ preferred_tool_format = "native"
                     name: "Acme Good".to_string(),
                     provider: "acme".to_string(),
                     context_window: 128_000,
+                    logical_model: None,
+                    equivalence_group: None,
+                    served_variant: None,
+                    wire_model: None,
+                    api_dialect: None,
+                    rate_limits: None,
+                    architecture: None,
+                    local_memory: None,
                     runtime_context_window: None,
                     stream_timeout: None,
                     capabilities: Vec::new(),

@@ -60,8 +60,9 @@ impl OllamaProvider {
         }
         let msgs = crate::llm::api::normalize_openai_style_messages(msgs, true);
 
+        let wire_model = crate::llm_config::wire_model_id(&opts.model);
         let mut body = serde_json::json!({
-            "model": opts.model,
+            "model": wire_model,
             "messages": msgs,
         });
         if opts.max_tokens > 0 {
@@ -162,8 +163,9 @@ impl OllamaProvider {
             );
         }
 
+        let wire_model = crate::llm_config::wire_model_id(&opts.model);
         let mut body = serde_json::json!({
-            "model": opts.model,
+            "model": wire_model,
             "prompt": render_qwen_chat_prompt(opts),
             "stream": opts.stream,
             "raw": true,

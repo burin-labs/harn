@@ -1,0 +1,53 @@
+# ---------- OpenRouter slugs for the new families -----------------------------
+# OpenRouter is OpenAI-compatible at the wire level, so model-specific
+# overrides only need to set `native_tools` + `preferred_tool_format`.
+# The audit test trips on missing entries because provider_family
+# inheritance does not cover specific OR slugs by itself.
+
+[[provider.openrouter]]
+model_match = "minimax/minimax-m3*"
+native_tools = true
+preferred_tool_format = "native"
+text_tool_wire_format_supported = true
+structured_output = "delimited"
+thinking_modes = ["adaptive"]
+vision = true
+vision_supported = true
+video_supported = true
+prompt_caching = true
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "delimited"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "inline"
+
+[[provider.openrouter]]
+model_match = "minimax/minimax-m2.7*"
+native_tools = true
+preferred_tool_format = "native"
+text_tool_wire_format_supported = true
+structured_output = "delimited"
+
+[[provider.openrouter]]
+model_match = "minimax/minimax-m2*"
+native_tools = true
+preferred_tool_format = "native"
+text_tool_wire_format_supported = true
+structured_output = "delimited"
+
+[[provider.openrouter]]
+model_match = "z-ai/glm-5*"
+native_tools = true
+preferred_tool_format = "native"
+text_tool_wire_format_supported = true
+structured_output = "native"
+
+[[provider.openrouter]]
+model_match = "deepseek/deepseek-v4*"
+native_tools = true
+preferred_tool_format = "native"
+text_tool_wire_format_supported = true
+structured_output = "native"
+

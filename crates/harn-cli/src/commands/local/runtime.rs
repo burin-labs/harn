@@ -207,7 +207,7 @@ fn readiness_status_label(status: ReadinessStatus) -> String {
     .to_string()
 }
 
-fn port_from_base_url(base_url: &str) -> Option<u16> {
+pub(crate) fn port_from_base_url(base_url: &str) -> Option<u16> {
     reqwest::Url::parse(base_url)
         .ok()
         .and_then(|url| url.port())

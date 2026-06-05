@@ -1,0 +1,117 @@
+# Harn provider capability matrix source fragments.
+#
+# The files under capability_sources/ are the source of truth for Harn's
+# built-in provider/model capability rules. `harn providers build-capabilities`
+# concatenates these fragments into llm/capabilities.toml, which is compiled
+# into the VM with include_str!.
+#
+# One `[[provider.<name>]]` array entry per rule; first match wins per
+# (provider, model). Place more specific `model_match` patterns before
+# wildcards. `version_min = [major, minor]` narrows the match to a model
+# ID whose `(major, minor)` version (parsed from the Anthropic / OpenAI
+# naming schemes) is greater than or equal to the given tuple. Rules
+# whose `version_min` is unparseable for the given model are skipped.
+#
+# `[provider_family]` declares the sibling providers that inherit rules
+# from a canonical family when they have no rule of their own (OpenRouter
+# et al. speak the same Responses API and forward `tool_search` /
+# `defer_loading` unchanged — they fall through to `[[provider.openai]]`
+# by default).
+#
+# Users override or extend this table per-project via
+# `[[capabilities.provider.<name>]]` entries in `harn.toml`. Project
+# overrides are checked before the built-in rules for the same provider
+# name and are authoritative on overlap.
+#
+# Supported per-rule fields:
+#   model_match     : glob pattern matched against the lowercased model ID.
+#   version_min     : [major, minor] lower bound, provider-aware parse.
+#   native_tools    : whether the model accepts native tool-call wire shape.
+#   message_wire_format:
+#                     shared helper wire format: openai, anthropic, gemini, or ollama.
+#   native_tool_wire_format:
+#                     native tool definition shape: openai or anthropic.
+#   defer_loading   : whether `defer_loading: true` is honored on tool defs.
+#   tool_search     : list of native tool-search variants, preferred first.
+#                     Anthropic = ["bm25", "regex"];
+#                     OpenAI    = ["hosted", "client"].
+#   responses_api   : whether Harn has a native provider path for OpenAI
+#                     Responses semantics on this route.
+#   hosted_tools    : provider-hosted tools Harn can pass through without
+#                     local execution.
+#   remote_mcp      : whether provider-hosted remote MCP connectors are
+#                     available.
+#   conversation_state:
+#                     whether previous_response_id-style provider state is
+#                     available.
+#   compaction      : whether provider-side truncation/compaction controls are
+#                     available.
+#   background_mode : whether provider-side background jobs are available.
+#   tool_approval_policy:
+#                     approval policy story for provider-executed tools.
+#   max_tools       : cap on tool-definition count the provider will accept.
+#                     Used by harn-lint to warn about oversized registries.
+#   prompt_caching  : whether the provider honors cache_control blocks.
+#   vision          : whether Harn can send visual input blocks on this route.
+#   audio_supported : whether Harn can send audio input blocks on this route.
+#   pdf_supported   : whether Harn can send PDF/document input blocks on this route.
+#   video_supported : whether Harn can send video input blocks on this route.
+#   files_api_supported:
+#                     whether file_id references from std/files::upload are accepted.
+#   file_upload_wire_format:
+#                     file-upload API family for std/files.upload: anthropic or gemini.
+#   structured_output: structured-output transport: native, tool_use, format_kw, none.
+#   prefers_xml_scaffolding:
+#                     prompt sections should use XML tags (`<task>`, `<examples>`).
+#   prefers_markdown_scaffolding:
+#                     prompt sections should use Markdown headings (`## Task`).
+#   structured_output_mode:
+#                     preferred logical output shape: native_json, delimited, xml_tagged, none.
+#   supports_assistant_prefill:
+#                     whether assistant-role prefill turns are accepted.
+#   prefers_role_developer:
+#                     whether durable instructions should use `developer` role.
+#   prefers_xml_tools:
+#                     whether text-rendered tool specs should use XML wrappers.
+#   thinking_block_style:
+#                     preferred transcript thinking style: none, thinking_blocks,
+#                     reasoning_summary, inline.
+#   thinking_modes  : supported script-facing modes: enabled, adaptive, effort.
+#   interleaved_thinking_supported:
+#                     whether `thinking` can opt Anthropic Messages API
+#                     requests into the interleaved-thinking beta header.
+#   anthropic_beta_features:
+#                     unconditional Anthropic beta feature names to request
+#                     for this route.
+#   vision_supported: whether image content blocks are accepted.
+#   image_url_input_supported:
+#                     whether image content blocks may reference remote URLs.
+#   preserve_thinking: whether prior <think> blocks should be carried forward.
+#   server_parser   : server-side response parser that transforms model output.
+#   honors_chat_template_kwargs: whether chat_template_kwargs are honored.
+#   requires_completion_tokens: whether to send max_completion_tokens instead of max_tokens.
+#   reasoning_effort_supported: whether reasoning_effort is accepted.
+#   reasoning_effort_levels:
+#                     accepted reasoning_effort values when the provider
+#                     accepts only a subset of Harn's neutral enum.
+#   reasoning_none_supported: whether reasoning_effort="none" is accepted.
+#   reasoning_wire_format:
+#                     OpenAI-compatible non-standard reasoning transport:
+#                     openrouter, enabled, or minimax.
+#   recommended_endpoint: preferred endpoint family for this route.
+#   text_tool_wire_format_supported: whether Harn text tool calls survive.
+#   preferred_tool_format:
+#                     default tool mode for this route: native or text.
+#   tool_mode_parity:
+#                     empirical native/text interchangeability status:
+#                     interchangeable, native_unreliable, text_unreliable,
+#                     native_only, text_only, unknown.
+#   tool_mode_parity_notes:
+#                     short explanation for known non-interchangeable modes.
+#   thinking_disable_directive:
+#                     in-prompt directive (e.g. "/no_think" for Qwen3 chat
+#                     templates) that disables the model's thinking mode.
+#                     When set, Harn auto-prepends this to the system message
+#                     whenever the resolved `thinking` config is `Disabled`,
+#                     so script authors don't need to know provider-specific
+#                     prompt directives. Idempotent — never injected twice.

@@ -82,8 +82,9 @@ async fn vm_call_completion_openai_style(
         .and_then(|p| p.completion_endpoint.as_deref())
         .unwrap_or("/completions");
 
+    let wire_model = crate::llm_config::wire_model_id(&opts.model);
     let mut body = serde_json::json!({
-        "model": opts.model,
+        "model": wire_model,
         "prompt": prefix,
         "max_tokens": opts.max_tokens,
     });
@@ -204,8 +205,9 @@ async fn vm_call_completion_ollama(
         serde_json::json!(opts.max_tokens),
     );
 
+    let wire_model = crate::llm_config::wire_model_id(&opts.model);
     let mut body = serde_json::json!({
-        "model": opts.model,
+        "model": wire_model,
         "prompt": prefix,
         "stream": false,
         "raw": true,

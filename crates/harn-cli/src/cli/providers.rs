@@ -14,6 +14,10 @@ pub(crate) enum ProvidersCommand {
     Refresh(ProvidersRefreshArgs),
     /// Validate the loaded catalog and generated artifact contract.
     Validate(ProvidersValidateArgs),
+    /// Generate or check the embedded provider TOML from source fragments.
+    BuildConfig(ProvidersBuildConfigArgs),
+    /// Generate or check the embedded capability TOML from source fragments.
+    BuildCapabilities(ProvidersBuildCapabilitiesArgs),
     /// Generate JSON, schema, TypeScript, and Swift catalog artifacts.
     Export(ProvidersExportArgs),
     /// Generate or check the provider capability matrix docs.
@@ -54,6 +58,32 @@ pub(crate) struct ProvidersValidateArgs {
     /// Emit validation details as JSON.
     #[arg(long)]
     pub json: bool,
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct ProvidersBuildConfigArgs {
+    /// Directory containing provider catalog TOML source fragments.
+    #[arg(long, default_value = "crates/harn-vm/src/llm/catalog_sources")]
+    pub source_dir: PathBuf,
+    /// Generated embedded provider catalog snapshot.
+    #[arg(long, default_value = "crates/harn-vm/src/llm/providers.toml")]
+    pub output: PathBuf,
+    /// Check whether the generated snapshot is up to date without writing.
+    #[arg(long)]
+    pub check: bool,
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct ProvidersBuildCapabilitiesArgs {
+    /// Directory containing provider capability TOML source fragments.
+    #[arg(long, default_value = "crates/harn-vm/src/llm/capability_sources")]
+    pub source_dir: PathBuf,
+    /// Generated embedded provider capability snapshot.
+    #[arg(long, default_value = "crates/harn-vm/src/llm/capabilities.toml")]
+    pub output: PathBuf,
+    /// Check whether the generated snapshot is up to date without writing.
+    #[arg(long)]
+    pub check: bool,
 }
 
 #[derive(Debug, Args)]

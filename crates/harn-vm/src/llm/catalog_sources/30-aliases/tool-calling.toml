@@ -1,0 +1,46 @@
+# ── Alias tool-calling probe state ───────────────────────────────────────────
+# Per-alias overrides recording the last-observed native vs. text vs.
+# streaming tool-call probe outcome and the desired fallback. Hosts may
+# update these via providers.toml overlays as they re-probe a model.
+
+[alias_tool_calling.ollama-gemma4]
+native = "unknown"
+text = "unknown"
+streaming_native = "unknown"
+fallback_mode = "disabled"
+failure_reason = "requires_tool_probe"
+
+[alias_tool_calling.ollama-gemma4-12b]
+native = "unknown"
+text = "unknown"
+streaming_native = "unknown"
+fallback_mode = "disabled"
+failure_reason = "requires_tool_probe"
+
+[alias_tool_calling."llamacpp-qwen3.6-q4"]
+native = "pass"
+text = "unknown"
+streaming_native = "pass"
+fallback_mode = "native"
+last_probe_at = "2026-06-05"
+
+[alias_tool_calling."local-qwen3.6"]
+native = "pass"
+text = "unknown"
+streaming_native = "pass"
+fallback_mode = "native"
+last_probe_at = "2026-06-05"
+
+[alias_tool_calling."local-qwen3.6-gguf"]
+native = "pass"
+text = "unknown"
+streaming_native = "pass"
+fallback_mode = "native"
+last_probe_at = "2026-06-05"
+
+[alias_tool_calling."mlx-qwen3.6-27b"]
+native = "unknown"
+text = "unknown"
+streaming_native = "unknown"
+fallback_mode = "native"
+failure_reason = "requires_served_identity_and_tool_probe"

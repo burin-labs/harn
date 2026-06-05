@@ -50,6 +50,51 @@
       ],
       "type": "object"
     },
+    "architecture": {
+      "additionalProperties": false,
+      "properties": {
+        "active_parameter_count_b": {
+          "exclusiveMinimum": 0,
+          "type": "number"
+        },
+        "knowledge_cutoff": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "last_verified": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "license": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "moe": {
+          "type": "boolean"
+        },
+        "parameter_count_b": {
+          "exclusiveMinimum": 0,
+          "type": "number"
+        },
+        "precision": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "quantization": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "source_url": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "tokenizer": {
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
     "auth": {
       "additionalProperties": false,
       "properties": {
@@ -200,6 +245,143 @@
       ],
       "type": "object"
     },
+    "local_memory": {
+      "additionalProperties": false,
+      "properties": {
+        "base_resident_gib": {
+          "exclusiveMinimum": 0,
+          "type": "number"
+        },
+        "cache_type_multipliers": {
+          "additionalProperties": {
+            "exclusiveMinimum": 0,
+            "type": "number"
+          },
+          "type": "object"
+        },
+        "default_cache_type": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "kv_cache_gib_per_1k_ctx": {
+          "minimum": 0,
+          "type": "number"
+        },
+        "last_verified": {
+          "type": "string"
+        },
+        "max_recommended_context": {
+          "minimum": 1,
+          "type": "integer"
+        },
+        "measured_cache_type": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "measured_context_window": {
+          "minimum": 1,
+          "type": "integer"
+        },
+        "measured_resident_gib": {
+          "exclusiveMinimum": 0,
+          "type": "number"
+        },
+        "notes": {
+          "type": "string"
+        },
+        "safety_margin_gib": {
+          "minimum": 0,
+          "type": "number"
+        },
+        "source_url": {
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "local_runtime": {
+      "additionalProperties": false,
+      "properties": {
+        "cache_ram_arg": {
+          "type": "string"
+        },
+        "cache_type_k_arg": {
+          "type": "string"
+        },
+        "cache_type_v_arg": {
+          "type": "string"
+        },
+        "command": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "ctx_arg": {
+          "type": "string"
+        },
+        "default_args": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "default_port": {
+          "maximum": 65535,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "gpu_layers_arg": {
+          "type": "string"
+        },
+        "host_arg": {
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "daemon_api",
+            "managed_process",
+            "external"
+          ]
+        },
+        "last_verified": {
+          "type": "string"
+        },
+        "model_arg": {
+          "type": "string"
+        },
+        "model_source": {
+          "type": "string"
+        },
+        "model_source_env": {
+          "type": "string"
+        },
+        "notes": {
+          "type": "string"
+        },
+        "parallel_arg": {
+          "type": "string"
+        },
+        "port_arg": {
+          "type": "string"
+        },
+        "served_model_arg": {
+          "type": "string"
+        },
+        "source_url": {
+          "type": "string"
+        },
+        "stop": {
+          "enum": [
+            "keep_alive_zero",
+            "pid",
+            "external"
+          ]
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "type": "object"
+    },
     "modalities": {
       "additionalProperties": false,
       "properties": {
@@ -232,6 +414,13 @@
             "type": "string"
           },
           "type": "array"
+        },
+        "api_dialect": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "architecture": {
+          "$ref": "#/$defs/architecture"
         },
         "availability": {
           "enum": [
@@ -273,6 +462,10 @@
         "deprecation": {
           "$ref": "#/$defs/deprecation"
         },
+        "equivalence_group": {
+          "minLength": 1,
+          "type": "string"
+        },
         "family": {
           "pattern": "^[a-z0-9][a-z0-9-]*$",
           "type": "string"
@@ -289,6 +482,13 @@
         },
         "lineage": {
           "pattern": "^[a-z0-9][a-z0-9-]*$",
+          "type": "string"
+        },
+        "local_memory": {
+          "$ref": "#/$defs/local_memory"
+        },
+        "logical_model": {
+          "minLength": 1,
           "type": "string"
         },
         "modalities": {
@@ -317,12 +517,19 @@
           },
           "type": "array"
         },
+        "rate_limits": {
+          "$ref": "#/$defs/rate_limits"
+        },
         "reasoning": {
           "$ref": "#/$defs/reasoning"
         },
         "runtime_context_window": {
           "minimum": 1,
           "type": "integer"
+        },
+        "served_variant": {
+          "minLength": 1,
+          "type": "string"
         },
         "stream_timeout": {
           "exclusiveMinimum": 0,
@@ -347,6 +554,10 @@
         },
         "tool_support": {
           "$ref": "#/$defs/tool_support"
+        },
+        "wire_model": {
+          "minLength": 1,
+          "type": "string"
         }
       },
       "required": [
@@ -445,11 +656,17 @@
           "minimum": 0,
           "type": "integer"
         },
+        "local_runtime": {
+          "$ref": "#/$defs/local_runtime"
+        },
         "protocols": {
           "items": {
             "type": "string"
           },
           "type": "array"
+        },
+        "rate_limits": {
+          "$ref": "#/$defs/rate_limits"
         },
         "rpm": {
           "minimum": 1,
@@ -466,6 +683,64 @@
         "features",
         "caveats"
       ],
+      "type": "object"
+    },
+    "rate_limits": {
+      "additionalProperties": false,
+      "properties": {
+        "concurrency": {
+          "minimum": 1,
+          "type": "integer"
+        },
+        "input_tpm": {
+          "minimum": 1,
+          "type": "integer"
+        },
+        "last_verified": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "notes": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "output_tpm": {
+          "minimum": 1,
+          "type": "integer"
+        },
+        "rpd": {
+          "minimum": 1,
+          "type": "integer"
+        },
+        "rph": {
+          "minimum": 1,
+          "type": "integer"
+        },
+        "rpm": {
+          "minimum": 1,
+          "type": "integer"
+        },
+        "source_url": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "tier": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "tpd": {
+          "minimum": 1,
+          "type": "integer"
+        },
+        "tph": {
+          "minimum": 1,
+          "type": "integer"
+        },
+        "tpm": {
+          "minimum": 1,
+          "type": "integer"
+        }
+      },
       "type": "object"
     },
     "reasoning": {

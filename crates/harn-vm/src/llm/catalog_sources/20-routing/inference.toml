@@ -1,0 +1,111 @@
+# ── Inference rules ──────────────────────────────────────────────────────────
+# Map a model ID shape to a default provider when the caller doesn't
+# specify one. First match wins. User overlays prepend, so they can
+# preempt these defaults without removing them.
+
+[[inference_rules]]
+pattern = "claude-*"
+provider = "anthropic"
+
+[[inference_rules]]
+pattern = "gpt-*"
+provider = "openai"
+
+[[inference_rules]]
+pattern = "o1*"
+provider = "openai"
+
+[[inference_rules]]
+pattern = "o3*"
+provider = "openai"
+
+[[inference_rules]]
+pattern = "o4*"
+provider = "openai"
+
+[[inference_rules]]
+pattern = "anthropic.claude-*"
+provider = "bedrock"
+
+[[inference_rules]]
+pattern = "meta.llama*"
+provider = "bedrock"
+
+[[inference_rules]]
+pattern = "amazon.*"
+provider = "bedrock"
+
+[[inference_rules]]
+pattern = "mistral.*"
+provider = "bedrock"
+
+[[inference_rules]]
+pattern = "cohere.*"
+provider = "bedrock"
+
+[[inference_rules]]
+pattern = "gemini-*"
+provider = "gemini"
+
+[[inference_rules]]
+pattern = "mistral-*"
+provider = "mistral"
+
+[[inference_rules]]
+pattern = "devstral-*"
+provider = "mistral"
+
+[[inference_rules]]
+pattern = "command-*"
+provider = "cohere"
+
+[[inference_rules]]
+pattern = "grok-*"
+provider = "xai"
+
+[[inference_rules]]
+pattern = "groq/*"
+provider = "groq"
+
+# Cerebras model IDs come back as bare names ("gpt-oss-120b",
+# "llama-3.3-70b") from /v1/models, so callers slash-prefix
+# them as "cerebras/<model>" to disambiguate from OpenRouter's
+# one-slash convention. Match the prefix before the generic
+# single-slash rule routes it elsewhere.
+[[inference_rules]]
+pattern = "cerebras/*"
+provider = "cerebras"
+
+# MiniMax — released-name canonical IDs (capital-M) sit on the direct
+# API. OpenRouter mirrors the same family under `minimax/*` slugs; that
+# routing is handled by the generic slash-prefix rule.
+[[inference_rules]]
+pattern = "MiniMax-*"
+provider = "minimax"
+
+# Z.AI — GLM family. Bare IDs ("glm-5", "glm-5.1") dial the direct
+# OpenAI-compatible Z.AI endpoint; `zhipu/*` is accepted as a legacy
+# prefix some packagers still use.
+[[inference_rules]]
+pattern = "glm-*"
+provider = "zai"
+
+[[inference_rules]]
+pattern = "zhipu/*"
+provider = "zai"
+
+# DeepSeek — V4 family. The direct API uses bare IDs while OpenRouter
+# slugs them as `deepseek/*`; only the bare form needs an inference
+# rule because slash-prefixed IDs hit the generic OpenRouter rule.
+[[inference_rules]]
+pattern = "deepseek-v4*"
+provider = "deepseek"
+
+[[inference_rules]]
+pattern = "deepseek-chat"
+provider = "deepseek"
+
+[[inference_rules]]
+pattern = "deepseek-reasoner"
+provider = "deepseek"
+

@@ -103,8 +103,9 @@ impl OpenAiResponsesProvider {
     }
 
     pub(crate) fn build_request_body(opts: &LlmRequestPayload) -> serde_json::Value {
+        let wire_model = crate::llm_config::wire_model_id(&opts.model);
         let mut body = serde_json::json!({
-            "model": opts.model,
+            "model": wire_model,
             "input": responses_input_items(opts),
         });
 
@@ -185,8 +186,9 @@ impl OpenAiResponsesProvider {
     }
 
     pub(crate) fn build_compact_request_body(opts: &LlmRequestPayload) -> serde_json::Value {
+        let wire_model = crate::llm_config::wire_model_id(&opts.model);
         let mut body = serde_json::json!({
-            "model": opts.model,
+            "model": wire_model,
             "input": responses_input_items(opts),
         });
         if let Some(ref system) = opts.system {

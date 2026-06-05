@@ -18,6 +18,8 @@ pub(crate) enum LocalCommand {
     /// Survey every local provider Harn knows about: base URL, reachability,
     /// served models, loaded models, memory footprint, context, keep-alive.
     List(LocalListArgs),
+    /// Launch a Harn-managed local server process and verify it is ready.
+    Launch(Box<LocalLaunchArgs>),
     /// Show the currently-selected local provider/model and a brief summary
     /// of every other local runtime.
     Status(LocalStatusArgs),
@@ -39,6 +41,88 @@ pub(crate) struct LocalListArgs {
     /// Restrict to one provider id (e.g. `ollama`, `llamacpp`, `mlx`).
     #[arg(long)]
     pub provider: Option<String>,
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct LocalLaunchArgs {
+    /// Model alias or provider-native model id to serve.
+    #[arg(
+        value_parser = llm_model_completion_parser(),
+        hide_possible_values = true
+    )]
+    pub model: String,
+    /// Local provider runtime to launch or warm (`ollama`, `llamacpp`, `mlx`).
+    #[arg(long)]
+    pub provider: Option<String>,
+    /// Local model file, directory, or Hugging Face repo id for launched servers.
+    #[arg(long = "model-source", alias = "model-path")]
+    pub model_source: Option<String>,
+    /// Server command to execute.
+    #[arg(long = "server-command")]
+    pub server_command: Option<String>,
+    /// Host interface for the launched server. Defaults to the provider base URL host.
+    #[arg(long)]
+    pub host: Option<String>,
+    /// Port for the launched server. Defaults to the provider catalog base URL.
+    #[arg(long)]
+    pub port: Option<u16>,
+    /// Context window to request from the runtime.
+    #[arg(long)]
+    pub ctx: Option<u64>,
+    /// Keep-alive value for Ollama warmup (e.g. `30m`, `forever`, `-1`).
+    #[arg(long = "keep-alive")]
+    pub keep_alive: Option<String>,
+    /// Skip pulling the model when it is missing (Ollama only).
+    #[arg(long = "no-pull")]
+    pub no_pull: bool,
+    /// Number of parallel slots.
+    #[arg(long, default_value_t = 1)]
+    pub parallel: u64,
+    /// llama.cpp GPU layer setting (`auto`, `all`, or a number).
+    #[arg(long = "gpu-layers", default_value = "auto")]
+    pub gpu_layers: String,
+    /// llama.cpp K-cache type.
+    #[arg(long = "cache-type-k")]
+    pub cache_type_k: Option<String>,
+    /// llama.cpp V-cache type.
+    #[arg(long = "cache-type-v")]
+    pub cache_type_v: Option<String>,
+    /// llama.cpp prompt/KV cache RAM MiB cap.
+    #[arg(long = "cache-ram")]
+    pub cache_ram: Option<u64>,
+    /// llama.cpp reasoning mode (`on`, `off`, or `auto`).
+    #[arg(long)]
+    pub reasoning: Option<String>,
+    /// llama.cpp reasoning extraction format, for example `deepseek`.
+    #[arg(long = "reasoning-format")]
+    pub reasoning_format: Option<String>,
+    /// llama.cpp flash-attention mode (`on`, `off`, or `auto`).
+    #[arg(long = "flash-attn")]
+    pub flash_attn: Option<String>,
+    /// Enable the llama.cpp Jinja chat template parser.
+    #[arg(long)]
+    pub jinja: bool,
+    /// Enable the llama.cpp Prometheus metrics endpoint.
+    #[arg(long)]
+    pub metrics: bool,
+    /// Extra argument to pass through to the server command. Repeat as needed.
+    #[arg(long = "server-arg", allow_hyphen_values = true)]
+    pub server_args: Vec<String>,
+    /// Readiness timeout in seconds.
+    #[arg(long = "timeout-secs", default_value_t = 120)]
+    pub timeout_secs: u64,
+    /// Log file path. Defaults under Harn local state.
+    #[arg(long)]
+    pub log: Option<PathBuf>,
+    /// Skip unloading other local providers / sibling models before launch.
+    #[arg(long = "no-evict")]
+    pub no_evict: bool,
+    /// Allow a launch even when catalog memory estimates exceed current RAM headroom.
+    #[arg(long = "allow-memory-risk")]
+    pub allow_memory_risk: bool,
+    /// Emit a structured JSON result.
+    #[arg(long)]
+    pub json: bool,
 }
 
 #[derive(Debug, Args)]
