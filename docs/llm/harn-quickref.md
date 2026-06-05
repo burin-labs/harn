@@ -815,6 +815,28 @@ let results = parallel settle paths with { max_concurrent: 4 } { p ->
 `retry { } catch err { }`, channels, `select`, and `deadline` in
 `docs/src/concurrency.md`.
 
+For quotas shared across Harn processes, use
+`durable_rate_limit_acquire(options)`. It writes a SQLite reservation log under
+`.harn/rate-limits.sqlite` by default, supports atomic multi-bucket admission,
+and returns `{ok, timed_out, waited_ms, retry_after_ms, buckets}`:
+
+```harn
+let admitted = durable_rate_limit_acquire({
+  buckets: [
+    {key: "provider:cerebras:rpm", limit: 5, units: 1, window_ms: 60s},
+    {
+      key: "model:cerebras:gpt-oss-120b:tpm",
+      limit: 30000,
+      units: 12000,
+      window_ms: 60s,
+    },
+  ],
+  timeout_ms: 2m,
+})
+
+guard admitted.ok else { throw "quota admission timed out" }
+```
+
 Channel waits are guarded: if every active task is blocked on sends/receives
 that cannot match another task, the runtime raises `HARN-ORC-012` instead of
 hanging. Use `deadline { ... }`, `select timeout`, or `channel_select(...,

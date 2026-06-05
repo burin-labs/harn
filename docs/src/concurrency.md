@@ -482,6 +482,63 @@ guard lock != nil else { throw "state lock timeout" }
 try { write_shared_state() } finally { sync_release(lock) }
 ```
 
+## Durable cross-process rate limiting
+
+The `sync_*` primitives above are process-local permits. Use
+`durable_rate_limit_acquire(options)` when multiple Harn processes, CLI
+invocations, eval runners, or worker pools need to share one quota. The
+primitive stores sliding-window reservations in SQLite, acquires all requested
+buckets in one transaction, sleeps outside the transaction, and returns a
+structured timeout instead of hanging forever when `timeout_ms` is exhausted.
+
+By default the state lives at `.harn/rate-limits.sqlite` under the runtime
+state root. Pass `state_path` when several repositories or runner fleets should
+share a quota DB:
+
+```harn
+let gate = durable_rate_limit_acquire({
+  state_path: ".harn/eval-rate-limits.sqlite",
+  buckets: [
+    {key: "provider:cerebras:rpm", limit: 5, units: 1, window_ms: 60s},
+    {
+      key: "model:cerebras:gpt-oss-120b:tpm",
+      limit: 30000,
+      units: 12000,
+      window_ms: 60s,
+    },
+  ],
+  timeout_ms: 2m,
+})
+
+guard gate.ok else {
+  throw "rate-limit admission timed out after ${gate.waited_ms}ms"
+}
+```
+
+Each bucket is `{key, limit, units?, window_ms?}`. Missing `units` means `1`;
+missing `window_ms` means one minute. A reservation larger than the bucket limit
+is admitted as one full-window charge so unusually large work can still run,
+but the next reservation waits until the window clears. Duplicate bucket keys
+are rejected because they would make the atomic reservation ambiguous.
+
+For tests, combine `mock_time(...)` with `timeout_ms: 0` to assert admission or
+timeout without real sleeps:
+
+```harn
+mock_time(1000)
+
+let first = durable_rate_limit_acquire({key: "test", limit: 1, window_ms: 1s})
+let second = durable_rate_limit_acquire({
+  key: "test",
+  limit: 1,
+  window_ms: 1s,
+  timeout_ms: 0,
+})
+
+log(first.ok)          // true
+log(second.timed_out) // true
+```
+
 ## Deadline
 
 Set a timeout on a block of work:
