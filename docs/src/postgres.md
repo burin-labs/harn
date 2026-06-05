@@ -92,23 +92,46 @@ Postgres driver can expose them that way.
 
 `std/postgres/query` is a small Harn-native layer over the raw `pg_*`
 builtins. It is not an ORM: SQL stays visible, Postgres-specific casts and
-operators stay available, and every dynamic value still goes through `params`.
+operators stay available, and every dynamic value still goes through Postgres
+bind parameters.
 The helpers are intended for data-access modules where long inline SQL calls
 make reviews noisy.
 
 ```harn,ignore
 import "std/postgres"
-import { many, named, nullable_timestamptz_json, run, select_clause, uuid_text } from "std/postgres/query"
+import {
+  ident,
+  many,
+  named_sql,
+  nullable_timestamptz_json,
+  run,
+  sql,
+  unsafe_sql,
+  uuid_text,
+} from "std/postgres/query"
 
 pub fn list_receipts_query(tenant_id: string, limit: int) {
-  let sql = select_clause([
-    uuid_text("id"),
-    uuid_text("tenant_id"),
-    "payload",
-    nullable_timestamptz_json("finished_at"),
-  ]) + " FROM receipts WHERE tenant_id = $1::uuid ORDER BY created_at DESC LIMIT $2"
-
-  return named("list_receipts", "many", sql, [tenant_id, limit])
+  return named_sql(
+    "list_receipts",
+    "many",
+    """
+SELECT {id}, {tenant_id_column}, payload, {finished_at}
+FROM {table}
+WHERE tenant_id = {tenant_id}::uuid
+ORDER BY {created_at} DESC
+LIMIT {limit}
+""",
+    {
+      id: unsafe_sql(uuid_text("id")),
+      tenant_id_column: unsafe_sql(uuid_text("tenant_id")),
+      finished_at: unsafe_sql(nullable_timestamptz_json("finished_at")),
+      table: ident("receipts"),
+      tenant_id: tenant_id,
+      created_at: ident("created_at"),
+      limit: limit,
+    },
+    {read_only: true},
+  )
 }
 
 pub fn list_receipts(db, tenant_id: string) {
@@ -116,14 +139,38 @@ pub fn list_receipts(db, tenant_id: string) {
 }
 ```
 
-For one-off call sites, pass a plain query record directly:
+`sql(template, values?)` and `named_sql(name, mode, template, values?)` replace
+ordinary `{name}` placeholders with `$1`, `$2`, ... and store the Harn values
+in `params`. If the same placeholder appears more than once, it reuses the
+first parameter index. Use `{{` and `}}` for literal braces:
 
 ```harn,ignore
-let rows = many(db, {
-  name: "list_receipts",
-  sql: "SELECT id::text AS id, payload FROM receipts WHERE tenant_id = $1::uuid",
-  params: [tenant_id],
-})
+let q = sql(
+  "SELECT '{{}}' AS empty_json, {tenant_id}::uuid AS tenant_id, {tenant_id}::uuid AS again",
+  {tenant_id: tenant_id},
+)
+// q.sql    == "SELECT '{}' AS empty_json, $1::uuid AS tenant_id, $1::uuid AS again"
+// q.params == [tenant_id]
+```
+
+Postgres cannot bind identifiers as parameters. Use `ident(...)` or
+`ident_path(...)` when SQL structure must be dynamic, and use `unsafe_sql(...)`
+only for source-controlled fragments such as projection helpers:
+
+```harn,ignore
+let q = sql(
+  "SELECT {column} FROM {table} WHERE tenant_id = {tenant_id}",
+  {column: ident("created_at"), table: ident_path(["app", "receipts"]), tenant_id: tenant_id},
+)
+```
+
+For one-off call sites, pass the template query record directly:
+
+```harn,ignore
+let rows = many(db, sql(
+  "SELECT id::text AS id, payload FROM receipts WHERE tenant_id = {tenant_id}::uuid",
+  {tenant_id: tenant_id},
+))
 ```
 
 Compared with direct `pg_query`, named query records make the SQL and params
@@ -151,7 +198,9 @@ assert_eq(pg_mock_calls(db)[0].params[0], "tenant-a")
 `one(handle, query)`, `many(handle, query)`, and `exec(handle, query)` force the
 matching mode when a record includes `mode`. `run(handle, named_query)` dispatches
 from the record's `mode`. When a named query fails, the thrown error includes
-the query name before the underlying Postgres or mock-pool error.
+the query name before the underlying Postgres or mock-pool error. Query records
+may include `options` for read routing; `one(...)` and `many(...)` pass those
+through to `pg_query_one` and `pg_query`.
 
 Projection helpers only accept static SQL identifiers matching
 `[A-Za-z_][A-Za-z0-9_]*`. They are for source-controlled column names, not

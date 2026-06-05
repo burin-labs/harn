@@ -964,30 +964,50 @@ let parsed = uuid_parse(uuid_v7())
 
 For Harn data-access modules, prefer `std/postgres/query` when direct
 `pg_query` calls become hard to review. It is not an ORM: SQL stays visible and
-dynamic values still go through `params`.
+dynamic values still go through Postgres bind parameters.
 
 ```harn,ignore
 import "std/postgres"
-import { many, named, run, uuid_text, nullable_timestamptz_json, select_clause } from "std/postgres/query"
+import { ident, many, named_sql, run, sql, unsafe_sql, uuid_text, nullable_timestamptz_json } from "std/postgres/query"
 
 fn list_receipts_query(tenant_id: string, limit: int) {
-  let sql = select_clause([
-    uuid_text("id"),
-    "payload",
-    nullable_timestamptz_json("finished_at"),
-  ]) + " FROM receipts WHERE tenant_id = $1::uuid ORDER BY created_at DESC LIMIT $2"
-  return named("list_receipts", "many", sql, [tenant_id, limit])
+  return named_sql(
+    "list_receipts",
+    "many",
+    """
+SELECT {id}, payload, {finished_at}
+FROM {table}
+WHERE tenant_id = {tenant_id}::uuid
+ORDER BY {created_at} DESC
+LIMIT {limit}
+""",
+    {
+      id: unsafe_sql(uuid_text("id")),
+      finished_at: unsafe_sql(nullable_timestamptz_json("finished_at")),
+      table: ident("receipts"),
+      tenant_id: tenant_id,
+      created_at: ident("created_at"),
+      limit: limit,
+    },
+    {read_only: true},
+  )
 }
 
 let rows = run(db, list_receipts_query(tenant_id, 50))
-let direct = many(db, {name: "recent_receipts", sql: "SELECT id::text AS id FROM receipts LIMIT $1", params: [10]})
+let direct = many(db, sql("SELECT id::text AS id FROM receipts LIMIT {limit}", {limit: 10}))
 ```
 
 Helpers: `one(handle, query)`, `many(handle, query)`, `exec(handle, query)`,
-`run(handle, named_query)`, `named(name, mode, sql, params?)`,
-`uuid_text(name)`, `timestamptz_json(name)`,
+`run(handle, named_query)`, `sql(template, values?, options?)`,
+`named_sql(name, mode, template, values?, options?)`,
+`named(name, mode, sql, params?)`, `ident(name)`, `ident_path(parts)`,
+`unsafe_sql(fragment)`, `uuid_text(name)`, `timestamptz_json(name)`,
 `nullable_timestamptz_json(name)`, and `select_clause(fragments)`.
-Identifier helpers accept only static names matching `[A-Za-z_][A-Za-z0-9_]*`.
+In `sql(...)`, ordinary `{name}` placeholders become `$n` params and repeated
+placeholders reuse the first parameter index. Use `{{` and `}}` for literal
+braces. SQL structure is never inferred from strings; use `ident(...)` /
+`ident_path(...)` for identifiers and reserve `unsafe_sql(...)` for
+source-controlled fragments.
 
 ## LLM surface
 

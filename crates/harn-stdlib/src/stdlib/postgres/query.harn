@@ -1,21 +1,56 @@
 /**
  * std/postgres/query - small SQL ergonomics over std/postgres.
  *
- * SQL remains the source of truth. These helpers only normalize query
- * records, keep values in the `params` list, and centralize safe static
- * projection fragments.
+ * SQL remains the source of truth. These helpers normalize query records,
+ * build `$n` parameter lists from readable SQL templates, and centralize
+ * explicit SQL-structure fragments for the cases Postgres cannot bind.
  */
 import "std/postgres"
 
 type PgQueryMode = "one" | "many" | "exec"
 
-type PgNamedQuery = {name: string, mode: PgQueryMode, sql: string, params: list<any>}
+type PgSqlFragment = {
+  _type: "std/postgres/query.sql_fragment.v1",
+  __harn_postgres_query_trusted_fragment: bool,
+  sql: string,
+}
 
-type PgQuery = {name?: string, mode?: PgQueryMode, sql: string, params?: list<any>}
+type PgNamedQuery = {
+  name: string,
+  mode: PgQueryMode,
+  sql: string,
+  params: list<any>,
+  options?: dict,
+}
+
+type PgQuery = {name?: string, mode?: PgQueryMode, sql: string, params?: list<any>, options?: dict}
 
 let __QUERY_MODES = ["one", "many", "exec"]
 
 let __IDENTIFIER_PATTERN = "^[A-Za-z_][A-Za-z0-9_]*$"
+
+let __SQL_FRAGMENT_TYPE = "std/postgres/query.sql_fragment.v1"
+
+fn __sql_fragment(sql: string) -> PgSqlFragment {
+  if type_of(sql) != "string" {
+    throw "std/postgres/query: SQL fragment must be a string"
+  }
+  return {_type: __SQL_FRAGMENT_TYPE, __harn_postgres_query_trusted_fragment: true, sql: sql}
+}
+
+fn __is_sql_fragment(value) -> bool {
+  return type_of(value) == "dict"
+    && value?._type == __SQL_FRAGMENT_TYPE
+    && value?.__harn_postgres_query_trusted_fragment
+}
+
+fn __sql_fragment_text(value) -> string {
+  let fragment_sql = value?.sql
+  if type_of(fragment_sql) != "string" {
+    throw "std/postgres/query: SQL fragment sql must be a string"
+  }
+  return fragment_sql
+}
 
 fn __query_name(query) -> string {
   if type_of(query) != "dict" {
@@ -58,7 +93,11 @@ fn __normalize_query(query, expected_mode = nil) {
   if expected_mode != nil && query?.mode != nil && query.mode != expected_mode {
     throw __query_error_prefix(query) + "mode " + query.mode + " cannot run through " + expected_mode
   }
-  return {name: __query_name(query), mode: mode, sql: sql, params: params}
+  let options = query?.options
+  if options != nil && type_of(options) != "dict" {
+    throw __query_error_prefix(query) + "options must be a dict"
+  }
+  return {name: __query_name(query), mode: mode, sql: sql, params: params, options: options}
 }
 
 fn __with_query_name(query, body) {
@@ -70,6 +109,84 @@ fn __with_query_name(query, body) {
     }
     throw __query_error_prefix(query) + to_string(error)
   }
+}
+
+fn __find_placeholder_end(chars: list<string>, start: int) -> int {
+  var idx = start
+  while idx < len(chars) {
+    if chars[idx] == "}" {
+      return idx
+    }
+    idx = idx + 1
+  }
+  return -1
+}
+
+fn __render_placeholder(key: string, value, params: list<any>, positions: dict) {
+  if __is_sql_fragment(value) {
+    return {sql: __sql_fragment_text(value), params: params, positions: positions}
+  }
+  let existing = positions[key]
+  if existing != nil {
+    return {sql: "$" + to_string(existing), params: params, positions: positions}
+  }
+  let next = len(params) + 1
+  return {sql: "$" + to_string(next), params: params.push(value), positions: positions + {[key]: next}}
+}
+
+fn __render_sql_template(template: string, values: dict) {
+  if type_of(template) != "string" || trim(template) == "" {
+    throw "std/postgres/query: SQL template must be a non-empty string"
+  }
+  if type_of(values) != "dict" {
+    throw "std/postgres/query: SQL template values must be a dict"
+  }
+  let template_chars = chars(template)
+  var idx = 0
+  var out = ""
+  var params = []
+  var positions = {}
+  while idx < len(template_chars) {
+    let char = template_chars[idx]
+    if char == "{" {
+      if idx + 1 < len(template_chars) && template_chars[idx + 1] == "{" {
+        out = out + "{"
+        idx = idx + 2
+        continue
+      }
+      let end = __find_placeholder_end(template_chars, idx + 1)
+      if end < 0 {
+        throw "std/postgres/query: unclosed `{` in SQL template"
+      }
+      let key = trim(join(template_chars[idx + 1:end], ""))
+      if key == "" {
+        throw "std/postgres/query: empty SQL template placeholder"
+      }
+      if regex_match(__IDENTIFIER_PATTERN, key) == nil {
+        throw "std/postgres/query: invalid SQL template placeholder `" + key + "`"
+      }
+      if !contains(values.keys(), key) {
+        throw "std/postgres/query: missing SQL template value `" + key + "`"
+      }
+      let rendered = __render_placeholder(key, values[key], params, positions)
+      out = out + rendered.sql
+      params = rendered.params
+      positions = rendered.positions
+      idx = end + 1
+      continue
+    }
+    if char == "}" {
+      if idx + 1 < len(template_chars) && template_chars[idx + 1] == "}" {
+        out = out + "}"
+        idx = idx + 2
+        continue
+      }
+      throw "std/postgres/query: unmatched `}` in SQL template"
+    }
+    out = out + char
+    idx = idx + 1
+  }
+  return {sql: out, params: params}
 }
 
 /**
@@ -86,6 +203,47 @@ pub fn named(name: string, mode: PgQueryMode, sql: string, params: list<any> = [
 }
 
 /**
+ * Build a parameterized query record from a SQL template.
+ *
+ * `{name}` placeholders become `$1`, `$2`, ... bind parameters. Repeated
+ * placeholders reuse the first parameter index. Use `{{` and `}}` for literal
+ * braces, and pass `ident(...)`, `ident_path(...)`, or `unsafe_sql(...)` only
+ * for source-controlled SQL structure.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: validation
+ * @api_stability: experimental
+ * @example: sql("SELECT * FROM receipts WHERE tenant_id = {tenant_id}", {tenant_id: tenant_id})
+ */
+pub fn sql(template: string, values: dict = {}, options = nil) -> PgQuery {
+  let rendered = __render_sql_template(template, values)
+  return __normalize_query({sql: rendered.sql, params: rendered.params, options: options})
+}
+
+/**
+ * Build a named parameterized query record from a SQL template.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: validation
+ * @api_stability: experimental
+ * @example: named_sql("list_receipts", "many", "SELECT * FROM receipts WHERE tenant_id = {tenant_id}", {tenant_id: tenant_id})
+ */
+pub fn named_sql(
+  name: string,
+  mode: PgQueryMode,
+  template: string,
+  values: dict = {},
+  options = nil,
+) -> PgNamedQuery {
+  let rendered = __render_sql_template(template, values)
+  return __normalize_query(
+    {name: name, mode: mode, sql: rendered.sql, params: rendered.params, options: options},
+  )
+}
+
+/**
  * Run a query that returns zero or one row.
  *
  * @effects: [postgres]
@@ -96,7 +254,7 @@ pub fn named(name: string, mode: PgQueryMode, sql: string, params: list<any> = [
  */
 pub fn one(handle, query: PgQuery) {
   let q = __normalize_query(query, "one")
-  return __with_query_name(q, { -> pg_query_one(handle, q.sql, q.params) })
+  return __with_query_name(q, { -> pg_query_one(handle, q.sql, q.params, q.options) })
 }
 
 /**
@@ -110,7 +268,7 @@ pub fn one(handle, query: PgQuery) {
  */
 pub fn many(handle, query: PgQuery) -> list {
   let q = __normalize_query(query, "many")
-  return __with_query_name(q, { -> pg_query(handle, q.sql, q.params) })
+  return __with_query_name(q, { -> pg_query(handle, q.sql, q.params, q.options) })
 }
 
 /**
@@ -124,6 +282,9 @@ pub fn many(handle, query: PgQuery) -> list {
  */
 pub fn exec(handle, query: PgQuery) -> PgExecuteResult {
   let q = __normalize_query(query, "exec")
+  if q.options != nil {
+    throw __query_error_prefix(q) + "options are only supported by one and many"
+  }
   return __with_query_name(q, { -> pg_execute(handle, q.sql, q.params) })
 }
 
@@ -167,6 +328,75 @@ pub fn identifier(name: string) -> string {
     throw "std/postgres/query: unsafe SQL identifier `" + to_string(name) + "`"
   }
   return name
+}
+
+/**
+ * Quote one SQL identifier part with PostgreSQL double-quote escaping.
+ *
+ * Dynamic values still belong in template placeholders; quoted identifiers are
+ * only for SQL structure such as table or column names.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: validation
+ * @api_stability: experimental
+ * @example: quote_identifier("receipt events")
+ */
+pub fn quote_identifier(name: string) -> string {
+  if type_of(name) != "string" || trim(name) == "" {
+    throw "std/postgres/query: SQL identifier must be a non-empty string"
+  }
+  return "\"" + replace(name, "\"", "\"\"") + "\""
+}
+
+/**
+ * Render a quoted SQL identifier fragment for use inside `sql(...)`.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: validation
+ * @api_stability: experimental
+ * @example: sql("SELECT {column} FROM receipts", {column: ident("created_at")})
+ */
+pub fn ident(name: string) -> PgSqlFragment {
+  return __sql_fragment(quote_identifier(name))
+}
+
+/**
+ * Render a dotted quoted SQL identifier path for use inside `sql(...)`.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: validation
+ * @api_stability: experimental
+ * @example: ident_path(["app", "receipts"])
+ */
+pub fn ident_path(parts: list<string>) -> PgSqlFragment {
+  if type_of(parts) != "list" || len(parts) == 0 {
+    throw "std/postgres/query: SQL identifier path must be a non-empty list"
+  }
+  var quoted = []
+  for part in parts {
+    quoted = quoted.push(quote_identifier(part))
+  }
+  return __sql_fragment(join(quoted, "."))
+}
+
+/**
+ * Mark a source-controlled SQL fragment for insertion into `sql(...)`.
+ *
+ * This bypasses parameter binding and must never wrap user input. Prefer
+ * normal placeholders for values and `ident(...)` / `ident_path(...)` for
+ * identifiers.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: validation
+ * @api_stability: experimental
+ * @example: unsafe_sql("COUNT(*)")
+ */
+pub fn unsafe_sql(fragment: string) -> PgSqlFragment {
+  return __sql_fragment(fragment)
 }
 
 /**
