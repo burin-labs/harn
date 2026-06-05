@@ -4,8 +4,21 @@ true
 1
 2026-06-05T12:00:00Z
 4
-SELECT id::text AS id FROM receipts WHERE id = $1::uuid
+SELECT id::text AS id FROM "receipts" WHERE id = $1::uuid
 r1
+true
+2
+true
+SELECT '{}' AS empty, $1 AS value
+ok
+SELECT * FROM "tenant data"."receipts""live"
+"select"
+SELECT $1
+danger
+true
+true
+true
+true
 true
 true
 true

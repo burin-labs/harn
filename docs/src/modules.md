@@ -768,24 +768,32 @@ RLS examples, pool options, and migration boundaries.
 ### std/postgres/query
 
 Harn-native query ergonomics over `std/postgres`. This module keeps raw SQL as
-the source of truth while making named query records and repeated projection
-fragments easier to review:
+the source of truth while making SQL templates, named query records, and
+repeated projection fragments easier to review:
 
 | Function | Description |
 |---|---|
 | `named(name, mode, sql, params?)` | Build a serializable query record with `name`, `mode`, `sql`, and `params` |
+| `sql(template, values?, options?)` | Build a `{sql, params}` record by replacing `{name}` placeholders with `$n` bind parameters |
+| `named_sql(name, mode, template, values?, options?)` | Build a named query record from a SQL template |
 | `one(handle, query)` | Run a query record through `pg_query_one` |
 | `many(handle, query)` | Run a query record through `pg_query` |
 | `exec(handle, query)` | Run a query record through `pg_execute` |
 | `run(handle, named_query)` | Dispatch a named query by `mode` (`one`, `many`, or `exec`) |
 | `identifier(name)` | Validate a static SQL identifier for projection helpers |
+| `quote_identifier(name)` | Quote one SQL identifier part with PostgreSQL double-quote escaping |
+| `ident(name)` | Build a quoted identifier fragment for `sql(...)` |
+| `ident_path(parts)` | Build a dotted quoted identifier fragment for `sql(...)` |
+| `unsafe_sql(fragment)` | Mark a source-controlled SQL fragment for insertion into `sql(...)` |
 | `select_clause(fragments)` | Render `SELECT ...` from static projection fragments |
 | `uuid_text(name)` | Render `name::text AS name` |
 | `timestamptz_json(name)` | Render `to_json(name)#>>'{}' AS name` |
 | `nullable_timestamptz_json(name)` | Render a timestamp projection that preserves nulls |
 
-Dynamic values must still be passed through `params`; identifier helpers reject
-unsafe names and are only for source-controlled column identifiers.
+In SQL templates, ordinary `{name}` placeholders are always bound as params;
+use `{{` and `}}` for literal braces. SQL structure must be explicit through
+`ident(...)`, `ident_path(...)`, or `unsafe_sql(...)`; `unsafe_sql(...)` must
+only wrap source-controlled fragments.
 
 ### std/sqlite
 
