@@ -1,0 +1,59 @@
+pipeline main(task) {
+  let session = agent_session_open("live-session-lifecycle-conformance")
+  agent_session_reset(session)
+  let observer = agent_session_attach(session, "client-observer", {mode: "observer"})
+  require observer.active_controller_id == nil, "observer attach does not claim control"
+  let controller = agent_session_attach(session, "client-a", {mode: "controller", metadata: {surface: "test"}})
+  require controller.active_controller_id == "client-a", "controller attach claims control"
+  let blocked_controller = try {
+    agent_session_attach(session, "client-b", {mode: "controller"})
+    "allowed"
+  } catch {
+    "blocked"
+  }
+  require blocked_controller == "blocked", "second controller requires takeover"
+  let takeover = agent_session_takeover(session, "client-b", {metadata: {reason: "operator-takeover"}})
+  require takeover.previous_controller_id == "client-a", "takeover records previous controller"
+  require takeover.active_controller_id == "client-b", "takeover changes controller"
+  let observer_prompt = try {
+    agent_session_client_inject_prompt(session, "client-observer", "must not land")
+    "allowed"
+  } catch {
+    "blocked"
+  }
+  require observer_prompt == "blocked", "observers cannot inject prompts"
+  agent_session_client_inject_prompt(
+    session,
+    "client-b",
+    "continue from attached client",
+    {metadata: {message_id: "live-1"}},
+  )
+  let after_prompt = agent_session_snapshot(session)
+  require len(after_prompt.messages) == 1, "controller prompt is appended once"
+  require after_prompt.messages[0].content == "continue from attached client", "prompt content survives"
+  require after_prompt.messages[0].metadata.live_session.client_id == "client-b", "prompt keeps client audit"
+  let routed = agent_session_route_permission(
+    session,
+    "client-b",
+    {id: "perm-1", action: "write_file", target: "README.md"},
+    {metadata: {surface: "test"}},
+  )
+  require routed.request_id == "perm-1", "permission request id is routed"
+  let heartbeat = agent_session_heartbeat(session, "client-observer", {metadata: {view: "tail"}})
+  require len(heartbeat.clients) == 3, "heartbeat preserves attached clients"
+  let detached = agent_session_detach(session, "client-b", {reason: "client_exit"})
+  require detached.active_controller_id == nil, "controller detach releases control"
+  let stale_permission = try {
+    agent_session_route_permission(session, "client-b", {id: "perm-2"})
+    "allowed"
+  } catch {
+    "blocked"
+  }
+  require stale_permission == "blocked", "detached controller cannot route permissions"
+  let final_snapshot = agent_session_snapshot(session)
+  require final_snapshot.live_controller_id == nil, "snapshot exposes released controller"
+  require len(final_snapshot.live_clients) == 2, "snapshot exposes remaining clients"
+  require len(transcript_events_by_kind(final_snapshot, "live_session_client")) >= 5, "lifecycle is audited"
+  require len(transcript_events_by_kind(final_snapshot, "live_session_permission_route")) == 1, "permission route is audited"
+  log("live session lifecycle tests passed")
+}

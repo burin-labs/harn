@@ -530,6 +530,124 @@ paths:
         default:
           $ref: "#/components/responses/Error"
 
+  /v1/sessions/{session_id}/live-clients:
+    get:
+      tags: [Sessions]
+      operationId: listSessionLiveClients
+      summary: List live clients attached to a Session.
+      parameters:
+        - $ref: "#/components/parameters/ProtocolVersion"
+        - $ref: "#/components/parameters/SessionId"
+      responses:
+        "200":
+          description: Attached live clients.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LiveSessionClientList"
+        default:
+          $ref: "#/components/responses/Error"
+
+  /v1/sessions/{session_id}/attach:
+    post:
+      tags: [Sessions]
+      operationId: attachSessionClient
+      summary: Attach a live client to a Session.
+      parameters:
+        - $ref: "#/components/parameters/ProtocolVersion"
+        - $ref: "#/components/parameters/SessionId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AttachSessionClientRequest"
+      responses:
+        "200":
+          description: Live-client ownership state.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LiveSessionClientChange"
+        default:
+          $ref: "#/components/responses/Error"
+
+  /v1/sessions/{session_id}/takeover:
+    post:
+      tags: [Sessions]
+      operationId: takeoverSessionClient
+      summary: Attach a client as the active Session controller.
+      parameters:
+        - $ref: "#/components/parameters/ProtocolVersion"
+        - $ref: "#/components/parameters/SessionId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SessionClientRequest"
+      responses:
+        "200":
+          description: Live-client ownership state.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LiveSessionClientChange"
+        default:
+          $ref: "#/components/responses/Error"
+
+  /v1/sessions/{session_id}/detach:
+    post:
+      tags: [Sessions]
+      operationId: detachSessionClient
+      summary: Detach a live client from a Session.
+      parameters:
+        - $ref: "#/components/parameters/ProtocolVersion"
+        - $ref: "#/components/parameters/SessionId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SessionClientRequest"
+      responses:
+        "200":
+          description: Live-client ownership state.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LiveSessionClientChange"
+        default:
+          $ref: "#/components/responses/Error"
+
+  /v1/sessions/{session_id}/heartbeat:
+    post:
+      tags: [Sessions]
+      operationId: heartbeatSessionClient
+      summary: Refresh an attached live client's liveness marker.
+      parameters:
+        - $ref: "#/components/parameters/ProtocolVersion"
+        - $ref: "#/components/parameters/SessionId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SessionClientRequest"
+      responses:
+        "200":
+          description: Live-client ownership state.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LiveSessionClientChange"
+        default:
+          $ref: "#/components/responses/Error"
+
   /v1/sessions/{session_id}/fork:
     post:
       tags: [Sessions]
@@ -2387,6 +2505,12 @@ components:
               type: [string, "null"]
             last_event_id:
               type: [string, "null"]
+            live_clients:
+              type: array
+              items:
+                $ref: "#/components/schemas/LiveSessionClient"
+            live_controller_id:
+              type: [string, "null"]
             summary:
               type: [string, "null"]
             expires_at:
@@ -2480,6 +2604,96 @@ components:
           type: [string, "null"]
         session:
           $ref: "#/components/schemas/Session"
+    LiveSessionClient:
+      type: object
+      required:
+        - client_id
+        - mode
+        - attached_at
+        - last_seen_at
+        - prompt_injection
+        - permission_routing
+        - metadata
+      properties:
+        client_id:
+          type: string
+        mode:
+          type: string
+          enum: [observer, controller]
+        attached_at:
+          type: string
+          description: Runtime liveness marker for when the client first attached.
+        last_seen_at:
+          type: string
+          description: Runtime liveness marker refreshed by attach or heartbeat.
+        prompt_injection:
+          type: boolean
+        permission_routing:
+          type: boolean
+        metadata:
+          $ref: "#/components/schemas/Metadata"
+    AttachSessionClientRequest:
+      type: object
+      required: [client_id]
+      properties:
+        client_id:
+          type: string
+        mode:
+          type: string
+          enum: [observer, controller]
+          default: observer
+        takeover:
+          type: boolean
+          default: false
+        prompt_injection:
+          type: boolean
+          description: Defaults to true for controllers and false for observers.
+        permission_routing:
+          type: boolean
+          description: Defaults to true for controllers and false for observers.
+        metadata:
+          $ref: "#/components/schemas/Metadata"
+    SessionClientRequest:
+      type: object
+      required: [client_id]
+      properties:
+        client_id:
+          type: string
+        reason:
+          type: [string, "null"]
+        metadata:
+          $ref: "#/components/schemas/Metadata"
+    LiveSessionClientChange:
+      type: object
+      required:
+        - client
+        - previous_controller_id
+        - active_controller_id
+        - clients
+      properties:
+        client:
+          oneOf:
+            - $ref: "#/components/schemas/LiveSessionClient"
+            - type: "null"
+        previous_controller_id:
+          type: [string, "null"]
+        active_controller_id:
+          type: [string, "null"]
+        clients:
+          type: array
+          items:
+            $ref: "#/components/schemas/LiveSessionClient"
+    LiveSessionClientList:
+      type: object
+      required: [object, data]
+      properties:
+        object:
+          type: string
+          enum: [list]
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/LiveSessionClient"
 
     Task:
       allOf:

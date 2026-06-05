@@ -7,6 +7,8 @@ given conversational agent run:
 2. The **closure subscribers** registered against it via
    `agent_subscribe(session_id, cb)`.
 3. Its **lifecycle** — create, reset, fork, trim, compact, close.
+4. Its **live-client ownership** — observers, the active controller, prompt
+   injection rights, and permission-routing responsibility.
 
 Sessions replace the old `transcript_policy` config pattern. Lifecycle
 used to be a side effect of dict fields (`mode: "reset"`, `mode: "fork"`
@@ -74,6 +76,13 @@ the "one-shot" call shape.
 | `agent_session_clear_scratchpad(id, opts?)` | `dict` | Clears the scratchpad and returns `{ok, version, scratchpad: nil}`. |
 | `agent_session_trim(id, keep_last)` | `int` | Retains last `keep_last` messages. Returns kept count. |
 | `agent_session_compact(id, opts)` | `int` | Runs the LLM/truncate/observation-mask/custom compactor. Unknown keys in `opts` error. |
+| `agent_session_attach(id, client_id, opts?)` | `dict` | Attaches a live client. `opts.mode` is `"observer"` or `"controller"`; a second controller requires `takeover: true` or `agent_session_takeover`. |
+| `agent_session_takeover(id, client_id, opts?)` | `dict` | Attaches `client_id` as the controller and demotes any prior controller to observer. |
+| `agent_session_detach(id, client_id, opts?)` | `dict` | Detaches a live client. If it was the controller, control is released. |
+| `agent_session_heartbeat(id, client_id, opts?)` | `dict` | Refreshes an attached client's last-seen marker and optional metadata. |
+| `agent_session_live_clients(id)` | `list` | Returns the attached live clients. `agent_session_snapshot` also includes `live_clients` and `live_controller_id`. |
+| `agent_session_client_inject_prompt(id, client_id, content, opts?)` | `nil` | Appends a user prompt only when `client_id` is the active controller with prompt-injection rights. |
+| `agent_session_route_permission(id, client_id, request, opts?)` | `dict` | Records that the active controller owns routing for a permission request. |
 | `agent_session_inject(id, message)` | `nil` | Appends a `{role, content, …}` message. Missing `role` errors. |
 | `agent_session_seed_from_jsonl(jsonl_path, opts?)` | `dict` | Creates a new session from a replayable `llm_transcript.jsonl` sidecar. |
 | `agent_session_workspace_anchor(id)` / `agent_session_set_workspace_anchor(id, anchor)` | `dict` / `bool` | Read or replace the typed workspace anchor. |
@@ -81,6 +90,31 @@ the "one-shot" call shape.
 | `agent_session_add_root(id, root, opts?)` / `agent_session_remove_root(id, root)` | `dict` | Mount or unmount additional workspace roots. `add_root` returns `{ok, mounted_at?, error?}` and defaults `mount_mode` from the session workspace policy. |
 | `agent_session_list_roots(id)` | `dict` | Returns `{primary, additional}` for the session's current mounted roots. |
 | `agent_session_close(id, status?)` | `nil` | Evicts immediately and records an `agent_session_closed` event. `status` may be a string reason or a dict such as `{reason: "timeout"}`. |
+
+### Live session clients
+
+Live attach state belongs to the Harn session, not to a particular UI. A
+session can have many observers and at most one controller. Observers can
+attach, heartbeat, detach, and read the stream. Only the active controller can
+inject a user prompt through `agent_session_client_inject_prompt` or claim a
+permission route through `agent_session_route_permission`.
+
+Attach, takeover, detach, and heartbeat each append a `live_session_client`
+transcript event. Permission routing appends
+`live_session_permission_route`. Prompt injection appends an ordinary user
+message whose metadata contains `live_session.client_id`, so transcript replay
+preserves the fact that an attached controller supplied the prompt.
+
+```harn
+let s = agent_session_open("incident-debug")
+agent_session_attach(s, "portal", {mode: "observer"})
+agent_session_attach(s, "tui", {mode: "controller"})
+
+// A second controller must make takeover explicit.
+agent_session_takeover(s, "mobile", {metadata: {reason: "operator handoff"}})
+agent_session_client_inject_prompt(s, "mobile", "continue from the failing test")
+agent_session_detach(s, "mobile", {reason: "client_exit"})
+```
 
 ### `agent_session_compact` options
 

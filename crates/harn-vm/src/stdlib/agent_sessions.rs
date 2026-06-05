@@ -48,6 +48,13 @@ pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
     &AGENT_SESSION_FORK_AT_BUILTIN_DEF,
     &AGENT_SESSION_CLOSE_BUILTIN_DEF,
     &AGENT_SESSION_TRIM_BUILTIN_DEF,
+    &AGENT_SESSION_ATTACH_BUILTIN_DEF,
+    &AGENT_SESSION_TAKEOVER_BUILTIN_DEF,
+    &AGENT_SESSION_DETACH_BUILTIN_DEF,
+    &AGENT_SESSION_HEARTBEAT_BUILTIN_DEF,
+    &AGENT_SESSION_LIVE_CLIENTS_BUILTIN_DEF,
+    &AGENT_SESSION_CLIENT_INJECT_PROMPT_BUILTIN_DEF,
+    &AGENT_SESSION_ROUTE_PERMISSION_BUILTIN_DEF,
     &AGENT_SESSION_INJECT_BUILTIN_DEF,
     &AGENT_SESSION_POST_EVENT_BUILTIN_DEF,
     &AGENT_SESSION_DRAIN_INBOX_BUILTIN_DEF,
@@ -181,6 +188,34 @@ fn opts_dict_arg(
     }
 }
 
+fn reject_unknown_opts(
+    opts: &BTreeMap<String, VmValue>,
+    fn_name: &str,
+    allowed: &[&str],
+) -> Result<(), VmError> {
+    for key in opts.keys() {
+        if !allowed.contains(&key.as_str()) {
+            let expected = allowed.join(", ");
+            return Err(err(format!(
+                "{fn_name}: unknown option key '{key}' (expected one of: {expected})"
+            )));
+        }
+    }
+    Ok(())
+}
+
+fn opt_bool(
+    opts: &BTreeMap<String, VmValue>,
+    fn_name: &str,
+    arg_name: &str,
+) -> Result<Option<bool>, VmError> {
+    match opts.get(arg_name) {
+        None | Some(VmValue::Nil) => Ok(None),
+        Some(VmValue::Bool(value)) => Ok(Some(*value)),
+        _ => Err(err(format!("{fn_name}: `{arg_name}` must be a bool"))),
+    }
+}
+
 fn seed_result_error(message: impl Into<String>) -> VmValue {
     crate::stdlib::json_to_vm_value(&serde_json::json!({
         "ok": false,
@@ -244,6 +279,15 @@ fn close_status_arg(args: &[VmValue]) -> Result<(String, String, serde_json::Val
 
 const AGENT_SESSION_OPEN_OPT_KEYS: &[&str] = &["workspace_anchor", "workspace_policy"];
 const AGENT_SESSION_ADD_ROOT_OPT_KEYS: &[&str] = &["mount_mode", "reason"];
+const AGENT_SESSION_ATTACH_OPT_KEYS: &[&str] = &[
+    "mode",
+    "takeover",
+    "prompt_injection",
+    "permission_routing",
+    "metadata",
+];
+const AGENT_SESSION_DETACH_OPT_KEYS: &[&str] = &["reason", "metadata"];
+const AGENT_SESSION_METADATA_OPT_KEYS: &[&str] = &["metadata"];
 
 #[harn_builtin(
     sig = "agent_session_open(id?: string, opts?: dict) -> any",
@@ -804,6 +848,211 @@ fn agent_session_trim_builtin(args: &[VmValue], _out: &mut String) -> Result<VmV
         )));
     };
     Ok(VmValue::Int(kept as i64))
+}
+
+#[harn_builtin(
+    sig = "agent_session_attach(id: string, client_id: string, opts?: dict) -> dict",
+    category = "agent.session",
+    doc = "Attach a live client to a session as an observer or controller."
+)]
+fn agent_session_attach_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let id = arg_string_required(args, 0, "agent_session_attach", "id")?;
+    let client_id = arg_string_required(args, 1, "agent_session_attach", "client_id")?;
+    let opts = opts_dict_arg(args, 2, "agent_session_attach")?;
+    reject_unknown_opts(&opts, "agent_session_attach", AGENT_SESSION_ATTACH_OPT_KEYS)?;
+    let mode = live_client_mode(&opts, "agent_session_attach")?;
+    let prompt_injection = opt_bool(&opts, "agent_session_attach", "prompt_injection")?
+        .unwrap_or(mode == agent_sessions::LiveClientMode::Controller);
+    let permission_routing = opt_bool(&opts, "agent_session_attach", "permission_routing")?
+        .unwrap_or(mode == agent_sessions::LiveClientMode::Controller);
+    if mode == agent_sessions::LiveClientMode::Observer && (prompt_injection || permission_routing)
+    {
+        return Err(err(
+            "agent_session_attach: observer mode cannot request prompt_injection or permission_routing",
+        ));
+    }
+    let request = agent_sessions::AttachLiveClient {
+        client_id,
+        mode,
+        takeover: arg_bool_opt(&opts, "agent_session_attach", "takeover", false)?,
+        prompt_injection,
+        permission_routing,
+        metadata: opt_json(&opts, "metadata"),
+    };
+    let change = agent_sessions::attach_live_client(&id, request)
+        .map_err(|message| err(format!("agent_session_attach: {message}")))?;
+    Ok(crate::stdlib::json_to_vm_value(
+        &agent_sessions::live_client_change_json(&change),
+    ))
+}
+
+#[harn_builtin(
+    sig = "agent_session_takeover(id: string, client_id: string, opts?: dict) -> dict",
+    category = "agent.session",
+    doc = "Attach a client as the controlling live client, demoting any prior controller."
+)]
+fn agent_session_takeover_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let id = arg_string_required(args, 0, "agent_session_takeover", "id")?;
+    let client_id = arg_string_required(args, 1, "agent_session_takeover", "client_id")?;
+    let opts = opts_dict_arg(args, 2, "agent_session_takeover")?;
+    reject_unknown_opts(
+        &opts,
+        "agent_session_takeover",
+        AGENT_SESSION_METADATA_OPT_KEYS,
+    )?;
+    let change = agent_sessions::takeover_live_client(&id, client_id, opt_json(&opts, "metadata"))
+        .map_err(|message| err(format!("agent_session_takeover: {message}")))?;
+    Ok(crate::stdlib::json_to_vm_value(
+        &agent_sessions::live_client_change_json(&change),
+    ))
+}
+
+#[harn_builtin(
+    sig = "agent_session_detach(id: string, client_id: string, opts?: dict) -> dict",
+    category = "agent.session",
+    doc = "Detach a live client and release controller ownership when it owns control."
+)]
+fn agent_session_detach_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let id = arg_string_required(args, 0, "agent_session_detach", "id")?;
+    let client_id = arg_string_required(args, 1, "agent_session_detach", "client_id")?;
+    let opts = opts_dict_arg(args, 2, "agent_session_detach")?;
+    reject_unknown_opts(&opts, "agent_session_detach", AGENT_SESSION_DETACH_OPT_KEYS)?;
+    let change = agent_sessions::detach_live_client(
+        &id,
+        client_id,
+        opt_string(&opts, "agent_session_detach", "reason")?,
+        opt_json(&opts, "metadata"),
+    )
+    .map_err(|message| err(format!("agent_session_detach: {message}")))?;
+    Ok(crate::stdlib::json_to_vm_value(
+        &agent_sessions::live_client_change_json(&change),
+    ))
+}
+
+#[harn_builtin(
+    sig = "agent_session_heartbeat(id: string, client_id: string, opts?: dict) -> dict",
+    category = "agent.session",
+    doc = "Refresh a live client's last-seen marker and optionally replace its metadata."
+)]
+fn agent_session_heartbeat_builtin(
+    args: &[VmValue],
+    _out: &mut String,
+) -> Result<VmValue, VmError> {
+    let id = arg_string_required(args, 0, "agent_session_heartbeat", "id")?;
+    let client_id = arg_string_required(args, 1, "agent_session_heartbeat", "client_id")?;
+    let opts = opts_dict_arg(args, 2, "agent_session_heartbeat")?;
+    reject_unknown_opts(
+        &opts,
+        "agent_session_heartbeat",
+        AGENT_SESSION_METADATA_OPT_KEYS,
+    )?;
+    let change = agent_sessions::heartbeat_live_client(&id, client_id, opt_json(&opts, "metadata"))
+        .map_err(|message| err(format!("agent_session_heartbeat: {message}")))?;
+    Ok(crate::stdlib::json_to_vm_value(
+        &agent_sessions::live_client_change_json(&change),
+    ))
+}
+
+#[harn_builtin(
+    sig = "agent_session_live_clients(id: string) -> list",
+    category = "agent.session",
+    doc = "Return live clients currently attached to an agent session."
+)]
+fn agent_session_live_clients_builtin(
+    args: &[VmValue],
+    _out: &mut String,
+) -> Result<VmValue, VmError> {
+    let id = arg_string_required(args, 0, "agent_session_live_clients", "id")?;
+    let Some(clients) = agent_sessions::live_clients(&id) else {
+        return Err(err(format!(
+            "agent_session_live_clients: unknown session id '{id}'"
+        )));
+    };
+    Ok(crate::stdlib::json_to_vm_value(&serde_json::Value::Array(
+        clients
+            .iter()
+            .map(agent_sessions::live_client_json)
+            .collect(),
+    )))
+}
+
+#[harn_builtin(
+    sig = "agent_session_client_inject_prompt(id: string, client_id: string, content: any, opts?: dict) -> nil",
+    category = "agent.session",
+    doc = "Inject a user prompt from the active live-session controller."
+)]
+fn agent_session_client_inject_prompt_builtin(
+    args: &[VmValue],
+    _out: &mut String,
+) -> Result<VmValue, VmError> {
+    let id = arg_string_required(args, 0, "agent_session_client_inject_prompt", "id")?;
+    let client_id =
+        arg_string_required(args, 1, "agent_session_client_inject_prompt", "client_id")?;
+    let content = args
+        .get(2)
+        .cloned()
+        .ok_or_else(|| err("agent_session_client_inject_prompt: `content` required"))?;
+    let opts = opts_dict_arg(args, 3, "agent_session_client_inject_prompt")?;
+    reject_unknown_opts(
+        &opts,
+        "agent_session_client_inject_prompt",
+        AGENT_SESSION_METADATA_OPT_KEYS,
+    )?;
+    agent_sessions::inject_prompt_from_live_client(
+        &id,
+        client_id,
+        content,
+        opt_json(&opts, "metadata"),
+    )
+    .map_err(|message| err(format!("agent_session_client_inject_prompt: {message}")))?;
+    Ok(VmValue::Nil)
+}
+
+#[harn_builtin(
+    sig = "agent_session_route_permission(id: string, client_id: string, request: any, opts?: dict) -> dict",
+    category = "agent.session",
+    doc = "Record that the active live-session controller owns a permission request route."
+)]
+fn agent_session_route_permission_builtin(
+    args: &[VmValue],
+    _out: &mut String,
+) -> Result<VmValue, VmError> {
+    let id = arg_string_required(args, 0, "agent_session_route_permission", "id")?;
+    let client_id = arg_string_required(args, 1, "agent_session_route_permission", "client_id")?;
+    let request = args
+        .get(2)
+        .map(crate::llm::helpers::vm_value_to_json)
+        .ok_or_else(|| err("agent_session_route_permission: `request` required"))?;
+    let opts = opts_dict_arg(args, 3, "agent_session_route_permission")?;
+    reject_unknown_opts(
+        &opts,
+        "agent_session_route_permission",
+        AGENT_SESSION_METADATA_OPT_KEYS,
+    )?;
+    let routed = agent_sessions::route_live_permission_request(
+        &id,
+        client_id,
+        request,
+        opt_json(&opts, "metadata"),
+    )
+    .map_err(|message| err(format!("agent_session_route_permission: {message}")))?;
+    Ok(crate::stdlib::json_to_vm_value(&routed))
+}
+
+fn live_client_mode(
+    opts: &BTreeMap<String, VmValue>,
+    fn_name: &str,
+) -> Result<agent_sessions::LiveClientMode, VmError> {
+    match opt_string(opts, fn_name, "mode")?
+        .as_deref()
+        .unwrap_or("observer")
+    {
+        "observer" => Ok(agent_sessions::LiveClientMode::Observer),
+        "controller" => Ok(agent_sessions::LiveClientMode::Controller),
+        other => Err(err(format!(
+            "{fn_name}: `mode` must be 'observer' or 'controller', got '{other}'"
+        ))),
+    }
 }
 
 #[harn_builtin(

@@ -627,6 +627,68 @@ Successful revocation returns `{reminderId, status: "revoked"}`; repeated
 revocation returns `status: "already_revoked"`. Races after a checkpoint drains
 the reminder return a structured `already_delivered` error.
 
+## Live session attach/detach
+
+Interactive clients attach to an existing live session with a Harn-owned
+lifecycle contract. Hosted/cloud brokers can authenticate and route these calls,
+but the runtime owns the session semantics so local TUIs, portals, and remote
+clients do not invent incompatible takeover rules.
+
+`session/attach` accepts:
+
+```json
+{
+  "sessionId": "session_123",
+  "clientId": "portal",
+  "mode": "observer",
+  "takeover": false,
+  "_meta": {
+    "harn": {
+      "surface": "portal"
+    }
+  }
+}
+```
+
+`mode` is `observer` or `controller`. A session may have many observers and at
+most one controller. A second controller attach fails unless `takeover: true` is
+set or the client calls `session/takeover`, which demotes the prior controller
+to observer. `session/detach` removes the client and releases control when the
+detaching client was the controller. `session/heartbeat` refreshes the client's
+last-seen marker and optional metadata without changing ownership.
+
+Responses share this shape:
+
+```json
+{
+  "client": {
+    "client_id": "portal",
+    "mode": "observer",
+    "attached_at": "1780000000",
+    "last_seen_at": "1780000000",
+    "prompt_injection": false,
+    "permission_routing": false,
+    "metadata": {"surface": "portal"}
+  },
+  "previous_controller_id": null,
+  "active_controller_id": "tui",
+  "clients": []
+}
+```
+
+Only the active controller may inject user prompts or route permission requests.
+Controller prompt injection records the client id on the user message metadata.
+Permission routing records a `live_session_permission_route` transcript event
+containing the request id, controller client, and host metadata. Attach,
+takeover, detach, and heartbeat record `live_session_client` transcript events
+and are also emitted as `session/update` extensions using the same
+`_meta.harn` namespacing rule as other Harn session-update extensions.
+
+Unexpected client exit is represented as `session/detach` with
+`reason: "client_exit"` by the host/broker that detects the disconnect. Reconnect
+is a fresh `session/attach` using the same `clientId`; the runtime preserves the
+transcript and recomputes ownership from the live-client registry.
+
 ## Client-executed tool search
 
 When a Harn script opts into `tool_search` against a provider that lacks
