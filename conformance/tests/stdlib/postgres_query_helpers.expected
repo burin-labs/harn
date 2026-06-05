@@ -1,0 +1,12 @@
+r1
+tenant-a
+true
+1
+2026-06-05T12:00:00Z
+4
+SELECT id::text AS id FROM receipts WHERE id = $1::uuid
+r1
+true
+true
+true
+true

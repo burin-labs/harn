@@ -514,6 +514,10 @@ pub const STDLIB_SOURCES: &[StdlibSource] = &[
         source: include_str!("stdlib/stdlib_postgres.harn"),
     },
     StdlibSource {
+        module: "postgres/query",
+        source: include_str!("stdlib/postgres/query.harn"),
+    },
+    StdlibSource {
         module: "checkpoint",
         source: include_str!("stdlib/stdlib_checkpoint.harn"),
     },
