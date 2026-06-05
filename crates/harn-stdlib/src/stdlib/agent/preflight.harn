@@ -18,6 +18,79 @@ fn __agent_tool_format(opts) {
   return agent_tool_format(opts)
 }
 
+/**
+ * agent_tool_call_paradigm — the format-aware intermediate representation for
+ * tool-call exemplars. Prompt and tool-description authors never hard-code a
+ * single wire format; they reference these paradigm fields (rendered into prompt
+ * bindings) and the runtime maps them to whatever the CURRENT model expects.
+ *
+ * Today the two paradigms are `text` (the canonical `name({ key: value })` form
+ * with heredoc bodies — the escape-free body channel weak models need) and
+ * `native` (provider JSON tool calls). `body_hint` is the single source of truth
+ * for "how do I pass a multi-line / code-bearing field" — heredoc for text, a
+ * plain JSON string for native — so the same `.harn.prompt` renders correct
+ * guidance for every model. Extend this (not the prompts) to add a new paradigm.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: experimental
+ * @example: agent_tool_call_paradigm(opts)
+ */
+pub fn agent_tool_call_paradigm(options = nil) {
+  if __agent_tool_format(options) == "native" {
+    return {
+      kind: "native",
+      call_open: "",
+      call_close: "",
+      body_open: "\"",
+      body_close: "\"",
+      body_hint: "Pass multi-line or code-bearing fields (file contents, replacement text) as ordinary JSON string arguments — the runtime handles escaping.",
+    }
+  }
+  return {
+    kind: "text",
+    call_open: "<tool_call>",
+    call_close: "</tool_call>",
+    body_open: "<<EOF\n",
+    body_close: "\nEOF",
+    body_hint: "For any multi-line or code-bearing field (file contents, replacement text, exact-match strings) use a heredoc body: write `<<EOF` after the colon, the raw content on the following lines, then a line that is exactly `EOF` (the closing `}`/`)` may follow it). Heredoc bodies need NO escaping — quotes, backslashes, and backticks are all literal. Never wrap code or multi-line text in a quoted string.",
+  }
+}
+
+/**
+ * agent_render_tool_call_exemplar — render one exemplar tool call in the current
+ * model's paradigm. `args` is a list of `{ key, value, body? }`; entries marked
+ * `body: true` use the paradigm's escape-free body channel (heredoc for text),
+ * everything else is a quoted scalar. Authors write the exemplar ONCE, abstractly,
+ * and get a wire-correct call for whichever model is on the transcript.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: experimental
+ * @example: agent_render_tool_call_exemplar("edit", [{key: "action", value: "create"}], opts)
+ */
+pub fn agent_render_tool_call_exemplar(name, args, options = nil) {
+  let p = agent_tool_call_paradigm(options)
+  var rendered = ""
+  var first = true
+  for a in args ?? [] {
+    let piece = if a?.body ?? false {
+      to_string(a?.key) + ": " + p.body_open + to_string(a?.value) + p.body_close
+    } else {
+      to_string(a?.key) + ": " + json_stringify(a?.value)
+    }
+    if first {
+      rendered = piece
+      first = false
+    } else {
+      rendered = rendered + ", " + piece
+    }
+  }
+  return p.call_open + to_string(name) + "({ " + rendered + " })" + p.call_close
+}
+
 fn __agent_has_tools(opts) {
   let registry = opts?.tools
   if registry == nil {
@@ -132,7 +205,7 @@ fn __agent_text_tool_contract_prompt(opts) {
       task_ledger_contract: render_agent_prompt_id("agent.tool_contract_task_ledger", {done_sentinel: done_sentinel}, opts),
       text_response_protocol: render_agent_prompt_id(
         "agent.tool_contract_text_response_protocol",
-        {done_sentinel: done_sentinel},
+        {done_sentinel: done_sentinel, body_hint: agent_tool_call_paradigm(opts).body_hint},
         opts,
       ),
       action_text_contract: render_agent_prompt_id("agent.tool_contract_action_text", {done_sentinel: done_sentinel}, opts),

@@ -152,7 +152,34 @@ impl<'a> TsValueParser<'a> {
             }
             self.advance();
             self.skip_ws_and_comments();
+            let value_start = self.pos;
+            let value_first = self.peek();
             let value = self.parse_value()?;
+            self.skip_ws_and_comments();
+            // Recover an object string value that closed early on an embedded
+            // unescaped quote — e.g. a Rust raw string `r#"..."#` inside a
+            // `content` body the model forgot to escape. The strict scan stops
+            // at the first bare quote, leaving the object continuation pointing
+            // at content (here `#`) instead of `,`/`}`. Re-scan greedily,
+            // absorbing embedded quotes until the continuation validates, so the
+            // call stays dispatchable instead of being dropped. Fires ONLY when
+            // the strict parse already failed its continuation, so a well-formed
+            // value is never reinterpreted (same philosophy as heredoc
+            // recovery — keep the model's intent, never silently drop it).
+            let value = if matches!(value, serde_json::Value::String(_))
+                && matches!(value_first, Some(b'"') | Some(b'\''))
+                && !matches!(self.peek(), Some(b',') | Some(b'}'))
+            {
+                match self.recover_overclosed_object_string(value_start, value_first.unwrap()) {
+                    Some(recovered) => {
+                        self.skip_ws_and_comments();
+                        serde_json::Value::String(recovered)
+                    }
+                    None => value,
+                }
+            } else {
+                value
+            };
             map.insert(key, value);
             self.skip_ws_and_comments();
             match self.peek() {
@@ -175,6 +202,88 @@ impl<'a> TsValueParser<'a> {
                 }
             }
         }
+    }
+
+    /// Re-scan an object string value that the strict pass closed too early
+    /// because the model left an embedded quote unescaped (the canonical case:
+    /// a Rust raw string `r#"..."#`, or any nested quote, inside a `content`
+    /// body). Starting at the opening quote, mirror `parse_string_literal`'s
+    /// escape handling, but at each *unescaped* closing quote, peek the
+    /// continuation: a `,` or `}` (after whitespace) is the value's true end;
+    /// anything else means the quote is content — absorb it and keep scanning.
+    /// Returns the recovered string and advances `self.pos` past the true close
+    /// only on success; on EOF-without-valid-continuation it leaves `self.pos`
+    /// untouched and returns `None` so the caller reports the original error.
+    /// Because it engages only after the strict continuation already failed, it
+    /// can never change a value that parsed cleanly.
+    fn recover_overclosed_object_string(
+        &mut self,
+        value_start: usize,
+        quote: u8,
+    ) -> Option<String> {
+        let mut pos = value_start + 1; // past the opening quote
+        let mut out = String::new();
+        while let Some(&b) = self.bytes.get(pos) {
+            if b == b'\\' {
+                pos += 1;
+                let &esc = self.bytes.get(pos)?;
+                pos += 1;
+                match esc {
+                    b'n' => out.push('\n'),
+                    b't' => out.push('\t'),
+                    b'r' => out.push('\r'),
+                    b'0' => out.push('\0'),
+                    b'\\' => out.push('\\'),
+                    b'\'' => out.push('\''),
+                    b'"' => out.push('"'),
+                    b'`' => out.push('`'),
+                    b'\n' => { /* line continuation — drop */ }
+                    b'u' => {
+                        let (ch, consumed) = parse_unicode_escape(&self.bytes[pos..])?;
+                        out.push(ch);
+                        pos += consumed;
+                    }
+                    b'x' => {
+                        let hex = std::str::from_utf8(self.bytes.get(pos..pos + 2)?).ok()?;
+                        let code = u32::from_str_radix(hex, 16).ok()?;
+                        out.push(char::from_u32(code)?);
+                        pos += 2;
+                    }
+                    other => out.push(other as char),
+                }
+            } else if b == quote {
+                // Candidate close: is the continuation a valid object boundary?
+                let mut look = pos + 1;
+                while matches!(self.bytes.get(look), Some(b' ' | b'\t' | b'\n' | b'\r')) {
+                    look += 1;
+                }
+                if matches!(self.bytes.get(look), Some(b',' | b'}')) {
+                    // Narrow safety net: recovers the canonical `r#"..."#`-style
+                    // case where the embedded quote is NOT followed by `,`/`}`.
+                    // It cannot recover a body whose embedded quote IS followed
+                    // by `,`/`}` (e.g. `vec!["a", "b"]`) — that ambiguity is only
+                    // resolved by the model using the escape-free heredoc body.
+                    // Trace firings so the real-world hit rate is observable.
+                    tracing::debug!(
+                        target: "harn::tool_parse",
+                        "recovered object string value with embedded unescaped quote(s)"
+                    );
+                    self.pos = pos + 1;
+                    return Some(out);
+                }
+                // Embedded quote — absorb as literal content and keep scanning.
+                out.push(quote as char);
+                pos += 1;
+            } else if b < 0x80 {
+                out.push(b as char);
+                pos += 1;
+            } else {
+                let ch = self.text[pos..].chars().next().unwrap_or('\u{FFFD}');
+                out.push(ch);
+                pos += ch.len_utf8();
+            }
+        }
+        None
     }
 
     fn parse_array(&mut self) -> Result<serde_json::Value, String> {

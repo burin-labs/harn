@@ -1,0 +1,31 @@
+import { agent_render_tool_call_exemplar, agent_tool_call_paradigm } from "std/agent/preflight"
+
+// The format-aware tool-call paradigm: prompt/tool-description authors reference
+// `body_hint` and the exemplar renderer, and the runtime maps them to whatever
+// the current model's tool-calling format expects. These assertions pin the two
+// shipped paradigms (text heredoc / native JSON) so a regression in the IR is
+// caught before it silently mis-formats every agent prompt.
+pipeline default() {
+  let text = agent_tool_call_paradigm({tool_format: "text"})
+  __io_println(text.kind == "text")
+  __io_println(text.call_open == "<tool_call>")
+  __io_println(contains(text.body_hint, "heredoc"))
+  __io_println(contains(text.body_hint, "Never wrap code"))
+  let native = agent_tool_call_paradigm({tool_format: "native"})
+  __io_println(native.kind == "native")
+  __io_println(contains(native.body_hint, "JSON string"))
+  __io_println(!contains(native.body_hint, "heredoc"))
+  // The exemplar renderer uses the escape-free body channel for body-marked args
+  // and quoted scalars otherwise — in the CURRENT paradigm.
+  let ex = agent_render_tool_call_exemplar(
+    "edit",
+    [
+      {key: "action", value: "create"},
+      {key: "path", value: "t.rs"},
+      {key: "content", value: "fn main() {}", body: true},
+    ],
+    {tool_format: "text"},
+  )
+  __io_println(contains(ex, "<tool_call>edit({ action: \"create\""))
+  __io_println(contains(ex, "content: <<EOF\nfn main() {}\nEOF })"))
+}

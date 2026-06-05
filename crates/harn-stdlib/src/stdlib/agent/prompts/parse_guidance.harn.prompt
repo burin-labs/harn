@@ -2,7 +2,7 @@ Your tool call could not be parsed: {{ error_summary }}{{ if has_partial_success
 
 (The other {{ parsed_call_count }} tool call(s) in this turn parsed successfully and were dispatched; the errors above describe only the malformed ones, which were dropped.){{ end }}
 
-Use heredoc syntax for multiline content. It requires no escaping:
+{{ body_hint }}
 
 edit({
     action: "create",
