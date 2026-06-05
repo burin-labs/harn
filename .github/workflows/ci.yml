@@ -242,17 +242,53 @@ jobs:
           fi
           cargo run --quiet --bin harn -- run scripts/check_changelog_no_retroactive_edits.harn
 
+  windows-plan:
+    name: Windows CI routing
+    runs-on: ubuntu-latest
+    outputs:
+      run_windows: ${{ steps.detect.outputs.run_windows }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: ${{ github.event_name == 'pull_request' && '0' || '1' }}
+      - name: Detect Windows-relevant changes
+        id: detect
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha || '' }}
+        run: |
+          set -euo pipefail
+          run_windows=false
+
+          if [[ "$EVENT_NAME" == "push" ]]; then
+            run_windows=true
+          elif [[ "$EVENT_NAME" == "pull_request" ]]; then
+            if [[ -z "$BASE_SHA" ]]; then
+              echo "windows: missing pull_request base SHA; running Windows smoke defensively."
+              run_windows=true
+            else
+              git diff --name-only "$BASE_SHA" HEAD > "$RUNNER_TEMP/windows-changed-files.txt"
+              cat "$RUNNER_TEMP/windows-changed-files.txt"
+              if grep -E -q '^(Cargo\.lock|Cargo\.toml|rust-toolchain\.toml|\.config/nextest\.toml|crates/harn-vm/Cargo\.toml|crates/harn-vm/src/(process_sandbox\.rs|shells\.rs|stdlib/(process\.rs|sandbox(/|\.rs))|vm/tests_runtime\.rs)|\.github/workflows/(ci|windows-nightly|build-release-binaries|release-smoke)\.yml|scripts/(release_smoke|smoke_installed_binary)\.sh)$' "$RUNNER_TEMP/windows-changed-files.txt"; then
+                run_windows=true
+              fi
+            fi
+          fi
+
+          echo "run_windows=$run_windows" >> "$GITHUB_OUTPUT"
+          echo "windows: run=$run_windows"
+
   windows:
     name: Rust on Windows (build + smoke test)
     runs-on: windows-latest
-    # Windows coverage is best-effort and OFF the blocking PR / merge-queue
-    # path: this job runs only on `push` to main (post-merge backstop) and via
-    # the `windows-nightly.yml` cron. On `pull_request` and `merge_group` it is
-    # skipped, so the 25-min Windows compile no longer gates an opened PR or the
-    # merge queue (it was the single long pole, ~2x the next-slowest job). A
-    # compile break or missing cfg-gate surfaces on the main push within minutes
-    # of merge and nightly on the full surface — acceptable pre-launch.
-    if: github.event_name == 'push'
+    needs: windows-plan
+    # Windows coverage stays off the default PR / merge-queue path, but runs
+    # before merge for Windows-sensitive process, sandbox, workflow, and release
+    # smoke changes. Other PRs still rely on the main-push backstop plus the
+    # full windows-nightly.yml surface so routine edits avoid the 15-25 minute
+    # Windows compile long pole.
+    if: needs.windows-plan.outputs.run_windows == 'true'
     # Drop sccache on the Windows job. PR #2114 documented 0% cache-hit
     # rate on the harn-vm Windows compile plus periodic `os error 10054`
     # failures where the GHA backend dropped the rmeta upload mid-rustc.
@@ -306,6 +342,10 @@ jobs:
           # coverage.
           HARN_SECRET_STORE_BACKEND: file
           HARN_LLM_CALLS_DISABLED: "1"
+          # Failure output stays suppressed on success; when a Windows
+          # AppContainer test times out, these milestones show whether it
+          # stalled in CreateProcess, pipe draining, or ACL cleanup.
+          HARN_WINDOWS_SANDBOX_TRACE: "1"
           BASE_REF: ${{ github.event.pull_request.base.ref }}
           AFFECTED_BASE: origin/${{ github.event.pull_request.base.ref }}
         run: |
@@ -318,7 +358,8 @@ jobs:
             if [[ -z "$args" ]]; then
               echo "windows: no workspace crate selected; falling back to full workspace."
             elif [[ "$args" == "--workspace" ]]; then
-              echo "windows: global change selected the full workspace."
+              echo "windows: global PR change selected the full workspace; focusing Windows smoke packages."
+              package_args=(-p harn-vm -p harn-cli)
             else
               read -r -a package_args <<< "$args"
               # The smoke test below executes target/debug/harn.exe. Keep that
@@ -334,7 +375,7 @@ jobs:
             # Some affected crate sets compile Windows-only surfaces but have
             # no tests matching the core unit filter; the compile itself is
             # still the smoke gate for those PRs.
-            cargo nextest run "${package_args[@]}" -E "$windows_filter" --no-tests=warn
+            cargo nextest run "${package_args[@]}" --profile ci -E "$windows_filter" --no-tests=warn
           else
             cargo test "${package_args[@]}" --no-run
             cargo test -p harn-lexer -p harn-parser -p harn-stdlib -p harn-vm -p harn-hostlib -p harn-fmt -p harn-lint -p harn-modules
@@ -462,7 +503,7 @@ jobs:
     name: CI status
     runs-on: ubuntu-latest
     if: always()
-    needs: [fmt, lint-md, rust-builds, audit-scripts, windows, portal, docs-site, actions, e2e]
+    needs: [fmt, lint-md, rust-builds, audit-scripts, windows-plan, windows, portal, docs-site, actions, e2e]
     steps:
       - name: Verify required CI jobs
         run: |
@@ -471,15 +512,16 @@ jobs:
             ["Markdown lint"]="${{ needs['lint-md'].result }}"
             ["Rust build group"]="${{ needs['rust-builds'].result }}"
             ["Audit scripts"]="${{ needs['audit-scripts'].result }}"
+            ["Windows CI routing"]="${{ needs['windows-plan'].result }}"
             ["Portal frontend"]="${{ needs.portal.result }}"
             ["Docs site"]="${{ needs['docs-site'].result }}"
             ["GitHub Actions hygiene"]="${{ needs.actions.result }}"
           )
 
-          # The Windows job runs only on `push` to main (and nightly), so it is
-          # skipped on every `pull_request` and `merge_group` event. Treat
-          # `skipped` as passing here; only an actual failure should fail the
-          # gate.
+          # The Windows job runs on `push` to main and on pull requests whose
+          # diff touches Windows-sensitive process/sandbox/workflow paths. It
+          # skips on routine PRs and merge_group events. Treat `skipped` as
+          # passing here; only an actual failure should fail the gate.
           windows_result="${{ needs.windows.result }}"
           echo "Rust on Windows (build + smoke test): $windows_result"
           if [ "$windows_result" != "success" ] && [ "$windows_result" != "skipped" ]; then

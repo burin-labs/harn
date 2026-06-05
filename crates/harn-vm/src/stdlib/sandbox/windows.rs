@@ -13,12 +13,14 @@ use windows_sys::Win32::Foundation::{
 };
 use windows_sys::Win32::Security::Authorization::ConvertSidToStringSidW;
 use windows_sys::Win32::Security::Isolation::{
-    CreateAppContainerProfile, DeleteAppContainerProfile, DeriveAppContainerSidFromAppContainerName,
+    CreateAppContainerProfile, DeleteAppContainerProfile,
+    DeriveAppContainerSidFromAppContainerName, GetAppContainerFolderPath,
 };
 use windows_sys::Win32::Security::{PSID, SECURITY_ATTRIBUTES, SECURITY_CAPABILITIES};
 use windows_sys::Win32::Storage::FileSystem::{
     CreateFileW, FILE_ATTRIBUTE_NORMAL, FILE_SHARE_READ, FILE_SHARE_WRITE, OPEN_EXISTING,
 };
+use windows_sys::Win32::System::Com::CoTaskMemFree;
 use windows_sys::Win32::System::JobObjects::{
     AssignProcessToJobObject, CreateJobObjectW, JobObjectBasicUIRestrictions,
     JobObjectExtendedLimitInformation, SetInformationJobObject, JOBOBJECT_BASIC_UI_RESTRICTIONS,
@@ -33,7 +35,7 @@ use windows_sys::Win32::System::Pipes::CreatePipe;
 use windows_sys::Win32::System::Threading::{
     CreateProcessW, DeleteProcThreadAttributeList, GetExitCodeProcess,
     InitializeProcThreadAttributeList, ResumeThread, TerminateProcess, UpdateProcThreadAttribute,
-    WaitForSingleObject, CREATE_SUSPENDED, CREATE_UNICODE_ENVIRONMENT,
+    WaitForSingleObject, CREATE_NO_WINDOW, CREATE_SUSPENDED, CREATE_UNICODE_ENVIRONMENT,
     EXTENDED_STARTUPINFO_PRESENT, INFINITE, PROCESS_INFORMATION, PROC_THREAD_ATTRIBUTE_HANDLE_LIST,
     PROC_THREAD_ATTRIBUTE_SECURITY_CAPABILITIES, STARTF_USESTDHANDLES, STARTUPINFOEXW,
 };
@@ -118,14 +120,23 @@ pub(super) fn sandboxed_output(
     config: &ProcessCommandConfig,
     policy: &CapabilityPolicy,
 ) -> io::Result<Output> {
+    sandbox_trace(
+        "pending",
+        format!("start program={program:?} argc={}", args.len()),
+    );
     let profile = AppContainerProfile::create()?;
+    let trace_label = profile.label().to_string();
+    sandbox_trace(&trace_label, "profile created");
     let sid_string = profile.sid_string()?;
-    let grants = WorkspaceAclGrants::grant(&sid_string, policy)?;
+    sandbox_trace(&trace_label, "sid resolved");
+    let grants = WorkspaceAclGrants::grant(&trace_label, &sid_string, policy)?;
     let _grants = grants;
+    sandbox_trace(&trace_label, "workspace ACL grants installed");
 
     let stdout_pipe = InheritablePipe::new()?;
     let stderr_pipe = InheritablePipe::new()?;
     let stdin = OwnedHandle::nul_read()?;
+    sandbox_trace(&trace_label, "stdio handles prepared");
     let inherited_handles = [
         stdin.raw(),
         stdout_pipe.write.raw(),
@@ -133,6 +144,7 @@ pub(super) fn sandboxed_output(
     ];
     let mut security_capabilities = profile.security_capabilities();
     let mut attributes = ProcThreadAttributes::new(2)?;
+    sandbox_trace(&trace_label, "process attributes allocated");
     attributes.update(
         PROC_THREAD_ATTRIBUTE_SECURITY_CAPABILITIES as usize,
         (&mut security_capabilities as *mut SECURITY_CAPABILITIES).cast(),
@@ -143,6 +155,7 @@ pub(super) fn sandboxed_output(
         inherited_handles.as_ptr().cast(),
         std::mem::size_of_val(&inherited_handles),
     )?;
+    sandbox_trace(&trace_label, "process attributes configured");
 
     let mut stdout_reader = stdout_pipe.into_reader();
     let mut stderr_reader = stderr_pipe.into_reader();
@@ -158,10 +171,14 @@ pub(super) fn sandboxed_output(
     let mut process_info = PROCESS_INFORMATION::default();
     let mut command_line = command_line(program, args);
     let application = resolve_application_name(program);
-    let mut environment = environment_block(&config.env);
+    let sandbox_env = profile.environment_overrides(&sid_string)?;
+    sandbox_trace(&trace_label, "AppContainer environment prepared");
+    let mut environment = environment_block(&config.env, &sandbox_env);
     let cwd = config.cwd.as_ref().map(|path| path_to_wide(path));
     let job = JobObject::create()?;
+    sandbox_trace(&trace_label, "job object prepared");
 
+    sandbox_trace(&trace_label, "CreateProcessW begin");
     let created = unsafe {
         CreateProcessW(
             application
@@ -171,7 +188,10 @@ pub(super) fn sandboxed_output(
             std::ptr::null(),
             std::ptr::null(),
             1,
-            EXTENDED_STARTUPINFO_PRESENT | CREATE_UNICODE_ENVIRONMENT | CREATE_SUSPENDED,
+            EXTENDED_STARTUPINFO_PRESENT
+                | CREATE_UNICODE_ENVIRONMENT
+                | CREATE_SUSPENDED
+                | CREATE_NO_WINDOW,
             if environment.is_empty() {
                 std::ptr::null()
             } else {
@@ -186,6 +206,7 @@ pub(super) fn sandboxed_output(
     if created == 0 {
         return Err(io::Error::last_os_error());
     }
+    sandbox_trace(&trace_label, "CreateProcessW ok");
 
     let process = OwnedHandle::new(process_info.hProcess);
     let thread = OwnedHandle::new(process_info.hThread);
@@ -195,34 +216,46 @@ pub(super) fn sandboxed_output(
         }
         return Err(error);
     }
+    sandbox_trace(&trace_label, "job assigned");
     stdout_reader.close_child_write();
     stderr_reader.close_child_write();
+    sandbox_trace(&trace_label, "parent child-write handles closed");
 
     if unsafe { ResumeThread(thread.raw()) } == u32::MAX {
         return Err(io::Error::last_os_error());
     }
+    sandbox_trace(&trace_label, "process resumed");
 
     let stdout = stdout_reader.read_async();
     let stderr = stderr_reader.read_async();
+    sandbox_trace(&trace_label, "waiting for process");
     let wait = unsafe { WaitForSingleObject(process.raw(), INFINITE) };
     if wait == WAIT_FAILED {
         return Err(io::Error::last_os_error());
     }
+    sandbox_trace(&trace_label, "process signaled");
 
     let mut code = 1u32;
     if unsafe { GetExitCodeProcess(process.raw(), &mut code) } == 0 {
         return Err(io::Error::last_os_error());
     }
+    sandbox_trace(&trace_label, format!("exit code {code}"));
 
+    sandbox_trace(&trace_label, "joining stdout reader");
+    let stdout = join_reader(stdout)?;
+    sandbox_trace(&trace_label, "joining stderr reader");
+    let stderr = join_reader(stderr)?;
+    sandbox_trace(&trace_label, "complete");
     Ok(Output {
         status: ExitStatus::from_raw(code),
-        stdout: join_reader(stdout)?,
-        stderr: join_reader(stderr)?,
+        stdout,
+        stderr,
     })
 }
 
 struct AppContainerProfile {
     name: Vec<u16>,
+    label: String,
     sid: PSID,
 }
 
@@ -253,8 +286,13 @@ impl AppContainerProfile {
         }
         Ok(Self {
             name: wide_name,
+            label: name,
             sid,
         })
+    }
+
+    fn label(&self) -> &str {
+        &self.label
     }
 
     fn security_capabilities(&self) -> SECURITY_CAPABILITIES {
@@ -277,6 +315,34 @@ impl AppContainerProfile {
         }
         Ok(result)
     }
+
+    fn local_app_data(&self, sid_string: &str) -> io::Result<PathBuf> {
+        let wide_sid = str_to_wide(sid_string);
+        let mut raw = std::ptr::null_mut();
+        let hr = unsafe { GetAppContainerFolderPath(wide_sid.as_ptr(), &mut raw) };
+        if failed(hr) {
+            return Err(io::Error::from_raw_os_error(hr));
+        }
+        let path = wide_ptr_to_string(raw);
+        unsafe {
+            CoTaskMemFree(raw.cast());
+        }
+        Ok(PathBuf::from(path))
+    }
+
+    fn environment_overrides(&self, sid_string: &str) -> io::Result<Vec<(String, String)>> {
+        let local_app_data = self.local_app_data(sid_string)?;
+        let temp = local_app_data.join("Temp");
+        std::fs::create_dir_all(&temp)?;
+        Ok(vec![
+            (
+                "LOCALAPPDATA".to_string(),
+                local_app_data.to_string_lossy().into_owned(),
+            ),
+            ("TEMP".to_string(), temp.to_string_lossy().into_owned()),
+            ("TMP".to_string(), temp.to_string_lossy().into_owned()),
+        ])
+    }
 }
 
 impl Drop for AppContainerProfile {
@@ -291,12 +357,13 @@ impl Drop for AppContainerProfile {
 }
 
 struct WorkspaceAclGrants {
+    label: String,
     sid: String,
     paths: Vec<PathBuf>,
 }
 
 impl WorkspaceAclGrants {
-    fn grant(sid: &str, policy: &CapabilityPolicy) -> io::Result<Self> {
+    fn grant(label: &str, sid: &str, policy: &CapabilityPolicy) -> io::Result<Self> {
         // Read-execute for the entire profile when writes are denied;
         // otherwise Modify on the writable roots. Read-only roots always
         // get read-execute regardless of the workspace-write capability.
@@ -315,10 +382,7 @@ impl WorkspaceAclGrants {
         let process_read = process_sandbox_policy_read_roots(policy)
             .into_iter()
             .map(|root| (root, "(OI)(CI)RX", false));
-        let preset_toolchains = process_sandbox_developer_toolchain_read_roots(policy)
-            .into_iter()
-            .map(|root| (root, "(OI)(CI)RX", true));
-        let package_manager = process_sandbox_package_manager_config_read_roots(policy)
+        let preset_roots = process_sandbox_preset_acl_roots(policy)
             .into_iter()
             .map(|root| (root, "(OI)(CI)RX", true));
         let process_write = if policy_allows_workspace_write(policy) {
@@ -332,8 +396,7 @@ impl WorkspaceAclGrants {
         for (root, permission, optional) in writable
             .chain(read_only)
             .chain(process_read)
-            .chain(preset_toolchains)
-            .chain(package_manager)
+            .chain(preset_roots)
             .chain(process_write)
         {
             if !root.exists() {
@@ -345,13 +408,16 @@ impl WorkspaceAclGrants {
                     format!("sandbox workspace root '{}' does not exist", root.display()),
                 ));
             }
+            sandbox_trace(label, format!("icacls grant begin path={}", root.display()));
             run_icacls(
                 &root,
                 ["/grant", &format!("*{sid}:{permission}"), "/T", "/C"],
             )?;
+            sandbox_trace(label, "icacls grant ok");
             paths.push(root);
         }
         Ok(Self {
+            label: label.to_string(),
             sid: sid.to_string(),
             paths,
         })
@@ -361,9 +427,27 @@ impl WorkspaceAclGrants {
 impl Drop for WorkspaceAclGrants {
     fn drop(&mut self) {
         for path in &self.paths {
-            let _ = run_icacls(path, ["/remove:g", &format!("*{}", self.sid), "/T", "/C"]);
+            sandbox_trace(
+                &self.label,
+                format!("icacls remove begin path={}", path.display()),
+            );
+            match run_icacls(path, ["/remove:g", &format!("*{}", self.sid), "/T", "/C"]) {
+                Ok(()) => sandbox_trace(&self.label, "icacls remove ok"),
+                Err(error) => sandbox_trace(&self.label, format!("icacls remove failed: {error}")),
+            }
         }
     }
+}
+
+fn process_sandbox_preset_acl_roots(policy: &CapabilityPolicy) -> Vec<PathBuf> {
+    if policy.process_sandbox.presets.is_none() {
+        return Vec::new();
+    }
+
+    process_sandbox_developer_toolchain_read_roots(policy)
+        .into_iter()
+        .chain(process_sandbox_package_manager_config_read_roots(policy))
+        .collect()
 }
 
 struct JobObject {
@@ -382,8 +466,7 @@ impl JobObject {
         limits.BasicLimitInformation.ActiveProcessLimit = 32;
         limits.ProcessMemoryLimit = 512 * 1024 * 1024;
         set_job_info(handle.raw(), JobObjectExtendedLimitInformation, &limits)?;
-
-        let ui = JOBOBJECT_BASIC_UI_RESTRICTIONS {
+        let restrictions = JOBOBJECT_BASIC_UI_RESTRICTIONS {
             UIRestrictionsClass: JOB_OBJECT_UILIMIT_HANDLES
                 | JOB_OBJECT_UILIMIT_READCLIPBOARD
                 | JOB_OBJECT_UILIMIT_WRITECLIPBOARD
@@ -393,7 +476,7 @@ impl JobObject {
                 | JOB_OBJECT_UILIMIT_DESKTOP
                 | JOB_OBJECT_UILIMIT_EXITWINDOWS,
         };
-        set_job_info(handle.raw(), JobObjectBasicUIRestrictions, &ui)?;
+        set_job_info(handle.raw(), JobObjectBasicUIRestrictions, &restrictions)?;
         Ok(Self { handle })
     }
 
@@ -627,6 +710,14 @@ fn run_icacls<const N: usize>(path: &Path, args: [&str; N]) -> io::Result<()> {
     Ok(())
 }
 
+fn sandbox_trace(label: &str, message: impl AsRef<str>) {
+    static ENABLED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    if !*ENABLED.get_or_init(|| std::env::var_os("HARN_WINDOWS_SANDBOX_TRACE").is_some()) {
+        return;
+    }
+    eprintln!("[harn windows sandbox {label}] {}", message.as_ref());
+}
+
 fn command_line(program: &str, args: &[String]) -> Vec<u16> {
     let mut parts = Vec::with_capacity(args.len() + 1);
     parts.push(quote_arg(OsStr::new(program)));
@@ -677,18 +768,13 @@ fn resolve_application_name(program: &str) -> Option<Vec<u16>> {
     }
 }
 
-fn environment_block(overrides: &[(String, String)]) -> Vec<u16> {
+fn environment_block(
+    overrides: &[(String, String)],
+    sandbox_overrides: &[(String, String)],
+) -> Vec<u16> {
     let mut values: Vec<(String, String)> = std::env::vars().collect();
-    for (key, value) in overrides {
-        if let Some(existing) = values
-            .iter_mut()
-            .find(|(candidate, _)| candidate.eq_ignore_ascii_case(key))
-        {
-            existing.1 = value.clone();
-        } else {
-            values.push((key.clone(), value.clone()));
-        }
-    }
+    upsert_env_pairs(&mut values, overrides);
+    upsert_env_pairs(&mut values, sandbox_overrides);
     values.sort_by(|left, right| {
         left.0
             .to_ascii_uppercase()
@@ -702,6 +788,19 @@ fn environment_block(overrides: &[(String, String)]) -> Vec<u16> {
     }
     block.push(0);
     block
+}
+
+fn upsert_env_pairs(values: &mut Vec<(String, String)>, updates: &[(String, String)]) {
+    for (key, value) in updates {
+        if let Some(existing) = values
+            .iter_mut()
+            .find(|(candidate, _)| candidate.eq_ignore_ascii_case(key))
+        {
+            existing.1 = value.clone();
+        } else {
+            values.push((key.clone(), value.clone()));
+        }
+    }
 }
 
 fn path_to_wide(path: &Path) -> Vec<u16> {
@@ -726,4 +825,102 @@ fn wide_ptr_to_string(raw: *const u16) -> String {
 
 fn failed(hr: i32) -> bool {
     hr < 0
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::orchestration::{ProcessSandboxPolicy, ProcessSandboxPreset};
+
+    #[test]
+    fn environment_block_forces_appcontainer_temp_roots() {
+        let overrides = vec![
+            ("TEMP".to_string(), "C:\\outside".to_string()),
+            ("TMP".to_string(), "C:\\outside".to_string()),
+            ("CUSTOM".to_string(), "kept".to_string()),
+        ];
+        let sandbox_overrides = vec![
+            (
+                "LOCALAPPDATA".to_string(),
+                "C:\\Users\\runneradmin\\AppData\\Local\\Packages\\harn\\AC".to_string(),
+            ),
+            (
+                "TEMP".to_string(),
+                "C:\\Users\\runneradmin\\AppData\\Local\\Packages\\harn\\AC\\Temp".to_string(),
+            ),
+            (
+                "TMP".to_string(),
+                "C:\\Users\\runneradmin\\AppData\\Local\\Packages\\harn\\AC\\Temp".to_string(),
+            ),
+        ];
+
+        let decoded = decode_environment_block(&environment_block(&overrides, &sandbox_overrides));
+
+        assert!(decoded.iter().any(|entry| entry == "CUSTOM=kept"));
+        assert!(decoded.iter().any(|entry| entry
+            == "LOCALAPPDATA=C:\\Users\\runneradmin\\AppData\\Local\\Packages\\harn\\AC"));
+        assert!(decoded.iter().any(|entry| entry
+            == "TEMP=C:\\Users\\runneradmin\\AppData\\Local\\Packages\\harn\\AC\\Temp"));
+        assert!(decoded
+            .iter()
+            .any(|entry| entry
+                == "TMP=C:\\Users\\runneradmin\\AppData\\Local\\Packages\\harn\\AC\\Temp"));
+        assert!(!decoded.iter().any(|entry| entry == "TEMP=C:\\outside"));
+        assert!(!decoded.iter().any(|entry| entry == "TMP=C:\\outside"));
+    }
+
+    fn decode_environment_block(block: &[u16]) -> Vec<String> {
+        block
+            .split(|ch| *ch == 0)
+            .filter(|part| !part.is_empty())
+            .map(|part| OsString::from_wide(part).to_string_lossy().into_owned())
+            .collect()
+    }
+
+    #[test]
+    fn implicit_default_presets_do_not_materialize_home_acl_roots() {
+        let policy = CapabilityPolicy::default();
+
+        assert!(
+            process_sandbox_preset_acl_roots(&policy).is_empty(),
+            "Windows should not recursively ACL home-scoped toolchain/cache roots unless presets were explicit"
+        );
+    }
+
+    #[test]
+    fn explicit_empty_presets_do_not_materialize_home_acl_roots() {
+        let policy = CapabilityPolicy {
+            process_sandbox: ProcessSandboxPolicy {
+                presets: Some(Vec::new()),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+
+        assert!(process_sandbox_preset_acl_roots(&policy).is_empty());
+    }
+
+    #[test]
+    fn explicit_home_presets_materialize_acl_roots_when_home_is_available() {
+        if crate::user_dirs::home_dir().is_none() {
+            return;
+        }
+
+        let policy = CapabilityPolicy {
+            process_sandbox: ProcessSandboxPolicy {
+                presets: Some(vec![
+                    ProcessSandboxPreset::DeveloperToolchains,
+                    ProcessSandboxPreset::PackageManagerConfig,
+                ]),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+
+        let roots = process_sandbox_preset_acl_roots(&policy);
+        assert!(
+            roots.iter().any(|path| path.ends_with(".cargo")),
+            "explicit Windows preset requests should still materialize developer/package roots"
+        );
+    }
 }
