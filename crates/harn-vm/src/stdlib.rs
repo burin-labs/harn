@@ -38,7 +38,6 @@ mod cookies;
 mod crypto;
 mod csv;
 mod datetime;
-mod durable_rate_limit;
 mod durable_step;
 mod event_log;
 mod external_agent;
@@ -71,7 +70,7 @@ mod net_policy;
 mod oauth_dynreg;
 mod oauth_storage;
 pub(crate) mod observability;
-mod options;
+pub(crate) mod options;
 mod path;
 pub(crate) mod path_scope_guard;
 pub(crate) mod pool;
@@ -181,7 +180,7 @@ pub fn register_io_stdlib(vm: &mut Vm) {
     // Clock builtins overlay process::timestamp/elapsed so they honor
     // mock_time / advance_time. Register AFTER process to take precedence.
     clock::register_clock_builtins(vm);
-    durable_rate_limit::register_durable_rate_limit_builtins(vm);
+    crate::durable_rate_limit::register_durable_rate_limit_builtins(vm);
     testbench::register_testbench_builtins(vm);
     project::register_project_builtins(vm);
     grounding::register_grounding_builtins(vm);

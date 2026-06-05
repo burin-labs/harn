@@ -9,13 +9,21 @@
 //! 1. provider/model catalog `rate_limits` fields and legacy provider `rpm`
 //! 2. environment variables such as `HARN_RATE_LIMIT_<PROVIDER>_TPM=1000000`
 //! 3. runtime `llm_rate_limit("provider", {rpm: N, tpm: M})`
+//!
+//! Request/token buckets are durable across processes by default when a route
+//! has rate limits. `HARN_LLM_RATE_LIMIT_STATE_PATH` overrides the shared DB
+//! path and `HARN_LLM_RATE_LIMIT_DURABLE=0` disables the durable layer for
+//! debugging or constrained embeddings.
 
 use std::collections::{HashMap, VecDeque};
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 
+const DURABLE_RATE_LIMIT_ENABLED_ENV: &str = "HARN_LLM_RATE_LIMIT_DURABLE";
+const DURABLE_RATE_LIMIT_STATE_PATH_ENV: &str = "HARN_LLM_RATE_LIMIT_STATE_PATH";
 const WINDOW_SECS: u64 = 60;
 const RATE_LIMIT_ENV_FIELD_SUFFIXES: [&str; 5] =
     ["_RPM", "_TPM", "_INPUT_TPM", "_OUTPUT_TPM", "_CONCURRENCY"];
@@ -535,6 +543,124 @@ fn record_for_keys(
     }
 }
 
+fn durable_rate_limit_disabled() -> bool {
+    let Ok(raw) = std::env::var(DURABLE_RATE_LIMIT_ENABLED_ENV) else {
+        return false;
+    };
+    matches!(
+        raw.trim().to_ascii_lowercase().as_str(),
+        "0" | "false" | "off" | "none" | "disabled"
+    )
+}
+
+fn durable_state_path() -> Option<PathBuf> {
+    if durable_rate_limit_disabled() {
+        return None;
+    }
+
+    if let Ok(raw) = std::env::var(DURABLE_RATE_LIMIT_STATE_PATH_ENV) {
+        let trimmed = raw.trim();
+        if !trimmed.is_empty() {
+            let path = PathBuf::from(trimmed);
+            return if path.is_absolute() {
+                Some(path)
+            } else {
+                std::env::current_dir().ok().map(|cwd| cwd.join(path))
+            };
+        }
+    }
+
+    let base = crate::stdlib::process::runtime_root_base();
+    Some(crate::runtime_paths::state_root(&base).join("llm-rate-limits.sqlite"))
+}
+
+fn durable_bucket(
+    key: &str,
+    suffix: &str,
+    limit: u64,
+    units: u64,
+) -> crate::durable_rate_limit::RateBucket {
+    crate::durable_rate_limit::RateBucket::new(
+        format!("llm:{key}:{suffix}"),
+        limit.max(1),
+        units,
+        WINDOW_SECS * 1000,
+    )
+}
+
+fn durable_buckets_for_keys(
+    registry: &RateLimitRegistry,
+    keys: &[String],
+    request: RateLimitRequest,
+) -> Vec<crate::durable_rate_limit::RateBucket> {
+    let mut buckets = Vec::new();
+    for key in keys {
+        let Some(limiter) = registry.limiters.get(key) else {
+            continue;
+        };
+        if let Some(rpm) = limiter.limits.rpm {
+            buckets.push(durable_bucket(key, "rpm", u64::from(rpm), 1));
+        }
+        if let Some(tpm) = limiter.limits.tpm {
+            buckets.push(durable_bucket(key, "tpm", tpm, request.total_tokens()));
+        }
+        if let Some(input_tpm) = limiter.limits.input_tpm {
+            buckets.push(durable_bucket(
+                key,
+                "input_tpm",
+                input_tpm,
+                request.input_tokens,
+            ));
+        }
+        if let Some(output_tpm) = limiter.limits.output_tpm {
+            buckets.push(durable_bucket(
+                key,
+                "output_tpm",
+                output_tpm,
+                request.output_tokens,
+            ));
+        }
+    }
+    buckets
+}
+
+async fn acquire_durable_for_keys(
+    state_path: PathBuf,
+    provider: &str,
+    model: &str,
+    keys: &[String],
+    request: RateLimitRequest,
+) -> Result<(), crate::value::VmError> {
+    let buckets = {
+        let registry = registry().lock().expect("rate limiter mutex poisoned");
+        durable_buckets_for_keys(&registry, keys, request)
+    };
+    if buckets.is_empty() {
+        return Ok(());
+    }
+    let outcome =
+        crate::durable_rate_limit::acquire_durable_rate_limit(state_path, buckets, None, || false)
+            .await?;
+    if outcome.waited_ms > 0 {
+        let route = if model.trim().is_empty() {
+            provider.to_string()
+        } else {
+            format!(
+                "{provider}/{}",
+                crate::llm_config::normalize_model_id(model)
+            )
+        };
+        crate::events::log_debug(
+            "llm.rate_limit",
+            &format!(
+                "Durable rate limit for '{}': waited {}ms",
+                route, outcome.waited_ms
+            ),
+        );
+    }
+    Ok(())
+}
+
 async fn sleep_after_throttle(provider: &str, model: &str, duration: Duration) {
     let route = if model.trim().is_empty() {
         provider.to_string()
@@ -559,9 +685,14 @@ async fn acquire_permit_for(
     provider: &str,
     model: &str,
     request: RateLimitRequest,
-) -> RateLimitPermit {
+) -> Result<RateLimitPermit, crate::value::VmError> {
     ensure_initialized_from_config();
     let keys = limiter_keys(provider, model);
+    if let Some(state_path) = durable_state_path() {
+        let permits = acquire_concurrency(&keys).await;
+        acquire_durable_for_keys(state_path, provider, model, &keys, request).await?;
+        return Ok(RateLimitPermit { _permits: permits });
+    }
     loop {
         if let Some(duration) = {
             let mut registry = registry().lock().expect("rate limiter mutex poisoned");
@@ -587,13 +718,15 @@ async fn acquire_permit_for(
             continue;
         }
 
-        return RateLimitPermit { _permits: permits };
+        return Ok(RateLimitPermit { _permits: permits });
     }
 }
 
 /// Wait until the provider rate limit allows an opaque request, then record it.
 /// Returns immediately if no limit is configured or the window has capacity.
-pub(crate) async fn acquire_permit(provider: &str) -> RateLimitPermit {
+pub(crate) async fn acquire_permit(
+    provider: &str,
+) -> Result<RateLimitPermit, crate::value::VmError> {
     acquire_permit_for(provider, "", RateLimitRequest::default()).await
 }
 
@@ -602,7 +735,7 @@ pub(crate) async fn acquire_permit(provider: &str) -> RateLimitPermit {
 /// concurrency limits cover in-flight calls rather than just launch rate.
 pub(crate) async fn acquire_permit_for_llm_call(
     opts: &super::api::LlmCallOptions,
-) -> RateLimitPermit {
+) -> Result<RateLimitPermit, crate::value::VmError> {
     acquire_permit_for(
         &opts.provider,
         &opts.model,
@@ -680,9 +813,63 @@ mod tests {
         crate::llm_config::set_user_overrides(Some(overlay));
     }
 
+    fn install_durable_overlay() {
+        let overlay = crate::llm_config::parse_config_toml(
+            "[providers.durable]\n\
+             base_url = \"https://durable.invalid/v1\"\n\
+             chat_endpoint = \"/chat/completions\"\n\
+             rate_limits = { rpm = 1 }\n",
+        )
+        .expect("durable overlay parses");
+        crate::llm_config::set_user_overrides(Some(overlay));
+    }
+
     fn reset_test_rate_limit_state() {
         reset_rate_limit_state();
         crate::llm_config::clear_user_overrides();
+    }
+
+    struct EnvVarGuard {
+        key: &'static str,
+        old: Option<String>,
+    }
+
+    impl EnvVarGuard {
+        fn set_value(key: &'static str, value: impl AsRef<std::ffi::OsStr>) -> Self {
+            let old = std::env::var(key).ok();
+            std::env::set_var(key, value);
+            Self { key, old }
+        }
+
+        fn set_path(key: &'static str, value: &std::path::Path) -> Self {
+            Self::set_value(key, value)
+        }
+    }
+
+    impl Drop for EnvVarGuard {
+        fn drop(&mut self) {
+            if let Some(value) = self.old.as_ref() {
+                std::env::set_var(self.key, value);
+            } else {
+                std::env::remove_var(self.key);
+            }
+        }
+    }
+
+    fn durable_usage(path: &std::path::Path, key: &str) -> u64 {
+        if !path.exists() {
+            return 0;
+        }
+        let conn = rusqlite::Connection::open(path).expect("open durable rate limit db");
+        conn.query_row(
+            "SELECT COALESCE(SUM(units), 0)
+             FROM durable_rate_limit_entries
+             WHERE bucket_key = ?1",
+            rusqlite::params![key],
+            |row| row.get::<_, i64>(0),
+        )
+        .expect("query durable usage")
+        .max(0) as u64
     }
 
     #[test]
@@ -768,6 +955,7 @@ mod tests {
     #[test]
     fn concurrency_queue_does_not_consume_request_quota_until_started() {
         let _guard = crate::llm::env_lock().lock().expect("env lock");
+        let _durable_disabled = EnvVarGuard::set_value(DURABLE_RATE_LIMIT_ENABLED_ENV, "0");
         reset_test_rate_limit_state();
         install_concurrency_overlay();
         init_from_config();
@@ -778,7 +966,7 @@ mod tests {
             .expect("current-thread runtime");
 
         runtime.block_on(async {
-            let first = acquire_permit("queue").await;
+            let first = acquire_permit("queue").await.expect("first permit");
             assert_eq!(provider_request_usage("queue"), 1);
 
             let second = tokio::spawn(async { acquire_permit("queue").await });
@@ -789,16 +977,92 @@ mod tests {
             assert_eq!(provider_request_usage("queue"), 1);
 
             drop(first);
-            for _ in 0..5 {
-                if second.is_finished() {
-                    break;
-                }
-                tokio::task::yield_now().await;
-            }
-            assert!(second.is_finished());
-            let second = second.await.expect("second task completed");
+            let second = tokio::time::timeout(std::time::Duration::from_secs(2), second)
+                .await
+                .expect("second task should acquire after first permit drops")
+                .expect("second task completed")
+                .expect("second permit");
             assert_eq!(provider_request_usage("queue"), 2);
             drop(second);
+        });
+
+        reset_test_rate_limit_state();
+    }
+
+    #[test]
+    fn durable_concurrency_queue_does_not_consume_request_quota_until_started() {
+        let _guard = crate::llm::env_lock().lock().expect("env lock");
+        reset_test_rate_limit_state();
+        install_concurrency_overlay();
+        let temp = tempfile::tempdir().expect("tempdir");
+        let state_path = temp.path().join("llm-rate-limits.sqlite");
+        let _env = EnvVarGuard::set_path(DURABLE_RATE_LIMIT_STATE_PATH_ENV, &state_path);
+        init_from_config();
+
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_time()
+            .build()
+            .expect("current-thread runtime");
+
+        runtime.block_on(async {
+            let first = acquire_permit("queue").await.expect("first permit");
+            assert_eq!(durable_usage(&state_path, "llm:provider:queue:rpm"), 1);
+
+            let second = tokio::spawn(async { acquire_permit("queue").await });
+            for _ in 0..5 {
+                tokio::task::yield_now().await;
+            }
+            assert!(!second.is_finished());
+            assert_eq!(durable_usage(&state_path, "llm:provider:queue:rpm"), 1);
+
+            drop(first);
+            let second = tokio::time::timeout(std::time::Duration::from_secs(2), second)
+                .await
+                .expect("second task should acquire after first permit drops")
+                .expect("second task completed")
+                .expect("second permit");
+            assert_eq!(durable_usage(&state_path, "llm:provider:queue:rpm"), 2);
+            drop(second);
+        });
+
+        reset_test_rate_limit_state();
+    }
+
+    #[test]
+    fn durable_state_path_coordinates_after_process_local_reset() {
+        let _guard = crate::llm::env_lock().lock().expect("env lock");
+        reset_test_rate_limit_state();
+        install_durable_overlay();
+        let temp = tempfile::tempdir().expect("tempdir");
+        let _env = EnvVarGuard::set_path(
+            DURABLE_RATE_LIMIT_STATE_PATH_ENV,
+            &temp.path().join("llm-rate-limits.sqlite"),
+        );
+        let _clock =
+            crate::clock_mock::install_override(crate::clock_mock::MockClock::at_wall_ms(1_000));
+        init_from_config();
+
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_time()
+            .build()
+            .expect("current-thread runtime");
+
+        runtime.block_on(async {
+            let first = acquire_permit("durable").await.expect("first permit");
+            drop(first);
+
+            reset_rate_limit_state();
+            init_from_config();
+
+            let before = crate::clock_mock::now_ms();
+            let second = acquire_permit("durable").await.expect("second permit");
+            let after = crate::clock_mock::now_ms();
+            drop(second);
+
+            assert!(
+                after.saturating_sub(before) >= 60_000,
+                "second process-local registry should wait on durable SQLite state"
+            );
         });
 
         reset_test_rate_limit_state();

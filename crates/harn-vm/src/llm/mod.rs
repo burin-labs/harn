@@ -563,7 +563,7 @@ async fn with_rate_limit_builtin(
     let mut attempt: usize = 0;
     loop {
         let (result, output) = {
-            let _rate_limit_permit = rate_limit::acquire_permit(&provider).await;
+            let _rate_limit_permit = rate_limit::acquire_permit(&provider).await?;
             let mut child_vm = ctx.child_vm();
             let result = child_vm.call_closure_pub(&closure, &[]).await;
             let output = child_vm.take_output();

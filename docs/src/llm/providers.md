@@ -659,7 +659,12 @@ let active = llm_rate_limit("anthropic", {details: true})
 ```
 
 The limiter uses a sliding-window budget and pauses before sending requests
-that would exceed the configured request or token quota.
+that would exceed the configured request or token quota. Request and token
+buckets are durable across Harn processes by default, using a SQLite state file
+under Harn's runtime state root. Fleet runners that need every child process to
+share one explicit file can set `HARN_LLM_RATE_LIMIT_STATE_PATH`; constrained
+tests or embeddings can disable the durable layer with
+`HARN_LLM_RATE_LIMIT_DURABLE=0`.
 
 ## Troubleshooting
 
@@ -667,8 +672,10 @@ that would exceed the configured request or token quota.
   set for your provider. Run `echo $ANTHROPIC_API_KEY` to verify.
 - **Wrong provider selected** — Set `HARN_LLM_PROVIDER` explicitly to
   override automatic detection.
-- **Rate limit errors** — Use `HARN_RATE_LIMIT_<PROVIDER>_RPM` and
-  `HARN_RATE_LIMIT_<PROVIDER>_TPM` to throttle requests below your plan's
-  applied limits. `HARN_RATE_LIMIT_<PROVIDER>` remains a legacy RPM shorthand.
+- **Rate limit errors** — Prefer fixing the provider/model catalog
+  `rate_limits` entry for shared defaults. Use `HARN_RATE_LIMIT_<PROVIDER>_RPM`
+  and `HARN_RATE_LIMIT_<PROVIDER>_TPM` only when your local key has a different
+  paid/custom quota. `HARN_RATE_LIMIT_<PROVIDER>` remains a legacy RPM
+  shorthand.
 - **Debug message shapes** — Set `HARN_DEBUG_MESSAGE_SHAPES=1` to log
   the structure of messages sent to the LLM provider.

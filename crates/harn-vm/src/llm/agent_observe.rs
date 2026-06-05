@@ -905,7 +905,7 @@ pub(crate) async fn observed_llm_call(
         .unwrap_or_else(|| crate::llm_config::default_tool_format(&opts.model, &opts.provider));
     let mut attempt = 0usize;
     loop {
-        let rate_limit_permit = super::rate_limit::acquire_permit_for_llm_call(opts).await;
+        let rate_limit_permit = super::rate_limit::acquire_permit_for_llm_call(opts).await?;
 
         let call_id = next_call_id();
         let prompt_chars: usize = opts

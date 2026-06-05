@@ -645,7 +645,9 @@ the throughput layer. Harn enforces catalog `rate_limits` metadata
 before each `llm_call`: requests per minute (`rpm`), total tokens per
 minute (`tpm`), split input/output token buckets (`input_tpm`,
 `output_tpm`), and route concurrency. Requests past the budget wait
-for the window to free up rather than error.
+for the window to free up rather than error. RPM/TPM buckets are durable
+across Harn processes by default, so parallel CLI, eval, and worker
+processes share the same sliding-window admission state.
 
 Configure provider limits via:
 
@@ -660,10 +662,14 @@ Configure provider limits via:
 
 The controls compose: `max_concurrent` prevents caller-side bursts,
 route `concurrency` caps in-flight provider calls, and RPM/TPM shapes
-sustained throughput. When batching hundreds of LLM calls against a
-local single-GPU server or a low-tier hosted key, set both concurrency
-and token/request throughput caps so a burst does not exhaust the
-minute window and drop requests.
+sustained throughput. Harn stores the default durable limiter under its
+runtime state root; set `HARN_LLM_RATE_LIMIT_STATE_PATH` only when a
+fleet runner needs an explicit shared SQLite path, and set
+`HARN_LLM_RATE_LIMIT_DURABLE=0` only to bypass the durable layer in
+constrained tests or embeddings. When batching hundreds of LLM calls
+against a local single-GPU server or a low-tier hosted key, set both
+concurrency and token/request throughput caps so a burst does not
+exhaust the minute window and drop requests.
 
 ## Connector task groups
 
