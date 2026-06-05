@@ -4,7 +4,7 @@
 /**
  * Upload a local file to a provider Files API and return its reusable file_id.
  *
- * @effects: []
+ * @effects: [fs, network]
  * @allocation: heap
  * @errors: []
  * @api_stability: stable

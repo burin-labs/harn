@@ -321,11 +321,10 @@ pub(crate) fn running_response(
         VmValue::String(Arc::from(sandbox_kind())),
     );
     sandbox.insert("enforced".to_string(), VmValue::Bool(sandbox_enforced()));
-    ResponseBuilder::new()
+    let mut builder = ResponseBuilder::new()
         .str("command_id", command_id.clone())
         .str("status", CommandStatus::Running.as_str())
         .int("pid", pid as i64)
-        .int("process_group_id", process_group_id.unwrap_or(pid) as i64)
         .str("handle_id", handle_id)
         .str("started_at", started_at)
         .nil("ended_at")
@@ -344,8 +343,12 @@ pub(crate) fn running_response(
         .dict("sandbox", sandbox)
         .str("audit_id", format!("audit_{command_id}"))
         .str("command", command_display.clone())
-        .str("command_or_op_descriptor", command_display)
-        .build()
+        .str("command_or_op_descriptor", command_display);
+    builder = match process_group_id {
+        Some(pgid) => builder.int("process_group_id", pgid as i64),
+        None => builder.nil("process_group_id"),
+    };
+    builder.build()
 }
 
 pub(crate) fn next_command_id() -> String {

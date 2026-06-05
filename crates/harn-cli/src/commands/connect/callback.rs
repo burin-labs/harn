@@ -112,7 +112,7 @@ pub(super) fn wait_for_callback_query(
                     Err(error) => {
                         response = html_response(400, &error);
                         let _ = stream.write_all(response.as_bytes());
-                        return Err(error);
+                        continue;
                     }
                 }
             }

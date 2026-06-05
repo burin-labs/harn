@@ -90,6 +90,14 @@ fn require_bool(map: &BTreeMap<String, VmValue>, key: &str) -> bool {
     }
 }
 
+fn require_nil(map: &BTreeMap<String, VmValue>, key: &str) {
+    assert!(
+        matches!(map.get(key), Some(VmValue::Nil)),
+        "expected nil at {key}, got {:?}",
+        map.get(key)
+    );
+}
+
 fn require_nested_dict(map: &BTreeMap<String, VmValue>, key: &str) -> BTreeMap<String, VmValue> {
     match map.get(key) {
         Some(VmValue::Dict(value)) => (**value).clone(),
@@ -675,6 +683,36 @@ fn run_command_long_running_returns_handle_immediately() {
 }
 
 #[test]
+fn run_command_long_running_reports_nil_process_group_when_unavailable() {
+    let _session_guard = harn_vm::agent_sessions::enter_current_session(unique_session_id(
+        "test-run-command-long-running-no-pgid",
+    ));
+    let config = MockProcessConfig {
+        pgid: None,
+        ..MockProcessConfig::running()
+    };
+    let (_spawner, _controller, _guard) = install_mock_with(config);
+
+    let mut req = dict();
+    req.insert("argv".into(), vlist_str(&["sleep", "10"]));
+    req.insert("background".into(), VmValue::Bool(true));
+    let resp = require_dict(call("hostlib_tools_run_command", req).unwrap());
+
+    assert_eq!(require_str(&resp, "status"), "running");
+    require_nil(&resp, "process_group_id");
+    let handle_id = require_str(&resp, "handle_id");
+    let completion_rx = register_completion_notifier(&handle_id);
+
+    let mut cancel_req = dict();
+    cancel_req.insert("handle_id".into(), vstr(&handle_id));
+    let cancel_resp = require_dict(call("hostlib_tools_cancel_handle", cancel_req).unwrap());
+    assert!(require_bool(&cancel_resp, "cancelled"));
+    if let Some(rx) = completion_rx {
+        let _ = rx.recv();
+    }
+}
+
+#[test]
 fn run_command_background_after_returns_progress_snapshot() {
     let _session_guard = harn_vm::agent_sessions::enter_current_session(unique_session_id(
         "test-run-command-background-after",
@@ -696,6 +734,39 @@ fn run_command_background_after_returns_progress_snapshot() {
     let handle_id = require_str(&resp, "handle_id");
 
     let completion_rx = register_completion_notifier(&handle_id);
+    let mut cancel_req = dict();
+    cancel_req.insert("handle_id".into(), vstr(&handle_id));
+    let cancel_resp = require_dict(call("hostlib_tools_cancel_handle", cancel_req).unwrap());
+    assert!(require_bool(&cancel_resp, "cancelled"));
+    if let Some(rx) = completion_rx {
+        let _ = rx.recv();
+    }
+}
+
+#[test]
+fn run_command_background_after_requeues_unrelated_feedback_without_restamping() {
+    let session_id = unique_session_id("test-run-command-background-after-requeue");
+    let _session_guard = harn_vm::agent_sessions::enter_current_session(session_id.clone());
+    let _ = harn_vm::orchestration::agent_inbox::drain(&session_id);
+    harn_vm::orchestration::agent_inbox::push(&session_id, "notice", "first", "test");
+    harn_vm::orchestration::agent_inbox::push(&session_id, "notice", "second", "test");
+
+    let (_spawner, _controller, _guard) = install_mock_with(MockProcessConfig::running());
+    let mut req = dict();
+    req.insert("argv".into(), vlist_str(&["sleep", "10"]));
+    req.insert("background_after_ms".into(), VmValue::Int(50));
+    let resp = require_dict(call("hostlib_tools_run_command", req).unwrap());
+
+    assert_eq!(require_str(&resp, "status"), "running");
+    let remaining = harn_vm::orchestration::agent_inbox::drain(&session_id);
+    assert_eq!(remaining.len(), 2);
+    assert_eq!(remaining[0].content, "first");
+    assert_eq!(remaining[1].content, "second");
+    assert_eq!(remaining[0].sequence, 1);
+    assert_eq!(remaining[1].sequence, 2);
+    let handle_id = require_str(&resp, "handle_id");
+    let completion_rx = register_completion_notifier(&handle_id);
+
     let mut cancel_req = dict();
     cancel_req.insert("handle_id".into(), vstr(&handle_id));
     let cancel_resp = require_dict(call("hostlib_tools_cancel_handle", cancel_req).unwrap());

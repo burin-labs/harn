@@ -116,11 +116,10 @@ fn wait_for_initial_background_feedback(
     if !harn_vm::orchestration::agent_inbox::wait_sync(session_id, timeout) {
         return None;
     }
+    let mut kept = Vec::new();
     let mut selected = None;
     for entry in harn_vm::orchestration::agent_inbox::drain(session_id) {
-        let kind = entry.kind;
-        let content = entry.content;
-        let parsed = serde_json::from_str::<serde_json::Value>(&content).ok();
+        let parsed = serde_json::from_str::<serde_json::Value>(&entry.content).ok();
         let matches_handle = parsed
             .as_ref()
             .and_then(|value| value.get("handle_id"))
@@ -131,19 +130,17 @@ fn wait_for_initial_background_feedback(
                 if let Some(object) = payload.as_object_mut() {
                     object.insert(
                         "feedback_kind".to_string(),
-                        serde_json::Value::String(kind.clone()),
+                        serde_json::Value::String(entry.kind.clone()),
                     );
                 }
                 selected = Some(harn_vm::json_to_vm_value(&payload));
                 continue;
             }
         }
-        harn_vm::orchestration::agent_inbox::push(
-            session_id,
-            &kind,
-            &content,
-            "hostlib.run_command.requeue",
-        );
+        kept.push(entry);
+    }
+    for entry in kept.into_iter().rev() {
+        harn_vm::orchestration::agent_inbox::requeue_front(entry);
     }
     selected
 }
