@@ -583,24 +583,30 @@ parallel 100 with { max_concurrent: 4 } { i ->
 ## Rate limiting LLM providers
 
 `max_concurrent` bounds *simultaneous* in-flight tasks on the caller's
-side. A provider can additionally be rate-limited at the throughput
-layer (requests per minute). The RPM limiter is a sliding-window
-budget enforced before each `llm_call` / `llm_completion` — requests
-past the budget wait for the window to free up rather than error.
+side. A provider or model route can additionally be rate-limited at
+the throughput layer. Harn enforces catalog `rate_limits` metadata
+before each `llm_call`: requests per minute (`rpm`), total tokens per
+minute (`tpm`), split input/output token buckets (`input_tpm`,
+`output_tpm`), and route concurrency. Requests past the budget wait
+for the window to free up rather than error.
 
-Configure RPM per provider via:
+Configure provider limits via:
 
 - `rpm: 600` in the provider's entry in `providers.toml` / `harn.toml`.
 - `HARN_RATE_LIMIT_<PROVIDER>=600` environment variable
   (e.g. `HARN_RATE_LIMIT_TOGETHER=600`, `HARN_RATE_LIMIT_LOCAL=60`).
-  Env overrides config.
-- `llm_rate_limit("provider", 600)` at runtime from a pipeline.
+  This legacy form sets provider RPM.
+- `HARN_RATE_LIMIT_<PROVIDER>_TPM=1000000` or
+  `HARN_RATE_LIMIT_<PROVIDER>_RPM=1000` for richer quota overrides.
+- `llm_rate_limit("provider", {rpm: 600, tpm: 1000000})` at runtime
+  from a pipeline.
 
-The two controls compose: `max_concurrent` prevents bursts from
-saturating the server; RPM shapes sustained throughput. When batching
-hundreds of LLM calls against a local single-GPU server, both are
-worth setting — otherwise the RPM budget can be spent in a 2-second
-burst that overwhelms the queue and drops requests.
+The controls compose: `max_concurrent` prevents caller-side bursts,
+route `concurrency` caps in-flight provider calls, and RPM/TPM shapes
+sustained throughput. When batching hundreds of LLM calls against a
+local single-GPU server or a low-tier hosted key, set both concurrency
+and token/request throughput caps so a burst does not exhaust the
+minute window and drop requests.
 
 ## Connector task groups
 

@@ -201,12 +201,6 @@ category = "thread_private"
 plan = "thread_private_cache"
 
 [[thread_local]]
-path = "src/llm/rate_limit.rs"
-statics = ["LIMITERS", "INITIALIZED_FROM_CONFIG"]
-category = "logical_task"
-plan = "task_local_or_explicit"
-
-[[thread_local]]
 path = "src/llm/reminder_providers.rs"
 statics = ["USER_PROVIDERS"]
 category = "logical_task"

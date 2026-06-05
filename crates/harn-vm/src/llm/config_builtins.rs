@@ -612,9 +612,51 @@ fn llm_config_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, Vm
     }
 }
 
-/// Set, query, or clear per-provider requests-per-minute rate limits.
+enum RateLimitField<T> {
+    Missing,
+    Clear,
+    Set(T),
+}
+
+fn rate_limit_u64_option(
+    opts: &BTreeMap<String, VmValue>,
+    key: &str,
+) -> Result<RateLimitField<u64>, VmError> {
+    let Some(value) = opts.get(key) else {
+        return Ok(RateLimitField::Missing);
+    };
+    let Some(parsed) = value.as_int() else {
+        return Err(VmError::Runtime(format!(
+            "llm_rate_limit: options.{key} must be an integer"
+        )));
+    };
+    if parsed <= 0 {
+        return Ok(RateLimitField::Clear);
+    }
+    Ok(RateLimitField::Set(parsed as u64))
+}
+
+fn rate_limit_u32_option(
+    opts: &BTreeMap<String, VmValue>,
+    key: &str,
+) -> Result<RateLimitField<u32>, VmError> {
+    match rate_limit_u64_option(opts, key)? {
+        RateLimitField::Missing => Ok(RateLimitField::Missing),
+        RateLimitField::Clear => Ok(RateLimitField::Clear),
+        RateLimitField::Set(parsed) => {
+            let parsed = u32::try_from(parsed).map_err(|_| {
+                VmError::Runtime(format!(
+                    "llm_rate_limit: options.{key} must fit in an unsigned 32-bit integer"
+                ))
+            })?;
+            Ok(RateLimitField::Set(parsed))
+        }
+    }
+}
+
+/// Set, query, or clear per-provider request/token rate limits.
 #[harn_builtin(
-    sig = "llm_rate_limit(provider: string, options?: dict|nil) -> bool|int|nil",
+    sig = "llm_rate_limit(provider: string, options?: dict|nil) -> bool|int|nil|dict",
     category = "llm.rate_limit"
 )]
 fn llm_rate_limit_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
@@ -624,21 +666,69 @@ fn llm_rate_limit_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue
             "llm_rate_limit: provider name is required".to_string(),
         ));
     }
-    if let Some(VmValue::Int(rpm)) = args
-        .get(1)
-        .and_then(|a| a.as_dict())
-        .and_then(|o| o.get("rpm").cloned())
-    {
-        if rpm <= 0 {
-            super::rate_limit::clear_rate_limit(&provider);
-        } else {
-            super::rate_limit::set_rate_limit(&provider, rpm as u32);
+    if let Some(opts) = args.get(1).and_then(|a| a.as_dict()) {
+        if opts
+            .get("details")
+            .is_some_and(|value| matches!(value, VmValue::Bool(true)))
+        {
+            return Ok(super::rate_limit::get_rate_limits(&provider)
+                .map(|limits| rate_limits_to_vm_value(&limits))
+                .unwrap_or(VmValue::Nil));
         }
-        return Ok(VmValue::Bool(true));
-    }
-    if args.get(1).and_then(|a| a.as_dict()).is_some() {
+        let mut limits = llm_config::RateLimitsDef::default();
+        let mut saw_limit = false;
+        let mut clear = false;
+        match rate_limit_u32_option(opts, "rpm")? {
+            RateLimitField::Set(parsed) => {
+                limits.rpm = Some(parsed);
+                saw_limit = true;
+            }
+            RateLimitField::Clear => clear = true,
+            RateLimitField::Missing => {}
+        }
+        match rate_limit_u64_option(opts, "tpm")? {
+            RateLimitField::Set(parsed) => {
+                limits.tpm = Some(parsed);
+                saw_limit = true;
+            }
+            RateLimitField::Clear => clear = true,
+            RateLimitField::Missing => {}
+        }
+        match rate_limit_u64_option(opts, "input_tpm")? {
+            RateLimitField::Set(parsed) => {
+                limits.input_tpm = Some(parsed);
+                saw_limit = true;
+            }
+            RateLimitField::Clear => clear = true,
+            RateLimitField::Missing => {}
+        }
+        match rate_limit_u64_option(opts, "output_tpm")? {
+            RateLimitField::Set(parsed) => {
+                limits.output_tpm = Some(parsed);
+                saw_limit = true;
+            }
+            RateLimitField::Clear => clear = true,
+            RateLimitField::Missing => {}
+        }
+        match rate_limit_u32_option(opts, "concurrency")? {
+            RateLimitField::Set(parsed) => {
+                limits.concurrency = Some(parsed);
+                saw_limit = true;
+            }
+            RateLimitField::Clear => clear = true,
+            RateLimitField::Missing => {}
+        }
+        if clear && !saw_limit {
+            super::rate_limit::clear_rate_limit(&provider);
+            return Ok(VmValue::Bool(true));
+        }
+        if saw_limit {
+            super::rate_limit::set_rate_limits(&provider, limits);
+            return Ok(VmValue::Bool(true));
+        }
         return Err(VmError::Runtime(
-            "llm_rate_limit: options must include 'rpm' (integer)".to_string(),
+            "llm_rate_limit: options must include rpm, tpm, input_tpm, output_tpm, concurrency, or details"
+                .to_string(),
         ));
     }
     match super::rate_limit::get_rate_limit(&provider) {
@@ -1730,6 +1820,86 @@ mod tests {
             map.insert(k.to_string(), v);
         }
         VmValue::Dict(std::sync::Arc::new(map))
+    }
+
+    fn expect_int(dict: &BTreeMap<String, VmValue>, key: &str, want: i64) {
+        match dict.get(key) {
+            Some(VmValue::Int(value)) => assert_eq!(*value, want, "{key}"),
+            other => panic!("expected Int({want}) for {key}, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_llm_rate_limit_sets_and_queries_rich_details() {
+        let _guard = crate::llm::env_lock().lock().expect("env lock");
+        crate::llm::reset_llm_state();
+        let provider = VmValue::String(std::sync::Arc::from("quota-builtin-provider"));
+        let mut out = String::new();
+
+        let set = llm_rate_limit_builtin(
+            &[
+                provider.clone(),
+                build_dict(vec![
+                    ("rpm", VmValue::Int(12)),
+                    ("tpm", VmValue::Int(34_000)),
+                    ("input_tpm", VmValue::Int(20_000)),
+                    ("output_tpm", VmValue::Int(14_000)),
+                    ("concurrency", VmValue::Int(2)),
+                ]),
+            ],
+            &mut out,
+        )
+        .expect("set rate limit");
+        assert!(matches!(set, VmValue::Bool(true)));
+
+        let legacy_query = llm_rate_limit_builtin(std::slice::from_ref(&provider), &mut out)
+            .expect("query legacy rpm");
+        assert!(matches!(legacy_query, VmValue::Int(12)));
+
+        let details = llm_rate_limit_builtin(
+            &[
+                provider.clone(),
+                build_dict(vec![("details", VmValue::Bool(true))]),
+            ],
+            &mut out,
+        )
+        .expect("query details");
+        let details = details.as_dict().expect("details dict");
+        expect_int(details, "rpm", 12);
+        expect_int(details, "tpm", 34_000);
+        expect_int(details, "input_tpm", 20_000);
+        expect_int(details, "output_tpm", 14_000);
+        expect_int(details, "concurrency", 2);
+
+        let overflow = llm_rate_limit_builtin(
+            &[
+                provider.clone(),
+                build_dict(vec![("rpm", VmValue::Int(i64::from(u32::MAX) + 1))]),
+            ],
+            &mut out,
+        )
+        .expect_err("oversized rpm should error");
+        match overflow {
+            VmError::Runtime(message) => assert!(
+                message.contains("unsigned 32-bit integer"),
+                "unexpected message: {message}"
+            ),
+            other => panic!("expected Runtime error, got {other:?}"),
+        }
+
+        let clear = llm_rate_limit_builtin(
+            &[provider.clone(), build_dict(vec![("rpm", VmValue::Int(0))])],
+            &mut out,
+        )
+        .expect("clear rate limit");
+        assert!(matches!(clear, VmValue::Bool(true)));
+        let cleared = llm_rate_limit_builtin(
+            &[provider, build_dict(vec![("details", VmValue::Bool(true))])],
+            &mut out,
+        )
+        .expect("query cleared");
+        assert!(matches!(cleared, VmValue::Nil));
+        crate::llm::reset_llm_state();
     }
 
     #[test]

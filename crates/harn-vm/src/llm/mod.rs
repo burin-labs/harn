@@ -562,10 +562,14 @@ async fn with_rate_limit_builtin(
 
     let mut attempt: usize = 0;
     loop {
-        rate_limit::acquire_permit(&provider).await;
-        let mut child_vm = ctx.child_vm();
-        let result = child_vm.call_closure_pub(&closure, &[]).await;
-        ctx.forward_output(&child_vm.take_output());
+        let (result, output) = {
+            let _rate_limit_permit = rate_limit::acquire_permit(&provider).await;
+            let mut child_vm = ctx.child_vm();
+            let result = child_vm.call_closure_pub(&closure, &[]).await;
+            let output = child_vm.take_output();
+            (result, output)
+        };
+        ctx.forward_output(&output);
         match result {
             Ok(v) => return Ok(v),
             Err(err) => {
