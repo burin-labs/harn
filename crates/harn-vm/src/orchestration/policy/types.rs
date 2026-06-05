@@ -180,7 +180,8 @@ pub enum ProcessSandboxPreset {
     /// Minimal host runtime roots needed to execute common system binaries.
     SystemRuntime,
     /// OS/vendor developer toolchains such as Xcode, Command Line Tools,
-    /// Homebrew, and language runtimes installed under standard system paths.
+    /// Homebrew, plus common user-managed runtime roots such as
+    /// `~/.local/share/uv`, `~/.rustup`, `~/.cargo`, `~/.pyenv`, and `~/.nvm`.
     DeveloperToolchains,
     /// Per-user package-manager config/cache roots used by npm, pip, cargo,
     /// git credential helpers, and enterprise CA configuration.

@@ -16,6 +16,7 @@ use std::process::Command;
 
 use super::{
     policy_allows_network, policy_allows_workspace_write,
+    process_sandbox_developer_toolchain_read_roots,
     process_sandbox_package_manager_config_read_roots, process_sandbox_policy_read_roots,
     process_sandbox_policy_write_roots, process_sandbox_presets, process_sandbox_readonly_roots,
     process_sandbox_roots, unavailable, PrepareOutcome, SandboxBackend,
@@ -135,12 +136,18 @@ fn has_swiftpm_option(args: &[String], option: &str) -> bool {
 }
 
 fn render_profile(policy: &CapabilityPolicy) -> String {
+    let developer_toolchain_read_roots = process_sandbox_developer_toolchain_read_roots(policy);
     let package_manager_read_roots = process_sandbox_package_manager_config_read_roots(policy);
-    render_profile_with_package_manager_read_roots(policy, &package_manager_read_roots)
+    render_profile_with_extra_read_roots(
+        policy,
+        &developer_toolchain_read_roots,
+        &package_manager_read_roots,
+    )
 }
 
-fn render_profile_with_package_manager_read_roots(
+fn render_profile_with_extra_read_roots(
     policy: &CapabilityPolicy,
+    developer_toolchain_read_roots: &[std::path::PathBuf],
     package_manager_read_roots: &[std::path::PathBuf],
 ) -> String {
     let roots = process_sandbox_roots(policy);
@@ -161,6 +168,12 @@ fn render_profile_with_package_manager_read_roots(
         profile.push_str(&format!(
             "(allow file-read* (subpath \"{}\"))\n",
             sandbox_profile_escape(root)
+        ));
+    }
+    for root in developer_toolchain_read_roots {
+        profile.push_str(&format!(
+            "(allow file-read* (subpath \"{}\"))\n",
+            sandbox_profile_escape(&root.display().to_string())
         ));
     }
     // Process-only read roots and Harn read-only roots are granted read but
@@ -394,8 +407,9 @@ mod tests {
 
         let package_roots =
             super::super::package_manager_config_read_roots_for_home(temp_home.path());
-        let profile = render_profile_with_package_manager_read_roots(
+        let profile = render_profile_with_extra_read_roots(
             &macos_policy_with_workspace_ops(&["read_text", "write_text", "delete"]),
+            &[],
             &package_roots,
         );
         let npmrc_path = super::super::package_manager_config_read_roots_for_home(temp_home.path())
@@ -418,6 +432,42 @@ mod tests {
             !profile.contains(&format!("(allow file-write* (subpath \"{escaped}\"))")),
             "package manager config must not get direct write access: {profile}"
         );
+    }
+
+    #[test]
+    fn sandbox_profile_allows_home_toolchain_roots_read_only() {
+        let temp_home = tempfile::tempdir().expect("temp home");
+        let toolchain_roots =
+            super::super::developer_toolchain_read_roots_for_home(temp_home.path());
+        let uv_path = toolchain_roots
+            .iter()
+            .find(|path| path.ends_with(std::path::Path::new(".local/share/uv")))
+            .expect("uv root")
+            .display()
+            .to_string();
+        let rustup_path = toolchain_roots
+            .iter()
+            .find(|path| path.ends_with(std::path::Path::new(".rustup")))
+            .expect("rustup root")
+            .display()
+            .to_string();
+        let profile = render_profile_with_extra_read_roots(
+            &macos_policy_with_workspace_ops(&["read_text", "write_text", "delete"]),
+            &toolchain_roots,
+            &[],
+        );
+
+        for path in [uv_path, rustup_path] {
+            let escaped = sandbox_profile_escape(&path);
+            assert!(
+                profile.contains(&format!("(allow file-read* (subpath \"{escaped}\"))")),
+                "home toolchain root should be readable: {profile}"
+            );
+            assert!(
+                !profile.contains(&format!("(allow file-write* (subpath \"{escaped}\"))")),
+                "home toolchain root must stay read-only: {profile}"
+            );
+        }
     }
 
     #[test]

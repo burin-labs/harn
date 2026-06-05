@@ -12,6 +12,7 @@ use std::process::Command;
 
 use super::{
     policy_allows_capability, policy_allows_network, policy_allows_workspace_write,
+    process_sandbox_developer_toolchain_read_roots,
     process_sandbox_package_manager_config_read_roots, process_sandbox_policy_read_roots,
     process_sandbox_policy_write_roots, process_sandbox_readonly_roots, process_sandbox_roots,
     sandbox_rejection, warn_once, PrepareOutcome, SandboxBackend, SandboxFallback,
@@ -168,6 +169,9 @@ fn landlock_profile(
             LANDLOCK_ACCESS_FS_READ_FILE | LANDLOCK_ACCESS_FS_READ_DIR | LANDLOCK_ACCESS_FS_EXECUTE,
             true,
         )?;
+    }
+    for root in process_sandbox_developer_toolchain_read_roots(policy) {
+        push_rule(&mut profile, root, read_only_access(), true)?;
     }
     let workspace_access = workspace_access(policy);
     for root in process_sandbox_roots(policy) {
@@ -586,6 +590,30 @@ mod tests {
             read_only_access() & WRITE_BITS,
             0,
             "package-manager Landlock rules use read-only access bits"
+        );
+    }
+
+    #[test]
+    fn developer_toolchain_roots_are_read_only() {
+        let temp_home = tempfile::tempdir().expect("temp home");
+        let roots = super::super::developer_toolchain_read_roots_for_home(temp_home.path());
+
+        assert!(
+            roots.iter().any(|path| path.ends_with(".local/share/uv")),
+            "uv runtimes should be part of the developer-toolchain preset"
+        );
+        assert!(
+            roots.iter().any(|path| path.ends_with(".rustup")),
+            "rustup should be part of the developer-toolchain preset"
+        );
+        assert!(
+            roots.iter().all(|path| path.starts_with(temp_home.path())),
+            "developer-toolchain roots must stay under HOME"
+        );
+        assert_eq!(
+            read_only_access() & WRITE_BITS,
+            0,
+            "developer-toolchain Landlock rules use read-only access bits"
         );
     }
 
