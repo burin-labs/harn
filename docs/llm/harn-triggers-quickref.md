@@ -123,6 +123,8 @@ Provider business logic ships as pure-Harn packages. The Rust runtime keeps only
 | Forgejo | <https://github.com/burin-labs/harn-forgejo-connector> | `harn add github.com/burin-labs/harn-forgejo-connector@v0.1.0` | `harn connector test . --provider forgejo` |
 | Gitea | <https://github.com/burin-labs/harn-gitea-connector> | `harn add github.com/burin-labs/harn-gitea-connector@v0.1.0` | `harn connector test . --provider gitea` |
 | Bitbucket | <https://github.com/burin-labs/harn-bitbucket-connector> | `harn add github.com/burin-labs/harn-bitbucket-connector@v0.1.0` | `harn connector test . --provider bitbucket` |
+| CircleCI | <https://github.com/burin-labs/harn-circleci-connector> | `harn add github.com/burin-labs/harn-circleci-connector@v0.1.0` | `harn connector test . --provider circleci` |
+| Buildkite | <https://github.com/burin-labs/harn-buildkite-connector> | `harn add github.com/burin-labs/harn-buildkite-connector@v0.1.0` | `harn connector test . --provider buildkite` |
 | SourceHut | <https://github.com/burin-labs/harn-sourcehut-connector> | `harn add github.com/burin-labs/harn-sourcehut-connector@v0.1.0` | `harn connector test . --provider sourcehut` |
 | Subversion | <https://github.com/burin-labs/harn-svn-connector> | `harn add github.com/burin-labs/harn-svn-connector@v0.1.0` | `harn connector test . --provider svn --run-poll-tick` |
 

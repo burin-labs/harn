@@ -1,0 +1,95 @@
+[package]
+name = "harn-circleci-connector"
+version = "0.1.0"
+description = "Pure-Harn CircleCI connector: signed webhooks, failure normalization, rerun-from-failed, artifacts."
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/burin-labs/harn-circleci-connector"
+harn = ">=0.8,<0.9"
+
+[exports]
+default = "src/lib.harn"
+
+[[providers]]
+id = "circleci"
+connector = { harn = "src/lib.harn" }
+capabilities = ["webhook", "rate_limit", "pagination"]
+
+[providers.setup]
+auth_type = "api-key"
+flow = "api-key"
+required_secrets = ["circleci/webhook-secret", "circleci/api-token"]
+setup_command = ["harn", "connect", "circleci"]
+validation_command = ["harn", "connect", "status", "--connector", "circleci", "--json"]
+
+[[providers.setup.health_checks]]
+id = "webhook-secret"
+kind = "secret"
+secret = "circleci/webhook-secret"
+
+[[providers.setup.health_checks]]
+id = "api-token"
+kind = "secret"
+secret = "circleci/api-token"
+
+[providers.setup.recovery]
+missing_auth = "Store circleci/webhook-secret and circleci/api-token before enabling CircleCI bindings."
+expired_credentials = "Rotate the CircleCI personal API token, update circleci/api-token, and rerun validation."
+revoked_credentials = "Issue a new CircleCI personal API token and replace circleci/api-token."
+missing_scopes = "Confirm the API token belongs to a user with access to the target CircleCI project."
+inaccessible_resource = "Confirm the token can reach the CircleCI project slug (vcs/org/repo)."
+transient_provider_outage = "Retry after the CircleCI API and webhook delivery endpoints are healthy."
+
+[connector_contract]
+version = 1
+
+[[connector_contract.fixtures]]
+provider = "circleci"
+name = "workflow completed success webhook"
+kind = "webhook"
+headers = { "circleci-event-type" = "workflow-completed", "circleci-signature" = "v1=a2f99a83204ded634a188a7f0072b73555c193b788fe604d9805aaef0a511f6c", "content-type" = "application/json" }
+metadata = { secret_ids = { signing_secret = "circleci/webhook-secret" } }
+body = '''{"id":"delivery-contract-wf-success","type":"workflow-completed","happened_at":"2026-05-01T12:05:00Z","workflow":{"id":"wf-aaaaaaaa-0000-1111-2222-333333333333","name":"build-and-test","status":"success","stopped_at":"2026-05-01T12:05:00Z","url":"https://app.circleci.com/pipelines/github/acme/widgets/42/workflows/wf-aaaaaaaa"},"pipeline":{"id":"pl-1","number":42,"vcs":{"provider_name":"github","origin_repository_url":"https://github.com/acme/widgets","target_repository_url":"https://github.com/acme/widgets","revision":"cccccccccccccccccccccccccccccccccccccccc","branch":"main"}},"project":{"id":"pr-1","name":"widgets","slug":"github/acme/widgets"},"organization":{"id":"org-1","name":"acme"}}'''
+expect_type = "event"
+expect_kind = "workflow-completed"
+expect_signature_state = "verified"
+expect_payload_contains = { provider = "circleci", schema_name = "CircleCIEventPayload", raw = { provider = "circleci", kind = "workflow-completed", status = "success", is_failure = false, project_slug = "github/acme/widgets", commit_sha = "cccccccccccccccccccccccccccccccccccccccc", branch = "main" } }
+expect_event_count = 1
+
+[[connector_contract.fixtures]]
+provider = "circleci"
+name = "workflow completed failed webhook"
+kind = "webhook"
+headers = { "circleci-event-type" = "workflow-completed", "circleci-signature" = "v1=48ae5a134527124fa6d8dddd077e3d5f3c9bc0962ba01d931e1397c70cf7a6a4", "content-type" = "application/json" }
+metadata = { secret_ids = { signing_secret = "circleci/webhook-secret" } }
+body = '''{"id":"delivery-contract-wf-failed","type":"workflow-completed","happened_at":"2026-05-01T13:05:00Z","workflow":{"id":"wf-bbbbbbbb-0000-1111-2222-333333333333","name":"build-and-test","status":"failed","stopped_at":"2026-05-01T13:05:00Z","url":"https://app.circleci.com/pipelines/github/acme/widgets/43/workflows/wf-bbbbbbbb"},"pipeline":{"id":"pl-2","number":43,"vcs":{"provider_name":"github","origin_repository_url":"https://github.com/contributor/widgets","target_repository_url":"https://github.com/acme/widgets","revision":"dddddddddddddddddddddddddddddddddddddddd","branch":"feature/login"}},"project":{"id":"pr-1","name":"widgets","slug":"github/acme/widgets"},"organization":{"id":"org-1","name":"acme"}}'''
+expect_type = "event"
+expect_kind = "workflow-completed"
+expect_signature_state = "verified"
+expect_payload_contains = { provider = "circleci", schema_name = "CircleCIEventPayload", raw = { provider = "circleci", kind = "workflow-completed", status = "failed", is_failure = true, project_slug = "github/acme/widgets", commit_sha = "dddddddddddddddddddddddddddddddddddddddd", branch = "feature/login" } }
+expect_event_count = 1
+
+[[connector_contract.fixtures]]
+provider = "circleci"
+name = "job completed failed webhook"
+kind = "webhook"
+headers = { "circleci-event-type" = "job-completed", "circleci-signature" = "v1=f9f5f9c54a37ad63ffb3e1a7d2b24999f12829bbe06963da11f06556682367d7", "content-type" = "application/json" }
+metadata = { secret_ids = { signing_secret = "circleci/webhook-secret" } }
+body = '''{"id":"delivery-contract-job-failed","type":"job-completed","happened_at":"2026-05-01T13:04:00Z","job":{"id":"job-eeeeeeee","number":128,"name":"test","status":"failed","started_at":"2026-05-01T13:01:00Z","stopped_at":"2026-05-01T13:04:00Z","web_url":"https://app.circleci.com/jobs/github/acme/widgets/128"},"workflow":{"id":"wf-bbbbbbbb-0000-1111-2222-333333333333","name":"build-and-test","url":"https://app.circleci.com/pipelines/github/acme/widgets/43/workflows/wf-bbbbbbbb"},"pipeline":{"id":"pl-2","number":43,"vcs":{"provider_name":"github","origin_repository_url":"https://github.com/contributor/widgets","target_repository_url":"https://github.com/acme/widgets","revision":"dddddddddddddddddddddddddddddddddddddddd","branch":"feature/login"}},"project":{"id":"pr-1","name":"widgets","slug":"github/acme/widgets"},"organization":{"id":"org-1","name":"acme"}}'''
+expect_type = "event"
+expect_kind = "job-completed"
+expect_signature_state = "verified"
+expect_payload_contains = { provider = "circleci", schema_name = "CircleCIEventPayload", raw = { provider = "circleci", kind = "job-completed", status = "failed", is_failure = true, project_slug = "github/acme/widgets", job = { job_number = 128, name = "test" } } }
+expect_event_count = 1
+
+[[connector_contract.fixtures]]
+provider = "circleci"
+name = "invalid signature reject"
+kind = "webhook"
+headers = { "circleci-event-type" = "workflow-completed", "circleci-signature" = "v1=0000000000000000000000000000000000000000000000000000000000000000", "content-type" = "application/json" }
+metadata = { secret_ids = { signing_secret = "circleci/webhook-secret" } }
+body = '''{"id":"delivery-contract-wf-success","type":"workflow-completed","happened_at":"2026-05-01T12:05:00Z","workflow":{"id":"wf-aaaaaaaa-0000-1111-2222-333333333333","name":"build-and-test","status":"success","stopped_at":"2026-05-01T12:05:00Z","url":"https://app.circleci.com/pipelines/github/acme/widgets/42/workflows/wf-aaaaaaaa"},"pipeline":{"id":"pl-1","number":42,"vcs":{"provider_name":"github","origin_repository_url":"https://github.com/acme/widgets","target_repository_url":"https://github.com/acme/widgets","revision":"cccccccccccccccccccccccccccccccccccccccc","branch":"main"}},"project":{"id":"pr-1","name":"widgets","slug":"github/acme/widgets"},"organization":{"id":"org-1","name":"acme"}}'''
+expect_type = "reject"
+expect_event_count = 0
+
+# No Harn-side package dependencies.
+[dependencies]

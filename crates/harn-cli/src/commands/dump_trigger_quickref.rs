@@ -69,6 +69,18 @@ const FIRST_PARTY_CONNECTOR_PACKAGES: &[FirstPartyConnectorPackage] = &[
         package_gate: "harn connector test . --provider bitbucket",
     },
     FirstPartyConnectorPackage {
+        provider: "CircleCI",
+        package_url: "https://github.com/burin-labs/harn-circleci-connector",
+        install: "harn add github.com/burin-labs/harn-circleci-connector@v0.1.0",
+        package_gate: "harn connector test . --provider circleci",
+    },
+    FirstPartyConnectorPackage {
+        provider: "Buildkite",
+        package_url: "https://github.com/burin-labs/harn-buildkite-connector",
+        install: "harn add github.com/burin-labs/harn-buildkite-connector@v0.1.0",
+        package_gate: "harn connector test . --provider buildkite",
+    },
+    FirstPartyConnectorPackage {
         provider: "SourceHut",
         package_url: "https://github.com/burin-labs/harn-sourcehut-connector",
         install: "harn add github.com/burin-labs/harn-sourcehut-connector@v0.1.0",
