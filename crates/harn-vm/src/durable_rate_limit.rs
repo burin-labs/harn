@@ -16,7 +16,7 @@ const DEFAULT_BUSY_TIMEOUT_MS: u64 = 5_000;
 const MAX_SLEEP_MS: u64 = 60_000;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-struct RateBucket {
+pub(crate) struct RateBucket {
     key: String,
     limit: u64,
     units: u64,
@@ -24,10 +24,31 @@ struct RateBucket {
     window_ms: u64,
 }
 
+impl RateBucket {
+    pub(crate) fn new(key: String, limit: u64, units: u64, window_ms: u64) -> Self {
+        let charged_units = if units == 0 { 0 } else { units.min(limit) };
+        Self {
+            key,
+            limit,
+            units,
+            charged_units,
+            window_ms,
+        }
+    }
+}
+
 #[derive(Debug, PartialEq, Eq)]
 struct ReserveAttempt {
     acquired: bool,
     retry_after_ms: u64,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct DurableRateLimitOutcome {
+    pub(crate) acquired: bool,
+    pub(crate) timed_out: bool,
+    pub(crate) waited_ms: u64,
+    pub(crate) retry_after_ms: u64,
 }
 
 pub(crate) fn register_durable_rate_limit_builtins(vm: &mut Vm) {
@@ -56,77 +77,22 @@ async fn durable_rate_limit_acquire_impl(
 
     sandbox::enforce_fs_path("durable_rate_limit_acquire", &state_path, FsAccess::Write)?;
 
-    let started_ms = now_wall_ms();
-    let mut waited_ms = 0_u64;
-    loop {
-        if vm
-            .cancel_token
-            .as_ref()
-            .is_some_and(|token| token.load(std::sync::atomic::Ordering::SeqCst))
-        {
-            return Err(VmError::Thrown(VmValue::String(Arc::from(
-                "kind:cancelled:VM cancelled by host",
-            ))));
-        }
-
-        let now_ms = now_wall_ms();
-        let attempt_path = state_path.clone();
-        let attempt_buckets = buckets.clone();
-        let attempt = tokio::task::spawn_blocking(move || {
-            try_reserve_once(&attempt_path, &attempt_buckets, now_ms)
+    let outcome =
+        acquire_durable_rate_limit(state_path.clone(), buckets.clone(), timeout_ms, || {
+            vm.cancel_token
+                .as_ref()
+                .is_some_and(|token| token.load(std::sync::atomic::Ordering::SeqCst))
         })
-        .await
-        .map_err(|error| {
-            VmError::Runtime(format!(
-                "durable_rate_limit_acquire: worker failed: {error}"
-            ))
-        })??;
+        .await?;
 
-        if attempt.acquired {
-            return Ok(result_value(
-                true,
-                false,
-                waited_ms,
-                0,
-                &state_path,
-                &buckets,
-            ));
-        }
-
-        let retry_after_ms = attempt.retry_after_ms.max(1);
-        let elapsed_ms = now_ms.saturating_sub(started_ms).max(0) as u64;
-        if let Some(timeout_ms) = timeout_ms {
-            if elapsed_ms >= timeout_ms {
-                return Ok(result_value(
-                    false,
-                    true,
-                    waited_ms,
-                    retry_after_ms,
-                    &state_path,
-                    &buckets,
-                ));
-            }
-            let remaining_ms = timeout_ms.saturating_sub(elapsed_ms);
-            if retry_after_ms > remaining_ms {
-                if remaining_ms > 0 {
-                    sleep_ms(remaining_ms).await;
-                    waited_ms = waited_ms.saturating_add(remaining_ms);
-                }
-                return Ok(result_value(
-                    false,
-                    true,
-                    waited_ms,
-                    retry_after_ms,
-                    &state_path,
-                    &buckets,
-                ));
-            }
-        }
-
-        let sleep_for_ms = retry_after_ms.min(MAX_SLEEP_MS);
-        sleep_ms(sleep_for_ms).await;
-        waited_ms = waited_ms.saturating_add(sleep_for_ms);
-    }
+    Ok(result_value(
+        outcome.acquired,
+        outcome.timed_out,
+        outcome.waited_ms,
+        outcome.retry_after_ms,
+        &state_path,
+        &buckets,
+    ))
 }
 
 pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[&DURABLE_RATE_LIMIT_ACQUIRE_IMPL_DEF];
@@ -198,14 +164,7 @@ fn parse_bucket(dict: &BTreeMap<String, VmValue>) -> Result<RateBucket, VmError>
             "durable_rate_limit_acquire: bucket.window_ms must be positive".to_string(),
         ));
     }
-    let charged_units = if units == 0 { 0 } else { units.min(limit) };
-    Ok(RateBucket {
-        key,
-        limit,
-        units,
-        charged_units,
-        window_ms,
-    })
+    Ok(RateBucket::new(key, limit, units, window_ms))
 }
 
 fn required_string_field(
@@ -354,6 +313,78 @@ fn try_reserve_once(
     })
 }
 
+pub(crate) async fn acquire_durable_rate_limit<F>(
+    state_path: PathBuf,
+    buckets: Vec<RateBucket>,
+    timeout_ms: Option<u64>,
+    is_cancelled: F,
+) -> Result<DurableRateLimitOutcome, VmError>
+where
+    F: Fn() -> bool,
+{
+    let started_ms = now_wall_ms();
+    let mut waited_ms = 0_u64;
+    loop {
+        if is_cancelled() {
+            return Err(VmError::Thrown(VmValue::String(Arc::from(
+                "kind:cancelled:VM cancelled by host",
+            ))));
+        }
+
+        let now_ms = now_wall_ms();
+        let attempt_path = state_path.clone();
+        let attempt_buckets = buckets.clone();
+        let attempt = tokio::task::spawn_blocking(move || {
+            try_reserve_once(&attempt_path, &attempt_buckets, now_ms)
+        })
+        .await
+        .map_err(|error| {
+            VmError::Runtime(format!(
+                "durable_rate_limit_acquire: worker failed: {error}"
+            ))
+        })??;
+
+        if attempt.acquired {
+            return Ok(DurableRateLimitOutcome {
+                acquired: true,
+                timed_out: false,
+                waited_ms,
+                retry_after_ms: 0,
+            });
+        }
+
+        let retry_after_ms = attempt.retry_after_ms.max(1);
+        let elapsed_ms = now_ms.saturating_sub(started_ms).max(0) as u64;
+        if let Some(timeout_ms) = timeout_ms {
+            if elapsed_ms >= timeout_ms {
+                return Ok(DurableRateLimitOutcome {
+                    acquired: false,
+                    timed_out: true,
+                    waited_ms,
+                    retry_after_ms,
+                });
+            }
+            let remaining_ms = timeout_ms.saturating_sub(elapsed_ms);
+            if retry_after_ms > remaining_ms {
+                if remaining_ms > 0 {
+                    sleep_ms(remaining_ms).await;
+                    waited_ms = waited_ms.saturating_add(remaining_ms);
+                }
+                return Ok(DurableRateLimitOutcome {
+                    acquired: false,
+                    timed_out: true,
+                    waited_ms,
+                    retry_after_ms,
+                });
+            }
+        }
+
+        let sleep_for_ms = retry_after_ms.min(MAX_SLEEP_MS);
+        sleep_ms(sleep_for_ms).await;
+        waited_ms = waited_ms.saturating_add(sleep_for_ms);
+    }
+}
+
 fn prune_bucket(
     tx: &rusqlite::Transaction<'_>,
     bucket: &RateBucket,
@@ -486,305 +517,4 @@ fn bucket_list_value(buckets: &[RateBucket]) -> VmValue {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::{compile_source, register_vm_stdlib, reset_thread_local_state, Vm};
-    use std::sync::Barrier;
-
-    async fn run_harn(base_dir: &std::path::Path, source: &str) -> Vec<String> {
-        reset_thread_local_state();
-        let chunk = compile_source(source).expect("compile source");
-        let mut vm = Vm::new();
-        register_vm_stdlib(&mut vm);
-        vm.set_source_dir(base_dir);
-        vm.execute(&chunk).await.expect("execute source");
-        vm.output()
-            .trim_end()
-            .lines()
-            .map(ToString::to_string)
-            .collect()
-    }
-
-    fn bucket(key: &str, limit: u64, units: u64, window_ms: u64) -> RateBucket {
-        RateBucket {
-            key: key.to_string(),
-            limit,
-            units,
-            charged_units: units.min(limit),
-            window_ms,
-        }
-    }
-
-    fn usage(path: &Path, key: &str) -> u64 {
-        let conn = Connection::open(path).expect("open sqlite");
-        conn.query_row(
-            "SELECT COALESCE(SUM(units), 0)
-             FROM durable_rate_limit_entries
-             WHERE bucket_key = ?1",
-            params![key],
-            |row| row.get::<_, i64>(0),
-        )
-        .expect("query")
-        .max(0) as u64
-    }
-
-    #[test]
-    fn reserve_blocks_until_window_expires() {
-        let temp = tempfile::tempdir().expect("tempdir");
-        let path = temp.path().join("rate.sqlite");
-        let buckets = vec![bucket("provider:rpm", 1, 1, 1_000)];
-
-        assert!(
-            try_reserve_once(&path, &buckets, 10_000)
-                .expect("first reserve")
-                .acquired
-        );
-        let blocked = try_reserve_once(&path, &buckets, 10_250).expect("blocked reserve");
-        assert_eq!(
-            blocked,
-            ReserveAttempt {
-                acquired: false,
-                retry_after_ms: 750
-            }
-        );
-        assert!(
-            try_reserve_once(&path, &buckets, 11_000)
-                .expect("expired reserve")
-                .acquired
-        );
-    }
-
-    #[test]
-    fn multi_bucket_reservation_is_atomic_when_one_bucket_is_full() {
-        let temp = tempfile::tempdir().expect("tempdir");
-        let path = temp.path().join("rate.sqlite");
-        let first = vec![
-            bucket("provider:rpm", 1, 1, 1_000),
-            bucket("model:tpm", 100, 50, 1_000),
-        ];
-        assert!(
-            try_reserve_once(&path, &first, 1_000)
-                .expect("initial reserve")
-                .acquired
-        );
-
-        let second = vec![
-            bucket("provider:rpm", 1, 1, 1_000),
-            bucket("model:tpm", 100, 10, 1_000),
-        ];
-        let blocked = try_reserve_once(&path, &second, 1_100).expect("blocked reserve");
-        assert!(!blocked.acquired);
-        assert_eq!(usage(&path, "model:tpm"), 50);
-    }
-
-    #[test]
-    fn oversized_reservation_charges_one_full_window() {
-        let temp = tempfile::tempdir().expect("tempdir");
-        let path = temp.path().join("rate.sqlite");
-        let buckets = vec![bucket("model:tpm", 100, 250, 1_000)];
-
-        assert!(
-            try_reserve_once(&path, &buckets, 1_000)
-                .expect("oversized reserve")
-                .acquired
-        );
-        assert_eq!(usage(&path, "model:tpm"), 100);
-    }
-
-    #[test]
-    fn concurrent_threads_do_not_over_reserve_shared_bucket() {
-        let temp = tempfile::tempdir().expect("tempdir");
-        let path = temp.path().join("rate.sqlite");
-        let buckets = vec![bucket("provider:rpm", 1, 1, 60_000)];
-        let barrier = Arc::new(Barrier::new(8));
-
-        let mut handles = Vec::new();
-        for _ in 0..8 {
-            let path = path.clone();
-            let buckets = buckets.clone();
-            let barrier = barrier.clone();
-            handles.push(std::thread::spawn(move || {
-                barrier.wait();
-                try_reserve_once(&path, &buckets, 1_000).expect("reserve")
-            }));
-        }
-
-        let attempts: Vec<_> = handles
-            .into_iter()
-            .map(|handle| handle.join().expect("thread"))
-            .collect();
-        assert_eq!(
-            attempts.iter().filter(|attempt| attempt.acquired).count(),
-            1
-        );
-        assert_eq!(
-            attempts.iter().filter(|attempt| !attempt.acquired).count(),
-            7
-        );
-        assert_eq!(usage(&path, "provider:rpm"), 1);
-    }
-
-    #[test]
-    fn duplicate_bucket_keys_are_rejected() {
-        let options = BTreeMap::from([(
-            "buckets".to_string(),
-            VmValue::List(Arc::new(vec![
-                VmValue::Dict(Arc::new(BTreeMap::from([
-                    ("key".to_string(), VmValue::String(Arc::from("same"))),
-                    ("limit".to_string(), VmValue::Int(1)),
-                ]))),
-                VmValue::Dict(Arc::new(BTreeMap::from([
-                    ("key".to_string(), VmValue::String(Arc::from("same"))),
-                    ("limit".to_string(), VmValue::Int(1)),
-                ]))),
-            ])),
-        )]);
-        let error = parse_buckets(&options).expect_err("duplicate keys should fail");
-        assert!(error.to_string().contains("duplicate bucket key `same`"));
-    }
-
-    #[tokio::test(flavor = "current_thread")]
-    async fn harn_builtin_returns_structured_timeout_without_real_sleep() {
-        tokio::task::LocalSet::new()
-            .run_until(async {
-                let temp = tempfile::tempdir().expect("tempdir");
-                let state_path = harn_string_path(temp.path().join("rate.sqlite"));
-                let source = r#"
-pipeline main(task) {
-  mock_time(1000)
-  let first = durable_rate_limit_acquire({
-    state_path: "__STATE_PATH__",
-    key: "provider:rpm",
-    limit: 1,
-    units: 1,
-    window_ms: 1000,
-  })
-  let second = durable_rate_limit_acquire({
-    state_path: "__STATE_PATH__",
-    key: "provider:rpm",
-    limit: 1,
-    units: 1,
-    window_ms: 1000,
-    timeout_ms: 0,
-  })
-  __io_println(to_string(first.ok))
-  __io_println(to_string(second.ok))
-  __io_println(to_string(second.timed_out))
-  __io_println(to_string(second.retry_after_ms))
-}
-"#
-                .replace("__STATE_PATH__", &state_path);
-                let lines = run_harn(temp.path(), &source).await;
-                assert_eq!(lines, vec!["true", "false", "true", "1000"]);
-            })
-            .await;
-    }
-
-    #[tokio::test(flavor = "current_thread")]
-    async fn harn_parallel_tasks_share_one_durable_bucket() {
-        tokio::task::LocalSet::new()
-            .run_until(async {
-                let temp = tempfile::tempdir().expect("tempdir");
-                let state_path = harn_string_path(temp.path().join("rate.sqlite"));
-                let source = r#"
-pipeline main(task) {
-  mock_time(1000)
-  let attempts = parallel each [1, 2, 3, 4] with { max_concurrent: 4 } { _ ->
-    durable_rate_limit_acquire({
-      state_path: "__STATE_PATH__",
-      key: "provider:rpm",
-      limit: 1,
-      units: 1,
-      window_ms: 60000,
-      timeout_ms: 0,
-    })
-  }
-  var successes = 0
-  var timeouts = 0
-  for attempt in attempts {
-    if attempt.ok {
-      successes = successes + 1
-    }
-    if attempt.timed_out {
-      timeouts = timeouts + 1
-    }
-  }
-  __io_println(to_string(successes))
-  __io_println(to_string(timeouts))
-}
-"#
-                .replace("__STATE_PATH__", &state_path);
-                let lines = run_harn(temp.path(), &source).await;
-                assert_eq!(lines, vec!["1", "3"]);
-            })
-            .await;
-    }
-
-    #[test]
-    fn harn_vms_on_multiple_threads_share_one_durable_bucket() {
-        let temp = tempfile::tempdir().expect("tempdir");
-        let base_dir = temp.path().to_path_buf();
-        let state_path = harn_string_path(temp.path().join("rate.sqlite"));
-        let source = Arc::new(
-            r#"
-pipeline main(task) {
-  let attempt = durable_rate_limit_acquire({
-    state_path: "__STATE_PATH__",
-    key: "provider:rpm",
-    limit: 1,
-    units: 1,
-    window_ms: 60000,
-    timeout_ms: 0,
-  })
-  __io_println(to_string(attempt.ok))
-  __io_println(to_string(attempt.timed_out))
-}
-"#
-            .replace("__STATE_PATH__", &state_path),
-        );
-        let barrier = Arc::new(Barrier::new(4));
-
-        let mut handles = Vec::new();
-        for _ in 0..4 {
-            let base_dir = base_dir.clone();
-            let source = source.clone();
-            let barrier = barrier.clone();
-            handles.push(std::thread::spawn(move || {
-                let runtime = tokio::runtime::Builder::new_current_thread()
-                    .enable_time()
-                    .build()
-                    .expect("current-thread runtime");
-                barrier.wait();
-                runtime.block_on(
-                    tokio::task::LocalSet::new()
-                        .run_until(async { run_harn(&base_dir, &source).await }),
-                )
-            }));
-        }
-
-        let outputs: Vec<_> = handles
-            .into_iter()
-            .map(|handle| handle.join().expect("thread"))
-            .collect();
-        assert_eq!(
-            outputs
-                .iter()
-                .filter(|lines| lines.as_slice() == ["true", "false"])
-                .count(),
-            1
-        );
-        assert_eq!(
-            outputs
-                .iter()
-                .filter(|lines| lines.as_slice() == ["false", "true"])
-                .count(),
-            3
-        );
-    }
-
-    fn harn_string_path(path: PathBuf) -> String {
-        path.to_string_lossy()
-            .replace('\\', "\\\\")
-            .replace('"', "\\\"")
-    }
-}
+mod tests;

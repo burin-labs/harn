@@ -4010,8 +4010,12 @@ Per-provider and per-model rate limiting is built in:
   to acquire a permit and auto-retry retryable failures.
 
 RPM/TPM shape sustained throughput; route `concurrency` and
-`max_concurrent` cap simultaneous in-flight work. Use both when
-batching LLM calls at scale.
+`max_concurrent` cap simultaneous in-flight work. RPM/TPM buckets are
+durable across Harn processes by default, using SQLite under Harn's runtime
+state root. Set `HARN_LLM_RATE_LIMIT_STATE_PATH` only to force an explicit
+shared path for an eval fleet, and set `HARN_LLM_RATE_LIMIT_DURABLE=0` only
+for constrained tests or embeddings. Use throughput and concurrency limits
+together when batching LLM calls at scale.
 
 ## Cache (`std/cache`)
 
