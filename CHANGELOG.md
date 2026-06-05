@@ -8,6 +8,17 @@ highlights live in [CHANGELOG-pre-0.6.md](CHANGELOG-pre-0.6.md).
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.8.78
+
+### Added
+
+- **Postgres query templates.** `std/postgres/query` now includes
+  `sql(...)` and `named_sql(...)` helpers that turn readable `{name}` SQL
+  templates into `$n` parameterized query records, plus explicit identifier and
+  source-controlled fragment helpers for SQL structure.
+- Added tree-sitter string-content nodes and SQL language injections for
+  `sql(...)` and `named_sql(...)` template strings from `std/postgres/query`.
+
 ## v0.8.77
 
 ### Added
