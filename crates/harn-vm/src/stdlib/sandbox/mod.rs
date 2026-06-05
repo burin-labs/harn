@@ -391,11 +391,15 @@ pub fn enforce_process_cwd(path: &Path) -> Result<(), VmError> {
     let Some(policy) = crate::orchestration::current_execution_policy() else {
         return Ok(());
     };
+    enforce_process_cwd_for_policy(path, &policy)
+}
+
+fn enforce_process_cwd_for_policy(path: &Path, policy: &CapabilityPolicy) -> Result<(), VmError> {
     if matches!(policy.sandbox_profile, SandboxProfile::Unrestricted) {
         return Ok(());
     }
     let candidate = normalize_for_policy(path);
-    let roots = normalized_workspace_roots(&policy);
+    let roots = normalized_workspace_roots(policy);
     if roots.iter().any(|root| path_is_within(&candidate, root)) {
         return Ok(());
     }
@@ -459,7 +463,8 @@ pub fn command_output(
 
     let output = match active_sandbox_policy() {
         Some((policy, profile)) => {
-            ActiveBackend::run_to_output(program, args, config, &policy, profile)?
+            let config = sandboxed_process_config(config, &policy)?;
+            ActiveBackend::run_to_output(program, args, &config, &policy, profile)?
         }
         None => {
             let mut command = Command::new(program);
@@ -477,6 +482,37 @@ pub fn command_output(
         span.finish(&output);
     }
     Ok(output)
+}
+
+fn sandboxed_process_config(
+    config: &ProcessCommandConfig,
+    policy: &CapabilityPolicy,
+) -> Result<ProcessCommandConfig, VmError> {
+    let mut resolved = config.clone();
+    if let Some(cwd) = resolved.cwd.as_ref() {
+        enforce_process_cwd_for_policy(cwd, policy)?;
+    } else {
+        resolved.cwd = Some(default_process_cwd_for_policy(policy)?);
+    }
+    Ok(resolved)
+}
+
+fn default_process_cwd_for_policy(policy: &CapabilityPolicy) -> Result<PathBuf, VmError> {
+    let roots = normalized_workspace_roots(policy);
+    let current = std::env::current_dir().map_err(|error| {
+        VmError::Thrown(crate::value::VmValue::String(std::sync::Arc::from(
+            format!("process cwd resolution failed: {error}"),
+        )))
+    })?;
+    let current = normalize_for_policy(&current);
+    if roots.iter().any(|root| path_is_within(&current, root)) {
+        return Ok(current);
+    }
+    roots.first().cloned().ok_or_else(|| {
+        VmError::Thrown(crate::value::VmValue::String(std::sync::Arc::from(
+            "process cwd resolution failed: no workspace root available",
+        )))
+    })
 }
 
 fn build_std_command<B: SandboxBackend + ?Sized>(
@@ -1114,6 +1150,54 @@ mod tests {
 
         pop_execution_policy();
         crate::stdlib::process::set_thread_execution_context(None);
+    }
+
+    #[test]
+    fn sandboxed_process_config_defaults_cwd_to_current_when_allowed() {
+        let cwd = std::env::current_dir().unwrap();
+        let policy = CapabilityPolicy {
+            sandbox_profile: SandboxProfile::Worktree,
+            workspace_roots: vec![cwd.to_string_lossy().into_owned()],
+            ..CapabilityPolicy::default()
+        };
+
+        let resolved = sandboxed_process_config(&ProcessCommandConfig::default(), &policy).unwrap();
+
+        assert_eq!(resolved.cwd.unwrap(), normalize_for_policy(&cwd));
+    }
+
+    #[test]
+    fn sandboxed_process_config_defaults_cwd_to_workspace_when_current_is_outside() {
+        let workspace = tempfile::tempdir().unwrap();
+        let policy = CapabilityPolicy {
+            sandbox_profile: SandboxProfile::Worktree,
+            workspace_roots: vec![workspace.path().to_string_lossy().into_owned()],
+            ..CapabilityPolicy::default()
+        };
+
+        let resolved = sandboxed_process_config(&ProcessCommandConfig::default(), &policy).unwrap();
+
+        assert_eq!(
+            resolved.cwd.unwrap(),
+            normalize_for_policy(workspace.path())
+        );
+    }
+
+    #[test]
+    fn sandboxed_process_config_rejects_explicit_cwd_outside_workspace() {
+        let workspace = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        let policy = CapabilityPolicy {
+            sandbox_profile: SandboxProfile::Worktree,
+            workspace_roots: vec![workspace.path().to_string_lossy().into_owned()],
+            ..CapabilityPolicy::default()
+        };
+        let config = ProcessCommandConfig {
+            cwd: Some(outside.path().to_path_buf()),
+            ..ProcessCommandConfig::default()
+        };
+
+        assert!(sandboxed_process_config(&config, &policy).is_err());
     }
 
     #[test]
