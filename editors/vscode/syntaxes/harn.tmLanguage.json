@@ -50,6 +50,20 @@
           }
         },
         {
+          "name": "string.quoted.triple.harn",
+          "begin": "\"\"\"",
+          "end": "\"\"\"",
+          "beginCaptures": {
+            "0": { "name": "punctuation.definition.string.begin.harn" }
+          },
+          "endCaptures": {
+            "0": { "name": "punctuation.definition.string.end.harn" }
+          },
+          "patterns": [
+            { "include": "#string-interpolation" }
+          ]
+        },
+        {
           "name": "string.quoted.double.harn",
           "begin": "\"",
           "end": "\"",
@@ -58,20 +72,25 @@
               "name": "constant.character.escape.harn",
               "match": "\\\\."
             },
-            {
-              "name": "meta.embedded.expression.harn",
-              "begin": "\\$\\{",
-              "end": "\\}",
-              "beginCaptures": {
-                "0": { "name": "punctuation.definition.template-expression.begin.harn" }
-              },
-              "endCaptures": {
-                "0": { "name": "punctuation.definition.template-expression.end.harn" }
-              },
-              "patterns": [
-                { "include": "source.harn" }
-              ]
-            }
+            { "include": "#string-interpolation" }
+          ]
+        }
+      ]
+    },
+    "string-interpolation": {
+      "patterns": [
+        {
+          "name": "meta.embedded.expression.harn",
+          "begin": "\\$\\{",
+          "end": "\\}",
+          "beginCaptures": {
+            "0": { "name": "punctuation.definition.template-expression.begin.harn" }
+          },
+          "endCaptures": {
+            "0": { "name": "punctuation.definition.template-expression.end.harn" }
+          },
+          "patterns": [
+            { "include": "source.harn" }
           ]
         }
       ]

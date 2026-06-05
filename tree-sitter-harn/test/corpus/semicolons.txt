@@ -36,9 +36,15 @@ skill deploy {
   (skill_declaration
     name: (identifier)
     field_name: (identifier)
-    field_value: (string_literal)
+    field_value: (string_literal
+      (string_delimiter)
+      (string_content)
+      (string_delimiter))
     field_name: (identifier)
-    field_value: (string_literal)))
+    field_value: (string_literal
+      (string_delimiter)
+      (string_content)
+      (string_delimiter))))
 
 ==================
 Invalid Else After Semicolon

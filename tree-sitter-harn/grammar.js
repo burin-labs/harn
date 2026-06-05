@@ -982,7 +982,6 @@ module.exports = grammar({
 
     _primary: ($) =>
       choice(
-        $.interpolated_string,
         $.multiline_string_literal,
         $.raw_string_literal,
         $.string_literal,
@@ -999,30 +998,47 @@ module.exports = grammar({
         $.fn_expression
       ),
 
-    string_literal: (_) =>
-      token(seq('"', repeat(choice(/[^"\\$\n]/, /\\[ntr\\"$]/, /\$[^{]/)), '"')),
-
-    multiline_string_literal: (_) =>
-      token(seq('"""', repeat(choice(/[^"]/, /"[^"]/, /""[^"]/)), '"""')),
-
-    raw_string_literal: (_) =>
-      token(seq('r"', repeat(/[^"\n]/), '"')),
-
-    interpolated_string: ($) =>
+    string_literal: ($) =>
       seq(
-        '"',
-        repeat(
-          choice(
-            $.interpolation,
-            $.string_content,
-            $.string_dollar
-          )
-        ),
-        '"'
+        alias('"', $.string_delimiter),
+        repeat(choice(
+          $.interpolation,
+          $.string_content,
+          $.string_escape,
+          $.string_dollar
+        )),
+        alias(token.immediate('"'), $.string_delimiter)
+      ),
+
+    multiline_string_literal: ($) =>
+      seq(
+        alias('"""', $.multiline_string_delimiter),
+        repeat(choice(
+          $.interpolation,
+          $.multiline_string_content,
+          $.string_dollar
+        )),
+        alias(token.immediate('"""'), $.multiline_string_delimiter)
+      ),
+
+    raw_string_literal: ($) =>
+      seq(
+        alias('r"', $.raw_string_delimiter),
+        optional($.raw_string_content),
+        alias(token.immediate('"'), $.raw_string_delimiter)
       ),
 
     string_content: (_) =>
       token.immediate(prec(1, /[^"\\$\n]+/)),
+
+    multiline_string_content: (_) =>
+      token.immediate(prec(1, /([^"$\\]|"[^"]|""[^"]|\\[\s\S])+/)),
+
+    raw_string_content: (_) =>
+      token.immediate(prec(1, /[^"\n]+/)),
+
+    string_escape: (_) =>
+      token.immediate(/\\[^\n]/),
 
     string_dollar: (_) =>
       token.immediate("$"),

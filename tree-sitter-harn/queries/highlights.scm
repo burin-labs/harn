@@ -62,9 +62,14 @@
 (integer_literal) @number
 (float_literal) @number.float
 (duration_literal) @number
-(string_literal) @string
-(interpolated_string) @string
+(string_delimiter) @punctuation.definition.string
+(multiline_string_delimiter) @punctuation.definition.string
+(raw_string_delimiter) @punctuation.definition.string
 (string_content) @string
+(multiline_string_content) @string
+(raw_string_content) @string
+(string_escape) @string.escape
+(string_dollar) @string
 (interpolation
   "${" @punctuation.special
   "}" @punctuation.special)

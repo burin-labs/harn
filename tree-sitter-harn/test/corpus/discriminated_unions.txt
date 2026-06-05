@@ -15,7 +15,10 @@ type Event = {type: "click", x: int, y: int} | {type: "scroll", dy: int}
           (shape_field
             name: (identifier)
             type: (type_annotation
-              (string_literal)))
+              (string_literal
+                (string_delimiter)
+                (string_content)
+                (string_delimiter))))
           (shape_field
             name: (identifier)
             type: (type_annotation
@@ -29,7 +32,10 @@ type Event = {type: "click", x: int, y: int} | {type: "scroll", dy: int}
           (shape_field
             name: (identifier)
             type: (type_annotation
-              (string_literal)))
+              (string_literal
+                (string_delimiter)
+                (string_content)
+                (string_delimiter))))
           (shape_field
             name: (identifier)
             type: (type_annotation
@@ -49,11 +55,20 @@ type Verdict = "pass" | "fail" | "unclear"
     type: (type_annotation
       (type_annotation
         (type_annotation
-          (string_literal))
+          (string_literal
+            (string_delimiter)
+            (string_content)
+            (string_delimiter)))
         (type_annotation
-          (string_literal)))
+          (string_literal
+            (string_delimiter)
+            (string_content)
+            (string_delimiter))))
       (type_annotation
-        (string_literal)))))
+        (string_literal
+          (string_delimiter)
+          (string_content)
+          (string_delimiter))))))
 
 ==================
 Intersection Type

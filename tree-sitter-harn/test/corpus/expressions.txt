@@ -84,7 +84,10 @@ pipeline test() {
         value: (ternary_expression
           (identifier)
           (list_literal
-            (string_literal)
+            (string_literal
+              (string_delimiter)
+              (string_content)
+              (string_delimiter))
             (identifier))
           (list_literal)))
       (let_binding
@@ -93,10 +96,16 @@ pipeline test() {
           (identifier)
           (subscript_expression
             object: (list_literal
-              (string_literal)
+              (string_literal
+                (string_delimiter)
+                (string_content)
+                (string_delimiter))
               (identifier))
             (integer_literal))
-          (string_literal))))))
+          (string_literal
+            (string_delimiter)
+            (string_content)
+            (string_delimiter)))))))
 
 ==================
 Comparison With Identifier LHS
@@ -314,7 +323,10 @@ pipeline test(task) {
         name: (identifier)
         value: (nil_coalescing_expression
           (nil)
-          (string_literal)))
+          (string_literal
+            (string_delimiter)
+            (string_content)
+            (string_delimiter))))
       (let_binding
         name: (identifier)
         value: (binary_expression

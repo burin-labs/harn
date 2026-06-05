@@ -27,7 +27,10 @@ pipeline default() {
               (integer_literal))
             body: (block
               (expression_statement
-                (string_literal))))
+                (string_literal
+                  (string_delimiter)
+                  (string_content)
+                  (string_delimiter)))))
           (match_arm
             pattern: (or_pattern
               (integer_literal)
@@ -38,12 +41,18 @@ pipeline default() {
               (integer_literal))
             body: (block
               (expression_statement
-                (string_literal))))
+                (string_literal
+                  (string_delimiter)
+                  (string_content)
+                  (string_delimiter)))))
           (match_arm
             pattern: (identifier)
             body: (block
               (expression_statement
-                (string_literal)))))))))
+                (string_literal
+                  (string_delimiter)
+                  (string_content)
+                  (string_delimiter))))))))))
 
 ==================
 Match String Or Pattern
@@ -68,13 +77,28 @@ pipeline default() {
           value: (identifier)
           (match_arm
             pattern: (or_pattern
-              (string_literal)
-              (string_literal))
+              (string_literal
+                (string_delimiter)
+                (string_content)
+                (string_delimiter))
+              (string_literal
+                (string_delimiter)
+                (string_content)
+                (string_delimiter)))
             body: (block
               (expression_statement
-                (string_literal))))
+                (string_literal
+                  (string_delimiter)
+                  (string_content)
+                  (string_delimiter)))))
           (match_arm
-            pattern: (string_literal)
+            pattern: (string_literal
+              (string_delimiter)
+              (string_content)
+              (string_delimiter))
             body: (block
               (expression_statement
-                (string_literal)))))))))
+                (string_literal
+                  (string_delimiter)
+                  (string_content)
+                  (string_delimiter))))))))))

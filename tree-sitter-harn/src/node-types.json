@@ -68,10 +68,6 @@
           "named": true
         },
         {
-          "type": "interpolated_string",
-          "named": true
-        },
-        {
           "type": "list_literal",
           "named": true
         },
@@ -266,10 +262,6 @@
           },
           {
             "type": "integer_literal",
-            "named": true
-          },
-          {
-            "type": "interpolated_string",
             "named": true
           },
           {
@@ -715,10 +707,6 @@
         },
         {
           "type": "integer_literal",
-          "named": true
-        },
-        {
-          "type": "interpolated_string",
           "named": true
         },
         {
@@ -1310,10 +1298,6 @@
             "named": true
           },
           {
-            "type": "interpolated_string",
-            "named": true
-          },
-          {
             "type": "list_literal",
             "named": true
           },
@@ -1503,10 +1487,6 @@
           },
           {
             "type": "integer_literal",
-            "named": true
-          },
-          {
-            "type": "interpolated_string",
             "named": true
           },
           {
@@ -1868,10 +1848,6 @@
             "named": true
           },
           {
-            "type": "interpolated_string",
-            "named": true
-          },
-          {
             "type": "list_literal",
             "named": true
           },
@@ -2051,10 +2027,6 @@
           },
           {
             "type": "integer_literal",
-            "named": true
-          },
-          {
-            "type": "interpolated_string",
             "named": true
           },
           {
@@ -2253,10 +2225,6 @@
             "named": true
           },
           {
-            "type": "interpolated_string",
-            "named": true
-          },
-          {
             "type": "keyword_identifier",
             "named": true
           },
@@ -2424,10 +2392,6 @@
           },
           {
             "type": "integer_literal",
-            "named": true
-          },
-          {
-            "type": "interpolated_string",
             "named": true
           },
           {
@@ -2637,10 +2601,6 @@
           "named": true
         },
         {
-          "type": "interpolated_string",
-          "named": true
-        },
-        {
           "type": "list_literal",
           "named": true
         },
@@ -2809,10 +2769,6 @@
         },
         {
           "type": "integer_literal",
-          "named": true
-        },
-        {
-          "type": "interpolated_string",
           "named": true
         },
         {
@@ -3050,10 +3006,6 @@
           },
           {
             "type": "integer_literal",
-            "named": true
-          },
-          {
-            "type": "interpolated_string",
             "named": true
           },
           {
@@ -3411,10 +3363,6 @@
           "named": true
         },
         {
-          "type": "interpolated_string",
-          "named": true
-        },
-        {
           "type": "list_literal",
           "named": true
         },
@@ -3687,10 +3635,6 @@
           },
           {
             "type": "integer_literal",
-            "named": true
-          },
-          {
-            "type": "interpolated_string",
             "named": true
           },
           {
@@ -3981,10 +3925,6 @@
             "named": true
           },
           {
-            "type": "interpolated_string",
-            "named": true
-          },
-          {
             "type": "list_literal",
             "named": true
           },
@@ -4177,10 +4117,6 @@
             "named": true
           },
           {
-            "type": "interpolated_string",
-            "named": true
-          },
-          {
             "type": "list_literal",
             "named": true
           },
@@ -4345,10 +4281,6 @@
         },
         {
           "type": "integer_literal",
-          "named": true
-        },
-        {
-          "type": "interpolated_string",
           "named": true
         },
         {
@@ -4558,10 +4490,6 @@
           },
           {
             "type": "integer_literal",
-            "named": true
-          },
-          {
-            "type": "interpolated_string",
             "named": true
           },
           {
@@ -4817,29 +4745,6 @@
     }
   },
   {
-    "type": "interpolated_string",
-    "named": true,
-    "fields": {},
-    "children": {
-      "multiple": true,
-      "required": false,
-      "types": [
-        {
-          "type": "interpolation",
-          "named": true
-        },
-        {
-          "type": "string_content",
-          "named": true
-        },
-        {
-          "type": "string_dollar",
-          "named": true
-        }
-      ]
-    }
-  },
-  {
     "type": "interpolation",
     "named": true,
     "fields": {},
@@ -4905,10 +4810,6 @@
         },
         {
           "type": "integer_literal",
-          "named": true
-        },
-        {
-          "type": "interpolated_string",
           "named": true
         },
         {
@@ -5120,10 +5021,6 @@
             "named": true
           },
           {
-            "type": "interpolated_string",
-            "named": true
-          },
-          {
             "type": "list_literal",
             "named": true
           },
@@ -5297,10 +5194,6 @@
         },
         {
           "type": "integer_literal",
-          "named": true
-        },
-        {
-          "type": "interpolated_string",
           "named": true
         },
         {
@@ -5494,10 +5387,6 @@
           "named": true
         },
         {
-          "type": "interpolated_string",
-          "named": true
-        },
-        {
           "type": "list_literal",
           "named": true
         },
@@ -5679,10 +5568,6 @@
             "named": true
           },
           {
-            "type": "interpolated_string",
-            "named": true
-          },
-          {
             "type": "list_literal",
             "named": true
           },
@@ -5846,10 +5731,6 @@
           },
           {
             "type": "integer_literal",
-            "named": true
-          },
-          {
-            "type": "interpolated_string",
             "named": true
           },
           {
@@ -6026,10 +5907,6 @@
           },
           {
             "type": "integer_literal",
-            "named": true
-          },
-          {
-            "type": "interpolated_string",
             "named": true
           },
           {
@@ -6229,10 +6106,6 @@
             "named": true
           },
           {
-            "type": "interpolated_string",
-            "named": true
-          },
-          {
             "type": "list_literal",
             "named": true
           },
@@ -6347,6 +6220,33 @@
     }
   },
   {
+    "type": "multiline_string_literal",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": true,
+      "types": [
+        {
+          "type": "interpolation",
+          "named": true
+        },
+        {
+          "type": "multiline_string_content",
+          "named": true
+        },
+        {
+          "type": "multiline_string_delimiter",
+          "named": true
+        },
+        {
+          "type": "string_dollar",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
     "type": "mutex_block",
     "named": true,
     "fields": {
@@ -6422,10 +6322,6 @@
           },
           {
             "type": "integer_literal",
-            "named": true
-          },
-          {
-            "type": "interpolated_string",
             "named": true
           },
           {
@@ -6606,10 +6502,6 @@
           "named": true
         },
         {
-          "type": "interpolated_string",
-          "named": true
-        },
-        {
           "type": "list_literal",
           "named": true
         },
@@ -6778,10 +6670,6 @@
         },
         {
           "type": "integer_literal",
-          "named": true
-        },
-        {
-          "type": "interpolated_string",
           "named": true
         },
         {
@@ -7004,10 +6892,6 @@
           },
           {
             "type": "integer_literal",
-            "named": true
-          },
-          {
-            "type": "interpolated_string",
             "named": true
           },
           {
@@ -7371,10 +7255,6 @@
             "named": true
           },
           {
-            "type": "interpolated_string",
-            "named": true
-          },
-          {
             "type": "list_literal",
             "named": true
           },
@@ -7735,10 +7615,6 @@
             "named": true
           },
           {
-            "type": "interpolated_string",
-            "named": true
-          },
-          {
             "type": "list_literal",
             "named": true
           },
@@ -7908,10 +7784,6 @@
           },
           {
             "type": "integer_literal",
-            "named": true
-          },
-          {
-            "type": "interpolated_string",
             "named": true
           },
           {
@@ -8280,10 +8152,6 @@
           "named": true
         },
         {
-          "type": "interpolated_string",
-          "named": true
-        },
-        {
           "type": "list_literal",
           "named": true
         },
@@ -8452,10 +8320,6 @@
         },
         {
           "type": "integer_literal",
-          "named": true
-        },
-        {
-          "type": "interpolated_string",
           "named": true
         },
         {
@@ -8680,10 +8544,6 @@
             "named": true
           },
           {
-            "type": "interpolated_string",
-            "named": true
-          },
-          {
             "type": "list_literal",
             "named": true
           },
@@ -8870,10 +8730,6 @@
           "named": true
         },
         {
-          "type": "interpolated_string",
-          "named": true
-        },
-        {
           "type": "list_literal",
           "named": true
         },
@@ -8977,6 +8833,25 @@
     }
   },
   {
+    "type": "raw_string_literal",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": true,
+      "types": [
+        {
+          "type": "raw_string_content",
+          "named": true
+        },
+        {
+          "type": "raw_string_delimiter",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
     "type": "require_statement",
     "named": true,
     "fields": {
@@ -9042,10 +8917,6 @@
           },
           {
             "type": "integer_literal",
-            "named": true
-          },
-          {
-            "type": "interpolated_string",
             "named": true
           },
           {
@@ -9212,10 +9083,6 @@
           },
           {
             "type": "integer_literal",
-            "named": true
-          },
-          {
-            "type": "interpolated_string",
             "named": true
           },
           {
@@ -9401,10 +9268,6 @@
             "named": true
           },
           {
-            "type": "interpolated_string",
-            "named": true
-          },
-          {
             "type": "list_literal",
             "named": true
           },
@@ -9574,10 +9437,6 @@
         },
         {
           "type": "integer_literal",
-          "named": true
-        },
-        {
-          "type": "interpolated_string",
           "named": true
         },
         {
@@ -9801,10 +9660,6 @@
             "named": true
           },
           {
-            "type": "interpolated_string",
-            "named": true
-          },
-          {
             "type": "list_literal",
             "named": true
           },
@@ -10010,10 +9865,6 @@
           },
           {
             "type": "integer_literal",
-            "named": true
-          },
-          {
-            "type": "interpolated_string",
             "named": true
           },
           {
@@ -10240,10 +10091,6 @@
             "named": true
           },
           {
-            "type": "interpolated_string",
-            "named": true
-          },
-          {
             "type": "list_literal",
             "named": true
           },
@@ -10426,10 +10273,6 @@
             "named": true
           },
           {
-            "type": "interpolated_string",
-            "named": true
-          },
-          {
             "type": "list_literal",
             "named": true
           },
@@ -10596,10 +10439,6 @@
             "named": true
           },
           {
-            "type": "interpolated_string",
-            "named": true
-          },
-          {
             "type": "list_literal",
             "named": true
           },
@@ -10763,10 +10602,6 @@
           },
           {
             "type": "integer_literal",
-            "named": true
-          },
-          {
-            "type": "interpolated_string",
             "named": true
           },
           {
@@ -11133,10 +10968,6 @@
           "named": true
         },
         {
-          "type": "interpolated_string",
-          "named": true
-        },
-        {
           "type": "list_literal",
           "named": true
         },
@@ -11234,6 +11065,37 @@
         },
         {
           "type": "unary_expression",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "string_literal",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": true,
+      "types": [
+        {
+          "type": "interpolation",
+          "named": true
+        },
+        {
+          "type": "string_content",
+          "named": true
+        },
+        {
+          "type": "string_delimiter",
+          "named": true
+        },
+        {
+          "type": "string_dollar",
+          "named": true
+        },
+        {
+          "type": "string_escape",
           "named": true
         }
       ]
@@ -11387,10 +11249,6 @@
           },
           {
             "type": "integer_literal",
-            "named": true
-          },
-          {
-            "type": "interpolated_string",
             "named": true
           },
           {
@@ -11558,10 +11416,6 @@
         },
         {
           "type": "integer_literal",
-          "named": true
-        },
-        {
-          "type": "interpolated_string",
           "named": true
         },
         {
@@ -11736,10 +11590,6 @@
           "named": true
         },
         {
-          "type": "interpolated_string",
-          "named": true
-        },
-        {
           "type": "list_literal",
           "named": true
         },
@@ -11908,10 +11758,6 @@
         },
         {
           "type": "integer_literal",
-          "named": true
-        },
-        {
-          "type": "interpolated_string",
           "named": true
         },
         {
@@ -12348,10 +12194,6 @@
             "named": true
           },
           {
-            "type": "interpolated_string",
-            "named": true
-          },
-          {
             "type": "list_literal",
             "named": true
           },
@@ -12521,10 +12363,6 @@
         },
         {
           "type": "integer_literal",
-          "named": true
-        },
-        {
-          "type": "interpolated_string",
           "named": true
         },
         {
@@ -12789,10 +12627,6 @@
             "named": true
           },
           {
-            "type": "interpolated_string",
-            "named": true
-          },
-          {
             "type": "list_literal",
             "named": true
           },
@@ -12982,10 +12816,6 @@
         },
         {
           "type": "integer_literal",
-          "named": true
-        },
-        {
-          "type": "interpolated_string",
           "named": true
         },
         {
@@ -13192,10 +13022,6 @@
             "named": true
           },
           {
-            "type": "interpolated_string",
-            "named": true
-          },
-          {
             "type": "list_literal",
             "named": true
           },
@@ -13397,10 +13223,6 @@
             "named": true
           },
           {
-            "type": "interpolated_string",
-            "named": true
-          },
-          {
             "type": "list_literal",
             "named": true
           },
@@ -13573,10 +13395,6 @@
           "named": true
         },
         {
-          "type": "interpolated_string",
-          "named": true
-        },
-        {
           "type": "list_literal",
           "named": true
         },
@@ -13689,10 +13507,6 @@
   },
   {
     "type": "!=",
-    "named": false
-  },
-  {
-    "type": "\"",
     "named": false
   },
   {
@@ -13997,7 +13811,11 @@
     "named": false
   },
   {
-    "type": "multiline_string_literal",
+    "type": "multiline_string_content",
+    "named": true
+  },
+  {
+    "type": "multiline_string_delimiter",
     "named": true
   },
   {
@@ -14033,7 +13851,11 @@
     "named": false
   },
   {
-    "type": "raw_string_literal",
+    "type": "raw_string_content",
+    "named": true
+  },
+  {
+    "type": "raw_string_delimiter",
     "named": true
   },
   {
@@ -14085,11 +13907,15 @@
     "named": true
   },
   {
+    "type": "string_delimiter",
+    "named": true
+  },
+  {
     "type": "string_dollar",
     "named": true
   },
   {
-    "type": "string_literal",
+    "type": "string_escape",
     "named": true
   },
   {
