@@ -2098,6 +2098,18 @@ fn build_agent_event(
             kind: "no_progress_streak_nudge".to_string(),
             content: get_usize("turns_since_progress").to_string(),
         }),
+        // `tool_parse_error_feedback` fires when a turn's tool calls were ALL
+        // dropped by the parser (>= 1 parse error, 0 dispatched). The engine
+        // injects the purpose-built parse-guidance prompt instead of the
+        // generic no-progress nudge; this surfaces that correction to operators
+        // on the FeedbackInjected stream (engine-injected, not user-injected),
+        // exactly like the sibling text-mode nudges above. `content` carries the
+        // first parser diagnostic that drove the correction.
+        "tool_parse_error_feedback" => Ok(AgentEvent::FeedbackInjected {
+            session_id: session_id.to_string(),
+            kind: "tool_parse_error_feedback".to_string(),
+            content: get_string("error_summary"),
+        }),
         other => Err(VmError::Runtime(format!(
             "{HOST_AGENT_EMIT_EVENT}: unsupported event type `{other}`"
         ))),

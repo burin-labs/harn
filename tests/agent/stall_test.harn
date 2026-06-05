@@ -51,3 +51,64 @@ pipeline test_mixed_turn_with_real_call_is_progress(task) {
   let o3 = _observe(o2.state, mixed, 3)
   assert(o3.warning == nil)
 }
+
+fn _observe_parse_error(state, iteration) {
+  // 0 tool calls + non-empty text, but the turn carried parser errors (the calls
+  // were dropped). `had_parse_errors = true`.
+  return agent_stall_observe_tool_calls(
+    "unit",
+    [],
+    iteration,
+    CONFIG,
+    state,
+    true,
+    nil,
+    "I edited the file.",
+    true,
+  )
+}
+
+fn _observe_text_only(state, iteration) {
+  // Same shape but a genuine no-progress monologue (no parser errors).
+  return agent_stall_observe_tool_calls(
+    "unit",
+    [],
+    iteration,
+    CONFIG,
+    state,
+    true,
+    nil,
+    "I edited the file.",
+    false,
+  )
+}
+
+pipeline test_parse_error_turn_is_not_no_progress(task) {
+  // A turn whose calls were ALL dropped by the parser is a malformed-call turn,
+  // not a no-progress monologue. Even across the no_progress_messages threshold
+  // (3) it must NOT trip the stall detector and must NOT accumulate the
+  // no-progress streak — the model already tried to act; parse-guidance feedback
+  // (injected by the loop) is the correct response, not a narration-loop nudge.
+  let o1 = _observe_parse_error(agent_stall_initial_state(), 1)
+  assert(o1.warning == nil)
+  assert(o1.state.no_progress_streak == 0)
+  let o2 = _observe_parse_error(o1.state, 2)
+  assert(o2.warning == nil)
+  assert(o2.state.no_progress_streak == 0)
+  let o3 = _observe_parse_error(o2.state, 3)
+  assert(o3.warning == nil)
+  assert(o3.state.no_progress_streak == 0)
+}
+
+pipeline test_text_only_turn_without_parse_errors_still_trips(task) {
+  // Control: the SAME 0-call + text turn WITHOUT parse errors is a real
+  // no-progress monologue and must still trip at the threshold. Guards against
+  // the parse-error gate accidentally disabling no-progress detection wholesale.
+  let o1 = _observe_text_only(agent_stall_initial_state(), 1)
+  assert(o1.warning == nil)
+  assert(o1.state.no_progress_streak == 1)
+  let o2 = _observe_text_only(o1.state, 2)
+  assert(o2.warning == nil)
+  let o3 = _observe_text_only(o2.state, 3)
+  assert(o3.warning != nil)
+}

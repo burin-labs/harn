@@ -18,7 +18,7 @@ import {
 import { agent_build_turn_messages, agent_build_turn_system_fragments } from "std/agent/preflight"
 import { agent_dispatch_tool_batch, agent_dispatch_tool_call } from "std/agent/primitives"
 import { agent_progress_apply_options } from "std/agent/progress"
-import { native_tool_contract_feedback_prompt } from "std/agent/prompts"
+import { native_tool_contract_feedback_prompt, parse_guidance_prompt } from "std/agent/prompts"
 import {
   agent_required_tools_enforce,
   agent_required_tools_inject_feedback,
@@ -630,6 +630,36 @@ fn __tool_call_args(call) {
 
 fn __native_fallback_feedback(policy, fallback_index) {
   return native_tool_contract_feedback_prompt({policy: policy, fallback_index: fallback_index})
+}
+
+/**
+ * A turn whose tool calls were ALL dropped by the parser (>=1 parse error and 0
+ * dispatched calls) is a malformed-call turn, not a no-progress monologue. The
+ * purpose-built `parse_guidance` prompt — which shows the heredoc syntax and
+ * names the exact parser diagnostic — is the right corrective feedback, but
+ * nothing consumed `tool_parse_errors` on the active path. This fires purely on
+ * the syntactic parse-error condition: strong models emit clean calls, hit zero
+ * parse errors, and never reach it (no regression). Returns true when feedback
+ * was injected so the caller can suppress the no-progress stall path.
+ */
+fn __maybe_inject_parse_error_feedback(session_id, parsed, tool_calls, turn_opts) -> bool {
+  let parse_errors = parsed?.tool_parse_errors ?? []
+  if len(parse_errors) == 0 || len(tool_calls) > 0 {
+    return false
+  }
+  let error_summary = to_string(parse_errors[0])
+  // All calls were dropped, so there is no partial success this turn.
+  let feedback = parse_guidance_prompt(
+    {error_summary: error_summary, has_partial_success: false, parsed_call_count: 0},
+    turn_opts,
+  )
+  agent_session_inject_feedback(session_id, "parse_guidance", feedback)
+  agent_emit_event(
+    session_id,
+    "tool_parse_error_feedback",
+    {parse_error_count: len(parse_errors), error_summary: error_summary},
+  )
+  return true
 }
 
 fn __detect_native_fallback(
@@ -2011,6 +2041,7 @@ fn __agent_loop_run(message, session, initial_opts) {
         normalized
       }
       agent_session_record_assistant(session.session_id, recorded_assistant)
+      let had_parse_errors = __maybe_inject_parse_error_feedback(session.session_id, parsed, tool_calls, turn_opts)
       let await_call = __agent_await_resumption_call(tool_calls)
       if await_call != nil {
         let await_result = try {
@@ -2089,6 +2120,7 @@ fn __agent_loop_run(message, session, initial_opts) {
         stall_judge_due,
         stall_prev_dispatch,
         visible_text,
+        had_parse_errors,
       )
       stall_state = stall_observation.state
       stall_enabled_seen = stall_enabled_seen || stall_observation.enabled
@@ -2674,6 +2706,9 @@ fn __agent_loop_run(message, session, initial_opts) {
   return unwrap(run)
 }
 
+// A turn whose calls were all dropped by the parser gets the purpose-built
+// parse-guidance feedback (not the generic no-progress nudge), and is
+// excluded from the no-progress stall streak below.
 // Host pushed an `interrupt_immediate` injection between the
 // model emitting tool calls and the dispatcher starting. Honor
 // the host's "stop, do this instead" by skipping the pending

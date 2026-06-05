@@ -71,28 +71,35 @@ fn registered_tools_dispatch_only_after_canonicalization_for_tagged_blocks() {
     // With a registry containing the emitted tools, the canonical (tagged) form
     // dispatches the `look`/`edit` calls cleanly. The sample registry has
     // `edit`; assert the captured single-edit turn dispatches the edit on the
-    // canonical path and is silent on the wire path.
+    // canonical path.
+    //
+    // NOTE: `EDIT_BLOCK`'s body uses the model's degraded JSON-escaped heredoc
+    // form (`<<EOF\npackage…` with *literal* `\n`). The JSON-escaped-heredoc
+    // recovery now lets bare-rescue parse that body on the wire path too, so the
+    // edit is no longer silently lost there — a strict improvement. The
+    // canonical path remains the robust route (real `<tool_call>` blocks); both
+    // must surface the edit.
     let tools = sample_tool_registry();
 
+    let saw_edit_call = |calls: &[serde_json::Value]| {
+        calls.iter().any(|c| {
+            c.get("name").and_then(|v| v.as_str()) == Some("edit")
+                || c.get("tool").and_then(|v| v.as_str()) == Some("edit")
+        })
+    };
+
     let wire = parse_text_tool_calls_with_tools(EDIT_BLOCK, Some(&tools));
-    assert_eq!(
-        wire.calls.len(),
-        0,
-        "wire form: no tagged edit block to parse"
-    );
     assert!(
-        wire.errors.is_empty(),
-        "wire form: silently lost, no diagnostic: {:?}",
+        saw_edit_call(&wire.calls),
+        "wire form: heredoc recovery must surface the edit (no silent loss): \
+         calls={:?} errors={:?}",
+        wire.calls,
         wire.errors
     );
 
     let canon = parse_text_tool_calls_with_tools(&wire_to_canonical(EDIT_BLOCK), Some(&tools));
-    let saw_edit = canon.calls.iter().any(|c| {
-        c.get("name").and_then(|v| v.as_str()) == Some("edit")
-            || c.get("tool").and_then(|v| v.as_str()) == Some("edit")
-    });
     assert!(
-        saw_edit || !canon.errors.is_empty(),
+        saw_edit_call(&canon.calls) || !canon.errors.is_empty(),
         "after remap the edit block must be visible (dispatched or diagnosed): \
          calls={:?} errors={:?}",
         canon.calls,

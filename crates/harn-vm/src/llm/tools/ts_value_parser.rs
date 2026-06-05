@@ -4,7 +4,7 @@
 //! the limited set of keywords (`true` / `false` / `null` / `undefined`)
 //! that models emit when transcribing tool calls.
 
-use super::parse::{ident_length, scan_heredoc, HeredocError};
+use super::parse::{ident_length, scan_heredoc, unescape_heredoc_body, HeredocError};
 
 /// Minimal recursive-descent parser for a TypeScript value expression. Handles
 /// object and array literals, string literals (double-quoted and single-quoted),
@@ -357,7 +357,20 @@ impl<'a> TsValueParser<'a> {
         // `self.pos` to right after the tag.
         match scan_heredoc(self.text, self.pos) {
             Ok(span) => {
-                let content = self.text[span.content].to_string();
+                let raw = &self.text[span.content];
+                let content = if span.escaped {
+                    // Degraded literal-`\n` form: the body is JSON/string-escaped
+                    // on one physical line. Dispatch the call with a real body
+                    // (non-fatal — strong models emit clean heredocs and never
+                    // reach this branch). Surfaced to telemetry via tracing.
+                    tracing::debug!(
+                        target: "harn::tool_parse",
+                        "recovered JSON-escaped heredoc body (literal \\n line breaks)"
+                    );
+                    unescape_heredoc_body(raw)
+                } else {
+                    raw.to_string()
+                };
                 self.pos = span.end;
                 Ok(serde_json::Value::String(content))
             }
