@@ -20,15 +20,24 @@ pub eval_pack pack "regression-pack" {
 (source_file
   (eval_pack_declaration
     name: (identifier)
-    id: (string_literal)
+    id: (string_literal
+      (string_delimiter)
+      (string_content)
+      (string_delimiter))
     field_name: (identifier)
-    field_value: (string_literal)
+    field_value: (string_literal
+      (string_delimiter)
+      (string_content)
+      (string_delimiter))
     field_name: (identifier)
     field_value: (list_literal
       (dict_literal
         (dict_entry
           key: (identifier)
-          value: (string_literal))))
+          value: (string_literal
+            (string_delimiter)
+            (string_content)
+            (string_delimiter)))))
     (for_statement
       variable: (identifier)
       iterable: (identifier)

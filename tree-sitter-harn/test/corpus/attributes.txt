@@ -22,7 +22,10 @@ fn no_secrets(slice) -> bool {
       (attribute_arg
         name: (identifier)
         value: (list_literal
-          (string_literal)))
+          (string_literal
+            (string_delimiter)
+            (string_content)
+            (string_delimiter))))
       (attribute_arg
         name: (identifier)
         value: (float_literal))
@@ -31,7 +34,10 @@ fn no_secrets(slice) -> bool {
         value: (dict_literal
           (dict_entry
             key: (identifier)
-            value: (string_literal)))))
+            value: (string_literal
+              (string_delimiter)
+              (string_content)
+              (string_delimiter))))))
     (fn_declaration
       name: (identifier)
       (parameter_list
@@ -70,7 +76,10 @@ fn merge_captain(ctx) -> string {
         value: (attribute_call
           (identifier)
           (attribute_arg
-            (string_literal)))))
+            (string_literal
+              (string_delimiter)
+              (string_content)
+              (string_delimiter))))))
     (fn_declaration
       name: (identifier)
       (parameter_list
@@ -79,8 +88,11 @@ fn merge_captain(ctx) -> string {
       (type_annotation
         (identifier))
       body: (block
-      (return_statement
-        (string_literal))))))
+        (return_statement
+          (string_literal
+            (string_delimiter)
+            (string_content)
+            (string_delimiter)))))))
 
 ==================
 Attributed Tool And Skill
@@ -103,7 +115,10 @@ skill release {
     (attribute
       name: (identifier)
       (attribute_arg
-        (string_literal)))
+        (string_literal
+          (string_delimiter)
+          (string_content)
+          (string_delimiter))))
     (tool_declaration
       name: (identifier)
       (parameter_list
@@ -114,13 +129,22 @@ skill release {
       (type_annotation
         (identifier))
       (tool_description
-        (string_literal))))
+        (string_literal
+          (string_delimiter)
+          (string_content)
+          (string_delimiter)))))
   (attributed_declaration
     (attribute
       name: (identifier)
       (attribute_arg
-        (string_literal)))
+        (string_literal
+          (string_delimiter)
+          (string_content)
+          (string_delimiter))))
     (skill_declaration
       name: (identifier)
       field_name: (identifier)
-      field_value: (string_literal))))
+      field_value: (string_literal
+        (string_delimiter)
+        (string_content)
+        (string_delimiter)))))

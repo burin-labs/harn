@@ -31,7 +31,10 @@ pipeline main(task) {
                 value: (dict_literal
                   (dict_entry
                     key: (identifier)
-                    value: (string_literal))))))))
+                    value: (string_literal
+                      (string_delimiter)
+                      (string_content)
+                      (string_delimiter)))))))))
       (let_binding
         name: (identifier)
         value: (call_expression
@@ -46,10 +49,16 @@ pipeline main(task) {
             (dict_literal
               (dict_entry
                 key: (identifier)
-                value: (string_literal))
+                value: (string_literal
+                  (string_delimiter)
+                  (string_content)
+                  (string_delimiter)))
               (dict_entry
                 key: (identifier)
-                value: (string_literal))
+                value: (string_literal
+                  (string_delimiter)
+                  (string_content)
+                  (string_delimiter)))
               (dict_entry
                 key: (identifier)
                 value: (dict_literal
@@ -58,7 +67,10 @@ pipeline main(task) {
                     value: (dict_literal
                       (dict_entry
                         key: (identifier)
-                        value: (string_literal))))))))))
+                        value: (string_literal
+                          (string_delimiter)
+                          (string_content)
+                          (string_delimiter)))))))))))
       (let_binding
         name: (identifier)
         value: (call_expression
@@ -76,7 +88,10 @@ pipeline main(task) {
                 value: (dict_literal
                   (dict_entry
                     key: (identifier)
-                    value: (string_literal))))))))
+                    value: (string_literal
+                      (string_delimiter)
+                      (string_content)
+                      (string_delimiter)))))))))
       (return_statement
         (dict_literal
           (dict_entry
@@ -117,7 +132,10 @@ pipeline test(task) {
         value: (hitl_expression
           (hitl_arg
             name: (identifier)
-            value: (string_literal))
+            value: (string_literal
+              (string_delimiter)
+              (string_content)
+              (string_delimiter)))
           (hitl_arg
             name: (identifier)
             value: (integer_literal))))
@@ -136,30 +154,48 @@ pipeline test(task) {
           (hitl_arg
             name: (identifier)
             value: (list_literal
-              (string_literal)
-              (string_literal)))))
+              (string_literal
+                (string_delimiter)
+                (string_content)
+                (string_delimiter))
+              (string_literal
+                (string_delimiter)
+                (string_content)
+                (string_delimiter))))))
       (let_binding
         name: (identifier)
         value: (hitl_expression
           (hitl_arg
             name: (identifier)
-            value: (string_literal))
+            value: (string_literal
+              (string_delimiter)
+              (string_content)
+              (string_delimiter)))
           (hitl_arg
             name: (identifier)
-            value: (string_literal))))
+            value: (string_literal
+              (string_delimiter)
+              (string_content)
+              (string_delimiter)))))
       (let_binding
         name: (identifier)
         value: (hitl_expression
           (hitl_arg
             name: (identifier)
-            value: (string_literal))
+            value: (string_literal
+              (string_delimiter)
+              (string_content)
+              (string_delimiter)))
           (hitl_arg
             name: (identifier)
             value: (integer_literal))
           (hitl_arg
             name: (identifier)
             value: (list_literal
-              (string_literal))))))))
+              (string_literal
+                (string_delimiter)
+                (string_content)
+                (string_delimiter)))))))))
 
 ==================
 Parallel Each As Stream

@@ -74,11 +74,20 @@ pipeline test(task) {
           (argument_list
             (call_expression
               function: (property_access
-                object: (string_literal)
+                object: (string_literal
+                  (string_delimiter)
+                  (string_content)
+                  (string_delimiter))
                 property: (identifier))
               (argument_list
-                (string_literal)
-                (string_literal)))))))))
+                (string_literal
+                  (string_delimiter)
+                  (string_content)
+                  (string_delimiter))
+                (string_literal
+                  (string_delimiter)
+                  (string_content)
+                  (string_delimiter))))))))))
 
 ==================
 Interpolated String
@@ -98,9 +107,11 @@ fn greet(self) {
         name: (identifier)))
     body: (block
       (return_statement
-        (interpolated_string
+        (string_literal
+          (string_delimiter)
           (string_content)
           (interpolation
             (property_access
               object: (identifier)
-              property: (identifier))))))))
+              property: (identifier)))
+          (string_delimiter))))))

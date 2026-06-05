@@ -1,0 +1,73 @@
+==================
+Postgres SQL Helper Strings
+==================
+
+fn build_sql(user_id) {
+  let q = sql("""
+select *
+from users
+where id = {user_id}
+""", {user_id: user_id})
+  let named = named_sql("users_by_id", "one", "select * from users where id = {user_id}", {user_id: user_id})
+  let raw = sql(r"select * from users where name = {name}", {name: "Ada"})
+}
+
+---
+
+(source_file
+  (fn_declaration
+    (identifier)
+    (parameter_list
+      (typed_parameter
+        (identifier)))
+    (block
+      (let_binding
+        (identifier)
+        (call_expression
+          (identifier)
+          (argument_list
+            (multiline_string_literal
+              (multiline_string_delimiter)
+              (multiline_string_content)
+              (multiline_string_delimiter))
+            (dict_literal
+              (dict_entry
+                (identifier)
+                (identifier))))))
+      (let_binding
+        (identifier)
+        (call_expression
+          (identifier)
+          (argument_list
+            (string_literal
+              (string_delimiter)
+              (string_content)
+              (string_delimiter))
+            (string_literal
+              (string_delimiter)
+              (string_content)
+              (string_delimiter))
+            (string_literal
+              (string_delimiter)
+              (string_content)
+              (string_delimiter))
+            (dict_literal
+              (dict_entry
+                (identifier)
+                (identifier))))))
+      (let_binding
+        (identifier)
+        (call_expression
+          (identifier)
+          (argument_list
+            (raw_string_literal
+              (raw_string_delimiter)
+              (raw_string_content)
+              (raw_string_delimiter))
+            (dict_literal
+              (dict_entry
+                (identifier)
+                (string_literal
+                  (string_delimiter)
+                  (string_content)
+                  (string_delimiter))))))))))
