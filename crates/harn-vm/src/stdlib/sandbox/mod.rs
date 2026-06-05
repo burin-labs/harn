@@ -39,7 +39,7 @@ use std::collections::BTreeSet;
 use std::path::{Component, Path, PathBuf};
 use std::process::{Command, Output, Stdio};
 
-#[cfg(any(target_os = "linux", target_os = "macos"))]
+#[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
 use crate::orchestration::ProcessSandboxPreset;
 use crate::orchestration::{CapabilityPolicy, SandboxProfile};
 use crate::value::{ErrorCategory, VmError, VmValue};
