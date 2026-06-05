@@ -310,11 +310,26 @@ pub fn enforce_current_policy_for_builtin(name: &str, args: &[VmValue]) -> Resul
         {
             return reject_policy(format!("builtin '{name}' exceeds process.exec ceiling"));
         }
-        "http_get" | "http_post" | "http_put" | "http_patch" | "http_delete" | "http_download"
+        "http_get"
+        | "http_post"
+        | "http_put"
+        | "http_patch"
+        | "http_delete"
+        | "http_download"
         | "http_request"
+        | "unix_socket_json_request"
+        | "__net_unix_socket_json_request"
             if !policy_allows_side_effect(&policy, "network") =>
         {
             return reject_policy(format!("builtin '{name}' exceeds network ceiling"));
+        }
+        "__files_upload"
+            if !policy_allows_capability(&policy, "workspace", "read_text")
+                || !policy_allows_side_effect(&policy, "network") =>
+        {
+            return reject_policy(
+                "builtin '__files_upload' exceeds workspace.read_text/network ceiling".to_string(),
+            );
         }
         "http_session_request"
         | "http_stream_open"
@@ -1051,6 +1066,57 @@ mod approval_policy_tests {
         assert!(
             error.to_string().contains("workspace write ceiling"),
             "unexpected error: {error}"
+        );
+
+        pop_execution_policy();
+    }
+
+    #[test]
+    fn unix_socket_json_request_requires_network_side_effect() {
+        clear_execution_policy_stacks();
+        push_execution_policy(CapabilityPolicy {
+            side_effect_level: Some("read_only".to_string()),
+            ..CapabilityPolicy::default()
+        });
+
+        let error =
+            enforce_current_policy_for_builtin("__net_unix_socket_json_request", &[]).unwrap_err();
+        assert!(
+            error.to_string().contains("network ceiling"),
+            "unexpected error: {error}"
+        );
+
+        pop_execution_policy();
+    }
+
+    #[test]
+    fn files_upload_requires_workspace_read_and_network_side_effect() {
+        clear_execution_policy_stacks();
+        push_execution_policy(CapabilityPolicy {
+            capabilities: BTreeMap::from([(
+                "workspace".to_string(),
+                vec!["read_text".to_string()],
+            )]),
+            side_effect_level: Some("read_only".to_string()),
+            ..CapabilityPolicy::default()
+        });
+
+        let network_error = enforce_current_policy_for_builtin("__files_upload", &[]).unwrap_err();
+        assert!(
+            network_error.to_string().contains("network ceiling"),
+            "unexpected error: {network_error}"
+        );
+        pop_execution_policy();
+
+        push_execution_policy(CapabilityPolicy {
+            capabilities: BTreeMap::from([("workspace".to_string(), vec!["exists".to_string()])]),
+            side_effect_level: Some("network".to_string()),
+            ..CapabilityPolicy::default()
+        });
+        let read_error = enforce_current_policy_for_builtin("__files_upload", &[]).unwrap_err();
+        assert!(
+            read_error.to_string().contains("workspace.read_text"),
+            "unexpected error: {read_error}"
         );
 
         pop_execution_policy();

@@ -409,6 +409,67 @@ fn github_install_callback_captures_installation_id() {
     assert_eq!(installation_id, "12345");
 }
 
+#[test]
+fn github_install_callback_ignores_invalid_request_before_valid_callback() {
+    let (listener, redirect_uri) = bind_loopback_listener("http://127.0.0.1:0/gh-install-callback")
+        .expect("loopback listener");
+    listener
+        .set_nonblocking(false)
+        .expect("revert listener to blocking for deterministic test accept");
+    let parsed = Url::parse(&redirect_uri).unwrap();
+    let port = parsed.port().unwrap();
+    let redirect_uri_for_server = redirect_uri;
+    let server_ready = Arc::new(Barrier::new(2));
+    let client_ready = Arc::clone(&server_ready);
+    let server = thread::spawn(move || {
+        client_ready.wait();
+        wait_for_github_installation(listener, &redirect_uri_for_server, Some("state-ok"))
+    });
+    let client = thread::spawn(move || {
+        server_ready.wait();
+        let mut invalid =
+            TcpStream::connect(("127.0.0.1", port)).expect("connect invalid callback");
+        invalid
+            .set_read_timeout(Some(Duration::from_secs(5)))
+            .expect("set invalid read timeout");
+        invalid
+            .set_write_timeout(Some(Duration::from_secs(5)))
+            .expect("set invalid write timeout");
+        invalid
+            .write_all(b"GET /wrong-path HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n")
+            .expect("write invalid callback");
+        let mut invalid_response = String::new();
+        invalid
+            .read_to_string(&mut invalid_response)
+            .expect("read invalid callback response");
+        assert!(invalid_response.contains("400 Bad Request"));
+
+        let mut valid = TcpStream::connect(("127.0.0.1", port)).expect("connect valid callback");
+        valid
+            .set_read_timeout(Some(Duration::from_secs(5)))
+            .expect("set valid read timeout");
+        valid
+            .set_write_timeout(Some(Duration::from_secs(5)))
+            .expect("set valid write timeout");
+        valid
+            .write_all(
+                b"GET /gh-install-callback?installation_id=12345&state=state-ok HTTP/1.1\r\nHost: 127.0.0.1\r\nOrigin: null\r\n\r\n",
+            )
+            .expect("write valid callback");
+        let mut valid_response = String::new();
+        valid
+            .read_to_string(&mut valid_response)
+            .expect("read valid callback response");
+        assert!(valid_response.contains("200 OK"));
+    });
+    let installation_id = server
+        .join()
+        .expect("server thread")
+        .expect("installation id");
+    client.join().expect("callback client");
+    assert_eq!(installation_id, "12345");
+}
+
 #[tokio::test(flavor = "current_thread")]
 async fn mocked_builtin_oauth_token_endpoints_receive_pkce_and_resource_indicators() {
     for provider in ["slack", "linear", "notion"] {

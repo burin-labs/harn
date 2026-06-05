@@ -2288,6 +2288,8 @@ fn is_network_call(name: &str) -> bool {
             | "websocket_route"
             | "websocket_server"
             | "websocket_server_close"
+            | "unix_socket_json_request"
+            | "__net_unix_socket_json_request"
     )
 }
 
@@ -2932,6 +2934,24 @@ fn handler(client) {
             "unexpected diagnostics: {:?}",
             report.diagnostics
         );
+    }
+
+    #[test]
+    fn capability_policy_treats_unix_socket_json_request_as_network_access() {
+        let report = analyze(
+            r#"
+@invariant("capability.policy",
+  allow: "network.access",
+  require_egress_policy: "network.access")
+fn handler() {
+  unix_socket_json_request("/tmp/harn.sock", {})
+}
+"#,
+        );
+
+        let diags = diagnostics_by_invariant(&report, "capability.policy");
+        assert_eq!(diags.len(), 1);
+        assert!(diags[0].message.contains("network.access"));
     }
 
     #[test]

@@ -153,6 +153,20 @@ fn effects_from_call(call: &harn_ir::CallSemantics) -> Vec<EffectRecord> {
     // Primary extraction: name-based builtin recognition. This path
     // carries the richest information (resource from literal args,
     // provider/model on LLM calls) and is the authoritative shape.
+    if call.name == "__files_upload" || call.name == "upload" {
+        let mut effects = Vec::with_capacity(2);
+        let mut fs = EffectRecord::new(EffectKind::Fs, EffectScope::Read);
+        if let Some(path) = call.literal_args.first().and_then(literal_as_str) {
+            fs = fs.with_resource(path);
+        }
+        effects.push(fs);
+        let mut net = EffectRecord::new(EffectKind::Net, EffectScope::Write);
+        if let Some(provider) = call.literal_args.get(1).and_then(literal_as_str) {
+            net = net.with_resource(provider);
+        }
+        effects.push(net);
+        return effects;
+    }
     if let Some(effect) = builtin_effect(&call.name) {
         return vec![annotate_with_resource(effect, call)];
     }
@@ -244,7 +258,11 @@ fn builtin_effect(name: &str) -> Option<EffectRecord> {
         | "websocket_close"
         | "websocket_route"
         | "websocket_server"
-        | "websocket_server_close" => Some(EffectRecord::new(EffectKind::Net, EffectScope::Write)),
+        | "websocket_server_close"
+        | "unix_socket_json_request"
+        | "__net_unix_socket_json_request" => {
+            Some(EffectRecord::new(EffectKind::Net, EffectScope::Write))
+        }
 
         // llm
         "llm_call"
@@ -960,6 +978,65 @@ mod tests {
             .expect("net effect");
         assert_eq!(net.scope, EffectScope::Write);
         assert_eq!(net.resource.as_deref(), Some("https://example.test/api"));
+    }
+
+    #[test]
+    fn unix_socket_json_request_yields_net_effect_with_resource() {
+        let source = r#"fn main() { __net_unix_socket_json_request("/tmp/harn.sock", {}) }"#;
+        let effects = compute_handoff_effects(source, None);
+        let net = effects
+            .iter()
+            .find(|effect| matches!(effect.kind, EffectKind::Net))
+            .expect("net effect");
+        assert_eq!(net.scope, EffectScope::Write);
+        assert_eq!(net.resource.as_deref(), Some("/tmp/harn.sock"));
+    }
+
+    #[test]
+    fn files_upload_yields_fs_read_and_net_write_effects() {
+        let source = r#"fn main() { __files_upload("/tmp/input.pdf", "gemini") }"#;
+        let effects = compute_handoff_effects(source, None);
+        assert!(
+            effects.iter().any(|effect| {
+                matches!(effect.kind, EffectKind::Fs)
+                    && effect.scope == EffectScope::Read
+                    && effect.resource.as_deref() == Some("/tmp/input.pdf")
+            }),
+            "expected Fs read effect, got {effects:?}"
+        );
+        assert!(
+            effects.iter().any(|effect| {
+                matches!(effect.kind, EffectKind::Net)
+                    && effect.scope == EffectScope::Write
+                    && effect.resource.as_deref() == Some("gemini")
+            }),
+            "expected Net write effect, got {effects:?}"
+        );
+    }
+
+    #[test]
+    fn std_files_upload_wrapper_yields_fs_read_and_net_write_effects() {
+        let source = r#"
+import { upload } from "std/files"
+fn main() { upload("/tmp/input.pdf", "gemini") }
+"#;
+        let effects = compute_handoff_effects(source, None);
+        assert!(
+            effects.iter().any(|effect| {
+                matches!(effect.kind, EffectKind::Fs)
+                    && effect.scope == EffectScope::Read
+                    && effect.resource.as_deref() == Some("/tmp/input.pdf")
+            }),
+            "expected Fs read effect, got {effects:?}"
+        );
+        assert!(
+            effects.iter().any(|effect| {
+                matches!(effect.kind, EffectKind::Net)
+                    && effect.scope == EffectScope::Write
+                    && effect.resource.as_deref() == Some("gemini")
+            }),
+            "expected Net write effect, got {effects:?}"
+        );
     }
 
     #[test]

@@ -20,13 +20,22 @@ impl Parser {
     pub(super) fn parse_type_param_list(&mut self) -> Result<Vec<TypeParam>, ParserError> {
         let mut params = Vec::new();
         self.skip_newlines();
-        while !self.is_at_end() && !self.check(&TokenKind::Gt) {
+        if self.check(&TokenKind::Gt) {
+            return Err(self.error("type parameter name"));
+        }
+        loop {
             let variance = self.parse_optional_variance_marker();
             let name = self.consume_identifier("type parameter name")?;
             params.push(TypeParam { name, variance });
+            self.skip_newlines();
             if self.check(&TokenKind::Comma) {
                 self.advance();
                 self.skip_newlines();
+                if self.check(&TokenKind::Gt) || self.is_at_end() {
+                    return Err(self.error("type parameter name"));
+                }
+            } else {
+                break;
             }
         }
         self.consume(&TokenKind::Gt, ">")?;
@@ -46,6 +55,9 @@ impl Parser {
             if self.check(&TokenKind::Comma) {
                 self.advance();
                 self.skip_newlines();
+                if self.check(&TokenKind::Gt) || self.is_at_end() {
+                    return Err(self.error("type argument"));
+                }
             } else {
                 break;
             }
@@ -82,6 +94,10 @@ impl Parser {
                 if id == "where" {
                     self.advance();
                     let mut clauses = Vec::new();
+                    self.skip_newlines();
+                    if self.check(&TokenKind::LBrace) || self.is_at_end() {
+                        return Err(self.error("where clause"));
+                    }
                     loop {
                         self.skip_newlines();
                         if self.check(&TokenKind::LBrace) || self.is_at_end() {
@@ -93,6 +109,10 @@ impl Parser {
                         clauses.push(WhereClause { type_name, bound });
                         if self.check(&TokenKind::Comma) {
                             self.advance();
+                            self.skip_newlines();
+                            if self.check(&TokenKind::LBrace) || self.is_at_end() {
+                                return Err(self.error("where clause"));
+                            }
                         } else {
                             break;
                         }

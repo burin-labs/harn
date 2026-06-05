@@ -540,6 +540,38 @@ pipeline test(task) {
     }
 
     #[test]
+    fn rejects_empty_generic_type_params() {
+        assert!(parse_source("fn f<>() { return 1 }").is_err());
+    }
+
+    #[test]
+    fn rejects_trailing_generic_type_param_comma() {
+        assert!(parse_source("fn f<T,>() { return 1 }").is_err());
+    }
+
+    #[test]
+    fn rejects_trailing_generic_call_type_arg_comma() {
+        let source = r"
+fn identity<T>(x: T) -> T { return x }
+pipeline test(task) {
+  let n = identity<int,>(42)
+}
+";
+
+        assert!(parse_source(source).is_err());
+    }
+
+    #[test]
+    fn rejects_empty_where_clause_list() {
+        assert!(parse_source("fn f<T>() where { return 1 }").is_err());
+    }
+
+    #[test]
+    fn rejects_trailing_where_clause_comma() {
+        assert!(parse_source("fn f<T>() where T: Displayable, { return 1 }").is_err());
+    }
+
+    #[test]
     fn parses_struct_literal_syntax_for_known_structs() {
         let source = r"
 struct Point {
