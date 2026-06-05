@@ -148,6 +148,44 @@ log(function_name)
 }
 
 #[test]
+fn test_parameter_defaults_mark_referenced_parameters_used() {
+    let diags = lint_source(
+        r#"
+pipeline default(task) {
+fn child_path(root, child = path_join(root, "child")) {
+    return child
+}
+log(child_path("/tmp"))
+}
+"#,
+    );
+    assert!(
+        !diags
+            .iter()
+            .any(|d| d.rule == "unused-parameter" && d.message.contains("`root`")),
+        "parameters used by default values should not trigger unused-parameter: {diags:?}"
+    );
+}
+
+#[test]
+fn test_mutex_key_marks_variable_used() {
+    let diags = lint_source(
+        r#"
+pipeline default(task) {
+let key = "tenant-a"
+mutex(key) {
+    log("locked")
+}
+}
+"#,
+    );
+    assert!(
+        !has_rule(&diags, "unused-variable"),
+        "mutex key expressions should mark referenced variables used: {diags:?}"
+    );
+}
+
+#[test]
 fn test_multiple_rules() {
     let diags = lint_source(
         r#"

@@ -786,6 +786,25 @@ impl<'a> Linter<'a> {
         }
     }
 
+    pub(super) fn record_callable_signature_type_references(
+        &mut self,
+        params: &[TypedParam],
+        return_type: &Option<TypeExpr>,
+    ) {
+        self.record_param_type_references(params);
+        if let Some(type_expr) = return_type {
+            self.record_type_expr_references(type_expr);
+        }
+    }
+
+    pub(super) fn lint_param_default_values(&mut self, params: &[TypedParam]) {
+        for param in params {
+            if let Some(default_value) = param.default_value.as_deref() {
+                self.lint_node(default_value);
+            }
+        }
+    }
+
     pub(super) fn has_interpolation(node: &SNode) -> bool {
         use harn_lexer::StringSegment;
         matches!(&node.node, Node::InterpolatedString(segments) if segments.iter().any(|segment| matches!(segment, StringSegment::Expression(_, _, _))))
