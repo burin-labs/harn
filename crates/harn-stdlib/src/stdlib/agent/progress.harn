@@ -1,45 +1,75 @@
 import { agent_emit_event } from "std/agent/state"
 
-fn __agent_progress_status(value, label) {
+// `agent_progress` is a cosmetic progress-report surface — it emits a task-list
+// event for the user, nothing more. A malformed `status`/`priority` enum from a
+// weaker model must NOT abort the whole turn (the historical hard `throw` crashed
+// the agent loop on a single typo like `status: "in-progress"` or `"doing"`).
+// Normalize the obvious synonyms and otherwise fall back to a sane default; never
+// throw. `_label` is retained for signature symmetry with the other validators.
+fn __agent_progress_status(value, _label) {
   if type_of(value) != "string" {
-    throw label + ".status must be one of pending, in_progress, completed"
+    return "in_progress"
   }
   if contains(["pending", "in_progress", "completed"], value) {
     return value
   }
-  throw label + ".status must be one of pending, in_progress, completed"
+  let normalized = replace(replace(lowercase(trim(value)), "-", "_"), " ", "_")
+  if contains(["pending", "todo", "not_started", "queued", "blocked", "waiting"], normalized) {
+    return "pending"
+  }
+  if contains(["completed", "complete", "done", "finished", "resolved", "closed"], normalized) {
+    return "completed"
+  }
+  // in_progress, doing, active, started, working, wip, … and any unknown value.
+  return "in_progress"
 }
 
-fn __agent_progress_priority(value, label) {
-  if value == nil {
-    return nil
-  }
+fn __agent_progress_priority(value, _label) {
   if type_of(value) != "string" {
-    throw label + ".priority must be one of high, medium, low, or nil"
+    return nil
   }
   if contains(["high", "medium", "low"], value) {
     return value
   }
-  throw label + ".priority must be one of high, medium, low, or nil"
+  let normalized = lowercase(trim(value))
+  if contains(["high", "urgent", "critical", "p0", "p1"], normalized) {
+    return "high"
+  }
+  if contains(["medium", "med", "normal", "p2"], normalized) {
+    return "medium"
+  }
+  if contains(["low", "minor", "p3", "p4"], normalized) {
+    return "low"
+  }
+  // Unknown → unprioritized rather than a turn-aborting throw.
+  return nil
 }
 
 fn __agent_progress_entries(value) {
   if value == nil {
     return []
   }
-  if type_of(value) != "list" {
-    throw "agent_progress: entries must be a list"
+  // Lenient by design (cosmetic surface): a single entry passed as a bare dict
+  // is wrapped; a non-list/non-dict shape yields no entries instead of aborting
+  // the turn. Individual entries that lack usable content are skipped, not fatal.
+  let list = if type_of(value) == "list" {
+    value
+  } else if type_of(value) == "dict" {
+    [value]
+  } else {
+    []
   }
   var entries = []
   var index = 0
-  for raw in value {
+  for raw in list {
     let label = "agent_progress: entries[" + to_string(index) + "]"
+    index = index + 1
     if type_of(raw) != "dict" {
-      throw label + " must be a dict"
+      continue
     }
     let content = raw?.content
     if type_of(content) != "string" || trim(content) == "" {
-      throw label + ".content must be a non-empty string"
+      continue
     }
     var entry = {content: content, status: __agent_progress_status(raw?.status, label)}
     let priority = __agent_progress_priority(raw?.priority, label)
@@ -47,7 +77,6 @@ fn __agent_progress_entries(value) {
       entry = entry + {priority: priority}
     }
     entries = entries.push(entry)
-    index = index + 1
   }
   return entries
 }

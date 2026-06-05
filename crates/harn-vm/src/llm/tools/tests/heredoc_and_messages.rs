@@ -844,6 +844,85 @@ fn tagged_tool_call_keeps_literal_close_tag_inside_heredoc() {
 }
 
 #[test]
+fn over_closed_object_string_recovers_embedded_raw_string() {
+    // The create-heavy local-model failure: a quoted `content` body holds a
+    // Rust raw string `r#"..."#` whose inner quotes the model left unescaped.
+    // The strict scan closes the string at the first bare `"`, leaving the
+    // object continuation on content (`s`/`#`) instead of `,`/`}` — historically
+    // dropping the whole create and stranding the model in a re-emit loop. The
+    // greedy object-string recovery must absorb the embedded quotes and keep the
+    // call dispatchable.
+    let tools = sample_tool_registry();
+    let text = "<tool_call>edit({ action: \"create\", path: \"t.rs\", content: \"let q = parse_query(r#\"sel\"#);\" })</tool_call>";
+    let result = parse_text_tool_calls_with_tools(text, Some(&tools));
+    assert_eq!(
+        result.calls.len(),
+        1,
+        "embedded-quote create should recover to one call, errors={:?} violations={:?}",
+        result.errors,
+        result.violations
+    );
+    let content = result.calls[0]["arguments"]["content"].as_str().unwrap();
+    assert_eq!(
+        content, "let q = parse_query(r#\"sel\"#);",
+        "recovered content must keep the embedded raw-string quotes verbatim"
+    );
+    assert_eq!(
+        result.calls[0]["arguments"]["action"].as_str().unwrap(),
+        "create"
+    );
+}
+
+#[test]
+fn over_closed_recovery_stops_at_true_boundary_preserving_later_keys() {
+    // Over-capture guard: when the embedded-quote value is NOT the last key, the
+    // greedy scan must stop at the first close whose continuation validates (a
+    // `,`), leaving subsequent keys intact rather than swallowing them. The
+    // embedded quotes are balanced (a full `r#"a"#`) so the upstream call-
+    // boundary scanner stays in sync and the value parser sees the whole args
+    // object — isolating MY recovery's boundary behavior.
+    let tools = sample_tool_registry();
+    let text =
+        "<tool_call>edit({ content: \"x=r#\"a\"#y\", action: \"create\", path: \"t.rs\" })</tool_call>";
+    let result = parse_text_tool_calls_with_tools(text, Some(&tools));
+    assert_eq!(
+        result.calls.len(),
+        1,
+        "recovery should preserve later keys, errors={:?} violations={:?}",
+        result.errors,
+        result.violations
+    );
+    assert_eq!(
+        result.calls[0]["arguments"]["content"].as_str().unwrap(),
+        "x=r#\"a\"#y"
+    );
+    assert_eq!(
+        result.calls[0]["arguments"]["action"].as_str().unwrap(),
+        "create",
+        "the key after the recovered string must survive"
+    );
+    assert_eq!(
+        result.calls[0]["arguments"]["path"].as_str().unwrap(),
+        "t.rs"
+    );
+}
+
+#[test]
+fn well_formed_escaped_string_is_untouched_by_recovery() {
+    // The recovery engages only after the strict continuation already failed, so
+    // a cleanly-escaped multi-key value must parse identically (no greedy
+    // re-interpretation, no merged keys).
+    let tools = sample_tool_registry();
+    let text = "<tool_call>edit({ action: \"create\", path: \"t.rs\", content: \"line1\\nline2\" })</tool_call>";
+    let result = parse_text_tool_calls_with_tools(text, Some(&tools));
+    assert_eq!(result.calls.len(), 1, "errors={:?}", result.errors);
+    assert_eq!(
+        result.calls[0]["arguments"]["content"].as_str().unwrap(),
+        "line1\nline2"
+    );
+}
+
+#[test]
 fn tagged_tool_calls_get_turn_unique_ids() {
     // Two `<tool_call>` blocks in one turn must not collide on `tc_0`; each
     // per-body parser only sees its local (single-call) vector, so the

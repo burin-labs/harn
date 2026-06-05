@@ -15,7 +15,11 @@ import {
   agent_compute_post_turn,
   agent_reset_tool_surface_narrowing,
 } from "std/agent/postturn"
-import { agent_build_turn_messages, agent_build_turn_system_fragments } from "std/agent/preflight"
+import {
+  agent_build_turn_messages,
+  agent_build_turn_system_fragments,
+  agent_tool_call_paradigm,
+} from "std/agent/preflight"
 import { agent_dispatch_tool_batch, agent_dispatch_tool_call } from "std/agent/primitives"
 import { agent_progress_apply_options } from "std/agent/progress"
 import { native_tool_contract_feedback_prompt, parse_guidance_prompt } from "std/agent/prompts"
@@ -650,7 +654,12 @@ fn __maybe_inject_parse_error_feedback(session_id, parsed, tool_calls, turn_opts
   let error_summary = to_string(parse_errors[0])
   // All calls were dropped, so there is no partial success this turn.
   let feedback = parse_guidance_prompt(
-    {error_summary: error_summary, has_partial_success: false, parsed_call_count: 0},
+    {
+      error_summary: error_summary,
+      has_partial_success: false,
+      parsed_call_count: 0,
+      body_hint: agent_tool_call_paradigm(turn_opts).body_hint,
+    },
     turn_opts,
   )
   agent_session_inject_feedback(session_id, "parse_guidance", feedback)
