@@ -960,6 +960,35 @@ let graphemes = unicode_graphemes("éx")
 let parsed = uuid_parse(uuid_v7())
 ```
 
+### Postgres query helpers
+
+For Harn data-access modules, prefer `std/postgres/query` when direct
+`pg_query` calls become hard to review. It is not an ORM: SQL stays visible and
+dynamic values still go through `params`.
+
+```harn,ignore
+import "std/postgres"
+import { many, named, run, uuid_text, nullable_timestamptz_json, select_clause } from "std/postgres/query"
+
+fn list_receipts_query(tenant_id: string, limit: int) {
+  let sql = select_clause([
+    uuid_text("id"),
+    "payload",
+    nullable_timestamptz_json("finished_at"),
+  ]) + " FROM receipts WHERE tenant_id = $1::uuid ORDER BY created_at DESC LIMIT $2"
+  return named("list_receipts", "many", sql, [tenant_id, limit])
+}
+
+let rows = run(db, list_receipts_query(tenant_id, 50))
+let direct = many(db, {name: "recent_receipts", sql: "SELECT id::text AS id FROM receipts LIMIT $1", params: [10]})
+```
+
+Helpers: `one(handle, query)`, `many(handle, query)`, `exec(handle, query)`,
+`run(handle, named_query)`, `named(name, mode, sql, params?)`,
+`uuid_text(name)`, `timestamptz_json(name)`,
+`nullable_timestamptz_json(name)`, and `select_clause(fragments)`.
+Identifier helpers accept only static names matching `[A-Za-z_][A-Za-z0-9_]*`.
+
 ## LLM surface
 
 ```harn

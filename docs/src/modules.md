@@ -764,6 +764,28 @@ claims, and audit records:
 See [Postgres](./postgres.md) for parameter binding, transaction settings,
 RLS examples, pool options, and migration boundaries.
 
+### std/postgres/query
+
+Harn-native query ergonomics over `std/postgres`. This module keeps raw SQL as
+the source of truth while making named query records and repeated projection
+fragments easier to review:
+
+| Function | Description |
+|---|---|
+| `named(name, mode, sql, params?)` | Build a serializable query record with `name`, `mode`, `sql`, and `params` |
+| `one(handle, query)` | Run a query record through `pg_query_one` |
+| `many(handle, query)` | Run a query record through `pg_query` |
+| `exec(handle, query)` | Run a query record through `pg_execute` |
+| `run(handle, named_query)` | Dispatch a named query by `mode` (`one`, `many`, or `exec`) |
+| `identifier(name)` | Validate a static SQL identifier for projection helpers |
+| `select_clause(fragments)` | Render `SELECT ...` from static projection fragments |
+| `uuid_text(name)` | Render `name::text AS name` |
+| `timestamptz_json(name)` | Render `to_json(name)#>>'{}' AS name` |
+| `nullable_timestamptz_json(name)` | Render a timestamp projection that preserves nulls |
+
+Dynamic values must still be passed through `params`; identifier helpers reject
+unsafe names and are only for source-controlled column identifiers.
+
 ### std/io
 
 Terminal-oriented helpers for scripts that need direct operator input without

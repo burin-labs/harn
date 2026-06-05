@@ -88,6 +88,82 @@ nulls, booleans, integer and float types, text, `uuid`, `json`/`jsonb`, `bytea`,
 types, and Postgres geometric types. Unknown types are decoded as text when the
 Postgres driver can expose them that way.
 
+## Query ergonomics
+
+`std/postgres/query` is a small Harn-native layer over the raw `pg_*`
+builtins. It is not an ORM: SQL stays visible, Postgres-specific casts and
+operators stay available, and every dynamic value still goes through `params`.
+The helpers are intended for data-access modules where long inline SQL calls
+make reviews noisy.
+
+```harn,ignore
+import "std/postgres"
+import { many, named, nullable_timestamptz_json, run, select_clause, uuid_text } from "std/postgres/query"
+
+pub fn list_receipts_query(tenant_id: string, limit: int) {
+  let sql = select_clause([
+    uuid_text("id"),
+    uuid_text("tenant_id"),
+    "payload",
+    nullable_timestamptz_json("finished_at"),
+  ]) + " FROM receipts WHERE tenant_id = $1::uuid ORDER BY created_at DESC LIMIT $2"
+
+  return named("list_receipts", "many", sql, [tenant_id, limit])
+}
+
+pub fn list_receipts(db, tenant_id: string) {
+  return run(db, list_receipts_query(tenant_id, 50))
+}
+```
+
+For one-off call sites, pass a plain query record directly:
+
+```harn,ignore
+let rows = many(db, {
+  name: "list_receipts",
+  sql: "SELECT id::text AS id, payload FROM receipts WHERE tenant_id = $1::uuid",
+  params: [tenant_id],
+})
+```
+
+Compared with direct `pg_query`, named query records make the SQL and params
+easy to inspect in tests while keeping execution explicit:
+
+```harn,ignore
+let db = pg_mock_pool([
+  {
+    sql: "SELECT id::text AS id, payload FROM receipts WHERE tenant_id = $1::uuid",
+    params: ["tenant-a"],
+    rows: [{id: "r1", payload: {ok: true}}],
+  },
+])
+
+let rows = run(db, named(
+  "list_receipts",
+  "many",
+  "SELECT id::text AS id, payload FROM receipts WHERE tenant_id = $1::uuid",
+  ["tenant-a"],
+))
+assert_eq(rows[0].id, "r1")
+assert_eq(pg_mock_calls(db)[0].params[0], "tenant-a")
+```
+
+`one(handle, query)`, `many(handle, query)`, and `exec(handle, query)` force the
+matching mode when a record includes `mode`. `run(handle, named_query)` dispatches
+from the record's `mode`. When a named query fails, the thrown error includes
+the query name before the underlying Postgres or mock-pool error.
+
+Projection helpers only accept static SQL identifiers matching
+`[A-Za-z_][A-Za-z0-9_]*`. They are for source-controlled column names, not
+user input:
+
+| Helper | Output |
+|---|---|
+| `uuid_text("id")` | `id::text AS id` |
+| `timestamptz_json("created_at")` | `to_json(created_at)#>>'{}' AS created_at` |
+| `nullable_timestamptz_json("finished_at")` | `CASE WHEN finished_at IS NULL THEN NULL ELSE to_json(finished_at)#>>'{}' END AS finished_at` |
+| `select_clause([...])` | `SELECT ...` |
+
 ## Transactions and tenant settings
 
 Use `pg_transaction` for changes that must commit or roll back together. The

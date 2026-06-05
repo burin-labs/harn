@@ -1,0 +1,236 @@
+/**
+ * std/postgres/query - small SQL ergonomics over std/postgres.
+ *
+ * SQL remains the source of truth. These helpers only normalize query
+ * records, keep values in the `params` list, and centralize safe static
+ * projection fragments.
+ */
+import "std/postgres"
+
+type PgQueryMode = "one" | "many" | "exec"
+
+type PgNamedQuery = {name: string, mode: PgQueryMode, sql: string, params: list<any>}
+
+type PgQuery = {name?: string, mode?: PgQueryMode, sql: string, params?: list<any>}
+
+let __QUERY_MODES = ["one", "many", "exec"]
+
+let __IDENTIFIER_PATTERN = "^[A-Za-z_][A-Za-z0-9_]*$"
+
+fn __query_name(query) -> string {
+  if type_of(query) != "dict" {
+    return ""
+  }
+  let name = query?.name
+  if name == nil {
+    return ""
+  }
+  if type_of(name) != "string" {
+    throw "std/postgres/query: query name must be a string"
+  }
+  return name
+}
+
+fn __query_error_prefix(query) -> string {
+  let name = __query_name(query)
+  if name == "" {
+    return "std/postgres/query: "
+  }
+  return "std/postgres/query `" + name + "`: "
+}
+
+fn __normalize_query(query, expected_mode = nil) {
+  if type_of(query) != "dict" {
+    throw "std/postgres/query: query must be a dict"
+  }
+  let sql = query?.sql
+  if type_of(sql) != "string" || trim(sql) == "" {
+    throw __query_error_prefix(query) + "sql must be a non-empty string"
+  }
+  let params = query?.params ?? []
+  if type_of(params) != "list" {
+    throw __query_error_prefix(query) + "params must be a list"
+  }
+  let mode = query?.mode ?? expected_mode
+  if mode != nil && !contains(__QUERY_MODES, mode) {
+    throw __query_error_prefix(query) + "mode must be one of one, many, exec"
+  }
+  if expected_mode != nil && query?.mode != nil && query.mode != expected_mode {
+    throw __query_error_prefix(query) + "mode " + query.mode + " cannot run through " + expected_mode
+  }
+  return {name: __query_name(query), mode: mode, sql: sql, params: params}
+}
+
+fn __with_query_name(query, body) {
+  try {
+    return body()
+  } catch (error) {
+    if query.name == "" {
+      throw error
+    }
+    throw __query_error_prefix(query) + to_string(error)
+  }
+}
+
+/**
+ * Build a serializable named-query record.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: validation
+ * @api_stability: experimental
+ * @example: named("list_receipts", "many", sql, [tenant_id])
+ */
+pub fn named(name: string, mode: PgQueryMode, sql: string, params: list<any> = []) -> PgNamedQuery {
+  return __normalize_query({name: name, mode: mode, sql: sql, params: params})
+}
+
+/**
+ * Run a query that returns zero or one row.
+ *
+ * @effects: [postgres]
+ * @allocation: heap
+ * @errors: validation, postgres
+ * @api_stability: experimental
+ * @example: one(db, {name: "get_receipt", sql: sql, params: [id]})
+ */
+pub fn one(handle, query: PgQuery) {
+  let q = __normalize_query(query, "one")
+  return __with_query_name(q, { -> pg_query_one(handle, q.sql, q.params) })
+}
+
+/**
+ * Run a query that returns a list of rows.
+ *
+ * @effects: [postgres]
+ * @allocation: heap
+ * @errors: validation, postgres
+ * @api_stability: experimental
+ * @example: many(db, {name: "list_receipts", sql: sql, params: [tenant_id]})
+ */
+pub fn many(handle, query: PgQuery) -> list {
+  let q = __normalize_query(query, "many")
+  return __with_query_name(q, { -> pg_query(handle, q.sql, q.params) })
+}
+
+/**
+ * Execute a statement and return the underlying PgExecuteResult.
+ *
+ * @effects: [postgres]
+ * @allocation: heap
+ * @errors: validation, postgres
+ * @api_stability: experimental
+ * @example: exec(db, {name: "mark_read", sql: sql, params: [id, status]})
+ */
+pub fn exec(handle, query: PgQuery) -> PgExecuteResult {
+  let q = __normalize_query(query, "exec")
+  return __with_query_name(q, { -> pg_execute(handle, q.sql, q.params) })
+}
+
+/**
+ * Run a named query according to its `mode`.
+ *
+ * @effects: [postgres]
+ * @allocation: heap
+ * @errors: validation, postgres
+ * @api_stability: experimental
+ * @example: run(db, named("list_receipts", "many", sql, [tenant_id]))
+ */
+pub fn run(handle, query: PgNamedQuery) {
+  let q = __normalize_query(query)
+  if q.mode == nil {
+    throw __query_error_prefix(q) + "mode is required"
+  }
+  if q.mode == "one" {
+    return one(handle, q)
+  }
+  if q.mode == "many" {
+    return many(handle, q)
+  }
+  return exec(handle, q)
+}
+
+/**
+ * Validate and return a static SQL identifier for projection helpers.
+ *
+ * @effects: []
+ * @allocation: stack-only
+ * @errors: validation
+ * @api_stability: experimental
+ * @example: identifier("created_at")
+ */
+pub fn identifier(name: string) -> string {
+  if type_of(name) != "string" || trim(name) == "" {
+    throw "std/postgres/query: SQL identifier must be a non-empty string"
+  }
+  if regex_match(__IDENTIFIER_PATTERN, name) == nil {
+    throw "std/postgres/query: unsafe SQL identifier `" + to_string(name) + "`"
+  }
+  return name
+}
+
+/**
+ * Render `SELECT a, b, c` from already-static projection fragments.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: validation
+ * @api_stability: experimental
+ * @example: select_clause([uuid_text("id"), "payload"])
+ */
+pub fn select_clause(fragments: list<string>) -> string {
+  if type_of(fragments) != "list" {
+    throw "std/postgres/query: select_clause requires a list of fragments"
+  }
+  if len(fragments) == 0 {
+    throw "std/postgres/query: select_clause requires at least one fragment"
+  }
+  return "SELECT " + join(fragments, ", ")
+}
+
+/**
+ * Render `column::text AS column` for UUID columns.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: validation
+ * @api_stability: experimental
+ * @example: uuid_text("id")
+ */
+pub fn uuid_text(name: string) -> string {
+  let ident = identifier(name)
+  return ident + "::text AS " + ident
+}
+
+/**
+ * Render `to_json(column)#>>'{}' AS column` for timestamp columns.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: validation
+ * @api_stability: experimental
+ * @example: timestamptz_json("created_at")
+ */
+pub fn timestamptz_json(name: string) -> string {
+  let ident = identifier(name)
+  return "to_json(" + ident + ")#>>'{}' AS " + ident
+}
+
+/**
+ * Render a nullable timestamp projection that preserves nulls as null.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: validation
+ * @api_stability: experimental
+ * @example: nullable_timestamptz_json("finished_at")
+ */
+pub fn nullable_timestamptz_json(name: string) -> string {
+  let ident = identifier(name)
+  return "CASE WHEN "
+    + ident
+    + " IS NULL THEN NULL ELSE to_json("
+    + ident
+    + ")#>>'{}' END AS "
+    + ident
+}
