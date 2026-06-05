@@ -605,6 +605,8 @@ The ACP server supports these JSON-RPC methods:
 | `session/cancel` | Cancel the currently running prompt |
 | `session/cancel_tool_call` | Cancel one in-flight tool call without tearing down the session |
 | `session/truncate` | Truncate the session transcript to a requested prefix |
+| `session/rollback` | Roll back the last completed prompt turn, including tracked filesystem pre-images |
+| `session/redo` | Reapply the most recent rollback while the redo stack is still valid |
 | `session/close` | Close a session and cancel any active prompt |
 | `session/stop` | Deprecated alias for `session/close` |
 | `session/set_mode` | Switch the active session mode |
@@ -636,9 +638,40 @@ Harn advertises `session.inject.modes = ["queue", "steer"]` and
 `session.inject.pending.replace = true`. Harn also advertises
 `session.remind.modes = ["interrupt_immediate", "finish_step", "audit_only"]`
 and `session.remind.pending = {list: true, revoke: true}` for host-side
-system-reminder queue controls. Harn-only methods such as
+system-reminder queue controls. Harn advertises
+`sessionCapabilities.rollback` and `sessionCapabilities.redo` for the
+completed-turn checkpoint stack; both methods return typed success/failure
+statuses and reject while a prompt is active. Harn-only methods such as
 `session/fork` remain documented extensions instead of being inserted into
 upstream `sessionCapabilities`.
+
+`session/rollback` and `session/redo` are Harn-owned session primitives. Harn
+moves the transcript to the checkpoint boundary and, when hostlib filesystem
+snapshots are available, the ACP adapter restores the matching file pre-images
+in the same request. Rollback captures redo filesystem snapshots before
+restoring the older state. Redo is invalidated by a new transcript mutation,
+workspace reanchor/root change, staged filesystem commit/discard, or direct
+tool-call restore.
+
+Example response:
+
+```json
+{
+  "status": "rolled_back",
+  "checkpointId": "turn_...",
+  "beforeMessageCount": 1,
+  "afterMessageCount": 2,
+  "fsSnapshotIds": ["tc_42"],
+  "redoFsSnapshotIds": ["turn_...:redo:tc_42"],
+  "fsRestores": [
+    {
+      "snapshotId": "tc_42",
+      "restoredPaths": ["notes.md"],
+      "skippedPathsWithReasons": []
+    }
+  ]
+}
+```
 
 ### Session workspace anchors
 

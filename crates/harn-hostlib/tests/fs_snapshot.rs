@@ -2,8 +2,7 @@
 //!
 //! Exercises both the explicit `hostlib_fs_snapshot({paths: [...]})` form
 //! and the auto-on-write path that snaps pre-images out of
-//! `tools/write_file` / `tools/delete_file` when an open snapshot is
-//! registered for the current tool call.
+//! `tools/write_file` / `tools/delete_file` for the current tool call.
 //!
 //! Tests rely on session-id isolation, not serialization: every test
 //! mints a unique session id, so the process-wide snapshot store keys
@@ -256,13 +255,14 @@ fn list_and_drop_remove_snapshot_state_through_builtins() {
 }
 
 #[test]
-fn auto_on_write_no_ops_when_no_snapshot_is_registered() {
+fn auto_on_write_opens_current_tool_call_snapshot() {
     let dir = TempDir::new().unwrap();
     let file = dir.path().join("plain.txt");
     let fixture = Fixture::new("snap-noop", true);
     let reg = registry();
 
-    // No fs_snapshot call — write should be a plain mutation.
+    // No fs_snapshot call — the first write auto-opens the current tool-call
+    // snapshot so session rollback can restore the pre-image later.
     (reg.find("hostlib_tools_write_file").unwrap().handler)(&dict_arg(&[
         ("path", vm_string(&path_str(&file))),
         ("content", vm_string("hi")),
@@ -275,8 +275,19 @@ fn auto_on_write_no_ops_when_no_snapshot_is_registered() {
         vm_string(&fixture.session),
     )]))
     .unwrap();
-    assert!(matches!(
-        dict_get(&listed, "snapshots"),
-        VmValue::List(items) if items.is_empty()
-    ));
+    let snapshots = match dict_get(&listed, "snapshots") {
+        VmValue::List(items) => items,
+        other => panic!("snapshots not a list: {other:?}"),
+    };
+    assert_eq!(snapshots.len(), 1);
+
+    (reg.find("hostlib_fs_restore").unwrap().handler)(&dict_arg(&[
+        ("session_id", vm_string(&fixture.session)),
+        ("snapshot_id", vm_string(&fixture.scope)),
+    ]))
+    .unwrap();
+    assert!(
+        !file.exists(),
+        "restore deletes files created during the call"
+    );
 }

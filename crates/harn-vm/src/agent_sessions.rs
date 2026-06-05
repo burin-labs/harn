@@ -163,6 +163,8 @@ pub struct SessionState {
     pub last_transcript_budget_action: Option<serde_json::Value>,
     pub live_clients: BTreeMap<String, LiveSessionClient>,
     pub live_controller_id: Option<String>,
+    pub completed_turn_checkpoints: Vec<SessionTurnCheckpoint>,
+    pub redo_stack: Vec<SessionRedoEntry>,
 }
 
 impl SessionState {
@@ -191,6 +193,8 @@ impl SessionState {
             last_transcript_budget_action: None,
             live_clients: BTreeMap::new(),
             live_controller_id: None,
+            completed_turn_checkpoints: Vec::new(),
+            redo_stack: Vec::new(),
         }
     }
 }
@@ -251,6 +255,45 @@ pub struct SessionTruncateResult {
     pub kept_turn_count: usize,
     pub removed_turn_count: usize,
     pub new_tip_turn_id: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SessionCheckpointSummary {
+    pub checkpoint_id: String,
+    pub before_message_count: usize,
+    pub after_message_count: usize,
+    pub fs_snapshot_ids: Vec<String>,
+}
+
+#[derive(Clone, Debug)]
+pub struct SessionTurnCheckpoint {
+    pub checkpoint_id: String,
+    pub completed_at: String,
+    pub before_transcript: VmValue,
+    pub after_transcript: VmValue,
+    pub before_message_count: usize,
+    pub after_message_count: usize,
+    pub fs_snapshot_ids: Vec<String>,
+}
+
+#[derive(Clone, Debug)]
+pub struct SessionRedoEntry {
+    pub checkpoint: SessionTurnCheckpoint,
+    pub redo_fs_snapshot_ids: Vec<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum SessionCheckpointError {
+    UnknownSession,
+    NoCheckpoint,
+    NoRedo,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SessionCheckpointOutcome {
+    pub status: &'static str,
+    pub checkpoint: SessionCheckpointSummary,
+    pub redo_fs_snapshot_ids: Vec<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -1158,6 +1201,8 @@ pub fn reset_transcript(id: &str) -> bool {
         state.scratchpad = None;
         state.scratchpad_version = 0;
         state.last_transcript_budget_action = None;
+        state.completed_turn_checkpoints.clear();
+        state.redo_stack.clear();
         state.last_accessed = Instant::now();
         true
     })
@@ -1524,6 +1569,14 @@ fn transcript_messages_from_dict(dict: &BTreeMap<String, VmValue>) -> Vec<VmValu
     }
 }
 
+fn transcript_message_count(transcript: &VmValue) -> usize {
+    transcript
+        .as_dict()
+        .map(transcript_messages_from_dict)
+        .map(|messages| messages.len())
+        .unwrap_or(0)
+}
+
 fn transcript_events_from_dict(dict: &BTreeMap<String, VmValue>) -> Vec<VmValue> {
     match dict.get("events") {
         Some(VmValue::List(list)) => list.iter().cloned().collect(),
@@ -1871,6 +1924,7 @@ fn apply_transcript_with_budget(
     candidate: VmValue,
     source: &str,
 ) -> Result<(), String> {
+    state.redo_stack.clear();
     let policy = state.transcript_budget_policy.normalized();
     let include_bytes = policy.max_approx_bytes.is_some();
     let usage_before = transcript_usage(&state.transcript, include_bytes);
@@ -2159,6 +2213,160 @@ pub fn store_transcript(id: &str, transcript: VmValue) -> Result<(), String> {
         apply_transcript_with_budget(state, transcript, "store_transcript")?;
         state.last_accessed = Instant::now();
         Ok(())
+    })
+}
+
+fn checkpoint_summary(checkpoint: &SessionTurnCheckpoint) -> SessionCheckpointSummary {
+    SessionCheckpointSummary {
+        checkpoint_id: checkpoint.checkpoint_id.clone(),
+        before_message_count: checkpoint.before_message_count,
+        after_message_count: checkpoint.after_message_count,
+        fs_snapshot_ids: checkpoint.fs_snapshot_ids.clone(),
+    }
+}
+
+fn checkpoint_error_status(error: SessionCheckpointError) -> &'static str {
+    match error {
+        SessionCheckpointError::UnknownSession => "unknown_session",
+        SessionCheckpointError::NoCheckpoint => "no_checkpoint",
+        SessionCheckpointError::NoRedo => "no_redo",
+    }
+}
+
+pub fn checkpoint_status_name(error: SessionCheckpointError) -> &'static str {
+    checkpoint_error_status(error)
+}
+
+/// Clear redo checkpoints after host-side workspace mutations that are not part
+/// of the redo flow. Returns whether any redo state was discarded.
+pub fn invalidate_redo(id: &str) -> bool {
+    SESSIONS.with(|s| {
+        let mut map = s.borrow_mut();
+        let Some(state) = map.get_mut(id) else {
+            return false;
+        };
+        let had_redo = !state.redo_stack.is_empty();
+        state.redo_stack.clear();
+        state.last_accessed = Instant::now();
+        had_redo
+    })
+}
+
+/// Record a completed prompt turn boundary.
+///
+/// `before_transcript` must be captured immediately before the user turn
+/// starts. The current live transcript becomes the redo target, and optional
+/// `fs_snapshot_ids` name host-owned filesystem snapshots captured during the
+/// turn. Harn owns the transcript stack; hosts own concrete file restoration.
+pub fn record_completed_turn_checkpoint(
+    id: &str,
+    before_transcript: VmValue,
+    fs_snapshot_ids: Vec<String>,
+) -> Result<Option<SessionCheckpointSummary>, SessionCheckpointError> {
+    SESSIONS.with(|s| {
+        let mut map = s.borrow_mut();
+        let Some(state) = map.get_mut(id) else {
+            return Err(SessionCheckpointError::UnknownSession);
+        };
+        let after_transcript = transcript_with_session_metadata(state.transcript.clone(), state);
+        let before_message_count = transcript_message_count(&before_transcript);
+        let after_message_count = transcript_message_count(&after_transcript);
+        if crate::values_equal(&before_transcript, &after_transcript) && fs_snapshot_ids.is_empty()
+        {
+            return Ok(None);
+        }
+        let checkpoint = SessionTurnCheckpoint {
+            checkpoint_id: format!("turn_{}", uuid::Uuid::now_v7().simple()),
+            completed_at: crate::orchestration::now_rfc3339(),
+            before_message_count,
+            after_message_count,
+            before_transcript,
+            after_transcript,
+            fs_snapshot_ids,
+        };
+        state.redo_stack.clear();
+        state.completed_turn_checkpoints.push(checkpoint.clone());
+        state.last_accessed = Instant::now();
+        Ok(Some(checkpoint_summary(&checkpoint)))
+    })
+}
+
+pub fn rollback_plan(id: &str) -> Result<SessionCheckpointSummary, SessionCheckpointError> {
+    SESSIONS.with(|s| {
+        let map = s.borrow();
+        let Some(state) = map.get(id) else {
+            return Err(SessionCheckpointError::UnknownSession);
+        };
+        state
+            .completed_turn_checkpoints
+            .last()
+            .map(checkpoint_summary)
+            .ok_or(SessionCheckpointError::NoCheckpoint)
+    })
+}
+
+pub fn redo_plan(id: &str) -> Result<SessionCheckpointSummary, SessionCheckpointError> {
+    SESSIONS.with(|s| {
+        let map = s.borrow();
+        let Some(state) = map.get(id) else {
+            return Err(SessionCheckpointError::UnknownSession);
+        };
+        state
+            .redo_stack
+            .last()
+            .map(|entry| {
+                let mut summary = checkpoint_summary(&entry.checkpoint);
+                summary.fs_snapshot_ids = entry.redo_fs_snapshot_ids.clone();
+                summary
+            })
+            .ok_or(SessionCheckpointError::NoRedo)
+    })
+}
+
+pub fn rollback_last_completed_turn(
+    id: &str,
+    redo_fs_snapshot_ids: Vec<String>,
+) -> Result<SessionCheckpointOutcome, SessionCheckpointError> {
+    SESSIONS.with(|s| {
+        let mut map = s.borrow_mut();
+        let Some(state) = map.get_mut(id) else {
+            return Err(SessionCheckpointError::UnknownSession);
+        };
+        let Some(checkpoint) = state.completed_turn_checkpoints.pop() else {
+            return Err(SessionCheckpointError::NoCheckpoint);
+        };
+        state.transcript = checkpoint.before_transcript.clone();
+        state.redo_stack.push(SessionRedoEntry {
+            checkpoint: checkpoint.clone(),
+            redo_fs_snapshot_ids: redo_fs_snapshot_ids.clone(),
+        });
+        state.last_accessed = Instant::now();
+        Ok(SessionCheckpointOutcome {
+            status: "rolled_back",
+            checkpoint: checkpoint_summary(&checkpoint),
+            redo_fs_snapshot_ids,
+        })
+    })
+}
+
+pub fn redo_last_rollback(id: &str) -> Result<SessionCheckpointOutcome, SessionCheckpointError> {
+    SESSIONS.with(|s| {
+        let mut map = s.borrow_mut();
+        let Some(state) = map.get_mut(id) else {
+            return Err(SessionCheckpointError::UnknownSession);
+        };
+        let Some(entry) = state.redo_stack.pop() else {
+            return Err(SessionCheckpointError::NoRedo);
+        };
+        let checkpoint = entry.checkpoint;
+        state.transcript = checkpoint.after_transcript.clone();
+        state.completed_turn_checkpoints.push(checkpoint.clone());
+        state.last_accessed = Instant::now();
+        Ok(SessionCheckpointOutcome {
+            status: "redone",
+            checkpoint: checkpoint_summary(&checkpoint),
+            redo_fs_snapshot_ids: entry.redo_fs_snapshot_ids,
+        })
     })
 }
 
@@ -2721,6 +2929,7 @@ pub fn set_workspace_anchor(id: &str, anchor: Option<WorkspaceAnchor>) -> Result
         let changed = state.workspace_anchor != anchor;
         state.workspace_anchor = anchor;
         if changed {
+            state.redo_stack.clear();
             crate::llm::permissions::clear_session_grants(id);
         }
         state.last_accessed = Instant::now();
@@ -2817,6 +3026,9 @@ pub fn set_workspace_policy(id: &str, policy: WorkspacePolicy) -> Result<bool, S
         };
         let changed = state.workspace_policy != policy;
         state.workspace_policy = policy;
+        if changed {
+            state.redo_stack.clear();
+        }
         state.last_accessed = Instant::now();
         Ok(changed)
     })
@@ -2857,14 +3069,20 @@ pub fn add_workspace_root(
             .iter_mut()
             .find(|entry| entry.path == normalized_root)
         {
+            let changed =
+                existing.mount_mode != resolved_mount_mode || existing.mounted_at != mounted_at;
             existing.mount_mode = resolved_mount_mode;
             existing.mounted_at = mounted_at.clone();
+            if changed {
+                state.redo_stack.clear();
+            }
         } else {
             anchor.additional_roots.push(MountedRoot {
                 path: normalized_root.clone(),
                 mount_mode: resolved_mount_mode,
                 mounted_at: mounted_at.clone(),
             });
+            state.redo_stack.clear();
         }
         let event = crate::llm::helpers::transcript_event(
             "RootMounted",
@@ -2903,6 +3121,7 @@ pub fn remove_workspace_root(id: &str, root: &str) -> Result<bool, String> {
             .retain(|entry| entry.path != normalized_root);
         let removed = anchor.additional_roots.len() != before;
         if removed {
+            state.redo_stack.clear();
             crate::llm::permissions::clear_session_grants(id);
         }
         state.last_accessed = Instant::now();
@@ -3173,6 +3392,14 @@ fn session_snapshot(state: &SessionState) -> VmValue {
             .as_ref()
             .map(|id| VmValue::String(std::sync::Arc::from(id.clone())))
             .unwrap_or(VmValue::Nil),
+    );
+    next.insert(
+        "completed_turn_checkpoint_count".to_string(),
+        VmValue::Int(state.completed_turn_checkpoints.len() as i64),
+    );
+    next.insert(
+        "redo_checkpoint_count".to_string(),
+        VmValue::Int(state.redo_stack.len() as i64),
     );
     VmValue::Dict(std::sync::Arc::new(next))
 }

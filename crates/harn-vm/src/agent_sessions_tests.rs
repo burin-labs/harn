@@ -150,6 +150,42 @@ fn simple_event(kind: &str) -> VmValue {
     crate::llm::helpers::transcript_event(kind, "system", "internal", "", None)
 }
 
+#[test]
+fn completed_turn_checkpoint_rolls_back_and_redoes_transcript() {
+    reset_session_store();
+    let id = open_or_create(Some("checkpoint-basic".into()));
+    inject_message(&id, make_msg("user", "one")).unwrap();
+    let before = transcript(&id).expect("before transcript");
+    inject_message(&id, make_msg("assistant", "two")).unwrap();
+
+    let checkpoint = record_completed_turn_checkpoint(&id, before, vec!["tool-1".to_string()])
+        .expect("checkpoint")
+        .expect("changed");
+    assert_eq!(checkpoint.before_message_count, 1);
+    assert_eq!(checkpoint.after_message_count, 2);
+    assert_eq!(message_count(&id), 2);
+
+    let rolled_back =
+        rollback_last_completed_turn(&id, vec!["redo-tool-1".to_string()]).expect("rollback");
+    assert_eq!(rolled_back.status, "rolled_back");
+    assert_eq!(message_count(&id), 1);
+    assert_eq!(
+        redo_plan(&id).expect("redo plan").fs_snapshot_ids,
+        ["redo-tool-1"]
+    );
+
+    let redone = redo_last_rollback(&id).expect("redo");
+    assert_eq!(redone.status, "redone");
+    assert_eq!(message_count(&id), 2);
+    assert!(redo_plan(&id).is_err());
+    assert_eq!(
+        rollback_plan(&id).expect("rollback plan").fs_snapshot_ids,
+        ["tool-1"]
+    );
+
+    reset_session_store();
+}
+
 struct CapturingSink(Arc<Mutex<Vec<AgentEvent>>>);
 
 impl AgentEventSink for CapturingSink {

@@ -138,6 +138,8 @@ ACP_AGENT_METHODS: tuple = (
     "session/prompt",
     "session/revoke_inject",
     "session/truncate",
+    "session/rollback",
+    "session/redo",
     "session/remind",
     "session/pending_injections",
     "session/revoke_reminder",
@@ -169,6 +171,8 @@ ACP_SESSION_UPDATES: tuple = (
     "current_mode_update",
     "config_option_update",
     "session_info_update",
+    "session_redo",
+    "session_rollback",
     "session_truncated",
     "artifact",
     "fs_watch",
@@ -421,6 +425,8 @@ class ACPAgentMethod(str, Enum):
     SESSION_PROMPT = "session/prompt"
     SESSION_REVOKE_INJECT = "session/revoke_inject"
     SESSION_TRUNCATE = "session/truncate"
+    SESSION_ROLLBACK = "session/rollback"
+    SESSION_REDO = "session/redo"
     SESSION_REMIND = "session/remind"
     SESSION_PENDING_INJECTIONS = "session/pending_injections"
     SESSION_REVOKE_REMINDER = "session/revoke_reminder"
@@ -455,6 +461,8 @@ class ACPSessionUpdate(str, Enum):
     CURRENT_MODE_UPDATE = "current_mode_update"
     CONFIG_OPTION_UPDATE = "config_option_update"
     SESSION_INFO_UPDATE = "session_info_update"
+    SESSION_REDO = "session_redo"
+    SESSION_ROLLBACK = "session_rollback"
     SESSION_TRUNCATED = "session_truncated"
     ARTIFACT = "artifact"
     FS_WATCH = "fs_watch"

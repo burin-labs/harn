@@ -46,6 +46,8 @@ pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
     &AGENT_SESSION_RESET_BUILTIN_DEF,
     &AGENT_SESSION_FORK_BUILTIN_DEF,
     &AGENT_SESSION_FORK_AT_BUILTIN_DEF,
+    &AGENT_SESSION_ROLLBACK_BUILTIN_DEF,
+    &AGENT_SESSION_REDO_BUILTIN_DEF,
     &AGENT_SESSION_CLOSE_BUILTIN_DEF,
     &AGENT_SESSION_TRIM_BUILTIN_DEF,
     &AGENT_SESSION_ATTACH_BUILTIN_DEF,
@@ -809,6 +811,50 @@ fn agent_session_fork_at_builtin(args: &[VmValue], _out: &mut String) -> Result<
             "agent_session_fork_at: failed to fork session '{src}'"
         ))),
     }
+}
+
+fn checkpoint_outcome_value(outcome: agent_sessions::SessionCheckpointOutcome) -> VmValue {
+    crate::stdlib::json_to_vm_value(&serde_json::json!({
+        "status": outcome.status,
+        "checkpoint_id": outcome.checkpoint.checkpoint_id,
+        "before_message_count": outcome.checkpoint.before_message_count,
+        "after_message_count": outcome.checkpoint.after_message_count,
+        "fs_snapshot_ids": outcome.checkpoint.fs_snapshot_ids,
+        "redo_fs_snapshot_ids": outcome.redo_fs_snapshot_ids,
+    }))
+}
+
+#[harn_builtin(
+    sig = "agent_session_rollback(id: string) -> dict",
+    category = "agent.session",
+    doc = "Roll back the most recent completed session turn transcript checkpoint."
+)]
+fn agent_session_rollback_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let id = arg_string_required(args, 0, "agent_session_rollback", "id")?;
+    let outcome =
+        agent_sessions::rollback_last_completed_turn(&id, Vec::new()).map_err(|error| {
+            err(format!(
+                "agent_session_rollback: {}",
+                agent_sessions::checkpoint_status_name(error)
+            ))
+        })?;
+    Ok(checkpoint_outcome_value(outcome))
+}
+
+#[harn_builtin(
+    sig = "agent_session_redo(id: string) -> dict",
+    category = "agent.session",
+    doc = "Redo the immediately preceding session rollback when still valid."
+)]
+fn agent_session_redo_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let id = arg_string_required(args, 0, "agent_session_redo", "id")?;
+    let outcome = agent_sessions::redo_last_rollback(&id).map_err(|error| {
+        err(format!(
+            "agent_session_redo: {}",
+            agent_sessions::checkpoint_status_name(error)
+        ))
+    })?;
+    Ok(checkpoint_outcome_value(outcome))
 }
 
 #[harn_builtin(
