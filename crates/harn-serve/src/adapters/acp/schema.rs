@@ -14,6 +14,8 @@ pub const ACP_SESSION_UPDATE_VARIANTS: &[&str] = &[
     "current_mode_update",
     "config_option_update",
     "session_info_update",
+    "session_redo",
+    "session_rollback",
     "session_truncated",
 ];
 
@@ -215,6 +217,8 @@ pub(super) fn acp_agent_capabilities() -> serde_json::Value {
             "close": {},
             "list": {},
             "resume": {},
+            "rollback": {},
+            "redo": {},
             "restoreToolCall": {},
             "cancelToolCall": {},
         },

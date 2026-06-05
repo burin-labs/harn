@@ -147,6 +147,8 @@ public enum HarnACPAgentMethod: String, Codable, Sendable, CaseIterable {
     case sessionPrompt = "session/prompt"
     case sessionRevokeInject = "session/revoke_inject"
     case sessionTruncate = "session/truncate"
+    case sessionRollback = "session/rollback"
+    case sessionRedo = "session/redo"
     case sessionRemind = "session/remind"
     case sessionPendingInjections = "session/pending_injections"
     case sessionRevokeReminder = "session/revoke_reminder"
@@ -165,6 +167,8 @@ public enum HarnACPAgentMethod: String, Codable, Sendable, CaseIterable {
         "session/prompt",
         "session/revoke_inject",
         "session/truncate",
+        "session/rollback",
+        "session/redo",
         "session/remind",
         "session/pending_injections",
         "session/revoke_reminder",
@@ -214,6 +218,8 @@ public enum HarnACPSessionUpdate: String, Codable, Sendable, CaseIterable {
     case currentModeUpdate = "current_mode_update"
     case configOptionUpdate = "config_option_update"
     case sessionInfoUpdate = "session_info_update"
+    case sessionRedo = "session_redo"
+    case sessionRollback = "session_rollback"
     case sessionTruncated = "session_truncated"
     case artifact = "artifact"
     case fsWatch = "fs_watch"
@@ -245,6 +251,8 @@ public enum HarnACPSessionUpdate: String, Codable, Sendable, CaseIterable {
         "current_mode_update",
         "config_option_update",
         "session_info_update",
+        "session_redo",
+        "session_rollback",
         "session_truncated",
         "artifact",
         "fs_watch",

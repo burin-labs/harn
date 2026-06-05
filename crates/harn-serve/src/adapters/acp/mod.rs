@@ -59,6 +59,8 @@ pub use types::{
     ACP_METHOD_SESSION_PROMPT, ACP_METHOD_SESSION_REPLACE_INJECT, ACP_METHOD_SESSION_REVOKE_INJECT,
 };
 
+#[cfg(feature = "hostlib")]
+use std::collections::HashSet;
 use std::collections::{BTreeMap, HashMap};
 use std::fs;
 use std::io::Write;
@@ -1942,6 +1944,20 @@ impl AcpServer {
         let _session_guard = harn_vm::agent_sessions::enter_current_session(session_id.clone());
         #[cfg(feature = "hostlib")]
         harn_hostlib::fs::configure_session_root(&session_id, &cwd);
+        let before_turn_transcript = harn_vm::agent_sessions::transcript(&session_id)
+            .unwrap_or_else(|| {
+                harn_vm::agent_sessions::snapshot(&session_id).unwrap_or(harn_vm::VmValue::Nil)
+            });
+        #[cfg(feature = "hostlib")]
+        let before_turn_fs_snapshots: HashSet<String> =
+            harn_hostlib::fs_snapshot::list_snapshots(&session_id)
+                .map(|snapshots| {
+                    snapshots
+                        .into_iter()
+                        .map(|snapshot| snapshot.snapshot_id)
+                        .collect()
+                })
+                .unwrap_or_default();
 
         let (source, source_path) = if let Some(ref pipeline_path) = self.pipeline {
             let full_path = if Path::new(pipeline_path).is_absolute() {
@@ -2153,6 +2169,27 @@ impl AcpServer {
                         .take_prompt_stop_reason()
                         .unwrap_or_else(|| "end_turn".to_string())
                 };
+                if stop_reason != "cancelled" {
+                    #[cfg(feature = "hostlib")]
+                    let fs_snapshot_ids = harn_hostlib::fs_snapshot::list_snapshots(&session_id)
+                        .map(|snapshots| {
+                            snapshots
+                                .into_iter()
+                                .filter_map(|snapshot| {
+                                    (!before_turn_fs_snapshots.contains(&snapshot.snapshot_id))
+                                        .then_some(snapshot.snapshot_id)
+                                })
+                                .collect::<Vec<_>>()
+                        })
+                        .unwrap_or_default();
+                    #[cfg(not(feature = "hostlib"))]
+                    let fs_snapshot_ids = Vec::new();
+                    let _ = harn_vm::agent_sessions::record_completed_turn_checkpoint(
+                        &session_id,
+                        before_turn_transcript,
+                        fs_snapshot_ids,
+                    );
+                }
                 send_json_response(
                     &send_output,
                     &id_owned,
@@ -3708,6 +3745,7 @@ impl AcpServer {
         let paths = staged_fs_paths_param(params);
         match harn_hostlib::fs::commit_staged(session_id.as_str(), &paths) {
             Ok(result) => {
+                harn_vm::agent_sessions::invalidate_redo(session_id.as_str());
                 self.send_response(
                     id,
                     serde_json::json!({
@@ -3758,6 +3796,7 @@ impl AcpServer {
         let paths = staged_fs_paths_param(params);
         match harn_hostlib::fs::discard_staged(session_id.as_str(), &paths) {
             Ok(result) => {
+                harn_vm::agent_sessions::invalidate_redo(session_id.as_str());
                 self.send_response(
                     id,
                     serde_json::json!({
@@ -3822,6 +3861,7 @@ impl AcpServer {
             .unwrap_or_default();
         match harn_hostlib::fs_snapshot::restore(session_id, tool_call_id, &paths) {
             Ok(result) => {
+                harn_vm::agent_sessions::invalidate_redo(session_id);
                 self.send_response(
                     id,
                     serde_json::json!({
@@ -3893,6 +3933,263 @@ impl AcpServer {
             -32601,
             "session/restore_tool_call requires the hostlib feature",
         );
+    }
+
+    #[cfg(feature = "hostlib")]
+    fn restore_fs_snapshots(
+        &self,
+        session_id: &str,
+        snapshot_ids: &[String],
+        reverse: bool,
+    ) -> Result<Vec<serde_json::Value>, String> {
+        let mut ids = snapshot_ids.to_vec();
+        if reverse {
+            ids.reverse();
+        }
+        let mut restored = Vec::new();
+        for snapshot_id in ids {
+            let result = harn_hostlib::fs_snapshot::restore(session_id, &snapshot_id, &[])
+                .map_err(|error| error.to_string())?;
+            restored.push(serde_json::json!({
+                "snapshotId": result.snapshot_id,
+                "restoredPaths": result.restored_paths,
+                "skippedPathsWithReasons": result
+                    .skipped_paths_with_reasons
+                    .into_iter()
+                    .map(|(path, reason)| serde_json::json!({
+                        "path": path,
+                        "reason": reason,
+                    }))
+                    .collect::<Vec<_>>(),
+            }));
+        }
+        Ok(restored)
+    }
+
+    #[cfg(feature = "hostlib")]
+    fn capture_redo_snapshots(
+        &self,
+        session_id: &str,
+        checkpoint_id: &str,
+        rollback_snapshot_ids: &[String],
+    ) -> Result<Vec<String>, String> {
+        let Some(cwd) = self
+            .sessions
+            .get(session_id)
+            .map(|session| session.cwd.clone())
+        else {
+            return Err(format!("Unknown session: {session_id}"));
+        };
+        let summaries = harn_hostlib::fs_snapshot::list_snapshots(session_id)
+            .map_err(|error| error.to_string())?;
+        let by_id: HashMap<String, harn_hostlib::fs_snapshot::SnapshotSummary> = summaries
+            .into_iter()
+            .map(|summary| (summary.snapshot_id.clone(), summary))
+            .collect();
+        let mut redo_ids = Vec::new();
+        for snapshot_id in rollback_snapshot_ids {
+            let Some(summary) = by_id.get(snapshot_id) else {
+                continue;
+            };
+            if summary.captured_paths.is_empty() {
+                continue;
+            }
+            let redo_id = format!("{checkpoint_id}:redo:{snapshot_id}");
+            harn_hostlib::fs_snapshot::snapshot(
+                session_id,
+                &redo_id,
+                &summary.captured_paths,
+                Some(&cwd),
+            )
+            .map_err(|error| error.to_string())?;
+            redo_ids.push(redo_id);
+        }
+        Ok(redo_ids)
+    }
+
+    fn checkpoint_response(
+        &self,
+        outcome: harn_vm::agent_sessions::SessionCheckpointOutcome,
+        fs_restores: Vec<serde_json::Value>,
+    ) -> serde_json::Value {
+        serde_json::json!({
+            "status": outcome.status,
+            "checkpointId": outcome.checkpoint.checkpoint_id,
+            "beforeMessageCount": outcome.checkpoint.before_message_count,
+            "afterMessageCount": outcome.checkpoint.after_message_count,
+            "fsSnapshotIds": outcome.checkpoint.fs_snapshot_ids,
+            "redoFsSnapshotIds": outcome.redo_fs_snapshot_ids,
+            "fsRestores": fs_restores,
+        })
+    }
+
+    fn send_checkpoint_error(
+        &self,
+        id: &serde_json::Value,
+        code: i64,
+        status: &'static str,
+        message: &str,
+    ) {
+        self.send_error_with_data(id, code, message, serde_json::json!({ "status": status }));
+    }
+
+    fn handle_session_rollback(&mut self, id: &serde_json::Value, params: &serde_json::Value) {
+        let Some(session_id) = session_id_param(params) else {
+            self.send_checkpoint_error(
+                id,
+                -32602,
+                "invalid_params",
+                "session/rollback requires sessionId",
+            );
+            return;
+        };
+        let Some(session) = self.sessions.get(&session_id) else {
+            self.send_checkpoint_error(
+                id,
+                -32602,
+                "unknown_session",
+                &format!("Unknown session: {session_id}"),
+            );
+            return;
+        };
+        if session.host_bridge.is_some() {
+            self.send_checkpoint_error(
+                id,
+                -32000,
+                "prompt_active",
+                "session/rollback rejected: prompt is active",
+            );
+            return;
+        }
+        let plan = match harn_vm::agent_sessions::rollback_plan(&session_id) {
+            Ok(plan) => plan,
+            Err(error) => {
+                let status = harn_vm::agent_sessions::checkpoint_status_name(error);
+                self.send_checkpoint_error(id, -32000, status, status);
+                return;
+            }
+        };
+        #[cfg(not(feature = "hostlib"))]
+        let _ = &plan;
+        #[cfg(feature = "hostlib")]
+        let redo_fs_snapshot_ids = match self.capture_redo_snapshots(
+            &session_id,
+            &plan.checkpoint_id,
+            &plan.fs_snapshot_ids,
+        ) {
+            Ok(ids) => ids,
+            Err(message) => {
+                self.send_checkpoint_error(id, -32000, "fs_snapshot_error", &message);
+                return;
+            }
+        };
+        #[cfg(not(feature = "hostlib"))]
+        let redo_fs_snapshot_ids = Vec::new();
+        #[cfg(feature = "hostlib")]
+        let fs_restores = match self.restore_fs_snapshots(&session_id, &plan.fs_snapshot_ids, true)
+        {
+            Ok(restores) => restores,
+            Err(message) => {
+                self.send_checkpoint_error(id, -32000, "fs_restore_error", &message);
+                return;
+            }
+        };
+        #[cfg(not(feature = "hostlib"))]
+        let fs_restores = Vec::new();
+        let outcome = match harn_vm::agent_sessions::rollback_last_completed_turn(
+            &session_id,
+            redo_fs_snapshot_ids,
+        ) {
+            Ok(outcome) => outcome,
+            Err(error) => {
+                let status = harn_vm::agent_sessions::checkpoint_status_name(error);
+                self.send_checkpoint_error(id, -32000, status, status);
+                return;
+            }
+        };
+        self.send_notification(
+            "session/update",
+            serde_json::json!({
+                "sessionId": session_id,
+                "update": {
+                    "sessionUpdate": "session_rollback",
+                    "checkpointId": outcome.checkpoint.checkpoint_id,
+                    "status": outcome.status,
+                },
+            }),
+        );
+        self.send_response(id, self.checkpoint_response(outcome, fs_restores));
+    }
+
+    fn handle_session_redo(&mut self, id: &serde_json::Value, params: &serde_json::Value) {
+        let Some(session_id) = session_id_param(params) else {
+            self.send_checkpoint_error(
+                id,
+                -32602,
+                "invalid_params",
+                "session/redo requires sessionId",
+            );
+            return;
+        };
+        let Some(session) = self.sessions.get(&session_id) else {
+            self.send_checkpoint_error(
+                id,
+                -32602,
+                "unknown_session",
+                &format!("Unknown session: {session_id}"),
+            );
+            return;
+        };
+        if session.host_bridge.is_some() {
+            self.send_checkpoint_error(
+                id,
+                -32000,
+                "prompt_active",
+                "session/redo rejected: prompt is active",
+            );
+            return;
+        }
+        let plan = match harn_vm::agent_sessions::redo_plan(&session_id) {
+            Ok(plan) => plan,
+            Err(error) => {
+                let status = harn_vm::agent_sessions::checkpoint_status_name(error);
+                self.send_checkpoint_error(id, -32000, status, status);
+                return;
+            }
+        };
+        #[cfg(not(feature = "hostlib"))]
+        let _ = &plan;
+        #[cfg(feature = "hostlib")]
+        let fs_restores = match self.restore_fs_snapshots(&session_id, &plan.fs_snapshot_ids, false)
+        {
+            Ok(restores) => restores,
+            Err(message) => {
+                self.send_checkpoint_error(id, -32000, "fs_restore_error", &message);
+                return;
+            }
+        };
+        #[cfg(not(feature = "hostlib"))]
+        let fs_restores = Vec::new();
+        let outcome = match harn_vm::agent_sessions::redo_last_rollback(&session_id) {
+            Ok(outcome) => outcome,
+            Err(error) => {
+                let status = harn_vm::agent_sessions::checkpoint_status_name(error);
+                self.send_checkpoint_error(id, -32000, status, status);
+                return;
+            }
+        };
+        self.send_notification(
+            "session/update",
+            serde_json::json!({
+                "sessionId": session_id,
+                "update": {
+                    "sessionUpdate": "session_redo",
+                    "checkpointId": outcome.checkpoint.checkpoint_id,
+                    "status": outcome.status,
+                },
+            }),
+        );
+        self.send_response(id, self.checkpoint_response(outcome, fs_restores));
     }
 
     fn handle_session_set_mode(&mut self, id: &serde_json::Value, params: &serde_json::Value) {
@@ -4205,6 +4502,18 @@ impl AcpServer {
                     return;
                 }
                 self.handle_session_restore_tool_call(&id, &params);
+            }
+            "session/rollback" | "harn.session_rollback" => {
+                if self.reject_unauthenticated(&id) {
+                    return;
+                }
+                self.handle_session_rollback(&id, &params);
+            }
+            "session/redo" | "harn.session_redo" => {
+                if self.reject_unauthenticated(&id) {
+                    return;
+                }
+                self.handle_session_redo(&id, &params);
             }
             "session/prompt" => {
                 if self.reject_unauthenticated(&id) {

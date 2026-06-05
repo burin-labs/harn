@@ -73,6 +73,8 @@ under `agentCapabilities.sessionCapabilities`:
     "close": {},
     "list": {},
     "resume": {},
+    "rollback": {},
+    "redo": {},
     "restoreToolCall": {}
   }
 }
@@ -93,6 +95,12 @@ Clients drive a restore with:
 The server routes the call through `harn_hostlib::fs_snapshot::restore`
 and emits a canonical `session/update` carrying the restored paths and
 a `_meta.harn.kind = "tool_call_restored"` discriminator:
+
+Completed prompt-turn rollback uses the same snapshots through
+`session/rollback` and `session/redo`. Harn owns the transcript checkpoint
+stack; hostlib owns the file pre-images. During rollback the ACP adapter
+captures redo file snapshots, restores the turn's original snapshots, and then
+moves the transcript back to the checkpoint boundary.
 
 ```jsonc
 {

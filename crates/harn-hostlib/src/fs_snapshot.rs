@@ -439,11 +439,10 @@ pub fn drop_snapshot(session_id: &str, snapshot_id: &str) -> Result<DropResult, 
 /// Auto-on-write hook called from the mutating tool builtins.
 ///
 /// Captures `path`'s pre-image into the snapshot whose id matches the
-/// current [`harn_vm::agent_sessions::current_tool_call_id`]. Silently
-/// no-ops when no session is active, no tool-call id is set, or no
-/// snapshot is registered under that id — this is the zero-cost path
-/// for read-only tools and immediate-mode writes outside an active
-/// snapshot scope.
+/// current [`harn_vm::agent_sessions::current_tool_call_id`]. The first
+/// write in a tool call auto-opens that snapshot. The hook silently no-ops
+/// when no session is active or no tool-call id is set, which keeps read-only
+/// tools and writes outside active tool scopes cheap.
 pub(crate) fn auto_capture_for_write(builtin: &'static str, path: &Path) {
     let Some(session_id) = active_session_id() else {
         return;
@@ -454,9 +453,21 @@ pub(crate) fn auto_capture_for_write(builtin: &'static str, path: &Path) {
     let mut guard = sessions()
         .lock()
         .expect("fs_snapshot session mutex poisoned");
-    let Some(bundle) = guard.get_mut(&session_id) else {
-        return;
-    };
+    let bundle = guard.entry(session_id.clone()).or_default();
+    if !bundle
+        .snapshots
+        .iter()
+        .any(|snap| snap.snapshot_id == snapshot_id)
+    {
+        let root =
+            crate::fs::configured_session_root(&session_id).unwrap_or_else(|| resolve_root(None));
+        if let Err(error) = upsert_snapshot(bundle, &session_id, &snapshot_id, &root) {
+            tracing::warn!(
+                "fs_snapshot: failed to auto-open snapshot {snapshot_id} in session {session_id} (builtin={builtin}): {error}"
+            );
+            return;
+        }
+    }
     let Some(snapshot) = bundle
         .snapshots
         .iter()

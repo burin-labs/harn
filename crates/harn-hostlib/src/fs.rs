@@ -290,6 +290,17 @@ pub fn configure_session_root(session_id: &str, root: &Path) {
     }
 }
 
+/// Return the root currently associated with a hostlib session.
+pub fn configured_session_root(session_id: &str) -> Option<PathBuf> {
+    if session_id.trim().is_empty() {
+        return None;
+    }
+    let guard = sessions()
+        .lock()
+        .expect("hostlib fs session mutex poisoned");
+    guard.get(session_id).map(|state| state.root.clone())
+}
+
 /// Set a session's filesystem mode.
 pub fn set_mode(
     session_id: &str,

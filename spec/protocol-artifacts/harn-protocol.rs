@@ -31,6 +31,8 @@ pub const ACP_AGENT_METHOD_SESSION_RESUME: &str = "session/resume";
 pub const ACP_AGENT_METHOD_SESSION_PROMPT: &str = "session/prompt";
 pub const ACP_AGENT_METHOD_SESSION_REVOKE_INJECT: &str = "session/revoke_inject";
 pub const ACP_AGENT_METHOD_SESSION_TRUNCATE: &str = "session/truncate";
+pub const ACP_AGENT_METHOD_SESSION_ROLLBACK: &str = "session/rollback";
+pub const ACP_AGENT_METHOD_SESSION_REDO: &str = "session/redo";
 pub const ACP_AGENT_METHOD_SESSION_REMIND: &str = "session/remind";
 pub const ACP_AGENT_METHOD_SESSION_PENDING_INJECTIONS: &str = "session/pending_injections";
 pub const ACP_AGENT_METHOD_SESSION_REVOKE_REMINDER: &str = "session/revoke_reminder";
@@ -49,6 +51,8 @@ pub const ACP_AGENT_METHODS: &[&str] = &[
     "session/prompt",
     "session/revoke_inject",
     "session/truncate",
+    "session/rollback",
+    "session/redo",
     "session/remind",
     "session/pending_injections",
     "session/revoke_reminder",
@@ -65,6 +69,8 @@ pub const ACP_DISPATCHED_METHOD_SESSION_LOAD: &str = "session/load";
 pub const ACP_DISPATCHED_METHOD_SESSION_RESUME: &str = "session/resume";
 pub const ACP_DISPATCHED_METHOD_SESSION_FORK: &str = "session/fork";
 pub const ACP_DISPATCHED_METHOD_SESSION_TRUNCATE: &str = "session/truncate";
+pub const ACP_DISPATCHED_METHOD_SESSION_ROLLBACK: &str = "session/rollback";
+pub const ACP_DISPATCHED_METHOD_SESSION_REDO: &str = "session/redo";
 pub const ACP_DISPATCHED_METHOD_SESSION_SET_MODE: &str = "session/set_mode";
 pub const ACP_DISPATCHED_METHOD_SESSION_SET_CONFIG_OPTION: &str = "session/set_config_option";
 pub const ACP_DISPATCHED_METHOD_SESSION_FS_MODE: &str = "session/fs_mode";
@@ -86,6 +92,8 @@ pub const ACP_DISPATCHED_METHOD_SESSION_LIST: &str = "session/list";
 pub const ACP_DISPATCHED_METHOD_HARN_SESSION_WORKSPACE_ROOTS: &str = "harn.session_workspace_roots";
 pub const ACP_DISPATCHED_METHOD_HARN_SESSION_ADD_ROOT: &str = "harn.session_add_root";
 pub const ACP_DISPATCHED_METHOD_HARN_SESSION_REANCHOR: &str = "harn.session_reanchor";
+pub const ACP_DISPATCHED_METHOD_HARN_SESSION_ROLLBACK: &str = "harn.session_rollback";
+pub const ACP_DISPATCHED_METHOD_HARN_SESSION_REDO: &str = "harn.session_redo";
 pub const ACP_DISPATCHED_METHOD_AGENT_RESUME: &str = "agent/resume";
 pub const ACP_DISPATCHED_METHOD_HARN_HITL_RESPOND: &str = "harn.hitl.respond";
 pub const ACP_DISPATCHED_METHOD_WORKFLOW_SIGNAL: &str = "workflow/signal";
@@ -117,6 +125,8 @@ pub const ACP_DISPATCHED_METHODS: &[&str] = &[
     "session/resume",
     "session/fork",
     "session/truncate",
+    "session/rollback",
+    "session/redo",
     "session/set_mode",
     "session/set_config_option",
     "session/fs_mode",
@@ -138,6 +148,8 @@ pub const ACP_DISPATCHED_METHODS: &[&str] = &[
     "harn.session_workspace_roots",
     "harn.session_add_root",
     "harn.session_reanchor",
+    "harn.session_rollback",
+    "harn.session_redo",
     "agent/resume",
     "harn.hitl.respond",
     "workflow/signal",
@@ -197,6 +209,8 @@ pub const ACP_SESSION_UPDATE_AVAILABLE_COMMANDS_UPDATE: &str = "available_comman
 pub const ACP_SESSION_UPDATE_CURRENT_MODE_UPDATE: &str = "current_mode_update";
 pub const ACP_SESSION_UPDATE_CONFIG_OPTION_UPDATE: &str = "config_option_update";
 pub const ACP_SESSION_UPDATE_SESSION_INFO_UPDATE: &str = "session_info_update";
+pub const ACP_SESSION_UPDATE_SESSION_REDO: &str = "session_redo";
+pub const ACP_SESSION_UPDATE_SESSION_ROLLBACK: &str = "session_rollback";
 pub const ACP_SESSION_UPDATE_SESSION_TRUNCATED: &str = "session_truncated";
 pub const ACP_SESSION_UPDATE_ARTIFACT: &str = "artifact";
 pub const ACP_SESSION_UPDATE_FS_WATCH: &str = "fs_watch";
@@ -229,6 +243,8 @@ pub const ACP_SESSION_UPDATES: &[&str] = &[
     "current_mode_update",
     "config_option_update",
     "session_info_update",
+    "session_redo",
+    "session_rollback",
     "session_truncated",
     "artifact",
     "fs_watch",

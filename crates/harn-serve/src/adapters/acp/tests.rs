@@ -55,6 +55,13 @@ async fn recv_json(rx: &mut mpsc::UnboundedReceiver<String>) -> serde_json::Valu
     serde_json::from_str(&line).expect("ACP JSON line")
 }
 
+fn make_acp_test_message(role: &str, content: &str) -> VmValue {
+    VmValue::Dict(Arc::new(BTreeMap::from([
+        ("role".to_string(), VmValue::String(Arc::from(role))),
+        ("content".to_string(), VmValue::String(Arc::from(content))),
+    ])))
+}
+
 async fn start_acp_channel_session() -> (
     mpsc::UnboundedSender<serde_json::Value>,
     mpsc::UnboundedReceiver<String>,
@@ -1192,6 +1199,100 @@ async fn acp_fs_mode_commit_and_discard_staged_hostlib_writes() {
 
 #[cfg(feature = "hostlib")]
 #[tokio::test(flavor = "current_thread")]
+async fn acp_session_rollback_and_redo_move_transcript_and_filesystem_together() {
+    use harn_hostlib::tools::permissions;
+
+    harn_vm::reset_thread_local_state();
+    permissions::reset();
+    permissions::enable_for_test();
+
+    let dir = tempfile::TempDir::new().unwrap();
+    let file = dir.path().join("note.txt");
+    std::fs::write(&file, "before").unwrap();
+
+    let (tx, mut rx) = mpsc::unbounded_channel();
+    let mut server = AcpServer::new_with_output(AcpServerConfig::new(None), AcpOutput::Channel(tx));
+    server
+        .handle_incoming_message(serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "session/new",
+            "params": {"cwd": dir.path().to_string_lossy()},
+        }))
+        .await;
+    let created = recv_json(&mut rx).await;
+    let session_id = created["result"]["sessionId"]
+        .as_str()
+        .expect("session id")
+        .to_string();
+    harn_hostlib::fs::configure_session_root(&session_id, dir.path());
+
+    harn_vm::agent_sessions::inject_message(
+        &session_id,
+        make_acp_test_message("user", "before turn"),
+    )
+    .expect("seed transcript");
+    let before_transcript = harn_vm::agent_sessions::transcript(&session_id).expect("transcript");
+    harn_hostlib::fs_snapshot::snapshot(
+        &session_id,
+        "turn-file",
+        &[file.to_string_lossy().into_owned()],
+        Some(dir.path()),
+    )
+    .expect("snapshot");
+    std::fs::write(&file, "after").unwrap();
+    harn_vm::agent_sessions::inject_message(
+        &session_id,
+        make_acp_test_message("assistant", "after turn"),
+    )
+    .expect("append transcript");
+    harn_vm::agent_sessions::record_completed_turn_checkpoint(
+        &session_id,
+        before_transcript,
+        vec!["turn-file".to_string()],
+    )
+    .expect("record checkpoint")
+    .expect("checkpoint changed");
+
+    server
+        .handle_incoming_message(serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": 2,
+            "method": "session/rollback",
+            "params": {"sessionId": session_id.clone()},
+        }))
+        .await;
+    let rollback_update = recv_json(&mut rx).await;
+    assert_eq!(
+        rollback_update["params"]["update"]["sessionUpdate"],
+        "session_rollback"
+    );
+    let rollback = recv_json(&mut rx).await;
+    assert_eq!(rollback["result"]["status"], "rolled_back");
+    assert_eq!(std::fs::read_to_string(&file).unwrap(), "before");
+    assert_eq!(harn_vm::agent_sessions::messages_json(&session_id).len(), 1);
+
+    server
+        .handle_incoming_message(serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": 3,
+            "method": "session/redo",
+            "params": {"sessionId": session_id.clone()},
+        }))
+        .await;
+    let redo_update = recv_json(&mut rx).await;
+    assert_eq!(
+        redo_update["params"]["update"]["sessionUpdate"],
+        "session_redo"
+    );
+    let redo = recv_json(&mut rx).await;
+    assert_eq!(redo["result"]["status"], "redone");
+    assert_eq!(std::fs::read_to_string(&file).unwrap(), "after");
+    assert_eq!(harn_vm::agent_sessions::messages_json(&session_id).len(), 2);
+}
+
+#[cfg(feature = "hostlib")]
+#[tokio::test(flavor = "current_thread")]
 async fn acp_session_restore_tool_call_restores_pre_image_and_emits_update() {
     use harn_hostlib::tools::permissions;
 
@@ -1441,6 +1542,8 @@ fn acp_agent_capabilities_use_canonical_initialize_shape() {
             "close": {},
             "list": {},
             "resume": {},
+            "rollback": {},
+            "redo": {},
             "restoreToolCall": {},
             "cancelToolCall": {},
         })

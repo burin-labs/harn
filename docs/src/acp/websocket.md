@@ -119,6 +119,8 @@ surface as stdio ACP:
 - `session/replace_inject`
 - `session/cancel`
 - `session/truncate`
+- `session/rollback`
+- `session/redo`
 - `session/close`
 - `session/remind`
 - `session/pending_injections`
