@@ -8,6 +8,34 @@ highlights live in [CHANGELOG-pre-0.6.md](CHANGELOG-pre-0.6.md).
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.8.77
+
+### Added
+
+- **Postgres query ergonomics.** `std/postgres/query` now provides Harn-native
+  named query records, `one`/`many`/`exec`/`run` wrappers over `std/postgres`,
+  and safe static projection helpers for UUID and timestamp columns (#3072).
+- **`std/sqlite` hostlib.** Harn scripts can now `import "std/sqlite"` to
+  open in-memory or file-backed SQLite databases, run parameterized queries and
+  statements, use transactions/savepoints/migrations, and test SQL
+  deterministically with fixture-backed mocks (#3073).
+- Added Harn-owned `session/rollback` and `session/redo` ACP primitives that
+  move transcript checkpoints and hostlib filesystem snapshots together for
+  completed agent turns.
+- **Live session attach/detach lifecycle.** Harn sessions now expose
+  observer/controller live-client ownership, takeover, detach, heartbeat,
+  controller prompt injection, and permission-route audit semantics for
+  interactive clients (#3076).
+
+### Changed
+
+- **Provider/model catalog authoring is now fragment-based and
+  model-equivalence aware (#1875).** Harn now generates its embedded provider
+  and capability snapshots from smaller TOML source files, exports
+  rate-limit/architecture/API-dialect/wire-model metadata to downstream catalog
+  artifacts, and exposes equivalent-model routes for providers that serve the
+  same logical model under different wire IDs.
+
 ## v0.8.76
 
 ### Fixed
