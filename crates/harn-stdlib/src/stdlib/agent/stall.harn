@@ -718,12 +718,29 @@ pub fn agent_stall_observe_tool_calls(
   defer_feedback: bool,
   prev_dispatch = nil,
   turn_text = "",
+  had_parse_errors = false,
 ) -> AgentStallObservation {
   let config = __agent_stall_config(raw_config)
   if !config.enabled {
     return {
       state: state,
       enabled: false,
+      warning: nil,
+      feedback_deferred: false,
+      config: config,
+      hard_stop: false,
+    }
+  }
+  // A turn whose tool calls were all dropped by the parser carries real intent
+  // (it tried to act); the malformed-call path already injected purpose-built
+  // parse-guidance feedback. Treat it as a neutral recovery turn so it does NOT
+  // count toward the no-progress monologue streak — otherwise the loop nags the
+  // model to "emit one well-formed tool call" when it already did, just with a
+  // malformed body. Gated purely on the syntactic parse-error signal.
+  if had_parse_errors {
+    return {
+      state: __agent_stall_register_recovery(__agent_stall_reset_action(state)),
+      enabled: true,
       warning: nil,
       feedback_deferred: false,
       config: config,

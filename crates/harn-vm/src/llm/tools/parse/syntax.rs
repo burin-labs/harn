@@ -211,6 +211,12 @@ pub(crate) struct HeredocSpan {
     pub content: std::ops::Range<usize>,
     /// Byte offset immediately after the closing tag on its line.
     pub end: usize,
+    /// True when the heredoc body used literal JSON/string escape sequences
+    /// (`\n`, `\t`, ...) as line separators instead of real newlines — the
+    /// degraded form cheap models emit when they treat the heredoc body as a
+    /// one-line JSON string. The caller must unescape `content` before use.
+    /// A body that used real newlines (the normal case) is always `false`.
+    pub escaped: bool,
 }
 
 /// Why a `<<` opener is not a complete heredoc. Carries the tag where one was
@@ -260,6 +266,16 @@ pub(crate) fn scan_heredoc(src: &str, start: usize) -> Result<HeredocSpan, Hered
         pos += 1;
     }
     if bytes.get(pos) != Some(&b'\n') {
+        // Degraded form: cheap models (e.g. qwen3.6) JSON-escape the heredoc
+        // body, so the line break after the tag is the two literal bytes
+        // backslash + 'n' rather than a real `\n`. Recover those calls by
+        // scanning the escaped body to a literal-`\n`-delimited closing tag
+        // line; the caller unescapes `content`. A genuinely-truncated opener
+        // (`<<EOF` then end-of-input, a real shift operator, etc.) still hits
+        // the original MissingNewline error below.
+        if bytes.get(pos) == Some(&b'\\') && bytes.get(pos + 1) == Some(&b'n') {
+            return scan_escaped_heredoc_body(src, pos, tag);
+        }
         return Err(HeredocError::MissingNewline { tag });
     }
     pos += 1;
@@ -287,6 +303,7 @@ pub(crate) fn scan_heredoc(src: &str, start: usize) -> Result<HeredocSpan, Hered
                 return Ok(HeredocSpan {
                     content: content_start..content_start + stripped.len(),
                     end: line_start + leading_ws_len + tag.len(),
+                    escaped: false,
                 });
             }
         }
@@ -297,6 +314,126 @@ pub(crate) fn scan_heredoc(src: &str, start: usize) -> Result<HeredocSpan, Hered
         }
     }
     Err(HeredocError::Unterminated { tag })
+}
+
+/// Scan a JSON/string-escaped heredoc body whose line breaks are the two
+/// literal bytes `\` + `n` instead of real newlines. `esc_nl_start` must sit on
+/// the `\` of the `\n` that immediately follows the opening `<<TAG`. The closing
+/// tag is found on a literal-`\n`-delimited "line" that — after optional literal
+/// leading whitespace — begins with `tag` at a word boundary, mirroring the
+/// real-newline grammar. The returned `content` range is the still-escaped body
+/// (callers unescape it via [`unescape_heredoc_body`]); `escaped` is `true`.
+fn scan_escaped_heredoc_body(
+    src: &str,
+    esc_nl_start: usize,
+    tag: String,
+) -> Result<HeredocSpan, HeredocError> {
+    let bytes = src.as_bytes();
+    // Body content starts after the leading literal `\n`.
+    let content_start = esc_nl_start + 2;
+    let mut pos = content_start;
+    // `line_start` tracks the first content byte of the current escaped "line".
+    let mut line_start = content_start;
+    while pos < bytes.len() {
+        // An escaped backslash `\\` is one decoded `\` — consume both bytes so a
+        // following `n` (e.g. a Go source `"...\n"`, on the wire `\\n`) is NOT
+        // misread as the escaped line separator. Keeps splitting consistent with
+        // `unescape_heredoc_body`.
+        if bytes.get(pos) == Some(&b'\\') && bytes.get(pos + 1) == Some(&b'\\') {
+            pos += 2;
+            continue;
+        }
+        // A literal `\n` (backslash + 'n') is the escaped line separator.
+        if bytes.get(pos) == Some(&b'\\') && bytes.get(pos + 1) == Some(&b'n') {
+            if let Some(span) = escaped_close_at(src, content_start, line_start, pos, &tag) {
+                return Ok(span);
+            }
+            pos += 2;
+            line_start = pos;
+            continue;
+        }
+        pos += src[pos..].chars().next().map_or(1, char::len_utf8);
+    }
+    // The closing tag may sit on the final escaped line with no trailing `\n`
+    // (e.g. `...\nEOF` at end of the string value, just before the closing
+    // quote/paren). Check the trailing line.
+    if let Some(span) = escaped_close_at(src, content_start, line_start, bytes.len(), &tag) {
+        return Ok(span);
+    }
+    Err(HeredocError::Unterminated { tag })
+}
+
+/// Test whether the escaped "line" `src[line_start..line_end]` is the closing
+/// tag line. `line_end` is the offset of the separating literal `\n` (or the end
+/// of the body). On a match, returns a [`HeredocSpan`] whose `content` runs from
+/// `content_start` to the start of the closing line's leading whitespace and
+/// whose `end` is just past the tag. Returns `None` when the line is body text.
+fn escaped_close_at(
+    src: &str,
+    content_start: usize,
+    line_start: usize,
+    line_end: usize,
+    tag: &str,
+) -> Option<HeredocSpan> {
+    let line = &src[line_start..line_end];
+    let leading_ws_len = line.len() - line.trim_start().len();
+    let after_ws = &line[leading_ws_len..];
+    let rest = after_ws.strip_prefix(tag)?;
+    let at_word_boundary = rest
+        .chars()
+        .next()
+        .is_none_or(|ch| !(ch.is_ascii_alphanumeric() || ch == '_'));
+    if !at_word_boundary {
+        return None;
+    }
+    // Exclude the closing line (and the literal `\n` that introduced it) from
+    // the body content, matching the real-newline grammar which excludes the
+    // trailing newline before the close tag. The first body line shares its
+    // start with `content_start`, so clamp to avoid an inverted range.
+    let content_end = line_start.saturating_sub(2).max(content_start);
+    // Real-newline closes leave the trailing newline + any tail (`EOF\n})`) for
+    // the outer parser's `skip_ws_and_comments`. In the escaped form that
+    // separator is the two literal bytes `\` + `n`, which the outer parser does
+    // NOT treat as whitespace — so consume one optional trailing literal `\n`
+    // here, leaving `end` on the structural tail (`})`/`,`).
+    let bytes = src.as_bytes();
+    let mut end = line_start + leading_ws_len + tag.len();
+    if bytes.get(end) == Some(&b'\\') && bytes.get(end + 1) == Some(&b'n') {
+        end += 2;
+    }
+    Some(HeredocSpan {
+        content: content_start..content_end,
+        end,
+        escaped: true,
+    })
+}
+
+/// Unescape a JSON/string-escaped heredoc body recovered from the degraded
+/// literal-`\n` form. Decodes `\n`, `\t`, `\r`, `\"`, and `\\`; any other escape
+/// is left verbatim (both the backslash and the following byte) so unrecognized
+/// sequences in code survive unchanged. A trailing lone backslash is preserved.
+pub(crate) fn unescape_heredoc_body(raw: &str) -> String {
+    let mut out = String::with_capacity(raw.len());
+    let mut chars = raw.chars();
+    while let Some(ch) = chars.next() {
+        if ch != '\\' {
+            out.push(ch);
+            continue;
+        }
+        match chars.next() {
+            Some('n') => out.push('\n'),
+            Some('t') => out.push('\t'),
+            Some('r') => out.push('\r'),
+            Some('"') => out.push('"'),
+            Some('\\') => out.push('\\'),
+            Some(other) => {
+                out.push('\\');
+                out.push(other);
+            }
+            None => out.push('\\'),
+        }
+    }
+    out
 }
 
 /// Skip past a `<<TAG\n...\nTAG` heredoc body starting at `start` in `src`.

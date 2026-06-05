@@ -905,3 +905,138 @@ fn tagged_tool_call_with_close_tag_inside_a_string_arg() {
     let command = result.calls[0]["arguments"]["command"].as_str().unwrap();
     assert_eq!(command, "echo </tool_call> done");
 }
+
+// --- JSON-escaped heredoc recovery (Change B) -------------------------------
+// Cheap models (e.g. qwen3.6) emit the heredoc body as a JSON-escaped one-liner
+// where the line breaks are the two literal bytes `\` + `n`, not real newlines.
+// The parser must recover those calls (dispatch with a real body) while leaving
+// genuine real-newline heredocs byte-for-byte unchanged.
+
+#[test]
+fn heredoc_recovers_json_escaped_literal_newline_body() {
+    let tools = sample_tool_registry();
+    // `\\n`, `\\t`, `\\"` here are the literal backslash-escape *bytes* — this
+    // mirrors the on-the-wire degraded form, e.g.
+    //   content: <<EOF\npackage manifest\n\nimport (\n\t"strings"\n)\n...EOF
+    let text = "edit({ path: \"parser_test.go\", content: <<EOF\\npackage manifest\\n\\nimport (\\n\\t\\\"strings\\\"\\n\\t\\\"testing\\\"\\n)\\n\\nfunc TestX(t *testing.T) {\\n\\tif 1 != 1 {\\n\\t\\tt.Fatal(\\\"bad\\\")\\n\\t}\\n}\\nEOF\\n })";
+    let result = parse_bare_calls_in_body(text, Some(&tools));
+    assert_eq!(
+        result.calls.len(),
+        1,
+        "escaped heredoc must yield exactly one call, errors: {:?}",
+        result.errors
+    );
+    let content = result.calls[0]["arguments"]["content"].as_str().unwrap();
+    // No literal backslash-n / backslash-t survives — they were unescaped.
+    assert!(
+        !content.contains("\\n") && !content.contains("\\t"),
+        "literal escapes must be decoded, got: {content:?}"
+    );
+    // Real newlines and tabs are present.
+    assert!(content.contains('\n'), "must contain real newlines");
+    assert!(content.contains('\t'), "must contain real tabs");
+    // Escaped quotes were decoded to bare quotes (valid Go source).
+    assert!(content.contains("\"strings\""), "must contain \"strings\"");
+    assert!(
+        content.starts_with("package manifest"),
+        "content should start with the package clause: {content:?}"
+    );
+    // The closing `EOF` tag is not part of the body.
+    assert!(
+        !content.contains("EOF"),
+        "closing tag must not leak into the body: {content:?}"
+    );
+}
+
+#[test]
+fn heredoc_real_newline_body_is_not_unescaped() {
+    // GUARD: a heredoc whose body uses REAL newlines must parse exactly as
+    // before — a literal `\n` typed inside such a body (e.g. a Go format string
+    // `"%d\n"`) must be preserved verbatim, never collapsed to a newline.
+    let tools = sample_tool_registry();
+    let text = "edit({ path: \"main.go\", content: <<EOF\npackage main\nimport \"fmt\"\nfunc main() { fmt.Printf(\"%d\\n\", 1) }\nEOF\n})";
+    let result = parse_bare_calls_in_body(text, Some(&tools));
+    assert_eq!(
+        result.calls.len(),
+        1,
+        "real-newline heredoc must parse, errors: {:?}",
+        result.errors
+    );
+    let content = result.calls[0]["arguments"]["content"].as_str().unwrap();
+    // The literal `\n` inside the format string survives untouched.
+    assert!(
+        content.contains("%d\\n"),
+        "literal \\n in a real-newline body must be preserved verbatim: {content:?}"
+    );
+    assert!(content.starts_with("package main"));
+}
+
+#[test]
+fn heredoc_escaped_body_with_escaped_backslash_n_is_not_a_line_break() {
+    // An escaped-backslash sequence `\\n` on the wire is a single decoded `\`
+    // followed by `n` (e.g. a Go format string `"%d\n"`), NOT the escaped line
+    // separator. The closing-tag scan must not split there, and the decoded body
+    // must keep the literal `\n`.
+    let tools = sample_tool_registry();
+    // Wire bytes: <<EOF \n package main \n s := "x\n" \n EOF
+    // where the inner `"x\\n"` is an escaped-backslash + n (decodes to `x\n`).
+    let text =
+        "edit({ path: \"m.go\", content: <<EOF\\npackage main\\nvar s = \\\"x\\\\n\\\"\\nEOF\\n})";
+    let result = parse_bare_calls_in_body(text, Some(&tools));
+    assert_eq!(
+        result.calls.len(),
+        1,
+        "escaped-backslash body must still parse to one call, errors: {:?}",
+        result.errors
+    );
+    let content = result.calls[0]["arguments"]["content"].as_str().unwrap();
+    assert!(
+        content.contains("\"x\\n\""),
+        "decoded body must keep the literal backslash-n from `\\\\n`: {content:?}"
+    );
+    assert!(
+        content.starts_with("package main"),
+        "body must not be truncated at the false separator: {content:?}"
+    );
+    assert!(
+        !content.contains("EOF"),
+        "close tag must not leak: {content:?}"
+    );
+}
+
+#[test]
+fn heredoc_genuinely_missing_newline_still_errors() {
+    // `<<EOF` followed by end-of-input (no newline, no literal `\n`) is a
+    // genuinely-malformed heredoc and must still surface a parse error.
+    let tools = sample_tool_registry();
+    let text = "edit({ path: \"x.go\", content: <<EOF";
+    let result = parse_bare_calls_in_body(text, Some(&tools));
+    assert_eq!(
+        result.calls.len(),
+        0,
+        "truncated heredoc opener must not produce a call"
+    );
+    assert!(
+        !result.errors.is_empty(),
+        "truncated heredoc opener must surface a parse error"
+    );
+}
+
+#[test]
+fn heredoc_escaped_body_unterminated_errors() {
+    // Literal-`\n` form that never reaches a closing tag line must error, not
+    // silently swallow the rest of the call.
+    let tools = sample_tool_registry();
+    let text = "edit({ path: \"x.go\", content: <<EOF\\npackage main\\nfunc main() {}";
+    let result = parse_bare_calls_in_body(text, Some(&tools));
+    assert_eq!(
+        result.calls.len(),
+        0,
+        "unterminated escaped heredoc must not produce a call, calls: {:?}",
+        result.calls
+    );
+    assert!(
+        !result.errors.is_empty(),
+        "unterminated escaped heredoc must surface a parse error"
+    );
+}
