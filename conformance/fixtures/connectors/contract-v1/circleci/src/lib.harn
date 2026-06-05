@@ -1,0 +1,834 @@
+let CIRCLECI_PROVIDER_ID = "circleci"
+
+let CIRCLECI_STATE_KEY = "harn-circleci-connector.state"
+
+let CIRCLECI_API_BASE_URL = "https://circleci.com/api/v2"
+
+let GITHUB_API_BASE_URL = "https://api.github.com"
+
+let MAX_BODY_BYTES = 1048576
+
+let CIRCLECI_SUPPORTED_EVENTS = ["job-completed", "workflow-completed"]
+
+let CIRCLECI_FAILURE_STATUSES = ["error", "failed"]
+
+let CIRCLECI_OUTBOUND_METHODS = [
+  "api.request",
+  "artifacts.list",
+  "job.get",
+  "workflow.cancel",
+  "workflow.get",
+  "workflow.jobs",
+  "workflow.rerun",
+]
+
+let CIRCLECI_MUTATING_METHODS = ["workflow.cancel", "workflow.rerun"]
+
+/** Return this connector's Harn provider id. */
+pub fn provider_id() {
+  return CIRCLECI_PROVIDER_ID
+}
+
+/** Return the trigger kinds supported by this connector. */
+pub fn kinds() {
+  return ["webhook"]
+}
+
+/** Describe outbound methods and which ones mutate provider state. */
+pub fn methods() {
+  var out = []
+  for name in CIRCLECI_OUTBOUND_METHODS {
+    out = out + [{name: name, requires_approval: contains(CIRCLECI_MUTATING_METHODS, name)}]
+  }
+  return out
+}
+
+/** Return the canonical normalized CircleCI event payload schema. */
+pub fn payload_schema() {
+  return {
+    harn_schema_name: "CircleCIEventPayload",
+    json_schema: {
+      type: "object",
+      required: ["provider", "kind", "status", "is_failure", "raw"],
+      additionalProperties: true,
+      properties: {
+        provider: {type: "string"},
+        kind: {type: "string"},
+        status: {type: ["string", "null"]},
+        is_failure: {type: "boolean"},
+        repo: {type: ["string", "null"]},
+        commit_sha: {type: ["string", "null"]},
+        branch: {type: ["string", "null"]},
+        project_slug: {type: ["string", "null"]},
+        workflow_id: {type: ["string", "null"]},
+        pipeline_number: {type: ["integer", "string", "null"]},
+        web_url: {type: ["string", "null"]},
+        job: {type: ["object", "null"]},
+        rerun_handle: {type: ["object", "null"]},
+        triage: {type: ["object", "null"]},
+        raw: {type: "object"},
+      },
+    },
+  }
+}
+
+/** Initialize connector state with orchestrator context. */
+pub fn init(ctx = nil) {
+  let next = __state() + {initialized: true, ctx: ctx ?? {}}
+  __set_state(next)
+  return next
+}
+
+/** Activate webhook bindings and reject duplicate configured paths. */
+pub fn activate(bindings = []) {
+  var by_id = {}
+  var seen_paths = {}
+  for binding in bindings ?? [] {
+    let binding_id = binding?.binding_id ?? binding?.id ?? ("binding-" + to_string(len(by_id.keys())))
+    let path = binding?.path ?? binding?.match?.path
+    if path != nil && path != "" {
+      if seen_paths.get(path) {
+        return __err("activation", "circleci connector path `" + path + "` is configured by multiple bindings")
+      }
+      seen_paths[path] = true
+    }
+    by_id[binding_id] = binding + {binding_id: binding_id}
+  }
+  let next = __state() + {active: true, bindings: by_id}
+  __set_state(next)
+  return {bindings: len(by_id.keys()), kind: "webhook", provider: CIRCLECI_PROVIDER_ID}
+}
+
+/** Clear connector lifecycle state. */
+pub fn shutdown() {
+  store_delete(CIRCLECI_STATE_KEY)
+  return {active: false, provider: CIRCLECI_PROVIDER_ID}
+}
+
+@complexity(allow)
+/**
+ * Verify and normalize a raw CircleCI webhook request.
+ *
+ * CircleCI signs the raw body with HMAC-SHA256 and ships the digest in a
+ * comma-separated, versioned `circleci-signature` header (`v1=<hex>`). We
+ * recompute the highest known version and compare in constant time. When no
+ * signing secret is configured we fail closed. There is no timestamp in the
+ * signature, so dedup happens on the top-level delivery `id` instead.
+ */
+pub fn normalize_inbound(raw) {
+  let body_text = raw?.body_text ?? raw?.body ?? ""
+  if len(body_text) > MAX_BODY_BYTES {
+    return __reject(413, "payload_too_large", "circleci webhook body exceeds 1 MiB cap")
+  }
+  let headers = raw?.headers ?? {}
+  let verified = __verify_circleci_signature(raw, headers, body_text)
+  if is_err(verified) {
+    return __reject_err(unwrap_err(verified))
+  }
+  let signature_status = unwrap(verified)
+  let parsed = try {
+    json_parse(body_text)
+  }
+  if is_err(parsed) {
+    return __reject(400, "invalid_json", "circleci payload body is not valid JSON")
+  }
+  let payload = unwrap(parsed)
+  let event_type = payload?.type ?? __event_type_from_header(headers)
+  if event_type == nil || event_type == "" {
+    return __reject(400, "missing_event", "missing CircleCI type and circleci-event-type header")
+  }
+  if !contains(CIRCLECI_SUPPORTED_EVENTS, event_type) {
+    return __reject(
+      400,
+      "unsupported_event",
+      "unsupported CircleCI event type `" + to_string(event_type) + "`",
+    )
+  }
+  let event = __build_event(event_type, payload, raw, headers, signature_status)
+  return {event: event, type: "event"}
+}
+
+@complexity(allow)
+/** Dispatch a supported CircleCI REST API v2 method. */
+pub fn call(method, args = {}) {
+  if !contains(CIRCLECI_OUTBOUND_METHODS, method) {
+    return __err("method_not_found", "circleci connector does not implement outbound method `" + method + "`")
+  }
+  let config = __outbound_config(args ?? {})
+  if is_err(config) {
+    return config
+  }
+  let cfg = unwrap(config)
+  if method == "workflow.rerun" {
+    return __circleci_json(
+      "POST",
+      __circleci_api_url(
+        cfg.api_base_url,
+        "/workflow/" + url_encode(to_string(args?.workflow_id ?? "")) + "/rerun",
+      ),
+      __rerun_body(args),
+      cfg,
+    )
+  }
+  if method == "workflow.cancel" {
+    return __circleci_json(
+      "POST",
+      __circleci_api_url(
+        cfg.api_base_url,
+        "/workflow/" + url_encode(to_string(args?.workflow_id ?? "")) + "/cancel",
+      ),
+      {},
+      cfg,
+    )
+  }
+  if method == "workflow.get" {
+    return __circleci_json(
+      "GET",
+      __circleci_api_url(cfg.api_base_url, "/workflow/" + url_encode(to_string(args?.workflow_id ?? ""))),
+      nil,
+      cfg,
+    )
+  }
+  if method == "workflow.jobs" {
+    return __circleci_json(
+      "GET",
+      __circleci_api_url(
+        cfg.api_base_url,
+        "/workflow/" + url_encode(to_string(args?.workflow_id ?? "")) + "/job"
+          + __pagination_query(args),
+      ),
+      nil,
+      cfg,
+    )
+  }
+  if method == "job.get" {
+    return __circleci_json(
+      "GET",
+      __circleci_api_url(
+        cfg.api_base_url,
+        "/project/" + __project_slug_path(args) + "/job/"
+          + url_encode(to_string(args?.job_number ?? "")),
+      ),
+      nil,
+      cfg,
+    )
+  }
+  if method == "artifacts.list" {
+    return __circleci_json(
+      "GET",
+      __circleci_api_url(
+        cfg.api_base_url,
+        "/project/" + __project_slug_path(args) + "/"
+          + url_encode(to_string(args?.job_number ?? ""))
+          + "/artifacts"
+          + __pagination_query(args),
+      ),
+      nil,
+      cfg,
+    )
+  }
+  return __api_request(args, cfg)
+}
+
+/**
+ * Resolve the pull requests associated with a commit SHA.
+ *
+ * CircleCI payloads carry no reliable PR number, so callers may opt in to a
+ * GitHub lookup by SHA. Explicit and optional: pass the owner, repo, SHA, and
+ * a GitHub token. Never invoked automatically during normalization.
+ */
+pub fn github_commit_pulls(owner, repo, sha, github_token, api_base_url = nil) {
+  if owner == nil || trim(to_string(owner)) == "" {
+    return __err("missing_owner", "github_commit_pulls requires owner")
+  }
+  if repo == nil || trim(to_string(repo)) == "" {
+    return __err("missing_repo", "github_commit_pulls requires repo")
+  }
+  if sha == nil || trim(to_string(sha)) == "" {
+    return __err("missing_sha", "github_commit_pulls requires sha")
+  }
+  if github_token == nil || trim(to_string(github_token)) == "" {
+    return __err("missing_token", "github_commit_pulls requires github_token")
+  }
+  let base = api_base_url ?? harness.env.get_or("GITHUB_API_BASE_URL", GITHUB_API_BASE_URL)
+  let base_check = __validate_api_base_url(base)
+  if is_err(base_check) {
+    return base_check
+  }
+  let url = __circleci_api_url(
+    base,
+    "/repos/" + url_encode(to_string(owner)) + "/" + url_encode(to_string(repo)) + "/commits/"
+      + url_encode(to_string(sha))
+      + "/pulls",
+  )
+  let response_result = try {
+    harness.net
+      .request(
+      "GET",
+      url,
+      {
+        headers: {Accept: "application/vnd.github+json", Authorization: "Bearer " + to_string(github_token)},
+        retry: {backoff_ms: 0, max: 0},
+      },
+    )
+  }
+  if is_err(response_result) {
+    return __err("transport", to_string(unwrap_err(response_result)))
+  }
+  let response = unwrap(response_result)
+  if response.status < 200 || response.status >= 300 {
+    return __err(
+      "transport",
+      "github commit pulls request failed with status " + to_string(response.status) + ": "
+        + response.body,
+    )
+  }
+  let parsed = try {
+    json_parse(response.body)
+  }
+  if is_err(parsed) {
+    return __err("invalid_response", "github commit pulls endpoint returned invalid JSON")
+  }
+  return unwrap(parsed)
+}
+
+fn __state() {
+  return store_get(CIRCLECI_STATE_KEY) ?? {active: false, bindings: {}, ctx: {}, initialized: false}
+}
+
+fn __set_state(state) {
+  store_set(CIRCLECI_STATE_KEY, state)
+  return state
+}
+
+fn __err(code, message) {
+  return Err({code: code, message: message})
+}
+
+fn __reject(status, code, message) {
+  return {
+    reject: {
+      body: json_stringify({error: code, message: message}),
+      content_type: "application/json",
+      status: status,
+    },
+    type: "reject",
+  }
+}
+
+fn __reject_err(err) {
+  let code = err?.code ?? "rejected"
+  let message = err?.message ?? "request rejected"
+  let status = if code == "invalid_signature" || code == "missing_signature" || code == "missing_secret" {
+    401
+  } else {
+    400
+  }
+  return __reject(status, code, message)
+}
+
+fn __header(headers, name) {
+  let wanted = lowercase(name)
+  for entry in (headers ?? {}).entries() {
+    if lowercase(trim(to_string(entry.key))) == wanted {
+      return trim(to_string(entry.value))
+    }
+  }
+  return nil
+}
+
+fn __event_type_from_header(headers) {
+  let raw_header = __header(headers, "circleci-event-type")
+  if raw_header == nil || raw_header == "" {
+    return nil
+  }
+  return lowercase(raw_header)
+}
+
+fn __signing_secret(raw) {
+  let state = __state()
+  let ctx_secret = state.ctx?.signing_secret ?? state.ctx?.secrets?.signing_secret
+  if ctx_secret != nil && trim(to_string(ctx_secret)) != "" {
+    return to_string(ctx_secret)
+  }
+  let bindings = state.bindings ?? {}
+  let binding_id = raw?.metadata?.binding_id ?? raw?.binding_id
+  if binding_id != nil {
+    let binding = bindings.get(binding_id)
+    let binding_secret = binding?.signing_secret ?? binding?.secrets?.signing_secret
+      ?? binding?.config?.signing_secret
+    if binding_secret != nil && trim(to_string(binding_secret)) != "" {
+      return to_string(binding_secret)
+    }
+  }
+  let secret_id = __signing_secret_id(raw)
+  if secret_id != nil {
+    let resolved = try {
+      secret_get(secret_id)
+    }
+    if !is_err(resolved) {
+      let value = to_string(unwrap(resolved))
+      if value != "" {
+        return value
+      }
+    }
+  }
+  return nil
+}
+
+fn __signing_secret_id(raw) {
+  let metadata = raw?.metadata ?? {}
+  let id = metadata?.secret_ids?.signing_secret ?? metadata?.config?.secret_ids?.signing_secret
+  if id != nil && trim(to_string(id)) != "" {
+    return to_string(id)
+  }
+  let bindings = __state().bindings ?? {}
+  let binding_id = metadata?.binding_id ?? raw?.binding_id
+  if binding_id != nil {
+    let binding = bindings.get(binding_id)
+    let bid = binding?.signing_secret_id ?? binding?.secrets?.signing_secret_id
+      ?? binding?.config?.secret_ids?.signing_secret
+    if bid != nil && trim(to_string(bid)) != "" {
+      return to_string(bid)
+    }
+  }
+  return nil
+}
+
+@complexity(allow)
+fn __verify_circleci_signature(raw, headers, body_text) {
+  let secret = __signing_secret(raw)
+  if secret == nil || trim(to_string(secret)) == "" {
+    return __err(
+      "missing_secret",
+      "circleci signing_secret is required; configure circleci/webhook-secret to verify inbound webhooks",
+    )
+  }
+  let header = __header(headers, "circleci-signature")
+  if header == nil || header == "" {
+    return __err("missing_signature", "missing circleci-signature header")
+  }
+  let provided = __highest_signature_version(header)
+  if provided == nil {
+    return __err("invalid_signature", "circleci-signature has no recognized version (expected v1=<hex>)")
+  }
+  let expected = hmac_sha256(to_string(secret), body_text)
+  if !constant_time_eq(expected, to_string(provided)) {
+    return __err("invalid_signature", "circleci-signature did not match the request body")
+  }
+  return Ok("verified")
+}
+
+fn __highest_signature_version(header) {
+  // Verify only the highest known version (v1 today) for downgrade defense.
+  for entry in split(header, ",") {
+    let pair = trim(entry)
+    if starts_with(pair, "v1=") {
+      let value = trim(pair[3:len(pair)])
+      if value != "" {
+        return value
+      }
+    }
+  }
+  return nil
+}
+
+@complexity(allow)
+fn __build_event(event_type, payload, raw, headers, signature_status) {
+  let pipe = payload?.pipeline ?? {}
+  let vcs = pipe?.vcs ?? {}
+  let project = payload?.project ?? {}
+  let workflow = payload?.workflow ?? {}
+  let status = __status(event_type, payload)
+  let is_failure = contains(CIRCLECI_FAILURE_STATUSES, to_string(status))
+  let repo = vcs?.target_repository_url
+  let commit_sha = vcs?.revision
+  let branch = vcs?.branch
+  let project_slug = project?.slug
+  let workflow_id = workflow?.id
+  let pipeline_number = pipe?.number
+  let web_url = __web_url(event_type, payload, workflow)
+  let job = __job(event_type, payload)
+  let dedupe_key = __dedupe_key(event_type, payload, workflow_id)
+  let normalized_payload = {
+    branch: branch,
+    commit_sha: commit_sha,
+    is_failure: is_failure,
+    job: job,
+    job_event: __job_event(event_type, payload, status, is_failure),
+    kind: event_type,
+    origin_repository_url: vcs?.origin_repository_url,
+    pipeline_number: pipeline_number,
+    project_slug: project_slug,
+    provider: CIRCLECI_PROVIDER_ID,
+    raw: payload,
+    repo: repo,
+    rerun_handle: {workflow_id: workflow_id},
+    status: status,
+    triage: __triage(
+      event_type,
+      payload,
+      status,
+      is_failure,
+      repo,
+      commit_sha,
+      branch,
+      project_slug,
+      workflow_id,
+    ),
+    web_url: web_url,
+    workflow_id: workflow_id,
+  }
+  return {
+    dedupe_key: dedupe_key,
+    headers: {"circleci-event-type": __header(headers, "circleci-event-type")},
+    kind: event_type,
+    occurred_at: __occurred_at(event_type, payload),
+    payload: normalized_payload,
+    signature_status: __signature_status(signature_status),
+  }
+}
+
+fn __signature_status(status) {
+  if status == "verified" || status == "signed" {
+    return {state: "verified"}
+  }
+  return {state: "unsigned"}
+}
+
+fn __status(event_type, payload) {
+  if event_type == "job-completed" {
+    return payload?.job?.status
+  }
+  return payload?.workflow?.status
+}
+
+fn __job(event_type, payload) {
+  if event_type != "job-completed" {
+    return nil
+  }
+  let job = payload?.job ?? {}
+  return {
+    id: job?.id,
+    job_number: job?.number,
+    name: job?.name,
+    started_at: job?.started_at,
+    status: job?.status,
+    stopped_at: job?.stopped_at,
+  }
+}
+
+fn __job_event(event_type, payload, status, is_failure) {
+  if event_type != "job-completed" {
+    return nil
+  }
+  let job = payload?.job ?? {}
+  return {is_failure: is_failure, job_number: job?.number, name: job?.name, status: status}
+}
+
+@complexity(allow)
+fn __triage(
+  event_type,
+  payload,
+  status,
+  is_failure,
+  repo,
+  commit_sha,
+  branch,
+  project_slug,
+  workflow_id,
+) {
+  // Mirror the GitLab pipeline-promotion convention: surface a compact triage
+  // shape so failure-handling triggers can act without re-walking `raw`.
+  let workflow = payload?.workflow ?? {}
+  return {
+    branch: branch,
+    commit_sha: commit_sha,
+    is_failure: is_failure,
+    kind: event_type,
+    project_slug: project_slug,
+    repo: repo,
+    rerun_handle: {workflow_id: workflow_id},
+    status: status,
+    workflow_id: workflow_id,
+    workflow_name: workflow?.name,
+  }
+}
+
+@complexity(allow)
+fn __web_url(event_type, payload, workflow) {
+  if event_type == "job-completed" {
+    let job_url = payload?.job?.web_url
+    if job_url != nil && trim(to_string(job_url)) != "" {
+      return job_url
+    }
+  }
+  return workflow?.url
+}
+
+@complexity(allow)
+fn __dedupe_key(event_type, payload, workflow_id) {
+  let delivery_id = payload?.id
+  if delivery_id != nil && trim(to_string(delivery_id)) != "" {
+    return "circleci:" + event_type + ":" + to_string(delivery_id)
+  }
+  if event_type == "job-completed" {
+    return "circleci:job-completed:" + to_string(workflow_id ?? "unknown") + ":"
+      + to_string(payload?.job?.id ?? payload?.job?.number ?? "unknown")
+  }
+  return "circleci:workflow-completed:" + to_string(workflow_id ?? "unknown")
+}
+
+fn __occurred_at(event_type, payload) {
+  if event_type == "job-completed" {
+    return payload?.job?.stopped_at ?? payload?.happened_at
+  }
+  return payload?.workflow?.stopped_at ?? payload?.happened_at
+}
+
+@complexity(allow)
+fn __outbound_config(args) {
+  let api_base_url = args?.api_base_url ?? harness.env.get_or("CIRCLECI_API_BASE_URL", CIRCLECI_API_BASE_URL)
+  let base_check = __validate_api_base_url(api_base_url)
+  if is_err(base_check) {
+    return base_check
+  }
+  let api_token = args?.api_token ?? args?.token ?? args?.circle_token ?? args?.secrets?.api_token
+    ?? harness.env.get("CIRCLECI_API_TOKEN")
+    ?? harness.env.get("CIRCLE_TOKEN")
+  if api_token == nil || trim(to_string(api_token)) == "" {
+    return __err("missing_token", "circleci connector requires api_token (Circle-Token)")
+  }
+  return Ok({api_base_url: to_string(api_base_url), api_token: to_string(api_token)})
+}
+
+fn __rerun_body(args) {
+  if args?.jobs != nil {
+    return {jobs: args.jobs}
+  }
+  return {from_failed: args?.from_failed ?? true}
+}
+
+fn __project_slug_path(args) {
+  // CircleCI project slugs are `vcs/org/repo`; keep the slashes unencoded so
+  // they remain path separators, but encode each segment.
+  let slug = to_string(args?.project_slug ?? "")
+  var parts = []
+  for segment in split(slug, "/") {
+    parts = parts + [url_encode(segment)]
+  }
+  return join(parts, "/")
+}
+
+@complexity(allow)
+fn __api_request(args, cfg) {
+  let method = uppercase(to_string(args?.method ?? "GET"))
+  let path = to_string(args?.path ?? "")
+  if path == "" {
+    return __err("missing_path", "api.request requires a path")
+  }
+  let url = __circleci_api_url(cfg.api_base_url, path)
+  return __circleci_json(method, url, args?.body, cfg)
+}
+
+fn __circleci_api_url(api_base_url, path) {
+  let base = trim(to_string(api_base_url))
+  let prefix = if ends_with(base, "/") {
+    base[0:len(base) - 1]
+  } else {
+    base
+  }
+  if starts_with(path, "/") {
+    return prefix + path
+  }
+  return prefix + "/" + path
+}
+
+@complexity(allow)
+fn __validate_api_base_url(api_base_url) {
+  if api_base_url == nil || trim(to_string(api_base_url)) == "" {
+    return __err("invalid_api_base_url", "api_base_url is required")
+  }
+  let url = trim(to_string(api_base_url))
+  if !starts_with(lowercase(url), "https://") {
+    return __err("invalid_api_base_url", "api_base_url must use https:// scheme")
+  }
+  let after_scheme = url[8:len(url)]
+  let slash_idx = __index_of(after_scheme, "/")
+  let host_port = if slash_idx >= 0 {
+    after_scheme[0:slash_idx]
+  } else {
+    after_scheme
+  }
+  let host = __strip_port(host_port)
+  if host == "" {
+    return __err("invalid_api_base_url", "api_base_url is missing a host")
+  }
+  let host_lc = lowercase(host)
+  if __is_disallowed_host(host_lc) {
+    return __err(
+      "invalid_api_base_url",
+      "api_base_url host `" + host
+        + "` is not allowed (loopback/private/link-local/.internal/.local are blocked)",
+    )
+  }
+  return Ok(true)
+}
+
+fn __strip_port(host_port) {
+  if starts_with(host_port, "[") {
+    let close = __index_of(host_port, "]")
+    if close >= 0 {
+      return host_port[1:close]
+    }
+    return host_port
+  }
+  let colon = __index_of(host_port, ":")
+  if colon >= 0 {
+    return host_port[0:colon]
+  }
+  return host_port
+}
+
+fn __index_of(text, needle) {
+  let n = len(text)
+  let m = len(needle)
+  if m == 0 {
+    return 0
+  }
+  var i = 0
+  while i + m <= n {
+    if text[i:i + m] == needle {
+      return i
+    }
+    i = i + 1
+  }
+  return -1
+}
+
+@complexity(allow)
+fn __is_disallowed_host(host_lc) {
+  if host_lc == "localhost" {
+    return true
+  }
+  if ends_with(host_lc, ".localhost") || ends_with(host_lc, ".local")
+    || ends_with(host_lc, ".internal") {
+    return true
+  }
+  if host_lc == "::1" || host_lc == "0:0:0:0:0:0:0:1" {
+    return true
+  }
+  if starts_with(host_lc, "127.") || starts_with(host_lc, "10.")
+    || starts_with(host_lc, "169.254.")
+    || starts_with(host_lc, "192.168.") {
+    return true
+  }
+  if starts_with(host_lc, "172.") {
+    let rest = host_lc[4:len(host_lc)]
+    let dot = __index_of(rest, ".")
+    if dot > 0 {
+      let octet_str = rest[0:dot]
+      let parsed = try {
+        to_int(octet_str)
+      }
+      if !is_err(parsed) {
+        let octet = unwrap(parsed)
+        if octet >= 16 && octet <= 31 {
+          return true
+        }
+      }
+    }
+  }
+  return false
+}
+
+fn __pagination_query(args) {
+  var parts = []
+  if args?.page_token != nil && trim(to_string(args.page_token)) != "" {
+    parts = parts + ["page-token=" + url_encode(to_string(args.page_token))]
+  }
+  if len(parts) == 0 {
+    return ""
+  }
+  return "?" + join(parts, "&")
+}
+
+@complexity(allow)
+fn __circleci_json(method, url, body, cfg) {
+  var options = {
+    headers: {Accept: "application/json", "Circle-Token": cfg.api_token},
+    retry: {backoff_ms: 0, max: 0},
+  }
+  if body != nil {
+    options["body"] = json_stringify(body)
+    options.headers["Content-Type"] = "application/json"
+  }
+  var retried_rate_limit = false
+  while true {
+    let response_result = try {
+      harness.net.request(method, url, options)
+    }
+    if is_err(response_result) {
+      return __err("transport", to_string(unwrap_err(response_result)))
+    }
+    let response = unwrap(response_result)
+    let limited = __maybe_wait_for_rate_limit(response)
+    if is_err(limited) {
+      return limited
+    }
+    if (response.status == 429 || response.status == 503) && unwrap(limited) && !retried_rate_limit {
+      retried_rate_limit = true
+      continue
+    }
+    if response.status < 200 || response.status >= 300 {
+      let code = if response.status == 429 || response.status == 503 {
+        "rate_limited"
+      } else if response.status == 401 || response.status == 403 {
+        "unauthorized"
+      } else {
+        "transport"
+      }
+      return __err(
+        code,
+        "circleci API request failed with status " + to_string(response.status) + ": "
+          + response.body,
+      )
+    }
+    if trim(response.body ?? "") == "" {
+      return {body: "", headers: response.headers, status: response.status}
+    }
+    let parsed = try {
+      json_parse(response.body)
+    }
+    if is_err(parsed) {
+      return __err("invalid_response", "CircleCI API returned invalid JSON")
+    }
+    return unwrap(parsed)
+  }
+}
+
+@complexity(allow)
+fn __maybe_wait_for_rate_limit(response) {
+  let remaining = __header(response.headers ?? {}, "x-ratelimit-remaining")
+  if remaining == nil || trim(to_string(remaining)) != "0" {
+    return Ok(false)
+  }
+  let retry_after = __header(response.headers ?? {}, "retry-after")
+  if retry_after == nil || trim(to_string(retry_after)) == "" {
+    return Ok(true)
+  }
+  let parsed_retry = try {
+    to_int(retry_after)
+  }
+  if is_err(parsed_retry) {
+    return Ok(true)
+  }
+  let wait_seconds = unwrap(parsed_retry)
+  if wait_seconds > 60 {
+    return __err("rate_limited", "circleci API retry-after is more than 60 seconds away")
+  }
+  if wait_seconds > 0 {
+    sleep(wait_seconds * 1000)
+  }
+  return Ok(true)
+}

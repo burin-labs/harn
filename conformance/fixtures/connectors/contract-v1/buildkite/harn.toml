@@ -1,0 +1,98 @@
+[package]
+name = "harn-buildkite-connector"
+version = "0.1.0"
+description = "Pure-Harn Buildkite connector: signed webhooks, CI failure normalization, retry/rebuild + job logs."
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/burin-labs/harn-buildkite-connector"
+harn = ">=0.8,<0.9"
+
+[exports]
+default = "src/lib.harn"
+
+[[providers]]
+id = "buildkite"
+connector = { harn = "src/lib.harn" }
+capabilities = ["webhook", "rate_limit", "pagination"]
+
+[providers.setup]
+auth_type = "api-key"
+flow = "api-key"
+required_secrets = ["buildkite/webhook-token", "buildkite/api-token"]
+setup_command = ["harn", "connect", "buildkite"]
+validation_command = ["harn", "connect", "status", "--connector", "buildkite", "--json"]
+
+[[providers.setup.health_checks]]
+id = "webhook-token"
+kind = "secret"
+secret = "buildkite/webhook-token"
+
+[[providers.setup.health_checks]]
+id = "api-token"
+kind = "secret"
+secret = "buildkite/api-token"
+
+[providers.setup.recovery]
+missing_auth = "Store buildkite/webhook-token (webhook signing/token) and buildkite/api-token (REST Bearer) before enabling Buildkite bindings."
+expired_credentials = "Rotate buildkite/api-token in Buildkite (Personal Settings -> API Access Tokens) and rerun Buildkite validation."
+revoked_credentials = "Replace buildkite/api-token with an active token scoped read_builds + write_builds."
+missing_scopes = "Grant the API token read_builds (for build.get / job.log) and write_builds (for retry/rebuild/cancel/unblock)."
+inaccessible_resource = "Confirm the token can access the target organization and pipeline."
+transient_provider_outage = "Retry after the Buildkite API and webhook endpoints are healthy."
+
+[connector_contract]
+version = 1
+
+[[connector_contract.fixtures]]
+provider = "buildkite"
+name = "build finished passed webhook"
+kind = "webhook"
+headers = { "X-Buildkite-Event" = "build.finished", "X-Buildkite-Signature" = "timestamp=1776859200,signature=1a1c0e0e2e9cdd257dc186d03f85791bc44ee5f070ad96950382161870ef544a", "content-type" = "application/json" }
+metadata = { secret_ids = { webhook_token = "buildkite/webhook-token" } }
+body = '''{"event":"build.finished","build":{"id":"b1111111-1111-1111-1111-111111111111","number":42,"state":"passed","commit":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","branch":"main","message":"Add the thing","web_url":"https://buildkite.com/acme/web/builds/42","source":"webhook","created_at":"2026-06-02T10:00:00.000Z","scheduled_at":"2026-06-02T10:00:01.000Z","started_at":"2026-06-02T10:00:05.000Z","finished_at":"2026-06-02T10:03:30.000Z"},"pipeline":{"id":"p2222222-2222-2222-2222-222222222222","name":"web","slug":"web","repository":"git@github.com:acme/web.git","provider":{"id":"github","settings":{"account":"acme"}}},"sender":{"id":"u3333333","name":"Ada Lovelace"}}'''
+expect_type = "event"
+expect_kind = "build.passed"
+expect_dedupe_key = "buildkite:web:42:build.finished:passed"
+expect_signature_state = "verified"
+expect_payload_contains = { provider = "buildkite", schema_name = "BuildkiteEventPayload", raw = { provider = "buildkite", kind = "build.finished", state = "passed", is_failure = false, commit_sha = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", branch = "main", pipeline_slug = "web", build_number = 42 } }
+expect_event_count = 1
+
+[[connector_contract.fixtures]]
+provider = "buildkite"
+name = "build finished failed webhook"
+kind = "webhook"
+headers = { "X-Buildkite-Event" = "build.finished", "X-Buildkite-Signature" = "timestamp=1776859200,signature=958fcbaebb9be8360dda58e4369e04883acb233606b88a742d4565b5d38e6ad2", "content-type" = "application/json" }
+metadata = { secret_ids = { webhook_token = "buildkite/webhook-token" } }
+body = '''{"event":"build.finished","build":{"id":"b4444444-4444-4444-4444-444444444444","number":43,"state":"failed","commit":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","branch":"feature/login","message":"Break the build","web_url":"https://buildkite.com/acme/web/builds/43","source":"webhook","pull_request":{"id":137,"base":"main","repository":"acme/web"},"created_at":"2026-06-02T11:00:00.000Z","started_at":"2026-06-02T11:00:05.000Z","finished_at":"2026-06-02T11:04:10.000Z"},"pipeline":{"id":"p2222222-2222-2222-2222-222222222222","name":"web","slug":"web","repository":"git@github.com:acme/web.git","provider":{"id":"github","settings":{"account":"acme"}}},"sender":{"id":"u3333333","name":"Ada Lovelace"}}'''
+expect_type = "event"
+expect_kind = "build.failed"
+expect_dedupe_key = "buildkite:web:43:build.finished:failed"
+expect_signature_state = "verified"
+expect_payload_contains = { provider = "buildkite", schema_name = "BuildkiteEventPayload", raw = { provider = "buildkite", kind = "build.finished", state = "failed", is_failure = true, commit_sha = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", branch = "feature/login", pr_number = 137, pipeline_slug = "web", build_number = 43 } }
+expect_event_count = 1
+
+[[connector_contract.fixtures]]
+provider = "buildkite"
+name = "job finished failed webhook"
+kind = "webhook"
+headers = { "X-Buildkite-Event" = "job.finished", "X-Buildkite-Signature" = "timestamp=1776859200,signature=e1f30f03f6e9fa0bfb437b186f45289f2b013bdbf252bf3bb73be151aa96178a", "content-type" = "application/json" }
+metadata = { secret_ids = { webhook_token = "buildkite/webhook-token" } }
+body = '''{"event":"job.finished","job":{"id":"j5555555-5555-5555-5555-555555555555","type":"script","name":"tests","state":"finished","exit_status":1,"log_url":"https://api.buildkite.com/v2/organizations/acme/pipelines/web/builds/43/jobs/j5555555-5555-5555-5555-555555555555/log","web_url":"https://buildkite.com/acme/web/builds/43#j5555555","started_at":"2026-06-02T11:00:10.000Z","finished_at":"2026-06-02T11:04:05.000Z"},"build":{"id":"b4444444-4444-4444-4444-444444444444","number":43,"state":"failed","commit":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","branch":"feature/login","web_url":"https://buildkite.com/acme/web/builds/43"},"pipeline":{"id":"p2222222-2222-2222-2222-222222222222","name":"web","slug":"web","repository":"git@github.com:acme/web.git","provider":{"id":"github","settings":{"account":"acme"}}},"sender":{"id":"u3333333","name":"Ada Lovelace"}}'''
+expect_type = "event"
+expect_kind = "job.finished"
+expect_dedupe_key = "buildkite:web:43:job.finished:failed"
+expect_signature_state = "verified"
+expect_payload_contains = { provider = "buildkite", schema_name = "BuildkiteEventPayload", raw = { provider = "buildkite", kind = "job.finished", state = "failed", is_failure = true, commit_sha = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", branch = "feature/login", pipeline_slug = "web", build_number = 43, job = { id = "j5555555-5555-5555-5555-555555555555", exit_status = 1, name = "tests" } } }
+expect_event_count = 1
+
+[[connector_contract.fixtures]]
+provider = "buildkite"
+name = "stale signature reject"
+kind = "webhook"
+headers = { "X-Buildkite-Event" = "build.finished", "X-Buildkite-Signature" = "timestamp=1776858600,signature=676f3bd7215cf79a693a2d4ef28ba93d77ae7d4b48aeaef077f29c27056754a4", "content-type" = "application/json" }
+metadata = { secret_ids = { webhook_token = "buildkite/webhook-token" } }
+body = '''{"event":"build.finished","build":{"id":"b4444444-4444-4444-4444-444444444444","number":43,"state":"failed","commit":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","branch":"feature/login","message":"Break the build","web_url":"https://buildkite.com/acme/web/builds/43","source":"webhook","pull_request":{"id":137,"base":"main","repository":"acme/web"},"created_at":"2026-06-02T11:00:00.000Z","started_at":"2026-06-02T11:00:05.000Z","finished_at":"2026-06-02T11:04:10.000Z"},"pipeline":{"id":"p2222222-2222-2222-2222-222222222222","name":"web","slug":"web","repository":"git@github.com:acme/web.git","provider":{"id":"github","settings":{"account":"acme"}}},"sender":{"id":"u3333333","name":"Ada Lovelace"}}'''
+expect_type = "reject"
+expect_event_count = 0
+
+# Harn package dependencies live here. No sibling SDK dependency for v0.
+[dependencies]

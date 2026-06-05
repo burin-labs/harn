@@ -12,6 +12,8 @@ Regenerate with `make gen-connector-matrix` and verify with `make check-connecto
 | Provider | Package | Webhook | OAuth | Rate limit | Pagination | GraphQL | Streaming |
 |---|---|---:|---:|---:|---:|---:|---:|
 | `bitbucket` | [`harn-bitbucket-connector`](https://github.com/burin-labs/harn-bitbucket-connector) | yes | no | yes | yes | no | no |
+| `buildkite` | [`harn-buildkite-connector`](https://github.com/burin-labs/harn-buildkite-connector) | yes | no | yes | yes | no | no |
+| `circleci` | [`harn-circleci-connector`](https://github.com/burin-labs/harn-circleci-connector) | yes | no | yes | yes | no | no |
 | `github` | [`harn-github-connector`](https://github.com/burin-labs/harn-github-connector) | yes | no | yes | yes | yes | no |
 | `linear` | [`harn-linear-connector`](https://github.com/burin-labs/harn-linear-connector) | yes | yes | yes | yes | yes | no |
 | `notion` | [`harn-notion-connector`](https://github.com/burin-labs/harn-notion-connector) | yes | no | yes | yes | no | no |
