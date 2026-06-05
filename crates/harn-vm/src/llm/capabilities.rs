@@ -330,6 +330,10 @@ pub struct ProviderRule {
     /// Whether this route accepts OpenAI's `reasoning_effort` request field.
     #[serde(default)]
     pub reasoning_effort_supported: Option<bool>,
+    /// Accepted `reasoning_effort` values for routes that expose a narrower
+    /// subset than Harn's provider-neutral enum. Empty means "unknown/all".
+    #[serde(default)]
+    pub reasoning_effort_levels: Option<Vec<String>>,
     /// Whether this route accepts `reasoning_effort: "none"` as a true
     /// reasoning-off setting. Older GPT-5 variants support effort but only
     /// floor at `minimal`.
@@ -442,6 +446,7 @@ pub struct Capabilities {
     pub honors_chat_template_kwargs: bool,
     pub requires_completion_tokens: bool,
     pub reasoning_effort_supported: bool,
+    pub reasoning_effort_levels: Vec<String>,
     pub reasoning_none_supported: bool,
     pub reasoning_wire_format: Option<String>,
     pub seed_supported: bool,
@@ -502,6 +507,7 @@ impl Default for Capabilities {
             honors_chat_template_kwargs: false,
             requires_completion_tokens: false,
             reasoning_effort_supported: false,
+            reasoning_effort_levels: Vec::new(),
             reasoning_none_supported: false,
             reasoning_wire_format: None,
             seed_supported: true,
@@ -1114,6 +1120,7 @@ fn defaults_to_caps(defaults: &ProviderDefaults) -> Capabilities {
         honors_chat_template_kwargs: None,
         requires_completion_tokens: None,
         reasoning_effort_supported: None,
+        reasoning_effort_levels: None,
         reasoning_none_supported: None,
         reasoning_wire_format: None,
         seed_supported: None,
@@ -1197,6 +1204,7 @@ fn rule_to_caps(rule: &ProviderRule, defaults: &ProviderDefaults) -> Capabilitie
         honors_chat_template_kwargs: rule.honors_chat_template_kwargs.unwrap_or(false),
         requires_completion_tokens: rule.requires_completion_tokens.unwrap_or(false),
         reasoning_effort_supported: rule.reasoning_effort_supported.unwrap_or(false),
+        reasoning_effort_levels: rule.reasoning_effort_levels.clone().unwrap_or_default(),
         reasoning_none_supported: rule.reasoning_none_supported.unwrap_or(false),
         reasoning_wire_format: rule
             .reasoning_wire_format
@@ -1344,6 +1352,16 @@ mod tests {
 
     fn reset() {
         clear_user_overrides();
+    }
+
+    fn assert_cerebras_effort_reasoning(model: &str, thinking_block_style: &str) {
+        let caps = lookup("cerebras", model);
+        assert_eq!(caps.thinking_modes, vec!["effort"]);
+        assert!(caps.reasoning_effort_supported);
+        assert_eq!(caps.preferred_tool_format.as_deref(), Some("native"));
+        assert_eq!(caps.structured_output.as_deref(), Some("native"));
+        assert_eq!(caps.structured_output_mode, "native_json");
+        assert_eq!(caps.thinking_block_style, thinking_block_style);
     }
 
     #[test]
@@ -1807,16 +1825,25 @@ anthropic_beta_features = ["fine-grained-tool-streaming-2025-05-14"]
     }
 
     #[test]
-    fn cerebras_gpt_oss_supports_reasoning_none() {
-        // Cerebras-hosted GPT-OSS accepts reasoning_effort ∈
-        // {none, low, medium, high} but rejects `minimal`. Advertising
-        // reasoning_none_supported makes the policy resolver materialize an
-        // "off" level as `none` instead of flooring at the rejected
-        // `minimal` (which 400s every no-tools/summarize turn).
+    fn cerebras_gpt_oss_declares_supported_reasoning_efforts() {
+        // Cerebras GPT-OSS accepts low/medium/high only. The policy resolver
+        // uses this list to floor `reasoning_policy: "off"` to `low` instead
+        // of sending unsupported `none` or `minimal` values.
         reset();
         let caps = lookup("cerebras", "gpt-oss-120b");
-        assert_eq!(caps.thinking_modes, vec!["effort"]);
-        assert!(caps.reasoning_effort_supported);
+        assert_cerebras_effort_reasoning("gpt-oss-120b", "reasoning_summary");
+        assert!(!caps.reasoning_none_supported);
+        assert_eq!(caps.reasoning_effort_levels, vec!["low", "medium", "high"]);
+    }
+
+    #[test]
+    fn cerebras_glm_47_supports_reasoning_none() {
+        // Cerebras documents GLM 4.7's no-reasoning value as
+        // reasoning_effort="none"; the older disable_reasoning knob is
+        // deprecated. Keep the route on the same policy path as GPT-OSS.
+        reset();
+        let caps = lookup("cerebras", "zai-glm-4.7");
+        assert_cerebras_effort_reasoning("zai-glm-4.7", "inline");
         assert!(caps.reasoning_none_supported);
     }
 

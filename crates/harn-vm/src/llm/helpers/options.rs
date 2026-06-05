@@ -1842,6 +1842,19 @@ pub(crate) fn extract_llm_options(
                 "thinking"
             },
         )?;
+        validate_reasoning_effort_level_supported(
+            &thinking,
+            &provider,
+            &model,
+            &caps,
+            if thinking_from_reasoning_effort {
+                "reasoning_effort"
+            } else if thinking_from_reasoning_policy {
+                "reasoning_policy"
+            } else {
+                "thinking"
+            },
+        )?;
     }
     let mut anthropic_beta_features = parse_anthropic_beta_features_option(
         options.as_ref(),
@@ -2460,6 +2473,33 @@ fn validate_thinking_supported(
         return Ok(());
     }
     Err(unsupported_option_error(option_name, provider, model))
+}
+
+fn validate_reasoning_effort_level_supported(
+    thinking: &crate::llm::api::ThinkingConfig,
+    provider: &str,
+    model: &str,
+    caps: &crate::llm::capabilities::Capabilities,
+    option_name: &str,
+) -> Result<(), VmError> {
+    let crate::llm::api::ThinkingConfig::Effort { level } = thinking else {
+        return Ok(());
+    };
+    if caps.reasoning_effort_levels.is_empty() {
+        return Ok(());
+    }
+    let raw = level.as_str();
+    if caps
+        .reasoning_effort_levels
+        .iter()
+        .any(|supported| supported == raw)
+    {
+        return Ok(());
+    }
+    let supported = caps.reasoning_effort_levels.join(", ");
+    Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(format!(
+        "option `{option_name}` level `{raw}` is not supported for provider `{provider}` model `{model}`; supported reasoning_effort values: {supported}"
+    )))))
 }
 
 fn parse_anthropic_beta_features_option(
@@ -4085,6 +4125,30 @@ mod routing_tests {
         )]))
     }
 
+    struct ScopedEnvVar {
+        key: &'static str,
+        previous: Option<String>,
+    }
+
+    impl ScopedEnvVar {
+        fn set(key: &'static str, value: &str) -> Self {
+            let previous = std::env::var(key).ok();
+            std::env::set_var(key, value);
+            super::super::reset_provider_key_cache();
+            Self { key, previous }
+        }
+    }
+
+    impl Drop for ScopedEnvVar {
+        fn drop(&mut self) {
+            match &self.previous {
+                Some(value) => std::env::set_var(self.key, value),
+                None => std::env::remove_var(self.key),
+            }
+            super::super::reset_provider_key_cache();
+        }
+    }
+
     #[test]
     fn unsupported_capability_options_error_with_provider_matrix_hint() {
         assert_unsupported_local_option("thinking", vec![("thinking", VmValue::Bool(true))]);
@@ -4386,6 +4450,53 @@ mod routing_tests {
             assert_eq!(
                 opts.thinking,
                 crate::llm::api::ThinkingConfig::Effort { level: expected }
+            );
+        }
+    }
+
+    #[test]
+    fn standalone_reasoning_effort_rejects_cerebras_gpt_oss_unsupported_levels() {
+        let _cerebras_key = ScopedEnvVar::set("CEREBRAS_API_KEY", "test-key");
+        for (key, value) in [
+            (
+                "reasoning_effort",
+                VmValue::String(std::sync::Arc::from("none".to_string())),
+            ),
+            (
+                "thinking",
+                VmValue::Dict(std::sync::Arc::new(BTreeMap::from([
+                    (
+                        "mode".to_string(),
+                        VmValue::String(std::sync::Arc::from("effort".to_string())),
+                    ),
+                    (
+                        "level".to_string(),
+                        VmValue::String(std::sync::Arc::from("minimal".to_string())),
+                    ),
+                ]))),
+            ),
+        ] {
+            let options = BTreeMap::from([
+                (
+                    "provider".to_string(),
+                    VmValue::String(std::sync::Arc::from("cerebras".to_string())),
+                ),
+                (
+                    "model".to_string(),
+                    VmValue::String(std::sync::Arc::from("gpt-oss-120b".to_string())),
+                ),
+                (key.to_string(), value),
+            ]);
+
+            let err = match extract_with_options(options) {
+                Ok(_) => panic!("unsupported reasoning effort should fail before transport"),
+                Err(err) => err,
+            };
+
+            let message = err.to_string();
+            assert!(
+                message.contains("supported reasoning_effort values: low, medium, high"),
+                "unexpected error: {message}"
             );
         }
     }

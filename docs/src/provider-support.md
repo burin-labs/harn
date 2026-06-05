@@ -14,7 +14,7 @@ No benchmark summary is baked into this checked-in page. To layer local empirica
 | `Anthropic` | Anthropic Messages API | `haiku` | `native` | yes | yes | `tool_use` / `xml_tagged` | `enabled` | yes | `high` | `not_recorded` |
 | `Azure Openai` | OpenAI-compatible chat completions | `azure_openai:gpt-*` | `native` | yes | yes | `none` / `native_json` | none | no | `provider_default` | `not_recorded` |
 | `Bedrock` | AWS Bedrock Converse | `bedrock:anthropic.claude-*` | `native` | yes | yes | `none` / `xml_tagged` | none | no | `provider_default` | `not_recorded` |
-| `Cerebras` | OpenAI-compatible chat completions | `cerebras:gpt-oss-120b` | `native` | yes | yes | `native` / `native_json` | `effort,reasoning_effort,reasoning_none` | no | `high` | `not_recorded` |
+| `Cerebras` | OpenAI-compatible chat completions | `cerebras/gpt-oss-120b` | `native` | yes | yes | `native` / `native_json` | `effort,reasoning_effort` | no | `high` | `not_recorded` |
 | `Dashscope` | OpenAI-compatible chat completions | `dashscope:qwen3.6*` | `native` | yes | yes | `native` / `delimited` | `disable_directive:/no_think,enabled` | no | `provider_default` | `not_recorded` |
 | `Deepseek` | OpenAI-compatible chat completions | `deepseek:deepseek-v4-flash` | `native` | yes | yes | `native` / `native_json` | `enabled` | yes | `high` | `not_recorded` |
 | `Fireworks` | OpenAI-compatible chat completions | `fireworks:*qwen3.6*` | `native` | yes | yes | `native` / `delimited` | `disable_directive:/no_think,enabled` | no | `provider_default` | `not_recorded` |
@@ -63,6 +63,33 @@ Caveats:
 MCP notes:
 
 - No provider-specific MCP connector is required; Harn exposes MCP tools through the runtime tool registry.
+
+### Cerebras
+
+- catalog provider: `cerebras`
+- recommended route: `cerebras/gpt-oss-120b` (`gpt-oss-120b`)
+- endpoint style: OpenAI-compatible chat completions
+- recommended Harn options:
+
+```toml
+provider = "cerebras"
+model = "gpt-oss-120b"
+tool_format = "native"
+structured_output_mode = "native_json"
+```
+
+Notes:
+
+- Harn catalogs Cerebras public serverless rows separately from dedicated-endpoint weights so clients do not present unprovisioned enterprise endpoints as one-click routes.
+- Use the slash-prefixed selector form (`cerebras/<model>`) when a single string must carry both provider and model identity; Harn strips the prefix before sending the provider-native model id.
+
+Caveats:
+
+- Preview rows such as `zai-glm-4.7` may be discontinued by Cerebras on short notice; pin public production workloads to non-preview rows unless the caller opts into preview behavior.
+
+MCP notes:
+
+- MCP tools are normalized through Harn tool definitions before they become OpenAI-compatible Cerebras tool schemas.
 
 ### Gemini API
 

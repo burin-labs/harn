@@ -157,7 +157,7 @@ path = "/models"
 # p50 still includes client/provider round-trip time, so callers should keep
 # their own wall-clock budget. Provider-level pricing here is a coarse
 # default; per-model rows under [models.X] hold the authoritative numbers
-# from the Cerebras pricing page.
+# from Cerebras's public model discovery endpoint.
 [providers.cerebras]
 base_url = "https://api.cerebras.ai/v1"
 base_url_env = "CEREBRAS_BASE_URL"
@@ -165,8 +165,8 @@ auth_style = "bearer"
 auth_env = "CEREBRAS_API_KEY"
 chat_endpoint = "/chat/completions"
 completion_endpoint = "/completions"
-cost_per_1k_in = 0.00025
-cost_per_1k_out = 0.00069
+cost_per_1k_in = 0.00035
+cost_per_1k_out = 0.00075
 latency_p50_ms = 150
 features = ["native_tools"]
 
@@ -1175,11 +1175,12 @@ context_window = 131072
 capabilities = ["tools", "streaming"]
 pricing = { input_per_mtok = 0.15, output_per_mtok = 0.60 }
 
-# Cerebras-hosted open-weight models. Per-model pricing mirrors the public
-# pricing catalog. The headline binder-substrate candidate is gpt-oss-120b
-# at very high token throughput; Llama 3.3 70B is included as a fallback
-# when the binder hop wants function-calling-trained Llama instead of
-# GPT-OSS.
+# Cerebras-hosted open-weight models. Serverless rows mirror
+# https://api.cerebras.ai/public/v1/models; dedicated-endpoint families are
+# intentionally not added as one-click routes unless Cerebras exposes a stable
+# public wire ID for the standard endpoint. The headline binder-substrate
+# candidate is gpt-oss-120b at very high token throughput; GLM 4.7 is the
+# public preview coding/agentic route.
 #
 # Catalog keys are bare wire IDs (Cerebras's /v1/chat/completions wants
 # the raw model name). Users routing via `model: "cerebras/<name>"` get
@@ -1193,16 +1194,28 @@ name = "GPT-OSS 120B (Cerebras)"
 provider = "cerebras"
 context_window = 131072
 capabilities = ["tools", "streaming"]
-pricing = { input_per_mtok = 0.25, output_per_mtok = 0.69 }
-tier = "mid"
+pricing = { input_per_mtok = 0.35, output_per_mtok = 0.75 }
+tier = "frontier"
 open_weight = true
 strengths = ["speed", "cheap", "tool_use"]
+[models."zai-glm-4.7"]
+name = "Z.ai GLM 4.7 (Cerebras)"
+provider = "cerebras"
+context_window = 131072
+capabilities = ["tools", "streaming", "thinking"]
+pricing = { input_per_mtok = 2.25, output_per_mtok = 2.75 }
+tier = "frontier"
+open_weight = true
+strengths = ["speed", "coding", "agentic", "tool_use", "reasoning"]
 [models."llama-3.3-70b"]
-name = "Llama 3.3 70B (Cerebras)"
+name = "Llama 3.3 70B (Cerebras, dedicated legacy)"
 provider = "cerebras"
 context_window = 131072
 capabilities = ["tools", "streaming"]
 pricing = { input_per_mtok = 0.85, output_per_mtok = 1.20 }
+availability = "dedicated"
+deprecated = true
+deprecation_note = "Cerebras no longer returns this model from public discovery; use a provisioned dedicated endpoint alias if your organization still serves these weights."
 
 # MiniMax family ─ pricing pages:
 #   https://platform.minimax.io/docs/guides/pricing-paygo

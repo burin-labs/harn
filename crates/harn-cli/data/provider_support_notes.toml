@@ -54,6 +54,32 @@ mcp_notes = [
 ]
 
 [[entry]]
+id = "cerebras"
+catalog_provider = "cerebras"
+display_name = "Cerebras"
+endpoint_style = "OpenAI-compatible chat completions"
+recommended_model = "gpt-oss-120b"
+recommended_selector = "cerebras/gpt-oss-120b"
+recommended_tool_format = "native"
+usage_confidence = "high"
+recommended_options = [
+  'provider = "cerebras"',
+  'model = "gpt-oss-120b"',
+  'tool_format = "native"',
+  'structured_output_mode = "native_json"',
+]
+notes = [
+  "Harn catalogs Cerebras public serverless rows separately from dedicated-endpoint weights so clients do not present unprovisioned enterprise endpoints as one-click routes.",
+  "Use the slash-prefixed selector form (`cerebras/<model>`) when a single string must carry both provider and model identity; Harn strips the prefix before sending the provider-native model id.",
+]
+caveats = [
+  "Preview rows such as `zai-glm-4.7` may be discontinued by Cerebras on short notice; pin public production workloads to non-preview rows unless the caller opts into preview behavior.",
+]
+mcp_notes = [
+  "MCP tools are normalized through Harn tool definitions before they become OpenAI-compatible Cerebras tool schemas.",
+]
+
+[[entry]]
 id = "gemini"
 catalog_provider = "gemini"
 display_name = "Gemini API"

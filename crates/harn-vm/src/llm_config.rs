@@ -2220,6 +2220,7 @@ mod tests {
         }
 
         assert_eq!(infer_provider("cerebras/gpt-oss-120b"), "cerebras");
+        assert_eq!(infer_provider("cerebras/zai-glm-4.7"), "cerebras");
         assert_eq!(infer_provider("cerebras/llama-3.3-70b"), "cerebras");
 
         unsafe {
@@ -2242,7 +2243,7 @@ mod tests {
             std::env::remove_var("HARN_DEFAULT_PROVIDER");
         }
 
-        for model in ["gpt-oss-120b", "llama-3.3-70b"] {
+        for model in ["gpt-oss-120b", "zai-glm-4.7", "llama-3.3-70b"] {
             assert_eq!(
                 infer_provider(model),
                 "cerebras",
@@ -2318,6 +2319,10 @@ mod tests {
         let cerebras = resolve_model_info("cerebras/gpt-oss-120b");
         assert_eq!(cerebras.id, "gpt-oss-120b");
         assert_eq!(cerebras.provider, "cerebras");
+
+        let cerebras_glm = resolve_model_info("cerebras/zai-glm-4.7");
+        assert_eq!(cerebras_glm.id, "zai-glm-4.7");
+        assert_eq!(cerebras_glm.provider, "cerebras");
     }
 
     #[test]
@@ -2906,6 +2911,25 @@ mod tests {
             offenders.is_empty(),
             "deprecated models missing a deprecation_note: {offenders:?}"
         );
+    }
+
+    #[test]
+    fn embedded_cerebras_catalog_separates_public_and_dedicated_routes() {
+        let config = default_config();
+        for id in ["gpt-oss-120b", "zai-glm-4.7"] {
+            let model = config.models.get(id).expect("current public Cerebras row");
+            assert_eq!(model.provider, "cerebras");
+            assert_eq!(model.availability, ModelAvailability::Serverless);
+            assert!(!model.deprecated);
+        }
+
+        let llama = config
+            .models
+            .get("llama-3.3-70b")
+            .expect("legacy Cerebras row");
+        assert_eq!(llama.provider, "cerebras");
+        assert_eq!(llama.availability, ModelAvailability::Dedicated);
+        assert!(llama.deprecated);
     }
 
     #[test]

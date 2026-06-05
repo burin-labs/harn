@@ -1191,19 +1191,66 @@ fn test_llm_call_option_literal_accepts_openai_responses_options() {
 }
 
 #[test]
+fn test_llm_call_option_literal_accepts_runtime_reasoning_and_routing_options() {
+    let warns = warnings(
+        r#"pipeline t(task) {
+  let profile = {prompt_fragments: [{body: "Use repo context.", requires_caps: ["language.rust"]}], caps: ["language.rust"]}
+  llm_call("prompt", nil, {
+    provider: "mock",
+    model_role: "merge",
+    role: "fast_apply",
+    routing: {chain: [{provider: "mock", model: "mock"}]},
+    context_profile: profile,
+    project_context_profile: profile,
+    caps: ["language.rust"],
+    capabilities: {tools: true},
+    reasoning_policy: "off",
+    thinking_policy: "auto",
+    reasoning_scale: "small",
+    problem_scale: "large",
+    reasoning_task: "code",
+    task_kind: "agent",
+    task: "verify",
+    timeout_ms: 250,
+    fast: false,
+    speed: "standard",
+    video: false,
+    reminders: {providers: []}
+  })
+  llm_completion("pre", "post", nil, {
+    provider: "mock",
+    reasoning_policy: "off",
+    timeout_ms: 250
+  })
+}"#,
+    );
+    assert!(warns.is_empty(), "got warnings: {warns:?}");
+}
+
+#[test]
 fn test_structured_llm_options_accept_structured_aliases() {
-    let errs = errors(
+    let warns = warnings(
         r#"pipeline t(task) {
   let schema = {type: "object", properties: {answer: {type: "string"}}}
   llm_call_structured_result("prompt", schema, {
     provider: "mock",
+    model_role: "merge",
     retries: 1,
     repair: {enabled: true, model: "mock"},
-    output_validation: "error"
+    output_validation: "error",
+    reasoning_policy: "off",
+    thinking_policy: "auto",
+    reasoning_scale: "small",
+    problem_scale: "large",
+    reasoning_task: "code",
+    task_kind: "agent",
+    timeout_ms: 250,
+    fast: false,
+    video: false
   })
 }"#,
     );
-    assert!(errs.is_empty(), "unexpected errors: {errs:?}");
+    assert!(warns.is_empty(), "got warnings: {warns:?}");
 }
 
 #[test]

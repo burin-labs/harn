@@ -269,6 +269,8 @@ pub const WORKSPACE_POLICY: Ty = Ty::Shape(&[ShapeFieldDescriptor::optional(
 pub const LLM_CALL_OPTIONS: Ty = Ty::Shape(&[
     // Routing.
     ShapeFieldDescriptor::optional("model", TY_STRING),
+    ShapeFieldDescriptor::optional("model_role", TY_STRING),
+    ShapeFieldDescriptor::optional("role", TY_STRING),
     ShapeFieldDescriptor::optional("model_tier", TY_STRING),
     ShapeFieldDescriptor::optional("provider", TY_STRING),
     ShapeFieldDescriptor::optional("api_mode", TY_STRING),
@@ -290,6 +292,11 @@ pub const LLM_CALL_OPTIONS: Ty = Ty::Shape(&[
     ShapeFieldDescriptor::optional("system_prompt_parts", TY_ANY),
     ShapeFieldDescriptor::optional("system_appendix", TY_ANY),
     ShapeFieldDescriptor::optional("system_suffix", TY_ANY),
+    ShapeFieldDescriptor::optional("_system_fragments", TY_LIST),
+    ShapeFieldDescriptor::optional("context_profile", TY_DICT),
+    ShapeFieldDescriptor::optional("project_context_profile", TY_DICT),
+    ShapeFieldDescriptor::optional("caps", TY_ANY),
+    ShapeFieldDescriptor::optional("capabilities", TY_ANY),
     ShapeFieldDescriptor::optional("previous_response_id", TY_STRING),
     // Generation.
     ShapeFieldDescriptor::optional("max_tokens", TY_INT),
@@ -317,12 +324,20 @@ pub const LLM_CALL_OPTIONS: Ty = Ty::Shape(&[
     ShapeFieldDescriptor::optional("llm_repair", Ty::Union(&[TY_BOOL, TY_DICT])),
     // Reasoning / multimodal options.
     ShapeFieldDescriptor::optional("thinking", Ty::Union(&[TY_BOOL, TY_STRING, TY_DICT])),
+    ShapeFieldDescriptor::optional("reasoning_policy", TY_ANY),
+    ShapeFieldDescriptor::optional("thinking_policy", TY_ANY),
+    ShapeFieldDescriptor::optional("reasoning_scale", TY_STRING),
+    ShapeFieldDescriptor::optional("problem_scale", TY_STRING),
+    ShapeFieldDescriptor::optional("reasoning_task", TY_STRING),
+    ShapeFieldDescriptor::optional("task_kind", TY_STRING),
+    ShapeFieldDescriptor::optional("task", TY_STRING),
     ShapeFieldDescriptor::optional("reasoning_effort", TY_STRING),
     ShapeFieldDescriptor::optional("interleaved_thinking", TY_BOOL),
     ShapeFieldDescriptor::optional("anthropic_beta_features", Ty::Union(&[TY_STRING, TY_LIST])),
     ShapeFieldDescriptor::optional("vision", TY_BOOL),
     ShapeFieldDescriptor::optional("audio", TY_BOOL),
     ShapeFieldDescriptor::optional("pdf", TY_BOOL),
+    ShapeFieldDescriptor::optional("video", TY_BOOL),
     // Tools and progressive disclosure. Runtime accepts either a raw tool
     // list or a tool_registry dict.
     ShapeFieldDescriptor::optional("tools", Ty::Union(&[TY_LIST, TY_DICT])),
@@ -337,8 +352,11 @@ pub const LLM_CALL_OPTIONS: Ty = Ty::Shape(&[
     ShapeFieldDescriptor::optional("llm_retries", TY_INT),
     ShapeFieldDescriptor::optional("llm_backoff_ms", TY_INT),
     ShapeFieldDescriptor::optional("timeout", TY_INT),
+    ShapeFieldDescriptor::optional("timeout_ms", TY_INT),
     ShapeFieldDescriptor::optional("idle_timeout", TY_INT),
     ShapeFieldDescriptor::optional("stream", TY_BOOL),
+    ShapeFieldDescriptor::optional("fast", TY_BOOL),
+    ShapeFieldDescriptor::optional("speed", TY_STRING),
     ShapeFieldDescriptor::optional("store", Ty::Union(&[TY_BOOL, TY_DICT])),
     ShapeFieldDescriptor::optional("response_store", TY_BOOL),
     ShapeFieldDescriptor::optional("responses_store", TY_BOOL),
@@ -376,6 +394,7 @@ pub const LLM_CALL_OPTIONS: Ty = Ty::Shape(&[
     ),
     // Legacy/runtime-adjacent keys handled at the boundary.
     ShapeFieldDescriptor::optional("transcript", TY_ANY),
+    ShapeFieldDescriptor::optional("reminders", TY_ANY),
     ShapeFieldDescriptor::optional("metadata", TY_DICT),
     ShapeFieldDescriptor::optional("_iteration", TY_INT),
 ]);
