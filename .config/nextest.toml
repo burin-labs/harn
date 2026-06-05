@@ -94,6 +94,10 @@ harn-cli-bin = { max-threads = 8 }
 # delayed by neighboring DAP tests. Keep leak failures enabled and remove
 # the concurrency pressure instead.
 harn-dap = { max-threads = 1 }
+# Windows AppContainer process launches and `icacls` grants exercise shared
+# OS resources. Keep these tests serialized under nextest so a valid sandbox
+# spawn is not forced to contend with several sibling AppContainer launches.
+harn-windows-sandbox = { max-threads = 1 }
 
 # Transport-layer LLM tests do real localhost TCP with a 3s accept deadline.
 # They're bounded internally but give them a bit more room than the default
@@ -131,6 +135,10 @@ leak-timeout = { period = "10s", result = "pass" }
 filter = "package(harn-dap)"
 test-group = "harn-dap"
 
+[[profile.default.overrides]]
+filter = 'package(harn-vm) and test(/windows_process_sandbox|replay_dispatch_scopes_harn_replay_per_dispatch_and_child_process/)'
+test-group = "harn-windows-sandbox"
+
 [[profile.ci.overrides]]
 filter = "package(harn-cli) and kind(test)"
 test-group = "harn-subprocess"
@@ -144,6 +152,10 @@ leak-timeout = { period = "10s", result = "pass" }
 [[profile.ci.overrides]]
 filter = "package(harn-dap)"
 test-group = "harn-dap"
+
+[[profile.ci.overrides]]
+filter = 'package(harn-vm) and test(/windows_process_sandbox|replay_dispatch_scopes_harn_replay_per_dispatch_and_child_process/)'
+test-group = "harn-windows-sandbox"
 
 # Flake-detection profile: zero retries, no fail-fast, tighter slow-test
 # threshold.  Used by the flake-detection CI workflow which runs touched

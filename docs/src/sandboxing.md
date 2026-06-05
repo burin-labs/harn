@@ -91,17 +91,26 @@ the child process can open; it does not rewrite npm, pip, cargo, git, proxy, or
 CA configuration.
 
 With the default `developer_toolchains` and `package_manager_config` presets,
-the desktop backends grant child processes read-only access to common
+the Unix desktop backends grant child processes read-only access to common
 home-scoped toolchain and package-manager roots under the first absolute
-`$HOME` or `%USERPROFILE%`. That includes user-managed runtimes such as
-`.local/share/uv`, `.cargo`, `.rustup`, `.pyenv`, `.nvm`, `.volta`, and `go`,
-plus package-manager config/cache paths such as `.npmrc`, `.gitconfig`,
-`.netrc`, `.yarnrc.yml`, `.config`, `.npm`, `.cache`, `.pip`, `.pypirc`,
+`$HOME`. That includes user-managed runtimes such as `.local/share/uv`,
+`.cargo`, `.rustup`, `.pyenv`, `.nvm`, `.volta`, and `go`, plus
+package-manager config/cache paths such as `.npmrc`, `.gitconfig`, `.netrc`,
+`.yarnrc.yml`, `.config`, `.npm`, `.cache`, `.pip`, `.pypirc`,
 `.cargo/config`, `.cargo/config.toml`, `.cargo/credentials`,
 `.cargo/credentials.toml`, `.cargo/registry`, and `.cargo/git`. These grants
 are process-only: Harn file builtins still need `workspace_roots` or
 `read_only_roots`, and the extra home-dir paths stay unwritable by the OS
 profile.
+
+Windows AppContainer confinement is more conservative for omitted presets:
+granting a home-scoped root requires mutating filesystem ACLs recursively, so
+the Windows backend does not materialize implicit default
+`developer_toolchains` or `package_manager_config` roots on every spawn. A
+policy that explicitly sets `process_sandbox.presets` still asks Windows to
+grant those preset roots, and `process_sandbox.read_roots` / `.write_roots`
+remain the preferred way to add the specific SDK, cache, or config directory a
+subprocess needs.
 
 Child processes spawned without env overrides inherit the parent environment.
 That includes corporate proxy and CA variables such as `HTTP_PROXY`,
@@ -263,12 +272,13 @@ successor when one exists.
 | Capability / policy | Win32 mechanism | Effect |
 |---|---|---|
 | always | `CreateAppContainerProfile` + `STARTUPINFOEX` + `PROC_THREAD_ATTRIBUTE_SECURITY_CAPABILITIES` | the process runs inside a per-spawn AppContainer with no capability SIDs |
+| always | `GetAppContainerFolderPath` plus child `LOCALAPPDATA` / `TEMP` / `TMP` overrides | child processes use AppContainer-owned profile and scratch directories instead of inheriting host-user temp paths that the AppContainer cannot access |
 | `workspace.write_text` / `workspace.delete` | `icacls /grant *<sid>:(OI)(CI)M /T /C` on each `workspace_roots` entry | the AppContainer SID gets Modify access on the roots; revoked on `Drop` |
 | read-only (denied workspace write, or any `read_only_roots` entry) | `icacls /grant *<sid>:(OI)(CI)RX /T /C` | the AppContainer SID gets ReadAndExecute; `read_only_roots` always use this grant even when workspace writes are allowed |
+| explicit `process_sandbox.presets` includes `developer_toolchains` / `package_manager_config` | `icacls /grant *<sid>:(OI)(CI)RX /T /C` on existing home-scoped preset roots | explicit preset requests get read-only access; omitted presets are not materialized as recursive ACL grants on Windows |
 | `process_sandbox.read_roots` / `.write_roots` | `icacls /grant *<sid>:(OI)(CI)RX` or Modify | process-only roots, with writes gated by workspace-write capability |
 | always | `CreateJobObjectW` with `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`, `_DIE_ON_UNHANDLED_EXCEPTION`, `_ACTIVE_PROCESS` (cap 32), `_PROCESS_MEMORY` (cap 512 MiB) | resource caps and lifecycle binding |
-| always | `JOBOBJECT_BASIC_UI_RESTRICTIONS` blocking `HANDLES`, `READCLIPBOARD`, `WRITECLIPBOARD`, `SYSTEMPARAMETERS`, `DISPLAYSETTINGS`, `GLOBALATOMS`, `DESKTOP`, `EXITWINDOWS` | UI surface is blocked |
-| always | direct `CreateProcessW` with explicit handle list and `STARTF_USESTDHANDLES` | stdin/stdout/stderr inheritance is restricted to the three pipes the runtime created |
+| always | direct `CreateProcessW` with `CREATE_NO_WINDOW`, explicit handle list, `STARTF_USESTDHANDLES`, and Job Object UI restrictions | stdin/stdout/stderr inheritance is restricted to the three pipes the runtime created, console commands do not bind to an interactive desktop, and child UI escape surfaces stay disabled |
 
 `std::process::Command` cannot carry an AppContainer
 `SECURITY_CAPABILITIES` block, so Windows callers must use
