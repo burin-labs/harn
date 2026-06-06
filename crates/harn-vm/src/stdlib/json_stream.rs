@@ -41,7 +41,14 @@ pub(crate) enum JsonStreamStatus {
 pub(crate) struct StreamSchemaValidator {
     schema_json: serde_json::Value,
     buffer: String,
-    scan: JsonStreamScan,
+    // Boxed so the scanner's footprint stays off the stack frame of every
+    // future that holds this validator by value. The LLM streaming transport
+    // carries a `StreamSchemaValidator` across off-thread awaits and inlines
+    // into large async dispatch frames (e.g. `host_agent_dispatch_tool_call`),
+    // which sit right at Clippy's `large_stack_frames` threshold; keeping the
+    // scan state on the heap stops fence-tracking fields from tipping them
+    // over. Auto-deref makes the `self.scan.*` call sites unchanged.
+    scan: Box<JsonStreamScan>,
     status: JsonStreamStatus,
 }
 
@@ -58,7 +65,7 @@ impl StreamSchemaValidator {
         Ok(Self {
             schema_json: schema.clone(),
             buffer: String::new(),
-            scan: JsonStreamScan::default(),
+            scan: Box::new(JsonStreamScan::default()),
             status: JsonStreamStatus::Pending,
         })
     }
