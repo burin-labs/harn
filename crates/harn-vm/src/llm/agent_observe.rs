@@ -223,8 +223,12 @@ pub(crate) fn parse_retry_after(msg: &str) -> Option<u64> {
     if value.is_empty() {
         return None;
     }
-    if let Some(num_str) = value.split_whitespace().next() {
-        if let Ok(secs) = num_str.parse::<f64>() {
+    let numeric_prefix = value
+        .chars()
+        .take_while(|ch| ch.is_ascii_digit() || *ch == '.')
+        .collect::<String>();
+    if !numeric_prefix.is_empty() {
+        if let Ok(secs) = numeric_prefix.parse::<f64>() {
             if !secs.is_finite() || secs < 0.0 {
                 return Some(0);
             }
@@ -1440,6 +1444,12 @@ mod retry_tests {
     #[test]
     fn retry_after_fractional_seconds() {
         assert_eq!(parse_retry_after("retry-after: 2.5"), Some(2_500));
+    }
+
+    #[test]
+    fn retry_after_seconds_with_provider_message_punctuation() {
+        let msg = "cerebras HTTP 429 Too Many Requests [rate_limited]: Tokens per minute limit exceeded (type: too_many_tokens_error, code: token_quota_exceeded) (retry-after: 60))";
+        assert_eq!(parse_retry_after(msg), Some(60_000));
     }
 
     #[test]
