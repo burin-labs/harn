@@ -7,6 +7,11 @@
 //! object per line, append-only. Consumers replay the events in order to
 //! reconstruct the model's context at any iteration.
 //!
+//! Every event also carries a `type` discriminator, a `timestamp` (Unix
+//! `secs.millis`), and a `span_id` (the current tracing span, may be
+//! null) — these common fields are omitted from the per-event field lists
+//! below.
+//!
 //! Event types:
 //!
 //! - `system_prompt` `{content, hash}` — emitted once when a new system
@@ -18,16 +23,32 @@
 //!   the visible conversation. Emitted every time a message lands in the
 //!   transcript (user task, nudge, assistant reply, tool result, host
 //!   push).
-//! - `provider_call_request` `{call_id, iteration, model, provider,
-//!   tool_format, max_tokens, temperature, tool_choice}` — slim metadata
+//! - `routing_decision` `{call_id, iteration, policy, requested_quality,
+//!   selected_provider, selected_model, fallback_chain, alternatives}` —
+//!   emitted once before `provider_call_request` whenever a routing
+//!   decision was attached to the call (model/provider selection,
+//!   fallback chain, and the considered alternatives).
+//! - `provider_call_request` core `{call_id, iteration, model, provider,
+//!   max_tokens, temperature, tool_choice, tool_format}` — slim metadata
 //!   for a single model call. No `messages`, `system`, or `tool_schemas`
-//!   fields; those are reconstructable from prior events.
+//!   fields; those are reconstructable from prior events. Also carries
+//!   diagnostics `{thinking, native_tool_count, message_count,
+//!   structural_experiment, route_policy, fallback_chain,
+//!   routing_decision}`.
 //!   Set `HARN_LLM_TRANSCRIPT_VERBOSE=1` to include a `request_snapshot`
 //!   object with the exact system prompt, message list, and tool schemas
 //!   attached to each request for debugging provider-context issues.
-//! - `provider_call_response` `{call_id, iteration, model, text,
-//!   tool_calls, input_tokens, output_tokens, cache_*, thinking,
-//!   response_ms}` — slim response metadata.
+//! - `provider_call_response` core `{call_id, iteration, model, provider,
+//!   text, tool_calls, parsed_tool_calls, input_tokens, output_tokens,
+//!   response_ms}`. `tool_calls` is the provider-native tool-call array
+//!   (empty for text-format local models); `parsed_tool_calls` is the
+//!   merged view (native when present, otherwise the calls parsed out of
+//!   the inline tagged `<tool_call>` blocks in `text`) so the record is
+//!   self-describing for text-format runs. Also carries diagnostics
+//!   `{cost_usd, cache_* (cache_read_tokens, cache_write_tokens,
+//!   cache_creation_input_tokens, cache_hit_ratio, cache_savings_usd,
+//!   cache_hit), thinking, thinking_summary, provider_telemetry,
+//!   structural_experiment}`.
 //! - `interpreted_response` `{call_id, iteration, tool_format, prose,
 //!   tool_calls, tool_parse_errors}` — post-parse view of the last
 //!   assistant turn.
@@ -656,12 +677,37 @@ pub(super) fn dump_llm_request(
     append_llm_transcript_entry(&request_event);
 }
 
+/// Compute the merged (native OR text-parsed) tool calls for the
+/// observability response record. Mirrors the merge in
+/// `crate::llm::api::result::vm_build_llm_result` (provider-native calls
+/// take precedence; otherwise fall back to the calls parsed out of the
+/// inline tagged `<tool_call>` blocks in `result.text`, resolved against
+/// the same `tools` registry the request used so unknown-name calls are
+/// not dropped). By the time the result reaches this function `text` has
+/// already been canonicalized from any `[[CALL]]` wire form back to
+/// `<tool_call>`, so the tagged parser sees the calls.
+///
+/// Observability-only: this is read off the existing `result` + `tools`
+/// and does not flow back into the request-construction / history path, so
+/// the model's next-turn payload is byte-identical with or without this
+/// call.
+fn merged_tool_calls_for_observability(
+    result: &super::api::LlmResult,
+    tools: Option<&crate::value::VmValue>,
+) -> Vec<serde_json::Value> {
+    if !result.tool_calls.is_empty() {
+        return result.tool_calls.clone();
+    }
+    crate::llm::tools::parse_text_tool_calls_with_tools(&result.text, tools).calls
+}
+
 pub(super) fn dump_llm_response(
     iteration: usize,
     call_id: &str,
     result: &super::api::LlmResult,
     response_ms: u64,
     structural_experiment: Option<&crate::llm::structural_experiments::AppliedStructuralExperiment>,
+    tools: Option<&crate::value::VmValue>,
 ) {
     let structural_experiment = structural_experiment
         .map(serde_json::to_value)
@@ -669,6 +715,7 @@ pub(super) fn dump_llm_response(
         .unwrap_or(None)
         .unwrap_or(serde_json::Value::Null);
     let telemetry = serde_json::to_value(&result.telemetry).unwrap_or(serde_json::Value::Null);
+    let parsed_tool_calls = merged_tool_calls_for_observability(result, tools);
     append_llm_transcript_entry(&serde_json::json!({
         "type": "provider_call_response",
         "iteration": iteration,
@@ -679,6 +726,15 @@ pub(super) fn dump_llm_response(
         "model": result.model,
         "text": result.text,
         "tool_calls": result.tool_calls,
+        // Observability-only merged view: provider-native calls when present,
+        // otherwise the calls parsed out of the inline tagged `<tool_call>`
+        // blocks in `text`. Text-format local models (llamacpp/qwen3.6) carry
+        // their calls only inline, so `tool_calls` (native) is empty for them;
+        // this sidecar makes the response record self-describing. Distinct from
+        // `tool_calls` so consumers can tell native vs. text-parsed apart. This
+        // does NOT touch the request-construction / history path — the model's
+        // next-turn payload is unchanged.
+        "parsed_tool_calls": parsed_tool_calls,
         "input_tokens": result.input_tokens,
         "output_tokens": result.output_tokens,
         "cost_usd": crate::llm::cost::calculate_cost_for_provider(
@@ -1025,6 +1081,7 @@ pub(crate) async fn observed_llm_call(
                     &result,
                     duration_ms,
                     opts.applied_structural_experiment.as_ref(),
+                    opts.tools.as_ref(),
                 );
                 annotate_current_span(&[(
                     "structural_experiment",
@@ -1256,6 +1313,139 @@ mod retry_tests {
             .expect("section branch present");
         assert_eq!(section_branch["branch_id"], "xml");
         assert_eq!(section_branch["branch_label"], "task");
+    }
+
+    // Fix B regression: for text-format local models (llamacpp/qwen3.6) the
+    // tool calls live only inline as `<tool_call>...</tool_call>` in the
+    // assistant content — the provider-native `result.tool_calls` array is
+    // EMPTY. The `provider_call_response` observability record used to carry
+    // only that native array, so the JSONL transcript was not self-describing
+    // for text-format runs. The record now also carries a `parsed_tool_calls`
+    // sidecar holding the merged (native OR text-parsed) view.
+    //
+    // Critically this is OBSERVABILITY ONLY: the request-construction / history
+    // path keys off `native_tool_calls` (the native-only list from
+    // `vm_build_llm_result`, consumed by
+    // `agent_session_host::assistant_message_from_llm_result`), which the test
+    // also asserts stays empty for a text-format result — so the model's
+    // next-turn payload is unchanged.
+    #[test]
+    fn response_record_exposes_text_parsed_calls_without_touching_history() {
+        use super::super::api::{vm_build_llm_result, LlmResult, ProviderTelemetry};
+        use crate::value::VmValue;
+
+        // Minimal tool registry so the tagged parser resolves the `run` name
+        // (mirrors the `tools` registry the request used).
+        fn run_tool_registry() -> VmValue {
+            let dict = |pairs: &[(&str, VmValue)]| -> VmValue {
+                VmValue::Dict(std::sync::Arc::new(
+                    pairs
+                        .iter()
+                        .map(|(k, v)| ((*k).to_string(), v.clone()))
+                        .collect(),
+                ))
+            };
+            let s = |v: &str| VmValue::String(std::sync::Arc::from(v));
+            let run_tool = dict(&[
+                ("name", s("run")),
+                ("description", s("Run a shell command.")),
+                (
+                    "parameters",
+                    dict(&[(
+                        "command",
+                        dict(&[("type", s("string")), ("description", s("Shell command."))]),
+                    )]),
+                ),
+            ]);
+            dict(&[("tools", VmValue::List(std::sync::Arc::new(vec![run_tool])))])
+        }
+
+        // A text-format completion: native tool_calls EMPTY, the call lives
+        // inline as a canonical `<tool_call>` block (already canonicalized from
+        // any `[[CALL]]` wire form by the time the result reaches here).
+        let text = "<tool_call>\nrun({ command: \"ls\" })\n</tool_call>";
+        let result = LlmResult {
+            served_fast: false,
+            text: text.to_string(),
+            tool_calls: Vec::new(),
+            input_tokens: 12,
+            output_tokens: 5,
+            cache_read_tokens: 0,
+            cache_write_tokens: 0,
+            cache_supported: true,
+            model: "qwen3.6".to_string(),
+            provider: "llamacpp".to_string(),
+            thinking: None,
+            thinking_summary: None,
+            stop_reason: Some("stop".to_string()),
+            blocks: Vec::new(),
+            logprobs: Vec::new(),
+            telemetry: ProviderTelemetry::default(),
+        };
+        let tools = run_tool_registry();
+
+        // 1. Observability path: the response record now exposes the parsed
+        //    call via the new sidecar, while native `tool_calls` stays empty.
+        let dir = tempfile::tempdir().expect("tempdir");
+        push_llm_transcript_dir(dir.path().to_str().expect("utf8"));
+        dump_llm_response(0, "call-textfmt", &result, 42, None, Some(&tools));
+        pop_llm_transcript_dir();
+
+        let transcript = std::fs::read_to_string(dir.path().join("llm_transcript.jsonl"))
+            .expect("read transcript");
+        let line = transcript
+            .lines()
+            .find(|line| line.contains("\"provider_call_response\""))
+            .expect("provider_call_response event present");
+        let event: serde_json::Value = serde_json::from_str(line).expect("parse event");
+
+        let native = event["tool_calls"].as_array().expect("tool_calls array");
+        assert!(
+            native.is_empty(),
+            "native tool_calls must remain empty for a text-format result, got: {native:?}"
+        );
+        let parsed = event["parsed_tool_calls"]
+            .as_array()
+            .expect("parsed_tool_calls array");
+        assert_eq!(
+            parsed.len(),
+            1,
+            "the text-parsed call must surface in the sidecar, got: {parsed:?}"
+        );
+        assert_eq!(parsed[0]["name"], "run");
+
+        // 2. Request-construction / history path is UNCHANGED: the value that
+        //    feeds the assistant history envelope is `native_tool_calls`, which
+        //    stays empty (native-only) for a text-format result. The merged
+        //    `tool_calls` carries the call for unified-view callers, but the
+        //    history-feeding native list does not.
+        let vm_result = vm_build_llm_result(&result, None, None, Some(&tools));
+        let VmValue::Dict(ref dict) = vm_result else {
+            panic!("vm_build_llm_result must return a dict");
+        };
+        let native_history = dict
+            .get("native_tool_calls")
+            .expect("native_tool_calls present");
+        match native_history {
+            VmValue::List(items) => assert!(
+                items.is_empty(),
+                "native_tool_calls (history-feeding list) must stay empty for a \
+                 text-format result, got: {items:?}"
+            ),
+            other => panic!("native_tool_calls must be a list, got {other:?}"),
+        }
+        // The merged `tool_calls` (unified view) does carry the call — proving
+        // the sidecar mirrors the same merge the result builder already does,
+        // not a divergent computation.
+        let merged_history = dict.get("tool_calls").expect("tool_calls present");
+        match merged_history {
+            VmValue::List(items) => assert_eq!(
+                items.len(),
+                1,
+                "merged tool_calls (unified view) should carry the text-parsed call"
+            ),
+            other => panic!("tool_calls must be a list, got {other:?}"),
+        }
     }
 
     #[test]
