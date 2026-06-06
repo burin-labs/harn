@@ -372,7 +372,7 @@ fn extract_per_file(
         let language = extensions::file_extension(&entry.relative_path);
         let imports = imports::extract_imports(&content, &language);
         let file_symbols = symbols::extract_symbols(&content, &language, &entry.relative_path);
-        let line_count = count_lines(&content);
+        let line_count = crate::text::count_lines(content.as_bytes()) as usize;
 
         for imp in &imports {
             dependencies.push(DependencyEdge {
@@ -397,15 +397,6 @@ fn extract_per_file(
     }
 
     (files, symbols, dependencies)
-}
-
-fn count_lines(content: &str) -> usize {
-    if content.is_empty() {
-        return 0;
-    }
-    let nl = content.bytes().filter(|b| *b == b'\n').count();
-    let trailing = content.as_bytes().last() != Some(&b'\n');
-    nl + usize::from(trailing)
 }
 
 fn sort_for_output(
