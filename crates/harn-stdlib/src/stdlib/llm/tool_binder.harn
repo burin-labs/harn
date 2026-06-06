@@ -47,6 +47,7 @@
 //     reason:     string?,        // present when status != ok, explains the disposition
 //     attempts:   int,            // 0 or 1 (no retry on the hot path)
 //   }
+import { tool_inject_param } from "std/llm/tool_middleware"
 
 // -------------------------------------------------------------------------------------------------
 // shared helpers
@@ -110,6 +111,14 @@ fn __binder_bool(value, default_value, name) -> bool {
     throw "with_natural_language_executor: `" + name + "` must be bool; got " + type_of(value)
   }
   return value
+}
+
+fn __binder_intent_field(cfg) -> string {
+  let intent_field = trim(to_string(cfg?.intent_field ?? "_nl_intent"))
+  if intent_field == "" {
+    throw "with_natural_language_executor: `intent_field` must not be empty"
+  }
+  return intent_field
 }
 
 fn __binder_short_circuit(envelope, reason) {
@@ -274,10 +283,7 @@ fn __binder_validate_opts(cfg) {
   } else {
     { binder_prompt, binder_system, binder_opts -> llm_call(binder_prompt, binder_system, binder_opts) }
   }
-  let intent_field = trim(to_string(cfg?.intent_field ?? "_nl_intent"))
-  if intent_field == "" {
-    throw "with_natural_language_executor: `intent_field` must not be empty"
-  }
+  let intent_field = __binder_intent_field(cfg)
   return {
     provider: provider,
     model: model,
@@ -289,6 +295,57 @@ fn __binder_validate_opts(cfg) {
     max_tokens: __binder_positive_int(cfg?.max_tokens, 1024, "max_tokens"),
     system_prompt: to_string(cfg?.system ?? __binder_default_system()),
     binder_fn: binder_fn,
+  }
+}
+
+/**
+ * natural_language_executor_schema_transform(opts?) -> transform
+ *
+ * Schema-time companion for `with_natural_language_executor`. It advertises an
+ * optional natural-language fallback intent field on every tool. Weak planners
+ * can fill that field when they know what the tool should do but cannot
+ * confidently bind the JSON arguments; the execution-time binder strips the
+ * field before dispatch and asks the binder model to produce valid args.
+ *
+ * Optional knobs:
+ *   intent_field:       string   (default "_nl_intent")
+ *   intent_description: string
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: natural_language_executor_schema_transform({intent_field: "_nl_intent"})
+ */
+pub fn natural_language_executor_schema_transform(opts = nil) {
+  let cfg = __binder_dict(opts)
+  let field = __binder_intent_field(cfg)
+  let description = to_string(
+    cfg?.intent_description
+      ?? "Natural-language fallback intent for the tool binder. Use when the intended tool action is clear but structured arguments are uncertain.",
+  )
+  let schema_fragment = {type: "string", description: description, required: false}
+  return { entry -> return tool_inject_param(entry, field, schema_fragment, {required: false}) }
+}
+
+/**
+ * natural_language_executor_middleware(opts) -> {schema_transform, caller}
+ *
+ * Paired schema + execution middleware for the natural-language tool binder.
+ * This mirrors `std/llm/tool_middleware::with_required_reason`, letting
+ * pipelines opt in once and pass `mw.schema_transform` to `tools_use_middleware`
+ * plus `mw.caller` to `compose_tool_callers`.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: natural_language_executor_middleware({provider: "cerebras", model: "gpt-oss-120b"})
+ */
+pub fn natural_language_executor_middleware(opts) {
+  return {
+    schema_transform: natural_language_executor_schema_transform(opts),
+    caller: with_natural_language_executor(opts),
   }
 }
 
