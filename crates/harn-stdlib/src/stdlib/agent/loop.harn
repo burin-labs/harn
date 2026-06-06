@@ -636,6 +636,38 @@ fn __native_fallback_feedback(policy, fallback_index) {
   return native_tool_contract_feedback_prompt({policy: policy, fallback_index: fallback_index})
 }
 
+fn __parse_feedback_tool_annotations(entry) {
+  let direct = entry?.annotations
+  if type_of(direct) == "dict" {
+    return direct
+  }
+  let func = entry?.function
+  if type_of(func) == "dict" && type_of(func?.annotations) == "dict" {
+    return func.annotations
+  }
+  return {}
+}
+
+fn __parse_feedback_annotation_enabled(value) -> bool {
+  return type_of(value) == "bool" && value
+}
+
+fn __parse_feedback_tool_is_structural(entry) -> bool {
+  let annotations = __parse_feedback_tool_annotations(entry)
+  return __parse_feedback_annotation_enabled(annotations?.structural)
+    || __parse_feedback_annotation_enabled(annotations?.agent_lifecycle)
+}
+
+fn __parse_feedback_has_non_structural_tools(turn_opts) -> bool {
+  let entries = turn_opts?.tools?.tools ?? []
+  for entry in entries {
+    if type_of(entry) == "dict" && !__parse_feedback_tool_is_structural(entry) {
+      return true
+    }
+  }
+  return false
+}
+
 /**
  * A turn whose tool calls were ALL dropped by the parser, or whose response
  * violates the tagged protocol with 0 dispatched calls, is a malformed-output
@@ -647,14 +679,23 @@ fn __native_fallback_feedback(policy, fallback_index) {
  * parse errors, and never reach it (no regression). Returns true when feedback
  * was injected so the caller can suppress the no-progress stall path.
  */
-fn __parse_feedback_diagnostics(parsed) {
+fn __parse_feedback_protocol_violations(parsed, turn_opts) {
+  if agent_tool_call_paradigm(turn_opts).kind != "text"
+    || !__parse_feedback_has_non_structural_tools(turn_opts) {
+    return []
+  }
+  return parsed?.protocol_violations ?? []
+}
+
+fn __parse_feedback_diagnostics(parsed, turn_opts) {
   let parse_errors = parsed?.tool_parse_errors ?? []
-  let protocol_violations = parsed?.protocol_violations ?? []
+  let protocol_violations = __parse_feedback_protocol_violations(parsed, turn_opts)
   return parse_errors + protocol_violations
 }
 
 fn __maybe_inject_parse_error_feedback(session_id, parsed, tool_calls, turn_opts) -> bool {
-  let diagnostics = __parse_feedback_diagnostics(parsed)
+  let protocol_violations = __parse_feedback_protocol_violations(parsed, turn_opts)
+  let diagnostics = __parse_feedback_diagnostics(parsed, turn_opts)
   if len(diagnostics) == 0 || len(tool_calls) > 0 {
     return false
   }
@@ -675,7 +716,7 @@ fn __maybe_inject_parse_error_feedback(session_id, parsed, tool_calls, turn_opts
     "tool_parse_error_feedback",
     {
       parse_error_count: len(parsed?.tool_parse_errors ?? []),
-      protocol_violation_count: len(parsed?.protocol_violations ?? []),
+      protocol_violation_count: len(protocol_violations),
       diagnostic_count: len(diagnostics),
       error_summary: error_summary,
     },
