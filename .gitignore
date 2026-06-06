@@ -26,14 +26,17 @@ tree-sitter-harn/*.dll
 !conformance/tests/**/.harn/**
 # …but per-run metadata shards from project_deep_scan tests (namespace
 # dirs under .harn/metadata/<UUID>/entries.json) are always ephemeral
-# and must stay ignored. Same goes for SQLite event-log files and
-# checkpoint/workflow dirs that tests drop into the fixture's .harn/.
+# and must stay ignored. Same goes for the runtime SQLite DBs that tests
+# drop into the fixture's .harn/ (the event log, the provider rate-limit
+# store, and any future runtime DB) plus checkpoint/workflow dirs. The
+# tracked fixtures under these dirs are skill manifests/JSON, never a
+# root-level *.sqlite, so the glob below cannot shadow shipped content.
 conformance/tests/**/.harn/metadata/
 conformance/tests/**/.harn/checkpoints/
 conformance/tests/**/.harn/workflows/
-conformance/tests/**/.harn/events.sqlite
-conformance/tests/**/.harn/events.sqlite-shm
-conformance/tests/**/.harn/events.sqlite-wal
+conformance/tests/**/.harn/*.sqlite
+conformance/tests/**/.harn/*.sqlite-shm
+conformance/tests/**/.harn/*.sqlite-wal
 # Per-run timing cache the `harn test` runner drops next to the suite.
 conformance/tests/**/.harn/test-timings.json
 .cargo/config.toml
