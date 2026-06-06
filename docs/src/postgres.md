@@ -106,7 +106,6 @@ import {
   nullable_timestamptz_json,
   run,
   sql,
-  unsafe_sql,
   uuid_text,
 } from "std/postgres/query"
 
@@ -122,9 +121,9 @@ ORDER BY {created_at} DESC
 LIMIT {limit}
 """,
     {
-      id: unsafe_sql(uuid_text("id")),
-      tenant_id_column: unsafe_sql(uuid_text("tenant_id")),
-      finished_at: unsafe_sql(nullable_timestamptz_json("finished_at")),
+      id: uuid_text("id"),
+      tenant_id_column: uuid_text("tenant_id"),
+      finished_at: nullable_timestamptz_json("finished_at"),
       table: ident("receipts"),
       tenant_id: tenant_id,
       created_at: ident("created_at"),
@@ -154,8 +153,9 @@ let q = sql(
 ```
 
 Postgres cannot bind identifiers as parameters. Use `ident(...)` or
-`ident_path(...)` when SQL structure must be dynamic, and use `unsafe_sql(...)`
-only for source-controlled fragments such as projection helpers:
+`ident_path(...)` when SQL structure must be dynamic, and reserve
+`unsafe_sql(...)` for the rare source-controlled fragment that no typed helper
+covers:
 
 ```harn,ignore
 let q = sql(
@@ -204,14 +204,33 @@ through to `pg_query_one` and `pg_query`.
 
 Projection helpers only accept static SQL identifiers matching
 `[A-Za-z_][A-Za-z0-9_]*`. They are for source-controlled column names, not
-user input:
+user input. Each returns a trusted `PgSqlFragment`, so it drops straight into a
+`{name}` placeholder — no `unsafe_sql(...)` wrapper — and carries the literal
+`'{}'` JSON path safely:
 
 | Helper | Output |
 |---|---|
 | `uuid_text("id")` | `id::text AS id` |
 | `timestamptz_json("created_at")` | `to_json(created_at)#>>'{}' AS created_at` |
 | `nullable_timestamptz_json("finished_at")` | `CASE WHEN finished_at IS NULL THEN NULL ELSE to_json(finished_at)#>>'{}' END AS finished_at` |
+| `columns([uuid_text("id"), "payload"])` | `id::text AS id, payload` |
 | `select_clause([...])` | `SELECT ...` |
+
+`columns([...])` joins projection parts — fragments or source-controlled
+strings — into one fragment for a `{projection}` placeholder, so a whole column
+list composes without `unsafe_sql(...)`:
+
+```harn,ignore
+let q = sql(
+  "SELECT {projection} FROM receipts WHERE tenant_id = {tenant_id}::uuid",
+  {
+    projection: columns([uuid_text("id"), timestamptz_json("created_at"), "payload"]),
+    tenant_id: tenant_id,
+  },
+)
+// q.sql == "SELECT id::text AS id, to_json(created_at)#>>'{}' AS created_at, payload
+//           FROM receipts WHERE tenant_id = $1::uuid"
+```
 
 ## Transactions and tenant settings
 

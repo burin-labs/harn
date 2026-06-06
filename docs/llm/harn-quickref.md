@@ -990,7 +990,7 @@ dynamic values still go through Postgres bind parameters.
 
 ```harn,ignore
 import "std/postgres"
-import { ident, many, named_sql, run, sql, unsafe_sql, uuid_text, nullable_timestamptz_json } from "std/postgres/query"
+import { ident, many, named_sql, run, sql, uuid_text, nullable_timestamptz_json } from "std/postgres/query"
 
 fn list_receipts_query(tenant_id: string, limit: int) {
   return named_sql(
@@ -1004,8 +1004,8 @@ ORDER BY {created_at} DESC
 LIMIT {limit}
 """,
     {
-      id: unsafe_sql(uuid_text("id")),
-      finished_at: unsafe_sql(nullable_timestamptz_json("finished_at")),
+      id: uuid_text("id"),
+      finished_at: nullable_timestamptz_json("finished_at"),
       table: ident("receipts"),
       tenant_id: tenant_id,
       created_at: ident("created_at"),
@@ -1024,12 +1024,15 @@ Helpers: `one(handle, query)`, `many(handle, query)`, `exec(handle, query)`,
 `named_sql(name, mode, template, values?, options?)`,
 `named(name, mode, sql, params?)`, `ident(name)`, `ident_path(parts)`,
 `unsafe_sql(fragment)`, `uuid_text(name)`, `timestamptz_json(name)`,
-`nullable_timestamptz_json(name)`, and `select_clause(fragments)`.
-In `sql(...)`, ordinary `{name}` placeholders become `$n` params and repeated
-placeholders reuse the first parameter index. Use `{{` and `}}` for literal
-braces. SQL structure is never inferred from strings; use `ident(...)` /
-`ident_path(...)` for identifiers and reserve `unsafe_sql(...)` for
-source-controlled fragments.
+`nullable_timestamptz_json(name)`, `columns(parts)`, and `select_clause(parts)`.
+The projection helpers (`uuid_text`, `timestamptz_json`,
+`nullable_timestamptz_json`, `columns`, `select_clause`) return trusted
+`PgSqlFragment`s, so they drop into `{name}` placeholders without
+`unsafe_sql(...)`. In `sql(...)`, ordinary `{name}` placeholders become `$n`
+params and repeated placeholders reuse the first parameter index. Use `{{` and
+`}}` for literal braces. SQL structure is never inferred from strings; use
+`ident(...)` / `ident_path(...)` for identifiers and reserve `unsafe_sql(...)`
+for source-controlled fragments no typed helper covers.
 
 ## LLM surface
 

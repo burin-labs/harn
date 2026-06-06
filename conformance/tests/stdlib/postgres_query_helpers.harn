@@ -1,5 +1,6 @@
 import "std/postgres"
 import {
+  columns,
   exec,
   ident,
   ident_path,
@@ -13,7 +14,6 @@ import {
   select_clause,
   sql,
   timestamptz_json,
-  unsafe_sql,
   uuid_text,
 } from "std/postgres/query"
 
@@ -30,16 +30,14 @@ ORDER BY {created_column} DESC
 LIMIT {limit}
 """,
     {
-      projection: unsafe_sql(
-        select_clause(
-          [
-            uuid_text("id"),
-            uuid_text("tenant_id"),
-            "payload",
-            nullable_timestamptz_json("finished_at"),
-            timestamptz_json("created_at"),
-          ],
-        ),
+      projection: select_clause(
+        [
+          uuid_text("id"),
+          uuid_text("tenant_id"),
+          "payload",
+          nullable_timestamptz_json("finished_at"),
+          timestamptz_json("created_at"),
+        ],
       ),
       table: ident("receipts"),
       tenant_id: "tenant-a",
@@ -52,7 +50,7 @@ LIMIT {limit}
     "get_receipt",
     "one",
     "SELECT {id_projection} FROM {table} WHERE id = {id}::uuid",
-    {id_projection: unsafe_sql(uuid_text("id")), table: ident("receipts"), id: "r1"},
+    {id_projection: uuid_text("id"), table: ident("receipts"), id: "r1"},
   )
   let update_query = named_sql(
     "mark_receipt_read",
@@ -130,4 +128,21 @@ LIMIT {limit}
   }
   __io_println(is_err(named_error))
   __io_println(regex_match("missing_query", to_string(unwrap_err(named_error))) != nil)
+  let columns_query = sql(
+    "SELECT {projection} FROM receipts WHERE tenant_id = {tenant_id}::uuid",
+    {
+      projection: columns([uuid_text("id"), timestamptz_json("created_at"), "payload"]),
+      tenant_id: "tenant-a",
+    },
+  )
+  __io_println(columns_query.sql)
+  __io_println(columns_query.params[0])
+  let empty_columns = try {
+    columns([])
+  }
+  __io_println(is_err(empty_columns))
+  let bad_columns = try {
+    columns([123])
+  }
+  __io_println(is_err(bad_columns))
 }
