@@ -43,6 +43,7 @@ pub mod secret_store;
 pub mod tools;
 
 mod registry;
+mod text;
 mod value_args;
 
 pub use error::HostlibError;

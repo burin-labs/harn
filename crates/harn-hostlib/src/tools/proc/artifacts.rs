@@ -60,7 +60,7 @@ pub(crate) fn persist_artifacts(
         output_path: artifacts.output_path,
         stdout_path: artifacts.stdout_path,
         stderr_path: artifacts.stderr_path,
-        line_count: line_count(&combined),
+        line_count: crate::text::count_lines(&combined),
         byte_count: combined.len() as u64,
         output_sha256,
     };
@@ -100,20 +100,5 @@ fn register_artifacts(command_id: &str, handle_id: Option<&str>, artifacts: &Com
     store.insert(command_id.to_string(), artifacts.clone());
     if let Some(handle_id) = handle_id {
         store.insert(handle_id.to_string(), artifacts.clone());
-    }
-}
-
-fn line_count(bytes: &[u8]) -> u64 {
-    if bytes.is_empty() {
-        return 0;
-    }
-    // Hot enough to matter, but pulling in the `bytecount` crate just for
-    // newline counts is overkill — the manual loop is fine here.
-    #[allow(clippy::naive_bytecount)]
-    let newlines = bytes.iter().filter(|b| **b == b'\n').count() as u64;
-    if bytes.ends_with(b"\n") {
-        newlines
-    } else {
-        newlines + 1
     }
 }

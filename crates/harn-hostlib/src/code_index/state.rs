@@ -197,11 +197,7 @@ impl IndexState {
             .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
             .map(|d| d.as_millis() as i64)
             .unwrap_or(0);
-        let line_count = if content.is_empty() {
-            0
-        } else {
-            content.split('\n').count() as u32
-        };
+        let line_count = crate::text::count_lines(content.as_bytes()) as u32;
 
         let file = IndexedFile {
             id,
