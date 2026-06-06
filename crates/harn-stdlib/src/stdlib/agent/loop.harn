@@ -20,7 +20,7 @@ import {
   agent_build_turn_system_fragments,
   agent_tool_call_paradigm,
 } from "std/agent/preflight"
-import { agent_dispatch_tool_batch, agent_dispatch_tool_call } from "std/agent/primitives"
+import { agent_dispatch_tool_call } from "std/agent/primitives"
 import { agent_progress_apply_options } from "std/agent/progress"
 import { native_tool_contract_feedback_prompt, parse_guidance_prompt } from "std/agent/prompts"
 import {
@@ -241,6 +241,12 @@ fn __tool_envelope(call, tools, options) {
   } else {
     {}
   }
+  let raw_call_id = to_string(call?.id ?? call?.tool_call_id ?? "")
+  let call_id = if raw_call_id == "" {
+    "tool_call_" + uuid()
+  } else {
+    raw_call_id
+  }
   let entry = __tool_registry_entry(tools, tool_name)
   let declared_executor = if entry == nil {
     nil
@@ -285,7 +291,7 @@ fn __tool_envelope(call, tools, options) {
   return {
     tool_name: tool_name,
     tool_args: tool_args,
-    call_id: to_string(call?.id ?? call?.tool_call_id ?? ""),
+    call_id: call_id,
     declared_executor: declared_executor,
     schema: schema,
     annotations: annotations,
@@ -305,7 +311,13 @@ fn __tool_envelope(call, tools, options) {
 
 fn __default_invoke_tool(envelope, original_call, tools, options) {
   let next_call = original_call
-    + {name: envelope.tool_name, tool_name: envelope.tool_name, arguments: envelope.tool_args}
+    + {
+    id: envelope.call_id,
+    tool_call_id: envelope.call_id,
+    name: envelope.tool_name,
+    tool_name: envelope.tool_name,
+    arguments: envelope.tool_args,
+  }
   return agent_dispatch_tool_call(next_call, tools, options)
 }
 
@@ -447,12 +459,87 @@ fn __run_structural_validator(
   }
 }
 
+fn __tool_lifecycle_session_id(envelope) -> string {
+  return to_string(envelope?.turn?.session_id ?? "")
+}
+
+fn __emit_tool_lifecycle_start(envelope) {
+  let session_id = __tool_lifecycle_session_id(envelope)
+  if session_id == "" || to_string(envelope?.tool_name ?? "") == "" {
+    return
+  }
+  let _ = agent_emit_event(
+    session_id,
+    "tool_call",
+    {
+      tool_call_id: envelope.call_id,
+      tool_name: envelope.tool_name,
+      status: "pending",
+      raw_input: envelope.tool_args,
+    },
+  )
+  let _ = agent_emit_event(
+    session_id,
+    "tool_call_update",
+    {
+      tool_call_id: envelope.call_id,
+      tool_name: envelope.tool_name,
+      status: "in_progress",
+      raw_input: envelope.tool_args,
+    },
+  )
+}
+
+fn __tool_terminal_status(result) -> string {
+  if result?.ok || result?.success {
+    return "completed"
+  }
+  let status = to_string(result?.status ?? "")
+  if status == "ok" || status == "success" {
+    return "completed"
+  }
+  return "failed"
+}
+
+fn __emit_tool_lifecycle_finish(envelope, result) {
+  let session_id = __tool_lifecycle_session_id(envelope)
+  if session_id == "" || to_string(envelope?.tool_name ?? "") == "" {
+    return
+  }
+  let tool_call_id = to_string(result?.tool_call_id ?? envelope.call_id)
+  let tool_name = to_string(result?.tool_name ?? result?.name ?? envelope.tool_name)
+  let raw_output = if result?.result != nil {
+    result.result
+  } else {
+    result?.rendered_result ?? result?.output ?? result
+  }
+  let payload = {
+    tool_call_id: tool_call_id,
+    tool_name: tool_name,
+    status: __tool_terminal_status(result),
+    raw_output: raw_output,
+    error: result?.error,
+    duration_ms: result?.duration_ms ?? result?.execution_duration_ms,
+    execution_duration_ms: result?.execution_duration_ms,
+    error_category: result?.error_category,
+    executor: result?.executor,
+  }
+  let _ = agent_emit_event(session_id, "tool_call_update", payload)
+}
+
 fn __invoke_tool(call, tools, options) {
   let caller = options?._tool_caller
-  if caller == nil {
-    return agent_dispatch_tool_call(call, tools, options)
-  }
   let envelope = __tool_envelope(call, tools, options)
+  __emit_tool_lifecycle_start(envelope)
+  if caller == nil {
+    let direct = agent_dispatch_tool_call(
+      call + {id: envelope.call_id, tool_call_id: envelope.call_id},
+      tools,
+      options,
+    )
+    __emit_tool_lifecycle_finish(envelope, direct)
+    return direct
+  }
   let next = { env_in -> __default_invoke_tool(env_in, call, tools, options) }
   let outcome = try {
     caller(envelope, next)
@@ -467,11 +554,14 @@ fn __invoke_tool(call, tools, options) {
       envelope,
       {layer: "tool_caller", status: "exception", error: to_string(err)},
     )
-    return __middleware_exception_result(envelope, err)
+    let result = __middleware_exception_result(envelope, err)
+    __emit_tool_lifecycle_finish(envelope, result)
+    return result
   }
   let r = unwrap(outcome)
   __validate_tool_caller_result(r)
   __maybe_emit_tool_audit(envelope.turn.session_id, envelope, r?.audit, r?.receipt)
+  __emit_tool_lifecycle_finish(envelope, r)
   return r
 }
 
@@ -894,11 +984,7 @@ fn __dispatch_tool_calls(session_id, tool_calls, turn_opts) {
     _prefetch_next_turn: turn_opts?.prefetch_next_turn ?? false,
   }
   let caller = turn_opts?._tool_caller
-  let raw_dispatch = if caller == nil {
-    agent_dispatch_tool_batch(tool_calls, tools, dispatch_options)
-  } else {
-    __dispatch_tool_calls_with_middleware(tool_calls, tools, dispatch_options, cap)
-  }
+  let raw_dispatch = __dispatch_tool_calls_with_middleware(tool_calls, tools, dispatch_options, cap)
   let audit_flushes = __collect_audit_flushes(raw_dispatch)
   let dispatch = __strip_internal_dispatch(raw_dispatch)
   agent_session_record_tool_results(session_id, dispatch)

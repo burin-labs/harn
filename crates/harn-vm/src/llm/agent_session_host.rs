@@ -1727,7 +1727,7 @@ fn build_agent_event(
     event_type: &str,
     payload: &serde_json::Value,
 ) -> Result<crate::agent_events::AgentEvent, VmError> {
-    use crate::agent_events::AgentEvent;
+    use crate::agent_events::{AgentEvent, ToolCallErrorCategory, ToolCallStatus, ToolExecutor};
     use crate::llm::receipts::ToolCallReceipt;
     let payload_obj = payload.as_object();
     let get_usize = |key: &str| -> usize {
@@ -1766,7 +1766,100 @@ fn build_agent_event(
             .map(|s| s.to_string())
             .filter(|s| !s.is_empty())
     };
+    let tool_status = |default: ToolCallStatus| -> Result<ToolCallStatus, VmError> {
+        let Some(raw) = get_opt_string("status") else {
+            return Ok(default);
+        };
+        serde_json::from_value::<ToolCallStatus>(serde_json::Value::String(raw.clone())).map_err(
+            |error| {
+                VmError::Runtime(format!(
+                    "{HOST_AGENT_EMIT_EVENT}: invalid tool status `{raw}`: {error}"
+                ))
+            },
+        )
+    };
+    let tool_error_category = || -> Result<Option<ToolCallErrorCategory>, VmError> {
+        let Some(raw) = get_opt_string("error_category") else {
+            return Ok(None);
+        };
+        serde_json::from_value::<ToolCallErrorCategory>(serde_json::Value::String(raw.clone()))
+            .map(Some)
+            .map_err(|error| {
+                VmError::Runtime(format!(
+                    "{HOST_AGENT_EMIT_EVENT}: invalid tool error_category `{raw}`: {error}"
+                ))
+            })
+    };
+    let tool_executor = || -> Result<Option<ToolExecutor>, VmError> {
+        let Some(value) = payload_obj.and_then(|m| m.get("executor")).cloned() else {
+            return Ok(None);
+        };
+        if value.is_null() {
+            return Ok(None);
+        }
+        if let Some(raw) = value.as_str() {
+            let normalized = raw.trim();
+            return match normalized {
+                "" => Ok(None),
+                "harn" | "harn_builtin" => Ok(Some(ToolExecutor::HarnBuiltin)),
+                "host" | "host_bridge" => Ok(Some(ToolExecutor::HostBridge)),
+                "provider" | "provider_native" => Ok(Some(ToolExecutor::ProviderNative)),
+                other => Err(VmError::Runtime(format!(
+                    "{HOST_AGENT_EMIT_EVENT}: invalid tool executor `{other}`"
+                ))),
+            };
+        }
+        serde_json::from_value::<ToolExecutor>(value)
+            .map(Some)
+            .map_err(|error| {
+                VmError::Runtime(format!(
+                    "{HOST_AGENT_EMIT_EVENT}: invalid tool executor: {error}"
+                ))
+            })
+    };
     match event_type {
+        "tool_call" => Ok(AgentEvent::ToolCall {
+            session_id: session_id.to_string(),
+            tool_call_id: get_string("tool_call_id"),
+            tool_name: get_string("tool_name"),
+            kind: payload_obj
+                .and_then(|m| m.get("kind"))
+                .cloned()
+                .map(serde_json::from_value)
+                .transpose()
+                .map_err(|error| {
+                    VmError::Runtime(format!(
+                        "{HOST_AGENT_EMIT_EVENT}: invalid tool kind: {error}"
+                    ))
+                })?,
+            status: tool_status(ToolCallStatus::Pending)?,
+            raw_input: payload_obj
+                .and_then(|m| m.get("raw_input"))
+                .cloned()
+                .unwrap_or(serde_json::Value::Null),
+            parsing: payload_obj
+                .and_then(|m| m.get("parsing"))
+                .and_then(|v| v.as_bool()),
+            audit: crate::orchestration::current_mutation_session(),
+        }),
+        "tool_call_update" => Ok(AgentEvent::ToolCallUpdate {
+            session_id: session_id.to_string(),
+            tool_call_id: get_string("tool_call_id"),
+            tool_name: get_string("tool_name"),
+            status: tool_status(ToolCallStatus::InProgress)?,
+            raw_output: payload_obj.and_then(|m| m.get("raw_output")).cloned(),
+            error: get_opt_string("error"),
+            duration_ms: get_opt_u64("duration_ms"),
+            execution_duration_ms: get_opt_u64("execution_duration_ms"),
+            error_category: tool_error_category()?,
+            executor: tool_executor()?,
+            parsing: payload_obj
+                .and_then(|m| m.get("parsing"))
+                .and_then(|v| v.as_bool()),
+            raw_input: payload_obj.and_then(|m| m.get("raw_input")).cloned(),
+            raw_input_partial: get_opt_string("raw_input_partial"),
+            audit: crate::orchestration::current_mutation_session(),
+        }),
         "iteration_start" => Ok(AgentEvent::IterationStart {
             session_id: session_id.to_string(),
             iteration: get_usize("iteration"),
