@@ -291,7 +291,7 @@ fn __sim_user_contains_glob(text, pattern) {
     if first && anchored_start && at != 0 {
       return false
     }
-    rest = rest.substring(at + len(part), len(rest) - at - len(part))
+    rest = rest.substring(at + len(part))
     first = false
   }
   if anchored_end && len(parts) > 0 {
@@ -408,13 +408,13 @@ fn __sim_user_json_object_text(raw) {
     let first_newline = text.index_of("\n")
     let last_fence = text.last_index_of("```")
     if first_newline >= 0 && last_fence > first_newline {
-      return trim(text.substring(first_newline + 1, last_fence - first_newline - 1))
+      return trim(text.substring(first_newline + 1, last_fence))
     }
   }
   let start = text.index_of("{")
   let end = text.last_index_of("}")
   if start >= 0 && end > start {
-    return text.substring(start, end - start + 1)
+    return text.substring(start, end + 1)
   }
   return text
 }

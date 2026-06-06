@@ -90,7 +90,7 @@ pub(crate) mod shapes;
 mod skills;
 #[cfg(feature = "sqlite")]
 mod sqlite;
-mod strings;
+pub(crate) mod strings;
 pub(crate) mod supervisor;
 pub mod template;
 mod testbench;

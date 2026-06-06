@@ -364,14 +364,14 @@ let xs = [1, 2, 3, 4, 5]
 log(xs[1:4])       // [2, 3, 4]
 ```
 
-`substring(s, start, length)` also exists — note the third argument
-is a **length**, not an end index. Prefer the slice syntax to avoid
-that footgun.
+`substring(s, start, end)` also exists — the second argument is an
+exclusive **end** index, matching `s[start:end]` slicing, `.substring`,
+and `list.slice`. `end` defaults to the string length.
 
 ### Scanning large text (cursor loops)
 
 A `string` is UTF-8, so every random char access — `s[i]`, `s[a:b]`,
-`s.count`, `substring(s, i, n)` — is **O(n)** in the string length. A
+`s.count`, `substring(s, a, b)` — is **O(n)** in the string length. A
 per-character cursor loop built from those is therefore O(n²) and stalls
 on multi-kilobyte source files (a real parser/lint script will feel it).
 
@@ -4308,8 +4308,8 @@ for entry in drain_audit() {
 
 - Heredoc `<<TAG ... TAG` is **not** a source-level string. Use
   `"""..."""`. The parser emits a targeted error pointing here.
-- `substring(s, start, length)` takes a **length**, not an end index.
-  Prefer `s[start:end]` slicing.
+- `substring(s, start, end)` takes an exclusive **end** index (matching
+  `s[start:end]` slicing and `.substring`), not a length.
 - Do NOT add `trailing_var_arg = true` to `RunArgs.argv` in clap — it
   conflicts with `last = true` at runtime. `last = true` alone is
   sufficient for `harn run script.harn -- a b c`.

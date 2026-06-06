@@ -44,7 +44,7 @@ fn __toml_string_literal(value: string) -> string {
 }
 
 fn __strip_trailing_periods(value: string) -> string {
-  // substring(s, start, length) — second arg is length, not end index.
+  // substring(s, start, end) — second arg is an exclusive end index.
   var out = value
   while len(out) > 0 && ends_with(out, ".") {
     out = substring(out, 0, len(out) - 1)
