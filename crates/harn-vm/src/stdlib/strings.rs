@@ -1029,15 +1029,33 @@ mod tests {
         };
         // Second arg is an END index, not a length — matches `.substring`,
         // `s[a:b]`, `list.slice`, and `bytes_slice`.
-        assert_eq!(call(vec![s("hello world"), VmValue::Int(0), VmValue::Int(5)]), "hello");
-        assert_eq!(call(vec![s("hello world"), VmValue::Int(6), VmValue::Int(9)]), "wor");
+        assert_eq!(
+            call(vec![s("hello world"), VmValue::Int(0), VmValue::Int(5)]),
+            "hello"
+        );
+        assert_eq!(
+            call(vec![s("hello world"), VmValue::Int(6), VmValue::Int(9)]),
+            "wor"
+        );
         // Omitted end runs to the end of the string.
         assert_eq!(call(vec![s("hello world"), VmValue::Int(6)]), "world");
         // end < start (after clamping) yields the empty string; negatives clamp to 0.
-        assert_eq!(call(vec![s("hello world"), VmValue::Int(6), VmValue::Int(3)]), "");
-        assert_eq!(call(vec![s("hello world"), VmValue::Int(2), VmValue::Int(-3)]), "");
-        assert_eq!(call(vec![s("hello world"), VmValue::Int(-3), VmValue::Int(5)]), "hello");
+        assert_eq!(
+            call(vec![s("hello world"), VmValue::Int(6), VmValue::Int(3)]),
+            ""
+        );
+        assert_eq!(
+            call(vec![s("hello world"), VmValue::Int(2), VmValue::Int(-3)]),
+            ""
+        );
+        assert_eq!(
+            call(vec![s("hello world"), VmValue::Int(-3), VmValue::Int(5)]),
+            "hello"
+        );
         // Char-indexed, not byte-indexed: the 2-byte 'é' counts as one char.
-        assert_eq!(call(vec![s("café latte"), VmValue::Int(0), VmValue::Int(4)]), "café");
+        assert_eq!(
+            call(vec![s("café latte"), VmValue::Int(0), VmValue::Int(4)]),
+            "café"
+        );
     }
 }
