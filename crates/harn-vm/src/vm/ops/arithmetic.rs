@@ -192,7 +192,10 @@ impl super::super::Vm {
         }
     }
 
-    fn generic_binary_result(
+    /// Generic (non-specialized) result for a binary op, matching exactly what
+    /// the unoptimized build computes. Exposed so the typed fast-path opcodes can
+    /// fall back to it on an operand-type miss — see [`Self::run_typed_binary`].
+    pub(super) fn generic_binary_result(
         vm: &Self,
         op: AdaptiveBinaryOp,
         a: VmValue,
@@ -333,93 +336,110 @@ impl super::super::Vm {
         Some(VmValue::Bool(result))
     }
 
-    pub(super) fn execute_add_int(&mut self) -> Result<(), VmError> {
+    /// Shared driver for the typed fast-path binary opcodes. Pops the two
+    /// operands, runs the supplied monomorphic fast path, and — when the
+    /// operands do not match the specialized shape — falls back to the exact
+    /// generic result the unoptimized build would produce (`op`).
+    ///
+    /// This is the runtime-guard half of typed-opcode specialization. The
+    /// compiler emits a typed op (`AddInt`, `LessInt`, …) from a *static* type
+    /// guess, but a guess can be wrong at runtime — e.g. an `any`-typed value
+    /// flowing through a typed parameter or an annotated binding initializer is
+    /// not runtime-checked, so the operand may be a different primitive than the
+    /// annotation claims. Hard-erroring there made the optimized build throw on
+    /// programs the unoptimized build runs correctly; guarding and falling back
+    /// keeps `optimized ≡ unoptimized` by construction. The fast path is a
+    /// monomorphic match the optimizer fully inlines, so the common case where
+    /// the guess holds pays nothing beyond the type check it already performed.
+    #[inline]
+    pub(super) fn run_typed_binary(
+        &mut self,
+        op: AdaptiveBinaryOp,
+        fast: impl FnOnce(&VmValue, &VmValue) -> Option<Result<VmValue, VmError>>,
+    ) -> Result<(), VmError> {
         let b = self.pop()?;
         let a = self.pop()?;
-        let (x, y) = typed_int_pair("add", a, b)?;
-        self.stack.push(VmValue::Int(x.wrapping_add(y)));
+        let result = match fast(&a, &b) {
+            Some(result) => result,
+            None => Self::generic_binary_result(self, op, a, b),
+        }?;
+        self.stack.push(result);
         Ok(())
+    }
+
+    pub(super) fn execute_add_int(&mut self) -> Result<(), VmError> {
+        self.run_typed_binary(AdaptiveBinaryOp::Add, |a, b| match (a, b) {
+            (VmValue::Int(x), VmValue::Int(y)) => Some(Ok(VmValue::Int(x.wrapping_add(*y)))),
+            _ => None,
+        })
     }
 
     pub(super) fn execute_sub_int(&mut self) -> Result<(), VmError> {
-        let b = self.pop()?;
-        let a = self.pop()?;
-        let (x, y) = typed_int_pair("subtract", a, b)?;
-        self.stack.push(VmValue::Int(x.wrapping_sub(y)));
-        Ok(())
+        self.run_typed_binary(AdaptiveBinaryOp::Sub, |a, b| match (a, b) {
+            (VmValue::Int(x), VmValue::Int(y)) => Some(Ok(VmValue::Int(x.wrapping_sub(*y)))),
+            _ => None,
+        })
     }
 
     pub(super) fn execute_mul_int(&mut self) -> Result<(), VmError> {
-        let b = self.pop()?;
-        let a = self.pop()?;
-        let (x, y) = typed_int_pair("multiply", a, b)?;
-        self.stack.push(VmValue::Int(x.wrapping_mul(y)));
-        Ok(())
+        self.run_typed_binary(AdaptiveBinaryOp::Mul, |a, b| match (a, b) {
+            (VmValue::Int(x), VmValue::Int(y)) => Some(Ok(VmValue::Int(x.wrapping_mul(*y)))),
+            _ => None,
+        })
     }
 
     pub(super) fn execute_div_int(&mut self) -> Result<(), VmError> {
-        let b = self.pop()?;
-        let a = self.pop()?;
-        let (x, y) = typed_int_pair("divide", a, b)?;
-        if y == 0 {
-            return Err(VmError::DivisionByZero);
-        }
-        self.stack.push(VmValue::Int(x.wrapping_div(y)));
-        Ok(())
+        self.run_typed_binary(AdaptiveBinaryOp::Div, |a, b| match (a, b) {
+            (VmValue::Int(_), VmValue::Int(0)) => Some(Err(VmError::DivisionByZero)),
+            (VmValue::Int(x), VmValue::Int(y)) => Some(Ok(VmValue::Int(x.wrapping_div(*y)))),
+            _ => None,
+        })
     }
 
     pub(super) fn execute_mod_int(&mut self) -> Result<(), VmError> {
-        let b = self.pop()?;
-        let a = self.pop()?;
-        let (x, y) = typed_int_pair("modulo", a, b)?;
-        if y == 0 {
-            return Err(VmError::DivisionByZero);
-        }
-        self.stack.push(VmValue::Int(x.wrapping_rem(y)));
-        Ok(())
+        self.run_typed_binary(AdaptiveBinaryOp::Mod, |a, b| match (a, b) {
+            (VmValue::Int(_), VmValue::Int(0)) => Some(Err(VmError::DivisionByZero)),
+            (VmValue::Int(x), VmValue::Int(y)) => Some(Ok(VmValue::Int(x.wrapping_rem(*y)))),
+            _ => None,
+        })
     }
 
     pub(super) fn execute_add_float(&mut self) -> Result<(), VmError> {
-        let b = self.pop()?;
-        let a = self.pop()?;
-        let (x, y) = typed_float_pair("add", a, b)?;
-        self.stack.push(VmValue::Float(x + y));
-        Ok(())
+        self.run_typed_binary(AdaptiveBinaryOp::Add, |a, b| match (a, b) {
+            (VmValue::Float(x), VmValue::Float(y)) => Some(Ok(VmValue::Float(x + y))),
+            _ => None,
+        })
     }
 
     pub(super) fn execute_sub_float(&mut self) -> Result<(), VmError> {
-        let b = self.pop()?;
-        let a = self.pop()?;
-        let (x, y) = typed_float_pair("subtract", a, b)?;
-        self.stack.push(VmValue::Float(x - y));
-        Ok(())
+        self.run_typed_binary(AdaptiveBinaryOp::Sub, |a, b| match (a, b) {
+            (VmValue::Float(x), VmValue::Float(y)) => Some(Ok(VmValue::Float(x - y))),
+            _ => None,
+        })
     }
 
     pub(super) fn execute_mul_float(&mut self) -> Result<(), VmError> {
-        let b = self.pop()?;
-        let a = self.pop()?;
-        let (x, y) = typed_float_pair("multiply", a, b)?;
-        self.stack.push(VmValue::Float(x * y));
-        Ok(())
+        self.run_typed_binary(AdaptiveBinaryOp::Mul, |a, b| match (a, b) {
+            (VmValue::Float(x), VmValue::Float(y)) => Some(Ok(VmValue::Float(x * y))),
+            _ => None,
+        })
     }
 
     pub(super) fn execute_div_float(&mut self) -> Result<(), VmError> {
-        let b = self.pop()?;
-        let a = self.pop()?;
-        let (x, y) = typed_float_pair("divide", a, b)?;
-        self.stack.push(VmValue::Float(x / y));
-        Ok(())
+        self.run_typed_binary(AdaptiveBinaryOp::Div, |a, b| match (a, b) {
+            (VmValue::Float(x), VmValue::Float(y)) => Some(Ok(VmValue::Float(x / y))),
+            _ => None,
+        })
     }
 
     pub(super) fn execute_mod_float(&mut self) -> Result<(), VmError> {
-        let b = self.pop()?;
-        let a = self.pop()?;
-        let (x, y) = typed_float_pair("modulo", a, b)?;
-        if y == 0.0 {
-            return Err(VmError::DivisionByZero);
-        }
-        self.stack.push(VmValue::Float(x % y));
-        Ok(())
+        self.run_typed_binary(AdaptiveBinaryOp::Mod, |a, b| match (a, b) {
+            (VmValue::Float(_), VmValue::Float(y)) if *y == 0.0 => {
+                Some(Err(VmError::DivisionByZero))
+            }
+            (VmValue::Float(x), VmValue::Float(y)) => Some(Ok(VmValue::Float(x % y))),
+            _ => None,
+        })
     }
 
     fn add(&self, a: VmValue, b: VmValue) -> Result<VmValue, VmError> {
@@ -596,29 +616,5 @@ impl BinaryShape {
             }
             _ => None,
         }
-    }
-}
-
-#[inline]
-fn typed_int_pair(name: &str, a: VmValue, b: VmValue) -> Result<(i64, i64), VmError> {
-    match (a, b) {
-        (VmValue::Int(x), VmValue::Int(y)) => Ok((x, y)),
-        (a, b) => Err(VmError::TypeError(format!(
-            "Typed int {name} expected int operands, got {} and {}",
-            a.type_name(),
-            b.type_name()
-        ))),
-    }
-}
-
-#[inline]
-fn typed_float_pair(name: &str, a: VmValue, b: VmValue) -> Result<(f64, f64), VmError> {
-    match (a, b) {
-        (VmValue::Float(x), VmValue::Float(y)) => Ok((x, y)),
-        (a, b) => Err(VmError::TypeError(format!(
-            "Typed float {name} expected float operands, got {} and {}",
-            a.type_name(),
-            b.type_name()
-        ))),
     }
 }
