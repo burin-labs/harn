@@ -16,7 +16,7 @@ pipeline test(task) {
       custom_compactor: { messages -> "CUSTOM SUMMARY " + to_string(len(messages)) },
     },
   )
-  assert(transcript_summary(compacted).contains("CUSTOM SUMMARY 1"), "custom summary retained")
+  assert(transcript_summary(compacted)?.contains("CUSTOM SUMMARY 1"), "custom summary retained")
   assert(
     transcript_events_by_kind(compacted, "compaction")[0].metadata?.strategy == "custom",
     "custom event recorded",

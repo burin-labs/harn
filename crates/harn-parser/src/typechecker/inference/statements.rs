@@ -55,6 +55,75 @@ impl UntypedAccessKind {
     }
 }
 
+/// The three runtime forms that dereference a receiver value: a property
+/// read (`obj.name`), a subscript (`obj[idx]`), and a method call
+/// (`obj.name(..)`). All three fail identically at runtime when the
+/// receiver is statically `nil`, may-be-`nil` (a `T | nil` union), or
+/// `unknown`. This enum lets a single diagnosis routine phrase the shared
+/// error/help for whichever form the author actually wrote, so the
+/// nil-safety guidance stays consistent across `.`, `[]`, and `.()`.
+#[derive(Clone, Copy)]
+enum AccessForm<'a> {
+    Property(&'a str),
+    Subscript,
+    Method(&'a str),
+}
+
+impl AccessForm<'_> {
+    /// Subject phrase for the "cannot access … on nil" message, e.g.
+    /// "property `name`", "an index", "method `greet`".
+    fn subject(self) -> String {
+        match self {
+            Self::Property(name) => format!("property `{name}`"),
+            Self::Subscript => "an index".to_string(),
+            Self::Method(name) => format!("method `{name}`"),
+        }
+    }
+
+    /// The `?`-form operator to recommend in help text, e.g.
+    /// "the optional access operator `?.name`".
+    fn optional_hint(self) -> String {
+        match self {
+            Self::Property(name) => {
+                format!("the optional access operator `?.{name}`")
+            }
+            Self::Subscript => "the optional subscript operator `?[…]`".to_string(),
+            Self::Method(name) => {
+                format!("the optional call operator `?.{name}(…)`")
+            }
+        }
+    }
+
+    /// Leading clause for the "on an `unknown` value" warning, e.g.
+    /// "property access `.name`", "subscript access", "method call `.greet()`".
+    fn unknown_label(self) -> String {
+        match self {
+            Self::Property(name) => format!("property access `.{name}`"),
+            Self::Subscript => "subscript access".to_string(),
+            Self::Method(name) => format!("method call `.{name}()`"),
+        }
+    }
+
+    /// What the receiver would have to be for the access to succeed,
+    /// completing "… will fail at runtime if the value is not {…}".
+    fn unknown_requirement(self) -> &'static str {
+        match self {
+            Self::Property(_) => "a shape with that field",
+            Self::Subscript => "a list, dict, or string",
+            Self::Method(_) => "a value with that method",
+        }
+    }
+
+    /// Trailing clause for the nil-guard help, e.g. "before reading fields".
+    fn guard_clause(self) -> &'static str {
+        match self {
+            Self::Property(_) => "before reading fields",
+            Self::Subscript => "before indexing",
+            Self::Method(_) => "before calling methods",
+        }
+    }
+}
+
 impl TypeChecker {
     pub(in crate::typechecker) fn check_block(&mut self, stmts: &[SNode], scope: &mut TypeScope) {
         self.check_block_with_expected_tail(stmts, None, scope);
@@ -317,40 +386,21 @@ impl TypeChecker {
             return;
         };
         let resolved = self.resolve_alias(&raw, scope);
-        // Decide whether to take the strict path. The "loose" case is the
-        // ambient dict literal idiom (`let d = {a: 1}; d.missing` returns
-        // nil at runtime) and the unannotated `var x = nil; ...; x.field`
-        // widening pattern — both rely on the runtime's silent-nil
-        // behavior. Strict diagnostics fire when the type came from a
-        // real contract: a written annotation, a named alias or struct,
-        // a struct/function-call return, or a nested property access.
-        let is_strict_source = match &object.node {
-            Node::Identifier(name) => {
-                scope.is_annotated(name) || self.is_named_contract_type(&raw, scope)
-            }
-            _ => true,
-        };
-        if !is_strict_source {
+        if !self.is_strict_access_source(object, &raw, scope) {
+            return;
+        }
+        // `nil` and `unknown` receivers fail identically for any access
+        // form, so route them through the shared diagnosis. Once it fires,
+        // the field-existence checks below would be redundant noise.
+        if self.diagnose_nil_or_unknown_receiver(
+            &resolved,
+            AccessForm::Property(property),
+            span,
+            optional,
+        ) {
             return;
         }
         match &resolved {
-            TypeExpr::Named(name) if name == "nil" && !optional => {
-                self.error_at_with_help(Code::InvalidOptionalAccess,
-                    format!(
-                        "cannot access property `{property}` on `nil`; the value is statically known to be nil here"
-                    ),
-                    span,
-                    format!("use the optional access operator `?.{property}`, or narrow the value with a `!= nil` guard before reading fields"),
-                );
-            }
-            TypeExpr::Named(name) if matches!(name.as_str(), "unknown") => {
-                self.warning_at_with_help(Code::UnknownField,
-                    format!("property access `.{property}` on an `unknown` value will fail at runtime if the value is not a shape with that field"),
-                    span,
-                    "narrow with `is_a`/`type_of`, validate with `assert_shape`, or annotate with a shape type before accessing fields"
-                        .to_string(),
-                );
-            }
             TypeExpr::Shape(fields) if !fields.iter().any(|f| f.name == *property) => {
                 let actual: Vec<&str> = fields.iter().map(|f| f.name.as_str()).collect();
                 let max_dist = if property.len() <= 4 { 1 } else { 2 };
@@ -375,6 +425,25 @@ impl TypeChecker {
             }
             _ if !optional => self.check_nilable_property_access(&resolved, property, scope, span),
             _ => {}
+        }
+    }
+
+    /// Decide whether an access (`.`, `[]`, or `.()`) should take the
+    /// strict diagnostic path. The "loose" case is the ambient dict-literal
+    /// idiom (`let d = {a: 1}; d.missing` returns nil at runtime) and the
+    /// unannotated `var x = nil; …; x.field` widening pattern — both rely
+    /// on the runtime's silent-nil behavior. Strict diagnostics fire when
+    /// the type came from a real contract: a written annotation, a named
+    /// alias / struct / enum, a struct or function-call return, or any
+    /// non-identifier expression (a call chain, literal, etc.). Shared by
+    /// property, subscript, and method-receiver checks so all three honour
+    /// the same boundary.
+    fn is_strict_access_source(&self, object: &SNode, raw: &TypeExpr, scope: &TypeScope) -> bool {
+        match &object.node {
+            Node::Identifier(name) => {
+                scope.is_annotated(name) || self.is_named_contract_type(raw, scope)
+            }
+            _ => true,
         }
     }
 
@@ -465,16 +534,142 @@ impl TypeChecker {
         if !non_nil_admits_property {
             return;
         }
-        self.error_at_with_help(Code::InvalidOptionalAccess,
+        self.emit_nilable_access_error(AccessForm::Property(property), ty, span);
+    }
+
+    /// Diagnose a statically-`nil` or `unknown` receiver for any access
+    /// form. Returns `true` when a diagnostic was emitted so the caller can
+    /// skip the access-kind-specific checks (field existence, etc.) that
+    /// would then be redundant. Optional access (`?.`, `?[]`, `?.()`)
+    /// suppresses the `nil` diagnostic — that is exactly what those
+    /// operators are for — but an `unknown` receiver is still flagged
+    /// because `?.` only guards `nil`, not a non-shape concrete value.
+    fn diagnose_nil_or_unknown_receiver(
+        &mut self,
+        resolved: &TypeExpr,
+        form: AccessForm,
+        span: Span,
+        optional: bool,
+    ) -> bool {
+        match resolved {
+            TypeExpr::Named(name) if name == "nil" => {
+                if optional {
+                    return false;
+                }
+                self.error_at_with_help(
+                    Code::InvalidOptionalAccess,
+                    format!(
+                        "cannot access {} on `nil`; the value is statically known to be nil here",
+                        form.subject()
+                    ),
+                    span,
+                    format!(
+                        "use {}, or narrow the value with a `!= nil` guard {}",
+                        form.optional_hint(),
+                        form.guard_clause()
+                    ),
+                );
+                true
+            }
+            TypeExpr::Named(name) if name == "unknown" => {
+                self.warning_at_with_help(
+                    Code::UnknownField,
+                    format!(
+                        "{} on an `unknown` value will fail at runtime if the value is not {}",
+                        form.unknown_label(),
+                        form.unknown_requirement()
+                    ),
+                    span,
+                    "narrow with `is_a`/`type_of`, validate with `assert_shape`, or annotate with a shape type before accessing fields"
+                        .to_string(),
+                );
+                true
+            }
+            _ => false,
+        }
+    }
+
+    /// Emit the shared "value may be nil at runtime" error for a `T | nil`
+    /// receiver, phrased for whichever access form was written.
+    fn emit_nilable_access_error(&mut self, form: AccessForm, ty: &TypeExpr, span: Span) {
+        self.error_at_with_help(
+            Code::InvalidOptionalAccess,
             format!(
-                "cannot access property `{property}` on nilable type `{ty}`; the value may be nil at runtime",
-                ty = format_type(ty)
+                "cannot access {} on nilable type `{}`; the value may be nil at runtime",
+                form.subject(),
+                format_type(ty)
             ),
             span,
             format!(
-                "use the optional access operator `?.{property}`, or narrow the value with a `!= nil` guard to drop the nil arm"
+                "use {}, or narrow the value with a `!= nil` guard to drop the nil arm",
+                form.optional_hint()
             ),
         );
+    }
+
+    /// True when `ty` is a `T | nil` union of any width. Subscript and
+    /// method-call receivers have no per-field semantics, so any nil arm
+    /// is grounds to warn (unlike property access, which first checks
+    /// whether the non-nil arm even admits the field).
+    fn is_nilable_union(&self, ty: &TypeExpr, scope: &TypeScope) -> bool {
+        matches!(ty, TypeExpr::Union(members)
+            if members.iter().any(|m| self.type_is_nil(m, scope)))
+    }
+
+    /// Subscript (`obj[idx]`) nil-safety, mirroring `check_property_access`:
+    /// a statically-`nil`, may-be-`nil`, or `unknown` receiver is diagnosed
+    /// with the same guidance, pointing at `?[…]` instead of `?.`.
+    fn check_subscript_access(
+        &mut self,
+        object: &SNode,
+        scope: &TypeScope,
+        span: Span,
+        optional: bool,
+    ) {
+        let Some(raw) = self.infer_type(object, scope) else {
+            return;
+        };
+        let resolved = self.resolve_alias(&raw, scope);
+        if !self.is_strict_access_source(object, &raw, scope) {
+            return;
+        }
+        if self.diagnose_nil_or_unknown_receiver(&resolved, AccessForm::Subscript, span, optional) {
+            return;
+        }
+        if !optional && self.is_nilable_union(&resolved, scope) {
+            self.emit_nilable_access_error(AccessForm::Subscript, &resolved, span);
+        }
+    }
+
+    /// Method-call (`obj.name(..)`) receiver nil-safety, mirroring
+    /// `check_property_access`: a statically-`nil`, may-be-`nil`, or
+    /// `unknown` receiver is diagnosed before the args/bound checks run.
+    fn check_method_receiver(
+        &mut self,
+        object: &SNode,
+        method: &str,
+        scope: &TypeScope,
+        span: Span,
+        optional: bool,
+    ) {
+        let Some(raw) = self.infer_type(object, scope) else {
+            return;
+        };
+        let resolved = self.resolve_alias(&raw, scope);
+        if !self.is_strict_access_source(object, &raw, scope) {
+            return;
+        }
+        if self.diagnose_nil_or_unknown_receiver(
+            &resolved,
+            AccessForm::Method(method),
+            span,
+            optional,
+        ) {
+            return;
+        }
+        if !optional && self.is_nilable_union(&resolved, scope) {
+            self.emit_nilable_access_error(AccessForm::Method(method), &resolved, span);
+        }
     }
 
     fn check_strict_untyped_access(
@@ -1796,6 +1991,7 @@ impl TypeChecker {
                 ..
             } => {
                 self.check_node(object, scope);
+                self.check_method_receiver(object, method, scope, span, false);
                 if self.check_harness_method_call(object, method, args, scope, span) {
                     return;
                 }
@@ -1810,6 +2006,7 @@ impl TypeChecker {
             } => {
                 self.check_unnecessary_safe_method_call(snode, object, scope);
                 self.check_node(object, scope);
+                self.check_method_receiver(object, method, scope, span, true);
                 if self.check_harness_method_call(object, method, args, scope, span) {
                     return;
                 }
@@ -1829,12 +2026,14 @@ impl TypeChecker {
             }
             Node::SubscriptAccess { object, index } => {
                 self.check_strict_untyped_access(object, scope, span, UntypedAccessKind::Subscript);
+                self.check_subscript_access(object, scope, span, false);
                 self.check_node(object, scope);
                 self.check_node(index, scope);
             }
             Node::OptionalSubscriptAccess { object, index } => {
                 self.check_unnecessary_safe_subscript_access(snode, object, scope);
                 self.check_strict_untyped_access(object, scope, span, UntypedAccessKind::Subscript);
+                self.check_subscript_access(object, scope, span, true);
                 self.check_node(object, scope);
                 self.check_node(index, scope);
             }

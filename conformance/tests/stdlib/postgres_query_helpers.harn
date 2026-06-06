@@ -95,13 +95,13 @@ LIMIT {limit}
   __io_println(contains(list_query.sql, "owner_tenant_id = $1::uuid"))
   let brace_query = sql("SELECT '{{}}' AS empty, {value} AS value", {value: "ok"})
   __io_println(brace_query.sql)
-  __io_println(brace_query.params[0])
+  __io_println(brace_query.params?[0])
   let path_query = sql("SELECT * FROM {table}", {table: ident_path(["tenant data", "receipts\"live"])})
   __io_println(path_query.sql)
   __io_println(quote_identifier("select"))
   let ordinary_dict = sql("SELECT {payload}", {payload: {_type: "std/postgres/query.sql_fragment.v1", sql: "danger"}})
   __io_println(ordinary_dict.sql)
-  __io_println(ordinary_dict.params[0].sql)
+  __io_println(ordinary_dict.params?[0]?.sql)
   let unsafe_ident = try {
     uuid_text("bad;drop")
   }
@@ -136,7 +136,7 @@ LIMIT {limit}
     },
   )
   __io_println(columns_query.sql)
-  __io_println(columns_query.params[0])
+  __io_println(columns_query.params?[0])
   let empty_columns = try {
     columns([])
   }

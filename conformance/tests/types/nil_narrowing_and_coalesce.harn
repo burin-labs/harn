@@ -1,0 +1,15 @@
+type Opts = {label?: string, tags?: list<string>}?
+
+fn describe(options: Opts = nil) -> string {
+  let opts = options ?? {}
+  var out = "base"
+  if opts?.label != nil {
+    out = opts.label
+  }
+  return out
+}
+
+pipeline main() {
+  __io_println(describe({label: "hello"}))
+  __io_println(describe(nil))
+}

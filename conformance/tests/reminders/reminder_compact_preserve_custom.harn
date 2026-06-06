@@ -29,7 +29,7 @@ pipeline main() {
     },
   )
   let reminders = transcript_events_by_kind(compacted, "system_reminder")
-  __io_println(transcript_summary(compacted).contains("2 reminders compactable"))
+  __io_println(transcript_summary(compacted)?.contains("2 reminders compactable"))
   __io_println(len(reminders))
   __io_println(reminders[0].reminder.body)
 }

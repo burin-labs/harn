@@ -22,5 +22,5 @@ pipeline main() {
   __io_println(len(reminders))
   __io_println(reminders[0].reminder.body)
   __io_println(reminders[0].reminder.ttl_turns)
-  __io_println(transcript_summary(compacted).contains("auto-compacted"))
+  __io_println(transcript_summary(compacted)?.contains("auto-compacted"))
 }
