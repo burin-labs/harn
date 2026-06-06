@@ -8,6 +8,26 @@ highlights live in [CHANGELOG-pre-0.6.md](CHANGELOG-pre-0.6.md).
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.8.79
+
+### Added
+
+- **Durable cross-process rate-limit admission.** Harn now exposes
+  `durable_rate_limit_acquire(options)` for SQLite-backed sliding-window quota
+  reservations across processes, with atomic multi-bucket admission, structured
+  timeout results, and mock-clock-friendly tests (#1873).
+
+### Changed
+
+- LLM provider rate limiting now consumes catalog `rate_limits` metadata,
+  including model-specific RPM/TPM and route concurrency, with environment and
+  `llm_rate_limit` overrides for paid/custom quotas.
+- **Durable LLM rate-limit admission.** Catalog and runtime LLM RPM/TPM
+  limits now use shared SQLite admission by default across Harn processes, so
+  parallel eval runners and worker fleets respect one provider/model quota
+  without relying on per-process sleeps or ad hoc environment-only guardrails
+  (#1873).
+
 ## v0.8.78
 
 ### Added
