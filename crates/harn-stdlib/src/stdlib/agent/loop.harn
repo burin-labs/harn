@@ -636,9 +636,42 @@ fn __native_fallback_feedback(policy, fallback_index) {
   return native_tool_contract_feedback_prompt({policy: policy, fallback_index: fallback_index})
 }
 
+fn __parse_feedback_tool_annotations(entry) {
+  let direct = entry?.annotations
+  if type_of(direct) == "dict" {
+    return direct
+  }
+  let func = entry?.function
+  if type_of(func) == "dict" && type_of(func?.annotations) == "dict" {
+    return func.annotations
+  }
+  return {}
+}
+
+fn __parse_feedback_annotation_enabled(value) -> bool {
+  return type_of(value) == "bool" && value
+}
+
+fn __parse_feedback_tool_is_structural(entry) -> bool {
+  let annotations = __parse_feedback_tool_annotations(entry)
+  return __parse_feedback_annotation_enabled(annotations?.structural)
+    || __parse_feedback_annotation_enabled(annotations?.agent_lifecycle)
+}
+
+fn __parse_feedback_has_non_structural_tools(turn_opts) -> bool {
+  let entries = turn_opts?.tools?.tools ?? []
+  for entry in entries {
+    if type_of(entry) == "dict" && !__parse_feedback_tool_is_structural(entry) {
+      return true
+    }
+  }
+  return false
+}
+
 /**
- * A turn whose tool calls were ALL dropped by the parser (>=1 parse error and 0
- * dispatched calls) is a malformed-call turn, not a no-progress monologue. The
+ * A turn whose tool calls were ALL dropped by the parser, or whose response
+ * violates the tagged protocol with 0 dispatched calls, is a malformed-output
+ * turn, not a no-progress monologue. The
  * purpose-built `parse_guidance` prompt — which shows the heredoc syntax and
  * names the exact parser diagnostic — is the right corrective feedback, but
  * nothing consumed `tool_parse_errors` on the active path. This fires purely on
@@ -646,12 +679,27 @@ fn __native_fallback_feedback(policy, fallback_index) {
  * parse errors, and never reach it (no regression). Returns true when feedback
  * was injected so the caller can suppress the no-progress stall path.
  */
-fn __maybe_inject_parse_error_feedback(session_id, parsed, tool_calls, turn_opts) -> bool {
+fn __parse_feedback_protocol_violations(parsed, turn_opts) {
+  if agent_tool_call_paradigm(turn_opts).kind != "text"
+    || !__parse_feedback_has_non_structural_tools(turn_opts) {
+    return []
+  }
+  return parsed?.protocol_violations ?? []
+}
+
+fn __parse_feedback_diagnostics(parsed, turn_opts) {
   let parse_errors = parsed?.tool_parse_errors ?? []
-  if len(parse_errors) == 0 || len(tool_calls) > 0 {
+  let protocol_violations = __parse_feedback_protocol_violations(parsed, turn_opts)
+  return parse_errors + protocol_violations
+}
+
+fn __maybe_inject_parse_error_feedback(session_id, parsed, tool_calls, turn_opts) -> bool {
+  let protocol_violations = __parse_feedback_protocol_violations(parsed, turn_opts)
+  let diagnostics = __parse_feedback_diagnostics(parsed, turn_opts)
+  if len(diagnostics) == 0 || len(tool_calls) > 0 {
     return false
   }
-  let error_summary = to_string(parse_errors[0])
+  let error_summary = to_string(diagnostics[0])
   // All calls were dropped, so there is no partial success this turn.
   let feedback = parse_guidance_prompt(
     {
@@ -666,7 +714,12 @@ fn __maybe_inject_parse_error_feedback(session_id, parsed, tool_calls, turn_opts
   agent_emit_event(
     session_id,
     "tool_parse_error_feedback",
-    {parse_error_count: len(parse_errors), error_summary: error_summary},
+    {
+      parse_error_count: len(parsed?.tool_parse_errors ?? []),
+      protocol_violation_count: len(protocol_violations),
+      diagnostic_count: len(diagnostics),
+      error_summary: error_summary,
+    },
   )
   return true
 }
@@ -1017,6 +1070,50 @@ fn __apply_post_turn_options(opts, outcome) {
     updated = updated + {llm_options: base_llm_options + llm_patch}
   }
   return updated
+}
+
+fn __agent_loop_llm_overrides(opts) {
+  let overrides = opts?.llm_options
+  if type_of(overrides) == "dict" {
+    return overrides
+  }
+  return {}
+}
+
+fn __agent_loop_effective_llm_options(opts) {
+  let base = opts ?? {}
+  return base + __agent_loop_llm_overrides(base)
+}
+
+fn __agent_loop_with_llm_render_context(opts, render) {
+  let effective = __agent_loop_effective_llm_options(opts)
+  let provider = to_string(effective?.provider ?? "")
+  let model = to_string(effective?.model ?? "")
+  let pushed = __push_llm_render_context(provider, model)
+  defer {
+    if pushed {
+      __pop_llm_render_context()
+    }
+  }
+  return render(effective)
+}
+
+fn __agent_loop_build_turn_prompt(session, opts, iteration) {
+  return __agent_loop_with_llm_render_context(
+    opts,
+    { effective ->
+      let fragments = agent_build_turn_system_fragments(session, effective, iteration)
+      var parts = []
+      for fragment in fragments {
+        parts = parts.push(fragment.body)
+      }
+      return {
+        fragments: fragments,
+        system: join(parts, "\n\n"),
+        messages: agent_build_turn_messages(session, effective, iteration),
+      }
+    },
+  )
 }
 
 fn __next_text_only_count(tool_count, consecutive_text_only) {
@@ -1788,19 +1885,16 @@ fn __agent_loop_final_wrapup(message, session, opts, final_status, stop_reason, 
     _progress_tool_system_prompt_nudge: "",
     transcript_projection: opts?.transcript_projection,
   }
-  let base_fragments = agent_build_turn_system_fragments(session, wrapup_opts, iteration)
+  let turn_prompt = __agent_loop_build_turn_prompt(session, wrapup_opts, iteration)
   var turn_system_parts = []
-  for fragment in base_fragments {
-    turn_system_parts = turn_system_parts.push(fragment.body)
+  if trim(turn_prompt.system ?? "") != "" {
+    turn_system_parts = turn_system_parts.push(turn_prompt.system)
   }
   turn_system_parts = turn_system_parts.push(directive)
   let turn_system = join(turn_system_parts, "\n\n")
-  let turn_messages = agent_build_turn_messages(session, wrapup_opts, iteration)
-  let llm_overrides = wrapup_opts?.llm_options ?? {}
-  let llm_opts = wrapup_opts
-    + llm_overrides
+  let llm_opts = __agent_loop_effective_llm_options(wrapup_opts)
     + {
-    messages: turn_messages,
+    messages: turn_prompt.messages,
     session_id: session.session_id,
     tool_format: wrapup_opts?.tool_format,
     tools: nil,
@@ -1835,20 +1929,7 @@ fn __agent_loop_run(message, session, initial_opts) {
   var opts = initial_opts
   var iteration = 0
   var session_finalized = false
-  // Publish the resolved provider/model so any `.harn.prompt` rendered
-  // during turn-system construction (loop contract, tool contract,
-  // skills, …) can branch on `llm.capabilities.*` without manual
-  // option threading. Skipped when provider is empty — the render
-  // sees `llm = nil` and the existing branch falls through.
-  let __llm_ctx_provider = to_string(initial_opts?.provider ?? "")
-  let __llm_ctx_model = to_string(initial_opts?.model ?? "")
-  let __llm_ctx_pushed = __push_llm_render_context(__llm_ctx_provider, __llm_ctx_model)
   var audit_background_tasks = []
-  defer {
-    if __llm_ctx_pushed {
-      __pop_llm_render_context()
-    }
-  }
   let run = try {
     opts = agent_mcp_bootstrap_if_needed(session, opts)
     var stop_reason = nil
@@ -1919,10 +2000,15 @@ fn __agent_loop_run(message, session, initial_opts) {
         break
       }
       let iteration_index = iteration
+      let iteration_opts = __agent_loop_effective_llm_options(opts)
       agent_emit_event(
         session.session_id,
         "iteration_start",
-        {iteration: iteration_index + 1, provider: opts?.provider ?? "", model: opts?.model ?? ""},
+        {
+          iteration: iteration_index + 1,
+          provider: iteration_opts?.provider ?? "",
+          model: iteration_opts?.model ?? "",
+        },
       )
       try {
         __host_drain_file_edits(session.session_id)
@@ -1930,21 +2016,22 @@ fn __agent_loop_run(message, session, initial_opts) {
         nil
       }
       __agent_loop_checkpoint(session.session_id, "iteration_start", {iteration: iteration_index + 1})
-      var turn_opts = agent_skills_match(session, opts, iteration_index)
+      var turn_opts = agent_skills_match(session, iteration_opts, iteration_index)
       if turn_opts?._skill_activated_this_turn ?? false {
         opts = agent_reset_tool_surface_narrowing(opts)
         turn_opts = agent_reset_tool_surface_narrowing(turn_opts)
       }
       turn_opts = agent_tool_search_inject_if_needed(turn_opts)
       turn_opts = agent_apply_tool_surface_narrowing(turn_opts)
+      let turn_llm_opts = __agent_loop_effective_llm_options(turn_opts)
       __agent_loop_checkpoint(session.session_id, "pre_compact", {iteration: iteration_index + 1})
-      agent_autocompact_if_needed(session, turn_opts)
+      agent_autocompact_if_needed(session, turn_llm_opts)
       __agent_loop_checkpoint(session.session_id, "post_compact", {iteration: iteration_index + 1})
       let scope_verdict = __run_pre_turn_scope_classifier(
-        turn_opts?._pre_turn_scope_classifier ?? opts?._pre_turn_scope_classifier,
+        turn_llm_opts?._pre_turn_scope_classifier ?? opts?._pre_turn_scope_classifier,
         session,
         message,
-        turn_opts,
+        turn_llm_opts,
         iteration_index,
       )
       if __scope_classifier_skip_main(scope_verdict) {
@@ -1954,24 +2041,16 @@ fn __agent_loop_run(message, session, initial_opts) {
         stop_reason = "out_of_scope"
         break
       }
-      let turn_system_fragments = agent_build_turn_system_fragments(session, turn_opts, iteration_index)
-      var turn_system_parts = []
-      for fragment in turn_system_fragments {
-        turn_system_parts = turn_system_parts.push(fragment.body)
-      }
-      let turn_system = join(turn_system_parts, "\n\n")
-      let turn_messages = agent_build_turn_messages(session, turn_opts, iteration_index)
-      let llm_overrides = turn_opts?.llm_options ?? {}
-      let base_opts = turn_opts + llm_overrides
-      let llm_opts = base_opts
+      let turn_prompt = __agent_loop_build_turn_prompt(session, turn_llm_opts, iteration_index)
+      let llm_opts = turn_llm_opts
         + {
-        messages: turn_messages,
+        messages: turn_prompt.messages,
         session_id: session.session_id,
-        tool_format: turn_opts.tool_format,
+        tool_format: turn_llm_opts.tool_format,
         _iteration: iteration_index + 1,
-        _system_fragments: turn_system_fragments,
+        _system_fragments: turn_prompt.fragments,
       }
-      let call = __invoke_llm(message, turn_system, llm_opts)
+      let call = __invoke_llm(message, turn_prompt.system, llm_opts)
       if !call.ok {
         let failure_config = __agent_loop_consecutive_failure_config(budget)
         if __agent_loop_tracks_failure(call?.error, failure_config) {
@@ -2040,7 +2119,7 @@ fn __agent_loop_run(message, session, initial_opts) {
       )
       fallback_index = fallback_outcome.fallback_index
       let tool_calls = if fallback_outcome.triggered {
-        fallback_outcome.calls
+        fallback_outcome.calls ?? []
       } else {
         __resolve_tool_calls(llm_result, parsed)
       }
@@ -2063,7 +2142,7 @@ fn __agent_loop_run(message, session, initial_opts) {
             "agent_await_resumption",
             __agent_loop_invalid_await_resumption_feedback(await_error),
           )
-          let await_totals = agent_session_record_usage(session.session_id, llm_result, turn_opts, iteration_index + 1)
+          let await_totals = agent_session_record_usage(session.session_id, llm_result, turn_llm_opts, iteration_index + 1)
           agent_emit_event(
             session.session_id,
             "iteration_end",
@@ -2099,7 +2178,7 @@ fn __agent_loop_run(message, session, initial_opts) {
           continue
         }
         suspend_result = unwrap(await_result)
-        let _totals = agent_session_record_usage(session.session_id, llm_result, turn_opts, iteration_index + 1)
+        let _totals = agent_session_record_usage(session.session_id, llm_result, turn_llm_opts, iteration_index + 1)
         agent_emit_event(
           session.session_id,
           "iteration_end",
@@ -2158,7 +2237,7 @@ fn __agent_loop_run(message, session, initial_opts) {
         if feedback != "" {
           agent_session_inject_feedback(session.session_id, "structural_validator", feedback)
         }
-        let structural_totals = agent_session_record_usage(session.session_id, llm_result, turn_opts, iteration_index + 1)
+        let structural_totals = agent_session_record_usage(session.session_id, llm_result, turn_llm_opts, iteration_index + 1)
         agent_emit_event(
           session.session_id,
           "iteration_end",
@@ -2222,7 +2301,7 @@ fn __agent_loop_run(message, session, initial_opts) {
             )
           }
         } else {
-          let stall_totals = agent_session_record_usage(session.session_id, llm_result, turn_opts, iteration_index + 1)
+          let stall_totals = agent_session_record_usage(session.session_id, llm_result, turn_llm_opts, iteration_index + 1)
           let tool_count = len(tool_calls)
           agent_emit_event(
             session.session_id,
@@ -2302,7 +2381,7 @@ fn __agent_loop_run(message, session, initial_opts) {
           if critique != "" {
             agent_session_inject_feedback(session.session_id, "step_judge", critique)
           }
-          let step_totals = agent_session_record_usage(session.session_id, llm_result, turn_opts, iteration_index + 1)
+          let step_totals = agent_session_record_usage(session.session_id, llm_result, turn_llm_opts, iteration_index + 1)
           agent_emit_event(
             session.session_id,
             "iteration_end",
@@ -2348,7 +2427,7 @@ fn __agent_loop_run(message, session, initial_opts) {
       let pre_dispatch_checkpoint = __agent_loop_checkpoint(session.session_id, "pre_tool_dispatch", {iteration: iteration_index + 1})
       if pre_dispatch_checkpoint.dispatch_skipped {
         let tool_count_skipped = len(tool_calls)
-        let totals_skipped = agent_session_record_usage(session.session_id, llm_result, turn_opts, iteration_index + 1)
+        let totals_skipped = agent_session_record_usage(session.session_id, llm_result, turn_llm_opts, iteration_index + 1)
         agent_emit_event(
           session.session_id,
           "iteration_end",
@@ -2401,7 +2480,7 @@ fn __agent_loop_run(message, session, initial_opts) {
       opts = __sync_tool_search_state(opts, dispatched.turn_opts)
       successful_tools_seen = __merge_tool_names(successful_tools_seen, __tool_names_by_status(dispatch, true))
       rejected_tools_seen = __merge_tool_names(rejected_tools_seen, __tool_names_by_status(dispatch, false))
-      let totals = agent_session_record_usage(session.session_id, llm_result, turn_opts, iteration_index + 1)
+      let totals = agent_session_record_usage(session.session_id, llm_result, turn_llm_opts, iteration_index + 1)
       let tool_count = len(tool_calls)
       agent_emit_event(
         session.session_id,
@@ -2487,12 +2566,15 @@ fn __agent_loop_run(message, session, initial_opts) {
         _done_judge_invocations: done_judge_invocations,
         _done_judge_loop_state: cadence_loop_state,
       }
-      let outcome = agent_compute_post_turn(
-        session,
-        normalized + {raw_text: raw_text, parsed_done_marker: parsed?.done_marker ?? ""},
-        dispatch,
-        post_turn_opts,
-        iteration_index,
+      let outcome = __agent_loop_with_llm_render_context(
+        turn_llm_opts,
+        { _effective -> agent_compute_post_turn(
+          session,
+          normalized + {raw_text: raw_text, parsed_done_marker: parsed?.done_marker ?? ""},
+          dispatch,
+          post_turn_opts,
+          iteration_index,
+        ) },
       )
       opts = __apply_post_turn_options(opts, outcome)
       var should_continue = outcome.kind == "continue" || bridge_step_delivered > 0

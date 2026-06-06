@@ -1088,6 +1088,11 @@ pub(crate) async fn observed_llm_call(
                 let category = crate::value::error_to_category(&error);
                 let message = error.to_string();
                 let classified = super::api::classify_llm_error(category.clone(), &message);
+                if classified.reason == super::api::LlmErrorReason::RateLimit {
+                    if let Some(retry_after_ms) = extract_retry_after_ms(&error) {
+                        super::rate_limit::observe_retry_after_for_llm_call(opts, retry_after_ms);
+                    }
+                }
                 let retryable = is_retryable_llm_error(&error);
                 let can_retry = retryable && attempt < retry_config.retries;
                 let status = if can_retry {

@@ -182,6 +182,7 @@ struct RouteLimiter {
     input_token_window: Option<SlidingWindow>,
     output_token_window: Option<SlidingWindow>,
     concurrency: Option<Arc<Semaphore>>,
+    cooldown_until_ms: Option<u128>,
     limits: EffectiveRateLimits,
 }
 
@@ -195,6 +196,7 @@ impl RouteLimiter {
             concurrency: limits
                 .concurrency
                 .map(|limit| Arc::new(Semaphore::new(limit.max(1) as usize))),
+            cooldown_until_ms: None,
             limits,
         }
     }
@@ -213,6 +215,13 @@ impl RouteLimiter {
             self.output_token_window
                 .as_mut()
                 .and_then(|window| window.check(now_ms, request.output_tokens)),
+            self.cooldown_until_ms
+                .filter(|until_ms| *until_ms > now_ms)
+                .map(|until_ms| {
+                    Duration::from_millis(
+                        until_ms.saturating_sub(now_ms).min(u128::from(u64::MAX)) as u64
+                    )
+                }),
         ];
         waits.into_iter().flatten().max()
     }
@@ -230,6 +239,14 @@ impl RouteLimiter {
         if let Some(window) = self.output_token_window.as_mut() {
             window.record(now_ms, request.output_tokens);
         }
+    }
+
+    fn observe_retry_after(&mut self, now_ms: u128, retry_after_ms: u64) {
+        if retry_after_ms == 0 {
+            return;
+        }
+        let until_ms = now_ms.saturating_add(u128::from(retry_after_ms));
+        self.cooldown_until_ms = Some(self.cooldown_until_ms.unwrap_or(0).max(until_ms));
     }
 }
 
@@ -340,6 +357,15 @@ fn insert_limiter(
     } else {
         limiters.insert(key, RouteLimiter::new(limits));
     }
+}
+
+fn limiter_for_key<'a>(
+    limiters: &'a mut HashMap<String, RouteLimiter>,
+    key: &str,
+) -> &'a mut RouteLimiter {
+    limiters
+        .entry(key.to_string())
+        .or_insert_with(|| RouteLimiter::new(EffectiveRateLimits::default()))
 }
 
 fn provider_limits_from_config(
@@ -689,9 +715,20 @@ async fn acquire_permit_for(
     ensure_initialized_from_config();
     let keys = limiter_keys(provider, model);
     if let Some(state_path) = durable_state_path() {
-        let permits = acquire_concurrency(&keys).await;
-        acquire_durable_for_keys(state_path, provider, model, &keys, request).await?;
-        return Ok(RateLimitPermit { _permits: permits });
+        loop {
+            let permits = acquire_concurrency(&keys).await;
+            if let Some(duration) = {
+                let mut registry = registry().lock().expect("rate limiter mutex poisoned");
+                let now_ms = crate::clock_mock::instant_now().as_millis();
+                check_wait_for_keys(&mut registry, &keys, request, now_ms)
+            } {
+                drop(permits);
+                sleep_after_throttle(provider, model, duration).await;
+                continue;
+            }
+            acquire_durable_for_keys(state_path, provider, model, &keys, request).await?;
+            return Ok(RateLimitPermit { _permits: permits });
+        }
     }
     loop {
         if let Some(duration) = {
@@ -719,6 +756,29 @@ async fn acquire_permit_for(
         }
 
         return Ok(RateLimitPermit { _permits: permits });
+    }
+}
+
+/// Share a provider Retry-After signal with the route limiter.
+///
+/// Catalog limits prevent most known quota overruns. Provider 429 responses are
+/// still useful live feedback: account tier, burst windows, or remote-side
+/// throttles can differ from the catalog. Recording the cooldown here lets
+/// sibling and subsequent calls wait on the same route instead of stampeding
+/// the provider after the first failed call.
+pub(crate) fn observe_retry_after_for_llm_call(
+    opts: &super::api::LlmCallOptions,
+    retry_after_ms: u64,
+) {
+    if retry_after_ms == 0 {
+        return;
+    }
+    ensure_initialized_from_config();
+    let keys = limiter_keys(&opts.provider, &opts.model);
+    let now_ms = crate::clock_mock::instant_now().as_millis();
+    let mut registry = registry().lock().expect("rate limiter mutex poisoned");
+    for key in keys {
+        limiter_for_key(&mut registry.limiters, &key).observe_retry_after(now_ms, retry_after_ms);
     }
 }
 
@@ -906,6 +966,33 @@ mod tests {
         window.record(0, 25);
         assert_eq!(window.usage(), 10);
         assert!(window.check(0, 1).is_some());
+    }
+
+    #[test]
+    fn retry_after_cooldown_blocks_route_without_catalog_limit() {
+        let mut limiter = RouteLimiter::new(EffectiveRateLimits::default());
+        limiter.observe_retry_after(1_000, 2_500);
+
+        let wait = limiter
+            .check(1_000, RateLimitRequest::default())
+            .expect("cooldown should block route");
+        assert_eq!(wait.as_millis(), 2_500);
+        assert!(
+            limiter.check(3_500, RateLimitRequest::default()).is_none(),
+            "cooldown should expire exactly at the provider-supplied deadline"
+        );
+    }
+
+    #[test]
+    fn retry_after_cooldown_extends_existing_route_cooldown() {
+        let mut limiter = RouteLimiter::new(EffectiveRateLimits::default());
+        limiter.observe_retry_after(1_000, 1_000);
+        limiter.observe_retry_after(1_500, 3_000);
+
+        let wait = limiter
+            .check(2_000, RateLimitRequest::default())
+            .expect("extended cooldown should block route");
+        assert_eq!(wait.as_millis(), 2_500);
     }
 
     #[test]

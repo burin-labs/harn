@@ -1,0 +1,81 @@
+import { agent_capture_events } from "std/agent/events"
+
+fn iteration_events(events) {
+  return events.filter({ event -> event.type == "iteration_start" })
+}
+
+pipeline test(task) {
+  let call_count = atomic(0)
+  let first_context_ok = atomic(0)
+  let second_context_ok = atomic(0)
+  let second_call_options_ok = atomic(0)
+  let caller = { call ->
+    let index = atomic_add(call_count, 1) + 1
+    if index == 1
+      && contains(call?.system ?? "", "ctx provider=cheap-provider model=cheap-model") {
+      atomic_set(first_context_ok, 1)
+    }
+    if index == 2
+      && contains(call?.system ?? "", "ctx provider=frontier-provider model=frontier-model") {
+      atomic_set(second_context_ok, 1)
+    }
+    if index == 2
+      && call?.opts?.provider == "frontier-provider"
+      && call?.opts?.model == "frontier-model" {
+      atomic_set(second_call_options_ok, 1)
+    }
+    let text = if index == 1 {
+      "still working"
+    } else {
+      "<user_response>done</user_response>\n<done>##DONE##</done>"
+    }
+    return {
+      ok: true,
+      value: {
+        text: text,
+        provider: call?.opts?.provider ?? "",
+        model: call?.opts?.model ?? "",
+        input_tokens: 0,
+        output_tokens: 0,
+      },
+    }
+  }
+  let session = "agent-loop-dynamic-llm-context-" + uuid()
+  let captured = agent_capture_events(
+    session,
+    fn() { return agent_loop(
+      "finish",
+      nil,
+      {
+        provider: "cheap-provider",
+        model: "cheap-model",
+        session_id: session,
+        llm_caller: caller,
+        loop_until_done: true,
+        done_judge: false,
+        max_iterations: 2,
+        prompts: {
+          "agent.loop_contract": {text: "ctx provider={{ llm.provider }} model={{ llm.model }} sentinel={{ done_sentinel }}"},
+        },
+        post_turn_callback: { info ->
+          if info?.iteration == 0 {
+            return {
+              message: "escalating after first turn",
+              llm_options: {provider: "frontier-provider", model: "frontier-model"},
+            }
+          }
+          return nil
+        },
+      },
+    ) },
+  )
+  let starts = iteration_events(captured.events)
+  assert(captured.result.status == "done", "loop completed after dynamic model switch")
+  assert(atomic_get(call_count) == 2, "two LLM calls were made")
+  assert(atomic_get(first_context_ok) == 1, "first turn rendered cheap model context")
+  assert(atomic_get(second_context_ok) == 1, "second turn rendered frontier model context")
+  assert(atomic_get(second_call_options_ok) == 1, "second call used frontier options")
+  assert(starts[1].provider == "frontier-provider", "iteration telemetry used frontier provider")
+  assert(starts[1].model == "frontier-model", "iteration telemetry used frontier model")
+  __io_println("dynamic llm context ok")
+}
