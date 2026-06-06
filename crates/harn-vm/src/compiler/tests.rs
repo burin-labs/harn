@@ -147,6 +147,120 @@ fn test_compile_generic_ops_for_overloaded_or_mixed_cases() {
 }
 
 #[test]
+fn monomorphic_var_keeps_typed_int_ops() {
+    // A `var` only ever reassigned through int-typed values is provably
+    // monomorphic, so its arithmetic keeps the typed fast path even when the
+    // use precedes the reassignment in source order.
+    let chunk = compile_source(
+        "pipeline test(task) {
+  var x = 0
+  var i = 0
+  while i < 3 {
+    log(x + 1)
+    x = x + 2
+    i = i + 1
+  }
+}",
+    );
+    let disasm = chunk.disassemble("test");
+    assert!(
+        disasm.contains("ADD_INT"),
+        "expected typed add, got:\n{disasm}"
+    );
+    assert!(disasm.contains("LESS_INT"));
+}
+
+#[test]
+fn polymorphic_var_reassigned_from_dynamic_falls_back_to_generic() {
+    // `x` is inferred `int` from its initializer but later reassigned from a
+    // statically-unknown (`any`) call result, so its runtime primitive type can
+    // change. Committing `x + 1` to ADD_INT would be unsound, so the compiler
+    // must keep the generic adaptive ADD. (No int counter here, so ADD_INT
+    // appearing at all would mean `x` was wrongly specialized.)
+    let chunk = compile_source(
+        "pipeline test(task) {
+  var x = 0
+  let cell = shared_cell(\"k\", 2.5)
+  log(x + 1)
+  x = shared_get(cell)
+}",
+    );
+    let disasm = chunk.disassemble("test");
+    assert!(
+        disasm.contains("ADD"),
+        "expected generic add, got:\n{disasm}"
+    );
+    assert!(
+        !disasm.contains("ADD_INT"),
+        "polymorphic var must not specialize, got:\n{disasm}"
+    );
+}
+
+#[test]
+fn polymorphic_var_demotes_dependent_sibling() {
+    // `sum` only ever takes `sum + x`, but `x` is polymorphic, so `sum`'s
+    // primitive type is not provable either — the fixpoint must demote both.
+    let chunk = compile_source(
+        "pipeline test(task) {
+  var x = 0
+  var sum = 0
+  let cell = shared_cell(\"k\", 2.5)
+  sum = sum + x
+  x = shared_get(cell)
+  log(sum)
+}",
+    );
+    let disasm = chunk.disassemble("test");
+    assert!(
+        !disasm.contains("ADD_INT"),
+        "x and its dependent sum must both fall back, got:\n{disasm}"
+    );
+}
+
+#[test]
+fn for_item_reassigned_from_dynamic_falls_back_to_generic() {
+    // A `for`-item binding is reassignable per iteration; reassigning it from an
+    // `any` value makes its primitive type unprovable, so arithmetic on it must
+    // stay generic.
+    let chunk = compile_source(
+        "pipeline test(task) {
+  var sum = 0
+  let cell = shared_cell(\"k\", 2.5)
+  for n in [1, 2, 3] {
+    sum = sum + n
+    n = shared_get(cell)
+  }
+  log(sum)
+}",
+    );
+    let disasm = chunk.disassemble("test");
+    assert!(
+        !disasm.contains("ADD_INT"),
+        "reassigned for-item must not specialize, got:\n{disasm}"
+    );
+}
+
+#[test]
+fn for_item_never_reassigned_keeps_typed_ops() {
+    // The common case: a `for`-item that is never reassigned stays on the typed
+    // fast path.
+    let chunk = compile_source(
+        "pipeline test(task) {
+  var sum = 0
+  for n in [1, 2, 3] {
+    sum = sum + n
+  }
+  log(sum)
+}",
+    );
+    let disasm = chunk.disassemble("test");
+    assert!(
+        disasm.contains("ADD_INT"),
+        "unreassigned for-item should specialize, got:\n{disasm}"
+    );
+}
+
+#[test]
 fn test_optimizer_folds_scalar_constants() {
     let chunk = compile_source("pipeline test(task) { log(2 + 3 * 4) }");
     let disasm = chunk.disassemble("test");

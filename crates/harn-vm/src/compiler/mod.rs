@@ -142,6 +142,18 @@ pub struct Compiler {
     /// from the parser's diagnostic type checker so compile-only callers keep
     /// working without a required type-check pass.
     type_scopes: Vec<std::collections::HashMap<String, TypeExpr>>,
+    /// `(span.start, span.end)` of every mutable binding (`var` / `for`-item)
+    /// proven *monomorphic*: its value keeps a single primitive type across its
+    /// initializer and every reassignment in scope. Only these bindings may
+    /// carry an initializer-inferred primitive type fact into typed-opcode
+    /// specialization (`AddInt`, `LessInt`, …), which hard-errors on a runtime
+    /// operand-type mismatch. A mutable binding that is reassigned through an
+    /// `any`-typed (or otherwise non-matching) value is *not* recorded here, so
+    /// the compiler keeps it on the generic adaptive path that re-checks operand
+    /// shapes at runtime — see [`Compiler::record_monomorphic_var_bindings`].
+    /// Populated per lexical scope before that scope's statements are compiled;
+    /// keyed by byte span because `Span` is not `Hash`.
+    monomorphic_bindings: std::collections::HashSet<(usize, usize)>,
     /// Current-chunk string constant index. This avoids repeatedly scanning the
     /// constant pool while compiling name-heavy scripts.
     string_constants: std::collections::HashMap<String, u16>,
@@ -222,6 +234,14 @@ impl Compiler {
                 };
                 self.compile_node(value)?;
                 self.compile_destructuring(pattern, true)?;
+                // A `var` is reassignable, so its initializer-inferred primitive
+                // type is only safe for typed-opcode specialization when the
+                // binding is provably monomorphic (proven by
+                // `record_monomorphic_var_bindings`, run before this scope's
+                // statements). Otherwise drop the primitive fact so arithmetic
+                // stays on the generic adaptive path, which re-checks operand
+                // shapes at runtime instead of hard-committing to `AddInt` etc.
+                let binding_type = self.gate_mutable_primitive_type(snode.span, binding_type);
                 self.record_binding_type(pattern, binding_type.clone());
                 self.maybe_register_owned_drop(pattern, binding_type.as_ref(), snode.span);
             }
