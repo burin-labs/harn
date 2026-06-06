@@ -8,6 +8,26 @@ highlights live in [CHANGELOG-pre-0.6.md](CHANGELOG-pre-0.6.md).
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.8.81
+
+### Added
+
+- **Natural-language tool binder schema middleware.** `std/llm/tool_binder`
+  now exposes a paired schema transform for advertising optional natural-language
+  fallback intents alongside the existing binder caller.
+- Added `std/agent/transcript` helpers for canonical agent transcript normalization and tool call/result extraction.
+
+### Fixed
+
+- **Agent loop recovery and provider cooldowns are more robust (#3094).**
+  Agent loops now turn zero-dispatch tool-call protocol violations into
+  actionable retry feedback, and provider `Retry-After` rate-limit signals
+  temporarily cool down matching provider/model routes across subsequent calls.
+- **Bytecode cache fingerprints are now checkout-path stable.** Harn no longer
+  bakes absolute compiler source paths into `HARN_CODEGEN_FINGERPRINT`, so
+  precompiled `.harnbc` artifacts generated from the same Harn source match
+  across Linux, macOS, and separate local worktrees.
+
 ## v0.8.80
 
 ### Fixed
