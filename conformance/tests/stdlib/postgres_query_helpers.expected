@@ -27,3 +27,5 @@ SELECT id::text AS id, to_json(created_at)#>>'{}' AS created_at, payload FROM re
 tenant-a
 true
 true
+vaults.id::text AS id, to_json(vaults.created_at)#>>'{}' AS created_at, CASE WHEN items.expires_at IS NULL THEN NULL ELSE to_json(items.expires_at)#>>'{}' END AS expires_at
+true

@@ -202,16 +202,20 @@ the query name before the underlying Postgres or mock-pool error. Query records
 may include `options` for read routing; `one(...)` and `many(...)` pass those
 through to `pg_query_one` and `pg_query`.
 
-Projection helpers only accept static SQL identifiers matching
-`[A-Za-z_][A-Za-z0-9_]*`. They are for source-controlled column names, not
-user input. Each returns a trusted `PgSqlFragment`, so it drops straight into a
-`{name}` placeholder — no `unsafe_sql(...)` wrapper — and carries the literal
-`'{}'` JSON path safely:
+Projection helpers accept static SQL identifiers matching
+`[A-Za-z_][A-Za-z0-9_]*`, optionally table-qualified (`vaults.created_at`) —
+every dot-separated segment is validated, and the output alias is the trailing
+segment (a qualified alias is not valid SQL). They are for source-controlled
+column names, not user input. Each returns a trusted `PgSqlFragment`, so it
+drops straight into a `{name}` placeholder — no `unsafe_sql(...)` wrapper — and
+carries the literal `'{}'` JSON path safely:
 
 | Helper | Output |
 |---|---|
 | `uuid_text("id")` | `id::text AS id` |
+| `uuid_text("vaults.id")` | `vaults.id::text AS id` |
 | `timestamptz_json("created_at")` | `to_json(created_at)#>>'{}' AS created_at` |
+| `timestamptz_json("vaults.created_at")` | `to_json(vaults.created_at)#>>'{}' AS created_at` |
 | `nullable_timestamptz_json("finished_at")` | `CASE WHEN finished_at IS NULL THEN NULL ELSE to_json(finished_at)#>>'{}' END AS finished_at` |
 | `columns([uuid_text("id"), "payload"])` | `id::text AS id, payload` |
 | `select_clause([...])` | `SELECT ...` |

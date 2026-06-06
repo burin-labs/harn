@@ -37,6 +37,10 @@ fn run_inner(args: &PgCodegenArgs) -> Result<i32, String> {
     let suffix = args.suffix.as_deref().unwrap_or(DEFAULT_TYPE_SUFFIX);
     let header = header_for(&args.dir, args.out.as_deref(), suffix);
     let rendered = emit::render(&schema, &header, suffix);
+    // Emit canonically formatted source so generated files satisfy `harn fmt
+    // --check` without a manual pass. Fall back to the raw render if the
+    // formatter ever rejects it, so codegen never hard-fails on formatting.
+    let rendered = harn_fmt::format_source(&rendered).unwrap_or(rendered);
 
     let Some(out) = args.out.as_deref() else {
         print!("{rendered}");

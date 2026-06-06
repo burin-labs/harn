@@ -175,6 +175,29 @@ pub fn lint_with_options(
     )
 }
 
+/// The filename suffix that marks a machine-generated Harn source file:
+/// `<name>.generated.harn`.
+pub const GENERATED_HARN_SUFFIX: &str = ".generated.harn";
+
+/// True if `path` names a machine-generated Harn file (`*.generated.harn`).
+///
+/// Style and declaration lints are skipped for these files because their shape
+/// is owned by the generator (e.g. `harn pg codegen`), not the author: an unused
+/// generated row type or banner comment is noise, not a defect. Type diagnostics
+/// run on a separate path and still apply, and `harn fmt` still formats them.
+///
+/// The signal is the *filename*, deliberately not an in-file `@generated` /
+/// `DO NOT EDIT` comment: a content marker is a one-line lint backdoor any
+/// author can paste in to dodge rules, whereas renaming a hand-written file to
+/// `*.generated.harn` is structural and obvious in review. (Compare Go's
+/// `// Code generated … DO NOT EDIT.` regex and Biome's `@generated`; we trade
+/// their convenience for a signal that cannot be forged in passing.)
+pub fn is_generated_path(path: &Path) -> bool {
+    path.file_name()
+        .and_then(|name| name.to_str())
+        .is_some_and(|name| name.ends_with(GENERATED_HARN_SUFFIX))
+}
+
 fn lint_full(
     program: &[SNode],
     disabled_rules: &[String],
@@ -183,6 +206,12 @@ fn lint_full(
     options: &LintOptions<'_>,
     module_graph: Option<(&harn_modules::ModuleGraph, &Path)>,
 ) -> Vec<LintDiagnostic> {
+    // Generated files (`*.generated.harn`) skip style/declaration lints entirely.
+    // Type diagnostics flow through a separate path, so real correctness errors
+    // are never hidden.
+    if options.file_path.is_some_and(is_generated_path) {
+        return Vec::new();
+    }
     let mut linter = Linter::new(source);
     // Append project rule-engine rules to the registry. They run in the
     // whole-program phase over the source; a malformed one is skipped.
