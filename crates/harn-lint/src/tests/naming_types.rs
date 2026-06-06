@@ -227,3 +227,45 @@ pipeline default(task) {
         "types referenced by typed catch clauses should not trigger unused-type: {diags:?}"
     );
 }
+
+fn lint_at_path(source: &str, path: &str) -> Vec<LintDiagnostic> {
+    let mut lexer = Lexer::new(source);
+    let tokens = lexer.tokenize().unwrap();
+    let mut parser = Parser::new(tokens);
+    let program = parser.parse().unwrap();
+    let path = std::path::PathBuf::from(path);
+    let options = LintOptions {
+        file_path: Some(&path),
+        ..Default::default()
+    };
+    lint_with_options(&program, &[], Some(source), &HashSet::new(), &options)
+}
+
+#[test]
+fn test_generated_file_skips_style_lints() {
+    let source = "type Payload = {value: int}\n";
+    // A hand-authored file still flags the unused type.
+    assert!(
+        has_rule(&lint_at_path(source, "schema.harn"), "unused-type"),
+        "plain .harn should flag unused-type"
+    );
+    // The same content in a `*.generated.harn` file skips style lints.
+    assert!(
+        !has_rule(
+            &lint_at_path(source, "schema.generated.harn"),
+            "unused-type"
+        ),
+        "*.generated.harn should skip the unused-type style lint"
+    );
+}
+
+#[test]
+fn test_is_generated_path_matches_only_suffix() {
+    use std::path::Path;
+    assert!(is_generated_path(Path::new("db_types.generated.harn")));
+    assert!(is_generated_path(Path::new("/a/b/schema.generated.harn")));
+    // A plain .harn, or a name that merely contains "generated", is not exempt.
+    assert!(!is_generated_path(Path::new("db_types.harn")));
+    assert!(!is_generated_path(Path::new("generated.harn")));
+    assert!(!is_generated_path(Path::new("my_generated_types.harn")));
+}

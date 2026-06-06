@@ -145,4 +145,16 @@ LIMIT {limit}
     columns([123])
   }
   __io_println(is_err(bad_columns))
+  let qualified = columns(
+    [
+      uuid_text("vaults.id"),
+      timestamptz_json("vaults.created_at"),
+      nullable_timestamptz_json("items.expires_at"),
+    ],
+  )
+  __io_println(qualified.sql)
+  let bad_qualified = try {
+    timestamptz_json("vaults.bad;drop")
+  }
+  __io_println(is_err(bad_qualified))
 }

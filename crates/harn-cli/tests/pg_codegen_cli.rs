@@ -45,9 +45,12 @@ fn codegen_to_stdout_emits_record_type() {
         .expect("spawn harn pg codegen");
     assert!(output.status.success(), "exit={:?}", output.status.code());
     let stdout = String::from_utf8_lossy(&output.stdout);
+    // Output is run through `harn fmt`, so this small record collapses onto one
+    // line. Assert on format-agnostic substrings (wide real-world rows still
+    // wrap across lines, but the field text is identical either way).
     assert!(stdout.contains("type ReceiptsRow = {"), "got:\n{stdout}");
-    assert!(stdout.contains("id: int,"), "got:\n{stdout}");
-    assert!(stdout.contains("note: string?,"), "got:\n{stdout}");
+    assert!(stdout.contains("id: int"), "got:\n{stdout}");
+    assert!(stdout.contains("note: string?"), "got:\n{stdout}");
     fs::remove_dir_all(&root).ok();
 }
 

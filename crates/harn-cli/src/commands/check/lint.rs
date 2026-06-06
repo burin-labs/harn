@@ -10,6 +10,8 @@ use crate::package::CheckConfig;
 use super::analysis::{analyze_file, render_file_analysis_error_or_exit};
 use super::outcome::{print_lint_diagnostics, CommandOutcome};
 
+use harn_lint::is_generated_path;
+
 /// Collect the TOML sources of `language = "harn"` rules from the project's
 /// `[rules] ruleDirs` (#2849), to run as lint rules. Non-harn rules can't
 /// match `.harn` source and are skipped. Returns empty when no manifest or no
@@ -108,6 +110,10 @@ pub(crate) fn lint_file_inner(
         native_rule_paths: &native_rule_paths,
         severity_overrides: super::harn_lint_severity_overrides(path),
     };
+    // Generated files (`*.generated.harn`) skip style/declaration lints inside
+    // `lint_with_module_graph`; type diagnostics still flow so real correctness
+    // errors are never hidden.
+    let generated = is_generated_path(path);
     let mut diagnostics = harn_lint::lint_with_module_graph(
         &program,
         &config.disable_rules,
@@ -124,17 +130,19 @@ pub(crate) fn lint_file_inner(
     // `.harn`-authored custom lint rules (#2850), pre-computed in the async
     // command handler (they need the VM) and merged here so they render and
     // affect the exit code exactly like built-in rules.
-    diagnostics.extend(
-        script_rule_diagnostics
-            .iter()
-            .filter(|d| {
-                !config
-                    .disable_rules
-                    .iter()
-                    .any(|r| r.as_str() == d.rule.as_ref())
-            })
-            .cloned(),
-    );
+    if !generated {
+        diagnostics.extend(
+            script_rule_diagnostics
+                .iter()
+                .filter(|d| {
+                    !config
+                        .disable_rules
+                        .iter()
+                        .any(|r| r.as_str() == d.rule.as_ref())
+                })
+                .cloned(),
+        );
+    }
 
     if diagnostics.is_empty() {
         println!("{path_str}: no issues found");
@@ -184,6 +192,8 @@ pub(crate) fn lint_fix_file(
         native_rule_paths: &native_rule_paths,
         severity_overrides: super::harn_lint_severity_overrides(path),
     };
+    // Generated files self-skip style lints inside `lint_with_module_graph`, so
+    // no style-lint autofix edits are produced for them.
     let lint_diags = harn_lint::lint_with_module_graph(
         &program,
         &config.disable_rules,

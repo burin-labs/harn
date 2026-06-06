@@ -462,7 +462,37 @@ pub fn select_clause(parts: list) -> PgSqlFragment {
 }
 
 /**
+ * Validate a possibly table-qualified column reference and return it unchanged.
+ *
+ * Accepts `"column"` or `"table.column"` (any depth of dotted qualification);
+ * every dot-separated segment must pass [`identifier`], so an unsafe segment
+ * throws exactly as a bare identifier would. This lets projection helpers carry
+ * qualified columns from joined queries (`vaults.created_at`) without escaping.
+ */
+fn __qualified_column(name: string) -> string {
+  let parts = split(name, ".")
+  var validated = []
+  for part in parts {
+    validated = validated.push(identifier(part))
+  }
+  return join(validated, ".")
+}
+
+/**
+ * The output alias for a projection column: the trailing segment of a qualified
+ * name, so `vaults.created_at` aliases to `created_at` (a qualified alias is not
+ * valid SQL).
+ */
+fn __column_alias(name: string) -> string {
+  let parts = split(name, ".")
+  return identifier(parts[len(parts) - 1])
+}
+
+/**
  * Render `column::text AS column` for UUID columns as a trusted fragment.
+ *
+ * Accepts a table-qualified name (`vaults.id`); the alias is the trailing
+ * segment (`id`).
  *
  * @effects: []
  * @allocation: heap
@@ -471,13 +501,17 @@ pub fn select_clause(parts: list) -> PgSqlFragment {
  * @example: uuid_text("id")
  */
 pub fn uuid_text(name: string) -> PgSqlFragment {
-  let ident = identifier(name)
-  return __sql_fragment(ident + "::text AS " + ident)
+  let column = __qualified_column(name)
+  let alias = __column_alias(name)
+  return __sql_fragment(column + "::text AS " + alias)
 }
 
 /**
  * Render `to_json(column)#>>'{}' AS column` for timestamp columns as a trusted
  * fragment.
+ *
+ * Accepts a table-qualified name (`vaults.created_at`); the alias is the
+ * trailing segment (`created_at`).
  *
  * @effects: []
  * @allocation: heap
@@ -486,13 +520,17 @@ pub fn uuid_text(name: string) -> PgSqlFragment {
  * @example: timestamptz_json("created_at")
  */
 pub fn timestamptz_json(name: string) -> PgSqlFragment {
-  let ident = identifier(name)
-  return __sql_fragment("to_json(" + ident + ")#>>'{}' AS " + ident)
+  let column = __qualified_column(name)
+  let alias = __column_alias(name)
+  return __sql_fragment("to_json(" + column + ")#>>'{}' AS " + alias)
 }
 
 /**
  * Render a nullable timestamp projection that preserves nulls as null, as a
  * trusted fragment.
+ *
+ * Accepts a table-qualified name (`items.expires_at`); the alias is the
+ * trailing segment (`expires_at`).
  *
  * @effects: []
  * @allocation: heap
@@ -501,8 +539,9 @@ pub fn timestamptz_json(name: string) -> PgSqlFragment {
  * @example: nullable_timestamptz_json("finished_at")
  */
 pub fn nullable_timestamptz_json(name: string) -> PgSqlFragment {
-  let ident = identifier(name)
+  let column = __qualified_column(name)
+  let alias = __column_alias(name)
   return __sql_fragment(
-    "CASE WHEN " + ident + " IS NULL THEN NULL ELSE to_json(" + ident + ")#>>'{}' END AS " + ident,
+    "CASE WHEN " + column + " IS NULL THEN NULL ELSE to_json(" + column + ")#>>'{}' END AS " + alias,
   )
 }

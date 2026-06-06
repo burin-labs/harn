@@ -1028,7 +1028,9 @@ Helpers: `one(handle, query)`, `many(handle, query)`, `exec(handle, query)`,
 The projection helpers (`uuid_text`, `timestamptz_json`,
 `nullable_timestamptz_json`, `columns`, `select_clause`) return trusted
 `PgSqlFragment`s, so they drop into `{name}` placeholders without
-`unsafe_sql(...)`. In `sql(...)`, ordinary `{name}` placeholders become `$n`
+`unsafe_sql(...)`. `uuid_text`/`timestamptz_json`/`nullable_timestamptz_json`
+accept table-qualified names (`timestamptz_json("vaults.created_at")`); the
+alias is the trailing segment. In `sql(...)`, ordinary `{name}` placeholders become `$n`
 params and repeated placeholders reuse the first parameter index. Use `{{` and
 `}}` for literal braces. SQL structure is never inferred from strings; use
 `ident(...)` / `ident_path(...)` for identifiers and reserve `unsafe_sql(...)`
