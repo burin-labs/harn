@@ -9,6 +9,7 @@ members = [
     "crates/harn-lexer",
     "crates/harn-parser",
     "crates/harn-ir",
+    "crates/harn-codegen",
     "crates/harn-cli",
     "crates/harn-serve",
     "crates/harn-skills",

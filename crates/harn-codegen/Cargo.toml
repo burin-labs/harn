@@ -1,0 +1,39 @@
+# harn-codegen — experimental ahead-of-time / JIT native compiler for the
+# scalar-compute subset of Harn bytecode.
+#
+# This crate is intentionally NOT a dependency of `harn-cli`, `harn-vm`, or any
+# other crate that ships in the distributed Harn binary. It pulls in the
+# Cranelift code generator (the same vetted code generator the optional
+# `testbench-wasi` feature already links via wasmtime), which would otherwise
+# bloat the shipped CLI. It builds and tests under `cargo *--workspace` so CI
+# keeps it honest, but `publish = false` keeps it off crates.io and nothing in
+# the published dependency graph links it. See `docs/src/dev/native-codegen.md`.
+[package]
+name = "harn-codegen"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+description = "Experimental Cranelift-backed native compiler for the scalar subset of Harn bytecode"
+publish = false
+
+[lib]
+name = "harn_codegen"
+
+[[bin]]
+name = "harn-nativec"
+path = "src/bin/harn-nativec.rs"
+
+[dependencies]
+harn-vm = { path = "../harn-vm", version = "0.8" }
+harn-parser = { path = "../harn-parser", version = "0.8" }
+cranelift-codegen = "0.132"
+cranelift-frontend = "0.132"
+cranelift-module = "0.132"
+cranelift-jit = "0.132"
+cranelift-native = "0.132"
+cranelift-object = "0.132"
+
+[lints]
+workspace = true

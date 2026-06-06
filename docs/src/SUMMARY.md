@@ -260,6 +260,7 @@
 - [Annotation tape format](./dev/annotation-tape-format.md)
 - [DES runtime mode](./dev/des-mode.md)
 - [VM and stdlib perf notes](./dev/vm-stdlib-perf-notes.md)
+- [Native code generation (experimental)](./dev/native-codegen.md)
 - [Bytecode cache](./perf/bytecode-cache.md)
 
 # Migrations
