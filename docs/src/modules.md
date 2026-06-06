@@ -785,10 +785,11 @@ repeated projection fragments easier to review:
 | `ident(name)` | Build a quoted identifier fragment for `sql(...)` |
 | `ident_path(parts)` | Build a dotted quoted identifier fragment for `sql(...)` |
 | `unsafe_sql(fragment)` | Mark a source-controlled SQL fragment for insertion into `sql(...)` |
-| `select_clause(fragments)` | Render `SELECT ...` from static projection fragments |
-| `uuid_text(name)` | Render `name::text AS name` |
-| `timestamptz_json(name)` | Render `to_json(name)#>>'{}' AS name` |
-| `nullable_timestamptz_json(name)` | Render a timestamp projection that preserves nulls |
+| `columns(parts)` | Join projection fragments/strings into one `{projection}` fragment |
+| `select_clause(parts)` | Render `SELECT ...` from projection parts as a fragment |
+| `uuid_text(name)` | Fragment `name::text AS name` |
+| `timestamptz_json(name)` | Fragment `to_json(name)#>>'{}' AS name` |
+| `nullable_timestamptz_json(name)` | Fragment timestamp projection that preserves nulls |
 
 In SQL templates, ordinary `{name}` placeholders are always bound as params;
 use `{{` and `}}` for literal braces. SQL structure must be explicit through

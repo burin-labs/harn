@@ -399,8 +399,57 @@ pub fn unsafe_sql(fragment: string) -> PgSqlFragment {
   return __sql_fragment(fragment)
 }
 
+fn __projection_part_text(part) -> string {
+  if __is_sql_fragment(part) {
+    return __sql_fragment_text(part)
+  }
+  if type_of(part) == "string" {
+    if trim(part) == "" {
+      throw "std/postgres/query: projection part must be a non-empty string"
+    }
+    return part
+  }
+  throw "std/postgres/query: projection part must be a SQL fragment or string"
+}
+
 /**
- * Render `SELECT a, b, c` from already-static projection fragments.
+ * Join projection parts into a single comma-separated `PgSqlFragment`.
+ *
+ * Each part is a `PgSqlFragment` (e.g. `uuid_text(...)`, `ident(...)`,
+ * `unsafe_sql(...)`) or a source-controlled projection string. The result is a
+ * trusted fragment, so it drops into a `{name}` placeholder without
+ * `unsafe_sql(...)` and carries any literal braces (such as the `'{}'` JSON
+ * path) safely:
+ *
+ * ```harn,ignore
+ * sql(
+ *   "SELECT {projection} FROM receipts WHERE tenant_id = {tenant_id}::uuid",
+ *   {projection: columns([uuid_text("id"), timestamptz_json("created_at"), "payload"]), tenant_id: tenant_id},
+ * )
+ * ```
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: validation
+ * @api_stability: experimental
+ * @example: columns([uuid_text("id"), timestamptz_json("created_at")])
+ */
+pub fn columns(parts: list) -> PgSqlFragment {
+  if type_of(parts) != "list" {
+    throw "std/postgres/query: columns requires a list of projection parts"
+  }
+  if len(parts) == 0 {
+    throw "std/postgres/query: columns requires at least one projection part"
+  }
+  var rendered = []
+  for part in parts {
+    rendered = rendered.push(__projection_part_text(part))
+  }
+  return __sql_fragment(join(rendered, ", "))
+}
+
+/**
+ * Prefix `columns(parts)` with `SELECT `, returning a trusted `PgSqlFragment`.
  *
  * @effects: []
  * @allocation: heap
@@ -408,18 +457,12 @@ pub fn unsafe_sql(fragment: string) -> PgSqlFragment {
  * @api_stability: experimental
  * @example: select_clause([uuid_text("id"), "payload"])
  */
-pub fn select_clause(fragments: list<string>) -> string {
-  if type_of(fragments) != "list" {
-    throw "std/postgres/query: select_clause requires a list of fragments"
-  }
-  if len(fragments) == 0 {
-    throw "std/postgres/query: select_clause requires at least one fragment"
-  }
-  return "SELECT " + join(fragments, ", ")
+pub fn select_clause(parts: list) -> PgSqlFragment {
+  return __sql_fragment("SELECT " + __sql_fragment_text(columns(parts)))
 }
 
 /**
- * Render `column::text AS column` for UUID columns.
+ * Render `column::text AS column` for UUID columns as a trusted fragment.
  *
  * @effects: []
  * @allocation: heap
@@ -427,13 +470,14 @@ pub fn select_clause(fragments: list<string>) -> string {
  * @api_stability: experimental
  * @example: uuid_text("id")
  */
-pub fn uuid_text(name: string) -> string {
+pub fn uuid_text(name: string) -> PgSqlFragment {
   let ident = identifier(name)
-  return ident + "::text AS " + ident
+  return __sql_fragment(ident + "::text AS " + ident)
 }
 
 /**
- * Render `to_json(column)#>>'{}' AS column` for timestamp columns.
+ * Render `to_json(column)#>>'{}' AS column` for timestamp columns as a trusted
+ * fragment.
  *
  * @effects: []
  * @allocation: heap
@@ -441,13 +485,14 @@ pub fn uuid_text(name: string) -> string {
  * @api_stability: experimental
  * @example: timestamptz_json("created_at")
  */
-pub fn timestamptz_json(name: string) -> string {
+pub fn timestamptz_json(name: string) -> PgSqlFragment {
   let ident = identifier(name)
-  return "to_json(" + ident + ")#>>'{}' AS " + ident
+  return __sql_fragment("to_json(" + ident + ")#>>'{}' AS " + ident)
 }
 
 /**
- * Render a nullable timestamp projection that preserves nulls as null.
+ * Render a nullable timestamp projection that preserves nulls as null, as a
+ * trusted fragment.
  *
  * @effects: []
  * @allocation: heap
@@ -455,12 +500,9 @@ pub fn timestamptz_json(name: string) -> string {
  * @api_stability: experimental
  * @example: nullable_timestamptz_json("finished_at")
  */
-pub fn nullable_timestamptz_json(name: string) -> string {
+pub fn nullable_timestamptz_json(name: string) -> PgSqlFragment {
   let ident = identifier(name)
-  return "CASE WHEN "
-    + ident
-    + " IS NULL THEN NULL ELSE to_json("
-    + ident
-    + ")#>>'{}' END AS "
-    + ident
+  return __sql_fragment(
+    "CASE WHEN " + ident + " IS NULL THEN NULL ELSE to_json(" + ident + ")#>>'{}' END AS " + ident,
+  )
 }

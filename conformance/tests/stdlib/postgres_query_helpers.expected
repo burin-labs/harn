@@ -23,3 +23,7 @@ true
 true
 true
 true
+SELECT id::text AS id, to_json(created_at)#>>'{}' AS created_at, payload FROM receipts WHERE tenant_id = $1::uuid
+tenant-a
+true
+true
