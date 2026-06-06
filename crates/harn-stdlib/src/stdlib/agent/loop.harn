@@ -501,6 +501,53 @@ fn __tool_terminal_status(result) -> string {
   return "failed"
 }
 
+fn __tool_lifecycle_error_category(raw) {
+  if raw == nil {
+    return nil
+  }
+  let category = to_string(raw)
+  if category == "" {
+    return nil
+  }
+  if contains(
+    [
+      "schema_validation",
+      "tool_error",
+      "mcp_server_error",
+      "host_bridge_error",
+      "permission_denied",
+      "rejected_loop",
+      "parse_aborted",
+      "timeout",
+      "network",
+      "cancelled",
+      "unknown",
+    ],
+    category,
+  ) {
+    return category
+  }
+  if contains(["tool_rejected", "consent_denied", "egress_blocked", "scope_violation"], category) {
+    return "permission_denied"
+  }
+  if contains(
+    ["schema_violation", "schema_stream_aborted", "validator_failure", "repair_failed"],
+    category,
+  ) {
+    return "schema_validation"
+  }
+  if contains(["rate_limit", "overloaded", "server_error", "transient_network"], category) {
+    return "network"
+  }
+  if contains(["tool_middleware_exception", "tool_parallel_dispatch_exception", "generic"], category) {
+    return "tool_error"
+  }
+  if contains(["auth", "channel_closed", "not_found", "circuit_open", "budget_exceeded"], category) {
+    return "host_bridge_error"
+  }
+  return "unknown"
+}
+
 fn __emit_tool_lifecycle_finish(envelope, result) {
   let session_id = __tool_lifecycle_session_id(envelope)
   if session_id == "" || to_string(envelope?.tool_name ?? "") == "" {
@@ -521,7 +568,7 @@ fn __emit_tool_lifecycle_finish(envelope, result) {
     error: result?.error,
     duration_ms: result?.duration_ms ?? result?.execution_duration_ms,
     execution_duration_ms: result?.execution_duration_ms,
-    error_category: result?.error_category,
+    error_category: __tool_lifecycle_error_category(result?.error_category),
     executor: result?.executor,
   }
   let _ = agent_emit_event(session_id, "tool_call_update", payload)
