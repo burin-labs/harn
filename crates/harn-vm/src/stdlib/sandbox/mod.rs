@@ -494,7 +494,31 @@ fn sandboxed_process_config(
     } else {
         resolved.cwd = Some(default_process_cwd_for_policy(policy)?);
     }
+    neutralize_rustc_wrapper(&mut resolved.env);
     Ok(resolved)
+}
+
+/// Disable any Cargo `rustc` wrapper (e.g. `sccache`) for a sandboxed spawn.
+///
+/// `sccache` is a single shared, long-lived per-user daemon. If a sandboxed
+/// cargo build is the first caller to spawn it, the daemon inherits the
+/// `sandbox-exec` confinement permanently — even after it reparents to
+/// launchd — and then fails *every* later build machine-wide with
+/// `Operation not permitted` (it can no longer read build inputs outside the
+/// sandbox root nor write its cache dir under `~/Library/Caches`). A
+/// per-command sandbox must never be allowed to poison a cross-workspace
+/// daemon, so sandboxed builds bypass the wrapper entirely. Cargo treats an
+/// empty `CARGO_BUILD_RUSTC_WRAPPER` / `RUSTC_WRAPPER` as "no wrapper", which
+/// overrides any `build.rustc-wrapper` set in `.cargo/config.toml`. The
+/// on-disk cache and all unsandboxed builds are unaffected.
+fn neutralize_rustc_wrapper(env: &mut Vec<(String, String)>) {
+    for key in ["RUSTC_WRAPPER", "CARGO_BUILD_RUSTC_WRAPPER"] {
+        if let Some(entry) = env.iter_mut().find(|(existing, _)| existing == key) {
+            entry.1.clear();
+        } else {
+            env.push((key.to_string(), String::new()));
+        }
+    }
 }
 
 fn default_process_cwd_for_policy(policy: &CapabilityPolicy) -> Result<PathBuf, VmError> {
@@ -1198,6 +1222,48 @@ mod tests {
         };
 
         assert!(sandboxed_process_config(&config, &policy).is_err());
+    }
+
+    #[test]
+    fn sandboxed_process_config_neutralizes_rustc_wrapper() {
+        let cwd = std::env::current_dir().unwrap();
+        let policy = CapabilityPolicy {
+            sandbox_profile: SandboxProfile::Worktree,
+            workspace_roots: vec![cwd.to_string_lossy().into_owned()],
+            ..CapabilityPolicy::default()
+        };
+
+        // A sandboxed spawn must bypass sccache so it can never spawn (and
+        // thereby permanently confine) the shared daemon.
+        let resolved = sandboxed_process_config(&ProcessCommandConfig::default(), &policy).unwrap();
+        let env: std::collections::BTreeMap<_, _> = resolved.env.into_iter().collect();
+        assert_eq!(env.get("RUSTC_WRAPPER").map(String::as_str), Some(""));
+        assert_eq!(
+            env.get("CARGO_BUILD_RUSTC_WRAPPER").map(String::as_str),
+            Some("")
+        );
+    }
+
+    #[test]
+    fn neutralize_rustc_wrapper_overrides_caller_supplied_wrapper() {
+        // Even if a caller (or inherited env) asked for sccache, the sandboxed
+        // config forces it off rather than appending a duplicate entry.
+        let mut env = vec![
+            ("RUSTC_WRAPPER".to_string(), "sccache".to_string()),
+            ("PATH".to_string(), "/usr/bin".to_string()),
+        ];
+        neutralize_rustc_wrapper(&mut env);
+        let collected: std::collections::BTreeMap<_, _> = env.iter().cloned().collect();
+        assert_eq!(collected.get("RUSTC_WRAPPER").map(String::as_str), Some(""));
+        assert_eq!(
+            collected
+                .get("CARGO_BUILD_RUSTC_WRAPPER")
+                .map(String::as_str),
+            Some("")
+        );
+        assert_eq!(collected.get("PATH").map(String::as_str), Some("/usr/bin"));
+        // No duplicate RUSTC_WRAPPER entries.
+        assert_eq!(env.iter().filter(|(k, _)| k == "RUSTC_WRAPPER").count(), 1);
     }
 
     #[test]
