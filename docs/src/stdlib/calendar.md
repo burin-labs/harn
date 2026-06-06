@@ -134,7 +134,7 @@ pipeline default() {
   let us = country_info("US")
   log(us.name)
   log(default_timezone_for_country("US") == nil)
-  log(country_timezones("GB")[0])
+  log(country_timezones("GB")?[0])
   log(default_timezone_for_country("GB"))
 }
 ```
