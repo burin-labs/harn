@@ -8,6 +8,15 @@ highlights live in [CHANGELOG-pre-0.6.md](CHANGELOG-pre-0.6.md).
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.8.80
+
+### Fixed
+
+- **LLM retry-after handling now parses provider messages with trailing
+  punctuation.** Rate-limit retries such as Cerebras
+  `(retry-after: 60))` now honor the full provider delay instead of falling
+  back to short exponential retries that can immediately hit another 429.
+
 ## v0.8.79
 
 ### Added
