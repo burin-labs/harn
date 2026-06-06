@@ -37,16 +37,13 @@ impl crate::vm::Vm {
             )),
             "lowercase" => Ok(VmValue::String(std::sync::Arc::from(s.to_lowercase()))),
             "uppercase" => Ok(VmValue::String(std::sync::Arc::from(s.to_uppercase()))),
-            "substring" => {
-                let len = s.chars().count() as i64;
-                let start = args.first().and_then(|a| a.as_int()).unwrap_or(0);
-                let end = args.get(1).and_then(|a| a.as_int()).unwrap_or(len);
-                let start = start.clamp(0, len) as usize;
-                let end = end.clamp(0, len) as usize;
-                let end = end.max(start);
-                let substr: String = s.chars().skip(start).take(end - start).collect();
-                Ok(VmValue::String(std::sync::Arc::from(substr)))
-            }
+            "substring" => Ok(VmValue::String(std::sync::Arc::from(
+                crate::stdlib::strings::char_substring(
+                    s,
+                    args.first().and_then(|a| a.as_int()).unwrap_or(0),
+                    args.get(1).and_then(|a| a.as_int()),
+                ),
+            ))),
             "index_of" => {
                 let needle = args.first().map(|a| a.as_str_cow()).unwrap_or_default();
                 let idx = s

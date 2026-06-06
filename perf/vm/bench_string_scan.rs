@@ -103,7 +103,7 @@ fn scan_source(scan_kind: &str, lines: usize) -> String {
   var i = 0
   var braces = 0
   while i < n {
-    if substring(src, i, 1) == "{" { braces = braces + 1 }
+    if substring(src, i, i + 1) == "{" { braces = braces + 1 }
     i = i + 1
   }
 "#

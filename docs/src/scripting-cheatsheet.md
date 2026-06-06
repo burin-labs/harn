@@ -59,9 +59,9 @@ let tail = content[len(content) - 400:len(content)]
 let sub = xs[1:4]
 ```
 
-`substring(s, start, length)` exists too, but the third argument is a
-**length**, not an end index. Prefer the slice syntax to avoid that
-footgun.
+`substring(s, start, end)` exists too. Its second argument is an
+exclusive **end** index — the same convention as `s[start:end]` slicing,
+`.substring`, and `list.slice` — and `end` defaults to the string length.
 
 Strings are UTF-8, so `s[i]`, `s[a:b]`, `s.count`, and `substring(...)`
 are each O(n) in the string length — a per-character cursor loop over a

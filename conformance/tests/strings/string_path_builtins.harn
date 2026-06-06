@@ -20,10 +20,10 @@ pipeline test(task) {
   log(len("hello"))
   log(len([1, 2, 3]))
   log(len({}))
-  // substring
+  // substring (start, end?) — second arg is an exclusive end index
   log(substring("hello world", 0, 5))
   log(substring("hello world", 6))
-  log(substring("hello world", 6, 3))
+  log(substring("hello world", 6, 9))
   // dirname
   log(dirname("/usr/local/bin/harn"))
   // basename

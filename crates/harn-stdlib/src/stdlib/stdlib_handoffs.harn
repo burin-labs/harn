@@ -40,18 +40,18 @@ fn __handoff_route_matches(route, kind, source) -> bool {
 fn __handoff_target_record(raw_target, route_target) {
   let target = __handoff_value_string(raw_target)
   if starts_with(target, "human:") {
-    let label = trim(substring(target, len("human:"), len(target) - len("human:")))
+    let label = trim(substring(target, len("human:")))
     return {kind: "human", id: label, label: label}
   }
   if starts_with(target, "a2a://") {
     return {kind: "a2a", uri: target, label: target}
   }
   if starts_with(target, "worker://") {
-    let queue = trim(substring(target, len("worker://"), len(target) - len("worker://")))
+    let queue = trim(substring(target, len("worker://")))
     return {kind: "worker", id: queue, label: queue}
   }
   let persona = if starts_with(target, "persona://") {
-    trim(substring(target, len("persona://"), len(target) - len("persona://")))
+    trim(substring(target, len("persona://")))
   } else {
     target
   }

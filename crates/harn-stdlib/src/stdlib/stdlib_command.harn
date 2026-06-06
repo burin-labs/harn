@@ -483,7 +483,7 @@ fn __command_tail_inline(result, length) -> string {
   if length == nil || len(content) <= length {
     return content
   }
-  return substring(content, len(content) - length, length)
+  return substring(content, len(content) - length)
 }
 
 fn __command_tail(result, options) {
@@ -847,7 +847,7 @@ fn __command_suffix(value, limit) {
   if limit == nil || len(text) <= limit {
     return text
   }
-  return substring(text, len(text) - limit, limit)
+  return substring(text, len(text) - limit)
 }
 
 /**

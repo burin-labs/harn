@@ -485,26 +485,36 @@ fn join_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     }
 }
 
+/// Extract a character range `[start, end)` from `s`, the single source of
+/// truth shared by the `substring(...)` builtin and the `.substring(...)`
+/// method so both forms agree (issue: free/method semantics drift).
+///
+/// `start`/`end` are character offsets, not byte offsets. Both are clamped
+/// to `[0, len]`; a negative offset clamps to `0`; an `end` below `start`
+/// (after clamping) yields the empty string. Omitting `end` runs to the end
+/// of the string. This matches the documented spec `substring(start, end?)`,
+/// the `s[a:b]` slice operator, `list.slice`, and `bytes_slice`.
+pub(crate) fn char_substring(s: &str, start: i64, end: Option<i64>) -> String {
+    let len = s.chars().count() as i64;
+    let start = start.clamp(0, len);
+    let end = end.unwrap_or(len).clamp(0, len).max(start);
+    s.chars()
+        .skip(start as usize)
+        .take((end - start) as usize)
+        .collect()
+}
+
 #[harn_builtin(
-    sig = "substring(text: string?, start: int, length?: int) -> string",
+    sig = "substring(text: string?, start: int, end?: int) -> string",
     category = "strings"
 )]
 fn substring_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let s = args.first().map(|a| a.display()).unwrap_or_default();
-    let start = args.get(1).and_then(|a| a.as_int()).unwrap_or(0).max(0) as usize;
-    let chars: Vec<char> = s.chars().collect();
-    let start = start.min(chars.len());
-    match args.get(2).and_then(|a| a.as_int()) {
-        Some(length) => {
-            let length = (length.max(0) as usize).min(chars.len() - start);
-            let result: String = chars[start..start + length].iter().collect();
-            Ok(VmValue::String(std::sync::Arc::from(result)))
-        }
-        None => {
-            let result: String = chars[start..].iter().collect();
-            Ok(VmValue::String(std::sync::Arc::from(result)))
-        }
-    }
+    let start = args.get(1).and_then(|a| a.as_int()).unwrap_or(0);
+    let end = args.get(2).and_then(|a| a.as_int());
+    Ok(VmValue::String(std::sync::Arc::from(char_substring(
+        &s, start, end,
+    ))))
 }
 
 #[harn_builtin(sig = "chars(text: string?) -> list", category = "strings")]
@@ -1004,5 +1014,48 @@ mod tests {
         // A 2-byte char before the needle still yields a char index (5), not a
         // byte index (6) — pairs with `substring`.
         assert_eq!(call(vec![s("café x"), s("x")]), 5);
+    }
+
+    #[test]
+    fn substring_builtin_uses_start_end_semantics() {
+        use crate::value::VmValue;
+        let s = |v: &str| VmValue::String(std::sync::Arc::from(v));
+        let call = |args: Vec<VmValue>| -> String {
+            let mut out = String::new();
+            match super::substring_impl(&args, &mut out).unwrap() {
+                VmValue::String(text) => text.to_string(),
+                other => panic!("expected string, got {other:?}"),
+            }
+        };
+        // Second arg is an END index, not a length — matches `.substring`,
+        // `s[a:b]`, `list.slice`, and `bytes_slice`.
+        assert_eq!(
+            call(vec![s("hello world"), VmValue::Int(0), VmValue::Int(5)]),
+            "hello"
+        );
+        assert_eq!(
+            call(vec![s("hello world"), VmValue::Int(6), VmValue::Int(9)]),
+            "wor"
+        );
+        // Omitted end runs to the end of the string.
+        assert_eq!(call(vec![s("hello world"), VmValue::Int(6)]), "world");
+        // end < start (after clamping) yields the empty string; negatives clamp to 0.
+        assert_eq!(
+            call(vec![s("hello world"), VmValue::Int(6), VmValue::Int(3)]),
+            ""
+        );
+        assert_eq!(
+            call(vec![s("hello world"), VmValue::Int(2), VmValue::Int(-3)]),
+            ""
+        );
+        assert_eq!(
+            call(vec![s("hello world"), VmValue::Int(-3), VmValue::Int(5)]),
+            "hello"
+        );
+        // Char-indexed, not byte-indexed: the 2-byte 'é' counts as one char.
+        assert_eq!(
+            call(vec![s("café latte"), VmValue::Int(0), VmValue::Int(4)]),
+            "café"
+        );
     }
 }

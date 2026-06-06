@@ -400,7 +400,7 @@ Sets also support method syntax: `my_set.union(other)`.
 | `contains(str, substr)` | str: string, substr: string | bool | Check if string contains substring. Also works on lists |
 | `replace(str, old, new)` | str: string, old: string, new: string | string | Replace all occurrences |
 | `join(list, sep)` | list: list, sep: string | string | Join list elements with separator |
-| `substring(str, start, len?)` | str: string, start: int, len: int | string | Extract substring from start position |
+| `substring(str, start, end?)` | str: string, start: int, end: int | string | Extract the character range `[start, end)`; `end` defaults to the string length. Matches `.substring`, `s[a:b]`, and `list.slice` |
 | `chars(str)` | str: string | list | Materialize a string into a list of single-character strings in one linear pass (ASCII chars are interned). Use this for cursor-style source scanning — see [Scanning large text](#scanning-large-text) — instead of repeated `substring`/`s[i]`, which are O(n) per call |
 | `unicode_normalize(str, form)` | str: string, form: `"NFC"\|"NFD"\|"NFKC"\|"NFKD"` | string | Normalize Unicode into the requested form |
 | `unicode_graphemes(str)` | str: string | list | Split a string into extended grapheme clusters |
@@ -436,7 +436,7 @@ These are called on string values with dot notation: `"hello".uppercase()`.
 ### Scanning large text
 
 Strings are stored as UTF-8, so random character access — `s[i]`,
-`s[a:b]`, `s.count`, and `substring(s, i, n)` — is **O(n)** in the string
+`s[a:b]`, `s.count`, and `substring(s, a, b)` — is **O(n)** in the string
 length. A per-character cursor loop built from those calls is therefore
 O(n²) and stalls on multi-kilobyte source files.
 
