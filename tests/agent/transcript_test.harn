@@ -1,0 +1,181 @@
+// Run: harn test tests/agent/transcript_test.harn
+//
+// Canonical transcript normalization tests. These cover the shapes produced by
+// modern provider-native agent loops and by older JSONL scorer fixtures.
+import {
+  agent_transcript_normalize,
+  agent_transcript_read,
+  agent_transcript_text,
+  agent_transcript_tool_call,
+  agent_transcript_tool_events,
+  agent_transcript_tool_result_blocks,
+  agent_transcript_tool_results,
+} from "std/agent/transcript"
+import { write_jsonl } from "std/jsonl"
+import { with_temp_dir } from "std/testing"
+
+pipeline test_agent_transcript_normalizes_modern_native_messages(_task) {
+  let records = [
+    {type: "message", role: "user", content: [{type: "text", text: "write tests"}]},
+    {
+      type: "message",
+      role: "assistant",
+      message: {
+        role: "assistant",
+        content: "I will inspect first.",
+        tool_calls: [
+          {
+            type: "function",
+            id: "call-look",
+            function: {name: "look", arguments: "{\"file\":\"src/app.py\",\"intent\":\"read\"}"},
+          },
+        ],
+      },
+      llm: {provider: "cerebras", model: "gpt-oss-120b", input_tokens: 100, output_tokens: 20},
+      response_ms: 42,
+    },
+    {
+      type: "message",
+      role: "tool",
+      name: "look",
+      tool_call_id: "call-look",
+      content: "[result of look]\nsource text",
+    },
+  ]
+  let rows = agent_transcript_normalize(records)
+  assert(len(rows) == 3, "all rows preserved")
+  assert(rows[0].kind == "user", "user row")
+  assert(rows[1].kind == "assistant", "assistant row")
+  assert(rows[1].text == "I will inspect first.", "assistant text normalized")
+  assert(rows[1].tool_calls[0].name == "look", "OpenAI native tool name normalized")
+  assert(rows[1].tool_calls[0].id == "call-look", "tool id normalized")
+  assert(rows[1].tool_calls[0].args.file == "src/app.py", "JSON-string arguments parsed")
+  assert(rows[1].usage.input_tokens == 100, "usage normalized")
+  assert(rows[2].kind == "tool_result", "tool message becomes tool_result row")
+  assert(rows[2].name == "look", "tool result name")
+  assert(rows[2].tool_call_id == "call-look", "tool result id")
+}
+
+pipeline test_agent_transcript_normalizes_legacy_response_and_cumulative_request(_task) {
+  let records = [
+    {
+      type: "response",
+      iteration: 0,
+      text: "",
+      tool_calls: [{name: "edit", args: {path: "a.go"}}],
+      model: "legacy-model",
+    },
+    {
+      type: "request",
+      iteration: 1,
+      messages: [{role: "user", content: "<tool_result name=\"edit\">wrote a.go</tool_result>"}],
+    },
+    {
+      type: "response",
+      iteration: 1,
+      text: "",
+      tool_calls: [{name: "run", arguments: "{\"command\":\"go test ./...\"}"}],
+    },
+    {
+      type: "request",
+      iteration: 2,
+      messages: [
+        {
+          role: "user",
+          content: "<tool_result name=\"edit\">wrote a.go</tool_result><tool_result name=\"run\">Error: exit 1</tool_result>",
+        },
+      ],
+    },
+  ]
+  let rows = agent_transcript_normalize(records)
+  let calls = agent_transcript_tool_events(records)
+  let results = agent_transcript_tool_results(records)
+  assert(len(rows) == 4, "two assistant rows plus two deduped result rows")
+  assert(len(calls) == 2, "tool calls extracted")
+  assert(calls[0].name == "edit", "first legacy call")
+  assert(calls[1].name == "run", "second legacy call")
+  assert(calls[1].args.command == "go test ./...", "legacy JSON-string args parsed")
+  assert(len(results) == 2, "cumulative request results deduped")
+  assert(results[0].name == "edit", "first result")
+  assert(results[1].name == "run", "second result")
+  assert(results[1].is_error, "error marker classified")
+}
+
+pipeline test_agent_transcript_helpers_cover_provider_variants(_task) {
+  assert(
+    agent_transcript_text([{type: "text", text: "hello"}, {type: "text", text: "world"}])
+      == "hello\nworld",
+    "content parts join",
+  )
+  let openai = agent_transcript_tool_call(
+    {id: "call-1", type: "function", function: {name: "search", arguments: "{\"query\":\"needle\"}"}},
+  )
+  assert(openai.name == "search", "OpenAI function name")
+  assert(openai.args.query == "needle", "OpenAI JSON args")
+  let legacy = agent_transcript_tool_call({name: "look", arguments: {file: "a.py"}})
+  assert(legacy.name == "look", "legacy call name")
+  assert(legacy.args.file == "a.py", "object arguments retained")
+  let raw = agent_transcript_tool_call({name: "bad", arguments: "{not-json"})
+  assert(raw.args._raw == "{not-json", "bad JSON args preserved")
+  let blocks = agent_transcript_tool_result_blocks(
+    "<tool_result name=\"run\" id=\"c1\">failed</tool_result><tool_result name=\"edit\">ok</tool_result>",
+  )
+  assert(len(blocks) == 2, "tool-result blocks parsed")
+  assert(blocks[0].name == "run", "block name")
+  assert(blocks[0].tool_call_id == "c1", "block id")
+}
+
+pipeline test_agent_transcript_normalize_is_composable(_task) {
+  let raw = [
+    {
+      type: "message",
+      role: "assistant",
+      message: {
+        role: "assistant",
+        content: "Reading files.",
+        tool_calls: [{id: "c1", function: {name: "look", arguments: "{\"file\":\"a.py\"}"}}],
+      },
+    },
+    {type: "message", role: "tool", name: "look", tool_call_id: "c1", content: "ok"},
+  ]
+  let once = agent_transcript_normalize(raw)
+  let twice = agent_transcript_normalize(once)
+  let calls = agent_transcript_tool_events(once)
+  let results = agent_transcript_tool_results(once)
+  assert(len(twice) == len(once), "normalization is idempotent")
+  assert(twice[0].tool_calls[0].name == "look", "normalized calls survive re-normalization")
+  assert(twice[1].kind == "tool_result", "normalized result survives re-normalization")
+  assert(
+    len(calls) == 1 && calls[0].args.file == "a.py",
+    "tool-event extraction accepts normalized rows",
+  )
+  assert(
+    len(results) == 1 && results[0].name == "look",
+    "tool-result extraction accepts normalized rows",
+  )
+}
+
+pipeline test_agent_transcript_read_jsonl(_task) {
+  with_temp_dir(
+    { dir ->
+      let path = path_join(dir, "llm_transcript.jsonl")
+      write_jsonl(
+        path,
+        [
+          {
+            type: "message",
+            role: "assistant",
+            message: {
+              role: "assistant",
+              content: "",
+              tool_calls: [{id: "c1", function: {name: "edit", arguments: "{\"path\":\"a\"}"}}],
+            },
+          },
+        ],
+      )
+      let rows = agent_transcript_read(path)
+      assert(len(rows) == 1, "read one row")
+      assert(rows[0].tool_calls[0].args.path == "a", "read JSONL normalizes calls")
+    },
+  )
+}

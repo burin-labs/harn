@@ -374,6 +374,10 @@ pub const STDLIB_SOURCES: &[StdlibSource] = &[
         source: include_str!("stdlib/agent/events.harn"),
     },
     StdlibSource {
+        module: "agent/transcript",
+        source: include_str!("stdlib/agent/transcript.harn"),
+    },
+    StdlibSource {
         module: "agent/primitives",
         source: include_str!("stdlib/agent/primitives.harn"),
     },
