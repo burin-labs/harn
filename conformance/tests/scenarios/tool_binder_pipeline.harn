@@ -16,8 +16,13 @@
  *   6. on_failure: "reject" — schema-error from binder short-circuits
  *      with a `schema_violation` error and never reaches next().
  *   7. compose_tool_callers stacks cleanly with the binder.
+ *   8. The paired schema_transform advertises optional `_nl_intent`.
  */
-import { with_natural_language_executor } from "std/llm/tool_binder"
+import {
+  natural_language_executor_middleware,
+  natural_language_executor_schema_transform,
+  with_natural_language_executor,
+} from "std/llm/tool_binder"
 import { compose_tool_callers } from "std/llm/tool_middleware"
 
 fn synthetic_next() {
@@ -192,4 +197,33 @@ pipeline default() {
   __io_println(r6.ok)
   __io_println(r6.audit.binder.status)
   __io_println(r6.arguments.path)
+  // (8) The binder's schema-time companion exposes an optional fallback
+  // intent field, and the paired middleware returns both pieces together.
+  var tools = tool_registry()
+  tools = tool_define(
+    tools,
+    "file_read",
+    "Read",
+    {handler: { _ -> "" }, parameters: file_schema(), returns: {type: "string"}},
+  )
+  let transform = natural_language_executor_schema_transform()
+  let transformed = transform(tools.tools[0])
+  __io_println(contains(transformed.parameters.properties.keys(), "_nl_intent"))
+  __io_println(contains(transformed.parameters.required, "_nl_intent"))
+  __io_println(transformed.parameters.properties._nl_intent.required)
+  let paired = natural_language_executor_middleware(
+    {provider: "cerebras", model: "gpt-oss-120b", timeout_ms: 100, binder_fn: mock_binder},
+  )
+  let paired_entry = paired.schema_transform(tools.tools[0])
+  __io_println(contains(paired_entry.parameters.properties.keys(), "_nl_intent"))
+  let _ = mock_time(0)
+  let r7 = paired
+    .caller(
+    envelope("file_read", {_nl_intent: "read /var/log/syslog and append hello"}, schema),
+    next,
+  )
+  let _ = unmock_time()
+  __io_println(r7.ok)
+  __io_println(r7.audit.binder.status)
+  __io_println(r7.arguments.path)
 }

@@ -26,3 +26,10 @@ true
 true
 ok
 /var/log/syslog
+true
+false
+false
+true
+true
+ok
+/var/log/syslog

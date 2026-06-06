@@ -1,0 +1,155 @@
+import { llm_text, with_llm_script } from "std/testing"
+
+fn echo_tools() {
+  let registry = tool_registry()
+  return tool_define(
+    registry,
+    "echo",
+    "Echo a message",
+    {parameters: {msg: {type: "string"}}, handler: { args -> "echoed: " + to_string(args?.msg ?? "") }},
+  )
+}
+
+fn observe_lifecycle(session_id: string, expected_msg: string) -> dict {
+  let pending = atomic(0)
+  let in_progress = atomic(0)
+  let completed = atomic(0)
+  let failed = atomic(0)
+  let saw_error_category = atomic(0)
+  let saw_args = atomic(0)
+  agent_subscribe(
+    session_id,
+    { ev ->
+      if ev?.type == "tool_call" && ev?.tool_name == "echo" && ev?.status == "pending" {
+        let _ = atomic_add(pending, 1)
+        if ev?.raw_input?.msg == expected_msg {
+          let _ = atomic_set(saw_args, 1)
+        }
+      }
+      if ev?.type == "tool_call_update" && ev?.tool_name == "echo" && ev?.status == "in_progress" {
+        let _ = atomic_add(in_progress, 1)
+      }
+      if ev?.type == "tool_call_update" && ev?.tool_name == "echo" && ev?.status == "completed" {
+        let _ = atomic_add(completed, 1)
+      }
+      if ev?.type == "tool_call_update" && ev?.tool_name == "echo" && ev?.status == "failed" {
+        let _ = atomic_add(failed, 1)
+        if ev?.error_category == "tool_error" {
+          let _ = atomic_set(saw_error_category, 1)
+        }
+      }
+    },
+  )
+  return {
+    pending: pending,
+    in_progress: in_progress,
+    completed: completed,
+    failed: failed,
+    saw_error_category: saw_error_category,
+    saw_args: saw_args,
+  }
+}
+
+fn assert_counts(label: string, counters: dict) {
+  assert(atomic_get(counters.pending) == 1, label + " pending event")
+  assert(atomic_get(counters.in_progress) == 1, label + " in-progress event")
+  assert(atomic_get(counters.completed) == 1, label + " completed event")
+  assert(atomic_get(counters.saw_args) == 1, label + " raw input")
+}
+
+pipeline test(task) {
+  let text_session = "tool-lifecycle-text-" + uuid()
+  let text_events = observe_lifecycle(text_session, "text")
+  with_llm_script(
+    [llm_text("<tool_call>\necho({ msg: \"text\" })\n</tool_call>"), llm_text("##DONE##")],
+    { ->
+      let result = agent_loop(
+        "Call echo once.",
+        nil,
+        {
+          provider: "mock",
+          session_id: text_session,
+          tools: echo_tools(),
+          tool_format: "text",
+          loop_until_done: true,
+          done_sentinel: "##DONE##",
+          max_iterations: 3,
+        },
+      )
+      assert(result.status == "done", "text loop completes")
+    },
+  )
+  assert_counts("text tool", text_events)
+  let middleware_session = "tool-lifecycle-middleware-" + uuid()
+  let middleware_events = observe_lifecycle(middleware_session, "short")
+  with_llm_script(
+    [{tool_calls: [{id: "short-1", name: "echo", arguments: {msg: "short"}}]}, llm_text("##DONE##")],
+    { ->
+      let short_circuit = { envelope, _next -> return {
+        ok: true,
+        status: "ok",
+        tool_name: envelope.tool_name,
+        tool_call_id: envelope.call_id,
+        arguments: envelope.tool_args,
+        result: {short_circuited: true},
+        rendered_result: "short-circuited",
+        observation: "[result of echo]\nshort-circuited\n[end of echo result]\n",
+        executor: "harn",
+      } }
+      let result = agent_loop(
+        "Call echo once.",
+        nil,
+        {
+          provider: "mock",
+          session_id: middleware_session,
+          tools: echo_tools(),
+          tool_format: "native",
+          loop_until_done: true,
+          done_sentinel: "##DONE##",
+          max_iterations: 3,
+          tool_caller: short_circuit,
+        },
+      )
+      assert(result.status == "done", "middleware loop completes")
+    },
+  )
+  assert_counts("middleware short-circuit", middleware_events)
+  let failed_session = "tool-lifecycle-failed-" + uuid()
+  let failed_events = observe_lifecycle(failed_session, "failed")
+  with_llm_script(
+    [{tool_calls: [{id: "failed-1", name: "echo", arguments: {msg: "failed"}}]}, llm_text("##DONE##")],
+    { ->
+      let failed_caller = { envelope, _next -> return {
+        ok: false,
+        status: "error",
+        tool_name: envelope.tool_name,
+        tool_call_id: envelope.call_id,
+        arguments: envelope.tool_args,
+        error: "failed on purpose",
+        error_category: "generic",
+        observation: "[result of echo]\nerror: failed on purpose\n[end of echo result]\n",
+        executor: "harn",
+      } }
+      let result = agent_loop(
+        "Call echo once.",
+        nil,
+        {
+          provider: "mock",
+          session_id: failed_session,
+          tools: echo_tools(),
+          tool_format: "native",
+          loop_until_done: true,
+          done_sentinel: "##DONE##",
+          max_iterations: 3,
+          tool_caller: failed_caller,
+        },
+      )
+      assert(result.status == "done", "failed middleware loop completes")
+    },
+  )
+  assert(atomic_get(failed_events.pending) == 1, "failed tool pending event")
+  assert(atomic_get(failed_events.in_progress) == 1, "failed tool in-progress event")
+  assert(atomic_get(failed_events.failed) == 1, "failed tool terminal event")
+  assert(atomic_get(failed_events.saw_args) == 1, "failed tool raw input")
+  assert(atomic_get(failed_events.saw_error_category) == 1, "failed tool canonical error category")
+}
