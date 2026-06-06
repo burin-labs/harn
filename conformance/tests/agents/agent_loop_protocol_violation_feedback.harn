@@ -45,4 +45,28 @@ pipeline default() {
       __io_println(!contains(retry_messages, "no_progress_streak"))
     },
   )
+  with_llm_script(
+    [llm_text("_call>_call>"), llm_text("##DONE##")],
+    { ->
+      let result = agent_loop(
+        "Write notes.txt.",
+        nil,
+        {
+          provider: "mock",
+          tool_format: "native",
+          loop_until_done: true,
+          done_sentinel: "##DONE##",
+          done_judge: nil,
+          max_iterations: 3,
+          max_nudges: 3,
+          tools: note_tools(),
+        },
+      )
+      let calls = llm_mock_calls()
+      let retry_messages = json_stringify(calls[1].messages)
+      __io_println(result.status)
+      __io_println(!contains(retry_messages, "parse_guidance"))
+      __io_println(!contains(retry_messages, "Stray text outside response tags"))
+    },
+  )
 }
