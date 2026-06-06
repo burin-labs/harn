@@ -2760,3 +2760,79 @@ fn typed_param_lambda_uses_check_type_and_walks() {
     );
     assert_eq!(out, "[harn] [2, 3, 4]\n");
 }
+
+/// Regression: a `var` inferred `int` from its initializer but later reassigned
+/// through an `any`-typed value of a different primitive must not be specialized
+/// into a typed opcode (`AddInt`), which would hard-error at runtime on a
+/// program the generic path runs correctly. The optimized result must match the
+/// unoptimized one exactly. (Previously the optimizer threw
+/// "Typed int add expected int operands, got int and float".)
+#[test]
+fn var_reassigned_via_any_matches_unoptimized() {
+    let source = r#"pipeline default(task) {
+  var x = 0
+  var sum = 0
+  var i = 0
+  let cell = shared_cell("k", 2.5)
+  while i < 3 {
+    sum = sum + x
+    if i == 0 { x = shared_get(cell) }
+    i = i + 1
+  }
+  log("${sum}")
+}"#;
+    let optimized = run_harn_result_display_with_options(source, CompilerOptions::optimized())
+        .expect("optimized run should not spuriously type-error");
+    let baseline =
+        run_harn_result_display_with_options(source, CompilerOptions::without_optimizations())
+            .expect("unoptimized run is the ground truth");
+    assert_eq!(
+        optimized.0, baseline.0,
+        "stdout must match the generic path"
+    );
+    assert_eq!(optimized.0.trim_end(), "[harn] 5.0");
+}
+
+/// Companion to the above for the `for`-item binding, which is reassignable per
+/// iteration. Reassigning it from an `any` value previously crashed under the
+/// optimizer; it must now match the unoptimized result.
+#[test]
+fn for_item_reassigned_via_any_matches_unoptimized() {
+    let source = r#"pipeline default(task) {
+  var sum = 0
+  let cell = shared_cell("k", 2.5)
+  for n in [1, 2, 3] {
+    sum = sum + n
+    n = shared_get(cell)
+    sum = sum + n
+  }
+  log("${sum}")
+}"#;
+    let optimized = run_harn_result_display_with_options(source, CompilerOptions::optimized())
+        .expect("optimized run should not spuriously type-error");
+    let baseline =
+        run_harn_result_display_with_options(source, CompilerOptions::without_optimizations())
+            .expect("unoptimized run is the ground truth");
+    assert_eq!(
+        optimized.0, baseline.0,
+        "stdout must match the generic path"
+    );
+}
+
+/// The monomorphic loop counter / accumulator idiom keeps producing the right
+/// result with the typed fast path engaged (guards against the gate
+/// over-demoting and silently changing arithmetic results).
+#[test]
+fn monomorphic_counter_loop_result_is_correct() {
+    let source = r#"pipeline default(task) {
+  var i = 0
+  var total = 0
+  while i < 10 {
+    total = total + (i + 3) * 2 - 1
+    i = i + 1
+  }
+  log("${total}")
+}"#;
+    let (out, _) = run_harn(source);
+    assert_eq!(out.trim_end(), "[harn] 140");
+}

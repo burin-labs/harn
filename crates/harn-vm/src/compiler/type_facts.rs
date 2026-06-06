@@ -327,6 +327,428 @@ impl Compiler {
         }
     }
 
+    /// Canonical primitive tag (`"int"` / `"float"` / `"bool"` / `"string"`)
+    /// for a type expression that resolves to one of the four
+    /// specialization-relevant primitives, else `None`. `nil` is excluded
+    /// because no typed opcode specializes on it. Used by the monomorphic-var
+    /// analysis and the mutable-binding gate.
+    pub(super) fn primitive_type_tag(&self, type_expr: &TypeExpr) -> Option<&'static str> {
+        match Self::primitive_kind(&self.expand_alias(type_expr)) {
+            Some(PrimitiveType::Int) => Some("int"),
+            Some(PrimitiveType::Float) => Some("float"),
+            Some(PrimitiveType::Bool) => Some("bool"),
+            Some(PrimitiveType::String) => Some("string"),
+            Some(PrimitiveType::Nil) | None => None,
+        }
+    }
+
+    /// Drop an initializer-inferred *primitive* type for a reassignable binding
+    /// (`var` / `for`-item) that the monomorphic analysis did not prove safe, so
+    /// typed-opcode specialization stays sound. Non-primitive types and
+    /// proven-monomorphic bindings pass through unchanged.
+    pub(super) fn gate_mutable_primitive_type(
+        &self,
+        span: harn_lexer::Span,
+        type_expr: Option<TypeExpr>,
+    ) -> Option<TypeExpr> {
+        if !self.options.optimizations_enabled() {
+            // No typed-opcode specialization happens, and the monomorphic set is
+            // never populated — leave facts byte-identical to the pre-gate path.
+            return type_expr;
+        }
+        match &type_expr {
+            Some(t)
+                if self.primitive_type_tag(t).is_some()
+                    && !self.monomorphic_bindings.contains(&(span.start, span.end)) =>
+            {
+                None
+            }
+            _ => type_expr,
+        }
+    }
+
+    /// Gate the inferred item type of a `for`-loop binding the same way `var`
+    /// bindings are gated. For a simple `for name in …` the primitive item type
+    /// is kept only when no body reassignment can change `name`'s primitive
+    /// kind. A destructuring item pattern (`for [a, b] in …`) is left untouched
+    /// unless one of its names is reassigned in the body, in which case the whole
+    /// inferred type is dropped — destructured items are rarely reassigned, so
+    /// this stays sound without per-element kind tracking.
+    pub(super) fn gate_for_item_type(
+        &mut self,
+        pattern: &BindingPattern,
+        item_type: Option<TypeExpr>,
+        body: &[SNode],
+    ) -> Option<TypeExpr> {
+        if !self.options.optimizations_enabled() {
+            return item_type;
+        }
+        match pattern {
+            BindingPattern::Identifier(name) => {
+                let Some(tag) = item_type.as_ref().and_then(|t| self.primitive_type_tag(t)) else {
+                    return item_type;
+                };
+                if self.for_item_binding_is_monomorphic(name, tag, body) {
+                    item_type
+                } else {
+                    None
+                }
+            }
+            other => {
+                let mut names = Vec::new();
+                Self::collect_pattern_names(other, &mut names);
+                if names
+                    .iter()
+                    .any(|name| Self::body_reassigns_name(name, body))
+                {
+                    None
+                } else {
+                    item_type
+                }
+            }
+        }
+    }
+
+    fn collect_pattern_names(pattern: &BindingPattern, out: &mut Vec<String>) {
+        match pattern {
+            BindingPattern::Identifier(name) => out.push(name.clone()),
+            BindingPattern::Dict(fields) => {
+                for field in fields {
+                    out.push(field.alias.clone().unwrap_or_else(|| field.key.clone()));
+                }
+            }
+            BindingPattern::List(elements) => {
+                for element in elements {
+                    out.push(element.name.clone());
+                }
+            }
+            BindingPattern::Pair(a, b) => {
+                out.push(a.clone());
+                out.push(b.clone());
+            }
+        }
+    }
+
+    fn body_reassigns_name(name: &str, body: &[SNode]) -> bool {
+        let mut found = false;
+        for sn in body {
+            harn_parser::visit::walk_node(sn, &mut |node| {
+                if let Node::Assignment { target, .. } = &node.node {
+                    if let Node::Identifier(target_name) = &target.node {
+                        if target_name == name {
+                            found = true;
+                        }
+                    }
+                }
+            });
+        }
+        found
+    }
+
+    /// Prove which mutable `var` bindings declared at the top level of `stmts`
+    /// are *monomorphic* — their value keeps one primitive type across the
+    /// initializer and every reassignment reachable in this scope — and record
+    /// their spans in [`Compiler::monomorphic_bindings`].
+    ///
+    /// This is the soundness gate for typed-opcode specialization. A typed op
+    /// such as `AddInt` hard-errors when an operand is not the expected
+    /// primitive at runtime, so the compiler may only emit it for operands whose
+    /// type it can *prove*, not merely guess. A `var`'s initializer type is a
+    /// guess: the binding can later be reassigned through an `any`-typed value
+    /// (which the type checker accepts as assignable to the inferred type) of a
+    /// different runtime primitive, at which point a hard-committed `AddInt`
+    /// would spuriously throw on a program the generic path runs correctly.
+    ///
+    /// Only `var`/`for`-item bindings need this gate. `let`/`const` are
+    /// immutable — the runtime rejects reassignment — so their initializer type
+    /// is sound as-is and is left untouched.
+    ///
+    /// Strategy: gather the primitive-typed `var` candidates, collect every
+    /// reassignment to each (the only way Harn can rebind a name; there is no
+    /// destructuring assignment and values are immutable, so an `Identifier`
+    /// assignment target is the sole rebind site), then run a monotone fixpoint.
+    /// Each round assumes the not-yet-disproven candidates hold their initializer
+    /// kind and demotes any whose reassignment then fails to yield that kind.
+    /// The mutual assumption lets the common accumulator idiom
+    /// (`total = total + (i + 3) * 2`, which depends on the sibling counter `i`)
+    /// stay proven, while a counter fed from an `any` value is demoted. The
+    /// fixpoint only ever demotes, so it terminates; a candidate that survives
+    /// to the end is monomorphic under a self-consistent assignment.
+    ///
+    /// Candidates the analysis cannot prove are simply left unrecorded: the gate
+    /// then drops their primitive fact and they fall back to the correct generic
+    /// adaptive path. Soundness therefore never depends on the analysis being
+    /// complete — only its reach affects how much code keeps the fast path.
+    pub(super) fn record_monomorphic_var_bindings(&mut self, stmts: &[SNode]) {
+        if !self.options.optimizations_enabled() {
+            return;
+        }
+
+        // 1. Gather primitive-typed `var name = init` candidates declared at the
+        //    top level of this scope. The first declaration of a name wins; a
+        //    later same-name `var` in this block is a redeclaration we leave on
+        //    the generic path (it would not be reached as a candidate here).
+        let mut order: Vec<String> = Vec::new();
+        let mut tag: std::collections::HashMap<String, &'static str> =
+            std::collections::HashMap::new();
+        let mut span: std::collections::HashMap<String, harn_lexer::Span> =
+            std::collections::HashMap::new();
+        for sn in stmts {
+            let Node::VarBinding {
+                pattern: BindingPattern::Identifier(name),
+                value,
+                type_ann,
+            } = &sn.node
+            else {
+                continue;
+            };
+            if tag.contains_key(name) {
+                continue;
+            }
+            let declared = type_ann.clone().or_else(|| self.infer_expr_type(value));
+            let Some(primitive) = declared.as_ref().and_then(|t| self.primitive_type_tag(t)) else {
+                continue;
+            };
+            order.push(name.clone());
+            tag.insert(name.clone(), primitive);
+            span.insert(name.clone(), sn.span);
+        }
+        if order.is_empty() {
+            return;
+        }
+
+        // 2. The set of names rebound anywhere in this subtree (an `Identifier`
+        //    assignment target is the only rebind site — Harn has no
+        //    destructuring assignment and values are immutable).
+        let reassigned_names = Self::collect_reassigned_names(stmts);
+
+        // 3. Seed map: bindings whose primitive type is stable across this
+        //    subtree and can therefore be assumed while proving the candidates —
+        //    immutable `let`/`const`, plus `var`/`for`-item bindings that are
+        //    never reassigned here. This lets a candidate that depends on a
+        //    sibling binding introduced later or in a nested scope (notably
+        //    `for n in xs { sum = sum + n }`) still be proven monomorphic. A
+        //    *reassigned* mutable binding is deliberately excluded: it cannot be
+        //    assumed safe, so candidates depending on it are demoted to the
+        //    generic path.
+        let seeds = self.collect_primitive_seeds(stmts, &reassigned_names);
+
+        // 4. Collect every reassignment `name = value` / `name op= value` to a
+        //    candidate, anywhere in this scope's statement subtree.
+        let candidate_names: std::collections::HashSet<&str> =
+            order.iter().map(String::as_str).collect();
+        let mut reassigns: std::collections::HashMap<String, Vec<(Option<String>, SNode)>> =
+            std::collections::HashMap::new();
+        for sn in stmts {
+            harn_parser::visit::walk_node(sn, &mut |node| {
+                if let Node::Assignment { target, value, op } = &node.node {
+                    if let Node::Identifier(name) = &target.node {
+                        if candidate_names.contains(name.as_str()) {
+                            reassigns
+                                .entry(name.clone())
+                                .or_default()
+                                .push((op.clone(), (**value).clone()));
+                        }
+                    }
+                }
+            });
+        }
+
+        // 5. Monotone fixpoint: assume every still-trusted candidate holds its
+        //    initializer kind (on top of the stable seeds), then demote any whose
+        //    reassignment does not yield that same kind under those assumptions.
+        //    Repeat until stable.
+        let mut demoted: std::collections::HashSet<String> = std::collections::HashSet::new();
+        loop {
+            let mut assumptions: std::collections::HashMap<String, TypeExpr> = seeds.clone();
+            for name in &order {
+                if !demoted.contains(name) {
+                    assumptions.insert(name.clone(), TypeExpr::Named(tag[name].to_string()));
+                }
+            }
+            self.type_scopes.push(assumptions);
+
+            let mut newly_demoted: Vec<String> = Vec::new();
+            for name in &order {
+                if demoted.contains(name) {
+                    continue;
+                }
+                let expected = tag[name];
+                let preserved = reassigns
+                    .get(name)
+                    .into_iter()
+                    .flatten()
+                    .all(|(op, value)| {
+                        self.reassignment_primitive_tag(expected, op.as_deref(), value)
+                            == Some(expected)
+                    });
+                if !preserved {
+                    newly_demoted.push(name.clone());
+                }
+            }
+
+            self.type_scopes.pop();
+            if newly_demoted.is_empty() {
+                break;
+            }
+            demoted.extend(newly_demoted);
+        }
+
+        // 6. Record the survivors as monomorphic.
+        for name in &order {
+            if !demoted.contains(name) {
+                let s = span[name];
+                self.monomorphic_bindings.insert((s.start, s.end));
+            }
+        }
+    }
+
+    /// Names rebound by an assignment anywhere in `stmts`' subtree. Used to
+    /// decide which mutable bindings are stable enough to seed the monomorphic
+    /// fixpoint.
+    fn collect_reassigned_names(stmts: &[SNode]) -> std::collections::HashSet<String> {
+        let mut names = std::collections::HashSet::new();
+        for sn in stmts {
+            harn_parser::visit::walk_node(sn, &mut |node| {
+                if let Node::Assignment { target, .. } = &node.node {
+                    if let Node::Identifier(name) = &target.node {
+                        names.insert(name.clone());
+                    }
+                }
+            });
+        }
+        names
+    }
+
+    /// Build the seed assumptions for the monomorphic fixpoint: every binding in
+    /// `stmts`' subtree whose value provably keeps a single primitive type here.
+    /// Immutable `let`/`const` always qualify; `var` and `for`-item bindings
+    /// qualify only when their name is never reassigned in this subtree.
+    fn collect_primitive_seeds(
+        &self,
+        stmts: &[SNode],
+        reassigned: &std::collections::HashSet<String>,
+    ) -> std::collections::HashMap<String, TypeExpr> {
+        let mut seeds: std::collections::HashMap<String, TypeExpr> =
+            std::collections::HashMap::new();
+        for sn in stmts {
+            harn_parser::visit::walk_node(sn, &mut |node| {
+                let (name, declared) = match &node.node {
+                    Node::LetBinding {
+                        pattern: BindingPattern::Identifier(name),
+                        type_ann,
+                        value,
+                    }
+                    | Node::VarBinding {
+                        pattern: BindingPattern::Identifier(name),
+                        type_ann,
+                        value,
+                    } => {
+                        // A reassigned `var` is not stable; `let` is immutable so
+                        // it always is, even though they share this arm.
+                        if matches!(node.node, Node::VarBinding { .. }) && reassigned.contains(name)
+                        {
+                            return;
+                        }
+                        (
+                            name,
+                            type_ann.clone().or_else(|| self.infer_expr_type(value)),
+                        )
+                    }
+                    Node::ConstBinding {
+                        name,
+                        type_ann,
+                        value,
+                    } => (
+                        name,
+                        type_ann.clone().or_else(|| self.infer_expr_type(value)),
+                    ),
+                    Node::ForIn {
+                        pattern: BindingPattern::Identifier(name),
+                        iterable,
+                        ..
+                    } => {
+                        if reassigned.contains(name) {
+                            return;
+                        }
+                        (name, self.infer_for_item_type(iterable))
+                    }
+                    _ => return,
+                };
+                if let Some(t) = declared.as_ref().and_then(|t| self.primitive_type_tag(t)) {
+                    seeds
+                        .entry(name.clone())
+                        .or_insert_with(|| TypeExpr::Named(t.to_string()));
+                }
+            });
+        }
+        seeds
+    }
+
+    /// Primitive tag a single reassignment to `name` (assumed to currently hold
+    /// `expected`) would produce, or `None` when it is non-primitive or
+    /// statically unknown. A plain `name = value` takes the value's type; a
+    /// compound `name op= value` takes `name op value` with `name` held at
+    /// `expected`. Candidate assumptions are supplied via a pushed type scope.
+    fn reassignment_primitive_tag(
+        &self,
+        expected: &str,
+        op: Option<&str>,
+        value: &SNode,
+    ) -> Option<&'static str> {
+        match op {
+            None => self
+                .infer_expr_type(value)
+                .as_ref()
+                .and_then(|t| self.primitive_type_tag(t)),
+            Some(op) => {
+                let left = TypeExpr::Named(expected.to_string());
+                let right = self.infer_expr_type(value);
+                self.infer_binary_result_type(op, Some(&left), right.as_ref())
+                    .as_ref()
+                    .and_then(|t| self.primitive_type_tag(t))
+            }
+        }
+    }
+
+    /// Prove a single `for`-loop item binding is monomorphic over `body`: it is
+    /// reassignable per iteration like a `var`, so the same gate applies. The
+    /// item starts each iteration at `item_tag`; the binding stays monomorphic
+    /// only if every reassignment in the loop body again yields `item_tag`.
+    pub(super) fn for_item_binding_is_monomorphic(
+        &mut self,
+        name: &str,
+        item_tag: &str,
+        body: &[SNode],
+    ) -> bool {
+        if !self.options.optimizations_enabled() {
+            return false;
+        }
+        let mut reassigns: Vec<(Option<String>, SNode)> = Vec::new();
+        for sn in body {
+            harn_parser::visit::walk_node(sn, &mut |node| {
+                if let Node::Assignment { target, value, op } = &node.node {
+                    if let Node::Identifier(target_name) = &target.node {
+                        if target_name == name {
+                            reassigns.push((op.clone(), (**value).clone()));
+                        }
+                    }
+                }
+            });
+        }
+        if reassigns.is_empty() {
+            return true;
+        }
+        let mut assumptions = std::collections::HashMap::new();
+        assumptions.insert(name.to_string(), TypeExpr::Named(item_tag.to_string()));
+        self.type_scopes.push(assumptions);
+        let preserved = reassigns.iter().all(|(op, value)| {
+            self.reassignment_primitive_tag(item_tag, op.as_deref(), value) == Some(item_tag)
+        });
+        self.type_scopes.pop();
+        preserved
+    }
+
     fn primitive_kind(type_expr: &TypeExpr) -> Option<PrimitiveType> {
         match type_expr {
             TypeExpr::Named(name) => match name.as_str() {

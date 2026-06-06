@@ -43,6 +43,7 @@ impl Compiler {
             scope_depth: 0,
             type_aliases: std::collections::HashMap::new(),
             type_scopes: vec![std::collections::HashMap::new()],
+            monomorphic_bindings: std::collections::HashSet::new(),
             string_constants: std::collections::HashMap::new(),
             local_scopes: vec![std::collections::HashMap::new()],
             module_level: true,
@@ -919,6 +920,7 @@ impl Compiler {
         stmts: &[SNode],
     ) -> Result<(), CompileError> {
         self.begin_scope();
+        self.record_monomorphic_var_bindings(stmts);
         let finally_floor = self.finally_bodies.len();
         for sn in stmts {
             self.compile_discarded_stmt(sn)?;
@@ -1066,6 +1068,7 @@ impl Compiler {
     }
 
     pub(super) fn compile_block(&mut self, stmts: &[SNode]) -> Result<(), CompileError> {
+        self.record_monomorphic_var_bindings(stmts);
         for (i, snode) in stmts.iter().enumerate() {
             if i == stmts.len() - 1 {
                 // The block's value is its last statement's. Backfill a `Nil`

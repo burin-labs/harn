@@ -247,7 +247,14 @@ impl Compiler {
         self.begin_scope();
         let finally_floor = self.finally_bodies.len();
         self.compile_destructuring(pattern, true)?;
+        // A `for`-item binding is reassignable per iteration, so — like a `var`
+        // — its inferred primitive type may only feed typed-opcode
+        // specialization when no reassignment in the loop body can change its
+        // primitive kind. Otherwise drop the primitive fact and stay on the
+        // generic adaptive path.
+        let item_type = self.gate_for_item_type(pattern, item_type, body);
         self.record_binding_type(pattern, item_type);
+        self.record_monomorphic_var_bindings(body);
         for sn in body {
             self.compile_discarded_stmt(sn)?;
         }
