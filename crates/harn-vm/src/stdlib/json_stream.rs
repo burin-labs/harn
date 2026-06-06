@@ -425,6 +425,15 @@ impl JsonStreamValidator {
         // Use the fenced-out body: a buffer holding only a fence opener
         // (no JSON yet) counts as "nothing arrived", not a partial document.
         if self.scan.json_slice(&self.buffer).trim().is_empty() {
+            // Exception: a fence opener that was seen but never closed its
+            // opener line (e.g. a CR-only `` ```json\r{...} `` where the
+            // expected `\n` never arrived) leaves us stuck mid-opener with
+            // buffered content that never became a body. That is a malformed,
+            // unrecoverable stream rather than "nothing arrived", so surface
+            // Invalid instead of a permanent Pending.
+            if self.scan.lead_fence == LeadFence::SkipLine && !self.buffer.trim().is_empty() {
+                self.invalidate("incomplete JSON document at end of stream".to_string(), "$");
+            }
             return;
         }
         self.invalidate("incomplete JSON document at end of stream".to_string(), "$");
@@ -492,8 +501,11 @@ impl JsonStreamScan {
 
     fn feed_char(&mut self, ch: char) -> Result<(), String> {
         // Trailing region: the JSON value is framed and we now only tolerate
-        // whitespace plus an optional closing ` ``` ` fence.
-        if self.complete || (self.root_scalar && self.trail_fence != TrailFence::None) {
+        // whitespace plus an optional closing ` ``` ` fence. Root scalars set
+        // `complete` the moment their value ends (see the `root_scalar` arm
+        // below and the string closing-quote arm), so this single flag covers
+        // every framed shape.
+        if self.complete {
             return self.feed_trailing(ch);
         }
 
@@ -526,10 +538,18 @@ impl JsonStreamScan {
         if self.root_scalar {
             // A root scalar (number / literal) has no closing delimiter, so
             // the first whitespace or backtick after it marks the end of the
-            // value. Capture that boundary and route the char through the
-            // trailing handler so a following ` ``` ` is tolerated.
+            // value. Frame the value here exactly as a closing quote frames a
+            // string root scalar: set `complete` and capture `body_end` once,
+            // so every later char routes through `feed_trailing` (which
+            // tolerates trailing whitespace + one closing ` ``` ` fence and
+            // rejects any other junk). Without this, trailing garbage after a
+            // scalar (e.g. `42 garbage`, `4 2`) would be silently dropped and
+            // the stream wrongly accepted as Valid.
             if ch.is_whitespace() || ch == '`' {
-                self.body_end = Some(self.byte_pos);
+                self.complete = true;
+                if self.body_end.is_none() {
+                    self.body_end = Some(self.byte_pos);
+                }
                 return self.feed_trailing(ch);
             }
             return Ok(());
@@ -561,6 +581,15 @@ impl JsonStreamScan {
     /// Handle a char before any JSON value has started. Recognizes an
     /// optional leading ` ``` ` code fence (with an optional language tag on
     /// the opener line) and otherwise begins normal JSON parsing.
+    ///
+    /// DELIBERATE divergence from `extract_json_from_text` (json.rs:714):
+    /// that helper scans for a fence anywhere in the text (`find("```")`), so
+    /// it tolerates leading prose before the fence. This streaming validator
+    /// only recognizes a fence as the FIRST non-whitespace content — any other
+    /// leading byte starts (or fails) JSON parsing immediately. That is the
+    /// stricter, safer choice for early-abort: a model that emits prose before
+    /// a fence should abort promptly rather than have the validator hunt for a
+    /// later fence. The two are different problems; do not unify them.
     fn feed_lead(&mut self, ch: char) -> Result<(), String> {
         match self.lead_fence {
             LeadFence::SkipLine => {
@@ -1439,5 +1468,107 @@ mod tests {
         // Value completes in one chunk; the closing fence arrives later.
         let status = feed_chunks(&object_a_int_schema(), &["```json\n{\"a\":1}", "\n```"]);
         assert_eq!(status, JsonStreamStatus::Valid);
+    }
+
+    // ---- Root-scalar trailing-junk framing (PR #3098 blocker fix) ----
+    //
+    // A root scalar (number / true / false / null) has no closing delimiter,
+    // so once its value ends at the first trailing whitespace/backtick we must
+    // FRAME it (`complete = true`) and route every later char through the
+    // trailing handler. Before the fix, trailing junk after a scalar was
+    // silently dropped and the stream wrongly accepted as Valid, which would
+    // let a model emit a valid scalar followed by hallucinated text without
+    // triggering schema_stream_abort.
+
+    fn int_schema() -> serde_json::Value {
+        serde_json::json!({ "type": "integer" })
+    }
+
+    #[test]
+    fn scalar_followed_by_junk_is_invalid() {
+        // `42 garbage` was wrongly Valid (body "42") before the fix.
+        let status = feed_chunks(&int_schema(), &["42 garbage"]);
+        assert!(
+            matches!(status, JsonStreamStatus::Invalid { .. }),
+            "trailing junk after a root scalar must be Invalid, got {status:?}"
+        );
+    }
+
+    #[test]
+    fn scalar_split_by_space_is_invalid_not_misframed() {
+        // `4 2` must NOT parse as 4 (the " 2" being dropped is a mis-frame
+        // that hands the caller the wrong value); it is trailing garbage.
+        let status = feed_chunks(&int_schema(), &["4 2"]);
+        assert!(
+            matches!(status, JsonStreamStatus::Invalid { .. }),
+            "`4 2` must be Invalid (mis-frame guard), got {status:?}"
+        );
+    }
+
+    #[test]
+    fn bool_followed_by_junk_is_invalid() {
+        let schema = serde_json::json!({ "type": "bool" });
+        let status = feed_chunks(&schema, &["true nope"]);
+        assert!(
+            matches!(status, JsonStreamStatus::Invalid { .. }),
+            "trailing junk after `true` must be Invalid, got {status:?}"
+        );
+    }
+
+    #[test]
+    fn null_followed_by_junk_is_invalid() {
+        let schema = serde_json::json!({ "type": "nil" });
+        let status = feed_chunks(&schema, &["null xxx"]);
+        assert!(
+            matches!(status, JsonStreamStatus::Invalid { .. }),
+            "trailing junk after `null` must be Invalid, got {status:?}"
+        );
+    }
+
+    #[test]
+    fn scalar_split_by_tab_is_invalid() {
+        // Whitespace other than a space (here a tab) frames the scalar too;
+        // `7\t9` is trailing garbage, not the number 7.
+        let status = feed_chunks(&int_schema(), &["7\t9"]);
+        assert!(
+            matches!(status, JsonStreamStatus::Invalid { .. }),
+            "`7\\t9` must be Invalid, got {status:?}"
+        );
+    }
+
+    #[test]
+    fn fenced_mid_stream_scalar_with_junk_is_not_valid() {
+        // Fenced opener + scalar + trailing junk, with no closing fence yet:
+        // must NOT be accepted as Valid (body "42") mid-stream.
+        let status = feed_chunks(&int_schema(), &["```\n42 garbage"]);
+        assert!(
+            !matches!(status, JsonStreamStatus::Valid),
+            "fenced mid-stream scalar + junk must not be Valid, got {status:?}"
+        );
+    }
+
+    #[test]
+    fn bare_scalar_then_finalize_is_valid() {
+        // Regression guard: a bare valid scalar with no trailing chars stays
+        // Valid (and finalize keeps it Valid).
+        let mut validator = StreamSchemaValidator::from_json_schema(&int_schema()).expect("schema");
+        assert_eq!(validator.feed("42").clone(), JsonStreamStatus::Valid);
+    }
+
+    #[test]
+    fn fenced_scalar_stays_valid() {
+        // Regression guard: a properly fenced scalar still validates.
+        let status = feed_chunks(&int_schema(), &["```\n42\n```"]);
+        assert_eq!(status, JsonStreamStatus::Valid);
+    }
+
+    #[test]
+    fn multi_token_scalar_run_is_invalid() {
+        // Regression guard: `1 2 3` is trailing garbage after the scalar `1`.
+        let status = feed_chunks(&int_schema(), &["1 2 3"]);
+        assert!(
+            matches!(status, JsonStreamStatus::Invalid { .. }),
+            "`1 2 3` must be Invalid, got {status:?}"
+        );
     }
 }
