@@ -10,6 +10,7 @@ import {
   has_duplicates,
   is_bump_ahead,
   is_descending,
+  protocol_artifact_version,
   success_message,
 } from "../verify_release_metadata.harn"
 
@@ -20,6 +21,22 @@ let CHANGELOG = "# Changelog\n\nintro text\n\n## v0.8.71\n\n- Added a thing.\n\n
 @test
 pipeline test_current_version(task) {
   assert_eq(current_version(CARGO), "0.8.71")
+}
+
+@test
+pipeline test_protocol_artifact_version(task) {
+  let manifest = "{\n  \"protocolVersion\": \"0.3.0\",\n  \"artifactVersion\": \"0.8.71\",\n  \"x\": 1\n}\n"
+  assert_eq(protocol_artifact_version(manifest), "0.8.71")
+}
+
+@test
+pipeline test_protocol_artifact_version_missing(task) {
+  let r = try {
+    protocol_artifact_version("{\n  \"protocolVersion\": \"0.3.0\"\n}\n")
+  } catch (e) {
+    e
+  }
+  assert_eq(r, "error: missing artifactVersion in spec/protocol-artifacts/manifest.json")
 }
 
 @test
