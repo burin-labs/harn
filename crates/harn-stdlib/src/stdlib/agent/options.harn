@@ -532,6 +532,8 @@ fn __validate_judge_cadence(label, value) {
 
 fn __validate_done_judge_cadence(value) {
   if type_of(value) == "dict" {
+    __validate_optional_nonnegative_int("done_judge", "max_invocations", value?.max_invocations)
+    __validate_optional_nonnegative_int("done_judge", "max_feedback", value?.max_feedback)
     __validate_judge_cadence("done_judge.cadence", value?.cadence)
   }
 }

@@ -1,0 +1,129 @@
+/* Verifies the top-level `done_judge.max_invocations` terminal cap:
+   - `done_judge.cadence.max_invocations` remains a cadence gate; this fixture
+     covers the separate top-level veto-loop cap.
+   - when the judge repeatedly vetoes, the loop stops with status
+     `verify_capped` and stop_reason `done_judge_cap_reached`.
+   - the run record carries structured `done_judge` counters.
+   - `max_invocations: 0` disables the terminal cap and leaves the existing
+     `max_verify_attempts` exhaustion behavior in charge. */
+import { agent_capture_events } from "std/agent/events"
+import { llm_text, with_llm_script } from "std/testing"
+
+fn events_of(events, kind) {
+  return events.filter({ event -> event.type == kind })
+}
+
+fn run_capped() {
+  with_llm_script(
+    [
+      llm_text("Round one. ##DONE##"),
+      llm_text("{\"verdict\":\"continue\",\"reasoning\":\"veto one\",\"next_step\":\"keep going\"}"),
+      llm_text("Round two. ##DONE##"),
+      llm_text("{\"verdict\":\"continue\",\"reasoning\":\"veto two\",\"next_step\":\"keep going\"}"),
+      llm_text("Round three. ##DONE##"),
+    ],
+    { ->
+      let session_id = "done-judge-cap-" + uuid()
+      let captured = agent_capture_events(
+        session_id,
+        fn() { return agent_loop(
+          "Done judge keeps vetoing.",
+          nil,
+          {
+            provider: "mock",
+            loop_until_done: true,
+            max_iterations: 10,
+            max_nudges: 10,
+            session_id: session_id,
+            done_sentinel: "##DONE##",
+            done_judge: {max_invocations: 2},
+          },
+        ) },
+      )
+      let result = captured.result
+      __io_println("capped.status=${result.status}")
+      __io_println("capped.stop_reason=${result.stop_reason}")
+      __io_println("capped.invocations=${result.done_judge.invocations}")
+      __io_println("capped.vetoes=${result.done_judge.vetoes}")
+      __io_println("capped.max_invocations=${result.done_judge.max_invocations}")
+      __io_println("capped.cap_reached=${result.done_judge.cap_reached}")
+      __io_println("capped.judge_decisions=${len(events_of(captured.events, "judge_decision"))}")
+      __io_println("capped.calls=${len(llm_mock_calls())}")
+    },
+  )
+}
+
+fn run_approved() {
+  with_llm_script(
+    [
+      llm_text("Final answer. ##DONE##"),
+      llm_text("{\"verdict\":\"done\",\"reasoning\":\"looks complete\"}"),
+    ],
+    { ->
+      let session_id = "done-judge-approve-" + uuid()
+      let result = agent_loop(
+        "Done judge approves on the first proposal.",
+        nil,
+        {
+          provider: "mock",
+          loop_until_done: true,
+          max_iterations: 10,
+          max_nudges: 10,
+          session_id: session_id,
+          done_sentinel: "##DONE##",
+          done_judge: {max_invocations: 2},
+        },
+      )
+      __io_println("approved.status=${result.status}")
+      __io_println("approved.invocations=${result.done_judge.invocations}")
+      __io_println("approved.vetoes=${result.done_judge.vetoes}")
+      __io_println("approved.max_invocations=${result.done_judge.max_invocations}")
+      __io_println("approved.cap_reached=${result.done_judge.cap_reached}")
+      __io_println("approved.calls=${len(llm_mock_calls())}")
+    },
+  )
+}
+
+fn run_cap_disabled() {
+  with_llm_script(
+    [
+      llm_text("Try one. ##DONE##"),
+      llm_text("{\"verdict\":\"continue\",\"reasoning\":\"veto one\"}"),
+      llm_text("Try two. ##DONE##"),
+      llm_text("{\"verdict\":\"continue\",\"reasoning\":\"veto two\"}"),
+      llm_text("Try three. ##DONE##"),
+    ],
+    { ->
+      let session_id = "done-judge-disabled-" + uuid()
+      let captured = agent_capture_events(
+        session_id,
+        fn() { return agent_loop(
+          "Cap disabled; rely on max_verify_attempts.",
+          nil,
+          {
+            provider: "mock",
+            loop_until_done: true,
+            max_iterations: 10,
+            max_nudges: 10,
+            session_id: session_id,
+            done_sentinel: "##DONE##",
+            max_verify_attempts: 2,
+            done_judge: {max_invocations: 0},
+          },
+        ) },
+      )
+      let result = captured.result
+      __io_println("disabled.status=${result.status}")
+      __io_println("disabled.stop_reason=${result.stop_reason}")
+      __io_println("disabled.invocations=${result.done_judge.invocations}")
+      __io_println("disabled.cap_reached=${result.done_judge.cap_reached}")
+      __io_println("disabled.judge_decisions=${len(events_of(captured.events, "judge_decision"))}")
+    },
+  )
+}
+
+pipeline default() {
+  run_capped()
+  run_approved()
+  run_cap_disabled()
+}
