@@ -1,0 +1,4 @@
+[harn] [-O2, -Wall]
+[harn] [cc, -g]
+[harn] 3
+[harn] 0

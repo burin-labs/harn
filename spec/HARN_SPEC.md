@@ -4565,6 +4565,28 @@ fn describe(x: string | int) {
 }
 ```
 
+#### Reference paths
+
+`type_of()` and nil checks narrow *reference paths* — an identifier
+followed by a chain of constant property accesses (`entry.arguments`,
+`cfg.opts.mode`) — not just bare variables. A guard on a path narrows
+later reads of that same path:
+
+```harn
+fn flags(entry: {arguments: list?}) -> list {
+  if type_of(entry.arguments) == "list" {
+    return entry.arguments  // entry.arguments is `list` here
+  }
+  return []
+}
+```
+
+Optional (`?.`) and plain (`.`) links address the same value, so they
+share a narrowing — `type_of(entry?.arguments) == "list"` narrows reads
+of both `entry?.arguments` and `entry.arguments`. The narrowing is
+dropped when the base variable or the path is reassigned, since the
+reference may then point at a different value.
+
 #### Truthiness
 
 A bare identifier in condition position narrows by removing `nil`:
@@ -4620,10 +4642,18 @@ fn process(x: string | nil) {
 
 The condition's truthy refinements apply inside the loop body.
 
-#### Ternary expressions
+#### Ternary and `if` expressions
 
 The condition's refinements apply to the true and false branches
-respectively.
+respectively — for both the `cond ? a : b` ternary and an `if`/`else`
+used as an expression for its value:
+
+```harn
+fn pick(x: string | int) -> string {
+  // then-branch sees `x: string`, so the result type is `string`.
+  return if type_of(x) == "string" { x } else { "fallback" }
+}
+```
 
 #### Match expressions
 

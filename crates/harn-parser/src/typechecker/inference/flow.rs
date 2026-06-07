@@ -19,10 +19,10 @@ use harn_lexer::Span;
 
 use super::super::exits::block_definitely_exits;
 use super::super::schema_inference::schema_type_expr_from_node;
-use super::super::scope::{Refinements, TypeScope};
+use super::super::scope::{PathNarrowing, Refinements, TypeScope};
 use super::super::union::{
-    discriminant_field, extract_type_of_var, intersect_types, narrow_shape_union_by_tag,
-    narrow_to_single, remove_from_union, subtract_type, DiscriminantValue,
+    discriminant_field, extract_type_of_arg, intersect_types, narrow_shape_union_by_tag,
+    narrow_to_single, reference_path_key, remove_from_union, subtract_type, DiscriminantValue,
 };
 use super::super::TypeChecker;
 
@@ -387,15 +387,15 @@ impl TypeChecker {
         match &condition.node {
             Node::BinaryOp { op, left, right } if op == "!=" || op == "==" => {
                 let nil_ref = Self::extract_nil_refinements(op, left, right, scope);
-                if !nil_ref.truthy.is_empty() || !nil_ref.falsy.is_empty() {
+                if !nil_ref.is_empty() {
                     return nil_ref;
                 }
                 let typeof_ref = Self::extract_typeof_refinements(op, left, right, scope);
-                if !typeof_ref.truthy.is_empty() || !typeof_ref.falsy.is_empty() {
+                if !typeof_ref.is_empty() {
                     return typeof_ref;
                 }
                 let tag_ref = Self::extract_discriminator_refinements(op, left, right, scope);
-                if !tag_ref.truthy.is_empty() || !tag_ref.falsy.is_empty() {
+                if !tag_ref.is_empty() {
                     return tag_ref;
                 }
                 Refinements::empty()
@@ -409,11 +409,15 @@ impl TypeChecker {
                 let right_ref = Self::extract_refinements(right, &right_scope);
                 let mut truthy = left_ref.truthy;
                 truthy.extend(right_ref.truthy);
+                let mut truthy_paths = left_ref.truthy_paths;
+                truthy_paths.extend(right_ref.truthy_paths);
                 let mut truthy_ruled_out = left_ref.truthy_ruled_out;
                 truthy_ruled_out.extend(right_ref.truthy_ruled_out);
                 Refinements {
                     truthy,
                     falsy: vec![],
+                    truthy_paths,
+                    falsy_paths: vec![],
                     truthy_ruled_out,
                     falsy_ruled_out: vec![],
                 }
@@ -427,11 +431,15 @@ impl TypeChecker {
                 let right_ref = Self::extract_refinements(right, &right_scope);
                 let mut falsy = left_ref.falsy;
                 falsy.extend(right_ref.falsy);
+                let mut falsy_paths = left_ref.falsy_paths;
+                falsy_paths.extend(right_ref.falsy_paths);
                 let mut falsy_ruled_out = left_ref.falsy_ruled_out;
                 falsy_ruled_out.extend(right_ref.falsy_ruled_out);
                 Refinements {
                     truthy: vec![],
                     falsy,
+                    truthy_paths: vec![],
+                    falsy_paths,
                     truthy_ruled_out: vec![],
                     falsy_ruled_out,
                 }
@@ -452,8 +460,7 @@ impl TypeChecker {
                             return Refinements {
                                 truthy: vec![(name.clone(), Some(narrowed))],
                                 falsy: vec![(name.clone(), Some(TypeExpr::Named("nil".into())))],
-                                truthy_ruled_out: vec![],
-                                falsy_ruled_out: vec![],
+                                ..Refinements::default()
                             };
                         }
                     }
@@ -526,29 +533,47 @@ impl TypeChecker {
                 }
                 _ => {}
             }
+            // A bare identifier never participates in path narrowing — return
+            // here so an unmatched scalar (`x: int`) doesn't fall through and
+            // get treated as a single-segment reference path.
+            return Refinements::empty();
         }
 
-        // `o?.a != nil` (and `?[]`/`?.()` chains) proves the *base* identifier
-        // is non-nil on the branch where the chain is non-nil. We can only
-        // refine the one branch — `o?.a == nil` is satisfiable with `o`
-        // non-nil but `o.a` nil — so the opposite branch stays unrefined.
+        // Non-identifier subject (a property path like `o.a` / `o?.a`). Two
+        // independent, sound facts combine on the "chain is non-nil" branch:
+        let mut refs = Refinements::default();
+
+        // (1) `o?.a != nil` (and `?[]`/`?.()` chains) proves the *base*
+        // identifier is non-nil — by optional-chaining semantics the chain
+        // is `nil` whenever the base is. This only refines the non-nil branch
+        // (`o?.a == nil` is satisfiable with `o` non-nil but `o.a` nil).
         if let Some(base) = optional_chain_base_identifier(var_node) {
             if let Some(TypeExpr::Union(members)) = scope.get_var(base).cloned().flatten() {
                 if let Some(narrowed) = remove_from_union(&members, "nil") {
-                    let nonnil = Refinements {
-                        truthy: vec![(base.to_string(), Some(narrowed))],
-                        ..Refinements::default()
-                    };
-                    return if op == "!=" {
-                        nonnil
-                    } else {
-                        nonnil.inverted()
-                    };
+                    refs.truthy.push((base.to_string(), Some(narrowed)));
                 }
             }
         }
 
-        Refinements::empty()
+        // (2) The reference path itself: `path != nil` removes `nil` from the
+        // path's natural type on the truthy branch and pins it to `nil` on the
+        // falsy branch. Deferred via `PathNarrowing` so reads re-derive from the
+        // path's freshly computed type (see `infer_property_access_type`).
+        if let Some(key) = reference_path_key(var_node) {
+            refs.truthy_paths
+                .push((key.clone(), PathNarrowing::Remove("nil".into())));
+            refs.falsy_paths
+                .push((key, PathNarrowing::Keep("nil".into())));
+        }
+
+        if refs.truthy.is_empty() && refs.truthy_paths.is_empty() && refs.falsy_paths.is_empty() {
+            return Refinements::empty();
+        }
+        if op == "!=" {
+            refs
+        } else {
+            refs.inverted()
+        }
     }
 
     /// Extract type_of refinements from `type_of(x) == "typename"` patterns.
@@ -558,14 +583,13 @@ impl TypeChecker {
         right: &SNode,
         scope: &TypeScope,
     ) -> Refinements {
-        let (var_name, type_name) = if let (Some(var), Node::StringLiteral(tn)) =
-            (extract_type_of_var(left), &right.node)
+        let (arg, type_name) = if let (Some(a), Node::StringLiteral(tn)) =
+            (extract_type_of_arg(left), &right.node)
         {
-            (var, tn.clone())
-        } else if let (Node::StringLiteral(tn), Some(var)) =
-            (&left.node, extract_type_of_var(right))
+            (a, tn.clone())
+        } else if let (Node::StringLiteral(tn), Some(a)) = (&left.node, extract_type_of_arg(right))
         {
-            (var, tn.clone())
+            (a, tn.clone())
         } else {
             return Refinements::empty();
         };
@@ -591,6 +615,27 @@ impl TypeChecker {
         if !KNOWN_TYPES.contains(&type_name.as_str()) {
             return Refinements::empty();
         }
+
+        // `type_of(<property path>) == "T"` — e.g. `type_of(entry?.arguments)`.
+        // Bare identifiers are handled by the variable logic below; anything
+        // that is a stable property path narrows via a deferred directive that
+        // `infer_property_access_type` re-applies to the path's natural type.
+        let Node::Identifier(var_name) = &arg.node else {
+            if let Some(key) = reference_path_key(arg) {
+                let eq_refs = Refinements {
+                    truthy_paths: vec![(key.clone(), PathNarrowing::Keep(type_name.clone()))],
+                    falsy_paths: vec![(key, PathNarrowing::Remove(type_name))],
+                    ..Refinements::default()
+                };
+                return if op == "==" {
+                    eq_refs
+                } else {
+                    eq_refs.inverted()
+                };
+            }
+            return Refinements::empty();
+        };
+        let var_name = var_name.clone();
 
         let var_type = scope.get_var(&var_name).cloned().flatten();
         match var_type {
@@ -623,9 +668,8 @@ impl TypeChecker {
                 // exhaustive-narrowing chains.
                 let eq_refs = Refinements {
                     truthy: vec![(var_name.clone(), Some(TypeExpr::Named(type_name.clone())))],
-                    falsy: vec![],
-                    truthy_ruled_out: vec![],
                     falsy_ruled_out: vec![(var_name, type_name)],
+                    ..Refinements::default()
                 };
                 return if op == "==" {
                     eq_refs
