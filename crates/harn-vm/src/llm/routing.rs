@@ -37,6 +37,70 @@ const DEFAULT_RACE_PRIMARY_TIMEOUT_MS: u64 = 120_000;
 
 const DEFAULT_FAILOVER_STATUSES: &[u16] = &[408, 429, 500, 502, 503, 504];
 
+/// Build a first-class routing policy from catalog-declared same-logical-model
+/// routes. This intentionally feeds the existing routing executor instead of
+/// adding another transport fallback path, so receipts, budget checks, and
+/// transcript metadata stay in one schema.
+pub(crate) fn build_equivalent_failover_policy(
+    provider: &str,
+    model: &str,
+    max_routes: usize,
+) -> Option<Arc<RoutingPolicyConfig>> {
+    if max_routes < 2 {
+        return None;
+    }
+
+    let mut chain = vec![ChainLink {
+        provider: provider.to_string(),
+        model: model.to_string(),
+        timeout_ms: None,
+        label: Some("primary".to_string()),
+    }];
+
+    for (candidate_model, candidate) in crate::llm_config::equivalent_model_catalog_entries(model) {
+        if chain.len() >= max_routes {
+            break;
+        }
+        if candidate.provider == provider {
+            continue;
+        }
+        if chain
+            .iter()
+            .any(|link| link.provider == candidate.provider && link.model == candidate_model)
+        {
+            continue;
+        }
+        if super::helpers::resolve_api_key(&candidate.provider).is_err() {
+            continue;
+        }
+        chain.push(ChainLink {
+            provider: candidate.provider.clone(),
+            model: candidate_model,
+            timeout_ms: None,
+            label: Some(format!("equivalent:{}", candidate.provider)),
+        });
+    }
+
+    if chain.len() < 2 {
+        return None;
+    }
+
+    let label = format!("equivalent_failover({provider}:{model})");
+    Some(Arc::new(RoutingPolicyConfig {
+        failover: FailoverRules {
+            max_attempts: Some(chain.len()),
+            ..FailoverRules::default()
+        },
+        latency: LatencyRules::default(),
+        budget: BudgetRules::default(),
+        observe: ObserveRules::default(),
+        escalate_on: Vec::new(),
+        max_refines_per_link: 0,
+        label,
+        chain,
+    }))
+}
+
 /// What to do when a budget cap is exceeded while the chain is running.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum BudgetExceedAction {

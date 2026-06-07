@@ -1,7 +1,9 @@
 use super::extract::*;
 use super::*;
 
-use crate::llm_config::{AliasDef, AuthEnv, ProviderDef, ProvidersConfig, TierRule};
+use crate::llm_config::{
+    AliasDef, AuthEnv, ModelAvailability, ModelDef, ProviderDef, ProvidersConfig, TierRule,
+};
 
 fn install_test_routes() {
     let mut overlay = ProvidersConfig::default();
@@ -59,6 +61,87 @@ fn install_test_routes() {
         contains: None,
         tier: "mid".to_string(),
     });
+    crate::llm_config::set_user_overrides(Some(overlay));
+    super::super::reset_provider_key_cache();
+}
+
+fn test_provider(url: &str) -> ProviderDef {
+    ProviderDef {
+        base_url: url.to_string(),
+        auth_style: "none".to_string(),
+        auth_env: AuthEnv::None,
+        chat_endpoint: "/chat/completions".to_string(),
+        cost_per_1k_in: Some(0.0),
+        cost_per_1k_out: Some(0.0),
+        latency_p50_ms: Some(1000),
+        ..Default::default()
+    }
+}
+
+fn test_equivalent_model(provider: &str, group: &str) -> ModelDef {
+    ModelDef {
+        name: format!("{provider} equivalent model"),
+        provider: provider.to_string(),
+        context_window: 32_000,
+        logical_model: None,
+        equivalence_group: Some(group.to_string()),
+        served_variant: None,
+        wire_model: None,
+        api_dialect: None,
+        rate_limits: None,
+        architecture: None,
+        local_memory: None,
+        runtime_context_window: None,
+        stream_timeout: None,
+        capabilities: Vec::new(),
+        pricing: None,
+        deprecated: false,
+        deprecation_note: None,
+        superseded_by: None,
+        fast_mode: None,
+        quality_tags: Vec::new(),
+        availability: ModelAvailability::Serverless,
+        tier: Some("mid".to_string()),
+        open_weight: Some(true),
+        strengths: Vec::new(),
+        benchmarks: BTreeMap::new(),
+        family: Some("test-equivalent-family".to_string()),
+        lineage: None,
+        complementary_with: Vec::new(),
+        avoid_as_reviewer_for: Vec::new(),
+    }
+}
+
+fn install_equivalent_routes() {
+    let mut overlay = ProvidersConfig::default();
+    overlay.providers.insert(
+        "primary".to_string(),
+        test_provider("https://primary.example/v1"),
+    );
+    overlay.providers.insert(
+        "backup-a".to_string(),
+        test_provider("https://backup-a.example/v1"),
+    );
+    overlay.providers.insert(
+        "backup-b".to_string(),
+        test_provider("https://backup-b.example/v1"),
+    );
+    overlay.models.insert(
+        "primary-model".to_string(),
+        test_equivalent_model("primary", "test-equivalent-model"),
+    );
+    overlay.models.insert(
+        "backup-a-model".to_string(),
+        test_equivalent_model("backup-a", "test-equivalent-model"),
+    );
+    overlay.models.insert(
+        "backup-b-model".to_string(),
+        test_equivalent_model("backup-b", "test-equivalent-model"),
+    );
+    overlay.models.insert(
+        "same-provider-model".to_string(),
+        test_equivalent_model("primary", "test-equivalent-model"),
+    );
     crate::llm_config::set_user_overrides(Some(overlay));
     super::super::reset_provider_key_cache();
 }
@@ -419,6 +502,92 @@ fn preference_list_cheapest_first_sets_route_fallbacks() {
     assert_eq!(opts.route_fallbacks.len(), 1);
     assert_eq!(opts.route_fallbacks[0].provider, "fast");
     assert_eq!(opts.route_fallbacks[0].model, "fast-mid-model");
+    crate::llm_config::clear_user_overrides();
+    super::super::reset_provider_key_cache();
+}
+
+#[test]
+fn equivalent_failover_builds_catalog_backed_routing_policy() {
+    install_equivalent_routes();
+    let mut failover = BTreeMap::new();
+    failover.insert("max_routes".to_string(), VmValue::Int(2));
+    let opts = extract_with_options(BTreeMap::from([
+        (
+            "provider".to_string(),
+            VmValue::String(std::sync::Arc::from("primary")),
+        ),
+        (
+            "model".to_string(),
+            VmValue::String(std::sync::Arc::from("primary-model")),
+        ),
+        (
+            "equivalent_failover".to_string(),
+            VmValue::Dict(std::sync::Arc::new(failover)),
+        ),
+    ]))
+    .expect("options");
+
+    let policy = opts.routing_policy.expect("equivalent routing policy");
+    assert_eq!(opts.provider, "primary");
+    assert_eq!(opts.model, "primary-model");
+    assert_eq!(policy.label, "equivalent_failover(primary:primary-model)");
+    assert_eq!(policy.chain.len(), 2);
+    assert_eq!(policy.chain[0].provider, "primary");
+    assert_eq!(policy.chain[0].model, "primary-model");
+    assert_eq!(policy.chain[1].provider, "backup-a");
+    assert_eq!(policy.chain[1].model, "backup-a-model");
+    assert!(policy
+        .chain
+        .iter()
+        .all(|link| link.model != "same-provider-model"));
+    assert_eq!(policy.failover.max_attempts, Some(2));
+
+    crate::llm_config::clear_user_overrides();
+    super::super::reset_provider_key_cache();
+}
+
+#[test]
+fn equivalent_failover_rejects_explicit_routing_policy() {
+    install_equivalent_routes();
+    let chain = VmValue::List(std::sync::Arc::new(vec![VmValue::Dict(
+        std::sync::Arc::new(BTreeMap::from([
+            (
+                "provider".to_string(),
+                VmValue::String(std::sync::Arc::from("primary")),
+            ),
+            (
+                "model".to_string(),
+                VmValue::String(std::sync::Arc::from("primary-model")),
+            ),
+        ])),
+    )]));
+    let routing =
+        crate::llm::routing::build_routing_policy(&BTreeMap::from([("chain".to_string(), chain)]))
+            .expect("routing policy");
+
+    let err = match extract_with_options(BTreeMap::from([
+        (
+            "provider".to_string(),
+            VmValue::String(std::sync::Arc::from("primary")),
+        ),
+        (
+            "model".to_string(),
+            VmValue::String(std::sync::Arc::from("primary-model")),
+        ),
+        ("routing".to_string(), routing),
+        ("equivalent_failover".to_string(), VmValue::Bool(true)),
+    ])) {
+        Ok(_) => panic!("ambiguous routing should fail"),
+        Err(err) => err,
+    };
+
+    match err {
+        VmError::Thrown(VmValue::String(message)) => {
+            assert!(message.contains("cannot be combined"), "{message}");
+        }
+        other => panic!("expected thrown ambiguity error, got {other:?}"),
+    }
+
     crate::llm_config::clear_user_overrides();
     super::super::reset_provider_key_cache();
 }
