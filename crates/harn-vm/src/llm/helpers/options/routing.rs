@@ -1,5 +1,7 @@
 use super::*;
 
+const DEFAULT_EQUIVALENT_FAILOVER_MAX_ROUTES: usize = 3;
+
 pub(super) fn quality_rank(tier: &str) -> i32 {
     match tier.to_ascii_lowercase().as_str() {
         "small" => 0,
@@ -178,6 +180,74 @@ pub(super) fn parse_fallback_chain_option(
         _ => {}
     }
     out
+}
+
+pub(super) fn parse_equivalent_failover_option(
+    options: Option<&BTreeMap<String, VmValue>>,
+    provider: &str,
+    model: &str,
+    explicit_routing_policy: bool,
+) -> Result<Option<std::sync::Arc<crate::llm::routing::RoutingPolicyConfig>>, VmError> {
+    let Some(raw) = options.and_then(|o| o.get("equivalent_failover")) else {
+        return Ok(None);
+    };
+
+    let mut enabled = true;
+    let mut max_routes = DEFAULT_EQUIVALENT_FAILOVER_MAX_ROUTES;
+    match raw {
+        VmValue::Nil | VmValue::Bool(false) => return Ok(None),
+        VmValue::Bool(true) => {}
+        VmValue::Dict(dict) => {
+            if let Some(value) = dict.get("enabled") {
+                enabled = match value {
+                    VmValue::Nil => true,
+                    VmValue::Bool(value) => *value,
+                    other => {
+                        return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+                            format!(
+                                "equivalent_failover.enabled: expected bool, got {}",
+                                other.type_name()
+                            ),
+                        ))));
+                    }
+                };
+            }
+            if let Some(value) = dict.get("max_routes") {
+                let raw_max = value.as_int().ok_or_else(|| {
+                    VmError::Thrown(VmValue::String(std::sync::Arc::from(
+                        "equivalent_failover.max_routes: expected a positive integer",
+                    )))
+                })?;
+                if raw_max < 1 {
+                    return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+                        "equivalent_failover.max_routes: expected a positive integer",
+                    ))));
+                }
+                max_routes = raw_max as usize;
+            }
+        }
+        other => {
+            return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+                format!(
+                    "equivalent_failover: expected bool or dict, got {}",
+                    other.type_name()
+                ),
+            ))));
+        }
+    }
+
+    if !enabled {
+        return Ok(None);
+    }
+    if explicit_routing_policy {
+        return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+            "equivalent_failover cannot be combined with explicit routing_policy(...)",
+        ))));
+    }
+
+    Ok(crate::llm::routing::build_equivalent_failover_policy(
+        provider, model, max_routes,
+    ))
 }
 
 pub(super) fn route_alternative(

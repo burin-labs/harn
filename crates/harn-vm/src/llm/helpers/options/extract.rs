@@ -31,7 +31,8 @@ pub(crate) fn extract_llm_options(
     apply_model_role_defaults(&mut options);
     apply_active_step_defaults(&mut options);
 
-    let routing_policy = crate::llm::routing::extract_routing_policy(options.as_ref())?;
+    let mut routing_policy = crate::llm::routing::extract_routing_policy(options.as_ref())?;
+    let explicit_routing_policy = routing_policy.is_some();
     let route_policy = parse_route_policy_option(options.as_ref())?;
     let mut provider = vm_resolve_provider(&options);
     let mut model = vm_resolve_model(&options, &provider);
@@ -39,6 +40,15 @@ pub(crate) fn extract_llm_options(
     if let Some(decision) = routing_decision.as_ref() {
         provider = decision.selected_provider.clone();
         model = decision.selected_model.clone();
+    }
+    let equivalent_failover_policy = parse_equivalent_failover_option(
+        options.as_ref(),
+        &provider,
+        &model,
+        explicit_routing_policy,
+    )?;
+    if routing_policy.is_none() {
+        routing_policy = equivalent_failover_policy;
     }
     // A routing_policy chain owns provider/model selection: snap the
     // base options to the first link so transcript-only consumers see
