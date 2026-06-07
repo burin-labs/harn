@@ -8,6 +8,111 @@ highlights live in [CHANGELOG-pre-0.6.md](CHANGELOG-pre-0.6.md).
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.8.82
+
+### Breaking
+
+- **`substring(s, start, end)` now takes an exclusive end index, not a length.**
+  The free `substring(...)` builtin previously treated its third argument as a
+  **length**, while the `.substring(...)` method, the `s[start:end]` slice
+  operator, `list.slice`, `bytes_slice`, and the language spec all use an
+  exclusive **end** index. The builtin now matches that single convention, so
+  `substring("hello world", 6, 9)` returns `"wor"` and the two call forms agree.
+  Both forms share one implementation, so they can no longer drift. Migrate any
+  length-style calls: a "last N chars" `substring(s, len(s) - n, n)` becomes
+  `substring(s, len(s) - n)` (omit the end to run to the string end), and a
+  fixed-length slice `substring(s, i, n)` becomes `substring(s, i, i + n)`.
+
+### Added
+
+- **Experimental `harn-codegen` crate: a Cranelift-backed native compiler for
+  Harn's scalar-compute subset.** Lowers `int`/`float`/`bool` functions
+  (arithmetic, comparisons, logical ops, branches, loops, locals) from VM
+  bytecode to native machine code, with an in-process JIT (`NativeFunction`),
+  an object-file backend (`emit_object`), a pure-Rust reference interpreter,
+  and a `harn-nativec` CLI. It is `publish = false` and is not a dependency of
+  `harn-cli`/`harn-vm`, so the distributed binary never links Cranelift; build
+  it explicitly with `-p harn-codegen`. See
+  `docs/src/dev/native-codegen.md`.
+- `harn pg codegen` now formats its rendered output, so generated type files
+  are `harn fmt`-clean by construction.
+- `harn lint` and `harn check` skip style and unused-declaration lints for
+  machine-generated `*.generated.harn` files (type diagnostics still apply, and
+  `harn fmt` still formats them). The signal is the filename, not an in-file
+  `@generated`/`DO NOT EDIT` comment, so a generated marker cannot be pasted in
+  to silence lints on a hand-written file.
+- `std/postgres/query` projection helpers (`uuid_text`, `timestamptz_json`,
+  `nullable_timestamptz_json`) now accept table-qualified column names such as
+  `timestamptz_json("vaults.created_at")`. Each dot-separated segment is
+  validated as an identifier and the output alias is the trailing segment
+  (`created_at`), so projections from joined queries compose through
+  `columns([...])` without `unsafe_sql(...)` or brace escaping.
+- `std/postgres/query` projection helpers (`uuid_text`, `timestamptz_json`,
+  `nullable_timestamptz_json`, `select_clause`) now return trusted
+  `PgSqlFragment`s, and a new `columns(parts)` helper joins projection
+  fragments/strings into one `{projection}` fragment. Column projections now
+  drop into `sql(...)` placeholders without an `unsafe_sql(...)` wrapper, and
+  carry the literal `'{}'` JSON path safely.
+
+### Fixed
+
+- **`hostlib_code_index_*` `line_count` no longer overcounts files that end in a newline.**
+  The code-index file scanner counted lines with `content.split('\n').count()`,
+  which reports one phantom extra line for any file with a trailing newline (the
+  common case) — e.g. a two-line file ending in `\n` was reported as 3 lines.
+  Line counting is now shared through a single `count_lines` helper, matching the
+  scanner and process-artifact surfaces that already counted correctly, so the
+  `line_count` field surfaced to scripts is accurate.
+- Conformance fixture `.harn/` dirs now ignore every runtime SQLite DB tests drop in (e.g. the rate-limit
+  store `llm-rate-limits.sqlite`), not just the event log, so a stray DB no longer trips the release guard.
+- Fixed unsound typed-opcode specialization for reassignable bindings. The
+  compiler trusted a `var` / `for`-item binding's initializer-inferred primitive
+  type when emitting typed fast-path opcodes (`AddInt`, `LessInt`, …), even
+  though such a binding can be reassigned through an `any`-typed value of a
+  different runtime primitive. Because typed opcodes hard-error on an operand
+  type mismatch, the optimized build could throw a spurious
+  `Typed int add expected int operands, got int and float` on a program the
+  unoptimized build runs correctly. The compiler now keeps the typed fast path
+  only for bindings a new monomorphism analysis can prove keep a single
+  primitive type across their initializer and every reassignment in scope; all
+  others fall back to the generic adaptive path, which re-checks operand shapes
+  at runtime. The common loop-counter and accumulator idioms stay fully
+  specialized.
+- **Streaming `output_schema` validation tolerates markdown code fences.**
+  The incremental JSON validator behind `schema_stream_abort` (and the
+  `std/json/stream*` builtins) now strips a leading triple-backtick fence
+  (with an optional language tag such as `json`) and a trailing closing fence
+  around the JSON body, surviving arbitrary chunk boundaries. Local Ollama
+  structured-output calls that wrap their JSON in a code fence no longer abort
+  with `schema_stream_aborted`. Genuine non-JSON leads and schema violations
+  inside the fence still fail as before. A root scalar (number / `true` /
+  `false` / `null`) is now framed at the first trailing whitespace or backtick,
+  so trailing junk after the value (e.g. `42 garbage`, `4 2`) is correctly
+  rejected as invalid rather than silently dropped.
+- Typed fast-path opcodes (`AddInt`, `LessInt`, `EqualString`, …) now guard
+  their operands and fall back to generic semantics on a type miss instead of
+  hard-erroring. The compiler emits these from a static type guess, but a guess
+  can be wrong at runtime — an `any`-typed value flowing through a typed
+  parameter or an annotated binding initializer (`let x: int = <any>`) is not
+  runtime-checked, so the operand may be a different primitive than the
+  annotation claims. The optimized build previously threw a
+  specialization-internal error (e.g. `Typed int add expected int operands, got
+  int and float`) on programs the unoptimized build runs correctly; it now
+  produces the same result as the unoptimized build by construction. The hot
+  path where the guess holds is unchanged, and genuinely incompatible operands
+  still error with the same generic message in both builds.
+- **Sandboxed builds no longer poison the shared `sccache` daemon.** `sccache`
+  runs as a single long-lived per-user server; if a sandboxed cargo build was the
+  first caller to spawn it, the daemon inherited harn's `sandbox-exec`
+  confinement permanently (even after reparenting to launchd) and then failed
+  *every* later build machine-wide with `Operation not permitted` — unable to
+  read build inputs outside the sandbox root or write its cache dir under
+  `~/Library/Caches`. Sandboxed process spawns now bypass the rustc wrapper
+  (empty `CARGO_BUILD_RUSTC_WRAPPER` / `RUSTC_WRAPPER`, which overrides
+  `build.rustc-wrapper` in `.cargo/config.toml`), so a per-command sandbox can
+  never confine the cross-workspace daemon. The on-disk cache and all
+  unsandboxed builds are unaffected.
+
 ## v0.8.81
 
 ### Added

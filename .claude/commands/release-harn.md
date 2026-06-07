@@ -81,10 +81,28 @@ step.
    ```
 
    This audits, dry-run-publishes, bumps `Cargo.toml`/`Cargo.lock`/per-crate
-   manifests, regenerates derived files (highlight keywords, language-spec
-   mirror), and `git add`s everything. Use `--skip-audit` to trust the
+   manifests, regenerates **version-embedded derived files** (highlight
+   keywords, language-spec mirror, and the `spec/protocol-artifacts/*` — whose
+   `manifest.json` `artifactVersion` and fixture runtime versions track the
+   crate version), and `git add`s everything. Use `--skip-audit` to trust the
    merge-queue CI when iterating fast; use `--skip-dry-run` for the same
    reason on the publish dry-run.
+
+   **Headless / hand-bumped fallback.** `release_ship.sh --prepare` refuses to
+   run standalone (it requires `release_harn.harn`), and `release_harn.harn`'s
+   live note generation needs `--agent` model creds — both absent in headless
+   runs. If you bump the version *by hand* there (edit the `[workspace.package]`
+   `version` in `Cargo.toml` + the workspace-crate `version =` lines in
+   `Cargo.lock`), you MUST also regenerate the version-embedded derived files
+   yourself, or the slow Release-PR merge-queue audit fails late on
+   `check-protocol-artifacts` (`protocol artifacts are stale or missing`):
+
+   ```bash
+   # after bumping the version, from the release branch:
+   cargo run --bin harn -- run scripts/sync_protocol_fixture_runtime_versions.harn -- --from <old> --to <new>
+   CARGO_INCREMENTAL=0 make gen-protocol-artifacts   # rebuilds harn-cli at <new> so artifactVersion is right
+   make check-protocol-artifacts                      # confirm before pushing
+   ```
 
 9. Commit, rebase onto latest `origin/main`, push, open the PR titled
    **`Release vX.Y.Z`**, and enable auto-merge:
