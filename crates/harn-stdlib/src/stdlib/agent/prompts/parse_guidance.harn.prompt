@@ -3,7 +3,13 @@ Your tool call could not be parsed: {{ error_summary }}{{ if has_partial_success
 (The other {{ parsed_call_count }} tool call(s) in this turn parsed successfully and were dispatched; the errors above describe only the malformed ones, which were dropped.){{ end }}
 
 {{ body_hint }}
+{{ if is_json_format }}
+```tool
+{ "name": "edit", "args": { "action": "create", "path": "main.go", "content": "package main\n\n// backticks, quotes, and backslashes all survive as JSON string bytes:\nconst usage = `go run main.go`\n" } }
+```
 
+The `content` value is an ordinary JSON string: the embedded `` ` `` backtick block and any `<<EOF` / `}` / `</tool>` are literal bytes — escape newlines as \n, quotes as \", backslashes as \\. Emit one ```tool block per call; never use a heredoc, a Markdown fence around the call, or a triple-quoted string.
+{{ else }}
 edit({
     action: "create",
     path: "...",
@@ -14,3 +20,4 @@ EOF
 })
 
 Do not use backtick template literals for code that contains backtick characters, such as Go raw strings, Rust raw strings, or shell snippets. Heredoc avoids those escaping issues.
+{{ end }}

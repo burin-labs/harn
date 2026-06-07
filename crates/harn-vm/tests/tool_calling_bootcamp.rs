@@ -19,10 +19,11 @@
 //!   {capability-profile × requested-format × config-source}
 //! kept to a few dozen cases. Each case asserts exactly one of:
 //!   (a) resolution REJECTS (throws) with a message naming `tool_format`, or
-//!   (b) resolution ACCEPTS and returns a concrete `native`/`text` that the
-//!       capability matrix says the model serves.
+//!   (b) resolution ACCEPTS and returns a concrete `native`/`text`/`json` that
+//!       the capability matrix says the model serves. `json` (fenced-JSON) is a
+//!       text-channel peer of `text`: valid wherever the text wire format is.
 //! No case is allowed to resolve to a format the matrix marks impossible, and
-//! no case is allowed to resolve to a non-`{native,text}` string.
+//! no case is allowed to resolve to a non-`{native,text,json}` string.
 //!
 //! Run with:
 //!   CARGO_TARGET_DIR=/tmp/harn-target-bootcamp \
@@ -128,8 +129,8 @@ const REQUESTED_FORMATS: &[&str] = &[
     "text",     // valid
     "NATIVE",   // valid but uppercase — must normalize, not reject
     " text ",   // valid but padded — must normalize, not reject
+    "json",     // valid — fenced-JSON text-channel format
     "nativ",    // typo — must reject
-    "json",     // wrong value — must reject
     "tool_use", // wrong value (Anthropic wire term) — must reject
     "xml",      // wrong value — must reject
 ];
@@ -146,7 +147,15 @@ const REAL_CELLS: &[(&str, &str)] = &[
 
 fn is_invalid_token(requested: &str) -> bool {
     let norm = requested.trim().to_lowercase();
-    !matches!(norm.as_str(), "" | "auto" | "native" | "text")
+    // `json` is the fenced-JSON text-channel format (a peer of `text`), so it
+    // is a valid token, not a typo/wrong value.
+    !matches!(norm.as_str(), "" | "auto" | "native" | "text" | "json")
+}
+
+/// True when `requested` rides the text channel (`text` or `json`). Both are
+/// rejected on a model whose text wire format is unsupported, identically.
+fn is_text_channel(requested: &str) -> bool {
+    matches!(requested.trim().to_lowercase().as_str(), "text" | "json")
 }
 
 #[test]
@@ -163,7 +172,7 @@ fn requested_format_axis_rejects_or_resolves_concretely() {
             // (the matrix says that side does not work) — never a silent
             // degrade. The invalid-token cases reject on syntax alone.
             let requests_impossible_side =
-                (norm == "native" && !native_ok) || (norm == "text" && !text_ok);
+                (norm == "native" && !native_ok) || (is_text_channel(&norm) && !text_ok);
             if is_invalid_token(requested) {
                 match outcome {
                     Outcome::Rejected(err) => assert!(
@@ -189,7 +198,7 @@ fn requested_format_axis_rejects_or_resolves_concretely() {
                         panic!("{label}: serviceable request unexpectedly rejected: {err}")
                     }
                     Outcome::Accepted { tool_format, .. } => assert!(
-                        tool_format == "native" || tool_format == "text",
+                        tool_format == "native" || tool_format == "text" || tool_format == "json",
                         "{label}: accepted but resolved to non-concrete {tool_format:?}"
                     ),
                 }
@@ -385,6 +394,29 @@ fn text_only_parity_rejects_native_request() {
 }
 
 #[test]
+fn json_is_a_text_channel_format_for_parity() {
+    // `json` (fenced-JSON) rides the text channel, so a native_only model must
+    // reject it exactly like `text`, and a text_only model must accept it.
+    match resolve_with_parity("bootcamp-native-only-json", "native_only", true, "json") {
+        Outcome::Rejected(err) => assert!(
+            err.contains("json") && err.contains("native_only"),
+            "expected native_only rejection naming json; got {err}"
+        ),
+        Outcome::Accepted { tool_format, .. } => panic!(
+            "native_only model accepted json (a text-channel format) as {tool_format:?} \
+             (silent half-support)"
+        ),
+    }
+    match resolve_with_parity("bootcamp-text-only-json", "text_only", false, "json") {
+        Outcome::Accepted { tool_format, .. } => assert_eq!(
+            tool_format, "json",
+            "text_only model should accept json, a text-channel format"
+        ),
+        Outcome::Rejected(err) => panic!("text_only model rejected json (text channel): {err}"),
+    }
+}
+
+#[test]
 fn override_reason_forces_marked_impossible_side() {
     // The escape hatch: a probe/matrix harness may deliberately force the
     // catalog-marked-impossible side by recording a reason. This stays within
@@ -467,7 +499,8 @@ fn explicit_and_catalog_paths_agree_on_servable_cells() {
             );
             let servable = match auto.as_str() {
                 "native" => native_ok,
-                "text" => text_ok,
+                // `json` is a text-channel format, servable wherever text is.
+                "text" | "json" => text_ok,
                 _ => false,
             };
             assert!(

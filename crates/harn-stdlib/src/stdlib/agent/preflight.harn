@@ -38,7 +38,8 @@ fn __agent_tool_format(opts) {
  * @example: agent_tool_call_paradigm(opts)
  */
 pub fn agent_tool_call_paradigm(options = nil) {
-  if __agent_tool_format(options) == "native" {
+  let format = __agent_tool_format(options)
+  if format == "native" {
     return {
       kind: "native",
       call_open: "",
@@ -46,6 +47,16 @@ pub fn agent_tool_call_paradigm(options = nil) {
       body_open: "\"",
       body_close: "\"",
       body_hint: "Pass multi-line or code-bearing fields (file contents, replacement text) as ordinary JSON string arguments — the runtime handles escaping.",
+    }
+  }
+  if format == "json" {
+    return {
+      kind: "json",
+      call_open: "```tool\n",
+      call_close: "\n```",
+      body_open: "\"",
+      body_close: "\"",
+      body_hint: "Each tool call is one ```tool fenced block containing a single JSON object `{ \"name\": \"...\", \"args\": { ... } }`. Pass multi-line or code-bearing fields (file contents, replacement text, exact-match strings) as ordinary JSON string values — escape newlines as \\n, quotes as \\\", backslashes as \\\\. Backticks, `<<EOF`, `}`, and `</tool>` need NO escaping; they are literal bytes inside the JSON string. Emit one ```tool block per call (N blocks for N calls). Never use a heredoc, a Markdown fence around the call, or a triple-quoted string.",
     }
   }
   return {
@@ -73,6 +84,17 @@ pub fn agent_tool_call_paradigm(options = nil) {
  */
 pub fn agent_render_tool_call_exemplar(name, args, options = nil) {
   let p = agent_tool_call_paradigm(options)
+  if p.kind == "json" {
+    // Fenced-JSON: one ```tool block wrapping a single {name, args} object.
+    // Both `body` and scalar args are ordinary JSON string/values — the JSON
+    // encoder handles escaping, so the `body` flag is a no-op here.
+    var pairs = []
+    for a in args ?? [] {
+      pairs = pairs.push([to_string(a?.key), a?.value])
+    }
+    let call_obj = {name: to_string(name), args: dict_from_pairs(pairs)}
+    return p.call_open + json_stringify(call_obj) + p.call_close
+  }
   var rendered = ""
   var first = true
   for a in args ?? [] {
@@ -136,6 +158,21 @@ fn __agent_native_tool_contract_prompt(opts) {
   return render_agent_prompt_id(
     "agent.tool_contract_native",
     {done_sentinel: __agent_done_sentinel(opts)},
+    opts,
+  )
+}
+
+fn __agent_json_tool_contract_prompt(opts) {
+  if !__agent_has_tools(opts) || __agent_tool_format(opts) != "json" {
+    return ""
+  }
+  return render_agent_prompt_id(
+    "agent.tool_contract_json",
+    {
+      done_sentinel: __agent_done_sentinel(opts),
+      body_hint: agent_tool_call_paradigm(opts).body_hint,
+      expanded_schemas: __agent_tool_listing_prompt(opts.tools),
+    },
     opts,
   )
 }
@@ -437,7 +474,13 @@ pub fn agent_build_turn_system_fragments(session, opts, iteration) {
     "native_tool_contract",
     __agent_native_tool_contract_prompt(opts),
   )
-  if opts?.tools != nil && __agent_tool_format(opts) != "native" {
+  if opts?.tools != nil && __agent_tool_format(opts) == "json" {
+    fragments = __agent_push_system_fragment(
+      fragments,
+      "json_tool_contract",
+      __agent_json_tool_contract_prompt(opts),
+    )
+  } else if opts?.tools != nil && __agent_tool_format(opts) != "native" {
     fragments = __agent_push_system_fragment(
       fragments,
       "text_tool_contract",

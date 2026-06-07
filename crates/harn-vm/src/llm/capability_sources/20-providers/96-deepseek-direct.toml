@@ -38,6 +38,12 @@ prompt_caching = true
 [[provider.deepseek]]
 model_match = "deepseek-chat*"
 native_tools = true
+# STAGED, NOT ACTIVE: fenced-json (tool_format = "json") scored a clean
+# 1.0/1.0/1.0 emission-fidelity sweep on the deepseek family (chat-v3 tested
+# on fenced/xml; v3.2 on heredoc/code). Measured at N=1 emission fidelity;
+# DO NOT rely until the N>=5 coding-agent parity bench clears CI lower bound
+# > 0, and re-confirm on the EXACT id Burin routes (chat-v3 vs v3.2). To
+# activate: change the line below to `preferred_tool_format = "json"`.
 preferred_tool_format = "native"
 structured_output = "native"
 text_tool_wire_format_supported = true

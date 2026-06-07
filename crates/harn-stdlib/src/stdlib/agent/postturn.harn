@@ -942,7 +942,7 @@ pub fn agent_extract_tool_calls(llm_result, opts) {
   if opts?.tools == nil {
     return []
   }
-  let parsed = agent_parse_tool_calls(llm_result?.text ?? "", opts.tools)
+  let parsed = agent_parse_tool_calls(llm_result?.text ?? "", opts.tools, opts?.tool_format)
   return parsed?.calls ?? []
 }
 

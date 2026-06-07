@@ -31,14 +31,19 @@ pub fn agent_typed_output_checkpoint(name, prompt, schema, options = nil, valida
 /**
  * agent_parse_tool_calls.
  *
+ * tool_format selects the text-channel grammar: pass "json" to parse the
+ * fenced-JSON protocol, anything else (or nil) parses the canonical
+ * tagged/heredoc text protocol. The returned record shape is identical for
+ * both grammars.
+ *
  * @effects: [host]
  * @allocation: heap
  * @errors: []
  * @api_stability: experimental
- * @example: agent_parse_tool_calls(text, tools)
+ * @example: agent_parse_tool_calls(text, tools, "json")
  */
-pub fn agent_parse_tool_calls(text, tools = nil) {
-  return __host_agent_parse_tool_calls(text, tools)
+pub fn agent_parse_tool_calls(text, tools = nil, tool_format = nil) {
+  return __host_agent_parse_tool_calls(text, tools, tool_format)
 }
 
 /**

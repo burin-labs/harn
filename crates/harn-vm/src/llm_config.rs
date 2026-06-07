@@ -1944,6 +1944,45 @@ pub fn provider_economics(provider: &str) -> (Option<f64>, Option<f64>, Option<u
         .unwrap_or((None, None, None))
 }
 
+/// The tool-call channel a `tool_format` string addresses.
+///
+/// `native` is the provider JSON tool-calling channel; `text` (the canonical
+/// tagged/heredoc grammar) and `json` (fenced-JSON) are both TEXT-channel
+/// formats — they ride in the assistant's visible content and parse with a
+/// text parser. This is the single source of truth for "is this format a
+/// text-channel format?" so the parity gates, native-tools resolution, and
+/// tool-result message role all agree.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ToolFormatChannel {
+    /// Provider native JSON tool calling.
+    Native,
+    /// A text-channel grammar carried in assistant content (`text` or `json`).
+    Text,
+}
+
+/// Classify a `tool_format` string into its channel, or `None` for an unknown
+/// value (a typo, or a not-yet-wired format). Callers use this to reject
+/// unknown formats loudly instead of silently defaulting.
+///
+/// EXHAUSTIVE-MATCH GUARD: this `match` is the canonical place tool_format is
+/// switched. Adding a new format requires a branch here, so a half-wired
+/// format fails to compile rather than silently reading as text.
+pub fn tool_format_channel(format: &str) -> Option<ToolFormatChannel> {
+    match format {
+        "native" => Some(ToolFormatChannel::Native),
+        "text" | "json" => Some(ToolFormatChannel::Text),
+        _ => None,
+    }
+}
+
+/// True when `format` is a tool_format Harn understands (`native`, `text`, or
+/// `json`). Used to gate the capability-matrix `preferred_tool_format` so a
+/// pinned format is honored, while an unknown value falls through to the
+/// native/text heuristic.
+pub fn is_known_tool_format(format: &str) -> bool {
+    tool_format_channel(format).is_some()
+}
+
 /// Resolve the default tool format for a model+provider combination.
 /// Priority: alias `tool_format` (matched by model ID) > provider/model
 /// capability matrix > legacy provider feature > "text".
@@ -1968,7 +2007,15 @@ fn default_tool_format_with_config(
     }
     let capabilities = crate::llm::capabilities::lookup(provider, model);
     if let Some(format) = capabilities.preferred_tool_format.as_deref() {
-        if matches!(format, "native" | "text") {
+        // A capability row may pin any known tool_format. `json` is a
+        // text-channel format and is honored here when a row sets it; today
+        // every shipped row pins `native` or `text`, so the default
+        // resolution is unchanged — the `json` rows are STAGED (commented)
+        // behind the N>=5 parity bench. The exhaustive match below is the
+        // EXHAUSTIVE-MATCH GUARD: a new tool_format that isn't classified
+        // here fails loudly rather than silently falling through to the
+        // native/text heuristic.
+        if is_known_tool_format(format) {
             return format.to_string();
         }
     }

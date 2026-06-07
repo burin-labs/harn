@@ -403,8 +403,13 @@ fn attach_hook_reminder_audit(
 }
 
 /// Parse model text into normalized agent tool-call records.
+///
+/// `tool_format` selects the text-channel grammar: `"json"` routes to the
+/// fenced-JSON parser, everything else (`"text"`, `"auto"`, nil) uses the
+/// canonical tagged/heredoc grammar. `"native"` never reaches a text parser,
+/// so it also reads as the tagged grammar (defensive default).
 #[harn_builtin(
-    sig = "__host_agent_parse_tool_calls(text: string, tools?: dict|nil) -> dict",
+    sig = "__host_agent_parse_tool_calls(text: string, tools?: dict|nil, tool_format?: string|nil) -> dict",
     kind = "async",
     category = "agent.host",
     runtime_only = true
@@ -417,18 +422,23 @@ async fn host_agent_parse_tool_calls_impl(
         Some(VmValue::String(text)) => text.to_string(),
         Some(other) => {
             return Err(VmError::Runtime(format!(
-                "__host_agent_parse_tool_calls(text, tools?): text must be a string; got {}",
+                "__host_agent_parse_tool_calls(text, tools?, tool_format?): text must be a string; got {}",
                 other.type_name()
             )))
         }
         None => {
             return Err(VmError::Runtime(
-                "__host_agent_parse_tool_calls(text, tools?): missing text".to_string(),
+                "__host_agent_parse_tool_calls(text, tools?, tool_format?): missing text".to_string(),
             ))
         }
     };
     let tools = agent_primitive_tools_arg(&args, 1, "__host_agent_parse_tool_calls")?;
-    let parsed = tools::parse_text_tool_calls_with_tools(&text, tools.as_ref());
+    let tool_format = match args.get(2) {
+        Some(VmValue::String(fmt)) => fmt.to_string(),
+        _ => String::new(),
+    };
+    let format = tools::TextToolFormat::from_option(&tool_format);
+    let parsed = tools::parse_text_tool_calls_in_format(&text, tools.as_ref(), format);
     Ok(json_to_vm_value(&serde_json::json!({
         "calls": parsed.calls,
         "tool_calls": parsed.calls,

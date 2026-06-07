@@ -19,8 +19,11 @@ pub(crate) use native::{
     apply_tool_search_native_injection_typed, extract_deferred_tool_names, vm_tools_to_native,
 };
 pub(crate) use parse::ident_length;
+pub(crate) use parse::parse_fenced_json_tool_calls;
+pub(crate) use parse::parse_text_tool_calls_in_format;
 pub(crate) use parse::parse_text_tool_calls_with_tools;
 pub(crate) use parse::StreamingToolCallDetector;
+pub(crate) use parse::TextToolFormat;
 #[cfg(test)]
 pub(crate) use parse::{parse_bare_calls_in_body, parse_native_json_tool_calls};
 pub(crate) use protocol::{

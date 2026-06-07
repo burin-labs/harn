@@ -1011,7 +1011,14 @@ fn tool_result_message_for_provider(
     observation: &str,
 ) -> VmValue {
     let mut msg = BTreeMap::new();
-    if tool_format == "text" {
+    // A text-channel tool_format (`text` or `json`) carries tool results back
+    // as an ordinary `user` message — there is no provider tool-result role on
+    // the text channel. `native` uses the provider's tool_result/tool role.
+    let is_text_channel = matches!(
+        crate::llm_config::tool_format_channel(tool_format),
+        Some(crate::llm_config::ToolFormatChannel::Text)
+    );
+    if is_text_channel {
         msg.insert(
             "role".to_string(),
             VmValue::String(std::sync::Arc::from("user")),

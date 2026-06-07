@@ -434,6 +434,20 @@ async fn execute_live_probe_case(
     )
 }
 
+/// True when `calls` contains the probe's echo_marker call (the
+/// `TOOL_PROBE_TOOL_NAME` tool with `args.value == marker`). Shared by the
+/// tagged and fenced-JSON text-channel parse attempts.
+fn probe_marker_present(calls: &[Value], marker: &str) -> bool {
+    calls.iter().any(|call| {
+        call.get("name").and_then(Value::as_str) == Some(TOOL_PROBE_TOOL_NAME)
+            && call
+                .get("arguments")
+                .and_then(|args| args.get("value"))
+                .and_then(Value::as_str)
+                == Some(marker)
+    })
+}
+
 fn classify_tool_probe_response(
     mode: ToolProbeMode,
     response: &Value,
@@ -473,16 +487,24 @@ fn classify_tool_probe_response(
 
     let content = extract_content(response);
     let tools = probe_tool_registry();
-    let parsed = crate::llm::tools::parse_text_tool_calls_with_tools(&content, Some(&tools));
+    // Try the canonical tagged/heredoc grammar first; if it does not yield the
+    // echo_marker call, also try the fenced-JSON grammar. A fenced-JSON
+    // emission that parses to the probe call still classifies as
+    // ParseableHarnTextToolCall (it is a text-channel format) — the taxonomy is
+    // unchanged, only the body grammar the text path accepts is extended.
+    let tagged = crate::llm::tools::parse_text_tool_calls_with_tools(&content, Some(&tools));
+    let parsed = if probe_marker_present(&tagged.calls, marker) {
+        tagged
+    } else {
+        let fenced = crate::llm::tools::parse_fenced_json_tool_calls(&content);
+        if probe_marker_present(&fenced.calls, marker) {
+            fenced
+        } else {
+            tagged
+        }
+    };
     let text_count = parsed.calls.len();
-    let text_pass = parsed.calls.iter().any(|call| {
-        call.get("name").and_then(Value::as_str) == Some(TOOL_PROBE_TOOL_NAME)
-            && call
-                .get("arguments")
-                .and_then(|args| args.get("value"))
-                .and_then(Value::as_str)
-                == Some(marker)
-    });
+    let text_pass = probe_marker_present(&parsed.calls, marker);
     if text_pass {
         return ToolConformanceCase {
             mode,

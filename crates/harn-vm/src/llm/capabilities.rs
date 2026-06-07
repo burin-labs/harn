@@ -857,13 +857,22 @@ fn suggested_tool_capability_defaults(
     matched: Option<&MatchedCapabilityRule<'_>>,
 ) -> (bool, String) {
     if let Some(rule) = matched.map(|matched| matched.rule) {
-        let native_tools =
-            rule.native_tools
-                .unwrap_or_else(|| match rule.preferred_tool_format.as_deref() {
-                    Some("native") => true,
-                    Some("text") => false,
-                    _ => suggested_native_tools(provider, model_id, model),
-                });
+        let native_tools = rule.native_tools.unwrap_or_else(|| {
+            // Resolve native_tools from the pinned tool_format via its channel
+            // so `json` (a TEXT-channel format) correctly implies
+            // native_tools = false, identically to `text`. Falling through to
+            // the provider heuristic for `json` would wrongly mark a gemini /
+            // cerebras row native. Unknown formats keep the heuristic.
+            match rule
+                .preferred_tool_format
+                .as_deref()
+                .and_then(crate::llm_config::tool_format_channel)
+            {
+                Some(crate::llm_config::ToolFormatChannel::Native) => true,
+                Some(crate::llm_config::ToolFormatChannel::Text) => false,
+                None => suggested_native_tools(provider, model_id, model),
+            }
+        });
         let preferred_tool_format = rule
             .preferred_tool_format
             .clone()
