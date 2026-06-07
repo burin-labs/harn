@@ -1,9 +1,11 @@
 use std::collections::BTreeSet;
 
 /// Detect and parse OpenAI-style native function calling JSON that a model
-/// emitted as raw text. Looks for `[{"id":"call_...","function":{"name":"...",
+/// emitted as raw text. Matches `[{"id":...,"function":{"name":"...",
 /// "arguments":"..."}}]` patterns (array or single object) embedded anywhere
-/// in the text.
+/// in the text — whitespace-tolerant and id-agnostic, so pretty-printed
+/// payloads and non-`call_` ids (common from local vLLM/llama.cpp templates)
+/// parse instead of silently vanishing. See [`find_native_json_items`].
 pub(crate) fn parse_native_json_tool_calls(
     text: &str,
     known_tools: &BTreeSet<String>,
@@ -11,32 +13,7 @@ pub(crate) fn parse_native_json_tool_calls(
     let mut results = Vec::new();
     let mut errors = Vec::new();
 
-    let json_start = text
-        .find("[{\"id\":")
-        .or_else(|| text.find("[{\"id\":"))
-        .or_else(|| text.find("{\"id\":\"call_"));
-
-    let Some(start) = json_start else {
-        return (results, errors);
-    };
-
-    let json_text = &text[start..];
-    // Parse the first JSON value at `start`, stopping at its structural end so
-    // trailing prose (including multi-byte UTF-8 — emoji/accents/CJK) is simply
-    // ignored. This is the same boundary-safe streaming technique used by
-    // `tagged.rs::parse_mistral_json_payload`; the old O(n^2) backward byte
-    // scan (`&text[start..=end]`) panicked the instant `end + 1` landed inside a
-    // multi-byte codepoint, aborting the turn before it reached the valid `]`.
-    let parsed: Option<Vec<serde_json::Value>> = serde_json::Deserializer::from_str(json_text)
-        .into_iter::<serde_json::Value>()
-        .next()
-        .and_then(|result| result.ok())
-        .map(|value| match value {
-            serde_json::Value::Array(items) => items,
-            other => vec![other],
-        });
-
-    let Some(items) = parsed else {
+    let Some(items) = find_native_json_items(text) else {
         return (results, errors);
     };
 
@@ -90,4 +67,47 @@ pub(crate) fn parse_native_json_tool_calls(
     }
 
     (results, errors)
+}
+
+/// Locate a native-JSON tool-call payload anywhere in `text` and return its
+/// items (a single object is wrapped in a one-element vec).
+///
+/// Detection is whitespace- and id-agnostic: we no longer match brittle
+/// `[{"id":` / `{"id":"call_` prefixes (those silently dropped pretty-printed
+/// arrays like `[{ "id": "0", "function": {...} }]` and any non-`call_` id).
+/// Instead we walk every position where a JSON value can begin (`[` or `{`),
+/// let the boundary-safe `serde_json::Deserializer` attempt a parse, and accept
+/// the first candidate whose decoded value actually carries a tool call (an
+/// item with a `function` field). The Deserializer stops at the value's
+/// structural end, so trailing prose — including multi-byte UTF-8
+/// (emoji/accents/CJK) — is ignored without the old O(n^2) backward byte scan
+/// that panicked on mid-codepoint slicing.
+fn find_native_json_items(text: &str) -> Option<Vec<serde_json::Value>> {
+    let bytes = text.as_bytes();
+    for (offset, &byte) in bytes.iter().enumerate() {
+        if byte != b'[' && byte != b'{' {
+            continue;
+        }
+        let parsed = serde_json::Deserializer::from_str(&text[offset..])
+            .into_iter::<serde_json::Value>()
+            .next()
+            .and_then(|result| result.ok())
+            .map(|value| match value {
+                serde_json::Value::Array(items) => items,
+                other => vec![other],
+            });
+        let Some(items) = parsed else {
+            continue;
+        };
+        // Only accept JSON that looks like a native tool-call payload. This
+        // skips incidental prose JSON (config snippets, examples) without a
+        // `function` field and keeps scanning for the real call.
+        if items.iter().any(|item| {
+            item.get("function")
+                .is_some_and(serde_json::Value::is_object)
+        }) {
+            return Some(items);
+        }
+    }
+    None
 }
