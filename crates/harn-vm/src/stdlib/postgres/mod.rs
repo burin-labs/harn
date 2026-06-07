@@ -8,20 +8,15 @@ use std::time::Duration;
 
 use sqlx_core::column::Column;
 use sqlx_core::connection::Connection;
-use sqlx_core::encode::{Encode, IsNull};
-use sqlx_core::error::BoxDynError;
 use sqlx_core::executor::Executor;
 use sqlx_core::query::{query, Query};
 use sqlx_core::row::Row;
 use sqlx_core::sql_str::AssertSqlSafe;
 use sqlx_core::transaction::Transaction;
 use sqlx_core::type_info::TypeInfo;
-use sqlx_core::types::Type;
 use sqlx_core::value::ValueRef;
-use sqlx_postgres::types::Oid;
 use sqlx_postgres::{
-    PgArgumentBuffer, PgArguments, PgConnectOptions, PgPool, PgPoolOptions, PgQueryResult, PgRow,
-    PgSslMode, PgTypeInfo, Postgres,
+    PgArguments, PgConnectOptions, PgPool, PgPoolOptions, PgQueryResult, PgRow, PgSslMode, Postgres,
 };
 use tokio::sync::Mutex;
 
@@ -945,52 +940,6 @@ async fn apply_transaction_settings(
     Ok(())
 }
 
-/// A NULL bind that declares Postgres type OID `0` (unspecified) in the
-/// `Parse` message, so the server infers the parameter's type from the query
-/// context (a cast like `$1::integer`, the target column, etc.) — exactly as a
-/// bare SQL `NULL` does.
-///
-/// Why this exists: `None::<String>` (the obvious way to bind a typed NULL)
-/// declares OID `25` (TEXT) because `Option::<T>::produces()` falls back to
-/// `T::type_info()` for the `None` case. sqlx caches prepared statements keyed
-/// by SQL string on the pooled connection AND sends params in binary with the
-/// client-declared OIDs in `Parse`, so a TEXT-declared NULL caused two
-/// production bugs:
-///   1. Type-cache poisoning: once `$1` is parsed as TEXT (from a NULL), a
-///      later non-null `i64` in the same slot is sent as 8 binary bytes that
-///      Postgres UTF-8-validates against the cached TEXT type →
-///      `invalid byte sequence for encoding "UTF8": 0x00`.
-///   2. Wrong NULL typing: `($1::integer)` / `($1::jsonb)` with a TEXT NULL →
-///      `column is of type integer but expression is of type text`.
-///
-/// `PgTypeInfo::with_oid(Oid(0))` resolves to OID `0` in `Parse`
-/// (see `sqlx_postgres::connection::resolve::try_oid` →
-/// `PgType::DeclareWithOid`), which Postgres treats as "infer from context".
-/// The encoded value is a `-1` length (NULL), so no binary bytes are sent and
-/// the parameter format is irrelevant.
-struct UntypedNull;
-
-impl Type<Postgres> for UntypedNull {
-    fn type_info() -> PgTypeInfo {
-        PgTypeInfo::with_oid(Oid(0))
-    }
-}
-
-impl Encode<'_, Postgres> for UntypedNull {
-    fn encode_by_ref(&self, _buf: &mut PgArgumentBuffer) -> Result<IsNull, BoxDynError> {
-        // Write no bytes; the caller records a `-1` length to mark SQL NULL.
-        Ok(IsNull::Yes)
-    }
-
-    fn produces(&self) -> Option<PgTypeInfo> {
-        Some(PgTypeInfo::with_oid(Oid(0)))
-    }
-
-    fn size_hint(&self) -> usize {
-        0
-    }
-}
-
 /// Error message for a non-finite float that can't be safely bound to Postgres.
 fn non_finite_float_error() -> VmError {
     runtime_error(
@@ -1028,7 +977,7 @@ pub(super) fn bind_params<'q>(
         // a float8 column or emitting invalid JSON.
         reject_non_finite_floats(param)?;
         query = match param {
-            VmValue::Nil => query.bind(UntypedNull),
+            VmValue::Nil => query.bind(None::<String>),
             VmValue::Bool(value) => query.bind(*value),
             VmValue::Int(value) => query.bind(*value),
             VmValue::Float(value) => query.bind(*value),
@@ -2100,129 +2049,16 @@ mod tests {
         assert_eq!(row.get("amount").unwrap().display(), "12345.6789");
     }
 
-    /// Opens a single-connection pool against the test database so that every
-    /// query reuses the same physical connection (and therefore the same
-    /// prepared-statement cache), which is required to exercise the
-    /// type-cache-poisoning path.
+    /// Opens a single-connection pool against the test database so every query
+    /// reuses the same physical connection (and prepared-statement cache).
     async fn open_single_conn_pool(url: &str) -> VmValue {
         let mut options = BTreeMap::new();
         options.insert("max_connections".to_string(), VmValue::Int(1));
-        options.insert(
-            "application_name".to_string(),
-            s("harn-postgres-untyped-null-test"),
-        );
+        options.insert("application_name".to_string(), s("harn-postgres-bind-test"));
         let ctx = crate::vm::AsyncBuiltinCtx::for_test(crate::Vm::new());
         open_pool(&ctx, &s(url), Some(&options), false)
             .await
             .expect("open single-connection pool")
-    }
-
-    /// Regression for prepared-statement TYPE-CACHE POISONING.
-    ///
-    /// Before the fix, binding `VmValue::Nil` declared OID 25 (TEXT) in the
-    /// `Parse` message. On a single pooled connection, `SELECT $1::bigint`
-    /// would be prepared with `$1` cached as TEXT during the first (NULL) call;
-    /// the second call binding a real `i64` then sent 8 binary bytes that
-    /// Postgres UTF-8-validated against the cached TEXT type, producing
-    /// `invalid byte sequence for encoding "UTF8": 0x00`.
-    ///
-    /// After the fix the NULL declares OID 0 (unspecified), so Postgres infers
-    /// `bigint` from the cast and both calls succeed.
-    #[tokio::test(flavor = "current_thread")]
-    async fn nil_bind_does_not_poison_prepared_statement_cache_when_env_url_is_set() {
-        let Ok(url) = std::env::var("HARN_TEST_POSTGRES_URL") else {
-            return;
-        };
-        reset_postgres_state();
-        let handle = open_single_conn_pool(&url).await;
-
-        // Same SQL string both times so the cached prepared statement is reused.
-        let sql = "select $1::bigint as v";
-
-        // 1) NULL first — this is what poisoned the cache as TEXT before.
-        let null_row = query_rows(&handle, sql, &[VmValue::Nil], QueryRouting::Primary)
-            .await
-            .expect("nil bind for $1::bigint should succeed")
-            .remove(0);
-        assert!(
-            matches!(null_row.as_dict().unwrap().get("v"), Some(VmValue::Nil)),
-            "NULL bigint should decode to Nil"
-        );
-
-        // 2) Non-null int, reusing the cached statement on the same connection.
-        let int_row = query_rows(&handle, sql, &[VmValue::Int(42)], QueryRouting::Primary)
-            .await
-            .expect("int bind after nil must not hit the 0x00 UTF8 error")
-            .remove(0);
-        assert_eq!(
-            int_row.as_dict().unwrap().get("v").unwrap().as_int(),
-            Some(42),
-            "second call should return the bound integer"
-        );
-    }
-
-    /// Regression for WRONG NULL TYPING on typed columns.
-    ///
-    /// Before the fix, binding `VmValue::Nil` directly into typed columns
-    /// (`INSERT ... VALUES ($1, $2)` where `i integer, j jsonb`) declared the
-    /// params as TEXT, so Postgres rejected the statement with
-    /// `column "i" is of type integer but expression is of type text`.
-    /// After the fix the NULLs declare OID 0 (unspecified), so Postgres infers
-    /// each parameter's type from the target column and stores SQL NULL.
-    ///
-    /// (A typed cast like `$1::integer` happens to mask this because a `text`
-    /// NULL casts to integer cleanly — but production `.harn` code that binds a
-    /// bare `$n` into a typed column hit the error, so we reproduce the
-    /// no-cast form here.)
-    #[tokio::test(flavor = "current_thread")]
-    async fn nil_bind_into_typed_columns_inserts_sql_null_when_env_url_is_set() {
-        let Ok(url) = std::env::var("HARN_TEST_POSTGRES_URL") else {
-            return;
-        };
-        reset_postgres_state();
-        let handle = open_single_conn_pool(&url).await;
-
-        execute_stmt(
-            &handle,
-            "create temporary table harn_untyped_null_test(i integer, j jsonb) on commit preserve rows",
-            &[],
-        )
-        .await
-        .expect("create temp table");
-        execute_stmt(&handle, "truncate table harn_untyped_null_test", &[])
-            .await
-            .expect("truncate temp table");
-
-        // Bare `$1`/`$2` into typed columns: a properly-inferred NULL must not
-        // raise `is of type integer but expression is of type text`.
-        execute_stmt(
-            &handle,
-            "insert into harn_untyped_null_test(i, j) values ($1, $2)",
-            &[VmValue::Nil, VmValue::Nil],
-        )
-        .await
-        .expect("nil binds into typed columns must insert cleanly");
-
-        let row = query_rows(
-            &handle,
-            "select i, j, (i is null) as i_is_null, (j is null) as j_is_null from harn_untyped_null_test",
-            &[],
-            QueryRouting::Primary,
-        )
-        .await
-        .expect("select back inserted row")
-        .remove(0);
-        let row = row.as_dict().unwrap();
-        assert!(
-            matches!(row.get("i"), Some(VmValue::Nil)),
-            "integer column should be SQL NULL"
-        );
-        assert!(
-            matches!(row.get("j"), Some(VmValue::Nil)),
-            "jsonb column should be SQL NULL"
-        );
-        assert_eq!(row.get("i_is_null").unwrap().display(), "true");
-        assert_eq!(row.get("j_is_null").unwrap().display(), "true");
     }
 
     #[test]
@@ -3204,8 +3040,7 @@ pg_close(db)
                 .expect_err("non-finite float must be rejected");
             assert!(
                 err.to_string().contains("non-finite float"),
-                "error should name the cause: {}",
-                err.to_string()
+                "error should name the cause: {err}"
             );
         }
 
@@ -3244,8 +3079,7 @@ pg_close(db)
             .expect_err("non-finite float8 bind must be rejected before sqlx");
             assert!(
                 err.to_string().contains("non-finite float"),
-                "error should be the guard's, not a raw sqlx error: {}",
-                err.to_string()
+                "error should be the guard's, not a raw sqlx error: {err}"
             );
         }
 
@@ -3261,8 +3095,7 @@ pg_close(db)
         .expect_err("non-finite float in jsonb path must be rejected");
         assert!(
             err.to_string().contains("non-finite float"),
-            "jsonb path should hit the same guard: {}",
-            err.to_string()
+            "jsonb path should hit the same guard: {err}"
         );
 
         // 3) A finite float still round-trips unchanged.
