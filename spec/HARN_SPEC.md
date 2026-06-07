@@ -6266,6 +6266,30 @@ distribution in `report.cases[*].reliability`, and emits generic stats rows in
 `harness_config_fingerprint` fields. `report.stats.macro_pass_at_1` is the
 uniform-case-weighted pass-rate mean over decided cases.
 
+Cases are replay/fixture cases by default. A case with `kind: "live-verify"`
+is executed against a live workspace instead of a pre-recorded run record. Live
+cases declare `task`, `workspace` (or `project`), `verify_command`,
+`expected_output_paths`, `required_output_snippets`, and optional
+`tool_budgets`. The manifest or case must declare `executor`, a command spec
+that is either a shell string, an argv list, or an object with `command` or
+`argv`, plus optional `cwd`, `env`, and `timeout_seconds`. Relative command
+working directories resolve under the live workspace.
+
+For each live trial, Harn sends the executor a JSON request on stdin:
+`{schema, manifest, case, trial, trials}`. `case.workspace` is an absolute
+workspace path, and the case object includes the task, verify command, expected
+paths, required snippets, tool budgets, metadata, and case fingerprint. The
+executor writes a normalized JSON object to stdout. Generic outcome fields are
+`verification` (`PASS`, `FAIL`, or `skip`), `verificationExitCode`,
+`timedOut`, `wallTimeSeconds`, `costUsd`, `producedPaths`, and
+`toolCallSummary`; snake_case aliases are also accepted. Harn then runs the
+case `verify_command` in the workspace, checks expected paths and required
+snippets, enforces any declared tool budgets against `toolCallSummary`, and
+records the merged normalized outcome under `report.cases[*].trials[*]`.
+Executor command details are part of the harness fingerprint, while the live
+task, workspace/project reference, verify command, expected outputs, required
+snippets, and tool budgets are part of the case fingerprint.
+
 Each normalized case carries `case_fingerprint`, a deterministic SHA-256 prefix
 over the case contract: task source, expected output references, resolved
 rubrics, comparison target, thresholds, severity, and case metadata. The report

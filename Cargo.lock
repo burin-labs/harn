@@ -2826,6 +2826,7 @@ dependencies = [
  "unicode-segmentation",
  "url",
  "uuid",
+ "wait-timeout",
  "walkdir",
  "wasmtime",
  "wasmtime-wasi",

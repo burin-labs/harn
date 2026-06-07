@@ -483,6 +483,18 @@ rows whose case or harness-config fingerprints are incompatible.
 | `regression_gate(baseline, current, k?)` | Baseline-standard-deviation-aware regression gate |
 | `routing_calibration_report(cheap, ladder, frontier)` | Over- and under-escalation routing report |
 
+`eval_pack_run` also supports live-verify eval cases. Set `kind: "live-verify"`
+and provide `task`, `workspace` or `project`, `verify_command`,
+`expected_output_paths`, and `required_output_snippets`; declare `executor` on
+the manifest or case as a shell string, argv list, or `{command|argv, cwd?,
+env?, timeout_seconds?}` object. Harn sends `{schema, manifest, case, trial,
+trials}` to the executor on stdin. The executor returns a generic JSON outcome
+with fields such as `verification`, `verificationExitCode`, `timedOut`,
+`wallTimeSeconds`, `costUsd`, `producedPaths`, and `toolCallSummary`; Harn then
+runs `verify_command`, checks expected paths/snippets, enforces tool budgets,
+and records the merged trial outcome in the same ledger/statistics path as
+replay cases.
+
 ### std/path
 
 Path manipulation utilities:
