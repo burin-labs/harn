@@ -40,6 +40,11 @@ use std::io::Write as _;
 use std::path::{Path, PathBuf};
 
 use harn_vm::clock::{Clock, RealClock};
+use harn_vm::orchestration::{
+    eval_pack_case_fingerprint, evaluate_eval_pack_manifest_resumable_with_live_executor,
+    EvalPackCase, EvalPackCommandObject, EvalPackCommandSpec, EvalPackLiveExecutor,
+    EvalPackLiveExecutorRequest, EvalPackLiveVerifyOutcome, EvalPackManifest,
+};
 use serde::Serialize;
 use serde_json::Value as JsonValue;
 
@@ -69,6 +74,7 @@ use crate::env_guard::ScopedEnvVar;
 /// matrix execution and scoring and hands the script the assembled
 /// summary so it only has to format it.
 const CODING_AGENT_SUMMARY_ENV: &str = "HARN_EVAL_CODING_AGENT_SUMMARY_JSON";
+const CODING_AGENT_EVAL_PACK_ID: &str = "coding-agent";
 
 /// Env var the script reads to pick the rendering mode — one of
 /// `"markdown"` (summary.md body), `"followups"` (followups.md body),
@@ -91,54 +97,6 @@ static DISPATCH_RENDER_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_
 
 const CODING_AGENT_SUITE_HARN: &str = include_str!("../../assets/evals/coding_agent_suite.harn");
 const TOOL_FORMAT_OVERRIDE_WARNING_PREFIX: &str = "warning: tool_format override:";
-
-#[derive(Debug, Clone, Copy)]
-struct FixtureDefinition {
-    id: &'static str,
-    name: &'static str,
-    tool_sequence: &'static str,
-    description: &'static str,
-}
-
-static FIXTURE_DEFINITIONS: &[FixtureDefinition] = &[
-    FixtureDefinition {
-        id: "python-add",
-        name: "Python add repair",
-        tool_sequence: "multi-tool",
-        description: "One-file Python bug fix verified by unittest output.",
-    },
-    FixtureDefinition {
-        id: "cli-help-flag",
-        name: "CLI help flag",
-        tool_sequence: "multi-tool",
-        description: "Add a tiny CLI flag, update help-facing docs, and verify behavior.",
-    },
-    FixtureDefinition {
-        id: "test-output-first",
-        name: "Test-output-first repair",
-        tool_sequence: "multi-tool",
-        description: "Run a failing test first, then edit the implementation and re-run it.",
-    },
-    FixtureDefinition {
-        id: "docs-symbol-rename",
-        name: "Docs symbol rename",
-        tool_sequence: "multi-tool",
-        description:
-            "Update docs and an example after a symbol rename without touching implementation.",
-    },
-    FixtureDefinition {
-        id: "read-only-audit",
-        name: "Read-only audit",
-        tool_sequence: "one-tool",
-        description: "Inspect a file and report that no edits are needed.",
-    },
-    FixtureDefinition {
-        id: "no-tool-diagnosis",
-        name: "No-tool diagnosis",
-        tool_sequence: "no-tool",
-        description: "Answer from prompt-only context without any tools.",
-    },
-];
 
 #[derive(Debug, Clone, Serialize)]
 struct LoadedEnvKey {
@@ -348,7 +306,7 @@ struct LocalRunGuard {
 
 struct RunSummaryContext {
     run_id: String,
-    fixture: FixtureDefinition,
+    fixture: EvalPackCase,
     selector: ModelSelector,
     tool_format: String,
     run_dir: PathBuf,
@@ -356,6 +314,153 @@ struct RunSummaryContext {
     exit_code: i32,
     stderr: String,
     local_cleanup: Option<LocalCleanupReport>,
+}
+
+struct CodingAgentLiveExecutor<'a> {
+    args: &'a EvalCodingAgentArgs,
+    fixture: EvalPackCase,
+    selector: ModelSelector,
+    tool_format: String,
+    run_id: String,
+    run_dir: PathBuf,
+    report: Option<RunReport>,
+}
+
+fn coding_agent_live_verify_cases(python: &str) -> Result<Vec<EvalPackCase>, String> {
+    let test_cmd = format!("{python} -m unittest discover -s tests");
+    let mut cases = vec![
+        coding_agent_live_verify_case(
+            python,
+            "python-add",
+            "Python add repair",
+            "multi-tool",
+            "One-file Python bug fix verified by unittest output.",
+            format!(
+                "Fix the repository so the test suite passes. Inspect files before editing, make the smallest correct code change, then run `{test_cmd}`."
+            ),
+        ),
+        coding_agent_live_verify_case(
+            python,
+            "cli-help-flag",
+            "CLI help flag",
+            "multi-tool",
+            "Add a tiny CLI flag, update help-facing docs, and verify behavior.",
+            "Add a `--shout` flag to the greeting CLI. The flag should print the greeting in uppercase, appear in `--help`, and be documented in README.md. Verify it with the Python CLI."
+                .to_string(),
+        ),
+        coding_agent_live_verify_case(
+            python,
+            "test-output-first",
+            "Test-output-first repair",
+            "multi-tool",
+            "Run a failing test first, then edit the implementation and re-run it.",
+            format!(
+                "Run the unittest suite first and use the failing output to choose the fix. Then make the smallest implementation change and re-run `{test_cmd}`."
+            ),
+        ),
+        coding_agent_live_verify_case(
+            python,
+            "docs-symbol-rename",
+            "Docs symbol rename",
+            "multi-tool",
+            "Update docs and an example after a symbol rename without touching implementation.",
+            "The public helper was renamed to `format_greeting`. Update the docs and example to use the renamed symbol. Do not edit `greeter.py`; verify the example runs."
+                .to_string(),
+        ),
+        coding_agent_live_verify_case(
+            python,
+            "read-only-audit",
+            "Read-only audit",
+            "one-tool",
+            "Inspect a file and report that no edits are needed.",
+            "Read README.md. If README.md says the default timeout is 30 seconds, do not edit files and reply exactly AUDIT_OK."
+                .to_string(),
+        ),
+        coding_agent_live_verify_case(
+            python,
+            "no-tool-diagnosis",
+            "No-tool diagnosis",
+            "no-tool",
+            "Answer from prompt-only context without any tools.",
+            "No tools are available. Given this snippet: `def add(a, b): return a - b`, and this failing expectation: `add(2, 3) == 5`, state the smallest code change. Include the exact token PATCH_HINT."
+                .to_string(),
+        ),
+    ];
+    for case in &mut cases {
+        case.case_fingerprint =
+            eval_pack_case_fingerprint(case).map_err(|error| error.to_string())?;
+    }
+    Ok(cases)
+}
+
+fn coding_agent_live_verify_case(
+    python: &str,
+    id: &str,
+    name: &str,
+    tool_sequence: &str,
+    description: &str,
+    task: String,
+) -> EvalPackCase {
+    let mut metadata = BTreeMap::new();
+    metadata.insert(
+        "group".to_string(),
+        JsonValue::String("coding-agent".to_string()),
+    );
+    metadata.insert(
+        "tool_sequence".to_string(),
+        JsonValue::String(tool_sequence.to_string()),
+    );
+    EvalPackCase {
+        id: Some(id.to_string()),
+        name: Some(name.to_string()),
+        description: Some(description.to_string()),
+        kind: Some("live-verify".to_string()),
+        task: Some(task),
+        workspace: Some(".".to_string()),
+        verify_command: Some(coding_agent_summary_verify_command(python)),
+        expected_output_paths: vec![
+            "summary.json".to_string(),
+            "result.json".to_string(),
+            "transcript_events.jsonl".to_string(),
+        ],
+        required_output_snippets: vec![format!("\"fixture_id\": \"{id}\"")],
+        metadata,
+        ..EvalPackCase::default()
+    }
+}
+
+fn coding_agent_summary_verify_command(python: &str) -> EvalPackCommandSpec {
+    EvalPackCommandSpec::Argv(vec![
+        python.to_string(),
+        "-c".to_string(),
+        "import json, pathlib, sys; p = pathlib.Path('summary.json'); sys.exit(0 if p.exists() and json.loads(p.read_text(encoding='utf-8')).get('passed') is True else 1)"
+            .to_string(),
+    ])
+}
+
+fn fixture_id(fixture: &EvalPackCase) -> &str {
+    fixture.id.as_deref().unwrap_or("<unnamed>")
+}
+
+fn fixture_name(fixture: &EvalPackCase) -> String {
+    fixture
+        .name
+        .clone()
+        .or_else(|| fixture.id.clone())
+        .unwrap_or_else(|| "<unnamed>".to_string())
+}
+
+fn fixture_description(fixture: &EvalPackCase) -> String {
+    fixture.description.clone().unwrap_or_default()
+}
+
+fn fixture_tool_sequence(fixture: &EvalPackCase) -> String {
+    fixture
+        .metadata
+        .get("tool_sequence")
+        .and_then(JsonValue::as_str)
+        .unwrap_or("unspecified")
+        .to_string()
 }
 
 pub async fn run(args: EvalCodingAgentArgs) -> i32 {
@@ -373,7 +478,7 @@ pub async fn run(args: EvalCodingAgentArgs) -> i32 {
         }
     };
 
-    let fixtures = match resolve_fixtures(&args.fixtures) {
+    let fixtures = match resolve_fixtures(&args.fixtures, &args.python) {
         Ok(fixtures) => fixtures,
         Err(error) => {
             eprintln!("error: {error}");
@@ -490,20 +595,20 @@ pub async fn run(args: EvalCodingAgentArgs) -> i32 {
 async fn run_matrix_entry(
     args: &EvalCodingAgentArgs,
     output_dir: &Path,
-    fixture: FixtureDefinition,
+    fixture: EvalPackCase,
     selector: ModelSelector,
     tool_format: String,
 ) -> RunReport {
-    let run_id = run_id_for(fixture, &selector, &tool_format);
+    let run_id = run_id_for(&fixture, &selector, &tool_format);
     let run_dir = output_dir.join(&run_id);
-    if let Err(error) = reset_dir(&run_dir) {
+    if let Err(error) = fs::create_dir_all(&run_dir) {
         return error_report(
             run_id,
             fixture,
             selector,
             tool_format,
             run_dir,
-            format!("failed to prepare run directory: {error}"),
+            format!("failed to create run directory: {error}"),
         );
     }
 
@@ -513,6 +618,57 @@ async fn run_matrix_entry(
             selector.provider
         );
         return skipped_report(run_id, fixture, selector, tool_format, run_dir, reason);
+    }
+
+    let manifest =
+        match coding_agent_eval_pack_manifest(&run_dir, &fixture, &selector, &tool_format) {
+            Ok(manifest) => manifest,
+            Err(error) => {
+                return error_report(run_id, fixture, selector, tool_format, run_dir, error);
+            }
+        };
+    let mut executor = CodingAgentLiveExecutor {
+        args,
+        fixture: fixture.clone(),
+        selector: selector.clone(),
+        tool_format: tool_format.clone(),
+        run_id: run_id.clone(),
+        run_dir: run_dir.clone(),
+        report: None,
+    };
+    let previous_event_log = harn_vm::event_log::active_event_log();
+    harn_vm::event_log::reset_active_event_log();
+    let pack_report =
+        evaluate_eval_pack_manifest_resumable_with_live_executor(&manifest, None, &mut executor);
+    harn_vm::event_log::reset_active_event_log();
+    if let Some(log) = previous_event_log {
+        harn_vm::event_log::install_active_event_log(log);
+    }
+    match pack_report {
+        Ok(_) => executor.report.unwrap_or_else(|| {
+            report_from_existing_summary(run_id, fixture, selector, tool_format, run_dir)
+        }),
+        Err(error) => error_report(
+            run_id,
+            fixture,
+            selector,
+            tool_format,
+            run_dir,
+            format!("eval pack live-verify execution failed: {error}"),
+        ),
+    }
+}
+
+async fn execute_coding_agent_trial(
+    args: &EvalCodingAgentArgs,
+    fixture: EvalPackCase,
+    selector: ModelSelector,
+    tool_format: String,
+    run_id: String,
+    run_dir: PathBuf,
+) -> RunReport {
+    if let Err(error) = prepare_run_dir_for_trial(&run_dir) {
+        return error_report(run_id, fixture, selector, tool_format, run_dir, error);
     }
 
     let script_path = run_dir.join("coding_agent_suite.harn");
@@ -528,7 +684,7 @@ async fn run_matrix_entry(
     }
 
     let local_guard = LocalRunGuard::before(&selector, !args.keep_local_after_run).await;
-    let argv = script_argv(args, fixture, &selector, &tool_format, &run_dir);
+    let argv = script_argv(args, &fixture, &selector, &tool_format, &run_dir);
     let clock = RealClock::new();
     let started_ms = clock.monotonic_ms();
     let outcome = execute_run_with_sandbox_options(
@@ -562,9 +718,9 @@ async fn run_matrix_entry(
     let Some(summary) = summary_value else {
         return RunReport {
             run_id,
-            fixture_id: fixture.id.to_string(),
-            fixture_name: fixture.name.to_string(),
-            fixture_tool_sequence: fixture.tool_sequence.to_string(),
+            fixture_id: fixture_id(&fixture).to_string(),
+            fixture_name: fixture_name(&fixture),
+            fixture_tool_sequence: fixture_tool_sequence(&fixture),
             selector,
             tool_format,
             status: "infra_error".to_string(),
@@ -613,6 +769,191 @@ async fn run_matrix_entry(
     )
 }
 
+impl EvalPackLiveExecutor for CodingAgentLiveExecutor<'_> {
+    fn execute(
+        &mut self,
+        _request: EvalPackLiveExecutorRequest,
+    ) -> Result<EvalPackLiveVerifyOutcome, harn_vm::value::VmError> {
+        let report = tokio::task::block_in_place(|| {
+            tokio::runtime::Handle::current().block_on(async {
+                execute_coding_agent_trial(
+                    self.args,
+                    self.fixture.clone(),
+                    self.selector.clone(),
+                    self.tool_format.clone(),
+                    self.run_id.clone(),
+                    self.run_dir.clone(),
+                )
+                .await
+            })
+        });
+        let outcome = live_verify_outcome_from_run_report(&report);
+        self.report = Some(report);
+        Ok(outcome)
+    }
+}
+
+fn live_verify_outcome_from_run_report(report: &RunReport) -> EvalPackLiveVerifyOutcome {
+    let mut failures = Vec::new();
+    if !report.passed && !report.skipped {
+        failures.push(
+            report
+                .error
+                .clone()
+                .unwrap_or_else(|| "coding-agent fixture failed".to_string()),
+        );
+    }
+    EvalPackLiveVerifyOutcome {
+        verification: Some(
+            if report.skipped {
+                "skip"
+            } else if report.passed {
+                "PASS"
+            } else {
+                "FAIL"
+            }
+            .to_string(),
+        ),
+        verification_exit_code: Some(report.harn_exit_code as i64),
+        passed: Some(report.passed),
+        timed_out: false,
+        wall_time_seconds: report.elapsed_ms as f64 / 1000.0,
+        cost_usd: report.cost_usd,
+        produced_paths: ["summary.json", "result.json", "transcript_events.jsonl"]
+            .into_iter()
+            .filter(|path| Path::new(&report.output_dir).join(path).exists())
+            .map(str::to_string)
+            .collect(),
+        tool_call_summary: serde_json::json!({
+            "total": report.tool_calls,
+            "rejected": report.rejected_tool_calls,
+            "sequence": report.tool_sequence.clone(),
+            "successful": report.successful_tools.clone(),
+        }),
+        failures,
+        run_id: Some(report.run_id.clone()),
+        workflow_id: Some(CODING_AGENT_EVAL_PACK_ID.to_string()),
+        source_path: Some(report.transcript_events_path.clone()),
+        stage_count: Some(report.transcript_event_count),
+        ..EvalPackLiveVerifyOutcome::default()
+    }
+}
+
+fn coding_agent_eval_pack_manifest(
+    run_dir: &Path,
+    fixture: &EvalPackCase,
+    selector: &ModelSelector,
+    tool_format: &str,
+) -> Result<EvalPackManifest, String> {
+    let mut case = fixture.clone();
+    case.workspace = Some(".".to_string());
+    case.case_fingerprint = eval_pack_case_fingerprint(&case).map_err(|error| error.to_string())?;
+    let mut metadata = BTreeMap::new();
+    metadata.insert(
+        "harness".to_string(),
+        JsonValue::String(CODING_AGENT_EVAL_PACK_ID.to_string()),
+    );
+    metadata.insert(
+        "model".to_string(),
+        JsonValue::String(format!("{}:{tool_format}", selector_label(selector))),
+    );
+    metadata.insert(
+        "provider".to_string(),
+        JsonValue::String(selector.provider.clone()),
+    );
+    metadata.insert(
+        "provider_model".to_string(),
+        JsonValue::String(selector.model.clone()),
+    );
+    metadata.insert(
+        "tool_format".to_string(),
+        JsonValue::String(tool_format.to_string()),
+    );
+    Ok(EvalPackManifest {
+        version: 1,
+        id: CODING_AGENT_EVAL_PACK_ID.to_string(),
+        name: Some("Coding Agent Harness Quality Suite".to_string()),
+        base_dir: Some(run_dir.display().to_string()),
+        executor: Some(coding_agent_executor_spec()),
+        trials: 1,
+        cases: vec![case],
+        metadata,
+        ..EvalPackManifest::default()
+    })
+}
+
+fn coding_agent_executor_spec() -> EvalPackCommandSpec {
+    EvalPackCommandSpec::Object(EvalPackCommandObject {
+        command: Some("harn-coding-agent-suite-in-process".to_string()),
+        ..EvalPackCommandObject::default()
+    })
+}
+
+fn prepare_run_dir_for_trial(run_dir: &Path) -> Result<(), String> {
+    fs::create_dir_all(run_dir).map_err(|error| error.to_string())?;
+    for file in [
+        "coding_agent_suite.harn",
+        "summary.json",
+        "result.json",
+        "transcript_events.jsonl",
+    ] {
+        let path = run_dir.join(file);
+        if path.exists() {
+            fs::remove_file(&path)
+                .map_err(|error| format!("failed to remove {}: {error}", path.display()))?;
+        }
+    }
+    let workspace = run_dir.join("workspace");
+    if workspace.exists() {
+        fs::remove_dir_all(&workspace)
+            .map_err(|error| format!("failed to remove {}: {error}", workspace.display()))?;
+    }
+    Ok(())
+}
+
+fn report_from_existing_summary(
+    run_id: String,
+    fixture: EvalPackCase,
+    selector: ModelSelector,
+    tool_format: String,
+    run_dir: PathBuf,
+) -> RunReport {
+    let Some(summary) = read_run_summary(&run_dir) else {
+        return error_report(
+            run_id,
+            fixture,
+            selector,
+            tool_format,
+            run_dir,
+            "eval pack skipped a completed ledger cell, but summary.json was missing".to_string(),
+        );
+    };
+    let exit_code = i32::from(
+        !summary
+            .get("passed")
+            .and_then(JsonValue::as_bool)
+            .unwrap_or(false),
+    );
+    let elapsed_ms = summary
+        .get("duration_ms")
+        .and_then(JsonValue::as_u64)
+        .unwrap_or(0);
+    report_from_summary(
+        RunSummaryContext {
+            run_id,
+            fixture,
+            selector,
+            tool_format,
+            run_dir,
+            elapsed_ms,
+            exit_code,
+            stderr: String::new(),
+            local_cleanup: None,
+        },
+        summary,
+    )
+}
+
 fn report_from_summary(ctx: RunSummaryContext, summary: JsonValue) -> RunReport {
     let passed = summary
         .get("passed")
@@ -646,9 +987,9 @@ fn report_from_summary(ctx: RunSummaryContext, summary: JsonValue) -> RunReport 
     };
     RunReport {
         run_id: ctx.run_id,
-        fixture_id: ctx.fixture.id.to_string(),
-        fixture_name: ctx.fixture.name.to_string(),
-        fixture_tool_sequence: ctx.fixture.tool_sequence.to_string(),
+        fixture_id: fixture_id(&ctx.fixture).to_string(),
+        fixture_name: fixture_name(&ctx.fixture),
+        fixture_tool_sequence: fixture_tool_sequence(&ctx.fixture),
         selector: ctx.selector,
         tool_format: ctx.tool_format,
         status,
@@ -785,14 +1126,16 @@ impl LocalRunGuard {
 
 fn script_argv(
     args: &EvalCodingAgentArgs,
-    fixture: FixtureDefinition,
+    fixture: &EvalPackCase,
     selector: &ModelSelector,
     tool_format: &str,
     run_dir: &Path,
 ) -> Vec<String> {
     let mut argv = vec![
         "--fixture".to_string(),
-        fixture.id.to_string(),
+        fixture_id(fixture).to_string(),
+        "--task".to_string(),
+        fixture.task.clone().unwrap_or_default(),
         "--output-dir".to_string(),
         run_dir.display().to_string(),
         "--provider".to_string(),
@@ -838,7 +1181,7 @@ fn tool_format_override_warning_line(stderr: &str) -> Option<&str> {
 
 fn error_report(
     run_id: String,
-    fixture: FixtureDefinition,
+    fixture: EvalPackCase,
     selector: ModelSelector,
     tool_format: String,
     run_dir: PathBuf,
@@ -846,9 +1189,9 @@ fn error_report(
 ) -> RunReport {
     RunReport {
         run_id,
-        fixture_id: fixture.id.to_string(),
-        fixture_name: fixture.name.to_string(),
-        fixture_tool_sequence: fixture.tool_sequence.to_string(),
+        fixture_id: fixture_id(&fixture).to_string(),
+        fixture_name: fixture_name(&fixture),
+        fixture_tool_sequence: fixture_tool_sequence(&fixture),
         selector,
         tool_format,
         status: "infra_error".to_string(),
@@ -883,7 +1226,7 @@ fn error_report(
 
 fn skipped_report(
     run_id: String,
-    fixture: FixtureDefinition,
+    fixture: EvalPackCase,
     selector: ModelSelector,
     tool_format: String,
     run_dir: PathBuf,
@@ -891,9 +1234,9 @@ fn skipped_report(
 ) -> RunReport {
     RunReport {
         run_id,
-        fixture_id: fixture.id.to_string(),
-        fixture_name: fixture.name.to_string(),
-        fixture_tool_sequence: fixture.tool_sequence.to_string(),
+        fixture_id: fixture_id(&fixture).to_string(),
+        fixture_name: fixture_name(&fixture),
+        fixture_tool_sequence: fixture_tool_sequence(&fixture),
         selector,
         tool_format,
         status: "skipped".to_string(),
@@ -933,7 +1276,8 @@ fn provider_available(selector: &ModelSelector) -> bool {
     harn_vm::llm_config::provider_key_available(&selector.provider)
 }
 
-fn resolve_fixtures(raw_fixtures: &[String]) -> Result<Vec<FixtureDefinition>, String> {
+fn resolve_fixtures(raw_fixtures: &[String], python: &str) -> Result<Vec<EvalPackCase>, String> {
+    let definitions = coding_agent_live_verify_cases(python)?;
     let mut seen = BTreeSet::new();
     let mut out = Vec::new();
     for raw in raw_fixtures {
@@ -942,19 +1286,19 @@ fn resolve_fixtures(raw_fixtures: &[String]) -> Result<Vec<FixtureDefinition>, S
             continue;
         }
         if fixture == "all" {
-            return Ok(FIXTURE_DEFINITIONS.to_vec());
+            return Ok(definitions);
         }
-        let Some(definition) = fixture_definition(&fixture) else {
+        let Some(definition) = fixture_definition(&definitions, &fixture) else {
             return Err(format!(
                 "unsupported --fixture `{fixture}`; expected one of: all, {}",
-                FIXTURE_DEFINITIONS
+                definitions
                     .iter()
-                    .map(|definition| definition.id)
+                    .map(fixture_id)
                     .collect::<Vec<_>>()
                     .join(", ")
             ));
         };
-        if seen.insert(definition.id) {
+        if seen.insert(fixture_id(&definition).to_string()) {
             out.push(definition);
         }
     }
@@ -964,11 +1308,11 @@ fn resolve_fixtures(raw_fixtures: &[String]) -> Result<Vec<FixtureDefinition>, S
     Ok(out)
 }
 
-fn fixture_definition(id: &str) -> Option<FixtureDefinition> {
-    FIXTURE_DEFINITIONS
+fn fixture_definition(definitions: &[EvalPackCase], id: &str) -> Option<EvalPackCase> {
+    definitions
         .iter()
-        .copied()
-        .find(|definition| definition.id == id)
+        .find(|definition| fixture_id(definition) == id)
+        .cloned()
 }
 
 async fn resolve_models(args: &EvalCodingAgentArgs) -> Result<Vec<ModelSelector>, String> {
@@ -1075,11 +1419,11 @@ fn normalize_tool_formats(raw_formats: &[String]) -> Result<Vec<String>, String>
 }
 
 fn build_matrix(
-    fixtures: &[FixtureDefinition],
+    fixtures: &[EvalPackCase],
     models: &[ModelSelector],
     tool_formats: &[String],
     max_runs: Option<usize>,
-) -> Vec<(FixtureDefinition, ModelSelector, String)> {
+) -> Vec<(EvalPackCase, ModelSelector, String)> {
     if max_runs == Some(0) {
         return Vec::new();
     }
@@ -1087,7 +1431,7 @@ fn build_matrix(
     for fixture in fixtures {
         for selector in models {
             for tool_format in tool_formats {
-                matrix.push((*fixture, selector.clone(), tool_format.clone()));
+                matrix.push((fixture.clone(), selector.clone(), tool_format.clone()));
                 if max_runs.is_some_and(|limit| matrix.len() >= limit) {
                     return matrix;
                 }
@@ -1100,7 +1444,7 @@ fn build_matrix(
 #[allow(clippy::too_many_arguments)]
 fn build_summary(
     output_dir: &Path,
-    fixtures: Vec<FixtureDefinition>,
+    fixtures: Vec<EvalPackCase>,
     models: Vec<ModelSelector>,
     tool_formats: Vec<String>,
     env_keys_loaded: Vec<LoadedEnvKey>,
@@ -1128,15 +1472,15 @@ fn build_summary(
         schema_version: 3,
         fixture_ids: fixtures
             .iter()
-            .map(|fixture| fixture.id.to_string())
+            .map(|fixture| fixture_id(fixture).to_string())
             .collect(),
         fixtures: fixtures
             .iter()
             .map(|fixture| FixtureReport {
-                id: fixture.id.to_string(),
-                name: fixture.name.to_string(),
-                tool_sequence: fixture.tool_sequence.to_string(),
-                description: fixture.description.to_string(),
+                id: fixture_id(fixture).to_string(),
+                name: fixture_name(fixture),
+                tool_sequence: fixture_tool_sequence(fixture),
+                description: fixture_description(fixture),
             })
             .collect(),
         output_dir: output_dir.display().to_string(),
@@ -2012,17 +2356,10 @@ fn markdown_link(label: &str, target: &str) -> String {
     )
 }
 
-fn reset_dir(path: &Path) -> Result<(), String> {
-    if path.exists() {
-        fs::remove_dir_all(path).map_err(|error| error.to_string())?;
-    }
-    fs::create_dir_all(path).map_err(|error| error.to_string())
-}
-
-fn run_id_for(fixture: FixtureDefinition, selector: &ModelSelector, tool_format: &str) -> String {
+fn run_id_for(fixture: &EvalPackCase, selector: &ModelSelector, tool_format: &str) -> String {
     sanitize_id(&format!(
         "{}__{}__{}",
-        fixture.id,
+        fixture_id(fixture),
         selector_label(selector),
         tool_format
     ))

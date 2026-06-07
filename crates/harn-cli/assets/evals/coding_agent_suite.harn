@@ -942,6 +942,7 @@ fn main(harness: Harness) {
     argv,
     [
       {kind: "option", name: "fixture", flags: ["--fixture"], required: true},
+      {kind: "option", name: "task", flags: ["--task"], default: ""},
       {kind: "option", name: "workspace_root", flags: ["--workspace-root"]},
       {kind: "option", name: "output_dir", flags: ["--output-dir"], required: true},
       {kind: "option", name: "provider", flags: ["--provider"], default: "mock"},
@@ -986,9 +987,14 @@ fn main(harness: Harness) {
       parsed
     }
   }
+  let task = if trim(args.task) == "" {
+    __task_prompt(args.fixture, args.python)
+  } else {
+    args.task
+  }
   let result = __run_fixture_agent(
     args.fixture,
-    __task_prompt(args.fixture, args.python),
+    task,
     args.provider,
     args.model,
     args.tool_format,

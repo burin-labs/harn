@@ -16,10 +16,13 @@ pub use eval_pack::{
     eval_ledger_append_rows_report, eval_ledger_prior_commit_rows_report, eval_ledger_read_report,
     eval_ledger_resume_plan_report, eval_pack_case_fingerprint,
     eval_pack_harness_config_fingerprint, evaluate_eval_pack_manifest,
-    evaluate_eval_pack_manifest_resumable, evaluate_run_against_fixture, evaluate_run_suite,
-    evaluate_run_suite_manifest, load_eval_pack_manifest, load_eval_suite_manifest,
-    normalize_eval_pack_manifest_value, normalize_eval_suite_manifest, replay_fixture_from_run,
-    validate_eval_pack_split,
+    evaluate_eval_pack_manifest_resumable,
+    evaluate_eval_pack_manifest_resumable_with_live_executor,
+    evaluate_eval_pack_manifest_with_live_executor, evaluate_run_against_fixture,
+    evaluate_run_suite, evaluate_run_suite_manifest, load_eval_pack_manifest,
+    load_eval_suite_manifest, normalize_eval_pack_manifest_value, normalize_eval_suite_manifest,
+    replay_fixture_from_run, validate_eval_pack_split, EvalPackLiveExecutor,
+    EvalPackLiveExecutorRequest, EvalPackLiveVerifyOutcome,
 };
 pub use persistence::{
     load_agent_session_replay_events, load_agent_session_replay_events_from_log, load_run_record,
