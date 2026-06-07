@@ -139,7 +139,20 @@ pub(super) fn normalize_openai_message_text(
     // final answer. Keep `text` empty and expose only the partial trace via
     // `thinking`, so the caller can emit a clean truncation signal instead.
     let truncated = finish_reason == Some("length");
-    if !truncated && text.is_empty() && !extracted_thinking.is_empty() {
+    // When the message also carries a tool call, the reasoning is intermediate
+    // chain-of-thought (the tool call is the real action), not a final answer.
+    // gpt-oss / harmony models route their analysis channel into
+    // `reasoning_content` and emit a tool call with empty content; promoting
+    // that reasoning into `.text` leaks the model's private chain-of-thought
+    // into the user-facing assistant message AND into the transcript the eval
+    // grader mines, contaminating both. Keep `.text` empty and surface the
+    // reasoning only via `thinking`. Only promote reasoning-as-answer when the
+    // turn has no tool call to act on.
+    let has_tool_call = message
+        .get("tool_calls")
+        .and_then(serde_json::Value::as_array)
+        .is_some_and(|calls| !calls.is_empty());
+    if !truncated && !has_tool_call && text.is_empty() && !extracted_thinking.is_empty() {
         text = extracted_thinking.clone();
     }
     (text, extracted_thinking)
@@ -273,6 +286,34 @@ mod tests {
         let (visible, thinking) = normalize_openai_message_text(&message, Some("stop"));
         assert_eq!(visible, "the answer is 42");
         assert_eq!(thinking, "the answer is 42");
+    }
+
+    #[test]
+    fn normalize_openai_message_text_does_not_promote_reasoning_when_tool_call_present() {
+        // gpt-oss / harmony models route their analysis channel into
+        // `reasoning_content` and emit a tool call with empty content. The
+        // reasoning is intermediate chain-of-thought, NOT a final answer — the
+        // tool call is the action. Promoting it into `.text` would leak the
+        // model's private CoT into the user-facing message and into the
+        // transcript the eval grader mines, contaminating the meter stick.
+        let message = serde_json::json!({
+            "content": "",
+            "reasoning_content": "We need to write unit tests for the parser. First inspect parser.rs.",
+            "tool_calls": [{
+                "id": "call_1",
+                "type": "function",
+                "function": {"name": "look", "arguments": "{\"path\":\"parser.rs\"}"}
+            }]
+        });
+        let (visible, thinking) = normalize_openai_message_text(&message, Some("tool_calls"));
+        assert_eq!(
+            visible, "",
+            "reasoning leaked into visible text on a tool-call turn"
+        );
+        assert_eq!(
+            thinking,
+            "We need to write unit tests for the parser. First inspect parser.rs."
+        );
     }
 
     #[test]
