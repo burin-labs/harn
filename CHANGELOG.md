@@ -8,6 +8,47 @@ highlights live in [CHANGELOG-pre-0.6.md](CHANGELOG-pre-0.6.md).
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.8.90
+
+### Added
+
+- Added live-verify eval pack cases with a generic executor command interface,
+  verify-command checks, expected output validation, and trial-level ledger
+  resume.
+
+### Changed
+
+- Refactored `harn eval coding-agent` fixtures into portable live-verify eval-pack cases
+  with trial ledger resume while preserving existing coding-agent reports.
+
+### Fixed
+
+- Fixed the direct Anthropic provider sending `tool_choice` as a bare string
+  (the OpenAI wire shape), which Anthropic rejected with HTTP 400
+  (`tool_choice: Input should be an object`) and broke tool-using agent loops on
+  `--provider anthropic`. Harn's tool-choice modes are now mapped to Anthropic's
+  object form (`auto`/`any`/`none`/specific-tool), and OpenAI-style
+  `{"type":"function",...}` and bare-name inputs are normalized too.
+- **Reverted the v0.8.89 "untyped NULL (OID 0)" Postgres `nil` bind.** Binding
+  `nil` as an unspecified-type NULL (OID 0) so Postgres infers the slot type
+  from context is incompatible with sqlx's binary wire protocol: when a query
+  mixes a `nil` param with non-null typed params, Postgres re-infers the whole
+  parameter-type list from the OID-0 slot during `Parse`, and the inferred
+  types no longer match the client-declared OIDs sqlx encodes the non-null
+  params with — yielding `incorrect binary data format in bind parameter N` /
+  `insufficient data left in message` (and `could not determine data type` in
+  genuinely ambiguous contexts). `nil` once again binds as `None::<String>`
+  (Postgres TEXT), the long-stable behavior. The narrow cache-poisoning /
+  typed-column cases the OID-0 change targeted are handled at the query layer by
+  binding a concrete cast (`$n::text::int`, a `::text` cast, or a non-null
+  sentinel) — the correct place to disambiguate a NULL's intended type.
+- Fixed the Postgres hostlib binding a non-finite `Float` (NaN/Infinity) raw:
+  a direct `float8` bind stored NaN/Infinity (which breaks downstream JSON), and
+  a non-finite float on the jsonb path serialized to a silent JSON `null`.
+  `pg_query`/`pg_execute` (and the introspection/advisory helpers) now reject a
+  non-finite float — directly bound or nested in a list/dict — with a clear
+  error before it reaches the database. Finite-float binds are unchanged.
+
 ## v0.8.89
 
 ### Added
