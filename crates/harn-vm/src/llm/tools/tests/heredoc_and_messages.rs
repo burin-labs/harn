@@ -489,6 +489,30 @@ fn native_json_fallback_parses_openai_array_format() {
 }
 
 #[test]
+fn native_json_fallback_parses_pretty_printed_non_call_id() {
+    // Regression: detection used three brittle substring needles
+    // (`[{"id":` / a byte-identical dead duplicate / `{"id":"call_`), so a
+    // pretty-printed native array with a space after `[{` AND a non-OpenAI id
+    // (no `call_` prefix) matched NONE of them — the entire tool call was
+    // silently dropped with zero parse feedback, reading to the loop as a
+    // stall. Local vLLM/llama.cpp tool templates and pretty-printers emit
+    // exactly this shape. Detection is now whitespace- and id-agnostic.
+    let known = known_tools_set();
+    let text =
+        r#"[{ "id": "0", "function": { "name": "read", "arguments": "{\"path\":\"main.go\"}" } }]"#;
+    let (calls, errors) = parse_native_json_tool_calls(text, &known);
+    assert!(errors.is_empty(), "no errors expected: {errors:?}");
+    assert_eq!(calls.len(), 1, "should parse the pretty-printed call");
+    assert_eq!(calls[0]["name"], json!("read"));
+    assert_eq!(calls[0]["arguments"]["path"], json!("main.go"));
+    assert_eq!(
+        calls[0]["id"],
+        json!("0"),
+        "non-call_ id should be preserved"
+    );
+}
+
+#[test]
 fn normalize_tool_args_coerces_integer_like_string_fields() {
     let normalized = normalize_tool_args(
         "edit",
