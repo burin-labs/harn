@@ -1182,3 +1182,189 @@ fn test_path_narrowing_invalidated_by_base_reassignment() {
         "expected `bad` binding to be rejected after base reassignment, got: {errs:?}"
     );
 }
+
+// ---------------------------------------------------------------------------
+// Path narrowing parity with variable narrowing: unknown paths, truthiness,
+// schema_is/has, constant subscripts, discriminators, and exhaustiveness.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_typeof_path_narrowing_unknown_field() {
+    // A path whose natural type is the top type narrows to the tested kind,
+    // mirroring `unknown`-typed variable narrowing.
+    let errs = errors(
+        r#"pipeline t(task) {
+  fn check(o: {data: unknown}) {
+    if type_of(o.data) == "list" { let r: list = o.data }
+  }
+}"#,
+    );
+    assert!(errs.is_empty(), "got: {errs:?}");
+}
+
+#[test]
+fn test_truthiness_narrowing_on_path() {
+    let errs = errors(
+        r"pipeline t(task) {
+  fn check(entry: {status: bool?}) {
+    if entry.status { let b: bool = entry.status }
+  }
+}",
+    );
+    assert!(errs.is_empty(), "got: {errs:?}");
+}
+
+#[test]
+fn test_schema_is_narrowing_on_path() {
+    let errs = errors(
+        r"pipeline t(task) {
+  type User = {id: string}
+  fn check(e: {profile: {id: string} | {err: string}}) {
+    if schema_is(e.profile, User) {
+      let u: {id: string} = e.profile
+    }
+  }
+}",
+    );
+    assert!(errs.is_empty(), "got: {errs:?}");
+}
+
+#[test]
+fn test_has_narrowing_on_path() {
+    let errs = errors(
+        r#"pipeline t(task) {
+  fn check(o: {meta: {name?: string}}) {
+    if o.meta.has("name") { let n: string = o.meta.name }
+  }
+}"#,
+    );
+    assert!(errs.is_empty(), "got: {errs:?}");
+}
+
+#[test]
+fn test_typeof_narrowing_on_constant_subscript() {
+    let errs = errors(
+        r#"pipeline t(task) {
+  fn check(xs: list<string | int>) {
+    if type_of(xs[0]) == "string" { let s: string = xs[0] }
+  }
+}"#,
+    );
+    assert!(errs.is_empty(), "got: {errs:?}");
+}
+
+#[test]
+fn test_dynamic_subscript_does_not_narrow() {
+    // A dynamic (non-literal) index is not a stable reference: it must NOT
+    // narrow, and the un-narrowed access must still be rejected (soundness).
+    let errs = errors(
+        r#"pipeline t(task) {
+  fn check(xs: list<string | int>, i: int) {
+    if type_of(xs[i]) == "string" { let s: string = xs[i] }
+  }
+}"#,
+    );
+    assert!(
+        errs.iter().any(|e| e.contains("expected string")),
+        "dynamic index must not narrow, got: {errs:?}"
+    );
+}
+
+#[test]
+fn test_discriminator_narrowing_on_path() {
+    let errs = errors(
+        r#"pipeline t(task) {
+  type Ping = {kind: "ping", ttl: int}
+  type Pong = {kind: "pong", lat: int}
+  fn check(o: {msg: Ping | Pong}) {
+    if o.msg.kind == "ping" { let p: Ping = o.msg }
+  }
+}"#,
+    );
+    assert!(errs.is_empty(), "got: {errs:?}");
+}
+
+#[test]
+fn test_discriminator_on_path_is_gated_to_tagged_unions() {
+    // `path.field == literal` on a non-tagged-union object (here a `dict`)
+    // must NOT narrow the object into a closed one-field shape — other keys
+    // stay accessible.
+    let errs = errors(
+        r#"pipeline t(task) {
+  fn check(o: {data: dict}) {
+    if o.data.status == "ok" {
+      let c = o.data.count
+    }
+  }
+}"#,
+    );
+    assert!(errs.is_empty(), "got: {errs:?}");
+}
+
+#[test]
+fn test_match_type_of_narrows_variable() {
+    let errs = errors(
+        r#"pipeline t(task) {
+  fn check(x: string | int) {
+    match type_of(x) {
+      "string" -> { let s: string = x }
+      "int" -> { let i: int = x }
+      _ -> {}
+    }
+  }
+}"#,
+    );
+    assert!(errs.is_empty(), "got: {errs:?}");
+}
+
+#[test]
+fn test_match_type_of_narrows_path() {
+    let errs = errors(
+        r#"pipeline t(task) {
+  fn check(o: {data: string | int}) {
+    match type_of(o.data) {
+      "string" -> { let s: string = o.data }
+      "int" -> { let i: int = o.data }
+      _ -> {}
+    }
+  }
+}"#,
+    );
+    assert!(errs.is_empty(), "got: {errs:?}");
+}
+
+#[test]
+fn test_match_type_of_narrows_unknown() {
+    let errs = errors(
+        r#"pipeline t(task) {
+  fn check(v: unknown) -> string {
+    match type_of(v) {
+      "string" -> { return v }
+      _ -> { return "other" }
+    }
+  }
+}"#,
+    );
+    assert!(errs.is_empty(), "got: {errs:?}");
+}
+
+#[test]
+fn test_unknown_exhaustiveness_warns_on_path() {
+    // An incomplete `type_of(path)` chain on an `unknown` path that reaches
+    // `unreachable()` warns about the uncovered concrete kinds.
+    let warns = exhaustive_warns(
+        r#"pipeline t(task) {
+  fn check(o: {x: unknown}) -> string {
+    if type_of(o.x) == "string" { return "s" }
+    if type_of(o.x) == "int" { return "i" }
+    unreachable("incomplete")
+  }
+}"#,
+    );
+    assert!(
+        warns
+            .iter()
+            .any(|w| w.contains("o.x") && w.contains("list")),
+        "expected path exhaustiveness warning naming uncovered kinds, got: {warns:?}"
+    );
+}

@@ -81,15 +81,48 @@ fn resolve_named_alias_chain(ty: TypeExpr, scope: &TypeScope) -> TypeExpr {
     }
 }
 
-/// Extract `(var_name, property_name)` from a `Identifier.property` access.
-/// Returns `None` for nested accesses or non-identifier objects.
-fn extract_property_var(node: &SNode) -> Option<(String, String)> {
-    if let Node::PropertyAccess { object, property } = &node.node {
-        if let Node::Identifier(name) = &object.node {
-            return Some((name.clone(), property.clone()));
-        }
+/// Split a property access into its object node and property name, for both
+/// plain and optional access. Returns `None` for non-property-access nodes.
+/// Unlike a bare-identifier extractor this keeps the full object node, so the
+/// caller can narrow a reference path (`o.msg.kind`) as well as a variable.
+fn property_access_parts(node: &SNode) -> Option<(&SNode, String)> {
+    match &node.node {
+        Node::PropertyAccess { object, property }
+        | Node::OptionalPropertyAccess { object, property } => Some((object, property.clone())),
+        _ => None,
     }
-    None
+}
+
+/// The runtime kinds that `type_of(...)` can return and that the refinement
+/// logic knows how to map to a `TypeExpr` member kind. Kept in lockstep with
+/// `VmValue::type_name` so the narrower never accepts a tag the runtime can't
+/// produce. Shared by `if`/`guard` `type_of` narrowing and `match type_of(…)`
+/// arm narrowing.
+fn is_type_of_tag(tag: &str) -> bool {
+    const TAGS: &[&str] = &[
+        "int",
+        "string",
+        "float",
+        "bool",
+        "nil",
+        "list",
+        "dict",
+        "closure",
+        "bytes",
+        "generator",
+        "stream",
+        "iter",
+    ];
+    TAGS.contains(&tag)
+}
+
+/// The literal `TypeExpr` for a discriminant value, used to build the
+/// `{tag: literal}` schema that drives path-based discriminant narrowing.
+fn discriminant_literal_type(value: &DiscriminantValue) -> TypeExpr {
+    match value {
+        DiscriminantValue::Str(s) => TypeExpr::LitString(s.clone()),
+        DiscriminantValue::Int(v) => TypeExpr::LitInt(*v),
+    }
 }
 
 /// Walk an *optional*-access chain (`o?.a`, `o?[i]`, `o?.m()`, and nestings
@@ -208,7 +241,7 @@ impl TypeChecker {
         scope: &TypeScope,
     ) -> Refinements {
         self.lint_vacuous_condition(condition, scope);
-        Self::extract_refinements(condition, scope)
+        self.extract_refinements(condition, scope)
     }
 
     /// Walk a boolean condition reporting `HARN-LNT-058`. Two patterns fire:
@@ -246,7 +279,7 @@ impl TypeChecker {
         match &condition.node {
             Node::BinaryOp { op, left, right } if op == "&&" || op == "||" => {
                 self.lint_vacuous_condition(left, scope);
-                let left_ref = Self::extract_refinements(left, scope);
+                let left_ref = self.extract_refinements(left, scope);
                 let mut right_scope = scope.child();
                 if op == "&&" {
                     left_ref.apply_truthy(&mut right_scope);
@@ -381,20 +414,21 @@ impl TypeChecker {
 
     /// Extract bidirectional type refinements from a condition expression.
     pub(in crate::typechecker) fn extract_refinements(
+        &self,
         condition: &SNode,
         scope: &TypeScope,
     ) -> Refinements {
         match &condition.node {
             Node::BinaryOp { op, left, right } if op == "!=" || op == "==" => {
-                let nil_ref = Self::extract_nil_refinements(op, left, right, scope);
+                let nil_ref = self.extract_nil_refinements(op, left, right, scope);
                 if !nil_ref.is_empty() {
                     return nil_ref;
                 }
-                let typeof_ref = Self::extract_typeof_refinements(op, left, right, scope);
+                let typeof_ref = self.extract_typeof_refinements(op, left, right, scope);
                 if !typeof_ref.is_empty() {
                     return typeof_ref;
                 }
-                let tag_ref = Self::extract_discriminator_refinements(op, left, right, scope);
+                let tag_ref = self.extract_discriminator_refinements(op, left, right, scope);
                 if !tag_ref.is_empty() {
                     return tag_ref;
                 }
@@ -403,10 +437,10 @@ impl TypeChecker {
 
             // Logical AND: both operands must be truthy, so truthy refinements compose.
             Node::BinaryOp { op, left, right } if op == "&&" => {
-                let left_ref = Self::extract_refinements(left, scope);
+                let left_ref = self.extract_refinements(left, scope);
                 let mut right_scope = scope.child();
                 left_ref.apply_truthy(&mut right_scope);
-                let right_ref = Self::extract_refinements(right, &right_scope);
+                let right_ref = self.extract_refinements(right, &right_scope);
                 let mut truthy = left_ref.truthy;
                 truthy.extend(right_ref.truthy);
                 let mut truthy_paths = left_ref.truthy_paths;
@@ -425,10 +459,10 @@ impl TypeChecker {
 
             // Logical OR: both operands must be falsy for the whole to be falsy.
             Node::BinaryOp { op, left, right } if op == "||" => {
-                let left_ref = Self::extract_refinements(left, scope);
+                let left_ref = self.extract_refinements(left, scope);
                 let mut right_scope = scope.child();
                 left_ref.apply_falsy(&mut right_scope);
-                let right_ref = Self::extract_refinements(right, &right_scope);
+                let right_ref = self.extract_refinements(right, &right_scope);
                 let mut falsy = left_ref.falsy;
                 falsy.extend(right_ref.falsy);
                 let mut falsy_paths = left_ref.falsy_paths;
@@ -446,7 +480,7 @@ impl TypeChecker {
             }
 
             Node::UnaryOp { op, operand } if op == "!" => {
-                Self::extract_refinements(operand, scope).inverted()
+                self.extract_refinements(operand, scope).inverted()
             }
 
             // Bare identifier in condition position: narrow `T | nil` to `T`.
@@ -468,18 +502,35 @@ impl TypeChecker {
                 Refinements::empty()
             }
 
+            // Bare reference path in condition position (`if entry.arguments`,
+            // `if xs[0]`): a truthy value is non-nil, so remove `nil` from the
+            // path's type on the truthy branch. The falsy branch stays open —
+            // `false`/`0`/`""` are falsy without being `nil`.
+            Node::PropertyAccess { .. }
+            | Node::OptionalPropertyAccess { .. }
+            | Node::SubscriptAccess { .. }
+            | Node::OptionalSubscriptAccess { .. } => {
+                if let Some(key) = reference_path_key(condition) {
+                    return Refinements {
+                        truthy_paths: vec![(key, PathNarrowing::Remove("nil".into()))],
+                        ..Refinements::default()
+                    };
+                }
+                Refinements::empty()
+            }
+
             Node::MethodCall {
                 object,
                 method,
                 args,
             } if method == "has" && args.len() == 1 => {
-                Self::extract_has_refinements(object, args, scope)
+                self.extract_has_refinements(object, args, scope)
             }
 
             Node::FunctionCall { name, args, .. }
                 if (name == "schema_is" || name == "is_type") && args.len() == 2 =>
             {
-                Self::extract_schema_refinements(args, scope)
+                self.extract_schema_refinements(args, scope)
             }
 
             _ => Refinements::empty(),
@@ -488,6 +539,7 @@ impl TypeChecker {
 
     /// Extract nil-check refinements from `x != nil` / `x == nil` patterns.
     fn extract_nil_refinements(
+        &self,
         op: &str,
         left: &SNode,
         right: &SNode,
@@ -578,6 +630,7 @@ impl TypeChecker {
 
     /// Extract type_of refinements from `type_of(x) == "typename"` patterns.
     fn extract_typeof_refinements(
+        &self,
         op: &str,
         left: &SNode,
         right: &SNode,
@@ -594,25 +647,7 @@ impl TypeChecker {
             return Refinements::empty();
         };
 
-        // The runtime kinds that `type_of(...)` can return and that the
-        // refinement logic knows how to map to a `TypeExpr` member kind.
-        // Keep this in lockstep with `VmValue::type_name` so the
-        // narrower never accepts a tag that the runtime can't produce.
-        const KNOWN_TYPES: &[&str] = &[
-            "int",
-            "string",
-            "float",
-            "bool",
-            "nil",
-            "list",
-            "dict",
-            "closure",
-            "bytes",
-            "generator",
-            "stream",
-            "iter",
-        ];
-        if !KNOWN_TYPES.contains(&type_name.as_str()) {
+        if !is_type_of_tag(&type_name) {
             return Refinements::empty();
         }
 
@@ -622,11 +657,19 @@ impl TypeChecker {
         // `infer_property_access_type` re-applies to the path's natural type.
         let Node::Identifier(var_name) = &arg.node else {
             if let Some(key) = reference_path_key(arg) {
-                let eq_refs = Refinements {
+                let mut eq_refs = Refinements {
                     truthy_paths: vec![(key.clone(), PathNarrowing::Keep(type_name.clone()))],
-                    falsy_paths: vec![(key, PathNarrowing::Remove(type_name))],
+                    falsy_paths: vec![(key.clone(), PathNarrowing::Remove(type_name.clone()))],
                     ..Refinements::default()
                 };
+                // When the path is itself a top type, the `==` falsy branch
+                // can't subtract a concrete kind from it (it stays open), but
+                // we record the ruled-out tag so an exhaustive `type_of`
+                // chain on the path can be validated at `unreachable()` /
+                // `throw` — exactly as for an `unknown`-typed variable.
+                if self.path_type_is_top(arg, scope) {
+                    eq_refs.falsy_ruled_out = vec![(key, type_name)];
+                }
                 return if op == "==" {
                     eq_refs
                 } else {
@@ -713,33 +756,48 @@ impl TypeChecker {
 
     /// Extract refinements from `obj.<tag> == "value"` / `obj.<tag> == 7` style
     /// patterns where `obj` is a tagged shape union and `<tag>` is the union's
-    /// auto-detected discriminant field. Truthy narrows `obj` to the matching
-    /// variant; falsy narrows to the residual union.
+    /// auto-detected discriminant field. `obj` may be a bare variable or a
+    /// reference path (`o.msg.kind == "ping"`). Truthy narrows `obj` to the
+    /// matching variant; falsy narrows to the residual union. The
+    /// tagged-shape-union gate keeps this from narrowing arbitrary
+    /// `path.field == literal` comparisons (which would otherwise mangle a
+    /// `dict`/`unknown` object into a closed one-field shape).
     fn extract_discriminator_refinements(
+        &self,
         op: &str,
         left: &SNode,
         right: &SNode,
         scope: &TypeScope,
     ) -> Refinements {
         // Find which side is the property access and which is the literal.
-        let (var_name, tag_field, tag_value) = match (
-            extract_property_var(left),
+        let (obj_node, tag_field, tag_value) = match (
+            property_access_parts(left),
             discriminant_value_from_node(right),
         ) {
-            (Some((var, field)), Some(value)) => (var, field, value),
+            (Some((obj, field)), Some(value)) => (obj, field, value),
             _ => match (
-                extract_property_var(right),
+                property_access_parts(right),
                 discriminant_value_from_node(left),
             ) {
-                (Some((var, field)), Some(value)) => (var, field, value),
+                (Some((obj, field)), Some(value)) => (obj, field, value),
                 _ => return Refinements::empty(),
             },
         };
 
-        let Some(Some(raw_type)) = scope.get_var(&var_name).cloned() else {
-            return Refinements::empty();
+        // Resolve the object's type to a union of shapes. A bare variable
+        // reads from the scope (preserving the historical resolution path);
+        // a reference path is inferred (needs `&self`).
+        let resolved = if let Node::Identifier(name) = &obj_node.node {
+            let Some(Some(raw_type)) = scope.get_var(name).cloned() else {
+                return Refinements::empty();
+            };
+            resolve_named_alias_chain(raw_type, scope)
+        } else {
+            let Some(obj_type) = self.infer_type(obj_node, scope) else {
+                return Refinements::empty();
+            };
+            self.resolve_alias(&obj_type, scope)
         };
-        let resolved = resolve_named_alias_chain(raw_type, scope);
         let TypeExpr::Union(members) = resolved else {
             return Refinements::empty();
         };
@@ -755,16 +813,33 @@ impl TypeChecker {
             return Refinements::empty();
         };
 
-        let truthy = vec![(var_name.clone(), Some(matched))];
-        let falsy = match residual {
-            TypeExpr::Never => vec![(var_name, Some(TypeExpr::Never))],
-            other => vec![(var_name, Some(other))],
-        };
-
-        let eq_refs = Refinements {
-            truthy,
-            falsy,
-            ..Refinements::default()
+        let eq_refs = if let Node::Identifier(var_name) = &obj_node.node {
+            // Variable: store the resolved matched/residual types directly.
+            let falsy = match residual {
+                TypeExpr::Never => vec![(var_name.clone(), Some(TypeExpr::Never))],
+                other => vec![(var_name.clone(), Some(other))],
+            };
+            Refinements {
+                truthy: vec![(var_name.clone(), Some(matched))],
+                falsy,
+                ..Refinements::default()
+            }
+        } else if let Some(key) = reference_path_key(obj_node) {
+            // Path: defer via `{tag: literal}` intersect/subtract, which
+            // re-derives the matched variant / residual union from the path's
+            // natural type at read time.
+            let schema = TypeExpr::Shape(vec![ShapeField {
+                name: tag_field,
+                type_expr: discriminant_literal_type(&tag_value),
+                optional: false,
+            }]);
+            Refinements {
+                truthy_paths: vec![(key.clone(), PathNarrowing::Intersect(schema.clone()))],
+                falsy_paths: vec![(key, PathNarrowing::Subtract(schema))],
+                ..Refinements::default()
+            }
+        } else {
+            return Refinements::empty();
         };
         if op == "==" {
             eq_refs
@@ -773,63 +848,142 @@ impl TypeChecker {
         }
     }
 
-    /// Extract .has("key") refinements on shape types.
-    fn extract_has_refinements(object: &SNode, args: &[SNode], scope: &TypeScope) -> Refinements {
+    /// Extract `.has("key")` refinements: the presence check makes the named
+    /// field required on the truthy branch. Works on a bare variable (narrow
+    /// its `Shape` to make the field required) or a reference path (deferred
+    /// `Intersect` with a `{key: any}` schema, which `intersect_shapes` folds
+    /// into making the field required at read time).
+    fn extract_has_refinements(
+        &self,
+        object: &SNode,
+        args: &[SNode],
+        scope: &TypeScope,
+    ) -> Refinements {
+        let Node::StringLiteral(key) = &args[0].node else {
+            return Refinements::empty();
+        };
         if let Node::Identifier(var_name) = &object.node {
-            if let Node::StringLiteral(key) = &args[0].node {
-                if let Some(Some(TypeExpr::Shape(fields))) = scope.get_var(var_name) {
-                    if fields.iter().any(|f| f.name == *key && f.optional) {
-                        let narrowed_fields: Vec<ShapeField> = fields
-                            .iter()
-                            .map(|f| {
-                                if f.name == *key {
-                                    ShapeField {
-                                        name: f.name.clone(),
-                                        type_expr: f.type_expr.clone(),
-                                        optional: false,
-                                    }
-                                } else {
-                                    f.clone()
+            if let Some(Some(TypeExpr::Shape(fields))) = scope.get_var(var_name) {
+                if fields.iter().any(|f| f.name == *key && f.optional) {
+                    let narrowed_fields: Vec<ShapeField> = fields
+                        .iter()
+                        .map(|f| {
+                            if f.name == *key {
+                                ShapeField {
+                                    name: f.name.clone(),
+                                    type_expr: f.type_expr.clone(),
+                                    optional: false,
                                 }
-                            })
-                            .collect();
-                        return Refinements {
-                            truthy: vec![(
-                                var_name.clone(),
-                                Some(TypeExpr::Shape(narrowed_fields)),
-                            )],
-                            falsy: vec![],
-                            ..Refinements::default()
-                        };
-                    }
+                            } else {
+                                f.clone()
+                            }
+                        })
+                        .collect();
+                    return Refinements {
+                        truthy: vec![(var_name.clone(), Some(TypeExpr::Shape(narrowed_fields)))],
+                        ..Refinements::default()
+                    };
                 }
             }
+            return Refinements::empty();
+        }
+        if let Some(path_key) = reference_path_key(object) {
+            // `{key: any}` required: intersecting with the path's shape marks
+            // the field required (and drops `nil` members) at read time.
+            let schema = TypeExpr::Shape(vec![ShapeField {
+                name: key.clone(),
+                type_expr: TypeExpr::Named("any".into()),
+                optional: false,
+            }]);
+            return Refinements {
+                truthy_paths: vec![(path_key, PathNarrowing::Intersect(schema))],
+                ..Refinements::default()
+            };
         }
         Refinements::empty()
     }
 
-    fn extract_schema_refinements(args: &[SNode], scope: &TypeScope) -> Refinements {
-        let Node::Identifier(var_name) = &args[0].node else {
-            return Refinements::empty();
-        };
+    /// Extract `schema_is(x, S)` / `is_type(x, S)` refinements for a bare
+    /// variable (resolved intersect/subtract) or a reference path (deferred
+    /// `Intersect`/`Subtract` directives re-applied to the path's type).
+    fn extract_schema_refinements(&self, args: &[SNode], scope: &TypeScope) -> Refinements {
         let Some(schema_type) = schema_type_expr_from_node(&args[1], scope) else {
             return Refinements::empty();
         };
-        let Some(Some(var_type)) = scope.get_var(var_name).cloned() else {
-            return Refinements::empty();
+        if let Node::Identifier(var_name) = &args[0].node {
+            let Some(Some(var_type)) = scope.get_var(var_name).cloned() else {
+                return Refinements::empty();
+            };
+            let truthy = intersect_types(&var_type, &schema_type)
+                .map(|ty| vec![(var_name.clone(), Some(ty))])
+                .unwrap_or_default();
+            let falsy = subtract_type(&var_type, &schema_type)
+                .map(|ty| vec![(var_name.clone(), Some(ty))])
+                .unwrap_or_default();
+            return Refinements {
+                truthy,
+                falsy,
+                ..Refinements::default()
+            };
+        }
+        if let Some(key) = reference_path_key(&args[0]) {
+            return Refinements {
+                truthy_paths: vec![(key.clone(), PathNarrowing::Intersect(schema_type.clone()))],
+                falsy_paths: vec![(key, PathNarrowing::Subtract(schema_type))],
+                ..Refinements::default()
+            };
+        }
+        Refinements::empty()
+    }
+
+    /// Narrow the subject of a `match type_of(subject) { "tag" -> … }` arm.
+    /// When the match scrutinee is `type_of(subject)` and an arm matches a
+    /// single runtime-kind literal, the subject is narrowed to that kind in
+    /// the arm scope — the `match` counterpart of `if type_of(subject) == "T"`.
+    /// `subject` may be a variable (narrow its union, or a top type to the
+    /// tag) or a reference path (deferred `Keep`). A no-op for any other
+    /// scrutinee, so it is safe to call at every match-arm site.
+    pub(in crate::typechecker) fn narrow_match_subject(
+        &self,
+        value: &SNode,
+        pattern: &SNode,
+        scope: &mut TypeScope,
+    ) {
+        let Some(subject) = extract_type_of_arg(value) else {
+            return;
         };
+        // Only a single concrete runtime-kind literal narrows; or-patterns over
+        // several tags, wildcards, and non-literal patterns leave it un-narrowed.
+        let leaves = pattern_alternatives(pattern);
+        let [leaf] = leaves.as_slice() else {
+            return;
+        };
+        let Node::StringLiteral(tag) = &leaf.node else {
+            return;
+        };
+        if !is_type_of_tag(tag) {
+            return;
+        }
 
-        let truthy = intersect_types(&var_type, &schema_type)
-            .map(|ty| vec![(var_name.clone(), Some(ty))])
-            .unwrap_or_default();
-        let falsy = subtract_type(&var_type, &schema_type)
-            .map(|ty| vec![(var_name.clone(), Some(ty))])
-            .unwrap_or_default();
-
-        Refinements {
-            truthy,
-            falsy,
-            ..Refinements::default()
+        match &subject.node {
+            Node::Identifier(name) => {
+                let narrowed = match scope.get_var(name).cloned().flatten() {
+                    Some(TypeExpr::Union(members)) => narrow_to_single(&members, tag),
+                    Some(TypeExpr::Named(n)) if n == "unknown" || n == "any" => {
+                        Some(TypeExpr::Named(tag.clone()))
+                    }
+                    Some(other) => narrow_to_single(std::slice::from_ref(&other), tag),
+                    None => None,
+                };
+                if let Some(narrowed) = narrowed {
+                    scope.define_var(name, Some(narrowed));
+                }
+            }
+            _ => {
+                if let Some(key) = reference_path_key(subject) {
+                    scope.set_narrowed_path(&key, PathNarrowing::Keep(tag.clone()));
+                }
+            }
         }
     }
 
@@ -1331,11 +1485,21 @@ impl TypeChecker {
         "int", "string", "float", "bool", "nil", "list", "dict", "closure", "bytes",
     ];
 
-    /// Emit a warning if any `unknown`-typed variable in scope has been
-    /// partially narrowed via `type_of(v) == "T"` checks but the current
-    /// control-flow path reaches a never-returning site (`unreachable()`,
-    /// a function with `Never` return, or a `throw`) without covering every
-    /// concrete `type_of` variant.
+    /// Whether a reference node's type resolves to a top type (`unknown` /
+    /// `any`) — the precondition for path-based `type_of` exhaustiveness
+    /// tracking, mirroring the `unknown`-typed-variable case.
+    fn path_type_is_top(&self, node: &SNode, scope: &TypeScope) -> bool {
+        matches!(
+            self.infer_type(node, scope).map(|t| self.resolve_alias(&t, scope)),
+            Some(TypeExpr::Named(n)) if n == "unknown" || n == "any"
+        )
+    }
+
+    /// Emit a warning if any `unknown`-typed variable or reference path in
+    /// scope has been partially narrowed via `type_of(v) == "T"` checks but
+    /// the current control-flow path reaches a never-returning site
+    /// (`unreachable()`, a function with `Never` return, or a `throw`)
+    /// without covering every concrete `type_of` variant.
     ///
     /// The ruled-out set must be non-empty — reaching `throw`/`unreachable`
     /// without any narrowing isn't an exhaustiveness claim, so it stays
@@ -1351,12 +1515,18 @@ impl TypeChecker {
             if covered.is_empty() {
                 continue;
             }
-            // Only warn if `v` is still typed `unknown` at this point —
-            // if it was fully narrowed elsewhere the ruled-out set is stale.
-            if !matches!(
-                scope.get_var(&var_name),
-                Some(Some(TypeExpr::Named(n))) if n == "unknown"
-            ) {
+            // A path key (`o.x`, `xs[0]`) can't be re-typed from its string
+            // form, but the ledger entry only exists because the path was a
+            // top type at the guards; a fully-narrowed chain rules out all
+            // nine variants, leaving `missing` empty. A bare variable must
+            // still be `unknown` — otherwise the ruled-out set is stale.
+            let is_path = var_name.contains('.') || var_name.contains('[');
+            if !is_path
+                && !matches!(
+                    scope.get_var(&var_name),
+                    Some(Some(TypeExpr::Named(n))) if n == "unknown"
+                )
+            {
                 continue;
             }
             let missing: Vec<&str> = Self::UNKNOWN_CONCRETE_TYPES

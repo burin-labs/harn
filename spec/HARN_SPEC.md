@@ -3916,6 +3916,10 @@ Narrowing rules for `unknown`:
   flow path, so an exhaustive chain ending in `unreachable()` / `throw`
   can be validated; see the "Exhaustive narrowing on `unknown`"
   subsection of "Flow-sensitive type refinement".
+- These rules apply equally when `x` is a *reference path* whose type is
+  `unknown` (e.g. an `unknown`-typed field reached via `o.data`), not
+  only a bare `unknown` variable — including the ruled-out tracking for
+  the exhaustiveness check.
 
 Interop between `any` and `unknown`:
 
@@ -4567,10 +4571,14 @@ fn describe(x: string | int) {
 
 #### Reference paths
 
-`type_of()` and nil checks narrow *reference paths* — an identifier
-followed by a chain of constant property accesses (`entry.arguments`,
-`cfg.opts.mode`) — not just bare variables. A guard on a path narrows
-later reads of that same path:
+Narrowing applies to *reference paths* — an identifier followed by a
+chain of constant property accesses and constant subscripts
+(`entry.arguments`, `cfg.opts.mode`, `xs[0]`, `m["k"]`) — not just bare
+variables. Every refinement form that narrows a variable also narrows a
+path: `type_of(path) == "T"`, `path != nil`, a bare `if path`
+(truthiness, removes `nil`), `schema_is(path, S)` / `path.has("k")`, and
+a tagged-shape-union discriminant (`o.msg.kind == "ping"` narrows
+`o.msg`). A guard on a path narrows later reads of that same path:
 
 ```harn
 fn flags(entry: {arguments: list?}) -> list {
@@ -4583,9 +4591,16 @@ fn flags(entry: {arguments: list?}) -> list {
 
 Optional (`?.`) and plain (`.`) links address the same value, so they
 share a narrowing — `type_of(entry?.arguments) == "list"` narrows reads
-of both `entry?.arguments` and `entry.arguments`. The narrowing is
-dropped when the base variable or the path is reassigned, since the
-reference may then point at a different value.
+of both `entry?.arguments` and `entry.arguments`. A path whose type is
+the top type (`unknown`/`any`, common for `json_parse` / `llm_call`
+boundary fields) narrows to the tested kind, exactly as an
+`unknown`-typed variable does.
+
+The narrowing is dropped when the base variable or the path is
+reassigned, since the reference may then point at a different value. A
+*dynamic* subscript (`xs[i]` with a non-literal index) is deliberately
+never narrowed: it is not a stable reference, so a later `xs[i]` may
+read a different element.
 
 #### Truthiness
 
@@ -4666,6 +4681,20 @@ fn check(x: string | int) {
     "hello" -> { log(x) }  // x is `string`
     42 -> { log(x) }       // x is `int`
     _ -> {}
+  }
+}
+```
+
+Matching on `type_of(subject)` narrows the subject (variable or
+reference path) in each arm to the tested kind — the `match`
+counterpart of an `if type_of(subject) == "T"` chain:
+
+```harn
+fn describe(o: {val: string | int}) -> string {
+  return match type_of(o.val) {
+    "string" -> { o.val }  // o.val is `string`
+    "int" -> { to_string(o.val) }  // o.val is `int`
+    _ -> { "?" }
   }
 }
 ```

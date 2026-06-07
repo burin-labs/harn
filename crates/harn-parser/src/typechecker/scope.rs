@@ -325,6 +325,15 @@ impl TypeScope {
             .insert(var_name.to_string(), Vec::new());
     }
 
+    /// Drop ruled-out sets for every reference *path* rooted at `base` (used
+    /// on reassignment of the base, alongside [`Self::clear_unknown_ruled_out`]
+    /// for the base itself). Current-scope only, matching the path-narrowing
+    /// invalidation, since both are applied into the same branch scope.
+    pub(super) fn clear_unknown_ruled_out_paths_rooted_at(&mut self, base: &str) {
+        self.unknown_ruled_out
+            .retain(|key, _| key == base || !path_key_rooted_at(key, base));
+    }
+
     /// Collect every function name visible through this scope chain.
     /// Used by the strict cross-module check to offer "did you mean"
     /// suggestions that span the whole lexical visibility set.
@@ -478,9 +487,8 @@ impl TypeScope {
     /// which is likewise current-scope-scoped, since narrowings are applied
     /// into the same branch scope they are invalidated from.
     pub(super) fn clear_narrowed_paths_rooted_at(&mut self, base: &str) {
-        let prefix = format!("{base}.");
         self.narrowed_paths
-            .retain(|key, _| key != base && !key.starts_with(&prefix));
+            .retain(|key, _| !path_key_rooted_at(key, base));
     }
 
     pub(super) fn define_var_mutable(&mut self, name: &str, ty: InferredType) {
@@ -587,15 +595,23 @@ impl TypeScope {
 /// `&self` (it never needs to project a property type), and re-deriving from
 /// the natural type each read keeps the result correct even as the base
 /// variable's own type is narrowed by other guards in the same flow.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub(super) enum PathNarrowing {
     /// Keep only the union members whose runtime `type_of` equals this tag
-    /// (the truthy branch of `type_of(path) == "tag"`).
+    /// (the truthy branch of `type_of(path) == "tag"`). A top type
+    /// (`unknown`/`any`) narrows straight to the tag, mirroring variable
+    /// `unknown` narrowing.
     Keep(String),
     /// Remove the union members whose runtime `type_of` equals this tag
     /// (the falsy branch of `type_of(path) == "tag"`, and — with tag `"nil"`
-    /// — the truthy branch of `path != nil`).
+    /// — the truthy branch of `path != nil` and of a bare `if path`).
     Remove(String),
+    /// Intersect the path's type with a schema (the truthy branch of
+    /// `schema_is(path, S)` / `is_type(path, S)`, and `path.has("k")`).
+    Intersect(TypeExpr),
+    /// Subtract a schema from the path's type (the falsy branch of
+    /// `schema_is(path, S)` / `is_type(path, S)`).
+    Subtract(TypeExpr),
 }
 
 /// Bidirectional type refinements extracted from a condition.
@@ -682,4 +698,17 @@ pub(super) fn builtin_return_type(name: &str) -> InferredType {
 /// [`builtin_signatures`] registry.
 pub(super) fn is_builtin(name: &str) -> bool {
     builtin_signatures::is_builtin(name)
+}
+
+/// Whether a canonical reference-path `key` is rooted at `base` — i.e. it is
+/// `base` itself or extends it through a path separator (`.` for a property,
+/// `[` for a constant subscript). `xs` roots `xs`, `xs.a`, and `xs[0]`, but
+/// not `xsmore`. Used to invalidate every narrowing that reads through a
+/// variable when that variable (or a path under it) is reassigned.
+pub(super) fn path_key_rooted_at(key: &str, base: &str) -> bool {
+    if key == base {
+        return true;
+    }
+    key.strip_prefix(base)
+        .is_some_and(|rest| rest.starts_with('.') || rest.starts_with('['))
 }
