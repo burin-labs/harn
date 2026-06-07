@@ -174,6 +174,14 @@
 (shape_field
   name: (identifier) @property)
 
+; Row-polymorphic shape tails (`...rest`): a bare row-variable identifier
+; reads as a type parameter, mirroring generic params and type annotations.
+; (Full-type tails like `...dict<string, V>` are already covered by the
+; `type_annotation` rule below.)
+(row_tail
+  type: (type_annotation
+    (identifier) @type))
+
 ; Dict entry keys
 (dict_entry
   key: (identifier) @property)

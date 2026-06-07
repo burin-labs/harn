@@ -11,6 +11,12 @@ module.exports = grammar({
 
   conflicts: ($) => [
     [$.dict_literal, $.shape_type],
+    // `{ ...x }` is ambiguous between a value-level spread inside a
+    // dict/closure (`{...a}`, a closure rest param) and a row-tail in a
+    // row-polymorphic shape type (`{ ...R }`). GLR resolves it from the
+    // surrounding context (annotation position vs. value position), the
+    // same way `dict_literal`/`shape_type` is already disambiguated above.
+    [$._primary, $.typed_parameter, $.type_annotation],
     [$._statement, $._expression],
     [$._primary, $.type_annotation],
     [$._primary, $.typed_parameter],
@@ -1195,14 +1201,32 @@ module.exports = grammar({
         optional(seq("->", $.type_annotation))
       )),
 
+    // Row-polymorphic shape type. After the regular named fields, a shape
+    // may carry one or more trailing row tails (`...<type>`), mirroring the
+    // value-level spread (`{...a, b: 1}`) and rest params (`fn f(...args)`).
+    // Forms accepted (matching the Rust parser):
+    //   { id: string, ...rest }      — fields + a row variable
+    //   { ...R1, ...R2 }             — row tails only, no explicit fields
+    //   { a: int, ...dict<string, V> } — a tail can be any type, not just an ident
+    //   { a: int, b?: string }       — plain closed shape (no tails)
     shape_type: ($) =>
       seq(
         "{",
         optional(
-          seq(
-            $.shape_field,
-            repeat(seq(",", $.shape_field)),
-            optional(",")
+          choice(
+            // Fields, optionally followed by row tails.
+            seq(
+              $.shape_field,
+              repeat(seq(",", $.shape_field)),
+              repeat(seq(",", $.row_tail)),
+              optional(",")
+            ),
+            // Row tails only (no explicit fields).
+            seq(
+              $.row_tail,
+              repeat(seq(",", $.row_tail)),
+              optional(",")
+            )
           )
         ),
         "}"
@@ -1215,6 +1239,12 @@ module.exports = grammar({
         ":",
         field("type", $.type_annotation)
       ),
+
+    // Trailing row tail in a row-polymorphic shape: `...<type>`. The tail
+    // may be a bare row variable (`...rest`) or any full type annotation
+    // (`...dict<string, V>`), so it carries a `type_annotation`.
+    row_tail: ($) =>
+      seq("...", field("type", $.type_annotation)),
   },
 });
 

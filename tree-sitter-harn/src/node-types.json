@@ -9543,6 +9543,22 @@
     }
   },
   {
+    "type": "row_tail",
+    "named": true,
+    "fields": {
+      "type": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "type_annotation",
+            "named": true
+          }
+        ]
+      }
+    }
+  },
+  {
     "type": "scope_block",
     "named": true,
     "fields": {
@@ -10005,6 +10021,10 @@
       "multiple": true,
       "required": false,
       "types": [
+        {
+          "type": "row_tail",
+          "named": true
+        },
         {
           "type": "shape_field",
           "named": true

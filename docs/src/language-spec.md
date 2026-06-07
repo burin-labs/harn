@@ -3976,6 +3976,56 @@ call-return, or any non-identifier expression. The ambient dict-literal
 idiom (`let d = {a: 1}; d.missing`) stays loose and returns `nil` at
 runtime, matching the gradual-typing affordance for one-off glue.
 
+### Open records and row polymorphism
+
+A shape type may end with one or more **row tails** — `...` followed by a type.
+A row tail stands for "any other fields," so the shape is **open**:
+
+```harn,ignore
+// `x` is any record that has at least a string `id`; `rest` captures the
+// other fields, whatever they are.
+fn needs_id(x: {id: string, ...rest}) -> string {
+  return x.id
+}
+
+needs_id({id: "u1", name: "Ann", age: 3})   // ok — extra fields allowed
+needs_id({name: "Ann"})                      // error — required `id` missing
+```
+
+`rest` is a **row variable**: an ordinary generic type parameter that happens
+to appear in tail position. A function generic over rows types record **merge**
+precisely — the result carries every field of both inputs, with the right-hand
+fields overriding the left on overlap (matching the runtime of `merge` /
+`{...a, ...b}` / `a + b`):
+
+```harn,ignore
+fn merge<R1, R2>(a: {...R1}, b: {...R2}) -> {...R1, ...R2} {
+  return a + b
+}
+
+let m = merge({a: 1, b: 2}, {b: "x", c: true})
+// m : {a: int, b: string, c: bool}   (b overridden by the right side)
+```
+
+Rules:
+
+- **Subtyping** checks only the *explicit* fields of the expected side against
+  the actual's known fields (Harn shapes are width-subtyped, so extra actual
+  fields are always allowed and the row tail absorbs them). A required field
+  absent from the actual's known fields is accepted only when the actual has a
+  **gradual** tail (`dict`, `any`); an abstract row variable is not assumed to
+  supply it.
+- **Binding** is one-sided: a row variable binds to the actual record's
+  *leftover* fields (the fields not matched by the explicit ones). With no
+  explicit fields, `{...R}` binds `R` to the whole record.
+- **Override** on overlap is right-biased; the result field is required if
+  either side is required, and its type is the right field's type (or the union
+  of both when the right field is optional).
+- **Gradual interop:** `dict` is the dynamic row — spreading or merging a
+  `dict`-typed value yields a `dict` rather than a falsely-precise closed shape.
+  Precision is monotone: you never get a more precise result than the inputs
+  justify.
+
 ### Union types
 
 ```harn
