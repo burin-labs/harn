@@ -411,6 +411,7 @@ pub struct EvalPackManifest {
     pub description: Option<String>,
     pub base_dir: Option<String>,
     pub baseline: Option<String>,
+    pub executor: Option<EvalPackCommandSpec>,
     pub trials: usize,
     pub split: Option<EvalPackSplit>,
     pub package: Option<EvalPackPackage>,
@@ -531,12 +532,41 @@ pub struct EvalPackThresholds {
     pub max_stage_count: Option<usize>,
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(untagged)]
+pub enum EvalPackCommandSpec {
+    Shell(String),
+    Argv(Vec<String>),
+    Object(EvalPackCommandObject),
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct EvalPackCommandObject {
+    pub command: Option<String>,
+    #[serde(default, alias = "args")]
+    pub argv: Vec<String>,
+    pub cwd: Option<String>,
+    pub env: BTreeMap<String, String>,
+    #[serde(
+        default,
+        alias = "timeout-seconds",
+        alias = "timeoutSeconds",
+        alias = "timeout_secs",
+        alias = "timeout-secs",
+        alias = "timeoutSecs"
+    )]
+    pub timeout_seconds: Option<f64>,
+}
+
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
 #[serde(default)]
 pub struct EvalPackCase {
     pub id: Option<String>,
     pub name: Option<String>,
     pub description: Option<String>,
+    #[serde(default, alias = "type")]
+    pub kind: Option<String>,
     pub run: Option<String>,
     #[serde(default, alias = "run-path")]
     pub run_path: Option<String>,
@@ -547,6 +577,31 @@ pub struct EvalPackCase {
     pub fixture_path: Option<String>,
     #[serde(default, alias = "compare-to")]
     pub compare_to: Option<String>,
+    pub task: Option<String>,
+    pub workspace: Option<String>,
+    pub project: Option<String>,
+    pub executor: Option<EvalPackCommandSpec>,
+    #[serde(
+        default,
+        alias = "verify",
+        alias = "verify-command",
+        alias = "verifyCommand"
+    )]
+    pub verify_command: Option<EvalPackCommandSpec>,
+    #[serde(
+        default,
+        alias = "expected-output-paths",
+        alias = "expectedOutputPaths"
+    )]
+    pub expected_output_paths: Vec<String>,
+    #[serde(
+        default,
+        alias = "required-output-snippets",
+        alias = "requiredOutputSnippets"
+    )]
+    pub required_output_snippets: Vec<String>,
+    #[serde(default, alias = "tool-budget", alias = "toolBudget")]
+    pub tool_budgets: BTreeMap<String, usize>,
     pub rubrics: Vec<String>,
     pub severity: Option<String>,
     pub trials: Option<usize>,
@@ -613,6 +668,8 @@ pub struct EvalPackCaseReport {
 pub struct EvalPackTrialReport {
     pub trial: usize,
     pub verification: String,
+    #[serde(default, alias = "verificationExitCode")]
+    pub verification_exit_code: Option<i64>,
     pub pass: bool,
     pub blocking: bool,
     pub run_id: String,
@@ -626,6 +683,10 @@ pub struct EvalPackTrialReport {
     pub timed_out: bool,
     pub wall_time_seconds: f64,
     pub cost_usd: f64,
+    #[serde(default, alias = "producedPaths")]
+    pub produced_paths: Vec<String>,
+    #[serde(default, alias = "toolCallSummary", alias = "tool_summary")]
+    pub tool_call_summary: serde_json::Value,
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]

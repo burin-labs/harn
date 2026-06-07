@@ -2635,7 +2635,7 @@ These builtins expose Harn's typed orchestration runtime.
 | `run_record_diff(left, right)` | left, right | dict | Compare two run records and summarize stage/status deltas |
 | `eval_pack_manifest(payload)` | payload: dict | dict | Normalize an eval pack manifest |
 | `eval_pack_validate_split(manifest)` | manifest: dict | dict | Validate an eval pack split declaration |
-| `eval_pack_run(manifest, options?)` | manifest: dict, options: dict | dict | Evaluate an eval pack manifest with trial-level ledger resume |
+| `eval_pack_run(manifest, options?)` | manifest: dict, options: dict | dict | Evaluate replay or live-verify eval pack cases with trial-level ledger resume |
 | `eval_ledger_read(options?)` | options: dict | dict | Read durable eval-ledger rows |
 | `eval_ledger_append_rows(rows, options?)` | rows: list or dict, options: dict | dict | Append idempotent eval-ledger rows |
 | `eval_ledger_append_unique_case_rows(rows, options?)` | rows: list or dict, options: dict | dict | Append eval-ledger rows keyed by case/trial fingerprints |

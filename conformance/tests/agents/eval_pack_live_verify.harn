@@ -1,0 +1,90 @@
+fn python_executor_source() -> string {
+  return "import json\n"
+    + "import pathlib\n"
+    + "import sys\n"
+    + "\n"
+    + "request = json.load(sys.stdin)\n"
+    + "workspace = pathlib.Path(request[\"case\"][\"workspace\"])\n"
+    + "output = workspace / \"answer.txt\"\n"
+    + "output.write_text(\"steel thread output\\n\", encoding=\"utf-8\")\n"
+    + "print(json.dumps({\n"
+    + "  \"verification\": \"PASS\",\n"
+    + "  \"wallTimeSeconds\": 1.25,\n"
+    + "  \"costUsd\": 0.02,\n"
+    + "  \"producedPaths\": [\"answer.txt\"],\n"
+    + "  \"toolCallSummary\": {\"total\": 1, \"byTool\": {\"edit\": 1}}\n"
+    + "}))\n"
+}
+
+fn verify_file_command(name: string) -> dict {
+  return {
+    argv: [
+      "python3",
+      "-c",
+      "import pathlib, sys; sys.exit(0 if pathlib.Path('" + name + "').exists() else 1)",
+    ],
+    timeout_seconds: 10,
+  }
+}
+
+fn live_pack(root: string, workspace: string, executor_path: string, verify_name: string) -> dict {
+  return {
+    id: "live-verify-pack",
+    base_dir: root,
+    trials: 2,
+    executor: {argv: ["python3", executor_path], timeout_seconds: 10},
+    metadata: {model: "mock-live", tool_format: "json"},
+    cases: [
+      {
+        id: "live-case",
+        kind: "live-verify",
+        task: "write the expected answer file",
+        workspace: workspace,
+        verify_command: verify_file_command(verify_name),
+        expected_output_paths: ["answer.txt"],
+        required_output_snippets: ["steel thread"],
+        tool_budgets: {total: 2, edit: 1},
+        metadata: {group: "live"},
+      },
+    ],
+  }
+}
+
+@test
+pipeline test_live_verify(_task) {
+  let root = path_join(harness.fs.temp_dir(), "harn-eval-pack-live-" + uuid())
+  let workspace = path_join(root, "workspace")
+  harness.fs.mkdir(root)
+  harness.fs.mkdir(workspace)
+  let executor_path = path_join(root, "executor.py")
+  harness.fs.write_text(executor_path, python_executor_source())
+  let manifest = eval_pack_manifest(live_pack(root, workspace, executor_path, "answer.txt"))
+  assert_eq(manifest.cases[0].kind, "live-verify")
+  assert(manifest.cases[0].case_fingerprint != "", "case fingerprint is stamped")
+  let ledger_options = {
+    namespace: "live-verify-" + uuid(),
+    suite: "live-verify-pack",
+    model: "mock-live",
+    commit: "conformance-live",
+  }
+  let report = eval_pack_run(manifest, ledger_options)
+  assert_eq(report.trial_count, 2)
+  assert_eq(report.cases[0].reliability.status, "all-pass")
+  assert_eq(report.cases[0].stats_row.passes, 2)
+  assert_eq(report.cases[0].trials[0].verification_exit_code, 0)
+  assert_eq(report.cases[0].trials[0].produced_paths[0], "answer.txt")
+  assert_eq(report.cases[0].trials[0].tool_call_summary.byTool.edit, 1)
+  assert_eq(report.stats.reliability.all_pass_cases, 1)
+  let resume = eval_pack_run(manifest, ledger_options)
+  assert_eq(resume.run_state.all_skipped, true)
+  assert_eq(resume.run_state.skipped_cells, 2)
+  assert_eq(resume.cases[0].reliability.status, "all-pass")
+  let broken = eval_pack_run(
+    eval_pack_manifest(live_pack(root, workspace, executor_path, "missing.txt")),
+    ledger_options + {namespace: "live-verify-broken-" + uuid()},
+  )
+  assert_eq(broken.cases[0].reliability.status, "all-fail")
+  assert_eq(broken.cases[0].stats_row.fails, 2)
+  assert_eq(broken.pass, false)
+  log("eval pack live verify ok")
+}
