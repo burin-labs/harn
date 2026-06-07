@@ -61,6 +61,14 @@ pub(crate) fn format_duration_ms(duration_ms: u64) -> String {
     }
 }
 
+/// Escape the `|` characters in `value` so it can sit inside a single Markdown
+/// table cell without prematurely ending the column. Several report commands
+/// (eval summaries, provider matrices, diagnostics catalogs) build Markdown
+/// tables and had each grown a private copy of this; keep the escaping uniform.
+pub(crate) fn escape_md(value: &str) -> String {
+    value.replace('|', "\\|")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -94,5 +102,12 @@ mod tests {
         assert_eq!(format_duration_ms(500), "500ms");
         assert_eq!(format_duration_ms(1_500), "1.5s");
         assert_eq!(format_duration_ms(90_000), "1.5m");
+    }
+
+    #[test]
+    fn escape_md_escapes_only_pipes() {
+        assert_eq!(escape_md("a|b|c"), "a\\|b\\|c");
+        assert_eq!(escape_md("no pipes here"), "no pipes here");
+        assert_eq!(escape_md(""), "");
     }
 }
