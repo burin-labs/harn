@@ -459,6 +459,29 @@ let grouped = kmeans([[0, 0], [0, 1], [10, 10], [10, 11]], 2)
 log(grouped.centroids)          // [[0.0, 0.5], [10.0, 10.5]]
 ```
 
+### std/eval/stats
+
+Deterministic eval-meter statistics over generic row dictionaries. Rows are
+identified by `name`/`case_name`, grouped by `group`, and scored from
+`passes`, `trials`, `skips`, `timeouts`, `wallTimeSeconds`, and `costUsd`.
+Existing ledger aliases such as `pass_rate`, `case_fingerprint`, and
+`total_cost_usd` are accepted when present.
+
+| Function | Description |
+|---|---|
+| `aggregate_trials(name, outcomes, metadata?)` | Summarize trial outcomes into a generic eval row |
+| `bootstrap_mean_ci(values, resamples, alpha, seed)` | Seeded bootstrap mean CI using high-bit LCG sampling |
+| `macro_pass_at_1(rows)` | Mean pass rate over decided cases with uniform case weights |
+| `reliability_breakdown(rows)` | All-pass, flaky, all-fail, and no-decision case buckets |
+| `pass_caret_k(rows)` / `pass_at_k(rows)` | Strict pass^k over decided cases |
+| `skip_rate(rows)` / `timeout_rate(rows)` | Mean per-row skip and timeout fractions |
+| `cost_per_solved(rows)` | Total realized cost divided by solved cases |
+| `worst_group(rows)` | Lowest macro pass@1 group |
+| `paired_case_deltas(baseline, current)` | Comparable per-case pass-rate deltas |
+| `paired_delta_report(baseline, current, resamples?, seed?)` | Paired bootstrap delta with improved/regression/inconclusive status |
+| `regression_gate(baseline, current, k?)` | Baseline-standard-deviation-aware regression gate |
+| `routing_calibration_report(cheap, ladder, frontier)` | Over- and under-escalation routing report |
+
 ### std/path
 
 Path manipulation utilities:

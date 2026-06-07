@@ -1,0 +1,49 @@
+import "std/eval/stats"
+
+fn meter_row(name, fingerprint, passes, fails, skips, pass_rate, cost) {
+  return {
+    case_name: name,
+    case_fingerprint: fingerprint,
+    passes: passes,
+    fails: fails,
+    skips: skips,
+    timeouts: 0,
+    trials: passes + fails + skips,
+    pass_rate: pass_rate,
+    mean_cost_usd: cost,
+    total_cost_usd: cost * (passes + fails + skips),
+  }
+}
+
+pipeline test(task) {
+  let baseline = [
+    meter_row("python-alpha", "a", 3, 1, 0, 0.75, 0.1),
+    meter_row("python-beta", "b", 2, 2, 0, 0.5, 0.1),
+    meter_row("rust-alpha", "c", 0, 4, 0, 0.0, 0.1),
+    meter_row("rust-skip", "d", 0, 0, 4, 0.0, 0.1) + {status: "skip"},
+  ]
+  let current = [
+    meter_row("python-alpha", "a", 4, 0, 0, 1.0, 0.1),
+    meter_row("python-beta", "b", 1, 3, 0, 0.25, 0.1),
+    meter_row("rust-alpha", "c", 2, 2, 0, 0.5, 0.1),
+    meter_row("rust-skip", "d", 0, 0, 4, 0.0, 0.1) + {status: "skip"},
+  ]
+  assert_eq(round(macro_pass_at_1(baseline) * 1000), 417)
+  let reliability = reliability_breakdown(baseline)
+  assert_eq(reliability.all_pass_cases, 0)
+  assert_eq(reliability.flaky_cases, 2)
+  assert_eq(reliability.all_fail_cases, 1)
+  assert_eq(reliability.no_decision_cases, 1)
+  let ci = bootstrap_mean_ci([0.75, 0.5, 0.0], 200, 0.05, 7)
+  assert_eq(round(ci.mean * 1000), 417)
+  assert_eq(round(ci.lo * 1000), 0)
+  assert_eq(round(ci.hi * 1000), 750)
+  assert_eq(round(ci.std * 1000000), 168815)
+  let delta = paired_delta_report(baseline, current, 200, 7)
+  assert_eq(delta.n_cases, 3)
+  assert_eq(round(delta.mean_delta * 1000), 167)
+  assert_eq(round(delta.ci_lo * 1000), -250)
+  assert_eq(round(delta.ci_hi * 1000), 500)
+  assert_eq(delta.status, "inconclusive")
+  log("stdlib eval stats ledger aliases ok")
+}
