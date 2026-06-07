@@ -95,7 +95,14 @@ WORKSPACE_CRATES=(
 #                                            after a successful upload
 #   - "already exists on crates.io index"  — crate succeeded on an earlier
 #                                            attempt; nothing to do
-RETRYABLE_PATTERN='429|Too Many Requests|unexpected cargo internal error|packages remain in plan|already exists on crates.io index'
+#   - "timeout while waiting for published  — a dependency was uploaded but the
+#      dependencies" / "timed out waiting     index hadn't propagated before
+#      for ... to be available"               cargo tried to publish a dependent
+#                                            (e.g. harn-cli waiting on harn-lsp).
+#                                            Pure propagation lag: retrying or the
+#                                            per-crate fallback (which skips the
+#                                            already-uploaded crates) completes it.
+RETRYABLE_PATTERN='429|Too Many Requests|unexpected cargo internal error|packages remain in plan|already exists on crates.io index|timeout while waiting for published dependencies|timed out waiting for'
 
 attempt_workspace_publish() {
   local attempt=1
