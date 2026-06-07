@@ -81,17 +81,17 @@ fn __explicit_provider(opts) {
   return provider
 }
 
-fn __resolved_model_id(model) {
+fn __resolved_model_id(model) -> string {
   let resolved = try {
     llm_resolve_model(model)
   }
   if is_err(resolved) {
     return to_string(model)
   }
-  return unwrap(resolved)?.id ?? to_string(model)
+  return to_string(unwrap(resolved)?.id ?? model)
 }
 
-fn __tool_format_pair(opts) {
+fn __tool_format_pair(opts) -> {provider: string, model: string}? {
   let raw_model = opts?.model
   if raw_model == nil || trim(to_string(raw_model)) == "" {
     return nil

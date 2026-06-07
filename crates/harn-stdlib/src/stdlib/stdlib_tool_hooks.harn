@@ -607,7 +607,7 @@ pub fn preset_run_command(config = nil) {
   let context = {stacks: stacks}
   return { args ->
     let command = __preset_command_text(args)
-    if has_custom {
+    if custom_registry != nil {
       let custom_matches = tool_hooks_match(custom_registry, command, context)
       if len(custom_matches) > 0 {
         return mode(custom_matches[0], args, inner)

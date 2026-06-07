@@ -132,16 +132,16 @@ fn __sitrep_resolved_routes(opts) {
   return __SITREP_DEFAULT_ROUTES
 }
 
-fn __sitrep_pick_route(opts) {
+fn __sitrep_pick_route(opts) -> {provider: string, model: string}? {
   if opts?.provider != nil && opts?.model != nil {
-    return {provider: opts.provider, model: opts.model}
+    return {provider: to_string(opts.provider), model: to_string(opts.model)}
   }
   let available = __sitrep_available_providers()
   for candidate in __sitrep_resolved_routes(opts) {
     if __sitrep_route_is_available(candidate, available) {
       let resolved_model = candidate?.model ?? llm_qc_default_model(candidate.provider)
       if resolved_model != nil && resolved_model != "" {
-        return {provider: candidate.provider, model: resolved_model}
+        return {provider: to_string(candidate.provider), model: to_string(resolved_model)}
       }
     }
   }

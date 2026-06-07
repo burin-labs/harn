@@ -27,7 +27,7 @@ let FACT_VALID_KINDS = ["observation", "claim", "hypothesis", "decision", "const
 
 let FACT_VALID_EVIDENCE_KINDS = ["trace_ref", "file_range", "tool_output", "user_input"]
 
-fn __fact_error(code, message) {
+fn __fact_error(code, message) -> never {
   throw code + ": std/agent/fact: " + message
 }
 

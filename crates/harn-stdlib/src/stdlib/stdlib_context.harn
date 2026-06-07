@@ -58,8 +58,17 @@ type ContextArtifact = {
   redaction: ContextArtifactRedaction,
   sensitivity?: string,
   metadata: dict,
+  source?: string,
+  priority?: any,
+  relevance?: any,
 }
 
+/**
+ * `source` mirrors the provenance source for convenient flat access.
+ * `priority`/`relevance` carry caller-supplied ranking hints sourced from
+ * the untyped `raw`/`opts` input, so they are genuinely any-valued; the
+ * ranking code defensively coerces them through `__context_num`.
+ */
 fn __context_list(value) {
   if value == nil {
     return []
@@ -555,8 +564,8 @@ pub fn context_artifact_rank(artifact, options = nil) {
   let confidence = __context_confidence(item.confidence) ?? 0.5
   let freshness = __context_freshness_rank(item.freshness)
   let authority = __context_authority_rank(item.provenance.authority)
-  let priority = __context_num(item?.priority, 0) * 1.0 / 100.0
-  let relevance = __context_num(item?.relevance, confidence) * 1.0
+  let priority = __context_num(item.priority, 0) * 1.0 / 100.0
+  let relevance = __context_num(item.relevance, confidence) * 1.0
   let pinned = if contains(__context_string_list(opts?.pinned_ids), item.id) {
     10.0
   } else {

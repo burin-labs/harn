@@ -39,8 +39,8 @@ type TriageEvent = {
   source_kind: string,
   source_id: string,
   source_url: string,
-  source_timestamp?: string,
-  received_at?: string,
+  source_timestamp: string?,
+  received_at: string?,
   actors: list<TriageActor>,
   summary: string,
   why_it_matters: string,
@@ -55,6 +55,11 @@ type TriageEvent = {
   raw_payload: dict,
 }
 
+/**
+ * Always emitted by `triage_normalize` (the literal is not `filter_nil`-ed),
+ * but the underlying lookup can resolve to nil, so the key is present with a
+ * nilable value rather than being absent.
+ */
 type TriageEmitReceipt = {
   schema: "harn.triage_event_emit_receipt.v1",
   topic: string,
@@ -350,7 +355,7 @@ fn __triage_notion_actors(payload) {
   return actors
 }
 
-fn __triage_actors(provider, input, payload, options) {
+fn __triage_actors(provider, input, payload, options) -> list<TriageActor> {
   if options?.actors != nil {
     return options.actors
   }
@@ -491,7 +496,7 @@ fn __triage_source_timestamp(input, payload, options) {
   )
 }
 
-fn __triage_related_refs(source_url, input, payload, options) {
+fn __triage_related_refs(source_url, input, payload, options) -> list<TriageRelatedRef> {
   if options?.related_refs != nil {
     return options.related_refs
   }
@@ -523,7 +528,7 @@ fn __triage_privacy(input, options) {
   }
 }
 
-fn __triage_default_action_intents(dedupe_key, source_url) {
+fn __triage_default_action_intents(dedupe_key, source_url) -> list<TriageActionIntent> {
   let target = {dedupe_key: dedupe_key, source_url: source_url}
   return [
     {
@@ -599,14 +604,18 @@ pub fn triage_normalize(input, options = nil) -> TriageEvent {
   let payload = __triage_payload(input)
   let provider = __triage_provider(input, payload, opts)
   let source_kind = __triage_source_kind(input, payload, opts)
-  let source_url = __triage_source_url(provider, input, payload, opts)
-  if __triage_text(source_url) == "" {
+  // `__triage_source_url` returns `string?`; the guard below rejects empty
+  // values, so coerce to a guaranteed `string` for the rest of the builder
+  // (and the `TriageEvent.source_url: string` field). `__triage_text` trims
+  // and stringifies, matching exactly the value the guard already validated.
+  let source_url = __triage_text(__triage_source_url(provider, input, payload, opts))
+  if source_url == "" {
     throw "std/triage: source_url is required"
   }
-  let source_id = __triage_source_id(provider, source_url, input, payload, opts)
+  let source_id = __triage_text(__triage_source_id(provider, source_url, input, payload, opts))
   let dedupe_key = opts.dedupe_key ?? input?.triage_dedupe_key
     ?? triage_dedupe_key(provider, source_kind, source_url, source_id)
-  let summary = __triage_summary(provider, source_kind, input, payload, opts)
+  let summary = __triage_text(__triage_summary(provider, source_kind, input, payload, opts))
   let event = {
     schema: TRIAGE_EVENT_SCHEMA,
     id: opts.id ?? input?.triage_event_id ?? ("triage_evt_" + substring(sha256(dedupe_key), 0, 24)),
@@ -615,7 +624,7 @@ pub fn triage_normalize(input, options = nil) -> TriageEvent {
     source_id: source_id,
     source_url: source_url,
     source_timestamp: __triage_source_timestamp(input, payload, opts),
-    received_at: opts.received_at ?? input?.received_at,
+    received_at: __triage_first([opts.received_at, input?.received_at]),
     actors: __triage_actors(provider, input, payload, opts),
     summary: summary,
     why_it_matters: opts.why_it_matters ?? input?.why_it_matters ?? __triage_default_why(provider),
