@@ -1,7 +1,9 @@
 //! Eval-suite manifest + eval-pack manifest loading, evaluation, replay-fixture comparison.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
+
+use sha2::{Digest, Sha256};
 
 use super::super::{
     evaluate_context_pack_suggestion_expectations, generate_context_pack_suggestions, new_id,
@@ -13,8 +15,10 @@ use super::json::{clarifying_max_questions, clarifying_min_questions, normalize_
 use super::persistence::load_run_record;
 use super::types::{
     EvalPackAssertion, EvalPackCase, EvalPackCaseReport, EvalPackFixtureRef, EvalPackManifest,
-    EvalPackReport, EvalPackRubric, EvalSuiteManifest, ReplayEvalCaseReport, ReplayEvalReport,
-    ReplayEvalSuiteReport, ReplayFixture, ReplayStageAssertion, RunRecord, RunStageRecord,
+    EvalPackReliabilityBreakdown, EvalPackReliabilityReport, EvalPackReport, EvalPackRubric,
+    EvalPackSplitValidationReport, EvalPackStatsReport, EvalPackStatsRow, EvalPackTrialReport,
+    EvalSuiteManifest, ReplayEvalCaseReport, ReplayEvalReport, ReplayEvalSuiteReport,
+    ReplayFixture, ReplayStageAssertion, RunDiffReport, RunRecord, RunStageRecord,
 };
 use crate::value::{VmError, VmValue};
 
@@ -51,7 +55,7 @@ pub fn load_eval_pack_manifest(path: &Path) -> Result<EvalPackManifest, VmError>
             toml::from_str(&content)
                 .map_err(|e| VmError::Runtime(format!("failed to parse eval pack TOML: {e}")))?
         };
-    normalize_eval_pack_manifest(&mut manifest);
+    normalize_eval_pack_manifest(&mut manifest)?;
     if manifest.base_dir.is_none() {
         manifest.base_dir = path.parent().map(|parent| parent.display().to_string());
     }
@@ -60,13 +64,16 @@ pub fn load_eval_pack_manifest(path: &Path) -> Result<EvalPackManifest, VmError>
 
 pub fn normalize_eval_pack_manifest_value(value: &VmValue) -> Result<EvalPackManifest, VmError> {
     let mut manifest: EvalPackManifest = parse_json_value(value)?;
-    normalize_eval_pack_manifest(&mut manifest);
+    normalize_eval_pack_manifest(&mut manifest)?;
     Ok(manifest)
 }
 
-fn normalize_eval_pack_manifest(manifest: &mut EvalPackManifest) {
+fn normalize_eval_pack_manifest(manifest: &mut EvalPackManifest) -> Result<(), VmError> {
     if manifest.version == 0 {
         manifest.version = 1;
+    }
+    if manifest.trials == 0 {
+        manifest.trials = 1;
     }
     if manifest.id.is_empty() {
         manifest.id = manifest
@@ -75,9 +82,314 @@ fn normalize_eval_pack_manifest(manifest: &mut EvalPackManifest) {
             .filter(|name| !name.trim().is_empty())
             .unwrap_or_else(|| new_id("eval_pack"));
     }
+    let rubrics_by_id = manifest
+        .rubrics
+        .iter()
+        .filter(|rubric| !rubric.id.is_empty())
+        .map(|rubric| (rubric.id.as_str(), rubric))
+        .collect::<BTreeMap<_, _>>();
+    let fixtures_by_id = manifest
+        .fixtures
+        .iter()
+        .filter(|fixture| !fixture.id.is_empty())
+        .map(|fixture| (fixture.id.as_str(), fixture))
+        .collect::<BTreeMap<_, _>>();
+    for case in &mut manifest.cases {
+        if case.trials == Some(0) {
+            return Err(VmError::Runtime(format!(
+                "eval pack case '{}' has trials = 0",
+                case.id.as_deref().unwrap_or("<unnamed>")
+            )));
+        }
+        case.case_fingerprint =
+            eval_pack_case_fingerprint_with_refs(case, &rubrics_by_id, &fixtures_by_id)?;
+    }
     for ladder in &mut manifest.ladders {
         super::super::normalize_persona_eval_ladder_manifest(ladder);
     }
+    Ok(())
+}
+
+pub fn eval_pack_case_fingerprint(case: &EvalPackCase) -> Result<String, VmError> {
+    eval_pack_case_fingerprint_with_refs(case, &BTreeMap::new(), &BTreeMap::new())
+}
+
+fn eval_pack_case_fingerprint_with_refs(
+    case: &EvalPackCase,
+    rubrics_by_id: &BTreeMap<&str, &EvalPackRubric>,
+    fixtures_by_id: &BTreeMap<&str, &EvalPackFixtureRef>,
+) -> Result<String, VmError> {
+    let mut task = BTreeMap::new();
+    insert_json_field(&mut task, "run", &case.run)?;
+    insert_json_field(&mut task, "run_path", &case.run_path)?;
+    insert_json_field(&mut task, "friction_events", &case.friction_events)?;
+
+    let mut expected_outputs = BTreeMap::new();
+    insert_json_field(&mut expected_outputs, "fixture", &case.fixture)?;
+    insert_json_field(&mut expected_outputs, "fixture_path", &case.fixture_path)?;
+    if let Some(fixture_ref) = case.fixture.as_deref().or(case.fixture_path.as_deref()) {
+        if let Some(fixture) = fixtures_by_id.get(fixture_ref) {
+            insert_json_field(&mut expected_outputs, "fixture_ref", *fixture)?;
+        }
+    }
+
+    let resolved_rubrics = case
+        .rubrics
+        .iter()
+        .filter_map(|rubric_id| rubrics_by_id.get(rubric_id.as_str()))
+        .map(|rubric| {
+            serde_json::to_value(rubric)
+                .map_err(|e| VmError::Runtime(format!("failed to encode eval pack rubric: {e}")))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    let mut verify = BTreeMap::new();
+    insert_json_field(&mut verify, "compare_to", &case.compare_to)?;
+    insert_json_field(&mut verify, "rubric_ids", &case.rubrics)?;
+    verify.insert(
+        "rubrics".to_string(),
+        serde_json::Value::Array(resolved_rubrics),
+    );
+
+    let mut flags = BTreeMap::new();
+    insert_json_field(&mut flags, "severity", &case.severity)?;
+    insert_json_field(&mut flags, "thresholds", &case.thresholds)?;
+    insert_json_field(&mut flags, "metadata", &case.metadata)?;
+
+    let mut payload = BTreeMap::new();
+    payload.insert("task".to_string(), encode_json(&task)?);
+    payload.insert(
+        "expected_outputs".to_string(),
+        encode_json(&expected_outputs)?,
+    );
+    payload.insert("verify".to_string(), encode_json(&verify)?);
+    payload.insert("flags".to_string(), encode_json(&flags)?);
+    fingerprint_json(&payload)
+}
+
+pub fn eval_pack_harness_config_fingerprint(
+    manifest: &EvalPackManifest,
+) -> Result<String, VmError> {
+    let rubric_harness = manifest
+        .rubrics
+        .iter()
+        .map(|rubric| {
+            let mut item = BTreeMap::new();
+            insert_json_field(&mut item, "id", &rubric.id)?;
+            insert_json_field(&mut item, "kind", &rubric.kind)?;
+            insert_json_field(&mut item, "prompt", &rubric.prompt)?;
+            insert_json_field(&mut item, "judge", &rubric.judge)?;
+            encode_json(&item)
+        })
+        .collect::<Result<Vec<_>, VmError>>()?;
+    let mut harness_metadata = BTreeMap::new();
+    for key in [
+        "model",
+        "provider",
+        "route",
+        "prompt",
+        "promptVersion",
+        "prompt_version",
+        "toolFormat",
+        "tool_format",
+        "pipelineRev",
+        "pipeline_rev",
+        "pipelineRevision",
+        "pipeline_revision",
+        "harnVersion",
+        "harn_version",
+        "harness",
+        "harnessConfig",
+        "harness_config",
+    ] {
+        if let Some(value) = manifest.metadata.get(key) {
+            harness_metadata.insert(key.to_string(), value.clone());
+        }
+    }
+
+    let mut payload = BTreeMap::new();
+    insert_json_field(&mut payload, "manifest_judge", &manifest.judge)?;
+    insert_json_field(&mut payload, "default_judge", &manifest.defaults.judge)?;
+    insert_json_field(&mut payload, "package", &manifest.package)?;
+    payload.insert(
+        "harness_metadata".to_string(),
+        encode_json(&harness_metadata)?,
+    );
+    payload.insert(
+        "rubric_harness".to_string(),
+        serde_json::Value::Array(rubric_harness),
+    );
+    fingerprint_json(&payload)
+}
+
+fn insert_json_field<T: serde::Serialize>(
+    map: &mut BTreeMap<String, serde_json::Value>,
+    key: &str,
+    value: &T,
+) -> Result<(), VmError> {
+    map.insert(key.to_string(), encode_json(value)?);
+    Ok(())
+}
+
+fn encode_json<T: serde::Serialize>(value: &T) -> Result<serde_json::Value, VmError> {
+    serde_json::to_value(value)
+        .map_err(|e| VmError::Runtime(format!("failed to encode eval pack fingerprint: {e}")))
+}
+
+fn fingerprint_json<T: serde::Serialize>(value: &T) -> Result<String, VmError> {
+    let bytes = serde_json::to_vec(value)
+        .map_err(|e| VmError::Runtime(format!("failed to encode eval pack fingerprint: {e}")))?;
+    let digest = hex::encode(Sha256::digest(bytes));
+    Ok(digest.chars().take(16).collect())
+}
+
+pub fn validate_eval_pack_split(
+    manifest: &EvalPackManifest,
+) -> Result<EvalPackSplitValidationReport, VmError> {
+    let report = eval_pack_split_validation_report(manifest);
+    if !report.valid {
+        return Err(VmError::Runtime(format!(
+            "eval pack split invalid: {}",
+            render_split_validation_errors(&report).join("; ")
+        )));
+    }
+    Ok(report)
+}
+
+fn eval_pack_split_validation_report(manifest: &EvalPackManifest) -> EvalPackSplitValidationReport {
+    let case_ids = eval_pack_case_ids(manifest);
+    let mut duplicate_case_ids = duplicates(&case_ids);
+    duplicate_case_ids.sort();
+
+    let case_set = case_ids.iter().cloned().collect::<BTreeSet<_>>();
+    let Some(split) = &manifest.split else {
+        return EvalPackSplitValidationReport {
+            valid: duplicate_case_ids.is_empty(),
+            case_count: case_ids.len(),
+            covered_count: 0,
+            duplicate_case_ids,
+            ..EvalPackSplitValidationReport::default()
+        };
+    };
+
+    let mut duplicate_partition_cases = Vec::new();
+    let mut unknown_cases = Vec::new();
+    let mut seen_by_case: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    for (partition, cases) in &split.partitions {
+        let mut local_seen = BTreeSet::new();
+        for case_id in cases {
+            if !local_seen.insert(case_id.clone()) {
+                duplicate_partition_cases.push(format!("{partition}:{case_id}"));
+            }
+            if !case_set.contains(case_id) {
+                unknown_cases.push(format!("{partition}:{case_id}"));
+            }
+            let partitions = seen_by_case.entry(case_id.clone()).or_default();
+            if !partitions.contains(partition) {
+                partitions.push(partition.clone());
+            }
+        }
+    }
+
+    let mut overlap_cases = seen_by_case
+        .iter()
+        .filter(|(case_id, partitions)| case_set.contains(*case_id) && partitions.len() > 1)
+        .map(|(case_id, partitions)| format!("{case_id}:{}", partitions.join(",")))
+        .collect::<Vec<_>>();
+    let mut missing_cases = case_set
+        .iter()
+        .filter(|case_id| !seen_by_case.contains_key(*case_id))
+        .cloned()
+        .collect::<Vec<_>>();
+    duplicate_partition_cases.sort();
+    unknown_cases.sort();
+    overlap_cases.sort();
+    missing_cases.sort();
+
+    let covered_count = case_set
+        .iter()
+        .filter(|case_id| seen_by_case.contains_key(*case_id))
+        .count();
+    let valid = duplicate_case_ids.is_empty()
+        && duplicate_partition_cases.is_empty()
+        && unknown_cases.is_empty()
+        && overlap_cases.is_empty()
+        && missing_cases.is_empty();
+    EvalPackSplitValidationReport {
+        valid,
+        partitions: split.partitions.clone(),
+        case_count: case_ids.len(),
+        covered_count,
+        duplicate_case_ids,
+        duplicate_partition_cases,
+        overlap_cases,
+        unknown_cases,
+        missing_cases,
+    }
+}
+
+fn eval_pack_case_ids(manifest: &EvalPackManifest) -> Vec<String> {
+    manifest
+        .cases
+        .iter()
+        .enumerate()
+        .map(|(index, case)| eval_pack_case_id(case, index))
+        .collect()
+}
+
+fn eval_pack_case_id(case: &EvalPackCase, index: usize) -> String {
+    case.id
+        .clone()
+        .filter(|id| !id.trim().is_empty())
+        .unwrap_or_else(|| format!("case_{}", index + 1))
+}
+
+fn duplicates(values: &[String]) -> Vec<String> {
+    let mut seen = BTreeSet::new();
+    let mut duplicates = BTreeSet::new();
+    for value in values {
+        if !seen.insert(value.clone()) {
+            duplicates.insert(value.clone());
+        }
+    }
+    duplicates.into_iter().collect()
+}
+
+fn render_split_validation_errors(report: &EvalPackSplitValidationReport) -> Vec<String> {
+    let mut errors = Vec::new();
+    if !report.duplicate_case_ids.is_empty() {
+        errors.push(format!(
+            "duplicate case ids: {}",
+            report.duplicate_case_ids.join(", ")
+        ));
+    }
+    if !report.duplicate_partition_cases.is_empty() {
+        errors.push(format!(
+            "duplicate partition entries: {}",
+            report.duplicate_partition_cases.join(", ")
+        ));
+    }
+    if !report.overlap_cases.is_empty() {
+        errors.push(format!(
+            "overlapping cases: {}",
+            report.overlap_cases.join(", ")
+        ));
+    }
+    if !report.unknown_cases.is_empty() {
+        errors.push(format!(
+            "unknown cases: {}",
+            report.unknown_cases.join(", ")
+        ));
+    }
+    if !report.missing_cases.is_empty() {
+        errors.push(format!(
+            "missing cases: {}",
+            report.missing_cases.join(", ")
+        ));
+    }
+    if errors.is_empty() {
+        errors.push("unknown split validation error".to_string());
+    }
+    errors
 }
 
 fn load_replay_fixture(path: &Path) -> Result<ReplayFixture, VmError> {
@@ -212,13 +524,12 @@ pub fn evaluate_eval_pack_manifest(manifest: &EvalPackManifest) -> Result<EvalPa
         .map(|rubric| (rubric.id.as_str(), rubric))
         .collect();
 
+    let split_report = validate_eval_pack_split(manifest)?;
+    let split_by_case = split_by_case_id(&split_report);
+    let harness_config_fingerprint = eval_pack_harness_config_fingerprint(manifest)?;
     let mut reports = Vec::new();
     for (index, case) in manifest.cases.iter().enumerate() {
-        let case_id = case
-            .id
-            .clone()
-            .filter(|id| !id.trim().is_empty())
-            .unwrap_or_else(|| format!("case_{}", index + 1));
+        let case_id = eval_pack_case_id(case, index);
         let label = case
             .name
             .clone()
@@ -226,88 +537,47 @@ pub fn evaluate_eval_pack_manifest(manifest: &EvalPackManifest) -> Result<EvalPa
             .unwrap_or_else(|| case_id.clone());
         let severity = eval_pack_case_severity(manifest, case);
         let blocking = severity == "blocking";
-        let mut failures = Vec::new();
-        let mut warnings = Vec::new();
-        let mut informational = Vec::new();
-
-        if case.friction_events.is_some() {
-            let report = evaluate_eval_pack_friction_case(
-                manifest,
-                case,
-                &case_id,
-                &label,
-                &severity,
-                blocking,
-                base_dir,
-                fixture_base_dir,
-                &fixtures_by_id,
-                &rubrics_by_id,
-            )?;
-            reports.push(report);
-            continue;
-        }
-
-        let run = load_eval_pack_case_run(case, base_dir, fixture_base_dir, &fixtures_by_id)?;
-        let fixture =
-            load_eval_pack_case_fixture(case, base_dir, fixture_base_dir, &fixtures_by_id, &run)?;
-        let eval = evaluate_run_against_fixture(&run, &fixture);
-        failures.extend(eval.failures);
-        apply_eval_pack_thresholds(&run, &manifest.defaults.thresholds, &mut failures);
-        apply_eval_pack_thresholds(&run, &case.thresholds, &mut failures);
-
-        let comparison = match case.compare_to.as_ref().or(manifest.baseline.as_ref()) {
-            Some(path) => {
-                let baseline_path = resolve_manifest_path(base_dir, path);
-                let baseline = load_run_record(&baseline_path)?;
-                let diff = diff_run_records(&baseline, &run);
-                if !diff.identical {
-                    failures.push(format!(
-                        "run differs from baseline {} with {} stage changes",
-                        baseline_path.display(),
-                        diff.stage_diffs.len()
-                    ));
-                }
-                Some(diff)
-            }
-            None => None,
-        };
-
-        for rubric_id in &case.rubrics {
-            let Some(rubric) = rubrics_by_id.get(rubric_id.as_str()) else {
-                failures.push(format!("case references unknown rubric '{rubric_id}'"));
-                continue;
-            };
-            apply_eval_pack_rubric(rubric, &run, &mut failures, &mut warnings);
-        }
-
-        let pass = failures.is_empty() || !blocking;
-        if !failures.is_empty() && !blocking {
-            if severity == "warning" {
-                warnings.append(&mut failures);
+        let trial_count = case.trials.unwrap_or(manifest.trials);
+        let split = split_by_case.get(&case_id).cloned();
+        let mut trials = Vec::with_capacity(trial_count);
+        for trial in 1..=trial_count {
+            let report = if case.friction_events.is_some() {
+                evaluate_eval_pack_friction_trial(
+                    manifest,
+                    case,
+                    trial,
+                    &severity,
+                    blocking,
+                    base_dir,
+                    fixture_base_dir,
+                    &fixtures_by_id,
+                    &rubrics_by_id,
+                )?
             } else {
-                informational.append(&mut failures);
-            }
+                evaluate_eval_pack_run_trial(
+                    manifest,
+                    case,
+                    trial,
+                    &severity,
+                    blocking,
+                    base_dir,
+                    fixture_base_dir,
+                    &fixtures_by_id,
+                    &rubrics_by_id,
+                )?
+            };
+            trials.push(report);
         }
-        reports.push(EvalPackCaseReport {
-            id: case_id,
+        reports.push(eval_pack_case_report_from_trials(
+            case,
+            case_id,
             label,
             severity,
-            pass,
+            split,
             blocking,
-            run_id: run.id.clone(),
-            workflow_id: run.workflow_id.clone(),
-            source_path: eval_pack_case_source_path(
-                case,
-                base_dir,
-                fixture_base_dir,
-                &fixtures_by_id,
-            ),
-            stage_count: eval.stage_count,
-            failures,
-            warnings,
-            informational,
-            comparison,
-        });
+            harness_config_fingerprint.clone(),
+            trials,
+        ));
     }
 
     let mut ladder_reports = Vec::new();
@@ -319,12 +589,18 @@ pub fn evaluate_eval_pack_manifest(manifest: &EvalPackManifest) -> Result<EvalPa
         ladder_reports.push(run_persona_eval_ladder(&ladder)?);
     }
 
+    let stats_rows = reports
+        .iter()
+        .map(|report| report.stats_row.clone())
+        .collect::<Vec<_>>();
+    let stats = eval_pack_stats_report(&stats_rows);
     let case_total = reports.len();
     let ladder_total = ladder_reports.len();
     let total = case_total + ladder_total;
+    let trial_count = reports.iter().map(|report| report.trial_count).sum();
     let case_blocking_failed = reports
         .iter()
-        .filter(|report| report.blocking && !report.failures.is_empty())
+        .filter(|report| report.blocking && report.reliability.status != "all-pass")
         .count();
     let ladder_blocking_failed = ladder_reports
         .iter()
@@ -351,6 +627,7 @@ pub fn evaluate_eval_pack_manifest(manifest: &EvalPackManifest) -> Result<EvalPa
         + ladder_reports.iter().filter(|report| report.pass).count();
     Ok(EvalPackReport {
         pack_id: manifest.id.clone(),
+        harness_config_fingerprint,
         pass: blocking_failed == 0,
         total,
         passed,
@@ -358,27 +635,102 @@ pub fn evaluate_eval_pack_manifest(manifest: &EvalPackManifest) -> Result<EvalPa
         blocking_failed,
         warning_failed,
         informational_failed,
+        trial_count,
+        split: manifest.split.as_ref().map(|_| split_report),
+        stats,
+        stats_rows,
         cases: reports,
         ladders: ladder_reports,
     })
 }
 
 #[allow(clippy::too_many_arguments)]
-fn evaluate_eval_pack_friction_case(
+fn evaluate_eval_pack_run_trial(
     manifest: &EvalPackManifest,
     case: &EvalPackCase,
-    case_id: &str,
-    label: &str,
+    trial: usize,
     severity: &str,
     blocking: bool,
     base_dir: Option<&Path>,
     fixture_base_dir: Option<&Path>,
     fixtures_by_id: &BTreeMap<&str, &EvalPackFixtureRef>,
     rubrics_by_id: &BTreeMap<&str, &EvalPackRubric>,
-) -> Result<EvalPackCaseReport, VmError> {
+) -> Result<EvalPackTrialReport, VmError> {
     let mut failures = Vec::new();
     let mut warnings = Vec::new();
-    let mut informational = Vec::new();
+    let informational = Vec::new();
+    let run = load_eval_pack_case_run(case, base_dir, fixture_base_dir, fixtures_by_id)?;
+    let fixture =
+        load_eval_pack_case_fixture(case, base_dir, fixture_base_dir, fixtures_by_id, &run)?;
+    let eval = evaluate_run_against_fixture(&run, &fixture);
+    failures.extend(eval.failures);
+    apply_eval_pack_thresholds(&run, &manifest.defaults.thresholds, &mut failures);
+    apply_eval_pack_thresholds(&run, &case.thresholds, &mut failures);
+
+    let comparison = match case.compare_to.as_ref().or(manifest.baseline.as_ref()) {
+        Some(path) => {
+            let baseline_path = resolve_manifest_path(base_dir, path);
+            let baseline = load_run_record(&baseline_path)?;
+            let diff = diff_run_records(&baseline, &run);
+            if !diff.identical {
+                failures.push(format!(
+                    "run differs from baseline {} with {} stage changes",
+                    baseline_path.display(),
+                    diff.stage_diffs.len()
+                ));
+            }
+            Some(diff)
+        }
+        None => None,
+    };
+
+    for rubric_id in &case.rubrics {
+        let Some(rubric) = rubrics_by_id.get(rubric_id.as_str()) else {
+            failures.push(format!("case references unknown rubric '{rubric_id}'"));
+            continue;
+        };
+        apply_eval_pack_rubric(rubric, &run, &mut failures, &mut warnings);
+    }
+
+    Ok(eval_pack_trial_report(
+        trial,
+        severity,
+        blocking,
+        run.id.clone(),
+        run.workflow_id.clone(),
+        eval_pack_case_source_path(case, base_dir, fixture_base_dir, fixtures_by_id),
+        eval.stage_count,
+        run.status.to_ascii_lowercase().contains("timeout"),
+        run.usage
+            .as_ref()
+            .map(|usage| usage.total_duration_ms as f64 / 1000.0)
+            .unwrap_or_default(),
+        run.usage
+            .as_ref()
+            .map(|usage| usage.total_cost)
+            .unwrap_or_default(),
+        failures,
+        warnings,
+        informational,
+        comparison,
+    ))
+}
+
+#[allow(clippy::too_many_arguments)]
+fn evaluate_eval_pack_friction_trial(
+    manifest: &EvalPackManifest,
+    case: &EvalPackCase,
+    trial: usize,
+    severity: &str,
+    blocking: bool,
+    base_dir: Option<&Path>,
+    fixture_base_dir: Option<&Path>,
+    fixtures_by_id: &BTreeMap<&str, &EvalPackFixtureRef>,
+    rubrics_by_id: &BTreeMap<&str, &EvalPackRubric>,
+) -> Result<EvalPackTrialReport, VmError> {
+    let mut failures = Vec::new();
+    let mut warnings = Vec::new();
+    let informational = Vec::new();
     let events =
         load_eval_pack_case_friction_events(case, base_dir, fixture_base_dir, fixtures_by_id)?;
     let options = friction_suggestion_options(case, manifest);
@@ -396,6 +748,42 @@ fn evaluate_eval_pack_friction_case(
         failures.push("friction fixture produced no context-pack suggestions".to_string());
     }
 
+    Ok(eval_pack_trial_report(
+        trial,
+        severity,
+        blocking,
+        "friction_events".to_string(),
+        String::new(),
+        eval_pack_case_friction_source_path(case, base_dir, fixture_base_dir, fixtures_by_id),
+        events.len(),
+        false,
+        0.0,
+        0.0,
+        failures,
+        warnings,
+        informational,
+        None,
+    ))
+}
+
+#[allow(clippy::too_many_arguments)]
+fn eval_pack_trial_report(
+    trial: usize,
+    severity: &str,
+    blocking: bool,
+    run_id: String,
+    workflow_id: String,
+    source_path: Option<String>,
+    stage_count: usize,
+    timed_out: bool,
+    wall_time_seconds: f64,
+    cost_usd: f64,
+    mut failures: Vec<String>,
+    mut warnings: Vec<String>,
+    mut informational: Vec<String>,
+    comparison: Option<RunDiffReport>,
+) -> EvalPackTrialReport {
+    let verification = if failures.is_empty() { "PASS" } else { "FAIL" }.to_string();
     let pass = failures.is_empty() || !blocking;
     if !failures.is_empty() && !blocking {
         if severity == "warning" {
@@ -404,27 +792,286 @@ fn evaluate_eval_pack_friction_case(
             informational.append(&mut failures);
         }
     }
-
-    Ok(EvalPackCaseReport {
-        id: case_id.to_string(),
-        label: label.to_string(),
-        severity: severity.to_string(),
+    EvalPackTrialReport {
+        trial,
+        verification,
         pass,
         blocking,
-        run_id: "friction_events".to_string(),
-        workflow_id: String::new(),
-        source_path: eval_pack_case_friction_source_path(
-            case,
-            base_dir,
-            fixture_base_dir,
-            fixtures_by_id,
-        ),
-        stage_count: events.len(),
+        run_id,
+        workflow_id,
+        source_path,
+        stage_count,
         failures,
         warnings,
         informational,
-        comparison: None,
-    })
+        comparison,
+        timed_out,
+        wall_time_seconds,
+        cost_usd,
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn eval_pack_case_report_from_trials(
+    case: &EvalPackCase,
+    case_id: String,
+    label: String,
+    severity: String,
+    split: Option<String>,
+    blocking: bool,
+    harness_config_fingerprint: String,
+    trials: Vec<EvalPackTrialReport>,
+) -> EvalPackCaseReport {
+    let reliability = eval_pack_reliability_report(&trials);
+    let stats_row = eval_pack_stats_row(
+        case,
+        &case_id,
+        &harness_config_fingerprint,
+        split.clone(),
+        &trials,
+        &reliability,
+    );
+    let first = trials.first();
+    let pass = if blocking {
+        reliability.status == "all-pass"
+    } else {
+        true
+    };
+    let failures = prefixed_trial_messages(&trials, |trial| &trial.failures);
+    let warnings = prefixed_trial_messages(&trials, |trial| &trial.warnings);
+    let informational = prefixed_trial_messages(&trials, |trial| &trial.informational);
+    EvalPackCaseReport {
+        id: case_id,
+        label,
+        severity,
+        split,
+        case_fingerprint: case.case_fingerprint.clone(),
+        harness_config_fingerprint,
+        pass,
+        blocking,
+        run_id: first.map(|trial| trial.run_id.clone()).unwrap_or_default(),
+        workflow_id: first
+            .map(|trial| trial.workflow_id.clone())
+            .unwrap_or_default(),
+        source_path: first.and_then(|trial| trial.source_path.clone()),
+        stage_count: first.map(|trial| trial.stage_count).unwrap_or_default(),
+        trial_count: trials.len(),
+        total_stage_count: trials.iter().map(|trial| trial.stage_count).sum(),
+        reliability,
+        stats_row,
+        comparison: first.and_then(|trial| trial.comparison.clone()),
+        trials,
+        failures,
+        warnings,
+        informational,
+    }
+}
+
+fn prefixed_trial_messages<F>(trials: &[EvalPackTrialReport], messages: F) -> Vec<String>
+where
+    F: Fn(&EvalPackTrialReport) -> &Vec<String>,
+{
+    let include_prefix = trials.len() > 1;
+    let mut out = Vec::new();
+    for trial in trials {
+        for message in messages(trial) {
+            if include_prefix {
+                out.push(format!("trial {}: {message}", trial.trial));
+            } else {
+                out.push(message.clone());
+            }
+        }
+    }
+    out
+}
+
+fn eval_pack_reliability_report(trials: &[EvalPackTrialReport]) -> EvalPackReliabilityReport {
+    let passes = trials
+        .iter()
+        .filter(|trial| trial.verification == "PASS")
+        .count();
+    let fails = trials
+        .iter()
+        .filter(|trial| trial.verification == "FAIL")
+        .count();
+    let skips = trials
+        .iter()
+        .filter(|trial| trial.verification.eq_ignore_ascii_case("skip"))
+        .count();
+    let timeouts = trials.iter().filter(|trial| trial.timed_out).count();
+    let decided = passes + fails;
+    let majority = if passes > 0 && fails > 0 {
+        Some(if passes >= fails { "PASS" } else { "FAIL" }.to_string())
+    } else {
+        None
+    };
+    let status = if decided == 0 {
+        "no-decision"
+    } else if fails == 0 {
+        "all-pass"
+    } else if passes == 0 {
+        "all-fail"
+    } else {
+        "flaky"
+    };
+    EvalPackReliabilityReport {
+        status: status.to_string(),
+        trials: trials.len(),
+        passes,
+        fails,
+        skips,
+        timeouts,
+        decided,
+        pass_rate: if trials.is_empty() {
+            0.0
+        } else {
+            passes as f64 / trials.len() as f64
+        },
+        majority,
+    }
+}
+
+fn eval_pack_stats_row(
+    case: &EvalPackCase,
+    case_id: &str,
+    harness_config_fingerprint: &str,
+    split: Option<String>,
+    trials: &[EvalPackTrialReport],
+    reliability: &EvalPackReliabilityReport,
+) -> EvalPackStatsRow {
+    let wall_times = trials
+        .iter()
+        .map(|trial| trial.wall_time_seconds)
+        .collect::<Vec<_>>();
+    let costs = trials
+        .iter()
+        .map(|trial| trial.cost_usd)
+        .collect::<Vec<_>>();
+    let group = case
+        .metadata
+        .get("group")
+        .or_else(|| case.metadata.get("language"))
+        .or_else(|| case.metadata.get("bucket"))
+        .and_then(|value| value.as_str())
+        .unwrap_or_default()
+        .to_string();
+    EvalPackStatsRow {
+        name: case_id.to_string(),
+        case_name: case_id.to_string(),
+        case_fingerprint: case.case_fingerprint.clone(),
+        harness_config_fingerprint: harness_config_fingerprint.to_string(),
+        group,
+        split,
+        trials: trials.len(),
+        passes: reliability.passes,
+        fails: reliability.fails,
+        skips: reliability.skips,
+        timeouts: reliability.timeouts,
+        pass_rate: reliability.pass_rate,
+        status: match reliability.status.as_str() {
+            "all-pass" => "PASS",
+            "all-fail" => "FAIL",
+            "flaky" => "FLAKY",
+            _ => "skip",
+        }
+        .to_string(),
+        majority: reliability.majority.clone(),
+        wall_time_seconds: mean(&wall_times),
+        cost_usd: costs.iter().sum(),
+        mean_wall_time_seconds: mean(&wall_times),
+        stdev_wall_time_seconds: stdev(&wall_times),
+        total_cost_usd: costs.iter().sum(),
+    }
+}
+
+fn eval_pack_stats_report(rows: &[EvalPackStatsRow]) -> EvalPackStatsReport {
+    EvalPackStatsReport {
+        macro_pass_at_1: macro_pass_at_1(rows),
+        reliability: eval_pack_reliability_breakdown(rows),
+    }
+}
+
+fn macro_pass_at_1(rows: &[EvalPackStatsRow]) -> f64 {
+    let decided = rows
+        .iter()
+        .filter(|row| row.passes + row.fails > 0)
+        .collect::<Vec<_>>();
+    if decided.is_empty() {
+        return 0.0;
+    }
+    decided.iter().map(|row| row.pass_rate).sum::<f64>() / decided.len() as f64
+}
+
+fn eval_pack_reliability_breakdown(rows: &[EvalPackStatsRow]) -> EvalPackReliabilityBreakdown {
+    let total_cases = rows.len();
+    let all_pass_cases = rows
+        .iter()
+        .filter(|row| row.passes > 0 && row.fails == 0)
+        .count();
+    let flaky_cases = rows
+        .iter()
+        .filter(|row| row.passes > 0 && row.fails > 0)
+        .count();
+    let all_fail_cases = rows
+        .iter()
+        .filter(|row| row.passes == 0 && row.fails > 0)
+        .count();
+    let no_decision_cases = rows
+        .iter()
+        .filter(|row| row.passes + row.fails == 0)
+        .count();
+    EvalPackReliabilityBreakdown {
+        all_pass_cases,
+        flaky_cases,
+        all_fail_cases,
+        no_decision_cases,
+        total_cases,
+        all_pass_fraction: rate(all_pass_cases, total_cases),
+        flaky_fraction: rate(flaky_cases, total_cases),
+        all_fail_fraction: rate(all_fail_cases, total_cases),
+        no_decision_fraction: rate(no_decision_cases, total_cases),
+    }
+}
+
+fn split_by_case_id(report: &EvalPackSplitValidationReport) -> BTreeMap<String, String> {
+    let mut out = BTreeMap::new();
+    for (partition, cases) in &report.partitions {
+        for case_id in cases {
+            out.insert(case_id.clone(), partition.clone());
+        }
+    }
+    out
+}
+
+fn mean(values: &[f64]) -> f64 {
+    if values.is_empty() {
+        return 0.0;
+    }
+    values.iter().sum::<f64>() / values.len() as f64
+}
+
+fn stdev(values: &[f64]) -> f64 {
+    if values.is_empty() {
+        return 0.0;
+    }
+    let mean = mean(values);
+    let variance = values
+        .iter()
+        .map(|value| {
+            let diff = value - mean;
+            diff * diff
+        })
+        .sum::<f64>()
+        / values.len() as f64;
+    variance.sqrt()
+}
+
+fn rate(count: usize, denom: usize) -> f64 {
+    if denom == 0 {
+        0.0
+    } else {
+        count as f64 / denom as f64
+    }
 }
 
 fn eval_pack_case_severity(manifest: &EvalPackManifest, case: &EvalPackCase) -> String {

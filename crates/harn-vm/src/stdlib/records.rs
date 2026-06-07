@@ -14,7 +14,7 @@ use crate::orchestration::{
     normalize_run_record, parse_context_pack_manifest_src, parse_friction_events_value,
     render_artifacts_context, render_unified_diff, replay_fixture_from_run,
     run_persona_eval_ladder, save_run_record, select_artifacts, synthesize_candidate_from_trace,
-    ArtifactRecord, CapabilityPolicy, ContextPackSuggestionExpectation,
+    validate_eval_pack_split, ArtifactRecord, CapabilityPolicy, ContextPackSuggestionExpectation,
     ContextPackSuggestionOptions, ContextPolicy, CrystallizationTrace, CrystallizeOptions,
     ReplayFixture,
 };
@@ -285,6 +285,18 @@ fn build_helper_artifact(
 
 pub(crate) fn register_record_builtins(vm: &mut Vm) {
     for def in MODULE_BUILTINS {
+        vm.register_builtin_def(def);
+    }
+    // Keep runtime registration aligned with the global signature catalog for
+    // records builtins emitted only into the workspace-global macro slice.
+    register_macro_builtins_by_category(vm, "records");
+}
+
+fn register_macro_builtins_by_category(vm: &mut Vm, category: &str) {
+    for def in crate::stdlib::all_builtin_defs()
+        .iter()
+        .filter(|def| def.category == Some(category))
+    {
         vm.register_builtin_def(def);
     }
 }
@@ -904,6 +916,17 @@ fn eval_pack_manifest_impl(args: &[VmValue], _out: &mut String) -> Result<VmValu
         VmError::Runtime("eval_pack_manifest: missing manifest payload".to_string())
     })?)?;
     to_vm(&manifest)
+}
+
+#[harn_builtin(
+    sig = "eval_pack_validate_split(payload: dict) -> dict",
+    category = "records"
+)]
+fn eval_pack_validate_split_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let manifest = normalize_eval_pack_manifest_value(args.first().ok_or_else(|| {
+        VmError::Runtime("eval_pack_validate_split: missing manifest payload".to_string())
+    })?)?;
+    to_vm(&validate_eval_pack_split(&manifest)?)
 }
 
 #[harn_builtin(sig = "eval_pack_run(payload: dict) -> dict", category = "records")]

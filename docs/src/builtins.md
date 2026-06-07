@@ -2634,6 +2634,7 @@ These builtins expose Harn's typed orchestration runtime.
 | `run_record_eval_suite(cases)` | cases: list | dict | Evaluate a list of `{run, fixture?, path?}` cases as a regression suite |
 | `run_record_diff(left, right)` | left, right | dict | Compare two run records and summarize stage/status deltas |
 | `eval_pack_manifest(payload)` | payload: dict | dict | Normalize an eval pack manifest |
+| `eval_pack_validate_split(manifest)` | manifest: dict | dict | Validate an eval pack split declaration |
 | `eval_pack_run(manifest)` | manifest: dict | dict | Evaluate an eval pack manifest |
 | `skill_induce(payload)` | payload: dict | dict | Induce replay-gated `SKILL.md` candidates from crystallization traces |
 | `persona_eval_ladder_manifest(payload)` | payload: dict | dict | Normalize a persona eval timeout/budget ladder manifest |
