@@ -1,6 +1,7 @@
 use super::*;
 use std::fs;
 use std::path::PathBuf;
+use std::sync::Arc;
 
 fn repo_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -32,6 +33,170 @@ fn minimal_run(status: &str) -> RunRecord {
         }),
         ..RunRecord::default()
     }
+}
+
+fn install_sqlite_event_log(path: PathBuf) {
+    crate::event_log::reset_active_event_log();
+    let log = Arc::new(crate::event_log::AnyEventLog::Sqlite(
+        crate::event_log::SqliteEventLog::open(path, 128).unwrap(),
+    ));
+    crate::event_log::install_active_event_log(log);
+}
+
+fn ledger_row_json(case_name: &str, status: &str, trial: usize) -> serde_json::Value {
+    let (passes, fails, skips) = match status {
+        "PASS" => (1, 0, 0),
+        "FAIL" => (0, 1, 0),
+        _ => (0, 0, 1),
+    };
+    serde_json::json!({
+        "case_name": case_name,
+        "name": case_name,
+        "trial": trial,
+        "trials": 1,
+        "status": status,
+        "verification": status,
+        "passes": passes,
+        "fails": fails,
+        "skips": skips,
+    })
+}
+
+#[test]
+fn eval_ledger_sqlite_backend_preserves_flat_file_semantics() {
+    let temp = tempfile::tempdir().unwrap();
+    install_sqlite_event_log(temp.path().join("events.sqlite"));
+
+    let options = serde_json::json!({
+        "namespace": "parity-ledger",
+        "suite": "suite-a",
+        "model": "mock-model",
+        "commit": "commit-b",
+        "branch": "main",
+        "case_fingerprint": "case-fp",
+        "harness_config_fingerprint": "harness-fp",
+    });
+    let rows = serde_json::json!([
+        ledger_row_json("case-a", "PASS", 1),
+        ledger_row_json("case-a", "PASS", 1),
+        ledger_row_json("case-b", "skip", 1)
+    ]);
+
+    let appended = eval_ledger_append_rows_report(rows, Some(options.clone())).unwrap();
+
+    assert_eq!(appended.appended, 3);
+    assert_eq!(appended.inserted, 2);
+    assert_eq!(appended.duplicates, 1);
+    assert!(!appended.all_skipped);
+
+    let read = eval_ledger_read_report(Some(options)).unwrap();
+
+    assert_eq!(read.rows.len(), 2);
+    assert_eq!(read.rows[0].case_name, "case-a");
+    assert_eq!(read.rows[1].case_name, "case-b");
+    assert_eq!(read.rows[0].provenance.commit, "commit-b");
+    assert_eq!(read.rows[0].provenance.branch.as_deref(), Some("main"));
+    assert!(read.rows[0].event_id < read.rows[1].event_id);
+
+    let all_skip = eval_ledger_append_rows_report(
+        serde_json::json!([
+            ledger_row_json("case-c", "skip", 1),
+            ledger_row_json("case-d", "skip", 1)
+        ]),
+        Some(serde_json::json!({
+            "namespace": "parity-skip-ledger",
+            "suite": "suite-a",
+            "model": "mock-model",
+            "commit": "commit-b",
+            "case_fingerprint": "case-fp",
+            "harness_config_fingerprint": "harness-fp",
+        })),
+    )
+    .unwrap();
+
+    assert!(all_skip.all_skipped);
+    crate::event_log::reset_active_event_log();
+}
+
+#[test]
+fn eval_ledger_prior_commit_rows_reports_mismatched_fingerprints() {
+    let temp = tempfile::tempdir().unwrap();
+    install_sqlite_event_log(temp.path().join("events.sqlite"));
+
+    let rows = serde_json::json!([
+        {
+            "suite": "prior-pack",
+            "model": "mock-model",
+            "commit": "old-good",
+            "case_name": "case-a",
+            "name": "case-a",
+            "case_fingerprint": "case-fp",
+            "harness_config_fingerprint": "harness-fp",
+            "trial": 1,
+            "trials": 1,
+            "status": "PASS",
+            "verification": "PASS",
+            "passes": 1
+        },
+        {
+            "suite": "prior-pack",
+            "model": "mock-model",
+            "commit": "old-bad",
+            "case_name": "case-a",
+            "name": "case-a",
+            "case_fingerprint": "case-fp",
+            "harness_config_fingerprint": "stale-harness",
+            "trial": 1,
+            "trials": 1,
+            "status": "PASS",
+            "verification": "PASS",
+            "passes": 1
+        },
+        {
+            "suite": "prior-pack",
+            "model": "mock-model",
+            "commit": "current",
+            "case_name": "case-a",
+            "name": "case-a",
+            "case_fingerprint": "case-fp",
+            "harness_config_fingerprint": "harness-fp",
+            "trial": 1,
+            "trials": 1,
+            "status": "PASS",
+            "verification": "PASS",
+            "passes": 1
+        }
+    ]);
+    eval_ledger_append_rows_report(
+        rows,
+        Some(serde_json::json!({
+            "namespace": "prior-ledger",
+            "branch": "main"
+        })),
+    )
+    .unwrap();
+
+    let report = eval_ledger_prior_commit_rows_report(serde_json::json!({
+        "namespace": "prior-ledger",
+        "suite": "prior-pack",
+        "model": "mock-model",
+        "commit": "current",
+        "case": "case-a",
+        "case_fingerprint": "case-fp",
+        "harness_config_fingerprint": "harness-fp"
+    }))
+    .unwrap();
+
+    assert_eq!(report.commit.as_deref(), Some("old-good"));
+    assert_eq!(report.rows.len(), 1);
+    assert_eq!(report.rows[0].commit, "old-good");
+    assert_eq!(report.fingerprint_mismatches.len(), 1);
+    assert_eq!(report.fingerprint_mismatches[0].commit, "old-bad");
+    assert_eq!(
+        report.fingerprint_mismatches[0].harness_config_fingerprint,
+        "stale-harness"
+    );
+    crate::event_log::reset_active_event_log();
 }
 
 #[test]
@@ -143,6 +308,134 @@ expected = "completed"
     assert_eq!(report.cases[1].reliability.status, "all-fail");
     assert_eq!(report.cases[1].stats_row.fails, 3);
     assert_eq!(report.stats.macro_pass_at_1, 0.5);
+}
+
+fn resumable_pack_payload() -> serde_json::Value {
+    let pass_run = minimal_run("completed");
+    let fail_run = minimal_run("failed");
+    serde_json::json!({
+        "id": "resumable-pack",
+        "metadata": {
+            "model": "mock-model",
+            "commit": "commit-a",
+            "branch": "main",
+            "tool_format": "native-json",
+            "pipeline_rev": "rev-a"
+        },
+        "fixtures": [
+            {"id": "pass-run", "kind": "run-record", "inline": pass_run},
+            {"id": "fail-run", "kind": "run-record", "inline": fail_run}
+        ],
+        "rubrics": [
+            {
+                "id": "status",
+                "kind": "deterministic",
+                "assertions": [{"kind": "run-status", "expected": "completed"}]
+            }
+        ],
+        "cases": [
+            {"id": "preseeded", "run": "fail-run", "rubrics": ["status"]},
+            {"id": "fresh", "run": "pass-run", "rubrics": ["status"]}
+        ]
+    })
+}
+
+#[test]
+fn eval_pack_resumable_skips_matching_cells_and_records_all_skip_heartbeat() {
+    let temp = tempfile::tempdir().unwrap();
+    install_sqlite_event_log(temp.path().join("events.sqlite"));
+    let manifest = normalize_eval_pack_manifest_value(&crate::stdlib::json_to_vm_value(
+        &resumable_pack_payload(),
+    ))
+    .unwrap();
+    let harness_fingerprint = eval_pack_harness_config_fingerprint(&manifest).unwrap();
+
+    let preseed = serde_json::json!([{
+        "suite": manifest.id,
+        "model": "mock-model",
+        "commit": "commit-a",
+        "case_name": "preseeded",
+        "name": "preseeded",
+        "case_fingerprint": manifest.cases[0].case_fingerprint.clone(),
+        "harness_config_fingerprint": harness_fingerprint,
+        "trial": 1,
+        "trials": 1,
+        "status": "PASS",
+        "verification": "PASS",
+        "passes": 1
+    }]);
+    eval_ledger_append_rows_report(
+        preseed,
+        Some(serde_json::json!({
+            "namespace": "resumable-pack",
+            "branch": "main"
+        })),
+    )
+    .unwrap();
+
+    let report = evaluate_eval_pack_manifest_resumable(&manifest, None).unwrap();
+
+    assert!(report.pass);
+    assert_eq!(report.run_state.requested_cells, 2);
+    assert_eq!(report.run_state.skipped_cells, 1);
+    assert_eq!(report.run_state.executed_cells, 1);
+    assert_eq!(report.run_state.ledger_rows_inserted, 1);
+    assert_eq!(report.cases[0].reliability.status, "all-pass");
+    assert_eq!(report.cases[1].reliability.status, "all-pass");
+
+    let rerun = evaluate_eval_pack_manifest_resumable(&manifest, None).unwrap();
+
+    assert!(rerun.pass);
+    assert!(rerun.run_state.all_skipped);
+    assert_eq!(rerun.run_state.skipped_cells, 2);
+    assert_eq!(rerun.run_state.executed_cells, 0);
+    assert_eq!(rerun.run_state.ledger_rows_inserted, 0);
+    assert!(rerun.run_state.heartbeat_event_id.is_some());
+    crate::event_log::reset_active_event_log();
+}
+
+#[test]
+fn eval_pack_resumable_refuses_fingerprint_mismatched_skip() {
+    let temp = tempfile::tempdir().unwrap();
+    install_sqlite_event_log(temp.path().join("events.sqlite"));
+    let payload = {
+        let mut payload = resumable_pack_payload();
+        payload["cases"] = serde_json::json!([
+            {"id": "preseeded", "run": "fail-run", "rubrics": ["status"]}
+        ]);
+        payload
+    };
+    let manifest =
+        normalize_eval_pack_manifest_value(&crate::stdlib::json_to_vm_value(&payload)).unwrap();
+
+    let preseed = serde_json::json!([{
+        "suite": manifest.id,
+        "model": "mock-model",
+        "commit": "commit-a",
+        "case_name": "preseeded",
+        "name": "preseeded",
+        "case_fingerprint": manifest.cases[0].case_fingerprint.clone(),
+        "harness_config_fingerprint": "different-harness",
+        "trial": 1,
+        "trials": 1,
+        "status": "PASS",
+        "verification": "PASS",
+        "passes": 1
+    }]);
+    eval_ledger_append_rows_report(
+        preseed,
+        Some(serde_json::json!({"namespace": "resumable-pack"})),
+    )
+    .unwrap();
+
+    let report = evaluate_eval_pack_manifest_resumable(&manifest, None).unwrap();
+
+    assert!(!report.pass);
+    assert_eq!(report.run_state.skipped_cells, 0);
+    assert_eq!(report.run_state.executed_cells, 1);
+    assert_eq!(report.run_state.fingerprint_refusals, 1);
+    assert_eq!(report.cases[0].reliability.status, "all-fail");
+    crate::event_log::reset_active_event_log();
 }
 
 #[test]

@@ -2635,7 +2635,12 @@ These builtins expose Harn's typed orchestration runtime.
 | `run_record_diff(left, right)` | left, right | dict | Compare two run records and summarize stage/status deltas |
 | `eval_pack_manifest(payload)` | payload: dict | dict | Normalize an eval pack manifest |
 | `eval_pack_validate_split(manifest)` | manifest: dict | dict | Validate an eval pack split declaration |
-| `eval_pack_run(manifest)` | manifest: dict | dict | Evaluate an eval pack manifest |
+| `eval_pack_run(manifest, options?)` | manifest: dict, options: dict | dict | Evaluate an eval pack manifest with trial-level ledger resume |
+| `eval_ledger_read(options?)` | options: dict | dict | Read durable eval-ledger rows |
+| `eval_ledger_append_rows(rows, options?)` | rows: list or dict, options: dict | dict | Append idempotent eval-ledger rows |
+| `eval_ledger_append_unique_case_rows(rows, options?)` | rows: list or dict, options: dict | dict | Append eval-ledger rows keyed by case/trial fingerprints |
+| `eval_ledger_prior_commit_rows(options)` | options: dict | dict | Read latest prior-commit eval rows and fingerprint mismatches |
+| `eval_ledger_resolve_resume_plan(manifest, options?)` | manifest: dict, options: dict | dict | Resolve which eval-pack trial cells will run or be skipped |
 | `skill_induce(payload)` | payload: dict | dict | Induce replay-gated `SKILL.md` candidates from crystallization traces |
 | `persona_eval_ladder_manifest(payload)` | payload: dict | dict | Normalize a persona eval timeout/budget ladder manifest |
 | `persona_eval_ladder_run(manifest)` | manifest: dict | dict | Run a persona eval ladder and write per-tier transcript, receipt, and summary artifacts |

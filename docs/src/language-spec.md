@@ -6277,6 +6277,22 @@ pipeline revision metadata, package data, and judge configuration. Paired eval
 statistics compare rows only when both the case and harness fingerprints are
 compatible.
 
+`eval_pack_run(manifest, options?)` appends one durable eval-ledger row per
+trial cell keyed by `(suite, model, split, commit, case,
+case_fingerprint, harness_config_fingerprint, trial)` to the active event-log
+backend, defaulting to the sqlite event log under the manifest `base_dir` /
+`HARN_STATE_DIR`. Before running a cell, the runner reuses an exact matching
+row and records the skip in `report.run_state`; rows for the same case/trial
+with mismatched fingerprints are refused as resume candidates and reported
+under `run_state.fingerprint_refusals`. A rerun where every requested cell is
+already present reports `run_state.all_skipped = true` and appends a run-state
+heartbeat without duplicating trial rows. `options` may set `namespace`,
+`suite`, `model`, `commit`, and `branch` for eval-pack resume identity and
+provenance. Lower-level ledger builtins also accept `split`, `case`,
+`case_fingerprint`, `harness_config_fingerprint`, and `limit` filters:
+`eval_ledger_read`, `eval_ledger_append_rows`,
+`eval_ledger_prior_commit_rows`, and `eval_ledger_resolve_resume_plan`.
+
 Manifests may declare named partitions with a `split` block:
 
 ```toml

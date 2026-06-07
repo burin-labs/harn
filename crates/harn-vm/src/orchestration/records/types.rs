@@ -574,6 +574,7 @@ pub struct EvalPackReport {
     pub warning_failed: usize,
     pub informational_failed: usize,
     pub trial_count: usize,
+    pub run_state: EvalPackRunState,
     pub split: Option<EvalPackSplitValidationReport>,
     pub stats: EvalPackStatsReport,
     pub stats_rows: Vec<EvalPackStatsRow>,
@@ -672,6 +673,26 @@ pub struct EvalPackStatsReport {
     pub reliability: EvalPackReliabilityBreakdown,
 }
 
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct EvalPackRunState {
+    pub schema: String,
+    pub suite: String,
+    pub model: String,
+    pub commit: String,
+    pub branch: Option<String>,
+    pub requested_cells: usize,
+    pub completed_cells: usize,
+    pub skipped_cells: usize,
+    pub executed_cells: usize,
+    pub remaining_cells: usize,
+    pub ledger_rows_inserted: usize,
+    pub ledger_rows_duplicate: usize,
+    pub fingerprint_refusals: usize,
+    pub all_skipped: bool,
+    pub heartbeat_event_id: Option<u64>,
+}
+
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
 #[serde(default)]
 pub struct EvalPackReliabilityBreakdown {
@@ -698,6 +719,121 @@ pub struct EvalPackSplitValidationReport {
     pub overlap_cases: Vec<String>,
     pub unknown_cases: Vec<String>,
     pub missing_cases: Vec<String>,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct EvalLedgerProvenance {
+    pub commit: String,
+    pub branch: Option<String>,
+    pub ts: String,
+    pub harn_version: String,
+    pub host: String,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct EvalLedgerRow {
+    pub event_id: Option<u64>,
+    pub schema: String,
+    pub suite: String,
+    pub model: String,
+    pub split: Option<String>,
+    pub commit: String,
+    pub case_name: String,
+    pub name: String,
+    pub case_fingerprint: String,
+    pub harness_config_fingerprint: String,
+    pub trial: usize,
+    pub trials: usize,
+    pub passes: usize,
+    pub fails: usize,
+    pub skips: usize,
+    pub timeouts: usize,
+    pub pass_rate: f64,
+    pub status: String,
+    pub majority: Option<String>,
+    pub verification: String,
+    pub skipped: bool,
+    pub wall_time_seconds: f64,
+    pub cost_usd: f64,
+    pub mean_wall_time_seconds: f64,
+    pub stdev_wall_time_seconds: f64,
+    pub total_cost_usd: f64,
+    pub run_id: String,
+    pub workflow_id: String,
+    pub source_path: Option<String>,
+    pub trial_report: Option<EvalPackTrialReport>,
+    pub provenance: EvalLedgerProvenance,
+    pub metadata: BTreeMap<String, serde_json::Value>,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct EvalLedgerAppendReport {
+    pub rows: Vec<EvalLedgerRow>,
+    pub appended: usize,
+    pub inserted: usize,
+    pub duplicates: usize,
+    pub all_skipped: bool,
+    pub event_ids: Vec<u64>,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct EvalLedgerReadReport {
+    pub rows: Vec<EvalLedgerRow>,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct EvalLedgerFingerprintMismatch {
+    pub case_name: String,
+    pub split: Option<String>,
+    pub commit: String,
+    pub trial: usize,
+    pub case_fingerprint: String,
+    pub harness_config_fingerprint: String,
+    pub expected_case_fingerprint: String,
+    pub expected_harness_config_fingerprint: String,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct EvalLedgerPriorCommitReport {
+    pub commit: Option<String>,
+    pub model: String,
+    pub split: Option<String>,
+    pub rows: Vec<EvalLedgerRow>,
+    pub fingerprint_mismatches: Vec<EvalLedgerFingerprintMismatch>,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct EvalLedgerResumeCell {
+    pub case_name: String,
+    pub split: Option<String>,
+    pub trial: usize,
+    pub status: String,
+    pub reason: String,
+    pub event_id: Option<u64>,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct EvalLedgerResumePlan {
+    pub schema: String,
+    pub suite: String,
+    pub model: String,
+    pub commit: String,
+    pub harness_config_fingerprint: String,
+    pub requested_cells: usize,
+    pub completed_cells: usize,
+    pub skipped_cells: usize,
+    pub remaining_cells: usize,
+    pub all_skipped: bool,
+    pub fingerprint_refusals: Vec<EvalLedgerFingerprintMismatch>,
+    pub cells: Vec<EvalLedgerResumeCell>,
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]

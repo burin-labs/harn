@@ -1,0 +1,145 @@
+import "../_common"
+
+pipeline default() {
+  let repo_root = exec("git", "rev-parse", "--show-toplevel").stdout.trim()
+  let harn_bin = harness.env.get_or("HARN_CONFORMANCE_HARN_BIN", resolve_harn_bin(harness, repo_root))
+  let root = path_join(harness.fs.temp_dir(), "harn-eval-ledger-" + uuid_v7())
+  let state = path_join(root, "state")
+  let script = path_join(root, "eval_ledger_child.harn")
+  harness.fs.mkdir(root)
+  harness.fs
+    .write_text(
+    script,
+    "fn completed_run(id: string, status: string) -> dict {\n"
+      + "  return {\n"
+      + "    _type: \"workflow_run\",\n"
+      + "    id: id,\n"
+      + "    workflow_id: \"workflow_1\",\n"
+      + "    task: \"demo\",\n"
+      + "    status: status,\n"
+      + "    usage: {total_duration_ms: 1000, total_cost: 0.25, input_tokens: 3, output_tokens: 4, call_count: 1, models: [\"mock\"]},\n"
+      + "    replay_fixture: {_type: \"replay_fixture\", expected_status: status, stage_assertions: []},\n"
+      + "  }\n"
+      + "}\n"
+      + "\n"
+      + "fn resume_pack() -> dict {\n"
+      + "  return {\n"
+      + "    id: \"ledger-resume-pack\",\n"
+      + "    base_dir: cwd(),\n"
+      + "    trials: 1,\n"
+      + "    metadata: {model: \"mock-model\", commit: \"commit-a\", branch: \"main\", tool_format: \"native-json\", pipeline_rev: \"rev-a\", ledger_namespace: \"ledger-resume\"},\n"
+      + "    fixtures: [\n"
+      + "      {id: \"pass-run\", kind: \"run-record\", inline: completed_run(\"run_pass\", \"completed\")},\n"
+      + "      {id: \"fail-run\", kind: \"run-record\", inline: completed_run(\"run_fail\", \"failed\")},\n"
+      + "    ],\n"
+      + "    rubrics: [\n"
+      + "      {id: \"completed\", kind: \"deterministic\", assertions: [{kind: \"run-status\", expected: \"completed\"}]},\n"
+      + "      {id: \"failed\", kind: \"deterministic\", assertions: [{kind: \"run-status\", expected: \"failed\"}]},\n"
+      + "    ],\n"
+      + "    cases: [\n"
+      + "      {id: \"pass-case\", run: \"pass-run\", rubrics: [\"completed\"]},\n"
+      + "      {id: \"fail-case\", run: \"fail-run\", rubrics: [\"failed\"]},\n"
+      + "    ],\n"
+      + "  }\n"
+      + "}\n"
+      + "\n"
+      + "fn mismatch_pack() -> dict {\n"
+      + "  return {\n"
+      + "    id: \"ledger-mismatch-pack\",\n"
+      + "    base_dir: cwd(),\n"
+      + "    trials: 1,\n"
+      + "    metadata: {model: \"mock-model\", commit: \"commit-b\", branch: \"main\", tool_format: \"native-json\", pipeline_rev: \"rev-a\", ledger_namespace: \"ledger-mismatch\"},\n"
+      + "    fixtures: [{id: \"fail-run\", kind: \"run-record\", inline: completed_run(\"run_fail\", \"failed\")}],\n"
+      + "    rubrics: [{id: \"completed\", kind: \"deterministic\", assertions: [{kind: \"run-status\", expected: \"completed\"}]}],\n"
+      + "    cases: [{id: \"fail-case\", run: \"fail-run\", rubrics: [\"completed\"]}],\n"
+      + "  }\n"
+      + "}\n"
+      + "\n"
+      + "fn options(manifest: dict) -> dict {\n"
+      + "  return {namespace: manifest.metadata.ledger_namespace, suite: manifest.id, model: manifest.metadata.model, commit: manifest.metadata.commit, branch: manifest.metadata.branch}\n"
+      + "}\n"
+      + "\n"
+      + "fn row_for_case(manifest: dict, case_index: int, harness_fingerprint: string) -> dict {\n"
+      + "  let case = manifest.cases[case_index]\n"
+      + "  return {\n"
+      + "    suite: manifest.id,\n"
+      + "    model: manifest.metadata.model,\n"
+      + "    commit: manifest.metadata.commit,\n"
+      + "    branch: manifest.metadata.branch,\n"
+      + "    case_name: case.id,\n"
+      + "    case_fingerprint: case.case_fingerprint,\n"
+      + "    harness_config_fingerprint: harness_fingerprint,\n"
+      + "    trial: 0,\n"
+      + "    trial_count: 1,\n"
+      + "    status: \"PASS\",\n"
+      + "    passes: 1,\n"
+      + "    fails: 0,\n"
+      + "    skips: 0,\n"
+      + "    timeouts: 0,\n"
+      + "    total: 1,\n"
+      + "  }\n"
+      + "}\n"
+      + "\n"
+      + "fn run_preseed() {\n"
+      + "  let manifest = eval_pack_manifest(resume_pack())\n"
+      + "  let opts = options(manifest)\n"
+      + "  let plan = eval_ledger_resolve_resume_plan(manifest, opts)\n"
+      + "  let append = eval_ledger_append_unique_case_rows([row_for_case(manifest, 1, plan.harness_config_fingerprint)], opts)\n"
+      + "  let report = eval_pack_run(manifest)\n"
+      + "  __io_println(\"inserted=\" + to_string(append.inserted))\n"
+      + "  __io_println(\"pass=\" + to_string(report.pass))\n"
+      + "  __io_println(\"skipped=\" + to_string(report.run_state.skipped_cells))\n"
+      + "  __io_println(\"executed=\" + to_string(report.run_state.executed_cells))\n"
+      + "  __io_println(\"duplicates=\" + to_string(report.run_state.ledger_rows_duplicate))\n"
+      + "}\n"
+      + "\n"
+      + "fn run_rerun() {\n"
+      + "  let report = eval_pack_run(eval_pack_manifest(resume_pack()))\n"
+      + "  __io_println(\"pass=\" + to_string(report.pass))\n"
+      + "  __io_println(\"all_skipped=\" + to_string(report.run_state.all_skipped))\n"
+      + "  __io_println(\"skipped=\" + to_string(report.run_state.skipped_cells))\n"
+      + "  __io_println(\"executed=\" + to_string(report.run_state.executed_cells))\n"
+      + "}\n"
+      + "\n"
+      + "fn run_mismatch() {\n"
+      + "  let manifest = eval_pack_manifest(mismatch_pack())\n"
+      + "  let opts = options(manifest)\n"
+      + "  let _append = eval_ledger_append_unique_case_rows([row_for_case(manifest, 0, \"wrong-harness\")], opts)\n"
+      + "  let report = eval_pack_run(manifest)\n"
+      + "  __io_println(\"pass=\" + to_string(report.pass))\n"
+      + "  __io_println(\"refusals=\" + to_string(report.run_state.fingerprint_refusals))\n"
+      + "  __io_println(\"skipped=\" + to_string(report.run_state.skipped_cells))\n"
+      + "  __io_println(\"executed=\" + to_string(report.run_state.executed_cells))\n"
+      + "}\n"
+      + "\n"
+      + "fn main(harness: Harness) {\n"
+      + "  let mode = argv[0]\n"
+      + "  if mode == \"preseed\" {\n"
+      + "    run_preseed()\n"
+      + "  } else if mode == \"rerun\" {\n"
+      + "    run_rerun()\n"
+      + "  } else if mode == \"mismatch\" {\n"
+      + "    run_mismatch()\n"
+      + "  }\n"
+      + "}\n",
+  )
+  let first = exec_at(root, "env", "HARN_STATE_DIR=" + state, harn_bin, "run", script, "--", "preseed")
+  let second = exec_at(root, "env", "HARN_STATE_DIR=" + state, harn_bin, "run", script, "--", "rerun")
+  let mismatch = exec_at(root, "env", "HARN_STATE_DIR=" + state, harn_bin, "run", script, "--", "mismatch")
+  __io_println(first.success)
+  __io_println(contains(first.stdout, "inserted=1"))
+  __io_println(contains(first.stdout, "pass=true"))
+  __io_println(contains(first.stdout, "skipped=1"))
+  __io_println(contains(first.stdout, "executed=1"))
+  __io_println(contains(first.stdout, "duplicates=0"))
+  __io_println(second.success)
+  __io_println(contains(second.stdout, "pass=true"))
+  __io_println(contains(second.stdout, "all_skipped=true"))
+  __io_println(contains(second.stdout, "skipped=2"))
+  __io_println(contains(second.stdout, "executed=0"))
+  __io_println(mismatch.success)
+  __io_println(contains(mismatch.stdout, "pass=false"))
+  __io_println(contains(mismatch.stdout, "refusals=1"))
+  __io_println(contains(mismatch.stdout, "skipped=0"))
+  __io_println(contains(mismatch.stdout, "executed=1"))
+}

@@ -2398,15 +2398,14 @@ fn eval_run_record(
             process::exit(1);
         }
         let manifest = load_eval_pack_manifest_or_exit(&path_buf);
-        let report = harn_vm::orchestration::evaluate_eval_pack_manifest(&manifest).unwrap_or_else(
-            |error| {
+        let report = harn_vm::orchestration::evaluate_eval_pack_manifest_resumable(&manifest, None)
+            .unwrap_or_else(|error| {
                 eprintln!(
                     "Failed to evaluate eval pack {}: {error}",
                     path_buf.display()
                 );
                 process::exit(1);
-            },
-        );
+            });
         print_eval_pack_report(&report);
         if !report.pass {
             process::exit(1);
@@ -2638,12 +2637,11 @@ fn run_package_evals() {
     for path in &paths {
         println!("Eval pack: {}", path.display());
         let manifest = load_eval_pack_manifest_or_exit(path);
-        let report = harn_vm::orchestration::evaluate_eval_pack_manifest(&manifest).unwrap_or_else(
-            |error| {
+        let report = harn_vm::orchestration::evaluate_eval_pack_manifest_resumable(&manifest, None)
+            .unwrap_or_else(|error| {
                 eprintln!("Failed to evaluate eval pack {}: {error}", path.display());
                 process::exit(1);
-            },
-        );
+            });
         print_eval_pack_report(&report);
         all_pass &= report.pass;
     }

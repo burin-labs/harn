@@ -4,8 +4,9 @@ use std::cell::RefCell;
 use std::collections::BTreeMap;
 
 use crate::orchestration::{
-    compute_handoff_effects, crystallize_traces, diff_run_records,
-    evaluate_context_pack_suggestion_expectations, evaluate_eval_pack_manifest,
+    compute_handoff_effects, crystallize_traces, diff_run_records, eval_ledger_append_rows_report,
+    eval_ledger_prior_commit_rows_report, eval_ledger_read_report, eval_ledger_resume_plan_report,
+    evaluate_context_pack_suggestion_expectations, evaluate_eval_pack_manifest_resumable,
     evaluate_run_against_fixture, evaluate_run_suite, evaluate_run_suite_manifest,
     extract_handoff_from_artifact, generate_context_pack_suggestions, handoff_context_text,
     handoff_from_json_value, normalize_artifact, normalize_context_pack_manifest,
@@ -929,13 +930,82 @@ fn eval_pack_validate_split_impl(args: &[VmValue], _out: &mut String) -> Result<
     to_vm(&validate_eval_pack_split(&manifest)?)
 }
 
-#[harn_builtin(sig = "eval_pack_run(payload: dict) -> dict", category = "records")]
+#[harn_builtin(sig = "eval_ledger_read(options?: dict) -> dict", category = "records")]
+fn eval_ledger_read_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let options = args.first().map(crate::llm::vm_value_to_json);
+    to_vm(&eval_ledger_read_report(options)?)
+}
+
+#[harn_builtin(
+    sig = "eval_ledger_append_rows(rows: list | dict, options?: dict) -> dict",
+    category = "records"
+)]
+fn eval_ledger_append_rows_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let rows = args
+        .first()
+        .map(crate::llm::vm_value_to_json)
+        .ok_or_else(|| VmError::Runtime("eval_ledger_append_rows: missing rows".to_string()))?;
+    let options = args.get(1).map(crate::llm::vm_value_to_json);
+    to_vm(&eval_ledger_append_rows_report(rows, options)?)
+}
+
+#[harn_builtin(
+    sig = "eval_ledger_append_unique_case_rows(rows: list | dict, options?: dict) -> dict",
+    category = "records"
+)]
+fn eval_ledger_append_unique_case_rows_impl(
+    args: &[VmValue],
+    out: &mut String,
+) -> Result<VmValue, VmError> {
+    eval_ledger_append_rows_impl(args, out)
+}
+
+#[harn_builtin(
+    sig = "eval_ledger_prior_commit_rows(options: dict) -> dict",
+    category = "records"
+)]
+fn eval_ledger_prior_commit_rows_impl(
+    args: &[VmValue],
+    _out: &mut String,
+) -> Result<VmValue, VmError> {
+    let options = args
+        .first()
+        .map(crate::llm::vm_value_to_json)
+        .ok_or_else(|| {
+            VmError::Runtime("eval_ledger_prior_commit_rows: missing options".to_string())
+        })?;
+    to_vm(&eval_ledger_prior_commit_rows_report(options)?)
+}
+
+#[harn_builtin(
+    sig = "eval_ledger_resolve_resume_plan(manifest: dict, options?: dict) -> dict",
+    category = "records"
+)]
+fn eval_ledger_resolve_resume_plan_impl(
+    args: &[VmValue],
+    _out: &mut String,
+) -> Result<VmValue, VmError> {
+    let manifest = normalize_eval_pack_manifest_value(args.first().ok_or_else(|| {
+        VmError::Runtime("eval_ledger_resolve_resume_plan: missing manifest".to_string())
+    })?)?;
+    let options = args.get(1).map(crate::llm::vm_value_to_json);
+    to_vm(&eval_ledger_resume_plan_report(&manifest, options)?)
+}
+
+#[harn_builtin(
+    sig = "eval_pack_run(payload: dict, options?: dict) -> dict",
+    category = "records"
+)]
 fn eval_pack_run_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let manifest =
         normalize_eval_pack_manifest_value(args.first().ok_or_else(|| {
             VmError::Runtime("eval_pack_run: missing manifest payload".to_string())
         })?)?;
-    to_vm(&evaluate_eval_pack_manifest(&manifest)?)
+    let ledger_options = args.get(1).map(crate::llm::vm_value_to_json);
+    to_vm(&evaluate_eval_pack_manifest_resumable(
+        &manifest,
+        ledger_options,
+    )?)
 }
 
 #[harn_builtin(sig = "skill_induce(payload: dict) -> dict", category = "records")]
