@@ -502,30 +502,74 @@ fn baseline_comparison_reports_regressions_and_recoveries() {
 
 #[test]
 fn fixture_selection_supports_all_and_specific_ids() {
-    let all = resolve_fixtures(&["all".to_string()]).expect("all fixtures resolve");
-    assert_eq!(all.len(), FIXTURE_DEFINITIONS.len());
+    let all = resolve_fixtures(&["all".to_string()], "python3").expect("all fixtures resolve");
+    assert_eq!(all.len(), 6);
+    assert!(all
+        .iter()
+        .all(|fixture| fixture.kind.as_deref() == Some("live-verify")));
+    assert!(all
+        .iter()
+        .all(|fixture| !fixture.case_fingerprint.is_empty()));
 
-    let selected = resolve_fixtures(&[
-        "python-add".to_string(),
-        "python-add".to_string(),
-        "read-only-audit".to_string(),
-    ])
+    let selected = resolve_fixtures(
+        &[
+            "python-add".to_string(),
+            "python-add".to_string(),
+            "read-only-audit".to_string(),
+        ],
+        "python3",
+    )
     .expect("specific fixtures resolve");
     assert_eq!(
-        selected
-            .iter()
-            .map(|fixture| fixture.id)
-            .collect::<Vec<_>>(),
+        selected.iter().map(fixture_id).collect::<Vec<_>>(),
         vec!["python-add", "read-only-audit"],
     );
 
-    let error = resolve_fixtures(&["missing".to_string()]).expect_err("unknown fixture fails");
+    let error =
+        resolve_fixtures(&["missing".to_string()], "python3").expect_err("unknown fixture fails");
     assert!(error.contains("unsupported --fixture `missing`"));
 }
 
 #[test]
+fn coding_agent_fixtures_are_portable_live_verify_cases() {
+    let cases = coding_agent_live_verify_cases("python3").expect("cases");
+    let ids = cases.iter().map(fixture_id).collect::<Vec<_>>();
+    assert_eq!(
+        ids,
+        vec![
+            "python-add",
+            "cli-help-flag",
+            "test-output-first",
+            "docs-symbol-rename",
+            "read-only-audit",
+            "no-tool-diagnosis",
+        ],
+    );
+    for case in cases {
+        assert_eq!(case.kind.as_deref(), Some("live-verify"));
+        assert_eq!(case.workspace.as_deref(), Some("."));
+        assert!(case.task.as_deref().is_some_and(|task| !task.is_empty()));
+        assert!(case.verify_command.is_some());
+        assert_eq!(
+            case.expected_output_paths,
+            vec![
+                "summary.json".to_string(),
+                "result.json".to_string(),
+                "transcript_events.jsonl".to_string(),
+            ],
+        );
+        assert!(case
+            .metadata
+            .get("tool_sequence")
+            .and_then(serde_json::Value::as_str)
+            .is_some());
+        assert!(!case.case_fingerprint.is_empty());
+    }
+}
+
+#[test]
 fn matrix_max_runs_bounds_fixture_model_tool_product() {
-    let fixtures = resolve_fixtures(&["all".to_string()]).expect("fixtures");
+    let fixtures = resolve_fixtures(&["all".to_string()], "python3").expect("fixtures");
     let selector = ModelSelector {
         selector: "mock:mock".to_string(),
         provider: "mock".to_string(),
@@ -538,7 +582,7 @@ fn matrix_max_runs_bounds_fixture_model_tool_product() {
     assert_eq!(
         matrix
             .iter()
-            .map(|(fixture, _selector, tool_format)| (fixture.id, tool_format.as_str()))
+            .map(|(fixture, _selector, tool_format)| (fixture_id(fixture), tool_format.as_str()))
             .collect::<Vec<_>>(),
         vec![
             ("python-add", "native"),

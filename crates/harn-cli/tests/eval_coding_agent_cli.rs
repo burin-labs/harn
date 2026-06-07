@@ -212,6 +212,72 @@ fn mock_matrix_writes_artifacts_for_native_and_text_tools() {
 }
 
 #[test]
+fn mock_matrix_resumes_completed_live_verify_cell_from_ledger() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let output = tmp.path().join("bench");
+    let args = || EvalCodingAgentArgs {
+        fixtures: vec!["python-add".to_string()],
+        models: vec!["mock:mock".to_string()],
+        tool_formats: vec!["native".to_string()],
+        output: Some(output.clone()),
+        env_files: Vec::new(),
+        include_local: false,
+        local_providers: Vec::new(),
+        max_local_models: 2,
+        keep_local_after_run: false,
+        max_runs: None,
+        max_iterations: 6,
+        python: "python3".to_string(),
+        fail_on_unauthorized: false,
+        json: false,
+        step_judge: None,
+        step_judge_on_veto: None,
+        step_judge_adversarial: false,
+        structural_validator: None,
+        run_label: String::new(),
+        override_reason: None,
+        baseline_comparison_against: None,
+    };
+
+    let first_exit = run_in_harn_runtime({
+        let args = args();
+        || async move {
+            let _env_guard = env_lock::lock_env().lock().await;
+            harn_cli::commands::eval_coding_agent::run(args).await
+        }
+    });
+    assert_eq!(first_exit, 0, "first live-verify run should pass");
+
+    let run_summary_path = output
+        .join("python-add__mock_mock__native")
+        .join("summary.json");
+    let mut run_summary: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&run_summary_path).expect("run summary"))
+            .expect("summary json");
+    run_summary["duration_ms"] = serde_json::json!(424242);
+    fs::write(
+        &run_summary_path,
+        serde_json::to_string_pretty(&run_summary).expect("serialize summary"),
+    )
+    .expect("rewrite run summary");
+
+    let second_exit = run_in_harn_runtime({
+        let args = args();
+        || async move {
+            let _env_guard = env_lock::lock_env().lock().await;
+            harn_cli::commands::eval_coding_agent::run(args).await
+        }
+    });
+    assert_eq!(second_exit, 0, "ledger-resumed run should pass");
+
+    let aggregate: serde_json::Value = serde_json::from_str(
+        &fs::read_to_string(output.join("summary.json")).expect("aggregate summary"),
+    )
+    .expect("aggregate json");
+    assert_eq!(aggregate["runs"][0]["duration_ms"], 424242);
+}
+
+#[test]
 fn read_only_audit_verifier_accepts_repeated_read_file_calls() {
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let fixture = manifest_dir.join("tests/fixtures/read_only_audit_verifier.harn");

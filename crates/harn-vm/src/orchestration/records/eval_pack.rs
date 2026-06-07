@@ -68,9 +68,9 @@ enum EvalPackCaseKind {
     LiveVerify,
 }
 
-#[derive(Clone, Debug, Default, serde::Deserialize)]
+#[derive(Clone, Debug, Default, serde::Deserialize, serde::Serialize)]
 #[serde(default)]
-struct EvalPackLiveOutcome {
+pub struct EvalPackLiveVerifyOutcome {
     pub verification: Option<String>,
     #[serde(alias = "verificationExitCode")]
     pub verification_exit_code: Option<i64>,
@@ -97,6 +97,46 @@ struct EvalPackLiveOutcome {
     pub source_path: Option<String>,
     #[serde(alias = "stageCount")]
     pub stage_count: Option<usize>,
+}
+
+#[derive(Clone, Debug)]
+pub struct EvalPackLiveExecutorRequest {
+    pub executor: EvalPackCommandSpec,
+    pub payload: serde_json::Value,
+    pub manifest_id: String,
+    pub case: EvalPackCase,
+    pub case_id: String,
+    pub trial: usize,
+    pub trials: usize,
+    pub workspace: PathBuf,
+    pub base_dir: Option<PathBuf>,
+}
+
+pub trait EvalPackLiveExecutor {
+    fn execute(
+        &mut self,
+        request: EvalPackLiveExecutorRequest,
+    ) -> Result<EvalPackLiveVerifyOutcome, VmError>;
+}
+
+struct EvalPackShellLiveExecutor;
+
+impl EvalPackLiveExecutor for EvalPackShellLiveExecutor {
+    fn execute(
+        &mut self,
+        request: EvalPackLiveExecutorRequest,
+    ) -> Result<EvalPackLiveVerifyOutcome, VmError> {
+        let output = run_eval_pack_command(
+            &request.executor,
+            &request.workspace,
+            Some(&request.payload),
+            DEFAULT_LIVE_EXECUTOR_TIMEOUT_SECONDS,
+        )?;
+        let mut failures = Vec::new();
+        let mut outcome = live_outcome_from_executor_output(output, &mut failures);
+        outcome.failures.extend(failures);
+        Ok(outcome)
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -1671,12 +1711,12 @@ fn command_spec_json(spec: Option<&EvalPackCommandSpec>) -> Result<serde_json::V
 fn live_outcome_from_executor_output(
     output: EvalPackCommandOutput,
     failures: &mut Vec<String>,
-) -> EvalPackLiveOutcome {
+) -> EvalPackLiveVerifyOutcome {
     let mut outcome = parse_live_outcome_stdout(&output.stdout).unwrap_or_else(|error| {
         if !output.stdout.trim().is_empty() {
             failures.push(error);
         }
-        EvalPackLiveOutcome::default()
+        EvalPackLiveVerifyOutcome::default()
     });
     if output.timed_out {
         outcome.timed_out = true;
@@ -1694,10 +1734,10 @@ fn live_outcome_from_executor_output(
     outcome
 }
 
-fn parse_live_outcome_stdout(stdout: &str) -> Result<EvalPackLiveOutcome, String> {
+fn parse_live_outcome_stdout(stdout: &str) -> Result<EvalPackLiveVerifyOutcome, String> {
     let trimmed = stdout.trim();
     if trimmed.is_empty() {
-        return Ok(EvalPackLiveOutcome::default());
+        return Ok(EvalPackLiveVerifyOutcome::default());
     }
     serde_json::from_str(trimmed)
         .or_else(|_| {
@@ -1711,7 +1751,7 @@ fn parse_live_outcome_stdout(stdout: &str) -> Result<EvalPackLiveOutcome, String
         .map_err(|error| format!("live executor stdout did not contain a JSON outcome: {error}"))
 }
 
-fn live_outcome_verification(outcome: &EvalPackLiveOutcome) -> String {
+fn live_outcome_verification(outcome: &EvalPackLiveVerifyOutcome) -> String {
     if let Some(verification) = outcome.verification.as_deref() {
         return normalize_live_verification(verification);
     }
@@ -1760,7 +1800,7 @@ fn compact_output_excerpt(output: &str) -> String {
 
 fn normalized_live_produced_paths(
     case: &EvalPackCase,
-    outcome: &EvalPackLiveOutcome,
+    outcome: &EvalPackLiveVerifyOutcome,
 ) -> Vec<String> {
     let mut seen = BTreeSet::new();
     let mut paths = Vec::new();
@@ -1923,20 +1963,38 @@ pub fn evaluate_run_suite_manifest(
 }
 
 pub fn evaluate_eval_pack_manifest(manifest: &EvalPackManifest) -> Result<EvalPackReport, VmError> {
-    evaluate_eval_pack_manifest_inner(manifest, false, None)
+    let mut live_executor = EvalPackShellLiveExecutor;
+    evaluate_eval_pack_manifest_inner(manifest, false, None, &mut live_executor)
 }
 
 pub fn evaluate_eval_pack_manifest_resumable(
     manifest: &EvalPackManifest,
     ledger_options: Option<serde_json::Value>,
 ) -> Result<EvalPackReport, VmError> {
-    evaluate_eval_pack_manifest_inner(manifest, true, ledger_options)
+    let mut live_executor = EvalPackShellLiveExecutor;
+    evaluate_eval_pack_manifest_inner(manifest, true, ledger_options, &mut live_executor)
+}
+
+pub fn evaluate_eval_pack_manifest_with_live_executor(
+    manifest: &EvalPackManifest,
+    live_executor: &mut dyn EvalPackLiveExecutor,
+) -> Result<EvalPackReport, VmError> {
+    evaluate_eval_pack_manifest_inner(manifest, false, None, live_executor)
+}
+
+pub fn evaluate_eval_pack_manifest_resumable_with_live_executor(
+    manifest: &EvalPackManifest,
+    ledger_options: Option<serde_json::Value>,
+    live_executor: &mut dyn EvalPackLiveExecutor,
+) -> Result<EvalPackReport, VmError> {
+    evaluate_eval_pack_manifest_inner(manifest, true, ledger_options, live_executor)
 }
 
 fn evaluate_eval_pack_manifest_inner(
     manifest: &EvalPackManifest,
     ledger_enabled: bool,
     ledger_options: Option<serde_json::Value>,
+    live_executor: &mut dyn EvalPackLiveExecutor,
 ) -> Result<EvalPackReport, VmError> {
     let base_dir = manifest.base_dir.as_deref().map(Path::new);
     let fixture_base_dir_buf = manifest
@@ -2011,6 +2069,7 @@ fn evaluate_eval_pack_manifest_inner(
                     &severity,
                     blocking,
                     base_dir,
+                    live_executor,
                 )?,
                 EvalPackCaseKind::Friction => evaluate_eval_pack_friction_trial(
                     manifest,
@@ -2151,6 +2210,7 @@ fn evaluate_eval_pack_live_verify_trial(
     severity: &str,
     blocking: bool,
     base_dir: Option<&Path>,
+    live_executor: &mut dyn EvalPackLiveExecutor,
 ) -> Result<EvalPackTrialReport, VmError> {
     let workspace = eval_pack_live_workspace(case, base_dir)?;
     let executor = case.executor.as_ref().or(manifest.executor.as_ref());
@@ -2168,7 +2228,7 @@ fn evaluate_eval_pack_live_verify_trial(
     let mut failures = Vec::new();
     let mut warnings = Vec::new();
     let mut informational = Vec::new();
-    let request = eval_pack_live_executor_request(
+    let request_payload = eval_pack_live_executor_request(
         manifest,
         case,
         case_id,
@@ -2177,17 +2237,22 @@ fn evaluate_eval_pack_live_verify_trial(
         &workspace,
         base_dir,
     )?;
-    let executor_output = run_eval_pack_command(
-        executor,
-        &workspace,
-        Some(&request),
-        DEFAULT_LIVE_EXECUTOR_TIMEOUT_SECONDS,
-    );
-    let mut outcome = match executor_output {
-        Ok(output) => live_outcome_from_executor_output(output, &mut failures),
+    let request = EvalPackLiveExecutorRequest {
+        executor: executor.clone(),
+        payload: request_payload,
+        manifest_id: manifest.id.clone(),
+        case: case.clone(),
+        case_id: case_id.to_string(),
+        trial,
+        trials: trial_count,
+        workspace: workspace.clone(),
+        base_dir: base_dir.map(Path::to_path_buf),
+    };
+    let mut outcome = match live_executor.execute(request) {
+        Ok(outcome) => outcome,
         Err(error) => {
             failures.push(format!("live executor failed: {error}"));
-            EvalPackLiveOutcome::default()
+            EvalPackLiveVerifyOutcome::default()
         }
     };
     failures.append(&mut outcome.failures);
