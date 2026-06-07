@@ -22,7 +22,8 @@ use super::super::binary_ops::{infer_binary_op_type, merge_shape_fields};
 use super::super::schema_inference::schema_type_expr_from_node;
 use super::super::scope::{builtin_return_type, InferredType, PathNarrowing, TypeScope};
 use super::super::union::{
-    narrow_to_single, reference_path_key, remove_from_union, simplify_union,
+    intersect_types, narrow_to_single, reference_path_key, reference_path_key_for_subscript,
+    remove_from_union, simplify_union, subtract_type,
 };
 use super::super::{is_gradual_type_name, TypeChecker};
 
@@ -133,6 +134,7 @@ impl TypeChecker {
         for arm in arms {
             let mut arm_scope = scope.child();
             self.define_match_pattern_bindings(&arm.pattern, value_type.as_ref(), &mut arm_scope);
+            self.narrow_match_subject(value, &arm.pattern, &mut arm_scope);
             if let Some(arm_type) = self.infer_block_type(&arm.body, &arm_scope) {
                 arm_types.push(arm_type);
             }
@@ -594,7 +596,7 @@ impl TypeChecker {
                 true_expr,
                 false_expr,
             } => {
-                let refs = Self::extract_refinements(condition, scope);
+                let refs = self.extract_refinements(condition, scope);
 
                 let mut true_scope = scope.child();
                 refs.apply_truthy(&mut true_scope);
@@ -980,7 +982,7 @@ impl TypeChecker {
                 // value (`let x = if type_of(p) == "list" { p } else { ... }`)
                 // must see `p` narrowed inside the matching branch, otherwise
                 // the result type widens back to the un-narrowed union.
-                let refs = Self::extract_refinements(condition, scope);
+                let refs = self.extract_refinements(condition, scope);
                 let mut then_scope = scope.child();
                 refs.apply_truthy(&mut then_scope);
                 let then_type = self.infer_block_type(then_body, &then_scope);
@@ -1093,21 +1095,38 @@ impl TypeChecker {
     }
 
     /// Re-apply a [`PathNarrowing`] directive to a reference path's natural
-    /// type. `Keep`/`Remove` reuse the same union helpers that variable
-    /// `type_of` narrowing uses, treating a non-union type as a one-member
-    /// union. When the directive matches nothing (a statically dead branch),
-    /// the natural type is returned unchanged rather than over-narrowing.
+    /// type. The directives reuse the same type algebra that variable
+    /// narrowing uses (`narrow_to_single`/`remove_from_union` for `type_of`,
+    /// `intersect_types`/`subtract_type` for schema checks), treating a
+    /// non-union type as a one-member union. A top type (`unknown`/`any`)
+    /// narrows straight to the tested kind on `Keep`, mirroring variable
+    /// `unknown` narrowing. When a directive matches nothing (a statically
+    /// dead branch) the natural type is returned unchanged rather than
+    /// over-narrowing.
     fn apply_path_narrowing(natural: InferredType, narrowing: &PathNarrowing) -> InferredType {
         let ty = natural?;
-        let members: Vec<TypeExpr> = match &ty {
+        match narrowing {
+            PathNarrowing::Keep(tag) => {
+                if matches!(&ty, TypeExpr::Named(n) if is_gradual_type_name(n)) {
+                    return Some(TypeExpr::Named(tag.clone()));
+                }
+                let members = Self::as_union_members(&ty);
+                narrow_to_single(&members, tag).or(Some(ty))
+            }
+            PathNarrowing::Remove(tag) => {
+                let members = Self::as_union_members(&ty);
+                remove_from_union(&members, tag).or(Some(ty))
+            }
+            PathNarrowing::Intersect(schema) => intersect_types(&ty, schema).or(Some(ty)),
+            PathNarrowing::Subtract(schema) => subtract_type(&ty, schema).or(Some(ty)),
+        }
+    }
+
+    fn as_union_members(ty: &TypeExpr) -> Vec<TypeExpr> {
+        match ty {
             TypeExpr::Union(members) => members.clone(),
             other => vec![other.clone()],
-        };
-        let narrowed = match narrowing {
-            PathNarrowing::Keep(tag) => narrow_to_single(&members, tag),
-            PathNarrowing::Remove(tag) => remove_from_union(&members, tag),
-        };
-        narrowed.or(Some(ty))
+        }
     }
 
     pub(super) fn infer_property_type_from_type(
@@ -1217,7 +1236,17 @@ impl TypeChecker {
         optional: bool,
     ) -> InferredType {
         let obj_type = self.infer_type(object, scope)?;
-        self.infer_subscript_type_from_type(&obj_type, index, scope, optional)
+        let natural = self.infer_subscript_type_from_type(&obj_type, index, scope, optional);
+
+        // Flow-sensitive path narrowing on a constant-index subscript
+        // (`xs[0]`, `cfg["mode"]`) — same deferred mechanism as property
+        // paths; `reference_path_key` only keys constant indices.
+        if let Some(key) = reference_path_key_for_subscript(object, index) {
+            if let Some(narrowing) = scope.get_narrowed_path(&key) {
+                return Self::apply_path_narrowing(natural, narrowing);
+            }
+        }
+        natural
     }
 
     fn infer_subscript_type_from_type(

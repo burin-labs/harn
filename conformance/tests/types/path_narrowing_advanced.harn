@@ -1,0 +1,27 @@
+/**
+ * Reference-path narrowing reaches parity with variable narrowing:
+ * `match type_of(path)` narrows each arm, and a tagged-shape-union
+ * discriminant narrows the object path. Both flow into typed positions
+ * without coercion, and run correctly.
+ */
+pipeline test(task) {
+  fn describe(o: {val: string | int}) -> string {
+    return match type_of(o.val) {
+      "string" -> { "s:${o.val}" }
+      "int" -> { "i:${o.val}" }
+      _ -> { "?" }
+    }
+  }
+  type Ping = {kind: "ping", ttl: int}
+  type Pong = {kind: "pong", lat: int}
+  fn latency(o: {msg: Ping | Pong}) -> int {
+    if o.msg.kind == "pong" {
+      return o.msg.lat
+    }
+    return 0
+  }
+  log(describe({val: "hi"}))
+  log(describe({val: 7}))
+  log(latency({msg: {kind: "pong", lat: 42}}))
+  log(latency({msg: {kind: "ping", ttl: 9}}))
+}

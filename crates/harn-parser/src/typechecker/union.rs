@@ -154,13 +154,15 @@ pub(super) fn extract_type_of_arg(node: &SNode) -> Option<&SNode> {
 }
 
 /// Build the canonical dotted key for an identifier-rooted reference path:
-/// `a` → `"a"`, `a.b` / `a?.b` → `"a.b"`, `cfg.opts.mode` → `"cfg.opts.mode"`.
+/// `a` → `"a"`, `a.b` / `a?.b` → `"a.b"`, `cfg.opts.mode` → `"cfg.opts.mode"`,
+/// `xs[0]` → `"xs[0]"`, `m["k"]` → `"m[\"k\"]"`.
 ///
 /// Optional (`?.`) and plain (`.`) property links produce the same key — they
 /// address the same runtime value, so a guard on one narrows reads of the
-/// other. Returns `None` for anything that isn't a chain of constant property
-/// accesses rooted at a bare identifier (subscripts, method calls, computed
-/// keys), since those are not stable references we can re-narrow soundly.
+/// other. Subscripts are keyed only when the index is a literal (a *constant*
+/// reference): a dynamic index is not a stable reference and is deliberately
+/// left un-narrowable. Returns `None` for method calls, computed keys, or any
+/// non-identifier root.
 pub(super) fn reference_path_key(node: &SNode) -> Option<String> {
     match &node.node {
         Node::Identifier(name) => Some(name.clone()),
@@ -169,8 +171,26 @@ pub(super) fn reference_path_key(node: &SNode) -> Option<String> {
             let base = reference_path_key(object)?;
             Some(format!("{base}.{property}"))
         }
+        Node::SubscriptAccess { object, index }
+        | Node::OptionalSubscriptAccess { object, index } => {
+            reference_path_key_for_subscript(object, index)
+        }
         _ => None,
     }
+}
+
+/// Key for a subscript access given its `object` and `index` separately (the
+/// read-side `infer_subscript_access_type` has them split, not as one node).
+/// Keys only literal-int / literal-string indices — a dynamic index yields
+/// `None`.
+pub(super) fn reference_path_key_for_subscript(object: &SNode, index: &SNode) -> Option<String> {
+    let base = reference_path_key(object)?;
+    let seg = match &index.node {
+        Node::IntLiteral(n) => format!("[{n}]"),
+        Node::StringLiteral(s) => format!("[\"{s}\"]"),
+        _ => return None,
+    };
+    Some(format!("{base}{seg}"))
 }
 
 /// Width subtyping for `Shape ∩ Shape`. Pulled out of `intersect_types`

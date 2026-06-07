@@ -1650,14 +1650,17 @@ impl TypeChecker {
                     }
                     scope.define_schema_binding(name, None);
                     scope.clear_unknown_ruled_out(name);
-                    // Reassigning the base drops any path narrowing that read
-                    // through it (`entry.arguments` is stale once `entry` is).
+                    // Reassigning the base drops any path narrowing (and path
+                    // exhaustiveness ledger) that read through it —
+                    // `entry.arguments` is stale once `entry` is.
                     scope.clear_narrowed_paths_rooted_at(name);
+                    scope.clear_unknown_ruled_out_paths_rooted_at(name);
                 } else if let Some(base) = Self::assignment_target_root(target) {
                     // Mutating a path (`entry.arguments = ...`, `o.a[i] = ...`)
                     // can invalidate any narrowing rooted at the same base, so
                     // conservatively drop them all.
                     scope.clear_narrowed_paths_rooted_at(base);
+                    scope.clear_unknown_ruled_out_paths_rooted_at(base);
                 }
             }
 
@@ -1890,6 +1893,9 @@ impl TypeChecker {
                             &mut arm_scope,
                         );
                     }
+                    // `match type_of(subject) { "T" -> … }` narrows the subject
+                    // in the arm — independent of the pattern-binding gate above.
+                    self.narrow_match_subject(value, &arm.pattern, &mut arm_scope);
                     if let Some(ref guard) = arm.guard {
                         self.check_node(guard, &mut arm_scope);
                     }
@@ -1902,7 +1908,7 @@ impl TypeChecker {
             Node::BinaryOp { op, left, right } => {
                 self.check_node(left, scope);
                 if op == "&&" || op == "||" {
-                    let refs = Self::extract_refinements(left, scope);
+                    let refs = self.extract_refinements(left, scope);
                     let mut right_scope = scope.child();
                     if op == "&&" {
                         refs.apply_truthy(&mut right_scope);

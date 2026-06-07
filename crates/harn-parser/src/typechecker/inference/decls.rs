@@ -204,6 +204,7 @@ impl TypeChecker {
                         value_type.as_ref(),
                         &mut arm_scope,
                     );
+                    self.narrow_match_subject(value, &arm.pattern, &mut arm_scope);
                     if !self.collect_block_returns(&arm.body, &mut arm_scope, out) {
                         return false;
                     }
@@ -543,6 +544,7 @@ impl TypeChecker {
                             value_type.as_ref(),
                             &mut arm_scope,
                         );
+                        self.narrow_match_subject(value, &arm.pattern, &mut arm_scope);
                         self.body_cannot_fall_through(&arm.body, &arm_scope)
                     })
             }
@@ -643,7 +645,7 @@ impl TypeChecker {
                 then_body,
                 else_body,
             } => {
-                let refs = Self::extract_refinements(condition, scope);
+                let refs = self.extract_refinements(condition, scope);
                 let mut then_scope = scope.child();
                 refs.apply_truthy(&mut then_scope);
                 for stmt in then_body {
@@ -681,6 +683,7 @@ impl TypeChecker {
                         value_type.as_ref(),
                         &mut arm_scope,
                     );
+                    self.narrow_match_subject(value, &arm.pattern, &mut arm_scope);
                     for stmt in &arm.body {
                         self.check_return_type(stmt, expected, expected_span, &mut arm_scope);
                     }
@@ -727,7 +730,7 @@ impl TypeChecker {
                 }
             }
             Node::WhileLoop { condition, body } => {
-                let refs = Self::extract_refinements(condition, scope);
+                let refs = self.extract_refinements(condition, scope);
                 let mut loop_scope = scope.child();
                 refs.apply_truthy(&mut loop_scope);
                 for stmt in body {
@@ -756,7 +759,7 @@ impl TypeChecker {
                 condition,
                 else_body,
             } => {
-                let refs = Self::extract_refinements(condition, scope);
+                let refs = self.extract_refinements(condition, scope);
                 let mut else_scope = scope.child();
                 refs.apply_falsy(&mut else_scope);
                 for stmt in else_body {
