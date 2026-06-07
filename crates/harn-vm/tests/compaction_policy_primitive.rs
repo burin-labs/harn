@@ -110,7 +110,7 @@ pipeline main(task) {
   log(outcome["archived_messages"])
   log(outcome["engine_strategy"])
   log(outcome["strategy"])
-  log(transcript_summary(outcome["transcript"]).contains("policy compacted"))
+  log(transcript_summary(outcome["transcript"])?.contains("policy compacted"))
 }
 "#);
     assert_eq!(
