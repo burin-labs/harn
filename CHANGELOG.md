@@ -8,6 +8,117 @@ highlights live in [CHANGELOG-pre-0.6.md](CHANGELOG-pre-0.6.md).
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.8.83
+
+### Breaking
+
+- **Member-access nil safety is now uniform across `.`, `[]`, and `.()`.**
+  Subscript (`obj[key]`) and method-call (`obj.method(..)`) receivers are
+  now held to the same standard the checker already applied to property
+  reads: a statically-`nil` or `T | nil` receiver is an **error**, and an
+  `unknown` receiver is a **warning**. Previously only `obj.field` was
+  diagnosed, so `obj[key]` / `obj.method()` on a possibly-nil value passed
+  `harn check` and failed at runtime instead. Migrate with the matching
+  optional operator (`?[…]`, `?.method()`), a `!= nil` guard, or a `??`
+  default. `any` receivers remain a deliberate, undiagnosed escape hatch,
+  and the ambient dict-literal idiom (`let d = {a: 1}; d["b"]`) stays loose.
+
+  To keep the stricter rule pleasant, two long-standing narrowing gaps were
+  closed alongside it: an `o?.field != nil` (or `?[]` / `?.()`) guard now
+  narrows the **base** identifier `o` to non-nil on the matching branch, and
+  the `??` coalesce operator now drops the nil arm even when its left operand
+  is a **named type alias** that expands to a nilable union (previously only
+  inline `T | nil` unions were narrowed). The conformance harness also labels
+  failures by stage — `type error` / `compile error` / `runtime error` —
+  instead of calling every pre-runtime failure a "runtime error".
+
+### Added
+
+- **Row polymorphism: open record types and row-polymorphic generics.** Shape
+  types may now carry a trailing **row tail** — `{id: string, ...R}` is an open
+  record (the listed fields plus a row variable `R` standing for any other
+  fields), and `{...R1, ...R2}` is the right-biased merge of two rows. A
+  function generic over rows types record merge precisely and soundly:
+
+  ```harn
+  pub fn merge<R1, R2>(a: {...R1}, b: {...R2}) -> {...R1, ...R2}
+  ```
+
+  `merge({a: 1}, {b: "x"})` now returns `{a: int, b: string}` — every field
+  preserved with its real type, `b` overriding `a` on overlap — instead of
+  failing to unify a single value type or collapsing to `dict`. Open-record
+  parameters (`fn f(x: {id: string, ...rest})`) accept any record that has the
+  required fields and carry the rest through. Row variables bind one-sidedly
+  from the actual record's leftover fields; gradual tails (`dict`, `any`)
+  interoperate, and absence reasoning stays restricted to closed shapes. `std`'s
+  `merge` and `deep_merge` are re-typed with row signatures.
+
+### Changed
+
+- **Record merge and spread now infer the precise merged shape.** `{...a, k: v}`,
+  `{...a, ...b}`, and `a + b` on record shapes now produce the right-biased
+  merged shape — every field carried through with its real type, later fields
+  overriding earlier ones — instead of collapsing to an untyped `dict`. On an
+  overlap the result is required if either side is required, and its type is the
+  overriding (right) field's type, or the union of both when the right field is
+  optional. Spreading a non-closed source (a `dict`, `dict<K,V>`, union, or
+  unknown) still degrades to `dict` rather than inventing fields. This is the
+  structural foundation for full row-polymorphism support. Generic functions
+  also now bind a type parameter from a **named-alias** argument the same way
+  they already did from an inline shape literal (`type Opts = {…}` arguments to
+  `dict<string, V>` parameters no longer fail to infer `V`).
+
+### Fixed
+
+- **Three parse-robustness fixes for the agent tool-call path.** The
+  native-JSON salvage path no longer panics on multi-byte UTF-8
+  (emoji/accents/CJK) in trailing prose after a `[{"id":...}]` array — it now
+  parses the first JSON value with a boundary-safe forward
+  `serde_json::Deserializer` instead of an O(n^2) backward byte scan that could
+  slice mid-codepoint and abort the turn. The tagged-protocol fence-parity
+  check no longer treats an earlier *unbalanced* ` ``` ` as fencing a later
+  legitimate `<tool_call>` block (which dropped the call and injected a spurious
+  protocol violation); an open fence only encloses a tag when a matching close
+  follows. And `agent_loop` now injects `parse_guidance` on partial-success
+  turns (some calls parsed, one malformed) flagged `has_partial_success` with
+  the dispatched-call count, so the model gets a signal to re-emit the dropped
+  call instead of zero feedback — while the no-progress stall suppression stays
+  gated on full parse drops only.
+- The release publish step (`scripts/publish.sh`) now treats cargo's "timeout
+  while waiting for published dependencies" / "timed out waiting for … to be
+  available" as a retryable index-propagation condition. Previously a slow
+  crates.io index could leave the last crate (e.g. `harn-cli`, waiting on
+  `harn-lsp`) unpublished and abort the run as a "non-retryable error" without
+  even trying the per-crate fallback; it now retries and falls back, so a
+  propagation lag no longer leaves a release half-published.
+- **Fixed four latent stdlib type bugs surfaced by precise record-merge typing.**
+  Now that `merge` infers the exact merged shape, the type checker caught
+  mismatches the old untyped `dict` return had hidden:
+  - `github.enable_auto_merge` reads `method`/`merge_method` options that
+    `GitHubCallOptions` never declared — added them.
+  - `github.wait_until_deploy_succeeds` / `wait_until_ci_green` /
+    `wait_until_pr_merged` built monitor options with GitHub's millisecond
+    field names (`timeout_ms`, `poll_interval_ms`, `max_wait_ms`), which
+    `wait_for` silently dropped — and since the monitor requires a `timeout`
+    duration, those calls would have **thrown at runtime**. They now translate
+    the millisecond cadence into the duration-typed `MonitorWaitOptions` so the
+    caller's timing is honored.
+  - The git-forge pull-request event builder is now annotated so its
+    `filter_nil`-projected fields type as the declared `GitForge*` structs.
+  - `graphql_parse_schema`'s `current` accumulator no longer trips a
+    narrow-to-`never` reassignment error.
+- **The entire shipped stdlib now passes `harn check` cleanly.** Closing the
+  loop on the precise-typing work, eight more latent type bugs were
+  root-caused and fixed: nilable option bags narrowed before reaching
+  non-nil `dict` builtins (`waitpoint`), missing/mis-typed fields on the
+  `context_artifact`, `TriageEvent`, and agent option-bag shapes corrected to
+  match what the builders actually emit, a nilable `provider` defaulted before
+  a non-nil use (`agent/options`, `agent/sitrep`), a nilable hook registry
+  narrowed (`tool_hooks`), and an always-throwing `__fact_error` typed
+  `-> never`. The type checker's `.reverse()` was also fixed to return the
+  receiver's own type (list-reversing a `list<T>` yields `list<T>`, not
+  `string`).
+
 ## v0.8.82
 
 ### Breaking
