@@ -1,5 +1,7 @@
 use std::collections::BTreeSet;
 
+use super::syntax::preview_str;
+
 /// Detect and parse OpenAI-style native function calling JSON that a model
 /// emitted as raw text. Looks for `[{"id":"call_...","function":{"name":"...",
 /// "arguments":"..."}}]` patterns (array or single object) embedded anywhere
@@ -70,7 +72,7 @@ pub(crate) fn parse_native_json_tool_calls(
                         "Could not parse arguments for tool '{}': {}. Raw: {}",
                         name,
                         error,
-                        &raw[..raw.len().min(200)]
+                        preview_str(raw, 200)
                     ));
                     continue;
                 }
