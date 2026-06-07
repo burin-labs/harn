@@ -590,6 +590,29 @@ Now I'll create the test:
 }
 
 #[test]
+fn native_json_fallback_handles_non_ascii_trailing_content() {
+    // Regression: the salvage path used to byte-scan backwards
+    // (`&text[start..=end]`) with no `is_char_boundary` guard, so any
+    // multi-byte char (emoji/accent/CJK) in the trailing prose made `end + 1`
+    // land mid-codepoint and PANIC — aborting the agent turn before it ever
+    // reached the valid `]`. The forward streaming parser stops at the array's
+    // structural end and ignores trailing bytes regardless of their width.
+    let known = known_tools_set();
+    let text = "[{\"id\":\"call_001\",\"type\":\"function\",\"function\":{\"name\":\"edit\",\
+                \"arguments\":\"{\\\"action\\\":\\\"create\\\",\\\"path\\\":\\\"café.go\\\",\
+                \\\"content\\\":\\\"pkg\\\"}\"}}] done ✅ — déjà vu 完了";
+    let (calls, errors) = parse_native_json_tool_calls(text, &known);
+    assert!(errors.is_empty(), "no errors expected: {errors:?}");
+    assert_eq!(
+        calls.len(),
+        1,
+        "should parse the call before the trailing prose"
+    );
+    assert_eq!(calls[0]["name"], json!("edit"));
+    assert_eq!(calls[0]["arguments"]["path"], json!("café.go"));
+}
+
+#[test]
 fn text_parser_falls_through_to_native_json_fallback() {
     // End-to-end: the main parse_text_tool_calls_with_tools should fall
     // through to the native JSON parser when text parsing finds nothing

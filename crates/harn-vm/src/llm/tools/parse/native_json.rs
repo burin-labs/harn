@@ -21,22 +21,19 @@ pub(crate) fn parse_native_json_tool_calls(
     };
 
     let json_text = &text[start..];
-    let parsed: Option<Vec<serde_json::Value>> = serde_json::from_str(json_text)
-        .ok()
-        .or_else(|| {
-            serde_json::from_str::<serde_json::Value>(json_text)
-                .ok()
-                .map(|value| vec![value])
-        })
-        .or_else(|| {
-            // Salvage trailing-text JSON by scanning for a valid close.
-            for end in (start + 10..text.len()).rev() {
-                let slice = &text[start..=end];
-                if let Ok(arr) = serde_json::from_str::<Vec<serde_json::Value>>(slice) {
-                    return Some(arr);
-                }
-            }
-            None
+    // Parse the first JSON value at `start`, stopping at its structural end so
+    // trailing prose (including multi-byte UTF-8 — emoji/accents/CJK) is simply
+    // ignored. This is the same boundary-safe streaming technique used by
+    // `tagged.rs::parse_mistral_json_payload`; the old O(n^2) backward byte
+    // scan (`&text[start..=end]`) panicked the instant `end + 1` landed inside a
+    // multi-byte codepoint, aborting the turn before it reached the valid `]`.
+    let parsed: Option<Vec<serde_json::Value>> = serde_json::Deserializer::from_str(json_text)
+        .into_iter::<serde_json::Value>()
+        .next()
+        .and_then(|result| result.ok())
+        .map(|value| match value {
+            serde_json::Value::Array(items) => items,
+            other => vec![other],
         });
 
     let Some(items) = parsed else {
