@@ -762,17 +762,38 @@ fn is_top_level_tag_position(src: &str, cursor: usize) -> bool {
         .all(|ch| matches!(ch, ' ' | '\t' | '\r'))
 }
 
+/// Is `cursor` enclosed by a *closed* markdown code fence?
+///
+/// A top-level tag inside a ```` ```lang … ``` ```` block is narration, not a
+/// real block, so the scanner skips it (e.g. an example `<user_response>` shown
+/// in fenced docs). But the cursor only counts as "inside a fence" when the
+/// opening fence is matched by a closing fence *at or after* the cursor.
+///
+/// The earlier implementation just counted ```` ``` ```` markers before the
+/// cursor and called an odd count "inside a fence". That shredded a legitimate
+/// trailing `<tool_call>` whenever an unbalanced ```` ``` ```` appeared earlier
+/// in the response: the open fence with no close had no business swallowing a
+/// later real block. Requiring a matching close ahead makes an unbalanced
+/// *trailing* fence harmless while keeping closed example fences skipped.
 fn inside_markdown_fence(src: &str, cursor: usize) -> bool {
-    let mut count = 0;
+    // Walk fence markers left to right, toggling parity. We only care whether
+    // the fence that is open *at* the cursor is later closed.
+    let mut open_before_cursor = false;
     let mut scan = 0;
-    while scan < cursor {
-        let Some(pos) = src[scan..cursor].find("```") else {
-            break;
-        };
-        count += 1;
-        scan += pos + 3;
+    while let Some(rel) = src[scan..].find("```") {
+        let pos = scan + rel;
+        if pos >= cursor {
+            // First fence marker at/after the cursor. If a fence was open when
+            // we crossed the cursor, this marker closes it → cursor is inside a
+            // real (closed) fence. Otherwise the cursor sat in open prose.
+            return open_before_cursor;
+        }
+        open_before_cursor = !open_before_cursor;
+        scan = pos + 3;
     }
-    count % 2 == 1
+    // No fence marker at/after the cursor: any fence still open here is an
+    // unbalanced trailing fence, so the cursor is not inside a closed fence.
+    false
 }
 
 /// Report stray text that sits outside any recognized top-level tag.

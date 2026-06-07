@@ -458,6 +458,36 @@ fn tagged_parser_ignores_user_response_inside_markdown_fence() {
 }
 
 #[test]
+fn tagged_parser_keeps_tool_call_after_unbalanced_fence() {
+    // Regression: the fence-parity check counted every ``` marker before the
+    // cursor and called an odd count "inside a fence". A single UNCLOSED ```
+    // earlier in the response (common when a model opens a code block in its
+    // narration but never closes it) therefore made a later, legitimate
+    // <tool_call> look fenced — the call was dropped and a spurious
+    // protocol_violation injected. An unbalanced *trailing* fence must not
+    // swallow a real block.
+    let tools = sample_tool_registry();
+    // The narration opens a ``` fence and never closes it before the real call.
+    // It sits inside <assistant_prose> so the only top-level block the parser
+    // must keep is the trailing <tool_call>.
+    let text = "<assistant_prose>\nHere is the rough shape:\n```\nfn sketch() {}\n</assistant_prose>\n\
+                <tool_call>\nedit({ action: \"create\", path: \"a.rs\", content: \"x\" })\n</tool_call>";
+    let result = parse_text_tool_calls_with_tools(text, Some(&tools));
+    assert_eq!(
+        result.calls.len(),
+        1,
+        "tool call after an unclosed fence must still parse: {:?}",
+        result.calls
+    );
+    assert_eq!(result.calls[0]["name"], json!("edit"));
+    assert!(
+        result.violations.is_empty(),
+        "no spurious protocol violation should be injected: {:?}",
+        result.violations
+    );
+}
+
+#[test]
 fn tagged_parser_flags_empty_done_block() {
     let tools = sample_tool_registry();
     let text = "<tool_call>\nedit({ action: \"create\", path: \"a.rs\", content: \"x\" })\n</tool_call>\n<done></done>";

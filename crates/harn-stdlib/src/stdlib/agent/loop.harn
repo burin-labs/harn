@@ -813,8 +813,18 @@ fn __parse_feedback_has_non_structural_tools(turn_opts) -> bool {
  * names the exact parser diagnostic — is the right corrective feedback, but
  * nothing consumed `tool_parse_errors` on the active path. This fires purely on
  * the syntactic parse-error condition: strong models emit clean calls, hit zero
- * parse errors, and never reach it (no regression). Returns true when feedback
- * was injected so the caller can suppress the no-progress stall path.
+ * parse errors, and never reach it (no regression).
+ *
+ * Partial-success turns (some calls parsed AND at least one was dropped) get
+ * the same parse_guidance note — flagged `has_partial_success` so the model
+ * knows the good calls dispatched and only re-emits the malformed one. Without
+ * this, the dropped call's diagnostic was silently swallowed and the model got
+ * zero signal to re-emit it.
+ *
+ * Returns true ONLY when the WHOLE turn was a parse failure (zero calls
+ * dispatched) so the caller can suppress the no-progress stall path. A
+ * partial-success turn made real progress (its parsed calls dispatched), so it
+ * returns false and stays subject to the normal stall accounting.
  */
 fn __parse_feedback_protocol_violations(parsed, turn_opts) {
   if agent_tool_call_paradigm(turn_opts).kind != "text"
@@ -833,16 +843,20 @@ fn __parse_feedback_diagnostics(parsed, turn_opts) {
 fn __maybe_inject_parse_error_feedback(session_id, parsed, tool_calls, turn_opts) -> bool {
   let protocol_violations = __parse_feedback_protocol_violations(parsed, turn_opts)
   let diagnostics = __parse_feedback_diagnostics(parsed, turn_opts)
-  if len(diagnostics) == 0 || len(tool_calls) > 0 {
+  if len(diagnostics) == 0 {
     return false
   }
+  // Some calls parsed AND at least one was dropped: the good calls already
+  // dispatched, so flag the note as partial success and report how many landed
+  // so the model only re-emits the malformed call.
+  let parsed_count = len(tool_calls)
+  let has_partial_success = parsed_count > 0
   let error_summary = to_string(diagnostics[0])
-  // All calls were dropped, so there is no partial success this turn.
   let feedback = parse_guidance_prompt(
     {
       error_summary: error_summary,
-      has_partial_success: false,
-      parsed_call_count: 0,
+      has_partial_success: has_partial_success,
+      parsed_call_count: parsed_count,
       body_hint: agent_tool_call_paradigm(turn_opts).body_hint,
     },
     turn_opts,
@@ -856,9 +870,14 @@ fn __maybe_inject_parse_error_feedback(session_id, parsed, tool_calls, turn_opts
       protocol_violation_count: len(protocol_violations),
       diagnostic_count: len(diagnostics),
       error_summary: error_summary,
+      has_partial_success: has_partial_success,
+      parsed_call_count: parsed_count,
     },
   )
-  return true
+  // Only a full parse drop (zero calls dispatched) suppresses the no-progress
+  // stall path; a partial-success turn made real progress and stays subject to
+  // normal stall accounting.
+  return !has_partial_success
 }
 
 fn __detect_native_fallback(

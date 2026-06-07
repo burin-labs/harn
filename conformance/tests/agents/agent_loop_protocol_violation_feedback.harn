@@ -69,4 +69,38 @@ pipeline default() {
       __io_println(!contains(retry_messages, "Stray text outside response tags"))
     },
   )
+  // Partial success: one call parses and dispatches while a sibling call in the
+  // same turn is malformed (unknown tool). The dropped call's diagnostic must
+  // still reach the model as parse_guidance, flagged has_partial_success so the
+  // model knows the good call landed and only re-emits the bad one.
+  with_llm_script(
+    [
+      llm_text(
+        "<tool_call>\nwrite_note({ path: \"a.txt\" })\n</tool_call>\n"
+          + "<tool_call>\nnope({})\n</tool_call>",
+      ),
+      llm_text("<done>##DONE##</done>"),
+    ],
+    { ->
+      let result = agent_loop(
+        "Write a.txt.",
+        nil,
+        {
+          provider: "mock",
+          tool_format: "text",
+          loop_until_done: true,
+          max_iterations: 5,
+          max_nudges: 5,
+          tools: note_tools(),
+        },
+      )
+      let calls = llm_mock_calls()
+      let retry_messages = json_stringify(calls[1].messages)
+      __io_println(result.status)
+      __io_println(result.tools.successful[0])
+      __io_println(contains(retry_messages, "parse_guidance"))
+      __io_println(contains(retry_messages, "parsed successfully and were dispatched"))
+      __io_println(!contains(retry_messages, "no_progress_streak"))
+    },
+  )
 }
