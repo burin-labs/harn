@@ -8,6 +8,22 @@ highlights live in [CHANGELOG-pre-0.6.md](CHANGELOG-pre-0.6.md).
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.8.87
+
+### Added
+
+- **LLM calls can opt into catalog-equivalent provider failover (#3135).**
+  Passing `equivalent_failover: true` now builds a first-class routing policy
+  from compatible same-logical-model catalog routes, preserving routing receipts,
+  budget checks, and transcript metadata while failing over on provider outages
+  and rate limits.
+
+### Fixed
+
+- **Postgres event logs are represented as host-provided event-log metadata.**
+  Managed Harn deployments can now report a `postgres` event-log backend without
+  pretending the host-provided log is one of the built-in file or SQLite logs.
+
 ## v0.8.86
 
 ### Fixed

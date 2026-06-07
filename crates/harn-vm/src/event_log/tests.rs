@@ -10,9 +10,39 @@ use tokio::sync::broadcast;
 use super::util::{file_size, stream_from_broadcast};
 use super::{
     active_event_log, install_lazy_default_for_base_dir, reset_active_event_log, AnyEventLog,
-    ConsumerId, EventLog, FileEventLog, LogError, LogEvent, MemoryEventLog, SqliteEventLog, Topic,
-    ACTIVE_EVENT_LOG, PENDING_DEFAULT_EVENT_LOG,
+    ConsumerId, EventLog, EventLogBackendKind, EventLogConfig, FileEventLog, LogError, LogEvent,
+    MemoryEventLog, SqliteEventLog, Topic, ACTIVE_EVENT_LOG, PENDING_DEFAULT_EVENT_LOG,
 };
+
+#[test]
+fn postgres_backend_kind_round_trips_as_metadata() {
+    assert_eq!(
+        "postgres".parse::<EventLogBackendKind>().unwrap(),
+        EventLogBackendKind::Postgres
+    );
+    assert_eq!(EventLogBackendKind::Postgres.to_string(), "postgres");
+    assert_eq!(
+        serde_json::to_value(EventLogBackendKind::Postgres).unwrap(),
+        serde_json::json!("postgres")
+    );
+    assert_eq!(
+        serde_json::from_value::<EventLogBackendKind>(serde_json::json!("postgres")).unwrap(),
+        EventLogBackendKind::Postgres
+    );
+}
+
+#[test]
+fn built_in_factory_rejects_host_provided_postgres_backend() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut config = EventLogConfig::for_base_dir(dir.path()).unwrap();
+    config.backend = EventLogBackendKind::Postgres;
+
+    let error = match super::open_event_log(&config) {
+        Ok(_) => panic!("postgres is host-provided"),
+        Err(error) => error,
+    };
+    assert!(matches!(error, LogError::Config(message) if message.contains("host-provided")));
+}
 
 #[test]
 fn lazy_default_event_log_opens_on_first_access() {

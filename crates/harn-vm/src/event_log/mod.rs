@@ -100,6 +100,7 @@ pub enum EventLogBackendKind {
     Memory,
     File,
     Sqlite,
+    Postgres,
 }
 
 impl fmt::Display for EventLogBackendKind {
@@ -108,6 +109,7 @@ impl fmt::Display for EventLogBackendKind {
             Self::Memory => write!(f, "memory"),
             Self::File => write!(f, "file"),
             Self::Sqlite => write!(f, "sqlite"),
+            Self::Postgres => write!(f, "postgres"),
         }
     }
 }
@@ -120,6 +122,7 @@ impl FromStr for EventLogBackendKind {
             "memory" => Ok(Self::Memory),
             "file" => Ok(Self::File),
             "sqlite" => Ok(Self::Sqlite),
+            "postgres" => Ok(Self::Postgres),
             other => Err(LogError::Config(format!(
                 "unsupported event log backend '{other}'"
             ))),
@@ -360,6 +363,7 @@ impl EventLogConfig {
             EventLogBackendKind::Memory => None,
             EventLogBackendKind::File => Some(self.file_dir.clone()),
             EventLogBackendKind::Sqlite => Some(self.sqlite_path.clone()),
+            EventLogBackendKind::Postgres => None,
         }
     }
 }
@@ -458,6 +462,12 @@ pub fn describe_for_base_dir(base_dir: &Path) -> Result<EventLogDescription, Log
             location: Some(config.sqlite_path),
             queue_depth: config.queue_depth,
         },
+        EventLogBackendKind::Postgres => EventLogDescription {
+            backend: EventLogBackendKind::Postgres,
+            location: None,
+            size_bytes: None,
+            queue_depth: config.queue_depth,
+        },
     };
     Ok(description)
 }
@@ -475,6 +485,10 @@ pub fn open_event_log(config: &EventLogConfig) -> Result<Arc<AnyEventLog>, LogEr
             config.sqlite_path.clone(),
             config.queue_depth,
         )?))),
+        EventLogBackendKind::Postgres => Err(LogError::Config(
+            "postgres event logs are host-provided; the built-in event log factory supports memory, file, and sqlite"
+                .to_string(),
+        )),
     }
 }
 
