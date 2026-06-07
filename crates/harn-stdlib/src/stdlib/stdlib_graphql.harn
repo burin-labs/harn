@@ -495,7 +495,7 @@ fn __graphql_field_from_line(line) {
  */
 pub fn graphql_parse_schema(schema_text) {
   var types = []
-  var current = nil
+  var current: {kind: string, name: string, fields: list}? = nil
   for raw_line in split(schema_text ?? "", "\n") {
     let line = trim(raw_line)
     if line == "" || starts_with(line, "#") {
@@ -513,12 +513,13 @@ pub fn graphql_parse_schema(schema_text) {
       }
       continue
     }
-    if current != nil {
+    let open = current
+    if open != nil {
       if starts_with(line, "}") {
-        types = types + [current]
+        types = types + [open]
         current = nil
       } else if contains(line, ":") {
-        current = merge(current, {fields: current.fields + [__graphql_field_from_line(line)]})
+        current = merge(open, {fields: open.fields + [__graphql_field_from_line(line)]})
       }
     }
   }

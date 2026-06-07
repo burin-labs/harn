@@ -31,6 +31,8 @@ type GitHubCallOptions = {
   headers?: dict<string, string>,
   timeout_ms?: int,
   retry_attempts?: int,
+  method?: string,
+  merge_method?: string,
 }
 
 /** Options for `wait_until_*` helpers — adds a polling cadence to the call options. */
@@ -572,7 +574,7 @@ pub fn github_release_assets(
  */
 pub fn enable_auto_merge(repo: any, pull_number: any, options: GitHubCallOptions = {}) -> GitHubAutoMergeResult {
   let r = __github_repo_or_throw(repo)
-  let requested_method = uppercase(to_string(options?.method ?? options?.merge_method ?? "merge"))
+  let requested_method = uppercase(to_string(options.method ?? options.merge_method ?? "merge"))
   let result = try {
     call(
       "github.pr.enable_auto_merge",
@@ -892,6 +894,26 @@ pub fn pull_request_merged_source(repo: string, number: any, options: GitHubCall
   }
 }
 
+/** Default overall wait cap (ms) applied when a GitHubWaitOptions supplies none. */
+const GITHUB_DEFAULT_WAIT_MS = 300000
+
+/**
+ * Translate a GitHubWaitOptions (millisecond cadence fields) plus a source and
+ * condition into the duration-typed MonitorWaitOptions shape that `wait_for`
+ * consumes. `max_wait_ms`/`timeout_ms` become the overall `timeout` duration
+ * and `poll_interval_ms` becomes the `poll_interval` duration so the caller's
+ * cadence is actually honored by the monitor.
+ */
+fn __github_wait_options(options: GitHubWaitOptions, source, condition) {
+  let timeout_ms = options.max_wait_ms ?? options.timeout_ms ?? GITHUB_DEFAULT_WAIT_MS
+  let base = {source: source, condition: condition, timeout: duration_ms(timeout_ms)}
+  let poll_interval_ms = options.poll_interval_ms
+  if poll_interval_ms != nil {
+    return merge(base, {poll_interval: duration_ms(poll_interval_ms)})
+  }
+  return base
+}
+
 /**
  * wait_until_deploy_succeeds.
  *
@@ -903,12 +925,10 @@ pub fn pull_request_merged_source(repo: string, number: any, options: GitHubCall
  */
 pub fn wait_until_deploy_succeeds(repo: string, deployment_id: any, options: GitHubWaitOptions = {}) {
   return wait_for(
-    merge(
+    __github_wait_options(
       options,
-      {
-        source: deployment_status_source(repo, deployment_id, options),
-        condition: { state -> state.state == "success" },
-      },
+      deployment_status_source(repo, deployment_id, options),
+      { state -> state.state == "success" },
     ),
   )
 }
@@ -924,12 +944,10 @@ pub fn wait_until_deploy_succeeds(repo: string, deployment_id: any, options: Git
  */
 pub fn wait_until_ci_green(repo: string, check_run_id: any, options: GitHubWaitOptions = {}) {
   return wait_for(
-    merge(
+    __github_wait_options(
       options,
-      {
-        source: check_run_source(repo, check_run_id, options),
-        condition: { state -> state.status == "completed" && state.conclusion == "success" },
-      },
+      check_run_source(repo, check_run_id, options),
+      { state -> state.status == "completed" && state.conclusion == "success" },
     ),
   )
 }
@@ -945,9 +963,10 @@ pub fn wait_until_ci_green(repo: string, check_run_id: any, options: GitHubWaitO
  */
 pub fn wait_until_pr_merged(repo: string, number: any, options: GitHubWaitOptions = {}) {
   return wait_for(
-    merge(
+    __github_wait_options(
       options,
-      {source: pull_request_merged_source(repo, number, options), condition: { state -> state.merged }},
+      pull_request_merged_source(repo, number, options),
+      { state -> state.merged },
     ),
   )
 }

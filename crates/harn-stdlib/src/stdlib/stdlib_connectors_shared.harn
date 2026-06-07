@@ -37,7 +37,7 @@ type GitForgePullRequestEvent = {
   repository: GitForgeRepositoryRef,
   pull_request: GitForgePullRequestRef,
   writeback: GitForgeWritebackTarget,
-  delivery_id?: string,
+  delivery_id: string?,
   signature_status?: any,
   provider_metadata: dict<string, any>,
   raw_payload: any,
@@ -845,7 +845,7 @@ fn __git_forge_lifecycle(provider, action, change) {
   return "updated"
 }
 
-fn __git_forge_repo_from_full_name(provider, full_name, id, web_url) {
+fn __git_forge_repo_from_full_name(provider, full_name, id, web_url) -> GitForgeRepositoryRef {
   return filter_nil(
     {
       provider: provider,
@@ -874,7 +874,7 @@ fn __git_forge_delivery_id(raw) {
   )
 }
 
-fn __git_forge_event(provider, lifecycle, repo, pr, raw, options) {
+fn __git_forge_event(provider, lifecycle, repo, pr, raw, options) -> GitForgePullRequestEvent? {
   let number = to_int(pr?.number ?? pr?.iid ?? pr?.index)
   if number == nil {
     return nil
@@ -886,7 +886,7 @@ fn __git_forge_event(provider, lifecycle, repo, pr, raw, options) {
     repo?.id,
     repo?.web_url ?? repo?.html_url,
   )
-  let pull_request = filter_nil(
+  let pull_request: GitForgePullRequestRef = filter_nil(
     {
       number: number,
       id: __git_forge_text(pr?.id),
@@ -902,15 +902,16 @@ fn __git_forge_event(provider, lifecycle, repo, pr, raw, options) {
       merged: __git_forge_bool(pr?.merged),
     },
   )
-  let writeback = filter_nil(
+  let writeback: GitForgeWritebackTarget = filter_nil(
     {
       provider: provider,
-      repository_full_name: repository?.full_name,
-      repository_id: repository?.id,
+      repository_full_name: repository.full_name,
+      repository_id: repository.id,
       pull_request_number: number,
-      web_url: pull_request?.web_url,
+      web_url: pull_request.web_url,
     },
   )
+  let provider_metadata: dict<string, any> = filter_nil(merge(raw?.provider_metadata ?? {}, options?.provider_metadata ?? {}))
   return {
     topic: GIT_FORGE_PULL_REQUEST_TOPIC,
     event: "pull_request",
@@ -922,7 +923,7 @@ fn __git_forge_event(provider, lifecycle, repo, pr, raw, options) {
     writeback: writeback,
     delivery_id: __git_forge_delivery_id(raw),
     signature_status: raw?.signature_status,
-    provider_metadata: filter_nil(merge(raw?.provider_metadata ?? {}, options?.provider_metadata ?? {})),
+    provider_metadata: provider_metadata,
     raw_payload: raw?.raw ?? raw,
   }
 }
