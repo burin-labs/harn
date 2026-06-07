@@ -554,6 +554,46 @@ fn native_json_fallback_reports_malformed_arguments() {
 }
 
 #[test]
+fn native_json_fallback_malformed_arguments_truncates_on_char_boundary() {
+    let known = known_tools_set();
+    // Malformed `arguments` >200 bytes with a 3-byte char ('€') straddling
+    // byte index 200 (198 ASCII bytes, then '€' occupies bytes 198..201).
+    // A byte slice `&raw[..200]` would land mid-codepoint and panic; the
+    // char-safe `preview_str` helper must truncate cleanly instead.
+    let mut bad_args = String::from("x"); // leading 'x' makes this invalid JSON
+    bad_args.push_str(&"a".repeat(197)); // 198 ASCII bytes total
+    bad_args.push('€'); // bytes 198..201 — index 200 is inside this codepoint
+    bad_args.push_str(" trailing"); // ensure raw.len() > 200
+    assert!(
+        bad_args.len() > 200,
+        "args must exceed the 200-byte preview cap"
+    );
+    assert!(
+        !bad_args.is_char_boundary(200),
+        "byte 200 must fall inside a multi-byte char to exercise the panic path"
+    );
+
+    // Embed `bad_args` as a JSON string inside the native-JSON envelope.
+    let escaped = json!(bad_args).to_string();
+    let text = format!(
+        r#"[{{"id":"call_001","type":"function","function":{{"name":"edit","arguments":{escaped}}}}}]"#
+    );
+
+    let (calls, errors) = parse_native_json_tool_calls(&text, &known);
+    assert_eq!(calls.len(), 0, "should not produce a call with bad args");
+    assert_eq!(
+        errors.len(),
+        1,
+        "should report exactly one parse error, not panic"
+    );
+    assert!(
+        errors[0].contains("Could not parse arguments"),
+        "error should describe the parse failure: {}",
+        errors[0]
+    );
+}
+
+#[test]
 fn native_json_fallback_returns_empty_for_no_json() {
     let known = known_tools_set();
     let text = "Just some prose without any tool calls.";
