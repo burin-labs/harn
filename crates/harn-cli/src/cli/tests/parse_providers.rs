@@ -1,0 +1,699 @@
+use super::*;
+
+#[test]
+fn test_parses_provider_capabilities_audit_json() {
+    let cli = Cli::parse_from(["harn", "provider", "capabilities", "audit", "--json"]);
+
+    let Command::Provider(args) = cli.command.unwrap() else {
+        panic!("expected provider command");
+    };
+    let ProviderCommand::Capabilities(capabilities) = args.command;
+    let ProviderCapabilitiesCommand::Audit(audit) = capabilities.command else {
+        panic!("expected audit command");
+    };
+    assert!(audit.json);
+}
+
+#[test]
+fn test_parses_provider_capabilities_promote_from_eval() {
+    let cli = Cli::parse_from([
+        "harn",
+        "provider",
+        "capabilities",
+        "promote-from-eval",
+        "overlay.toml",
+        "--catalog",
+        "custom-capabilities.toml",
+    ]);
+
+    let Command::Provider(args) = cli.command.unwrap() else {
+        panic!("expected provider command");
+    };
+    let ProviderCommand::Capabilities(capabilities) = args.command;
+    let ProviderCapabilitiesCommand::PromoteFromEval(promote) = capabilities.command else {
+        panic!("expected promote-from-eval command");
+    };
+    assert_eq!(promote.overlay_path, PathBuf::from("overlay.toml"));
+    assert_eq!(promote.catalog, PathBuf::from("custom-capabilities.toml"));
+}
+
+#[test]
+fn test_parses_mcp_login_flags() {
+    let cli = Cli::parse_from([
+        "harn",
+        "mcp",
+        "login",
+        "notion",
+        "--url",
+        "https://example.com/mcp",
+        "--client-id",
+        "abc",
+    ]);
+
+    let Command::Mcp(args) = cli.command.unwrap() else {
+        panic!("expected mcp command");
+    };
+    let McpCommand::Login(login) = args.command else {
+        panic!("expected mcp login");
+    };
+    assert_eq!(login.target.as_deref(), Some("notion"));
+    assert_eq!(login.url.as_deref(), Some("https://example.com/mcp"));
+    assert_eq!(login.client_id.as_deref(), Some("abc"));
+}
+
+#[test]
+fn test_parses_connect_oauth_flags() {
+    let cli = Cli::parse_from([
+        "harn",
+        "connect",
+        "slack",
+        "--client-id",
+        "client",
+        "--client-secret",
+        "secret",
+        "--scope",
+        "chat:write app_mentions:read",
+        "--no-open",
+    ]);
+
+    let Command::Connect(args) = cli.command.unwrap() else {
+        panic!("expected connect command");
+    };
+    let Some(ConnectCommand::Slack(slack)) = args.command else {
+        panic!("expected connect slack");
+    };
+    assert_eq!(slack.client_id.as_deref(), Some("client"));
+    assert_eq!(slack.client_secret.as_deref(), Some("secret"));
+    assert_eq!(slack.scope.as_deref(), Some("chat:write app_mentions:read"));
+    assert!(slack.no_open);
+
+    let cli = Cli::parse_from([
+        "harn",
+        "connect",
+        "linear",
+        "--client-id",
+        "linear-client",
+        "--client-secret",
+        "linear-secret",
+    ]);
+    let Command::Connect(args) = cli.command.unwrap() else {
+        panic!("expected connect command");
+    };
+    let Some(ConnectCommand::Linear(linear)) = args.command else {
+        panic!("expected connect linear");
+    };
+    assert!(linear.url.is_none());
+    assert_eq!(linear.client_id.as_deref(), Some("linear-client"));
+
+    let cli = Cli::parse_from([
+        "harn",
+        "connect",
+        "acme",
+        "--client-id",
+        "acme-client",
+        "--scope",
+        "tickets.read",
+        "--no-open",
+    ]);
+    let Command::Connect(args) = cli.command.unwrap() else {
+        panic!("expected connect command");
+    };
+    let Some(ConnectCommand::Provider(raw)) = args.command else {
+        panic!("expected external provider connect command");
+    };
+    assert_eq!(
+        raw,
+        vec![
+            "acme".to_string(),
+            "--client-id".to_string(),
+            "acme-client".to_string(),
+            "--scope".to_string(),
+            "tickets.read".to_string(),
+            "--no-open".to_string()
+        ]
+    );
+}
+
+#[test]
+fn test_parses_connect_management_flags() {
+    let cli = Cli::parse_from(["harn", "connect", "--list", "--json"]);
+
+    let Command::Connect(args) = cli.command.unwrap() else {
+        panic!("expected connect command");
+    };
+    assert!(args.list);
+    assert!(args.json);
+    assert!(args.command.is_none());
+
+    let cli = Cli::parse_from([
+        "harn",
+        "connect",
+        "--generic",
+        "acme",
+        "https://mcp.example.com/mcp",
+    ]);
+    let Command::Connect(args) = cli.command.unwrap() else {
+        panic!("expected connect command");
+    };
+    assert_eq!(args.generic, vec!["acme", "https://mcp.example.com/mcp"]);
+}
+
+#[test]
+fn test_parses_mcp_serve_flags() {
+    let cli = Cli::parse_from([
+        "harn",
+        "mcp",
+        "serve",
+        "--config",
+        "workspace/harn.toml",
+        "--state-dir",
+        "state/orchestrator",
+        "--transport",
+        "http",
+        "--bind",
+        "127.0.0.1:9000",
+        "--path",
+        "/rpc",
+        "--sse-path",
+        "/events",
+        "--messages-path",
+        "/legacy/messages",
+    ]);
+
+    let Command::Mcp(args) = cli.command.unwrap() else {
+        panic!("expected mcp command");
+    };
+    let McpCommand::Serve(serve) = args.command else {
+        panic!("expected mcp serve");
+    };
+    assert_eq!(serve.local.config, PathBuf::from("workspace/harn.toml"));
+    assert_eq!(serve.local.state_dir, PathBuf::from("state/orchestrator"));
+    assert_eq!(serve.transport, crate::cli::McpServeTransport::Http);
+    assert_eq!(serve.bind.to_string(), "127.0.0.1:9000");
+    assert_eq!(serve.path, "/rpc");
+    assert_eq!(serve.sse_path, "/events");
+    assert_eq!(serve.messages_path, "/legacy/messages");
+}
+
+#[test]
+fn test_parses_mcp_mock_commands() {
+    let cli = Cli::parse_from([
+        "harn",
+        "mcp",
+        "mock",
+        "record",
+        "--cassette",
+        "cassette.json",
+        "--",
+        "python3",
+        "server.py",
+    ]);
+    let Command::Mcp(args) = cli.command.unwrap() else {
+        panic!("expected mcp command");
+    };
+    let McpCommand::Mock(mock) = args.command else {
+        panic!("expected mcp mock");
+    };
+    let McpMockCommand::Record(record) = mock.command else {
+        panic!("expected mcp mock record");
+    };
+    assert_eq!(record.cassette, "cassette.json");
+    assert_eq!(record.command, vec!["python3", "server.py"]);
+
+    let cli = Cli::parse_from([
+        "harn",
+        "mcp",
+        "mock",
+        "eval",
+        "--spec",
+        "world.json",
+        "--state",
+        "run1.json",
+        "--state",
+        "run2.json",
+    ]);
+    let Command::Mcp(args) = cli.command.unwrap() else {
+        panic!("expected mcp command");
+    };
+    let McpCommand::Mock(mock) = args.command else {
+        panic!("expected mcp mock");
+    };
+    let McpMockCommand::Eval(eval) = mock.command else {
+        panic!("expected mcp mock eval");
+    };
+    assert_eq!(eval.spec, "world.json");
+    assert_eq!(eval.states, vec!["run1.json", "run2.json"]);
+}
+
+#[test]
+fn test_parses_connector_test_args() {
+    let cli = Cli::parse_from([
+        "harn",
+        "connector",
+        "test",
+        "pkg",
+        "--provider",
+        "notion",
+        "--run-poll-tick",
+        "--json",
+    ]);
+    let Command::Connector(args) = cli.command.unwrap() else {
+        panic!("expected connector command");
+    };
+    let ConnectorCommand::Test(test) = args.command else {
+        panic!("expected connector test");
+    };
+    assert_eq!(test.package, "pkg");
+    assert_eq!(test.providers, vec!["notion"]);
+    assert!(test.run_poll_tick);
+    assert!(test.json);
+}
+
+#[test]
+fn test_parses_viz_args() {
+    let cli = Cli::parse_from(["harn", "viz", "main.harn", "--output", "graph.mmd"]);
+
+    let Command::Viz(args) = cli.command.unwrap() else {
+        panic!("expected viz command");
+    };
+    assert_eq!(args.file, "main.harn");
+    assert_eq!(args.output.as_deref(), Some("graph.mmd"));
+}
+
+#[test]
+fn test_parses_model_info_args() {
+    let cli = Cli::parse_from([
+        "harn",
+        "model-info",
+        "--verify",
+        "--warm",
+        "--keep-alive",
+        "forever",
+        "tog-gemma4-31b",
+    ]);
+
+    let Command::ModelInfo(args) = cli.command.unwrap() else {
+        panic!("expected model-info command");
+    };
+    assert_eq!(args.model, "tog-gemma4-31b");
+    assert!(args.verify);
+    assert!(args.warm);
+    assert_eq!(args.keep_alive.as_deref(), Some("forever"));
+}
+
+#[test]
+fn test_parses_models_test_args() {
+    let cli = Cli::parse_from([
+        "harn",
+        "models",
+        "test",
+        "qwen3:30b",
+        "--provider",
+        "ollama",
+        "--prompt",
+        "say pong",
+        "--json",
+    ]);
+
+    let Command::Models(args) = cli.command.unwrap() else {
+        panic!("expected models command");
+    };
+    let ModelsCommand::Test(args) = args.command else {
+        panic!("expected models test command");
+    };
+    assert_eq!(args.model, "qwen3:30b");
+    assert_eq!(args.provider.as_deref(), Some("ollama"));
+    assert_eq!(args.prompt, "say pong");
+    assert!(args.json);
+}
+
+#[test]
+fn test_parses_providers_refresh_args() {
+    let cli = Cli::parse_from([
+        "harn",
+        "providers",
+        "refresh",
+        "--live",
+        "--check",
+        "--script",
+        "scripts/update_provider_catalog.harn",
+    ]);
+
+    let Command::Providers(args) = cli.command.unwrap() else {
+        panic!("expected providers command");
+    };
+    let ProvidersCommand::Refresh(args) = args.command else {
+        panic!("expected providers refresh command");
+    };
+    assert!(args.live);
+    assert!(args.check);
+    assert!(!args.update);
+    assert_eq!(
+        args.script,
+        std::path::PathBuf::from("scripts/update_provider_catalog.harn")
+    );
+}
+
+#[test]
+fn test_parses_providers_validate_args() {
+    let cli = Cli::parse_from([
+        "harn",
+        "providers",
+        "validate",
+        "--overlay",
+        "providers.local.toml",
+        "--check-artifacts",
+        "--artifact-dir",
+        "spec/provider-catalog",
+        "--json",
+    ]);
+
+    let Command::Providers(args) = cli.command.unwrap() else {
+        panic!("expected providers command");
+    };
+    let ProvidersCommand::Validate(args) = args.command else {
+        panic!("expected providers validate command");
+    };
+    assert_eq!(
+        args.overlay.as_deref(),
+        Some(std::path::Path::new("providers.local.toml"))
+    );
+    assert!(args.check_artifacts);
+    assert_eq!(
+        args.artifact_dir,
+        std::path::PathBuf::from("spec/provider-catalog")
+    );
+    assert!(args.json);
+}
+
+#[test]
+fn test_parses_providers_export_args() {
+    let cli = Cli::parse_from([
+        "harn",
+        "providers",
+        "export",
+        "--output-dir",
+        "tmp/catalog",
+        "--check",
+    ]);
+
+    let Command::Providers(args) = cli.command.unwrap() else {
+        panic!("expected providers command");
+    };
+    let ProvidersCommand::Export(args) = args.command else {
+        panic!("expected providers export command");
+    };
+    assert_eq!(args.output_dir, std::path::PathBuf::from("tmp/catalog"));
+    assert!(args.check);
+}
+
+#[test]
+fn test_parses_providers_build_config_args() {
+    let cli = Cli::parse_from([
+        "harn",
+        "providers",
+        "build-config",
+        "--source-dir",
+        "tmp/catalog_sources",
+        "--output",
+        "tmp/providers.toml",
+        "--check",
+    ]);
+
+    let Command::Providers(args) = cli.command.unwrap() else {
+        panic!("expected providers command");
+    };
+    let ProvidersCommand::BuildConfig(args) = args.command else {
+        panic!("expected providers build-config command");
+    };
+    assert_eq!(
+        args.source_dir,
+        std::path::PathBuf::from("tmp/catalog_sources")
+    );
+    assert_eq!(args.output, std::path::PathBuf::from("tmp/providers.toml"));
+    assert!(args.check);
+}
+
+#[test]
+fn test_parses_providers_build_capabilities_args() {
+    let cli = Cli::parse_from([
+        "harn",
+        "providers",
+        "build-capabilities",
+        "--source-dir",
+        "tmp/capability_sources",
+        "--output",
+        "tmp/capabilities.toml",
+        "--check",
+    ]);
+
+    let Command::Providers(args) = cli.command.unwrap() else {
+        panic!("expected providers command");
+    };
+    let ProvidersCommand::BuildCapabilities(args) = args.command else {
+        panic!("expected providers build-capabilities command");
+    };
+    assert_eq!(
+        args.source_dir,
+        std::path::PathBuf::from("tmp/capability_sources")
+    );
+    assert_eq!(
+        args.output,
+        std::path::PathBuf::from("tmp/capabilities.toml")
+    );
+    assert!(args.check);
+}
+
+#[test]
+fn test_parses_providers_matrix_args() {
+    let cli = Cli::parse_from([
+        "harn",
+        "providers",
+        "matrix",
+        "--output",
+        "tmp/provider-matrix.md",
+        "--check",
+        "--stdout",
+        "--filter",
+        "native_tools",
+    ]);
+
+    let Command::Providers(args) = cli.command.unwrap() else {
+        panic!("expected providers command");
+    };
+    let ProvidersCommand::Matrix(args) = args.command else {
+        panic!("expected providers matrix command");
+    };
+    assert_eq!(
+        args.output,
+        std::path::PathBuf::from("tmp/provider-matrix.md")
+    );
+    assert!(args.check);
+    assert!(args.stdout);
+    assert_eq!(args.filter.as_deref(), Some("native_tools"));
+}
+
+#[test]
+fn test_parses_providers_support_args() {
+    let cli = Cli::parse_from([
+        "harn",
+        "providers",
+        "support",
+        "--output",
+        "tmp/provider-support.md",
+        "--json-output",
+        "tmp/provider-support.json",
+        "--notes",
+        "provider_support_notes.toml",
+        "--empirical",
+        "summary.json",
+        "--check",
+    ]);
+
+    let Command::Providers(args) = cli.command.unwrap() else {
+        panic!("expected providers command");
+    };
+    let ProvidersCommand::Support(args) = args.command else {
+        panic!("expected providers support command");
+    };
+    assert_eq!(
+        args.output,
+        std::path::PathBuf::from("tmp/provider-support.md")
+    );
+    assert_eq!(
+        args.json_output,
+        std::path::PathBuf::from("tmp/provider-support.json")
+    );
+    assert_eq!(
+        args.notes,
+        std::path::PathBuf::from("provider_support_notes.toml")
+    );
+    assert_eq!(
+        args.empirical,
+        vec![std::path::PathBuf::from("summary.json")]
+    );
+    assert!(args.check);
+}
+
+#[test]
+fn test_parses_provider_catalog_args() {
+    let cli = Cli::parse_from(["harn", "provider-catalog", "--available-only", "--refresh"]);
+
+    let Command::ProviderCatalog(args) = cli.command.unwrap() else {
+        panic!("expected provider-catalog command");
+    };
+    assert!(args.available_only);
+    assert!(args.refresh);
+}
+
+#[test]
+fn test_parses_provider_ready_args() {
+    let cli = Cli::parse_from([
+        "harn",
+        "provider-ready",
+        "mlx",
+        "--model",
+        "mlx-qwen36-27b",
+        "--base-url",
+        "http://127.0.0.1:8002",
+        "--json",
+    ]);
+
+    let Command::ProviderReady(args) = cli.command.unwrap() else {
+        panic!("expected provider-ready command");
+    };
+    assert_eq!(args.provider, "mlx");
+    assert_eq!(args.model.as_deref(), Some("mlx-qwen36-27b"));
+    assert_eq!(args.base_url.as_deref(), Some("http://127.0.0.1:8002"));
+    assert!(args.json);
+}
+
+#[test]
+fn test_parses_provider_probe_args() {
+    let cli = Cli::parse_from([
+        "harn",
+        "provider-probe",
+        "ollama",
+        "--model",
+        "devstral-small-2",
+        "--base-url",
+        "http://127.0.0.1:11434",
+    ]);
+
+    let Command::ProviderProbe(args) = cli.command.unwrap() else {
+        panic!("expected provider-probe command");
+    };
+    assert_eq!(args.provider, "ollama");
+    assert_eq!(args.model.as_deref(), Some("devstral-small-2"));
+    assert_eq!(args.base_url.as_deref(), Some("http://127.0.0.1:11434"));
+    // The probe is meant for eval pipelines; JSON output is the default
+    // surface so an aggregator doesn't have to opt in.
+    assert!(args.json);
+}
+
+#[test]
+fn test_parses_provider_tool_probe_args() {
+    let cli = Cli::parse_from([
+        "harn",
+        "provider-tool-probe",
+        "ollama",
+        "--model",
+        "devstral-small-2",
+        "--base-url",
+        "http://127.0.0.1:11434",
+        "--mode",
+        "non-streaming",
+        "--marker",
+        "marker",
+        "--response-fixture",
+        "fixture.json",
+    ]);
+
+    let Command::ProviderToolProbe(args) = cli.command.unwrap() else {
+        panic!("expected provider-tool-probe command");
+    };
+    assert_eq!(args.provider, "ollama");
+    assert_eq!(args.model, "devstral-small-2");
+    assert_eq!(args.base_url.as_deref(), Some("http://127.0.0.1:11434"));
+    assert!(matches!(args.mode, ProviderToolProbeModeArg::NonStreaming));
+    assert_eq!(args.marker, "marker");
+    assert_eq!(args.response_fixture, Some(PathBuf::from("fixture.json")));
+    assert!(args.json);
+}
+
+#[test]
+fn test_provider_model_completion_candidates_stay_permissive() {
+    let cli = Cli::parse_from([
+        "harn",
+        "provider-ready",
+        "custom-provider",
+        "--model",
+        "vendor/custom-model",
+    ]);
+    let Command::ProviderReady(args) = cli.command.unwrap() else {
+        panic!("expected provider-ready command");
+    };
+    assert_eq!(args.provider, "custom-provider");
+    assert_eq!(args.model.as_deref(), Some("vendor/custom-model"));
+
+    let command = Cli::command();
+    let provider_ready = command
+        .find_subcommand("provider-ready")
+        .expect("provider-ready subcommand");
+    let provider_values: Vec<_> = provider_ready
+        .get_arguments()
+        .find(|arg| arg.get_id() == "provider")
+        .expect("provider argument")
+        .get_possible_values()
+        .into_iter()
+        .map(|value| value.get_name().to_string())
+        .collect();
+    assert!(provider_values.iter().any(|value| value == "openai"));
+
+    let model_values: Vec<_> = provider_ready
+        .get_arguments()
+        .find(|arg| arg.get_id() == "model")
+        .expect("model argument")
+        .get_possible_values()
+        .into_iter()
+        .map(|value| value.get_name().to_string())
+        .collect();
+    assert!(model_values.iter().any(|value| value == "gpt-4o-mini"));
+}
+
+#[test]
+fn test_parses_models_recommend_args() {
+    let cli = Cli::parse_from(["harn", "models", "recommend", "--json"]);
+
+    let Command::Models(args) = cli.command.unwrap() else {
+        panic!("expected models command");
+    };
+    let ModelsCommand::Recommend(recommend) = args.command else {
+        panic!("expected models recommend command");
+    };
+    assert!(recommend.json);
+}
+
+#[test]
+fn test_parses_providers_recommend_args() {
+    let cli = Cli::parse_from([
+        "harn",
+        "providers",
+        "recommend",
+        "--input",
+        "local_readiness.json",
+        "--provider",
+        "ollama",
+        "--json",
+    ]);
+
+    let Command::Providers(args) = cli.command.unwrap() else {
+        panic!("expected providers command");
+    };
+    let ProvidersCommand::Recommend(recommend) = args.command else {
+        panic!("expected providers recommend command");
+    };
+    assert_eq!(recommend.input, Some(PathBuf::from("local_readiness.json")));
+    assert_eq!(recommend.provider.as_deref(), Some("ollama"));
+    assert!(recommend.json);
+}

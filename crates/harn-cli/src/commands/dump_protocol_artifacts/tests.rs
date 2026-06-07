@@ -237,9 +237,10 @@ fn dispatched_acp_methods_match_artifact() {
     // surface the adapter handles. If a contributor adds or removes a
     // `match method.as_str()` arm in the ACP adapter without updating the
     // artifact, this guard fails. We read the adapter source directly so
-    // the check has no runtime dependency on a live server.
+    // the check has no runtime dependency on a live server. The dispatch
+    // `match` lives in the `dispatch` submodule of the ACP adapter.
     let dispatch =
-        read_repo_text("crates/harn-serve/src/adapters/acp/mod.rs").expect("read acp adapter");
+        read_repo_text("crates/harn-serve/src/adapters/acp/dispatch.rs").expect("read acp adapter");
     let body = dispatch
         .split_once("match method.as_str() {")
         .expect("dispatch match block")

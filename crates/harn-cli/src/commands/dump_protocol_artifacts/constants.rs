@@ -36,7 +36,7 @@ pub(super) const ACP_CLIENT_METHODS: &[&str] = &[
 
 /// Every JSON-RPC method the ACP adapter's `dispatch` actually handles,
 /// reconciled against the match arms in
-/// `crates/harn-serve/src/adapters/acp/mod.rs`.
+/// `crates/harn-serve/src/adapters/acp/dispatch.rs`.
 ///
 /// `ACP_AGENT_METHODS` is the stable, hand-curated host-facing contract that
 /// the TypeScript/Swift/Python/Go bindings publish. The dispatcher additionally

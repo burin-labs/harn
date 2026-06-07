@@ -2,7 +2,7 @@
 //!
 //! The fake servers in [`harn_mcp_rc_compat::fake_server`] are the
 //! reference fixtures that Harn's MCP client gets tested against (see
-//! `crates/harn-vm/src/mcp.rs` for the in-process client wire tests).
+//! `crates/harn-vm/src/mcp/` for the in-process client wire tests).
 //! This test file proves the fakes themselves agree with the published
 //! JSON fixtures so the same wire shape is what downstream consumers
 //! (Burin Code, harn-cloud) replay in their own suites.
