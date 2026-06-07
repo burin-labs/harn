@@ -76,12 +76,12 @@ pub fn wait(waitpoints: string | dict | list, options: WaitpointWaitOptions = ni
     if options == nil {
       return __waitpoint_wait(waitpoints)
     }
-    return __waitpoint_wait(waitpoints, options)
+    return __waitpoint_wait(waitpoints, options ?? {})
   }
   if options == nil {
     return __waitpoint_wait(waitpoints)
   }
-  return __waitpoint_wait(waitpoints, options)
+  return __waitpoint_wait(waitpoints, options ?? {})
 }
 
 /**
@@ -97,7 +97,7 @@ pub fn complete(waitpoint: WaitpointHandle, value, options: WaitpointTerminalOpt
   if options == nil {
     return __waitpoint_complete(waitpoint, value)
   }
-  return __waitpoint_complete(waitpoint, value, options)
+  return __waitpoint_complete(waitpoint, value, options ?? {})
 }
 
 /**
@@ -113,5 +113,5 @@ pub fn cancel(waitpoint: WaitpointHandle, options: WaitpointTerminalOptions = ni
   if options == nil {
     return __waitpoint_cancel(waitpoint)
   }
-  return __waitpoint_cancel(waitpoint, options)
+  return __waitpoint_cancel(waitpoint, options ?? {})
 }

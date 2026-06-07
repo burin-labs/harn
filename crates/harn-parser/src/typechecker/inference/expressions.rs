@@ -833,9 +833,35 @@ impl TypeChecker {
                     // Shared: int-returning methods
                     "count" | "index_of" => Some(result(TypeExpr::Named("int".into()))),
                     // String methods
-                    "trim" | "lowercase" | "uppercase" | "reverse" | "replace" | "substring"
-                    | "pad_left" | "pad_right" | "repeat" | "join" => {
+                    "trim" | "lowercase" | "uppercase" | "replace" | "substring" | "pad_left"
+                    | "pad_right" | "repeat" | "join" => {
                         Some(result(TypeExpr::Named("string".into())))
+                    }
+                    // `reverse` works on both strings and lists, returning the
+                    // receiver's own type. Reversing a list yields a list with the
+                    // same element type; reversing a string yields a string. A
+                    // gradual/unknown receiver (`any`/`_`, or an unannotated value
+                    // whose type we couldn't pin down) could be either at runtime,
+                    // so it stays gradual rather than being forced to `string` —
+                    // forcing `string` mis-typed list reversals through untyped
+                    // bindings (e.g. `list + value.reverse()`).
+                    "reverse" => {
+                        let is_list = list_elem.is_some()
+                            || matches!(&resolved_recv, Some(TypeExpr::Named(n)) if n == "list");
+                        let is_string =
+                            matches!(&resolved_recv, Some(TypeExpr::Named(n)) if n == "string");
+                        if is_list {
+                            match &list_elem {
+                                Some(e) => Some(result(list_of(e.clone()))),
+                                None => Some(result(TypeExpr::Named("list".into()))),
+                            }
+                        } else if is_string {
+                            Some(result(TypeExpr::Named("string".into())))
+                        } else {
+                            // Gradual receiver: defer to `any` so neither the
+                            // string nor the list interpretation is rejected.
+                            Some(result(TypeExpr::Named("any".into())))
+                        }
                     }
                     "split" | "chars" => Some(result(TypeExpr::Named("list".into()))),
                     // filter returns dict for dicts, list for lists; the element
