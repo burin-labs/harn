@@ -1155,7 +1155,15 @@ pub(super) async fn consume_sse_lines<R: tokio::io::AsyncBufRead + Unpin>(
     // final answer. Leave `text` empty and expose the partial trace only via
     // `thinking`, mirroring `openai_normalize::normalize_openai_message_text`.
     let truncated = stop_reason.as_deref() == Some("length");
-    if !truncated && text.is_empty() && !thinking_text.is_empty() {
+    // When the turn also carries a tool call, the reasoning is intermediate
+    // chain-of-thought (the tool call is the real action), not a final answer.
+    // gpt-oss / harmony models stream their analysis channel into the reasoning
+    // delta and emit a tool call with no committed content; promoting that
+    // reasoning into `.text` leaks private chain-of-thought into the user-facing
+    // assistant message AND the transcript the eval grader mines. Keep `.text`
+    // empty and surface the reasoning only via `thinking`, mirroring
+    // `openai_normalize::normalize_openai_message_text`.
+    if !truncated && tool_calls.is_empty() && text.is_empty() && !thinking_text.is_empty() {
         text = thinking_text.clone();
         blocks
             .push(serde_json::json!({"type": "output_text", "text": text, "visibility": "public"}));
@@ -1949,6 +1957,42 @@ mod streaming_tool_call_tests {
         assert_eq!(result.stop_reason.as_deref(), Some("stop"));
         assert_eq!(result.text, "the answer is 42");
         assert_eq!(result.thinking.as_deref(), Some("the answer is 42"));
+
+        clear_session_sinks(&session_id);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn openai_stream_reasoning_does_not_leak_into_text_when_tool_call_present() {
+        // gpt-oss / harmony streaming: the analysis channel arrives as
+        // `reasoning` deltas, the model emits a tool call, and no `content`
+        // delta is committed. The reasoning is intermediate chain-of-thought,
+        // not a final answer — the tool call is the action. It must NOT be
+        // promoted into `.text` (that would leak private CoT into the
+        // user-facing message and into the transcript the eval grader mines);
+        // it stays under `.thinking`.
+        let body = concat!(
+            "data: {\"choices\":[{\"index\":0,\"delta\":{\"reasoning\":\"We need to inspect\"}}]}\n",
+            "data: {\"choices\":[{\"index\":0,\"delta\":{\"reasoning\":\" parser.rs first.\"}}]}\n",
+            "data: {\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call_a\",\"function\":{\"name\":\"look\",\"arguments\":\"{\\\"path\\\":\\\"parser.rs\\\"}\"}}]}}]}\n",
+            "data: {\"choices\":[{\"index\":0,\"finish_reason\":\"tool_calls\",\"delta\":{}}],\"usage\":{\"prompt_tokens\":4,\"completion_tokens\":6}}\n",
+            "data: [DONE]\n",
+        );
+        let session_id = fresh_session_id("oai-reason-toolcall");
+        let (result, _events) = drive(body.as_bytes(), &session_id, false).await;
+
+        assert_eq!(result.stop_reason.as_deref(), Some("tool_calls"));
+        assert_eq!(
+            result.text, "",
+            "reasoning leaked into visible text on a tool-call turn: {:?}",
+            result.text
+        );
+        assert_eq!(
+            result.thinking.as_deref(),
+            Some("We need to inspect parser.rs first."),
+            "reasoning trace must survive under thinking"
+        );
+        assert_eq!(result.tool_calls.len(), 1);
+        assert_eq!(result.tool_calls[0]["name"], "look");
 
         clear_session_sinks(&session_id);
     }
