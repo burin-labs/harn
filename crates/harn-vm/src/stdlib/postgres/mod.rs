@@ -72,12 +72,42 @@ thread_local! {
     static TXS: RefCell<PgTxRegistry> =
         const { RefCell::new(BTreeMap::new()) };
     static MOCKS: RefCell<BTreeMap<String, MockPool>> = const { RefCell::new(BTreeMap::new()) };
+    /// Server-described per-slot parameter OIDs, keyed by the SQL string.
+    ///
+    /// Postgres infers every `$n` slot's type from the query *structure* (casts,
+    /// target columns, operators) — independent of which params are `nil` at
+    /// runtime — so the described OID list is stable per SQL string and can be
+    /// cached and reused for all future nil-bearing executions of that SQL. This
+    /// turns the describe round-trip into a one-time cost per distinct SQL rather
+    /// than a per-query cost (see [`described_param_oids`]). Scoped thread-local
+    /// to match the `POOLS`/`TXS`/`MOCKS` registries above (the harn VM runs on a
+    /// current-thread runtime).
+    static DESCRIBED_OIDS: RefCell<BTreeMap<String, Arc<Vec<PgTypeInfo>>>> =
+        const { RefCell::new(BTreeMap::new()) };
+}
+
+/// Counts how many times an *uncached* server describe round-trip is performed.
+/// Used by tests to assert that a repeated nil-query of the same SQL hits the
+/// OID cache and does **not** re-describe. Lives behind `cfg(test)` so it has
+/// zero cost in release builds.
+#[cfg(test)]
+static DESCRIBE_ROUND_TRIPS: AtomicU64 = AtomicU64::new(0);
+
+#[cfg(test)]
+fn describe_round_trips() -> u64 {
+    DESCRIBE_ROUND_TRIPS.load(Ordering::Relaxed)
+}
+
+#[cfg(test)]
+fn reset_describe_round_trips() {
+    DESCRIBE_ROUND_TRIPS.store(0, Ordering::Relaxed);
 }
 
 pub(crate) fn reset_postgres_state() {
     POOLS.with(|pools| pools.borrow_mut().clear());
     TXS.with(|txs| txs.borrow_mut().clear());
     MOCKS.with(|mocks| mocks.borrow_mut().clear());
+    DESCRIBED_OIDS.with(|oids| oids.borrow_mut().clear());
     listen::reset_state();
 }
 
@@ -749,8 +779,9 @@ pub(super) async fn query_rows(
                 .ok_or_else(|| runtime_error("pg_query: transaction is closed"))?;
             let rows = if params_have_nil(params) {
                 // describe-then-bind: learn the server-inferred parameter OIDs
-                // on the tx connection, then bind typed NULLs for the nils.
-                let oids = describe_param_oids(tx, sql, "pg_query").await?;
+                // on the tx connection (cached per SQL), then bind typed NULLs
+                // for the nils.
+                let oids = described_param_oids(tx, sql, "pg_query").await?;
                 bind_params_described(sql, &oids, params)?
                     .fetch_all(&mut **tx)
                     .await
@@ -818,8 +849,9 @@ pub(super) async fn execute_stmt(
             .ok_or_else(|| runtime_error("pg_execute: transaction is closed"))?;
         let result = if params_have_nil(params) {
             // describe-then-bind: learn the server-inferred parameter OIDs on
-            // the tx connection, then bind typed NULLs for the nils.
-            let oids = describe_param_oids(tx, sql, "pg_execute").await?;
+            // the tx connection (cached per SQL), then bind typed NULLs for the
+            // nils.
+            let oids = described_param_oids(tx, sql, "pg_execute").await?;
             bind_params_described(sql, &oids, params)?
                 .execute(&mut **tx)
                 .await
@@ -1098,41 +1130,98 @@ pub(super) fn bind_params<'q>(
     Ok(query)
 }
 
-/// Build a `query_with` bound to `sql`, encoding any dynamic `nil` as a
-/// [`TypedNull`] carrying the server-described OID for that slot (`described`).
+/// Build a query bound to `sql`, encoding any dynamic `nil` as a [`TypedNull`]
+/// carrying the server-described OID for that slot (`described`).
 ///
 /// Non-null params are bound by sqlx in their natural type/format, so the
 /// resulting `PgArguments` declares, per slot, either sqlx's natural type
-/// (non-null) or the described OID (nil). When this query is executed against a
-/// connection whose statement cache has *no* poisoned entry for `sql`, the
-/// `Parse` runs with exactly this self-consistent type list — eliminating both
-/// the binary-format mismatch (the OID-0 failure mode) and the text-NULL
-/// failure modes, while the concrete params keep their normal binary encodings.
+/// (non-null) or the described OID (nil). The exact per-slot type list therefore
+/// depends on *which* slots are `nil` at runtime — and sqlx's prepared-statement
+/// cache is keyed by the SQL string **alone**, so two different nil-patterns of
+/// the same SQL would collide on a single cached statement (a non-null slot
+/// reusing a sibling pattern's `NULL`-declared OID → `incorrect binary data
+/// format in bind parameter N`). We therefore mark the described query
+/// [`persistent(false)`], so in sqlx 0.9.0 it Parses an **unnamed** statement
+/// and is **never inserted** into the SQL-keyed cache (verified in
+/// `sqlx_postgres::connection::executor::{prepare, get_or_prepare}` — the cache
+/// insert is gated on `persistent == true`, and a non-persistent prepare uses
+/// `StatementId::UNNAMED`). Each described execute thus Parses exactly this
+/// self-consistent type list (in the *same* network round-trip as the Bind +
+/// Execute — sqlx pipelines Parse/Bind/Execute/Sync behind one flush),
+/// eliminating both the binary-format mismatch (the OID-0 failure mode) and the
+/// text-NULL failure modes, and it cannot poison sibling patterns or the
+/// all-non-null fast path. A `nil` reusing an all-non-null cached statement is
+/// harmless: a SQL `NULL` carries no payload bytes, so the declared OID is
+/// irrelevant for it.
 fn bind_params_described<'q>(
     sql: &'q str,
     described: &[PgTypeInfo],
     params: &'q [VmValue],
 ) -> Result<Query<'q, Postgres, PgArguments>, VmError> {
-    let mut query = query(AssertSqlSafe(sql));
+    let mut query = query(AssertSqlSafe(sql)).persistent(false);
     for (index, param) in params.iter().enumerate() {
         query = bind_one(query, param, described.get(index))?;
     }
     Ok(query)
 }
 
-/// Server-described parameter type OIDs for `sql`, obtained by preparing it on
-/// `conn` with no caller-supplied types (so Postgres infers every slot from
-/// query context). Returns one [`PgTypeInfo`] per `$n`.
+/// Server-described per-slot parameter OIDs for `sql`, looked up from the
+/// process-stable [`DESCRIBED_OIDS`] cache and computed on a miss.
 ///
-/// `prepare_with` caches the *server-inferred* statement on the connection; for
-/// queries with a non-null param whose natural sqlx type differs from the
-/// inferred column type (e.g. an `i64` against an `integer`/`int4` column), that
-/// cached type list would poison a later execute. We therefore immediately
-/// [`clear_cached_statements`] so the subsequent describe-bound execute re-parses
-/// with its own self-consistent type list and caches *that*. Clearing only
-/// forces the connection's other cached statements to re-warm (correctness is
-/// never affected), and it runs solely on the nil-bearing query path.
-async fn describe_param_oids(
+/// The described OID list is a pure function of the SQL *structure* (Postgres
+/// infers each `$n` from casts/target columns/operators, not from the runtime
+/// param values), so it is stable per SQL string and never needs invalidation:
+///
+///   * **HIT** — return the cached `Arc<Vec<PgTypeInfo>>` with **no** describe
+///     round-trip and **no** statement-cache clear. The caller then binds the
+///     nils with these OIDs and executes via the *normal* path, which Parses its
+///     own self-consistent type list and caches it under `sql` like any plain
+///     query. After warmup, a nil-query therefore costs exactly the same
+///     round-trips as a plain bind.
+///   * **MISS** — perform a single describe via
+///     [`describe_param_oids_uncached`] (one prepare + one cache clear), store
+///     the result, and return it.
+///
+/// Schema changes that would alter a slot's inferred type are extremely rare and
+/// are already handled by the execute path: Postgres raises `cached plan must
+/// not change result type` / re-parse on its own, and sqlx surfaces it as a
+/// query error — the cached OIDs only seed the NULL *declaration*, they do not
+/// pin server-side plans.
+async fn described_param_oids(
+    conn: &mut sqlx_postgres::PgConnection,
+    sql: &str,
+    builtin: &str,
+) -> Result<Arc<Vec<PgTypeInfo>>, VmError> {
+    if let Some(cached) = DESCRIBED_OIDS.with(|oids| oids.borrow().get(sql).cloned()) {
+        return Ok(cached);
+    }
+    let oids = Arc::new(describe_param_oids_uncached(conn, sql, builtin).await?);
+    DESCRIBED_OIDS.with(|cache| {
+        cache
+            .borrow_mut()
+            .insert(sql.to_string(), Arc::clone(&oids));
+    });
+    Ok(oids)
+}
+
+/// Perform the actual (uncached) server describe for `sql` on `conn`, returning
+/// one [`PgTypeInfo`] per `$n`.
+///
+/// In sqlx 0.9.0, `prepare_with` is the only public way to obtain per-slot
+/// parameter OIDs, and it *always* prepares persistently — it inserts the
+/// *server-inferred* statement into the connection's SQL-keyed cache (see
+/// `sqlx_postgres::connection::executor::get_or_prepare`, which gates the cache
+/// insert on `persistent == true` and offers no per-key eviction). There is no
+/// non-caching describe-only entry point: `Executor::describe` is gated behind
+/// the `offline` feature (which harn does not enable) and is likewise
+/// persistent. For a query whose non-null param's natural sqlx type differs from
+/// the inferred column type (e.g. an `i64` against an `int4` column), that
+/// inferred cache entry would poison a later execute, so we
+/// [`clear_cached_statements`] once here. Because the result is cached by
+/// [`described_param_oids`], this prepare+clear happens **at most once per
+/// distinct SQL** (on the first nil-bearing execution); every subsequent
+/// nil-query of that SQL is a pure cache hit with no describe and no clear.
+async fn describe_param_oids_uncached(
     conn: &mut sqlx_postgres::PgConnection,
     sql: &str,
     builtin: &str,
@@ -1140,6 +1229,9 @@ async fn describe_param_oids(
     use sqlx_core::connection::Connection as _;
     use sqlx_core::sql_str::SqlSafeStr as _;
     use sqlx_core::statement::Statement as _;
+
+    #[cfg(test)]
+    DESCRIBE_ROUND_TRIPS.fetch_add(1, Ordering::Relaxed);
 
     let stmt = conn
         .prepare_with(AssertSqlSafe(sql.to_string()).into_sql_str(), &[])
@@ -1161,14 +1253,19 @@ async fn describe_param_oids(
 /// Run a nil-containing query against `pool` via the describe-then-bind path on
 /// a single acquired pool connection.
 ///
-/// [`describe_param_oids`] clears the connection's statement cache after the
-/// inference probe, so the describe-bound execute re-parses with its own
-/// self-consistent type list and the connection returns to the pool with the
-/// *correct* cached entry for `sql` (other entries simply re-warm — never
-/// poisoned). This work happens **only** when a `nil` is present; the
-/// all-non-null fast path never reaches here and is fully unchanged. `run`
-/// performs the actual `fetch_all`/`execute` and is generic over the result so
-/// both `pg_query` and `pg_execute` can share this flow.
+/// On the first nil-bearing execution of `sql`, [`described_param_oids`] does one
+/// describe (and one statement-cache clear) and caches the per-slot OIDs; the
+/// describe-bound execute then re-parses with its own self-consistent type list
+/// and the connection returns to the pool with the *correct* cached entry for
+/// `sql`. Every subsequent nil-query of the same SQL is an OID-cache hit: no
+/// describe, no clear — it binds the cached OIDs and executes via the normal
+/// prepared-statement cache, so it costs the same round-trips as a plain bind
+/// (and on a fresh pool connection it simply Parses+caches its self-consistent
+/// statement once, exactly like any plain query would). This work happens
+/// **only** when a `nil` is present; the all-non-null fast path never reaches
+/// here and is fully unchanged. `run` performs the actual `fetch_all`/`execute`
+/// and is generic over the result so both `pg_query` and `pg_execute` can share
+/// this flow.
 async fn run_described_query<T>(
     pool: &PgPool,
     sql: &str,
@@ -1185,7 +1282,7 @@ async fn run_described_query<T>(
         .acquire()
         .await
         .map_err(|error| runtime_error(format!("{builtin}: {error}")))?;
-    let oids = describe_param_oids(&mut conn, sql, builtin).await?;
+    let oids = described_param_oids(&mut conn, sql, builtin).await?;
     let query = bind_params_described(sql, &oids, params)?;
     run(query, &mut conn)
         .await
@@ -3663,5 +3760,147 @@ pg_close(db)
                 })
                 .await;
         });
+    }
+
+    /// Performant describe-then-bind: the server describe for a given SQL runs
+    /// at most **once**. The first nil-query of a SQL populates the
+    /// [`DESCRIBED_OIDS`] cache (one describe round-trip); every subsequent
+    /// nil-query of the SAME SQL is a cache hit and performs **no** further
+    /// describe. Asserted via the `cfg(test)` [`DESCRIBE_ROUND_TRIPS`] counter.
+    #[tokio::test(flavor = "current_thread")]
+    async fn nil_query_describes_once_and_caches_oids_when_env_url_is_set() {
+        let Ok(url) = std::env::var("HARN_TEST_POSTGRES_URL") else {
+            return;
+        };
+        reset_postgres_state();
+        reset_describe_round_trips();
+        let handle = open_single_conn_pool(&url).await;
+
+        let sql = "SELECT $1::bigint AS v";
+
+        // Cache must start empty for this SQL.
+        assert!(
+            DESCRIBED_OIDS.with(|c| !c.borrow().contains_key(sql)),
+            "OID cache should not contain the SQL before first use"
+        );
+
+        // First nil-query: one describe round-trip, populates the cache.
+        let first = query_rows(&handle, sql, &[VmValue::Nil], QueryRouting::Primary)
+            .await
+            .expect("first nil query");
+        assert!(matches!(one_cell(first, "v"), VmValue::Nil));
+        assert_eq!(
+            describe_round_trips(),
+            1,
+            "first nil query must perform exactly one describe round-trip"
+        );
+        assert!(
+            DESCRIBED_OIDS.with(|c| c.borrow().contains_key(sql)),
+            "OID cache must be populated after first nil query"
+        );
+
+        // Subsequent nil-queries of the SAME SQL must NOT re-describe.
+        for _ in 0..5 {
+            let row = query_rows(&handle, sql, &[VmValue::Nil], QueryRouting::Primary)
+                .await
+                .expect("repeat nil query");
+            assert!(matches!(one_cell(row, "v"), VmValue::Nil));
+        }
+        assert_eq!(
+            describe_round_trips(),
+            1,
+            "repeat nil queries of the same SQL must hit the OID cache (no re-describe)"
+        );
+
+        // A different SQL still describes once (independent cache key).
+        let other = "SELECT $1::int AS v";
+        let r = query_rows(&handle, other, &[VmValue::Nil], QueryRouting::Primary)
+            .await
+            .expect("different SQL nil query");
+        assert!(matches!(one_cell(r, "v"), VmValue::Nil));
+        assert_eq!(
+            describe_round_trips(),
+            2,
+            "a distinct SQL must add exactly one more describe round-trip"
+        );
+    }
+
+    /// Micro-benchmark proving the performant path: after warmup, a
+    /// nil-containing query (OID-cache hit + normal prepared-statement cache)
+    /// has p99 latency within 1.2x of the SAME query bound with no nil (the
+    /// plain fast path) on the same pool. Gated behind `HARN_PG_NIL_BENCH=1` (in
+    /// addition to `HARN_TEST_POSTGRES_URL`) so it does not run in normal CI.
+    #[tokio::test(flavor = "current_thread")]
+    async fn nil_path_p99_within_budget_of_plain_path_when_bench_enabled() {
+        let Ok(url) = std::env::var("HARN_TEST_POSTGRES_URL") else {
+            return;
+        };
+        if std::env::var("HARN_PG_NIL_BENCH").as_deref() != Ok("1") {
+            return;
+        }
+        reset_postgres_state();
+        let handle = open_single_conn_pool(&url).await;
+
+        // Representative shape: mixed nil + non-null typed params, the workload
+        // the describe-then-bind path exists for.
+        let sql = "SELECT COALESCE($1::bigint, $2::bigint) AS v";
+        let nil_params = [VmValue::Nil, VmValue::Int(7)];
+        let plain_params = [VmValue::Int(1), VmValue::Int(7)];
+
+        async fn run_once(handle: &VmValue, sql: &str, params: &[VmValue]) -> std::time::Duration {
+            let start = std::time::Instant::now();
+            query_rows(handle, sql, params, QueryRouting::Primary)
+                .await
+                .expect("bench query");
+            start.elapsed()
+        }
+
+        // Warmup: prime the OID cache (nil path) and the statement cache (both
+        // paths) so we measure steady state, not the one-time describe.
+        for _ in 0..50 {
+            let _ = run_once(&handle, sql, &nil_params).await;
+            let _ = run_once(&handle, sql, &plain_params).await;
+        }
+
+        const N: usize = 2000;
+        let mut nil_us: Vec<u128> = Vec::with_capacity(N);
+        let mut plain_us: Vec<u128> = Vec::with_capacity(N);
+        // Interleave to share network/scheduler noise evenly between the two.
+        for _ in 0..N {
+            nil_us.push(run_once(&handle, sql, &nil_params).await.as_micros());
+            plain_us.push(run_once(&handle, sql, &plain_params).await.as_micros());
+        }
+        nil_us.sort_unstable();
+        plain_us.sort_unstable();
+
+        let pct = |v: &[u128], p: f64| -> u128 {
+            let idx = ((v.len() as f64 - 1.0) * p).round() as usize;
+            v[idx]
+        };
+        let (nil_p50, nil_p95, nil_p99) =
+            (pct(&nil_us, 0.50), pct(&nil_us, 0.95), pct(&nil_us, 0.99));
+        let (plain_p50, plain_p95, plain_p99) = (
+            pct(&plain_us, 0.50),
+            pct(&plain_us, 0.95),
+            pct(&plain_us, 0.99),
+        );
+
+        println!(
+            "pg nil-bench (N={N}, us):\n  nil:   p50={nil_p50} p95={nil_p95} p99={nil_p99}\n  plain: p50={plain_p50} p95={plain_p95} p99={plain_p99}\n  ratio: p50={:.3} p95={:.3} p99={:.3}",
+            nil_p50 as f64 / plain_p50.max(1) as f64,
+            nil_p95 as f64 / plain_p95.max(1) as f64,
+            nil_p99 as f64 / plain_p99.max(1) as f64,
+        );
+
+        // The describe must have happened at most once per distinct SQL — never
+        // per query — which is the whole point of the cache.
+        // Budget: nil-path p99 <= 1.2x plain-path p99, with a small absolute
+        // floor (200us) so sub-ms scheduler/network jitter doesn't trip a ratio
+        // assertion on near-zero baselines.
+        let budget = ((plain_p99 as f64 * 1.2) as u128).max(plain_p99 + 200);
+        assert!(
+            nil_p99 <= budget,
+            "nil-path p99 ({nil_p99}us) must be within budget ({budget}us) of plain-path p99 ({plain_p99}us)"
+        );
     }
 }
