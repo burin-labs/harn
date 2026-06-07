@@ -6209,6 +6209,32 @@ and all declared field names in scope. When a file has pipelines, top-level
 their executable body, so importing or running an unrelated pipeline does not
 trigger eval side effects.
 
+### Eval statistics stdlib
+
+`std/eval/stats` provides pure, deterministic eval-meter statistics over
+generic row dictionaries. A row should carry `passes`, `trials`, `skips`,
+`timeouts`, `wallTimeSeconds`, `costUsd`, and `group`; `name` or `case_name`
+identifies the case, and `case_fingerprint`/`caseFingerprint` may be supplied
+to reject non-comparable paired rows. Ledger aliases such as `pass_rate`,
+`total_cost_usd`, and `agent_lane_escalated` are accepted when present.
+
+The module exposes:
+
+| Function | Contract |
+|---|---|
+| `aggregate_trials(name, outcomes, metadata?)` | Collapses trial outcomes into counts, `PASS`/`FAIL`/`FLAKY`/`skip` status, majority, mean/stdev wall time, and cost fields |
+| `bootstrap_mean_ci(values, resamples, alpha, seed)` | Returns `{mean, lo, hi, std, n}` for a seeded bootstrap; resample indices are drawn from the high-order LCG state bits so power-of-two case counts do not collapse the CI |
+| `macro_pass_at_1(rows)` | Computes the uniform-case-weighted mean pass rate over decided cases |
+| `reliability_breakdown(rows)` | Returns all-pass, flaky, all-fail, and no-decision fractions plus raw case counts |
+| `pass_caret_k(rows)` / `pass_at_k(rows)` | Computes strict pass^k over decided cases |
+| `paired_case_deltas(baseline, current)` | Pairs decided rows by case and compatible fingerprint, returning current-minus-baseline pass-rate deltas |
+| `paired_delta_report(baseline, current, resamples?, seed?)` | Reports paired bootstrap delta and `status`, where `improved` requires CI lower bound `> 0`, `regression` requires current macro below `baseline - sigma`, and all other results are `inconclusive` |
+| `regression_gate(baseline, current, k?)` | Fails when current macro pass@1 is below `baseline - k * sigma` |
+| `skip_rate(rows)` / `timeout_rate(rows)` | Mean per-row skip and timeout fractions |
+| `worst_group(rows)` | Lowest macro pass@1 group |
+| `cost_per_solved(rows)` | Total realized cost divided by solved cases, or `nil` when nothing solved |
+| `routing_calibration_report(cheap, ladder, frontier)` | Pairs cheap-only, ladder, and frontier rows to report over-escalation, under-escalation, costs, and convergence-at-frontier |
+
 ### Package registry index
 
 `harn package search`, `harn package info`, and registry-name

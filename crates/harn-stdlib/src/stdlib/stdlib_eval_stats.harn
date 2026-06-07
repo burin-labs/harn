@@ -1,0 +1,868 @@
+/**
+ * std/eval/stats - deterministic statistics for eval ledgers.
+ *
+ * Import with: import "std/eval/stats"
+ */
+fn __float(value) -> float {
+  return to_float(value) ?? 0.0
+}
+
+fn __int(value) -> int {
+  return to_int(value) ?? 0
+}
+
+fn __text(value) -> string {
+  return trim(to_string(value ?? ""))
+}
+
+fn __field(row: dict, keys: list) {
+  for key in keys {
+    let value = row[key]
+    if value != nil {
+      return value
+    }
+  }
+  return nil
+}
+
+fn __pow10_int(digits: int) -> int {
+  var factor = 1
+  var i = 0
+  while i < digits {
+    factor = factor * 10
+    i = i + 1
+  }
+  return factor
+}
+
+fn __round_digits(value: float, digits: int) -> float {
+  let factor = __float(__pow10_int(digits))
+  if factor <= 0.0 {
+    return value
+  }
+  return round(value * factor) / factor
+}
+
+fn __mean(values: list) -> float {
+  if len(values) == 0 {
+    return 0.0
+  }
+  var total = 0.0
+  for value in values {
+    total = total + __float(value)
+  }
+  return total / __float(len(values))
+}
+
+fn __stdev(values: list) -> float {
+  if len(values) == 0 {
+    return 0.0
+  }
+  let mean = __mean(values)
+  var squares = []
+  for value in values {
+    let diff = __float(value) - mean
+    squares = squares + [diff * diff]
+  }
+  return sqrt(__mean(squares))
+}
+
+fn __present_numbers(values: list) -> list {
+  var out = []
+  for value in values {
+    let number = to_float(value)
+    if number != nil {
+      out = out + [number]
+    }
+  }
+  return out
+}
+
+fn __mean_or_nil(values: list) {
+  let known = __present_numbers(values)
+  if len(known) == 0 {
+    return nil
+  }
+  return __mean(known)
+}
+
+fn __stdev_or_nil(values: list) {
+  let known = __present_numbers(values)
+  if len(known) == 0 {
+    return nil
+  }
+  return __stdev(known)
+}
+
+fn __row_passes(row: dict) -> int {
+  return __int(__field(row, ["passes", "pass_count", "passCount"]))
+}
+
+fn __row_skips(row: dict) -> int {
+  return __int(__field(row, ["skips", "skip_count", "skipCount"]))
+}
+
+fn __row_timeouts(row: dict) -> int {
+  return __int(__field(row, ["timeouts", "timeout_count", "timeoutCount"]))
+}
+
+fn __row_trials(row: dict) -> int {
+  let explicit = __field(row, ["trials", "trial_count", "trialCount"])
+  if explicit != nil {
+    return __int(explicit)
+  }
+  return __row_passes(row) + __int(__field(row, ["fails", "fail_count", "failCount"])) + __row_skips(row)
+}
+
+fn __row_fails(row: dict) -> int {
+  let explicit = __field(row, ["fails", "fail_count", "failCount"])
+  if explicit != nil {
+    return __int(explicit)
+  }
+  let inferred = __row_trials(row) - __row_passes(row) - __row_skips(row)
+  if inferred < 0 {
+    return 0
+  }
+  return inferred
+}
+
+fn __row_decided(row: dict) -> int {
+  return __row_passes(row) + __row_fails(row)
+}
+
+fn __row_pass_rate(row: dict) -> float {
+  let explicit = __field(row, ["pass_rate", "passRate"])
+  if explicit != nil {
+    return __float(explicit)
+  }
+  let trials = __row_trials(row)
+  if trials <= 0 {
+    return 0.0
+  }
+  return __float(__row_passes(row)) / __float(trials)
+}
+
+fn __row_case_name(row: dict) -> string {
+  return __text(__field(row, ["case_name", "caseName", "name", "id"]))
+}
+
+fn __row_fingerprint(row: dict) -> string {
+  return __text(__field(row, ["case_fingerprint", "caseFingerprint", "fingerprint"]))
+}
+
+fn __group_prefix(name: string) -> string {
+  let parts = split(name ?? "", "-")
+  if len(parts) == 0 {
+    return name ?? ""
+  }
+  return parts[0]
+}
+
+fn __row_group(row: dict) -> string {
+  let explicit = __text(__field(row, ["group", "language", "bucket"]))
+  if explicit != "" {
+    return explicit
+  }
+  return __group_prefix(__row_case_name(row))
+}
+
+fn __row_total_cost_usd(row: dict) -> float {
+  let total = __field(row, ["total_cost_usd", "totalCostUsd", "costUsd", "cost_usd"])
+  if total != nil {
+    return __float(total)
+  }
+  let mean = __field(row, ["mean_cost_usd", "meanCostUsd"])
+  if mean != nil {
+    return __float(mean) * __float(__row_trials(row))
+  }
+  return 0.0
+}
+
+fn __row_solved(row: dict) -> bool {
+  return __row_pass_rate(row) > 0.0
+}
+
+fn __row_all_failed(row: dict) -> bool {
+  return __row_passes(row) == 0 && __row_decided(row) > 0
+}
+
+fn __row_escalated(row: dict) -> bool {
+  let explicit = __field(row, ["escalated", "agent_lane_escalated", "agentLaneEscalated"])
+  if explicit != nil {
+    return explicit
+  }
+  return __int(__field(row, ["escalation_count", "agent_lane_escalation_count", "agentLaneEscalationCount"]))
+    > 0
+}
+
+fn __is_no_decision(row: dict) -> bool {
+  return __row_trials(row) <= 0 || __text(row?.status) == "skip" || __row_decided(row) <= 0
+}
+
+fn __decided_rows(rows: list) -> list {
+  var out = []
+  for row in rows {
+    if !__is_no_decision(row) {
+      out = out + [row]
+    }
+  }
+  return out
+}
+
+fn __pass_rates(rows: list) -> list {
+  var out = []
+  for row in rows {
+    out = out + [__row_pass_rate(row)]
+  }
+  return out
+}
+
+fn __rate(count: int, denom: int) -> float {
+  if denom <= 0 {
+    return 0.0
+  }
+  return __float(count) / __float(denom)
+}
+
+fn __rows_by_case(rows: list) -> dict {
+  var out = {}
+  for row in rows {
+    let name = __row_case_name(row)
+    if name != "" && out[name] == nil {
+      out = out + {[name]: row}
+    }
+  }
+  return out
+}
+
+fn __unique_rows_by_case(rows: list) -> list {
+  var seen = {}
+  var out = []
+  for row in rows {
+    let name = __row_case_name(row)
+    if name == "" || seen[name] ?? false {
+      continue
+    }
+    seen = seen + {[name]: true}
+    out = out + [row]
+  }
+  return out
+}
+
+fn __fingerprints_match(lhs: dict, rhs: dict) -> bool {
+  let left = __row_fingerprint(lhs)
+  let right = __row_fingerprint(rhs)
+  return left == "" || right == "" || left == right
+}
+
+fn __lcg_next(state: int) -> int {
+  return (state * 1103515245 + 12345) % 2147483648
+}
+
+fn __clamp_index(idx: int, size: int) -> int {
+  if idx < 0 {
+    return 0
+  }
+  if idx >= size {
+    return size - 1
+  }
+  return idx
+}
+
+fn __outcome_verification(outcome: dict) -> string {
+  return __text(__field(outcome, ["verification", "status", "outcome"]))
+}
+
+fn __outcome_timed_out(outcome: dict) -> bool {
+  let explicit = __field(outcome, ["timedOut", "timed_out", "timeout"])
+  if explicit != nil {
+    return explicit
+  }
+  return contains(__text(__field(outcome, ["outcomeKind", "outcome_kind", "kind"])).lower(), "timeout")
+}
+
+fn __outcome_number(outcome: dict, keys: list) {
+  return __field(outcome, keys)
+}
+
+/**
+ * Aggregate trial outcomes into a generic eval ledger row.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: aggregate_trials("case", [{verification: "PASS", wallTimeSeconds: 1.0, costUsd: 0.01}], {group: "python"})
+ */
+pub fn aggregate_trials(name: string, outcomes: list, metadata: dict = {}) -> dict {
+  var pass_count = 0
+  var fail_count = 0
+  var skip_count = 0
+  var timeout_count = 0
+  var wall_seconds = []
+  var costs = []
+  var total_cost = 0.0
+  for outcome in outcomes {
+    let verification = __outcome_verification(outcome)
+    if verification == "PASS" {
+      pass_count = pass_count + 1
+    } else if verification == "FAIL" {
+      fail_count = fail_count + 1
+    } else if verification.lower() == "skip" {
+      skip_count = skip_count + 1
+    }
+    if __outcome_timed_out(outcome) {
+      timeout_count = timeout_count + 1
+    }
+    wall_seconds = wall_seconds + [__float(__outcome_number(outcome, ["wallTimeSeconds", "wall_time_seconds"]))]
+    let cost = __outcome_number(outcome, ["costUsd", "cost_usd"])
+    if cost != nil {
+      let cost_float = __float(cost)
+      costs = costs + [cost_float]
+      total_cost = total_cost + cost_float
+    }
+  }
+  let decided = pass_count + fail_count
+  var status = "skip"
+  var majority = nil
+  if decided == 0 {
+    status = "skip"
+  } else if fail_count == 0 {
+    status = "PASS"
+  } else if pass_count == 0 {
+    status = "FAIL"
+  } else {
+    status = "FLAKY"
+    majority = if pass_count > fail_count {
+      "PASS"
+    } else {
+      "FAIL"
+    }
+  }
+  let trials = len(outcomes)
+  let pass_rate = if trials <= 0 {
+    0.0
+  } else {
+    __round_digits(__float(pass_count) / __float(trials), 4)
+  }
+  let mean_wall = __round_digits(__mean(wall_seconds), 2)
+  let stdev_wall = __round_digits(__stdev(wall_seconds), 2)
+  let mean_cost = __mean_or_nil(costs)
+  let stdev_cost = __stdev_or_nil(costs)
+  let group = __text(metadata?.group ?? metadata?.language ?? "")
+  let case_fingerprint = metadata?.caseFingerprint ?? metadata?.case_fingerprint ?? nil
+  return {
+    name: name,
+    case_name: name,
+    case_fingerprint: case_fingerprint,
+    group: group,
+    trials: trials,
+    passes: pass_count,
+    fails: fail_count,
+    skips: skip_count,
+    timeouts: timeout_count,
+    pass_rate: pass_rate,
+    status: status,
+    majority: majority,
+    wallTimeSeconds: mean_wall,
+    costUsd: __round_digits(total_cost, 6),
+    mean_wall_time_seconds: mean_wall,
+    stdev_wall_time_seconds: stdev_wall,
+    mean_cost_usd: if mean_cost == nil {
+      nil
+    } else {
+      __round_digits(mean_cost, 6)
+    },
+    stdev_cost_usd: if stdev_cost == nil {
+      nil
+    } else {
+      __round_digits(stdev_cost, 6)
+    },
+    total_cost_usd: __round_digits(total_cost, 6),
+    metadata: metadata,
+    outcomes: outcomes,
+  }
+}
+
+/**
+ * Deterministically bootstrap a mean and return `{mean, lo, hi, std, n}`.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: bootstrap_mean_ci([0.0, 1.0], 100, 0.05, 42)
+ */
+pub fn bootstrap_mean_ci(values: list, resamples: int, alpha: float, seed: int) -> dict {
+  let n = len(values)
+  if n == 0 {
+    return {mean: 0.0, lo: 0.0, hi: 0.0, std: 0.0, n: 0}
+  }
+  if resamples <= 0 {
+    let point = __mean(values)
+    return {mean: point, lo: point, hi: point, std: 0.0, n: n}
+  }
+  var state = if seed <= 0 {
+    1
+  } else {
+    seed
+  }
+  var means = []
+  var b = 0
+  while b < resamples {
+    var sum = 0.0
+    var i = 0
+    while i < n {
+      state = __lcg_next(state)
+      // Use the high-order state bits. Low bits of this LCG cycle too evenly
+      // for power-of-two sample sizes and can collapse bootstrap variance.
+      let idx = __clamp_index(to_int(__float(state) / 2147483648.0 * __float(n)) ?? 0, n)
+      sum = sum + __float(values[idx])
+      i = i + 1
+    }
+    means = means + [sum / __float(n)]
+    b = b + 1
+  }
+  let sorted = means.sort()
+  let lo_idx = __clamp_index(to_int(round(alpha / 2.0 * __float(resamples))) ?? 0, resamples)
+  let hi_idx = __clamp_index(to_int(round((1.0 - alpha / 2.0) * __float(resamples))) ?? (resamples - 1), resamples)
+  return {
+    mean: __mean(values),
+    lo: __float(sorted[lo_idx]),
+    hi: __float(sorted[hi_idx]),
+    std: __stdev(means),
+    n: n,
+  }
+}
+
+/**
+ * Return macro pass@1 over decided cases with uniform case weights.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: macro_pass_at_1([{passes: 1, trials: 1, skips: 0}, {passes: 0, trials: 1, skips: 0}])
+ */
+pub fn macro_pass_at_1(rows: list) -> float {
+  let decided = __decided_rows(rows)
+  if len(decided) == 0 {
+    return 0.0
+  }
+  return __mean(__pass_rates(decided))
+}
+
+/**
+ * Break rows into all-pass, flaky, all-fail, and no-decision buckets.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: reliability_breakdown([{passes: 1, trials: 1, skips: 0}])
+ */
+pub fn reliability_breakdown(rows: list) -> dict {
+  let n = len(rows)
+  if n == 0 {
+    return {
+      all_pass: 0.0,
+      flaky: 0.0,
+      all_fail: 0.0,
+      no_decision: 0.0,
+      cases: 0,
+      all_pass_cases: 0,
+      flaky_cases: 0,
+      all_fail_cases: 0,
+      no_decision_cases: 0,
+      decided_cases: 0,
+    }
+  }
+  var all_pass = 0
+  var flaky = 0
+  var all_fail = 0
+  var no_decision = 0
+  for row in rows {
+    let passes = __row_passes(row)
+    let decided = __row_decided(row)
+    if __is_no_decision(row) {
+      no_decision = no_decision + 1
+    } else if passes == decided {
+      all_pass = all_pass + 1
+    } else if passes == 0 {
+      all_fail = all_fail + 1
+    } else {
+      flaky = flaky + 1
+    }
+  }
+  let denom = __float(n)
+  return {
+    all_pass: __float(all_pass) / denom,
+    flaky: __float(flaky) / denom,
+    all_fail: __float(all_fail) / denom,
+    no_decision: __float(no_decision) / denom,
+    cases: n,
+    all_pass_cases: all_pass,
+    flaky_cases: flaky,
+    all_fail_cases: all_fail,
+    no_decision_cases: no_decision,
+    decided_cases: all_pass + flaky + all_fail,
+  }
+}
+
+/**
+ * Return strict pass^k over decided cases.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: pass_caret_k([{passes: 2, trials: 2, skips: 0}])
+ */
+pub fn pass_caret_k(rows: list) -> float {
+  let rel = reliability_breakdown(rows)
+  if rel.decided_cases <= 0 {
+    return 0.0
+  }
+  return __float(rel.all_pass_cases) / __float(rel.decided_cases)
+}
+
+/**
+ * Alias for `pass_caret_k`.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: pass_at_k([{passes: 2, trials: 2, skips: 0}])
+ */
+pub fn pass_at_k(rows: list) -> float {
+  return pass_caret_k(rows)
+}
+
+/**
+ * Return the mean per-row skip fraction.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: skip_rate([{passes: 0, trials: 2, skips: 1}])
+ */
+pub fn skip_rate(rows: list) -> float {
+  if len(rows) == 0 {
+    return 0.0
+  }
+  var fractions = []
+  for row in rows {
+    let trials = __float(__row_trials(row))
+    fractions = fractions
+      + [
+      if trials > 0.0 {
+        __float(__row_skips(row)) / trials
+      } else {
+        0.0
+      },
+    ]
+  }
+  return __mean(fractions)
+}
+
+/**
+ * Return the mean per-row timeout fraction.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: timeout_rate([{passes: 0, trials: 2, skips: 0, timeouts: 1}])
+ */
+pub fn timeout_rate(rows: list) -> float {
+  if len(rows) == 0 {
+    return 0.0
+  }
+  var fractions = []
+  for row in rows {
+    let trials = __float(__row_trials(row))
+    fractions = fractions
+      + [
+      if trials > 0.0 {
+        __float(__row_timeouts(row)) / trials
+      } else {
+        0.0
+      },
+    ]
+  }
+  return __mean(fractions)
+}
+
+/**
+ * Return total realized row cost divided by solved cases.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: cost_per_solved([{passes: 1, trials: 1, skips: 0, costUsd: 0.25}])
+ */
+pub fn cost_per_solved(rows: list) {
+  var solved_cases = 0
+  var total_cost = 0.0
+  for row in rows {
+    total_cost = total_cost + __row_total_cost_usd(row)
+    if __row_solved(row) {
+      solved_cases = solved_cases + 1
+    }
+  }
+  if solved_cases <= 0 {
+    return nil
+  }
+  return total_cost / __float(solved_cases)
+}
+
+/**
+ * Return the group with the lowest macro pass@1.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: worst_group([{group: "a", passes: 0, trials: 1, skips: 0}])
+ */
+pub fn worst_group(rows: list) -> dict {
+  var groups = []
+  for row in rows {
+    let group = __row_group(row)
+    if !contains(groups, group) {
+      groups = groups + [group]
+    }
+  }
+  if len(groups) == 0 {
+    return {group: nil, pass_rate: 0.0, cases: 0}
+  }
+  var worst = nil
+  var worst_rate = 2.0
+  var worst_cases = 0
+  for group in groups {
+    var grouped = []
+    for row in rows {
+      if __row_group(row) == group {
+        grouped = grouped + [row]
+      }
+    }
+    let rate = macro_pass_at_1(grouped)
+    if rate < worst_rate {
+      worst_rate = rate
+      worst = group
+      worst_cases = len(grouped)
+    }
+  }
+  return {
+    group: worst,
+    pass_rate: if worst == nil {
+      0.0
+    } else {
+      worst_rate
+    },
+    cases: worst_cases,
+  }
+}
+
+/**
+ * Return paired per-case pass-rate deltas for comparable decided rows.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: paired_case_deltas([{name: "a", passes: 0, trials: 1}], [{name: "a", passes: 1, trials: 1}])
+ */
+pub fn paired_case_deltas(baseline_rows: list, current_rows: list) -> list {
+  var baseline = {}
+  for row in __decided_rows(baseline_rows) {
+    let name = __row_case_name(row)
+    baseline = baseline
+      + {[name]: {pass_rate: __row_pass_rate(row), case_fingerprint: __row_fingerprint(row)}}
+  }
+  var deltas = []
+  for row in __decided_rows(current_rows) {
+    let name = __row_case_name(row)
+    let base = baseline[name]
+    let base_fingerprint = __text(base?.case_fingerprint)
+    let current_fingerprint = __row_fingerprint(row)
+    let comparable = base != nil
+      && (base_fingerprint == "" || current_fingerprint == "" || base_fingerprint == current_fingerprint)
+    if comparable {
+      deltas = deltas + [__row_pass_rate(row) - __float(base.pass_rate)]
+    }
+  }
+  return deltas
+}
+
+/**
+ * Return paired bootstrap delta and verdict fields for two cohorts.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: paired_delta_report([{name: "a", passes: 0, trials: 1}], [{name: "a", passes: 1, trials: 1}], 100, 7)
+ */
+pub fn paired_delta_report(
+  baseline_rows: list,
+  current_rows: list,
+  resamples: int = 2000,
+  seed: int = 1234567,
+) -> dict {
+  let deltas = paired_case_deltas(baseline_rows, current_rows)
+  if len(deltas) == 0 {
+    return {
+      n_cases: 0,
+      mean_delta: 0.0,
+      ci_lo: 0.0,
+      ci_hi: 0.0,
+      improved: false,
+      regressed: false,
+      regression: false,
+      status: "inconclusive",
+    }
+  }
+  let ci = bootstrap_mean_ci(deltas, resamples, 0.05, seed)
+  let baseline_macro = macro_pass_at_1(baseline_rows)
+  let current_macro = macro_pass_at_1(current_rows)
+  let baseline_ci = bootstrap_mean_ci(__pass_rates(__decided_rows(baseline_rows)), resamples, 0.05, 987654)
+  let threshold = baseline_macro - baseline_ci.std
+  let improved = ci.lo > 0.0
+  let regression = current_macro < threshold
+  return {
+    n_cases: len(deltas),
+    mean_delta: ci.mean,
+    ci_lo: ci.lo,
+    ci_hi: ci.hi,
+    baseline_macro: baseline_macro,
+    current_macro: current_macro,
+    baseline_std: baseline_ci.std,
+    regression_threshold: threshold,
+    improved: improved,
+    regressed: ci.hi < 0.0,
+    regression: regression,
+    status: if improved {
+      "improved"
+    } else if regression {
+      "regression"
+    } else {
+      "inconclusive"
+    },
+  }
+}
+
+/**
+ * Return a baseline-standard-deviation-aware regression gate.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: regression_gate([{passes: 1, trials: 1}], [{passes: 0, trials: 1}])
+ */
+pub fn regression_gate(baseline_rows: list, current_rows: list, k: float = 1.0) -> dict {
+  let baseline_macro = macro_pass_at_1(baseline_rows)
+  let current_macro = macro_pass_at_1(current_rows)
+  let ci = bootstrap_mean_ci(__pass_rates(__decided_rows(baseline_rows)), 2000, 0.05, 987654)
+  let threshold = baseline_macro - k * ci.std
+  let passed = current_macro >= threshold
+  return {
+    baseline_macro: baseline_macro,
+    current_macro: current_macro,
+    std: ci.std,
+    threshold: threshold,
+    passed: passed,
+    status: if passed {
+      "passed"
+    } else {
+      "regression"
+    },
+  }
+}
+
+/**
+ * Compute routing calibration from paired cheap, ladder, and frontier rows.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: routing_calibration_report([{name: "a"}], [{name: "a"}], [{name: "a"}])
+ */
+pub fn routing_calibration_report(cheap_rows: list, ladder_rows: list, frontier_rows: list) -> dict {
+  let cheap_index = __rows_by_case(cheap_rows)
+  let frontier_index = __rows_by_case(frontier_rows)
+  var paired_ladder = []
+  var paired_cheap = []
+  var paired_frontier = []
+  var escalated_ladder = []
+  var paired_case_names = []
+  var missing_reference_cases = []
+  var fingerprint_mismatch_cases = []
+  var over_escalated_case_names = []
+  var under_escalated_case_names = []
+  var escalated_cases = 0
+  var non_escalated_cases = 0
+  var over_escalated_cases = 0
+  var under_escalated_cases = 0
+  for ladder in __unique_rows_by_case(ladder_rows) {
+    let name = __row_case_name(ladder)
+    let cheap = cheap_index[name]
+    let frontier = frontier_index[name]
+    if cheap == nil || frontier == nil {
+      missing_reference_cases = missing_reference_cases + [name]
+      continue
+    }
+    if !__fingerprints_match(ladder, cheap) || !__fingerprints_match(ladder, frontier) {
+      fingerprint_mismatch_cases = fingerprint_mismatch_cases + [name]
+      continue
+    }
+    paired_ladder = paired_ladder + [ladder]
+    paired_cheap = paired_cheap + [cheap]
+    paired_frontier = paired_frontier + [frontier]
+    paired_case_names = paired_case_names + [name]
+    if __row_escalated(ladder) {
+      escalated_cases = escalated_cases + 1
+      escalated_ladder = escalated_ladder + [ladder]
+      if __row_solved(cheap) {
+        over_escalated_cases = over_escalated_cases + 1
+        over_escalated_case_names = over_escalated_case_names + [name]
+      }
+    } else {
+      non_escalated_cases = non_escalated_cases + 1
+      if __row_all_failed(ladder) && __row_solved(frontier) {
+        under_escalated_cases = under_escalated_cases + 1
+        under_escalated_case_names = under_escalated_case_names + [name]
+      }
+    }
+  }
+  return {
+    paired_cases: len(paired_ladder),
+    paired_case_names: paired_case_names,
+    missing_reference_cases: missing_reference_cases,
+    missing_reference_count: len(missing_reference_cases),
+    fingerprint_mismatch_cases: fingerprint_mismatch_cases,
+    fingerprint_mismatch_count: len(fingerprint_mismatch_cases),
+    escalation_rate: __rate(escalated_cases, len(paired_ladder)),
+    escalated_cases: escalated_cases,
+    non_escalated_cases: non_escalated_cases,
+    over_escalation_rate: __rate(over_escalated_cases, escalated_cases),
+    over_escalated_cases: over_escalated_cases,
+    over_escalated_case_names: over_escalated_case_names,
+    under_escalation_rate: __rate(under_escalated_cases, non_escalated_cases),
+    under_escalated_cases: under_escalated_cases,
+    under_escalated_case_names: under_escalated_case_names,
+    cost_per_solved_usd: cost_per_solved(paired_ladder),
+    cheap_cost_per_solved_usd: cost_per_solved(paired_cheap),
+    frontier_cost_per_solved_usd: cost_per_solved(paired_frontier),
+    convergence_at_frontier: if escalated_cases > 0 {
+      macro_pass_at_1(escalated_ladder)
+    } else {
+      0.0
+    },
+  }
+}
