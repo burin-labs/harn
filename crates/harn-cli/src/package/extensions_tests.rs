@@ -928,6 +928,72 @@ secrets = { signing_secret = "github/webhook-secret" }
 }
 
 #[tokio::test(flavor = "current_thread")]
+async fn collect_manifest_triggers_accepts_eval_pack_handler_uri() {
+    let tmp = tempfile::tempdir().unwrap();
+    fs::create_dir_all(tmp.path().join("evals")).unwrap();
+    let harn_file = write_trigger_project(
+        tmp.path(),
+        r#"
+[package]
+name = "workspace"
+evals = ["evals/nightly.toml"]
+
+[[triggers]]
+id = "nightly-eval"
+kind = "cron"
+provider = "cron"
+match = { events = ["cron.tick"] }
+handler = "eval_pack://nightly"
+schedule = "0 3 * * *"
+timezone = "UTC"
+budget = { daily_cost_usd = 0.50, max_concurrent = 1 }
+ledger = { namespace = "nightly-trigger" }
+"#,
+        None,
+    );
+    fs::write(
+        tmp.path().join("evals/nightly.toml"),
+        r#"
+version = 1
+id = "nightly"
+trials = 1
+
+[metadata]
+model = "mock-model"
+commit = "commit-a"
+branch = "main"
+
+[[cases]]
+id = "case-a"
+run = "run.json"
+"#,
+    )
+    .unwrap();
+
+    let mut vm = test_vm();
+    let collected = collect_manifest_triggers(&mut vm, &load_runtime_extensions(&harn_file))
+        .await
+        .expect("trigger collection succeeds");
+
+    assert_eq!(collected.len(), 1);
+    assert!(matches!(
+        &collected[0].handler,
+        CollectedTriggerHandler::EvalPack {
+            target,
+            manifest,
+            ledger_options,
+        } if target == "nightly"
+            && manifest.id == "nightly"
+            && ledger_options.as_ref().and_then(|value| value.get("namespace")).and_then(|value| value.as_str())
+                == Some("nightly-trigger")
+    ));
+    let binding = manifest_trigger_binding_spec(collected.into_iter().next().unwrap());
+    assert_eq!(binding.handler.kind(), "eval_pack");
+    assert_eq!(binding.daily_cost_usd, Some(0.50));
+    assert_eq!(binding.max_concurrent, Some(1));
+}
+
+#[tokio::test(flavor = "current_thread")]
 async fn collect_manifest_triggers_accepts_harn_provider_override() {
     let tmp = tempfile::tempdir().unwrap();
     let harn_file = write_trigger_project(

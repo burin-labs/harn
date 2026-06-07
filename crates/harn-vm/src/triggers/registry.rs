@@ -151,6 +151,11 @@ pub enum TriggerHandlerSpec {
     Persona {
         binding: crate::PersonaRuntimeBinding,
     },
+    EvalPack {
+        target: String,
+        manifest: Box<crate::orchestration::EvalPackManifest>,
+        ledger_options: Option<serde_json::Value>,
+    },
     AutoResume {
         worker_id: String,
     },
@@ -287,6 +292,16 @@ impl std::fmt::Debug for TriggerHandlerSpec {
                 .debug_struct("Persona")
                 .field("name", &binding.name)
                 .finish(),
+            Self::EvalPack {
+                target,
+                manifest,
+                ledger_options,
+            } => f
+                .debug_struct("EvalPack")
+                .field("target", target)
+                .field("pack_id", &manifest.id)
+                .field("ledger_options", ledger_options)
+                .finish(),
             Self::AutoResume { worker_id } => f
                 .debug_struct("AutoResume")
                 .field("worker_id", worker_id)
@@ -341,6 +356,7 @@ impl TriggerHandlerSpec {
             Self::A2a { .. } => "a2a",
             Self::Worker { .. } => "worker",
             Self::Persona { .. } => "persona",
+            Self::EvalPack { .. } => "eval_pack",
             Self::AutoResume { .. } => "auto_resume",
             Self::SpawnToPool { .. } => "spawn_to_pool",
             Self::ReminderInject { .. } => "reminder_inject",
@@ -747,6 +763,25 @@ pub fn note_orchestrator_budget_cost(cost_usd_micros: u64) {
     });
 }
 
+pub(crate) fn note_binding_budget_cost(binding: &TriggerBinding, cost_usd_micros: u64) {
+    if cost_usd_micros == 0 {
+        return;
+    }
+    reset_binding_budget_windows(binding);
+    binding
+        .metrics
+        .cost_total_usd_micros
+        .fetch_add(cost_usd_micros, Ordering::Relaxed);
+    binding
+        .metrics
+        .cost_today_usd_micros
+        .fetch_add(cost_usd_micros, Ordering::Relaxed);
+    binding
+        .metrics
+        .cost_hour_usd_micros
+        .fetch_add(cost_usd_micros, Ordering::Relaxed);
+}
+
 pub fn orchestrator_budget_would_exceed(expected_cost_usd_micros: u64) -> Option<&'static str> {
     ORCHESTRATOR_BUDGET.with(|slot| {
         let mut state = slot.borrow_mut();
@@ -1135,7 +1170,10 @@ pub(crate) fn matching_bindings(event: &super::TriggerEvent) -> Vec<Arc<TriggerB
                     continue;
                 }
                 if !binding.match_events.is_empty()
-                    && !binding.match_events.iter().any(|kind| kind == &event.kind)
+                    && !binding
+                        .match_events
+                        .iter()
+                        .any(|kind| trigger_event_kind_matches(event, kind))
                 {
                     continue;
                 }
@@ -1151,6 +1189,16 @@ pub(crate) fn matching_bindings(event: &super::TriggerEvent) -> Vec<Arc<TriggerB
         });
         bindings
     })
+}
+
+fn trigger_event_kind_matches(event: &super::TriggerEvent, expected: &str) -> bool {
+    if expected == event.kind {
+        return true;
+    }
+    expected
+        .strip_prefix(event.provider.as_str())
+        .and_then(|rest| rest.strip_prefix('.'))
+        .is_some_and(|kind| kind == event.kind)
 }
 
 pub async fn install_manifest_triggers(

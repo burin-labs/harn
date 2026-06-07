@@ -189,33 +189,29 @@ fn describe_trigger(
     cache: &mut ModuleCache,
 ) -> Result<RouteTrigger, String> {
     let handler_uri = parse_trigger_handler_uri(trigger).map_err(|error| error.to_string())?;
+    use TriggerHandlerUri::*;
     let mut capabilities = BTreeSet::new();
     let mut module = None;
     let mut vendor_locked = false;
     let mut framework_overhead_tokens = 0u64;
-    let handler = match &handler_uri {
-        TriggerHandlerUri::Local(reference) => {
+    let (handler, dispatch_capability) = match &handler_uri {
+        Local(reference) => {
             let local = analyze_local_function(trigger, reference, manifest_dir, cache)?;
             module = local.module;
             capabilities.extend(local.capabilities);
             vendor_locked |= local.vendor_locked;
             framework_overhead_tokens =
                 framework_overhead_tokens.saturating_add(local.framework_overhead_tokens);
-            reference.function_name.clone()
+            (reference.function_name.clone(), None)
         }
-        TriggerHandlerUri::A2a { target, .. } => {
-            capabilities.insert("worker.dispatch".to_string());
-            format!("a2a://{target}")
-        }
-        TriggerHandlerUri::Worker { queue } => {
-            capabilities.insert("worker.dispatch".to_string());
-            format!("worker://{queue}")
-        }
-        TriggerHandlerUri::Persona { name } => {
-            capabilities.insert("persona.dispatch".to_string());
-            format!("persona://{name}")
-        }
+        A2a { target, .. } => (format!("a2a://{target}"), Some("worker.dispatch")),
+        Worker { queue } => (format!("worker://{queue}"), Some("worker.dispatch")),
+        Persona { name } => (format!("persona://{name}"), Some("persona.dispatch")),
+        EvalPack { target } => (format!("eval_pack://{target}"), Some("eval.dispatch")),
     };
+    if let Some(capability) = dispatch_capability {
+        capabilities.insert(capability.to_string());
+    }
 
     if let Some(when_raw) = trigger.when.as_deref() {
         let reference = parse_local_trigger_ref(when_raw, "when", trigger)

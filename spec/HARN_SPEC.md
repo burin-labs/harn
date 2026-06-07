@@ -6315,6 +6315,16 @@ provenance. Lower-level ledger builtins also accept `split`, `case`,
 `eval_ledger_read`, `eval_ledger_append_rows`,
 `eval_ledger_prior_commit_rows`, and `eval_ledger_resolve_resume_plan`.
 
+Declarative trigger manifests may bind a trigger directly to an eval pack with
+`handler = "eval_pack://<target>"`. A path-like target (`eval_pack://evals/a.toml`
+or an absolute path) loads that TOML/JSON pack relative to `harn.toml`; a bare
+target resolves by pack `id`, `name`, or file stem through `[package].evals` or
+the package's default `harn.eval.toml`. Dispatch runs the normalized manifest
+through the same `eval_pack_run` path as scripts, so cron ticks inherit trigger
+dedupe, retry, DLQ, replay/cancel, budget, and flow-control handling without a
+separate scheduler. Optional trigger-local `ledger = { ... }` or
+`eval_options = { ... }` fields are passed as the `eval_pack_run` options.
+
 Manifests may declare named partitions with a `split` block:
 
 ```toml

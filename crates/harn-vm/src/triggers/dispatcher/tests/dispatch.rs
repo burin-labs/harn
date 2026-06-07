@@ -113,6 +113,118 @@ pub fn local_fn(event: TriggerEvent) -> dict {
         .await;
 }
 
+#[tokio::test(flavor = "current_thread")]
+async fn eval_pack_handler_runs_from_cron_tick_and_sheds_after_budget() {
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            crate::reset_thread_local_state();
+            let dir = tempfile::tempdir().expect("tempdir");
+            let log = install_default_for_base_dir(dir.path()).expect("install event log");
+            let manifest = crate::triggers::test_util::scheduled_eval_manifest(dir.path())
+                .expect("scheduled eval manifest normalizes");
+
+            let mut vm = Vm::new();
+            register_vm_stdlib(&mut vm);
+            vm.set_source_dir(dir.path());
+            install_manifest_triggers(vec![TriggerBindingSpec {
+                id: "nightly-eval".to_string(),
+                source: TriggerBindingSource::Manifest,
+                kind: "cron".to_string(),
+                provider: ProviderId::from("cron"),
+                autonomy_tier: crate::AutonomyTier::Suggest,
+                handler: TriggerHandlerSpec::EvalPack {
+                    target: "scheduled-eval".to_string(),
+                    manifest: Box::new(manifest),
+                    ledger_options: None,
+                },
+                dispatch_priority: crate::WorkerQueuePriority::Normal,
+                when: None,
+                when_budget: None,
+                retry: TriggerRetryConfig::default(),
+                match_events: vec!["cron.tick".to_string()],
+                dedupe_key: None,
+                dedupe_retention_days: crate::triggers::DEFAULT_INBOX_RETENTION_DAYS,
+                filter: None,
+                daily_cost_usd: Some(0.10),
+                hourly_cost_usd: None,
+                max_autonomous_decisions_per_hour: None,
+                max_autonomous_decisions_per_day: None,
+                on_budget_exhausted: crate::TriggerBudgetExhaustionStrategy::False,
+                max_concurrent: None,
+                flow_control: crate::triggers::TriggerFlowControlConfig {
+                    concurrency: Some(crate::triggers::TriggerConcurrencyConfig {
+                        key: None,
+                        max: 1,
+                    }),
+                    ..Default::default()
+                },
+                aggregation: None,
+                manifest_path: None,
+                package_name: Some("workspace".to_string()),
+                definition_fingerprint: "fp:scheduled-eval".to_string(),
+            }])
+            .await
+            .expect("install eval trigger");
+
+            let dispatcher = Dispatcher::with_event_log(vm, log.clone());
+            let first = dispatcher
+                .dispatch_event(crate::triggers::test_util::scheduled_eval_cron_tick(
+                    "nightly-eval",
+                    "tick-1",
+                ))
+                .await
+                .expect("first tick dispatches");
+
+            assert_eq!(first.len(), 1);
+            assert_eq!(first[0].status, DispatchStatus::Succeeded);
+            let report = first[0].result.as_ref().expect("eval report");
+            assert_eq!(report["pack_id"], serde_json::json!("scheduled-eval"));
+            assert_eq!(report["pass"], serde_json::json!(true));
+            assert_eq!(
+                report["run_state"]["ledger_rows_inserted"],
+                serde_json::json!(1)
+            );
+
+            let ledger = crate::orchestration::eval_ledger_read_report(Some(serde_json::json!({
+                "namespace": "scheduled-eval",
+            })))
+            .expect("ledger read");
+            assert_eq!(ledger.rows.len(), 1);
+            assert_eq!(ledger.rows[0].suite, "scheduled-eval");
+            assert_eq!(ledger.rows[0].provenance.commit, "commit-a");
+
+            let second = dispatcher
+                .dispatch_event(crate::triggers::test_util::scheduled_eval_cron_tick(
+                    "nightly-eval",
+                    "tick-2",
+                ))
+                .await
+                .expect("second tick sheds");
+            assert_eq!(second.len(), 1);
+            assert_eq!(second[0].status, DispatchStatus::Skipped);
+            assert_eq!(
+                second[0].result,
+                Some(serde_json::json!({
+                    "skipped": true,
+                    "budget": "daily_budget_exceeded",
+                }))
+            );
+
+            let outbox = read_topic(log.clone(), "trigger.outbox").await;
+            let skipped = outbox
+                .iter()
+                .find(|(_, event)| event.kind == "dispatch_skipped")
+                .expect("budget-shed tick emits skipped outbox record");
+            assert_eq!(skipped.1.payload["skip_stage"], serde_json::json!("budget"));
+            assert_eq!(
+                skipped.1.payload["detail"]["budget"],
+                serde_json::json!("daily_budget_exceeded")
+            );
+        })
+        .await;
+}
+
 #[tokio::test(start_paused = true, flavor = "current_thread")]
 async fn a2a_handler_returns_inline_result_and_emits_a2a_action_graph() {
     let local = tokio::task::LocalSet::new();

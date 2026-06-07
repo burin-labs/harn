@@ -322,6 +322,7 @@ impl Dispatcher {
         route: &DispatchUri,
         event: &TriggerEvent,
         replay_of_event_id: Option<&String>,
+        stage: DispatchSkipStage,
         reason: &str,
     ) -> Result<(), DispatchError> {
         self.append_topic_event(
@@ -348,12 +349,45 @@ impl Dispatcher {
             route,
             event,
             replay_of_event_id,
-            DispatchSkipStage::Predicate,
+            stage,
             serde_json::json!({
                 "deferred": true,
                 "reason": reason,
                 "retry_at": next_budget_reset_rfc3339(binding),
             }),
+        )
+        .await
+    }
+
+    pub(super) async fn append_trigger_budget_exhausted_event(
+        &self,
+        binding: &TriggerBinding,
+        route: &DispatchUri,
+        event: &TriggerEvent,
+        replay_of_event_id: Option<&String>,
+        reason: &str,
+        expected_cost_usd_micros: u64,
+    ) -> Result<(), DispatchError> {
+        self.append_lifecycle_event(
+            "trigger.budget_exceeded",
+            event,
+            binding,
+            serde_json::json!({
+                "trigger_id": binding.id.as_str(),
+                "event_id": event.id.0,
+                "handler_kind": route.kind(),
+                "target_uri": route.target_uri(),
+                "reason": reason,
+                "strategy": binding.on_budget_exhausted.as_str(),
+                "expected_cost_usd": crate::triggers::micros_to_usd(expected_cost_usd_micros),
+                "cost_usd": crate::triggers::micros_to_usd(expected_cost_usd_micros),
+                "daily_limit_usd": binding.daily_cost_usd,
+                "hourly_limit_usd": binding.hourly_cost_usd,
+                "cost_today_usd": crate::triggers::micros_to_usd(binding.metrics.cost_today_usd_micros.load(Ordering::Relaxed)),
+                "cost_hour_usd": crate::triggers::micros_to_usd(binding.metrics.cost_hour_usd_micros.load(Ordering::Relaxed)),
+                "replay_of_event_id": replay_of_event_id,
+            }),
+            replay_of_event_id,
         )
         .await
     }

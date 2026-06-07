@@ -1,0 +1,22 @@
+version = 1
+id = "scheduled-regression"
+name = "Scheduled regression suite"
+trials = 1
+
+[metadata]
+model = "mock-model"
+commit = "example-commit"
+branch = "main"
+tool_format = "replay"
+pipeline_rev = "docs-example"
+ledger_namespace = "scheduled-regression"
+
+[[rubrics]]
+id = "completed"
+kind = "deterministic"
+assertions = [{ kind = "run-status", expected = "completed" }]
+
+[[cases]]
+id = "smoke"
+run = "fixtures/pass-run.json"
+rubrics = ["completed"]

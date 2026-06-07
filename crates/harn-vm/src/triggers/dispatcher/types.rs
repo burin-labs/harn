@@ -342,6 +342,7 @@ pub(super) struct DispatchCallResult {
 
 #[derive(Clone, Debug)]
 pub(super) enum DispatchSkipStage {
+    Budget,
     Predicate,
     FlowControl,
 }
@@ -391,6 +392,7 @@ impl DispatchError {
 impl DispatchSkipStage {
     pub(super) fn as_str(&self) -> &'static str {
         match self {
+            Self::Budget => "budget",
             Self::Predicate => "predicate",
             Self::FlowControl => "flow_control",
         }

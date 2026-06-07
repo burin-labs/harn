@@ -36,9 +36,21 @@ secrets = { signing_secret = "github/webhook-secret" }
 id = "weekday-digest"
 kind = "cron"
 provider = "cron"
+match = { events = ["cron.tick"] }
 schedule = "0 9 * * 1-5"
 timezone = "America/Los_Angeles"
 handler = "handlers::send_digest"
+
+[[triggers]]
+id = "nightly-regression"
+kind = "cron"
+provider = "cron"
+match = { events = ["cron.tick"] }
+schedule = "0 3 * * *"
+timezone = "UTC"
+handler = "eval_pack://scheduled-regression"
+budget = { daily_cost_usd = 0.25, on_budget_exhausted = "retry_later" }
+concurrency = { max = 1 }
 ```
 
 Key fields: `id`, `kind`, `provider`, `handler`, `path` or `match.path`, `match.events`, `when`, `dedupe_key`, `retry`, `budget`, `secrets`, `schedule`, `timezone`, and provider-specific config tables such as `poll`.
@@ -47,7 +59,7 @@ Audit a project before deploy with `harn routes <root> --json`; it reports each 
 
 ## Handler variants
 
-`handler:` accepts a closure (in-process), an `a2a://` or `worker://` URI string, or a handler-variant dict. The dict form covers compositions that need more than a single callable; `SpawnToPool` and `ReminderInject` ship today, more variants will plug into the same syntax over time.
+`handler:` accepts a closure (in-process), an `a2a://`, `worker://`, or `eval_pack://` URI string, or a handler-variant dict. `eval_pack://<target>` resolves a bare target from `[package].evals` by id/name/file stem or a path-like target relative to `harn.toml`, then dispatches through `eval_pack_run(manifest, options?)` under the trigger's normal budget, retry, DLQ, replay/cancel, and flow-control rules. The dict form covers compositions that need more than a single callable; `SpawnToPool` and `ReminderInject` ship today, more variants will plug into the same syntax over time.
 
 ```harn
 import { SpawnToPool } from "std/triggers"
