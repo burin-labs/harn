@@ -724,6 +724,10 @@ pub const STDLIB_PROMPT_ASSETS: &[StdlibPromptAsset] = &[
         source: include_str!("stdlib/agent/prompts/tool_contract_text.harn.prompt"),
     },
     StdlibPromptAsset {
+        path: "agent/prompts/tool_contract_json.harn.prompt",
+        source: include_str!("stdlib/agent/prompts/tool_contract_json.harn.prompt"),
+    },
+    StdlibPromptAsset {
         path: "agent/prompts/tool_contract_native.harn.prompt",
         source: include_str!("stdlib/agent/prompts/tool_contract_native.harn.prompt"),
     },

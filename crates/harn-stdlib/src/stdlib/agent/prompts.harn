@@ -1,4 +1,4 @@
-type AgentPromptId = "agent.action_required_feedback" | "agent.action_turn_nudge" | "agent.completion_judge_feedback" | "agent.completion_judge_system" | "agent.completion_judge_user" | "agent.daemon_timer_feedback" | "agent.daemon_watch_feedback" | "agent.default_nudge" | "agent.deferred_tool_listing" | "agent.loop_contract" | "agent.native_tool_contract_feedback" | "agent.parse_guidance" | "agent.protocol_violation_feedback" | "agent.step_judge_system" | "agent.step_judge_system_adversarial" | "agent.step_judge_user" | "agent.tool_contract_action_native" | "agent.tool_contract_action_text" | "agent.tool_contract_deferred_tools" | "agent.tool_contract_native" | "agent.tool_contract_task_ledger" | "agent.tool_contract_text" | "agent.tool_contract_text_response_protocol" | "agent.turn_preamble" | "agent.verification_gate_feedback"
+type AgentPromptId = "agent.action_required_feedback" | "agent.action_turn_nudge" | "agent.completion_judge_feedback" | "agent.completion_judge_system" | "agent.completion_judge_user" | "agent.daemon_timer_feedback" | "agent.daemon_watch_feedback" | "agent.default_nudge" | "agent.deferred_tool_listing" | "agent.loop_contract" | "agent.native_tool_contract_feedback" | "agent.parse_guidance" | "agent.protocol_violation_feedback" | "agent.step_judge_system" | "agent.step_judge_system_adversarial" | "agent.step_judge_user" | "agent.tool_contract_action_native" | "agent.tool_contract_action_text" | "agent.tool_contract_deferred_tools" | "agent.tool_contract_json" | "agent.tool_contract_native" | "agent.tool_contract_task_ledger" | "agent.tool_contract_text" | "agent.tool_contract_text_response_protocol" | "agent.turn_preamble" | "agent.verification_gate_feedback"
 
 type AgentPromptEntry = string | {path: string} | {text: string} | fn(dict) -> string
 
@@ -22,6 +22,7 @@ type AgentPromptOverrides = {
   tool_contract_action_native?: AgentPromptEntry,
   tool_contract_action_text?: AgentPromptEntry,
   tool_contract_deferred_tools?: AgentPromptEntry,
+  tool_contract_json?: AgentPromptEntry,
   tool_contract_native?: AgentPromptEntry,
   tool_contract_task_ledger?: AgentPromptEntry,
   tool_contract_text?: AgentPromptEntry,
@@ -51,6 +52,7 @@ fn __agent_prompt_ids() {
     "agent.tool_contract_action_native",
     "agent.tool_contract_action_text",
     "agent.tool_contract_deferred_tools",
+    "agent.tool_contract_json",
     "agent.tool_contract_native",
     "agent.tool_contract_task_ledger",
     "agent.tool_contract_text",
@@ -81,6 +83,7 @@ fn __agent_default_prompt_catalog() {
     "agent.tool_contract_action_native": "tool_contract_action_native.harn.prompt",
     "agent.tool_contract_action_text": "tool_contract_action_text.harn.prompt",
     "agent.tool_contract_deferred_tools": "tool_contract_deferred_tools.harn.prompt",
+    "agent.tool_contract_json": "tool_contract_json.harn.prompt",
     "agent.tool_contract_native": "tool_contract_native.harn.prompt",
     "agent.tool_contract_task_ledger": "tool_contract_task_ledger.harn.prompt",
     "agent.tool_contract_text": "tool_contract_text.harn.prompt",
@@ -286,6 +289,7 @@ pub fn agent_prompt_override_map(overrides: AgentPromptOverrides) -> dict {
     "agent.tool_contract_deferred_tools",
     overrides.tool_contract_deferred_tools,
   )
+  out = __agent_add_prompt_override(out, "agent.tool_contract_json", overrides.tool_contract_json)
   out = __agent_add_prompt_override(out, "agent.tool_contract_native", overrides.tool_contract_native)
   out = __agent_add_prompt_override(
     out,
@@ -592,6 +596,19 @@ pub fn tool_contract_action_text_prompt(bindings, options = nil) {
  */
 pub fn tool_contract_deferred_tools_prompt(bindings, options = nil) {
   return render_agent_prompt_id("agent.tool_contract_deferred_tools", bindings, options)
+}
+
+/**
+ * tool_contract_json_prompt.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: experimental
+ * @example: tool_contract_json_prompt(bindings, options)
+ */
+pub fn tool_contract_json_prompt(bindings, options = nil) {
+  return render_agent_prompt_id("agent.tool_contract_json", bindings, options)
 }
 
 /**

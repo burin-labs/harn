@@ -95,6 +95,11 @@ thinking_block_style = "none"
 [[provider.ollama]]
 model_match = "qwen3.6*"
 native_tools = false
+# STAGED, NOT ACTIVE: fenced-json (tool_format = "json") is the json sibling of
+# this text route and was the only paradigm with a clean 1.0/1.0/1.0 sweep for
+# local-qwen3.6. Measured at N=1 emission fidelity; DO NOT rely until the N>=5
+# coding-agent parity bench clears CI lower bound > 0. To activate: change the
+# line below to `preferred_tool_format = "json"`.
 preferred_tool_format = "text"
 # Qwen3.x reserves <tool_call> as a single special token; serving text-format
 # without the wire remap re-exposes the opener-repetition collapse #2978 fixed.
@@ -142,6 +147,14 @@ thinking_block_style = "inline"
 [[provider.llamacpp]]
 model_match = "qwen3.6-35b-a3b-ud-q4-k-xl"
 native_tools = true
+# STAGED, NOT ACTIVE: fenced-json (tool_format = "json") was the ONLY paradigm
+# where local-qwen3.6 scored a clean 1.0/1.0/1.0 sweep, including the S3
+# delimiter-soup case; the escaping tax did not materialize at temp=0.
+# Measured at N=1 emission fidelity; DO NOT rely until the N>=5 coding-agent
+# parity bench clears CI lower bound > 0 (specifically watch the json
+# rejected-rate for a long-tail double-escape under sampling). To activate:
+# change the line below to `preferred_tool_format = "json"`. This is the
+# llama.cpp :8001 route Burin routes to for local-qwen3.6.
 preferred_tool_format = "native"
 structured_output = "native"
 reserved_tool_call_token = true

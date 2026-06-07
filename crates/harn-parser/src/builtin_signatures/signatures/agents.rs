@@ -185,6 +185,7 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
         &[
             Param::new("text", TY_STRING),
             Param::optional("tools", TY_DICT_OR_NIL),
+            Param::optional("tool_format", TY_STRING_OR_NIL),
         ],
         TY_DICT,
     ),

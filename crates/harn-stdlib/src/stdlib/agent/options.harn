@@ -117,16 +117,29 @@ fn __tool_format_pair(opts) -> {provider: string, model: string}? {
 
 fn __valid_tool_format(value) {
   let format = lowercase(trim(to_string(value ?? "")))
-  if format == "native" || format == "text" {
+  if format == "native" || format == "text" || format == "json" {
     return format
   }
   return nil
 }
 
 /**
- * Reject an explicit `tool_format` that is neither `native`, `text`, nor a
- * recognized auto sentinel. Without this, a typo like `"nativ"` or a wrong
- * value like `"json"` / `"tool_use"` silently flows through resolution
+ * True when a (already-validated) tool_format rides the TEXT channel — the
+ * assistant's visible content — rather than the provider's native tool-calling
+ * channel. Both `text` (tagged/heredoc) and `json` (fenced-JSON) are
+ * text-channel formats, so the parity gates treat them identically: a
+ * `native_only` model rejects either, a `text_only` model accepts either.
+ * This is the single source of truth for that classification on the harn side,
+ * mirroring `llm_config::tool_format_channel` in the runtime.
+ */
+fn __tool_format_is_text_channel(format) {
+  return format == "text" || format == "json"
+}
+
+/**
+ * Reject an explicit `tool_format` that is neither `native`, `text`, `json`,
+ * nor a recognized auto sentinel. Without this, a typo like `"nativ"` or a
+ * wrong value like `"tool_use"` silently flows through resolution
  * (`source: "explicit"`, no override event), and every downstream branch that
  * gates on `tool_format == "native"` reads it as `false` — so the agent
  * silently runs the text protocol instead of either honoring the request or
@@ -141,7 +154,7 @@ fn __valid_tool_format(value) {
  */
 fn __validate_explicit_tool_format(value) {
   if __valid_tool_format(value) == nil {
-    throw "agent_loop: `tool_format` must be one of native, text, auto (or omitted); got "
+    throw "agent_loop: `tool_format` must be one of native, text, json, auto (or omitted); got "
       + to_string(value)
   }
 }
@@ -174,8 +187,10 @@ fn __validate_tool_format_parity(pair, requested, parity, override_reason) {
     return
   }
   let catalog_parity = __catalog_parity(parity)
-  if catalog_parity == "native_only" && requested_format == "text" {
-    throw "agent_loop: tool_format \"text\" is unsupported for "
+  if catalog_parity == "native_only" && __tool_format_is_text_channel(requested_format) {
+    throw "agent_loop: tool_format \""
+      + requested_format
+      + "\" is unsupported for "
       + pair.provider
       + ":"
       + pair.model
@@ -229,7 +244,7 @@ fn __parity_conflicts_with_requested(parity, requested) {
     return requested == "text"
   }
   if parity == "native_only" {
-    return requested == "text"
+    return __tool_format_is_text_channel(requested)
   }
   if parity == "text_only" {
     return requested == "native"

@@ -13,7 +13,7 @@ import {
   agent_verify_or_continue,
 } from "std/agent/judge"
 import { agent_mcp_bootstrap_if_needed } from "std/agent/mcp"
-import { agent_loop_options } from "std/agent/options"
+import { agent_loop_options, agent_tool_format } from "std/agent/options"
 import {
   agent_apply_tool_surface_narrowing,
   agent_compute_post_turn,
@@ -261,7 +261,7 @@ fn __autocontinue_should_continue(call, turn_opts) {
     return false
   }
   let raw_text = llm_result?.text ?? ""
-  let parsed = agent_parse_tool_calls(raw_text, turn_opts?.tools)
+  let parsed = agent_parse_tool_calls(raw_text, turn_opts?.tools, turn_opts?.tool_format)
   let tool_calls = __resolve_tool_calls(llm_result, parsed)
   let has_parse_errors = len(parsed?.tool_parse_errors ?? []) > 0
   return __host_agent_truncated_tool_call(
@@ -997,6 +997,7 @@ fn __maybe_inject_parse_error_feedback(session_id, parsed, tool_calls, turn_opts
       has_partial_success: has_partial_success,
       parsed_call_count: parsed_count,
       body_hint: agent_tool_call_paradigm(turn_opts).body_hint,
+      is_json_format: agent_tool_format(turn_opts) == "json",
     },
     turn_opts,
   )
@@ -2198,7 +2199,7 @@ fn __agent_loop_final_wrapup(message, session, opts, final_status, stop_reason, 
   }
   let llm_result = call.value
   let raw_text = llm_result?.text ?? ""
-  let parsed = agent_parse_tool_calls(raw_text, nil)
+  let parsed = agent_parse_tool_calls(raw_text, nil, wrapup_opts?.tool_format)
   let visible_text = __visible_text(parsed, raw_text)
   if to_string(visible_text) == "" {
     return false
@@ -2405,7 +2406,7 @@ fn __agent_loop_run(message, session, initial_opts) {
       consecutive_failure_count = 0
       iteration = iteration + 1
       let raw_text = llm_result?.text ?? ""
-      let parsed = agent_parse_tool_calls(raw_text, turn_opts?.tools)
+      let parsed = agent_parse_tool_calls(raw_text, turn_opts?.tools, turn_opts?.tool_format)
       let visible_text = __visible_text(parsed, raw_text)
       let normalized = llm_result + {text: visible_text, visible_text: visible_text}
       let fallback_outcome = __detect_native_fallback(
