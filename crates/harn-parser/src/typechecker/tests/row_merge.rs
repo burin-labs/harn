@@ -66,6 +66,62 @@ fn optional_right_field_unions_with_required_left() {
     assert!(ok.is_empty(), "optional override should union; got: {ok:?}");
 }
 
+// --- open records + row-polymorphic generics --------------------------
+
+#[test]
+fn open_consumer_accepts_wider_record() {
+    let errs = errors(
+        "fn needs_id(x: {id: string, ...rest}) -> string { return x.id }\n\
+         pipeline main(task) { __io_println(needs_id({id: \"u1\", name: \"Ann\", age: 3})) }",
+    );
+    assert!(
+        errs.is_empty(),
+        "open consumer should accept extra fields; got: {errs:?}"
+    );
+}
+
+#[test]
+fn open_consumer_rejects_missing_required_field() {
+    let errs = errors(
+        "fn needs_id(x: {id: string, ...rest}) -> string { return x.id }\n\
+         pipeline main(task) { __io_println(needs_id({name: \"Ann\"})) }",
+    );
+    assert!(
+        !errs.is_empty(),
+        "missing required `id` must be rejected even with an open tail; got: {errs:?}"
+    );
+}
+
+#[test]
+fn row_generic_merge_returns_precise_merged_shape() {
+    // The motivating case: a row-polymorphic merge over two independent rows
+    // returns the precise right-biased merged record — each typed binding only
+    // checks clean if every field landed with the right type.
+    let errs = errors(
+        "fn rmerge<R1, R2>(a: {...R1}, b: {...R2}) -> {...R1, ...R2} { return a + b }\n\
+         pipeline main(task) {\n\
+         let m = rmerge({a: 1, b: 2}, {b: \"s\", c: true})\n\
+         let av: int = m.a\nlet bv: string = m.b\nlet cv: bool = m.c\nlog(av) }",
+    );
+    assert!(
+        errs.is_empty(),
+        "row merge should preserve precise field types; got: {errs:?}"
+    );
+}
+
+#[test]
+fn row_generic_merge_keeps_precision_for_wrong_annotation() {
+    let errs = errors(
+        "fn rmerge<R1, R2>(a: {...R1}, b: {...R2}) -> {...R1, ...R2} { return a + b }\n\
+         pipeline main(task) {\n\
+         let m = rmerge({a: 1}, {b: \"s\"})\nlet bad: int = m.b\nlog(bad) }",
+    );
+    assert!(
+        !errs.is_empty(),
+        "m.b is string after merge; an int annotation must be rejected; got: {errs:?}"
+    );
+}
+
 #[test]
 fn spread_of_open_dict_degrades_to_dict() {
     // Spreading a value typed `dict` (unknown fields) can't yield a closed

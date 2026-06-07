@@ -505,7 +505,13 @@ impl TypeChecker {
             // contract. Bind V to the union of field types so the projected
             // result keeps useful element typing instead of collapsing to
             // `dict`.
-            (TypeExpr::DictType(pk, pv), TypeExpr::Shape(arg_fields)) => {
+            (TypeExpr::DictType(pk, pv), TypeExpr::Shape(arg_fields))
+            | (
+                TypeExpr::DictType(pk, pv),
+                TypeExpr::OpenShape {
+                    fields: arg_fields, ..
+                },
+            ) => {
                 if matches!(pk.as_ref(), TypeExpr::Named(name) if name == "string") {
                     let value_union = Self::union_of_shape_field_types(arg_fields)
                         .unwrap_or_else(|| TypeExpr::Named("nil".into()));
@@ -541,6 +547,54 @@ impl TypeChecker {
                             bindings,
                         )?;
                     }
+                }
+                Ok(())
+            }
+            // Open record parameter `{f: T, ...R}` against an actual record:
+            // bind the explicit fields field-by-field, then bind the single row
+            // variable `R` to the actual's **leftover** fields (one-sided row
+            // matching — the design's core operation; no HM unification). With
+            // no explicit fields (`{...R}`, as in `merge`'s params) R simply
+            // binds to the whole actual record. Multiple row variables can't be
+            // split unambiguously, so they are left for the gradual fallback.
+            (
+                TypeExpr::OpenShape {
+                    fields: pf,
+                    rests: prests,
+                },
+                arg_type,
+            ) => {
+                let af: &[ShapeField] = match arg_type {
+                    TypeExpr::Shape(af) => af,
+                    TypeExpr::OpenShape { fields: af, .. } => af,
+                    _ => return Ok(()),
+                };
+                for pfield in pf {
+                    if let Some(afield) = af.iter().find(|f| f.name == pfield.name) {
+                        Self::extract_type_bindings(
+                            &pfield.type_expr,
+                            &afield.type_expr,
+                            type_params,
+                            bindings,
+                        )?;
+                    }
+                }
+                let row_vars: Vec<&String> = prests
+                    .iter()
+                    .filter_map(|r| match r {
+                        TypeExpr::Named(n) if type_params.contains(n) => Some(n),
+                        _ => None,
+                    })
+                    .collect();
+                if row_vars.len() == 1 {
+                    let explicit: std::collections::BTreeSet<&str> =
+                        pf.iter().map(|f| f.name.as_str()).collect();
+                    let leftover: Vec<ShapeField> = af
+                        .iter()
+                        .filter(|f| !explicit.contains(f.name.as_str()))
+                        .cloned()
+                        .collect();
+                    Self::bind_type_param(row_vars[0], &TypeExpr::Shape(leftover), bindings)?;
                 }
                 Ok(())
             }

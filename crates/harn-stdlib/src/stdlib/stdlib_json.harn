@@ -38,9 +38,12 @@ pub fn safe_parse(text) {
 }
 
 /**
- * Shallow-merge two dicts. Keys in `b` override matching keys in `a`. Generic
- * over the value type so the resulting dict keeps the same value contract as
- * the inputs (`dict<string, V>` in, `dict<string, V>` out).
+ * Shallow-merge two dicts. Keys in `b` override matching keys in `a`.
+ * Row-polymorphic: each argument carries its own row of fields, and the result
+ * is the right-biased merge of both rows (`b`'s fields override `a`'s, every
+ * field preserved with its real type). Merging two records with *different*
+ * value types is therefore sound and precise — `merge({a: 1}, {b: "x"})`
+ * returns `{a: int, b: string}` rather than collapsing to `dict`.
  *
  * @effects: []
  * @allocation: heap
@@ -48,7 +51,7 @@ pub fn safe_parse(text) {
  * @api_stability: stable
  * @example: merge(a, b)
  */
-pub fn merge<V>(a: dict<string, V>, b: dict<string, V>) -> dict<string, V> {
+pub fn merge<R1, R2>(a: {...R1}, b: {...R2}) -> {...R1, ...R2} {
   return __dict_merge(a ?? {}, b ?? {})
 }
 

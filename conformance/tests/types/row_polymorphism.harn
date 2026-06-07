@@ -1,0 +1,13 @@
+import { merge } from "std/json"
+
+fn needs_id(x: {id: string, ...rest}) -> string {
+  return x.id
+}
+
+pipeline main() {
+  let combined = merge({a: 1, b: 2}, {b: "override", c: true})
+  __io_println(combined.a)
+  __io_println(combined.b)
+  __io_println(combined.c)
+  __io_println(needs_id({id: "u1", name: "Ann", age: 3}))
+}

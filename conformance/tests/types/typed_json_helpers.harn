@@ -1,6 +1,7 @@
-// Verifies that std/json's merge/pick/omit preserve `dict<string, V>` typing
-// through generic projection — both with explicit annotations on inputs and
-// with explicit type arguments at the call site.
+// Verifies that std/json's merge/pick/omit preserve typing through generic
+// projection. `merge` is row-polymorphic, so merging two record literals
+// infers the precise merged shape (no explicit type arguments needed); `pick`
+// and `omit` preserve the `dict<string, V>` value contract.
 import { merge, omit, pick } from "std/json"
 
 pipeline default(task) {
@@ -16,7 +17,7 @@ pipeline default(task) {
   let dropped: dict<string, int> = omit(scores, ["bob"])
   __io_println(dropped.alice)
   __io_println(contains(dropped.keys(), "bob"))
-  let extras = merge<string>({region: "us"}, {tier: "gold"})
+  let extras = merge({region: "us"}, {tier: "gold"})
   __io_println(extras.region)
   __io_println(extras.tier)
 }

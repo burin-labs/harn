@@ -54,7 +54,7 @@ pub fn pick_keys<V>(d: dict<string, V>, selected_keys: list<string>, options: Pi
  * @api_stability: stable
  * @example: deep_merge(defaults, overrides)
  */
-pub fn deep_merge<V>(a: dict<string, V>, b: dict<string, V>) -> dict<string, V> {
+pub fn deep_merge<R1, R2>(a: {...R1}, b: {...R2}) -> {...R1, ...R2} {
   return __deep_merge(a ?? {}, b ?? {})
 }
 
