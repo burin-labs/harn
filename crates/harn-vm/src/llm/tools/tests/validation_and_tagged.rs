@@ -211,6 +211,49 @@ fn tagged_parser_accepts_gemma_json_tool_call_body() {
 }
 
 #[test]
+fn tagged_parser_accepts_nested_xml_json_args_tool_call_body() {
+    // Some OpenAI-compatible value routes emit a generic XML function wrapper
+    // inside Harn's `<tool_call>` block, for example:
+    // `<tool_call><edit>{"action":"create",...}</edit></tool_call>`.
+    // Recover only registered tool names and JSON-object arguments.
+    let tools = sample_tool_registry();
+    let text = r#"<tool_call><edit>{"action":"create","path":"a.rs","content":"fn a() {}"}</edit></tool_call>"#;
+    let result = parse_text_tool_calls_with_tools(text, Some(&tools));
+
+    assert!(
+        result.violations.is_empty(),
+        "violations: {:?}",
+        result.violations
+    );
+    assert!(result.errors.is_empty(), "errors: {:?}", result.errors);
+    assert_eq!(result.calls.len(), 1);
+    assert_eq!(result.calls[0]["name"], json!("edit"));
+    assert_eq!(result.calls[0]["arguments"]["path"], json!("a.rs"));
+    assert!(
+        result.canonical.contains("edit({"),
+        "canonical replay should use Harn syntax: {}",
+        result.canonical
+    );
+}
+
+#[test]
+fn tagged_parser_rejects_unknown_nested_xml_tool_call_body() {
+    let tools = sample_tool_registry();
+    let text = r#"<tool_call><deploy>{"target":"prod"}</deploy></tool_call>"#;
+    let result = parse_text_tool_calls_with_tools(text, Some(&tools));
+
+    assert!(result.calls.is_empty(), "unknown tool must not execute");
+    assert!(
+        result
+            .errors
+            .iter()
+            .any(|error| error.contains("Unknown tool 'deploy'")),
+        "unknown inner tag should be an actionable parse error: {:?}",
+        result.errors
+    );
+}
+
+#[test]
 fn tagged_parser_recovers_mistral_tool_markers() {
     let tools = sample_tool_registry();
     let text = "I'll inspect first.[TOOL_CALLS]edit[ARGS]{\"action\":\"create\",\"path\":\"a.rs\"}";
