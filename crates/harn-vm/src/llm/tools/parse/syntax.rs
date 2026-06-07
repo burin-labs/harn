@@ -310,10 +310,95 @@ pub(crate) fn scan_heredoc(src: &str, start: usize) -> Result<HeredocSpan, Hered
         if bytes.get(pos) == Some(&b'\n') {
             pos += 1;
         } else {
-            return Err(HeredocError::Unterminated { tag });
+            // Last physical line, no trailing newline, not the closing tag.
+            return unterminated_or_implicit_close(src, content_start, tag);
         }
     }
-    Err(HeredocError::Unterminated { tag })
+    unterminated_or_implicit_close(src, content_start, tag)
+}
+
+/// Recover a heredoc whose closing tag the model botched (indented, misspelled,
+/// or omitted) but which is otherwise a complete, structurally-closed call.
+///
+/// Value models routinely write `new_body: <<EOF\n...body...\n})` — the call's
+/// own `}`/`)` close it, but the `EOF` line is missing. The corpus shows ~2,400
+/// of these "sloppy terminator" shapes against ~1 genuine max-token truncation,
+/// so dropping them all wastes a turn the model usually repeats verbatim.
+///
+/// The distinguisher is sharp: we treat the body as implicitly closed ONLY when
+/// its final non-blank line is a pure structural call-tail — after leading
+/// whitespace, nothing but `}` / `)` / `]` / `,` AND at least one `)`. That `)`
+/// is the tool call's own closing paren, which an escape-free heredoc *body*
+/// would not place on a standalone final line. A bare `}`-only final line
+/// (ordinary Go/Rust code) is ambiguous and is left to error, and a body cut
+/// off mid-token (no structural tail at all) still reports `Unterminated`. So a
+/// genuinely truncated/unclosed body never silently dispatches.
+fn unterminated_or_implicit_close(
+    src: &str,
+    content_start: usize,
+    tag: String,
+) -> Result<HeredocSpan, HeredocError> {
+    let body = &src[content_start..];
+    // Find the last non-blank line and where it starts within `body`.
+    let mut last_line_start = body.len();
+    for (offset, line) in line_starts(body) {
+        if !line.trim().is_empty() {
+            last_line_start = offset;
+        }
+    }
+    if last_line_start >= body.len() {
+        return Err(HeredocError::Unterminated { tag });
+    }
+    let last_line = body[last_line_start..].trim_end();
+    let after_ws = last_line.trim_start();
+    let is_call_tail = !after_ws.is_empty()
+        && after_ws.contains(')')
+        && after_ws
+            .chars()
+            .all(|ch| matches!(ch, '}' | ')' | ']' | ',' | ' ' | '\t'));
+    if !is_call_tail {
+        return Err(HeredocError::Unterminated { tag });
+    }
+    // Body content ends just before the structural call-tail line; `end` points
+    // at the start of that line so the outer parser consumes the `})`/`)` close.
+    let content_abs_end = content_start + last_line_start;
+    let raw = &src[content_start..content_abs_end];
+    let stripped = raw.strip_suffix('\n').unwrap_or(raw);
+    let stripped = stripped.strip_suffix('\r').unwrap_or(stripped);
+    tracing::debug!(
+        target: "harn::tool_parse",
+        "recovered heredoc with botched/missing closing tag (implicit close at call tail)"
+    );
+    Ok(HeredocSpan {
+        content: content_start..content_start + stripped.len(),
+        end: content_abs_end,
+        escaped: false,
+    })
+}
+
+/// Yield `(byte_offset_within_s, line_without_newline)` for each `\n`-delimited
+/// line of `s`, including a trailing line with no terminating newline.
+fn line_starts(s: &str) -> impl Iterator<Item = (usize, &str)> {
+    let mut start = 0usize;
+    let bytes = s.as_bytes();
+    std::iter::from_fn(move || {
+        if start > s.len() {
+            return None;
+        }
+        if start == s.len() {
+            // Emit nothing more once we've passed the end; a trailing newline
+            // means the final "line" is empty and is handled by the loop below.
+            return None;
+        }
+        let mut end = start;
+        while end < bytes.len() && bytes[end] != b'\n' {
+            end += 1;
+        }
+        let line = &s[start..end];
+        let offset = start;
+        start = end + 1; // skip the '\n'
+        Some((offset, line))
+    })
 }
 
 /// Scan a JSON/string-escaped heredoc body whose line breaks are the two

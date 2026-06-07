@@ -236,7 +236,8 @@ id = "devstral-small-2:24b"
 provider = "ollama"
 tool_format = "text"
 
-[aliases.ollama-devstral-small-2-native]
-id = "devstral-small-2:24b"
-provider = "ollama"
-tool_format = "native"
+# NOTE: there is intentionally no `ollama-devstral-small-2-native` alias.
+# Devstral Small 2 on Ollama is text-tool-only (see the `devstral-small-2*`
+# capability rule: native_tools = false). A `tool_format = "native"` pin here
+# would be silently half-supported — accepted by resolution but degraded to
+# the text protocol downstream — which the catalog validator now rejects.

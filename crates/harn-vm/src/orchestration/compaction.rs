@@ -898,6 +898,50 @@ async fn custom_compaction_summary(
     }
 }
 
+/// Marker the host emits inside a tool-output (or message) body to pin its
+/// live grounding — the current file view and just-edited window — so it
+/// survives a compaction pass. Burin renders this literal substring inside
+/// markdown headings (e.g. `## Exact current file text [no-compact]`,
+/// `## Edited region now reads (...) [no-compact]`) in
+/// `lib/tools/result-format.harn`. Compaction matches the substring; it does
+/// not invent a new vocabulary.
+pub(crate) const NO_COMPACT_MARKER: &str = "[no-compact]";
+
+/// Upper bound on how many of the most-recent pinned segments survive a
+/// compaction pass verbatim. A pin that could never be evicted would let a
+/// long session accumulate unbounded pinned snapshots (e.g. one edited-window
+/// per edit) and eventually overflow the context window — defeating the
+/// purpose of compaction. Keeping only the latest few preserves the agent's
+/// *current* grounding (the file it is editing now, emitted as the exact-text
+/// block plus the numbered-lines block in one or two adjacent outputs) while
+/// letting stale duplicates from earlier in the session compact normally.
+pub(crate) const MAX_PINNED_SEGMENTS: usize = 3;
+
+/// Whether a content body carries the host's `[no-compact]` pin marker.
+fn is_pinned_content(content: &str) -> bool {
+    content.contains(NO_COMPACT_MARKER)
+}
+
+/// Compute the set of message indices into `messages` that are pinned AND fall
+/// within the most-recent [`MAX_PINNED_SEGMENTS`] pinned bodies. Older pinned
+/// bodies are intentionally excluded so they compact normally (the bound).
+/// `content_of` extracts the body text to inspect for each message.
+fn latest_pinned_indices<'a, F>(
+    messages: impl Iterator<Item = &'a serde_json::Value>,
+    content_of: F,
+) -> std::collections::HashSet<usize>
+where
+    F: Fn(&serde_json::Value) -> Option<&str>,
+{
+    // Walk newest-first, collecting up to MAX_PINNED_SEGMENTS pinned indices.
+    let pinned: Vec<usize> = messages
+        .enumerate()
+        .filter(|(_, msg)| content_of(msg).is_some_and(is_pinned_content))
+        .map(|(idx, _)| idx)
+        .collect();
+    pinned.into_iter().rev().take(MAX_PINNED_SEGMENTS).collect()
+}
+
 /// Check whether a tool-result string should be preserved verbatim during
 /// observation masking. Uses content length as the primary heuristic:
 /// short results (< 500 chars) are kept since they're typically error messages,
@@ -938,6 +982,13 @@ fn observation_mask_compaction_with_callback(
     parts.push(format!(
         "[auto-compacted {archived_count} older messages via observation masking]"
     ));
+    // Pin the agent's most-recent live grounding: any archived body carrying
+    // the host's `[no-compact]` marker (the current file view / edited window)
+    // survives masking verbatim, bounded to the latest MAX_PINNED_SEGMENTS so a
+    // long session's stale snapshots still compact.
+    let pinned = latest_pinned_indices(old_messages.iter(), |msg| {
+        msg.get("content").and_then(|v| v.as_str())
+    });
     for (idx, msg) in old_messages.iter().enumerate() {
         let role = msg.get("role").and_then(|v| v.as_str()).unwrap_or("user");
         let content = msg
@@ -945,6 +996,10 @@ fn observation_mask_compaction_with_callback(
             .and_then(|v| v.as_str())
             .unwrap_or_default();
         if content.is_empty() {
+            continue;
+        }
+        if pinned.contains(&idx) {
+            parts.push(format!("[{role}] {content}"));
             continue;
         }
         if role == "assistant" {
@@ -1015,7 +1070,18 @@ async fn clamp_tool_outputs(
     if config.tool_output_max_chars == 0 {
         return Ok(());
     }
-    for message in messages.iter_mut() {
+    // Exempt the most-recent pinned tool-outputs (those carrying the host's
+    // `[no-compact]` marker) from length-clamping so the agent's live file view
+    // stays intact. Bounded to the latest MAX_PINNED_SEGMENTS so older pinned
+    // snapshots in the kept window still clamp and can't blow the budget.
+    let pinned = latest_pinned_indices(messages.iter(), |msg| {
+        if msg.get("role").and_then(|role| role.as_str()) == Some("tool") {
+            msg.get("content").and_then(|content| content.as_str())
+        } else {
+            None
+        }
+    });
+    for (idx, message) in messages.iter_mut().enumerate() {
         if message.get("role").and_then(|role| role.as_str()) != Some("tool") {
             continue;
         }
@@ -1023,6 +1089,9 @@ async fn clamp_tool_outputs(
             continue;
         };
         if content.len() <= config.tool_output_max_chars {
+            continue;
+        }
+        if pinned.contains(&idx) {
             continue;
         }
         let content = content.to_string();
@@ -1528,6 +1597,186 @@ mod tests {
             content.len(),
             big_len
         );
+        assert!(content.len() < 2000, "clamped near tool_output_max_chars");
+    }
+
+    /// (1) A pinned tool-output survives an observation-mask pass that evicts
+    /// (masks) the unpinned verbose outputs around it.
+    #[test]
+    fn observation_mask_preserves_pinned_live_file_view() {
+        let pinned_body = format!(
+            "## Edited region now reads (line 42, ±6 context) {}\n```\n{}\n```",
+            NO_COMPACT_MARKER,
+            (0..40)
+                .map(|i| format!("   {i}  let x = compute({i});"))
+                .collect::<Vec<_>>()
+                .join("\n")
+        );
+        let verbose_unpinned = (0..60)
+            .map(|i| format!("verbose scan output line {i}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        // These are the ARCHIVED messages handed to the mask pass.
+        let archived = vec![
+            serde_json::json!({"role": "user", "content": verbose_unpinned}),
+            serde_json::json!({"role": "user", "content": pinned_body}),
+        ];
+        let summary = observation_mask_compaction(&archived, archived.len());
+        // Pinned live file view survives verbatim.
+        assert!(
+            summary.contains("Edited region now reads"),
+            "pinned heading survived: {summary}"
+        );
+        assert!(
+            summary.contains("let x = compute(39);"),
+            "pinned body survived verbatim"
+        );
+        // The unpinned verbose neighbor was masked.
+        assert!(summary.contains("masked]"), "unpinned output was masked");
+        assert!(!summary.contains("verbose scan output line 30"));
+    }
+
+    /// (2) A pinned large tool-output is NOT clamped, while an unpinned one of
+    /// the same size IS.
+    #[test]
+    fn clamp_exempts_pinned_tool_output() {
+        let pinned_big = format!(
+            "## Exact current file text {}\n{}",
+            NO_COMPACT_MARKER,
+            "x".repeat(4000)
+        );
+        let pinned_len = pinned_big.len();
+        let unpinned_big = "y".repeat(4000);
+        let unpinned_len = unpinned_big.len();
+        let mut messages = vec![
+            serde_json::json!({"role": "user", "content": "old task"}),
+            serde_json::json!({"role": "assistant", "content": "reply"}),
+            serde_json::json!({"role": "user", "content": "new task"}),
+            serde_json::json!({"role": "assistant", "content": "calling tools"}),
+            serde_json::json!({"role": "tool", "tool_call_id": "c0", "content": unpinned_big}),
+            serde_json::json!({"role": "tool", "tool_call_id": "c1", "content": pinned_big}),
+            serde_json::json!({"role": "user", "content": "continue"}),
+        ];
+        let config = AutoCompactConfig {
+            token_threshold: 1,
+            keep_last: 4,
+            tool_output_max_chars: 500,
+            ..Default::default()
+        };
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("runtime");
+        runtime
+            .block_on(auto_compact_messages(&mut messages, &config, None))
+            .expect("compaction succeeds");
+
+        let pinned_msg = messages
+            .iter()
+            .find(|m| m["tool_call_id"] == "c1")
+            .expect("pinned tool message kept");
+        assert_eq!(
+            pinned_msg["content"].as_str().map(str::len),
+            Some(pinned_len),
+            "pinned output must be intact (unclamped)"
+        );
+        let unpinned_msg = messages
+            .iter()
+            .find(|m| m["tool_call_id"] == "c0")
+            .expect("unpinned tool message kept");
+        assert!(
+            unpinned_msg["content"].as_str().map(str::len).unwrap() < unpinned_len,
+            "unpinned output of the same size must be clamped"
+        );
+    }
+
+    /// (3) Bounded policy: with MANY pinned outputs, only the latest
+    /// MAX_PINNED_SEGMENTS survive verbatim; older pinned duplicates compact —
+    /// so the pin can't prevent all compaction (and can't overflow the window
+    /// on a very long session).
+    #[test]
+    fn pin_bound_keeps_only_latest_segments() {
+        // Build 6 distinct pinned, oversized edited-window snapshots
+        // (gen 0 = oldest .. gen 5 = newest), each tagged with the marker and
+        // long enough that masking would otherwise truncate it.
+        let make = |gen: usize| {
+            let body = (0..40)
+                .map(|i| format!("marker-gen-{gen} body line {i}"))
+                .collect::<Vec<_>>()
+                .join("\n");
+            serde_json::json!({
+                "role": "user",
+                "content": format!(
+                    "## Edited region now reads (gen {gen}) {}\n{}",
+                    NO_COMPACT_MARKER, body
+                ),
+            })
+        };
+        let archived: Vec<_> = (0..6).map(make).collect();
+
+        // Unit-level: the index selection keeps exactly the latest N.
+        let pinned = latest_pinned_indices(archived.iter(), |m| {
+            m.get("content").and_then(|c| c.as_str())
+        });
+        assert_eq!(
+            pinned.len(),
+            MAX_PINNED_SEGMENTS,
+            "only the latest MAX_PINNED_SEGMENTS are pinned"
+        );
+        assert!(pinned.contains(&5) && pinned.contains(&4) && pinned.contains(&3));
+        assert!(!pinned.contains(&0) && !pinned.contains(&1) && !pinned.contains(&2));
+
+        // End-to-end through the mask pass: the 3 newest snapshots survive
+        // verbatim; the 3 oldest are masked, proving the pin cannot defeat all
+        // compaction.
+        let summary = observation_mask_compaction(&archived, archived.len());
+        assert!(
+            summary.contains("marker-gen-5")
+                && summary.contains("marker-gen-4")
+                && summary.contains("marker-gen-3"),
+            "latest {MAX_PINNED_SEGMENTS} pinned snapshots survive verbatim: {summary}"
+        );
+        assert!(
+            !summary.contains("marker-gen-0")
+                && !summary.contains("marker-gen-1")
+                && !summary.contains("marker-gen-2"),
+            "older pinned snapshots are masked (bound enforced)"
+        );
+        assert!(summary.contains("masked]"), "older snapshots were masked");
+    }
+
+    /// (4) Regression: with NO pins, compaction behaves exactly as before.
+    #[test]
+    fn no_pins_preserves_prior_clamp_behavior() {
+        let big = "x".repeat(4000);
+        let big_len = big.len();
+        let mut messages = vec![
+            serde_json::json!({"role": "user", "content": "old task"}),
+            serde_json::json!({"role": "assistant", "content": "old reply"}),
+            serde_json::json!({"role": "user", "content": "new task"}),
+            serde_json::json!({"role": "assistant", "content": "calling tool"}),
+            serde_json::json!({"role": "tool", "tool_call_id": "call_1", "content": big}),
+        ];
+        let config = AutoCompactConfig {
+            token_threshold: 1,
+            keep_last: 2,
+            tool_output_max_chars: 500,
+            ..Default::default()
+        };
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("runtime");
+        let result = runtime
+            .block_on(auto_compact_messages(&mut messages, &config, None))
+            .expect("compaction succeeds");
+        assert!(result.is_some());
+        let tool_msg = messages
+            .iter()
+            .find(|m| m["role"] == "tool")
+            .expect("tool kept");
+        let content = tool_msg["content"].as_str().expect("string content");
+        assert!(content.len() < big_len, "unpinned output clamped as before");
         assert!(content.len() < 2000, "clamped near tool_output_max_chars");
     }
 }

@@ -4883,8 +4883,7 @@ public let harnProviderCatalogJSON = #"""
       "provider": "ollama",
       "aliases": [
         "devstral-small-2",
-        "ollama-devstral-small-2",
-        "ollama-devstral-small-2-native"
+        "ollama-devstral-small-2"
       ],
       "context_window": 262144,
       "runtime_context_window": 32768,
@@ -7906,12 +7905,6 @@ public let harnProviderCatalogJSON = #"""
       "model_id": "devstral-small-2:24b",
       "provider": "ollama",
       "tool_format": "text"
-    },
-    {
-      "name": "ollama-devstral-small-2-native",
-      "model_id": "devstral-small-2:24b",
-      "provider": "ollama",
-      "tool_format": "native"
     },
     {
       "name": "ollama-gemma4",

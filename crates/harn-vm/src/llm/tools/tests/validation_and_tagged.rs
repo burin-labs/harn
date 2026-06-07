@@ -343,6 +343,132 @@ fn tagged_parser_rejects_unknown_nested_xml_tool_with_sloppy_close() {
     );
 }
 
+// High-frequency DeepSeek shape: the model wraps its THINKING/narration in
+// `<assistant_prose>` *inside* `<tool_call>`. This is not a malformed call —
+// it took no action this turn. It must NOT be reported as a parse error
+// (which wastes the turn telling the model it erred); the text is preserved as
+// prose and the loop's normal no-tool-call nudge applies.
+#[test]
+fn tagged_parser_treats_wrapped_assistant_prose_as_narration_not_parse_error() {
+    let tools = sample_tool_registry();
+    let text = "<tool_call>\n<assistant_prose>\nReading parser.go to understand ParseManifest.\n</assistant_prose>\n</tool_call>";
+    let result = parse_text_tool_calls_with_tools(text, Some(&tools));
+
+    assert!(result.calls.is_empty(), "narration emits no tool call");
+    assert!(
+        result.errors.is_empty(),
+        "narration wrapped in <tool_call> must not be a parse error: {:?}",
+        result.errors
+    );
+    assert!(
+        result.violations.is_empty(),
+        "narration wrapped in <tool_call> must not be a violation: {:?}",
+        result.violations
+    );
+    assert!(
+        !result
+            .errors
+            .iter()
+            .chain(result.violations.iter())
+            .any(|msg| msg.contains("could not be parsed")
+                || msg.contains("did not contain a bare")
+                || msg.contains("TRUNCATED")),
+        "no 'could not be parsed' diagnostic for narration: errors={:?} violations={:?}",
+        result.errors,
+        result.violations
+    );
+    assert_eq!(
+        result.prose, "Reading parser.go to understand ParseManifest.",
+        "narration text preserved as prose"
+    );
+}
+
+// A bare prose body (no inner tag, no call) the model wrapped in `<tool_call>`
+// is treated identically to `<assistant_prose>` — narration, not a parse error.
+#[test]
+fn tagged_parser_treats_bare_prose_tool_call_body_as_narration() {
+    let tools = sample_tool_registry();
+    let text = "<tool_call>\nReading the file to understand the layout.\n</tool_call>";
+    let result = parse_text_tool_calls_with_tools(text, Some(&tools));
+
+    assert!(result.calls.is_empty(), "bare prose emits no tool call");
+    assert!(
+        result.errors.is_empty(),
+        "bare prose body must not be a parse error: {:?}",
+        result.errors
+    );
+    assert!(
+        result.violations.is_empty(),
+        "bare prose body must not be a violation: {:?}",
+        result.violations
+    );
+    assert_eq!(
+        result.prose, "Reading the file to understand the layout.",
+        "bare prose text preserved"
+    );
+}
+
+// Mixed shape: the SAME `<tool_call>` wrapper carries an `<assistant_prose>`
+// narration block AND a real call. Recover and dispatch the call; keep the
+// narration as prose; emit no parse error.
+#[test]
+fn tagged_parser_recovers_real_call_alongside_wrapped_prose() {
+    let tools = sample_tool_registry();
+    let text = "<tool_call>\n<assistant_prose>\nReading parser.go first.\n</assistant_prose>\nrun({ command: \"cat parser.go\" })\n</tool_call>";
+    let result = parse_text_tool_calls_with_tools(text, Some(&tools));
+
+    assert!(
+        result.errors.is_empty(),
+        "mixed prose+call must not error: {:?}",
+        result.errors
+    );
+    assert_eq!(
+        result.calls.len(),
+        1,
+        "the real call must be recovered (violations: {:?})",
+        result.violations
+    );
+    assert_eq!(result.calls[0]["name"], json!("run"));
+    assert_eq!(
+        result.calls[0]["arguments"]["command"],
+        json!("cat parser.go")
+    );
+    assert_eq!(
+        result.prose, "Reading parser.go first.",
+        "narration preserved alongside the recovered call"
+    );
+    assert!(
+        result.canonical.contains("run({"),
+        "canonical replay should carry the recovered call: {}",
+        result.canonical
+    );
+}
+
+// Negative: an unknown inner tag that LOOKS like an attempted call must STILL
+// be rejected — the narration allowance is scoped to the narration allowlist,
+// it does not turn every unknown wrapped tag into silent prose.
+#[test]
+fn tagged_parser_still_rejects_unknown_wrapped_tag_as_not_narration() {
+    let tools = sample_tool_registry();
+    let text = "<tool_call>\n<frobnicate>\n{ \"target\": \"prod\" }\n</frobnicate>\n</tool_call>";
+    let result = parse_text_tool_calls_with_tools(text, Some(&tools));
+
+    assert!(result.calls.is_empty(), "unknown tool must not execute");
+    assert!(
+        result.prose.trim().is_empty(),
+        "an unknown attempted call is not narration: {:?}",
+        result.prose
+    );
+    assert!(
+        result
+            .errors
+            .iter()
+            .any(|error| error.contains("Unknown tool 'frobnicate'")),
+        "unknown inner tag must be rejected with an actionable error: {:?}",
+        result.errors
+    );
+}
+
 #[test]
 fn tagged_parser_recovers_mistral_tool_markers() {
     let tools = sample_tool_registry();
@@ -764,5 +890,106 @@ fn tagged_parser_closed_tool_call_unaffected_by_truncation_branch() {
         !result.errors.iter().any(|e| e.contains("TRUNCATED")),
         "closed call must not be flagged as truncated: {:?}",
         result.errors
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Shape 1: template literals + `+`-concatenated string fragments in a value.
+// ---------------------------------------------------------------------------
+
+// A multi-line backtick template literal as a value (Go-ish content) parses to
+// the literal body. (Single-line backticks were already covered; this guards
+// the multi-line body the corpus emits.)
+#[test]
+fn value_accepts_multiline_template_literal() {
+    let tools = sample_tool_registry();
+    let text =
+        "edit({ action: \"create\", path: \"a.go\", content: `package main\n\nfunc main() {}\n` })";
+    let result = parse_bare_calls_in_body(text, Some(&tools));
+    assert_eq!(result.calls.len(), 1, "errors: {:?}", result.errors);
+    assert_eq!(
+        result.calls[0]["arguments"]["content"],
+        json!("package main\n\nfunc main() {}\n")
+    );
+}
+
+// Plain `+`-concatenation of two quoted strings collapses to one value.
+#[test]
+fn value_folds_string_concatenation() {
+    let tools = sample_tool_registry();
+    let text = "edit({ action: \"create\", path: \"a.txt\", content: \"hello \" + \"world\" })";
+    let result = parse_bare_calls_in_body(text, Some(&tools));
+    assert_eq!(result.calls.len(), 1, "errors: {:?}", result.errors);
+    assert_eq!(
+        result.calls[0]["arguments"]["content"],
+        json!("hello world")
+    );
+}
+
+// The dominant corpus shape: a Go file body where a backtick struct tag forces
+// the model into ``…` + "`json:\"x\"`" + `…`` concatenation. The fragments
+// (template + quoted + template) must collapse into one content string with the
+// literal backtick struct tag preserved.
+#[test]
+fn value_folds_go_backtick_struct_tag_concatenation() {
+    let tools = sample_tool_registry();
+    let text = "edit({ action: \"create\", path: \"status.go\", content: `package main\n\ntype S struct {\n\tServices []ServiceStatus ` + \"`json:\\\"services\\\"`\" + ` // tail\n}\n` })";
+    let result = parse_bare_calls_in_body(text, Some(&tools));
+    assert_eq!(result.calls.len(), 1, "errors: {:?}", result.errors);
+    let content = result.calls[0]["arguments"]["content"].as_str().unwrap();
+    assert!(
+        content.contains("`json:\"services\"`"),
+        "backtick struct tag must survive concatenation: {content:?}"
+    );
+    assert!(
+        content.starts_with("package main") && content.contains("type S struct {"),
+        "surrounding template fragments must be joined: {content:?}"
+    );
+}
+
+// Negative: a `+` whose right operand is NOT a string is malformed
+// concatenation — the parser must reject loudly, never guess.
+#[test]
+fn value_rejects_non_string_concatenation_operand() {
+    let tools = sample_tool_registry();
+    let text = "edit({ action: \"create\", path: \"a.txt\", content: \"x\" + 1 })";
+    let result = parse_bare_calls_in_body(text, Some(&tools));
+    assert!(
+        result.calls.is_empty(),
+        "non-string concat operand must not dispatch: {:?}",
+        result.calls
+    );
+    assert!(
+        !result.errors.is_empty(),
+        "should error: {:?}",
+        result.errors
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Shape 3: `=` accepted as a synonym for `:` as the object key/value separator.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn object_accepts_equals_as_key_value_separator() {
+    let tools = sample_tool_registry();
+    // `=` before a scalar and before a template body, mixed with a normal `:`.
+    let text = "edit({ action= \"create\", path: \"a.go\", content= `x` })";
+    let result = parse_bare_calls_in_body(text, Some(&tools));
+    assert_eq!(result.calls.len(), 1, "errors: {:?}", result.errors);
+    assert_eq!(result.calls[0]["arguments"]["action"], json!("create"));
+    assert_eq!(result.calls[0]["arguments"]["path"], json!("a.go"));
+    assert_eq!(result.calls[0]["arguments"]["content"], json!("x"));
+}
+
+#[test]
+fn object_accepts_equals_before_heredoc_value() {
+    let tools = sample_tool_registry();
+    let text = "edit({\n    action: \"create\",\n    path: \"a.go\",\n    content= <<EOF\npackage main\nEOF\n})";
+    let result = parse_bare_calls_in_body(text, Some(&tools));
+    assert_eq!(result.calls.len(), 1, "errors: {:?}", result.errors);
+    assert_eq!(
+        result.calls[0]["arguments"]["content"],
+        json!("package main")
     );
 }

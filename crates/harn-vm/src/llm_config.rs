@@ -3165,10 +3165,6 @@ mod tests {
             default_tool_format("devstral-small-2:24b", "ollama"),
             "text"
         );
-        assert_eq!(
-            default_tool_format("ollama-devstral-small-2-native", "ollama"),
-            "native"
-        );
         // vLLM/SGLang-served Gemma 4 exposes OpenAI-compatible function calling,
         // so the local route declares native tools (matching every hosted gemma-4
         // sibling) rather than degrading to the text tool format.
