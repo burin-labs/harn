@@ -111,6 +111,34 @@ pub(crate) fn parse_text_tool_calls_with_tools(
         if let Some((body, after)) = match_tool_call_block(src, cursor, TEXT_TOOL_CALL_TAG)
             .or_else(|| match_tool_call_block(src, cursor, TEXT_TOOL_CALL_TAG_COMPACT))
         {
+            // Weak value models (DeepSeek) wrap THINKING/narration in
+            // `<assistant_prose>` *inside* `<tool_call>`, sometimes alongside a
+            // real call in the same wrapper. When the body opens with a known
+            // narration tag, peel the narration out as prose and recover any
+            // real call that follows — never report the narration as a parse
+            // error (which would waste the turn telling the model it erred).
+            if let Some(narration) = recover_tool_call_narration(body, tools_val) {
+                for prose in &narration.prose {
+                    assistant_prose_parts.push(prose.clone());
+                    canonical_parts.push(format!("<assistant_prose>\n{prose}\n</assistant_prose>"));
+                }
+                if let Some(call) = narration.call {
+                    let name = call
+                        .get("name")
+                        .and_then(|name| name.as_str())
+                        .unwrap_or("")
+                        .to_string();
+                    let args = call
+                        .get("arguments")
+                        .cloned()
+                        .unwrap_or(serde_json::json!({}));
+                    canonical_parts
+                        .push(text_tool_call_block(&render_canonical_call(&name, &args)));
+                    calls.push(call);
+                }
+                cursor = after;
+                continue;
+            }
             match parse_single_tool_call(body, tools_val) {
                 Ok(call) => {
                     let name = call
@@ -933,6 +961,108 @@ fn parse_single_tool_call(
         ));
     }
     Ok(inner.calls.into_iter().next().expect("len == 1"))
+}
+
+/// Narration recovered from a `<tool_call>` wrapper that the body parser
+/// rejected: the assistant's prose plus any real call that shared the wrapper.
+struct ToolCallNarration {
+    prose: Vec<String>,
+    call: Option<serde_json::Value>,
+}
+
+/// Known *narration* tags a value model may wrap inside `<tool_call>` while it
+/// is only thinking out loud. Deliberately tiny and allowlisted: a narration
+/// tag is special precisely because it is NOT an attempted tool invocation, so
+/// it must never widen to cover unknown tags that look like calls (e.g.
+/// `<frobnicate>{...}</frobnicate>` stays a rejected unknown tool). Compact
+/// (tagless-underscore) spellings mirror the top-level `<assistant_prose>` /
+/// `<user_response>` aliases the parser already accepts.
+const NARRATION_TAGS: &[&str] = &["assistant_prose", "assistantprose", "thinking", "reasoning"];
+
+/// Reclassify a `<tool_call>` body that failed to parse as a call. Returns
+/// `Some` only when the body is narration the model mis-wrapped in tool-call
+/// tags, in which case the surrounding turn should NOT be reported as a parse
+/// error:
+///
+/// * The body opens with a known narration tag (`<assistant_prose>…`). Peel off
+///   every leading narration block as prose; if a real `name({ ... })` / nested
+///   tool call follows in the same wrapper, recover it too.
+/// * The body is bare prose — no inner `<tag>` and no recoverable call (e.g.
+///   `<tool_call>Reading the file.</tool_call>`). Treat the text as narration.
+///
+/// Returns `None` for anything that looks like an attempted (but malformed or
+/// unknown) tool call so the caller surfaces the existing actionable error and
+/// the #3132/6b970d61 unknown-tag discipline is preserved.
+fn recover_tool_call_narration(
+    body: &str,
+    tools_val: Option<&VmValue>,
+) -> Option<ToolCallNarration> {
+    let mut prose: Vec<String> = Vec::new();
+    let mut rest = body.trim();
+
+    // Peel leading narration blocks. `match_block` finds the matching close
+    // tag, so a narration block followed by a real call is split cleanly.
+    loop {
+        let opened = NARRATION_TAGS
+            .iter()
+            .find_map(|tag| match_block(rest, 0, tag).map(|matched| (tag, matched)));
+        match opened {
+            Some((_, (inner, after))) => {
+                let trimmed = inner.trim();
+                if !trimmed.is_empty() {
+                    prose.push(trimmed.to_string());
+                }
+                rest = rest[after..].trim_start();
+            }
+            None => break,
+        }
+    }
+
+    let remainder = rest.trim();
+    if !prose.is_empty() {
+        // Narration tag(s) present. Recover a real call from whatever follows,
+        // if any; ignore a parse failure on the remainder (it is trailing slop,
+        // not the model's intended action — the prose already carries the turn).
+        let call = if remainder.is_empty() {
+            None
+        } else {
+            parse_single_tool_call(remainder, tools_val).ok()
+        };
+        return Some(ToolCallNarration { prose, call });
+    }
+
+    // No narration tag. Only reclassify as prose when the body is plainly NOT
+    // an attempted tool call: it carries no inner `<tag>` (not an unknown-tool
+    // attempt like `<frobnicate>{...}`), no `{` JSON body (the Gemma-style
+    // `{ "name": …, "arguments": … }` shape), and no `name(` call head (so a
+    // bare call to an unknown/misspelled tool still surfaces its real error
+    // instead of being silently swallowed as prose).
+    if remainder.starts_with('<')
+        || remainder.starts_with('{')
+        || remainder.is_empty()
+        || looks_like_call_head(remainder)
+    {
+        return None;
+    }
+    Some(ToolCallNarration {
+        prose: vec![remainder.to_string()],
+        call: None,
+    })
+}
+
+/// True if `src` opens with a `name(` token — the head of a (possibly
+/// unknown-tool) call. Used to keep an attempted bare call out of the
+/// narration path so its real parse error still surfaces.
+fn looks_like_call_head(src: &str) -> bool {
+    let bytes = src.as_bytes();
+    let Some(name_len) = ident_length(bytes) else {
+        return false;
+    };
+    let mut idx = name_len;
+    while idx < bytes.len() && bytes[idx].is_ascii_whitespace() {
+        idx += 1;
+    }
+    bytes.get(idx) == Some(&b'(')
 }
 
 fn known_tool_names_with_implicit(tools_val: Option<&VmValue>) -> BTreeSet<String> {

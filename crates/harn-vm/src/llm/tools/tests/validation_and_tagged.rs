@@ -343,6 +343,132 @@ fn tagged_parser_rejects_unknown_nested_xml_tool_with_sloppy_close() {
     );
 }
 
+// High-frequency DeepSeek shape: the model wraps its THINKING/narration in
+// `<assistant_prose>` *inside* `<tool_call>`. This is not a malformed call —
+// it took no action this turn. It must NOT be reported as a parse error
+// (which wastes the turn telling the model it erred); the text is preserved as
+// prose and the loop's normal no-tool-call nudge applies.
+#[test]
+fn tagged_parser_treats_wrapped_assistant_prose_as_narration_not_parse_error() {
+    let tools = sample_tool_registry();
+    let text = "<tool_call>\n<assistant_prose>\nReading parser.go to understand ParseManifest.\n</assistant_prose>\n</tool_call>";
+    let result = parse_text_tool_calls_with_tools(text, Some(&tools));
+
+    assert!(result.calls.is_empty(), "narration emits no tool call");
+    assert!(
+        result.errors.is_empty(),
+        "narration wrapped in <tool_call> must not be a parse error: {:?}",
+        result.errors
+    );
+    assert!(
+        result.violations.is_empty(),
+        "narration wrapped in <tool_call> must not be a violation: {:?}",
+        result.violations
+    );
+    assert!(
+        !result
+            .errors
+            .iter()
+            .chain(result.violations.iter())
+            .any(|msg| msg.contains("could not be parsed")
+                || msg.contains("did not contain a bare")
+                || msg.contains("TRUNCATED")),
+        "no 'could not be parsed' diagnostic for narration: errors={:?} violations={:?}",
+        result.errors,
+        result.violations
+    );
+    assert_eq!(
+        result.prose, "Reading parser.go to understand ParseManifest.",
+        "narration text preserved as prose"
+    );
+}
+
+// A bare prose body (no inner tag, no call) the model wrapped in `<tool_call>`
+// is treated identically to `<assistant_prose>` — narration, not a parse error.
+#[test]
+fn tagged_parser_treats_bare_prose_tool_call_body_as_narration() {
+    let tools = sample_tool_registry();
+    let text = "<tool_call>\nReading the file to understand the layout.\n</tool_call>";
+    let result = parse_text_tool_calls_with_tools(text, Some(&tools));
+
+    assert!(result.calls.is_empty(), "bare prose emits no tool call");
+    assert!(
+        result.errors.is_empty(),
+        "bare prose body must not be a parse error: {:?}",
+        result.errors
+    );
+    assert!(
+        result.violations.is_empty(),
+        "bare prose body must not be a violation: {:?}",
+        result.violations
+    );
+    assert_eq!(
+        result.prose, "Reading the file to understand the layout.",
+        "bare prose text preserved"
+    );
+}
+
+// Mixed shape: the SAME `<tool_call>` wrapper carries an `<assistant_prose>`
+// narration block AND a real call. Recover and dispatch the call; keep the
+// narration as prose; emit no parse error.
+#[test]
+fn tagged_parser_recovers_real_call_alongside_wrapped_prose() {
+    let tools = sample_tool_registry();
+    let text = "<tool_call>\n<assistant_prose>\nReading parser.go first.\n</assistant_prose>\nrun({ command: \"cat parser.go\" })\n</tool_call>";
+    let result = parse_text_tool_calls_with_tools(text, Some(&tools));
+
+    assert!(
+        result.errors.is_empty(),
+        "mixed prose+call must not error: {:?}",
+        result.errors
+    );
+    assert_eq!(
+        result.calls.len(),
+        1,
+        "the real call must be recovered (violations: {:?})",
+        result.violations
+    );
+    assert_eq!(result.calls[0]["name"], json!("run"));
+    assert_eq!(
+        result.calls[0]["arguments"]["command"],
+        json!("cat parser.go")
+    );
+    assert_eq!(
+        result.prose, "Reading parser.go first.",
+        "narration preserved alongside the recovered call"
+    );
+    assert!(
+        result.canonical.contains("run({"),
+        "canonical replay should carry the recovered call: {}",
+        result.canonical
+    );
+}
+
+// Negative: an unknown inner tag that LOOKS like an attempted call must STILL
+// be rejected — the narration allowance is scoped to the narration allowlist,
+// it does not turn every unknown wrapped tag into silent prose.
+#[test]
+fn tagged_parser_still_rejects_unknown_wrapped_tag_as_not_narration() {
+    let tools = sample_tool_registry();
+    let text = "<tool_call>\n<frobnicate>\n{ \"target\": \"prod\" }\n</frobnicate>\n</tool_call>";
+    let result = parse_text_tool_calls_with_tools(text, Some(&tools));
+
+    assert!(result.calls.is_empty(), "unknown tool must not execute");
+    assert!(
+        result.prose.trim().is_empty(),
+        "an unknown attempted call is not narration: {:?}",
+        result.prose
+    );
+    assert!(
+        result
+            .errors
+            .iter()
+            .any(|error| error.contains("Unknown tool 'frobnicate'")),
+        "unknown inner tag must be rejected with an actionable error: {:?}",
+        result.errors
+    );
+}
+
 #[test]
 fn tagged_parser_recovers_mistral_tool_markers() {
     let tools = sample_tool_registry();
