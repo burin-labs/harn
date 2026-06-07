@@ -785,6 +785,79 @@ pub(crate) fn canonical_provider_stop_reason(last_llm_stop_reason: Option<&str>)
     }
 }
 
+/// True when a provider stop_reason means "I ran out of output-token budget
+/// mid-emit", i.e. the response was cut off rather than completed.
+///
+/// Keys on the normalized condition, not one wire format: OpenAI / OpenRouter /
+/// Ollama (`/v1` finish_reason + native `done_reason`) report `length`;
+/// Anthropic reports `max_tokens`. Both canonicalize to `max_tokens` via
+/// [`canonical_provider_stop_reason`], so we reuse that mapping as the single
+/// source of truth — a new provider that adopts either spelling is covered for
+/// free.
+pub(crate) fn is_length_truncation(stop_reason: Option<&str>) -> bool {
+    canonical_provider_stop_reason(stop_reason) == "max_tokens"
+}
+
+/// True when the model's text looks like it was mid-tool-call when the stream
+/// was cut off: it contains a text-tool-call opener (the `<tool_call>` tag or a
+/// bare `name(` shape) but the turn resolved ZERO usable tool calls. This is the
+/// "truncated, unparseable tool call" fingerprint — distinct from a model that
+/// simply ran long on prose with no tool intent.
+///
+/// Deliberately permissive on the *prefix* side (any opener) but strict on the
+/// *outcome* side (zero calls dispatched): a turn that landed even one tool call
+/// made real progress and is not a truncation casualty.
+fn text_has_tool_call_prefix(text: &str) -> bool {
+    if text.contains(super::tools::TEXT_TOOL_CALL_OPEN)
+        || text.contains(super::tools::TEXT_TOOL_CALL_OPEN_COMPACT)
+    {
+        return true;
+    }
+    // Bare `name(` shape at the start of any line — the text-tool wire format
+    // the agent loop reads back. We only need a cheap structural sniff here;
+    // the authoritative parse already ran and produced zero calls, so this just
+    // decides whether continuing is worthwhile.
+    for line in text.lines() {
+        let trimmed = line.trim_start();
+        if let Some(ident) = super::tools::ident_length(trimmed.as_bytes()) {
+            if trimmed.as_bytes().get(ident) == Some(&b'(') {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+/// Decide whether the agent loop should AUTO-CONTINUE (re-issue the completion
+/// with a raised output cap) instead of burning the turn on parse-guidance.
+///
+/// Fires only when ALL hold:
+///   1. `stop_reason` is a length truncation (the response was cut off), AND
+///   2. the turn resolved ZERO usable tool calls, AND
+///   3. there is a partial tool-call signal — either the parser emitted a
+///      diagnostic (e.g. "unterminated heredoc") or the raw text carries a
+///      tool-call opener prefix.
+///
+/// A clean stop with a genuinely malformed call returns `false` here: that is
+/// the parse-tolerance / narration-as-prose domain (#3137) and the
+/// reasoning-leak domain (#3142), which this must NOT double-handle. The
+/// length-truncation gate is what keeps the two from colliding — those cases
+/// stop with `end_turn`/`stop`, never `length`/`max_tokens`.
+pub(crate) fn truncated_tool_call_should_continue(
+    stop_reason: Option<&str>,
+    text: &str,
+    tool_call_count: i64,
+    has_parse_errors: bool,
+) -> bool {
+    if !is_length_truncation(stop_reason) {
+        return false;
+    }
+    if tool_call_count > 0 {
+        return false;
+    }
+    has_parse_errors || text_has_tool_call_prefix(text)
+}
+
 fn last_assistant_text(snapshot: &VmValue) -> Option<String> {
     let messages_value = dict_get(snapshot, "messages")?;
     let messages = list_items(messages_value);
@@ -1248,6 +1321,41 @@ fn host_agent_session_record_usage_builtin(
     out.insert("tokens_used".to_string(), VmValue::Int(totals.0));
     out.insert("cost_usd".to_string(), VmValue::Float(totals.1));
     Ok(VmValue::Dict(std::sync::Arc::new(out)))
+}
+
+/// Deterministic "should the loop auto-continue this truncated turn?" gate.
+///
+/// Returns `true` only when the provider cut the response off mid-emit
+/// (`stop_reason` is a length truncation), the turn resolved zero usable tool
+/// calls, and there is a partial tool-call signal (a parser diagnostic or a
+/// tool-call opener in the text). Returns `false` on clean stops — including a
+/// cleanly-finished-but-malformed call — so it never overlaps the
+/// parse-tolerance (#3137) or reasoning-leak (#3142) paths.
+#[harn_builtin(
+    sig = "__host_agent_truncated_tool_call(stop_reason: string|nil, text: string, tool_call_count: int, has_parse_errors: bool) -> bool",
+    category = "agent.host",
+    runtime_only = true
+)]
+fn host_agent_truncated_tool_call_builtin(
+    args: &[VmValue],
+    _out: &mut String,
+) -> Result<VmValue, VmError> {
+    let stop_reason = match args.first() {
+        Some(VmValue::String(s)) if !s.is_empty() => Some(s.to_string()),
+        _ => None,
+    };
+    let text = args.get(1).map(|v| v.display()).unwrap_or_default();
+    let tool_call_count = match args.get(2) {
+        Some(VmValue::Int(i)) => *i,
+        _ => 0,
+    };
+    let has_parse_errors = matches!(args.get(3), Some(VmValue::Bool(true)));
+    Ok(VmValue::Bool(truncated_tool_call_should_continue(
+        stop_reason.as_deref(),
+        &text,
+        tool_call_count,
+        has_parse_errors,
+    )))
 }
 
 /// Drain pending runtime-feedback notes for a session (no-op shim).
@@ -2203,6 +2311,23 @@ fn build_agent_event(
             kind: "tool_parse_error_feedback".to_string(),
             content: get_string("error_summary"),
         }),
+        // `llm_auto_continue` fires when a length-truncated turn with an
+        // incomplete tool call is re-issued with a raised output cap instead of
+        // burning the turn on parse-guidance. Engine-emitted (not user
+        // feedback), surfaced on the FeedbackInjected stream like the sibling
+        // corrections above so operators can see the recovery. `content`
+        // summarizes the cap raise: "<previous>->-<raised> (attempt N/max)".
+        "llm_auto_continue" => Ok(AgentEvent::FeedbackInjected {
+            session_id: session_id.to_string(),
+            kind: "llm_auto_continue".to_string(),
+            content: format!(
+                "{}->{} (attempt {}/{})",
+                get_usize("previous_max_tokens"),
+                get_usize("raised_max_tokens"),
+                get_usize("attempt"),
+                get_usize("max_continuations"),
+            ),
+        }),
         other => Err(VmError::Runtime(format!(
             "{HOST_AGENT_EMIT_EVENT}: unsupported event type `{other}`"
         ))),
@@ -3111,6 +3236,7 @@ const HOST_SESSION_BUILTINS: &[&VmBuiltinDef] = &[
     &HOST_AGENT_SESSION_RECORD_USAGE_BUILTIN_DEF,
     &HOST_AGENT_SESSION_DRAIN_FEEDBACK_BUILTIN_DEF,
     &HOST_AGENT_SESSION_TOTALS_BUILTIN_DEF,
+    &HOST_AGENT_TRUNCATED_TOOL_CALL_BUILTIN_DEF,
     &HOST_AGENT_SESSION_INJECT_FEEDBACK_BUILTIN_DEF,
     &HOST_AGENT_SESSION_POST_EVENT_BUILTIN_DEF,
     &HOST_AGENT_SESSION_APPLY_REMINDER_POST_TURN_BUILTIN_DEF,
@@ -3148,8 +3274,9 @@ mod tests {
 
     use super::{
         agent_turn_made_no_llm_call, assistant_message_from_llm_result, canonical_acp_stop_reason,
-        canonical_provider_stop_reason, initial_user_content, last_assistant_text,
-        tool_result_message_for_provider, vm_to_json,
+        canonical_provider_stop_reason, initial_user_content, is_length_truncation,
+        last_assistant_text, text_has_tool_call_prefix, tool_result_message_for_provider,
+        truncated_tool_call_should_continue, vm_to_json,
     };
     use std::collections::BTreeMap;
 
@@ -3389,6 +3516,107 @@ mod tests {
             canonical_acp_stop_reason("budget_exhausted", 50, 50, Some("refusal")),
             "max_turn_requests"
         );
+    }
+
+    #[test]
+    fn length_truncation_recognized_across_provider_spellings() {
+        // Keyed on the normalized condition, not one wire format.
+        assert!(is_length_truncation(Some("length"))); // OpenAI/OpenRouter/Ollama
+        assert!(is_length_truncation(Some("max_tokens"))); // Anthropic
+        assert!(is_length_truncation(Some("LENGTH"))); // case-insensitive
+        assert!(!is_length_truncation(Some("stop")));
+        assert!(!is_length_truncation(Some("end_turn")));
+        assert!(!is_length_truncation(Some("tool_use")));
+        assert!(!is_length_truncation(Some("refusal")));
+        assert!(!is_length_truncation(None));
+    }
+
+    #[test]
+    fn truncated_tool_call_prefix_detection_covers_both_wire_shapes() {
+        // Tagged opener.
+        assert!(text_has_tool_call_prefix(
+            "let me edit\n<tool_call>\nedit({ path: \"a.rs\", body: <<EOF\nfn"
+        ));
+        // Bare `name(` at line start.
+        assert!(text_has_tool_call_prefix(
+            "I'll write the file.\nwrite_file({ path: \"a.rs\", contents: <<EOF\nfn main"
+        ));
+        // Pure prose with no call shape — not a truncated call.
+        assert!(!text_has_tool_call_prefix(
+            "Here is a long explanation of the algorithm that just kept going"
+        ));
+        // A bare ident with no opening paren is not a call prefix.
+        assert!(!text_has_tool_call_prefix(
+            "write_file is the tool you want"
+        ));
+    }
+
+    #[test]
+    fn auto_continue_fires_on_length_truncation_with_partial_call() {
+        // (a) finish_reason == length + truncated tool-call prefix with zero
+        // resolved calls -> auto-continue.
+        let truncated_body = "edit({ path: \"a.rs\", body: <<EOF\nfn main() {";
+        // Via a parser diagnostic (unterminated heredoc).
+        assert!(truncated_tool_call_should_continue(
+            Some("length"),
+            truncated_body,
+            0,
+            true,
+        ));
+        // Via the text prefix alone, even with no parser diagnostic surfaced.
+        assert!(truncated_tool_call_should_continue(
+            Some("max_tokens"),
+            truncated_body,
+            0,
+            false,
+        ));
+    }
+
+    #[test]
+    fn auto_continue_does_not_fire_when_calls_resolved() {
+        // A length truncation that still landed a usable tool call made real
+        // progress; do not re-issue.
+        assert!(!truncated_tool_call_should_continue(
+            Some("length"),
+            "edit({ path: \"a.rs\", body: <<EOF\nfn main() {}\nEOF })",
+            1,
+            false,
+        ));
+    }
+
+    #[test]
+    fn auto_continue_does_not_fire_on_clean_stop_with_malformed_call() {
+        // (c) Clean stop + malformed call -> NOT auto-continue. This is the
+        // #3137/#3142 domain (parse-tolerance / reasoning-leak); the
+        // length-truncation gate is what keeps the two from colliding.
+        let malformed = "edit({ path: \"a.rs\" body \"oops\" })";
+        assert!(!truncated_tool_call_should_continue(
+            Some("stop"),
+            malformed,
+            0,
+            true,
+        ));
+        assert!(!truncated_tool_call_should_continue(
+            Some("end_turn"),
+            malformed,
+            0,
+            true,
+        ));
+        assert!(!truncated_tool_call_should_continue(
+            None, malformed, 0, true
+        ));
+    }
+
+    #[test]
+    fn auto_continue_does_not_fire_on_length_truncated_prose() {
+        // A model that simply ran long on prose with no tool intent should not
+        // trigger a continuation: there is no partial-call signal.
+        assert!(!truncated_tool_call_should_continue(
+            Some("length"),
+            "Here is a very long explanation that ran past the token cap",
+            0,
+            false,
+        ));
     }
 }
 
