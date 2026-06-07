@@ -253,6 +253,96 @@ fn tagged_parser_rejects_unknown_nested_xml_tool_call_body() {
     );
 }
 
+// Shape 1 (dominant DeepSeek failure): the inner OPEN tag names a registered
+// tool, the inner CLOSE tag is malformed (`</edit_call>`), and there is no
+// outer `</tool_call>`. The JSON object is complete, so the call is recoverable
+// — not truncated. Recover, canonicalize, and dispatch it.
+#[test]
+fn tagged_parser_recovers_nested_xml_mismatched_inner_close_no_outer_close() {
+    let tools = sample_tool_registry();
+    let text = "<tool_call>\n<edit>\n{ \"action\": \"create\", \"path\": \"a.rs\", \"content\": \"fn a() {}\" }\n</edit_call>";
+    let result = parse_text_tool_calls_with_tools(text, Some(&tools));
+
+    assert!(result.errors.is_empty(), "errors: {:?}", result.errors);
+    assert_eq!(result.calls.len(), 1, "violations: {:?}", result.violations);
+    assert_eq!(result.calls[0]["name"], json!("edit"));
+    assert_eq!(result.calls[0]["arguments"]["path"], json!("a.rs"));
+    assert!(
+        !result
+            .errors
+            .iter()
+            .any(|error| error.contains("TRUNCATED")),
+        "a complete JSON body must not be misreported as truncated: {:?}",
+        result.errors
+    );
+    assert!(
+        result.canonical.contains("edit({"),
+        "canonical replay should use Harn syntax: {}",
+        result.canonical
+    );
+}
+
+// Shape 2: the inner tag is never closed and a duplicate/trailing
+// `</tool_call>` follows the JSON object. Tolerate both; dispatch the call and
+// swallow the orphan close tag without a noisy violation.
+#[test]
+fn tagged_parser_recovers_nested_xml_missing_inner_close_and_duplicate_outer_close() {
+    let tools = sample_tool_registry();
+    let text = "<tool_call>\n<edit>\n{ \"action\": \"create\", \"path\": \"a.rs\" }\n</tool_call>\n</tool_call>";
+    let result = parse_text_tool_calls_with_tools(text, Some(&tools));
+
+    assert!(result.errors.is_empty(), "errors: {:?}", result.errors);
+    assert_eq!(result.calls.len(), 1, "violations: {:?}", result.violations);
+    assert_eq!(result.calls[0]["name"], json!("edit"));
+    assert_eq!(result.calls[0]["arguments"]["path"], json!("a.rs"));
+    assert!(
+        result.violations.is_empty(),
+        "duplicate trailing </tool_call> must be swallowed silently: {:?}",
+        result.violations
+    );
+    assert!(
+        result.canonical.contains("edit({"),
+        "canonical replay should use Harn syntax: {}",
+        result.canonical
+    );
+}
+
+// Shape 3: a leading-dot float (`.100`) inside an otherwise-valid `name({ ... })`
+// call. Recover `.100` -> `0.100` so the whole call is not dropped over one char.
+#[test]
+fn tagged_parser_recovers_leading_dot_float_in_tool_args() {
+    let tools = sample_tool_registry();
+    let text = "<tool_call>\nrun({ command: \"x\", limit: .100, weight: -.5 })\n</tool_call>";
+    let result = parse_text_tool_calls_with_tools(text, Some(&tools));
+
+    assert!(result.errors.is_empty(), "errors: {:?}", result.errors);
+    assert_eq!(result.calls.len(), 1, "violations: {:?}", result.violations);
+    assert_eq!(result.calls[0]["name"], json!("run"));
+    assert_eq!(result.calls[0]["arguments"]["limit"], json!(0.100));
+    assert_eq!(result.calls[0]["arguments"]["weight"], json!(-0.5));
+}
+
+// Negative: an unknown inner tag in the sloppy (mismatched-close, no outer
+// close) shape must still be rejected — prose-with-angle-brackets must not be
+// mis-parsed as a call. Mirrors the #3132 discipline through the new path.
+#[test]
+fn tagged_parser_rejects_unknown_nested_xml_tool_with_sloppy_close() {
+    let tools = sample_tool_registry();
+    let text = "<tool_call>\n<frobnicate>\n{ \"target\": \"prod\" }\n</frobnicate_call>";
+    let result = parse_text_tool_calls_with_tools(text, Some(&tools));
+
+    assert!(result.calls.is_empty(), "unknown tool must not execute");
+    assert!(
+        result
+            .errors
+            .iter()
+            .any(|error| error.contains("Unknown tool 'frobnicate'")
+                || error.contains("TRUNCATED")),
+        "unknown inner tag must be rejected (not dispatched): {:?}",
+        result.errors
+    );
+}
+
 #[test]
 fn tagged_parser_recovers_mistral_tool_markers() {
     let tools = sample_tool_registry();
