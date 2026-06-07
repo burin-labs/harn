@@ -1,4 +1,4 @@
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use super::*;
 
@@ -165,6 +165,17 @@ pub fn validate_artifact(artifact: &ProviderCatalogArtifact) -> ProviderCatalogV
         }
     }
 
+    // Index models by (provider, id) so alias tool_format can be checked
+    // against the target model's declared tool support. An alias is the one
+    // place a harness author can pin `native` / `text` per model, so a typo
+    // or a format the model can't serve must be caught at catalog-build time
+    // rather than silently degrading at call time.
+    let model_by_pair: BTreeMap<(&str, &str), &CatalogModel> = artifact
+        .models
+        .iter()
+        .map(|model| ((model.provider.as_str(), model.id.as_str()), model))
+        .collect();
+
     let dedicated_pairs: BTreeSet<(&str, &str)> = artifact
         .models
         .iter()
@@ -177,6 +188,29 @@ pub fn validate_artifact(artifact: &ProviderCatalogArtifact) -> ProviderCatalogV
                 "alias {} targets {}/{} without a catalog row",
                 alias.name, alias.provider, alias.model_id
             ));
+        }
+        if let Some(format) = alias.tool_format.as_deref() {
+            if format != "native" && format != "text" {
+                result.errors.push(format!(
+                    "alias {} declares tool_format {:?}; must be \"native\" or \"text\"",
+                    alias.name, format
+                ));
+            } else if let Some(model) =
+                model_by_pair.get(&(alias.provider.as_str(), alias.model_id.as_str()))
+            {
+                if format == "native" && !model.tool_support.native {
+                    result.errors.push(format!(
+                        "alias {} pins tool_format \"native\" but model {}/{} does not support native tool calling",
+                        alias.name, alias.provider, alias.model_id
+                    ));
+                }
+                if format == "text" && !model.tool_support.text {
+                    result.errors.push(format!(
+                        "alias {} pins tool_format \"text\" but model {}/{} does not support text tool calling",
+                        alias.name, alias.provider, alias.model_id
+                    ));
+                }
+            }
         }
         if is_tier_alias(&alias.name)
             && dedicated_pairs.contains(&(alias.provider.as_str(), alias.model_id.as_str()))

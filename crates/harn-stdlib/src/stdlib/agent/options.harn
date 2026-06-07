@@ -123,6 +123,75 @@ fn __valid_tool_format(value) {
   return nil
 }
 
+/**
+ * Reject an explicit `tool_format` that is neither `native`, `text`, nor a
+ * recognized auto sentinel. Without this, a typo like `"nativ"` or a wrong
+ * value like `"json"` / `"tool_use"` silently flows through resolution
+ * (`source: "explicit"`, no override event), and every downstream branch that
+ * gates on `tool_format == "native"` reads it as `false` — so the agent
+ * silently runs the text protocol instead of either honoring the request or
+ * failing loudly. This is the "never silently half-supported" gate for the
+ * single knob harness authors touch most. `auto`/`""`/nil are handled before
+ * this is reached and never land here.
+ *
+ * @effects: []
+ * @allocation: none
+ * @errors: [agent_loop_invalid_tool_format]
+ * @api_stability: experimental
+ */
+fn __validate_explicit_tool_format(value) {
+  if __valid_tool_format(value) == nil {
+    throw "agent_loop: `tool_format` must be one of native, text, auto (or omitted); got "
+      + to_string(value)
+  }
+}
+
+/**
+ * Reject a tool_format the catalog marks as *impossible* for this model
+ * (`native_only` asked for `text`, or `text_only` asked for `native`). Unlike
+ * the `*_unreliable` parity classes — which stay a recoverable warning the
+ * harness author can override with a reason — the `*_only` classes mean the
+ * requested side does not work at all, so honoring the request would silently
+ * produce a broken request envelope. Rejecting here turns a silent quirk into
+ * a loud, actionable error.
+ *
+ * Escape hatch: a non-empty `tool_format_override_reason` lets a probe / matrix
+ * harness force the marked-impossible side deliberately. That keeps the "never
+ * SILENTLY half-supported" invariant — the only way past the gate is an
+ * explicit, recorded acknowledgment, mirroring the `*_unreliable` reason path.
+ *
+ * @effects: []
+ * @allocation: none
+ * @errors: [agent_loop_unsupported_tool_format]
+ * @api_stability: experimental
+ */
+fn __validate_tool_format_parity(pair, requested, parity, override_reason) {
+  let requested_format = __valid_tool_format(requested)
+  if requested_format == nil || pair == nil {
+    return
+  }
+  if override_reason != nil {
+    return
+  }
+  let catalog_parity = __catalog_parity(parity)
+  if catalog_parity == "native_only" && requested_format == "text" {
+    throw "agent_loop: tool_format \"text\" is unsupported for "
+      + pair.provider
+      + ":"
+      + pair.model
+      + " (catalog parity native_only — this model only does native tool calling). "
+      + "Pass tool_format_override_reason to force it deliberately."
+  }
+  if catalog_parity == "text_only" && requested_format == "native" {
+    throw "agent_loop: tool_format \"native\" is unsupported for "
+      + pair.provider
+      + ":"
+      + pair.model
+      + " (catalog parity text_only — this model only does text tool calling). "
+      + "Pass tool_format_override_reason to force it deliberately."
+  }
+}
+
 fn __optional_text(value) {
   if value == nil {
     return nil
@@ -284,6 +353,7 @@ pub fn agent_tool_format_resolution(options = nil) {
   let opts = options ?? {}
   let explicit = __explicit_tool_format(opts)
   if explicit != nil {
+    __validate_explicit_tool_format(explicit)
     let pair = __tool_format_pair(opts)
     var preferred = nil
     var parity = nil
@@ -297,6 +367,12 @@ pub fn agent_tool_format_resolution(options = nil) {
         parity = resolved_caps?.tool_mode_parity
       }
     }
+    __validate_tool_format_parity(
+      pair,
+      explicit,
+      parity,
+      __optional_text(opts?.tool_format_override_reason),
+    )
     return {
       tool_format: explicit,
       source: "explicit",

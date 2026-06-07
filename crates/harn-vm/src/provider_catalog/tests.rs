@@ -309,6 +309,104 @@ fn validation_rejects_duplicate_and_dangling_aliases() {
 }
 
 #[test]
+fn validation_rejects_alias_tool_format_not_native_or_text() {
+    // A typo / wrong value in an alias's tool_format pin must be caught at
+    // catalog-build time, not silently degraded at call time.
+    let mut catalog = artifact();
+    catalog.aliases[0].tool_format = Some("nativ".to_string());
+    let report = validate_artifact(&catalog);
+    assert!(
+        report
+            .errors
+            .iter()
+            .any(|message| message.contains("must be \"native\" or \"text\"")),
+        "expected invalid alias tool_format error, got {:?}",
+        report.errors
+    );
+}
+
+#[test]
+fn validation_rejects_alias_pinning_unservable_tool_format() {
+    // An alias may only pin a format the target model actually serves. Pin
+    // "native" on a text-only model -> hard error (this is the exact footgun
+    // that the shipped ollama-devstral-small-2-native alias had).
+    let mut catalog = artifact();
+    let alias_target = (
+        catalog.aliases[0].provider.clone(),
+        catalog.aliases[0].model_id.clone(),
+    );
+    let model = catalog
+        .models
+        .iter_mut()
+        .find(|m| m.provider == alias_target.0 && m.id == alias_target.1)
+        .expect("alias target model present in catalog");
+    model.tool_support.native = false;
+    model.tool_support.text = true;
+    catalog.aliases[0].tool_format = Some("native".to_string());
+    let report = validate_artifact(&catalog);
+    assert!(
+        report
+            .errors
+            .iter()
+            .any(|message| message.contains("does not support native tool calling")),
+        "expected unservable-native alias error, got {:?}",
+        report.errors
+    );
+
+    // Symmetric: pin "text" on a native-only model -> hard error.
+    let mut catalog = artifact();
+    let alias_target = (
+        catalog.aliases[0].provider.clone(),
+        catalog.aliases[0].model_id.clone(),
+    );
+    let model = catalog
+        .models
+        .iter_mut()
+        .find(|m| m.provider == alias_target.0 && m.id == alias_target.1)
+        .expect("alias target model present in catalog");
+    model.tool_support.native = true;
+    model.tool_support.text = false;
+    catalog.aliases[0].tool_format = Some("text".to_string());
+    let report = validate_artifact(&catalog);
+    assert!(
+        report
+            .errors
+            .iter()
+            .any(|message| message.contains("does not support text tool calling")),
+        "expected unservable-text alias error, got {:?}",
+        report.errors
+    );
+}
+
+#[test]
+fn validation_accepts_alias_pinning_servable_tool_format() {
+    // The happy path: an alias pinning a format the model serves validates.
+    let mut catalog = artifact();
+    let alias_target = (
+        catalog.aliases[0].provider.clone(),
+        catalog.aliases[0].model_id.clone(),
+    );
+    let model = catalog
+        .models
+        .iter_mut()
+        .find(|m| m.provider == alias_target.0 && m.id == alias_target.1)
+        .expect("alias target model present in catalog");
+    model.tool_support.native = true;
+    model.tool_support.text = true;
+    catalog.aliases[0].tool_format = Some("native".to_string());
+    let report = validate_artifact(&catalog);
+    assert!(
+        !report
+            .errors
+            .iter()
+            .any(|message| message.contains("does not support")
+                || message.contains("must be \"native\" or \"text\"")),
+        "servable alias tool_format should validate, got {:?}",
+        report.errors
+    );
+}
+
+#[test]
 fn overlay_merge_surfaces_private_model() {
     let _guard = install_overlay(
         r#"

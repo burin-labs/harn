@@ -2432,7 +2432,9 @@ public let harnProviderCatalogJSON = #"""
       "id": "gpt-oss-120b",
       "name": "GPT-OSS 120B (Cerebras)",
       "provider": "cerebras",
-      "aliases": [],
+      "aliases": [
+        "cerebras-gpt-oss"
+      ],
       "context_window": 131072,
       "logical_model": "openai-gpt-oss-120b",
       "equivalence_group": "openai-gpt-oss-120b",
@@ -2588,7 +2590,9 @@ public let harnProviderCatalogJSON = #"""
       "id": "zai-glm-4.7",
       "name": "Z.ai GLM 4.7 (Cerebras)",
       "provider": "cerebras",
-      "aliases": [],
+      "aliases": [
+        "cerebras-glm"
+      ],
       "context_window": 131072,
       "modalities": {
         "input": [
@@ -4883,8 +4887,7 @@ public let harnProviderCatalogJSON = #"""
       "provider": "ollama",
       "aliases": [
         "devstral-small-2",
-        "ollama-devstral-small-2",
-        "ollama-devstral-small-2-native"
+        "ollama-devstral-small-2"
       ],
       "context_window": 262144,
       "runtime_context_window": 32768,
@@ -7681,6 +7684,18 @@ public let harnProviderCatalogJSON = #"""
   ],
   "aliases": [
     {
+      "name": "cerebras-glm",
+      "model_id": "zai-glm-4.7",
+      "provider": "cerebras",
+      "tool_format": "text"
+    },
+    {
+      "name": "cerebras-gpt-oss",
+      "model_id": "gpt-oss-120b",
+      "provider": "cerebras",
+      "tool_format": "text"
+    },
+    {
       "name": "cohere",
       "model_id": "command-a-plus-05-2026",
       "provider": "cohere"
@@ -7906,12 +7921,6 @@ public let harnProviderCatalogJSON = #"""
       "model_id": "devstral-small-2:24b",
       "provider": "ollama",
       "tool_format": "text"
-    },
-    {
-      "name": "ollama-devstral-small-2-native",
-      "model_id": "devstral-small-2:24b",
-      "provider": "ollama",
-      "tool_format": "native"
     },
     {
       "name": "ollama-gemma4",
