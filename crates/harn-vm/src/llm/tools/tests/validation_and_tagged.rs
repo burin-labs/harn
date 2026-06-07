@@ -892,3 +892,104 @@ fn tagged_parser_closed_tool_call_unaffected_by_truncation_branch() {
         result.errors
     );
 }
+
+// ---------------------------------------------------------------------------
+// Shape 1: template literals + `+`-concatenated string fragments in a value.
+// ---------------------------------------------------------------------------
+
+// A multi-line backtick template literal as a value (Go-ish content) parses to
+// the literal body. (Single-line backticks were already covered; this guards
+// the multi-line body the corpus emits.)
+#[test]
+fn value_accepts_multiline_template_literal() {
+    let tools = sample_tool_registry();
+    let text =
+        "edit({ action: \"create\", path: \"a.go\", content: `package main\n\nfunc main() {}\n` })";
+    let result = parse_bare_calls_in_body(text, Some(&tools));
+    assert_eq!(result.calls.len(), 1, "errors: {:?}", result.errors);
+    assert_eq!(
+        result.calls[0]["arguments"]["content"],
+        json!("package main\n\nfunc main() {}\n")
+    );
+}
+
+// Plain `+`-concatenation of two quoted strings collapses to one value.
+#[test]
+fn value_folds_string_concatenation() {
+    let tools = sample_tool_registry();
+    let text = "edit({ action: \"create\", path: \"a.txt\", content: \"hello \" + \"world\" })";
+    let result = parse_bare_calls_in_body(text, Some(&tools));
+    assert_eq!(result.calls.len(), 1, "errors: {:?}", result.errors);
+    assert_eq!(
+        result.calls[0]["arguments"]["content"],
+        json!("hello world")
+    );
+}
+
+// The dominant corpus shape: a Go file body where a backtick struct tag forces
+// the model into ``…` + "`json:\"x\"`" + `…`` concatenation. The fragments
+// (template + quoted + template) must collapse into one content string with the
+// literal backtick struct tag preserved.
+#[test]
+fn value_folds_go_backtick_struct_tag_concatenation() {
+    let tools = sample_tool_registry();
+    let text = "edit({ action: \"create\", path: \"status.go\", content: `package main\n\ntype S struct {\n\tServices []ServiceStatus ` + \"`json:\\\"services\\\"`\" + ` // tail\n}\n` })";
+    let result = parse_bare_calls_in_body(text, Some(&tools));
+    assert_eq!(result.calls.len(), 1, "errors: {:?}", result.errors);
+    let content = result.calls[0]["arguments"]["content"].as_str().unwrap();
+    assert!(
+        content.contains("`json:\"services\"`"),
+        "backtick struct tag must survive concatenation: {content:?}"
+    );
+    assert!(
+        content.starts_with("package main") && content.contains("type S struct {"),
+        "surrounding template fragments must be joined: {content:?}"
+    );
+}
+
+// Negative: a `+` whose right operand is NOT a string is malformed
+// concatenation — the parser must reject loudly, never guess.
+#[test]
+fn value_rejects_non_string_concatenation_operand() {
+    let tools = sample_tool_registry();
+    let text = "edit({ action: \"create\", path: \"a.txt\", content: \"x\" + 1 })";
+    let result = parse_bare_calls_in_body(text, Some(&tools));
+    assert!(
+        result.calls.is_empty(),
+        "non-string concat operand must not dispatch: {:?}",
+        result.calls
+    );
+    assert!(
+        !result.errors.is_empty(),
+        "should error: {:?}",
+        result.errors
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Shape 3: `=` accepted as a synonym for `:` as the object key/value separator.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn object_accepts_equals_as_key_value_separator() {
+    let tools = sample_tool_registry();
+    // `=` before a scalar and before a template body, mixed with a normal `:`.
+    let text = "edit({ action= \"create\", path: \"a.go\", content= `x` })";
+    let result = parse_bare_calls_in_body(text, Some(&tools));
+    assert_eq!(result.calls.len(), 1, "errors: {:?}", result.errors);
+    assert_eq!(result.calls[0]["arguments"]["action"], json!("create"));
+    assert_eq!(result.calls[0]["arguments"]["path"], json!("a.go"));
+    assert_eq!(result.calls[0]["arguments"]["content"], json!("x"));
+}
+
+#[test]
+fn object_accepts_equals_before_heredoc_value() {
+    let tools = sample_tool_registry();
+    let text = "edit({\n    action: \"create\",\n    path: \"a.go\",\n    content= <<EOF\npackage main\nEOF\n})";
+    let result = parse_bare_calls_in_body(text, Some(&tools));
+    assert_eq!(result.calls.len(), 1, "errors: {:?}", result.errors);
+    assert_eq!(
+        result.calls[0]["arguments"]["content"],
+        json!("package main")
+    );
+}

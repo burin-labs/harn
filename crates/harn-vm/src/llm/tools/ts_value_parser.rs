@@ -96,6 +96,26 @@ impl<'a> TsValueParser<'a> {
     }
 
     pub(super) fn parse_value(&mut self) -> Result<serde_json::Value, String> {
+        let value = self.parse_primary_value()?;
+        // String concatenation (`"a" + "b"` / `` `a` + "b" ``). Value models —
+        // notably Go, where backtick struct tags force JS-style concat like
+        // `` `...` + "`json:\"x\"`" + `...` `` — split a single code body into
+        // `+`-joined string/template fragments. TS would evaluate that to one
+        // string; tool arguments never evaluate expressions, so collapse the
+        // fragments into one string value here. Engages ONLY when the first
+        // operand already parsed as a string AND a `+` follows, so non-string
+        // values and well-formed single strings are untouched. Scoped to
+        // tool-call argument parsing — `TsValueParser` is private to the tools
+        // module and never parses general documents.
+        if matches!(value, serde_json::Value::String(_)) {
+            return self.fold_string_concatenation(value);
+        }
+        Ok(value)
+    }
+
+    /// Parse one primary value (object, array, string/template, heredoc,
+    /// keyword, or number) without considering a trailing `+` concatenation.
+    fn parse_primary_value(&mut self) -> Result<serde_json::Value, String> {
         self.skip_ws_and_comments();
         let c = self.peek().ok_or("unexpected end of input")?;
         match c {
@@ -120,6 +140,44 @@ impl<'a> TsValueParser<'a> {
                 "unexpected character `{}` starting a value",
                 other as char
             )),
+        }
+    }
+
+    /// Given an already-parsed leading string `head`, fold any `+`-joined
+    /// trailing string/template fragments into it. Each `+` must be followed
+    /// (after whitespace/comments) by another string-producing primary; if the
+    /// right operand is NOT a string the input is malformed concatenation
+    /// (e.g. `"a" + 1` or `"a" +` at EOF) and we error rather than guess. A
+    /// recovered concat collapses to one `String` value — canonicalized back to
+    /// a single quoted string on replay by `render_canonical_call`.
+    fn fold_string_concatenation(
+        &mut self,
+        head: serde_json::Value,
+    ) -> Result<serde_json::Value, String> {
+        let serde_json::Value::String(mut acc) = head else {
+            return Ok(head);
+        };
+        loop {
+            // Peek past whitespace/comments without committing: only a `+`
+            // continues the concatenation. Anything else is the next structural
+            // token (`,`, `}`, `]`, `)`), which the caller handles.
+            let save = self.pos;
+            self.skip_ws_and_comments();
+            if self.peek() != Some(b'+') {
+                self.pos = save;
+                return Ok(serde_json::Value::String(acc));
+            }
+            self.advance(); // consume '+'
+            self.skip_ws_and_comments();
+            let rhs = self.parse_primary_value()?;
+            match rhs {
+                serde_json::Value::String(s) => acc.push_str(&s),
+                other => {
+                    return Err(format!(
+                        "expected a string fragment after `+` in string concatenation, got `{other}`"
+                    ));
+                }
+            }
         }
     }
 
@@ -152,8 +210,13 @@ impl<'a> TsValueParser<'a> {
             };
             self.skip_ws_and_comments();
             // TS shorthand `{ foo }` is legal but rare for our tool calls; we
-            // disallow it to keep the contract explicit.
-            if self.peek() != Some(b':') {
+            // disallow it to keep the contract explicit. Accept `=` as a synonym
+            // for `:`: value models (especially before a heredoc/template body,
+            // e.g. `{ new_body= <<EOF ... }`) reach for the assignment glyph they
+            // know from kwargs/struct-literal syntax. `=` is not a legal
+            // object-literal separator in TS, so there is no ambiguity to lose —
+            // canonicalized back to `:` on replay by `render_canonical_call`.
+            if !matches!(self.peek(), Some(b':') | Some(b'=')) {
                 return Err(format!(
                     "expected `:` after key `{key}` inside object literal"
                 ));

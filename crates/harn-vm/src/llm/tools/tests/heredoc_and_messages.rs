@@ -232,7 +232,27 @@ EOF
 }
 
 #[test]
-fn heredoc_unterminated_is_error() {
+fn heredoc_indented_closing_tag_terminates() {
+    // Shape 2 (indented terminator): the model indents the closing `EOF` to
+    // match the surrounding code. Leading whitespace before the tag on the
+    // close line must not prevent termination.
+    let tools = sample_tool_registry();
+    let text = "edit({\n    action: \"create\",\n    path: \"a.go\",\n    content: <<EOF\npackage main\n    EOF\n})";
+    let result = parse_bare_calls_in_body(text, Some(&tools));
+    assert_eq!(result.calls.len(), 1, "errors: {:?}", result.errors);
+    assert_eq!(
+        result.calls[0]["arguments"]["content"],
+        json!("package main")
+    );
+}
+
+#[test]
+fn heredoc_missing_tag_with_structural_close_recovers() {
+    // Shape 2 (sloppy terminator): the model wrote a complete, structurally
+    // closed call but botched/omitted the heredoc `EOF` tag. The trailing `})`
+    // is the call's own close, so the body is implicitly terminated there and
+    // the call dispatches rather than wasting a turn on parse_guidance. (~2,400
+    // of these in the corpus vs ~1 genuine truncation.)
     let tools = sample_tool_registry();
     let text = r#"edit({
     action: "create",
@@ -242,9 +262,58 @@ package main
 // no closing EOF tag
 })"#;
     let result = parse_bare_calls_in_body(text, Some(&tools));
+    assert_eq!(
+        result.calls.len(),
+        1,
+        "sloppy-terminator heredoc should recover, errors: {:?}",
+        result.errors
+    );
+    assert!(result.errors.is_empty(), "no errors: {:?}", result.errors);
+    let content = result.calls[0]["arguments"]["content"].as_str().unwrap();
+    assert_eq!(
+        content, "package main\n// no closing EOF tag",
+        "body ends just before the call tail"
+    );
+}
+
+#[test]
+fn heredoc_truncated_mid_body_is_error() {
+    // Negative: a genuinely truncated body (cut off mid-token, no structural
+    // call-tail line at the end) must still error loudly — never silently
+    // dispatch a half-written call. This is the ~1-in-the-corpus real
+    // max-token truncation that the implicit-close recovery deliberately leaves
+    // alone (no `)` on a standalone final line to anchor the close).
+    let tools = sample_tool_registry();
+    let text = r#"edit({
+    action: "create",
+    path: "main.go",
+    content: <<EOF
+package main
+
+func main() {
+    fmt.Println("hello"#;
+    let result = parse_bare_calls_in_body(text, Some(&tools));
     assert!(
         result.calls.is_empty(),
-        "unterminated heredoc should produce no calls"
+        "truncated heredoc should produce no calls, calls: {:?}",
+        result.calls
+    );
+    assert!(!result.errors.is_empty(), "should have parse error");
+}
+
+#[test]
+fn heredoc_code_body_with_bare_brace_close_stays_ambiguous() {
+    // Boundary: a body whose final standalone line is a bare `}` (ordinary
+    // Go/Rust block close) is ambiguous — it could be code or a botched call
+    // tail. With no `)` to anchor the call's own close, we do NOT guess; the
+    // call errors rather than risk truncating a legitimate body.
+    let tools = sample_tool_registry();
+    let text = "edit({\n    action: \"create\",\n    path: \"main.go\",\n    content: <<EOF\nfunc main() {\n    return\n}";
+    let result = parse_bare_calls_in_body(text, Some(&tools));
+    assert!(
+        result.calls.is_empty(),
+        "bare-brace ambiguous close must not silently dispatch, calls: {:?}",
+        result.calls
     );
     assert!(!result.errors.is_empty(), "should have parse error");
 }
@@ -510,6 +579,45 @@ fn native_json_fallback_parses_pretty_printed_non_call_id() {
         json!("0"),
         "non-call_ id should be preserved"
     );
+}
+
+#[test]
+fn native_json_fallback_parses_flat_jsonrpc_envelope() {
+    // Bonus item 9: a flat JSON-RPC/MCP envelope `[{"name":..,"arguments":{..}}]`
+    // (name + args object at the TOP level, no nested `function`) should map to
+    // the same call as `read({ path: ".." })`.
+    let known = known_tools_set();
+    let text = r#"[{"name":"read","arguments":{"path":"main.go"}}]"#;
+    let (calls, errors) = parse_native_json_tool_calls(text, &known);
+    assert!(errors.is_empty(), "no errors expected: {errors:?}");
+    assert_eq!(calls.len(), 1, "should parse flat envelope: {calls:?}");
+    assert_eq!(calls[0]["name"], json!("read"));
+    assert_eq!(calls[0]["arguments"]["path"], json!("main.go"));
+}
+
+#[test]
+fn native_json_fallback_parses_flat_envelope_with_parameters_slot() {
+    // The flat envelope sometimes names the args slot `parameters`, and arrives
+    // as a single object rather than an array.
+    let known = known_tools_set();
+    let text = r#"{"name":"read","parameters":{"path":"lib.rs"}}"#;
+    let (calls, errors) = parse_native_json_tool_calls(text, &known);
+    assert!(errors.is_empty(), "no errors expected: {errors:?}");
+    assert_eq!(calls.len(), 1, "should parse single-object envelope");
+    assert_eq!(calls[0]["name"], json!("read"));
+    assert_eq!(calls[0]["arguments"]["path"], json!("lib.rs"));
+}
+
+#[test]
+fn native_json_fallback_ignores_prose_json_with_bare_name() {
+    // Negative: incidental prose JSON that merely has a `name` key (a
+    // package.json snippet, a config example) but no args/parameters object
+    // must NOT be hijacked as a tool call.
+    let known = known_tools_set();
+    let text = r#"Here is the config: {"name":"my-pkg","version":"1.0.0"}"#;
+    let (calls, errors) = parse_native_json_tool_calls(text, &known);
+    assert!(calls.is_empty(), "prose JSON must not match: {calls:?}");
+    assert!(errors.is_empty(), "no errors for prose JSON: {errors:?}");
 }
 
 #[test]
