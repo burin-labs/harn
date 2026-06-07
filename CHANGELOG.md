@@ -8,6 +8,14 @@ highlights live in [CHANGELOG-pre-0.6.md](CHANGELOG-pre-0.6.md).
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.8.86
+
+### Fixed
+
+- **Text-tool parsing now recovers registered XML-wrapped JSON tool calls.**
+  Harn accepts this value-model output shape for known tools, rewrites replay
+  to canonical text-tool syntax, and still rejects unknown XML tags.
+
 ## v0.8.85
 
 ### Fixed
