@@ -1,25 +1,51 @@
 use super::*;
 
 pub fn typescript_binding() -> Result<String, serde_json::Error> {
-    let json = artifact_json()?;
-    Ok(format!(
+    Ok(typescript_binding_from_json(&artifact_json()?))
+}
+
+/// Hermetic counterpart of [`typescript_binding`] for generating the
+/// checked-in `harn-provider-catalog.ts` artifact. See [`artifact_embedded`].
+pub fn typescript_binding_embedded(
+    explicit_overlay: Option<&crate::llm_config::ProvidersConfig>,
+) -> Result<String, serde_json::Error> {
+    Ok(typescript_binding_from_json(&artifact_json_embedded(
+        explicit_overlay,
+    )?))
+}
+
+fn typescript_binding_from_json(json: &str) -> String {
+    format!(
         "{}{}{}{}{}",
         generated_header("//", "typescript"),
         TYPESCRIPT_TYPES,
         "\nexport const harnProviderCatalog: HarnProviderCatalog = ",
         json.trim_end(),
         ";\n",
-    ) + TYPESCRIPT_COMPAT_EXPORTS)
+    ) + TYPESCRIPT_COMPAT_EXPORTS
 }
 
 pub fn swift_binding() -> Result<String, serde_json::Error> {
-    let json = artifact_json()?;
-    Ok(format!(
+    Ok(swift_binding_from_json(&artifact_json()?))
+}
+
+/// Hermetic counterpart of [`swift_binding`] for generating the checked-in
+/// `HarnProviderCatalog.swift` artifact. See [`artifact_embedded`].
+pub fn swift_binding_embedded(
+    explicit_overlay: Option<&crate::llm_config::ProvidersConfig>,
+) -> Result<String, serde_json::Error> {
+    Ok(swift_binding_from_json(&artifact_json_embedded(
+        explicit_overlay,
+    )?))
+}
+
+fn swift_binding_from_json(json: &str) -> String {
+    format!(
         "{}{}\npublic let harnProviderCatalogJSON = #\"\"\"\n{}\"\"\"#\n",
         generated_header("//", "swift"),
         SWIFT_TYPES,
         json
-    ))
+    )
 }
 
 fn generated_header(comment: &str, language: &str) -> String {
