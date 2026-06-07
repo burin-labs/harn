@@ -1,0 +1,123 @@
+import { llm_text, with_llm_script } from "std/testing"
+
+/**
+ * A value model that hits the output-token cap mid-emit returns a
+ * length-truncation stop_reason with a partial, unparseable tool call. The loop
+ * must AUTO-CONTINUE (re-issue with a raised cap) instead of burning the turn on
+ * parse-guidance — but only on a real length truncation, and bounded so it can't
+ * loop forever. A clean stop with a malformed call must NOT trigger it (that is
+ * the parse-tolerance / reasoning-leak domain).
+ */
+fn note_tools() {
+  var tools = tool_registry()
+  tools = tool_define(
+    tools,
+    "write_note",
+    "Write a note.",
+    {
+      handler: { args -> "wrote " + to_string(args?.path) },
+      parameters: {path: {type: "string", description: "Path to write"}},
+      returns: {type: "string"},
+      annotations: {kind: "edit", side_effect_level: "workspace_write"},
+    },
+  )
+  return tools
+}
+
+/**
+ * A tagged tool-call cut off mid-heredoc: the parser surfaces a TRUNCATED
+ * diagnostic and zero calls. `stop_reason: "length"` marks the token-cap cause.
+ */
+fn truncated_turn() {
+  return {text: "<tool_call>\nwrite_note({ path: \"a.txt\", body: <<EOF\nhello", stop_reason: "length"}
+}
+
+pipeline default() {
+  // (a) Length truncation + incomplete call -> auto-continue. The re-issue
+  // consumes the next scripted turn (a complete call), dispatches it, then the
+  // loop finishes. The continuation must NOT carry parse-guidance — the whole
+  // point is that we did not burn the turn.
+  with_llm_script(
+    [
+      truncated_turn(),
+      llm_text("<tool_call>\nwrite_note({ path: \"a.txt\" })\n</tool_call>"),
+      llm_text("<done>##DONE##</done>"),
+    ],
+    { ->
+      let result = agent_loop(
+        "Write a.txt.",
+        nil,
+        {
+          provider: "mock",
+          tool_format: "text",
+          loop_until_done: true,
+          max_iterations: 5,
+          max_nudges: 5,
+          tools: note_tools(),
+        },
+      )
+      let calls = llm_mock_calls()
+      __io_println(result.status)
+      __io_println(result.tools.successful[0])
+      __io_println(len(calls))
+      __io_println(!contains(json_stringify(calls[1].messages), "parse_guidance"))
+    },
+  )
+  // (b) Still truncated after the cap -> fall back to parse-guidance, no
+  // infinite loop. Two continuations are allowed (default cap), so the third
+  // truncated result falls through; its successor call carries parse-guidance.
+  with_llm_script(
+    [
+      truncated_turn(),
+      truncated_turn(),
+      truncated_turn(),
+      llm_text("<tool_call>\nwrite_note({ path: \"a.txt\" })\n</tool_call>"),
+      llm_text("<done>##DONE##</done>"),
+    ],
+    { ->
+      let result = agent_loop(
+        "Write a.txt.",
+        nil,
+        {
+          provider: "mock",
+          tool_format: "text",
+          loop_until_done: true,
+          max_iterations: 8,
+          max_nudges: 8,
+          tools: note_tools(),
+        },
+      )
+      let calls = llm_mock_calls()
+      __io_println(result.status)
+      __io_println(contains(json_stringify(calls[3].messages), "parse_guidance"))
+    },
+  )
+  // (c) Clean stop + malformed call -> NOT auto-continue. The same truncated
+  // body but with `stop_reason: "stop"` is the #3137/#3142 domain: parse-guidance
+  // fires immediately on the next call and the continuation count is not inflated.
+  with_llm_script(
+    [
+      {text: "<tool_call>\nwrite_note({ path: \"a.txt\", body: <<EOF\nhello", stop_reason: "stop"},
+      llm_text("<tool_call>\nwrite_note({ path: \"a.txt\" })\n</tool_call>"),
+      llm_text("<done>##DONE##</done>"),
+    ],
+    { ->
+      let result = agent_loop(
+        "Write a.txt.",
+        nil,
+        {
+          provider: "mock",
+          tool_format: "text",
+          loop_until_done: true,
+          max_iterations: 5,
+          max_nudges: 5,
+          tools: note_tools(),
+        },
+      )
+      let calls = llm_mock_calls()
+      __io_println(result.status)
+      __io_println(len(calls))
+      __io_println(contains(json_stringify(calls[1].messages), "parse_guidance"))
+    },
+  )
+}

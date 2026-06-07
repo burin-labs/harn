@@ -18,6 +18,7 @@ pub(crate) use messages::{build_assistant_response_message, normalize_tool_args}
 pub(crate) use native::{
     apply_tool_search_native_injection_typed, extract_deferred_tool_names, vm_tools_to_native,
 };
+pub(crate) use parse::ident_length;
 pub(crate) use parse::parse_text_tool_calls_with_tools;
 pub(crate) use parse::StreamingToolCallDetector;
 #[cfg(test)]

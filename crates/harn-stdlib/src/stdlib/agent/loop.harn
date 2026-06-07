@@ -186,6 +186,141 @@ fn __invoke_llm(message, turn_system, llm_opts) {
 
 // -------------------------------------------------------------------------------------------------
 
+// Length-truncation auto-continue.
+//
+// When a value model hits the output-token cap mid-emit, the provider returns a
+// length-truncation stop_reason (`length` for OpenAI/OpenRouter/Ollama,
+// `max_tokens` for Anthropic) and the partial output often holds a TRUNCATED,
+// unparseable tool call. Treating that as a malformed/missing call burns the
+// turn on parse-guidance even though the model was mid-correct-action — a
+// silent-corruption class that hurts even capable models.
+//
+// Instead we detect the specific condition deterministically (no model
+// cooperation, no abuse surface) and re-issue the completion with a RAISED cap
+// so the model can finish the call. The retry is invisible to the rest of the
+// loop body: it does not consume an iteration or run stall/parse accounting.
+// Bounded to a small number of continuations; if still truncated after the cap
+// we return the last result and the existing parse-guidance path takes over.
+//
+// The gate (`__host_agent_truncated_tool_call`) fires ONLY on a real length
+// truncation with zero usable calls AND a partial-call signal, so it never
+// double-handles the clean-stop-but-malformed (#3137) or reasoning-leak (#3142)
+// cases — those stop with `end_turn`/`stop`, not `length`/`max_tokens`.
+
+// -------------------------------------------------------------------------------------------------
+
+fn __autocontinue_max_continuations(llm_opts) {
+  let configured = llm_opts?.truncation_auto_continue_max
+  if type_of(configured) == "int" && configured >= 0 {
+    return configured
+  }
+  return 2
+}
+
+/**
+ * Compute the raised output-token cap for an auto-continue retry. An unset cap
+ * (`<= 0`) means the provider's own default truncated us, so jump to an
+ * explicit base. A set cap doubles. Both are clamped to a ceiling so a
+ * misconfigured model can't request an unbounded body.
+ */
+fn __autocontinue_raised_cap(current, llm_opts) {
+  let base = if type_of(llm_opts?.truncation_auto_continue_base) == "int"
+    && llm_opts.truncation_auto_continue_base > 0 {
+    llm_opts.truncation_auto_continue_base
+  } else {
+    16384
+  }
+  let ceiling = if type_of(llm_opts?.truncation_auto_continue_ceiling) == "int"
+    && llm_opts.truncation_auto_continue_ceiling > 0 {
+    llm_opts.truncation_auto_continue_ceiling
+  } else {
+    32768
+  }
+  let raised = if type_of(current) == "int" && current > 0 {
+    current * 2
+  } else {
+    base
+  }
+  if raised > ceiling {
+    return ceiling
+  }
+  return raised
+}
+
+/**
+ * Detect whether `call` is a length-truncated turn that resolved no usable
+ * tool call but looks like it was mid-call — the one condition where
+ * re-issuing with a raised cap is the right move.
+ */
+fn __autocontinue_should_continue(call, turn_opts) {
+  if !(call?.ok ?? false) {
+    return false
+  }
+  let llm_result = call?.value
+  if type_of(llm_result) != "dict" {
+    return false
+  }
+  let raw_text = llm_result?.text ?? ""
+  let parsed = agent_parse_tool_calls(raw_text, turn_opts?.tools)
+  let tool_calls = __resolve_tool_calls(llm_result, parsed)
+  let has_parse_errors = len(parsed?.tool_parse_errors ?? []) > 0
+  return __host_agent_truncated_tool_call(
+    llm_result?.stop_reason,
+    raw_text,
+    len(tool_calls),
+    has_parse_errors,
+  )
+}
+
+/**
+ * Call the LLM, and on a length-truncated turn with an incomplete tool call,
+ * AUTO-CONTINUE by re-issuing with a raised output cap (bounded). Returns the
+ * same `{ok, value, ...}` shape `__invoke_llm` returns; callers consume the
+ * final (hopefully complete) result and run their normal parse/stall/dispatch
+ * accounting on it. Falls back to the last truncated result once the cap is
+ * exhausted, so the existing parse-guidance path still fires.
+ */
+fn __invoke_llm_with_autocontinue(
+  message,
+  turn_system,
+  llm_opts,
+  turn_opts,
+  session_id,
+  iteration_index,
+) {
+  var call = __invoke_llm(message, turn_system, llm_opts)
+  let max_continuations = __autocontinue_max_continuations(llm_opts)
+  var attempts = 0
+  var cap = llm_opts?.max_tokens ?? 0
+  while attempts < max_continuations && __autocontinue_should_continue(call, turn_opts) {
+    let raised = __autocontinue_raised_cap(cap, llm_opts)
+    // No headroom left to raise — re-issuing would just truncate again at the
+    // same cap, so stop and let parse-guidance take the turn.
+    if type_of(cap) == "int" && cap > 0 && raised <= cap {
+      break
+    }
+    attempts = attempts + 1
+    agent_emit_event(
+      session_id,
+      "llm_auto_continue",
+      {
+        iteration: iteration_index + 1,
+        attempt: attempts,
+        max_continuations: max_continuations,
+        previous_max_tokens: cap,
+        raised_max_tokens: raised,
+        stop_reason: call?.value?.stop_reason ?? "",
+      },
+    )
+    cap = raised
+    let retry_opts = llm_opts + {max_tokens: raised, _truncation_auto_continue_attempt: attempts}
+    call = __invoke_llm(message, turn_system, retry_opts)
+  }
+  return call
+}
+
+// -------------------------------------------------------------------------------------------------
+
 // Tool middleware seam — composable tool_caller (mirrors __invoke_llm).
 //
 // Each tool dispatch is funneled through `tool_caller(envelope, next)` when
@@ -2207,7 +2342,14 @@ fn __agent_loop_run(message, session, initial_opts) {
         _iteration: iteration_index + 1,
         _system_fragments: turn_prompt.fragments,
       }
-      let call = __invoke_llm(message, turn_prompt.system, llm_opts)
+      let call = __invoke_llm_with_autocontinue(
+        message,
+        turn_prompt.system,
+        llm_opts,
+        turn_opts,
+        session.session_id,
+        iteration_index,
+      )
       if !call.ok {
         let failure_config = __agent_loop_consecutive_failure_config(budget)
         if __agent_loop_tracks_failure(call?.error, failure_config) {
