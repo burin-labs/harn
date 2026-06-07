@@ -282,7 +282,14 @@ impl AnthropicProvider {
             }
         }
         if let Some(ref tc) = opts.tool_choice {
-            body["tool_choice"] = tc.clone();
+            // Anthropic requires `tool_choice` to be an OBJECT (e.g.
+            // `{"type":"auto"}`); a bare string like `"auto"` — which is the
+            // OpenAI wire shape that most callers and the harn agent loop emit —
+            // returns HTTP 400 (`tool_choice: Input should be an object`).
+            // Normalize harn's internal tool-choice modes to Anthropic's shape.
+            if let Some(normalized) = normalize_anthropic_tool_choice(tc) {
+                body["tool_choice"] = normalized;
+            }
         }
         match &opts.output_format {
             crate::llm::api::OutputFormat::Text => {}
@@ -360,6 +367,78 @@ fn sanitize_anthropic_tool_for_request(tool: &serde_json::Value) -> serde_json::
         object.remove("namespaces");
     }
     tool
+}
+
+/// Map a caller-supplied `tool_choice` value to Anthropic's object form.
+///
+/// Anthropic's Messages API requires `tool_choice` to be an object with a
+/// `type` of `auto` | `any` | `tool` | `none` (and `name` for `tool`); a bare
+/// string returns HTTP 400. Callers and the harn agent loop, however, speak the
+/// OpenAI dialect (bare strings `"auto"` / `"none"` / `"required"`, or a
+/// `{"type":"function","function":{"name":...}}` object), so we translate here.
+///
+/// Mapping (mirrors how the OpenAI providers interpret the same modes):
+/// - `"auto"` / `{"type":"auto"}` → `{"type":"auto"}`
+/// - `"required"` / `"any"` / `{"type":"required"}` / `{"type":"any"}` → `{"type":"any"}`
+/// - `"none"` / `{"type":"none"}` → `{"type":"none"}` (tools stay in the request
+///   but Claude won't call them — same semantics as OpenAI's `"none"`)
+/// - a specific tool: bare name string, `{"type":"tool","name":N}`, or the
+///   OpenAI `{"type":"function","function":{"name":N}}` → `{"type":"tool","name":N}`
+///
+/// Returns `None` only when the value can't be interpreted at all (e.g. a JSON
+/// `null`), in which case the caller leaves `tool_choice` unset. Any
+/// `disable_parallel_tool_use` flag on an object input is preserved.
+fn normalize_anthropic_tool_choice(value: &serde_json::Value) -> Option<serde_json::Value> {
+    let attach_parallel = |mut obj: serde_json::Value, src: &serde_json::Value| {
+        if let Some(flag) = src.get("disable_parallel_tool_use") {
+            if let Some(map) = obj.as_object_mut() {
+                map.insert("disable_parallel_tool_use".to_string(), flag.clone());
+            }
+        }
+        obj
+    };
+
+    match value {
+        serde_json::Value::String(s) => match s.as_str() {
+            "auto" => Some(serde_json::json!({"type": "auto"})),
+            "any" | "required" => Some(serde_json::json!({"type": "any"})),
+            "none" => Some(serde_json::json!({"type": "none"})),
+            // A bare, non-keyword string names a specific tool to force.
+            other => Some(serde_json::json!({"type": "tool", "name": other})),
+        },
+        serde_json::Value::Object(_) => {
+            let ty = value.get("type").and_then(|t| t.as_str());
+            match ty {
+                Some("auto") => Some(attach_parallel(serde_json::json!({"type": "auto"}), value)),
+                Some("any") | Some("required") => {
+                    Some(attach_parallel(serde_json::json!({"type": "any"}), value))
+                }
+                Some("none") => Some(attach_parallel(serde_json::json!({"type": "none"}), value)),
+                // Anthropic native: `{"type":"tool","name":...}`.
+                Some("tool") => {
+                    let name = value.get("name").and_then(|n| n.as_str());
+                    name.map(|name| {
+                        attach_parallel(serde_json::json!({"type": "tool", "name": name}), value)
+                    })
+                }
+                // OpenAI native: `{"type":"function","function":{"name":...}}`.
+                Some("function") => {
+                    let name = value
+                        .get("function")
+                        .and_then(|f| f.get("name"))
+                        .and_then(|n| n.as_str());
+                    name.map(|name| {
+                        attach_parallel(serde_json::json!({"type": "tool", "name": name}), value)
+                    })
+                }
+                // Unknown / unset `type` on an object: fall back to letting
+                // Claude decide rather than forwarding a shape Anthropic rejects.
+                _ => Some(serde_json::json!({"type": "auto"})),
+            }
+        }
+        // Null or any other JSON scalar: treat as "no tool_choice".
+        _ => None,
+    }
 }
 
 fn force_json_via_tool_use(body: &mut serde_json::Value, schema: &serde_json::Value, model: &str) {
@@ -666,6 +745,89 @@ mod tests {
         assert!(
             tool_names.contains(&"lookup"),
             "the caller's tool is preserved, not dropped: {tool_names:?}"
+        );
+    }
+
+    #[test]
+    fn tool_choice_string_modes_become_anthropic_objects() {
+        // The OpenAI/agent-loop wire shape is a bare string. Anthropic 400s on
+        // a bare string, so each mode must be rewritten to its object form.
+        for (input, expected) in [
+            ("auto", serde_json::json!({"type": "auto"})),
+            ("any", serde_json::json!({"type": "any"})),
+            ("required", serde_json::json!({"type": "any"})),
+            ("none", serde_json::json!({"type": "none"})),
+        ] {
+            let mut payload = base_payload();
+            payload.tool_choice = Some(serde_json::json!(input));
+            let body = AnthropicProvider::build_request_body(&payload);
+            assert_eq!(
+                body["tool_choice"], expected,
+                "tool_choice \"{input}\" must serialize to an object"
+            );
+            assert!(
+                body["tool_choice"].is_object(),
+                "Anthropic rejects a non-object tool_choice"
+            );
+        }
+    }
+
+    #[test]
+    fn tool_choice_bare_string_names_a_specific_tool() {
+        // A non-keyword bare string is treated as "force this tool by name".
+        let mut payload = base_payload();
+        payload.tool_choice = Some(serde_json::json!("read_file"));
+        let body = AnthropicProvider::build_request_body(&payload);
+        assert_eq!(
+            body["tool_choice"],
+            serde_json::json!({"type": "tool", "name": "read_file"})
+        );
+    }
+
+    #[test]
+    fn tool_choice_openai_function_object_maps_to_anthropic_tool() {
+        // OpenAI's specific-tool shape is `{"type":"function","function":{...}}`.
+        let mut payload = base_payload();
+        payload.tool_choice = Some(serde_json::json!({
+            "type": "function",
+            "function": {"name": "read_file"},
+        }));
+        let body = AnthropicProvider::build_request_body(&payload);
+        assert_eq!(
+            body["tool_choice"],
+            serde_json::json!({"type": "tool", "name": "read_file"})
+        );
+    }
+
+    #[test]
+    fn tool_choice_already_anthropic_object_is_preserved() {
+        // Callers that already speak Anthropic must pass through unchanged,
+        // including the optional disable_parallel_tool_use flag.
+        let mut payload = base_payload();
+        payload.tool_choice = Some(serde_json::json!({
+            "type": "tool",
+            "name": "read_file",
+            "disable_parallel_tool_use": true,
+        }));
+        let body = AnthropicProvider::build_request_body(&payload);
+        assert_eq!(
+            body["tool_choice"],
+            serde_json::json!({
+                "type": "tool",
+                "name": "read_file",
+                "disable_parallel_tool_use": true,
+            })
+        );
+    }
+
+    #[test]
+    fn tool_choice_null_leaves_field_unset() {
+        let mut payload = base_payload();
+        payload.tool_choice = Some(serde_json::Value::Null);
+        let body = AnthropicProvider::build_request_body(&payload);
+        assert!(
+            body.get("tool_choice").is_none(),
+            "a null tool_choice must not be forwarded"
         );
     }
 
