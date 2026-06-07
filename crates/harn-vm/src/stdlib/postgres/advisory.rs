@@ -142,13 +142,13 @@ async fn take_xact_lock(tx_id: &str, key: &LockKey) -> Result<(), VmError> {
     let result = match key {
         LockKey::Single(value) => {
             let params = [VmValue::Int(*value)];
-            bind_params(query("SELECT pg_advisory_xact_lock($1)"), &params)
+            bind_params(query("SELECT pg_advisory_xact_lock($1)"), &params)?
                 .execute(&mut **tx)
                 .await
         }
         LockKey::Pair(a, b) => {
             let params = [VmValue::Int(i64::from(*a)), VmValue::Int(i64::from(*b))];
-            bind_params(query("SELECT pg_advisory_xact_lock($1, $2)"), &params)
+            bind_params(query("SELECT pg_advisory_xact_lock($1, $2)"), &params)?
                 .execute(&mut **tx)
                 .await
         }
