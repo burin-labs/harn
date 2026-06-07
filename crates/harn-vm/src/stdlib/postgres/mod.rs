@@ -8,15 +8,20 @@ use std::time::Duration;
 
 use sqlx_core::column::Column;
 use sqlx_core::connection::Connection;
+use sqlx_core::encode::{Encode, IsNull};
+use sqlx_core::error::BoxDynError;
 use sqlx_core::executor::Executor;
 use sqlx_core::query::{query, Query};
 use sqlx_core::row::Row;
 use sqlx_core::sql_str::AssertSqlSafe;
 use sqlx_core::transaction::Transaction;
 use sqlx_core::type_info::TypeInfo;
+use sqlx_core::types::Type;
 use sqlx_core::value::ValueRef;
+use sqlx_postgres::types::Oid;
 use sqlx_postgres::{
-    PgArguments, PgConnectOptions, PgPool, PgPoolOptions, PgQueryResult, PgRow, PgSslMode, Postgres,
+    PgArgumentBuffer, PgArguments, PgConnectOptions, PgPool, PgPoolOptions, PgQueryResult, PgRow,
+    PgSslMode, PgTypeInfo, Postgres,
 };
 use tokio::sync::Mutex;
 
@@ -940,13 +945,59 @@ async fn apply_transaction_settings(
     Ok(())
 }
 
+/// A NULL bind that declares Postgres type OID `0` (unspecified) in the
+/// `Parse` message, so the server infers the parameter's type from the query
+/// context (a cast like `$1::integer`, the target column, etc.) — exactly as a
+/// bare SQL `NULL` does.
+///
+/// Why this exists: `None::<String>` (the obvious way to bind a typed NULL)
+/// declares OID `25` (TEXT) because `Option::<T>::produces()` falls back to
+/// `T::type_info()` for the `None` case. sqlx caches prepared statements keyed
+/// by SQL string on the pooled connection AND sends params in binary with the
+/// client-declared OIDs in `Parse`, so a TEXT-declared NULL caused two
+/// production bugs:
+///   1. Type-cache poisoning: once `$1` is parsed as TEXT (from a NULL), a
+///      later non-null `i64` in the same slot is sent as 8 binary bytes that
+///      Postgres UTF-8-validates against the cached TEXT type →
+///      `invalid byte sequence for encoding "UTF8": 0x00`.
+///   2. Wrong NULL typing: `($1::integer)` / `($1::jsonb)` with a TEXT NULL →
+///      `column is of type integer but expression is of type text`.
+///
+/// `PgTypeInfo::with_oid(Oid(0))` resolves to OID `0` in `Parse`
+/// (see `sqlx_postgres::connection::resolve::try_oid` →
+/// `PgType::DeclareWithOid`), which Postgres treats as "infer from context".
+/// The encoded value is a `-1` length (NULL), so no binary bytes are sent and
+/// the parameter format is irrelevant.
+struct UntypedNull;
+
+impl Type<Postgres> for UntypedNull {
+    fn type_info() -> PgTypeInfo {
+        PgTypeInfo::with_oid(Oid(0))
+    }
+}
+
+impl Encode<'_, Postgres> for UntypedNull {
+    fn encode_by_ref(&self, _buf: &mut PgArgumentBuffer) -> Result<IsNull, BoxDynError> {
+        // Write no bytes; the caller records a `-1` length to mark SQL NULL.
+        Ok(IsNull::Yes)
+    }
+
+    fn produces(&self) -> Option<PgTypeInfo> {
+        Some(PgTypeInfo::with_oid(Oid(0)))
+    }
+
+    fn size_hint(&self) -> usize {
+        0
+    }
+}
+
 pub(super) fn bind_params<'q>(
     mut query: Query<'q, Postgres, PgArguments>,
     params: &'q [VmValue],
 ) -> Query<'q, Postgres, PgArguments> {
     for param in params {
         query = match param {
-            VmValue::Nil => query.bind(None::<String>),
+            VmValue::Nil => query.bind(UntypedNull),
             VmValue::Bool(value) => query.bind(*value),
             VmValue::Int(value) => query.bind(*value),
             VmValue::Float(value) => query.bind(*value),
@@ -2018,6 +2069,131 @@ mod tests {
         assert_eq!(row.get("amount").unwrap().display(), "12345.6789");
     }
 
+    /// Opens a single-connection pool against the test database so that every
+    /// query reuses the same physical connection (and therefore the same
+    /// prepared-statement cache), which is required to exercise the
+    /// type-cache-poisoning path.
+    async fn open_single_conn_pool(url: &str) -> VmValue {
+        let mut options = BTreeMap::new();
+        options.insert("max_connections".to_string(), VmValue::Int(1));
+        options.insert(
+            "application_name".to_string(),
+            s("harn-postgres-untyped-null-test"),
+        );
+        let ctx = crate::vm::AsyncBuiltinCtx::for_test(crate::Vm::new());
+        open_pool(&ctx, &s(url), Some(&options), false)
+            .await
+            .expect("open single-connection pool")
+    }
+
+    /// Regression for prepared-statement TYPE-CACHE POISONING.
+    ///
+    /// Before the fix, binding `VmValue::Nil` declared OID 25 (TEXT) in the
+    /// `Parse` message. On a single pooled connection, `SELECT $1::bigint`
+    /// would be prepared with `$1` cached as TEXT during the first (NULL) call;
+    /// the second call binding a real `i64` then sent 8 binary bytes that
+    /// Postgres UTF-8-validated against the cached TEXT type, producing
+    /// `invalid byte sequence for encoding "UTF8": 0x00`.
+    ///
+    /// After the fix the NULL declares OID 0 (unspecified), so Postgres infers
+    /// `bigint` from the cast and both calls succeed.
+    #[tokio::test(flavor = "current_thread")]
+    async fn nil_bind_does_not_poison_prepared_statement_cache_when_env_url_is_set() {
+        let Ok(url) = std::env::var("HARN_TEST_POSTGRES_URL") else {
+            return;
+        };
+        reset_postgres_state();
+        let handle = open_single_conn_pool(&url).await;
+
+        // Same SQL string both times so the cached prepared statement is reused.
+        let sql = "select $1::bigint as v";
+
+        // 1) NULL first — this is what poisoned the cache as TEXT before.
+        let null_row = query_rows(&handle, sql, &[VmValue::Nil], QueryRouting::Primary)
+            .await
+            .expect("nil bind for $1::bigint should succeed")
+            .remove(0);
+        assert!(
+            matches!(null_row.as_dict().unwrap().get("v"), Some(VmValue::Nil)),
+            "NULL bigint should decode to Nil"
+        );
+
+        // 2) Non-null int, reusing the cached statement on the same connection.
+        let int_row = query_rows(&handle, sql, &[VmValue::Int(42)], QueryRouting::Primary)
+            .await
+            .expect("int bind after nil must not hit the 0x00 UTF8 error")
+            .remove(0);
+        assert_eq!(
+            int_row.as_dict().unwrap().get("v").unwrap().as_int(),
+            Some(42),
+            "second call should return the bound integer"
+        );
+    }
+
+    /// Regression for WRONG NULL TYPING on typed columns.
+    ///
+    /// Before the fix, binding `VmValue::Nil` directly into typed columns
+    /// (`INSERT ... VALUES ($1, $2)` where `i integer, j jsonb`) declared the
+    /// params as TEXT, so Postgres rejected the statement with
+    /// `column "i" is of type integer but expression is of type text`.
+    /// After the fix the NULLs declare OID 0 (unspecified), so Postgres infers
+    /// each parameter's type from the target column and stores SQL NULL.
+    ///
+    /// (A typed cast like `$1::integer` happens to mask this because a `text`
+    /// NULL casts to integer cleanly — but production `.harn` code that binds a
+    /// bare `$n` into a typed column hit the error, so we reproduce the
+    /// no-cast form here.)
+    #[tokio::test(flavor = "current_thread")]
+    async fn nil_bind_into_typed_columns_inserts_sql_null_when_env_url_is_set() {
+        let Ok(url) = std::env::var("HARN_TEST_POSTGRES_URL") else {
+            return;
+        };
+        reset_postgres_state();
+        let handle = open_single_conn_pool(&url).await;
+
+        execute_stmt(
+            &handle,
+            "create temporary table harn_untyped_null_test(i integer, j jsonb) on commit preserve rows",
+            &[],
+        )
+        .await
+        .expect("create temp table");
+        execute_stmt(&handle, "truncate table harn_untyped_null_test", &[])
+            .await
+            .expect("truncate temp table");
+
+        // Bare `$1`/`$2` into typed columns: a properly-inferred NULL must not
+        // raise `is of type integer but expression is of type text`.
+        execute_stmt(
+            &handle,
+            "insert into harn_untyped_null_test(i, j) values ($1, $2)",
+            &[VmValue::Nil, VmValue::Nil],
+        )
+        .await
+        .expect("nil binds into typed columns must insert cleanly");
+
+        let row = query_rows(
+            &handle,
+            "select i, j, (i is null) as i_is_null, (j is null) as j_is_null from harn_untyped_null_test",
+            &[],
+            QueryRouting::Primary,
+        )
+        .await
+        .expect("select back inserted row")
+        .remove(0);
+        let row = row.as_dict().unwrap();
+        assert!(
+            matches!(row.get("i"), Some(VmValue::Nil)),
+            "integer column should be SQL NULL"
+        );
+        assert!(
+            matches!(row.get("j"), Some(VmValue::Nil)),
+            "jsonb column should be SQL NULL"
+        );
+        assert_eq!(row.get("i_is_null").unwrap().display(), "true");
+        assert_eq!(row.get("j_is_null").unwrap().display(), "true");
+    }
+
     #[test]
     fn harn_transaction_commits_rolls_back_and_applies_settings_when_env_url_is_set() {
         if std::env::var("HARN_TEST_POSTGRES_URL").is_err() {
@@ -2205,6 +2381,87 @@ pg_close(db)
         });
     }
 
+    /// Harn-ledger drift detection (C-2): apply a migration, then edit the
+    /// file body on disk and re-run. The runner must re-hash the on-disk file,
+    /// see it no longer matches the recorded SHA-256, and error naming the
+    /// migration — never silently skip an edited (already-applied) file.
+    #[test]
+    fn migrate_harn_detects_checksum_drift_when_env_url_is_set() {
+        if std::env::var("HARN_TEST_POSTGRES_URL").is_err() {
+            return;
+        }
+        reset_postgres_state();
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let dir = tmp.path();
+        let migration_path = dir.join("0001_create_widgets.sql");
+        std::fs::write(
+            &migration_path,
+            "CREATE TABLE widgets (id INT PRIMARY KEY, label TEXT NOT NULL)",
+        )
+        .unwrap();
+
+        let schema = format!("harn_pg_drift_{}", uuid::Uuid::new_v4().simple());
+        let migration_dir = dir.to_string_lossy().into_owned();
+
+        // First run: apply the migration cleanly into a fresh schema. The
+        // schema persists in the shared DB for the second run below.
+        let apply_source = format!(
+            r#"
+import "std/postgres"
+
+let admin = pg_pool("env:HARN_TEST_POSTGRES_URL", {{max_connections: 1}})
+pg_execute(admin, "DROP SCHEMA IF EXISTS \"{schema}\" CASCADE", [])
+pg_execute(admin, "CREATE SCHEMA \"{schema}\"", [])
+pg_close(admin)
+
+let db = pg_pool("env:HARN_TEST_POSTGRES_URL", {{max_connections: 1}})
+pg_execute(db, "SET search_path TO \"{schema}\"", [])
+let first = pg_migrate(db, {{dir: "{migration_dir}"}})
+__io_println(len(first.applied))
+pg_close(db)
+"#,
+        );
+        let out = run_harn_source(&apply_source);
+        assert_eq!(out.trim(), "1", "first run should apply exactly one file");
+
+        // Edit the migration body on disk *after* it was recorded. A clean
+        // re-run would normally skip an already-applied file; here the changed
+        // body must trip the checksum check.
+        std::fs::write(
+            &migration_path,
+            "CREATE TABLE widgets (id INT PRIMARY KEY, label TEXT NOT NULL, extra INT)",
+        )
+        .unwrap();
+
+        let rerun_source = format!(
+            r#"
+import "std/postgres"
+
+let db = pg_pool("env:HARN_TEST_POSTGRES_URL", {{max_connections: 1}})
+pg_execute(db, "SET search_path TO \"{schema}\"", [])
+let second = pg_migrate(db, {{dir: "{migration_dir}"}})
+__io_println(len(second.applied))
+pg_close(db)
+"#,
+        );
+        let err = run_harn_source_expect_err(&rerun_source);
+        assert!(
+            err.contains("checksum mismatch") && err.contains("0001_create_widgets.sql"),
+            "expected harn checksum-mismatch error naming the migration, got: {err}"
+        );
+
+        // Clean up the scratch schema.
+        let cleanup = format!(
+            r#"
+import "std/postgres"
+let admin = pg_pool("env:HARN_TEST_POSTGRES_URL", {{max_connections: 1}})
+pg_execute(admin, "DROP SCHEMA IF EXISTS \"{schema}\" CASCADE", [])
+pg_close(admin)
+"#,
+        );
+        run_harn_source(&cleanup);
+    }
+
     /// `pg_migrate` against the canonical `harn-cloud-store/migrations/`
     /// directory. Opt-in via `HARN_TEST_CLOUD_MIGRATIONS_DIR`; verifies
     /// that the runner consumes the full ledger without errors.
@@ -2274,6 +2531,412 @@ pg_close(db)
                 })
                 .await;
         });
+    }
+
+    /// Build a synthetic SQLx-style migrations directory (with `.up.sql`
+    /// and ignorable `.down.sql` siblings) and return (tmpdir, dir-string).
+    /// Keep the `TempDir` alive for the duration of the test.
+    fn sqlx_synthetic_migrations() -> (tempfile::TempDir, String) {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let dir = tmp.path();
+        let files: &[(&str, &str)] = &[
+            (
+                "20260419170000_bootstrap.up.sql",
+                "CREATE TABLE widgets (id INT PRIMARY KEY, label TEXT NOT NULL)",
+            ),
+            ("20260419170000_bootstrap.down.sql", "DROP TABLE widgets"),
+            (
+                "20260423100000_seed_widget.up.sql",
+                "INSERT INTO widgets (id, label) VALUES (1, 'alpha')",
+            ),
+            (
+                "20260423100000_seed_widget.down.sql",
+                "DELETE FROM widgets WHERE id = 1",
+            ),
+            (
+                "20260424000000_add_gadgets.up.sql",
+                "CREATE TABLE gadgets (id INT PRIMARY KEY)",
+            ),
+            ("20260424000000_add_gadgets.down.sql", "DROP TABLE gadgets"),
+        ];
+        for (name, body) in files {
+            std::fs::write(dir.join(name), body).unwrap();
+        }
+        let s = dir.to_string_lossy().into_owned();
+        (tmp, s)
+    }
+
+    fn run_harn_source(source: &str) -> String {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        rt.block_on(async {
+            let local = tokio::task::LocalSet::new();
+            local
+                .run_until(async {
+                    let chunk = compile_source(source).expect("compile source");
+                    let mut vm = Vm::new();
+                    register_vm_stdlib(&mut vm);
+                    vm.execute(&chunk).await.expect("execute source");
+                    vm.output().to_string()
+                })
+                .await
+        })
+    }
+
+    fn run_harn_source_expect_err(source: &str) -> String {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        rt.block_on(async {
+            let local = tokio::task::LocalSet::new();
+            local
+                .run_until(async {
+                    let chunk = compile_source(source).expect("compile source");
+                    let mut vm = Vm::new();
+                    register_vm_stdlib(&mut vm);
+                    let err = vm
+                        .execute(&chunk)
+                        .await
+                        .expect_err("expected source to error");
+                    format!("{err:?}")
+                })
+                .await
+        })
+    }
+
+    /// SQLx ledger mode applies all forward files into `_sqlx_migrations`
+    /// with the exact 6-column schema, 48-byte SHA-384 checksums, and
+    /// `success = true`.
+    #[test]
+    fn migrate_sqlx_applies_into_sqlx_migrations_table_when_env_url_is_set() {
+        if std::env::var("HARN_TEST_POSTGRES_URL").is_err() {
+            return;
+        }
+        reset_postgres_state();
+        let (_tmp, dir) = sqlx_synthetic_migrations();
+        let schema = format!("harn_pg_sqlx_{}", uuid::Uuid::new_v4().simple());
+        let source = format!(
+            r#"
+import "std/postgres"
+
+let admin = pg_pool("env:HARN_TEST_POSTGRES_URL", {{max_connections: 1}})
+pg_execute(admin, "DROP SCHEMA IF EXISTS \"{schema}\" CASCADE", [])
+pg_execute(admin, "CREATE SCHEMA \"{schema}\"", [])
+pg_close(admin)
+
+let db = pg_pool("env:HARN_TEST_POSTGRES_URL", {{max_connections: 1}})
+pg_execute(db, "SET search_path TO \"{schema}\"", [])
+
+let result = pg_migrate(db, {{dir: "{dir}", ledger: "sqlx"}})
+__io_println(len(result.applied))
+__io_println(len(result.available))
+__io_println(result.table)
+
+let cols = pg_query(db, "SELECT column_name FROM information_schema.columns WHERE table_schema=$1 AND table_name='_sqlx_migrations' ORDER BY column_name", ["{schema}"])
+__io_println(len(cols))
+
+let rows = pg_query_one(db, "SELECT count(*)::int8 AS c FROM _sqlx_migrations", [])
+__io_println(rows.c)
+
+let badlen = pg_query_one(db, "SELECT count(*)::int8 AS c FROM _sqlx_migrations WHERE octet_length(checksum) <> 48", [])
+__io_println(badlen.c)
+
+let failed = pg_query_one(db, "SELECT count(*)::int8 AS c FROM _sqlx_migrations WHERE success = false", [])
+__io_println(failed.c)
+
+let versions = pg_query(db, "SELECT version FROM _sqlx_migrations ORDER BY version", [])
+__io_println(len(versions))
+
+pg_execute(db, "DROP SCHEMA \"{schema}\" CASCADE", [])
+pg_close(db)
+"#,
+        );
+        let out = run_harn_source(&source);
+        let lines: Vec<&str> = out.lines().collect();
+        // applied=3, available=3, table name, 6 columns, 3 rows, 0 bad
+        // checksum lengths, 0 failed, 3 versions.
+        assert_eq!(
+            lines,
+            vec!["3", "3", "_sqlx_migrations", "6", "3", "0", "0", "3"],
+            "unexpected output: {out}"
+        );
+    }
+
+    /// SQLx ledger mode is idempotent: a second run applies 0, skips all,
+    /// and leaves the row count unchanged.
+    #[test]
+    fn migrate_sqlx_is_idempotent_when_env_url_is_set() {
+        if std::env::var("HARN_TEST_POSTGRES_URL").is_err() {
+            return;
+        }
+        reset_postgres_state();
+        let (_tmp, dir) = sqlx_synthetic_migrations();
+        let schema = format!("harn_pg_sqlxidem_{}", uuid::Uuid::new_v4().simple());
+        let source = format!(
+            r#"
+import "std/postgres"
+
+let admin = pg_pool("env:HARN_TEST_POSTGRES_URL", {{max_connections: 1}})
+pg_execute(admin, "DROP SCHEMA IF EXISTS \"{schema}\" CASCADE", [])
+pg_execute(admin, "CREATE SCHEMA \"{schema}\"", [])
+pg_close(admin)
+
+let db = pg_pool("env:HARN_TEST_POSTGRES_URL", {{max_connections: 1}})
+pg_execute(db, "SET search_path TO \"{schema}\"", [])
+
+let first = pg_migrate(db, {{dir: "{dir}", ledger: "sqlx"}})
+__io_println(len(first.applied))
+__io_println(len(first.skipped))
+
+let count1 = pg_query_one(db, "SELECT count(*)::int8 AS c FROM _sqlx_migrations", [])
+__io_println(count1.c)
+
+let second = pg_migrate(db, {{dir: "{dir}", ledger: "sqlx"}})
+__io_println(len(second.applied))
+__io_println(len(second.skipped))
+
+let count2 = pg_query_one(db, "SELECT count(*)::int8 AS c FROM _sqlx_migrations", [])
+__io_println(count2.c)
+
+pg_execute(db, "DROP SCHEMA \"{schema}\" CASCADE", [])
+pg_close(db)
+"#,
+        );
+        let out = run_harn_source(&source);
+        let lines: Vec<&str> = out.lines().collect();
+        // first: applied 3 skipped 0, count 3; second: applied 0 skipped 3,
+        // count still 3.
+        assert_eq!(
+            lines,
+            vec!["3", "0", "3", "0", "3", "3"],
+            "unexpected output: {out}"
+        );
+    }
+
+    /// No-fork against a "real" SQLx ledger: pre-seed `_sqlx_migrations`
+    /// with rows whose checksums are computed the SAME way SQLx does
+    /// (SHA-384 of the file body) — exactly what `sqlx migrate run` would
+    /// have written — then run `pg_migrate(ledger: "sqlx")`. It must apply
+    /// 0 and the checksums stay byte-identical.
+    #[test]
+    fn migrate_sqlx_no_fork_against_preseeded_ledger_when_env_url_is_set() {
+        if std::env::var("HARN_TEST_POSTGRES_URL").is_err() {
+            return;
+        }
+        reset_postgres_state();
+        let (_tmp, dir) = sqlx_synthetic_migrations();
+
+        // Compute SHA-384 the same way sqlx (and our runner) does: over the
+        // file body read as a string.
+        let checksum_hex = |name: &str| -> String {
+            use sha2::{Digest, Sha384};
+            let body =
+                std::fs::read_to_string(std::path::Path::new(&dir).join(name)).expect("read file");
+            let digest = Sha384::digest(body.as_bytes());
+            digest.iter().map(|b| format!("{b:02x}")).collect()
+        };
+        let bootstrap_sum = checksum_hex("20260419170000_bootstrap.up.sql");
+        let seed_sum = checksum_hex("20260423100000_seed_widget.up.sql");
+        let gadgets_sum = checksum_hex("20260424000000_add_gadgets.up.sql");
+
+        let schema = format!("harn_pg_sqlxnofork_{}", uuid::Uuid::new_v4().simple());
+        let source = format!(
+            r#"
+import "std/postgres"
+
+let admin = pg_pool("env:HARN_TEST_POSTGRES_URL", {{max_connections: 1}})
+pg_execute(admin, "DROP SCHEMA IF EXISTS \"{schema}\" CASCADE", [])
+pg_execute(admin, "CREATE SCHEMA \"{schema}\"", [])
+pg_close(admin)
+
+let db = pg_pool("env:HARN_TEST_POSTGRES_URL", {{max_connections: 1}})
+pg_execute(db, "SET search_path TO \"{schema}\"", [])
+
+// Replicate exactly what `sqlx migrate run` would have written, including
+// the schema and the three rows with SHA-384 checksums, then create the
+// objects those migrations would have created.
+pg_execute(db, "CREATE TABLE _sqlx_migrations (version BIGINT PRIMARY KEY, description TEXT NOT NULL, installed_on TIMESTAMPTZ NOT NULL DEFAULT now(), success BOOLEAN NOT NULL, checksum BYTEA NOT NULL, execution_time BIGINT NOT NULL)", [])
+pg_execute(db, "CREATE TABLE widgets (id INT PRIMARY KEY, label TEXT NOT NULL)", [])
+pg_execute(db, "INSERT INTO widgets (id, label) VALUES (1, 'alpha')", [])
+pg_execute(db, "CREATE TABLE gadgets (id INT PRIMARY KEY)", [])
+pg_execute(db, "INSERT INTO _sqlx_migrations (version, description, success, checksum, execution_time) VALUES (20260419170000, 'bootstrap', TRUE, decode('{bootstrap_sum}', 'hex'), 1)", [])
+pg_execute(db, "INSERT INTO _sqlx_migrations (version, description, success, checksum, execution_time) VALUES (20260423100000, 'seed widget', TRUE, decode('{seed_sum}', 'hex'), 1)", [])
+pg_execute(db, "INSERT INTO _sqlx_migrations (version, description, success, checksum, execution_time) VALUES (20260424000000, 'add gadgets', TRUE, decode('{gadgets_sum}', 'hex'), 1)", [])
+
+let before = pg_query_one(db, "SELECT md5(string_agg(encode(checksum,'hex'), ',' ORDER BY version)) AS h FROM _sqlx_migrations", [])
+
+let result = pg_migrate(db, {{dir: "{dir}", ledger: "sqlx"}})
+__io_println(len(result.applied))
+__io_println(len(result.skipped))
+
+let after = pg_query_one(db, "SELECT md5(string_agg(encode(checksum,'hex'), ',' ORDER BY version)) AS h FROM _sqlx_migrations", [])
+if before.h == after.h {{ __io_println("checksums-identical") }} else {{ __io_println("checksums-CHANGED") }}
+
+let count = pg_query_one(db, "SELECT count(*)::int8 AS c FROM _sqlx_migrations", [])
+__io_println(count.c)
+
+pg_execute(db, "DROP SCHEMA \"{schema}\" CASCADE", [])
+pg_close(db)
+"#,
+        );
+        let out = run_harn_source(&source);
+        let lines: Vec<&str> = out.lines().collect();
+        assert_eq!(
+            lines,
+            vec!["0", "3", "checksums-identical", "3"],
+            "unexpected output: {out}"
+        );
+    }
+
+    /// Checksum-mismatch detection: corrupt one recorded checksum then run;
+    /// the runner must error and name the offending version.
+    #[test]
+    fn migrate_sqlx_detects_checksum_mismatch_when_env_url_is_set() {
+        if std::env::var("HARN_TEST_POSTGRES_URL").is_err() {
+            return;
+        }
+        reset_postgres_state();
+        let (_tmp, dir) = sqlx_synthetic_migrations();
+        let schema = format!("harn_pg_sqlxmismatch_{}", uuid::Uuid::new_v4().simple());
+        let source = format!(
+            r#"
+import "std/postgres"
+
+let admin = pg_pool("env:HARN_TEST_POSTGRES_URL", {{max_connections: 1}})
+pg_execute(admin, "DROP SCHEMA IF EXISTS \"{schema}\" CASCADE", [])
+pg_execute(admin, "CREATE SCHEMA \"{schema}\"", [])
+pg_close(admin)
+
+let db = pg_pool("env:HARN_TEST_POSTGRES_URL", {{max_connections: 1}})
+pg_execute(db, "SET search_path TO \"{schema}\"", [])
+
+let first = pg_migrate(db, {{dir: "{dir}", ledger: "sqlx"}})
+__io_println(len(first.applied))
+
+// Corrupt the recorded checksum for the first migration.
+pg_execute(db, "UPDATE _sqlx_migrations SET checksum = decode('deadbeef', 'hex') WHERE version = 20260419170000", [])
+
+let second = pg_migrate(db, {{dir: "{dir}", ledger: "sqlx"}})
+__io_println(len(second.applied))
+
+pg_execute(db, "DROP SCHEMA \"{schema}\" CASCADE", [])
+pg_close(db)
+"#,
+        );
+        let err = run_harn_source_expect_err(&source);
+        assert!(
+            err.contains("checksum mismatch") && err.contains("20260419170000"),
+            "expected checksum-mismatch error naming the version, got: {err}"
+        );
+    }
+
+    /// Dirty-ledger detection: a `success = false` row blocks the run.
+    #[test]
+    fn migrate_sqlx_detects_dirty_ledger_when_env_url_is_set() {
+        if std::env::var("HARN_TEST_POSTGRES_URL").is_err() {
+            return;
+        }
+        reset_postgres_state();
+        let (_tmp, dir) = sqlx_synthetic_migrations();
+        let schema = format!("harn_pg_sqlxdirty_{}", uuid::Uuid::new_v4().simple());
+        let source = format!(
+            r#"
+import "std/postgres"
+
+let admin = pg_pool("env:HARN_TEST_POSTGRES_URL", {{max_connections: 1}})
+pg_execute(admin, "DROP SCHEMA IF EXISTS \"{schema}\" CASCADE", [])
+pg_execute(admin, "CREATE SCHEMA \"{schema}\"", [])
+pg_close(admin)
+
+let db = pg_pool("env:HARN_TEST_POSTGRES_URL", {{max_connections: 1}})
+pg_execute(db, "SET search_path TO \"{schema}\"", [])
+
+pg_execute(db, "CREATE TABLE _sqlx_migrations (version BIGINT PRIMARY KEY, description TEXT NOT NULL, installed_on TIMESTAMPTZ NOT NULL DEFAULT now(), success BOOLEAN NOT NULL, checksum BYTEA NOT NULL, execution_time BIGINT NOT NULL)", [])
+pg_execute(db, "INSERT INTO _sqlx_migrations (version, description, success, checksum, execution_time) VALUES (20260419170000, 'bootstrap', FALSE, decode('deadbeef', 'hex'), -1)", [])
+
+let result = pg_migrate(db, {{dir: "{dir}", ledger: "sqlx"}})
+__io_println(len(result.applied))
+
+pg_execute(db, "DROP SCHEMA \"{schema}\" CASCADE", [])
+pg_close(db)
+"#,
+        );
+        let err = run_harn_source_expect_err(&source);
+        assert!(
+            err.contains("dirty migration") && err.contains("20260419170000"),
+            "expected dirty-ledger error naming the version, got: {err}"
+        );
+    }
+
+    /// SQLx ledger mode against the canonical harn-cloud `migrations/`
+    /// directory: applies the full forward history, then a second run is a
+    /// no-op (every version skipped, no checksum drift). This is the
+    /// retire-`migrations.rs` acceptance test. Opt-in via
+    /// `HARN_TEST_CLOUD_MIGRATIONS_DIR`.
+    #[test]
+    fn migrate_sqlx_applies_real_cloud_dir_and_is_idempotent_when_env_set() {
+        if std::env::var("HARN_TEST_POSTGRES_URL").is_err() {
+            return;
+        }
+        let Ok(dir) = std::env::var("HARN_TEST_CLOUD_MIGRATIONS_DIR") else {
+            return;
+        };
+        if !std::path::Path::new(&dir).exists() {
+            return;
+        }
+        reset_postgres_state();
+        let schema = format!("harn_pg_sqlxcloud_{}", uuid::Uuid::new_v4().simple());
+        let source = format!(
+            r#"
+import "std/postgres"
+
+let admin = pg_pool("env:HARN_TEST_POSTGRES_URL", {{max_connections: 1}})
+pg_execute(admin, "DROP SCHEMA IF EXISTS \"{schema}\" CASCADE", [])
+pg_execute(admin, "CREATE SCHEMA \"{schema}\"", [])
+pg_close(admin)
+
+let db = pg_pool("env:HARN_TEST_POSTGRES_URL", {{max_connections: 1}})
+pg_execute(db, "SET search_path TO \"{schema}\"", [])
+
+let first = pg_migrate(db, {{dir: "{dir}", ledger: "sqlx"}})
+__io_println(len(first.applied))
+__io_println(len(first.skipped))
+
+let count1 = pg_query_one(db, "SELECT count(*)::int8 AS c FROM _sqlx_migrations", [])
+__io_println(count1.c)
+
+let badlen = pg_query_one(db, "SELECT count(*)::int8 AS c FROM _sqlx_migrations WHERE octet_length(checksum) <> 48", [])
+__io_println(badlen.c)
+
+let second = pg_migrate(db, {{dir: "{dir}", ledger: "sqlx"}})
+__io_println(len(second.applied))
+__io_println(len(second.skipped))
+
+pg_execute(db, "DROP SCHEMA \"{schema}\" CASCADE", [])
+pg_close(db)
+"#,
+        );
+        let out = run_harn_source(&source);
+        let lines: Vec<&str> = out.lines().collect();
+        assert_eq!(lines.len(), 6, "unexpected output: {out}");
+        let applied: usize = lines[0].parse().expect("applied count");
+        let skipped_first: usize = lines[1].parse().expect("skipped count");
+        let count: usize = lines[2].parse().expect("row count");
+        let bad_checksums: usize = lines[3].parse().expect("bad checksum count");
+        let applied_second: usize = lines[4].parse().expect("second applied");
+        let skipped_second: usize = lines[5].parse().expect("second skipped");
+        assert!(applied > 0, "no migrations applied: {out}");
+        assert_eq!(skipped_first, 0, "first run should skip nothing: {out}");
+        assert_eq!(count, applied, "ledger rows != applied: {out}");
+        assert_eq!(bad_checksums, 0, "all checksums must be 48 bytes: {out}");
+        assert_eq!(applied_second, 0, "second run must apply nothing: {out}");
+        assert_eq!(
+            skipped_second, applied,
+            "second run must skip everything: {out}"
+        );
     }
 
     /// Confirms `duration_ms` lives on every real execute result. The

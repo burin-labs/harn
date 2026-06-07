@@ -39,7 +39,7 @@ pipeline default() {
 | `pg_savepoint(tx, name)` | `bool` | Create a savepoint inside an open transaction. |
 | `pg_release_savepoint(tx, name)` | `bool` | Release a previously created savepoint. |
 | `pg_rollback_to_savepoint(tx, name)` | `bool` | Roll work back to a savepoint while keeping the outer transaction open. |
-| `pg_migrate(pool, {dir, table?, dry_run?})` | `PgMigrateResult` | Apply `.sql` files from a directory; track the applied set in `harn_migrations` (override via `table`). |
+| `pg_migrate(pool, {dir, ledger?, table?, dry_run?})` | `PgMigrateResult` | Apply `.sql` files from a directory; track the applied set in `harn_migrations` (override via `table`). Pass `ledger: "sqlx"` to read/write SQLx's `_sqlx_migrations` ledger instead. |
 | `pg_close(pool)` | `bool` | Close and unregister a pool handle. |
 | `pg_stmt_cache_clear(pool)` | `PgStmtCacheClearResult` | Clear prepared-statement caches on idle primary and replica connections without closing the pool. |
 | `pg.jsonb.path(pool, document, jsonpath)` | `list<any>` | Run `jsonb_path_query($1::jsonb, $2::jsonpath)` with bound operands. |
@@ -313,6 +313,46 @@ For richer migration tooling — multi-statement `.down` files, baselines,
 or branching — keep using SQLx CLI, Sqitch, or Flyway and call
 `pg_migrate` only when your `.harn` pipeline is the authoritative
 schema owner.
+
+### SQLx-compatible ledger
+
+Pass `ledger: "sqlx"` to apply an existing SQLx migration history into
+SQLx's own `_sqlx_migrations` table, byte-for-byte compatibly:
+
+```harn
+let pool = pg_pool("env:DATABASE_URL", {max_connections: 1})
+let result = pg_migrate(pool, {dir: "./migrations", ledger: "sqlx"})
+```
+
+In this mode `pg_migrate`:
+
+- Always targets the `_sqlx_migrations` table (the default
+  `ledger: "harn"` continues to use `harn_migrations`). Passing a `table`
+  that disagrees with `_sqlx_migrations` is an error.
+- Identifies each migration by the **integer version prefix** of its
+  filename (`splitn(_)[0]`, e.g. `20260419170000_bootstrap.up.sql` →
+  `20260419170000`) rather than the full name, sorts ascending by that
+  numeric version, and applies only forward files (`*.up.sql` / `*.sql`,
+  skipping `*.down.sql`). A non-integer prefix is a hard error.
+- Computes a **SHA-384** checksum of the raw file (the same digest SQLx
+  records), so a migration already applied by `sqlx migrate run` is
+  recognized and skipped — running `pg_migrate(ledger: "sqlx")` against a
+  SQLx-migrated database applies zero rows.
+- Records rows exactly as SQLx does
+  (`version, description, success=TRUE, checksum, execution_time`).
+- Takes the **same per-database advisory lock** SQLx uses
+  (`0x3d32ad9e * crc32(current_database())`), so a Harn migration and a
+  concurrent `sqlx migrate run` serialize against each other instead of
+  racing.
+- Refuses to run when the ledger has a failed (`success = false`)
+  migration (a "dirty" ledger), and errors if a file's checksum differs
+  from the recorded one (drift detection), naming the offending version.
+- Honors a leading `-- no-transaction` comment by running the migration
+  outside a wrapping transaction, matching SQLx.
+
+This is the path to retire a Rust `run_migrations()` that called
+`sqlx_core::migrate::Migrator`: point `pg_migrate(ledger: "sqlx")` at the
+same `migrations/` directory and the two are interchangeable.
 
 ## Typed rows from migrations
 
