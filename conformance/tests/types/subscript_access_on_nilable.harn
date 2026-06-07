@@ -1,0 +1,6 @@
+// Indexing a `T | nil` receiver may hit nil at runtime. Same diagnostic
+// shape as property access on a nilable value, but for `[]`.
+pipeline default(_) {
+  let xs: list? = nil
+  __io_println(xs[0])
+}

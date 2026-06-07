@@ -543,6 +543,16 @@ impl TypeChecker {
                 }
                 let lt = self.infer_type(left, scope);
                 let rt = self.infer_type(right, scope);
+                if op == "??" {
+                    // `??` strips the nil arm from its left operand, but the
+                    // structural `without_nil`/`contains_nil` helpers can't see
+                    // through a named alias — so `type T = {..}?; x: T; x ?? d`
+                    // would keep `T` (still nilable) as the result. Resolve
+                    // aliases first so the coalesce drops nil for aliased
+                    // nilable types exactly as it does for inline unions.
+                    let lt = lt.map(|t| self.resolve_alias(&t, scope));
+                    return infer_binary_op_type(op, &lt, &rt);
+                }
                 infer_binary_op_type(op, &lt, &rt)
             }
 

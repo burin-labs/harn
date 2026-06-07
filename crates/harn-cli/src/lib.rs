@@ -2951,8 +2951,57 @@ fn error_span_from_parse(e: &harn_parser::ParserError) -> harn_lexer::Span {
     }
 }
 
+/// The pipeline stage at which an `execute_*` call failed. Callers (the
+/// conformance harness, the REPL) use this to label a failure accurately
+/// instead of calling every failure a "runtime error" — a parse, typecheck,
+/// or compile failure never reaches the VM.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ExecStage {
+    Parse,
+    Typecheck,
+    Compile,
+    Runtime,
+}
+
+impl ExecStage {
+    /// Human-facing label for this stage, e.g. `"type error"`.
+    pub(crate) fn label(self) -> &'static str {
+        match self {
+            ExecStage::Parse => "parse error",
+            ExecStage::Typecheck => "type error",
+            ExecStage::Compile => "compile error",
+            ExecStage::Runtime => "runtime error",
+        }
+    }
+}
+
+/// An `execute_*` failure tagged with the stage it came from. `Display`
+/// renders only the bare message (matching the historical `String` error),
+/// so callers that just print `{e}` are unaffected; the `stage` is available
+/// for callers that want to label the failure.
+#[derive(Debug, Clone)]
+pub(crate) struct ExecError {
+    pub(crate) stage: ExecStage,
+    pub(crate) message: String,
+}
+
+impl ExecError {
+    fn new(stage: ExecStage, message: impl Into<String>) -> Self {
+        Self {
+            stage,
+            message: message.into(),
+        }
+    }
+}
+
+impl std::fmt::Display for ExecError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.message)
+    }
+}
+
 /// Used by REPL and conformance tests.
-pub(crate) async fn execute(source: &str, source_path: Option<&Path>) -> Result<String, String> {
+pub(crate) async fn execute(source: &str, source_path: Option<&Path>) -> Result<String, ExecError> {
     execute_with_skill_dirs(source, source_path, &[]).await
 }
 
@@ -2960,7 +3009,7 @@ pub(crate) async fn execute_with_skill_dirs(
     source: &str,
     source_path: Option<&Path>,
     cli_skill_dirs: &[PathBuf],
-) -> Result<String, String> {
+) -> Result<String, ExecError> {
     execute_with_skill_dirs_and_optional_harness(source, source_path, cli_skill_dirs, None).await
 }
 
@@ -2969,7 +3018,7 @@ pub(crate) async fn execute_with_skill_dirs_and_harness(
     source_path: Option<&Path>,
     cli_skill_dirs: &[PathBuf],
     harness: harn_vm::Harness,
-) -> Result<String, String> {
+) -> Result<String, ExecError> {
     execute_with_skill_dirs_and_optional_harness(source, source_path, cli_skill_dirs, Some(harness))
         .await
 }
@@ -2979,11 +3028,15 @@ async fn execute_with_skill_dirs_and_optional_harness(
     source_path: Option<&Path>,
     cli_skill_dirs: &[PathBuf],
     harness: Option<harn_vm::Harness>,
-) -> Result<String, String> {
+) -> Result<String, ExecError> {
     let mut lexer = Lexer::new(source);
-    let tokens = lexer.tokenize().map_err(|e| e.to_string())?;
+    let tokens = lexer
+        .tokenize()
+        .map_err(|e| ExecError::new(ExecStage::Parse, e.to_string()))?;
     let mut parser = Parser::new(tokens);
-    let program = parser.parse().map_err(|e| e.to_string())?;
+    let program = parser
+        .parse()
+        .map_err(|e| ExecError::new(ExecStage::Parse, e.to_string()))?;
 
     // Static cross-module resolution: when executed from a file, derive the
     // import graph so `execute` catches undefined calls at typecheck time.
@@ -3006,7 +3059,9 @@ async fn execute_with_skill_dirs_and_optional_harness(
     let mut warning_lines = Vec::new();
     for diag in &type_diagnostics {
         match diag.severity {
-            DiagnosticSeverity::Error => return Err(diag.message.clone()),
+            DiagnosticSeverity::Error => {
+                return Err(ExecError::new(ExecStage::Typecheck, diag.message.clone()))
+            }
             DiagnosticSeverity::Warning => {
                 warning_lines.push(format!("warning: {}", diag.message));
             }
@@ -3015,7 +3070,7 @@ async fn execute_with_skill_dirs_and_optional_harness(
 
     let chunk = harn_vm::Compiler::new()
         .compile(&program)
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| ExecError::new(ExecStage::Compile, e.to_string()))?;
 
     let local = tokio::task::LocalSet::new();
     local
@@ -3081,10 +3136,20 @@ async fn execute_with_skill_dirs_and_optional_harness(
                 package::install_runtime_extensions(&extensions);
                 package::install_manifest_triggers(&mut vm, &extensions)
                     .await
-                    .map_err(|error| format!("failed to install manifest triggers: {error}"))?;
+                    .map_err(|error| {
+                        ExecError::new(
+                            ExecStage::Runtime,
+                            format!("failed to install manifest triggers: {error}"),
+                        )
+                    })?;
                 package::install_manifest_hooks(&mut vm, &extensions)
                     .await
-                    .map_err(|error| format!("failed to install manifest hooks: {error}"))?;
+                    .map_err(|error| {
+                        ExecError::new(
+                            ExecStage::Runtime,
+                            format!("failed to install manifest hooks: {error}"),
+                        )
+                    })?;
             }
             let _event_log = harn_vm::event_log::active_event_log()
                 .unwrap_or_else(|| harn_vm::event_log::install_memory_for_current_thread(64));
@@ -3093,9 +3158,17 @@ async fn execute_with_skill_dirs_and_optional_harness(
             if connector_clients_installed {
                 install_default_connector_clients(store_base)
                     .await
-                    .map_err(|error| format!("failed to initialize connector clients: {error}"))?;
+                    .map_err(|error| {
+                        ExecError::new(
+                            ExecStage::Runtime,
+                            format!("failed to initialize connector clients: {error}"),
+                        )
+                    })?;
             }
-            let execution_result = vm.execute(&chunk).await.map_err(|e| e.to_string());
+            let execution_result = vm
+                .execute(&chunk)
+                .await
+                .map_err(|e| ExecError::new(ExecStage::Runtime, e.to_string()));
             harn_vm::egress::reset_egress_policy_for_host();
             if connector_clients_installed {
                 harn_vm::clear_active_connector_clients();

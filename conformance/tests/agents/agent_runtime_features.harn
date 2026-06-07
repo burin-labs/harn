@@ -94,7 +94,7 @@ pipeline test(task) {
     },
   )
   __io_println(
-    transcript_summary(loop_compacted?.transcript).contains("loop compact retain_current_plan"),
+    transcript_summary(loop_compacted?.transcript)?.contains("loop compact retain_current_plan"),
   )
   let request_compacted = agent_loop(
     "Inspect the workspace",
@@ -114,7 +114,7 @@ pipeline test(task) {
     },
   )
   __io_println(
-    transcript_summary(request_compacted?.transcript).contains("request compact resume_request host"),
+    transcript_summary(request_compacted?.transcript)?.contains("request compact resume_request host"),
   )
   let stopped_after_tool_turn = agent_loop(
     "Inspect the workspace",

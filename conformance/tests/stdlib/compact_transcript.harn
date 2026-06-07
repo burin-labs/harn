@@ -10,7 +10,7 @@ pipeline test(task) {
     ],
   )
   let truncated = transcript_compact(base, {strategy: "truncate", keep_last: 1, target_tokens: 1})
-  __io_println(transcript_summary(truncated).contains("auto-compacted"))
+  __io_println(transcript_summary(truncated)?.contains("auto-compacted"))
   __io_println(transcript_events_by_kind(truncated, "compaction")[0].metadata?.strategy == "truncate")
   let truncate_assets = transcript_assets(truncated)
   __io_println(len(truncate_assets) == 1)
@@ -28,7 +28,7 @@ pipeline test(task) {
     ],
   )
   let masked = transcript_compact(masked_base, {strategy: "observation_mask", keep_last: 1, target_tokens: 1})
-  __io_println(transcript_summary(masked).contains("masked"))
+  __io_println(transcript_summary(masked)?.contains("masked"))
   __io_println(
     transcript_events_by_kind(masked, "compaction")[0].metadata?.strategy == "observation_mask",
   )
@@ -48,7 +48,7 @@ pipeline test(task) {
           summarize_prompt: "compact_transcript_summary.harn.prompt",
         },
       )
-      __io_println(transcript_summary(llm_compacted).contains("LLM compact summary"))
+      __io_println(transcript_summary(llm_compacted)?.contains("LLM compact summary"))
       let llm_calls = llm_mock_calls()
       let prompt = llm_calls[0].messages[0].content
       __io_println(prompt.contains("Compact prompt from asset."))

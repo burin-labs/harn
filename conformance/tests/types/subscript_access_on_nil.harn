@@ -1,0 +1,7 @@
+// Subscript access on a value statically known to be `nil` fails at
+// runtime; the checker flags it with the same guidance as property
+// access, pointing at `?[…]` / a nil guard.
+pipeline default(_) {
+  let x: nil = nil
+  __io_println(x["k"])
+}

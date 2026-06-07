@@ -92,6 +92,35 @@ fn extract_property_var(node: &SNode) -> Option<(String, String)> {
     None
 }
 
+/// Walk an *optional*-access chain (`o?.a`, `o?[i]`, `o?.m()`, and nestings
+/// thereof) down to the base identifier it is rooted on. Returns `None`
+/// unless `node` is itself an optional access whose object resolves — through
+/// further optional links only — to a bare identifier.
+///
+/// Soundness: by optional-chaining semantics `obj?.x` (and `?[]`/`?.()`)
+/// evaluates to `nil` whenever `obj` is `nil`. So if the *outermost* optional
+/// access is non-nil, its object was non-nil; applying that fact down a chain
+/// of optional links proves the base identifier is non-nil. We deliberately
+/// do **not** descend through *non-optional* links (`o.a?.b`), since a plain
+/// `.a` being read tells the type system nothing it is willing to assume.
+fn optional_chain_base_identifier(node: &SNode) -> Option<&str> {
+    fn root(node: &SNode) -> Option<&str> {
+        match &node.node {
+            Node::Identifier(name) => Some(name.as_str()),
+            Node::OptionalPropertyAccess { object, .. }
+            | Node::OptionalSubscriptAccess { object, .. }
+            | Node::OptionalMethodCall { object, .. } => root(object),
+            _ => None,
+        }
+    }
+    match &node.node {
+        Node::OptionalPropertyAccess { object, .. }
+        | Node::OptionalSubscriptAccess { object, .. }
+        | Node::OptionalMethodCall { object, .. } => root(object),
+        _ => None,
+    }
+}
+
 /// Project a literal expression node to a [`DiscriminantValue`]. Only the
 /// literal kinds eligible as tagged-shape-union discriminants
 /// (`StringLiteral`, `IntLiteral`) are recognised here.
@@ -498,6 +527,27 @@ impl TypeChecker {
                 _ => {}
             }
         }
+
+        // `o?.a != nil` (and `?[]`/`?.()` chains) proves the *base* identifier
+        // is non-nil on the branch where the chain is non-nil. We can only
+        // refine the one branch — `o?.a == nil` is satisfiable with `o`
+        // non-nil but `o.a` nil — so the opposite branch stays unrefined.
+        if let Some(base) = optional_chain_base_identifier(var_node) {
+            if let Some(TypeExpr::Union(members)) = scope.get_var(base).cloned().flatten() {
+                if let Some(narrowed) = remove_from_union(&members, "nil") {
+                    let nonnil = Refinements {
+                        truthy: vec![(base.to_string(), Some(narrowed))],
+                        ..Refinements::default()
+                    };
+                    return if op == "!=" {
+                        nonnil
+                    } else {
+                        nonnil.inverted()
+                    };
+                }
+            }
+        }
+
         Refinements::empty()
     }
 

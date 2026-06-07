@@ -14,7 +14,7 @@ use crate::env_guard::ScopedEnvVar;
 use crate::json_envelope::{self, JsonEnvelope, JsonError};
 use crate::test_report::{self, TestCaseReport, TestOutcome, TestReport};
 use crate::test_runner;
-use crate::{execute_with_skill_dirs, execute_with_skill_dirs_and_harness};
+use crate::{execute_with_skill_dirs, execute_with_skill_dirs_and_harness, ExecError};
 
 /// Report-writing options threaded into `run_user_tests`. Each `Some`
 /// path triggers a write at end-of-run; a missing parent directory or
@@ -429,7 +429,7 @@ fn harness_kind_name(kind: harn_vm::HarnessKind) -> &'static str {
 }
 
 enum ConformanceExecution {
-    Completed(Result<String, String>),
+    Completed(Result<String, ExecError>),
     TimedOut,
 }
 
@@ -1090,7 +1090,7 @@ async fn evaluate_conformance_case(
                 }
             }
             ConformanceExecution::Completed(Err(e)) => ConformanceCaseEvaluation::fail(
-                format!("{rel_path}: runtime error: {e}"),
+                format!("{rel_path}: {}: {}", e.stage.label(), e.message),
                 duration_ms,
             ),
             ConformanceExecution::TimedOut => ConformanceCaseEvaluation::fail(
@@ -1146,7 +1146,9 @@ async fn evaluate_conformance_case(
         }
 
         return match run.execution {
-            ConformanceExecution::Completed(Err(ref err)) if error_matches(err, &expected_error) => {
+            ConformanceExecution::Completed(Err(ref err))
+                if error_matches(&err.message, &expected_error) =>
+            {
                 if options.differential_optimizations {
                     if let Err(error) = verify_unoptimized_conformance_subprocess(
                         harn_file,
@@ -1961,7 +1963,7 @@ async fn execute_determinism_run(
     persist_result?;
     match result {
         Ok(Ok(output)) => Ok(output),
-        Ok(Err(error)) => Err(error),
+        Ok(Err(error)) => Err(error.to_string()),
         Err(_) => Err(format!("timed out after {timeout_ms}ms")),
     }
 }

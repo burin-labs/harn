@@ -3935,6 +3935,45 @@ Interop between `any` and `unknown`:
   `unknown` unless you have a specific reason to defeat checking
   bidirectionally.
 
+### Member access and nil safety
+
+Three syntactic forms dereference a receiver value at runtime — property
+read (`obj.field`), subscript (`obj[key]`), and method call
+(`obj.method(..)`). All three fail identically when the receiver is `nil`
+or is not the kind of value the access expects, so the checker applies one
+consistent set of diagnostics to all three rather than treating property
+access as special:
+
+| Receiver type | `obj.field` / `obj[key]` / `obj.m()` | `obj?.field` / `obj?[key]` / `obj?.m()` |
+|---|---|---|
+| statically `nil` | **error** — known nil here | allowed (the `?` short-circuits) |
+| `T \| nil` (nilable) | **error** — may be nil at runtime | allowed |
+| `unknown` | **warning** — narrow or validate first | **warning** — `?` only guards nil, not a non-shape value |
+| `any` | no diagnostic (checking opted out) | no diagnostic |
+| concrete (`struct`, shape, `list`, …) | field/index/method checked against the type | unnecessary-`?` lint if the receiver can't be nil |
+
+The fix for a `nil` / nilable receiver is always one of: the matching
+optional operator (`?.`, `?[…]`, or `?.m()`), a `!= nil` guard that
+narrows the value, or a `??` default. For an `unknown` receiver, narrow
+with `is_a` / `type_of`, validate with `assert_shape` / `schema_is`, or
+add a shape annotation. `any` is the deliberate escape hatch and is never
+diagnosed — see the `any` vs `unknown` guidance above.
+
+Two narrowings keep this rule ergonomic. A guard on an optional-access
+chain narrows the **base** identifier: inside `if o?.field != nil { … }`
+the value `o` is non-nil (if `o` were nil, `o?.field` would be nil), so a
+plain `o.field` read in that branch is allowed. And `value ?? default`
+drops the `nil` arm of `value` even when `value`'s type is a **named
+alias** that expands to a nilable union (`type Opts = {…} | nil`), so the
+common `let opts = options ?? {}` option-defaulting idiom yields a non-nil
+value.
+
+These diagnostics fire only when the receiver's type comes from a real
+contract — a written annotation, a named struct / alias / enum, a
+call-return, or any non-identifier expression. The ambient dict-literal
+idiom (`let d = {a: 1}; d.missing`) stays loose and returns `nil` at
+runtime, matching the gradual-typing affordance for one-off glue.
+
 ### Union types
 
 ```harn
