@@ -2168,9 +2168,7 @@ export const harnProviderCatalog: HarnProviderCatalog = {
       "id": "gpt-oss-120b",
       "name": "GPT-OSS 120B (Cerebras)",
       "provider": "cerebras",
-      "aliases": [
-        "cerebras-gpt-oss"
-      ],
+      "aliases": [],
       "context_window": 131072,
       "logical_model": "openai-gpt-oss-120b",
       "equivalence_group": "openai-gpt-oss-120b",
@@ -2326,9 +2324,7 @@ export const harnProviderCatalog: HarnProviderCatalog = {
       "id": "zai-glm-4.7",
       "name": "Z.ai GLM 4.7 (Cerebras)",
       "provider": "cerebras",
-      "aliases": [
-        "cerebras-glm"
-      ],
+      "aliases": [],
       "context_window": 131072,
       "modalities": {
         "input": [
@@ -7419,18 +7415,6 @@ export const harnProviderCatalog: HarnProviderCatalog = {
     }
   ],
   "aliases": [
-    {
-      "name": "cerebras-glm",
-      "model_id": "zai-glm-4.7",
-      "provider": "cerebras",
-      "tool_format": "text"
-    },
-    {
-      "name": "cerebras-gpt-oss",
-      "model_id": "gpt-oss-120b",
-      "provider": "cerebras",
-      "tool_format": "text"
-    },
     {
       "name": "cohere",
       "model_id": "command-a-plus-05-2026",
