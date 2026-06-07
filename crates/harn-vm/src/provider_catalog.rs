@@ -39,7 +39,9 @@ mod tests;
 mod types;
 mod validation;
 
-pub use bindings::{swift_binding, typescript_binding};
+pub use bindings::{
+    swift_binding, swift_binding_embedded, typescript_binding, typescript_binding_embedded,
+};
 pub use remote::{refresh_runtime_catalog, CatalogRefreshOptions, CatalogRefreshReport};
 pub use schema::{schema_json, schema_value};
 pub use types::*;
@@ -165,6 +167,30 @@ pub fn artifact() -> ProviderCatalogArtifact {
     artifact_from_config(&config, CatalogCapabilityOverrides::CurrentThread)
 }
 
+/// Build the catalog artifact hermetically: from the compiled-in embedded
+/// provider config and embedded capability matrix only, ignoring the
+/// developer's `~/.config/harn/providers.toml`, environment overrides
+/// (`HARN_PROVIDERS_CONFIG`, `HARN_DEFAULT_PROVIDER`, `HARN_LLM_*`), the
+/// process runtime-catalog overlay, and any thread-local user overrides.
+///
+/// This is what `harn providers export` / `providers validate
+/// --check-artifacts` use so the checked-in `spec/provider-catalog/*` artifacts
+/// are a pure function of the source tree. Do NOT use this for live runtime
+/// catalog presentation — use [`artifact`] / [`artifact_with_overrides`] there,
+/// which legitimately reflect the host's configuration.
+///
+/// `explicit_overlay` is an optional declared overlay (e.g. a `--overlay` file
+/// named on the command line); it is reproducible input, not ambient machine
+/// state, so it is merged on top of the embedded base while staying hermetic.
+pub fn artifact_embedded(
+    explicit_overlay: Option<&llm_config::ProvidersConfig>,
+) -> ProviderCatalogArtifact {
+    let config = llm_config::embedded_config(explicit_overlay);
+    // `Explicit(None)` consults only the built-in capability matrix, never the
+    // thread-local capability user-overrides the CLI may have installed.
+    artifact_from_config(&config, CatalogCapabilityOverrides::Explicit(None))
+}
+
 /// Build a catalog artifact for a runtime that has captured explicit provider
 /// and capability overlays. `None` means no override for that layer; unlike
 /// `artifact()`, this does not read thread-local user overrides implicitly.
@@ -233,7 +259,19 @@ fn artifact_from_config(
 }
 
 pub fn artifact_json() -> Result<String, serde_json::Error> {
-    serde_json::to_string_pretty(&artifact()).map(|mut text| {
+    artifact_to_json(&artifact())
+}
+
+/// Hermetic counterpart of [`artifact_json`] for generating the checked-in
+/// `provider-catalog.json` artifact. See [`artifact_embedded`].
+pub fn artifact_json_embedded(
+    explicit_overlay: Option<&llm_config::ProvidersConfig>,
+) -> Result<String, serde_json::Error> {
+    artifact_to_json(&artifact_embedded(explicit_overlay))
+}
+
+fn artifact_to_json(artifact: &ProviderCatalogArtifact) -> Result<String, serde_json::Error> {
+    serde_json::to_string_pretty(artifact).map(|mut text| {
         text.push('\n');
         text
     })

@@ -597,3 +597,99 @@ fast_mode = { param = "speed", value = "fast", status = "turbo", pricing = { inp
         report.warnings
     );
 }
+
+/// A providers.toml overlay declaring a provider/alias/model that a developer
+/// might carry in their personal `~/.config/harn/providers.toml`. Generation
+/// must never bake any of this into the shipped catalog artifacts.
+const POLLUTING_OVERLAY: &str = r#"
+[providers.leakco]
+display_name = "Leak Co"
+base_url = "https://leak.example/v1"
+auth_style = "bearer"
+auth_env = "LEAK_API_KEY"
+chat_endpoint = "/chat/completions"
+
+[aliases]
+leak-alias = { id = "leak/model", provider = "leakco", tool_format = "text" }
+
+[models."leak/model"]
+name = "Leak Model"
+provider = "leakco"
+context_window = 8192
+"#;
+
+fn catalog_mentions_leak(artifact: &ProviderCatalogArtifact) -> bool {
+    artifact.providers.iter().any(|p| p.id == "leakco")
+        || artifact.aliases.iter().any(|a| a.name == "leak-alias")
+        || artifact.models.iter().any(|m| m.id == "leak/model")
+}
+
+#[test]
+fn embedded_artifact_generation_is_hermetic_against_ambient_overlay() {
+    // Baseline generated with no ambient config at all.
+    llm_config::clear_user_overrides();
+    let baseline = artifact_embedded(None);
+    let baseline_json = artifact_json_embedded(None).expect("baseline json");
+    let baseline_ts = typescript_binding_embedded(None).expect("baseline ts");
+    let baseline_swift = swift_binding_embedded(None).expect("baseline swift");
+
+    assert!(
+        !catalog_mentions_leak(&baseline),
+        "baseline embedded catalog should not contain leak fixtures"
+    );
+
+    // Install an ambient overlay — the in-test proxy for a polluting
+    // `~/.config/harn/providers.toml` / `HARN_PROVIDERS_CONFIG`. Hermetic
+    // generation must ignore it entirely, so output stays byte-identical.
+    {
+        let _guard = install_overlay(POLLUTING_OVERLAY);
+
+        // Sanity-check the contrast: the *runtime* catalog DOES reflect the
+        // ambient overlay, so this is a genuine hermetic fork, not a no-op.
+        assert!(
+            catalog_mentions_leak(&artifact()),
+            "runtime artifact() must still reflect the ambient overlay"
+        );
+
+        let polluted = artifact_embedded(None);
+        assert!(
+            !catalog_mentions_leak(&polluted),
+            "embedded catalog leaked ambient overlay aliases/providers/models"
+        );
+        assert_eq!(
+            artifact_json_embedded(None).expect("polluted json"),
+            baseline_json,
+            "embedded provider-catalog.json must be byte-identical with/without ambient overlay"
+        );
+        assert_eq!(
+            typescript_binding_embedded(None).expect("polluted ts"),
+            baseline_ts,
+            "embedded TypeScript binding must be byte-identical with/without ambient overlay"
+        );
+        assert_eq!(
+            swift_binding_embedded(None).expect("polluted swift"),
+            baseline_swift,
+            "embedded Swift binding must be byte-identical with/without ambient overlay"
+        );
+    }
+
+    // After dropping the overlay, generation is unchanged.
+    assert_eq!(
+        artifact_json_embedded(None).expect("cleared json"),
+        baseline_json
+    );
+}
+
+#[test]
+fn embedded_artifact_honors_explicit_declared_overlay() {
+    llm_config::clear_user_overrides();
+    let overlay = llm_config::parse_config_toml(POLLUTING_OVERLAY).expect("overlay parses");
+    // An *explicit* declared overlay (e.g. a `--overlay` file named on the
+    // command line) is reproducible input, not ambient machine state, so the
+    // hermetic generator merges it on top of the embedded base.
+    let artifact = artifact_embedded(Some(&overlay));
+    assert!(
+        catalog_mentions_leak(&artifact),
+        "explicit overlay should be merged into the embedded catalog"
+    );
+}
