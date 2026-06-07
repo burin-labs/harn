@@ -672,11 +672,7 @@ fn try_parse_angle_wrapped_call(
     }
     let name_str = std::str::from_utf8(&bytes[name_start..name_start + name_len]).ok()?;
     // Only known tools are eligible — keeps `<notes>...` out of the path.
-    let known: BTreeSet<String> = collect_tool_schemas(tools_val, None)
-        .into_iter()
-        .map(|schema| schema.name)
-        .chain(["ledger".to_string(), "load_skill".to_string()])
-        .collect();
+    let known = known_tool_names_with_implicit(tools_val);
     if !known.contains(name_str) {
         return None;
     }
@@ -747,11 +743,7 @@ fn leading_call_name(body: &str, tools_val: Option<&VmValue>) -> Option<String> 
         return None;
     }
     let name = &trimmed[..name_len];
-    let known: BTreeSet<String> = collect_tool_schemas(tools_val, None)
-        .into_iter()
-        .map(|schema| schema.name)
-        .chain(["ledger".to_string(), "load_skill".to_string()])
-        .collect();
+    let known = known_tool_names_with_implicit(tools_val);
     known.contains(name).then(|| name.to_string())
 }
 
@@ -863,6 +855,9 @@ fn parse_single_tool_call(
     if let Some(call) = parse_json_tool_call_body(body, tools_val)? {
         return Ok(call);
     }
+    if let Some(call) = parse_xml_wrapped_json_args_body(body, tools_val)? {
+        return Ok(call);
+    }
     let inner = parse_bare_calls_in_body(body, tools_val);
     if let Some(err) = inner.errors.into_iter().next() {
         return Err(err);
@@ -881,6 +876,64 @@ fn parse_single_tool_call(
         ));
     }
     Ok(inner.calls.into_iter().next().expect("len == 1"))
+}
+
+fn known_tool_names_with_implicit(tools_val: Option<&VmValue>) -> BTreeSet<String> {
+    collect_tool_schemas(tools_val, None)
+        .into_iter()
+        .map(|schema| schema.name)
+        .chain(["ledger".to_string(), "load_skill".to_string()])
+        .collect()
+}
+
+fn parse_xml_wrapped_json_args_body(
+    body: &str,
+    tools_val: Option<&VmValue>,
+) -> Result<Option<serde_json::Value>, String> {
+    let trimmed = body.trim();
+    let bytes = trimmed.as_bytes();
+    if bytes.first() != Some(&b'<') {
+        return Ok(None);
+    }
+    let name_start = 1usize;
+    let Some(name_len) = ident_length(&bytes[name_start..]) else {
+        return Ok(None);
+    };
+    let name_end = name_start + name_len;
+    if bytes.get(name_end) != Some(&b'>') {
+        return Ok(None);
+    }
+    let name = &trimmed[name_start..name_end];
+    let close = format!("</{name}>");
+    if !trimmed.ends_with(&close) {
+        return Ok(None);
+    }
+    let known = known_tool_names_with_implicit(tools_val);
+    if !known.contains(name) {
+        let available: Vec<_> = known.iter().take(20).cloned().collect();
+        return Err(format!(
+            "Unknown tool '{}' in nested XML tool-call body. Available tools: [{}]",
+            name,
+            available.join(", ")
+        ));
+    }
+    let inner = trimmed[name_end + 1..trimmed.len() - close.len()].trim();
+    let arguments: serde_json::Value = serde_json::from_str(inner).map_err(|error| {
+        format!(
+            "<tool_call><{name}> body did not parse as a JSON object: {error}. \
+             Emit `<tool_call>{name}({{ ... }})</tool_call>` instead."
+        )
+    })?;
+    if !arguments.is_object() {
+        return Err(format!(
+            "Nested XML arguments for tool '{name}' must be a JSON object, got `{arguments}`."
+        ));
+    }
+    Ok(Some(serde_json::json!({
+        "id": format!("tc_xml_{name}"),
+        "name": name,
+        "arguments": arguments,
+    })))
 }
 
 fn parse_json_tool_call_body(
@@ -925,11 +978,7 @@ fn parse_json_tool_call_body(
     if name.is_empty() {
         return Err("<tool_call> JSON body did not contain a tool name".to_string());
     }
-    let known: BTreeSet<String> = collect_tool_schemas(tools_val, None)
-        .into_iter()
-        .map(|schema| schema.name)
-        .chain(["ledger".to_string(), "load_skill".to_string()])
-        .collect();
+    let known = known_tool_names_with_implicit(tools_val);
     if !known.contains(name) {
         let available: Vec<_> = known.iter().take(20).cloned().collect();
         return Err(format!(
