@@ -36,6 +36,7 @@ use harn_vm::orchestration::{
 use crate::cli::EvalContextArgs;
 use crate::dispatch;
 use crate::env_guard::ScopedEnvVar;
+use crate::format::escape_md;
 
 /// Env var the embedded `cli/eval/context` script reads to pick up the
 /// pre-serialised `ContextEvalReport`. The Rust shim does all the
@@ -243,10 +244,6 @@ fn legacy_render_markdown(report: &ContextEvalReport) -> String {
         ));
     }
     out
-}
-
-fn escape_md(value: &str) -> String {
-    value.replace('|', "\\|")
 }
 
 // ─── Dispatch (.harn) render path ────────────────────────────────────────

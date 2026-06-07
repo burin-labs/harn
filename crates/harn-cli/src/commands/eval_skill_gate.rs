@@ -10,6 +10,7 @@ use harn_vm::orchestration::{
 };
 
 use crate::cli::EvalSkillGateArgs;
+use crate::format::escape_md;
 
 pub async fn run(args: EvalSkillGateArgs) -> i32 {
     let manifest = match load_skill_gate_manifest(&args.manifest) {
@@ -179,8 +180,4 @@ fn variant_row(variant: &SkillGateVariantReport) -> String {
         variant.context.delta_tokens,
         escape_md(&variant.failures.join("; "))
     )
-}
-
-fn escape_md(value: &str) -> String {
-    value.replace('|', "\\|")
 }

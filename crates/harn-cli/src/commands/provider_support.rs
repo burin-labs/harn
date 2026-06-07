@@ -11,6 +11,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
 
 use crate::cli::ProvidersSupportArgs;
+use crate::format::escape_md;
 
 pub(crate) const PROVIDER_SUPPORT_SCHEMA_VERSION: u32 = 1;
 const DEFAULT_NOTES_PATH: &str = "crates/harn-cli/data/provider_support_notes.toml";
@@ -934,7 +935,9 @@ fn yes_no(value: bool) -> &'static str {
 }
 
 fn markdown_escape(value: &str) -> String {
-    value.replace('|', "\\|").replace('\n', " ")
+    // Pipes would end the table column; newlines would break the row. Share
+    // the pipe escaping with the other report commands and collapse newlines.
+    escape_md(value).replace('\n', " ")
 }
 
 fn write_file(path: &Path, body: &str) -> Result<(), String> {

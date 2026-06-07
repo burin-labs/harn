@@ -16,6 +16,8 @@ use std::fmt::Write as _;
 use harn_parser::diagnostic_codes::{Category, Code, RegistryEntry};
 use serde::Serialize;
 
+use crate::format::escape_md;
+
 /// JSON sidecar schema version. Increment on any breaking shape change.
 pub const SCHEMA_VERSION: u32 = 1;
 
@@ -240,7 +242,7 @@ impl Renderer {
                     "| [`{}`](#{}) | {} | {} | {} |",
                     entry.identifier,
                     code_anchor(entry.identifier),
-                    escape_pipe(entry.summary),
+                    escape_md(entry.summary),
                     repair_cell,
                     safety_cell,
                 )
@@ -464,10 +466,6 @@ fn category_anchor(category: Category) -> String {
 
 fn code_anchor(identifier: &str) -> String {
     identifier.to_lowercase()
-}
-
-fn escape_pipe(value: &str) -> String {
-    value.replace('|', "\\|")
 }
 
 /// Drop the leading `#` heading line from a markdown chunk plus any

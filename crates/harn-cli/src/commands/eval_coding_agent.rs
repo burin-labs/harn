@@ -61,6 +61,7 @@ use crate::commands::tool_mode_parity::{
 };
 use crate::dispatch;
 use crate::env_guard::ScopedEnvVar;
+use crate::format::escape_md;
 #[cfg(test)]
 use live_verify::{coding_agent_live_verify_cases, tool_format_override_warning_line};
 use live_verify::{
@@ -1251,14 +1252,14 @@ fn render_markdown(summary: &EvalSummary) -> String {
         let tool_sequence = if run.tool_sequence.is_empty() {
             "-".to_string()
         } else {
-            run.tool_sequence.join(", ").replace('|', "\\|")
+            escape_md(&run.tool_sequence.join(", "))
         };
         out.push_str(&format!(
             "| `{}` | `{}` | `{}` | `{}` | `{}` | `{}` | `{}` | {} | {} | {} | {:.6} | {} | `{}` |\n",
             run.fixture_id,
             run.run_id,
             run.selector.provider,
-            run.selector.model.replace('|', "\\|"),
+            escape_md(&run.selector.model),
             run.tool_format,
             run.fixture_tool_sequence,
             tool_sequence,
@@ -1403,7 +1404,7 @@ fn render_rollup_table(out: &mut String, title: &str, rollups: &[RollupReport]) 
     for rollup in rollups {
         out.push_str(&format!(
             "| `{}` | {} | {} | {} | {} | {:.6} |\n",
-            rollup.key.replace('|', "\\|"),
+            escape_md(&rollup.key),
             rollup.passed_runs,
             rollup.failed_runs,
             rollup.skipped_runs,
@@ -1507,7 +1508,7 @@ fn comparison_evidence_links(comparison: &FormatComparison) -> String {
 fn markdown_link(label: &str, target: &str) -> String {
     format!(
         "[{}]({})",
-        label.replace('|', "\\|"),
+        escape_md(label),
         target
             .replace(' ', "%20")
             .replace('(', "%28")

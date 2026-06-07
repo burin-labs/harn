@@ -7,6 +7,7 @@ use harn_vm::provider_catalog::{CatalogModel, ModelToolEmpiricalParity, Provider
 
 use crate::cli::CheckOutputFormat;
 use crate::commands::tool_mode_parity::{self, ToolModeParityOverlay};
+use crate::format::escape_md;
 use crate::json_envelope::{to_string_pretty, JsonEnvelope};
 
 pub(crate) const PROVIDER_MATRIX_SCHEMA_VERSION: u32 = 1;
@@ -120,7 +121,7 @@ pub(crate) fn generate_markdown(
         out.push_str(&format!(
             "| `{}` | `{}` | `{}` | `{}` | {} | {} | {} | {} | {} | {} |\n",
             model.provider,
-            escape_markdown_pipes(&model.id),
+            escape_md(&model.id),
             recommended_tool_format_cell(model),
             parity_cell(model),
             empirical
@@ -459,10 +460,6 @@ fn markdown_cell(value: &str) -> String {
     } else {
         format!("`{value}`")
     }
-}
-
-fn escape_markdown_pipes(value: &str) -> String {
-    value.replace('|', "\\|")
 }
 
 #[cfg(test)]
