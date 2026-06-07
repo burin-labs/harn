@@ -19,6 +19,7 @@ mod nil_safety;
 mod ownership;
 mod reachability;
 mod repair;
+mod row_merge;
 mod soundness;
 mod strict_types;
 mod typing;

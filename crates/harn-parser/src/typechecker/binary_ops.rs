@@ -16,6 +16,41 @@ fn dict_like(ty: &TypeExpr) -> bool {
         || matches!(ty, TypeExpr::Shape(_))
 }
 
+/// Right-biased structural merge of two record shapes — the type-level model
+/// of `merge(a, b)` / `{...a, ...b}` / `a + b`, where `b`'s fields override
+/// `a`'s on overlap (matching the runtime). Field rules (see the row-poly
+/// design memo §2.4):
+///
+/// - A field present on only one side carries through unchanged.
+/// - On overlap, the result is **present (required) if either side is
+///   required** (`optional = a.optional && b.optional`).
+/// - The overlap value type is `b`'s type when `b`'s field is required (`b`
+///   always overrides), otherwise `a | b` (when `b` is absent at runtime the
+///   value comes from `a`).
+///
+/// This is the precise, sound result for *closed* shapes: `merge({a:int,
+/// b:int}, {b:str, c:bool})` → `{a:int, b:str, c:bool}` — every field
+/// preserved (the carry-forward that plain subtyping/intersection can't give).
+pub(in crate::typechecker) fn merge_shape_fields(
+    left: &[ShapeField],
+    right: &[ShapeField],
+) -> Vec<ShapeField> {
+    let mut out: Vec<ShapeField> = left.to_vec();
+    for rf in right {
+        if let Some(slot) = out.iter_mut().find(|f| f.name == rf.name) {
+            slot.optional = slot.optional && rf.optional;
+            slot.type_expr = if rf.optional {
+                simplify_union(vec![slot.type_expr.clone(), rf.type_expr.clone()])
+            } else {
+                rf.type_expr.clone()
+            };
+        } else {
+            out.push(rf.clone());
+        }
+    }
+    out
+}
+
 /// Infer the result type of a binary operation.
 pub(super) fn infer_binary_op_type(
     op: &str,
@@ -37,11 +72,19 @@ pub(super) fn infer_binary_op_type(
                     _ => None,
                 }
             }
+            // Two closed record shapes merge to the precise right-biased
+            // merged shape (`b` overrides `a`), instead of collapsing to a
+            // bare `dict` and losing every field type.
+            (Some(TypeExpr::Shape(l)), Some(TypeExpr::Shape(r))) => {
+                Some(TypeExpr::Shape(merge_shape_fields(l, r)))
+            }
             // dict + dict shallow-merges. Recognize parameterized and shape
             // forms so a `dict<string, V> + Shape{...}` chain (the common
             // connector/agent option-projection idiom) keeps the dict-shaped
             // typing instead of falling through to `None` and downgrading
-            // every subsequent inference step to untyped.
+            // every subsequent inference step to untyped. (A bare/parameterised
+            // dict on either side means an unknown tail, so the merged shape is
+            // not statically closed — degrade to `dict`.)
             (Some(l), Some(r)) if dict_like(l) && dict_like(r) => {
                 Some(TypeExpr::Named("dict".into()))
             }

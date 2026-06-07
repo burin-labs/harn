@@ -613,12 +613,20 @@ impl TypeChecker {
                     return Ok(());
                 }
                 if let Some(arg_ty) = self.infer_type(arg, scope) {
+                    let arg_ty = self.resolve_alias(&arg_ty, scope);
                     Self::extract_type_bindings(param, &arg_ty, type_params, bindings)?;
                 }
                 Ok(())
             }
             _ => {
                 if let Some(arg_ty) = self.infer_type(arg, scope) {
+                    // Resolve named aliases (`type Opts = {..}`) to their
+                    // structural form first: `extract_type_bindings` is a
+                    // pure function that can't see through an alias, so a
+                    // `dict<string, V>` param would otherwise fail to bind V
+                    // from a named-shape argument the way it does for an
+                    // inline shape literal.
+                    let arg_ty = self.resolve_alias(&arg_ty, scope);
                     Self::extract_type_bindings(param, &arg_ty, type_params, bindings)?;
                 }
                 Ok(())
