@@ -110,6 +110,7 @@ impl Dispatcher {
         route: &DispatchUri,
         event: &TriggerEvent,
         replay_of_event_id: Option<&String>,
+        source_node_id: &str,
         final_error: &str,
     ) -> Result<(), DispatchError> {
         let dlq_entry = DlqEntry {
@@ -163,7 +164,7 @@ impl Dispatcher {
                 metadata: dlq_node_metadata(binding, event, 0, final_error),
             }],
             vec![RunActionGraphEdgeRecord {
-                from_id: format!("predicate:{}:{}", binding.binding_key(), event.id.0),
+                from_id: source_node_id.to_string(),
                 to_id: format!("dlq:{}:{}", binding.binding_key(), event.id.0),
                 kind: ACTION_GRAPH_EDGE_KIND_DLQ_MOVE.to_string(),
                 label: Some("budget exhausted".to_string()),

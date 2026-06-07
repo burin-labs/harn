@@ -21,8 +21,8 @@ use crate::connectors::{
     RawInbound, TriggerBinding as ConnectorTriggerBinding,
 };
 use crate::event_log::{
-    install_memory_for_current_thread, AnyEventLog, EventLog, FileEventLog, LogEvent,
-    MemoryEventLog, Topic,
+    install_default_for_base_dir, install_memory_for_current_thread, AnyEventLog, EventLog,
+    FileEventLog, LogEvent, MemoryEventLog, Topic,
 };
 use crate::secrets::{
     RotationHandle, SecretBytes, SecretError, SecretId, SecretMeta, SecretProvider,
@@ -62,6 +62,7 @@ pub const TRIGGER_TEST_FIXTURES: &[&str] = &[
     "rate_limit_throttles",
     "replay_binding_gc_fallback",
     "replay_refires_from_dlq",
+    "scheduled_eval_suite",
     "webhook_dedupe_blocks_duplicates",
     "webhook_verifies_hmac",
 ];
@@ -242,6 +243,7 @@ impl TriggerTestHarness {
             "rate_limit_throttles" => self.rate_limit_throttles().await,
             "replay_binding_gc_fallback" => self.replay_binding_gc_fallback().await,
             "replay_refires_from_dlq" => self.replay_refires_from_dlq().await,
+            "scheduled_eval_suite" => self.scheduled_eval_suite().await,
             "webhook_dedupe_blocks_duplicates" => self.webhook_dedupe_blocks_duplicates().await,
             "webhook_verifies_hmac" => self.webhook_verifies_hmac().await,
             _ => Err(format!(
@@ -1073,6 +1075,129 @@ impl TriggerTestHarness {
         })
     }
 
+    async fn scheduled_eval_suite(self) -> Result<TriggerHarnessResult, String> {
+        let guard = ScopedTriggerHarnessState::new("scheduled-eval-suite")?;
+        let log = install_default_for_base_dir(guard.path()).map_err(|error| error.to_string())?;
+        let manifest = scheduled_eval_manifest(guard.path())?;
+
+        let mut vm = crate::Vm::new();
+        crate::register_vm_stdlib(&mut vm);
+        vm.set_source_dir(guard.path());
+
+        install_manifest_triggers(vec![TriggerBindingSpec {
+            id: "nightly-eval".to_string(),
+            source: TriggerBindingSource::Manifest,
+            kind: "cron".to_string(),
+            provider: ProviderId::from("cron"),
+            autonomy_tier: crate::AutonomyTier::Suggest,
+            handler: TriggerHandlerSpec::EvalPack {
+                target: "scheduled-eval".to_string(),
+                manifest: Box::new(manifest),
+                ledger_options: None,
+            },
+            dispatch_priority: crate::WorkerQueuePriority::Normal,
+            when: None,
+            when_budget: None,
+            retry: TriggerRetryConfig::default(),
+            match_events: vec!["cron.tick".to_string()],
+            dedupe_key: None,
+            dedupe_retention_days: DEFAULT_INBOX_RETENTION_DAYS,
+            filter: None,
+            daily_cost_usd: Some(0.10),
+            hourly_cost_usd: None,
+            max_autonomous_decisions_per_hour: None,
+            max_autonomous_decisions_per_day: None,
+            on_budget_exhausted: crate::TriggerBudgetExhaustionStrategy::False,
+            max_concurrent: None,
+            flow_control: crate::triggers::TriggerFlowControlConfig {
+                concurrency: Some(crate::triggers::TriggerConcurrencyConfig { key: None, max: 1 }),
+                ..Default::default()
+            },
+            aggregation: None,
+            manifest_path: None,
+            package_name: Some("workspace".to_string()),
+            definition_fingerprint: "fp:scheduled-eval".to_string(),
+        }])
+        .await
+        .map_err(|error| error.to_string())?;
+
+        let dispatcher = crate::triggers::Dispatcher::with_event_log(vm, log.clone());
+        let first = dispatcher
+            .dispatch_event(scheduled_eval_cron_tick("nightly-eval", "tick-1"))
+            .await
+            .map_err(|error| error.to_string())?;
+        let second = dispatcher
+            .dispatch_event(scheduled_eval_cron_tick("nightly-eval", "tick-2"))
+            .await
+            .map_err(|error| error.to_string())?;
+
+        let ledger = crate::orchestration::eval_ledger_read_report(Some(json!({
+            "namespace": "scheduled-eval",
+        })))
+        .map_err(|error| error.to_string())?;
+        let outbox = read_log_topic(log, crate::TRIGGER_OUTBOX_TOPIC).await?;
+        let skipped = outbox
+            .iter()
+            .find(|(_, event)| event.kind == "dispatch_skipped");
+
+        let first_status = first
+            .first()
+            .map(|outcome| outcome.status.as_str())
+            .unwrap_or("missing");
+        let second_status = second
+            .first()
+            .map(|outcome| outcome.status.as_str())
+            .unwrap_or("missing");
+        let second_budget = second
+            .first()
+            .and_then(|outcome| outcome.result.as_ref())
+            .and_then(|result| result.get("budget"))
+            .and_then(JsonValue::as_str)
+            .unwrap_or("");
+        let skip_stage = skipped
+            .and_then(|(_, event)| event.payload.get("skip_stage"))
+            .and_then(JsonValue::as_str)
+            .unwrap_or("");
+
+        let report = first
+            .first()
+            .and_then(|outcome| outcome.result.as_ref())
+            .cloned()
+            .unwrap_or(JsonValue::Null);
+        let ok = first_status == "succeeded"
+            && report.get("pack_id").and_then(JsonValue::as_str) == Some("scheduled-eval")
+            && report.get("pass").and_then(JsonValue::as_bool) == Some(true)
+            && ledger.rows.len() == 1
+            && ledger.rows[0].provenance.commit == "commit-a"
+            && second_status == "skipped"
+            && second_budget == "daily_budget_exceeded"
+            && skip_stage == "budget";
+
+        Ok(TriggerHarnessResult {
+            fixture: "scheduled_eval_suite".to_string(),
+            ok,
+            stub: false,
+            summary: "cron triggers can dispatch eval packs and shed later ticks on spent budget"
+                .to_string(),
+            emitted: Vec::new(),
+            attempts: Vec::new(),
+            dlq: Vec::new(),
+            alerts: Vec::new(),
+            bindings: snapshot_trigger_bindings(),
+            notes: Vec::new(),
+            details: json!({
+                "first_status": first_status,
+                "second_status": second_status,
+                "second_budget": second_budget,
+                "skip_stage": skip_stage,
+                "ledger_rows": ledger.rows.len(),
+                "ledger_commit": ledger.rows.first().map(|row| row.provenance.commit.clone()),
+                "pack_id": report.get("pack_id").cloned().unwrap_or(JsonValue::Null),
+                "pass": report.get("pass").cloned().unwrap_or(JsonValue::Null),
+            }),
+        })
+    }
+
     async fn multi_tenant_isolation_stub(self) -> Result<TriggerHarnessResult, String> {
         let tenant_a = synthetic_event("tenant.event", "tenant-a", Some("tenant-a"));
         let tenant_b = synthetic_event("tenant.event", "tenant-b", Some("tenant-b"));
@@ -1473,6 +1598,120 @@ impl SecretProvider for EmptySecretProvider {
     fn supports_versions(&self) -> bool {
         false
     }
+}
+
+struct ScopedTriggerHarnessState {
+    path: PathBuf,
+}
+
+impl ScopedTriggerHarnessState {
+    fn new(label: &str) -> Result<Self, String> {
+        clear_dispatcher_state_for_harness();
+        let path =
+            std::env::temp_dir().join(format!("harn-trigger-harness-{label}-{}", Uuid::new_v4()));
+        fs::create_dir_all(&path).map_err(|error| error.to_string())?;
+        Ok(Self { path })
+    }
+
+    fn path(&self) -> &std::path::Path {
+        &self.path
+    }
+}
+
+impl Drop for ScopedTriggerHarnessState {
+    fn drop(&mut self) {
+        clear_dispatcher_state_for_harness();
+        crate::event_log::reset_active_event_log();
+        let _ = fs::remove_dir_all(&self.path);
+    }
+}
+
+fn clear_dispatcher_state_for_harness() {
+    crate::triggers::clear_dispatcher_state();
+    clear_trigger_registry();
+}
+
+pub(crate) fn scheduled_eval_cron_tick(trigger_id: &str, dedupe_key: &str) -> TriggerEvent {
+    let tick_at = OffsetDateTime::from_unix_timestamp(1).expect("valid timestamp");
+    TriggerEvent::new(
+        ProviderId::from("cron"),
+        "tick",
+        Some(tick_at),
+        dedupe_key,
+        None,
+        BTreeMap::new(),
+        ProviderPayload::Known(KnownProviderPayload::Cron(
+            crate::triggers::CronEventPayload {
+                cron_id: Some(trigger_id.to_string()),
+                schedule: Some("0 3 * * *".to_string()),
+                tick_at,
+                raw: json!({"timezone": "UTC"}),
+            },
+        )),
+        SignatureStatus::Verified,
+    )
+}
+
+pub(crate) fn scheduled_eval_manifest(
+    base_dir: &std::path::Path,
+) -> Result<crate::orchestration::EvalPackManifest, String> {
+    let payload = json!({
+        "id": "scheduled-eval",
+        "base_dir": base_dir.display().to_string(),
+        "trials": 1,
+        "metadata": {
+            "model": "mock-model",
+            "commit": "commit-a",
+            "branch": "main",
+            "tool_format": "native-json",
+            "pipeline_rev": "rev-a",
+            "ledger_namespace": "scheduled-eval"
+        },
+        "fixtures": [{
+            "id": "pass-run",
+            "kind": "run-record",
+            "inline": {
+                "_type": "workflow_run",
+                "id": "run_pass",
+                "workflow_id": "workflow_1",
+                "task": "demo",
+                "status": "completed",
+                "usage": {
+                    "total_duration_ms": 1000,
+                    "total_cost": 0.25,
+                    "input_tokens": 3,
+                    "output_tokens": 4,
+                    "call_count": 1,
+                    "models": ["mock"]
+                },
+                "replay_fixture": {
+                    "_type": "replay_fixture",
+                    "expected_status": "completed",
+                    "stage_assertions": []
+                }
+            }
+        }],
+        "rubrics": [{
+            "id": "completed",
+            "kind": "deterministic",
+            "assertions": [{"kind": "run-status", "expected": "completed"}]
+        }],
+        "cases": [{"id": "pass-case", "run": "pass-run", "rubrics": ["completed"]}]
+    });
+    crate::orchestration::normalize_eval_pack_manifest_value(&crate::stdlib::json_to_vm_value(
+        &payload,
+    ))
+    .map_err(|error| error.to_string())
+}
+
+async fn read_log_topic(
+    log: Arc<AnyEventLog>,
+    topic: &str,
+) -> Result<Vec<(u64, LogEvent)>, String> {
+    let topic = Topic::new(topic).map_err(|error| error.to_string())?;
+    log.read_range(&topic, None, usize::MAX)
+        .await
+        .map_err(|error| error.to_string())
 }
 
 pub async fn run_trigger_harness_fixture(fixture: &str) -> Result<TriggerHarnessResult, String> {

@@ -205,6 +205,15 @@ pub async fn collect_manifest_triggers(
                 let binding = persona_runtime_binding_for_handler(extensions, trigger, &name)?;
                 CollectedTriggerHandler::Persona { binding }
             }
+            TriggerHandlerUri::EvalPack { target } => {
+                let manifest = eval_pack_manifest_for_handler(trigger, &target)?;
+                let ledger_options = eval_pack_ledger_options_for_handler(trigger)?;
+                CollectedTriggerHandler::EvalPack {
+                    target,
+                    manifest: Box::new(manifest),
+                    ledger_options,
+                }
+            }
         };
 
         let collected_when = if let Some(when_raw) = &trigger.when {
@@ -437,6 +446,92 @@ fn persona_runtime_binding_for_handler(
     Ok(persona_runtime_binding(name, persona))
 }
 
+fn eval_pack_manifest_for_handler(
+    trigger: &ResolvedTriggerConfig,
+    target: &str,
+) -> Result<harn_vm::orchestration::EvalPackManifest, PackageError> {
+    if eval_pack_target_is_path(target) {
+        let path = resolve_eval_pack_target_path(&trigger.manifest_dir, target);
+        return harn_vm::orchestration::load_eval_pack_manifest(&path).map_err(|error| {
+            trigger_error(
+                trigger,
+                format!(
+                    "handler eval_pack://{target} failed to load eval pack {}: {error}",
+                    path.display()
+                ),
+            )
+        });
+    }
+
+    let paths = load_package_eval_pack_paths(Some(&trigger.manifest_path))
+        .map_err(|error| trigger_error(trigger, error))?;
+    let mut matches = Vec::new();
+    for path in paths {
+        let manifest = harn_vm::orchestration::load_eval_pack_manifest(&path).map_err(|error| {
+            trigger_error(
+                trigger,
+                format!(
+                    "failed to load package eval pack {}: {error}",
+                    path.display()
+                ),
+            )
+        })?;
+        let file_stem = path.file_stem().and_then(|stem| stem.to_str());
+        if manifest.id == target
+            || manifest.name.as_deref() == Some(target)
+            || file_stem == Some(target)
+        {
+            matches.push((path, manifest));
+        }
+    }
+
+    match matches.len() {
+        0 => Err(trigger_error(
+            trigger,
+            format!(
+                "handler eval_pack://{target} did not match any [package].evals pack by id, name, or file stem",
+            ),
+        )),
+        1 => Ok(matches.remove(0).1),
+        _ => Err(trigger_error(
+            trigger,
+            format!("handler eval_pack://{target} matched multiple package eval packs"),
+        )),
+    }
+}
+
+fn eval_pack_target_is_path(target: &str) -> bool {
+    target.contains('/')
+        || target.contains('\\')
+        || target.ends_with(".toml")
+        || target.ends_with(".json")
+}
+
+fn resolve_eval_pack_target_path(manifest_dir: &Path, target: &str) -> PathBuf {
+    let path = PathBuf::from(target);
+    if path.is_absolute() {
+        path
+    } else {
+        manifest_dir.join(path)
+    }
+}
+
+fn eval_pack_ledger_options_for_handler(
+    trigger: &ResolvedTriggerConfig,
+) -> Result<Option<serde_json::Value>, PackageError> {
+    let value = trigger
+        .kind_specific
+        .get("eval_options")
+        .or_else(|| trigger.kind_specific.get("ledger"));
+    value
+        .map(|value| {
+            serde_json::to_value(value).map_err(|error| {
+                trigger_error(trigger, format!("invalid eval ledger options: {error}"))
+            })
+        })
+        .transpose()
+}
+
 /// Lower a manifest persona entry into the runtime binding. Centralised so
 /// every call site (`harn persona` CLI, trigger registration, etc.) carries
 /// the same shape — stages included.
@@ -598,6 +693,30 @@ pub fn manifest_trigger_binding_spec(
                 "entry_workflow": binding.entry_workflow,
             }),
         ),
+        CollectedTriggerHandler::EvalPack {
+            target,
+            manifest,
+            ledger_options,
+        } => {
+            let pack_id = manifest.id.clone();
+            let harness_config_fingerprint =
+                harn_vm::orchestration::eval_pack_harness_config_fingerprint(manifest.as_ref())
+                    .ok();
+            (
+                harn_vm::TriggerHandlerSpec::EvalPack {
+                    target: target.clone(),
+                    manifest,
+                    ledger_options: ledger_options.clone(),
+                },
+                serde_json::json!({
+                    "kind": "eval_pack",
+                    "target": target,
+                    "pack_id": pack_id,
+                    "harness_config_fingerprint": harness_config_fingerprint,
+                    "ledger_options": ledger_options,
+                }),
+            )
+        }
     };
 
     let when_raw = trigger

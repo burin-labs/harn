@@ -70,6 +70,10 @@ pub(super) fn dispatch_success_outcome(
         }
         DispatchUri::A2a { .. } => "completed",
         DispatchUri::Local { .. } => "success",
+        DispatchUri::EvalPack { .. } => match result.get("pass").and_then(|v| v.as_bool()) {
+            Some(false) => "eval_failed",
+            _ => "eval_passed",
+        },
         DispatchUri::AutoResume { .. } => "resumed",
         // SpawnToPool reports the same accept/reject distinction we record
         // on the dispatch metadata so observers (run viewer, audit log) can
@@ -248,6 +252,10 @@ pub(super) fn dispatch_node_metadata(
     if let DispatchUri::Persona { name } = route {
         metadata.insert("persona".to_string(), serde_json::json!(name));
     }
+    if let DispatchUri::EvalPack { target, pack_id } = route {
+        metadata.insert("eval_pack_target".to_string(), serde_json::json!(target));
+        metadata.insert("eval_pack_id".to_string(), serde_json::json!(pack_id));
+    }
     if let DispatchUri::SpawnToPool {
         pool,
         priority_from,
@@ -327,6 +335,35 @@ pub(super) fn dispatch_success_metadata(
             }
             if let Some(status) = result.get("status").and_then(|value| value.as_str()) {
                 metadata.insert("status".to_string(), serde_json::json!(status));
+            }
+        }
+        DispatchUri::EvalPack { target, pack_id } => {
+            metadata.insert("eval_pack_target".to_string(), serde_json::json!(target));
+            metadata.insert("eval_pack_id".to_string(), serde_json::json!(pack_id));
+            for field in [
+                "pass",
+                "total",
+                "passed",
+                "failed",
+                "blocking_failed",
+                "trial_count",
+            ] {
+                if let Some(value) = result.get(field).cloned() {
+                    metadata.insert(field.to_string(), value);
+                }
+            }
+            if let Some(run_state) = result.get("run_state").and_then(|value| value.as_object()) {
+                for field in [
+                    "ledger_rows_inserted",
+                    "ledger_rows_duplicate",
+                    "executed_cells",
+                    "skipped_cells",
+                    "all_skipped",
+                ] {
+                    if let Some(value) = run_state.get(field).cloned() {
+                        metadata.insert(field.to_string(), value);
+                    }
+                }
             }
         }
         DispatchUri::SpawnToPool { pool, .. } => {

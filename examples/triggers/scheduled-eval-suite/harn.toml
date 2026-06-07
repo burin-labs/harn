@@ -1,0 +1,16 @@
+[package]
+name = "scheduled-eval-suite"
+evals = ["harn.eval.toml"]
+
+[[triggers]]
+id = "nightly-regression"
+kind = "cron"
+provider = "cron"
+match = { events = ["cron.tick"] }
+handler = "eval_pack://scheduled-regression"
+schedule = "0 3 * * *"
+timezone = "UTC"
+dedupe_key = "event.dedupe_key"
+budget = { daily_cost_usd = 0.25, on_budget_exhausted = "retry_later" }
+concurrency = { max = 1 }
+ledger = { namespace = "scheduled-regression" }

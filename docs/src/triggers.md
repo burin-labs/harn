@@ -104,8 +104,11 @@ Predicate evaluation is safety-defaulted:
 - `when_budget.max_cost_usd`, `tokens_max`, and `timeout` cap a single
   predicate evaluation
 - `budget.daily_cost_usd` applies to aggregate predicate spend for the trigger
-  across the current UTC day
-- if either budget is exceeded, the predicate short-circuits to `false`
+  and to handler results that report `cost_usd`, `total_cost_usd`, or eval-pack
+  `stats_rows[*].total_cost_usd`, across the current UTC day
+- if a predicate budget is exceeded, the predicate short-circuits to `false`;
+  if aggregate trigger spend is already exhausted before a handler starts, the
+  dispatcher applies `budget.on_budget_exhausted`
 - replay caches predicate `llm_call(...)` responses so `trigger_replay(...)`
   can deterministically re-evaluate the predicate without hitting a live
   provider

@@ -768,6 +768,7 @@ fn handler_kind(handler: &CollectedTriggerHandler) -> &'static str {
         CollectedTriggerHandler::A2a { .. } => "a2a",
         CollectedTriggerHandler::Worker { .. } => "worker",
         CollectedTriggerHandler::Persona { .. } => "persona",
+        CollectedTriggerHandler::EvalPack { .. } => "eval_pack",
     }
 }
 

@@ -57,7 +57,7 @@ that agent.
 
 ## Handler URI schemes
 
-Harn currently accepts three handler forms:
+Harn currently accepts these handler forms:
 
 - local function:
   `handler = "on_event"` or `handler = "handlers::on_event"`
@@ -65,6 +65,8 @@ Harn currently accepts three handler forms:
   `handler = "a2a://reviewer.prod/triage"`
 - worker queue dispatch:
   `handler = "worker://triage-queue"`
+- eval-pack dispatch:
+  `handler = "eval_pack://nightly-regression"`
 
 Unsupported URI schemes fail fast at load time.
 
@@ -94,6 +96,15 @@ in-process HTTPS.
 That scalar priority becomes the default queue priority when the dispatcher
 enqueues the job. An explicit event header `priority` still overrides it at
 dispatch time.
+
+`eval_pack://...` handlers run an eval pack through the same
+`eval_pack_run(manifest, options?)` path as scripts. A bare target resolves by
+pack `id`, `name`, or file stem from `[package].evals` or `harn.eval.toml`; a
+path-like target resolves relative to `harn.toml`. Cron bindings use the normal
+trigger substrate, so budget, retry, DLQ, replay/cancel, dedupe, and
+concurrency controls apply before the suite runs. Optional trigger-local
+`ledger = { ... }` or `eval_options = { ... }` fields are passed as
+`eval_pack_run` options.
 
 Local handlers and predicates resolve through the same module-export plumbing as
 the manifest hook loader:

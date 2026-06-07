@@ -60,6 +60,13 @@ pub(super) fn handler_json(handler: &CollectedTriggerHandler) -> JsonValue {
             "name": binding.name,
             "entry_workflow": binding.entry_workflow,
         }),
+        CollectedTriggerHandler::EvalPack {
+            target, manifest, ..
+        } => json!({
+            "kind": "eval_pack",
+            "target": target,
+            "pack_id": manifest.id.clone(),
+        }),
     }
 }
 

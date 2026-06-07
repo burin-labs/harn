@@ -596,6 +596,9 @@ pub enum TriggerHandlerUri {
     Persona {
         name: String,
     },
+    EvalPack {
+        target: String,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1357,6 +1360,11 @@ pub enum CollectedTriggerHandler {
     },
     Persona {
         binding: harn_vm::PersonaRuntimeBinding,
+    },
+    EvalPack {
+        target: String,
+        manifest: Box<harn_vm::orchestration::EvalPackManifest>,
+        ledger_options: Option<serde_json::Value>,
     },
 }
 

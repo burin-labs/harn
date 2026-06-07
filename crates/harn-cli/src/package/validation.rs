@@ -403,6 +403,17 @@ pub(crate) fn parse_trigger_handler_uri(
             name: name.to_string(),
         });
     }
+    if let Some(target) = raw.strip_prefix("eval_pack://") {
+        if target.is_empty() {
+            return Err(trigger_error(
+                trigger,
+                "handler eval_pack:// target cannot be empty",
+            ));
+        }
+        return Ok(TriggerHandlerUri::EvalPack {
+            target: target.to_string(),
+        });
+    }
     if raw.contains("://") {
         return Err(trigger_error(
             trigger,

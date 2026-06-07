@@ -30,7 +30,9 @@ use crate::vm::Vm;
 
 use self::uri::DispatchUri;
 use super::registry::{
-    binding_autonomy_budget_would_exceed, matching_bindings, note_autonomous_decision, AgentScope,
+    binding_autonomy_budget_would_exceed, binding_budget_would_exceed, matching_bindings,
+    micros_to_usd, note_autonomous_decision, note_binding_budget_cost,
+    note_orchestrator_budget_cost, orchestrator_budget_would_exceed, usd_to_micros, AgentScope,
     TargetExpr, TriggerBinding, TriggerBudgetExhaustionStrategy, TriggerHandlerSpec,
 };
 use super::{
@@ -728,6 +730,7 @@ impl Dispatcher {
                         &route,
                         &event,
                         replay_of_event_id.as_ref(),
+                        &predicate_node_id,
                         &final_error,
                     )
                     .await?;
@@ -773,6 +776,7 @@ impl Dispatcher {
                         &route,
                         &event,
                         replay_of_event_id.as_ref(),
+                        DispatchSkipStage::Predicate,
                         evaluation.reason.as_deref().unwrap_or("budget_exhausted"),
                     )
                     .await?;
@@ -865,6 +869,20 @@ impl Dispatcher {
             }
 
             source_node_id = predicate_node_id;
+        }
+
+        if let Some(outcome) = self
+            .handle_dispatch_budget_exhaustion(
+                binding,
+                &route,
+                &event,
+                replay_of_event_id.as_ref(),
+                &source_node_id,
+                autonomy_tier,
+            )
+            .await?
+        {
+            return Ok(outcome);
         }
 
         if autonomy_tier == AutonomyTier::ActAuto {
@@ -1229,7 +1247,8 @@ impl Dispatcher {
             match result {
                 Ok(dispatch_result) => {
                     let result = dispatch_result.output;
-                    let dispatch_metadata = dispatch_result.metadata;
+                    let mut dispatch_metadata = dispatch_result.metadata;
+                    self.note_dispatch_result_cost(binding, &result, &mut dispatch_metadata);
                     let attempt_record = DispatchAttemptRecord {
                         trigger_id: binding.id.as_str().to_string(),
                         binding_key: binding.binding_key(),
@@ -1990,6 +2009,196 @@ impl Dispatcher {
         })
     }
 
+    async fn handle_dispatch_budget_exhaustion(
+        &self,
+        binding: &TriggerBinding,
+        route: &DispatchUri,
+        event: &TriggerEvent,
+        replay_of_event_id: Option<&String>,
+        source_node_id: &str,
+        autonomy_tier: AutonomyTier,
+    ) -> Result<Option<DispatchOutcome>, DispatchError> {
+        let expected_cost_usd_micros = 0;
+        let Some(reason) = binding_budget_would_exceed(binding, expected_cost_usd_micros)
+            .or_else(|| orchestrator_budget_would_exceed(expected_cost_usd_micros))
+        else {
+            return Ok(None);
+        };
+        self.append_trigger_budget_exhausted_event(
+            binding,
+            route,
+            event,
+            replay_of_event_id,
+            reason,
+            expected_cost_usd_micros,
+        )
+        .await?;
+
+        if binding.on_budget_exhausted == TriggerBudgetExhaustionStrategy::Warn {
+            return Ok(None);
+        }
+
+        match binding.on_budget_exhausted {
+            TriggerBudgetExhaustionStrategy::Fail => {
+                let final_error = format!("trigger budget exhausted: {reason}");
+                self.move_budget_exhausted_to_dlq(
+                    binding,
+                    route,
+                    event,
+                    replay_of_event_id,
+                    source_node_id,
+                    &final_error,
+                )
+                .await?;
+                finish_in_flight(
+                    binding.id.as_str(),
+                    binding.version,
+                    TriggerDispatchOutcome::Dlq,
+                )
+                .await
+                .map_err(|error| DispatchError::Registry(error.to_string()))?;
+                decrement_in_flight(&self.state);
+                self.append_dispatch_trust_record(
+                    binding,
+                    route,
+                    event,
+                    replay_of_event_id,
+                    autonomy_tier,
+                    TrustOutcome::Failure,
+                    "dlq",
+                    0,
+                    Some(final_error.clone()),
+                )
+                .await?;
+                Ok(Some(DispatchOutcome {
+                    trigger_id: binding.id.as_str().to_string(),
+                    binding_key: binding.binding_key(),
+                    event_id: event.id.0.clone(),
+                    attempt_count: 0,
+                    status: DispatchStatus::Dlq,
+                    handler_kind: route.kind().to_string(),
+                    target_uri: route.target_uri(),
+                    replay_of_event_id: replay_of_event_id.cloned(),
+                    result: None,
+                    error: Some(final_error),
+                }))
+            }
+            TriggerBudgetExhaustionStrategy::RetryLater => {
+                self.append_budget_deferred_event(
+                    binding,
+                    route,
+                    event,
+                    replay_of_event_id,
+                    DispatchSkipStage::Budget,
+                    reason,
+                )
+                .await?;
+                finish_in_flight(
+                    binding.id.as_str(),
+                    binding.version,
+                    TriggerDispatchOutcome::Dispatched,
+                )
+                .await
+                .map_err(|error| DispatchError::Registry(error.to_string()))?;
+                decrement_in_flight(&self.state);
+                self.append_dispatch_trust_record(
+                    binding,
+                    route,
+                    event,
+                    replay_of_event_id,
+                    autonomy_tier,
+                    TrustOutcome::Denied,
+                    "waiting",
+                    0,
+                    Some(reason.to_string()),
+                )
+                .await?;
+                Ok(Some(DispatchOutcome {
+                    trigger_id: binding.id.as_str().to_string(),
+                    binding_key: binding.binding_key(),
+                    event_id: event.id.0.clone(),
+                    attempt_count: 0,
+                    status: DispatchStatus::Waiting,
+                    handler_kind: route.kind().to_string(),
+                    target_uri: route.target_uri(),
+                    replay_of_event_id: replay_of_event_id.cloned(),
+                    result: Some(serde_json::json!({
+                        "deferred": true,
+                        "reason": reason,
+                    })),
+                    error: None,
+                }))
+            }
+            TriggerBudgetExhaustionStrategy::False => {
+                self.append_skipped_outbox_event(
+                    binding,
+                    route,
+                    event,
+                    replay_of_event_id,
+                    DispatchSkipStage::Budget,
+                    serde_json::json!({
+                        "budget": reason,
+                    }),
+                )
+                .await?;
+                finish_in_flight(
+                    binding.id.as_str(),
+                    binding.version,
+                    TriggerDispatchOutcome::Dispatched,
+                )
+                .await
+                .map_err(|error| DispatchError::Registry(error.to_string()))?;
+                decrement_in_flight(&self.state);
+                self.append_dispatch_trust_record(
+                    binding,
+                    route,
+                    event,
+                    replay_of_event_id,
+                    autonomy_tier,
+                    TrustOutcome::Denied,
+                    "skipped",
+                    0,
+                    Some(reason.to_string()),
+                )
+                .await?;
+                Ok(Some(DispatchOutcome {
+                    trigger_id: binding.id.as_str().to_string(),
+                    binding_key: binding.binding_key(),
+                    event_id: event.id.0.clone(),
+                    attempt_count: 0,
+                    status: DispatchStatus::Skipped,
+                    handler_kind: route.kind().to_string(),
+                    target_uri: route.target_uri(),
+                    replay_of_event_id: replay_of_event_id.cloned(),
+                    result: Some(serde_json::json!({
+                        "skipped": true,
+                        "budget": reason,
+                    })),
+                    error: None,
+                }))
+            }
+            TriggerBudgetExhaustionStrategy::Warn => Ok(None),
+        }
+    }
+
+    fn note_dispatch_result_cost(
+        &self,
+        binding: &TriggerBinding,
+        result: &serde_json::Value,
+        metadata: &mut BTreeMap<String, serde_json::Value>,
+    ) {
+        let cost_usd_micros = dispatch_result_cost_usd_micros(result);
+        if cost_usd_micros == 0 {
+            return;
+        }
+        note_binding_budget_cost(binding, cost_usd_micros);
+        note_orchestrator_budget_cost(cost_usd_micros);
+        metadata.insert(
+            "cost_usd".to_string(),
+            serde_json::json!(micros_to_usd(cost_usd_micros)),
+        );
+    }
+
     async fn dispatch_once(
         &self,
         binding: &TriggerBinding,
@@ -2137,6 +2346,32 @@ impl Dispatcher {
                     output: serde_json::to_value(receipt)
                         .map_err(|error| DispatchError::Serde(error.to_string()))?,
                     metadata: route.dispatch_boundary_metadata(),
+                })
+            }
+            DispatchUri::EvalPack { target, pack_id } => {
+                let TriggerHandlerSpec::EvalPack {
+                    manifest,
+                    ledger_options,
+                    ..
+                } = &binding.handler
+                else {
+                    return Err(DispatchError::Local(format!(
+                        "trigger '{}' resolved to an eval_pack dispatch URI but does not carry an eval_pack manifest",
+                        binding.id.as_str()
+                    )));
+                };
+                let report = crate::orchestration::evaluate_eval_pack_manifest_resumable(
+                    manifest,
+                    ledger_options.clone(),
+                )
+                .map_err(|error| DispatchError::Local(error.to_string()))?;
+                let mut metadata = route.dispatch_boundary_metadata();
+                metadata.insert("eval_pack_target".to_string(), serde_json::json!(target));
+                metadata.insert("eval_pack_id".to_string(), serde_json::json!(pack_id));
+                Ok(DispatchCallResult {
+                    output: serde_json::to_value(report)
+                        .map_err(|error| DispatchError::Serde(error.to_string()))?,
+                    metadata,
                 })
             }
             DispatchUri::AutoResume { worker_id } => {
@@ -3072,6 +3307,61 @@ impl Dispatcher {
             .await?;
         Ok(json_value_to_gate(&vm_value_to_json(&value)))
     }
+}
+
+fn dispatch_result_cost_usd_micros(result: &serde_json::Value) -> u64 {
+    for field in ["cost_usd", "costUsd", "total_cost_usd", "totalCostUsd"] {
+        if let Some(cost) = result.get(field).and_then(json_usd_micros) {
+            return cost;
+        }
+    }
+
+    let stats_rows_cost = result
+        .get("stats_rows")
+        .and_then(|rows| rows.as_array())
+        .map(|rows| {
+            rows.iter().fold(0_u64, |acc, row| {
+                acc.saturating_add(
+                    row.get("total_cost_usd")
+                        .or_else(|| row.get("totalCostUsd"))
+                        .and_then(json_usd_micros)
+                        .unwrap_or_default(),
+                )
+            })
+        })
+        .unwrap_or_default();
+    if stats_rows_cost > 0 {
+        return stats_rows_cost;
+    }
+
+    result
+        .get("cases")
+        .and_then(|cases| cases.as_array())
+        .map(|cases| {
+            cases.iter().fold(0_u64, |case_acc, case| {
+                let trial_cost = case
+                    .get("trials")
+                    .and_then(|trials| trials.as_array())
+                    .map(|trials| {
+                        trials.iter().fold(0_u64, |trial_acc, trial| {
+                            trial_acc.saturating_add(
+                                trial
+                                    .get("cost_usd")
+                                    .or_else(|| trial.get("costUsd"))
+                                    .and_then(json_usd_micros)
+                                    .unwrap_or_default(),
+                            )
+                        })
+                    })
+                    .unwrap_or_default();
+                case_acc.saturating_add(trial_cost)
+            })
+        })
+        .unwrap_or_default()
+}
+
+fn json_usd_micros(value: &serde_json::Value) -> Option<u64> {
+    value.as_f64().map(usd_to_micros)
 }
 
 #[cfg(test)]

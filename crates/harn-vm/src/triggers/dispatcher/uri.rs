@@ -36,6 +36,10 @@ pub enum DispatchUri {
     Persona {
         name: String,
     },
+    EvalPack {
+        target: String,
+        pack_id: String,
+    },
     AutoResume {
         worker_id: String,
     },
@@ -104,6 +108,17 @@ impl DispatchUri {
                 name: name.to_string(),
             });
         }
+        if let Some(target) = raw.strip_prefix("eval_pack://") {
+            if target.is_empty() {
+                return Err(DispatchUriError::MissingTarget {
+                    scheme: "eval_pack".to_string(),
+                });
+            }
+            return Ok(Self::EvalPack {
+                target: target.to_string(),
+                pack_id: target.to_string(),
+            });
+        }
         if let Some(pool) = raw.strip_prefix("pool://") {
             if pool.is_empty() {
                 return Err(DispatchUriError::MissingTarget {
@@ -130,6 +145,7 @@ impl DispatchUri {
             Self::A2a { .. } => "a2a",
             Self::Worker { .. } => "worker",
             Self::Persona { .. } => "persona",
+            Self::EvalPack { .. } => "eval_pack",
             Self::AutoResume { .. } => "auto_resume",
             Self::SpawnToPool { .. } => "spawn_to_pool",
             Self::ReminderInject { .. } => "reminder_inject",
@@ -143,6 +159,7 @@ impl DispatchUri {
             Self::A2a { target, .. } => format!("a2a://{target}"),
             Self::Worker { queue } => format!("worker://{queue}"),
             Self::Persona { name } => format!("persona://{name}"),
+            Self::EvalPack { target, .. } => format!("eval_pack://{target}"),
             Self::AutoResume { worker_id } => format!("auto_resume://{worker_id}"),
             Self::SpawnToPool { pool, .. } => format!("pool://{pool}"),
             Self::ReminderInject {
@@ -168,6 +185,7 @@ impl DispatchUri {
             Self::A2a { .. } => "federated_a2a",
             Self::Worker { .. } => "event_log_worker_queue",
             Self::Persona { .. } => "persona_runtime",
+            Self::EvalPack { .. } => "local_process",
             Self::AutoResume { .. } => "local_process",
             Self::SpawnToPool { .. } => "local_process",
             Self::ReminderInject { .. } => "local_process",
@@ -181,6 +199,7 @@ impl DispatchUri {
             Self::A2a { .. } => "remote",
             Self::Worker { .. } => "queued",
             Self::Persona { .. } => "managed_persona",
+            Self::EvalPack { .. } => "in_process",
             Self::AutoResume { .. } => "in_process",
             Self::SpawnToPool { .. } => "pool_queued",
             Self::ReminderInject { .. } => "in_process",
@@ -233,6 +252,12 @@ impl From<&TriggerHandlerSpec> for DispatchUri {
             },
             TriggerHandlerSpec::Persona { binding } => Self::Persona {
                 name: binding.name.clone(),
+            },
+            TriggerHandlerSpec::EvalPack {
+                target, manifest, ..
+            } => Self::EvalPack {
+                target: target.clone(),
+                pack_id: manifest.id.clone(),
             },
             TriggerHandlerSpec::AutoResume { worker_id } => Self::AutoResume {
                 worker_id: worker_id.clone(),

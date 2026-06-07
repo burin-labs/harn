@@ -151,12 +151,13 @@ fn generate_file() -> String {
     out.push_str("[exports]\nhandlers = \"lib.harn\"\n\n");
     out.push_str("[[triggers]]\n");
     out.push_str("id = \"github-prs\"\nkind = \"webhook\"\nprovider = \"github\"\nmatch = { path = \"/hooks/github\", events = [\"pull_request.opened\"] }\nhandler = \"handlers::on_pull_request\"\nwhen = \"handlers::should_handle\"\ndedupe_key = \"event.dedupe_key\"\nretry = { max = 7, backoff = \"svix\" }\nbudget = { daily_cost_usd = 5.00, max_concurrent = 4 }\nsecrets = { signing_secret = \"github/webhook-secret\" }\n\n");
-    out.push_str("[[triggers]]\nid = \"weekday-digest\"\nkind = \"cron\"\nprovider = \"cron\"\nschedule = \"0 9 * * 1-5\"\ntimezone = \"America/Los_Angeles\"\nhandler = \"handlers::send_digest\"\n```\n\n");
+    out.push_str("[[triggers]]\nid = \"weekday-digest\"\nkind = \"cron\"\nprovider = \"cron\"\nmatch = { events = [\"cron.tick\"] }\nschedule = \"0 9 * * 1-5\"\ntimezone = \"America/Los_Angeles\"\nhandler = \"handlers::send_digest\"\n\n");
+    out.push_str("[[triggers]]\nid = \"nightly-regression\"\nkind = \"cron\"\nprovider = \"cron\"\nmatch = { events = [\"cron.tick\"] }\nschedule = \"0 3 * * *\"\ntimezone = \"UTC\"\nhandler = \"eval_pack://scheduled-regression\"\nbudget = { daily_cost_usd = 0.25, on_budget_exhausted = \"retry_later\" }\nconcurrency = { max = 1 }\n```\n\n");
     out.push_str("Key fields: `id`, `kind`, `provider`, `handler`, `path` or `match.path`, `match.events`, `when`, `dedupe_key`, `retry`, `budget`, `secrets`, `schedule`, `timezone`, and provider-specific config tables such as `poll`.\n\n");
     out.push_str("Audit a project before deploy with `harn routes <root> --json`; it reports each declarative trigger's route path, handler module, budgets, inferred host capabilities, vendor-lock disclosure, and prompt/template overhead without executing handler code.\n\n");
 
     out.push_str("## Handler variants\n\n");
-    out.push_str("`handler:` accepts a closure (in-process), an `a2a://` or `worker://` URI string, or a handler-variant dict. The dict form covers compositions that need more than a single callable; `SpawnToPool` and `ReminderInject` ship today, more variants will plug into the same syntax over time.\n\n");
+    out.push_str("`handler:` accepts a closure (in-process), an `a2a://`, `worker://`, or `eval_pack://` URI string, or a handler-variant dict. `eval_pack://<target>` resolves a bare target from `[package].evals` by id/name/file stem or a path-like target relative to `harn.toml`, then dispatches through `eval_pack_run(manifest, options?)` under the trigger's normal budget, retry, DLQ, replay/cancel, and flow-control rules. The dict form covers compositions that need more than a single callable; `SpawnToPool` and `ReminderInject` ship today, more variants will plug into the same syntax over time.\n\n");
     out.push_str("```harn\n");
     out.push_str("import { SpawnToPool } from \"std/triggers\"\n");
     out.push_str("import { pool_create } from \"std/lifecycle/pool\"\n\n");
