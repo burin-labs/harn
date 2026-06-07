@@ -15,15 +15,16 @@
 //!   mutually exclude. This lets Harn apply an existing SQLx migration
 //!   history idempotently without forking it.
 
-use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Instant;
 
+use sqlx_core::connection::Connection;
 use sqlx_core::executor::Executor;
 use sqlx_core::row::Row;
 use sqlx_core::sql_str::AssertSqlSafe;
-use sqlx_postgres::PgPool;
+use sqlx_postgres::{PgConnection, PgPool};
 
 use crate::value::{VmError, VmValue};
 
@@ -131,27 +132,47 @@ async fn run_harn(
     let entries = discover_migrations(dir)?;
 
     let started = Instant::now();
-    acquire_lock(pool.clone(), MIGRATION_LOCK_KEY).await?;
+    // Pin a SINGLE connection for the whole run. `pg_advisory_lock` is
+    // session-scoped, so the lock, every read/write, and the unlock must run
+    // on the same backend or there is no mutual exclusion (and the unlock
+    // would no-op on a connection that never held the lock, leaking it). This
+    // mirrors sqlx-migrate, which acquires one `PoolConnection` for
+    // lock -> migrate -> unlock.
+    let mut conn = pool.acquire().await.map_err(|error| {
+        runtime_error(format!("pg_migrate: acquire connection failed: {error}"))
+    })?;
+
+    acquire_lock(&mut conn, MIGRATION_LOCK_KEY).await?;
     let result = async {
-        ensure_migrations_table(pool.clone(), table_name.clone()).await?;
-        let applied = applied_set(pool.clone(), table_name.clone()).await?;
+        ensure_migrations_table(&mut conn, &table_name).await?;
+        let applied = applied_set(&mut conn, &table_name).await?;
 
         let mut applied_now = Vec::new();
         let mut skipped = Vec::new();
-        for entry in entries.iter().cloned() {
-            if applied.contains(&entry.name) {
+        for entry in entries.iter() {
+            if let Some(existing) = applied.get(&entry.name) {
+                // Already applied: re-hash the on-disk file and compare to the
+                // recorded SHA-256 so drift (an edited migration) is caught.
+                let checksum = sha256_file(&entry.path)?;
+                if &checksum != existing {
+                    return Err(runtime_error(format!(
+                        "pg_migrate: checksum mismatch for migration {}; the \
+                         recorded checksum differs from the file on disk",
+                        entry.name
+                    )));
+                }
                 skipped.push(entry.name.clone());
                 continue;
             }
             if !dry_run {
-                apply_one(pool.clone(), table_name.clone(), entry.clone()).await?;
+                apply_one(&mut conn, &table_name, entry).await?;
             }
             applied_now.push(entry.name.clone());
         }
         Ok::<_, VmError>((applied_now, skipped))
     }
     .await;
-    release_lock(pool.clone(), MIGRATION_LOCK_KEY).await;
+    release_lock(&mut conn, MIGRATION_LOCK_KEY).await;
     let (applied_now, skipped) = result?;
 
     let available: Vec<String> = entries.iter().map(|entry| entry.name.clone()).collect();
@@ -214,7 +235,7 @@ fn discover_migrations(dir: &Path) -> Result<Vec<MigrationEntry>, VmError> {
     Ok(entries)
 }
 
-async fn ensure_migrations_table(pool: Arc<PgPool>, table: String) -> Result<(), VmError> {
+async fn ensure_migrations_table(conn: &mut PgConnection, table: &str) -> Result<(), VmError> {
     let sql = format!(
         "CREATE TABLE IF NOT EXISTS \"{table}\" (\
              name TEXT PRIMARY KEY,\
@@ -222,26 +243,34 @@ async fn ensure_migrations_table(pool: Arc<PgPool>, table: String) -> Result<(),
              checksum BYTEA NOT NULL\
          )"
     );
-    pool.as_ref()
-        .execute(AssertSqlSafe(sql))
+    conn.execute(AssertSqlSafe(sql))
         .await
         .map_err(|error| runtime_error(format!("pg_migrate: ensure table failed: {error}")))?;
     Ok(())
 }
 
-async fn applied_set(pool: Arc<PgPool>, table: String) -> Result<BTreeSet<String>, VmError> {
-    let sql = format!("SELECT name FROM \"{table}\"");
+/// Read the full ledger as `name -> stored SHA-256 checksum` so already-applied
+/// migrations can be re-hashed and checked for drift.
+async fn applied_set(
+    conn: &mut PgConnection,
+    table: &str,
+) -> Result<BTreeMap<String, Vec<u8>>, VmError> {
+    let sql = format!("SELECT name, checksum FROM \"{table}\"");
     let rows = sqlx_core::query::query::<sqlx_postgres::Postgres>(AssertSqlSafe(sql))
-        .fetch_all(pool.as_ref())
+        .fetch_all(conn)
         .await
         .map_err(|error| runtime_error(format!("pg_migrate: select applied failed: {error}")))?;
     Ok(rows
         .iter()
-        .map(|row| row.get::<String, _>(0))
-        .collect::<BTreeSet<_>>())
+        .map(|row| (row.get::<String, _>(0), row.get::<Vec<u8>, _>(1)))
+        .collect::<BTreeMap<_, _>>())
 }
 
-async fn apply_one(pool: Arc<PgPool>, table: String, entry: MigrationEntry) -> Result<(), VmError> {
+async fn apply_one(
+    conn: &mut PgConnection,
+    table: &str,
+    entry: &MigrationEntry,
+) -> Result<(), VmError> {
     let sql = std::fs::read_to_string(&entry.path).map_err(|error| {
         runtime_error(format!(
             "pg_migrate: could not read {}: {error}",
@@ -250,7 +279,9 @@ async fn apply_one(pool: Arc<PgPool>, table: String, entry: MigrationEntry) -> R
     })?;
     let checksum = sha256(&sql);
 
-    let mut tx = pool
+    // Per-migration transaction started from the pinned connection (so it runs
+    // on the same backend that holds the advisory lock).
+    let mut tx = conn
         .begin()
         .await
         .map_err(|error| runtime_error(format!("pg_migrate: begin failed: {error}")))?;
@@ -275,20 +306,52 @@ async fn apply_one(pool: Arc<PgPool>, table: String, entry: MigrationEntry) -> R
     })
 }
 
-async fn acquire_lock(pool: Arc<PgPool>, key: i64) -> Result<(), VmError> {
+/// Take the session-scoped advisory lock on the PINNED connection. Holding it
+/// on the pool would be meaningless: the next pool checkout is a different
+/// backend that never acquired the lock.
+async fn acquire_lock(conn: &mut PgConnection, key: i64) -> Result<(), VmError> {
     sqlx_core::query::query::<sqlx_postgres::Postgres>("SELECT pg_advisory_lock($1)")
         .bind(key)
-        .execute(pool.as_ref())
+        .execute(conn)
         .await
         .map_err(|error| runtime_error(format!("pg_migrate: advisory lock failed: {error}")))?;
     Ok(())
 }
 
-async fn release_lock(pool: Arc<PgPool>, key: i64) {
-    let _ = sqlx_core::query::query::<sqlx_postgres::Postgres>("SELECT pg_advisory_unlock($1)")
+/// Release the session-scoped advisory lock on the same pinned connection that
+/// took it. `pg_advisory_unlock` returns whether a lock was actually released;
+/// since the connection is pinned this is normally `true`, so a `false` (or a
+/// query error) signals something unexpected and is logged.
+async fn release_lock(conn: &mut PgConnection, key: i64) {
+    match sqlx_core::query::query::<sqlx_postgres::Postgres>("SELECT pg_advisory_unlock($1)")
         .bind(key)
-        .execute(pool.as_ref())
-        .await;
+        .fetch_optional(conn)
+        .await
+    {
+        Ok(Some(row)) => {
+            let released: bool = row.get::<bool, _>(0);
+            if !released {
+                tracing::warn!(
+                    lock_key = key,
+                    "pg_migrate: pg_advisory_unlock returned false; the advisory \
+                     lock was not held by this connection"
+                );
+            }
+        }
+        Ok(None) => {
+            tracing::warn!(
+                lock_key = key,
+                "pg_migrate: pg_advisory_unlock returned no row"
+            );
+        }
+        Err(error) => {
+            tracing::warn!(
+                lock_key = key,
+                %error,
+                "pg_migrate: releasing advisory lock failed"
+            );
+        }
+    }
 }
 
 fn sha256(text: &str) -> Vec<u8> {
@@ -296,6 +359,16 @@ fn sha256(text: &str) -> Vec<u8> {
     let mut hasher = Sha256::new();
     hasher.update(text.as_bytes());
     hasher.finalize().to_vec()
+}
+
+fn sha256_file(path: &Path) -> Result<Vec<u8>, VmError> {
+    let sql = std::fs::read_to_string(path).map_err(|error| {
+        runtime_error(format!(
+            "pg_migrate: could not read {}: {error}",
+            path.display()
+        ))
+    })?;
+    Ok(sha256(&sql))
 }
 
 fn validate_table_name(name: &str) -> Result<(), VmError> {
@@ -457,10 +530,17 @@ async fn run_sqlx(
     let migrations = discover_sqlx_migrations(dir)?;
 
     let started = Instant::now();
-    let lock_id = sqlx_lock_id(pool.clone()).await?;
-    acquire_lock(pool.clone(), lock_id).await?;
-    let result = run_sqlx_locked(pool.clone(), &table_name, dry_run, &migrations).await;
-    release_lock(pool.clone(), lock_id).await;
+    // Pin one connection for lock -> migrate -> unlock, exactly like
+    // sqlx-migrate. The advisory lock is session-scoped, so it only mutually
+    // excludes when held on the same backend that does the work.
+    let mut conn = pool.acquire().await.map_err(|error| {
+        runtime_error(format!("pg_migrate: acquire connection failed: {error}"))
+    })?;
+
+    let lock_id = sqlx_lock_id(&mut conn).await?;
+    acquire_lock(&mut conn, lock_id).await?;
+    let result = run_sqlx_locked(&mut conn, &table_name, dry_run, &migrations).await;
+    release_lock(&mut conn, lock_id).await;
     let (applied_now, skipped) = result?;
 
     let available: Vec<String> = migrations.iter().map(|m| m.name.clone()).collect();
@@ -475,15 +555,15 @@ async fn run_sqlx(
 }
 
 async fn run_sqlx_locked(
-    pool: Arc<PgPool>,
+    conn: &mut PgConnection,
     table: &str,
     dry_run: bool,
     migrations: &[SqlxMigration],
 ) -> Result<(Vec<String>, Vec<String>), VmError> {
-    ensure_sqlx_migrations_table(pool.clone(), table).await?;
+    ensure_sqlx_migrations_table(conn, table).await?;
 
     // Refuse to proceed on a dirty ledger (a failed migration).
-    if let Some(version) = sqlx_dirty_version(pool.clone(), table).await? {
+    if let Some(version) = sqlx_dirty_version(conn, table).await? {
         return Err(runtime_error(format!(
             "pg_migrate: dirty migration {version}; the ledger has a failed \
              migration recorded — resolve it before re-running"
@@ -491,7 +571,7 @@ async fn run_sqlx_locked(
     }
 
     // version -> checksum of everything already recorded.
-    let applied = sqlx_applied(pool.clone(), table).await?;
+    let applied = sqlx_applied(conn, table).await?;
 
     let mut applied_now = Vec::new();
     let mut skipped = Vec::new();
@@ -509,7 +589,7 @@ async fn run_sqlx_locked(
             continue;
         }
         if !dry_run {
-            apply_sqlx_one(pool.clone(), table, migration).await?;
+            apply_sqlx_one(conn, table, migration).await?;
         }
         applied_now.push(migration.name.clone());
     }
@@ -518,7 +598,7 @@ async fn run_sqlx_locked(
 }
 
 /// EXACT schema match for SQLx 0.9 `_sqlx_migrations`.
-async fn ensure_sqlx_migrations_table(pool: Arc<PgPool>, table: &str) -> Result<(), VmError> {
+async fn ensure_sqlx_migrations_table(conn: &mut PgConnection, table: &str) -> Result<(), VmError> {
     let sql = format!(
         "CREATE TABLE IF NOT EXISTS \"{table}\" (\
              version BIGINT PRIMARY KEY,\
@@ -529,27 +609,29 @@ async fn ensure_sqlx_migrations_table(pool: Arc<PgPool>, table: &str) -> Result<
              execution_time BIGINT NOT NULL\
          )"
     );
-    pool.as_ref()
-        .execute(AssertSqlSafe(sql))
+    conn.execute(AssertSqlSafe(sql))
         .await
         .map_err(|error| runtime_error(format!("pg_migrate: ensure sqlx table failed: {error}")))?;
     Ok(())
 }
 
-async fn sqlx_dirty_version(pool: Arc<PgPool>, table: &str) -> Result<Option<i64>, VmError> {
+async fn sqlx_dirty_version(conn: &mut PgConnection, table: &str) -> Result<Option<i64>, VmError> {
     let sql =
         format!("SELECT version FROM \"{table}\" WHERE success = false ORDER BY version LIMIT 1");
     let row = sqlx_core::query::query::<sqlx_postgres::Postgres>(AssertSqlSafe(sql))
-        .fetch_optional(pool.as_ref())
+        .fetch_optional(conn)
         .await
         .map_err(|error| runtime_error(format!("pg_migrate: dirty check failed: {error}")))?;
     Ok(row.map(|row| row.get::<i64, _>(0)))
 }
 
-async fn sqlx_applied(pool: Arc<PgPool>, table: &str) -> Result<HashMap<i64, Vec<u8>>, VmError> {
+async fn sqlx_applied(
+    conn: &mut PgConnection,
+    table: &str,
+) -> Result<HashMap<i64, Vec<u8>>, VmError> {
     let sql = format!("SELECT version, checksum FROM \"{table}\" ORDER BY version");
     let rows = sqlx_core::query::query::<sqlx_postgres::Postgres>(AssertSqlSafe(sql))
-        .fetch_all(pool.as_ref())
+        .fetch_all(conn)
         .await
         .map_err(|error| {
             runtime_error(format!("pg_migrate: select applied (sqlx) failed: {error}"))
@@ -561,7 +643,7 @@ async fn sqlx_applied(pool: Arc<PgPool>, table: &str) -> Result<HashMap<i64, Vec
 }
 
 async fn apply_sqlx_one(
-    pool: Arc<PgPool>,
+    conn: &mut PgConnection,
     table: &str,
     migration: &SqlxMigration,
 ) -> Result<(), VmError> {
@@ -579,8 +661,9 @@ async fn apply_sqlx_one(
     let start = Instant::now();
 
     if no_tx {
-        // Run the migration SQL then record it, no wrapping transaction.
-        pool.as_ref()
+        // Run the migration SQL then record it, no wrapping transaction, on
+        // the pinned connection that holds the advisory lock.
+        (&mut *conn)
             .execute(AssertSqlSafe(sql))
             .await
             .map_err(|error| {
@@ -589,9 +672,9 @@ async fn apply_sqlx_one(
                     migration.version, migration.name
                 ))
             })?;
-        sqlx_insert_row(pool.as_ref(), table, migration, &checksum).await?;
+        sqlx_insert_row(&mut *conn, table, migration, &checksum).await?;
     } else {
-        let mut tx = pool
+        let mut tx = conn
             .begin()
             .await
             .map_err(|error| runtime_error(format!("pg_migrate: begin failed: {error}")))?;
@@ -619,7 +702,7 @@ async fn apply_sqlx_one(
     sqlx_core::query::query::<sqlx_postgres::Postgres>(AssertSqlSafe(update))
         .bind(elapsed_nanos)
         .bind(migration.version)
-        .execute(pool.as_ref())
+        .execute(&mut *conn)
         .await
         .map_err(|error| {
             runtime_error(format!(
@@ -664,9 +747,9 @@ where
 /// `0x3d32ad9e * crc32_iso_hdlc(current_database())`. Computing it the same
 /// way means a Harn `pg_migrate(ledger: "sqlx")` and a concurrent
 /// `sqlx migrate run` take the SAME lock and serialize against each other.
-async fn sqlx_lock_id(pool: Arc<PgPool>) -> Result<i64, VmError> {
+async fn sqlx_lock_id(conn: &mut PgConnection) -> Result<i64, VmError> {
     let row = sqlx_core::query::query::<sqlx_postgres::Postgres>("SELECT current_database()")
-        .fetch_one(pool.as_ref())
+        .fetch_one(conn)
         .await
         .map_err(|error| {
             runtime_error(format!("pg_migrate: current_database() failed: {error}"))

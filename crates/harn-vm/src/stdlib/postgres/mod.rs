@@ -2381,6 +2381,87 @@ pg_close(db)
         });
     }
 
+    /// Harn-ledger drift detection (C-2): apply a migration, then edit the
+    /// file body on disk and re-run. The runner must re-hash the on-disk file,
+    /// see it no longer matches the recorded SHA-256, and error naming the
+    /// migration — never silently skip an edited (already-applied) file.
+    #[test]
+    fn migrate_harn_detects_checksum_drift_when_env_url_is_set() {
+        if std::env::var("HARN_TEST_POSTGRES_URL").is_err() {
+            return;
+        }
+        reset_postgres_state();
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let dir = tmp.path();
+        let migration_path = dir.join("0001_create_widgets.sql");
+        std::fs::write(
+            &migration_path,
+            "CREATE TABLE widgets (id INT PRIMARY KEY, label TEXT NOT NULL)",
+        )
+        .unwrap();
+
+        let schema = format!("harn_pg_drift_{}", uuid::Uuid::new_v4().simple());
+        let migration_dir = dir.to_string_lossy().into_owned();
+
+        // First run: apply the migration cleanly into a fresh schema. The
+        // schema persists in the shared DB for the second run below.
+        let apply_source = format!(
+            r#"
+import "std/postgres"
+
+let admin = pg_pool("env:HARN_TEST_POSTGRES_URL", {{max_connections: 1}})
+pg_execute(admin, "DROP SCHEMA IF EXISTS \"{schema}\" CASCADE", [])
+pg_execute(admin, "CREATE SCHEMA \"{schema}\"", [])
+pg_close(admin)
+
+let db = pg_pool("env:HARN_TEST_POSTGRES_URL", {{max_connections: 1}})
+pg_execute(db, "SET search_path TO \"{schema}\"", [])
+let first = pg_migrate(db, {{dir: "{migration_dir}"}})
+__io_println(len(first.applied))
+pg_close(db)
+"#,
+        );
+        let out = run_harn_source(&apply_source);
+        assert_eq!(out.trim(), "1", "first run should apply exactly one file");
+
+        // Edit the migration body on disk *after* it was recorded. A clean
+        // re-run would normally skip an already-applied file; here the changed
+        // body must trip the checksum check.
+        std::fs::write(
+            &migration_path,
+            "CREATE TABLE widgets (id INT PRIMARY KEY, label TEXT NOT NULL, extra INT)",
+        )
+        .unwrap();
+
+        let rerun_source = format!(
+            r#"
+import "std/postgres"
+
+let db = pg_pool("env:HARN_TEST_POSTGRES_URL", {{max_connections: 1}})
+pg_execute(db, "SET search_path TO \"{schema}\"", [])
+let second = pg_migrate(db, {{dir: "{migration_dir}"}})
+__io_println(len(second.applied))
+pg_close(db)
+"#,
+        );
+        let err = run_harn_source_expect_err(&rerun_source);
+        assert!(
+            err.contains("checksum mismatch") && err.contains("0001_create_widgets.sql"),
+            "expected harn checksum-mismatch error naming the migration, got: {err}"
+        );
+
+        // Clean up the scratch schema.
+        let cleanup = format!(
+            r#"
+import "std/postgres"
+let admin = pg_pool("env:HARN_TEST_POSTGRES_URL", {{max_connections: 1}})
+pg_execute(admin, "DROP SCHEMA IF EXISTS \"{schema}\" CASCADE", [])
+pg_close(admin)
+"#,
+        );
+        run_harn_source(&cleanup);
+    }
+
     /// `pg_migrate` against the canonical `harn-cloud-store/migrations/`
     /// directory. Opt-in via `HARN_TEST_CLOUD_MIGRATIONS_DIR`; verifies
     /// that the runner consumes the full ledger without errors.
