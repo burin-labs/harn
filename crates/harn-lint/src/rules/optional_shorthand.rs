@@ -443,6 +443,14 @@ impl<'a, 'd> State<'a, 'd> {
                     self.visit_shape_field(f, parent_span);
                 }
             }
+            TypeExpr::OpenShape { fields, rests } => {
+                for f in fields {
+                    self.visit_shape_field(f, parent_span);
+                }
+                for r in rests {
+                    self.visit_type(r, parent_span);
+                }
+            }
             TypeExpr::FnType {
                 params,
                 return_type,

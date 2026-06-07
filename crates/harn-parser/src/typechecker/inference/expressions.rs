@@ -18,7 +18,7 @@ use crate::builtin_signatures::BuiltinSignatureExt;
 use crate::diagnostic_codes::Code;
 use harn_lexer::{FixEdit, Span};
 
-use super::super::binary_ops::infer_binary_op_type;
+use super::super::binary_ops::{infer_binary_op_type, merge_shape_fields};
 use super::super::schema_inference::schema_type_expr_from_node;
 use super::super::scope::{builtin_return_type, InferredType, TypeScope};
 use super::super::union::simplify_union;
@@ -320,9 +320,28 @@ impl TypeChecker {
             Node::RangeExpr { .. } => Some(TypeExpr::Named("range".into())),
             Node::HitlExpr { kind, args } => Some(self.hitl_expr_inferred_type(*kind, args, scope)),
             Node::DictLiteral(entries) => {
-                // Infer shape type when all keys are string literals
-                let mut fields = Vec::new();
+                // Build the shape by folding entries left-to-right with the
+                // right-biased shape merge, so `{...base, k: v}` and
+                // `{...a, ...b}` infer the precise merged record instead of a
+                // bare `dict`. A spread of anything that isn't a statically
+                // closed shape (a `dict`, `dict<K,V>`, union, or unknown) means
+                // an unknown tail, so the result degrades to `dict` — we can't
+                // name the merged fields without open-record types.
+                let mut fields: Vec<ShapeField> = Vec::new();
                 for entry in entries {
+                    if matches!(&entry.value.node, Node::Spread(inner) if matches!(&inner.node, Node::Identifier(_) | Node::DictLiteral(_) | Node::PropertyAccess { .. } | Node::SubscriptAccess { .. } | Node::OptionalPropertyAccess { .. } | Node::FunctionCall { .. } | Node::MethodCall { .. }))
+                    {
+                        let Node::Spread(inner) = &entry.value.node else {
+                            unreachable!()
+                        };
+                        match self.infer_type(inner, scope) {
+                            Some(TypeExpr::Shape(spread_fields)) => {
+                                fields = merge_shape_fields(&fields, &spread_fields);
+                            }
+                            _ => return Some(TypeExpr::Named("dict".into())),
+                        }
+                        continue;
+                    }
                     let key = match &entry.key.node {
                         Node::StringLiteral(key) | Node::Identifier(key) => key.clone(),
                         _ => return Some(TypeExpr::Named("dict".into())),
@@ -330,11 +349,14 @@ impl TypeChecker {
                     let val_type = self
                         .infer_type(&entry.value, scope)
                         .unwrap_or_else(Self::wildcard_type);
-                    fields.push(ShapeField {
-                        name: key,
-                        type_expr: val_type,
-                        optional: false,
-                    });
+                    fields = merge_shape_fields(
+                        &fields,
+                        &[ShapeField {
+                            name: key,
+                            type_expr: val_type,
+                            optional: false,
+                        }],
+                    );
                 }
                 if !fields.is_empty() {
                     Some(TypeExpr::Shape(fields))

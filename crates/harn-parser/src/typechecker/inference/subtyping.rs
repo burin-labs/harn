@@ -17,6 +17,18 @@ use super::super::scope::{Polarity, TypeScope};
 use super::super::union::collapse_members;
 use super::super::TypeChecker;
 
+/// Whether an open record's trailing row tails are *gradual* — a `dict`,
+/// `dict<K, V>`, or `any` tail stands for unknown fields, so a required
+/// expected field absent from the known fields may still be present at
+/// runtime. An abstract row variable (a `Named` generic param) is **not**
+/// gradual: absence reasoning needs a closed, non-gradual shape.
+fn open_shape_tail_is_gradual(rests: &[TypeExpr]) -> bool {
+    rests.iter().any(|r| {
+        matches!(r, TypeExpr::DictType(..))
+            || matches!(r, TypeExpr::Named(n) if n == "dict" || n == "any" || n == "_")
+    })
+}
+
 impl TypeChecker {
     /// Check if a type satisfies an interface (Go-style implicit satisfaction).
     /// A type satisfies an interface if its impl block has all the required methods.
@@ -156,6 +168,31 @@ impl TypeChecker {
         scope: &TypeScope,
     ) -> bool {
         self.types_compatible_at(Polarity::Covariant, expected, actual, scope)
+    }
+
+    /// Check a record's explicit fields against an actual record's known
+    /// fields (the shared core of shape / open-shape subtyping). Each expected
+    /// field must be present-and-compatible, be optional, or — when missing —
+    /// be covered by a gradual actual tail. An explicit `nil` satisfies an
+    /// optional field (matching the closed-shape rule).
+    fn shape_fields_satisfied(
+        &self,
+        expected_fields: &[ShapeField],
+        actual_fields: &[ShapeField],
+        actual_tail_gradual: bool,
+        scope: &TypeScope,
+    ) -> bool {
+        expected_fields.iter().all(
+            |ef| match actual_fields.iter().find(|f| f.name == ef.name) {
+                None => ef.optional || actual_tail_gradual,
+                Some(af) => {
+                    if ef.optional && matches!(&af.type_expr, TypeExpr::Named(n) if n == "nil") {
+                        return true;
+                    }
+                    self.types_compatible(&ef.type_expr, &af.type_expr, scope)
+                }
+            },
+        )
     }
 
     /// Polarity-aware subtype check.
@@ -337,6 +374,34 @@ impl TypeChecker {
                 .any(|m| self.types_compatible(expected_type, m, scope)),
             (TypeExpr::Shape(_), TypeExpr::Named(n)) if n == "dict" => true,
             (TypeExpr::Named(n), TypeExpr::Shape(_)) if n == "dict" => true,
+            // Open records. Subtyping verifies only the EXPECTED side's
+            // explicit fields against the actual's known fields — Harn shapes
+            // are already width-subtyped, so extra actual fields (and the
+            // expected's own row tail, which absorbs them) impose nothing. A
+            // required expected field absent from the actual's known fields is
+            // accepted only when the actual carries a *gradual* tail
+            // (`dict`/`any`); an abstract row variable is not assumed to supply
+            // it (per the row-poly design: absence reasoning needs a closed
+            // non-gradual shape).
+            (TypeExpr::OpenShape { fields: ef, .. }, TypeExpr::Shape(af)) => {
+                self.shape_fields_satisfied(ef, af, false, scope)
+            }
+            (TypeExpr::Shape(ef), TypeExpr::OpenShape { fields: af, rests }) => {
+                self.shape_fields_satisfied(ef, af, open_shape_tail_is_gradual(rests), scope)
+            }
+            (TypeExpr::OpenShape { fields: ef, .. }, TypeExpr::OpenShape { fields: af, rests }) => {
+                self.shape_fields_satisfied(ef, af, open_shape_tail_is_gradual(rests), scope)
+            }
+            // Gradual map interop, mirroring the `Shape`/`dict` arms.
+            (TypeExpr::OpenShape { .. }, TypeExpr::Named(n)) if n == "dict" => true,
+            (TypeExpr::Named(n), TypeExpr::OpenShape { .. }) if n == "dict" => true,
+            (TypeExpr::OpenShape { .. }, TypeExpr::DictType(..)) => true,
+            (TypeExpr::DictType(ek, ev), TypeExpr::OpenShape { fields: af, .. }) => {
+                matches!(ek.as_ref(), TypeExpr::Named(n) if n == "string")
+                    && af
+                        .iter()
+                        .all(|f| self.types_compatible(ev, &f.type_expr, scope))
+            }
             (TypeExpr::Shape(ef), TypeExpr::Shape(af)) => ef.iter().all(|expected_field| {
                 let matched = af.iter().find(|f| f.name == expected_field.name);
                 match matched {
@@ -527,6 +592,24 @@ impl TypeChecker {
                     })
                     .collect(),
             ),
+            // Resolve aliases inside the explicit fields and the row tails, then
+            // re-fold so a tail that resolved to a concrete shape collapses into
+            // the merged record.
+            TypeExpr::OpenShape { fields, rests } => {
+                let fields = fields
+                    .iter()
+                    .map(|field| ShapeField {
+                        name: field.name.clone(),
+                        type_expr: self.resolve_alias_inner(&field.type_expr, scope, visiting),
+                        optional: field.optional,
+                    })
+                    .collect();
+                let rests = rests
+                    .iter()
+                    .map(|rest| self.resolve_alias_inner(rest, scope, visiting))
+                    .collect();
+                super::super::binary_ops::fold_open_shape(fields, rests)
+            }
             TypeExpr::List(inner) => {
                 TypeExpr::List(Box::new(self.resolve_alias_inner(inner, scope, visiting)))
             }

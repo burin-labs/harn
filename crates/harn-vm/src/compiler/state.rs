@@ -138,6 +138,17 @@ impl Compiler {
                     })
                     .collect(),
             ),
+            TypeExpr::OpenShape { fields, rests } => TypeExpr::OpenShape {
+                fields: fields
+                    .iter()
+                    .map(|field| ShapeField {
+                        name: field.name.clone(),
+                        type_expr: self.expand_alias(&field.type_expr),
+                        optional: field.optional,
+                    })
+                    .collect(),
+                rests: rests.iter().map(|r| self.expand_alias(r)).collect(),
+            },
             TypeExpr::List(inner) => TypeExpr::List(Box::new(self.expand_alias(inner))),
             TypeExpr::Iter(inner) => TypeExpr::Iter(Box::new(self.expand_alias(inner))),
             TypeExpr::Generator(inner) => TypeExpr::Generator(Box::new(self.expand_alias(inner))),
@@ -472,7 +483,8 @@ impl Compiler {
                 }
                 _ => None,
             },
-            harn_parser::TypeExpr::Shape(fields) => {
+            harn_parser::TypeExpr::Shape(fields)
+            | harn_parser::TypeExpr::OpenShape { fields, .. } => {
                 let mut properties = BTreeMap::new();
                 let mut required = Vec::new();
                 for field in fields {

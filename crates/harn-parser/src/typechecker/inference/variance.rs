@@ -223,6 +223,16 @@ impl TypeChecker {
                     self.walk_variance(decl_kind, &f.type_expr, polarity, declared, span);
                 }
             }
+            TypeExpr::OpenShape { fields, rests } => {
+                for f in fields {
+                    self.walk_variance(decl_kind, &f.type_expr, polarity, declared, span);
+                }
+                // Row tails sit in a mutable-record position, so they are
+                // invariant by default (same rule as `dict<K, V>`).
+                for r in rests {
+                    self.walk_variance(decl_kind, r, Polarity::Invariant, declared, span);
+                }
+            }
             TypeExpr::Union(members) | TypeExpr::Intersection(members) => {
                 for m in members {
                     self.walk_variance(decl_kind, m, polarity, declared, span);

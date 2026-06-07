@@ -291,13 +291,45 @@ impl Parser {
         Ok(TypeExpr::Named(name))
     }
 
-    /// Parse a shape type: `{ name: string, age: int, active?: bool }`.
+    /// True when the cursor sits on a `...` ellipsis (three `.` tokens),
+    /// used to introduce a row tail in a shape type (`{a: T, ...R}`).
+    fn at_ellipsis(&self) -> bool {
+        self.check(&TokenKind::Dot)
+            && self
+                .tokens
+                .get(self.pos + 1)
+                .is_some_and(|t| t.kind == TokenKind::Dot)
+            && self
+                .tokens
+                .get(self.pos + 2)
+                .is_some_and(|t| t.kind == TokenKind::Dot)
+    }
+
+    /// Parse a shape type: `{ name: string, age: int, active?: bool }`, or an
+    /// **open** record with one or more trailing row tails:
+    /// `{ id: string, ...R }`, `{ ...R1, ...R2 }`. A tail is `...` followed by
+    /// a type — a bare identifier is a row variable, but `...dict<string, V>`
+    /// (a gradual map tail) is also accepted.
     pub(super) fn parse_shape_type(&mut self) -> Result<TypeExpr, ParserError> {
         self.consume(&TokenKind::LBrace, "{")?;
         let mut fields = Vec::new();
+        let mut rests: Vec<TypeExpr> = Vec::new();
         self.skip_newlines();
 
         while !self.is_at_end() && !self.check(&TokenKind::RBrace) {
+            if self.at_ellipsis() {
+                self.advance();
+                self.advance();
+                self.advance();
+                let tail = self.parse_nested_type_expr("row tail")?;
+                rests.push(tail);
+                self.skip_newlines();
+                if self.check(&TokenKind::Comma) {
+                    self.advance();
+                    self.skip_newlines();
+                }
+                continue;
+            }
             // Shape field names parallel dict-literal keys: a few reserved
             // keywords (`type`, `match`, …) are common discriminant names
             // and must work in shape-type position too.
@@ -323,7 +355,11 @@ impl Parser {
         }
 
         self.consume(&TokenKind::RBrace, "}")?;
-        Ok(TypeExpr::Shape(fields))
+        if rests.is_empty() {
+            Ok(TypeExpr::Shape(fields))
+        } else {
+            Ok(TypeExpr::OpenShape { fields, rests })
+        }
     }
 }
 

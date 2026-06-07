@@ -597,6 +597,16 @@ pub enum TypeExpr {
     Intersection(Vec<TypeExpr>),
     /// A dict shape type: `{name: string, age: int, active?: bool}`.
     Shape(Vec<ShapeField>),
+    /// An **open** record / row-polymorphic shape: a set of explicit fields
+    /// plus one or more trailing **row tails** (`{id: string, ...R}`,
+    /// `{...R1, ...R2}`). Each tail in `rests` is a row variable
+    /// (`Named(rowvar)`), a gradual map tail (`dict` / `dict<string, V>`), or a
+    /// nested shape — folded left-to-right with right-biased merge once the row
+    /// variables are bound. A closed shape stays `Shape` (empty `rests`).
+    OpenShape {
+        fields: Vec<ShapeField>,
+        rests: Vec<TypeExpr>,
+    },
     /// A list type: `list<int>`.
     List(Box<TypeExpr>),
     /// A dict type with key and value types: `dict<string, int>`.

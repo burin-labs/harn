@@ -45,6 +45,19 @@ pub fn format_type(ty: &TypeExpr) -> String {
                 .collect();
             format!("{{{}}}", inner.join(", "))
         }
+        TypeExpr::OpenShape { fields, rests } => {
+            let mut parts: Vec<String> = fields
+                .iter()
+                .map(|f| {
+                    let opt = if f.optional { "?" } else { "" };
+                    format!("{}{opt}: {}", f.name, format_type(&f.type_expr))
+                })
+                .collect();
+            for rest in rests {
+                parts.push(format!("...{}", format_type(rest)));
+            }
+            format!("{{{}}}", parts.join(", "))
+        }
         TypeExpr::List(inner) => format!("list<{}>", format_type(inner)),
         TypeExpr::Iter(inner) => format!("iter<{}>", format_type(inner)),
         TypeExpr::Generator(inner) => format!("Generator<{}>", format_type(inner)),

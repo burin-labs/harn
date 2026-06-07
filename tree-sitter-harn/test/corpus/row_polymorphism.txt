@@ -1,0 +1,130 @@
+==================
+Open Record With Row Tail
+==================
+
+type T = { id: string, ...rest }
+
+---
+
+(source_file
+  (type_declaration
+    name: (identifier)
+    type: (type_annotation
+      (shape_type
+        (shape_field
+          name: (identifier)
+          type: (type_annotation
+            (identifier)))
+        (row_tail
+          type: (type_annotation
+            (identifier)))))))
+
+==================
+Row Tails Only
+==================
+
+type U = { ...R1, ...R2 }
+
+---
+
+(source_file
+  (type_declaration
+    name: (identifier)
+    type: (type_annotation
+      (shape_type
+        (row_tail
+          type: (type_annotation
+            (identifier)))
+        (row_tail
+          type: (type_annotation
+            (identifier)))))))
+
+==================
+Row Tail With Full Type
+==================
+
+type D = { a: int, ...dict<string, V> }
+
+---
+
+(source_file
+  (type_declaration
+    name: (identifier)
+    type: (type_annotation
+      (shape_type
+        (shape_field
+          name: (identifier)
+          type: (type_annotation
+            (identifier)))
+        (row_tail
+          type: (type_annotation
+            (identifier)
+            (type_annotation
+              (identifier))
+            (type_annotation
+              (identifier))))))))
+
+==================
+Row Polymorphic Function Signature
+==================
+
+fn merge2<R1, R2>(a: { ...R1 }, b: { ...R2 }) -> { ...R1, ...R2 } { return a }
+
+---
+
+(source_file
+  (fn_declaration
+    name: (identifier)
+    (generic_params
+      (generic_param
+        (identifier))
+      (generic_param
+        (identifier)))
+    (parameter_list
+      (typed_parameter
+        name: (identifier)
+        type: (type_annotation
+          (shape_type
+            (row_tail
+              type: (type_annotation
+                (identifier))))))
+      (typed_parameter
+        name: (identifier)
+        type: (type_annotation
+          (shape_type
+            (row_tail
+              type: (type_annotation
+                (identifier)))))))
+    (type_annotation
+      (shape_type
+        (row_tail
+          type: (type_annotation
+            (identifier)))
+        (row_tail
+          type: (type_annotation
+            (identifier)))))
+    body: (block
+      (return_statement
+        (identifier)))))
+
+==================
+Closed Shape Still Parses
+==================
+
+type C = { a: int, b?: string }
+
+---
+
+(source_file
+  (type_declaration
+    name: (identifier)
+    type: (type_annotation
+      (shape_type
+        (shape_field
+          name: (identifier)
+          type: (type_annotation
+            (identifier)))
+        (shape_field
+          name: (identifier)
+          type: (type_annotation
+            (identifier)))))))

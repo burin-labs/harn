@@ -16,6 +16,86 @@ fn dict_like(ty: &TypeExpr) -> bool {
         || matches!(ty, TypeExpr::Shape(_))
 }
 
+/// Right-biased structural merge of two record shapes — the type-level model
+/// of `merge(a, b)` / `{...a, ...b}` / `a + b`, where `b`'s fields override
+/// `a`'s on overlap (matching the runtime). Field rules (see the row-poly
+/// design memo §2.4):
+///
+/// - A field present on only one side carries through unchanged.
+/// - On overlap, the result is **present (required) if either side is
+///   required** (`optional = a.optional && b.optional`).
+/// - The overlap value type is `b`'s type when `b`'s field is required (`b`
+///   always overrides), otherwise `a | b` (when `b` is absent at runtime the
+///   value comes from `a`).
+///
+/// This is the precise, sound result for *closed* shapes: `merge({a:int,
+/// b:int}, {b:str, c:bool})` → `{a:int, b:str, c:bool}` — every field
+/// preserved (the carry-forward that plain subtyping/intersection can't give).
+pub(in crate::typechecker) fn merge_shape_fields(
+    left: &[ShapeField],
+    right: &[ShapeField],
+) -> Vec<ShapeField> {
+    let mut out: Vec<ShapeField> = left.to_vec();
+    for rf in right {
+        if let Some(slot) = out.iter_mut().find(|f| f.name == rf.name) {
+            slot.optional = slot.optional && rf.optional;
+            slot.type_expr = if rf.optional {
+                simplify_union(vec![slot.type_expr.clone(), rf.type_expr.clone()])
+            } else {
+                rf.type_expr.clone()
+            };
+        } else {
+            out.push(rf.clone());
+        }
+    }
+    out
+}
+
+/// Collapse an open shape (`fields` + trailing row `rests`) after the row
+/// variables have been substituted. Resolved tails that are themselves shapes
+/// are folded into the explicit fields with right-biased merge (preserving
+/// order, so later tails override earlier ones); tails that are still row
+/// variables or gradual map tails (`dict` / `dict<K,V>`) are kept as leftover
+/// tails. With no leftover tails the result is a **closed** `Shape` — this is
+/// how `merge<...R1,...R2>(…) -> {...R1, ...R2}` lands a precise merged record
+/// once both rows are bound.
+pub(in crate::typechecker) fn fold_open_shape(
+    fields: Vec<ShapeField>,
+    rests: Vec<TypeExpr>,
+) -> TypeExpr {
+    let mut acc = fields;
+    let mut leftover: Vec<TypeExpr> = Vec::new();
+    let mut work: Vec<TypeExpr> = rests;
+    let mut i = 0;
+    while i < work.len() {
+        match std::mem::replace(&mut work[i], TypeExpr::Never) {
+            TypeExpr::Shape(rf) => acc = merge_shape_fields(&acc, &rf),
+            TypeExpr::OpenShape {
+                fields: rf,
+                rests: rr,
+            } => {
+                acc = merge_shape_fields(&acc, &rf);
+                // Splice the nested open shape's own tails in-order after the
+                // current position so right-bias ordering is preserved.
+                let tail = work.split_off(i + 1);
+                work.truncate(i + 1);
+                work.extend(rr);
+                work.extend(tail);
+            }
+            other => leftover.push(other),
+        }
+        i += 1;
+    }
+    if leftover.is_empty() {
+        TypeExpr::Shape(acc)
+    } else {
+        TypeExpr::OpenShape {
+            fields: acc,
+            rests: leftover,
+        }
+    }
+}
+
 /// Infer the result type of a binary operation.
 pub(super) fn infer_binary_op_type(
     op: &str,
@@ -37,11 +117,19 @@ pub(super) fn infer_binary_op_type(
                     _ => None,
                 }
             }
+            // Two closed record shapes merge to the precise right-biased
+            // merged shape (`b` overrides `a`), instead of collapsing to a
+            // bare `dict` and losing every field type.
+            (Some(TypeExpr::Shape(l)), Some(TypeExpr::Shape(r))) => {
+                Some(TypeExpr::Shape(merge_shape_fields(l, r)))
+            }
             // dict + dict shallow-merges. Recognize parameterized and shape
             // forms so a `dict<string, V> + Shape{...}` chain (the common
             // connector/agent option-projection idiom) keeps the dict-shaped
             // typing instead of falling through to `None` and downgrading
-            // every subsequent inference step to untyped.
+            // every subsequent inference step to untyped. (A bare/parameterised
+            // dict on either side means an unknown tail, so the merged shape is
+            // not statically closed — degrade to `dict`.)
             (Some(l), Some(r)) if dict_like(l) && dict_like(r) => {
                 Some(TypeExpr::Named("dict".into()))
             }
