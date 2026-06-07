@@ -8,6 +8,15 @@ highlights live in [CHANGELOG-pre-0.6.md](CHANGELOG-pre-0.6.md).
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.8.84
+
+### Fixed
+
+- Published the native-JSON parser robustness fixes that landed on `main`
+  after the `v0.8.83` tag was cut. This patch release makes the UTF-8-safe
+  preview parser and native-JSON detection fixes available to downstream
+  `.harn-version` pins instead of requiring consumers to track Harn `main`.
+
 ## v0.8.83
 
 ### Breaking
