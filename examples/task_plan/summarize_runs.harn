@@ -104,15 +104,15 @@ fn __format_strategy_label(strategy) {
 fn __strategy_summary(records, strategy) {
   let tasks_seen = __distinct(records, "task_id")
   var rows = []
-  var pass_total = 0
+  var pass_total = 0.0
   var pass_count = 0
   var struct_total = 0
   var struct_count = 0
   var det_total = 0
   var det_count = 0
-  var validate_pass = 0
+  var validate_pass = 0.0
   var validate_total = 0
-  var workflow_pass = 0
+  var workflow_pass = 0.0
   var workflow_total = 0
   var tok_in = 0
   var tok_out = 0

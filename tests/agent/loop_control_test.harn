@@ -14,7 +14,16 @@
 import { agent_loop_control_invoke } from "std/agent/control"
 
 // Adaptive budget so the default policy (not a caller override) is consulted.
-const BUDGET = {mode: "adaptive", initial: 8, max: 50, extend_by: 4, expose_decisions: false}
+const BUDGET = {
+  mode: "adaptive",
+  initial: 8,
+  max: 50,
+  extend_by: 4,
+  expose_decisions: false,
+  wall_clock_ms: nil,
+  total_cost_usd: nil,
+  consecutive_failures: nil,
+}
 
 /**
  * Build a loop state. `remaining` is the budget headroom: the policy only
