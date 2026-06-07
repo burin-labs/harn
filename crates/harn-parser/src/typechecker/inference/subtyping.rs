@@ -527,6 +527,24 @@ impl TypeChecker {
                     })
                     .collect(),
             ),
+            // Resolve aliases inside the explicit fields and the row tails, then
+            // re-fold so a tail that resolved to a concrete shape collapses into
+            // the merged record.
+            TypeExpr::OpenShape { fields, rests } => {
+                let fields = fields
+                    .iter()
+                    .map(|field| ShapeField {
+                        name: field.name.clone(),
+                        type_expr: self.resolve_alias_inner(&field.type_expr, scope, visiting),
+                        optional: field.optional,
+                    })
+                    .collect();
+                let rests = rests
+                    .iter()
+                    .map(|rest| self.resolve_alias_inner(rest, scope, visiting))
+                    .collect();
+                super::super::binary_ops::fold_open_shape(fields, rests)
+            }
             TypeExpr::List(inner) => {
                 TypeExpr::List(Box::new(self.resolve_alias_inner(inner, scope, visiting)))
             }

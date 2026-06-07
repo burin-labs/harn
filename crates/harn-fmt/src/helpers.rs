@@ -331,6 +331,19 @@ pub(crate) fn format_type_expr(te: &TypeExpr) -> String {
             .collect::<Vec<_>>()
             .join(" & "),
         TypeExpr::Shape(fields) => format_shape_inline(fields),
+        TypeExpr::OpenShape { fields, rests } => {
+            let mut parts: Vec<String> = fields
+                .iter()
+                .map(|f| {
+                    let opt = if f.optional { "?" } else { "" };
+                    format!("{}{opt}: {}", f.name, format_type_expr(&f.type_expr))
+                })
+                .collect();
+            for rest in rests {
+                parts.push(format!("...{}", format_type_expr(rest)));
+            }
+            format!("{{{}}}", parts.join(", "))
+        }
         TypeExpr::List(inner) => {
             format!("list<{}>", format_type_expr(inner))
         }

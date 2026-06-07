@@ -665,6 +665,24 @@ impl TypeChecker {
                     })
                     .collect(),
             ),
+            // Substitute the explicit fields and each row tail, then fold:
+            // once the row variables resolve to shapes this collapses to a
+            // precise closed `Shape` (the `{...R1, ...R2}` merge result).
+            TypeExpr::OpenShape { fields, rests } => {
+                let fields = fields
+                    .iter()
+                    .map(|field| ShapeField {
+                        name: field.name.clone(),
+                        type_expr: Self::apply_type_bindings(&field.type_expr, bindings),
+                        optional: field.optional,
+                    })
+                    .collect();
+                let rests = rests
+                    .iter()
+                    .map(|rest| Self::apply_type_bindings(rest, bindings))
+                    .collect();
+                super::super::binary_ops::fold_open_shape(fields, rests)
+            }
             TypeExpr::List(inner) => {
                 TypeExpr::List(Box::new(Self::apply_type_bindings(inner, bindings)))
             }

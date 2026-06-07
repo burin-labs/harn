@@ -160,6 +160,12 @@ impl TypeChecker {
             TypeExpr::Shape(fields) => fields
                 .iter()
                 .any(|field| Self::contains_wildcard_type(&field.type_expr)),
+            TypeExpr::OpenShape { fields, rests } => {
+                fields
+                    .iter()
+                    .any(|field| Self::contains_wildcard_type(&field.type_expr))
+                    || rests.iter().any(Self::contains_wildcard_type)
+            }
             TypeExpr::List(inner)
             | TypeExpr::Iter(inner)
             | TypeExpr::Generator(inner)
@@ -192,6 +198,14 @@ impl TypeChecker {
             TypeExpr::Shape(fields) => fields
                 .iter()
                 .any(|field| Self::contains_type_param(&field.type_expr, type_params)),
+            TypeExpr::OpenShape { fields, rests } => {
+                fields
+                    .iter()
+                    .any(|field| Self::contains_type_param(&field.type_expr, type_params))
+                    || rests
+                        .iter()
+                        .any(|rest| Self::contains_type_param(rest, type_params))
+            }
             TypeExpr::List(inner)
             | TypeExpr::Iter(inner)
             | TypeExpr::Generator(inner)
@@ -233,6 +247,14 @@ impl TypeChecker {
             TypeExpr::Shape(fields) => fields
                 .iter()
                 .any(|field| self.contains_abstract_type(&field.type_expr, scope)),
+            TypeExpr::OpenShape { fields, rests } => {
+                fields
+                    .iter()
+                    .any(|field| self.contains_abstract_type(&field.type_expr, scope))
+                    || rests
+                        .iter()
+                        .any(|rest| self.contains_abstract_type(rest, scope))
+            }
             TypeExpr::List(inner)
             | TypeExpr::Iter(inner)
             | TypeExpr::Generator(inner)

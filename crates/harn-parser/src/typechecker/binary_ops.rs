@@ -51,6 +51,51 @@ pub(in crate::typechecker) fn merge_shape_fields(
     out
 }
 
+/// Collapse an open shape (`fields` + trailing row `rests`) after the row
+/// variables have been substituted. Resolved tails that are themselves shapes
+/// are folded into the explicit fields with right-biased merge (preserving
+/// order, so later tails override earlier ones); tails that are still row
+/// variables or gradual map tails (`dict` / `dict<K,V>`) are kept as leftover
+/// tails. With no leftover tails the result is a **closed** `Shape` — this is
+/// how `merge<...R1,...R2>(…) -> {...R1, ...R2}` lands a precise merged record
+/// once both rows are bound.
+pub(in crate::typechecker) fn fold_open_shape(
+    fields: Vec<ShapeField>,
+    rests: Vec<TypeExpr>,
+) -> TypeExpr {
+    let mut acc = fields;
+    let mut leftover: Vec<TypeExpr> = Vec::new();
+    let mut work: Vec<TypeExpr> = rests;
+    let mut i = 0;
+    while i < work.len() {
+        match std::mem::replace(&mut work[i], TypeExpr::Never) {
+            TypeExpr::Shape(rf) => acc = merge_shape_fields(&acc, &rf),
+            TypeExpr::OpenShape {
+                fields: rf,
+                rests: rr,
+            } => {
+                acc = merge_shape_fields(&acc, &rf);
+                // Splice the nested open shape's own tails in-order after the
+                // current position so right-bias ordering is preserved.
+                let tail = work.split_off(i + 1);
+                work.truncate(i + 1);
+                work.extend(rr);
+                work.extend(tail);
+            }
+            other => leftover.push(other),
+        }
+        i += 1;
+    }
+    if leftover.is_empty() {
+        TypeExpr::Shape(acc)
+    } else {
+        TypeExpr::OpenShape {
+            fields: acc,
+            rests: leftover,
+        }
+    }
+}
+
 /// Infer the result type of a binary operation.
 pub(super) fn infer_binary_op_type(
     op: &str,

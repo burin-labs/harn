@@ -186,7 +186,10 @@ fn matches_type_with_generics(
             VmValue::List(_) | VmValue::Generator(_) | VmValue::Stream(_) => true,
             _ => false,
         },
-        TypeExpr::Shape(fields) => match value {
+        // An open shape `{a: T, ...R}` checks its explicit fields exactly like
+        // a closed shape; the row tail just means "and possibly more fields,"
+        // which any dict already satisfies — so no extra runtime constraint.
+        TypeExpr::Shape(fields) | TypeExpr::OpenShape { fields, .. } => match value {
             VmValue::Dict(map) => fields.iter().all(|f| match map.get(&f.name) {
                 // Optional fields treat an explicit `nil` value the same as
                 // "field missing" so callers can write `{flag: nil}` to mean

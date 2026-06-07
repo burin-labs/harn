@@ -594,6 +594,14 @@ impl<'a> Linter<'a> {
                     self.record_type_expr_references(&field.type_expr);
                 }
             }
+            TypeExpr::OpenShape { fields, rests } => {
+                for field in fields {
+                    self.record_type_expr_references(&field.type_expr);
+                }
+                for rest in rests {
+                    self.record_type_expr_references(rest);
+                }
+            }
             TypeExpr::List(inner) => self.record_type_expr_references(inner),
             TypeExpr::Iter(inner) => self.record_type_expr_references(inner),
             TypeExpr::Generator(inner) => self.record_type_expr_references(inner),
