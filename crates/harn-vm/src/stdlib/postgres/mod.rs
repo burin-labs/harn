@@ -16,7 +16,8 @@ use sqlx_core::transaction::Transaction;
 use sqlx_core::type_info::TypeInfo;
 use sqlx_core::value::ValueRef;
 use sqlx_postgres::{
-    PgArguments, PgConnectOptions, PgPool, PgPoolOptions, PgQueryResult, PgRow, PgSslMode, Postgres,
+    PgArguments, PgConnectOptions, PgPool, PgPoolOptions, PgQueryResult, PgRow, PgSslMode,
+    PgTypeInfo, Postgres,
 };
 use tokio::sync::Mutex;
 
@@ -746,11 +747,19 @@ pub(super) async fn query_rows(
             let tx = tx
                 .as_mut()
                 .ok_or_else(|| runtime_error("pg_query: transaction is closed"))?;
-            let query = bind_params(query(AssertSqlSafe(sql)), params)?;
-            let rows = query
-                .fetch_all(&mut **tx)
-                .await
-                .map_err(|error| runtime_error(format!("pg_query: {error}")))?;
+            let rows = if params_have_nil(params) {
+                // describe-then-bind: learn the server-inferred parameter OIDs
+                // on the tx connection, then bind typed NULLs for the nils.
+                let oids = describe_param_oids(tx, sql, "pg_query").await?;
+                bind_params_described(sql, &oids, params)?
+                    .fetch_all(&mut **tx)
+                    .await
+            } else {
+                bind_params(query(AssertSqlSafe(sql)), params)?
+                    .fetch_all(&mut **tx)
+                    .await
+            }
+            .map_err(|error| runtime_error(format!("pg_query: {error}")))?;
             return rows.into_iter().map(row_to_value).collect();
         }
         _ => {}
@@ -759,8 +768,17 @@ pub(super) async fn query_rows(
     let record = pool_record_from_handle(target, "pg_query")?;
     let pool = pool_for_routing(&record, routing, "pg_query")?;
     let (probe, _) = enter_circuit(&record.circuit, "pg_query")?;
-    let query = bind_params(query(AssertSqlSafe(sql)), params)?;
-    let result = query.fetch_all(pool.as_ref()).await;
+    let result = if params_have_nil(params) {
+        run_described_query(&pool, sql, params, "pg_query", |q, conn| {
+            Box::pin(async move { q.fetch_all(conn).await })
+        })
+        .await
+    } else {
+        bind_params(query(AssertSqlSafe(sql)), params)?
+            .fetch_all(pool.as_ref())
+            .await
+            .map_err(|error| runtime_error(format!("pg_query: {error}")))
+    };
     match result {
         Ok(rows) => {
             record.circuit.record_success(probe);
@@ -768,7 +786,7 @@ pub(super) async fn query_rows(
         }
         Err(error) => {
             record.circuit.record_failure(probe);
-            Err(runtime_error(format!("pg_query: {error}")))
+            Err(error)
         }
     }
 }
@@ -798,17 +816,34 @@ pub(super) async fn execute_stmt(
         let tx = tx
             .as_mut()
             .ok_or_else(|| runtime_error("pg_execute: transaction is closed"))?;
-        let result = bind_params(query(AssertSqlSafe(sql)), params)?
-            .execute(&mut **tx)
-            .await
-            .map_err(|error| runtime_error(format!("pg_execute: {error}")))?;
+        let result = if params_have_nil(params) {
+            // describe-then-bind: learn the server-inferred parameter OIDs on
+            // the tx connection, then bind typed NULLs for the nils.
+            let oids = describe_param_oids(tx, sql, "pg_execute").await?;
+            bind_params_described(sql, &oids, params)?
+                .execute(&mut **tx)
+                .await
+        } else {
+            bind_params(query(AssertSqlSafe(sql)), params)?
+                .execute(&mut **tx)
+                .await
+        }
+        .map_err(|error| runtime_error(format!("pg_execute: {error}")))?;
         return Ok(query_result_value(result, started.elapsed()));
     }
     let record = pool_record_from_handle(target, "pg_execute")?;
     let (probe, _) = enter_circuit(&record.circuit, "pg_execute")?;
-    let result = bind_params(query(AssertSqlSafe(sql)), params)?
-        .execute(record.pool.as_ref())
-        .await;
+    let result = if params_have_nil(params) {
+        run_described_query(&record.pool, sql, params, "pg_execute", |q, conn| {
+            Box::pin(async move { q.execute(conn).await })
+        })
+        .await
+    } else {
+        bind_params(query(AssertSqlSafe(sql)), params)?
+            .execute(record.pool.as_ref())
+            .await
+            .map_err(|error| runtime_error(format!("pg_execute: {error}")))
+    };
     match result {
         Ok(query_result) => {
             record.circuit.record_success(probe);
@@ -816,7 +851,7 @@ pub(super) async fn execute_stmt(
         }
         Err(error) => {
             record.circuit.record_failure(probe);
-            Err(runtime_error(format!("pg_execute: {error}")))
+            Err(error)
         }
     }
 }
@@ -967,27 +1002,194 @@ fn reject_non_finite_floats(value: &VmValue) -> Result<(), VmError> {
     }
 }
 
+/// A SQL `NULL` that declares a *specific* Postgres type OID.
+///
+/// A dynamic `nil` from harn has no static Rust type, so we cannot pick a
+/// sqlx `Type` for it the way every other `VmValue` does. Binding it as
+/// `None::<String>` declares the parameter as `text` (OID 25), which is wrong
+/// in two ways:
+///
+///   * it poisons sqlx's *per-connection*, *SQL-keyed* prepared-statement
+///     cache — the first execution caches `$n = text`, so a later execution
+///     that binds a non-text value at `$n` sends binary data that no longer
+///     matches the cached parameter type (→ `invalid byte sequence ... 0x00`);
+///   * it fails outright against a non-text typed column / cast
+///     (→ `column is of type integer but expression is of type text`).
+///
+/// `TypedNull` carries the *server-described* OID for that parameter slot (see
+/// [`bind_params_described`]) so the NULL declares exactly the type a non-null
+/// value at that slot would. `encode` writes no bytes and reports `IsNull::Yes`,
+/// while `produces()` overrides the declared type to our chosen OID — matching
+/// the cached statement's parameter list and eliminating both failure modes.
+struct TypedNull(PgTypeInfo);
+
+impl sqlx_core::types::Type<Postgres> for TypedNull {
+    fn type_info() -> PgTypeInfo {
+        // Fallback only; `produces()` overrides this for the actual bind.
+        // `Void` (OID 2278) is the most neutral built-in. This is never the
+        // declared type in practice because `produces()` always returns `Some`.
+        PgTypeInfo::with_oid(sqlx_postgres::types::Oid(2278))
+    }
+
+    fn compatible(_ty: &PgTypeInfo) -> bool {
+        true
+    }
+}
+
+impl sqlx_core::encode::Encode<'_, Postgres> for TypedNull {
+    fn encode_by_ref(
+        &self,
+        _buf: &mut <Postgres as sqlx_core::database::Database>::ArgumentBuffer,
+    ) -> Result<sqlx_core::encode::IsNull, sqlx_core::error::BoxDynError> {
+        // A NULL writes no payload bytes; the buffer machinery records the
+        // `-1` length when it sees `IsNull::Yes`.
+        Ok(sqlx_core::encode::IsNull::Yes)
+    }
+
+    fn produces(&self) -> Option<PgTypeInfo> {
+        // This is the whole point: declare the parameter with the
+        // server-described OID rather than the `Type::type_info()` fallback.
+        Some(self.0.clone())
+    }
+}
+
+/// True when any bound param is a dynamic `nil`. Only these queries need the
+/// extra describe round-trip; all-non-null queries take the fast path
+/// (`bind_params`) unchanged.
+pub(super) fn params_have_nil(params: &[VmValue]) -> bool {
+    params.iter().any(|p| matches!(p, VmValue::Nil))
+}
+
+/// Bind a single `VmValue` onto a `Query`. `nil_type`, when present, is the
+/// server-described OID for *this* parameter slot and is used to bind a typed
+/// `NULL` (see [`TypedNull`]); otherwise a `nil` falls back to the legacy
+/// `None::<String>` (`text`) bind.
+fn bind_one<'q>(
+    query: Query<'q, Postgres, PgArguments>,
+    param: &'q VmValue,
+    nil_type: Option<&PgTypeInfo>,
+) -> Result<Query<'q, Postgres, PgArguments>, VmError> {
+    // Guard every param (including floats nested in the jsonb path) before it
+    // reaches sqlx, so NaN/Infinity fail cleanly rather than corrupting a
+    // float8 column or emitting invalid JSON.
+    reject_non_finite_floats(param)?;
+    Ok(match param {
+        VmValue::Nil => match nil_type {
+            Some(ty) => query.bind(TypedNull(ty.clone())),
+            None => query.bind(None::<String>),
+        },
+        VmValue::Bool(value) => query.bind(*value),
+        VmValue::Int(value) => query.bind(*value),
+        VmValue::Float(value) => query.bind(*value),
+        VmValue::String(value) => query.bind(value.to_string()),
+        VmValue::Bytes(value) => query.bind((**value).clone()),
+        VmValue::Duration(ms) => query.bind(*ms),
+        value => query.bind(sqlx_core::types::Json(vm_value_to_json(value))),
+    })
+}
+
 pub(super) fn bind_params<'q>(
     mut query: Query<'q, Postgres, PgArguments>,
     params: &'q [VmValue],
 ) -> Result<Query<'q, Postgres, PgArguments>, VmError> {
     for param in params {
-        // Guard every param (including floats nested in the jsonb path) before
-        // it reaches sqlx, so NaN/Infinity fail cleanly rather than corrupting
-        // a float8 column or emitting invalid JSON.
-        reject_non_finite_floats(param)?;
-        query = match param {
-            VmValue::Nil => query.bind(None::<String>),
-            VmValue::Bool(value) => query.bind(*value),
-            VmValue::Int(value) => query.bind(*value),
-            VmValue::Float(value) => query.bind(*value),
-            VmValue::String(value) => query.bind(value.to_string()),
-            VmValue::Bytes(value) => query.bind((**value).clone()),
-            VmValue::Duration(ms) => query.bind(*ms),
-            value => query.bind(sqlx_core::types::Json(vm_value_to_json(value))),
-        };
+        query = bind_one(query, param, None)?;
     }
     Ok(query)
+}
+
+/// Build a `query_with` bound to `sql`, encoding any dynamic `nil` as a
+/// [`TypedNull`] carrying the server-described OID for that slot (`described`).
+///
+/// Non-null params are bound by sqlx in their natural type/format, so the
+/// resulting `PgArguments` declares, per slot, either sqlx's natural type
+/// (non-null) or the described OID (nil). When this query is executed against a
+/// connection whose statement cache has *no* poisoned entry for `sql`, the
+/// `Parse` runs with exactly this self-consistent type list — eliminating both
+/// the binary-format mismatch (the OID-0 failure mode) and the text-NULL
+/// failure modes, while the concrete params keep their normal binary encodings.
+fn bind_params_described<'q>(
+    sql: &'q str,
+    described: &[PgTypeInfo],
+    params: &'q [VmValue],
+) -> Result<Query<'q, Postgres, PgArguments>, VmError> {
+    let mut query = query(AssertSqlSafe(sql));
+    for (index, param) in params.iter().enumerate() {
+        query = bind_one(query, param, described.get(index))?;
+    }
+    Ok(query)
+}
+
+/// Server-described parameter type OIDs for `sql`, obtained by preparing it on
+/// `conn` with no caller-supplied types (so Postgres infers every slot from
+/// query context). Returns one [`PgTypeInfo`] per `$n`.
+///
+/// `prepare_with` caches the *server-inferred* statement on the connection; for
+/// queries with a non-null param whose natural sqlx type differs from the
+/// inferred column type (e.g. an `i64` against an `integer`/`int4` column), that
+/// cached type list would poison a later execute. We therefore immediately
+/// [`clear_cached_statements`] so the subsequent describe-bound execute re-parses
+/// with its own self-consistent type list and caches *that*. Clearing only
+/// forces the connection's other cached statements to re-warm (correctness is
+/// never affected), and it runs solely on the nil-bearing query path.
+async fn describe_param_oids(
+    conn: &mut sqlx_postgres::PgConnection,
+    sql: &str,
+    builtin: &str,
+) -> Result<Vec<PgTypeInfo>, VmError> {
+    use sqlx_core::connection::Connection as _;
+    use sqlx_core::sql_str::SqlSafeStr as _;
+    use sqlx_core::statement::Statement as _;
+
+    let stmt = conn
+        .prepare_with(AssertSqlSafe(sql.to_string()).into_sql_str(), &[])
+        .await
+        .map_err(|error| runtime_error(format!("{builtin}: prepare failed: {error}")))?;
+    let oids = match stmt.parameters() {
+        Some(sqlx_core::Either::Left(types)) => types.to_vec(),
+        // Count-only or no parameter metadata: no per-slot OIDs to apply; the
+        // bind path will fall back to legacy text NULLs.
+        _ => Vec::new(),
+    };
+    drop(stmt);
+    conn.clear_cached_statements()
+        .await
+        .map_err(|error| runtime_error(format!("{builtin}: clear cache failed: {error}")))?;
+    Ok(oids)
+}
+
+/// Run a nil-containing query against `pool` via the describe-then-bind path on
+/// a single acquired pool connection.
+///
+/// [`describe_param_oids`] clears the connection's statement cache after the
+/// inference probe, so the describe-bound execute re-parses with its own
+/// self-consistent type list and the connection returns to the pool with the
+/// *correct* cached entry for `sql` (other entries simply re-warm — never
+/// poisoned). This work happens **only** when a `nil` is present; the
+/// all-non-null fast path never reaches here and is fully unchanged. `run`
+/// performs the actual `fetch_all`/`execute` and is generic over the result so
+/// both `pg_query` and `pg_execute` can share this flow.
+async fn run_described_query<T>(
+    pool: &PgPool,
+    sql: &str,
+    params: &[VmValue],
+    builtin: &str,
+    run: impl for<'a> FnOnce(
+        Query<'a, Postgres, PgArguments>,
+        &'a mut sqlx_postgres::PgConnection,
+    ) -> std::pin::Pin<
+        Box<dyn std::future::Future<Output = Result<T, sqlx_core::error::Error>> + Send + 'a>,
+    >,
+) -> Result<T, VmError> {
+    let mut conn = pool
+        .acquire()
+        .await
+        .map_err(|error| runtime_error(format!("{builtin}: {error}")))?;
+    let oids = describe_param_oids(&mut conn, sql, builtin).await?;
+    let query = bind_params_described(sql, &oids, params)?;
+    run(query, &mut conn)
+        .await
+        .map_err(|error| runtime_error(format!("{builtin}: {error}")))
 }
 
 pub(super) fn row_to_value(row: PgRow) -> Result<VmValue, VmError> {
@@ -3112,5 +3314,354 @@ pg_close(db)
             matches!(row.as_dict().unwrap().get("v"), Some(VmValue::Float(f)) if *f == 1.5),
             "finite float must round-trip unchanged"
         );
+    }
+
+    /// Pull the lone `v` cell out of the first row of a single-column query.
+    fn one_cell(rows: Vec<VmValue>, key: &str) -> VmValue {
+        rows.into_iter()
+            .next()
+            .and_then(|row| row.as_dict().and_then(|d| d.get(key).cloned()))
+            .unwrap_or(VmValue::Nil)
+    }
+
+    /// describe-then-bind: a bare `$n` against a typed column stores SQL NULL
+    /// instead of failing with `column is of type integer but expression is of
+    /// type text` (the `None::<String>` failure mode).
+    #[tokio::test(flavor = "current_thread")]
+    async fn nil_into_typed_columns_stores_sql_null_when_env_url_is_set() {
+        let Ok(url) = std::env::var("HARN_TEST_POSTGRES_URL") else {
+            return;
+        };
+        reset_postgres_state();
+        let handle = open_single_conn_pool(&url).await;
+
+        execute_stmt(&handle, "DROP TABLE IF EXISTS harn_pg_nil_typed", &[])
+            .await
+            .expect("drop table");
+        execute_stmt(
+            &handle,
+            "CREATE TABLE harn_pg_nil_typed (id int PRIMARY KEY, i integer, j jsonb, t text)",
+            &[],
+        )
+        .await
+        .expect("create table");
+
+        // Bare `$n` into typed columns with nils — would be rejected as
+        // "integer but expression is of type text" under the old text-NULL bind.
+        execute_stmt(
+            &handle,
+            "INSERT INTO harn_pg_nil_typed (id, i, j, t) VALUES ($1, $2, $3, $4)",
+            &[VmValue::Int(1), VmValue::Nil, VmValue::Nil, VmValue::Nil],
+        )
+        .await
+        .expect("insert bare nils into typed columns");
+
+        let rows = query_rows(
+            &handle,
+            "SELECT i, j, t, (i IS NULL) AS i_null, (j IS NULL) AS j_null FROM harn_pg_nil_typed WHERE id = 1",
+            &[],
+            QueryRouting::Primary,
+        )
+        .await
+        .expect("read back nulls");
+        let row = rows.into_iter().next().unwrap();
+        let d = row.as_dict().unwrap();
+        assert!(
+            matches!(d.get("i"), Some(VmValue::Nil)),
+            "i must be SQL NULL"
+        );
+        assert!(
+            matches!(d.get("j"), Some(VmValue::Nil)),
+            "j must be SQL NULL"
+        );
+        assert!(
+            matches!(d.get("i_null"), Some(VmValue::Bool(true))),
+            "i IS NULL must be true"
+        );
+        assert!(
+            matches!(d.get("j_null"), Some(VmValue::Bool(true))),
+            "j IS NULL must be true"
+        );
+
+        execute_stmt(&handle, "DROP TABLE harn_pg_nil_typed", &[])
+            .await
+            .expect("cleanup");
+    }
+
+    /// describe-then-bind: the cache-poisoning regression. The same SQL
+    /// (`SELECT $1::bigint`) is run NULL-first then non-null on the *same*
+    /// pooled connection. The old text-NULL bind poisoned the SQL-keyed
+    /// prepared-statement cache, so the second call failed with
+    /// `invalid byte sequence for encoding "UTF8": 0x00`.
+    #[tokio::test(flavor = "current_thread")]
+    async fn nil_then_non_null_same_sql_does_not_poison_cache_when_env_url_is_set() {
+        let Ok(url) = std::env::var("HARN_TEST_POSTGRES_URL") else {
+            return;
+        };
+        reset_postgres_state();
+        let handle = open_single_conn_pool(&url).await;
+
+        // NULL first — primes the statement cache for this SQL.
+        let first = query_rows(
+            &handle,
+            "SELECT $1::bigint AS v",
+            &[VmValue::Nil],
+            QueryRouting::Primary,
+        )
+        .await
+        .expect("null bigint bind must succeed");
+        assert!(matches!(one_cell(first, "v"), VmValue::Nil));
+
+        // Non-null int at the SAME `$1` slot on the SAME connection — must not
+        // hit the poisoned-cache 0x00 error.
+        let second = query_rows(
+            &handle,
+            "SELECT $1::bigint AS v",
+            &[VmValue::Int(42)],
+            QueryRouting::Primary,
+        )
+        .await
+        .expect("non-null bigint after null must not be poisoned");
+        assert!(matches!(one_cell(second, "v"), VmValue::Int(42)));
+
+        // And NULL again still works.
+        let third = query_rows(
+            &handle,
+            "SELECT $1::bigint AS v",
+            &[VmValue::Nil],
+            QueryRouting::Primary,
+        )
+        .await
+        .expect("null bigint again");
+        assert!(matches!(one_cell(third, "v"), VmValue::Nil));
+    }
+
+    /// describe-then-bind: mixed nil + non-null typed params in one query —
+    /// the exact shape the OID-0 ("let server infer everything") approach broke
+    /// with `incorrect binary data format in bind parameter N`. The concrete
+    /// sibling params keep their binary encodings while the nils declare the
+    /// described OID.
+    #[tokio::test(flavor = "current_thread")]
+    async fn mixed_nil_and_non_null_params_when_env_url_is_set() {
+        let Ok(url) = std::env::var("HARN_TEST_POSTGRES_URL") else {
+            return;
+        };
+        reset_postgres_state();
+        let handle = open_single_conn_pool(&url).await;
+
+        execute_stmt(&handle, "DROP TABLE IF EXISTS harn_pg_nil_mixed", &[])
+            .await
+            .expect("drop");
+        execute_stmt(
+            &handle,
+            "CREATE TABLE harn_pg_nil_mixed (id int PRIMARY KEY, a int, b text, c jsonb)",
+            &[],
+        )
+        .await
+        .expect("create");
+
+        // INSERT with [non-null id, nil a, "x" b, nil c] — mixes binary int +
+        // text + typed NULLs across slots.
+        execute_stmt(
+            &handle,
+            "INSERT INTO harn_pg_nil_mixed (id, a, b, c) VALUES ($1, $2, $3, $4)",
+            &[VmValue::Int(1), VmValue::Nil, s("x"), VmValue::Nil],
+        )
+        .await
+        .expect("mixed insert must not hit binary-format mismatch");
+
+        execute_stmt(
+            &handle,
+            "INSERT INTO harn_pg_nil_mixed (id, a, b, c) VALUES ($1, $2, $3, $4)",
+            &[
+                VmValue::Int(2),
+                VmValue::Int(7),
+                VmValue::Nil,
+                dict(&[("k", VmValue::Int(9))]),
+            ],
+        )
+        .await
+        .expect("second mixed insert");
+
+        // SELECT mixing nil + non-null int in the WHERE clause — the failing
+        // shape for OID-0.
+        let rows = query_rows(
+            &handle,
+            "SELECT id FROM harn_pg_nil_mixed WHERE (a = $1 OR $1 IS NULL) AND id > $2 ORDER BY id",
+            &[VmValue::Nil, VmValue::Int(0)],
+            QueryRouting::Primary,
+        )
+        .await
+        .expect("mixed nil + non-null WHERE must not hit binary-format mismatch");
+        let ids: Vec<i64> = rows
+            .iter()
+            .filter_map(|r| {
+                r.as_dict()
+                    .and_then(|d| d.get("id"))
+                    .and_then(VmValue::as_int)
+            })
+            .collect();
+        assert_eq!(ids, vec![1, 2], "the `$1 IS NULL` branch matches all rows");
+
+        // COALESCE with a nil + non-null fallback.
+        let coalesced = query_rows(
+            &handle,
+            "SELECT COALESCE($1::int, $2::int) AS v",
+            &[VmValue::Nil, VmValue::Int(99)],
+            QueryRouting::Primary,
+        )
+        .await
+        .expect("coalesce nil/non-null");
+        assert!(matches!(one_cell(coalesced, "v"), VmValue::Int(99)));
+
+        // CASE mixing a nil and a non-null branch.
+        let cased = query_rows(
+            &handle,
+            "SELECT CASE WHEN $1::int IS NULL THEN $2::text ELSE 'no' END AS v",
+            &[VmValue::Nil, s("was-null")],
+            QueryRouting::Primary,
+        )
+        .await
+        .expect("case nil/non-null");
+        assert_eq!(one_cell(cased, "v").display(), "was-null");
+
+        // Multi-row VALUES with mixed nil / non-null across rows and columns.
+        let multi = query_rows(
+            &handle,
+            "SELECT n, t FROM (VALUES ($1::int, $2::text), ($3::int, $4::text)) AS v(n, t) ORDER BY n NULLS LAST",
+            &[VmValue::Int(1), VmValue::Nil, VmValue::Nil, s("two")],
+            QueryRouting::Primary,
+        )
+        .await
+        .expect("multi-row VALUES mixed nil/non-null");
+        assert_eq!(multi.len(), 2);
+
+        execute_stmt(&handle, "DROP TABLE harn_pg_nil_mixed", &[])
+            .await
+            .expect("cleanup");
+    }
+
+    /// describe-then-bind: an ambiguous bare `SELECT $1` with a nil. Postgres
+    /// cannot infer a type for a lone unconstrained parameter, so it defaults
+    /// the slot to `text`; the described OID is therefore `text` and the NULL
+    /// round-trips as SQL NULL (documented expected behavior).
+    #[tokio::test(flavor = "current_thread")]
+    async fn ambiguous_bare_select_nil_when_env_url_is_set() {
+        let Ok(url) = std::env::var("HARN_TEST_POSTGRES_URL") else {
+            return;
+        };
+        reset_postgres_state();
+        let handle = open_single_conn_pool(&url).await;
+
+        let rows = query_rows(
+            &handle,
+            "SELECT $1 AS v",
+            &[VmValue::Nil],
+            QueryRouting::Primary,
+        )
+        .await
+        .expect("ambiguous bare SELECT $1 with nil must succeed as SQL NULL");
+        assert!(
+            matches!(one_cell(rows, "v"), VmValue::Nil),
+            "bare nil select returns SQL NULL"
+        );
+    }
+
+    /// Perf path: an all-non-null query still works and reuses the per-connection
+    /// SQL-keyed statement cache (no describe round-trip). We can't observe the
+    /// cache directly here, but running the identical SQL many times on a
+    /// single-connection pool exercises the cached prepared statement and must
+    /// stay correct. Also asserts a nil-containing run of the SAME SQL afterward
+    /// still works (the describe path repairs/uses the same cache entry).
+    #[tokio::test(flavor = "current_thread")]
+    async fn all_non_null_uses_cache_and_interops_with_nil_when_env_url_is_set() {
+        let Ok(url) = std::env::var("HARN_TEST_POSTGRES_URL") else {
+            return;
+        };
+        reset_postgres_state();
+        let handle = open_single_conn_pool(&url).await;
+
+        for n in 0..5_i64 {
+            let rows = query_rows(
+                &handle,
+                "SELECT $1::bigint AS v",
+                &[VmValue::Int(n)],
+                QueryRouting::Primary,
+            )
+            .await
+            .expect("all-non-null cached query");
+            assert!(matches!(one_cell(rows, "v"), VmValue::Int(v) if v == n));
+        }
+
+        // Now a nil at the same SQL (describe path) — must coexist with the
+        // already-cached all-non-null statement.
+        let null_row = query_rows(
+            &handle,
+            "SELECT $1::bigint AS v",
+            &[VmValue::Nil],
+            QueryRouting::Primary,
+        )
+        .await
+        .expect("nil after cached all-non-null runs");
+        assert!(matches!(one_cell(null_row, "v"), VmValue::Nil));
+
+        // And back to non-null once more — still fine.
+        let again = query_rows(
+            &handle,
+            "SELECT $1::bigint AS v",
+            &[VmValue::Int(123)],
+            QueryRouting::Primary,
+        )
+        .await
+        .expect("non-null again after nil");
+        assert!(matches!(one_cell(again, "v"), VmValue::Int(123)));
+    }
+
+    /// describe-then-bind inside a managed transaction: a `nil` bound through
+    /// the `HANDLE_TX` path (which describes on the tx connection rather than a
+    /// detached pool connection) must store SQL NULL and coexist with non-null
+    /// binds in the same transaction.
+    #[test]
+    fn nil_in_transaction_when_env_url_is_set() {
+        if std::env::var("HARN_TEST_POSTGRES_URL").is_err() {
+            return;
+        }
+        reset_postgres_state();
+        let source = r#"
+import "std/postgres"
+
+let db = pg_pool("env:HARN_TEST_POSTGRES_URL", {max_connections: 1})
+pg_execute(db, "DROP TABLE IF EXISTS harn_pg_tx_nil", [])
+pg_execute(db, "CREATE TABLE harn_pg_tx_nil (id int PRIMARY KEY, a int, b text)", [])
+
+pg_transaction(db, { tx ->
+  pg_execute(tx, "INSERT INTO harn_pg_tx_nil (id, a, b) VALUES ($1, $2, $3)", [1, nil, "x"])
+  pg_execute(tx, "INSERT INTO harn_pg_tx_nil (id, a, b) VALUES ($1, $2, $3)", [2, 7, nil])
+  return 0
+})
+
+let r1 = pg_query_one(db, "SELECT (a IS NULL) AS a_null, b FROM harn_pg_tx_nil WHERE id = 1", [])
+__io_println(to_string(r1.a_null) + ":" + r1.b)
+let r2 = pg_query_one(db, "SELECT a, (b IS NULL) AS b_null FROM harn_pg_tx_nil WHERE id = 2", [])
+__io_println(to_string(r2.a) + ":" + to_string(r2.b_null))
+pg_execute(db, "DROP TABLE harn_pg_tx_nil", [])
+pg_close(db)
+"#;
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        rt.block_on(async {
+            let local = tokio::task::LocalSet::new();
+            local
+                .run_until(async {
+                    let chunk = compile_source(source).expect("compile tx nil source");
+                    let mut vm = Vm::new();
+                    register_vm_stdlib(&mut vm);
+                    vm.execute(&chunk).await.expect("execute tx nil source");
+                    assert_eq!(vm.output().trim(), "true:x\n7:true");
+                })
+                .await;
+        });
     }
 }
