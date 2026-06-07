@@ -8,6 +8,162 @@ highlights live in [CHANGELOG-pre-0.6.md](CHANGELOG-pre-0.6.md).
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.8.88
+
+### Added
+
+- **Eval statistics stdlib.** Added `std/eval/stats` with deterministic
+  bootstrap confidence intervals, macro pass@1/pass^k, reliability and
+  skip/timeout breakdowns, paired delta/regression gates, routing calibration,
+  and trial aggregation for generic eval rows (#3117).
+
+- Eval packs now support trial counts, held-out split validation, deterministic
+  case and harness fingerprints, and per-case trial reliability summaries.
+
+- **Flow-sensitive type refinement now narrows reference paths and
+  `if`-expression branches, at parity with bare-variable narrowing.** Every
+  refinement form that narrowed a variable now also narrows an *identifier-
+  rooted reference path* — a chain of constant `.`/`?.` property accesses and
+  constant `[…]` subscripts (`entry.arguments`, `cfg.opts.mode`, `xs[0]`,
+  `m["k"]`):
+  - `type_of(path) == "T"`, `path != nil`, and a bare `if path` (truthiness)
+    narrow the path; a path whose type is the top type (`unknown`/`any`, e.g. a
+    `json_parse` / `llm_call` boundary field) narrows to the tested kind.
+  - `schema_is(path, S)` / `is_type(path, S)` and `path.has("k")` narrow the
+    path.
+  - A tagged-shape-union discriminant narrows the object path
+    (`o.msg.kind == "ping"` narrows `o.msg`), gated so it never mangles a
+    `dict`/`unknown` object.
+  - `match type_of(subject) { "T" -> … }` now narrows the subject — variable
+    **or** path — in each arm (previously this narrowed nothing, even for a
+    bare variable).
+  - The `unknown`-exhaustiveness lint (incomplete `type_of` chain reaching
+    `unreachable()` / `throw`) now also covers `unknown`-typed paths.
+  - An `if`/`else` used as an expression now narrows its branches like the
+    ternary, so `let xs = if type_of(p) == "list" { p } else { [] }` infers
+    `list` rather than widening back to `list?`.
+
+  Narrowing is dropped when the base variable or path is reassigned. A
+  *dynamic* subscript (`xs[i]` with a non-literal index) is intentionally never
+  narrowed — it is not a stable reference. This is a static type-checker
+  feature: the runtime is dynamically typed and `type_of` always reflects the
+  concrete value, so no runtime change is needed.
+
+### Changed
+
+- **`tool_format` is now reject-or-work-well: a bad value fails loudly instead
+  of silently degrading.** The agent-loop `tool_format` knob
+  (`agent_tool_format_resolution` in `std/agent/options`) previously accepted
+  any explicit string verbatim — a typo like `"nativ"` or a wrong value like
+  `"json"` / `"tool_use"` flowed straight through as `source: "explicit"` with
+  no warning, and every downstream branch that gates on `tool_format ==
+  "native"` read it as `false`, so the agent silently ran the text protocol.
+  Resolution now throws on any value that is not `native`, `text`, `auto`, or
+  omitted. It also rejects requesting the side the capability matrix marks
+  *impossible* for a model (`native` on a `text_only` model, or `text` on a
+  `native_only` model); pass `tool_format_override_reason` to force the marked
+  side deliberately (probe/matrix use). `*_unreliable` parity stays a
+  recoverable warning, not a hard reject.
+- **The provider-catalog validator now rejects alias `tool_format` pins that
+  the target model cannot serve.** An alias may only pin `tool_format =
+  "native"` / `"text"`, and only when the model's `tool_support` advertises
+  that side. This caught a real shipped footgun: the
+  `ollama-devstral-small-2-native` alias pinned `native` on a model the
+  capability matrix marks `native_tools = false` (`text_only`). That alias has
+  been removed — Devstral Small 2 on Ollama is text-tool-only.
+- Added a deterministic tool-calling boot-camp battery
+  (`crates/harn-vm/tests/tool_calling_bootcamp.rs`) that exercises the real
+  resolution layer across a pairwise sample of {capability-profile ×
+  requested-format × config-source} and asserts the reject-or-work-well
+  invariant with zero live LLM calls.
+
+### Fixed
+
+- **Tool-call argument grammar now accepts the code-bearing value shapes weak
+  value models naturally emit**, instead of dropping the turn to
+  parse-guidance. Three shapes from the transcript corpus now parse and
+  canonicalize back to `name({ ... })` on replay: (1) `+`-concatenated
+  string/template fragments — including the multi-line backtick template
+  literals and `` `…` + "`json:\"x\"`" + `…` `` struct-tag concatenation Go
+  forces — collapse into one string value; (2) a heredoc whose closing tag is
+  indented, misspelled, or omitted but whose call is structurally closed (a
+  trailing `})`/`)` call-tail) is implicitly terminated at that tail; and (3)
+  `=` is accepted as a synonym for `:` as the object key/value separator
+  (`{ new_body= <<EOF … }`). A flat JSON-RPC/MCP envelope
+  (`[{"name":"read","arguments":{…}}]` or a single object with `parameters`)
+  also maps to the matching call. The recover/reject boundary stays sharp: a
+  `+` with a non-string right operand, a heredoc body truncated mid-token with
+  no structural tail, an ambiguous bare-`}` code close, and prose JSON that
+  merely has a `name` key all still error loudly.
+
+- **Text tool-call parser no longer wastes a turn on narration wrapped in
+  `<tool_call>` tags.** Weak value models (DeepSeek) wrap their thinking in
+  `<assistant_prose>` *inside* a `<tool_call>` block. The parser previously
+  treated this as a malformed call, dropped it, and emitted a "could not be
+  parsed" diagnostic — costing the model its whole turn for merely narrating.
+  Such a block is now reclassified as assistant narration: the inner text is
+  preserved as prose, no tool call and no parse error are emitted, and a
+  prose-only turn surfaces to the loop as "said X but took no action" so the
+  normal no-tool-call nudge applies. If the same wrapper also carries a real
+  `name({ ... })` / nested-XML call, that call is still recovered and
+  dispatched. The allowance is scoped to a small narration allowlist
+  (`assistant_prose`, `thinking`, `reasoning`); unknown wrapped tags that look
+  like attempted calls (e.g. `<frobnicate>{...}`) are still rejected.
+
+- **Transcript compaction now honors the host `[no-compact]` pin so an agent's
+  live grounding survives a compaction pass.** Both compaction surfaces in the
+  `observation_mask` strategy — archived-window masking and kept-window
+  `clamp_tool_outputs` length-clamping — now treat any tool-output or message
+  body that contains the literal `[no-compact]` marker (emitted by the host
+  around the current file view and the just-edited window) as pinned: masking
+  preserves it verbatim and clamping leaves it intact. Previously the marker was
+  ignored, so on long sessions the model lost sight of the file it was editing,
+  then drifted, re-read, and stalled. The pin is bounded to the most recent
+  `MAX_PINNED_SEGMENTS` (3) pinned bodies — older duplicate snapshots from
+  earlier in the session compact normally — so a pin can never accumulate
+  unbounded and overflow the context window. With no pins present, compaction
+  behaves exactly as before.
+
+- **Text tool-call parser now recovers more sloppy-but-unambiguous shapes from
+  weak value models.** Building on the nested-XML wrapper acceptance, the
+  `<tool_call>` parser now also recovers: a nested XML tool tag whose inner
+  close is mismatched (`</edit_call>`) or absent and whose outer `</tool_call>`
+  is missing entirely (terminating the body at the JSON object's closing
+  brace); a missing inner close paired with a duplicate/trailing `</tool_call>`
+  (the orphan close tag is swallowed silently); and leading-dot decimal literals
+  (`.100` → `0.100`) inside an otherwise-valid `name({ ... })` argument object.
+  Recovery stays constrained to registered/implicit tool names with JSON-object
+  arguments and canonicalizes back to `<tool_call>name({ ... })</tool_call>` on
+  replay; unknown inner tags are still rejected.
+
+- **`harn providers export` / `providers validate --check-artifacts` now
+  generate the `spec/provider-catalog/*` artifacts hermetically.** Generation
+  reads only the compiled-in embedded provider config and capability matrix,
+  ignoring the developer's `~/.config/harn/providers.toml`, environment
+  overrides (`HARN_PROVIDERS_CONFIG`, `HARN_DEFAULT_PROVIDER`, `HARN_LLM_*`),
+  the process runtime-catalog overlay, and ambient thread-local user overrides.
+  Previously, artifact generation merged the effective (home/env-aware) config,
+  so a developer's personal aliases/providers could leak into the shipped
+  catalog and clean CI would then flag the artifacts as drifted. Runtime catalog
+  presentation is unchanged and still reflects the host's live configuration; an
+  explicit `--overlay` file remains honored because it is a declared,
+  reproducible input rather than ambient machine state.
+
+- **Reasoning-only turns that also call a tool no longer leak the model's
+  private chain-of-thought into the visible message channel.** OpenAI-compatible
+  normalization (both the non-streaming `normalize_openai_message_text` and the
+  streaming transport path) promoted a turn's extracted reasoning into `.text`
+  whenever the content channel was empty — intended for models that legitimately
+  answer inside the reasoning channel. But gpt-oss / harmony models route their
+  analysis channel into `reasoning_content` and emit a tool call with no
+  committed content, so that promotion surfaced their intermediate
+  chain-of-thought ("We need to inspect parser.rs first…") as the assistant
+  message. That contaminated both the user-facing transcript and the
+  transcript-mined eval grader. Promotion is now suppressed when the turn
+  carries a tool call (the tool call is the action, the reasoning is not a final
+  answer); the reasoning stays under `thinking`. Reasoning-as-answer promotion
+  on tool-call-free clean stops is unchanged.
+
 ## v0.8.87
 
 ### Added
