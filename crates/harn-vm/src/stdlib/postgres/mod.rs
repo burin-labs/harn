@@ -751,7 +751,7 @@ pub(super) async fn query_rows(
             let tx = tx
                 .as_mut()
                 .ok_or_else(|| runtime_error("pg_query: transaction is closed"))?;
-            let query = bind_params(query(AssertSqlSafe(sql)), params);
+            let query = bind_params(query(AssertSqlSafe(sql)), params)?;
             let rows = query
                 .fetch_all(&mut **tx)
                 .await
@@ -764,7 +764,7 @@ pub(super) async fn query_rows(
     let record = pool_record_from_handle(target, "pg_query")?;
     let pool = pool_for_routing(&record, routing, "pg_query")?;
     let (probe, _) = enter_circuit(&record.circuit, "pg_query")?;
-    let query = bind_params(query(AssertSqlSafe(sql)), params);
+    let query = bind_params(query(AssertSqlSafe(sql)), params)?;
     let result = query.fetch_all(pool.as_ref()).await;
     match result {
         Ok(rows) => {
@@ -803,7 +803,7 @@ pub(super) async fn execute_stmt(
         let tx = tx
             .as_mut()
             .ok_or_else(|| runtime_error("pg_execute: transaction is closed"))?;
-        let result = bind_params(query(AssertSqlSafe(sql)), params)
+        let result = bind_params(query(AssertSqlSafe(sql)), params)?
             .execute(&mut **tx)
             .await
             .map_err(|error| runtime_error(format!("pg_execute: {error}")))?;
@@ -811,7 +811,7 @@ pub(super) async fn execute_stmt(
     }
     let record = pool_record_from_handle(target, "pg_execute")?;
     let (probe, _) = enter_circuit(&record.circuit, "pg_execute")?;
-    let result = bind_params(query(AssertSqlSafe(sql)), params)
+    let result = bind_params(query(AssertSqlSafe(sql)), params)?
         .execute(record.pool.as_ref())
         .await;
     match result {
@@ -935,7 +935,7 @@ async fn apply_transaction_settings(
         let tx = tx
             .as_mut()
             .ok_or_else(|| runtime_error("pg_transaction: transaction is closed"))?;
-        bind_params(query(sql), &params)
+        bind_params(query(sql), &params)?
             .execute(&mut **tx)
             .await
             .map_err(|error| {
@@ -991,11 +991,42 @@ impl Encode<'_, Postgres> for UntypedNull {
     }
 }
 
+/// Error message for a non-finite float that can't be safely bound to Postgres.
+fn non_finite_float_error() -> VmError {
+    runtime_error(
+        "pg bind: non-finite float (NaN/Infinity) cannot be bound to a Postgres parameter",
+    )
+}
+
+/// Reject a non-finite `VmValue::Float` anywhere inside a value that will be
+/// bound. Direct `float8` binds of NaN/Infinity are legal for the column type
+/// but corrupt any downstream JSON, and a non-finite float that falls through
+/// to the jsonb (`vm_value_to_json`) path serializes to a JSON `null`
+/// (serde_json's representation of non-finite f64), silently dropping the
+/// value. We reject both up front with a clear error instead.
+fn reject_non_finite_floats(value: &VmValue) -> Result<(), VmError> {
+    match value {
+        VmValue::Float(f) if !f.is_finite() => Err(non_finite_float_error()),
+        VmValue::List(list) => list.iter().try_for_each(reject_non_finite_floats),
+        VmValue::Dict(dict) => dict.values().try_for_each(reject_non_finite_floats),
+        VmValue::StructInstance { .. } => value
+            .struct_fields_map()
+            .unwrap_or_default()
+            .values()
+            .try_for_each(reject_non_finite_floats),
+        _ => Ok(()),
+    }
+}
+
 pub(super) fn bind_params<'q>(
     mut query: Query<'q, Postgres, PgArguments>,
     params: &'q [VmValue],
-) -> Query<'q, Postgres, PgArguments> {
+) -> Result<Query<'q, Postgres, PgArguments>, VmError> {
     for param in params {
+        // Guard every param (including floats nested in the jsonb path) before
+        // it reaches sqlx, so NaN/Infinity fail cleanly rather than corrupting
+        // a float8 column or emitting invalid JSON.
+        reject_non_finite_floats(param)?;
         query = match param {
             VmValue::Nil => query.bind(UntypedNull),
             VmValue::Bool(value) => query.bind(*value),
@@ -1007,7 +1038,7 @@ pub(super) fn bind_params<'q>(
             value => query.bind(sqlx_core::types::Json(vm_value_to_json(value))),
         };
     }
-    query
+    Ok(query)
 }
 
 pub(super) fn row_to_value(row: PgRow) -> Result<VmValue, VmError> {
@@ -3145,5 +3176,108 @@ pg_close(db)
         assert_ne!(key_a, key_b, "same salt for distinct tenants");
         assert_eq!(key_none, 0, "no-tenant scope should produce zero salt");
         assert_ne!(key_a, 0);
+    }
+
+    /// `reject_non_finite_floats` must catch a non-finite float wherever it
+    /// hides — bound directly, or nested in a list/dict that takes the jsonb
+    /// path — while leaving finite floats and float-free values alone. No DB
+    /// required: this is the pure guard that `bind_params` calls per param.
+    #[test]
+    fn non_finite_float_guard_catches_direct_and_nested() {
+        // Finite scalars and collections pass.
+        assert!(reject_non_finite_floats(&VmValue::Float(1.5)).is_ok());
+        assert!(reject_non_finite_floats(&VmValue::Float(0.0)).is_ok());
+        assert!(reject_non_finite_floats(&VmValue::Int(7)).is_ok());
+        assert!(reject_non_finite_floats(&VmValue::Nil).is_ok());
+        assert!(
+            reject_non_finite_floats(&VmValue::List(std::sync::Arc::new(vec![
+                VmValue::Float(1.0),
+                VmValue::Int(2),
+            ])))
+            .is_ok()
+        );
+        assert!(reject_non_finite_floats(&dict(&[("amount", VmValue::Float(3.25))])).is_ok());
+
+        // Direct non-finite binds are rejected.
+        for bad in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            let err = reject_non_finite_floats(&VmValue::Float(bad))
+                .expect_err("non-finite float must be rejected");
+            assert!(
+                err.to_string().contains("non-finite float"),
+                "error should name the cause: {}",
+                err.to_string()
+            );
+        }
+
+        // Nested in a list (jsonb path) — rejected.
+        let list = VmValue::List(std::sync::Arc::new(vec![
+            VmValue::Int(1),
+            VmValue::Float(f64::NAN),
+        ]));
+        assert!(reject_non_finite_floats(&list).is_err());
+
+        // Nested in a dict (jsonb path) — rejected.
+        let nested = dict(&[("ratio", VmValue::Float(f64::INFINITY))]);
+        assert!(reject_non_finite_floats(&nested).is_err());
+    }
+
+    /// Live regression: binding a non-finite float must fail cleanly with the
+    /// guard's error rather than corrupting a `float8` column or emitting
+    /// invalid JSON on the jsonb path. Gated on `HARN_TEST_POSTGRES_URL`.
+    #[tokio::test(flavor = "current_thread")]
+    async fn non_finite_float_bind_errors_cleanly_when_env_url_is_set() {
+        let Ok(url) = std::env::var("HARN_TEST_POSTGRES_URL") else {
+            return;
+        };
+        reset_postgres_state();
+        let handle = open_single_conn_pool(&url).await;
+
+        // 1) Direct float8 bind of each non-finite value must error.
+        for bad in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            let err = query_rows(
+                &handle,
+                "select $1::float8 as v",
+                &[VmValue::Float(bad)],
+                QueryRouting::Primary,
+            )
+            .await
+            .expect_err("non-finite float8 bind must be rejected before sqlx");
+            assert!(
+                err.to_string().contains("non-finite float"),
+                "error should be the guard's, not a raw sqlx error: {}",
+                err.to_string()
+            );
+        }
+
+        // 2) Non-finite float nested in a jsonb-bound value must also error
+        //    (rather than silently serializing to JSON null).
+        let err = query_rows(
+            &handle,
+            "select $1::jsonb as payload",
+            &[dict(&[("ratio", VmValue::Float(f64::NAN))])],
+            QueryRouting::Primary,
+        )
+        .await
+        .expect_err("non-finite float in jsonb path must be rejected");
+        assert!(
+            err.to_string().contains("non-finite float"),
+            "jsonb path should hit the same guard: {}",
+            err.to_string()
+        );
+
+        // 3) A finite float still round-trips unchanged.
+        let row = query_rows(
+            &handle,
+            "select $1::float8 as v",
+            &[VmValue::Float(1.5)],
+            QueryRouting::Primary,
+        )
+        .await
+        .expect("finite float bind must still work")
+        .remove(0);
+        assert!(
+            matches!(row.as_dict().unwrap().get("v"), Some(VmValue::Float(f)) if *f == 1.5),
+            "finite float must round-trip unchanged"
+        );
     }
 }

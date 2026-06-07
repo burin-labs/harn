@@ -559,7 +559,7 @@ fn prune_subtree<'a>(
     pruned: &'a mut Vec<VmValue>,
 ) -> Pin<Box<dyn Future<Output = Result<(), VmError>> + Send + 'a>> {
     Box::pin(async move {
-        let rows = bind_params(query(PARTITION_CHILDREN_SQL), &[VmValue::Int(parent_oid)])
+        let rows = bind_params(query(PARTITION_CHILDREN_SQL), &[VmValue::Int(parent_oid)])?
             .fetch_all(pool)
             .await
             .map_err(|error| runtime_error(format!("{builtin}: {error}")))?;
@@ -608,7 +608,7 @@ async fn resolve_regclass_oid(
     let row = bind_params(
         query("SELECT ($1::regclass)::oid::bigint AS oid"),
         &[VmValue::String(std::sync::Arc::from(qualified))],
-    )
+    )?
     .fetch_one(pool)
     .await
     .map_err(|error| runtime_error(format!("{builtin}: {error}")))?;
@@ -628,7 +628,7 @@ async fn existing_partition_names(
              WHERE inh.inhparent = ($1::regclass)::oid",
         ),
         &[VmValue::String(std::sync::Arc::from(qualified))],
-    )
+    )?
     .fetch_all(pool)
     .await
     .map_err(|error| runtime_error(format!("{builtin}: {error}")))?;
@@ -755,7 +755,7 @@ async fn rows_to_list(
     params: &[VmValue],
     builtin: &'static str,
 ) -> Result<VmValue, VmError> {
-    let rows = bind_params(query(AssertSqlSafe(sql)), params)
+    let rows = bind_params(query(AssertSqlSafe(sql)), params)?
         .fetch_all(pool)
         .await
         .map_err(|error| runtime_error(format!("{builtin}: {error}")))?;
