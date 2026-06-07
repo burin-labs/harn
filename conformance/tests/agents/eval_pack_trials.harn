@@ -1,0 +1,75 @@
+import "std/eval/stats"
+
+fn completed_run(id: string) -> dict {
+  return {
+    _type: "workflow_run",
+    id: id,
+    workflow_id: "workflow_1",
+    task: "demo",
+    status: "completed",
+    usage: {
+      total_duration_ms: 1000,
+      total_cost: 0.25,
+      input_tokens: 3,
+      output_tokens: 4,
+      call_count: 1,
+      models: ["mock"],
+    },
+    replay_fixture: {_type: "replay_fixture", expected_status: "completed", stage_assertions: []},
+  }
+}
+
+fn pack(expected_status: string) -> dict {
+  let pass_run = completed_run("run_pass")
+  let fail_run = completed_run("run_fail") + {status: "failed"}
+  return {
+    id: "trial-pack",
+    trials: 3,
+    metadata: {model: "mock-model", tool_format: "native-json", pipeline_rev: "rev-a"},
+    split: {tune: ["pass-case"], holdout: ["fail-case"]},
+    fixtures: [
+      {id: "pass-run", kind: "run-record", inline: pass_run},
+      {id: "fail-run", kind: "run-record", inline: fail_run},
+    ],
+    rubrics: [
+      {id: "status", kind: "deterministic", assertions: [{kind: "run-status", expected: expected_status}]},
+    ],
+    cases: [
+      {id: "pass-case", run: "pass-run", rubrics: ["status"], metadata: {group: "smoke"}},
+      {id: "fail-case", run: "fail-run", rubrics: ["status"], metadata: {group: "smoke"}},
+    ],
+  }
+}
+
+pipeline test(_task) {
+  let manifest = eval_pack_manifest(pack("completed"))
+  assert_eq(manifest.trials, 3)
+  assert(manifest.cases[0].case_fingerprint != "", "case fingerprint is stamped")
+  assert(
+    manifest.cases[0].case_fingerprint
+      == eval_pack_manifest(pack("completed")).cases[0].case_fingerprint,
+  )
+  assert(
+    manifest.cases[0].case_fingerprint
+      != eval_pack_manifest(pack("failed")).cases[0].case_fingerprint,
+  )
+  let split = eval_pack_validate_split(manifest)
+  assert_eq(split.valid, true)
+  assert_eq(split.covered_count, 2)
+  let report = eval_pack_run(manifest)
+  assert_eq(report.trial_count, 6)
+  assert_eq(report.harness_config_fingerprint, report.cases[0].harness_config_fingerprint)
+  assert_eq(report.cases[0].trial_count, 3)
+  assert_eq(report.cases[0].split, "tune")
+  assert_eq(report.cases[0].reliability.status, "all-pass")
+  assert_eq(report.cases[0].stats_row.passes, 3)
+  assert_eq(report.cases[1].split, "holdout")
+  assert_eq(report.cases[1].reliability.status, "all-fail")
+  assert_eq(report.cases[1].stats_row.fails, 3)
+  assert_eq(report.stats.macro_pass_at_1, 0.5)
+  assert_eq(len(report.stats_rows), 2)
+  let baseline = [report.stats_rows[0]]
+  let mismatch = [report.stats_rows[0] + {harness_config_fingerprint: "other-config"}]
+  assert_eq(paired_case_deltas(baseline, mismatch), [])
+  log("eval pack trials ok")
+}

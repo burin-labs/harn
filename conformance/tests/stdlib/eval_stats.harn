@@ -47,11 +47,18 @@ pipeline test(task) {
   assert_eq(aggregate.skips, 1)
   assert_eq(aggregate.timeouts, 1)
   assert_eq(aggregate.status, "FLAKY")
+  assert_eq(aggregate.harness_config_fingerprint, nil)
   assert_eq(aggregate.majority, "FAIL")
   assert_eq(aggregate.pass_rate, 0.25)
   assert_eq(aggregate.mean_wall_time_seconds, 15.0)
   assert_eq(aggregate.stdev_wall_time_seconds, 11.18)
   assert_eq(aggregate.total_cost_usd, 1.2)
+  let aggregate_with_harness = aggregate_trials(
+    "agg-harness",
+    [{verification: "PASS", wallTimeSeconds: 1.0}],
+    {harnessConfigFingerprint: "cfg-1"},
+  )
+  assert_eq(aggregate_with_harness.harness_config_fingerprint, "cfg-1")
   let power_two_values = [0, 1, 0, 1, 0, 1, 0, 1, 1, 0, 1, 0, 1, 0, 1, 0]
   let ci = bootstrap_mean_ci(power_two_values, 200, 0.05, 12345)
   assert_eq(ci, bootstrap_mean_ci(power_two_values, 200, 0.05, 12345))
@@ -65,6 +72,15 @@ pipeline test(task) {
     row("case-b", "python", 2, 4, 0, 0, 1.0) + {case_fingerprint: "b"},
   ]
   assert_eq(paired_case_deltas(baseline, current), [1.0, 0.5])
+  let harness_baseline = [
+    row("case-a", "python", 0, 4, 0, 0, 1.0)
+      + {case_fingerprint: "a", harness_config_fingerprint: "cfg-a"},
+  ]
+  let harness_current = [
+    row("case-a", "python", 4, 4, 0, 0, 1.0)
+      + {case_fingerprint: "a", harness_config_fingerprint: "cfg-b"},
+  ]
+  assert_eq(paired_case_deltas(harness_baseline, harness_current), [])
   let delta = paired_delta_report(baseline, current, 200, 99)
   assert(delta.improved)
   assert_eq(delta.status, "improved")

@@ -465,7 +465,8 @@ Deterministic eval-meter statistics over generic row dictionaries. Rows are
 identified by `name`/`case_name`, grouped by `group`, and scored from
 `passes`, `trials`, `skips`, `timeouts`, `wallTimeSeconds`, and `costUsd`.
 Existing ledger aliases such as `pass_rate`, `case_fingerprint`, and
-`total_cost_usd` are accepted when present.
+`harness_config_fingerprint` are accepted when present. Paired comparisons skip
+rows whose case or harness-config fingerprints are incompatible.
 
 | Function | Description |
 |---|---|

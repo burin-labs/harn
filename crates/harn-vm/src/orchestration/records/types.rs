@@ -411,6 +411,8 @@ pub struct EvalPackManifest {
     pub description: Option<String>,
     pub base_dir: Option<String>,
     pub baseline: Option<String>,
+    pub trials: usize,
+    pub split: Option<EvalPackSplit>,
     pub package: Option<EvalPackPackage>,
     pub defaults: EvalPackDefaults,
     pub fixtures: Vec<EvalPackFixtureRef>,
@@ -419,6 +421,13 @@ pub struct EvalPackManifest {
     pub cases: Vec<EvalPackCase>,
     pub ladders: Vec<PersonaEvalLadderManifest>,
     pub metadata: BTreeMap<String, serde_json::Value>,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct EvalPackSplit {
+    #[serde(flatten)]
+    pub partitions: BTreeMap<String, Vec<String>>,
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
@@ -540,6 +549,14 @@ pub struct EvalPackCase {
     pub compare_to: Option<String>,
     pub rubrics: Vec<String>,
     pub severity: Option<String>,
+    pub trials: Option<usize>,
+    #[serde(
+        default,
+        alias = "case-fingerprint",
+        alias = "caseFingerprint",
+        alias = "fingerprint"
+    )]
+    pub case_fingerprint: String,
     pub thresholds: EvalPackThresholds,
     pub metadata: BTreeMap<String, serde_json::Value>,
 }
@@ -548,6 +565,7 @@ pub struct EvalPackCase {
 #[serde(default)]
 pub struct EvalPackReport {
     pub pack_id: String,
+    pub harness_config_fingerprint: String,
     pub pass: bool,
     pub total: usize,
     pub passed: usize,
@@ -555,16 +573,45 @@ pub struct EvalPackReport {
     pub blocking_failed: usize,
     pub warning_failed: usize,
     pub informational_failed: usize,
+    pub trial_count: usize,
+    pub split: Option<EvalPackSplitValidationReport>,
+    pub stats: EvalPackStatsReport,
+    pub stats_rows: Vec<EvalPackStatsRow>,
     pub cases: Vec<EvalPackCaseReport>,
     pub ladders: Vec<PersonaEvalLadderReport>,
 }
 
-#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
 #[serde(default)]
 pub struct EvalPackCaseReport {
     pub id: String,
     pub label: String,
     pub severity: String,
+    pub split: Option<String>,
+    pub case_fingerprint: String,
+    pub harness_config_fingerprint: String,
+    pub pass: bool,
+    pub blocking: bool,
+    pub run_id: String,
+    pub workflow_id: String,
+    pub source_path: Option<String>,
+    pub stage_count: usize,
+    pub trial_count: usize,
+    pub total_stage_count: usize,
+    pub reliability: EvalPackReliabilityReport,
+    pub stats_row: EvalPackStatsRow,
+    pub trials: Vec<EvalPackTrialReport>,
+    pub failures: Vec<String>,
+    pub warnings: Vec<String>,
+    pub informational: Vec<String>,
+    pub comparison: Option<RunDiffReport>,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct EvalPackTrialReport {
+    pub trial: usize,
+    pub verification: String,
     pub pass: bool,
     pub blocking: bool,
     pub run_id: String,
@@ -575,6 +622,82 @@ pub struct EvalPackCaseReport {
     pub warnings: Vec<String>,
     pub informational: Vec<String>,
     pub comparison: Option<RunDiffReport>,
+    pub timed_out: bool,
+    pub wall_time_seconds: f64,
+    pub cost_usd: f64,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct EvalPackReliabilityReport {
+    pub status: String,
+    pub trials: usize,
+    pub passes: usize,
+    pub fails: usize,
+    pub skips: usize,
+    pub timeouts: usize,
+    pub decided: usize,
+    pub pass_rate: f64,
+    pub majority: Option<String>,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct EvalPackStatsRow {
+    pub name: String,
+    pub case_name: String,
+    pub case_fingerprint: String,
+    pub harness_config_fingerprint: String,
+    pub group: String,
+    pub split: Option<String>,
+    pub trials: usize,
+    pub passes: usize,
+    pub fails: usize,
+    pub skips: usize,
+    pub timeouts: usize,
+    pub pass_rate: f64,
+    pub status: String,
+    pub majority: Option<String>,
+    pub wall_time_seconds: f64,
+    pub cost_usd: f64,
+    pub mean_wall_time_seconds: f64,
+    pub stdev_wall_time_seconds: f64,
+    pub total_cost_usd: f64,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct EvalPackStatsReport {
+    pub macro_pass_at_1: f64,
+    pub reliability: EvalPackReliabilityBreakdown,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct EvalPackReliabilityBreakdown {
+    pub all_pass_cases: usize,
+    pub flaky_cases: usize,
+    pub all_fail_cases: usize,
+    pub no_decision_cases: usize,
+    pub total_cases: usize,
+    pub all_pass_fraction: f64,
+    pub flaky_fraction: f64,
+    pub all_fail_fraction: f64,
+    pub no_decision_fraction: f64,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct EvalPackSplitValidationReport {
+    pub valid: bool,
+    pub partitions: BTreeMap<String, Vec<String>>,
+    pub case_count: usize,
+    pub covered_count: usize,
+    pub duplicate_case_ids: Vec<String>,
+    pub duplicate_partition_cases: Vec<String>,
+    pub overlap_cases: Vec<String>,
+    pub unknown_cases: Vec<String>,
+    pub missing_cases: Vec<String>,
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]

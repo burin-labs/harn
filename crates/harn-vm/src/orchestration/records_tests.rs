@@ -77,6 +77,166 @@ expected = "completed"
 }
 
 #[test]
+fn eval_pack_trials_split_and_stats_rows() {
+    let temp = tempfile::tempdir().unwrap();
+    let pass_path = temp.path().join("pass.json");
+    fs::write(
+        &pass_path,
+        serde_json::to_string(&minimal_run("completed")).unwrap(),
+    )
+    .unwrap();
+    let fail_path = temp.path().join("fail.json");
+    fs::write(
+        &fail_path,
+        serde_json::to_string(&minimal_run("failed")).unwrap(),
+    )
+    .unwrap();
+    let pack_path = temp.path().join("harn.eval.toml");
+    fs::write(
+        &pack_path,
+        r#"
+version = 1
+id = "trial-pack"
+trials = 3
+
+[split]
+tune = ["pass-case"]
+holdout = ["fail-case"]
+
+[[cases]]
+id = "pass-case"
+run = "pass.json"
+rubrics = ["status"]
+
+[[cases]]
+id = "fail-case"
+run = "fail.json"
+rubrics = ["status"]
+
+[[rubrics]]
+id = "status"
+kind = "deterministic"
+
+[[rubrics.assertions]]
+kind = "run-status"
+expected = "completed"
+"#,
+    )
+    .unwrap();
+
+    let manifest = load_eval_pack_manifest(&pack_path).unwrap();
+    let split = validate_eval_pack_split(&manifest).unwrap();
+    assert_eq!(split.covered_count, 2);
+    assert_eq!(manifest.trials, 3);
+    assert!(manifest.cases[0].case_fingerprint.len() >= 16);
+
+    let report = evaluate_eval_pack_manifest(&manifest).unwrap();
+
+    assert!(!report.pass);
+    assert_eq!(report.trial_count, 6);
+    assert_eq!(report.stats_rows.len(), 2);
+    assert_eq!(report.cases[0].trial_count, 3);
+    assert_eq!(report.cases[0].split.as_deref(), Some("tune"));
+    assert_eq!(report.cases[0].reliability.status, "all-pass");
+    assert_eq!(report.cases[0].stats_row.passes, 3);
+    assert_eq!(report.cases[1].split.as_deref(), Some("holdout"));
+    assert_eq!(report.cases[1].reliability.status, "all-fail");
+    assert_eq!(report.cases[1].stats_row.fails, 3);
+    assert_eq!(report.stats.macro_pass_at_1, 0.5);
+}
+
+#[test]
+fn eval_pack_split_validation_rejects_duplicate_overlap_unknown_and_missing() {
+    let pack = serde_json::json!({
+        "id": "bad-split",
+        "split": {
+            "tune": ["a", "a", "b"],
+            "holdout": ["b", "ghost"]
+        },
+        "cases": [
+            {"id": "a", "run": "a.json"},
+            {"id": "b", "run": "b.json"},
+            {"id": "c", "run": "c.json"}
+        ]
+    });
+    let manifest =
+        normalize_eval_pack_manifest_value(&crate::stdlib::json_to_vm_value(&pack)).unwrap();
+    let error = validate_eval_pack_split(&manifest).unwrap_err();
+    let message = error.to_string();
+
+    assert!(message.contains("duplicate partition entries: tune:a"));
+    assert!(message.contains("overlapping cases:"));
+    assert!(message.contains("b:"));
+    assert!(message.contains("holdout"));
+    assert!(message.contains("tune"));
+    assert!(message.contains("unknown cases: holdout:ghost"));
+    assert!(message.contains("missing cases: c"));
+}
+
+#[test]
+fn eval_pack_case_fingerprint_is_stable_and_verification_sensitive() {
+    let base = serde_json::json!({
+        "id": "fingerprints",
+        "fixtures": [
+            {
+                "id": "fixture",
+                "kind": "replay",
+                "inline": {
+                    "_type": "replay_fixture",
+                    "expected_status": "completed",
+                    "stage_assertions": []
+                }
+            }
+        ],
+        "rubrics": [
+            {
+                "id": "status",
+                "kind": "deterministic",
+                "assertions": [{"kind": "run-status", "expected": "completed"}]
+            }
+        ],
+        "cases": [{"id": "case", "run": "run.json", "fixture": "fixture", "rubrics": ["status"]}]
+    });
+    let changed = serde_json::json!({
+        "id": "fingerprints",
+        "fixtures": [
+            {
+                "id": "fixture",
+                "kind": "replay",
+                "inline": {
+                    "_type": "replay_fixture",
+                    "expected_status": "completed",
+                    "stage_assertions": []
+                }
+            }
+        ],
+        "rubrics": [
+            {
+                "id": "status",
+                "kind": "deterministic",
+                "assertions": [{"kind": "run-status", "expected": "failed"}]
+            }
+        ],
+        "cases": [{"id": "case", "run": "run.json", "fixture": "fixture", "rubrics": ["status"]}]
+    });
+    let base_manifest =
+        normalize_eval_pack_manifest_value(&crate::stdlib::json_to_vm_value(&base)).unwrap();
+    let same_manifest =
+        normalize_eval_pack_manifest_value(&crate::stdlib::json_to_vm_value(&base)).unwrap();
+    let changed_manifest =
+        normalize_eval_pack_manifest_value(&crate::stdlib::json_to_vm_value(&changed)).unwrap();
+
+    assert_eq!(
+        base_manifest.cases[0].case_fingerprint,
+        same_manifest.cases[0].case_fingerprint
+    );
+    assert_ne!(
+        base_manifest.cases[0].case_fingerprint,
+        changed_manifest.cases[0].case_fingerprint
+    );
+}
+
+#[test]
 fn eval_pack_warning_case_does_not_block() {
     let temp = tempfile::tempdir().unwrap();
     let run_path = temp.path().join("run.json");

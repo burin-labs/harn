@@ -6231,6 +6231,36 @@ eval-pack runtime data model as TOML packs. A top-level `baseline` field acts
 as a default `compare_to` path for cases that do not specify their own
 baseline.
 
+Eval-pack manifests may set `trials = N` to repeat each case evaluation `N`
+times. A case may override the manifest default with its own `trials` value.
+The runner records every trial under `report.cases[*].trials`, summarizes the
+distribution in `report.cases[*].reliability`, and emits generic stats rows in
+`report.stats_rows` with `passes`, `fails`, `trials`, `case_fingerprint`, and
+`harness_config_fingerprint` fields. `report.stats.macro_pass_at_1` is the
+uniform-case-weighted pass-rate mean over decided cases.
+
+Each normalized case carries `case_fingerprint`, a deterministic SHA-256 prefix
+over the case contract: task source, expected output references, resolved
+rubrics, comparison target, thresholds, severity, and case metadata. The report
+also carries `harness_config_fingerprint`, a deterministic hash over the
+manifest-level harness configuration such as model, prompt/tool-format,
+pipeline revision metadata, package data, and judge configuration. Paired eval
+statistics compare rows only when both the case and harness fingerprints are
+compatible.
+
+Manifests may declare named partitions with a `split` block:
+
+```toml
+[split]
+tune = ["case-a", "case-b"]
+holdout = ["case-c"]
+```
+
+`eval_pack_validate_split(manifest)` rejects duplicate case ids, duplicate
+partition entries, overlapping partitions, unknown case ids, and under-covered
+splits. `eval_pack_run(manifest)` performs the same validation before running
+cases.
+
 An `eval_pack` block may include ordinary Harn statements and one
 `summarize { ... }` block. These statements run when the declaration is
 executed in script or block position, with the binding name, `id`, `version`,
@@ -6244,8 +6274,9 @@ trigger eval side effects.
 `std/eval/stats` provides pure, deterministic eval-meter statistics over
 generic row dictionaries. A row should carry `passes`, `trials`, `skips`,
 `timeouts`, `wallTimeSeconds`, `costUsd`, and `group`; `name` or `case_name`
-identifies the case, and `case_fingerprint`/`caseFingerprint` may be supplied
-to reject non-comparable paired rows. Ledger aliases such as `pass_rate`,
+identifies the case, and `case_fingerprint`/`caseFingerprint` plus
+`harness_config_fingerprint`/`harnessConfigFingerprint` may be supplied to
+reject non-comparable paired rows. Ledger aliases such as `pass_rate`,
 `total_cost_usd`, and `agent_lane_escalated` are accepted when present.
 
 The module exposes:

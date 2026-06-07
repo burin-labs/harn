@@ -150,6 +150,20 @@ fn __row_fingerprint(row: dict) -> string {
   return __text(__field(row, ["case_fingerprint", "caseFingerprint", "fingerprint"]))
 }
 
+fn __row_harness_fingerprint(row: dict) -> string {
+  return __text(
+    __field(
+      row,
+      [
+        "harness_config_fingerprint",
+        "harnessConfigFingerprint",
+        "harness_fingerprint",
+        "harnessFingerprint",
+      ],
+    ),
+  )
+}
+
 fn __group_prefix(name: string) -> string {
   let parts = split(name ?? "", "-")
   if len(parts) == 0 {
@@ -252,7 +266,11 @@ fn __unique_rows_by_case(rows: list) -> list {
 fn __fingerprints_match(lhs: dict, rhs: dict) -> bool {
   let left = __row_fingerprint(lhs)
   let right = __row_fingerprint(rhs)
-  return left == "" || right == "" || left == right
+  let case_matches = left == "" || right == "" || left == right
+  let left_harness = __row_harness_fingerprint(lhs)
+  let right_harness = __row_harness_fingerprint(rhs)
+  let harness_matches = left_harness == "" || right_harness == "" || left_harness == right_harness
+  return case_matches && harness_matches
 }
 
 fn __lcg_next(state: int) -> int {
@@ -351,10 +369,16 @@ pub fn aggregate_trials(name: string, outcomes: list, metadata: dict = {}) -> di
   let stdev_cost = __stdev_or_nil(costs)
   let group = __text(metadata?.group ?? metadata?.language ?? "")
   let case_fingerprint = metadata?.caseFingerprint ?? metadata?.case_fingerprint ?? nil
+  let harness_config_fingerprint = metadata?.harnessConfigFingerprint
+    ?? metadata?.harness_config_fingerprint
+    ?? metadata?.harnessFingerprint
+    ?? metadata?.harness_fingerprint
+    ?? nil
   return {
     name: name,
     case_name: name,
     case_fingerprint: case_fingerprint,
+    harness_config_fingerprint: harness_config_fingerprint,
     group: group,
     trials: trials,
     passes: pass_count,
@@ -680,19 +704,15 @@ pub fn paired_case_deltas(baseline_rows: list, current_rows: list) -> list {
   var baseline = {}
   for row in __decided_rows(baseline_rows) {
     let name = __row_case_name(row)
-    baseline = baseline
-      + {[name]: {pass_rate: __row_pass_rate(row), case_fingerprint: __row_fingerprint(row)}}
+    baseline = baseline + {[name]: row}
   }
   var deltas = []
   for row in __decided_rows(current_rows) {
     let name = __row_case_name(row)
     let base = baseline[name]
-    let base_fingerprint = __text(base?.case_fingerprint)
-    let current_fingerprint = __row_fingerprint(row)
-    let comparable = base != nil
-      && (base_fingerprint == "" || current_fingerprint == "" || base_fingerprint == current_fingerprint)
+    let comparable = base != nil && __fingerprints_match(base, row)
     if comparable {
-      deltas = deltas + [__row_pass_rate(row) - __float(base.pass_rate)]
+      deltas = deltas + [__row_pass_rate(row) - __row_pass_rate(base)]
     }
   }
   return deltas
