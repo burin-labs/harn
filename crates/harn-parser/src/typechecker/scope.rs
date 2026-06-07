@@ -100,6 +100,14 @@ pub(super) struct TypeScope {
     /// Variables that have been narrowed by flow-sensitive refinement.
     /// Maps var name → pre-narrowing type (used to restore on reassignment).
     pub(super) narrowed_vars: BTreeMap<String, InferredType>,
+    /// Flow-narrowed *reference paths* — identifier-rooted property chains
+    /// like `entry.arguments` or `cfg.opts.mode`. Maps a canonical dotted key
+    /// to the narrowing directive that the property-access type inference
+    /// re-applies to the path's natural type. Keyed by `.`-joined segments,
+    /// which can never collide with a plain variable name (identifiers never
+    /// contain `.`). Optional (`?.`) and plain (`.`) links collapse to the
+    /// same key — the runtime guard inspects the same value either way.
+    pub(super) narrowed_paths: BTreeMap<String, PathNarrowing>,
     /// Mutable vars declared as unannotated `var x = nil`. A local `false`
     /// entry shadows a parent widenable marker after a new declaration or
     /// after the first successful widening assignment.
@@ -171,6 +179,7 @@ impl TypeScope {
             where_constraints: BTreeMap::new(),
             mutable_vars: std::collections::BTreeSet::new(),
             narrowed_vars: BTreeMap::new(),
+            narrowed_paths: BTreeMap::new(),
             nil_widenable_vars: BTreeMap::new(),
             schema_bindings: BTreeMap::new(),
             untyped_sources: BTreeMap::new(),
@@ -246,6 +255,7 @@ impl TypeScope {
             where_constraints: BTreeMap::new(),
             mutable_vars: std::collections::BTreeSet::new(),
             narrowed_vars: BTreeMap::new(),
+            narrowed_paths: BTreeMap::new(),
             nil_widenable_vars: BTreeMap::new(),
             schema_bindings: BTreeMap::new(),
             untyped_sources: BTreeMap::new(),
@@ -449,6 +459,30 @@ impl TypeScope {
         self.narrowed_vars.clear();
     }
 
+    /// Record a flow narrowing for a reference path (`entry.arguments`).
+    pub(super) fn set_narrowed_path(&mut self, key: &str, narrowing: PathNarrowing) {
+        self.narrowed_paths.insert(key.to_string(), narrowing);
+    }
+
+    /// Look up the narrowing directive for a reference path, walking the
+    /// lexical scope chain (a child entry masks a parent's).
+    pub(super) fn get_narrowed_path(&self, key: &str) -> Option<&PathNarrowing> {
+        self.narrowed_paths
+            .get(key)
+            .or_else(|| self.parent.as_ref()?.get_narrowed_path(key))
+    }
+
+    /// Drop every path narrowing rooted at `base` (used on reassignment of the
+    /// base variable, which may invalidate any path that reads through it).
+    /// Only the current scope is touched — mirroring `narrowed_vars` rollback,
+    /// which is likewise current-scope-scoped, since narrowings are applied
+    /// into the same branch scope they are invalidated from.
+    pub(super) fn clear_narrowed_paths_rooted_at(&mut self, base: &str) {
+        let prefix = format!("{base}.");
+        self.narrowed_paths
+            .retain(|key, _| key != base && !key.starts_with(&prefix));
+    }
+
     pub(super) fn define_var_mutable(&mut self, name: &str, ty: InferredType) {
         if is_discard_name(name) {
             return;
@@ -544,6 +578,26 @@ impl TypeScope {
     }
 }
 
+/// A flow-narrowing directive for a reference *path* (`entry.arguments`).
+///
+/// Unlike variable narrowing — which stores a resolved [`TypeExpr`] keyed by
+/// name — path narrowing is deferred: we record only *how* to narrow, and the
+/// property-access type inference re-applies it to the path's freshly computed
+/// natural type at every read. Deferring keeps refinement extraction free of
+/// `&self` (it never needs to project a property type), and re-deriving from
+/// the natural type each read keeps the result correct even as the base
+/// variable's own type is narrowed by other guards in the same flow.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) enum PathNarrowing {
+    /// Keep only the union members whose runtime `type_of` equals this tag
+    /// (the truthy branch of `type_of(path) == "tag"`).
+    Keep(String),
+    /// Remove the union members whose runtime `type_of` equals this tag
+    /// (the falsy branch of `type_of(path) == "tag"`, and — with tag `"nil"`
+    /// — the truthy branch of `path != nil`).
+    Remove(String),
+}
+
 /// Bidirectional type refinements extracted from a condition.
 /// Each path contains a list of (variable_name, narrowed_type) pairs.
 #[derive(Debug, Clone, Default)]
@@ -552,6 +606,10 @@ pub(super) struct Refinements {
     pub(super) truthy: Vec<(String, InferredType)>,
     /// Narrowings when the condition evaluates to false/falsy.
     pub(super) falsy: Vec<(String, InferredType)>,
+    /// Reference-path narrowings on the truthy branch (see [`PathNarrowing`]).
+    pub(super) truthy_paths: Vec<(String, PathNarrowing)>,
+    /// Reference-path narrowings on the falsy branch.
+    pub(super) falsy_paths: Vec<(String, PathNarrowing)>,
     /// Concrete `type_of` variants (var_name, type_name) to add to the
     /// ruled-out coverage set on the truthy branch. Only populated for
     /// `type_of(x) != "T"` patterns against `unknown`-typed values.
@@ -567,11 +625,25 @@ impl Refinements {
         Self::default()
     }
 
+    /// Whether this carries no narrowing on either branch — variable, path, or
+    /// ruled-out. Used by the condition dispatch to decide whether a more
+    /// specific extractor matched before trying the next one.
+    pub(super) fn is_empty(&self) -> bool {
+        self.truthy.is_empty()
+            && self.falsy.is_empty()
+            && self.truthy_paths.is_empty()
+            && self.falsy_paths.is_empty()
+            && self.truthy_ruled_out.is_empty()
+            && self.falsy_ruled_out.is_empty()
+    }
+
     /// Swap truthy and falsy (used for negation).
     pub(super) fn inverted(self) -> Self {
         Self {
             truthy: self.falsy,
             falsy: self.truthy,
+            truthy_paths: self.falsy_paths,
+            falsy_paths: self.truthy_paths,
             truthy_ruled_out: self.falsy_ruled_out,
             falsy_ruled_out: self.truthy_ruled_out,
         }
@@ -580,6 +652,9 @@ impl Refinements {
     /// Apply the truthy-branch narrowings and ruled-out additions to `scope`.
     pub(super) fn apply_truthy(&self, scope: &mut TypeScope) {
         apply_refinements(scope, &self.truthy);
+        for (key, narrowing) in &self.truthy_paths {
+            scope.set_narrowed_path(key, narrowing.clone());
+        }
         for (var, ty) in &self.truthy_ruled_out {
             scope.add_unknown_ruled_out(var, ty);
         }
@@ -588,6 +663,9 @@ impl Refinements {
     /// Apply the falsy-branch narrowings and ruled-out additions to `scope`.
     pub(super) fn apply_falsy(&self, scope: &mut TypeScope) {
         apply_refinements(scope, &self.falsy);
+        for (key, narrowing) in &self.falsy_paths {
+            scope.set_narrowed_path(key, narrowing.clone());
+        }
         for (var, ty) in &self.falsy_ruled_out {
             scope.add_unknown_ruled_out(var, ty);
         }

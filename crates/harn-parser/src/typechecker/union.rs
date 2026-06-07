@@ -141,16 +141,36 @@ pub(super) fn narrow_to_single(members: &[TypeExpr], target: &str) -> InferredTy
     collapse_members_opt(matched, TypeExpr::Union)
 }
 
-/// Extract the variable name from a `type_of(x)` call.
-pub(super) fn extract_type_of_var(node: &SNode) -> Option<String> {
+/// Extract the single argument node of a `type_of(...)` call. The caller
+/// decides whether the subject is a bare identifier (variable narrowing) or a
+/// stable property path like `entry?.arguments` (path narrowing).
+pub(super) fn extract_type_of_arg(node: &SNode) -> Option<&SNode> {
     if let Node::FunctionCall { name, args, .. } = &node.node {
         if name == "type_of" && args.len() == 1 {
-            if let Node::Identifier(var) = &args[0].node {
-                return Some(var.clone());
-            }
+            return Some(&args[0]);
         }
     }
     None
+}
+
+/// Build the canonical dotted key for an identifier-rooted reference path:
+/// `a` → `"a"`, `a.b` / `a?.b` → `"a.b"`, `cfg.opts.mode` → `"cfg.opts.mode"`.
+///
+/// Optional (`?.`) and plain (`.`) property links produce the same key — they
+/// address the same runtime value, so a guard on one narrows reads of the
+/// other. Returns `None` for anything that isn't a chain of constant property
+/// accesses rooted at a bare identifier (subscripts, method calls, computed
+/// keys), since those are not stable references we can re-narrow soundly.
+pub(super) fn reference_path_key(node: &SNode) -> Option<String> {
+    match &node.node {
+        Node::Identifier(name) => Some(name.clone()),
+        Node::PropertyAccess { object, property }
+        | Node::OptionalPropertyAccess { object, property } => {
+            let base = reference_path_key(object)?;
+            Some(format!("{base}.{property}"))
+        }
+        _ => None,
+    }
 }
 
 /// Width subtyping for `Shape ∩ Shape`. Pulled out of `intersect_types`

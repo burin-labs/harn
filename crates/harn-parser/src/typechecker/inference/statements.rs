@@ -1037,6 +1037,31 @@ impl TypeChecker {
         }
     }
 
+    /// Root identifier of an assignment target that is a property/subscript
+    /// path (`o.a`, `o.a[i]`, `o?.a`). Returns `None` for a bare identifier
+    /// target (handled separately) or an unrooted target.
+    fn assignment_target_root(target: &SNode) -> Option<&str> {
+        match &target.node {
+            Node::PropertyAccess { object, .. }
+            | Node::OptionalPropertyAccess { object, .. }
+            | Node::SubscriptAccess { object, .. }
+            | Node::OptionalSubscriptAccess { object, .. } => {
+                let mut cur = object;
+                loop {
+                    match &cur.node {
+                        Node::Identifier(name) => return Some(name.as_str()),
+                        Node::PropertyAccess { object, .. }
+                        | Node::OptionalPropertyAccess { object, .. }
+                        | Node::SubscriptAccess { object, .. }
+                        | Node::OptionalSubscriptAccess { object, .. } => cur = object,
+                        _ => return None,
+                    }
+                }
+            }
+            _ => None,
+        }
+    }
+
     pub(in crate::typechecker) fn check_node(&mut self, snode: &SNode, scope: &mut TypeScope) {
         let span = snode.span;
         match &snode.node {
@@ -1625,6 +1650,14 @@ impl TypeChecker {
                     }
                     scope.define_schema_binding(name, None);
                     scope.clear_unknown_ruled_out(name);
+                    // Reassigning the base drops any path narrowing that read
+                    // through it (`entry.arguments` is stale once `entry` is).
+                    scope.clear_narrowed_paths_rooted_at(name);
+                } else if let Some(base) = Self::assignment_target_root(target) {
+                    // Mutating a path (`entry.arguments = ...`, `o.a[i] = ...`)
+                    // can invalidate any narrowing rooted at the same base, so
+                    // conservatively drop them all.
+                    scope.clear_narrowed_paths_rooted_at(base);
                 }
             }
 

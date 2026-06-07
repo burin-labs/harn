@@ -108,6 +108,14 @@ impl<'a> TsValueParser<'a> {
             b'n' => self.parse_null(),
             b'u' => self.parse_undefined(),
             b'-' | b'0'..=b'9' => self.parse_number(),
+            // Leading-dot decimals (`.100`) are not valid JSON/TS, but weak value
+            // models (notably OpenRouter DeepSeek) emit them inside tool-call
+            // argument objects. Recover `.NNN` as `0.NNN`. Scoped to tool-call
+            // argument parsing only — `TsValueParser` is private to the tools
+            // module and is never used for general document parsing.
+            b'.' if self.bytes.get(self.pos + 1).is_some_and(u8::is_ascii_digit) => {
+                self.parse_number()
+            }
             other => Err(format!(
                 "unexpected character `{}` starting a value",
                 other as char
@@ -538,10 +546,21 @@ impl<'a> TsValueParser<'a> {
             }
         }
         let slice = &self.text[start..self.pos];
-        if let Ok(n) = slice.parse::<i64>() {
+        // Recover leading-dot decimals (`.100`, `-.5`) into canonical `0.100` /
+        // `-0.5` so an otherwise-valid tool call isn't dropped over one char.
+        // Scoped to tool-call argument parsing only: `TsValueParser` is private
+        // to the tools module and never parses general documents.
+        let normalized: std::borrow::Cow<'_, str> = if let Some(rest) = slice.strip_prefix('.') {
+            format!("0.{rest}").into()
+        } else if let Some(rest) = slice.strip_prefix("-.") {
+            format!("-0.{rest}").into()
+        } else {
+            slice.into()
+        };
+        if let Ok(n) = normalized.parse::<i64>() {
             return Ok(serde_json::json!(n));
         }
-        if let Ok(n) = slice.parse::<f64>() {
+        if let Ok(n) = normalized.parse::<f64>() {
             return serde_json::Number::from_f64(n)
                 .map(serde_json::Value::Number)
                 .ok_or_else(|| "non-finite number literal".to_string());

@@ -1035,3 +1035,150 @@ pipeline t(task) {
         "expected schema_is to be vacuous after `x != nil` narrowing, got: {warns:?}"
     );
 }
+
+// ---------------------------------------------------------------------------
+// `if`-expression narrowing: branches used for their value must be narrowed
+// the same way the ternary already narrows them.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_if_expression_narrows_then_branch() {
+    // The whole `if` is used as a value; the then-branch must see `x: string`
+    // so the inferred result is `string`, not `string | int`.
+    let errs = errors(
+        r#"pipeline t(task) {
+  fn check(x: string | int) {
+    let y: string = if type_of(x) == "string" { x } else { "fallback" }
+  }
+}"#,
+    );
+    assert!(errs.is_empty(), "got: {errs:?}");
+}
+
+#[test]
+fn test_if_expression_narrows_nil_both_branches() {
+    let errs = errors(
+        r"pipeline t(task) {
+  fn check(x: int | nil) {
+    let y: int = if x != nil { x } else { 0 }
+  }
+}",
+    );
+    assert!(errs.is_empty(), "got: {errs:?}");
+}
+
+// ---------------------------------------------------------------------------
+// Reference-path narrowing: `type_of(o.x) == "T"` / `o.x != nil` narrow the
+// property path, not just bare variables.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_typeof_path_narrowing_then_branch() {
+    let errs = errors(
+        r#"pipeline t(task) {
+  fn use_list(xs: list) -> list { return xs }
+  fn check(entry: {arguments: list?}) {
+    if type_of(entry.arguments) == "list" {
+      let r: list = use_list(entry.arguments)
+    }
+  }
+}"#,
+    );
+    assert!(errs.is_empty(), "got: {errs:?}");
+}
+
+#[test]
+fn test_typeof_path_narrowing_if_expression() {
+    // The motivating case: an `if`-expression whose then-branch yields a
+    // narrowed property path. Without path narrowing `tokens` is `list?` and
+    // the `list` argument is rejected.
+    let errs = errors(
+        r#"pipeline t(task) {
+  fn use_list(xs: list) -> list { return xs }
+  fn check(entry: {arguments: list?}) {
+    let tokens = if type_of(entry.arguments) == "list" {
+      entry.arguments
+    } else {
+      ["a", "b"]
+    }
+    let flags: list = use_list(tokens)
+  }
+}"#,
+    );
+    assert!(errs.is_empty(), "got: {errs:?}");
+}
+
+#[test]
+fn test_nil_path_narrowing_both_branches() {
+    let errs = errors(
+        r"pipeline t(task) {
+  fn check(entry: {arguments: list?}) {
+    if entry.arguments != nil {
+      let r: list = entry.arguments
+    } else {
+      let n: nil = entry.arguments
+    }
+  }
+}",
+    );
+    assert!(errs.is_empty(), "got: {errs:?}");
+}
+
+#[test]
+fn test_typeof_path_narrowing_optional_chain() {
+    // Optional (`?.`) and plain (`.`) links share a narrowing key — guarding
+    // `entry?.arguments` narrows reads of the same path.
+    let errs = errors(
+        r#"pipeline t(task) {
+  fn use_list(xs: list) -> list { return xs }
+  fn check(entry: {arguments: list?} | nil) {
+    if type_of(entry?.arguments) == "list" {
+      let r: list = use_list(entry?.arguments)
+    }
+  }
+}"#,
+    );
+    assert!(errs.is_empty(), "got: {errs:?}");
+}
+
+#[test]
+fn test_path_narrowing_does_not_leak_past_if() {
+    // Soundness: the narrowing is scoped to the guarded branch. After the
+    // `if`, `entry.arguments` is `list | nil` again, so the `list` binding
+    // must still be rejected.
+    let errs = errors(
+        r#"pipeline t(task) {
+  fn check(entry: {arguments: list?}) {
+    if type_of(entry.arguments) == "list" {
+      let ok: list = entry.arguments
+    }
+    let bad: list = entry.arguments
+  }
+}"#,
+    );
+    assert!(
+        errs.iter().any(|e| e.contains("bad")),
+        "expected `bad` binding to be rejected outside the guard, got: {errs:?}"
+    );
+}
+
+#[test]
+fn test_path_narrowing_invalidated_by_base_reassignment() {
+    // Soundness: reassigning the base variable inside the guarded branch drops
+    // the path narrowing — the path may now reference a different value.
+    let errs = errors(
+        r#"pipeline t(task) {
+  fn check(entry: {arguments: list?}, other: {arguments: list?}) {
+    var e = entry
+    if type_of(e.arguments) == "list" {
+      e = other
+      let bad: list = e.arguments
+    }
+  }
+}"#,
+    );
+    assert!(
+        errs.iter().any(|e| e.contains("bad")),
+        "expected `bad` binding to be rejected after base reassignment, got: {errs:?}"
+    );
+}

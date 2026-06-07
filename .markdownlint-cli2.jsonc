@@ -19,6 +19,10 @@
     "**/node_modules",
     "target",
     ".target-inspect",
+    // Stray out-of-tree Cargo target dirs (gitignored as `.target-*/`, plus a
+    // bare `.target`). Their vendored crate READMEs are build output, not docs.
+    ".target/**",
+    ".target-*/**",
     "docs/dist",
     ".worktrees",
     ".burin",

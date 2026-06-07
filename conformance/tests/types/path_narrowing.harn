@@ -1,0 +1,33 @@
+/**
+ * Flow-sensitive narrowing follows reference *paths*, not just bare
+ * variables. `type_of(entry.arguments) == "list"` and `entry.arguments != nil`
+ * narrow the property path itself, so the value flows into a `list` parameter
+ * without a defensive `?? []` coercion — including when the guarded `if` is
+ * used as an expression whose result type must stay `list`.
+ */
+pipeline test(task) {
+  fn clang_flags(tokens: list) -> list {
+    return tokens
+  }
+  // `if`-expression: the then-branch yields the narrowed path `list`, the
+  // else-branch yields `list`, so `tokens` is `list` (not `list?`).
+  fn resolve(entry: {arguments: list?, command: string?}) -> list {
+    let tokens = if type_of(entry.arguments) == "list" {
+      entry.arguments
+    } else {
+      to_string(entry.command ?? "").split(" ")
+    }
+    return clang_flags(tokens)
+  }
+  // `!= nil` guard narrows the path in the then-branch.
+  fn count(entry: {items: list?}) -> int {
+    if entry.items != nil {
+      return len(clang_flags(entry.items))
+    }
+    return 0
+  }
+  log(resolve({arguments: ["-O2", "-Wall"], command: nil}))
+  log(resolve({arguments: nil, command: "cc -g"}))
+  log(count({items: ["a", "b", "c"]}))
+  log(count({items: nil}))
+}

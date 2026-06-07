@@ -143,6 +143,41 @@ pub(crate) fn parse_text_tool_calls_with_tools(
             // name when possible) so the loop sees a truncated-tool-call signal
             // rather than an empty text turn.
             let body = &src[cursor + open_len..];
+            // Before declaring truncation, try the nested-XML recovery: weak
+            // value models open `<tool_call>`, emit `<look>{ ... }`, then close
+            // with a mismatched `</look_call>` (or no inner close) and omit the
+            // `</tool_call>` entirely. The JSON object is complete, so the call
+            // is recoverable rather than truncated — canonicalize and dispatch
+            // it exactly like a well-formed block.
+            match parse_xml_wrapped_json_args_body(body, tools_val) {
+                Ok(Some(call)) => {
+                    let name = call
+                        .get("name")
+                        .and_then(|name| name.as_str())
+                        .unwrap_or("")
+                        .to_string();
+                    let args = call
+                        .get("arguments")
+                        .cloned()
+                        .unwrap_or(serde_json::json!({}));
+                    canonical_parts
+                        .push(text_tool_call_block(&render_canonical_call(&name, &args)));
+                    calls.push(call);
+                    cursor = bytes.len();
+                    continue;
+                }
+                // A recognizable nested-XML shape whose tool is unknown or whose
+                // body is malformed: surface the actionable parse error rather
+                // than the misleading "truncated" diagnostic, and stop scanning.
+                Err(msg) => {
+                    errors.push(msg);
+                    cursor = bytes.len();
+                    continue;
+                }
+                // Not a nested-XML shape at all — fall through to the
+                // truncation diagnostic below.
+                Ok(None) => {}
+            }
             let recovered_name = leading_call_name(body, tools_val);
             match recovered_name {
                 Some(name) => errors.push(format!(
@@ -219,6 +254,13 @@ pub(crate) fn parse_text_tool_calls_with_tools(
                  subsequent turns."
             ));
             cursor = after_call;
+        } else if let Some(skip) = stray_tool_call_close_len(src, cursor) {
+            // A bare, orphaned `</tool_call>` (or `</toolcall>`). Weak value
+            // models duplicate the close after a recovered nested-XML body
+            // (`...</look></tool_call></tool_call>`). It carries no content and
+            // no work, so swallow it silently rather than raising a noisy
+            // "unknown top-level tag" violation.
+            cursor += skip;
         } else {
             // Unclosed/unknown tag — skip to end of line or `>`.
             let start = cursor;
@@ -733,6 +775,21 @@ fn unclosed_tool_call_open(src: &str, cursor: usize) -> Option<usize> {
     Some(open.len())
 }
 
+/// If `cursor` sits on a bare closing `</tool_call>` / `</toolcall>` tag (no
+/// matching open consumed it), return the tag's byte length so the scanner can
+/// skip it silently. This swallows the duplicate/trailing close tag that weak
+/// value models emit after a recovered nested-XML body.
+fn stray_tool_call_close_len(src: &str, cursor: usize) -> Option<usize> {
+    let rest = &src[cursor..];
+    for tag in [TEXT_TOOL_CALL_TAG, TEXT_TOOL_CALL_TAG_COMPACT] {
+        let close = format!("</{tag}>");
+        if rest.starts_with(&close) {
+            return Some(close.len());
+        }
+    }
+    None
+}
+
 /// Best-effort recovery of the tool name from a truncated `<tool_call>` body:
 /// the leading `name(` of an unterminated call, when `name` is a registered
 /// tool. Used only for a clearer truncation diagnostic — never to dispatch.
@@ -886,6 +943,12 @@ fn known_tool_names_with_implicit(tools_val: Option<&VmValue>) -> BTreeSet<Strin
         .collect()
 }
 
+/// Recover a nested XML function wrapper inside a `<tool_call>` body, e.g.
+/// `<edit>{ ... }</edit>`. Tolerates the sloppy shapes weak value models emit:
+/// a mismatched inner close tag (`</edit_call>`), a missing inner close tag, or
+/// a duplicate/trailing `</tool_call>` after the JSON object. The inner tag must
+/// name a registered/implicit tool and be followed by a JSON object, otherwise
+/// the body falls through to the bare-call path and unknown tags are rejected.
 fn parse_xml_wrapped_json_args_body(
     body: &str,
     tools_val: Option<&VmValue>,
@@ -904,8 +967,12 @@ fn parse_xml_wrapped_json_args_body(
         return Ok(None);
     }
     let name = &trimmed[name_start..name_end];
-    let close = format!("</{name}>");
-    if !trimmed.ends_with(&close) {
+    // The JSON body starts after the inner open tag. Anything after the JSON
+    // object's closing brace (a matched `</edit>`, a mismatched `</edit_call>`,
+    // a stray `</tool_call>`, or nothing) is tolerated trailing slop.
+    let after_open = trimmed[name_end + 1..].trim_start();
+    if !after_open.starts_with('{') {
+        // Not a JSON-object body — let the bare-call path handle (or reject) it.
         return Ok(None);
     }
     let known = known_tool_names_with_implicit(tools_val);
@@ -917,8 +984,14 @@ fn parse_xml_wrapped_json_args_body(
             available.join(", ")
         ));
     }
-    let inner = trimmed[name_end + 1..trimmed.len() - close.len()].trim();
-    let arguments: serde_json::Value = serde_json::from_str(inner).map_err(|error| {
+    let Some(obj_len) = balanced_json_object_len(after_open) else {
+        return Err(format!(
+            "<tool_call><{name}> body did not contain a complete JSON object. \
+             Emit `<tool_call>{name}({{ ... }})</tool_call>` instead."
+        ));
+    };
+    let json_src = &after_open[..obj_len];
+    let arguments: serde_json::Value = serde_json::from_str(json_src).map_err(|error| {
         format!(
             "<tool_call><{name}> body did not parse as a JSON object: {error}. \
              Emit `<tool_call>{name}({{ ... }})</tool_call>` instead."
@@ -934,6 +1007,44 @@ fn parse_xml_wrapped_json_args_body(
         "name": name,
         "arguments": arguments,
     })))
+}
+
+/// Byte length of the first balanced `{ ... }` JSON object at the start of
+/// `src` (which must begin with `{`), brace-counting while skipping string
+/// spans so braces inside string values don't miscount. Returns `None` if the
+/// object is never closed.
+fn balanced_json_object_len(src: &str) -> Option<usize> {
+    let bytes = src.as_bytes();
+    if bytes.first() != Some(&b'{') {
+        return None;
+    }
+    let mut depth = 0usize;
+    let mut in_string = false;
+    let mut escaped = false;
+    for (idx, &byte) in bytes.iter().enumerate() {
+        if in_string {
+            if escaped {
+                escaped = false;
+            } else if byte == b'\\' {
+                escaped = true;
+            } else if byte == b'"' {
+                in_string = false;
+            }
+            continue;
+        }
+        match byte {
+            b'"' => in_string = true,
+            b'{' => depth += 1,
+            b'}' => {
+                depth -= 1;
+                if depth == 0 {
+                    return Some(idx + 1);
+                }
+            }
+            _ => {}
+        }
+    }
+    None
 }
 
 fn parse_json_tool_call_body(

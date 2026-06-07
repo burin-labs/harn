@@ -20,8 +20,10 @@ use harn_lexer::{FixEdit, Span};
 
 use super::super::binary_ops::{infer_binary_op_type, merge_shape_fields};
 use super::super::schema_inference::schema_type_expr_from_node;
-use super::super::scope::{builtin_return_type, InferredType, TypeScope};
-use super::super::union::simplify_union;
+use super::super::scope::{builtin_return_type, InferredType, PathNarrowing, TypeScope};
+use super::super::union::{
+    narrow_to_single, reference_path_key, remove_from_union, simplify_union,
+};
 use super::super::{is_gradual_type_name, TypeChecker};
 
 const UNNECESSARY_SAFE_NAVIGATION_RULE: &str = "unnecessary-safe-navigation";
@@ -969,14 +971,24 @@ impl TypeChecker {
             // `let x: int = if cond { 1 }` would type-check but run-time
             // produce `nil` and crash on the first `int` use.
             Node::IfElse {
+                condition,
                 then_body,
                 else_body,
-                ..
             } => {
-                let then_type = self.infer_block_type(then_body, scope);
+                // Narrow each branch with the condition's refinements, the same
+                // way the ternary arm does — an `if`-expression used for its
+                // value (`let x = if type_of(p) == "list" { p } else { ... }`)
+                // must see `p` narrowed inside the matching branch, otherwise
+                // the result type widens back to the un-narrowed union.
+                let refs = Self::extract_refinements(condition, scope);
+                let mut then_scope = scope.child();
+                refs.apply_truthy(&mut then_scope);
+                let then_type = self.infer_block_type(then_body, &then_scope);
                 match else_body {
                     Some(eb) => {
-                        let else_type = self.infer_block_type(eb, scope);
+                        let mut else_scope = scope.child();
+                        refs.apply_falsy(&mut else_scope);
+                        let else_type = self.infer_block_type(eb, &else_scope);
                         match (then_type, else_type) {
                             (Some(TypeExpr::Never), Some(TypeExpr::Never)) => Some(TypeExpr::Never),
                             (Some(TypeExpr::Never), Some(other))
@@ -1066,7 +1078,36 @@ impl TypeChecker {
             }
         }
         let obj_type = self.infer_type(object, scope)?;
-        self.infer_property_type_from_type(&obj_type, property, scope, optional)
+        let natural = self.infer_property_type_from_type(&obj_type, property, scope, optional);
+
+        // Flow-sensitive path narrowing: if a guard earlier on this path
+        // (`type_of(o.x) == "T"`, `o.x != nil`) narrowed this exact reference,
+        // re-apply that directive to the freshly computed natural type.
+        if let Some(base_key) = reference_path_key(object) {
+            let key = format!("{base_key}.{property}");
+            if let Some(narrowing) = scope.get_narrowed_path(&key) {
+                return Self::apply_path_narrowing(natural, narrowing);
+            }
+        }
+        natural
+    }
+
+    /// Re-apply a [`PathNarrowing`] directive to a reference path's natural
+    /// type. `Keep`/`Remove` reuse the same union helpers that variable
+    /// `type_of` narrowing uses, treating a non-union type as a one-member
+    /// union. When the directive matches nothing (a statically dead branch),
+    /// the natural type is returned unchanged rather than over-narrowing.
+    fn apply_path_narrowing(natural: InferredType, narrowing: &PathNarrowing) -> InferredType {
+        let ty = natural?;
+        let members: Vec<TypeExpr> = match &ty {
+            TypeExpr::Union(members) => members.clone(),
+            other => vec![other.clone()],
+        };
+        let narrowed = match narrowing {
+            PathNarrowing::Keep(tag) => narrow_to_single(&members, tag),
+            PathNarrowing::Remove(tag) => remove_from_union(&members, tag),
+        };
+        narrowed.or(Some(ty))
     }
 
     pub(super) fn infer_property_type_from_type(
