@@ -8,6 +8,98 @@ highlights live in [CHANGELOG-pre-0.6.md](CHANGELOG-pre-0.6.md).
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.8.89
+
+### Added
+
+- **Eval packs now have a durable trial-level ledger (#3119).** `eval_pack_run`
+  resumes exact `(suite, model, split, commit, case, case_fingerprint,
+  harness_config_fingerprint, trial)` matches from the sqlite event log,
+  reports all-skip reruns honestly, refuses fingerprint-mismatched resume rows,
+  and exposes `eval_ledger_*` builtins for reading, appending, prior-commit
+  lookup, and resume planning.
+- **`pg_migrate` gained an SQLx-compatible ledger mode (`ledger: "sqlx"`).**
+  The Postgres builtin can now read and write SQLx's own `_sqlx_migrations`
+  table byte-for-byte: it keys migrations off the integer version prefix of
+  each filename, sorts ascending by that numeric version, applies only
+  forward files (`*.up.sql` / `*.sql`, skipping `*.down.sql`), records the
+  same `version, description, success, checksum (SHA-384), execution_time`
+  rows SQLx does, and takes SQLx's per-database advisory lock
+  (`0x3d32ad9e * crc32(current_database())`) so a Harn migration and a
+  concurrent `sqlx migrate run` serialize against each other. It is
+  idempotent against a SQLx-migrated database (applies zero rows, checksums
+  byte-identical), refuses to run on a dirty ledger, errors on checksum
+  drift naming the version, and warn-and-skips duplicate versions. The
+  default `ledger: "harn"` path (the native `harn_migrations` SHA-256
+  ledger) is unchanged. This lets harn-cloud retire its bespoke Rust
+  `run_migrations()` in favor of `pg_migrate`.
+
+### Fixed
+
+- **Incremental project scans now detect same-instant edits that the
+  modification-time heuristic alone misses.** `scan_incremental`'s automatic
+  delta computation (the path taken when no explicit `changed_paths` signal is
+  supplied) compared only `mtime > previous_mtime`. Millisecond mtime
+  granularity collides on same-turn/same-second writes — and on
+  coarse-granularity filesystems — so a file an agent wrote and then re-scanned
+  in the same instant was silently treated as unchanged, leaving the index
+  serving pre-edit symbol facts and feeding fuzzy-match-stale loops on weak
+  local models. The delta now also flags a file as modified when its byte size
+  differs from the cached record, an mtime-independent signal that catches the
+  overwhelmingly common add/remove edit for free (the file metadata is already
+  read for the mtime check). Length-preserving same-instant edits still rely on
+  the explicit `changed_paths` bypass the agent loop already threads through
+  after its own writes.
+- **`pg_migrate` advisory lock now actually serializes, and the harn ledger
+  verifies checksums.** Two correctness bugs in the `std/postgres` migration
+  runner are fixed. (1) The Postgres advisory lock was taken, all migration
+  work done, and the unlock run on *different* pooled connections. Because
+  `pg_advisory_lock` is session-scoped (tied to one backend), concurrent
+  `pg_migrate` callers did not mutually exclude, and the unlock usually ran on
+  a connection that never held the lock — a no-op that leaked a session lock on
+  a recycled connection. The runner now pins a single connection for
+  lock → migrate → unlock (matching `sqlx migrate`), in both `harn` and `sqlx`
+  ledger modes. (2) The default `harn` ledger wrote a SHA-256 checksum per
+  migration but never read it back, so an edited (already-applied) migration
+  file was silently skipped with no drift detection. The runner now re-hashes
+  each already-applied file and errors with `checksum mismatch for migration
+  <name>` when it differs from the recorded checksum, mirroring the `sqlx`
+  mode's SHA-384 check. `pg_advisory_unlock`'s boolean result is now checked
+  and a `false` (lock not held) is logged.
+- **Postgres `nil` bind parameters no longer pin the TEXT type.** The
+  `std/postgres` client previously bound a `nil` argument as `None::<String>`,
+  which declared Postgres type OID `25` (TEXT) in the wire `Parse` message.
+  Because sqlx caches prepared statements per pooled connection and sends
+  params in binary, this caused two production failures: prepared-statement
+  type-cache poisoning (a slot first seen as `nil` was cached as TEXT, so a
+  later non-null integer was UTF-8-validated against TEXT and failed with
+  `invalid byte sequence for encoding "UTF8": 0x00`), and wrong NULL typing
+  (binding `nil` into an `integer`/`jsonb` column or cast failed with
+  `column is of type integer but expression is of type text`). `nil` now binds
+  as a Postgres NULL with type OID `0` (unspecified), so the server infers the
+  parameter's type from the query context — the cast, the target column — just
+  like a bare SQL `NULL`. Non-null binds are unchanged.
+- **A tool call that the provider cut off mid-emit when the model hit its
+  output-token cap is now auto-continued with a raised cap instead of burning
+  the turn.** When a value model exhausts `max_tokens` partway through a tool
+  call, the provider returns a length-truncation stop reason (`length` for
+  OpenAI/OpenRouter/Ollama, `max_tokens` for Anthropic) and the partial output
+  carries a truncated, unparseable call. The agent loop previously treated that
+  as a malformed/missing call and dropped the turn to parse-guidance — a
+  silent-corruption class that wastes a turn even on capable models that were
+  mid-correct-action. The loop now detects this specific condition
+  deterministically (no model cooperation, no abuse surface): a length
+  truncation that resolved zero usable tool calls AND shows a partial-call
+  signal (a parser truncation diagnostic or a tool-call opener prefix) is
+  re-issued with a higher output cap so the model can finish the call. The
+  re-issue is bounded (two continuations by default, each clamped to a ceiling)
+  and does not consume a loop iteration; once the cap is exhausted the loop
+  falls back to the existing parse-guidance path, so it can never loop forever.
+  The gate keys on the normalized finish reason, so it generalizes across
+  providers, and it fires ONLY on a real length truncation — a clean stop with
+  a genuinely malformed call still flows through the parse-tolerance and
+  reasoning-leak paths unchanged, with no overlap.
+
 ## v0.8.88
 
 ### Added
