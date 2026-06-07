@@ -2012,11 +2012,18 @@ completion judge after a native-tool loop naturally completes or after
 the model emits `##DONE##` in a sentinel loop.
 The judge returns `verdict: "done" | "continue"` plus optional
 `reasoning` and `next_step`. A veto injects feedback and the loop
-continues until the judge accepts or `max_verify_attempts` is exhausted.
+continues until the judge accepts, `done_judge.max_invocations` is reached, or
+`max_verify_attempts` is exhausted.
 Each judge call emits a `JudgeDecision` agent event with optional `trigger`.
 Use
 `verify_completion_judge` instead when every natural stop should be
 judged.
+
+Set top-level `done_judge.max_invocations` (alias `max_feedback`) to a positive
+integer to cap repeated vetoes. Once reached, the loop stops with
+`status: "verify_capped"` and `stop_reason: "done_judge_cap_reached"`; the
+result carries structured `done_judge` counters. Set it to `0` to disable the
+terminal cap.
 
 Use `done_judge.cadence` when completion checks should be signal-gated
 instead of firing on every completion candidate:

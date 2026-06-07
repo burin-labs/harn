@@ -67,7 +67,7 @@ top-level keys before `v0.8`).
 
 | Field | Type | Description |
 |---|---|---|
-| `status` | string | Terminal state: `"done"` (natural completion), `"suspended"` (worker yielded at a cooperative suspend checkpoint), `"stuck"` (exceeded `max_nudges` consecutive text-only turns), `"budget_exhausted"` (hit `max_iterations` without any explicit break), `"verify_capped"` (the `verify_completion_judge` veto cap was reached; see `stop_reason: "completion_judge_cap_reached"`), `"provider_error"` (provider/tool-protocol request failed and was captured in `error`), `"idle"` (daemon yielded with no remaining wake source), `"watchdog"` (daemon idle-wait tripped the `idle_watchdog_attempts` limit), or `"failed"` (`require_successful_tools` not satisfied). |
+| `status` | string | Terminal state: `"done"` (natural completion), `"suspended"` (worker yielded at a cooperative suspend checkpoint), `"stuck"` (exceeded `max_nudges` consecutive text-only turns), `"budget_exhausted"` (hit `max_iterations` without any explicit break), `"verify_capped"` (a structured completion-judge veto cap was reached; see `stop_reason: "completion_judge_cap_reached"` or `"done_judge_cap_reached"`), `"provider_error"` (provider/tool-protocol request failed and was captured in `error`), `"idle"` (daemon yielded with no remaining wake source), `"watchdog"` (daemon idle-wait tripped the `idle_watchdog_attempts` limit), or `"failed"` (`require_successful_tools` not satisfied). |
 | `error` | dict or nil | Structured terminal failure for provider/tool-protocol failures: `{category, reason, kind, provider, model, message, phase, tool_format, after_tool_result}`. `after_tool_result` is true when the rejected model request included prior tool observations. |
 | `text` | string | Accumulated text output from all iterations |
 | `visible_text` | string | Human-visible accumulated output |
@@ -88,6 +88,7 @@ top-level keys before `v0.8`).
 | `stall_warnings` | list | Present when `stall_diagnostics` is enabled. Diagnostic warning records emitted when a repeat streak reaches the configured threshold |
 | `suspected_loop` | bool | Present when `stall_diagnostics` is enabled. `true` when at least one stall warning fired |
 | `completion_judge` | dict | Present when `verify_completion_judge` is configured. `{invocations, vetoes, max_invocations, cap_reached}` — the per-session judge call/veto counts, the resolved cap (`nil` when disabled), and whether the cap was hit. Lets a harness report judge churn without transcript mining |
+| `done_judge` | dict | Present when `done_judge` is configured. `{invocations, vetoes, max_invocations, cap_reached}` — the per-session done-judge call/veto counts, the resolved top-level cap (`nil` when disabled or not configured), and whether that cap was hit. This is separate from `done_judge.cadence.max_invocations`, which only gates when the judge is due |
 
 Nested `llm` fields:
 
@@ -262,7 +263,7 @@ Same as `llm_call`, plus additional options:
 | `post_turn_callback` | closure | nil | Hook called after each turn. Receives turn metadata and may inject a message, request an immediate stage stop, or merge next-turn options such as `llm_options: {tool_choice: "none"}` |
 | `verify_completion` | closure | nil | Hook called when the loop is about to stop naturally. Return `nil`/`true` to accept the stop or feedback text to veto and continue |
 | `verify_completion_judge` | bool/dict | nil | Built-in structured judge for any natural stop. `true` uses defaults; a dict may set `provider`, `model`, `system`, `feedback_fallback`, and `max_invocations` (alias `max_feedback`, default `5`) to cap repeated vetoes. Once the cap is hit the judge stops firing and the loop ends with status `verify_capped` and stop_reason `completion_judge_cap_reached`; set `max_invocations: 0` to disable the cap |
-| `done_judge` | bool/dict | nil | Completion structured judge. It runs when the model naturally completes a native-tool loop or emits the done sentinel, and may veto by returning `verdict: "continue"` plus `next_step` or `reasoning`. Dict configs may include `cadence: {every?, when?, max_invocations?, min_iterations_before_first?}` |
+| `done_judge` | bool/dict | nil | Completion structured judge. It runs when the model naturally completes a native-tool loop or emits the done sentinel, and may veto by returning `verdict: "continue"` plus `next_step` or `reasoning`. Dict configs may include `max_invocations` (alias `max_feedback`) to terminally cap repeated vetoes, plus `cadence: {every?, when?, max_invocations?, min_iterations_before_first?}` to control when the judge is due |
 | `step_judge` | dict | nil | Per-turn structured judge that runs after an assistant turn and before tool dispatch. Dict configs may include `provider`, `model`, `on_veto` (`"replace"` or `"retain"`), `max_attempts`, `skip_when_empty`, `skip_when_stalled`, and `skip_when_iterations_remaining` (default `1`, skips when no regeneration turn remains). Skips emit `step_judge_decision` with `skipped: true` |
 | `llm_transcript_dir` | string | nil | Per-loop directory for Harn's existing `llm_transcript.jsonl` sidecar. This is equivalent to scoping `HARN_LLM_TRANSCRIPT_DIR` to one agent loop and is preferred when a script needs run-specific auditable model-turn JSONL |
 | `turn_policy` | dict | nil | Turn-shape policy for action stages. Supports `require_action_or_yield: bool`, `allow_done_sentinel: bool` (default `true`; set to `false` in workflow-owned action stages so nudges stop advertising the done sentinel), and `max_prose_chars: int` |
@@ -716,10 +717,17 @@ When `loop_until_done: true`, the system prompt is automatically extended with:
 `done_judge` adds a second gate after completion is detected. The loop renders
 the transcript for a structured judge call and expects
 `verdict: "done" | "continue"` plus optional `reasoning` and `next_step`.
-A veto injects runtime feedback and the loop continues until the judge accepts
-or `max_verify_attempts` is exhausted. Every judge call emits `JudgeDecision`
+A veto injects runtime feedback and the loop continues until the judge accepts,
+`done_judge.max_invocations` is reached, or `max_verify_attempts` is exhausted.
+Every judge call emits `JudgeDecision`
 with `session_id`, `iteration`, `verdict`, `reasoning`, `next_step`, and
 `judge_duration_ms`, plus optional `trigger`.
+
+Set top-level `done_judge.max_invocations` (alias `max_feedback`) to a positive
+integer to cap repeated done-judge vetoes. Once reached, the loop stops with
+`status: "verify_capped"` and `stop_reason: "done_judge_cap_reached"`, and the
+result carries `{done_judge: {invocations, vetoes, max_invocations,
+cap_reached}}`. Set it to `0` to disable the terminal cap.
 
 Use `done_judge.cadence` to gate the judge. Omit it to preserve the default:
 every completion candidate is judged. `every: N` judges turns `N`, `2N`, and so

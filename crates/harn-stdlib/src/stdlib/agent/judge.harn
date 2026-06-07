@@ -157,6 +157,23 @@ fn __verify_completion_judge_cap(judge_cfg) {
 }
 
 /**
+ * Resolve the optional top-level cap for `done_judge`. Unlike
+ * `done_judge.cadence.max_invocations`, this is a terminal veto-loop cap: the
+ * judge may fire up to the cap, then the loop finalizes instead of silently
+ * continuing until the iteration budget expires.
+ */
+fn __done_judge_cap(judge_cfg) {
+  if type_of(judge_cfg) != "dict" {
+    return nil
+  }
+  let cap = judge_cfg?.max_invocations ?? judge_cfg?.max_feedback
+  if cap == nil || cap <= 0 {
+    return nil
+  }
+  return cap
+}
+
+/**
  * agent_verify_completion_judge_cap.
  *
  * Resolved completion-judge veto cap for a `verify_completion_judge` config,
@@ -170,6 +187,22 @@ fn __verify_completion_judge_cap(judge_cfg) {
  */
 pub fn agent_verify_completion_judge_cap(judge_cfg) {
   return __verify_completion_judge_cap(judge_cfg)
+}
+
+/**
+ * agent_done_judge_cap.
+ *
+ * Resolved terminal veto cap for a `done_judge` config. Returns nil when the
+ * cap is not configured or is disabled with 0.
+ *
+ * @effects: []
+ * @allocation: stack
+ * @errors: []
+ * @api_stability: experimental
+ * @example: agent_done_judge_cap(opts?.done_judge)
+ */
+pub fn agent_done_judge_cap(judge_cfg) {
+  return __done_judge_cap(judge_cfg)
 }
 
 fn __emit_judge_decision(session_id, iteration, verdict) {
@@ -229,10 +262,17 @@ pub fn agent_verify_or_continue(session, opts, stop_reason, text, iteration = 0)
   let done_judge_applies = opts?.done_judge != nil
     && (stop_reason == "sentinel" || stop_reason == "natural" || stop_reason == "stalled")
     && done_judge_due
+  var done_judge_cap_reached = false
+  let prior_done_judge_invocations = opts?._done_judge_invocations ?? 0
   if !verdict.vetoed && done_judge_applies {
-    verdict = __judge_invoke_structured(harness, opts.done_judge, opts, payload)
-    verdict = verdict + {done_judge_invoked: true, trigger: opts?._done_judge_trigger ?? nil}
-    __emit_judge_decision(session.session_id, iteration, verdict)
+    let cap = __done_judge_cap(opts.done_judge)
+    if cap != nil && prior_done_judge_invocations >= cap {
+      done_judge_cap_reached = true
+    } else {
+      verdict = __judge_invoke_structured(harness, opts.done_judge, opts, payload)
+      verdict = verdict + {done_judge_invoked: true, trigger: opts?._done_judge_trigger ?? nil}
+      __emit_judge_decision(session.session_id, iteration, verdict)
+    }
   }
   if verdict.vetoed && verdict?.feedback != nil && verdict.feedback != "" {
     agent_session_inject_feedback(session.session_id, "verify_completion", verdict.feedback)
@@ -241,5 +281,6 @@ pub fn agent_verify_or_continue(session, opts, stop_reason, text, iteration = 0)
     + {
     verify_completion_judge_invoked: completion_judge_invoked,
     verify_completion_judge_cap_reached: completion_judge_cap_reached,
+    done_judge_cap_reached: done_judge_cap_reached,
   }
 }
