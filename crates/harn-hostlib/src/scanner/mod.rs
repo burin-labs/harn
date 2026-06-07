@@ -448,13 +448,23 @@ fn compute_delta(
         let mut out = Vec::new();
         for entry in current {
             if let Some(prev) = cached_files.get(entry.relative_path.as_str()) {
-                let mtime = std::fs::metadata(&entry.absolute_path)
-                    .ok()
+                let meta = std::fs::metadata(&entry.absolute_path).ok();
+                let mtime = meta
+                    .as_ref()
                     .and_then(|m| m.modified().ok())
                     .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
                     .map(|d| d.as_millis() as i64)
                     .unwrap_or(0);
-                if mtime > prev.last_modified_unix_ms {
+                let size = meta.as_ref().map(|m| m.len()).unwrap_or(prev.size_bytes);
+                // A newer mtime is the cheap common signal, but mtime
+                // granularity collides on same-turn/same-second edits (and on
+                // coarse-granularity filesystems), silently dropping the edit.
+                // A changed byte size is an mtime-independent modification
+                // signal that catches the overwhelmingly common add/remove edit
+                // for free — `meta.len()` is already in hand. Without it, an
+                // agent that writes a file and re-scans in the same instant
+                // keeps reading the pre-edit symbol facts.
+                if mtime > prev.last_modified_unix_ms || size != prev.size_bytes {
                     out.push(entry.relative_path.clone());
                 }
             }
@@ -756,6 +766,8 @@ fn delta_to_value(delta: &ScanDelta) -> VmValue {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use filetime::{set_file_mtime, FileTime};
+    use std::fs;
 
     #[test]
     fn builtin_option_defaults_match_request_schemas() {
@@ -766,5 +778,115 @@ mod tests {
 
         assert!(scan_project.include_git_history);
         assert!(!scan_incremental.include_git_history);
+    }
+
+    fn symbol_names(scan: &IncrementalScan) -> Vec<String> {
+        scan.result.symbols.iter().map(|s| s.name.clone()).collect()
+    }
+
+    /// Regression guard: an agent that writes a file and re-scans in the same
+    /// instant must see its own edit. `compute_delta`'s mtime comparison
+    /// collides on same-millisecond/same-second writes (and on
+    /// coarse-granularity filesystems), so the size-change fallback is what
+    /// keeps same-turn index freshness honest. Before the fallback this
+    /// returned the pre-edit symbol set, feeding fuzzy-match-stale loops on
+    /// cheap local models.
+    #[test]
+    fn scan_incremental_detects_same_mtime_size_changing_edit() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::create_dir_all(dir.path().join("src")).unwrap();
+        let file = dir.path().join("src/lib.rs");
+        fs::write(&file, "pub fn old_symbol() {}\n").unwrap();
+
+        // Canonicalize so the snapshot token matches across calls.
+        let canonical = std::fs::canonicalize(dir.path()).unwrap();
+        let token = canonical.to_string_lossy().to_string();
+        let opts = ScanProjectOptions::default();
+
+        let first = scan_incremental(&token, None, opts.clone());
+        let cached_mtime = first
+            .result
+            .files
+            .iter()
+            .find(|r| r.relative_path == "src/lib.rs")
+            .expect("seed file indexed")
+            .last_modified_unix_ms;
+        assert!(symbol_names(&first).iter().any(|n| n == "old_symbol"));
+
+        // Add a symbol (byte size grows), then force the mtime back to the
+        // cached value to simulate a same-instant edit the OS couldn't
+        // distinguish by mtime.
+        fs::write(
+            &file,
+            "pub fn old_symbol() {}\npub fn brand_new_symbol() {}\n",
+        )
+        .unwrap();
+        let secs = cached_mtime / 1000;
+        let nanos = ((cached_mtime % 1000) * 1_000_000) as u32;
+        set_file_mtime(&file, FileTime::from_unix_time(secs, nanos)).unwrap();
+
+        let second = scan_incremental(&token, None, opts);
+        let names = symbol_names(&second);
+        assert!(
+            names.iter().any(|n| n == "brand_new_symbol"),
+            "same-mtime size-changing edit must be reindexed, got {names:?} (delta.modified={:?})",
+            second.delta.modified,
+        );
+    }
+
+    /// Companion guard: even when an edit changes nothing the scanner can
+    /// cheaply detect (same mtime AND same byte size — e.g. a length-preserving
+    /// one-character swap), passing the explicit `changed_paths` signal still
+    /// forces the reindex. The agent loop threads its own write through this
+    /// bypass, so freshness never depends on mtime/size heuristics for the
+    /// agent's own edits.
+    #[test]
+    fn scan_incremental_changed_paths_bypasses_metadata_heuristics() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::create_dir_all(dir.path().join("src")).unwrap();
+        let file = dir.path().join("src/lib.rs");
+        // 23 bytes.
+        fs::write(&file, "pub fn alpha_name() {}\n").unwrap();
+
+        let canonical = std::fs::canonicalize(dir.path()).unwrap();
+        let token = canonical.to_string_lossy().to_string();
+        let opts = ScanProjectOptions::default();
+
+        let first = scan_incremental(&token, None, opts.clone());
+        let cached_mtime = first
+            .result
+            .files
+            .iter()
+            .find(|r| r.relative_path == "src/lib.rs")
+            .expect("seed file indexed")
+            .last_modified_unix_ms;
+        assert!(symbol_names(&first).iter().any(|n| n == "alpha_name"));
+
+        // Length-preserving rename (same 23 bytes), same forced mtime: neither
+        // the size nor the mtime heuristic can see this.
+        fs::write(&file, "pub fn omega_name() {}\n").unwrap();
+        let secs = cached_mtime / 1000;
+        let nanos = ((cached_mtime % 1000) * 1_000_000) as u32;
+        set_file_mtime(&file, FileTime::from_unix_time(secs, nanos)).unwrap();
+
+        // Without an explicit signal the heuristics legitimately miss this
+        // rare length-preserving same-instant case...
+        let heuristic_only = scan_incremental(&token, None, opts.clone());
+        assert!(
+            !heuristic_only
+                .delta
+                .modified
+                .contains(&"src/lib.rs".to_string()),
+            "documenting the heuristic's known blind spot",
+        );
+
+        // ...but the explicit changed-path signal the agent loop passes after
+        // its own write forces the reindex regardless.
+        let explicit = scan_incremental(&token, Some(&["src/lib.rs".to_string()]), opts);
+        assert!(
+            symbol_names(&explicit).iter().any(|n| n == "omega_name"),
+            "explicit changed_paths must always reindex, got {:?}",
+            symbol_names(&explicit),
+        );
     }
 }

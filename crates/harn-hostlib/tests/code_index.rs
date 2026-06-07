@@ -384,3 +384,140 @@ fn empty_workspace_returns_empty_responses() {
     ));
     assert!(extract_list(imps_of.get("importers").unwrap()).is_empty());
 }
+
+// === Recall@K canary for the substring `query` scorer ===
+//
+// `run_query` ranks hits by raw substring `match_count` (desc, path asc) — no
+// IDF or length normalization. This gold fixture pins what that scorer actually
+// recovers so a future scorer change has to MEASURE against it rather than
+// churn the load-bearing index blindly.
+//
+// Findings these assertions lock in (see PR investigation):
+//   * Rare-symbol localization — the cheap-model grounding pain point — already
+//     achieves recall@5 = 1.0 under raw count. There are few matching files and
+//     they all fit in the top-K, so the scorer is NOT the bottleneck here.
+//   * The one demonstrable count-scorer blind spot is recall@1 for a symbol
+//     DEFINITION when a non-definition file mentions the symbol more times
+//     (e.g. a test that repeats it). The definition is ranked 2nd, not buried —
+//     recall@3 recovers it. A length/IDF-normalized scorer was prototyped and
+//     REGRESSED other cases (common-token recall@5 1.0 -> 0.5) with no rare-
+//     symbol gain, so the scorer is intentionally left as raw count.
+
+/// Build a workspace where a rare symbol is defined once but mentioned many
+/// times in a non-definition test file, plus several single-mention callers and
+/// unrelated noise files. Mirrors the realistic "localize the definition" task.
+fn write_recall_workspace() -> tempfile::TempDir {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    fs::create_dir_all(root.join("src")).unwrap();
+    fs::create_dir_all(root.join("tests")).unwrap();
+
+    // Definition file: the symbol appears twice (decl + impl).
+    fs::write(
+        root.join("src/retry_budget.rs"),
+        "pub struct RetryBudget { remaining: u32 }\nimpl RetryBudget { pub fn new() -> Self { RetryBudget { remaining: 3 } } }\n",
+    )
+    .unwrap();
+    // Non-definition test file mentions the symbol many times (high raw count).
+    fs::write(
+        root.join("tests/retry_budget_test.rs"),
+        "let b = RetryBudget::new();\n".repeat(20),
+    )
+    .unwrap();
+    // Single-mention callers.
+    for i in 0..6 {
+        fs::write(
+            root.join(format!("src/caller{i}.rs")),
+            "fn run() { let b = RetryBudget::new(); }\n",
+        )
+        .unwrap();
+    }
+    // Noise files without the symbol.
+    for i in 0..8 {
+        fs::write(root.join(format!("src/noise{i}.rs")), "fn unrelated() {}\n").unwrap();
+    }
+    dir
+}
+
+fn query_ranked_paths(registry: &BuiltinRegistry, needle: &str) -> Vec<String> {
+    let response = call(
+        registry,
+        "hostlib_code_index_query",
+        dict(&[
+            ("needle", VmValue::String(Arc::from(needle))),
+            ("max_results", VmValue::Int(100)),
+        ]),
+    );
+    let response = extract_dict(&response);
+    extract_list(response.get("results").unwrap())
+        .iter()
+        .map(|hit| extract_str(extract_dict(hit).get("path").unwrap()))
+        .collect()
+}
+
+fn recall_at_k(ranked: &[String], expected: &[&str], k: usize) -> f64 {
+    let top = &ranked[..ranked.len().min(k)];
+    let hit = expected
+        .iter()
+        .filter(|e| top.iter().any(|p| p == *e))
+        .count();
+    hit as f64 / expected.len() as f64
+}
+
+#[test]
+fn query_recall_gold_fixture_rare_symbol_and_definition_burial() {
+    let dir = write_recall_workspace();
+    let (registry, _) = build_registry();
+    call(
+        &registry,
+        "hostlib_code_index_rebuild",
+        dict(&[(
+            "root",
+            VmValue::String(Arc::from(dir.path().to_string_lossy().to_string())),
+        )]),
+    );
+
+    let ranked = query_ranked_paths(&registry, "RetryBudget");
+
+    // Rare-symbol recall: every file that references the symbol is a relevant
+    // localization target, and they all surface within the top-K. recall@5 is
+    // perfect — the count scorer is not the rare-symbol grounding bottleneck.
+    let all_refs = [
+        "src/retry_budget.rs",
+        "tests/retry_budget_test.rs",
+        "src/caller0.rs",
+        "src/caller1.rs",
+        "src/caller2.rs",
+        "src/caller3.rs",
+        "src/caller4.rs",
+        "src/caller5.rs",
+    ];
+    assert_eq!(
+        recall_at_k(&ranked, &["src/retry_budget.rs"], 5),
+        1.0,
+        "definition must be within top-5 under raw count, got order {ranked:?}"
+    );
+    assert_eq!(
+        ranked.len(),
+        all_refs.len(),
+        "every referencing file returns (no false drops), got {ranked:?}"
+    );
+
+    // Documented blind spot: the high-mention test file outranks the
+    // definition, so recall@1 for the *definition* is 0. recall@3 recovers it.
+    // If a scorer change flips these, this canary forces a re-measure.
+    assert_eq!(
+        ranked[0], "tests/retry_budget_test.rs",
+        "raw count ranks the most-mentions file first, got {ranked:?}"
+    );
+    assert_eq!(
+        recall_at_k(&ranked, &["src/retry_budget.rs"], 1),
+        0.0,
+        "known recall@1 definition-burial under raw count, order {ranked:?}"
+    );
+    assert_eq!(
+        recall_at_k(&ranked, &["src/retry_budget.rs"], 3),
+        1.0,
+        "definition recovered by recall@3, order {ranked:?}"
+    );
+}
