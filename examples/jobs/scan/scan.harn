@@ -1,0 +1,25 @@
+// A minimal `.harn` worker/job (#3171).
+//
+// Run it as a one-shot worker:
+//
+//   harn run --as-job examples/jobs/scan/scan.harn \
+//     --job scan --request request.json --result-out report.json
+//
+// The `@job` attribute marks `scan` as a worker entrypoint. The driver
+// lowers it into a trigger binding and dispatches it through the trigger
+// dispatcher, so retry / dead-letter / budget / cancellation all come for
+// free — no second execution engine. The JSON request is delivered to the
+// handler as `event.provider_payload.raw` (the idiomatic place every
+// webhook-shaped trigger handler reads its body), and whatever the job
+// returns is printed to stdout as the JSON report.
+//
+// This mirrors the harn-cloud factory `scan_worker` contract: read a JSON
+// request, do work, emit a JSON report.
+import "std/triggers"
+
+/** Echo the JSON request back as a worker report. */
+@job("scan", retry: {max: 3, backoff: "exponential"})
+pub fn scan(event: TriggerEvent) -> dict {
+  let req = event.provider_payload.raw
+  return {status: "ok", echo: req}
+}

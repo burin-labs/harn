@@ -295,6 +295,11 @@ async fn async_main(raw_args: Vec<String>, runtime_mode: CliRuntimeMode) {
                 return;
             }
 
+            if args.as_job {
+                run_as_job(&args).await;
+                return;
+            }
+
             match (args.eval.as_deref(), args.file.as_deref()) {
                 (Some(code), None) => {
                     if args.allow_unsigned || args.dry_run_verify {
@@ -1995,6 +2000,64 @@ fn command_error(message: &str) -> ! {
     Cli::command()
         .error(ErrorKind::ValueValidation, message)
         .exit()
+}
+
+/// `harn run --as-job <file.harn> --job <name> --request <req.json>
+/// [--result-out <out.json>]` — run a `.harn` `@job` once against a JSON
+/// request and print the report JSON. The drop-in for the factory worker
+/// binaries' `--request → do work → println!(report)` contract (#3171).
+///
+/// Lowers the job to a trigger binding and dispatches it through the
+/// existing trigger dispatcher (retry / DLQ / budget / cancel come from
+/// there), so this is purely a thin CLI shell over
+/// [`harn_serve::run_job_from_files`].
+async fn run_as_job(args: &cli::RunArgs) {
+    let Some(file) = args.file.as_deref() else {
+        command_error("`--as-job` requires a `.harn` file path");
+    };
+    let Some(job) = args.job.as_deref() else {
+        command_error("`--as-job` requires `--job <name>`");
+    };
+    let Some(request) = args.request.as_deref() else {
+        command_error("`--as-job` requires `--request <path>`");
+    };
+
+    let script_path = PathBuf::from(file);
+    let job = job.to_string();
+    let request = request.to_path_buf();
+    let result_out = args.result_out.clone();
+
+    // Pin the whole job run to the current thread: the trigger registry
+    // and dispatcher state are thread-local, so the register → resolve →
+    // dispatch sequence must not migrate across the multi-thread runtime's
+    // workers between awaits. `LocalSet::run_until` keeps it on one thread
+    // and also backs any `spawn_local` the VM performs.
+    let local = tokio::task::LocalSet::new();
+    let outcome = local
+        .run_until(async move {
+            harn_serve::run_job_from_files(
+                &script_path,
+                &job,
+                &request,
+                result_out.as_deref(),
+                false,
+            )
+            .await
+        })
+        .await;
+
+    match outcome {
+        Ok((outcome, rendered)) => {
+            println!("{rendered}");
+            if !outcome.succeeded() {
+                process::exit(1);
+            }
+        }
+        Err(error) => {
+            eprintln!("[harn] job failed: {}", error.message());
+            process::exit(1);
+        }
+    }
 }
 
 fn print_check_error(code: &str, message: &str) -> ! {

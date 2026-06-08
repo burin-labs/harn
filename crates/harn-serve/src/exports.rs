@@ -2,7 +2,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use harn_parser::{Attribute, Node, TypeExpr};
+use harn_parser::{Attribute, AttributeArg, Node, TypeExpr};
 
 use crate::limits::{limits_and_budget_from_attributes, BudgetSpec, RouteLimits};
 use crate::DispatchError;
@@ -50,6 +50,86 @@ pub struct ExportedFunction {
     /// absent. `None` for functions that are dispatch-only (API/A2A/MCP)
     /// and not meant to be reached over a bare HTTP path.
     pub route: Option<RouteSpec>,
+    /// Worker/job execution surface declared via `@job("name")`. `None`
+    /// for ordinary `pub fn` handlers; `Some` marks a long-running /
+    /// scheduled / operator-batch entrypoint that the worker adapter runs
+    /// through the trigger dispatcher (retry / DLQ / budget / cancel all
+    /// come free from the dispatcher). See [`JobSpec`].
+    pub job: Option<JobSpec>,
+}
+
+/// A `.harn` worker/job entrypoint declared with `@job("name")`.
+///
+/// A job is *not* a separate execution engine: the worker adapter lowers
+/// it into a `TriggerBindingSpec` whose handler is the function's own
+/// closure and dispatches it through `harn_vm`'s trigger
+/// [`Dispatcher`](harn_vm::Dispatcher). Retry, dead-letter, per-dispatch
+/// budget, and cancellation are therefore inherited from the dispatcher
+/// rather than re-implemented here.
+///
+/// Declared like the route/limits/budget attributes:
+///
+/// ```harn
+/// @job("scan")
+/// @schedule("0 * * * *", "UTC")   // optional — cron-driven daemon jobs
+/// @queue("scan-jobs")             // optional — worker-queue fan-out
+/// @retry(max: 3, backoff: "exponential")
+/// @budget(llm_cost_usd: 0.50)
+/// @scopes("scan:run")
+/// pub fn scan(event: TriggerEvent) -> dict { ... }
+/// ```
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct JobSpec {
+    /// Stable job name; used as the trigger-binding id. Defaults to the
+    /// function name when `@job()` is written with no argument.
+    pub name: String,
+    /// Cron expression (+ optional timezone) from `@schedule(...)`. Only
+    /// the `harn serve worker` daemon acts on this; the one-shot
+    /// `harn run --as-job` path ignores it. `None` for queue / one-shot
+    /// jobs.
+    pub schedule: Option<ScheduleSpec>,
+    /// Worker-queue name from `@queue("q")`. `None` for inline jobs.
+    pub queue: Option<String>,
+    /// Retry policy from `@retry(max:, backoff:)`. `None` falls back to
+    /// the dispatcher default (`TriggerRetryConfig::default`).
+    pub retry: Option<RetrySpec>,
+}
+
+/// Cron schedule declared via `@schedule("expr", "tz")`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ScheduleSpec {
+    /// Cron expression (5- or 6-field), passed verbatim to the cron
+    /// connector.
+    pub cron: String,
+    /// IANA timezone name; `None` means the connector's default (UTC).
+    pub timezone: Option<String>,
+}
+
+/// Retry policy declared via `@retry(max: N, backoff: "...")`.
+///
+/// Mirrors the trigger DSL's `retry: {max, policy}` shape. The worker
+/// adapter maps this onto `harn_vm::TriggerRetryConfig` so the dispatcher
+/// applies it unchanged.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RetrySpec {
+    /// Maximum total attempts. `0` (or absent) defers to the dispatcher
+    /// default.
+    pub max_attempts: u32,
+    /// Backoff strategy keyword: `svix` (default), `linear`, or
+    /// `exponential`.
+    pub backoff: RetryBackoff,
+}
+
+/// Backoff keyword from `@retry(backoff: "...")`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum RetryBackoff {
+    /// Svix-style increasing schedule — the dispatcher default.
+    #[default]
+    Svix,
+    /// Fixed delay between attempts.
+    Linear,
+    /// Doubling delay, capped.
+    Exponential,
 }
 
 /// An HTTP method + path a `.harn` handler answers under `harn serve
@@ -91,6 +171,22 @@ pub const ROUTE_BAD_ARITY: &str = "HARN-SRV-002";
 /// `@scopes` carries an argument that is not a string literal; that
 /// scope requirement is dropped, leaving the route less restricted.
 pub const SCOPES_ARG_NOT_STRING: &str = "HARN-SRV-003";
+/// `@job` carries a non-string name, or more than one positional
+/// argument. The function is not registered as a job.
+pub const JOB_BAD_NAME: &str = "HARN-SRV-004";
+/// `@schedule` is malformed — it takes a cron expression and an optional
+/// timezone, both string literals. The schedule is dropped.
+pub const SCHEDULE_BAD_ARGS: &str = "HARN-SRV-005";
+/// `@queue` carries a non-string queue name, or the wrong number of
+/// arguments. The queue binding is dropped.
+pub const QUEUE_BAD_NAME: &str = "HARN-SRV-006";
+/// `@retry(max:, backoff:)` carries an unrecognised argument shape — a
+/// non-integer `max` or an unknown `backoff` keyword. The offending
+/// field is dropped (the rest of the policy still applies).
+pub const RETRY_BAD_ARGS: &str = "HARN-SRV-007";
+/// `@schedule` / `@queue` / `@retry` appears without a `@job` attribute.
+/// Those modifiers only mean something on a job, so they are ignored.
+pub const JOB_MODIFIER_WITHOUT_JOB: &str = "HARN-SRV-008";
 
 impl std::fmt::Display for ExportDiagnostic {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -165,6 +261,7 @@ impl ExportCatalog {
                     limits,
                     budget,
                     route: route_from_attributes(attrs, name, &mut diagnostics),
+                    job: job_from_attributes(attrs, name, &mut diagnostics),
                 },
             );
         }
@@ -205,6 +302,7 @@ impl ExportCatalog {
                     // HTTP route. Only `pub fn` handlers participate in
                     // `harn serve site`.
                     route: None,
+                    job: job_from_attributes(attrs, name, &mut diagnostics),
                 });
         }
 
@@ -426,6 +524,268 @@ fn normalize_route_path(path: &str) -> String {
     } else {
         format!("/{trimmed}")
     }
+}
+
+/// Resolve the worker/job binding a `pub fn` declares with `@job(...)`.
+///
+/// Mirrors [`route_from_attributes`]: a present-but-malformed `@job`
+/// records a `HARN-SRV-*` diagnostic and returns `None` so the author
+/// sees the mistake instead of a silently mis-named or unregistered job.
+///
+/// Shape (`retry:` rides inside `@job` because `retry` is a reserved
+/// keyword and so cannot be its own `@retry` attribute name — the same
+/// reason the trigger DSL nests `retry: {...}` inside `trigger_register`):
+///
+/// ```harn
+/// @job("scan", retry: { max: 3, backoff: "exponential" })
+/// @schedule("0 * * * *", "UTC")   // optional cron daemon job
+/// @queue("scan-jobs")             // optional worker queue
+/// pub fn scan(event: TriggerEvent) -> dict { ... }
+/// ```
+///
+/// The `@schedule` / `@queue` modifiers are parsed only when a `@job` is
+/// present; written without one, they are dropped with a diagnostic (they
+/// have no meaning off a job).
+fn job_from_attributes(
+    attrs: &[Attribute],
+    fn_name: &str,
+    diagnostics: &mut Vec<ExportDiagnostic>,
+) -> Option<JobSpec> {
+    let Some(job_attr) = attrs.iter().find(|attr| attr.name == "job") else {
+        // The schedule/queue modifiers are inert without a `@job`.
+        for modifier in ["schedule", "queue"] {
+            if let Some(attr) = attrs.iter().find(|attr| attr.name == modifier) {
+                diagnostics.push(ExportDiagnostic {
+                    code: JOB_MODIFIER_WITHOUT_JOB,
+                    line: attr.span.line,
+                    message: format!(
+                        "`@{modifier}` on `{fn_name}` has no effect without a `@job(\"name\")` \
+                         attribute; ignoring it"
+                    ),
+                });
+            }
+        }
+        return None;
+    };
+
+    // Split the `@job(...)` args into the optional positional name and
+    // the named modifiers (`retry: {...}`). A non-string positional name
+    // or more than one positional is ambiguous, so refuse to guess.
+    let positionals: Vec<&AttributeArg> = job_attr
+        .args
+        .iter()
+        .filter(|arg| arg.name.is_none())
+        .collect();
+    let name = match positionals.as_slice() {
+        [] => fn_name.to_string(),
+        [arg] => match &arg.value.node {
+            Node::StringLiteral(value) | Node::RawStringLiteral(value) => {
+                let trimmed = value.trim();
+                if trimmed.is_empty() {
+                    fn_name.to_string()
+                } else {
+                    trimmed.to_string()
+                }
+            }
+            _ => {
+                diagnostics.push(ExportDiagnostic {
+                    code: JOB_BAD_NAME,
+                    line: job_attr.span.line,
+                    message: format!(
+                        "`@job` on `{fn_name}` takes an optional string-literal name \
+                         (`@job` or `@job(\"name\")`); function not registered as a job"
+                    ),
+                });
+                return None;
+            }
+        },
+        _ => {
+            diagnostics.push(ExportDiagnostic {
+                code: JOB_BAD_NAME,
+                line: job_attr.span.line,
+                message: format!(
+                    "`@job` on `{fn_name}` takes at most one string-literal name, found {}; \
+                     function not registered as a job",
+                    positionals.len()
+                ),
+            });
+            return None;
+        }
+    };
+
+    Some(JobSpec {
+        name,
+        schedule: schedule_from_attributes(attrs, fn_name, diagnostics),
+        queue: queue_from_attributes(attrs, fn_name, diagnostics),
+        retry: retry_from_job_attr(job_attr, fn_name, diagnostics),
+    })
+}
+
+fn schedule_from_attributes(
+    attrs: &[Attribute],
+    fn_name: &str,
+    diagnostics: &mut Vec<ExportDiagnostic>,
+) -> Option<ScheduleSpec> {
+    let attr = attrs.iter().find(|attr| attr.name == "schedule")?;
+    let literals: Vec<&str> = attr
+        .args
+        .iter()
+        .filter_map(|arg| match &arg.value.node {
+            Node::StringLiteral(value) | Node::RawStringLiteral(value) => Some(value.as_str()),
+            _ => None,
+        })
+        .collect();
+    if literals.len() != attr.args.len() {
+        diagnostics.push(ExportDiagnostic {
+            code: SCHEDULE_BAD_ARGS,
+            line: attr.span.line,
+            message: format!(
+                "`@schedule` on `{fn_name}` requires string-literal arguments \
+                 (`@schedule(\"cron\")` or `@schedule(\"cron\", \"timezone\")`); schedule dropped"
+            ),
+        });
+        return None;
+    }
+    match literals.as_slice() {
+        [cron] => Some(ScheduleSpec {
+            cron: cron.trim().to_string(),
+            timezone: None,
+        }),
+        [cron, timezone] => Some(ScheduleSpec {
+            cron: cron.trim().to_string(),
+            timezone: Some(timezone.trim().to_string()),
+        }),
+        _ => {
+            diagnostics.push(ExportDiagnostic {
+                code: SCHEDULE_BAD_ARGS,
+                line: attr.span.line,
+                message: format!(
+                    "`@schedule` on `{fn_name}` takes a cron expression and an optional timezone, \
+                     found {} arguments; schedule dropped",
+                    literals.len()
+                ),
+            });
+            None
+        }
+    }
+}
+
+fn queue_from_attributes(
+    attrs: &[Attribute],
+    fn_name: &str,
+    diagnostics: &mut Vec<ExportDiagnostic>,
+) -> Option<String> {
+    let attr = attrs.iter().find(|attr| attr.name == "queue")?;
+    match attr.args.as_slice() {
+        [arg] => match &arg.value.node {
+            Node::StringLiteral(value) | Node::RawStringLiteral(value)
+                if !value.trim().is_empty() =>
+            {
+                Some(value.trim().to_string())
+            }
+            _ => {
+                diagnostics.push(ExportDiagnostic {
+                    code: QUEUE_BAD_NAME,
+                    line: attr.span.line,
+                    message: format!(
+                        "`@queue` on `{fn_name}` requires a non-empty string-literal queue name \
+                         (`@queue(\"queue-name\")`); queue dropped"
+                    ),
+                });
+                None
+            }
+        },
+        _ => {
+            diagnostics.push(ExportDiagnostic {
+                code: QUEUE_BAD_NAME,
+                line: attr.span.line,
+                message: format!(
+                    "`@queue` on `{fn_name}` takes exactly one string-literal queue name, found {}; \
+                     queue dropped",
+                    attr.args.len()
+                ),
+            });
+            None
+        }
+    }
+}
+
+/// Parse the optional `retry: { max:, backoff: }` named argument off the
+/// `@job(...)` attribute. Mirrors the trigger DSL's `retry` dict so a job
+/// author who knows `trigger_register` reuses the same shape.
+fn retry_from_job_attr(
+    job_attr: &Attribute,
+    fn_name: &str,
+    diagnostics: &mut Vec<ExportDiagnostic>,
+) -> Option<RetrySpec> {
+    let retry_arg = job_attr
+        .args
+        .iter()
+        .find(|arg| arg.name.as_deref() == Some("retry"))?;
+    let Node::DictLiteral(entries) = &retry_arg.value.node else {
+        diagnostics.push(ExportDiagnostic {
+            code: RETRY_BAD_ARGS,
+            line: retry_arg.span.line,
+            message: format!(
+                "`@job(retry:)` on `{fn_name}` requires a dict \
+                 (`retry: {{ max: 3, backoff: \"exponential\" }}`); retry dropped"
+            ),
+        });
+        return None;
+    };
+
+    let mut max_attempts: u32 = 0;
+    let mut backoff = RetryBackoff::default();
+    for entry in entries {
+        let key = match &entry.key.node {
+            Node::Identifier(name) => name.clone(),
+            Node::StringLiteral(name) | Node::RawStringLiteral(name) => name.clone(),
+            _ => continue,
+        };
+        match key.as_str() {
+            "max" | "max_attempts" => match &entry.value.node {
+                Node::IntLiteral(value) if *value >= 0 => max_attempts = *value as u32,
+                _ => diagnostics.push(ExportDiagnostic {
+                    code: RETRY_BAD_ARGS,
+                    line: retry_arg.span.line,
+                    message: format!(
+                        "`@job(retry:)` `max` on `{fn_name}` requires a non-negative integer; \
+                         using the dispatcher default"
+                    ),
+                }),
+            },
+            "backoff" | "policy" => match &entry.value.node {
+                Node::StringLiteral(value) | Node::RawStringLiteral(value) => {
+                    match value.trim().to_ascii_lowercase().as_str() {
+                        "svix" | "" => backoff = RetryBackoff::Svix,
+                        "linear" => backoff = RetryBackoff::Linear,
+                        "exponential" | "exp" => backoff = RetryBackoff::Exponential,
+                        other => diagnostics.push(ExportDiagnostic {
+                            code: RETRY_BAD_ARGS,
+                            line: retry_arg.span.line,
+                            message: format!(
+                                "`@job(retry:)` `backoff` on `{fn_name}` got unknown strategy \
+                                 '{other}' (expected 'svix', 'linear', or 'exponential'); using 'svix'"
+                            ),
+                        }),
+                    }
+                }
+                _ => diagnostics.push(ExportDiagnostic {
+                    code: RETRY_BAD_ARGS,
+                    line: retry_arg.span.line,
+                    message: format!(
+                        "`@job(retry:)` `backoff` on `{fn_name}` requires a string-literal \
+                         strategy; using 'svix'"
+                    ),
+                }),
+            },
+            _ => continue,
+        }
+    }
+    Some(RetrySpec {
+        max_attempts,
+        backoff,
+    })
 }
 
 fn pipeline_input_schema(params: &[String]) -> serde_json::Value {
@@ -751,5 +1111,112 @@ pub fn list_sessions() -> string { return "ok" }
             .find(|d| d.code == SCOPES_ARG_NOT_STRING)
             .expect("scopes diagnostic");
         assert!(diagnostic.message.contains("list_sessions"));
+    }
+
+    #[test]
+    fn job_attribute_parses_name_schedule_queue_and_retry() {
+        let catalog = catalog_from_source(
+            r#"
+@job("scan", retry: { max: 3, backoff: "exponential" })
+@schedule("0 * * * *", "UTC")
+@queue("scan-jobs")
+pub fn scan(event: TriggerEvent) -> dict { return {ok: true} }
+
+@job
+pub fn sweep(event: TriggerEvent) -> dict { return {ok: true} }
+
+pub fn helper(req: dict) -> dict { return req }
+"#,
+        );
+        assert!(
+            catalog.diagnostics().is_empty(),
+            "unexpected diagnostics: {:?}",
+            catalog.diagnostics()
+        );
+
+        let scan = catalog.function("scan").expect("scan export");
+        let job = scan.job.as_ref().expect("scan is a job");
+        assert_eq!(job.name, "scan");
+        assert_eq!(
+            job.schedule,
+            Some(ScheduleSpec {
+                cron: "0 * * * *".to_string(),
+                timezone: Some("UTC".to_string()),
+            })
+        );
+        assert_eq!(job.queue.as_deref(), Some("scan-jobs"));
+        assert_eq!(
+            job.retry,
+            Some(RetrySpec {
+                max_attempts: 3,
+                backoff: RetryBackoff::Exponential,
+            })
+        );
+
+        // Bare `@job` defaults the job name to the function name and
+        // carries no schedule/queue/retry.
+        let sweep = catalog.function("sweep").expect("sweep export");
+        let sweep_job = sweep.job.as_ref().expect("sweep is a job");
+        assert_eq!(sweep_job.name, "sweep");
+        assert!(sweep_job.schedule.is_none());
+        assert!(sweep_job.queue.is_none());
+        assert!(sweep_job.retry.is_none());
+
+        // A plain `pub fn` is not a job.
+        let helper = catalog.function("helper").expect("helper export");
+        assert!(helper.job.is_none());
+    }
+
+    #[test]
+    fn job_with_non_string_name_is_diagnosed_and_unregistered() {
+        let catalog = catalog_from_source(
+            r#"
+pub fn name_of(event: TriggerEvent) -> string { return "x" }
+
+@job(name_of)
+pub fn scan(event: TriggerEvent) -> dict { return {ok: true} }
+"#,
+        );
+        let scan = catalog.function("scan").expect("scan export");
+        assert!(scan.job.is_none());
+        let codes: Vec<&str> = catalog.diagnostics().iter().map(|d| d.code).collect();
+        assert_eq!(codes, vec![JOB_BAD_NAME]);
+    }
+
+    #[test]
+    fn schedule_modifier_without_job_is_diagnosed() {
+        let catalog = catalog_from_source(
+            r#"
+@schedule("0 * * * *")
+pub fn orphan(event: TriggerEvent) -> dict { return {ok: true} }
+"#,
+        );
+        let orphan = catalog.function("orphan").expect("orphan export");
+        assert!(orphan.job.is_none());
+        let codes: Vec<&str> = catalog.diagnostics().iter().map(|d| d.code).collect();
+        assert_eq!(codes, vec![JOB_MODIFIER_WITHOUT_JOB]);
+    }
+
+    #[test]
+    fn retry_with_unknown_backoff_keeps_max_and_diagnoses() {
+        let catalog = catalog_from_source(
+            r#"
+@job("scan", retry: { max: 5, backoff: "wishful" })
+pub fn scan(event: TriggerEvent) -> dict { return {ok: true} }
+"#,
+        );
+        let scan = catalog.function("scan").expect("scan export");
+        let retry = scan
+            .job
+            .as_ref()
+            .expect("job")
+            .retry
+            .as_ref()
+            .expect("retry");
+        // The valid `max` survives; the bad backoff falls back to svix.
+        assert_eq!(retry.max_attempts, 5);
+        assert_eq!(retry.backoff, RetryBackoff::Svix);
+        let codes: Vec<&str> = catalog.diagnostics().iter().map(|d| d.code).collect();
+        assert_eq!(codes, vec![RETRY_BAD_ARGS]);
     }
 }

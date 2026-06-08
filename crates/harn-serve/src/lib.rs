@@ -51,6 +51,7 @@ pub use adapters::mcp::{
     McpHttpServeOptions, McpServer, McpServerConfig, McpStdioServer, MCP_PROTOCOL_VERSION,
 };
 pub use adapters::site::{SiteHttpServeOptions, SiteServer, SiteServerConfig};
+pub use adapters::worker::{run_job_from_files, run_job_once, JobRunOutcome};
 pub use auth::{
     AllowlistOutcome, ApiKeyAuthConfig, ApiKeyEntry, AuthMethodConfig, AuthPolicy, AuthRequest,
     AuthenticatedPrincipal, AuthorizationDecision, HmacAuthConfig, McpAllowlist, McpAllowlistTools,
@@ -64,7 +65,7 @@ pub use embed::EmbeddedAgent;
 pub use error::{forbidden_data_payload, forbidden_message, DispatchError};
 pub use exports::{
     emit_export_diagnostics, ExportCatalog, ExportDiagnostic, ExportedCallableKind,
-    ExportedFunction, ExportedParam, RouteSpec,
+    ExportedFunction, ExportedParam, JobSpec, RetryBackoff, RetrySpec, RouteSpec, ScheduleSpec,
 };
 pub use http_codec::{
     axum_response_from_call, axum_response_from_dispatch_error, classify_ws_upgrade,
