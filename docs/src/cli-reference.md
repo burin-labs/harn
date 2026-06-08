@@ -1551,7 +1551,9 @@ harn test package --evals
 ```
 
 Package eval discovery uses `[package].evals = ["evals/webhooks.toml"]` when
-present, otherwise it falls back to `harn.eval.toml` in the package root.
+present, otherwise it falls back to `harn.eval.toml` in the package root. After
+`harn install`, discovery also includes eval packs declared by materialized
+dependency packages under `.harn/packages/<alias>/`.
 
 Clarifying-question evals use an explicit fixture with
 `"eval_kind": "clarifying_question"`. The fixture checks persisted

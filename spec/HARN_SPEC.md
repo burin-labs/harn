@@ -6145,6 +6145,11 @@ version = "0.1.0"
 evals = ["evals/webhooks.toml"]
 ```
 
+After `harn install`, eval-pack discovery includes the root package plus
+materialized dependency packages under `.harn/packages/<alias>/`. Installed
+package eval packs are inert until a command or root trigger references them;
+installing a package does not install that package's own triggers.
+
 An eval pack is a TOML document with `version = 1`, package metadata, fixture
 references, rubrics, optional judge calibration, thresholds, cases, and optional
 persona timeout ladders:
@@ -6232,9 +6237,9 @@ Threshold severity controls deployment-gate behavior:
 | `warning` | Failure is reported but does not block |
 | `informational` | Failure is reported for comparison and dashboards only |
 
-Run a pack directly with `harn eval harn.eval.toml`, run package-declared packs
-with `harn test package --evals`, or run a ladder directly with `harn
-merge-captain ladder <manifest>`.
+Run a pack directly with `harn eval harn.eval.toml`, run root and installed
+package-declared packs with `harn test package --evals`, or run a ladder
+directly with `harn merge-captain ladder <manifest>`.
 
 Harn source may also declare an eval pack directly:
 
@@ -6318,12 +6323,13 @@ provenance. Lower-level ledger builtins also accept `split`, `case`,
 Declarative trigger manifests may bind a trigger directly to an eval pack with
 `handler = "eval_pack://<target>"`. A path-like target (`eval_pack://evals/a.toml`
 or an absolute path) loads that TOML/JSON pack relative to `harn.toml`; a bare
-target resolves by pack `id`, `name`, or file stem through `[package].evals` or
-the package's default `harn.eval.toml`. Dispatch runs the normalized manifest
-through the same `eval_pack_run` path as scripts, so cron ticks inherit trigger
-dedupe, retry, DLQ, replay/cancel, budget, and flow-control handling without a
-separate scheduler. Optional trigger-local `ledger = { ... }` or
-`eval_options = { ... }` fields are passed as the `eval_pack_run` options.
+target resolves by pack `id`, `name`, or file stem through the root package and
+installed package eval declarations (`[package].evals` or default
+`harn.eval.toml`). Dispatch runs the normalized manifest through the same
+`eval_pack_run` path as scripts, so cron ticks inherit trigger dedupe, retry,
+DLQ, replay/cancel, budget, and flow-control handling without a separate
+scheduler. Optional trigger-local `ledger = { ... }` or `eval_options = { ... }`
+fields are passed as the `eval_pack_run` options.
 
 Manifests may declare named partitions with a `split` block:
 

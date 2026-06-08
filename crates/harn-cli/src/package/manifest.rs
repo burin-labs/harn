@@ -1507,13 +1507,38 @@ pub fn load_package_eval_pack_paths(anchor: Option<&Path>) -> Result<Vec<PathBuf
         ));
     };
 
+    let ctx = ManifestContext { manifest, dir };
+    let mut paths = eval_pack_paths_from_manifest(&ctx.manifest, &ctx.dir)?;
+    paths.extend(installed_package_eval_pack_paths(&ctx)?);
+    paths.sort();
+    paths.dedup();
+    if paths.is_empty() {
+        return Err(PackageError::Manifest(
+            "package declares no eval packs; add [package].evals, harn.eval.toml, or install a dependency that ships eval packs".to_string(),
+        ));
+    }
+    for path in &paths {
+        if !path.is_file() {
+            return Err(PackageError::Manifest(format!(
+                "eval pack does not exist: {}",
+                path.display()
+            )));
+        }
+    }
+    Ok(paths)
+}
+
+fn eval_pack_paths_from_manifest(
+    manifest: &Manifest,
+    manifest_dir: &Path,
+) -> Result<Vec<PathBuf>, PackageError> {
     let declared = manifest
         .package
         .as_ref()
         .map(|package| package.evals.clone())
         .unwrap_or_default();
-    let mut paths = if declared.is_empty() {
-        let default_pack = dir.join("harn.eval.toml");
+    let paths = if declared.is_empty() {
+        let default_pack = manifest_dir.join("harn.eval.toml");
         if default_pack.is_file() {
             vec![default_pack]
         } else {
@@ -1527,17 +1552,11 @@ pub fn load_package_eval_pack_paths(anchor: Option<&Path>) -> Result<Vec<PathBuf
                 if path.is_absolute() {
                     path
                 } else {
-                    dir.join(path)
+                    manifest_dir.join(path)
                 }
             })
             .collect()
     };
-    paths.sort();
-    if paths.is_empty() {
-        return Err(PackageError::Manifest(
-            "package declares no eval packs; add [package].evals or harn.eval.toml".to_string(),
-        ));
-    }
     for path in &paths {
         if !path.is_file() {
             return Err(PackageError::Manifest(format!(
@@ -1545,6 +1564,36 @@ pub fn load_package_eval_pack_paths(anchor: Option<&Path>) -> Result<Vec<PathBuf
                 path.display()
             )));
         }
+    }
+    Ok(paths)
+}
+
+fn installed_package_eval_pack_paths(ctx: &ManifestContext) -> Result<Vec<PathBuf>, PackageError> {
+    let Some(lock) = LockFile::load(&ctx.lock_path())? else {
+        return Ok(Vec::new());
+    };
+    let mut paths = Vec::new();
+    let packages_dir = ctx.packages_dir();
+    for entry in &lock.packages {
+        validate_package_alias(&entry.name)?;
+        let package_dir = packages_dir.join(&entry.name);
+        if package_dir.is_dir() {
+            if let Some(manifest) = read_package_manifest_from_dir(&package_dir)? {
+                paths.extend(eval_pack_paths_from_manifest(&manifest, &package_dir)?);
+            }
+            continue;
+        }
+
+        let package_file = packages_dir.join(format!("{}.harn", entry.name));
+        if package_file.is_file() {
+            continue;
+        }
+
+        return Err(PackageError::Manifest(format!(
+            "installed package {} is missing under {}; run `harn install`",
+            entry.name,
+            packages_dir.display()
+        )));
     }
     Ok(paths)
 }
@@ -1694,6 +1743,7 @@ impl PackageWorkspace {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::package::test_support::TestWorkspace;
 
     #[test]
     fn rules_table_parses_camel_and_kebab_dir_keys() {
@@ -1745,6 +1795,161 @@ mod tests {
         let paths = load_package_eval_pack_paths(Some(&root.join("src/main.harn"))).unwrap();
 
         assert_eq!(paths, vec![root.join("evals/webhook.toml")]);
+    }
+
+    #[test]
+    fn package_eval_pack_paths_include_installed_package_evals() {
+        let dependency_tmp = tempfile::tempdir().unwrap();
+        let dependency = dependency_tmp.path().join("coding-pack");
+        fs::create_dir_all(dependency.join("evals")).unwrap();
+        fs::write(
+            dependency.join(MANIFEST),
+            r#"
+[package]
+name = "coding-pack"
+version = "0.1.0"
+evals = ["evals/coding.toml"]
+"#,
+        )
+        .unwrap();
+        fs::write(
+            dependency.join("evals/run.json"),
+            serde_json::to_string_pretty(&serde_json::json!({
+                "_type": "workflow_run",
+                "id": "run_1",
+                "workflow_id": "workflow_1",
+                "status": "completed",
+                "usage": {
+                    "total_duration_ms": 12,
+                    "total_cost": 0.01,
+                    "input_tokens": 3,
+                    "output_tokens": 4,
+                    "call_count": 1,
+                    "models": ["mock"]
+                },
+                "replay_fixture": {
+                    "_type": "replay_fixture",
+                    "expected_status": "completed"
+                }
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+        fs::write(
+            dependency.join("evals/coding.toml"),
+            r#"
+version = 1
+id = "coding-pack"
+trials = 2
+
+[package]
+name = "coding-pack"
+version = "0.1.0"
+source = "path:test"
+templates = ["templates/rubric.harn.prompt"]
+
+[metadata]
+model = "mock-model"
+commit = "commit-a"
+
+[[cases]]
+id = "case-a"
+run = "run.json"
+rubrics = ["status"]
+
+[[rubrics]]
+id = "status"
+kind = "deterministic"
+
+[[rubrics.assertions]]
+kind = "run-status"
+expected = "completed"
+"#,
+        )
+        .unwrap();
+
+        let helper = dependency_tmp.path().join("helper-lib");
+        fs::create_dir_all(&helper).unwrap();
+        fs::write(
+            helper.join(MANIFEST),
+            r#"
+[package]
+name = "helper-lib"
+version = "0.1.0"
+"#,
+        )
+        .unwrap();
+
+        let project_tmp = tempfile::tempdir().unwrap();
+        let root = project_tmp.path();
+        let workspace = TestWorkspace::new(root);
+        fs::create_dir_all(root.join(".git")).unwrap();
+        fs::write(
+            root.join(MANIFEST),
+            format!(
+                r#"
+[package]
+name = "workspace"
+version = "0.1.0"
+
+[dependencies]
+coding-pack = {{ path = "{}" }}
+helper-lib = {{ path = "{}" }}
+"#,
+                dependency.display(),
+                helper.display()
+            ),
+        )
+        .unwrap();
+
+        install_packages_in(workspace.env(), false, None, false).unwrap();
+
+        let paths = load_package_eval_pack_paths(Some(&root.join("src/main.harn"))).unwrap();
+        assert_eq!(
+            paths,
+            vec![root
+                .join(PKG_DIR)
+                .join("coding-pack")
+                .join("evals/coding.toml")]
+        );
+
+        harn_vm::event_log::reset_active_event_log();
+        let manifest = harn_vm::orchestration::load_eval_pack_manifest(&paths[0]).unwrap();
+        let package = manifest.package.as_ref().expect("package descriptor");
+        assert_eq!(package.name.as_deref(), Some("coding-pack"));
+        assert_eq!(package.templates, vec!["templates/rubric.harn.prompt"]);
+
+        let report = harn_vm::orchestration::evaluate_eval_pack_manifest_resumable(
+            &manifest,
+            Some(serde_json::json!({
+                "namespace": "installed-pack-evals",
+                "suite": "coding-pack",
+                "model": "mock-model",
+                "commit": "commit-a",
+                "branch": "main"
+            })),
+        )
+        .unwrap();
+        assert!(report.pass);
+        assert_eq!(report.trial_count, 2);
+        assert_eq!(report.run_state.ledger_rows_inserted, 2);
+        assert_eq!(report.stats_rows.len(), 1);
+        assert_eq!(report.stats_rows[0].trials, 2);
+        assert!(!report.stats_rows[0].case_fingerprint.is_empty());
+        assert_eq!(
+            report.harness_config_fingerprint,
+            report.stats_rows[0].harness_config_fingerprint
+        );
+
+        let ledger = harn_vm::orchestration::eval_ledger_read_report(Some(serde_json::json!({
+            "namespace": "installed-pack-evals",
+            "suite": "coding-pack",
+            "model": "mock-model",
+            "commit": "commit-a"
+        })))
+        .unwrap();
+        assert_eq!(ledger.rows.len(), 2);
+        harn_vm::event_log::reset_active_event_log();
     }
     #[test]
     fn preflight_severity_parsing_accepts_synonyms() {

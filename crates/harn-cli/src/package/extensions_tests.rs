@@ -994,6 +994,81 @@ run = "run.json"
 }
 
 #[tokio::test(flavor = "current_thread")]
+async fn collect_manifest_triggers_accepts_installed_eval_pack_handler_uri() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path();
+    fs::create_dir_all(root.join(".harn/packages/installed-evals/evals")).unwrap();
+    let harn_file = write_trigger_project(
+        root,
+        r#"
+[package]
+name = "workspace"
+
+[[triggers]]
+id = "dependency-eval"
+kind = "cron"
+provider = "cron"
+match = { events = ["cron.tick"] }
+handler = "eval_pack://dependency-pack"
+schedule = "0 4 * * *"
+timezone = "UTC"
+"#,
+        None,
+    );
+    fs::write(
+        root.join(LOCK_FILE),
+        r#"
+version = 4
+generator_version = "0.8.90"
+protocol_artifact_version = "0.8.90"
+
+[[package]]
+name = "installed-evals"
+source = "path+file:///tmp/installed-evals"
+"#,
+    )
+    .unwrap();
+    fs::write(
+        root.join(".harn/packages/installed-evals/harn.toml"),
+        r#"
+[package]
+name = "installed-evals"
+version = "0.1.0"
+evals = ["evals/dependency.toml"]
+"#,
+    )
+    .unwrap();
+    fs::write(
+        root.join(".harn/packages/installed-evals/evals/dependency.toml"),
+        r#"
+version = 1
+id = "dependency-pack"
+
+[metadata]
+model = "mock-model"
+commit = "commit-a"
+
+[[cases]]
+id = "case-a"
+run = "run.json"
+"#,
+    )
+    .unwrap();
+
+    let mut vm = test_vm();
+    let collected = collect_manifest_triggers(&mut vm, &load_runtime_extensions(&harn_file))
+        .await
+        .expect("trigger collection succeeds");
+
+    assert_eq!(collected.len(), 1);
+    assert!(matches!(
+        &collected[0].handler,
+        CollectedTriggerHandler::EvalPack { target, manifest, .. }
+            if target == "dependency-pack" && manifest.id == "dependency-pack"
+    ));
+}
+
+#[tokio::test(flavor = "current_thread")]
 async fn collect_manifest_triggers_accepts_harn_provider_override() {
     let tmp = tempfile::tempdir().unwrap();
     let harn_file = write_trigger_project(

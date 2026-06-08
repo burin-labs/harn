@@ -99,12 +99,12 @@ dispatch time.
 
 `eval_pack://...` handlers run an eval pack through the same
 `eval_pack_run(manifest, options?)` path as scripts. A bare target resolves by
-pack `id`, `name`, or file stem from `[package].evals` or `harn.eval.toml`; a
-path-like target resolves relative to `harn.toml`. Cron bindings use the normal
-trigger substrate, so budget, retry, DLQ, replay/cancel, dedupe, and
-concurrency controls apply before the suite runs. Optional trigger-local
-`ledger = { ... }` or `eval_options = { ... }` fields are passed as
-`eval_pack_run` options.
+pack `id`, `name`, or file stem from root and installed package eval
+declarations (`[package].evals` or `harn.eval.toml`); a path-like target
+resolves relative to `harn.toml`. Cron bindings use the normal trigger
+substrate, so budget, retry, DLQ, replay/cancel, dedupe, and concurrency
+controls apply before the suite runs. Optional trigger-local `ledger = { ... }`
+or `eval_options = { ... }` fields are passed as `eval_pack_run` options.
 
 Local handlers and predicates resolve through the same module-export plumbing as
 the manifest hook loader:
