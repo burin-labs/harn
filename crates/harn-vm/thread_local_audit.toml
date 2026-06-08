@@ -490,7 +490,7 @@ plan = "arc_registry_scope"
 
 [[thread_local]]
 path = "src/stdlib/postgres/mod.rs"
-statics = ["POOLS", "TXS", "MOCKS"]
+statics = ["POOLS", "TXS", "MOCKS", "DESCRIBED_OIDS"]
 category = "runtime_registry"
 plan = "arc_registry_scope"
 
