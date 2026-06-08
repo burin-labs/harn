@@ -43,6 +43,11 @@ pub(super) struct HttpRequestConfig {
     tls: HttpTlsConfig,
     decompress: bool,
     max_response_bytes: usize,
+    /// When true, install a connect-time [`crate::egress::GuardedResolver`] so
+    /// the TCP connection can only target addresses that pass the SSRF
+    /// classifier (closes the DNS-rebinding TOCTOU).
+    ssrf_block_private: bool,
+    ssrf_allow_loopback: bool,
 }
 
 #[derive(Clone, Default)]
@@ -471,6 +476,7 @@ fn parse_retry_methods(options: &BTreeMap<String, VmValue>) -> Vec<String> {
 }
 
 pub(super) fn parse_http_options(options: &BTreeMap<String, VmValue>) -> HttpRequestConfig {
+    let (ssrf_block_private, ssrf_allow_loopback) = crate::egress::current_ssrf_client_settings();
     let total_timeout_ms = vm_get_int_option(options, "total_timeout_ms", -1);
     let total_timeout_ms = if total_timeout_ms >= 0 {
         total_timeout_ms as u64
@@ -514,12 +520,14 @@ pub(super) fn parse_http_options(options: &BTreeMap<String, VmValue>) -> HttpReq
         tls: parse_tls_config(options),
         decompress: vm_get_bool_option(options, "decompress", true),
         max_response_bytes,
+        ssrf_block_private,
+        ssrf_allow_loopback,
     }
 }
 
 fn http_client_key(config: &HttpRequestConfig) -> String {
     format!(
-        "follow_redirects={};max_redirects={};connect_timeout={:?};read_timeout={:?};proxy={};proxy_auth={};proxy_pass={};no_proxy={};ca={};client_cert={};client_key={};identity={};pins={};decompress={}",
+        "follow_redirects={};max_redirects={};connect_timeout={:?};read_timeout={:?};proxy={};proxy_auth={};proxy_pass={};no_proxy={};ca={};client_cert={};client_key={};identity={};pins={};decompress={};ssrf={};ssrf_loopback={}",
         config.follow_redirects,
         config.max_redirects,
         config.connect_timeout_ms,
@@ -552,6 +560,8 @@ fn http_client_key(config: &HttpRequestConfig) -> String {
         config.tls.client_identity_path.as_deref().unwrap_or(""),
         config.tls.pinned_sha256.join(","),
         config.decompress,
+        config.ssrf_block_private,
+        config.ssrf_allow_loopback,
     )
 }
 
@@ -577,6 +587,14 @@ pub(super) fn build_http_client(config: &HttpRequestConfig) -> Result<reqwest::C
     };
 
     let mut builder = reqwest::Client::builder().redirect(redirect_policy);
+    if config.ssrf_block_private {
+        // Connect-time backstop: reqwest can only open TCP connections to the
+        // addresses this resolver returns, so private/loopback/metadata IPs
+        // are unreachable even if DNS rebinds after the egress pre-check.
+        builder = builder.dns_resolver(Arc::new(crate::egress::GuardedResolver::new(
+            config.ssrf_allow_loopback,
+        )));
+    }
     if let Some(ms) = config.connect_timeout_ms {
         builder = builder.connect_timeout(Duration::from_millis(ms));
     }
