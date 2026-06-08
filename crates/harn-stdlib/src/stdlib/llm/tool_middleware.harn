@@ -318,6 +318,11 @@ pub fn tool_inject_param(entry, name, schema_fragment, opts = nil) {
   }
   let cfg = __tool_mw_dict(opts)
   let required = cfg?.required ?? true
+  let fragment = if type_of(schema_fragment) == "dict" && schema_fragment?.required == nil {
+    schema_fragment + {required: required}
+  } else {
+    schema_fragment
+  }
   let params = entry?.parameters
   if type_of(params) == "dict" && contains(params.keys(), "type")
     && to_string(params.type) == "object" {
@@ -325,7 +330,7 @@ pub fn tool_inject_param(entry, name, schema_fragment, opts = nil) {
     if contains(props.keys(), name) {
       return entry
     }
-    let new_props = props + {[name]: schema_fragment}
+    let new_props = props + {[name]: fragment}
     let req_list = __tool_mw_list(params?.required)
     let new_req = if required && !contains(req_list, name) {
       req_list.push(name)
@@ -340,7 +345,7 @@ pub fn tool_inject_param(entry, name, schema_fragment, opts = nil) {
   if contains(bare.keys(), name) {
     return entry
   }
-  return entry + {parameters: bare + {[name]: schema_fragment}}
+  return entry + {parameters: bare + {[name]: fragment}}
 }
 
 // -------------------------------------------------------------------------------------------------
@@ -718,7 +723,7 @@ pub fn with_audit_log(sink_or_options) {
     let receipt = if receipt_uri == nil {
       base_receipt
     } else {
-      base_receipt + {audit: __merge_audit(base_receipt?.audit, {receipt_uri: receipt_uri})}
+      base_receipt + {audit: __merge_audit(base_receipt.audit, {receipt_uri: receipt_uri})}
     }
     let enriched_result = if receipt_uri == nil {
       result
