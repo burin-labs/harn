@@ -8,6 +8,109 @@ highlights live in [CHANGELOG-pre-0.6.md](CHANGELOG-pre-0.6.md).
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.8.91
+
+### Added
+
+- Added cron-bindable eval-pack trigger handlers via `eval_pack://...`,
+  including trigger budget, retry, replay, DLQ, cancellation, ledger, docs, and
+  conformance coverage.
+- Added a third tool-calling format, `tool_format = "json"` (fenced-JSON), a
+  delimiter-safe peer of `text` (tagged/heredoc) and `native`. Each call is one
+  ```` ```tool ```` fenced block wrapping a single
+  `{ "name": ..., "args": { ... } }` JSON object (N blocks for N calls); the
+  body channel is a JSON string, so backticks, `<<EOF`, `}`, and `</tool>` ride
+  inside file content with no escaping and the line-anchored close fence never
+  collides with a content ```` ``` ````. This root-cause-fixes the
+  native/text `<<EOF` heredoc-leak class (`syntax error: line 0: <<`) by
+  deleting the heredoc body channel entirely. New parser
+  `crates/harn-vm/src/llm/tools/parse/fenced_json.rs` (selected when
+  `tool_format == "json"`), new `agent.tool_contract_json` prompt and json
+  paradigm/body-hint, format plumbing across the parity gates and capability
+  resolution with a compile-time exhaustive `tool_format_channel` guard, and a
+  conformance classifier that recognizes a fenced-JSON emission as
+  `parseable_harn_text_tool_call`. (A follow-up change promotes `json` to the
+  global default text tool-calling format; see the separate changelog entry.)
+
+### Changed
+
+- **Internal: unified the Markdown table-cell pipe escaping used by the CLI
+  report commands.** The eval summary, provider-matrix, provider-support, and
+  diagnostics-catalog commands each carried a private copy of the same
+  `|`-escaping helper; they now share `crate::format::escape_md`. No behavior
+  change to any rendered report.
+- Made fenced-JSON (`tool_format = "json"`) the GLOBAL DEFAULT text tool-calling
+  format, replacing heredoc (`text`). A text-channel model with no
+  `preferred_tool_format` pin — and the `auto`/omitted resolution path — now
+  resolves to `json` in both the runtime (`llm_config::default_tool_format`) and
+  the agent stdlib (`std/agent/options` fallback). NATIVE-channel models are
+  unchanged. The flip is STRUCTURAL, not just measured: a JSON string can't
+  carry a raw newline, so a content delimiter like `<<EOF` never collides with
+  the call wrapper, deleting the heredoc `line 0: <<` leak class — so it
+  generalizes to unmeasured models, not only the local-qwen3.6 /
+  gemini-2.5-flash / deepseek rows that swept a clean 1.0/1.0/1.0
+  compliance/parse-determinism/expressiveness bench. Heredoc (`text`) remains a
+  selectable format and a per-model `preferred_tool_format = "text"` override
+  (the reverse safety valve) for any model that later regresses below baseline.
+  `json` is now also a first-class alias `tool_format` (validated against
+  text-channel tool support), the structural validator enforces text-protocol
+  well-formedness for `json` identically to `text`, and the local-qwen3.6 ollama
+  route drops its `text` pin to inherit json (json's ```tool fence sidesteps the
+  reserved `<tool_call>` token that forced the heredoc pin).
+
+### Fixed
+
+- Fixed the code-index symbol graph accumulating duplicate Module→Module
+  `IMPORTS` edges on every incremental reindex. `link_imports` re-runs over the
+  whole workspace after each per-file reindex, but `rebuild_file` only clears the
+  reindexed file's edges, so every reindex appended another copy of every
+  still-valid import edge between unchanged files — despite the documented
+  "idempotent" / "add-only" contract. The edge set grew without bound and Cypher
+  `IMPORTS`/`IMPORTED_BY` traversals returned duplicate rows, wasting the row
+  budget and polluting code-index grounding. The relink is now idempotent.
+- Fixed named per-tool `tool_budgets` (e.g. `{edit: 1}`) being silently
+  unenforced for live coding-agent eval packs. The in-process executor reports
+  tool usage only as a per-call `sequence` array (no `by_tool` map), so the
+  budget checker could never resolve a named tool's count and skipped the limit
+  entirely. The checker now falls back to counting occurrences in `sequence`, so
+  a configured per-tool budget is enforced regardless of executor summary shape.
+- **Tool middleware optional parameter injection.** `tool_inject_param(...,
+  {required: false})` now also marks the injected parameter fragment optional,
+  preventing provider-facing tool schemas from accidentally requiring stripped
+  middleware-only fields such as `_nl_intent`.
+- Fixed `pg_advisory_xact_lock` / `pg_with_advisory_lock` failing for string and
+  `{class, instance}` keys: the blocking path bound the two-part key as `int8`,
+  asking Postgres for a nonexistent `pg_advisory_xact_lock(int8, int8)` overload
+  (`function ... does not exist`). The key halves are now bound as `int4` to hit
+  the real `(int4, int4)` overload, matching the already-correct
+  `pg_try_advisory_xact_lock` path. String keys (`pg_with_advisory_lock(db,
+  "migrations", ...)`) and dict keys were the common lock-by-name path, so this
+  affected most advisory-lock callers.
+- **Fixed dynamic `nil` Postgres binds in all contexts via describe-then-bind.**
+  A dynamic `nil` has no static Rust type, so the long-stable fallback bound it
+  as `None::<String>` (Postgres TEXT). That poisoned sqlx's per-connection,
+  SQL-keyed prepared-statement cache (a later non-text value at the same `$n`
+  slot failed with `invalid byte sequence for encoding "UTF8": 0x00`) and was
+  rejected outright against non-text typed columns/casts (`column is of type
+  integer but expression is of type text`). The previously-attempted OID-0
+  ("let the server infer") alternative broke mixed nil + non-null queries with
+  `incorrect binary data format in bind parameter N`. Now, **only when a query
+  actually contains a `nil`**, Harn binds every `nil` as a typed NULL carrying
+  the server-described OID for that slot while non-null params keep their natural
+  binary encodings. The per-slot OIDs are obtained by describing the SQL once and
+  **caching the result keyed by the SQL string** — Postgres infers each slot from
+  the query structure, so the OID list is stable per SQL and never needs
+  invalidation. After the first nil-bearing execution of a given SQL there are
+  **zero** extra round-trips: subsequent nil-queries hit the OID cache (no
+  describe) and execute as a **non-persistent** statement, so they never poison
+  sqlx's SQL-keyed prepared-statement cache and never need to clear it. The
+  all-non-null fast path (and its warm statement cache) is completely unchanged,
+  and a representative nil-query's steady-state p99 latency is within ~1.02x of
+  the same query bound without a nil. This fixes `nil` into typed columns, cache
+  poisoning across NULL-then-non-null on a pooled connection, and mixed
+  nil/non-null params in `INSERT`/`WHERE`/`COALESCE`/`CASE`/multi-row `VALUES`,
+  without the per-query describe + full-cache-clear of the initial fix.
+
 ## v0.8.90
 
 ### Added
