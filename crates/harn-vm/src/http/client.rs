@@ -158,13 +158,17 @@ fn build_http_download_response(
     );
     result.insert(
         "bytes_written".to_string(),
-        VmValue::Int(bytes_written as i64),
+        VmValue::Int(u64_to_vm_int(bytes_written)),
     );
     result.insert(
         "ok".to_string(),
         VmValue::Bool((200..300).contains(&(status as u16))),
     );
     VmValue::Dict(std::sync::Arc::new(result))
+}
+
+fn u64_to_vm_int(value: u64) -> i64 {
+    value.min(i64::MAX as u64) as i64
 }
 
 fn response_headers(headers: &reqwest::header::HeaderMap) -> BTreeMap<String, VmValue> {
@@ -1753,5 +1757,12 @@ mod tests {
         assert!(error
             .to_string()
             .contains("response body exceeded max_response_bytes"));
+    }
+
+    #[test]
+    fn download_response_saturates_large_byte_count() {
+        let response = build_http_download_response(200, BTreeMap::new(), u64::MAX);
+        let response = response.as_dict().expect("response dict");
+        assert_eq!(response["bytes_written"].as_int(), Some(i64::MAX));
     }
 }

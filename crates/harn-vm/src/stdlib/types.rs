@@ -2,6 +2,8 @@ use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
 use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
 
+const I64_FLOAT_UPPER_BOUND_EXCLUSIVE: f64 = 9_223_372_036_854_775_808.0;
+
 pub(crate) fn register_type_builtins(vm: &mut Vm) {
     for def in MODULE_BUILTINS {
         vm.register_builtin_def(def);
@@ -25,10 +27,18 @@ fn to_int_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> 
     let val = args.first().unwrap_or(&VmValue::Nil);
     match val {
         VmValue::Int(n) => Ok(VmValue::Int(*n)),
-        VmValue::Float(n) => Ok(VmValue::Int(*n as i64)),
+        VmValue::Float(n) => Ok(float_to_int(*n).map(VmValue::Int).unwrap_or(VmValue::Nil)),
+        VmValue::Bool(value) => Ok(VmValue::Int(i64::from(*value))),
         VmValue::String(s) => Ok(s.parse::<i64>().map(VmValue::Int).unwrap_or(VmValue::Nil)),
         _ => Ok(VmValue::Nil),
     }
+}
+
+fn float_to_int(value: f64) -> Option<i64> {
+    if !value.is_finite() || value < i64::MIN as f64 || value >= I64_FLOAT_UPPER_BOUND_EXCLUSIVE {
+        return None;
+    }
+    Some(value as i64)
 }
 
 #[harn_builtin(sig = "to_float(...args: any) -> float", category = "types")]
@@ -221,3 +231,32 @@ pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
     &ADDR_OF_IMPL_DEF,
     &DROP_IMPL_DEF,
 ];
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn to_int_converts_bools() {
+        assert_eq!(
+            to_int_impl(&[VmValue::Bool(true)], &mut String::new())
+                .unwrap()
+                .as_int(),
+            Some(1)
+        );
+        assert_eq!(
+            to_int_impl(&[VmValue::Bool(false)], &mut String::new())
+                .unwrap()
+                .as_int(),
+            Some(0)
+        );
+    }
+
+    #[test]
+    fn to_int_rejects_non_finite_and_out_of_range_floats() {
+        for value in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY, 1.0e30] {
+            let converted = to_int_impl(&[VmValue::Float(value)], &mut String::new()).unwrap();
+            assert!(matches!(converted, VmValue::Nil));
+        }
+    }
+}
