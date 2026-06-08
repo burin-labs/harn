@@ -1,60 +1,71 @@
-/target
-# Per-feature sitrep-style target dirs (`CARGO_TARGET_DIR=.target-sitrep cargo …`).
-# Anything matching `.target-*` is a per-feature out-of-tree Cargo target.
+# Rust and local Cargo build outputs.
+/target/
 .target-*/
-/crates/harn-cli/portal-dist/
-node_modules/
-__pycache__/
-*.pyc
+.cargo/config.toml
+
+# Local environment and machine-specific files.
+.env
+.env.*
+!.env.example
+!.env.*.example
+.DS_Store
 *.DS_Store
+__pycache__/
+*.py[cod]
+
+# Local agent/runtime state.
 .burin/
 .harn-runs/
-docs/dist/
-# harnlang.com site (website/) build + dependency artifacts.
-website/.ssr/
-website/dist/
-website/*.tsbuildinfo
-tree-sitter-harn/*.dylib
-tree-sitter-harn/*.so
-tree-sitter-harn/*.dll
 .harn/receipts/
 .harn/
+.remember/
+.serena/
+meta_scratch/
+
 # Conformance skill fixtures deliberately ship a .harn/ subdir so the
-# project-layer loader (issue #73) has something to discover. The
-# blanket `.harn/` ignore above would drop them otherwise.
+# project-layer loader (issue #73) has something to discover. The blanket
+# `.harn/` ignore above would drop them otherwise.
 !conformance/tests/**/.harn/
 !conformance/tests/**/.harn/**
-# …but per-run metadata shards from project_deep_scan tests (namespace
-# dirs under .harn/metadata/<UUID>/entries.json) are always ephemeral
-# and must stay ignored. Same goes for the runtime SQLite DBs that tests
-# drop into the fixture's .harn/ (the event log, the provider rate-limit
-# store, and any future runtime DB) plus checkpoint/workflow dirs. The
-# tracked fixtures under these dirs are skill manifests/JSON, never a
-# root-level *.sqlite, so the glob below cannot shadow shipped content.
+
+# Per-run metadata shards from project_deep_scan tests are ephemeral. Runtime
+# SQLite DBs, checkpoint/workflow dirs, and per-suite timing caches under
+# fixture .harn/ dirs must stay ignored without shadowing shipped manifests.
 conformance/tests/**/.harn/metadata/
 conformance/tests/**/.harn/checkpoints/
 conformance/tests/**/.harn/workflows/
 conformance/tests/**/.harn/*.sqlite
 conformance/tests/**/.harn/*.sqlite-shm
 conformance/tests/**/.harn/*.sqlite-wal
-# Per-run timing cache the `harn test` runner drops next to the suite.
 conformance/tests/**/.harn/test-timings.json
-.cargo/config.toml
-# .claude/ is local-only except for shared skill definitions
+
+# Shared Claude skill definitions are tracked; local Claude state is not.
 .claude/*
 !.claude/commands/
 !.claude/skills/
 !.claude/skills/harn-scripting/
 !.claude/skills/harn-scripting/SKILL.md
-# `merge-captain` covers the Harn-triad lay of the land (including the
-# private harn-cloud repo + business goals); it lives in burin-code's
-# local `.claude/commands/` only, never in the public harn repo.
+
+# `merge-captain` covers the Harn triad, including private harn-cloud context,
+# so it lives only in burin-code's local `.claude/commands/`.
 .claude/commands/merge-captain.md
-meta_scratch/
-.remember/
-.serena/
+
 # Codex worktree environment files are per-worktree local state.
 .codex/environments/
+
+# JavaScript, portal, and website artifacts.
+node_modules/
+/crates/harn-cli/portal-dist/
+docs/dist/
+website/.ssr/
+website/dist/
+website/*.tsbuildinfo
+
+# Tree-sitter native build artifacts.
+tree-sitter-harn/*.dylib
+tree-sitter-harn/*.so
+tree-sitter-harn/*.dll
+
 # Test artifacts from conformance tests that create fixtures in CWD
 # (project_scan_*, project_deep_scan_*, and polyglot_tree tests in
 # conformance/tests/stdlib/).
@@ -66,11 +77,13 @@ meta_scratch/
 /project_deep_scan_ignore/
 /project_deep_scan_ns/
 /project_deep_scan_repo/
-# qmode experiment per-task state (qa.jsonl, plan.json, llm-mock.jsonl, transcripts).
+
+# qmode experiment and test-run state.
 experiments/burin-mini/.qmode/
-# qmode test runs may write synthetic preferences to project-scoped profiles.
 experiments/burin-mini/workspace/.harn/
+
 # Per-iteration logs from scripts/stress_subprocess_tests.sh.
 .stress-logs/
-# Worktrees
+
+# Local worktrees.
 .worktrees/

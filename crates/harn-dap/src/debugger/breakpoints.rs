@@ -396,29 +396,47 @@ pub(crate) fn condition_for_line(
 pub(crate) fn check_condition_literal(
     condition: &str,
     variables: &BTreeMap<String, VmValue>,
-) -> bool {
+) -> Result<bool, String> {
     for op in &["==", "!=", ">=", "<=", ">", "<"] {
         if let Some((lhs, rhs)) = condition.split_once(op) {
             let lhs = lhs.trim();
             let rhs = rhs.trim().trim_matches('"');
-            let lhs_val = variables.get(lhs).map(|v| v.display()).unwrap_or_default();
+            let lhs_val = variables
+                .get(lhs)
+                .ok_or_else(|| format!("Breakpoint condition references unknown variable '{lhs}'"))?
+                .display();
             return match *op {
-                "==" => lhs_val == rhs,
-                "!=" => lhs_val != rhs,
-                ">=" => lhs_val.parse::<f64>().unwrap_or(0.0) >= rhs.parse::<f64>().unwrap_or(0.0),
-                "<=" => lhs_val.parse::<f64>().unwrap_or(0.0) <= rhs.parse::<f64>().unwrap_or(0.0),
-                ">" => lhs_val.parse::<f64>().unwrap_or(0.0) > rhs.parse::<f64>().unwrap_or(0.0),
-                "<" => lhs_val.parse::<f64>().unwrap_or(0.0) < rhs.parse::<f64>().unwrap_or(0.0),
-                _ => true,
+                "==" => Ok(lhs_val == rhs),
+                "!=" => Ok(lhs_val != rhs),
+                ">=" | "<=" | ">" | "<" => {
+                    let lhs_num = lhs_val.parse::<f64>().map_err(|_| {
+                        format!(
+                            "Breakpoint condition expected numeric variable '{lhs}', got '{lhs_val}'"
+                        )
+                    })?;
+                    let rhs_num = rhs.parse::<f64>().map_err(|_| {
+                        format!("Breakpoint condition expected numeric literal, got '{rhs}'")
+                    })?;
+                    Ok(match *op {
+                        ">=" => lhs_num >= rhs_num,
+                        "<=" => lhs_num <= rhs_num,
+                        ">" => lhs_num > rhs_num,
+                        "<" => lhs_num < rhs_num,
+                        _ => unreachable!(),
+                    })
+                }
+                _ => unreachable!(),
             };
         }
     }
 
     if let Some(val) = variables.get(condition) {
-        return val.is_truthy();
+        return Ok(val.is_truthy());
     }
 
-    true
+    Err(format!(
+        "Breakpoint condition '{condition}' could not be evaluated without a VM frame"
+    ))
 }
 
 impl Debugger {
@@ -437,10 +455,10 @@ impl Debugger {
         };
         let condition = condition.to_string();
         if self.vm.is_none() {
-            return if check_condition_literal(&condition, variables) {
-                BreakpointCondition::Fire
-            } else {
-                BreakpointCondition::Skip
+            return match check_condition_literal(&condition, variables) {
+                Ok(true) => BreakpointCondition::Fire,
+                Ok(false) => BreakpointCondition::Skip,
+                Err(error) => BreakpointCondition::Error(error),
             };
         }
         match self.evaluate_expression_in_vm(&condition) {

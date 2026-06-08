@@ -19,7 +19,7 @@ Complete reference for all built-in functions available in Harn.
 |---|---|---|---|
 | `type_of(value)` | value: any | string | Returns type name: `"int"`, `"float"`, `"string"`, `"bool"`, `"nil"`, `"list"`, `"dict"`, `"closure"`, `"taskHandle"`, `"duration"`, `"enum"`, `"struct"` |
 | `to_string(value)` | value: any | string | Convert to string representation |
-| `to_int(value)` | value: any | int or nil | Parse/convert to integer. Floats truncate, bools become 0/1 |
+| `to_int(value)` | value: any | int or nil | Parse/convert to integer. Floats truncate, bools become 0/1; non-finite or out-of-range floats return `nil` |
 | `to_float(value)` | value: any | float or nil | Parse/convert to float |
 | `unreachable(value?)` | value: any (optional) | never | Throws "unreachable code was reached" at runtime. When the argument is a variable, the type checker verifies it has been narrowed to `never` (exhaustiveness check) |
 | `iter(x)` | x: list, dict, set, string, generator, channel, or iter | `Iter<T>` | Lift an iterable source into a lazy, single-pass, fused iterator. No-op on an existing iter. Dict iters yield `Pair(key, value)`; string iters yield chars. See [Iterator methods](#iterator-methods) |

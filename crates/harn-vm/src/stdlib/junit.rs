@@ -20,6 +20,8 @@ use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
 use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
 
+const MAX_DURATION_MS: u64 = i64::MAX as u64;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Status {
     Passed,
@@ -295,11 +297,12 @@ fn unescape_xml(text: &str) -> String {
 }
 
 fn duration_seconds_to_ms(seconds: f64) -> u64 {
-    if seconds.is_finite() && seconds >= 0.0 {
-        Duration::from_secs_f64(seconds).as_millis() as u64
-    } else {
-        0
+    if !seconds.is_finite() || seconds < 0.0 {
+        return 0;
     }
+    Duration::try_from_secs_f64(seconds)
+        .map(|duration| duration.as_millis().min(u128::from(MAX_DURATION_MS)) as u64)
+        .unwrap_or(MAX_DURATION_MS)
 }
 
 #[cfg(test)]
@@ -377,6 +380,16 @@ mod tests {
         let records = parse_junit_xml(xml.as_bytes());
         assert_eq!(records.len(), 1);
         assert_eq!(records[0].name, "pkg.Suite::actual");
+    }
+
+    #[test]
+    fn huge_duration_saturates_instead_of_panicking() {
+        let xml = r#"<testsuite>
+  <testcase name="slow" time="1e308"/>
+</testsuite>"#;
+        let records = parse_junit_xml(xml.as_bytes());
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].duration_ms, MAX_DURATION_MS);
     }
 
     #[test]

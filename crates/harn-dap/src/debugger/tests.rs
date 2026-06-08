@@ -1398,7 +1398,7 @@ fn test_set_expression_rejects_non_identifier_paths() {
 
 #[test]
 fn test_hit_condition_matches_parses_all_forms() {
-    use super::breakpoints::hit_condition_matches;
+    use super::breakpoints::{check_condition_literal, hit_condition_matches};
 
     // Bare N → fire exactly on Nth hit.
     assert_eq!(hit_condition_matches("3", 2), Some(false));
@@ -1425,6 +1425,25 @@ fn test_hit_condition_matches_parses_all_forms() {
     // Garbage → None so the caller can surface a diagnostic.
     assert_eq!(hit_condition_matches("hello", 1), None);
     assert_eq!(hit_condition_matches("= =1", 1), None);
+
+    let mut vars = BTreeMap::new();
+    vars.insert("count".to_string(), VmValue::Int(5));
+    vars.insert(
+        "label".to_string(),
+        VmValue::String(std::sync::Arc::from("ready")),
+    );
+
+    assert_eq!(check_condition_literal("count >= 5", &vars), Ok(true));
+    assert_eq!(
+        check_condition_literal("label == \"ready\"", &vars),
+        Ok(true)
+    );
+    assert!(check_condition_literal("label > 0", &vars)
+        .unwrap_err()
+        .contains("expected numeric variable"));
+    assert!(check_condition_literal("missing", &vars)
+        .unwrap_err()
+        .contains("could not be evaluated"));
 }
 
 // ---------------------------------------------------------------

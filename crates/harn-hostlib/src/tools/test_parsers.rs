@@ -13,6 +13,8 @@
 
 use std::time::Duration;
 
+const MAX_DURATION_MS: u64 = i64::MAX as u64;
+
 /// Status of one test run, matching the `status` enum in the schema.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Status {
@@ -232,11 +234,12 @@ fn unescape_xml(text: &str) -> String {
 }
 
 fn duration_seconds_to_ms(seconds: f64) -> u64 {
-    if seconds.is_finite() && seconds >= 0.0 {
-        Duration::from_secs_f64(seconds).as_millis() as u64
-    } else {
-        0
+    if !seconds.is_finite() || seconds < 0.0 {
+        return 0;
     }
+    Duration::try_from_secs_f64(seconds)
+        .map(|duration| duration.as_millis().min(u128::from(MAX_DURATION_MS)) as u64)
+        .unwrap_or(MAX_DURATION_MS)
 }
 
 /// Parse cargo's libtest plain-text output. Recognizes lines like
@@ -375,6 +378,16 @@ mod tests {
         assert!(message.contains("a & b"));
         assert!(message.contains("left < right"));
         assert_eq!(records[0].stdout.as_deref(), Some("hello & goodbye"));
+    }
+
+    #[test]
+    fn huge_junit_duration_saturates_instead_of_panicking() {
+        let xml = r#"<testsuite>
+  <testcase name="slow" time="1e308"/>
+</testsuite>"#;
+        let records = parse_junit_xml(xml.as_bytes()).unwrap();
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].duration_ms, MAX_DURATION_MS);
     }
 
     #[test]
