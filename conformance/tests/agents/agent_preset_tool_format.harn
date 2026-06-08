@@ -9,13 +9,17 @@ pipeline default() {
   // capability matrix via `llm_resolve_model`.
   let native_audit = agent_preset("audit", {model: "claude-sonnet-4-5"})
   __io_println(native_audit.tool_format)
-  // Text-only local route — preset derives `tool_format: "text"` so the VM
-  // capability gate accepts the request instead of rejecting with
-  // "option `tools` is not supported by ...".
+  // Text-only local route — preset derives the GLOBAL text-channel default,
+  // which is now fenced-json (`tool_format: "json"`), so the VM capability gate
+  // accepts the request instead of rejecting with
+  // "option `tools` is not supported by ...". (Heredoc `text` is no longer
+  // auto-derived; it is the reverse safety valve, reached only via a pin or an
+  // explicit request — see `forced_text` below.)
   let text_audit = agent_preset("audit", {provider: "ollama", model: "qwen3.6:35b-a3b-coding-nvfp4"})
   __io_println(text_audit.tool_format)
   // Caller explicit `tool_format` wins over the derived default — even if the
-  // capability matrix disagrees.
+  // capability matrix disagrees. An explicit `text` still yields heredoc (the
+  // format is demoted to opt-in, not removed).
   let forced_text = agent_preset("audit", {model: "claude-sonnet-4-5", tool_format: "text"})
   __io_println(forced_text.tool_format)
   // Summary preset does not opt into tool semantics, so the derivation is

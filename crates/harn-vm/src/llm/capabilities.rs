@@ -904,11 +904,18 @@ fn suggested_native_tools(
         .any(|capability| capability == "tools")
 }
 
+/// The derived `preferred_tool_format` for a capability row (or unmatched
+/// model) that does not pin one. Native-capable models derive `native`;
+/// text-channel models derive `json` (fenced-JSON), the GLOBAL text-channel
+/// default. Heredoc (`text`) is never auto-derived — it is reachable only via
+/// an explicit `preferred_tool_format = "text"` pin or an explicit request (the
+/// reverse safety valve). This is the primary default site: it fires for every
+/// model that matches a capability row without an explicit format pin.
 fn tool_format_for_native(native_tools: bool) -> String {
     if native_tools {
         "native".to_string()
     } else {
-        "text".to_string()
+        "json".to_string()
     }
 }
 
@@ -1248,11 +1255,16 @@ fn rule_to_caps(rule: &ProviderRule, defaults: &ProviderDefaults) -> Capabilitie
 }
 
 fn rule_preferred_tool_format(rule: &ProviderRule) -> String {
+    // This is the `caps.preferred_tool_format` the runtime `lookup` returns for
+    // a matched capability row. When the row pins a format, honor it (including
+    // an explicit `text` — the reverse safety valve). Otherwise derive: native
+    // models get `native`, text-channel models get `json` (fenced-JSON), the
+    // GLOBAL text-channel default. Heredoc `text` is never auto-derived.
     rule.preferred_tool_format.clone().unwrap_or_else(|| {
         if rule.native_tools.unwrap_or(false) {
             "native".to_string()
         } else {
-            "text".to_string()
+            "json".to_string()
         }
     })
 }

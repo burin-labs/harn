@@ -1985,7 +1985,9 @@ pub fn is_known_tool_format(format: &str) -> bool {
 
 /// Resolve the default tool format for a model+provider combination.
 /// Priority: alias `tool_format` (matched by model ID) > provider/model
-/// capability matrix > legacy provider feature > "text".
+/// capability matrix > legacy provider feature > "json" (the global
+/// text-channel default; heredoc "text" is opt-in via a pin or explicit
+/// request).
 pub fn default_tool_format(model: &str, provider: &str) -> String {
     let config = effective_config();
     default_tool_format_with_config(&config, model, provider)
@@ -2007,14 +2009,12 @@ fn default_tool_format_with_config(
     }
     let capabilities = crate::llm::capabilities::lookup(provider, model);
     if let Some(format) = capabilities.preferred_tool_format.as_deref() {
-        // A capability row may pin any known tool_format. `json` is a
-        // text-channel format and is honored here when a row sets it; today
-        // every shipped row pins `native` or `text`, so the default
-        // resolution is unchanged — the `json` rows are STAGED (commented)
-        // behind the N>=5 parity bench. The exhaustive match below is the
-        // EXHAUSTIVE-MATCH GUARD: a new tool_format that isn't classified
-        // here fails loudly rather than silently falling through to the
-        // native/text heuristic.
+        // A capability row may pin any known tool_format, including `text`
+        // (heredoc) — the reverse safety valve a regressing model uses to pin
+        // OFF the global json default. `json` is also honored when a row sets
+        // it. The exhaustive match below is the EXHAUSTIVE-MATCH GUARD: a new
+        // tool_format that isn't classified here fails loudly rather than
+        // silently falling through to the native/json heuristic.
         if is_known_tool_format(format) {
             return format.to_string();
         }
@@ -2028,7 +2028,17 @@ fn default_tool_format_with_config(
     if capability_matrix_native || legacy_provider_native {
         "native".to_string()
     } else {
-        "text".to_string()
+        // GLOBAL DEFAULT: a text-channel model with no pinned format resolves
+        // to fenced-json (`json`), not heredoc (`text`). The win is STRUCTURAL
+        // — a JSON string can't carry a raw newline, so a `<<EOF` content
+        // delimiter never collides with the call wrapper (heredoc's known
+        // production defect: models leak `<<EOF` into file content → the
+        // `line 0: <<` thrash). Fenced-json swept a clean 1.0/1.0/1.0
+        // (compliance/parse-determinism/expressiveness) across every model
+        // measured, and the structural guarantee generalizes to unmeasured
+        // models. Heredoc (`text`) stays selectable explicitly and via a
+        // per-model `preferred_tool_format = "text"` pin (the reverse valve).
+        "json".to_string()
     }
 }
 
@@ -3233,14 +3243,19 @@ mod tests {
             default_tool_format("qwen3.6-35b-a3b-ud-q4-k-xl", "llamacpp"),
             "native"
         );
+        // devstral pins `preferred_tool_format = "text"` (the reverse safety
+        // valve), so it stays on heredoc even though `json` is now the global
+        // text-channel default.
         assert_eq!(
             default_tool_format("devstral-small-2:24b", "ollama"),
             "text"
         );
         // vLLM/SGLang-served Gemma 4 exposes OpenAI-compatible function calling,
         // so the local route declares native tools (matching every hosted gemma-4
-        // sibling) rather than degrading to the text tool format.
+        // sibling) rather than degrading to a text tool format.
         assert_eq!(default_tool_format("gemma-4-26b-a4b-it", "local"), "native");
+        // deepseek-v3.2 and qwen3-coder both pin `text` in the capability
+        // matrix, so they keep heredoc rather than inheriting the json default.
         assert_eq!(
             default_tool_format("deepseek/deepseek-v3.2", "openrouter"),
             "text"
@@ -3249,6 +3264,18 @@ mod tests {
             default_tool_format("qwen/qwen3-coder-flash", "openrouter"),
             "text"
         );
+    }
+
+    #[test]
+    fn test_default_tool_format_unpinned_text_channel_is_json() {
+        reset_overrides();
+
+        // GLOBAL DEFAULT FLIP: a model with no capability-matrix pin and no
+        // native tool support resolves to fenced-json (`json`), not heredoc
+        // (`text`). This is the behavior change — an unknown text-channel model
+        // gets the delimiter-safe default. (Native-capable unknowns still get
+        // `native`; pinned models still honor their pin, covered above.)
+        assert_eq!(default_tool_format("mystery-model-xyz", "ollama"), "json");
     }
 
     #[test]

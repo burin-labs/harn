@@ -12,7 +12,5 @@
   paradigm/body-hint, format plumbing across the parity gates and capability
   resolution with a compile-time exhaustive `tool_format_channel` guard, and a
   conformance classifier that recognizes a fenced-JSON emission as
-  `parseable_harn_text_tool_call`. Per-model `preferred_tool_format = "json"`
-  rows for local-qwen3.6, `google/gemini-2.5-flash`, and the deepseek family are
-  staged (commented) in the capability fragments; the global default resolution
-  is unchanged pending the N>=5 coding-agent parity bench.
+  `parseable_harn_text_tool_call`. (A follow-up change promotes `json` to the
+  global default text tool-calling format; see the separate changelog entry.)

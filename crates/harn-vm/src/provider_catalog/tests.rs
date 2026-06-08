@@ -309,9 +309,10 @@ fn validation_rejects_duplicate_and_dangling_aliases() {
 }
 
 #[test]
-fn validation_rejects_alias_tool_format_not_native_or_text() {
+fn validation_rejects_alias_tool_format_not_a_known_format() {
     // A typo / wrong value in an alias's tool_format pin must be caught at
-    // catalog-build time, not silently degraded at call time.
+    // catalog-build time, not silently degraded at call time. The known set is
+    // native, text, and json (the fenced-JSON text-channel format).
     let mut catalog = artifact();
     catalog.aliases[0].tool_format = Some("nativ".to_string());
     let report = validate_artifact(&catalog);
@@ -319,8 +320,61 @@ fn validation_rejects_alias_tool_format_not_native_or_text() {
         report
             .errors
             .iter()
-            .any(|message| message.contains("must be \"native\" or \"text\"")),
+            .any(|message| message.contains("must be \"native\", \"text\", or \"json\"")),
         "expected invalid alias tool_format error, got {:?}",
+        report.errors
+    );
+}
+
+#[test]
+fn validation_accepts_alias_pinning_json_on_text_capable_model() {
+    // `json` (fenced-JSON) is a first-class text-channel format. An alias may
+    // pin it, and it validates against the model's text tool support — not a
+    // typo/wrong value, and not gated on native support.
+    let mut catalog = artifact();
+    let alias_target = (
+        catalog.aliases[0].provider.clone(),
+        catalog.aliases[0].model_id.clone(),
+    );
+    let model = catalog
+        .models
+        .iter_mut()
+        .find(|m| m.provider == alias_target.0 && m.id == alias_target.1)
+        .expect("alias target model present in catalog");
+    model.tool_support.native = false;
+    model.tool_support.text = true;
+    catalog.aliases[0].tool_format = Some("json".to_string());
+    let report = validate_artifact(&catalog);
+    assert!(
+        !report.errors.iter().any(|message| message
+            .contains("must be \"native\", \"text\", or \"json\"")
+            || message.contains("does not support")),
+        "json pinned on a text-capable model should validate, got {:?}",
+        report.errors
+    );
+
+    // Symmetric: pinning `json` on a model with no text support is a hard error
+    // (json rides the text channel, so it requires text tool support).
+    let mut catalog = artifact();
+    let alias_target = (
+        catalog.aliases[0].provider.clone(),
+        catalog.aliases[0].model_id.clone(),
+    );
+    let model = catalog
+        .models
+        .iter_mut()
+        .find(|m| m.provider == alias_target.0 && m.id == alias_target.1)
+        .expect("alias target model present in catalog");
+    model.tool_support.native = true;
+    model.tool_support.text = false;
+    catalog.aliases[0].tool_format = Some("json".to_string());
+    let report = validate_artifact(&catalog);
+    assert!(
+        report
+            .errors
+            .iter()
+            .any(|message| message.contains("does not support text tool calling")),
+        "expected json-on-text-unsupported alias error, got {:?}",
         report.errors
     );
 }
@@ -400,7 +454,7 @@ fn validation_accepts_alias_pinning_servable_tool_format() {
             .errors
             .iter()
             .any(|message| message.contains("does not support")
-                || message.contains("must be \"native\" or \"text\"")),
+                || message.contains("must be \"native\", \"text\", or \"json\"")),
         "servable alias tool_format should validate, got {:?}",
         report.errors
     );

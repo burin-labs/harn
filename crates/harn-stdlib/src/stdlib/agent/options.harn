@@ -55,7 +55,13 @@ fn __client_tool_search_requested(value) {
 }
 
 fn __fallback_tool_format() {
-  return "text"
+  // GLOBAL DEFAULT: a text-channel model with no pinned tool_format falls back
+  // to fenced-json (`json`), not heredoc (`text`). A JSON string can't carry a
+  // raw newline, so `<<EOF` content delimiters never collide with the call
+  // wrapper — eliminating the heredoc `line 0: <<` leak class structurally. The
+  // reverse safety valve is a per-model `preferred_tool_format = "text"` pin or
+  // an explicit `tool_format: "text"` request, both of which still yield heredoc.
+  return "json"
 }
 
 fn __tool_format_auto(value) {
