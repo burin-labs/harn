@@ -495,6 +495,12 @@ category = "runtime_registry"
 plan = "arc_registry_scope"
 
 [[thread_local]]
+path = "src/stdlib/postgres/mod.rs"
+statics = ["DESCRIBE_ROUND_TRIPS"]
+category = "thread_private"
+plan = "thread_private_test"
+
+[[thread_local]]
 path = "src/stdlib/sqlite/mod.rs"
 statics = ["DBS", "TXS", "MOCKS"]
 category = "runtime_registry"

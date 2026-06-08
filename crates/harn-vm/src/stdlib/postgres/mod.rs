@@ -86,21 +86,35 @@ thread_local! {
         const { RefCell::new(BTreeMap::new()) };
 }
 
-/// Counts how many times an *uncached* server describe round-trip is performed.
-/// Used by tests to assert that a repeated nil-query of the same SQL hits the
-/// OID cache and does **not** re-describe. Lives behind `cfg(test)` so it has
-/// zero cost in release builds.
+// Counts how many times an *uncached* server describe round-trip is performed.
+// Used by tests to assert that a repeated nil-query of the same SQL hits the OID
+// cache and does **not** re-describe. Lives behind `cfg(test)` so it has zero
+// cost in release builds.
+//
+// Thread-local (not a process-global atomic): cargo runs the postgres tests in
+// parallel against one live database, and several of them perform describes. A
+// process-global counter would race — one test's describe would inflate
+// another's absolute count. A per-thread counter, combined with the
+// `current_thread` runtime the counting test uses, isolates each test's own
+// describe count so the assertions are deterministic.
 #[cfg(test)]
-static DESCRIBE_ROUND_TRIPS: AtomicU64 = AtomicU64::new(0);
+thread_local! {
+    static DESCRIBE_ROUND_TRIPS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+}
 
 #[cfg(test)]
 fn describe_round_trips() -> u64 {
-    DESCRIBE_ROUND_TRIPS.load(Ordering::Relaxed)
+    DESCRIBE_ROUND_TRIPS.with(std::cell::Cell::get)
 }
 
 #[cfg(test)]
 fn reset_describe_round_trips() {
-    DESCRIBE_ROUND_TRIPS.store(0, Ordering::Relaxed);
+    DESCRIBE_ROUND_TRIPS.with(|c| c.set(0));
+}
+
+#[cfg(test)]
+fn bump_describe_round_trips() {
+    DESCRIBE_ROUND_TRIPS.with(|c| c.set(c.get() + 1));
 }
 
 pub(crate) fn reset_postgres_state() {
@@ -324,6 +338,52 @@ async fn clear_idle_statement_caches(
     }
 
     Ok((cleared, size_before.saturating_sub(cleared)))
+}
+
+/// Recycle prepared-statement state after a `pg_migrate` that ran DDL (M-5).
+///
+/// `pg_migrate` runs `CREATE TABLE` / `ALTER TABLE` / etc., which can change the
+/// result type of a query whose plan a pooled connection has already cached. The
+/// next reuse of that cached plan then fails with SQLSTATE `0A000`
+/// (`cached plan must not change result type`).
+///
+/// We drain every connection currently in the pool — acquiring up to
+/// `max_connections` of them (so we catch the one the migration ran on, which
+/// sqlx returns to the pool asynchronously and which `try_acquire` can therefore
+/// miss right after the run) — clear each one's cached statements (sqlx sends a
+/// server-side `Close`/`DEALLOCATE`), and clear the thread-local `DESCRIBED_OIDS`
+/// cache (a DDL can change the server-inferred type of a `$n` slot).
+///
+/// Best-effort and non-fatal: the migration already committed, so a clear
+/// failure is logged and the run still reports success. The `acquire` is bounded
+/// by `max` and each is immediately released, so this never starves the pool. A
+/// connection still checked out by another task at recycle time is not drained
+/// here; its first post-DDL reuse would hit `0A000` once and sqlx re-prepares —
+/// the same self-healing sqlx already does for a plan invalidated out of band.
+pub(super) async fn recycle_pool_after_ddl(pool: &PgPool, max: u32) {
+    let mut held = Vec::new();
+    // Acquire (waiting, not try_acquire) so we deterministically catch the
+    // just-released migration connection even though its return to the pool is
+    // processed asynchronously. Bounded by `max` so we never block forever.
+    for _ in 0..max.max(1) {
+        match pool.try_acquire() {
+            Some(conn) => held.push(conn),
+            None => match pool.acquire().await {
+                Ok(conn) => held.push(conn),
+                Err(_) => break,
+            },
+        }
+    }
+    for mut connection in held {
+        if let Err(error) = connection.clear_cached_statements().await {
+            tracing::warn!(
+                target: "harn_vm::postgres",
+                %error,
+                "pg_migrate: clearing cached statements after DDL failed (non-fatal)"
+            );
+        }
+    }
+    DESCRIBED_OIDS.with(|oids| oids.borrow_mut().clear());
 }
 
 #[harn_builtin(
@@ -790,7 +850,7 @@ pub(super) async fn query_rows(
                     .fetch_all(&mut **tx)
                     .await
             }
-            .map_err(|error| runtime_error(format!("pg_query: {error}")))?;
+            .map_err(|error| map_db_error("pg_query", error))?;
             return rows.into_iter().map(row_to_value).collect();
         }
         _ => {}
@@ -808,7 +868,7 @@ pub(super) async fn query_rows(
         bind_params(query(AssertSqlSafe(sql)), params)?
             .fetch_all(pool.as_ref())
             .await
-            .map_err(|error| runtime_error(format!("pg_query: {error}")))
+            .map_err(|error| map_db_error("pg_query", error))
     };
     match result {
         Ok(rows) => {
@@ -860,7 +920,7 @@ pub(super) async fn execute_stmt(
                 .execute(&mut **tx)
                 .await
         }
-        .map_err(|error| runtime_error(format!("pg_execute: {error}")))?;
+        .map_err(|error| map_db_error("pg_execute", error))?;
         return Ok(query_result_value(result, started.elapsed()));
     }
     let record = pool_record_from_handle(target, "pg_execute")?;
@@ -874,7 +934,7 @@ pub(super) async fn execute_stmt(
         bind_params(query(AssertSqlSafe(sql)), params)?
             .execute(record.pool.as_ref())
             .await
-            .map_err(|error| runtime_error(format!("pg_execute: {error}")))
+            .map_err(|error| map_db_error("pg_execute", error))
     };
     match result {
         Ok(query_result) => {
@@ -982,11 +1042,77 @@ pub(super) fn validate_pg_identifier(
     Ok(())
 }
 
+/// GUC keys that `pg_transaction(settings)` is permitted to `set_config`.
+///
+/// These are the *non-`app.`* runtime parameters Harn callers legitimately
+/// tune per transaction: the statement/lock/idle timeouts. Everything in the
+/// `app.*` namespace is allowed by prefix (see [`is_allowed_transaction_setting`])
+/// because that namespace is the application's own RLS contract — RLS policies
+/// are written against `app.current_tenant_id` / `app.bypass_rls`, so those keys
+/// are part of the intended security model, not an escape from it.
+///
+/// Crucially, this allowlist does **not** include privileged Postgres GUCs that
+/// would let `.harn` code escalate *beyond* the app's RLS model at the Postgres
+/// level — `role`, `session_authorization`, `is_superuser`, `search_path`, etc.
+/// Those are rejected so a `pg_transaction(settings)` cannot, for example,
+/// `SET ROLE` to a superuser and read every tenant's rows regardless of policy.
+const ALLOWED_TRANSACTION_SETTINGS: &[&str] = &[
+    "statement_timeout",
+    "lock_timeout",
+    "idle_in_transaction_session_timeout",
+];
+
+/// True when `key` is a GUC that `pg_transaction(settings)` may set.
+///
+/// Allowed: any `app.*` key (the application's own settable namespace, which is
+/// what RLS policies read) and the explicit timeout GUCs in
+/// [`ALLOWED_TRANSACTION_SETTINGS`]. Everything else — notably `role`,
+/// `session_authorization`, `is_superuser`, `search_path` and any other
+/// privileged backend GUC — is rejected so untrusted `.harn` code cannot use a
+/// transaction setting to escape row-level security at the Postgres level.
+///
+/// The comparison is case-insensitive on the *non*-`app.` keys because Postgres
+/// GUC names are case-insensitive; `app.*` is matched by prefix on the original
+/// (custom GUC namespaces are conventionally lower-case and case-sensitive after
+/// the first `.`, so we keep the user's spelling there).
+fn is_allowed_transaction_setting(key: &str) -> bool {
+    let key = key.trim();
+    if key.is_empty() {
+        return false;
+    }
+    // App-scoped settings (`app.current_tenant_id`, `app.bypass_rls`, …) are the
+    // application's own contract that RLS policies read; allow the whole prefix.
+    if let Some(rest) = key.strip_prefix("app.") {
+        // Reject `app.` with nothing after it or with an embedded NUL.
+        return !rest.is_empty() && !rest.contains('\0');
+    }
+    let lower = key.to_ascii_lowercase();
+    ALLOWED_TRANSACTION_SETTINGS.contains(&lower.as_str())
+}
+
 async fn apply_transaction_settings(
     tx_id: &str,
     settings: &BTreeMap<String, VmValue>,
 ) -> Result<(), VmError> {
     for (key, value) in settings {
+        if !is_allowed_transaction_setting(key) {
+            return Err(runtime_error(format!(
+                "pg_transaction: setting `{key}` is not permitted; allowed settings are \
+                 `app.*` keys and the timeouts {ALLOWED_TRANSACTION_SETTINGS:?}. Privileged \
+                 GUCs such as `role`, `session_authorization`, `is_superuser` and \
+                 `search_path` are rejected because they could bypass row-level security."
+            )));
+        }
+        // A `nil` settings value would otherwise be stringified to the literal
+        // `"nil"` (set_config takes text), silently setting the GUC to a bogus
+        // value instead of resetting it. That is never what a caller means, so
+        // reject it explicitly (M-3).
+        if matches!(value, VmValue::Nil) {
+            return Err(runtime_error(format!(
+                "pg_transaction: setting `{key}` has a nil value; provide a string/number \
+                 value (nil would be set as the literal text \"nil\", not a reset)"
+            )));
+        }
         let params = vec![
             VmValue::String(std::sync::Arc::from(key.as_str())),
             VmValue::String(std::sync::Arc::from(value.display())),
@@ -1263,7 +1389,7 @@ async fn describe_param_oids_uncached(
     const SAVEPOINT: &str = "_harn_describe_probe";
 
     #[cfg(test)]
-    DESCRIBE_ROUND_TRIPS.fetch_add(1, Ordering::Relaxed);
+    bump_describe_round_trips();
 
     // In a caller transaction, a failed probe aborts the whole tx. A savepoint
     // lets us roll back *only* the failed probe and keep the tx alive. Outside a
@@ -1357,7 +1483,7 @@ async fn run_described_query<T>(
     let query = bind_params_described(sql, &oids, params)?;
     run(query, &mut conn)
         .await
-        .map_err(|error| runtime_error(format!("{builtin}: {error}")))
+        .map_err(|error| map_db_error(builtin, error))
 }
 
 pub(super) fn row_to_value(row: PgRow) -> Result<VmValue, VmError> {
@@ -1628,6 +1754,80 @@ fn dict_value<const N: usize>(pairs: [(&'static str, VmValue); N]) -> VmValue {
 
 fn decode_error(error: sqlx_core::error::Error) -> VmError {
     runtime_error(format!("pg_query: row decode failed: {error}"))
+}
+
+/// Map a SQLSTATE code to a stable, schema-free category string.
+///
+/// Returns `Some(category)` for the error classes whose *raw* Postgres message
+/// embeds sensitive schema detail (constraint names, column names, relation
+/// names) that should not cross the hostlib boundary to a `.harn` caller. The
+/// SQLSTATE itself is stable and safe to surface. Unknown codes return `None`,
+/// and those fall back to a generic `"database error"` category (still without
+/// the raw message). The five-character SQLSTATE class (first two chars) is used
+/// so we cover whole families, e.g. `23xxx` integrity-constraint violations.
+fn sqlstate_category(code: &str) -> Option<&'static str> {
+    match code {
+        // 23xxx — integrity constraint violation (names tables/constraints).
+        "23505" => Some("unique_violation"),
+        "23503" => Some("foreign_key_violation"),
+        "23502" => Some("not_null_violation"),
+        "23514" => Some("check_violation"),
+        "23P01" => Some("exclusion_violation"),
+        // 22xxx — data exceptions (overflow, etc.) name columns/values.
+        "22003" => Some("numeric_out_of_range"),
+        "22001" => Some("string_too_long"),
+        "22P02" => Some("invalid_text_representation"),
+        // 42xxx — syntax / access-rule (relation/column names).
+        "42501" => Some("insufficient_privilege"),
+        "42P01" => Some("undefined_table"),
+        "42703" => Some("undefined_column"),
+        // 40xxx — transaction rollback (serialization / deadlock).
+        "40001" => Some("serialization_failure"),
+        "40P01" => Some("deadlock_detected"),
+        _ => {
+            // Cover the whole 23xxx integrity-violation family by class so a
+            // newer constraint code still gets a stable, schema-free category.
+            if code.starts_with("23") {
+                Some("constraint_violation")
+            } else {
+                None
+            }
+        }
+    }
+}
+
+/// Map a sqlx error from a user-facing `pg_query`/`pg_execute` into a stable
+/// `VmError` whose message does **not** leak raw Postgres detail (constraint
+/// names, schema/relation names, column names). The full original error —
+/// including any constraint name — is recorded via `tracing` at the boundary so
+/// operators keep the detail server-side (M-2).
+///
+/// For a database error we surface `{builtin}: <category> (SQLSTATE <code>)`.
+/// Non-database errors (pool/IO/protocol) carry no schema detail, so their text
+/// is preserved behind the `{builtin}:` prefix as before.
+fn map_db_error(builtin: &str, error: sqlx_core::error::Error) -> VmError {
+    if let sqlx_core::error::Error::Database(db) = &error {
+        let code = db.code().map(|c| c.into_owned());
+        let category = code
+            .as_deref()
+            .and_then(sqlstate_category)
+            .unwrap_or("database error");
+        // Keep the full, detail-bearing error in server-side tracing only.
+        tracing::warn!(
+            target: "harn_vm::postgres",
+            builtin,
+            sqlstate = code.as_deref().unwrap_or("none"),
+            constraint = db.constraint().unwrap_or(""),
+            table = db.table().unwrap_or(""),
+            error = %error,
+            "postgres error (detail withheld from caller)"
+        );
+        return match code {
+            Some(code) => runtime_error(format!("{builtin}: {category} (SQLSTATE {code})")),
+            None => runtime_error(format!("{builtin}: {category}")),
+        };
+    }
+    runtime_error(format!("{builtin}: {error}"))
 }
 
 fn query_result_value(result: PgQueryResult, duration: std::time::Duration) -> VmValue {
@@ -2170,6 +2370,51 @@ mod tests {
                 .max_connections(1)
                 .connect_lazy_with(options),
         )
+    }
+
+    /// M-4: the GUC allowlist accepts the app's own `app.*` namespace and the
+    /// benign timeout GUCs, and rejects privileged backend GUCs (`role`,
+    /// `session_authorization`, `is_superuser`, `search_path`) that could be used
+    /// to escape row-level security.
+    #[test]
+    fn transaction_setting_allowlist_permits_app_and_timeouts_rejects_privileged() {
+        // Allowed: the application's own contract that RLS policies read.
+        assert!(is_allowed_transaction_setting("app.current_tenant_id"));
+        assert!(is_allowed_transaction_setting("app.bypass_rls"));
+        assert!(is_allowed_transaction_setting("app.anything_else"));
+        // Allowed: benign timeouts, case-insensitive (PG GUC names are).
+        assert!(is_allowed_transaction_setting("statement_timeout"));
+        assert!(is_allowed_transaction_setting("Statement_Timeout"));
+        assert!(is_allowed_transaction_setting("lock_timeout"));
+        assert!(is_allowed_transaction_setting(
+            "idle_in_transaction_session_timeout"
+        ));
+
+        // Rejected: privileged GUCs that bypass RLS at the Postgres level.
+        assert!(!is_allowed_transaction_setting("role"));
+        assert!(!is_allowed_transaction_setting("ROLE"));
+        assert!(!is_allowed_transaction_setting("session_authorization"));
+        assert!(!is_allowed_transaction_setting("is_superuser"));
+        assert!(!is_allowed_transaction_setting("search_path"));
+        // Rejected: empty / malformed.
+        assert!(!is_allowed_transaction_setting(""));
+        assert!(!is_allowed_transaction_setting("app."));
+        assert!(!is_allowed_transaction_setting("work_mem"));
+    }
+
+    /// M-2: SQLSTATE codes map to stable, schema-free categories. The mapping
+    /// must never echo a constraint or relation name — only the category and the
+    /// (stable) SQLSTATE.
+    #[test]
+    fn sqlstate_category_maps_sensitive_classes() {
+        assert_eq!(sqlstate_category("23505"), Some("unique_violation"));
+        assert_eq!(sqlstate_category("23503"), Some("foreign_key_violation"));
+        assert_eq!(sqlstate_category("23502"), Some("not_null_violation"));
+        assert_eq!(sqlstate_category("23514"), Some("check_violation"));
+        // Unknown 23xxx still gets a stable family category, not the raw text.
+        assert_eq!(sqlstate_category("23999"), Some("constraint_violation"));
+        assert_eq!(sqlstate_category("22003"), Some("numeric_out_of_range"));
+        assert_eq!(sqlstate_category("0A000"), None);
     }
 
     fn routing_record(replicas: usize, policy: ReadRoutingPolicy) -> Arc<PoolRecord> {
@@ -2768,6 +3013,358 @@ pg_close(db)
                 })
                 .await;
         });
+    }
+
+    /// M-4 (live): `pg_transaction(settings)` rejects a privileged GUC
+    /// (`role`) and a nil value (M-3), and accepts the legitimate
+    /// `app.current_tenant_id` / `app.bypass_rls` / timeout settings. This is
+    /// the RLS-escape guard exercised end-to-end through the VM.
+    #[test]
+    fn transaction_settings_reject_privileged_gucs_when_env_url_is_set() {
+        if std::env::var("HARN_TEST_POSTGRES_URL").is_err() {
+            return;
+        }
+        reset_postgres_state();
+
+        // `role` is rejected before any SQL runs.
+        let reject_role = r#"
+import "std/postgres"
+let db = pg_pool("env:HARN_TEST_POSTGRES_URL", {max_connections: 1})
+let r = pg_transaction(db, { tx -> return 1 }, {settings: {"role": "postgres"}})
+pg_close(db)
+"#;
+        let err = run_harn_source_expect_err(reject_role);
+        assert!(
+            err.contains("not permitted") && err.contains("role"),
+            "expected `role` to be rejected, got: {err}"
+        );
+
+        // A nil value is rejected (M-3) rather than set as the text "nil".
+        reset_postgres_state();
+        let reject_nil = r#"
+import "std/postgres"
+let db = pg_pool("env:HARN_TEST_POSTGRES_URL", {max_connections: 1})
+let r = pg_transaction(db, { tx -> return 1 }, {settings: {"app.current_tenant_id": nil}})
+pg_close(db)
+"#;
+        let err = run_harn_source_expect_err(reject_nil);
+        assert!(
+            err.contains("nil value"),
+            "expected nil setting to be rejected, got: {err}"
+        );
+
+        // The legitimate settings pass and take effect inside the transaction.
+        reset_postgres_state();
+        let allow_legit = r#"
+import "std/postgres"
+let db = pg_pool("env:HARN_TEST_POSTGRES_URL", {max_connections: 1})
+let tenant = pg_transaction(db, { tx ->
+  return pg_query_one(tx, "SELECT current_setting('app.current_tenant_id', true) AS t", []).t
+}, {settings: {"app.current_tenant_id": "tenant-xyz", "app.bypass_rls": "on", "statement_timeout": "5000"}})
+__io_println(tenant)
+pg_close(db)
+"#;
+        let out = run_harn_source(allow_legit);
+        assert_eq!(out.trim(), "tenant-xyz", "legit settings must apply: {out}");
+    }
+
+    /// M-2 (live): a unique-constraint violation surfaces a *stable category*
+    /// (`unique_violation` + SQLSTATE 23505), never the raw constraint name.
+    #[test]
+    fn constraint_violation_surfaces_stable_category_when_env_url_is_set() {
+        if std::env::var("HARN_TEST_POSTGRES_URL").is_err() {
+            return;
+        }
+        reset_postgres_state();
+        let schema = format!("harn_pg_m2_{}", uuid::Uuid::new_v4().simple());
+        let source = format!(
+            r#"
+import "std/postgres"
+let db = pg_pool("env:HARN_TEST_POSTGRES_URL", {{max_connections: 1}})
+pg_execute(db, "DROP SCHEMA IF EXISTS \"{schema}\" CASCADE", [])
+pg_execute(db, "CREATE SCHEMA \"{schema}\"", [])
+pg_execute(db, "SET search_path TO \"{schema}\"", [])
+pg_execute(db, "CREATE TABLE accounts (id int4 PRIMARY KEY, email text UNIQUE)", [])
+pg_execute(db, "INSERT INTO accounts (id, email) VALUES (1, 'a@b.com')", [])
+pg_execute(db, "INSERT INTO accounts (id, email) VALUES ($1, $2)", [2, "a@b.com"])
+pg_close(db)
+"#,
+        );
+        let err = run_harn_source_expect_err(&source);
+        assert!(
+            err.contains("unique_violation") && err.contains("23505"),
+            "expected stable unique_violation category, got: {err}"
+        );
+        // The raw constraint name must NOT leak to the caller.
+        assert!(
+            !err.contains("accounts_email_key"),
+            "raw constraint name leaked to caller: {err}"
+        );
+
+        // Clean up.
+        let cleanup = format!(
+            r#"
+import "std/postgres"
+let db = pg_pool("env:HARN_TEST_POSTGRES_URL", {{max_connections: 1}})
+pg_execute(db, "DROP SCHEMA IF EXISTS \"{schema}\" CASCADE", [])
+pg_close(db)
+"#,
+        );
+        run_harn_source(&cleanup);
+    }
+
+    /// H-2 (live): an in-range `Int` binds and round-trips correctly through an
+    /// `int4` column, and an out-of-range value surfaces a clear, stable
+    /// `numeric_out_of_range` (SQLSTATE 22003) diagnostic rather than a raw or
+    /// confusing message.
+    #[test]
+    fn int_bind_into_int4_column_when_env_url_is_set() {
+        if std::env::var("HARN_TEST_POSTGRES_URL").is_err() {
+            return;
+        }
+        reset_postgres_state();
+        let schema = format!("harn_pg_h2_{}", uuid::Uuid::new_v4().simple());
+        let ok_source = format!(
+            r#"
+import "std/postgres"
+let db = pg_pool("env:HARN_TEST_POSTGRES_URL", {{max_connections: 1}})
+pg_execute(db, "DROP SCHEMA IF EXISTS \"{schema}\" CASCADE", [])
+pg_execute(db, "CREATE SCHEMA \"{schema}\"", [])
+pg_execute(db, "SET search_path TO \"{schema}\"", [])
+pg_execute(db, "CREATE TABLE narrow (a int4, b int2)", [])
+pg_execute(db, "INSERT INTO narrow (a, b) VALUES ($1, $2)", [2000000000, 30000])
+let row = pg_query_one(db, "SELECT a, b FROM narrow WHERE a = $1", [2000000000])
+__io_println(row.a)
+__io_println(row.b)
+pg_close(db)
+"#,
+        );
+        let out = run_harn_source(&ok_source);
+        let lines: Vec<&str> = out.lines().collect();
+        assert_eq!(
+            lines,
+            vec!["2000000000", "30000"],
+            "in-range int must round-trip through int4/int2: {out}"
+        );
+
+        // Overflow into int4 yields a clear stable category.
+        let overflow_source = format!(
+            r#"
+import "std/postgres"
+let db = pg_pool("env:HARN_TEST_POSTGRES_URL", {{max_connections: 1}})
+pg_execute(db, "SET search_path TO \"{schema}\"", [])
+pg_execute(db, "INSERT INTO narrow (a) VALUES ($1)", [5000000000])
+pg_close(db)
+"#,
+        );
+        let err = run_harn_source_expect_err(&overflow_source);
+        assert!(
+            err.contains("numeric_out_of_range") && err.contains("22003"),
+            "expected numeric_out_of_range diagnostic for int4 overflow, got: {err}"
+        );
+
+        let cleanup = format!(
+            r#"
+import "std/postgres"
+let db = pg_pool("env:HARN_TEST_POSTGRES_URL", {{max_connections: 1}})
+pg_execute(db, "DROP SCHEMA IF EXISTS \"{schema}\" CASCADE", [])
+pg_close(db)
+"#,
+        );
+        run_harn_source(&cleanup);
+    }
+
+    /// M-5 (live): after `pg_migrate` runs DDL, a query whose result type the
+    /// DDL changed must NOT fail with `cached plan must not change result type`
+    /// (SQLSTATE 0A000) on a pooled connection. We warm a plan, migrate an
+    /// `ALTER TABLE` that changes the column type, then re-query on the same
+    /// pool — it must succeed because the migrate recycled the statement caches.
+    #[test]
+    fn migrate_recycles_statement_cache_after_ddl_when_env_url_is_set() {
+        if std::env::var("HARN_TEST_POSTGRES_URL").is_err() {
+            return;
+        }
+        reset_postgres_state();
+        let schema = format!("harn_pg_m5_{}", uuid::Uuid::new_v4().simple());
+
+        // Migration 1 creates the table with a text column.
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let dir = tmp.path();
+        std::fs::write(dir.join("0001_init.sql"), "CREATE TABLE plan_t (v text)").unwrap();
+        std::fs::write(
+            dir.join("0002_seed.sql"),
+            "INSERT INTO plan_t (v) VALUES ('x')",
+        )
+        .unwrap();
+        let dir1 = dir.to_string_lossy().into_owned();
+
+        // Migration 2 (added later) changes the column type, invalidating any
+        // cached plan that selected it as text.
+        let tmp2 = tempfile::tempdir().expect("tempdir2");
+        let dir2p = tmp2.path();
+        std::fs::write(dir2p.join("0001_init.sql"), "CREATE TABLE plan_t (v text)").unwrap();
+        std::fs::write(
+            dir2p.join("0002_seed.sql"),
+            "INSERT INTO plan_t (v) VALUES ('x')",
+        )
+        .unwrap();
+        std::fs::write(
+            dir2p.join("0003_retype.sql"),
+            "ALTER TABLE plan_t ALTER COLUMN v TYPE int4 USING 1",
+        )
+        .unwrap();
+        let dir2 = dir2p.to_string_lossy().into_owned();
+
+        let source = format!(
+            r#"
+import "std/postgres"
+let admin = pg_pool("env:HARN_TEST_POSTGRES_URL", {{max_connections: 1}})
+pg_execute(admin, "DROP SCHEMA IF EXISTS \"{schema}\" CASCADE", [])
+pg_execute(admin, "CREATE SCHEMA \"{schema}\"", [])
+pg_close(admin)
+
+// A single-connection pool: the warmed connection, the migrate connection,
+// and the post-migrate query all share ONE backend, so a stale cached plan
+// would deterministically reproduce 0A000 unless the migrate recycled it.
+// (max_connections: 1 also keeps the `SET search_path` session setting on the
+// same connection migrate/queries reuse.)
+let db = pg_pool("env:HARN_TEST_POSTGRES_URL", {{max_connections: 1}})
+pg_execute(db, "SET search_path TO \"{schema}\"", [])
+pg_migrate(db, {{dir: "{dir1}"}})
+// Warm + cache a plan that selects v as text on the pooled connection.
+let warm = pg_query_one(db, "SELECT v FROM plan_t LIMIT 1", [])
+__io_println(warm.v)
+// Apply the retype DDL through pg_migrate (which recycles caches).
+pg_migrate(db, {{dir: "{dir2}"}})
+// This reuse would hit 0A000 if the cache were not recycled.
+let after = pg_query_one(db, "SELECT v FROM plan_t LIMIT 1", [])
+__io_println(after.v)
+pg_execute(db, "DROP SCHEMA \"{schema}\" CASCADE", [])
+pg_close(db)
+"#,
+        );
+        let out = run_harn_source(&source);
+        let lines: Vec<&str> = out.lines().collect();
+        assert_eq!(lines.len(), 2, "unexpected output: {out}");
+        assert_eq!(lines[0], "x", "warmed select should read text: {out}");
+        assert_eq!(
+            lines[1], "1",
+            "post-DDL select must succeed (int4) not 0A000: {out}"
+        );
+    }
+
+    /// C-1 (live): two concurrent `pg_migrate` calls against the same database
+    /// serialize on the advisory lock — they do not interleave, exactly one
+    /// applies each migration, and the lock is released afterward (a third run
+    /// can immediately acquire it and is a clean no-op).
+    #[test]
+    fn concurrent_migrate_serializes_on_advisory_lock_when_env_url_is_set() {
+        if std::env::var("HARN_TEST_POSTGRES_URL").is_err() {
+            return;
+        }
+        reset_postgres_state();
+        let schema = format!("harn_pg_c1_{}", uuid::Uuid::new_v4().simple());
+
+        // A slow migration: pg_sleep inside the migration body widens the window
+        // in which the lock is held, so an unserialized second caller would
+        // observe a half-applied state / double-apply.
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let dir = tmp.path();
+        std::fs::write(
+            dir.join("0001_slow.sql"),
+            "SELECT pg_sleep(0.5); CREATE TABLE c1_widgets (id int4 PRIMARY KEY)",
+        )
+        .unwrap();
+        let migration_dir = dir.to_string_lossy().into_owned();
+
+        // Set the search_path inside each migrate task so both target the same
+        // scratch schema. Both tasks run on one current-thread runtime via a
+        // LocalSet; `tokio::join!` drives them concurrently.
+        let setup = format!(
+            r#"
+import "std/postgres"
+let admin = pg_pool("env:HARN_TEST_POSTGRES_URL", {{max_connections: 1}})
+pg_execute(admin, "DROP SCHEMA IF EXISTS \"{schema}\" CASCADE", [])
+pg_execute(admin, "CREATE SCHEMA \"{schema}\"", [])
+pg_close(admin)
+"#,
+        );
+        run_harn_source(&setup);
+
+        let migrate_src = |label: &str| {
+            format!(
+                r#"
+import "std/postgres"
+let db = pg_pool("env:HARN_TEST_POSTGRES_URL", {{max_connections: 1}})
+pg_execute(db, "SET search_path TO \"{schema}\"", [])
+let r = pg_migrate(db, {{dir: "{migration_dir}"}})
+__io_println("{label}:" + to_string(len(r.applied)))
+pg_close(db)
+"#,
+            )
+        };
+        let src_a = migrate_src("a");
+        let src_b = migrate_src("b");
+
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let (out_a, out_b) = rt.block_on(async {
+            let local = tokio::task::LocalSet::new();
+            local
+                .run_until(async {
+                    let run_one = |src: String| async move {
+                        let chunk = compile_source(&src).expect("compile migrate src");
+                        let mut vm = Vm::new();
+                        register_vm_stdlib(&mut vm);
+                        vm.execute(&chunk).await.expect("execute migrate src");
+                        vm.output().trim().to_string()
+                    };
+                    tokio::join!(run_one(src_a), run_one(src_b))
+                })
+                .await
+        });
+
+        // Exactly one caller applied the migration; the other saw it already
+        // applied (0). If the lock did not serialize, both would race the
+        // CREATE TABLE and one would error (duplicate table) — instead the
+        // loser cleanly skips.
+        let applied: Vec<i64> = [out_a.as_str(), out_b.as_str()]
+            .iter()
+            .map(|line| {
+                line.split(':')
+                    .nth(1)
+                    .and_then(|n| n.trim().parse::<i64>().ok())
+                    .unwrap_or_else(|| panic!("unexpected migrate output: {line:?}"))
+            })
+            .collect();
+        let mut sorted = applied.clone();
+        sorted.sort_unstable();
+        assert_eq!(
+            sorted,
+            vec![0, 1],
+            "concurrent migrate must serialize: one applies (1), one skips (0); got {applied:?}"
+        );
+
+        // The lock was released: a third run acquires it immediately and is a
+        // clean no-op.
+        let third = run_harn_source(&migrate_src("c"));
+        assert_eq!(
+            third.trim(),
+            "c:0",
+            "third run after release must be a clean no-op: {third}"
+        );
+
+        let cleanup = format!(
+            r#"
+import "std/postgres"
+let db = pg_pool("env:HARN_TEST_POSTGRES_URL", {{max_connections: 1}})
+pg_execute(db, "DROP SCHEMA IF EXISTS \"{schema}\" CASCADE", [])
+pg_close(db)
+"#,
+        );
+        run_harn_source(&cleanup);
     }
 
     /// Build a synthetic SQLx-style migrations directory (with `.up.sql`

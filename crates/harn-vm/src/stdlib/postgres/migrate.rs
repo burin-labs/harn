@@ -28,7 +28,7 @@ use sqlx_postgres::{PgConnection, PgPool};
 
 use crate::value::{VmError, VmValue};
 
-use super::{handle_id, pool_by_id, runtime_error, HANDLE_POOL};
+use super::{handle_id, pool_by_id, recycle_pool_after_ddl, runtime_error, HANDLE_POOL};
 
 /// Stable advisory-lock key distinct from anything sqlx-migrate uses so
 /// running `pg_migrate` and `sqlx migrate` side-by-side during a
@@ -173,7 +173,18 @@ async fn run_harn(
     }
     .await;
     release_lock(&mut conn, MIGRATION_LOCK_KEY).await;
+    // Release the pinned connection back to the pool *before* recycling so the
+    // post-DDL cache clear can drain it too.
+    drop(conn);
     let (applied_now, skipped) = result?;
+
+    // Migrations ran DDL on a fresh connection; pooled connections may hold a
+    // cached plan that the new schema invalidates (`0A000`). Recycle on a
+    // non-dry-run that actually applied something (M-5).
+    if !dry_run && !applied_now.is_empty() {
+        let max = pool.options().get_max_connections();
+        recycle_pool_after_ddl(pool.as_ref(), max).await;
+    }
 
     let available: Vec<String> = entries.iter().map(|entry| entry.name.clone()).collect();
     Ok(build_response(
@@ -541,7 +552,16 @@ async fn run_sqlx(
     acquire_lock(&mut conn, lock_id).await?;
     let result = run_sqlx_locked(&mut conn, &table_name, dry_run, &migrations).await;
     release_lock(&mut conn, lock_id).await;
+    // Release the pinned connection before recycling so the post-DDL cache clear
+    // can drain it too.
+    drop(conn);
     let (applied_now, skipped) = result?;
+
+    // See `run_harn`: recycle prepared-statement caches after DDL (M-5).
+    if !dry_run && !applied_now.is_empty() {
+        let max = pool.options().get_max_connections();
+        recycle_pool_after_ddl(pool.as_ref(), max).await;
+    }
 
     let available: Vec<String> = migrations.iter().map(|m| m.name.clone()).collect();
     Ok(build_response(
