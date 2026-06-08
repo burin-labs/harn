@@ -436,7 +436,20 @@ impl SymbolGraph {
                 let Some(tgt_module) = self.module_node_for_file(*tgt_file) else {
                     continue;
                 };
-                self.add_edge(src_module, tgt_module, EdgeKind::Imports);
+                // Idempotent add: `link_imports` re-runs over the WHOLE
+                // workspace after every per-file reindex, but `rebuild_file`
+                // only clears the reindexed file's edges. Without this guard,
+                // every reindex appends another copy of every still-valid
+                // Module→Module edge, growing the graph without bound and
+                // returning duplicate rows from IMPORTS/IMPORTED_BY traversals.
+                let already_linked = self.out_edges.get(&src_module).is_some_and(|edges| {
+                    edges
+                        .iter()
+                        .any(|e| e.to == tgt_module && e.kind == EdgeKind::Imports)
+                });
+                if !already_linked {
+                    self.add_edge(src_module, tgt_module, EdgeKind::Imports);
+                }
             }
         }
     }
@@ -687,5 +700,43 @@ mod tests {
             .iter()
             .any(|e| e.kind == EdgeKind::Imports && e.to == b_mod);
         assert!(edge_exists, "expected Module→Module IMPORTS edge");
+    }
+
+    #[test]
+    fn link_imports_is_idempotent_across_repeated_relinks() {
+        let mut g = SymbolGraph::new();
+        g.rebuild_file(
+            1,
+            "src/a.ts",
+            Language::TypeScript,
+            "import { x } from \"./b\";\n",
+            &["./b".into()],
+        );
+        g.rebuild_file(
+            2,
+            "src/b.ts",
+            Language::TypeScript,
+            "export const x = 1;\n",
+            &[],
+        );
+        let mut resolved: HashMap<FileId, Vec<FileId>> = HashMap::new();
+        resolved.insert(1, vec![2]);
+        // `link_imports` re-runs over the whole workspace after every per-file
+        // reindex, so relinking three times must not accumulate duplicate
+        // Module→Module IMPORTS edges.
+        g.link_imports(&resolved);
+        g.link_imports(&resolved);
+        g.link_imports(&resolved);
+        let a_mod = g.module_node_for_file(1).unwrap();
+        let b_mod = g.module_node_for_file(2).unwrap();
+        let module_import_edges = g
+            .outgoing(a_mod)
+            .iter()
+            .filter(|e| e.kind == EdgeKind::Imports && e.to == b_mod)
+            .count();
+        assert_eq!(
+            module_import_edges, 1,
+            "Module→Module IMPORTS edge must not duplicate across relinks"
+        );
     }
 }
