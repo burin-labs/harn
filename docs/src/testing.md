@@ -366,6 +366,10 @@ Run the eval packs shipped by a package:
 harn test package --evals
 ```
 
+After `harn install`, this also includes eval packs declared by installed
+dependency packages under `.harn/packages/<alias>/`. Dependency eval packs are
+passive until this command or a root `eval_pack://...` trigger references them.
+
 `[package].evals` is optional when the package root contains
 `harn.eval.toml`; otherwise declare one or more package-relative pack paths:
 

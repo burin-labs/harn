@@ -489,7 +489,7 @@ fn eval_pack_manifest_for_handler(
         0 => Err(trigger_error(
             trigger,
             format!(
-                "handler eval_pack://{target} did not match any [package].evals pack by id, name, or file stem",
+                "handler eval_pack://{target} did not match any package eval pack by id, name, or file stem",
             ),
         )),
         1 => Ok(matches.remove(0).1),
