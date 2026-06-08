@@ -57,7 +57,10 @@ path = "crates/harn-cli/src/lib.rs"
 # matching budget bump, leaving the ratchet stale for every downstream PR.
 # Re-bumped to 3335: lib.rs reached 3330 on main via #2784 without a matching
 # budget bump, leaving the merge queue ratchet stale for downstream PRs.
-max_loc = 3335
+# Re-bumped to 3400: lib.rs reached 3395 on main via #3181 (the `harn run
+# --as-job` one-shot worker entrypoint, `run_as_job`) without a matching budget
+# bump, leaving the ratchet stale for every downstream PR.
+max_loc = 3400
 
 [[handler]]
 path = "crates/harn-cli/src/commands/models/list.rs"
