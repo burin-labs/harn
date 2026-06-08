@@ -1,0 +1,150 @@
+import { call_notify_on_eval_gate_flip } from "./support"
+
+let DEFAULT_SUITE = "eval-suite-regression"
+
+let DEFAULT_MODEL = "mock-model"
+
+@test
+pipeline test_regression_notification_posts(task) {
+  egress_policy({allow: ["api.slack.com"], default: "deny"})
+  http_mock_clear()
+  let base = "https://api.slack.com"
+  http_mock(
+    "POST",
+    base + "/chat.postMessage",
+    {status: 200, body: "{\"ok\":true,\"channel\":\"C111\",\"ts\":\"1713650000.000100\"}", headers: {}},
+  )
+  let namespace = "eval-notifier-test-" + uuid()
+  let manifest = load_eval_manifest()
+  let config = {
+    namespace: namespace,
+    suite: DEFAULT_SUITE,
+    model: DEFAULT_MODEL,
+    split: "holdout",
+    commit: "commit-b",
+    branch: "main",
+    resamples: 200,
+  }
+  let plan = eval_ledger_resolve_resume_plan(manifest, ledger_options(config))
+  let baseline = eval_ledger_append_unique_case_rows(
+    baseline_rows(manifest, plan.harness_config_fingerprint, "commit-a"),
+    ledger_options(config + {commit: "commit-a"}),
+  )
+  assert_eq(baseline.inserted, 2, "baseline rows inserted")
+  let outcome = call_notify_on_eval_gate_flip(notifier_event(config, base))
+  assert(outcome.notified, "regression notifies")
+  assert_eq(outcome.decision, "regression", "gate decision")
+  assert_eq(outcome.verdict.gate.status, "regression", "regression gate used")
+  assert_eq(outcome.verdict.paired_delta.status, "regression", "paired delta included")
+  assert_eq(len(outcome.verdict.top_regressed_cases), 1, "top regressed case included")
+  let calls = http_mock_calls()
+  assert_eq(len(calls), 1, "one Slack post")
+  let body = json_parse(calls[0].body)
+  assert(contains(body.text, "Eval regression detected"), "Slack digest labels regression")
+  assert(
+    contains(body.blocks[2].text.text, "tool-call-schema"),
+    "Slack digest includes regressed case",
+  )
+  http_mock_clear()
+}
+
+@test
+pipeline test_no_prior_baseline_skips_notification(task) {
+  egress_policy({allow: ["api.slack.com"], default: "deny"})
+  http_mock_clear()
+  let base = "https://api.slack.com"
+  let namespace = "eval-notifier-test-" + uuid()
+  let config = {
+    namespace: namespace,
+    suite: DEFAULT_SUITE,
+    model: DEFAULT_MODEL,
+    split: "holdout",
+    commit: "commit-no-prior",
+    branch: "main",
+  }
+  let outcome = call_notify_on_eval_gate_flip(notifier_event(config, base))
+  assert(!outcome.notified, "no prior baseline does not notify")
+  assert(!(outcome.notify ?? false), "no prior baseline suppresses Slack")
+  assert_eq(outcome.reason, "no_prior_baseline", "no baseline reason")
+  assert_eq(len(http_mock_calls()), 0, "no Slack post")
+  http_mock_clear()
+}
+
+fn notifier_event(config, base) -> dict {
+  return {
+    id: "tick-1",
+    kind: "cron.tick",
+    provider: "cron",
+    received_at: "2026-04-22T03:00:00Z",
+    occurred_at: nil,
+    dedupe_key: "tick-1",
+    trace_id: "trace-tick-1",
+    tenant_id: nil,
+    headers: {},
+    batch: nil,
+    raw_body: nil,
+    provider_payload: {
+      provider: "cron",
+      cron_id: "nightly-eval-regression-notifier",
+      schedule: "0 3 * * *",
+      tick_at: "2026-04-22T03:00:00Z",
+      raw: {
+        config: config
+          + {
+          slack_channel: "C111",
+          bot_token: "xoxb-test-token",
+          api_base_url: base,
+          dashboard_url: "https://harn.example/evals/nightly",
+        },
+      },
+    },
+    signature_status: {state: "verified"},
+  }
+}
+
+fn load_eval_manifest() -> dict {
+  let base_dir = path_join(source_dir(), "..")
+  let path = path_join(base_dir, "harn.eval.toml")
+  return eval_pack_manifest(toml_parse(harness.fs.read_text(path)) + {base_dir: base_dir})
+}
+
+fn ledger_options(config) -> dict {
+  return {
+    namespace: config.namespace,
+    suite: config.suite,
+    model: config.model,
+    split: config.split,
+    commit: config.commit,
+    branch: config.branch,
+  }
+}
+
+fn baseline_rows(manifest, harness_fingerprint, commit) -> list {
+  var rows = []
+  for case in manifest.cases {
+    rows = rows
+      + [
+      {
+        suite: DEFAULT_SUITE,
+        model: DEFAULT_MODEL,
+        split: case.split,
+        commit: commit,
+        branch: "main",
+        case_name: case.id,
+        name: case.id,
+        case_fingerprint: case.case_fingerprint,
+        harness_config_fingerprint: harness_fingerprint,
+        trial: 0,
+        trials: 1,
+        passes: 1,
+        fails: 0,
+        skips: 0,
+        timeouts: 0,
+        pass_rate: 1.0,
+        status: "PASS",
+        verification: "PASS",
+      },
+    ]
+  }
+  return rows
+}

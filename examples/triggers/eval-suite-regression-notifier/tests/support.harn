@@ -1,0 +1,6 @@
+import { notify_on_eval_gate_flip } from "../lib"
+
+/** Call the package handler through an explicit test import. */
+pub fn call_notify_on_eval_gate_flip(event) -> dict {
+  return notify_on_eval_gate_flip(event)
+}

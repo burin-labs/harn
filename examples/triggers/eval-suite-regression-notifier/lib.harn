@@ -1,0 +1,235 @@
+import "std/eval/stats"
+import "std/triggers"
+import { post_eval_verdict } from "harn-slack-connector/default"
+
+let DEFAULT_NAMESPACE = "eval-suite-regression-notifier"
+
+let DEFAULT_SUITE = "eval-suite-regression"
+
+let DEFAULT_MODEL = "mock-model"
+
+let DEFAULT_SLACK_CHANNEL = "C0123456789"
+
+/**
+ * Run the scheduled eval, gate it against the prior ledger commit, and notify only on a gate flip.
+ */
+pub fn notify_on_eval_gate_flip(event: TriggerEvent) -> dict {
+  let outcome = eval_gate_verdict(event)
+  if !(outcome.notify ?? false) {
+    return outcome
+  }
+  let config = outcome.config
+  let posted = post_eval_verdict(outcome.verdict, slack_options(config))
+  if is_err(posted) {
+    return outcome + {notified: false, notify_error: unwrap_err(posted)}
+  }
+  return outcome + {notified: true, slack: posted}
+}
+
+/** Run the eval pack and build the structured verdict without posting to Slack. */
+pub fn eval_gate_verdict(event: TriggerEvent) -> dict {
+  let config = notifier_config(event)
+  let manifest = load_eval_manifest()
+  let options = ledger_options(config)
+  let report = eval_pack_run(manifest, options)
+  let current_rows = rows_for_split(report.stats_rows, config.split)
+  let prior = eval_ledger_prior_commit_rows(options)
+  if len(prior.rows) == 0 {
+    return {
+      notified: false,
+      notify: false,
+      reason: "no_prior_baseline",
+      config: config,
+      report: report,
+      prior: prior,
+      current_rows: current_rows,
+    }
+  }
+  let gate = regression_gate(prior.rows, current_rows, config.k)
+  let paired = paired_delta_report(prior.rows, current_rows, config.resamples, config.seed)
+  let decision = verdict_decision(gate, paired)
+  let verdict = {
+    suite: config.suite,
+    model: config.model,
+    split: config.split ?? "all",
+    decision: decision,
+    macro_pass_at_1: gate.current_macro,
+    baseline_macro_pass_at_1: gate.baseline_macro,
+    gate: gate,
+    paired_delta: paired,
+    reliability: reliability_breakdown(current_rows),
+    top_regressed_cases: top_regressed_cases(prior.rows, current_rows),
+    ledger_url: config.ledger_url,
+    dashboard_url: config.dashboard_url,
+  }
+  let notify = should_notify(decision, config)
+  return {
+    notified: false,
+    notify: notify,
+    decision: decision,
+    config: config,
+    verdict: verdict,
+    report: report,
+    prior: prior,
+    current_rows: current_rows,
+  }
+}
+
+fn load_eval_manifest() -> dict {
+  let path = path_join(source_dir(), "harn.eval.toml")
+  return eval_pack_manifest(toml_parse(harness.fs.read_text(path)) + {base_dir: source_dir()})
+}
+
+fn notifier_config(event) -> dict {
+  let payload = event?.provider_payload ?? {}
+  let raw = payload?.config ?? payload?.raw?.config ?? payload
+  return compact(
+    {
+      namespace: raw?.namespace ?? DEFAULT_NAMESPACE,
+      suite: raw?.suite ?? DEFAULT_SUITE,
+      model: raw?.model ?? DEFAULT_MODEL,
+      split: raw?.split,
+      commit: raw?.commit ?? "example-commit",
+      branch: raw?.branch ?? "main",
+      k: raw?.k ?? 1.0,
+      resamples: raw?.resamples ?? 2000,
+      seed: raw?.seed ?? 1234567,
+      slack_channel: raw?.slack_channel ?? raw?.channel ?? DEFAULT_SLACK_CHANNEL,
+      bot_token: raw?.bot_token,
+      bot_token_secret: raw?.bot_token_secret ?? "slack/bot-token",
+      thread_ts: raw?.thread_ts,
+      api_base_url: raw?.api_base_url,
+      ledger_url: raw?.ledger_url,
+      dashboard_url: raw?.dashboard_url,
+      notify_inconclusive: raw?.notify_inconclusive ?? false,
+    },
+  )
+}
+
+fn ledger_options(config) -> dict {
+  return compact(
+    {
+      namespace: config.namespace,
+      suite: config.suite,
+      model: config.model,
+      split: config.split,
+      commit: config.commit,
+      branch: config.branch,
+    },
+  )
+}
+
+fn slack_options(config) -> dict {
+  return compact(
+    {
+      channel: config.slack_channel,
+      bot_token: config.bot_token,
+      bot_token_secret: config.bot_token_secret,
+      thread_ts: config.thread_ts,
+      api_base_url: config.api_base_url,
+    },
+  )
+}
+
+fn rows_for_split(rows, split) -> list {
+  if split == nil {
+    return rows
+  }
+  var filtered = []
+  for row in rows ?? [] {
+    if row?.split == split {
+      filtered = filtered + [row]
+    }
+  }
+  return filtered
+}
+
+fn verdict_decision(gate, paired) -> string {
+  if !(gate?.passed ?? true) {
+    return "regression"
+  }
+  if paired?.status == "improved" {
+    return "improved"
+  }
+  return "inconclusive"
+}
+
+fn should_notify(decision, config) -> bool {
+  let notify_inconclusive = config.notify_inconclusive ?? false
+  return decision == "regression" || decision == "improved"
+    || (decision == "inconclusive" && notify_inconclusive)
+}
+
+fn top_regressed_cases(baseline_rows, current_rows) -> list {
+  var baseline = {}
+  for row in baseline_rows ?? [] {
+    baseline[row.case_name ?? row.name] = row
+  }
+  var cases = []
+  for row in current_rows ?? [] {
+    let name = row.case_name ?? row.name
+    let base = baseline[name]
+    if base != nil && fingerprints_match(base, row) {
+      let delta = row_pass_rate(row) - row_pass_rate(base)
+      if delta < 0.0 {
+        cases = insert_regressed_case(
+          cases,
+          {
+            name: name,
+            fingerprint: row.case_fingerprint,
+            delta: delta,
+            baseline_pass_rate: row_pass_rate(base),
+            current_pass_rate: row_pass_rate(row),
+          },
+        )
+      }
+    }
+  }
+  return cases
+}
+
+fn insert_regressed_case(cases, candidate) -> list {
+  var out = []
+  var inserted = false
+  for item in cases {
+    if !inserted && candidate.delta < item.delta {
+      out = out + [candidate]
+      inserted = true
+    }
+    out = out + [item]
+  }
+  if !inserted {
+    out = out + [candidate]
+  }
+  return out
+}
+
+fn fingerprints_match(left, right) -> bool {
+  let left_harness = left?.harness_config_fingerprint ?? ""
+  let right_harness = right?.harness_config_fingerprint ?? ""
+  return left?.case_fingerprint == right?.case_fingerprint
+    && left_harness == right_harness
+}
+
+fn row_pass_rate(row) -> float {
+  if row?.pass_rate != nil {
+    return row.pass_rate
+  }
+  let passes = row?.passes ?? 0
+  let fails = row?.fails ?? 0
+  let decided = passes + fails
+  if decided <= 0 {
+    return 0.0
+  }
+  return passes * 1.0 / (decided * 1.0)
+}
+
+fn compact(input) -> dict {
+  var out = {}
+  for entry in (input ?? {}).entries() {
+    if entry.value != nil {
+      out[entry.key] = entry.value
+    }
+  }
+  return out
+}
