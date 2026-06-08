@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::fmt;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
@@ -57,6 +57,44 @@ fn constants_identical(a: &Constant, b: &Constant) -> bool {
         (Constant::Float(x), Constant::Float(y)) => x.to_bits() == y.to_bits(),
         _ => a == b,
     }
+}
+
+/// Hashable identity for constant-pool deduplication.
+///
+/// Mirrors [`constants_identical`] exactly, including bitwise float identity,
+/// so the compiler can replace the previous linear scan with an amortized O(1)
+/// side index without changing bytecode-visible constant slots.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+enum ConstantKey {
+    Int(i64),
+    Float(u64),
+    String(String),
+    Bool(bool),
+    Nil,
+    Duration(i64),
+}
+
+impl From<&Constant> for ConstantKey {
+    fn from(constant: &Constant) -> Self {
+        match constant {
+            Constant::Int(value) => Self::Int(*value),
+            Constant::Float(value) => Self::Float(value.to_bits()),
+            Constant::String(value) => Self::String(value.clone()),
+            Constant::Bool(value) => Self::Bool(*value),
+            Constant::Nil => Self::Nil,
+            Constant::Duration(value) => Self::Duration(*value),
+        }
+    }
+}
+
+fn build_constant_index(constants: &[Constant]) -> HashMap<ConstantKey, u16> {
+    let mut index = HashMap::with_capacity(constants.len());
+    for (slot, constant) in constants.iter().enumerate() {
+        if let Ok(slot) = u16::try_from(slot) {
+            index.entry(ConstantKey::from(constant)).or_insert(slot);
+        }
+    }
+    index
 }
 
 /// Runtime-only inline-cache state for bytecode instructions that repeatedly
@@ -272,6 +310,10 @@ pub struct Chunk {
     pub code: Vec<u8>,
     /// Constant pool.
     pub constants: Vec<Constant>,
+    /// Compile-time constant-pool side index. Derived from [`Chunk::constants`]
+    /// and intentionally omitted from [`CachedChunk`]; bytecode-cache loads
+    /// rebuild it from the serialized constant vector.
+    constant_index: HashMap<ConstantKey, u16>,
     /// Source line numbers for each instruction (for error reporting).
     pub lines: Vec<u32>,
     /// Source column numbers for each instruction (for error reporting).
@@ -354,6 +396,7 @@ impl Clone for Chunk {
             cache_id: self.cache_id,
             code: self.code.clone(),
             constants: self.constants.clone(),
+            constant_index: self.constant_index.clone(),
             lines: self.lines.clone(),
             columns: self.columns.clone(),
             source_file: self.source_file.clone(),
@@ -645,6 +688,7 @@ impl Chunk {
             cache_id: next_chunk_cache_id(),
             code: Vec::new(),
             constants: Vec::new(),
+            constant_index: HashMap::new(),
             lines: Vec::new(),
             columns: Vec::new(),
             source_file: None,
@@ -670,14 +714,25 @@ impl Chunk {
 
     /// Add a constant and return its index.
     pub fn add_constant(&mut self, constant: Constant) -> u16 {
-        for (i, c) in self.constants.iter().enumerate() {
-            if constants_identical(c, &constant) {
-                return i as u16;
-            }
+        debug_assert!(
+            self.constant_index.len() <= self.constants.len(),
+            "constant side index cannot outgrow the constant pool"
+        );
+        let key = ConstantKey::from(&constant);
+        if let Some(index) = self.constant_index.get(&key) {
+            debug_assert!(
+                self.constants
+                    .get(*index as usize)
+                    .is_some_and(|existing| constants_identical(existing, &constant)),
+                "constant side index drifted from the constant pool"
+            );
+            return *index;
         }
         let idx = self.constants.len();
+        let idx = u16::try_from(idx).expect("constant pool exceeded u16 operand space");
         self.constants.push(constant);
-        idx as u16
+        self.constant_index.insert(key, idx);
+        idx
     }
 
     /// Emit a single-byte instruction.
@@ -1110,6 +1165,7 @@ impl Chunk {
             cache_id: next_chunk_cache_id(),
             code: cached.code.clone(),
             constants: cached.constants.clone(),
+            constant_index: build_constant_index(&cached.constants),
             lines: cached.lines.clone(),
             columns: cached.columns.clone(),
             source_file: cached.source_file.clone(),
@@ -1992,9 +2048,53 @@ mod tests {
         // Ordinary floats still dedup by value.
         let a = chunk.add_constant(Constant::Float(1.5));
         assert_eq!(a, chunk.add_constant(Constant::Float(1.5)));
+        let nan_a = chunk.add_constant(Constant::Float(f64::from_bits(0x7ff8_0000_0000_0001)));
+        let nan_b = chunk.add_constant(Constant::Float(f64::from_bits(0x7ff8_0000_0000_0002)));
+        assert_ne!(
+            nan_a, nan_b,
+            "distinct NaN payloads must get distinct constant slots"
+        );
+        assert_eq!(
+            nan_a,
+            chunk.add_constant(Constant::Float(f64::from_bits(0x7ff8_0000_0000_0001)))
+        );
         // Non-float constants are unaffected.
         let s = chunk.add_constant(Constant::Int(7));
         assert_eq!(s, chunk.add_constant(Constant::Int(7)));
+    }
+
+    #[test]
+    fn add_constant_uses_first_slot_after_many_unique_constants() {
+        let mut chunk = Chunk::new();
+        let first = chunk.add_constant(Constant::String("shared".to_string()));
+        for index in 0..10_000 {
+            let slot = chunk.add_constant(Constant::String(format!("unique_{index}")));
+            assert_eq!(slot as usize, index + 1);
+        }
+        assert_eq!(
+            first,
+            chunk.add_constant(Constant::String("shared".to_string())),
+            "duplicate lookup must return the original slot after index growth"
+        );
+    }
+
+    #[test]
+    fn constant_index_round_trips_through_cached_chunk() {
+        let mut chunk = Chunk::new();
+        let shared = chunk.add_constant(Constant::String("shared".to_string()));
+        for index in 0..128 {
+            chunk.add_constant(Constant::Int(index));
+        }
+
+        let frozen = chunk.freeze_for_cache();
+        let mut thawed = Chunk::from_cached(&frozen);
+        assert_eq!(
+            shared,
+            thawed.add_constant(Constant::String("shared".to_string())),
+            "cache thaw must rebuild the constant side index"
+        );
+        let next = thawed.add_constant(Constant::String("new".to_string()));
+        assert_eq!(next as usize, frozen.constants.len());
     }
 
     #[test]
