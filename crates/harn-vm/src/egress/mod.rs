@@ -14,13 +14,31 @@ use crate::event_log::{active_event_log, EventLog, LogEvent, Topic};
 use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
 
+pub mod ssrf;
+
+pub use ssrf::{is_disallowed_ip, GuardedResolver};
+
 pub const HARN_EGRESS_ALLOW_ENV: &str = "HARN_EGRESS_ALLOW";
 pub const HARN_EGRESS_DENY_ENV: &str = "HARN_EGRESS_DENY";
 pub const HARN_EGRESS_DEFAULT_ENV: &str = "HARN_EGRESS_DEFAULT";
+pub const HARN_EGRESS_BLOCK_PRIVATE_ENV: &str = "HARN_EGRESS_BLOCK_PRIVATE";
+pub const HARN_EGRESS_ALLOW_LOOPBACK_ENV: &str = "HARN_EGRESS_ALLOW_LOOPBACK";
 pub const EGRESS_AUDIT_TOPIC: &str = "connectors.egress.audit";
 
 thread_local! {
     static REQUIRE_EXPLICIT_EGRESS_POLICY_DEPTH: RefCell<usize> = const { RefCell::new(0) };
+    static REQUIRE_SSRF_GUARD_DEPTH: RefCell<usize> = const { RefCell::new(0) };
+}
+
+/// Whether the private-address (SSRF) block is engaged for a policy.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum SsrfMode {
+    /// No private-address blocking; only host allow/deny rules apply.
+    Off,
+    /// Block any URL whose host is, or resolves to, a private / loopback /
+    /// link-local / metadata / reserved address.
+    #[default]
+    BlockPrivate,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -34,6 +52,11 @@ struct EgressPolicy {
     allow: Vec<EgressRule>,
     deny: Vec<EgressRule>,
     default: DefaultAction,
+    /// `None` means "caller did not set the axis": the effective mode then
+    /// falls back to [`SsrfMode::BlockPrivate`] when the SSRF guard scope is
+    /// active (e.g. under `harn run`) and [`SsrfMode::Off`] otherwise.
+    block_private: Option<SsrfMode>,
+    allow_loopback: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -107,11 +130,18 @@ pub fn register_egress_builtins(vm: &mut Vm) {
 }
 
 pub async fn enforce_url_allowed(surface: &str, url: &str) -> Result<(), VmError> {
-    let Some(blocked) = check_url(surface, url)? else {
-        return Ok(());
-    };
-    audit_blocked(&blocked).await;
-    Err(blocked.to_vm_error())
+    if let Some(blocked) = check_url(surface, url)? {
+        audit_blocked(&blocked).await;
+        return Err(blocked.to_vm_error());
+    }
+    // Host-name SSRF resolution (DNS off the runtime). The connect-time
+    // GuardedResolver is the unbypassable backstop; this gives callers a clean
+    // typed `EgressBlocked` instead of an opaque connect error.
+    if let Some(blocked) = check_url_host_resolution(surface, url).await? {
+        audit_blocked(&blocked).await;
+        return Err(blocked.to_vm_error());
+    }
+    Ok(())
 }
 
 pub fn redirect_url_allowed(surface: &str, url: &str) -> bool {
@@ -170,6 +200,7 @@ pub fn reset_egress_policy_for_host() {
         guard.policy = None;
     }
     clear_explicit_egress_policy_requirement_for_host();
+    clear_ssrf_guard_requirement_for_host();
 }
 
 pub(crate) fn clear_explicit_egress_policy_requirement_for_host() {
@@ -179,6 +210,34 @@ pub(crate) fn clear_explicit_egress_policy_requirement_for_host() {
 #[cfg(test)]
 pub fn reset_egress_policy_for_tests() {
     reset_egress_policy_for_host();
+}
+
+/// Serializes egress tests that mutate `HARN_EGRESS_*` process-global env or
+/// the global egress policy state. `std::env::set_var` is unsound under
+/// concurrent access, so every env-mutating egress test holds this lock for its
+/// whole body. Recovers from a poisoned mutex so a panicking test cannot wedge
+/// the rest of the suite.
+#[cfg(test)]
+pub(crate) fn test_env_lock() -> std::sync::MutexGuard<'static, ()> {
+    use std::sync::{Mutex, OnceLock};
+    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+    LOCK.get_or_init(|| Mutex::new(()))
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
+/// Install a thread-local egress policy from `(key, value)` config pairs for
+/// tests that need to drive the real HTTP client path without touching
+/// process-global `HARN_EGRESS_*` env (which is unsound under concurrency).
+#[cfg(test)]
+pub(crate) fn install_test_policy(config: &[(&str, VmValue)]) {
+    let map = config
+        .iter()
+        .cloned()
+        .map(|(key, value)| (key.to_string(), value))
+        .collect();
+    let policy = policy_from_config(&map).expect("test egress policy parses");
+    install_policy(policy, "test").expect("test egress policy installs");
 }
 
 /// Scope outbound network to explicit `egress_policy(...)` /
@@ -203,6 +262,130 @@ impl Drop for ExplicitEgressPolicyGuard {
     }
 }
 
+/// Default-on the SSRF private-address guard for outbound HTTP.
+///
+/// Mirrors [`require_explicit_egress_policy_for_host`]. While in scope, any
+/// URL whose host is, or resolves to, a private/loopback/link-local/metadata
+/// address is blocked by [`check_url`] unless the caller explicitly opts out
+/// via `egress_policy({block_private:"off"})` / `HARN_EGRESS_BLOCK_PRIVATE=off`.
+pub fn require_ssrf_guard_for_host() -> SsrfGuardScope {
+    REQUIRE_SSRF_GUARD_DEPTH.with(|depth| {
+        *depth.borrow_mut() += 1;
+    });
+    SsrfGuardScope
+}
+
+#[derive(Debug)]
+pub struct SsrfGuardScope;
+
+impl Drop for SsrfGuardScope {
+    fn drop(&mut self) {
+        REQUIRE_SSRF_GUARD_DEPTH.with(|depth| {
+            let mut depth = depth.borrow_mut();
+            *depth = depth.saturating_sub(1);
+        });
+    }
+}
+
+pub(crate) fn clear_ssrf_guard_requirement_for_host() {
+    REQUIRE_SSRF_GUARD_DEPTH.with(|depth| *depth.borrow_mut() = 0);
+}
+
+fn ssrf_guard_scope_active() -> bool {
+    REQUIRE_SSRF_GUARD_DEPTH.with(|depth| *depth.borrow() > 0)
+}
+
+/// The effective SSRF settings the HTTP client builder should apply, taking
+/// the configured policy (if any), env seeding, and the default-on guard scope
+/// into account. Returns `(block_private_active, allow_loopback)`.
+///
+/// Used by `crate::http::client::build_http_client` to decide whether to
+/// install a [`GuardedResolver`] (the connect-time backstop) and to key the
+/// pooled-client cache so clients with different SSRF settings never alias.
+pub fn current_ssrf_client_settings() -> (bool, bool) {
+    // Best-effort: seed env so a process configured purely via env is honored.
+    let _ = ensure_env_seeded();
+    let configured = {
+        let guard = state().read().expect("egress policy state poisoned");
+        #[cfg(test)]
+        {
+            guard
+                .test_policies
+                .get(&std::thread::current().id())
+                .cloned()
+        }
+        #[cfg(not(test))]
+        {
+            guard.policy.clone()
+        }
+    };
+    let (mode, allow_loopback) = effective_ssrf_settings(configured.as_ref().map(|c| &c.policy));
+    (mode == SsrfMode::BlockPrivate, allow_loopback)
+}
+
+/// Resolve the effective SSRF mode + loopback hatch given the (optional)
+/// configured policy. An unset `block_private` axis defaults to
+/// [`SsrfMode::BlockPrivate`] iff the guard scope is active.
+fn effective_ssrf_settings(configured: Option<&EgressPolicy>) -> (SsrfMode, bool) {
+    let scope_active = ssrf_guard_scope_active();
+    match configured {
+        Some(policy) => {
+            let mode = policy.block_private.unwrap_or(if scope_active {
+                SsrfMode::BlockPrivate
+            } else {
+                SsrfMode::Off
+            });
+            (mode, policy.allow_loopback)
+        }
+        None => {
+            let mode = if scope_active {
+                SsrfMode::BlockPrivate
+            } else {
+                SsrfMode::Off
+            };
+            (mode, false)
+        }
+    }
+}
+
+/// Reason text for an SSRF private-address block. Carries only the host, never
+/// the resolved address or any secret embedded in the URL.
+fn private_block_reason(host: &str) -> String {
+    format!(
+        "host `{host}` is a disallowed address \
+         (private, loopback, link-local, or metadata IP)"
+    )
+}
+
+/// Synchronous private-address block for IP-literal hosts. Host *names* are
+/// handled by the async [`enforce_url_allowed`] path (DNS off the runtime) and
+/// ultimately by the connect-time [`GuardedResolver`]; this only classifies a
+/// literal address so the sync callers (redirects, connectors) still block the
+/// most direct SSRF attempt.
+fn private_block_for_literal(target: &EgressTarget, allow_loopback: bool) -> Option<String> {
+    target.ip.and_then(|ip| {
+        is_disallowed_ip(ip, allow_loopback).then(|| private_block_reason(&target.host))
+    })
+}
+
+/// Resolve a host to its IP addresses using the blocking OS resolver on the
+/// blocking pool. Returns `None` on resolution failure or when no addresses
+/// are produced (deferred to the connect-time guard).
+async fn resolve_host_addrs(host: &str) -> Option<Vec<IpAddr>> {
+    use std::net::ToSocketAddrs;
+    let host = host.to_string();
+    tokio::task::spawn_blocking(move || {
+        (host.as_str(), 0_u16)
+            .to_socket_addrs()
+            .ok()
+            .map(|addrs| addrs.map(|addr| addr.ip()).collect::<Vec<_>>())
+            .filter(|addrs: &Vec<IpAddr>| !addrs.is_empty())
+    })
+    .await
+    .ok()
+    .flatten()
+}
+
 fn check_url(surface: &str, raw_url: &str) -> Result<Option<EgressBlocked>, VmError> {
     ensure_env_seeded()?;
     let configured = {
@@ -217,9 +400,20 @@ fn check_url(surface: &str, raw_url: &str) -> Result<Option<EgressBlocked>, VmEr
             guard.policy.clone()
         }
     };
+    let (ssrf_mode, allow_loopback) =
+        effective_ssrf_settings(configured.as_ref().map(|c| &c.policy));
     let require_explicit_policy =
         REQUIRE_EXPLICIT_EGRESS_POLICY_DEPTH.with(|depth| *depth.borrow() > 0);
+
     let Some(configured) = configured else {
+        // No host allow/deny policy is configured. The private-block still
+        // applies in addition when the SSRF guard is active (default-on).
+        if ssrf_mode == SsrfMode::BlockPrivate {
+            let target = EgressTarget::parse(raw_url)?;
+            if let Some(reason) = private_block_for_literal(&target, allow_loopback) {
+                return Ok(Some(blocked(surface, raw_url, &target, reason)));
+            }
+        }
         if require_explicit_policy {
             let target = EgressTarget::parse(raw_url)?;
             return Ok(Some(blocked(
@@ -232,6 +426,17 @@ fn check_url(surface: &str, raw_url: &str) -> Result<Option<EgressBlocked>, VmEr
         return Ok(None);
     };
     let target = EgressTarget::parse(raw_url)?;
+
+    // Deny-private wins: the SSRF block is applied IN ADDITION to and ahead of
+    // the host allow/deny rules so an `allow` entry cannot re-open a private
+    // address. (Literal IPs only here; host names are resolved in the async
+    // `enforce_url_allowed` path and pinned at connect time.)
+    if ssrf_mode == SsrfMode::BlockPrivate {
+        if let Some(reason) = private_block_for_literal(&target, allow_loopback) {
+            return Ok(Some(blocked(surface, raw_url, &target, reason)));
+        }
+    }
+
     if let Some(rule) = configured
         .policy
         .deny
@@ -262,6 +467,53 @@ fn check_url(surface: &str, raw_url: &str) -> Result<Option<EgressBlocked>, VmEr
         &target,
         "no allow rule matched".to_string(),
     )))
+}
+
+/// Async host-name private-address block. Run by [`enforce_url_allowed`] after
+/// the sync [`check_url`] passes: when the SSRF mode is `BlockPrivate` and the
+/// host is a name (not a literal IP), resolve it off the runtime and block if
+/// ANY resolved address is disallowed. The connect-time [`GuardedResolver`]
+/// remains the unbypassable backstop against rebinding between this check and
+/// the actual connection.
+async fn check_url_host_resolution(
+    surface: &str,
+    raw_url: &str,
+) -> Result<Option<EgressBlocked>, VmError> {
+    let configured = {
+        let guard = state().read().expect("egress policy state poisoned");
+        #[cfg(test)]
+        {
+            let thread_id = std::thread::current().id();
+            guard.test_policies.get(&thread_id).cloned()
+        }
+        #[cfg(not(test))]
+        {
+            guard.policy.clone()
+        }
+    };
+    let (ssrf_mode, allow_loopback) =
+        effective_ssrf_settings(configured.as_ref().map(|c| &c.policy));
+    if ssrf_mode != SsrfMode::BlockPrivate {
+        return Ok(None);
+    }
+    let target = EgressTarget::parse(raw_url)?;
+    if target.ip.is_some() {
+        // Literal IPs are already handled synchronously in `check_url`.
+        return Ok(None);
+    }
+    let Some(addrs) = resolve_host_addrs(&target.host).await else {
+        // Unresolvable here: defer to the connect-time guard.
+        return Ok(None);
+    };
+    if addrs.iter().any(|ip| is_disallowed_ip(*ip, allow_loopback)) {
+        return Ok(Some(blocked(
+            surface,
+            raw_url,
+            &target,
+            private_block_reason(&target.host),
+        )));
+    }
+    Ok(None)
 }
 
 fn blocked(surface: &str, url: &str, target: &EgressTarget, reason: String) -> EgressBlocked {
@@ -371,6 +623,26 @@ fn ensure_env_seeded() -> Result<(), VmError> {
     let allow = std::env::var(HARN_EGRESS_ALLOW_ENV).ok();
     let deny = std::env::var(HARN_EGRESS_DENY_ENV).ok();
     let default = std::env::var(HARN_EGRESS_DEFAULT_ENV).ok();
+    let block_private = std::env::var(HARN_EGRESS_BLOCK_PRIVATE_ENV).ok();
+    let allow_loopback = std::env::var(HARN_EGRESS_ALLOW_LOOPBACK_ENV).ok();
+    let any_set = allow.is_some()
+        || deny.is_some()
+        || default.is_some()
+        || block_private.is_some()
+        || allow_loopback.is_some();
+    let build_policy = || -> Result<EgressPolicy, VmError> {
+        Ok(EgressPolicy {
+            allow: parse_rule_list(allow.as_deref().unwrap_or(""))?,
+            deny: parse_rule_list(deny.as_deref().unwrap_or(""))?,
+            default: parse_default_action(default.as_deref().unwrap_or("allow"))?,
+            block_private: block_private.as_deref().map(parse_ssrf_mode).transpose()?,
+            allow_loopback: allow_loopback
+                .as_deref()
+                .map(parse_bool)
+                .transpose()?
+                .unwrap_or(false),
+        })
+    };
     let mut guard = state().write().expect("egress policy state poisoned");
     #[cfg(test)]
     {
@@ -379,19 +651,14 @@ fn ensure_env_seeded() -> Result<(), VmError> {
             return Ok(());
         }
         guard.test_env_checked.insert(thread_id);
-        if allow.is_none() && deny.is_none() && default.is_none() {
+        if !any_set {
             return Ok(());
         }
-        let policy = EgressPolicy {
-            allow: parse_rule_list(allow.as_deref().unwrap_or(""))?,
-            deny: parse_rule_list(deny.as_deref().unwrap_or(""))?,
-            default: parse_default_action(default.as_deref().unwrap_or("allow"))?,
-        };
         guard.test_policies.insert(
             thread_id,
             ConfiguredPolicy {
                 source: "environment",
-                policy,
+                policy: build_policy()?,
             },
         );
         Ok(())
@@ -402,17 +669,12 @@ fn ensure_env_seeded() -> Result<(), VmError> {
             return Ok(());
         }
         guard.env_checked = true;
-        if allow.is_none() && deny.is_none() && default.is_none() {
+        if !any_set {
             return Ok(());
         }
-        let policy = EgressPolicy {
-            allow: parse_rule_list(allow.as_deref().unwrap_or(""))?,
-            deny: parse_rule_list(deny.as_deref().unwrap_or(""))?,
-            default: parse_default_action(default.as_deref().unwrap_or("allow"))?,
-        };
         guard.policy = Some(ConfiguredPolicy {
             source: "environment",
-            policy,
+            policy: build_policy()?,
         });
         Ok(())
     }
@@ -436,11 +698,42 @@ fn policy_from_config(config: &BTreeMap<String, VmValue>) -> Result<EgressPolicy
         .map(|value| parse_default_action(&value.display()))
         .transpose()?
         .unwrap_or(DefaultAction::Allow);
+    let block_private = config
+        .get("block_private")
+        .map(|value| parse_ssrf_mode(&value.display()))
+        .transpose()?;
+    let allow_loopback = match config.get("allow_loopback") {
+        Some(value) => parse_bool(&value.display())?,
+        None => false,
+    };
     Ok(EgressPolicy {
         allow,
         deny,
         default,
+        block_private,
+        allow_loopback,
     })
+}
+
+fn parse_ssrf_mode(raw: &str) -> Result<SsrfMode, VmError> {
+    match raw.trim().to_ascii_lowercase().as_str() {
+        // `private` and `on` engage the private-address block; `off` opts out.
+        "private" | "on" | "block" | "block_private" | "true" => Ok(SsrfMode::BlockPrivate),
+        "off" | "false" | "none" => Ok(SsrfMode::Off),
+        other => Err(vm_error(format!(
+            "egress_policy: block_private must be `private`/`on` or `off`, got `{other}`"
+        ))),
+    }
+}
+
+fn parse_bool(raw: &str) -> Result<bool, VmError> {
+    match raw.trim().to_ascii_lowercase().as_str() {
+        "true" | "1" | "yes" | "on" => Ok(true),
+        "false" | "0" | "no" | "off" | "" => Ok(false),
+        other => Err(vm_error(format!(
+            "egress_policy: allow_loopback must be a boolean, got `{other}`"
+        ))),
+    }
 }
 
 fn parse_rule_values(values: &[VmValue]) -> Result<Vec<EgressRule>, VmError> {
@@ -519,6 +812,15 @@ fn policy_summary() -> VmValue {
                     .collect(),
             )),
         );
+        let (mode, allow_loopback) = effective_ssrf_settings(Some(&configured.policy));
+        dict.insert(
+            "block_private".to_string(),
+            VmValue::String(std::sync::Arc::from(match mode {
+                SsrfMode::BlockPrivate => "private",
+                SsrfMode::Off => "off",
+            })),
+        );
+        dict.insert("allow_loopback".to_string(), VmValue::Bool(allow_loopback));
     } else {
         dict.insert("configured".to_string(), VmValue::Bool(false));
     }
@@ -724,10 +1026,8 @@ impl std::fmt::Display for EgressBlocked {
 mod tests {
     use super::*;
 
-    static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
-
     fn install(config: &[(&str, VmValue)]) -> std::sync::MutexGuard<'static, ()> {
-        let guard = ENV_LOCK.lock().unwrap();
+        let guard = test_env_lock();
         reset_egress_policy_for_tests();
         let map = config
             .iter()
@@ -824,7 +1124,7 @@ mod tests {
 
     #[test]
     fn require_explicit_policy_blocks_unconfigured_egress() {
-        let _guard = ENV_LOCK.lock().unwrap();
+        let _guard = test_env_lock();
         reset_egress_policy_for_tests();
         {
             let _scope = require_explicit_egress_policy_for_host();
@@ -842,7 +1142,7 @@ mod tests {
 
     #[test]
     fn reset_thread_local_state_clears_required_policy_scope() {
-        let _guard = ENV_LOCK.lock().unwrap();
+        let _guard = test_env_lock();
         reset_egress_policy_for_tests();
         let _scope = require_explicit_egress_policy_for_host();
 
@@ -856,7 +1156,7 @@ mod tests {
 
     #[test]
     fn explicit_environment_policy_satisfies_required_policy_scope() {
-        let _guard = ENV_LOCK.lock().unwrap();
+        let _guard = test_env_lock();
         reset_egress_policy_for_tests();
         std::env::set_var(HARN_EGRESS_ALLOW_ENV, "api.example.com");
         std::env::set_var(HARN_EGRESS_DEFAULT_ENV, "deny");
@@ -876,7 +1176,7 @@ mod tests {
 
     #[test]
     fn env_seeding_is_honored() {
-        let _guard = ENV_LOCK.lock().unwrap();
+        let _guard = test_env_lock();
         reset_egress_policy_for_tests();
         std::env::set_var(HARN_EGRESS_ALLOW_ENV, "");
         std::env::set_var(HARN_EGRESS_DENY_ENV, "blocked-env.example.com");
@@ -891,5 +1191,160 @@ mod tests {
         std::env::remove_var(HARN_EGRESS_DENY_ENV);
         std::env::remove_var(HARN_EGRESS_DEFAULT_ENV);
         reset_egress_policy_for_tests();
+    }
+
+    // --- SSRF private-address block (literal IPs; host-name DNS is covered by
+    //     GuardedResolver tests in `ssrf.rs`). ---
+
+    /// Install an explicit `block_private:"private"` policy with default allow,
+    /// so the SSRF block is the only thing that can deny.
+    fn install_block_private() -> std::sync::MutexGuard<'static, ()> {
+        install(&[(
+            "block_private",
+            VmValue::String(std::sync::Arc::from("private")),
+        )])
+    }
+
+    #[test]
+    fn block_private_rejects_loopback_and_metadata_literals() {
+        let _guard = install_block_private();
+        for url in [
+            "http://127.0.0.1",
+            "https://169.254.169.254",
+            "http://10.0.0.1",
+            "https://192.168.1.1",
+            "https://[::1]",
+            "https://[fe80::1]",
+            "https://[::ffff:127.0.0.1]",
+            "https://100.64.0.1",
+        ] {
+            let blocked = check_url("http_get", url)
+                .unwrap()
+                .unwrap_or_else(|| panic!("expected block for {url}"));
+            assert!(
+                blocked.reason.contains("disallowed address"),
+                "{url}: {}",
+                blocked.reason
+            );
+        }
+    }
+
+    #[test]
+    fn block_private_allows_public_literal() {
+        let _guard = install_block_private();
+        assert!(check_url("http_get", "https://93.184.216.34")
+            .unwrap()
+            .is_none());
+        assert!(check_url("http_get", "http://8.8.8.8").unwrap().is_none());
+    }
+
+    #[test]
+    fn block_private_wins_over_allow_rule() {
+        // Deny-private wins: an explicit allow for the literal must NOT re-open it.
+        let _guard = install(&[
+            ("allow", strings(&["127.0.0.1"])),
+            (
+                "block_private",
+                VmValue::String(std::sync::Arc::from("private")),
+            ),
+            ("default", VmValue::String(std::sync::Arc::from("deny"))),
+        ]);
+        assert!(check_url("http_get", "http://127.0.0.1").unwrap().is_some());
+    }
+
+    #[test]
+    fn block_private_redacts_secret_in_url() {
+        let _guard = install_block_private();
+        let blocked = check_url(
+            "http_get",
+            "http://127.0.0.1/resource?token=SECRET&access_token=zzz&ok=1",
+        )
+        .unwrap()
+        .expect("loopback blocked");
+        assert!(!blocked.url.contains("SECRET"), "{}", blocked.url);
+        assert!(!blocked.url.contains("zzz"), "{}", blocked.url);
+        assert!(!blocked.to_string().contains("SECRET"));
+        assert!(!blocked.reason.contains("SECRET"));
+        // Reason names only the host.
+        assert!(blocked.reason.contains("127.0.0.1"));
+    }
+
+    #[test]
+    fn allow_loopback_hatch_permits_loopback_literal() {
+        let _guard = install(&[
+            (
+                "block_private",
+                VmValue::String(std::sync::Arc::from("private")),
+            ),
+            ("allow_loopback", VmValue::Bool(true)),
+        ]);
+        assert!(check_url("http_get", "http://127.0.0.1").unwrap().is_none());
+        assert!(check_url("http_get", "https://[::1]").unwrap().is_none());
+        // Metadata stays blocked even with the loopback hatch.
+        assert!(check_url("http_get", "https://169.254.169.254")
+            .unwrap()
+            .is_some());
+    }
+
+    #[test]
+    fn default_on_blocks_loopback_under_run_scope() {
+        let _guard = test_env_lock();
+        reset_egress_policy_for_tests();
+        {
+            let _scope = require_ssrf_guard_for_host();
+            // No policy configured at all, but the guard scope defaults to
+            // BlockPrivate.
+            assert!(check_url("http_get", "http://127.0.0.1").unwrap().is_some());
+            assert!(check_url("http_get", "https://169.254.169.254")
+                .unwrap()
+                .is_some());
+            // Public literal still allowed.
+            assert!(check_url("http_get", "https://8.8.8.8").unwrap().is_none());
+        }
+        // Out of scope: allow-all restored.
+        assert!(check_url("http_get", "http://127.0.0.1").unwrap().is_none());
+        reset_egress_policy_for_tests();
+    }
+
+    #[test]
+    fn block_private_off_opts_out_under_run_scope() {
+        let _guard = test_env_lock();
+        reset_egress_policy_for_tests();
+        install_test_policy(&[(
+            "block_private",
+            VmValue::String(std::sync::Arc::from("off")),
+        )]);
+        let _scope = require_ssrf_guard_for_host();
+        // Explicit off overrides the default-on guard.
+        assert!(check_url("http_get", "http://127.0.0.1").unwrap().is_none());
+        reset_egress_policy_for_tests();
+    }
+
+    #[test]
+    fn env_allow_loopback_opts_out_under_run_scope() {
+        let _guard = test_env_lock();
+        reset_egress_policy_for_tests();
+        std::env::set_var(HARN_EGRESS_ALLOW_LOOPBACK_ENV, "1");
+        let _scope = require_ssrf_guard_for_host();
+        // Loopback opened by env hatch...
+        assert!(check_url("http_get", "http://127.0.0.1").unwrap().is_none());
+        // ...but metadata stays blocked.
+        assert!(check_url("http_get", "https://169.254.169.254")
+            .unwrap()
+            .is_some());
+        std::env::remove_var(HARN_EGRESS_ALLOW_LOOPBACK_ENV);
+        reset_egress_policy_for_tests();
+    }
+
+    #[test]
+    fn current_ssrf_client_settings_reflects_guard_scope() {
+        let _guard = test_env_lock();
+        reset_egress_policy_for_tests();
+        assert_eq!(current_ssrf_client_settings(), (false, false));
+        let _scope = require_ssrf_guard_for_host();
+        assert_eq!(current_ssrf_client_settings(), (true, false));
+        drop(_scope);
+        reset_egress_policy_for_tests();
+        assert_eq!(current_ssrf_client_settings(), (false, false));
     }
 }

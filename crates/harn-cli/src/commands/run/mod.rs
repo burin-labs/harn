@@ -914,6 +914,7 @@ impl Drop for ExecutionPolicyGuard {
 struct RunSandboxScope {
     _execution_policy: Option<ExecutionPolicyGuard>,
     _egress_policy: Option<harn_vm::egress::ExplicitEgressPolicyGuard>,
+    _ssrf_guard: Option<harn_vm::egress::SsrfGuardScope>,
 }
 
 impl RunSandboxScope {
@@ -921,6 +922,7 @@ impl RunSandboxScope {
         Self {
             _execution_policy: None,
             _egress_policy: None,
+            _ssrf_guard: None,
         }
     }
 }
@@ -947,10 +949,15 @@ fn install_run_sandbox_scope(
         None
     };
     let egress_policy = Some(harn_vm::egress::require_explicit_egress_policy_for_host());
+    // Default-on the SSRF private-address guard for outbound HTTP. Callers can
+    // opt out with `egress_policy({block_private:"off"})` /
+    // `HARN_EGRESS_BLOCK_PRIVATE=off`.
+    let ssrf_guard = Some(harn_vm::egress::require_ssrf_guard_for_host());
 
     RunSandboxScope {
         _execution_policy: execution_policy,
         _egress_policy: egress_policy,
+        _ssrf_guard: ssrf_guard,
     }
 }
 
