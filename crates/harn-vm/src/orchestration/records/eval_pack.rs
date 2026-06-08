@@ -1889,6 +1889,22 @@ fn live_tool_summary_count(summary: &serde_json::Value, name: &str) -> Option<us
                 .get("tools")
                 .and_then(|value| json_usize_from_keys(value, &[normalized]))
         })
+        .or_else(|| {
+            // Fall back to counting occurrences in the per-call `sequence`
+            // array. The in-process coding-agent executor only emits
+            // `{total, rejected, sequence, successful}` (no `by_tool` map), so
+            // without this a named per-tool budget like `{edit: 1}` would
+            // silently never be enforced for live coding-agent evals.
+            summary
+                .get("sequence")
+                .and_then(serde_json::Value::as_array)
+                .map(|calls| {
+                    calls
+                        .iter()
+                        .filter(|call| call.as_str() == Some(normalized))
+                        .count()
+                })
+        })
 }
 
 fn json_usize_from_keys(value: &serde_json::Value, keys: &[&str]) -> Option<usize> {
@@ -3507,5 +3523,51 @@ pub fn evaluate_run_suite(
         passed,
         failed,
         cases: reports,
+    }
+}
+
+#[cfg(test)]
+mod live_tool_budget_tests {
+    use super::*;
+    use std::collections::BTreeMap;
+
+    #[test]
+    fn per_tool_budget_counts_from_sequence_when_no_by_tool_map() {
+        // The in-process coding-agent executor emits only
+        // {total, rejected, sequence, successful} — no `by_tool` map.
+        let summary = serde_json::json!({
+            "total": 4,
+            "rejected": 0,
+            "sequence": ["read", "edit", "edit", "run"],
+            "successful": ["read", "edit", "edit", "run"],
+        });
+        assert_eq!(live_tool_summary_count(&summary, "edit"), Some(2));
+        assert_eq!(live_tool_summary_count(&summary, "read"), Some(1));
+        assert_eq!(live_tool_summary_count(&summary, "delete"), Some(0));
+        assert_eq!(live_tool_summary_count(&summary, "total"), Some(4));
+    }
+
+    #[test]
+    fn per_tool_budget_is_enforced_against_sequence_only_summary() {
+        let summary = serde_json::json!({
+            "total": 3,
+            "sequence": ["edit", "edit", "run"],
+        });
+        let budgets = BTreeMap::from([("edit".to_string(), 1usize)]);
+        let failures = eval_pack_live_tool_budget_failures(&budgets, &summary);
+        assert_eq!(failures.len(), 1, "edit budget of 1 must trip on 2 edits");
+        assert!(failures[0].contains("edit"));
+
+        let within = BTreeMap::from([("edit".to_string(), 2usize)]);
+        assert!(eval_pack_live_tool_budget_failures(&within, &summary).is_empty());
+    }
+
+    #[test]
+    fn explicit_by_tool_map_still_takes_precedence() {
+        let summary = serde_json::json!({
+            "total": 1,
+            "byTool": {"edit": 1},
+        });
+        assert_eq!(live_tool_summary_count(&summary, "edit"), Some(1));
     }
 }
