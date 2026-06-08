@@ -781,7 +781,7 @@ pub(super) async fn query_rows(
                 // describe-then-bind: learn the server-inferred parameter OIDs
                 // on the tx connection (cached per SQL), then bind typed NULLs
                 // for the nils.
-                let oids = described_param_oids(tx, sql, "pg_query").await?;
+                let oids = described_param_oids(tx, sql, "pg_query", true).await?;
                 bind_params_described(sql, &oids, params)?
                     .fetch_all(&mut **tx)
                     .await
@@ -851,7 +851,7 @@ pub(super) async fn execute_stmt(
             // describe-then-bind: learn the server-inferred parameter OIDs on
             // the tx connection (cached per SQL), then bind typed NULLs for the
             // nils.
-            let oids = described_param_oids(tx, sql, "pg_execute").await?;
+            let oids = described_param_oids(tx, sql, "pg_execute", true).await?;
             bind_params_described(sql, &oids, params)?
                 .execute(&mut **tx)
                 .await
@@ -1187,15 +1187,22 @@ fn bind_params_described<'q>(
 /// not change result type` / re-parse on its own, and sqlx surfaces it as a
 /// query error — the cached OIDs only seed the NULL *declaration*, they do not
 /// pin server-side plans.
+///
+/// `in_transaction` tells the describe probe whether `conn` is currently inside
+/// a caller-owned transaction (the `HANDLE_TX` paths pass `true`; the
+/// autocommit pool path passes `false`). It controls whether the probe wraps its
+/// `prepare_with` in a `SAVEPOINT` so a failed probe cannot abort the caller's
+/// transaction — see [`describe_param_oids_uncached`].
 async fn described_param_oids(
     conn: &mut sqlx_postgres::PgConnection,
     sql: &str,
     builtin: &str,
+    in_transaction: bool,
 ) -> Result<Arc<Vec<PgTypeInfo>>, VmError> {
     if let Some(cached) = DESCRIBED_OIDS.with(|oids| oids.borrow().get(sql).cloned()) {
         return Ok(cached);
     }
-    let oids = Arc::new(describe_param_oids_uncached(conn, sql, builtin).await?);
+    let oids = Arc::new(describe_param_oids_uncached(conn, sql, builtin, in_transaction).await?);
     DESCRIBED_OIDS.with(|cache| {
         cache
             .borrow_mut()
@@ -1221,22 +1228,74 @@ async fn described_param_oids(
 /// [`described_param_oids`], this prepare+clear happens **at most once per
 /// distinct SQL** (on the first nil-bearing execution); every subsequent
 /// nil-query of that SQL is a pure cache hit with no describe and no clear.
+///
+/// **Best-effort, never worse than the legacy bind.** `prepare_with(sql, &[])`
+/// forces Postgres to infer *every* `$n` from query structure alone, so a query
+/// with a genuinely ambiguous slot (e.g. `could not determine data type of
+/// parameter $3`) makes the probe itself fail — even though binding that nil as
+/// a legacy `text` NULL would have worked. We therefore treat a probe failure as
+/// "no per-slot OIDs available" rather than an error: we return an **empty**
+/// `Vec`, which the bind path turns into the legacy `None::<String>` (text) NULL
+/// for each nil — strictly ≥ the pre-describe behavior. The empty result is
+/// cached by [`described_param_oids`] like any other (the failure is
+/// deterministic per SQL structure, so re-probing every call would be wasted
+/// round-trips).
+///
+/// Inside a caller transaction (`in_transaction`), a failed `prepare_with`
+/// aborts the whole transaction (`current transaction is aborted`), which would
+/// then break the caller's own statements. We guard the probe with `SAVEPOINT
+/// _harn_describe_probe`: on success we `RELEASE` it and proceed normally; on
+/// failure we `ROLLBACK TO` it, which discards the aborted sub-state and leaves
+/// the transaction usable. Outside a transaction (autocommit pool conn) a
+/// `SAVEPOINT` is itself an error, so we skip it and simply catch the prepare
+/// failure. The savepoint round-trips are added **only** around a tx-path probe
+/// — the all-non-null fast path and the successful-describe path are unchanged.
 async fn describe_param_oids_uncached(
     conn: &mut sqlx_postgres::PgConnection,
     sql: &str,
     builtin: &str,
+    in_transaction: bool,
 ) -> Result<Vec<PgTypeInfo>, VmError> {
     use sqlx_core::connection::Connection as _;
     use sqlx_core::sql_str::SqlSafeStr as _;
     use sqlx_core::statement::Statement as _;
 
+    const SAVEPOINT: &str = "_harn_describe_probe";
+
     #[cfg(test)]
     DESCRIBE_ROUND_TRIPS.fetch_add(1, Ordering::Relaxed);
 
-    let stmt = conn
+    // In a caller transaction, a failed probe aborts the whole tx. A savepoint
+    // lets us roll back *only* the failed probe and keep the tx alive. Outside a
+    // tx, SAVEPOINT is an error, so we skip it.
+    if in_transaction {
+        conn.execute(AssertSqlSafe(format!("SAVEPOINT {SAVEPOINT}")))
+            .await
+            .map_err(|error| runtime_error(format!("{builtin}: savepoint failed: {error}")))?;
+    }
+
+    let prepared = conn
         .prepare_with(AssertSqlSafe(sql.to_string()).into_sql_str(), &[])
-        .await
-        .map_err(|error| runtime_error(format!("{builtin}: prepare failed: {error}")))?;
+        .await;
+
+    let stmt = match prepared {
+        Ok(stmt) => stmt,
+        Err(_) => {
+            // The describe probe failed (e.g. an ambiguous `$n` Postgres cannot
+            // infer from structure alone). Don't propagate — fall back to legacy
+            // text NULLs by returning no per-slot OIDs. Inside a tx, undo the
+            // aborted sub-state so the caller's transaction stays usable.
+            if in_transaction {
+                conn.execute(AssertSqlSafe(format!("ROLLBACK TO SAVEPOINT {SAVEPOINT}")))
+                    .await
+                    .map_err(|error| {
+                        runtime_error(format!("{builtin}: rollback to savepoint failed: {error}"))
+                    })?;
+            }
+            return Ok(Vec::new());
+        }
+    };
+
     let oids = match stmt.parameters() {
         Some(sqlx_core::Either::Left(types)) => types.to_vec(),
         // Count-only or no parameter metadata: no per-slot OIDs to apply; the
@@ -1244,6 +1303,15 @@ async fn describe_param_oids_uncached(
         _ => Vec::new(),
     };
     drop(stmt);
+
+    if in_transaction {
+        conn.execute(AssertSqlSafe(format!("RELEASE SAVEPOINT {SAVEPOINT}")))
+            .await
+            .map_err(|error| {
+                runtime_error(format!("{builtin}: release savepoint failed: {error}"))
+            })?;
+    }
+
     conn.clear_cached_statements()
         .await
         .map_err(|error| runtime_error(format!("{builtin}: clear cache failed: {error}")))?;
@@ -1282,7 +1350,10 @@ async fn run_described_query<T>(
         .acquire()
         .await
         .map_err(|error| runtime_error(format!("{builtin}: {error}")))?;
-    let oids = described_param_oids(&mut conn, sql, builtin).await?;
+    // Autocommit pool connection: not inside a caller transaction, so no
+    // savepoint (it would error outside a tx) — the probe just catches its own
+    // failure and falls back to legacy text NULLs.
+    let oids = described_param_oids(&mut conn, sql, builtin, false).await?;
     let query = bind_params_described(sql, &oids, params)?;
     run(query, &mut conn)
         .await
@@ -3662,6 +3733,107 @@ pg_close(db)
             matches!(one_cell(rows, "v"), VmValue::Nil),
             "bare nil select returns SQL NULL"
         );
+    }
+
+    /// POOL path, describe-probe FAILURE → graceful text fallback. `SELECT $1 IS
+    /// NULL` is a slot Postgres cannot type from structure alone, so the
+    /// describe probe (`prepare_with(sql, &[])`) errors with `could not
+    /// determine data type of parameter $1`. The fix catches that, returns an
+    /// **empty** OID list (cached), and the bind path falls back to a legacy
+    /// `text` NULL — `text IS NULL` → `true`. Before the fix this query failed
+    /// outright even though the pre-describe-then-bind behavior worked.
+    #[tokio::test(flavor = "current_thread")]
+    async fn pool_describe_probe_failure_falls_back_to_text_null_when_env_url_is_set() {
+        let Ok(url) = std::env::var("HARN_TEST_POSTGRES_URL") else {
+            return;
+        };
+        reset_postgres_state();
+        let handle = open_single_conn_pool(&url).await;
+
+        // `SELECT $1 IS NULL` is a slot Postgres cannot type from structure
+        // alone, so the describe probe errors. The probe must NOT reach the
+        // caller as an error; the query succeeds
+        // and the nil binds as a text NULL, so `$1 IS NULL` is `true`.
+        let sql = "SELECT $1 IS NULL AS v";
+        let rows = query_rows(&handle, sql, &[VmValue::Nil], QueryRouting::Primary)
+            .await
+            .expect(
+                "ambiguous nil query must succeed via text fallback, not propagate the probe error",
+            );
+        assert!(
+            matches!(one_cell(rows, "v"), VmValue::Bool(true)),
+            "text NULL IS NULL must be true"
+        );
+
+        // The fallback cached an EMPTY OID list for this SQL (probe failed), so
+        // later runs reuse the text fallback with no further probing.
+        let cached = DESCRIBED_OIDS
+            .with(|c| c.borrow().get(sql).cloned())
+            .expect("ambiguous SQL must populate the OID cache (with an empty list)");
+        assert!(
+            cached.is_empty(),
+            "probe failure must cache an empty OID list (got {cached:?})"
+        );
+
+        // A repeat run still succeeds (cache hit, still text fallback).
+        let again = query_rows(&handle, sql, &[VmValue::Nil], QueryRouting::Primary)
+            .await
+            .expect("repeat ambiguous nil query still succeeds");
+        assert!(matches!(one_cell(again, "v"), VmValue::Bool(true)));
+    }
+
+    /// TX path, describe-probe FAILURE must NOT abort the caller's transaction.
+    /// A failed `prepare_with` inside a tx normally taints it (`current
+    /// transaction is aborted`), so a naive same-connection fallback would still
+    /// fail. The savepoint guard rolls back ONLY the probe, leaving the tx
+    /// usable: the ambiguous nil query succeeds via the text fallback, AND a
+    /// subsequent write + commit in the SAME tx lands durably.
+    #[test]
+    fn tx_describe_probe_failure_keeps_tx_alive_when_env_url_is_set() {
+        if std::env::var("HARN_TEST_POSTGRES_URL").is_err() {
+            return;
+        }
+        reset_postgres_state();
+        let source = r#"
+import "std/postgres"
+
+let db = pg_pool("env:HARN_TEST_POSTGRES_URL", {max_connections: 1})
+pg_execute(db, "DROP TABLE IF EXISTS harn_pg_tx_probe", [])
+pg_execute(db, "CREATE TABLE harn_pg_tx_probe (id int PRIMARY KEY, note text)", [])
+
+let probed = pg_transaction(db, { tx ->
+  // Ambiguous nil query: the describe probe fails. The savepoint must roll
+  // back only the probe, the bind falls back to a text NULL, and the result
+  // ($1 IS NULL) is true.
+  let r = pg_query_one(tx, "SELECT $1 IS NULL AS v", [nil])
+  // The tx must still be USABLE after the failed probe: this write must work.
+  pg_execute(tx, "INSERT INTO harn_pg_tx_probe (id, note) VALUES ($1, $2)", [1, "after-probe"])
+  return to_string(r.v)
+})
+__io_println(probed)
+
+// The commit must have persisted the post-probe write.
+let row = pg_query_one(db, "SELECT note FROM harn_pg_tx_probe WHERE id = 1", [])
+__io_println(row.note)
+pg_execute(db, "DROP TABLE harn_pg_tx_probe", [])
+pg_close(db)
+"#;
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        rt.block_on(async {
+            let local = tokio::task::LocalSet::new();
+            local
+                .run_until(async {
+                    let chunk = compile_source(source).expect("compile tx probe source");
+                    let mut vm = Vm::new();
+                    register_vm_stdlib(&mut vm);
+                    vm.execute(&chunk).await.expect("execute tx probe source");
+                    assert_eq!(vm.output().trim(), "true\nafter-probe");
+                })
+                .await;
+        });
     }
 
     /// Perf path: an all-non-null query still works and reuses the per-connection
