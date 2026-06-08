@@ -12,6 +12,11 @@ pipeline default(task) {
   __io_println(to_int("abc"))
   // to_int from nil returns nil
   __io_println(to_int(nil))
+  // to_int from bool follows the documented 1/0 conversion
+  __io_println(to_int(true))
+  __io_println(to_int(false))
+  // to_int from non-finite floats returns nil
+  __io_println(to_int(to_float("NaN")))
   // to_float from float (passthrough)
   __io_println(3.14)
   // to_float from int
