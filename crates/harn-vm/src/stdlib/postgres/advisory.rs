@@ -147,8 +147,13 @@ async fn take_xact_lock(tx_id: &str, key: &LockKey) -> Result<(), VmError> {
                 .await
         }
         LockKey::Pair(a, b) => {
-            let params = [VmValue::Int(i64::from(*a)), VmValue::Int(i64::from(*b))];
-            bind_params(query("SELECT pg_advisory_xact_lock($1, $2)"), &params)?
+            // Bind the two halves as i32 so Postgres resolves the
+            // `pg_advisory_xact_lock(int4, int4)` overload. Binding i64 here
+            // would ask for a nonexistent `(int8, int8)` function (see the
+            // matching i32 binds in `try_take_xact_lock`).
+            query("SELECT pg_advisory_xact_lock($1, $2)")
+                .bind(*a)
+                .bind(*b)
                 .execute(&mut **tx)
                 .await
         }
