@@ -46,6 +46,33 @@ pub(crate) struct RunArgs {
         conflicts_with_all = ["eval", "file", "explain_cost", "allow_unsigned", "dry_run_verify"]
     )]
     pub resume: Option<String>,
+    /// Run the script's `@job` entrypoint once against a JSON request
+    /// instead of executing the default pipeline. The named function must
+    /// carry a `@job("name")` attribute; the request JSON is delivered to
+    /// the handler as `event.provider_payload.raw`, and the value the job
+    /// returns is printed as a JSON report on stdout. Retry / dead-letter
+    /// / budget / cancellation come from the trigger dispatcher. See #3171.
+    #[arg(
+        long = "as-job",
+        action = clap::ArgAction::SetTrue,
+        requires = "job",
+        requires = "request",
+        conflicts_with_all = ["eval", "resume", "explain_cost"]
+    )]
+    pub as_job: bool,
+    /// Name of the `@job` to run (the `@job("name")` argument, or the
+    /// function name for a bare `@job`). Requires `--as-job`.
+    #[arg(long = "job", value_name = "NAME", requires = "as_job")]
+    pub job: Option<String>,
+    /// Path to the JSON request file passed to the `@job`. Requires
+    /// `--as-job`. Matches the factory worker `--request file.json`
+    /// contract.
+    #[arg(long = "request", value_name = "PATH", requires = "as_job")]
+    pub request: Option<PathBuf>,
+    /// Write the job report JSON to this path in addition to printing it
+    /// on stdout. Only meaningful with `--as-job`.
+    #[arg(long = "result-out", value_name = "PATH", requires = "as_job")]
+    pub result_out: Option<PathBuf>,
     /// Extra skill-discovery roots. Repeatable; each path is a
     /// directory of `<name>/SKILL.md` bundles, equivalent to a
     /// single-entry `$HARN_SKILLS_PATH`. Highest-priority layer —

@@ -26,7 +26,7 @@ impl TypeChecker {
                 "deprecated" | "test" | "complexity" | "acp_tool" | "acp_skill" | "invariant"
                 | "deterministic" | "semantic" | "archivist" | "retroactive" | "persona"
                 | "step" | "trigger" | "handoff" | "budget" | "command" | "serial" | "heavy"
-                | "scopes" | "route" => {}
+                | "scopes" | "route" | "job" | "schedule" | "queue" => {}
                 other => {
                     self.warning_at(
                         Code::UnknownAttribute,
@@ -97,6 +97,18 @@ impl TypeChecker {
                 self.warning_at(
                     Code::InvalidAttributeTarget,
                     "`@step` only applies to function declarations".to_string(),
+                    attr.span,
+                );
+            }
+            if matches!(attr.name.as_str(), "job" | "schedule" | "queue")
+                && !matches!(inner.node, Node::FnDecl { .. })
+            {
+                self.warning_at(
+                    Code::InvalidAttributeTarget,
+                    format!(
+                        "`@{}` only applies to function declarations (worker/job entrypoints)",
+                        attr.name
+                    ),
                     attr.span,
                 );
             }
@@ -205,6 +217,9 @@ impl TypeChecker {
             "serial" => self.validate_serial_args(attr),
             "heavy" => self.validate_heavy_args(attr),
             "scopes" => self.validate_scopes_args(attr),
+            "job" => self.validate_job_args(attr),
+            "schedule" => self.validate_schedule_args(attr),
+            "queue" => self.validate_queue_args(attr),
             "test" if !attr.args.is_empty() => {
                 self.warning_at(
                     Code::InvalidAttributeArgument,
@@ -651,6 +666,142 @@ impl TypeChecker {
                     arg.span,
                 );
             }
+        }
+    }
+
+    /// Validate `@job("name", retry: { max:, backoff: })`. The positional
+    /// name (optional) must be a string; the only recognized named arg is
+    /// `retry`, a `{ max, backoff }` dict (`retry` rides inside `@job`
+    /// because `retry` is a reserved keyword and so cannot be its own
+    /// attribute name). Lint-only — malformed forms warn, never block.
+    pub(super) fn validate_job_args(&mut self, attr: &Attribute) {
+        const KNOWN_KEYS: &[&str] = &["retry"];
+        let mut positionals = 0;
+        for arg in &attr.args {
+            let Some(name) = arg.name.as_deref() else {
+                positionals += 1;
+                if positionals > 1 {
+                    self.warning_at(
+                        Code::InvalidAttributeArgument,
+                        "`@job(...)` takes at most one positional name".to_string(),
+                        arg.span,
+                    );
+                } else if !is_symbol_like(&arg.value.node) {
+                    self.warning_at(
+                        Code::InvalidAttributeArgument,
+                        "`@job(\"name\")` name must be a string literal".to_string(),
+                        arg.span,
+                    );
+                }
+                continue;
+            };
+            if !KNOWN_KEYS.contains(&name) {
+                self.warning_at(
+                    Code::InvalidAttributeArgument,
+                    format!("unknown `@job` argument `{name}`; expected one of {KNOWN_KEYS:?}"),
+                    arg.span,
+                );
+                continue;
+            }
+            if name == "retry" {
+                self.expect_job_retry_dict(&arg.value, arg.span);
+            }
+        }
+    }
+
+    pub(super) fn expect_job_retry_dict(&mut self, value: &SNode, span: Span) {
+        const KNOWN_KEYS: &[&str] = &["max", "max_attempts", "backoff", "policy"];
+        const BACKOFFS: &[&str] = &["svix", "linear", "exponential", "exp"];
+        let Node::DictLiteral(entries) = &value.node else {
+            self.warning_at(
+                Code::InvalidAttributeArgument,
+                "`@job(retry: ...)` must be a dict such as `{ max: 3, backoff: \"exponential\" }`"
+                    .to_string(),
+                span,
+            );
+            return;
+        };
+        for entry in entries {
+            let Some(field_name) = attr_key_name(&entry.key.node) else {
+                self.warning_at(
+                    Code::InvalidAttributeArgument,
+                    "`@job(retry: ...)` field names must be strings or identifiers".to_string(),
+                    entry.key.span,
+                );
+                continue;
+            };
+            if !KNOWN_KEYS.contains(&field_name) {
+                self.warning_at(
+                    Code::InvalidAttributeArgument,
+                    format!(
+                        "unknown `@job(retry: ...)` field `{field_name}`; expected one of {KNOWN_KEYS:?}"
+                    ),
+                    entry.key.span,
+                );
+                continue;
+            }
+            match (field_name, &entry.value.node) {
+                ("max" | "max_attempts", Node::IntLiteral(i)) if *i >= 0 => {}
+                ("max" | "max_attempts", _) => self.warning_at(
+                    Code::InvalidAttributeArgument,
+                    "`@job(retry: { max: ... })` must be a non-negative integer".to_string(),
+                    entry.value.span,
+                ),
+                ("backoff" | "policy", value) => {
+                    let ok = symbol_like_value(value)
+                        .map(|v| BACKOFFS.contains(&v.to_ascii_lowercase().as_str()))
+                        .unwrap_or(false);
+                    if !ok {
+                        self.warning_at(
+                            Code::InvalidAttributeArgument,
+                            format!(
+                                "`@job(retry: {{ backoff: ... }})` must be one of {BACKOFFS:?}"
+                            ),
+                            entry.value.span,
+                        );
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
+    /// Validate `@schedule("cron")` / `@schedule("cron", "timezone")`.
+    pub(super) fn validate_schedule_args(&mut self, attr: &Attribute) {
+        if attr.args.is_empty() || attr.args.len() > 2 {
+            self.warning_at(
+                Code::InvalidAttributeArgument,
+                "`@schedule(...)` takes a cron expression and an optional timezone".to_string(),
+                attr.span,
+            );
+        }
+        for arg in &attr.args {
+            if !is_symbol_like(&arg.value.node) {
+                self.warning_at(
+                    Code::InvalidAttributeArgument,
+                    "`@schedule(...)` arguments must be string literals".to_string(),
+                    arg.span,
+                );
+            }
+        }
+    }
+
+    /// Validate `@queue("queue-name")`.
+    pub(super) fn validate_queue_args(&mut self, attr: &Attribute) {
+        if attr.args.len() != 1 {
+            self.warning_at(
+                Code::InvalidAttributeArgument,
+                "`@queue(\"name\")` takes exactly one string-literal queue name".to_string(),
+                attr.span,
+            );
+            return;
+        }
+        if !is_symbol_like(&attr.args[0].value.node) {
+            self.warning_at(
+                Code::InvalidAttributeArgument,
+                "`@queue(\"name\")` argument must be a string literal".to_string(),
+                attr.args[0].span,
+            );
         }
     }
 
