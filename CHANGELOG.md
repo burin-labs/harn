@@ -8,6 +8,106 @@ highlights live in [CHANGELOG-pre-0.6.md](CHANGELOG-pre-0.6.md).
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.8.93
+
+### Added
+
+- **Eval packs can now be discovered from installed packages (#3124).** Package
+  eval discovery includes the root package plus materialized dependencies under
+  `.harn/packages/<alias>/`, so `harn test package --evals` and root
+  `eval_pack://...` trigger handlers can run published eval packs through the
+  existing package-manager install path.
+- **`.harn` worker/job execution surface (#3171).** A `pub fn` annotated
+  with `@job("name")` is now a worker entrypoint that runs on harn-serve.
+  `harn run --as-job <file.harn> --job <name> --request <req.json>
+  [--result-out <out.json>]` runs it once against a JSON request, delivers
+  the request to the handler as `event.provider_payload.raw`, and prints
+  the value the job returns as a JSON report — the drop-in shape for
+  read-request → do-work → emit-report workers. The job is lowered into a
+  trigger binding and dispatched through the existing trigger dispatcher,
+  so retry (`@job("name", retry: { max: 3, backoff: "exponential" })`),
+  dead-letter, per-dispatch `@budget(...)`, scopes, and cancellation are
+  inherited from the dispatcher rather than re-implemented. `@schedule` and
+  `@queue` attributes are parsed for the forthcoming `harn serve worker`
+  daemon. Malformed forms surface `HARN-SRV-004..008` diagnostics.
+
+### Changed
+
+- **Compiler constant-pool building.** The bytecode compiler now indexes
+  constants while emitting chunks, avoiding quadratic duplicate scans in
+  generated scripts with many literals.
+- Harmonized `gpt-oss` to a single tool-format default and dropped the stale
+  heredoc `text` pins left on the local devstral / llamacpp-qwen rows after the
+  fenced-json default flip. Previously the same `gpt-oss` model resolved three
+  ways: cerebras and groq pinned `preferred_tool_format = "native"` while
+  together inherited the new global `json` default — a correctness bug. All
+  three `gpt-oss` capability rows now inherit `json` (the cerebras/groq rows drop
+  their `native_tools`/`preferred_tool_format = "native"` pins so they match
+  together). native is the evidenced-bad direction here: `gpt-oss` native
+  streaming tool-calls have returned empty payloads in evals; `json` is
+  structurally delimiter-safe and beats heredoc `text`.
+- Dropped the explicit `preferred_tool_format = "text"` pins on the llamacpp
+  `*qwen3.6*` / `*qwen3*` and the llamacpp + ollama `devstral-small-2*`
+  capability rows so they inherit the global `json` default like their siblings.
+  The qwen rows keep `reserved_tool_call_token = true` (the remap still applies
+  whenever a heredoc `text` pin re-selects the tagged format; json's ` ```tool `
+  fence already sidesteps the reserved `<tool_call>` token). devstral has no
+  reserved-token constraint, so there was never a structural reason for the
+  heredoc pin. Confirmed live on the local-qwen3.6 `:8001` route (json parses
+  delimiter-soup `write_file` content clean; heredoc leaks the `<<EOF`
+  delimiter); the devstral rows apply the same structural fix (not locally
+  reachable, backed by the audit's local-qwen3.6 json 3/3 vs heredoc 0/3).
+
+### Fixed
+
+- **Debugging and test-result edge cases.** Conditional breakpoint fallback
+  evaluation now reports unknown or non-numeric conditions instead of silently
+  firing, JUnit duration parsing saturates hostile timestamps instead of
+  panicking, HTTP download byte counts no longer wrap, and `to_int` now follows
+  the documented bool and invalid-float behavior.
+- **`pg_migrate` now recycles prepared-statement caches after DDL, and a few
+  `std/postgres` bind/setting edge cases are tightened.** (1) After a migration
+  runs DDL, a pooled connection could reuse a cached query plan whose result
+  type the DDL changed and fail with `cached plan must not change result type`
+  (SQLSTATE `0A000`). `pg_migrate` now clears the pool's cached statements (and
+  the per-slot OID describe cache) once after applying any migration, so the
+  next query re-prepares cleanly. (2) An out-of-range integer bound into a
+  narrow (`int4`/`int2`) column now surfaces a stable `numeric_out_of_range`
+  (SQLSTATE `22003`) diagnostic instead of a raw message; in-range integers bind
+  and round-trip correctly. (3) A `nil` value in `pg_transaction(settings)` is
+  rejected instead of being silently set as the literal text `"nil"`.
+
+### Security
+
+- **Outbound HTTP now has a DNS-resolving SSRF/egress guard, on by default
+  under `harn run` (#3172).** A new private-address classifier blocks loopback,
+  RFC 1918, link-local (including the `169.254.169.254` cloud-metadata
+  endpoint), broadcast, unspecified, multicast, documentation, CGNAT
+  (`100.64/10`), and benchmark (`198.18/15`) ranges, plus the IPv6 analogues
+  and IPv4-mapped addresses. URL pre-checks classify literal IPs synchronously
+  and resolve host names off the runtime, and a connect-time `reqwest` DNS
+  resolver re-validates every resolved address so DNS rebinding cannot reach a
+  private target after the check. `http_*`, `http_download`, `http_stream_open`,
+  and `harness.net.*` all inherit the guard through the shared client path.
+  Configure via `egress_policy({block_private: "private"|"off", allow_loopback:
+  bool})` or `HARN_EGRESS_BLOCK_PRIVATE` / `HARN_EGRESS_ALLOW_LOOPBACK`; the
+  private-block always wins over `allow` rules, and block reasons name only the
+  host so request secrets are never echoed.
+- **`std/postgres` transaction settings are now allowlisted, and raw Postgres
+  error detail no longer leaks to `.harn` callers.** Two hardening fixes to the
+  Postgres hostlib. (1) `pg_transaction(settings)` previously ran `set_config`
+  for *any* GUC key, so `.harn` code could set a privileged backend GUC
+  (`role`, `session_authorization`, `is_superuser`, `search_path`, …) to escape
+  row-level security at the Postgres level. Settings are now restricted to the
+  application's own `app.*` namespace (which RLS policies are written against)
+  plus the benign `statement_timeout` / `lock_timeout` /
+  `idle_in_transaction_session_timeout` GUCs; any other key is rejected with a
+  clear error. (2) A failing query/execute previously surfaced the raw Postgres
+  message — which embeds schema, relation, column, and constraint names — to the
+  caller. The hostlib boundary now maps database errors to stable, schema-free
+  categories (e.g. `unique_violation (SQLSTATE 23505)`) and keeps the full
+  detail in server-side tracing only.
+
 ## v0.8.92
 
 ### Added
