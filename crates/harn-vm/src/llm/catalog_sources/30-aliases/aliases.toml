@@ -114,10 +114,14 @@ provider = "together"
 # Use the llamacpp provider for local qwen3.x.
 
 # llama.cpp — Unsloth Dynamic 2.0 GGUF served by llama-server.
+# No `tool_format` pin: this non-native-quant id matches the `*qwen3.6*`
+# text-channel capability row, which now resolves to the global `json`
+# (fenced-JSON) default. json's ```tool fence sidesteps the reserved
+# <tool_call> token (so the reserved-token remap stays correct) and is
+# delimiter-safe vs heredoc. To force heredoc, set `tool_format = "text"`.
 [aliases."llamacpp-qwen3.6"]
 id = "qwen3.6-35b-a3b"
 provider = "llamacpp"
-tool_format = "text"
 
 [aliases."llamacpp-qwen3.6-q4"]
 id = "qwen3.6-35b-a3b-ud-q4-k-xl"
@@ -226,15 +230,19 @@ id = "grok-build-0.1"
 provider = "xai"
 
 # Devstral (Mistral's agentic-coding tune).
+# No `tool_format` pin: these aliases inherit the `devstral-small-2*` capability
+# row's resolved default, now `json` (fenced-JSON) — the global text-channel
+# default. devstral has no reserved-token constraint, so the stale heredoc
+# `text` pin that used to sit here had no structural reason to exist; json is
+# delimiter-safe and root-cause-fixes heredoc's `<<EOF` content leak. To force
+# heredoc, set `tool_format = "text"` here or pin the capability row.
 [aliases.devstral-small-2]
 id = "devstral-small-2:24b"
 provider = "ollama"
-tool_format = "text"
 
 [aliases.ollama-devstral-small-2]
 id = "devstral-small-2:24b"
 provider = "ollama"
-tool_format = "text"
 
 # NOTE: there is intentionally no `ollama-devstral-small-2-native` alias.
 # Devstral Small 2 on Ollama is text-tool-only (see the `devstral-small-2*`

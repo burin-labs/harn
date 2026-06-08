@@ -137,7 +137,7 @@ const REQUESTED_FORMATS: &[&str] = &[
 
 /// Representative real catalog cells spanning the capability profiles:
 ///   - anthropic native-tools frontier
-///   - ollama text-only local (devstral)
+///   - ollama text-channel local (devstral; unpinned -> json default)
 ///   - llamacpp qwen3.6 native
 const REAL_CELLS: &[(&str, &str)] = &[
     ("anthropic", "claude-sonnet-4-6"),
@@ -242,7 +242,9 @@ fn accepted_format_is_consistent_with_capability_matrix() {
     for &(provider, model) in REAL_CELLS {
         let (native_ok, text_ok, parity) = capability_facts(provider, model);
         // A text-only model (no native tools) must always accept and resolve
-        // "text", and its auto resolution must land on "text".
+        // an explicit "text" request, and its auto resolution must land on the
+        // global text-channel default `json` (fenced-JSON) — never silently on
+        // native, and never on heredoc `text` unless explicitly pinned.
         if text_ok && !native_ok {
             if let Outcome::Accepted { tool_format, .. } = resolve(provider, model, "text") {
                 assert_eq!(
@@ -252,12 +254,13 @@ fn accepted_format_is_consistent_with_capability_matrix() {
             } else {
                 panic!("{provider}:{model}: text-capable model rejected a text request");
             }
-            // Auto must pick the servable side, not silently choose native.
+            // Auto must pick the servable text channel — now the json default,
+            // not native and not heredoc text.
             if let Outcome::Accepted { tool_format, .. } = resolve(provider, model, "auto") {
                 assert_eq!(
-                    tool_format, "text",
-                    "{provider}:{model}: auto resolved to {tool_format:?} on a text-only model \
-                     (parity={parity})"
+                    tool_format, "json",
+                    "{provider}:{model}: auto resolved to {tool_format:?} on a text-only model; \
+                     expected the global json default (parity={parity})"
                 );
             }
         }

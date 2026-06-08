@@ -185,11 +185,23 @@ tool_mode_parity_notes = "Harn-managed llama.cpp launch plus one-tool probe pass
 [[provider.llamacpp]]
 model_match = "*qwen3.6*"
 native_tools = false
-preferred_tool_format = "text"
+# Pinned to `json` (fenced-JSON), the GLOBAL text-channel default — same
+# RESOLVED format as the ollama qwen3.6 sibling above. (Pinned explicitly rather
+# than left to inherit because the `llamacpp-qwen3.6` alias / catalogued routes
+# trip the catalog invariant that every catalogued model/alias rule set
+# native_tools + preferred_tool_format.) json's call opener is a ```tool fence,
+# NOT the reserved <tool_call> token, so it sidesteps the opener-repetition
+# collapse that forced the old heredoc pin (see reserved_tool_call_token below)
+# AND root-cause-fixes heredoc's `<<EOF` -> `line 0: <<` content leak
+# (local-qwen3.6 json swept a clean 1.0/1.0/1.0 emission bench). To pin heredoc,
+# set `preferred_tool_format = "text"`.
+preferred_tool_format = "json"
 structured_output = "native"
 # Qwen3.6's tokenizer reserves <tool_call>/</tool_call> as single special
 # tokens; reusing them as text-format delimiters collapses the agent loop into
 # opener repetition. Remap to a non-special wire form (validated: 5/5 vs 0/5).
+# Kept ON: the remap still applies whenever a heredoc `text` pin re-selects the
+# tagged format; json's ```tool fence already sidesteps the reserved token.
 reserved_tool_call_token = true
 thinking_modes = ["enabled"]
 auto_reasoning_overrides = { agent = "off", verify = "off", code = "off" }
@@ -210,10 +222,16 @@ thinking_block_style = "inline"
 [[provider.llamacpp]]
 model_match = "*qwen3*"
 native_tools = false
-preferred_tool_format = "text"
+# Pinned to `json` (fenced-JSON), the GLOBAL text-channel default — same as the
+# qwen3.6 rule above (explicit pin keeps the catalog invariant satisfied for any
+# catalogued qwen3 route). json's ```tool fence sidesteps the reserved
+# <tool_call> token and is delimiter-safe vs heredoc. To pin heredoc, set
+# `preferred_tool_format = "text"`.
+preferred_tool_format = "json"
 structured_output = "native"
 # Qwen3 family reserves <tool_call>/</tool_call> as special tokens; see the
-# qwen3.6 rule above. Remapped to a non-special wire delimiter.
+# qwen3.6 rule above. Remapped to a non-special wire delimiter. Kept ON for the
+# heredoc-pin path; json's ```tool fence already avoids the reserved token.
 reserved_tool_call_token = true
 thinking_modes = ["enabled"]
 auto_reasoning_overrides = { agent = "off", verify = "off", code = "off" }
@@ -233,7 +251,13 @@ thinking_block_style = "inline"
 [[provider.llamacpp]]
 model_match = "*devstral-small-2*"
 native_tools = false
-preferred_tool_format = "text"
+# Pinned to `json` (fenced-JSON), the GLOBAL text-channel default (explicit pin
+# keeps the catalog invariant satisfied for the catalogued devstral routes).
+# devstral has NO reserved-token constraint, so there was never a structural
+# reason to stay on heredoc; json is delimiter-safe and root-cause-fixes
+# heredoc's `<<EOF` -> `line 0: <<` content leak. To pin heredoc, set
+# `preferred_tool_format = "text"`.
+preferred_tool_format = "json"
 structured_output = "native"
 server_parser = "none"
 honors_chat_template_kwargs = true
@@ -250,7 +274,13 @@ thinking_block_style = "none"
 [[provider.ollama]]
 model_match = "devstral-small-2*"
 native_tools = false
-preferred_tool_format = "text"
+# Pinned to `json` (fenced-JSON), the GLOBAL text-channel default, matching the
+# llamacpp devstral sibling above (explicit pin keeps the catalog invariant
+# satisfied for the catalogued `devstral-small-2:24b` model + aliases). devstral
+# has NO reserved-token constraint, so there was no structural reason to stay on
+# heredoc; json is delimiter-safe and fixes heredoc's `<<EOF` content leak. To
+# pin heredoc, set `preferred_tool_format = "text"`.
+preferred_tool_format = "json"
 structured_output = "format_kw"
 server_parser = "none"
 honors_chat_template_kwargs = false

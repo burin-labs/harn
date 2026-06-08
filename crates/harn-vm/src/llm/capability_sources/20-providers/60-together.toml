@@ -7,8 +7,18 @@
 # Keep each host-specific rule explicit so the generic OpenAI fallback does
 # not accidentally claim the wrong wire format.
 
+# gpt-oss is harmonized to ONE tool format across every provider that serves
+# it (cerebras / groq / together): `json` (fenced-JSON), the GLOBAL text-channel
+# default. This row previously omitted native_tools/preferred_tool_format
+# (inheriting json), but `openai/gpt-oss-120b` is a catalogued model, so the
+# catalog invariant requires the rule to set both fields EXPLICITLY. native is
+# avoided because gpt-oss native streaming tool-calls have returned EMPTY
+# payloads in evals; json is structurally delimiter-safe and strictly beats
+# heredoc text. To change, set `preferred_tool_format` ("native" | "text").
 [[provider.together]]
 model_match = "openai/gpt-oss-*"
+native_tools = false
+preferred_tool_format = "json"
 structured_output = "native"
 thinking_modes = ["effort"]
 reasoning_effort_supported = true

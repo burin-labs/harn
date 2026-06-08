@@ -2465,10 +2465,10 @@ public let harnProviderCatalogJSON = #"""
         ]
       },
       "tool_support": {
-        "native": true,
+        "native": false,
         "text": true,
-        "preferred_format": "native",
-        "parity": "unknown",
+        "preferred_format": "json",
+        "parity": "text_only",
         "tool_search": []
       },
       "structured_output": "native",
@@ -3382,10 +3382,10 @@ public let harnProviderCatalogJSON = #"""
         ]
       },
       "tool_support": {
-        "native": true,
+        "native": false,
         "text": true,
-        "preferred_format": "native",
-        "parity": "unknown",
+        "preferred_format": "json",
+        "parity": "text_only",
         "tool_search": []
       },
       "structured_output": "native",
@@ -3623,7 +3623,7 @@ public let harnProviderCatalogJSON = #"""
       "tool_support": {
         "native": false,
         "text": true,
-        "preferred_format": "text",
+        "preferred_format": "json",
         "parity": "text_only",
         "tool_search": []
       },
@@ -3776,7 +3776,7 @@ public let harnProviderCatalogJSON = #"""
       "tool_support": {
         "native": false,
         "text": true,
-        "preferred_format": "text",
+        "preferred_format": "json",
         "parity": "text_only",
         "tool_search": []
       },
@@ -4899,7 +4899,7 @@ public let harnProviderCatalogJSON = #"""
       "tool_support": {
         "native": false,
         "text": true,
-        "preferred_format": "text",
+        "preferred_format": "json",
         "parity": "text_only",
         "tool_search": []
       },
@@ -7717,8 +7717,7 @@ public let harnProviderCatalogJSON = #"""
     {
       "name": "devstral-small-2",
       "model_id": "devstral-small-2:24b",
-      "provider": "ollama",
-      "tool_format": "text"
+      "provider": "ollama"
     },
     {
       "name": "frontier",
@@ -7768,8 +7767,7 @@ public let harnProviderCatalogJSON = #"""
     {
       "name": "llamacpp-qwen3.6",
       "model_id": "qwen3.6-35b-a3b",
-      "provider": "llamacpp",
-      "tool_format": "text"
+      "provider": "llamacpp"
     },
     {
       "name": "llamacpp-qwen3.6-q4",
@@ -7903,8 +7901,7 @@ public let harnProviderCatalogJSON = #"""
     {
       "name": "ollama-devstral-small-2",
       "model_id": "devstral-small-2:24b",
-      "provider": "ollama",
-      "tool_format": "text"
+      "provider": "ollama"
     },
     {
       "name": "ollama-gemma4",
