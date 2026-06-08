@@ -1381,7 +1381,10 @@ mod tests {
         let caps = lookup("cerebras", model);
         assert_eq!(caps.thinking_modes, vec!["effort"]);
         assert!(caps.reasoning_effort_supported);
-        assert_eq!(caps.preferred_tool_format.as_deref(), Some("native"));
+        // tool_format is NOT asserted here: cerebras gpt-oss and zai-glm now
+        // diverge (gpt-oss harmonized to `json`, glm stays `native`), and this
+        // shared helper is about reasoning-effort behavior. Tool-format
+        // resolution is asserted in the dedicated harmonization tests.
         assert_eq!(caps.structured_output.as_deref(), Some("native"));
         assert_eq!(caps.structured_output_mode, "native_json");
         assert_eq!(caps.thinking_block_style, thinking_block_style);
@@ -1852,7 +1855,13 @@ anthropic_beta_features = ["fine-grained-tool-streaming-2025-05-14"]
         let caps = lookup("cerebras", "gpt-oss-120b");
         assert_eq!(caps.message_wire_format, "openai");
         assert_eq!(caps.native_tool_wire_format, "openai");
-        assert!(caps.native_tools);
+        // gpt-oss is harmonized to ONE tool format across cerebras/groq/together:
+        // the global text-channel `json` default. The cerebras row no longer
+        // advertises `native_tools` (native streaming tool-calls return empty
+        // payloads in evals), so it resolves to the json text channel — matching
+        // the together gpt-oss row, not the family `native` fallback.
+        assert!(!caps.native_tools);
+        assert_eq!(caps.preferred_tool_format.as_deref(), Some("json"));
     }
 
     #[test]
@@ -2016,7 +2025,7 @@ anthropic_beta_features = ["fine-grained-tool-streaming-2025-05-14"]
     }
 
     #[test]
-    fn devstral_local_routes_default_to_text_tools() {
+    fn devstral_local_routes_default_to_json_tools() {
         reset();
         for provider in ["ollama", "llamacpp"] {
             let caps = lookup(provider, "devstral-small-2:24b");
@@ -2024,6 +2033,15 @@ anthropic_beta_features = ["fine-grained-tool-streaming-2025-05-14"]
             assert!(
                 caps.text_tool_wire_format_supported,
                 "{provider}: text tools should remain available"
+            );
+            // devstral has no reserved-token constraint, so it dropped its stale
+            // heredoc `text` pin and now inherits the global `json` (fenced-JSON)
+            // text-channel default. Heredoc stays reachable via an explicit
+            // `preferred_tool_format = "text"` pin.
+            assert_eq!(
+                caps.preferred_tool_format.as_deref(),
+                Some("json"),
+                "{provider}: devstral inherits the global json default"
             );
         }
     }

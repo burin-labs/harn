@@ -36,7 +36,7 @@ Regenerate with `make gen-provider-matrix` and verify with `make check-provider-
 | `bedrock` | `anthropic.claude-*` | `any` | no | no | no | no | no | yes | no | no | `xml` | `xml_tagged` | no | `system` | `xml` | `thinking_blocks` | `native` | yes | yes | `unknown` | yes | no |
 | `bedrock` | `*claude*` | `any` | no | no | no | no | no | yes | no | no | `xml` | `xml_tagged` | no | `system` | `xml` | `thinking_blocks` | `native` | yes | yes | `unknown` | yes | no |
 | `bedrock` | `*` | `any` | no | no | no | no | no | yes | no | no | `markdown` | `delimited` | no | `system` | `json` | `none` | `native` | yes | yes | `unknown` | yes | no |
-| `cerebras` | `gpt-oss-*` | `any` | `effort` | no | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `reasoning_summary` | `native` | yes | yes | `unknown` | yes | no |
+| `cerebras` | `gpt-oss-*` | `any` | `effort` | no | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `reasoning_summary` | `json` | no | yes | `text_only` | yes | no |
 | `cerebras` | `zai-glm-*` | `any` | `effort` | no | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `inline` | `native` | yes | yes | `unknown` | yes | no |
 | `cerebras` | `llama-*` | `any` | no | no | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `none` | `native` | yes | yes | `unknown` | yes | no |
 | `cerebras` | `qwen-*` | `any` | no | no | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `none` | `native` | yes | yes | `unknown` | yes | no |
@@ -56,16 +56,16 @@ Regenerate with `make gen-provider-matrix` and verify with `make check-provider-
 | `gemini` | `models/gemini-2.5*` | `any` | `enabled,adaptive,effort` | yes | yes | yes | no | yes | yes | `native` | `xml,markdown` | `native_json` | no | `system` | `json` | `reasoning_summary` | `native` | yes | yes | `unknown` | yes | no |
 | `gemini` | `gemini-*` | `any` | no | yes | yes | yes | no | yes | yes | `native` | `xml,markdown` | `native_json` | no | `system` | `json` | `none` | `native` | yes | yes | `unknown` | yes | no |
 | `gemini` | `models/gemini-*` | `any` | no | yes | yes | yes | no | yes | yes | `native` | `xml,markdown` | `native_json` | no | `system` | `json` | `none` | `native` | yes | yes | `unknown` | yes | no |
-| `groq` | `*gpt-oss-*` | `any` | `effort` | no | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `reasoning_summary` | `native` | yes | yes | `unknown` | yes | no |
+| `groq` | `*gpt-oss-*` | `any` | `effort` | no | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `reasoning_summary` | `json` | no | yes | `text_only` | yes | no |
 | `groq` | `llama-*` | `any` | no | no | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `none` | `native` | yes | yes | `unknown` | yes | no |
 | `huggingface` | `qwen/qwen3.6*` | `any` | `enabled` | no | no | no | no | yes | no | `native` | `markdown` | `delimited` | no | `system` | `json` | `inline` | `native` | yes | yes | `unknown` | yes | no |
 | `huggingface` | `qwen/qwen3-coder*` | `any` | no | no | no | no | no | yes | no | `native` | `markdown` | `delimited` | no | `system` | `json` | `none` | `native` | yes | yes | `unknown` | yes | no |
 | `huggingface` | `qwen/*` | `any` | `enabled` | no | no | no | no | yes | no | `native` | `markdown` | `delimited` | no | `system` | `json` | `inline` | `native` | yes | yes | `unknown` | yes | no |
 | `huggingface` | `deepseek-ai/deepseek-v3*` | `any` | `enabled` | no | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `inline` | `native` | yes | yes | `unknown` | yes | yes |
 | `llamacpp` | `qwen3.6-35b-a3b-ud-q4-k-xl` | `any` | `enabled` | no | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `inline` | `native` | yes | yes | `native` | yes | no |
-| `llamacpp` | `*qwen3.6*` | `any` | `enabled` | no | no | no | no | yes | no | `native` | `markdown` | `delimited` | no | `system` | `json` | `inline` | `text` | no | yes | `text_only` | yes | no |
-| `llamacpp` | `*qwen3*` | `any` | `enabled` | no | no | no | no | yes | no | `native` | `markdown` | `delimited` | no | `system` | `json` | `inline` | `text` | no | yes | `text_only` | yes | no |
-| `llamacpp` | `*devstral-small-2*` | `any` | no | no | no | no | no | yes | no | `native` | `markdown` | `delimited` | no | `system` | `json` | `none` | `text` | no | yes | `text_only` | yes | no |
+| `llamacpp` | `*qwen3.6*` | `any` | `enabled` | no | no | no | no | yes | no | `native` | `markdown` | `delimited` | no | `system` | `json` | `inline` | `json` | no | yes | `text_only` | yes | no |
+| `llamacpp` | `*qwen3*` | `any` | `enabled` | no | no | no | no | yes | no | `native` | `markdown` | `delimited` | no | `system` | `json` | `inline` | `json` | no | yes | `text_only` | yes | no |
+| `llamacpp` | `*devstral-small-2*` | `any` | no | no | no | no | no | yes | no | `native` | `markdown` | `delimited` | no | `system` | `json` | `none` | `json` | no | yes | `text_only` | yes | no |
 | `local` | `*qwen3.6*` | `any` | `enabled` | no | no | no | no | yes | no | `native` | `markdown` | `delimited` | no | `system` | `json` | `inline` | `native` | yes | yes | `unknown` | yes | no |
 | `local` | `*qwen3*` | `any` | `enabled` | no | no | no | no | yes | no | `native` | `markdown` | `delimited` | no | `system` | `json` | `inline` | `native` | yes | yes | `unknown` | yes | no |
 | `local` | `gemma-4*` | `any` | `enabled` | no | no | no | no | yes | no | `native` | `markdown` | `delimited` | no | `system` | `json` | `inline` | `native` | yes | yes | `unknown` | yes | no |
@@ -86,7 +86,7 @@ Regenerate with `make gen-provider-matrix` and verify with `make check-provider-
 | `ollama` | `gemma4*` | `any` | no | yes | no | no | no | yes | no | `format_kw` | `markdown` | `delimited` | no | `system` | `json` | `none` | `text` | no | yes | `text_only` | yes | no |
 | `ollama` | `qwen3.6*` | `any` | `enabled` | no | no | no | no | yes | no | `format_kw` | `markdown` | `delimited` | no | `system` | `json` | `inline` | `json` | no | yes | `text_only` | yes | no |
 | `ollama` | `qwen3*` | `any` | `enabled` | no | no | no | no | yes | no | `format_kw` | `markdown` | `delimited` | no | `system` | `json` | `inline` | `native` | yes | no | `native_only` | yes | no |
-| `ollama` | `devstral-small-2*` | `any` | no | no | no | no | no | yes | no | `format_kw` | `markdown` | `delimited` | no | `system` | `json` | `none` | `text` | no | yes | `text_only` | yes | no |
+| `ollama` | `devstral-small-2*` | `any` | no | no | no | no | no | yes | no | `format_kw` | `markdown` | `delimited` | no | `system` | `json` | `none` | `json` | no | yes | `text_only` | yes | no |
 | `openai` | `gpt-4o*` | `any` | no | yes | yes | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `none` | `native` | yes | yes | `unknown` | yes | no |
 | `openai` | `gpt-4.1*` | `any` | no | yes | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `none` | `native` | yes | yes | `unknown` | yes | no |
 | `openai` | `gpt-*` | `>=5.4` | `effort` | yes | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `reasoning_summary` | `native` | yes | yes | `unknown` | yes | no |
@@ -161,7 +161,7 @@ This section starts from the checked-in provider catalog. Recommended format fol
 | `anthropic` | `claude-sonnet-4-5` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `anthropic` | `claude-sonnet-4-6` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `anthropic` | `claude-sonnet-4-7` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
-| `cerebras` | `gpt-oss-120b` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
+| `cerebras` | `gpt-oss-120b` | `json` | `text_only` | - | - | - | - | - | `data not yet collected` |
 | `cerebras` | `llama-3.3-70b` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `cerebras` | `zai-glm-4.7` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `cohere` | `command-a-plus-05-2026` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
@@ -173,12 +173,12 @@ This section starts from the checked-in provider catalog. Recommended format fol
 | `gemini` | `gemini-2.5-pro` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `gemini` | `models/gemma-4-26b-a4b-it` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `gemini` | `models/gemma-4-31b-it` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
-| `groq` | `groq/openai/gpt-oss-120b` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
+| `groq` | `groq/openai/gpt-oss-120b` | `json` | `text_only` | - | - | - | - | - | `data not yet collected` |
 | `groq` | `llama-3.1-8b-instant` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `groq` | `llama-3.3-70b-versatile` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
-| `llamacpp` | `qwen3.6-35b-a3b` | `text` | `text_only` | - | - | - | - | - | `data not yet collected` |
+| `llamacpp` | `qwen3.6-35b-a3b` | `json` | `text_only` | - | - | - | - | - | `data not yet collected` |
 | `llamacpp` | `qwen3.6-35b-a3b-ud-q4-k-xl` | `native` | `native` | - | - | - | - | - | `data not yet collected` |
-| `llamacpp` | `qwen3.6-35b-a3b-ud-q5-k-xl` | `text` | `text_only` | - | - | - | - | - | `data not yet collected` |
+| `llamacpp` | `qwen3.6-35b-a3b-ud-q5-k-xl` | `json` | `text_only` | - | - | - | - | - | `data not yet collected` |
 | `local` | `gemma-4-12b-it` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `local` | `gemma-4-26b-a4b-it` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `local` | `gemma-4-31b-it` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
@@ -194,7 +194,7 @@ This section starts from the checked-in provider catalog. Recommended format fol
 | `mistral` | `mistral-large-2512` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `mistral` | `mistral-small-2603` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `mlx` | `unsloth/Qwen3.6-27B-UD-MLX-4bit` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
-| `ollama` | `devstral-small-2:24b` | `text` | `text_only` | - | - | - | - | - | `data not yet collected` |
+| `ollama` | `devstral-small-2:24b` | `json` | `text_only` | - | - | - | - | - | `data not yet collected` |
 | `ollama` | `gemma4:12b-mlx` | `text` | `text_only` | - | - | - | - | - | `data not yet collected` |
 | `ollama` | `gemma4:12b-mxfp8` | `text` | `text_only` | - | - | - | - | - | `data not yet collected` |
 | `ollama` | `gemma4:12b-nvfp4` | `text` | `text_only` | - | - | - | - | - | `data not yet collected` |

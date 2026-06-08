@@ -3243,12 +3243,13 @@ mod tests {
             default_tool_format("qwen3.6-35b-a3b-ud-q4-k-xl", "llamacpp"),
             "native"
         );
-        // devstral pins `preferred_tool_format = "text"` (the reverse safety
-        // valve), so it stays on heredoc even though `json` is now the global
-        // text-channel default.
+        // devstral dropped its stale heredoc `text` pin (it has no reserved-token
+        // constraint, so there was no structural reason to stay on heredoc) and
+        // now inherits the global `json` text-channel default. Heredoc is still
+        // reachable via an explicit `preferred_tool_format = "text"` pin.
         assert_eq!(
             default_tool_format("devstral-small-2:24b", "ollama"),
-            "text"
+            "json"
         );
         // vLLM/SGLang-served Gemma 4 exposes OpenAI-compatible function calling,
         // so the local route declares native tools (matching every hosted gemma-4

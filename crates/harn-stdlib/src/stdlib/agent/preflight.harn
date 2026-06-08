@@ -435,12 +435,28 @@ fn __agent_primary_system_text(session, opts) {
  * agent_build_turn_system_fragments decomposes the per-turn primary system
  * block into an ordered list of `{id, source, body}` fragments — one per
  * internal part (system text, MCP advisory, active skills, skill catalog,
- * progress nudge, loop contract, native/text tool contracts). The agent loop
- * forwards this list to `llm_call` via the `_system_fragments` channel so the
- * Rust assembler records per-part provenance instead of treating the whole
+ * progress nudge, loop contract, native/json/text tool contracts). The agent
+ * loop forwards this list to `llm_call` via the `_system_fragments` channel so
+ * the Rust assembler records per-part provenance instead of treating the whole
  * primary block as one opaque string. Bodies are trimmed and empty parts are
  * dropped, so joining the bodies with `\n\n` reproduces the string
  * `agent_build_turn_system` returns.
+ *
+ * INVARIANT — tool-format contract injection is `agent_loop`-only by design.
+ * The native/json/text tool-call contract (the prose that teaches the model
+ * HOW to emit `name({ key: value })` calls in the resolved format) is injected
+ * here, in the agent_loop preflight, and NOWHERE else. The bare `llm_call`
+ * builtin renders native tool wire definitions and PARSES whatever text/json
+ * tool calls come back (via `parse_text_tool_calls_with_tools`), but it never
+ * injects the format contract — so a tool caller that bypasses `agent_loop`
+ * and drives tools through a bare `llm_call` at `tool_format` json/text would
+ * have the model guess the format and parse 0 calls. That is acceptable
+ * because nothing does: `agent_loop` is the only tool driver in Harn and Burin
+ * (the lone bare-`llm_call`-with-tools seam, `std/agents::run_stage` with
+ * `mode: "llm"` / `loop_until_done: false`, is a public stdlib entrypoint with
+ * no in-tree consumer that passes `tools`). If a future caller needs format-
+ * correct tools OUTSIDE agent_loop, move this injection into the shared
+ * `llm_call` tool-rendering path rather than re-deriving it at each call site.
  *
  * @effects: [agent, mcp]
  * @allocation: heap

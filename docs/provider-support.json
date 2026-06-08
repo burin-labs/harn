@@ -188,10 +188,10 @@
         ]
       },
       "capabilities": {
-        "native_tools": true,
+        "native_tools": false,
         "text_tools": true,
-        "preferred_tool_format": "native",
-        "tool_mode_parity": "unknown",
+        "preferred_tool_format": "json",
+        "tool_mode_parity": "text_only",
         "structured_output_transport": "native",
         "structured_output_mode": "native_json",
         "streaming": true,
@@ -900,7 +900,7 @@
       "capabilities": {
         "native_tools": false,
         "text_tools": true,
-        "preferred_tool_format": "text",
+        "preferred_tool_format": "json",
         "tool_mode_parity": "text_only",
         "structured_output_transport": "format_kw",
         "structured_output_mode": "delimited",
