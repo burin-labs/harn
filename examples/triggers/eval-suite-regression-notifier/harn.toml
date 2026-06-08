@@ -1,0 +1,22 @@
+[package]
+name = "eval-suite-regression-notifier"
+evals = ["harn.eval.toml"]
+
+[exports]
+handlers = "lib.harn"
+
+[dependencies]
+harn-slack-connector = { git = "https://github.com/burin-labs/harn-slack-connector", branch = "main" }
+
+[[triggers]]
+id = "nightly-eval-regression-notifier"
+kind = "cron"
+provider = "cron"
+match = { events = ["cron.tick"] }
+handler = "handlers::notify_on_eval_gate_flip"
+schedule = "0 3 * * *"
+timezone = "UTC"
+dedupe_key = "event.dedupe_key"
+budget = { daily_cost_usd = 0.50, on_budget_exhausted = "retry_later" }
+concurrency = { max = 1 }
+retry = { max = 3, backoff = "svix" }
