@@ -837,9 +837,13 @@ mod tests {
             parsed["aliases"][QUICKSTART_ALIAS]["id"].as_str(),
             Some("devstral-small-2:24b")
         );
+        // devstral dropped its stale heredoc `text` pin in the tool-format
+        // harmonize; the quickstart overlay now inherits the global `json`
+        // (fenced-JSON) text-channel default. Heredoc stays reachable via an
+        // explicit `tool_format = "text"` pin.
         assert_eq!(
             parsed["aliases"][QUICKSTART_ALIAS]["tool_format"].as_str(),
-            Some("text")
+            Some("json")
         );
     }
 
