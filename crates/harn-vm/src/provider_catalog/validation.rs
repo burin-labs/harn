@@ -190,9 +190,12 @@ pub fn validate_artifact(artifact: &ProviderCatalogArtifact) -> ProviderCatalogV
             ));
         }
         if let Some(format) = alias.tool_format.as_deref() {
-            if format != "native" && format != "text" {
+            // `json` (fenced-JSON) and `text` (tagged/heredoc) are both
+            // TEXT-channel formats and validate against `tool_support.text`;
+            // `native` validates against `tool_support.native`.
+            if format != "native" && format != "text" && format != "json" {
                 result.errors.push(format!(
-                    "alias {} declares tool_format {:?}; must be \"native\" or \"text\"",
+                    "alias {} declares tool_format {:?}; must be \"native\", \"text\", or \"json\"",
                     alias.name, format
                 ));
             } else if let Some(model) =
@@ -204,10 +207,10 @@ pub fn validate_artifact(artifact: &ProviderCatalogArtifact) -> ProviderCatalogV
                         alias.name, alias.provider, alias.model_id
                     ));
                 }
-                if format == "text" && !model.tool_support.text {
+                if (format == "text" || format == "json") && !model.tool_support.text {
                     result.errors.push(format!(
-                        "alias {} pins tool_format \"text\" but model {}/{} does not support text tool calling",
-                        alias.name, alias.provider, alias.model_id
+                        "alias {} pins tool_format {:?} (a text-channel format) but model {}/{} does not support text tool calling",
+                        alias.name, format, alias.provider, alias.model_id
                     ));
                 }
             }

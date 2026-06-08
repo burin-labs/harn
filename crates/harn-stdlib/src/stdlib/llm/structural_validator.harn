@@ -540,7 +540,13 @@ fn __sv_tool_schema_violations(payload) {
 }
 
 fn __sv_tool_calls_well_formed(payload) {
-  let is_text_tool_format = lowercase(__sv_string(payload?.tool_format)) == "text"
+  // Both `text` (tagged/heredoc) and `json` (fenced-JSON) ride the TEXT channel
+  // and surface `tool_parse_errors`/`protocol_violations` from the text parser,
+  // so the well-formedness veto must enforce for either. Gating on `text` alone
+  // would silently stop vetoing malformed turns once `json` became the global
+  // default. (Native rides the provider channel and is never enforced here.)
+  let format = lowercase(__sv_string(payload?.tool_format))
+  let is_text_tool_format = format == "text" || format == "json"
   let should_enforce_text_protocol = is_text_tool_format && __sv_has_non_structural_tools(payload)
   let parse_errors = if should_enforce_text_protocol {
     __sv_string_list(payload?.tool_parse_errors)

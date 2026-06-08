@@ -1321,9 +1321,14 @@ mod tests {
         assert!(!child_messages
             .iter()
             .any(|message| message["content"].as_str() == Some("parent context")));
+        // The child sub-agent resolves its OWN tool_format default — the spec
+        // pins none, and `mock`/`mock` has no capability pin, so it lands on the
+        // global text-channel default, which is now fenced-json (`json`), not
+        // heredoc (`text`). (The parent's separate `text` claim does not bleed
+        // into the child; the child always resolved its own default here.)
         assert_eq!(
             crate::agent_sessions::tool_format("child-subagent").as_deref(),
-            Some("text")
+            Some("json")
         );
 
         let parent_events = crate::agent_sessions::snapshot(&parent)

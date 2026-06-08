@@ -417,6 +417,53 @@ fn json_is_a_text_channel_format_for_parity() {
 }
 
 #[test]
+fn unpinned_text_channel_model_defaults_to_json() {
+    // GLOBAL DEFAULT FLIP lock-in: a text-channel model (native_tools = false)
+    // with NO `preferred_tool_format` pin resolves `auto`/omitted to `json`
+    // (fenced-JSON), the new global default — not heredoc `text`. Heredoc stays
+    // reachable only via an explicit `text` request or a per-model pin (the
+    // reverse safety valve). This is the harn-side counterpart of
+    // `llm_config::default_tool_format`'s unpinned-text-channel branch.
+    let install = r#"
+[[provider.bootcamp]]
+model_match = "bootcamp-unpinned-text*"
+native_tools = false
+text_tool_wire_format_supported = true
+"#;
+    let src = format!(
+        r#"
+import {{ agent_tool_format_resolution, agent_tool_format }} from "std/agent/options"
+pipeline main(task) {{
+  provider_capabilities_install({install:?})
+  let auto = agent_tool_format_resolution({{
+    model: "bootcamp-unpinned-text-1",
+    provider: "bootcamp",
+    tool_format: "auto",
+  }})
+  log("auto=" + to_string(auto.tool_format))
+  // An omitted tool_format must agree with the explicit `auto` sentinel.
+  log("effective=" + to_string(agent_tool_format({{
+    model: "bootcamp-unpinned-text-1",
+    provider: "bootcamp",
+  }})))
+  provider_capabilities_clear()
+}}
+"#
+    );
+    let out = lines(&src).expect("unpinned-text-channel resolution");
+    assert_eq!(
+        accepted_field(&out, "auto"),
+        "json",
+        "an unpinned text-channel model must default to json, not heredoc text"
+    );
+    assert_eq!(
+        accepted_field(&out, "effective"),
+        "json",
+        "omitted tool_format must resolve to the same json default as explicit auto"
+    );
+}
+
+#[test]
 fn override_reason_forces_marked_impossible_side() {
     // The escape hatch: a probe/matrix harness may deliberately force the
     // catalog-marked-impossible side by recording a reason. This stays within

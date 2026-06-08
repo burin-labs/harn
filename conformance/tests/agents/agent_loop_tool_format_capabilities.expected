@@ -2,13 +2,13 @@ format=native
 0
 format=native
 0
-format=text
+format=json
 1
 warning
 testcatalog
 uncatalogued-model
 preferred_tool_format
-text
+json
 format=text
 1
 testcatalog

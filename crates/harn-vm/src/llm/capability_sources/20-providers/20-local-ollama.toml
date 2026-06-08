@@ -95,14 +95,17 @@ thinking_block_style = "none"
 [[provider.ollama]]
 model_match = "qwen3.6*"
 native_tools = false
-# STAGED, NOT ACTIVE: fenced-json (tool_format = "json") is the json sibling of
-# this text route and was the only paradigm with a clean 1.0/1.0/1.0 sweep for
-# local-qwen3.6. Measured at N=1 emission fidelity; DO NOT rely until the N>=5
-# coding-agent parity bench clears CI lower bound > 0. To activate: change the
-# line below to `preferred_tool_format = "json"`.
-preferred_tool_format = "text"
-# Qwen3.x reserves <tool_call> as a single special token; serving text-format
-# without the wire remap re-exposes the opener-repetition collapse #2978 fixed.
+# No `preferred_tool_format` pin: this text-channel route inherits the GLOBAL
+# default, which is now `json` (fenced-JSON). json is strictly better here than
+# heredoc — the json call opener is a ```tool fence, NOT the reserved
+# <tool_call> token, so json sidesteps the opener-repetition collapse that
+# forced this row onto a non-native text pin (see reserved_tool_call_token
+# below), and json swept a clean 1.0/1.0/1.0 emission-fidelity bench for
+# local-qwen3.6. To pin heredoc instead, set `preferred_tool_format = "text"`.
+# Qwen3.x reserves <tool_call> as a single special token; serving the tagged
+# (heredoc) text format without the wire remap re-exposes the opener-repetition
+# collapse #2978 fixed — which is exactly why the json default is preferred for
+# this route over heredoc text.
 reserved_tool_call_token = true
 structured_output = "format_kw"
 thinking_modes = ["enabled"]
@@ -147,14 +150,14 @@ thinking_block_style = "inline"
 [[provider.llamacpp]]
 model_match = "qwen3.6-35b-a3b-ud-q4-k-xl"
 native_tools = true
-# STAGED, NOT ACTIVE: fenced-json (tool_format = "json") was the ONLY paradigm
-# where local-qwen3.6 scored a clean 1.0/1.0/1.0 sweep, including the S3
-# delimiter-soup case; the escaping tax did not materialize at temp=0.
-# Measured at N=1 emission fidelity; DO NOT rely until the N>=5 coding-agent
-# parity bench clears CI lower bound > 0 (specifically watch the json
-# rejected-rate for a long-tail double-escape under sampling). To activate:
-# change the line below to `preferred_tool_format = "json"`. This is the
-# llama.cpp :8001 route Burin routes to for local-qwen3.6.
+# This route pins the NATIVE channel (provider JSON tool calling), validated by
+# `harn provider-tool-probe` on the llama.cpp :8001 endpoint Burin routes to for
+# local-qwen3.6. `json` (fenced-JSON) is now the GLOBAL text-channel default, so
+# no per-model json pin is needed; the `native` pin below is only kept because
+# this row deliberately selects the native channel over any text format. To run
+# this route on fenced-json text instead, set `preferred_tool_format = "json"`
+# (json swept a clean 1.0/1.0/1.0 emission-fidelity bench here, including the S3
+# delimiter-soup case); to use heredoc text, set `preferred_tool_format = "text"`.
 preferred_tool_format = "native"
 structured_output = "native"
 reserved_tool_call_token = true

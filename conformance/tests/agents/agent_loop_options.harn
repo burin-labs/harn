@@ -1,6 +1,8 @@
 import { agent_loop_options } from "std/agent/options"
 
 pipeline default() {
+  // No explicit tool_format: resolves the GLOBAL text-channel default, now
+  // fenced-json (`json`), not heredoc (`text`).
   let no_tools = agent_loop_options({provider: "mock"})
   __io_println(no_tools.tool_format)
   __io_println(contains(no_tools.keys(), "done_judge"))
