@@ -64,7 +64,7 @@ grepping logs trivial to write.
 | Workflow artifacts | [`ArtifactRecord::redact_in_place`](../../crates/harn-vm/src/orchestration/artifacts.rs) | `text` is run through the secret-pattern scanner; `data` and `metadata` go through the JSON walk. |
 | Session bundles | [`harn_vm::session_bundle`](../../crates/harn-vm/src/session_bundle.rs) | Sanitized exports walk the whole bundle and emit a redaction manifest; replay-only exports additionally withhold prompt and tool payload fields. Import and validation reject high-confidence secret markers unless explicitly allowed. |
 | Connector inbound headers | [`HeaderRedactionPolicy` (alias for `RedactionPolicy`)](../../crates/harn-vm/src/triggers/event.rs) | Each connector strips inbound HTTP headers before they reach the durable inbox. |
-| HTTP egress diagnostics | [`crate::egress`](../../crates/harn-vm/src/egress.rs) | URLs reported in `EgressBlocked` errors and `http_mock` calls are redacted via the same policy. |
+| HTTP egress diagnostics | [`crate::egress`](../../crates/harn-vm/src/egress/mod.rs) | URLs reported in `EgressBlocked` errors and `http_mock` calls are redacted via the same policy. |
 
 ## Host extension points
 
