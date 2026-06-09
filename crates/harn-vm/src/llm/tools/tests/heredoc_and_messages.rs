@@ -596,6 +596,26 @@ fn native_json_fallback_parses_flat_jsonrpc_envelope() {
 }
 
 #[test]
+fn native_json_fallback_parses_flat_envelope_with_string_encoded_arguments() {
+    // Regression: OpenAI's on-the-wire flat shape encodes `arguments` as a JSON
+    // STRING (`{"name":"read","arguments":"{\"path\":\"a\"}"}`), which local
+    // llama.cpp/vLLM/Ollama OpenAI-mimic templates commonly emit. The
+    // acceptance gate used to require an args OBJECT, so this call silently
+    // vanished even though the downstream extractor already decodes the string.
+    let known = known_tools_set();
+    let text = r#"{"name":"read","arguments":"{\"path\":\"a\"}"}"#;
+    let (calls, errors) = parse_native_json_tool_calls(text, &known);
+    assert!(errors.is_empty(), "no errors expected: {errors:?}");
+    assert_eq!(
+        calls.len(),
+        1,
+        "string-encoded arguments must parse: {calls:?}"
+    );
+    assert_eq!(calls[0]["name"], json!("read"));
+    assert_eq!(calls[0]["arguments"]["path"], json!("a"));
+}
+
+#[test]
 fn native_json_fallback_parses_flat_envelope_with_parameters_slot() {
     // The flat envelope sometimes names the args slot `parameters`, and arrives
     // as a single object rather than an array.

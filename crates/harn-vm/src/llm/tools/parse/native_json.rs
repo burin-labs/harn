@@ -118,20 +118,25 @@ fn find_native_json_items(text: &str) -> Option<Vec<serde_json::Value>> {
         // scanning for the real call. Two payload shapes qualify:
         //   - OpenAI native: an item with an object `function` field.
         //   - flat JSON-RPC/MCP: an item with a string `name` AND an
-        //     `arguments`/`parameters` object — the generic function-call
-        //     envelope value models reach for when ignoring the text format.
-        // Requiring the args object (not just a bare `name`) keeps prose JSON
+        //     `arguments`/`parameters` slot that is an object OR a string —
+        //     the generic function-call envelope value models reach for when
+        //     ignoring the text format. The slot is a JSON STRING in OpenAI's
+        //     on-the-wire shape (`{"name":"read","arguments":"{\"path\":..}"}`),
+        //     which local llama.cpp/vLLM/Ollama OpenAI-mimic templates commonly
+        //     emit; the downstream extractor already decodes that string, so the
+        //     gate must accept it too or the call silently vanishes.
+        // Requiring the args slot (not just a bare `name`) keeps prose JSON
         // that merely has a `name` key (config, package.json) from matching.
+        let args_slot_present = |item: &serde_json::Value, key: &str| {
+            item.get(key)
+                .is_some_and(|slot| slot.is_object() || slot.is_string())
+        };
         if items.iter().any(|item| {
             item.get("function")
                 .is_some_and(serde_json::Value::is_object)
                 || (item.get("name").is_some_and(serde_json::Value::is_string)
-                    && (item
-                        .get("arguments")
-                        .is_some_and(serde_json::Value::is_object)
-                        || item
-                            .get("parameters")
-                            .is_some_and(serde_json::Value::is_object)))
+                    && (args_slot_present(item, "arguments")
+                        || args_slot_present(item, "parameters")))
         }) {
             return Some(items);
         }

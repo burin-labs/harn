@@ -305,6 +305,11 @@ pub(crate) fn parse_bare_calls_in_body(
 
         if bytes[i] == b'\n' {
             at_line_start = true;
+            // Markdown inline code spans never cross a newline. Reset the
+            // flag here so a single stray/unmatched backtick in prose can't
+            // flip `in_inline_code` true for the rest of the response and
+            // silently suppress every later bare tool call.
+            in_inline_code = false;
         } else if !bytes[i].is_ascii_whitespace() {
             at_line_start = false;
         }
