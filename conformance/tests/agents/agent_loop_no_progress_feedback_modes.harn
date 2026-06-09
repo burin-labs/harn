@@ -1,0 +1,85 @@
+import { llm_text, with_llm_script } from "std/testing"
+import { agent_loop } from "../../../crates/harn-stdlib/src/stdlib/agent/loop.harn"
+
+fn note_tools() {
+  var tools = tool_registry()
+  tools = tool_define(
+    tools,
+    "write_note",
+    "Write a note.",
+    {
+      handler: { args -> "wrote " + args.path },
+      parameters: {path: {type: "string", description: "Path to write"}},
+      returns: {type: "string"},
+      annotations: {kind: "edit", side_effect_level: "workspace_write"},
+    },
+  )
+  return tools
+}
+
+fn messages_for_streak_retry(calls) {
+  return json_stringify(calls[2].messages)
+}
+
+pipeline default() {
+  with_llm_script(
+    [
+      llm_text("The context appears consistent."),
+      llm_text("The surrounding details remain aligned."),
+      llm_text("<user_response>done</user_response>\n<done>##DONE##</done>"),
+    ],
+    { ->
+      let text_result = agent_loop(
+        "Write notes.txt.",
+        nil,
+        {
+          provider: "mock",
+          tool_format: "text",
+          loop_until_done: true,
+          done_sentinel: "##DONE##",
+          max_iterations: 4,
+          max_nudges: 4,
+          tools: note_tools(),
+        },
+      )
+      let text_retry = messages_for_streak_retry(llm_mock_calls())
+      __io_println("text.status=" + text_result.status)
+      __io_println("text.has_streak=" + to_string(contains(text_retry, "no_progress_streak")))
+      __io_println("text.has_tool_call_tag=" + to_string(contains(text_retry, "<tool_call>")))
+      __io_println("text.has_user_response_tag=" + to_string(contains(text_retry, "<user_response>")))
+      __io_println("text.no_native_channel=" + to_string(!contains(text_retry, "provider tool channel")))
+    },
+  )
+  with_llm_script(
+    [
+      llm_text("The context appears consistent."),
+      llm_text("The surrounding details remain aligned."),
+      llm_text("##DONE##"),
+    ],
+    { ->
+      let native_result = agent_loop(
+        "Write notes.txt.",
+        nil,
+        {
+          provider: "mock",
+          tool_format: "native",
+          loop_until_done: true,
+          done_sentinel: "##DONE##",
+          done_judge: nil,
+          max_iterations: 4,
+          max_nudges: 4,
+          tools: note_tools(),
+        },
+      )
+      let native_retry = messages_for_streak_retry(llm_mock_calls())
+      __io_println("native.status=" + native_result.status)
+      __io_println("native.has_streak=" + to_string(contains(native_retry, "no_progress_streak")))
+      __io_println(
+        "native.has_native_channel=" + to_string(contains(native_retry, "provider tool channel")),
+      )
+      __io_println("native.has_native_tool=" + to_string(contains(native_retry, "native tool")))
+      __io_println("native.no_tool_call_tag=" + to_string(!contains(native_retry, "<tool_call>")))
+      __io_println("native.no_user_response_tag=" + to_string(!contains(native_retry, "<user_response>")))
+    },
+  )
+}
