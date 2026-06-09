@@ -8,6 +8,36 @@ highlights live in [CHANGELOG-pre-0.6.md](CHANGELOG-pre-0.6.md).
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.8.97
+
+### Added
+
+- **The `@job` one-shot driver can now register embedder-defined host builtins (#3207.)** New
+  `harn_serve::run_job_once_with(.., configure: impl FnOnce(&mut Vm))` hands the embedder the
+  fully-built job VM after the standard stdlib + store/metadata registration and before the job
+  entrypoint runs, so a host builtin (e.g. a `sandbox_exec` bridge) can coexist with — or override —
+  the standard ones and be callable from the `@job` `.harn` code. `run_job_once` is unchanged and
+  delegates to the new variant with a no-op closure. Fixes #3207.
+Added `std/eval/agreement`: deterministic, I/O-free cross-checked-success math for eval ledgers — the reusable
+counterpart to `std/eval/stats`. Exposes `agreement_decision` (the ">=2 independent judges must agree, with at least one
+independent re-execution among them" rule) and `cohen_kappa` (inter-judge agreement statistic), so eval clients can drop
+their own hand-rolled agreement math.
+Added `estimate_cost_usd` and `realized_trial_cost_usd` to `std/eval/stats`: cache-aware token→USD cost estimation
+(cache-read/write tokens are billed at their own rates and not re-charged at the full input rate) plus cached-replay
+realized-cost accounting. Lets eval harnesses drop their own hand-rolled LLM cost math.
+
+### Fixed
+
+Release tooling no longer reflows already-published `CHANGELOG.md` sections.
+`make lint-md` previously linted the assembled `CHANGELOG.md` (and `CHANGELOG-pre-*.md`
+archives) under MD013 line-length, so long lines in published `## vX.Y.Z` sections were
+flagged and rewrapped during a release — tripping the retroactive-edit guard. Those
+machine-assembled, append-only files are now excluded from markdownlint; the
+`changelog.d/*` fragments are still linted at the source.
+- **Agent-loop no-progress feedback now respects native tool mode.** Native-tool
+  runs are nudged to use the provider tool channel instead of receiving
+  text-mode `<tool_call>` and `<user_response>` syntax.
+
 ## v0.8.96
 
 ### Fixed
