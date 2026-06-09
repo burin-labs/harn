@@ -3,6 +3,7 @@
 mod adapter;
 pub mod adapters;
 mod auth;
+mod auth_context;
 mod core;
 pub mod embed;
 mod error;
@@ -50,13 +51,16 @@ pub use adapters::api::{ApiHttpServeOptions, ApiServer, ApiServerConfig};
 pub use adapters::mcp::{
     McpHttpServeOptions, McpServer, McpServerConfig, McpStdioServer, MCP_PROTOCOL_VERSION,
 };
-pub use adapters::site::{SiteHttpServeOptions, SiteServer, SiteServerConfig};
+pub use adapters::site::{
+    SiteAuth, SiteAuthContext, SiteAuthOutcome, SiteHttpServeOptions, SiteServer, SiteServerConfig,
+};
 pub use adapters::worker::{run_job_from_files, run_job_once, run_job_once_with, JobRunOutcome};
 pub use auth::{
     AllowlistOutcome, ApiKeyAuthConfig, ApiKeyEntry, AuthMethodConfig, AuthPolicy, AuthRequest,
     AuthenticatedPrincipal, AuthorizationDecision, HmacAuthConfig, McpAllowlist, McpAllowlistTools,
     OAuth21AuthConfig, OAuthClaims, ACP_LOCAL_NONE_METHOD_ID,
 };
+pub use auth_context::{current_auth_context, enter_auth_context, AuthContextScopeGuard};
 pub use core::{
     CallArguments, CallRequest, CallResponse, DispatchCore, DispatchCoreConfig, NoopVmConfigurator,
     VmConfigurator,

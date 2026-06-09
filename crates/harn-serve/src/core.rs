@@ -138,6 +138,15 @@ pub struct CallRequest {
     /// the caller. `None` for tests / in-process callers with no
     /// ingress to mint against.
     pub request_id: Option<String>,
+    /// Opaque embedder auth context resolved at admission (e.g. by a
+    /// [`crate::SiteAuth`] hook): the API-key record, session claims,
+    /// or whatever else the embedder's host-call bridge needs to see
+    /// for this request. harn-serve never interprets it; `invoke_*`
+    /// installs it as an ambient scope on the VM thread so a
+    /// [`harn_vm::HostCallBridge`] can recover it via
+    /// [`crate::current_auth_context`] for the duration of the
+    /// dispatch. `None` (the default) installs nothing.
+    pub auth_context: Option<serde_json::Value>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -489,6 +498,7 @@ impl DispatchCore {
         let tenant_id = request.tenant_id.clone();
         let budget = function.budget.clone();
         let request_id = request.request_id.clone();
+        let auth_context = request.auth_context.clone();
         let local = LocalSet::new();
         local
             .run_until(harn_vm::mcp_progress::scope_context(progress, async move {
@@ -500,6 +510,7 @@ impl DispatchCore {
                 let _tenant_guard = tenant_id.map(harn_vm::enter_tenant);
                 let _budget_guard = budget.as_ref().and_then(BudgetSpec::install);
                 let _request_id_guard = request_id.map(harn_vm::enter_request_id);
+                let _auth_context_guard = auth_context.map(crate::enter_auth_context);
 
                 let mut vm = Vm::new();
                 harn_vm::register_vm_stdlib(&mut vm);
@@ -568,6 +579,7 @@ impl DispatchCore {
         let tenant_id = request.tenant_id.clone();
         let budget = function.budget.clone();
         let request_id = request.request_id.clone();
+        let auth_context = request.auth_context.clone();
         let local = LocalSet::new();
         local
             .run_until(harn_vm::mcp_progress::scope_context(progress, async move {
@@ -579,6 +591,7 @@ impl DispatchCore {
                 let _tenant_guard = tenant_id.map(harn_vm::enter_tenant);
                 let _budget_guard = budget.as_ref().and_then(BudgetSpec::install);
                 let _request_id_guard = request_id.map(harn_vm::enter_request_id);
+                let _auth_context_guard = auth_context.map(crate::enter_auth_context);
 
                 let mut vm = Vm::new();
                 harn_vm::register_vm_stdlib(&mut vm);
@@ -838,6 +851,7 @@ pub fn greet(name: string) -> string {
                 progress: None,
                 tenant_id: None,
                 request_id: None,
+                auth_context: None,
             })
             .await
             .expect("dispatch");
@@ -880,6 +894,7 @@ pipeline default(task) {
                 progress: None,
                 tenant_id: None,
                 request_id: None,
+                auth_context: None,
             })
             .await
             .expect("dispatch");
@@ -939,6 +954,7 @@ pub fn greet(name: string) -> string {
                 progress: None,
                 tenant_id: None,
                 request_id: None,
+                auth_context: None,
             })
             .await
             .expect("dispatch");
@@ -977,6 +993,7 @@ pub fn inspect(upload: string) -> string {
             progress: None,
             tenant_id: None,
             request_id: None,
+            auth_context: None,
         };
 
         let first = core
@@ -1030,6 +1047,7 @@ pub fn greet(name: string) -> string {
                 progress: None,
                 tenant_id: None,
                 request_id: None,
+                auth_context: None,
             })
             .await
             .expect("dispatch");
@@ -1080,6 +1098,7 @@ pub fn spin() -> string {
                 progress: None,
                 tenant_id: None,
                 request_id: None,
+                auth_context: None,
             })
             .await
             .expect("dispatch");
@@ -1141,6 +1160,7 @@ pub fn whoami(harness: Harness) -> string {
                 progress: None,
                 tenant_id: None,
                 request_id: None,
+                auth_context: None,
             })
             .await
             .expect("dispatch");
@@ -1190,6 +1210,7 @@ pub fn whoami(harness: Harness) -> string {
                 progress: None,
                 tenant_id: None,
                 request_id: None,
+                auth_context: None,
             })
             .await
             .expect_err("missing tenant should error");
@@ -1253,6 +1274,7 @@ pub fn whoami(harness: Harness) -> string {
                 progress: None,
                 tenant_id: Some(harn_vm::TenantId::new("override-tenant")),
                 request_id: None,
+                auth_context: None,
             })
             .await
             .expect("dispatch");

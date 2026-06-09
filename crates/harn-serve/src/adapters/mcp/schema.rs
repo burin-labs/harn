@@ -38,6 +38,7 @@ pub(super) fn build_call_request(
         progress,
         tenant_id: None,
         request_id,
+        auth_context: None,
     })
 }
 

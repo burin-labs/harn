@@ -67,10 +67,11 @@
 //! value as JSON, `nil` sends nothing). This reuses the exact subprotocol
 //! negotiation and idle-keepalive machinery the other WS routes use.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::net::{IpAddr, SocketAddr};
 use std::sync::Arc;
 
+use async_trait::async_trait;
 use axum::body::{to_bytes, Bytes};
 use axum::extract::ws::WebSocketUpgrade;
 use axum::extract::{
@@ -82,6 +83,7 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::any;
 use axum::{Json, Router};
 use base64::Engine;
+use harn_vm::TenantId;
 use ipnet::IpNet;
 use serde_json::{json, Map, Value};
 
@@ -94,14 +96,74 @@ use crate::http_codec::{
 use crate::tls::HttpTlsConfig;
 use crate::ws::{ws_accept, WsConfig, WsMessage, WsSession};
 use crate::{
-    CallArguments, CallRequest, DispatchCore, ExportCatalog, RouteSpec, TransportConfig,
-    DEFAULT_HTTP_BODY_LIMIT_BYTES,
+    CallArguments, CallRequest, DispatchCore, DispatchError, ExportCatalog, RouteSpec,
+    TransportConfig, DEFAULT_HTTP_BODY_LIMIT_BYTES,
 };
 
 /// Adapter identifier stamped on every [`CallRequest`] this host issues,
 /// so trust records and span attributes attribute the dispatch to the
 /// site host rather than one of the protocol adapters.
 const SITE_ADAPTER: &str = "site";
+
+/// Embedder-supplied per-request authenticator for the site surface
+/// (#3212). Installed with [`SiteServerConfig::with_auth`]; without one
+/// the adapter behaves exactly as before — no edge auth, every dispatch
+/// tenant-less, and `@scopes` enforced only by the configured
+/// [`crate::AuthPolicy`].
+///
+/// The hook runs once per matched route, after routing but before the
+/// request body is buffered, so it sees the request head
+/// ([`axum::http::request::Parts`]: method, URI, headers, extensions)
+/// plus the matched [`RouteSpec`]. That is enough for the embedder
+/// auth schemes harn-cloud needs: bearer API keys, cookie sessions,
+/// token-in-path public routes, worker enrollment tokens.
+#[async_trait]
+pub trait SiteAuth: Send + Sync {
+    async fn authenticate(
+        &self,
+        parts: &axum::http::request::Parts,
+        route: &RouteSpec,
+    ) -> SiteAuthOutcome;
+}
+
+/// Decision returned by [`SiteAuth::authenticate`].
+pub enum SiteAuthOutcome {
+    /// Admit the request under the given identity. The route's
+    /// `@scopes` are then checked against [`SiteAuthContext::scopes`];
+    /// a route with no `@scopes` admits any allowed request.
+    Allow(SiteAuthContext),
+    /// Refuse the request. The embedder-shaped response (401/403/redirect/
+    /// whatever) is returned to the client verbatim.
+    Deny(Box<Response>),
+}
+
+/// Identity resolved by an embedder's [`SiteAuth`] hook.
+#[derive(Clone, Debug, Default)]
+pub struct SiteAuthContext {
+    /// Tenant the credential is bound to. Threaded into the dispatch
+    /// (`CallRequest::tenant_id`) so trust records, span attributes,
+    /// and the `.harn` callee's `harness.tenant.id()` all see it.
+    /// `None` admits the request tenant-less (public routes).
+    pub tenant_id: Option<TenantId>,
+    /// Scopes the credential carries. Checked against the route's
+    /// `@scopes` at admission and unioned into the authenticated
+    /// principal (via [`AuthRequest::granted_scopes`]) so the
+    /// dispatch-level scope check agrees with the edge.
+    pub scopes: BTreeSet<String>,
+    /// Opaque embedder context (e.g. the API-key record or session
+    /// claims). Never interpreted by harn-serve; surfaced to the
+    /// embedder's [`harn_vm::HostCallBridge`] for the duration of the
+    /// dispatch via [`crate::current_auth_context`].
+    pub context: Option<Value>,
+}
+
+impl SiteAuthOutcome {
+    /// Convenience constructor: wrap an embedder response in the
+    /// boxed `Deny` variant.
+    pub fn deny(response: Response) -> Self {
+        Self::Deny(Box::new(response))
+    }
+}
 
 /// Listener options for [`SiteServer::run_http`].
 #[derive(Clone, Debug)]
@@ -125,6 +187,10 @@ pub struct SiteServerConfig {
     /// `client_ip` is the direct transport peer — the only spoof-proof
     /// choice when the server is not strictly behind a known proxy.
     pub trusted_proxies: Vec<IpNet>,
+    /// Embedder auth hook consulted on every matched route. `None`
+    /// (the default) keeps the historic behavior: no edge auth and
+    /// tenant-less dispatch.
+    pub auth: Option<Arc<dyn SiteAuth>>,
 }
 
 impl SiteServerConfig {
@@ -133,6 +199,7 @@ impl SiteServerConfig {
             core,
             transport: TransportConfig::default_enabled(),
             trusted_proxies: Vec::new(),
+            auth: None,
         }
     }
 
@@ -143,6 +210,14 @@ impl SiteServerConfig {
 
     pub fn with_trusted_proxies(mut self, trusted_proxies: Vec<IpNet>) -> Self {
         self.trusted_proxies = trusted_proxies;
+        self
+    }
+
+    /// Install an embedder [`SiteAuth`] hook. Every matched route then
+    /// authenticates through it before the body is read or anything is
+    /// dispatched.
+    pub fn with_auth(mut self, auth: Arc<dyn SiteAuth>) -> Self {
+        self.auth = Some(auth);
         self
     }
 }
@@ -165,10 +240,11 @@ impl SiteServer {
             core,
             transport,
             trusted_proxies,
+            auth,
         } = self.config;
         let catalog = Arc::new(core.catalog().clone());
         let runtime = Arc::new(DispatchRuntime::start("SITE", Arc::new(core)));
-        build_site_router(&catalog, runtime, &transport, trusted_proxies)
+        build_site_router(&catalog, runtime, &transport, trusted_proxies, auth)
     }
 
     /// Bind the configured socket and serve until the process exits.
@@ -191,28 +267,42 @@ impl SiteServer {
     }
 }
 
+/// Resolved dispatch target for one mounted `(path, method)` pair: the
+/// function to invoke plus the route metadata the auth hook and the
+/// scope admission check need without re-consulting the catalog.
+#[derive(Clone)]
+struct SiteRoute {
+    function: String,
+    /// The function's declared [`RouteSpec`] (method may be `*`),
+    /// handed to the embedder's [`SiteAuth`] hook.
+    spec: RouteSpec,
+    /// `@scopes(...)` declared on the function; empty means no scope
+    /// requirement (public, as far as scopes are concerned).
+    required_scopes: BTreeSet<String>,
+}
+
 /// State shared by every site route handler: the dispatch executor plus
 /// the method→function table for each mounted path.
 #[derive(Clone)]
 struct SiteState {
     runtime: Arc<DispatchRuntime>,
-    /// `path → (method → function name)`. `method` is uppercased; `"*"`
-    /// is the any-method fallback consulted when no exact method matches.
-    routes: Arc<BTreeMap<String, BTreeMap<String, String>>>,
+    /// `path → (method → route)`. `method` is uppercased; `"*"` is the
+    /// any-method fallback consulted when no exact method matches.
+    routes: Arc<BTreeMap<String, BTreeMap<String, SiteRoute>>>,
     /// Reverse-proxy CIDR ranges trusted for forwarded-header parsing;
     /// empty means `client_ip` is always the direct peer.
     trusted_proxies: Arc<Vec<IpNet>>,
+    /// Embedder auth hook; `None` means no edge auth (historic
+    /// behavior).
+    auth: Option<Arc<dyn SiteAuth>>,
 }
 
 impl SiteState {
     /// Resolve the handler for a `(path, method)` pair, honouring the
-    /// `*` any-method fallback. Returns the function name to dispatch.
-    fn resolve(&self, path: &str, method: &Method) -> Option<&str> {
+    /// `*` any-method fallback.
+    fn resolve(&self, path: &str, method: &Method) -> Option<&SiteRoute> {
         let methods = self.routes.get(path)?;
-        methods
-            .get(method.as_str())
-            .or_else(|| methods.get("*"))
-            .map(String::as_str)
+        methods.get(method.as_str()).or_else(|| methods.get("*"))
     }
 }
 
@@ -224,18 +314,24 @@ fn build_site_router(
     runtime: Arc<DispatchRuntime>,
     transport: &TransportConfig,
     trusted_proxies: Vec<IpNet>,
+    auth: Option<Arc<dyn SiteAuth>>,
 ) -> Result<Router, String> {
-    let mut routes: BTreeMap<String, BTreeMap<String, String>> = BTreeMap::new();
+    let mut routes: BTreeMap<String, BTreeMap<String, SiteRoute>> = BTreeMap::new();
     for function in catalog.functions.values() {
-        let Some(RouteSpec { method, path }) = function.route.as_ref() else {
+        let Some(spec @ RouteSpec { method, path }) = function.route.as_ref() else {
             continue;
         };
         let by_method = routes.entry(path.clone()).or_default();
-        if let Some(existing) = by_method.insert(method.clone(), function.name.clone()) {
+        let entry = SiteRoute {
+            function: function.name.clone(),
+            spec: spec.clone(),
+            required_scopes: function.required_scopes.clone(),
+        };
+        if let Some(existing) = by_method.insert(method.clone(), entry) {
             return Err(format!(
-                "route conflict: {method} {path} is claimed by both `{existing}` and \
+                "route conflict: {method} {path} is claimed by both `{}` and \
                  `{}`; give one of them a distinct @route(...)",
-                function.name
+                existing.function, function.name
             ));
         }
     }
@@ -252,6 +348,7 @@ fn build_site_router(
         runtime,
         routes: Arc::new(routes),
         trusted_proxies: Arc::new(trusted_proxies),
+        auth,
     };
 
     let mut router: Router<SiteState> = Router::new();
@@ -297,8 +394,34 @@ async fn site_dispatch(State(state): State<SiteState>, request: Request) -> Resp
 
     let method = parts.method.clone();
     let route_template = matched_path.unwrap_or_else(|| parts.uri.path().to_string());
-    let Some(function) = state.resolve(&route_template, &method).map(str::to_string) else {
+    let Some(route) = state.resolve(&route_template, &method).cloned() else {
         return method_not_allowed(&state, &route_template);
+    };
+    let function = route.function.clone();
+    let request_id = fresh_request_id();
+
+    // Embedder auth runs on the request head, before the body is
+    // buffered: an unauthenticated caller never costs a body read or a
+    // dispatch. `Deny` short-circuits with the embedder's response
+    // verbatim; `Allow` is then checked against the route's `@scopes`
+    // (a route without `@scopes` has no scope requirement).
+    let auth_context = match state.auth.as_ref() {
+        None => None,
+        Some(hook) => match hook.authenticate(&parts, &route.spec).await {
+            SiteAuthOutcome::Deny(response) => return *response,
+            SiteAuthOutcome::Allow(context) => {
+                if !route.required_scopes.is_subset(&context.scopes) {
+                    return axum_response_from_dispatch_error(
+                        DispatchError::Forbidden {
+                            required: route.required_scopes.clone(),
+                            granted: context.scopes,
+                        },
+                        &request_id,
+                    );
+                }
+                Some(context)
+            }
+        },
     };
 
     let wants_upgrade = is_websocket_upgrade(&parts.headers);
@@ -326,7 +449,6 @@ async fn site_dispatch(State(state): State<SiteState>, request: Request) -> Resp
         }
     };
 
-    let request_id = fresh_request_id();
     let req_value = build_request_value(
         &method,
         &parts.uri,
@@ -338,12 +460,19 @@ async fn site_dispatch(State(state): State<SiteState>, request: Request) -> Resp
         peer,
         &state.trusted_proxies,
     );
-    let auth = AuthRequest::from_http(
+    let mut auth = AuthRequest::from_http(
         &method,
         parts.uri.path(),
         body_bytes.to_vec(),
         &parts.headers,
     );
+    // The hook-resolved scopes feed the dispatch-level scope check too,
+    // so a configured `AuthPolicy` (or the allow-all default) agrees
+    // with the admission decision made above instead of re-denying a
+    // route the embedder explicitly allowed.
+    if let Some(context) = auth_context.as_ref() {
+        auth.granted_scopes = context.scopes.clone();
+    }
 
     let call = CallRequest {
         adapter: SITE_ADAPTER.to_string(),
@@ -358,8 +487,13 @@ async fn site_dispatch(State(state): State<SiteState>, request: Request) -> Resp
         cancel_token: None,
         agent_session_id: None,
         progress: None,
-        tenant_id: None,
+        tenant_id: auth_context
+            .as_ref()
+            .and_then(|context| context.tenant_id.clone()),
         request_id: Some(request_id.clone()),
+        auth_context: auth_context
+            .as_ref()
+            .and_then(|context| context.context.clone()),
     };
 
     let response = match state.runtime.call(call).await {
@@ -375,7 +509,7 @@ async fn site_dispatch(State(state): State<SiteState>, request: Request) -> Resp
     // surface, not silently 101 a plain GET.
     if wants_upgrade {
         if let Some(spec) = classify_ws_upgrade(&response) {
-            return upgrade_websocket(&mut parts, state.runtime, spec).await;
+            return upgrade_websocket(&mut parts, state.runtime, spec, auth_context).await;
         }
     }
 
@@ -438,6 +572,7 @@ async fn upgrade_websocket(
     parts: &mut axum::http::request::Parts,
     runtime: Arc<DispatchRuntime>,
     spec: harn_vm::WsUpgradeSpec,
+    auth_context: Option<SiteAuthContext>,
 ) -> Response {
     let config = ws_config_from_spec(&spec);
     let on_message = spec.on_message.clone();
@@ -450,8 +585,9 @@ async fn upgrade_websocket(
     ws_accept(config, headers, upgrade, move |session| {
         let runtime = runtime.clone();
         let on_message = on_message.clone();
+        let auth_context = auth_context.clone();
         async move {
-            drive_ws_session(session, runtime, on_message).await;
+            drive_ws_session(session, runtime, on_message, auth_context).await;
         }
     })
     .await
@@ -476,10 +612,16 @@ fn ws_config_from_spec(spec: &harn_vm::WsUpgradeSpec) -> WsConfig {
 /// return value back. When the envelope named no handler the socket is
 /// inbound-only — frames are drained and discarded (suiting server-push
 /// handlers that never read from the client).
+///
+/// `auth_context` is the identity the [`SiteAuth`] hook resolved for
+/// the upgrade request; every frame dispatched over the socket carries
+/// the same tenant / scopes / embedder context, since the frames belong
+/// to the connection that was admitted.
 async fn drive_ws_session(
     session: WsSession,
     runtime: Arc<DispatchRuntime>,
     on_message: Option<String>,
+    auth_context: Option<SiteAuthContext>,
 ) {
     let Some(handler) = on_message else {
         while let Ok(Some(_)) = session.recv().await {}
@@ -494,11 +636,18 @@ async fn drive_ws_session(
                 "data_base64": base64::engine::general_purpose::STANDARD.encode(bytes),
             }),
         };
+        let auth = AuthRequest {
+            granted_scopes: auth_context
+                .as_ref()
+                .map(|context| context.scopes.clone())
+                .unwrap_or_default(),
+            ..AuthRequest::default()
+        };
         let call = CallRequest {
             adapter: SITE_ADAPTER.to_string(),
             function: handler.clone(),
             arguments: CallArguments::Positional(vec![message_value]),
-            auth: AuthRequest::default(),
+            auth,
             caller: SITE_ADAPTER.to_string(),
             replay_key: None,
             trace_id: None,
@@ -507,8 +656,13 @@ async fn drive_ws_session(
             cancel_token: None,
             agent_session_id: None,
             progress: None,
-            tenant_id: None,
+            tenant_id: auth_context
+                .as_ref()
+                .and_then(|context| context.tenant_id.clone()),
             request_id: Some(fresh_request_id()),
+            auth_context: auth_context
+                .as_ref()
+                .and_then(|context| context.context.clone()),
         };
         match runtime.call(call).await {
             Ok(response) => {

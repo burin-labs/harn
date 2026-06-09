@@ -120,6 +120,7 @@ impl A2aServer {
                 progress: None,
                 tenant_id: None,
                 request_id: Some(task.id.clone()),
+                auth_context: None,
             })
             .await;
 

@@ -51,6 +51,14 @@ pub struct AuthRequest {
     /// transports that own tenant resolution. `None` means defer to
     /// the auth method.
     pub tenant_id: Option<TenantId>,
+    /// Scopes the transport granted ahead of authentication (e.g. a
+    /// [`crate::SiteAuth`] hook that resolved the credential in the
+    /// embedder's own store). Unioned into the authenticated
+    /// principal's `granted_scopes` before the per-route scope check,
+    /// mirroring how `tenant_id` lets a transport own tenant
+    /// resolution. Empty (the default) defers entirely to the
+    /// configured auth methods.
+    pub granted_scopes: BTreeSet<String>,
 }
 
 impl AuthRequest {
@@ -370,6 +378,13 @@ impl AuthPolicy {
         if let Some(override_tenant) = request.tenant_id.clone() {
             principal.tenant_id = Some(override_tenant);
         }
+
+        // Same story for scopes: a transport-side authenticator that
+        // already resolved the credential contributes the scopes it
+        // granted, on top of whatever the configured method granted.
+        principal
+            .granted_scopes
+            .extend(request.granted_scopes.iter().cloned());
 
         if !required.is_subset(&principal.granted_scopes) {
             return AuthorizationDecision::MissingScope {
@@ -771,8 +786,7 @@ mod tests {
             path: "/mcp".to_string(),
             body: body.to_vec(),
             headers: BTreeMap::from([("authorization".to_string(), authorization)]),
-            validated_oauth: None,
-            tenant_id: None,
+            ..AuthRequest::default()
         };
 
         let decision = policy.authorize(&request).await;
@@ -971,8 +985,7 @@ mod tests {
             path: "/mcp".to_string(),
             body: body.to_vec(),
             headers: BTreeMap::from([("authorization".to_string(), authorization)]),
-            validated_oauth: None,
-            tenant_id: None,
+            ..AuthRequest::default()
         };
 
         let decision = policy
@@ -1080,6 +1093,27 @@ mod tests {
             panic!("expected Authorized");
         };
         assert_eq!(principal.tenant_id, Some(TenantId::new("policy-default")));
+    }
+
+    /// A transport that resolved scopes itself (e.g. a `SiteAuth` hook
+    /// backed by the embedder's API-key store) passes them in via
+    /// `AuthRequest.granted_scopes`; they union into the principal so
+    /// the per-route scope check honours them even under an allow-all
+    /// policy with no configured methods.
+    #[tokio::test]
+    async fn transport_granted_scopes_extend_the_principal() {
+        let policy = AuthPolicy::allow_all();
+        let request = AuthRequest {
+            granted_scopes: scopes(&["personas:read"]),
+            ..AuthRequest::default()
+        };
+        let decision = policy
+            .authorize_with_scopes(&request, &scopes(&["personas:read"]))
+            .await;
+        let AuthorizationDecision::Authorized(principal) = decision else {
+            panic!("expected Authorized");
+        };
+        assert_eq!(principal.granted_scopes, scopes(&["personas:read"]));
     }
 
     #[tokio::test]

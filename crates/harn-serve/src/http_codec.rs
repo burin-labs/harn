@@ -53,8 +53,7 @@ impl AuthRequest {
             path: path.to_string(),
             body,
             headers: normalize_headers(headers),
-            validated_oauth: None,
-            tenant_id: None,
+            ..Self::default()
         }
     }
 }
@@ -809,6 +808,7 @@ mod tests {
             progress: None,
             tenant_id: None,
             request_id: None,
+            auth_context: None,
         };
         core.dispatch(request).await.map(|response| response.value)
     }
@@ -1107,6 +1107,7 @@ pub fn handler() -> dict {
             progress: None,
             tenant_id: None,
             request_id,
+            auth_context: None,
         };
         core.dispatch(request).await.map(|response| response.value)
     }

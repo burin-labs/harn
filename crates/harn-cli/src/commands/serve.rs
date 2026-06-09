@@ -791,8 +791,7 @@ fn script_http_auth_request(
         path: path.to_string(),
         body,
         headers: script_normalized_headers(headers),
-        validated_oauth: None,
-        tenant_id: None,
+        ..AuthRequest::default()
     }
 }
 

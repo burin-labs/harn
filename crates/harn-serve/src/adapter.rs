@@ -128,6 +128,7 @@ mod tests {
             progress: None,
             tenant_id: None,
             request_id: None,
+            auth_context: None,
         }
     }
 
