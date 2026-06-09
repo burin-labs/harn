@@ -250,6 +250,64 @@ fn agent_primitive_denied_tool(
     })
 }
 
+/// Cause-named feedback for a tool call whose arguments arrived EMPTY
+/// (`{}` or null) and failed required-parameter validation.
+///
+/// Observed live on the OpenAI-compatible native tool-call route
+/// (burin-code#2121): 13/165 edit calls arrived with literally `{}` arguments
+/// while the model generated 549–5,056 output tokens those turns — the model
+/// authored content, but the provider boundary delivered an empty-args call.
+/// The generic "missing required parameter(s): path" message misdiagnoses
+/// that as a model slip and sends it into re-call loops. Name the actual
+/// cause instead, keyed off the turn's provider stop reason:
+///
+/// - length truncation (`length` / `max_tokens` / `MAX_TOKENS`): the
+///   arguments were cut off by the output-token limit — coach a smaller
+///   re-issue.
+/// - anything else: the provider/template dropped the arguments — coach an
+///   identical re-issue with the full arguments.
+///
+/// Returns `None` when the call's arguments were not empty, so ordinary
+/// validation failures keep the precise missing-parameter message. The
+/// `&'static str` is a machine-readable cause (`empty_arguments_truncated` /
+/// `empty_arguments_dropped`) exposed on the dispatch envelope so hosts can
+/// distinguish the class without string-matching the reason.
+fn empty_args_cause_named_feedback(
+    tool_name: &str,
+    raw_args: &serde_json::Value,
+    stop_reason: Option<&str>,
+) -> Option<(String, &'static str)> {
+    let args_empty = match raw_args {
+        serde_json::Value::Null => true,
+        serde_json::Value::Object(map) => map.is_empty(),
+        _ => false,
+    };
+    if !args_empty {
+        return None;
+    }
+    if agent_session_host::is_length_truncation(stop_reason) {
+        Some((
+            format!(
+                "Tool '{tool_name}' arrived with EMPTY arguments because the response hit \
+                 the output-token limit (finish_reason=length): your tool call's arguments \
+                 were TRUNCATED by the output limit. Re-issue the call with shorter \
+                 content, or split the change into several smaller calls."
+            ),
+            "empty_arguments_truncated",
+        ))
+    } else {
+        Some((
+            format!(
+                "Tool '{tool_name}' arrived with EMPTY arguments — a known \
+                 provider/template fault where the arguments you authored are dropped at \
+                 the provider boundary, not a formatting mistake on your part. Re-issue \
+                 the same call with its full arguments."
+            ),
+            "empty_arguments_dropped",
+        ))
+    }
+}
+
 /// Append a `PermissionDeny` transcript event that carries the structured
 /// [`crate::agent_events::ToolDenial`] alongside the human-readable reason.
 /// Silent no-op for sessions that were never opened.
@@ -1199,9 +1257,24 @@ async fn host_agent_dispatch_tool_call(
 
     let tool_schemas = tools::collect_tool_schemas(tools, None);
     if let Err(message) = tools::validate_tool_args(&tool_name, &tool_args, &tool_schemas) {
+        // Empty-args calls (`{}` / null arguments) are a provider-boundary
+        // fault class, not a model slip — replace the misdiagnosing
+        // missing-parameter message with cause-named feedback keyed off the
+        // turn's provider stop reason (threaded in by the agent loop as
+        // `_stop_reason`). See `empty_args_cause_named_feedback`.
+        let turn_stop_reason = agent_primitive_option_str(options, "_stop_reason");
+        let cause_named = empty_args_cause_named_feedback(
+            &tool_name,
+            &raw_args,
+            turn_stop_reason.as_deref().filter(|s| !s.is_empty()),
+        );
+        let (message, cause) = match cause_named {
+            Some((cause_message, cause)) => (cause_message, Some(cause)),
+            None => (message, None),
+        };
         // Schema validation is not a policy denial — the model can fix the
         // arguments and retry — so no structured `ToolDenial` is attached.
-        let denied = agent_primitive_denied_tool(
+        let mut denied = agent_primitive_denied_tool(
             &tool_name,
             &tool_id,
             &tool_args,
@@ -1209,6 +1282,15 @@ async fn host_agent_dispatch_tool_call(
             crate::agent_events::ToolCallErrorCategory::SchemaValidation,
             None,
         );
+        if let Some(cause) = cause {
+            // Machine-readable cause on both the envelope (for host harnesses
+            // reading the dispatch outcome) and the inner model-facing result
+            // (so it rides the transcript).
+            denied["cause"] = serde_json::json!(cause);
+            if let Some(result) = denied.get_mut("result") {
+                result["cause"] = serde_json::json!(cause);
+            }
+        }
         let denied = attach_hook_reminder_audit(denied, hook_reminder_reports);
         return Ok(json_to_vm_value(&denied));
     }
@@ -1938,6 +2020,64 @@ mod denied_tool_routing_tests {
         assert!(
             !next.contains("Do not retry"),
             "empty-name slip must be retry-positive: {next}"
+        );
+    }
+
+    use super::empty_args_cause_named_feedback;
+
+    #[test]
+    fn empty_args_with_length_truncation_names_the_truncation_cause() {
+        let (reason, cause) =
+            empty_args_cause_named_feedback("edit", &serde_json::json!({}), Some("length"))
+                .expect("empty args must be cause-named");
+        assert_eq!(cause, "empty_arguments_truncated");
+        assert!(
+            reason.contains("TRUNCATED") && reason.contains("output"),
+            "length-truncated empty args must name the output-limit cut: {reason}"
+        );
+        assert!(
+            reason.contains("shorter") || reason.contains("split"),
+            "truncation feedback must coach a smaller re-issue: {reason}"
+        );
+        assert!(
+            !reason.contains("missing required parameter"),
+            "must not misdiagnose as a missing-parameter slip: {reason}"
+        );
+        // Anthropic spelling and provider casing route to the same cause.
+        let (_, cause) =
+            empty_args_cause_named_feedback("edit", &serde_json::Value::Null, Some("MAX_TOKENS"))
+                .expect("null args must be cause-named");
+        assert_eq!(cause, "empty_arguments_truncated");
+    }
+
+    #[test]
+    fn empty_args_with_clean_stop_names_the_provider_fault_cause() {
+        for stop_reason in [Some("stop"), Some("tool_calls"), None] {
+            let (reason, cause) =
+                empty_args_cause_named_feedback("edit", &serde_json::json!({}), stop_reason)
+                    .expect("empty args must be cause-named");
+            assert_eq!(cause, "empty_arguments_dropped");
+            assert!(
+                reason.contains("EMPTY arguments") && reason.contains("provider"),
+                "clean-stop empty args must name the provider fault: {reason}"
+            );
+            assert!(
+                reason.contains("Re-issue the same call"),
+                "provider-fault feedback must coach an identical re-issue: {reason}"
+            );
+        }
+    }
+
+    #[test]
+    fn non_empty_args_keep_the_precise_validator_message() {
+        assert!(
+            empty_args_cause_named_feedback(
+                "edit",
+                &serde_json::json!({ "content": "x" }),
+                Some("length")
+            )
+            .is_none(),
+            "a call that DID deliver arguments must keep the missing-parameter message"
         );
     }
 

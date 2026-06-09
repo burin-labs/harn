@@ -1222,6 +1222,39 @@ mod tests {
     }
 
     #[test]
+    fn openai_parser_keeps_finish_reason_on_empty_args_tool_call() {
+        // burin-code#2121 evidence shape (non-streaming): the provider
+        // boundary delivers a named tool call with literally "{}" arguments.
+        // `finish_reason` must surface as `stop_reason` so downstream
+        // feedback can distinguish a length-truncated call from a clean-stop
+        // provider drop.
+        for finish_reason in ["length", "tool_calls"] {
+            let response = serde_json::json!({
+                "choices": [{
+                    "message": {
+                        "content": "",
+                        "tool_calls": [
+                            {
+                                "id": "chatcmpl-tool-1",
+                                "type": "function",
+                                "function": {"name": "edit", "arguments": "{}"}
+                            }
+                        ]
+                    },
+                    "finish_reason": finish_reason
+                }],
+                "usage": {"prompt_tokens": 10, "completion_tokens": 549}
+            });
+            let result = parse_llm_response(&response, "openrouter", "or-qwen", false)
+                .expect("parser succeeds");
+            assert_eq!(result.stop_reason.as_deref(), Some(finish_reason));
+            assert_eq!(result.tool_calls.len(), 1);
+            assert_eq!(result.tool_calls[0]["name"], "edit");
+            assert_eq!(result.tool_calls[0]["arguments"], serde_json::json!({}));
+        }
+    }
+
+    #[test]
     fn openai_parser_records_tool_search_call_as_query_event() {
         // OpenAI's Responses API (harn#71) surfaces the server-hosted
         // tool_search as a `tool_search_call` entry in the `tool_calls`

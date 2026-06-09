@@ -1176,6 +1176,11 @@ fn __dispatch_tool_calls(session_id, tool_calls, turn_opts) {
   agent_tool_search_emit_queries(session_id, tool_calls, turn_opts)
   let tools = turn_opts?.tools
   let cap = __resolve_max_concurrent_tools(turn_opts)
+  // `_stop_reason` is the turn's provider stop reason
+  // (`stop`/`length`/`tool_calls`/...). The dispatch host primitive uses it
+  // to cause-name empty-args tool calls: finish_reason=length means the
+  // arguments were TRUNCATED by the output cap, anything else means the
+  // provider dropped them (burin-code#2121).
   let dispatch_options = {
     session_id: session_id,
     tool_format: turn_opts.tool_format,
@@ -1188,6 +1193,7 @@ fn __dispatch_tool_calls(session_id, tool_calls, turn_opts) {
     _tool_caller: turn_opts?._tool_caller,
     _max_concurrent_tools: cap,
     _prefetch_next_turn: turn_opts?.prefetch_next_turn ?? false,
+    _stop_reason: turn_opts?._stop_reason ?? "",
   }
   let caller = turn_opts?._tool_caller
   let raw_dispatch = __dispatch_tool_calls_with_middleware(tool_calls, tools, dispatch_options, cap)
@@ -2788,7 +2794,12 @@ fn __agent_loop_run(message, session, initial_opts) {
       let dispatched = __dispatch_tool_calls(
         session.session_id,
         tool_calls,
-        turn_opts + {_iteration: iteration_index + 1, _tool_caller: opts?._tool_caller},
+        turn_opts
+          + {
+          _iteration: iteration_index + 1,
+          _tool_caller: opts?._tool_caller,
+          _stop_reason: llm_result?.stop_reason ?? "",
+        },
       )
       let dispatch = dispatched.dispatch
       stall_prev_dispatch = dispatch

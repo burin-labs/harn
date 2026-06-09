@@ -794,6 +794,15 @@ pub(super) fn dump_llm_response(
         "cache_hit": result.cache_read_tokens > 0,
         "thinking": result.thinking,
         "thinking_summary": result.thinking_summary,
+        // Provider-reported finish/stop reason (`stop` / `length` /
+        // `tool_calls` for OpenAI-compatibles, `end_turn` / `max_tokens` /
+        // `tool_use` for Anthropic, `done_reason` for Ollama). The transport
+        // layer has always captured this onto `LlmResult.stop_reason`, but the
+        // observability record dropped it — so transcript mining saw
+        // stop_reason=None on every provider response and truncation analysis
+        // (burin-code#2121) was blind to output-cap cuts. `null` when the
+        // provider reported nothing.
+        "stop_reason": result.stop_reason,
         "response_ms": response_ms,
         // Server-side runtime telemetry (Ollama timings, llama.cpp prefill /
         // decode breakdown, etc.). Empty for providers that report nothing.
@@ -1542,6 +1551,10 @@ mod retry_tests {
             "the text-parsed call must surface in the sidecar, got: {parsed:?}"
         );
         assert_eq!(parsed[0]["name"], "run");
+        // The provider-reported stop reason must ride the observability record
+        // (burin-code#2121: it was dropped here, blinding transcript mining to
+        // length truncations on every provider route).
+        assert_eq!(event["stop_reason"], "stop");
 
         // 2. Request-construction / history path is UNCHANGED: the value that
         //    feeds the assistant history envelope is `native_tool_calls`, which
