@@ -767,14 +767,6 @@ async fn host_agent_dispatch_tool_call(
         )))
         }
     };
-    let mut tool_name = match call.get("name") {
-        Some(VmValue::String(name)) if !name.trim().is_empty() => name.to_string(),
-        _ => {
-            return Err(VmError::Runtime(
-                "__host_agent_dispatch_tool_call: call.name must be a non-empty string".to_string(),
-            ))
-        }
-    };
     let tool_id = ["id", "tool_call_id", "call_id"]
         .iter()
         .find_map(|key| match call.get(*key) {
@@ -786,6 +778,29 @@ async fn host_agent_dispatch_tool_call(
         .get("arguments")
         .map(helpers::vm_value_to_json)
         .unwrap_or(serde_json::Value::Null);
+    let mut tool_name = match call.get("name") {
+        Some(VmValue::String(name)) if !name.trim().is_empty() => name.to_string(),
+        // An empty/missing/non-string tool name is a recoverable parse slip,
+        // not a terminal harness error: the model emitted a malformed call and
+        // can fix it on the next turn. Surface it through the same
+        // schema-validation denied-tool envelope the loop already re-injects
+        // for bad arguments (a hard `Err` here aborts the whole agent_loop,
+        // wrongly tanking a run over one fixable slip). The unknown-but-named
+        // path is already recoverable this way; align the unnamed path with it.
+        _ => {
+            let denied = agent_primitive_denied_tool(
+                "<unnamed>",
+                &tool_id,
+                &raw_args,
+                "Tool call is missing a name. Emit one tool call per turn as \
+                 `name({ ... })` using a non-empty tool name from the allowed \
+                 list, then retry.",
+                crate::agent_events::ToolCallErrorCategory::SchemaValidation,
+                None,
+            );
+            return Ok(json_to_vm_value(&denied));
+        }
+    };
     let mut tool_args = tools::normalize_tool_args(&tool_name, &raw_args);
     let session_id = agent_primitive_option_str(options, "session_id")
         .or_else(current_agent_session_id)

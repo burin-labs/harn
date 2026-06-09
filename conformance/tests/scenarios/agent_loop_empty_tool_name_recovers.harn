@@ -1,0 +1,79 @@
+/**
+ * An empty / missing / non-string tool name is a RECOVERABLE parse slip, not a
+ * terminal harness error.
+ *
+ * Regression: `__host_agent_dispatch_tool_call` used to `Err(...)` on an empty
+ * `call.name`, which propagates out of `agent_loop` and aborts the entire run.
+ * A model that emits one nameless/malformed tool call would have its whole
+ * session terminated, wrongly scoring a fixable slip as a hard failure. The
+ * unknown-but-named path was already recoverable (the loop re-injects the
+ * `schema_validation` denied-tool result and lets the model retry); this aligns
+ * the unnamed path with it.
+ *
+ * Part A: drive `agent_loop` with a nameless tool call on turn 1 followed by a
+ * `##DONE##` text turn. The loop must reach `done` (it recovers + retries),
+ * not abort.
+ *
+ * Part B: call the dispatch primitive directly with an empty / missing name and
+ * assert it returns the recoverable error envelope (ok=false, status=error,
+ * error_category=schema_validation) instead of throwing.
+ */
+import { agent_dispatch_tool_call } from "std/agent/primitives"
+import { llm_text, with_llm_script } from "std/testing"
+
+fn one_tool() {
+  let r = tool_registry()
+  return tool_define(
+    r,
+    "echo",
+    "Echo back the message",
+    {
+      handler: { args -> return "echoed:" + to_string(args?.msg ?? "") },
+      parameters: {msg: {type: "string"}},
+    },
+  )
+}
+
+fn run_loop_with_empty_name() {
+  return with_llm_script(
+    [{tool_calls: [{id: "bad-1", name: "", arguments: {}}]}, llm_text("##DONE##")],
+    { ->
+      let result = agent_loop(
+        "do something",
+        nil,
+        {
+          provider: "mock",
+          tools: one_tool(),
+          tool_format: "native",
+          max_iterations: 4,
+          loop_until_done: true,
+          done_sentinel: "##DONE##",
+        },
+      )
+      return result.status
+    },
+  )
+}
+
+/**
+ * Turn 1: a malformed call with an empty name — the loop must NOT abort.
+ * Turn 2: the model recovers and finishes.
+ */
+pipeline default() {
+  // Part A: the whole run survives a nameless tool call and reaches `done`.
+  __io_println("loop.status=" + run_loop_with_empty_name())
+  // Part B: the dispatch primitive returns a recoverable envelope, not a throw.
+  let empty = agent_dispatch_tool_call({name: "", arguments: {}}, one_tool(), {})
+  __io_println("empty.ok=" + to_string(empty?.ok))
+  __io_println("empty.status=" + to_string(empty?.status))
+  __io_println("empty.error_category=" + to_string(empty?.error_category))
+  let missing = agent_dispatch_tool_call({arguments: {}}, one_tool(), {})
+  __io_println("missing.ok=" + to_string(missing?.ok))
+  __io_println("missing.status=" + to_string(missing?.status))
+  __io_println("missing.error_category=" + to_string(missing?.error_category))
+  // A well-formed call against the same registry still executes normally:
+  // the recovery path must not have broken the happy path.
+  let good = agent_dispatch_tool_call({name: "echo", arguments: {msg: "hi"}}, one_tool(), {})
+  __io_println("good.ok=" + to_string(good?.ok))
+  __io_println("good.status=" + to_string(good?.status))
+}

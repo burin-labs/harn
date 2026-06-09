@@ -1,0 +1,9 @@
+loop.status=done
+empty.ok=false
+empty.status=error
+empty.error_category=schema_validation
+missing.ok=false
+missing.status=error
+missing.error_category=schema_validation
+good.ok=true
+good.status=ok
