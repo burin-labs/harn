@@ -1,0 +1,108 @@
+import { llm_text, with_llm_script } from "std/testing"
+
+/**
+ * Native tool calls can arrive with EMPTY `{}` arguments even though the model
+ * authored hundreds of output tokens that turn — a provider/template fault
+ * observed live on the OpenAI-compatible native route (burin-code#2121:
+ * 13/165 edit calls). The dispatch feedback must name the CAUSE instead of
+ * misdiagnosing it as "missing required parameter(s)" and sending the model
+ * into re-call loops:
+ *
+ *  - finish_reason `length` -> the arguments were TRUNCATED by the output cap;
+ *    coach a shorter / split re-issue.
+ *  - any clean stop -> the provider dropped the arguments; coach an identical
+ *    re-issue with the full arguments.
+ *
+ * A call that DID deliver (incomplete) arguments keeps the precise
+ * missing-parameter message.
+ */
+fn note_tools() {
+  var tools = tool_registry()
+  tools = tool_define(
+    tools,
+    "write_note",
+    "Write a note.",
+    {
+      handler: { args -> "wrote " + to_string(args?.path) },
+      parameters: {path: {type: "string", description: "Path to write"}},
+      returns: {type: "string"},
+      annotations: {kind: "edit", side_effect_level: "workspace_write"},
+    },
+  )
+  return tools
+}
+
+fn loop_opts() {
+  return {
+    provider: "mock",
+    tool_format: "native",
+    loop_until_done: true,
+    max_iterations: 5,
+    max_nudges: 5,
+    tools: note_tools(),
+  }
+}
+
+pipeline default() {
+  // (a) Empty args + finish_reason "length" -> the feedback names the
+  // output-cap truncation, never the misdiagnosing missing-parameter slip.
+  with_llm_script(
+    [
+      {tool_calls: [{id: "t1", name: "write_note", arguments: {}}], stop_reason: "length"},
+      {
+        tool_calls: [{id: "t2", name: "write_note", arguments: {path: "a.txt"}}],
+        stop_reason: "tool_calls",
+      },
+      llm_text("##DONE##"),
+    ],
+    { ->
+      let result = agent_loop("Write a.txt.", nil, loop_opts())
+      let calls = llm_mock_calls()
+      let feedback = json_stringify(calls[1].messages)
+      __io_println(result.status)
+      __io_println(contains(feedback, "TRUNCATED by the output limit"))
+      __io_println(!contains(feedback, "missing required parameter"))
+    },
+  )
+  // (b) Empty args + clean stop -> the feedback names the provider fault and
+  // coaches an identical re-issue.
+  with_llm_script(
+    [
+      {tool_calls: [{id: "t1", name: "write_note", arguments: {}}], stop_reason: "tool_calls"},
+      {
+        tool_calls: [{id: "t2", name: "write_note", arguments: {path: "a.txt"}}],
+        stop_reason: "tool_calls",
+      },
+      llm_text("##DONE##"),
+    ],
+    { ->
+      let result = agent_loop("Write a.txt.", nil, loop_opts())
+      let calls = llm_mock_calls()
+      let feedback = json_stringify(calls[1].messages)
+      __io_println(result.status)
+      __io_println(contains(feedback, "EMPTY arguments"))
+      __io_println(contains(feedback, "Re-issue the same call with its full arguments"))
+      __io_println(!contains(feedback, "missing required parameter"))
+    },
+  )
+  // (c) Non-empty but incomplete args -> the precise validator message stays;
+  // the empty-args cause-naming must not fire.
+  with_llm_script(
+    [
+      {tool_calls: [{id: "t1", name: "write_note", arguments: {body: "hello"}}], stop_reason: "length"},
+      {
+        tool_calls: [{id: "t2", name: "write_note", arguments: {path: "a.txt"}}],
+        stop_reason: "tool_calls",
+      },
+      llm_text("##DONE##"),
+    ],
+    { ->
+      let result = agent_loop("Write a.txt.", nil, loop_opts())
+      let calls = llm_mock_calls()
+      let feedback = json_stringify(calls[1].messages)
+      __io_println(result.status)
+      __io_println(contains(feedback, "missing required parameter(s): path"))
+      __io_println(!contains(feedback, "EMPTY arguments"))
+    },
+  )
+}

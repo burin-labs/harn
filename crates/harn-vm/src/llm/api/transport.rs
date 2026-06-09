@@ -2018,6 +2018,35 @@ mod streaming_tool_call_tests {
     }
 
     #[tokio::test(flavor = "current_thread")]
+    async fn openai_stream_tool_call_cut_by_length_keeps_finish_reason() {
+        // burin-code#2121 evidence shape: the output-token cap cuts a native
+        // tool call mid-arguments. OpenRouter delivers the truncated args
+        // deltas and a final chunk that carries BOTH a `tool_calls` delta and
+        // `finish_reason:"length"`. The accumulated args fail to parse (-> the
+        // empty-object fallback the agent loop sees as an empty-args call),
+        // and `stop_reason` MUST still surface so the empty-args feedback can
+        // name the truncation cause.
+        let body = concat!(
+            "data: {\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"chatcmpl-tool-1\",\"function\":{\"name\":\"edit\",\"arguments\":\"{\\\"pa\"}}]}}]}\n",
+            "data: {\"choices\":[{\"index\":0,\"finish_reason\":\"length\",\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\"th\\\":\\\"src/ma\"}}]}}],\"usage\":{\"prompt_tokens\":4,\"completion_tokens\":9}}\n",
+            "data: [DONE]\n",
+        );
+        let session_id = fresh_session_id("oai-toolcall-length");
+        let (result, _events) = drive(body.as_bytes(), &session_id, false).await;
+
+        assert_eq!(result.stop_reason.as_deref(), Some("length"));
+        assert_eq!(result.tool_calls.len(), 1);
+        assert_eq!(result.tool_calls[0]["name"], "edit");
+        assert_eq!(
+            result.tool_calls[0]["arguments"],
+            serde_json::json!({}),
+            "truncated unparseable args fall back to the empty object"
+        );
+
+        clear_session_sinks(&session_id);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
     async fn openai_stream_announces_and_streams_partials() {
         // OpenAI Chat-Completions-style: tool name on the first delta,
         // arguments string concatenated across subsequent deltas.
