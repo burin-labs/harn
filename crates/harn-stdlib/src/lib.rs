@@ -178,6 +178,10 @@ pub const STDLIB_SOURCES: &[StdlibSource] = &[
         source: include_str!("stdlib/stdlib_eval_stats.harn"),
     },
     StdlibSource {
+        module: "eval/agreement",
+        source: include_str!("stdlib/stdlib_eval_agreement.harn"),
+    },
+    StdlibSource {
         module: "runtime",
         source: include_str!("stdlib/stdlib_runtime.harn"),
     },
@@ -1306,6 +1310,7 @@ mod tests {
             "context/maintenance",
             "context/eval",
             "eval/stats",
+            "eval/agreement",
             "edit",
             "artifact/web",
             "command",
