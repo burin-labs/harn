@@ -1,0 +1,334 @@
+/**
+ * std/eval/agreement - deterministic cross-checked-success math for eval ledgers.
+ *
+ * Import with: import "std/eval/agreement"
+ *
+ * This module is the reusable, PURE counterpart to std/eval/stats: it decides
+ * whether a set of independent judge verdicts AGREE strongly enough to count a
+ * trial as a pass, and it computes Cohen's kappa between two judges. It does no
+ * I/O — it works only on already-recorded verdicts — so the actual re-running of
+ * verify commands and any product-specific ledger shaping live in the caller.
+ *
+ * The HARD CONSTRAINT this module enforces: a trial's success must be confirmed
+ * by >=2 INDEPENDENT judges, and at least one of the agreeing judges must have
+ * actually RUN OR INSPECTED the program's behavior — and specifically must
+ * include an independent RE-EXECUTION judge. A pass that exists only because an
+ * expected output FILE is on disk (or a required substring appears), or only
+ * because the in-loop gate plus a non-re-executing model grader agreed, is NEVER
+ * a trustworthy pass — it is BARRED.
+ *
+ * The judges (called "evaluators"; each returns "pass", "fail", or "abstain",
+ * where abstain means "this judge doesn't apply to this case"). Callers commonly
+ * wire four:
+ *   E1  the in-loop mechanical gate the agent loop itself ran;
+ *   E2  an independent re-execution of the real verify command from clean files
+ *       in a fresh process (the required re-execution judge by default);
+ *   E3  weak "expected file exists" / "required substring present" checks, which
+ *       can never carry a pass by themselves;
+ *   E4  an optional model-based grader, which can REINFORCE but never replace a
+ *       judge that actually re-ran the code.
+ */
+/**
+ * A "pass" verdict an evaluator can record for a trial.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: verdict_pass()
+ */
+pub fn verdict_pass() -> string {
+  return "pass"
+}
+
+/**
+ * A "fail" verdict an evaluator can record for a trial.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: verdict_fail()
+ */
+pub fn verdict_fail() -> string {
+  return "fail"
+}
+
+/**
+ * The neutral verdict: this evaluator is N/A for the case and does NOT dissent.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: verdict_abstain()
+ */
+pub fn verdict_abstain() -> string {
+  return "abstain"
+}
+
+/**
+ * The behavior-judge tag (ran or inspected real program behavior).
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: evaluator_kind_execution()
+ */
+pub fn evaluator_kind_execution() -> string {
+  return "execution"
+}
+
+/**
+ * The weak-judge tag (file-exists / substring only — cannot carry a pass alone).
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: evaluator_kind_weak()
+ */
+pub fn evaluator_kind_weak() -> string {
+  return "weak"
+}
+
+fn normalize_verdict(value) -> string {
+  let text = trim(to_string(value ?? "")).lower()
+  if text == "pass" || text == "true" || text == "complete" {
+    return verdict_pass()
+  }
+  if text == "fail" || text == "false" || text == "incomplete" {
+    return verdict_fail()
+  }
+  return verdict_abstain()
+}
+
+/**
+ * Build one judge's verdict record from raw inputs. `decided` may be nil/bool/
+ * string; a judge that doesn't apply passes verdict "abstain" (or nil).
+ * `is_execution` tags whether this judge ran or inspected real program behavior.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: evaluator_verdict(id, verdict, is_execution, reason)
+ */
+pub fn evaluator_verdict(id: string, verdict, is_execution: bool, reason: string = "") -> dict {
+  return {
+    id: id,
+    verdict: normalize_verdict(verdict),
+    kind: if is_execution {
+      evaluator_kind_execution()
+    } else {
+      evaluator_kind_weak()
+    },
+    reason: reason,
+  }
+}
+
+/**
+ * True when the judge returned an explicit pass/fail (did not abstain).
+ *
+ * @effects: []
+ * @allocation: stack-only
+ * @errors: []
+ * @api_stability: stable
+ * @example: verdict_is_decided(v)
+ */
+pub fn verdict_is_decided(v: dict) -> bool {
+  return v?.verdict == verdict_pass() || v?.verdict == verdict_fail()
+}
+
+fn passing(verdicts: list) -> list {
+  return verdicts.filter({ v -> v?.verdict == verdict_pass() }).to_list()
+}
+
+fn execution_passes(verdicts: list) -> list {
+  return verdicts
+    .filter({ v -> v?.verdict == verdict_pass() && v?.kind == evaluator_kind_execution() }).to_list()
+}
+
+fn ids_of(verdicts: list) -> list<string> {
+  return verdicts.map({ v -> to_string(v?.id ?? "") }).to_list()
+}
+
+/**
+ * The cross-checked-success decision over a list of judge verdicts.
+ *
+ * A trial PASSES only if ALL of:
+ *   1. at least `min_agreement` (default 2) judges that apply to this case agree
+ *      on "pass" — judges that abstain count neither as agreeing NOR as
+ *      disagreeing (abstaining is not a "no" vote), and
+ *   2. at least one agreeing judge actually ran or inspected program behavior
+ *      (a "behavior" judge), and
+ *   3. the agreement is carried by an INDEPENDENT RE-EXECUTION judge: at least
+ *      one agreeing judge whose id is in `reexecution_ids` (or equals
+ *      `required_execution_id`) — a judge that re-ran the REAL verify command in
+ *      a fresh process. A pass backed only by the in-loop gate plus a weak
+ *      (file-exists/substring) judge, or only by the in-loop gate plus a
+ *      non-re-executing model grader, is BARRED.
+ *
+ * Returns a record with the headline booleans and full evidence; see the field
+ * names in the returned dict.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: agreement_decision(verdicts, min_agreement, required_execution_id, reexecution_ids)
+ */
+pub fn agreement_decision(
+  verdicts: list,
+  min_agreement: int = 2,
+  required_execution_id: string = "reexec_verify",
+  reexecution_ids: list<string> = ["reexec_verify"],
+) -> dict {
+  let concurring = passing(verdicts)
+  let exec_passes = execution_passes(verdicts)
+  let decided = verdicts.filter({ v -> verdict_is_decided(v) }).to_list()
+  let aligned = len(concurring)
+  let enough_concur = aligned >= min_agreement
+  let has_execution = len(exec_passes) >= 1
+  // Clause 3, "an independent RE-EXECUTION judge must be among the agreeing
+  // votes": at least one agreeing behavior judge whose id is in `reexecution_ids`
+  // (the re-grade, reexec_verify, by default) OR equals `required_execution_id`.
+  // A bare count of behavior judges (`len(exec_ids) >= 2`) is NOT sufficient,
+  // because a non-re-executing model grader is an execution-KIND judge that does
+  // not re-run anything — letting it substitute for the re-execution judge would
+  // contradict "the grader can only reinforce, never replace a judge that ran the
+  // code".
+  let exec_ids = ids_of(exec_passes)
+  let reexec_concurring = exec_passes
+    .filter(
+    { v ->
+      let id = to_string(v?.id ?? "")
+      contains(reexecution_ids, id) || id == required_execution_id
+    },
+  ).to_list()
+  let has_required_execution = len(reexec_concurring) >= 1
+  let passed = enough_concur && has_execution && has_required_execution
+  // A bar fires when enough judges agreed but no INDEPENDENT RE-EXECUTION judge
+  // is among them — either the only behavior signal is weak (the "a file exists,
+  // so call it solved" trap) or the only behavior signals are the in-loop gate
+  // and/or a non-re-executing model grader.
+  let barred = enough_concur && !passed
+  let bar_reason = if !barred {
+    ""
+  } else if !has_execution {
+    "pass carried only by non-execution (artifact/substring) signals — BARRED"
+  } else {
+    "pass carried only by the in-loop E1 gate and/or a non-re-executing grader plus weak signals; no independent re-execution confirmation — BARRED"
+  }
+  return {
+    evaluator_agreement: passed,
+    passed: passed,
+    verdicts_aligned_count: aligned,
+    applicable_count: len(decided),
+    barred: barred,
+    bar_reason: bar_reason,
+    concurring_ids: ids_of(concurring),
+    execution_pass_ids: exec_ids,
+    min_agreement: min_agreement,
+    required_execution_id: required_execution_id,
+    verdicts: verdicts,
+  }
+}
+
+fn verdict_for(verdicts: list, id: string) {
+  for v in verdicts {
+    if to_string(v?.id ?? "") == id {
+      return v?.verdict ?? verdict_abstain()
+    }
+  }
+  return nil
+}
+
+/**
+ * Cohen's kappa between two judges, over the cases they BOTH gave a verdict on
+ * (neither abstained). Cohen's kappa is a standard statistic for how much two
+ * judges agree beyond what you'd expect from random chance: 1.0 is perfect
+ * agreement, 0.0 is no better than chance. `cases` is a list of verdict-lists
+ * (one per case/trial), each holding the per-judge records.
+ *
+ * Returns {kappa, n, po, pe, agree, e1_pass, e2_pass, both_pass, both_fail}
+ * where `n` is the number of cases both judges decided, `po` is the fraction
+ * they actually agreed on, and `pe` is the fraction they'd be expected to agree
+ * on by chance. With <2 jointly-decided cases kappa is nil (undefined). Edge
+ * case: when both judges always give the same single label, agreement-by-chance
+ * (pe) can reach 1.0; we then return kappa 1.0 if they fully agreed and 0.0
+ * otherwise.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: cohen_kappa(cases, id_a, id_b)
+ */
+pub fn cohen_kappa(
+  cases: list,
+  id_a: string = "burin_mechanical_gate",
+  id_b: string = "reexec_verify",
+) -> dict {
+  var n = 0
+  var agree = 0
+  var a_pass = 0
+  var b_pass = 0
+  var both_pass = 0
+  var both_fail = 0
+  for verdicts in cases {
+    let va = verdict_for(verdicts, id_a)
+    let vb = verdict_for(verdicts, id_b)
+    let a_decided = va == verdict_pass() || va == verdict_fail()
+    let b_decided = vb == verdict_pass() || vb == verdict_fail()
+    if !a_decided || !b_decided {
+      continue
+    }
+    n = n + 1
+    if va == verdict_pass() {
+      a_pass = a_pass + 1
+    }
+    if vb == verdict_pass() {
+      b_pass = b_pass + 1
+    }
+    if va == vb {
+      agree = agree + 1
+    }
+    if va == verdict_pass() && vb == verdict_pass() {
+      both_pass = both_pass + 1
+    }
+    if va == verdict_fail() && vb == verdict_fail() {
+      both_fail = both_fail + 1
+    }
+  }
+  if n < 2 {
+    return {kappa: nil, n: n, po: nil, pe: nil, agree: agree, e1_pass: a_pass, e2_pass: b_pass}
+  }
+  let total = to_float(n) ?? 1.0
+  let po = (to_float(agree) ?? 0.0) / total
+  // Chance agreement = P(both pass by chance) + P(both fail by chance).
+  let pa_pass = (to_float(a_pass) ?? 0.0) / total
+  let pb_pass = (to_float(b_pass) ?? 0.0) / total
+  let pe = pa_pass * pb_pass + (1.0 - pa_pass) * (1.0 - pb_pass)
+  let kappa = if pe >= 1.0 {
+    if po >= 1.0 {
+      1.0
+    } else {
+      0.0
+    }
+  } else {
+    (po - pe) / (1.0 - pe)
+  }
+  return {
+    kappa: kappa,
+    n: n,
+    po: po,
+    pe: pe,
+    agree: agree,
+    e1_pass: a_pass,
+    e2_pass: b_pass,
+    both_pass: both_pass,
+    both_fail: both_fail,
+  }
+}
