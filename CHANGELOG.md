@@ -8,6 +8,56 @@ highlights live in [CHANGELOG-pre-0.6.md](CHANGELOG-pre-0.6.md).
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.8.94
+
+### Fixed
+
+- Lint: `cyclomatic-complexity` (HARN-LNT-002) and `naming-convention`
+  diagnostics now underline just the keyword + declaration name
+  (`fn run_agent`, `struct Bad`) instead of carpeting carets across the
+  entire function/type body.
+- **Agent tool-call parser no longer silently drops valid calls in two cases.**
+  A single stray/unmatched backtick in model prose used to flip the bare-call
+  scanner's inline-code flag for the rest of the response, suppressing every
+  later bare `name({ ... })` tool call and stalling the agent loop; the flag now
+  resets at each newline (Markdown inline code never spans lines). And the
+  native-JSON fallback now accepts the flat OpenAI on-the-wire envelope whose
+  `arguments`/`parameters` value is a JSON *string*
+  (`{"name":"read","arguments":"{\"path\":\"a\"}"}`, common from local
+  llama.cpp/vLLM/Ollama OpenAI-mimic templates) — the acceptance gate previously
+  required an object and dropped the call even though the extractor already
+  decoded the string.
+- `harn-vm` agent loop: an empty or malformed tool-call name no longer aborts
+  the whole run. `host_agent_dispatch_tool_call` previously threw a runtime
+  error on a blank `tool_name`, terminating `agent_loop` — so a single malformed
+  function-call element from a model (common on some native-tool/MoE providers)
+  could wipe an entire run. The empty/malformed-name case now routes through the
+  existing recoverable denied-tool path, re-injecting actionable retry feedback,
+  exactly as an unknown-but-named tool already does.
+- `harn-vm` stdlib `write_file`/text edits: the primary (no-overlay) write
+  path is now crash-safe. It previously used `std::fs::write`, which opens the
+  destination `O_CREAT|O_TRUNC` and truncates it before any byte is written, so
+  a failure or process kill mid-write (ENOSPC/EDQUOT/EIO) left the file empty
+  or partial and the original content unrecoverable. Writes now go through a
+  sibling temp file that is flushed, fsynced, and atomically renamed over the
+  target, leaving the original untouched on any failure.
+- AST edit builtins (`ast.apply_node`, `ast.batch_apply`,
+  `ast.insert_at_anchor`) no longer corrupt invalid-UTF-8 bytes. The read path
+  decoded the whole file with `String::from_utf8_lossy` and the callers wrote
+  the decoded buffer back, so any non-UTF-8 byte anywhere in the file (e.g. a
+  Latin-1 byte or a `\x80` in a comment or byte-string) was silently rewritten
+  to the 3-byte U+FFFD encoding — even in regions the edit never touched. The
+  edit pipeline now reads, parses (tree-sitter over raw bytes), splices, and
+  writes raw bytes, so bytes outside the edited span pass through verbatim.
+  Lossy decoding is retained only for display-only previews/diagnostics and the
+  read-only `ast.search` text bindings.
+- Structured-output truncation is now detected for Gemini/Vertex responses,
+  which report `MAX_TOKENS` (uppercase). `llm_call`'s structured-output error
+  path previously used a case-sensitive `length`/`max_tokens` literal match and
+  mislabeled a truncated Gemini response as "did not contain parseable JSON".
+  It now reuses the canonical, case-insensitive `is_length_truncation`
+  classifier (single source of truth shared with the agent/ACP path).
+
 ## v0.8.93
 
 ### Added
