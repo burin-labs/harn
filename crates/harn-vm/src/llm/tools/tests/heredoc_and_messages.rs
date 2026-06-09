@@ -685,8 +685,29 @@ fn native_json_fallback_reports_unknown_tools() {
         errors[0]
     );
     assert!(
-        errors[0].contains("Available tools:"),
+        errors[0].contains("Tool calls must be one of:"),
         "error should list available tools: {}",
+        errors[0]
+    );
+}
+
+// D3: the native-JSON parser must give the same alias hint as the bare parser
+// for the high-frequency `read` miss (answer is always `look`).
+#[test]
+fn native_json_unknown_read_suggests_look_alias() {
+    // A registry that has `look` (the real reader) but not `read`, so `read`
+    // is an unknown name that should be aliased to `look`.
+    let known: std::collections::BTreeSet<String> = ["edit", "look", "run"]
+        .into_iter()
+        .map(String::from)
+        .collect();
+    let text = r#"[{"function":{"name":"read","arguments":"{}"}}]"#;
+    let (calls, errors) = parse_native_json_tool_calls(text, &known);
+    assert_eq!(calls.len(), 0);
+    assert_eq!(errors.len(), 1, "errors: {errors:?}");
+    assert!(
+        errors[0].contains("look(") && errors[0].contains("intent"),
+        "read should be aliased to look: {}",
         errors[0]
     );
 }

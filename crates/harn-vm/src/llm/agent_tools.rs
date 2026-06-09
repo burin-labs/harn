@@ -15,10 +15,21 @@ pub(super) fn stable_hash(val: &serde_json::Value) -> u64 {
 }
 
 pub(super) fn denied_tool_result(tool_name: &str, reason: impl Into<String>) -> serde_json::Value {
+    let reason = reason.into();
+    // A bare `{"error":"permission_denied", ...}` tells the model what was
+    // blocked but not what to do instead, so it tends to retry the same denied
+    // call. Add a generic, capability-gate-appropriate next step: don't repeat
+    // the call, find another way to make progress, or ask for the permission.
+    let next_step = format!(
+        "The `{tool_name}` tool is not permitted right now. Do not retry the same call. \
+         Make progress with the tools you are allowed to use, or if this capability is \
+         essential, briefly tell the user what you need permission for and why."
+    );
     serde_json::json!({
         "error": "permission_denied",
         "tool": tool_name,
-        "reason": reason.into(),
+        "reason": reason,
+        "next_step": next_step,
     })
 }
 
@@ -510,6 +521,31 @@ mod tests {
     use std::sync::atomic::AtomicBool;
     use std::sync::Arc;
     use tokio::sync::Mutex;
+
+    // D5: a permission denial must tell the model what to do instead, not just
+    // report `{"error":"permission_denied"}`. The bare object made the model
+    // retry the same blocked call; the `next_step` field gives it an out.
+    #[test]
+    fn denied_tool_result_includes_actionable_next_step() {
+        let result = denied_tool_result("run", "shell access is disabled");
+        assert_eq!(result["error"], serde_json::json!("permission_denied"));
+        assert_eq!(result["tool"], serde_json::json!("run"));
+        assert_eq!(
+            result["reason"],
+            serde_json::json!("shell access is disabled")
+        );
+        let next = result["next_step"]
+            .as_str()
+            .expect("denial should carry a next_step string");
+        assert!(
+            next.contains("Do not retry"),
+            "next_step should steer the model off a retry loop: {next}"
+        );
+        assert!(
+            next.contains("run"),
+            "next_step should name the denied tool: {next}"
+        );
+    }
 
     fn tools_dict(entries: Vec<(&str, BTreeMap<String, VmValue>)>) -> VmValue {
         let list: Vec<VmValue> = entries

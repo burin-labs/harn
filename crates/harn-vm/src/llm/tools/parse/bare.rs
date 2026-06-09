@@ -4,7 +4,7 @@ use super::native_json::parse_native_json_tool_calls;
 use super::syntax::{
     collapse_blank_lines, has_object_literal_arg_start, ident_length, parse_object_literal_from,
     parse_ts_call_from, strip_empty_fences, strip_thinking_tags, strip_tool_call_wrappers,
-    unwrap_exact_code_wrapper,
+    unknown_tool_feedback, unwrap_exact_code_wrapper,
 };
 use super::TextToolParseResult;
 use crate::llm::tools::collect_tool_schemas;
@@ -247,12 +247,7 @@ pub(crate) fn parse_bare_calls_in_body(
                                 }
                             }
                         } else if object_arg_start {
-                            let available: Vec<_> = known.iter().take(20).cloned().collect();
-                            errors.push(format!(
-                                "Unknown tool '{}'. Available tools: [{}]",
-                                name_str,
-                                available.join(", ")
-                            ));
+                            errors.push(unknown_tool_feedback(name_str, &known));
                             i = k + name_len + 1;
                             at_line_start = false;
                             continue;

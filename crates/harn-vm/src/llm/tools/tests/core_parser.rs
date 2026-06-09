@@ -245,12 +245,89 @@ fn reports_unknown_tool_names() {
         result.errors[0]
     );
     assert!(
-        result.errors[0].contains("Available tools:"),
+        result.errors[0].contains("Tool calls must be one of:"),
         "error should list available tools: {}",
         result.errors[0]
     );
     assert_eq!(result.calls.len(), 1, "valid edit call should still parse");
     assert_eq!(result.calls[0]["name"], json!("edit"));
+}
+
+// D3: the available-tool list must never be silently truncated. With a small
+// registry every tool name must appear; with a huge one we append an explicit
+// "…and N more" marker rather than dropping names without a trace.
+#[test]
+fn unknown_tool_lists_every_available_tool() {
+    let tools = sample_tool_registry();
+    let result = parse_bare_calls_in_body("fictitious_tool({ x: 1 })", Some(&tools));
+    assert_eq!(result.errors.len(), 1);
+    let msg = &result.errors[0];
+    // sample_tool_registry has `edit` and `run`; both must be listed.
+    assert!(msg.contains("edit"), "should list edit: {msg}");
+    assert!(msg.contains("run"), "should list run: {msg}");
+    assert!(
+        !msg.contains("and") || !msg.contains("more"),
+        "small registry must not truncate: {msg}"
+    );
+}
+
+// D3: the #1 real miss is `read`, where the answer is always
+// `look({ intent: "read" })`. The alias hint must name that.
+#[test]
+fn unknown_read_suggests_look_alias() {
+    let tools = sample_tool_registry();
+    let result = parse_bare_calls_in_body("read({ path: \"a.go\" })", Some(&tools));
+    assert_eq!(result.errors.len(), 1, "errors: {:?}", result.errors);
+    let msg = &result.errors[0];
+    assert!(
+        msg.contains("look(") && msg.contains("intent"),
+        "read should be aliased to look({{intent:\"read\"}}): {msg}"
+    );
+}
+
+// D2: when the model emits its own test/source code (`it(...)`,
+// `expect(...)`, `assertServiceCount(...)`) where a tool call is expected, the
+// feedback must name the real cause — code outside a heredoc/content envelope —
+// not blame the model for an "unknown tool", so it knows to re-wrap it.
+#[test]
+fn code_emitted_outside_heredoc_reports_envelope_cause() {
+    let tools = sample_tool_registry();
+    for snippet in [
+        "it({ x: 1 })",
+        "expect({ x: 1 })",
+        "describe({ x: 1 })",
+        "assertServiceCount({ x: 1 })",
+    ] {
+        let result = parse_bare_calls_in_body(snippet, Some(&tools));
+        assert_eq!(result.errors.len(), 1, "{snippet}: {:?}", result.errors);
+        let msg = &result.errors[0];
+        assert!(
+            msg.contains("looks like source code"),
+            "{snippet} should report the source-code cause: {msg}"
+        );
+        assert!(
+            msg.contains("heredoc") || msg.contains("content"),
+            "{snippet} should tell the model to wrap it: {msg}"
+        );
+        assert!(
+            !msg.contains("Unknown tool"),
+            "{snippet} must not blame an unknown tool: {msg}"
+        );
+    }
+}
+
+// A genuine close-miss typo must still get the existing suggestion behavior,
+// not be misrouted to the source-code message.
+#[test]
+fn close_miss_typo_still_suggests_real_tool() {
+    let tools = sample_tool_registry();
+    let result = parse_bare_calls_in_body("edt({ action: \"create\" })", Some(&tools));
+    assert_eq!(result.errors.len(), 1, "errors: {:?}", result.errors);
+    let msg = &result.errors[0];
+    assert!(
+        msg.contains("Did you mean 'edit'"),
+        "edt should suggest edit: {msg}"
+    );
 }
 
 #[test]
@@ -441,6 +518,29 @@ fn reports_bare_scalar_argument_as_needing_object_wrapper() {
     assert!(
         err.contains("object literal") || err.contains("{ key: value }"),
         "diagnostic should nudge towards object literal syntax: {err}"
+    );
+}
+
+// D8: a parse failure inside the argument object must include a short `Raw:`
+// preview of the offending span, so the model can tell which of several
+// on-screen calls failed (the native-JSON path already showed `Raw:`).
+#[test]
+fn object_literal_parse_error_includes_raw_preview() {
+    let tools = sample_tool_registry();
+    // `action:` with no value is a malformed object literal that fails the
+    // value parser, exercising the `parse_ts_call_from` error path.
+    let text = "edit({ action: })";
+    let result = parse_bare_calls_in_body(text, Some(&tools));
+    assert!(result.calls.is_empty());
+    assert_eq!(result.errors.len(), 1, "errors: {:?}", result.errors);
+    let err = &result.errors[0];
+    assert!(
+        err.contains("Raw:"),
+        "parse error should include a Raw: preview: {err}"
+    );
+    assert!(
+        err.contains("action"),
+        "Raw: preview should echo the offending span: {err}"
     );
 }
 
