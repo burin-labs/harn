@@ -1,6 +1,6 @@
 use std::collections::BTreeSet;
 
-use super::syntax::preview_str;
+use super::syntax::{preview_str, unknown_tool_feedback};
 
 /// Detect and parse OpenAI-style native function calling JSON that a model
 /// emitted as raw text. Matches `[{"id":...,"function":{"name":"...",
@@ -42,12 +42,7 @@ pub(crate) fn parse_native_json_tool_calls(
             continue;
         }
         if !known_tools.contains(name) {
-            let available: Vec<_> = known_tools.iter().take(20).cloned().collect();
-            errors.push(format!(
-                "Unknown tool '{}'. Available tools: [{}]",
-                name,
-                available.join(", ")
-            ));
+            errors.push(unknown_tool_feedback(name, known_tools));
             continue;
         }
         // OpenAI format encodes arguments as a JSON string; others as an object.

@@ -1,6 +1,150 @@
+use std::collections::BTreeSet;
 use std::sync::OnceLock;
 
 use super::super::ts_value_parser::TsValueParser;
+
+/// Identifiers a model commonly emits as raw source/test code at the start of a
+/// line — `it(...)`, `expect(...)`, `describe(...)`, `assertServiceCount(...)`,
+/// etc. When one of these appears where a tool call is expected, the real cause
+/// is "code emitted outside a heredoc/content envelope," NOT "the model called
+/// an unknown tool." Naming the wrong cause (`Unknown tool 'it'`) gives the
+/// model no signal to re-wrap the body, so several eval transcripts show it
+/// re-emitting the same code and re-failing. We treat a name as source code
+/// when it is one of these well-known non-tool identifiers.
+const SOURCE_CODE_IDENTIFIERS: &[&str] = &[
+    // JS/TS test frameworks (jest, mocha, vitest, jasmine).
+    "it",
+    "test",
+    "describe",
+    "expect",
+    "beforeEach",
+    "afterEach",
+    "beforeAll",
+    "afterAll",
+    "suite",
+    "context",
+    // Common assertion helpers (custom + library).
+    "assert",
+    "assertEquals",
+    "assertEqual",
+    "assertTrue",
+    "assertFalse",
+    "assertThat",
+    "require",
+    // Generic source-ish calls models leak as bare lines.
+    "console",
+    "print",
+    "println",
+    "printf",
+    "fmt",
+    "func",
+    "function",
+    "return",
+    "if",
+    "for",
+    "while",
+    "class",
+    "def",
+];
+
+/// True when `name` is a project-specific custom assertion the model is likely
+/// writing as test source (e.g. `assertServiceCount(...)`). We match the common
+/// `assert*`/`expect*`/`check*`/`verify*` test-helper prefixes (camelCase, so
+/// the char after the prefix is uppercase) to catch the long tail of bespoke
+/// helpers without hardcoding every project's names.
+fn looks_like_test_helper(name: &str) -> bool {
+    for prefix in ["assert", "expect", "check", "verify", "should", "mock"] {
+        if let Some(rest) = name.strip_prefix(prefix) {
+            if rest.chars().next().is_some_and(|c| c.is_ascii_uppercase()) {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+/// True when `name` looks like the model's own source/test code rather than a
+/// (mistyped) tool call. Used to route the feedback to the heredoc-envelope
+/// message instead of a misleading "Unknown tool" message.
+pub(super) fn looks_like_source_code(name: &str) -> bool {
+    SOURCE_CODE_IDENTIFIERS.contains(&name) || looks_like_test_helper(name)
+}
+
+/// High-frequency tool-name misses where the right answer is always the same
+/// canonical call. The #1 real miss across eval transcripts is `read` (271×),
+/// where the answer is `look({ intent: "read" })`. Sourced here as a small
+/// static table because the canonical replacement is a full call shape, not a
+/// rename the live registry can express.
+fn tool_alias_hint(name: &str) -> Option<&'static str> {
+    match name {
+        "read" | "read_file" | "readFile" | "cat" | "open" => {
+            Some("Use `look({ intent: \"read\", ... })` to read a file.")
+        }
+        "write" | "write_file" | "writeFile" => {
+            Some("Use `edit({ action: \"create\", ... })` to write a file.")
+        }
+        "list" | "ls" | "list_files" => {
+            Some("Use `look({ intent: \"list\", ... })` to list files.")
+        }
+        "search" | "grep" | "find" => {
+            Some("Use `look({ intent: \"search\", ... })` to search the codebase.")
+        }
+        _ => None,
+    }
+}
+
+/// Render the full available-tool list, sorted and never silently truncated.
+/// The previous `known.iter().take(20)` cap could hide the very tool the model
+/// needed (225 transcripts), so we list every tool. If the registry is ever
+/// pathologically large we keep the head and append an explicit `…and N more`
+/// marker rather than dropping names without a trace.
+fn render_available_tools(known: &BTreeSet<String>) -> String {
+    const CAP: usize = 60;
+    if known.len() <= CAP {
+        return known.iter().cloned().collect::<Vec<_>>().join(", ");
+    }
+    let head = known.iter().take(CAP).cloned().collect::<Vec<_>>();
+    format!("{}, …and {} more", head.join(", "), known.len() - CAP)
+}
+
+/// Build the model-facing feedback for a name that parsed like a tool call
+/// (`name({ ... })`) but is not a registered tool. Routes to the most
+/// actionable message: a close-miss typo suggestion, a known-alias hint
+/// (e.g. `read` → `look`), a "this is source code, wrap it in a heredoc"
+/// message when the name looks like the model's own code, or a plain
+/// unknown-tool listing. Shared by the bare and native-JSON parsers so both
+/// surfaces give the same precise {what/why/how-to-fix} guidance.
+pub(super) fn unknown_tool_feedback(name: &str, known: &BTreeSet<String>) -> String {
+    let available = render_available_tools(known);
+
+    // Genuine close-miss typo (e.g. `edt` → `edit`): keep the existing
+    // suggestion behavior, which is the most likely intent.
+    if let Some(suggestion) = crate::value::closest_match(name, known.iter().map(String::as_str)) {
+        return format!(
+            "Unknown tool '{name}'. Did you mean '{suggestion}'? \
+             Tool calls must be one of: [{available}]."
+        );
+    }
+
+    // High-frequency alias where the real tool is a specific call shape.
+    if let Some(hint) = tool_alias_hint(name) {
+        return format!("Unknown tool '{name}'. {hint} Tool calls must be one of: [{available}].");
+    }
+
+    // Not close to any real tool AND it looks like the model's own source/test
+    // code: name the real cause so the model re-wraps it instead of re-emitting
+    // the same code as a "tool call."
+    if looks_like_source_code(name) {
+        return format!(
+            "`{name}(...)` looks like source code, not a tool call. If this is file \
+             content, wrap it in a heredoc or a string `content` value (e.g. \
+             `edit({{ action: \"create\", path: ..., content: <<EOF ... EOF }})`). \
+             Tool calls must be one of: [{available}]."
+        );
+    }
+
+    format!("Unknown tool '{name}'. Tool calls must be one of: [{available}].")
+}
 
 /// Strip leaked thinking tags from model output. Some models (Qwen, Gemma)
 /// emit `</think>` or `<think>` markers in their response text when the
@@ -144,15 +288,21 @@ pub(super) fn parse_object_literal_from(
     let mut parser = TsValueParser::new(text);
     parser.skip_ws_and_comments();
     let value = parser.parse_value().map_err(|error| {
+        // Include a short preview of the offending span so the model can tell
+        // which of several on-screen calls failed (the native-JSON parser
+        // already shows `Raw: …`; mirror it here for object-literal failures).
         format!(
             "TOOL CALL PARSE ERROR: `{name}{{...}}` — {error}. \
-             Tool arguments must be a TypeScript object literal."
+             Tool arguments must be a TypeScript object literal. Raw: {}",
+            preview_str(text, 200)
         )
     })?;
     match value {
         serde_json::Value::Object(map) => Ok((serde_json::Value::Object(map), parser.position())),
         other => Err(format!(
-            "TOOL CALL PARSE ERROR: `{name}{{...}}` — expected an object literal argument, got `{other}`."
+            "TOOL CALL PARSE ERROR: `{name}{{...}}` — expected an object literal argument, \
+             got `{other}`. Raw: {}",
+            preview_str(text, 200)
         )),
     }
 }
@@ -679,9 +829,14 @@ pub(crate) fn parse_ts_call_from(
         serde_json::Value::Object(serde_json::Map::new())
     } else {
         parser.parse_value().map_err(|error| {
+            // Preview the offending arg span so the model can tell which call
+            // failed when several appear on screen (mirrors the native-JSON
+            // `Raw: …` snippet).
             format!(
                 "TOOL CALL PARSE ERROR: `{name}(...)` — {error}. \
-                 Tool arguments must be a TypeScript object literal: `{{ key: value, key: value }}`."
+                 Tool arguments must be a TypeScript object literal: `{{ key: value, key: value }}`. \
+                 Raw: {}",
+                preview_str(&text[paren_open + 1..], 200)
             )
         })?
     };
