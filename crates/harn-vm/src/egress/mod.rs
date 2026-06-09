@@ -130,14 +130,24 @@ pub fn register_egress_builtins(vm: &mut Vm) {
 }
 
 pub async fn enforce_url_allowed(surface: &str, url: &str) -> Result<(), VmError> {
-    if let Some(blocked) = check_url(surface, url)? {
-        audit_blocked(&blocked).await;
-        return Err(blocked.to_vm_error());
-    }
-    // Host-name SSRF resolution (DNS off the runtime). The connect-time
-    // GuardedResolver is the unbypassable backstop; this gives callers a clean
-    // typed `EgressBlocked` instead of an opaque connect error.
-    if let Some(blocked) = check_url_host_resolution(surface, url).await? {
+    // `resolution_required` carries forward a deferred default-deny hostname:
+    // the URL-literal rules did not grant it, but a resolved-IP allow rule
+    // might. The resolution step must then either find a granting address or
+    // block (an unresolvable host has no other path to approval).
+    let resolution_required = match check_url_decision(surface, url)? {
+        SyncCheck::Allowed => false,
+        SyncCheck::DeferToResolution(_) => true,
+        SyncCheck::Blocked(blocked) => {
+            audit_blocked(&blocked).await;
+            return Err(blocked.to_vm_error());
+        }
+    };
+    // Host-name resolution (DNS off the runtime): applies the SSRF private
+    // block AND the NetPolicy IP/CIDR allow & deny rules to the resolved
+    // addresses. The connect-time GuardedResolver is the unbypassable backstop
+    // that re-checks the same predicates on the pinned address; this step gives
+    // callers a clean typed `EgressBlocked` instead of an opaque connect error.
+    if let Some(blocked) = check_url_host_resolution(surface, url, resolution_required).await? {
         audit_blocked(&blocked).await;
         return Err(blocked.to_vm_error());
     }
@@ -323,6 +333,116 @@ pub fn current_ssrf_client_settings() -> (bool, bool) {
     (mode == SsrfMode::BlockPrivate, allow_loopback)
 }
 
+/// The NetPolicy IP/CIDR rules that must be enforced against a host's
+/// *resolved* addresses at connect time.
+///
+/// This is the connect-time analogue of the URL-literal rule matching done by
+/// [`check_url`]: it carries only the IP-literal and CIDR rules (host/suffix
+/// rules pin to the URL hostname and cannot be evaluated against an address).
+/// `deny` rules block any resolved address they contain; when `allow_active`
+/// is set the allowlist is "only these", so a resolved address that matches no
+/// `allow` rule is rejected.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct ResolvedIpRules {
+    /// Resolved addresses inside any of these nets are blocked (deny wins).
+    pub deny: Vec<IpNet>,
+    /// When `allow_active`, a resolved address must fall inside one of these
+    /// nets (or be host-allowed at the URL layer) to be permitted.
+    pub allow: Vec<IpNet>,
+    /// True when an allowlist with a default-deny posture is in effect, i.e.
+    /// the resolved address must be positively allowed.
+    pub allow_active: bool,
+}
+
+impl ResolvedIpRules {
+    /// True when no resolved-IP rule would ever change a decision, so callers
+    /// can skip installing the connect-time resolver / re-resolving.
+    pub fn is_empty(&self) -> bool {
+        self.deny.is_empty() && !self.allow_active
+    }
+}
+
+/// Collapse an IP-literal rule to a host-sized net so it can be matched the
+/// same way as a CIDR rule.
+fn ip_to_net(ip: IpAddr) -> IpNet {
+    match ip {
+        IpAddr::V4(v4) => IpNet::from(ipnet::Ipv4Net::new(v4, 32).expect("/32 is valid")),
+        IpAddr::V6(v6) => IpNet::from(ipnet::Ipv6Net::new(v6, 128).expect("/128 is valid")),
+    }
+}
+
+/// Extract the IP/CIDR allow & deny rules from a policy into a
+/// [`ResolvedIpRules`] for the connect-time [`GuardedResolver`]. Host/suffix
+/// rules are intentionally dropped — they pin to the URL hostname, never the
+/// resolved IP.
+///
+/// Only PORT-UNSCOPED rules are carried here: the resolver sees addresses
+/// stripped of the destination port (reqwest substitutes the URL port after
+/// resolution), so it cannot honor a `:port` qualifier. Port-scoped IP/CIDR
+/// rules are enforced by the port-aware pre-check in
+/// [`check_url_host_resolution`] instead; dropping them from the backstop avoids
+/// over-blocking other ports to the same address.
+///
+/// `allow_active` reflects a default-deny posture, but it is informational for
+/// the resolver: the backstop enforces only the deny side (a security
+/// boundary), since the allow grant depends on hostname context the resolver
+/// does not have.
+fn resolved_ip_rules_for(policy: &EgressPolicy) -> ResolvedIpRules {
+    let net_of = |rule: &EgressRule| match &rule.matcher {
+        EgressMatcher::Cidr(net) => Some(*net),
+        EgressMatcher::Ip(ip) => Some(ip_to_net(*ip)),
+        _ => None,
+    };
+    let deny: Vec<IpNet> = policy
+        .deny
+        .iter()
+        .filter(|rule| rule.port.is_none())
+        .filter_map(net_of)
+        .collect();
+    let allow: Vec<IpNet> = policy
+        .allow
+        .iter()
+        .filter(|rule| rule.port.is_none())
+        .filter_map(net_of)
+        .collect();
+    ResolvedIpRules {
+        deny,
+        allow,
+        allow_active: policy.default == DefaultAction::Deny,
+    }
+}
+
+/// The NetPolicy IP/CIDR rules the HTTP client builder should enforce at
+/// connect time against resolved addresses, reflecting the configured policy
+/// (if any) plus env seeding.
+///
+/// Used by `crate::http::client::build_http_client` so the connect-time
+/// [`GuardedResolver`] pins the connection to an address that has been checked
+/// against the operator's CIDR/IP allow & deny rules — closing the gap where a
+/// hostname resolving into a denied CIDR (or out of an allowed CIDR) was only
+/// caught for URL-literal IPs.
+pub fn current_resolved_ip_rules() -> ResolvedIpRules {
+    let _ = ensure_env_seeded();
+    let configured = {
+        let guard = state().read().expect("egress policy state poisoned");
+        #[cfg(test)]
+        {
+            guard
+                .test_policies
+                .get(&std::thread::current().id())
+                .cloned()
+        }
+        #[cfg(not(test))]
+        {
+            guard.policy.clone()
+        }
+    };
+    configured
+        .as_ref()
+        .map(|c| resolved_ip_rules_for(&c.policy))
+        .unwrap_or_default()
+}
+
 /// Resolve the effective SSRF mode + loopback hatch given the (optional)
 /// configured policy. An unset `block_private` axis defaults to
 /// [`SsrfMode::BlockPrivate`] iff the guard scope is active.
@@ -386,7 +506,32 @@ async fn resolve_host_addrs(host: &str) -> Option<Vec<IpAddr>> {
     .flatten()
 }
 
+/// Outcome of the synchronous URL-literal egress check.
+enum SyncCheck {
+    /// The URL is permitted by the URL-literal rules. Resolved-IP rules may
+    /// still apply downstream (see `enforce_url_allowed`).
+    Allowed,
+    /// The URL is blocked outright; no later resolution can grant it.
+    Blocked(EgressBlocked),
+    /// A default-deny allowlist matched no host/suffix rule for this hostname,
+    /// but at least one IP/CIDR allow rule exists. The hostname might still be
+    /// granted if it RESOLVES into an allow net, so the decision is deferred to
+    /// [`check_url_host_resolution`]. Sync-only callers treat this as blocked.
+    DeferToResolution(EgressBlocked),
+}
+
+/// Thin wrapper for the synchronous callers (redirects, connectors,
+/// client-error mapping) that cannot resolve hostnames. A `DeferToResolution`
+/// outcome is conservatively treated as blocked: the URL-literal rules did not
+/// grant it and these paths have no resolution step to consult.
 fn check_url(surface: &str, raw_url: &str) -> Result<Option<EgressBlocked>, VmError> {
+    match check_url_decision(surface, raw_url)? {
+        SyncCheck::Allowed => Ok(None),
+        SyncCheck::Blocked(blocked) | SyncCheck::DeferToResolution(blocked) => Ok(Some(blocked)),
+    }
+}
+
+fn check_url_decision(surface: &str, raw_url: &str) -> Result<SyncCheck, VmError> {
     ensure_env_seeded()?;
     let configured = {
         let guard = state().read().expect("egress policy state poisoned");
@@ -411,19 +556,21 @@ fn check_url(surface: &str, raw_url: &str) -> Result<Option<EgressBlocked>, VmEr
         if ssrf_mode == SsrfMode::BlockPrivate {
             let target = EgressTarget::parse(raw_url)?;
             if let Some(reason) = private_block_for_literal(&target, allow_loopback) {
-                return Ok(Some(blocked(surface, raw_url, &target, reason)));
+                return Ok(SyncCheck::Blocked(blocked(
+                    surface, raw_url, &target, reason,
+                )));
             }
         }
         if require_explicit_policy {
             let target = EgressTarget::parse(raw_url)?;
-            return Ok(Some(blocked(
+            return Ok(SyncCheck::Blocked(blocked(
                 surface,
                 raw_url,
                 &target,
                 "no egress policy configured".to_string(),
             )));
         }
-        return Ok(None);
+        return Ok(SyncCheck::Allowed);
     };
     let target = EgressTarget::parse(raw_url)?;
 
@@ -433,7 +580,9 @@ fn check_url(surface: &str, raw_url: &str) -> Result<Option<EgressBlocked>, VmEr
     // `enforce_url_allowed` path and pinned at connect time.)
     if ssrf_mode == SsrfMode::BlockPrivate {
         if let Some(reason) = private_block_for_literal(&target, allow_loopback) {
-            return Ok(Some(blocked(surface, raw_url, &target, reason)));
+            return Ok(SyncCheck::Blocked(blocked(
+                surface, raw_url, &target, reason,
+            )));
         }
     }
 
@@ -443,7 +592,7 @@ fn check_url(surface: &str, raw_url: &str) -> Result<Option<EgressBlocked>, VmEr
         .iter()
         .find(|rule| rule.matches(&target))
     {
-        return Ok(Some(blocked(
+        return Ok(SyncCheck::Blocked(blocked(
             surface,
             raw_url,
             &target,
@@ -456,28 +605,58 @@ fn check_url(surface: &str, raw_url: &str) -> Result<Option<EgressBlocked>, VmEr
         .iter()
         .any(|rule| rule.matches(&target))
     {
-        return Ok(None);
+        return Ok(SyncCheck::Allowed);
     }
     if configured.policy.default == DefaultAction::Allow {
-        return Ok(None);
+        return Ok(SyncCheck::Allowed);
     }
-    Ok(Some(blocked(
+
+    // Default-deny and no host/suffix allow matched. For a literal-IP target
+    // this is final. For a HOSTNAME, an IP/CIDR allow rule could still grant it
+    // once resolved (the gap #3174 closes for the allow direction), so defer.
+    let could_allow_on_resolution = target.ip.is_none()
+        && configured
+            .policy
+            .allow
+            .iter()
+            .any(EgressRule::is_ip_matcher);
+    let blocked = blocked(
         surface,
         raw_url,
         &target,
         "no allow rule matched".to_string(),
-    )))
+    );
+    if could_allow_on_resolution {
+        Ok(SyncCheck::DeferToResolution(blocked))
+    } else {
+        Ok(SyncCheck::Blocked(blocked))
+    }
 }
 
-/// Async host-name private-address block. Run by [`enforce_url_allowed`] after
-/// the sync [`check_url`] passes: when the SSRF mode is `BlockPrivate` and the
-/// host is a name (not a literal IP), resolve it off the runtime and block if
-/// ANY resolved address is disallowed. The connect-time [`GuardedResolver`]
-/// remains the unbypassable backstop against rebinding between this check and
-/// the actual connection.
+/// Async host-name resolution check. Run by [`enforce_url_allowed`] after the
+/// sync [`check_url`] passes (or after `check_url` deferred a hostname whose
+/// only possible allow is a CIDR/IP rule): resolve the host ONCE off the
+/// runtime and evaluate the resolved addresses against
+///
+///   1. the SSRF private-address block (when `block_private` is active), and
+///   2. the NetPolicy IP/CIDR allow & deny rules ([`ResolvedIpRules`]).
+///
+/// This is the typed-error analogue of the connect-time [`GuardedResolver`]:
+/// it gives callers a clean `EgressBlocked` instead of an opaque connect
+/// error. The GuardedResolver remains the unbypassable backstop — it
+/// re-applies the SAME checks to whatever address reqwest actually pins the
+/// connection to, so a DNS rebind between this pre-check and the connection
+/// cannot defeat a deny CIDR or smuggle a connection out of an allow CIDR.
+///
+/// `resolution_required` is set when the sync layer could not grant the
+/// hostname (default-deny with no host/suffix allow match) and the only way it
+/// can be allowed is a resolved-IP allow rule; in that case an unresolvable
+/// host must be blocked rather than deferred, since nothing downstream can
+/// grant it.
 async fn check_url_host_resolution(
     surface: &str,
     raw_url: &str,
+    resolution_required: bool,
 ) -> Result<Option<EgressBlocked>, VmError> {
     let configured = {
         let guard = state().read().expect("egress policy state poisoned");
@@ -491,29 +670,130 @@ async fn check_url_host_resolution(
             guard.policy.clone()
         }
     };
-    let (ssrf_mode, allow_loopback) =
+    let (ssrf_mode, _allow_loopback) =
         effective_ssrf_settings(configured.as_ref().map(|c| &c.policy));
-    if ssrf_mode != SsrfMode::BlockPrivate {
+    let block_private = ssrf_mode == SsrfMode::BlockPrivate;
+    // Does the policy carry any IP/CIDR deny rule (port-scoped or not)? Such a
+    // rule can only ever change the outcome via the resolved-IP layer.
+    let has_ip_deny = configured
+        .as_ref()
+        .is_some_and(|c| c.policy.deny.iter().any(EgressRule::is_ip_matcher));
+
+    // Nothing on the resolved-IP axis can change the outcome: defer entirely.
+    // (`resolution_required` already implies a deferred allow decision.)
+    if !block_private && !has_ip_deny && !resolution_required {
         return Ok(None);
     }
+
     let target = EgressTarget::parse(raw_url)?;
     if target.ip.is_some() {
-        // Literal IPs are already handled synchronously in `check_url`.
+        // Literal IPs are already fully handled synchronously in `check_url`
+        // (both the SSRF block and the IP/CIDR rules).
         return Ok(None);
     }
+
     let Some(addrs) = resolve_host_addrs(&target.host).await else {
-        // Unresolvable here: defer to the connect-time guard.
+        // Unresolvable here. If a resolved-IP allow rule was the host's only
+        // path to approval we must block; otherwise defer to the connect-time
+        // guard (which will itself fail to connect to a disallowed address).
+        if resolution_required {
+            return Ok(Some(blocked(
+                surface,
+                raw_url,
+                &target,
+                "no allow rule matched".to_string(),
+            )));
+        }
         return Ok(None);
     };
-    if addrs.iter().any(|ip| is_disallowed_ip(*ip, allow_loopback)) {
-        return Ok(Some(blocked(
+
+    Ok(evaluate_resolved_addrs(
+        configured.as_ref(),
+        surface,
+        raw_url,
+        &target,
+        &addrs,
+        resolution_required,
+    ))
+}
+
+/// Pure resolved-address policy evaluation, factored out of
+/// [`check_url_host_resolution`] so it can be unit-tested with synthetic
+/// addresses (no real DNS). `configured` is the effective policy; `addrs` are
+/// the host's resolved addresses.
+///
+/// Resolve-once-and-pin: callers pass a SINGLE resolution and every decision
+/// below uses exactly those addresses. The connect-time [`GuardedResolver`]
+/// re-applies the same SSRF + deny predicates to whatever address reqwest pins
+/// the socket to, so the two layers cannot disagree under DNS rebinding.
+fn evaluate_resolved_addrs(
+    configured: Option<&ConfiguredPolicy>,
+    surface: &str,
+    raw_url: &str,
+    target: &EgressTarget,
+    addrs: &[IpAddr],
+    resolution_required: bool,
+) -> Option<EgressBlocked> {
+    let (ssrf_mode, allow_loopback) = effective_ssrf_settings(configured.map(|c| &c.policy));
+    let block_private = ssrf_mode == SsrfMode::BlockPrivate;
+    let allow_active = configured.is_some_and(|c| c.policy.default == DefaultAction::Deny);
+
+    // (1) SSRF private-address block: if ANY resolved address is disallowed,
+    //     block (a private address among the answers is a rebinding vector).
+    if block_private && addrs.iter().any(|ip| is_disallowed_ip(*ip, allow_loopback)) {
+        return Some(blocked(
             surface,
             raw_url,
-            &target,
+            target,
             private_block_reason(&target.host),
-        )));
+        ));
     }
-    Ok(None)
+
+    // (2) NetPolicy deny CIDR/IP wins over allow: if ANY resolved address
+    //     matches a deny IP/CIDR rule (port-aware), block. This is the gap
+    //     #3174 closes — a hostname that resolves into a denied CIDR was
+    //     previously never matched. Matching against the rule list (rather than
+    //     pre-reduced nets) preserves per-rule `:port` scoping.
+    if let Some(rule) = configured.and_then(|c| {
+        c.policy.deny.iter().find(|rule| {
+            rule.is_ip_matcher()
+                && addrs
+                    .iter()
+                    .any(|ip| rule.matches_resolved_ip(*ip, target.port))
+        })
+    }) {
+        return Some(blocked(
+            surface,
+            raw_url,
+            target,
+            format!("resolved address matched deny rule `{}`", rule.raw),
+        ));
+    }
+
+    // (3) Allowlist gating: when a default-deny allowlist is in effect and the
+    //     host was NOT already granted at the URL layer (`resolution_required`),
+    //     the host is allowed only if a resolved address matches an allow
+    //     IP/CIDR rule (port-aware). Without one, reject.
+    if resolution_required && allow_active {
+        let permitted = configured.is_some_and(|c| {
+            c.policy.allow.iter().any(|rule| {
+                rule.is_ip_matcher()
+                    && addrs
+                        .iter()
+                        .any(|ip| rule.matches_resolved_ip(*ip, target.port))
+            })
+        });
+        if !permitted {
+            return Some(blocked(
+                surface,
+                raw_url,
+                target,
+                "no allow rule matched".to_string(),
+            ));
+        }
+    }
+
+    None
 }
 
 fn blocked(surface: &str, url: &str, target: &EgressTarget, reason: String) -> EgressBlocked {
@@ -877,6 +1157,31 @@ impl EgressRule {
             }
             EgressMatcher::Ip(ip) => target.ip == Some(*ip),
             EgressMatcher::Cidr(net) => target.ip.is_some_and(|ip| net.contains(&ip)),
+        }
+    }
+
+    /// True when this rule is an IP-literal or CIDR matcher (the only rule
+    /// kinds that can be evaluated against a *resolved* address). Host and
+    /// suffix matchers can only ever match the URL hostname, so they are out
+    /// of scope for the resolved-IP layer.
+    fn is_ip_matcher(&self) -> bool {
+        matches!(self.matcher, EgressMatcher::Ip(_) | EgressMatcher::Cidr(_))
+    }
+
+    /// Whether this IP/CIDR rule matches a *resolved* address for the given
+    /// request port. Host/suffix rules never match here (they pin to the URL
+    /// hostname, not the address it resolves to). Returns `false` for non-IP
+    /// matchers so callers can blanket-iterate the rule list.
+    fn matches_resolved_ip(&self, ip: IpAddr, request_port: Option<u16>) -> bool {
+        if let Some(port) = self.port {
+            if request_port != Some(port) {
+                return false;
+            }
+        }
+        match &self.matcher {
+            EgressMatcher::Ip(rule_ip) => *rule_ip == ip,
+            EgressMatcher::Cidr(net) => net.contains(&ip),
+            EgressMatcher::Host(_) | EgressMatcher::Suffix(_) => false,
         }
     }
 }
@@ -1346,5 +1651,290 @@ mod tests {
         drop(_scope);
         reset_egress_policy_for_tests();
         assert_eq!(current_ssrf_client_settings(), (false, false));
+    }
+
+    // --- NetPolicy CIDR/IP rules applied to RESOLVED host IPs (#3174). ---
+    //
+    // `evaluate_resolved_addrs` is the pure decision the async resolution path
+    // and the connect-time GuardedResolver both rely on; testing it with
+    // synthetic addresses pins the resolve-once-and-pin semantics without DNS.
+
+    /// Build a `ConfiguredPolicy` from `(key, value)` config pairs for the
+    /// resolved-IP unit tests (no global state mutation, so no env lock needed).
+    fn policy(config: &[(&str, VmValue)]) -> ConfiguredPolicy {
+        let map = config
+            .iter()
+            .cloned()
+            .map(|(key, value)| (key.to_string(), value))
+            .collect();
+        ConfiguredPolicy {
+            source: "test",
+            policy: policy_from_config(&map).expect("policy parses"),
+        }
+    }
+
+    fn ips(values: &[&str]) -> Vec<IpAddr> {
+        values.iter().map(|v| v.parse().unwrap()).collect()
+    }
+
+    fn target(url: &str) -> EgressTarget {
+        EgressTarget::parse(url).expect("target parses")
+    }
+
+    #[test]
+    fn resolved_ip_in_deny_cidr_blocks_hostname() {
+        // A deny CIDR must apply to a hostname that RESOLVES into it, not only
+        // to URL-literal IPs. This is the core #3174 bypass.
+        let pol = policy(&[("deny", strings(&["203.0.113.0/24"]))]);
+        let blocked = evaluate_resolved_addrs(
+            Some(&pol),
+            "http_get",
+            "https://evil.example.com",
+            &target("https://evil.example.com"),
+            &ips(&["203.0.113.7"]),
+            false,
+        )
+        .expect("resolved address in deny CIDR is blocked");
+        assert!(
+            blocked.reason.contains("deny rule `203.0.113.0/24`"),
+            "{}",
+            blocked.reason
+        );
+        assert_eq!(blocked.host, "evil.example.com");
+    }
+
+    #[test]
+    fn resolved_ip_in_deny_ip_literal_blocks_hostname() {
+        let pol = policy(&[("deny", strings(&["198.51.100.9"]))]);
+        let blocked = evaluate_resolved_addrs(
+            Some(&pol),
+            "http_get",
+            "https://name.example.com",
+            &target("https://name.example.com"),
+            &ips(&["198.51.100.9"]),
+            false,
+        )
+        .expect("resolved address matching deny IP is blocked");
+        assert!(
+            blocked.reason.contains("deny rule `198.51.100.9`"),
+            "{}",
+            blocked.reason
+        );
+    }
+
+    #[test]
+    fn resolved_ip_outside_deny_cidr_is_allowed() {
+        let pol = policy(&[("deny", strings(&["203.0.113.0/24"]))]);
+        assert!(evaluate_resolved_addrs(
+            Some(&pol),
+            "http_get",
+            "https://ok.example.com",
+            &target("https://ok.example.com"),
+            &ips(&["198.51.100.7"]),
+            false,
+        )
+        .is_none());
+    }
+
+    #[test]
+    fn resolved_ip_in_allow_cidr_permits_hostname_under_default_deny() {
+        // default=deny + CIDR allowlist: a hostname resolving INTO the allow
+        // CIDR must be permitted (resolution_required carries the deferred allow
+        // decision from the sync layer).
+        let pol = policy(&[
+            ("allow", strings(&["10.0.0.0/8"])),
+            ("default", VmValue::String(std::sync::Arc::from("deny"))),
+        ]);
+        assert!(evaluate_resolved_addrs(
+            Some(&pol),
+            "http_get",
+            "https://internal.example.com",
+            &target("https://internal.example.com"),
+            &ips(&["10.1.2.3"]),
+            true,
+        )
+        .is_none());
+    }
+
+    #[test]
+    fn resolved_ip_outside_allow_cidr_blocks_hostname_under_default_deny() {
+        let pol = policy(&[
+            ("allow", strings(&["10.0.0.0/8"])),
+            ("default", VmValue::String(std::sync::Arc::from("deny"))),
+        ]);
+        let blocked = evaluate_resolved_addrs(
+            Some(&pol),
+            "http_get",
+            "https://outside.example.com",
+            &target("https://outside.example.com"),
+            &ips(&["8.8.8.8"]),
+            true,
+        )
+        .expect("resolved address outside allow CIDR is blocked under default deny");
+        assert_eq!(blocked.reason, "no allow rule matched");
+    }
+
+    #[test]
+    fn deny_cidr_wins_over_allow_cidr_on_resolved_ip() {
+        // Deny precedence: even if a resolved address is in an allow CIDR, a
+        // matching deny CIDR blocks it.
+        let pol = policy(&[
+            ("allow", strings(&["10.0.0.0/8"])),
+            ("deny", strings(&["10.6.0.0/16"])),
+            ("default", VmValue::String(std::sync::Arc::from("deny"))),
+        ]);
+        let blocked = evaluate_resolved_addrs(
+            Some(&pol),
+            "http_get",
+            "https://internal.example.com",
+            &target("https://internal.example.com"),
+            &ips(&["10.6.1.2"]),
+            true,
+        )
+        .expect("deny CIDR wins over allow CIDR");
+        assert!(
+            blocked.reason.contains("deny rule `10.6.0.0/16`"),
+            "{}",
+            blocked.reason
+        );
+    }
+
+    #[test]
+    fn mixed_resolution_blocks_if_any_address_is_denied() {
+        // A host answering with both an allowed and a denied address is blocked:
+        // the denied address is a rebinding vector the backstop would pin to.
+        let pol = policy(&[("deny", strings(&["203.0.113.0/24"]))]);
+        assert!(evaluate_resolved_addrs(
+            Some(&pol),
+            "http_get",
+            "https://mixed.example.com",
+            &target("https://mixed.example.com"),
+            &ips(&["8.8.8.8", "203.0.113.9"]),
+            false,
+        )
+        .is_some());
+    }
+
+    #[test]
+    fn port_scoped_deny_cidr_only_matches_that_port_on_resolved_ip() {
+        // `:443` qualifier is honored against the resolved address using the
+        // request's destination port.
+        let pol = policy(&[("deny", strings(&["203.0.113.0/24:443"]))]);
+        // https → port 443 → blocked.
+        assert!(evaluate_resolved_addrs(
+            Some(&pol),
+            "http_get",
+            "https://p.example.com",
+            &target("https://p.example.com"),
+            &ips(&["203.0.113.7"]),
+            false,
+        )
+        .is_some());
+        // http → port 80 → not blocked by the :443 rule.
+        assert!(evaluate_resolved_addrs(
+            Some(&pol),
+            "http_get",
+            "http://p.example.com",
+            &target("http://p.example.com"),
+            &ips(&["203.0.113.7"]),
+            false,
+        )
+        .is_none());
+    }
+
+    #[test]
+    fn ssrf_block_still_applies_to_resolved_ip() {
+        // Even with no NetPolicy IP rules, block_private rejects a host that
+        // resolves to a private address (existing behavior, kept).
+        let pol = policy(&[(
+            "block_private",
+            VmValue::String(std::sync::Arc::from("private")),
+        )]);
+        let blocked = evaluate_resolved_addrs(
+            Some(&pol),
+            "http_get",
+            "https://rebind.example.com",
+            &target("https://rebind.example.com"),
+            &ips(&["10.0.0.1"]),
+            false,
+        )
+        .expect("private resolved address blocked");
+        assert!(
+            blocked.reason.contains("disallowed address"),
+            "{}",
+            blocked.reason
+        );
+    }
+
+    #[test]
+    fn check_url_defers_hostname_with_cidr_allowlist_under_default_deny() {
+        // The sync layer must NOT block a hostname outright when a CIDR allow
+        // rule could still grant it after resolution.
+        let _guard = install(&[
+            ("allow", strings(&["10.0.0.0/8"])),
+            ("default", VmValue::String(std::sync::Arc::from("deny"))),
+        ]);
+        match check_url_decision("http_get", "https://internal.example.com").unwrap() {
+            SyncCheck::DeferToResolution(_) => {}
+            other => panic!(
+                "expected DeferToResolution, got {}",
+                match other {
+                    SyncCheck::Allowed => "Allowed",
+                    SyncCheck::Blocked(_) => "Blocked",
+                    SyncCheck::DeferToResolution(_) => unreachable!(),
+                }
+            ),
+        }
+        // A literal IP outside the allow CIDR is still blocked outright (no
+        // resolution can change a literal).
+        assert!(matches!(
+            check_url_decision("http_get", "https://8.8.8.8").unwrap(),
+            SyncCheck::Blocked(_)
+        ));
+        // With only host/suffix allow rules, an unknown host is blocked outright.
+        drop(_guard);
+        let _guard = install(&[
+            ("allow", strings(&["api.example.com"])),
+            ("default", VmValue::String(std::sync::Arc::from("deny"))),
+        ]);
+        assert!(matches!(
+            check_url_decision("http_get", "https://other.example.com").unwrap(),
+            SyncCheck::Blocked(_)
+        ));
+    }
+
+    #[test]
+    fn resolved_ip_rules_for_drops_host_suffix_and_port_scoped_rules() {
+        // The connect-time backstop carries only port-unscoped IP/CIDR rules:
+        // host/suffix rules pin to the hostname, and port-scoped rules can't be
+        // honored by the resolver (it sees no destination port).
+        let pol = policy(&[
+            (
+                "deny",
+                strings(&[
+                    "203.0.113.0/24",
+                    "198.51.100.5",
+                    "*.evil.com",
+                    "10.0.0.0/8:443",
+                ]),
+            ),
+            ("default", VmValue::String(std::sync::Arc::from("deny"))),
+        ]);
+        let rules = resolved_ip_rules_for(&pol.policy);
+        assert_eq!(
+            rules.deny.len(),
+            2,
+            "host/suffix + port-scoped rules dropped"
+        );
+        assert!(rules.deny.contains(&"203.0.113.0/24".parse().unwrap()));
+        assert!(rules.deny.contains(&"198.51.100.5/32".parse().unwrap()));
+        assert!(rules.allow_active);
+    }
+
+    #[test]
+    fn current_resolved_ip_rules_reflects_installed_policy() {
+        let _guard = install(&[("deny", strings(&["203.0.113.0/24"]))]);
+        let rules = current_resolved_ip_rules();
+        assert_eq!(rules.deny, vec!["203.0.113.0/24".parse().unwrap()]);
     }
 }

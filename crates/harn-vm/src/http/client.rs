@@ -48,6 +48,11 @@ pub(super) struct HttpRequestConfig {
     /// classifier (closes the DNS-rebinding TOCTOU).
     ssrf_block_private: bool,
     ssrf_allow_loopback: bool,
+    /// NetPolicy IP/CIDR allow & deny rules to enforce against resolved
+    /// addresses at connect time. The deny side is applied by the
+    /// [`crate::egress::GuardedResolver`] so a hostname resolving into a denied
+    /// CIDR is unreachable even when the URL literal carried only a hostname.
+    resolved_ip_rules: crate::egress::ResolvedIpRules,
 }
 
 #[derive(Clone, Default)]
@@ -481,6 +486,7 @@ fn parse_retry_methods(options: &BTreeMap<String, VmValue>) -> Vec<String> {
 
 pub(super) fn parse_http_options(options: &BTreeMap<String, VmValue>) -> HttpRequestConfig {
     let (ssrf_block_private, ssrf_allow_loopback) = crate::egress::current_ssrf_client_settings();
+    let resolved_ip_rules = crate::egress::current_resolved_ip_rules();
     let total_timeout_ms = vm_get_int_option(options, "total_timeout_ms", -1);
     let total_timeout_ms = if total_timeout_ms >= 0 {
         total_timeout_ms as u64
@@ -526,12 +532,22 @@ pub(super) fn parse_http_options(options: &BTreeMap<String, VmValue>) -> HttpReq
         max_response_bytes,
         ssrf_block_private,
         ssrf_allow_loopback,
+        resolved_ip_rules,
     }
 }
 
 fn http_client_key(config: &HttpRequestConfig) -> String {
+    // The connect-time deny nets change the installed resolver, so a client
+    // built with different deny rules must not alias one without them.
+    let deny_nets = config
+        .resolved_ip_rules
+        .deny
+        .iter()
+        .map(|net| net.to_string())
+        .collect::<Vec<_>>()
+        .join(",");
     format!(
-        "follow_redirects={};max_redirects={};connect_timeout={:?};read_timeout={:?};proxy={};proxy_auth={};proxy_pass={};no_proxy={};ca={};client_cert={};client_key={};identity={};pins={};decompress={};ssrf={};ssrf_loopback={}",
+        "follow_redirects={};max_redirects={};connect_timeout={:?};read_timeout={:?};proxy={};proxy_auth={};proxy_pass={};no_proxy={};ca={};client_cert={};client_key={};identity={};pins={};decompress={};ssrf={};ssrf_loopback={};deny_nets={deny_nets}",
         config.follow_redirects,
         config.max_redirects,
         config.connect_timeout_ms,
@@ -591,12 +607,17 @@ pub(super) fn build_http_client(config: &HttpRequestConfig) -> Result<reqwest::C
     };
 
     let mut builder = reqwest::Client::builder().redirect(redirect_policy);
-    if config.ssrf_block_private {
-        // Connect-time backstop: reqwest can only open TCP connections to the
-        // addresses this resolver returns, so private/loopback/metadata IPs
-        // are unreachable even if DNS rebinds after the egress pre-check.
-        builder = builder.dns_resolver(Arc::new(crate::egress::GuardedResolver::new(
+    // Install the connect-time backstop when EITHER the SSRF private block is on
+    // OR there are NetPolicy deny CIDR/IP rules. reqwest can only open TCP
+    // connections to addresses this resolver returns, so private/loopback/
+    // metadata IPs and any denied CIDR are unreachable even if DNS rebinds after
+    // the egress pre-check. (#3174: a hostname resolving into a denied CIDR is
+    // now blocked at connect time, not just when the URL carried a literal IP.)
+    if config.ssrf_block_private || !config.resolved_ip_rules.deny.is_empty() {
+        builder = builder.dns_resolver(Arc::new(crate::egress::GuardedResolver::with_policy(
+            config.ssrf_block_private,
             config.ssrf_allow_loopback,
+            &config.resolved_ip_rules,
         )));
     }
     if let Some(ms) = config.connect_timeout_ms {

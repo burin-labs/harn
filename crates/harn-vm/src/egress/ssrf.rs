@@ -18,7 +18,10 @@
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, ToSocketAddrs};
 use std::sync::Arc;
 
+use ipnet::IpNet;
 use reqwest::dns::{Addrs, Name, Resolve, Resolving};
+
+use super::ResolvedIpRules;
 
 /// The error type carried by [`reqwest::dns::Resolving`]. reqwest keeps its
 /// own alias `pub(crate)`, so we spell out the equivalent boxed trait object.
@@ -108,27 +111,61 @@ impl InnerResolver for GaiInnerResolver {
 }
 
 /// A [`reqwest::dns::Resolve`] implementation that filters every resolved
-/// address through [`is_disallowed_ip`]. If filtering removes all addresses,
-/// resolution fails with an error that names ONLY the host — never the URL,
-/// query string, or any caller secret.
+/// address through [`is_disallowed_ip`] AND the NetPolicy deny CIDR/IP rules.
+/// If filtering removes all addresses, resolution fails with an error that
+/// names ONLY the host — never the URL, query string, or any caller secret.
+///
+/// This is the connect-time backstop for the NetPolicy fix (#3174): reqwest
+/// can only open a TCP connection to an address this resolver returns, so a
+/// hostname that resolves (or rebinds) into a denied CIDR is unreachable even
+/// though the URL literal carried only a hostname. Only the security boundary
+/// (private-range + deny rules) is enforced here — the allowlist positive grant
+/// is decided at the URL layer where the hostname is known, so it is not
+/// re-applied to the pinned address (a host-allowlisted name may legitimately
+/// resolve outside the allow CIDRs).
 pub struct GuardedResolver {
+    /// When true, drop any address the SSRF classifier rejects. Off when the
+    /// resolver is installed purely for NetPolicy deny rules with
+    /// `block_private:off`, so it must not start blocking private ranges.
+    block_private: bool,
     allow_loopback: bool,
+    /// NetPolicy deny CIDR/IP nets; any resolved address inside one is dropped.
+    deny_nets: Vec<IpNet>,
     inner: Arc<dyn InnerResolver>,
 }
 
 impl std::fmt::Debug for GuardedResolver {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("GuardedResolver")
+            .field("block_private", &self.block_private)
             .field("allow_loopback", &self.allow_loopback)
+            .field("deny_nets", &self.deny_nets)
             .finish_non_exhaustive()
     }
 }
 
 impl GuardedResolver {
-    /// Build a guard backed by the blocking OS resolver.
+    /// Build a guard backed by the blocking OS resolver that enforces only the
+    /// SSRF private-address block.
     pub fn new(allow_loopback: bool) -> Self {
         Self {
+            block_private: true,
             allow_loopback,
+            deny_nets: Vec::new(),
+            inner: Arc::new(GaiInnerResolver),
+        }
+    }
+
+    /// Build a guard that enforces the NetPolicy deny nets and, when
+    /// `block_private`, the SSRF private-address block. `allow_loopback`, the
+    /// deny nets, and `block_private` come from the effective egress policy via
+    /// [`super::current_resolved_ip_rules`] and
+    /// [`super::current_ssrf_client_settings`].
+    pub fn with_policy(block_private: bool, allow_loopback: bool, rules: &ResolvedIpRules) -> Self {
+        Self {
+            block_private,
+            allow_loopback,
+            deny_nets: rules.deny.clone(),
             inner: Arc::new(GaiInnerResolver),
         }
     }
@@ -136,7 +173,24 @@ impl GuardedResolver {
     #[cfg(test)]
     fn with_inner(allow_loopback: bool, inner: Arc<dyn InnerResolver>) -> Self {
         Self {
+            block_private: true,
             allow_loopback,
+            deny_nets: Vec::new(),
+            inner,
+        }
+    }
+
+    #[cfg(test)]
+    fn with_inner_full(
+        block_private: bool,
+        allow_loopback: bool,
+        deny_nets: Vec<IpNet>,
+        inner: Arc<dyn InnerResolver>,
+    ) -> Self {
+        Self {
+            block_private,
+            allow_loopback,
+            deny_nets,
             inner,
         }
     }
@@ -167,7 +221,9 @@ impl std::error::Error for BlockedHostError {}
 impl Resolve for GuardedResolver {
     fn resolve(&self, name: Name) -> Resolving {
         let host = name.as_str().to_string();
+        let block_private = self.block_private;
         let allow_loopback = self.allow_loopback;
+        let deny_nets = self.deny_nets.clone();
         let inner = self.inner.clone();
         Box::pin(async move {
             // `to_socket_addrs` is blocking; never run it on the async runtime
@@ -178,9 +234,19 @@ impl Resolve for GuardedResolver {
                 .await
                 .map_err(|join_err| Box::new(join_err) as BoxError)?;
             let resolved = lookup.map_err(|io_err| Box::new(io_err) as BoxError)?;
+            // Resolve-once-and-pin: filter the SAME address set reqwest will
+            // connect to through both the SSRF private-range block and the
+            // NetPolicy deny nets. No second resolution happens between here and
+            // the socket connect, so a DNS rebind cannot smuggle a denied
+            // address past this point.
             let filtered: Vec<SocketAddr> = resolved
                 .into_iter()
-                .filter(|addr| !is_disallowed_ip(addr.ip(), allow_loopback))
+                .filter(|addr| {
+                    let ip = addr.ip();
+                    let ssrf_blocked = block_private && is_disallowed_ip(ip, allow_loopback);
+                    let deny_blocked = deny_nets.iter().any(|net| net.contains(&ip));
+                    !ssrf_blocked && !deny_blocked
+                })
                 .collect();
             if filtered.is_empty() {
                 return Err(Box::new(BlockedHostError { host }) as BoxError);
@@ -361,5 +427,75 @@ mod tests {
             !err.contains("10.0.0.1"),
             "must not leak the address: {err}"
         );
+    }
+
+    // --- NetPolicy deny-CIDR enforcement at the connect-time pin (#3174). ---
+
+    fn stub_with_deny(
+        block_private: bool,
+        allow_loopback: bool,
+        deny: &[&str],
+        addrs: &[&str],
+    ) -> GuardedResolver {
+        let deny_nets: Vec<IpNet> = deny.iter().map(|s| s.parse().unwrap()).collect();
+        let addrs = addrs
+            .iter()
+            .map(|s| SocketAddr::new(s.parse().unwrap(), 0))
+            .collect();
+        GuardedResolver::with_inner_full(
+            block_private,
+            allow_loopback,
+            deny_nets,
+            Arc::new(StubResolver { addrs }),
+        )
+    }
+
+    #[tokio::test]
+    async fn guarded_resolver_blocks_resolved_addr_in_deny_cidr() {
+        // The connect-time backstop drops a resolved address inside a NetPolicy
+        // deny CIDR even though the URL carried only a hostname — and the SAME
+        // resolution is what reqwest would pin to (resolve-once-and-pin).
+        let resolver = stub_with_deny(false, false, &["203.0.113.0/24"], &["203.0.113.7"]);
+        let err = resolve_host(&resolver)
+            .await
+            .expect_err("deny CIDR blocked");
+        assert!(err.contains("example.test"), "{err}");
+        assert!(!err.contains("203.0.113.7"), "must not leak address: {err}");
+    }
+
+    #[tokio::test]
+    async fn guarded_resolver_keeps_addr_outside_deny_cidr() {
+        let resolver = stub_with_deny(false, false, &["203.0.113.0/24"], &["8.8.8.8"]);
+        let addrs = resolve_host(&resolver).await.expect("outside deny CIDR");
+        assert_eq!(addrs.len(), 1);
+        assert_eq!(addrs[0].ip(), v4("8.8.8.8"));
+    }
+
+    #[tokio::test]
+    async fn guarded_resolver_deny_only_does_not_block_private() {
+        // With block_private off (deny-only resolver), a private address that is
+        // NOT in a deny net must pass — the deny-only backstop must not silently
+        // re-enable the SSRF block.
+        let resolver = stub_with_deny(false, false, &["203.0.113.0/24"], &["10.0.0.1"]);
+        let addrs = resolve_host(&resolver)
+            .await
+            .expect("private passes when block off");
+        assert_eq!(addrs.len(), 1);
+        assert_eq!(addrs[0].ip(), v4("10.0.0.1"));
+    }
+
+    #[tokio::test]
+    async fn guarded_resolver_applies_both_ssrf_and_deny() {
+        // With block_private on AND a deny CIDR, a mixed answer keeps only the
+        // address that clears BOTH filters.
+        let resolver = stub_with_deny(
+            true,
+            false,
+            &["203.0.113.0/24"],
+            &["10.0.0.1", "203.0.113.5", "8.8.8.8"],
+        );
+        let addrs = resolve_host(&resolver).await.expect("one survivor");
+        assert_eq!(addrs.len(), 1);
+        assert_eq!(addrs[0].ip(), v4("8.8.8.8"));
     }
 }
