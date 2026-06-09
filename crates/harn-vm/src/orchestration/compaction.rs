@@ -552,6 +552,115 @@ fn find_prev_user_boundary(messages: &[serde_json::Value], start: usize) -> Opti
         .find(|idx| messages[*idx].get("role").and_then(|value| value.as_str()) == Some("user"))
 }
 
+/// True when `trimmed` (an already-trimmed line) begins with `file:line` —
+/// a colon immediately followed by a digit, with no whitespace before the
+/// colon. Used as a strong signal that a line carries a located diagnostic.
+fn line_has_file_line_prefix(trimmed: &str) -> bool {
+    let bytes = trimmed.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() && bytes[i] != b':' {
+        i += 1;
+    }
+    i < bytes.len() && i + 1 < bytes.len() && bytes[i + 1].is_ascii_digit()
+}
+
+/// True when a single line carries failure signal worth preserving verbatim
+/// when we shrink a large tool output. This is the ONE filter shared by both
+/// the microcompact path (`microcompact_tool_output`) and the observation-mask
+/// path (`default_mask_tool_result`) — previously the mask path had a weaker,
+/// divergent filter that dropped assertion-value lines, rustc continuation
+/// lines, and structured failing-line markers, silently shredding the failure
+/// detail the model re-reads to fix the bug.
+///
+/// In addition to keyword/positional error lines and `file:line` diagnostics,
+/// this keeps three structured kinds the mask path used to drop:
+///   - assertion value lines with no `file:line` (`left:`, `right:`,
+///     `expected:`, `actual:`, `got`, `want`) — the values the model needs to
+///     see the actual-vs-expected mismatch.
+///   - rustc continuation lines (`-->` location pointers, `= help:`/`= note:`,
+///     numbered source rows like `12 |`, and `^^^` carets).
+///   - `Lnnn:` failing-line structure some test harnesses emit.
+fn is_failure_signal_line(line: &str) -> bool {
+    let trimmed = line.trim();
+    if trimmed.is_empty() {
+        return false;
+    }
+    let lower = trimmed.to_lowercase();
+
+    let has_file_line = line_has_file_line_prefix(trimmed);
+    let has_strong_keyword =
+        trimmed.contains("FAIL") || trimmed.contains("panic") || trimmed.contains("Panic");
+    let has_weak_keyword = trimmed.contains("error")
+        || trimmed.contains("undefined")
+        || trimmed.contains("expected")
+        || trimmed.contains("got")
+        || lower.contains("cannot find")
+        || lower.contains("not found")
+        || lower.contains("no such")
+        || lower.contains("unresolved")
+        || lower.contains("missing")
+        || lower.contains("declared but not used")
+        || lower.contains("unused")
+        || lower.contains("mismatch");
+    let positional = lower.contains(" error ")
+        || lower.starts_with("error:")
+        || lower.starts_with("warning:")
+        || lower.starts_with("note:")
+        || lower.contains("panic:");
+
+    // Assertion value lines (no file:line) — the actual-vs-expected values.
+    let assertion_value = lower.starts_with("left:")
+        || lower.starts_with("right:")
+        || lower.starts_with("expected:")
+        || lower.starts_with("actual:")
+        || lower.starts_with("got:")
+        || lower.starts_with("want:")
+        || lower.starts_with("got ")
+        || lower.starts_with("want ")
+        || lower.starts_with("assertion")
+        || lower.contains("assertionerror");
+
+    // rustc continuation lines: location pointer, help/note, numbered source
+    // rows (`12 | ...`), and caret underlines (`^^^`).
+    let rustc_continuation = trimmed.starts_with("-->")
+        || trimmed.starts_with("= help:")
+        || trimmed.starts_with("= note:")
+        || trimmed.contains('^')
+        || {
+            // `<digits> |` numbered source row from rustc's snippet rendering.
+            let mut chars = trimmed.chars();
+            let mut saw_digit = false;
+            let mut rest = trimmed;
+            while let Some(c) = chars.clone().next() {
+                if c.is_ascii_digit() {
+                    saw_digit = true;
+                    chars.next();
+                    rest = chars.as_str();
+                } else {
+                    break;
+                }
+            }
+            saw_digit && rest.trim_start().starts_with('|')
+        };
+
+    // `Lnnn:` failing-line structure (`L42:`), some harnesses emit this.
+    let failing_line_marker = {
+        if let Some(rest) = trimmed.strip_prefix('L') {
+            let digits: String = rest.chars().take_while(|c| c.is_ascii_digit()).collect();
+            !digits.is_empty() && rest[digits.len()..].starts_with(':')
+        } else {
+            false
+        }
+    };
+
+    has_strong_keyword
+        || (has_file_line && has_weak_keyword)
+        || positional
+        || assertion_value
+        || rustc_continuation
+        || failing_line_marker
+}
+
 /// Microcompact a tool result: if it exceeds `max_chars`, keep the first and
 /// last portions with a snip marker in between.
 pub fn microcompact_tool_output(output: &str, max_chars: usize) -> String {
@@ -560,43 +669,7 @@ pub fn microcompact_tool_output(output: &str, max_chars: usize) -> String {
     }
     let diagnostic_lines = output
         .lines()
-        .filter(|line| {
-            let trimmed = line.trim();
-            let lower = trimmed.to_lowercase();
-            let has_file_line = {
-                let bytes = trimmed.as_bytes();
-                let mut i = 0;
-                let mut found_colon = false;
-                while i < bytes.len() {
-                    if bytes[i] == b':' {
-                        found_colon = true;
-                        break;
-                    }
-                    i += 1;
-                }
-                found_colon && i + 1 < bytes.len() && bytes[i + 1].is_ascii_digit()
-            };
-            let has_strong_keyword =
-                trimmed.contains("FAIL") || trimmed.contains("panic") || trimmed.contains("Panic");
-            let has_weak_keyword = trimmed.contains("error")
-                || trimmed.contains("undefined")
-                || trimmed.contains("expected")
-                || trimmed.contains("got")
-                || lower.contains("cannot find")
-                || lower.contains("not found")
-                || lower.contains("no such")
-                || lower.contains("unresolved")
-                || lower.contains("missing")
-                || lower.contains("declared but not used")
-                || lower.contains("unused")
-                || lower.contains("mismatch");
-            let positional = lower.contains(" error ")
-                || lower.starts_with("error:")
-                || lower.starts_with("warning:")
-                || lower.starts_with("note:")
-                || lower.contains("panic:");
-            has_strong_keyword || (has_file_line && has_weak_keyword) || positional
-        })
+        .filter(|line| is_failure_signal_line(line))
         .take(32)
         .collect::<Vec<_>>();
     if !diagnostic_lines.is_empty() {
@@ -952,15 +1025,38 @@ fn content_should_preserve(content: &str) -> bool {
 }
 
 /// Default per-message masking for tool results.
+///
+/// Beyond the first-line preview, this KEEPS any failure-signal lines
+/// (assertion values, located diagnostics, rustc help/caret/source rows,
+/// `Lnnn:` markers) via the shared [`is_failure_signal_line`] filter, so the
+/// model re-reads the actual-vs-expected detail it needs to fix the bug. The
+/// previous mask dropped everything but the first line, silently shredding the
+/// structured failure that the strong microcompact filter preserves at the
+/// emission side.
 fn default_mask_tool_result(role: &str, content: &str) -> String {
     let first_line = content.lines().next().unwrap_or(content);
     let line_count = content.lines().count();
     let char_count = content.len();
     if line_count <= 3 {
-        format!("[{role}] {content}")
-    } else {
-        let preview = &first_line[..first_line.len().min(120)];
+        return format!("[{role}] {content}");
+    }
+    let preview = &first_line[..first_line.len().min(120)];
+    // Preserve failure-signal lines (bounded so a huge log can't defeat the
+    // mask). Skip the first line itself — it is already in the preview.
+    let kept: Vec<&str> = content
+        .lines()
+        .skip(1)
+        .filter(|line| is_failure_signal_line(line))
+        .take(32)
+        .collect();
+    if kept.is_empty() {
         format!("[{role}] {preview}... [{line_count} lines, {char_count} chars masked]")
+    } else {
+        format!(
+            "[{role}] {preview}... [{line_count} lines, {char_count} chars masked; \
+             failure lines preserved]\n{}",
+            kept.join("\n")
+        )
     }
 }
 
@@ -1439,6 +1535,94 @@ mod tests {
         assert!(
             result.contains("[diagnostic lines preserved]"),
             "has diagnostic marker"
+        );
+    }
+
+    // D1-durable: the shared failure-signal filter must keep the structured
+    // failure kinds the old mask path dropped — assertion values, rustc
+    // help/caret/source rows, and `Lnnn:` markers — not just keyword lines.
+    #[test]
+    fn failure_signal_filter_keeps_structured_failure_lines() {
+        for keep in [
+            "left: 3",
+            "right: 4",
+            "expected: foo",
+            "actual: bar",
+            "  --> src/main.rs:4:9",
+            "= help: add `use std::fmt;`",
+            "12 | let x = bad();",
+            "   | ^^^^^^^ not found",
+            "L42: assertion failed",
+            "src/main.rs:42: error: cannot find value",
+            "FAIL: TestThing",
+            "panic: index out of range",
+        ] {
+            assert!(
+                is_failure_signal_line(keep),
+                "should keep failure-signal line: {keep:?}"
+            );
+        }
+        for drop in [
+            "verbose output line 7",
+            "compiling crate foo",
+            "    let y = ok();",
+            "",
+        ] {
+            assert!(
+                !is_failure_signal_line(drop),
+                "should drop ordinary line: {drop:?}"
+            );
+        }
+    }
+
+    // D1-durable: masking a large tool output must preserve the assertion
+    // values and rustc detail (not just the first line) so the model can fix
+    // the bug instead of re-reading a shredded summary.
+    #[test]
+    fn default_mask_preserves_failure_detail() {
+        let mut lines = vec!["running 1 test".to_string()];
+        for i in 0..40 {
+            lines.push(format!("noise line {i}"));
+        }
+        lines.push("assertion `left == right` failed".to_string());
+        lines.push("  left: 3".to_string());
+        lines.push(" right: 4".to_string());
+        lines.push("  --> src/lib.rs:10:5".to_string());
+        for i in 40..80 {
+            lines.push(format!("more noise {i}"));
+        }
+        let content = lines.join("\n");
+        let masked = default_mask_tool_result("tool", &content);
+        assert!(
+            masked.contains("masked"),
+            "still reports it masked: {masked}"
+        );
+        assert!(
+            masked.contains("failure lines preserved"),
+            "should flag preserved lines: {masked}"
+        );
+        assert!(masked.contains("left: 3"), "keeps left value: {masked}");
+        assert!(masked.contains("right: 4"), "keeps right value: {masked}");
+        assert!(
+            masked.contains("--> src/lib.rs:10:5"),
+            "keeps rustc location: {masked}"
+        );
+        assert!(
+            !masked.contains("noise line 7"),
+            "drops ordinary noise: {masked}"
+        );
+    }
+
+    // Verbose output with NO failure signal still masks down to the preview.
+    #[test]
+    fn default_mask_without_failure_lines_stays_terse() {
+        let lines: Vec<String> = (0..40).map(|i| format!("plain line {i}")).collect();
+        let content = lines.join("\n");
+        let masked = default_mask_tool_result("tool", &content);
+        assert!(masked.contains("masked]"), "should mask: {masked}");
+        assert!(
+            !masked.contains("failure lines preserved"),
+            "no failure lines to preserve: {masked}"
         );
     }
 
