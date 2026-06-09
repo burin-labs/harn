@@ -43,6 +43,18 @@
     // GitHub PR/issue templates are forms, not prose docs — they lead with
     // an HTML comment and h2 sections, which trips MD041 (first-line-h1).
     ".github/pull_request_template.md",
-    ".github/ISSUE_TEMPLATE/**/*.md"
+    ".github/ISSUE_TEMPLATE/**/*.md",
+    // CHANGELOG.md (and the pre-0.x archives) is machine-assembled by the
+    // release tooling from `changelog.d/*` fragments and is append-only
+    // published history. Linting the assembled file for MD013 line-length
+    // flagged long lines in already-published `## vX.Y.Z` sections, which drove
+    // the release recovery agent to rewrap them — tripping
+    // `scripts/check_changelog_no_retroactive_edits.harn` ("sections for
+    // already-published versions were modified"). The fragments themselves are
+    // still linted as `*.md`, so line-length is enforced at the source; the
+    // assembled history must not be reflowed. (harn-bump-fleet release_harn.harn
+    // runs `make lint-md` post-assembly.)
+    "CHANGELOG.md",
+    "CHANGELOG-pre-*.md"
   ]
 }
