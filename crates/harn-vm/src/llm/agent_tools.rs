@@ -20,6 +20,13 @@ pub(super) fn denied_tool_result(tool_name: &str, reason: impl Into<String>) -> 
     // blocked but not what to do instead, so it tends to retry the same denied
     // call. Add a generic, capability-gate-appropriate next step: don't repeat
     // the call, find another way to make progress, or ask for the permission.
+    //
+    // RESERVED FOR TRUE POLICY/PERMISSION DENIALS (capability gate, sandbox /
+    // command policy, host rejection). The "Do not retry the same call" wording
+    // is *correct* there — the call is blocked and re-issuing it identically
+    // will be blocked again. Recoverable rejections (bad/missing arguments, an
+    // empty tool name) must NOT use this body: see `recoverable_tool_result`,
+    // which coaches a retry *with the correction* instead.
     let next_step = format!(
         "The `{tool_name}` tool is not permitted right now. Do not retry the same call. \
          Make progress with the tools you are allowed to use, or if this capability is \
@@ -31,6 +38,69 @@ pub(super) fn denied_tool_result(tool_name: &str, reason: impl Into<String>) -> 
         "reason": reason,
         "next_step": next_step,
     })
+}
+
+/// Build the tool-result body for a RECOVERABLE rejection — a schema /
+/// argument-validation failure or a malformed (empty) tool name. Unlike
+/// [`denied_tool_result`], this is explicitly retry-POSITIVE: the model made a
+/// fixable slip, so the guidance tells it to re-call the same tool *with the
+/// correction*, naming the specific missing/invalid parameter(s) when the
+/// `reason` carries them.
+///
+/// Using `error: "invalid_arguments"` (NOT `permission_denied`) is load-bearing
+/// — it keeps `is_denied_tool_result` from misclassifying a fixable mistake as a
+/// hard denial, and it stops cheap models from giving up after one correctable
+/// error (observed live: a model called `edit` without `path`, read
+/// `permission_denied / do not retry`, then made zero further edits and timed
+/// out into a false FAIL; ~26 recent eval transcripts show this pattern).
+pub(super) fn recoverable_tool_result(
+    tool_name: &str,
+    reason: impl Into<String>,
+) -> serde_json::Value {
+    let reason = reason.into();
+    // The validator phrases missing params as
+    // "... missing required parameter(s): path, mode. ...". Pull the named
+    // params out so the next_step can be concretely actionable instead of
+    // generic. Falls back to a generic-but-still-retry-positive nudge when no
+    // parameter list is present (e.g. the empty-tool-name slip).
+    let missing_params = extract_missing_params(&reason);
+    let next_step = match (tool_name, missing_params.as_deref()) {
+        ("<unnamed>", _) => "This was a malformed tool call (no tool name). It is fixable — \
+             emit exactly one tool call this turn as `name({ ... })` using a non-empty tool \
+             name from the allowed list, with all required parameters."
+            .to_string(),
+        (name, Some(params)) => format!(
+            "This is a fixable argument error, not a permission denial. \
+             Re-call `{name}` with the missing required parameter(s): {params}."
+        ),
+        (name, None) => format!(
+            "This is a fixable argument error, not a permission denial. \
+             Re-call `{name}` with corrected arguments per the reason above."
+        ),
+    };
+    serde_json::json!({
+        "error": "invalid_arguments",
+        "tool": tool_name,
+        "reason": reason,
+        "next_step": next_step,
+    })
+}
+
+/// Extract the named missing parameters from a validator `reason` of the form
+/// `"Tool 'x' is missing required parameter(s): a, b. ..."`. Returns the
+/// comma-separated parameter list (e.g. `"a, b"`) when present, else `None`.
+fn extract_missing_params(reason: &str) -> Option<String> {
+    let marker = "missing required parameter(s):";
+    let start = reason.find(marker)? + marker.len();
+    let tail = reason[start..].trim_start();
+    // The list runs up to the sentence-ending period the validator appends.
+    let end = tail.find('.').unwrap_or(tail.len());
+    let params = tail[..end].trim();
+    if params.is_empty() {
+        None
+    } else {
+        Some(params.to_string())
+    }
 }
 
 pub(super) fn render_tool_result(value: &serde_json::Value) -> String {
@@ -545,6 +615,92 @@ mod tests {
             next.contains("run"),
             "next_step should name the denied tool: {next}"
         );
+    }
+
+    // A RECOVERABLE schema/argument rejection must coach a retry WITH the
+    // correction — `error: "invalid_arguments"` (not permission_denied) and a
+    // next_step that re-calls the tool naming the missing param. Reverting the
+    // recoverable/denied split (routing this through `denied_tool_result`) makes
+    // every assertion below fail: the error flips to permission_denied and the
+    // next_step says "Do not retry the same call".
+    #[test]
+    fn recoverable_tool_result_coaches_retry_with_named_missing_param() {
+        let result = recoverable_tool_result(
+            "edit",
+            "Tool 'edit' is missing required parameter(s): path. \
+             Provide all required parameters and try again.",
+        );
+        assert_eq!(result["error"], serde_json::json!("invalid_arguments"));
+        assert_ne!(result["error"], serde_json::json!("permission_denied"));
+        assert_eq!(result["tool"], serde_json::json!("edit"));
+        let next = result["next_step"]
+            .as_str()
+            .expect("recoverable result should carry a next_step string");
+        assert!(
+            !next.contains("Do not retry"),
+            "recoverable next_step must be retry-positive, not a don't-retry denial: {next}"
+        );
+        assert!(
+            next.contains("Re-call") && next.contains("edit"),
+            "next_step should tell the model to re-call the named tool: {next}"
+        );
+        assert!(
+            next.contains("path"),
+            "next_step should name the specific missing parameter: {next}"
+        );
+    }
+
+    // The empty/malformed tool-name slip (harn#3194) is also recoverable: it
+    // must get retry-positive feedback, never the permission-denial body.
+    #[test]
+    fn recoverable_tool_result_handles_empty_tool_name() {
+        let result = recoverable_tool_result(
+            "<unnamed>",
+            "Tool call is missing a name. Emit one tool call per turn as \
+             `name({ ... })` using a non-empty tool name from the allowed list, then retry.",
+        );
+        assert_eq!(result["error"], serde_json::json!("invalid_arguments"));
+        let next = result["next_step"]
+            .as_str()
+            .expect("recoverable result should carry a next_step string");
+        assert!(
+            !next.contains("Do not retry"),
+            "empty-name feedback must be retry-positive: {next}"
+        );
+        assert!(
+            next.contains("fixable") && next.contains("name"),
+            "next_step should frame the missing name as a fixable slip: {next}"
+        );
+    }
+
+    #[test]
+    fn recoverable_tool_result_is_not_a_denial() {
+        // The loop keys flow control off `is_denied_tool_result`; a fixable
+        // argument error must NOT trip the denial detector.
+        let result = recoverable_tool_result(
+            "edit",
+            "Tool 'edit' is missing required parameter(s): path. \
+             Provide all required parameters and try again.",
+        );
+        assert!(
+            !is_denied_tool_result(&result),
+            "recoverable invalid_arguments result must not read as a denial"
+        );
+        assert!(!is_denied_tool_result(&serde_json::Value::String(
+            result.to_string()
+        )));
+    }
+
+    #[test]
+    fn extract_missing_params_pulls_named_list() {
+        assert_eq!(
+            extract_missing_params(
+                "Tool 'edit' is missing required parameter(s): path, mode. \
+                 Provide all required parameters and try again."
+            ),
+            Some("path, mode".to_string())
+        );
+        assert_eq!(extract_missing_params("Tool call is missing a name."), None);
     }
 
     fn tools_dict(entries: Vec<(&str, BTreeMap<String, VmValue>)>) -> VmValue {

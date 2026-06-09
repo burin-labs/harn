@@ -552,6 +552,24 @@ fn tool_call_error_category_from_internal_collapses_transient_family() {
 }
 
 #[test]
+fn only_schema_validation_is_recoverable() {
+    // Recoverable == the model can fix the call itself and retry (bad/missing
+    // args, malformed tool name). Everything else — permission denials,
+    // tool/transport errors, timeouts — is NOT something a retry-with-correction
+    // fixes, so it must not get retry-positive feedback.
+    assert!(ToolCallErrorCategory::SchemaValidation.is_recoverable());
+    for category in ToolCallErrorCategory::ALL {
+        if matches!(category, ToolCallErrorCategory::SchemaValidation) {
+            continue;
+        }
+        assert!(
+            !category.is_recoverable(),
+            "{category:?} must not be treated as recoverable"
+        );
+    }
+}
+
+#[test]
 fn tool_call_update_event_omits_error_category_when_none() {
     let event = AgentEvent::ToolCallUpdate {
         session_id: "s".into(),
