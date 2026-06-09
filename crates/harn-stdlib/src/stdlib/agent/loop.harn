@@ -1445,9 +1445,13 @@ fn __next_progress_count(made_progress, turns_since_progress) {
  * double-injected; this streak nudge is the fallback for pure-prose churn.
  * Depth is `turns_since_progress`.
  */
-fn __progress_nudge_text(depth, has_tools) {
+fn __progress_nudge_text(depth, has_tools, tool_mode = "text") {
   let action = if has_tools {
-    "Emit exactly one well-formed <tool_call> now, or state your final answer in <user_response> and stop."
+    if tool_mode == "native" {
+      "Call exactly one native tool through the provider tool channel now, or give your final answer and stop."
+    } else {
+      "Emit exactly one well-formed <tool_call> now, or state your final answer in <user_response> and stop."
+    }
   } else {
     "Make concrete progress in your reply now, or state your final answer and stop."
   }
@@ -2967,10 +2971,11 @@ fn __agent_loop_run(message, session, initial_opts) {
           && turns_since_progress <= turn_max_nudges
           && !(outcome?.nudged_this_turn ?? false) {
           let has_tools = len(opts?.tools?.tools ?? []) > 0
+          let tool_mode = agent_tool_call_paradigm(turn_opts).kind
           agent_session_inject_feedback(
             session.session_id,
             "no_progress_streak",
-            __progress_nudge_text(turns_since_progress, has_tools),
+            __progress_nudge_text(turns_since_progress, has_tools, tool_mode),
           )
           agent_emit_event(
             session.session_id,

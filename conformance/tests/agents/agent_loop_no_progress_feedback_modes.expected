@@ -1,0 +1,11 @@
+text.status=done
+text.has_streak=true
+text.has_tool_call_tag=true
+text.has_user_response_tag=true
+text.no_native_channel=true
+native.status=done
+native.has_streak=true
+native.has_native_channel=true
+native.has_native_tool=true
+native.no_tool_call_tag=true
+native.no_user_response_tag=true
