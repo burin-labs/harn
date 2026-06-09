@@ -567,12 +567,72 @@ pub mod helpers {
     pub fn write(path: &Path, contents: &[u8]) -> std::io::Result<()> {
         let result = match active_overlay() {
             Some(overlay) => overlay.write(path, contents),
-            None => std::fs::write(path, contents),
+            None => atomic_write(path, contents),
         };
         if result.is_ok() {
             record_file_write(path, contents);
         }
         result
+    }
+
+    /// Crash-safe replacement for `std::fs::write`.
+    ///
+    /// `std::fs::write` opens the destination with `O_CREAT|O_TRUNC`, so it
+    /// truncates an existing file to zero length *before* any byte is
+    /// written. Any failure between that truncation and the completion of
+    /// `write_all` (ENOSPC/EDQUOT, a failing/network fs returning EIO, or the
+    /// process being killed mid-write) leaves the original content destroyed
+    /// and unrecoverable, while the caller assumes the prior content survived.
+    ///
+    /// Instead we write the full contents into a sibling temp file, flush it,
+    /// and atomically `rename` it over the destination. On POSIX `rename` is
+    /// atomic and never leaves a half-written destination; if anything fails
+    /// before the rename, the original file is untouched. The temp file is
+    /// created in the destination's own directory so the rename stays within a
+    /// single filesystem (a cross-device rename would fail with EXDEV).
+    fn atomic_write(path: &Path, contents: &[u8]) -> std::io::Result<()> {
+        use std::io::Write;
+
+        let parent = path.parent().filter(|p| !p.as_os_str().is_empty());
+        let dir = parent.unwrap_or_else(|| Path::new("."));
+
+        // Unique, hidden sibling temp name. Including the pid and an atomic
+        // counter keeps concurrent writers from colliding on the same temp
+        // path.
+        let counter = {
+            use std::sync::atomic::{AtomicU64, Ordering};
+            static COUNTER: AtomicU64 = AtomicU64::new(0);
+            COUNTER.fetch_add(1, Ordering::Relaxed)
+        };
+        let file_name = path
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        let tmp_name = format!(".{file_name}.harn-tmp.{}.{counter}", std::process::id());
+        let tmp_path = dir.join(tmp_name);
+
+        // Write the full contents to the temp file, then fsync so the bytes
+        // are durable before we swap it into place.
+        let write_result = (|| -> std::io::Result<()> {
+            let mut file = std::fs::File::create(&tmp_path)?;
+            file.write_all(contents)?;
+            file.flush()?;
+            file.sync_all()?;
+            Ok(())
+        })();
+        if let Err(err) = write_result {
+            // Best-effort cleanup; the destination was never touched.
+            let _ = std::fs::remove_file(&tmp_path);
+            return Err(err);
+        }
+
+        // Atomically replace the destination. On failure, clean up the temp
+        // file and leave the original intact.
+        if let Err(err) = std::fs::rename(&tmp_path, path) {
+            let _ = std::fs::remove_file(&tmp_path);
+            return Err(err);
+        }
+        Ok(())
     }
 
     pub fn append(path: &Path, contents: &[u8]) -> std::io::Result<()> {
@@ -790,6 +850,79 @@ mod tests {
                 .unwrap_err()
                 .kind(),
             std::io::ErrorKind::NotFound
+        );
+    }
+
+    /// Regression: the live (no-overlay) write path must be crash-safe. A
+    /// successful overwrite replaces the content and leaves no temp files.
+    #[test]
+    fn no_overlay_write_replaces_content() {
+        let dir = tempfile::tempdir().unwrap();
+        let target = dir.path().join("important.txt");
+        std::fs::write(&target, "ORIGINAL IMPORTANT CONTENT").unwrap();
+        assert!(active_overlay().is_none(), "no overlay should be installed");
+
+        helpers::write(&target, b"NEW CONTENT").unwrap();
+
+        assert_eq!(std::fs::read_to_string(&target).unwrap(), "NEW CONTENT");
+        // No leftover temp files in the directory.
+        let leftovers: Vec<_> = std::fs::read_dir(dir.path())
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .filter(|n| n.contains("harn-tmp"))
+            .collect();
+        assert!(
+            leftovers.is_empty(),
+            "temp files left behind: {leftovers:?}"
+        );
+    }
+
+    /// Regression for the non-atomic primary write path: a write that cannot
+    /// be completed must leave the original file completely intact rather than
+    /// truncating it.
+    ///
+    /// The trigger here is a read-only containing directory. The atomic path
+    /// writes through a sibling temp file, so it cannot even start (temp
+    /// `File::create` is denied) and the original survives untouched. The old
+    /// `std::fs::write` path instead reopens the *existing* destination with
+    /// `O_CREAT|O_TRUNC` — which needs no directory write permission — so it
+    /// truncates and overwrites the original before any failure could protect
+    /// it. The load-bearing assertion is therefore that the original content
+    /// is preserved; under the buggy path it would read back as "NEW CONTENT".
+    #[cfg(unix)]
+    #[test]
+    fn no_overlay_write_failure_preserves_original() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = tempfile::tempdir().unwrap();
+        let target = dir.path().join("important.txt");
+        std::fs::write(&target, "ORIGINAL IMPORTANT CONTENT").unwrap();
+
+        // Read+exec but not writable: a new sibling temp file cannot be
+        // created, but the existing destination file is still openable.
+        let mut perms = std::fs::metadata(dir.path()).unwrap().permissions();
+        perms.set_mode(0o500);
+        std::fs::set_permissions(dir.path(), perms).unwrap();
+
+        let result = helpers::write(&target, b"NEW CONTENT");
+
+        // Restore write perms before asserting so tempdir drop/cleanup works.
+        let mut restore = std::fs::metadata(dir.path()).unwrap().permissions();
+        restore.set_mode(0o700);
+        std::fs::set_permissions(dir.path(), restore).unwrap();
+
+        // Load-bearing invariant: the original content must survive.
+        assert_eq!(
+            std::fs::read_to_string(&target).unwrap(),
+            "ORIGINAL IMPORTANT CONTENT",
+            "a write that cannot complete must not truncate or corrupt the original file"
+        );
+        // The atomic path also surfaces the failure rather than reporting a
+        // false success.
+        assert!(
+            result.is_err(),
+            "atomic write should report failure when it cannot create its temp file"
         );
     }
 
