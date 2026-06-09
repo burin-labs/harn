@@ -1,10 +1,8 @@
-type AgentPromptId = "agent.action_required_feedback" | "agent.action_turn_nudge" | "agent.completion_judge_feedback" | "agent.completion_judge_system" | "agent.completion_judge_user" | "agent.daemon_timer_feedback" | "agent.daemon_watch_feedback" | "agent.default_nudge" | "agent.deferred_tool_listing" | "agent.loop_contract" | "agent.native_tool_contract_feedback" | "agent.parse_guidance" | "agent.protocol_violation_feedback" | "agent.step_judge_system" | "agent.step_judge_system_adversarial" | "agent.step_judge_user" | "agent.tool_contract_action_native" | "agent.tool_contract_action_text" | "agent.tool_contract_deferred_tools" | "agent.tool_contract_json" | "agent.tool_contract_native" | "agent.tool_contract_task_ledger" | "agent.tool_contract_text" | "agent.tool_contract_text_response_protocol" | "agent.turn_preamble" | "agent.verification_gate_feedback"
+type AgentPromptId = "agent.completion_judge_feedback" | "agent.completion_judge_system" | "agent.completion_judge_user" | "agent.daemon_timer_feedback" | "agent.daemon_watch_feedback" | "agent.default_nudge" | "agent.deferred_tool_listing" | "agent.loop_contract" | "agent.native_tool_contract_feedback" | "agent.parse_guidance" | "agent.step_judge_system" | "agent.step_judge_system_adversarial" | "agent.step_judge_user" | "agent.tool_contract_action_native" | "agent.tool_contract_action_text" | "agent.tool_contract_deferred_tools" | "agent.tool_contract_json" | "agent.tool_contract_native" | "agent.tool_contract_task_ledger" | "agent.tool_contract_text" | "agent.tool_contract_text_response_protocol" | "agent.turn_preamble" | "agent.verification_gate_feedback"
 
 type AgentPromptEntry = string | {path: string} | {text: string} | fn(dict) -> string
 
 type AgentPromptOverrides = {
-  action_required_feedback?: AgentPromptEntry,
-  action_turn_nudge?: AgentPromptEntry,
   completion_judge_feedback?: AgentPromptEntry,
   completion_judge_system?: AgentPromptEntry,
   completion_judge_user?: AgentPromptEntry,
@@ -15,7 +13,6 @@ type AgentPromptOverrides = {
   loop_contract?: AgentPromptEntry,
   native_tool_contract_feedback?: AgentPromptEntry,
   parse_guidance?: AgentPromptEntry,
-  protocol_violation_feedback?: AgentPromptEntry,
   step_judge_system?: AgentPromptEntry,
   step_judge_system_adversarial?: AgentPromptEntry,
   step_judge_user?: AgentPromptEntry,
@@ -33,8 +30,6 @@ type AgentPromptOverrides = {
 
 fn __agent_prompt_ids() {
   return [
-    "agent.action_required_feedback",
-    "agent.action_turn_nudge",
     "agent.completion_judge_feedback",
     "agent.completion_judge_system",
     "agent.completion_judge_user",
@@ -45,7 +40,6 @@ fn __agent_prompt_ids() {
     "agent.loop_contract",
     "agent.native_tool_contract_feedback",
     "agent.parse_guidance",
-    "agent.protocol_violation_feedback",
     "agent.step_judge_system",
     "agent.step_judge_system_adversarial",
     "agent.step_judge_user",
@@ -64,8 +58,6 @@ fn __agent_prompt_ids() {
 
 fn __agent_default_prompt_catalog() {
   return {
-    "agent.action_required_feedback": "action_required_feedback.harn.prompt",
-    "agent.action_turn_nudge": "action_turn_nudge.harn.prompt",
     "agent.completion_judge_feedback": "completion_judge_feedback_fallback.harn.prompt",
     "agent.completion_judge_system": "completion_judge_default.harn.prompt",
     "agent.completion_judge_user": "completion_judge_user.harn.prompt",
@@ -76,7 +68,6 @@ fn __agent_default_prompt_catalog() {
     "agent.loop_contract": "loop_until_done_system.harn.prompt",
     "agent.native_tool_contract_feedback": "native_tool_contract_feedback.harn.prompt",
     "agent.parse_guidance": "parse_guidance.harn.prompt",
-    "agent.protocol_violation_feedback": "protocol_violation_feedback.harn.prompt",
     "agent.step_judge_system": "step_judge_system_default.harn.prompt",
     "agent.step_judge_system_adversarial": "step_judge_system_adversarial.harn.prompt",
     "agent.step_judge_user": "step_judge_user.harn.prompt",
@@ -240,12 +231,6 @@ pub fn agent_prompt_override_map(overrides: AgentPromptOverrides) -> dict {
   var out = {}
   out = __agent_add_prompt_override(
     out,
-    "agent.action_required_feedback",
-    overrides.action_required_feedback,
-  )
-  out = __agent_add_prompt_override(out, "agent.action_turn_nudge", overrides.action_turn_nudge)
-  out = __agent_add_prompt_override(
-    out,
     "agent.completion_judge_feedback",
     overrides.completion_judge_feedback,
   )
@@ -262,11 +247,6 @@ pub fn agent_prompt_override_map(overrides: AgentPromptOverrides) -> dict {
     overrides.native_tool_contract_feedback,
   )
   out = __agent_add_prompt_override(out, "agent.parse_guidance", overrides.parse_guidance)
-  out = __agent_add_prompt_override(
-    out,
-    "agent.protocol_violation_feedback",
-    overrides.protocol_violation_feedback,
-  )
   out = __agent_add_prompt_override(out, "agent.step_judge_system", overrides.step_judge_system)
   out = __agent_add_prompt_override(
     out,
@@ -388,32 +368,6 @@ pub fn render_agent_prompt_id(id, bindings = nil, options = nil) {
  */
 pub fn render_agent_prompt(path, bindings = nil) {
   return __agent_render_prompt_entry(path, bindings ?? {})
-}
-
-/**
- * action_required_feedback_prompt.
- *
- * @effects: []
- * @allocation: heap
- * @errors: []
- * @api_stability: experimental
- * @example: action_required_feedback_prompt(bindings, options)
- */
-pub fn action_required_feedback_prompt(bindings, options = nil) {
-  return render_agent_prompt_id("agent.action_required_feedback", bindings, options)
-}
-
-/**
- * action_turn_nudge_prompt.
- *
- * @effects: []
- * @allocation: heap
- * @errors: []
- * @api_stability: experimental
- * @example: action_turn_nudge_prompt(bindings, options)
- */
-pub fn action_turn_nudge_prompt(bindings, options = nil) {
-  return render_agent_prompt_id("agent.action_turn_nudge", bindings, options)
 }
 
 /**
@@ -544,19 +498,6 @@ pub fn native_tool_contract_feedback_prompt(bindings, options = nil) {
  */
 pub fn parse_guidance_prompt(bindings, options = nil) {
   return render_agent_prompt_id("agent.parse_guidance", bindings, options)
-}
-
-/**
- * protocol_violation_feedback_prompt.
- *
- * @effects: []
- * @allocation: heap
- * @errors: []
- * @api_stability: experimental
- * @example: protocol_violation_feedback_prompt(bindings, options)
- */
-pub fn protocol_violation_feedback_prompt(bindings, options = nil) {
-  return render_agent_prompt_id("agent.protocol_violation_feedback", bindings, options)
 }
 
 /**
