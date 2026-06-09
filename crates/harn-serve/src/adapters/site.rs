@@ -66,8 +66,24 @@
 //! adapter hands the request head to the embedder's
 //! [`SiteStreamProvider`] (installed with
 //! [`SiteServerConfig::with_stream_provider`]) and forwards its
-//! streaming `Response` — an SSE or chunked body — unbuffered. See the
-//! trait docs for the contract.
+//! `Response` verbatim. The provider may return *any* response — an SSE
+//! or chunked stream, but equally a buffered binary download with its
+//! own `Content-Type`/`Content-Disposition` — so `@stream` is also the
+//! seam for binary response bodies: the bytes never cross the JSON
+//! dispatch boundary and are never utf8-lossied. See the trait docs for
+//! the contract.
+//!
+//! ## Raw request bodies (`@raw`)
+//!
+//! `@stream` never reads the request body, which rules it out for
+//! binary/multipart *uploads* (a pack publish). A route carrying the
+//! bare `@raw` attribute is the complement: like `@stream` it skips the
+//! VM and is answered by the same [`SiteStreamProvider`] after the same
+//! admission, but the request body *is* buffered (up to the configured
+//! body limit) and handed to the provider as raw [`Bytes`] — exact
+//! payload, no utf8-lossy view, no base64 envelope. The provider parses
+//! multipart/binary itself (it has the head dict with the
+//! `content-type` boundary) and shapes any response it likes.
 //!
 //! ## WebSockets
 //!
@@ -178,28 +194,37 @@ impl SiteAuthOutcome {
     }
 }
 
-/// Embedder-supplied responder for `@stream` routes (#3213).
+/// Embedder-supplied responder for `@stream` (#3213) and `@raw` (#3214)
+/// routes.
 ///
 /// The host-call bridge is synchronous request/response (JSON in, JSON
-/// out), so a `.harn` handler can never *stream* a body — yet SSE/
-/// chunked endpoints are real surfaces an embedder needs to host on the
-/// same router, behind the same admission. The seam: a route whose
-/// `.harn` export carries the `@stream` marker (see [`crate::exports`])
-/// never buffers the request body and never dispatches into the VM.
-/// After routing and admission — the [`SiteAuth`] hook plus the route's
-/// `@scopes` — the adapter calls the provider installed with
-/// [`SiteServerConfig::with_stream_provider`], and forwards whatever
-/// streaming [`Response`] it returns (an [`axum::response::sse::Sse`],
-/// a `Body::from_stream`, …) to the client unbuffered. Keep-alive and
-/// client-disconnect propagation are axum's: when the client goes away
-/// the response body stream is dropped, cancelling the source.
+/// out), so a `.harn` handler can never *stream* a body, and its bodies
+/// pay the JSON-envelope encoding both ways — wrong for SSE and wrong
+/// for binary payloads. The seam: a route whose `.harn` export carries
+/// the `@stream` or `@raw` marker (see [`crate::exports`]) never
+/// dispatches into the VM. After routing and admission — the
+/// [`SiteAuth`] hook plus the route's `@scopes` — the adapter calls the
+/// provider installed with [`SiteServerConfig::with_stream_provider`],
+/// and forwards whatever [`Response`] it returns to the client verbatim:
+/// an [`axum::response::sse::Sse`] or `Body::from_stream` flows
+/// unbuffered (keep-alive and client-disconnect propagation are axum's
+/// — when the client goes away the response body stream is dropped,
+/// cancelling the source), and a buffered binary body with its own
+/// `Content-Type`/`Content-Disposition` arrives byte-exact, untouched
+/// by the utf8-lossy JSON envelope.
 ///
-/// The `.harn` function under a `@stream` route is a declaration-only
-/// stub — it owns the route, its `@scopes`, and its docs, while the
-/// stream source lives in embedder Rust (where the event store is).
+/// The two markers differ only on the *request* body: `@stream` never
+/// reads one (`body` is `None`), while `@raw` buffers it up to the
+/// configured limit and hands the exact bytes over (`body` is `Some`)
+/// — the channel for binary/multipart uploads.
+///
+/// The `.harn` function under a `@stream`/`@raw` route is a
+/// declaration-only stub — it owns the route, its `@scopes`, and its
+/// docs, while the body source/sink lives in embedder Rust (where the
+/// event store / object store is).
 #[async_trait]
 pub trait SiteStreamProvider: Send + Sync {
-    /// Open the stream for one admitted request.
+    /// Answer one admitted request.
     ///
     /// * `route` — the matched function's declared [`RouteSpec`].
     /// * `auth` — the identity the [`SiteAuth`] hook resolved (tenant,
@@ -207,8 +232,14 @@ pub trait SiteStreamProvider: Send + Sync {
     /// * `request` — the request head as the same JSON dict a `.harn`
     ///   handler would receive (`method`, `path`, `route`,
     ///   `path_params`/`params`, `query`, `headers`, `client_ip`,
-    ///   `remote_addr`), minus any body — a stream route never reads
-    ///   one.
+    ///   `remote_addr`), minus any body — the raw bytes travel in
+    ///   `body`, never through the JSON dict.
+    /// * `body` — `None` on a `@stream` route (the body is never read);
+    ///   `Some(bytes)` on a `@raw` route: the exact request payload,
+    ///   buffered up to [`crate::DEFAULT_HTTP_BODY_LIMIT_BYTES`]
+    ///   (larger requests are refused with a 413 before the provider is
+    ///   consulted). Multipart parsing is the provider's job — the
+    ///   `content-type` header (with its boundary) is in `request`.
     ///
     /// Errors are just responses: shape a 404/410/500 the same way a
     /// success is shaped, and return it.
@@ -217,6 +248,7 @@ pub trait SiteStreamProvider: Send + Sync {
         route: &RouteSpec,
         auth: Option<&SiteAuthContext>,
         request: Value,
+        body: Option<Bytes>,
     ) -> Response;
 }
 
@@ -246,9 +278,9 @@ pub struct SiteServerConfig {
     /// (the default) keeps the historic behavior: no edge auth and
     /// tenant-less dispatch.
     pub auth: Option<Arc<dyn SiteAuth>>,
-    /// Embedder responder for `@stream` routes. Required when the
-    /// script declares any — building the router fails loudly otherwise,
-    /// since the route would have no body source.
+    /// Embedder responder for `@stream` / `@raw` routes. Required when
+    /// the script declares any — building the router fails loudly
+    /// otherwise, since the route would have no body source.
     pub stream_provider: Option<Arc<dyn SiteStreamProvider>>,
 }
 
@@ -282,7 +314,7 @@ impl SiteServerConfig {
     }
 
     /// Install the embedder [`SiteStreamProvider`] that answers the
-    /// script's `@stream` routes.
+    /// script's `@stream` and `@raw` routes.
     pub fn with_stream_provider(mut self, provider: Arc<dyn SiteStreamProvider>) -> Self {
         self.stream_provider = Some(provider);
         self
@@ -355,8 +387,14 @@ struct SiteRoute {
     /// requirement (public, as far as scopes are concerned).
     required_scopes: BTreeSet<String>,
     /// `@stream` marker: after admission, hand the request head to the
-    /// [`SiteStreamProvider`] instead of dispatching into the VM.
+    /// [`SiteStreamProvider`] instead of dispatching into the VM. The
+    /// request body is never read.
     stream: bool,
+    /// `@raw` marker: like `@stream`, the route is answered by the
+    /// [`SiteStreamProvider`] after admission — but the request body is
+    /// buffered (up to the configured limit) and handed to the provider
+    /// as exact bytes.
+    raw: bool,
 }
 
 /// State shared by every site route handler: the dispatch executor plus
@@ -373,9 +411,9 @@ struct SiteState {
     /// Embedder auth hook; `None` means no edge auth (historic
     /// behavior).
     auth: Option<Arc<dyn SiteAuth>>,
-    /// Embedder stream provider answering `@stream` routes. Present
-    /// whenever the catalog declares one (router construction enforces
-    /// it).
+    /// Embedder stream provider answering `@stream` / `@raw` routes.
+    /// Present whenever the catalog declares one (router construction
+    /// enforces it).
     stream_provider: Option<Arc<dyn SiteStreamProvider>>,
 }
 
@@ -404,11 +442,13 @@ fn build_site_router(
         let Some(spec @ RouteSpec { method, path }) = function.route.as_ref() else {
             continue;
         };
-        // A `@stream` route has no body source without a provider;
-        // refusing to start beats serving a route that can only 500.
-        if function.stream && stream_provider.is_none() {
+        // A `@stream` / `@raw` route has no body source without a
+        // provider; refusing to start beats serving a route that can
+        // only 500.
+        if (function.stream || function.raw) && stream_provider.is_none() {
+            let marker = if function.stream { "@stream" } else { "@raw" };
             return Err(format!(
-                "route {method} {path} (`{}`) is marked @stream but no stream provider is \
+                "route {method} {path} (`{}`) is marked {marker} but no stream provider is \
                  configured; install one with SiteServerConfig::with_stream_provider(...)",
                 function.name
             ));
@@ -419,6 +459,7 @@ fn build_site_router(
             spec: spec.clone(),
             required_scopes: function.required_scopes.clone(),
             stream: function.stream,
+            raw: function.raw,
         };
         if let Some(existing) = by_method.insert(method.clone(), entry) {
             return Err(format!(
@@ -518,13 +559,14 @@ async fn site_dispatch(State(state): State<SiteState>, request: Request) -> Resp
         },
     };
 
-    // `@stream` routes hand off to the embedder's provider right after
-    // admission: no body buffering (a stream route never reads one) and
-    // no VM dispatch — the provider's streaming Response is forwarded
-    // unbuffered, so SSE keep-alive and client-disconnect propagation
-    // are whatever the provider's `Sse`/stream body gives axum.
-    if route.stream {
-        // A @stream route never builds a `CallRequest`, so the
+    // `@stream` / `@raw` routes hand off to the embedder's provider
+    // right after admission, with no VM dispatch — the provider's
+    // Response is forwarded verbatim, so an SSE/stream body flows
+    // unbuffered and a binary body arrives byte-exact. The only
+    // difference between the markers is the request body: `@stream`
+    // never reads one, `@raw` buffers it and hands the exact bytes over.
+    if route.stream || route.raw {
+        // A provider route never builds a `CallRequest`, so the
         // dispatch-level `AuthPolicy` scope check cannot back-stop it
         // the way it does for plain routes. With a hook installed the
         // admission above already compared `@scopes` against the
@@ -541,14 +583,25 @@ async fn site_dispatch(State(state): State<SiteState>, request: Request) -> Resp
             );
         }
         let Some(provider) = state.stream_provider.as_ref() else {
-            // Unreachable: router construction refuses a @stream route
-            // without a provider. Shape a loud 500 rather than panic.
+            // Unreachable: router construction refuses a @stream/@raw
+            // route without a provider. Shape a loud 500 rather than
+            // panic.
             return axum_response_from_dispatch_error(
                 DispatchError::Execution(format!(
-                    "@stream route {route_template} has no stream provider"
+                    "provider route {route_template} has no stream provider"
                 )),
                 &request_id,
             );
+        };
+        // Body buffering happens after admission: an unauthenticated
+        // caller never costs a body read here either.
+        let raw_body = if route.raw {
+            match buffer_request_body(body).await {
+                Ok(bytes) => Some(bytes),
+                Err(response) => return response,
+            }
+        } else {
+            None
         };
         let request = build_request_value(
             &method,
@@ -562,7 +615,7 @@ async fn site_dispatch(State(state): State<SiteState>, request: Request) -> Resp
             &state.trusted_proxies,
         );
         return provider
-            .open(&route.spec, auth_context.as_ref(), request)
+            .open(&route.spec, auth_context.as_ref(), request, raw_body)
             .await;
     }
 
@@ -574,20 +627,9 @@ async fn site_dispatch(State(state): State<SiteState>, request: Request) -> Resp
     let body_bytes = if wants_upgrade {
         Bytes::new()
     } else {
-        match to_bytes(body, DEFAULT_HTTP_BODY_LIMIT_BYTES).await {
+        match buffer_request_body(body).await {
             Ok(bytes) => bytes,
-            Err(_) => {
-                return (
-                    StatusCode::PAYLOAD_TOO_LARGE,
-                    Json(json!({
-                        "code": "request_body_too_large",
-                        "message": format!(
-                            "request body exceeds the {DEFAULT_HTTP_BODY_LIMIT_BYTES}-byte limit"
-                        ),
-                    })),
-                )
-                    .into_response();
-            }
+            Err(response) => return response,
         }
     };
 
@@ -656,6 +698,27 @@ async fn site_dispatch(State(state): State<SiteState>, request: Request) -> Resp
     }
 
     axum_response_from_call(response, &request_id)
+}
+
+/// Buffer a request body up to [`DEFAULT_HTTP_BODY_LIMIT_BYTES`],
+/// shaping the canonical 413 envelope when it is larger (the
+/// `DefaultBodyLimit` layer caps the stream; `to_bytes` surfaces the
+/// overflow as an error).
+async fn buffer_request_body(body: axum::body::Body) -> Result<Bytes, Response> {
+    to_bytes(body, DEFAULT_HTTP_BODY_LIMIT_BYTES)
+        .await
+        .map_err(|_| {
+            (
+                StatusCode::PAYLOAD_TOO_LARGE,
+                Json(json!({
+                    "code": "request_body_too_large",
+                    "message": format!(
+                        "request body exceeds the {DEFAULT_HTTP_BODY_LIMIT_BYTES}-byte limit"
+                    ),
+                })),
+            )
+                .into_response()
+        })
 }
 
 /// Render the `405 Method Not Allowed` for a known path with an `Allow`
