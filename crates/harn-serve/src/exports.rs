@@ -56,6 +56,15 @@ pub struct ExportedFunction {
     /// through the trigger dispatcher (retry / DLQ / budget / cancel all
     /// come free from the dispatcher). See [`JobSpec`].
     pub job: Option<JobSpec>,
+    /// `true` when the function carries a `@stream` attribute alongside
+    /// its HTTP route. A streaming route never buffers the request body
+    /// and never dispatches into the VM: after the site adapter's
+    /// admission checks (the embedder's `SiteAuth` hook plus `@scopes`)
+    /// it hands the request head to the embedder-registered
+    /// `SiteStreamProvider`, which returns a live SSE/chunked response.
+    /// The `.harn` function body is a declaration-only stub for such
+    /// routes — the stream source lives in embedder Rust.
+    pub stream: bool,
 }
 
 /// A `.harn` worker/job entrypoint declared with `@job("name")`.
@@ -187,6 +196,13 @@ pub const RETRY_BAD_ARGS: &str = "HARN-SRV-007";
 /// `@schedule` / `@queue` / `@retry` appears without a `@job` attribute.
 /// Those modifiers only mean something on a job, so they are ignored.
 pub const JOB_MODIFIER_WITHOUT_JOB: &str = "HARN-SRV-008";
+/// `@stream` carries arguments — it is a bare marker. The marker is
+/// dropped, so the route dispatches into the VM like any other handler.
+pub const STREAM_BAD_ARGS: &str = "HARN-SRV-009";
+/// `@stream` appears on a declaration without an HTTP route (no
+/// `@route(...)`, no `handler_*` convention, or a pipeline). Streaming
+/// only means something on a routed `pub fn`, so it is ignored.
+pub const STREAM_WITHOUT_ROUTE: &str = "HARN-SRV-010";
 
 impl std::fmt::Display for ExportDiagnostic {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -246,6 +262,8 @@ impl ExportCatalog {
             }
 
             let (limits, budget) = limits_and_budget_from_attributes(attrs);
+            let route = route_from_attributes(attrs, name, &mut diagnostics);
+            let stream = stream_from_attributes(attrs, name, route.as_ref(), &mut diagnostics);
             functions.insert(
                 name.clone(),
                 ExportedFunction {
@@ -260,7 +278,8 @@ impl ExportCatalog {
                     required_scopes: scopes_from_attributes(attrs, name, &mut diagnostics),
                     limits,
                     budget,
-                    route: route_from_attributes(attrs, name, &mut diagnostics),
+                    route,
+                    stream,
                     job: job_from_attributes(attrs, name, &mut diagnostics),
                 },
             );
@@ -284,6 +303,9 @@ impl ExportCatalog {
             }
             let required_scopes = scopes_from_attributes(attrs, name, &mut diagnostics);
             let (limits, budget) = limits_and_budget_from_attributes(attrs);
+            // Pipelines never carry a route, so a `@stream` on one is
+            // inert — diagnose it the same way as on an unrouted fn.
+            let stream = stream_from_attributes(attrs, name, None, &mut diagnostics);
             functions
                 .entry(name.clone())
                 .or_insert_with(|| ExportedFunction {
@@ -302,6 +324,7 @@ impl ExportCatalog {
                     // HTTP route. Only `pub fn` handlers participate in
                     // `harn serve site`.
                     route: None,
+                    stream,
                     job: job_from_attributes(attrs, name, &mut diagnostics),
                 });
         }
@@ -524,6 +547,52 @@ fn normalize_route_path(path: &str) -> String {
     } else {
         format!("/{trimmed}")
     }
+}
+
+/// Resolve the `@stream` marker on a declaration.
+///
+/// `@stream` is a bare attribute: it takes no arguments and only means
+/// something on a declaration that resolved an HTTP route. A
+/// well-formed marker turns the route into a streaming route — the site
+/// adapter skips body buffering and VM dispatch and hands the request
+/// head to the embedder's `SiteStreamProvider` after admission. A
+/// malformed or unrouted `@stream` records a `HARN-SRV-*` diagnostic
+/// and returns `false`, so the author sees the mistake instead of a
+/// route that silently dispatches a stub handler (or a marker that
+/// silently does nothing).
+fn stream_from_attributes(
+    attrs: &[Attribute],
+    fn_name: &str,
+    route: Option<&RouteSpec>,
+    diagnostics: &mut Vec<ExportDiagnostic>,
+) -> bool {
+    let Some(attr) = attrs.iter().find(|attr| attr.name == "stream") else {
+        return false;
+    };
+    if route.is_none() {
+        diagnostics.push(ExportDiagnostic {
+            code: STREAM_WITHOUT_ROUTE,
+            line: attr.span.line,
+            message: format!(
+                "`@stream` on `{fn_name}` has no effect without an HTTP route \
+                 (`@route(...)` or the `handler_*` convention); ignoring it"
+            ),
+        });
+        return false;
+    }
+    if !attr.args.is_empty() {
+        diagnostics.push(ExportDiagnostic {
+            code: STREAM_BAD_ARGS,
+            line: attr.span.line,
+            message: format!(
+                "`@stream` on `{fn_name}` takes no arguments, found {}; marker dropped — \
+                 the route dispatches as a plain handler",
+                attr.args.len()
+            ),
+        });
+        return false;
+    }
+    true
 }
 
 /// Resolve the worker/job binding a `pub fn` declares with `@job(...)`.
@@ -1218,5 +1287,59 @@ pub fn scan(event: TriggerEvent) -> dict { return {ok: true} }
         assert_eq!(retry.backoff, RetryBackoff::Svix);
         let codes: Vec<&str> = catalog.diagnostics().iter().map(|d| d.code).collect();
         assert_eq!(codes, vec![RETRY_BAD_ARGS]);
+    }
+
+    #[test]
+    fn stream_attribute_marks_routed_functions_only() {
+        let catalog = catalog_from_source(
+            r#"
+@stream
+@route("GET", "/events")
+pub fn events(req: dict) -> dict { return http_ok({}) }
+
+@stream
+pub fn handler_feed(req: dict) -> dict { return http_ok({}) }
+
+@route("GET", "/plain")
+pub fn plain(req: dict) -> dict { return http_ok({}) }
+"#,
+        );
+        assert!(
+            catalog.diagnostics().is_empty(),
+            "unexpected diagnostics: {:?}",
+            catalog.diagnostics()
+        );
+        // Works with an explicit @route and with the handler_* convention.
+        assert!(catalog.function("events").expect("events").stream);
+        assert!(catalog.function("handler_feed").expect("feed").stream);
+        // A routed fn without the marker is a plain dispatch route.
+        assert!(!catalog.function("plain").expect("plain").stream);
+    }
+
+    #[test]
+    fn stream_with_args_is_diagnosed_and_dropped() {
+        let catalog = catalog_from_source(
+            r#"
+@stream("sse")
+@route("GET", "/events")
+pub fn events(req: dict) -> dict { return http_ok({}) }
+"#,
+        );
+        assert!(!catalog.function("events").expect("events").stream);
+        let codes: Vec<&str> = catalog.diagnostics().iter().map(|d| d.code).collect();
+        assert_eq!(codes, vec![STREAM_BAD_ARGS]);
+    }
+
+    #[test]
+    fn stream_without_route_is_diagnosed_and_ignored() {
+        let catalog = catalog_from_source(
+            r"
+@stream
+pub fn helper(req: dict) -> dict { return req }
+",
+        );
+        assert!(!catalog.function("helper").expect("helper").stream);
+        let codes: Vec<&str> = catalog.diagnostics().iter().map(|d| d.code).collect();
+        assert_eq!(codes, vec![STREAM_WITHOUT_ROUTE]);
     }
 }
