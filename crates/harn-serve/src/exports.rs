@@ -65,6 +65,17 @@ pub struct ExportedFunction {
     /// The `.harn` function body is a declaration-only stub for such
     /// routes — the stream source lives in embedder Rust.
     pub stream: bool,
+    /// `true` when the function carries a `@raw` attribute alongside its
+    /// HTTP route. Like `@stream`, a raw route never dispatches into the
+    /// VM — after admission the site adapter hands the request to the
+    /// embedder's `SiteStreamProvider` — but unlike `@stream` the
+    /// request body *is* read: it is buffered (up to the configured
+    /// body limit) and passed to the provider as raw bytes, untouched
+    /// by the utf8-lossy / base64 JSON-envelope encoding. This is the
+    /// seam for binary and multipart uploads (pack publish) whose
+    /// handling lives in embedder Rust. The `.harn` function body is a
+    /// declaration-only stub, exactly as for `@stream`.
+    pub raw: bool,
 }
 
 /// A `.harn` worker/job entrypoint declared with `@job("name")`.
@@ -203,6 +214,17 @@ pub const STREAM_BAD_ARGS: &str = "HARN-SRV-009";
 /// `@route(...)`, no `handler_*` convention, or a pipeline). Streaming
 /// only means something on a routed `pub fn`, so it is ignored.
 pub const STREAM_WITHOUT_ROUTE: &str = "HARN-SRV-010";
+/// `@raw` carries arguments — it is a bare marker. The marker is
+/// dropped, so the route dispatches into the VM like any other handler.
+pub const RAW_BAD_ARGS: &str = "HARN-SRV-011";
+/// `@raw` appears on a declaration without an HTTP route. Raw-body
+/// hand-off only means something on a routed `pub fn`, so it is ignored.
+pub const RAW_WITHOUT_ROUTE: &str = "HARN-SRV-012";
+/// `@raw` and `@stream` appear on the same declaration. They contradict
+/// on body handling (`@stream` never reads the request body, `@raw`
+/// buffers it for the provider), so `@raw` is dropped and the route
+/// behaves as `@stream`.
+pub const RAW_CONFLICTS_WITH_STREAM: &str = "HARN-SRV-013";
 
 impl std::fmt::Display for ExportDiagnostic {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -264,6 +286,7 @@ impl ExportCatalog {
             let (limits, budget) = limits_and_budget_from_attributes(attrs);
             let route = route_from_attributes(attrs, name, &mut diagnostics);
             let stream = stream_from_attributes(attrs, name, route.as_ref(), &mut diagnostics);
+            let raw = raw_from_attributes(attrs, name, route.as_ref(), stream, &mut diagnostics);
             functions.insert(
                 name.clone(),
                 ExportedFunction {
@@ -280,6 +303,7 @@ impl ExportCatalog {
                     budget,
                     route,
                     stream,
+                    raw,
                     job: job_from_attributes(attrs, name, &mut diagnostics),
                 },
             );
@@ -303,9 +327,10 @@ impl ExportCatalog {
             }
             let required_scopes = scopes_from_attributes(attrs, name, &mut diagnostics);
             let (limits, budget) = limits_and_budget_from_attributes(attrs);
-            // Pipelines never carry a route, so a `@stream` on one is
-            // inert — diagnose it the same way as on an unrouted fn.
+            // Pipelines never carry a route, so a `@stream` / `@raw` on
+            // one is inert — diagnose it the same way as on an unrouted fn.
             let stream = stream_from_attributes(attrs, name, None, &mut diagnostics);
+            let raw = raw_from_attributes(attrs, name, None, stream, &mut diagnostics);
             functions
                 .entry(name.clone())
                 .or_insert_with(|| ExportedFunction {
@@ -325,6 +350,7 @@ impl ExportCatalog {
                     // `harn serve site`.
                     route: None,
                     stream,
+                    raw,
                     job: job_from_attributes(attrs, name, &mut diagnostics),
                 });
         }
@@ -566,15 +592,84 @@ fn stream_from_attributes(
     route: Option<&RouteSpec>,
     diagnostics: &mut Vec<ExportDiagnostic>,
 ) -> bool {
-    let Some(attr) = attrs.iter().find(|attr| attr.name == "stream") else {
+    bare_route_marker_from_attributes(
+        attrs,
+        "stream",
+        fn_name,
+        route,
+        diagnostics,
+        STREAM_BAD_ARGS,
+        STREAM_WITHOUT_ROUTE,
+    )
+}
+
+/// Resolve the `@raw` marker on a declaration.
+///
+/// `@raw` mirrors `@stream` (a bare, route-only marker that turns the
+/// route into a provider-answered route), except the request body *is*
+/// buffered and handed to the provider as raw bytes. The two markers
+/// contradict on body handling, so declaring both is diagnosed
+/// (`HARN-SRV-013`) and `@raw` is dropped — the route behaves as
+/// `@stream`.
+fn raw_from_attributes(
+    attrs: &[Attribute],
+    fn_name: &str,
+    route: Option<&RouteSpec>,
+    stream: bool,
+    diagnostics: &mut Vec<ExportDiagnostic>,
+) -> bool {
+    let raw = bare_route_marker_from_attributes(
+        attrs,
+        "raw",
+        fn_name,
+        route,
+        diagnostics,
+        RAW_BAD_ARGS,
+        RAW_WITHOUT_ROUTE,
+    );
+    if raw && stream {
+        let line = attrs
+            .iter()
+            .find(|attr| attr.name == "raw")
+            .map(|attr| attr.span.line)
+            .unwrap_or(0);
+        diagnostics.push(ExportDiagnostic {
+            code: RAW_CONFLICTS_WITH_STREAM,
+            line,
+            message: format!(
+                "`@raw` on `{fn_name}` conflicts with `@stream` (one never reads the request \
+                 body, the other buffers it); dropping `@raw` — the route behaves as `@stream`"
+            ),
+        });
+        return false;
+    }
+    raw
+}
+
+/// Shared resolution for the bare route markers (`@stream`, `@raw`):
+/// present-and-well-formed on a routed declaration returns `true`;
+/// arguments or a missing route record the given diagnostic codes and
+/// return `false`, so the author sees the mistake instead of a route
+/// that silently dispatches a stub handler (or a marker that silently
+/// does nothing).
+fn bare_route_marker_from_attributes(
+    attrs: &[Attribute],
+    marker: &str,
+    fn_name: &str,
+    route: Option<&RouteSpec>,
+    diagnostics: &mut Vec<ExportDiagnostic>,
+    bad_args_code: &'static str,
+    without_route_code: &'static str,
+) -> bool {
+    let Some(attr) = attrs.iter().find(|attr| attr.name == marker) else {
         return false;
     };
     if route.is_none() {
         diagnostics.push(ExportDiagnostic {
-            code: STREAM_WITHOUT_ROUTE,
+            code: without_route_code,
             line: attr.span.line,
             message: format!(
-                "`@stream` on `{fn_name}` has no effect without an HTTP route \
+                "`@{marker}` on `{fn_name}` has no effect without an HTTP route \
                  (`@route(...)` or the `handler_*` convention); ignoring it"
             ),
         });
@@ -582,10 +677,10 @@ fn stream_from_attributes(
     }
     if !attr.args.is_empty() {
         diagnostics.push(ExportDiagnostic {
-            code: STREAM_BAD_ARGS,
+            code: bad_args_code,
             line: attr.span.line,
             message: format!(
-                "`@stream` on `{fn_name}` takes no arguments, found {}; marker dropped — \
+                "`@{marker}` on `{fn_name}` takes no arguments, found {}; marker dropped — \
                  the route dispatches as a plain handler",
                 attr.args.len()
             ),
@@ -1341,5 +1436,79 @@ pub fn helper(req: dict) -> dict { return req }
         assert!(!catalog.function("helper").expect("helper").stream);
         let codes: Vec<&str> = catalog.diagnostics().iter().map(|d| d.code).collect();
         assert_eq!(codes, vec![STREAM_WITHOUT_ROUTE]);
+    }
+
+    #[test]
+    fn raw_attribute_marks_routed_functions_only() {
+        let catalog = catalog_from_source(
+            r#"
+@raw
+@route("POST", "/packs/publish")
+pub fn publish(req: dict) -> dict { return http_ok({}) }
+
+@raw
+pub fn handler_upload(req: dict) -> dict { return http_ok({}) }
+
+@route("GET", "/plain")
+pub fn plain(req: dict) -> dict { return http_ok({}) }
+"#,
+        );
+        assert!(
+            catalog.diagnostics().is_empty(),
+            "unexpected diagnostics: {:?}",
+            catalog.diagnostics()
+        );
+        // Works with an explicit @route and with the handler_* convention.
+        assert!(catalog.function("publish").expect("publish").raw);
+        assert!(catalog.function("handler_upload").expect("upload").raw);
+        // A routed fn without the marker is a plain dispatch route.
+        assert!(!catalog.function("plain").expect("plain").raw);
+        // `@raw` never implies `@stream`.
+        assert!(!catalog.function("publish").expect("publish").stream);
+    }
+
+    #[test]
+    fn raw_with_args_is_diagnosed_and_dropped() {
+        let catalog = catalog_from_source(
+            r#"
+@raw("bytes")
+@route("POST", "/upload")
+pub fn upload(req: dict) -> dict { return http_ok({}) }
+"#,
+        );
+        assert!(!catalog.function("upload").expect("upload").raw);
+        let codes: Vec<&str> = catalog.diagnostics().iter().map(|d| d.code).collect();
+        assert_eq!(codes, vec![RAW_BAD_ARGS]);
+    }
+
+    #[test]
+    fn raw_without_route_is_diagnosed_and_ignored() {
+        let catalog = catalog_from_source(
+            r"
+@raw
+pub fn helper(req: dict) -> dict { return req }
+",
+        );
+        assert!(!catalog.function("helper").expect("helper").raw);
+        let codes: Vec<&str> = catalog.diagnostics().iter().map(|d| d.code).collect();
+        assert_eq!(codes, vec![RAW_WITHOUT_ROUTE]);
+    }
+
+    #[test]
+    fn raw_conflicting_with_stream_is_diagnosed_and_dropped() {
+        let catalog = catalog_from_source(
+            r#"
+@stream
+@raw
+@route("GET", "/both")
+pub fn both(req: dict) -> dict { return http_ok({}) }
+"#,
+        );
+        // `@stream` wins; `@raw` is dropped with a diagnostic.
+        let function = catalog.function("both").expect("both");
+        assert!(function.stream);
+        assert!(!function.raw);
+        let codes: Vec<&str> = catalog.diagnostics().iter().map(|d| d.code).collect();
+        assert_eq!(codes, vec![RAW_CONFLICTS_WITH_STREAM]);
     }
 }

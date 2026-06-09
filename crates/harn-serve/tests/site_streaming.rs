@@ -65,8 +65,11 @@ impl SiteStreamProvider for ThreeEventProvider {
         route: &RouteSpec,
         auth: Option<&SiteAuthContext>,
         request: Value,
+        body: Option<axum::body::Bytes>,
     ) -> Response {
         self.calls.fetch_add(1, Ordering::SeqCst);
+        // A @stream route never reads the request body.
+        assert!(body.is_none(), "stream route must not buffer a body");
         let opened = json!({
             "route": { "method": route.method, "path": route.path },
             "tenant": auth.and_then(|context| context.tenant_id.as_ref()).map(|t| t.0.clone()),
