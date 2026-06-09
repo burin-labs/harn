@@ -52,11 +52,11 @@ use crate::tools::args::{
 use crate::tools::permissions::enforce_path_scope;
 
 use super::edit_common::{
-    first_syntax_error, format_query_error, read_source, resolve_target_capture, sha256_hex,
-    write_source,
+    first_syntax_error, format_query_error, lossy_str, read_source, resolve_target_capture,
+    sha256_hex, write_source,
 };
 use super::language::{Language, TEXT_PATCH_FALLBACK};
-use super::parse::parse_source;
+use super::parse::parse_bytes;
 
 const BUILTIN: &str = "hostlib_ast_insert_at_anchor";
 const DEFAULT_TARGET_CAPTURE: &str = "anchor";
@@ -176,12 +176,12 @@ pub(super) fn run(args: &[VmValue]) -> Result<VmValue, HostlibError> {
         }
     };
 
-    let tree = parse_source(&source, language).map_err(|err| HostlibError::Backend {
+    let tree = parse_bytes(&source, language).map_err(|err| HostlibError::Backend {
         builtin: BUILTIN,
         message: err.to_string(),
     })?;
 
-    let anchors = collect_anchors(&query, &tree, source.as_bytes(), target_index);
+    let anchors = collect_anchors(&query, &tree, &source, target_index);
     if anchors.is_empty() {
         return Ok(no_match_response(
             &path_str,
@@ -227,7 +227,11 @@ pub(super) fn run(args: &[VmValue]) -> Result<VmValue, HostlibError> {
 
     if validate {
         if let Some(detail) = first_syntax_error(&patched, language) {
-            return Ok(syntax_error_response(&path_str, &patched, &detail));
+            return Ok(syntax_error_response(
+                &path_str,
+                &lossy_str(&patched),
+                &detail,
+            ));
         }
     }
 
@@ -335,13 +339,13 @@ struct InsertionPlan {
 }
 
 fn build_insertion(
-    source: &str,
+    source: &[u8],
     anchor: Node<'_>,
     position: Position,
     language: Language,
     indent_override: Option<&str>,
 ) -> Result<InsertionPlan, String> {
-    let bytes = source.as_bytes();
+    let bytes = source;
     let anchor_indent = line_indent(bytes, anchor.start_byte());
 
     match position {
@@ -514,13 +518,16 @@ fn line_indent(bytes: &[u8], byte: usize) -> String {
 
 /// Detect the file's prevailing indent unit so child insertions feel
 /// native. Override > language default > heuristic scan.
-fn indent_unit(source: &str, language: Language, override_unit: Option<&str>) -> String {
+fn indent_unit(source: &[u8], language: Language, override_unit: Option<&str>) -> String {
     if let Some(unit) = override_unit {
         if !unit.is_empty() {
             return unit.to_string();
         }
     }
-    if let Some(unit) = scan_indent_unit(source) {
+    // Indent detection is a display/formatting heuristic, so a lossy view
+    // of the raw bytes is fine here — it never feeds back into byte offsets
+    // or the write path.
+    if let Some(unit) = scan_indent_unit(&lossy_str(source)) {
         return unit;
     }
     language_default_indent(language).to_string()
@@ -587,12 +594,16 @@ fn reindent_lines(body: &str, indent: &str) -> String {
     out
 }
 
-fn splice_insert(source: &str, byte: usize, text: &str) -> String {
-    let mut out = String::with_capacity(source.len() + text.len());
+/// Insert `text` at byte offset `byte` in the raw `source` bytes. Operates
+/// on bytes so any non-UTF-8 bytes elsewhere in the file pass through the
+/// insertion untouched (`byte` is a tree-sitter offset over these same raw
+/// bytes via [`parse_bytes`]).
+fn splice_insert(source: &[u8], byte: usize, text: &str) -> Vec<u8> {
     let cut = byte.min(source.len());
-    out.push_str(&source[..cut]);
-    out.push_str(text);
-    out.push_str(&source[cut..]);
+    let mut out = Vec::with_capacity(source.len() + text.len());
+    out.extend_from_slice(&source[..cut]);
+    out.extend_from_slice(text.as_bytes());
+    out.extend_from_slice(&source[cut..]);
     out
 }
 
@@ -603,8 +614,8 @@ fn splice_insert(source: &str, byte: usize, text: &str) -> String {
 #[allow(clippy::too_many_arguments)]
 fn applied_response(
     path: &str,
-    before: &str,
-    after: &str,
+    before: &[u8],
+    after: &[u8],
     anchor: &AnchorSpan,
     insertion_byte: usize,
     inserted_text: &str,
@@ -622,9 +633,9 @@ fn applied_response(
         ("indent", str_value(target_indent)),
         ("inserted_text", str_value(inserted_text)),
         ("anchor", anchor_to_value(anchor)),
-        ("before_sha256", str_value(sha256_hex(before.as_bytes()))),
-        ("after_sha256", str_value(sha256_hex(after.as_bytes()))),
-        ("preview", str_value(after)),
+        ("before_sha256", str_value(sha256_hex(before))),
+        ("after_sha256", str_value(sha256_hex(after))),
+        ("preview", str_value(lossy_str(after))),
     ])
 }
 
@@ -800,6 +811,59 @@ mod tests {
         assert!(
             alpha < beta && beta < gamma,
             "beta must land between alpha and gamma:\n{preview}"
+        );
+    }
+
+    fn write_temp_bytes(extension: &str, source: &[u8]) -> NamedTempFile {
+        let mut file = tempfile::Builder::new()
+            .suffix(&format!(".{extension}"))
+            .tempfile()
+            .expect("temp file");
+        file.write_all(source).expect("write source");
+        file
+    }
+
+    #[test]
+    fn preserves_invalid_utf8_bytes_outside_insertion() {
+        // An invalid byte (0x80) lives in a comment far from the insertion
+        // anchor. Reading the file lossily and writing the decoded buffer
+        // back would rewrite 0x80 to U+FFFD even though the insert never
+        // touches that region.
+        let mut source: Vec<u8> = b"// header byte: ".to_vec();
+        source.push(0x80);
+        source.extend_from_slice(b"\nfn alpha() {\n    1\n}\n");
+        assert!(
+            std::str::from_utf8(&source).is_err(),
+            "fixture must be non-UTF8"
+        );
+
+        let file = write_temp_bytes("rs", &source);
+        let path = file.path().to_string_lossy().to_string();
+        let result = invoke(dict(&[
+            ("path", vm_string(&path)),
+            (
+                "query",
+                vm_string(
+                    "(function_item name: (identifier) @name (#eq? @name \"alpha\")) @anchor",
+                ),
+            ),
+            ("position", vm_string("after")),
+            ("content", vm_string("fn beta() {\n    2\n}")),
+        ]));
+        assert_eq!(s(field(&result, "result")), "applied");
+
+        let on_disk = std::fs::read(file.path()).expect("read raw bytes");
+        assert!(
+            String::from_utf8_lossy(&on_disk).contains("fn beta()"),
+            "insert should apply"
+        );
+        assert!(
+            on_disk.contains(&0x80),
+            "invalid byte must be preserved, not rewritten to U+FFFD"
+        );
+        assert!(
+            !on_disk.windows(3).any(|w| w == [0xEF, 0xBF, 0xBD]),
+            "no U+FFFD replacement bytes should be introduced"
         );
     }
 

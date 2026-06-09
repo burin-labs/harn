@@ -89,6 +89,15 @@ pub(super) fn read_source(path: &str, max_bytes: usize) -> Result<String, Hostli
 /// Build a parser, point it at `language`'s grammar, and parse `source`.
 /// Tree-sitter parser construction is cheap; we don't bother pooling.
 pub(super) fn parse_source(source: &str, language: Language) -> Result<Tree, HostlibError> {
+    parse_bytes(source.as_bytes(), language)
+}
+
+/// Parse raw `source` bytes for `language`. The byte offsets in the
+/// returned tree index `source` directly, so the AST edit primitives can
+/// splice on the original bytes and preserve any non-UTF-8 bytes verbatim
+/// (lossy decoding the source first would corrupt them — see the
+/// byte-preserving edit path in `edit_common`).
+pub(super) fn parse_bytes(source: &[u8], language: Language) -> Result<Tree, HostlibError> {
     let ts_language = language
         .ts_language()
         .ok_or_else(|| HostlibError::Backend {

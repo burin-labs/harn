@@ -48,7 +48,7 @@ use crate::tools::args::{
 };
 use crate::tools::permissions::enforce_path_scope;
 
-use super::edit_common::{format_query_error, node_text, read_source};
+use super::edit_common::{format_query_error, lossy_str, node_text, read_source};
 use super::language::{Language, TEXT_PATCH_FALLBACK};
 use super::parse::parse_source;
 
@@ -85,7 +85,8 @@ pub(super) fn run(args: &[VmValue]) -> Result<VmValue, HostlibError> {
                     ))
                 }
             };
-            (read_source(BUILTIN, &path, None, 0)?, language)
+            // Read-only search: lossy decode is fine, no bytes are written back.
+            (lossy_str(&read_source(BUILTIN, &path, None, 0)?), language)
         }
         (None, Some(src)) => {
             // Inline source carries no extension, so a language is required.
@@ -235,7 +236,7 @@ fn collect_matches(query: &Query, tree: &Tree, source: &str) -> Vec<SearchMatch>
             if !captures.iter().any(|c| c.name == name) {
                 captures.push(CaptureBinding {
                     name: name.to_string(),
-                    text: node_text(capture.node, source),
+                    text: node_text(capture.node, source_bytes),
                     span,
                 });
             }

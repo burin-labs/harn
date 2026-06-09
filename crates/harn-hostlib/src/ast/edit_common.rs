@@ -13,7 +13,7 @@ use tree_sitter::{Node, Query, QueryCursor, QueryError, QueryErrorKind, Tree};
 use crate::error::HostlibError;
 
 use super::language::Language;
-use super::parse::parse_source;
+use super::parse::parse_bytes;
 
 /// A matched, replaceable byte span plus its 0-based row/col coordinates
 /// and the original text it covers. Shared by every query-driven edit
@@ -164,12 +164,19 @@ fn insert_span(into: &mut BTreeMap<(usize, usize), Span>, node: Node<'_>, source
 /// processed in reverse start order so earlier byte offsets stay valid as
 /// later ones are rewritten; whitespace and trivia outside each span are
 /// preserved verbatim (the format-preserving guarantee).
-pub(super) fn splice(source: &str, chosen: &[Span], replacement: &str) -> String {
+///
+/// Operates on raw bytes so that bytes outside the edited spans — including
+/// any invalid-UTF-8 bytes elsewhere in the file — are copied through
+/// untouched. The span offsets must index `source` directly (they come from
+/// a tree parsed over these same raw bytes via [`parse_bytes`]).
+pub(super) fn splice(source: &[u8], chosen: &[Span], replacement: &str) -> Vec<u8> {
     let mut by_start: Vec<&Span> = chosen.iter().collect();
     by_start.sort_by_key(|s| std::cmp::Reverse(s.start_byte));
-    let mut out = source.to_string();
+    let mut out = source.to_vec();
     for span in by_start {
-        out.replace_range(span.start_byte..span.end_byte, replacement);
+        let end = span.end_byte.min(out.len());
+        let start = span.start_byte.min(end);
+        out.splice(start..end, replacement.bytes());
     }
     out
 }
@@ -228,8 +235,8 @@ pub(super) fn format_query_error(err: &QueryError) -> String {
 /// any ERROR / MISSING node, return a short human-readable diagnostic
 /// pinpointing the first offender. Returns `None` when the source
 /// parses cleanly.
-pub(super) fn first_syntax_error(source: &str, language: Language) -> Option<String> {
-    let tree = parse_source(source, language).ok()?;
+pub(super) fn first_syntax_error(source: &[u8], language: Language) -> Option<String> {
+    let tree = parse_bytes(source, language).ok()?;
     let root = tree.root_node();
     if !root.has_error() {
         return None;
@@ -266,14 +273,13 @@ pub(super) fn first_syntax_error(source: &str, language: Language) -> Option<Str
     Some("post-edit source has parse errors".into())
 }
 
-pub(super) fn node_text(node: Node<'_>, source: &str) -> String {
-    let bytes = source.as_bytes();
-    let start = node.start_byte().min(bytes.len());
-    let end = node.end_byte().min(bytes.len());
+pub(super) fn node_text(node: Node<'_>, source: &[u8]) -> String {
+    let start = node.start_byte().min(source.len());
+    let end = node.end_byte().min(source.len());
     if start >= end {
         return String::new();
     }
-    std::str::from_utf8(&bytes[start..end])
+    std::str::from_utf8(&source[start..end])
         .map(|s| s.to_string())
         .unwrap_or_default()
 }
@@ -290,12 +296,18 @@ pub(super) fn sha256_hex(bytes: &[u8]) -> String {
 /// Read `path` through staged-fs when `session_id` is set, otherwise
 /// fall back to the real filesystem. Truncates to `max_bytes` (`0` is
 /// unlimited). `builtin` names the caller for error reporting.
+///
+/// Returns the **raw bytes** verbatim — no lossy UTF-8 decoding. The edit
+/// primitives parse, splice, and write these same bytes, so any invalid
+/// UTF-8 elsewhere in the file survives a targeted edit untouched. Decoding
+/// to a `String` here would silently rewrite every invalid byte in the file
+/// to U+FFFD on write-back, even in regions the edit never touched.
 pub(super) fn read_source(
     builtin: &'static str,
     path: &Path,
     session_id: Option<&str>,
     max_bytes: usize,
-) -> Result<String, HostlibError> {
+) -> Result<Vec<u8>, HostlibError> {
     let bytes = if let Some(result) = crate::fs::read(path, session_id) {
         result.map_err(|err| HostlibError::Backend {
             builtin,
@@ -307,26 +319,34 @@ pub(super) fn read_source(
             message: format!("read `{}`: {err}", path.display()),
         })?
     };
-    let slice = if max_bytes == 0 || bytes.len() <= max_bytes {
-        &bytes[..]
+    if max_bytes != 0 && bytes.len() > max_bytes {
+        Ok(bytes[..max_bytes].to_vec())
     } else {
-        &bytes[..max_bytes]
-    };
-    Ok(String::from_utf8_lossy(slice).into_owned())
+        Ok(bytes)
+    }
+}
+
+/// Best-effort UTF-8 view of raw source bytes for display/heuristic use
+/// (response previews, indent detection). Lossy decoding is safe here
+/// because the result never feeds back into byte offsets or the write
+/// path — only [`splice`]/[`write_source`] over the raw bytes do.
+pub(super) fn lossy_str(source: &[u8]) -> String {
+    String::from_utf8_lossy(source).into_owned()
 }
 
 /// Write `contents` to `path`. Routes through staged-fs when active;
 /// otherwise captures an auto-snapshot (#1722 fallback) and writes
 /// directly. Creates the parent directory if it doesn't exist.
+///
+/// Takes raw bytes so the byte-preserving edit path can write back the
+/// original (possibly non-UTF-8) bytes outside the edited span verbatim.
 pub(super) fn write_source(
     builtin: &'static str,
     path: &Path,
-    contents: &str,
+    contents: &[u8],
     session_id: Option<&str>,
 ) -> Result<(), HostlibError> {
-    if crate::fs::stage_write_or_none(builtin, path, contents.as_bytes(), true, true, session_id)?
-        .is_some()
-    {
+    if crate::fs::stage_write_or_none(builtin, path, contents, true, true, session_id)?.is_some() {
         return Ok(());
     }
     crate::fs_snapshot::auto_capture_for_write(builtin, path);
