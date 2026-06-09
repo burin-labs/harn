@@ -31,6 +31,28 @@ pipeline test(task) {
   assert_eq(round(skip_rate(rows) * 1000), 250)
   assert_eq(round(timeout_rate(rows) * 1000), 63)
   assert_eq(cost_per_solved(rows), 5.0)
+  // estimate_cost_usd: cache-aware token->USD. 1M billable input @ $3 + 1M
+  // output @ $15 = 18.0; cache-read tokens bill at their own rate and are not
+  // re-charged at the input rate.
+  assert_eq(estimate_cost_usd(nil, {inputTokens: 1000000}), nil)
+  assert_eq(
+    estimate_cost_usd(
+      {inputPerMTok: 3.0, outputPerMTok: 15.0},
+      {inputTokens: 1000000, outputTokens: 1000000},
+    ),
+    18.0,
+  )
+  assert_eq(
+    estimate_cost_usd(
+      {inputPerMTok: 3.0, outputPerMTok: 15.0, cacheReadPerMTok: 0.3},
+      {inputTokens: 1000000, cacheReadTokens: 1000000},
+    ),
+    0.3,
+  )
+  // realized_trial_cost_usd: a cached replay realizes $0; otherwise pass-through.
+  assert_eq(realized_trial_cost_usd(0.42, true), 0.0)
+  assert_eq(realized_trial_cost_usd(0.42, false), 0.42)
+  assert_eq(realized_trial_cost_usd(nil, true), nil)
   assert_eq(worst_group(rows), {group: "rust", pass_rate: 0.0, cases: 2})
   let aggregate = aggregate_trials(
     "agg-a",

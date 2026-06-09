@@ -644,6 +644,63 @@ pub fn cost_per_solved(rows: list) {
 }
 
 /**
+ * Estimate USD model cost from a pricing descriptor and token usage, or nil
+ * when pricing is unknown.
+ *
+ * `pricing` carries per-million-token rates (`inputPerMTok`, `outputPerMTok`,
+ * and optional `cacheReadPerMTok` / `cacheWritePerMTok`, each defaulting to the
+ * input rate when absent). `usage` carries token counts (`inputTokens`,
+ * `outputTokens`, `cacheReadTokens`, and `cacheWriteTokens` — the
+ * `cacheCreationInputTokens` alias is also honored). Cache-read and cache-write
+ * tokens are billed at their own rates and subtracted from the billable input
+ * so they are never double-charged at the full input rate. Returns the total
+ * rounded to 6 decimal places.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: estimate_cost_usd(pricing, usage)
+ */
+pub fn estimate_cost_usd(pricing, usage: dict) {
+  if pricing == nil {
+    return nil
+  }
+  let input_tokens = to_float(usage?.inputTokens ?? 0) ?? 0.0
+  let output_tokens = to_float(usage?.outputTokens ?? 0) ?? 0.0
+  let cache_read_tokens = to_float(usage?.cacheReadTokens ?? 0) ?? 0.0
+  let cache_write_tokens = to_float(usage?.cacheWriteTokens ?? usage?.cacheCreationInputTokens ?? 0) ?? 0.0
+  let billable_input_tokens = max(input_tokens - cache_read_tokens - cache_write_tokens, 0.0)
+  let input_cost = billable_input_tokens / 1000000.0 * (to_float(pricing?.inputPerMTok ?? 0) ?? 0.0)
+  let output_cost = output_tokens / 1000000.0 * (to_float(pricing?.outputPerMTok ?? 0) ?? 0.0)
+  let cache_read_cost = cache_read_tokens / 1000000.0
+    * (to_float(pricing?.cacheReadPerMTok ?? pricing?.inputPerMTok ?? 0) ?? 0.0)
+  let cache_write_cost = cache_write_tokens / 1000000.0
+    * (to_float(pricing?.cacheWritePerMTok ?? pricing?.inputPerMTok ?? 0) ?? 0.0)
+  return __round_digits(input_cost + output_cost + cache_read_cost + cache_write_cost, 6)
+}
+
+/**
+ * Realized trial cost after cache-trajectory replay accounting. A cached replay
+ * re-runs a previously-recorded trajectory at no model cost, so its realized
+ * cost is 0.0 even though `derived_cost_usd` reflects the original (uncached)
+ * spend. With no replay (or unknown derived cost) the derived value passes
+ * through unchanged.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: realized_trial_cost_usd(derived_cost_usd, cache_replay)
+ */
+pub fn realized_trial_cost_usd(derived_cost_usd, cache_replay: bool) {
+  if cache_replay && derived_cost_usd != nil {
+    return 0.0
+  }
+  return derived_cost_usd
+}
+
+/**
  * Return the group with the lowest macro pass@1.
  *
  * @effects: []
