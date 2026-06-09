@@ -49,12 +49,12 @@ use crate::tools::args::{
 use crate::tools::permissions::enforce_path_scope;
 
 use super::edit_common::{
-    collect_target_spans, first_syntax_error, format_query_error, read_source,
+    collect_target_spans, first_syntax_error, format_query_error, lossy_str, read_source,
     resolve_target_capture, select_spans, sha256_hex, splice, write_source, SelectFailure,
     Selector, Span,
 };
 use super::language::{Language, TEXT_PATCH_FALLBACK};
-use super::parse::parse_source;
+use super::parse::parse_bytes;
 
 const BUILTIN: &str = "hostlib_ast_apply_node";
 const DEFAULT_TARGET_CAPTURE: &str = "target";
@@ -140,12 +140,12 @@ pub(super) fn run(args: &[VmValue]) -> Result<VmValue, HostlibError> {
         }
     };
 
-    let tree = parse_source(&source, language).map_err(|err| HostlibError::Backend {
+    let tree = parse_bytes(&source, language).map_err(|err| HostlibError::Backend {
         builtin: BUILTIN,
         message: err.to_string(),
     })?;
 
-    let spans = collect_target_spans(&query, &tree, source.as_bytes(), target_index);
+    let spans = collect_target_spans(&query, &tree, &source, target_index);
     if spans.is_empty() {
         return Ok(no_match_response(
             &path_str,
@@ -174,7 +174,12 @@ pub(super) fn run(args: &[VmValue]) -> Result<VmValue, HostlibError> {
 
     if validate {
         if let Some(detail) = first_syntax_error(&patched, language) {
-            return Ok(syntax_error_response(&path_str, &patched, &detail, &chosen));
+            return Ok(syntax_error_response(
+                &path_str,
+                &lossy_str(&patched),
+                &detail,
+                &chosen,
+            ));
         }
     }
 
@@ -198,8 +203,8 @@ pub(super) fn run(args: &[VmValue]) -> Result<VmValue, HostlibError> {
 
 fn applied_response(
     path: &str,
-    before: &str,
-    after: &str,
+    before: &[u8],
+    after: &[u8],
     chosen: &[Span],
     replacement: &str,
     dry_run: bool,
@@ -220,15 +225,9 @@ fn applied_response(
                         .collect(),
                 )),
             ),
-            (
-                "before_sha256".to_string(),
-                str_value(sha256_hex(before.as_bytes())),
-            ),
-            (
-                "after_sha256".to_string(),
-                str_value(sha256_hex(after.as_bytes())),
-            ),
-            ("preview".to_string(), str_value(after)),
+            ("before_sha256".to_string(), str_value(sha256_hex(before))),
+            ("after_sha256".to_string(), str_value(sha256_hex(after))),
+            ("preview".to_string(), str_value(lossy_str(after))),
         ]
         .into_iter()
         .collect(),
@@ -546,6 +545,58 @@ mod tests {
         assert!(s(field(&result, "preview")).contains("{ 2 }"));
         let on_disk = std::fs::read_to_string(file.path()).expect("read");
         assert_eq!(on_disk, source);
+    }
+
+    fn write_temp_bytes(extension: &str, source: &[u8]) -> NamedTempFile {
+        let mut file = tempfile::Builder::new()
+            .suffix(&format!(".{extension}"))
+            .tempfile()
+            .expect("temp file");
+        file.write_all(source).expect("write source");
+        file
+    }
+
+    #[test]
+    fn preserves_invalid_utf8_bytes_outside_edited_span() {
+        // A valid-UTF-8 edit target sitting next to an invalid byte (0x80)
+        // in a comment. Lossy-decoding the whole file on read and writing
+        // the decoded string back would rewrite 0x80 to the 3-byte U+FFFD
+        // encoding, even though the edit never touches the comment.
+        let mut source: Vec<u8> = b"// header byte: ".to_vec();
+        source.push(0x80);
+        source.extend_from_slice(b"\nfn foo() { let x = 1; }\n");
+        assert!(
+            std::str::from_utf8(&source).is_err(),
+            "fixture must be non-UTF8"
+        );
+
+        let file = write_temp_bytes("rs", &source);
+        let path = file.path().to_string_lossy().to_string();
+        let result = invoke(dict(&[
+            ("path", vm_string(&path)),
+            (
+                "query",
+                vm_string("(let_declaration value: (integer_literal) @target)"),
+            ),
+            ("replacement", vm_string("2")),
+        ]));
+        assert_eq!(s(field(&result, "result")), "applied");
+
+        let on_disk = std::fs::read(file.path()).expect("read raw bytes");
+        // The targeted edit landed...
+        assert!(
+            String::from_utf8_lossy(&on_disk).contains("let x = 2"),
+            "edit should apply"
+        );
+        // ...and the untouched invalid byte survived verbatim — no U+FFFD.
+        assert!(
+            on_disk.contains(&0x80),
+            "invalid byte must be preserved, not rewritten to U+FFFD"
+        );
+        assert!(
+            !on_disk.windows(3).any(|w| w == [0xEF, 0xBF, 0xBD]),
+            "no U+FFFD replacement bytes should be introduced"
+        );
     }
 
     #[test]

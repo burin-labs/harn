@@ -58,12 +58,12 @@ use crate::tools::args::{
 use crate::tools::permissions::enforce_path_scope;
 
 use super::edit_common::{
-    collect_target_spans, first_syntax_error, format_query_error, read_source,
+    collect_target_spans, first_syntax_error, format_query_error, lossy_str, read_source,
     resolve_target_capture, select_spans, sha256_hex, splice, write_source, SelectFailure,
     Selector,
 };
 use super::language::Language;
-use super::parse::parse_source;
+use super::parse::parse_bytes;
 
 const BUILTIN: &str = "hostlib_ast_batch_apply";
 const DEFAULT_TARGET_CAPTURE: &str = "target";
@@ -304,12 +304,12 @@ fn apply_one(path_str: &str, cfg: &FileJob<'_>) -> Result<FileOutcome, HostlibEr
         Err(detail) => return Ok(FileOutcome::failure("no_match", detail)),
     };
 
-    let tree = match parse_source(&source, language) {
+    let tree = match parse_bytes(&source, language) {
         Ok(tree) => tree,
         Err(err) => return Ok(FileOutcome::failure("parse_error", err.to_string())),
     };
 
-    let spans = collect_target_spans(&query, &tree, source.as_bytes(), target_index);
+    let spans = collect_target_spans(&query, &tree, &source, target_index);
     if spans.is_empty() {
         return Ok(unchanged(&source, "no_match", 0, None));
     }
@@ -348,10 +348,10 @@ fn apply_one(path_str: &str, cfg: &FileJob<'_>) -> Result<FileOutcome, HostlibEr
             return Ok(FileOutcome {
                 result: "syntax_error",
                 match_count: chosen.len(),
-                before_sha: Some(sha256_hex(source.as_bytes())),
-                after_sha: Some(sha256_hex(patched.as_bytes())),
+                before_sha: Some(sha256_hex(&source)),
+                after_sha: Some(sha256_hex(&patched)),
                 changed: false,
-                preview: Some(patched),
+                preview: Some(lossy_str(&patched)),
                 details: Some(detail),
             });
         }
@@ -368,10 +368,10 @@ fn apply_one(path_str: &str, cfg: &FileJob<'_>) -> Result<FileOutcome, HostlibEr
     Ok(FileOutcome {
         result: "applied",
         match_count: chosen.len(),
-        before_sha: Some(sha256_hex(source.as_bytes())),
-        after_sha: Some(sha256_hex(patched.as_bytes())),
+        before_sha: Some(sha256_hex(&source)),
+        after_sha: Some(sha256_hex(&patched)),
         changed,
-        preview: Some(patched),
+        preview: Some(lossy_str(&patched)),
         details: None,
     })
 }
@@ -382,12 +382,12 @@ fn apply_one(path_str: &str, cfg: &FileJob<'_>) -> Result<FileOutcome, HostlibEr
 /// so echoing its full source back for every non-matching file would bloat
 /// a large batch's response for nothing.
 fn unchanged(
-    source: &str,
+    source: &[u8],
     result: &'static str,
     match_count: usize,
     details: Option<String>,
 ) -> FileOutcome {
-    let sha = sha256_hex(source.as_bytes());
+    let sha = sha256_hex(source);
     FileOutcome {
         result,
         match_count,
