@@ -51,7 +51,7 @@ pub use adapters::mcp::{
     McpHttpServeOptions, McpServer, McpServerConfig, McpStdioServer, MCP_PROTOCOL_VERSION,
 };
 pub use adapters::site::{SiteHttpServeOptions, SiteServer, SiteServerConfig};
-pub use adapters::worker::{run_job_from_files, run_job_once, JobRunOutcome};
+pub use adapters::worker::{run_job_from_files, run_job_once, run_job_once_with, JobRunOutcome};
 pub use auth::{
     AllowlistOutcome, ApiKeyAuthConfig, ApiKeyEntry, AuthMethodConfig, AuthPolicy, AuthRequest,
     AuthenticatedPrincipal, AuthorizationDecision, HmacAuthConfig, McpAllowlist, McpAllowlistTools,

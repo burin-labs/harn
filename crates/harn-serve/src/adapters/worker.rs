@@ -117,6 +117,33 @@ pub async fn run_job_once(
     job_name: &str,
     request: serde_json::Value,
 ) -> Result<JobRunOutcome, DispatchError> {
+    run_job_once_with(script_path, job_name, request, |_vm| {}).await
+}
+
+/// Like [`run_job_once`], but lets the embedder inject extra VM state via a
+/// `configure` closure that runs on the fully-built job VM.
+///
+/// The closure receives `&mut Vm` *after* the standard registration
+/// (`register_vm_stdlib` + `register_store_builtins` +
+/// `register_metadata_builtins` + source-dir/harness wiring) and *before*
+/// the job module is loaded and the entrypoint executes. This lets an
+/// embedder register host-defined builtins (e.g. a `sandbox_exec` that
+/// bridges to a cloud-sandbox adapter) that coexist with the standard
+/// ones, so the `@job` closure can call them.
+///
+/// Ordering guarantees:
+/// - Standard stdlib + store/metadata builtins are registered first, so
+///   embedder builtins may *extend* the surface the job sees.
+/// - Embedder builtins are registered last, so a name collision *overrides*
+///   the standard builtin (`register_builtin` replaces by name).
+/// - The closure runs before `load_module_exports`, so the job module's
+///   captured globals resolve against the embedder-augmented VM.
+pub async fn run_job_once_with(
+    script_path: &Path,
+    job_name: &str,
+    request: serde_json::Value,
+    configure: impl FnOnce(&mut Vm),
+) -> Result<JobRunOutcome, DispatchError> {
     // A one-shot process owns its trigger registry / dispatcher state, so
     // start from a clean slate. (No-op the first time; defends against a
     // second call in the same process — e.g. tests.)
@@ -179,6 +206,10 @@ pub async fn run_job_once(
     harn_vm::register_metadata_builtins(&mut vm, &base_dir);
     vm.set_source_dir(&base_dir);
     vm.set_harness(harn_vm::Harness::real());
+
+    // Let the embedder register host-defined builtins on the fully-built VM
+    // before the job module loads. See `run_job_once_with` docs for ordering.
+    configure(&mut vm);
 
     let exports = vm
         .load_module_exports(script_path)
@@ -408,6 +439,49 @@ pub fn scan(event: TriggerEvent) -> dict {
                 let result = outcome.result.expect("result");
                 assert_eq!(result["status"], serde_json::json!("ok"));
                 assert_eq!(result["echo"], request);
+            })
+            .await;
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn configure_hook_registers_callable_host_builtin() {
+        let local = tokio::task::LocalSet::new();
+        local
+            .run_until(async {
+                let dir = tempfile::tempdir().expect("tempdir");
+                let script = write_script(
+                    dir.path(),
+                    r#"
+import "std/triggers"
+
+@job("scan")
+pub fn scan(event: TriggerEvent) -> dict {
+  let req = event.provider_payload.raw
+  return {status: "ok", host: host_echo(req.repo)}
+}
+"#,
+                )
+                .await;
+
+                let request = serde_json::json!({"repo": "burin-labs/harn"});
+                let outcome = run_job_once_with(&script, "scan", request, |vm| {
+                    // An embedder-defined builtin, injected via the configure
+                    // hook on the fully-built job VM. The `@job` closure calls
+                    // it by bare name, exactly like the stdlib builtins.
+                    vm.register_builtin("host_echo", |args, _out| {
+                        let x = args.first().map(|a| a.display()).unwrap_or_default();
+                        Ok(harn_vm::VmValue::String(std::sync::Arc::from(
+                            format!("host:{x}").as_str(),
+                        )))
+                    });
+                })
+                .await
+                .expect("run job");
+
+                assert_eq!(outcome.status, DispatchStatus::Succeeded);
+                let result = outcome.result.expect("result");
+                assert_eq!(result["status"], serde_json::json!("ok"));
+                assert_eq!(result["host"], serde_json::json!("host:burin-labs/harn"));
             })
             .await;
     }
