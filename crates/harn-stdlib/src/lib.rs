@@ -758,10 +758,6 @@ pub const STDLIB_PROMPT_ASSETS: &[StdlibPromptAsset] = &[
         source: include_str!("stdlib/agent/prompts/deferred_tool_listing.harn.prompt"),
     },
     StdlibPromptAsset {
-        path: "agent/prompts/action_turn_nudge.harn.prompt",
-        source: include_str!("stdlib/agent/prompts/action_turn_nudge.harn.prompt"),
-    },
-    StdlibPromptAsset {
         path: "agent/prompts/agent_turn_preamble.harn.prompt",
         source: include_str!("stdlib/agent/prompts/agent_turn_preamble.harn.prompt"),
     },
@@ -810,20 +806,12 @@ pub const STDLIB_PROMPT_ASSETS: &[StdlibPromptAsset] = &[
         source: include_str!("stdlib/agent/prompts/parse_guidance.harn.prompt"),
     },
     StdlibPromptAsset {
-        path: "agent/prompts/protocol_violation_feedback.harn.prompt",
-        source: include_str!("stdlib/agent/prompts/protocol_violation_feedback.harn.prompt"),
-    },
-    StdlibPromptAsset {
         path: "agent/prompts/native_tool_contract_feedback.harn.prompt",
         source: include_str!("stdlib/agent/prompts/native_tool_contract_feedback.harn.prompt"),
     },
     StdlibPromptAsset {
         path: "agent/prompts/verification_gate_feedback.harn.prompt",
         source: include_str!("stdlib/agent/prompts/verification_gate_feedback.harn.prompt"),
-    },
-    StdlibPromptAsset {
-        path: "agent/prompts/action_required_feedback.harn.prompt",
-        source: include_str!("stdlib/agent/prompts/action_required_feedback.harn.prompt"),
     },
     StdlibPromptAsset {
         path: "agent/prompts/daemon_watch_feedback.harn.prompt",
@@ -1354,7 +1342,7 @@ mod tests {
     fn key_stdlib_prompt_assets_resolve() {
         for path in [
             "std/agent/prompts/tool_contract_text.harn.prompt",
-            "std/agent/prompts/action_turn_nudge.harn.prompt",
+            "std/agent/prompts/default_nudge.harn.prompt",
             "std/agent/prompts/completion_judge_default.harn.prompt",
             "std/workflow/prompts/stage.harn.prompt",
             "std/orchestration/prompts/compaction_summary.harn.prompt",
