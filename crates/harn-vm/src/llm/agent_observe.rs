@@ -202,6 +202,39 @@ fn is_empty_completion_retry_error(err: &VmError) -> bool {
     lower.contains("completion_tokens=") && lower.contains("delivered no content")
 }
 
+/// A wire-level "success" that carries nothing at all: zero output tokens, no
+/// text, no thinking, no tool calls, and no server-side tool-search activity.
+/// Observed live (OpenRouter): a provider stall that ends with an empty 200
+/// flows back into the agent loop as an empty assistant turn the loop has to
+/// burn an iteration recovering from. Treated as a transient provider hiccup
+/// and retried in [`observed_llm_call`].
+///
+/// Token-cap truncations (`stop_reason` length/max_tokens) are excluded — a
+/// deterministic cap would just re-truncate on every retry, mirroring the
+/// `done_reason == "length"` carve-out on the Ollama NDJSON path.
+fn is_zero_token_empty_completion(result: &super::api::LlmResult) -> bool {
+    let truncated = matches!(
+        result
+            .stop_reason
+            .as_deref()
+            .map(str::to_ascii_lowercase)
+            .as_deref(),
+        Some("length" | "max_tokens")
+    );
+    let has_tool_search_block = result.blocks.iter().any(|block| {
+        matches!(
+            block.get("type").and_then(|value| value.as_str()),
+            Some("tool_search_query") | Some("tool_search_result")
+        )
+    });
+    result.output_tokens == 0
+        && result.text.is_empty()
+        && result.tool_calls.is_empty()
+        && result.thinking.as_deref().unwrap_or("").is_empty()
+        && !truncated
+        && !has_tool_search_block
+}
+
 /// Extract retry-after delay from an error message if present.
 ///
 /// Supports both forms defined by RFC 7231 §7.1.3:
@@ -908,6 +941,29 @@ async fn run_detector_loop(
 pub(crate) const DEFAULT_LLM_CALL_RETRIES: usize = 0;
 pub(crate) const DEFAULT_LLM_CALL_BACKOFF_MS: u64 = 250;
 
+/// Built-in retry budget for zero-token empty completions. Applies even when
+/// the caller's transient-retry budget is 0 (the fail-fast `llm_call`
+/// default), mirroring the transport's unconditional single retry for the
+/// Ollama empty-content parser bug: an empty 200 is clearly a provider
+/// hiccup, and most live callers (e.g. the Burin agent loop) retry only on
+/// *errors*, so an empty Ok would otherwise sail through untouched.
+const EMPTY_COMPLETION_BUILTIN_RETRIES: usize = 1;
+
+/// Effective retry budget for zero-token empty completions: the caller's
+/// transient budget, floored at [`EMPTY_COMPLETION_BUILTIN_RETRIES`] for real
+/// providers. Deterministic in-process providers (mock/fake) replay scripted
+/// turns — a built-in silent retry would consume turns tests rely on — so
+/// they only honor an explicit `llm_retries` opt-in.
+fn empty_completion_retry_budget(retry_config: &LlmRetryConfig, provider: &str) -> usize {
+    if crate::llm::providers::MockProvider::should_intercept(provider)
+        || crate::llm::fake::FakeLlmProvider::should_intercept(provider)
+    {
+        retry_config.retries
+    } else {
+        retry_config.retries.max(EMPTY_COMPLETION_BUILTIN_RETRIES)
+    }
+}
+
 pub(crate) struct LlmRetryConfig {
     /// Maximum number of retries for transient errors (429, 5xx, connection).
     pub retries: usize,
@@ -933,8 +989,13 @@ fn llm_retry_backoff_ms(
     if crate::llm::providers::MockProvider::should_intercept(provider) {
         return 0;
     }
-    extract_retry_after_ms(error)
-        .unwrap_or_else(|| retry_config.backoff_ms.saturating_mul(1 << attempt.min(4)))
+    extract_retry_after_ms(error).unwrap_or_else(|| base_retry_backoff_ms(retry_config, attempt))
+}
+
+/// Exponential backoff base shared by the error-retry and empty-completion
+/// retry paths (no `retry-after` hint available on the latter).
+fn base_retry_backoff_ms(retry_config: &LlmRetryConfig, attempt: usize) -> u64 {
+    retry_config.backoff_ms.saturating_mul(1 << attempt.min(4))
 }
 
 // ---------------------------------------------------------------------------
@@ -1061,6 +1122,74 @@ pub(crate) async fn observed_llm_call(
 
         match llm_result {
             Ok(result) => {
+                // Zero-token empty "success" (no content, no thinking, no tool
+                // calls): a provider hiccup, not an answer. Retry within the
+                // empty-completion budget; once exhausted, fall through and
+                // return the result unchanged so callers see today's shape
+                // rather than a novel error.
+                if is_zero_token_empty_completion(&result)
+                    && attempt < empty_completion_retry_budget(retry_config, &opts.provider)
+                {
+                    annotate_current_span(&[
+                        ("status", serde_json::json!("retrying")),
+                        ("retry_reason", serde_json::json!("empty_completion")),
+                        ("attempt", serde_json::json!(attempt)),
+                    ]);
+                    let detail = format!(
+                        "provider {} model {} returned a zero-token empty completion (no content, thinking, or tool calls)",
+                        opts.provider, opts.model
+                    );
+                    append_llm_observability_entry(
+                        "empty_completion_retry",
+                        serde_json::Map::from_iter([
+                            (
+                                "iteration".to_string(),
+                                serde_json::json!(iteration.unwrap_or(0)),
+                            ),
+                            ("attempt".to_string(), serde_json::json!(attempt + 1)),
+                            ("provider".to_string(), serde_json::json!(opts.provider)),
+                            ("model".to_string(), serde_json::json!(opts.model)),
+                            ("error".to_string(), serde_json::json!(detail.clone())),
+                        ]),
+                    );
+                    super::trace::emit_agent_event(
+                        super::trace::AgentTraceEvent::EmptyCompletionRetry {
+                            iteration: iteration.unwrap_or(0),
+                            attempt: attempt + 1,
+                            error: detail.clone(),
+                        },
+                    );
+                    if let Some(b) = bridge {
+                        b.send_call_end(
+                            &call_id,
+                            "llm",
+                            "llm_call",
+                            duration_ms,
+                            "retrying",
+                            serde_json::json!({
+                                "error": detail,
+                                "retryable": true,
+                                "attempt": attempt,
+                                "user_visible": user_visible,
+                            }),
+                        );
+                    }
+                    attempt += 1;
+                    let backoff =
+                        if crate::llm::providers::MockProvider::should_intercept(&opts.provider) {
+                            0
+                        } else {
+                            base_retry_backoff_ms(retry_config, attempt)
+                        };
+                    crate::events::log_warn(
+                        "llm",
+                        &format!("{detail}; retrying in {backoff}ms (attempt {attempt})"),
+                    );
+                    if backoff > 0 {
+                        crate::clock_mock::sleep(std::time::Duration::from_millis(backoff)).await;
+                    }
+                    continue;
+                }
                 annotate_current_span(&[
                     ("status", serde_json::json!("ok")),
                     ("input_tokens", serde_json::json!(result.input_tokens)),
@@ -1666,6 +1795,204 @@ mod retry_tests {
     #[test]
     fn retry_after_malformed_returns_none() {
         assert_eq!(parse_retry_after("retry-after: soon-ish"), None);
+    }
+}
+
+#[cfg(test)]
+mod empty_completion_retry_tests {
+    //! Zero-token empty-completion retry coverage. A provider stall can end
+    //! with an empty HTTP 200 (observed live on OpenRouter: 133s hang,
+    //! `output_tokens=0`), which is not an error at the wire level —
+    //! `observed_llm_call` must treat it as a transient hiccup and retry,
+    //! and must return the empty result unchanged once the budget is spent.
+    //! Driven through `FakeLlmProvider` (an empty scripted stream produces
+    //! exactly the zero-token empty shape) so the full retry loop runs
+    //! without network I/O.
+
+    use super::*;
+    use crate::llm::fake::{
+        install_fake_llm_script, FakeLlmEvent, FakeLlmScript, FakeLlmTurn, FakeStopReason,
+    };
+    use crate::llm::trace::{peek_agent_trace, reset_agent_trace_state, AgentTraceEvent};
+
+    fn fake_opts() -> crate::llm::api::LlmCallOptions {
+        let mut opts = crate::llm::api::options::base_opts("fake");
+        opts.model = "fake-stream".to_string();
+        opts.native_tools = None;
+        opts.tools = None;
+        opts.tool_choice = None;
+        opts.provider_overrides = None;
+        opts
+    }
+
+    fn current_thread_runtime() -> tokio::runtime::Runtime {
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("runtime")
+    }
+
+    fn empty_turn() -> FakeLlmTurn {
+        FakeLlmTurn::stream(vec![FakeLlmEvent::Done(FakeStopReason::EndTurn)])
+    }
+
+    fn retry_config(retries: usize) -> LlmRetryConfig {
+        LlmRetryConfig {
+            retries,
+            backoff_ms: 0,
+        }
+    }
+
+    #[test]
+    fn empty_completion_retries_then_succeeds_on_second_attempt() {
+        current_thread_runtime().block_on(async {
+            reset_agent_trace_state();
+            let _guard = install_fake_llm_script(FakeLlmScript::new().push(empty_turn()).push(
+                FakeLlmTurn::stream(vec![
+                    FakeLlmEvent::Token("recovered".into()),
+                    FakeLlmEvent::Done(FakeStopReason::EndTurn),
+                ]),
+            ));
+            let result = observed_llm_call(
+                &fake_opts(),
+                None,
+                None,
+                &retry_config(1),
+                None,
+                false,
+                false,
+                None,
+            )
+            .await
+            .expect("empty completion retry should recover");
+            assert_eq!(result.text, "recovered");
+
+            let retries: Vec<usize> = peek_agent_trace()
+                .iter()
+                .filter_map(|event| match event {
+                    AgentTraceEvent::EmptyCompletionRetry { attempt, .. } => Some(*attempt),
+                    _ => None,
+                })
+                .collect();
+            assert_eq!(
+                retries,
+                vec![1],
+                "expected exactly one EmptyCompletionRetry trace event"
+            );
+            reset_agent_trace_state();
+            // _guard drop asserts both scripted turns were consumed.
+        });
+    }
+
+    #[test]
+    fn empty_completion_returns_result_unchanged_after_budget_exhausted() {
+        current_thread_runtime().block_on(async {
+            reset_agent_trace_state();
+            let _guard =
+                install_fake_llm_script(FakeLlmScript::new().push(empty_turn()).push(empty_turn()));
+            let result = observed_llm_call(
+                &fake_opts(),
+                None,
+                None,
+                &retry_config(1),
+                None,
+                false,
+                false,
+                None,
+            )
+            .await
+            .expect("exhausted empty-completion retries must return Ok, not a new error");
+            assert!(result.text.is_empty());
+            assert!(result.tool_calls.is_empty());
+            assert_eq!(result.output_tokens, 0);
+            reset_agent_trace_state();
+        });
+    }
+
+    #[test]
+    fn fake_provider_without_retry_budget_does_not_silently_retry() {
+        // Mock/fake providers replay scripted turns, so the built-in
+        // empty-completion floor must not apply to them — only an explicit
+        // budget. One scripted turn, zero retries: the guard would panic on
+        // drop if a hidden retry consumed a second turn.
+        current_thread_runtime().block_on(async {
+            let _guard = install_fake_llm_script(FakeLlmScript::new().push(empty_turn()));
+            let result = observed_llm_call(
+                &fake_opts(),
+                None,
+                None,
+                &retry_config(0),
+                None,
+                false,
+                false,
+                None,
+            )
+            .await
+            .expect("empty completion without budget returns as today");
+            assert!(result.text.is_empty());
+        });
+    }
+
+    #[test]
+    fn builtin_empty_retry_budget_floors_real_providers_only() {
+        let zero = retry_config(0);
+        assert_eq!(empty_completion_retry_budget(&zero, "openrouter"), 1);
+        assert_eq!(empty_completion_retry_budget(&zero, "fake"), 0);
+        assert_eq!(empty_completion_retry_budget(&zero, "mock"), 0);
+        let three = retry_config(3);
+        assert_eq!(empty_completion_retry_budget(&three, "openrouter"), 3);
+        assert_eq!(empty_completion_retry_budget(&three, "fake"), 3);
+    }
+
+    fn empty_result() -> crate::llm::api::LlmResult {
+        crate::llm::api::LlmResult {
+            text: String::new(),
+            tool_calls: Vec::new(),
+            input_tokens: 0,
+            output_tokens: 0,
+            cache_read_tokens: 0,
+            cache_write_tokens: 0,
+            cache_supported: true,
+            model: "test-model".to_string(),
+            provider: "openrouter".to_string(),
+            thinking: None,
+            thinking_summary: None,
+            stop_reason: Some("stop".to_string()),
+            served_fast: false,
+            blocks: Vec::new(),
+            logprobs: Vec::new(),
+            telemetry: crate::llm::api::ProviderTelemetry::default(),
+        }
+    }
+
+    #[test]
+    fn zero_token_empty_completion_predicate_edges() {
+        assert!(is_zero_token_empty_completion(&empty_result()));
+
+        // Token-cap truncation is deterministic — not a retryable hiccup.
+        let mut truncated = empty_result();
+        truncated.stop_reason = Some("length".to_string());
+        assert!(!is_zero_token_empty_completion(&truncated));
+        let mut truncated_upper = empty_result();
+        truncated_upper.stop_reason = Some("MAX_TOKENS".to_string());
+        assert!(!is_zero_token_empty_completion(&truncated_upper));
+
+        // Any delivered payload disqualifies.
+        let mut with_text = empty_result();
+        with_text.text = "hi".to_string();
+        assert!(!is_zero_token_empty_completion(&with_text));
+        let mut with_tokens = empty_result();
+        with_tokens.output_tokens = 3;
+        assert!(!is_zero_token_empty_completion(&with_tokens));
+        let mut with_thinking = empty_result();
+        with_thinking.thinking = Some("hmm".to_string());
+        assert!(!is_zero_token_empty_completion(&with_thinking));
+        let mut with_tool_call = empty_result();
+        with_tool_call.tool_calls = vec![serde_json::json!({"id": "t1", "name": "look"})];
+        assert!(!is_zero_token_empty_completion(&with_tool_call));
+        let mut with_tool_search = empty_result();
+        with_tool_search.blocks = vec![serde_json::json!({"type": "tool_search_query"})];
+        assert!(!is_zero_token_empty_completion(&with_tool_search));
     }
 }
 

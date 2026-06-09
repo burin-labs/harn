@@ -444,19 +444,40 @@ pub(crate) struct LlmCallOptions {
         Option<crate::llm::structural_experiments::AppliedStructuralExperiment>,
 }
 
-/// Resolve effective request timeout: explicit value > `HARN_LLM_TIMEOUT` env > 120s default.
-fn resolve_timeout(explicit: Option<u64>) -> u64 {
-    explicit.unwrap_or_else(|| {
-        std::env::var("HARN_LLM_TIMEOUT")
-            .ok()
-            .and_then(|v| v.parse::<u64>().ok())
-            .unwrap_or(120)
-    })
+/// Resolve effective request timeout: explicit value > `HARN_LLM_TIMEOUT` env >
+/// model-catalog `stream_timeout` > 120s default.
+///
+/// `stream_timeout` (fractional seconds in the model catalog) was previously
+/// only projected into the config dict for pipelines — no transport consumed
+/// it, so a slow local model with `stream_timeout = 900.0` was still cut off
+/// (and a hung remote provider only bounded) by the generic 120s default.
+/// It now feeds the same whole-request deadline every provider applies via
+/// `reqwest::RequestBuilder::timeout`, which covers both the non-streaming
+/// response read and the streamed body.
+fn resolve_timeout(explicit: Option<u64>, model: &str) -> u64 {
+    let env = std::env::var("HARN_LLM_TIMEOUT")
+        .ok()
+        .and_then(|v| v.parse::<u64>().ok());
+    resolve_timeout_from(explicit, env, catalog_stream_timeout_secs(model))
+}
+
+/// Pure precedence core of [`resolve_timeout`], split out for tests.
+fn resolve_timeout_from(explicit: Option<u64>, env: Option<u64>, catalog: Option<u64>) -> u64 {
+    explicit.or(env).or(catalog).unwrap_or(120)
+}
+
+/// Model-catalog `stream_timeout` (fractional seconds) for `model`, rounded
+/// up to whole seconds. `None` when the model is unknown or carries no value.
+fn catalog_stream_timeout_secs(model: &str) -> Option<u64> {
+    crate::llm_config::model_catalog_entry(model)
+        .and_then(|entry| entry.stream_timeout)
+        .filter(|secs| secs.is_finite() && *secs > 0.0)
+        .map(|secs| secs.ceil() as u64)
 }
 
 impl LlmCallOptions {
     pub(crate) fn resolve_timeout(&self) -> u64 {
-        resolve_timeout(self.timeout)
+        resolve_timeout(self.timeout, &self.model)
     }
 
     pub(crate) fn anthropic_beta_features_for_request(&self) -> Vec<String> {
@@ -558,7 +579,7 @@ pub(crate) struct LlmRequestPayload {
 
 impl LlmRequestPayload {
     pub(crate) fn resolve_timeout(&self) -> u64 {
-        resolve_timeout(self.timeout)
+        resolve_timeout(self.timeout, &self.model)
     }
 
     pub(crate) fn emit_reminder_lifecycle(&self) {
@@ -734,9 +755,49 @@ pub(crate) fn base_opts(provider: &str) -> LlmCallOptions {
 
 #[cfg(test)]
 mod tests {
-    use super::{base_opts, LlmRequestPayload, ThinkingConfig};
+    use super::{
+        base_opts, catalog_stream_timeout_secs, resolve_timeout_from, LlmRequestPayload,
+        ThinkingConfig,
+    };
 
     fn assert_send<T: Send>() {}
+
+    #[test]
+    fn resolve_timeout_precedence_explicit_then_env_then_catalog_then_default() {
+        // Explicit always wins.
+        assert_eq!(resolve_timeout_from(Some(7), Some(60), Some(300)), 7);
+        // Operator env override beats the catalog hint.
+        assert_eq!(resolve_timeout_from(None, Some(60), Some(300)), 60);
+        // Catalog `stream_timeout` replaces the hardcoded default.
+        assert_eq!(resolve_timeout_from(None, None, Some(300)), 300);
+        // No `stream_timeout` -> behavior unchanged (120s default, no new
+        // deadline tighter than today).
+        assert_eq!(resolve_timeout_from(None, None, None), 120);
+    }
+
+    #[test]
+    fn catalog_stream_timeout_resolves_from_model_catalog_overlay() {
+        crate::llm_config::set_user_overrides(None);
+        let mut overlay = crate::llm_config::ProvidersConfig::default();
+        let model: crate::llm_config::ModelDef = toml::from_str(
+            "name = \"Acme Slow\"\nprovider = \"acme\"\ncontext_window = 8192\nstream_timeout = 330.5\n",
+        )
+        .expect("model def parses");
+        overlay.models.insert("acme/slow-model".to_string(), model);
+        crate::llm_config::set_user_overrides(Some(overlay));
+
+        assert_eq!(catalog_stream_timeout_secs("acme/slow-model"), Some(331));
+
+        crate::llm_config::clear_user_overrides();
+    }
+
+    #[test]
+    fn catalog_stream_timeout_absent_for_unknown_model() {
+        assert_eq!(
+            catalog_stream_timeout_secs("model-that-does-not-exist-xyz"),
+            None
+        );
+    }
 
     #[test]
     fn request_payload_is_send_safe_and_drops_vm_local_fields() {
