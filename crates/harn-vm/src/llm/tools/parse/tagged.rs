@@ -1,5 +1,6 @@
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
+use super::super::type_expr::TypeExpr;
 use super::super::{text_tool_call_block, TEXT_TOOL_CALL_TAG, TEXT_TOOL_CALL_TAG_COMPACT};
 use super::bare::parse_bare_calls_in_body;
 use super::syntax::{
@@ -206,6 +207,34 @@ pub(crate) fn parse_text_tool_calls_with_tools(
                 // truncation diagnostic below.
                 Ok(None) => {}
             }
+            // Chat-template function markup with an unclosed wrapper (#3220):
+            // `<tool_call>` + `<function=edit>...` where the model never
+            // emitted `</tool_call>`. Complete parameter blocks make the call
+            // recoverable; a truncated parameter surfaces its precise error.
+            match parse_function_markup_body(body, tools_val) {
+                Ok(Some(call)) => {
+                    let name = call
+                        .get("name")
+                        .and_then(|name| name.as_str())
+                        .unwrap_or("")
+                        .to_string();
+                    let args = call
+                        .get("arguments")
+                        .cloned()
+                        .unwrap_or(serde_json::json!({}));
+                    canonical_parts
+                        .push(text_tool_call_block(&render_canonical_call(&name, &args)));
+                    calls.push(call);
+                    cursor = bytes.len();
+                    continue;
+                }
+                Err(msg) => {
+                    errors.push(msg);
+                    cursor = bytes.len();
+                    continue;
+                }
+                Ok(None) => {}
+            }
             let recovered_name = leading_call_name(body, tools_val);
             match recovered_name {
                 Some(name) => errors.push(format!(
@@ -282,6 +311,39 @@ pub(crate) fn parse_text_tool_calls_with_tools(
                  subsequent turns."
             ));
             cursor = after_call;
+        } else if let Some(outcome) = try_parse_top_level_function_markup(src, cursor, tools_val) {
+            // Chat-template function markup with no `<tool_call>` wrapper
+            // (#3220): `<function=edit><parameter=...>...</parameter></function>`
+            // or `<invoke name="edit">...</invoke>` emitted as plain text.
+            // Line anchoring and the markdown-fence guard above keep prose
+            // mentioning the syntax and fenced examples out of this branch.
+            match outcome {
+                Ok((call, after)) => {
+                    let name = call
+                        .get("name")
+                        .and_then(|name| name.as_str())
+                        .unwrap_or("")
+                        .to_string();
+                    let args = call
+                        .get("arguments")
+                        .cloned()
+                        .unwrap_or(serde_json::json!({}));
+                    canonical_parts
+                        .push(text_tool_call_block(&render_canonical_call(&name, &args)));
+                    calls.push(call);
+                    violations.push(format!(
+                        "Tool call `{name}` was emitted as chat-template function markup \
+                         instead of `<tool_call>{name}({{ ... }})</tool_call>`. Recovered \
+                         this turn so work moves forward; emit the canonical form on \
+                         subsequent turns."
+                    ));
+                    cursor = after;
+                }
+                Err((msg, after)) => {
+                    errors.push(msg);
+                    cursor = after;
+                }
+            }
         } else if let Some(skip) = stray_tool_call_close_len(src, cursor) {
             // A bare, orphaned `</tool_call>` (or `</toolcall>`). Weak value
             // models duplicate the close after a recovered nested-XML body
@@ -943,6 +1005,11 @@ fn parse_single_tool_call(
     if let Some(call) = parse_xml_wrapped_json_args_body(body, tools_val)? {
         return Ok(call);
     }
+    // Chat-template function markup inside the wrapper (#3220):
+    // `<tool_call><function=edit><parameter=action>...</parameter></function></tool_call>`.
+    if let Some(call) = parse_function_markup_body(body, tools_val)? {
+        return Ok(call);
+    }
     let inner = parse_bare_calls_in_body(body, tools_val);
     if let Some(err) = inner.errors.into_iter().next() {
         return Err(err);
@@ -1175,6 +1242,231 @@ fn balanced_json_object_len(src: &str) -> Option<usize> {
         }
     }
     None
+}
+
+/// Opening markers for the chat-template "function markup" rendering of a
+/// tool call. `<function=NAME>` is the qwen3 chat-template style; `<invoke
+/// name="NAME">` is the attribute spelling other templates use.
+const FUNCTION_MARKUP_OPEN: &str = "<function=";
+const INVOKE_MARKUP_OPEN: &str = "<invoke name=";
+
+/// Parse the chat-template "function markup" rendering of a tool call that
+/// native-format models (observed live: qwen3.6 under long context, #3220)
+/// sometimes emit as plain assistant text instead of using the provider's
+/// structured tool channel:
+///
+/// ```text
+/// <function=edit>
+/// <parameter=action>
+/// create
+/// </parameter>
+/// </function>
+/// ```
+///
+/// or the attribute spelling `<invoke name="edit">` +
+/// `<parameter name="action">create</parameter>` + `</invoke>`.
+///
+/// `body` is the markup WITHOUT the optional `<tool_call>` wrapper. Returns:
+/// * `Ok(None)` — body does not open with a plausible function-markup tag
+///   (the caller falls through to its other recovery paths);
+/// * `Ok(Some(call))` — a complete markup block for a registered tool. A
+///   missing `</function>` / `</invoke>` close is tolerated as long as every
+///   `<parameter ...>` block is itself properly closed (some emissions close
+///   only the outer `</tool_call>`);
+/// * `Err(msg)` — recognizably function markup but unusable: unknown tool,
+///   an unterminated `<parameter ...>` block (truncation — never dispatch a
+///   partial argument value), or a second call sharing the block. The message
+///   is model-facing parse feedback.
+///
+/// Parameter values are typed against the registered tool schema: parameters
+/// the schema declares as strings (or whose schema entry is missing) keep
+/// their raw bytes verbatim — code in an `edit` `content` value is never
+/// JSON-mangled — while non-string parameters are parsed as JSON with a
+/// fallback to the raw string.
+fn parse_function_markup_body(
+    body: &str,
+    tools_val: Option<&VmValue>,
+) -> Result<Option<serde_json::Value>, String> {
+    let trimmed = body.trim();
+    let (name, after_open, close_tag, style) =
+        if let Some(rest) = trimmed.strip_prefix(FUNCTION_MARKUP_OPEN) {
+            let Some(gt) = rest.find('>') else {
+                return Err(
+                    "TOOL CALL TRUNCATED: a `<function=` open tag was never closed with `>` — \
+                     the response appears to have been cut off. The call was NOT executed; \
+                     re-emit the complete call."
+                        .to_string(),
+                );
+            };
+            (
+                rest[..gt].trim().trim_matches('"'),
+                &rest[gt + 1..],
+                "</function>",
+                "`<function=...>`",
+            )
+        } else if let Some(rest) = trimmed.strip_prefix(INVOKE_MARKUP_OPEN) {
+            let Some(gt) = rest.find('>') else {
+                return Err(
+                    "TOOL CALL TRUNCATED: an `<invoke name=` open tag was never closed with \
+                     `>` — the response appears to have been cut off. The call was NOT \
+                     executed; re-emit the complete call."
+                        .to_string(),
+                );
+            };
+            (
+                rest[..gt].trim().trim_matches('"'),
+                &rest[gt + 1..],
+                "</invoke>",
+                "`<invoke name=...>`",
+            )
+        } else {
+            return Ok(None);
+        };
+    // Require a plausible tool identifier; anything else is not tool-call
+    // markup (e.g. prose like `<function=a tool of your choice>`), so let the
+    // caller's other paths classify it.
+    if name.is_empty()
+        || !name
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-' | b'.'))
+    {
+        return Ok(None);
+    }
+    let known = known_tool_names_with_implicit(tools_val);
+    if !known.contains(name) {
+        let available: Vec<_> = known.iter().take(20).cloned().collect();
+        return Err(format!(
+            "Unknown tool '{name}' in chat-template {style} tool-call markup. \
+             Available tools: [{}]",
+            available.join(", ")
+        ));
+    }
+    // Anything after the close tag (a stray `</tool_call>`, whitespace) is
+    // tolerated slop. A missing close tag is tolerated only when every
+    // parameter block below is itself closed — see the leftover check.
+    let inner = match after_open.find(close_tag) {
+        Some(idx) => &after_open[..idx],
+        None => after_open,
+    };
+    let param_types: BTreeMap<String, TypeExpr> = collect_tool_schemas(tools_val, None)
+        .into_iter()
+        .find(|schema| schema.name == name)
+        .map(|schema| {
+            schema
+                .params
+                .into_iter()
+                .map(|param| (param.name, param.ty))
+                .collect()
+        })
+        .unwrap_or_default();
+    let param_re = regex::Regex::new(
+        r#"(?s)<parameter(?:=([A-Za-z0-9_][A-Za-z0-9_.-]*)|\s+name="([^"]+)")\s*>(.*?)</parameter>"#,
+    )
+    .expect("valid function-markup parameter regex");
+    let mut args = serde_json::Map::new();
+    let mut covered: Vec<(usize, usize)> = Vec::new();
+    for captures in param_re.captures_iter(inner) {
+        let whole = captures.get(0).expect("whole parameter match");
+        covered.push((whole.start(), whole.end()));
+        let key = captures
+            .get(1)
+            .or_else(|| captures.get(2))
+            .map(|m| m.as_str())
+            .unwrap_or("")
+            .to_string();
+        let raw = captures.get(3).map(|m| m.as_str()).unwrap_or("");
+        let value = function_markup_param_value(raw, param_types.get(&key));
+        args.insert(key, value);
+    }
+    let leftover = prose_without_ranges(inner, &covered);
+    if leftover.contains("<parameter") {
+        return Err(format!(
+            "TOOL CALL TRUNCATED: a `<parameter ...>` block in the {style} markup for \
+             `{name}` was never closed with `</parameter>` — the response appears to have \
+             been cut off. The call was NOT executed; re-emit the complete call."
+        ));
+    }
+    if leftover.contains(FUNCTION_MARKUP_OPEN) || leftover.contains(INVOKE_MARKUP_OPEN) {
+        return Err(format!(
+            "The {style} markup block for `{name}` contained more than one call; \
+             emit one call per <tool_call> block."
+        ));
+    }
+    Ok(Some(serde_json::json!({
+        "id": format!("tc_fnmarkup_{name}"),
+        "name": name,
+        "arguments": serde_json::Value::Object(args),
+    })))
+}
+
+/// Type a raw function-markup parameter value against its schema entry.
+///
+/// The chat-template markup carries no type information — values are raw
+/// text framed by the template's own newlines. Strip exactly one leading and
+/// one trailing newline (the template's framing, not the value's), then:
+/// string-typed (or schema-unknown) parameters keep the framed bytes
+/// verbatim; non-string parameters are parsed as JSON, falling back to the
+/// raw string when they don't parse.
+fn function_markup_param_value(raw: &str, ty: Option<&TypeExpr>) -> serde_json::Value {
+    let framed = raw
+        .strip_prefix("\r\n")
+        .or_else(|| raw.strip_prefix('\n'))
+        .unwrap_or(raw);
+    let framed = framed
+        .strip_suffix("\r\n")
+        .or_else(|| framed.strip_suffix('\n'))
+        .unwrap_or(framed);
+    let wants_string = ty.map(type_expr_wants_string).unwrap_or(true);
+    if wants_string {
+        return serde_json::Value::String(framed.to_string());
+    }
+    match serde_json::from_str::<serde_json::Value>(framed.trim()) {
+        Ok(value) => value,
+        Err(_) => serde_json::Value::String(framed.to_string()),
+    }
+}
+
+/// True when a schema type only admits string values, so a raw markup value
+/// must be kept verbatim rather than JSON-parsed.
+fn type_expr_wants_string(ty: &TypeExpr) -> bool {
+    match ty {
+        TypeExpr::Primitive(name) => name == "string",
+        TypeExpr::Literal(value) => value.is_string(),
+        TypeExpr::Union(items) => items.iter().all(type_expr_wants_string),
+        _ => false,
+    }
+}
+
+/// Try to parse top-level chat-template function markup (no `<tool_call>`
+/// wrapper) at `cursor`. Returns `None` when the cursor is not on a
+/// plausible function-markup opener; otherwise the parsed call or the
+/// model-facing diagnostic, each paired with the cursor position after the
+/// consumed block. Line anchoring and markdown-fence exclusion are enforced
+/// by the caller (the main scanner checks both before dispatching tags), so
+/// prose mentioning the syntax inline or fenced examples never reach this.
+#[allow(clippy::type_complexity)]
+fn try_parse_top_level_function_markup(
+    src: &str,
+    cursor: usize,
+    tools_val: Option<&VmValue>,
+) -> Option<Result<(serde_json::Value, usize), (String, usize)>> {
+    let rest = &src[cursor..];
+    let close_tag = if rest.starts_with(FUNCTION_MARKUP_OPEN) {
+        "</function>"
+    } else if rest.starts_with(INVOKE_MARKUP_OPEN) {
+        "</invoke>"
+    } else {
+        return None;
+    };
+    let end = rest
+        .find(close_tag)
+        .map(|idx| cursor + idx + close_tag.len())
+        .unwrap_or(src.len());
+    match parse_function_markup_body(&src[cursor..end], tools_val) {
+        Ok(Some(call)) => Some(Ok((call, end))),
+        Err(msg) => Some(Err((msg, end))),
+        Ok(None) => None,
+    }
 }
 
 fn parse_json_tool_call_body(

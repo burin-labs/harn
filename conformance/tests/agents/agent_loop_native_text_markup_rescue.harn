@@ -1,0 +1,115 @@
+// #3220: in a NATIVE tool-format session, a model that falls back to its
+// chat template's TEXT rendering of a tool call (qwen style:
+// `<tool_call><function=NAME><parameter=KEY>...</parameter></function></tool_call>`)
+// must NOT end the run with the call silently dropped. The parser promotes
+// the markup into a parsed call; the loop's native-fallback contract then
+// either injects "re-issue natively" feedback (default `reject` policy) or
+// dispatches the rescued call (`allow`), and post-turn never reads the
+// markup turn as a natural completion.
+import { llm_text, with_llm_script } from "std/testing"
+
+fn lookup_tools() {
+  var tools = tool_registry()
+  tools = tool_define(
+    tools,
+    "lookup",
+    "Return release evidence",
+    {
+      handler: { args -> "evidence for " + args.query },
+      parameters: {query: {type: "string", description: "Lookup query"}},
+      returns: {type: "string"},
+      annotations: {kind: "read"},
+    },
+  )
+  return tools
+}
+
+const MARKUP_TURN = "<tool_call>\n<function=lookup>\n<parameter=query>\nfollow-up evidence\n</parameter>\n</function>\n</tool_call>"
+
+pipeline main() {
+  // Default policy (reject): the markup turn must continue the loop with
+  // native-contract feedback instead of completing — the live failure was a
+  // natural completion on exactly this turn shape, losing the call.
+  with_llm_script(
+    [
+      {tool_calls: [{id: "lookup_1", name: "lookup", arguments: {query: "release"}}]},
+      llm_text(MARKUP_TURN),
+      llm_text("Final answer: release evidence verified."),
+    ],
+    { ->
+      let result = agent_loop(
+        "Inspect evidence and finish.",
+        nil,
+        {
+          provider: "mock",
+          tools: lookup_tools(),
+          tool_format: "native",
+          loop_until_done: true,
+          done_judge: nil,
+          max_iterations: 6,
+        },
+      )
+      let calls = llm_mock_calls()
+      __io_println(result.status)
+      __io_println(len(calls))
+      let feedback_messages = json_stringify(calls[2].messages)
+      __io_println(contains(feedback_messages, "emitted text-mode tool calls"))
+      __io_println(contains(feedback_messages, "native tool channel"))
+      __io_println(len(result.tools.successful))
+    },
+  )
+  // `allow` policy: the rescued markup call dispatches this turn.
+  with_llm_script(
+    [llm_text(MARKUP_TURN), llm_text("All set.")],
+    { ->
+      let result = agent_loop(
+        "Look up the evidence.",
+        nil,
+        {
+          provider: "mock",
+          tools: lookup_tools(),
+          tool_format: "native",
+          loop_until_done: true,
+          done_judge: nil,
+          max_iterations: 4,
+          native_tool_fallback: "allow",
+        },
+      )
+      __io_println(result.status)
+      __io_println(contains(result.tools.successful, "lookup"))
+      __io_println(len(llm_mock_calls()))
+    },
+  )
+  // Truncated markup (output cut off mid-parameter): the parser refuses to
+  // dispatch the partial value and raises a parse error instead. The
+  // post-turn gate must hold the loop open so the queued parse-guidance
+  // feedback reaches the model — without it this zero-call turn reads as a
+  // natural completion and the feedback is lost.
+  with_llm_script(
+    [
+      {tool_calls: [{id: "lookup_1", name: "lookup", arguments: {query: "release"}}]},
+      llm_text("<tool_call>\n<function=lookup>\n<parameter=query>\nfollow-up evi"),
+      llm_text("Final answer: release evidence verified."),
+    ],
+    { ->
+      let result = agent_loop(
+        "Inspect evidence and finish.",
+        nil,
+        {
+          provider: "mock",
+          tools: lookup_tools(),
+          tool_format: "native",
+          loop_until_done: true,
+          done_judge: nil,
+          max_iterations: 6,
+        },
+      )
+      let calls = llm_mock_calls()
+      __io_println(result.status)
+      __io_println(len(calls))
+      let feedback_messages = json_stringify(calls[2].messages)
+      __io_println(contains(feedback_messages, "parse_guidance"))
+      __io_println(contains(feedback_messages, "TRUNCATED"))
+    },
+  )
+}
