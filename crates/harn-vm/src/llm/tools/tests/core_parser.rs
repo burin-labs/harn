@@ -125,6 +125,28 @@ fn ignores_tool_name_mentions_inside_inline_code_spans() {
 }
 
 #[test]
+fn unbalanced_backtick_in_prose_does_not_suppress_later_bare_call() {
+    // Regression: a single stray/unmatched backtick in prose used to flip the
+    // scanner's `in_inline_code` flag true for the REST of the response, so
+    // every later bare tool call was silently skipped and the agent loop
+    // stalled. The flag must reset at each newline (inline code never spans
+    // lines), so the call on the following line still parses.
+    let tools = sample_tool_registry();
+    let text =
+        "The file is `src/main.rs (note path).\nedit({ action: \"create\", path: \"real.go\" })\n";
+    let result = parse_bare_calls_in_body(text, Some(&tools));
+    assert!(result.errors.is_empty(), "errors: {:?}", result.errors);
+    assert_eq!(
+        result.calls.len(),
+        1,
+        "stray backtick must not suppress the later call: {:?}",
+        result.calls
+    );
+    assert_eq!(result.calls[0]["name"], json!("edit"));
+    assert_eq!(result.calls[0]["arguments"]["path"], json!("real.go"));
+}
+
+#[test]
 fn recovers_single_inline_wrapped_tool_call_when_it_is_the_entire_response() {
     let tools = sample_tool_registry();
     let text = r#"`edit({ action: "create", path: "wrapped.go" })`"#;
