@@ -19,6 +19,7 @@ pub(super) use serde_json::json;
 use std::collections::BTreeMap;
 
 mod core_parser;
+mod function_markup;
 mod heredoc_and_messages;
 mod native_tools;
 mod reserved_token;

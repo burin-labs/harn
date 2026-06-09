@@ -2881,6 +2881,8 @@ fn __agent_loop_run(message, session, initial_opts) {
         _consecutive_text_only: consecutive_text_only,
         _done_judge_invocations: done_judge_invocations,
         _done_judge_loop_state: cadence_loop_state,
+        _turn_tool_call_feedback: (fallback_outcome.triggered && !fallback_outcome.accepted)
+          || had_parse_errors,
       }
       let outcome = __agent_loop_with_llm_render_context(
         turn_llm_opts,
@@ -3133,6 +3135,11 @@ fn __agent_loop_run(message, session, initial_opts) {
   return unwrap(run)
 }
 
+// #3220: this turn attempted a tool call that did not dispatch — the
+// native-fallback contract rejected text-emitted calls (corrective
+// feedback queued), or the parser dropped every call and parse
+// guidance was injected. Post-turn must not read the turn's prose as
+// a completion signal.
 // A turn whose calls were all dropped by the parser gets the purpose-built
 // parse-guidance feedback (not the generic no-progress nudge), and is
 // excluded from the no-progress stall streak below.

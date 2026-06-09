@@ -1,0 +1,58 @@
+// Run: harn test tests/agent/judge_verdict_test.harn
+//
+// Unit tests for the judge verdict-token normalization in
+// `std/agent/judge_internals`. Structured judges occasionally emit sloppy
+// JSON (double commas, run-on key/value pairs) that the structured-call
+// repair layer salvages by capturing trailing JSON junk into the verdict
+// string — observed live in `judge_decision` events as `continue",,` and
+// `continue",  "reasoning":`. The classifier must strip the junk so the
+// stored/emitted verdict is the clean token AND classification keys on the
+// real verdict (a mangled pass token must not read as a veto).
+import { __judge_classify_verdict, __judge_verdict_token } from "std/agent/judge_internals"
+
+const DONE_TOKENS = ["done", "complete"]
+
+pipeline test_clean_verdict_passes_through(task) {
+  assert_eq(__judge_verdict_token("done"), "done")
+  assert_eq(__judge_verdict_token("  Continue "), "continue")
+  let outcome = __judge_classify_verdict("done", DONE_TOKENS, [], "fallback")
+  assert_eq(outcome.vetoed, false)
+  assert_eq(outcome.verdict, "done")
+}
+
+pipeline test_live_mangled_continue_double_comma(task) {
+  // Exact live string: `continue",,`
+  assert_eq(__judge_verdict_token("continue\",,"), "continue")
+  let outcome = __judge_classify_verdict("continue\",,", DONE_TOKENS, ["critique"], "fallback")
+  assert_eq(outcome.vetoed, true)
+  assert_eq(outcome.verdict, "continue")
+}
+
+pipeline test_live_mangled_continue_runon_reasoning_key(task) {
+  // Exact live string: `continue",  "reasoning":`
+  assert_eq(__judge_verdict_token("continue\",  \"reasoning\":"), "continue")
+  let outcome = __judge_classify_verdict("continue\",  \"reasoning\":", DONE_TOKENS, [], "fallback")
+  assert_eq(outcome.vetoed, true)
+  assert_eq(outcome.verdict, "continue")
+}
+
+pipeline test_mangled_pass_token_still_classifies_as_pass(task) {
+  // The same junk on a PASS token must not flip the classification to veto.
+  let outcome = __judge_classify_verdict("done\",,", DONE_TOKENS, [], "fallback")
+  assert_eq(outcome.vetoed, false)
+  assert_eq(outcome.verdict, "done")
+}
+
+pipeline test_prose_verdict_without_json_junk_is_unchanged(task) {
+  // Multi-word prose verdicts carry signal; only JSON structural characters
+  // mark upstream mangling, so plain prose passes through verbatim.
+  assert_eq(__judge_verdict_token("not done yet"), "not done yet")
+  let outcome = __judge_classify_verdict("not done yet", DONE_TOKENS, [], "fallback")
+  assert_eq(outcome.vetoed, true)
+  assert_eq(outcome.verdict, "not done yet")
+}
+
+pipeline test_empty_and_nil_verdicts(task) {
+  assert_eq(__judge_verdict_token(nil), "")
+  assert_eq(__judge_verdict_token("\",,"), "")
+}

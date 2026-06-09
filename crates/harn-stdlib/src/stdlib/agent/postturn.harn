@@ -182,6 +182,19 @@ fn __native_tool_text_completion(opts, has_tool_calls, text) {
   if !__native_completion_context(opts, has_tool_calls, text) {
     return false
   }
+  // #3220: a zero-dispatch turn that ATTEMPTED a tool call as text is a
+  // failed call, not a completion signal. The loop already queued the
+  // corrective feedback this turn (the native-fallback contract note, or
+  // parse guidance for markup the parser could not promote into a call), so
+  // give the model the next turn instead of reading the prose as "done".
+  // Live failure: in a native session qwen3.6 emitted a `<function=edit>`
+  // call as plain text on its final turn; the native path ignored the text,
+  // the turn read as a natural completion, and the run ended with the edit
+  // lost. An explicit done sentinel still wins (it is an intentional host
+  // contract); this only stops the implicit prose-means-done read.
+  if opts?._turn_tool_call_feedback ?? false {
+    return false
+  }
   if !__zero_tool_completion_context(opts, has_tool_calls, text) {
     return true
   }
