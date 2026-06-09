@@ -8,6 +8,62 @@ highlights live in [CHANGELOG-pre-0.6.md](CHANGELOG-pre-0.6.md).
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.8.95
+
+### Removed
+
+- `std/agent/prompts`: removed the unused `action_required_feedback`,
+  `action_turn_nudge`, and `protocol_violation_feedback` prompt entrypoints
+  (their `*_prompt` functions, registry/catalog/override entries, and
+  `.harn.prompt` exemplar files). They had no in-tree caller — the live tool-
+  call repair path uses the parametric `parse_guidance` prompt — and the
+  `protocol_violation_feedback` exemplar hardcoded a text-format `<tool_call>
+  name({...})` shape that does not apply to json/native tool-format sessions.
+
+### Fixed
+
+- `harn-vm` tool-call parser feedback is now precise about what went wrong and
+  how to fix it, so cheap coding models stop re-emitting the same broken turn:
+  - Source/test code emitted where a tool call was expected (`it(...)`,
+    `expect(...)`, `describe(...)`, `assertServiceCount(...)`, …) no longer
+    reports a misleading `Unknown tool 'it'`. The feedback now names the real
+    cause — code outside a heredoc/`content` envelope — and tells the model to
+    wrap it.
+  - The "Unknown tool" available-tools list is no longer capped at 20 names
+    (which could hide the very tool the model needed). It lists every tool, and
+    appends an explicit `…and N more` only for a pathologically large registry —
+    never silently truncating. The highest-frequency misses (`read`, `write`,
+    `list`, `search`, …) now carry a canonical alias hint, e.g. `read` →
+    `look({ intent: "read" })`. Genuine close-miss typos still get the
+    `Did you mean '<tool>'?` suggestion. Applies to both the bare-TS and
+    native-JSON tool-call parsers.
+  - A denied/permission-gated tool result now carries an actionable `next_step`
+    ("do not retry the same call; make progress with allowed tools, or ask for
+    permission") instead of a bare `{"error":"permission_denied"}`.
+  - Object-literal tool-call parse errors now include a short `Raw:` preview of
+    the offending span (mirroring the native-JSON parser), so the model can tell
+    which of several on-screen calls failed.
+- `harn-vm` observation-mask compaction no longer shreds structured failure
+  detail. Masking a large tool output (`default_mask_tool_result`) used a
+  weaker, divergent filter than the microcompact path and dropped assertion-
+  value lines (`left:`/`right:`/`expected:`/`actual:`/`got`/`want`), rustc
+  continuation lines (`-->`, `= help:`, numbered source rows, `^` carets), and
+  `Lnnn:` failing-line markers — so the model re-read a summary with the
+  actual-vs-expected values removed. There is now ONE shared failure-signal
+  filter (`is_failure_signal_line`) used by both the microcompact and
+  observation-mask paths; the mask preserves those failure lines (bounded)
+  alongside the first-line preview.
+- **Egress NetPolicy CIDR/IP allow & deny rules now match resolved host IPs,
+  not just URL literals (#3174).** A rule like `deny 203.0.113.0/24` or
+  `allow 10.0.0.0/8` previously applied only when the request URL contained a
+  literal IP, so a CIDR denylist could be bypassed with a DNS name and a CIDR
+  allowlist wrongly rejected hostnames that resolve into the allowed range. The
+  IP/CIDR rules are now evaluated against the host's resolved addresses in the
+  off-runtime egress pre-check (clean typed `EgressBlocked`) and re-enforced at
+  connect time by the `GuardedResolver`, which pins the connection to the same
+  checked address — closing the DNS-rebinding window. Literal-IP, hostname, and
+  `*.suffix` rules are unchanged.
+
 ## v0.8.94
 
 ### Fixed
