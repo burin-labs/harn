@@ -24,15 +24,20 @@ thread_local! {
 /// Parse the (major, minor) generation out of a Claude model ID. Handles
 /// both dash-separated names like `claude-opus-4-7` / `claude-sonnet-4-6`
 /// and dotted variants like `claude-opus-4.7` (OpenRouter, some proxies),
-/// plus dated IDs like `claude-haiku-4-5-20251001`.
+/// plus dated IDs like `claude-haiku-4-5-20251001` and single-component
+/// generations like `claude-fable-5` → (5, 0).
 ///
-/// Returns `None` if the ID isn't a known Claude shape (e.g. `gpt-4o`).
+/// Returns `None` if the ID isn't a known Claude shape (e.g. `gpt-4o`),
+/// including non-numeric tails like `claude-mythos-preview`.
 pub(crate) fn claude_generation(model: &str) -> Option<(u32, u32)> {
     let lower = model.to_lowercase();
     if !lower.starts_with("claude-") && !lower.contains("/claude-") {
         return None;
     }
-    for family in ["opus", "sonnet", "haiku"] {
+    // fable/mythos (the Mythos-class tier above Opus, generation 5+) share
+    // the Opus 4.7+ request surface, so the >= (4, 6) / (4, 7) guards below
+    // must fire for them too.
+    for family in ["opus", "sonnet", "haiku", "fable", "mythos"] {
         let needle = format!("{family}-");
         if let Some(idx) = lower.find(&needle) {
             return parse_major_minor_tail(&lower[idx + needle.len()..]);
@@ -552,6 +557,47 @@ mod tests {
         assert!(claude_model_supports_tool_search("claude-opus-4-0"));
         assert!(claude_model_supports_tool_search("claude-sonnet-4-6"));
         assert!(claude_model_supports_tool_search("claude-sonnet-4-0"));
+    }
+
+    #[test]
+    fn fable_and_mythos_parse_generation_and_inherit_guards() {
+        // Fable/Mythos 5 (launched 2026-06-09) share the Opus 4.7+ request
+        // surface; the generation parser must recognize the families or none
+        // of the >= (4, 6) / (4, 7) guards (prefill removal, sampling strip,
+        // adaptive-thinking rewrite) fire for them.
+        assert_eq!(claude_generation("claude-fable-5"), Some((5, 0)));
+        assert_eq!(claude_generation("claude-mythos-5"), Some((5, 0)));
+        assert_eq!(claude_generation("anthropic/claude-fable-5"), Some((5, 0)));
+        // Mythos Preview has no numeric generation — stays unrecognized.
+        assert_eq!(claude_generation("claude-mythos-preview"), None);
+        assert!(claude_model_supports_tool_search("claude-fable-5"));
+    }
+
+    #[test]
+    fn fable_thinking_payloads_match_always_on_surface() {
+        // Extended-thinking budgets are a 400 on Fable — rewritten to adaptive.
+        let mut payload = base_payload();
+        payload.model = "claude-fable-5".to_string();
+        payload.thinking = ThinkingConfig::Enabled {
+            budget_tokens: Some(4096),
+        };
+        let body = AnthropicProvider::build_request_body(&payload);
+        assert_eq!(body["thinking"], serde_json::json!({ "type": "adaptive" }));
+
+        // Thinking is always on for Fable, and an explicit
+        // `thinking: {type: "disabled"}` is also a 400 — a Disabled config
+        // must leave the field out of the payload entirely.
+        let mut payload2 = base_payload();
+        payload2.model = "claude-fable-5".to_string();
+        payload2.thinking = ThinkingConfig::Disabled;
+        payload2.temperature = Some(0.0);
+        let body2 = AnthropicProvider::build_request_body(&payload2);
+        assert!(body2.get("thinking").is_none());
+        // Sampling params are rejected on the 4.7+ surface — stripped.
+        assert!(
+            body2.get("temperature").is_none(),
+            "temperature must be stripped for claude-fable-5"
+        );
     }
 
     #[test]

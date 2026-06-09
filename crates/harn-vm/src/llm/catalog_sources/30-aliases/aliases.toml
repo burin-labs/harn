@@ -14,6 +14,12 @@ provider = "anthropic"
 id = "claude-opus-4-8"
 provider = "anthropic"
 
+# Fable is the Mythos-class tier above Opus, not an Opus successor — the
+# `opus` alias intentionally stays on claude-opus-4-8.
+[aliases.fable]
+id = "claude-fable-5"
+provider = "anthropic"
+
 [aliases.haiku]
 id = "claude-haiku-4-5-20251001"
 provider = "anthropic"

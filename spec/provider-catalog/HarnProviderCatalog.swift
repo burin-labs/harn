@@ -1494,6 +1494,101 @@ public let harnProviderCatalogJSON = #"""
       ]
     },
     {
+      "id": "claude-fable-5",
+      "name": "Claude Fable 5",
+      "provider": "anthropic",
+      "aliases": [
+        "fable"
+      ],
+      "context_window": 1000000,
+      "modalities": {
+        "input": [
+          "text",
+          "image",
+          "audio",
+          "pdf"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
+        "tool_search": [
+          "bm25",
+          "regex"
+        ],
+        "max_tools": 10000
+      },
+      "structured_output": "tool_use",
+      "format_preferences": {
+        "prefers_xml_scaffolding": true,
+        "prefers_markdown_scaffolding": false,
+        "structured_output_mode": "xml_tagged",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": true,
+        "thinking_block_style": "thinking_blocks"
+      },
+      "reasoning": {
+        "modes": [
+          "adaptive"
+        ],
+        "effort_supported": false,
+        "none_supported": false,
+        "interleaved_supported": true,
+        "preserve_thinking": false
+      },
+      "prompt_cache": true,
+      "pricing": {
+        "input_per_mtok": 10.0,
+        "output_per_mtok": 50.0,
+        "cache_read_per_mtok": 1.0,
+        "cache_write_per_mtok": 12.5
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "tool_search",
+        "vision",
+        "audio",
+        "pdf",
+        "files",
+        "prompt_caching",
+        "thinking",
+        "extended_thinking",
+        "structured_output"
+      ],
+      "family": "anthropic-claude",
+      "lineage": "claude-sonnet-opus",
+      "complementary_with": [
+        "openai-gpt",
+        "google-gemini",
+        "qwen",
+        "deepseek",
+        "kimi"
+      ],
+      "tier": "frontier",
+      "open_weight": false,
+      "strengths": [
+        "reasoning",
+        "coding",
+        "long_context",
+        "agentic"
+      ],
+      "benchmarks": {
+        "swe_bench_pro": 80.3
+      }
+    },
+    {
       "id": "claude-haiku-4-5-20251001",
       "name": "Claude Haiku 4.5",
       "provider": "anthropic",
@@ -7718,6 +7813,11 @@ public let harnProviderCatalogJSON = #"""
       "name": "devstral-small-2",
       "model_id": "devstral-small-2:24b",
       "provider": "ollama"
+    },
+    {
+      "name": "fable",
+      "model_id": "claude-fable-5",
+      "provider": "anthropic"
     },
     {
       "name": "frontier",

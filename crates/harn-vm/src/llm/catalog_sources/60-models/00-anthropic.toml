@@ -211,3 +211,31 @@ complementary_with = ["openai-gpt", "google-gemini", "qwen", "deepseek", "kimi"]
 # Fast mode (research preview): 2x standard pricing, ~2.5x output tok/s.
 fast_mode = { param = "speed", value = "fast", beta_header = "fast-mode-2026-02-01", otps_speedup = 2.5, status = "research_preview", pricing = { input_per_mtok = 10.00, output_per_mtok = 50.00, cache_read_per_mtok = 1.00, cache_write_per_mtok = 12.50 }, note = "Claude API + Managed Agents only (not Bedrock/Vertex/Foundry); excluded from Batch and Priority Tier. Switching speed invalidates the prompt cache. Waitlist/account-manager gated." }
 
+# Claude Fable 5 (released 2026-06-09) — Anthropic's most capable widely
+# released model: the first generally available Mythos-class model, a new
+# tier *above* Opus (Opus 4.8 stays current and keeps the `opus` alias;
+# nothing is superseded). Same request surface as Opus 4.7/4.8 — adaptive
+# thinking only, sampling params rejected, no assistant prefill — plus one
+# new constraint: an explicit `thinking: {type: "disabled"}` is also a 400
+# (thinking is always on; omit the field instead, which our request
+# builder already does for the Disabled config). Safety classifiers can
+# decline requests with stop_reason="refusal"; the `fallbacks` beta
+# retries on Opus 4.8. No fast mode tier. The 1M-token context window is
+# the model's only tier (there is no 200k standard tier to mirror, so
+# this row intentionally departs from the 200k convention used by the
+# Opus/Sonnet rows above). Pricing per the Anthropic pricing page:
+# $10 / $50 per MTok in/out (cache read 0.1x, 5-min cache write 1.25x);
+# Batch API 50% discount applies. SWE-bench Verified not published for
+# Fable 5 itself at launch (only for Mythos Preview), so it is omitted.
+[models."claude-fable-5"]
+name = "Claude Fable 5"
+provider = "anthropic"
+context_window = 1000000
+capabilities = ["tools", "streaming", "prompt_caching", "thinking"]
+pricing = { input_per_mtok = 10.00, output_per_mtok = 50.00, cache_read_per_mtok = 1.00, cache_write_per_mtok = 12.50 }
+tier = "frontier"
+open_weight = false
+strengths = ["reasoning", "coding", "long_context", "agentic"]
+benchmarks = { swe_bench_pro = 80.3 }
+complementary_with = ["openai-gpt", "google-gemini", "qwen", "deepseek", "kimi"]
+
