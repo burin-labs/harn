@@ -515,6 +515,57 @@ impl<'a> Linter<'a> {
         });
     }
 
+    /// Narrow a declaration span (which covers the whole `fn`/`pipeline`/`tool`
+    /// node, signature through body) down to just the keyword + name on the
+    /// signature's first line, so name-anchored lints underline `fn run_agent`
+    /// instead of carpeting hundreds of columns across the entire function.
+    ///
+    /// The AST does not carry a separate identifier span, so we recover it from
+    /// the source: scan forward from the decl span's start for the `name`
+    /// identifier as a whole word and end the narrow span just past it. Falls
+    /// back to the original span when the source is unavailable or the name
+    /// can't be located (e.g. synthetic nodes), preserving prior behavior.
+    pub(super) fn name_anchored_span(&self, name: &str, span: Span) -> Span {
+        let Some(source) = self.source else {
+            return span;
+        };
+        if name.is_empty() || span.start >= span.end {
+            return span;
+        }
+        // Confine the search to the first line of the decl so we never grab a
+        // same-named token from the body.
+        let scan_end = source[span.start..span.end]
+            .find('\n')
+            .map_or(span.end, |nl| span.start + nl);
+        let Some(haystack) = source.get(span.start..scan_end) else {
+            return span;
+        };
+        let mut search_from = 0;
+        while let Some(rel) = haystack[search_from..].find(name) {
+            let match_start = search_from + rel;
+            let match_end = match_start + name.len();
+            let prev_ok = match_start == 0
+                || !haystack[..match_start]
+                    .chars()
+                    .next_back()
+                    .is_some_and(|c| c.is_alphanumeric() || c == '_');
+            let next_ok = !haystack[match_end..]
+                .chars()
+                .next()
+                .is_some_and(|c| c.is_alphanumeric() || c == '_');
+            if prev_ok && next_ok {
+                return Span::with_offsets(
+                    span.start,
+                    span.start + match_end,
+                    span.line,
+                    span.column,
+                );
+            }
+            search_from = match_start + 1;
+        }
+        span
+    }
+
     /// Score the body of a function/tool and emit a
     /// `cyclomatic-complexity` warning if it exceeds the configured
     /// threshold. No-op when the enclosing decl carries
@@ -534,7 +585,7 @@ impl<'a> Linter<'a> {
             message: format!(
                 "function `{name}` has cyclomatic complexity {complexity} (> {threshold})"
             ),
-            span,
+            span: self.name_anchored_span(name, span),
             severity: LintSeverity::Warning,
             suggestion: Some(format!(
                 "split `{name}` into smaller helpers, or mark it `@complexity(allow)` if the branching is intrinsic; threshold configurable via `[lint].complexity_threshold` in `harn.toml`"
@@ -551,7 +602,7 @@ impl<'a> Linter<'a> {
             code: Code::LintNamingConvention,
             rule: "naming-convention".into(),
             message: format!("function `{name}` should use snake_case"),
-            span,
+            span: self.name_anchored_span(name, span),
             severity: LintSeverity::Warning,
             suggestion: Some(format!(
                 "rename `{name}` to snake_case (for example `{}`)",
@@ -569,7 +620,7 @@ impl<'a> Linter<'a> {
             code: Code::LintNamingConvention,
             rule: "naming-convention".into(),
             message: format!("{kind} `{name}` should use PascalCase"),
-            span,
+            span: self.name_anchored_span(name, span),
             severity: LintSeverity::Warning,
             suggestion: Some(format!(
                 "rename `{name}` to PascalCase (for example `{}`)",

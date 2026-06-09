@@ -182,6 +182,67 @@ pipeline default(task) {
 }
 
 #[test]
+fn test_cyclomatic_complexity_span_anchors_to_name_not_whole_function() {
+    // Regression for HARN-LNT-002 underlining the entire function (signature
+    // through body, hundreds of columns) instead of pointing at the name. The
+    // diagnostic span must cover only `fn complicated_runner` on the first line.
+    let source = r#"
+fn complicated_runner(x: int, y: int, z: int, label: string, extra: bool) -> int {
+  if x > 0 { log("1") }
+  if x > 1 { log("2") }
+  if x > 2 { log("3") }
+  if x > 3 { log("4") }
+  if x > 4 { log("5") }
+  if x > 5 { log("6") }
+  if x > 6 { log("7") }
+  if x > 7 { log("8") }
+  if x > 8 { log("9") }
+  if x > 9 { log("10") }
+  if x > 10 { log("11") }
+  if x > 11 { log("12") }
+  if x > 12 { log("13") }
+  if x > 13 { log("14") }
+  if x > 14 { log("15") }
+  if x > 15 { log("16") }
+  if x > 16 { log("17") }
+  if x > 17 { log("18") }
+  if x > 18 { log("19") }
+  if x > 19 { log("20") }
+  if x > 20 { log("21") }
+  if x > 21 { log("22") }
+  if x > 22 { log("23") }
+  if x > 23 { log("24") }
+  if x > 24 { log("25") }
+  if x > 25 { log("26") }
+  0
+}
+
+pipeline default(task) {
+  complicated_runner(10, 1, 2, "a", true)
+}
+"#;
+    let diags = lint_source(source);
+    let warning = diags
+        .iter()
+        .find(|d| d.rule == "cyclomatic-complexity")
+        .expect("expected a cyclomatic-complexity warning");
+    let underlined = &source[warning.span.start..warning.span.end];
+    assert_eq!(
+        underlined, "fn complicated_runner",
+        "complexity diagnostic must underline only the keyword + name, got: {underlined:?}"
+    );
+    // The span must not bleed past the first line into the giant body.
+    assert_eq!(
+        warning.span.line, warning.span.end_line,
+        "name-anchored span must stay on a single line"
+    );
+    assert!(
+        !underlined.contains('\n'),
+        "name-anchored span must not span the whole multi-line function"
+    );
+}
+
+#[test]
 fn test_cyclomatic_complexity_allow_attribute_suppresses() {
     // Intentionally branchy parser-style function; `@complexity(allow)`
     // must silence the warning even when the score is above threshold.

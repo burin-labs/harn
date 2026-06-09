@@ -18,6 +18,47 @@ fn BadName() {
 }
 
 #[test]
+fn test_naming_convention_span_anchors_to_function_name() {
+    // The name lint should underline `fn BadName`, not the whole multi-line
+    // function declaration (same HARN-LNT-002-class span bug).
+    let source = "
+fn BadName(a: int, b: int, c: string) -> int {
+  return a
+}
+";
+    let diags = lint_source(source);
+    let warning = diags
+        .iter()
+        .find(|d| d.rule == "naming-convention")
+        .expect("expected naming-convention warning");
+    let underlined = &source[warning.span.start..warning.span.end];
+    assert_eq!(
+        underlined, "fn BadName",
+        "function name lint must underline only keyword + name, got: {underlined:?}"
+    );
+}
+
+#[test]
+fn test_naming_convention_span_anchors_to_type_name() {
+    let source = "
+struct bad_name {
+  value: int
+  other: string
+}
+";
+    let diags = lint_source(source);
+    let warning = diags
+        .iter()
+        .find(|d| d.rule == "naming-convention")
+        .expect("expected naming-convention warning");
+    let underlined = &source[warning.span.start..warning.span.end];
+    assert_eq!(
+        underlined, "struct bad_name",
+        "type name lint must underline only keyword + name, got: {underlined:?}"
+    );
+}
+
+#[test]
 fn test_naming_convention_flags_non_pascal_case_type() {
     let diags = lint_source(
         r"
