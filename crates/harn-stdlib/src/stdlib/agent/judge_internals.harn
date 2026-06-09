@@ -34,6 +34,42 @@ pub fn __judge_apply_llm_overrides(llm_opts, judge_cfg) {
 }
 
 /**
+ * JSON structural characters can never be part of a legitimate verdict
+ * token, so a captured verdict containing one was mangled upstream.
+ */
+const __JUDGE_VERDICT_JSON_JUNK = ["\"", ",", "{", "}", ":", "\\"]
+
+/**
+ * Normalize a captured judge verdict to its leading token. Structured
+ * judges occasionally emit sloppy JSON (double commas, run-on key/value
+ * pairs) that the structured-call repair layer salvages by capturing
+ * trailing JSON junk into the verdict string — observed live in
+ * `judge_decision` events as `continue",,` and `continue",  "reasoning":`.
+ * Cut at the first JSON structural character and trim; verdicts without
+ * JSON junk (including multi-word prose verdicts) pass through unchanged.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: internal
+ * @example: __judge_verdict_token("continue\",,")
+ */
+pub fn __judge_verdict_token(raw_verdict) {
+  let normalized = lowercase(trim(to_string(raw_verdict ?? "")))
+  var cut = len(normalized)
+  for junk in __JUDGE_VERDICT_JSON_JUNK {
+    let idx = normalized.index_of(junk)
+    if idx >= 0 && idx < cut {
+      cut = idx
+    }
+  }
+  if cut == len(normalized) {
+    return normalized
+  }
+  return trim(normalized[0:cut])
+}
+
+/**
  * Classify a raw verdict string against an allow-list of pass tokens and
  * compose the `{vetoed, feedback?}` outcome. `feedback_candidates` is
  * tried in order: the first non-nil, non-empty entry wins. Falls back
@@ -41,6 +77,9 @@ pub fn __judge_apply_llm_overrides(llm_opts, judge_cfg) {
  *
  * Used by `agent_step_judge` (pass tokens like "pass"/"yes"/"approve") and
  * by `agent_verify_or_continue` (pass tokens like "done"/"complete").
+ * The raw verdict is normalized through `__judge_verdict_token` first, so
+ * a verdict that captured trailing JSON junk still classifies correctly
+ * and the stored/emitted `verdict` field carries the clean token.
  *
  * @effects: []
  * @allocation: heap
@@ -49,7 +88,7 @@ pub fn __judge_apply_llm_overrides(llm_opts, judge_cfg) {
  * @example: __judge_classify_verdict("pass", ["pass", "yes"], [critique], default)
  */
 pub fn __judge_classify_verdict(raw_verdict, pass_tokens, feedback_candidates, feedback_default) {
-  let normalized = lowercase(trim(to_string(raw_verdict ?? "")))
+  let normalized = __judge_verdict_token(raw_verdict)
   if contains(pass_tokens, normalized) {
     return {vetoed: false, verdict: normalized}
   }
