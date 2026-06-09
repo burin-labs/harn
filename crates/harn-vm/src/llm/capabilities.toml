@@ -169,6 +169,110 @@ top_k_supported = false
 # --- source: 20-providers/00-anthropic.toml ---
 # ---------- Anthropic (Claude) ------------------------------------------------
 
+# Claude Fable 5 / Mythos 5 — the Mythos-class tier above Opus (launched
+# 2026-06-09). Same surface as Opus 4.7+: adaptive thinking only (and on
+# this family thinking is always on — an explicit `disabled` is a 400, so
+# the request builder must omit the field), interleaved thinking, no
+# assistant prefill, sampling params rejected. No version_min: every
+# fable/mythos id is Mythos-class. Without these rows the ids would fall
+# through to the permissive `claude-*` catch-all at the bottom of this
+# file, which wrongly grants `thinking_modes = ["enabled"]` and prefill.
+[[provider.anthropic]]
+model_match = "claude-fable-*"
+native_tools = true
+preferred_tool_format = "native"
+defer_loading = true
+tool_search = ["bm25", "regex"]
+max_tools = 10000
+prompt_caching = true
+vision = true
+audio_supported = true
+pdf_supported = true
+files_api_supported = true
+structured_output = "tool_use"
+thinking_modes = ["adaptive"]
+interleaved_thinking_supported = true
+vision_supported = true
+prefers_xml_scaffolding = true
+prefers_markdown_scaffolding = false
+structured_output_mode = "xml_tagged"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = true
+thinking_block_style = "thinking_blocks"
+
+[[provider.anthropic]]
+model_match = "claude-mythos-*"
+native_tools = true
+preferred_tool_format = "native"
+defer_loading = true
+tool_search = ["bm25", "regex"]
+max_tools = 10000
+prompt_caching = true
+vision = true
+audio_supported = true
+pdf_supported = true
+files_api_supported = true
+structured_output = "tool_use"
+thinking_modes = ["adaptive"]
+interleaved_thinking_supported = true
+vision_supported = true
+prefers_xml_scaffolding = true
+prefers_markdown_scaffolding = false
+structured_output_mode = "xml_tagged"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = true
+thinking_block_style = "thinking_blocks"
+
+[[provider.anthropic]]
+model_match = "anthropic/claude-fable-*"
+native_tools = true
+preferred_tool_format = "native"
+defer_loading = true
+tool_search = ["bm25", "regex"]
+max_tools = 10000
+prompt_caching = true
+vision = true
+audio_supported = true
+pdf_supported = true
+files_api_supported = true
+structured_output = "tool_use"
+thinking_modes = ["adaptive"]
+interleaved_thinking_supported = true
+vision_supported = true
+prefers_xml_scaffolding = true
+prefers_markdown_scaffolding = false
+structured_output_mode = "xml_tagged"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = true
+thinking_block_style = "thinking_blocks"
+
+[[provider.anthropic]]
+model_match = "anthropic/claude-mythos-*"
+native_tools = true
+preferred_tool_format = "native"
+defer_loading = true
+tool_search = ["bm25", "regex"]
+max_tools = 10000
+prompt_caching = true
+vision = true
+audio_supported = true
+pdf_supported = true
+files_api_supported = true
+structured_output = "tool_use"
+thinking_modes = ["adaptive"]
+interleaved_thinking_supported = true
+vision_supported = true
+prefers_xml_scaffolding = true
+prefers_markdown_scaffolding = false
+structured_output_mode = "xml_tagged"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = true
+thinking_block_style = "thinking_blocks"
+
 # Claude 4.7+ uses adaptive thinking instead of explicit budgets.
 [[provider.anthropic]]
 model_match = "claude-haiku-*"
