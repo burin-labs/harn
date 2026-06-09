@@ -213,7 +213,19 @@ fn agent_primitive_denied_tool(
     denial: Option<&crate::agent_events::ToolDenial>,
 ) -> serde_json::Value {
     let reason = reason.into();
-    let mut result = agent_tools::denied_tool_result(tool_name, reason.clone());
+    // Split the inner result body by category. A RECOVERABLE rejection
+    // (`SchemaValidation` — bad/missing arguments or an empty tool name) must
+    // coach a retry *with the correction* via `recoverable_tool_result`
+    // (`error: "invalid_arguments"`), never the permission-denial body. Reusing
+    // `denied_tool_result` here was the live convergence bug: cheap models read
+    // "permission_denied / Do not retry the same call" after one fixable arg
+    // mistake and gave up (false FAIL across ~26 recent eval transcripts). True
+    // policy/permission denials keep the don't-retry `denied_tool_result` body.
+    let mut result = if category.is_recoverable() {
+        agent_tools::recoverable_tool_result(tool_name, reason.clone())
+    } else {
+        agent_tools::denied_tool_result(tool_name, reason.clone())
+    };
     // Mirror the structured denial onto the inner tool result so it rides
     // along in the transcript the model sees, and onto the envelope so a
     // host harness reading the dispatch outcome can fail or pivot early
@@ -1868,6 +1880,85 @@ mod security_gate_tests {
         assert_eq!(descriptor["schemaChanged"], true);
 
         assert!(tool_descriptor_for(Some(&catalog), "unknown_tool").is_none());
+    }
+}
+
+#[cfg(test)]
+mod denied_tool_routing_tests {
+    //! `agent_primitive_denied_tool` must pick its model-facing result body by
+    //! category: RECOVERABLE rejections (schema/argument validation, malformed
+    //! tool name) coach a retry-with-correction, while TRUE policy/permission
+    //! denials keep the don't-retry body. Reverting the split (sending every
+    //! category through `denied_tool_result`) fails the recoverable assertions.
+    use super::agent_primitive_denied_tool;
+    use crate::agent_events::ToolCallErrorCategory;
+
+    #[test]
+    fn schema_validation_missing_param_yields_invalid_arguments_retry_positive() {
+        let envelope = agent_primitive_denied_tool(
+            "edit",
+            "call_1",
+            &serde_json::json!({ "content": "x" }),
+            "Tool 'edit' is missing required parameter(s): path. \
+             Provide all required parameters and try again.",
+            ToolCallErrorCategory::SchemaValidation,
+            None,
+        );
+        // Envelope-level category is still schema_validation for the wire...
+        assert_eq!(envelope["error_category"], "schema_validation");
+        // ...but the inner model-facing result is retry-positive, NOT a denial.
+        let result = &envelope["result"];
+        assert_eq!(result["error"], serde_json::json!("invalid_arguments"));
+        assert_ne!(result["error"], serde_json::json!("permission_denied"));
+        let next = result["next_step"].as_str().expect("next_step");
+        assert!(
+            !next.contains("Do not retry"),
+            "schema rejection must be retry-positive: {next}"
+        );
+        assert!(
+            next.contains("Re-call") && next.contains("edit") && next.contains("path"),
+            "next_step should re-call the named tool with the missing param: {next}"
+        );
+    }
+
+    #[test]
+    fn empty_tool_name_yields_recoverable_retry_positive_feedback() {
+        let envelope = agent_primitive_denied_tool(
+            "<unnamed>",
+            "call_2",
+            &serde_json::json!({}),
+            "Tool call is missing a name. Emit one tool call per turn as \
+             `name({ ... })` using a non-empty tool name from the allowed list, then retry.",
+            ToolCallErrorCategory::SchemaValidation,
+            None,
+        );
+        let result = &envelope["result"];
+        assert_eq!(result["error"], serde_json::json!("invalid_arguments"));
+        let next = result["next_step"].as_str().expect("next_step");
+        assert!(
+            !next.contains("Do not retry"),
+            "empty-name slip must be retry-positive: {next}"
+        );
+    }
+
+    #[test]
+    fn permission_denied_keeps_do_not_retry_body() {
+        let envelope = agent_primitive_denied_tool(
+            "run",
+            "call_3",
+            &serde_json::json!({ "command": "rm -rf /" }),
+            "shell access is disabled by policy",
+            ToolCallErrorCategory::PermissionDenied,
+            None,
+        );
+        assert_eq!(envelope["error_category"], "permission_denied");
+        let result = &envelope["result"];
+        assert_eq!(result["error"], serde_json::json!("permission_denied"));
+        let next = result["next_step"].as_str().expect("next_step");
+        assert!(
+            next.contains("Do not retry the same call"),
+            "true denial must still steer off a retry loop: {next}"
+        );
     }
 }
 

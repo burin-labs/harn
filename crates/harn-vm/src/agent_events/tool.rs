@@ -90,6 +90,17 @@ impl ToolCallErrorCategory {
         Self::Unknown,
     ];
 
+    /// Whether a rejection in this category is RECOVERABLE by the model on its
+    /// own — i.e. the call failed because of a fixable slip (bad/missing
+    /// arguments, malformed tool name) and re-issuing it *with the correction*
+    /// is the right next move. Distinguished from a true policy/permission
+    /// denial, where the model must NOT retry and should pivot or ask. Used by
+    /// the dispatch primitive to pick a retry-positive vs. don't-retry feedback
+    /// body for the model-facing tool result.
+    pub fn is_recoverable(self) -> bool {
+        matches!(self, Self::SchemaValidation)
+    }
+
     pub fn as_str(self) -> &'static str {
         match self {
             Self::SchemaValidation => "schema_validation",
