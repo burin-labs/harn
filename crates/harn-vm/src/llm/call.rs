@@ -146,7 +146,15 @@ pub(crate) fn structured_output_errors(
         }
     }
     if let Some(stop_reason) = dict.get("stop_reason").map(VmValue::display) {
-        if matches!(stop_reason.as_str(), "length" | "max_tokens") {
+        // Reuse the single canonical truncation classifier instead of a
+        // partial, case-sensitive literal match. The hand-rolled
+        // `matches!(.., "length" | "max_tokens")` missed Gemini/Vertex, which
+        // report `MAX_TOKENS` (uppercase) — those native responses passed their
+        // raw `finishReason` through unnormalized, so a truncated structured
+        // output was misreported as "did not contain parseable JSON" rather
+        // than a token-limit hit. `is_length_truncation` is case-insensitive
+        // and covers `length`/`max_tokens`/`MAX_TOKENS`/etc. for free.
+        if super::agent_session_host::is_length_truncation(Some(stop_reason.as_str())) {
             errors.push("response hit the token limit before producing complete JSON".to_string());
         }
     }
@@ -1076,6 +1084,37 @@ mod schema_stream_abort_retry_tests {
         routing::extract_routing_policy(Some(&options))
             .expect("routing policy extracts")
             .expect("routing policy present")
+    }
+
+    // Regression: a truncated structured-output response must be reported as a
+    // token-limit hit regardless of provider stop_reason spelling. Gemini /
+    // Vertex pass `MAX_TOKENS` (uppercase) through unnormalized; the previous
+    // case-sensitive `matches!(.., "length" | "max_tokens")` missed it and
+    // mislabeled the failure as "did not contain parseable JSON".
+    #[test]
+    fn structured_output_truncation_detected_case_insensitively() {
+        let opts = api::options::base_opts("fake");
+        for spelling in ["max_tokens", "MAX_TOKENS", "length", "LENGTH"] {
+            let dict = VmValue::Dict(std::sync::Arc::new(BTreeMap::from([(
+                "stop_reason".to_string(),
+                VmValue::String(std::sync::Arc::from(spelling)),
+            )])));
+            let errors = structured_output_errors(&dict, &opts);
+            assert!(
+                errors.iter().any(|e| e.contains("hit the token limit")),
+                "spelling {spelling:?} should be flagged as truncation, got: {errors:?}"
+            );
+        }
+        // A non-truncation stop_reason must NOT add the token-limit error.
+        let dict = VmValue::Dict(std::sync::Arc::new(BTreeMap::from([(
+            "stop_reason".to_string(),
+            VmValue::String(std::sync::Arc::from("stop")),
+        )])));
+        let errors = structured_output_errors(&dict, &opts);
+        assert!(
+            !errors.iter().any(|e| e.contains("hit the token limit")),
+            "non-truncation stop must not add token-limit error, got: {errors:?}"
+        );
     }
 
     #[test]
