@@ -83,6 +83,18 @@ features = ["use_pem", "aws_lc_rs"]
 [dev-dependencies]
 async-compression = { version = "0.4", features = ["tokio", "gzip"] }
 filetime = "0.2"
+# harn-serve depends on harn-vm with `default-features = false` (lean embedding
+# — see lean-embedding.yml), so the `pg.*` builtins are off in the library
+# build. A handful of integration tests (e.g. the `@budget(pg_queries)` gate in
+# tests/limits_loadgen.rs) drive a `pg_mock_pool` against the dispatch core and
+# need those builtins registered. Re-declaring harn-vm here with `postgres`
+# turns it on for harn-serve's OWN test/bench builds only: cargo merges normal +
+# dev dependency features for test targets, while the library build and every
+# downstream embedder still see the lean `default-features = false` view. This
+# makes `cargo nextest run -p harn-serve` green in isolation without the test
+# silently relying on workspace-wide feature unification (which masked the gap:
+# it passed under `--workspace` but failed under `-p harn-serve`).
+harn-vm = { path = "../harn-vm", version = "0.8", default-features = false, features = ["postgres"] }
 futures-util = "0.3"
 hex = "0.4"
 tempfile = "3"
