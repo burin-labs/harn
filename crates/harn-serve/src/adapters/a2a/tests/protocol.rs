@@ -767,8 +767,7 @@ fn auth_request_with_bearer(token: &str) -> AuthRequest {
             "authorization".to_string(),
             format!("Bearer {token}"),
         )]),
-        validated_oauth: None,
-        tenant_id: None,
+        ..AuthRequest::default()
     }
 }
 

@@ -55,6 +55,10 @@ async fn recv_json(rx: &mut mpsc::UnboundedReceiver<String>) -> serde_json::Valu
     serde_json::from_str(&line).expect("ACP JSON line")
 }
 
+/// Only the hostlib-gated rollback/redo test builds transcript
+/// messages by hand; gate the helper identically so a featureless
+/// `clippy --all-targets -D warnings` run stays clean.
+#[cfg(feature = "hostlib")]
 fn make_acp_test_message(role: &str, content: &str) -> VmValue {
     VmValue::Dict(Arc::new(BTreeMap::from([
         ("role".to_string(), VmValue::String(Arc::from(role))),
