@@ -56,6 +56,19 @@
 //! status/headers/SSE/304 semantics come for free and stay identical to
 //! every other harn-serve surface.
 //!
+//! ## Streamed bodies (`@stream`)
+//!
+//! The dispatch boundary is JSON in/out, so a `.harn` handler's response
+//! is fully buffered before it is rendered — fine for pages and APIs,
+//! wrong for SSE. A route whose export carries the bare `@stream`
+//! attribute therefore never dispatches into the VM: after the
+//! [`SiteAuth`] hook and the route's `@scopes` admit the request, the
+//! adapter hands the request head to the embedder's
+//! [`SiteStreamProvider`] (installed with
+//! [`SiteServerConfig::with_stream_provider`]) and forwards its
+//! streaming `Response` — an SSE or chunked body — unbuffered. See the
+//! trait docs for the contract.
+//!
 //! ## WebSockets
 //!
 //! When a handler returns an `http_upgrade_ws(req, options)` envelope and
@@ -165,6 +178,48 @@ impl SiteAuthOutcome {
     }
 }
 
+/// Embedder-supplied responder for `@stream` routes (#3213).
+///
+/// The host-call bridge is synchronous request/response (JSON in, JSON
+/// out), so a `.harn` handler can never *stream* a body — yet SSE/
+/// chunked endpoints are real surfaces an embedder needs to host on the
+/// same router, behind the same admission. The seam: a route whose
+/// `.harn` export carries the `@stream` marker (see [`crate::exports`])
+/// never buffers the request body and never dispatches into the VM.
+/// After routing and admission — the [`SiteAuth`] hook plus the route's
+/// `@scopes` — the adapter calls the provider installed with
+/// [`SiteServerConfig::with_stream_provider`], and forwards whatever
+/// streaming [`Response`] it returns (an [`axum::response::sse::Sse`],
+/// a `Body::from_stream`, …) to the client unbuffered. Keep-alive and
+/// client-disconnect propagation are axum's: when the client goes away
+/// the response body stream is dropped, cancelling the source.
+///
+/// The `.harn` function under a `@stream` route is a declaration-only
+/// stub — it owns the route, its `@scopes`, and its docs, while the
+/// stream source lives in embedder Rust (where the event store is).
+#[async_trait]
+pub trait SiteStreamProvider: Send + Sync {
+    /// Open the stream for one admitted request.
+    ///
+    /// * `route` — the matched function's declared [`RouteSpec`].
+    /// * `auth` — the identity the [`SiteAuth`] hook resolved (tenant,
+    ///   scopes, opaque context); `None` when no hook is installed.
+    /// * `request` — the request head as the same JSON dict a `.harn`
+    ///   handler would receive (`method`, `path`, `route`,
+    ///   `path_params`/`params`, `query`, `headers`, `client_ip`,
+    ///   `remote_addr`), minus any body — a stream route never reads
+    ///   one.
+    ///
+    /// Errors are just responses: shape a 404/410/500 the same way a
+    /// success is shaped, and return it.
+    async fn open(
+        &self,
+        route: &RouteSpec,
+        auth: Option<&SiteAuthContext>,
+        request: Value,
+    ) -> Response;
+}
+
 /// Listener options for [`SiteServer::run_http`].
 #[derive(Clone, Debug)]
 pub struct SiteHttpServeOptions {
@@ -191,6 +246,10 @@ pub struct SiteServerConfig {
     /// (the default) keeps the historic behavior: no edge auth and
     /// tenant-less dispatch.
     pub auth: Option<Arc<dyn SiteAuth>>,
+    /// Embedder responder for `@stream` routes. Required when the
+    /// script declares any — building the router fails loudly otherwise,
+    /// since the route would have no body source.
+    pub stream_provider: Option<Arc<dyn SiteStreamProvider>>,
 }
 
 impl SiteServerConfig {
@@ -200,6 +259,7 @@ impl SiteServerConfig {
             transport: TransportConfig::default_enabled(),
             trusted_proxies: Vec::new(),
             auth: None,
+            stream_provider: None,
         }
     }
 
@@ -218,6 +278,13 @@ impl SiteServerConfig {
     /// dispatched.
     pub fn with_auth(mut self, auth: Arc<dyn SiteAuth>) -> Self {
         self.auth = Some(auth);
+        self
+    }
+
+    /// Install the embedder [`SiteStreamProvider`] that answers the
+    /// script's `@stream` routes.
+    pub fn with_stream_provider(mut self, provider: Arc<dyn SiteStreamProvider>) -> Self {
+        self.stream_provider = Some(provider);
         self
     }
 }
@@ -241,10 +308,18 @@ impl SiteServer {
             transport,
             trusted_proxies,
             auth,
+            stream_provider,
         } = self.config;
         let catalog = Arc::new(core.catalog().clone());
         let runtime = Arc::new(DispatchRuntime::start("SITE", Arc::new(core)));
-        build_site_router(&catalog, runtime, &transport, trusted_proxies, auth)
+        build_site_router(
+            &catalog,
+            runtime,
+            &transport,
+            trusted_proxies,
+            auth,
+            stream_provider,
+        )
     }
 
     /// Bind the configured socket and serve until the process exits.
@@ -279,6 +354,9 @@ struct SiteRoute {
     /// `@scopes(...)` declared on the function; empty means no scope
     /// requirement (public, as far as scopes are concerned).
     required_scopes: BTreeSet<String>,
+    /// `@stream` marker: after admission, hand the request head to the
+    /// [`SiteStreamProvider`] instead of dispatching into the VM.
+    stream: bool,
 }
 
 /// State shared by every site route handler: the dispatch executor plus
@@ -295,6 +373,10 @@ struct SiteState {
     /// Embedder auth hook; `None` means no edge auth (historic
     /// behavior).
     auth: Option<Arc<dyn SiteAuth>>,
+    /// Embedder stream provider answering `@stream` routes. Present
+    /// whenever the catalog declares one (router construction enforces
+    /// it).
+    stream_provider: Option<Arc<dyn SiteStreamProvider>>,
 }
 
 impl SiteState {
@@ -315,17 +397,28 @@ fn build_site_router(
     transport: &TransportConfig,
     trusted_proxies: Vec<IpNet>,
     auth: Option<Arc<dyn SiteAuth>>,
+    stream_provider: Option<Arc<dyn SiteStreamProvider>>,
 ) -> Result<Router, String> {
     let mut routes: BTreeMap<String, BTreeMap<String, SiteRoute>> = BTreeMap::new();
     for function in catalog.functions.values() {
         let Some(spec @ RouteSpec { method, path }) = function.route.as_ref() else {
             continue;
         };
+        // A `@stream` route has no body source without a provider;
+        // refusing to start beats serving a route that can only 500.
+        if function.stream && stream_provider.is_none() {
+            return Err(format!(
+                "route {method} {path} (`{}`) is marked @stream but no stream provider is \
+                 configured; install one with SiteServerConfig::with_stream_provider(...)",
+                function.name
+            ));
+        }
         let by_method = routes.entry(path.clone()).or_default();
         let entry = SiteRoute {
             function: function.name.clone(),
             spec: spec.clone(),
             required_scopes: function.required_scopes.clone(),
+            stream: function.stream,
         };
         if let Some(existing) = by_method.insert(method.clone(), entry) {
             return Err(format!(
@@ -349,6 +442,7 @@ fn build_site_router(
         routes: Arc::new(routes),
         trusted_proxies: Arc::new(trusted_proxies),
         auth,
+        stream_provider,
     };
 
     let mut router: Router<SiteState> = Router::new();
@@ -423,6 +517,54 @@ async fn site_dispatch(State(state): State<SiteState>, request: Request) -> Resp
             }
         },
     };
+
+    // `@stream` routes hand off to the embedder's provider right after
+    // admission: no body buffering (a stream route never reads one) and
+    // no VM dispatch — the provider's streaming Response is forwarded
+    // unbuffered, so SSE keep-alive and client-disconnect propagation
+    // are whatever the provider's `Sse`/stream body gives axum.
+    if route.stream {
+        // A @stream route never builds a `CallRequest`, so the
+        // dispatch-level `AuthPolicy` scope check cannot back-stop it
+        // the way it does for plain routes. With a hook installed the
+        // admission above already compared `@scopes` against the
+        // hook-granted set; without one, no identity means no granted
+        // scopes, and any scope requirement refuses — matching the
+        // allow-all default a plain route would hit at dispatch.
+        if auth_context.is_none() && !route.required_scopes.is_empty() {
+            return axum_response_from_dispatch_error(
+                DispatchError::Forbidden {
+                    required: route.required_scopes.clone(),
+                    granted: BTreeSet::new(),
+                },
+                &request_id,
+            );
+        }
+        let Some(provider) = state.stream_provider.as_ref() else {
+            // Unreachable: router construction refuses a @stream route
+            // without a provider. Shape a loud 500 rather than panic.
+            return axum_response_from_dispatch_error(
+                DispatchError::Execution(format!(
+                    "@stream route {route_template} has no stream provider"
+                )),
+                &request_id,
+            );
+        };
+        let request = build_request_value(
+            &method,
+            &parts.uri,
+            &route_template,
+            raw_params.as_ref(),
+            &query,
+            &parts.headers,
+            &[],
+            peer,
+            &state.trusted_proxies,
+        );
+        return provider
+            .open(&route.spec, auth_context.as_ref(), request)
+            .await;
+    }
 
     let wants_upgrade = is_websocket_upgrade(&parts.headers);
 
