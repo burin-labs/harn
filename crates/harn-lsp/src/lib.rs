@@ -184,9 +184,7 @@ mod tests {
  * Read a file as UTF-8.
  *
  * @effects: [fs.read]
- * @allocation: heap
  * @errors: [FileNotFound, PermissionDenied]
- * @api_stability: stable
  * @example: let s = read_to_string(\"/tmp/x\")
  */
 fn read_to_string(path: string) -> string {
@@ -201,7 +199,53 @@ fn read_to_string(path: string) -> string {
             .expect("should find fn");
         let meta = fn_sym.stdlib_metadata.as_ref().expect("metadata present");
         assert!(meta.is_complete(), "missing: {:?}", meta.missing_fields());
-        assert_eq!(meta.allocation.as_deref(), Some("heap"));
+        assert_eq!(meta.effects.as_deref(), Some(&["fs.read".to_string()][..]));
+        // Authored example wins over the derived one in the rendered block.
+        let md = meta.to_markdown_with_derived_example(fn_sym.derived_example.as_deref());
+        assert!(md.contains("let s = read_to_string(\"/tmp/x\")"));
+        assert!(!md.contains("derived from signature"));
+    }
+
+    #[test]
+    fn hover_fn_without_example_gets_derived_one() {
+        let source = "\
+/**
+ * Read a file as UTF-8.
+ *
+ * @effects: [fs.read]
+ * @errors: [FileNotFound]
+ */
+fn read_to_string(path: string) -> string {
+  return \"\"
+}
+";
+        let state = DocumentState::new(source.to_string());
+        let fn_sym = state
+            .symbols
+            .iter()
+            .find(|s| s.name == "read_to_string" && s.kind == HarnSymbolKind::Function)
+            .expect("should find fn");
+        assert_eq!(
+            fn_sym.derived_example.as_deref(),
+            Some("let out = read_to_string(path)")
+        );
+        let meta = fn_sym.stdlib_metadata.as_ref().expect("metadata present");
+        let md = meta.to_markdown_with_derived_example(fn_sym.derived_example.as_deref());
+        assert!(md.contains("derived from signature"));
+        assert!(md.contains("let out = read_to_string(path)"));
+    }
+
+    #[test]
+    fn hover_undocumented_fn_still_derives_example() {
+        let source = "fn notify(event) {\n  return\n}\n";
+        let state = DocumentState::new(source.to_string());
+        let fn_sym = state
+            .symbols
+            .iter()
+            .find(|s| s.name == "notify" && s.kind == HarnSymbolKind::Function)
+            .expect("should find fn");
+        assert!(fn_sym.stdlib_metadata.is_none());
+        assert_eq!(fn_sym.derived_example.as_deref(), Some("notify(event)"));
     }
 
     #[test]

@@ -40,7 +40,6 @@ fn __first_text(values: list) -> string {
  * Harn block dicts with `text` or `content`.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
  * @example: agent_transcript_text(message.content)
@@ -87,10 +86,8 @@ fn __json_or_raw(raw) {
  * Return the canonical tool name for Harn, OpenAI, or legacy tool-call dicts.
  *
  * @effects: []
- * @allocation: stack-only
  * @errors: []
  * @api_stability: experimental
- * @example: agent_transcript_tool_call_name(call)
  */
 pub fn agent_transcript_tool_call_name(call) -> string {
   if type_of(call) != "dict" {
@@ -106,10 +103,8 @@ pub fn agent_transcript_tool_call_name(call) -> string {
  * as `{_raw}` so consumers do not silently lose evidence.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
- * @example: agent_transcript_tool_call_args(call)
  */
 pub fn agent_transcript_tool_call_args(call) {
   if type_of(call) != "dict" {
@@ -133,10 +128,8 @@ pub fn agent_transcript_tool_call_args(call) {
  * Unknown fields stay available in `raw` for audit/replay consumers.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
- * @example: agent_transcript_tool_call(call)
  */
 pub fn agent_transcript_tool_call(call) {
   let name = agent_transcript_tool_call_name(call)
@@ -155,10 +148,8 @@ pub fn agent_transcript_tool_call(call) {
  * Normalize a list of tool-call dicts, dropping only entries without a name.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
- * @example: agent_transcript_tool_calls(calls)
  */
 pub fn agent_transcript_tool_calls(calls) -> list {
   var out = []
@@ -281,10 +272,8 @@ fn __parse_tool_result_attrs(attrs: string) -> dict {
  * requiring downstream consumers to parse rendered transcript text.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
- * @example: agent_transcript_tool_result_blocks(text)
  */
 pub fn agent_transcript_tool_result_blocks(text: string) -> list {
   var out = []
@@ -346,10 +335,8 @@ fn __legacy_request_tool_result_rows(record, index: int, previous_count: int) ->
  * - plain provider/session messages with only `role` and `content`
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
- * @example: agent_transcript_normalize(records)
  */
 pub fn agent_transcript_normalize(records) -> list {
   var rows = []
@@ -387,10 +374,8 @@ pub fn agent_transcript_normalize(records) -> list {
  * Read a transcript JSONL file and normalize it to canonical rows.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
- * @example: agent_transcript_read(path)
  */
 pub fn agent_transcript_read(path: string, options = {}) -> list {
   return agent_transcript_normalize(read_jsonl(path, options ?? {}))
@@ -400,10 +385,8 @@ pub fn agent_transcript_read(path: string, options = {}) -> list {
  * Return only assistant tool-call rows from a normalized or raw transcript.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
- * @example: agent_transcript_tool_events(records)
  */
 pub fn agent_transcript_tool_events(records) -> list {
   let rows = agent_transcript_normalize(records)
@@ -438,10 +421,8 @@ pub fn agent_transcript_tool_events(records) -> list {
  * Return only tool-result rows from a normalized or raw transcript.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
- * @example: agent_transcript_tool_results(records)
  */
 pub fn agent_transcript_tool_results(records) -> list {
   let rows = agent_transcript_normalize(records)

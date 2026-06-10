@@ -32,7 +32,6 @@ type TimingHandle = dict
  * so this is the preferred shape for measuring a discrete piece of work.
  *
  * @effects: [host]
- * @allocation: heap
  * @errors: [invalid_argument]
  * @api_stability: experimental
  * @example: let r = timed("benchmark.agent_loop", {case_id: case_id}, { -> work() })
@@ -58,7 +57,6 @@ pub fn timed(name: string, attrs: dict = {}, callback = nil) -> dict {
  * `timed(name, attrs, callback)` when the work fits in a single callback.
  *
  * @effects: [host]
- * @allocation: heap
  * @errors: [invalid_argument]
  * @api_stability: experimental
  * @example: let h = start_timing("provider.preflight", {provider: provider})
@@ -73,7 +71,6 @@ pub fn start_timing(name: string, attrs: dict = {}) -> TimingHandle {
  * event was attached, `false` if the handle's span was already closed.
  *
  * @effects: [host]
- * @allocation: heap
  * @errors: [invalid_argument]
  * @api_stability: experimental
  * @example: timing_event(timing, "credentials.checked", {available: true})
@@ -90,7 +87,6 @@ pub fn timing_event(handle: TimingHandle, name: string, attrs: dict = {}) -> boo
  * corrupting the active span stack.
  *
  * @effects: [host]
- * @allocation: heap
  * @errors: [invalid_argument]
  * @api_stability: experimental
  * @example: let timing = end_timing(handle, {status: "ok"})
@@ -105,7 +101,6 @@ pub fn end_timing(handle: TimingHandle, final_attrs: dict = {}) -> TimingSegment
  * want to keep the span open for sub-phase annotations after the check.
  *
  * @effects: []
- * @allocation: heap
  * @errors: [invalid_argument]
  * @api_stability: experimental
  * @example: if elapsed_ms(handle) > 5000 { abort("deadline") }

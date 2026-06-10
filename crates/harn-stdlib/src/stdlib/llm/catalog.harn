@@ -12,10 +12,7 @@
  * field will be nil and the inferred provider will be the default.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: model_info(selector)
  */
 pub fn model_info(selector) {
   return llm_model_info(selector)
@@ -25,10 +22,7 @@ pub fn model_info(selector) {
  * Wraps llm_resolved_options(opts). opts.model is required; throws otherwise.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: resolved_options(opts)
  */
 pub fn resolved_options(opts) {
   if type_of(opts) != "dict" {
@@ -86,10 +80,7 @@ fn __capability_field(caps, capability) {
  * "reasoning_effort", "native_tools". Returns false on unknown model.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: has_capability(model, capability)
  */
 pub fn has_capability(model, capability) {
   let info = llm_model_info(model)
@@ -109,10 +100,7 @@ pub fn has_capability(model, capability) {
  * provider and preserves hosted lineage where known.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: family_of(model_id)
  */
 pub fn family_of(model_id) {
   let info = llm_model_info(model_id)
@@ -127,10 +115,7 @@ pub fn family_of(model_id) {
  * packs. Falls back to family when a catalog row has no lineage.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: lineage_of(model_id)
  */
 pub fn lineage_of(model_id) {
   let info = llm_model_info(model_id)
@@ -146,7 +131,6 @@ pub fn lineage_of(model_id) {
  * `intent` is `"review"`, `"critique"`, or `"plan_review"`.
  *
  * @effects: []
- * @allocation: heap
  * @errors: ["llm_complementary_reviewer: ..."]
  * @api_stability: experimental
  * @example: complementary_reviewer({author_model: "claude-sonnet-4-6", intent: "plan_review"})
@@ -161,7 +145,6 @@ pub fn complementary_reviewer(opts) {
  * still let Harn re-render messages/tools for the selected provider.
  *
  * @effects: []
- * @allocation: heap
  * @errors: ["llm_equivalent_models: ..."]
  * @api_stability: experimental
  * @example: equivalent_models("cerebras/gpt-oss-120b")
@@ -370,7 +353,6 @@ fn __filter_models(opts) {
  * models_with.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
  * @example: models_with({tier: "frontier", strengths: ["coding"], available_only: true})
@@ -430,7 +412,6 @@ fn __relax_step(opts, step) {
  * best_available_models.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
  * @example: best_available_models({tier: "frontier", strengths: ["vision"]})
@@ -458,7 +439,6 @@ pub fn best_available_models(opts = nil) {
  * pick_model.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
  * @example: pick_model({tier: "frontier", strengths: ["coding"], available_only: true})

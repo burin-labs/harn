@@ -125,10 +125,8 @@ fn __workflow_autonomy_tier(value) -> WorkflowAutonomyTier {
  * workflow_autonomy_policy normalizes tier policy for with_autonomy_policy.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
- * @example: workflow_autonomy_policy(config)
  */
 pub fn workflow_autonomy_policy(config: WorkflowAutonomyPolicyConfig = {}) -> WorkflowAutonomyPolicy {
   return {
@@ -202,10 +200,8 @@ fn __workflow_agent_loop_options(
  * workflow_stage_agent_options.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
- * @example: workflow_stage_agent_options(config)
  */
 pub fn workflow_stage_agent_options(config: WorkflowStageOptionsConfig = {}) -> WorkflowStageAgentOptions {
   let model_policy: WorkflowModelPolicy = config.model_policy ?? {}

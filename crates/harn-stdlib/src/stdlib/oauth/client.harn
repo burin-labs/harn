@@ -597,7 +597,6 @@ fn __token_request(harness: Harness, cfg, method, url, opts) {
  *   - extra_auth_params:    additional key/value pairs on /authorize.
  *
  * @effects: [time, net]
- * @allocation: heap
  * @errors: [invalid_argument]
  * @api_stability: experimental
  * @example: client(providers().github, {client_id: id, storage: memory()})
@@ -658,10 +657,8 @@ pub fn client(provider, opts) -> OAuthClient {
  * every call so concurrent in-process callers see the latest refresh.
  *
  * @effects: [time, net]
- * @allocation: heap
  * @errors: [invalid_argument]
  * @api_stability: experimental
- * @example: token(cli)
  */
 pub fn token(cli) -> string {
   if type_of(cli) != "dict" || cli?._namespace != "oauth_client" {
@@ -676,10 +673,8 @@ pub fn token(cli) -> string {
  * when a downstream caller has separately observed token revocation.
  *
  * @effects: [time, net]
- * @allocation: heap
  * @errors: [invalid_argument]
  * @api_stability: experimental
- * @example: refresh(cli)
  */
 pub fn refresh(cli) {
   if type_of(cli) != "dict" || cli?._namespace != "oauth_client" {
@@ -696,7 +691,6 @@ pub fn refresh(cli) {
  * shape as `http_request`.
  *
  * @effects: [time, net]
- * @allocation: heap
  * @errors: [invalid_argument]
  * @api_stability: experimental
  * @example: request(cli, "GET", "https://api.github.com/user")
@@ -715,10 +709,8 @@ pub fn request(cli, method, url, opts = nil) {
  * `code` and `state`.
  *
  * @effects: []
- * @allocation: heap
  * @errors: [invalid_argument]
  * @api_stability: experimental
- * @example: start_authorization(cli)
  */
 pub fn start_authorization(cli) {
   if type_of(cli) != "dict" || cli?._namespace != "oauth_client" {
@@ -735,10 +727,8 @@ pub fn start_authorization(cli) {
  * redirected `code` for a token set, validating PKCE and `state`.
  *
  * @effects: [time, net]
- * @allocation: heap
  * @errors: [invalid_argument]
  * @api_stability: experimental
- * @example: exchange_code(cli, pkce, code, state)
  */
 pub fn exchange_code(cli, pkce, code, state) {
   if type_of(cli) != "dict" || cli?._namespace != "oauth_client" {
@@ -759,10 +749,8 @@ pub fn exchange_code(cli, pkce, code, state) {
  * authorization flow is run.
  *
  * @effects: [time, net]
- * @allocation: heap
  * @errors: [invalid_argument]
  * @api_stability: experimental
- * @example: revoke(cli)
  */
 pub fn revoke(cli) {
   if type_of(cli) != "dict" || cli?._namespace != "oauth_client" {

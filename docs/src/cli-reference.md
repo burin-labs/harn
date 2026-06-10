@@ -787,8 +787,8 @@ literal `render(...)` / `render_prompt(...)` targets, detects import symbol coll
 modules, validates `host_call("capability.operation", ...)` capability
 contracts, and flags missing template resources, execution directories, and worker repos that would
 otherwise fail only at runtime. Source-aware lint rules run as part of
-`check`, including the `missing-harndoc` warning for undocumented `pub fn`
-APIs.
+`check`. (The `missing-harndoc` warning for undocumented `pub fn` APIs is
+opt-in via `[lint] require_docstrings = true` in `harn.toml`.)
 
 `check` builds a cross-module graph from each entry file and follows
 `import` statements recursively. When every import in a file resolves,

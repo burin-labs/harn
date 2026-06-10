@@ -32,10 +32,7 @@
  * A "pass" verdict an evaluator can record for a trial.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: verdict_pass()
  */
 pub fn verdict_pass() -> string {
   return "pass"
@@ -45,10 +42,7 @@ pub fn verdict_pass() -> string {
  * A "fail" verdict an evaluator can record for a trial.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: verdict_fail()
  */
 pub fn verdict_fail() -> string {
   return "fail"
@@ -58,10 +52,7 @@ pub fn verdict_fail() -> string {
  * The neutral verdict: this evaluator is N/A for the case and does NOT dissent.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: verdict_abstain()
  */
 pub fn verdict_abstain() -> string {
   return "abstain"
@@ -71,10 +62,7 @@ pub fn verdict_abstain() -> string {
  * The behavior-judge tag (ran or inspected real program behavior).
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: evaluator_kind_execution()
  */
 pub fn evaluator_kind_execution() -> string {
   return "execution"
@@ -84,10 +72,7 @@ pub fn evaluator_kind_execution() -> string {
  * The weak-judge tag (file-exists / substring only — cannot carry a pass alone).
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: evaluator_kind_weak()
  */
 pub fn evaluator_kind_weak() -> string {
   return "weak"
@@ -110,10 +95,7 @@ fn normalize_verdict(value) -> string {
  * `is_execution` tags whether this judge ran or inspected real program behavior.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: evaluator_verdict(id, verdict, is_execution, reason)
  */
 pub fn evaluator_verdict(id: string, verdict, is_execution: bool, reason: string = "") -> dict {
   return {
@@ -132,10 +114,7 @@ pub fn evaluator_verdict(id: string, verdict, is_execution: bool, reason: string
  * True when the judge returned an explicit pass/fail (did not abstain).
  *
  * @effects: []
- * @allocation: stack-only
  * @errors: []
- * @api_stability: stable
- * @example: verdict_is_decided(v)
  */
 pub fn verdict_is_decided(v: dict) -> bool {
   return v?.verdict == verdict_pass() || v?.verdict == verdict_fail()
@@ -174,10 +153,7 @@ fn ids_of(verdicts: list) -> list<string> {
  * names in the returned dict.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: agreement_decision(verdicts, min_agreement, required_execution_id, reexecution_ids)
  */
 pub fn agreement_decision(
   verdicts: list,
@@ -261,10 +237,7 @@ fn verdict_for(verdicts: list, id: string) {
  * otherwise.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: cohen_kappa(cases, id_a, id_b)
  */
 pub fn cohen_kappa(
   cases: list,

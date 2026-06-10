@@ -132,9 +132,13 @@ pub(crate) struct Linter<'a> {
     /// annotations if the registry is later exposed through `mcp_tools`.
     pub(super) mcp_registry_missing_annotation_spans: HashMap<String, Vec<Span>>,
     /// When set, public `fn` declarations must carry the structured
-    /// `@effects` / `@allocation` / `@errors` / `@api_stability` /
-    /// `@example` block. Enabled by callers linting stdlib sources.
+    /// `@effects` / `@errors` block. Enabled by callers linting stdlib
+    /// sources.
     pub(crate) require_stdlib_metadata: bool,
+    /// When set, public `fn` declarations without a `/** */` doc comment
+    /// warn (`missing-harndoc`). Opt-in via `[lint] require_docstrings`;
+    /// implied by `require_stdlib_metadata`.
+    pub(crate) require_docstrings: bool,
     /// Lazily-lexed comment tokens, cached so the `missing-harndoc`
     /// suppression gate (which runs per public item) does not re-tokenize
     /// the whole source each time.
@@ -191,6 +195,7 @@ impl<'a> Linter<'a> {
             long_running_cleanup_stack: Vec::new(),
             mcp_registry_missing_annotation_spans: HashMap::new(),
             require_stdlib_metadata: false,
+            require_docstrings: false,
             cached_comment_toks: None,
             rules,
             rules_visit_nodes,
@@ -473,8 +478,8 @@ impl<'a> Linter<'a> {
         })
     }
     /// Warn when a public stdlib `pub fn` is missing one or more of the
-    /// declared metadata fields (`@effects`, `@allocation`, `@errors`,
-    /// `@api_stability`, `@example`). Only runs when callers opted in via
+    /// required metadata fields (`@effects`, `@errors`). Only runs when
+    /// callers opted in via
     /// [`crate::LintOptions::require_stdlib_metadata`].
     ///
     /// Functions with no canonical `/** */` block at all are exempt — the
@@ -495,7 +500,7 @@ impl<'a> Linter<'a> {
         let missing_list = missing.join(", ");
         let message = if meta.is_empty() {
             format!(
-                "public stdlib function `{name}` is missing the `@effects`/`@allocation`/`@errors`/`@api_stability`/`@example` metadata block"
+                "public stdlib function `{name}` is missing the `@effects`/`@errors` metadata block"
             )
         } else {
             format!(

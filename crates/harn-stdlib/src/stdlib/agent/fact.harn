@@ -209,10 +209,8 @@ fn __fact_options(options, caller) -> dict {
  * already project-local unless a caller provides `options.root`.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
- * @example: fact_namespace(scope)
  */
 pub fn fact_namespace(scope = nil) -> string {
   let raw = lowercase(__fact_text(scope))
@@ -232,10 +230,8 @@ pub fn fact_namespace(scope = nil) -> string {
  * Build a stable fact id from the normalized schema-bearing fields.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
- * @example: fact_id(kind, claim, evidence, provenance)
  */
 pub fn fact_id(kind, claim, evidence = nil, provenance = nil) -> string {
   let seed = to_string(__fact_kind(kind))
@@ -252,10 +248,8 @@ pub fn fact_id(kind, claim, evidence = nil, provenance = nil) -> string {
  * Return the reserved memory key for a fact.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
- * @example: fact_key(fact)
  */
 pub fn fact_key(fact_value) -> string {
   let fact = fact_validate(fact_value)
@@ -266,10 +260,8 @@ pub fn fact_key(fact_value) -> string {
  * Return the canonical memory tags for a fact.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
- * @example: fact_tags(fact, tags)
  */
 pub fn fact_tags(fact_value, tags = nil) -> list<string> {
   let fact = fact_validate(fact_value)
@@ -290,10 +282,8 @@ pub fn fact_tags(fact_value, tags = nil) -> list<string> {
  * lower snake-case strings so facts compose with the rest of the stdlib.
  *
  * @effects: []
- * @allocation: heap
  * @errors: [HARN-FACT-001, HARN-FACT-002, HARN-FACT-003, HARN-FACT-004, HARN-FACT-005, HARN-FACT-006, HARN-FACT-007]
  * @api_stability: experimental
- * @example: fact(input, options)
  */
 pub fn fact(input, options = nil) -> Fact {
   if input == nil || type_of(input) != "dict" {
@@ -337,10 +327,8 @@ pub fn fact(input, options = nil) -> Fact {
  * Validate and return a normalized `harn.fact.v1` envelope.
  *
  * @effects: []
- * @allocation: heap
  * @errors: [HARN-FACT-001, HARN-FACT-002, HARN-FACT-003, HARN-FACT-004, HARN-FACT-005, HARN-FACT-006, HARN-FACT-007, HARN-FACT-009]
  * @api_stability: experimental
- * @example: fact_validate(input)
  */
 pub fn fact_validate(input) -> Fact {
   return fact(input, {require_asserted_at: true})
@@ -353,10 +341,8 @@ pub fn fact_validate(input) -> Fact {
  * fact namespace, and `options.scope` maps through `fact_namespace`.
  *
  * @effects: [store.write]
- * @allocation: heap
  * @errors: [HARN-FACT-001, HARN-FACT-002, HARN-FACT-003, HARN-FACT-004, HARN-FACT-005, HARN-FACT-006, HARN-FACT-007]
  * @api_stability: experimental
- * @example: store_fact(input, options)
  */
 pub fn store_fact(input, options = nil) {
   let opts = __fact_options(options, "store_fact")
@@ -411,10 +397,8 @@ fn __fact_recall_hit(record) {
  * normal `memory_recall` options.
  *
  * @effects: [store.read]
- * @allocation: heap
  * @errors: [HARN-FACT-001, HARN-FACT-002, HARN-FACT-004]
  * @api_stability: experimental
- * @example: recall_facts(query, kind, min_confidence, scope)
  */
 pub fn recall_facts(query, kind = nil, min_confidence = nil, scope = nil) -> list {
   let opts = __fact_scope_options(scope)
@@ -572,10 +556,8 @@ fn __fact_forget_evidence_entry(out, fact_kind, entry) -> list<string> {
  * `evidence`.
  *
  * @effects: [store.write]
- * @allocation: heap
  * @errors: [HARN-FACT-002, HARN-FACT-008]
  * @api_stability: experimental
- * @example: invalidate_facts(predicate, scope)
  */
 pub fn invalidate_facts(predicate, scope = nil) {
   let opts = __fact_scope_options(scope)

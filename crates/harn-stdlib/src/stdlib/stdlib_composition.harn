@@ -129,10 +129,8 @@ fn __composition_mcp_reduced_result(report, opts) {
  * composition_mcp_manifest builds a Code Mode binding manifest from only MCP-served tools.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
- * @example: composition_mcp_manifest(tool_registry)
  */
 pub fn composition_mcp_manifest(tools = nil, options = nil) {
   let opts = options ?? {}
@@ -144,7 +142,6 @@ pub fn composition_mcp_manifest(tools = nil, options = nil) {
  * composition_mcp_api returns the manifest plus prompt-visible Harn API for MCP Code Mode.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
  * @example: composition_mcp_api(tool_registry, {query: "issues"})
@@ -171,7 +168,6 @@ pub fn composition_mcp_api(tools = nil, options = nil) {
  * composition_mcp_search searches MCP tools with the same scorer as tool_search and returns a Code Mode API slice.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
  * @example: composition_mcp_search(tool_registry, "issues", {limit: 5})
@@ -185,7 +181,6 @@ pub fn composition_mcp_search(tools = nil, query = "", options = nil) {
  * composition_mcp_execute runs a Harn Code Mode snippet and dispatches child calls through the agent tool path.
  *
  * @effects: [host, mcp]
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
  * @example: composition_mcp_execute("return github_search({query: \"bug\"})", tools)
@@ -208,10 +203,7 @@ pub fn composition_mcp_execute(snippet, tools = nil, options = nil) {
  * composition_mcp_tools builds the compact Code Mode MCP profile registry.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: composition_mcp_tools(registry, options)
  */
 pub fn composition_mcp_tools(registry = nil, options = nil) {
   let opts = options ?? {}
@@ -294,10 +286,7 @@ pub fn composition_mcp_tools(registry = nil, options = nil) {
  * composition_crystallization_input converts a composition report into a crystallization trace.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: composition_crystallization_input(report, options)
  */
 pub fn composition_crystallization_input(report, options = nil) {
   return composition_crystallization_trace(report, options ?? {})

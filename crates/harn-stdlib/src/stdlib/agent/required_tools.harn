@@ -46,10 +46,8 @@ fn __agent_required_tools_from_options(opts) -> list {
  * agent_required_tools_missing_from_result returns missing required tools.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
- * @example: agent_required_tools_missing_from_result(result, opts)
  */
 pub fn agent_required_tools_missing_from_result(result: dict, opts) -> list<string> {
   let required = __agent_required_tools_from_options(opts)
@@ -70,10 +68,8 @@ pub fn agent_required_tools_missing_from_result(result: dict, opts) -> list<stri
  * agent_required_tools_missing_from_session returns missing accumulated tools.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
- * @example: agent_required_tools_missing_from_session(opts, successful_tools_seen)
  */
 pub fn agent_required_tools_missing_from_session(opts, successful_tools_seen: list) -> list<string> {
   let required = __agent_required_tools_from_options(opts)
@@ -144,10 +140,8 @@ fn __agent_required_tools_emit_friction(result: dict, opts, missing: list<string
  * agent_required_tools_enforce fails results that missed required tools.
  *
  * @effects: [agent]
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
- * @example: agent_required_tools_enforce(result, opts)
  */
 pub fn agent_required_tools_enforce(result: dict, opts) -> dict {
   let missing = agent_required_tools_missing_from_result(result, opts)
@@ -172,7 +166,6 @@ pub fn agent_required_tools_enforce(result: dict, opts) -> dict {
  * agent_required_tools_feedback builds feedback for missing required tools.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
  * @example: agent_required_tools_feedback(["run_tests"])
@@ -187,10 +180,8 @@ pub fn agent_required_tools_feedback(missing: list<string>) -> string {
  * agent_required_tools_inject_feedback injects missing-tool feedback.
  *
  * @effects: [agent]
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
- * @example: agent_required_tools_inject_feedback(session_id, missing)
  */
 pub fn agent_required_tools_inject_feedback(session_id: string, missing: list<string>) {
   agent_session_inject_feedback(session_id, "required_tools", agent_required_tools_feedback(missing))

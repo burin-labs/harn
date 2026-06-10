@@ -66,10 +66,7 @@ fn __strip_signature_prefix(signature) {
  * Legacy HMAC-SHA1 requires options.allow_legacy_sha1.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: verify_hmac_signature(body, signature, secret, algorithm, options)
  */
 pub fn verify_hmac_signature(body, signature, secret, algorithm = "sha256", options = nil) {
   let alg = lowercase(trim(algorithm ?? "sha256"))
@@ -92,10 +89,7 @@ pub fn verify_hmac_signature(body, signature, secret, algorithm = "sha256", opti
  * verify_jwt.
  *
  * @effects: [net]
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: verify_jwt(token, jwks_url, options)
  */
 pub fn verify_jwt(token, jwks_url, options = nil) {
   let opts = options ?? {}
@@ -501,9 +495,7 @@ fn __connector_http_sleep_before_retry(retry_policy, attempt, retry_after_ms) {
  * envelopes.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
  * @example: connector_http_header(response, "Retry-After")
  */
 pub fn connector_http_header(headers_or_response, name) {
@@ -514,10 +506,7 @@ pub fn connector_http_header(headers_or_response, name) {
  * Extract the standard rate-limit headers connector packages commonly expose.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: connector_http_rate_limit(response)
  */
 pub fn connector_http_rate_limit(headers_or_response) {
   let retry_after = connector_http_header(headers_or_response, "Retry-After")
@@ -548,9 +537,7 @@ pub fn connector_http_rate_limit(headers_or_response) {
  * connector_http_request.
  *
  * @effects: [net, time]
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
  * @example: connector_http_request("GET", url, {retry: {max_attempts: 3}})
  */
 pub fn connector_http_request(method, url, options = nil) {
@@ -609,9 +596,7 @@ pub fn connector_http_request(method, url, options = nil) {
  * connector_http_json.
  *
  * @effects: [net, time]
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
  * @example: connector_http_json("GET", url, {retry: {max_attempts: 3}})
  */
 pub fn connector_http_json(method, url, options = nil) {
@@ -650,10 +635,7 @@ pub fn connector_http_json(method, url, options = nil) {
  * oauth2_token_refresh.
  *
  * @effects: [net]
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: oauth2_token_refresh(client_id, client_secret, refresh_token, token_url, options)
  */
 pub fn oauth2_token_refresh(client_id, client_secret, refresh_token, token_url, options = nil) {
   let opts = options ?? {}
@@ -684,10 +666,7 @@ pub fn oauth2_token_refresh(client_id, client_secret, refresh_token, token_url, 
  * rate_limit_token_bucket.
  *
  * @effects: [time]
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: rate_limit_token_bucket(state, config, now_ms)
  */
 pub fn rate_limit_token_bucket(state = nil, config = nil, now_ms = nil) {
   let cfg = config ?? {}
@@ -738,10 +717,7 @@ fn __page_items(page, items_path) {
  * paginate_cursor.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: paginate_cursor(initial_url, fetch_fn, cursor_path, options)
  */
 pub fn paginate_cursor(initial_url, fetch_fn, cursor_path, options = nil) {
   let opts = options ?? {}
@@ -1003,10 +979,7 @@ fn __git_forge_gitea_event(payload, options) {
  * provider-independent PR/MR lifecycle events.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: git_forge_pull_request_topic()
  */
 pub fn git_forge_pull_request_topic() {
   return GIT_FORGE_PULL_REQUEST_TOPIC
@@ -1017,9 +990,7 @@ pub fn git_forge_pull_request_topic() {
  * merge_request, and Gitea pull_request payloads into one forge event shape.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
  * @example: git_forge_pull_request_event("github", payload)
  */
 pub fn git_forge_pull_request_event(provider, payload, options = nil) -> GitForgePullRequestEvent? {
@@ -1066,10 +1037,7 @@ fn __git_forge_repo_parts(full_name) {
  * provider-independent status comment for a normalized forge event.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: git_forge_writeback_request(event, body)
  */
 pub fn git_forge_writeback_request(event: GitForgePullRequestEvent, body: string, options = nil) -> GitForgeWritebackRequest {
   let opts = options ?? {}
@@ -1096,10 +1064,7 @@ pub fn git_forge_writeback_request(event: GitForgePullRequestEvent, body: string
  * comment through the active connector client.
  *
  * @effects: [net]
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: git_forge_writeback_comment(event, body)
  */
 pub fn git_forge_writeback_comment(event: GitForgePullRequestEvent, body: string, options = nil) {
   let request = git_forge_writeback_request(event, body, options)

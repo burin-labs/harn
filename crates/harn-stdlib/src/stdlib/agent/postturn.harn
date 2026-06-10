@@ -908,10 +908,8 @@ fn __tool_surface_policy_tools(policy, names) {
  * agent_apply_tool_surface_narrowing.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
- * @example: agent_apply_tool_surface_narrowing(opts)
  */
 pub fn agent_apply_tool_surface_narrowing(opts) {
   let names = opts?._tool_surface_narrowed_tools
@@ -929,10 +927,8 @@ pub fn agent_apply_tool_surface_narrowing(opts) {
  * agent_reset_tool_surface_narrowing.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
- * @example: agent_reset_tool_surface_narrowing(opts)
  */
 pub fn agent_reset_tool_surface_narrowing(opts) {
   return opts
@@ -943,10 +939,8 @@ pub fn agent_reset_tool_surface_narrowing(opts) {
  * agent_extract_tool_calls.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
- * @example: agent_extract_tool_calls(llm_result, opts)
  */
 pub fn agent_extract_tool_calls(llm_result, opts) {
   if len(llm_result?.tool_calls ?? []) > 0 {
@@ -963,10 +957,8 @@ pub fn agent_extract_tool_calls(llm_result, opts) {
  * agent_compute_post_turn.
  *
  * @effects: [host]
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
- * @example: agent_compute_post_turn(session, llm_result, dispatch, opts, iteration)
  */
 pub fn agent_compute_post_turn(session, llm_result, dispatch, opts, iteration) {
   let sentinel = __default_done_sentinel(opts)

@@ -26,10 +26,7 @@ import { agent_emit_event } from "std/agent/state"
  * checkpoint_stage.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: checkpoint_stage(name, f)
  */
 pub fn checkpoint_stage(name, f) {
   if checkpoint_exists(name) {
@@ -52,10 +49,7 @@ pub fn checkpoint_stage(name, f) {
  * checkpoint_stage_retry.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: checkpoint_stage_retry(name, max_retries, f)
  */
 pub fn checkpoint_stage_retry(name, max_retries, f) {
   if checkpoint_exists(name) {
@@ -261,10 +255,7 @@ fn __typed_checkpoint_envelope(args) {
  * caller-owned side effects run.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: typed_output_checkpoint(name, prompt, schema, options, validator)
  */
 pub fn typed_output_checkpoint(name, prompt, schema, options = nil, validator = nil) {
   let opts = options ?? {}
@@ -394,10 +385,7 @@ fn __typed_checkpoint_text_repair_prompt(name, raw_text, errors) {
  * work without replaying those side effects.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: typed_output_checkpoint_from_text(name, raw_text, schema, options, validator)
  */
 pub fn typed_output_checkpoint_from_text(name, raw_text, schema, options = nil, validator = nil) {
   let opts = options ?? {}
@@ -418,12 +406,12 @@ pub fn typed_output_checkpoint_from_text(name, raw_text, schema, options = nil, 
         name: name,
         ok: false,
         final_result: recovered,
-        error: recovered?.error ?? "structured output recovery failed",
-        error_category: recovered?.error_category ?? "schema_validation",
+        error: recovered.error ?? "structured output recovery failed",
+        error_category: recovered.error_category ?? "schema_validation",
         attempts: total_attempts,
         checkpoint_attempts: checkpoint_attempt,
-        repaired: recovered?.repaired ?? false,
-        extracted_json: recovered?.stage == "extracted",
+        repaired: recovered.repaired ?? false,
+        extracted_json: recovered.stage == "extracted",
         parse_failures: failures.parse_failures,
         schema_failures: failures.schema_failures,
         validator_failures: validator_failures,
@@ -503,7 +491,7 @@ pub fn typed_output_checkpoint_from_text(name, raw_text, schema, options = nil, 
       name: name,
       ok: false,
       final_result: last_result,
-      data: last_result?.data,
+      data: last_result.data,
       error: errors.join("; "),
       error_category: "validator_failure",
       attempts: total_attempts,

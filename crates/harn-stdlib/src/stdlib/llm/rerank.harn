@@ -266,10 +266,7 @@ fn __rerank_strip_internal_score_fields(scores) {
  * pairwise_rerank ranks candidates through O(n log n) pairwise comparisons.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: pairwise_rerank(candidates, opts)
  */
 pub fn pairwise_rerank(candidates, opts = nil) -> dict {
   require type_of(candidates) == "list", "pairwise_rerank: candidates must be a list"
@@ -293,10 +290,7 @@ pub fn pairwise_rerank(candidates, opts = nil) -> dict {
  * self_certainty returns length-normalized confidence from token log probabilities.
  *
  * @effects: [llm.call]
- * @allocation: stack-only
  * @errors: []
- * @api_stability: stable
- * @example: self_certainty(text, model_opts)
  */
 pub fn self_certainty(text, model_opts = nil) -> float {
   return __llm_self_certainty(text, model_opts ?? {})

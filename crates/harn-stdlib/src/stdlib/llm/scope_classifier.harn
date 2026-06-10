@@ -171,7 +171,6 @@ fn __scope_classifier_fail_open(error, threshold) {
  * evals can pass `classifier` to provide a deterministic closure.
  *
  * @effects: [llm]
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
  * @example: pre_turn_scope_classifier({enabled: true})

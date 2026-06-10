@@ -14,10 +14,7 @@ type ModelIdParts = {provider: string, model: string, raw: string}
  * Read an env var as a non-empty string, returning nil when unset/blank.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: env_str(key)
  */
 pub fn env_str(key: string) -> any {
   let raw = harness.env.get(key)
@@ -34,10 +31,7 @@ pub fn env_str(key: string) -> any {
  * Read an env var as an int, falling back to `default` on missing/unparseable input.
  *
  * @effects: []
- * @allocation: stack-only
  * @errors: []
- * @api_stability: stable
- * @example: env_int(key, default)
  */
 pub fn env_int(key: string, default: int) -> int {
   let raw = harness.env.get(key)
@@ -51,10 +45,7 @@ pub fn env_int(key: string, default: int) -> int {
  * Read an env var as a float, falling back to `default` on missing/unparseable input.
  *
  * @effects: []
- * @allocation: stack-only
  * @errors: []
- * @api_stability: stable
- * @example: env_float(key, default)
  */
 pub fn env_float(key: string, default: float) -> float {
   let raw = harness.env.get(key)
@@ -70,10 +61,7 @@ pub fn env_float(key: string, default: float) -> float {
  * unparseable.
  *
  * @effects: []
- * @allocation: stack-only
  * @errors: []
- * @api_stability: stable
- * @example: env_bool(key, default)
  */
 pub fn env_bool(key: string, default: bool) -> bool {
   let raw = harness.env.get(key)
@@ -99,9 +87,7 @@ pub fn env_bool(key: string, default: bool) -> bool {
  * empty list when the env var is unset or blank.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
  * @example: env_list(key, separator, ")
  */
 pub fn env_list(key: string, separator: string = ",") -> list<string> {
@@ -135,10 +121,7 @@ pub fn env_list(key: string, separator: string = ",") -> list<string> {
  * choose based on the model registry.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: parse_model_id(id)
  */
 pub fn parse_model_id(id: string) -> ModelIdParts {
   let raw = id ?? ""
@@ -191,10 +174,7 @@ pub fn parse_model_id(id: string) -> ModelIdParts {
  * to `parse_model_id` or to the `model` option of `llm_call`.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: model_from_env(env_key, default)
  */
 pub fn model_from_env(env_key: string, default: string) -> string {
   let resolved = env_str(env_key)

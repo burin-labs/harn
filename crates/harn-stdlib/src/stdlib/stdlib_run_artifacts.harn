@@ -130,9 +130,7 @@ fn __run_artifacts_make_run(kind, namespace, root, run_id, dir, modified = nil) 
  * Create or resolve a run artifact directory below the configured run root.
  *
  * @effects: [fs.write]
- * @allocation: heap
  * @errors: [validation, fs]
- * @api_stability: stable
  * @example: run_artifacts_open("release", {root: root, run_id: "run-1"})
  */
 pub fn run_artifacts_open(kind: string, options: RunArtifactsOpenOptions = {}) -> RunArtifactsRun {
@@ -154,9 +152,7 @@ pub fn run_artifacts_open(kind: string, options: RunArtifactsOpenOptions = {}) -
  * Return an artifact path inside `run.dir`, rejecting absolute paths and traversal.
  *
  * @effects: []
- * @allocation: heap
  * @errors: [validation]
- * @api_stability: stable
  * @example: run_artifact_path(run, "facts.json")
  */
 pub fn run_artifact_path(run: RunArtifactsRun, name: string) -> string {
@@ -167,9 +163,7 @@ pub fn run_artifact_path(run: RunArtifactsRun, name: string) -> string {
  * Write a JSON artifact using the standard `std/fs.write_json` conventions.
  *
  * @effects: [fs.write]
- * @allocation: heap
  * @errors: [validation, fs]
- * @api_stability: stable
  * @example: run_artifact_write_json(run, "facts.json", facts, {pretty: true})
  */
 pub fn run_artifact_write_json(
@@ -185,9 +179,7 @@ pub fn run_artifact_write_json(
  * Read a JSON artifact, returning `fallback` when the file is missing or malformed.
  *
  * @effects: [fs.read]
- * @allocation: heap
  * @errors: [validation]
- * @api_stability: stable
  * @example: run_artifact_read_json(run, "facts.json", {})
  */
 pub fn run_artifact_read_json(run: RunArtifactsRun, name: string, fallback = nil) {
@@ -198,9 +190,7 @@ pub fn run_artifact_read_json(run: RunArtifactsRun, name: string, fallback = nil
  * Write a text artifact with standard parent-directory and newline handling.
  *
  * @effects: [fs.write]
- * @allocation: heap
  * @errors: [validation, fs]
- * @api_stability: stable
  * @example: run_artifact_write_text(run, "review.md", body)
  */
 pub fn run_artifact_write_text(
@@ -216,9 +206,7 @@ pub fn run_artifact_write_text(
  * Read a text artifact, returning `fallback` when it cannot be read.
  *
  * @effects: [fs.read]
- * @allocation: heap
  * @errors: [validation]
- * @api_stability: stable
  * @example: run_artifact_read_text(run, "review.md", "")
  */
 pub fn run_artifact_read_text(run: RunArtifactsRun, name: string, fallback = nil) {
@@ -235,9 +223,7 @@ pub fn run_artifact_read_text(run: RunArtifactsRun, name: string, fallback = nil
  * Return the transcript sidecar directory for a run without creating it.
  *
  * @effects: []
- * @allocation: heap
  * @errors: [validation]
- * @api_stability: stable
  * @example: run_artifact_transcript_dir(run, "agent-llm")
  */
 pub fn run_artifact_transcript_dir(run: RunArtifactsRun, name: string = "agent-llm") -> string {
@@ -253,9 +239,7 @@ pub fn run_artifact_transcript_dir(run: RunArtifactsRun, name: string = "agent-l
  * Return the standard JSONL transcript sidecar path for a named transcript directory.
  *
  * @effects: []
- * @allocation: heap
  * @errors: [validation]
- * @api_stability: stable
  * @example: run_artifact_transcript_path(run, "agent-llm")
  */
 pub fn run_artifact_transcript_path(run: RunArtifactsRun, name: string = "agent-llm") -> string {
@@ -271,9 +255,7 @@ pub fn run_artifact_transcript_path(run: RunArtifactsRun, name: string = "agent-
  * List recent run artifact directories newest-first for a kind.
  *
  * @effects: [fs.read]
- * @allocation: heap
  * @errors: [validation]
- * @api_stability: stable
  * @example: run_artifacts_list("release", {limit: 5})
  */
 pub fn run_artifacts_list(kind: string, options: RunArtifactsListOptions = {}) -> list<RunArtifactsRun> {
@@ -321,9 +303,7 @@ pub fn run_artifacts_list(kind: string, options: RunArtifactsListOptions = {}) -
  * Reconstruct the run artifact shape from an existing directory path without writing.
  *
  * @effects: []
- * @allocation: heap
  * @errors: [validation]
- * @api_stability: stable
  * @example: run_artifacts_from_dir("release", previous_dir)
  */
 pub fn run_artifacts_from_dir(kind: string, dir: string) -> RunArtifactsRun {

@@ -346,13 +346,22 @@ fn write_graph_metadata_fixture(root: &Path) {
  * Read a file and return its contents.
  *
  * @effects: [fs.read]
- * @allocation: heap
  * @errors: [FileNotFound]
- * @api_stability: stable
+ * @api_stability: experimental
  * @example: read_file("README.md")
  */
 pub fn read_file(path: string) -> string {
   return path
+}
+
+/**
+ * Count lines.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn count_lines(text: string) -> int {
+  return 1
 }
 "#,
     )
@@ -426,9 +435,19 @@ fn graph_metadata_round_trips_byte_identical_between_impls() {
     let harn_value = parse_json(&harn.stdout, "harn");
     let rust_value = parse_json(&rust.stdout, "rust");
     assert_eq!(rust_value, harn_value);
-    let read_file = &harn_value["data"]["modules"][0]["public_symbols"][0];
-    assert_eq!(read_file["metadata"]["allocation"], "heap");
-    assert_eq!(read_file["metadata"]["api_stability"], "stable");
+    // Symbols sort by name: count_lines first, read_file second.
+    let count_lines = &harn_value["data"]["modules"][0]["public_symbols"][0];
+    assert_eq!(count_lines["name"], "count_lines");
+    // No authored @example → the derived one must survive the dispatch
+    // round-trip identically in both impls.
+    assert_eq!(
+        count_lines["derived_example"],
+        "let out = count_lines(text)"
+    );
+    let read_file = &harn_value["data"]["modules"][0]["public_symbols"][1];
+    assert_eq!(read_file["metadata"]["api_stability"], "experimental");
+    assert_eq!(read_file["metadata"]["example"], "read_file(\"README.md\")");
+    assert!(read_file.get("derived_example").is_none());
 }
 
 #[test]

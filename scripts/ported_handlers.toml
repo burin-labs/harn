@@ -78,9 +78,13 @@ max_loc = 150
 path = "crates/harn-cli/src/commands/routes.rs"
 max_loc = 805
 
+# 690 → 720 (2026-06-10, docstring-lint simplification): the new
+# `derived_example` wire field is extraction-layer plumbing that belongs
+# in Rust (`synthesize_example` call sites + per-arm field init); the
+# render layer stays in stdlib/cli/graph.harn.
 [[handler]]
 path = "crates/harn-cli/src/commands/graph.rs"
-max_loc = 690
+max_loc = 720
 
 [[handler]]
 path = "crates/harn-cli/src/commands/doctor.rs"

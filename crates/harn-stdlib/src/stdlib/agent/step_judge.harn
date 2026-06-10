@@ -197,10 +197,8 @@ fn __emit_decision(session_id, iteration, on_veto, verdict) {
  * `skipped: true`.
  *
  * @effects: [host]
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
- * @example: agent_step_judge(session, llm_result, opts, iteration, stall_warning, attempts)
  */
 pub fn agent_step_judge(
   session,

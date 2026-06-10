@@ -6,7 +6,6 @@
  * `external_agent_approve` on that envelope after host approval to dispatch.
  *
  * @effects: [network, agent]
- * @allocation: heap
  * @errors: [invalid_request, transport, protocol]
  * @api_stability: experimental
  * @example: external_agent_delegate("127.0.0.1:8080", "review this change", {budget: {max_usd: 0.25}})
@@ -28,7 +27,6 @@ pub fn external_agent_delegate(target, task, options = nil) {
  * set, preserving the same idempotency key so dispatch happens at most once.
  *
  * @effects: [network, agent]
- * @allocation: heap
  * @errors: [invalid_request, transport, protocol]
  * @api_stability: experimental
  * @example: external_agent_approve(checkpoint, {checkpoint: {approved_by: "operator"}})

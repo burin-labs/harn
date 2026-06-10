@@ -349,10 +349,7 @@ fn __context_artifact_body(input, opts) {
  * Build a normalized host-neutral context artifact envelope.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: context_artifact(input, options)
  */
 pub fn context_artifact(input = nil, options = nil) -> ContextArtifact {
   let raw = if type_of(input) == "dict" {
@@ -442,10 +439,7 @@ pub fn context_artifact(input = nil, options = nil) -> ContextArtifact {
  * Adapt a legacy `.burin/context-digests` markdown body into a context artifact.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: context_artifact_from_burin_digest(path, body, options)
  */
 pub fn context_artifact_from_burin_digest(path: string, body: string, options = nil) -> ContextArtifact {
   let opts = options ?? {}
@@ -553,10 +547,7 @@ fn __context_path_match(paths, query_paths) {
  * Score an artifact for deterministic ranking under a task/context policy.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: context_artifact_rank(artifact, options)
  */
 pub fn context_artifact_rank(artifact, options = nil) {
   let item = context_artifact(artifact)
@@ -654,10 +645,7 @@ fn __context_merge_provenance(left, right) {
  * Merge two artifacts with the same identity, keeping the stronger envelope fields.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: context_artifact_merge(left, right, options)
  */
 pub fn context_artifact_merge(left, right, options = nil) -> ContextArtifact {
   let opts = options ?? {}
@@ -708,10 +696,7 @@ pub fn context_artifact_merge(left, right, options = nil) -> ContextArtifact {
  * Deduplicate artifacts by explicit source hash overlap or canonical body key.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: context_artifact_dedupe(artifacts, options)
  */
 pub fn context_artifact_dedupe(artifacts = nil, options = nil) {
   var out = []
@@ -756,10 +741,7 @@ fn __context_insert_ranked(sorted, artifact, options) {
  * Return artifacts sorted by deterministic rank, highest first.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: context_artifact_sort(artifacts, options)
  */
 pub fn context_artifact_sort(artifacts = nil, options = nil) {
   var sorted = []
@@ -794,10 +776,7 @@ fn __context_artifact_matches_policy(artifact, options) {
  * Rank, deduplicate, and fit artifacts into a token and count budget.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: context_artifact_budget(artifacts, options)
  */
 pub fn context_artifact_budget(artifacts = nil, options = nil) {
   let opts = options ?? {}
@@ -831,10 +810,7 @@ pub fn context_artifact_budget(artifacts = nil, options = nil) {
  * Convenience wrapper returning only the selected artifact list.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: context_artifact_select(artifacts, options)
  */
 pub fn context_artifact_select(artifacts = nil, options = nil) {
   return context_artifact_budget(artifacts, options).artifacts ?? []
@@ -1006,10 +982,7 @@ fn __context_render_artifact_compact(artifact, options) {
  * Render a logical section with provider-capability-aware scaffolding.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: context_render_logical_section(name, title, body, options)
  */
 pub fn context_render_logical_section(name: string, title: string, body: string, options = nil) {
   let variant = __context_render_variant(options ?? {}, "plain")
@@ -1034,10 +1007,7 @@ pub fn context_render_logical_section(name: string, title: string, body: string,
  * Render context artifacts as markdown, XML, plain text, or compact lines.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: context_render_artifacts(artifacts, options)
  */
 pub fn context_render_artifacts(artifacts = nil, options = nil) {
   let opts = options ?? {}
@@ -1097,10 +1067,7 @@ pub fn context_render_artifacts(artifacts = nil, options = nil) {
  * clip_text.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: clip_text(text, max_chars)
  */
 pub fn clip_text(text, max_chars) {
   if max_chars == nil || max_chars <= 0 {
@@ -1119,10 +1086,7 @@ pub fn clip_text(text, max_chars) {
  * render_section.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: render_section(section, include_headers, section_max_chars)
  */
 pub fn render_section(section, include_headers, section_max_chars) {
   if section == nil {
@@ -1148,10 +1112,7 @@ pub fn render_section(section, include_headers, section_max_chars) {
  * context_section.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: context_section(name, content, options)
  */
 pub fn context_section(name, content, options = nil) {
   let opts = options ?? {}
@@ -1173,10 +1134,7 @@ pub fn context_section(name, content, options = nil) {
  * section.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: section(name, content, options)
  */
 pub fn section(name, content, options = nil) {
   return context_section(name, content, options)
@@ -1186,10 +1144,7 @@ pub fn section(name, content, options = nil) {
  * context_attach.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: context_attach(name, path, content, options)
  */
 pub fn context_attach(name, path, content, options = nil) {
   let opts = options ?? {}
@@ -1204,10 +1159,7 @@ pub fn context_attach(name, path, content, options = nil) {
  * context.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: context(sections, options)
  */
 pub fn context(sections, options = nil) {
   let opts = options ?? {}
@@ -1228,10 +1180,7 @@ pub fn context(sections, options = nil) {
  * context_add.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: context_add(ctx, new_section)
  */
 pub fn context_add(ctx, new_section) {
   let existing = ctx?.sections ?? []
@@ -1243,10 +1192,7 @@ pub fn context_add(ctx, new_section) {
  * context_add_artifact.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: context_add_artifact(ctx, artifact)
  */
 pub fn context_add_artifact(ctx, artifact) {
   let base = ctx ?? {}
@@ -1258,10 +1204,7 @@ pub fn context_add_artifact(ctx, artifact) {
  * context_render.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: context_render(ctx, options)
  */
 pub fn context_render(ctx, options = nil) {
   let base = ctx ?? {}
@@ -1312,10 +1255,7 @@ pub fn context_render(ctx, options = nil) {
  * context_compact.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: context_compact(ctx, options)
  */
 pub fn context_compact(ctx, options = nil) {
   let base = ctx ?? {}
@@ -1365,10 +1305,7 @@ fn __context_prompt_text(task, rendered, opts, task_label) {
  * prompt_compose.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: prompt_compose(task, ctx, options)
  */
 pub fn prompt_compose(task, ctx, options = nil) {
   let opts = options ?? {}

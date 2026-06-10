@@ -90,10 +90,7 @@ fn __billable_input(input_tokens, cache_read_tokens, cache_write_tokens) {
  * economics — callers should treat that as "unknown".
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: pricing_for(provider, model)
  */
 pub fn pricing_for(provider, model = nil) {
   return __resolve_pricing_selector(provider, model)
@@ -109,10 +106,7 @@ pub fn pricing_for(provider, model = nil) {
  * cost_usd field is nil — branch on `pricing_known`.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: estimate_call_cost(opts)
  */
 pub fn estimate_call_cost(opts) {
   __ensure_dict(opts, "estimate_call_cost")
@@ -196,10 +190,7 @@ fn __aggregate_key(provider, model) {
  *  unknown_calls, per_model}. `per_model` is sorted descending by cost.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: estimate_session_cost(usage)
  */
 pub fn estimate_session_cost(usage) {
   if type_of(usage) != "list" {
@@ -224,11 +215,11 @@ pub fn estimate_session_cost(usage) {
     } else {
       unknown_calls = unknown_calls + calls
     }
-    let key = __aggregate_key(row?.provider, row?.model)
+    let key = __aggregate_key(row.provider, row.model)
     let prior = aggregated[key]
       ?? {
-      provider: row?.provider,
-      model: row?.model,
+      provider: row.provider,
+      model: row.model,
       calls: 0,
       cost_usd: 0.0,
       pricing_known: row.pricing_known,
@@ -266,10 +257,7 @@ pub fn estimate_session_cost(usage) {
  * by projected cost, with unknown-pricing entries at the end.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: compare_model_costs(candidates, opts)
  */
 pub fn compare_model_costs(candidates, opts) {
   __ensure_dict(opts, "compare_model_costs")
@@ -289,10 +277,7 @@ pub fn compare_model_costs(candidates, opts) {
  * cache hits needed before the write pays for itself.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: cache_break_even(opts)
  */
 pub fn cache_break_even(opts) {
   __ensure_dict(opts, "cache_break_even")
@@ -365,10 +350,7 @@ pub fn cache_break_even(opts) {
  *          cost_per_call?, cost_per_period?, total_cost?, ...}.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: volume_cost(opts)
  */
 pub fn volume_cost(opts) {
   __ensure_dict(opts, "volume_cost")
@@ -392,8 +374,8 @@ pub fn volume_cost(opts) {
       cost_per_call: nil,
       cost_per_period: nil,
       total_cost: nil,
-      provider: row?.provider,
-      model: row?.model,
+      provider: row.provider,
+      model: row.model,
     }
   }
   return {
@@ -417,10 +399,7 @@ pub fn volume_cost(opts) {
  * {precision: N} or {sign: true} to override.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: format_usd(amount, options)
  */
 pub fn format_usd(amount, options = nil) {
   if options == nil {

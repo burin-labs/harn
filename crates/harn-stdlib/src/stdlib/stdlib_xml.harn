@@ -27,9 +27,7 @@ type XmlOptions = {root?: string, item_tag?: string, pretty?: bool, declaration?
  * LLM system prompts.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
  * @example: to_xml({previous_chats: ["x.jsonl", "y.jsonl"]})
  */
 pub fn to_xml(value, options: XmlOptions = {}) -> string {
@@ -55,9 +53,7 @@ type FromXmlOptions = {preserve_repeated_tag?: bool}
  * `@attr`; mixed content's text is exposed under `@text`.
  *
  * @effects: []
- * @allocation: heap
  * @errors: [from_xml]
- * @api_stability: stable
  * @example: from_xml("<root><a>1</a></root>")
  */
 pub fn from_xml(text: string, options: FromXmlOptions = {}) {

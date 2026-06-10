@@ -40,10 +40,7 @@ type SelectFromOptions = {
  * page shows a text or markdown artifact through a pager when stdout is interactive.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: page(opts)
  */
 pub fn page(opts: PageOptions) -> PageResult {
   return __tui_page(opts)
@@ -53,10 +50,7 @@ pub fn page(opts: PageOptions) -> PageResult {
  * terminal_width returns the current terminal width, or default_width when unknown.
  *
  * @effects: []
- * @allocation: stack-only
  * @errors: []
- * @api_stability: stable
- * @example: terminal_width(default_width)
  */
 pub fn terminal_width(default_width = 80) -> int {
   return __tui_terminal_width(default_width)
@@ -66,10 +60,7 @@ pub fn terminal_width(default_width = 80) -> int {
  * rule returns a repeated character line sized to width or the terminal width.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: rule(char, width)
  */
 pub fn rule(char = "─", width = nil) -> string {
   let mark = if type_of(char) == "string" && len(char) > 0 {
@@ -88,10 +79,7 @@ pub fn rule(char = "─", width = nil) -> string {
  * clear writes the ANSI clear-screen sequence to stdout.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: clear()
  */
 pub fn clear() {
   __tui_clear()
@@ -478,17 +466,14 @@ fn __tui_gum_pick(items, labels, opts) -> dict {
  * TTY, so harness tests with `mock_stdin` keep working).
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: select_from(items, opts)
  */
 pub fn select_from(items: list, opts: SelectFromOptions = {}) -> dict {
   let options = opts ?? {}
   if type_of(items) != "list" || len(items) == 0 {
     return __tui_error(options, "select_from: items must be a non-empty list")
   }
-  let prefer = __tui_to_string(options?.prefer_external ?? "auto")
+  let prefer = __tui_to_string(options.prefer_external ?? "auto")
   if prefer != "auto" && prefer != "fzf" && prefer != "gum" && prefer != "none" {
     return __tui_error(options, "select_from: prefer_external must be auto/fzf/gum/none (got " + prefer + ")")
   }

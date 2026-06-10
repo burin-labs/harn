@@ -5,10 +5,8 @@ import { typed_output_checkpoint } from "std/checkpoint"
  * workflow_typed_output_checkpoint.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
- * @example: workflow_typed_output_checkpoint(name, prompt, schema, options, validator)
  */
 pub fn workflow_typed_output_checkpoint(name, prompt, schema, options = nil, validator = nil) {
   return typed_output_checkpoint(name, prompt, schema, options, validator)

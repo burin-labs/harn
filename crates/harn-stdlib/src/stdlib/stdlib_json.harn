@@ -8,10 +8,7 @@ pub import "std/json/stream"
  * pretty.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: pretty(value)
  */
 pub fn pretty(value) {
   return json_stringify_pretty(value)
@@ -22,10 +19,7 @@ pub fn pretty(value) {
  * safe_parse.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: safe_parse(text)
  */
 pub fn safe_parse(text) {
   let result = try {
@@ -46,10 +40,7 @@ pub fn safe_parse(text) {
  * returns `{a: int, b: string}` rather than collapsing to `dict`.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: merge(a, b)
  */
 pub fn merge<R1, R2>(a: {...R1}, b: {...R2}) -> {...R1, ...R2} {
   return __dict_merge(a ?? {}, b ?? {})
@@ -61,10 +52,7 @@ pub fn merge<R1, R2>(a: {...R1}, b: {...R2}) -> {...R1, ...R2} {
  * the projection keeps the same V.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: pick(data, keys)
  */
 pub fn pick<V>(data: dict<string, V>, keys: list<string>) -> dict<string, V> {
   return __dict_pick(data ?? {}, keys ?? [])
@@ -75,10 +63,7 @@ pub fn pick<V>(data: dict<string, V>, keys: list<string>) -> dict<string, V> {
  * resulting dict keeps the same value contract as the input.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: omit(data, keys)
  */
 pub fn omit<V>(data: dict<string, V>, keys: list<string>) -> dict<string, V> {
   return __dict_omit(data ?? {}, keys ?? [])

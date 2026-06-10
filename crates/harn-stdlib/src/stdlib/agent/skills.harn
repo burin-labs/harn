@@ -656,10 +656,8 @@ fn __opts_with_active_skills(opts, registry, active, activated_this_turn = false
  * agent_skills_match.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
- * @example: agent_skills_match(session, opts, iteration)
  */
 pub fn agent_skills_match(session, opts, iteration) {
   let registry = __skills_registry(opts)

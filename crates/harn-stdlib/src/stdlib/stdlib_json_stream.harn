@@ -22,10 +22,7 @@ type JsonStreamValidator = {
  * value after Valid and nil otherwise.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: stream_validator(schema)
  */
 pub fn stream_validator(schema) -> JsonStreamValidator {
   let handle = __json_stream_validator(schema)
@@ -59,10 +56,7 @@ pub fn stream_validator(schema) -> JsonStreamValidator {
  * Create a `stream_validate` handle for a JSON schema.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: stream_validate_create(schema)
  */
 pub fn stream_validate_create(schema) -> string {
   return __json_stream_validate_create(schema)
@@ -73,10 +67,7 @@ pub fn stream_validate_create(schema) -> string {
  * verdict dict.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: stream_validate_chunk(handle, chunk)
  */
 pub fn stream_validate_chunk(handle: string, chunk) -> dict {
   return __json_stream_validate_chunk(handle, chunk)
@@ -88,10 +79,7 @@ pub fn stream_validate_chunk(handle: string, chunk) -> dict {
  * valid or invalid verdict is returned unchanged.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: stream_validate_finalize(handle)
  */
 pub fn stream_validate_finalize(handle: string) -> dict {
   return __json_stream_validate_finalize(handle)
@@ -104,10 +92,7 @@ pub fn stream_validate_finalize(handle: string) -> dict {
  * via `let {create, chunk, finalize} = stream_validate()`.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: stream_validate()
  */
 pub fn stream_validate() -> dict {
   return {

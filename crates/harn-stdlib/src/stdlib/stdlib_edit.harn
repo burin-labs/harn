@@ -427,10 +427,7 @@ fn __edit_apply_line_candidate(text, old_text, new_text, match_kind, candidates,
  * `old_text` when the model pasted them straight from a numbered file read.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: edit_apply_old_new_patch(text, old_text, new_text, options)
  */
 pub fn edit_apply_old_new_patch(text, old_text, new_text, options = nil) {
   let source = text ?? ""
@@ -516,10 +513,7 @@ pub fn edit_apply_old_new_patch(text, old_text, new_text, options = nil) {
  * Splice a half-open 0-based line range and return patch metadata.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: edit_splice_lines(text, start_line, end_line_exclusive, new_text, options)
  */
 pub fn edit_splice_lines(text, start_line, end_line_exclusive, new_text, options = nil) {
   let source = text ?? ""
@@ -583,10 +577,7 @@ fn __edit_hunk(before_start, after_start, before_end, after_end, next_before, ne
  * Return deterministic line-level changed-region metadata.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: edit_changed_regions(before, after)
  */
 pub fn edit_changed_regions(before, after) {
   let before_lines = split(before ?? "", "\n")
@@ -641,10 +632,7 @@ fn __edit_region_within(actual, expected) {
  * two `N | …` lines (e.g. a docstring example) is left alone.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: edit_strip_line_number_prefixes(text)
  */
 pub fn edit_strip_line_number_prefixes(text) {
   let raw = text ?? ""
@@ -737,10 +725,7 @@ fn __edit_count_blank_lines(lines) {
  * detectable.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: edit_explain_whitespace_difference(needle, matched)
  */
 pub fn edit_explain_whitespace_difference(needle, matched) {
   let needle_text = needle ?? ""
@@ -791,10 +776,7 @@ pub fn edit_explain_whitespace_difference(needle, matched) {
  * where placeholders by themselves are not a signal.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: edit_check_lazy_truncation(old_content, new_content, options)
  */
 pub fn edit_check_lazy_truncation(old_content, new_content, options = nil) {
   let opts = options ?? {}
@@ -848,10 +830,7 @@ pub fn edit_check_lazy_truncation(old_content, new_content, options = nil) {
  * Expected regions use inclusive `end_line` or half-open `end_line_exclusive`.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: edit_validate_changed_regions(before, after, expected_regions, options)
  */
 pub fn edit_validate_changed_regions(before, after, expected_regions, options = nil) {
   let actual = edit_changed_regions(before ?? "", after ?? "")
@@ -921,7 +900,6 @@ pub fn edit_validate_changed_regions(before, after, expected_regions, options = 
  * supplied so the edit is atomic alongside siblings.
  *
  * @effects: [host, fs]
- * @allocation: heap
  * @errors: [backend]
  * @api_stability: experimental
  * @example: edit_apply_node({path: "src/lib.rs", query: query, replacement: "{ 42 }"})
@@ -994,7 +972,6 @@ pub fn edit_apply_node(params) {
  * alongside siblings.
  *
  * @effects: [host, fs]
- * @allocation: heap
  * @errors: [backend]
  * @api_stability: experimental
  * @example: edit_insert_at_anchor({path: "src/lib.rs", query: q, position: "after", content: "fn beta() {}"})
@@ -1072,7 +1049,6 @@ pub fn edit_insert_at_anchor(params) {
  * files_changed / files_written / files_failed / match_count_total`.
  *
  * @effects: [host, fs]
- * @allocation: heap
  * @errors: [backend]
  * @api_stability: experimental
  * @example: edit_batch_apply({paths: ["a.rs", "b.rs"], query: q, replacement: "{ 0 }"})
@@ -1206,7 +1182,6 @@ fn __edit_safe_patch_result(ctx, fields = nil) {
  * hunk-conflict rates and average hunks-per-patch.
  *
  * @effects: [host, fs]
- * @allocation: heap
  * @errors: [backend]
  * @api_stability: experimental
  * @example: edit_safe_text_patch({path: "src/lib.rs", expected_hash: "sha256:...", hunks: [{old_text: "x = 1", new_text: "x = 2"}]})
@@ -1357,7 +1332,6 @@ pub fn edit_safe_text_patch(params) {
  * with `result: "syntax_error"` on any ERROR/MISSING node.
  *
  * @effects: [host, fs]
- * @allocation: heap
  * @errors: [backend]
  * @api_stability: experimental
  * @example: edit_rename_symbol({symbol_ref: {name: "Widget", path: "src/lib.rs", kind: "Type"}, new_name: "Gadget", scope: "workspace"})
@@ -1418,7 +1392,6 @@ pub fn edit_rename_symbol(params) {
  * `result` is one of `ok | partial | no_ops_applied`.
  *
  * @effects: [host, fs]
- * @allocation: heap
  * @errors: [backend]
  * @api_stability: experimental
  * @example: edit_dry_run({plan: [{op: "apply_node", path: "src/lib.rs", query: query, replacement: "{ 42 }"}]})
@@ -1650,7 +1623,6 @@ fn __edit_fast_apply_result(ctx, fields = nil) {
  *   Tree-Sitter languages and skips validation for unsupported paths.
  *
  * @effects: [host, fs, llm.call]
- * @allocation: heap
  * @errors: [backend]
  * @api_stability: experimental
  * @example: edit_fast_apply({path: "src/lib.rs", intent: "Rename alpha to beta"})
@@ -1836,7 +1808,6 @@ pub fn edit_fast_apply(params) {
  * Convenience wrapper for `edit_fast_apply({path, intent, ...})`.
  *
  * @effects: [host, fs, llm.call]
- * @allocation: heap
  * @errors: [backend]
  * @api_stability: experimental
  * @example: fast_apply("src/lib.rs", "Rename alpha to beta")
@@ -1862,7 +1833,6 @@ pub fn fast_apply(path, edit_intent, options = nil) {
  * `"unsupported_language"` when a `language` filter names no grammar.
  *
  * @effects: [host]
- * @allocation: heap
  * @errors: [backend]
  * @api_stability: experimental
  * @example: edit_capabilities({language: "yaml"})
@@ -2245,7 +2215,6 @@ fn __refactor_var_decl_syntax(language) {
  * preview, `session_id` to stage into a caller-owned session.
  *
  * @effects: [host, fs]
- * @allocation: heap
  * @errors: [backend]
  * @api_stability: experimental
  * @example: edit_extract_variable({path: "src/lib.rs", range: {start_line: 4, start_col: 13, end_line: 4, end_col: 24}, new_name: "total"})
@@ -2566,7 +2535,6 @@ fn __refactor_def_op(spec, path, fn_name, new_inner) {
  * tsx, javascript, jsx, go.
  *
  * @effects: [host, fs]
- * @allocation: heap
  * @errors: [backend]
  * @api_stability: experimental
  * @example: edit_change_signature({path: "src/lib.rs", symbol: {name: "add"}, new_params: "a: i64, b: i64, c: i64", callsite_strategy: "strict"})
@@ -2674,7 +2642,6 @@ pub fn edit_change_signature(params) {
  * Languages: rust, python, typescript, tsx, javascript, jsx, go.
  *
  * @effects: [host, fs]
- * @allocation: heap
  * @errors: [backend]
  * @api_stability: experimental
  * @example: edit_add_parameter({path: "src/lib.rs", symbol: {name: "add"}, param: "c: i64", default: "0"})
@@ -2768,7 +2735,6 @@ pub fn edit_add_parameter(params) {
  * Languages: rust, python, typescript, tsx, javascript, jsx, go.
  *
  * @effects: [host, fs]
- * @allocation: heap
  * @errors: [backend]
  * @api_stability: experimental
  * @example: edit_reorder_parameters({path: "src/lib.rs", symbol: {name: "add"}, order: [1, 0]})
@@ -2865,7 +2831,6 @@ pub fn edit_reorder_parameters(params) {
  * call sites is surfaced in `warnings` so the agent knows what to review.
  *
  * @effects: [host, fs]
- * @allocation: heap
  * @errors: [backend]
  * @api_stability: experimental
  * @example: edit_change_return_type({path: "src/lib.rs", symbol: {name: "add"}, new_type: "i32"})
@@ -3045,7 +3010,6 @@ fn __refactor_wrap_probe(kind, body_lines) {
  * analysis and a parameter form that needs no inferred types).
  *
  * @effects: [host, fs]
- * @allocation: heap
  * @errors: [backend]
  * @api_stability: experimental
  * @example: edit_extract_function({path: "app.py", range: {start_line: 3, end_line: 5}, new_name: "summarize"})
@@ -3205,7 +3169,6 @@ fn __refactor_inline_expr(body_text, kind) {
  * Languages: rust, python, typescript, tsx, javascript, jsx, go.
  *
  * @effects: [host, fs]
- * @allocation: heap
  * @errors: [backend]
  * @api_stability: experimental
  * @example: edit_inline({path: "src/lib.rs", symbol: {name: "answer"}})
@@ -3307,7 +3270,6 @@ pub fn edit_inline(params) {
  * `warnings`; combine with `edit_rename_symbol` for re-export safety.
  *
  * @effects: [host, fs]
- * @allocation: heap
  * @errors: [backend]
  * @api_stability: experimental
  * @example: edit_move_decl({path: "src/a.rs", symbol: {name: "helper"}, target_file: "src/b.rs"})

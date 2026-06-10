@@ -80,10 +80,7 @@ type CorrectionQueryFilters = {
  * record appends a typed replay correction and returns its CorrectionId.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: record(correction)
  */
 pub fn record(correction: CorrectionInput) -> CorrectionId {
   return corrections.record(correction)
@@ -93,10 +90,7 @@ pub fn record(correction: CorrectionInput) -> CorrectionId {
  * query returns recorded replay corrections.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: query(filters)
  */
 pub fn query(filters: CorrectionQueryFilters = {}) -> list<CorrectionRecord> {
   return corrections.query(filters)

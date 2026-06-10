@@ -19,10 +19,7 @@
  * calling `memory_open` again replaces the active config.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: memory_open(namespace, options)
  */
 pub fn memory_open(namespace, options = nil) {
   return __memory_open(namespace, options)
@@ -36,10 +33,7 @@ pub fn memory_open(namespace, options = nil) {
  * semantic recall is cache-only.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: memory_store(namespace, key, value, tags, options)
  */
 pub fn memory_store(namespace, key, value, tags = nil, options = nil) {
   return __memory_store(namespace, key, value, tags, options)
@@ -53,10 +47,7 @@ pub fn memory_store(namespace, key, value, tags = nil, options = nil) {
  * model for this query only.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: memory_recall(namespace, query, k, options)
  */
 pub fn memory_recall(namespace, query, k = nil, options = nil) {
   return __memory_recall(namespace, query, k, options)
@@ -66,10 +57,7 @@ pub fn memory_recall(namespace, query, k = nil, options = nil) {
  * memory_summarize.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: memory_summarize(namespace, window, options)
  */
 pub fn memory_summarize(namespace, window = nil, options = nil) {
   return __memory_summarize(namespace, window, options)
@@ -79,10 +67,7 @@ pub fn memory_summarize(namespace, window = nil, options = nil) {
  * memory_forget.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: memory_forget(namespace, predicate, options)
  */
 pub fn memory_forget(namespace, predicate, options = nil) {
   return __memory_forget(namespace, predicate, options)

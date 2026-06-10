@@ -157,10 +157,7 @@ fn __cm_source_id(input) {
  * Build a stable dedupe key for one maintenance job observation.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: context_maintenance_dedupe_key(job_id, lifecycle_event, affected_paths, source_id)
  */
 pub fn context_maintenance_dedupe_key(
   job_id: string,
@@ -182,10 +179,7 @@ pub fn context_maintenance_dedupe_key(
  * Normalize one background maintenance job receipt.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: context_maintenance_receipt(job_id, status, input)
  */
 pub fn context_maintenance_receipt(
   job_id: string,
@@ -228,10 +222,7 @@ pub fn context_maintenance_receipt(
  * Build the queued/skipped receipt a lifecycle hook should return after enqueueing.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: context_maintenance_queue_receipt(job_id, event, options)
  */
 pub fn context_maintenance_queue_receipt(job_id: string, event, options = nil) -> ContextMaintenanceJobReceipt {
   let opts = options ?? {}
@@ -255,10 +246,7 @@ pub fn context_maintenance_queue_receipt(job_id: string, event, options = nil) -
  * Transition a receipt to the next worker-observed state.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: context_maintenance_transition(receipt, status, input)
  */
 pub fn context_maintenance_transition(
   receipt: ContextMaintenanceJobReceipt,
@@ -272,12 +260,12 @@ pub fn context_maintenance_transition(
     opts
       .merge(
       {
-        dedupe_key: receipt?.dedupe_key,
-        run_id: receipt?.run_id,
-        lifecycle_event: opts?.lifecycle_event ?? receipt?.lifecycle_event,
-        affected_paths: opts?.affected_paths ?? receipt?.affected_paths,
-        artifact_ids: opts?.artifact_ids ?? receipt?.artifact_ids,
-        replay: opts?.replay ?? receipt?.replay,
+        dedupe_key: receipt.dedupe_key,
+        run_id: receipt.run_id,
+        lifecycle_event: opts?.lifecycle_event ?? receipt.lifecycle_event,
+        affected_paths: opts?.affected_paths ?? receipt.affected_paths,
+        artifact_ids: opts?.artifact_ids ?? receipt.artifact_ids,
+        replay: opts?.replay ?? receipt.replay,
       },
     ),
   )
@@ -287,23 +275,20 @@ pub fn context_maintenance_transition(
  * Decide whether replay should run the job again or emit a deterministic skip.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: context_maintenance_replay_decision(receipt, options)
  */
 pub fn context_maintenance_replay_decision(receipt: ContextMaintenanceJobReceipt, options = nil) {
   let opts = options ?? {}
-  let mode = __cm_replay_mode(opts?.mode ?? opts?.replay_mode ?? receipt?.replay?.mode ?? "include")
+  let mode = __cm_replay_mode(opts?.mode ?? opts?.replay_mode ?? receipt.replay.mode ?? "include")
   if mode == "skip" {
-    let reason = __cm_text(opts?.reason ?? receipt?.replay?.reason ?? "deterministic_replay_skip")
+    let reason = __cm_text(opts?.reason ?? receipt.replay.reason ?? "deterministic_replay_skip")
     return {
       mode: "skip",
       should_run: false,
       receipt: context_maintenance_transition(
         receipt,
         "skipped",
-        {replay: {mode: "skip", determinism_key: receipt?.dedupe_key, reason: reason}, error: reason},
+        {replay: {mode: "skip", determinism_key: receipt.dedupe_key, reason: reason}, error: reason},
       ),
     }
   }

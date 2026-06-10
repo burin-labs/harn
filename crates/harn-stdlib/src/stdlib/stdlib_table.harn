@@ -232,10 +232,7 @@ fn __table_render_markdown(cols, matrix, widths, show_header) -> string {
  * Render rows as a stable plain-text or Markdown table.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: render_table(rows, options)
  */
 pub fn render_table(rows: list, options: TableOptions = {}) -> string {
   let items = rows ?? []
@@ -260,10 +257,7 @@ pub fn render_table(rows: list, options: TableOptions = {}) -> string {
  * Alias for `render_table(..., {format: "markdown"})`.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: render_markdown_table(rows, options)
  */
 pub fn render_markdown_table(rows: list, options: TableOptions = {}) -> string {
   let base = options ?? {}
@@ -274,10 +268,7 @@ pub fn render_markdown_table(rows: list, options: TableOptions = {}) -> string {
  * Render a dict as a two-column key/value table.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: render_kv_table(data, options)
  */
 pub fn render_kv_table(data: dict, options: TableOptions = {}) -> string {
   var rows = []

@@ -81,7 +81,6 @@ type LibrarianOverlay = {active: string?, reuse_fraction: float}
  * Returns the row list plus the active overlay name (nil when on base).
  *
  * @effects: [host]
- * @allocation: heap
  * @errors: [backend]
  * @api_stability: experimental
  * @example: code_librarian_query("MATCH (f:Function {name: 'main'}) RETURN f.path AS path")
@@ -98,7 +97,6 @@ pub fn code_librarian_query(cypher: string) -> LibrarianCypherResult {
  * shape is stable for richer expansions later.
  *
  * @effects: [host]
- * @allocation: heap
  * @errors: [invalid_argument]
  * @api_stability: experimental
  * @example: code_librarian_outline("src/util.ts")
@@ -133,7 +131,6 @@ pub fn code_librarian_outline(path: string, depth: int = 1) -> LibrarianOutline 
  * Canned query: `MATCH (f:Function {name: $name})<-[:CALLS]-(c:CallSite) RETURN c.path AS path, c.caller AS caller, f.name AS symbol`.
  *
  * @effects: [host]
- * @allocation: heap
  * @errors: [backend]
  * @api_stability: experimental
  * @example: code_librarian_who_calls("formatDate")
@@ -161,7 +158,6 @@ pub fn code_librarian_who_calls(symbol: string, max_hops: int = 2) -> list<Libra
  * Canned query: `MATCH (m:Module {path: $path})<-[:IMPORTS]-(s:Module) RETURN s.path AS importer, 'import' AS kind`.
  *
  * @effects: [host]
- * @allocation: heap
  * @errors: [backend]
  * @api_stability: experimental
  * @example: code_librarian_what_imports("src/util.ts")
@@ -187,7 +183,6 @@ pub fn code_librarian_what_imports(path: string) -> list<LibrarianImport> {
  * resume.
  *
  * @effects: [host]
- * @allocation: heap
  * @errors: [invalid_argument]
  * @api_stability: experimental
  * @example: code_librarian_recent_changes(0)
@@ -206,7 +201,6 @@ pub fn code_librarian_recent_changes(since_seq: int = 0) -> list<LibrarianFileCh
  * preserving the `{known, stale, indexed_hash, disk_hash, ...}` shape.
  *
  * @effects: [host, fs]
- * @allocation: heap
  * @errors: [backend]
  * @api_stability: experimental
  * @example: code_librarian_freshness("src/util.ts")
@@ -222,7 +216,6 @@ pub fn code_librarian_freshness(path: string) -> LibrarianFreshness {
  * the active overlay and returns to the base graph.
  *
  * @effects: [host]
- * @allocation: heap
  * @errors: [backend, invalid_argument]
  * @api_stability: experimental
  * @example: code_librarian_branch_overlay("topic/cypher")
@@ -277,7 +270,6 @@ const __DEFAULT_LLM_OPTIONS = {provider: "openrouter", model: "mistralai/devstra
  * results in-process cached for 5 minutes on the lowercased NL text.
  *
  * @effects: [host, llm.call]
- * @allocation: heap
  * @errors: [backend]
  * @api_stability: experimental
  * @example: code_librarian_query_nl("which file defines formatDate?")

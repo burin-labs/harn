@@ -32,10 +32,8 @@ fn __agent_tool_format(opts) {
  * guidance for every model. Extend this (not the prompts) to add a new paradigm.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
- * @example: agent_tool_call_paradigm(opts)
  */
 pub fn agent_tool_call_paradigm(options = nil) {
   let format = __agent_tool_format(options)
@@ -77,7 +75,6 @@ pub fn agent_tool_call_paradigm(options = nil) {
  * and get a wire-correct call for whichever model is on the transcript.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
  * @example: agent_render_tool_call_exemplar("edit", [{key: "action", value: "create"}], opts)
@@ -459,10 +456,8 @@ fn __agent_primary_system_text(session, opts) {
  * `llm_call` tool-rendering path rather than re-deriving it at each call site.
  *
  * @effects: [agent, mcp]
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
- * @example: agent_build_turn_system_fragments(session, opts, iteration)
  */
 pub fn agent_build_turn_system_fragments(session, opts, iteration) {
   var fragments = []
@@ -514,10 +509,8 @@ pub fn agent_build_turn_system_fragments(session, opts, iteration) {
  * agent_build_turn_system.
  *
  * @effects: [agent, mcp]
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
- * @example: agent_build_turn_system(session, opts, iteration)
  */
 pub fn agent_build_turn_system(session, opts, iteration) {
   var parts = []
@@ -589,10 +582,8 @@ fn __agent_apply_projection(session_id, messages, opts) {
  * agent_build_turn_messages.
  *
  * @effects: [agent]
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
- * @example: agent_build_turn_messages(session, opts, iteration)
  */
 pub fn agent_build_turn_messages(session, opts, iteration) {
   let raw_messages = agent_session_messages(session.session_id)

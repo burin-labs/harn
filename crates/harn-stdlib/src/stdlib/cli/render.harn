@@ -30,10 +30,7 @@ import { is_tty } from "std/io"
  * level (see harn#2294 G1).
  *
  * @effects: [env.read]
- * @allocation: none
  * @errors: []
- * @api_stability: stable
- * @example: mode()
  */
 pub fn mode() -> string {
   if env_or("HARN_OUTPUT_JSON", "0") == "1" {
@@ -47,10 +44,7 @@ pub fn mode() -> string {
  * output. Sugar over `mode() == "json"`.
  *
  * @effects: [env.read]
- * @allocation: none
  * @errors: []
- * @api_stability: stable
- * @example: json_mode()
  */
 pub fn json_mode() -> bool {
   return mode() == "json"
@@ -73,9 +67,7 @@ type Envelope = {schema_version: int, api_stability: string, payload: any, warni
  * `api_stability` should be one of: "stable", "experimental", "internal".
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
  * @example: envelope({schema_version: 1, api_stability: "stable", payload: {ok: true}})
  */
 pub fn envelope(spec: Envelope) -> dict {
@@ -95,9 +87,7 @@ pub fn envelope(spec: Envelope) -> dict {
  * through `jq`), compact JSON otherwise.
  *
  * @effects: [stdio.write]
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
  * @example: write_envelope(envelope({schema_version: 1, api_stability: "stable", payload: result}))
  */
 pub fn write_envelope(env: dict) {

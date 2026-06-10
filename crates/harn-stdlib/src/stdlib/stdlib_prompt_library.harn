@@ -360,10 +360,7 @@ fn __shared_prefix(snippets, min_fraction, min_tokens) {
  * Create a prompt library from a fragment list.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: prompt_library(fragments)
  */
 pub fn prompt_library(fragments = nil) {
   var library = __empty_library()
@@ -377,10 +374,7 @@ pub fn prompt_library(fragments = nil) {
  * Normalize one prompt fragment.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: prompt_fragment(id, body, config)
  */
 pub fn prompt_fragment(id, body, config = nil) {
   require id != nil && id != "", "prompt_fragment: id must be a non-empty string"
@@ -417,10 +411,7 @@ pub fn prompt_fragment(id, body, config = nil) {
  * Add or replace a fragment by id.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: prompt_library_define(library, fragment)
  */
 pub fn prompt_library_define(library, fragment) {
   let fragments = __require_library(library, "prompt_library_define")
@@ -445,10 +436,7 @@ pub fn prompt_library_define(library, fragment) {
  * Load fragments from a TOML catalog or `.harn.prompt` fragment file.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: prompt_library_load(path_or_paths)
  */
 pub fn prompt_library_load(path_or_paths) {
   if type_of(path_or_paths) == "list" {
@@ -468,10 +456,7 @@ pub fn prompt_library_load(path_or_paths) {
  * List fragments, optionally filtered by id, tag/tags, tenant, provenance, or status.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: prompt_library_list(library, filters)
  */
 pub fn prompt_library_list(library, filters = nil) {
   let fragments = __require_library(library, "prompt_library_list")
@@ -482,10 +467,7 @@ pub fn prompt_library_list(library, filters = nil) {
  * Find one fragment by id, returning nil when it is absent.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: prompt_library_find(library, id)
  */
 pub fn prompt_library_find(library, id) {
   for fragment in __require_library(library, "prompt_library_find") {
@@ -500,10 +482,7 @@ pub fn prompt_library_find(library, id) {
  * Render one fragment to text.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: prompt_library_inject(library, id, bindings)
  */
 pub fn prompt_library_inject(library, id, bindings = nil) {
   let fragment = prompt_library_find(library, id)
@@ -515,10 +494,7 @@ pub fn prompt_library_inject(library, id, bindings = nil) {
  * Render one fragment with cache metadata for hosts that consume prompt blocks.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: prompt_library_payload(library, id, bindings)
  */
 pub fn prompt_library_payload(library, id, bindings = nil) {
   let fragment = prompt_library_find(library, id)
@@ -537,10 +513,7 @@ pub fn prompt_library_payload(library, id, bindings = nil) {
  * Render all matching fragments until `max_tokens` would be exceeded.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: prompt_library_inject_cluster(library, filters, bindings)
  */
 pub fn prompt_library_inject_cluster(library, filters = nil, bindings = nil) {
   let max_tokens = filters?.max_tokens
@@ -561,10 +534,7 @@ pub fn prompt_library_inject_cluster(library, filters = nil, bindings = nil) {
  * Score and return likely useful fragments for a context.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: prompt_library_suggest(library, ctx)
  */
 pub fn prompt_library_suggest(library, ctx = nil) {
   var scored = []
@@ -581,10 +551,7 @@ pub fn prompt_library_suggest(library, ctx = nil) {
  * Return a closure-backed namespace for `library.inject(...)` style calls.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: prompt_library_api(library)
  */
 pub fn prompt_library_api(library) {
   return {
@@ -601,10 +568,7 @@ pub fn prompt_library_api(library) {
  * Build k-means prompt-hotspot fragment proposals from tenant-scoped conversations.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: prompt_library_hotspots(conversations, options)
  */
 pub fn prompt_library_hotspots(conversations, options = nil) {
   let tenant = options?.tenant_id
@@ -699,10 +663,7 @@ pub fn prompt_library_hotspots(conversations, options = nil) {
  * Return pending k-means proposals in the shape expected by review UIs.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: prompt_library_review_queue(library, filters)
  */
 pub fn prompt_library_review_queue(library, filters = nil) {
   var queue = []

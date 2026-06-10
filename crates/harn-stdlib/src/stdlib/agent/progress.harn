@@ -1,11 +1,13 @@
 import { agent_emit_event } from "std/agent/state"
 
-// `agent_progress` is a cosmetic progress-report surface — it emits a task-list
-// event for the user, nothing more. A malformed `status`/`priority` enum from a
-// weaker model must NOT abort the whole turn (the historical hard `throw` crashed
-// the agent loop on a single typo like `status: "in-progress"` or `"doing"`).
-// Normalize the obvious synonyms and otherwise fall back to a sane default; never
-// throw. `_label` is retained for signature symmetry with the other validators.
+/**
+ * `agent_progress` is a cosmetic progress-report surface — it emits a task-list
+ * event for the user, nothing more. A malformed `status`/`priority` enum from a
+ * weaker model must NOT abort the whole turn (the historical hard `throw` crashed
+ * the agent loop on a single typo like `status: "in-progress"` or `"doing"`).
+ * Normalize the obvious synonyms and otherwise fall back to a sane default; never
+ * throw. `_label` is retained for signature symmetry with the other validators.
+ */
 fn __agent_progress_status(value, _label) {
   if type_of(value) != "string" {
     return "in_progress"
@@ -170,10 +172,8 @@ fn __agent_progress_tool_config(value) {
  * agent_progress emits a structured progress_reported event for the current agent session.
  *
  * @effects: [agent]
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
- * @example: agent_progress(input)
  */
 pub fn agent_progress(input) {
   let payload = __agent_progress_payload(input)
@@ -189,10 +189,8 @@ pub fn agent_progress(input) {
  * agent_progress_tool adds a handler-backed agent_progress tool to a registry.
  *
  * @effects: [agent]
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
- * @example: agent_progress_tool(registry, options)
  */
 pub fn agent_progress_tool(registry = nil, options = nil) {
   let config = options ?? {}
@@ -225,10 +223,8 @@ pub fn agent_progress_tool(registry = nil, options = nil) {
  * agent_progress_apply_options injects the progress tool when agent_loop opts in.
  *
  * @effects: [agent]
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
- * @example: agent_progress_apply_options(options)
  */
 pub fn agent_progress_apply_options(options = nil) {
   let opts = options ?? {}

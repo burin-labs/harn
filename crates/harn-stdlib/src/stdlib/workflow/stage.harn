@@ -193,10 +193,8 @@ fn __stage_prepare_escalation(node_id, node, consumed_artifact_ids) {
  * workflow_evaluate_verification.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
- * @example: workflow_evaluate_verification(config)
  */
 pub fn workflow_evaluate_verification(config = nil) {
   let verify = config?.verify
@@ -240,10 +238,8 @@ pub fn workflow_evaluate_verification(config = nil) {
  * workflow_evaluate_condition.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
- * @example: workflow_evaluate_condition(config)
  */
 pub fn workflow_evaluate_condition(config = nil) {
   let artifacts = __stage_list(config?.artifacts)
@@ -268,10 +264,8 @@ pub fn workflow_evaluate_condition(config = nil) {
  * workflow_classify_stage_outcome.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
- * @example: workflow_classify_stage_outcome(config)
  */
 pub fn workflow_classify_stage_outcome(config = nil) {
   let node_kind = __stage_string(config?.node_kind, "")
@@ -314,10 +308,8 @@ pub fn workflow_classify_stage_outcome(config = nil) {
  * workflow_stage_attempt_outcome.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
- * @example: workflow_stage_attempt_outcome(config)
  */
 pub fn workflow_stage_attempt_outcome(config = nil) {
   let {node = {}, result = {}} = config ?? {}
@@ -336,10 +328,8 @@ pub fn workflow_stage_attempt_outcome(config = nil) {
  * workflow_prepare_static_stage.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
- * @example: workflow_prepare_static_stage(config)
  */
 pub fn workflow_prepare_static_stage(config = nil) {
   let node_id = __stage_string(config?.node_id, "stage")

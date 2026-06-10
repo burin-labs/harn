@@ -42,10 +42,8 @@
  * are set (a callsite that defensively passes both stays valid).
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
- * @example: runtime_introspection_tools(registry, options)
  */
 pub fn runtime_introspection_tools(registry = nil, options = nil) {
   let base = registry ?? tool_registry()

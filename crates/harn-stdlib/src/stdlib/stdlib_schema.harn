@@ -4,10 +4,7 @@
  * Import with: import "std/schema"
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: schema_any()
  */
 pub fn schema_any() {
   return {type: "any"}

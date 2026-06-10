@@ -5,10 +5,8 @@
  * agent_session_init.
  *
  * @effects: [host]
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
- * @example: agent_session_init(message, system_prompt, opts)
  */
 pub fn agent_session_init(message, system_prompt, opts) {
   return __host_agent_session_init(message, system_prompt, opts)
@@ -18,10 +16,8 @@ pub fn agent_session_init(message, system_prompt, opts) {
  * agent_session_finalize.
  *
  * @effects: [host]
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
- * @example: agent_session_finalize(session_id, status)
  */
 pub fn agent_session_finalize(session_id, status) {
   return __host_agent_session_finalize(session_id, status)
@@ -31,10 +27,8 @@ pub fn agent_session_finalize(session_id, status) {
  * agent_session_messages.
  *
  * @effects: [host]
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
- * @example: agent_session_messages(session_id)
  */
 pub fn agent_session_messages(session_id) {
   return __host_agent_session_messages(session_id)
@@ -44,10 +38,8 @@ pub fn agent_session_messages(session_id) {
  * agent_session_record_assistant.
  *
  * @effects: [host]
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
- * @example: agent_session_record_assistant(session_id, llm_result)
  */
 pub fn agent_session_record_assistant(session_id, llm_result) {
   return __host_agent_session_record_assistant(session_id, llm_result)
@@ -57,10 +49,8 @@ pub fn agent_session_record_assistant(session_id, llm_result) {
  * agent_session_record_tool_results.
  *
  * @effects: [host]
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
- * @example: agent_session_record_tool_results(session_id, dispatch)
  */
 pub fn agent_session_record_tool_results(session_id, dispatch) {
   return __host_agent_session_record_tool_results(session_id, dispatch)
@@ -80,7 +70,6 @@ fn __agent_usage_int(value) {
  * agent_reminder_providers_fire.
  *
  * @effects: [host]
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
  * @example: agent_reminder_providers_fire(session_id, "post_compact", payload, opts)
@@ -93,10 +82,8 @@ pub fn agent_reminder_providers_fire(session_id, event, payload = nil, opts = ni
  * agent_session_record_usage.
  *
  * @effects: [host]
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
- * @example: agent_session_record_usage(session_id, llm_result, opts, iteration)
  */
 pub fn agent_session_record_usage(session_id, llm_result, opts = nil, iteration = 0) {
   let totals = __host_agent_session_record_usage(session_id, llm_result)
@@ -125,10 +112,8 @@ pub fn agent_session_record_usage(session_id, llm_result, opts = nil, iteration 
  * agent_session_drain_feedback.
  *
  * @effects: [host]
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
- * @example: agent_session_drain_feedback(session_id)
  */
 pub fn agent_session_drain_feedback(session_id) {
   return __host_agent_session_drain_feedback(session_id)
@@ -138,7 +123,6 @@ pub fn agent_session_drain_feedback(session_id) {
  * agent_session_drain_bridge_injections.
  *
  * @effects: [host]
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
  * @example: agent_session_drain_bridge_injections(session_id, "finish_step")
@@ -171,7 +155,6 @@ pub fn agent_session_drain_bridge_injections(session_id, checkpoint) {
  *     before the loop terminates (harn#2212).
  *
  * @effects: [host]
- * @allocation: heap
  * @errors: [HARN-RMD-002]
  * @api_stability: experimental
  * @example: agent_session_push_bridge_injection(session_id, {body: "stop", mode: "interrupt_immediate"})
@@ -189,10 +172,8 @@ pub fn agent_session_push_bridge_injection(session_id, options) {
  * kind-specific fields such as `messageId`, `reminderId`, or `body`.
  *
  * @effects: [host]
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
- * @example: agent_session_pending_injections(session_id)
  */
 pub fn agent_session_pending_injections(session_id) {
   return __host_agent_session_pending_injections(session_id)
@@ -207,10 +188,8 @@ pub fn agent_session_pending_injections(session_id) {
  * `"unknown_reminder_id"`.
  *
  * @effects: [host]
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
- * @example: agent_session_revoke_reminder(session_id, reminder_id)
  */
 pub fn agent_session_revoke_reminder(session_id, reminder_id) {
   return __host_agent_session_revoke_reminder(session_id, reminder_id)
@@ -220,10 +199,8 @@ pub fn agent_session_revoke_reminder(session_id, reminder_id) {
  * agent_session_totals.
  *
  * @effects: [host]
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
- * @example: agent_session_totals(session_id)
  */
 pub fn agent_session_totals(session_id) {
   return __host_agent_session_totals(session_id)
@@ -233,10 +210,8 @@ pub fn agent_session_totals(session_id) {
  * agent_session_inject_feedback.
  *
  * @effects: [host]
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
- * @example: agent_session_inject_feedback(session_id, kind, content)
  */
 pub fn agent_session_inject_feedback(session_id, kind, content) {
   return __host_agent_session_inject_feedback(session_id, kind, content)
@@ -252,10 +227,8 @@ pub fn agent_session_inject_feedback(session_id, kind, content) {
  * discipline bug, not a runtime condition.
  *
  * @effects: [host]
- * @allocation: heap
  * @errors: [runtime]
  * @api_stability: experimental
- * @example: agent_session_pop_last_assistant(session_id)
  */
 pub fn agent_session_pop_last_assistant(session_id) {
   return __host_agent_session_pop_last_assistant(session_id)
@@ -268,10 +241,8 @@ pub fn agent_session_pop_last_assistant(session_id) {
  * compaction drain — surfaces the entry as feedback.
  *
  * @effects: [host]
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
- * @example: agent_session_post_event(session_id, kind, content, source)
  */
 pub fn agent_session_post_event(session_id, kind, content, source = nil) {
   return __host_agent_session_post_event(session_id, kind, content, source)
@@ -281,10 +252,8 @@ pub fn agent_session_post_event(session_id, kind, content, source = nil) {
  * agent_session_apply_reminder_post_turn.
  *
  * @effects: [host]
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
- * @example: agent_session_apply_reminder_post_turn(session_id, turn)
  */
 pub fn agent_session_apply_reminder_post_turn(session_id, turn = 0) {
   return __host_agent_session_apply_reminder_post_turn(session_id, turn)
@@ -294,10 +263,8 @@ pub fn agent_session_apply_reminder_post_turn(session_id, turn = 0) {
  * agent_session_set_active_skills.
  *
  * @effects: [host]
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
- * @example: agent_session_set_active_skills(session_id, skills)
  */
 pub fn agent_session_set_active_skills(session_id, skills) {
   return __host_agent_session_set_active_skills(session_id, skills)
@@ -307,10 +274,8 @@ pub fn agent_session_set_active_skills(session_id, skills) {
  * agent_session_active_skills.
  *
  * @effects: [host]
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
- * @example: agent_session_active_skills(session_id)
  */
 pub fn agent_session_active_skills(session_id) {
   return __host_agent_session_active_skills(session_id)
@@ -320,10 +285,8 @@ pub fn agent_session_active_skills(session_id) {
  * agent_session_record_skill_event.
  *
  * @effects: [host]
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
- * @example: agent_session_record_skill_event(session_id, kind, metadata)
  */
 pub fn agent_session_record_skill_event(session_id, kind, metadata) {
   return __host_agent_session_record_skill_event(session_id, kind, metadata)
@@ -333,10 +296,8 @@ pub fn agent_session_record_skill_event(session_id, kind, metadata) {
  * agent_session_claim_tool_format_internal.
  *
  * @effects: [host]
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
- * @example: agent_session_claim_tool_format_internal(session_id, tool_format)
  */
 pub fn agent_session_claim_tool_format_internal(session_id, tool_format) {
   return __host_agent_session_claim_tool_format(session_id, tool_format)
@@ -346,10 +307,8 @@ pub fn agent_session_claim_tool_format_internal(session_id, tool_format) {
  * agent_emit_event.
  *
  * @effects: [host]
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
- * @example: agent_emit_event(session_id, event_type, payload)
  */
 pub fn agent_emit_event(session_id, event_type, payload) {
   return __host_agent_emit_event(session_id, event_type, payload)
@@ -359,10 +318,8 @@ pub fn agent_emit_event(session_id, event_type, payload) {
  * agent_record_native_tool_fallback.
  *
  * @effects: [host]
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
- * @example: agent_record_native_tool_fallback(session_id, payload)
  */
 pub fn agent_record_native_tool_fallback(session_id, payload) {
   return __host_agent_record_native_tool_fallback(session_id, payload)
@@ -372,10 +329,8 @@ pub fn agent_record_native_tool_fallback(session_id, payload) {
  * agent_record_compaction.
  *
  * @effects: [host]
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
- * @example: agent_record_compaction(session_id, payload)
  */
 pub fn agent_record_compaction(session_id, payload) {
   return __host_agent_record_compaction(session_id, payload)
@@ -393,7 +348,6 @@ pub fn agent_record_compaction(session_id, payload) {
  * "reachability_gc", and "custom" (with a `projector` closure).
  *
  * @effects: [host]
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
  * @example: agent_session_project_turn(session_id, {policy: "clean_tool_repair"})

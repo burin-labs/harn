@@ -48,9 +48,6 @@ fn warns_when_block_omits_a_field() {
  * Document.
  *
  * @effects: [fs.read]
- * @allocation: heap
- * @errors: []
- * @api_stability: stable
  */
 pub fn foo() {
   return 1
@@ -62,8 +59,8 @@ pub fn foo() {
         .find(|d| d.rule == "missing-stdlib-metadata")
         .expect("should warn");
     assert!(
-        missing.message.contains("example"),
-        "expected `example` listed as missing, got: {}",
+        missing.message.contains("errors"),
+        "expected `errors` listed as missing, got: {}",
         missing.message
     );
 }
@@ -75,10 +72,7 @@ fn accepts_complete_block() {
  * Document.
  *
  * @effects: [fs.read]
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: foo()
  */
 pub fn foo() {
   return 1
@@ -88,6 +82,28 @@ pub fn foo() {
     assert!(
         !has_rule(&diags, "missing-stdlib-metadata"),
         "complete metadata should not trip HARN-STD-101: {diags:?}"
+    );
+}
+
+#[test]
+fn stability_and_example_are_optional() {
+    // `@api_stability` (absent ⇒ stable) and `@example` (tooling derives
+    // one from the signature) are no longer part of the required set.
+    let source = "\
+/**
+ * Document.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn foo() {
+  return 1
+}
+";
+    let diags = lint_with_stdlib_metadata(source);
+    assert!(
+        !has_rule(&diags, "missing-stdlib-metadata"),
+        "api_stability/example must not be required: {diags:?}"
     );
 }
 

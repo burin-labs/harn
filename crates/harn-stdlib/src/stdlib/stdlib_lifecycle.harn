@@ -17,9 +17,7 @@
  * Tracking: harn#1855 (P-02), harn#1853 (epic).
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
  * @example: pipeline_on_finish(on_finish_drain)
  */
 /**
@@ -28,10 +26,7 @@
  * call as either method or free function depending on style.
  *
  * @effects: [host]
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: let state = unsettled_state(harness)
  */
 pub fn unsettled_state(harness) {
   return harness.unsettled_state()
@@ -43,9 +38,7 @@ pub fn unsettled_state(harness) {
  * code that does not hold the harness.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
  * @example: if is_empty(state) { return return_value }
  */
 pub fn is_empty(state) {
@@ -61,9 +54,7 @@ pub fn is_empty(state) {
  * shaped `{suspended, queued, partial, in_flight, pool_pending}`.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
  * @example: counts(state).partial
  */
 pub fn counts(state) {
@@ -81,9 +72,7 @@ pub fn counts(state) {
  * Useful for audit payloads and operator-facing log lines.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
  * @example: harness.emit_audit("snapshot", {summary: summary(state)})
  */
 pub fn summary(state) {
@@ -114,9 +103,7 @@ pub fn summary(state) {
  * downstream cleanup is the host's responsibility.
  *
  * @effects: [host]
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
  * @example: pipeline_on_finish(on_finish_abandon)
  */
 pub fn on_finish_abandon(harness, return_value) {
@@ -144,9 +131,7 @@ pub fn on_finish_abandon(harness, return_value) {
  * piece of deferred work before exiting. It is the recommended default.
  *
  * @effects: [host]
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
  * @example: pipeline_on_finish(on_finish_drain)
  */
 pub fn on_finish_drain(harness, return_value) {
@@ -169,7 +154,6 @@ pub fn on_finish_drain(harness, return_value) {
  * cleanly.
  *
  * @effects: [host]
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
  * @example: pipeline_on_finish(on_finish_block_until_settled(30s))
@@ -202,7 +186,6 @@ pub fn on_finish_block_until_settled(timeout = 30s, fallback = nil) {
  * typical case where the handoff pipeline does not need to run at all.
  *
  * @effects: [host]
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
  * @example: pipeline_on_finish(on_finish_handoff_to("nightly-drain"))
@@ -231,10 +214,8 @@ pub fn on_finish_handoff_to(target_pipeline, options = nil) {
  * which presets recorded what during a pipeline run.
  *
  * @effects: [host]
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
- * @example: lifecycle_audit_log_take()
  */
 pub fn lifecycle_audit_log_take() {
   return pipeline_lifecycle_audit_log_take()
@@ -245,10 +226,8 @@ pub fn lifecycle_audit_log_take() {
  * without draining them.
  *
  * @effects: [host]
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
- * @example: lifecycle_audit_log_snapshot()
  */
 pub fn lifecycle_audit_log_snapshot() {
   return pipeline_lifecycle_audit_log_snapshot()

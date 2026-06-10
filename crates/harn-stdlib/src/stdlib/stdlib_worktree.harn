@@ -21,10 +21,7 @@ import { process_run, process_shell } from "std/runtime"
  * `git_noninteractive_env` — the single source of truth for the guard.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: worktree_noninteractive_env()
  */
 pub fn worktree_noninteractive_env() -> dict {
   return git_noninteractive_env()
@@ -66,10 +63,7 @@ fn __worktree_git(cwd, args, options) {
  * worktree_default_path.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: worktree_default_path(repo, name)
  */
 pub fn worktree_default_path(repo, name) {
   return repo + "/.harn/worktrees/" + name
@@ -79,10 +73,7 @@ pub fn worktree_default_path(repo, name) {
  * worktree_create.
  *
  * @effects: [host]
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: worktree_create(repo, name, base_ref, path)
  */
 pub fn worktree_create(repo, name, base_ref, path, options = {}) {
   let target = if path == nil || path == "" {
@@ -100,10 +91,7 @@ pub fn worktree_create(repo, name, base_ref, path, options = {}) {
  * worktree_remove.
  *
  * @effects: [host]
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: worktree_remove(repo, path, force)
  */
 pub fn worktree_remove(repo, path, force, options = {}) {
   if force {
@@ -116,10 +104,7 @@ pub fn worktree_remove(repo, path, force, options = {}) {
  * worktree_status.
  *
  * @effects: [host]
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: worktree_status(path)
  */
 pub fn worktree_status(path, options = {}) {
   return __worktree_git(path, ["status", "--short", "--branch"], options)
@@ -129,10 +114,7 @@ pub fn worktree_status(path, options = {}) {
  * worktree_diff.
  *
  * @effects: [host]
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: worktree_diff(path, base_ref)
  */
 pub fn worktree_diff(path, base_ref, options = {}) {
   if base_ref == nil || base_ref == "" {
@@ -145,10 +127,7 @@ pub fn worktree_diff(path, base_ref, options = {}) {
  * worktree_shell.
  *
  * @effects: [host]
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: worktree_shell(path, script)
  */
 pub fn worktree_shell(path, script, options = {}) {
   return process_shell(script, __worktree_git_options(path, options))

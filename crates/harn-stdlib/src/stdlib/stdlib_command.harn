@@ -178,10 +178,7 @@ fn __command_normalize_result(result) {
  * command_run runs an argv-first hostlib command and returns a normalized result.
  *
  * @effects: [process]
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: command_run(spec, options)
  */
 pub fn command_run(spec, options = nil) -> dict {
   let _enabled = hostlib_enable("tools:deterministic")
@@ -214,9 +211,7 @@ fn __command_wait_request(locator, options) {
  * command_wait waits for one background command handle and returns a normalized command result.
  *
  * @effects: [process]
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
  * @example: command_wait(result, {timeout_ms: 1000})
  */
 pub fn command_wait(locator, options = nil) -> dict {
@@ -228,10 +223,7 @@ pub fn command_wait(locator, options = nil) -> dict {
  * command_cancel cancels one background command handle.
  *
  * @effects: [process]
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: command_cancel(result)
  */
 pub fn command_cancel(locator, options = nil) -> dict {
   let opts = __command_options(options)
@@ -351,9 +343,7 @@ fn __command_stream_cancel_timeout(start, options) {
  * command_run_streaming runs a command in the background, tees new output, and returns the final result.
  *
  * @effects: [process]
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
  * @example: command_run_streaming(spec, {timeout_ms: 30000})
  */
 pub fn command_run_streaming(spec, options = nil) -> dict {
@@ -435,10 +425,7 @@ fn __command_locator(locator, options) {
  * command_output_range reads a command output artifact by command result, id, handle, or path.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: command_output_range(locator, options)
  */
 pub fn command_output_range(locator, options = nil) -> dict {
   let opts = __command_options(options)
@@ -460,10 +447,7 @@ pub fn command_output_range(locator, options = nil) -> dict {
  * command_output_tail reads the last bytes of a command output artifact.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: command_output_tail(locator, options)
  */
 pub fn command_output_tail(locator, options = nil) -> dict {
   let opts = __command_options(options)
@@ -716,10 +700,7 @@ fn __command_before_retry(policy, step, attempt_number) {
  * command_step runs one named command and returns a normalized step record.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: command_step(name, spec, options)
  */
 pub fn command_step(name: string, spec, options = nil) -> dict {
   let opts = __command_options(options)
@@ -754,10 +735,7 @@ pub fn command_step(name: string, spec, options = nil) -> dict {
  * command_step_with_retry is an explicit alias for command_step retry policies.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: command_step_with_retry(name, spec, options)
  */
 pub fn command_step_with_retry(name: string, spec, options = nil) -> dict {
   return command_step(name, spec, options)
@@ -767,10 +745,7 @@ pub fn command_step_with_retry(name: string, spec, options = nil) -> dict {
  * command_steps_append runs a command step and appends its record to an existing step list.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: command_steps_append(steps, name, spec, options)
  */
 pub fn command_steps_append(steps, name: string, spec, options = nil) -> dict {
   let current = steps ?? []
@@ -806,10 +781,7 @@ fn __command_is_recovered(step, options) -> bool {
  * command_steps_failed reports whether any step failed and was not caller-marked recovered.
  *
  * @effects: []
- * @allocation: stack-only
  * @errors: []
- * @api_stability: stable
- * @example: command_steps_failed(steps, options)
  */
 pub fn command_steps_failed(steps, options = nil) -> bool {
   for step in steps ?? [] {
@@ -824,10 +796,7 @@ pub fn command_steps_failed(steps, options = nil) -> bool {
  * command_last_failed_step returns the last unrecovered failed step, if any.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: command_last_failed_step(steps, options)
  */
 pub fn command_last_failed_step(steps, options = nil) {
   var failed = nil
@@ -854,10 +823,7 @@ fn __command_suffix(value, limit) {
  * command_step_ref returns compact context for agents or recovery reports.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: command_step_ref(step, options)
  */
 pub fn command_step_ref(step, options = nil) -> dict {
   let opts = __command_options(options)
@@ -886,10 +852,7 @@ pub fn command_step_ref(step, options = nil) -> dict {
  * argv_label renders argv parts as the same stable space-separated label used in step records.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: argv_label(argv)
  */
 pub fn argv_label(argv: list) -> string {
   return join((argv ?? []).map({ arg -> to_string(arg) }), " ")
@@ -899,10 +862,7 @@ pub fn argv_label(argv: list) -> string {
  * command_output_text returns stdout, stderr, combined, tail, or failure_tail from a command result.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: command_output_text(result, stream)
  */
 pub fn command_output_text(result, stream: string = "combined") -> string {
   let mode = stream ?? "combined"
@@ -925,10 +885,7 @@ pub fn command_output_text(result, stream: string = "combined") -> string {
  * command_failure_text formats a compact failure block for logs and recovery prompts.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: command_failure_text(result, options)
  */
 pub fn command_failure_text(result, options = nil) -> string {
   let opts = __command_options(options)
@@ -1078,9 +1035,7 @@ fn __command_json_uses_step(options) -> bool {
  * command_json_step runs one named command step and parses the selected output as JSON.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
  * @example: command_json_step("gh repo", ["gh", "api", "repos/owner/repo"])
  */
 pub fn command_json_step(name: string, spec, options = nil) -> dict {
@@ -1092,9 +1047,7 @@ pub fn command_json_step(name: string, spec, options = nil) -> dict {
  * command_json runs a command and returns parsed JSON from stdout by default.
  *
  * @effects: [process]
- * @allocation: heap
  * @errors: [command_failed, empty_output, invalid_json]
- * @api_stability: stable
  * @example: command_json(["gh", "api", "repos/owner/repo"])
  */
 pub fn command_json(spec, options = nil) {
@@ -1276,9 +1229,7 @@ fn __command_try_attempt_record(attempt) {
  * command_try runs ordered equivalent probes until one returns an ok value.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
  * @example: command_try([{source: "cli", spec: ["tool", "--json"]}])
  */
 pub fn command_try(attempts, options = nil) -> dict {
@@ -1318,10 +1269,7 @@ pub fn command_try(attempts, options = nil) -> dict {
  * Build a normalized successful command-result dict for tests and harness adapters.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: command_result_ok(stdout, extra)
  */
 pub fn command_result_ok(stdout: string = "", extra = nil) -> dict {
   let base = extra ?? {}
@@ -1332,10 +1280,7 @@ pub fn command_result_ok(stdout: string = "", extra = nil) -> dict {
  * Build a normalized failed command-result dict for tests and harness adapters.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: command_result_fail(exit_code, stderr, extra)
  */
 pub fn command_result_fail(exit_code: int = 1, stderr: string = "", extra = nil) -> dict {
   let base = extra ?? {}

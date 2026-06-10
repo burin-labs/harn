@@ -127,10 +127,7 @@ fn __llm_call_option_keys() {
  * llm_call option surface.
  *
  * @effects: [llm.call]
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: llm_call_options(options)
  */
 pub fn llm_call_options(options = nil) {
   return pick_keys(options ?? {}, __llm_call_option_keys(), {drop_nil: true})

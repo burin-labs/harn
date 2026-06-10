@@ -22,10 +22,7 @@ fn __fs_with_newline(text, trailing_newline) {
  * Create the parent directory for `path` when it is not `.` or empty.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: ensure_parent_dir(path)
  */
 pub fn ensure_parent_dir(path: string) {
   let parent = __fs_parent(path)
@@ -38,10 +35,7 @@ pub fn ensure_parent_dir(path: string) {
  * Read and parse a JSON file, returning `fallback` for missing or invalid files.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: read_json(path, fallback)
  */
 pub fn read_json(path: string, fallback = nil) {
   if !harness.fs.exists(path) {
@@ -58,10 +52,7 @@ pub fn read_json(path: string, fallback = nil) {
  * Read and parse a JSON file, returning `{ok, value?, error?}`.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: read_json_result(path)
  */
 pub fn read_json_result(path: string) -> dict {
   if !harness.fs.exists(path) {
@@ -80,10 +71,7 @@ pub fn read_json_result(path: string) -> dict {
  * Write a JSON file with optional pretty formatting and parent-dir creation.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: write_json(path, value, options)
  */
 pub fn write_json(path: string, value, options: WriteDataOptions = {}) {
   let opts = options ?? {}
@@ -95,17 +83,14 @@ pub fn write_json(path: string, value, options: WriteDataOptions = {}) {
   } else {
     json_stringify(value)
   }
-  harness.fs.write_text(path, __fs_with_newline(body, opts?.trailing_newline ?? true))
+  harness.fs.write_text(path, __fs_with_newline(body, opts.trailing_newline ?? true))
 }
 
 /**
  * Read and parse a YAML file, returning `fallback` for missing or invalid files.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: read_yaml(path, fallback)
  */
 pub fn read_yaml(path: string, fallback = nil) {
   if !harness.fs.exists(path) {
@@ -124,10 +109,7 @@ pub fn read_yaml(path: string, fallback = nil) {
  * Write a YAML file.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: write_yaml(path, value, options)
  */
 pub fn write_yaml(path: string, value, options: WriteDataOptions = {}) {
   let opts = options ?? {}
@@ -135,17 +117,14 @@ pub fn write_yaml(path: string, value, options: WriteDataOptions = {}) {
     ensure_parent_dir(path)
   }
   harness.fs
-    .write_text(path, __fs_with_newline(yaml_stringify(value), opts?.trailing_newline ?? true))
+    .write_text(path, __fs_with_newline(yaml_stringify(value), opts.trailing_newline ?? true))
 }
 
 /**
  * Read and parse a TOML file, returning `fallback` for missing or invalid files.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: read_toml(path, fallback)
  */
 pub fn read_toml(path: string, fallback = nil) {
   if !harness.fs.exists(path) {
@@ -164,10 +143,7 @@ pub fn read_toml(path: string, fallback = nil) {
  * Write a TOML file.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: write_toml(path, value, options)
  */
 pub fn write_toml(path: string, value, options: WriteDataOptions = {}) {
   let opts = options ?? {}
@@ -175,17 +151,14 @@ pub fn write_toml(path: string, value, options: WriteDataOptions = {}) {
     ensure_parent_dir(path)
   }
   harness.fs
-    .write_text(path, __fs_with_newline(toml_stringify(value), opts?.trailing_newline ?? true))
+    .write_text(path, __fs_with_newline(toml_stringify(value), opts.trailing_newline ?? true))
 }
 
 /**
  * Write a list of lines as a text file.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: write_lines(path, lines, options)
  */
 pub fn write_lines(path: string, lines: list<string>, options: WriteDataOptions = {}) {
   let opts = options ?? {}
@@ -193,17 +166,14 @@ pub fn write_lines(path: string, lines: list<string>, options: WriteDataOptions 
     ensure_parent_dir(path)
   }
   harness.fs
-    .write_text(path, __fs_with_newline(join(lines ?? [], "\n"), opts?.trailing_newline ?? true))
+    .write_text(path, __fs_with_newline(join(lines ?? [], "\n"), opts.trailing_newline ?? true))
 }
 
 /**
  * Append one line to a text file.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: append_line(path, line)
  */
 pub fn append_line(path: string, line: string) {
   let text = line ?? ""
@@ -214,10 +184,7 @@ pub fn append_line(path: string, line: string) {
  * Create a file if missing and update it to empty content only on first creation.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: touch(path)
  */
 pub fn touch(path: string) {
   if !harness.fs.exists(path) {
@@ -230,10 +197,7 @@ pub fn touch(path: string) {
  * Return files matching `pattern` below `root`, using the host glob implementation.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: find_files(root, pattern, options)
  */
 pub fn find_files(root: string, pattern: string, options = {}) -> list<string> {
   let matches = harness.fs.glob(pattern, {base: root, long_running: options?.long_running ?? false})
@@ -247,10 +211,7 @@ pub fn find_files(root: string, pattern: string, options = {}) -> list<string> {
  * Return `path` relative to `root` when it is inside that root.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: relative_path(root, path)
  */
 pub fn relative_path(root: string, path: string) -> string {
   let base_raw = __fs_norm(root)
@@ -270,10 +231,7 @@ pub fn relative_path(root: string, path: string) -> string {
  * Return whether `path` exists and is a regular file.
  *
  * @effects: []
- * @allocation: stack-only
  * @errors: []
- * @api_stability: stable
- * @example: is_file(path)
  */
 pub fn is_file(path: string) -> bool {
   let info = try {
@@ -289,10 +247,7 @@ pub fn is_file(path: string) -> bool {
  * Return whether `path` exists and is a directory.
  *
  * @effects: []
- * @allocation: stack-only
  * @errors: []
- * @api_stability: stable
- * @example: is_dir(path)
  */
 pub fn is_dir(path: string) -> bool {
   let info = try {
@@ -308,10 +263,7 @@ pub fn is_dir(path: string) -> bool {
  * Return a file size in bytes, or nil when the path cannot be statted.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: file_size(path)
  */
 pub fn file_size(path: string) {
   let info = try {

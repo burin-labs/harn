@@ -251,7 +251,6 @@ fn __cc_scan_cuts(command) {
  * is not a safe rewrite target.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
  * @example: command_capture_detect("seq 100 | tail -3")
@@ -317,7 +316,6 @@ fn __cc_shquote(value) {
  * filter) or nil when the command is not a safe rewrite target.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
  * @example: command_capture_plan("seq 100 | tail -3", "/tmp/out")
@@ -347,7 +345,6 @@ pub fn command_capture_plan(command, capture_path) {
  * Convenience wrapper returning just the rewritten command string (or nil).
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
  * @example: command_capture_rewrite("ls | wc -l", "/tmp/out")
@@ -374,7 +371,6 @@ fn __cc_posix_shell(word) {
  * fresh temp file, or nil when no safe rewrite applies.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
  * @example: command_capture_plan_request({mode: "shell", command: "ls | wc -l"})
@@ -426,10 +422,8 @@ pub fn command_capture_plan_request(request) {
  * materialized (so a blocked temp write produces no misleading hint).
  *
  * @effects: [fs]
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
- * @example: command_capture_annotate(result, plan)
  */
 pub fn command_capture_annotate(result, plan) {
   if result == nil || plan == nil {

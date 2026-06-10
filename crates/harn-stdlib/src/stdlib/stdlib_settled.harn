@@ -16,10 +16,7 @@ type SettledPartition = {oks: list, errs: list, ok_count: int, err_count: int}
  * iterate without re-walking the list.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: partition(results)
  */
 pub fn partition(results: list) -> SettledPartition {
   var oks = []
@@ -38,10 +35,7 @@ pub fn partition(results: list) -> SettledPartition {
  * Return only the successful values (drops errors).
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: oks(results)
  */
 pub fn oks(results: list) -> list {
   var out = []
@@ -57,10 +51,7 @@ pub fn oks(results: list) -> list {
  * Return only the error payloads (drops successes).
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: errs(results)
  */
 pub fn errs(results: list) -> list {
   var out = []
@@ -76,10 +67,7 @@ pub fn errs(results: list) -> list {
  * Count successful Results in the list.
  *
  * @effects: []
- * @allocation: stack-only
  * @errors: []
- * @api_stability: stable
- * @example: count_oks(results)
  */
 pub fn count_oks(results: list) -> int {
   var n = 0
@@ -95,10 +83,7 @@ pub fn count_oks(results: list) -> int {
  * Count error Results in the list.
  *
  * @effects: []
- * @allocation: stack-only
  * @errors: []
- * @api_stability: stable
- * @example: count_errs(results)
  */
 pub fn count_errs(results: list) -> int {
   var n = 0
@@ -117,10 +102,7 @@ pub fn count_errs(results: list) -> int {
  * argument's position when reporting.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: map_settled(results, on_ok, on_err)
  */
 pub fn map_settled(results: list, on_ok, on_err) -> list {
   var out = []
@@ -142,10 +124,7 @@ pub fn map_settled(results: list, on_ok, on_err) -> list {
  * nil, errors fall under the "error" bucket and successes under "ok".
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: tally_by(results, classifier)
  */
 pub fn tally_by(results: list, classifier) -> dict<string, int> {
   var counts = {}
@@ -175,10 +154,7 @@ pub fn tally_by(results: list, classifier) -> dict<string, int> {
  * one consolidated loop with both branches in scope at the same point.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: enumerate_settled(results)
  */
 pub fn enumerate_settled(results: list) -> list<dict> {
   var out = []
@@ -201,10 +177,7 @@ pub fn enumerate_settled(results: list) -> list<dict> {
  * without re-walking the list.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: summary(results)
  */
 pub fn summary(results: list) -> dict {
   let counts = partition(results)

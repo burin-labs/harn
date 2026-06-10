@@ -403,7 +403,6 @@ fn __probe_run_typecheck(body, opts) -> ProbeResult {
  * directory in tests.
  *
  * @effects: [process, store.write]
- * @allocation: heap
  * @errors: [HARN-PROBE-001, HARN-PROBE-002, HARN-PROBE-003, HARN-PROBE-004]
  * @api_stability: experimental
  * @example: probe("eval", "echo hi", {expected: "hi"})
@@ -425,7 +424,6 @@ pub fn probe(kind, body, options = nil) -> ProbeResult {
  * Convenience for `probe("eval", ...)`.
  *
  * @effects: [process, store.write]
- * @allocation: heap
  * @errors: [HARN-PROBE-001, HARN-PROBE-002, HARN-PROBE-003, HARN-PROBE-004]
  * @api_stability: experimental
  * @example: probe_eval("echo hi", {expected: "hi"})
@@ -438,7 +436,6 @@ pub fn probe_eval(body, options = nil) -> ProbeResult {
  * Convenience for `probe("typecheck", ...)`.
  *
  * @effects: [process, store.write]
- * @allocation: heap
  * @errors: [HARN-PROBE-001, HARN-PROBE-002, HARN-PROBE-003, HARN-PROBE-004]
  * @api_stability: experimental
  * @example: probe_typecheck("let x: int = \"oops\"", {expected: 0})

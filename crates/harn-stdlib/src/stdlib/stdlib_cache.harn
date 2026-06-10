@@ -19,10 +19,7 @@ import { timed } from "std/timing"
  * cache_get returns {hit: bool, value?, backend, namespace} for key.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: cache_get(key, options)
  */
 pub fn cache_get(key: string, options = nil) -> dict {
   return __cache_get(key, options ?? {})
@@ -32,10 +29,7 @@ pub fn cache_get(key: string, options = nil) -> dict {
  * cache_put stores value under key with the configured TTL and LRU policy.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: cache_put(key, value, options)
  */
 pub fn cache_put(key: string, value, options = nil) -> dict {
   return __cache_put(key, value, options ?? {})
@@ -46,10 +40,7 @@ pub fn cache_put(key: string, value, options = nil) -> dict {
  *  resets the in-process hit/miss counters for that namespace.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: cache_clear(options)
  */
 pub fn cache_clear(options = nil) {
   return __cache_clear(options ?? {})
@@ -59,10 +50,7 @@ pub fn cache_clear(options = nil) {
  * cache_stats returns {hits, misses, lookups, hit_rate, ...} for a namespace.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: cache_stats(options)
  */
 pub fn cache_stats(options = nil) -> dict {
   return __cache_stats(options ?? {})
@@ -73,10 +61,7 @@ pub fn cache_stats(options = nil) -> dict {
  *  touching cached entries.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: cache_stats_reset(options)
  */
 pub fn cache_stats_reset(options = nil) {
   return __cache_stats_reset(options ?? {})
@@ -102,10 +87,7 @@ pub fn cache_stats_reset(options = nil) {
  * Memory caches do not survive across `harn run` invocations.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: mem_cache(options)
  */
 pub fn mem_cache(options = nil) -> dict {
   let opts = options ?? {}
@@ -120,10 +102,7 @@ pub fn mem_cache(options = nil) -> dict {
  * same path with different namespaces.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: fs_cache(path, options)
  */
 pub fn fs_cache(path: string, options = nil) -> dict {
   let opts = options ?? {}
@@ -137,10 +116,7 @@ pub fn fs_cache(path: string, options = nil) -> dict {
  * each cache_put transaction.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: sqlite_cache(path, options)
  */
 pub fn sqlite_cache(path: string, options = nil) -> dict {
   let opts = options ?? {}
@@ -202,10 +178,7 @@ fn __cache_store_dict(backend, path, opts) -> dict {
  * `with_cache_envelope` if you need the hit flag and metrics inline.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: with_cache(key, compute, options)
  */
 pub fn with_cache(key: string, compute, options = nil) {
   return with_cache_envelope(key, compute, options).value
@@ -220,10 +193,7 @@ pub fn with_cache(key: string, compute, options = nil) {
  * monotonic clock — useful for callers seeding a future `estimate` block.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: with_cache_envelope(key, compute, options)
  */
 pub fn with_cache_envelope(key: string, compute, options = nil) -> dict {
   let opts = options ?? {}

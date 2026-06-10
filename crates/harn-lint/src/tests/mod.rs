@@ -70,6 +70,18 @@ pub(super) fn lint_with_require_header(
     lint_with_options(&program, &[], Some(source), &HashSet::new(), &options)
 }
 
+pub(super) fn lint_with_docstrings(source: &str) -> Vec<LintDiagnostic> {
+    let mut lexer = Lexer::new(source);
+    let tokens = lexer.tokenize().unwrap();
+    let mut parser = Parser::new(tokens);
+    let program = parser.parse().unwrap();
+    let options = LintOptions {
+        require_docstrings: true,
+        ..Default::default()
+    };
+    lint_with_options(&program, &[], Some(source), &HashSet::new(), &options)
+}
+
 pub(super) fn lint_with_stdlib_metadata(source: &str) -> Vec<LintDiagnostic> {
     let mut lexer = Lexer::new(source);
     let tokens = lexer.tokenize().unwrap();

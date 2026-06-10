@@ -91,7 +91,12 @@ impl<'a> Linter<'a> {
                     is_pub: *is_pub,
                     is_method: self.in_impl_block,
                 });
+                // Opt-in: `require_docstrings` via config, implied for
+                // stdlib sources (HARN-STD-101 defers to this rule when no
+                // doc block exists at all, so the stdlib gate must keep it
+                // armed or undocumented stdlib fns would escape both lints).
                 if *is_pub
+                    && (self.require_docstrings || self.require_stdlib_metadata)
                     && self
                         .source
                         .and_then(|source| extract_harndoc(source, &snode.span))

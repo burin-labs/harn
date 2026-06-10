@@ -6,10 +6,8 @@
  * `auto`, `off`, `minimal`, `low`, `medium`, `high`, and `xhigh`.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
- * @example: agent_reasoning_apply(opts)
  */
 pub fn agent_reasoning_apply(opts) {
   return llm_apply_reasoning_policy(opts)

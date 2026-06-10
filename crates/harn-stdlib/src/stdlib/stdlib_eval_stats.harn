@@ -307,9 +307,7 @@ fn __outcome_number(outcome: dict, keys: list) {
  * Aggregate trial outcomes into a generic eval ledger row.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
  * @example: aggregate_trials("case", [{verification: "PASS", wallTimeSeconds: 1.0, costUsd: 0.01}], {group: "python"})
  */
 pub fn aggregate_trials(name: string, outcomes: list, metadata: dict = {}) -> dict {
@@ -412,9 +410,7 @@ pub fn aggregate_trials(name: string, outcomes: list, metadata: dict = {}) -> di
  * Deterministically bootstrap a mean and return `{mean, lo, hi, std, n}`.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
  * @example: bootstrap_mean_ci([0.0, 1.0], 100, 0.05, 42)
  */
 pub fn bootstrap_mean_ci(values: list, resamples: int, alpha: float, seed: int) -> dict {
@@ -463,9 +459,7 @@ pub fn bootstrap_mean_ci(values: list, resamples: int, alpha: float, seed: int) 
  * Return macro pass@1 over decided cases with uniform case weights.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
  * @example: macro_pass_at_1([{passes: 1, trials: 1, skips: 0}, {passes: 0, trials: 1, skips: 0}])
  */
 pub fn macro_pass_at_1(rows: list) -> float {
@@ -480,9 +474,7 @@ pub fn macro_pass_at_1(rows: list) -> float {
  * Break rows into all-pass, flaky, all-fail, and no-decision buckets.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
  * @example: reliability_breakdown([{passes: 1, trials: 1, skips: 0}])
  */
 pub fn reliability_breakdown(rows: list) -> dict {
@@ -537,9 +529,7 @@ pub fn reliability_breakdown(rows: list) -> dict {
  * Return strict pass^k over decided cases.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
  * @example: pass_caret_k([{passes: 2, trials: 2, skips: 0}])
  */
 pub fn pass_caret_k(rows: list) -> float {
@@ -554,9 +544,7 @@ pub fn pass_caret_k(rows: list) -> float {
  * Alias for `pass_caret_k`.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
  * @example: pass_at_k([{passes: 2, trials: 2, skips: 0}])
  */
 pub fn pass_at_k(rows: list) -> float {
@@ -567,9 +555,7 @@ pub fn pass_at_k(rows: list) -> float {
  * Return the mean per-row skip fraction.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
  * @example: skip_rate([{passes: 0, trials: 2, skips: 1}])
  */
 pub fn skip_rate(rows: list) -> float {
@@ -595,9 +581,7 @@ pub fn skip_rate(rows: list) -> float {
  * Return the mean per-row timeout fraction.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
  * @example: timeout_rate([{passes: 0, trials: 2, skips: 0, timeouts: 1}])
  */
 pub fn timeout_rate(rows: list) -> float {
@@ -623,9 +607,7 @@ pub fn timeout_rate(rows: list) -> float {
  * Return total realized row cost divided by solved cases.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
  * @example: cost_per_solved([{passes: 1, trials: 1, skips: 0, costUsd: 0.25}])
  */
 pub fn cost_per_solved(rows: list) {
@@ -657,10 +639,7 @@ pub fn cost_per_solved(rows: list) {
  * rounded to 6 decimal places.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: estimate_cost_usd(pricing, usage)
  */
 pub fn estimate_cost_usd(pricing, usage: dict) {
   if pricing == nil {
@@ -688,10 +667,7 @@ pub fn estimate_cost_usd(pricing, usage: dict) {
  * through unchanged.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: realized_trial_cost_usd(derived_cost_usd, cache_replay)
  */
 pub fn realized_trial_cost_usd(derived_cost_usd, cache_replay: bool) {
   if cache_replay && derived_cost_usd != nil {
@@ -704,9 +680,7 @@ pub fn realized_trial_cost_usd(derived_cost_usd, cache_replay: bool) {
  * Return the group with the lowest macro pass@1.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
  * @example: worst_group([{group: "a", passes: 0, trials: 1, skips: 0}])
  */
 pub fn worst_group(rows: list) -> dict {
@@ -752,9 +726,7 @@ pub fn worst_group(rows: list) -> dict {
  * Return paired per-case pass-rate deltas for comparable decided rows.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
  * @example: paired_case_deltas([{name: "a", passes: 0, trials: 1}], [{name: "a", passes: 1, trials: 1}])
  */
 pub fn paired_case_deltas(baseline_rows: list, current_rows: list) -> list {
@@ -779,9 +751,7 @@ pub fn paired_case_deltas(baseline_rows: list, current_rows: list) -> list {
  * Return paired bootstrap delta and verdict fields for two cohorts.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
  * @example: paired_delta_report([{name: "a", passes: 0, trials: 1}], [{name: "a", passes: 1, trials: 1}], 100, 7)
  */
 pub fn paired_delta_report(
@@ -836,9 +806,7 @@ pub fn paired_delta_report(
  * Return a baseline-standard-deviation-aware regression gate.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
  * @example: regression_gate([{passes: 1, trials: 1}], [{passes: 0, trials: 1}])
  */
 pub fn regression_gate(baseline_rows: list, current_rows: list, k: float = 1.0) -> dict {
@@ -865,9 +833,7 @@ pub fn regression_gate(baseline_rows: list, current_rows: list, k: float = 1.0) 
  * Compute routing calibration from paired cheap, ladder, and frontier rows.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
  * @example: routing_calibration_report([{name: "a"}], [{name: "a"}], [{name: "a"}])
  */
 pub fn routing_calibration_report(cheap_rows: list, ladder_rows: list, frontier_rows: list) -> dict {

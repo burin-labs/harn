@@ -70,9 +70,7 @@ type ParseResult = {ok?: dict, err?: ParseError}
  * spec is static and any failure here means the script is buggy.
  *
  * @effects: []
- * @allocation: none
  * @errors: ["argparse: every arg must have a non-empty name", "argparse: arg N has invalid kind 'K'; expected positional|flag|switch"]
- * @api_stability: stable
  * @example: parser({name: "demo", args: [{name: "input", kind: "positional"}]})
  */
 pub fn parser(spec: ParserSpec) -> ParserSpec {
@@ -198,10 +196,7 @@ fn __long_split(body) {
  * on success, or `{ err: ParseError }` on failure.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: parse(spec, argv)
  */
 pub fn parse(spec: ParserSpec, argv: list<string>) -> ParseResult {
   var collected = {}
@@ -373,10 +368,7 @@ fn __help_arg_line(arg) -> string {
  * the conformance fixtures.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: render_help(spec)
  */
 pub fn render_help(spec: ParserSpec) -> string {
   var lines = []

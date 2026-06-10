@@ -15,7 +15,6 @@
  * `harn lint` emits.
  *
  * @effects: [host]
- * @allocation: heap
  * @errors: [backend]
  * @api_stability: experimental
  * @example: lint_run({source: "fn f() { let x = (1) }"})

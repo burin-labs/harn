@@ -4,10 +4,7 @@ import { filter_nil } from "std/collections"
  * runtime_task.
  *
  * @effects: [host]
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: runtime_task()
  */
 pub fn runtime_task() -> string {
   return host_call("runtime.task", {}) ?? ""
@@ -17,10 +14,7 @@ pub fn runtime_task() -> string {
  * runtime_pipeline_input.
  *
  * @effects: [host]
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: runtime_pipeline_input()
  */
 pub fn runtime_pipeline_input() {
   return host_call("runtime.pipeline_input", {})
@@ -30,10 +24,7 @@ pub fn runtime_pipeline_input() {
  * runtime_dry_run.
  *
  * @effects: [host]
- * @allocation: stack-only
  * @errors: []
- * @api_stability: stable
- * @example: runtime_dry_run()
  */
 pub fn runtime_dry_run() -> bool {
   return host_call("runtime.dry_run", {}) ?? false
@@ -43,10 +34,7 @@ pub fn runtime_dry_run() -> bool {
  * runtime_approved_plan.
  *
  * @effects: [host]
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: runtime_approved_plan()
  */
 pub fn runtime_approved_plan() -> string {
   return host_call("runtime.approved_plan", {}) ?? ""
@@ -56,10 +44,7 @@ pub fn runtime_approved_plan() -> string {
  * process_run.
  *
  * @effects: [host]
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: process_run(argv, options)
  */
 pub fn process_run(argv: list<string>, options = nil) {
   let opts = options ?? {}
@@ -70,10 +55,7 @@ pub fn process_run(argv: list<string>, options = nil) {
  * process_shell.
  *
  * @effects: [host]
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: process_shell(command, options)
  */
 pub fn process_shell(command: string, options = nil) {
   let opts = options ?? {}
@@ -84,10 +66,7 @@ pub fn process_shell(command: string, options = nil) {
  * process_result_text.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: process_result_text(result)
  */
 pub fn process_result_text(result: dict) -> string {
   let {stdout = "", stderr = ""} = result ?? {}
@@ -107,10 +86,7 @@ pub fn process_result_text(result: dict) -> string {
  * process_result_success.
  *
  * @effects: []
- * @allocation: stack-only
  * @errors: []
- * @api_stability: stable
- * @example: process_result_success(result)
  */
 pub fn process_result_success(result: dict) -> bool {
   if result?.success != nil {
@@ -124,10 +100,7 @@ pub fn process_result_success(result: dict) -> bool {
  * shell_quote.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: shell_quote(value)
  */
 pub fn shell_quote(value) -> string {
   return "'" + to_string(value ?? "").replace("'", "'\"'\"'") + "'"
@@ -137,10 +110,7 @@ pub fn shell_quote(value) -> string {
  * interaction_ask.
  *
  * @effects: [host]
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: interaction_ask(question)
  */
 pub fn interaction_ask(question) -> string {
   return host_call("interaction.ask", {question: question}) ?? ""
@@ -150,10 +120,7 @@ pub fn interaction_ask(question) -> string {
  * interaction_ask_with_kind.
  *
  * @effects: [host]
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: interaction_ask_with_kind(question, kind)
  */
 pub fn interaction_ask_with_kind(question, kind) -> string {
   return host_call("interaction.ask", {question: question, type: kind}) ?? ""
@@ -163,10 +130,7 @@ pub fn interaction_ask_with_kind(question, kind) -> string {
  * record_run_metadata.
  *
  * @effects: [host]
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: record_run_metadata(run, workflow_name)
  */
 pub fn record_run_metadata(run, workflow_name) {
   if run?.path {

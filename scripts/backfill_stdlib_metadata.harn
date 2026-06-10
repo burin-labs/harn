@@ -1,9 +1,11 @@
 /**
- * Backfill @effects/@allocation/@errors/@api_stability/@example metadata
- * fields on every `pub fn` under `crates/harn-stdlib/src/stdlib/`.
+ * Backfill the required @effects/@errors metadata fields on every
+ * `pub fn` under `crates/harn-stdlib/src/stdlib/`.
  *
- * Port of scripts/backfill_stdlib_metadata.py. Mutating script: rewrites
- * stdlib .harn files in place to append missing canonical metadata fields.
+ * Mutating script: rewrites stdlib .harn files in place to append missing
+ * canonical metadata fields. The optional `@api_stability`/`@example`
+ * tags are never backfilled — absent stability means stable, and tooling
+ * derives examples from type signatures.
  *
  * Behavior:
  *   - Functions that already carry every field are skipped.
@@ -16,20 +18,7 @@
  *
  * Run from the repo root: harn run scripts/backfill_stdlib_metadata.harn
  */
-let META_KEYS = ["effects", "allocation", "errors", "api_stability", "example"]
-
-let EXPERIMENTAL_PATH_FRAGMENTS = [
-  "/agent/",
-  "/triggers",
-  "/workflow/",
-  "/connectors",
-  "/personas",
-  "/handoffs",
-  "/triage",
-  "/dashboard/",
-  "/ui_resource",
-  "/orchestration/",
-]
+let META_KEYS = ["effects", "errors"]
 
 /** Each rule is [pattern, label]. Order is significant for effect ordering. */
 fn _effect_rules() -> list {
@@ -362,24 +351,6 @@ pub fn collect_body(lines, start) -> string {
   return body_lines.join("\n")
 }
 
-/**
- * Collect the signature: lines from `start` until a line containing `{`,
- * each stripped, joined with single spaces.
- */
-pub fn collect_signature(lines, start) -> string {
-  var parts = []
-  var i = start
-  let n = len(lines)
-  while i < n {
-    parts = parts + [strip_ws(lines[i])]
-    if lines[i].contains("{") {
-      break
-    }
-    i = i + 1
-  }
-  return parts.join(" ")
-}
-
 /** Infer effects list label set, in rule order, from the body text. */
 pub fn infer_effects(body) -> string {
   var effects = []
@@ -393,202 +364,16 @@ pub fn infer_effects(body) -> string {
   return "[${effects.join(", ")}]"
 }
 
-/** Infer allocation from the declared return type in the signature. */
-pub fn infer_allocation(signature) -> string {
-  let ret = _extract_return_type(signature)
-  if ret == "" {
-    return "heap"
-  }
-  if ret == "nil" || ret == "void" {
-    return "stack-only"
-  }
-  if ret == "bool" || ret == "int" || ret == "float" {
-    return "stack-only"
-  }
-  return "heap"
-}
-
-/**
- * Replicates re.search(r"->\s*([^{}]+?)\s*(?:\{|$)", signature).
- * Returns the captured return type string, or "" when no match.
- */
-fn _extract_return_type(signature) -> string {
-  let n = signature.len()
-  var i = 0
-  while i < n - 1 {
-    if signature.char_at(i) == "-" && signature.char_at(i + 1) == ">" {
-      /* Found "->". Skip following whitespace. */
-      var p = i + 2
-      while p < n {
-        if _is_ws(signature.char_at(p)) {
-          p = p + 1
-        } else {
-          break
-        }
-      }
-      /* Capture [^{}]+? non-greedy up to optional ws then { or end.
-         The capture must be at least one char and contain no { or }. */
-      let start = p
-      var q = start
-      while q < n {
-        let c = signature.char_at(q)
-        if c == "{" || c == "}" {
-          break
-        }
-        q = q + 1
-      }
-      /* q is first {/}/end. The match needs >=1 char between start and the
-         trailing-ws-trimmed boundary. Non-greedy +? with \s*(?:{|$): the
-         capture is everything from start up to trailing whitespace before
-         the terminator. */
-      if q > start {
-        return rstrip_ws(signature.substring(start, q))
-      }
-    }
-    i = i + 1
-  }
-  return ""
-}
-
-/** Derive an example call from the function name and signature parameters. */
-pub fn derive_example(name, signature) -> string {
-  let raw = _extract_params(signature)
-  if raw == "" {
-    return "${name}()"
-  }
-  var args = []
-  for part in _split_top_level(raw) {
-    let token = strip_ws(part)
-    if token == "" {
-      continue
-    }
-    /* ident = token.split(":")[0].split("=")[0].strip().lstrip("*&") */
-    var ident = token
-    let ci = ident.index_of(":")
-    if ci != -1 {
-      ident = ident.substring(0, ci)
-    }
-    let ei = ident.index_of("=")
-    if ei != -1 {
-      ident = ident.substring(0, ei)
-    }
-    ident = strip_ws(ident)
-    ident = _lstrip_set(ident, "*&")
-    if ident != "" {
-      args = args + [ident]
-    }
-  }
-  return "${name}(${args.join(", ")})"
-}
-
-/** Strip leading chars that are in the set string `set`. */
-fn _lstrip_set(s, set) -> string {
-  let n = s.len()
-  var i = 0
-  while i < n {
-    if set.contains(s.char_at(i)) {
-      i = i + 1
-    } else {
-      break
-    }
-  }
-  return s.substring(i, n)
-}
-
-/**
- * Replicates re.search(r"\((.*?)\)\s*(?:->|\{)", signature, DOTALL).
- * Returns the param text (first balanced-by-position group), or "".
- */
-fn _extract_params(signature) -> string {
-  let n = signature.len()
-  let op = signature.index_of("(")
-  if op == -1 {
-    return ""
-  }
-  /* .*? non-greedy: smallest span; find first ")" after "(" such that
-     after the ")" (and optional ws) comes "->" or "{". */
-  var close = op + 1
-  while close < n {
-    if signature.char_at(close) == ")" {
-      var p = close + 1
-      while p < n {
-        if _is_ws(signature.char_at(p)) {
-          p = p + 1
-        } else {
-          break
-        }
-      }
-      if p < n {
-        let c = signature.char_at(p)
-        if c == "{" {
-          return signature.substring(op + 1, close)
-        }
-        if c == "-" && p + 1 < n && signature.char_at(p + 1) == ">" {
-          return signature.substring(op + 1, close)
-        }
-      }
-    }
-    close = close + 1
-  }
-  return ""
-}
-
-/** Split on top-level commas (depth 0 across ()[]{}<>). */
-fn _split_top_level(raw) -> list {
-  var out = []
-  var depth = 0
-  var start = 0
-  let n = raw.len()
-  var idx = 0
-  while idx < n {
-    let ch = raw.char_at(idx)
-    if ch == "(" || ch == "[" || ch == "{" || ch == "<" {
-      depth = depth + 1
-    } else if ch == ")" || ch == "]" || ch == "}" || ch == ">" {
-      depth = depth - 1
-    } else if ch == "," && depth == 0 {
-      out = out + [raw.substring(start, idx)]
-      start = idx + 1
-    }
-    idx = idx + 1
-  }
-  out = out + [raw.substring(start, n)]
-  return out
-}
-
 /** Build the inferred metadata dict for the missing keys. */
-pub fn build_inferred(keys, name, signature, body, is_experimental) -> dict {
+pub fn build_inferred(keys, body) -> dict {
   var out = {}
   if keys.contains("effects") {
     out = out + {effects: infer_effects(body)}
   }
-  if keys.contains("allocation") {
-    out = out + {allocation: infer_allocation(signature)}
-  }
   if keys.contains("errors") {
     out = out + {errors: "[]"}
   }
-  if keys.contains("api_stability") {
-    let v = if is_experimental {
-      "experimental"
-    } else {
-      "stable"
-    }
-    out = out + {api_stability: v}
-  }
-  if keys.contains("example") {
-    out = out + {example: derive_example(name, signature)}
-  }
   return out
-}
-
-fn _path_is_experimental(path) -> bool {
-  for frag in EXPERIMENTAL_PATH_FRAGMENTS {
-    if path.contains(frag) {
-      return true
-    }
-  }
-  return false
 }
 
 /** Pure transform: text + path -> {text, stats}. */
@@ -597,7 +382,6 @@ pub fn process_file(text, path) -> dict {
   var backfilled = 0
   var skipped_no_block = 0
   var already_complete = 0
-  let is_experimental = _path_is_experimental(path)
   let lines = text.split("\n")
   var out = []
   var i = 0
@@ -634,14 +418,13 @@ pub fn process_file(text, path) -> dict {
       continue
     }
     let body = collect_body(lines, i)
-    let signature = collect_signature(lines, i)
     var missing = []
     for k in META_KEYS {
       if !existing.keys().contains(k) {
         missing = missing + [k]
       }
     }
-    let inferred = build_inferred(missing, name, signature, body, is_experimental)
+    let inferred = build_inferred(missing, body)
     let new_block = inject_metadata(block, inferred)
     out = out.slice(0, block_start) + new_block + out.slice(block_end, len(out))
     out = out + [line]
@@ -681,7 +464,7 @@ pipeline main(task) {
   var skipped_no_block = 0
   var already_complete = 0
   /* rglob("*.harn") sorted: glob returns abs workspace paths; sort for
-     determinism. The absolute path drives @api_stability path fragments. */
+     determinism. */
   let files = harness.fs.glob("${stdlib}/**/*.harn").sort()
   for path in files {
     let text = harness.fs.read_text(path)

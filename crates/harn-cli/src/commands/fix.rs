@@ -631,6 +631,7 @@ fn count_remaining_diagnostics(target: &Path) -> Result<RemainingDiagnostics, St
         let options = harn_lint::LintOptions {
             file_path: Some(file),
             require_file_header: commands::check::harn_lint_require_file_header(file),
+            require_docstrings: commands::check::harn_lint_require_docstrings(file),
             complexity_threshold: commands::check::harn_lint_complexity_threshold(file),
             persona_step_allowlist: &persona_step_allowlist,
             require_stdlib_metadata: commands::check::path_is_stdlib_source(file),
@@ -713,6 +714,7 @@ fn collect_file_candidates(
     let lint_options = harn_lint::LintOptions {
         file_path: Some(file),
         require_file_header: commands::check::harn_lint_require_file_header(file),
+        require_docstrings: commands::check::harn_lint_require_docstrings(file),
         complexity_threshold: commands::check::harn_lint_complexity_threshold(file),
         persona_step_allowlist: &persona_step_allowlist,
         require_stdlib_metadata: commands::check::path_is_stdlib_source(file),
@@ -2206,7 +2208,7 @@ mod tests {
         let script = stdlib_dir.join("public_helper.harn");
         fs::write(
             &script,
-            "/**\n * Public API.\n *\n * @effects: []\n * @allocation: heap\n * @errors: []\n * @api_stability: stable\n * @example: helper(path)\n */\npub fn helper(path: string) {\n  return read_file(path)\n}\n\npipeline default() {\n  helper(\"notes.txt\")\n}\n",
+            "/**\n * Public API.\n *\n * @effects: []\n * @errors: []\n */\npub fn helper(path: string) {\n  return read_file(path)\n}\n\npipeline default() {\n  helper(\"notes.txt\")\n}\n",
         )
         .unwrap();
 
