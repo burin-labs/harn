@@ -396,6 +396,39 @@ pipeline test_bare_serial(task) {}
 }
 
 #[test]
+fn test_job_retry_dict_and_standalone_retry_validate_identically() {
+    // The compact `@job(retry: {...})` dict and the standalone `@retry(...)`
+    // attribute are documented aliases and now share one validator, so they
+    // MUST accept/reject the same backoff strategies. A valid strategy warns
+    // on neither; an invalid one warns on both. Guards against the two
+    // surfaces drifting (e.g. one list keeping a `"exp"` the other dropped).
+    let valid = warnings(
+        r#"
+@job("nightly", retry: {max: 3, backoff: "exponential"})
+@retry(max: 3, backoff: "linear")
+fn nightly() -> string { return "ok" }
+"#,
+    );
+    assert!(
+        valid.iter().all(|w| !w.contains("backoff")),
+        "recognized backoff strategies must warn on neither retry surface: {valid:?}"
+    );
+
+    let invalid = warnings(
+        r#"
+@job("nightly", retry: {max: 3, backoff: "exp"})
+@retry(max: 3, backoff: "exp")
+fn nightly() -> string { return "ok" }
+"#,
+    );
+    let backoff_warns = invalid.iter().filter(|w| w.contains("backoff")).count();
+    assert_eq!(
+        backoff_warns, 2,
+        "an unrecognized backoff must warn on BOTH retry surfaces (compact + standalone): {invalid:?}"
+    );
+}
+
+#[test]
 fn test_heavy_attribute_requires_positive_int_threads() {
     let warns = warnings(
         r#"

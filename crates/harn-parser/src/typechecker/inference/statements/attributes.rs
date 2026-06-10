@@ -1,5 +1,12 @@
 use super::*;
 
+/// Recognized retry fields, shared by the compact `@job(retry: {...})` dict
+/// and the standalone `@retry(...)` attribute (documented aliases — keep them
+/// in lockstep).
+const RETRY_KNOWN_KEYS: &[&str] = &["max", "max_attempts", "backoff", "policy"];
+/// Recognized backoff strategies for both retry surfaces (case-insensitive).
+const RETRY_BACKOFFS: &[&str] = &["svix", "linear", "exponential"];
+
 impl TypeChecker {
     /// Validate attribute usage and emit warnings for unknown attributes.
     /// Recognized attribute names are the runtime/tooling attributes plus
@@ -670,6 +677,53 @@ impl TypeChecker {
         }
     }
 
+    /// Validate one recognized retry field (`max`/`max_attempts`/`backoff`/
+    /// `policy`) for either retry surface. The compact `@job(retry: {...})`
+    /// dict and the standalone `@retry(...)` attribute are documented as
+    /// aliases, so they MUST validate identically — sharing this helper (and
+    /// [`RETRY_KNOWN_KEYS`]/[`RETRY_BACKOFFS`]) is what keeps them from
+    /// drifting. `key_span` points at the field name (unknown-key warning),
+    /// `value_span` at its value (type warnings). `label` is the surface name
+    /// woven into messages (`@job(retry: {{ ... }})` or `@retry(...)`).
+    fn validate_retry_field(
+        &mut self,
+        key: &str,
+        value: &Node,
+        key_span: Span,
+        value_span: Span,
+        label: &str,
+    ) {
+        if !RETRY_KNOWN_KEYS.contains(&key) {
+            self.warning_at(
+                Code::InvalidAttributeArgument,
+                format!("unknown `{label}` field `{key}`; expected one of {RETRY_KNOWN_KEYS:?}"),
+                key_span,
+            );
+            return;
+        }
+        match (key, value) {
+            ("max" | "max_attempts", Node::IntLiteral(i)) if *i >= 0 => {}
+            ("max" | "max_attempts", _) => self.warning_at(
+                Code::InvalidAttributeArgument,
+                format!("`{label}` `max` must be a non-negative integer"),
+                value_span,
+            ),
+            ("backoff" | "policy", value) => {
+                let ok = symbol_like_value(value)
+                    .map(|v| RETRY_BACKOFFS.contains(&v.to_ascii_lowercase().as_str()))
+                    .unwrap_or(false);
+                if !ok {
+                    self.warning_at(
+                        Code::InvalidAttributeArgument,
+                        format!("`{label}` `backoff` must be one of {RETRY_BACKOFFS:?}"),
+                        value_span,
+                    );
+                }
+            }
+            _ => {}
+        }
+    }
+
     /// Validate `@job("name", retry: { max:, backoff: })`. The positional
     /// name (optional) must be a string; the compact named `retry` dict is
     /// accepted as an alias for the standalone `@retry(...)` job modifier.
@@ -710,8 +764,6 @@ impl TypeChecker {
     }
 
     pub(super) fn expect_job_retry_dict(&mut self, value: &SNode, span: Span) {
-        const KNOWN_KEYS: &[&str] = &["max", "max_attempts", "backoff", "policy"];
-        const BACKOFFS: &[&str] = &["svix", "linear", "exponential"];
         let Node::DictLiteral(entries) = &value.node else {
             self.warning_at(
                 Code::InvalidAttributeArgument,
@@ -730,46 +782,20 @@ impl TypeChecker {
                 );
                 continue;
             };
-            if !KNOWN_KEYS.contains(&field_name) {
-                self.warning_at(
-                    Code::InvalidAttributeArgument,
-                    format!(
-                        "unknown `@job(retry: ...)` field `{field_name}`; expected one of {KNOWN_KEYS:?}"
-                    ),
-                    entry.key.span,
-                );
-                continue;
-            }
-            match (field_name, &entry.value.node) {
-                ("max" | "max_attempts", Node::IntLiteral(i)) if *i >= 0 => {}
-                ("max" | "max_attempts", _) => self.warning_at(
-                    Code::InvalidAttributeArgument,
-                    "`@job(retry: { max: ... })` must be a non-negative integer".to_string(),
-                    entry.value.span,
-                ),
-                ("backoff" | "policy", value) => {
-                    let ok = symbol_like_value(value)
-                        .map(|v| BACKOFFS.contains(&v.to_ascii_lowercase().as_str()))
-                        .unwrap_or(false);
-                    if !ok {
-                        self.warning_at(
-                            Code::InvalidAttributeArgument,
-                            format!(
-                                "`@job(retry: {{ backoff: ... }})` must be one of {BACKOFFS:?}"
-                            ),
-                            entry.value.span,
-                        );
-                    }
-                }
-                _ => {}
-            }
+            self.validate_retry_field(
+                field_name,
+                &entry.value.node,
+                entry.key.span,
+                entry.value.span,
+                "@job(retry: { ... })",
+            );
         }
     }
 
-    /// Validate `@retry(max: N, backoff: "strategy")`.
+    /// Validate `@retry(max: N, backoff: "strategy")`. Documented as an alias
+    /// for the compact `@job(retry: {...})` dict, so it shares
+    /// [`TypeChecker::validate_retry_field`] to stay in lockstep.
     pub(super) fn validate_retry_args(&mut self, attr: &Attribute) {
-        const KNOWN_KEYS: &[&str] = &["max", "max_attempts", "backoff", "policy"];
-        const BACKOFFS: &[&str] = &["svix", "linear", "exponential"];
         for arg in &attr.args {
             let Some(name) = arg.name.as_deref() else {
                 self.warning_at(
@@ -780,35 +806,13 @@ impl TypeChecker {
                 );
                 continue;
             };
-            if !KNOWN_KEYS.contains(&name) {
-                self.warning_at(
-                    Code::InvalidAttributeArgument,
-                    format!("unknown `@retry` argument `{name}`; expected one of {KNOWN_KEYS:?}"),
-                    arg.span,
-                );
-                continue;
-            }
-            match (name, &arg.value.node) {
-                ("max" | "max_attempts", Node::IntLiteral(i)) if *i >= 0 => {}
-                ("max" | "max_attempts", _) => self.warning_at(
-                    Code::InvalidAttributeArgument,
-                    "`@retry(max: ...)` must be a non-negative integer".to_string(),
-                    arg.value.span,
-                ),
-                ("backoff" | "policy", value) => {
-                    let ok = symbol_like_value(value)
-                        .map(|v| BACKOFFS.contains(&v.to_ascii_lowercase().as_str()))
-                        .unwrap_or(false);
-                    if !ok {
-                        self.warning_at(
-                            Code::InvalidAttributeArgument,
-                            format!("`@retry(backoff: ...)` must be one of {BACKOFFS:?}"),
-                            arg.value.span,
-                        );
-                    }
-                }
-                _ => {}
-            }
+            self.validate_retry_field(
+                name,
+                &arg.value.node,
+                arg.span,
+                arg.value.span,
+                "@retry(...)",
+            );
         }
     }
 
