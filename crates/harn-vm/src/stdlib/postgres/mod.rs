@@ -213,6 +213,9 @@ mod introspect;
 mod jsonb;
 mod listen;
 mod migrate;
+mod shared;
+
+pub use shared::install_shared_pool_registry;
 
 #[harn_builtin(
     sig_expr = BuiltinSignature::variadic("pg_pool", &[Param::new("args", TY_ANY)], TY_DICT),
@@ -647,6 +650,31 @@ async fn open_pool(
             .unwrap_or(5)
             .clamp(1, i64::from(u32::MAX)) as u32
     };
+
+    // Resolve replica URLs up front: they participate in the shared-pool key,
+    // and resolving them is cheap (no connection opened) relative to building
+    // the pools. These awaits hold no registry lock.
+    let replica_urls = collect_replica_urls(ctx, options).await?;
+
+    // When a server embedder has installed the shared registry, try to reuse an
+    // existing pool whose *full* connection identity matches before building a
+    // new one. This is a double-checked init: the lock is only held for the map
+    // lookup (in `shared::get`), never across the pool-building await below.
+    // `application_name` is reflected in the returned handle metadata (and is
+    // part of the shared-pool key, so a shared hit always has the same value).
+    let application_name = option_string(options, "application_name");
+    let shared_key = shared::is_installed()
+        .then(|| shared::PoolKey::new(&primary_url, &replica_urls, options, single_connection));
+    if let Some(key) = &shared_key {
+        if let Some(record) = shared::get(key) {
+            return Ok(register_local_pool_handle(
+                record,
+                single_connection,
+                application_name,
+            ));
+        }
+    }
+
     let primary_pool = build_pool(
         &primary_url,
         options,
@@ -656,7 +684,6 @@ async fn open_pool(
     )
     .await?;
 
-    let replica_urls = collect_replica_urls(ctx, options).await?;
     let mut replicas = Vec::with_capacity(replica_urls.len());
     for url in &replica_urls {
         let pool = build_pool(
@@ -672,6 +699,45 @@ async fn open_pool(
 
     let circuit = Arc::new(build_circuit_breaker(options));
 
+    let record = Arc::new(PoolRecord {
+        pool: Arc::new(primary_pool),
+        replicas,
+        replica_cursor: AtomicUsize::new(0),
+        max_connections,
+        statement_cache_capacity: stmt_cache_capacity,
+        read_routing_policy,
+        circuit,
+    });
+
+    // If sharing is enabled, publish (or adopt a racing winner's) record into
+    // the process-global registry. `get_or_insert` keeps the existing entry on a
+    // race, so concurrent first-opens of the same identity converge on ONE pool;
+    // our now-unused `record` is dropped, closing its freshly-opened pool.
+    let record = match shared_key {
+        Some(key) => shared::get_or_insert(key, record),
+        None => record,
+    };
+
+    Ok(register_local_pool_handle(
+        record,
+        single_connection,
+        application_name,
+    ))
+}
+
+/// Register `record` in the thread-local [`POOLS`] registry under a fresh
+/// opaque id and build the `pg_pool` handle the VM hands back to `.harn` code.
+///
+/// The thread-local map is still the per-request lookup table that the query
+/// builtins consult by handle id; sharing happens at the [`PoolRecord`] `Arc`
+/// level, so two requests get distinct ids that resolve to the *same* underlying
+/// pool. The handle metadata is derived from the (possibly shared) record so it
+/// always reflects the live pool rather than this caller's requested options.
+fn register_local_pool_handle(
+    record: Arc<PoolRecord>,
+    single_connection: bool,
+    application_name: Option<String>,
+) -> VmValue {
     let id = next_id(if single_connection {
         "pgconn"
     } else {
@@ -680,42 +746,34 @@ async fn open_pool(
     let mut meta = BTreeMap::new();
     meta.insert(
         "max_connections".to_string(),
-        VmValue::Int(i64::from(max_connections)),
+        VmValue::Int(i64::from(record.max_connections)),
     );
     meta.insert(
         "single_connection".to_string(),
         VmValue::Bool(single_connection),
     );
-    meta.insert("replicas".to_string(), VmValue::Int(replicas.len() as i64));
+    meta.insert(
+        "replicas".to_string(),
+        VmValue::Int(record.replicas.len() as i64),
+    );
     meta.insert(
         "statement_cache_capacity".to_string(),
-        VmValue::Int(stmt_cache_capacity as i64),
+        VmValue::Int(record.statement_cache_capacity as i64),
     );
     meta.insert(
         "read_routing_policy".to_string(),
-        VmValue::String(Arc::from(read_routing_policy.as_str())),
+        VmValue::String(Arc::from(record.read_routing_policy.as_str())),
     );
-    if let Some(application_name) = option_string(options, "application_name") {
+    if let Some(application_name) = application_name {
         meta.insert(
             "application_name".to_string(),
             VmValue::String(std::sync::Arc::from(application_name)),
         );
     }
     POOLS.with(|pools| {
-        pools.borrow_mut().insert(
-            id.clone(),
-            Arc::new(PoolRecord {
-                pool: Arc::new(primary_pool),
-                replicas,
-                replica_cursor: AtomicUsize::new(0),
-                max_connections,
-                statement_cache_capacity: stmt_cache_capacity,
-                read_routing_policy,
-                circuit,
-            }),
-        );
+        pools.borrow_mut().insert(id.clone(), record);
     });
-    Ok(handle_value(HANDLE_POOL, &id, meta))
+    handle_value(HANDLE_POOL, &id, meta)
 }
 
 async fn build_pool(
@@ -2674,6 +2732,152 @@ mod tests {
         open_pool(&ctx, &s(url), Some(&options), false)
             .await
             .expect("open single-connection pool")
+    }
+
+    /// Resolve the underlying primary `PgPool` `Arc` behind a `pg_pool` handle so
+    /// tests can assert two handles point at the SAME (or distinct) pool via
+    /// `Arc::ptr_eq`.
+    fn pool_ptr(handle: &VmValue) -> Arc<PgPool> {
+        let id = handle_id(Some(handle), HANDLE_POOL, "test").expect("pool handle id");
+        pool_by_id(&id).expect("pool record")
+    }
+
+    /// SECURITY/CORRECTNESS: with the shared registry installed, two `pg_pool`
+    /// calls for the SAME connection identity reuse ONE underlying pool, while a
+    /// call for a DIFFERENT identity (database) gets its own — and a CLI-style
+    /// run with the registry NOT consulted is unaffected. Uses lazy pools so it
+    /// needs no live database.
+    #[tokio::test(flavor = "current_thread")]
+    async fn shared_registry_shares_on_match_and_isolates_on_mismatch() {
+        shared::install_shared_pool_registry();
+        shared::clear_for_test();
+        reset_postgres_state();
+
+        // Route through the registry primitives (not open_pool's eager connect)
+        // so the test needs no live database. This exercises exactly the
+        // share/adopt/isolate logic open_pool relies on.
+        //
+        // Simulate two requests opening the same identity: build the record once
+        // through the registry, then a second "request" must adopt it.
+        let key_a = shared::PoolKey::new("postgres://u:p@h/db_a", &[], None, false);
+        let key_b = shared::PoolKey::new("postgres://u:p@h/db_b", &[], None, false);
+
+        let rec_a1 = Arc::new(lazy_record());
+        let shared_a1 = shared::get_or_insert(key_a.clone(), Arc::clone(&rec_a1));
+        // First insert wins and is the very record we passed in.
+        assert!(Arc::ptr_eq(&rec_a1, &shared_a1));
+
+        // A second request for the same identity builds its own record but must
+        // ADOPT the already-registered one (its own is dropped).
+        let rec_a2 = Arc::new(lazy_record());
+        let shared_a2 = shared::get_or_insert(key_a.clone(), Arc::clone(&rec_a2));
+        assert!(
+            Arc::ptr_eq(&shared_a1, &shared_a2),
+            "same identity must share one PoolRecord"
+        );
+        assert!(
+            !Arc::ptr_eq(&rec_a2, &shared_a2),
+            "the racing/second record must be dropped in favor of the canonical one"
+        );
+
+        // A lookup of the same key returns the canonical shared record.
+        let got = shared::get(&key_a).expect("registered");
+        assert!(Arc::ptr_eq(&got, &shared_a1));
+
+        // A different identity (different database) gets its own record.
+        let rec_b = Arc::new(lazy_record());
+        let shared_b = shared::get_or_insert(key_b, Arc::clone(&rec_b));
+        assert!(
+            !Arc::ptr_eq(&shared_a1, &shared_b),
+            "different identity must NOT share a pool"
+        );
+
+        assert_eq!(shared::len_for_test(), 2);
+        shared::clear_for_test();
+    }
+
+    /// Build a `PoolRecord` around a lazily-connected pool — no network I/O until
+    /// a query runs (which these tests never do). Mirrors the shape `open_pool`
+    /// constructs.
+    fn lazy_record() -> PoolRecord {
+        PoolRecord {
+            pool: lazy_pool_for_test(),
+            replicas: Vec::new(),
+            replica_cursor: AtomicUsize::new(0),
+            max_connections: 1,
+            statement_cache_capacity: DEFAULT_STATEMENT_CACHE_CAPACITY,
+            read_routing_policy: ReadRoutingPolicy::ReplicaOrPrimary,
+            circuit: Arc::new(circuit::CircuitBreakerState::disabled()),
+        }
+    }
+
+    /// End-to-end against a live DB (gated on `HARN_TEST_POSTGRES_URL`): with the
+    /// shared registry installed, `open_pool` for the same source across two
+    /// distinct `Vm`s / simulated requests returns handles backed by the SAME
+    /// physical pool; a different database does not share.
+    #[tokio::test(flavor = "current_thread")]
+    async fn open_pool_shares_across_requests_when_registry_installed() {
+        let Ok(url) = std::env::var("HARN_TEST_POSTGRES_URL") else {
+            return;
+        };
+        shared::install_shared_pool_registry();
+        shared::clear_for_test();
+        reset_postgres_state();
+
+        let ctx = crate::vm::AsyncBuiltinCtx::for_test(crate::Vm::new());
+        let o = dict(&[("max_connections", VmValue::Int(2))]);
+        let opt = o.as_dict();
+
+        // Request 1.
+        let h1 = open_pool(&ctx, &s(&url), opt, false).await.unwrap();
+        // Request 2: fresh handle id, but must resolve to the same pool Arc.
+        let h2 = open_pool(&ctx, &s(&url), opt, false).await.unwrap();
+        assert_ne!(
+            h1.as_dict().unwrap()["id"].display(),
+            h2.as_dict().unwrap()["id"].display(),
+            "each call still gets a distinct opaque handle id"
+        );
+        assert!(
+            Arc::ptr_eq(&pool_ptr(&h1), &pool_ptr(&h2)),
+            "same identity under shared registry must reuse one pool"
+        );
+
+        // Different identity (different max_connections) -> different pool.
+        let o3 = dict(&[("max_connections", VmValue::Int(7))]);
+        let h3 = open_pool(&ctx, &s(&url), o3.as_dict(), false)
+            .await
+            .unwrap();
+        assert!(
+            !Arc::ptr_eq(&pool_ptr(&h1), &pool_ptr(&h3)),
+            "different pool shape must not share"
+        );
+
+        shared::clear_for_test();
+    }
+
+    /// CLI default: when the shared registry is NOT installed, two `open_pool`
+    /// calls for the same source get DISTINCT pools (byte-identical to legacy
+    /// behavior). Gated on a live DB. NOTE: relies on per-test process isolation
+    /// (nextest) so no sibling test has installed the registry in this process.
+    #[tokio::test(flavor = "current_thread")]
+    async fn open_pool_does_not_share_when_registry_absent() {
+        let Ok(url) = std::env::var("HARN_TEST_POSTGRES_URL") else {
+            return;
+        };
+        if shared::is_installed() {
+            // Another test installed it in this (cargo test) process; skip rather
+            // than assert a false negative.
+            return;
+        }
+        reset_postgres_state();
+        let ctx = crate::vm::AsyncBuiltinCtx::for_test(crate::Vm::new());
+        let o = dict(&[("max_connections", VmValue::Int(1))]);
+        let h1 = open_pool(&ctx, &s(&url), o.as_dict(), false).await.unwrap();
+        let h2 = open_pool(&ctx, &s(&url), o.as_dict(), false).await.unwrap();
+        assert!(
+            !Arc::ptr_eq(&pool_ptr(&h1), &pool_ptr(&h2)),
+            "without the shared registry, each pg_pool opens its own pool"
+        );
     }
 
     #[test]

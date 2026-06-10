@@ -76,6 +76,8 @@ pub(crate) mod path_scope_guard;
 pub(crate) mod pool;
 #[cfg(feature = "postgres")]
 mod postgres;
+#[cfg(feature = "postgres")]
+pub use postgres::install_shared_pool_registry;
 pub mod process;
 mod project;
 mod project_catalog;
