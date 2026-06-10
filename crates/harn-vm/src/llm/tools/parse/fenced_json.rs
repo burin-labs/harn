@@ -24,8 +24,10 @@
 use super::syntax::preview_str;
 use super::TextToolParseResult;
 
-/// Backtick fence used to open/close a fenced-JSON tool block.
-const FENCE: &str = "```";
+/// Canonical backtick fence used to open/close a fenced-JSON tool block.
+const BACKTICK_FENCE: &str = "```";
+/// CommonMark tilde fence. Tool-shaped tilde fences are recoverable drift.
+const TILDE_FENCE: &str = "~~~";
 /// The exact info string that opens a tool block: ```` ```tool ````.
 const OPEN_INFO: &str = "tool";
 
@@ -87,9 +89,9 @@ struct FenceBlock {
     body: String,
     open_line: usize,
     /// True when the block opened with a non-`tool` info string we accepted
-    /// with a warning (today: ```` ```json ````). Surfaced as a
-    /// `protocol_violation` so telemetry sees drift while the turn progresses.
-    drifted_info: Option<String>,
+    /// with a warning. Surfaced as a `protocol_violation` so telemetry sees
+    /// drift while the turn progresses.
+    drifted_opener: Option<String>,
 }
 
 /// Parse a model response under the fenced-JSON tool protocol.
@@ -104,13 +106,14 @@ pub(crate) fn parse_fenced_json_tool_calls(text: &str) -> TextToolParseResult {
     let cleaned = super::syntax::strip_thinking_tags(text);
     let src = cleaned.as_ref();
 
-    let (blocks, prose, mut violations, mut errors) = chunk_fence_blocks(src);
+    let (blocks, mut prose, mut violations, mut errors) = chunk_fence_blocks(src);
 
     let mut calls: Vec<serde_json::Value> = Vec::new();
+    let saw_fenced_blocks = !blocks.is_empty();
     for block in blocks {
-        if let Some(info) = block.drifted_info {
+        if let Some(opener) = block.drifted_opener {
             violations.push(format!(
-                "protocol_violation: a tool call was emitted in a ```{info} fence; the contract \
+                "protocol_violation: a tool call was emitted in a {opener} fence; the contract \
                  requires a bare ```tool fence. Accepted this turn, but switch to ```tool."
             ));
         }
@@ -123,6 +126,31 @@ pub(crate) fn parse_fenced_json_tool_calls(text: &str) -> TextToolParseResult {
                 }));
             }
             Err(err) => errors.push(err.into_message()),
+        }
+    }
+
+    if !saw_fenced_blocks {
+        let trimmed = src.trim();
+        if let Ok((name, arguments)) = parse_bare_json_tool_call(trimmed) {
+            violations.push(
+                "protocol_violation: a tool call was emitted as a bare JSON object; the contract \
+                 requires wrapping each `{ \"name\": ..., \"args\": { ... } }` object in a \
+                 ```tool fence. Accepted this turn, but switch to ```tool."
+                    .to_string(),
+            );
+            calls.push(serde_json::json!({
+                "id": "tc_0",
+                "name": name,
+                "arguments": arguments,
+            }));
+            prose.clear();
+        } else if contains_legacy_tool_call_markup(src) {
+            violations.push(
+                "protocol_violation: `<tool_call>...</tool_call>` markup was emitted while \
+                 `tool_format` is `json`; wrap each call as a strict JSON object inside a \
+                 ```tool fence instead."
+                    .to_string(),
+            );
         }
     }
 
@@ -140,13 +168,13 @@ pub(crate) fn parse_fenced_json_tool_calls(text: &str) -> TextToolParseResult {
 /// LAYER 0: walk lines and split into fenced-JSON blocks + leftover prose.
 ///
 /// OPEN = a line whose trimmed content is exactly ```` ```tool ```` (the exact
-/// `tool` info string). ```` ```json ```` whose body is a valid object is
-/// ACCEPT-WITH-WARNING (recorded on the block as `drifted_info`); any other
-/// info string (```` ```python ````, ```` ```tool_code ````, ```` ```tool x ````)
-/// does NOT open and stays in prose. CLOSE = a line whose trimmed content is
-/// exactly a bare ```` ``` ````. A content ```` ``` ```` lives inside a quoted
-/// JSON string (which cannot hold a raw newline) so it never fronts a line and
-/// never collides with the close fence.
+/// `tool` info string). Recoverable drift such as ```` ```json ````,
+/// ```` ```tool_code ````, ```` ```tool python ````, or ```` ~~~tool ```` also
+/// opens with a protocol warning; unrelated code fences stay in prose. CLOSE =
+/// a line whose trimmed content is exactly the matching bare fence marker. A
+/// content ```` ``` ```` lives inside a quoted JSON string (which cannot hold a
+/// raw newline) so it never fronts a line and never collides with the close
+/// fence.
 ///
 /// EOF before CLOSE reuses the unterminated-or-implicit-close discipline: a
 /// block whose accumulated body is a balanced/complete JSON object is accepted
@@ -169,7 +197,7 @@ fn chunk_fence_blocks(src: &str) -> (Vec<FenceBlock>, String, Vec<String>, Vec<S
                 let mut closed = false;
                 idx += 1;
                 while idx < lines.len() {
-                    if is_bare_fence(lines[idx]) {
+                    if is_bare_fence(lines[idx], open.close_fence) {
                         closed = true;
                         idx += 1;
                         break;
@@ -178,14 +206,10 @@ fn chunk_fence_blocks(src: &str) -> (Vec<FenceBlock>, String, Vec<String>, Vec<S
                     idx += 1;
                 }
                 let _ = closed; // EOF-before-close is handled by LAYER 1 balance check.
-                let drifted_info = match open {
-                    FenceOpen::Tool => None,
-                    FenceOpen::DriftJson => Some("json".to_string()),
-                };
                 blocks.push(FenceBlock {
                     body: body_lines.join("\n"),
                     open_line,
-                    drifted_info,
+                    drifted_opener: open.drifted_opener,
                 });
             }
             None => {
@@ -195,46 +219,70 @@ fn chunk_fence_blocks(src: &str) -> (Vec<FenceBlock>, String, Vec<String>, Vec<S
         }
     }
 
-    // A ```json block that did NOT parse to a tool-call object should not be
-    // silently swallowed — but we cannot know until LAYER 1. We keep the drift
-    // warning attached to the block; if it fails to parse there, the block's
-    // error is surfaced and the warning is noise the loop already tolerates.
+    // A drift block that did NOT parse to a tool-call object should not be
+    // silently swallowed. We keep the warning attached to the block; if it
+    // fails to parse there, the block's error is surfaced and the warning is
+    // still useful protocol guidance.
     let _ = &mut violations;
 
     let prose = collapse_prose(&prose_lines);
     (blocks, prose, violations, errors)
 }
 
-/// The kind of fence an OPEN line carries.
-enum FenceOpen {
-    /// Canonical ```` ```tool ````.
-    Tool,
-    /// Drift: ```` ```json ````. Accepted with a protocol_violation warning.
-    DriftJson,
+/// A recognized OPEN line.
+struct FenceOpen {
+    close_fence: &'static str,
+    drifted_opener: Option<String>,
 }
 
 /// Classify a line as a fence-open of a known info string, or `None`.
 ///
-/// Only an exact ```` ```tool ```` opens canonically. ```` ```json ```` opens
-/// with drift (accept-with-warning). Every other info string is left in prose
-/// so a model that fences real code (```` ```python ````) does not get its
-/// snippet eaten as a tool call.
+/// Only an exact ```` ```tool ```` opens canonically. Recognizable tool-call
+/// drift opens with a warning. Every other info string is left in prose so a
+/// model that fences real code (```` ```python ````) does not get its snippet
+/// eaten as a tool call.
 fn fence_open_kind(line: &str) -> Option<FenceOpen> {
     let trimmed = line.trim();
-    let info = trimmed.strip_prefix(FENCE)?;
+    let (fence, info) = if let Some(info) = trimmed.strip_prefix(BACKTICK_FENCE) {
+        (BACKTICK_FENCE, info)
+    } else if let Some(info) = trimmed.strip_prefix(TILDE_FENCE) {
+        (TILDE_FENCE, info)
+    } else {
+        return None;
+    };
     // The info string is everything after the opening fence, trimmed. A bare
     // ``` (empty info) is a close, not an open.
     let info = info.trim();
-    match info {
-        OPEN_INFO => Some(FenceOpen::Tool),
-        "json" => Some(FenceOpen::DriftJson),
-        _ => None,
+    if fence == BACKTICK_FENCE && info == OPEN_INFO {
+        return Some(FenceOpen {
+            close_fence: BACKTICK_FENCE,
+            drifted_opener: None,
+        });
     }
+    if is_recoverable_tool_fence_drift(fence, info) {
+        return Some(FenceOpen {
+            close_fence: fence,
+            drifted_opener: Some(format!("{fence}{info}")),
+        });
+    }
+    None
 }
 
-/// True when `line` is exactly a bare ```` ``` ```` close fence.
-fn is_bare_fence(line: &str) -> bool {
-    line.trim() == FENCE
+fn is_recoverable_tool_fence_drift(fence: &str, info: &str) -> bool {
+    if info == "json" || info == "tool_code" || info == "tool_call" || info == "function_call" {
+        return true;
+    }
+    if fence == TILDE_FENCE && info == OPEN_INFO {
+        return true;
+    }
+    info.strip_prefix(OPEN_INFO)
+        .and_then(|rest| rest.chars().next())
+        .is_some_and(|ch| ch.is_ascii_whitespace() || ch == '_' || ch == '-')
+}
+
+/// True when `line` is exactly a bare close fence matching the opener.
+fn is_bare_fence(line: &str, fence: &str) -> bool {
+    line.trim() == fence
 }
 
 /// Join leftover non-fence lines back into prose, trimming surrounding
@@ -305,6 +353,24 @@ fn parse_block_body(
 
 fn empty_object() -> serde_json::Value {
     serde_json::Value::Object(serde_json::Map::new())
+}
+
+fn parse_bare_json_tool_call(body: &str) -> Result<(String, serde_json::Value), BlockError> {
+    if body.is_empty()
+        || !body.starts_with('{')
+        || !body.contains("\"name\"")
+        || !body.contains("\"args\"")
+    {
+        return Err(BlockError::ExpectedSingleObject);
+    }
+    parse_block_body(body, 0)
+}
+
+fn contains_legacy_tool_call_markup(src: &str) -> bool {
+    src.contains("<tool_call>")
+        || src.contains("<tool_call ")
+        || src.contains("<toolcall>")
+        || src.contains("<toolcall ")
 }
 
 #[cfg(test)]
@@ -469,10 +535,98 @@ mod tests {
         );
     }
 
+    #[test]
+    fn tool_like_fence_drift_accepts_with_protocol_violation() {
+        for (src, opener) in [
+            (
+                "```tool_code\n{\"name\": \"a\", \"args\": {\"k\": 1}}\n```",
+                "```tool_code",
+            ),
+            (
+                "```tool python\n{\"name\": \"a\", \"args\": {\"k\": 1}}\n```",
+                "```tool python",
+            ),
+            (
+                "```function_call\n{\"name\": \"a\", \"args\": {\"k\": 1}}\n```",
+                "```function_call",
+            ),
+            (
+                "~~~tool\n{\"name\": \"a\", \"args\": {\"k\": 1}}\n~~~",
+                "~~~tool",
+            ),
+        ] {
+            let out = parse(src);
+            assert!(
+                out.errors.is_empty(),
+                "errors for {opener}: {:?}",
+                out.errors
+            );
+            assert_eq!(out.calls.len(), 1, "calls for {opener}: {:?}", out.calls);
+            assert_eq!(out.calls[0]["name"], "a");
+            assert_eq!(arg(&out.calls[0], "k").unwrap(), 1);
+            assert!(
+                out.violations.iter().any(|v| v.contains(opener)),
+                "violations for {opener}: {:?}",
+                out.violations
+            );
+        }
+    }
+
+    #[test]
+    fn invalid_tool_like_fence_drift_reports_error_and_violation() {
+        let out = parse("```tool_code\nnot json\n```");
+        assert!(out.calls.is_empty());
+        assert_eq!(out.errors.len(), 1);
+        assert!(out.errors[0].contains("not valid JSON"));
+        assert!(
+            out.violations.iter().any(|v| v.contains("```tool_code")),
+            "violations: {:?}",
+            out.violations
+        );
+    }
+
+    #[test]
+    fn bare_json_tool_call_accepts_with_protocol_violation() {
+        let out = parse("{\"name\": \"a\", \"args\": {\"k\": 1}}");
+        assert!(out.errors.is_empty(), "errors: {:?}", out.errors);
+        assert!(out.prose.is_empty(), "prose: {:?}", out.prose);
+        assert_eq!(out.calls.len(), 1);
+        assert_eq!(out.calls[0]["name"], "a");
+        assert_eq!(arg(&out.calls[0], "k").unwrap(), 1);
+        assert!(
+            out.violations
+                .iter()
+                .any(|v| v.contains("bare JSON object")),
+            "violations: {:?}",
+            out.violations
+        );
+    }
+
+    #[test]
+    fn legacy_tagged_markup_under_json_reports_protocol_violation() {
+        let out = parse("<tool_call>\na({})\n</tool_call>");
+        assert!(out.calls.is_empty());
+        assert!(out.errors.is_empty(), "errors: {:?}", out.errors);
+        assert!(
+            out.violations.iter().any(|v| v.contains("<tool_call>")),
+            "violations: {:?}",
+            out.violations
+        );
+    }
+
     // A non-tool fence (```python) is left in prose, not eaten as a call.
     #[test]
     fn unrelated_fence_stays_in_prose() {
         let out = parse("```python\nprint('hi')\n```");
+        assert!(out.calls.is_empty());
+        assert!(out.errors.is_empty());
+        assert!(out.prose.contains("print('hi')"));
+    }
+
+    // A non-tool tilde fence is also left in prose, not eaten as a call.
+    #[test]
+    fn unrelated_tilde_fence_stays_in_prose() {
+        let out = parse("~~~python\nprint('hi')\n~~~");
         assert!(out.calls.is_empty());
         assert!(out.errors.is_empty());
         assert!(out.prose.contains("print('hi')"));
