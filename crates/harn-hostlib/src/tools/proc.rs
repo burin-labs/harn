@@ -31,6 +31,7 @@ use crate::process::{self as process_handle, ProcessError, SpawnSpec};
 use crate::tools::response::ResponseBuilder;
 
 mod artifacts;
+mod toolchain_path;
 
 pub(crate) use self::artifacts::{persist_artifacts, planned_artifact_paths, resolve_output_path};
 
@@ -124,12 +125,15 @@ pub(crate) fn run(req: SpawnRequest) -> Result<SpawnOutcome, HostlibError> {
     let started_at = now_rfc3339();
     let command_id = next_command_id();
 
+    let mut env = req.env.clone();
+    apply_toolchain_path(req.cwd.as_deref(), &mut env, req.env_mode);
+
     let spec = SpawnSpec {
         builtin: req.builtin,
         program: req.program.clone(),
         args: req.args.clone(),
         cwd: req.cwd.clone(),
-        env: req.env.clone(),
+        env,
         env_mode: req.env_mode,
         use_stdin: req.stdin.is_some(),
         configure_process_group: false,
@@ -227,6 +231,28 @@ pub(crate) fn run(req: SpawnRequest) -> Result<SpawnOutcome, HostlibError> {
         duration: started.elapsed(),
         timed_out,
     })
+}
+
+/// Apply the mise/asdf toolchain PATH normalizer to a run() child environment
+/// before it is handed to the spawner. The effective working directory is the
+/// command's `cwd` (when supplied) or the hostlib process cwd. Gated behind
+/// `HARN_RUN_TOOLCHAIN_PATH` and declaration-gated, so this is byte-identical
+/// to the previous behavior on repos without a recognized version file (or with
+/// the gate off). See `tools/proc/toolchain_path.rs`.
+pub(crate) fn apply_toolchain_path(
+    cwd: Option<&Path>,
+    env: &mut BTreeMap<String, String>,
+    env_mode: EnvMode,
+) {
+    let effective_cwd = match cwd {
+        Some(cwd) => cwd.to_path_buf(),
+        None => match std::env::current_dir() {
+            Ok(dir) => dir,
+            // No cwd to anchor detection on — leave PATH untouched.
+            Err(_) => return,
+        },
+    };
+    toolchain_path::normalize_child_env(&effective_cwd, env, env_mode);
 }
 
 pub(crate) fn process_error_to_hostlib(builtin: &'static str, err: ProcessError) -> HostlibError {

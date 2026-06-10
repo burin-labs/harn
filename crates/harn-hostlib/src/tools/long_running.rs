@@ -199,6 +199,8 @@ pub(crate) fn spawn_long_running_with_options(
     env: BTreeMap<String, String>,
     options: LongRunningSpawnOptions,
 ) -> Result<LongRunningHandleInfo, HostlibError> {
+    let mut env = env;
+    proc::apply_toolchain_path(cwd.as_deref(), &mut env, options.env_mode);
     let spec = SpawnSpec {
         builtin,
         program: program.clone(),
