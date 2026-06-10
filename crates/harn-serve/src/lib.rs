@@ -75,6 +75,18 @@ pub use exports::{
     emit_export_diagnostics, ExportCatalog, ExportDiagnostic, ExportedCallableKind,
     ExportedFunction, ExportedParam, JobSpec, RetryBackoff, RetrySpec, RouteSpec, ScheduleSpec,
 };
+/// Install the process-lifetime shared Postgres pool registry.
+///
+/// Call this **once** at server startup (e.g. from the `SiteServer`/embedder
+/// wiring), before serving requests, to make `.harn` `pg_pool`/`pg_connect`
+/// calls reuse one connection pool per distinct connection identity across
+/// requests and worker threads — instead of opening a fresh pool per request
+/// (each `harn serve` dispatch builds a new [`harn_vm::Vm`]). Without this call,
+/// behavior is unchanged: every `pg_pool` opens its own pool. Idempotent.
+///
+/// Only available when the `vm-postgres` feature is enabled.
+#[cfg(feature = "vm-postgres")]
+pub use harn_vm::install_shared_pool_registry;
 pub use http_codec::{
     axum_response_from_call, axum_response_from_dispatch_error, classify_ws_upgrade,
     decode_call_response, dispatch_error_payload, fresh_request_id, HttpCodecOutcome, SseEventSpec,
