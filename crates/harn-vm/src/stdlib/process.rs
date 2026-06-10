@@ -428,8 +428,10 @@ const PROCESS_BUILTINS: &[&VmBuiltinDef] = &[
     &ENV_OR_IMPL_DEF,
     &EXIT_IMPL_DEF,
     &EXEC_IMPL_DEF,
+    &EXEC_OPTS_IMPL_DEF,
     &SHELL_IMPL_DEF,
     &EXEC_AT_IMPL_DEF,
+    &EXEC_AT_OPTS_IMPL_DEF,
     &SHELL_AT_IMPL_DEF,
     &USERNAME_IMPL_DEF,
     &HOSTNAME_IMPL_DEF,
@@ -509,39 +511,119 @@ pub(crate) fn spawn_captured_value(args: &[VmValue]) -> Result<VmValue, VmError>
         .filter(|n| *n > 0)
         .map(|n| Duration::from_millis(n as u64));
 
-    let mut command = std::process::Command::new(&cmd);
-    command.args(&cmd_args);
-    if let Some(cwd) = cwd.as_ref() {
+    let spawn = CapturedSpawn {
+        label: "spawn_captured",
+        cmd: &cmd,
+        args: &cmd_args,
+        cwd: cwd.as_deref(),
+        env: &env_overrides,
+        // `spawn_captured` has always layered `env` over the inherited
+        // parent environment, so keep that merge behavior.
+        env_clear: false,
+        stdin: stdin_bytes,
+        timeout,
+    };
+    let CapturedRun {
+        output,
+        timed_out,
+        duration_ms,
+    } = run_captured_spawn(spawn)?;
+
+    let exit_code = if timed_out {
+        -1
+    } else {
+        output.status.code().unwrap_or(-1) as i64
+    };
+    let success = if timed_out {
+        false
+    } else {
+        output.status.success()
+    };
+    let mut result = BTreeMap::new();
+    result.insert("exit_code".to_string(), VmValue::Int(exit_code));
+    result.insert(
+        "stdout".to_string(),
+        VmValue::String(std::sync::Arc::from(
+            String::from_utf8_lossy(&output.stdout).as_ref(),
+        )),
+    );
+    result.insert(
+        "stderr".to_string(),
+        VmValue::String(std::sync::Arc::from(
+            String::from_utf8_lossy(&output.stderr).as_ref(),
+        )),
+    );
+    result.insert("duration_ms".to_string(), VmValue::Int(duration_ms));
+    result.insert("success".to_string(), VmValue::Bool(success));
+    result.insert("timed_out".to_string(), VmValue::Bool(timed_out));
+    Ok(VmValue::Dict(std::sync::Arc::new(result)))
+}
+
+/// Parameters for [`run_captured_spawn`]: a single synchronous subprocess
+/// spawn that captures stdout/stderr, optionally feeds stdin, optionally
+/// enforces a wall-clock timeout, and either merges (`env_clear == false`)
+/// or replaces (`env_clear == true`) the parent environment with `env`.
+struct CapturedSpawn<'a> {
+    label: &'static str,
+    cmd: &'a str,
+    args: &'a [String],
+    cwd: Option<&'a str>,
+    env: &'a [(String, String)],
+    env_clear: bool,
+    stdin: Option<Vec<u8>>,
+    timeout: Option<Duration>,
+}
+
+/// Result of [`run_captured_spawn`].
+struct CapturedRun {
+    output: std::process::Output,
+    timed_out: bool,
+    duration_ms: i64,
+}
+
+/// Shared synchronous spawn-and-capture core used by `spawn_captured` and the
+/// `exec_opts`/`exec_at_opts` convenience builtins. Honors cwd, an env
+/// overlay (merge or replace via `env_clear`), optional stdin, and an optional
+/// wall-clock timeout (after which the child is killed and `timed_out` is set).
+fn run_captured_spawn(spec: CapturedSpawn<'_>) -> Result<CapturedRun, VmError> {
+    let label = spec.label;
+    let mut command = std::process::Command::new(spec.cmd);
+    command.args(spec.args);
+    if let Some(cwd) = spec.cwd {
         command.current_dir(cwd);
     }
-    for (key, value) in &env_overrides {
+    if spec.env_clear {
+        command.env_clear();
+    }
+    for (key, value) in spec.env {
         command.env(key, value);
     }
     command.stdout(Stdio::piped()).stderr(Stdio::piped());
-    if stdin_bytes.is_some() {
+    if spec.stdin.is_some() {
         command.stdin(Stdio::piped());
     } else {
         command.stdin(Stdio::null());
     }
 
     let started = Instant::now();
+    let cmd = spec.cmd;
     let mut child = command.spawn().map_err(|error| {
         VmError::Thrown(VmValue::String(std::sync::Arc::from(format!(
-            "spawn_captured: failed to spawn '{cmd}': {error}"
+            "{label}: failed to spawn '{cmd}': {error}"
         ))))
     })?;
 
-    if let (Some(payload), Some(mut stdin)) = (stdin_bytes, child.stdin.take()) {
+    if let (Some(payload), Some(mut stdin)) = (spec.stdin, child.stdin.take()) {
         // Children may close stdin early while still producing useful output.
         let _ = stdin.write_all(&payload);
     }
 
-    let (output, timed_out) = match timeout {
+    let (output, timed_out) = match spec.timeout {
         None => match child.wait_with_output() {
             Ok(output) => (output, false),
             Err(error) => {
                 return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
-                    format!("spawn_captured: wait failed: {error}"),
+                    format!("{label}: wait failed: {error}"),
                 ))));
             }
         },
@@ -562,7 +644,7 @@ pub(crate) fn spawn_captured_value(args: &[VmValue]) -> Result<VmValue, VmError>
                     }
                     Err(error) => {
                         return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
-                            format!("spawn_captured: poll failed: {error}"),
+                            format!("{label}: poll failed: {error}"),
                         ))));
                     }
                 }
@@ -607,7 +689,7 @@ pub(crate) fn spawn_captured_value(args: &[VmValue]) -> Result<VmValue, VmError>
                     Ok(output) => (output, false),
                     Err(error) => {
                         return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
-                            format!("spawn_captured: wait failed: {error}"),
+                            format!("{label}: wait failed: {error}"),
                         ))));
                     }
                 }
@@ -615,35 +697,181 @@ pub(crate) fn spawn_captured_value(args: &[VmValue]) -> Result<VmValue, VmError>
         }
     };
 
-    let duration_ms = started.elapsed().as_millis() as i64;
-    let exit_code = if timed_out {
+    Ok(CapturedRun {
+        output,
+        timed_out,
+        duration_ms: started.elapsed().as_millis() as i64,
+    })
+}
+
+/// Parsed `exec_opts` / `exec_at_opts` options, ready to populate a
+/// [`CapturedSpawn`].
+#[derive(Default)]
+struct ExecOptions {
+    env: Vec<(String, String)>,
+    env_clear: bool,
+    cwd: Option<String>,
+    timeout: Option<Duration>,
+}
+
+/// Extract `exec_opts` / `exec_at_opts` options into an [`ExecOptions`].
+///
+/// `env_mode` mirrors the `process.exec` host op (and the env-clear footgun
+/// fix): the default is `"merge"` (overlay `env` keys on the inherited parent
+/// environment, keeping PATH/HOME/etc.); `"replace"` clears the parent
+/// environment first so only the provided keys remain.
+fn exec_options(label: &str, options: Option<&VmValue>) -> Result<ExecOptions, VmError> {
+    let opts = match options {
+        None | Some(VmValue::Nil) => return Ok(ExecOptions::default()),
+        Some(VmValue::Dict(opts)) => opts.clone(),
+        Some(other) => {
+            return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+                format!("{label}: options must be a dict, got {}", other.type_name()),
+            ))));
+        }
+    };
+    let env: Vec<(String, String)> = match opts.get("env") {
+        Some(VmValue::Dict(env)) => env.iter().map(|(k, v)| (k.clone(), v.display())).collect(),
+        None | Some(VmValue::Nil) => Vec::new(),
+        Some(other) => {
+            return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+                format!(
+                    "{label}: options.env must be a dict, got {}",
+                    other.type_name()
+                ),
+            ))));
+        }
+    };
+    let env_clear = match opts.get("env_mode").map(|v| v.display()).as_deref() {
+        None | Some("merge") => false,
+        Some("replace") => true,
+        Some(other) => {
+            return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+                format!(
+                    "{label}: options.env_mode must be \"merge\" or \"replace\", got {other:?}"
+                ),
+            ))));
+        }
+    };
+    let cwd = opts
+        .get("cwd")
+        .map(|v| v.display())
+        .filter(|s| !s.is_empty());
+    // Accept both `timeout` and `timeout_ms` (millis), matching the
+    // `process.exec` host op's tolerance.
+    let timeout = opts
+        .get("timeout")
+        .or_else(|| opts.get("timeout_ms"))
+        .and_then(|v| v.as_int())
+        .filter(|n| *n > 0)
+        .map(|n| Duration::from_millis(n as u64));
+    Ok(ExecOptions {
+        env,
+        env_clear,
+        cwd,
+        timeout,
+    })
+}
+
+/// Build the `exec`-shaped result dict (`stdout`/`stderr`/`status`/`success`)
+/// and additionally surface `timed_out` so options-form callers can detect a
+/// timeout kill without inspecting the exit status.
+fn captured_run_to_value(run: &CapturedRun) -> VmValue {
+    let status = if run.timed_out {
         -1
     } else {
-        output.status.code().unwrap_or(-1) as i64
+        run.output.status.code().unwrap_or(-1) as i64
     };
-    let success = if timed_out {
-        false
-    } else {
-        output.status.success()
-    };
+    let success = !run.timed_out && run.output.status.success();
     let mut result = BTreeMap::new();
-    result.insert("exit_code".to_string(), VmValue::Int(exit_code));
     result.insert(
         "stdout".to_string(),
         VmValue::String(std::sync::Arc::from(
-            String::from_utf8_lossy(&output.stdout).as_ref(),
+            String::from_utf8_lossy(&run.output.stdout).as_ref(),
         )),
     );
     result.insert(
         "stderr".to_string(),
         VmValue::String(std::sync::Arc::from(
-            String::from_utf8_lossy(&output.stderr).as_ref(),
+            String::from_utf8_lossy(&run.output.stderr).as_ref(),
         )),
     );
-    result.insert("duration_ms".to_string(), VmValue::Int(duration_ms));
+    result.insert("status".to_string(), VmValue::Int(status));
     result.insert("success".to_string(), VmValue::Bool(success));
-    result.insert("timed_out".to_string(), VmValue::Bool(timed_out));
-    Ok(VmValue::Dict(std::sync::Arc::new(result)))
+    result.insert("timed_out".to_string(), VmValue::Bool(run.timed_out));
+    result.insert("duration_ms".to_string(), VmValue::Int(run.duration_ms));
+    VmValue::Dict(std::sync::Arc::new(result))
+}
+
+#[harn_builtin(
+    sig = "exec_opts(command: list, options: dict?) -> dict",
+    category = "process"
+)]
+fn exec_opts_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let command = exec_opts_command("exec_opts", args.first())?;
+    let opts = exec_options("exec_opts", args.get(1))?;
+    let run = run_captured_spawn(CapturedSpawn {
+        label: "exec_opts",
+        cmd: &command[0],
+        args: &command[1..],
+        cwd: opts.cwd.as_deref(),
+        env: &opts.env,
+        env_clear: opts.env_clear,
+        stdin: None,
+        timeout: opts.timeout,
+    })?;
+    Ok(captured_run_to_value(&run))
+}
+
+#[harn_builtin(
+    sig = "exec_at_opts(dir: string, command: list, options: dict?) -> dict",
+    category = "process"
+)]
+fn exec_at_opts_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let dir = match args.first() {
+        Some(value) if !value.display().is_empty() => value.display(),
+        _ => {
+            return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+                "exec_at_opts: directory is required",
+            ))));
+        }
+    };
+    let command = exec_opts_command("exec_at_opts", args.get(1))?;
+    let opts = exec_options("exec_at_opts", args.get(2))?;
+    // The positional `dir` argument is the working directory; an explicit
+    // `options.cwd` (rare) overrides it so callers retain full control.
+    let resolved_cwd = opts.cwd.unwrap_or(dir);
+    let run = run_captured_spawn(CapturedSpawn {
+        label: "exec_at_opts",
+        cmd: &command[0],
+        args: &command[1..],
+        cwd: Some(resolved_cwd.as_str()),
+        env: &opts.env,
+        env_clear: opts.env_clear,
+        stdin: None,
+        timeout: opts.timeout,
+    })?;
+    Ok(captured_run_to_value(&run))
+}
+
+/// Validate the `command` argument shared by `exec_opts`/`exec_at_opts`: a
+/// non-empty list whose first element is a non-empty program name.
+fn exec_opts_command(label: &str, value: Option<&VmValue>) -> Result<Vec<String>, VmError> {
+    let items = match value {
+        Some(VmValue::List(items)) => items,
+        _ => {
+            return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+                format!("{label}: command must be a non-empty list of strings"),
+            ))));
+        }
+    };
+    let command: Vec<String> = items.iter().map(|v| v.display()).collect();
+    if command.is_empty() || command[0].is_empty() {
+        return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+            format!("{label}: command must be a non-empty list of strings"),
+        ))));
+    }
+    Ok(command)
 }
 
 /// Find the project root by walking up from a base directory looking for harn.toml.
@@ -1053,5 +1281,118 @@ mod tests {
 
         reset_process_state();
         let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[cfg(unix)]
+    fn exec_opts_list(items: &[&str]) -> VmValue {
+        VmValue::List(std::sync::Arc::new(
+            items
+                .iter()
+                .map(|s| VmValue::String(std::sync::Arc::from(*s)))
+                .collect(),
+        ))
+    }
+
+    #[cfg(unix)]
+    fn exec_opts_dict(pairs: &[(&str, VmValue)]) -> VmValue {
+        VmValue::Dict(std::sync::Arc::new(
+            pairs
+                .iter()
+                .map(|(k, v)| (k.to_string(), v.clone()))
+                .collect(),
+        ))
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn exec_opts_merges_env_with_parent_by_default() {
+        std::env::set_var("HARN_EXEC_OPTS_PARENT", "from-parent");
+        let env = exec_opts_dict(&[("CHILD", VmValue::String(std::sync::Arc::from("from-child")))]);
+        let args = vec![
+            exec_opts_list(&[
+                "/bin/sh",
+                "-c",
+                "printf '%s|%s' \"$HARN_EXEC_OPTS_PARENT\" \"$CHILD\"",
+            ]),
+            exec_opts_dict(&[("env", env)]),
+        ];
+        let mut out = String::new();
+        let result = exec_opts_impl(&args, &mut out).expect("exec_opts result");
+        let dict = result.as_dict().expect("dict");
+        assert_eq!(
+            dict.get("stdout").unwrap().display(),
+            "from-parent|from-child"
+        );
+        assert!(matches!(dict.get("success"), Some(VmValue::Bool(true))));
+        std::env::remove_var("HARN_EXEC_OPTS_PARENT");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn exec_opts_replace_env_clears_parent() {
+        std::env::set_var("HARN_EXEC_OPTS_PARENT2", "from-parent");
+        let env = exec_opts_dict(&[("CHILD", VmValue::String(std::sync::Arc::from("from-child")))]);
+        let args = vec![
+            exec_opts_list(&[
+                "/bin/sh",
+                "-c",
+                "printf '%s|%s' \"$HARN_EXEC_OPTS_PARENT2\" \"$CHILD\"",
+            ]),
+            exec_opts_dict(&[
+                ("env", env),
+                ("env_mode", VmValue::String(std::sync::Arc::from("replace"))),
+            ]),
+        ];
+        let mut out = String::new();
+        let result = exec_opts_impl(&args, &mut out).expect("exec_opts result");
+        let dict = result.as_dict().expect("dict");
+        assert_eq!(dict.get("stdout").unwrap().display(), "|from-child");
+        std::env::remove_var("HARN_EXEC_OPTS_PARENT2");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn exec_at_opts_honors_directory() {
+        let dir = std::env::temp_dir().join(format!("harn-exec-opts-cwd-{}", uuid::Uuid::now_v7()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let args = vec![
+            VmValue::String(std::sync::Arc::from(dir.to_string_lossy().into_owned())),
+            exec_opts_list(&["/bin/sh", "-c", "pwd -P"]),
+        ];
+        let mut out = String::new();
+        let result = exec_at_opts_impl(&args, &mut out).expect("exec_at_opts result");
+        let dict = result.as_dict().expect("dict");
+        // macOS /tmp is a symlink to /private/tmp; canonicalize for comparison.
+        let want = std::fs::canonicalize(&dir).unwrap();
+        let got = dict.get("stdout").unwrap().display();
+        assert_eq!(got.trim(), want.to_string_lossy());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn exec_opts_enforces_timeout() {
+        let args = vec![
+            exec_opts_list(&["/bin/sh", "-c", "sleep 5"]),
+            exec_opts_dict(&[("timeout", VmValue::Int(50))]),
+        ];
+        let mut out = String::new();
+        let result = exec_opts_impl(&args, &mut out).expect("exec_opts result");
+        let dict = result.as_dict().expect("dict");
+        assert!(
+            matches!(dict.get("timed_out"), Some(VmValue::Bool(true))),
+            "command exceeding timeout must report timed_out"
+        );
+        assert!(matches!(dict.get("success"), Some(VmValue::Bool(false))));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn exec_opts_rejects_empty_command() {
+        let args = vec![exec_opts_list(&[])];
+        let mut out = String::new();
+        assert!(exec_opts_impl(&args, &mut out).is_err());
+        let bad = vec![VmValue::String(std::sync::Arc::from("not-a-list"))];
+        assert!(exec_opts_impl(&bad, &mut out).is_err());
     }
 }

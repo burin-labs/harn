@@ -615,6 +615,8 @@ filesystem builtins remain supported as thin aliases for existing scripts.
 | `elapsed()` | none | int | Milliseconds since VM startup |
 | `exec(cmd, args...)` | cmd: string, args: strings | dict | Execute external command. Returns stdout/stderr plus status metadata and `success` |
 | `exec_at(dir, cmd, args...)` | dir: string, cmd: string, args: strings | dict | Execute external command inside a specific directory |
+| `exec_opts(command, options?)` | command: list of strings, options: dict | dict | Options form of `exec`: `command` is an argv list, `options` is `{env?, env_mode?, cwd?, timeout?}`. `env` overlays the inherited parent environment by default (`env_mode: "merge"`); pass `env_mode: "replace"` to clear the parent env first. `timeout` is milliseconds. Returns the same `{stdout, stderr, status, success}` shape as `exec`, plus `timed_out`/`duration_ms` |
+| `exec_at_opts(dir, command, options?)` | dir: string, command: list of strings, options: dict | dict | Options form of `exec_at`: run argv `command` in `dir` with the same `{env?, env_mode?, cwd?, timeout?}` options as `exec_opts`. An explicit `options.cwd` overrides the positional `dir` |
 | `shell(cmd)` | cmd: string | dict | Execute command via shell. Returns stdout/stderr plus status metadata and `success` |
 | `shell_at(dir, cmd)` | dir: string, cmd: string | dict | Execute shell command inside a specific directory |
 | `harness.process.spawn_captured(opts)` | opts: dict | dict | Run an external command synchronously through the `Harness` process capability. `opts` is `{cmd, args?, cwd?, env?, stdin?, timeout_ms?}` and supports feeding a stdin payload plus a per-call timeout. Returns `{exit_code, stdout, stderr, duration_ms, success, timed_out}`. On timeout the child is killed, `exit_code = -1`, `success = false`, and `timed_out = true` |
@@ -1523,6 +1525,21 @@ Programmatic execution should prefer argv mode (`process.exec` with
 `mode: "argv"`). Shell mode is for user-authored commands; callers can pass a
 shell object or shell ID discovered through this capability, or omit both to use
 the selected default shell.
+
+`process.exec` accepts an optional `env` dict and an `env_mode` that controls
+how those keys combine with the parent environment:
+
+- `env_mode: "merge"` (the default) overlays the provided `env` keys on the
+  inherited parent environment, so PATH/HOME and the rest survive. This is the
+  least-surprising behavior: `env: {ONE_VAR: "x"}` adds one variable rather than
+  wiping the child's entire environment.
+- `env_mode: "replace"` clears the parent environment first, so the child sees
+  only the keys you provide (plus any `env_remove` exclusions). Use this when you
+  need a fully hermetic environment.
+
+For convenience-builtin callers, `exec_opts`/`exec_at_opts` expose the same
+`{env, env_mode, cwd, timeout}` options without dropping to the verbose
+`host_call("process.exec", {...})` form.
 
 Prefer `host_call("capability.operation", args)` in shared wrappers and
 host-owned `.harn` modules so capability names stay consistent across the
