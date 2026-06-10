@@ -241,6 +241,22 @@ fn push_rule(
             )));
         }
     };
+    // Landlock rejects (EINVAL) a PATH_BENEATH rule whose `parent_fd`
+    // points at a non-directory file but whose `allowed_access` carries
+    // directory-only rights (READ_DIR, the MAKE_*/REMOVE_* family,
+    // REFER). Read-root presets routinely resolve to *files* (e.g.
+    // `~/.gitconfig`, `~/.cargo/config.toml`), so mask the directory-only
+    // bits off when the handle is not a directory. The remaining
+    // file-applicable rights (READ_FILE/EXECUTE/WRITE_FILE/…) still apply.
+    let is_dir = file
+        .metadata()
+        .map(|metadata| metadata.is_dir())
+        .unwrap_or(false);
+    let allowed_access = if is_dir {
+        allowed_access
+    } else {
+        allowed_access & !DIRECTORY_ONLY_ACCESS_FS
+    };
     profile.rules.push(LandlockRule {
         file,
         allowed_access: allowed_access & profile.handled_access_fs,
@@ -496,6 +512,24 @@ const LANDLOCK_ACCESS_FS_REFER: u64 = 1 << 13;
 const LANDLOCK_ACCESS_FS_TRUNCATE: u64 = 1 << 14;
 const LANDLOCK_ACCESS_FS_IOCTL_DEV: u64 = 1 << 15;
 
+/// Access rights that Landlock only permits on a *directory* handle. A
+/// PATH_BENEATH rule that pairs any of these with a non-directory
+/// `parent_fd` is rejected with EINVAL, so [`push_rule`] strips them when
+/// the resolved path is a regular file. (`READ_FILE`, `WRITE_FILE`,
+/// `EXECUTE`, `TRUNCATE`, and `IOCTL_DEV` are valid on file handles and
+/// are intentionally absent here.)
+const DIRECTORY_ONLY_ACCESS_FS: u64 = LANDLOCK_ACCESS_FS_READ_DIR
+    | LANDLOCK_ACCESS_FS_REMOVE_DIR
+    | LANDLOCK_ACCESS_FS_REMOVE_FILE
+    | LANDLOCK_ACCESS_FS_MAKE_CHAR
+    | LANDLOCK_ACCESS_FS_MAKE_DIR
+    | LANDLOCK_ACCESS_FS_MAKE_REG
+    | LANDLOCK_ACCESS_FS_MAKE_SOCK
+    | LANDLOCK_ACCESS_FS_MAKE_FIFO
+    | LANDLOCK_ACCESS_FS_MAKE_BLOCK
+    | LANDLOCK_ACCESS_FS_MAKE_SYM
+    | LANDLOCK_ACCESS_FS_REFER;
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -649,6 +683,56 @@ mod tests {
                 "{device} must not receive device ioctl access"
             );
         }
+    }
+
+    #[test]
+    fn directory_only_access_excludes_file_applicable_rights() {
+        // The file-applicable rights must never be classified as
+        // directory-only, otherwise `push_rule` would strip a read/exec
+        // grant from a regular-file rule and silently under-scope it.
+        for right in [
+            LANDLOCK_ACCESS_FS_READ_FILE,
+            LANDLOCK_ACCESS_FS_WRITE_FILE,
+            LANDLOCK_ACCESS_FS_EXECUTE,
+            LANDLOCK_ACCESS_FS_TRUNCATE,
+            LANDLOCK_ACCESS_FS_IOCTL_DEV,
+        ] {
+            assert_eq!(
+                DIRECTORY_ONLY_ACCESS_FS & right,
+                0,
+                "file-applicable right {right:#x} must not be directory-only",
+            );
+        }
+        // READ_DIR is the right that triggers the EINVAL on regular files.
+        assert_ne!(
+            DIRECTORY_ONLY_ACCESS_FS & LANDLOCK_ACCESS_FS_READ_DIR,
+            0,
+            "READ_DIR must be classified as directory-only",
+        );
+    }
+
+    #[test]
+    fn read_only_access_on_a_regular_file_drops_directory_only_bits() {
+        // A read-only preset root that resolves to a *file* (e.g.
+        // `~/.gitconfig`) must end up with only file-applicable rights;
+        // the `READ_DIR` bit in `read_only_access()` would otherwise make
+        // `landlock_add_rule` return EINVAL.
+        let masked = read_only_access() & !DIRECTORY_ONLY_ACCESS_FS;
+        assert_eq!(
+            masked & LANDLOCK_ACCESS_FS_READ_DIR,
+            0,
+            "READ_DIR must be stripped for non-directory rules",
+        );
+        assert_ne!(
+            masked & LANDLOCK_ACCESS_FS_READ_FILE,
+            0,
+            "READ_FILE must survive for non-directory rules",
+        );
+        assert_ne!(
+            masked & LANDLOCK_ACCESS_FS_EXECUTE,
+            0,
+            "EXECUTE must survive for non-directory rules",
+        );
     }
 
     #[test]
