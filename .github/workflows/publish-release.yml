@@ -13,10 +13,19 @@ name: Publish release
 #
 #   2. push to main — no-op/self-heal only. A release whose Cargo.toml
 #      version is ahead of the latest `vX.Y.Z` tag must already have a
-#      matching `vX.Y.Z` tag at the bumping commit. If not, this
-#      workflow fails loudly instead of tagging main HEAD. That makes
+#      matching `vX.Y.Z` tag at the bumping commit. The one EXPECTED
+#      exception is the release-commit transient: the `Release vX.Y.Z`
+#      commit lands on main a few seconds before the signed `vX.Y.Z` tag
+#      is pushed at that same commit, so for that brief window the version
+#      is ahead with no matching tag yet. When HEAD is the genuine
+#      `Release vX.Y.Z` commit for the current version, this run is a
+#      clean no-op (drift=false, exit 0) and waits for the tag push to
+#      publish — it does NOT turn main red. If the version is ahead with
+#      no matching tag and HEAD is NOT that release commit, the workflow
+#      still fails loudly instead of tagging main HEAD. That keeps
 #      tag-first publishing mandatory: concurrent merge-queue entries
-#      cannot leak into the published artifact.
+#      cannot leak into the published artifact, and a stray version bump
+#      without a tag is still caught.
 #
 #   3. workflow_dispatch — manual recovery for the partial-failure case
 #      (tag pushed but crates.io publish was incomplete). With no
@@ -134,6 +143,32 @@ jobs:
           resolve_tag_commit() {
             git rev-list -n 1 "$1" 2>/dev/null || true
           }
+          # True when HEAD is the legitimate "Release vX.Y.Z" commit for the
+          # current Cargo.toml version, i.e. the merge-queue squash commit
+          # whose subject is `Release v$CARGO_VERSION` (with optional
+          # ` (#N)` squash suffix) AND which is the commit that actually
+          # bumped the workspace version to $CARGO_VERSION. The version-bump
+          # confirmation is what keeps this from rubber-stamping any commit
+          # someone titles "Release …": a forged subject that did not touch
+          # the `version =` line still fails the strict guard below.
+          head_is_release_commit_for_cargo_version() {
+            local subject
+            subject="$(git log -1 --format='%s' HEAD)"
+            if [[ ! "$subject" =~ ^Release\ v"$CARGO_VERSION"([[:space:]].*)?$ ]]; then
+              return 1
+            fi
+            # Confirm this very commit introduced the current version. The
+            # release commit is the one that changes the workspace
+            # `version = "X.Y.Z"` line in the root Cargo.toml.
+            git show HEAD -- Cargo.toml \
+              | grep -Eq "^\+version = \"$CARGO_VERSION\"" || return 1
+            return 0
+          }
+          # Return codes:
+          #   0  -> proceed (tag already at HEAD; recovery can use the tag)
+          #  10  -> expected transient (release commit landed, tag imminent):
+          #         caller should treat as no-op and exit 0
+          #  exit 1 -> genuine drift: hard-fail (preserved protection)
           require_tag_first_main_publish() {
             if [[ "$EVENT_NAME" != "push" || "$REF_TYPE" != "branch" || "$REF_NAME" != "main" ]]; then
               return 0
@@ -141,7 +176,20 @@ jobs:
             local matching_tag_commit
             matching_tag_commit="$(resolve_tag_commit "$MATCHING_TAG")"
             if [[ -z "$matching_tag_commit" ]]; then
-              echo "::error::Cargo.toml=$CARGO_VERSION is ahead of latest tag ${LATEST_TAG:-<none>}, but $MATCHING_TAG does not exist. Push $MATCHING_TAG at the release commit before merging; publish-release.yml will not tag main HEAD."
+              # Tag-first publishing is deliberately racy on the main-push
+              # side: the `Release vX.Y.Z` commit lands on main a few seconds
+              # before the signed `vX.Y.Z` tag is pushed at that same commit.
+              # During that window Cargo.toml is ahead of the latest tag with
+              # no matching tag yet. That transient is EXPECTED and must not
+              # turn main red — the tag push is the real publish trigger.
+              # Only tolerate it when HEAD is the genuine release commit for
+              # this exact version; otherwise a non-release commit bumped the
+              # version without a tag and we still fail loudly.
+              if head_is_release_commit_for_cargo_version; then
+                echo "::notice::Release commit for $CARGO_VERSION detected on main; $MATCHING_TAG not pushed yet. Waiting for the tag push to publish — this main-push run is a no-op, not a failure."
+                return 10
+              fi
+              echo "::error::Cargo.toml=$CARGO_VERSION is ahead of latest tag ${LATEST_TAG:-<none>}, but $MATCHING_TAG does not exist and HEAD is not a 'Release v$CARGO_VERSION' commit. Push $MATCHING_TAG at the release commit before merging; publish-release.yml will not tag main HEAD."
               exit 1
             fi
             if [[ "$matching_tag_commit" != "$HEAD_SHA" ]]; then
@@ -150,6 +198,24 @@ jobs:
             fi
             MAIN_DRIFT_PUBLISH_REF="$MATCHING_TAG"
             echo "::notice::$MATCHING_TAG already points at this main commit; any publish recovery will use the tag, not main HEAD."
+          }
+          # Wrapper that converts the "expected transient" return code (10)
+          # into a clean no-op: emit drift=false outputs and exit 0 so the
+          # publish job skips and main CI stays green until the tag push
+          # fires the real publish run.
+          guard_tag_first_or_skip() {
+            local rc=0
+            require_tag_first_main_publish || rc=$?
+            if [[ "$rc" -eq 10 ]]; then
+              {
+                echo "drift=false"
+                echo "cargo_version=$CARGO_VERSION"
+                echo "latest_tag=$LATEST_TAG"
+                echo "publish_ref=main"
+              } >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            return "$rc"
           }
 
           # Tag-push trigger ("tag is truth"). The release harness pushed
@@ -174,11 +240,11 @@ jobs:
           fi
 
           if [[ -z "$LATEST_TAG" ]]; then
-            require_tag_first_main_publish
+            guard_tag_first_or_skip
             DRIFT=true
             echo "::notice::No vX.Y.Z tags exist yet; treating Cargo.toml=$CARGO_VERSION as drift (first release)."
           elif version_gt "$CARGO_VERSION" "$LATEST_VERSION"; then
-            require_tag_first_main_publish
+            guard_tag_first_or_skip
             DRIFT=true
             echo "::notice::Cargo.toml=$CARGO_VERSION ahead of latest tag $LATEST_TAG → finalize needed."
           elif [[ "$CARGO_VERSION" != "$LATEST_VERSION" ]]; then
