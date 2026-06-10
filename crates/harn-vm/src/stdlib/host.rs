@@ -712,9 +712,25 @@ async fn dispatch_process_exec_after_policy(
         cmd.current_dir(cwd);
     }
     if let Some(env) = optional_string_dict(params, "env")? {
+        // `env_mode` controls how the provided `env` keys combine with the
+        // parent environment:
+        //   - "merge" (default): inherit the parent env and overlay the
+        //     provided keys. This is the least-surprising behavior — a
+        //     caller passing `env: {ONE_VAR: "x"}` keeps PATH/HOME/etc.
+        //   - "replace": clear the parent env entirely, then set only the
+        //     provided keys. Must be requested explicitly now; previously
+        //     this was the (footgun) default whenever `env` was supplied.
         let env_mode = optional_string(params, "env_mode");
-        if env_mode.as_deref().unwrap_or("replace") == "replace" {
-            cmd.env_clear();
+        match env_mode.as_deref().unwrap_or("merge") {
+            "replace" => {
+                cmd.env_clear();
+            }
+            "merge" => {}
+            other => {
+                return Err(VmError::Runtime(format!(
+                    "host_call process.exec: unknown env_mode {other:?}; expected \"merge\" or \"replace\""
+                )));
+            }
         }
         for (key, value) in env {
             cmd.env(key, value);
@@ -1483,6 +1499,127 @@ mod tests {
                     .unwrap_or_default()
                     .contains("cat *"),
                 "blocked result should name the matched policy pattern"
+            );
+        });
+    }
+
+    #[cfg(unix)]
+    async fn process_exec_env_probe(env: VmValue, env_mode: Option<&str>) -> (String, String) {
+        // Run `sh -c 'printf "%s|%s" "$PARENT_VAR" "$CHILD_VAR"'` so we can
+        // observe whether an inherited parent var survives alongside the
+        // explicitly-provided child var. The parent var is set on this
+        // process's environment immediately before the spawn.
+        std::env::set_var("PARENT_VAR", "inherited");
+        let mut params = BTreeMap::from([
+            (
+                "mode".to_string(),
+                VmValue::String(std::sync::Arc::from("argv")),
+            ),
+            (
+                "argv".to_string(),
+                VmValue::List(std::sync::Arc::new(vec![
+                    // Absolute path so the spawn does not depend on PATH,
+                    // which the `replace` case intentionally clears.
+                    VmValue::String(std::sync::Arc::from("/bin/sh")),
+                    VmValue::String(std::sync::Arc::from("-c")),
+                    VmValue::String(std::sync::Arc::from(
+                        "printf '%s|%s' \"$PARENT_VAR\" \"$CHILD_VAR\"",
+                    )),
+                ])),
+            ),
+            ("env".to_string(), env),
+        ]);
+        if let Some(mode) = env_mode {
+            params.insert(
+                "env_mode".to_string(),
+                VmValue::String(std::sync::Arc::from(mode)),
+            );
+        }
+        let result = super::dispatch_process_exec(&params, serde_json::Value::Null)
+            .await
+            .expect("process.exec result");
+        let dict = result.as_dict().expect("result dict");
+        let stdout = dict.get("stdout").map(VmValue::display).unwrap_or_default();
+        std::env::remove_var("PARENT_VAR");
+        let (parent, child) = stdout.split_once('|').unwrap_or((&stdout, ""));
+        (parent.to_string(), child.to_string())
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn process_exec_env_default_merges_with_parent() {
+        run_host_async_test(|| async {
+            // No `env_mode`: the provided key must be added WITHOUT clearing
+            // the inherited parent environment (the env-clear footgun fix).
+            let child_env = VmValue::Dict(std::sync::Arc::new(BTreeMap::from([(
+                "CHILD_VAR".to_string(),
+                VmValue::String(std::sync::Arc::from("provided")),
+            )])));
+            let (parent, child) = process_exec_env_probe(child_env, None).await;
+            assert_eq!(
+                parent, "inherited",
+                "default env_mode must inherit parent env"
+            );
+            assert_eq!(
+                child, "provided",
+                "default env_mode must apply provided keys"
+            );
+        });
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn process_exec_env_mode_replace_clears_parent() {
+        run_host_async_test(|| async {
+            // Explicit `replace`: the inherited parent var must be gone and
+            // only the provided key survives. This preserves the ability to
+            // fully replace the environment when intentionally requested.
+            let child_env = VmValue::Dict(std::sync::Arc::new(BTreeMap::from([(
+                "CHILD_VAR".to_string(),
+                VmValue::String(std::sync::Arc::from("provided")),
+            )])));
+            let (parent, child) = process_exec_env_probe(child_env, Some("replace")).await;
+            assert_eq!(parent, "", "explicit replace must clear parent env");
+            assert_eq!(
+                child, "provided",
+                "explicit replace must keep provided keys"
+            );
+        });
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn process_exec_env_mode_unknown_is_rejected() {
+        run_host_async_test(|| async {
+            let params = BTreeMap::from([
+                (
+                    "mode".to_string(),
+                    VmValue::String(std::sync::Arc::from("argv")),
+                ),
+                (
+                    "argv".to_string(),
+                    VmValue::List(std::sync::Arc::new(vec![VmValue::String(
+                        std::sync::Arc::from("true"),
+                    )])),
+                ),
+                (
+                    "env".to_string(),
+                    VmValue::Dict(std::sync::Arc::new(BTreeMap::from([(
+                        "CHILD_VAR".to_string(),
+                        VmValue::String(std::sync::Arc::from("x")),
+                    )]))),
+                ),
+                (
+                    "env_mode".to_string(),
+                    VmValue::String(std::sync::Arc::from("bogus")),
+                ),
+            ]);
+            let err = super::dispatch_process_exec(&params, serde_json::Value::Null)
+                .await
+                .expect_err("unknown env_mode must error");
+            assert!(
+                format!("{err:?}").contains("env_mode"),
+                "error should name env_mode, got {err:?}"
             );
         });
     }
