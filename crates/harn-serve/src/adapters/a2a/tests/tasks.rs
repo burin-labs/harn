@@ -649,7 +649,7 @@ fn a2a_worker_sink_does_not_override_terminal_task_with_progress() {
     );
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "current_thread")]
 async fn worker_event_emitted_during_dispatch_streams_to_task_subscribers() {
     // End-to-end: a Harn function that emits a `WorkerUpdate`
     // through the canonical sink registry must surface as a task
@@ -698,6 +698,7 @@ pub fn run(task: string) -> string {
         tasks: server.tasks.clone(),
     });
     harn_vm::agent_events::register_sink(session_id.clone(), sink);
+    let _sink_cleanup = SessionSinkCleanup(session_id.clone());
     // Push the session so emit_event routes correctly even though
     // we're not going through the full dispatch wrapper here. In
     // production, `invoke_function` does this via the
@@ -740,8 +741,14 @@ pub fn run(task: string) -> string {
             .and_then(JsonValue::as_bool),
         Some(true)
     );
+}
 
-    harn_vm::agent_events::clear_session_sinks(&session_id);
+struct SessionSinkCleanup(String);
+
+impl Drop for SessionSinkCleanup {
+    fn drop(&mut self) {
+        harn_vm::agent_events::clear_session_sinks(&self.0);
+    }
 }
 
 #[test]

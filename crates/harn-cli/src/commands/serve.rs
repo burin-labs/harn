@@ -3,6 +3,7 @@ use std::convert::Infallible;
 use std::net::SocketAddr;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
+use std::time::Duration as StdDuration;
 
 use axum::body::Bytes;
 use axum::extract::{DefaultBodyLimit, Query, State};
@@ -28,7 +29,7 @@ use uuid::Uuid;
 
 use crate::cli::{
     A2aServeArgs, AcpServeTransport, ApiServeArgs, McpServeTransport, ServeAcpArgs, ServeMcpArgs,
-    ServeObsMode, ServeTlsMode, SiteServeArgs,
+    ServeObsMode, ServeTlsMode, SiteServeArgs, WorkerServeArgs,
 };
 
 /// Default 10 MiB request-body cap applied to every `harn serve` HTTP
@@ -190,6 +191,52 @@ pub(crate) async fn run_site_server(args: &SiteServeArgs) -> Result<(), String> 
             bind: args.bind,
             public_url: args.public_url.clone(),
             tls,
+        })
+        .await
+}
+
+pub(crate) async fn run_worker_server(args: &WorkerServeArgs) -> Result<(), String> {
+    apply_obs_mode(args.obs)?;
+    let script_path = Path::new(&args.file).to_path_buf();
+    let options = harn_serve::WorkerServeOptions {
+        consumer_id: args.consumer_id.clone(),
+        claim_ttl: StdDuration::from_secs(args.claim_ttl_secs),
+        drain_timeout: StdDuration::from_secs(args.drain_timeout_secs),
+    };
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async move {
+            let server = harn_serve::start_worker_server(&script_path, options)
+                .await
+                .map_err(|error| error.to_string())?;
+            let job_count = server.jobs().len();
+            let queue_count = server
+                .jobs()
+                .iter()
+                .filter_map(|job| job.queue.as_deref())
+                .collect::<BTreeSet<_>>()
+                .len();
+            eprintln!(
+                "[harn] worker ready: jobs={job_count} queues={queue_count} script={}",
+                script_path.display()
+            );
+
+            tokio::signal::ctrl_c()
+                .await
+                .map_err(|error| format!("failed to wait for shutdown signal: {error}"))?;
+            let report = server.shutdown().await.map_err(|error| error.to_string())?;
+            if !report.drained {
+                return Err(format!(
+                    "worker shutdown timed out with {} in-flight dispatch(es), {} retry item(s), and {} DLQ item(s)",
+                    report.in_flight, report.retry_queue_depth, report.dlq_depth
+                ));
+            }
+            eprintln!(
+                "[harn] worker stopped: jobs={} queues={} dlq={}",
+                report.jobs, report.queues, report.dlq_depth
+            );
+            Ok(())
         })
         .await
 }

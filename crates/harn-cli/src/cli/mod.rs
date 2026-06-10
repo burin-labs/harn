@@ -186,7 +186,7 @@ pub(crate) use runs::{ReplayArgs, RunsArgs, RunsCommand};
 pub(crate) use scan::ScanArgs;
 pub(crate) use serve::{
     A2aServeArgs, AcpServeTransport, ApiServeArgs, McpServeTransport, ServeAcpArgs, ServeArgs,
-    ServeCommand, ServeMcpArgs, ServeObsMode, ServeTlsMode, SiteServeArgs,
+    ServeCommand, ServeMcpArgs, ServeObsMode, ServeTlsMode, SiteServeArgs, WorkerServeArgs,
 };
 pub(crate) use session::{
     SessionArgs, SessionCommand, SessionExportArgs, SessionImportArgs, SessionSchemaArgs,

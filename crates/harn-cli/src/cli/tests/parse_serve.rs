@@ -179,6 +179,36 @@ fn test_parses_serve_api() {
 }
 
 #[test]
+fn test_parses_serve_worker() {
+    let cli = Cli::parse_from([
+        "harn",
+        "serve",
+        "worker",
+        "--consumer-id",
+        "local-worker",
+        "--claim-ttl-secs",
+        "60",
+        "--drain-timeout-secs",
+        "5",
+        "--obs",
+        "stderr",
+        "worker.harn",
+    ]);
+
+    let Command::Serve(args) = cli.command.unwrap() else {
+        panic!("expected serve command");
+    };
+    let crate::cli::ServeCommand::Worker(serve) = args.command else {
+        panic!("expected serve worker");
+    };
+    assert_eq!(serve.consumer_id.as_deref(), Some("local-worker"));
+    assert_eq!(serve.claim_ttl_secs, 60);
+    assert_eq!(serve.drain_timeout_secs, 5);
+    assert_eq!(serve.obs, crate::cli::ServeObsMode::Stderr);
+    assert_eq!(serve.file, "worker.harn");
+}
+
+#[test]
 fn test_parses_portal_flags() {
     let cli = Cli::parse_from([
         "harn", "portal", "--dir", "runs", "--host", "0.0.0.0", "--port", "4900", "--open", "false",

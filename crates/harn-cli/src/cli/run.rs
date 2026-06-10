@@ -51,7 +51,7 @@ pub(crate) struct RunArgs {
     /// carry a `@job("name")` attribute; the request JSON is delivered to
     /// the handler as `event.provider_payload.raw`, and the value the job
     /// returns is printed as a JSON report on stdout. Retry / dead-letter
-    /// / budget / cancellation come from the trigger dispatcher. See #3171.
+    /// / budget / cancellation come from the trigger dispatcher.
     #[arg(
         long = "as-job",
         action = clap::ArgAction::SetTrue,
