@@ -53,7 +53,7 @@ adapter renders it into a real `axum::Response`:
 | `http_error(status, code, message, details?)`    | error envelope: `{ code, message, request_id, details? }` |
 | `http_stream(source, content_type?)`             | streamed body, `source` is a list or channel of chunks  |
 | `http_sse(source, retry_ms?)`                    | Server-Sent Events, `source` is a list or channel       |
-| `http_reply(status, body?, headers?)`            | low-level escape hatch for arbitrary 1xx-5xx codes      |
+| `http_reply(status, body?, headers?)`            | low-level escape hatch for arbitrary 1xx-5xx codes; a `bytes` body is rendered byte-exact |
 
 Plain values returned from a handler still work — they degrade to
 `200 OK` with `Content-Type: application/json`. Untagged dicts that
@@ -186,18 +186,19 @@ Mapping:
 
 - the request dict mirrors the in-process `http_server` shape:
   `{ method, path, route, path_params, params, query, headers, body,
-  body_base64, content_length, client_ip, remote_addr }`
-- `body` is the UTF-8-lossy view; `body_base64` is the standard-base64
-  encoding of the raw bytes, so binary payloads (e.g. a multipart upload)
-  round-trip losslessly — recover them with
-  `bytes_from_base64(req.body_base64)` and hand the result to
-  `multipart_parse`
+  body_kind, body_base64, content_length, client_ip, remote_addr }`
+- `body` is set only when the payload is valid UTF-8; binary payloads set
+  `body` to `nil`, `body_kind` to `base64`, and `body_base64` to the
+  standard-base64 encoding of the raw bytes. Recover binary uploads with
+  `bytes_from_base64(req.body_base64)` and hand the result to `multipart_parse`
 - header keys are lower-cased; `client_ip` is read from
   `X-Forwarded-For` / `X-Real-IP` when present
 - responses go through the same codec as every other surface, so
   `http_ok` / `http_created` / `http_not_modified` / `http_error` /
-  `http_stream` / `http_sse` plus content negotiation, ETag, and
-  compression all behave identically
+  `http_stream` / `http_sse` / `http_reply` plus content negotiation, ETag,
+  and compression all behave identically. `http_reply(200, bytes, headers)`
+  returns the raw bytes with caller-supplied `Content-Type` /
+  `Content-Disposition` preserved.
 - WebSocket handlers return
   `http_upgrade_ws(req, { on_message: "fn_name" })`; the named function
   runs per inbound frame with a `{type, data}` / `{type, data_base64}`

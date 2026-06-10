@@ -48,7 +48,7 @@ pub fn conditional(req: dict) -> dict {
   if inm == etag {
     return http_not_modified(etag, {})
   }
-  return http_response(200, json_parse(body), { "ETag": etag })
+  return http_reply(200, json_parse(body), { "ETag": etag })
 }
 
 // Binary-safe multipart: the raw bytes survive the JSON dispatch boundary
@@ -57,7 +57,25 @@ pub fn conditional(req: dict) -> dict {
 pub fn upload(req: dict) -> dict {
   let raw = bytes_from_base64(req.body_base64)
   let parsed = multipart_parse(raw, req.headers["content-type"])
-  return http_ok({ "parts": parsed.field_count })
+  return http_ok({
+    "parts": parsed.field_count,
+    "body_is_nil": req.body == nil,
+    "body_kind": req.body_kind,
+    "body_base64_matches": bytes_to_base64(raw) == req.body_base64,
+    "content_length": req.content_length,
+  })
+}
+
+@route("GET", "/download")
+pub fn download(req: dict) -> dict {
+  return http_reply(
+    200,
+    bytes_from_base64("AP/+gA=="),
+    {
+      "Content-Type": "application/vnd.harn.harnpack",
+      "Content-Disposition": "attachment; filename=\"demo.harnpack\"",
+    },
+  )
 }
 
 // Zero-config: the handler_* convention mounts this at /ping.
@@ -306,13 +324,20 @@ async fn conditional_get_returns_304_via_http_not_modified() {
 async fn multipart_upload_is_observed_by_harn_handler() {
     let (_dir, router) = site_router();
     let boundary = "----site-host-boundary";
-    // Two fields, the second binary (a NUL byte) — proof the bytes survive
-    // the base64 round-trip into the handler intact.
-    let body = format!(
-        "--{boundary}\r\nContent-Disposition: form-data; name=\"title\"\r\n\r\nhello\r\n\
-         --{boundary}\r\nContent-Disposition: form-data; name=\"blob\"; filename=\"a.bin\"\r\n\
-         Content-Type: application/octet-stream\r\n\r\n\x00\x01\x02\r\n--{boundary}--\r\n"
+    // Two fields, the second deliberately invalid UTF-8, so the hosted
+    // request must expose the base64 body path instead of a lossy text view.
+    let mut body = Vec::new();
+    body.extend_from_slice(
+        format!(
+            "--{boundary}\r\nContent-Disposition: form-data; name=\"title\"\r\n\r\nhello\r\n\
+             --{boundary}\r\nContent-Disposition: form-data; name=\"blob\"; filename=\"a.bin\"\r\n\
+             Content-Type: application/octet-stream\r\n\r\n"
+        )
+        .as_bytes(),
     );
+    body.extend_from_slice(&[0x00, 0xff, 0xfe, 0x80]);
+    body.extend_from_slice(format!("\r\n--{boundary}--\r\n").as_bytes());
+    let body_len = body.len();
     let response = router
         .oneshot(
             Request::builder()
@@ -322,7 +347,7 @@ async fn multipart_upload_is_observed_by_harn_handler() {
                     header::CONTENT_TYPE,
                     format!("multipart/form-data; boundary={boundary}"),
                 )
-                .body(Body::from(body.into_bytes()))
+                .body(Body::from(body))
                 .unwrap(),
         )
         .await
@@ -330,6 +355,36 @@ async fn multipart_upload_is_observed_by_harn_handler() {
     let (status, parsed) = read_json(response).await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(parsed["parts"], 2);
+    assert_eq!(parsed["body_is_nil"], true);
+    assert_eq!(parsed["body_kind"], "base64");
+    assert_eq!(parsed["body_base64_matches"], true);
+    assert_eq!(parsed["content_length"].as_u64().unwrap(), body_len as u64);
+}
+
+#[tokio::test]
+async fn binary_response_from_harn_handler_round_trips_byte_exact() {
+    let (_dir, router) = site_router();
+    let response = router
+        .oneshot(
+            Request::builder()
+                .uri("/download")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        response.headers()[header::CONTENT_TYPE],
+        "application/vnd.harn.harnpack"
+    );
+    assert_eq!(
+        response.headers()[header::CONTENT_DISPOSITION],
+        "attachment; filename=\"demo.harnpack\""
+    );
+    let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    assert_eq!(body.as_ref(), &[0x00, 0xff, 0xfe, 0x80]);
 }
 
 #[tokio::test]
