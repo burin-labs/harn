@@ -76,6 +76,18 @@ pub struct ExportedFunction {
     /// handling lives in embedder Rust. The `.harn` function body is a
     /// declaration-only stub, exactly as for `@stream`.
     pub raw: bool,
+    /// `true` when the function carries a `@ws` attribute alongside its
+    /// HTTP route. Like `@stream`, a `@ws` route never dispatches into
+    /// the VM: after the site adapter's admission checks (the embedder's
+    /// `SiteAuth` hook plus `@scopes`) it performs the WebSocket upgrade
+    /// and hands the upgrade handle to the embedder's
+    /// `SiteStreamProvider::upgrade`, which drives the socket. The marker
+    /// is the seam for embedder routes that need a real WebSocket
+    /// connection (mirroring how `@stream` is the seam for SSE). It
+    /// conflicts with `@stream`/`@raw` (they target different provider
+    /// entry points), so declaring both drops `@ws`. The `.harn`
+    /// function body is a declaration-only stub.
+    pub ws: bool,
 }
 
 /// A `.harn` worker/job entrypoint declared with `@job("name")`.
@@ -226,6 +238,17 @@ pub const RAW_WITHOUT_ROUTE: &str = "HARN-SRV-012";
 /// buffers it for the provider), so `@raw` is dropped and the route
 /// behaves as `@stream`.
 pub const RAW_CONFLICTS_WITH_STREAM: &str = "HARN-SRV-013";
+/// `@ws` carries arguments — it is a bare marker. The marker is dropped,
+/// so the route dispatches into the VM like any other handler.
+pub const WS_BAD_ARGS: &str = "HARN-SRV-014";
+/// `@ws` appears on a declaration without an HTTP route. A WebSocket
+/// upgrade only means something on a routed `pub fn`, so it is ignored.
+pub const WS_WITHOUT_ROUTE: &str = "HARN-SRV-015";
+/// `@ws` and `@stream`/`@raw` appear on the same declaration. They route
+/// to different provider entry points (a WebSocket upgrade vs. an
+/// SSE/raw response), so they contradict; `@ws` is dropped and the route
+/// behaves as `@stream`/`@raw`.
+pub const WS_CONFLICTS_WITH_STREAM_OR_RAW: &str = "HARN-SRV-016";
 
 impl std::fmt::Display for ExportDiagnostic {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -288,6 +311,8 @@ impl ExportCatalog {
             let route = route_from_attributes(attrs, name, &mut diagnostics);
             let stream = stream_from_attributes(attrs, name, route.as_ref(), &mut diagnostics);
             let raw = raw_from_attributes(attrs, name, route.as_ref(), stream, &mut diagnostics);
+            let ws =
+                ws_from_attributes(attrs, name, route.as_ref(), stream || raw, &mut diagnostics);
             functions.insert(
                 name.clone(),
                 ExportedFunction {
@@ -305,6 +330,7 @@ impl ExportCatalog {
                     route,
                     stream,
                     raw,
+                    ws,
                     job: job_from_attributes(attrs, name, &mut diagnostics),
                 },
             );
@@ -332,6 +358,7 @@ impl ExportCatalog {
             // one is inert — diagnose it the same way as on an unrouted fn.
             let stream = stream_from_attributes(attrs, name, None, &mut diagnostics);
             let raw = raw_from_attributes(attrs, name, None, stream, &mut diagnostics);
+            let ws = ws_from_attributes(attrs, name, None, stream || raw, &mut diagnostics);
             functions
                 .entry(name.clone())
                 .or_insert_with(|| ExportedFunction {
@@ -352,6 +379,7 @@ impl ExportCatalog {
                     route: None,
                     stream,
                     raw,
+                    ws,
                     job: job_from_attributes(attrs, name, &mut diagnostics),
                 });
         }
@@ -645,6 +673,52 @@ fn raw_from_attributes(
         return false;
     }
     raw
+}
+
+/// Resolve the `@ws` marker on a declaration.
+///
+/// `@ws` mirrors `@stream` (a bare, route-only marker that turns the
+/// route into a provider-answered route), except the provider is handed
+/// a WebSocket upgrade handle instead of producing a response body. It
+/// conflicts with `@stream`/`@raw`: those target the provider's response
+/// entry point (`open`), while `@ws` targets the upgrade entry point
+/// (`upgrade`). Declaring `@ws` alongside either is diagnosed
+/// (`HARN-SRV-016`) and `@ws` is dropped — the route behaves as
+/// `@stream`/`@raw`.
+fn ws_from_attributes(
+    attrs: &[Attribute],
+    fn_name: &str,
+    route: Option<&RouteSpec>,
+    stream_or_raw: bool,
+    diagnostics: &mut Vec<ExportDiagnostic>,
+) -> bool {
+    let ws = bare_route_marker_from_attributes(
+        attrs,
+        "ws",
+        fn_name,
+        route,
+        diagnostics,
+        WS_BAD_ARGS,
+        WS_WITHOUT_ROUTE,
+    );
+    if ws && stream_or_raw {
+        let line = attrs
+            .iter()
+            .find(|attr| attr.name == "ws")
+            .map(|attr| attr.span.line)
+            .unwrap_or(0);
+        diagnostics.push(ExportDiagnostic {
+            code: WS_CONFLICTS_WITH_STREAM_OR_RAW,
+            line,
+            message: format!(
+                "`@ws` on `{fn_name}` conflicts with `@stream`/`@raw` (a WebSocket upgrade and an \
+                 SSE/raw response are different provider entry points); dropping `@ws` — the route \
+                 behaves as `@stream`/`@raw`"
+            ),
+        });
+        return false;
+    }
+    ws
 }
 
 /// Shared resolution for the bare route markers (`@stream`, `@raw`):
@@ -1590,5 +1664,98 @@ pub fn both(req: dict) -> dict { return http_ok({}) }
         assert!(!function.raw);
         let codes: Vec<&str> = catalog.diagnostics().iter().map(|d| d.code).collect();
         assert_eq!(codes, vec![RAW_CONFLICTS_WITH_STREAM]);
+    }
+
+    #[test]
+    fn ws_attribute_marks_routed_functions_only() {
+        let catalog = catalog_from_source(
+            r#"
+@ws
+@route("GET", "/socket")
+pub fn socket(req: dict) -> dict { return http_ok({}) }
+
+@ws
+pub fn handler_live(req: dict) -> dict { return http_ok({}) }
+
+@route("GET", "/plain")
+pub fn plain(req: dict) -> dict { return http_ok({}) }
+"#,
+        );
+        assert!(
+            catalog.diagnostics().is_empty(),
+            "unexpected diagnostics: {:?}",
+            catalog.diagnostics()
+        );
+        // Works with an explicit @route and with the handler_* convention.
+        assert!(catalog.function("socket").expect("socket").ws);
+        assert!(catalog.function("handler_live").expect("live").ws);
+        // A routed fn without the marker is a plain dispatch route.
+        assert!(!catalog.function("plain").expect("plain").ws);
+        // `@ws` never implies `@stream` / `@raw`.
+        assert!(!catalog.function("socket").expect("socket").stream);
+        assert!(!catalog.function("socket").expect("socket").raw);
+    }
+
+    #[test]
+    fn ws_with_args_is_diagnosed_and_dropped() {
+        let catalog = catalog_from_source(
+            r#"
+@ws("chat")
+@route("GET", "/socket")
+pub fn socket(req: dict) -> dict { return http_ok({}) }
+"#,
+        );
+        assert!(!catalog.function("socket").expect("socket").ws);
+        let codes: Vec<&str> = catalog.diagnostics().iter().map(|d| d.code).collect();
+        assert_eq!(codes, vec![WS_BAD_ARGS]);
+    }
+
+    #[test]
+    fn ws_without_route_is_diagnosed_and_ignored() {
+        let catalog = catalog_from_source(
+            r"
+@ws
+pub fn helper(req: dict) -> dict { return req }
+",
+        );
+        assert!(!catalog.function("helper").expect("helper").ws);
+        let codes: Vec<&str> = catalog.diagnostics().iter().map(|d| d.code).collect();
+        assert_eq!(codes, vec![WS_WITHOUT_ROUTE]);
+    }
+
+    #[test]
+    fn ws_conflicting_with_stream_is_diagnosed_and_dropped() {
+        let catalog = catalog_from_source(
+            r#"
+@stream
+@ws
+@route("GET", "/both")
+pub fn both(req: dict) -> dict { return http_ok({}) }
+"#,
+        );
+        // `@stream` wins; `@ws` is dropped with a diagnostic.
+        let function = catalog.function("both").expect("both");
+        assert!(function.stream);
+        assert!(!function.ws);
+        let codes: Vec<&str> = catalog.diagnostics().iter().map(|d| d.code).collect();
+        assert_eq!(codes, vec![WS_CONFLICTS_WITH_STREAM_OR_RAW]);
+    }
+
+    #[test]
+    fn ws_conflicting_with_raw_is_diagnosed_and_dropped() {
+        let catalog = catalog_from_source(
+            r#"
+@raw
+@ws
+@route("POST", "/both")
+pub fn both(req: dict) -> dict { return http_ok({}) }
+"#,
+        );
+        // `@raw` wins; `@ws` is dropped with a diagnostic.
+        let function = catalog.function("both").expect("both");
+        assert!(function.raw);
+        assert!(!function.ws);
+        let codes: Vec<&str> = catalog.diagnostics().iter().map(|d| d.code).collect();
+        assert_eq!(codes, vec![WS_CONFLICTS_WITH_STREAM_OR_RAW]);
     }
 }

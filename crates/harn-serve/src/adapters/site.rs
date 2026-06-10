@@ -96,6 +96,22 @@
 //! the function's return value is sent back (a string verbatim, any other
 //! value as JSON, `nil` sends nothing). This reuses the exact subprotocol
 //! negotiation and idle-keepalive machinery the other WS routes use.
+//!
+//! ## Embedder-driven WebSockets (`@ws`)
+//!
+//! The envelope path above runs the socket *in the VM* — each frame is a
+//! `.harn` dispatch. An embedder that owns the socket in Rust (a CLI
+//! proxy, a fan-out event hub) needs the raw upgrade handle instead. A
+//! route carrying the bare `@ws` attribute is that seam: like `@stream`
+//! it skips the VM and is answered by the same [`SiteStreamProvider`]
+//! after the same admission ([`SiteAuth`] hook + `@scopes`), but the
+//! adapter extracts the [`WebSocketUpgrade`] (auth gates it *before* the
+//! connection is handed off) and calls
+//! [`SiteStreamProvider::upgrade`], forwarding the `101` it returns. The
+//! provider drives the socket; the `.harn` function is a
+//! declaration-only stub that owns the route, its `@scopes`, and its
+//! docs. A non-WebSocket request to a `@ws` route is refused with the
+//! correct 4xx by axum's extractor — never a stray upgrade.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::net::{IpAddr, SocketAddr};
@@ -251,6 +267,56 @@ pub trait SiteStreamProvider: Send + Sync {
         request: Value,
         body: Option<Bytes>,
     ) -> Response;
+
+    /// Answer one admitted `@ws` request by completing the WebSocket
+    /// upgrade and driving the socket.
+    ///
+    /// This is the WebSocket sibling of [`open`](Self::open): a route
+    /// whose `.harn` export carries the bare `@ws` marker (see
+    /// [`crate::exports`]) never dispatches into the VM. After the same
+    /// admission — the [`SiteAuth`] hook plus the route's `@scopes` —
+    /// the adapter extracts the [`axum::extract::ws::WebSocketUpgrade`]
+    /// while the raw connection's `OnUpgrade` handle is still present,
+    /// then hands it here. The provider completes the handshake with
+    /// [`WebSocketUpgrade::on_upgrade`] (or harn-serve's own WS helpers)
+    /// and owns the socket for its lifetime; the `101 Switching
+    /// Protocols` response it returns is forwarded to the client
+    /// verbatim. Auth gates the upgrade *before* the connection is handed
+    /// off, exactly as it gates a `@stream` response.
+    ///
+    /// * `route` — the matched function's declared [`RouteSpec`].
+    /// * `auth` — the identity the [`SiteAuth`] hook resolved (tenant,
+    ///   scopes, opaque context); `None` when no hook is installed.
+    /// * `ws` — the extracted upgrade handle. Calling `on_upgrade`
+    ///   yields the live socket; the returned [`Response`] is the 101.
+    /// * `request` — the request head as the same JSON dict
+    ///   [`open`](Self::open) receives, minus any body (a WebSocket
+    ///   handshake carries none).
+    ///
+    /// The default implementation refuses with `426 Upgrade Required`,
+    /// so a provider that only serves `@stream`/`@raw` routes keeps
+    /// compiling and a misconfigured `@ws` route fails loudly rather
+    /// than 101-ing into a socket nobody drives.
+    async fn upgrade(
+        &self,
+        route: &RouteSpec,
+        _auth: Option<&SiteAuthContext>,
+        _ws: WebSocketUpgrade,
+        _request: Value,
+    ) -> Response {
+        (
+            StatusCode::UPGRADE_REQUIRED,
+            Json(json!({
+                "code": "ws_upgrade_unsupported",
+                "message": format!(
+                    "route {} {} is marked @ws but this stream provider does not implement \
+                     SiteStreamProvider::upgrade",
+                    route.method, route.path
+                ),
+            })),
+        )
+            .into_response()
+    }
 }
 
 /// Listener options for [`SiteServer::run_http`].
@@ -279,9 +345,10 @@ pub struct SiteServerConfig {
     /// (the default) keeps the historic behavior: no edge auth and
     /// tenant-less dispatch.
     pub auth: Option<Arc<dyn SiteAuth>>,
-    /// Embedder responder for `@stream` / `@raw` routes. Required when
-    /// the script declares any — building the router fails loudly
-    /// otherwise, since the route would have no body source.
+    /// Embedder responder for `@stream` / `@raw` / `@ws` routes.
+    /// Required when the script declares any — building the router fails
+    /// loudly otherwise, since the route would have no body source (or,
+    /// for `@ws`, no upgrade sink).
     pub stream_provider: Option<Arc<dyn SiteStreamProvider>>,
 }
 
@@ -396,6 +463,11 @@ struct SiteRoute {
     /// buffered (up to the configured limit) and handed to the provider
     /// as exact bytes.
     raw: bool,
+    /// `@ws` marker: after admission, perform the WebSocket upgrade and
+    /// hand the upgrade handle to [`SiteStreamProvider::upgrade`] instead
+    /// of dispatching into the VM. Mutually exclusive with
+    /// `stream`/`raw`.
+    ws: bool,
 }
 
 /// State shared by every site route handler: the dispatch executor plus
@@ -443,11 +515,17 @@ fn build_site_router(
         let Some(spec @ RouteSpec { method, path }) = function.route.as_ref() else {
             continue;
         };
-        // A `@stream` / `@raw` route has no body source without a
-        // provider; refusing to start beats serving a route that can
-        // only 500.
-        if (function.stream || function.raw) && stream_provider.is_none() {
-            let marker = if function.stream { "@stream" } else { "@raw" };
+        // A `@stream` / `@raw` / `@ws` route is answered by the provider,
+        // so it has no body source (or upgrade sink) without one;
+        // refusing to start beats serving a route that can only 500.
+        if (function.stream || function.raw || function.ws) && stream_provider.is_none() {
+            let marker = if function.stream {
+                "@stream"
+            } else if function.raw {
+                "@raw"
+            } else {
+                "@ws"
+            };
             return Err(format!(
                 "route {method} {path} (`{}`) is marked {marker} but no stream provider is \
                  configured; install one with SiteServerConfig::with_stream_provider(...)",
@@ -461,6 +539,7 @@ fn build_site_router(
             required_scopes: function.required_scopes.clone(),
             stream: function.stream,
             raw: function.raw,
+            ws: function.ws,
         };
         if let Some(existing) = by_method.insert(method.clone(), entry) {
             return Err(format!(
@@ -559,6 +638,61 @@ async fn site_dispatch(State(state): State<SiteState>, request: Request) -> Resp
             }
         },
     };
+
+    // `@ws` routes hand off to the embedder's provider after the *same*
+    // admission as `@stream`/`@raw` — auth gates the upgrade before the
+    // connection is handed off — but instead of producing a response
+    // body, the adapter extracts the WebSocket upgrade (while hyper's
+    // `OnUpgrade` extension is still on `parts`) and the provider drives
+    // the socket. The 101 it returns is forwarded verbatim.
+    if route.ws {
+        // Same admission back-stop as `@stream`/`@raw`: a `@ws` route
+        // never builds a `CallRequest`, so the dispatch-level scope
+        // check cannot cover it. With no hook there is no identity and
+        // no granted scopes, so any scope requirement refuses.
+        if auth_context.is_none() && !route.required_scopes.is_empty() {
+            return axum_response_from_dispatch_error(
+                DispatchError::Forbidden {
+                    required: route.required_scopes.clone(),
+                    granted: BTreeSet::new(),
+                },
+                &request_id,
+            );
+        }
+        let Some(provider) = state.stream_provider.as_ref() else {
+            // Unreachable: router construction refuses a @ws route
+            // without a provider. Shape a loud 500 rather than panic.
+            return axum_response_from_dispatch_error(
+                DispatchError::Execution(format!(
+                    "provider route {route_template} has no stream provider"
+                )),
+                &request_id,
+            );
+        };
+        // Extract the upgrade while the `OnUpgrade` extension is still
+        // present on `parts`. A non-WebSocket request (missing the
+        // upgrade headers / key) is refused here by axum's extractor
+        // with the correct 4xx — never a panic, never a stray 101.
+        let upgrade = match WebSocketUpgrade::from_request_parts(&mut parts, &()).await {
+            Ok(upgrade) => upgrade,
+            Err(rejection) => return rejection.into_response(),
+        };
+        // A WebSocket handshake carries no body, so none is built.
+        let request = build_request_value(
+            &method,
+            &parts.uri,
+            &route_template,
+            raw_params.as_ref(),
+            &query,
+            &parts.headers,
+            &[],
+            peer,
+            &state.trusted_proxies,
+        );
+        return provider
+            .upgrade(&route.spec, auth_context.as_ref(), upgrade, request)
+            .await;
+    }
 
     // `@stream` / `@raw` routes hand off to the embedder's provider
     // right after admission, with no VM dispatch — the provider's
