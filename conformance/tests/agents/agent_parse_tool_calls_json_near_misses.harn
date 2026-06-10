@@ -1,0 +1,27 @@
+import { agent_parse_tool_calls } from "std/agent/primitives"
+
+pipeline main() {
+  let tool_code = agent_parse_tool_calls(
+    "```tool_code\n{\"name\":\"read_file\",\"args\":{\"path\":\"a.rs\"}}\n```",
+    nil,
+    "json",
+  )
+  __io_println(tool_code.tool_calls[0].name)
+  __io_println(tool_code.tool_calls[0].arguments.path)
+  __io_println(len(tool_code.protocol_violations) == 1)
+  __io_println(contains(tool_code.protocol_violations[0], "```tool_code"))
+  let tilde = agent_parse_tool_calls(
+    "~~~tool\n{\"name\":\"read_file\",\"args\":{\"path\":\"b.rs\"}}\n~~~",
+    nil,
+    "json",
+  )
+  __io_println(tilde.tool_calls[0].arguments.path)
+  __io_println(contains(tilde.protocol_violations[0], "~~~tool"))
+  let bare_json = agent_parse_tool_calls("{\"name\":\"read_file\",\"args\":{\"path\":\"c.rs\"}}", nil, "json")
+  __io_println(bare_json.tool_calls[0].arguments.path)
+  __io_println(contains(bare_json.protocol_violations[0], "bare JSON object"))
+  let tagged = agent_parse_tool_calls("<tool_call>\nread_file({ path: \"d.rs\" })\n</tool_call>", nil, "json")
+  __io_println(len(tagged.tool_calls))
+  __io_println(len(tagged.protocol_violations) == 1)
+  __io_println(contains(tagged.protocol_violations[0], "<tool_call>"))
+}
