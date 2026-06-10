@@ -240,6 +240,7 @@ fn lint_full(
         linter.complexity_threshold = threshold;
     }
     linter.require_stdlib_metadata = options.require_stdlib_metadata;
+    linter.require_docstrings = options.require_docstrings;
     linter
         .persona_step_allowlist
         .extend(options.persona_step_allowlist.iter().cloned());

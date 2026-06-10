@@ -6,10 +6,8 @@ fn __budget_envelope(opts) {
  * agent_budget_pre_call_blocked.
  *
  * @effects: [host]
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
- * @example: agent_budget_pre_call_blocked(session, opts)
  */
 pub fn agent_budget_pre_call_blocked(session, opts) {
   let envelope = __budget_envelope(opts)
@@ -23,10 +21,8 @@ pub fn agent_budget_pre_call_blocked(session, opts) {
  * agent_budget_post_call_blocked.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
- * @example: agent_budget_post_call_blocked(totals, opts)
  */
 pub fn agent_budget_post_call_blocked(totals, opts) {
   let envelope = __budget_envelope(opts)

@@ -143,7 +143,7 @@ harn lint --fix file.harn   # automatically apply safe fixes
 
 The linter checks for: shadow variables, unused variables, unused pattern
 bindings, unused types, undefined functions, dead code after terminating
-statements, pointless comparisons, redundant clones, missing harndoc comments,
+statements, pointless comparisons, redundant clones,
 naming convention drift, branch-heavy functions, prompt-injection risks such as
 interpolated `llm_call` system prompts, and unnecessary conversion calls
 (`to_string("hi")`, `to_int(42)`, etc.). With `--fix`, the linter

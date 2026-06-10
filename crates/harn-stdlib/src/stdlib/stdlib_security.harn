@@ -26,9 +26,7 @@
  *   - trusted_mcp_servers: [str]     — servers exempt from taint + pinning
  *
  * @effects: [state]
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
  * @example: configure({ mode: "spotlight", trusted_mcp_servers: ["internal-docs"] })
  */
 pub fn configure(config: dict = {}) -> dict {
@@ -39,10 +37,7 @@ pub fn configure(config: dict = {}) -> dict {
  * Enable the default posture: spotlight untrusted content + trifecta gate.
  *
  * @effects: [state]
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: spotlight()
  */
 pub fn spotlight() -> dict {
   return security_policy({mode: "spotlight"})
@@ -52,10 +47,7 @@ pub fn spotlight() -> dict {
  * Enable strict mode: spotlight + per-line datamarking of untrusted content.
  *
  * @effects: [state]
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: strict()
  */
 pub fn strict() -> dict {
   return security_policy({mode: "strict"})
@@ -72,10 +64,7 @@ pub fn strict() -> dict {
  * default keeps the host's configured model (typically the ungated default).
  *
  * @effects: [state]
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: local_ml()
  */
 pub fn local_ml(model: string = "") -> dict {
   if model == "" {
@@ -88,10 +77,7 @@ pub fn local_ml(model: string = "") -> dict {
  * Disable every prompt-injection defense layer for this run.
  *
  * @effects: [state]
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: off()
  */
 pub fn off() -> dict {
   return security_policy({mode: "off"})

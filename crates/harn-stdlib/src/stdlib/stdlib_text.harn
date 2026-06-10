@@ -5,10 +5,7 @@
  * int_to_string.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: int_to_string(value)
  */
 pub fn int_to_string(value) {
   let parsed = to_int(value)
@@ -21,10 +18,7 @@ pub fn int_to_string(value) {
  * float_to_string.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: float_to_string(value)
  */
 pub fn float_to_string(value) {
   let parsed = to_float(value)
@@ -37,10 +31,7 @@ pub fn float_to_string(value) {
  * parse_int_or.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: parse_int_or(value, fallback)
  */
 pub fn parse_int_or(value, fallback) {
   return to_int(value) ?? fallback
@@ -51,10 +42,7 @@ pub fn parse_int_or(value, fallback) {
  * parse_float_or.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: parse_float_or(value, fallback)
  */
 pub fn parse_float_or(value, fallback) {
   return to_float(value) ?? fallback
@@ -67,10 +55,7 @@ pub fn parse_float_or(value, fallback) {
  * extract_paths.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: extract_paths(text)
  */
 pub fn extract_paths(text) {
   let lines = split(text, "\n")
@@ -124,10 +109,7 @@ pub fn extract_paths(text) {
  * parse_cells.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: parse_cells(response)
  */
 pub fn parse_cells(response) {
   let lines = split(response, "\n")
@@ -177,10 +159,7 @@ pub fn parse_cells(response) {
  * filter_test_cells.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: filter_test_cells(cells, target_file)
  */
 pub fn filter_test_cells(cells, target_file) {
   return cells
@@ -202,10 +181,7 @@ pub fn filter_test_cells(cells, target_file) {
  * truncate_head_tail.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: truncate_head_tail(text, n)
  */
 pub fn truncate_head_tail(text, n) {
   let lines = split(text, "\n")
@@ -224,10 +200,7 @@ pub fn truncate_head_tail(text, n) {
  * Truncate text to `max_chars`, appending a deterministic marker when clipped.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: truncate_text(text, max_chars, marker)
  */
 pub fn truncate_text(text, max_chars = 4000, marker = nil) {
   let value = text ?? ""
@@ -243,10 +216,7 @@ pub fn truncate_text(text, max_chars = 4000, marker = nil) {
  * Keep both ends of long text, with a marker in the middle.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: truncate_middle(text, max_chars, marker)
  */
 pub fn truncate_middle(text, max_chars = 4000, marker = "...") {
   let value = text ?? ""
@@ -271,10 +241,7 @@ pub fn truncate_middle(text, max_chars = 4000, marker = "...") {
  * Collapse whitespace for one-line report fields, returning fallback for blank input.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: single_line_or(value, fallback)
  */
 pub fn single_line_or(value, fallback = "") {
   let text = trim(value ?? "")
@@ -288,10 +255,7 @@ pub fn single_line_or(value, fallback = "") {
  * Prefix each line in text.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: prefix_lines(text, prefix)
  */
 pub fn prefix_lines(text, prefix = "  ") {
   let p = prefix ?? ""
@@ -302,10 +266,7 @@ pub fn prefix_lines(text, prefix = "  ") {
  * Indent text by `spaces` spaces.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: indent(text, spaces)
  */
 pub fn indent(text, spaces = 2) {
   return prefix_lines(text, " ".repeat(max(spaces ?? 0, 0)))
@@ -317,10 +278,7 @@ pub fn indent(text, spaces = 2) {
  * detect_compile_error.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: detect_compile_error(output)
  */
 pub fn detect_compile_error(output) {
   return contains(output, "SyntaxError")
@@ -337,10 +295,7 @@ pub fn detect_compile_error(output) {
  * has_got_want.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: has_got_want(output)
  */
 pub fn has_got_want(output) {
   let has_got = contains(output, "got:")
@@ -360,10 +315,7 @@ pub fn has_got_want(output) {
  * format_test_errors.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: format_test_errors(output)
  */
 pub fn format_test_errors(output) {
   let error_lines = split(output, "\n")
@@ -388,9 +340,7 @@ pub fn format_test_errors(output) {
  * numbers or nil with `to_string`.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
  * @example: pad_right("api", 6)
  */
 pub fn pad_right(value, width: int, fill: string = " ") -> string {
@@ -403,9 +353,7 @@ pub fn pad_right(value, width: int, fill: string = " ") -> string {
  * "0")`) and right-aligned table cells. Coerces `value` to a string.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
  * @example: pad_left(7, 4, "0")
  */
 pub fn pad_left(value, width: int, fill: string = " ") -> string {
@@ -418,9 +366,7 @@ pub fn pad_left(value, width: int, fill: string = " ") -> string {
  * the call site is clearer than `" ".repeat(width)` or a `while` loop.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
  * @example: repeat_string("-", 5)
  */
 pub fn repeat_string(text, count: int) -> string {
@@ -438,9 +384,7 @@ pub fn repeat_string(text, count: int) -> string {
  * dance per call site.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
  * @example: regex_first_capture("v(\\d+\\.\\d+\\.\\d+)", tag)
  */
 pub fn regex_first_capture(pattern: string, text) {
@@ -461,9 +405,7 @@ pub fn regex_first_capture(pattern: string, text) {
  * no groups. Useful when several groups need to be destructured at once.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
  * @example: regex_capture_groups("(\\d+)\\.(\\d+)\\.(\\d+)", "1.2.3")
  */
 pub fn regex_capture_groups(pattern: string, text) -> list {
@@ -481,9 +423,7 @@ pub fn regex_capture_groups(pattern: string, text) -> list {
  * reference out of a changelog.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
  * @example: regex_all_first_captures("#(\\d+)", "fixes #12 and #34")
  */
 pub fn regex_all_first_captures(pattern: string, text) -> list {

@@ -3,10 +3,7 @@
  * Register a process interrupt handler.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: on_interrupt(handler, options)
  */
 pub fn on_interrupt(handler, options = nil) {
   return __signal_on_interrupt(handler, options)
@@ -16,10 +13,7 @@ pub fn on_interrupt(handler, options = nil) {
  * Remove an interrupt handler returned by `on_interrupt`.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: off_interrupt(handle)
  */
 pub fn off_interrupt(handle) {
   return __signal_off_interrupt(handle)
@@ -29,10 +23,7 @@ pub fn off_interrupt(handle) {
  * Return true after the current VM observes an interrupt.
  *
  * @effects: []
- * @allocation: stack-only
  * @errors: []
- * @api_stability: stable
- * @example: interrupted()
  */
 pub fn interrupted() -> bool {
   return __signal_interrupted()
@@ -42,10 +33,7 @@ pub fn interrupted() -> bool {
  * Run `body` with an interrupt handler that is always unregistered afterward.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: with_interrupt(handler, body, options)
  */
 pub fn with_interrupt(handler, body, options = nil) {
   let registration = on_interrupt(handler, options)

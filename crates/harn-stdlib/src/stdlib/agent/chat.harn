@@ -129,10 +129,8 @@ fn __chat_has_tool(registry, name) {
  * agent_chat_wait_for_user_tools adds the terminal wait_for_user tool.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
- * @example: agent_chat_wait_for_user_tools(registry)
  */
 pub fn agent_chat_wait_for_user_tools(registry = nil) {
   let tools = registry ?? tool_registry()
@@ -175,10 +173,8 @@ fn __chat_default_help(handlers = nil) {
  * agent_chat_route_input applies the shared slash-command convention.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
- * @example: agent_chat_route_input(line, state, handlers)
  */
 pub fn agent_chat_route_input(line, state = nil, handlers = nil) {
   let current = __chat_dict(state)
@@ -351,10 +347,8 @@ fn __chat_finish(
  * agent_chat_loop runs an operator-message / agent-turn loop around agent_loop.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
- * @example: agent_chat_loop(opts)
  */
 pub fn agent_chat_loop(opts = nil) {
   let config = __chat_dict(opts)

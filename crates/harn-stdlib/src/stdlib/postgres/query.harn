@@ -193,7 +193,6 @@ fn __render_sql_template(template: string, values: dict) {
  * Build a serializable named-query record.
  *
  * @effects: []
- * @allocation: heap
  * @errors: validation
  * @api_stability: experimental
  * @example: named("list_receipts", "many", sql, [tenant_id])
@@ -211,7 +210,6 @@ pub fn named(name: string, mode: PgQueryMode, sql: string, params: list<any> = [
  * for source-controlled SQL structure.
  *
  * @effects: []
- * @allocation: heap
  * @errors: validation
  * @api_stability: experimental
  * @example: sql("SELECT * FROM receipts WHERE tenant_id = {tenant_id}", {tenant_id: tenant_id})
@@ -225,7 +223,6 @@ pub fn sql(template: string, values: dict = {}, options = nil) -> PgQuery {
  * Build a named parameterized query record from a SQL template.
  *
  * @effects: []
- * @allocation: heap
  * @errors: validation
  * @api_stability: experimental
  * @example: named_sql("list_receipts", "many", "SELECT * FROM receipts WHERE tenant_id = {tenant_id}", {tenant_id: tenant_id})
@@ -255,7 +252,6 @@ pub fn named_sql(
  * [`sql`] when you want named placeholders and `{{`/`}}` escaping.
  *
  * @effects: []
- * @allocation: heap
  * @errors: validation
  * @api_stability: experimental
  * @example: raw_sql("SELECT data#>>'{}' FROM events WHERE tenant_id = $1::uuid", [tenant_id])
@@ -276,7 +272,6 @@ pub fn raw_sql(template: string, params: list<any> = [], options = nil) -> PgQue
  * `$2`, ... matching the `params` list.
  *
  * @effects: []
- * @allocation: heap
  * @errors: validation
  * @api_stability: experimental
  * @example: named_raw_sql("list_events", "many", "SELECT data#>>'{}' FROM events WHERE tags && '{a,b}'::text[]", [])
@@ -298,7 +293,6 @@ pub fn named_raw_sql(
  * Run a query that returns zero or one row.
  *
  * @effects: [postgres]
- * @allocation: heap
  * @errors: validation, postgres
  * @api_stability: experimental
  * @example: one(db, {name: "get_receipt", sql: sql, params: [id]})
@@ -312,7 +306,6 @@ pub fn one(handle, query: PgQuery) {
  * Run a query that returns a list of rows.
  *
  * @effects: [postgres]
- * @allocation: heap
  * @errors: validation, postgres
  * @api_stability: experimental
  * @example: many(db, {name: "list_receipts", sql: sql, params: [tenant_id]})
@@ -326,7 +319,6 @@ pub fn many(handle, query: PgQuery) -> list {
  * Execute a statement and return the underlying PgExecuteResult.
  *
  * @effects: [postgres]
- * @allocation: heap
  * @errors: validation, postgres
  * @api_stability: experimental
  * @example: exec(db, {name: "mark_read", sql: sql, params: [id, status]})
@@ -343,7 +335,6 @@ pub fn exec(handle, query: PgQuery) -> PgExecuteResult {
  * Run a named query according to its `mode`.
  *
  * @effects: [postgres]
- * @allocation: heap
  * @errors: validation, postgres
  * @api_stability: experimental
  * @example: run(db, named("list_receipts", "many", sql, [tenant_id]))
@@ -366,7 +357,6 @@ pub fn run(handle, query: PgNamedQuery) {
  * Validate and return a static SQL identifier for projection helpers.
  *
  * @effects: []
- * @allocation: stack-only
  * @errors: validation
  * @api_stability: experimental
  * @example: identifier("created_at")
@@ -388,7 +378,6 @@ pub fn identifier(name: string) -> string {
  * only for SQL structure such as table or column names.
  *
  * @effects: []
- * @allocation: heap
  * @errors: validation
  * @api_stability: experimental
  * @example: quote_identifier("receipt events")
@@ -404,7 +393,6 @@ pub fn quote_identifier(name: string) -> string {
  * Render a quoted SQL identifier fragment for use inside `sql(...)`.
  *
  * @effects: []
- * @allocation: heap
  * @errors: validation
  * @api_stability: experimental
  * @example: sql("SELECT {column} FROM receipts", {column: ident("created_at")})
@@ -417,7 +405,6 @@ pub fn ident(name: string) -> PgSqlFragment {
  * Render a dotted quoted SQL identifier path for use inside `sql(...)`.
  *
  * @effects: []
- * @allocation: heap
  * @errors: validation
  * @api_stability: experimental
  * @example: ident_path(["app", "receipts"])
@@ -441,7 +428,6 @@ pub fn ident_path(parts: list<string>) -> PgSqlFragment {
  * identifiers.
  *
  * @effects: []
- * @allocation: heap
  * @errors: validation
  * @api_stability: experimental
  * @example: unsafe_sql("COUNT(*)")
@@ -480,7 +466,6 @@ fn __projection_part_text(part) -> string {
  * ```
  *
  * @effects: []
- * @allocation: heap
  * @errors: validation
  * @api_stability: experimental
  * @example: columns([uuid_text("id"), timestamptz_json("created_at")])
@@ -503,7 +488,6 @@ pub fn columns(parts: list) -> PgSqlFragment {
  * Prefix `columns(parts)` with `SELECT `, returning a trusted `PgSqlFragment`.
  *
  * @effects: []
- * @allocation: heap
  * @errors: validation
  * @api_stability: experimental
  * @example: select_clause([uuid_text("id"), "payload"])
@@ -546,7 +530,6 @@ fn __column_alias(name: string) -> string {
  * segment (`id`).
  *
  * @effects: []
- * @allocation: heap
  * @errors: validation
  * @api_stability: experimental
  * @example: uuid_text("id")
@@ -565,7 +548,6 @@ pub fn uuid_text(name: string) -> PgSqlFragment {
  * trailing segment (`created_at`).
  *
  * @effects: []
- * @allocation: heap
  * @errors: validation
  * @api_stability: experimental
  * @example: timestamptz_json("created_at")
@@ -584,7 +566,6 @@ pub fn timestamptz_json(name: string) -> PgSqlFragment {
  * trailing segment (`expires_at`).
  *
  * @effects: []
- * @allocation: heap
  * @errors: validation
  * @api_stability: experimental
  * @example: nullable_timestamptz_json("finished_at")

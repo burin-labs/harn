@@ -14,10 +14,7 @@ type PickKeysOptions = {drop_nil?: bool}
  * same value contract instead of collapsing to untyped `dict`.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: filter_nil(d)
  */
 pub fn filter_nil<V>(d: dict<string, V>) -> dict<string, V> {
   return __dict_filter_nil(d ?? {})
@@ -29,10 +26,7 @@ pub fn filter_nil<V>(d: dict<string, V>) -> dict<string, V> {
  * after lookup. Missing keys are silently dropped.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: pick_keys(d, selected_keys, options)
  */
 pub fn pick_keys<V>(d: dict<string, V>, selected_keys: list<string>, options: PickKeysOptions = {}) -> dict<string, V> {
   if type_of(d) != "dict" {
@@ -49,10 +43,7 @@ pub fn pick_keys<V>(d: dict<string, V>, selected_keys: list<string>, options: Pi
  * accumulators don't need a base case.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: deep_merge(defaults, overrides)
  */
 pub fn deep_merge<R1, R2>(a: {...R1}, b: {...R2}) -> {...R1, ...R2} {
   return __deep_merge(a ?? {}, b ?? {})
@@ -64,10 +55,7 @@ pub fn deep_merge<R1, R2>(a: {...R1}, b: {...R2}) -> {...R1, ...R2} {
  * identical contents collapse to a single entry.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: unique(values)
  */
 pub fn unique<T>(values: list<T>) -> list<T> {
   return __list_unique(values ?? [])
@@ -80,9 +68,7 @@ pub fn unique<T>(values: list<T>) -> list<T> {
  * build a lookup table from a list of records.
  *
  * @effects: []
- * @allocation: heap
  * @errors: [TypeError]
- * @api_stability: stable
  * @example: dict_from_pairs([["a", 1], ["b", 2]])
  */
 pub fn dict_from_pairs<V>(pairs: list<list<V>>) -> dict<string, V> {
@@ -95,9 +81,7 @@ pub fn dict_from_pairs<V>(pairs: list<list<V>>) -> dict<string, V> {
  * Equivalent to `dict_from_pairs(map(items, { it -> [key_fn(it), it] }))`.
  *
  * @effects: []
- * @allocation: heap
  * @errors: [TypeError]
- * @api_stability: stable
  * @example: index_by(records, { r -> r.id })
  */
 pub fn index_by<V>(items: list<V>, key_fn) -> dict<string, V> {
@@ -114,10 +98,7 @@ pub fn index_by<V>(items: list<V>, key_fn) -> dict<string, V> {
  * store_stale.
  *
  * @effects: [time, store.read]
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: store_stale(key, max_age_seconds)
  */
 pub fn store_stale(key, max_age_seconds) {
   let ts = store_get(key + "_ts")
@@ -132,10 +113,7 @@ pub fn store_stale(key, max_age_seconds) {
  * store_refresh.
  *
  * @effects: [time, store.write]
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: store_refresh(key)
  */
 pub fn store_refresh(key) {
   store_set(key + "_ts", harness.clock.timestamp())

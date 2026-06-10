@@ -119,10 +119,7 @@ fn __handoff_decision(route, route_index, route_target, target_index, handoff, c
  * Return the first matching route decision for a handoff payload.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: handoff_route_select(handoff_payload, routes, context)
  */
 pub fn handoff_route_select(handoff_payload, routes = nil, context = nil) {
   let route_table = routes ?? handoff_routes()
@@ -156,10 +153,7 @@ pub fn handoff_route_select(handoff_payload, routes = nil, context = nil) {
  * Normalize a handoff after selecting and embedding its route decision.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: handoff_routed(payload, routes, context)
  */
 pub fn handoff_routed(payload, routes = nil, context = nil) {
   let decision = handoff_route_select(payload, routes, context)
@@ -233,10 +227,7 @@ fn __handoff_invoke_dispatcher(dispatcher, envelope) {
  * Persist the selected handoff route and enqueue a target-specific dispatch record.
  *
  * @effects: [transcript.write]
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: handoff_dispatch(handoff_payload, decision, options)
  */
 pub fn handoff_dispatch(handoff_payload, decision = nil, options = nil) {
   let handoff_value = handoff(handoff_payload)

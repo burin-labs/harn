@@ -751,7 +751,6 @@ fn __sv_handle_turn(call, cfg) {
  *          or [{name: "tool_calls_well_formed", warn_only: true}]
  *
  * @effects: [host]
- * @allocation: heap
  * @errors: [runtime]
  * @api_stability: experimental
  * Pass the returned closure via `agent_loop({structural_validator: ...})`.

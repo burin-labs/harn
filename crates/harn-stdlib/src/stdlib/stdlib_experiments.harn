@@ -2,10 +2,7 @@
  * message.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: message(role, content)
  */
 pub fn message(role, content) {
   return {role: role, content: content}
@@ -15,10 +12,7 @@ pub fn message(role, content) {
  * prompt_order_permutation.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: prompt_order_permutation(options)
  */
 pub fn prompt_order_permutation(options = nil) {
   let seed = options?.seed ?? 0
@@ -33,10 +27,7 @@ pub fn prompt_order_permutation(options = nil) {
  * doubled_prompt.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: doubled_prompt()
  */
 pub fn doubled_prompt() {
   return {name: "doubled_prompt", label: "doubled_prompt"}
@@ -46,10 +37,7 @@ pub fn doubled_prompt() {
  * chain_of_draft.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: chain_of_draft()
  */
 pub fn chain_of_draft() {
   return {name: "chain_of_draft", label: "chain_of_draft"}
@@ -59,10 +47,7 @@ pub fn chain_of_draft() {
  * inverted_system.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: inverted_system()
  */
 pub fn inverted_system() {
   return {name: "inverted_system", label: "inverted_system"}
@@ -72,10 +57,7 @@ pub fn inverted_system() {
  * custom.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: custom(label, transform, args)
  */
 pub fn custom(label, transform, args = nil) {
   return {name: label, label: label, args: args ?? {}, transform: transform}
@@ -85,10 +67,7 @@ pub fn custom(label, transform, args = nil) {
  * latest_string_user_message.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: latest_string_user_message(messages)
  */
 pub fn latest_string_user_message(messages) {
   var idx = len(messages)
@@ -106,10 +85,7 @@ pub fn latest_string_user_message(messages) {
  * replace_message.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: replace_message(messages, index, message)
  */
 pub fn replace_message(messages, index, message) {
   var out = []
@@ -132,10 +108,7 @@ pub fn replace_message(messages, index, message) {
  * prepend_message.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: prepend_message(messages, msg)
  */
 pub fn prepend_message(messages, msg) {
   return [msg] + messages
@@ -145,10 +118,7 @@ pub fn prepend_message(messages, msg) {
  * append_message.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: append_message(messages, msg)
  */
 pub fn append_message(messages, msg) {
   return messages + [msg]

@@ -1480,7 +1480,9 @@ fn preflight_allow_matches_exact_wildcard_and_capability_scope() {
 }
 
 #[test]
-fn check_lint_reports_missing_harndoc_for_public_functions() {
+fn check_lint_does_not_require_harndoc_by_default() {
+    // `missing-harndoc` is opt-in (`[lint] require_docstrings = true`);
+    // the default check invocation leaves undocumented pub fns alone.
     let source = r#"
 pub fn exposed() -> string {
   return "x"
@@ -1493,8 +1495,8 @@ pub fn exposed() -> string {
         Some(source),
     );
     assert!(
-        diagnostics.iter().any(|d| d.rule == "missing-harndoc"),
-        "expected missing-harndoc warning, got: {:?}",
+        !diagnostics.iter().any(|d| d.rule == "missing-harndoc"),
+        "missing-harndoc must not fire by default, got: {:?}",
         diagnostics.iter().map(|d| &d.rule).collect::<Vec<_>>()
     );
 }

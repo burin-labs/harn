@@ -10,10 +10,7 @@
  * wait_for.
  *
  * @effects: [time]
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: wait_for(timeout_ms, interval_ms, predicate)
  */
 pub fn wait_for(timeout_ms, interval_ms, predicate) {
   let end_time = harness.clock.timestamp() * 1000 + timeout_ms
@@ -43,10 +40,7 @@ pub fn wait_for(timeout_ms, interval_ms, predicate) {
  * retry_until.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: retry_until(max_attempts, predicate)
  */
 pub fn retry_until(max_attempts, predicate) {
   var i = 0
@@ -67,10 +61,7 @@ pub fn retry_until(max_attempts, predicate) {
  * retry_predicate_with_backoff.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: retry_predicate_with_backoff(max_attempts, base_ms, predicate)
  */
 pub fn retry_predicate_with_backoff(max_attempts, base_ms, predicate) {
   var attempt = 0
@@ -97,10 +88,7 @@ pub fn retry_predicate_with_backoff(max_attempts, base_ms, predicate) {
  * circuit_call.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: circuit_call(name, closure)
  */
 pub fn circuit_call(name, closure) {
   let state = circuit_check(name)

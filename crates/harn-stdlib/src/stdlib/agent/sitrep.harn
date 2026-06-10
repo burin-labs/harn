@@ -196,10 +196,8 @@ fn __sitrep_empty_result(reason) {
  * agent_sitrep.
  *
  * @effects: [llm.call]
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
- * @example: agent_sitrep(transcript)
  */
 pub fn agent_sitrep(input, opts = nil) {
   let messages = __sitrep_messages_from(input)
@@ -242,10 +240,8 @@ pub fn agent_sitrep(input, opts = nil) {
  * agent_sitrep_append.
  *
  * @effects: [llm.call]
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
- * @example: agent_sitrep_append(transcript)
  */
 pub fn agent_sitrep_append(input, opts = nil) {
   let result = agent_sitrep(input, opts)
@@ -271,10 +267,8 @@ pub fn agent_sitrep_append(input, opts = nil) {
  * agent_sitrep_preferred_routes.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
- * @example: agent_sitrep_preferred_routes()
  */
 pub fn agent_sitrep_preferred_routes() {
   return __SITREP_DEFAULT_ROUTES

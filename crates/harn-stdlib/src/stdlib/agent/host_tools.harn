@@ -54,7 +54,7 @@ fn __agent_host_tool_enabled(options, key, group) {
 
 fn __agent_host_name(options, key, default_name) {
   let opts = __agent_host_options(options)
-  return opts?.names?[key] ?? opts?[key + "_name"] ?? default_name
+  return opts?.names?[key] ?? opts[key + "_name"] ?? default_name
 }
 
 fn __agent_host_description(options, key, default_description) {
@@ -493,10 +493,8 @@ fn __agent_host_command_result_readers(options, read_name, tail_name) {
  * agent_read_tools adds root-scoped read, directory, outline, search, and git inspection tools.
  *
  * @effects: [agent]
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
- * @example: agent_read_tools(registry, options)
  */
 pub fn agent_read_tools(registry = nil, options = nil) {
   let opts = __agent_host_options(options)
@@ -683,10 +681,8 @@ pub fn agent_read_tools(registry = nil, options = nil) {
  * agent_command_tools adds argv-based run_command plus command-output artifact readers.
  *
  * @effects: [agent]
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
- * @example: agent_command_tools(registry, options)
  */
 pub fn agent_command_tools(registry = nil, options = nil) {
   let opts = __agent_host_options(options)
@@ -831,10 +827,8 @@ pub fn agent_command_tools(registry = nil, options = nil) {
  * agent_host_tools adds read/search/git inspection tools and argv-based command tools.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
- * @example: agent_host_tools(registry, options)
  */
 pub fn agent_host_tools(registry = nil, options = nil) {
   var tools = agent_read_tools(registry, options)

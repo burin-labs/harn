@@ -36,10 +36,7 @@ type PlanArtifact = {
  * plan_from normalizes flexible model/user plan shapes into harn.plan.v1.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: plan_from(plan)
  */
 pub fn plan_from(plan) -> PlanArtifact {
   return plan_artifact(plan)
@@ -49,10 +46,7 @@ pub fn plan_from(plan) -> PlanArtifact {
  * plan_acp_entries returns ACP-compatible plan entries for a harn.plan.v1 artifact.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: plan_acp_entries(plan)
  */
 pub fn plan_acp_entries(plan) {
   return plan_entries(plan)
@@ -62,10 +56,7 @@ pub fn plan_acp_entries(plan) {
  * emit_plan_tool registers the Harn-owned terminal plan emission tool.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: emit_plan_tool(registry)
  */
 pub fn emit_plan_tool(registry) {
   return tool_define(
@@ -94,10 +85,7 @@ pub fn emit_plan_tool(registry) {
  * update_plan_tool registers the incremental Harn-owned plan update tool.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: update_plan_tool(registry)
  */
 pub fn update_plan_tool(registry) {
   return tool_define(
@@ -123,10 +111,7 @@ pub fn update_plan_tool(registry) {
  * plan_tools adds emit_plan and update_plan to a tool registry.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: plan_tools(registry)
  */
 pub fn plan_tools(registry = nil) {
   var tools = registry ?? tool_registry()
@@ -139,10 +124,7 @@ pub fn plan_tools(registry = nil) {
  * plan_approved returns a copy of plan with an approved/rejected approval state.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: plan_approved(plan, approval)
  */
 pub fn plan_approved(plan, approval: ApprovalRecord) -> PlanArtifact {
   let artifact = plan_from(plan)
@@ -166,10 +148,7 @@ pub fn plan_approved(plan, approval: ApprovalRecord) -> PlanArtifact {
  * request_plan_approval uses std/hitl approval primitives for plan approval/resume flows.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: request_plan_approval(plan, options)
  */
 pub fn request_plan_approval(plan, options = nil) -> PlanArtifact {
   let artifact = plan_from(plan)

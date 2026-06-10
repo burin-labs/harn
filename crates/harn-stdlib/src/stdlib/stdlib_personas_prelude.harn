@@ -146,10 +146,7 @@ fn __prelude_call_record(name, status, value, error) {
  * returns an ok-shaped value.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: verify_then_act(verifier, actor, options)
  */
 pub fn verify_then_act(verifier, actor, options = nil) {
   let opts = options ?? {}
@@ -228,10 +225,7 @@ pub fn verify_then_act(verifier, actor, options = nil) {
  * the supplied iteration/time budget.
  *
  * @effects: [time]
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: bounded_loop(state_init, step_fn, options)
  */
 pub fn bounded_loop(state_init, step_fn, options = nil) {
   let opts = options ?? {}
@@ -371,10 +365,7 @@ fn __prelude_confidence(value) {
  * or the caller-supplied predicate returns true.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: cheap_classify_then_escalate(input, cheap_model, escalate_model, escalation_predicate, options)
  */
 pub fn cheap_classify_then_escalate(
   input,
@@ -480,10 +471,7 @@ pub fn cheap_classify_then_escalate(
  * failures reach the circuit-breaker threshold.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: parallel_sweep_with_circuit_breaker(items, step_fn, options)
  */
 pub fn parallel_sweep_with_circuit_breaker(items, step_fn, options = nil) {
   let opts = options ?? {}
@@ -569,10 +557,7 @@ pub fn parallel_sweep_with_circuit_breaker(items, step_fn, options = nil) {
  * Return a wrapper that runs a step and attaches a canonical receipt envelope.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: with_audit_receipt(step_fn, options)
  */
 pub fn with_audit_receipt(step_fn, options = nil) {
   let opts = options ?? {}
@@ -610,10 +595,7 @@ pub fn with_audit_receipt(step_fn, options = nil) {
  * a suspended envelope instead of blocking indefinitely.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: with_approval_gate(approval_kind, step_fn, options)
  */
 pub fn with_approval_gate(approval_kind, step_fn, options = nil) {
   let opts = options ?? {}
@@ -928,10 +910,7 @@ fn __prelude_persona_candidate(group, opts) {
  * deterministic persona `@step`.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: persona_crystallization_candidates(history, options)
  */
 pub fn persona_crystallization_candidates(history, options = nil) {
   let opts = options ?? {}
@@ -1032,10 +1011,7 @@ pub fn persona_crystallization_candidates(history, options = nil) {
  * that reviewers can apply to the persona package after shadow/eval review.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: persona_crystallization_bundle(history, options)
  */
 pub fn persona_crystallization_bundle(history, options = nil) {
   let opts = options ?? {}

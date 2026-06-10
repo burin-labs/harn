@@ -87,10 +87,8 @@ fn __github_record() {
  * github returns the preconfigured GitHub OAuth provider record.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
- * @example: github()
  */
 pub fn github(overrides = nil) -> OAuthProvider {
   return __with_overrides(__github_record(), overrides)
@@ -100,7 +98,6 @@ pub fn github(overrides = nil) -> OAuthProvider {
  * github_enterprise builds a GitHub Enterprise Server provider from its web base URL.
  *
  * @effects: []
- * @allocation: heap
  * @errors: [invalid_argument]
  * @api_stability: experimental
  * @example: github_enterprise("https://ghe.example.com")
@@ -133,10 +130,8 @@ pub fn github_enterprise(base_url, overrides = nil) -> OAuthProvider {
  * slack returns the preconfigured Slack OAuth v2 provider record.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
- * @example: slack()
  */
 pub fn slack(overrides = nil) -> OAuthProvider {
   return __with_overrides(
@@ -173,10 +168,8 @@ pub fn slack(overrides = nil) -> OAuthProvider {
  * linear returns the preconfigured Linear OAuth provider record.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
- * @example: linear()
  */
 pub fn linear(overrides = nil) -> OAuthProvider {
   return __with_overrides(
@@ -210,10 +203,8 @@ pub fn linear(overrides = nil) -> OAuthProvider {
  * notion returns the preconfigured Notion public-connection OAuth provider record.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
- * @example: notion()
  */
 pub fn notion(overrides = nil) -> OAuthProvider {
   return __with_overrides(
@@ -249,10 +240,8 @@ pub fn notion(overrides = nil) -> OAuthProvider {
  * google returns the preconfigured Google OAuth/OIDC provider record.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
- * @example: google()
  */
 pub fn google(overrides = nil) -> OAuthProvider {
   return __with_overrides(
@@ -288,10 +277,8 @@ pub fn google(overrides = nil) -> OAuthProvider {
  * microsoft returns the preconfigured Microsoft identity platform provider record.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
- * @example: microsoft()
  */
 pub fn microsoft(overrides = nil) -> OAuthProvider {
   return __with_overrides(
@@ -325,10 +312,8 @@ pub fn microsoft(overrides = nil) -> OAuthProvider {
  * atlassian returns the preconfigured Atlassian Cloud OAuth 2.0 3LO provider record.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
- * @example: atlassian()
  */
 pub fn atlassian(overrides = nil) -> OAuthProvider {
   return __with_overrides(
@@ -362,10 +347,8 @@ pub fn atlassian(overrides = nil) -> OAuthProvider {
  * discord returns the preconfigured Discord OAuth provider record.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
- * @example: discord()
  */
 pub fn discord(overrides = nil) -> OAuthProvider {
   return __with_overrides(
@@ -399,10 +382,8 @@ pub fn discord(overrides = nil) -> OAuthProvider {
  * gitlab returns the preconfigured GitLab.com OAuth provider record.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
- * @example: gitlab()
  */
 pub fn gitlab(overrides = nil) -> OAuthProvider {
   return __with_overrides(
@@ -436,10 +417,8 @@ pub fn gitlab(overrides = nil) -> OAuthProvider {
  * bitbucket returns the preconfigured Bitbucket Cloud OAuth provider record.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
- * @example: bitbucket()
  */
 pub fn bitbucket(overrides = nil) -> OAuthProvider {
   return __with_overrides(
@@ -475,10 +454,8 @@ pub fn bitbucket(overrides = nil) -> OAuthProvider {
  * provider_names returns the ten named provider keys in the catalogue.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
- * @example: provider_names()
  */
 pub fn provider_names() -> list<string> {
   return [
@@ -499,7 +476,6 @@ pub fn provider_names() -> list<string> {
  * provider returns one named provider record with optional field overrides.
  *
  * @effects: []
- * @allocation: heap
  * @errors: [invalid_argument]
  * @api_stability: experimental
  * @example: provider("github", {default_scopes: ["read:user"]})
@@ -543,7 +519,6 @@ pub fn provider(name, overrides = nil) -> OAuthProvider {
  * provider_catalog returns the ten named provider records, with per-provider overrides.
  *
  * @effects: []
- * @allocation: heap
  * @errors: [invalid_argument]
  * @api_stability: experimental
  * @example: provider_catalog({github: {default_scopes: ["read:user"]}})
@@ -561,7 +536,6 @@ pub fn provider_catalog(overrides = nil) {
  * github_enterprise(base_url, overrides?) and custom(config, overrides?) factories.
  *
  * @effects: []
- * @allocation: heap
  * @errors: [invalid_argument]
  * @api_stability: experimental
  * @example: providers().github_enterprise("https://ghe.example.com")
@@ -578,7 +552,6 @@ pub fn providers(overrides = nil) {
  * custom builds an OAuth provider record for enterprise or niche providers.
  *
  * @effects: []
- * @allocation: heap
  * @errors: [invalid_argument]
  * @api_stability: experimental
  * @example: custom({id: "acme", auth_url: "https://idp.example/authorize", token_url: "https://idp.example/token"})

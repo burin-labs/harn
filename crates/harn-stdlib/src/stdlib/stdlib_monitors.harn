@@ -41,10 +41,7 @@ type MonitorWaitResult = {
  * wait_for.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: wait_for(options)
  */
 pub fn wait_for(options: MonitorWaitOptions) -> MonitorWaitResult {
   return monitor_wait_for_native(options)

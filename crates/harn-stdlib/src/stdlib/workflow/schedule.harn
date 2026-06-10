@@ -49,10 +49,8 @@ fn __schedule_required_inputs(node, incoming_count) {
  * workflow_join_readiness.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
- * @example: workflow_join_readiness(config)
  */
 pub fn workflow_join_readiness(config = nil) {
   let node_id = __schedule_string(config?.node_id, "")
@@ -80,10 +78,8 @@ fn __schedule_branch_matches(left, right) {
  * workflow_next_edges.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
- * @example: workflow_next_edges(config)
  */
 pub fn workflow_next_edges(config = nil) {
   let graph = config?.graph ?? {}

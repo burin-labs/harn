@@ -1,0 +1,221 @@
+/**
+ * One-shot strip of retired HarnDoc metadata from
+ * `crates/harn-stdlib/src/stdlib/`. Inverse companion of
+ * backfill_stdlib_metadata.harn for the contract shrink that reduced the
+ * required stdlib fields to `@effects` + `@errors`:
+ *
+ *   - every `@allocation:` line is deleted (tag retired),
+ *   - `@api_stability: stable` lines are deleted (absent now means
+ *     stable); `experimental` / `internal` markers are kept,
+ *   - `@example:` lines whose value is a trivial echo of the signature
+ *     (`name(arg1, arg2)` or `let x = name(arg1, arg2)`) are deleted —
+ *     tooling derives those from the signature; hand-written examples
+ *     that show more than the signature are kept,
+ *   - blank `*` separator lines left doubled or dangling by the
+ *     removals are collapsed.
+ *
+ * The pure transform lives in process_file(text, path) -> {text, stats}
+ * so tests can verify the rewrite without touching disk. Idempotent:
+ * re-running on already-stripped sources is a no-op.
+ *
+ * Run from the repo root: harn run scripts/strip_stdlib_metadata.harn
+ */
+import {
+  find_doc_block_start,
+  lstrip_char,
+  lstrip_ws,
+  match_pub_fn,
+  rstrip_ws,
+  strip_ws,
+} from "./backfill_stdlib_metadata.harn"
+
+/** Inner content of a doc-block line: text after the leading `*`. */
+fn _block_line_content(line) -> string {
+  var s = strip_ws(line)
+  if s.starts_with("/**") {
+    s = lstrip_ws(s.substring(3, s.len()))
+  }
+  if s.ends_with("*/") {
+    s = rstrip_ws(s.substring(0, s.len() - 2))
+  }
+  return strip_ws(lstrip_char(s, "*"))
+}
+
+/**
+ * True when an `@example:` value is a trivial echo of the signature for
+ * `name`: an optional `let <ident> = ` binding around `name(...)` with
+ * only bare identifier arguments. Anything richer (literals, nested
+ * calls, multiple statements) is a real example and survives.
+ */
+pub fn is_trivial_example(value, name) -> bool {
+  let ident = "[A-Za-z_][A-Za-z0-9_]*"
+  let args = "(?:${ident}(?:,\\s*${ident})*)?"
+  let pattern = "^(?:let ${ident} = )?${name}\\(${args}\\)$"
+  return len(regex_captures(pattern, value)) > 0
+}
+
+/**
+ * Rewrite one multi-line doc block for the shrunk metadata contract.
+ * Single-line doc blocks pass through untouched. Returns {lines, stats}.
+ */
+pub fn strip_block(block, fn_name) -> dict {
+  var allocation_removed = 0
+  var stability_removed = 0
+  var example_removed = 0
+  var example_kept = 0
+  if len(block) < 2 {
+    return {
+      lines: block,
+      stats: {allocation_removed: 0, stability_removed: 0, example_removed: 0, example_kept: 0},
+    }
+  }
+  var kept = []
+  let n = len(block)
+  var i = 0
+  while i < n {
+    let line = block[i]
+    let content = _block_line_content(line)
+    if content.starts_with("@allocation:") {
+      allocation_removed = allocation_removed + 1
+      i = i + 1
+      continue
+    }
+    if content.starts_with("@api_stability:") {
+      let value = strip_ws(content.substring("@api_stability:".len(), content.len()))
+      if value == "stable" {
+        stability_removed = stability_removed + 1
+        i = i + 1
+        continue
+      }
+    }
+    if content.starts_with("@example:") {
+      let value = strip_ws(content.substring("@example:".len(), content.len()))
+      /* Only a single-line example can be a signature echo: a
+         continuation line is one that is not another @field, not a
+         blank separator, and not the closing terminator. */
+      var has_continuation = false
+      if i + 1 < n {
+        let next = _block_line_content(block[i + 1])
+        let next_is_close = strip_ws(block[i + 1]).ends_with("*/")
+        if next != "" && !next.starts_with("@") && !next_is_close {
+          has_continuation = true
+        }
+      }
+      if !has_continuation && is_trivial_example(value, fn_name) {
+        example_removed = example_removed + 1
+        i = i + 1
+        continue
+      }
+      example_kept = example_kept + 1
+    }
+    kept = kept + [line]
+    i = i + 1
+  }
+  /* Collapse separator damage: no doubled blank `*` lines, no blank
+     line directly after `/**` or directly before `*/`. */
+  var cleaned = []
+  let m = len(kept)
+  var j = 0
+  while j < m {
+    let line = kept[j]
+    let is_blank_star = _block_line_content(line) == "" && lstrip_ws(line).starts_with("*")
+      && !lstrip_ws(line).starts_with("*/")
+    if is_blank_star {
+      let prev_blank_or_open = len(cleaned) == 0
+        || _block_line_content(cleaned[len(cleaned) - 1]) == ""
+      let next_is_close = j + 1 < m && lstrip_ws(kept[j + 1]).starts_with("*/")
+      let last_is_open = len(cleaned) > 0
+        && lstrip_ws(cleaned[len(cleaned) - 1]).starts_with("/**")
+      if prev_blank_or_open || next_is_close || last_is_open {
+        j = j + 1
+        continue
+      }
+    }
+    cleaned = cleaned + [line]
+    j = j + 1
+  }
+  return {
+    lines: cleaned,
+    stats: {
+      allocation_removed: allocation_removed,
+      stability_removed: stability_removed,
+      example_removed: example_removed,
+      example_kept: example_kept,
+    },
+  }
+}
+
+/** Pure transform: text + path -> {text, stats}. */
+pub fn process_file(text, path) -> dict {
+  var allocation_removed = 0
+  var stability_removed = 0
+  var example_removed = 0
+  var example_kept = 0
+  let lines = text.split("\n")
+  var out = []
+  var i = 0
+  let n = len(lines)
+  while i < n {
+    let line = lines[i]
+    let name = match_pub_fn(line)
+    if name == "" {
+      out = out + [line]
+      i = i + 1
+      continue
+    }
+    let block_end = len(out)
+    let block_start = find_doc_block_start(out)
+    if block_start == -1 {
+      out = out + [line]
+      i = i + 1
+      continue
+    }
+    let block = out.slice(block_start, block_end)
+    let result = strip_block(block, name)
+    let st = result["stats"]
+    allocation_removed = allocation_removed + st["allocation_removed"]
+    stability_removed = stability_removed + st["stability_removed"]
+    example_removed = example_removed + st["example_removed"]
+    example_kept = example_kept + st["example_kept"]
+    out = out.slice(0, block_start) + result["lines"] + out.slice(block_end, len(out))
+    out = out + [line]
+    i = i + 1
+  }
+  return {
+    text: out.join("\n"),
+    stats: {
+      allocation_removed: allocation_removed,
+      stability_removed: stability_removed,
+      example_removed: example_removed,
+      example_kept: example_kept,
+    },
+  }
+}
+
+pipeline main(task) {
+  let stdlib = "crates/harn-stdlib/src/stdlib"
+  var allocation_removed = 0
+  var stability_removed = 0
+  var example_removed = 0
+  var example_kept = 0
+  var files_changed = 0
+  let files = harness.fs.glob("${stdlib}/**/*.harn").sort()
+  for path in files {
+    let text = harness.fs.read_text(path)
+    let result = process_file(text, path)
+    let st = result["stats"]
+    allocation_removed = allocation_removed + st["allocation_removed"]
+    stability_removed = stability_removed + st["stability_removed"]
+    example_removed = example_removed + st["example_removed"]
+    example_kept = example_kept + st["example_kept"]
+    let new_text = result["text"]
+    if new_text != text {
+      harness.fs.write_text(path, new_text)
+      files_changed = files_changed + 1
+    }
+  }
+  __io_println(
+    "files changed: ${files_changed}; @allocation removed: ${allocation_removed}; @api_stability: stable removed: ${stability_removed}; trivial @example removed: ${example_removed}; rich @example kept: ${example_kept}",
+  )
+  return 0
+}

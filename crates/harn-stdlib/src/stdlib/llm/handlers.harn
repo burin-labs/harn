@@ -26,10 +26,7 @@ import { with_case_insensitive_keys } from "std/llm/safe"
  *     let caller = with_retry(default_llm_caller(), {...})
  *
  * @effects: [llm.call]
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: default_llm_caller()
  */
 pub fn default_llm_caller() {
   return { call ->
@@ -314,10 +311,7 @@ fn __backoff_delay(harness: Harness, attempt, base_ms, max_ms, backoff, jitter) 
  * Never throws — raw throws from `next` become {ok: false, status: "exception"}.
  *
  * @effects: [llm.call]
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: with_retry(next, opts)
  */
 pub fn with_retry(next, opts = nil) {
   if !__llm_handler_is_callable(next) {
@@ -384,10 +378,7 @@ pub fn with_retry(next, opts = nil) {
  * On all-fail: last envelope + {fallback_total}.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: with_fallback(callers)
  */
 pub fn with_fallback(callers) {
   let total = if type_of(callers) == "list" {
@@ -449,10 +440,7 @@ fn __envelope_text(env) {
  * differ and call.turn.session_id is non-empty.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: with_shadow(primary, shadow, opts)
  */
 pub fn with_shadow(primary, shadow, opts = nil) {
   let cfg = __opts_dict(opts)
@@ -530,10 +518,7 @@ pub fn with_shadow(primary, shadow, opts = nil) {
  * rewritten call. Preserves `call.turn`.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: with_prompt_rewrite(next, rewriter)
  */
 pub fn with_prompt_rewrite(next, rewriter) {
   return { call ->
@@ -599,10 +584,7 @@ pub fn with_prompt_rewrite(next, rewriter) {
  * Emits `llm_call_log` event when call.turn.session_id is non-empty.
  *
  * @effects: [llm.call]
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: with_logging(next, opts)
  */
 pub fn with_logging(next, opts = nil) {
   if !__llm_handler_is_callable(next) {
@@ -688,10 +670,7 @@ fn __budget_check(limit_name, max_value, observed, on_exceed) {
  *   - "throw": throws (propagates to caller)
  *
  * @effects: [llm.call]
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: with_budget(next, opts)
  */
 pub fn with_budget(next, opts = nil) {
   if !__llm_handler_is_callable(next) {
@@ -738,10 +717,7 @@ pub fn with_budget(next, opts = nil) {
  * llm_cache_key returns the canonical sha256 cache key used by with_cache.
  *
  * @effects: [llm.call]
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: llm_cache_key(prompt, system, options)
  */
 pub fn llm_cache_key(prompt, system = nil, options = nil) -> string {
   return __llm_cache_key(prompt, system, options ?? {})
@@ -765,10 +741,7 @@ pub fn llm_cache_key(prompt, system = nil, options = nil) -> string {
  * can read them back.
  *
  * @effects: [llm.call]
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: with_cache(first, second, third)
  */
 pub fn with_cache(first, second = nil, third = nil) {
   if __llm_handler_is_callable(first) {
@@ -926,10 +899,7 @@ fn __with_cache_emit_miss(session_id, key, cached, compute_ms) {
  * share one circuit across calls.
  *
  * @effects: [llm.call]
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: with_circuit_breaker(handler, options)
  */
 pub fn with_circuit_breaker(handler, options = nil) {
   if !__llm_handler_is_callable(handler) {
@@ -1041,10 +1011,7 @@ fn __repair_apply_strategy(call, envelope, strategy, max_tokens, temperature) {
  * unstructured callers that surface `schema_validation` themselves.
  *
  * @effects: [llm.call]
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: with_repair(next, opts)
  */
 pub fn with_repair(next, opts = nil) {
   if !__llm_handler_is_callable(next) {
@@ -1103,10 +1070,7 @@ fn __coerce_value_dict(value, lower_keys) {
  * Failure envelopes pass through unchanged.
  *
  * @effects: [llm.call]
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: with_coerce(next, opts)
  */
 pub fn with_coerce(next, opts = nil) {
   if !__llm_handler_is_callable(next) {
@@ -1198,10 +1162,7 @@ fn __timeout_resolve_ms(opts) {
  *     `timeout`. Set false to keep the original status code.
  *
  * @effects: [llm.call]
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: with_timeout(next, opts)
  */
 pub fn with_timeout(next, opts = nil) {
   if !__llm_handler_is_callable(next) {
@@ -1316,10 +1277,7 @@ fn __routing_resolve(routes, call) {
  * caller before any provider work happens.
  *
  * @effects: [llm.call]
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: with_routing(opts)
  */
 pub fn with_routing(opts) {
   let cfg = __opts_dict(opts)
@@ -1371,10 +1329,7 @@ pub fn with_routing(opts) {
  * Equivalently, the leftmost wrapper is the outermost.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: compose(wrappers)
  */
 pub fn compose(wrappers) {
   let list = if type_of(wrappers) == "list" {

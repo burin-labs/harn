@@ -60,6 +60,19 @@ pub(crate) fn harn_lint_require_file_header(path: &Path) -> bool {
     }
 }
 
+/// Read `[lint] require_docstrings` from the nearest harn.toml, defaulting
+/// to `false`. Gates the opt-in `missing-harndoc` rule on public
+/// functions; stdlib sources enforce docstrings regardless.
+pub(crate) fn harn_lint_require_docstrings(path: &Path) -> bool {
+    match harn_config::load_for_path(path) {
+        Ok(cfg) => cfg.lint.require_docstrings.unwrap_or(false),
+        Err(e) => {
+            eprintln!("warning: {e}");
+            false
+        }
+    }
+}
+
 /// Read `[lint] complexity_threshold` from the nearest harn.toml. Returns
 /// `None` when unset or when the manifest is missing/malformed — the
 /// linter falls back to `harn_lint::DEFAULT_COMPLEXITY_THRESHOLD`.

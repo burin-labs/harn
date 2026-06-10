@@ -29,10 +29,8 @@ const TASK_PLAN_SCHEMA_VERSION: string = "1"
  * task_plan_schema_version.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
- * @example: task_plan_schema_version()
  */
 pub fn task_plan_schema_version() {
   return TASK_PLAN_SCHEMA_VERSION
@@ -159,10 +157,8 @@ fn __task_plan_unknown_schema() {
  * `schema_check`/`schema_parse` can apply to a JSON task-plan IR.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
- * @example: task_plan_schema()
  */
 pub fn task_plan_schema() {
   return schema_object(
@@ -620,10 +616,8 @@ fn __task_plan_finalize(report) {
  * fail fast on coarse shape errors.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
- * @example: task_plan_validate(plan)
  */
 pub fn task_plan_validate(plan) {
   if type_of(plan) != "dict" {
@@ -937,10 +931,8 @@ fn __task_plan_metadata(plan, validation) {
  * itself never throws.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
- * @example: task_plan_compile(plan)
  */
 pub fn task_plan_compile(plan) {
   let validation = task_plan_validate(plan)
@@ -974,10 +966,8 @@ pub fn task_plan_compile(plan) {
  * IR-level review.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
- * @example: task_plan_render_mermaid(plan)
  */
 pub fn task_plan_render_mermaid(plan) {
   var lines = ["flowchart TD"]

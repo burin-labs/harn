@@ -20,10 +20,7 @@ fn params_subset_match(expected, actual) {
  * clear_host_mocks.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: clear_host_mocks()
  */
 pub fn clear_host_mocks() {
   return host_mock_clear()
@@ -33,10 +30,7 @@ pub fn clear_host_mocks() {
  * mock_host_result.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: mock_host_result(cap, op, result, params)
  */
 pub fn mock_host_result(cap: string, op: string, result, params) {
   if params == nil {
@@ -49,10 +43,7 @@ pub fn mock_host_result(cap: string, op: string, result, params) {
  * mock_host_error.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: mock_host_error(cap, op, message, params)
  */
 pub fn mock_host_error(cap: string, op: string, message: string, params) {
   let config = {error: message}
@@ -66,10 +57,7 @@ pub fn mock_host_error(cap: string, op: string, message: string, params) {
  * mock_host_response.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: mock_host_response(cap, op, config)
  */
 pub fn mock_host_response(cap: string, op: string, config) {
   return host_mock(cap, op, config)
@@ -79,10 +67,7 @@ pub fn mock_host_response(cap: string, op: string, config) {
  * host_calls.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: host_calls()
  */
 pub fn host_calls() {
   return host_mock_calls()
@@ -92,10 +77,7 @@ pub fn host_calls() {
  * host_calls_for.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: host_calls_for(cap, op)
  */
 pub fn host_calls_for(cap: string, op: string) {
   return host_mock_calls()
@@ -106,10 +88,7 @@ pub fn host_calls_for(cap: string, op: string) {
  * host_call_count.
  *
  * @effects: []
- * @allocation: stack-only
  * @errors: []
- * @api_stability: stable
- * @example: host_call_count()
  */
 pub fn host_call_count() -> int {
   return len(host_mock_calls())
@@ -119,10 +98,7 @@ pub fn host_call_count() -> int {
  * host_call_count_for.
  *
  * @effects: []
- * @allocation: stack-only
  * @errors: []
- * @api_stability: stable
- * @example: host_call_count_for(cap, op)
  */
 pub fn host_call_count_for(cap: string, op: string) -> int {
   return len(host_calls_for(cap, op))
@@ -132,10 +108,7 @@ pub fn host_call_count_for(cap: string, op: string) -> int {
  * host_was_called.
  *
  * @effects: []
- * @allocation: stack-only
  * @errors: []
- * @api_stability: stable
- * @example: host_was_called(cap, op, expected_params)
  */
 pub fn host_was_called(cap: string, op: string, expected_params) -> bool {
   for call in host_calls_for(cap, op) {
@@ -150,10 +123,7 @@ pub fn host_was_called(cap: string, op: string, expected_params) -> bool {
  * assert_host_called.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: assert_host_called(cap, op, params, message)
  */
 pub fn assert_host_called(cap: string, op: string, params = nil, message = nil) {
   if host_was_called(cap, op, params) {
@@ -172,10 +142,7 @@ pub fn assert_host_called(cap: string, op: string, params = nil, message = nil) 
  * assert_host_call_count.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: assert_host_call_count(expected_count, cap, op, message)
  */
 pub fn assert_host_call_count(expected_count: int, cap: string, op: string, message = nil) {
   let actual_count = host_call_count_for(cap, op)
@@ -188,10 +155,7 @@ pub fn assert_host_call_count(expected_count: int, cap: string, op: string, mess
  * assert_no_host_calls.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: assert_no_host_calls(message)
  */
 pub fn assert_no_host_calls(message = nil) {
   let actual_count = host_call_count()
@@ -231,10 +195,7 @@ fn apply_host_mock_entry(entry) {
  * cleanup.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: with_host_mocks(mocks, body)
  */
 pub fn with_host_mocks(mocks, body) {
   host_mock_push_scope()
@@ -359,10 +320,7 @@ fn __testing_golden_match(expected, actual) -> bool {
  * llm_calls. Returns the LLM mock call log for the current scope.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: llm_calls()
  */
 pub fn llm_calls() {
   return llm_mock_calls()
@@ -372,10 +330,7 @@ pub fn llm_calls() {
  * llm_call_count. Number of LLM calls recorded in the current scope.
  *
  * @effects: []
- * @allocation: stack-only
  * @errors: []
- * @api_stability: stable
- * @example: llm_call_count()
  */
 pub fn llm_call_count() -> int {
   return len(llm_mock_calls())
@@ -392,10 +347,7 @@ pub fn llm_call_count() -> int {
  * cleanup.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: with_llm_mocks(mocks, body)
  */
 pub fn with_llm_mocks(mocks, body) {
   llm_mock_push_scope()
@@ -423,10 +375,7 @@ pub fn with_llm_mocks(mocks, body) {
  * popped (in reverse order) after — including on thrown errors.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: with_mocks(config, body)
  */
 pub fn with_mocks(config, body) {
   let host_entries = config?.host_mocks ?? []
@@ -462,10 +411,7 @@ pub fn with_mocks(config, body) {
  * Clear recorded persona step events.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: step_events_clear()
  */
 pub fn step_events_clear() {
   __testing_step_events = []
@@ -476,10 +422,7 @@ pub fn step_events_clear() {
  * Return recorded PreStep/PostStep payloads captured by step_assertions_begin.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: step_events()
  */
 pub fn step_events() {
   return __testing_step_events
@@ -493,10 +436,7 @@ pub fn step_events() {
  * hooks after calling this helper.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: step_assertions_begin(persona_pattern)
  */
 pub fn step_assertions_begin(persona_pattern = "*") {
   clear_persona_hooks()
@@ -524,10 +464,7 @@ pub fn step_assertions_begin(persona_pattern = "*") {
  * Stop recording persona step hook payloads.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: step_assertions_end()
  */
 pub fn step_assertions_end() {
   clear_persona_hooks()
@@ -538,10 +475,7 @@ pub fn step_assertions_end() {
  * Assert the exact ordered list of @step names that ran.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: assert_steps_ran(expected_names, message)
  */
 pub fn assert_steps_ran(expected_names, message = nil) {
   var actual = []
@@ -559,10 +493,7 @@ pub fn assert_steps_ran(expected_names, message = nil) {
  * Assert that a step received an input matching a closure, dict subset, or value.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: assert_step_received(step_name, predicate, message)
  */
 pub fn assert_step_received(step_name, predicate = nil, message = nil) {
   for event in __testing_step_events_for("PreStep") {
@@ -578,10 +509,7 @@ pub fn assert_step_received(step_name, predicate = nil, message = nil) {
  * Assert that a step emitted an output matching a closure, dict subset, or value.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: assert_step_emitted(step_name, predicate, message)
  */
 pub fn assert_step_emitted(step_name, predicate = nil, message = nil) {
   for event in __testing_step_events_for("PostStep") {
@@ -597,10 +525,7 @@ pub fn assert_step_emitted(step_name, predicate = nil, message = nil) {
  * Assert that a handoff list or run record contains a handoff of kind and optional target.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: assert_handoff_emitted(source, handoff_kind, target)
  */
 pub fn assert_handoff_emitted(source, handoff_kind, target = nil) {
   let handoffs = source?.handoffs ?? source
@@ -622,10 +547,7 @@ pub fn assert_handoff_emitted(source, handoff_kind, target = nil) {
  * Assert an RFC 6901 JSON Pointer field inside a receipt or envelope.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: assert_receipt_field(receipt, path, value)
  */
 pub fn assert_receipt_field(receipt, path, value) {
   let actual = json_pointer(receipt, path)
@@ -641,10 +563,7 @@ pub fn assert_receipt_field(receipt, path, value) {
  * fields that matter without pinning every implementation detail.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: assert_golden_transcript(expected, actual, message)
  */
 pub fn assert_golden_transcript(expected, actual, message = nil) {
   require __testing_golden_match(expected, actual), message ?? "golden transcript mismatch"
@@ -672,9 +591,7 @@ pub fn assert_golden_transcript(expected, actual, message = nil) {
  * Build a plain-text assistant turn for an LLM mock script.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
  * @example: llm_text("Sure, here is the answer.")
  */
 pub fn llm_text(text: string) -> dict {
@@ -687,10 +604,7 @@ pub fn llm_text(text: string) -> dict {
  * pass a custom marker when the loop under test uses a different one.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: llm_done()
  */
 pub fn llm_done(marker: string = "##DONE##") -> dict {
   return {text: marker}
@@ -702,9 +616,7 @@ pub fn llm_done(marker: string = "##DONE##") -> dict {
  * scripted alongside successful turns.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
  * @example: llm_error("rate limited")
  */
 pub fn llm_error(message: string) -> dict {
@@ -717,9 +629,7 @@ pub fn llm_error(message: string) -> dict {
  * test asserts on it or issues the same tool twice in one turn.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
  * @example: llm_tool_call("write_note", {path: "n.txt"})
  */
 pub fn llm_tool_call(name: string, args = {}, id = nil) -> dict {
@@ -732,9 +642,7 @@ pub fn llm_tool_call(name: string, args = {}, id = nil) -> dict {
  * `name + "_" + index` so parallel calls to the same tool stay distinct.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
  * @example: llm_tool_calls([{name: "a", args: {}}, {name: "b"}])
  */
 pub fn llm_tool_calls(calls) -> dict {
@@ -753,9 +661,7 @@ pub fn llm_tool_calls(calls) -> dict {
  * assistant turns. Pair it with the `llm_*` turn builders.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
  * @example: with_llm_script([llm_text("hi"), llm_done()], body)
  */
 pub fn with_llm_script(turns, body) {
@@ -776,9 +682,7 @@ pub fn with_llm_script(turns, body) {
  * make further assertions on it. Fails if the body returns normally.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
  * @example: assert_throws({ -> parse("") })
  */
 pub fn assert_throws(body, message = nil) -> any {
@@ -800,9 +704,7 @@ pub fn assert_throws(body, message = nil) -> any {
  * try/is_err/unwrap_err/to_string/contains chain with one call.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
  * @example: assert_error_contains({ -> connect("") }, "url is required")
  */
 pub fn assert_error_contains(body, substring: string, message = nil) -> any {
@@ -821,9 +723,7 @@ pub fn assert_error_contains(body, substring: string, message = nil) -> any {
  * pinning a regression where a previously-rejected input must now succeed.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
  * @example: assert_no_throw({ -> parse("ok") })
  */
 pub fn assert_no_throw(body, message = nil) -> any {
@@ -864,9 +764,7 @@ fn __testing_fs_content(value) -> string {
  * returns.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
  * @example: with_temp_dir({ dir -> harness.fs.write_text(dir + "/x", "1") })
  */
 pub fn with_temp_dir(body) -> any {
@@ -890,9 +788,7 @@ pub fn with_temp_dir(body) -> any {
  * directory path is passed to `body` and removed on exit.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
  * @example: with_fs({"in.txt": "hello"}, { dir -> harness.fs.read_text(dir + "/in.txt") })
  */
 pub fn with_fs(files, body) -> any {
@@ -921,9 +817,7 @@ pub fn with_fs(files, body) -> any {
  * reverse order on exit, including on a thrown error.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
  * @example: with_scenario({llm: [llm_done()], fs: {"a.txt": "1"}}, { s -> run(s.dir) })
  */
 pub fn with_scenario(config, body) {

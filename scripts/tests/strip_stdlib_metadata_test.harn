@@ -1,0 +1,77 @@
+// Tests for scripts/strip_stdlib_metadata.harn — exercise the pure
+// transform on synthetic inputs (no filesystem dependency).
+import "../strip_stdlib_metadata.harn"
+
+@test
+pipeline test_is_trivial_example(task) {
+  assert_eq(is_trivial_example("foo()", "foo"), true)
+  assert_eq(is_trivial_example("foo(a, b)", "foo"), true)
+  assert_eq(is_trivial_example("let s = foo(a)", "foo"), true)
+  // Wrong name is not an echo of this signature.
+  assert_eq(is_trivial_example("bar(a)", "foo"), false)
+  // Literals, nested calls, or chains are real examples.
+  assert_eq(is_trivial_example("foo(\"x\")", "foo"), false)
+  assert_eq(is_trivial_example("foo(bar(a))", "foo"), false)
+  assert_eq(is_trivial_example("foo(a) + foo(b)", "foo"), false)
+  assert_eq(is_trivial_example("foo(a).len()", "foo"), false)
+}
+
+@test
+pipeline test_strip_removes_retired_tags(task) {
+  let input = "/**\n * Read the file.\n *\n * @effects: [fs.read]\n * @allocation: heap\n * @errors: [FileNotFound]\n * @api_stability: stable\n * @example: read_file(path)\n */\npub fn read_file(path) {\n  return path\n}\n"
+  let expected = "/**\n * Read the file.\n *\n * @effects: [fs.read]\n * @errors: [FileNotFound]\n */\npub fn read_file(path) {\n  return path\n}\n"
+  let result = process_file(input, "x.harn")
+  assert_eq(result["text"], expected)
+  let st = result["stats"]
+  assert_eq(st["allocation_removed"], 1)
+  assert_eq(st["stability_removed"], 1)
+  assert_eq(st["example_removed"], 1)
+  assert_eq(st["example_kept"], 0)
+}
+
+@test
+pipeline test_strip_keeps_experimental_and_rich_examples(task) {
+  let input = "/**\n * Run the loop.\n *\n * @effects: [llm.call]\n * @allocation: heap\n * @errors: []\n * @api_stability: experimental\n * @example: run_loop({model: \"opus\"})\n */\npub fn run_loop(opts) {\n  return opts\n}\n"
+  let expected = "/**\n * Run the loop.\n *\n * @effects: [llm.call]\n * @errors: []\n * @api_stability: experimental\n * @example: run_loop({model: \"opus\"})\n */\npub fn run_loop(opts) {\n  return opts\n}\n"
+  let result = process_file(input, "x.harn")
+  assert_eq(result["text"], expected)
+  let st = result["stats"]
+  assert_eq(st["stability_removed"], 0)
+  assert_eq(st["example_removed"], 0)
+  assert_eq(st["example_kept"], 1)
+}
+
+@test
+pipeline test_strip_keeps_multiline_examples(task) {
+  // A continuation line under @example marks a rich example even when
+  // the first line looks like a signature echo.
+  let input = "/**\n * Open then read.\n *\n * @effects: [fs.read]\n * @errors: []\n * @example: open(path)\n *   read(handle)\n */\npub fn open(path) {\n  return path\n}\n"
+  let result = process_file(input, "x.harn")
+  assert_eq(result["text"], input)
+  assert_eq(result["stats"]["example_kept"], 1)
+}
+
+@test
+pipeline test_strip_collapses_dangling_separators(task) {
+  // When the removals leave a blank `*` directly before the terminator
+  // (or doubled blanks), the separators collapse.
+  let input = "/**\n * Pure helper.\n *\n * @effects: []\n * @errors: []\n *\n * @allocation: heap\n * @api_stability: stable\n * @example: pure(x)\n */\npub fn pure(x) {\n  return x\n}\n"
+  let expected = "/**\n * Pure helper.\n *\n * @effects: []\n * @errors: []\n */\npub fn pure(x) {\n  return x\n}\n"
+  let result = process_file(input, "x.harn")
+  assert_eq(result["text"], expected)
+}
+
+@test
+pipeline test_strip_leaves_prose_only_blocks_alone(task) {
+  let input = "/**\n * Just prose, nothing structured.\n */\npub fn helper(x) {\n  return x\n}\n\n/** Single-line prose. */\npub fn other(y) {\n  return y\n}\n"
+  let result = process_file(input, "x.harn")
+  assert_eq(result["text"], input)
+}
+
+@test
+pipeline test_strip_is_idempotent(task) {
+  let input = "/**\n * Read the file.\n *\n * @effects: [fs.read]\n * @allocation: heap\n * @errors: []\n * @api_stability: stable\n * @example: read_file(path)\n */\npub fn read_file(path) {\n  return path\n}\n"
+  let once = process_file(input, "x.harn")["text"]
+  let twice = process_file(once, "x.harn")["text"]
+  assert_eq(twice, once)
+}

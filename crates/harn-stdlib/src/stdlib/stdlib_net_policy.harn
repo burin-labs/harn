@@ -52,7 +52,6 @@
  * not match subdomains; use `domain_wildcard` for that.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
  * @example: NetPolicy.domain("github.com")
@@ -67,7 +66,6 @@ pub fn domain(host) {
  * — list the apex separately if you need it).
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
  * @example: NetPolicy.domain_wildcard("*.github.com")
@@ -84,7 +82,6 @@ pub fn domain_wildcard(pattern) {
  * `harness.net.*` real-mode wiring (E4.4 / harn#1769).
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
  * @example: NetPolicy.cidr("10.0.0.0/8")
@@ -98,7 +95,6 @@ pub fn cidr(range) {
  * for any port. `ports` must be a list of u16 integers.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
  * @example: NetPolicy.host("api.anthropic.com", [443])
@@ -114,7 +110,6 @@ pub fn host(host_name, ports) {
  * (interpreted as domain, wildcard, or CIDR by shape).
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
  * @example: NetPolicy.create({allow: [NetPolicy.domain("github.com")], default: "deny"})
@@ -131,7 +126,6 @@ pub fn create(config) {
  * strings.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
  * @example: NetPolicy.create({on_violation: OnViolation.audit_only})
@@ -147,10 +141,8 @@ pub fn OnViolation() {
  * the stdlib.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
- * @example: let NetPolicy = NetPolicy()
  */
 pub fn NetPolicy() {
   return {

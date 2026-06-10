@@ -71,10 +71,7 @@ fn __normalize_system_prompt_part(part) {
  * system_prompt_part.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: system_prompt_part(content, options)
  */
 pub fn system_prompt_part(content, options = nil) {
   let opts = if type_of(options) == "dict" {
@@ -89,10 +86,7 @@ pub fn system_prompt_part(content, options = nil) {
  * system_preamble.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: system_preamble(content, options)
  */
 pub fn system_preamble(content, options = nil) {
   let opts = if type_of(options) == "dict" {
@@ -107,10 +101,7 @@ pub fn system_preamble(content, options = nil) {
  * system_appendix.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: system_appendix(content, options)
  */
 pub fn system_appendix(content, options = nil) {
   let opts = if type_of(options) == "dict" {
@@ -125,10 +116,7 @@ pub fn system_appendix(content, options = nil) {
  * with_system_prompt_parts.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: with_system_prompt_parts(options, parts)
  */
 pub fn with_system_prompt_parts(options, parts) {
   let opts = if type_of(options) == "dict" {
@@ -152,10 +140,7 @@ pub fn with_system_prompt_parts(options, parts) {
  * ("professional" | "terse" | "conversational"; default "professional").
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: system_prelude(opts)
  */
 pub fn system_prelude(opts) {
   if type_of(opts) != "dict" {
@@ -201,10 +186,7 @@ fn __tools_listing(tools) {
  * plain non-loop callers can supply.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: tool_use_prelude(tools, format)
  */
 pub fn tool_use_prelude(tools, format) {
   let normalized = lowercase(to_string(format ?? "text"))
@@ -272,10 +254,7 @@ fn __schema_property_lines(properties) {
  * schema.properties (sorted).
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: structured_output_preface(schema, opts)
  */
 pub fn structured_output_preface(schema, opts) {
   let options = opts ?? {}

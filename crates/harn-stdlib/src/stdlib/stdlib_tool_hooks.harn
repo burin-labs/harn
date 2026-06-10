@@ -33,7 +33,6 @@ import { tool_hooks_seed_registry } from "std/tool_hooks_catalogues"
  * Tracking: harn#1895 (TH-02), epic #1884.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
  * @example: preset_run_command({stacks: ["rust"], inner: shell_runner})
@@ -139,7 +138,6 @@ fn __preset_reminder_body(rule, original_command, command, action) {
  *     produces a `tool_hooks.reminder_injected` audit entry).
  *
  * @effects: [host]
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
  * @example: preset_run_command({mode: tool_hooks_mode_rewrite_with_audit})
@@ -178,7 +176,6 @@ pub fn tool_hooks_mode_rewrite_with_audit(rule, args, inner) {
  *     denied rule + command on the lifecycle audit log.
  *
  * @effects: [host]
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
  * @example: preset_run_command({mode: tool_hooks_mode_deny_with_explanation})
@@ -206,7 +203,6 @@ pub fn tool_hooks_mode_deny_with_explanation(rule, args, _inner) {
  *     the matched rule + command on the lifecycle audit log.
  *
  * @effects: [host]
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
  * @example: preset_run_command({mode: tool_hooks_mode_passthrough_only_audit})
@@ -566,7 +562,6 @@ fn __preset_custom_registry(custom_rules) {
  *     autonomy budget, etc.) — keep the classifier model small.
  *
  * @effects: [llm]
- * @allocation: heap
  * @errors: ["preset_run_command: llm_classifier.model must be a non-empty string"]
  * @api_stability: experimental
  * @example: agent_loop(message, tools: {tools: [{name: "run_command", handler: preset_run_command({stacks: ["rust"]})}]})

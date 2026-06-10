@@ -6801,6 +6801,7 @@ guide for harn-canon rules is in
 [lint]
 disabled = ["unused-import"]
 require_file_header = false
+require_docstrings = false
 complexity_threshold = 25
 persona_step_allowlist = ["legacy_helper"]
 ```
@@ -6809,6 +6810,11 @@ persona_step_allowlist = ["legacy_helper"]
 - `require_file_header` opts into the `require-file-header` rule,
   which checks that each source file begins with a `/** */` HarnDoc
   block whose title matches the filename.
+- `require_docstrings` opts into the `missing-harndoc` rule, which
+  warns when a public function has no `/** */` doc comment. Off by
+  default — out of the box, `pub fn` needs no docs, and editor
+  tooling derives a usage example from the type signature. Embedded
+  stdlib sources enforce docstrings regardless of this flag.
 - `complexity_threshold` overrides the default cyclomatic-complexity
   warning threshold (default **25**, chosen to match Clippy's
   `cognitive_complexity` default). Set lower to tighten, higher to

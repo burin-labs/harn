@@ -25,7 +25,6 @@
  * it queries the partial tree and reports `had_errors`.
  *
  * @effects: [host]
- * @allocation: heap
  * @errors: [backend]
  * @api_stability: experimental
  * @example: ast_search({path: "src/lib.rs", query: "(let_declaration value: (_) @v)"})

@@ -28,7 +28,6 @@ fn __span_fields(span: ObsSpan, fields: dict) -> dict {
  * Honeycomb, or pretty stderr from process environment in that order.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
  * @example: configure({backend: backends().auto})
@@ -51,7 +50,6 @@ pub fn backends() -> dict {
  * before backend routing or wire-format conversion.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
  * @example: configure({processors: [processors().redaction]})
@@ -66,7 +64,6 @@ pub fn processors() -> dict {
  * `backends`, `routes`, `processors`, and `audit_to_pretty_stderr`.
  *
  * @effects: [host]
- * @allocation: heap
  * @errors: [invalid_argument]
  * @api_stability: experimental
  * @example: configure({backend: backends().auto})
@@ -80,10 +77,8 @@ pub fn configure(config: dict = {}) {
  * for the current process environment.
  *
  * @effects: [env]
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
- * @example: auto_backend()
  */
 pub fn auto_backend() -> ObsBackend {
   return __obs_auto_backend()
@@ -95,7 +90,6 @@ pub fn auto_backend() -> ObsBackend {
  * for callback-scoped auto-close.
  *
  * @effects: [host]
- * @allocation: heap
  * @errors: [invalid_argument]
  * @api_stability: experimental
  * @example: let s = start_span("review", {pr: 1915})
@@ -108,10 +102,8 @@ pub fn start_span(name: string, attrs: dict = {}) -> ObsSpan {
  * end_span closes a span handle returned by `start_span`.
  *
  * @effects: [host]
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
- * @example: end_span(s)
  */
 pub fn end_span(span: ObsSpan) {
   __obs_end_span(span)
@@ -122,7 +114,6 @@ pub fn end_span(span: ObsSpan) {
  * callback inside a span and closes it on return or throw.
  *
  * @effects: [host]
- * @allocation: heap
  * @errors: [invalid_argument]
  * @api_stability: experimental
  * @example: span("review", {pr: 1915}, { -> work() })
@@ -146,7 +137,6 @@ pub fn span(name: string, attrs: dict = {}, callback = nil) {
  * log emits a structured log event through the configured backend.
  *
  * @effects: [host]
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
  * @example: log("starting", "info", {phase: "review"})
@@ -159,7 +149,6 @@ pub fn log(message: string, level: string = "info", fields: dict = {}) {
  * metric emits a numeric measurement through the configured backend.
  *
  * @effects: [host]
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
  * @example: metric("review_duration_ms", 42, {pr: 1915})
@@ -174,7 +163,6 @@ pub fn metric(name: string, value, fields: dict = {}) {
  * round-trip this as `Sum`-typed metric points.
  *
  * @effects: [host]
- * @allocation: heap
  * @errors: [invalid_argument]
  * @api_stability: experimental
  * @example: counter("harn.session.put_total", 1, {"harn.session.outcome": "ok"})
@@ -189,7 +177,6 @@ pub fn counter(name: string, value = 1, attrs: dict = {}) {
  * the value lands as a generic observation alongside `counter`/`gauge`.
  *
  * @effects: [host]
- * @allocation: heap
  * @errors: [invalid_argument]
  * @api_stability: experimental
  * @example: histogram("harn.pg.duration_ms", 42, {"harn.pg.query_name": "users.by_id"})
@@ -204,7 +191,6 @@ pub fn histogram(name: string, value, attrs: dict = {}) {
  * exporters keep only the most recent reading.
  *
  * @effects: [host]
- * @allocation: heap
  * @errors: [invalid_argument]
  * @api_stability: experimental
  * @example: gauge("harn.mcp.restart_count", 3, {"harn.mcp.server": "fs"})
@@ -219,10 +205,8 @@ pub fn gauge(name: string, value, attrs: dict = {}) {
  * bound — useful for tests and standalone `harn run`.
  *
  * @effects: [host]
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
- * @example: let id = request_id()
  */
 pub fn request_id() {
   return __obs_request_id()
@@ -233,7 +217,6 @@ pub fn request_id() {
  * primitive underneath logs, metrics, and span lifecycle events.
  *
  * @effects: [host]
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
  * @example: event({kind: "audit", name: "policy.decision"})
@@ -247,7 +230,6 @@ pub fn event(record: dict) {
  * without requiring that span to be current on the stack.
  *
  * @effects: [host]
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
  * @example: log_in_span(span, "child event")
@@ -270,10 +252,8 @@ pub fn log_in_span(span: ObsSpan, message: string, level: string = "info", field
  * for tests and embedded hosts that want to pull observations directly.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
- * @example: events()
  */
 pub fn events() -> list {
   return __obs_events()
@@ -283,10 +263,8 @@ pub fn events() -> list {
  * events_take drains the process-local emitted payload buffer.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
- * @example: events_take()
  */
 pub fn events_take() -> list {
   return __obs_events_take()
@@ -297,10 +275,8 @@ pub fn events_take() -> list {
  * emissions for the current VM thread.
  *
  * @effects: [host]
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
- * @example: reset()
  */
 pub fn reset() {
   __obs_reset()
@@ -311,7 +287,6 @@ pub fn reset() {
  * `obs().span(...)`, `obs().Backend.auto`, and matching direct helpers.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
  * @example: let o = obs(); o.log("ready")

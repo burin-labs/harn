@@ -7,10 +7,7 @@ type ReadLineResult = {ok: bool, value?: string, status?: string, error?: string
  * is_tty returns whether fd 0, 1, or 2 is attached to a terminal.
  *
  * @effects: []
- * @allocation: stack-only
  * @errors: []
- * @api_stability: stable
- * @example: is_tty(fd)
  */
 pub fn is_tty(fd: int = 0) -> bool {
   if fd == 0 {
@@ -29,10 +26,7 @@ pub fn is_tty(fd: int = 0) -> bool {
  * read_line reads one line from stdin and reports ok/eof/timeout/interrupt/error.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: read_line(opts)
  */
 pub fn read_line(opts: ReadLineOptions = {}) -> ReadLineResult {
   return __io_read_line(opts ?? {})
@@ -42,10 +36,7 @@ pub fn read_line(opts: ReadLineOptions = {}) -> ReadLineResult {
  * read_password reads one line with terminal echo disabled.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: read_password(prompt, timeout_ms)
  */
 pub fn read_password(prompt: string = "", timeout_ms: int? = nil) -> ReadLineResult {
   if timeout_ms == nil {
@@ -58,10 +49,7 @@ pub fn read_password(prompt: string = "", timeout_ms: int? = nil) -> ReadLineRes
  * write_stdout writes text to stdout without appending a newline.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: write_stdout(text)
  */
 pub fn write_stdout(text: string) {
   __io_write_stdout(text)
@@ -71,10 +59,7 @@ pub fn write_stdout(text: string) {
  * write_stderr writes text to stderr without appending a newline.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: write_stderr(text)
  */
 pub fn write_stderr(text: string) {
   __io_write_stderr(text)

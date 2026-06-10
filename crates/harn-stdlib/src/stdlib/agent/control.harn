@@ -171,10 +171,8 @@ fn __agent_interpret_loop_command(command) -> AgentLoopCommand {
  * agent_loop_control_invoke normalizes a custom or adaptive loop command.
  *
  * @effects: [agent]
- * @allocation: heap
  * @errors: [agent_loop]
  * @api_stability: experimental
- * @example: agent_loop_control_invoke(opts, budget, state)
  */
 pub fn agent_loop_control_invoke(opts, budget: AgentLoopBudget, state: AgentLoopState) -> AgentLoopCommand {
   let policy = opts?.loop_control
@@ -249,10 +247,8 @@ fn __agent_progress_summary_text(completion_vetoed: bool, tool_count: int, visib
  * agent_loop_snapshot_state builds the loop-control state callback payload.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
- * @example: agent_loop_snapshot_state(args)
  */
 pub fn agent_loop_snapshot_state(args) -> AgentLoopState {
   let verdict = args.verdict
@@ -307,10 +303,8 @@ pub fn agent_loop_snapshot_state(args) -> AgentLoopState {
  * agent_loop_apply_command applies a normalized command to the loop budget.
  *
  * @effects: [agent]
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
- * @example: agent_loop_apply_command(state)
  */
 pub fn agent_loop_apply_command(state) -> AgentLoopCommandApplication {
   let command = state.command

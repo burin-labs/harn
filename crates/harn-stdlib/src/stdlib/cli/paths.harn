@@ -73,9 +73,7 @@ fn __resolve_app_home(
  * `$HOME/.config/<app_name>` elsewhere. The directory is not created.
  *
  * @effects: [env.read]
- * @allocation: heap
  * @errors: ["app_name must be a single path segment", "HOME or USERPROFILE must be an absolute path"]
- * @api_stability: stable
  * @example: xdg_config_home("harn")
  */
 pub fn xdg_config_home(app_name: string) -> string {
@@ -89,9 +87,7 @@ pub fn xdg_config_home(app_name: string) -> string {
  * `$HOME/.local/share/<app_name>` elsewhere. The directory is not created.
  *
  * @effects: [env.read]
- * @allocation: heap
  * @errors: ["app_name must be a single path segment", "HOME or USERPROFILE must be an absolute path"]
- * @api_stability: stable
  * @example: xdg_data_home("harn")
  */
 pub fn xdg_data_home(app_name: string) -> string {
@@ -110,9 +106,7 @@ pub fn xdg_data_home(app_name: string) -> string {
  * `$HOME/.cache/<app_name>` elsewhere. The directory is not created.
  *
  * @effects: [env.read]
- * @allocation: heap
  * @errors: ["app_name must be a single path segment", "HOME or USERPROFILE must be an absolute path"]
- * @api_stability: stable
  * @example: xdg_cache_home("harn")
  */
 pub fn xdg_cache_home(app_name: string) -> string {

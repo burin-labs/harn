@@ -248,10 +248,7 @@ fn __bulletin_privacy(value) -> BulletinPrivacy {
  * Build the stable bulletin id from scope, scope_key, subject, persona, and assertion.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: bulletin_id(scope, scope_key, subject, assertion, persona)
  */
 pub fn bulletin_id(scope, scope_key, subject, assertion, persona = nil) -> string {
   let seed = lowercase(__bulletin_text(scope))
@@ -316,10 +313,7 @@ fn __bulletin_status_for_action(action) -> string {
  * Validate that a bulletin envelope has the required fields and shapes.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: bulletin_validate(bulletin)
  */
 pub fn bulletin_validate(bulletin: ProfileBulletin) -> ProfileBulletin {
   if bulletin.schema != BULLETIN_SCHEMA {
@@ -351,10 +345,7 @@ pub fn bulletin_validate(bulletin: ProfileBulletin) -> ProfileBulletin {
  * `status = "proposed"` so they never silently enter durable context.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: bulletin_propose(input, options)
  */
 pub fn bulletin_propose(input, options = nil) -> ProfileBulletin {
   if input == nil || type_of(input) != "dict" {
@@ -413,10 +404,7 @@ pub fn bulletin_propose(input, options = nil) -> ProfileBulletin {
  * Drop duplicate proposals by stable bulletin id, preserving first-seen order.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: bulletin_dedupe(bulletins)
  */
 pub fn bulletin_dedupe(bulletins: list) -> list<ProfileBulletin> {
   var seen = {}
@@ -439,10 +427,7 @@ pub fn bulletin_dedupe(bulletins: list) -> list<ProfileBulletin> {
  * decision should use `bulletin_emit_decision`.
  *
  * @effects: [transcript.write]
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: bulletin_emit(input, options)
  */
 pub fn bulletin_emit(input, options = nil) -> BulletinProposeReceipt {
   let opts = options ?? {}
@@ -474,10 +459,7 @@ pub fn bulletin_emit(input, options = nil) -> BulletinProposeReceipt {
  * Build a typed decision envelope without writing to the EventLog.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: bulletin_decide(bulletin, action, options)
  */
 pub fn bulletin_decide(bulletin: ProfileBulletin, action, options = nil) -> ProfileBulletinDecision {
   let opts = options ?? {}
@@ -515,10 +497,7 @@ pub fn bulletin_decide(bulletin: ProfileBulletin, action, options = nil) -> Prof
  * Emit a decision envelope to the EventLog and return an audit receipt.
  *
  * @effects: [transcript.write]
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: bulletin_emit_decision(decision, options)
  */
 pub fn bulletin_emit_decision(decision: ProfileBulletinDecision, options = nil) -> BulletinDecisionReceipt {
   let opts = options ?? {}
@@ -553,10 +532,7 @@ pub fn bulletin_emit_decision(decision: ProfileBulletinDecision, options = nil) 
  * `options.memory_namespace` on `bulletin_accept`.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: bulletin_memory_namespace(bulletin)
  */
 pub fn bulletin_memory_namespace(bulletin: ProfileBulletin) -> string {
   let scope = __bulletin_text(bulletin.scope)
@@ -604,10 +580,7 @@ fn __bulletin_remember_accepted(bulletin: ProfileBulletin, options) {
  * persona prompts can recall it semantically later.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: bulletin_accept(bulletin, options)
  */
 pub fn bulletin_accept(bulletin: ProfileBulletin, options = nil) -> BulletinDecisionReceipt {
   let receipt = bulletin_emit_decision(bulletin_decide(bulletin, "accept", options), options)
@@ -621,10 +594,7 @@ pub fn bulletin_accept(bulletin: ProfileBulletin, options = nil) -> BulletinDeci
  * Shorthand: build and emit a reject decision. Rationale should be supplied.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: bulletin_reject(bulletin, options)
  */
 pub fn bulletin_reject(bulletin: ProfileBulletin, options = nil) -> BulletinDecisionReceipt {
   return bulletin_emit_decision(bulletin_decide(bulletin, "reject", options), options)
@@ -634,10 +604,7 @@ pub fn bulletin_reject(bulletin: ProfileBulletin, options = nil) -> BulletinDeci
  * Shorthand: build and emit an expire decision (TTL elapsed or out of date).
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: bulletin_expire(bulletin, options)
  */
 pub fn bulletin_expire(bulletin: ProfileBulletin, options = nil) -> BulletinDecisionReceipt {
   return bulletin_emit_decision(bulletin_decide(bulletin, "expire", options), options)
@@ -647,10 +614,7 @@ pub fn bulletin_expire(bulletin: ProfileBulletin, options = nil) -> BulletinDeci
  * Shorthand: supersede prior bulletin ids with this proposal.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: bulletin_supersede(bulletin, supersedes, options)
  */
 pub fn bulletin_supersede(bulletin: ProfileBulletin, supersedes: list<string>, options = nil) -> BulletinDecisionReceipt {
   let merged = options ?? {} + {supersedes: supersedes}
@@ -681,10 +645,7 @@ fn __bulletin_decision_index(decisions) {
  * their original status (typically `proposed`).
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: bulletin_apply_decisions(bulletins, decisions)
  */
 pub fn bulletin_apply_decisions(bulletins: list, decisions: list) -> list<ProfileBulletin> {
   let index = __bulletin_decision_index(decisions)
@@ -704,10 +665,7 @@ pub fn bulletin_apply_decisions(bulletins: list, decisions: list) -> list<Profil
  * Partition bulletins by their effective status.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: bulletin_partition(bulletins)
  */
 pub fn bulletin_partition(bulletins: list) -> BulletinPartition {
   var proposed = []
@@ -752,10 +710,7 @@ fn __bulletin_expired_now(bulletin, now_iso) -> bool {
  * become durable fact without an accept decision.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: bulletin_active(bulletins, now)
  */
 pub fn bulletin_active(bulletins: list, now = nil) -> list<ProfileBulletin> {
   let now_iso = __bulletin_text(now) == "" ? date_now_iso() : __bulletin_text(now)
@@ -786,10 +741,7 @@ fn __bulletin_render_line(bulletin) -> string {
  * fact. Pass `{include_proposed: false}` to drop proposals entirely.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: bulletin_render_for_prompt(bulletins, options)
  */
 pub fn bulletin_render_for_prompt(bulletins: list, options = nil) -> string {
   let opts = options ?? {}

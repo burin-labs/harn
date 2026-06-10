@@ -21,8 +21,40 @@ log(x)
 }
 
 #[test]
-fn test_public_function_requires_harndoc() {
+fn test_missing_harndoc_is_off_by_default() {
+    // SOTA default: doc-presence lints are opt-in (`[lint]
+    // require_docstrings = true`), so a bare `pub fn` is clean out of
+    // the box.
     let diags = lint_source(
+        r#"
+pub fn exposed() -> string {
+  return "x"
+}
+"#,
+    );
+    assert!(
+        !has_rule(&diags, "missing-harndoc"),
+        "missing-harndoc must not fire by default: {diags:?}"
+    );
+}
+
+#[test]
+fn test_public_function_requires_harndoc_when_opted_in() {
+    let diags = lint_with_docstrings(
+        r#"
+pub fn exposed() -> string {
+  return "x"
+}
+"#,
+    );
+    assert!(has_rule(&diags, "missing-harndoc"));
+}
+
+#[test]
+fn test_stdlib_metadata_mode_implies_harndoc_requirement() {
+    // The stdlib gate must keep missing-harndoc armed: HARN-STD-101
+    // defers to it when no doc block exists at all.
+    let diags = lint_with_stdlib_metadata(
         r#"
 pub fn exposed() -> string {
   return "x"
@@ -34,7 +66,7 @@ pub fn exposed() -> string {
 
 #[test]
 fn test_public_function_with_harndoc_is_clean() {
-    let diags = lint_source(
+    let diags = lint_with_docstrings(
         r#"
 /** Explain the public API. */
 pub fn exposed() -> string {
@@ -147,7 +179,7 @@ fn test_legacy_line_comment_suppresses_missing_harndoc() {
     // A wrong-format `//` doc comment is migratable, so the user should see
     // only the auto-fixable `legacy-doc-comment` finding, not the fixless
     // `missing-harndoc` alongside it.
-    let diags = lint_source(
+    let diags = lint_with_docstrings(
         r#"
 // Not HarnDoc.
 pub fn exposed() -> string {
@@ -167,7 +199,7 @@ pub fn exposed() -> string {
 
 #[test]
 fn test_triple_slash_suppresses_missing_harndoc() {
-    let diags = lint_source(
+    let diags = lint_with_docstrings(
         r#"
 /// Old-style doc.
 pub fn exposed() -> string {
@@ -184,7 +216,7 @@ pub fn exposed() -> string {
 
 #[test]
 fn test_plain_block_comment_above_pub_fn_migrates() {
-    let diags = lint_source(
+    let diags = lint_with_docstrings(
         r#"
 /* Not a doc block. */
 pub fn exposed() -> string {
@@ -243,7 +275,7 @@ pub fn exposed() -> string {
 
 #[test]
 fn test_block_comment_with_blank_gap_does_not_migrate() {
-    let diags = lint_source(
+    let diags = lint_with_docstrings(
         r#"
 /* unrelated */
 
@@ -266,7 +298,7 @@ pub fn exposed() -> string {
 
 #[test]
 fn test_private_function_does_not_require_harndoc() {
-    let diags = lint_source(
+    let diags = lint_with_docstrings(
         r#"
 fn helper() -> string {
   return "x"

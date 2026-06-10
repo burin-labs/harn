@@ -5,10 +5,7 @@ import { command_run } from "std/command"
  * Return a compact host/runtime information dict for diagnostics.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: os_info()
  */
 pub fn os_info() -> dict {
   return {
@@ -31,10 +28,7 @@ pub fn os_info() -> dict {
  * Read an environment variable as a bool, accepting common CLI spellings.
  *
  * @effects: []
- * @allocation: stack-only
  * @errors: []
- * @api_stability: stable
- * @example: env_bool(name, fallback)
  */
 pub fn env_bool(name: string, fallback: bool = false) -> bool {
   let value = harness.env.get(name)
@@ -57,10 +51,7 @@ pub fn env_bool(name: string, fallback: bool = false) -> bool {
  * Read an environment variable as an int, returning fallback on absence or parse failure.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: env_int(name, fallback)
  */
 pub fn env_int(name: string, fallback = nil) {
   let value = harness.env.get(name)
@@ -74,10 +65,7 @@ pub fn env_int(name: string, fallback = nil) {
  * Split a path/list-style environment variable, dropping empty entries.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: env_list(name, separator)
  */
 pub fn env_list(name: string, separator = nil) -> list<string> {
   let value = harness.env.get(name)
@@ -106,10 +94,7 @@ pub fn env_list(name: string, separator = nil) -> list<string> {
  * Read a required environment variable or throw a clear error.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: require_env(name)
  */
 pub fn require_env(name: string) -> string {
   let value = harness.env.get(name)
@@ -123,10 +108,7 @@ pub fn require_env(name: string) -> string {
  * Resolve an executable on PATH, returning nil when not found.
  *
  * @effects: [process]
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: which(binary)
  */
 pub fn which(binary: string) {
   let executable = trim(binary ?? "")
@@ -159,10 +141,7 @@ pub fn which(binary: string) {
  * Return whether an executable is visible on PATH.
  *
  * @effects: []
- * @allocation: stack-only
  * @errors: []
- * @api_stability: stable
- * @example: command_exists(binary)
  */
 pub fn command_exists(binary: string) -> bool {
   return which(binary) != nil

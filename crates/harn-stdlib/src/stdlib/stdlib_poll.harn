@@ -49,10 +49,7 @@ fn __poll_options(options) {
  * `initial_delay_ms` is positive.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: poll_until(check, options)
  */
 pub fn poll_until(check, options: PollOptions = {}) -> any {
   let resolved = __poll_options(options)
@@ -89,10 +86,7 @@ pub fn poll_until(check, options: PollOptions = {}) -> any {
  * dict.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: wait_for_status(probe, terminal, options, extractor)
  */
 pub fn wait_for_status(probe, terminal: list<string>, options: PollOptions = {}, extractor = nil) -> any {
   let resolved = __poll_options(options)
@@ -177,10 +171,7 @@ fn __backoff_delay(base_ms: int, attempt: int, multiplier: float, cap_ms: int) -
  * propagate without re-wrapping.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: retry_with_result(action, options)
  */
 pub fn retry_with_result(action, options: RetryOptions = {}) -> RetryReport {
   let resolved = __retry_options(options)

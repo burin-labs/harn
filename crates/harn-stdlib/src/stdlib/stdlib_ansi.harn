@@ -142,10 +142,7 @@ fn __ansi_codes(style) {
  * Return whether ANSI output should be emitted for the requested stream.
  *
  * @effects: []
- * @allocation: stack-only
  * @errors: []
- * @api_stability: stable
- * @example: ansi_enabled(options)
  */
 pub fn ansi_enabled(options: AnsiOptions = {}) -> bool {
   let opts = __ansi_options(options)
@@ -166,10 +163,7 @@ pub fn ansi_enabled(options: AnsiOptions = {}) -> bool {
  * Build an ANSI Select Graphic Rendition escape sequence such as `ansi_escape("1;31")`.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: ansi_escape(code)
  */
 pub fn ansi_escape(code: string) -> string {
   return __ANSI_ESC + "[" + code + "m"
@@ -179,10 +173,7 @@ pub fn ansi_escape(code: string) -> string {
  * Return the terminal reset escape sequence.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: ansi_reset()
  */
 pub fn ansi_reset() -> string {
   return __ANSI_RESET
@@ -192,10 +183,7 @@ pub fn ansi_reset() -> string {
  * Remove ANSI CSI/OSC escape sequences from text.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: ansi_strip(text)
  */
 pub fn ansi_strip(text: string) -> string {
   let value = text ?? ""
@@ -209,10 +197,7 @@ pub fn ansi_strip(text: string) -> string {
  * Return the visible character count after stripping ANSI escapes.
  *
  * @effects: []
- * @allocation: stack-only
  * @errors: []
- * @api_stability: stable
- * @example: ansi_visible_len(text)
  */
 pub fn ansi_visible_len(text: string) -> int {
   return len(ansi_strip(text ?? ""))
@@ -222,10 +207,7 @@ pub fn ansi_visible_len(text: string) -> int {
  * Apply a style dict to text when ANSI is enabled.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: ansi_style(text, style, options)
  */
 pub fn ansi_style(text: string, style: AnsiStyle = {}, options: AnsiOptions = {}) -> string {
   let value = text ?? ""
@@ -243,10 +225,7 @@ pub fn ansi_style(text: string, style: AnsiStyle = {}, options: AnsiOptions = {}
  * Apply a foreground color.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: ansi_color(text, name, options)
  */
 pub fn ansi_color(text: string, name: string, options: AnsiOptions = {}) -> string {
   return ansi_style(text, {fg: name}, options)
@@ -256,10 +235,7 @@ pub fn ansi_color(text: string, name: string, options: AnsiOptions = {}) -> stri
  * Apply a background color.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: ansi_bg(text, name, options)
  */
 pub fn ansi_bg(text: string, name: string, options: AnsiOptions = {}) -> string {
   return ansi_style(text, {bg: name}, options)
@@ -269,10 +245,7 @@ pub fn ansi_bg(text: string, name: string, options: AnsiOptions = {}) -> string 
  * Apply bold styling.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: ansi_bold(text, options)
  */
 pub fn ansi_bold(text: string, options: AnsiOptions = {}) -> string {
   return ansi_style(text, {bold: true}, options)
@@ -282,10 +255,7 @@ pub fn ansi_bold(text: string, options: AnsiOptions = {}) -> string {
  * Apply dim styling.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: ansi_dim(text, options)
  */
 pub fn ansi_dim(text: string, options: AnsiOptions = {}) -> string {
   return ansi_style(text, {dim: true}, options)
@@ -295,10 +265,7 @@ pub fn ansi_dim(text: string, options: AnsiOptions = {}) -> string {
  * Apply underline styling.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: ansi_underline(text, options)
  */
 pub fn ansi_underline(text: string, options: AnsiOptions = {}) -> string {
   return ansi_style(text, {underline: true}, options)
@@ -308,10 +275,7 @@ pub fn ansi_underline(text: string, options: AnsiOptions = {}) -> string {
  * Standard success styling.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: ansi_success(text, options)
  */
 pub fn ansi_success(text: string, options: AnsiOptions = {}) -> string {
   return ansi_style(text, {fg: "green", bold: true}, options)
@@ -321,10 +285,7 @@ pub fn ansi_success(text: string, options: AnsiOptions = {}) -> string {
  * Standard warning styling.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: ansi_warn(text, options)
  */
 pub fn ansi_warn(text: string, options: AnsiOptions = {}) -> string {
   return ansi_style(text, {fg: "yellow", bold: true}, options)
@@ -334,10 +295,7 @@ pub fn ansi_warn(text: string, options: AnsiOptions = {}) -> string {
  * Standard error styling.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: ansi_error(text, options)
  */
 pub fn ansi_error(text: string, options: AnsiOptions = {}) -> string {
   return ansi_style(text, {fg: "red", bold: true}, options)
@@ -347,10 +305,7 @@ pub fn ansi_error(text: string, options: AnsiOptions = {}) -> string {
  * Standard informational styling.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: ansi_info(text, options)
  */
 pub fn ansi_info(text: string, options: AnsiOptions = {}) -> string {
   return ansi_style(text, {fg: "cyan"}, options)
@@ -360,10 +315,7 @@ pub fn ansi_info(text: string, options: AnsiOptions = {}) -> string {
  * Low-emphasis styling for secondary text.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: ansi_muted(text, options)
  */
 pub fn ansi_muted(text: string, options: AnsiOptions = {}) -> string {
   return ansi_style(text, {dim: true}, options)
@@ -373,10 +325,7 @@ pub fn ansi_muted(text: string, options: AnsiOptions = {}) -> string {
  * Render an OSC-8 terminal hyperlink when ANSI is enabled; otherwise return the label.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: ansi_link(label, url, options)
  */
 pub fn ansi_link(label: string, url: string, options: AnsiOptions = {}) -> string {
   let text = label ?? ""
@@ -390,10 +339,7 @@ pub fn ansi_link(label: string, url: string, options: AnsiOptions = {}) -> strin
  * Truncate visible text after stripping ANSI escapes.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: ansi_truncate(text, max_chars, marker)
  */
 pub fn ansi_truncate(text: string, max_chars: int, marker: string = "...") -> string {
   let plain = ansi_strip(text ?? "")

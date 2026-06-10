@@ -17,7 +17,6 @@
  * adds `resolved` and `type` entries when the resolver can supply them.
  *
  * @effects: [host]
- * @allocation: heap
  * @errors: [backend]
  * @api_stability: experimental
  * @example: rules_search({rule: src, source: "foo();", language: "typescript"})
@@ -36,7 +35,6 @@ pub fn rules_search(params) -> dict {
  * counts). Never edits anything.
  *
  * @effects: [host]
- * @allocation: heap
  * @errors: [backend]
  * @api_stability: experimental
  * @example: rules_report({rule: src, paths: ["a.ts", "b.ts"]})
@@ -54,7 +52,6 @@ pub fn rules_report(params) -> dict {
  * `nil` unless the rule has a `fix` template).
  *
  * @effects: [host]
- * @allocation: heap
  * @errors: [backend]
  * @api_stability: experimental
  * @example: rules_diagnostics({rule: src, source: "foo();", language: "typescript"})
@@ -87,7 +84,6 @@ pub fn rules_diagnostics(params) -> dict {
  * equivalent produce identical diagnostics.
  *
  * @effects: [host]
- * @allocation: heap
  * @errors: [backend]
  * @api_stability: experimental
  * @example: rules_visit({rule: src, source: "f();", language: "typescript", on_match: fn(node, ctx) { return {message: "call"} }})
@@ -110,7 +106,6 @@ pub fn rules_visit(params) -> dict {
  * (`hostlib_enable("tools:deterministic")`).
  *
  * @effects: [host, fs]
- * @allocation: heap
  * @errors: [backend]
  * @api_stability: experimental
  * @example: rules_apply({rule: src, paths: ["a.ts"], dry_run: false})
@@ -131,7 +126,6 @@ pub fn rules_apply(params) -> dict {
  * Each file entry reports `{path, changed, applied, before, preview}`.
  *
  * @effects: [host, fs]
- * @allocation: heap
  * @errors: [backend]
  * @api_stability: experimental
  * @example: rules_fold({paths: ["a.harn"], dry_run: false})

@@ -180,7 +180,6 @@ fn __done_judge_cap(judge_cfg) {
  * for surfacing in run records. Returns nil when the cap is disabled.
  *
  * @effects: []
- * @allocation: stack
  * @errors: []
  * @api_stability: experimental
  * @example: agent_verify_completion_judge_cap(opts?.verify_completion_judge)
@@ -196,7 +195,6 @@ pub fn agent_verify_completion_judge_cap(judge_cfg) {
  * cap is not configured or is disabled with 0.
  *
  * @effects: []
- * @allocation: stack
  * @errors: []
  * @api_stability: experimental
  * @example: agent_done_judge_cap(opts?.done_judge)
@@ -229,10 +227,8 @@ fn __emit_judge_decision(session_id, iteration, verdict) {
  * agent_verify_or_continue.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
- * @example: agent_verify_or_continue(session, opts, stop_reason, text, iteration)
  */
 pub fn agent_verify_or_continue(session, opts, stop_reason, text, iteration = 0) {
   let payload = __judge_payload(session, opts, stop_reason, text, iteration)

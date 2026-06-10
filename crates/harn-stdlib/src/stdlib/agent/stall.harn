@@ -225,10 +225,8 @@ fn __agent_stall_config(value) -> AgentStallConfig {
  * agent_stall_initial_state creates repeated-tool-call diagnostic state.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
- * @example: agent_stall_initial_state()
  */
 pub fn agent_stall_initial_state() -> AgentStallState {
   return {
@@ -425,10 +423,8 @@ fn __agent_stall_warning_record(
  * agent_stall_inject_feedback injects bounded stall feedback.
  *
  * @effects: [agent]
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
- * @example: agent_stall_inject_feedback(session_id, warning, config, state)
  */
 pub fn agent_stall_inject_feedback(
   session_id: string,
@@ -704,10 +700,8 @@ fn __agent_stall_process_call(
  * hatch.
  *
  * @effects: [agent]
- * @allocation: heap
  * @errors: [agent_loop]
  * @api_stability: experimental
- * @example: agent_stall_observe_tool_calls(session_id, calls, iteration, config, state, true, prev_dispatch, text)
  */
 pub fn agent_stall_observe_tool_calls(
   session_id: string,
@@ -820,10 +814,8 @@ pub fn agent_stall_observe_tool_calls(
  * agent_stall_apply_result adds stall diagnostics to an agent-loop result.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
- * @example: agent_stall_apply_result(result, enabled, state)
  */
 pub fn agent_stall_apply_result(result: dict, stall_enabled: bool, stall_state: AgentStallState) -> dict {
   if !stall_enabled && len(stall_state.warnings) == 0 {
@@ -853,7 +845,6 @@ fn __agent_done_judge_stall_cadence(opts) {
  * agent_stall_done_judge_due decides whether the stall done judge is due.
  *
  * @effects: []
- * @allocation: stack
  * @errors: []
  * @api_stability: experimental
  * @example: agent_stall_done_judge_due(opts, 0, 3)

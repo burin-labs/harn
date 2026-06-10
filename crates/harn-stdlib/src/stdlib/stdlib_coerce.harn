@@ -13,10 +13,7 @@
  * `to_string`. Nil collapses to the empty string.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: to_string_lossy(value, separator)
  */
 pub fn to_string_lossy(value: any, separator: string = " ") -> string {
   if value == nil {
@@ -46,10 +43,7 @@ pub fn to_string_lossy(value: any, separator: string = " ") -> string {
  * result is truncated to `max_items`.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: to_string_list(value, max_items)
  */
 pub fn to_string_list(value: any, max_items: int = 256) -> list<string> {
   if value == nil {
@@ -84,10 +78,7 @@ pub fn to_string_list(value: any, max_items: int = 256) -> list<string> {
  * Parse an int-like value, returning fallback on failure.
  *
  * @effects: []
- * @allocation: stack-only
  * @errors: []
- * @api_stability: stable
- * @example: to_int_or(value, fallback)
  */
 pub fn to_int_or(value: any, fallback: int) -> int {
   return to_int(value) ?? fallback
@@ -97,10 +88,7 @@ pub fn to_int_or(value: any, fallback: int) -> int {
  * Parse a float-like value, returning fallback on failure.
  *
  * @effects: []
- * @allocation: stack-only
  * @errors: []
- * @api_stability: stable
- * @example: to_float_or(value, fallback)
  */
 pub fn to_float_or(value: any, fallback: float) -> float {
   return to_float(value) ?? fallback
@@ -112,10 +100,7 @@ pub fn to_float_or(value: any, fallback: float) -> float {
  * numeric zero as false, and treats empty list/dict as false.
  *
  * @effects: []
- * @allocation: stack-only
  * @errors: []
- * @api_stability: stable
- * @example: to_bool_or(value, fallback)
  */
 pub fn to_bool_or(value: any, fallback: bool) -> bool {
   if value == nil {
@@ -156,10 +141,7 @@ pub fn to_bool_or(value: any, fallback: bool) -> bool {
  * first miss or non-dict.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: dict_path_ci(d, path)
  */
 pub fn dict_path_ci(d: any, path: list<string>) -> any {
   var current = d
@@ -190,10 +172,7 @@ pub fn dict_path_ci(d: any, path: list<string>) -> any {
  * nil, return `default`.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: first_non_nil(values, default)
  */
 pub fn first_non_nil(values: list, default: any = nil) -> any {
   for v in values {
@@ -210,10 +189,7 @@ pub fn first_non_nil(values: list, default: any = nil) -> any {
  * nothing qualifies.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: first_present(values, default)
  */
 pub fn first_present(values: list, default: any = nil) -> any {
   for v in values {

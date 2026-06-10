@@ -308,10 +308,7 @@ fn __refine_prompt_dict(opts) {
  * refine_prompt(base_prompt, options?) form used by prompt optimization.
  *
  * @effects: [llm.call]
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: refine_prompt(input, options)
  */
 pub fn refine_prompt(input, options = nil) {
   if type_of(input) == "dict" {
@@ -341,10 +338,7 @@ pub fn refine_prompt(input, options = nil) {
  * options.
  *
  * @effects: [llm.call]
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: propose_instructions(base_prompt, options)
  */
 pub fn propose_instructions(base_prompt, options = nil) {
   if type_of(base_prompt) != "string" {
@@ -393,10 +387,7 @@ pub fn propose_instructions(base_prompt, options = nil) {
  * session-scoped cache.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: refine_caller(next, refine_opts)
  */
 pub fn refine_caller(next, refine_opts = nil) {
   let base_opts = if type_of(refine_opts) == "dict" {

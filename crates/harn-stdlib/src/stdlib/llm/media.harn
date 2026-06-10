@@ -13,10 +13,7 @@ fn __llm_media_source_field(harness: Harness, source, media_type) {
  * media_type_for_path returns a best-effort MIME type from a filename extension.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: media_type_for_path(path, fallback)
  */
 pub fn media_type_for_path(path, fallback = nil) {
   let ext = extname(path).lower()
@@ -69,10 +66,7 @@ pub fn media_type_for_path(path, fallback = nil) {
  * text_content creates a provider-neutral text content block.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: text_content(text)
  */
 pub fn text_content(text) {
   return {type: "text", text: text}
@@ -82,10 +76,7 @@ pub fn text_content(text) {
  * image_content creates an llm_call-compatible image block from a URL or local path.
  *
  * @effects: [llm.call]
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: image_content(source, options)
  */
 pub fn image_content(source, options = nil) {
   if type_of(source) == "dict" {
@@ -107,10 +98,7 @@ pub fn image_content(source, options = nil) {
  * video_content creates an llm_call-compatible video block from a URL or local path.
  *
  * @effects: [llm.call]
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: video_content(source, options)
  */
 pub fn video_content(source, options = nil) {
   if type_of(source) == "dict" {
@@ -129,10 +117,7 @@ pub fn video_content(source, options = nil) {
  * document_content creates an llm_call-compatible PDF/document block from a URL, file id, or path.
  *
  * @effects: [llm.call]
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: document_content(source, options)
  */
 pub fn document_content(source, options = nil) {
   if type_of(source) == "dict" {
@@ -154,10 +139,7 @@ pub fn document_content(source, options = nil) {
  * audio_content creates an llm_call-compatible audio block from a URL, file id, or path.
  *
  * @effects: [llm.call]
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: audio_content(source, options)
  */
 pub fn audio_content(source, options = nil) {
   if type_of(source) == "dict" {
@@ -179,10 +161,7 @@ pub fn audio_content(source, options = nil) {
  * image_message builds a user message containing text plus one image.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: image_message(source, prompt, options)
  */
 pub fn image_message(source, prompt = "", options = nil) {
   let text = if prompt == nil || prompt == "" {
@@ -197,10 +176,7 @@ pub fn image_message(source, prompt = "", options = nil) {
  * video_message builds a user message containing text plus one video.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: video_message(source, prompt, options)
  */
 pub fn video_message(source, prompt = "", options = nil) {
   let text = if prompt == nil || prompt == "" {
@@ -215,10 +191,7 @@ pub fn video_message(source, prompt = "", options = nil) {
  * image_vision_context returns OCR/vision output beside an LLM-ready image message.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: image_vision_context(source, options)
  */
 pub fn image_vision_context(source, options = nil) {
   let opts = options ?? {}

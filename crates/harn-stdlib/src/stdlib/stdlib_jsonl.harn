@@ -45,10 +45,7 @@ fn __parse_line(text: string, opts, out_in: list, dropped_in: int) -> dict {
  * parsing stops after that many successes.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: parse_jsonl(text, options)
  */
 pub fn parse_jsonl(text: string, options: ReadJsonlOptions = {}) -> list {
   let opts = __read_options(options)
@@ -75,10 +72,7 @@ pub fn parse_jsonl(text: string, options: ReadJsonlOptions = {}) -> list {
  * absent from empty). Pass `strict: true` to surface parse errors.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: read_jsonl(path, options)
  */
 pub fn read_jsonl(path: string, options: ReadJsonlOptions = {}) -> list {
   if !harness.fs.exists(path) {
@@ -109,10 +103,7 @@ fn __serialize(items: list) -> string {
  * replaced. Returns the count of items written.
  *
  * @effects: []
- * @allocation: stack-only
  * @errors: []
- * @api_stability: stable
- * @example: write_jsonl(path, items)
  */
 pub fn write_jsonl(path: string, items: list) -> int {
   let body = __serialize(items)
@@ -125,10 +116,7 @@ pub fn write_jsonl(path: string, items: list) -> int {
  * absent. Returns the byte count appended (newline included).
  *
  * @effects: []
- * @allocation: stack-only
  * @errors: []
- * @api_stability: stable
- * @example: append_jsonl(path, item)
  */
 pub fn append_jsonl(path: string, item) -> int {
   let line = json_stringify(item) + "\n"
@@ -143,10 +131,7 @@ pub fn append_jsonl(path: string, item) -> int {
  * { state = fold(state, event) }` loops harness authors hand-write.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: fold_jsonl(text, initial, reducer, options)
  */
 pub fn fold_jsonl(text: string, initial, reducer, options: ReadJsonlOptions = {}) -> any {
   let opts = __read_options(options)

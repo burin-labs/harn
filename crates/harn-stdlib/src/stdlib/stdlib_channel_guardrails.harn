@@ -29,7 +29,6 @@
  * Tracking: harn#1911 (CH-11), epic #1870.
  *
  * @effects: ["channel.middleware"]
- * @allocation: heap
  * @errors: ["channel_guardrail_register: ..."]
  * @api_stability: experimental
  */
@@ -236,11 +235,11 @@ fn llm_risk_classifier(opts) -> string {
     let envelope = llm_call_safe(payload_text, cfg.meta_prompt, __guardrails_classifier_options(cfg))
     let raw_text = __guardrails_extract_text(envelope)
     let verdict = __guardrails_parse_verdict(raw_text)
-    if len(to_string(verdict?.error ?? "")) > 0 {
+    if len(to_string(verdict.error ?? "")) > 0 {
       return {verdict: "allow", reason: "classifier-error: " + to_string(verdict.error)}
     }
     if verdict.verdict == "allow" {
-      return {verdict: "allow", reason: to_string(verdict?.reason ?? "")}
+      return {verdict: "allow", reason: to_string(verdict.reason ?? "")}
     }
     if verdict.confidence < cfg.threshold {
       return {
@@ -248,7 +247,7 @@ fn llm_risk_classifier(opts) -> string {
         reason: "sub-threshold " + verdict.verdict + " (conf="
           + to_string(verdict.confidence)
           + "): "
-          + to_string(verdict?.reason ?? ""),
+          + to_string(verdict.reason ?? ""),
       }
     }
     let final_verdict = if verdict.verdict == "block" {
@@ -258,8 +257,8 @@ fn llm_risk_classifier(opts) -> string {
     }
     return {
       verdict: final_verdict,
-      reason: "[" + to_string(verdict?.category ?? "unknown") + "] "
-        + to_string(verdict?.reason ?? ""),
+      reason: "[" + to_string(verdict.category ?? "unknown") + "] "
+        + to_string(verdict.reason ?? ""),
     }
   }
   let resolved = opts ?? {}

@@ -160,13 +160,21 @@ fn graph_json_surfaces_declared_stdlib_metadata_per_symbol() {
  * Read a file and return its contents.
  *
  * @effects: [fs.read]
- * @allocation: heap
  * @errors: [FileNotFound]
- * @api_stability: stable
  * @example: read_file("README.md")
  */
 pub fn read_file(path: string) -> string {
   return path
+}
+
+/**
+ * Count lines.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn count_lines(text: string) -> int {
+  return 1
 }
 "#,
     )
@@ -186,10 +194,21 @@ pub fn read_file(path: string) -> string {
         .expect("read_file symbol");
     let meta = &read_file_sym["metadata"];
     assert_eq!(meta["effects"], serde_json::json!(["fs.read"]));
-    assert_eq!(meta["allocation"], "heap");
     assert_eq!(meta["errors"], serde_json::json!(["FileNotFound"]));
-    assert_eq!(meta["api_stability"], "stable");
     assert_eq!(meta["example"], "read_file(\"README.md\")");
+    // An authored @example suppresses the synthesized one.
+    assert!(read_file_sym.get("derived_example").is_none());
+
+    // No authored @example → a signature-derived one is emitted.
+    let count_lines_sym = symbols
+        .iter()
+        .find(|s| s["name"] == "count_lines")
+        .expect("count_lines symbol");
+    assert!(count_lines_sym["metadata"]["example"].is_null());
+    assert_eq!(
+        count_lines_sym["derived_example"],
+        "let out = count_lines(text)"
+    );
 }
 
 #[test]
