@@ -171,6 +171,12 @@ category = "thread_private"
 plan = "thread_private_cache"
 
 [[thread_local]]
+path = "src/llm/helpers/options/extract.rs"
+statics = ["WARNED_UNSUPPORTED"]
+category = "thread_private"
+plan = "thread_private_cache"
+
+[[thread_local]]
 path = "src/llm/introspection.rs"
 statics = ["LAST_RESOLVED_LLM_CALL"]
 category = "logical_task"

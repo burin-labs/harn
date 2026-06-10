@@ -682,10 +682,31 @@ pub(crate) fn opt_str_list(
     }
 }
 
+thread_local! {
+    /// Unsupported-param warnings already emitted this process, keyed by
+    /// `"{param}|{provider}|{model}"`. `validate_options` runs on every LLM
+    /// call, so without this the same "ignoring top_k" line floods agent
+    /// logs once per turn. The capability mismatch is a static config fact,
+    /// so one warning per (param, provider, model) is all the operator needs.
+    static WARNED_UNSUPPORTED: std::cell::RefCell<std::collections::BTreeSet<String>> =
+        const { std::cell::RefCell::new(std::collections::BTreeSet::new()) };
+}
+
+/// Returns true the first time a `(param, provider, model)` triple is seen,
+/// false on every repeat. Lets `validate_options` warn once instead of on
+/// every LLM call.
+fn first_unsupported_warning(param: &str, provider: &str, model: &str) -> bool {
+    let key = format!("{param}|{provider}|{model}");
+    WARNED_UNSUPPORTED.with(|seen| seen.borrow_mut().insert(key))
+}
+
 /// Emit warnings for options not supported by the target provider.
 pub(super) fn validate_options(opts: &crate::llm::api::LlmCallOptions) {
     let caps = crate::llm::capabilities::lookup(&opts.provider, &opts.model);
     let warn = |param: &str| {
+        if !first_unsupported_warning(param, &opts.provider, &opts.model) {
+            return;
+        }
         crate::events::log_warn(
             "llm",
             &format!(
@@ -709,5 +730,47 @@ pub(super) fn validate_options(opts: &crate::llm::api::LlmCallOptions) {
     }
     if opts.cache && !caps.prompt_caching {
         warn("cache");
+    }
+}
+
+#[cfg(test)]
+mod unsupported_warning_tests {
+    use super::first_unsupported_warning;
+
+    #[test]
+    fn warns_once_per_param_provider_model() {
+        // Use a unique synthetic triple so the process-wide thread-local set
+        // is not polluted by (or polluting) any real provider calls.
+        let m = "test-model-warns-once";
+        assert!(
+            first_unsupported_warning("top_k", "openrouter", m),
+            "first sighting must warn"
+        );
+        assert!(
+            !first_unsupported_warning("top_k", "openrouter", m),
+            "repeat must be silent"
+        );
+        assert!(
+            !first_unsupported_warning("top_k", "openrouter", m),
+            "still silent on third call"
+        );
+    }
+
+    #[test]
+    fn distinct_param_provider_model_each_warn_once() {
+        let m = "test-model-distinct";
+        // Different param, different provider, and different model are each a
+        // distinct key that warns on its own first sighting.
+        assert!(first_unsupported_warning("top_k", "openrouter", m));
+        assert!(first_unsupported_warning("seed", "openrouter", m));
+        assert!(first_unsupported_warning("top_k", "other-prov", m));
+        assert!(first_unsupported_warning(
+            "top_k",
+            "openrouter",
+            "test-model-distinct-2"
+        ));
+        // ...and each repeat stays silent.
+        assert!(!first_unsupported_warning("top_k", "openrouter", m));
+        assert!(!first_unsupported_warning("seed", "openrouter", m));
     }
 }
