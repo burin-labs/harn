@@ -68,17 +68,66 @@ pub(crate) async fn run_structured_envelope(
     let provider_hint = opts.provider.clone();
     let model_hint = opts.model.clone();
 
-    let main_outcome =
-        match execute_schema_retry_loop(None, opts, options_dict.clone(), bridge).await {
-            Ok(outcome) => outcome,
-            Err(err) => {
+    let main_outcome = match execute_schema_retry_loop(None, opts, options_dict.clone(), bridge)
+        .await
+    {
+        Ok(outcome) => outcome,
+        Err(err) => {
+            // Outcome-based structured-output fallback. A multi-upstream
+            // router (e.g. OpenRouter) can return a route-specific
+            // `400 invalid_request` for a json_schema/json_object
+            // `response_format` when it transiently routes to an upstream
+            // that can't honor it — even for a model whose capability rule
+            // declares native structured output. That is NOT a permanent
+            // client error, but Harn classifies 400/invalid_request as a
+            // Terminal (non-retryable) error, so the native mechanism alone
+            // would surface a hard failure for a quirk Harn is meant to
+            // abstract away. Degrade to the existing prompt-mode TEXT
+            // transport (schema embedded in the prompt + post-hoc Harn
+            // validation, which carries no `response_format` and so works on
+            // any chat model/route) and retry once. The native path — and
+            // the meter — are unchanged whenever the first call succeeds.
+            if is_structured_output_rejection(&err)
+                && structured_request_uses_response_format(&rewritten)
+            {
+                tracing::warn!(
+                    provider = %provider_hint,
+                    model = %model_hint,
+                    "structured output got invalid_request; degrading to prompt-mode text transport and retrying"
+                );
+                apply_prompt_mode_structured_transport(&mut rewritten);
+                let fallback_options = rewritten.get(2).and_then(|a| a.as_dict()).cloned();
+                match extract_llm_options(&rewritten) {
+                    Ok(fallback_opts) => {
+                        match execute_schema_retry_loop(
+                            None,
+                            fallback_opts,
+                            fallback_options,
+                            bridge,
+                        )
+                        .await
+                        {
+                            Ok(outcome) => outcome,
+                            Err(fallback_err) => {
+                                return Ok(envelope_from_transport_error(
+                                    &fallback_err,
+                                    &provider_hint,
+                                    &model_hint,
+                                ));
+                            }
+                        }
+                    }
+                    Err(fallback_err) => return Ok(envelope_from_arg_error(&fallback_err)),
+                }
+            } else {
                 return Ok(envelope_from_transport_error(
                     &err,
                     &provider_hint,
                     &model_hint,
                 ));
             }
-        };
+        }
+    };
 
     if main_outcome.errors.is_empty() {
         return Ok(envelope_success(&main_outcome, false));
@@ -109,6 +158,43 @@ pub(crate) async fn run_structured_envelope(
         classify_main_failure(&main_outcome),
         false,
     ))
+}
+
+/// Whether a transport error looks like the provider/route REJECTING the
+/// structured-output request itself (a json_schema/json_object `response_format`
+/// an upstream can't honor), as opposed to an unrelated failure. Detected from
+/// the error message because `error_to_category` collapses a provider 400 to the
+/// generic bucket — the discriminating signal (`invalid_request`,
+/// `400 bad request`, `response_format`, `json_schema`) only survives in the
+/// message text relayed from the upstream/router.
+fn is_structured_output_rejection(err: &VmError) -> bool {
+    let message = err.to_string().to_lowercase();
+    message.contains("invalid_request")
+        || message.contains("response_format")
+        || message.contains("json_schema")
+        || (message.contains("400") && message.contains("bad request"))
+}
+
+/// Whether this structured request actually sent a `response_format`
+/// (json_schema / json_object) to the provider, i.e. it is NOT already in
+/// prompt-mode text transport. Only such requests can hit a provider-side
+/// structured-output 400 and benefit from degrading to text transport. The
+/// structured envelope defaults to json_schema when a schema arg is present, so
+/// a missing options dict / missing output_format still counts as "yes".
+fn structured_request_uses_response_format(args: &[VmValue]) -> bool {
+    let Some(dict) = args.get(2).and_then(|a| a.as_dict()) else {
+        return true;
+    };
+    let is_text = |value: &VmValue| match value {
+        VmValue::String(text) => text.to_string() == "text",
+        _ => false,
+    };
+    if dict.get("output_format").is_some_and(is_text)
+        || dict.get("response_format").is_some_and(is_text)
+    {
+        return false;
+    }
+    true
 }
 
 fn is_unsupported_structured_transport_error(err: &VmError) -> bool {
@@ -540,6 +626,51 @@ mod tests {
         assert!(prompt.contains("Validation errors: expected string for verdict"));
         assert!(prompt.contains("{\"verdict\": 42}"));
         assert!(prompt.contains("Reply with valid JSON only"));
+    }
+
+    #[test]
+    fn structured_output_rejection_detects_provider_400() {
+        // The OpenRouter/upstream relay shape we degrade on.
+        let rejected = VmError::Thrown(VmValue::String(std::sync::Arc::from(
+            "openrouter HTTP 400 Bad Request [invalid_request]: Provider returned error",
+        )));
+        assert!(is_structured_output_rejection(&rejected));
+        // An unrelated transport failure must NOT trigger the structured fallback.
+        let unrelated = VmError::Thrown(VmValue::String(std::sync::Arc::from(
+            "connection reset by peer",
+        )));
+        assert!(!is_structured_output_rejection(&unrelated));
+    }
+
+    #[test]
+    fn response_format_guard_skips_text_mode_requests() {
+        // No options dict: structured envelope defaults to json_schema -> counts.
+        assert!(structured_request_uses_response_format(&[
+            VmValue::Nil,
+            VmValue::Nil
+        ]));
+        // Already prompt-mode text transport -> do NOT re-degrade.
+        let mut text_opts = BTreeMap::new();
+        text_opts.insert(
+            "output_format".to_string(),
+            VmValue::String(std::sync::Arc::from("text")),
+        );
+        assert!(!structured_request_uses_response_format(&[
+            VmValue::Nil,
+            VmValue::Nil,
+            VmValue::Dict(std::sync::Arc::new(text_opts)),
+        ]));
+        // json_object still sends a response_format -> degradable.
+        let mut json_object_opts = BTreeMap::new();
+        json_object_opts.insert(
+            "output_format".to_string(),
+            VmValue::String(std::sync::Arc::from("json_object")),
+        );
+        assert!(structured_request_uses_response_format(&[
+            VmValue::Nil,
+            VmValue::Nil,
+            VmValue::Dict(std::sync::Arc::new(json_object_opts)),
+        ]));
     }
 
     #[test]
