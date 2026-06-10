@@ -33,6 +33,7 @@ pub const HTTP_RESPONSE_TAG_VERSION: &str = "v1";
 
 const BODY_KIND_JSON: &str = "json";
 const BODY_KIND_NONE: &str = "none";
+const BODY_KIND_BYTES: &str = "bytes";
 const BODY_KIND_STREAM: &str = "stream";
 const BODY_KIND_SSE: &str = "sse";
 
@@ -116,6 +117,8 @@ fn http_reply_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErr
     let headers = parse_headers(args.get(2), "http_reply")?;
     let body_kind = if status == 204 || status == 304 || matches!(body, VmValue::Nil) {
         BODY_KIND_NONE
+    } else if matches!(body, VmValue::Bytes(_)) {
+        BODY_KIND_BYTES
     } else {
         BODY_KIND_JSON
     };
@@ -1098,6 +1101,26 @@ mod tests {
             }
             other => panic!("unexpected error: {other:?}"),
         }
+    }
+
+    #[test]
+    fn http_reply_bytes_uses_bytes_body_kind() {
+        let bytes = VmValue::Bytes(std::sync::Arc::new(vec![0x00, 0xff, 0xfe, 0x80]));
+        let headers = VmValue::Dict(std::sync::Arc::new(BTreeMap::from([(
+            "Content-Type".to_string(),
+            VmValue::String(std::sync::Arc::from("application/octet-stream")),
+        )])));
+        let response =
+            http_reply_impl(&[VmValue::Int(200), bytes, headers], &mut String::new()).unwrap();
+        let map = dict(&response);
+        assert_eq!(
+            map.get("body_kind").and_then(|v| match v {
+                VmValue::String(s) => Some(s.as_ref()),
+                _ => None,
+            }),
+            Some(BODY_KIND_BYTES)
+        );
+        assert!(matches!(map.get("body"), Some(VmValue::Bytes(_))));
     }
 
     #[test]

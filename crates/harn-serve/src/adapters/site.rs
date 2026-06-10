@@ -28,14 +28,15 @@
 //!
 //! ```text
 //! { method, path, route, path_params, params, query, headers,
-//!   body, body_base64, content_length, client_ip, remote_addr }
+//!   body, body_kind, body_base64, content_length, client_ip, remote_addr }
 //! ```
 //!
-//! `body` is the UTF-8-lossy view (convenient for JSON/text handlers);
-//! `body_base64` is the standard-base64 encoding of the *raw* bytes, so a
-//! binary handler recovers the exact payload with `bytes_from_base64(...)`
-//! — multipart uploads survive losslessly through the JSON dispatch
-//! boundary this way.
+//! `body` is present only when the payload is valid UTF-8 (convenient for
+//! JSON/text handlers); binary payloads set `body` to `nil`, `body_kind` to
+//! `base64`, and `body_base64` to the standard-base64 encoding of the raw
+//! bytes. A binary handler recovers the exact payload with
+//! `bytes_from_base64(...)` — multipart uploads survive losslessly through
+//! the JSON dispatch boundary this way.
 //!
 //! `remote_addr` is the real transport peer (`ip:port`) wired through from
 //! the listener. `client_ip` is the *originating* client IP: by default it
@@ -902,8 +903,8 @@ async fn send_ws_reply(session: &WsSession, value: Value) -> bool {
 
 /// Assemble the `req` dict handed to a `.harn` handler. Mirrors the
 /// in-process `http_server` shape so handlers are portable between the
-/// embedded server and a hosted site, with `body_base64` added as the
-/// binary-safe channel through the JSON dispatch boundary.
+/// embedded server and a hosted site, with strict text-or-base64 body
+/// fields so binary payloads never pass through UTF-8 replacement.
 #[allow(clippy::too_many_arguments)]
 fn build_request_value(
     method: &Method,
@@ -951,10 +952,16 @@ fn build_request_value(
     request.insert("path_params".into(), path_params);
     request.insert("query".into(), Value::Object(query));
     request.insert("headers".into(), Value::Object(header_map));
-    request.insert(
-        "body".into(),
-        Value::String(String::from_utf8_lossy(body).into_owned()),
-    );
+    match std::str::from_utf8(body) {
+        Ok(text) => {
+            request.insert("body".into(), Value::String(text.to_string()));
+            request.insert("body_kind".into(), Value::String("text".to_string()));
+        }
+        Err(_) => {
+            request.insert("body".into(), Value::Null);
+            request.insert("body_kind".into(), Value::String("base64".to_string()));
+        }
+    }
     request.insert(
         "body_base64".into(),
         Value::String(base64::engine::general_purpose::STANDARD.encode(body)),

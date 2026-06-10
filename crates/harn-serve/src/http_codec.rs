@@ -231,6 +231,19 @@ fn envelope_to_outcome(envelope: HttpEnvelope, request_id: &str) -> HttpCodecOut
                 chunks,
             }
         }
+        "bytes" => {
+            let chunks = envelope
+                .body
+                .as_ref()
+                .and_then(value_to_bytes)
+                .into_iter()
+                .collect();
+            HttpCodecOutcome::Stream {
+                status,
+                headers,
+                chunks,
+            }
+        }
         "sse" => {
             let events = body_to_sse(envelope.body.as_ref());
             HttpCodecOutcome::Sse {
@@ -604,6 +617,10 @@ mod tests {
         String::from_utf8(bytes.to_vec()).unwrap()
     }
 
+    async fn body_bytes(response: Response) -> Bytes {
+        to_bytes(response.into_body(), usize::MAX).await.unwrap()
+    }
+
     #[test]
     fn auth_request_from_http_lowercases_headers_and_drops_invalid_utf8() {
         let mut headers = HeaderMap::new();
@@ -780,6 +797,34 @@ mod tests {
         });
         let response = make_response(envelope);
         assert_eq!(body_text(response).await, "hello");
+    }
+
+    #[tokio::test]
+    async fn bytes_envelope_renders_raw_body_and_headers() {
+        let envelope = json!({
+            "__http_response__": "v1",
+            "status": 200,
+            "body_kind": "bytes",
+            "headers": {
+                "Content-Type": "application/vnd.harn.harnpack",
+                "Content-Disposition": "attachment; filename=\"demo.harnpack\"",
+            },
+            "body": {"$bytes_b64": "AP/+gA=="},
+        });
+        let response = make_response(envelope);
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(
+            response.headers().get(header::CONTENT_TYPE).unwrap(),
+            "application/vnd.harn.harnpack"
+        );
+        assert_eq!(
+            response.headers().get(header::CONTENT_DISPOSITION).unwrap(),
+            "attachment; filename=\"demo.harnpack\""
+        );
+        assert_eq!(
+            body_bytes(response).await.as_ref(),
+            &[0x00, 0xff, 0xfe, 0x80]
+        );
     }
 
     // --- End-to-end: .harn handler -> DispatchCore -> codec ----------
