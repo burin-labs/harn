@@ -8,6 +8,57 @@ highlights live in [CHANGELOG-pre-0.6.md](CHANGELOG-pre-0.6.md).
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.8.99
+
+### Added
+
+- Added `harn serve worker` for `.harn` `@job` files, including
+  scheduled job activation, durable queue consumption, and standalone
+  `@retry(...)` job modifiers.
+- **`run()` can prepend the repo-declared toolchain to the child-process
+  `PATH` (mise/asdf path normalizer).** When `HARN_RUN_TOOLCHAIN_PATH` is set,
+  the `run_*` tools detect a repo's declared interpreter versions
+  (`.tool-versions`, `.mise.toml`, `.ruby-version`, `.nvmrc`) at or above the
+  command's cwd, resolve them via `mise where` / `asdf where`, and prepend the
+  resolved bin dir to the child process's `PATH` only — so the command sees the
+  version the repo declares instead of a stale system interpreter. Strictly
+  declaration-gated (no version file ⇒ `PATH` byte-identical), process-scoped,
+  delegates all version resolution to mise/asdf (no per-language table in harn),
+  never prepends a path that does not exist, and logs a one-line override notice.
+  Generalizes burin-code #2136's keg-only-Ruby hardcode; default OFF and
+  per-session disable-able.
+
+### Fixed
+
+- **Fenced-JSON tool parsing now recovers recognizable near-miss tool-call
+  shapes (#3176).** Tool-like fence drift such as `tool_code`, `tool python`,
+  and tilde `tool` fences now dispatches valid `{ "name": ..., "args": { ... } }`
+  calls with a protocol violation, while bare JSON calls and legacy
+  `<tool_call>` markup surface actionable guidance instead of disappearing into
+  prose.
+- **OpenRouter DeepSeek aliases.** `deepseek/deepseek-chat` and tool-capable
+  DeepSeek R1 routes now accept native tools instead of falling through to the
+  unmatched model default (#3177).
+- **OpenAI-compatible prompt-cache requests now honor `cache: true` on explicit-cache
+  routes (#3197).** OpenRouter-routed Claude emits a top-level `cache_control`
+  breakpoint, Alibaba-backed Qwen/DeepSeek explicit-cache routes mark the last
+  message content block, Gemini explicit-cache routes do the same, and existing
+  message or tool cache markers survive request normalization without duplicate
+  insertion.
+- **harn-serve hosted site handlers now preserve binary HTTP bodies through
+  dispatch (#3214).** Request `body` is no longer UTF-8-lossy for binary
+  payloads; handlers use `body_base64` when `body_kind` is `base64`, and
+  `http_reply(..., bytes, headers)` now returns byte-exact responses with
+  caller-controlled headers.
+- Unsupported sampling-param warnings (`"top_k" is not supported by provider …,
+  ignoring` and the seed/penalty/cache siblings) now emit once per
+  `(param, provider, model)` instead of on every LLM call, so they no longer
+  flood agent and eval logs.
+- **SSRF egress policy controls documented (#3172).** The HTTP builtin
+  reference and language spec now document the `egress_policy` axes
+  (`block_private`, `allow_loopback`) and their environment hatches; the
+  resolved-IP `NetPolicy` runtime already shipped in earlier patches.
+
 ## v0.8.98
 
 ### Added
