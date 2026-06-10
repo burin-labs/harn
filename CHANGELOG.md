@@ -8,6 +8,122 @@ highlights live in [CHANGELOG-pre-0.6.md](CHANGELOG-pre-0.6.md).
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.8.100
+
+### Added
+
+- **`exec_opts` / `exec_at_opts` — an options form for the convenience exec
+  builtins (#3240).** `.harn` callers that need to pass `env`, `cwd`, or a
+  `timeout` no longer have to drop to the verbose `host_call("process.exec",
+  {mode: "argv", argv: [...], env, env_mode})`. The new builtins take an argv
+  list plus an options dict: `exec_opts(["git", "clone", a, b], {env: {...},
+  timeout: 30000})` and `exec_at_opts(dir, ["git", ...], {env_mode: "replace"})`.
+  Options are `{env?, env_mode?, cwd?, timeout?}` (`timeout`/`timeout_ms` in
+  milliseconds), and the result is the same `{stdout, stderr, status, success}`
+  shape as `exec` plus `timed_out`/`duration_ms`. The positional
+  `exec("ls", "-la")` / `exec_at(dir, ...)` forms are unchanged.
+- **`std/postgres/query` gains `raw_sql(template, params?)` and
+  `named_raw_sql(name, mode, template, params?)` (#3238).** These build query
+  records from literal SQL with **no** `{name}` scanning, so brace-heavy SQL —
+  JSON paths (`#>>'{}'`), array literals (`'{a,b}'::text[]`), and
+  `jsonb_set(.., '{path}', ..)` — no longer needs `{{`/`}}` doubling. Parameters
+  are positional (`$1`, `$2`, ...). The existing `sql(...)` / `named_sql(...)`
+  named-placeholder behavior, including `{{`/`}}` escaping and `unsafe_sql(...)`
+  fragments, is unchanged.
+- **Server embedders can install a process-lifetime shared Postgres pool
+  registry (#3234).** `harn_vm::install_shared_pool_registry()` (re-exported as
+  `harn_serve::install_shared_pool_registry()` under the `vm-postgres` feature)
+  opts a long-lived server into reusing one `sqlx` connection pool per distinct
+  connection identity across requests and worker threads — instead of opening a
+  fresh pool on every `harn serve` dispatch. Pools are keyed on the **resolved**
+  connection identity (host/port/database/credentials, SSL mode, application
+  name, replica set, and every pool-shaping option), not on a caller-supplied
+  alias, so two callers never share a pool across different credentials,
+  databases, or pool shapes. Safe across tenants because harn scopes RLS
+  per-transaction, never per-pool/per-connection. Strictly opt-in: the CLI
+  one-shot path never installs the registry and behaves exactly as before.
+  (Shipped in the v0.8.99 series; documented here.)
+- **One-shot `@job` drivers can override or disable the retry policy (#3242).**
+  `harn_serve::run_job_once_with_options(..)` accepts a new
+  `harn_serve::JobRunOptions` whose `retry_override` replaces the `@job`'s
+  declared `@retry`/`retry:` policy for that run only. `JobRunOptions::fail_fast()`
+  runs a single attempt with no backoff sleep — the natural choice for one-shot
+  CLI and failure-path test drivers, which previously inherited the `@job`'s
+  multi-hour `svix` backoff and could hang for an hour-plus on an erroring job.
+  Strictly opt-in: `run_job_once` / `run_job_once_with` (and the server path)
+  are unchanged and still honour the `@job`'s declared policy when no override
+  is given.
+
+### Changed
+
+- **`@retry(...)` and `@job(retry: {...})` now share one validator (#3236).**
+  The standalone job modifier and its compact dict alias are documented as
+  equivalent, so their recognized keys and backoff strategies
+  (`svix`/`linear`/`exponential`) are now a single source of truth — the two
+  surfaces can no longer drift apart in what they accept or reject.
+- **`process.exec` no longer clears the child environment by default when `env`
+  is supplied (#3240).** Previously, passing an `env` dict without an explicit
+  `env_mode` defaulted to `env_mode: "replace"`, which called `env_clear()` and
+  silently dropped PATH/HOME/etc. — so `env: {ONE_VAR: "x"}` wiped the rest of
+  the environment. The default is now `env_mode: "merge"`: the provided keys are
+  overlaid on the inherited parent environment. Full replacement is still
+  available by passing `env_mode: "replace"` explicitly. An unrecognized
+  `env_mode` is now rejected instead of being treated as a non-replace mode. No
+  in-tree caller relied on the clear-by-default behavior.
+
+### Fixed
+
+- **Harn's git stdlib is now non-interactive by default (#3241), so a `.harn`
+  git operation can no longer hang on a credential or host-key prompt in a
+  TTY-less context (`harn serve`, `@job`, CI).** Every git subprocess the stdlib
+  spawns — the receipt builtins (`git.fetch`/`git.push`/`git.rebase`/
+  `git.worktree_create`/…) and the `std/worktree` helpers — now runs with
+  `GIT_TERMINAL_PROMPT=0`, an empty `GIT_ASKPASS`/`SSH_ASKPASS`, and an
+  `ssh -oBatchMode=yes` transport, so git fails fast instead of blocking on an
+  interactive prompt. The guard is merged (`env_mode: "merge"`), so inherited
+  `PATH`/`HOME` and credentials supplied via env, `.netrc`, credential helpers,
+  or a pre-loaded ssh-agent continue to authenticate push/clone/fetch exactly as
+  before — only *interactive prompting* is disabled. `std/worktree` helpers take
+  an optional trailing `options` dict to re-enable interactive git when wanted.
+- **`run()` toolchain-PATH normalizer is now Windows-correct (#3239).** The
+  `HARN_RUN_TOOLCHAIN_PATH` normalizer builds the child `PATH` with
+  `std::env::join_paths`/`split_paths`, so prepend/override/replace use the
+  platform separator (`;` on Windows, `:` on unix) instead of a hardcoded `:`,
+  and the PATH env key is matched case-insensitively on Windows (`Path`/`PATH`)
+  so an existing caller-supplied key is updated in place rather than duplicated.
+  The toolchain-PATH unit-test fixtures were also made platform-correct so the
+  "Rust on Windows" CI job is green.
+- **`publish-release` no longer fails on the transient release-commit
+  ahead-of-tag state on a `main` push (#3237).** The guard that errors when
+  `Cargo.toml` is ahead of the latest tag now tolerates the brief window between
+  a Release PR landing on `main` and the `vX.Y.Z` tag being pushed, instead of
+  surfacing a spurious red run.
+
+### LLM
+
+- **`llm(structured)` degrades to text transport on a route-specific
+  structured-output 400 (#3244).** When a provider/route rejects a native
+  structured-output request with a 400 that is specific to that route's
+  structured-output support, the call now falls back to the text transport for
+  that request instead of failing, recovering the response without losing the
+  result.
+
+### Tooling
+
+- **`pub fn` docstring lint is now SOTA-default (#3245).** The `missing-harndoc`
+  rule (HARN-LNT-024) is **opt-in** via `[lint] require_docstrings = true` in
+  `harn.toml` instead of warning on every undocumented `pub fn`, and the stdlib
+  metadata contract (HARN-STD-101) shrank from five required tags to two —
+  `@effects` + `@errors`. `@allocation` is retired entirely (parser ignores it;
+  the field is gone from `StdlibMetadata` and `harn graph --json`),
+  `@api_stability` is optional (absent ⇒ stable), and `@example` is optional
+  everywhere: LSP hover and `harn graph --json` now synthesize a usage example
+  from the type signature when no hand-written one exists (`derived_example` in
+  graph JSON, a labeled "derived from signature" block in hover). ~2,900 lines
+  of boilerplate tags were stripped from the embedded stdlib. **Breaking:** no
+  compatibility shims; projects relying on the old default docstring requirement
+  must set `require_docstrings = true` to keep it.
+
 ## v0.8.99
 
 ### Added
