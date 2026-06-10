@@ -244,6 +244,57 @@ pub fn named_sql(
 }
 
 /**
+ * Build a parameterized query record from literal SQL, with NO `{name}`
+ * scanning.
+ *
+ * Unlike [`sql`], the template is used byte-for-byte: `{` and `}` are ordinary
+ * characters, so brace-heavy SQL — JSON paths (`#>>'{}'`), array literals
+ * (`'{a,b}'::text[]`), and `jsonb_set(.., '{path}', ..)` — needs no `{{`/`}}`
+ * doubling. Parameters are positional: write `$1`, `$2`, ... directly and pass
+ * the matching `params` list. This is the literal-SQL companion to [`sql`]; use
+ * [`sql`] when you want named placeholders and `{{`/`}}` escaping.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: validation
+ * @api_stability: experimental
+ * @example: raw_sql("SELECT data#>>'{}' FROM events WHERE tenant_id = $1::uuid", [tenant_id])
+ */
+pub fn raw_sql(template: string, params: list<any> = [], options = nil) -> PgQuery {
+  if type_of(template) != "string" || trim(template) == "" {
+    throw "std/postgres/query: SQL template must be a non-empty string"
+  }
+  return __normalize_query({sql: template, params: params, options: options})
+}
+
+/**
+ * Build a named parameterized query record from literal SQL, with NO `{name}`
+ * scanning.
+ *
+ * The named, mode-carrying companion to [`raw_sql`]: the template is used
+ * byte-for-byte (no `{{`/`}}` doubling) and parameters are positional `$1`,
+ * `$2`, ... matching the `params` list.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: validation
+ * @api_stability: experimental
+ * @example: named_raw_sql("list_events", "many", "SELECT data#>>'{}' FROM events WHERE tags && '{a,b}'::text[]", [])
+ */
+pub fn named_raw_sql(
+  name: string,
+  mode: PgQueryMode,
+  template: string,
+  params: list<any> = [],
+  options = nil,
+) -> PgNamedQuery {
+  if type_of(template) != "string" || trim(template) == "" {
+    throw __query_error_prefix({name: name}) + "sql must be a non-empty string"
+  }
+  return __normalize_query({name: name, mode: mode, sql: template, params: params, options: options})
+}
+
+/**
  * Run a query that returns zero or one row.
  *
  * @effects: [postgres]
