@@ -55,9 +55,8 @@ pub(crate) struct GraphSymbol {
     /// agents); absent when the author has not annotated the function.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub metadata: Option<StdlibMetadata>,
-    /// Usage example synthesized from the type signature. Present only
-    /// when the doc block carries no hand-written `@example`, so
-    /// consumers can compute `example = metadata.example ?? derived_example`.
+    /// Example synthesized from the type signature; present only when the
+    /// doc block has no `@example` (consumers prefer `metadata.example`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub derived_example: Option<String>,
 }
@@ -459,8 +458,7 @@ fn public_symbols(program: &[SNode], exports: &BTreeSet<String>, source: &str) -
 }
 
 /// Synthesize a signature-derived example for a callable, unless the doc
-/// block already carries a hand-written `@example` (consumers prefer
-/// `metadata.example` when present, so emitting both would be redundant).
+/// block already carries a hand-written `@example`.
 fn derived_example_for(
     source: &str,
     node: &SNode,
@@ -468,11 +466,10 @@ fn derived_example_for(
     params: &[TypedParam],
     return_type: Option<&TypeExpr>,
 ) -> Option<String> {
-    let authored = parse_stdlib_metadata(source, &node.span).and_then(|meta| meta.example);
-    if authored.is_some() {
-        return None;
-    }
-    Some(synthesize_example(name, params, return_type))
+    parse_stdlib_metadata(source, &node.span)
+        .and_then(|meta| meta.example)
+        .is_none()
+        .then(|| synthesize_example(name, params, return_type))
 }
 
 fn collect_public_symbol(
