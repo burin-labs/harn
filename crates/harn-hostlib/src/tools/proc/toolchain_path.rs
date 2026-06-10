@@ -559,6 +559,17 @@ mod tests {
         assert!(env.resolve_calls.borrow().is_empty());
     }
 
+    /// Join PATH components with the platform separator (`;` on Windows, `:` on
+    /// unix) via the same `std::env::join_paths` that `apply_to_env` uses, so
+    /// fixtures and expectations match the child PATH on every OS instead of
+    /// hardcoding a unix `:` that Windows treats as part of a single entry.
+    fn join_path_str(parts: &[&str]) -> String {
+        std::env::join_paths(parts.iter().map(std::ffi::OsStr::new))
+            .expect("clean ASCII path components join")
+            .into_string()
+            .expect("ASCII path joins to valid UTF-8")
+    }
+
     #[test]
     fn declared_and_installed_prepends_resolved_bin_dir() {
         let env = FakeEnv::with_gate_on()
@@ -577,15 +588,22 @@ mod tests {
         assert!(norm.unresolved.is_empty());
 
         let mut env_map = BTreeMap::new();
+        let base = join_path_str(&["/usr/bin", "/bin"]);
         apply_to_env(
             &mut env_map,
             EnvMode::InheritClean,
-            Some("/usr/bin:/bin"),
+            Some(base.as_str()),
             &norm,
         );
+        let expected = join_path_str(&[
+            "/opt/mise/installs/ruby/3.2.2",
+            "/opt/mise/installs/node/20.11.0",
+            "/usr/bin",
+            "/bin",
+        ]);
         assert_eq!(
             env_map.get("PATH").map(String::as_str),
-            Some("/opt/mise/installs/ruby/3.2.2:/opt/mise/installs/node/20.11.0:/usr/bin:/bin")
+            Some(expected.as_str())
         );
     }
 
@@ -692,9 +710,10 @@ mod tests {
             &norm,
         );
         // Replace mode ignores the parent PATH; prepends to the caller's.
+        let expected = join_path_str(&["/opt/ruby/bin", "/sbin"]);
         assert_eq!(
             env_map.get("PATH").map(String::as_str),
-            Some("/opt/ruby/bin:/sbin")
+            Some(expected.as_str())
         );
     }
 
@@ -726,9 +745,10 @@ mod tests {
         let mut env_map = BTreeMap::new();
         env_map.insert("PATH".to_string(), "/caller/path".to_string());
         apply_to_env(&mut env_map, EnvMode::Patch, Some("/parent/path"), &norm);
+        let expected = join_path_str(&["/opt/ruby/bin", "/caller/path"]);
         assert_eq!(
             env_map.get("PATH").map(String::as_str),
-            Some("/opt/ruby/bin:/caller/path")
+            Some(expected.as_str())
         );
     }
 
