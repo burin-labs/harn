@@ -395,11 +395,21 @@ pub(crate) fn messages_contain_url_images(messages: &[serde_json::Value]) -> Res
 fn normalized_text_block(block: &serde_json::Value) -> Option<serde_json::Value> {
     let block_type = block.get("type").and_then(|value| value.as_str());
     match block_type {
-        Some("text") | Some("output_text") => Some(serde_json::json!({
-            "type": "text",
-            "text": block.get("text").and_then(|value| value.as_str()).unwrap_or_default(),
-        })),
+        Some("text") | Some("output_text") => {
+            let mut normalized = serde_json::json!({
+                "type": "text",
+                "text": block.get("text").and_then(|value| value.as_str()).unwrap_or_default(),
+            });
+            copy_cache_control(block, &mut normalized);
+            Some(normalized)
+        }
         _ => None,
+    }
+}
+
+fn copy_cache_control(original: &serde_json::Value, normalized: &mut serde_json::Value) {
+    if let Some(cache_control) = original.get("cache_control") {
+        normalized["cache_control"] = cache_control.clone();
     }
 }
 
@@ -461,19 +471,23 @@ pub(crate) fn openai_content(content: &serde_json::Value) -> serde_json::Value {
                     if let Some(detail) = image.detail {
                         image_url["detail"] = serde_json::json!(detail);
                     }
-                    out.push(serde_json::json!({
+                    let mut normalized = serde_json::json!({
                         "type": "image_url",
                         "image_url": image_url,
-                    }));
+                    });
+                    copy_cache_control(block, &mut normalized);
+                    out.push(normalized);
                 } else if let Ok(Some(video)) = parse_video_block(block) {
-                    out.push(serde_json::json!({
+                    let mut normalized = serde_json::json!({
                         "type": "video_url",
                         "video_url": {
                             "url": video.openai_url(),
                         },
-                    }));
+                    });
+                    copy_cache_control(block, &mut normalized);
+                    out.push(normalized);
                 } else if let Ok(Some(file)) = parse_file_block(block) {
-                    out.push(openai_file_block(file));
+                    out.push(openai_file_block(block, file));
                 } else if let Some(text) = normalized_text_block(block) {
                     out.push(text);
                 } else {
@@ -488,19 +502,23 @@ pub(crate) fn openai_content(content: &serde_json::Value) -> serde_json::Value {
                 if let Some(detail) = image.detail {
                     image_url["detail"] = serde_json::json!(detail);
                 }
-                serde_json::Value::Array(vec![serde_json::json!({
+                let mut normalized = serde_json::json!({
                     "type": "image_url",
                     "image_url": image_url,
-                })])
+                });
+                copy_cache_control(content, &mut normalized);
+                serde_json::Value::Array(vec![normalized])
             } else if let Ok(Some(video)) = parse_video_block(content) {
-                serde_json::Value::Array(vec![serde_json::json!({
+                let mut normalized = serde_json::json!({
                     "type": "video_url",
                     "video_url": {
                         "url": video.openai_url(),
                     },
-                })])
+                });
+                copy_cache_control(content, &mut normalized);
+                serde_json::Value::Array(vec![normalized])
             } else if let Ok(Some(file)) = parse_file_block(content) {
-                serde_json::Value::Array(vec![openai_file_block(file)])
+                serde_json::Value::Array(vec![openai_file_block(content, file)])
             } else {
                 content.clone()
             }
@@ -707,7 +725,7 @@ fn anthropic_file_block(original: &serde_json::Value, file: FileContent) -> serd
     block
 }
 
-fn openai_file_block(file: FileContent) -> serde_json::Value {
+fn openai_file_block(original: &serde_json::Value, file: FileContent) -> serde_json::Value {
     let mut block = serde_json::json!({
         "type": file.kind.harn_type(),
         "media_type": file.media_type,
@@ -721,6 +739,7 @@ fn openai_file_block(file: FileContent) -> serde_json::Value {
     if let Some(file_id) = file.file_id {
         block["file_id"] = serde_json::json!(file_id);
     }
+    copy_cache_control(original, &mut block);
     block
 }
 

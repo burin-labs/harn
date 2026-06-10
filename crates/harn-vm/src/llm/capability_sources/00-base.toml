@@ -51,7 +51,9 @@
 #                     approval policy story for provider-executed tools.
 #   max_tools       : cap on tool-definition count the provider will accept.
 #                     Used by harn-lint to warn about oversized registries.
-#   prompt_caching  : whether the provider honors cache_control blocks.
+#   prompt_caching  : whether provider-side prompt caching is available.
+#   cache_breakpoint_style:
+#                     explicit cache_control strategy: none, top_level, or last_block.
 #   vision          : whether Harn can send visual input blocks on this route.
 #   audio_supported : whether Harn can send audio input blocks on this route.
 #   pdf_supported   : whether Harn can send PDF/document input blocks on this route.

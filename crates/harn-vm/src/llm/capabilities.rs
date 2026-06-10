@@ -221,6 +221,11 @@ pub struct ProviderRule {
     pub max_tools: Option<u32>,
     #[serde(default)]
     pub prompt_caching: Option<bool>,
+    /// Request-side cache breakpoint strategy for routes that require
+    /// `cache_control` to opt into provider prompt caching. Known values are
+    /// `none`, `top_level`, and `last_block`.
+    #[serde(default)]
+    pub cache_breakpoint_style: Option<String>,
     /// Whether this provider/model route accepts image or other visual
     /// input blocks through Harn's LLM message path.
     #[serde(default)]
@@ -420,6 +425,7 @@ pub struct Capabilities {
     pub tool_approval_policy: Option<String>,
     pub max_tools: Option<u32>,
     pub prompt_caching: bool,
+    pub cache_breakpoint_style: String,
     pub vision: bool,
     pub audio: bool,
     pub pdf: bool,
@@ -483,6 +489,7 @@ impl Default for Capabilities {
             tool_approval_policy: None,
             max_tools: None,
             prompt_caching: false,
+            cache_breakpoint_style: "none".to_string(),
             vision: false,
             audio: false,
             pdf: false,
@@ -1111,6 +1118,7 @@ fn defaults_to_caps(defaults: &ProviderDefaults) -> Capabilities {
         tool_approval_policy: None,
         max_tools: None,
         prompt_caching: None,
+        cache_breakpoint_style: None,
         vision: None,
         audio: None,
         pdf: None,
@@ -1184,6 +1192,10 @@ fn rule_to_caps(rule: &ProviderRule, defaults: &ProviderDefaults) -> Capabilitie
         tool_approval_policy: rule.tool_approval_policy.clone(),
         max_tools: rule.max_tools,
         prompt_caching: rule.prompt_caching.unwrap_or(false),
+        cache_breakpoint_style: rule
+            .cache_breakpoint_style
+            .clone()
+            .unwrap_or_else(|| "none".to_string()),
         vision: rule_vision(rule),
         audio: rule.audio.unwrap_or(false),
         pdf: rule.pdf.unwrap_or(false),
@@ -1692,6 +1704,14 @@ anthropic_beta_features = ["fine-grained-tool-streaming-2025-05-14"]
     }
 
     #[test]
+    fn openrouter_gemini_explicit_cache_uses_block_breakpoints() {
+        reset();
+        let caps = lookup("openrouter", "google/gemini-2.5-flash");
+        assert!(caps.prompt_caching);
+        assert_eq!(caps.cache_breakpoint_style, "last_block");
+    }
+
+    #[test]
     fn local_gemma4_exposes_native_tools_and_structured_output() {
         // Fix A: vLLM/SGLang serve Gemma 4 over the OpenAI-compatible surface,
         // so the local route must declare native tools + native structured
@@ -1805,6 +1825,10 @@ anthropic_beta_features = ["fine-grained-tool-streaming-2025-05-14"]
                 "{model} via openrouter should report prompt_caching=true",
             );
             assert_eq!(
+                caps.cache_breakpoint_style, "top_level",
+                "{model} via openrouter should use top-level cache_control",
+            );
+            assert_eq!(
                 caps.structured_output.as_deref(),
                 Some("tool_use"),
                 "{model} via openrouter should structured_output=tool_use (matches direct anthropic)",
@@ -1821,6 +1845,35 @@ anthropic_beta_features = ["fine-grained-tool-streaming-2025-05-14"]
         assert_eq!(caps.preferred_tool_format.as_deref(), Some("text"));
         assert_eq!(caps.tool_mode_parity.as_deref(), Some("native_unreliable"));
         assert_eq!(caps.structured_output.as_deref(), Some("native"));
+        assert!(caps.prompt_caching);
+        assert_eq!(caps.cache_breakpoint_style, "last_block");
+
+        let automated = lookup("openrouter", "deepseek/deepseek-v3");
+        assert!(automated.prompt_caching);
+        assert_eq!(automated.cache_breakpoint_style, "none");
+    }
+
+    #[test]
+    fn openrouter_explicit_cache_routes_get_block_breakpoints() {
+        reset();
+        for model in [
+            "qwen/qwen3.6-plus",
+            "qwen/qwen3-coder-plus",
+            "qwen/qwen3-coder-flash",
+            "qwen/qwen3-max",
+            "qwen/qwen-plus",
+        ] {
+            let caps = lookup("openrouter", model);
+            assert!(caps.prompt_caching, "{model} should support prompt cache");
+            assert_eq!(
+                caps.cache_breakpoint_style, "last_block",
+                "{model} should request explicit content-block cache breakpoints",
+            );
+        }
+
+        let open_weight = lookup("openrouter", "qwen/qwen3.6-35b-a3b");
+        assert!(!open_weight.prompt_caching);
+        assert_eq!(open_weight.cache_breakpoint_style, "none");
     }
 
     #[test]

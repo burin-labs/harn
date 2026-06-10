@@ -338,7 +338,8 @@ entry accepts these fields:
 | `background_mode` | bool | Provider-side background jobs are available. |
 | `tool_approval_policy` | string | Approval policy story for provider-executed tools, for example `provider_or_harn`. |
 | `max_tools` | int | Cap on tool count. `harn lint` will warn if a registry exceeds the smallest cap any active provider advertises. |
-| `prompt_caching` | bool | `cache_control` blocks honored. |
+| `prompt_caching` | bool | Provider-side prompt caching is available. |
+| `cache_breakpoint_style` | string | Request marker strategy when caching is explicit: `none`, `top_level`, or `last_block`. |
 | `prefers_xml_scaffolding` | bool | Logical prompt sections should prefer XML tags such as `<task>` / `<examples>`. |
 | `prefers_markdown_scaffolding` | bool | Logical prompt sections should prefer Markdown headings such as `## Task`. |
 | `structured_output_mode` | string | Preferred logical structured-output shape: `native_json`, `delimited`, `xml_tagged`, or `none`. Separate from the transport-level `structured_output` strategy. |
