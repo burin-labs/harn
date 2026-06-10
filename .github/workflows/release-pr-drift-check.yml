@@ -92,16 +92,44 @@ jobs:
             echo '[]' > targets.json
             echo "merge_group event — drift check is a no-op pass." >> "$GITHUB_STEP_SUMMARY"
           else
-            gh pr list \
-              --repo "$GITHUB_REPOSITORY" \
-              --state open \
-              --base main \
-              --json number,headRefName,headRefOid \
-              --jq '[
-                .[]
-                | select(.headRefName | test("^release/v[0-9]+\\.[0-9]+\\.[0-9]+$"))
-                | {ref:.headRefName, sha:.headRefOid, pr:(.number|tostring)}
-              ]' > targets.json
+            # push-to-main path. The genuine drift comparison runs on the
+            # `pull_request` event and posts the gating check_run on the PR
+            # head; on push we only refresh open release PRs and, per the
+            # `drift_detected` guard below, never fail the main run itself.
+            #
+            # `gh pr list` hits the GraphQL API, which intermittently returns
+            # `HTTP 401: Requires authentication` for the default token right
+            # after a release commit lands (the same eventually-consistent
+            # api.github.com gating that the publish workflow already tolerates
+            # for `gh release view`, harn#2964). With `set -euo pipefail` that
+            # transient 401 crashed this step and turned a routine release-
+            # commit main push red even though there was nothing to check.
+            # Retry briefly; on a persistent failure, treat it as "no release
+            # PR targets" (empty list) and keep main green — the PR-event run
+            # is the authoritative gate, not this main-push refresh.
+            list_failed=0
+            for _ in 1 2 3; do
+              list_failed=0
+              if gh pr list \
+                --repo "$GITHUB_REPOSITORY" \
+                --state open \
+                --base main \
+                --json number,headRefName,headRefOid \
+                --jq '[
+                  .[]
+                  | select(.headRefName | test("^release/v[0-9]+\\.[0-9]+\\.[0-9]+$"))
+                  | {ref:.headRefName, sha:.headRefOid, pr:(.number|tostring)}
+                ]' > targets.json; then
+                break
+              fi
+              list_failed=1
+              sleep 5
+            done
+            if [ "$list_failed" -eq 1 ]; then
+              echo '[]' > targets.json
+              echo "::notice::Could not list open release PRs after retries (transient API auth); treating as no targets and keeping main green. The pull_request-event run is the authoritative drift gate."
+              echo "gh pr list failed after retries on push-to-main — no release PR targets refreshed." >> "$GITHUB_STEP_SUMMARY"
+            fi
           fi
           count=$(jq 'length' targets.json)
           echo "Found $count release PR target(s):"
