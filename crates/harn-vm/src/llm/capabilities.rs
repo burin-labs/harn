@@ -1824,6 +1824,45 @@ anthropic_beta_features = ["fine-grained-tool-streaming-2025-05-14"]
     }
 
     #[test]
+    fn openrouter_deepseek_alias_slugs_support_native_tools() {
+        reset();
+        for model in ["deepseek/deepseek-chat", "deepseek/deepseek-chat-v3-0324"] {
+            let caps = lookup("openrouter", model);
+            assert!(caps.native_tools, "{model} should expose native tools");
+            assert_eq!(caps.preferred_tool_format.as_deref(), Some("native"));
+            assert_eq!(caps.structured_output.as_deref(), Some("native"));
+            assert!(
+                caps.thinking_modes.is_empty(),
+                "{model} is not a reasoning route"
+            );
+            assert_eq!(caps.thinking_block_style, "none");
+            assert!(
+                caps.top_k_supported,
+                "{model} should accept top_k through OpenRouter"
+            );
+        }
+
+        for model in [
+            "deepseek/deepseek-chat-v3.1",
+            "deepseek/deepseek-r1",
+            "deepseek/deepseek-r1-0528",
+        ] {
+            let caps = lookup("openrouter", model);
+            assert!(caps.native_tools, "{model} should expose native tools");
+            assert_eq!(caps.preferred_tool_format.as_deref(), Some("native"));
+            assert_eq!(caps.structured_output.as_deref(), Some("native"));
+            assert_eq!(caps.thinking_modes, vec!["enabled", "effort"]);
+            assert_eq!(caps.thinking_block_style, "reasoning_summary");
+            assert!(
+                caps.top_k_supported,
+                "{model} should accept top_k through OpenRouter"
+            );
+        }
+
+        assert!(!lookup("openrouter", "deepseek/deepseek-r1-distill-qwen-32b").native_tools);
+    }
+
+    #[test]
     fn openrouter_qwen_coder_defaults_to_text_tools() {
         reset();
         let caps = lookup("openrouter", "qwen/qwen3-coder-flash");
