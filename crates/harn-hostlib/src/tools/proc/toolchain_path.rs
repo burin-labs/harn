@@ -319,15 +319,18 @@ pub(crate) fn apply_to_env(
     if normalization.is_noop() {
         return;
     }
-    let prefix = normalization
-        .prepend_dirs
-        .iter()
-        .map(|p| p.display().to_string())
-        .collect::<Vec<_>>()
-        .join(path_separator());
+
+    // The child's PATH env key is `PATH` on every platform std::process::Command
+    // targets (Windows env keys are case-insensitive, but std normalizes the
+    // common name). The caller's env map, however, may carry a differently-cased
+    // key (e.g. `Path` on Windows) — find it case-insensitively so we prepend to
+    // the base the child would actually see instead of leaving a stale duplicate.
+    let caller_path_key = find_path_key(env_map);
+    let caller_path = caller_path_key
+        .as_deref()
+        .and_then(|key| env_map.get(key).cloned());
 
     // Determine the base PATH the child would otherwise see.
-    let caller_path = env_map.get("PATH").cloned();
     let base = match env_mode {
         EnvMode::Replace => caller_path,
         EnvMode::InheritClean | EnvMode::Patch => {
@@ -335,19 +338,45 @@ pub(crate) fn apply_to_env(
         }
     };
 
-    let new_path = match base {
-        Some(base) if !base.is_empty() => format!("{prefix}{}{base}", path_separator()),
-        _ => prefix,
+    // Build the new PATH with the platform-correct separator/quoting rules via
+    // std, so Windows gets `;`-joined entries and unix gets `:`-joined entries
+    // without hardcoding either. `join_paths` only fails if an entry itself
+    // contains the platform separator (e.g. a `;` inside a Windows path), which
+    // a resolver-reported install dir will not; if it ever does we fall back to
+    // the un-prefixed base rather than corrupting PATH.
+    let mut entries: Vec<PathBuf> = normalization.prepend_dirs.clone();
+    if let Some(base) = base.as_deref().filter(|b| !b.is_empty()) {
+        entries.extend(std::env::split_paths(base));
+    }
+    let new_path = match std::env::join_paths(entries.iter().map(|p| p.as_os_str())) {
+        Ok(joined) => joined.to_string_lossy().into_owned(),
+        Err(_) => match base {
+            Some(base) if !base.is_empty() => base,
+            _ => return,
+        },
     };
-    env_map.insert("PATH".to_string(), new_path);
+
+    // Reuse the caller's existing key casing when present so we overwrite it in
+    // place (avoiding a `Path` + `PATH` duplicate on Windows); otherwise use the
+    // canonical `PATH`.
+    let key = caller_path_key.unwrap_or_else(|| "PATH".to_string());
+    env_map.insert(key, new_path);
 }
 
-fn path_separator() -> &'static str {
-    if cfg!(windows) {
-        ";"
-    } else {
-        ":"
+/// Find the PATH key in `env_map`, matching case-insensitively on Windows (where
+/// `Path` and `PATH` are the same variable) and exactly elsewhere. Returns the
+/// key as it is actually stored so the caller can update it in place.
+fn find_path_key(env_map: &BTreeMap<String, String>) -> Option<String> {
+    if env_map.contains_key("PATH") {
+        return Some("PATH".to_string());
     }
+    if cfg!(windows) {
+        return env_map
+            .keys()
+            .find(|k| k.eq_ignore_ascii_case("PATH"))
+            .cloned();
+    }
+    None
 }
 
 /// Production [`Env`] implementation: real filesystem, real `mise`/`asdf`
