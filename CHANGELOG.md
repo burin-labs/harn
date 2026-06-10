@@ -8,6 +8,133 @@ highlights live in [CHANGELOG-pre-0.6.md](CHANGELOG-pre-0.6.md).
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.8.98
+
+### Added
+
+- **`harn serve site` now takes an embedder auth hook with tenant/claims plumbing (#3212).** New
+  `harn_serve::SiteAuth` trait (`async fn authenticate(&self, parts, route) -> SiteAuthOutcome`),
+  installed via `SiteServerConfig::with_auth(Arc<dyn SiteAuth>)`, runs on every matched route before
+  the body is read. `Allow(SiteAuthContext { tenant_id, scopes, context })` threads the tenant into
+  the dispatch (trust records, spans, `harness.tenant.id()`), checks the route's `@scopes` against
+  the hook-granted scopes (refusing with the canonical `forbidden` envelope), and installs the
+  opaque embedder `context` as an ambient scope a `HostCallBridge` can read via
+  `harn_serve::current_auth_context()` for the duration of the dispatch; `Deny(response)` returns
+  the embedder-shaped response verbatim. `AuthRequest` gains a `granted_scopes` field so transports
+  that own credential resolution compose with the dispatch-level scope check, and `CallRequest`
+  gains the `auth_context` carrier. Without a hook, behavior is unchanged. Fixes #3212.
+- **`harn serve site` can now host-stream response bodies (SSE/chunked) on `@stream` routes
+  (#3213).** The dispatch boundary is JSON in/out, so a `.harn` handler's response is always
+  buffered — wrong for SSE. A routed `pub fn` carrying the new bare `@stream` attribute therefore
+  never buffers the request body and never dispatches into the VM: after admission (the `SiteAuth`
+  hook plus the route's `@scopes`, which the adapter now enforces itself for stream routes since no
+  `CallRequest` exists to back-stop them) the adapter calls the embedder's new
+  `harn_serve::SiteStreamProvider` (`async fn open(&self, route, auth: Option<&SiteAuthContext>,
+  request: Value) -> Response`), installed via `SiteServerConfig::with_stream_provider`, and
+  forwards its streaming `Response` unbuffered — keep-alive and client-disconnect propagation come
+  from the returned `Sse`/stream body. The provider receives the same request-head dict a `.harn`
+  handler would see (`method`, `path`, `route`, `path_params`, `query`, `headers`, `client_ip`,
+  `remote_addr`), minus any body. Declaring a `@stream` route without a provider fails at
+  router-build time; a malformed `@stream(...)` or one without an HTTP route is diagnosed
+  (`HARN-SRV-009` / `HARN-SRV-010`). Non-stream routes are unchanged. Fixes #3213.
+- **`harn serve site` now carries raw/binary request and response bodies losslessly on
+  provider-answered routes (#3214).** The plain dispatch boundary is a JSON envelope (a utf8-lossy
+  `body` plus `body_base64`), which is wrong for binary surfaces like `.harnpack` downloads, CAS
+  blobs, and multipart pack publishes. The response half needed no new machinery: a `@stream`
+  route's `SiteStreamProvider` may return *any* axum `Response` — including a buffered binary body
+  with its own `Content-Type`/`Content-Disposition` — and the adapter forwards it verbatim,
+  byte-exact (now documented and proven by test). The request half is the new bare `@raw` route
+  marker: like `@stream` it skips the VM and is answered by the same provider behind the same
+  admission (the `SiteAuth` hook plus the route's `@scopes`, enforced before the body is read), but
+  the request body *is* buffered — up to the configured body limit, larger payloads get the
+  canonical 413 — and handed to the provider as exact bytes. `SiteStreamProvider::open` accordingly
+  gains a `body: Option<Bytes>` parameter (`None` on `@stream` routes, `Some(bytes)` on `@raw`
+  routes); the provider parses multipart itself from the head dict's `content-type` boundary.
+  Declaring a `@raw` route without a provider fails at router-build time; a malformed `@raw(...)`,
+  one without an HTTP route, or one combined with `@stream` is diagnosed (`HARN-SRV-011` /
+  `HARN-SRV-012` / `HARN-SRV-013`). Plain routes are unchanged. Fixes #3214.
+Claude Fable 5 (`claude-fable-5`, released 2026-06-09) in the provider catalog: model entry
+($10/$50 per MTok, 1M context, SWE-bench Pro 80.3), a `fable` alias, `claude-fable-*` /
+`claude-mythos-*` capability rules (adaptive-only thinking, no assistant prefill), and
+generation parsing for the fable/mythos families so the Opus 4.7+ request guards
+(sampling-param strip, adaptive-thinking rewrite, prefill removal, always-on thinking) apply.
+
+### Fixed
+
+- **Native tool_format: tool calls emitted as chat-template text markup are no longer silently
+  dropped (#3220).** Cheap native-format models (observed live: qwen3.6 under long context) sometimes
+  fall back to their chat template's TEXT rendering of a tool call —
+  `<tool_call><function=edit><parameter=action>...</parameter></function></tool_call>` or the
+  `<invoke name="edit">` attribute spelling — which the native parse path ignored entirely, so the
+  turn read as a natural completion and the run ended with the call lost. The tagged text parser now
+  rescue-parses this markup into real calls (schema-typed parameter values: string params keep raw
+  bytes verbatim, non-string params parse as JSON; unknown tools and truncated `<parameter>` blocks
+  surface precise parse errors instead of dispatching partial values; prose mentions and fenced
+  examples never fire — the opener must be line-anchored outside a markdown fence). In native
+  sessions the existing `native_tool_fallback` contract then takes over: the default `reject` policy
+  injects "re-issue through the native tool channel" feedback and the loop continues; `allow`
+  dispatches the rescued call. A zero-call turn whose markup could not be promoted (parse error,
+  feedback queued) no longer reads as a native natural completion — the loop holds the turn open so
+  the parse guidance reaches the model.
+- **harn-serve:** the `@budget(pg_queries)` integration test
+  (`pg_query_budget_rejects_third_query_as_429_via_dispatch`) now registers the
+  `pg.*` builtins it exercises via a `harn-vm`/`postgres` dev-dependency, so
+  `cargo nextest run -p harn-serve` is green in isolation. Previously the test
+  only passed under a `--workspace` run that happened to unify `harn-vm/postgres`
+  on; running the crate alone hit `Undefined builtin: pg_mock_pool`. The library
+  build stays lean (`default-features = false`, no `sqlx` in the non-dev graph).
+- **Empty-args native tool calls now get cause-named feedback, and the
+  provider `stop_reason` rides the observability transcript.** Two halves of
+  the same blind spot (burin-code#2121, observed live on the OpenRouter
+  native route: 13/165 edit calls arrived with literally `{}` arguments while
+  the model authored 549–5,056 output tokens those turns): (1) the
+  `provider_call_response` record in `llm_transcript.jsonl` dropped
+  `LlmResult.stop_reason` — the transport layer captured `finish_reason` on
+  both the streaming and non-streaming OpenAI-compatible paths, but transcript
+  mining saw `stop_reason=None` on every provider response, so truncation
+  analysis was blind; the record now carries it. (2) A tool call that arrives
+  with empty (`{}`/null) arguments and fails required-parameter validation was
+  misdiagnosed as `"missing required parameter(s): path"`, sending the model
+  into re-call loops. The agent loop now threads the turn's provider stop
+  reason into dispatch, and the feedback names the actual cause: on a length
+  truncation the model is told its arguments were TRUNCATED by the output
+  limit (re-issue shorter / split the change); on a clean stop it is told the
+  provider dropped the arguments (re-issue the same call in full). The
+  dispatch envelope and inner tool result also carry a machine-readable
+  `cause` (`empty_arguments_truncated` / `empty_arguments_dropped`) so host
+  harnesses can classify the fault without string-matching. Calls that did
+  deliver (incomplete) arguments keep the precise missing-parameter message.
+- **Judge verdicts no longer carry trailing JSON junk.** When a structured completion/step judge
+  emits sloppy JSON (double commas, run-on key/value pairs) that the structured-call repair layer
+  salvages, the captured `verdict` string could include trailing junk — observed live in
+  `judge_decision` events as `continue",,` and `continue",  "reasoning":`. `__judge_classify_verdict`
+  now normalizes the captured verdict to its leading token (cut at the first JSON structural
+  character), so stored/emitted `judge_decision` / `step_judge_decision` verdicts are clean tokens
+  and a mangled PASS token (`done",,`) classifies as a pass instead of being wrongly vetoed.
+  Multi-word prose verdicts without JSON junk pass through unchanged.
+- **The OpenAI-compatible transport now honors the model catalog's
+  `stream_timeout`, surfaces mid-stream failures, and retries zero-token empty
+  completions.** Three gaps turned provider stalls into silent empty agent
+  turns (observed live in Burin Code eval-meter work: an OpenRouter call hung
+  133s and returned `output_tokens=0` as a "success"): (1) the catalog's
+  `stream_timeout` (seconds) was projected into config dicts but consumed by
+  no transport — it now feeds the shared whole-request deadline
+  (`explicit timeout option > HARN_LLM_TIMEOUT > stream_timeout > 120s
+  default`) for every provider on the common `resolve_timeout` seam, both
+  streaming and non-streaming, so slow local models with `stream_timeout =
+  900.0` get their budget and hung remote calls are bounded; (2) a mid-body
+  SSE read failure (including that deadline firing mid-stream) was silently
+  swallowed, returning a truncated zero-token success — it now surfaces as
+  the same transient stream-error class other timeouts use, so the existing
+  retry machinery picks it up; (3) a wire-level "success" carrying zero output
+  tokens, no content, no thinking, and no tool calls is now retried once
+  built-in (more with `llm_retries`) as a transient provider hiccup, with an
+  `empty_completion_retry` observability entry and `EmptyCompletionRetry`
+  trace event; if it stays empty after the budget, the result is returned
+  unchanged. Token-cap truncations (`stop_reason` length/max_tokens) are
+  excluded from the retry, and mock/fake providers only retry on explicit
+  opt-in so scripted tests stay deterministic.
+
 ## v0.8.97
 
 ### Added
