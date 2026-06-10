@@ -6,10 +6,12 @@ import {
   ident_path,
   many,
   named,
+  named_raw_sql,
   named_sql,
   nullable_timestamptz_json,
   one,
   quote_identifier,
+  raw_sql,
   run,
   select_clause,
   sql,
@@ -157,4 +159,30 @@ LIMIT {limit}
     timestamptz_json("vaults.bad;drop")
   }
   __io_println(is_err(bad_qualified))
+  // raw_sql: braces are literal, no {name} scanning, positional params.
+  let raw_query = raw_sql(
+    "SELECT data#>>'{}' AS data FROM events WHERE tags && '{a,b}'::text[] AND tenant_id = $1::uuid",
+    ["tenant-a"],
+  )
+  __io_println(raw_query.sql)
+  __io_println(raw_query.params?[0])
+  __io_println(len(raw_query.params ?? []))
+  // A bare {path} that would be a placeholder in sql(...) is left untouched.
+  let raw_jsonb = raw_sql("UPDATE t SET d = jsonb_set(d, '{path}', $1)", [42])
+  __io_println(raw_jsonb.sql)
+  __io_println(raw_jsonb.params?[0])
+  // named_raw_sql carries name + mode and renders verbatim.
+  let raw_named = named_raw_sql("scan_events", "many", "SELECT '{}'::jsonb AS empty", [])
+  __io_println(raw_named.sql)
+  __io_println(raw_named.name)
+  __io_println(raw_named.mode)
+  let raw_empty = try {
+    raw_sql("   ", [])
+  }
+  __io_println(is_err(raw_empty))
+  let raw_named_empty = try {
+    named_raw_sql("nope", "one", "", [])
+  }
+  __io_println(is_err(raw_named_empty))
+  __io_println(regex_match("nope", to_string(unwrap_err(raw_named_empty))) != nil)
 }
