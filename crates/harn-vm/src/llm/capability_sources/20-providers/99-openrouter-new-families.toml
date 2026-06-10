@@ -43,11 +43,3 @@ native_tools = true
 preferred_tool_format = "native"
 text_tool_wire_format_supported = true
 structured_output = "native"
-
-[[provider.openrouter]]
-model_match = "deepseek/deepseek-v4*"
-native_tools = true
-preferred_tool_format = "native"
-text_tool_wire_format_supported = true
-structured_output = "native"
-
