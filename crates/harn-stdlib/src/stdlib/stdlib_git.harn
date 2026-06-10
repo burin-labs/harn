@@ -267,6 +267,29 @@ pub fn git_env_remove() -> list<string> {
   ]
 }
 
+/**
+ * git_noninteractive_env returns the prompt-guard env applied to every local
+ * git subprocess so a credential / host-key prompt fails fast instead of
+ * hanging a TTY-less runtime (`harn serve`, `@job`, CI).
+ *
+ * `GIT_TERMINAL_PROMPT=0` disables git's own prompting; an empty
+ * `GIT_ASKPASS`/`SSH_ASKPASS` refuses an external passphrase helper; and an
+ * `ssh -oBatchMode=yes` transport makes ssh non-interactive. This guard never
+ * removes credentials — auth via env, `.netrc`, credential helpers, or a
+ * loaded ssh-agent still works because those paths are non-interactive. It is
+ * merged (`env_mode: "merge"`) so inherited PATH/HOME/credentials survive, and
+ * a caller can re-enable prompting by passing its own `env`/`env_mode`.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: git_noninteractive_env()
+ */
+pub fn git_noninteractive_env() -> dict {
+  return {GIT_TERMINAL_PROMPT: "0", GIT_ASKPASS: "", SSH_ASKPASS: "", GIT_SSH_COMMAND: "ssh -oBatchMode=yes"}
+}
+
 fn __git_non_empty_string(value, label) -> string {
   if type_of(value) != "string" || value == "" {
     throw "std/git: " + label + " must be a non-empty string"
@@ -338,11 +361,11 @@ fn __git_run_options(repo, options) -> dict {
     cwd: git_repo_path(opts?.repo ?? opts?.cwd ?? repo ?? "."),
     timeout_ms: opts?.timeout_ms ?? 120000,
     env_remove: opts?.env_remove ?? git_env_remove(),
+    env: git_noninteractive_env() + opts?.env ?? {},
+    env_mode: opts?.env_mode ?? "merge",
   }
   for key in [
     "stdin",
-    "env",
-    "env_mode",
     "capture",
     "background",
     "background_after_ms",
@@ -361,6 +384,11 @@ fn __git_run_options(repo, options) -> dict {
   return out
 }
 
+/**
+ * Non-interactive by default: a credential / host-key prompt fails
+ * fast instead of hanging a TTY-less runtime. Caller `env` keys win,
+ * and `env_mode: "merge"` keeps inherited PATH/HOME/credentials.
+ */
 fn __git_with_repo(repo, options) -> dict {
   let opts = options ?? {}
   return opts + {repo: repo}
@@ -419,7 +447,7 @@ fn __git_result(result, argv, cwd) -> GitCommandResult {
  */
 pub fn git_run(args: list<string>, options: GitRunOptions = {}) -> GitCommandResult {
   let argv = __git_argv(args)
-  let run_options = __git_run_options(options?.repo ?? ".", options)
+  let run_options = __git_run_options(options.repo ?? ".", options)
   return __git_result(process_run(argv, run_options), argv, run_options.cwd)
 }
 
@@ -600,7 +628,7 @@ pub fn git_log(repo = ".", options: GitLogOptions = {}) -> GitCommandResult {
   if opts.rev_range != nil {
     args = args + [__git_ref_arg(opts.rev_range, "rev_range")]
   }
-  let paths = __git_string_list(opts?.paths, "paths")
+  let paths = __git_string_list(opts.paths, "paths")
   if len(paths) > 0 {
     args = args + ["--"] + paths
   }
@@ -1080,7 +1108,7 @@ pub fn git_run_tool(
     return git_show(__git_non_empty_string(request.rev, "rev"), repo, request)
   }
   if op == "discover" {
-    return git_discover(request?.path ?? repo)
+    return git_discover(request.path ?? repo)
   }
   if op == "conflicts" {
     return git_conflicts(repo)
@@ -1093,13 +1121,13 @@ pub fn git_run_tool(
     )
   }
   if op == "fetch" {
-    return git_fetch(request?.remote ?? "origin", repo, request?.refspecs ?? [])
+    return git_fetch(request.remote ?? "origin", repo, request.refspecs ?? [])
   }
   if op == "switch" {
     return git_switch(__git_non_empty_string(request.branch, "branch"), repo, request)
   }
   if op == "pull_ff_only" {
-    return git_pull_ff_only(repo, request?.remote ?? "origin", request?.branch, request)
+    return git_pull_ff_only(repo, request.remote ?? "origin", request.branch, request)
   }
   if op == "rebase" {
     return git_rebase(__git_non_empty_string(request.base_ref, "base_ref"), repo)
