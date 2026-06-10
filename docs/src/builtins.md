@@ -1009,7 +1009,7 @@ pipeline summarize() {
 | `http_delete(url, options?)` | url: string, options: dict | dict | DELETE request |
 | `http_request(method, url, options?)` | method: string, url: string, options: dict | dict | Generic HTTP request |
 | `http_download(url, dst_path, options?)` | url: string, dst_path: string, options: dict | dict | Stream a response body to a file |
-| `egress_policy(config)` | config: dict | dict | Install the process egress policy used by HTTP, SSE, WebSocket, and connector outbound calls |
+| `egress_policy(config)` | config: dict | dict | Install the process egress policy used by HTTP, SSE, WebSocket, and connector outbound calls, including DNS-resolved private-address blocking |
 | `security_policy(config)` | config: dict | dict | Install the prompt-injection defense policy (spotlighting of untrusted output + lethal-trifecta gate + MCP schema pinning + `local-ml` injection detection). See `std/security`. |
 | `http_server_tls_plain()` | none | dict | Build HTTP-server TLS config for intentional cleartext/local listener mode |
 | `http_server_tls_edge(options?)` | options: dict | dict | Build HTTP-server TLS config for edge-terminated HTTPS; local listener stays plain and HSTS is enabled by default |
@@ -1086,17 +1086,26 @@ routes through an existing session when one is provided. `http_post`,
 `http_put`, and `http_patch` accept an options dict as the second argument
 when you want to send multipart without a separate string body.
 
-`egress_policy({allow, deny, default})` installs a process-scoped outbound
-network policy before user code opens real connections. Rules accept exact
-hosts (`api.example.com`), suffix wildcards (`*.example.com`), IP literals or
-CIDR ranges (`127.0.0.0/8`), and optional port restrictions
-(`api.example.com:443`). Deny rules override allow rules; `default: "deny"`
-turns the policy into an allowlist. Operators can seed the same policy without
-editing scripts via comma-separated `HARN_EGRESS_ALLOW`, `HARN_EGRESS_DENY`,
-and `HARN_EGRESS_DEFAULT=deny`. Under default `harn run`, the worktree
-sandbox denies network side effects before destination policy is consulted;
-use `egress_policy(...)` for network-enabled host policies or explicit
-`--no-sandbox` runs.
+`egress_policy({allow, deny, default, block_private, allow_loopback})` installs
+a process-scoped outbound network policy before user code opens real
+connections. Rules accept exact hosts (`api.example.com`), suffix wildcards
+(`*.example.com`), IP literals or CIDR ranges (`127.0.0.0/8`), and optional
+port restrictions (`api.example.com:443`). Deny rules override allow rules;
+`default: "deny"` turns the policy into an allowlist.
+
+`block_private: "private"` blocks loopback, RFC 1918, link-local and cloud
+metadata addresses, multicast, documentation, CGNAT, benchmark, and equivalent
+IPv6 ranges after DNS resolution and again at connect time. Under default
+`harn run`, this private-address guard is on unless the policy explicitly sets
+`block_private: "off"`. `allow_loopback: true` opens only loopback addresses;
+metadata and other private ranges remain blocked.
+
+Operators can seed the same policy without editing scripts via comma-separated
+`HARN_EGRESS_ALLOW`, `HARN_EGRESS_DENY`, `HARN_EGRESS_DEFAULT=deny`,
+`HARN_EGRESS_BLOCK_PRIVATE=private|off`, and `HARN_EGRESS_ALLOW_LOOPBACK=1`.
+Under default `harn run`, the worktree sandbox denies network side effects
+before destination policy is consulted; use `egress_policy(...)` for
+network-enabled host policies or explicit `--no-sandbox` runs.
 
 ```harn
 pipeline main(task) {
