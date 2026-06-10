@@ -71,6 +71,8 @@ pub(crate) enum ServeCommand {
     /// handler receives a `req` dict and returns a value or an `http_*`
     /// response envelope.
     Site(SiteServeArgs),
+    /// Run a `.harn` file's `@job` exports as a local worker daemon.
+    Worker(WorkerServeArgs),
 }
 
 #[derive(Debug, Args)]
@@ -129,6 +131,25 @@ pub(crate) struct ServeAcpArgs {
 pub(crate) enum AcpServeTransport {
     Stdio,
     Websocket,
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct WorkerServeArgs {
+    /// Stable consumer id used when claiming worker-queue jobs. Defaults
+    /// to a process-local id.
+    #[arg(long = "consumer-id", value_name = "ID")]
+    pub consumer_id: Option<String>,
+    /// Worker-queue claim lease duration in seconds.
+    #[arg(long = "claim-ttl-secs", default_value_t = 300)]
+    pub claim_ttl_secs: u64,
+    /// Maximum time to wait for in-flight dispatches during shutdown.
+    #[arg(long = "drain-timeout-secs", default_value_t = 30)]
+    pub drain_timeout_secs: u64,
+    /// Where to route `harness.obs.*` spans/metrics/logs.
+    #[arg(long = "obs", value_enum, default_value_t = ServeObsMode::Auto)]
+    pub obs: ServeObsMode,
+    /// Path to the `.harn` worker file.
+    pub file: String,
 }
 
 #[derive(Debug, Args)]

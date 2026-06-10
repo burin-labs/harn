@@ -85,7 +85,7 @@ module.exports = grammar({
     attribute: ($) =>
       seq(
         "@",
-        field("name", $.identifier),
+        field("name", attributeIdentifier($)),
         optional(seq(
           "(",
           optional(commaSep1($.attribute_arg)),
@@ -96,7 +96,7 @@ module.exports = grammar({
 
     attribute_arg: ($) =>
       choice(
-        seq(field("name", $.identifier), ":", field("value", $._attribute_value)),
+        seq(field("name", attributeIdentifier($)), ":", field("value", $._attribute_value)),
         $._attribute_value
       ),
 
@@ -1250,6 +1250,10 @@ module.exports = grammar({
 
 function commaSep1(rule) {
   return seq(rule, repeat(seq(",", rule)));
+}
+
+function attributeIdentifier($) {
+  return choice($.identifier, alias("retry", $.identifier));
 }
 
 function lineBreak($) {

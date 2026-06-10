@@ -245,8 +245,7 @@ impl Parser {
     pub(super) fn parse_one_attribute(&mut self) -> Result<Attribute, ParserError> {
         let at_span = self.current_span();
         self.consume(&TokenKind::At, "@")?;
-        let name_span = self.current_span();
-        let name = self.consume_identifier("attribute name")?;
+        let name = self.consume_attribute_key("attribute name")?;
         let mut args = Vec::new();
         if self.check(&TokenKind::LParen) {
             self.advance();
@@ -263,7 +262,6 @@ impl Parser {
             }
             self.consume(&TokenKind::RParen, ")")?;
         }
-        let _ = name_span;
         Ok(Attribute {
             name,
             args,

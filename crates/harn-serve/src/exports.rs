@@ -201,8 +201,9 @@ pub const SCHEDULE_BAD_ARGS: &str = "HARN-SRV-005";
 /// arguments. The queue binding is dropped.
 pub const QUEUE_BAD_NAME: &str = "HARN-SRV-006";
 /// `@retry(max:, backoff:)` carries an unrecognised argument shape — a
-/// non-integer `max` or an unknown `backoff` keyword. The offending
-/// field is dropped (the rest of the policy still applies).
+/// positional argument, non-integer `max`, or an unknown `backoff`
+/// keyword. The offending field is dropped (the rest of the policy still
+/// applies).
 pub const RETRY_BAD_ARGS: &str = "HARN-SRV-007";
 /// `@schedule` / `@queue` / `@retry` appears without a `@job` attribute.
 /// Those modifiers only mean something on a job, so they are ignored.
@@ -696,12 +697,11 @@ fn bare_route_marker_from_attributes(
 /// records a `HARN-SRV-*` diagnostic and returns `None` so the author
 /// sees the mistake instead of a silently mis-named or unregistered job.
 ///
-/// Shape (`retry:` rides inside `@job` because `retry` is a reserved
-/// keyword and so cannot be its own `@retry` attribute name — the same
-/// reason the trigger DSL nests `retry: {...}` inside `trigger_register`):
+/// Shape:
 ///
 /// ```harn
-/// @job("scan", retry: { max: 3, backoff: "exponential" })
+/// @job("scan")
+/// @retry(max: 3, backoff: "exponential")
 /// @schedule("0 * * * *", "UTC")   // optional cron daemon job
 /// @queue("scan-jobs")             // optional worker queue
 /// pub fn scan(event: TriggerEvent) -> dict { ... }
@@ -717,7 +717,7 @@ fn job_from_attributes(
 ) -> Option<JobSpec> {
     let Some(job_attr) = attrs.iter().find(|attr| attr.name == "job") else {
         // The schedule/queue modifiers are inert without a `@job`.
-        for modifier in ["schedule", "queue"] {
+        for modifier in ["schedule", "queue", "retry"] {
             if let Some(attr) = attrs.iter().find(|attr| attr.name == modifier) {
                 diagnostics.push(ExportDiagnostic {
                     code: JOB_MODIFIER_WITHOUT_JOB,
@@ -781,7 +781,7 @@ fn job_from_attributes(
         name,
         schedule: schedule_from_attributes(attrs, fn_name, diagnostics),
         queue: queue_from_attributes(attrs, fn_name, diagnostics),
-        retry: retry_from_job_attr(job_attr, fn_name, diagnostics),
+        retry: retry_from_attributes(attrs, job_attr, fn_name, diagnostics),
     })
 }
 
@@ -874,9 +874,22 @@ fn queue_from_attributes(
     }
 }
 
-/// Parse the optional `retry: { max:, backoff: }` named argument off the
-/// `@job(...)` attribute. Mirrors the trigger DSL's `retry` dict so a job
-/// author who knows `trigger_register` reuses the same shape.
+fn retry_from_attributes(
+    attrs: &[Attribute],
+    job_attr: &Attribute,
+    fn_name: &str,
+    diagnostics: &mut Vec<ExportDiagnostic>,
+) -> Option<RetrySpec> {
+    if let Some(attr) = attrs.iter().find(|attr| attr.name == "retry") {
+        return retry_from_attr(attr, fn_name, diagnostics);
+    }
+    retry_from_job_attr(job_attr, fn_name, diagnostics)
+}
+
+/// Parse the optional compact `retry: { max:, backoff: }` named argument
+/// off `@job(...)`. Standalone `@retry(...)` is the preferred spelling,
+/// but the dict form is useful when generated metadata already mirrors
+/// the trigger DSL's shape.
 fn retry_from_job_attr(
     job_attr: &Attribute,
     fn_name: &str,
@@ -898,37 +911,74 @@ fn retry_from_job_attr(
         return None;
     };
 
+    Some(retry_from_entries(
+        entries.iter().filter_map(|entry| {
+            let key = match &entry.key.node {
+                Node::Identifier(name) => name.as_str(),
+                Node::StringLiteral(name) | Node::RawStringLiteral(name) => name.as_str(),
+                _ => return None,
+            };
+            Some((key, &entry.value.node, retry_arg.span.line, "@job(retry:)"))
+        }),
+        fn_name,
+        diagnostics,
+    ))
+}
+
+fn retry_from_attr(
+    attr: &Attribute,
+    fn_name: &str,
+    diagnostics: &mut Vec<ExportDiagnostic>,
+) -> Option<RetrySpec> {
+    let mut fields = Vec::new();
+    for arg in &attr.args {
+        let Some(name) = arg.name.as_deref() else {
+            diagnostics.push(ExportDiagnostic {
+                code: RETRY_BAD_ARGS,
+                line: arg.span.line,
+                message: format!(
+                    "`@retry` on `{fn_name}` accepts named arguments \
+                     (`@retry(max: 3, backoff: \"exponential\")`); ignoring a positional argument"
+                ),
+            });
+            continue;
+        };
+        fields.push((name, &arg.value.node, arg.span.line, "@retry"));
+    }
+    Some(retry_from_entries(fields, fn_name, diagnostics))
+}
+
+fn retry_from_entries<'a>(
+    entries: impl IntoIterator<Item = (&'a str, &'a Node, usize, &'static str)>,
+    fn_name: &str,
+    diagnostics: &mut Vec<ExportDiagnostic>,
+) -> RetrySpec {
     let mut max_attempts: u32 = 0;
     let mut backoff = RetryBackoff::default();
-    for entry in entries {
-        let key = match &entry.key.node {
-            Node::Identifier(name) => name.clone(),
-            Node::StringLiteral(name) | Node::RawStringLiteral(name) => name.clone(),
-            _ => continue,
-        };
-        match key.as_str() {
-            "max" | "max_attempts" => match &entry.value.node {
+    for (key, value, line, context) in entries {
+        match key {
+            "max" | "max_attempts" => match value {
                 Node::IntLiteral(value) if *value >= 0 => max_attempts = *value as u32,
                 _ => diagnostics.push(ExportDiagnostic {
                     code: RETRY_BAD_ARGS,
-                    line: retry_arg.span.line,
+                    line,
                     message: format!(
-                        "`@job(retry:)` `max` on `{fn_name}` requires a non-negative integer; \
+                        "`{context}` `max` on `{fn_name}` requires a non-negative integer; \
                          using the dispatcher default"
                     ),
                 }),
             },
-            "backoff" | "policy" => match &entry.value.node {
+            "backoff" | "policy" => match value {
                 Node::StringLiteral(value) | Node::RawStringLiteral(value) => {
                     match value.trim().to_ascii_lowercase().as_str() {
                         "svix" | "" => backoff = RetryBackoff::Svix,
                         "linear" => backoff = RetryBackoff::Linear,
-                        "exponential" | "exp" => backoff = RetryBackoff::Exponential,
+                        "exponential" => backoff = RetryBackoff::Exponential,
                         other => diagnostics.push(ExportDiagnostic {
                             code: RETRY_BAD_ARGS,
-                            line: retry_arg.span.line,
+                            line,
                             message: format!(
-                                "`@job(retry:)` `backoff` on `{fn_name}` got unknown strategy \
+                                "`{context}` `backoff` on `{fn_name}` got unknown strategy \
                                  '{other}' (expected 'svix', 'linear', or 'exponential'); using 'svix'"
                             ),
                         }),
@@ -936,20 +986,27 @@ fn retry_from_job_attr(
                 }
                 _ => diagnostics.push(ExportDiagnostic {
                     code: RETRY_BAD_ARGS,
-                    line: retry_arg.span.line,
+                    line,
                     message: format!(
-                        "`@job(retry:)` `backoff` on `{fn_name}` requires a string-literal \
+                        "`{context}` `backoff` on `{fn_name}` requires a string-literal \
                          strategy; using 'svix'"
                     ),
                 }),
             },
-            _ => continue,
+            _ => diagnostics.push(ExportDiagnostic {
+                code: RETRY_BAD_ARGS,
+                line,
+                message: format!(
+                    "`{context}` on `{fn_name}` got unknown field `{key}` \
+                     (expected `max`, `max_attempts`, `backoff`, or `policy`); field ignored"
+                ),
+            }),
         }
     }
-    Some(RetrySpec {
+    RetrySpec {
         max_attempts,
         backoff,
-    })
+    }
 }
 
 fn pipeline_input_schema(params: &[String]) -> serde_json::Value {
@@ -1378,6 +1435,29 @@ pub fn scan(event: TriggerEvent) -> dict { return {ok: true} }
             .as_ref()
             .expect("retry");
         // The valid `max` survives; the bad backoff falls back to svix.
+        assert_eq!(retry.max_attempts, 5);
+        assert_eq!(retry.backoff, RetryBackoff::Svix);
+        let codes: Vec<&str> = catalog.diagnostics().iter().map(|d| d.code).collect();
+        assert_eq!(codes, vec![RETRY_BAD_ARGS]);
+    }
+
+    #[test]
+    fn standalone_retry_unknown_key_is_diagnosed() {
+        let catalog = catalog_from_source(
+            r#"
+@job("scan")
+@retry(max: 5, patience: "high")
+pub fn scan(event: TriggerEvent) -> dict { return {ok: true} }
+"#,
+        );
+        let scan = catalog.function("scan").expect("scan export");
+        let retry = scan
+            .job
+            .as_ref()
+            .expect("job")
+            .retry
+            .as_ref()
+            .expect("retry");
         assert_eq!(retry.max_attempts, 5);
         assert_eq!(retry.backoff, RetryBackoff::Svix);
         let codes: Vec<&str> = catalog.diagnostics().iter().map(|d| d.code).collect();

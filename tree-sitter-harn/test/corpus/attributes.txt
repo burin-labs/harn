@@ -50,6 +50,46 @@ fn no_secrets(slice) -> bool {
           (true))))))
 
 ==================
+Retry Attribute Name
+==================
+
+@job("scan")
+@retry(max: 3, backoff: "linear")
+fn scan() -> bool {
+  return true
+}
+
+---
+
+(source_file
+  (attributed_declaration
+    (attribute
+      name: (identifier)
+      (attribute_arg
+        (string_literal
+          (string_delimiter)
+          (string_content)
+          (string_delimiter))))
+    (attribute
+      name: (identifier)
+      (attribute_arg
+        name: (identifier)
+        value: (integer_literal))
+      (attribute_arg
+        name: (identifier)
+        value: (string_literal
+          (string_delimiter)
+          (string_content)
+          (string_delimiter))))
+    (fn_declaration
+      name: (identifier)
+      (type_annotation
+        (identifier))
+      body: (block
+        (return_statement
+          (true))))))
+
+==================
 Attribute Path And Call Sentinels
 ==================
 

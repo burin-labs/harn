@@ -546,6 +546,10 @@ pub fn compute(x: int) -> int { return x + 1 }
 | `@test` | Marks a `pipeline` as a test. `harn test` discovers it alongside the legacy `test_*` naming convention. |
 | `@serial(group: "name")` | Test-scheduler hint: tests sharing the group are run serially under `--parallel`. Bare `@serial` shares a default group. |
 | `@heavy(threads: N)` | Test-scheduler hint: the test reserves `N` worker permits under `--parallel` so it never oversubscribes the pool. |
+| `@job("name")` | Marks a `pub fn` as a trigger-dispatched job. `harn run --as-job file.harn --job name --request req.json` runs it once; `harn serve worker file.harn` runs schedules and queue consumers. |
+| `@schedule("cron", "UTC")` | Job modifier: activates the job from `harn serve worker` through the cron connector. |
+| `@queue("name")` | Job modifier: makes `harn serve worker` consume durable jobs from the named worker queue. |
+| `@retry(max: N, backoff: "svix" \| "linear" \| "exponential")` | Job modifier: maps to dispatcher retry/DLQ policy. `@job(..., retry: {...})` remains accepted for generated trigger-style metadata. |
 | `@complexity(allow)` | Suppresses the `cyclomatic-complexity` lint warning on this fn. |
 | `@invariant("fs.writes", "src/**")` | Checked only by `harn check --invariants`. Current built-ins: `fs.writes`, `budget.remaining`, `approval.reachability`. `harn explain --invariant <name> <handler> <file>` prints the violating CFG path. |
 | `@acp_tool(name: "X", kind: "edit", side_effect_level: "mutation", ...)` | Compiles to `tool_define(...)` with the fn as the handler and the named args (minus `name`) lifted into `annotations`. `name` defaults to the fn name. |

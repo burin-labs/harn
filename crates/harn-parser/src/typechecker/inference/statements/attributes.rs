@@ -26,7 +26,7 @@ impl TypeChecker {
                 "deprecated" | "test" | "complexity" | "acp_tool" | "acp_skill" | "invariant"
                 | "deterministic" | "semantic" | "archivist" | "retroactive" | "persona"
                 | "step" | "trigger" | "handoff" | "budget" | "command" | "serial" | "heavy"
-                | "scopes" | "route" | "job" | "schedule" | "queue" => {}
+                | "scopes" | "route" | "job" | "schedule" | "queue" | "retry" => {}
                 other => {
                     self.warning_at(
                         Code::UnknownAttribute,
@@ -100,7 +100,7 @@ impl TypeChecker {
                     attr.span,
                 );
             }
-            if matches!(attr.name.as_str(), "job" | "schedule" | "queue")
+            if matches!(attr.name.as_str(), "job" | "schedule" | "queue" | "retry")
                 && !matches!(inner.node, Node::FnDecl { .. })
             {
                 self.warning_at(
@@ -220,6 +220,7 @@ impl TypeChecker {
             "job" => self.validate_job_args(attr),
             "schedule" => self.validate_schedule_args(attr),
             "queue" => self.validate_queue_args(attr),
+            "retry" => self.validate_retry_args(attr),
             "test" if !attr.args.is_empty() => {
                 self.warning_at(
                     Code::InvalidAttributeArgument,
@@ -670,10 +671,9 @@ impl TypeChecker {
     }
 
     /// Validate `@job("name", retry: { max:, backoff: })`. The positional
-    /// name (optional) must be a string; the only recognized named arg is
-    /// `retry`, a `{ max, backoff }` dict (`retry` rides inside `@job`
-    /// because `retry` is a reserved keyword and so cannot be its own
-    /// attribute name). Lint-only — malformed forms warn, never block.
+    /// name (optional) must be a string; the compact named `retry` dict is
+    /// accepted as an alias for the standalone `@retry(...)` job modifier.
+    /// Lint-only: malformed forms warn, never block.
     pub(super) fn validate_job_args(&mut self, attr: &Attribute) {
         const KNOWN_KEYS: &[&str] = &["retry"];
         let mut positionals = 0;
@@ -686,7 +686,7 @@ impl TypeChecker {
                         "`@job(...)` takes at most one positional name".to_string(),
                         arg.span,
                     );
-                } else if !is_symbol_like(&arg.value.node) {
+                } else if !is_string_literal(&arg.value.node) {
                     self.warning_at(
                         Code::InvalidAttributeArgument,
                         "`@job(\"name\")` name must be a string literal".to_string(),
@@ -711,7 +711,7 @@ impl TypeChecker {
 
     pub(super) fn expect_job_retry_dict(&mut self, value: &SNode, span: Span) {
         const KNOWN_KEYS: &[&str] = &["max", "max_attempts", "backoff", "policy"];
-        const BACKOFFS: &[&str] = &["svix", "linear", "exponential", "exp"];
+        const BACKOFFS: &[&str] = &["svix", "linear", "exponential"];
         let Node::DictLiteral(entries) = &value.node else {
             self.warning_at(
                 Code::InvalidAttributeArgument,
@@ -766,6 +766,52 @@ impl TypeChecker {
         }
     }
 
+    /// Validate `@retry(max: N, backoff: "strategy")`.
+    pub(super) fn validate_retry_args(&mut self, attr: &Attribute) {
+        const KNOWN_KEYS: &[&str] = &["max", "max_attempts", "backoff", "policy"];
+        const BACKOFFS: &[&str] = &["svix", "linear", "exponential"];
+        for arg in &attr.args {
+            let Some(name) = arg.name.as_deref() else {
+                self.warning_at(
+                    Code::InvalidAttributeArgument,
+                    "`@retry(...)` accepts named arguments such as `max: 3, backoff: \"exponential\"`"
+                        .to_string(),
+                    arg.span,
+                );
+                continue;
+            };
+            if !KNOWN_KEYS.contains(&name) {
+                self.warning_at(
+                    Code::InvalidAttributeArgument,
+                    format!("unknown `@retry` argument `{name}`; expected one of {KNOWN_KEYS:?}"),
+                    arg.span,
+                );
+                continue;
+            }
+            match (name, &arg.value.node) {
+                ("max" | "max_attempts", Node::IntLiteral(i)) if *i >= 0 => {}
+                ("max" | "max_attempts", _) => self.warning_at(
+                    Code::InvalidAttributeArgument,
+                    "`@retry(max: ...)` must be a non-negative integer".to_string(),
+                    arg.value.span,
+                ),
+                ("backoff" | "policy", value) => {
+                    let ok = symbol_like_value(value)
+                        .map(|v| BACKOFFS.contains(&v.to_ascii_lowercase().as_str()))
+                        .unwrap_or(false);
+                    if !ok {
+                        self.warning_at(
+                            Code::InvalidAttributeArgument,
+                            format!("`@retry(backoff: ...)` must be one of {BACKOFFS:?}"),
+                            arg.value.span,
+                        );
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
     /// Validate `@schedule("cron")` / `@schedule("cron", "timezone")`.
     pub(super) fn validate_schedule_args(&mut self, attr: &Attribute) {
         if attr.args.is_empty() || attr.args.len() > 2 {
@@ -776,7 +822,7 @@ impl TypeChecker {
             );
         }
         for arg in &attr.args {
-            if !is_symbol_like(&arg.value.node) {
+            if !is_string_literal(&arg.value.node) {
                 self.warning_at(
                     Code::InvalidAttributeArgument,
                     "`@schedule(...)` arguments must be string literals".to_string(),
@@ -796,7 +842,7 @@ impl TypeChecker {
             );
             return;
         }
-        if !is_symbol_like(&attr.args[0].value.node) {
+        if !is_string_literal(&attr.args[0].value.node) {
             self.warning_at(
                 Code::InvalidAttributeArgument,
                 "`@queue(\"name\")` argument must be a string literal".to_string(),

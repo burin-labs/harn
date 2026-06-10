@@ -329,8 +329,9 @@ attributed_decl    ::= attribute+ (pipeline_decl | fn_decl | tool_decl
                                   | skill_decl | eval_pack_decl | struct_decl
                                   | enum_decl | type_decl | interface_decl
                                   | impl_block)
-attribute          ::= '@' IDENTIFIER ['(' attr_arg (',' attr_arg)* [','] ')']
-attr_arg           ::= [IDENTIFIER ':'] attr_value
+attribute          ::= '@' attr_name ['(' attr_arg (',' attr_arg)* [','] ')']
+attr_arg           ::= [attr_name ':'] attr_value
+attr_name          ::= IDENTIFIER | 'retry'
 attr_value         ::= STRING_LITERAL | RAW_STRING | INT_LITERAL
                      | FLOAT_LITERAL | 'true' | 'false' | 'nil'
                      | IDENTIFIER | '-' INT_LITERAL | '-' FLOAT_LITERAL
@@ -3592,8 +3593,9 @@ There is no runtime evaluation.
 ### Syntax
 
 ```ebnf
-attribute    ::= '@' IDENTIFIER ['(' attr_arg (',' attr_arg)* [','] ')']
-attr_arg     ::= [IDENTIFIER ':'] attr_value
+attribute    ::= '@' attr_name ['(' attr_arg (',' attr_arg)* [','] ')']
+attr_arg     ::= [attr_name ':'] attr_value
+attr_name    ::= IDENTIFIER | 'retry'
 attr_value   ::= literal | dotted_ident | attr_list | attr_dict | attr_call
 dotted_ident ::= IDENTIFIER ('.' IDENTIFIER)*
 attr_list    ::= '[' [attr_value (',' attr_value)* [',']] ']'
@@ -3641,6 +3643,35 @@ pipeline test_smoke(task) { ... }
 Marks a pipeline as a test entry point. The conformance / `harn test`
 runner discovers attributed pipelines in addition to the legacy
 `test_*` naming convention. Both forms continue to work.
+
+#### `@job`, `@schedule`, `@queue`, and `@retry`
+
+```harn,ignore
+import "std/triggers"
+
+@job("scan")
+@retry(max: 3, backoff: "exponential")
+@schedule("0 * * * *", "UTC")
+@queue("scan-jobs")
+pub fn scan(event: TriggerEvent) -> dict {
+  return {status: "ok", request: event.provider_payload.raw}
+}
+```
+
+`@job` marks an exported function as a trigger-dispatched background
+entrypoint. `harn run --as-job file.harn --job scan --request req.json`
+runs that job once, delivering the request JSON as
+`event.provider_payload.raw` and printing the returned value as JSON.
+`harn serve worker file.harn` activates every `@schedule`d job in the
+file and consumes any declared `@queue` worker queues until shutdown.
+
+`@retry(max: N, backoff: "...")` applies the dispatcher's retry policy
+to the job. `max`/`max_attempts` must be a non-negative integer;
+`backoff`/`policy` accepts `svix`, `linear`, or `exponential`. A compact
+`@job("scan", retry: { max: 3, backoff: "linear" })` form is also
+accepted for generated metadata that already mirrors trigger configs.
+`@schedule`, `@queue`, and `@retry` are inert without `@job` and produce
+a serve diagnostic.
 
 #### Durable persona annotations
 

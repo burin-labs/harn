@@ -146,6 +146,10 @@ fn is_symbol_like(node: &Node) -> bool {
     )
 }
 
+fn is_string_literal(node: &Node) -> bool {
+    matches!(node, Node::StringLiteral(_) | Node::RawStringLiteral(_))
+}
+
 fn symbol_like_value(node: &Node) -> Option<&str> {
     match node {
         Node::Identifier(value) | Node::StringLiteral(value) | Node::RawStringLiteral(value) => {

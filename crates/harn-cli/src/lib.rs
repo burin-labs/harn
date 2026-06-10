@@ -1093,6 +1093,12 @@ async fn async_main(raw_args: Vec<String>, runtime_mode: CliRuntimeMode) {
                     std::process::exit(1);
                 }
             }
+            ServeCommand::Worker(args) => {
+                if let Err(error) = commands::serve::run_worker_server(&args).await {
+                    eprintln!("{error}");
+                    std::process::exit(1);
+                }
+            }
         },
         Command::Connector(args) => {
             if let Err(error) = commands::connector::handle_connector_command(args).await {
@@ -2002,15 +2008,10 @@ fn command_error(message: &str) -> ! {
         .exit()
 }
 
-/// `harn run --as-job <file.harn> --job <name> --request <req.json>
-/// [--result-out <out.json>]` — run a `.harn` `@job` once against a JSON
-/// request and print the report JSON. The drop-in for the factory worker
-/// binaries' `--request → do work → println!(report)` contract (#3171).
+/// Run a `.harn` `@job` once against a JSON request and print the report JSON.
 ///
-/// Lowers the job to a trigger binding and dispatches it through the
-/// existing trigger dispatcher (retry / DLQ / budget / cancel come from
-/// there), so this is purely a thin CLI shell over
-/// [`harn_serve::run_job_from_files`].
+/// Lowering through the trigger dispatcher keeps retry, DLQ, budget, and
+/// cancellation behavior aligned with long-running worker execution.
 async fn run_as_job(args: &cli::RunArgs) {
     let Some(file) = args.file.as_deref() else {
         command_error("`--as-job` requires a `.harn` file path");
