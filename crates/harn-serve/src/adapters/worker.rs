@@ -217,7 +217,7 @@ pub async fn start_worker_server(
     script_path: &Path,
     options: WorkerServeOptions,
 ) -> Result<WorkerServer, DispatchError> {
-    let prepared = prepare_job_runtime(script_path, |_vm| {}).await?;
+    let prepared = prepare_job_runtime(script_path, |_vm| {}, None).await?;
     if prepared.jobs.is_empty() {
         return Err(DispatchError::Validation(format!(
             "{} does not export any `@job` functions",
@@ -315,6 +315,7 @@ pub async fn start_worker_server(
 async fn prepare_job_runtime(
     script_path: &Path,
     configure: impl FnOnce(&mut Vm),
+    retry_override: Option<&TriggerRetryConfig>,
 ) -> Result<PreparedJobRuntime, DispatchError> {
     harn_vm::reset_thread_local_state();
     harn_vm::clear_trigger_registry();
@@ -368,7 +369,7 @@ async fn prepare_job_runtime(
                 script_path.display()
             ))
         })?;
-        let spec = job_binding_spec(&job, function, closure);
+        let spec = job_binding_spec(&job, function, closure, retry_override);
         let binding_id = dynamic_register(spec)
             .await
             .map_err(|error| DispatchError::Execution(error.to_string()))?;
@@ -787,8 +788,52 @@ fn now_ms() -> i64 {
     harn_vm::clock_mock::now_ms()
 }
 
+/// Driver-level knobs for a one-shot `@job` run.
+///
+/// The default is **exactly** the production behaviour: no override, so the
+/// dispatcher uses the `@job`'s declared `@retry`/`retry:` policy (or its
+/// own default). Overrides are opt-in — they let a one-shot or failure-path
+/// test runner cap or disable retry without editing the `@job` source, so an
+/// erroring job fails fast instead of sleeping through a multi-hour backoff.
+#[derive(Clone, Debug, Default)]
+pub struct JobRunOptions {
+    /// When set, this retry config replaces the `@job`'s declared policy for
+    /// this run only. `None` (the default) preserves production behaviour.
+    pub retry_override: Option<TriggerRetryConfig>,
+}
+
+impl JobRunOptions {
+    /// Override the retry policy for this run, replacing the `@job`'s
+    /// declared policy. The dispatcher's binding is otherwise unchanged.
+    pub fn with_retry(mut self, retry: TriggerRetryConfig) -> Self {
+        self.retry_override = Some(retry);
+        self
+    }
+
+    /// Run the `@job` at most once: a single attempt with no retry and no
+    /// backoff sleep. The natural choice for one-shot CLI / failure-path
+    /// test drivers that must fail fast rather than inherit a long backoff.
+    ///
+    /// `max_attempts: 1` makes `TriggerRetryConfig::next_retry_delay` return
+    /// `None` after the first attempt, so the dispatcher never sleeps. The
+    /// `Linear { delay_ms: 0 }` policy is belt-and-suspenders: even the
+    /// first-attempt delay is zero.
+    pub fn fail_fast() -> Self {
+        Self {
+            retry_override: Some(TriggerRetryConfig::new(
+                1,
+                RetryPolicy::Linear { delay_ms: 0 },
+            )),
+        }
+    }
+}
+
 /// Run one `@job` function against a single JSON request and return its
 /// outcome. This is the one-shot driver behind `harn run --as-job`.
+///
+/// Uses the `@job`'s declared retry policy unchanged. To cap or disable
+/// retry for a one-shot/failure-path run, use [`run_job_once_with_options`]
+/// with [`JobRunOptions::fail_fast`].
 ///
 /// Mirrors [`crate::core::DispatchCore::invoke_function`] for the base-VM
 /// build (stdlib + store/metadata builtins + real harness), then hands
@@ -825,7 +870,31 @@ pub async fn run_job_once_with(
     request: serde_json::Value,
     configure: impl FnOnce(&mut Vm),
 ) -> Result<JobRunOutcome, DispatchError> {
-    let prepared = prepare_job_runtime(script_path, configure).await?;
+    run_job_once_with_options(
+        script_path,
+        job_name,
+        request,
+        JobRunOptions::default(),
+        configure,
+    )
+    .await
+}
+
+/// Like [`run_job_once_with`], but also accepts [`JobRunOptions`] so a
+/// driver can override the `@job`'s retry policy for this run (e.g.
+/// [`JobRunOptions::fail_fast`] to run a single attempt with no backoff).
+///
+/// With [`JobRunOptions::default`] the behaviour is identical to
+/// [`run_job_once_with`]: the `@job`'s declared policy is used unchanged.
+pub async fn run_job_once_with_options(
+    script_path: &Path,
+    job_name: &str,
+    request: serde_json::Value,
+    options: JobRunOptions,
+    configure: impl FnOnce(&mut Vm),
+) -> Result<JobRunOutcome, DispatchError> {
+    let prepared =
+        prepare_job_runtime(script_path, configure, options.retry_override.as_ref()).await?;
     let job = prepared
         .jobs
         .iter()
@@ -857,8 +926,16 @@ fn job_binding_spec(
     job: &JobSpec,
     function: &ExportedFunction,
     closure: Arc<harn_vm::VmClosure>,
+    retry_override: Option<&TriggerRetryConfig>,
 ) -> TriggerBindingSpec {
-    let retry = job.retry.as_ref().map(retry_config).unwrap_or_default();
+    // A driver-level override (e.g. a one-shot/test runner that wants to
+    // fail fast) takes precedence over the `@job`'s declared policy. When
+    // no override is given, behaviour is exactly as before: the `@job`'s
+    // declared `@retry`/`retry:` policy, or the dispatcher default.
+    let retry = match retry_override {
+        Some(config) => config.clone(),
+        None => job.retry.as_ref().map(retry_config).unwrap_or_default(),
+    };
 
     // Scheduled jobs register with the cron provider so cron connector
     // ticks target the same binding the one-shot and queue paths use.
@@ -1255,6 +1332,137 @@ pub fn scan(event: TriggerEvent) -> dict {
 
                 assert_eq!(outcome.status, DispatchStatus::Dlq);
                 assert_eq!(outcome.attempt_count, 2);
+            })
+            .await;
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn fail_fast_override_runs_a_single_attempt_for_an_erroring_job() {
+        let local = tokio::task::LocalSet::new();
+        local
+            .run_until(async {
+                let dir = tempfile::tempdir().expect("tempdir");
+                // The `@job` declares the production default (svix, max 7),
+                // whose backoff would sleep minutes-to-hours between
+                // attempts. The driver override must cap it to one attempt.
+                let script = write_script(
+                    dir.path(),
+                    r#"
+import "std/triggers"
+
+@job("scan")
+@retry(max: 7, backoff: "svix")
+pub fn scan(event: TriggerEvent) -> dict {
+  throw "boom"
+}
+"#,
+                )
+                .await;
+
+                let started = std::time::Instant::now();
+                let outcome = run_job_once_with_options(
+                    &script,
+                    "scan",
+                    serde_json::json!({}),
+                    JobRunOptions::fail_fast(),
+                    |_vm| {},
+                )
+                .await
+                .expect("run job returns terminal outcome");
+                let elapsed = started.elapsed();
+
+                // One attempt, no retry, no backoff sleep: terminal failure
+                // arrives effectively immediately despite the `@job`'s
+                // multi-hour svix policy.
+                assert_eq!(outcome.attempt_count, 1);
+                assert_eq!(outcome.status, DispatchStatus::Dlq);
+                assert!(!outcome.succeeded());
+                assert!(
+                    elapsed < StdDuration::from_secs(5),
+                    "fail-fast run should not sleep through retry backoff (took {elapsed:?})"
+                );
+            })
+            .await;
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn retry_override_caps_attempts_below_the_job_policy() {
+        let local = tokio::task::LocalSet::new();
+        local
+            .run_until(async {
+                let dir = tempfile::tempdir().expect("tempdir");
+                // Declared policy is 5 attempts; the driver caps it to 3 with
+                // an immediate (zero-delay) backoff so the test is fast.
+                let script = write_script(
+                    dir.path(),
+                    r#"
+import "std/triggers"
+
+@job("scan")
+@retry(max: 5, backoff: "linear")
+pub fn scan(event: TriggerEvent) -> dict {
+  throw "boom"
+}
+"#,
+                )
+                .await;
+
+                let outcome = run_job_once_with_options(
+                    &script,
+                    "scan",
+                    serde_json::json!({}),
+                    JobRunOptions::default().with_retry(TriggerRetryConfig::new(
+                        3,
+                        RetryPolicy::Linear { delay_ms: 0 },
+                    )),
+                    |_vm| {},
+                )
+                .await
+                .expect("run job returns terminal outcome");
+
+                assert_eq!(outcome.attempt_count, 3);
+                assert_eq!(outcome.status, DispatchStatus::Dlq);
+            })
+            .await;
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn default_options_preserve_the_job_declared_retry_policy() {
+        let local = tokio::task::LocalSet::new();
+        local
+            .run_until(async {
+                let dir = tempfile::tempdir().expect("tempdir");
+                // Linear backoff: attempt 1 is immediate, attempt 2 sleeps
+                // 1s, so the default (no override) path stays fast enough to
+                // test while still proving the `@job`'s `max: 2` is honoured.
+                let script = write_script(
+                    dir.path(),
+                    r#"
+import "std/triggers"
+
+@job("scan")
+@retry(max: 2, backoff: "linear")
+pub fn scan(event: TriggerEvent) -> dict {
+  throw "boom"
+}
+"#,
+                )
+                .await;
+
+                // `JobRunOptions::default()` carries no override, so the
+                // dispatcher must use the `@job`'s declared `max: 2`.
+                let outcome = run_job_once_with_options(
+                    &script,
+                    "scan",
+                    serde_json::json!({}),
+                    JobRunOptions::default(),
+                    |_vm| {},
+                )
+                .await
+                .expect("run job returns terminal outcome");
+
+                assert_eq!(outcome.attempt_count, 2);
+                assert_eq!(outcome.status, DispatchStatus::Dlq);
             })
             .await;
     }
