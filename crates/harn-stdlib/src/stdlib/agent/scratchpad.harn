@@ -57,7 +57,6 @@ fn __scratchpad_dict(label, value, fallback) {
  * Normalize the public `agent_loop(..., {scratchpad})` option.
  *
  * @effects: []
- * @allocation: heap
  * @errors: [runtime]
  * @api_stability: experimental
  * @example: agent_scratchpad_options({scratchpad: true})
@@ -168,10 +167,8 @@ fn __scratchpad_empty(task) {
  * enabled and the session does not already carry one.
  *
  * @effects: [agent]
- * @allocation: heap
  * @errors: [runtime]
  * @api_stability: experimental
- * @example: agent_scratchpad_init(session, opts)
  */
 pub fn agent_scratchpad_init(session, opts) {
   let cfg = agent_scratchpad_options(opts)
@@ -288,10 +285,8 @@ fn __scratchpad_render(pad) {
  * Return the tail system fragment that recites the current scratchpad.
  *
  * @effects: [agent]
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
- * @example: agent_scratchpad_recitation_fragment(session, opts)
  */
 pub fn agent_scratchpad_recitation_fragment(session, opts) {
   let cfg = agent_scratchpad_options(opts)
@@ -514,7 +509,6 @@ fn __scratchpad_emit_reorganization(session_id, iteration, status, payload = nil
  * Reorganize the session scratchpad through a structured-output LLM call.
  *
  * @effects: [agent, llm]
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
  * @example: agent_scratchpad_reorganize(session, opts, 1, {reason: "iteration_end"})
@@ -615,7 +609,6 @@ pub fn agent_scratchpad_reorganize(session, opts, iteration, context = nil) {
  * Reorganize when the configured cadence is due after a completed turn.
  *
  * @effects: [agent, llm]
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
  * @example: agent_scratchpad_reorganize_if_due(session, opts, 0)

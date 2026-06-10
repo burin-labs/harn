@@ -7,10 +7,7 @@ import { llm_call_options } from "std/llm/options"
  * workflow_model_spec.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: workflow_model_spec(config)
  */
 pub fn workflow_model_spec(config) {
   let target = config?.model ?? config?.model_alias ?? config?.model_tier ?? config?.tier
@@ -24,10 +21,7 @@ pub fn workflow_model_spec(config) {
  * workflow_options.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: workflow_options(config)
  */
 pub fn workflow_options(config) {
   let spec = workflow_model_spec(config)
@@ -81,10 +75,7 @@ pub fn workflow_options(config) {
  * stage_config.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: stage_config(flow, overrides, stage_name)
  */
 pub fn stage_config(flow, overrides, stage_name) {
   let combined = flow ?? {} + overrides ?? {}
@@ -97,10 +88,7 @@ pub fn stage_config(flow, overrides, stage_name) {
  * stage_prompt.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: stage_prompt(task, config)
  */
 pub fn stage_prompt(task, config) {
   let ctx = config?.context
@@ -123,10 +111,7 @@ pub fn stage_prompt(task, config) {
  * run_stage.
  *
  * @effects: [llm.call]
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: run_stage(task, config)
  */
 pub fn run_stage(task, config) {
   let prompt = stage_prompt(task, config)
@@ -148,10 +133,7 @@ pub fn run_stage(task, config) {
  * verify_command.
  *
  * @effects: [host]
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: verify_command(config)
  */
 pub fn verify_command(config) {
   if config?.command == nil || config?.command == "" {
@@ -174,10 +156,7 @@ pub fn verify_command(config) {
  * verify_result.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: verify_result(task, result, config)
  */
 pub fn verify_result(task, result, config) {
   if config == nil {
@@ -196,10 +175,7 @@ pub fn verify_result(task, result, config) {
  * repair_task.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: repair_task(original_task, verification, config)
  */
 pub fn repair_task(original_task, verification, config) {
   if config?.prompt != nil {
@@ -215,10 +191,7 @@ pub fn repair_task(original_task, verification, config) {
  * workflow.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: workflow(config)
  */
 pub fn workflow(config) {
   return workflow_graph(config ?? {})
@@ -810,10 +783,7 @@ fn __action_graph_terminal_node(plan, phase, template) {
  * action_graph.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: action_graph(raw, options)
  */
 pub fn action_graph(raw, options = nil) {
   let parsed = __action_graph_parse_input(raw)
@@ -919,10 +889,7 @@ pub fn action_graph(raw, options = nil) {
  * action_graph_batches.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: action_graph_batches(graph, completed)
  */
 pub fn action_graph_batches(graph, completed = nil) {
   let plan = if graph?._type == "action_graph" {
@@ -1002,10 +969,7 @@ pub fn action_graph_batches(graph, completed = nil) {
  * action_graph_render.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: action_graph_render(graph)
  */
 pub fn action_graph_render(graph) {
   let plan = if graph?._type == "action_graph" {
@@ -1048,10 +1012,7 @@ pub fn action_graph_render(graph) {
  * action_graph_flow.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: action_graph_flow(graph, config)
  */
 pub fn action_graph_flow(graph, config = nil) {
   let plan = if graph?._type == "action_graph" {
@@ -1114,10 +1075,7 @@ pub fn action_graph_flow(graph, config = nil) {
  * action_graph_run.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: action_graph_run(task, graph, config, overrides)
  */
 pub fn action_graph_run(task, graph, config = nil, overrides = nil) {
   let plan = if graph?._type == "action_graph" {
@@ -1158,10 +1116,7 @@ pub fn action_graph_run(task, graph, config = nil, overrides = nil) {
  * task_run.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: task_run(task, flow, overrides)
  */
 pub fn task_run(task, flow, overrides) {
   let graph = workflow_graph(flow ?? {})
@@ -1214,10 +1169,7 @@ pub fn task_run(task, flow, overrides) {
  * workflow_continue.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: workflow_continue(prev, task, flow, overrides)
  */
 pub fn workflow_continue(prev, task, flow, overrides) {
   let transcript = prev?.transcript ?? prev
@@ -1229,10 +1181,7 @@ pub fn workflow_continue(prev, task, flow, overrides) {
  * workflow_result_text.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: workflow_result_text(result)
  */
 pub fn workflow_result_text(result) {
   let raw = if type_of(result) == "string" {
@@ -1305,10 +1254,7 @@ fn __workflow_result_metadata(base_run, options) {
  * workflow_result_transcript.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: workflow_result_transcript(task, workflow_name, result, metadata)
  */
 pub fn workflow_result_transcript(task, workflow_name, result, metadata) {
   let existing = __workflow_existing_transcript(result)
@@ -1323,10 +1269,7 @@ pub fn workflow_result_transcript(task, workflow_name, result, metadata) {
  * workflow_result_run.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: workflow_result_run(task, workflow_name, result, artifacts, options)
  */
 pub fn workflow_result_run(task, workflow_name, result, artifacts, options) {
   let base_run = if result?._type == "run_record" {
@@ -1365,10 +1308,7 @@ pub fn workflow_result_run(task, workflow_name, result, artifacts, options) {
  * workflow_result_persist.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: workflow_result_persist(task, workflow_name, result, artifacts, options)
  */
 pub fn workflow_result_persist(task, workflow_name, result, artifacts, options) {
   let base_run = if result?._type == "run_record" {
@@ -1417,10 +1357,7 @@ pub fn workflow_result_persist(task, workflow_name, result, artifacts, options) 
  * handoff_artifact.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: handoff_artifact(value)
  */
 pub fn handoff_artifact(value) {
   let item = handoff(value)
@@ -1444,10 +1381,7 @@ pub fn handoff_artifact(value) {
  * workflow_session.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: workflow_session(prev)
  */
 pub fn workflow_session(prev) {
   let transcript = prev?.transcript ?? prev?.result?.transcript ?? prev
@@ -1476,10 +1410,7 @@ pub fn workflow_session(prev) {
  * workflow_session_new.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: workflow_session_new(metadata)
  */
 pub fn workflow_session_new(metadata) {
   let raw = metadata ?? {}
@@ -1491,10 +1422,7 @@ pub fn workflow_session_new(metadata) {
  * workflow_session_restore.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: workflow_session_restore(source)
  */
 pub fn workflow_session_restore(source) {
   let run = if type_of(source) == "string" {
@@ -1517,54 +1445,40 @@ pub fn workflow_session_restore(source) {
  * workflow_session_fork.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: workflow_session_fork(prev)
  */
 pub fn workflow_session_fork(prev) {
   let session = workflow_session(prev)
-  return workflow_session(session + {transcript: transcript_fork(session?.transcript)})
+  return workflow_session(session + {transcript: transcript_fork(session.transcript)})
 }
 
 /**
  * workflow_session_archive.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: workflow_session_archive(prev)
  */
 pub fn workflow_session_archive(prev) {
   let session = workflow_session(prev)
-  return workflow_session(
-    session + {status: "archived", transcript: transcript_archive(session?.transcript)},
-  )
+  return workflow_session(session + {status: "archived", transcript: transcript_archive(session.transcript)})
 }
 
 /**
  * workflow_session_resume.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: workflow_session_resume(prev)
  */
 pub fn workflow_session_resume(prev) {
   let session = workflow_session(prev)
-  return workflow_session(session + {status: "active", transcript: transcript_resume(session?.transcript)})
+  return workflow_session(session + {status: "active", transcript: transcript_resume(session.transcript)})
 }
 
 /**
  * workflow_compact.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: workflow_compact(prev, options)
  */
 pub fn workflow_compact(prev, options) {
   let transcript = prev?.transcript ?? prev
@@ -1575,24 +1489,18 @@ pub fn workflow_compact(prev, options) {
  * workflow_session_compact.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: workflow_session_compact(prev, options)
  */
 pub fn workflow_session_compact(prev, options) {
   let session = workflow_session(prev)
-  return workflow_session(session + {transcript: transcript_summarize(session?.transcript, options)})
+  return workflow_session(session + {transcript: transcript_summarize(session.transcript, options)})
 }
 
 /**
  * workflow_reset.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: workflow_reset(prev, carry_summary)
  */
 pub fn workflow_reset(prev, carry_summary) {
   let transcript = prev?.transcript ?? prev
@@ -1606,19 +1514,16 @@ pub fn workflow_reset(prev, carry_summary) {
  * workflow_session_reset.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: workflow_session_reset(prev, carry_summary)
  */
 pub fn workflow_session_reset(prev, carry_summary) {
   let session = workflow_session(prev)
   return workflow_session(
     {
-      workflow_id: session?.workflow_id,
-      workflow: session?.workflow,
+      workflow_id: session.workflow_id,
+      workflow: session.workflow,
       status: "active",
-      transcript: workflow_reset(session?.transcript, carry_summary),
+      transcript: workflow_reset(session.transcript, carry_summary),
     },
   )
 }
@@ -1627,10 +1532,7 @@ pub fn workflow_session_reset(prev, carry_summary) {
  * continue_as_new.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: continue_as_new(prev, options)
  */
 pub fn continue_as_new(prev, options = nil) {
   let session = workflow_session(prev)
@@ -1638,12 +1540,12 @@ pub fn continue_as_new(prev, options = nil) {
   let _state = workflow.continue_as_new(session)
   return workflow_session(
     {
-      workflow_id: session?.workflow_id,
-      workflow: session?.workflow,
+      workflow_id: session.workflow_id,
+      workflow: session.workflow,
       status: "active",
-      persisted_path: session?.persisted_path,
-      run: session?.run,
-      transcript: workflow_reset(session?.transcript, carry_summary),
+      persisted_path: session.persisted_path,
+      run: session.run,
+      transcript: workflow_reset(session.transcript, carry_summary),
     },
   )
 }
@@ -1652,17 +1554,14 @@ pub fn continue_as_new(prev, options = nil) {
  * workflow_session_persist.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: workflow_session_persist(prev, path)
  */
 pub fn workflow_session_persist(prev, path) {
   let session = workflow_session(prev)
-  if session?.run == nil {
+  if session.run == nil {
     return session
   }
-  let persisted = run_record_save(session?.run, path)
+  let persisted = run_record_save(session.run, path)
   return workflow_session(session + {run: persisted?.run, persisted_path: persisted?.path})
 }
 
@@ -1670,10 +1569,7 @@ pub fn workflow_session_persist(prev, path) {
  * worker_request.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: worker_request(worker)
  */
 pub fn worker_request(worker) {
   return worker?.request ?? worker?.worker?.request ?? worker?.data?.request
@@ -1683,10 +1579,7 @@ pub fn worker_request(worker) {
  * worker_result.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: worker_result(worker)
  */
 pub fn worker_result(worker) {
   return worker?.result ?? worker?.data?.payload ?? worker?.worker?.result
@@ -1696,10 +1589,7 @@ pub fn worker_result(worker) {
  * worker_provenance.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: worker_provenance(worker)
  */
 pub fn worker_provenance(worker) {
   return worker?.provenance ?? worker?.worker?.provenance ?? worker?.data?.provenance
@@ -1709,10 +1599,7 @@ pub fn worker_provenance(worker) {
  * worker_research_questions.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: worker_research_questions(worker)
  */
 pub fn worker_research_questions(worker) {
   return worker_request(worker)?.research_questions ?? []
@@ -1722,10 +1609,7 @@ pub fn worker_research_questions(worker) {
  * worker_action_items.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: worker_action_items(worker)
  */
 pub fn worker_action_items(worker) {
   return worker_request(worker)?.action_items ?? []
@@ -1735,10 +1619,7 @@ pub fn worker_action_items(worker) {
  * worker_workflow_stages.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: worker_workflow_stages(worker)
  */
 pub fn worker_workflow_stages(worker) {
   return worker_request(worker)?.workflow_stages ?? []
@@ -1748,10 +1629,7 @@ pub fn worker_workflow_stages(worker) {
  * worker_verification_steps.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: worker_verification_steps(worker)
  */
 pub fn worker_verification_steps(worker) {
   return worker_request(worker)?.verification_steps ?? []

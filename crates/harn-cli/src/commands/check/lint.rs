@@ -103,6 +103,7 @@ pub(crate) fn lint_file_inner(
     let options = harn_lint::LintOptions {
         file_path: Some(path),
         require_file_header,
+        require_docstrings: super::harn_lint_require_docstrings(path),
         complexity_threshold,
         persona_step_allowlist,
         require_stdlib_metadata: path_is_stdlib_source(path),
@@ -185,6 +186,7 @@ pub(crate) fn lint_fix_file(
     let options = harn_lint::LintOptions {
         file_path: Some(path),
         require_file_header,
+        require_docstrings: super::harn_lint_require_docstrings(path),
         complexity_threshold,
         persona_step_allowlist,
         require_stdlib_metadata: path_is_stdlib_source(path),

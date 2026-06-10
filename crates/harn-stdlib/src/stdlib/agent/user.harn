@@ -584,10 +584,8 @@ fn __sim_user_should_answer_post_turn(payload, options) {
  * to simulate the harness user during an eval.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
- * @example: agentic_user(task_or_config, behavior, tools, model, options)
  */
 pub fn agentic_user(task_or_config, behavior = nil, tools = nil, model = nil, options = nil) {
   let config = __sim_user_config(task_or_config, behavior, tools, model, options)
@@ -620,10 +618,8 @@ pub fn agentic_user(task_or_config, behavior = nil, tools = nil, model = nil, op
  * scripted_user returns a deterministic fixture answerer.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
- * @example: scripted_user(script, options)
  */
 pub fn scripted_user(script, options = nil) {
   let opts = options ?? {}
@@ -645,10 +641,8 @@ pub fn scripted_user(script, options = nil) {
  * fixture_user is an alias for deterministic eval fixtures.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
- * @example: fixture_user(script, options)
  */
 pub fn fixture_user(script, options = nil) {
   return scripted_user(script, options)
@@ -658,10 +652,8 @@ pub fn fixture_user(script, options = nil) {
  * simulated_user_respond asks an answerer for its next decision.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
- * @example: simulated_user_respond(answerer, payload)
  */
 pub fn simulated_user_respond(answerer, payload = nil) {
   if type_of(answerer) == "string" {
@@ -684,10 +676,8 @@ pub fn simulated_user_respond(answerer, payload = nil) {
  * simulated_user_status returns public state for assertions and eval reports.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
- * @example: simulated_user_status(answerer)
  */
 pub fn simulated_user_status(answerer) {
   if type_of(answerer) != "dict" {
@@ -706,10 +696,8 @@ pub fn simulated_user_status(answerer) {
  * user_tools adds an ask_user tool backed by a simulated answerer.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
- * @example: user_tools(answerer, registry, options)
  */
 pub fn user_tools(answerer, registry = nil, options = nil) {
   let opts = options ?? {}
@@ -727,7 +715,7 @@ pub fn user_tools(answerer, registry = nil, options = nil) {
           return decision.message
         }
         if decision.action == "fail" {
-          let reason = decision?.reason ?? decision?.message ?? "unknown"
+          let reason = decision.reason ?? decision?.message ?? "unknown"
           throw "simulated user failed: " + reason
         }
         return opts?.stop_observation
@@ -752,10 +740,8 @@ pub fn user_tools(answerer, registry = nil, options = nil) {
  * simulated_user_post_turn replies to plain-text clarification questions.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
- * @example: simulated_user_post_turn(answerer, options)
  */
 pub fn simulated_user_post_turn(answerer, options = nil) {
   let opts = options ?? {}
@@ -777,7 +763,7 @@ pub fn simulated_user_post_turn(answerer, options = nil) {
       return prefix + decision.message
     }
     if decision.action == "fail" {
-      let reason = decision?.reason ?? "unknown"
+      let reason = decision.reason ?? "unknown"
       return {stop: true, message: "simulated user failed: " + reason}
     }
     return {stop: true}
@@ -788,10 +774,8 @@ pub fn simulated_user_post_turn(answerer, options = nil) {
  * simulated_user_read_tools is a named alias for read-only research tools.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
- * @example: simulated_user_read_tools(registry, options)
  */
 pub fn simulated_user_read_tools(registry = nil, options = nil) {
   return agent_read_tools(registry, options)

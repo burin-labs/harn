@@ -160,10 +160,7 @@ fn __diff_color_line(line, options) {
  * Return a structured line diff `{changed, insertions, deletions, ops}`.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: diff_lines(before, after)
  */
 pub fn diff_lines(before: string, after: string) -> dict {
   let old_lines = __diff_lines_of(before)
@@ -177,10 +174,7 @@ pub fn diff_lines(before: string, after: string) -> dict {
  * Render a unified diff for two text values.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: unified_diff(before, after, options)
  */
 pub fn unified_diff(before: string, after: string, options: DiffOptions = {}) -> string {
   let opts = options ?? {}
@@ -216,10 +210,7 @@ pub fn unified_diff(before: string, after: string, options: DiffOptions = {}) ->
  * Apply ANSI coloring to an existing unified diff.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: colorize_diff(diff_text, options)
  */
 pub fn colorize_diff(diff_text: string, options: DiffOptions = {}) -> string {
   let base = options ?? {}
@@ -231,10 +222,7 @@ pub fn colorize_diff(diff_text: string, options: DiffOptions = {}) -> string {
  * Return a compact stat dict for two text values.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: diff_summary(before, after)
  */
 pub fn diff_summary(before: string, after: string) -> dict {
   let result = diff_lines(before, after)
@@ -258,7 +246,6 @@ pub fn diff_summary(before: string, after: string) -> dict {
  * a `line_diff` payload instead of throwing.
  *
  * @effects: [host]
- * @allocation: heap
  * @errors: [backend]
  * @api_stability: experimental
  * @example: structural_diff("before.rs", "after.rs", "rust")
@@ -284,10 +271,7 @@ pub fn structural_diff(path_a: string, path_b: string, options = nil) -> dict {
  * Render per-file diff stats from entries with `{path, before, after}` or stat fields.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: render_diff_stat(entries, options)
  */
 pub fn render_diff_stat(entries: list, options = {}) -> string {
   var rows = []

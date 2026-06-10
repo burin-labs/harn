@@ -57,10 +57,8 @@ fn __agent_option_keys() {
  * agent creates an agent spec dict.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
- * @example: agent(name, config)
  */
 pub fn agent(name, config = nil) {
   if type_of(name) != "string" {
@@ -77,10 +75,8 @@ pub fn agent(name, config = nil) {
  * agent_name reads an agent spec name.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
- * @example: agent_name(agent)
  */
 pub fn agent_name(spec) {
   if type_of(spec) != "dict" {
@@ -93,10 +89,8 @@ pub fn agent_name(spec) {
  * agent_config builds prompt/system/options for an agent spec.
  *
  * @effects: [agent]
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
- * @example: agent_config(agent, prompt)
  */
 pub fn agent_config(spec, prompt) {
   if type_of(spec) != "dict" || spec?._type != "agent" {
@@ -359,10 +353,8 @@ fn __agent_lifecycle_add_subagent_tools(registry) {
  * `sub_agent_run` / `spawn_agent` tool.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
- * @example: agent_lifecycle_tools(registry, options)
  */
 pub fn agent_lifecycle_tools(registry = nil, options = nil) {
   let opts = __worker_options(options, "agent_lifecycle_tools")
@@ -412,10 +404,8 @@ fn __worker_config(config) {
  * spawn_agent.
  *
  * @effects: [host]
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
- * @example: spawn_agent(config)
  */
 pub fn spawn_agent(config) {
   return __host_worker_spawn(__worker_config(config))
@@ -431,10 +421,8 @@ pub fn spawn_agent(config) {
  * `on_event` must be a non-empty EventLog topic.
  *
  * @effects: [host]
- * @allocation: heap
  * @errors: [HARN-SUS-002]
  * @api_stability: experimental
- * @example: parse_resume_conditions(conditions)
  */
 pub fn parse_resume_conditions(conditions = nil) -> ResumeConditions? {
   return __host_resume_conditions_parse(conditions)
@@ -457,7 +445,6 @@ pub fn parse_resume_conditions(conditions = nil) -> ResumeConditions? {
  * presence of `conditions` and the active cloud session.
  *
  * @effects: [host]
- * @allocation: heap
  * @errors: [HARN-SUS-002, HARN-SUS-005]
  * @api_stability: experimental
  * @example: agent_await_resumption("waiting on review", {timeout: {duration_minutes: 5}})
@@ -474,10 +461,8 @@ pub fn agent_await_resumption(reason, conditions = nil, resume_by = nil) -> Agen
  * send_input.
  *
  * @effects: [host]
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
- * @example: send_input(worker, task)
  */
 pub fn send_input(worker, task) {
   return __host_worker_send_input(worker, task)
@@ -487,10 +472,8 @@ pub fn send_input(worker, task) {
  * worker_trigger.
  *
  * @effects: [host]
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
- * @example: worker_trigger(worker, payload)
  */
 pub fn worker_trigger(worker, payload) {
   return __host_worker_trigger(worker, payload)
@@ -504,10 +487,8 @@ fn __is_pool_task(value) {
  * wait_agent.
  *
  * @effects: [host]
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
- * @example: wait_agent(worker_or_workers)
  */
 pub fn wait_agent(worker_or_workers) {
   if __is_pool_task(worker_or_workers) {
@@ -531,7 +512,6 @@ pub fn wait_agent(worker_or_workers) {
  * worker is stopped.
  *
  * @effects: [host]
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
  * @example: agent_stop(worker, {graceful: true})
@@ -544,10 +524,8 @@ pub fn agent_stop(worker, options: AgentStopOptions = nil) {
  * close_agent.
  *
  * @effects: [host]
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
- * @example: close_agent(worker)
  */
 pub fn close_agent(worker) {
   return __host_worker_close(worker)
@@ -561,10 +539,8 @@ pub fn close_agent(worker) {
  * `suspension` metadata.
  *
  * @effects: [host]
- * @allocation: heap
  * @errors: [HARN-SUS-001, HARN-SUS-002, HARN-SUS-007, HARN-SUS-008]
  * @api_stability: experimental
- * @example: suspend_agent(worker, reason)
  */
 pub fn suspend_agent(worker, reason = "", options = nil) {
   return __host_worker_suspend(worker, reason, options)
@@ -580,10 +556,8 @@ pub fn suspend_agent(worker, reason = "", options = nil) {
  * plus the new input only.
  *
  * @effects: [host]
- * @allocation: heap
  * @errors: [HARN-SUS-003, HARN-SUS-004, HARN-SUS-006, HARN-SUS-009, HARN-SUS-010]
  * @api_stability: experimental
- * @example: resume_agent(worker_or_snapshot, resume_input, continue_transcript)
  */
 pub fn resume_agent(worker_or_snapshot, resume_input = nil, continue_transcript = true) {
   return __host_worker_resume(
@@ -596,10 +570,8 @@ pub fn resume_agent(worker_or_snapshot, resume_input = nil, continue_transcript 
  * list_agents.
  *
  * @effects: [host]
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
- * @example: list_agents()
  */
 pub fn list_agents() {
   return __host_worker_list()
@@ -684,10 +656,8 @@ fn __sub_agent_options(opts, session_id, selected_tools) {
  * sub_agent_request builds the Harn-owned child-agent request envelope.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
- * @example: sub_agent_request(task, options)
  */
 pub fn sub_agent_request(task, options = nil) {
   let task_text = __sub_agent_string(task)
@@ -722,10 +692,8 @@ pub fn sub_agent_request(task, options = nil) {
  * sub_agent_run.
  *
  * @effects: [host]
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
- * @example: sub_agent_run(task, options)
  */
 pub fn sub_agent_run(task, options = nil) {
   return __host_sub_agent_run(sub_agent_request(task, options))

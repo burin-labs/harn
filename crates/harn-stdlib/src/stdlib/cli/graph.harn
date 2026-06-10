@@ -32,6 +32,7 @@
  *           "kind": "fn" | "tool" | "pipeline" | ...,
  *           "signature": "...",
  *           "metadata": {...} | absent,
+ *           "derived_example": "..." | absent,
  *         }, ...],
  *         "imports": ["..."],
  *         "requires_capabilities": ["..."],
@@ -146,6 +147,10 @@ fn __clean_symbol(symbol: dict) -> dict {
   let metadata = symbol["metadata"]
   if metadata != nil {
     entry = entry + {metadata: metadata}
+  }
+  let derived_example = symbol["derived_example"]
+  if derived_example != nil {
+    entry = entry + {derived_example: derived_example}
   }
   return entry
 }

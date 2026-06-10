@@ -152,6 +152,26 @@ let q = sql(
 // q.params == [tenant_id]
 ```
 
+For brace-heavy literal SQL — JSON paths (`#>>'{}'`), array literals
+(`'{a,b}'::text[]`), `jsonb_set(.., '{path}', ..)` — doubling every brace is
+noisy and error-prone. `raw_sql(template, params?)` and
+`named_raw_sql(name, mode, template, params?)` take the SQL byte-for-byte with
+**no** `{name}` scanning, so braces need no `{{`/`}}` escaping. Parameters are
+positional — write `$1`, `$2`, ... yourself and pass the matching list:
+
+```harn,ignore
+let q = raw_sql(
+  "SELECT data#>>'{}' AS data FROM events WHERE tags && '{a,b}'::text[] AND tenant_id = $1::uuid",
+  [tenant_id],
+)
+// q.sql    == "SELECT data#>>'{}' AS data FROM events WHERE tags && '{a,b}'::text[] AND tenant_id = $1::uuid"
+// q.params == [tenant_id]
+```
+
+Use `sql(...)` / `named_sql(...)` when you want named placeholders and
+`{{`/`}}` escaping; reach for `raw_sql(...)` / `named_raw_sql(...)` when the SQL
+is literal and the braces are the SQL's own.
+
 Postgres cannot bind identifiers as parameters. Use `ident(...)` or
 `ident_path(...)` when SQL structure must be dynamic, and reserve
 `unsafe_sql(...)` for the rare source-controlled fragment that no typed helper

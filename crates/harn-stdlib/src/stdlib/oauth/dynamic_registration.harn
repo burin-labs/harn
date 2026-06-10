@@ -102,7 +102,6 @@ fn __safe_get(dict, key) {
  * `HARN-OAU-005:` so callers can match on a stable diagnostic code.
  *
  * @effects: []
- * @allocation: heap
  * @errors: [invalid_argument]
  * @api_stability: experimental
  * @example: validate_metadata({redirect_uris: ["https://app.example/cb"]})
@@ -119,7 +118,6 @@ pub fn validate_metadata(metadata) -> dict {
  * field violates RFC 7591 §2.
  *
  * @effects: []
- * @allocation: heap
  * @errors: [invalid_argument]
  * @api_stability: experimental
  * @example: client_metadata({redirect_uris: ["https://app.example/cb"], client_name: "Harn"})
@@ -136,7 +134,6 @@ pub fn client_metadata(opts) -> dict {
  * embedding HTTP server will mount.
  *
  * @effects: []
- * @allocation: heap
  * @errors: [invalid_argument]
  * @api_stability: experimental
  * @example: authorization_server_metadata(providers().github, {registration_endpoint: "/register"})
@@ -159,10 +156,8 @@ pub fn authorization_server_metadata(provider, overrides = nil) -> dict {
  * closures (`register`, `get`, `list`).
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
- * @example: dynamic_registration_store()
  */
 pub fn dynamic_registration_store() -> dict {
   let inner = __oauth_dynreg_store_handle()
@@ -197,7 +192,6 @@ fn __redact_shape(metadata, response) {
  * `has_client_secret`) — never the secret material itself.
  *
  * @effects: []
- * @allocation: heap
  * @errors: [invalid_argument]
  * @api_stability: experimental
  * @example: register_client(store, {redirect_uris: ["https://app.example/cb"]})
@@ -221,7 +215,6 @@ pub fn register_client(store, metadata) -> dict {
  * returned once, by `register_client`. Returns nil for unknown ids.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
  * @example: get_client(store, "abc123")
@@ -234,10 +227,8 @@ pub fn get_client(store, client_id) -> dict {
  * list_clients returns the list of registered client ids on the store.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
- * @example: list_clients(store)
  */
 pub fn list_clients(store) -> list<string> {
   return __oauth_dynreg_list(__require_dict(store, "store"))
@@ -250,10 +241,8 @@ pub fn list_clients(store) -> list<string> {
  * mount under a different prefix.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
- * @example: well_known_paths()
  */
 pub fn well_known_paths(overrides = nil) -> dict {
   let defaults = {
@@ -274,7 +263,6 @@ pub fn well_known_paths(overrides = nil) -> dict {
  * handlers — no extra serialization on the embedder side.
  *
  * @effects: []
- * @allocation: heap
  * @errors: [invalid_argument]
  * @api_stability: experimental
  * @example: well_known_response(client_metadata({redirect_uris: ["https://a/cb"]}))

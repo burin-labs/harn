@@ -53,10 +53,8 @@ fn __wrap_host_handle(inner) {
  * BTreeMap. Tokens stored here are lost when the VM exits.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
- * @example: memory()
  */
 pub fn memory() -> Storage {
   return __wrap_host_handle(__oauth_storage_memory_handle())
@@ -70,7 +68,6 @@ pub fn memory() -> Storage {
  * `crypto.random_bytes(32)` rather than a user passphrase.
  *
  * @effects: [file_io]
- * @allocation: heap
  * @errors: [invalid_argument]
  * @api_stability: experimental
  * @example: file("/var/lib/harn/tokens.bin", env("HARN_OAUTH_KEY"))
@@ -89,10 +86,8 @@ pub fn file(path, encryption_key) -> Storage {
  * storage and per-session isolation.
  *
  * @effects: [host_call]
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
- * @example: harn_cloud_session()
  */
 pub fn harn_cloud_session() -> Storage {
   return __wrap_host_handle(__oauth_storage_cloud_handle("session"))
@@ -106,10 +101,8 @@ pub fn harn_cloud_session() -> Storage {
  * client.
  *
  * @effects: [host_call]
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
- * @example: harn_cloud_org()
  */
 pub fn harn_cloud_org() -> Storage {
   return __wrap_host_handle(__oauth_storage_cloud_handle("org"))
@@ -127,7 +120,6 @@ pub fn harn_cloud_org() -> Storage {
  * diagnostics.
  *
  * @effects: []
- * @allocation: heap
  * @errors: [invalid_argument]
  * @api_stability: experimental
  * @example: custom({get: my_get, set: my_set, delete: my_delete})
@@ -159,7 +151,6 @@ pub fn custom(handlers) -> Storage {
  * `custom` are factory closures.
  *
  * @effects: [host_call]
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
  * @example: storage().file("/var/lib/harn/tokens.bin", key)

@@ -553,6 +553,33 @@ const GIT_ENV_OVERRIDES: &[&str] = &[
     "GIT_PREFIX",
 ];
 
+/// Non-interactive guard applied to every git subprocess Harn spawns.
+///
+/// Harn runs git from TTY-less contexts (`harn serve`, `@job`, CI). A
+/// fetch/push/clone that needs credentials or an SSH host-key decision
+/// would otherwise block on an interactive prompt and hang the runtime
+/// indefinitely. These variables tell git (and the ssh transport) to
+/// fail fast instead of prompting:
+///
+/// * `GIT_TERMINAL_PROMPT=0` — disable git's own terminal prompting
+///   (HTTPS username/password, missing-credential prompts).
+/// * `GIT_ASKPASS` / `SSH_ASKPASS` empty — refuse to shell out to a GUI
+///   or external askpass helper for a passphrase.
+/// * `GIT_SSH_COMMAND` with `BatchMode=yes` — make the ssh transport
+///   non-interactive (no passphrase / host-key prompts).
+///
+/// This is a *prompt* guard only: it never removes credentials. Auth via
+/// environment, `.netrc`, credential helpers, or pre-loaded ssh-agent
+/// keys continues to work because those paths are non-interactive. The
+/// env is merged (`env_mode: "merge"`) so inherited PATH/HOME and any
+/// caller-supplied credentials survive.
+const GIT_NONINTERACTIVE_ENV: &[(&str, &str)] = &[
+    ("GIT_TERMINAL_PROMPT", "0"),
+    ("GIT_ASKPASS", ""),
+    ("SSH_ASKPASS", ""),
+    ("GIT_SSH_COMMAND", "ssh -oBatchMode=yes"),
+];
+
 async fn exec_argv(command: &GitCommand) -> Result<VmValue, VmError> {
     let mut params = BTreeMap::new();
     params.insert(
@@ -582,6 +609,22 @@ async fn exec_argv(command: &GitCommand) -> Result<VmValue, VmError> {
                 .map(|name| VmValue::String(std::sync::Arc::from(*name)))
                 .collect(),
         )),
+    );
+    // Make every git subprocess non-interactive by default so a
+    // credential / host-key prompt fails fast instead of hanging a
+    // TTY-less runtime. `env_mode: "merge"` keeps inherited PATH/HOME
+    // and any credentials already present in the environment.
+    let mut env = BTreeMap::new();
+    for (key, value) in GIT_NONINTERACTIVE_ENV {
+        env.insert(
+            (*key).to_string(),
+            VmValue::String(std::sync::Arc::from(*value)),
+        );
+    }
+    params.insert("env".to_string(), VmValue::Dict(std::sync::Arc::new(env)));
+    params.insert(
+        "env_mode".to_string(),
+        VmValue::String(std::sync::Arc::from("merge")),
     );
     let caller = json!({
         "surface": "stdlib.git",
@@ -1297,6 +1340,51 @@ mod tests {
             );
         })
         .await;
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn git_subprocess_carries_noninteractive_prompt_guard() {
+        // Every git subprocess Harn spawns must be non-interactive by
+        // default so a credential / host-key prompt fails fast instead
+        // of hanging a TTY-less runtime (`harn serve`, `@job`, CI). We
+        // run a probe through the same `exec_argv` path the receipt git
+        // builtins use and assert the guard env reached the child while
+        // an inherited env var survived the merge (proving `env_mode:
+        // "merge"`, not a clobbering replace). The inherited var uses a
+        // unique name so it can't race other tests in a shared process.
+        crate::stdlib::reset_stdlib_state();
+        std::env::set_var("HARN_GUARD_PROBE_INHERIT", "kept");
+        run_on_local(async {
+            let result = exec_argv(&GitCommand {
+                operation: "git.status",
+                action: "git.status",
+                cwd: std::env::temp_dir(),
+                argv: vec![
+                    "sh".to_string(),
+                    "-c".to_string(),
+                    "printf '%s|%s' \"$GIT_TERMINAL_PROMPT\" \"$HARN_GUARD_PROBE_INHERIT\""
+                        .to_string(),
+                ],
+                mutation: GitMutation::Read,
+                affected_paths: Vec::new(),
+                data_parser: GitDataParser::None,
+            })
+            .await
+            .expect("exec_argv probe");
+            let json = crate::llm::vm_value_to_json(&result);
+            let stdout = json["stdout"].as_str().unwrap_or_default();
+            let (prompt, inherited) = stdout.split_once('|').unwrap_or_default();
+            assert_eq!(
+                prompt, "0",
+                "git subprocess must inherit GIT_TERMINAL_PROMPT=0; stdout was {stdout:?}"
+            );
+            assert_eq!(
+                inherited, "kept",
+                "env_mode=merge must preserve inherited env; stdout was {stdout:?}"
+            );
+        })
+        .await;
+        std::env::remove_var("HARN_GUARD_PROBE_INHERIT");
     }
 
     #[tokio::test(flavor = "current_thread")]

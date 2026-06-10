@@ -18,9 +18,7 @@ type UnixSocketJsonResult = {
  * Expected readiness failures return `{ok: false, status, error?}` instead of throwing.
  *
  * @effects: [network]
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
  * @example: unix_socket_json_request(path, {id: "ping", method: "ping"})
  */
 pub fn unix_socket_json_request(path: string, request, options: UnixSocketJsonOptions = {}) -> UnixSocketJsonResult {

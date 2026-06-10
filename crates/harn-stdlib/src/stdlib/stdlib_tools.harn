@@ -52,7 +52,6 @@ type PathScopeMatcherOptions = {
  * against the active session workspace anchor.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
  * @example: path_scope({mount_modes: ["extend"]})
@@ -91,10 +90,7 @@ fn __tool_spec_config(spec: ToolDefinitionSpec) -> ToolDefinitionConfig {
  * tool_define_many adds a list of tool specs to a registry.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: tool_define_many(registry, specs)
  */
 pub fn tool_define_many(registry, specs: list<ToolDefinitionSpec>? = nil) -> ToolRegistry {
   var target = registry
@@ -125,10 +121,7 @@ pub fn tool_define_many(registry, specs: list<ToolDefinitionSpec>? = nil) -> Too
  * tool_registry_from creates a registry from a list of tool specs.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: tool_registry_from(specs)
  */
 pub fn tool_registry_from(specs: list<ToolDefinitionSpec>) -> ToolRegistry {
   return tool_define_many(tool_registry(), specs)

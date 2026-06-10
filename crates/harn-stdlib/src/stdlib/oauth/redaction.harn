@@ -51,7 +51,6 @@
  *   keeps matches from chewing unrelated identifiers.
  *
  * @effects: []
- * @allocation: heap
  * @errors: [invalid_argument]
  * @api_stability: experimental
  * @example: register_pattern("acme_api_key", "\\bACME-[A-Z0-9]{12}\\b")
@@ -65,10 +64,8 @@ pub fn register_pattern(name, regex_source) {
  * Default patterns are unaffected.
  *
  * @effects: []
- * @allocation: none
  * @errors: []
  * @api_stability: experimental
- * @example: clear_custom_patterns()
  */
 pub fn clear_custom_patterns() {
   return __token_redaction_clear_custom_patterns()
@@ -81,7 +78,6 @@ pub fn clear_custom_patterns() {
  * per-thread audit ring as an `HARN-OAU-001` entry.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
  * @example: redact("Authorization: Bearer abcdef1234567890")
@@ -94,10 +90,7 @@ pub fn redact(text) {
  * Names of every default pattern in catalog order.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: default_patterns()
  */
 pub fn default_patterns() {
   return __token_redaction_default_patterns()
@@ -107,10 +100,8 @@ pub fn default_patterns() {
  * Names of every custom pattern installed on the current thread.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
- * @example: custom_patterns()
  */
 pub fn custom_patterns() {
   return __token_redaction_custom_patterns()
@@ -128,10 +119,8 @@ pub fn custom_patterns() {
  * compliance contract — it works on every execution backend.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
- * @example: drain_audit()
  */
 pub fn drain_audit() {
   return __token_redaction_drain_audit()

@@ -52,9 +52,7 @@ fn __context_eval_string_list(value, field) {
  * Build a context-eval mode declaration.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
  * @example: context_eval_mode("pack", "hud_pack", {budget_tokens: 1600})
  */
 pub fn context_eval_mode(id: string, kind = nil, options = nil) {
@@ -101,9 +99,7 @@ pub fn context_eval_mode(id: string, kind = nil, options = nil) {
  * Build a context-eval task declaration.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
  * @example: context_eval_task("incident", "Find the failing service", {artifacts: []})
  */
 pub fn context_eval_task(id: string, objective: string, options = nil) {
@@ -143,9 +139,7 @@ pub fn context_eval_task(id: string, objective: string, options = nil) {
  * Build a portable context-eval manifest for `harn eval context`.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
  * @example: context_eval_manifest(tasks, modes, {id: "repo-context-smoke"})
  */
 pub fn context_eval_manifest(tasks = [], modes = [], options = nil) {
@@ -168,10 +162,7 @@ pub fn context_eval_manifest(tasks = [], modes = [], options = nil) {
  * Return the report schema id consumed by harn-cloud and local host UIs.
  *
  * @effects: []
- * @allocation: stack
  * @errors: []
- * @api_stability: stable
- * @example: context_eval_report_schema()
  */
 pub fn context_eval_report_schema() {
   return CONTEXT_EVAL_REPORT_SCHEMA

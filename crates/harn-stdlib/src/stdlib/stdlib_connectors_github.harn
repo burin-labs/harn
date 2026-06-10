@@ -76,10 +76,7 @@ var github_connector_config: GitHubConnectorConfig = {}
  * configure overrides the module-level connector config used by every call.
  *
  * @effects: [net]
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: configure(config)
  */
 pub fn configure(config: GitHubConnectorConfig = {}) -> GitHubConnectorConfig {
   github_connector_config = filter_nil(config)
@@ -90,10 +87,7 @@ pub fn configure(config: GitHubConnectorConfig = {}) -> GitHubConnectorConfig {
  * reset clears the module-level connector config.
  *
  * @effects: [net]
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: reset()
  */
 pub fn reset() {
   github_connector_config = {}
@@ -107,10 +101,7 @@ fn __call(method: string, params: dict = {}) {
  * call dispatches one GitHub connector outbound method. Prefer typed helpers when one exists.
  *
  * @effects: [net]
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: call(method, args, options)
  */
 pub fn call(method: string, args: dict = {}, options: GitHubCallOptions = {}) {
   return __call(method, merge(options, args ?? {}))
@@ -145,10 +136,7 @@ fn __github_slug_match(pattern, text) {
  * github_slug_from_remote returns `owner/repo` for common GitHub SSH and HTTPS remote URLs.
  *
  * @effects: [net]
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: github_slug_from_remote(url)
  */
 pub fn github_slug_from_remote(url: string) -> string? {
   let text = trim(to_string(url ?? ""))
@@ -169,10 +157,7 @@ pub fn github_slug_from_remote(url: string) -> string? {
  * github_repo normalizes an `owner/repo` slug, GitHub remote URL, or owner+repo pair.
  *
  * @effects: [net]
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: github_repo(repo, name)
  */
 pub fn github_repo(repo: any, name: string? = nil) -> GitHubRepoRef? {
   if name != nil {
@@ -223,10 +208,7 @@ fn __github_repo_or_throw(repo, name = nil) {
  * comment posts a comment on a GitHub issue or PR.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: comment(issue_url, body, options)
  */
 pub fn comment(issue_url: string, body: string, options: GitHubCallOptions = {}) {
   return __call("comment", merge(options, {issue_url: issue_url, body: body}))
@@ -236,10 +218,7 @@ pub fn comment(issue_url: string, body: string, options: GitHubCallOptions = {})
  * add_labels adds the listed labels to an issue or PR.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: add_labels(issue_url, labels, options)
  */
 pub fn add_labels(issue_url: string, labels: list<string>, options: GitHubCallOptions = {}) {
   return __call("add_labels", merge(options, {issue_url: issue_url, labels: labels}))
@@ -249,10 +228,7 @@ pub fn add_labels(issue_url: string, labels: list<string>, options: GitHubCallOp
  * request_review asks the listed reviewers to review a pull request.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: request_review(pr_url, reviewers, options)
  */
 pub fn request_review(pr_url: string, reviewers: list<string>, options: GitHubCallOptions = {}) {
   return __call("request_review", merge(options, {pr_url: pr_url, reviewers: reviewers}))
@@ -262,10 +238,7 @@ pub fn request_review(pr_url: string, reviewers: list<string>, options: GitHubCa
  * merge_pr merges a pull request via the API.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: merge_pr(pr_url, options)
  */
 pub fn merge_pr(pr_url: string, options: GitHubCallOptions = {}) {
   return __call("merge_pr", merge(options, {pr_url: pr_url}))
@@ -275,10 +248,7 @@ pub fn merge_pr(pr_url: string, options: GitHubCallOptions = {}) {
  * list_stale_prs returns PRs in `repo` that have been open for at least `days` days.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: list_stale_prs(repo, days, options)
  */
 pub fn list_stale_prs(repo: string, days: int, options: GitHubCallOptions = {}) {
   return __call("list_stale_prs", merge(options, {repo: repo, days: days}))
@@ -288,10 +258,7 @@ pub fn list_stale_prs(repo: string, days: int, options: GitHubCallOptions = {}) 
  * get_pr_diff fetches the unified diff for the pull request.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: get_pr_diff(pr_url, options)
  */
 pub fn get_pr_diff(pr_url: string, options: GitHubCallOptions = {}) {
   return __call("get_pr_diff", merge(options, {pr_url: pr_url}))
@@ -301,10 +268,7 @@ pub fn get_pr_diff(pr_url: string, options: GitHubCallOptions = {}) {
  * create_issue opens a new issue in `repo`, optionally with a body and labels.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: create_issue()
  */
 pub fn create_issue(
   repo: string,
@@ -323,10 +287,7 @@ pub fn create_issue(
  * api_call is the escape hatch for raw GitHub REST calls.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: api_call(path, method, body, options)
  */
 pub fn api_call(path: string, method: string, body: any = nil, options: GitHubCallOptions = {}) {
   return __call("api_call", filter_nil(merge(options, {path: path, method: method, body: body})))
@@ -336,10 +297,7 @@ pub fn api_call(path: string, method: string, body: any = nil, options: GitHubCa
  * workflow_dispatch triggers a workflow_dispatch workflow without shelling out to `gh`.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: workflow_dispatch()
  */
 pub fn workflow_dispatch(
   repo: any,
@@ -360,10 +318,7 @@ pub fn workflow_dispatch(
  * workflow_runs lists recent workflow runs, optionally scoped by workflow_id/event/status filters.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: workflow_runs(repo, options)
  */
 pub fn workflow_runs(repo: any, options: GitHubCallOptions = {}) {
   let r = __github_repo_or_throw(repo)
@@ -374,10 +329,7 @@ pub fn workflow_runs(repo: any, options: GitHubCallOptions = {}) {
  * workflow_run fetches one Actions workflow run by id.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: workflow_run(repo, run_id, options)
  */
 pub fn workflow_run(repo: any, run_id: any, options: GitHubCallOptions = {}) {
   let r = __github_repo_or_throw(repo)
@@ -388,10 +340,7 @@ pub fn workflow_run(repo: any, run_id: any, options: GitHubCallOptions = {}) {
  * Package-compatible owner/repo alias for workflow_dispatch.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: actions_workflow_dispatch()
  */
 pub fn actions_workflow_dispatch(
   owner: string,
@@ -408,10 +357,7 @@ pub fn actions_workflow_dispatch(
  * Package-compatible owner/repo alias for workflow_runs.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: actions_workflow_runs(owner, repo, options)
  */
 pub fn actions_workflow_runs(owner: string, repo: string, options: GitHubCallOptions = {}) {
   return workflow_runs(owner + "/" + repo, options)
@@ -421,10 +367,7 @@ pub fn actions_workflow_runs(owner: string, repo: string, options: GitHubCallOpt
  * Package-compatible owner/repo alias for workflow_run.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: actions_workflow_run()
  */
 pub fn actions_workflow_run(
   owner: string,
@@ -439,10 +382,7 @@ pub fn actions_workflow_run(
  * read_file_at_ref reads a repository file as decoded text at an optional ref.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: read_file_at_ref()
  */
 pub fn read_file_at_ref(
   repo: any,
@@ -458,10 +398,7 @@ pub fn read_file_at_ref(
  * Package-compatible owner/repo alias for read_file_at_ref.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: repos_get_text()
  */
 pub fn repos_get_text(
   owner: string,
@@ -477,10 +414,7 @@ pub fn repos_get_text(
  * latest_release returns a stable latest-release envelope with asset_names.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: latest_release(repo, options)
  */
 pub fn latest_release(repo: any, options: GitHubCallOptions = {}) {
   let r = __github_repo_or_throw(repo)
@@ -491,10 +425,7 @@ pub fn latest_release(repo: any, options: GitHubCallOptions = {}) {
  * release_assets returns a stable asset envelope for a release id, or latest release when omitted.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: release_assets(repo, release_id, options)
  */
 pub fn release_assets(repo: any, release_id: any = nil, options: GitHubCallOptions = {}) {
   let r = __github_repo_or_throw(repo)
@@ -505,10 +436,7 @@ pub fn release_assets(repo: any, release_id: any = nil, options: GitHubCallOptio
  * repos_get_latest_release fetches the raw GitHub latest-release payload.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: repos_get_latest_release(owner, repo, options)
  */
 pub fn repos_get_latest_release(owner: string, repo: string, options: GitHubCallOptions = {}) {
   return call("repos.get_latest_release", {owner: owner, repo: repo}, options)
@@ -518,10 +446,7 @@ pub fn repos_get_latest_release(owner: string, repo: string, options: GitHubCall
  * repos_list_release_assets fetches the raw GitHub release assets payload.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: repos_list_release_assets()
  */
 pub fn repos_list_release_assets(
   owner: string,
@@ -536,10 +461,7 @@ pub fn repos_list_release_assets(
  * Package-compatible owner/repo alias for latest_release.
  *
  * @effects: [net]
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: github_latest_release(owner, repo, options)
  */
 pub fn github_latest_release(owner: string, repo: string, options: GitHubCallOptions = {}) {
   return latest_release(owner + "/" + repo, options)
@@ -549,10 +471,7 @@ pub fn github_latest_release(owner: string, repo: string, options: GitHubCallOpt
  * Package-compatible owner/repo alias for release_assets.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: github_release_assets()
  */
 pub fn github_release_assets(
   owner: string,
@@ -567,10 +486,7 @@ pub fn github_release_assets(
  * enable_auto_merge enables GitHub auto-merge and normalizes the result shape.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: enable_auto_merge(repo, pull_number, options)
  */
 pub fn enable_auto_merge(repo: any, pull_number: any, options: GitHubCallOptions = {}) -> GitHubAutoMergeResult {
   let r = __github_repo_or_throw(repo)
@@ -592,10 +508,7 @@ pub fn enable_auto_merge(repo: any, pull_number: any, options: GitHubCallOptions
  * Package-compatible owner/repo alias for enable_auto_merge.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: pulls_enable_auto_merge()
  */
 pub fn pulls_enable_auto_merge(
   owner: string,
@@ -610,10 +523,7 @@ pub fn pulls_enable_auto_merge(
  * Package-compatible owner/repo alias for enable_auto_merge.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: github_ensure_auto_merge()
  */
 pub fn github_ensure_auto_merge(
   owner: string,
@@ -628,10 +538,7 @@ pub fn github_ensure_auto_merge(
  * close_pr closes a pull request through the issues endpoint, optionally after posting a comment.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: close_pr()
  */
 pub fn close_pr(
   repo: any,
@@ -671,10 +578,7 @@ pub fn close_pr(
  * Package-compatible owner/repo alias for close_pr.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: github_close_pr()
  */
 pub fn github_close_pr(
   owner: string,
@@ -691,10 +595,7 @@ pub fn github_close_pr(
  * shared git-forge PR/MR lifecycle shape.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: forge_pull_request_event(payload)
  */
 pub fn forge_pull_request_event(payload, options: GitHubCallOptions = {}) {
   return git_forge_pull_request_event("github", payload, options)
@@ -705,10 +606,7 @@ pub fn forge_pull_request_event(payload, options: GitHubCallOptions = {}) {
  * status comment.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: forge_writeback_request(event, body)
  */
 pub fn forge_writeback_request(event, body: string, options: GitHubCallOptions = {}) {
   return git_forge_writeback_request(event, body, options)
@@ -719,10 +617,7 @@ pub fn forge_writeback_request(event, body: string, options: GitHubCallOptions =
  * active GitHub connector.
  *
  * @effects: [net]
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: forge_writeback_comment(event, body)
  */
 pub fn forge_writeback_comment(event, body: string, options: GitHubCallOptions = {}) {
   return git_forge_writeback_comment(event, body, options)
@@ -792,10 +687,7 @@ fn __github_repo_matches(payload, repo) {
  * deployment_status_source.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: deployment_status_source(repo, deployment_id, options)
  */
 pub fn deployment_status_source(repo: string, deployment_id: any, options: GitHubCallOptions = {}) {
   return {
@@ -830,10 +722,7 @@ pub fn deployment_status_source(repo: string, deployment_id: any, options: GitHu
  * check_run_source.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: check_run_source(repo, check_run_id, options)
  */
 pub fn check_run_source(repo: string, check_run_id: any, options: GitHubCallOptions = {}) {
   return {
@@ -864,10 +753,7 @@ pub fn check_run_source(repo: string, check_run_id: any, options: GitHubCallOpti
  * pull_request_merged_source.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: pull_request_merged_source(repo, number, options)
  */
 pub fn pull_request_merged_source(repo: string, number: any, options: GitHubCallOptions = {}) {
   return {
@@ -918,10 +804,7 @@ fn __github_wait_options(options: GitHubWaitOptions, source, condition) {
  * wait_until_deploy_succeeds.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: wait_until_deploy_succeeds(repo, deployment_id, options)
  */
 pub fn wait_until_deploy_succeeds(repo: string, deployment_id: any, options: GitHubWaitOptions = {}) {
   return wait_for(
@@ -937,10 +820,7 @@ pub fn wait_until_deploy_succeeds(repo: string, deployment_id: any, options: Git
  * wait_until_ci_green.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: wait_until_ci_green(repo, check_run_id, options)
  */
 pub fn wait_until_ci_green(repo: string, check_run_id: any, options: GitHubWaitOptions = {}) {
   return wait_for(
@@ -956,10 +836,7 @@ pub fn wait_until_ci_green(repo: string, check_run_id: any, options: GitHubWaitO
  * wait_until_pr_merged.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: wait_until_pr_merged(repo, number, options)
  */
 pub fn wait_until_pr_merged(repo: string, number: any, options: GitHubWaitOptions = {}) {
   return wait_for(

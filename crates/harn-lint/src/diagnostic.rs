@@ -64,16 +64,20 @@ pub struct LintOptions<'a> {
     pub file_path: Option<&'a std::path::Path>,
     /// When true, the opt-in `require-file-header` rule runs.
     pub require_file_header: bool,
+    /// When true, the opt-in `missing-harndoc` rule warns on public
+    /// functions without a `/** */` doc comment. Off by default —
+    /// enabled via `[lint] require_docstrings = true` in `harn.toml`,
+    /// and implied by `require_stdlib_metadata`.
+    pub require_docstrings: bool,
     /// Override the cyclomatic-complexity threshold. `None` uses
     /// [`DEFAULT_COMPLEXITY_THRESHOLD`].
     pub complexity_threshold: Option<usize>,
     /// Extra non-stdlib function names that persona bodies may call
     /// without requiring a `@step` declaration.
     pub persona_step_allowlist: &'a [String],
-    /// When true, the `HARN-STD-101` lint enforces a complete
-    /// `@effects`/`@allocation`/`@errors`/`@api_stability`/`@example`
-    /// block on every `pub fn`. Auto-enabled by `harn lint` for files
-    /// under `crates/harn-stdlib/src/stdlib/`.
+    /// When true, the `HARN-STD-101` lint enforces an `@effects` +
+    /// `@errors` block on every `pub fn`. Auto-enabled by `harn lint`
+    /// for files under `crates/harn-stdlib/src/stdlib/`.
     pub require_stdlib_metadata: bool,
     /// TOML sources of declarative rule-engine rules to run as lint rules,
     /// loaded from the project's `[rules] ruleDirs`. Each is compiled and

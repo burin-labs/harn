@@ -163,9 +163,16 @@ impl HarnLsp {
                 hover_text.push_str(&format!("\n---\n\n{doc}"));
             }
 
+            let derived = sym.derived_example.as_deref();
             if let Some(meta) = sym.stdlib_metadata.as_ref().filter(|m| !m.is_empty()) {
                 hover_text.push_str("\n\n---\n\n");
-                hover_text.push_str(&meta.to_markdown());
+                hover_text.push_str(&meta.to_markdown_with_derived_example(derived));
+            } else if let Some(derived) = derived {
+                // No structured metadata (user scripts, undocumented fns):
+                // still surface a usage example inferred from the signature.
+                hover_text.push_str(&format!(
+                    "\n\n---\n\n**Example** _(derived from signature)_\n\n```harn\n{derived}\n```"
+                ));
             }
 
             if let Some(block) = format_flow_attributes_block(&sym.attributes) {

@@ -50,10 +50,7 @@ type WaitpointCancelledError = {
  * create.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: create(id_or_options)
  */
 pub fn create(id_or_options: WaitpointCreateInput = nil) -> Waitpoint {
   if id_or_options == nil {
@@ -66,10 +63,7 @@ pub fn create(id_or_options: WaitpointCreateInput = nil) -> Waitpoint {
  * wait.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: wait(waitpoints, options)
  */
 pub fn wait(waitpoints: string | dict | list, options: WaitpointWaitOptions = nil) -> Waitpoint | list<Waitpoint> {
   if type_of(waitpoints) == "list" {
@@ -88,10 +82,7 @@ pub fn wait(waitpoints: string | dict | list, options: WaitpointWaitOptions = ni
  * complete.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: complete(waitpoint, value, options)
  */
 pub fn complete(waitpoint: WaitpointHandle, value, options: WaitpointTerminalOptions = nil) -> Waitpoint {
   if options == nil {
@@ -104,10 +95,7 @@ pub fn complete(waitpoint: WaitpointHandle, value, options: WaitpointTerminalOpt
  * cancel.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: cancel(waitpoint, options)
  */
 pub fn cancel(waitpoint: WaitpointHandle, options: WaitpointTerminalOptions = nil) -> Waitpoint {
   if options == nil {

@@ -499,10 +499,8 @@ fn __job_default_actions(kind, job_id, run_id, approval, dlq, receipt_refs, repl
  * Build a stable dashboard event dedupe key from job provenance.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
- * @example: dashboard_job_dedupe_key(kind, job_id, run_id, timestamp, source_id)
  */
 pub fn dashboard_job_dedupe_key(kind, job_id, run_id = nil, timestamp = nil, source_id = nil) -> string {
   let seed = __job_text(kind)
@@ -581,10 +579,8 @@ fn __job_validate_action_intents(event) {
  * Validate mandatory dashboard provenance and host action boundaries.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
- * @example: dashboard_job_validate(event)
  */
 pub fn dashboard_job_validate(event: DashboardJobEvent) -> DashboardJobEvent {
   __job_validate_required(event)
@@ -599,10 +595,8 @@ pub fn dashboard_job_validate(event: DashboardJobEvent) -> DashboardJobEvent {
  * event envelope.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
- * @example: dashboard_job_event(kind, input, options)
  */
 pub fn dashboard_job_event(kind, input = nil, options = nil) -> DashboardJobEvent {
   let opts = options ?? {}
@@ -668,10 +662,8 @@ pub fn dashboard_job_event(kind, input = nil, options = nil) -> DashboardJobEven
  * Emit a dashboard job event to the EventLog and return an audit receipt.
  *
  * @effects: [transcript.write]
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
- * @example: dashboard_job_emit(input, options)
  */
 pub fn dashboard_job_emit(input: DashboardJobEvent, options = nil) -> DashboardJobEmitReceipt {
   let opts = options ?? {}
@@ -704,10 +696,8 @@ pub fn dashboard_job_emit(input: DashboardJobEvent, options = nil) -> DashboardJ
  * Drop duplicate dashboard events by `dedupe_key`, preserving first-seen order.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
- * @example: dashboard_job_dedupe_events(events)
  */
 pub fn dashboard_job_dedupe_events(events: list) -> list<DashboardJobEvent> {
   var seen = {}
@@ -820,10 +810,8 @@ fn __job_merge_card(card, event) {
  * Reduce an ordered dashboard event stream into static Jobs view cards.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
- * @example: dashboard_jobs_snapshot(events, options)
  */
 pub fn dashboard_jobs_snapshot(events: list, options = nil) {
   let opts = options ?? {}
@@ -850,10 +838,8 @@ pub fn dashboard_jobs_snapshot(events: list, options = nil) {
  * to also append each event to the EventLog.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
- * @example: dashboard_jobs_view(events, options)
  */
 pub fn dashboard_jobs_view(events: list, options = nil) {
   let opts = options ?? {}

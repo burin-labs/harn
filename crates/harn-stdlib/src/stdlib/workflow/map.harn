@@ -213,10 +213,8 @@ fn __map_output_kind(node) {
  * workflow_map_stage_plan.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
- * @example: workflow_map_stage_plan(config)
  */
 pub fn workflow_map_stage_plan(config = nil) {
   let node = config?.node ?? {}
@@ -243,10 +241,8 @@ pub fn workflow_map_stage_plan(config = nil) {
  * workflow_map_work_items.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
- * @example: workflow_map_work_items(config)
  */
 pub fn workflow_map_work_items(config = nil) {
   let node = config?.node ?? {}
@@ -276,16 +272,14 @@ pub fn workflow_map_work_items(config = nil) {
  * workflow_map_execution_plan.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
- * @example: workflow_map_execution_plan(config)
  */
 pub fn workflow_map_execution_plan(config = nil) {
   let node = config?.node ?? {}
   let stage_plan = workflow_map_stage_plan({node: node})
   let work = workflow_map_work_items({node: node, artifacts: config?.artifacts ?? []})
-  let items = __map_list(work?.items)
+  let items = __map_list(work.items)
   let strategy = __map_string(node?.join_policy?.strategy, "all")
   return {
     items: items,
@@ -307,10 +301,8 @@ pub fn workflow_map_execution_plan(config = nil) {
  * workflow_map_join_target.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
- * @example: workflow_map_join_target(config)
  */
 pub fn workflow_map_join_target(config = nil) {
   let total = max(__map_int(config?.total, 0), 0)
@@ -332,10 +324,8 @@ pub fn workflow_map_join_target(config = nil) {
  * workflow_map_finalize.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
- * @example: workflow_map_finalize(config)
  */
 pub fn workflow_map_finalize(config = nil) {
   let strategy = __map_string(config?.strategy, "all")
@@ -371,10 +361,8 @@ pub fn workflow_map_finalize(config = nil) {
  * workflow_execute_map_stage.
  *
  * @effects: [host]
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
- * @example: workflow_execute_map_stage(node_id, node, artifacts, opts)
  */
 pub fn workflow_execute_map_stage(node_id, node, artifacts = nil, opts = nil) {
   let plan = __host_workflow_map_plan(node, __map_list(artifacts))

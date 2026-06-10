@@ -41,7 +41,6 @@
  *   * `references` — links to upstream docs, RFCs, or post-mortems.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
  * @example: preset_run_command({stacks: ["rust", "python"]})
@@ -51,16 +50,20 @@
 // shared helpers
 // -------------------------------------------------------------------------------------------------
 
-/* Boolean regex test wrapper. The Harn stdlib exposes `regex_match`
+/**
+ * Boolean regex test wrapper. The Harn stdlib exposes `regex_match`
  * which returns a list of matches or nil; this helper collapses the
- * two cases into a clean predicate for catalogue rules. */
+ * two cases into a clean predicate for catalogue rules.
+ */
 fn __cat_re(pattern, text) -> bool {
   return regex_match(pattern, text) != nil
 }
 
-/* Append a flag to a command only when it isn't already present. The
+/**
+ * Append a flag to a command only when it isn't already present. The
  * naive concat is sufficient because rewrites flow through
- * `__preset_invoke_rewrite`, which forwards the final string to `inner`. */
+ * `__preset_invoke_rewrite`, which forwards the final string to `inner`.
+ */
 fn __cat_append_flag(command, flag) -> string {
   if contains(command, flag) {
     return command
@@ -68,10 +71,12 @@ fn __cat_append_flag(command, flag) -> string {
   return command + " " + flag
 }
 
-/* Rewrite shell `find . -name '*.<ext>'` invocations to the equivalent
+/**
+ * Rewrite shell `find . -name '*.<ext>'` invocations to the equivalent
  * `rg --files -t <type>` form. Used by both python and typescript
  * catalogues to stay DRY. Falls back to an untyped `rg --files` when no
- * extension is detected so the rewrite is still safe to dispatch. */
+ * extension is detected so the rewrite is still safe to dispatch.
+ */
 fn __cat_find_to_rg(command, file_type) -> string {
   // The ripgrep equivalent only needs the type tag, since `rg --files`
   // walks the cwd by default and respects `.gitignore`. The original
@@ -85,29 +90,35 @@ fn __cat_find_to_rg(command, file_type) -> string {
   return "rg --files -t " + file_type
 }
 
-/* Build a catalogue dict using a uniform shape so authors only pass the
+/**
+ * Build a catalogue dict using a uniform shape so authors only pass the
  * rule list. Each catalogue advertises `source: "harn-canon"` so audit
- * consumers know the provenance even after JSON round-trip. */
+ * consumers know the provenance even after JSON round-trip.
+ */
 fn __cat_build(id, stack, rules) {
   return catalogue({id: id, stack: stack, version: "0.1.0", source: "harn-canon", rules: rules})
 }
 
-/* Build a stackless universal catalogue. Stackless catalogues survive
+/**
+ * Build a stackless universal catalogue. Stackless catalogues survive
  * `tool_hooks_filter`, so universal denies fire regardless of which
- * `stacks: [...]` the caller opted into. */
+ * `stacks: [...]` the caller opted into.
+ */
 fn __cat_build_universal(id, rules) {
   // priority: 100 places deny-rules ahead of stack-specific rewrites
   // on ambiguous commands during the linear sweep in tool_hooks_match.
   return catalogue({id: id, version: "0.1.0", source: "harn-canon", priority: 100, rules: rules})
 }
 
-/* Pattern predicate factory: "matches the given regex prefix AND lacks
+/**
+ * Pattern predicate factory: "matches the given regex prefix AND lacks
  * any of the given suppress markers (as plain substrings)". The Rust
  * regex engine has no lookaround so we substring-check the suppress
  * markers in Harn. Bails early when the prefix doesn't match, then
  * short-circuits as soon as any suppress marker is present in the
  * command. Used by every stack catalogue with a "trigger on bare X, but
- * skip when the user already supplied the corrected flag" shape. */
+ * skip when the user already supplied the corrected flag" shape.
+ */
 fn __cat_pred_prefix(prefix_re, suppress_markers) {
   return { command, _context ->
     if !__cat_re(prefix_re, command) {
@@ -122,11 +133,13 @@ fn __cat_pred_prefix(prefix_re, suppress_markers) {
   }
 }
 
-/* `find . -name '*.<ext>'` predicate used by both python and typescript
+/**
+ * `find . -name '*.<ext>'` predicate used by both python and typescript
  * catalogues. Matches `find .` with a `-name '*.ext'` filter, with the
  * pattern optionally single-, double-, or unquoted. The leading `find .`
  * anchor keeps grep-style `find` invocations in other contexts from
- * tripping. */
+ * tripping.
+ */
 fn __cat_pred_find_for_ext(extensions) {
   let ext_re = "(?:" + join(extensions, "|") + ")"
   // The trailing `(?:[\"']|\\s|$)` is essential: without an anchor on
@@ -136,7 +149,8 @@ fn __cat_pred_find_for_ext(extensions) {
   return "^find \\.(?:\\s|$).*-name\\s+[\"']?\\*\\." + ext_re + "(?:[\"']|\\s|$)"
 }
 
-/* Force-push deny predicate. A command is denied iff:
+/**
+ * Force-push deny predicate. A command is denied iff:
  *   1. It starts with `git push`.
  *   2. It carries a force flag: `--force`, `--force=...`,
  *      `--force-with-lease=false`, or a bare `-f` short flag (alone or
@@ -175,7 +189,8 @@ fn __cat_pred_force_push_main(command, _context) -> bool {
   return __cat_re("\\b(?:main|master)\\b", command)
 }
 
-/* Recursive-delete deny predicate. Matches `rm` invocations carrying
+/**
+ * Recursive-delete deny predicate. Matches `rm` invocations carrying
  * BOTH a recursive flag (-r / -R / --recursive) AND a force flag
  * (-f / --force), regardless of order or whether the flags are bundled,
  * targeting a root-adjacent path:
@@ -184,7 +199,8 @@ fn __cat_pred_force_push_main(command, _context) -> bool {
  *
  * Defeats quoting bypasses (`rm -rf "/"` , `rm -rf '/'`, `rm -rf  /`)
  * by anchoring on the path token itself with optional surrounding
- * quotes/whitespace. */
+ * quotes/whitespace.
+ */
 fn __cat_pred_rm_rf_root(command, _context) -> bool {
   if !__cat_re("^rm\\b", command) {
     return false
@@ -242,7 +258,6 @@ fn __cat_pred_rm_rf_root(command, _context) -> bool {
  *     the agent can confirm intent before mutating files.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
  * @example: tool_hooks_register(tool_hooks_registry(), tool_hooks_catalogue_rust())
@@ -326,7 +341,6 @@ pub fn tool_hooks_catalogue_rust() {
  *     agent can read `print` output.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
  * @example: tool_hooks_register(tool_hooks_registry(), tool_hooks_catalogue_python())
@@ -394,7 +408,6 @@ pub fn tool_hooks_catalogue_python() {
  *     graphs and ship footguns to production.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
  * @example: tool_hooks_register(tool_hooks_registry(), tool_hooks_catalogue_typescript())
@@ -446,7 +459,6 @@ pub fn tool_hooks_catalogue_typescript() {
  *     in a non-trivial package.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
  * @example: tool_hooks_register(tool_hooks_registry(), tool_hooks_catalogue_swift())
@@ -482,7 +494,6 @@ pub fn tool_hooks_catalogue_swift() {
  *     leak columns the agent didn't intend to expose.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
  * @example: tool_hooks_register(tool_hooks_registry(), tool_hooks_catalogue_sql())
@@ -527,7 +538,6 @@ pub fn tool_hooks_catalogue_sql() {
  *     use `cargo run --quiet --bin harn`.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
  * @example: tool_hooks_register(tool_hooks_registry(), tool_hooks_catalogue_harn())
@@ -581,7 +591,6 @@ pub fn tool_hooks_catalogue_harn() {
  * `tool_hooks_mode_deny_with_explanation` blocks the call entirely.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
  * @example: tool_hooks_register(tool_hooks_registry(), tool_hooks_catalogue_universal())
@@ -621,9 +630,11 @@ pub fn tool_hooks_catalogue_universal() {
 // seed registry
 // -------------------------------------------------------------------------------------------------
 
-/* Map a stack name to its catalogue builder. Returns `nil` for unknown
+/**
+ * Map a stack name to its catalogue builder. Returns `nil` for unknown
  * stacks so the seeder can silently skip them — callers may legitimately
- * pass stacks that have no shipped catalogue yet. */
+ * pass stacks that have no shipped catalogue yet.
+ */
 fn __cat_for_stack(stack) {
   if stack == "rust" {
     return tool_hooks_catalogue_rust()
@@ -653,7 +664,6 @@ fn __cat_for_stack(stack) {
  * don't break.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
  * @example: tool_hooks_seed_registry(["rust", "python"])

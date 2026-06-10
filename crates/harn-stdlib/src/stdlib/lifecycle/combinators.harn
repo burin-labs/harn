@@ -90,7 +90,6 @@ fn __stringify_error(err) -> string {
  * composition stops at the first throw.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
  * @example: pipeline_on_finish(compose([on_finish_drain, audit_callback]))
@@ -118,7 +117,6 @@ pub fn compose(callbacks) {
  * where the first responder wins.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
  * @example: pipeline_on_finish(first_available([cloud_drain, local_drain]))
@@ -149,7 +147,6 @@ pub fn first_available(callbacks) {
  * and re-throws. The default `span_name` is `"lifecycle_callback"`.
  *
  * @effects: [host]
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
  * @example: pipeline_on_finish(with_telemetry(on_finish_drain, "drain"))
@@ -196,7 +193,6 @@ pub fn with_telemetry(callback, span_name = "lifecycle_callback") {
  * hard thread-kill.
  *
  * @effects: [host]
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
  * @example: pipeline_on_finish(with_timeout(on_finish_drain, 30000))
@@ -225,7 +221,6 @@ pub fn with_timeout(callback, ms) {
  * cheap.
  *
  * @effects: [host]
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
  * @example: pipeline_on_finish(if_unsettled(on_finish_drain))
@@ -249,7 +244,6 @@ pub fn if_unsettled(callback) {
  * inbound `return_value`.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
  * @example: pipeline_on_finish(when({ h, rv -> rv == nil }, fallback_cb))

@@ -354,10 +354,7 @@ fn __fill_unset(result, overlay) {
  * "pack_thinking_stripped" if a session_id is present in opts.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: pack_for(opts)
  */
 pub fn pack_for(opts) {
   if type_of(opts) != "dict" {
@@ -431,10 +428,7 @@ pub fn pack_for(opts) {
  * pack_chat(model, opts) — convenience wrapper for task: "chat".
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: pack_chat(model, opts)
  */
 pub fn pack_chat(model, opts = nil) {
   let base = opts ?? {}
@@ -445,10 +439,7 @@ pub fn pack_chat(model, opts = nil) {
  * pack_agent(model, opts) — convenience wrapper for task: "agent".
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: pack_agent(model, opts)
  */
 pub fn pack_agent(model, opts = nil) {
   let base = opts ?? {}
@@ -459,10 +450,7 @@ pub fn pack_agent(model, opts = nil) {
  * pack_refine(model, opts) — convenience wrapper for task: "refine".
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: pack_refine(model, opts)
  */
 pub fn pack_refine(model, opts = nil) {
   let base = opts ?? {}
@@ -473,10 +461,7 @@ pub fn pack_refine(model, opts = nil) {
  * pack_judge(model, opts) — convenience wrapper for task: "judge".
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: pack_judge(model, opts)
  */
 pub fn pack_judge(model, opts = nil) {
   let base = opts ?? {}
@@ -487,10 +472,7 @@ pub fn pack_judge(model, opts = nil) {
  * pack_summarize(model, opts) — convenience wrapper for task: "summarize".
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: pack_summarize(model, opts)
  */
 pub fn pack_summarize(model, opts = nil) {
   let base = opts ?? {}
@@ -501,10 +483,7 @@ pub fn pack_summarize(model, opts = nil) {
  * pack_code(model, opts) — convenience wrapper for task: "code".
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: pack_code(model, opts)
  */
 pub fn pack_code(model, opts = nil) {
   let base = opts ?? {}
@@ -515,10 +494,7 @@ pub fn pack_code(model, opts = nil) {
  * pack_json(model, opts) — convenience wrapper for task: "json".
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: pack_json(model, opts)
  */
 pub fn pack_json(model, opts = nil) {
   let base = opts ?? {}

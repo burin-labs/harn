@@ -263,10 +263,8 @@ fn __workflow_sort_artifacts(artifacts, policy) {
  * workflow_stage_context_policy.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
- * @example: workflow_stage_context_policy(context_policy, input_contract)
  */
 pub fn workflow_stage_context_policy(context_policy = nil, input_contract = nil) {
   let policy = context_policy ?? {}
@@ -284,10 +282,8 @@ pub fn workflow_stage_context_policy(context_policy = nil, input_contract = nil)
  * workflow_select_artifacts.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
- * @example: workflow_select_artifacts(artifacts, policy)
  */
 pub fn workflow_select_artifacts(artifacts = nil, policy = nil) {
   let opts = policy ?? {}
@@ -324,10 +320,8 @@ pub fn workflow_select_artifacts(artifacts = nil, policy = nil) {
  * workflow_select_artifacts_adaptive.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
- * @example: workflow_select_artifacts_adaptive(artifacts, policy)
  */
 pub fn workflow_select_artifacts_adaptive(artifacts = nil, policy = nil) {
   let opts = policy ?? {}
@@ -341,10 +335,8 @@ pub fn workflow_select_artifacts_adaptive(artifacts = nil, policy = nil) {
  * workflow_select_stage_artifacts.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
- * @example: workflow_select_stage_artifacts(config)
  */
 pub fn workflow_select_stage_artifacts(config = nil) {
   let opts = config ?? {}

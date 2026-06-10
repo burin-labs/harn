@@ -220,13 +220,13 @@ fn __ui_validation_summary(validation) {
 fn __ui_csp(options) {
   let base = options?.csp ?? UI_DEFAULT_CSP
   return {
-    default_src: __ui_str_list(base?.default_src ?? UI_DEFAULT_CSP.default_src),
-    script_src: __ui_str_list(base?.script_src ?? UI_DEFAULT_CSP.script_src),
-    style_src: __ui_str_list(base?.style_src ?? UI_DEFAULT_CSP.style_src),
-    img_src: __ui_str_list(base?.img_src ?? UI_DEFAULT_CSP.img_src),
-    connect_src: __ui_str_list(base?.connect_src ?? UI_DEFAULT_CSP.connect_src),
-    frame_ancestors: __ui_str_list(base?.frame_ancestors ?? UI_DEFAULT_CSP.frame_ancestors),
-    sandbox: __ui_str_list(base?.sandbox ?? UI_DEFAULT_CSP.sandbox),
+    default_src: __ui_str_list(base.default_src ?? UI_DEFAULT_CSP.default_src),
+    script_src: __ui_str_list(base.script_src ?? UI_DEFAULT_CSP.script_src),
+    style_src: __ui_str_list(base.style_src ?? UI_DEFAULT_CSP.style_src),
+    img_src: __ui_str_list(base.img_src ?? UI_DEFAULT_CSP.img_src),
+    connect_src: __ui_str_list(base.connect_src ?? UI_DEFAULT_CSP.connect_src),
+    frame_ancestors: __ui_str_list(base.frame_ancestors ?? UI_DEFAULT_CSP.frame_ancestors),
+    sandbox: __ui_str_list(base.sandbox ?? UI_DEFAULT_CSP.sandbox),
   }
 }
 
@@ -234,10 +234,7 @@ fn __ui_csp(options) {
  * Build a Content-Security-Policy header value from a CSP dict.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: ui_resource_csp_header(csp)
  */
 pub fn ui_resource_csp_header(csp: UiResourceCsp) -> string {
   var directives = []
@@ -261,10 +258,7 @@ pub fn ui_resource_csp_header(csp: UiResourceCsp) -> string {
  * Build the `sandbox` attribute value for the host iframe.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: ui_resource_sandbox_attr(csp)
  */
 pub fn ui_resource_sandbox_attr(csp: UiResourceCsp) -> string {
   return join(csp.sandbox, " ")
@@ -279,10 +273,7 @@ pub fn ui_resource_sandbox_attr(csp: UiResourceCsp) -> string {
  * Harn's artifact pipeline uses.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: ui_resource(uri, name, html, options)
  */
 pub fn ui_resource(uri: string, name: string, html: string, options: UiResourceOptions = nil) -> UiResource {
   let normalized_uri = __ui_validate_uri(uri)
@@ -333,10 +324,7 @@ pub fn ui_resource(uri: string, name: string, html: string, options: UiResourceO
  * inclusion in MCP `tools/list` payloads.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: ui_tool_meta(resource, options)
  */
 pub fn ui_tool_meta(resource: UiResource, options: UiToolMetaOptions = nil) -> UiToolMeta {
   let visibility = options?.visibility ?? "app_only"
@@ -361,10 +349,7 @@ pub fn ui_tool_meta(resource: UiResource, options: UiToolMetaOptions = nil) -> U
  * Serialize `ui_tool_meta` into the MCP Apps `_meta.ui` dict shape.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: ui_tool_meta_to_mcp(meta)
  */
 pub fn ui_tool_meta_to_mcp(meta: UiToolMeta) -> dict {
   let ui = meta.ui
@@ -387,10 +372,7 @@ pub fn ui_tool_meta_to_mcp(meta: UiToolMeta) -> dict {
  * Build a text fallback envelope for hosts without embedded UI support.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: ui_text_fallback(content)
  */
 pub fn ui_text_fallback(content: string) -> UiTextFallback {
   let text = __ui_text(content)
@@ -404,10 +386,7 @@ pub fn ui_text_fallback(content: string) -> UiTextFallback {
  * Build a structured fallback envelope for hosts that prefer JSON results.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: ui_structured_fallback(data, options)
  */
 pub fn ui_structured_fallback(data: dict, options: UiStructuredFallbackOptions = nil) -> UiStructuredFallback {
   if data == nil {
@@ -435,10 +414,7 @@ fn __ui_default_text_fallback(resource: UiResource, fallback_options: UiDefaultT
  * mandatory so every host has a non-empty rendering path.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: ui_tool_result(resource, options)
  */
 pub fn ui_tool_result(resource: UiResource, options: UiToolResultOptions = nil) -> UiToolResult {
   let meta = options?.tool_meta ?? ui_tool_meta(resource, options?.tool_meta_options)
@@ -475,10 +451,7 @@ pub fn ui_tool_result(resource: UiResource, options: UiToolResultOptions = nil) 
  * does not need host-specific branches.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: ui_host_capabilities(input)
  */
 pub fn ui_host_capabilities(input: UiHostCapabilityInput = nil) -> UiHostCapabilities {
   let value = input ?? {}
@@ -502,10 +475,7 @@ pub fn ui_host_capabilities(input: UiHostCapabilityInput = nil) -> UiHostCapabil
  * Return true if the host capabilities advertise MCP Apps support.
  *
  * @effects: []
- * @allocation: stack-only
  * @errors: []
- * @api_stability: stable
- * @example: ui_host_supports_apps(capabilities)
  */
 pub fn ui_host_supports_apps(capabilities: UiHostCapabilityInput = nil) -> bool {
   let caps = ui_host_capabilities(capabilities)
@@ -527,10 +497,7 @@ pub fn ui_host_supports_apps(capabilities: UiHostCapabilityInput = nil) -> bool 
  * fallbacks and provenance metadata.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: ui_select_for_host(result, capabilities)
  */
 pub fn ui_select_for_host(result: UiToolResult, capabilities: UiHostCapabilityInput = nil) -> UiToolResult {
   let supports_apps = ui_host_supports_apps(capabilities)
@@ -551,10 +518,7 @@ pub fn ui_select_for_host(result: UiToolResult, capabilities: UiHostCapabilityIn
  * Build the host->guest JSON-RPC envelope a sandboxed UI sees over postMessage.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: ui_tool_call_envelope(name, params, options)
  */
 pub fn ui_tool_call_envelope(name: string, params: dict? = nil, options: UiToolCallOptions = nil) -> UiToolCallEnvelope {
   let tool_name = __ui_text(name)
@@ -575,10 +539,7 @@ pub fn ui_tool_call_envelope(name: string, params: dict? = nil, options: UiToolC
  * Build the guest->host JSON-RPC envelope used to update model-visible context.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: ui_context_update_envelope(key, value, options)
  */
 pub fn ui_context_update_envelope(key: string, value, options: UiContextUpdateOptions = nil) -> UiContextUpdateEnvelope {
   let context_key = __ui_text(key)
@@ -599,10 +560,7 @@ pub fn ui_context_update_envelope(key: string, value, options: UiContextUpdateOp
  * Validate a tool-result envelope and its inner shapes.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: ui_tool_result_validate(result)
  */
 pub fn ui_tool_result_validate(result: UiToolResult) -> UiToolResult {
   if result.schema != UI_TOOL_RESULT_SCHEMA {

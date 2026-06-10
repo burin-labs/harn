@@ -1039,7 +1039,7 @@ const REPAIR_DOC_ADD_HARNDOC: RepairTemplate = RepairTemplate {
 
 const REPAIR_DOC_ADD_STDLIB_METADATA: RepairTemplate = RepairTemplate {
     id: "doc/add-stdlib-metadata",
-    summary: "Add `@effects`, `@allocation`, `@errors`, `@api_stability`, and `@example` fields to the stdlib function's doc block",
+    summary: "Add `@effects` and `@errors` fields to the stdlib function's doc block",
     safety: RepairSafety::BehaviorPreserving,
 };
 

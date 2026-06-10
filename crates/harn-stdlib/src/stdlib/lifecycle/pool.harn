@@ -27,7 +27,6 @@ fn __queue_strategy(kind, options = nil) {
  * fifo returns a queue strategy descriptor that dequeues oldest-first.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
  * @example: pool_create({queue: fifo()})
@@ -41,7 +40,6 @@ pub fn fifo() {
  * submit-time `priority` first, with FIFO tiebreaks.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
  * @example: pool_create({queue: priority()})
@@ -54,7 +52,6 @@ pub fn priority() {
  * lifo returns a queue strategy descriptor that dequeues newest-first.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
  * @example: pool_create({queue: lifo()})
@@ -68,7 +65,6 @@ pub fn lifo() {
  * tasks by a submit option field and round-robins across distinct values.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
  * @example: pool_create({queue: fair_round_robin("tenant_id")})
@@ -82,10 +78,8 @@ pub fn fair_round_robin(key = "key") {
  * callers that prefer dotted local access.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
- * @example: let QueueStrategy = QueueStrategy()
  */
 pub fn QueueStrategy() {
   return {fifo: fifo(), priority: priority(), lifo: lifo(), fair_round_robin: fair_round_robin}
@@ -106,7 +100,6 @@ fn __backpressure(kind, options = nil) {
  * or `"fail_submitter"`.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
  * @example: pool_create({backpressure: backpressure_queue(100, "block_submitter")})
@@ -120,7 +113,6 @@ pub fn backpressure_queue(max_depth, on_full = "block_submitter") {
  * worker slot is immediately available.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
  * @example: pool_create({backpressure: fail_fast()})
@@ -134,7 +126,6 @@ pub fn fail_fast() {
  * when a new submission arrives after the queue reaches capacity.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
  * @example: pool_create({backpressure: ring_buffer(10)})
@@ -148,10 +139,8 @@ pub fn ring_buffer(capacity) {
  * callers that prefer dotted local access.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
- * @example: let Backpressure = Backpressure()
  */
 pub fn Backpressure() {
   return {queue: backpressure_queue, fail_fast: fail_fast(), ring_buffer: ring_buffer}
@@ -175,7 +164,6 @@ fn __pool_attach_methods(snapshot) {
  * pool_create allocates a named pool and returns its handle.
  *
  * @effects: [host]
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
  * @example: pool_create({name: "review", max_concurrent: 2})
@@ -188,7 +176,6 @@ pub fn pool_create(options = nil) {
  * pool_get looks up a pool by name or id; returns nil when not found.
  *
  * @effects: [host]
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
  * @example: pool_get("review")
@@ -205,10 +192,8 @@ pub fn pool_get(name_or_id) {
  * pool_list returns every pool registered in the current runtime.
  *
  * @effects: [host]
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
- * @example: pool_list()
  */
 pub fn pool_list() {
   let snapshots = __pool_list()
@@ -223,10 +208,8 @@ pub fn pool_list() {
  * pool_wait blocks until one or more pool task handles complete.
  *
  * @effects: [host]
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
- * @example: pool_wait(task)
  */
 pub fn pool_wait(handle_or_handles) {
   return __pool_wait(handle_or_handles)
@@ -239,10 +222,8 @@ pub fn pool_wait(handle_or_handles) {
  * fixtures and durability tests — production code should not need this.
  *
  * @effects: [host]
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
- * @example: pool_simulate_restart()
  */
 pub fn pool_simulate_restart() {
   return __pool_simulate_restart()

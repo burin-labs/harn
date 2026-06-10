@@ -1027,7 +1027,6 @@ type InterruptAndSuspendHandler = {kind: string, target_agents: InterruptTargets
  * priority (0) and a null fair-queue key.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
  * @example: trigger_register({handler: SpawnToPool({pool: "pr-review", task_factory: { event -> { -> review(event) } }})})
@@ -1065,7 +1064,6 @@ pub fn SpawnToPool(options: SpawnToPoolOptions) -> SpawnToPoolHandler {
  * of failing the dispatch.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
  * @example: trigger_register({handler: ReminderInject({target: "current", body: "{{ event.kind }} arrived"})})
@@ -1112,7 +1110,6 @@ pub fn ReminderInject(options: ReminderInjectOptions) -> ReminderInjectHandler {
  * than dispatch failure.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
  * @example: trigger_register({handler: InterruptAndSuspend({target_agents: "all", reason: "build_storm"})})
@@ -1125,10 +1122,7 @@ pub fn InterruptAndSuspend(options: InterruptAndSuspendOptions) -> InterruptAndS
  * list_providers.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: list_providers()
  */
 pub fn list_providers() -> list<ProviderCatalogEntry> {
   return list_providers_native()
@@ -1138,10 +1132,7 @@ pub fn list_providers() -> list<ProviderCatalogEntry> {
  * stream_fork returns a declarative fan-out plan for stream handlers.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: stream_fork(source, branches)
  */
 pub fn stream_fork(source, branches = []) -> StreamForkPlan {
   return {kind: "stream.fork", source: source, branches: branches}
@@ -1151,10 +1142,7 @@ pub fn stream_fork(source, branches = []) -> StreamForkPlan {
  * stream_join returns a declarative fan-in plan for stream handlers.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: stream_join(source, join)
  */
 pub fn stream_join(source, join: dict? = nil) -> StreamJoinPlan {
   return {kind: "stream.join", source: source, join: join ?? {}}
@@ -1178,10 +1166,7 @@ fn __stream_llm_classify_options(options: StreamLlmClassifyOptions = nil) -> Str
  * window_by groups stream events with the same manifest window shape.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: window_by(events, window)
  */
 pub fn window_by(events, window: StreamWindowSpec) -> StreamWindowPlan {
   return {kind: "stream.window", events: events, window: window}
@@ -1191,10 +1176,7 @@ pub fn window_by(events, window: StreamWindowSpec) -> StreamWindowPlan {
  * llm_classify describes a cached classifier step without forcing a provider call during planning.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: llm_classify(input, labels, options)
  */
 pub fn llm_classify(input, labels: list<string>, options: StreamLlmClassifyOptions = nil) -> StreamLlmClassifyPlan {
   let config = __stream_llm_classify_options(options)

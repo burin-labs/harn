@@ -242,7 +242,6 @@ fn __compaction_enabled(opts) {
  * compaction_policy.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
  * @example: compaction_policy("Preserve failing tests.", {author: "host"})
@@ -272,7 +271,6 @@ pub fn compaction_policy(instructions = nil, opts = nil) {
  * compact_for_bug_fix_resumption.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
  * @example: compact_for_bug_fix_resumption({author: "host"})
@@ -304,10 +302,8 @@ pub fn compact_for_bug_fix_resumption(opts = nil) {
  * compact_preserving_test_failures.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
- * @example: compact_preserving_test_failures()
  */
 pub fn compact_preserving_test_failures(opts = nil) {
   let base = if type_of(opts) == "dict" {
@@ -337,7 +333,6 @@ pub fn compact_preserving_test_failures(opts = nil) {
  * compact_retaining_current_plan.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
  * @example: compact_retaining_current_plan({author: "host"})
@@ -376,10 +371,8 @@ pub fn compact_retaining_current_plan(opts = nil) {
  * agent_autocompact_if_needed.
  *
  * @effects: [host]
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
- * @example: agent_autocompact_if_needed(session, opts)
  */
 pub fn agent_autocompact_if_needed(session, opts) {
   if !__compaction_enabled(opts) {

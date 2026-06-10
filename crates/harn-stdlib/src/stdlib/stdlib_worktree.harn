@@ -1,14 +1,69 @@
-// std/worktree — isolated git worktree helpers built on exec_at/shell_at.
+// std/worktree — isolated git worktree helpers built on std/runtime process exec.
+//
+// Every git subprocess these helpers spawn runs non-interactive by
+// default: `GIT_TERMINAL_PROMPT=0` plus an empty askpass and an ssh
+// `BatchMode=yes` transport. Harn runs worktree git from TTY-less
+// contexts (`harn serve`, `@job`, CI); without this guard a clone/fetch
+// that needs a credential or host-key decision would block on an
+// interactive prompt and hang the runtime. The guard only disables
+// *prompting* — credentials supplied via env/helper/agent still work —
+// and is merged (`env_mode: "merge"`) so inherited PATH/HOME survive.
+// Callers that genuinely want interactive git can override by passing
+// their own `env` / `env_mode` in `options`.
 //
 // Import: import "std/worktree"
+import { git_env_remove, git_noninteractive_env } from "std/git"
+import { process_run, process_shell } from "std/runtime"
+
+/**
+ * worktree_noninteractive_env returns the default prompt guard env applied
+ * to git subprocesses so credential/host-key prompts fail fast. Alias of
+ * `git_noninteractive_env` — the single source of truth for the guard.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn worktree_noninteractive_env() -> dict {
+  return git_noninteractive_env()
+}
+
+/**
+ * __worktree_git_options builds process.exec options for a git command in
+ * `cwd`: non-interactive guard env merged with the inherited environment,
+ * the std/git ambient-env strip, and any caller overrides from `options`.
+ */
+fn __worktree_git_options(cwd, options) -> dict {
+  let opts = options ?? {}
+  // Caller `env` overrides individual guard keys; `env_mode` defaults to
+  // "merge" so inherited PATH/HOME/credentials survive.
+  let env = git_noninteractive_env() + opts?.env ?? {}
+  var out = {
+    cwd: cwd,
+    env: env,
+    env_mode: opts?.env_mode ?? "merge",
+    env_remove: opts?.env_remove ?? git_env_remove(),
+  }
+  for key in ["timeout_ms", "stdin", "capture", "max_inline_bytes", "policy_context"] {
+    if opts[key] != nil {
+      out = out + {[key]: opts[key]}
+    }
+  }
+  return out
+}
+
+/**
+ * __worktree_git runs one argv-mode git command in `cwd` with the
+ * non-interactive guard applied. `args` omits the leading "git".
+ */
+fn __worktree_git(cwd, args, options) {
+  return process_run(["git"] + args, __worktree_git_options(cwd, options))
+}
+
 /**
  * worktree_default_path.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: worktree_default_path(repo, name)
  */
 pub fn worktree_default_path(repo, name) {
   return repo + "/.harn/worktrees/" + name
@@ -17,13 +72,10 @@ pub fn worktree_default_path(repo, name) {
 /**
  * worktree_create.
  *
- * @effects: []
- * @allocation: heap
+ * @effects: [host]
  * @errors: []
- * @api_stability: stable
- * @example: worktree_create(repo, name, base_ref, path)
  */
-pub fn worktree_create(repo, name, base_ref, path) {
+pub fn worktree_create(repo, name, base_ref, path, options = {}) {
   let target = if path == nil || path == "" {
     worktree_default_path(repo, name)
   } else {
@@ -31,64 +83,52 @@ pub fn worktree_create(repo, name, base_ref, path) {
   }
   harness.fs.mkdir(repo + "/.harn")
   harness.fs.mkdir(repo + "/.harn/worktrees")
-  let result = exec_at(repo, "git", "worktree", "add", "-B", name, target, base_ref)
+  let result = __worktree_git(repo, ["worktree", "add", "-B", name, target, base_ref], options)
   return {repo: repo, name: name, path: target, base_ref: base_ref, result: result, success: result?.success}
 }
 
 /**
  * worktree_remove.
  *
- * @effects: []
- * @allocation: heap
+ * @effects: [host]
  * @errors: []
- * @api_stability: stable
- * @example: worktree_remove(repo, path, force)
  */
-pub fn worktree_remove(repo, path, force) {
+pub fn worktree_remove(repo, path, force, options = {}) {
   if force {
-    return exec_at(repo, "git", "worktree", "remove", "--force", path)
+    return __worktree_git(repo, ["worktree", "remove", "--force", path], options)
   }
-  return exec_at(repo, "git", "worktree", "remove", path)
+  return __worktree_git(repo, ["worktree", "remove", path], options)
 }
 
 /**
  * worktree_status.
  *
- * @effects: []
- * @allocation: heap
+ * @effects: [host]
  * @errors: []
- * @api_stability: stable
- * @example: worktree_status(path)
  */
-pub fn worktree_status(path) {
-  return exec_at(path, "git", "status", "--short", "--branch")
+pub fn worktree_status(path, options = {}) {
+  return __worktree_git(path, ["status", "--short", "--branch"], options)
 }
 
 /**
  * worktree_diff.
  *
- * @effects: []
- * @allocation: heap
+ * @effects: [host]
  * @errors: []
- * @api_stability: stable
- * @example: worktree_diff(path, base_ref)
  */
-pub fn worktree_diff(path, base_ref) {
+pub fn worktree_diff(path, base_ref, options = {}) {
   if base_ref == nil || base_ref == "" {
-    return exec_at(path, "git", "diff", "--stat")
+    return __worktree_git(path, ["diff", "--stat"], options)
   }
-  return exec_at(path, "git", "diff", base_ref + "...HEAD")
+  return __worktree_git(path, ["diff", base_ref + "...HEAD"], options)
 }
 
 /**
  * worktree_shell.
  *
- * @effects: []
- * @allocation: heap
+ * @effects: [host]
  * @errors: []
- * @api_stability: stable
- * @example: worktree_shell(path, script)
  */
-pub fn worktree_shell(path, script) {
-  return shell_at(path, script)
+pub fn worktree_shell(path, script, options = {}) {
+  return process_shell(script, __worktree_git_options(path, options))
 }

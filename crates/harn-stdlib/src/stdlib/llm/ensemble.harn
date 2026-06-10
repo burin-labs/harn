@@ -171,10 +171,7 @@ fn __structured_judge(samples, opts) {
  * On all-fail: {ok: false, status: "all_samples_failed"}.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: best_of_n(prompt, system, opts)
  */
 pub fn best_of_n(prompt, system, opts = nil) {
   let cfg = if type_of(opts) == "dict" {
@@ -221,7 +218,7 @@ pub fn best_of_n(prompt, system, opts = nil) {
     }
   }
   let verdict = __structured_judge(samples, cfg)
-  if !(verdict?.ok ?? false) {
+  if !(verdict.ok ?? false) {
     return {
       ok: false,
       status: to_string(verdict?.status ?? "judge_failed"),
@@ -432,10 +429,7 @@ fn __build_distribution(keys_in_order, counts) {
  * No extractable answers: {ok: false, status: "no_extractable_answers"}.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: self_consistency(prompt, system, opts)
  */
 pub fn self_consistency(prompt, system, opts = nil) {
   let cfg = if type_of(opts) == "dict" {
@@ -512,10 +506,7 @@ pub fn self_consistency(prompt, system, opts = nil) {
  *   - on_progress: closure({index, total, item, verdict}) -> nil
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: parallel_judge(items, judge_fn, opts)
  */
 pub fn parallel_judge(items, judge_fn, opts = nil) {
   let cfg = if type_of(opts) == "dict" {
@@ -940,10 +931,7 @@ fn __emit_stability_short_circuit(opts, stability) {
  * `stability_threshold` (default `0.15`).
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: debate(opts)
  */
 pub fn debate(opts) -> DebateResult {
   let config = __debate_options(opts)
@@ -1223,10 +1211,7 @@ fn __tot_search_beam(root, expand, evaluate, is_terminal, stop, k, max_depth, be
  * tree_of_thoughts searches explicitly expanded reasoning states with BFS, DFS, or beam search.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: tree_of_thoughts(opts)
  */
 pub fn tree_of_thoughts(opts) {
   require type_of(opts) == "dict", "tree_of_thoughts: opts must be a dict"

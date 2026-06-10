@@ -254,10 +254,7 @@ fn __safe_call_caller(caller, envelope, next) {
  * the tool and reject calls in the execution-time middleware instead).
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: tools_use_middleware(registry, transform)
  */
 pub fn tools_use_middleware(registry, transform) {
   if !__tool_mw_is_callable(transform) {
@@ -307,10 +304,7 @@ pub fn tools_use_middleware(registry, transform) {
  * additive, not destructive).
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: tool_inject_param(entry, name, schema_fragment, opts)
  */
 pub fn tool_inject_param(entry, name, schema_fragment, opts = nil) {
   if type_of(entry) != "dict" {
@@ -361,10 +355,7 @@ pub fn tool_inject_param(entry, name, schema_fragment, opts = nil) {
  * as "no middleware" and short-circuits to the same path automatically).
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: default_tool_caller()
  */
 pub fn default_tool_caller() {
   return { call, next -> next(call) }
@@ -383,10 +374,7 @@ pub fn default_tool_caller() {
  * `next`. To mutate args, call `next(call + {tool_args: new_args})`.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: compose_tool_callers(wrappers)
  */
 pub fn compose_tool_callers(wrappers) {
   let list = __tool_mw_list(wrappers)
@@ -436,10 +424,7 @@ pub fn compose_tool_callers(wrappers) {
  *     agent_loop({tools: registry, tool_caller: mw.caller})
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: with_required_reason(opts)
  */
 pub fn with_required_reason(opts = nil) {
   let cfg = __tool_mw_dict(opts)
@@ -517,10 +502,7 @@ pub fn with_required_reason(opts = nil) {
  * The sink writes one record per invocation and does not buffer.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: local_receipt_sink(session_id)
  */
 pub fn local_receipt_sink(session_id) {
   let fallback = __tool_mw_optional_text(session_id) ?? "session"
@@ -703,10 +685,7 @@ fn __tool_mw_audit_log_return(result, cfg, receipt) {
  * URI as a deep-link to the persisted JSONL line.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: with_audit_log(sink_or_options)
  */
 pub fn with_audit_log(sink_or_options) {
   let cfg = __tool_mw_audit_log_config(sink_or_options)
@@ -755,10 +734,7 @@ pub fn with_audit_log(sink_or_options) {
  * Read-only tools can opt out by returning `{decision: "auto"}`.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: with_consent(prompt_fn)
  */
 pub fn with_consent(prompt_fn) {
   if !__tool_mw_is_callable(prompt_fn) {
@@ -854,10 +830,7 @@ pub fn with_consent(prompt_fn) {
  * on `audit.scope` and a layer entry under `audit.layers`.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: with_scoped_executor(opts)
  */
 pub fn with_scoped_executor(opts) {
   let cfg = __tool_mw_dict(opts)
@@ -931,10 +904,7 @@ pub fn with_scoped_executor(opts) {
  *   except:  list      (run normally for these tools, dry-run the rest)
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: with_dry_run(opts)
  */
 pub fn with_dry_run(opts = nil) {
   let cfg = __tool_mw_dict(opts)
@@ -974,10 +944,7 @@ pub fn with_dry_run(opts = nil) {
  * fields in audit for downstream observability.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: with_redaction(redactor)
  */
 pub fn with_redaction(redactor) {
   if !__tool_mw_is_callable(redactor) {
@@ -1039,10 +1006,7 @@ pub fn with_redaction(redactor) {
  *   namespace:   string  // cache namespace (default "tool_middleware")
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: with_idempotency(key_fn, opts)
  */
 pub fn with_idempotency(key_fn, opts = nil) {
   if !__tool_mw_is_callable(key_fn) {
@@ -1097,10 +1061,7 @@ pub fn with_idempotency(key_fn, opts = nil) {
  *   message:   string    (override error message)
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: with_rate_limit(opts)
  */
 pub fn with_rate_limit(opts) {
   let cfg = __tool_mw_dict(opts)
@@ -1165,10 +1126,7 @@ pub fn with_rate_limit(opts) {
  *     with_telemetry({sinks: ["langfuse", "stderr"], persona: "merge_captain"})
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: with_telemetry(sink_or_opts)
  */
 pub fn with_telemetry(sink_or_opts) {
   let sink = resolve_telemetry_sink(sink_or_opts)
@@ -1233,10 +1191,7 @@ fn __telemetry_extras(value) {
  * tool_call_audit events.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: with_summary(format_fn)
  */
 pub fn with_summary(format_fn) {
   if !__tool_mw_is_callable(format_fn) {
@@ -1290,10 +1245,7 @@ pub fn with_summary(format_fn) {
  *   strict:    bool — throw if detect returns malformed payload (default false)
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: with_handoff_artifact(opts)
  */
 pub fn with_handoff_artifact(opts = nil) {
   let cfg = __tool_mw_dict(opts)
@@ -1415,10 +1367,7 @@ fn __tool_mw_handoff_dict_candidate(raw_result) {
  *   message: string    (override error message)
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: with_timeout(opts)
  */
 pub fn with_timeout(opts) {
   let cfg = __tool_mw_dict(opts)

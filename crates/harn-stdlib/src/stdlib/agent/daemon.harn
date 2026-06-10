@@ -100,10 +100,8 @@ fn __agent_daemon_await_resumption(session, opts, iteration, timeout_ms) {
  * agent_daemon_snapshot.
  *
  * @effects: [host]
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
- * @example: agent_daemon_snapshot(session, opts, daemon_state, iteration)
  */
 pub fn agent_daemon_snapshot(session, opts, daemon_state = "idle", iteration = 0) {
   let summary = __daemon_compaction_summary(opts)
@@ -118,10 +116,8 @@ pub fn agent_daemon_snapshot(session, opts, daemon_state = "idle", iteration = 0
  * agent_daemon_step.
  *
  * @effects: [host, agent]
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
- * @example: agent_daemon_step(session, opts, iteration)
  */
 pub fn agent_daemon_step(session, opts, iteration) {
   let snapshot = agent_daemon_snapshot(session, opts, "idle", iteration)

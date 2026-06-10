@@ -33,10 +33,7 @@ type TrustGraphQueryFilters = {
  * query returns TrustGraphRecord rows from the runtime trust graph.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: query(filters)
  */
 pub fn query(filters = {}) -> list<TrustGraphRecord> {
   return trust.query(filters)
@@ -46,10 +43,7 @@ pub fn query(filters = {}) -> list<TrustGraphRecord> {
  * record appends a TrustGraph decision and returns its stable TrustEntryId.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: record(decision)
  */
 pub fn record(decision) -> TrustEntryId {
   return trust.record(decision)
@@ -59,10 +53,7 @@ pub fn record(decision) -> TrustEntryId {
  * score returns aggregate trust counters and derived capability policy.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: score(actor_id, action)
  */
 pub fn score(actor_id: string, action: string? = nil) -> TrustScore {
   return trust.score(actor_id, action)
@@ -72,10 +63,7 @@ pub fn score(actor_id: string, action: string? = nil) -> TrustScore {
  * policy_for returns the capability policy derived from trust history.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: policy_for(actor_id)
  */
 pub fn policy_for(actor_id: string) -> CapabilityPolicy {
   return trust.policy_for(actor_id)
@@ -85,10 +73,7 @@ pub fn policy_for(actor_id: string) -> CapabilityPolicy {
  * verify_chain verifies the underlying OpenTrustGraph hash chain.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: verify_chain()
  */
 pub fn verify_chain() -> TrustChainReport {
   return trust.verify_chain()

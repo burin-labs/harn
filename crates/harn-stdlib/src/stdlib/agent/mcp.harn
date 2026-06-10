@@ -2,10 +2,8 @@
  * agent_mcp_bootstrap_if_needed.
  *
  * @effects: [host, mcp]
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
- * @example: agent_mcp_bootstrap_if_needed(session, opts)
  */
 pub fn agent_mcp_bootstrap_if_needed(session, opts) {
   let specs = opts?.mcp_servers

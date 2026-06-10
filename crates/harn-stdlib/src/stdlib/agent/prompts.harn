@@ -183,10 +183,8 @@ fn __agent_add_prompt_override(out, id, entry) {
  * agent_prompt_ids lists every logical prompt id accepted by the agent prompt catalog.
  *
  * @effects: [agent]
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
- * @example: agent_prompt_ids()
  */
 pub fn agent_prompt_ids() -> list<string> {
   return __agent_prompt_ids()
@@ -196,10 +194,8 @@ pub fn agent_prompt_ids() -> list<string> {
  * agent_prompt_text creates an inline text prompt override entry.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
- * @example: agent_prompt_text(text)
  */
 pub fn agent_prompt_text(text: string) -> AgentPromptEntry {
   return {text: text}
@@ -209,10 +205,8 @@ pub fn agent_prompt_text(text: string) -> AgentPromptEntry {
  * agent_prompt_path creates a prompt asset path override entry.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
- * @example: agent_prompt_path(path)
  */
 pub fn agent_prompt_path(path: string) -> AgentPromptEntry {
   return {path: path}
@@ -222,10 +216,8 @@ pub fn agent_prompt_path(path: string) -> AgentPromptEntry {
  * agent_prompt_override_map converts typed prompt overrides into the logical prompt-id map.
  *
  * @effects: [agent]
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
- * @example: agent_prompt_override_map(overrides)
  */
 pub fn agent_prompt_override_map(overrides: AgentPromptOverrides) -> dict {
   var out = {}
@@ -295,10 +287,8 @@ pub fn agent_prompt_override_map(overrides: AgentPromptOverrides) -> dict {
  * agent_prompt_overrides wraps typed prompt overrides for direct use in agent-loop options.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
- * @example: agent_prompt_overrides(overrides)
  */
 pub fn agent_prompt_overrides(overrides: AgentPromptOverrides) -> dict {
   return {prompts: agent_prompt_override_map(overrides)}
@@ -308,10 +298,8 @@ pub fn agent_prompt_overrides(overrides: AgentPromptOverrides) -> dict {
  * agent_prompt_catalog returns the logical prompt-id map used by the agent stdlib.
  *
  * @effects: [agent]
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
- * @example: agent_prompt_catalog(options)
  */
 pub fn agent_prompt_catalog(options = nil) {
   return __agent_default_prompt_catalog() + __agent_prompt_overrides(options)
@@ -343,10 +331,8 @@ fn __agent_render_prompt_entry(entry, bindings) {
  * render_agent_prompt_id renders a logical prompt id with optional overrides.
  *
  * @effects: [agent]
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
- * @example: render_agent_prompt_id(id, bindings, options)
  */
 pub fn render_agent_prompt_id(id, bindings = nil, options = nil) {
   let catalog = agent_prompt_catalog(options)
@@ -361,10 +347,8 @@ pub fn render_agent_prompt_id(id, bindings = nil, options = nil) {
  * render_agent_prompt renders a std agent prompt asset by filename/path.
  *
  * @effects: [agent]
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
- * @example: render_agent_prompt(path, bindings)
  */
 pub fn render_agent_prompt(path, bindings = nil) {
   return __agent_render_prompt_entry(path, bindings ?? {})
@@ -374,10 +358,8 @@ pub fn render_agent_prompt(path, bindings = nil) {
  * loop_until_done_system_prompt.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
- * @example: loop_until_done_system_prompt(bindings, options)
  */
 pub fn loop_until_done_system_prompt(bindings, options = nil) {
   return render_agent_prompt_id("agent.loop_contract", bindings, options)
@@ -387,10 +369,8 @@ pub fn loop_until_done_system_prompt(bindings, options = nil) {
  * default_nudge_prompt.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
- * @example: default_nudge_prompt(bindings, options)
  */
 pub fn default_nudge_prompt(bindings, options = nil) {
   return render_agent_prompt_id("agent.default_nudge", bindings, options)
@@ -400,10 +380,8 @@ pub fn default_nudge_prompt(bindings, options = nil) {
  * completion_judge_system_prompt.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
- * @example: completion_judge_system_prompt(options)
  */
 pub fn completion_judge_system_prompt(options = nil) {
   return render_agent_prompt_id("agent.completion_judge_system", {}, options)
@@ -413,10 +391,8 @@ pub fn completion_judge_system_prompt(options = nil) {
  * completion_judge_feedback_prompt.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
- * @example: completion_judge_feedback_prompt(options)
  */
 pub fn completion_judge_feedback_prompt(options = nil) {
   return render_agent_prompt_id("agent.completion_judge_feedback", {}, options)
@@ -426,10 +402,8 @@ pub fn completion_judge_feedback_prompt(options = nil) {
  * completion_judge_user_prompt.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
- * @example: completion_judge_user_prompt(bindings, options)
  */
 pub fn completion_judge_user_prompt(bindings, options = nil) {
   return render_agent_prompt_id("agent.completion_judge_user", bindings, options)
@@ -439,10 +413,8 @@ pub fn completion_judge_user_prompt(bindings, options = nil) {
  * daemon_timer_feedback_prompt.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
- * @example: daemon_timer_feedback_prompt(options)
  */
 pub fn daemon_timer_feedback_prompt(options = nil) {
   return render_agent_prompt_id("agent.daemon_timer_feedback", {}, options)
@@ -452,10 +424,8 @@ pub fn daemon_timer_feedback_prompt(options = nil) {
  * daemon_watch_feedback_prompt.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
- * @example: daemon_watch_feedback_prompt(bindings, options)
  */
 pub fn daemon_watch_feedback_prompt(bindings, options = nil) {
   return render_agent_prompt_id("agent.daemon_watch_feedback", bindings, options)
@@ -465,10 +435,8 @@ pub fn daemon_watch_feedback_prompt(bindings, options = nil) {
  * deferred_tool_listing_prompt.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
- * @example: deferred_tool_listing_prompt(bindings, options)
  */
 pub fn deferred_tool_listing_prompt(bindings, options = nil) {
   return render_agent_prompt_id("agent.deferred_tool_listing", bindings, options)
@@ -478,10 +446,8 @@ pub fn deferred_tool_listing_prompt(bindings, options = nil) {
  * native_tool_contract_feedback_prompt.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
- * @example: native_tool_contract_feedback_prompt(bindings, options)
  */
 pub fn native_tool_contract_feedback_prompt(bindings, options = nil) {
   return render_agent_prompt_id("agent.native_tool_contract_feedback", bindings, options)
@@ -491,10 +457,8 @@ pub fn native_tool_contract_feedback_prompt(bindings, options = nil) {
  * parse_guidance_prompt.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
- * @example: parse_guidance_prompt(bindings, options)
  */
 pub fn parse_guidance_prompt(bindings, options = nil) {
   return render_agent_prompt_id("agent.parse_guidance", bindings, options)
@@ -504,10 +468,8 @@ pub fn parse_guidance_prompt(bindings, options = nil) {
  * tool_contract_action_native_prompt.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
- * @example: tool_contract_action_native_prompt(bindings, options)
  */
 pub fn tool_contract_action_native_prompt(bindings, options = nil) {
   return render_agent_prompt_id("agent.tool_contract_action_native", bindings, options)
@@ -517,10 +479,8 @@ pub fn tool_contract_action_native_prompt(bindings, options = nil) {
  * tool_contract_action_text_prompt.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
- * @example: tool_contract_action_text_prompt(bindings, options)
  */
 pub fn tool_contract_action_text_prompt(bindings, options = nil) {
   return render_agent_prompt_id("agent.tool_contract_action_text", bindings, options)
@@ -530,10 +490,8 @@ pub fn tool_contract_action_text_prompt(bindings, options = nil) {
  * tool_contract_deferred_tools_prompt.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
- * @example: tool_contract_deferred_tools_prompt(bindings, options)
  */
 pub fn tool_contract_deferred_tools_prompt(bindings, options = nil) {
   return render_agent_prompt_id("agent.tool_contract_deferred_tools", bindings, options)
@@ -543,10 +501,8 @@ pub fn tool_contract_deferred_tools_prompt(bindings, options = nil) {
  * tool_contract_json_prompt.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
- * @example: tool_contract_json_prompt(bindings, options)
  */
 pub fn tool_contract_json_prompt(bindings, options = nil) {
   return render_agent_prompt_id("agent.tool_contract_json", bindings, options)
@@ -556,10 +512,8 @@ pub fn tool_contract_json_prompt(bindings, options = nil) {
  * tool_contract_native_prompt.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
- * @example: tool_contract_native_prompt(bindings, options)
  */
 pub fn tool_contract_native_prompt(bindings, options = nil) {
   return render_agent_prompt_id("agent.tool_contract_native", bindings, options)
@@ -569,10 +523,8 @@ pub fn tool_contract_native_prompt(bindings, options = nil) {
  * tool_contract_task_ledger_prompt.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
- * @example: tool_contract_task_ledger_prompt(bindings, options)
  */
 pub fn tool_contract_task_ledger_prompt(bindings, options = nil) {
   return render_agent_prompt_id("agent.tool_contract_task_ledger", bindings, options)
@@ -582,10 +534,8 @@ pub fn tool_contract_task_ledger_prompt(bindings, options = nil) {
  * tool_contract_text_prompt.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
- * @example: tool_contract_text_prompt(bindings, options)
  */
 pub fn tool_contract_text_prompt(bindings, options = nil) {
   return render_agent_prompt_id("agent.tool_contract_text", bindings, options)
@@ -595,10 +545,8 @@ pub fn tool_contract_text_prompt(bindings, options = nil) {
  * tool_contract_text_response_protocol_prompt.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
- * @example: tool_contract_text_response_protocol_prompt(bindings, options)
  */
 pub fn tool_contract_text_response_protocol_prompt(bindings, options = nil) {
   return render_agent_prompt_id("agent.tool_contract_text_response_protocol", bindings, options)
@@ -608,10 +556,8 @@ pub fn tool_contract_text_response_protocol_prompt(bindings, options = nil) {
  * agent_turn_preamble_prompt.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
- * @example: agent_turn_preamble_prompt(options)
  */
 pub fn agent_turn_preamble_prompt(options = nil) {
   return render_agent_prompt_id("agent.turn_preamble", {}, options)
@@ -621,10 +567,8 @@ pub fn agent_turn_preamble_prompt(options = nil) {
  * verification_gate_feedback_prompt.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
- * @example: verification_gate_feedback_prompt(bindings, options)
  */
 pub fn verification_gate_feedback_prompt(bindings, options = nil) {
   return render_agent_prompt_id("agent.verification_gate_feedback", bindings, options)
@@ -636,10 +580,8 @@ pub fn verification_gate_feedback_prompt(bindings, options = nil) {
  * to use the adversarial variant for sycophancy-mitigation experiments.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
- * @example: step_judge_system_prompt(options)
  */
 pub fn step_judge_system_prompt(options = nil) {
   let rubric = options?.rubric ?? "default"
@@ -657,10 +599,8 @@ pub fn step_judge_system_prompt(options = nil) {
  * Bindings: session_id, iteration, task, transcript, latest_response.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
- * @example: step_judge_user_prompt(bindings, options)
  */
 pub fn step_judge_user_prompt(bindings, options = nil) {
   return render_agent_prompt_id("agent.step_judge_user", bindings, options)

@@ -249,10 +249,7 @@ type GitToolRegistryOptions = {
  * git_env_remove returns ambient git env vars stripped from local git subprocesses.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: git_env_remove()
  */
 pub fn git_env_remove() -> list<string> {
   return [
@@ -265,6 +262,26 @@ pub fn git_env_remove() -> list<string> {
     "GIT_COMMON_DIR",
     "GIT_PREFIX",
   ]
+}
+
+/**
+ * git_noninteractive_env returns the prompt-guard env applied to every local
+ * git subprocess so a credential / host-key prompt fails fast instead of
+ * hanging a TTY-less runtime (`harn serve`, `@job`, CI).
+ *
+ * `GIT_TERMINAL_PROMPT=0` disables git's own prompting; an empty
+ * `GIT_ASKPASS`/`SSH_ASKPASS` refuses an external passphrase helper; and an
+ * `ssh -oBatchMode=yes` transport makes ssh non-interactive. This guard never
+ * removes credentials — auth via env, `.netrc`, credential helpers, or a
+ * loaded ssh-agent still works because those paths are non-interactive. It is
+ * merged (`env_mode: "merge"`) so inherited PATH/HOME/credentials survive, and
+ * a caller can re-enable prompting by passing its own `env`/`env_mode`.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn git_noninteractive_env() -> dict {
+  return {GIT_TERMINAL_PROMPT: "0", GIT_ASKPASS: "", SSH_ASKPASS: "", GIT_SSH_COMMAND: "ssh -oBatchMode=yes"}
 }
 
 fn __git_non_empty_string(value, label) -> string {
@@ -304,10 +321,7 @@ fn __git_string_list(value, label) -> list<string> {
  * git_repo_path normalizes a repo path, repo dict, or git receipt into a filesystem path.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: git_repo_path(repo)
  */
 pub fn git_repo_path(repo = ".") -> string {
   if repo == nil {
@@ -338,11 +352,11 @@ fn __git_run_options(repo, options) -> dict {
     cwd: git_repo_path(opts?.repo ?? opts?.cwd ?? repo ?? "."),
     timeout_ms: opts?.timeout_ms ?? 120000,
     env_remove: opts?.env_remove ?? git_env_remove(),
+    env: git_noninteractive_env() + opts?.env ?? {},
+    env_mode: opts?.env_mode ?? "merge",
   }
   for key in [
     "stdin",
-    "env",
-    "env_mode",
     "capture",
     "background",
     "background_after_ms",
@@ -361,6 +375,11 @@ fn __git_run_options(repo, options) -> dict {
   return out
 }
 
+/**
+ * Non-interactive by default: a credential / host-key prompt fails
+ * fast instead of hanging a TTY-less runtime. Caller `env` keys win,
+ * and `env_mode: "merge"` keeps inherited PATH/HOME/credentials.
+ */
 fn __git_with_repo(repo, options) -> dict {
   let opts = options ?? {}
   return opts + {repo: repo}
@@ -412,14 +431,11 @@ fn __git_result(result, argv, cwd) -> GitCommandResult {
  * git_run runs one argv-mode local git command. Pass args without the leading `git`.
  *
  * @effects: [process]
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: git_run(args, options)
  */
 pub fn git_run(args: list<string>, options: GitRunOptions = {}) -> GitCommandResult {
   let argv = __git_argv(args)
-  let run_options = __git_run_options(options?.repo ?? ".", options)
+  let run_options = __git_run_options(options.repo ?? ".", options)
   return __git_result(process_run(argv, run_options), argv, run_options.cwd)
 }
 
@@ -427,10 +443,7 @@ pub fn git_run(args: list<string>, options: GitRunOptions = {}) -> GitCommandRes
  * git_discover discovers repository root/git-dir metadata with a receipt.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: git_discover(path)
  */
 pub fn git_discover(path = ".") -> GitReceipt {
   return git.repo_discover(path)
@@ -440,10 +453,7 @@ pub fn git_discover(path = ".") -> GitReceipt {
  * git_status returns structured porcelain status with a git receipt.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: git_status(repo)
  */
 pub fn git_status(repo = ".") -> GitReceipt {
   return git.status(repo)
@@ -453,10 +463,7 @@ pub fn git_status(repo = ".") -> GitReceipt {
  * git_conflicts returns structured unmerged paths with a git receipt.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: git_conflicts(repo)
  */
 pub fn git_conflicts(repo = ".") -> GitReceipt {
   return git.conflicts(repo)
@@ -466,10 +473,7 @@ pub fn git_conflicts(repo = ".") -> GitReceipt {
  * git_diff returns diff text in a git receipt.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: git_diff(repo, selector)
  */
 pub fn git_diff(repo = ".", selector = nil) -> GitReceipt {
   return git.diff(repo, selector)
@@ -479,10 +483,7 @@ pub fn git_diff(repo = ".", selector = nil) -> GitReceipt {
  * git_merge_base returns the merge-base OID in a git receipt.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: git_merge_base(left, right, repo)
  */
 pub fn git_merge_base(left: string, right: string, repo = ".") -> GitReceipt {
   return git.merge_base(repo, __git_ref_arg(left, "left"), __git_ref_arg(right, "right"))
@@ -492,10 +493,7 @@ pub fn git_merge_base(left: string, right: string, repo = ".") -> GitReceipt {
  * git_rebase rebases the current branch and returns a git receipt.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: git_rebase(base_ref, repo)
  */
 pub fn git_rebase(base_ref: string, repo = ".") -> GitReceipt {
   return git.rebase(repo, __git_ref_arg(base_ref, "base_ref"))
@@ -505,10 +503,7 @@ pub fn git_rebase(base_ref: string, repo = ".") -> GitReceipt {
  * git_push pushes a refspec and returns a git receipt.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: git_push(remote, refspec, repo, lease)
  */
 pub fn git_push(remote: string, refspec: string, repo = ".", lease = nil) -> GitReceipt {
   return git.push(repo, __git_ref_arg(remote, "remote"), __git_ref_arg(refspec, "refspec"), lease)
@@ -518,10 +513,7 @@ pub fn git_push(remote: string, refspec: string, repo = ".", lease = nil) -> Git
  * git_worktree_create creates a git worktree and returns a git receipt.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: git_worktree_create(branch, path, repo, options)
  */
 pub fn git_worktree_create(branch: string, path: string, repo = ".", options: dict = {}) -> GitReceipt {
   return git
@@ -537,10 +529,7 @@ pub fn git_worktree_create(branch: string, path: string, repo = ".", options: di
  * git_worktree_remove removes a git worktree and returns a git receipt.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: git_worktree_remove(path, options)
  */
 pub fn git_worktree_remove(path: string, options: dict = {}) -> GitReceipt {
   return git.worktree_remove(__git_non_empty_string(path, "path"), options)
@@ -550,10 +539,7 @@ pub fn git_worktree_remove(path: string, options: dict = {}) -> GitReceipt {
  * git_current_branch returns the current branch name from the local checkout.
  *
  * @effects: [process]
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: git_current_branch(repo, options)
  */
 pub fn git_current_branch(repo = ".", options: GitRunOptions = {}) -> GitBranchResult {
   let result = git_run(["branch", "--show-current"], __git_with_repo(repo, options))
@@ -565,10 +551,7 @@ pub fn git_current_branch(repo = ".", options: GitRunOptions = {}) -> GitBranchR
  * git_log returns local commit log text from the checkout.
  *
  * @effects: [process]
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: git_log(repo, options)
  */
 pub fn git_log(repo = ".", options: GitLogOptions = {}) -> GitCommandResult {
   let opts = options
@@ -600,7 +583,7 @@ pub fn git_log(repo = ".", options: GitLogOptions = {}) -> GitCommandResult {
   if opts.rev_range != nil {
     args = args + [__git_ref_arg(opts.rev_range, "rev_range")]
   }
-  let paths = __git_string_list(opts?.paths, "paths")
+  let paths = __git_string_list(opts.paths, "paths")
   if len(paths) > 0 {
     args = args + ["--"] + paths
   }
@@ -611,10 +594,7 @@ pub fn git_log(repo = ".", options: GitLogOptions = {}) -> GitCommandResult {
  * git_show returns `git show` output for a ref.
  *
  * @effects: [process]
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: git_show(rev, repo, options)
  */
 pub fn git_show(rev: string, repo = ".", options: GitShowOptions = {}) -> GitCommandResult {
   let opts = options
@@ -633,10 +613,7 @@ pub fn git_show(rev: string, repo = ".", options: GitShowOptions = {}) -> GitCom
  * git_branch_list returns local branch refs.
  *
  * @effects: [process]
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: git_branch_list(repo, options)
  */
 pub fn git_branch_list(repo = ".", options: GitRunOptions = {}) -> GitCommandResult {
   return git_run(["branch", "--list"], __git_with_repo(repo, options))
@@ -646,10 +623,7 @@ pub fn git_branch_list(repo = ".", options: GitRunOptions = {}) -> GitCommandRes
  * git_remote_list returns configured remotes.
  *
  * @effects: [process]
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: git_remote_list(repo, options)
  */
 pub fn git_remote_list(repo = ".", options: GitRunOptions = {}) -> GitCommandResult {
   return git_run(["remote", "-v"], __git_with_repo(repo, options))
@@ -659,10 +633,7 @@ pub fn git_remote_list(repo = ".", options: GitRunOptions = {}) -> GitCommandRes
  * git_switch switches the local checkout to a branch or ref.
  *
  * @effects: [process]
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: git_switch(branch, repo, options)
  */
 pub fn git_switch(branch: string, repo = ".", options: GitSwitchOptions = {}) -> GitCommandResult {
   let opts = options
@@ -690,10 +661,7 @@ pub fn git_switch(branch: string, repo = ".", options: GitSwitchOptions = {}) ->
  * git_pull_ff_only runs `git pull --ff-only` for the local checkout.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: git_pull_ff_only()
  */
 pub fn git_pull_ff_only(
   repo = ".",
@@ -720,10 +688,7 @@ pub fn git_pull_ff_only(
  * git_fetch fetches from a configured remote and returns a git receipt.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: git_fetch(remote, repo, refspecs)
  */
 pub fn git_fetch(remote = "origin", repo = ".", refspecs: list<string> = []) -> GitReceipt {
   return git.fetch(repo, __git_ref_arg(remote, "remote"), __git_string_list(refspecs, "refspecs"))
@@ -901,10 +866,7 @@ fn __git_catalog_all() {
  * git_tool_catalog returns searchable git operation metadata.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: git_tool_catalog(options)
  */
 pub fn git_tool_catalog(options: GitToolCatalogOptions = {}) -> list<GitToolCatalogEntry> {
   let opts = options
@@ -990,10 +952,7 @@ fn __git_insert_ranked(ranked, entry) {
  * git_find_tool ranks git operations for a natural-language query.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: git_find_tool(query, options)
  */
 pub fn git_find_tool(query: string, options: GitToolCatalogOptions = {}) -> GitToolSearchResult {
   let opts = options
@@ -1030,10 +989,7 @@ pub fn git_find_tool(query: string, options: GitToolCatalogOptions = {}) -> GitT
  * git_run_tool dispatches one catalogued git operation by name.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: git_run_tool()
  */
 pub fn git_run_tool(
   operation: GitToolOperation,
@@ -1080,7 +1036,7 @@ pub fn git_run_tool(
     return git_show(__git_non_empty_string(request.rev, "rev"), repo, request)
   }
   if op == "discover" {
-    return git_discover(request?.path ?? repo)
+    return git_discover(request.path ?? repo)
   }
   if op == "conflicts" {
     return git_conflicts(repo)
@@ -1093,13 +1049,13 @@ pub fn git_run_tool(
     )
   }
   if op == "fetch" {
-    return git_fetch(request?.remote ?? "origin", repo, request?.refspecs ?? [])
+    return git_fetch(request.remote ?? "origin", repo, request.refspecs ?? [])
   }
   if op == "switch" {
     return git_switch(__git_non_empty_string(request.branch, "branch"), repo, request)
   }
   if op == "pull_ff_only" {
-    return git_pull_ff_only(repo, request?.remote ?? "origin", request?.branch, request)
+    return git_pull_ff_only(repo, request.remote ?? "origin", request.branch, request)
   }
   if op == "rebase" {
     return git_rebase(__git_non_empty_string(request.base_ref, "base_ref"), repo)
@@ -1201,10 +1157,7 @@ fn __git_define_catalog_tool(tools, entry, opts) {
  * git_tools builds a narrow agent tool registry from the std/git operation catalog.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: git_tools(registry, options)
  */
 pub fn git_tools(registry = nil, options: GitToolRegistryOptions = {}) {
   let opts = options
@@ -1249,10 +1202,7 @@ fn __git_toolbox_run_annotations(opts, key) {
  * git_toolbox_tools builds a two-tool find/run git surface optimized for small local models.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: git_toolbox_tools(registry, options)
  */
 pub fn git_toolbox_tools(registry = nil, options: GitToolRegistryOptions = {}) {
   let opts = options

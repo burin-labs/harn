@@ -35,7 +35,6 @@ type ResumeByCallback = fn(Harness, dict) -> ResumeByDispatchResult | dict | nil
  * when every entry declines so callers can observe the last reason.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
  * @example: first_handled([ResumeBy().cloud_harness, ResumeBy().local_runtime])
@@ -115,10 +114,8 @@ fn __resume_by_cloud_session(harness) {
  * owns the parent transcript.
  *
  * @effects: [host]
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
- * @example: resume_by_parent_llm(harness, suspension)
  */
 pub fn resume_by_parent_llm(harness, suspension) -> ResumeByDispatchResult {
   __resume_by_emit(harness, suspension, "ResumeBy.parent_llm")
@@ -132,10 +129,8 @@ pub fn resume_by_parent_llm(harness, suspension) -> ResumeByDispatchResult {
  * present — the parent LLM must resume in that case.
  *
  * @effects: [host]
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
- * @example: resume_by_local_runtime(harness, suspension)
  */
 pub fn resume_by_local_runtime(harness, suspension) -> ResumeByDispatchResult {
   if !__resume_by_has_conditions(suspension) {
@@ -158,10 +153,8 @@ pub fn resume_by_local_runtime(harness, suspension) -> ResumeByDispatchResult {
  * session is bound — the local runtime or parent LLM must resume.
  *
  * @effects: [host]
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
- * @example: resume_by_cloud_harness(harness, suspension)
  */
 pub fn resume_by_cloud_harness(harness, suspension) -> ResumeByDispatchResult {
   let session = __resume_by_cloud_session(harness)
@@ -185,10 +178,8 @@ pub fn resume_by_cloud_harness(harness, suspension) -> ResumeByDispatchResult {
  * drain step owns the resume responsibility from there on.
  *
  * @effects: [host]
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
- * @example: resume_by_pipeline_drain(harness, suspension)
  */
 pub fn resume_by_pipeline_drain(harness, suspension) -> ResumeByDispatchResult {
   __resume_by_emit(harness, suspension, "ResumeBy.pipeline_drain")
@@ -208,10 +199,8 @@ pub fn resume_by_pipeline_drain(harness, suspension) -> ResumeByDispatchResult {
  * — the same shape as `Backpressure()` in `std/lifecycle/pool`.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
- * @example: let ResumeBy = ResumeBy()
  */
 pub fn ResumeBy() {
   return {
@@ -236,7 +225,6 @@ pub fn ResumeBy() {
  * suspension) -> dict` callback (often a `first_available` chain).
  *
  * @effects: [host]
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
  * @example: default_resume_by({conditions: cond, harness: harness})
@@ -269,10 +257,8 @@ pub fn default_resume_by(opts = nil) -> ResumeByCallback {
  * callback are caught and surfaced through the fallback path.
  *
  * @effects: [host]
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
- * @example: invoke_resume_by(callback, harness, suspension)
  */
 pub fn invoke_resume_by(callback, harness, suspension) -> ResumeByDispatchResult | dict {
   let cb = if callback == nil {

@@ -357,7 +357,6 @@ fn __poll_until_done(
  *                       Defaults to `stderr` output with the URL and code.
  *
  * @effects: [time, net, stderr]
- * @allocation: heap
  * @errors: [invalid_argument]
  * @api_stability: experimental
  * @example: device_flow(providers().github, {client_id: id, storage: memory()})

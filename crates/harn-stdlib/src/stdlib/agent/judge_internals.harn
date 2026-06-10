@@ -18,10 +18,8 @@ const __JUDGE_LLM_OVERRIDE_KEYS = ["temperature", "max_tokens", "top_p", "tool_f
  * call sites before v0.8.43.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
  * @api_stability: internal
- * @example: __judge_apply_llm_overrides(llm_opts, judge_cfg)
  */
 pub fn __judge_apply_llm_overrides(llm_opts, judge_cfg) {
   var out = llm_opts
@@ -49,7 +47,6 @@ const __JUDGE_VERDICT_JSON_JUNK = ["\"", ",", "{", "}", ":", "\\"]
  * JSON junk (including multi-word prose verdicts) pass through unchanged.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
  * @api_stability: internal
  * @example: __judge_verdict_token("continue\",,")
@@ -82,7 +79,6 @@ pub fn __judge_verdict_token(raw_verdict) {
  * and the stored/emitted `verdict` field carries the clean token.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
  * @api_stability: internal
  * @example: __judge_classify_verdict("pass", ["pass", "yes"], [critique], default)

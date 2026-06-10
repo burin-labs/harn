@@ -472,10 +472,8 @@ fn __apply_captain_llm_caller(opts, kind) {
  * composition outright.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
- * @example: agent_preset(kind, options)
  */
 pub fn agent_preset(kind, options = nil) {
   let resolved_kind = __preset_kind(kind)
@@ -502,10 +500,8 @@ pub fn agent_preset(kind, options = nil) {
  *     (when `kind` is provided in the second argument).
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
- * @example: agent_budget(kind_or_options, options)
  */
 pub fn agent_budget(kind_or_options, options = nil) {
   if type_of(kind_or_options) == "dict" {
@@ -534,10 +530,8 @@ pub fn agent_budget(kind_or_options, options = nil) {
  * iteration budget and native completion. Inherits from the audit preset.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
- * @example: audit_agent(prompt, options)
  */
 pub fn audit_agent(prompt, options = nil) {
   let opts = agent_preset("audit", options)
@@ -549,10 +543,8 @@ pub fn audit_agent(prompt, options = nil) {
  * and native completion.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
- * @example: repair_agent(prompt, options)
  */
 pub fn repair_agent(prompt, options = nil) {
   let opts = agent_preset("repair", options)
@@ -564,10 +556,8 @@ pub fn repair_agent(prompt, options = nil) {
  * default.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
- * @example: summary_agent(prompt, options)
  */
 pub fn summary_agent(prompt, options = nil) {
   let opts = agent_preset("summary", options)
@@ -579,10 +569,8 @@ pub fn summary_agent(prompt, options = nil) {
  * verification.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
- * @example: verify_agent(prompt, options)
  */
 pub fn verify_agent(prompt, options = nil) {
   let opts = agent_preset("verify", options)
@@ -596,10 +584,8 @@ pub fn verify_agent(prompt, options = nil) {
  * stack when the caller supplies cheap/frontier callers.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
- * @example: merge_captain_agent(prompt, options)
  */
 pub fn merge_captain_agent(prompt, options = nil) {
   let opts = agent_preset("merge_captain", options)
@@ -612,10 +598,8 @@ pub fn merge_captain_agent(prompt, options = nil) {
  * handler stack for risk-aware escalation.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
- * @example: review_captain_agent(prompt, options)
  */
 pub fn review_captain_agent(prompt, options = nil) {
   let opts = agent_preset("review_captain", options)
@@ -629,10 +613,8 @@ pub fn review_captain_agent(prompt, options = nil) {
  * out unbounded.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
- * @example: oncall_captain_agent(prompt, options)
  */
 pub fn oncall_captain_agent(prompt, options = nil) {
   let opts = agent_preset("oncall_captain", options)
@@ -645,10 +627,8 @@ pub fn oncall_captain_agent(prompt, options = nil) {
  * to layer `with_dry_run` over the tool stack for shadow runs.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
- * @example: release_captain_agent(prompt, options)
  */
 pub fn release_captain_agent(prompt, options = nil) {
   let opts = agent_preset("release_captain", options)

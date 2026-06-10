@@ -154,7 +154,6 @@ fn __tool_format_is_text_channel(format) {
  * this is reached and never land here.
  *
  * @effects: []
- * @allocation: none
  * @errors: [agent_loop_invalid_tool_format]
  * @api_stability: experimental
  */
@@ -180,7 +179,6 @@ fn __validate_explicit_tool_format(value) {
  * explicit, recorded acknowledgment, mirroring the `*_unreliable` reason path.
  *
  * @effects: []
- * @allocation: none
  * @errors: [agent_loop_unsupported_tool_format]
  * @api_stability: experimental
  */
@@ -293,10 +291,8 @@ fn __tool_format_override_event(pair, requested, preferred, parity, override_rea
  * Render one `tool_format_override` event as the CLI's single-line warning.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
- * @example: agent_tool_format_override_warning_text(event)
  */
 pub fn agent_tool_format_override_warning_text(event) {
   if event == nil {
@@ -333,10 +329,8 @@ pub fn agent_tool_format_override_warning_text(event) {
  * Render the first `tool_format_override` event in an event list, if present.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
- * @example: agent_first_tool_format_override_warning_text(events)
  */
 pub fn agent_first_tool_format_override_warning_text(events) {
   for event in events {
@@ -365,10 +359,8 @@ fn __capability_gap_event(pair, requested, fallback) {
  * omitted value.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
- * @example: agent_tool_format_resolution(options)
  */
 pub fn agent_tool_format_resolution(options = nil) {
   let opts = options ?? {}
@@ -450,10 +442,8 @@ pub fn agent_tool_format_resolution(options = nil) {
  * Return the concrete tool format a prompt-building helper should use.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
- * @example: agent_tool_format(options)
  */
 pub fn agent_tool_format(options = nil) {
   let resolved = agent_tool_format_resolution(options)
@@ -1156,10 +1146,8 @@ fn __autonomy_tier(value) {
  * autonomy_policy returns the VM-enforced autonomy assignment for an agent.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
- * @example: autonomy_policy(tier, options)
  */
 pub fn autonomy_policy(tier = "act_auto", options = nil) {
   let opts = options ?? {}
@@ -1177,10 +1165,8 @@ pub fn autonomy_policy(tier = "act_auto", options = nil) {
  * agent_loop_options.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
- * @example: agent_loop_options(options)
  */
 pub fn agent_loop_options(options = nil) {
   var opts = options ?? {}

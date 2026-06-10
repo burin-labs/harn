@@ -29,3 +29,14 @@ true
 true
 vaults.id::text AS id, to_json(vaults.created_at)#>>'{}' AS created_at, CASE WHEN items.expires_at IS NULL THEN NULL ELSE to_json(items.expires_at)#>>'{}' END AS expires_at
 true
+SELECT data#>>'{}' AS data FROM events WHERE tags && '{a,b}'::text[] AND tenant_id = $1::uuid
+tenant-a
+1
+UPDATE t SET d = jsonb_set(d, '{path}', $1)
+42
+SELECT '{}'::jsonb AS empty
+scan_events
+many
+true
+true
+true

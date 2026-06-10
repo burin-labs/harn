@@ -100,7 +100,6 @@ fn __on_budget_terminate_error(state) {
  * Never returns; never reaches downstream combinators.
  *
  * @effects: [host]
- * @allocation: heap
  * @errors: ["budget_exceeded"]
  * @api_stability: experimental
  * @example: register_persona_hook("*", "OnBudgetThreshold", OnBudget.terminate)
@@ -125,7 +124,6 @@ pub fn terminate(harness, budget_state) {
  * on `status == "budget_exhausted"` without parsing free-form text.
  *
  * @effects: [host]
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
  * @example: register_persona_hook("*", "OnBudgetThreshold", OnBudget.graceful_exit)
@@ -163,7 +161,6 @@ pub fn graceful_exit(harness, budget_state) {
  * and conformance fixtures can observe the side effect deterministically.
  *
  * @effects: [host]
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
  * @example: register_persona_hook("*", "OnBudgetThreshold", OnBudget.warn_and_continue)
@@ -221,7 +218,6 @@ fn __on_budget_replan_reminder(kind, iteration) {
  * decide when to schedule the retry.
  *
  * @effects: [host]
- * @allocation: heap
  * @errors: ["budget_replan_missing_session"]
  * @api_stability: experimental
  * @example: register_persona_hook("*", "OnBudgetThreshold", OnBudget.replan)
@@ -289,10 +285,8 @@ pub fn replan(harness, budget_state) {
  * pattern.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
  * @api_stability: experimental
- * @example: let OnBudget = OnBudget()
  */
 pub fn OnBudget() {
   return {

@@ -5,8 +5,8 @@ use std::path::{Path, PathBuf};
 
 use harn_ir::{CallClassification, Capability, LiteralValue, NodeSemantics};
 use harn_parser::{
-    format_type, parse_stdlib_metadata, Node, SNode, StdlibMetadata, TypeParam, TypedParam,
-    Variance, WhereClause,
+    format_type, parse_stdlib_metadata, synthesize_example, Node, SNode, StdlibMetadata, TypeExpr,
+    TypeParam, TypedParam, Variance, WhereClause,
 };
 use serde::Serialize;
 
@@ -49,12 +49,16 @@ pub(crate) struct GraphSymbol {
     pub name: String,
     pub kind: String,
     pub signature: String,
-    /// Declared `@effects`/`@allocation`/`@errors`/`@api_stability`/
-    /// `@example` block parsed from the HarnDoc above the declaration.
+    /// Declared `@effects`/`@errors` (+ optional `@api_stability`/
+    /// `@example`) block parsed from the HarnDoc above the declaration.
     /// Surfaced for `harn graph --json` consumers (docs, IDE hover,
     /// agents); absent when the author has not annotated the function.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub metadata: Option<StdlibMetadata>,
+    /// Example synthesized from the type signature; present only when the
+    /// doc block has no `@example` (consumers prefer `metadata.example`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub derived_example: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -453,6 +457,21 @@ fn public_symbols(program: &[SNode], exports: &BTreeSet<String>, source: &str) -
     symbols
 }
 
+/// Synthesize a signature-derived example for a callable, unless the doc
+/// block already carries a hand-written `@example`.
+fn derived_example_for(
+    source: &str,
+    node: &SNode,
+    name: &str,
+    params: &[TypedParam],
+    return_type: Option<&TypeExpr>,
+) -> Option<String> {
+    parse_stdlib_metadata(source, &node.span)
+        .and_then(|meta| meta.example)
+        .is_none()
+        .then(|| synthesize_example(name, params, return_type))
+}
+
 fn collect_public_symbol(
     node: &SNode,
     exports: &BTreeSet<String>,
@@ -481,6 +500,7 @@ fn collect_public_symbol(
                 where_clauses,
             ),
             metadata: parse_stdlib_metadata(source, &node.span).filter(|meta| !meta.is_empty()),
+            derived_example: derived_example_for(source, node, name, params, return_type.as_ref()),
         }),
         Node::ToolDecl {
             name,
@@ -492,6 +512,7 @@ fn collect_public_symbol(
             kind: "tool".to_string(),
             signature: callable_signature("tool", name, &[], params, return_type.as_ref(), &[]),
             metadata: parse_stdlib_metadata(source, &node.span).filter(|meta| !meta.is_empty()),
+            derived_example: derived_example_for(source, node, name, params, return_type.as_ref()),
         }),
         Node::Pipeline {
             name,
@@ -511,6 +532,7 @@ fn collect_public_symbol(
                     .unwrap_or_default()
             ),
             metadata: None,
+            derived_example: None,
         }),
         Node::StructDecl {
             name, type_params, ..
@@ -519,6 +541,7 @@ fn collect_public_symbol(
             kind: "struct".to_string(),
             signature: format!("struct {}{}", name, format_type_params(type_params)),
             metadata: None,
+            derived_example: None,
         }),
         Node::EnumDecl {
             name, type_params, ..
@@ -527,6 +550,7 @@ fn collect_public_symbol(
             kind: "enum".to_string(),
             signature: format!("enum {}{}", name, format_type_params(type_params)),
             metadata: None,
+            derived_example: None,
         }),
         Node::InterfaceDecl {
             name, type_params, ..
@@ -535,6 +559,7 @@ fn collect_public_symbol(
             kind: "interface".to_string(),
             signature: format!("interface {}{}", name, format_type_params(type_params)),
             metadata: None,
+            derived_example: None,
         }),
         Node::TypeDecl {
             name,
@@ -550,12 +575,14 @@ fn collect_public_symbol(
                 format_type(type_expr)
             ),
             metadata: None,
+            derived_example: None,
         }),
         Node::SkillDecl { name, .. } if exports.contains(name) => out.push(GraphSymbol {
             name: name.clone(),
             kind: "skill".to_string(),
             signature: format!("skill {name}"),
             metadata: None,
+            derived_example: None,
         }),
         _ => {}
     }

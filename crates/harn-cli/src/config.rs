@@ -19,6 +19,7 @@
 //! [lint]
 //! disabled = ["unused-import"]
 //! require_file_header = false
+//! require_docstrings = false
 //! complexity_threshold = 25
 //! persona_step_allowlist = ["legacy_helper"]
 //! template_variant_branch_threshold = 3
@@ -76,6 +77,11 @@ pub struct LintConfig {
     /// `false`.
     #[serde(default, alias = "require-file-header")]
     pub require_file_header: Option<bool>,
+    /// Opt-in docstring requirement: when true, the `missing-harndoc`
+    /// rule warns on public functions without a `/** */` doc comment.
+    /// Off by default — out of the box, `pub fn` needs no docs.
+    #[serde(default, alias = "require-docstrings")]
+    pub require_docstrings: Option<bool>,
     /// Override the default cyclomatic-complexity warning threshold
     /// (see `harn_lint::DEFAULT_COMPLEXITY_THRESHOLD`). Accept both
     /// snake_case and kebab-case for consistency with the other keys.
@@ -230,6 +236,7 @@ mod tests {
         assert!(cfg.fmt.separator_width.is_none());
         assert!(cfg.lint.disabled.is_none());
         assert!(cfg.lint.require_file_header.is_none());
+        assert!(cfg.lint.require_docstrings.is_none());
     }
 
     #[test]
@@ -246,6 +253,7 @@ separator_width = 60
 [lint]
 disabled = ["unused-import", "missing-harndoc"]
 require_file_header = true
+require_docstrings = true
 "#,
         );
         let harn_file = write_file(tmp.path(), "main.harn", "pipeline default(t) {}\n");
@@ -257,6 +265,7 @@ require_file_header = true
             Some(["unused-import".to_string(), "missing-harndoc".to_string()].as_slice())
         );
         assert_eq!(cfg.lint.require_file_header, Some(true));
+        assert_eq!(cfg.lint.require_docstrings, Some(true));
     }
 
     #[test]
@@ -327,6 +336,7 @@ separator-width = 72
 
 [lint]
 require-file-header = true
+require-docstrings = true
 ",
         );
         let harn_file = write_file(tmp.path(), "main.harn", "pipeline default(t) {}\n");
@@ -334,6 +344,7 @@ require-file-header = true
         assert_eq!(cfg.fmt.line_width, Some(110));
         assert_eq!(cfg.fmt.separator_width, Some(72));
         assert_eq!(cfg.lint.require_file_header, Some(true));
+        assert_eq!(cfg.lint.require_docstrings, Some(true));
     }
 
     #[test]

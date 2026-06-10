@@ -53,10 +53,7 @@ fn __ceil_int(x) {
  * token_count_encoder returns the encoder metadata used for a model token count.
  *
  * @effects: [llm.call]
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: token_count_encoder(model)
  */
 pub fn token_count_encoder(model) {
   return tiktoken_tokenizer_info(__llm_budget_model(model))
@@ -66,10 +63,7 @@ pub fn token_count_encoder(model) {
  * estimate_text_tokens returns a model-aware text-token estimate.
  *
  * @effects: [llm.call]
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: estimate_text_tokens(text, model)
  */
 pub fn estimate_text_tokens(text, model = nil) {
   let normalized = __llm_budget_text(text)
@@ -85,10 +79,7 @@ pub fn estimate_text_tokens(text, model = nil) {
  * estimate_text_tokens_detail returns token count plus the encoder or heuristic source.
  *
  * @effects: [llm.call]
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: estimate_text_tokens_detail(text, model)
  */
 pub fn estimate_text_tokens_detail(text, model = nil) {
   let normalized = __llm_budget_text(text)
@@ -107,10 +98,7 @@ pub fn estimate_text_tokens_detail(text, model = nil) {
  * Falls back to 8192 if the catalog has no entry. Returns int.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: context_window_for(model)
  */
 pub fn context_window_for(model) {
   let info = try {
@@ -191,10 +179,7 @@ fn __task_clamp(kind, capped, used, summary_ratio) {
  * (default 0.30).
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: recommend_max_output_tokens(opts)
  */
 pub fn recommend_max_output_tokens(opts) {
   if type_of(opts) != "dict" {
@@ -230,10 +215,7 @@ pub fn recommend_max_output_tokens(opts) {
  * recommend_max_output_tokens, plus an `assumptions` list of strings.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: budget_summary(opts)
  */
 pub fn budget_summary(opts) {
   if type_of(opts) != "dict" {
@@ -290,10 +272,7 @@ pub fn budget_summary(opts) {
  * after reserving `headroom` of the window?
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: fits_in_context(text, model, headroom)
  */
 pub fn fits_in_context(text, model, headroom = 0.1) {
   let ctx = context_window_for(model)

@@ -1519,28 +1519,36 @@ of truth for what's available.
 public stdlib function is missing declared metadata
 
 - **Repair:** `doc/add-stdlib-metadata` &nbsp;·&nbsp; **Safety:** `behavior-preserving`
-- Add `@effects`, `@allocation`, `@errors`, `@api_stability`, and `@example` fields to the stdlib function's doc block
+- Add `@effects` and `@errors` fields to the stdlib function's doc block
 
 #### What it means
 
-Every public stdlib function ships with a declarative metadata block above
-its `pub fn` declaration so that `harn graph --json`, the LSP hover, generated
-docs, and downstream agents can read a single source of truth for the
-function's runtime contract.
+Every public stdlib function ships with a prose summary plus two
+machine-meaningful metadata fields above its `pub fn` declaration so that
+`harn graph --json`, the LSP hover, generated docs, and downstream agents
+can read a single source of truth for the function's runtime contract.
 
 The required fields are:
 
-| Field            | Purpose                                                                                   |
-|------------------|-------------------------------------------------------------------------------------------|
-| `@effects`       | Capabilities the function may touch (e.g. `fs.read`, `stdio.write`, `llm.call`). `[]` means pure. |
-| `@allocation`    | Allocation profile — typically `stack-only` or `heap`.                                    |
-| `@errors`        | Error variants the function may surface. `[]` means infallible.                           |
-| `@api_stability` | Stability promise — `stable`, `experimental`, or `deprecated`.                            |
-| `@example`       | Minimal usage example (verbatim Harn).                                                    |
+| Field      | Purpose                                                                                           |
+|------------|---------------------------------------------------------------------------------------------------|
+| `@effects` | Capabilities the function may touch (e.g. `fs.read`, `stdio.write`, `llm.call`). `[]` means pure. |
+| `@errors`  | Error variants the function may surface. `[]` means infallible.                                   |
+
+Two more fields are recognized but optional:
+
+| Field            | Purpose                                                                       |
+|------------------|--------------------------------------------------------------------------------|
+| `@api_stability` | Stability promise (`experimental`, `internal`, `deprecated`). Absent ⇒ stable. |
+| `@example`       | Hand-written usage example. Absent ⇒ tooling derives one from the signature.   |
+
+Only write an `@example` when it shows something the type signature cannot
+(non-obvious argument shapes, a multi-step idiom). LSP hover and
+`harn graph --json` synthesize a signature-derived example otherwise.
 
 The lint warns when a `pub fn` declared inside an embedded stdlib module
-(`crates/harn-stdlib/src/stdlib/**/*.harn`) is missing one or more of these
-fields from the `/** ... */` HarnDoc block immediately above it.
+(`crates/harn-stdlib/src/stdlib/**/*.harn`) is missing a required field
+from the `/** ... */` HarnDoc block immediately above it.
 
 #### How to fix
 
@@ -1551,10 +1559,7 @@ Add the missing fields to the function's HarnDoc block:
  * Render the project README.
  *
  * @effects: [fs.read, fs.write]
- * @allocation: heap
  * @errors: [FileNotFound, PermissionDenied]
- * @api_stability: stable
- * @example: render_readme("README.md")
  */
 pub fn render_readme(path: string) -> Result<string, FsError> { ... }
 ```
@@ -2542,10 +2547,29 @@ missing harndoc lint
 - **Repair:** `doc/add-harndoc` &nbsp;·&nbsp; **Safety:** `behavior-preserving`
 - Add a `///` doc comment describing this declaration
 
+#### What it means
+
+A public function has no `/** */` HarnDoc block above its declaration.
+
+This rule is **opt-in**: it only runs when the nearest `harn.toml` sets
+
+```toml
+[lint]
+require_docstrings = true
+```
+
+Out of the box, public functions in user scripts and pipelines need no
+doc comments. Embedded stdlib sources always enforce docstrings (the
+HARN-STD-101 metadata lint relies on the doc block existing).
+
 #### How to fix
 
+- Add a `/** ... */` block with a one-line prose summary above the
+  declaration. No structured tags are required; LSP hover derives a usage
+  example from the type signature.
 - Apply the lint's auto-fix where one is offered (`harn lint --fix`).
-- Suppress the lint with an attribute only when the surrounding code is intentionally non-idiomatic.
+- Or leave `require_docstrings` unset if the project doesn't want the
+  requirement.
 
 ### `HARN-LNT-025`
 

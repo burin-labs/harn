@@ -242,10 +242,7 @@ fn __rank_observations(observations) {
  * Optimize a prompt over instruction/demo candidates using deterministic acquisition search.
  *
  * @effects: []
- * @allocation: heap
  * @errors: []
- * @api_stability: stable
- * @example: optimize_prompt(config)
  */
 pub fn optimize_prompt(config) {
   let cfg = __require_config(config)
