@@ -66,6 +66,7 @@ tool_mode_parity = "native_unreliable"
 tool_mode_parity_notes = "OpenRouter DeepSeek V3.2 advertises native tools, but coding-agent runs observed provider-native failures; default to Harn text tools and recover DSML markers."
 thinking_modes = ["enabled", "effort"]
 prompt_caching = true
+cache_breakpoint_style = "last_block"
 structured_output = "native"
 top_k_supported = true
 server_parser = "none"

@@ -17,6 +17,7 @@ native_tools = true
 preferred_tool_format = "native"
 thinking_modes = ["enabled", "effort"]
 prompt_caching = true
+cache_breakpoint_style = "last_block"
 vision_supported = true
 vision = true
 audio_supported = true
@@ -180,4 +181,3 @@ supports_assistant_prefill = false
 prefers_role_developer = false
 prefers_xml_tools = false
 thinking_block_style = "none"
-

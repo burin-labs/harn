@@ -1184,6 +1184,10 @@ pub(crate) fn capabilities_to_vm_value(
         VmValue::Bool(caps.prompt_caching),
     );
     dict.insert(
+        "cache_breakpoint_style".to_string(),
+        VmValue::String(std::sync::Arc::from(caps.cache_breakpoint_style.as_str())),
+    );
+    dict.insert(
         "prefers_xml_scaffolding".to_string(),
         VmValue::Bool(caps.prefers_xml_scaffolding),
     );

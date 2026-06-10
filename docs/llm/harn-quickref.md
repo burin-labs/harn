@@ -1424,7 +1424,8 @@ set under `[provider_defaults.<name>]`:
 | `remote_mcp`, `conversation_state`, `compaction`, `background_mode` | bool | OpenAI Responses remote MCP, previous-response state, provider compaction, and background-mode controls. |
 | `tool_approval_policy` | string | Approval policy story for provider-executed tools, for example `provider_or_harn`. |
 | `max_tools` | int | Cap on tool count (used by `harn lint`). |
-| `prompt_caching` | bool | `cache_control` blocks honored. |
+| `prompt_caching` | bool | Provider-side prompt caching is available. |
+| `cache_breakpoint_style` | string | Request marker strategy when caching is explicit: `none`, `top_level`, or `last_block`. |
 | `prefers_xml_scaffolding` | bool | Prompt sections prefer XML tags such as `<task>` / `<examples>`. |
 | `prefers_markdown_scaffolding` | bool | Prompt sections prefer Markdown headings such as `## Task`. |
 | `structured_output_mode` | string | Preferred logical output shape: `native_json`, `delimited`, `xml_tagged`, or `none`. |

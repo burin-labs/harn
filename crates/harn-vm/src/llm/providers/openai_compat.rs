@@ -284,6 +284,7 @@ impl OpenAiCompatibleProvider {
             }
             body["chat_template_kwargs"] = chat_template_kwargs;
         }
+        apply_prompt_cache_breakpoint(&mut body, opts.cache, &caps);
         crate::llm::fast_mode::apply_request_knob(&mut body, &opts.model, opts.fast);
         body
     }
@@ -489,6 +490,96 @@ fn sanitize_openai_tool_for_request(
     }
 
     tool
+}
+
+fn apply_prompt_cache_breakpoint(
+    body: &mut serde_json::Value,
+    cache_requested: bool,
+    caps: &crate::llm::capabilities::Capabilities,
+) {
+    if !cache_requested || !caps.prompt_caching || body_contains_cache_control(body) {
+        return;
+    }
+    match caps.cache_breakpoint_style.as_str() {
+        "top_level" => {
+            body["cache_control"] = serde_json::json!({"type": "ephemeral"});
+        }
+        "last_block" => {
+            insert_last_message_cache_control(body);
+        }
+        _ => {}
+    }
+}
+
+fn body_contains_cache_control(value: &serde_json::Value) -> bool {
+    match value {
+        serde_json::Value::Object(object) => {
+            object.contains_key("cache_control") || object.values().any(body_contains_cache_control)
+        }
+        serde_json::Value::Array(values) => values.iter().any(body_contains_cache_control),
+        _ => false,
+    }
+}
+
+fn insert_last_message_cache_control(body: &mut serde_json::Value) -> bool {
+    let Some(messages) = body
+        .get_mut("messages")
+        .and_then(serde_json::Value::as_array_mut)
+    else {
+        return false;
+    };
+    for message in messages.iter_mut().rev() {
+        if insert_message_cache_control(message) {
+            return true;
+        }
+    }
+    false
+}
+
+fn insert_message_cache_control(message: &mut serde_json::Value) -> bool {
+    let Some(content) = message
+        .as_object_mut()
+        .and_then(|object| object.get_mut("content"))
+    else {
+        return false;
+    };
+    match content {
+        serde_json::Value::String(text) => {
+            if text.is_empty() {
+                return false;
+            }
+            let text = text.clone();
+            *content = serde_json::json!([{
+                "type": "text",
+                "text": text,
+                "cache_control": {"type": "ephemeral"},
+            }]);
+            true
+        }
+        serde_json::Value::Array(blocks) => {
+            for block in blocks.iter_mut().rev() {
+                let Some(object) = block.as_object_mut() else {
+                    continue;
+                };
+                if object.contains_key("cache_control") {
+                    return true;
+                }
+                object.insert(
+                    "cache_control".to_string(),
+                    serde_json::json!({"type": "ephemeral"}),
+                );
+                return true;
+            }
+            false
+        }
+        serde_json::Value::Object(object) => {
+            object
+                .entry("cache_control".to_string())
+                .or_insert_with(|| serde_json::json!({"type": "ephemeral"}));
+            true
+        }
+        _ => false,
+    }
 }
 
 /// True when the OpenRouter `reasoning` body explicitly disables reasoning
@@ -1084,6 +1175,139 @@ thinking_modes = ["enabled"]
     }
 
     #[test]
+    fn openrouter_anthropic_cache_uses_top_level_breakpoint() {
+        let mut payload = base_request_payload();
+        payload.model = "anthropic/claude-sonnet-4-6".to_string();
+        payload.cache = true;
+
+        let body = OpenAiCompatibleProvider::build_request_body(&payload, false);
+
+        assert_eq!(body["cache_control"], json!({"type": "ephemeral"}));
+        assert_eq!(cache_control_count(&body), 1);
+    }
+
+    #[test]
+    fn openrouter_qwen_explicit_cache_uses_last_content_block() {
+        let mut payload = base_request_payload();
+        payload.model = "qwen/qwen3.6-plus".to_string();
+        payload.cache = true;
+        payload.messages = vec![json!({
+            "role": "user",
+            "content": [
+                {"type": "text", "text": "stable reference"},
+                {"type": "text", "text": "question"}
+            ],
+        })];
+
+        let body = OpenAiCompatibleProvider::build_request_body(&payload, false);
+
+        assert!(body.get("cache_control").is_none());
+        assert_eq!(
+            body["messages"][0]["content"][1]["cache_control"],
+            json!({"type": "ephemeral"})
+        );
+        assert_eq!(cache_control_count(&body), 1);
+    }
+
+    #[test]
+    fn openrouter_gemini_explicit_cache_uses_last_content_block() {
+        let mut payload = base_request_payload();
+        payload.model = "google/gemini-2.5-flash".to_string();
+        payload.cache = true;
+        payload.messages = vec![json!({
+            "role": "user",
+            "content": [
+                {"type": "text", "text": "stable reference"},
+                {"type": "text", "text": "question"}
+            ],
+        })];
+
+        let body = OpenAiCompatibleProvider::build_request_body(&payload, false);
+
+        assert_eq!(
+            body["messages"][0]["content"][1]["cache_control"],
+            json!({"type": "ephemeral"})
+        );
+        assert_eq!(cache_control_count(&body), 1);
+    }
+
+    #[test]
+    fn openrouter_automatic_cache_route_does_not_emit_cache_control() {
+        let mut payload = base_request_payload();
+        payload.model = "deepseek/deepseek-v3".to_string();
+        payload.cache = true;
+
+        let body = OpenAiCompatibleProvider::build_request_body(&payload, false);
+
+        assert_eq!(cache_control_count(&body), 0);
+    }
+
+    #[test]
+    fn openrouter_qwen_open_weight_route_does_not_emit_cache_control() {
+        let mut payload = base_request_payload();
+        payload.model = "qwen/qwen3.6-35b-a3b".to_string();
+        payload.cache = true;
+
+        let body = OpenAiCompatibleProvider::build_request_body(&payload, false);
+
+        assert_eq!(cache_control_count(&body), 0);
+    }
+
+    #[test]
+    fn openrouter_explicit_cache_preserves_existing_message_breakpoint() {
+        let mut payload = base_request_payload();
+        payload.model = "qwen/qwen3-coder-plus".to_string();
+        payload.cache = true;
+        payload.messages = vec![json!({
+            "role": "user",
+            "content": [
+                {
+                    "type": "text",
+                    "text": "stable reference",
+                    "cache_control": {"type": "ephemeral"}
+                },
+                {"type": "text", "text": "question"}
+            ],
+        })];
+
+        let body = OpenAiCompatibleProvider::build_request_body(&payload, false);
+
+        assert_eq!(
+            body["messages"][0]["content"][0]["cache_control"],
+            json!({"type": "ephemeral"})
+        );
+        assert!(body["messages"][0]["content"][1]
+            .get("cache_control")
+            .is_none());
+        assert_eq!(cache_control_count(&body), 1);
+    }
+
+    #[test]
+    fn openrouter_cache_preserves_existing_tool_breakpoint() {
+        let mut payload = base_request_payload();
+        payload.model = "anthropic/claude-sonnet-4-6".to_string();
+        payload.cache = true;
+        payload.native_tools = Some(vec![json!({
+            "type": "function",
+            "cache_control": {"type": "ephemeral"},
+            "function": {
+                "name": "lookup",
+                "description": "Lookup stable context",
+                "parameters": {"type": "object"}
+            }
+        })]);
+
+        let body = OpenAiCompatibleProvider::build_request_body(&payload, false);
+
+        assert!(body.get("cache_control").is_none());
+        assert_eq!(
+            body["tools"][0]["cache_control"],
+            json!({"type": "ephemeral"})
+        );
+        assert_eq!(cache_control_count(&body), 1);
+    }
+
+    #[test]
     fn image_content_maps_to_openai_image_url_block() {
         let mut payload = base_request_payload();
         payload.provider = "openai".to_string();
@@ -1279,6 +1503,17 @@ thinking_modes = ["enabled"]
             max_tool_calls: None,
             prefill: None,
             reminder_lifecycle: Vec::new(),
+        }
+    }
+
+    fn cache_control_count(value: &serde_json::Value) -> usize {
+        match value {
+            serde_json::Value::Object(object) => {
+                usize::from(object.contains_key("cache_control"))
+                    + object.values().map(cache_control_count).sum::<usize>()
+            }
+            serde_json::Value::Array(values) => values.iter().map(cache_control_count).sum(),
+            _ => 0,
         }
     }
 
