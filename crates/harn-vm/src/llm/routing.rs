@@ -55,6 +55,7 @@ pub(crate) fn build_equivalent_failover_policy(
         model: model.to_string(),
         timeout_ms: None,
         label: Some("primary".to_string()),
+        region: None,
     }];
 
     for (candidate_model, candidate) in crate::llm_config::equivalent_model_catalog_entries(model) {
@@ -78,6 +79,7 @@ pub(crate) fn build_equivalent_failover_policy(
             model: candidate_model,
             timeout_ms: None,
             label: Some(format!("equivalent:{}", candidate.provider)),
+            region: None,
         });
     }
 
@@ -142,6 +144,13 @@ pub(crate) struct ChainLink {
     /// Optional human-readable label for telemetry; falls back to
     /// `provider:model` if unset.
     pub label: Option<String>,
+    /// Optional region override (e.g. AWS Bedrock `us-east-1` vs
+    /// `eu-west-1`). When set, the provider call uses this region instead
+    /// of the env/profile-resolved default. `None` keeps the existing
+    /// env-fallback behaviour, so omitting it is fully backward
+    /// compatible. Only multi-region providers (currently Bedrock) act on
+    /// it; other providers ignore it gracefully.
+    pub region: Option<String>,
 }
 
 impl ChainLink {
@@ -409,6 +418,7 @@ fn parse_chain_link(value: &VmValue, idx: usize) -> Result<ChainLink, VmError> {
                 model,
                 timeout_ms: None,
                 label: None,
+                region: None,
             });
         }
         other => {
@@ -442,11 +452,18 @@ fn parse_chain_link(value: &VmValue, idx: usize) -> Result<ChainLink, VmError> {
     } else {
         Some(label_text)
     };
+    let region_text = parse_label(&dict, "region")?;
+    let region = if region_text.is_empty() {
+        None
+    } else {
+        Some(region_text)
+    };
     Ok(ChainLink {
         provider,
         model,
         timeout_ms,
         label,
+        region,
     })
 }
 
@@ -660,6 +677,12 @@ fn chain_summary_value(chain: &[ChainLink]) -> VmValue {
                 dict.insert(
                     "label".to_string(),
                     VmValue::String(std::sync::Arc::from(label.clone())),
+                );
+            }
+            if let Some(region) = &link.region {
+                dict.insert(
+                    "region".to_string(),
+                    VmValue::String(std::sync::Arc::from(region.clone())),
                 );
             }
             VmValue::Dict(std::sync::Arc::new(dict))
@@ -1040,6 +1063,7 @@ fn link_options(
     let mut opts = base.clone();
     opts.provider = link.provider.clone();
     opts.model = link.model.clone();
+    opts.region = link.region.clone();
     opts.api_key = String::new();
     opts.route_policy = LlmRoutePolicy::Always(format!("{}:{}", link.provider, link.model));
     opts.fallback_chain = Vec::new();
@@ -1697,6 +1721,7 @@ async fn run_race(
                 model: backup_opts.model.clone(),
                 timeout_ms: link.timeout_ms,
                 label: Some(backup_label.clone()),
+                region: backup_opts.region.clone(),
             };
             let mut backup_future = Box::pin({
                 let backup_opts = backup_opts.clone();
@@ -2028,6 +2053,60 @@ mod tests {
         let policy = lookup_policy(handle as u64).expect("policy registered");
         assert_eq!(policy.chain.len(), 2);
         assert_eq!(policy.failover.on_status, vec![429, 500]);
+    }
+
+    #[test]
+    fn chain_link_region_parses_summarizes_and_threads_into_options() {
+        clear_policy_registry();
+        let config = dict(&[(
+            "chain",
+            VmValue::List(std::sync::Arc::new(vec![
+                // Link 0: explicit region override.
+                VmValue::Dict(std::sync::Arc::new(dict(&[
+                    ("provider", VmValue::String(std::sync::Arc::from("bedrock"))),
+                    (
+                        "model",
+                        VmValue::String(std::sync::Arc::from("anthropic.claude-3-5-sonnet-v2:0")),
+                    ),
+                    ("region", VmValue::String(std::sync::Arc::from("eu-west-1"))),
+                ]))),
+                // Link 1: no region -> falls back to env at call time.
+                VmValue::String(std::sync::Arc::from("mock:mock")),
+            ])),
+        )]);
+        let tagged = build_routing_policy(&config).expect("validates");
+        let inner = tagged.as_dict().expect("dict");
+
+        // Parsed chain carries the region on link 0 and None on link 1.
+        let handle = inner.get(HANDLE_KEY).and_then(|v| v.as_int()).unwrap();
+        let policy = lookup_policy(handle as u64).expect("policy registered");
+        assert_eq!(policy.chain[0].region.as_deref(), Some("eu-west-1"));
+        assert_eq!(policy.chain[1].region, None);
+
+        // The summary dict echoes the region back for introspection,
+        // and only on the link that set it.
+        let chain_summary = match inner.get("chain") {
+            Some(VmValue::List(items)) => items.clone(),
+            other => panic!("expected chain list, got {other:?}"),
+        };
+        let link0 = chain_summary[0].as_dict().expect("link0 dict");
+        assert_eq!(
+            link0.get("region").and_then(|v| match v {
+                VmValue::String(s) => Some(s.to_string()),
+                _ => None,
+            }),
+            Some("eu-west-1".to_string())
+        );
+        let link1 = chain_summary[1].as_dict().expect("link1 dict");
+        assert!(!link1.contains_key("region"));
+
+        // link_options threads the region into the per-link call options;
+        // the region-less link resolves to None (env fallback).
+        let base = crate::llm::api::options::base_opts("bedrock");
+        let with_region = link_options(&base, &policy, &policy.chain[0]);
+        assert_eq!(with_region.region.as_deref(), Some("eu-west-1"));
+        let without_region = link_options(&base, &policy, &policy.chain[1]);
+        assert_eq!(without_region.region, None);
     }
 
     #[test]

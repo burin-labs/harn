@@ -484,6 +484,7 @@ mod tests {
         LlmRequestPayload {
             provider: "gemini".to_string(),
             model: model.to_string(),
+            region: None,
             api_key: String::new(),
             api_mode: crate::llm::api::LlmApiMode::ChatCompletions,
             fallback_chain: Vec::new(),
@@ -537,6 +538,7 @@ mod tests {
         let payload = LlmRequestPayload {
             provider: "gemini".to_string(),
             model: "gemini-2.5-flash".to_string(),
+            region: None,
             api_key: String::new(),
             api_mode: crate::llm::api::LlmApiMode::ChatCompletions,
             fallback_chain: Vec::new(),
@@ -599,6 +601,7 @@ mod tests {
         let mut payload = LlmRequestPayload {
             provider: "gemini".to_string(),
             model: "gemini-2.5-flash".to_string(),
+            region: None,
             api_key: String::new(),
             api_mode: crate::llm::api::LlmApiMode::ChatCompletions,
             fallback_chain: Vec::new(),
@@ -665,6 +668,7 @@ mod tests {
         let payload = LlmRequestPayload {
             provider: "gemini".to_string(),
             model: "gemini-2.5-flash".to_string(),
+            region: None,
             api_key: String::new(),
             api_mode: crate::llm::api::LlmApiMode::ChatCompletions,
             fallback_chain: Vec::new(),

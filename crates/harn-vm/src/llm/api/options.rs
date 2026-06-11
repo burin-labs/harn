@@ -308,6 +308,12 @@ pub(crate) struct LlmCallOptions {
     /// that ignore the policy (e.g. transcript builders) see a
     /// coherent placeholder.
     pub routing_policy: Option<std::sync::Arc<crate::llm::routing::RoutingPolicyConfig>>,
+    /// Optional provider region override (e.g. AWS Bedrock `us-east-1`).
+    /// Set from a routing-policy chain link's `region` field, or left
+    /// `None` to fall back to the provider's env/profile-resolved region.
+    /// Only multi-region providers (currently Bedrock) act on it; others
+    /// ignore it. `None` preserves the historical env-only behaviour.
+    pub region: Option<String>,
 
     // --- Observability ---
     /// Agent session id, when this call is driven from `run_agent_loop_internal`.
@@ -514,6 +520,10 @@ pub(crate) fn push_unique_anthropic_beta_feature(features: &mut Vec<String>, fea
 pub(crate) struct LlmRequestPayload {
     pub provider: String,
     pub model: String,
+    /// See [`LlmCallOptions::region`]. Forwarded to provider transport so
+    /// multi-region providers (currently Bedrock) can override their
+    /// env-resolved region per call. `None` keeps env-only resolution.
+    pub region: Option<String>,
     pub api_key: String,
     pub api_mode: LlmApiMode,
     pub fallback_chain: Vec<String>,
@@ -594,6 +604,7 @@ impl From<&LlmCallOptions> for LlmRequestPayload {
         let mut payload = Self {
             provider: opts.provider.clone(),
             model: opts.model.clone(),
+            region: opts.region.clone(),
             api_key: opts.api_key.clone(),
             api_mode: opts.api_mode,
             fallback_chain: opts.fallback_chain.clone(),
@@ -692,6 +703,7 @@ pub(crate) fn base_opts(provider: &str) -> LlmCallOptions {
         route_fallbacks: Vec::new(),
         routing_decision: None,
         routing_policy: None,
+        region: None,
         session_id: None,
         reminders: None,
         reminder_lifecycle: Vec::new(),

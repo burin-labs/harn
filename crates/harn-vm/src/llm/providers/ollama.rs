@@ -578,6 +578,7 @@ mod tests {
         LlmRequestPayload {
             provider: "ollama".to_string(),
             model: "qwen3.5:35b-a3b-coding-nvfp4".to_string(),
+            region: None,
             api_key: String::new(),
             api_mode: crate::llm::api::LlmApiMode::ChatCompletions,
             fallback_chain: Vec::new(),
