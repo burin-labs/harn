@@ -8,6 +8,39 @@ highlights live in [CHANGELOG-pre-0.6.md](CHANGELOG-pre-0.6.md).
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.8.101
+
+### Added
+
+- **`@ws` WebSocket-upgrade marker for `harn serve site`.** A `pub fn`
+  carrying the bare `@ws` attribute alongside its HTTP route is answered
+  by the embedder's `SiteStreamProvider` instead of dispatching into the
+  VM — the WebSocket sibling of `@stream`. After the same admission (the
+  `SiteAuth` hook plus the route's `@scopes`, enforced *before* the
+  connection is handed off), the site adapter extracts the
+  `WebSocketUpgrade` and calls the new `SiteStreamProvider::upgrade`,
+  which completes the handshake and drives the socket; the `101` is
+  forwarded verbatim. The trait method has a default `426 Upgrade
+  Required` implementation, so existing providers keep compiling. A
+  non-WebSocket request to a `@ws` route is refused with the correct 4xx,
+  and a `@ws` route declared without a provider fails the router build
+  loudly. New diagnostics `HARN-SRV-014..016` cover a `@ws` marker with
+  arguments, without a route, or conflicting with `@stream`/`@raw`.
+
+### Fixed
+
+- **Linux process sandbox no longer fails to spawn when a read-root resolves
+  to a regular file.** `process.exec` under the `worktree`/`os_hardened`
+  profiles built a Landlock `PATH_BENEATH` rule with directory-only access
+  rights (`READ_DIR`, the `MAKE_*`/`REMOVE_*` family, `REFER`) even when the
+  root was a *file* — e.g. the package-manager-config preset's `~/.gitconfig`,
+  `~/.cargo/config.toml`, or `~/.npmrc`. On a kernel with Landlock support the
+  kernel rejects such a rule with `EINVAL`, surfacing as
+  `host_call process.exec: Invalid argument (os error 22)`. The directory-only
+  bits are now stripped for non-directory rule targets, so the remaining
+  file-applicable rights (`READ_FILE`/`EXECUTE`/…) are still enforced and the
+  spawn succeeds.
+
 ## v0.8.100
 
 ### Added
