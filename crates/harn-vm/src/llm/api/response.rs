@@ -497,12 +497,90 @@ pub(crate) fn parse_openai_responses_response(
     })
 }
 
+/// Minimum number of non-whitespace characters a clean, tool-less completion
+/// must carry to count as a committed answer rather than a billed no-op. The
+/// canonical violation is OpenRouter's `Ambient` upstream for
+/// `qwen/qwen3.6-35b-a3b`: it narrates the intended tool call on the reasoning
+/// channel, emits a tiny `content` preamble (e.g. `"creating files\n\n"`), then
+/// finishes with `finish_reason: "stop"` and EMPTY `tool_calls` — billing
+/// thousands of reasoning tokens while dispatching nothing. A short preamble
+/// defeats a bare `text.is_empty()` guard, so we require a structural floor of
+/// committed visible characters before accepting a clean, tool-offered turn
+/// that produced no tool call. This is a fixed structural threshold, not a
+/// token ratio.
+pub(crate) const MIN_COMMITTED_ANSWER_CHARS: usize = 24;
+
+/// Structural signals describing a finished LLM turn, used by
+/// [`is_billed_noncommittal_completion`]. All fields are derived from the
+/// parsed response plus the outbound request; none involve model-name or
+/// provider-name branching.
+pub(crate) struct CompletionContractSignals<'a> {
+    /// The provider-reported finish/stop reason, if any.
+    pub stop_reason: Option<&'a str>,
+    /// Billed completion/output tokens for this turn.
+    pub output_tokens: i64,
+    /// Whether the outbound request offered any tools to the model.
+    pub tools_offered: bool,
+    /// Number of dispatchable tool calls captured from the response.
+    pub tool_call_count: usize,
+    /// Whether the response carried a server-side tool-search block (which
+    /// counts as the model "doing something" even with no committed text).
+    pub has_tool_search_block: bool,
+    /// The committed visible answer text.
+    pub text: &'a str,
+}
+
+/// Deterministic detector for a finished-clean LLM turn that billed output
+/// but delivered neither a dispatchable tool call nor a committed answer — an
+/// upstream contract violation (the model serialized its action only onto the
+/// reasoning channel, or onto no wire field at all).
+///
+/// Returns `true` only when ALL hold:
+/// - the turn finished cleanly (stop reason is `stop` / `tool_calls` /
+///   `end_turn` / absent — NOT `length`, so genuine truncation never misfires),
+/// - the provider billed output tokens (`output_tokens > 0`),
+/// - tools were offered in the request (so a deliberate terse text answer to a
+///   tool-less prompt is never flagged),
+/// - no dispatchable tool call was captured,
+/// - no server-side tool-search block was present, and
+/// - the committed visible text is below [`MIN_COMMITTED_ANSWER_CHARS`]
+///   non-whitespace characters.
+pub(crate) fn is_billed_noncommittal_completion(signals: &CompletionContractSignals) -> bool {
+    let finished_clean = !matches!(signals.stop_reason, Some("length"));
+    finished_clean
+        && signals.output_tokens > 0
+        && signals.tools_offered
+        && signals.tool_call_count == 0
+        && !signals.has_tool_search_block
+        && signals.text.trim().chars().count() < MIN_COMMITTED_ANSWER_CHARS
+}
+
+/// Build the loud, actionable error returned when
+/// [`is_billed_noncommittal_completion`] fires. Names the provider/model and
+/// the structural facts so eval dashboards and operators can route around the
+/// broken upstream instead of silently absorbing a billed no-op.
+pub(crate) fn billed_noncommittal_completion_error(
+    provider: &str,
+    model: &str,
+    output_tokens: i64,
+) -> VmError {
+    VmError::Thrown(VmValue::String(std::sync::Arc::from(format!(
+        "provider {provider} model {model} returned billed output \
+         (completion_tokens={output_tokens}) with no dispatchable tool call or answer \
+         (upstream contract violation): the model finished cleanly but committed neither a \
+         tool call nor a substantive text answer. This usually means a broken OpenRouter \
+         upstream serialized the tool call onto the reasoning channel only; consider a \
+         provider_route_denylist for the offending upstream."
+    ))))
+}
+
 /// Parse a complete (non-streaming) LLM JSON response into an `LlmResult`.
 pub(crate) fn parse_llm_response(
     json: &serde_json::Value,
     provider: &str,
     model: &str,
     is_anthropic_style: bool,
+    tools_offered: bool,
 ) -> Result<LlmResult, VmError> {
     if provider == "openai"
         && json
@@ -796,6 +874,26 @@ pub(crate) fn parse_llm_response(
             ),
             ))));
         }
+        // Deterministic upstream contract-violation backstop. A short, clean,
+        // tool-offered completion that billed output but dispatched no tool
+        // call (and carried no tool-search block) is a billed no-op — the
+        // structured action went only to the reasoning channel or nowhere.
+        // This catches the case the `text.is_empty()` guard above misses
+        // because the upstream emitted a tiny content preamble.
+        if is_billed_noncommittal_completion(&CompletionContractSignals {
+            stop_reason: stop_reason.as_deref(),
+            output_tokens,
+            tools_offered,
+            tool_call_count: tool_calls.len(),
+            has_tool_search_block,
+            text: &text,
+        }) {
+            return Err(billed_noncommittal_completion_error(
+                provider,
+                model,
+                output_tokens,
+            ));
+        }
 
         Ok(LlmResult {
             text,
@@ -935,8 +1033,142 @@ pub(super) fn extract_cache_write_tokens(usage: &serde_json::Value) -> i64 {
 mod tests {
     use super::{
         extract_cache_read_tokens, extract_cache_write_tokens, extract_openai_choice_logprobs,
-        parse_llm_response, parse_openai_responses_response,
+        is_billed_noncommittal_completion, parse_llm_response, parse_openai_responses_response,
+        CompletionContractSignals,
     };
+
+    #[test]
+    fn contract_violation_fires_on_billed_noop_tool_turn() {
+        // Ambient shape: clean `stop`, billed tokens, tools offered, no tool
+        // call, no tool-search, tiny content preamble below the floor.
+        let signals = CompletionContractSignals {
+            stop_reason: Some("stop"),
+            output_tokens: 342,
+            tools_offered: true,
+            tool_call_count: 0,
+            has_tool_search_block: false,
+            text: "creating files\n\n",
+        };
+        assert!(is_billed_noncommittal_completion(&signals));
+    }
+
+    #[test]
+    fn contract_violation_silent_on_normal_tool_call() {
+        let signals = CompletionContractSignals {
+            stop_reason: Some("tool_calls"),
+            output_tokens: 800,
+            tools_offered: true,
+            tool_call_count: 2,
+            has_tool_search_block: false,
+            text: "",
+        };
+        assert!(!is_billed_noncommittal_completion(&signals));
+    }
+
+    #[test]
+    fn contract_violation_silent_on_substantive_text_answer() {
+        let signals = CompletionContractSignals {
+            stop_reason: Some("stop"),
+            output_tokens: 120,
+            tools_offered: true,
+            tool_call_count: 0,
+            has_tool_search_block: false,
+            text: "Here is the full explanation you asked for, in detail.",
+        };
+        assert!(!is_billed_noncommittal_completion(&signals));
+    }
+
+    #[test]
+    fn contract_violation_silent_on_truncation() {
+        // A `length`/truncation finish must never misfire even when short.
+        let signals = CompletionContractSignals {
+            stop_reason: Some("length"),
+            output_tokens: 4096,
+            tools_offered: true,
+            tool_call_count: 0,
+            has_tool_search_block: false,
+            text: "creating files\n\n",
+        };
+        assert!(!is_billed_noncommittal_completion(&signals));
+    }
+
+    #[test]
+    fn contract_violation_silent_when_no_tools_offered() {
+        // A deliberately terse text reply to a tool-less prompt is fine.
+        let signals = CompletionContractSignals {
+            stop_reason: Some("stop"),
+            output_tokens: 6,
+            tools_offered: false,
+            tool_call_count: 0,
+            has_tool_search_block: false,
+            text: "Yes.",
+        };
+        assert!(!is_billed_noncommittal_completion(&signals));
+    }
+
+    #[test]
+    fn contract_violation_silent_on_tool_search_block() {
+        let signals = CompletionContractSignals {
+            stop_reason: Some("stop"),
+            output_tokens: 200,
+            tools_offered: true,
+            tool_call_count: 0,
+            has_tool_search_block: true,
+            text: "",
+        };
+        assert!(!is_billed_noncommittal_completion(&signals));
+    }
+
+    #[test]
+    fn parse_llm_response_rejects_ambient_billed_noop() {
+        // End-to-end through the openai-compat parser: the Ambient response
+        // shape (clean stop, billed reasoning tokens, tiny content preamble,
+        // empty tool_calls) must surface a loud contract-violation error
+        // rather than a silent empty success.
+        let response = serde_json::json!({
+            "id": "gen-ambient",
+            "model": "qwen/qwen3.6-35b-a3b",
+            "provider": "Ambient",
+            "choices": [{
+                "index": 0,
+                "finish_reason": "stop",
+                "message": { "role": "assistant", "content": "creating files\n\n" }
+            }],
+            "usage": { "prompt_tokens": 321, "completion_tokens": 342 }
+        });
+        let err = parse_llm_response(&response, "openrouter", "qwen/qwen3.6-35b-a3b", false, true)
+            .expect_err("billed no-op tool turn must be rejected");
+        let message = err.to_string();
+        assert!(
+            message.contains("upstream contract violation"),
+            "error must name the contract violation: {message}"
+        );
+    }
+
+    #[test]
+    fn parse_llm_response_allows_short_answer_when_no_tools_offered() {
+        // Same short content, but no tools were offered: this is a legitimate
+        // terse answer and must parse cleanly.
+        let response = serde_json::json!({
+            "id": "gen-terse",
+            "model": "qwen/qwen3.6-35b-a3b",
+            "choices": [{
+                "index": 0,
+                "finish_reason": "stop",
+                "message": { "role": "assistant", "content": "creating files\n\n" }
+            }],
+            "usage": { "prompt_tokens": 321, "completion_tokens": 6 }
+        });
+        let result = parse_llm_response(
+            &response,
+            "openrouter",
+            "qwen/qwen3.6-35b-a3b",
+            false,
+            false,
+        )
+        .expect("short answer with no tools offered parses cleanly");
+        assert_eq!(result.text.trim(), "creating files");
+    }
 
     #[test]
     fn cache_write_tokens_supports_openrouter_prompt_details_shape() {
@@ -1149,7 +1381,7 @@ mod tests {
             "usage": {"input_tokens": 1, "output_tokens": 0}
         });
 
-        let error = parse_llm_response(&response, "anthropic", "claude-opus-4-7", true)
+        let error = parse_llm_response(&response, "anthropic", "claude-opus-4-7", true, false)
             .expect_err("missing content must be rejected");
 
         assert!(error.to_string().contains("missing content array"));
@@ -1162,7 +1394,7 @@ mod tests {
             "usage": {"prompt_tokens": 1, "completion_tokens": 0}
         });
 
-        let error = parse_llm_response(&response, "openai", "gpt-5.4-preview", false)
+        let error = parse_llm_response(&response, "openai", "gpt-5.4-preview", false, false)
             .expect_err("missing choices must be rejected");
 
         assert!(error
@@ -1180,7 +1412,7 @@ mod tests {
             "usage": {"prompt_tokens": 1, "completion_tokens": 0}
         });
 
-        let error = parse_llm_response(&response, "openai", "gpt-5.4-preview", false)
+        let error = parse_llm_response(&response, "openai", "gpt-5.4-preview", false, false)
             .expect_err("empty provider message must be rejected");
 
         assert!(error.to_string().contains("delivered no content"));
@@ -1202,7 +1434,7 @@ mod tests {
             ],
             "usage": {"input_tokens": 10, "output_tokens": 5}
         });
-        let result = parse_llm_response(&response, "anthropic", "claude-opus-4-7", true)
+        let result = parse_llm_response(&response, "anthropic", "claude-opus-4-7", true, false)
             .expect("parser succeeds");
 
         // tool_calls is for *dispatchable* user tools — server-side tools
@@ -1245,7 +1477,7 @@ mod tests {
                 }],
                 "usage": {"prompt_tokens": 10, "completion_tokens": 549}
             });
-            let result = parse_llm_response(&response, "openrouter", "or-qwen", false)
+            let result = parse_llm_response(&response, "openrouter", "or-qwen", false, false)
                 .expect("parser succeeds");
             assert_eq!(result.stop_reason.as_deref(), Some(finish_reason));
             assert_eq!(result.tool_calls.len(), 1);
@@ -1278,7 +1510,7 @@ mod tests {
             }],
             "usage": {"prompt_tokens": 10, "completion_tokens": 5}
         });
-        let result = parse_llm_response(&response, "openai", "gpt-5.4-preview", false)
+        let result = parse_llm_response(&response, "openai", "gpt-5.4-preview", false, false)
             .expect("parser succeeds");
 
         assert!(
@@ -1315,7 +1547,7 @@ mod tests {
             }],
             "usage": {"prompt_tokens": 3, "completion_tokens": 1}
         });
-        let result = parse_llm_response(&response, "openai", "gpt-5.4-preview", false)
+        let result = parse_llm_response(&response, "openai", "gpt-5.4-preview", false, false)
             .expect("parser succeeds");
 
         assert!(result.tool_calls.is_empty());
@@ -1348,7 +1580,8 @@ mod tests {
             "usage": {"prompt_tokens": 5, "completion_tokens": 7}
         });
 
-        let result = parse_llm_response(&response, "openai", "o3", false).expect("parser succeeds");
+        let result =
+            parse_llm_response(&response, "openai", "o3", false, false).expect("parser succeeds");
 
         assert_eq!(result.text, "Final answer.");
         assert_eq!(
@@ -1381,7 +1614,7 @@ mod tests {
             ],
             "usage": {"input_tokens": 3, "output_tokens": 1}
         });
-        let result = parse_llm_response(&response, "anthropic", "claude-opus-4-7", true)
+        let result = parse_llm_response(&response, "anthropic", "claude-opus-4-7", true, false)
             .expect("parser succeeds");
 
         let result_block = result
@@ -1417,8 +1650,8 @@ mod tests {
             "usage": {"prompt_tokens": 314, "completion_tokens": 27}
         });
 
-        let result =
-            parse_llm_response(&response, "vllm", "qwen3.6", false).expect("parser succeeds");
+        let result = parse_llm_response(&response, "vllm", "qwen3.6", false, false)
+            .expect("parser succeeds");
 
         assert_eq!(
             result.telemetry.source,
@@ -1453,8 +1686,8 @@ mod tests {
             }
         });
 
-        let result =
-            parse_llm_response(&response, "llamacpp", "qwen-7b", false).expect("parser succeeds");
+        let result = parse_llm_response(&response, "llamacpp", "qwen-7b", false, false)
+            .expect("parser succeeds");
 
         assert_eq!(
             result.telemetry.source,
@@ -1473,7 +1706,7 @@ mod tests {
             "usage": {"input_tokens": 5, "output_tokens": 2},
             "stop_reason": "end_turn"
         });
-        let result = parse_llm_response(&response, "anthropic", "claude-opus-4-7", true)
+        let result = parse_llm_response(&response, "anthropic", "claude-opus-4-7", true, false)
             .expect("parser succeeds");
         assert_eq!(
             result.telemetry.source,

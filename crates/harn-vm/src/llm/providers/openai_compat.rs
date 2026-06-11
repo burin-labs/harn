@@ -250,6 +250,15 @@ impl OpenAiCompatibleProvider {
         {
             ensure_openrouter_require_parameters(&mut body);
         }
+        // Data-driven OpenRouter upstream route-around. The capability row may
+        // deny specific upstream providers that serve this (provider, model)
+        // route incorrectly (e.g. billing reasoning tokens then finishing with
+        // empty tool_calls) while still advertising the model. We merge those
+        // names into the request body's `provider.ignore` so OpenRouter reroutes
+        // to a healthy upstream. Pure capability lookup — no model-name branch.
+        if opts.provider == "openrouter" && !caps.provider_route_denylist.is_empty() {
+            apply_openrouter_route_denylist(&mut body, &caps.provider_route_denylist);
+        }
         if let Some(ref tools) = opts.native_tools {
             if !tools.is_empty() {
                 body["tools"] = serde_json::Value::Array(provider_request_tools(
@@ -442,6 +451,43 @@ pub(crate) fn ensure_openrouter_require_parameters(body: &mut serde_json::Value)
         Some(_) => {}
         None => {
             body["provider"] = serde_json::json!({"require_parameters": true});
+        }
+    }
+}
+
+/// Merge `deny` into the OpenRouter request body's `provider.ignore` array,
+/// preserving any entries already present and de-duplicating. Creates the
+/// `provider` object and/or `ignore` array when absent. This is the wire
+/// materialization of the capability-row `provider_route_denylist`; it is
+/// provider-agnostic data plumbing with no model-specific logic — the caller
+/// decides whether a denylist applies by consulting the capability matrix.
+pub(crate) fn apply_openrouter_route_denylist(body: &mut serde_json::Value, deny: &[String]) {
+    if deny.is_empty() {
+        return;
+    }
+    if !body.is_object() {
+        return;
+    }
+    let provider = body
+        .as_object_mut()
+        .expect("body is an object")
+        .entry("provider".to_string())
+        .or_insert_with(|| serde_json::json!({}));
+    let Some(provider_obj) = provider.as_object_mut() else {
+        return;
+    };
+    let ignore = provider_obj
+        .entry("ignore".to_string())
+        .or_insert_with(|| serde_json::Value::Array(Vec::new()));
+    let Some(ignore_arr) = ignore.as_array_mut() else {
+        return;
+    };
+    for name in deny {
+        let already_present = ignore_arr
+            .iter()
+            .any(|existing| existing.as_str() == Some(name.as_str()));
+        if !already_present {
+            ignore_arr.push(serde_json::Value::String(name.clone()));
         }
     }
 }
@@ -1618,5 +1664,61 @@ thinking_modes = ["enabled"]
             "non-reserved model keeps canonical delimiter: {serialized}"
         );
         assert!(!serialized.contains("[[CALL]]"));
+    }
+
+    #[test]
+    fn route_denylist_seeds_provider_ignore_on_empty_body() {
+        let mut body = json!({"model": "qwen/qwen3.6-35b-a3b"});
+        apply_openrouter_route_denylist(&mut body, &["Ambient".to_string()]);
+        assert_eq!(body["provider"]["ignore"], json!(["Ambient"]));
+    }
+
+    #[test]
+    fn route_denylist_merges_and_dedupes_existing_ignore() {
+        let mut body = json!({
+            "model": "qwen/qwen3.6-35b-a3b",
+            "provider": { "ignore": ["X"], "require_parameters": true }
+        });
+        apply_openrouter_route_denylist(&mut body, &["Ambient".to_string(), "X".to_string()]);
+        // Existing entry preserved, new entry appended, duplicate not re-added.
+        assert_eq!(body["provider"]["ignore"], json!(["X", "Ambient"]));
+        // Unrelated provider keys are left untouched.
+        assert_eq!(body["provider"]["require_parameters"], json!(true));
+    }
+
+    #[test]
+    fn route_denylist_noop_for_empty_deny() {
+        let mut body = json!({"model": "qwen/qwen3.6-35b-a3b"});
+        apply_openrouter_route_denylist(&mut body, &[]);
+        assert!(body.get("provider").is_none());
+    }
+
+    #[test]
+    fn build_request_body_applies_qwen36_ambient_denylist_for_openrouter_only() {
+        // The qwen3.6 openrouter capability row carries
+        // provider_route_denylist = ["Ambient"]; build_request_body must
+        // materialize it into provider.ignore for the openrouter provider.
+        let mut payload = base_request_payload();
+        payload.provider = "openrouter".to_string();
+        payload.model = "qwen/qwen3.6-35b-a3b".to_string();
+        let body = OpenAiCompatibleProvider::build_request_body(&payload, false);
+        let ignore = body["provider"]["ignore"]
+            .as_array()
+            .expect("provider.ignore array present for qwen3.6 openrouter route");
+        assert!(
+            ignore.iter().any(|v| v.as_str() == Some("Ambient")),
+            "qwen3.6 openrouter body must deny the Ambient upstream: {body}"
+        );
+
+        // A non-openrouter provider serving the same model id must NOT get a
+        // provider.ignore block — the denylist is openrouter-scoped.
+        let mut other = base_request_payload();
+        other.provider = "vllm".to_string();
+        other.model = "qwen/qwen3.6-35b-a3b".to_string();
+        let other_body = OpenAiCompatibleProvider::build_request_body(&other, false);
+        assert!(
+            other_body.get("provider").is_none(),
+            "non-openrouter provider must not receive provider.ignore: {other_body}"
+        );
     }
 }
