@@ -79,6 +79,7 @@ mod postgres;
 #[cfg(feature = "postgres")]
 pub use postgres::install_shared_pool_registry;
 pub mod process;
+pub(crate) mod process_spawn;
 mod project;
 mod project_catalog;
 mod project_enrich;

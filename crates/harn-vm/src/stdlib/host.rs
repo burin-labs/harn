@@ -12,7 +12,7 @@ use crate::vm::{AsyncBuiltinCtx, Vm};
 /// Audited wrapper for `chrono::Utc::now().to_rfc3339()`. Routes through
 /// the testbench leak audit so a paused-clock session can surface every
 /// host capability that observed real wall-clock time.
-fn audited_utc_now_rfc3339(capability_id: &'static str) -> String {
+pub(crate) fn audited_utc_now_rfc3339(capability_id: &'static str) -> String {
     let dt: chrono::DateTime<chrono::Utc> =
         crate::clock_mock::leak_audit::wall_now(capability_id).into();
     dt.to_rfc3339()
@@ -94,6 +94,26 @@ fn capability_manifest_map() -> BTreeMap<String, VmValue> {
             "Process execution.",
             &[
                 op("exec", "Execute a process in argv or shell mode."),
+                op(
+                    "spawn",
+                    "Spawn a process non-blocking; returns a handle immediately for poll/wait/kill.",
+                ),
+                op(
+                    "poll",
+                    "Non-blocking snapshot of a spawned process: status, captured stdout/stderr.",
+                ),
+                op(
+                    "wait",
+                    "Await a spawned process to completion (optional timeout_ms); returns final result.",
+                ),
+                op(
+                    "kill",
+                    "Terminate a spawned process by handle and await the status transition.",
+                ),
+                op(
+                    "release",
+                    "Release a spawned-process handle and free its retained output.",
+                ),
                 op("list_shells", "List shells discovered by the host/session."),
                 op(
                     "get_default_shell",
@@ -243,7 +263,10 @@ fn capability(description: &str, ops: &[(String, VmValue)]) -> VmValue {
     VmValue::Dict(std::sync::Arc::new(entry))
 }
 
-fn require_param(params: &BTreeMap<String, VmValue>, key: &str) -> Result<String, VmError> {
+pub(crate) fn require_param(
+    params: &BTreeMap<String, VmValue>,
+    key: &str,
+) -> Result<String, VmError> {
     params
         .get(key)
         .map(|v| v.display())
@@ -553,6 +576,27 @@ pub(crate) async fn dispatch_host_operation_with_ctx(
         return dispatch_process_exec_with_policy(ctx, params, caller).await;
     }
 
+    // process.spawn is the non-blocking sibling of exec. Route it through the
+    // SAME command-policy preflight so deny-patterns/approval/sandbox gating
+    // are identical; only the completion semantics differ (returns a handle
+    // immediately instead of awaiting). poll/wait/kill/release are pure
+    // registry operations on an already-gated spawn, so they bypass the
+    // command policy.
+    if (capability, operation) == ("process", "spawn") {
+        let caller = serde_json::json!({
+            "surface": "host_call",
+            "capability": "process",
+            "operation": "spawn",
+            "session_id": crate::llm::current_agent_session_id(),
+        });
+        return dispatch_process_spawn_with_policy(ctx, params, caller).await;
+    }
+    if capability == "process" && matches!(operation, "poll" | "wait" | "kill" | "release") {
+        if let Some(result) = crate::stdlib::process_spawn::dispatch(operation, params).await {
+            return result;
+        }
+    }
+
     let bridge = HOST_CALL_BRIDGE.with(|b| b.borrow().clone());
     if let Some(bridge) = bridge {
         if let Some(value) = bridge.dispatch(capability, operation, params)? {
@@ -683,13 +727,48 @@ async fn dispatch_process_exec_with_policy(
     .await
 }
 
+/// Apply the command-policy preflight (deny-patterns, approval gating,
+/// sandbox decisions) and then spawn the process non-blocking. Mirrors
+/// [`dispatch_process_exec_with_policy`] so spawn is gated identically to
+/// exec. There is no postflight here: spawn returns a handle immediately,
+/// not a completed command result; completion is observed later via
+/// poll/wait, which are not themselves command executions.
+async fn dispatch_process_spawn_with_policy(
+    ctx: Option<&AsyncBuiltinCtx>,
+    params: &BTreeMap<String, VmValue>,
+    caller: serde_json::Value,
+) -> Result<VmValue, VmError> {
+    let params =
+        match crate::orchestration::run_command_policy_preflight_with_ctx(ctx, params, caller)
+            .await?
+        {
+            crate::orchestration::CommandPolicyPreflight::Proceed { params, .. } => params,
+            crate::orchestration::CommandPolicyPreflight::Blocked {
+                status,
+                message,
+                context,
+                decisions,
+            } => {
+                return Ok(crate::orchestration::blocked_command_response(
+                    params, status, &message, context, decisions,
+                ));
+            }
+        };
+
+    match crate::stdlib::process_spawn::dispatch("spawn", &params).await {
+        Some(result) => result,
+        None => Err(VmError::Runtime(
+            "host_call process.spawn: dispatch returned None".to_string(),
+        )),
+    }
+}
+
 async fn dispatch_process_exec_after_policy(
     ctx: Option<&AsyncBuiltinCtx>,
     params: &BTreeMap<String, VmValue>,
     command_policy_context: JsonValue,
     command_policy_decisions: Vec<crate::orchestration::CommandPolicyDecision>,
 ) -> Result<VmValue, VmError> {
-    let (program, args) = process_exec_argv(params)?;
     let timeout_ms = optional_i64(params, "timeout")
         .or_else(|| optional_i64(params, "timeout_ms"))
         .filter(|value| *value > 0)
@@ -703,49 +782,7 @@ async fn dispatch_process_exec_after_policy(
         Some(value) => Some(push_sandbox_profile_override(&value)?),
         None => None,
     };
-    let mut cmd = crate::process_sandbox::tokio_command_for(&program, &args)
-        .map_err(|e| VmError::Runtime(format!("host_call process.exec sandbox setup: {e}")))?;
-    if let Some(cwd) = optional_string(params, "cwd") {
-        let cwd = resolve_process_exec_cwd(&cwd);
-        crate::process_sandbox::enforce_process_cwd(&cwd)
-            .map_err(|e| VmError::Runtime(format!("host_call process.exec cwd: {e}")))?;
-        cmd.current_dir(cwd);
-    }
-    if let Some(env) = optional_string_dict(params, "env")? {
-        // `env_mode` controls how the provided `env` keys combine with the
-        // parent environment:
-        //   - "merge" (default): inherit the parent env and overlay the
-        //     provided keys. This is the least-surprising behavior — a
-        //     caller passing `env: {ONE_VAR: "x"}` keeps PATH/HOME/etc.
-        //   - "replace": clear the parent env entirely, then set only the
-        //     provided keys. Must be requested explicitly now; previously
-        //     this was the (footgun) default whenever `env` was supplied.
-        let env_mode = optional_string(params, "env_mode");
-        match env_mode.as_deref().unwrap_or("merge") {
-            "replace" => {
-                cmd.env_clear();
-            }
-            "merge" => {}
-            other => {
-                return Err(VmError::Runtime(format!(
-                    "host_call process.exec: unknown env_mode {other:?}; expected \"merge\" or \"replace\""
-                )));
-            }
-        }
-        for (key, value) in env {
-            cmd.env(key, value);
-        }
-    }
-    // env_remove: list of environment variable names to strip before
-    // spawning. Applied after `env` so callers can both inherit and
-    // selectively unset (e.g. the git stdlib strips `GIT_*` so its
-    // operations are self-contained even when Harn is invoked from
-    // inside a git hook that sets `GIT_DIR`).
-    if let Some(env_remove) = optional_string_list(params, "env_remove") {
-        for key in env_remove {
-            cmd.env_remove(key);
-        }
-    }
+    let mut cmd = build_sandboxed_command(params, "process.exec")?;
     cmd.stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
@@ -819,6 +856,68 @@ async fn dispatch_process_exec_after_policy(
         command_policy_decisions,
     )
     .await
+}
+
+/// Build a sandboxed `tokio::process::Command` from process-call params,
+/// applying argv/shell resolution, the active sandbox policy via
+/// [`crate::process_sandbox::tokio_command_for`], cwd enforcement, and
+/// env/env_mode/env_remove handling.
+///
+/// Shared by `process.exec` (synchronous) and `process.spawn`
+/// (non-blocking) so both go through the identical sandbox-gated build
+/// path. The caller is responsible for any `sandbox_profile` override
+/// guard (it must be live across this call) and for setting stdio/kill
+/// behaviour on the returned command. `label` ("process.exec" or
+/// "process.spawn") is woven into error messages.
+pub(crate) fn build_sandboxed_command(
+    params: &BTreeMap<String, VmValue>,
+    label: &str,
+) -> Result<tokio::process::Command, VmError> {
+    let (program, args) = process_exec_argv(params)?;
+    let mut cmd = crate::process_sandbox::tokio_command_for(&program, &args)
+        .map_err(|e| VmError::Runtime(format!("host_call {label} sandbox setup: {e}")))?;
+    if let Some(cwd) = optional_string(params, "cwd") {
+        let cwd = resolve_process_exec_cwd(&cwd);
+        crate::process_sandbox::enforce_process_cwd(&cwd)
+            .map_err(|e| VmError::Runtime(format!("host_call {label} cwd: {e}")))?;
+        cmd.current_dir(cwd);
+    }
+    if let Some(env) = optional_string_dict(params, "env")? {
+        // `env_mode` controls how the provided `env` keys combine with the
+        // parent environment:
+        //   - "merge" (default): inherit the parent env and overlay the
+        //     provided keys. This is the least-surprising behavior — a
+        //     caller passing `env: {ONE_VAR: "x"}` keeps PATH/HOME/etc.
+        //   - "replace": clear the parent env entirely, then set only the
+        //     provided keys. Must be requested explicitly now; previously
+        //     this was the (footgun) default whenever `env` was supplied.
+        let env_mode = optional_string(params, "env_mode");
+        match env_mode.as_deref().unwrap_or("merge") {
+            "replace" => {
+                cmd.env_clear();
+            }
+            "merge" => {}
+            other => {
+                return Err(VmError::Runtime(format!(
+                    "host_call {label}: unknown env_mode {other:?}; expected \"merge\" or \"replace\""
+                )));
+            }
+        }
+        for (key, value) in env {
+            cmd.env(key, value);
+        }
+    }
+    // env_remove: list of environment variable names to strip before
+    // spawning. Applied after `env` so callers can both inherit and
+    // selectively unset (e.g. the git stdlib strips `GIT_*` so its
+    // operations are self-contained even when Harn is invoked from
+    // inside a git hook that sets `GIT_DIR`).
+    if let Some(env_remove) = optional_string_list(params, "env_remove") {
+        for key in env_remove {
+            cmd.env_remove(key);
+        }
+    }
+    Ok(cmd)
 }
 
 struct ProcessExecResponse<'a> {
@@ -960,7 +1059,7 @@ fn split_argv(mut argv: Vec<String>) -> Result<(String, Vec<String>), VmError> {
 /// Used by `host_call("process", "exec", ...)` to honor a per-call
 /// `sandbox_profile` override without rewriting the surrounding
 /// orchestration policy.
-fn push_sandbox_profile_override(value: &str) -> Result<SandboxProfileGuard, VmError> {
+pub(crate) fn push_sandbox_profile_override(value: &str) -> Result<SandboxProfileGuard, VmError> {
     let profile = crate::orchestration::SandboxProfile::parse(value).ok_or_else(|| {
         VmError::Thrown(VmValue::String(std::sync::Arc::from(format!(
             "host_call process.exec: unknown sandbox_profile {value:?}; expected one of \"unrestricted\", \"worktree\", \"os_hardened\", \"wasi\""
@@ -974,7 +1073,7 @@ fn push_sandbox_profile_override(value: &str) -> Result<SandboxProfileGuard, VmE
     })
 }
 
-struct SandboxProfileGuard {
+pub(crate) struct SandboxProfileGuard {
     _private: std::marker::PhantomData<*const ()>,
 }
 
@@ -984,7 +1083,7 @@ impl Drop for SandboxProfileGuard {
     }
 }
 
-fn optional_i64(params: &BTreeMap<String, VmValue>, key: &str) -> Option<i64> {
+pub(crate) fn optional_i64(params: &BTreeMap<String, VmValue>, key: &str) -> Option<i64> {
     match params.get(key) {
         Some(VmValue::Int(value)) => Some(*value),
         Some(VmValue::Float(value)) if value.fract() == 0.0 => Some(*value as i64),
@@ -992,7 +1091,7 @@ fn optional_i64(params: &BTreeMap<String, VmValue>, key: &str) -> Option<i64> {
     }
 }
 
-fn optional_string(params: &BTreeMap<String, VmValue>, key: &str) -> Option<String> {
+pub(crate) fn optional_string(params: &BTreeMap<String, VmValue>, key: &str) -> Option<String> {
     params.get(key).and_then(vm_string).map(ToString::to_string)
 }
 

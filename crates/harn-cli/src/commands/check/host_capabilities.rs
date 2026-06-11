@@ -22,6 +22,12 @@ fn default_host_capabilities() -> HashMap<String, HashSet<String>> {
             "process".to_string(),
             HashSet::from([
                 "exec".to_string(),
+                // #3252: non-blocking spawn lifecycle ops.
+                "spawn".to_string(),
+                "poll".to_string(),
+                "wait".to_string(),
+                "kill".to_string(),
+                "release".to_string(),
                 "get_default_shell".to_string(),
                 "list_shells".to_string(),
                 "set_default_shell".to_string(),
