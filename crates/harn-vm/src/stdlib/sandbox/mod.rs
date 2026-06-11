@@ -851,7 +851,12 @@ pub(crate) fn process_sandbox_package_manager_config_read_roots(
 /// active policy already permits workspace writes (mirroring `UserTemp`); under
 /// a read-only policy they fall back to read access so dependency resolution
 /// still works.
-#[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
+// Cache *write* roots are only consumed by the macOS (seatbelt) and Linux
+// (Landlock) sandbox backends; the Windows backend deliberately does not grant
+// recursive home-scoped cache roots (see `windows.rs`). Gating to those two
+// targets keeps `-D warnings` happy on Windows, where this would otherwise be
+// dead code.
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 pub(crate) fn process_sandbox_developer_toolchain_cache_roots(
     policy: &CapabilityPolicy,
 ) -> Vec<PathBuf> {
@@ -914,7 +919,7 @@ pub(crate) fn developer_toolchain_read_roots_for_home(home: &Path) -> Vec<PathBu
 /// the macOS seatbelt and Linux Landlock backends render the same set; the
 /// macOS-only `~/Library/...` entries are simply absent on Linux disk and the
 /// `optional`/NotFound handling in each backend skips roots that do not exist.
-#[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 pub(crate) fn developer_toolchain_cache_write_roots_for_home(home: &Path) -> Vec<PathBuf> {
     let mut roots: Vec<_> = [
         ".gradle",                             // Gradle (JVM/Android/Kotlin)
@@ -1515,7 +1520,7 @@ mod tests {
         );
     }
 
-    #[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
     #[test]
     fn developer_toolchain_cache_roots_cover_jvm_and_ios_toolchains() {
         let temp_home = tempfile::tempdir().expect("temp home");
@@ -1541,7 +1546,7 @@ mod tests {
         );
     }
 
-    #[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
     #[test]
     fn developer_toolchain_cache_roots_require_developer_toolchains_preset() {
         let mut policy = CapabilityPolicy {

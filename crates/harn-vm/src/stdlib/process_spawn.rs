@@ -559,7 +559,7 @@ fn release(params: &BTreeMap<String, VmValue>) -> Result<VmValue, VmError> {
     Ok(VmValue::Dict(std::sync::Arc::new(result)))
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 pub(crate) fn registry_len_for_test() -> usize {
     SPAWN_REGISTRY
         .lock()
