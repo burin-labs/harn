@@ -206,6 +206,16 @@ pub struct ParseError {
 
 impl ParseError {
     pub fn to_vm_value(&self) -> VmValue {
+        self.to_vm_value_with_span(false)
+    }
+
+    /// Same as [`to_vm_value`], plus a `spans_full_source` flag the caller
+    /// computes from the total line count. When true, this ERROR node covers
+    /// essentially the entire file — the fingerprint of a tree-sitter
+    /// grammar-limitation cascade (e.g. Scala 3 indented `match`) rather than a
+    /// localized, model-authored syntax mistake. Edit-validation gates use this
+    /// to avoid hard-rejecting a correct edit on a grammar blind spot.
+    pub fn to_vm_value_with_span(&self, spans_full_source: bool) -> VmValue {
         let mut dict: BTreeMap<String, VmValue> = BTreeMap::new();
         dict.insert("start_row".into(), VmValue::Int(self.start_row as i64));
         dict.insert("start_col".into(), VmValue::Int(self.start_col as i64));
@@ -222,6 +232,7 @@ impl ParseError {
             VmValue::String(Arc::from(self.snippet.as_str())),
         );
         dict.insert("missing".into(), VmValue::Bool(self.missing));
+        dict.insert("spans_full_source".into(), VmValue::Bool(spans_full_source));
         VmValue::Dict(Arc::new(dict))
     }
 }

@@ -69,7 +69,25 @@ pub(super) fn run(args: &[VmValue]) -> Result<VmValue, HostlibError> {
     let top_level = count_top_level_declarations(tree.root_node(), language);
     let had_errors = tree.root_node().has_error() || !errors.is_empty();
 
-    let errors_list: Vec<VmValue> = errors.iter().map(ParseError::to_vm_value).collect();
+    // A grammar-limitation "cascade": tree-sitter could not parse a construct
+    // the language genuinely supports (e.g. tree-sitter-scala 0.26 on Scala 3
+    // indentation-based `match`/`case`), so it wraps essentially the whole file
+    // in one root-level ERROR node spanning from the first line to the last.
+    // That is NOT a localized, model-authored syntax mistake — the file is
+    // well-formed source the grammar just can't model. Edit-validation gates
+    // must not hard-reject a CORRECT create/replace on this signal, or they
+    // false-fail correct edits (evidence: eval-scala-feat t2 reported
+    // `syntax error: line 1: package rulekit...` on a valid Scala 3 file).
+    // We surface this so consumers can downgrade the rejection instead of
+    // blaming the model for the grammar's blind spot.
+    let total_lines = source_line_count(&source);
+    let cascade = errors
+        .iter()
+        .any(|e| error_spans_full_source(e, total_lines));
+    let errors_list: Vec<VmValue> = errors
+        .iter()
+        .map(|e| e.to_vm_value_with_span(error_spans_full_source(e, total_lines)))
+        .collect();
 
     Ok(build_dict([
         ("path", str_value(path_str.as_deref().unwrap_or(""))),
@@ -78,7 +96,33 @@ pub(super) fn run(args: &[VmValue]) -> Result<VmValue, HostlibError> {
         ("had_errors", VmValue::Bool(had_errors)),
         ("errors", VmValue::List(Arc::new(errors_list))),
         ("top_level_decl_count", VmValue::Int(top_level as i64)),
+        ("cascade", VmValue::Bool(cascade)),
     ]))
+}
+
+/// Count of source lines (number of `\n`-separated segments). Used to decide
+/// whether an ERROR node covers essentially the whole file.
+fn source_line_count(source: &str) -> u32 {
+    if source.is_empty() {
+        return 0;
+    }
+    (source.bytes().filter(|b| *b == b'\n').count() as u32) + 1
+}
+
+/// True when an ERROR node starts at the top of the file and spans nearly all
+/// of it — the fingerprint of a grammar-limitation cascade rather than a
+/// localized syntax mistake. Requires the node to begin on the first line and
+/// to cover at least 80% of the source lines (and at least a handful of lines,
+/// so a tiny file that is genuinely broken end-to-end is not excused).
+fn error_spans_full_source(error: &ParseError, total_lines: u32) -> bool {
+    if total_lines < 5 {
+        return false;
+    }
+    if error.start_row != 0 {
+        return false;
+    }
+    let covered = error.end_row.saturating_sub(error.start_row) + 1;
+    covered * 100 >= total_lines * 80
 }
 
 fn resolve_language(
@@ -387,6 +431,130 @@ mod tests {
             },
             _ => panic!("expected dict"),
         }
+    }
+
+    fn bool_field(value: &VmValue, key: &str) -> bool {
+        match value {
+            VmValue::Dict(d) => match d.get(key) {
+                Some(VmValue::Bool(b)) => *b,
+                other => panic!("expected bool field {key}, got {other:?}"),
+            },
+            _ => panic!("expected dict"),
+        }
+    }
+
+    fn err_bool(err: &VmValue, key: &str) -> bool {
+        match err {
+            VmValue::Dict(d) => matches!(d.get(key), Some(VmValue::Bool(true))),
+            _ => false,
+        }
+    }
+
+    // The decoded body the model authored for eval-scala-feat t2 (`edit`
+    // create, `tool_format: "native"` — serde already turned the JSON `\n`
+    // escapes into real newlines). It is valid Scala 3, but tree-sitter-scala
+    // 0.26 cannot parse the indentation-based `match`/`case` arms, so it wraps
+    // nearly the whole file in one root-spanning ERROR node and the gate
+    // false-rejected the correct create with `syntax error: line 1: package
+    // rulekit...`. The body must reach tree-sitter with REAL newlines (it does)
+    // and the result must carry the `cascade` / `spans_full_source` signal so
+    // the edit-validation gate can decline to hard-reject a grammar blind spot.
+    #[test]
+    fn scala3_indented_match_cascade_is_flagged_not_localized() {
+        let body = include_str!("scala_repro_fixture.scala");
+        // The authored body reaches us with real newlines, not literal `\n`
+        // line breaks. (Literal backslash-n only survives inside Scala string /
+        // char literals like `case '\n'`, which is correct source text.)
+        assert!(
+            body.starts_with("package rulekit\n\n"),
+            "fixture must have real newlines after the package clause"
+        );
+        let result = run_with(body, "scala");
+        let errors = list_field(&result, "errors");
+        assert!(
+            !errors.is_empty(),
+            "tree-sitter-scala 0.26 should error here"
+        );
+        // The cascade signal must be set, and the first (root-spanning) error
+        // must be marked so consumers can downgrade the rejection.
+        assert!(
+            bool_field(&result, "cascade"),
+            "a root-spanning grammar cascade must set cascade=true"
+        );
+        assert!(
+            errors.iter().any(|e| err_bool(e, "spans_full_source")),
+            "the file-spanning ERROR node must be marked spans_full_source"
+        );
+    }
+
+    // A normal one-line, localized syntax error must NOT be classified as a
+    // cascade — only file-spanning grammar blind spots get the escape hatch.
+    #[test]
+    fn localized_python_error_is_not_a_cascade() {
+        let src = "def a():\n    return 1\n\n\ndef b(\n    return 2\n\n\ndef c():\n    return 3\n";
+        let result = run_with(src, "python");
+        let errors = list_field(&result, "errors");
+        assert!(!errors.is_empty());
+        assert!(
+            !bool_field(&result, "cascade"),
+            "a localized error in an otherwise-parseable file is not a cascade"
+        );
+        assert!(
+            !errors.iter().any(|e| err_bool(e, "spans_full_source")),
+            "a localized error must not be marked spans_full_source"
+        );
+    }
+
+    // Simple Scala 3 optional-braces (`object Foo:`) parses cleanly — proves the
+    // cascade is specifically the indented `match`/`case` blind spot, and that
+    // we are not blanket-excusing Scala.
+    #[test]
+    fn simple_scala3_optional_braces_has_no_errors() {
+        let src = "package rulekit\n\nobject Foo:\n  val x: Int = 1\n";
+        let result = run_with(src, "scala");
+        let errors = list_field(&result, "errors");
+        assert!(errors.is_empty(), "expected clean parse, got {errors:?}");
+        assert!(!bool_field(&result, "cascade"));
+    }
+
+    // The Kotlin file the model authored for eval-kotlin-workflow t1 (`edit`
+    // create, native tool_format) is valid and parses with ZERO errors when
+    // checked standalone — proving the reported `line 150: }` rejection was a
+    // Burin-side `replace_body` brace-splice defect on a LATER edit, not a
+    // newline-corruption or a grammar gap in the authored content. The body
+    // carries real newlines and no literal `\n`.
+    #[test]
+    fn kotlin_authored_test_file_parses_clean() {
+        let body = include_str!("kotlin_repro_fixture.kt");
+        assert!(
+            !body.contains("\\n"),
+            "authored Kotlin body must not contain literal backslash-n"
+        );
+        let result = run_with(body, "kotlin");
+        let errors = list_field(&result, "errors");
+        assert!(errors.is_empty(), "expected clean parse, got {errors:?}");
+        assert!(!bool_field(&result, "cascade"));
+    }
+
+    // Guard against over-unescaping: a JSON-arg body with `\\n` (an intended
+    // literal backslash-n in authored code, e.g. a Go/Kotlin string literal)
+    // must survive as the two characters `\` + `n` in the source we validate,
+    // not collapse into a real newline. tree-sitter validation operates on the
+    // already-decoded bytes, so this is a property of those bytes.
+    #[test]
+    fn literal_backslash_n_in_string_literal_survives() {
+        // Represents the decoded bytes of a Go const: `const nl = "\n"` where
+        // the `\n` is an escape INSIDE the Go string, not a line break.
+        let src = "package main\n\nconst nl = \"\\n\"\n";
+        // The validated source has a backslash followed by 'n' inside quotes,
+        // and a real newline only between top-level lines.
+        assert!(src.contains("\"\\n\""), "string literal escape preserved");
+        let result = run_with(src, "go");
+        let errors = list_field(&result, "errors");
+        assert!(
+            errors.is_empty(),
+            "valid Go must parse clean, got {errors:?}"
+        );
     }
 
     #[test]
