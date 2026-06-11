@@ -29,9 +29,13 @@
       "type": "integer",
       "minimum": 0,
       "description": "Count of top-level declaration nodes per the language profile. Languages without an explicit declaration map return 0."
+    },
+    "cascade": {
+      "type": "boolean",
+      "description": "True when an ERROR node spans essentially the whole file (starts on line 1 and covers >= 80% of source lines in a file of >= 5 lines). This is the fingerprint of a tree-sitter grammar limitation (e.g. tree-sitter-scala 0.26 on Scala 3 indented `match`/`case`) wrapping well-formed source in one giant ERROR node, NOT a localized, author-introduced syntax mistake. Edit-validation gates should not hard-reject a correct create/replace on this signal."
     }
   },
-  "required": ["path", "language", "supported", "had_errors", "errors", "top_level_decl_count"],
+  "required": ["path", "language", "supported", "had_errors", "errors", "top_level_decl_count", "cascade"],
   "additionalProperties": false,
   "$defs": {
     "ParseError": {
@@ -54,6 +58,10 @@
         "missing": {
           "type": "boolean",
           "description": "True when tree-sitter flagged this as a MISSING token (the grammar expected a token that wasn't present)."
+        },
+        "spans_full_source": {
+          "type": "boolean",
+          "description": "True when this ERROR node starts on line 1 and covers essentially the entire file — the per-node form of the top-level `cascade` signal. Marks a grammar-limitation cascade rather than a localized syntax mistake; gates use it to avoid blaming the model for a grammar blind spot."
         }
       },
       "required": [
@@ -65,7 +73,8 @@
         "end_byte",
         "message",
         "snippet",
-        "missing"
+        "missing",
+        "spans_full_source"
       ],
       "additionalProperties": false
     }
