@@ -404,6 +404,18 @@ pub struct ProviderRule {
     /// matching Qwen's own published guidance.
     #[serde(default)]
     pub auto_reasoning_overrides: Option<BTreeMap<String, String>>,
+    /// OpenRouter upstream provider names that must be excluded from routing
+    /// for this `(provider, model)` row. Materialized into the request body's
+    /// `provider.ignore` array (see
+    /// [`crate::llm::providers::openai_compat::apply_openrouter_route_denylist`]).
+    /// This is a data-driven route-around for upstreams that serve a route
+    /// incorrectly while still advertising the model — the canonical case is
+    /// OpenRouter's `Ambient` upstream billing reasoning tokens for
+    /// `qwen/qwen3.6-35b-a3b` and then finishing with empty `tool_calls`,
+    /// while Parasail / AtlasCloud / AkashML serve the identical request
+    /// natively. Only consulted for the `openrouter` provider.
+    #[serde(default)]
+    pub provider_route_denylist: Option<Vec<String>>,
 }
 
 /// Resolved capabilities for a `(provider, model)` pair. Unset rule
@@ -470,6 +482,10 @@ pub struct Capabilities {
     /// Per-task auto-policy reasoning-level overrides for this route.
     /// See [`ProviderRule::auto_reasoning_overrides`].
     pub auto_reasoning_overrides: BTreeMap<String, String>,
+    /// OpenRouter upstream provider names to exclude from routing for this
+    /// row. See [`ProviderRule::provider_route_denylist`]. Empty means "no
+    /// route restriction".
+    pub provider_route_denylist: Vec<String>,
 }
 
 impl Default for Capabilities {
@@ -530,6 +546,7 @@ impl Default for Capabilities {
             tool_mode_parity_notes: None,
             thinking_disable_directive: None,
             auto_reasoning_overrides: BTreeMap::new(),
+            provider_route_denylist: Vec::new(),
         }
     }
 }
@@ -1160,6 +1177,7 @@ fn defaults_to_caps(defaults: &ProviderDefaults) -> Capabilities {
         tool_mode_parity_notes: None,
         thinking_disable_directive: None,
         auto_reasoning_overrides: None,
+        provider_route_denylist: None,
     };
     let mut caps = rule_to_caps(&empty, defaults);
     caps.preferred_tool_format = None;
@@ -1263,6 +1281,7 @@ fn rule_to_caps(rule: &ProviderRule, defaults: &ProviderDefaults) -> Capabilitie
         tool_mode_parity_notes: rule.tool_mode_parity_notes.clone(),
         thinking_disable_directive: rule.thinking_disable_directive.clone(),
         auto_reasoning_overrides: rule.auto_reasoning_overrides.clone().unwrap_or_default(),
+        provider_route_denylist: rule.provider_route_denylist.clone().unwrap_or_default(),
     }
 }
 
@@ -1513,6 +1532,24 @@ preferred_tool_format = "native"
         assert!(report.render_human().contains(
             "acme:acme-good-1 (provider.acme model_match=\"acme-good-*\") missing native_tools; suggest native_tools = true, preferred_tool_format = \"native\""
         ));
+    }
+
+    #[test]
+    fn openrouter_qwen36_keeps_native_and_denies_ambient_upstream() {
+        reset();
+        let caps = lookup("openrouter", "qwen/qwen3.6-35b-a3b");
+        // The route-around must NOT downgrade the tool format: native stays on.
+        assert!(caps.native_tools);
+        assert_eq!(caps.preferred_tool_format.as_deref(), Some("native"));
+        // The broken Ambient upstream is denied via the data-driven denylist.
+        assert_eq!(caps.provider_route_denylist, vec!["Ambient".to_string()]);
+    }
+
+    #[test]
+    fn provider_route_denylist_defaults_empty_for_unmarked_rows() {
+        reset();
+        let caps = lookup("anthropic", "claude-opus-4-7");
+        assert!(caps.provider_route_denylist.is_empty());
     }
 
     #[test]

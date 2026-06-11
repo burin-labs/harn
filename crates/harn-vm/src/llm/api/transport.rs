@@ -13,7 +13,10 @@ use super::openai_normalize::{
 };
 use super::options::{DeltaSender, LlmRequestPayload};
 use super::partial_tool_args::{project_partial, DeltaCoalescer, PartialToolArgs};
-use super::response::{extract_cache_read_tokens, extract_cache_write_tokens, parse_llm_response};
+use super::response::{
+    billed_noncommittal_completion_error, extract_cache_read_tokens, extract_cache_write_tokens,
+    is_billed_noncommittal_completion, parse_llm_response, CompletionContractSignals,
+};
 use super::result::LlmResult;
 use super::telemetry::{elapsed_ms, source as telemetry_source, ProviderTelemetry};
 use super::thinking::ThinkingStreamSplitter;
@@ -318,6 +321,14 @@ async fn vm_call_llm_api_with_body_inner(
     let provider = &opts.provider;
     let model = &opts.model;
     let wants_streaming = delta_tx.is_some() && opts.stream;
+    // Whether this request offered any tools to the model. Used by the
+    // billed-no-op contract guard so a deliberately terse text answer to a
+    // tool-less prompt is never misclassified as a missing tool call.
+    let tools_offered = body
+        .get("tools")
+        .and_then(|tools| tools.as_array())
+        .map(|tools| !tools.is_empty())
+        .unwrap_or(false);
 
     let resolved = crate::llm::helpers::ResolvedProvider::resolve(provider);
     let use_stream_transport = if is_ollama && !opts.stream {
@@ -444,6 +455,7 @@ async fn vm_call_llm_api_with_body_inner(
                     tx,
                     opts.session_id.as_deref(),
                     schema_watch,
+                    tools_offered,
                 )
                 .await;
             }
@@ -519,13 +531,14 @@ async fn vm_call_llm_api_with_body_inner(
 
     let is_anthropic_style =
         crate::llm::provider::provider_uses_anthropic_messages(provider, model);
-    parse_llm_response(&json, provider, model, is_anthropic_style)
+    parse_llm_response(&json, provider, model, is_anthropic_style, tools_offered)
 }
 
 /// Consume an SSE streaming response from an already-sent request.
 /// Parses `data: {...}` lines from the response body, then defers to
 /// [`consume_sse_lines`] for the parsing and event-emission logic so
 /// tests can drive the same code path against an in-memory `AsyncBufRead`.
+#[allow(clippy::too_many_arguments)]
 async fn vm_call_llm_api_sse_from_response(
     response: reqwest::Response,
     provider: &str,
@@ -534,6 +547,7 @@ async fn vm_call_llm_api_sse_from_response(
     delta_tx: DeltaSender,
     session_id: Option<&str>,
     schema_watch: Option<super::schema_stream::StreamSchemaWatch>,
+    tools_offered: bool,
 ) -> Result<LlmResult, VmError> {
     use tokio_stream::StreamExt;
 
@@ -549,6 +563,7 @@ async fn vm_call_llm_api_sse_from_response(
         delta_tx,
         session_id,
         schema_watch,
+        tools_offered,
     )
     .await
 }
@@ -659,6 +674,7 @@ fn streaming_tool_call_id(provider_id: &str, fallback_index: usize) -> String {
 /// behavior can be tested against canned byte streams without standing
 /// up a full `reqwest::Response`. The Anthropic / OpenAI branches and
 /// the trailing accumulator drain that finalize the call live here.
+#[allow(clippy::too_many_arguments)]
 pub(super) async fn consume_sse_lines<R: tokio::io::AsyncBufRead + Unpin>(
     reader: R,
     provider: &str,
@@ -667,6 +683,7 @@ pub(super) async fn consume_sse_lines<R: tokio::io::AsyncBufRead + Unpin>(
     delta_tx: DeltaSender,
     session_id: Option<&str>,
     mut schema_watch: Option<super::schema_stream::StreamSchemaWatch>,
+    tools_offered: bool,
 ) -> Result<LlmResult, VmError> {
     use tokio::io::AsyncBufReadExt;
     let mut lines = reader.lines();
@@ -1203,6 +1220,26 @@ pub(super) async fn consume_sse_lines<R: tokio::io::AsyncBufRead + Unpin>(
         return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(format!(
             "openai-compatible model {model} reported completion_tokens={output_tokens} but delivered no content, reasoning, or tool calls"
         )))));
+    }
+    // Deterministic upstream contract-violation backstop (streaming path).
+    // Mirrors the non-streaming detector in `response::parse_llm_response`: a
+    // short, clean, tool-offered turn that billed output but dispatched no tool
+    // call is a billed no-op (the action went only to the reasoning channel).
+    // The bare `text.is_empty()` guard above misses it because the upstream
+    // emitted a tiny content preamble.
+    if is_billed_noncommittal_completion(&CompletionContractSignals {
+        stop_reason: stop_reason.as_deref(),
+        output_tokens,
+        tools_offered,
+        tool_call_count: tool_calls.len(),
+        has_tool_search_block,
+        text: &text,
+    }) {
+        return Err(billed_noncommittal_completion_error(
+            provider,
+            model,
+            output_tokens,
+        ));
     }
 
     // Use the caller-supplied provider id rather than collapsing every
@@ -1797,6 +1834,7 @@ mod streaming_tool_call_tests {
             delta_tx,
             Some(session_id),
             None,
+            false,
         )
         .await
         .expect("sse parse should succeed");
@@ -2134,6 +2172,7 @@ mod streaming_tool_call_tests {
             delta_tx,
             None,
             None,
+            false,
         )
         .await
         .expect("parse");
@@ -2228,6 +2267,7 @@ mod sse_read_error_tests {
             delta_tx,
             None,
             None,
+            false,
         )
         .await
         .expect_err("mid-stream read failure must not return a truncated success");
@@ -2260,6 +2300,7 @@ mod sse_read_error_tests {
             delta_tx,
             None,
             None,
+            false,
         )
         .await
         .expect_err("mid-stream reset must surface as an error");
@@ -2281,9 +2322,18 @@ mod sse_read_error_tests {
         .as_bytes();
         let (delta_tx, _delta_rx) = tokio::sync::mpsc::unbounded_channel::<String>();
         let reader = tokio::io::BufReader::new(body);
-        let result = consume_sse_lines(reader, "openai", "test-model", false, delta_tx, None, None)
-            .await
-            .expect("clean EOF without [DONE] parses");
+        let result = consume_sse_lines(
+            reader,
+            "openai",
+            "test-model",
+            false,
+            delta_tx,
+            None,
+            None,
+            false,
+        )
+        .await
+        .expect("clean EOF without [DONE] parses");
         assert_eq!(result.text, "hello");
         assert_eq!(result.stop_reason.as_deref(), Some("stop"));
     }
@@ -2353,6 +2403,7 @@ mod schema_stream_abort_tests {
             delta_tx,
             None,
             Some(watch),
+            false,
         )
         .await
         .expect_err("schema abort must surface as error");

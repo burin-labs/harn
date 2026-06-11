@@ -1668,6 +1668,20 @@ supports_assistant_prefill = false
 prefers_role_developer = false
 prefers_xml_tools = false
 thinking_block_style = "inline"
+# Route around OpenRouter's `Ambient` upstream for this row. With raw SSE
+# captures (evidence: /tmp/qwen36_*), Ambient narrates the tool call on the
+# `reasoning` channel, emits a tiny `content` preamble, then finishes with
+# `finish_reason: "stop"` and EMPTY `tool_calls` — billing ~2800 reasoning
+# tokens while the structured call is never serialized to any wire field. The
+# `Parasail` / `AtlasCloud` / `AkashML` upstreams serve the IDENTICAL request
+# natively (`finish: tool_calls`, valid calls), so native WORKS — only Ambient
+# is broken. This denies the broken upstream rather than downgrading the tool
+# format (KEEP native_tools / preferred_tool_format = "native" above): the
+# proven workaround is the OpenRouter `provider.ignore` body knob (the
+# `require_parameters` knob does NOT help — Ambient advertises tools, stays
+# selected). Materialized into `provider.ignore` by
+# `apply_openrouter_route_denylist`.
+provider_route_denylist = ["Ambient"]
 
 [[provider.openrouter]]
 model_match = "qwen/qwen3-coder-plus"
