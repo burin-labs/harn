@@ -716,6 +716,20 @@ impl AcpServerConfig {
 }
 
 impl AcpSandboxConfig {
+    /// Whether the embedder actually contributed any sandbox configuration.
+    ///
+    /// A default (empty) config means "embedder said nothing" — the no-config
+    /// path that must behave exactly as before. A non-default config (any
+    /// read-only root, or any process preset/read/write root) is the signal
+    /// that the embedder opted into confinement, which the ActAuto `code` mode
+    /// now honors as a `Worktree`-level OS sandbox.
+    pub fn is_configured(&self) -> bool {
+        !self.read_only_roots.is_empty()
+            || self.process.presets.is_some()
+            || !self.process.read_roots.is_empty()
+            || !self.process.write_roots.is_empty()
+    }
+
     pub fn with_read_only_roots(roots: Vec<String>) -> Self {
         Self {
             read_only_roots: canonicalize_sandbox_roots(roots),

@@ -186,6 +186,19 @@ fn landlock_profile(
     for root in process_sandbox_package_manager_config_read_roots(policy) {
         push_rule(&mut profile, root, read_only_access(), true)?;
     }
+    // JVM/iOS toolchain caches (Gradle/Maven/Kotlin-Native/Xcode/CocoaPods).
+    // Grant write when the policy allows workspace writes so a sandboxed build
+    // can populate its caches; otherwise read-only so dependency resolution
+    // still works. These roots are optional — they are skipped when absent.
+    let toolchain_cache_roots = super::process_sandbox_developer_toolchain_cache_roots(policy);
+    let toolchain_cache_access = if policy_allows_workspace_write(policy) {
+        workspace_access
+    } else {
+        read_only_access()
+    };
+    for root in toolchain_cache_roots {
+        push_rule(&mut profile, root, toolchain_cache_access, true)?;
+    }
     if policy_allows_workspace_write(policy) {
         for root in process_sandbox_policy_write_roots(policy) {
             push_rule(&mut profile, root, workspace_access, false)?;

@@ -402,10 +402,25 @@ pub(super) fn policy_for_mode(
 ) -> Option<CapabilityPolicy> {
     let mode = definition(mode_id)?;
     if mode.autonomy_tier == AutonomyTier::ActAuto {
-        // Full-access mode leaves the ambient host/runtime policy as the
-        // authority. Installing a no-op ceiling would still make legacy bridge
-        // fallbacks look policy-governed and block them.
-        return None;
+        // ActAuto is the "no human approval gate" tier — but that is an
+        // *approval* decision, decoupled from *OS confinement*. When the
+        // embedder said nothing about sandboxing, preserve the historical
+        // behavior exactly: no per-turn policy, ambient host/runtime policy
+        // remains the authority (installing a no-op ceiling would make legacy
+        // bridge fallbacks look policy-governed and block them).
+        if !sandbox.is_configured() {
+            return None;
+        }
+        // The embedder opted into confinement (sandbox.json /
+        // BURIN_SANDBOX_CONFIG). Honor it as a `Worktree`-level OS sandbox
+        // seeded from the config's roots/presets, while keeping ActAuto's
+        // approval semantics (no approval gate -> `side_effect_level: network`,
+        // no recursion clamp). This is the seam that stops the "config loaded
+        // then ignored" theater for the default coding mode.
+        let mut policy = harn_vm::policy_for_autonomy_tier(AutonomyTier::ActAuto);
+        policy.sandbox_profile = harn_vm::orchestration::SandboxProfile::Worktree;
+        apply_sandbox_config(&mut policy, sandbox);
+        return Some(policy);
     }
     let mut policy = harn_vm::policy_for_autonomy_tier(mode.autonomy_tier);
     apply_sandbox_config(&mut policy, sandbox);
@@ -428,19 +443,48 @@ fn apply_sandbox_config(policy: &mut CapabilityPolicy, sandbox: &AcpSandboxConfi
 }
 
 /// RAII guard that pushes a CapabilityPolicy on construction and pops it on
-/// drop. Full-access `code` mode has no extra policy to push.
+/// drop, and (when the embedder opted into sandboxing) installs the SSRF
+/// private-address egress guard for the turn. The no-config `code` mode has no
+/// extra policy to push and no SSRF guard, leaving egress exactly as before.
+///
+/// The serve adapter runs the whole prompt turn — including the agent's model
+/// HTTP calls — on a single current-thread `LocalSet` runtime (see
+/// `crates/harn-serve/src/adapter.rs`), so a thread-local egress guard held for
+/// the turn's lifetime covers every outbound request made during that turn,
+/// the same way the thread-local execution-policy stack already does.
 pub(super) struct ModePolicyGuard {
     pushed: bool,
+    // Held for the turn so the SSRF private-address backstop stays installed
+    // until the guard drops. `None` when the embedder supplied no sandbox
+    // config (the no-config default path).
+    _ssrf_guard: Option<harn_vm::egress::SsrfGuardScope>,
 }
 
 impl ModePolicyGuard {
     pub(super) fn enter(mode_id: &str, sandbox: &AcpSandboxConfig) -> Self {
+        // Install the SSRF guard only when the embedder opted into sandboxing.
+        // It blocks PRIVATE/loopback/link-local/metadata egress while leaving
+        // public traffic (model APIs, web_search/web_fetch to public hosts)
+        // ALLOWED. Local model servers on loopback are reached via the
+        // documented `HARN_EGRESS_ALLOW_LOOPBACK=1` /
+        // `egress_policy({block_private:"off"})` hatch; the metadata endpoint
+        // stays blocked regardless. With no sandbox config we install nothing,
+        // so egress is byte-identical to today's default.
+        let ssrf_guard = sandbox
+            .is_configured()
+            .then(harn_vm::egress::require_ssrf_guard_for_host);
         match policy_for_mode(mode_id, sandbox) {
             Some(policy) => {
                 harn_vm::orchestration::push_execution_policy(policy);
-                Self { pushed: true }
+                Self {
+                    pushed: true,
+                    _ssrf_guard: ssrf_guard,
+                }
             }
-            None => Self { pushed: false },
+            None => Self {
+                pushed: false,
+                _ssrf_guard: ssrf_guard,
+            },
         }
     }
 }
@@ -637,8 +681,59 @@ mod tests {
     }
 
     #[test]
-    fn policy_for_code_is_none() {
+    fn policy_for_code_with_no_config_is_none() {
+        // No-config default MUST be byte-identical to historical behavior:
+        // ActAuto `code` mode installs no per-turn policy, leaving the ambient
+        // (unrestricted) host/runtime policy as the authority.
         assert!(policy_for_mode("code", &AcpSandboxConfig::default()).is_none());
+        // The default config is, by definition, not "configured".
+        assert!(!AcpSandboxConfig::default().is_configured());
+    }
+
+    #[test]
+    fn policy_for_code_with_config_applies_worktree_confinement() {
+        // When the embedder opts into sandboxing, ActAuto `code` mode now
+        // honors it as a Worktree-level OS sandbox instead of discarding it.
+        let roots = vec!["/work/project".to_string()];
+        let sandbox = AcpSandboxConfig::with_read_only_roots(roots.clone());
+        assert!(sandbox.is_configured());
+        let policy = policy_for_mode("code", &sandbox)
+            .expect("configured code mode must install a confinement policy");
+        // Worktree-level OS confinement is engaged...
+        assert_eq!(
+            policy.sandbox_profile,
+            harn_vm::orchestration::SandboxProfile::Worktree
+        );
+        // ...the embedder roots are carried through...
+        assert_eq!(policy.read_only_roots, roots);
+        // ...and ActAuto approval semantics are preserved (no approval gate ->
+        // network side effects allowed, no recursion clamp).
+        assert_eq!(policy.side_effect_level.as_deref(), Some("network"));
+        assert_eq!(policy.recursion_limit, None);
+    }
+
+    #[test]
+    fn policy_for_code_with_process_config_applies_confinement() {
+        let process = harn_vm::orchestration::ProcessSandboxPolicy {
+            presets: Some(vec![
+                harn_vm::orchestration::ProcessSandboxPreset::DeveloperToolchains,
+            ]),
+            read_roots: vec!["/opt/sdk".to_string()],
+            write_roots: Vec::new(),
+        };
+        let sandbox = AcpSandboxConfig::with_process(process);
+        assert!(sandbox.is_configured());
+        let policy = policy_for_mode("code", &sandbox)
+            .expect("process-config code mode must install a confinement policy");
+        assert_eq!(
+            policy.sandbox_profile,
+            harn_vm::orchestration::SandboxProfile::Worktree
+        );
+        assert_eq!(
+            policy.process_sandbox.read_roots,
+            vec!["/opt/sdk".to_string()]
+        );
+        assert_eq!(policy.side_effect_level.as_deref(), Some("network"));
     }
 
     #[test]
@@ -727,12 +822,20 @@ mod tests {
     }
 
     #[test]
-    fn code_mode_ignores_embedder_read_only_roots() {
-        // Full-access mode pushes no per-turn policy; the ambient sandbox is
-        // already unrestricted so there is nothing to union into.
+    fn code_mode_honors_embedder_read_only_roots() {
+        // Previously full-access mode discarded embedder roots entirely. Now a
+        // configured embedder gets Worktree confinement with its roots applied.
         let sandbox =
             AcpSandboxConfig::with_read_only_roots(vec!["/opt/burin/pipelines".to_string()]);
-        assert!(policy_for_mode("code", &sandbox).is_none());
+        let policy = policy_for_mode("code", &sandbox).expect("configured code mode has policy");
+        assert_eq!(
+            policy.read_only_roots,
+            vec!["/opt/burin/pipelines".to_string()]
+        );
+        assert_eq!(
+            policy.sandbox_profile,
+            harn_vm::orchestration::SandboxProfile::Worktree
+        );
     }
 
     #[test]
@@ -740,5 +843,50 @@ mod tests {
         assert!(is_known("ask"));
         assert!(!is_known(""));
         assert!(!is_known("plan"));
+    }
+
+    #[test]
+    fn no_config_code_mode_installs_no_ssrf_guard() {
+        // The default (no-config) path must not change egress behavior at all:
+        // the SSRF private-address guard is NOT installed, so the agent's
+        // egress (including loopback to a local model server) is unchanged.
+        assert_eq!(
+            harn_vm::egress::current_ssrf_client_settings(),
+            (false, false),
+            "precondition: no guard active outside a turn"
+        );
+        {
+            let _guard = ModePolicyGuard::enter("code", &AcpSandboxConfig::default());
+            assert_eq!(
+                harn_vm::egress::current_ssrf_client_settings(),
+                (false, false),
+                "no-config code mode must leave egress unguarded (public + private allowed)"
+            );
+        }
+    }
+
+    #[test]
+    fn configured_code_mode_installs_ssrf_guard() {
+        // A configured embedder gets the SSRF private-address backstop for the
+        // turn: block_private becomes active. Public hosts stay reachable (the
+        // guard only blocks private/loopback/link-local/metadata addresses).
+        assert_eq!(
+            harn_vm::egress::current_ssrf_client_settings(),
+            (false, false)
+        );
+        {
+            let sandbox = AcpSandboxConfig::with_read_only_roots(vec!["/work/project".to_string()]);
+            let _guard = ModePolicyGuard::enter("code", &sandbox);
+            assert!(
+                harn_vm::egress::current_ssrf_client_settings().0,
+                "configured code mode must arm the SSRF private-address guard"
+            );
+        }
+        // The guard is released when the turn's ModePolicyGuard drops.
+        assert_eq!(
+            harn_vm::egress::current_ssrf_client_settings(),
+            (false, false),
+            "SSRF guard must release on turn end"
+        );
     }
 }

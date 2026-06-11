@@ -842,6 +842,28 @@ pub(crate) fn process_sandbox_package_manager_config_read_roots(
     package_manager_config_read_roots_for_home(&home)
 }
 
+/// Per-user toolchain *cache* roots that JVM/iOS build tools read **and write**
+/// while a sandboxed build runs (Gradle, Maven, CocoaPods, Xcode, Kotlin
+/// Native). Unlike [`developer_toolchain_read_roots_for_home`] these are not
+/// read-only: a build legitimately populates `~/.gradle/caches`,
+/// `~/.m2/repository`, `~/Library/Developer/Xcode/DerivedData`, etc. They are
+/// gated on the `DeveloperToolchains` preset and granted *write* only when the
+/// active policy already permits workspace writes (mirroring `UserTemp`); under
+/// a read-only policy they fall back to read access so dependency resolution
+/// still works.
+#[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
+pub(crate) fn process_sandbox_developer_toolchain_cache_roots(
+    policy: &CapabilityPolicy,
+) -> Vec<PathBuf> {
+    if !process_sandbox_presets(policy).contains(&ProcessSandboxPreset::DeveloperToolchains) {
+        return Vec::new();
+    }
+    let Some(home) = sandbox_user_home_dir() else {
+        return Vec::new();
+    };
+    developer_toolchain_cache_write_roots_for_home(&home)
+}
+
 #[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
 fn sandbox_user_home_dir() -> Option<PathBuf> {
     // Only an absolute home grounds the user-scope read-roots below; a
@@ -883,6 +905,27 @@ pub(crate) fn developer_toolchain_read_roots_for_home(home: &Path) -> Vec<PathBu
         .into_iter()
         .map(|entry| normalize_for_policy(&home.join(entry))),
     );
+    roots.sort_unstable();
+    roots.dedup();
+    roots
+}
+
+/// Per-user JVM/iOS toolchain cache roots (read+write). Kept platform-shared so
+/// the macOS seatbelt and Linux Landlock backends render the same set; the
+/// macOS-only `~/Library/...` entries are simply absent on Linux disk and the
+/// `optional`/NotFound handling in each backend skips roots that do not exist.
+#[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
+pub(crate) fn developer_toolchain_cache_write_roots_for_home(home: &Path) -> Vec<PathBuf> {
+    let mut roots: Vec<_> = [
+        ".gradle",                             // Gradle (JVM/Android/Kotlin)
+        ".m2",                                 // Maven (JVM)
+        ".konan",                              // Kotlin/Native
+        "Library/Caches/CocoaPods",            // CocoaPods (iOS/macOS)
+        "Library/Developer/Xcode/DerivedData", // Xcode build products
+    ]
+    .into_iter()
+    .map(|entry| normalize_for_policy(&home.join(entry)))
+    .collect();
     roots.sort_unstable();
     roots.dedup();
     roots
@@ -1469,6 +1512,55 @@ mod tests {
         assert!(
             roots.iter().all(|path| path.starts_with(&normalized_home)),
             "developer-toolchain roots must stay under HOME"
+        );
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
+    #[test]
+    fn developer_toolchain_cache_roots_cover_jvm_and_ios_toolchains() {
+        let temp_home = tempfile::tempdir().expect("temp home");
+        let roots = developer_toolchain_cache_write_roots_for_home(temp_home.path());
+        let normalized_home = normalize_for_policy(temp_home.path());
+
+        for suffix in [
+            Path::new(".gradle"),
+            Path::new(".m2"),
+            Path::new(".konan"),
+            Path::new("Library/Caches/CocoaPods"),
+            Path::new("Library/Developer/Xcode/DerivedData"),
+        ] {
+            assert!(
+                roots.iter().any(|path| path.ends_with(suffix)),
+                "expected a JVM/iOS toolchain cache grant for {}",
+                suffix.display()
+            );
+        }
+        assert!(
+            roots.iter().all(|path| path.starts_with(&normalized_home)),
+            "toolchain cache roots must stay under HOME"
+        );
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
+    #[test]
+    fn developer_toolchain_cache_roots_require_developer_toolchains_preset() {
+        let mut policy = CapabilityPolicy {
+            workspace_roots: vec!["/tmp/harn-workspace".to_string()],
+            ..CapabilityPolicy::default()
+        };
+        // Default presets include DeveloperToolchains -> cache roots present
+        // (only when an absolute HOME is resolvable on this host).
+        if sandbox_user_home_dir().is_some() {
+            assert!(
+                !process_sandbox_developer_toolchain_cache_roots(&policy).is_empty(),
+                "default presets should render JVM/iOS cache roots"
+            );
+        }
+        // Explicitly dropping DeveloperToolchains removes them.
+        policy.process_sandbox.presets = Some(vec![ProcessSandboxPreset::SystemRuntime]);
+        assert!(
+            process_sandbox_developer_toolchain_cache_roots(&policy).is_empty(),
+            "cache roots must be gated on the DeveloperToolchains preset"
         );
     }
 
