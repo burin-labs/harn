@@ -110,8 +110,24 @@
 //! [`SiteStreamProvider::upgrade`], forwarding the `101` it returns. The
 //! provider drives the socket; the `.harn` function is a
 //! declaration-only stub that owns the route, its `@scopes`, and its
-//! docs. A non-WebSocket request to a `@ws` route is refused with the
-//! correct 4xx by axum's extractor — never a stray upgrade.
+//! docs. A non-WebSocket request to a `@ws`-only route is refused with
+//! the correct 4xx by axum's extractor — never a stray upgrade.
+//!
+//! ## One route, two transports (`@ws` + `@stream`)
+//!
+//! A single route may carry **both** `@ws` and `@stream` — the seam the
+//! gateway `/acp` carve-out needs: one route that runs auth + `@scopes`
+//! once, then serves a genuine WebSocket handshake *and* an SSE/stream
+//! response from the same admission. After admission the adapter sniffs
+//! the request head's `Upgrade: websocket` / `Connection: upgrade`
+//! headers (before any extractor or the body is consumed): a genuine
+//! handshake takes the `@ws` [`SiteStreamProvider::upgrade`] path, while
+//! every other request falls through to the `@stream`
+//! [`SiteStreamProvider::open`] path — never a 4xx for the non-upgrade
+//! caller. Auth gates both branches identically; the same provider
+//! implements both `open` and `upgrade`. (`@ws` + `@raw` stays a
+//! conflict: a handshake carries no body, but `@raw` exists to buffer
+//! one.)
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::net::{IpAddr, SocketAddr};
@@ -465,8 +481,12 @@ struct SiteRoute {
     raw: bool,
     /// `@ws` marker: after admission, perform the WebSocket upgrade and
     /// hand the upgrade handle to [`SiteStreamProvider::upgrade`] instead
-    /// of dispatching into the VM. Mutually exclusive with
-    /// `stream`/`raw`.
+    /// of dispatching into the VM. May be combined with `stream` (one
+    /// route, two transports): when both are set the adapter sniffs the
+    /// request's upgrade headers — a genuine handshake takes the
+    /// [`SiteStreamProvider::upgrade`] path, every other request falls
+    /// through to the [`SiteStreamProvider::open`] (`stream`) path. Still
+    /// mutually exclusive with `raw` (a handshake carries no body).
     ws: bool,
 }
 
@@ -645,7 +665,18 @@ async fn site_dispatch(State(state): State<SiteState>, request: Request) -> Resp
     // body, the adapter extracts the WebSocket upgrade (while hyper's
     // `OnUpgrade` extension is still on `parts`) and the provider drives
     // the socket. The 101 it returns is forwarded verbatim.
-    if route.ws {
+    //
+    // A route may carry `@ws` *and* `@stream` together — one route, two
+    // transports (the gateway `/acp` carve-out): a genuine WebSocket
+    // handshake upgrades through `provider.upgrade(...)`, while every
+    // other request falls through to the `@stream` `provider.open(...)`
+    // path below. The branch is picked by sniffing the request's
+    // `Upgrade`/`Connection` headers on the head we already hold — before
+    // any extractor or the body is consumed — so neither branch races the
+    // other for the request. A `@ws`-only route keeps the historic
+    // behavior: a non-upgrade request is refused by axum's extractor with
+    // the correct 4xx (there is no stream path to fall through to).
+    if route.ws && (is_websocket_upgrade(&parts.headers) || !route.stream) {
         // Same admission back-stop as `@stream`/`@raw`: a `@ws` route
         // never builds a `CallRequest`, so the dispatch-level scope
         // check cannot cover it. With no hook there is no identity and
@@ -670,9 +701,11 @@ async fn site_dispatch(State(state): State<SiteState>, request: Request) -> Resp
             );
         };
         // Extract the upgrade while the `OnUpgrade` extension is still
-        // present on `parts`. A non-WebSocket request (missing the
-        // upgrade headers / key) is refused here by axum's extractor
-        // with the correct 4xx — never a panic, never a stray 101.
+        // present on `parts`. On a `@ws`-only route a non-WebSocket
+        // request (missing the upgrade headers / key) is refused here by
+        // axum's extractor with the correct 4xx — never a panic, never a
+        // stray 101. On a combined `@ws @stream` route we only reach this
+        // when the header sniff already saw a genuine handshake.
         let upgrade = match WebSocketUpgrade::from_request_parts(&mut parts, &()).await {
             Ok(upgrade) => upgrade,
             Err(rejection) => return rejection.into_response(),
