@@ -41,7 +41,23 @@ const FINGERPRINT_SKIP_DIRS: &[&str] = &[
     "venv",
 ];
 const PROJECT_FINGERPRINT_MAX_DEPTH: usize = RuntimeLimits::DEFAULT.max_project_fingerprint_depth;
-const PROJECT_LANGUAGE_ORDER: &[&str] = &["rust", "typescript", "python", "go", "swift", "ruby"];
+const PROJECT_LANGUAGE_ORDER: &[&str] = &[
+    "rust",
+    "typescript",
+    "python",
+    "go",
+    "swift",
+    "ruby",
+    "scala",
+    "kotlin",
+    "java",
+    "elixir",
+    "zig",
+    "php",
+    "csharp",
+    "c",
+    "cpp",
+];
 const PROJECT_FRAMEWORK_ORDER: &[&str] = &["axum", "next", "react", "django", "fastapi", "rails"];
 const PROJECT_PACKAGE_MANAGER_ORDER: &[&str] = &[
     "cargo", "spm", "pnpm", "npm", "yarn", "uv", "poetry", "pip", "go-mod", "bundler",
@@ -1830,6 +1846,32 @@ fn inspect_fingerprint_file(path: &Path, rel: &str, name: &str, signals: &mut Fi
             signals.test_runners.insert("xctest".to_string());
         }
         "Gemfile" => inspect_gemfile(path, signals),
+        "build.sbt" => {
+            signals.languages.insert("scala".to_string());
+            signals.build_tools.insert("sbt".to_string());
+        }
+        "build.gradle.kts" => {
+            signals.languages.insert("kotlin".to_string());
+            signals.build_tools.insert("gradle".to_string());
+        }
+        "mix.exs" => {
+            signals.languages.insert("elixir".to_string());
+            signals.package_managers.insert("mix".to_string());
+            signals.build_tools.insert("mix".to_string());
+        }
+        "pom.xml" => {
+            signals.languages.insert("java".to_string());
+            signals.build_tools.insert("maven".to_string());
+        }
+        "composer.json" => {
+            signals.languages.insert("php".to_string());
+            signals.package_managers.insert("composer".to_string());
+            signals.build_tools.insert("composer".to_string());
+        }
+        "build.zig" | "build.zig.zon" => {
+            signals.languages.insert("zig".to_string());
+            signals.build_tools.insert("zig".to_string());
+        }
         _ => {}
     }
 
@@ -1884,6 +1926,34 @@ fn inspect_fingerprint_file(path: &Path, rel: &str, name: &str, signals: &mut Fi
         Some("rb") => {
             signals.languages.insert("ruby".to_string());
             signals.ruby_project = true;
+        }
+        Some("scala") | Some("sc") => {
+            signals.languages.insert("scala".to_string());
+        }
+        Some("kt") | Some("kts") => {
+            signals.languages.insert("kotlin".to_string());
+        }
+        Some("java") => {
+            signals.languages.insert("java".to_string());
+        }
+        Some("ex") | Some("exs") => {
+            signals.languages.insert("elixir".to_string());
+        }
+        Some("zig") | Some("zon") => {
+            signals.languages.insert("zig".to_string());
+        }
+        Some("php") => {
+            signals.languages.insert("php".to_string());
+        }
+        Some("cs") => {
+            signals.languages.insert("csharp".to_string());
+        }
+        Some("c") | Some("h") => {
+            signals.languages.insert("c".to_string());
+        }
+        Some("cpp") | Some("cc") | Some("cxx") | Some("hpp") | Some("hh") | Some("hxx")
+        | Some("mm") => {
+            signals.languages.insert("cpp".to_string());
         }
         _ => {}
     }
@@ -3424,6 +3494,146 @@ mod tests {
         assert_eq!(fingerprint.test_runner.as_deref(), Some("nextest"));
         assert_eq!(fingerprint.build_tool.as_deref(), Some("cargo"));
         assert_eq!(fingerprint.vcs.as_deref(), Some("git"));
+    }
+
+    #[test]
+    fn project_fingerprint_detects_scala_sbt_profile() {
+        let dir = temp_dir("fingerprint-scala");
+        std::fs::create_dir_all(dir.path().join("src/main/scala")).unwrap();
+        std::fs::write(
+            dir.path().join("build.sbt"),
+            "name := \"app\"\nscalaVersion := \"3.3.1\"\n",
+        )
+        .unwrap();
+        std::fs::write(
+            dir.path().join("src/main/scala/Main.scala"),
+            "object Main { def main(args: Array[String]): Unit = () }\n",
+        )
+        .unwrap();
+
+        let fingerprint = detect_project_fingerprint(dir.path());
+        assert_eq!(fingerprint.primary_language, "scala");
+        assert!(fingerprint.languages.contains(&"scala".to_string()));
+        assert!(fingerprint.build_tool.as_deref() == Some("sbt"));
+    }
+
+    #[test]
+    fn project_fingerprint_detects_kotlin_gradle_kts_profile() {
+        let dir = temp_dir("fingerprint-kotlin");
+        std::fs::create_dir_all(dir.path().join("src/main/kotlin")).unwrap();
+        std::fs::write(
+            dir.path().join("build.gradle.kts"),
+            "plugins { kotlin(\"jvm\") version \"2.0.0\" }\n",
+        )
+        .unwrap();
+        std::fs::write(
+            dir.path().join("src/main/kotlin/Main.kt"),
+            "fun main() {}\n",
+        )
+        .unwrap();
+
+        let fingerprint = detect_project_fingerprint(dir.path());
+        assert_eq!(fingerprint.primary_language, "kotlin");
+        assert!(fingerprint.languages.contains(&"kotlin".to_string()));
+        assert!(fingerprint.build_tool.as_deref() == Some("gradle"));
+    }
+
+    #[test]
+    fn project_fingerprint_detects_elixir_mix_profile() {
+        let dir = temp_dir("fingerprint-elixir");
+        std::fs::create_dir_all(dir.path().join("lib")).unwrap();
+        std::fs::write(
+            dir.path().join("mix.exs"),
+            "defmodule App.MixProject do\n  use Mix.Project\nend\n",
+        )
+        .unwrap();
+        std::fs::write(dir.path().join("lib/app.ex"), "defmodule App do\nend\n").unwrap();
+
+        let fingerprint = detect_project_fingerprint(dir.path());
+        assert_eq!(fingerprint.primary_language, "elixir");
+        assert_eq!(fingerprint.package_manager.as_deref(), Some("mix"));
+        assert_eq!(fingerprint.build_tool.as_deref(), Some("mix"));
+    }
+
+    #[test]
+    fn project_fingerprint_detects_zig_profile() {
+        let dir = temp_dir("fingerprint-zig");
+        std::fs::create_dir_all(dir.path().join("src")).unwrap();
+        std::fs::write(
+            dir.path().join("build.zig"),
+            "const std = @import(\"std\");\npub fn build(b: *std.Build) void { _ = b; }\n",
+        )
+        .unwrap();
+        std::fs::write(dir.path().join("src/main.zig"), "pub fn main() void {}\n").unwrap();
+
+        let fingerprint = detect_project_fingerprint(dir.path());
+        assert_eq!(fingerprint.primary_language, "zig");
+        assert_eq!(fingerprint.build_tool.as_deref(), Some("zig"));
+    }
+
+    #[test]
+    fn project_fingerprint_detects_java_maven_profile() {
+        let dir = temp_dir("fingerprint-java");
+        std::fs::create_dir_all(dir.path().join("src/main/java/app")).unwrap();
+        std::fs::write(
+            dir.path().join("pom.xml"),
+            "<project><modelVersion>4.0.0</modelVersion></project>\n",
+        )
+        .unwrap();
+        std::fs::write(
+            dir.path().join("src/main/java/app/App.java"),
+            "package app;\npublic class App {}\n",
+        )
+        .unwrap();
+
+        let fingerprint = detect_project_fingerprint(dir.path());
+        assert_eq!(fingerprint.primary_language, "java");
+        assert_eq!(fingerprint.build_tool.as_deref(), Some("maven"));
+    }
+
+    #[test]
+    fn project_fingerprint_detects_php_composer_profile() {
+        let dir = temp_dir("fingerprint-php");
+        std::fs::create_dir_all(dir.path().join("src")).unwrap();
+        std::fs::write(
+            dir.path().join("composer.json"),
+            "{\n  \"name\": \"acme/app\"\n}\n",
+        )
+        .unwrap();
+        std::fs::write(dir.path().join("src/index.php"), "<?php\necho \"hi\";\n").unwrap();
+
+        let fingerprint = detect_project_fingerprint(dir.path());
+        assert_eq!(fingerprint.primary_language, "php");
+        assert_eq!(fingerprint.package_manager.as_deref(), Some("composer"));
+    }
+
+    #[test]
+    fn project_fingerprint_detects_csharp_profile() {
+        let dir = temp_dir("fingerprint-csharp");
+        std::fs::create_dir_all(dir.path().join("src")).unwrap();
+        std::fs::write(
+            dir.path().join("src/Program.cs"),
+            "class Program { static void Main() {} }\n",
+        )
+        .unwrap();
+
+        let fingerprint = detect_project_fingerprint(dir.path());
+        assert_eq!(fingerprint.primary_language, "csharp");
+    }
+
+    #[test]
+    fn project_fingerprint_detects_cpp_profile() {
+        let dir = temp_dir("fingerprint-cpp");
+        std::fs::create_dir_all(dir.path().join("src")).unwrap();
+        std::fs::write(
+            dir.path().join("src/main.cpp"),
+            "int main() { return 0; }\n",
+        )
+        .unwrap();
+        std::fs::write(dir.path().join("src/util.hpp"), "#pragma once\n").unwrap();
+
+        let fingerprint = detect_project_fingerprint(dir.path());
+        assert_eq!(fingerprint.primary_language, "cpp");
     }
 
     #[test]
