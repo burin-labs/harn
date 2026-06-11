@@ -809,6 +809,36 @@ pipeline main() {
 }
 
 #[test]
+fn preflight_accepts_process_spawn_lifecycle_ops() {
+    // #3252: the non-blocking process lifecycle ops
+    // (spawn/poll/wait/kill/release) are part of the "process" capability
+    // manifest, so `host_call` targets naming them must type-check.
+    let dir = unique_temp_dir("harn-check-process-spawn");
+    std::fs::create_dir_all(&dir).unwrap();
+    let file = dir.join("main.harn");
+    let source = r#"
+pipeline main() {
+  var h = host_call("process.spawn", {mode: "argv", argv: ["echo", "hi"]})
+  host_call("process.poll", {handle_id: h.handle_id})
+  host_call("process.wait", {handle_id: h.handle_id, timeout_ms: 1000})
+  host_call("process.kill", {handle_id: h.handle_id})
+  host_call("process.release", {handle_id: h.handle_id})
+}
+"#;
+    let program = parse_program(source);
+    let diagnostics =
+        collect_preflight_diagnostics(&file, source, &program, &CheckConfig::default());
+    assert!(
+        diagnostics
+            .iter()
+            .all(|d| !d.message.contains("unknown host capability")),
+        "unexpected host cap diagnostic for process.spawn lifecycle ops: {:?}",
+        diagnostics.iter().map(|d| &d.message).collect::<Vec<_>>()
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn check_file_inner_enforces_invariants_when_requested() {
     let dir = unique_temp_dir("harn-check-invariants");
     std::fs::create_dir_all(&dir).unwrap();
