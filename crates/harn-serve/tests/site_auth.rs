@@ -48,6 +48,12 @@ pub fn scoped_route(harness: Harness, req: dict) -> dict {
 pub fn ctx_route(req: dict) -> dict {
   return http_ok({ "ctx": host_call("embedder.auth_context", {}) })
 }
+
+@scopes("base:read", "PUT personas:write")
+@route("*", "/per_method")
+pub fn per_method_route(req: dict) -> dict {
+  return http_ok({ "ok": true })
+}
 "#;
 
 /// `SiteAuth` hook that always admits with a fixed identity.
@@ -172,8 +178,18 @@ fn site_router(
 }
 
 async fn get(router: Router, uri: &str) -> Response {
+    request(router, "GET", uri).await
+}
+
+async fn request(router: Router, method: &str, uri: &str) -> Response {
     router
-        .oneshot(Request::builder().uri(uri).body(Body::empty()).unwrap())
+        .oneshot(
+            Request::builder()
+                .method(method)
+                .uri(uri)
+                .body(Body::empty())
+                .unwrap(),
+        )
         .await
         .unwrap()
 }
@@ -328,4 +344,72 @@ async fn hook_sees_request_head_and_matched_route() {
     let echoed: Value =
         serde_json::from_str(body["ctx"].as_str().expect("bridge echoes a string")).unwrap();
     assert_eq!(echoed, json!({ "route": "/ctx", "method": "GET" }));
+}
+
+/// Per-method `@scopes`: `/per_method` declares the baseline `base:read`
+/// for every method plus `personas:write` only for `PUT`. A `GET` needs
+/// just the baseline — an `Allow` carrying `base:read` admits it even
+/// without `personas:write`, proving the per-method extra is scoped to
+/// `PUT` and `GET` falls back to the baseline alone.
+#[tokio::test]
+async fn per_method_get_requires_only_the_baseline_scope() {
+    let hook = Arc::new(AllowAuth {
+        tenant: None,
+        scopes: &["base:read"],
+        context: None,
+    });
+    let (_dir, router) = site_router(Some(hook), None);
+    let (status, body) = read_json(request(router, "GET", "/per_method").await).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["ok"], true);
+}
+
+/// The same baseline-only credential is *insufficient* for `PUT`, which
+/// unions `personas:write` onto the baseline: admission refuses with the
+/// canonical envelope, and the missing scope is exactly the per-method
+/// extra (not the already-granted baseline).
+#[tokio::test]
+async fn per_method_put_demands_the_method_scoped_extra() {
+    let hook = Arc::new(AllowAuth {
+        tenant: None,
+        scopes: &["base:read"],
+        context: None,
+    });
+    let (_dir, router) = site_router(Some(hook), None);
+    let (status, body) = read_json(request(router, "PUT", "/per_method").await).await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    assert_eq!(body["code"], "forbidden");
+    assert_eq!(body["details"]["missing_scopes"][0], "personas:write");
+    assert_eq!(body["details"]["required_scopes"][0], "base:read");
+    assert_eq!(body["details"]["required_scopes"][1], "personas:write");
+}
+
+/// A credential carrying both the baseline and the per-method extra
+/// admits `PUT` — the union is satisfied.
+#[tokio::test]
+async fn per_method_put_admits_with_baseline_plus_extra() {
+    let hook = Arc::new(AllowAuth {
+        tenant: None,
+        scopes: &["base:read", "personas:write"],
+        context: None,
+    });
+    let (_dir, router) = site_router(Some(hook), None);
+    let (status, body) = read_json(request(router, "PUT", "/per_method").await).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["ok"], true);
+}
+
+/// A method with no per-method extra (here `DELETE`) falls back to the
+/// baseline requirement — `base:read` alone admits it, same as `GET`.
+#[tokio::test]
+async fn per_method_unlisted_method_falls_back_to_baseline() {
+    let hook = Arc::new(AllowAuth {
+        tenant: None,
+        scopes: &["base:read"],
+        context: None,
+    });
+    let (_dir, router) = site_router(Some(hook), None);
+    let (status, body) = read_json(request(router, "DELETE", "/per_method").await).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["ok"], true);
 }
