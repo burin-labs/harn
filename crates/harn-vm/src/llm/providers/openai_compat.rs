@@ -1507,6 +1507,7 @@ thinking_modes = ["enabled"]
         LlmRequestPayload {
             provider: "openrouter".to_string(),
             model: "google/gemini-2.5-pro".to_string(),
+            region: None,
             api_key: String::new(),
             api_mode: crate::llm::api::LlmApiMode::ChatCompletions,
             fallback_chain: Vec::new(),

@@ -611,6 +611,7 @@ pub(crate) fn extract_llm_options(
         route_fallbacks,
         routing_decision,
         routing_policy,
+        region: None,
         session_id,
         reminders,
         reminder_lifecycle,

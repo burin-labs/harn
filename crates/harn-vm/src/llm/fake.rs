@@ -510,6 +510,7 @@ mod tests {
         LlmRequestPayload {
             provider: "fake".to_string(),
             model: "fake-model".to_string(),
+            region: None,
             api_key: String::new(),
             api_mode: LlmApiMode::ChatCompletions,
             fallback_chain: Vec::new(),

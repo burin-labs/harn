@@ -229,6 +229,7 @@ mod tests {
         LlmRequestPayload {
             provider: "azure_openai".to_string(),
             model: "gpt-4o-prod".to_string(),
+            region: None,
             api_key: String::new(),
             api_mode: crate::llm::api::LlmApiMode::ChatCompletions,
             fallback_chain: Vec::new(),

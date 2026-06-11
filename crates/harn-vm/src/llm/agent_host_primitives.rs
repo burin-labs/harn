@@ -1319,19 +1319,27 @@ async fn host_agent_dispatch_tool_call(
     )
     .map(|(handle, guard)| (Some(handle), Some(guard)))
     .unwrap_or((None, None));
-    let dispatch_future = crate::agent_sessions::scope_current_tool_call(tool_id.clone(), async {
-        agent_tools::dispatch_tool_execution_with_mcp(
-            Some(&ctx),
-            &tool_name,
-            &tool_args,
-            tools,
-            mcp_clients_ref,
-            bridge.as_ref(),
-            tool_retries,
-            tool_backoff_ms,
-        )
-        .await
-    });
+    // Heap-pin the dispatch future. The tool-execution path builds large
+    // per-call state (e.g. `LlmCallOptions`/`LlmRequestPayload`), so keeping
+    // this future inline in the parent frame pushes the enclosing async fn
+    // over clippy's `large_stack_frames` threshold. Boxing moves that state
+    // onto the heap; both await arms below consume the `Pin<Box<_>>` directly.
+    let mut dispatch_future = Box::pin(crate::agent_sessions::scope_current_tool_call(
+        tool_id.clone(),
+        async {
+            agent_tools::dispatch_tool_execution_with_mcp(
+                Some(&ctx),
+                &tool_name,
+                &tool_args,
+                tools,
+                mcp_clients_ref,
+                bridge.as_ref(),
+                tool_retries,
+                tool_backoff_ms,
+            )
+            .await
+        },
+    ));
     let (outcome, preempted_by_cancel) = match cancel_handle.as_ref() {
         Some(handle) => {
             // Race the dispatch against the cancellation signal. When the
@@ -1348,7 +1356,6 @@ async fn host_agent_dispatch_tool_call(
             // what actually happened.
             let cancel_wait = handle.cancelled();
             tokio::pin!(cancel_wait);
-            tokio::pin!(dispatch_future);
             tokio::select! {
                 biased;
                 outcome = &mut dispatch_future => (outcome, false),

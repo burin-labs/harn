@@ -703,6 +703,7 @@ mod tests {
             route_fallbacks: Vec::new(),
             routing_decision: None,
             routing_policy: None,
+            region: None,
             session_id: None,
             reminders: None,
             reminder_lifecycle: Vec::new(),

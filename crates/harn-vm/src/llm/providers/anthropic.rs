@@ -499,6 +499,7 @@ mod tests {
         LlmRequestPayload {
             provider: "anthropic".to_string(),
             model: "claude-sonnet-4-6".to_string(),
+            region: None,
             api_key: String::new(),
             api_mode: crate::llm::api::LlmApiMode::ChatCompletions,
             fallback_chain: Vec::new(),

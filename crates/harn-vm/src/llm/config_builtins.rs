@@ -868,6 +868,46 @@ fn parse_healthcheck_args(args: &[VmValue]) -> (String, Option<String>) {
     (provider, api_key)
 }
 
+/// Region-introspection block for multi-region providers, so a
+/// region-aware `.harn` gateway can discover which knobs to set and what
+/// is currently resolved without hard-coding provider internals.
+///
+/// Shape (additive — only present for region-capable providers):
+/// `region: { override_key: "region", envs: [<env var names>],
+/// resolved: <region|nil> }`. `override_key` names the chain-link field
+/// a `routing_policy({...})` route sets to pin a region; `envs` lists the
+/// environment variables consulted (in precedence order) when no
+/// override is given; `resolved` is the region the env/profile currently
+/// yields, or `nil` when nothing is configured yet.
+fn provider_region_value(provider_name: Option<&str>) -> Option<VmValue> {
+    let name = provider_name?;
+    let envs: &[&str] = match name {
+        "bedrock" => crate::llm::providers::bedrock::BEDROCK_REGION_ENV_VARS,
+        _ => return None,
+    };
+    let resolved = match name {
+        "bedrock" => crate::llm::providers::bedrock::current_env_region(),
+        _ => None,
+    };
+    let mut region = BTreeMap::new();
+    region.insert(
+        "override_key".to_string(),
+        VmValue::String(std::sync::Arc::from("region")),
+    );
+    region.insert(
+        "envs".to_string(),
+        string_list_to_vm_value(envs.iter().map(|s| s.to_string()).collect()),
+    );
+    region.insert(
+        "resolved".to_string(),
+        match resolved {
+            Some(value) => VmValue::String(std::sync::Arc::from(value)),
+            None => VmValue::Nil,
+        },
+    );
+    Some(VmValue::Dict(std::sync::Arc::new(region)))
+}
+
 /// Convert a ProviderDef to a VmValue dict for the llm_config builtin.
 fn provider_def_to_vm_value(
     provider_name: Option<&str>,
@@ -910,6 +950,9 @@ fn provider_def_to_vm_value(
         "auth_envs".to_string(),
         string_list_to_vm_value(llm_config::auth_env_names(&pdef.auth_env)),
     );
+    if let Some(region) = provider_region_value(provider_name) {
+        dict.insert("region".to_string(), region);
+    }
     dict.insert(
         "auth_available".to_string(),
         VmValue::Bool(
@@ -1904,6 +1947,50 @@ mod tests {
         .expect("query cleared");
         assert!(matches!(cleared, VmValue::Nil));
         crate::llm::reset_llm_state();
+    }
+
+    #[test]
+    fn llm_config_surfaces_bedrock_region_block() {
+        let mut out = String::new();
+        let args = vec![VmValue::String(std::sync::Arc::from("bedrock"))];
+        let result = llm_config_builtin(&args, &mut out).expect("bedrock config");
+        let cfg = result.as_dict().expect("config dict");
+
+        let region = cfg
+            .get("region")
+            .and_then(|v| v.as_dict())
+            .expect("region block present for bedrock");
+
+        // override_key documents the chain-link field a routing_policy
+        // route sets to pin a region.
+        assert_eq!(
+            region.get("override_key").map(|v| v.display()).as_deref(),
+            Some("region")
+        );
+
+        // envs lists the resolution precedence chain.
+        let envs = match region.get("envs") {
+            Some(VmValue::List(items)) => items.iter().map(|v| v.display()).collect::<Vec<_>>(),
+            other => panic!("expected envs list, got {other:?}"),
+        };
+        assert!(envs.contains(&"AWS_REGION".to_string()));
+        assert!(envs.contains(&"BEDROCK_REGION".to_string()));
+
+        // resolved is always present (string or nil) so a gateway can
+        // branch on "is a region already configured?".
+        assert!(region.contains_key("resolved"));
+    }
+
+    #[test]
+    fn llm_config_omits_region_block_for_single_region_provider() {
+        let mut out = String::new();
+        let args = vec![VmValue::String(std::sync::Arc::from("anthropic"))];
+        let result = llm_config_builtin(&args, &mut out).expect("anthropic config");
+        let cfg = result.as_dict().expect("config dict");
+        assert!(
+            !cfg.contains_key("region"),
+            "region block should only appear for multi-region providers"
+        );
     }
 
     #[test]

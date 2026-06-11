@@ -444,6 +444,7 @@ mod tests {
         LlmRequestPayload {
             provider: "vertex".to_string(),
             model: "gemini-1.5-pro-002".to_string(),
+            region: None,
             api_key: String::new(),
             api_mode: crate::llm::api::LlmApiMode::ChatCompletions,
             fallback_chain: Vec::new(),

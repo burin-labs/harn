@@ -19,6 +19,22 @@ use crate::value::VmError;
 
 pub(crate) struct BedrockProvider;
 
+/// Environment variables consulted (in order) when resolving the AWS
+/// region for a Bedrock call, before falling back to the AWS profile
+/// `config` file. Exposed so the catalog builtins can advertise which
+/// knobs a region-aware `.harn` gateway may set, and so a routing-policy
+/// chain link's `region` field documents the same vocabulary.
+pub(crate) const BEDROCK_REGION_ENV_VARS: &[&str] =
+    &["AWS_REGION", "AWS_DEFAULT_REGION", "BEDROCK_REGION"];
+
+/// Best-effort region currently resolved from the environment/profile,
+/// for catalog introspection. Returns `None` when nothing is configured
+/// (the live call would then require an explicit `region` override or an
+/// env var). Never errors — purely informational.
+pub(crate) fn current_env_region() -> Option<String> {
+    resolve_region(None).ok()
+}
+
 pub(crate) use crate::aws_sigv4::AwsSigV4Credentials as AwsCredentials;
 
 impl BedrockProvider {
@@ -93,7 +109,7 @@ impl BedrockProvider {
         request: &LlmRequestPayload,
         delta_tx: Option<DeltaSender>,
     ) -> Result<LlmResult, VmError> {
-        let region = resolve_region()?;
+        let region = resolve_region(request.region.as_deref())?;
         let credentials = resolve_aws_credentials().await?;
         let mut body = Self::build_request_body(request);
         apply_provider_overrides(&mut body, request.provider_overrides.as_ref());
@@ -256,7 +272,20 @@ fn bedrock_base_url(region: &str) -> String {
         .unwrap_or_else(|| format!("https://bedrock-runtime.{region}.amazonaws.com"))
 }
 
-fn resolve_region() -> Result<String, VmError> {
+/// Resolve the AWS region for a Bedrock call.
+///
+/// An explicit per-call override (from a routing-policy chain link's
+/// `region` field, threaded through `LlmRequestPayload::region`) wins
+/// over every environment/profile source. When the override is `None`
+/// or blank, resolution falls back to the historical env/profile chain,
+/// so existing scripts that never set a region are unaffected.
+fn resolve_region(override_region: Option<&str>) -> Result<String, VmError> {
+    if let Some(region) = override_region {
+        let trimmed = region.trim();
+        if !trimmed.is_empty() {
+            return Ok(trimmed.to_string());
+        }
+    }
     for env_name in ["AWS_REGION", "AWS_DEFAULT_REGION", "BEDROCK_REGION"] {
         if let Ok(region) = std::env::var(env_name) {
             if !region.trim().is_empty() {
@@ -528,6 +557,50 @@ mod tests {
     }
 
     #[test]
+    fn explicit_region_override_wins_over_env() {
+        // The override path returns before touching the environment, so
+        // this is deterministic regardless of ambient AWS_* vars.
+        assert_eq!(
+            resolve_region(Some("eu-west-1")).expect("override region"),
+            "eu-west-1"
+        );
+        // Surrounding whitespace is trimmed.
+        assert_eq!(
+            resolve_region(Some("  ap-southeast-2  ")).expect("trimmed region"),
+            "ap-southeast-2"
+        );
+    }
+
+    #[test]
+    fn blank_region_override_falls_back_to_env() {
+        let _guard = crate::llm::env_lock().lock().expect("env lock");
+        let saved: Vec<(&str, Option<String>)> = BEDROCK_REGION_ENV_VARS
+            .iter()
+            .map(|name| (*name, std::env::var(name).ok()))
+            .collect();
+        for name in BEDROCK_REGION_ENV_VARS {
+            std::env::remove_var(name);
+        }
+        std::env::set_var("AWS_REGION", "us-east-2");
+
+        // A `None` override falls through to the env chain...
+        assert_eq!(resolve_region(None).expect("env region"), "us-east-2");
+        // ...as does a blank/whitespace override (so an empty chain-link
+        // `region: ""` doesn't accidentally pin an invalid region).
+        assert_eq!(
+            resolve_region(Some("   ")).expect("env region"),
+            "us-east-2"
+        );
+
+        for (name, value) in saved {
+            match value {
+                Some(v) => std::env::set_var(name, v),
+                None => std::env::remove_var(name),
+            }
+        }
+    }
+
+    #[test]
     fn ini_parser_reads_profile_values() {
         let text = r"
 [default]
@@ -546,6 +619,7 @@ aws_secret_access_key = dev-secret
         LlmRequestPayload {
             provider: "bedrock".to_string(),
             model: "anthropic.claude-3-5-sonnet-20240620-v1:0".to_string(),
+            region: None,
             api_key: String::new(),
             api_mode: crate::llm::api::LlmApiMode::ChatCompletions,
             fallback_chain: Vec::new(),
