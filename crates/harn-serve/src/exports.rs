@@ -83,10 +83,17 @@ pub struct ExportedFunction {
     /// and hands the upgrade handle to the embedder's
     /// `SiteStreamProvider::upgrade`, which drives the socket. The marker
     /// is the seam for embedder routes that need a real WebSocket
-    /// connection (mirroring how `@stream` is the seam for SSE). It
-    /// conflicts with `@stream`/`@raw` (they target different provider
-    /// entry points), so declaring both drops `@ws`. The `.harn`
-    /// function body is a declaration-only stub.
+    /// connection (mirroring how `@stream` is the seam for SSE).
+    ///
+    /// `@ws` may be combined with `@stream` on one route: the adapter
+    /// sniffs the request's `Upgrade`/`Connection` headers and routes a
+    /// genuine WebSocket handshake to `SiteStreamProvider::upgrade` while
+    /// every other request falls through to `SiteStreamProvider::open`
+    /// (the SSE/stream path) — one route serving both transports (the
+    /// gateway `/acp` carve-out). `@ws` still conflicts with `@raw` (a
+    /// handshake carries no body, but `@raw` buffers one), so declaring
+    /// that pair drops `@ws`. The `.harn` function body is a
+    /// declaration-only stub.
     pub ws: bool,
 }
 
@@ -244,10 +251,11 @@ pub const WS_BAD_ARGS: &str = "HARN-SRV-014";
 /// `@ws` appears on a declaration without an HTTP route. A WebSocket
 /// upgrade only means something on a routed `pub fn`, so it is ignored.
 pub const WS_WITHOUT_ROUTE: &str = "HARN-SRV-015";
-/// `@ws` and `@stream`/`@raw` appear on the same declaration. They route
-/// to different provider entry points (a WebSocket upgrade vs. an
-/// SSE/raw response), so they contradict; `@ws` is dropped and the route
-/// behaves as `@stream`/`@raw`.
+/// `@ws` and `@raw` appear on the same declaration. A WebSocket
+/// handshake carries no request body, but `@raw` exists to buffer one, so
+/// they contradict; `@ws` is dropped and the route behaves as `@raw`.
+/// (`@ws` + `@stream` is *not* a conflict — it is the combined route that
+/// upgrades a genuine handshake and falls through to the stream otherwise.)
 pub const WS_CONFLICTS_WITH_STREAM_OR_RAW: &str = "HARN-SRV-016";
 
 impl std::fmt::Display for ExportDiagnostic {
@@ -311,8 +319,7 @@ impl ExportCatalog {
             let route = route_from_attributes(attrs, name, &mut diagnostics);
             let stream = stream_from_attributes(attrs, name, route.as_ref(), &mut diagnostics);
             let raw = raw_from_attributes(attrs, name, route.as_ref(), stream, &mut diagnostics);
-            let ws =
-                ws_from_attributes(attrs, name, route.as_ref(), stream || raw, &mut diagnostics);
+            let ws = ws_from_attributes(attrs, name, route.as_ref(), raw, &mut diagnostics);
             functions.insert(
                 name.clone(),
                 ExportedFunction {
@@ -358,7 +365,7 @@ impl ExportCatalog {
             // one is inert — diagnose it the same way as on an unrouted fn.
             let stream = stream_from_attributes(attrs, name, None, &mut diagnostics);
             let raw = raw_from_attributes(attrs, name, None, stream, &mut diagnostics);
-            let ws = ws_from_attributes(attrs, name, None, stream || raw, &mut diagnostics);
+            let ws = ws_from_attributes(attrs, name, None, raw, &mut diagnostics);
             functions
                 .entry(name.clone())
                 .or_insert_with(|| ExportedFunction {
@@ -679,17 +686,23 @@ fn raw_from_attributes(
 ///
 /// `@ws` mirrors `@stream` (a bare, route-only marker that turns the
 /// route into a provider-answered route), except the provider is handed
-/// a WebSocket upgrade handle instead of producing a response body. It
-/// conflicts with `@stream`/`@raw`: those target the provider's response
-/// entry point (`open`), while `@ws` targets the upgrade entry point
-/// (`upgrade`). Declaring `@ws` alongside either is diagnosed
-/// (`HARN-SRV-016`) and `@ws` is dropped — the route behaves as
-/// `@stream`/`@raw`.
+/// a WebSocket upgrade handle instead of producing a response body.
+///
+/// `@ws` *combines* with `@stream` on one route: the site adapter sniffs
+/// the request's upgrade headers and routes a genuine WebSocket handshake
+/// to the provider's `upgrade` entry point while every other request
+/// falls through to the `open` (SSE/stream) entry point — one route, two
+/// transports (the gateway `/acp` carve-out). Both flags are carried.
+///
+/// `@ws` still conflicts with `@raw`, though: a WebSocket handshake
+/// carries no request body, while `@raw` exists precisely to buffer one,
+/// so the pair contradicts. Declaring `@ws` alongside `@raw` is diagnosed
+/// (`HARN-SRV-016`) and `@ws` is dropped — the route behaves as `@raw`.
 fn ws_from_attributes(
     attrs: &[Attribute],
     fn_name: &str,
     route: Option<&RouteSpec>,
-    stream_or_raw: bool,
+    raw: bool,
     diagnostics: &mut Vec<ExportDiagnostic>,
 ) -> bool {
     let ws = bare_route_marker_from_attributes(
@@ -701,7 +714,7 @@ fn ws_from_attributes(
         WS_BAD_ARGS,
         WS_WITHOUT_ROUTE,
     );
-    if ws && stream_or_raw {
+    if ws && raw {
         let line = attrs
             .iter()
             .find(|attr| attr.name == "ws")
@@ -711,9 +724,10 @@ fn ws_from_attributes(
             code: WS_CONFLICTS_WITH_STREAM_OR_RAW,
             line,
             message: format!(
-                "`@ws` on `{fn_name}` conflicts with `@stream`/`@raw` (a WebSocket upgrade and an \
-                 SSE/raw response are different provider entry points); dropping `@ws` — the route \
-                 behaves as `@stream`/`@raw`"
+                "`@ws` on `{fn_name}` conflicts with `@raw` (a WebSocket handshake carries no \
+                 request body, but `@raw` buffers one); dropping `@ws` — the route behaves as \
+                 `@raw`. (Pair `@ws` with `@stream` instead for a route that is both a WebSocket \
+                 upgrade and an SSE/stream fallback.)"
             ),
         });
         return false;
@@ -1724,7 +1738,10 @@ pub fn helper(req: dict) -> dict { return req }
     }
 
     #[test]
-    fn ws_conflicting_with_stream_is_diagnosed_and_dropped() {
+    fn ws_combined_with_stream_carries_both_flags_without_diagnostic() {
+        // `@ws` + `@stream` is the *combined* route (one route that both
+        // upgrades a genuine WebSocket handshake and falls through to the
+        // SSE/stream path otherwise): both flags survive, no diagnostic.
         let catalog = catalog_from_source(
             r#"
 @stream
@@ -1733,12 +1750,15 @@ pub fn helper(req: dict) -> dict { return req }
 pub fn both(req: dict) -> dict { return http_ok({}) }
 "#,
         );
-        // `@stream` wins; `@ws` is dropped with a diagnostic.
         let function = catalog.function("both").expect("both");
         assert!(function.stream);
-        assert!(!function.ws);
+        assert!(function.ws);
+        assert!(!function.raw);
         let codes: Vec<&str> = catalog.diagnostics().iter().map(|d| d.code).collect();
-        assert_eq!(codes, vec![WS_CONFLICTS_WITH_STREAM_OR_RAW]);
+        assert!(
+            codes.is_empty(),
+            "combined @ws @stream must not be diagnosed, got {codes:?}"
+        );
     }
 
     #[test]
