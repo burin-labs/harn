@@ -138,10 +138,13 @@ fn has_swiftpm_option(args: &[String], option: &str) -> bool {
 fn render_profile(policy: &CapabilityPolicy) -> String {
     let developer_toolchain_read_roots = process_sandbox_developer_toolchain_read_roots(policy);
     let package_manager_read_roots = process_sandbox_package_manager_config_read_roots(policy);
+    let developer_toolchain_cache_roots =
+        super::process_sandbox_developer_toolchain_cache_roots(policy);
     render_profile_with_extra_read_roots(
         policy,
         &developer_toolchain_read_roots,
         &package_manager_read_roots,
+        &developer_toolchain_cache_roots,
     )
 }
 
@@ -149,6 +152,7 @@ fn render_profile_with_extra_read_roots(
     policy: &CapabilityPolicy,
     developer_toolchain_read_roots: &[std::path::PathBuf],
     package_manager_read_roots: &[std::path::PathBuf],
+    developer_toolchain_cache_roots: &[std::path::PathBuf],
 ) -> String {
     let roots = process_sandbox_roots(policy);
     let read_only_roots = process_sandbox_readonly_roots(policy);
@@ -170,7 +174,10 @@ fn render_profile_with_extra_read_roots(
             sandbox_profile_escape(root)
         ));
     }
-    for root in developer_toolchain_read_roots {
+    for root in developer_toolchain_read_roots
+        .iter()
+        .chain(developer_toolchain_cache_roots.iter())
+    {
         profile.push_str(&format!(
             "(allow file-read* (subpath \"{}\"))\n",
             sandbox_profile_escape(&root.display().to_string())
@@ -206,7 +213,10 @@ fn render_profile_with_extra_read_roots(
         for root in preset_write_roots(policy) {
             profile.push_str(&format!(" (subpath \"{}\")", sandbox_profile_escape(root)));
         }
-        for root in &policy_write_roots {
+        for root in policy_write_roots
+            .iter()
+            .chain(developer_toolchain_cache_roots.iter())
+        {
             profile.push_str(&format!(
                 " (subpath \"{}\")",
                 sandbox_profile_escape(&root.display().to_string())
@@ -411,6 +421,7 @@ mod tests {
             &macos_policy_with_workspace_ops(&["read_text", "write_text", "delete"]),
             &[],
             &package_roots,
+            &[],
         );
         let npmrc_path = super::super::package_manager_config_read_roots_for_home(temp_home.path())
             .into_iter()
@@ -455,6 +466,7 @@ mod tests {
             &macos_policy_with_workspace_ops(&["read_text", "write_text", "delete"]),
             &toolchain_roots,
             &[],
+            &[],
         );
 
         for path in [uv_path, rustup_path] {
@@ -468,6 +480,74 @@ mod tests {
                 "home toolchain root must stay read-only: {profile}"
             );
         }
+    }
+
+    #[test]
+    fn sandbox_profile_allows_jvm_ios_toolchain_caches_read_write() {
+        let temp_home = tempfile::tempdir().expect("temp home");
+        let cache_roots =
+            super::super::developer_toolchain_cache_write_roots_for_home(temp_home.path());
+        let gradle_path = cache_roots
+            .iter()
+            .find(|path| path.ends_with(std::path::Path::new(".gradle")))
+            .expect("gradle cache root")
+            .display()
+            .to_string();
+        let derived_data_path = cache_roots
+            .iter()
+            .find(|path| {
+                path.ends_with(std::path::Path::new("Library/Developer/Xcode/DerivedData"))
+            })
+            .expect("DerivedData cache root")
+            .display()
+            .to_string();
+
+        // Writable policy: the build can read AND write its toolchain caches.
+        // The writable roots all land on the single `(allow file-write* ...)`
+        // line, so isolate that line and assert each cache subpath is on it.
+        let writable = render_profile_with_extra_read_roots(
+            &macos_policy_with_workspace_ops(&["read_text", "write_text", "delete"]),
+            &[],
+            &[],
+            &cache_roots,
+        );
+        let write_line = writable
+            .lines()
+            .find(|line| line.starts_with("(allow file-write* (subpath"))
+            .expect("a multi-subpath file-write* allow line");
+        for path in [&gradle_path, &derived_data_path] {
+            let escaped = sandbox_profile_escape(path);
+            assert!(
+                writable.contains(&format!("(allow file-read* (subpath \"{escaped}\"))")),
+                "JVM/iOS toolchain cache should be readable: {writable}"
+            );
+            assert!(
+                write_line.contains(&format!("(subpath \"{escaped}\")")),
+                "JVM/iOS toolchain cache should be writable under a writable policy: {writable}"
+            );
+        }
+
+        // Read-only policy: caches are readable (dependency resolution) but
+        // never writable — the whole workspace-write block is skipped.
+        let read_only = render_profile_with_extra_read_roots(
+            &macos_policy_with_workspace_ops(&["read_text"]),
+            &[],
+            &[],
+            &cache_roots,
+        );
+        let gradle_escaped = sandbox_profile_escape(&gradle_path);
+        assert!(
+            read_only.contains(&format!(
+                "(allow file-read* (subpath \"{gradle_escaped}\"))"
+            )),
+            "toolchain cache should still be readable under a read-only policy: {read_only}"
+        );
+        assert!(
+            !read_only
+                .lines()
+                .any(|line| line.starts_with("(allow file-write* (subpath")),
+            "read-only policy must not emit a workspace file-write allow: {read_only}"
+        );
     }
 
     #[test]
