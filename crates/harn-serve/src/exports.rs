@@ -30,12 +30,27 @@ pub struct ExportedFunction {
     pub return_type: Option<TypeExpr>,
     pub input_schema: serde_json::Value,
     pub output_schema: Option<serde_json::Value>,
-    /// Scopes the caller's credential must carry to invoke this function.
-    /// Populated from `@scopes("...", "...")` attribute literals on the
-    /// declaration; empty when no attribute is present, meaning the route
-    /// is unrestricted beyond whatever scopes the auth method enforces
-    /// globally.
+    /// Scopes the caller's credential must carry to invoke this function,
+    /// for *every* HTTP method (the method-agnostic baseline). Populated
+    /// from un-prefixed `@scopes("...", "...")` literals on the
+    /// declaration; empty when no such literal is present, meaning the
+    /// route is unrestricted beyond whatever scopes the auth method
+    /// enforces globally. The dispatch-level scope check (API / A2A / MCP
+    /// and the site VM backstop) reads this baseline set, so it stays the
+    /// strict-subset floor of whatever a per-method route additionally
+    /// requires.
     pub required_scopes: BTreeSet<String>,
+    /// Additional scopes required only for specific HTTP methods, declared
+    /// with a method-prefixed `@scopes("GET read:x", "PUT write:x")`
+    /// literal (see [`scopes_from_attributes`] for the grammar). The site
+    /// adapter unions a request's resolved requirement as
+    /// `required_scopes ∪ method_scopes[method]`; methods absent from the
+    /// map fall back to the `required_scopes` baseline. Only the
+    /// `harn serve site` HTTP admission layer consults this map — the
+    /// dispatch-level adapters (API / A2A / MCP) have no per-method HTTP
+    /// surface and use `required_scopes` alone. Empty for the common
+    /// uniform case, keeping the per-method path zero-cost.
+    pub method_scopes: BTreeMap<String, BTreeSet<String>>,
     /// Rate / backpressure ceilings declared via `@limits(...)`. `None`
     /// when the route is unbounded — the dispatch path short-circuits
     /// cheaply when both `limits` and `budget` are absent.
@@ -315,6 +330,7 @@ impl ExportCatalog {
                 continue;
             }
 
+            let scopes = scopes_from_attributes(attrs, name, &mut diagnostics);
             let (limits, budget) = limits_and_budget_from_attributes(attrs);
             let route = route_from_attributes(attrs, name, &mut diagnostics);
             let stream = stream_from_attributes(attrs, name, route.as_ref(), &mut diagnostics);
@@ -331,7 +347,8 @@ impl ExportCatalog {
                     output_schema: return_type
                         .as_ref()
                         .and_then(harn_vm::json_schema_for_type_expr),
-                    required_scopes: scopes_from_attributes(attrs, name, &mut diagnostics),
+                    required_scopes: scopes.baseline,
+                    method_scopes: scopes.per_method,
                     limits,
                     budget,
                     route,
@@ -359,7 +376,7 @@ impl ExportCatalog {
             if has_public_exports && !*is_pub {
                 continue;
             }
-            let required_scopes = scopes_from_attributes(attrs, name, &mut diagnostics);
+            let scopes = scopes_from_attributes(attrs, name, &mut diagnostics);
             let (limits, budget) = limits_and_budget_from_attributes(attrs);
             // Pipelines never carry a route, so a `@stream` / `@raw` on
             // one is inert — diagnose it the same way as on an unrouted fn.
@@ -377,7 +394,8 @@ impl ExportCatalog {
                     output_schema: return_type
                         .as_ref()
                         .and_then(harn_vm::json_schema_for_type_expr),
-                    required_scopes,
+                    required_scopes: scopes.baseline,
+                    method_scopes: scopes.per_method,
                     limits,
                     budget,
                     // Pipelines are dispatch-only; they never carry an
@@ -439,18 +457,58 @@ fn pipeline_exported_params(params: &[String]) -> Vec<ExportedParam> {
         .collect()
 }
 
+/// The two scope buckets a `@scopes(...)` attribute set resolves into: a
+/// method-agnostic `baseline` required of every method, plus optional
+/// `per_method` extras keyed by uppercased HTTP method. The site adapter
+/// resolves a request's requirement as `baseline ∪ per_method[method]`;
+/// every other adapter reads `baseline` alone.
+#[derive(Default)]
+struct ParsedScopes {
+    baseline: BTreeSet<String>,
+    per_method: BTreeMap<String, BTreeSet<String>>,
+}
+
+/// HTTP methods recognized as a `@scopes` literal prefix. A first
+/// whitespace-delimited word matching one of these (case-insensitively)
+/// switches the literal from the uniform form to the per-method form;
+/// anything else is treated as a plain (baseline) scope, so an unusual
+/// scope string that happens to contain a space is never misread as a
+/// method prefix.
+const SCOPE_METHOD_PREFIXES: [&str; 7] =
+    ["GET", "PUT", "POST", "DELETE", "PATCH", "HEAD", "OPTIONS"];
+
 /// Collect scope literals from any `@scopes(...)` attributes on a
 /// declaration. Both positional and named arguments are accepted (named
 /// args are useful for ergonomics like `@scopes(read: "personas:read")`
 /// in callers that prefer key-value form); only string literals
 /// contribute. Multiple `@scopes` attributes on the same declaration
-/// union into one set.
+/// union together.
+///
+/// ## Grammar
+///
+/// Each string literal is one of:
+///
+/// * **Uniform** — `"read:x"`: a bare scope required of every HTTP method.
+///   This is the historic form and the default; it lands in the
+///   `baseline` set unchanged.
+/// * **Per-method** — `"GET read:x"`: an HTTP method (one of
+///   [`SCOPE_METHOD_PREFIXES`], case-insensitive), a single run of
+///   whitespace, then the scope. The scope is required *only* for that
+///   method, in addition to the baseline. The whitespace separator can
+///   never collide with a scope token (scopes use `:`-delimited words,
+///   never spaces), so the uniform form is unambiguous and untouched.
+///
+/// So `@scopes("read:x", "PUT write:x")` requires `read:x` of every
+/// method and additionally `write:x` of `PUT`. A method named in a
+/// per-method literal but never given its own baseline still inherits the
+/// baseline; a method *not* named anywhere falls back to the baseline
+/// alone (resolution lives in the site adapter).
 fn scopes_from_attributes(
     attrs: &[Attribute],
     fn_name: &str,
     diagnostics: &mut Vec<ExportDiagnostic>,
-) -> BTreeSet<String> {
-    let mut set = BTreeSet::new();
+) -> ParsedScopes {
+    let mut parsed = ParsedScopes::default();
     for attr in attrs {
         if attr.name != "scopes" {
             continue;
@@ -458,7 +516,14 @@ fn scopes_from_attributes(
         for arg in &attr.args {
             match &arg.value.node {
                 Node::StringLiteral(value) | Node::RawStringLiteral(value) => {
-                    set.insert(value.clone());
+                    match parse_scope_literal(value) {
+                        Some((method, scope)) => {
+                            parsed.per_method.entry(method).or_default().insert(scope);
+                        }
+                        None => {
+                            parsed.baseline.insert(value.clone());
+                        }
+                    }
                 }
                 // A non-string scope is silently dropped by the
                 // collector, which would leave the route *less*
@@ -474,7 +539,27 @@ fn scopes_from_attributes(
             }
         }
     }
-    set
+    parsed
+}
+
+/// Split a `@scopes` literal into an optional `(METHOD, scope)` pair.
+///
+/// Returns `Some((uppercased_method, scope))` when the literal begins with
+/// a recognized HTTP method ([`SCOPE_METHOD_PREFIXES`], case-insensitive)
+/// followed by whitespace and a non-empty scope; `None` for the uniform
+/// form (no method prefix, or a leading word that is not a method), which
+/// the caller files under the method-agnostic baseline verbatim.
+fn parse_scope_literal(literal: &str) -> Option<(String, String)> {
+    let (first, rest) = literal.split_once(char::is_whitespace)?;
+    let method = first.to_ascii_uppercase();
+    if !SCOPE_METHOD_PREFIXES.contains(&method.as_str()) {
+        return None;
+    }
+    let scope = rest.trim();
+    if scope.is_empty() {
+        return None;
+    }
+    Some((method, scope.to_string()))
 }
 
 /// Resolve the HTTP route a `pub fn` answers under `harn serve site`.
@@ -1166,6 +1251,61 @@ pub fn ping() -> string {
         );
         let ping = catalog.function("ping").expect("ping");
         assert!(ping.required_scopes.is_empty());
+    }
+
+    #[test]
+    fn export_catalog_splits_method_prefixed_scopes_from_the_baseline() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("server.harn");
+        std::fs::write(
+            &path,
+            r#"
+@scopes("base:read", "GET extra:get", "put extra:put")
+@route("*", "/r")
+pub fn r() -> string { return "ok" }
+"#,
+        )
+        .expect("write script");
+
+        let catalog = ExportCatalog::from_path(&path).expect("catalog");
+        let r = catalog.function("r").expect("r export");
+        // An un-prefixed literal stays in the method-agnostic baseline.
+        assert_eq!(r.required_scopes, BTreeSet::from(["base:read".to_string()]));
+        // A method prefix (case-insensitive) routes the scope into the
+        // per-method bucket under the uppercased method key.
+        assert_eq!(
+            r.method_scopes.get("GET"),
+            Some(&BTreeSet::from(["extra:get".to_string()]))
+        );
+        assert_eq!(
+            r.method_scopes.get("PUT"),
+            Some(&BTreeSet::from(["extra:put".to_string()]))
+        );
+    }
+
+    #[test]
+    fn export_catalog_keeps_colon_scopes_uniform_without_a_method_prefix() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("server.harn");
+        // A leading word that is *not* an HTTP method (here a normal
+        // `scope:verb` token) is never misread as a per-method prefix —
+        // the historic uniform form is untouched.
+        std::fs::write(
+            &path,
+            r#"
+@scopes("personas:read")
+pub fn r() -> string { return "ok" }
+"#,
+        )
+        .expect("write script");
+
+        let catalog = ExportCatalog::from_path(&path).expect("catalog");
+        let r = catalog.function("r").expect("r export");
+        assert_eq!(
+            r.required_scopes,
+            BTreeSet::from(["personas:read".to_string()])
+        );
+        assert!(r.method_scopes.is_empty());
     }
 
     #[test]

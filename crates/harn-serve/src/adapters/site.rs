@@ -129,6 +129,7 @@
 //! conflict: a handshake carries no body, but `@raw` exists to buffer
 //! one.)
 
+use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet};
 use std::net::{IpAddr, SocketAddr};
 use std::sync::Arc;
@@ -467,9 +468,14 @@ struct SiteRoute {
     /// The function's declared [`RouteSpec`] (method may be `*`),
     /// handed to the embedder's [`SiteAuth`] hook.
     spec: RouteSpec,
-    /// `@scopes(...)` declared on the function; empty means no scope
-    /// requirement (public, as far as scopes are concerned).
+    /// Method-agnostic `@scopes(...)` baseline declared on the function;
+    /// empty means no scope requirement (public, as far as scopes are
+    /// concerned). Required of every method; see [`SiteRoute::scopes_for`].
     required_scopes: BTreeSet<String>,
+    /// Per-method `@scopes("GET read:x", ...)` extras, keyed by uppercased
+    /// HTTP method. Unioned onto `required_scopes` for the matching method;
+    /// empty for the common uniform route. See [`SiteRoute::scopes_for`].
+    method_scopes: BTreeMap<String, BTreeSet<String>>,
     /// `@stream` marker: after admission, hand the request head to the
     /// [`SiteStreamProvider`] instead of dispatching into the VM. The
     /// request body is never read.
@@ -488,6 +494,27 @@ struct SiteRoute {
     /// through to the [`SiteStreamProvider::open`] (`stream`) path. Still
     /// mutually exclusive with `raw` (a handshake carries no body).
     ws: bool,
+}
+
+impl SiteRoute {
+    /// The scopes this route requires of `method`: the method-agnostic
+    /// `required_scopes` baseline, unioned with any per-method extras
+    /// declared for that method. A method with no extras (the uniform
+    /// case) resolves to the baseline alone — so a route that never used
+    /// the per-method `@scopes` form behaves exactly as before. The method
+    /// is matched on its uppercased name, the same key the parser stores.
+    ///
+    /// Returns a borrowed `Cow` to keep the uniform path allocation-free:
+    /// only a genuinely per-method route (a non-empty `method_scopes`
+    /// entry on top of a non-empty baseline) builds an owned union.
+    fn scopes_for(&self, method: &Method) -> Cow<'_, BTreeSet<String>> {
+        match self.method_scopes.get(method.as_str()) {
+            None => Cow::Borrowed(&self.required_scopes),
+            Some(extra) if extra.is_empty() => Cow::Borrowed(&self.required_scopes),
+            Some(extra) if self.required_scopes.is_empty() => Cow::Borrowed(extra),
+            Some(extra) => Cow::Owned(self.required_scopes.union(extra).cloned().collect()),
+        }
+    }
 }
 
 /// State shared by every site route handler: the dispatch executor plus
@@ -557,6 +584,7 @@ fn build_site_router(
             function: function.name.clone(),
             spec: spec.clone(),
             required_scopes: function.required_scopes.clone(),
+            method_scopes: function.method_scopes.clone(),
             stream: function.stream,
             raw: function.raw,
             ws: function.ws,
@@ -594,6 +622,33 @@ fn build_site_router(
         .layer(DefaultBodyLimit::max(DEFAULT_HTTP_BODY_LIMIT_BYTES))
         .with_state(state);
     Ok(crate::apply_transport_layers(router, transport))
+}
+
+/// Scope back-stop for provider routes (`@ws` / `@stream` / `@raw`).
+///
+/// These routes never build a `CallRequest`, so the dispatch-level
+/// `AuthPolicy` scope check that back-stops a plain route cannot cover
+/// them. With a `SiteAuth` hook installed, the admission check at the top
+/// of [`site_dispatch`] already compared the method-resolved requirement
+/// against the hook-granted scopes; this helper is the *no-hook* case —
+/// no identity means no granted scopes, so any non-empty requirement
+/// refuses, matching the allow-all default a plain route would hit at
+/// dispatch. Returns `Some(403)` to short-circuit, or `None` to admit.
+fn provider_scope_backstop(
+    auth_context: Option<&SiteAuthContext>,
+    required_scopes: &BTreeSet<String>,
+    request_id: &str,
+) -> Option<Response> {
+    if auth_context.is_none() && !required_scopes.is_empty() {
+        return Some(axum_response_from_dispatch_error(
+            DispatchError::Forbidden {
+                required: required_scopes.clone(),
+                granted: BTreeSet::new(),
+            },
+            request_id,
+        ));
+    }
+    None
 }
 
 /// Single entry point for every site route. Resolves the handler,
@@ -640,15 +695,19 @@ async fn site_dispatch(State(state): State<SiteState>, request: Request) -> Resp
     // dispatch. `Deny` short-circuits with the embedder's response
     // verbatim; `Allow` is then checked against the route's `@scopes`
     // (a route without `@scopes` has no scope requirement).
+    // The scopes this route requires of *this* request's method: the
+    // method-agnostic baseline unioned with any per-method `@scopes`
+    // extras (uniform routes resolve to the baseline, allocation-free).
+    let required_scopes = route.scopes_for(&method);
     let auth_context = match state.auth.as_ref() {
         None => None,
         Some(hook) => match hook.authenticate(&parts, &route.spec).await {
             SiteAuthOutcome::Deny(response) => return *response,
             SiteAuthOutcome::Allow(context) => {
-                if !route.required_scopes.is_subset(&context.scopes) {
+                if !required_scopes.is_subset(&context.scopes) {
                     return axum_response_from_dispatch_error(
                         DispatchError::Forbidden {
-                            required: route.required_scopes.clone(),
+                            required: required_scopes.into_owned(),
                             granted: context.scopes,
                         },
                         &request_id,
@@ -677,18 +736,12 @@ async fn site_dispatch(State(state): State<SiteState>, request: Request) -> Resp
     // behavior: a non-upgrade request is refused by axum's extractor with
     // the correct 4xx (there is no stream path to fall through to).
     if route.ws && (is_websocket_upgrade(&parts.headers) || !route.stream) {
-        // Same admission back-stop as `@stream`/`@raw`: a `@ws` route
-        // never builds a `CallRequest`, so the dispatch-level scope
-        // check cannot cover it. With no hook there is no identity and
-        // no granted scopes, so any scope requirement refuses.
-        if auth_context.is_none() && !route.required_scopes.is_empty() {
-            return axum_response_from_dispatch_error(
-                DispatchError::Forbidden {
-                    required: route.required_scopes.clone(),
-                    granted: BTreeSet::new(),
-                },
-                &request_id,
-            );
+        // Same admission back-stop as `@stream`/`@raw`, resolved per
+        // method (see `provider_scope_backstop`).
+        if let Some(response) =
+            provider_scope_backstop(auth_context.as_ref(), &required_scopes, &request_id)
+        {
+            return response;
         }
         let Some(provider) = state.stream_provider.as_ref() else {
             // Unreachable: router construction refuses a @ws route
@@ -735,20 +788,12 @@ async fn site_dispatch(State(state): State<SiteState>, request: Request) -> Resp
     // never reads one, `@raw` buffers it and hands the exact bytes over.
     if route.stream || route.raw {
         // A provider route never builds a `CallRequest`, so the
-        // dispatch-level `AuthPolicy` scope check cannot back-stop it
-        // the way it does for plain routes. With a hook installed the
-        // admission above already compared `@scopes` against the
-        // hook-granted set; without one, no identity means no granted
-        // scopes, and any scope requirement refuses — matching the
-        // allow-all default a plain route would hit at dispatch.
-        if auth_context.is_none() && !route.required_scopes.is_empty() {
-            return axum_response_from_dispatch_error(
-                DispatchError::Forbidden {
-                    required: route.required_scopes.clone(),
-                    granted: BTreeSet::new(),
-                },
-                &request_id,
-            );
+        // dispatch-level `AuthPolicy` scope check cannot back-stop it the
+        // way it does for plain routes (see `provider_scope_backstop`).
+        if let Some(response) =
+            provider_scope_backstop(auth_context.as_ref(), &required_scopes, &request_id)
+        {
+            return response;
         }
         let Some(provider) = state.stream_provider.as_ref() else {
             // Unreachable: router construction refuses a @stream/@raw
