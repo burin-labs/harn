@@ -596,6 +596,9 @@ impl Formatter<'_> {
         if arm.body.len() == 1 && crate::helpers::is_simple_expr(&arm.body[0]) {
             let expr = self.format_expr(&arm.body[0], self.indent);
             self.writeln(&format!("{pattern}{guard} -> {{ {expr} }}"));
+            // Keep a same-line comment on the arm (`1 -> { x } // c`)
+            // attached; unclaimed it would be flushed to the end of file.
+            self.attach_trailing_comment(arm.body[0].span.end_line);
         } else {
             self.writeln(&format!("{pattern}{guard} -> {{"));
             self.indent();

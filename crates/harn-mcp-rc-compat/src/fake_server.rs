@@ -176,6 +176,26 @@ async fn post_mcp(
         .and_then(JsonValue::as_str)
         .unwrap_or_default()
         .to_string();
+    if behavior == FakeServerBehavior::HeaderMismatch {
+        // Strict-server slice: validate the RC `Mcp-Method` / `Mcp-Name`
+        // headers against the body exactly like a real RC server and
+        // answer `-32600` on disagreement. Reuses the production
+        // negotiation helper so the fake can't drift from the spec.
+        let header_lookup = |name: &str| headers.get(name).and_then(|value| value.to_str().ok());
+        let body_name = body
+            .pointer("/params/name")
+            .and_then(JsonValue::as_str)
+            .filter(|name| !name.is_empty());
+        if let Err(error_body) = mcp_protocol::negotiate_rc_http_request(
+            header_lookup,
+            body.get("method").and_then(JsonValue::as_str),
+            body_name,
+            &id,
+        ) {
+            drop(guard);
+            return json_response_with_protocol(error_body, DRAFT_PROTOCOL_VERSION);
+        }
+    }
     let response = handle_request(&mut guard, behavior, &id, &method, &body);
     drop(guard);
     match response {

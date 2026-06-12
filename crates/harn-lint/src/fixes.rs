@@ -252,6 +252,26 @@ pub(crate) fn is_pure_expression(node: &Node) -> bool {
     }
 }
 
+/// True when the expression has an optional-chaining link (`?.`, `?.()`,
+/// `?[]`) anywhere along its receiver chain, i.e. it can evaluate to `nil`
+/// because some receiver was nil. For such expressions `expr == false` /
+/// `expr != true` are presence-sensitive tests, not redundant boolean
+/// noise: `nil == false` is `false`, while the "simplified" `!expr` is
+/// `true` for nil. Only the receiver chain propagates nil, so call/index
+/// arguments are not inspected.
+pub(crate) fn contains_optional_chaining(node: &Node) -> bool {
+    match node {
+        Node::OptionalPropertyAccess { .. }
+        | Node::OptionalMethodCall { .. }
+        | Node::OptionalSubscriptAccess { .. } => true,
+        Node::PropertyAccess { object, .. }
+        | Node::MethodCall { object, .. }
+        | Node::SubscriptAccess { object, .. }
+        | Node::SliceAccess { object, .. } => contains_optional_chaining(&object.node),
+        _ => false,
+    }
+}
+
 /// Conservative NaN analysis for the self-comparison autofix. Returns true
 /// only when the expression provably cannot evaluate to a NaN float, nor to a
 /// list/dict transitively containing one.

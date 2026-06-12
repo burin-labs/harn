@@ -244,14 +244,34 @@ impl Formatter<'_> {
             Node::ListLiteral(elems) => {
                 // Children land at `indent + 1` if the list wraps; render them
                 // there so their own internal wrapping is at the right depth.
-                let rendered = elems
+                let mut from_line = node.span.line + 1;
+                let items = elems
                     .iter()
-                    .map(|e| self.format_expr(e, indent + 1))
+                    .map(|e| {
+                        let body = self.format_expr(e, indent + 1);
+                        let item = self.commented_item(
+                            body,
+                            from_line,
+                            e.span.line,
+                            e.span.end_line,
+                            node.span.end_line,
+                        );
+                        from_line = e.span.end_line + 1;
+                        item
+                    })
                     .collect::<Vec<_>>();
-                let items = self.format_comma_sequence(rendered, 1, indent);
+                let items = self.format_comma_sequence_commented(items, 1, indent);
                 format!("[{items}]")
             }
-            Node::DictLiteral(entries) => self.format_dict_entries(entries, indent),
+            Node::DictLiteral(entries) => {
+                let items = self.format_dict_entry_list(
+                    entries,
+                    1,
+                    indent,
+                    (node.span.line, node.span.end_line),
+                );
+                format!("{{{items}}}")
+            }
             Node::RangeExpr {
                 start,
                 end,
@@ -293,7 +313,12 @@ impl Formatter<'_> {
                 struct_name,
                 fields,
             } => {
-                let items = self.format_dict_entry_list(fields, struct_name.len() + 2, indent);
+                let items = self.format_dict_entry_list(
+                    fields,
+                    struct_name.len() + 2,
+                    indent,
+                    (node.span.line, node.span.end_line),
+                );
                 format!("{struct_name} {{{items}}}")
             }
             Node::DeferStmt { body } => self.format_block_expr("defer {", body, indent),
@@ -337,7 +362,16 @@ impl Formatter<'_> {
                     if arm.body.len() == 1 && is_simple_expr(&arm.body[0]) {
                         let expr = self.format_expr(&arm.body[0], arm_indent);
                         result.push_str(&indent_str);
-                        result.push_str(&format!("{pattern}{guard_str} -> {{ {expr} }}\n"));
+                        result.push_str(&format!("{pattern}{guard_str} -> {{ {expr} }}"));
+                        // Keep a same-line comment on the arm (`1 -> { x } // c`)
+                        // attached; unclaimed it would be flushed to EOF.
+                        if let Some(trail) =
+                            self.take_trailing_comment_for_line(arm.body[0].span.end_line)
+                        {
+                            result.push_str("  ");
+                            result.push_str(&trail);
+                        }
+                        result.push('\n');
                     } else {
                         result.push_str(&indent_str);
                         result.push_str(&format!("{pattern}{guard_str} -> {{\n"));
@@ -737,30 +771,37 @@ impl Formatter<'_> {
         }
     }
 
-    fn format_dict_entries(&self, entries: &[harn_parser::DictEntry], indent: usize) -> String {
-        let items = self.format_dict_entry_list(entries, 1, indent);
-        format!("{{{items}}}")
-    }
-
     pub(super) fn format_dict_entry_list(
         &self,
         entries: &[harn_parser::DictEntry],
         prefix_len: usize,
         indent: usize,
+        (open_line, close_line): (usize, usize),
     ) -> String {
         // Each entry value (and computed key) may itself wrap; if it does, it
         // lands at `indent + 1`, so render children at that depth.
-        let rendered = entries
+        let mut from_line = open_line + 1;
+        let items = entries
             .iter()
             .map(|e| {
-                if let Node::Spread(inner) = &e.value.node {
-                    return format!("...{}", self.format_expr(inner, indent + 1));
-                }
-                let k = self.format_dict_key(&e.key, indent + 1);
-                let v = self.format_expr(&e.value, indent + 1);
-                format!("{k}: {v}")
+                let body = if let Node::Spread(inner) = &e.value.node {
+                    format!("...{}", self.format_expr(inner, indent + 1))
+                } else {
+                    let k = self.format_dict_key(&e.key, indent + 1);
+                    let v = self.format_expr(&e.value, indent + 1);
+                    format!("{k}: {v}")
+                };
+                let item = self.commented_item(
+                    body,
+                    from_line,
+                    e.key.span.line.min(e.value.span.line),
+                    e.value.span.end_line,
+                    close_line,
+                );
+                from_line = e.value.span.end_line + 1;
+                item
             })
             .collect::<Vec<_>>();
-        self.format_comma_sequence(rendered, prefix_len, indent)
+        self.format_comma_sequence_commented(items, prefix_len, indent)
     }
 }

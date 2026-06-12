@@ -1289,7 +1289,7 @@ impl TypeChecker {
             TypeExpr::DictType(_, value) => Some(*value.clone()),
             TypeExpr::Shape(fields) => {
                 if let Node::StringLiteral(key) = &index.node {
-                    Self::shape_property_type(fields, key, false)
+                    Self::shape_property_type(fields, key, optional)
                 } else {
                     None
                 }

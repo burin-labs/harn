@@ -823,11 +823,14 @@ New child scopes are created for:
 - `for` loop bodies (loop variable is mutable)
 - `while` loop iterations
 - `parallel`, `parallel each`, and `parallel settle` task bodies (isolated interpreter per task)
+- `if`/`else` branch bodies and `match` arm bodies
 - `try`/`catch` blocks (catch body gets its own child scope with optional error variable)
 - Closure invocations (child of the *captured* environment, not the call site)
 - `block` nodes
 
-Control flow statements (`if`/`else`, `match`) execute in the current scope without creating a new child scope.
+Control flow *headers* (`if` conditions, `match` scrutinees) evaluate in the current
+scope, but each branch or arm body is its own child scope: bindings declared inside
+shadow outer names and do not leak past the body.
 
 ## Destructuring patterns
 

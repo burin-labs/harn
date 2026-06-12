@@ -611,8 +611,33 @@ fn line_for(source: &str, offset: usize) -> usize {
 }
 
 fn column_for(source: &str, offset: usize) -> usize {
+    // 1-based *character* column: byte arithmetic would overshoot on any
+    // line containing multibyte characters before the offset.
     let upto = &source[..offset.min(source.len())];
-    upto.rfind('\n')
-        .map(|idx| offset - idx)
-        .unwrap_or(offset + 1)
+    let line_start = upto.rfind('\n').map(|idx| idx + 1).unwrap_or(0);
+    upto[line_start..].chars().count() + 1
+}
+
+#[cfg(test)]
+mod position_tests {
+    use super::column_for;
+
+    #[test]
+    fn column_counts_chars_not_bytes() {
+        // 'é' is 2 bytes / 1 char: 'b' sits at byte 4 but char column 4.
+        let first = "aé b";
+        let off = first.find('b').unwrap();
+        assert_eq!(column_for(first, off), 4);
+
+        // Same shape on a later line: line-relative, still char-based.
+        let multi = "x\naé b";
+        let off = multi.rfind('b').unwrap();
+        assert_eq!(column_for(multi, off), 4);
+    }
+
+    #[test]
+    fn column_is_one_based_at_line_start() {
+        assert_eq!(column_for("abc", 0), 1);
+        assert_eq!(column_for("a\nbc", 2), 1);
+    }
 }

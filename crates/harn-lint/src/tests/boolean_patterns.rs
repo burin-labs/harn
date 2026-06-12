@@ -53,6 +53,28 @@ if x == 1 { log("one") }
 }
 
 #[test]
+fn test_no_comparison_to_bool_for_optional_chaining() {
+    // `d?.enabled == false` is a presence test: it is `false` when the
+    // chain is nil, while the rewrite `!d?.enabled` would be `true`.
+    // The rule (and its autofix) must not fire on optional-chained
+    // operands, including chains continuing past the `?.` link.
+    for expr in [
+        "d?.enabled == false",
+        "false == d?.enabled",
+        "d?.flags.strict != true",
+        "d?[\"enabled\"] == false",
+    ] {
+        let diags = lint_source(&format!(
+            "pipeline default(task) {{\n  let d = {{}}\n  if {expr} {{ log(\"x\") }}\n}}"
+        ));
+        assert!(
+            !has_rule(&diags, "comparison-to-bool"),
+            "should not trigger for `{expr}`: {diags:?}"
+        );
+    }
+}
+
+#[test]
 fn test_constant_logical_operand_autofix() {
     let source = "pipeline default(task) {\n  let x = true\n  let a = x || true\n  let b = x && false\n  log(a)\n  log(b)\n}";
     let diags = lint_source(source);
