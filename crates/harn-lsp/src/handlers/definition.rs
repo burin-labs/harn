@@ -16,7 +16,7 @@ use crate::constants::is_builtin;
 use crate::helpers::{
     lsp_position_to_offset, offset_to_position, span_to_full_range, word_at_position,
 };
-use crate::references::find_references;
+use crate::references::{find_references, identifier_token_spans_within};
 use crate::symbols::HarnSymbolKind;
 use crate::HarnLsp;
 
@@ -260,7 +260,15 @@ impl HarnLsp {
             return Ok(None);
         }
 
-        let locations: Vec<Location> = ref_spans
+        // Raw AST spans cover whole declarations for definition sites;
+        // narrow each hit to the identifier token so the references list
+        // doesn't highlight entire functions.
+        let token_spans = identifier_token_spans_within(&source, &word, &ref_spans);
+        if token_spans.is_empty() {
+            return Ok(None);
+        }
+
+        let locations: Vec<Location> = token_spans
             .iter()
             .map(|span| Location {
                 uri: uri.clone(),
@@ -315,30 +323,17 @@ impl HarnLsp {
 
         // AST reference spans cover whole declarations, so rescan the lexer
         // tokens within each span to pin down the exact identifier position.
-        let mut edits = Vec::new();
-        let mut seen_offsets = std::collections::HashSet::new();
-
-        let mut lexer = Lexer::new(&source);
-        if let Ok(tokens) = lexer.tokenize() {
-            for token in &tokens {
-                if let TokenKind::Identifier(ref name) = token.kind {
-                    if name == &old_name && !seen_offsets.contains(&token.span.start) {
-                        let in_ref = ref_spans
-                            .iter()
-                            .any(|rs| token.span.start >= rs.start && token.span.end <= rs.end);
-                        if in_ref {
-                            seen_offsets.insert(token.span.start);
-                            let start = offset_to_position(&source, token.span.start);
-                            let end = offset_to_position(&source, token.span.end);
-                            edits.push(TextEdit {
-                                range: Range { start, end },
-                                new_text: new_name.clone(),
-                            });
-                        }
-                    }
-                }
-            }
-        }
+        let mut edits: Vec<TextEdit> =
+            identifier_token_spans_within(&source, &old_name, &ref_spans)
+                .into_iter()
+                .map(|span| TextEdit {
+                    range: Range {
+                        start: offset_to_position(&source, span.start),
+                        end: offset_to_position(&source, span.end),
+                    },
+                    new_text: new_name.clone(),
+                })
+                .collect();
 
         if edits.is_empty() {
             return Ok(None);

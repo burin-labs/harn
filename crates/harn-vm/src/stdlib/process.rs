@@ -1239,7 +1239,7 @@ mod tests {
     fn runtime_paths_uses_configurable_state_roots() {
         let _runtime_paths_env_lock = crate::runtime_paths::test_env_lock()
             .lock()
-            .expect("runtime paths env lock");
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         let _env_guard = RuntimePathsEnvGuard::capture();
         let base =
             std::env::temp_dir().join(format!("harn-process-runtime-{}", uuid::Uuid::now_v7()));

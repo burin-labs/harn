@@ -648,7 +648,7 @@ fn html_response(status: u16, message: &str) -> String {
         400 => ("Authorization Failed", "#c76b19", "Retry Needed"),
         _ => ("Callback Error", "#b42318", "Invalid Request"),
     };
-    let message = html_escape(message);
+    let message = crate::format::escape_html(message);
     format!(
         r#"{status_line}
 Content-Type: text/html; charset=utf-8
@@ -682,21 +682,6 @@ p {{ margin: 0; color: #c6cfdb; font-size: 15px; line-height: 1.55; }}
 </body>
 </html>"#
     )
-}
-
-fn html_escape(text: &str) -> String {
-    let mut escaped = String::with_capacity(text.len());
-    for ch in text.chars() {
-        match ch {
-            '&' => escaped.push_str("&amp;"),
-            '<' => escaped.push_str("&lt;"),
-            '>' => escaped.push_str("&gt;"),
-            '"' => escaped.push_str("&quot;"),
-            '\'' => escaped.push_str("&#39;"),
-            _ => escaped.push(ch),
-        }
-    }
-    escaped
 }
 
 #[cfg(test)]

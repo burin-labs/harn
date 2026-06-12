@@ -8,14 +8,19 @@ pub(super) async fn run(args: TryArgs, provider: &str, model: &str) {
 
     use crate::commands::run::{execute_run, CliLlmMockMode, RunOutcome, RunProfileOptions};
 
-    let escaped = escape_for_harn_string(&args.prompt);
+    let escaped = harn_lexer::escape_string_literal(&args.prompt);
     let max_iters = args.max_iterations;
-    let provider = escape_for_harn_string(provider);
-    let model = escape_for_harn_string(model);
+    let provider = harn_lexer::escape_string_literal(provider);
+    let model = harn_lexer::escape_string_literal(model);
     let tool_format_line = args
         .tool_format
         .as_deref()
-        .map(|value| format!("    tool_format: \"{}\",\n", escape_for_harn_string(value)))
+        .map(|value| {
+            format!(
+                "    tool_format: \"{}\",\n",
+                harn_lexer::escape_string_literal(value)
+            )
+        })
         .unwrap_or_default();
     let override_reason_line = args
         .override_reason
@@ -23,7 +28,7 @@ pub(super) async fn run(args: TryArgs, provider: &str, model: &str) {
         .map(|value| {
             format!(
                 "    tool_format_override_reason: \"{}\",\n",
-                escape_for_harn_string(value)
+                harn_lexer::escape_string_literal(value)
             )
         })
         .unwrap_or_default();
@@ -74,12 +79,4 @@ pub(super) async fn run(args: TryArgs, provider: &str, model: &str) {
     if outcome.exit_code != 0 {
         std::process::exit(outcome.exit_code);
     }
-}
-
-fn escape_for_harn_string(s: &str) -> String {
-    s.replace('\\', "\\\\")
-        .replace('"', "\\\"")
-        .replace('\n', "\\n")
-        .replace('\r', "\\r")
-        .replace('\t', "\\t")
 }

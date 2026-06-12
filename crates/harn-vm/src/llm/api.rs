@@ -33,7 +33,8 @@ pub(crate) use auth::apply_auth_headers;
 pub(crate) use completion::vm_call_completion_full;
 pub use context_window::fetch_provider_max_context;
 pub(crate) use errors::{
-    classify_llm_error, classify_provider_http_error, LlmErrorInfo, LlmErrorKind, LlmErrorReason,
+    classify_llm_error, classify_provider_http_error, retry_after_header, LlmErrorInfo,
+    LlmErrorKind, LlmErrorReason,
 };
 pub(crate) use ollama::apply_ollama_runtime_settings;
 pub(crate) use ollama::ollama_unload_grace_duration_from_env;
@@ -430,7 +431,7 @@ mod tests {
         vm_call_llm_full, vm_call_llm_full_streaming, vm_call_llm_full_streaming_offthread,
         LlmRequestPayload, ThinkingConfig,
     };
-    use crate::llm::env_lock;
+    use crate::llm::env_guard;
 
     struct ScopedEnvVar {
         key: &'static str,
@@ -582,7 +583,7 @@ mod tests {
 
     #[test]
     fn disabled_llm_calls_reject_real_provider_before_transport() {
-        let _guard = env_lock().lock().expect("env lock");
+        let _guard = env_guard();
         let _disabled = ScopedEnvVar::set(crate::llm::LLM_CALLS_DISABLED_ENV, "1");
         let runtime = tokio::runtime::Builder::new_current_thread()
             .enable_all()
@@ -619,7 +620,7 @@ mod tests {
 
     #[test]
     fn disabled_llm_calls_still_allow_mock_provider() {
-        let _guard = env_lock().lock().expect("env lock");
+        let _guard = env_guard();
         let _disabled = ScopedEnvVar::set(crate::llm::LLM_CALLS_DISABLED_ENV, "1");
         let runtime = tokio::runtime::Builder::new_current_thread()
             .enable_all()
@@ -638,7 +639,7 @@ mod tests {
             install_fake_llm_script, FakeLlmEvent, FakeLlmScript, FakeStopReason,
         };
 
-        let _guard = env_lock().lock().expect("env lock");
+        let _guard = env_guard();
         // Even with HARN_LLM_CALLS_DISABLED, the fake must pass through —
         // it never hits the network, so it must not be gated by that env.
         let _disabled = ScopedEnvVar::set(crate::llm::LLM_CALLS_DISABLED_ENV, "1");
@@ -1031,7 +1032,7 @@ mod tests {
 
     #[test]
     fn anthropic_interleaved_thinking_beta_header_is_sent_for_supported_model() {
-        let _guard = env_lock().lock().expect("env lock");
+        let _guard = env_guard();
         let _allow_llm_transport = allow_stubbed_llm_transport();
         let runtime = tokio::runtime::Builder::new_current_thread()
             .enable_all()
@@ -1089,7 +1090,7 @@ mod tests {
 
     #[test]
     fn offthread_streaming_completes_inside_localset() {
-        let _guard = env_lock().lock().expect("env lock");
+        let _guard = env_guard();
         let _allow_llm_transport = allow_stubbed_llm_transport();
         let runtime = tokio::runtime::Builder::new_multi_thread()
             .enable_all()
@@ -1144,7 +1145,7 @@ mod tests {
 
     #[test]
     fn ollama_empty_content_done_frame_retries_once() {
-        let _guard = env_lock().lock().expect("env lock");
+        let _guard = env_guard();
         let _allow_llm_transport = allow_stubbed_llm_transport();
         let runtime = tokio::runtime::Builder::new_multi_thread()
             .enable_all()
@@ -1194,7 +1195,7 @@ mod tests {
 
     #[test]
     fn ollama_chat_applies_env_runtime_overrides() {
-        let _guard = env_lock().lock().expect("env lock");
+        let _guard = env_guard();
         let _allow_llm_transport = allow_stubbed_llm_transport();
         let runtime = tokio::runtime::Builder::new_multi_thread()
             .enable_all()
@@ -1254,7 +1255,7 @@ mod tests {
 
     #[test]
     fn ollama_qwen_text_tool_route_bypasses_chat_parser_with_raw_generate() {
-        let _guard = env_lock().lock().expect("env lock");
+        let _guard = env_guard();
         let _allow_llm_transport = allow_stubbed_llm_transport();
         let runtime = tokio::runtime::Builder::new_multi_thread()
             .enable_all()
@@ -1326,7 +1327,7 @@ mod tests {
 
     #[test]
     fn ollama_warmup_applies_shared_runtime_settings() {
-        let _guard = env_lock().lock().expect("env lock");
+        let _guard = env_guard();
         let _allow_llm_transport = allow_stubbed_llm_transport();
         let runtime = tokio::runtime::Builder::new_multi_thread()
             .enable_all()
@@ -1389,7 +1390,7 @@ mod tests {
         extra_headers: &'static str,
         body: &'static str,
     ) -> String {
-        let _guard = env_lock().lock().expect("env lock");
+        let _guard = env_guard();
         let _allow_llm_transport = allow_stubbed_llm_transport();
         let server = spawn_openai_error_stub(status_line, extra_headers, body);
         let addr = server.addr();

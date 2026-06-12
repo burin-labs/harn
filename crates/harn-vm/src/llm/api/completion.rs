@@ -21,11 +21,7 @@ async fn completion_json_response(
 ) -> Result<serde_json::Value, VmError> {
     if !response.status().is_success() {
         let status = response.status();
-        let retry_after = response
-            .headers()
-            .get("retry-after")
-            .and_then(|value| value.to_str().ok())
-            .map(str::to_string);
+        let retry_after = super::retry_after_header(response.headers());
         let body = response.text().await.unwrap_or_default();
         let message =
             super::classify_provider_http_error(provider, status, retry_after.as_deref(), &body)

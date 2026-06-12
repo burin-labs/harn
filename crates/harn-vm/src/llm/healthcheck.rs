@@ -372,7 +372,7 @@ mod tests {
     #[tokio::test(flavor = "current_thread")]
     #[allow(clippy::await_holding_lock)]
     async fn sends_configured_probe_request_with_candidate_key() {
-        let _guard = crate::llm::env_lock().lock().expect("env lock");
+        let _guard = crate::llm::env_guard();
         let captured = Arc::new(Mutex::new(None));
         let (base_url, server) = spawn_healthcheck_stub(200, r#"{"ok":true}"#, captured.clone());
         install_provider(
@@ -419,7 +419,7 @@ mod tests {
     #[tokio::test(flavor = "current_thread")]
     #[allow(clippy::await_holding_lock)]
     async fn reports_missing_credentials_without_network() {
-        let _guard = crate::llm::env_lock().lock().expect("env lock");
+        let _guard = crate::llm::env_guard();
         unsafe {
             std::env::remove_var("HARN_TEST_PROVIDER_KEY");
         }
@@ -451,7 +451,7 @@ mod tests {
     #[tokio::test(flavor = "current_thread")]
     #[allow(clippy::await_holding_lock)]
     async fn returns_stable_failure_shape_for_http_errors() {
-        let _guard = crate::llm::env_lock().lock().expect("env lock");
+        let _guard = crate::llm::env_guard();
         let captured = Arc::new(Mutex::new(None));
         let (base_url, server) = spawn_healthcheck_stub(401, r#"{"error":"bad key"}"#, captured);
         install_provider(

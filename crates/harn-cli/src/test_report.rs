@@ -100,14 +100,6 @@ impl TestReport {
     }
 }
 
-fn xml_escape(s: &str) -> String {
-    s.replace('&', "&amp;")
-        .replace('<', "&lt;")
-        .replace('>', "&gt;")
-        .replace('"', "&quot;")
-        .replace('\'', "&apos;")
-}
-
 fn ensure_parent_writable(path: &Path) -> Result<(), String> {
     let parent = path.parent().filter(|p| !p.as_os_str().is_empty());
     if let Some(parent) = parent {
@@ -132,7 +124,7 @@ pub fn write_junit(path: &str, report: &TestReport) -> Result<PathBuf, String> {
     ensure_parent_writable(&path_buf)?;
 
     let suite_time = report.duration_ms as f64 / 1000.0;
-    let suite_name = xml_escape(&report.suite);
+    let suite_name = crate::format::escape_html(&report.suite);
     let tests = report.summary.total;
     let failures = report.summary.failed + report.summary.timed_out;
     let skipped = report.summary.skipped;
@@ -147,9 +139,9 @@ pub fn write_junit(path: &str, report: &TestReport) -> Result<PathBuf, String> {
     ));
     for case in &report.cases {
         let time = case.duration_ms as f64 / 1000.0;
-        let escaped_name = xml_escape(&case.name);
-        let escaped_classname = xml_escape(&case.classname);
-        let escaped_file = xml_escape(&case.file);
+        let escaped_name = crate::format::escape_html(&case.name);
+        let escaped_classname = crate::format::escape_html(&case.classname);
+        let escaped_file = crate::format::escape_html(&case.file);
         xml.push_str(&format!(
             "    <testcase name=\"{escaped_name}\" classname=\"{escaped_classname}\" file=\"{escaped_file}\" time=\"{time:.3}\""
         ));
@@ -159,7 +151,7 @@ pub fn write_junit(path: &str, report: &TestReport) -> Result<PathBuf, String> {
         }
         xml.push_str(">\n");
         let body = case.message.as_deref().unwrap_or_default();
-        let escaped_body = xml_escape(body);
+        let escaped_body = crate::format::escape_html(body);
         if case.outcome.is_skipped() {
             xml.push_str(&format!("      <skipped message=\"{escaped_body}\" />\n"));
         } else if case.outcome.is_failure() {

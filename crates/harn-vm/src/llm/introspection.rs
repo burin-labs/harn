@@ -347,7 +347,7 @@ mod tests {
 
     #[test]
     fn harness_env_wins_over_default() {
-        let _guard = crate::llm::env_lock().lock().expect("env lock");
+        let _guard = crate::llm::env_guard();
         reset_env_harness();
         assert_eq!(harness_identifier(), "harn");
         unsafe {

@@ -743,7 +743,7 @@ mod tests {
     }
 
     fn with_mock_provider<T>(f: impl FnOnce() -> T) -> T {
-        let _guard = crate::llm::env_lock().lock().expect("env lock");
+        let _guard = crate::llm::env_guard();
         let prev_provider = std::env::var("HARN_LLM_PROVIDER").ok();
         let prev_model = std::env::var("HARN_LLM_MODEL").ok();
         unsafe {

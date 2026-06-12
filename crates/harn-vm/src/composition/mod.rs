@@ -930,7 +930,7 @@ fn composition_source(manifest: &BindingManifest, snippet: &str) -> String {
 }
 
 fn escape_harn_string(value: &str) -> String {
-    value.replace('\\', "\\\\").replace('"', "\\\"")
+    harn_lexer::escape_string_literal(value)
 }
 
 fn validate_composition_program(

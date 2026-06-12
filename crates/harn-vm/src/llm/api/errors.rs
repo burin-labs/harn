@@ -78,6 +78,16 @@ pub(crate) struct LlmErrorInfo {
     pub(crate) message: String,
 }
 
+/// Extract the `Retry-After` header for threading into
+/// [`classify_provider_http_error`]. Read it before consuming the response
+/// body — `Response::text()` takes the response by value.
+pub(crate) fn retry_after_header(headers: &reqwest::header::HeaderMap) -> Option<String> {
+    headers
+        .get("retry-after")
+        .and_then(|value| value.to_str().ok())
+        .map(str::to_string)
+}
+
 /// Build a tagged, provider-prefixed error message from a non-2xx HTTP
 /// response so downstream agent loops can react (e.g. trigger compaction on
 /// `context_overflow`, back off on `rate_limited`, surface everything else as

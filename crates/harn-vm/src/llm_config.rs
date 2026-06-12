@@ -2641,7 +2641,7 @@ mod tests {
 
     #[test]
     fn test_infer_provider_from_defaults() {
-        let _guard = crate::llm::env_lock().lock().expect("env lock");
+        let _guard = crate::llm::env_guard();
         let prev_default_provider = std::env::var("HARN_DEFAULT_PROVIDER").ok();
         unsafe {
             std::env::remove_var("HARN_DEFAULT_PROVIDER");
@@ -2676,7 +2676,7 @@ mod tests {
 
     #[test]
     fn test_openrouter_inference_requires_one_slash() {
-        let _guard = crate::llm::env_lock().lock().expect("env lock");
+        let _guard = crate::llm::env_guard();
         let prev_default_provider = std::env::var("HARN_DEFAULT_PROVIDER").ok();
         unsafe {
             std::env::remove_var("HARN_DEFAULT_PROVIDER");
@@ -2695,7 +2695,7 @@ mod tests {
 
     #[test]
     fn test_cerebras_inference_beats_openrouter_slash_fallback() {
-        let _guard = crate::llm::env_lock().lock().expect("env lock");
+        let _guard = crate::llm::env_guard();
         let prev_default_provider = std::env::var("HARN_DEFAULT_PROVIDER").ok();
         unsafe {
             std::env::remove_var("HARN_DEFAULT_PROVIDER");
@@ -2719,7 +2719,7 @@ mod tests {
         // not be misrouted by the generic `gpt-*` / single-slash inference
         // fallbacks. Regression for harn#2142 (model-info routed
         // `gpt-oss-120b` to openai, breaking Burin TUI credential checks).
-        let _guard = crate::llm::env_lock().lock().expect("env lock");
+        let _guard = crate::llm::env_guard();
         let prev_default_provider = std::env::var("HARN_DEFAULT_PROVIDER").ok();
         unsafe {
             std::env::remove_var("HARN_DEFAULT_PROVIDER");
@@ -3119,7 +3119,7 @@ mod tests {
 
     #[test]
     fn test_default_provider_env_override_for_unknown_model() {
-        let _guard = crate::llm::env_lock().lock().expect("env lock");
+        let _guard = crate::llm::env_guard();
         let prev_default_provider = std::env::var("HARN_DEFAULT_PROVIDER").ok();
         unsafe {
             std::env::set_var("HARN_DEFAULT_PROVIDER", "openai");
@@ -3143,7 +3143,7 @@ mod tests {
 
     #[test]
     fn test_unknown_model_family_ignores_default_provider_fallback() {
-        let _guard = crate::llm::env_lock().lock().expect("env lock");
+        let _guard = crate::llm::env_guard();
         let prev_default_provider = std::env::var("HARN_DEFAULT_PROVIDER").ok();
         unsafe {
             std::env::set_var("HARN_DEFAULT_PROVIDER", "ollama");

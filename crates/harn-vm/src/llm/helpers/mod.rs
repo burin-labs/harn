@@ -97,7 +97,7 @@ mod tests {
         // Share the crate-wide LLM env lock so this test cannot race with
         // sibling modules (e.g. llm::api streaming classification tests) that
         // also mutate LOCAL_LLM_BASE_URL.
-        let _guard = crate::llm::env_lock().lock().expect("env lock");
+        let _guard = crate::llm::env_guard();
         let prev_base = std::env::var("LOCAL_LLM_BASE_URL").ok();
         let prev_model = std::env::var("LOCAL_LLM_MODEL").ok();
         let prev_harn_provider = std::env::var("HARN_LLM_PROVIDER").ok();
@@ -146,7 +146,7 @@ mod tests {
         // `llm_call(..., {model: "anthropic/claude-sonnet-4-6"})`
         // ends up at the local Ollama endpoint and returns a 404
         // `model_unavailable`.
-        let _guard = crate::llm::env_lock().lock().expect("env lock");
+        let _guard = crate::llm::env_guard();
         let prev_base = std::env::var("LOCAL_LLM_BASE_URL").ok();
         let prev_local_model = std::env::var("LOCAL_LLM_MODEL").ok();
         let prev_harn_provider = std::env::var("HARN_LLM_PROVIDER").ok();
@@ -223,7 +223,7 @@ mod tests {
 
     #[test]
     fn extract_llm_options_rejects_removed_transcript_key() {
-        let _guard = crate::llm::env_lock().lock().expect("env lock");
+        let _guard = crate::llm::env_guard();
         let prev_harn_provider = std::env::var("HARN_LLM_PROVIDER").ok();
         let prev_harn_model = std::env::var("HARN_LLM_MODEL").ok();
         unsafe {
@@ -266,7 +266,7 @@ mod tests {
 
     #[test]
     fn model_tier_prefers_reachable_env_provider_and_model() {
-        let _guard = crate::llm::env_lock().lock().expect("env lock");
+        let _guard = crate::llm::env_guard();
         let prev_harn_model = std::env::var("HARN_LLM_MODEL").ok();
         let prev_harn_provider = std::env::var("HARN_LLM_PROVIDER").ok();
         let prev_local_model = std::env::var("LOCAL_LLM_MODEL").ok();
@@ -311,7 +311,7 @@ mod tests {
 
     #[test]
     fn model_tier_falls_back_to_reachable_local_provider_when_default_alias_is_unavailable() {
-        let _guard = crate::llm::env_lock().lock().expect("env lock");
+        let _guard = crate::llm::env_guard();
         let prev_harn_model = std::env::var("HARN_LLM_MODEL").ok();
         let prev_harn_provider = std::env::var("HARN_LLM_PROVIDER").ok();
         let prev_local_model = std::env::var("LOCAL_LLM_MODEL").ok();
@@ -357,7 +357,7 @@ mod tests {
 
     #[test]
     fn raw_env_model_is_accepted_when_env_provider_matches() {
-        let _guard = crate::llm::env_lock().lock().expect("env lock");
+        let _guard = crate::llm::env_guard();
         let prev_harn_model = std::env::var("HARN_LLM_MODEL").ok();
         let prev_harn_provider = std::env::var("HARN_LLM_PROVIDER").ok();
 
@@ -387,7 +387,7 @@ mod tests {
         // `provider: "auto"` must fall through to inference. With a `local:`
         // model prefix that inference should resolve to Ollama rather than
         // the local OpenAI-compatible provider or Anthropic.
-        let _guard = crate::llm::env_lock().lock().expect("env lock");
+        let _guard = crate::llm::env_guard();
         let prev_harn_provider = std::env::var("HARN_LLM_PROVIDER").ok();
         let prev_harn_model = std::env::var("HARN_LLM_MODEL").ok();
         let prev_base = std::env::var("LOCAL_LLM_BASE_URL").ok();
@@ -452,7 +452,7 @@ mod tests {
 
     #[test]
     fn provider_auto_unknown_model_warns_and_uses_default_provider() {
-        let _guard = crate::llm::env_lock().lock().expect("env lock");
+        let _guard = crate::llm::env_guard();
         let prev_harn_provider = std::env::var("HARN_LLM_PROVIDER").ok();
         let prev_harn_model = std::env::var("HARN_LLM_MODEL").ok();
         let prev_default_provider = std::env::var("HARN_DEFAULT_PROVIDER").ok();
@@ -514,7 +514,7 @@ mod tests {
 
     #[test]
     fn openrouter_provider_fallback_uses_current_valid_model_id() {
-        let _guard = crate::llm::env_lock().lock().expect("env lock");
+        let _guard = crate::llm::env_guard();
         let prev_harn_model = std::env::var("HARN_LLM_MODEL").ok();
         let prev_harn_provider = std::env::var("HARN_LLM_PROVIDER").ok();
         let prev_local_model = std::env::var("LOCAL_LLM_MODEL").ok();
@@ -557,7 +557,7 @@ mod tests {
         // resolvers must surface that pin in place of the env-driven
         // default so the next `llm_call` honours it without each
         // builtin threading the session id manually.
-        let _guard = crate::llm::env_lock().lock().expect("env lock");
+        let _guard = crate::llm::env_guard();
         let prev_harn_model = std::env::var("HARN_LLM_MODEL").ok();
         let prev_harn_provider = std::env::var("HARN_LLM_PROVIDER").ok();
         unsafe {
@@ -600,7 +600,7 @@ mod tests {
 
     #[test]
     fn explicit_call_site_model_wins_over_session_pin() {
-        let _guard = crate::llm::env_lock().lock().expect("env lock");
+        let _guard = crate::llm::env_guard();
         let prev_harn_model = std::env::var("HARN_LLM_MODEL").ok();
         let prev_harn_provider = std::env::var("HARN_LLM_PROVIDER").ok();
         unsafe {

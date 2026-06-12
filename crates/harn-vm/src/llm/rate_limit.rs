@@ -816,6 +816,31 @@ pub(crate) fn reset_rate_limit_state() {
         .clear();
 }
 
+/// Reset rate-limit state only if a runtime override (via `llm_rate_limit`)
+/// was actually installed — the one piece of rate-limit state a test run can
+/// leak into the next.
+///
+/// `reset_llm_state` used to call [`reset_rate_limit_state`] unconditionally,
+/// but the limiter registry is *process-global*, and `reset_thread_local_state`
+/// runs from ~150 test setups in parallel — each call wiped the usage counters
+/// that concurrently running rate-limit tests were asserting on. With this
+/// guard, the common no-override case leaves the global registry untouched;
+/// the wipe (and lazy re-init from config) only happens when there is
+/// genuinely something to clean up.
+pub(crate) fn reset_runtime_rate_limit_overrides() {
+    let mut overrides = runtime_overrides()
+        .lock()
+        .expect("rate limiter runtime override mutex poisoned");
+    if overrides.is_empty() {
+        return;
+    }
+    overrides.clear();
+    drop(overrides);
+    let mut registry = registry().lock().expect("rate limiter mutex poisoned");
+    registry.limiters.clear();
+    registry.initialized_from_config = false;
+}
+
 #[cfg(test)]
 fn get_model_rate_limits(provider: &str, model: &str) -> Option<crate::llm_config::RateLimitsDef> {
     ensure_initialized_from_config();
@@ -997,7 +1022,7 @@ mod tests {
 
     #[test]
     fn init_from_config_loads_model_rate_limits_from_catalog_overlay() {
-        let _guard = crate::llm::env_lock().lock().expect("env lock");
+        let _guard = crate::llm::env_guard();
         reset_test_rate_limit_state();
         install_quota_overlay();
         init_from_config();
@@ -1016,7 +1041,7 @@ mod tests {
 
     #[test]
     fn provider_env_override_sets_tpm() {
-        let _guard = crate::llm::env_lock().lock().expect("env lock");
+        let _guard = crate::llm::env_guard();
         reset_test_rate_limit_state();
         install_quota_overlay();
         std::env::set_var("HARN_RATE_LIMIT_QUOTA_TPM", "1000000");
@@ -1030,7 +1055,7 @@ mod tests {
 
     #[test]
     fn legacy_provider_rpm_env_still_sets_provider_bucket() {
-        let _guard = crate::llm::env_lock().lock().expect("env lock");
+        let _guard = crate::llm::env_guard();
         reset_rate_limit_state();
         std::env::set_var("HARN_RATE_LIMIT_TESTPROVIDER", "42");
         init_from_config();
@@ -1041,7 +1066,7 @@ mod tests {
 
     #[test]
     fn concurrency_queue_does_not_consume_request_quota_until_started() {
-        let _guard = crate::llm::env_lock().lock().expect("env lock");
+        let _guard = crate::llm::env_guard();
         let _durable_disabled = EnvVarGuard::set_value(DURABLE_RATE_LIMIT_ENABLED_ENV, "0");
         reset_test_rate_limit_state();
         install_concurrency_overlay();
@@ -1056,11 +1081,21 @@ mod tests {
             let first = acquire_permit("queue").await.expect("first permit");
             assert_eq!(provider_request_usage("queue"), 1);
 
-            let second = tokio::spawn(async { acquire_permit("queue").await });
-            for _ in 0..5 {
-                tokio::task::yield_now().await;
+            let mut second = tokio::spawn(async { acquire_permit("queue").await });
+            // The second acquire must stay parked behind the first permit.
+            // Poll under a real-time timeout instead of counting yields —
+            // yield counting is scheduler-sensitive, and when this fires it
+            // also surfaces *what* completed instead of a bare is_finished.
+            if let Ok(join) =
+                tokio::time::timeout(std::time::Duration::from_millis(100), &mut second).await
+            {
+                let outcome = match join {
+                    Ok(Ok(_permit)) => "a second permit was granted".to_string(),
+                    Ok(Err(error)) => format!("acquire failed: {error:?}"),
+                    Err(join_error) => format!("task panicked: {join_error}"),
+                };
+                panic!("second acquire completed while the first permit was held ({outcome})");
             }
-            assert!(!second.is_finished());
             assert_eq!(provider_request_usage("queue"), 1);
 
             drop(first);
@@ -1078,7 +1113,7 @@ mod tests {
 
     #[test]
     fn durable_concurrency_queue_does_not_consume_request_quota_until_started() {
-        let _guard = crate::llm::env_lock().lock().expect("env lock");
+        let _guard = crate::llm::env_guard();
         reset_test_rate_limit_state();
         install_concurrency_overlay();
         let temp = tempfile::tempdir().expect("tempdir");
@@ -1095,11 +1130,19 @@ mod tests {
             let first = acquire_permit("queue").await.expect("first permit");
             assert_eq!(durable_usage(&state_path, "llm:provider:queue:rpm"), 1);
 
-            let second = tokio::spawn(async { acquire_permit("queue").await });
-            for _ in 0..5 {
-                tokio::task::yield_now().await;
+            let mut second = tokio::spawn(async { acquire_permit("queue").await });
+            // See concurrency_queue_does_not_consume_request_quota_until_started
+            // for why this polls under a timeout instead of counting yields.
+            if let Ok(join) =
+                tokio::time::timeout(std::time::Duration::from_millis(100), &mut second).await
+            {
+                let outcome = match join {
+                    Ok(Ok(_permit)) => "a second permit was granted".to_string(),
+                    Ok(Err(error)) => format!("acquire failed: {error:?}"),
+                    Err(join_error) => format!("task panicked: {join_error}"),
+                };
+                panic!("second acquire completed while the first permit was held ({outcome})");
             }
-            assert!(!second.is_finished());
             assert_eq!(durable_usage(&state_path, "llm:provider:queue:rpm"), 1);
 
             drop(first);
@@ -1117,7 +1160,7 @@ mod tests {
 
     #[test]
     fn durable_state_path_coordinates_after_process_local_reset() {
-        let _guard = crate::llm::env_lock().lock().expect("env lock");
+        let _guard = crate::llm::env_guard();
         reset_test_rate_limit_state();
         install_durable_overlay();
         let temp = tempfile::tempdir().expect("tempdir");
@@ -1151,6 +1194,101 @@ mod tests {
                 "second process-local registry should wait on durable SQLite state"
             );
         });
+
+        reset_test_rate_limit_state();
+    }
+
+    // ---------------------------------------------------------------------
+    // Reset-scope contract.
+    //
+    // The rate-limiter registry is process-global. Two reset levels exist and
+    // MUST stay decoupled:
+    //
+    //   * `reset_llm_state` (runs from parallel in-process unit tests) only
+    //     scrubs leaked *runtime overrides* — it must NOT wipe a config-derived
+    //     registry, or it would corrupt a concurrently asserting sibling test.
+    //   * `reset_rate_limit_state` (the full wipe, reached in sequential /
+    //     separate-process contexts via `reset_thread_local_state`) clears
+    //     everything, including retry-after cooldowns.
+    //
+    // These two tests pin each half of that contract so a future refactor can't
+    // silently re-merge them — the failure mode was a leaked cooldown stalling a
+    // later conformance test's mocked LLM call under a paused clock for the full
+    // per-test timeout.
+    // ---------------------------------------------------------------------
+
+    #[test]
+    fn full_registry_reset_clears_retry_after_cooldown() {
+        let _guard = crate::llm::env_guard();
+        reset_test_rate_limit_state();
+        install_quota_overlay();
+        init_from_config();
+
+        let keys = limiter_keys("quota", "quota-model");
+        let request = RateLimitRequest::default();
+        let now_ms = 0;
+
+        // A provider 429 installs a long retry-after cooldown on the route.
+        {
+            let mut registry = registry().lock().expect("registry");
+            for key in &keys {
+                limiter_for_key(&mut registry.limiters, key).observe_retry_after(now_ms, 60_000);
+            }
+            assert!(
+                check_wait_for_keys(&mut registry, &keys, request, now_ms).is_some(),
+                "cooldown should force a wait before reset"
+            );
+        }
+
+        // The full wipe (what `reset_thread_local_state` performs between
+        // sequential tests) must clear the cooldown so the next test's call
+        // doesn't stall on a paused clock.
+        reset_rate_limit_state();
+        init_from_config();
+        {
+            let mut registry = registry().lock().expect("registry");
+            assert!(
+                check_wait_for_keys(&mut registry, &keys, request, now_ms).is_none(),
+                "cooldown must not survive a full registry reset"
+            );
+        }
+
+        reset_test_rate_limit_state();
+    }
+
+    #[test]
+    fn runtime_override_reset_preserves_config_registry() {
+        let _guard = crate::llm::env_guard();
+        reset_test_rate_limit_state();
+        install_quota_overlay();
+        init_from_config();
+
+        let provider_bucket = provider_key("quota");
+        assert!(
+            registry()
+                .lock()
+                .expect("registry")
+                .limiters
+                .contains_key(&provider_bucket),
+            "config init should populate the provider limiter"
+        );
+
+        // The override-scoped reset (what `reset_llm_state` runs from parallel
+        // unit tests, with no runtime override installed) must leave the
+        // config-derived registry untouched — otherwise it would wipe usage
+        // counters a concurrent rate-limit test is asserting on.
+        reset_runtime_rate_limit_overrides();
+
+        let registry = registry().lock().expect("registry");
+        assert!(
+            registry.initialized_from_config,
+            "config-init flag must survive an override-only reset"
+        );
+        assert!(
+            registry.limiters.contains_key(&provider_bucket),
+            "config limiters must survive an override-only reset"
+        );
+        drop(registry);
 
         reset_test_rate_limit_state();
     }

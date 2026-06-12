@@ -140,6 +140,12 @@ impl AcpServer {
                 self.handle_session_prompt(&id, &params).await;
             }
             "session/cancel" => {
+                // `reject_unauthenticated` only answers when `id` is non-null,
+                // so the notification form is silently ignored when
+                // unauthenticated rather than processed.
+                if self.reject_unauthenticated(&id) {
+                    return;
+                }
                 self.handle_session_cancel(&id, &params);
             }
             "session/cancel_tool_call" => {

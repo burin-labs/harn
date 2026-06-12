@@ -1285,6 +1285,18 @@ impl TypeChecker {
                 }
                 (!inferred.is_empty()).then(|| simplify_union(inferred))
             }
+            // Mirrors the Intersection arm of `infer_property_type_from_type`
+            // — `x["a"]` and `x.a` must resolve the same set of types.
+            TypeExpr::Intersection(members) => {
+                for member in members {
+                    if let Some(member_type) =
+                        self.infer_subscript_type_from_type(member, index, scope, optional)
+                    {
+                        return Some(member_type);
+                    }
+                }
+                optional.then(|| TypeExpr::Named("nil".into()))
+            }
             TypeExpr::List(inner) => Some(*inner.clone()),
             TypeExpr::DictType(_, value) => Some(*value.clone()),
             TypeExpr::Shape(fields) => {

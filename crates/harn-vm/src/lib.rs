@@ -428,6 +428,14 @@ pub fn json_schema_for_typed_params(params: &[harn_parser::TypedParam]) -> serde
 /// Reset all thread-local state that can leak between test runs.
 pub fn reset_thread_local_state() {
     llm::reset_llm_state();
+    // `reset_thread_local_state` only runs in sequential / separate-process
+    // contexts (the CLI test runner between cases, integration-test binaries,
+    // per-job worker resets) — never from the parallel in-process unit tests
+    // that share the rate-limiter registry. So unlike `reset_llm_state`, it is
+    // safe (and necessary for test isolation) to fully wipe the registry here,
+    // clearing retry-after cooldowns that would otherwise stall a later test's
+    // LLM call under a paused clock.
+    llm::reset_rate_limit_registry();
     llm_config::clear_user_overrides();
     http::reset_http_state();
     channels::reset_channel_state();

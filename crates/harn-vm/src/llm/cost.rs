@@ -1131,7 +1131,7 @@ mod tests {
 
     #[test]
     fn calculate_cost_uses_catalog_model_pricing() {
-        let _guard = crate::llm::env_lock().lock().unwrap();
+        let _guard = crate::llm::env_guard();
         let mut overlay = crate::llm_config::ProvidersConfig::default();
         overlay.models.insert(
             "gpt-4o-mini".to_string(),
@@ -1182,7 +1182,7 @@ mod tests {
 
     #[test]
     fn calculate_cost_is_zero_for_unknown_model() {
-        let _guard = crate::llm::env_lock().lock().unwrap();
+        let _guard = crate::llm::env_guard();
         crate::llm_config::clear_user_overrides();
         assert_eq!(
             calculate_cost("definitely-unpriced-model", 1_000, 1_000),
@@ -1192,9 +1192,7 @@ mod tests {
 
     #[test]
     fn calculate_cost_for_provider_falls_back_to_provider_economics() {
-        let _guard = crate::llm::env_lock()
-            .lock()
-            .unwrap_or_else(|e| e.into_inner());
+        let _guard = crate::llm::env_guard();
         crate::llm_config::clear_user_overrides();
         let cost =
             calculate_cost_for_provider("openai", "some-bespoke-openai-deployment", 1_000, 1_000);
@@ -1209,7 +1207,7 @@ mod tests {
 
     #[test]
     fn pricing_detail_reports_source() {
-        let _guard = crate::llm::env_lock().lock().unwrap();
+        let _guard = crate::llm::env_guard();
         crate::llm_config::clear_user_overrides();
         let exact = pricing_detail_for("anthropic", "claude-sonnet-4-20250514").unwrap();
         assert_eq!(exact.source, PricingSource::CatalogModel);
@@ -1246,7 +1244,7 @@ mod tests {
 
     #[test]
     fn fast_tier_bills_premium_pricing_when_served_fast() {
-        let _guard = crate::llm::env_lock().lock().unwrap();
+        let _guard = crate::llm::env_guard();
         crate::llm_config::clear_user_overrides();
 
         // Opus 4.8 fast mode is 2x standard ($5/$25 -> $10/$50 per MTok).
@@ -1273,7 +1271,7 @@ mod tests {
 
     #[test]
     fn cache_savings_uses_catalog_cache_pricing() {
-        let _guard = crate::llm::env_lock().lock().unwrap();
+        let _guard = crate::llm::env_guard();
         crate::llm_config::clear_user_overrides();
 
         let savings =
@@ -1296,7 +1294,7 @@ mod tests {
 
     #[test]
     fn token_budget_guard_restores_prior_state_on_drop() {
-        let _guard_outer = crate::llm::env_lock().lock().unwrap();
+        let _guard_outer = crate::llm::env_guard();
         reset_cost_state();
 
         let outer = install_llm_token_budget(100);
@@ -1321,7 +1319,7 @@ mod tests {
 
     #[test]
     fn set_budget_rearms_in_place_without_resetting_accumulation() {
-        let _guard_outer = crate::llm::env_lock().lock().unwrap();
+        let _guard_outer = crate::llm::env_guard();
         reset_cost_state();
 
         // Install a $1.00 cap and spend $0.60 against it.
@@ -1352,7 +1350,7 @@ mod tests {
 
     #[test]
     fn set_token_budget_rearms_in_place_without_resetting_accumulation() {
-        let _guard_outer = crate::llm::env_lock().lock().unwrap();
+        let _guard_outer = crate::llm::env_guard();
         reset_cost_state();
 
         let _budget = install_llm_token_budget(100);
@@ -1371,7 +1369,7 @@ mod tests {
 
     #[test]
     fn token_budget_raises_categorized_error_when_exhausted() {
-        let _guard_outer = crate::llm::env_lock().lock().unwrap();
+        let _guard_outer = crate::llm::env_guard();
         reset_cost_state();
         let _budget = install_llm_token_budget(10);
 

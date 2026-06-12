@@ -96,5 +96,5 @@ pub(super) fn sanitize_identifier(raw: &str) -> String {
 }
 
 pub(super) fn escape_harn_string(value: &str) -> String {
-    value.replace('\\', "\\\\").replace('"', "\\\"")
+    harn_lexer::escape_string_literal(value)
 }

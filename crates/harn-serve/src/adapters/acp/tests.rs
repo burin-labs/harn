@@ -1485,7 +1485,9 @@ fn sanitize_visible_assistant_text_keeps_normal_json() {
 
 #[test]
 fn acp_agent_capabilities_use_canonical_initialize_shape() {
-    let _guard = acp_env_lock().lock().unwrap();
+    let _guard = acp_env_lock()
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     let _env = EnvSnapshot::capture(&[
         "HARN_LLM_PROVIDER",
         "HARN_LLM_MODEL",
@@ -1598,7 +1600,9 @@ async fn acp_provider_catalog_method_matches_export_artifact_with_overrides() {
 
 #[test]
 fn acp_prompt_capabilities_follow_configured_model_aliases() {
-    let _guard = acp_env_lock().lock().unwrap();
+    let _guard = acp_env_lock()
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     let _env = EnvSnapshot::capture(&[
         "HARN_LLM_PROVIDER",
         "HARN_LLM_MODEL",
@@ -1809,6 +1813,44 @@ fn parse_oauth_redirect_url_requires_code() {
     let error =
         parse_oauth_redirect_url("http://127.0.0.1/cb?state=xyz").expect_err("missing code");
     assert!(error.contains("code"), "{error}");
+}
+
+/// Drift guard: every `session/*` dispatch arm must gate on
+/// `reject_unauthenticated`. `session/cancel` shipped without the guard once
+/// (any unauthenticated peer could cancel a running session); this keeps the
+/// next session method from repeating that.
+#[test]
+fn every_session_dispatch_arm_checks_authentication() {
+    let src = include_str!("dispatch.rs");
+    let lines: Vec<&str> = src.lines().collect();
+    // Match-arm patterns in the dispatch match are indented exactly 12
+    // spaces; arm bodies are indented deeper. Collect each session arm's
+    // body by scanning to the next same-indent pattern.
+    let is_pattern =
+        |line: &str| line.starts_with("            \"") && !line.starts_with("             ");
+    let mut checked = 0;
+    for (i, line) in lines.iter().enumerate() {
+        if !is_pattern(line) || !line.contains("\"session/") {
+            continue;
+        }
+        let method = line.trim();
+        let body: String = lines[i + 1..]
+            .iter()
+            .take_while(|l| !is_pattern(l))
+            .copied()
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            body.contains("reject_unauthenticated"),
+            "dispatch arm {method} does not call reject_unauthenticated"
+        );
+        checked += 1;
+    }
+    assert!(
+        checked >= 10,
+        "expected to find the session/* dispatch arms in dispatch.rs (found {checked}); \
+         if the match moved, update this test's pattern detection"
+    );
 }
 
 mod commands;

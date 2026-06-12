@@ -75,8 +75,10 @@ impl Compiler {
                 self.assign_type_fact(name, value_type);
             }
         } else if let Node::PropertyAccess { object, property } = &target.node {
-            if let Some(var_name) = self.root_var_name(object) {
-                let var_idx = self.string_constant(&var_name);
+            if let Node::Identifier(var_name) = &object.node {
+                // Single-level `x.prop (op)= value` — SetProperty reads the
+                // variable, sets the property, and writes it back.
+                let var_idx = self.string_constant(var_name);
                 let prop_idx = self.string_constant(property);
                 if let Some(op) = op {
                     self.compile_node(target)?;
@@ -85,7 +87,6 @@ impl Compiler {
                 } else {
                     self.compile_node(value)?;
                 }
-                // SetProperty reads var_idx from env, sets prop, writes back.
                 // The variable name index is encoded as a second u16.
                 self.chunk.emit_u16(Op::SetProperty, prop_idx, self.line);
                 let hi = (var_idx >> 8) as u8;
@@ -96,21 +97,193 @@ impl Compiler {
                 self.chunk.columns.push(self.column);
                 self.chunk.lines.push(self.line);
                 self.chunk.columns.push(self.column);
+            } else {
+                self.compile_path_assignment(target, value, op)?;
             }
         } else if let Node::SubscriptAccess { object, index } = &target.node {
-            if let Some(var_name) = self.root_var_name(object) {
-                let var_idx = self.string_constant(&var_name);
-                if let Some(op) = op {
-                    self.compile_node(target)?;
-                    self.compile_node(value)?;
-                    self.emit_compound_op(op)?;
+            if let Node::Identifier(var_name) = &object.node {
+                // Single-level `x[index] (op)= value`. A compound op reads the
+                // target before writing it, and both the read and the write
+                // need the index — so an index with potential side effects is
+                // hoisted into a temp to keep it evaluated exactly once.
+                if op.is_some() && !Self::is_effect_free_index(index) {
+                    self.compile_path_assignment(target, value, op)?;
                 } else {
-                    self.compile_node(value)?;
+                    let var_idx = self.string_constant(var_name);
+                    if let Some(op) = op {
+                        self.compile_node(target)?;
+                        self.compile_node(value)?;
+                        self.emit_compound_op(op)?;
+                    } else {
+                        self.compile_node(value)?;
+                    }
+                    self.compile_node(index)?;
+                    self.chunk.emit_u16(Op::SetSubscript, var_idx, self.line);
                 }
-                self.compile_node(index)?;
-                self.chunk.emit_u16(Op::SetSubscript, var_idx, self.line);
+            } else {
+                self.compile_path_assignment(target, value, op)?;
             }
+        } else {
+            return Err(CompileError {
+                message: format!(
+                    "invalid assignment target: expected a variable, property path \
+                     (`x.a.b`), or subscript path (`x[i][j]`), found {}",
+                    Self::describe_assignment_target(&target.node)
+                ),
+                line: target.span.line as u32,
+            });
         }
+        Ok(())
+    }
+
+    /// True when re-evaluating `index` cannot run user code or change between
+    /// the read and write halves of a compound assignment.
+    fn is_effect_free_index(index: &SNode) -> bool {
+        matches!(
+            index.node,
+            Node::Identifier(_)
+                | Node::IntLiteral(_)
+                | Node::FloatLiteral(_)
+                | Node::StringLiteral(_)
+                | Node::RawStringLiteral(_)
+                | Node::BoolLiteral(_)
+        )
+    }
+
+    /// Human description of a non-assignable target for the compile error.
+    fn describe_assignment_target(node: &Node) -> &'static str {
+        match node {
+            Node::FunctionCall { .. } => "a function call result",
+            Node::MethodCall { .. } | Node::OptionalMethodCall { .. } => "a method call result",
+            Node::SliceAccess { .. } => "a slice",
+            Node::OptionalPropertyAccess { .. } | Node::OptionalSubscriptAccess { .. } => {
+                "an optional-chained access (`?.` / `?[]`)"
+            }
+            _ => "an expression",
+        }
+    }
+
+    /// Lower an assignment through a nested access path (`a.b.c = v`,
+    /// `a["b"]["c"] = v`, `xs[0][1] = v`, `m.list[0] = v`, …) or a
+    /// single-level compound subscript whose index has side effects.
+    ///
+    /// `SetProperty`/`SetSubscript` only know how to write one level deep on
+    /// a named binding, so deeper paths are desugared into a scope-contained
+    /// chain of temporaries: hoist each computed index once, copy each path
+    /// prefix into a temp, perform the single-level leaf assignment on the
+    /// innermost temp, then write each temp back into its parent. (The naive
+    /// lowering used to collapse the path to its root variable and final
+    /// accessor, so `a.b.c = v` silently wrote `a.c`.)
+    fn compile_path_assignment(
+        &mut self,
+        target: &SNode,
+        value: &SNode,
+        op: &Option<String>,
+    ) -> Result<(), CompileError> {
+        enum Seg {
+            Prop(String),
+            Index(SNode),
+        }
+
+        // Collect the access path, root-first. Anything that is not a plain
+        // property/subscript chain rooted at an identifier is not assignable.
+        let mut segs: Vec<Seg> = Vec::new();
+        let mut cur = target;
+        let root = loop {
+            match &cur.node {
+                Node::PropertyAccess { object, property } => {
+                    segs.push(Seg::Prop(property.clone()));
+                    cur = object;
+                }
+                Node::SubscriptAccess { object, index } => {
+                    segs.push(Seg::Index((**index).clone()));
+                    cur = object;
+                }
+                Node::Identifier(name) => break name.clone(),
+                _ => {
+                    return Err(CompileError {
+                        message: format!(
+                            "invalid assignment target: expected a variable, property path \
+                             (`x.a.b`), or subscript path (`x[i][j]`), found {}",
+                            Self::describe_assignment_target(&cur.node)
+                        ),
+                        line: cur.span.line as u32,
+                    });
+                }
+            }
+        };
+        segs.reverse();
+        let span = target.span;
+        self.temp_counter += 1;
+        let id = self.temp_counter;
+
+        // The temps live in their own scope so they never leak into (or
+        // shadow anything in) the surrounding code.
+        self.begin_scope();
+
+        // 1. Hoist computed indices into temps, in source order, so each
+        //    index expression is evaluated exactly once.
+        let seg_nodes: Vec<Seg> = segs
+            .into_iter()
+            .enumerate()
+            .map(|(i, seg)| -> Result<Seg, CompileError> {
+                match seg {
+                    Seg::Prop(p) => Ok(Seg::Prop(p)),
+                    Seg::Index(idx) if Self::is_effect_free_index(&idx) => Ok(Seg::Index(idx)),
+                    Seg::Index(idx) => {
+                        let name = format!("__asg{id}_k{i}__");
+                        self.compile_node(&idx)?;
+                        self.emit_define_binding(&name, false);
+                        Ok(Seg::Index(SNode::new(Node::Identifier(name), idx.span)))
+                    }
+                }
+            })
+            .collect::<Result<_, _>>()?;
+
+        let access = |obj_name: &str, seg: &Seg| -> SNode {
+            let object = Box::new(SNode::new(Node::Identifier(obj_name.to_string()), span));
+            match seg {
+                Seg::Prop(p) => SNode::new(
+                    Node::PropertyAccess {
+                        object,
+                        property: p.clone(),
+                    },
+                    span,
+                ),
+                Seg::Index(idx) => SNode::new(
+                    Node::SubscriptAccess {
+                        object,
+                        index: Box::new(idx.clone()),
+                    },
+                    span,
+                ),
+            }
+        };
+
+        // 2. Copy each path prefix into a mutable temp, walking down.
+        let n = seg_nodes.len();
+        let mut prefix_names: Vec<String> = vec![root];
+        for (i, seg) in seg_nodes.iter().enumerate().take(n - 1) {
+            let get_expr = access(prefix_names.last().expect("non-empty"), seg);
+            self.compile_node(&get_expr)?;
+            let name = format!("__asg{id}_t{i}__");
+            self.emit_define_binding(&name, true);
+            prefix_names.push(name);
+        }
+
+        // 3. Single-level leaf assignment on the innermost temp (or the root
+        //    itself when the only reason we are here is an effectful index).
+        let leaf_target = access(prefix_names.last().expect("non-empty"), &seg_nodes[n - 1]);
+        self.compile_assignment(&leaf_target, value, op)?;
+
+        // 4. Write each temp back into its parent, walking up.
+        for i in (0..n - 1).rev() {
+            let wb_target = access(&prefix_names[i], &seg_nodes[i]);
+            let wb_value = SNode::new(Node::Identifier(prefix_names[i + 1].clone()), span);
+            self.compile_assignment(&wb_target, &wb_value, &None)?;
+        }
+
+        self.end_scope();
         Ok(())
     }
 

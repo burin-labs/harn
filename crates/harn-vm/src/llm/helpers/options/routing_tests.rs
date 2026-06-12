@@ -217,7 +217,7 @@ fn clear_merge_role_env() {
 
 #[test]
 fn model_role_defaults_fill_missing_llm_options() {
-    let _guard = crate::llm::env_lock().lock().unwrap();
+    let _guard = crate::llm::env_guard();
     clear_merge_role_env();
     let mut overlay = ProvidersConfig::default();
     overlay.model_roles.insert(
@@ -252,7 +252,7 @@ fn model_role_defaults_fill_missing_llm_options() {
 
 #[test]
 fn explicit_options_win_over_model_role_defaults() {
-    let _guard = crate::llm::env_lock().lock().unwrap();
+    let _guard = crate::llm::env_guard();
     clear_merge_role_env();
     let mut overlay = ProvidersConfig::default();
     overlay.model_roles.insert(
@@ -291,7 +291,7 @@ fn explicit_options_win_over_model_role_defaults() {
 
 #[test]
 fn merge_model_role_has_env_overrides() {
-    let _guard = crate::llm::env_lock().lock().unwrap();
+    let _guard = crate::llm::env_guard();
     crate::llm_config::clear_user_overrides();
     clear_merge_role_env();
     std::env::set_var("HARN_LLM_MERGE_PROVIDER", "mock");
@@ -310,7 +310,7 @@ fn merge_model_role_has_env_overrides() {
 
 #[test]
 fn model_role_aliases_do_not_override_exact_role_defaults() {
-    let _guard = crate::llm::env_lock().lock().unwrap();
+    let _guard = crate::llm::env_guard();
     clear_merge_role_env();
     let mut overlay = ProvidersConfig::default();
     overlay.model_roles.insert(
@@ -356,7 +356,7 @@ fn model_role_aliases_do_not_override_exact_role_defaults() {
 
 #[test]
 fn model_role_env_aliases_do_not_override_exact_role_env() {
-    let _guard = crate::llm::env_lock().lock().unwrap();
+    let _guard = crate::llm::env_guard();
     crate::llm_config::clear_user_overrides();
     clear_merge_role_env();
     std::env::set_var("HARN_LLM_FAST_APPLY_PROVIDER", "mock");
@@ -379,7 +379,7 @@ fn model_role_env_aliases_do_not_override_exact_role_env() {
 
 #[test]
 fn model_role_config_keys_normalize_like_call_options() {
-    let _guard = crate::llm::env_lock().lock().unwrap();
+    let _guard = crate::llm::env_guard();
     clear_merge_role_env();
     let mut overlay = ProvidersConfig::default();
     overlay.model_roles.insert(
@@ -420,7 +420,7 @@ fn fast_options(model: &str) -> BTreeMap<String, VmValue> {
 
 #[test]
 fn fast_opts_into_tier_for_supported_model_and_guards_others() {
-    let _guard = crate::llm::env_lock().lock().unwrap();
+    let _guard = crate::llm::env_guard();
     crate::llm_config::clear_user_overrides();
     std::env::set_var("ANTHROPIC_API_KEY", "test-key");
     std::env::set_var("OPENAI_API_KEY", "test-key");

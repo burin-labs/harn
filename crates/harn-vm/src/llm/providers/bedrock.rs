@@ -152,10 +152,16 @@ impl BedrockProvider {
             .map_err(|error| vm_err(format!("bedrock API error: {error}")))?;
         if !response.status().is_success() {
             let status = response.status();
+            let retry_after = crate::llm::api::retry_after_header(response.headers());
             let body = response.text().await.unwrap_or_default();
             return Err(vm_err(
-                crate::llm::api::classify_provider_http_error("bedrock", status, None, &body)
-                    .message,
+                crate::llm::api::classify_provider_http_error(
+                    "bedrock",
+                    status,
+                    retry_after.as_deref(),
+                    &body,
+                )
+                .message,
             ));
         }
         let json: serde_json::Value = response
@@ -573,7 +579,7 @@ mod tests {
 
     #[test]
     fn blank_region_override_falls_back_to_env() {
-        let _guard = crate::llm::env_lock().lock().expect("env lock");
+        let _guard = crate::llm::env_guard();
         let saved: Vec<(&str, Option<String>)> = BEDROCK_REGION_ENV_VARS
             .iter()
             .map(|name| (*name, std::env::var(name).ok()))

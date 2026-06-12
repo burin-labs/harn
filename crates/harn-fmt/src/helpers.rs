@@ -240,13 +240,7 @@ pub(crate) fn format_pattern(pattern: &BindingPattern) -> String {
 
 /// Escape a string for embedding in double-quoted output.
 pub(crate) fn escape_string(s: &str) -> String {
-    s.replace('\\', "\\\\")
-        .replace('"', "\\\"")
-        .replace('\n', "\\n")
-        .replace('\r', "\\r")
-        .replace('\t', "\\t")
-        .replace('\0', "\\0")
-        .replace("${", "\\${")
+    harn_lexer::escape_string_literal(s)
 }
 
 /// Render a raw-string literal value, choosing the narrowest delimiter that

@@ -59,6 +59,18 @@ fn optional_subscript_on_nil_is_allowed() {
 }
 
 #[test]
+fn subscript_on_intersection_resolves_member_type() {
+    // `x["a"]` must resolve through intersections the same way `x.a` does
+    // (the subscript path used to fall through to gradual, silently
+    // accepting any assignment).
+    let errs = errors(
+        "pipeline t(task) { let x: {a: int} & {b: string} = {a: 1, b: \"s\"}\n\
+         let y: string = x[\"a\"] }",
+    );
+    assert!(has(&errs, "expected string"), "got: {errs:?}");
+}
+
+#[test]
 fn optional_subscript_unknown_shape_key_infers_nil() {
     // `x?["b"]` on a shape without a `b` field is statically nil, so
     // assigning it to `int` must be a mismatch — same standard as

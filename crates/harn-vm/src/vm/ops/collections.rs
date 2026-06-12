@@ -539,11 +539,12 @@ impl super::super::Vm {
             let slot = &mut frame.local_slots[slot_idx];
             match &mut slot.value {
                 VmValue::List(items) => {
-                    if let Some(i) = index.as_int() {
-                        let idx = resolve_list_assign_index(i, items.len())?;
-                        Arc::make_mut(items)[idx] = new_value;
-                        slot.synced = false;
-                    }
+                    let Some(i) = index.as_int() else {
+                        return Err(Self::list_index_type_error(&index));
+                    };
+                    let idx = resolve_list_assign_index(i, items.len())?;
+                    Arc::make_mut(items)[idx] = new_value;
+                    slot.synced = false;
                     return Ok(());
                 }
                 VmValue::Dict(map) => {
@@ -552,7 +553,7 @@ impl super::super::Vm {
                     slot.synced = false;
                     return Ok(());
                 }
-                _ => return Ok(()),
+                other => return Err(Self::subscript_assign_type_error(other)),
             }
         }
 
@@ -563,14 +564,15 @@ impl super::super::Vm {
         if let Some(obj) = self.env.get(var_name) {
             match obj {
                 VmValue::List(items) => {
-                    if let Some(i) = index.as_int() {
-                        let mut new_items =
-                            Arc::try_unwrap(items).unwrap_or_else(|items| (*items).clone());
-                        let idx = resolve_list_assign_index(i, new_items.len())?;
-                        new_items[idx] = new_value;
-                        self.env
-                            .assign(var_name, VmValue::List(std::sync::Arc::new(new_items)))?;
-                    }
+                    let Some(i) = index.as_int() else {
+                        return Err(Self::list_index_type_error(&index));
+                    };
+                    let mut new_items =
+                        Arc::try_unwrap(items).unwrap_or_else(|items| (*items).clone());
+                    let idx = resolve_list_assign_index(i, new_items.len())?;
+                    new_items[idx] = new_value;
+                    self.env
+                        .assign(var_name, VmValue::List(std::sync::Arc::new(new_items)))?;
                 }
                 VmValue::Dict(map) => {
                     let key = index.display();
@@ -579,10 +581,27 @@ impl super::super::Vm {
                     self.env
                         .assign(var_name, VmValue::Dict(std::sync::Arc::new(new_map)))?;
                 }
-                _ => {}
+                other => return Err(Self::subscript_assign_type_error(&other)),
             }
         }
         Ok(())
+    }
+
+    /// Index-assignment on a list requires an int index — mirrors the read
+    /// path's "cannot index into list with …" wording.
+    fn list_index_type_error(index: &VmValue) -> VmError {
+        VmError::TypeError(format!("cannot index into list with {}", index.type_name()))
+    }
+
+    /// Index-assignment is only supported on lists and dicts. This used to
+    /// be a silent no-op (e.g. `s[0] = "Z"` on a string left `s` untouched);
+    /// it is now the same class of error the property path raises.
+    fn subscript_assign_type_error(target: &VmValue) -> VmError {
+        VmError::TypeError(format!(
+            "cannot assign by index into {}; only lists and dicts support \
+             index assignment",
+            target.type_name()
+        ))
     }
 
     pub(super) fn execute_concat(&mut self) {

@@ -235,11 +235,7 @@ impl OllamaProvider {
         })?;
         if !response.status().is_success() {
             let status = response.status();
-            let retry_after = response
-                .headers()
-                .get("retry-after")
-                .and_then(|v| v.to_str().ok())
-                .map(|s| s.to_string());
+            let retry_after = crate::llm::api::retry_after_header(response.headers());
             let body = response.text().await.unwrap_or_default();
             let msg = Self::classify_http_error(status, retry_after.as_deref(), &body).message;
             return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(msg))));
@@ -682,7 +678,7 @@ mod tests {
 
     #[test]
     fn defaults_ollama_runtime_settings() {
-        let _guard = crate::llm::env_lock().lock().expect("env lock");
+        let _guard = crate::llm::env_guard();
         let _env = [
             ScopedEnvVar::remove("HARN_OLLAMA_NUM_CTX"),
             ScopedEnvVar::remove("OLLAMA_CONTEXT_LENGTH"),

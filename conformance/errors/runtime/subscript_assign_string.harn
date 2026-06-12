@@ -1,0 +1,4 @@
+pipeline test(task) {
+  var s = "ab"
+  s[0] = "Z"
+}
