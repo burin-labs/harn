@@ -396,40 +396,10 @@ fn build_mock_result(mock: &LlmMock, last_msg_len: usize) -> LlmResult {
     }
 }
 
-/// Multi-segment glob match: split on `*` and check segments appear in order.
-/// Handles `*`, `prefix*`, `*suffix`, `*contains*`, `pre*mid*suf`, etc.
-fn mock_glob_match(pattern: &str, text: &str) -> bool {
-    if pattern == "*" {
-        return true;
-    }
-    if !pattern.contains('*') {
-        return pattern == text;
-    }
-    let parts: Vec<&str> = pattern.split('*').collect();
-    let mut remaining = text;
-    for (i, part) in parts.iter().enumerate() {
-        if part.is_empty() {
-            continue;
-        }
-        if i == 0 {
-            if !remaining.starts_with(part) {
-                return false;
-            }
-            remaining = &remaining[part.len()..];
-        } else if i == parts.len() - 1 {
-            if !remaining.ends_with(part) {
-                return false;
-            }
-            remaining = "";
-        } else {
-            match remaining.find(part) {
-                Some(pos) => remaining = &remaining[pos + part.len()..],
-                None => return false,
-            }
-        }
-    }
-    true
-}
+// Mock prompt patterns match free prose, where `?`/`[`/`{` are ordinary
+// characters — only `*` is a wildcard. The shared prose matcher keeps that
+// contract (`*`-only ordered segments).
+use harn_glob::match_prose as mock_glob_match;
 
 fn collect_mock_match_strings(value: &serde_json::Value, out: &mut Vec<String>) {
     match value {

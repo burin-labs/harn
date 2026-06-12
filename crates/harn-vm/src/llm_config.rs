@@ -2501,23 +2501,9 @@ fn refs_contain_selector(refs: &BTreeSet<String>, selector: &str) -> bool {
         .is_some_and(|selector| refs.contains(&selector))
 }
 
-/// Simple glob matching for patterns like "claude-*", "qwen/*", "ollama:*".
-fn glob_match(pattern: &str, input: &str) -> bool {
-    if let Some(prefix) = pattern.strip_suffix('*') {
-        input.starts_with(prefix)
-    } else if let Some(suffix) = pattern.strip_prefix('*') {
-        input.ends_with(suffix)
-    } else if pattern.contains('*') {
-        let parts: Vec<&str> = pattern.split('*').collect();
-        if parts.len() == 2 {
-            input.starts_with(parts[0]) && input.ends_with(parts[1])
-        } else {
-            input == pattern
-        }
-    } else {
-        input == pattern
-    }
-}
+// Model-pattern matching for forms like "claude-*", "qwen/*", "ollama:*".
+// Shared workspace semantics live in `harn-glob`.
+use harn_glob::match_name as glob_match;
 
 fn dirs_or_home() -> Option<String> {
     crate::user_dirs::home_dir().map(|home| home.to_string_lossy().into_owned())

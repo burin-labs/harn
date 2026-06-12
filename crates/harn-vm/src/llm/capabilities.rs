@@ -1376,29 +1376,10 @@ fn extract_version(model: &str) -> Option<(u32, u32)> {
     claude_generation(model).or_else(|| gpt_generation(model))
 }
 
-/// Simple glob matching with `*` wildcards. Mirrors the helper in
-/// `llm_config.rs` — keep them in sync if either ever grows regex or
-/// character-class support.
-fn glob_match(pattern: &str, input: &str) -> bool {
-    if let Some(prefix) = pattern.strip_suffix('*') {
-        if let Some(rest) = prefix.strip_prefix('*') {
-            // `*foo*` — substring match.
-            return input.contains(rest);
-        }
-        return input.starts_with(prefix);
-    }
-    if let Some(suffix) = pattern.strip_prefix('*') {
-        return input.ends_with(suffix);
-    }
-    if pattern.contains('*') {
-        let parts: Vec<&str> = pattern.split('*').collect();
-        if parts.len() == 2 {
-            return input.starts_with(parts[0]) && input.ends_with(parts[1]);
-        }
-        return input == pattern;
-    }
-    input == pattern
-}
+// Model-pattern matching for capability rules. Shared workspace semantics
+// live in `harn-glob` (this used to be a hand-mirrored copy of the
+// `llm_config.rs` helper with a "keep them in sync" comment).
+use harn_glob::match_name as glob_match;
 
 #[cfg(test)]
 mod tests {

@@ -6,6 +6,7 @@ members = [
     "crates/harn-builtin-macros",
     "crates/harn-opcode-macros",
     "crates/harn-clock",
+    "crates/harn-glob",
     "crates/harn-lexer",
     "crates/harn-parser",
     "crates/harn-ir",

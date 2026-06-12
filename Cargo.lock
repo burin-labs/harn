@@ -2350,6 +2350,7 @@ dependencies = [
  "futures",
  "harn-dap",
  "harn-fmt",
+ "harn-glob",
  "harn-guard",
  "harn-hostlib",
  "harn-ir",
@@ -2454,6 +2455,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "harn-glob"
+version = "0.8.103"
+dependencies = [
+ "globset",
+]
+
+[[package]]
 name = "harn-guard"
 version = "0.8.103"
 dependencies = [
@@ -2534,6 +2542,7 @@ dependencies = [
 name = "harn-ir"
 version = "0.8.103"
 dependencies = [
+ "harn-glob",
  "harn-lexer",
  "harn-parser",
 ]
@@ -2767,6 +2776,7 @@ dependencies = [
  "harn-builtin-meta",
  "harn-builtin-registry",
  "harn-clock",
+ "harn-glob",
  "harn-ir",
  "harn-lexer",
  "harn-modules",

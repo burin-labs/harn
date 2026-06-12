@@ -173,37 +173,9 @@ impl ToolPattern {
     }
 }
 
-fn glob_match(pattern: &str, value: &str) -> bool {
-    if !pattern.contains('*') {
-        return pattern == value;
-    }
-    let parts: Vec<&str> = pattern.split('*').collect();
-    let mut cursor = 0usize;
-    let last = parts.len().saturating_sub(1);
-    for (i, part) in parts.iter().enumerate() {
-        if part.is_empty() {
-            if i == 0 || i == last {
-                continue;
-            }
-            continue;
-        }
-        if i == 0 && !pattern.starts_with('*') {
-            if !value[cursor..].starts_with(part) {
-                return false;
-            }
-            cursor += part.len();
-            continue;
-        }
-        if i == last && !pattern.ends_with('*') {
-            return value[cursor..].ends_with(part);
-        }
-        match value[cursor..].find(part) {
-            Some(idx) => cursor += idx + part.len(),
-            None => return false,
-        }
-    }
-    pattern.ends_with('*') || cursor == value.len()
-}
+// Golden-fixture tool patterns promise `*`-only wildcards (everything else
+// literal), which is exactly the shared prose matcher's contract.
+use harn_glob::match_prose as glob_match;
 
 /// One state-machine step in the golden fixture.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, Default)]

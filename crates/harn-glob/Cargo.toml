@@ -1,0 +1,20 @@
+[package]
+name = "harn-glob"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+description = "Glob pattern matching primitives for the Harn programming language"
+
+[features]
+default = ["name"]
+# `match_name` (full glob syntax over flat names) pulls in globset; path and
+# prose matching are dependency-free so low layers can opt out.
+name = ["dep:globset"]
+
+[dependencies]
+globset = { version = "0.4", optional = true }
+
+[lints]
+workspace = true
