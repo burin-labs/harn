@@ -124,6 +124,26 @@ same precedence as runtime provider config, so private providers,
 aliases, deprecation notes, quality tags, pricing, and transport
 settings can be validated before they are published.
 
+Overlays can also hide baseline routes that are broken or unsupported
+in the embedding product. `[suppress]` removes the model row, its
+aliases, and any recommendation variant derived from it from the
+exported and served artifact (runtime resolution of an explicitly
+requested id is unaffected):
+
+```toml
+[suppress]
+routes = [
+  "together:Qwen/Qwen3-Coder-Next-FP8",
+  "ollama:qwen3.6:35b-a3b-coding-nvfp4",
+]
+```
+
+Selectors are `provider:model_id`, split on the first colon only, so
+model ids that themselves contain colons (Ollama image tags) work.
+Because an overlay's `[models]` entries replace whole rows, pairing a
+new row with a `[suppress]` entry for the old id also expresses a route
+rename — no post-export patching required.
+
 ## Runtime surfaces
 
 Thin clients should prefer the live harn-serve catalog when a runtime is

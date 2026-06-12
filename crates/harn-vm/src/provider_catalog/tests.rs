@@ -845,3 +845,72 @@ fn embedded_artifact_honors_explicit_declared_overlay() {
         "explicit overlay should be merged into the embedded catalog"
     );
 }
+
+#[test]
+fn overlay_suppress_hides_route_aliases_and_variants() {
+    let _guard = install_overlay(
+        r#"
+[suppress]
+routes = ["together:Qwen/Qwen3-Coder-Next-FP8"]
+"#,
+    );
+    let catalog = artifact();
+    assert!(
+        !catalog
+            .models
+            .iter()
+            .any(|model| model.provider == "together" && model.id == "Qwen/Qwen3-Coder-Next-FP8"),
+        "suppressed route must not export a model row"
+    );
+    assert!(
+        !catalog
+            .aliases
+            .iter()
+            .any(|alias| alias.provider == "together"
+                && alias.model_id == "Qwen/Qwen3-Coder-Next-FP8"),
+        "aliases of a suppressed route must not be exported"
+    );
+    assert!(
+        !catalog
+            .variants
+            .iter()
+            .any(|variant| variant.provider == "together"
+                && variant.model_id == "Qwen/Qwen3-Coder-Next-FP8"),
+        "recommendation variants must re-derive from surviving routes"
+    );
+}
+
+#[test]
+fn suppress_splits_on_first_colon_and_ignores_malformed_entries() {
+    let _guard = install_overlay(
+        r#"
+[providers.private]
+display_name = "Private"
+base_url = "http://127.0.0.1:9000"
+auth_style = "none"
+chat_endpoint = "/v1/chat/completions"
+
+[models."img:tag-a"]
+name = "Img A"
+provider = "private"
+context_window = 8192
+
+[models."img:tag-b"]
+name = "Img B"
+provider = "private"
+context_window = 8192
+
+[suppress]
+routes = ["private:img:tag-a", "not-a-route"]
+"#,
+    );
+    let catalog = artifact();
+    assert!(
+        !catalog.models.iter().any(|model| model.id == "img:tag-a"),
+        "model ids containing colons are matched by splitting the selector on its first colon"
+    );
+    assert!(
+        catalog.models.iter().any(|model| model.id == "img:tag-b"),
+        "sibling routes are unaffected"
+    );
+}

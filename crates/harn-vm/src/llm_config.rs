@@ -39,6 +39,30 @@ pub struct ProvidersConfig {
     pub model_defaults: BTreeMap<String, BTreeMap<String, toml::Value>>,
     #[serde(default)]
     pub model_roles: BTreeMap<String, BTreeMap<String, toml::Value>>,
+    #[serde(default)]
+    pub suppress: SuppressDef,
+}
+
+/// Routes hidden from the exported/served provider catalog artifact.
+///
+/// Lets an overlay drop baseline routes that are broken or unusable for the
+/// embedding product (e.g. a dedicated-only serving route, or a local image
+/// with a broken server-side tool parser) without forking the baseline
+/// catalog. Suppression is artifact-level presentation: it removes the model
+/// row, its aliases, and any recommendation variant derived from it, but does
+/// not block runtime resolution of an explicitly requested model id.
+///
+/// Combined with the overlay's whole-row `models` replacement, this also
+/// expresses route renames: define the row under the new id and suppress the
+/// old one.
+#[derive(Debug, Clone, Deserialize, Default, PartialEq, Eq)]
+pub struct SuppressDef {
+    /// `"provider:model_id"` selectors. Split on the FIRST colon only —
+    /// model ids may themselves contain colons (e.g. Ollama image tags such
+    /// as `ollama:qwen3.6:35b-a3b-coding-nvfp4`). Entries without a colon
+    /// match nothing.
+    #[serde(default)]
+    pub routes: Vec<String>,
 }
 
 impl ProvidersConfig {
@@ -53,6 +77,7 @@ impl ProvidersConfig {
             && self.tier_rules.is_empty()
             && self.model_defaults.is_empty()
             && self.model_roles.is_empty()
+            && self.suppress.routes.is_empty()
             && self.tier_defaults.default == default_mid()
     }
 
@@ -103,6 +128,12 @@ impl ProvidersConfig {
                 .entry(role.clone())
                 .or_default()
                 .extend(defaults.clone());
+        }
+
+        for route in &overlay.suppress.routes {
+            if !self.suppress.routes.contains(route) {
+                self.suppress.routes.push(route.clone());
+            }
         }
     }
 }
@@ -2560,6 +2591,27 @@ mod tests {
 
     fn reset_overrides() {
         clear_user_overrides();
+    }
+
+    #[test]
+    fn suppress_routes_parse_and_merge_dedupe() {
+        let mut base =
+            parse_config_toml("[suppress]\nroutes = [\"together:Qwen/Qwen3-Coder-Next-FP8\"]\n")
+                .expect("base parses");
+        assert!(!base.is_empty(), "a suppress-only overlay is not empty");
+        let overlay = parse_config_toml(
+            "[suppress]\nroutes = [\"together:Qwen/Qwen3-Coder-Next-FP8\", \"ollama:img:tag\"]\n",
+        )
+        .expect("overlay parses");
+        base.merge_from(&overlay);
+        assert_eq!(
+            base.suppress.routes,
+            vec![
+                "together:Qwen/Qwen3-Coder-Next-FP8".to_string(),
+                "ollama:img:tag".to_string(),
+            ],
+            "merge appends new selectors without duplicating existing ones"
+        );
     }
 
     #[test]
