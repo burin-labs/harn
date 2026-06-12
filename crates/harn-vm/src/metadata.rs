@@ -1436,30 +1436,35 @@ fn scan_dir_recursive(
     }
 }
 
-/// Simple glob matching (supports * and ** patterns).
+/// Scan-pattern matching. Patterns with wildcards use the shared glob
+/// matcher in name mode (`*` crosses `/`, so the historical `*.rs` form keeps
+/// matching nested entries during the recursive scan); wildcard-free patterns
+/// keep their historical substring semantics.
 fn glob_match(pattern: &str, path: &str) -> bool {
-    if pattern.contains("**") {
-        let parts: Vec<&str> = pattern.split("**").collect();
-        if parts.len() == 2 {
-            let prefix = parts[0].trim_end_matches('/');
-            let suffix = parts[1].trim_start_matches('/');
-            let prefix_ok = prefix.is_empty() || path.starts_with(prefix);
-            let suffix_ok = suffix.is_empty() || path.ends_with(suffix);
-            return prefix_ok && suffix_ok;
-        }
+    if pattern.contains('*') || pattern.contains('?') {
+        harn_glob::match_name(pattern, path)
+    } else {
+        path.contains(pattern)
     }
-    if pattern.contains('*') {
-        let parts: Vec<&str> = pattern.split('*').collect();
-        if parts.len() == 2 {
-            return path.starts_with(parts[0]) && path.ends_with(parts[1]);
-        }
-    }
-    path.contains(pattern)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn scan_pattern_matching_globs_and_substrings() {
+        // Historical recursive-scan form: `*` crosses directory separators.
+        assert!(glob_match("*.rs", "src/nested/main.rs"));
+        // `**` forms match too (the previous hand-rolled matcher rejected
+        // `**/*.rs` because it compared the second `*` literally).
+        assert!(glob_match("**/*.rs", "src/nested/main.rs"));
+        assert!(glob_match("src/**", "src/nested/main.rs"));
+        assert!(!glob_match("*.toml", "src/main.rs"));
+        // Wildcard-free patterns keep substring semantics.
+        assert!(glob_match("nested", "src/nested/main.rs"));
+        assert!(!glob_match("missing", "src/nested/main.rs"));
+    }
 
     fn temp_path(name: &str) -> PathBuf {
         let unique = std::time::SystemTime::now()

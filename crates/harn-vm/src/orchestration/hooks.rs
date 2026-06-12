@@ -535,25 +535,10 @@ pub fn clear_file_edit_queue() {
     FILE_EDIT_QUEUE.with(|queue| queue.borrow_mut().clear());
 }
 
-pub(crate) fn glob_match(pattern: &str, name: &str) -> bool {
-    if pattern == "*" {
-        return true;
-    }
-    if pattern.contains('*') || pattern.contains('?') || pattern.contains('[') {
-        if let Ok(glob) = globset::Glob::new(pattern) {
-            if glob.compile_matcher().is_match(name) {
-                return true;
-            }
-        }
-    }
-    if let Some(prefix) = pattern.strip_suffix('*') {
-        return name.starts_with(prefix);
-    }
-    if let Some(suffix) = pattern.strip_prefix('*') {
-        return name.ends_with(suffix);
-    }
-    pattern == name
-}
+// The workspace-wide name matcher (re-exported as
+// `crate::orchestration::glob_match` for the tool-surface, permission, and
+// step-runtime call sites). Semantics live in `harn-glob`.
+pub(crate) use harn_glob::match_name as glob_match;
 
 pub fn register_tool_hook(hook: ToolHook) {
     if let Some(pre) = hook.pre {

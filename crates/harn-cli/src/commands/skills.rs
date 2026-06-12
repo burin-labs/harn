@@ -1165,55 +1165,7 @@ fn count_path_hits(patterns: &[String], files: &[String]) -> usize {
     hits
 }
 
-fn glob_match(pattern: &str, path: &str) -> bool {
-    glob_match_inner(pattern.as_bytes(), 0, path.as_bytes(), 0)
-}
-
-fn glob_match_inner(pat: &[u8], mut pi: usize, path: &[u8], mut si: usize) -> bool {
-    while pi < pat.len() {
-        match pat[pi] {
-            b'*' => {
-                let double = pi + 1 < pat.len() && pat[pi + 1] == b'*';
-                let next_pi = if double { pi + 2 } else { pi + 1 };
-                let next_pi = if double && next_pi < pat.len() && pat[next_pi] == b'/' {
-                    next_pi + 1
-                } else {
-                    next_pi
-                };
-                if next_pi >= pat.len() {
-                    if double {
-                        return true;
-                    }
-                    return !path[si..].contains(&b'/');
-                }
-                for try_si in si..=path.len() {
-                    if !double && path[si..try_si].contains(&b'/') {
-                        break;
-                    }
-                    if glob_match_inner(pat, next_pi, path, try_si) {
-                        return true;
-                    }
-                }
-                return false;
-            }
-            b'?' => {
-                if si >= path.len() || path[si] == b'/' {
-                    return false;
-                }
-                pi += 1;
-                si += 1;
-            }
-            c => {
-                if si >= path.len() || path[si] != c {
-                    return false;
-                }
-                pi += 1;
-                si += 1;
-            }
-        }
-    }
-    si == path.len()
-}
+use harn_glob::match_path as glob_match;
 
 fn truncate(value: &str, max: usize) -> String {
     if value.chars().count() <= max {

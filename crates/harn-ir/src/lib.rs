@@ -2431,48 +2431,7 @@ fn pattern_label(node: &SNode) -> String {
     }
 }
 
-fn glob_match(pattern: &str, path: &str) -> bool {
-    fn helper(pattern: &[u8], pi: usize, path: &[u8], si: usize) -> bool {
-        if pi == pattern.len() {
-            return si == path.len();
-        }
-
-        if pattern[pi] == b'*' {
-            if pattern.get(pi + 1) == Some(&b'*') {
-                let next = pi + 2;
-                if next == pattern.len() {
-                    return true;
-                }
-                for index in si..=path.len() {
-                    if helper(pattern, next, path, index) {
-                        return true;
-                    }
-                }
-                return false;
-            }
-
-            let next = pi + 1;
-            let mut index = si;
-            while index <= path.len() {
-                if helper(pattern, next, path, index) {
-                    return true;
-                }
-                if index == path.len() || path[index] == b'/' {
-                    break;
-                }
-                index += 1;
-            }
-            return false;
-        }
-
-        if si == path.len() || pattern[pi] != path[si] {
-            return false;
-        }
-        helper(pattern, pi + 1, path, si + 1)
-    }
-
-    helper(pattern.as_bytes(), 0, path.as_bytes(), 0)
-}
+use harn_glob::match_path as glob_match;
 
 #[cfg(test)]
 mod tests {
@@ -3017,5 +2976,7 @@ fn handler() {
         assert!(glob_match("src/*.rs", "src/main.rs"));
         assert!(!glob_match("src/*.rs", "src/nested/main.rs"));
         assert!(glob_match("src/**/*.rs", "src/nested/main.rs"));
+        // `**/` also matches zero directories (git/globset convention).
+        assert!(glob_match("src/**/*.rs", "src/main.rs"));
     }
 }

@@ -69,6 +69,7 @@ MAX_ATTEMPTS=3
 # Crates to publish, in dependency order. Used by the per-crate fallback
 # when `cargo publish --workspace` bails out partway through.
 WORKSPACE_CRATES=(
+  harn-glob
   harn-lexer
   harn-parser
   harn-ir
