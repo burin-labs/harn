@@ -115,6 +115,16 @@ provider = "openrouter"
 id = "google/gemma-4-31B-it"
 provider = "together"
 
+# Kimi via OpenRouter. Keep the short alias on the current code-focused route;
+# the full model id remains available for callers that want explicit slugs.
+[aliases."kimi-k2.7-code"]
+id = "moonshotai/kimi-k2.7-code"
+provider = "openrouter"
+
+[aliases."openrouter-kimi-k2.7-code"]
+id = "moonshotai/kimi-k2.7-code"
+provider = "openrouter"
+
 # qwen3.6 has no working Ollama route — Ollama's qwen3.5-family server-side
 # tool-call parser 500s on text-tool output (ollama/ollama#14986, #14570).
 # Use the llamacpp provider for local qwen3.x.

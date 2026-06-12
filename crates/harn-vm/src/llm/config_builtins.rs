@@ -1366,12 +1366,29 @@ pub(crate) fn capabilities_to_vm_value(
         VmValue::Bool(caps.top_k_supported),
     );
     dict.insert(
+        "temperature_supported".to_string(),
+        VmValue::Bool(caps.temperature_supported),
+    );
+    dict.insert(
+        "top_p_supported".to_string(),
+        VmValue::Bool(caps.top_p_supported),
+    );
+    dict.insert(
         "frequency_penalty_supported".to_string(),
         VmValue::Bool(caps.frequency_penalty_supported),
     );
     dict.insert(
         "presence_penalty_supported".to_string(),
         VmValue::Bool(caps.presence_penalty_supported),
+    );
+    dict.insert(
+        "allowed_tool_choice_modes".to_string(),
+        VmValue::List(std::sync::Arc::new(
+            caps.allowed_tool_choice_modes
+                .iter()
+                .map(|mode| VmValue::String(std::sync::Arc::from(mode.as_str())))
+                .collect(),
+        )),
     );
     // Accelerated-serving ("fast mode") tier, read from the catalog so
     // callers can branch on `llm_call(..., { fast: true })` support without

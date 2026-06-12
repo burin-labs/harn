@@ -81,6 +81,10 @@ pub struct ProviderDefaults {
     #[serde(default)]
     pub top_k_supported: Option<bool>,
     #[serde(default)]
+    pub temperature_supported: Option<bool>,
+    #[serde(default)]
+    pub top_p_supported: Option<bool>,
+    #[serde(default)]
     pub frequency_penalty_supported: Option<bool>,
     #[serde(default)]
     pub presence_penalty_supported: Option<bool>,
@@ -111,6 +115,12 @@ impl ProviderDefaults {
         }
         if other.top_k_supported.is_some() {
             self.top_k_supported = other.top_k_supported;
+        }
+        if other.temperature_supported.is_some() {
+            self.temperature_supported = other.temperature_supported;
+        }
+        if other.top_p_supported.is_some() {
+            self.top_p_supported = other.top_p_supported;
         }
         if other.frequency_penalty_supported.is_some() {
             self.frequency_penalty_supported = other.frequency_penalty_supported;
@@ -145,6 +155,12 @@ impl ProviderDefaults {
         if self.top_k_supported.is_none() {
             self.top_k_supported = other.top_k_supported;
         }
+        if self.temperature_supported.is_none() {
+            self.temperature_supported = other.temperature_supported;
+        }
+        if self.top_p_supported.is_none() {
+            self.top_p_supported = other.top_p_supported;
+        }
         if self.frequency_penalty_supported.is_none() {
             self.frequency_penalty_supported = other.frequency_penalty_supported;
         }
@@ -162,6 +178,8 @@ impl ProviderDefaults {
             || self.files_api_supported.is_some()
             || self.seed_supported.is_some()
             || self.top_k_supported.is_some()
+            || self.temperature_supported.is_some()
+            || self.top_p_supported.is_some()
             || self.frequency_penalty_supported.is_some()
             || self.presence_penalty_supported.is_some()
     }
@@ -355,9 +373,18 @@ pub struct ProviderRule {
     #[serde(default)]
     pub top_k_supported: Option<bool>,
     #[serde(default)]
+    pub temperature_supported: Option<bool>,
+    #[serde(default)]
+    pub top_p_supported: Option<bool>,
+    #[serde(default)]
     pub frequency_penalty_supported: Option<bool>,
     #[serde(default)]
     pub presence_penalty_supported: Option<bool>,
+    /// Accepted provider-native `tool_choice` modes. Empty means unrestricted
+    /// or unknown. Use this for routes whose native tools work, but whose API
+    /// rejects forced/specified tool choices.
+    #[serde(default)]
+    pub allowed_tool_choice_modes: Option<Vec<String>>,
     /// Preferred endpoint family for this provider/model route. Values
     /// are descriptive labels consumed by providers, e.g.
     /// `/api/generate-raw` for Ollama raw prompt bypass.
@@ -471,8 +498,11 @@ pub struct Capabilities {
     pub reasoning_wire_format: Option<String>,
     pub seed_supported: bool,
     pub top_k_supported: bool,
+    pub temperature_supported: bool,
+    pub top_p_supported: bool,
     pub frequency_penalty_supported: bool,
     pub presence_penalty_supported: bool,
+    pub allowed_tool_choice_modes: Vec<String>,
     pub recommended_endpoint: Option<String>,
     pub text_tool_wire_format_supported: bool,
     pub preferred_tool_format: Option<String>,
@@ -537,8 +567,11 @@ impl Default for Capabilities {
             reasoning_wire_format: None,
             seed_supported: true,
             top_k_supported: true,
+            temperature_supported: true,
+            top_p_supported: true,
             frequency_penalty_supported: true,
             presence_penalty_supported: true,
+            allowed_tool_choice_modes: Vec::new(),
             recommended_endpoint: None,
             text_tool_wire_format_supported: true,
             preferred_tool_format: None,
@@ -1175,8 +1208,11 @@ fn defaults_to_caps(defaults: &ProviderDefaults) -> Capabilities {
         reasoning_wire_format: None,
         seed_supported: None,
         top_k_supported: None,
+        temperature_supported: None,
+        top_p_supported: None,
         frequency_penalty_supported: None,
         presence_penalty_supported: None,
+        allowed_tool_choice_modes: None,
         recommended_endpoint: None,
         text_tool_wire_format_supported: None,
         preferred_tool_format: None,
@@ -1273,6 +1309,14 @@ fn rule_to_caps(rule: &ProviderRule, defaults: &ProviderDefaults) -> Capabilitie
             .top_k_supported
             .or(defaults.top_k_supported)
             .unwrap_or(true),
+        temperature_supported: rule
+            .temperature_supported
+            .or(defaults.temperature_supported)
+            .unwrap_or(true),
+        top_p_supported: rule
+            .top_p_supported
+            .or(defaults.top_p_supported)
+            .unwrap_or(true),
         frequency_penalty_supported: rule
             .frequency_penalty_supported
             .or(defaults.frequency_penalty_supported)
@@ -1281,6 +1325,7 @@ fn rule_to_caps(rule: &ProviderRule, defaults: &ProviderDefaults) -> Capabilitie
             .presence_penalty_supported
             .or(defaults.presence_penalty_supported)
             .unwrap_or(true),
+        allowed_tool_choice_modes: rule.allowed_tool_choice_modes.clone().unwrap_or_default(),
         recommended_endpoint: rule.recommended_endpoint.clone(),
         text_tool_wire_format_supported: rule.text_tool_wire_format_supported.unwrap_or(true),
         preferred_tool_format: Some(rule_preferred_tool_format(rule)),
@@ -1804,6 +1849,30 @@ anthropic_beta_features = ["fine-grained-tool-streaming-2025-05-14"]
         assert_eq!(caps.tool_search, vec!["hosted", "client"]);
         assert_eq!(caps.reasoning_wire_format.as_deref(), Some("openrouter"));
         assert!(!caps.top_k_supported);
+    }
+
+    #[test]
+    fn openrouter_kimi27_code_records_tool_choice_and_sampling_limits() {
+        reset();
+        let caps = lookup("openrouter", "moonshotai/kimi-k2.7-code");
+        assert!(caps.native_tools);
+        assert!(caps.prompt_caching);
+        assert!(caps.vision_supported);
+        assert!(caps.video);
+        assert_eq!(caps.preferred_tool_format.as_deref(), Some("native"));
+        assert_eq!(caps.thinking_modes, vec!["enabled"]);
+        assert_eq!(caps.allowed_tool_choice_modes, vec!["auto", "none"]);
+        assert!(!caps.temperature_supported);
+        assert!(!caps.top_p_supported);
+        assert!(!caps.frequency_penalty_supported);
+        assert!(!caps.presence_penalty_supported);
+
+        let prior = lookup("openrouter", "moonshotai/kimi-k2.6");
+        assert!(prior.prompt_caching);
+        assert!(prior.vision_supported);
+        assert!(!prior.video);
+        assert!(prior.allowed_tool_choice_modes.is_empty());
+        assert!(prior.temperature_supported);
     }
 
     #[test]

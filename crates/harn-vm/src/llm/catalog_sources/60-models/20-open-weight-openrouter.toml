@@ -47,12 +47,22 @@ complementary_with = ["anthropic-claude", "openai-gpt", "google-gemini", "qwen",
 name = "Kimi K2.6"
 provider = "openrouter"
 context_window = 262144
-capabilities = ["tools", "streaming"]
-pricing = { input_per_mtok = 0.73, output_per_mtok = 3.49 }
+capabilities = ["tools", "vision", "streaming", "thinking", "prompt_caching"]
+pricing = { input_per_mtok = 0.68, output_per_mtok = 3.41, cache_read_per_mtok = 0.34 }
 tier = "frontier"
 open_weight = true
-strengths = ["coding", "agentic", "long_context", "tool_use", "reasoning"]
+strengths = ["coding", "agentic", "long_context", "tool_use", "reasoning", "vision"]
 benchmarks = { swe_bench_pro = 58.6, humanitys_last_exam_with_tools = 54.0 }
+complementary_with = ["anthropic-claude", "openai-gpt", "google-gemini", "qwen", "deepseek"]
+[models."moonshotai/kimi-k2.7-code"]
+name = "Kimi K2.7 Code"
+provider = "openrouter"
+context_window = 262144
+capabilities = ["tools", "vision", "video", "streaming", "thinking", "prompt_caching"]
+pricing = { input_per_mtok = 0.95, output_per_mtok = 4.00, cache_read_per_mtok = 0.19 }
+tier = "frontier"
+open_weight = true
+strengths = ["coding", "agentic", "long_context", "tool_use", "reasoning", "vision"]
 complementary_with = ["anthropic-claude", "openai-gpt", "google-gemini", "qwen", "deepseek"]
 [models."openai/gpt-oss-120b"]
 name = "GPT-OSS 120B"
@@ -65,4 +75,3 @@ api_dialect = "openai_chat"
 capabilities = ["tools", "streaming"]
 pricing = { input_per_mtok = 0.15, output_per_mtok = 0.60 }
 architecture = { parameter_count_b = 117.0, active_parameter_count_b = 5.1, moe = true, license = "Apache-2.0", source_url = "https://developers.openai.com/api/docs/models/gpt-oss-120b", last_verified = "2026-06-05" }
-

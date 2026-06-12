@@ -723,6 +723,12 @@ pub(super) fn validate_options(opts: &crate::llm::api::LlmCallOptions) {
     if opts.top_k.is_some() && !caps.top_k_supported {
         warn("top_k");
     }
+    if opts.temperature.is_some() && !caps.temperature_supported {
+        warn("temperature");
+    }
+    if opts.top_p.is_some() && !caps.top_p_supported {
+        warn("top_p");
+    }
     if opts.frequency_penalty.is_some() && !caps.frequency_penalty_supported {
         warn("frequency_penalty");
     }
