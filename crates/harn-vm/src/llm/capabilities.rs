@@ -352,6 +352,11 @@ pub struct ProviderRule {
     /// request field instead of legacy `max_tokens`.
     #[serde(default)]
     pub requires_completion_tokens: Option<bool>,
+    /// Whether this route rejects non-streaming chat-completion requests.
+    /// Harn forces streaming for such routes so callers can keep provider-
+    /// neutral `stream` preferences.
+    #[serde(default)]
+    pub requires_streaming: Option<bool>,
     /// Whether this route accepts OpenAI's `reasoning_effort` request field.
     #[serde(default)]
     pub reasoning_effort_supported: Option<bool>,
@@ -364,6 +369,16 @@ pub struct ProviderRule {
     /// floor at `minimal`.
     #[serde(default)]
     pub reasoning_none_supported: Option<bool>,
+    /// Whether this route accepts an explicit enabled/disabled reasoning switch
+    /// set to false. Some OpenRouter endpoints require reasoning and return
+    /// 400 when sent `reasoning: {enabled:false}`.
+    #[serde(default)]
+    pub reasoning_disable_supported: Option<bool>,
+    /// Whether reasoning-only clean stops may be promoted into visible text.
+    /// Disable this for providers whose `reasoning` field is always private
+    /// trace, even when `content` is empty.
+    #[serde(default)]
+    pub reasoning_text_promotable: Option<bool>,
     /// Provider-specific reasoning request shape for OpenAI-compatible
     /// transports. Known values are `openrouter`, `enabled`, and `minimax`.
     #[serde(default)]
@@ -492,9 +507,12 @@ pub struct Capabilities {
     pub server_parser: String,
     pub honors_chat_template_kwargs: bool,
     pub requires_completion_tokens: bool,
+    pub requires_streaming: bool,
     pub reasoning_effort_supported: bool,
     pub reasoning_effort_levels: Vec<String>,
     pub reasoning_none_supported: bool,
+    pub reasoning_disable_supported: bool,
+    pub reasoning_text_promotable: bool,
     pub reasoning_wire_format: Option<String>,
     pub seed_supported: bool,
     pub top_k_supported: bool,
@@ -561,9 +579,12 @@ impl Default for Capabilities {
             server_parser: "none".to_string(),
             honors_chat_template_kwargs: false,
             requires_completion_tokens: false,
+            requires_streaming: false,
             reasoning_effort_supported: false,
             reasoning_effort_levels: Vec::new(),
             reasoning_none_supported: false,
+            reasoning_disable_supported: true,
+            reasoning_text_promotable: true,
             reasoning_wire_format: None,
             seed_supported: true,
             top_k_supported: true,
@@ -1202,9 +1223,12 @@ fn defaults_to_caps(defaults: &ProviderDefaults) -> Capabilities {
         server_parser: None,
         honors_chat_template_kwargs: None,
         requires_completion_tokens: None,
+        requires_streaming: None,
         reasoning_effort_supported: None,
         reasoning_effort_levels: None,
         reasoning_none_supported: None,
+        reasoning_disable_supported: None,
+        reasoning_text_promotable: None,
         reasoning_wire_format: None,
         seed_supported: None,
         top_k_supported: None,
@@ -1294,9 +1318,12 @@ fn rule_to_caps(rule: &ProviderRule, defaults: &ProviderDefaults) -> Capabilitie
             .unwrap_or_else(|| "none".to_string()),
         honors_chat_template_kwargs: rule.honors_chat_template_kwargs.unwrap_or(false),
         requires_completion_tokens: rule.requires_completion_tokens.unwrap_or(false),
+        requires_streaming: rule.requires_streaming.unwrap_or(false),
         reasoning_effort_supported: rule.reasoning_effort_supported.unwrap_or(false),
         reasoning_effort_levels: rule.reasoning_effort_levels.clone().unwrap_or_default(),
         reasoning_none_supported: rule.reasoning_none_supported.unwrap_or(false),
+        reasoning_disable_supported: rule.reasoning_disable_supported.unwrap_or(true),
+        reasoning_text_promotable: rule.reasoning_text_promotable.unwrap_or(true),
         reasoning_wire_format: rule
             .reasoning_wire_format
             .clone()
@@ -1876,12 +1903,64 @@ anthropic_beta_features = ["fine-grained-tool-streaming-2025-05-14"]
     }
 
     #[test]
+    fn qwen37_routes_record_prompt_cache_vision_and_streaming_quirks() {
+        reset();
+        let plus = lookup("openrouter", "qwen/qwen3.7-plus");
+        assert!(plus.native_tools);
+        assert!(plus.prompt_caching);
+        assert!(plus.vision_supported);
+        assert_eq!(plus.preferred_tool_format.as_deref(), Some("native"));
+        assert_eq!(plus.thinking_modes, vec!["enabled"]);
+        assert_eq!(
+            plus.auto_reasoning_overrides
+                .get("agent")
+                .map(String::as_str),
+            Some("off"),
+            "Qwen tool-bearing agent turns should disable reasoning automatically",
+        );
+
+        let max = lookup("openrouter", "qwen/qwen3.7-max");
+        assert!(max.native_tools);
+        assert!(max.prompt_caching);
+        assert!(!max.vision_supported);
+        assert_eq!(max.thinking_modes, vec!["enabled"]);
+
+        let together = lookup("together", "Qwen/Qwen3.7-Max");
+        assert!(together.native_tools);
+        assert!(together.prompt_caching);
+        assert!(together.requires_streaming);
+        assert!(!together.honors_chat_template_kwargs);
+
+        let glm = lookup("together", "zai-org/GLM-5.1");
+        assert!(glm.native_tools);
+        assert!(glm.prompt_caching);
+        assert_eq!(
+            glm.auto_reasoning_overrides
+                .get("agent")
+                .map(String::as_str),
+            Some("off"),
+        );
+
+        let minimax = lookup("together", "MiniMaxAI/MiniMax-M2.7");
+        assert!(minimax.native_tools);
+        assert!(minimax.prompt_caching);
+        assert!(!minimax.reasoning_text_promotable);
+
+        let step = lookup("openrouter", "stepfun/step-3.7-flash");
+        assert!(step.native_tools);
+        assert!(step.prompt_caching);
+        assert!(!step.reasoning_disable_supported);
+        assert_eq!(step.thinking_modes, vec!["enabled"]);
+    }
+
+    #[test]
     fn openrouter_structured_routes_cover_current_open_models() {
         reset();
         for model in [
             "deepseek/deepseek-v4-flash",
             "mistralai/devstral-small",
             "meta-llama/llama-4-scout",
+            "kwaipilot/kat-coder-pro-v2",
         ] {
             let caps = lookup("openrouter", model);
             assert!(caps.native_tools, "{model} should expose native tools");

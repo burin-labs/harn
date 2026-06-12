@@ -1,0 +1,46 @@
+# Current OpenRouter-hosted coding/agent models that are not direct provider
+# defaults. Pricing snapshots are from OpenRouter's live `/api/v1/models`.
+
+tier = "frontier"
+open_weight = false
+strengths = ["agentic", "coding", "long_context", "tool_use", "reasoning", "vision"]
+complementary_with = ["anthropic-claude", "openai-gpt", "google-gemini", "deepseek", "kimi"]
+[models."qwen/qwen3.7-plus"]
+name = "Qwen3.7 Plus"
+provider = "openrouter"
+context_window = 1000000
+capabilities = ["tools", "vision", "streaming", "thinking", "prompt_caching"]
+pricing = { input_per_mtok = 0.32, output_per_mtok = 1.28, cache_read_per_mtok = 0.064, cache_write_per_mtok = 0.40 }
+
+tier = "frontier"
+open_weight = false
+strengths = ["agentic", "coding", "long_context", "tool_use", "reasoning"]
+complementary_with = ["anthropic-claude", "openai-gpt", "google-gemini", "deepseek", "kimi"]
+[models."qwen/qwen3.7-max"]
+name = "Qwen3.7 Max"
+provider = "openrouter"
+context_window = 1000000
+capabilities = ["tools", "streaming", "thinking", "prompt_caching"]
+pricing = { input_per_mtok = 1.25, output_per_mtok = 3.75, cache_read_per_mtok = 0.25, cache_write_per_mtok = 1.5625 }
+
+tier = "mid"
+open_weight = false
+strengths = ["coding", "agentic", "tool_use", "long_context", "speed"]
+complementary_with = ["anthropic-claude", "openai-gpt", "google-gemini", "qwen", "deepseek"]
+[models."kwaipilot/kat-coder-pro-v2"]
+name = "KAT-Coder-Pro V2"
+provider = "openrouter"
+context_window = 256000
+capabilities = ["tools", "streaming", "prompt_caching"]
+pricing = { input_per_mtok = 0.30, output_per_mtok = 1.20, cache_read_per_mtok = 0.06 }
+
+tier = "mid"
+open_weight = false
+strengths = ["agentic", "long_context", "tool_use", "reasoning", "speed"]
+complementary_with = ["qwen", "deepseek", "kimi", "minimax", "zai-glm"]
+[models."stepfun/step-3.7-flash"]
+name = "Step 3.7 Flash"
+provider = "openrouter"
+context_window = 256000
+capabilities = ["tools", "streaming", "thinking", "prompt_caching"]
+pricing = { input_per_mtok = 0.20, output_per_mtok = 1.15, cache_read_per_mtok = 0.04 }

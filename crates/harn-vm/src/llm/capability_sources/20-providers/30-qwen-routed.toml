@@ -201,6 +201,54 @@ prefers_xml_tools = true
 thinking_block_style = "thinking_blocks"
 
 [[provider.openrouter]]
+model_match = "qwen/qwen3.7-plus"
+native_tools = true
+preferred_tool_format = "native"
+structured_output = "native"
+thinking_modes = ["enabled"]
+reasoning_none_supported = true
+auto_reasoning_overrides = { agent = "off", verify = "off", code = "off" }
+prompt_caching = true
+cache_breakpoint_style = "last_block"
+vision_supported = true
+vision = true
+server_parser = "none"
+honors_chat_template_kwargs = false
+recommended_endpoint = "/v1/chat/completions"
+text_tool_wire_format_supported = true
+thinking_disable_directive = "/no_think"
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "delimited"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "inline"
+
+[[provider.openrouter]]
+model_match = "qwen/qwen3.7-max"
+native_tools = true
+preferred_tool_format = "native"
+structured_output = "native"
+thinking_modes = ["enabled"]
+reasoning_none_supported = true
+auto_reasoning_overrides = { agent = "off", verify = "off", code = "off" }
+prompt_caching = true
+cache_breakpoint_style = "last_block"
+server_parser = "none"
+honors_chat_template_kwargs = false
+recommended_endpoint = "/v1/chat/completions"
+text_tool_wire_format_supported = true
+thinking_disable_directive = "/no_think"
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "delimited"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "inline"
+
+[[provider.openrouter]]
 model_match = "qwen/qwen3.6-plus"
 native_tools = true
 preferred_tool_format = "native"
@@ -434,6 +482,28 @@ structured_output = "native"
 thinking_modes = ["enabled"]
 server_parser = "none"
 honors_chat_template_kwargs = true
+recommended_endpoint = "/v1/chat/completions"
+text_tool_wire_format_supported = true
+thinking_disable_directive = "/no_think"
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "delimited"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "inline"
+
+[[provider.together]]
+model_match = "Qwen/Qwen3.7-Max"
+native_tools = true
+preferred_tool_format = "native"
+structured_output = "native"
+thinking_modes = ["enabled"]
+auto_reasoning_overrides = { agent = "off", verify = "off", code = "off" }
+prompt_caching = true
+requires_streaming = true
+server_parser = "none"
+honors_chat_template_kwargs = false
 recommended_endpoint = "/v1/chat/completions"
 text_tool_wire_format_supported = true
 thinking_disable_directive = "/no_think"

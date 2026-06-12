@@ -119,6 +119,7 @@ pub(super) fn extract_openai_delta_field_str<'a>(
 pub(super) fn normalize_openai_message_text(
     message: &serde_json::Value,
     finish_reason: Option<&str>,
+    promote_reasoning_to_text: bool,
 ) -> (String, String) {
     let raw_text = extract_openai_message_field_as_text(message, &["content"]);
     let reasoning_text = extract_openai_message_field_as_text(
@@ -152,7 +153,12 @@ pub(super) fn normalize_openai_message_text(
         .get("tool_calls")
         .and_then(serde_json::Value::as_array)
         .is_some_and(|calls| !calls.is_empty());
-    if !truncated && !has_tool_call && text.is_empty() && !extracted_thinking.is_empty() {
+    if promote_reasoning_to_text
+        && !truncated
+        && !has_tool_call
+        && text.is_empty()
+        && !extracted_thinking.is_empty()
+    {
         text = extracted_thinking.clone();
     }
     (text, extracted_thinking)
@@ -241,7 +247,7 @@ mod tests {
         let message = serde_json::json!({
             "reasoning": "hello from reasoning"
         });
-        let (visible, thinking) = normalize_openai_message_text(&message, Some("stop"));
+        let (visible, thinking) = normalize_openai_message_text(&message, Some("stop"), true);
         assert_eq!(visible, "hello from reasoning");
         assert_eq!(thinking, "hello from reasoning");
     }
@@ -252,7 +258,7 @@ mod tests {
             "content": "<think>inline reasoning</think>visible answer",
             "reasoning": "separate reasoning"
         });
-        let (visible, thinking) = normalize_openai_message_text(&message, Some("stop"));
+        let (visible, thinking) = normalize_openai_message_text(&message, Some("stop"), true);
         assert_eq!(visible, "visible answer");
         assert_eq!(thinking, "separate reasoning\ninline reasoning");
     }
@@ -266,7 +272,7 @@ mod tests {
             "content": "",
             "reasoning": "Let me think step by step about the problem. First I need to"
         });
-        let (visible, thinking) = normalize_openai_message_text(&message, Some("length"));
+        let (visible, thinking) = normalize_openai_message_text(&message, Some("length"), true);
         assert_eq!(visible, "", "truncated reasoning leaked into visible text");
         assert_eq!(
             thinking,
@@ -283,7 +289,7 @@ mod tests {
             "content": "",
             "reasoning": "the answer is 42"
         });
-        let (visible, thinking) = normalize_openai_message_text(&message, Some("stop"));
+        let (visible, thinking) = normalize_openai_message_text(&message, Some("stop"), true);
         assert_eq!(visible, "the answer is 42");
         assert_eq!(thinking, "the answer is 42");
     }
@@ -305,7 +311,7 @@ mod tests {
                 "function": {"name": "look", "arguments": "{\"path\":\"parser.rs\"}"}
             }]
         });
-        let (visible, thinking) = normalize_openai_message_text(&message, Some("tool_calls"));
+        let (visible, thinking) = normalize_openai_message_text(&message, Some("tool_calls"), true);
         assert_eq!(
             visible, "",
             "reasoning leaked into visible text on a tool-call turn"
@@ -322,9 +328,22 @@ mod tests {
             "content": "visible answer",
             "reasoning_details": "minimax private trace"
         });
-        let (visible, thinking) = normalize_openai_message_text(&message, Some("stop"));
+        let (visible, thinking) = normalize_openai_message_text(&message, Some("stop"), true);
         assert_eq!(visible, "visible answer");
         assert_eq!(thinking, "minimax private trace");
+    }
+
+    #[test]
+    fn normalize_openai_message_text_can_keep_reasoning_private_without_content() {
+        let message = serde_json::json!({
+            "content": "",
+            "reasoning": "private trace ending with OK"
+        });
+
+        let (visible, thinking) = normalize_openai_message_text(&message, Some("stop"), false);
+
+        assert_eq!(visible, "");
+        assert_eq!(thinking, "private trace ending with OK");
     }
 
     #[test]

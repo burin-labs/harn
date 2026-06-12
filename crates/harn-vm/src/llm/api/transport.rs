@@ -331,14 +331,21 @@ async fn vm_call_llm_api_with_body_inner(
         .unwrap_or(false);
 
     let resolved = crate::llm::helpers::ResolvedProvider::resolve(provider);
+    let caps = crate::llm::capabilities::lookup(provider, model);
     let use_stream_transport = if is_ollama && !opts.stream {
         crate::events::log_warn(
             "llm",
             "stream=false is not supported by Ollama, using streaming",
         );
         true
+    } else if caps.requires_streaming && !opts.stream {
+        crate::events::log_warn(
+            "llm",
+            &format!("{provider} model {model} requires streaming, using stream=true"),
+        );
+        true
     } else {
-        wants_streaming || is_ollama
+        wants_streaming || is_ollama || caps.requires_streaming
     };
 
     if !is_ollama {

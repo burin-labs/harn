@@ -101,6 +101,12 @@
 #                     accepted reasoning_effort values when the provider
 #                     accepts only a subset of Harn's neutral enum.
 #   reasoning_none_supported: whether reasoning_effort="none" is accepted.
+#   reasoning_disable_supported:
+#                     whether `reasoning: {enabled:false}` is accepted when
+#                     the provider uses an enabled/disabled reasoning switch.
+#   reasoning_text_promotable:
+#                     whether a reasoning-only clean stop may be promoted into
+#                     visible text when the provider omits content.
 #   reasoning_wire_format:
 #                     OpenAI-compatible non-standard reasoning transport:
 #                     openrouter, enabled, or minimax.
@@ -1624,6 +1630,54 @@ prefers_xml_tools = true
 thinking_block_style = "thinking_blocks"
 
 [[provider.openrouter]]
+model_match = "qwen/qwen3.7-plus"
+native_tools = true
+preferred_tool_format = "native"
+structured_output = "native"
+thinking_modes = ["enabled"]
+reasoning_none_supported = true
+auto_reasoning_overrides = { agent = "off", verify = "off", code = "off" }
+prompt_caching = true
+cache_breakpoint_style = "last_block"
+vision_supported = true
+vision = true
+server_parser = "none"
+honors_chat_template_kwargs = false
+recommended_endpoint = "/v1/chat/completions"
+text_tool_wire_format_supported = true
+thinking_disable_directive = "/no_think"
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "delimited"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "inline"
+
+[[provider.openrouter]]
+model_match = "qwen/qwen3.7-max"
+native_tools = true
+preferred_tool_format = "native"
+structured_output = "native"
+thinking_modes = ["enabled"]
+reasoning_none_supported = true
+auto_reasoning_overrides = { agent = "off", verify = "off", code = "off" }
+prompt_caching = true
+cache_breakpoint_style = "last_block"
+server_parser = "none"
+honors_chat_template_kwargs = false
+recommended_endpoint = "/v1/chat/completions"
+text_tool_wire_format_supported = true
+thinking_disable_directive = "/no_think"
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "delimited"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "inline"
+
+[[provider.openrouter]]
 model_match = "qwen/qwen3.6-plus"
 native_tools = true
 preferred_tool_format = "native"
@@ -1857,6 +1911,28 @@ structured_output = "native"
 thinking_modes = ["enabled"]
 server_parser = "none"
 honors_chat_template_kwargs = true
+recommended_endpoint = "/v1/chat/completions"
+text_tool_wire_format_supported = true
+thinking_disable_directive = "/no_think"
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "delimited"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "inline"
+
+[[provider.together]]
+model_match = "Qwen/Qwen3.7-Max"
+native_tools = true
+preferred_tool_format = "native"
+structured_output = "native"
+thinking_modes = ["enabled"]
+auto_reasoning_overrides = { agent = "off", verify = "off", code = "off" }
+prompt_caching = true
+requires_streaming = true
+server_parser = "none"
+honors_chat_template_kwargs = false
 recommended_endpoint = "/v1/chat/completions"
 text_tool_wire_format_supported = true
 thinking_disable_directive = "/no_think"
@@ -2424,7 +2500,27 @@ native_tools = true
 preferred_tool_format = "native"
 structured_output = "native"
 thinking_modes = ["enabled"]
+auto_reasoning_overrides = { agent = "off", verify = "off", code = "off" }
+prompt_caching = true
 honors_chat_template_kwargs = false
+reasoning_text_promotable = false
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "native_json"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "inline"
+
+[[provider.together]]
+model_match = "minimaxai/minimax-m2.7*"
+native_tools = true
+preferred_tool_format = "native"
+structured_output = "native"
+thinking_modes = ["enabled"]
+prompt_caching = true
+honors_chat_template_kwargs = false
+reasoning_text_promotable = false
 prefers_xml_scaffolding = false
 prefers_markdown_scaffolding = true
 structured_output_mode = "native_json"
@@ -2893,6 +2989,7 @@ vision = true
 vision_supported = true
 video_supported = true
 prompt_caching = true
+reasoning_text_promotable = false
 text_tool_wire_format_supported = true
 prefers_xml_scaffolding = false
 prefers_markdown_scaffolding = true
@@ -2917,6 +3014,7 @@ prefers_role_developer = false
 prefers_xml_tools = false
 thinking_block_style = "inline"
 prompt_caching = true
+reasoning_text_promotable = false
 
 [[provider.minimax]]
 model_match = "minimax-m2.5*"
@@ -2932,6 +3030,7 @@ supports_assistant_prefill = false
 prefers_role_developer = false
 prefers_xml_tools = false
 thinking_block_style = "inline"
+reasoning_text_promotable = false
 
 [[provider.minimax]]
 model_match = "minimax-m2*"
@@ -2947,6 +3046,7 @@ supports_assistant_prefill = false
 prefers_role_developer = false
 prefers_xml_tools = false
 thinking_block_style = "inline"
+reasoning_text_promotable = false
 
 [[provider.minimax]]
 model_match = "minimax-text-*"
@@ -3045,6 +3145,42 @@ native_tools = true
 preferred_tool_format = "native"
 text_tool_wire_format_supported = true
 structured_output = "native"
+
+[[provider.openrouter]]
+model_match = "kwaipilot/kat-coder-pro-v2"
+native_tools = true
+preferred_tool_format = "native"
+tool_mode_parity = "interchangeable"
+tool_mode_parity_notes = "Live OpenRouter probe on 2026-06-12 returned a valid provider-native tool call for KAT-Coder-Pro V2."
+prompt_caching = true
+text_tool_wire_format_supported = true
+structured_output = "native"
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "native_json"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "none"
+
+[[provider.openrouter]]
+model_match = "stepfun/step-3.7-flash"
+native_tools = true
+preferred_tool_format = "native"
+tool_mode_parity = "interchangeable"
+tool_mode_parity_notes = "Live OpenRouter probe on 2026-06-12 returned a valid provider-native tool call for Step 3.7 Flash with reasoning enabled."
+prompt_caching = true
+structured_output = "native"
+thinking_modes = ["enabled"]
+reasoning_disable_supported = false
+text_tool_wire_format_supported = true
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "native_json"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "inline"
 
 # --- source: 90-families/provider-family.toml ---
 [provider_family]

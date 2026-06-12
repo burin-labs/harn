@@ -203,8 +203,12 @@ impl OpenAiCompatibleProvider {
                     // directive shrinks the candidate set to zero -> 404 "No
                     // endpoints found" (e.g. qwen/qwen3-coder json_object calls).
                     // The disable is a no-op for these models anyway, so skip it.
+                    // A smaller set of routes (for example Step 3.7 Flash)
+                    // support reasoning but reject explicit disable directives;
+                    // omit the field there and let the endpoint's mandatory
+                    // reasoning default apply.
                     let skip_disable = is_openrouter_reasoning_disable(&reasoning)
-                        && !model_declares_reasoning(&caps);
+                        && (!model_declares_reasoning(&caps) || !caps.reasoning_disable_supported);
                     if !skip_disable {
                         body["reasoning"] = reasoning;
                     }
@@ -1037,6 +1041,21 @@ mod tests {
         assert_eq!(
             body["reasoning"]["enabled"], false,
             "reasoning-capable model must keep the explicit disable: {body}"
+        );
+    }
+
+    #[test]
+    fn openrouter_mandatory_reasoning_model_omits_unsupported_disable() {
+        let mut payload = base_request_payload();
+        payload.provider = "openrouter".to_string();
+        payload.model = "stepfun/step-3.7-flash".to_string();
+        payload.thinking = ThinkingConfig::Disabled;
+        payload.output_format = crate::llm::api::OutputFormat::JsonObject;
+        let body = OpenAiCompatibleProvider::build_request_body(&payload, false);
+
+        assert!(
+            body.get("reasoning").is_none(),
+            "mandatory-reasoning route must omit unsupported disable: {body}"
         );
     }
 

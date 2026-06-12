@@ -104,6 +104,35 @@ pipeline test(task) {
   assert(!kimi27.top_p_supported, "Kimi K2.7 Code has fixed top_p")
   assert(!kimi27.frequency_penalty_supported, "Kimi K2.7 Code has fixed penalties")
   assert(!kimi27.presence_penalty_supported, "Kimi K2.7 Code has fixed penalties")
+  let qwen37_plus = provider_capabilities("openrouter", "qwen/qwen3.7-plus")
+  assert(qwen37_plus.native_tools, "OpenRouter Qwen3.7 Plus exposes native tools")
+  assert(qwen37_plus.prompt_caching, "OpenRouter Qwen3.7 Plus exposes prompt caching")
+  assert(qwen37_plus.vision_supported, "OpenRouter Qwen3.7 Plus accepts image input")
+  assert(
+    qwen37_plus.auto_reasoning_overrides.agent == "off",
+    "Qwen3.7 Plus disables reasoning for agent tool loops",
+  )
+  let qwen37_max = provider_capabilities("together", "Qwen/Qwen3.7-Max")
+  assert(qwen37_max.native_tools, "Together Qwen3.7 Max exposes native tools")
+  assert(qwen37_max.prompt_caching, "Together Qwen3.7 Max exposes prompt caching")
+  assert(qwen37_max.requires_streaming, "Together Qwen3.7 Max requires streaming transport")
+  let kat = provider_capabilities("openrouter", "kwaipilot/kat-coder-pro-v2")
+  assert(kat.native_tools, "OpenRouter KAT-Coder-Pro V2 exposes native tools")
+  assert(kat.prompt_caching, "OpenRouter KAT-Coder-Pro V2 exposes prompt caching")
+  let step37 = provider_capabilities("openrouter", "stepfun/step-3.7-flash")
+  assert(step37.native_tools, "OpenRouter Step 3.7 Flash exposes native tools")
+  assert(step37.prompt_caching, "OpenRouter Step 3.7 Flash exposes prompt caching")
+  assert(!step37.reasoning_disable_supported, "OpenRouter Step 3.7 Flash requires reasoning")
+  let glm51 = provider_capabilities("together", "zai-org/GLM-5.1")
+  assert(glm51.native_tools, "Together GLM 5.1 exposes native tools")
+  assert(
+    glm51.auto_reasoning_overrides.agent == "off",
+    "Together GLM 5.1 supports reasoning-off tool loops",
+  )
+  let minimax27 = provider_capabilities("together", "MiniMaxAI/MiniMax-M2.7")
+  assert(minimax27.native_tools, "Together MiniMax M2.7 exposes native tools")
+  assert(minimax27.prompt_caching, "Together MiniMax M2.7 exposes prompt caching")
+  assert(!minimax27.reasoning_text_promotable, "Together MiniMax M2.7 keeps reasoning private")
   // OpenRouter inherits the openai family.
   let routed = provider_capabilities("openrouter", "gpt-5.4")
   assert(routed.defer_loading, "openrouter inherits openai defer_loading")
