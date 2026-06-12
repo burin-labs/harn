@@ -8,6 +8,90 @@ highlights live in [CHANGELOG-pre-0.6.md](CHANGELOG-pre-0.6.md).
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.8.105
+
+### Added
+
+- **Providers overlay: `[suppress] routes` section (#3267).** New
+  `[suppress] routes = ["provider:model_id", ...]` section hides broken or
+  product-unsupported routes from the exported/served catalog artifact — the
+  model row, its aliases, and any recommendation variant derived from it —
+  without forking the baseline. Selectors split on the first colon (model ids
+  may contain colons, e.g. Ollama image tags). Combined with whole-row
+  `models` replacement this also expresses route renames (define the new id,
+  suppress the old), letting embedders drop post-export catalog patching.
+
+### Changed
+
+- **One glob matcher for the whole workspace (#3265).** Seven divergent
+  `glob_match` implementations (invariant globs, metadata scan, model
+  config/capability patterns, hook routing, mock prompt patterns, skills
+  triggers) consolidated into the new `harn-glob` crate with three explicit
+  contracts (`match_path`, `match_name`, `match_prose`). Model and hook
+  patterns now share full glob syntax (`*`, `?`, `[..]`), and path globs
+  uniformly treat `**/` as matching zero directories.
+
+### Fixed
+
+- **One wire id per streamed tool call (#3270).** The streaming
+  `ToolCall(Pending)` announcement and partial-arg updates from the SSE
+  transport used a `tool-{provider_id}` id while the executed
+  `Pending → InProgress → Completed/Failed` lifecycle ran under the bare
+  provider id, so every executed call appeared under two ids on the ACP
+  wire and id-keyed consumers double-counted tool calls. The announcement
+  now uses the provider id verbatim, and when a provider omits the id the
+  synthesized fallback is written into the dispatched call so the
+  lifecycle keeps the same id.
+- **`metadata` directory-scan `**` patterns match again (#3265).** The
+  scanner's hand-rolled matcher compared the second `*` in `**/*.rs`
+  literally, so recursive `**` scan patterns never matched; scan patterns now
+  go through the shared glob matcher (bare substring patterns keep their
+  historical behavior).
+- **Cross-cutting validation fixes (#3269).** Glob `**/` patterns now stay on
+  directory boundaries and name globs honor brace alternates; schema validation
+  and export now enforce enum/`uniqueItems` collection constraints and emit
+  valid JSON/OpenAPI for `any`, `set`, and nullable unions; MCP file upload
+  `accept` matching honors wildcards and extensions; OAuth dynamic registration
+  accepts loopback IPv6 and 127/8 redirect hosts; and MCP OAuth resource
+  audiences are matched exactly.
+- **Cross-cutting bug sweep (10+ root-cause fixes).**
+  - *Compiler:* a function or program body whose bytecode exceeded 64 KiB
+    silently truncated its `u16` jump operands and jumped somewhere wild at
+    runtime; every finalized chunk is now guarded and oversized bodies fail
+    compilation with a clear "split it into smaller functions" error.
+  - *Typechecker:* optional subscript access on a shape (`x?["k"]`) dropped
+    the optional flag, so an unknown key inferred gradual instead of `nil`
+    and mismatched assignments passed silently.
+  - *Stdlib:* the regex builtins (`regex_match`, `regex_replace`,
+    `regex_captures`, `regex_split`) stringified an explicit `nil`
+    pattern/text/replacement to the literal string `"nil"` and compiled —
+    and matched — it as a real regex; `nil` now takes the same fallback as a
+    missing argument (mirroring the existing flags guard).
+  - *Formatter:* `harn fmt` relocated comments to the end of the file from
+    three positions — trailing comments on inline match arms
+    (`1 -> { x } // c`), trailing comments on dict/struct-literal entries,
+    and full-line comments inside multiline dict/list literals. All three now
+    stay anchored, and a literal with interior comments keeps its multiline
+    shape.
+  - *Linter:* `comparison-to-bool` flagged optional-chained presence tests
+    (`d?.enabled == false`) as "redundant" and its autofix rewrote them to
+    `!d?.enabled`, which flips the branch when the chain is nil; the rule now
+    skips operands that can be nil via optional chaining. Also,
+    `prefer-optional-shorthand` diagnostics reported byte-based columns,
+    overshooting on lines with multibyte characters; columns are now
+    character-based.
+  - *Spec:* `spec/HARN_SPEC.md` claimed `if`/`else` and `match` execute
+    without creating a child scope, contradicting both the docs and actual
+    behavior (branch/arm bodies are block-scoped); the scope-creation section
+    now matches the implementation.
+  - *MCP test fixtures:* `FakeServerBehavior::HeaderMismatch` was declared
+    but never implemented; the fake RC server now validates `Mcp-Method` /
+    `Mcp-Name` headers via the production negotiation helper and answers
+    `-32600` with the spec error shape.
+  - *Docs/release:* `docs/src/embedding-rust.md` pinned `tag = "v0.8.57"`
+    (~46 releases stale); the pins are refreshed and
+    `release_gate.sh prepare` now bumps them automatically each release.
+
 ## v0.8.104
 
 ### Added
