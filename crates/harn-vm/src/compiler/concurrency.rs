@@ -67,6 +67,7 @@ impl Compiler {
         let param_slots = crate::chunk::ParamSlot::vec_from_typed(&typed_params);
         let has_runtime_type_checks =
             CompiledFunction::has_runtime_type_checks_for_params(&param_slots);
+        super::ensure_chunk_addressable(&fn_compiler.chunk, &format!("`{fn_name}`"), self.line)?;
         let func = CompiledFunction {
             name: fn_name.to_string(),
             type_params: Vec::new(),
@@ -100,6 +101,7 @@ impl Compiler {
         fn_compiler.struct_layouts = self.struct_layouts.clone();
         fn_compiler.compile_block(body)?;
         fn_compiler.chunk.emit(Op::Return, self.line);
+        super::ensure_chunk_addressable(&fn_compiler.chunk, "spawn body", self.line)?;
         let func = CompiledFunction {
             name: "<spawn>".to_string(),
             type_params: Vec::new(),

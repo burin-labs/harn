@@ -24,6 +24,27 @@ fn try_compile(source: &str) -> Result<Chunk, CompileError> {
 }
 
 #[test]
+fn oversized_function_chunk_is_a_compile_error_not_a_miscompile() {
+    // Jump operands are u16 chunk offsets; a body that compiles past
+    // 64 KiB used to silently truncate jump targets (`loop_start as
+    // u16`, `patch_jump`'s `code.len() as u16`) and jump somewhere
+    // wild at runtime. It must be a compile error instead.
+    let mut body = String::new();
+    for i in 0..6000 {
+        // Each iteration emits a conditional, so the chunk accumulates
+        // patched jumps on both sides of the 64 KiB boundary.
+        body.push_str(&format!("  if task == {i} {{ log({i}) }}\n"));
+    }
+    let source = format!("fn huge(task: int) {{\n{body}}}\npipeline t(task) {{ huge(1) }}");
+    let err = try_compile(&source).unwrap_err();
+    assert!(
+        err.message.contains("64 KiB") && err.message.contains("huge"),
+        "{}",
+        err.message
+    );
+}
+
+#[test]
 fn match_list_pattern_rest_must_be_last() {
     let err = try_compile(
         r"pipeline t(task) { match [1, 2, 3] { [...rest, last] -> { log(last) } _ -> {} } }",

@@ -59,6 +59,16 @@ fn optional_subscript_on_nil_is_allowed() {
 }
 
 #[test]
+fn optional_subscript_unknown_shape_key_infers_nil() {
+    // `x?["b"]` on a shape without a `b` field is statically nil, so
+    // assigning it to `int` must be a mismatch — same standard as
+    // `x?.b` property access. (The Shape subscript arm used to drop the
+    // optional flag and infer gradual, silently accepting this.)
+    let errs = errors("pipeline t(task) { let x: {a: int} = {a: 1}\nlet y: int = x?[\"b\"] }");
+    assert!(has(&errs, "expected int"), "got: {errs:?}");
+}
+
+#[test]
 fn subscript_on_concrete_list_is_silent() {
     let errs = errors("pipeline t(task) { let xs: list = []\nlog(xs[0]) }");
     let warns = warnings("pipeline t(task) { let xs: list = []\nlog(xs[0]) }");

@@ -58,6 +58,46 @@ async fn modern_success_fake_server_emits_envelope_and_cache_hint() {
 }
 
 #[tokio::test]
+async fn header_mismatch_fake_server_validates_mcp_method_header() {
+    let server = spawn_fake_http_server(FakeServerBehavior::HeaderMismatch).await;
+    let url = format!("{}/mcp", server.base_url);
+
+    // Agreeing header and body sail through to the normal handler.
+    let list = json!({
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "tools/list",
+        "params": {"_meta": rc_meta("client.rs")},
+    });
+    let ok = post_rc(&url, &list, &rc_headers("tools/list", &list["params"])).await;
+    assert!(
+        ok.body.get("result").is_some(),
+        "matching headers must succeed; got {}",
+        ok.body
+    );
+
+    // A spoofed `Mcp-Method` header is rejected with the RC `-32600`
+    // shape, mirroring the strict generic server.
+    let call = json!({
+        "jsonrpc": "2.0",
+        "id": 2,
+        "method": "tools/call",
+        "params": {
+            "name": "echo",
+            "arguments": {"message": "spoofed"},
+            "_meta": rc_meta("client.rs"),
+        },
+    });
+    let bad = post_rc(&url, &call, &rc_headers("tools/list", &call["params"])).await;
+    assert_eq!(bad.body["error"]["code"], json!(-32600));
+    assert_eq!(
+        bad.body["error"]["data"]["headerValue"],
+        json!("tools/list")
+    );
+    assert_eq!(bad.body["error"]["data"]["bodyMethod"], json!("tools/call"));
+}
+
+#[tokio::test]
 async fn unsupported_version_fake_server_returns_minus_32004_then_succeeds() {
     let server = spawn_fake_http_server(FakeServerBehavior::UnsupportedVersionRetry).await;
     let url = format!("{}/mcp", server.base_url);

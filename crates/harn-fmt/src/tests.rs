@@ -1325,6 +1325,58 @@ fn test_doc_comment_existing_block_is_canonicalized() {
 }
 
 #[test]
+fn test_inline_match_arm_trailing_comment_stays_on_arm() {
+    let source =
+        "fn pick(x: int) -> int {\n  match x {\n    1 -> { 10 } // ten\n    _ -> { 0 }\n  }\n}\n";
+    let result = format_source(source).unwrap();
+    assert!(
+        result.contains("1 -> { 10 }  // ten"),
+        "arm comment must stay on the arm line (was flushed to EOF), got:\n{result}"
+    );
+    assert_roundtrip(source);
+}
+
+#[test]
+fn test_dict_entry_comments_stay_in_literal() {
+    let source =
+        "fn f() -> dict {\n  let d = {\n    // section\n    x: 1,\n    y: 2, // why\n  }\n  d\n}\n";
+    let result = format_source(source).unwrap();
+    assert!(
+        result.contains("    // section\n    x: 1,"),
+        "full-line comment must stay above its entry, got:\n{result}"
+    );
+    assert!(
+        result.contains("y: 2,  // why"),
+        "trailing entry comment must stay on the entry, got:\n{result}"
+    );
+    assert_roundtrip(source);
+}
+
+#[test]
+fn test_list_item_trailing_comment_stays_in_literal() {
+    let source = "fn f() -> list {\n  let l = [\n    1, // one\n    2,\n  ]\n  l\n}\n";
+    let result = format_source(source).unwrap();
+    assert!(
+        result.contains("1,  // one"),
+        "list item comment must stay on the item, got:\n{result}"
+    );
+    assert_roundtrip(source);
+}
+
+#[test]
+fn test_statement_comment_after_inline_dict_stays_on_statement() {
+    // The dict ends on the statement line, so the comment belongs to the
+    // statement and the literal must not absorb it (or force-wrap).
+    let source = "fn f() -> dict {\n  let d = {x: 1} // note\n  d\n}\n";
+    let result = format_source(source).unwrap();
+    assert!(
+        result.contains("let d = {x: 1}  // note"),
+        "statement-level comment must stay on the statement, got:\n{result}"
+    );
+    assert_roundtrip(source);
+}
+
+#[test]
 fn test_plain_double_slash_comment_preserved_verbatim() {
     let source = "// plain comment\npub fn exposed() -> string {\n  return \"x\"\n}\n";
     let result = format_source(source).unwrap();

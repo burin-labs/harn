@@ -317,6 +317,22 @@ cmd_prepare() {
   next="$(next_version "$bump")"
   bump_version "$next"
   cargo run --quiet --bin harn -- run scripts/sync_protocol_fixture_runtime_versions.harn -- --from "$current" --to "$next"
+  # Keep the embedding guide's `tag = "vX.Y.Z"` pins on the released version
+  # line. Nothing owned these before and they silently drifted ~46 versions
+  # behind; match any prior version rather than `$current` so a stale doc
+  # still converges.
+  python3 - "$next" <<'PY'
+import re
+import sys
+from pathlib import Path
+
+next_version = sys.argv[1]
+doc = Path("docs/src/embedding-rust.md")
+text = doc.read_text()
+updated = re.sub(r'tag = "v\d+\.\d+\.\d+"', f'tag = "v{next_version}"', text)
+if updated != text:
+    doc.write_text(updated)
+PY
   # The audit lanes that ran before prepare populate `target/debug/incremental/`
   # with object-file references keyed to the *old* version's crate hashes.
   # Once `bump_version` rewrites Cargo.toml the workspace crates rebuild with

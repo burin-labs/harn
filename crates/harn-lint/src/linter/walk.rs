@@ -9,8 +9,8 @@ use super::Linter;
 use crate::decls::{FnDeclaration, ImportInfo, TypeDeclaration};
 use crate::diagnostic::{LintDiagnostic, LintSeverity};
 use crate::fixes::{
-    empty_statement_removal_fix, is_nan_free, is_pure_expression, nil_fallback_ternary_parts,
-    unnecessary_cast_fix,
+    contains_optional_chaining, empty_statement_removal_fix, is_nan_free, is_pure_expression,
+    nil_fallback_ternary_parts, unnecessary_cast_fix,
 };
 use crate::harndoc::extract_harndoc;
 use crate::naming::simplify_bool_comparison;
@@ -551,7 +551,17 @@ impl<'a> Linter<'a> {
                 if (op == "==" || op == "!=") && !is_self_comparison {
                     let is_bool_left = matches!(left.node, Node::BoolLiteral(_));
                     let is_bool_right = matches!(right.node, Node::BoolLiteral(_));
-                    if is_bool_left || is_bool_right {
+                    // `x?.y == false` is a presence test, not redundancy:
+                    // a nil receiver makes the comparison `false` while the
+                    // "simplified" `!x?.y` would be `true`. Skip the lint
+                    // (and its behavior-changing autofix) for operands that
+                    // can be nil via optional chaining.
+                    let other_can_be_nil = if is_bool_left {
+                        contains_optional_chaining(&right.node)
+                    } else {
+                        contains_optional_chaining(&left.node)
+                    };
+                    if (is_bool_left || is_bool_right) && !other_can_be_nil {
                         let (suggestion, msg) = if op == "==" {
                             if matches!(right.node, Node::BoolLiteral(true))
                                 || matches!(left.node, Node::BoolLiteral(true))

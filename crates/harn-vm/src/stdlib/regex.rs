@@ -69,6 +69,19 @@ fn optional_flags(args: &[VmValue], idx: usize) -> std::borrow::Cow<'_, str> {
     }
 }
 
+/// Read a required string argument (pattern/text/replacement). Returns
+/// `None` when the slot is absent *or* explicitly `nil`, so each builtin
+/// can take its missing-argument fallback. Without this guard
+/// `Nil.as_str_cow()` stringifies to `"nil"`, and a forwarded unset
+/// optional would silently be compiled — and matched — as the literal
+/// pattern/text `nil`.
+fn required_str(args: &[VmValue], idx: usize) -> Option<std::borrow::Cow<'_, str>> {
+    match args.get(idx) {
+        None | Some(VmValue::Nil) => None,
+        Some(v) => Some(v.as_str_cow()),
+    }
+}
+
 fn build_regex(pattern: &str, flags: &str) -> Result<regex::Regex, String> {
     let mut builder = regex::RegexBuilder::new(pattern);
     for flag in flags.chars() {
@@ -105,21 +118,19 @@ pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
     category = "regex"
 )]
 fn regex_match_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
-    if args.len() >= 2 {
-        let pattern = args[0].as_str_cow();
-        let text = args[1].as_str_cow();
-        let flags = optional_flags(args, 2);
-        let re = get_cached_regex(&pattern, &flags)?;
-        let matches: Vec<VmValue> = re
-            .find_iter(&text)
-            .map(|m| VmValue::String(std::sync::Arc::from(m.as_str())))
-            .collect();
-        if matches.is_empty() {
-            return Ok(VmValue::Nil);
-        }
-        return Ok(VmValue::List(std::sync::Arc::new(matches)));
+    let (Some(pattern), Some(text)) = (required_str(args, 0), required_str(args, 1)) else {
+        return Ok(VmValue::Nil);
+    };
+    let flags = optional_flags(args, 2);
+    let re = get_cached_regex(&pattern, &flags)?;
+    let matches: Vec<VmValue> = re
+        .find_iter(&text)
+        .map(|m| VmValue::String(std::sync::Arc::from(m.as_str())))
+        .collect();
+    if matches.is_empty() {
+        return Ok(VmValue::Nil);
     }
-    Ok(VmValue::Nil)
+    Ok(VmValue::List(std::sync::Arc::new(matches)))
 }
 
 // Both `regex_replace` and `regex_replace_all` replace every match via the
@@ -131,17 +142,18 @@ fn regex_match_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmEr
     category = "regex"
 )]
 fn regex_replace_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
-    if args.len() >= 3 {
-        let pattern = args[0].as_str_cow();
-        let replacement = args[1].as_str_cow();
-        let text = args[2].as_str_cow();
-        let flags = optional_flags(args, 3);
-        let re = get_cached_regex(&pattern, &flags)?;
-        return Ok(VmValue::String(std::sync::Arc::from(
-            re.replace_all(&text, replacement.as_ref()).into_owned(),
-        )));
-    }
-    Ok(VmValue::Nil)
+    let (Some(pattern), Some(replacement), Some(text)) = (
+        required_str(args, 0),
+        required_str(args, 1),
+        required_str(args, 2),
+    ) else {
+        return Ok(VmValue::Nil);
+    };
+    let flags = optional_flags(args, 3);
+    let re = get_cached_regex(&pattern, &flags)?;
+    Ok(VmValue::String(std::sync::Arc::from(
+        re.replace_all(&text, replacement.as_ref()).into_owned(),
+    )))
 }
 
 #[harn_builtin(
@@ -149,11 +161,9 @@ fn regex_replace_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, Vm
     category = "regex"
 )]
 fn regex_captures_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
-    if args.len() < 2 {
+    let (Some(pattern), Some(text)) = (required_str(args, 0), required_str(args, 1)) else {
         return Ok(VmValue::List(std::sync::Arc::new(Vec::new())));
-    }
-    let pattern = args[0].as_str_cow();
-    let text = args[1].as_str_cow();
+    };
     let flags = optional_flags(args, 2);
     let re = get_cached_regex(&pattern, &flags)?;
 
@@ -234,11 +244,9 @@ fn regex_captures_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, V
     category = "regex"
 )]
 fn regex_split_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
-    if args.len() < 2 {
+    let (Some(text), Some(pattern)) = (required_str(args, 0), required_str(args, 1)) else {
         return Ok(VmValue::Nil);
-    }
-    let text = args[0].as_str_cow();
-    let pattern = args[1].as_str_cow();
+    };
     let flags = optional_flags(args, 2);
     let re = get_cached_regex(&pattern, &flags)?;
     Ok(VmValue::List(std::sync::Arc::new(
@@ -530,6 +538,39 @@ mod tests {
         )
         .unwrap();
         assert_eq!(replaced.display(), "a#b#");
+    }
+
+    #[test]
+    fn nil_required_args_take_missing_arg_fallback() {
+        // A nil pattern/text must NOT stringify to the literal "nil"
+        // (which would compile — and match — as a real regex). Each
+        // builtin takes the same fallback as a missing argument.
+        let mut vm = vm();
+
+        // Would previously compile pattern "nil" and find it in the text.
+        let m = call(&mut vm, "regex_match", vec![VmValue::Nil, s("a nil value")]).unwrap();
+        assert!(matches!(m, VmValue::Nil), "got {:?}", m.display());
+        let m = call(&mut vm, "regex_match", vec![s("nil"), VmValue::Nil]).unwrap();
+        assert!(matches!(m, VmValue::Nil), "got {:?}", m.display());
+
+        let c = call(
+            &mut vm,
+            "regex_captures",
+            vec![VmValue::Nil, s("a nil value")],
+        )
+        .unwrap();
+        assert!(unwrap_list(&c).is_empty());
+
+        let r = call(
+            &mut vm,
+            "regex_replace",
+            vec![VmValue::Nil, s("#"), s("a1b2")],
+        )
+        .unwrap();
+        assert!(matches!(r, VmValue::Nil), "got {:?}", r.display());
+
+        let sp = call(&mut vm, "regex_split", vec![VmValue::Nil, s(",")]).unwrap();
+        assert!(matches!(sp, VmValue::Nil), "got {:?}", sp.display());
     }
 
     #[test]

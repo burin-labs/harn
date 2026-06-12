@@ -21,6 +21,30 @@ pub use error::CompileError;
 
 use crate::chunk::{Chunk, Constant, Op};
 
+/// Jump operands are 16-bit chunk offsets (`emit_jump`, `patch_jump`,
+/// backward loop jumps), so a chunk whose code grows past `u16::MAX`
+/// bytes would silently truncate jump targets and land somewhere wild at
+/// runtime. Every finalized chunk (the program chunk and each compiled
+/// function's chunk) must pass through this guard so oversized bodies
+/// fail compilation instead of miscompiling.
+pub(crate) fn ensure_chunk_addressable(
+    chunk: &Chunk,
+    what: &str,
+    line: u32,
+) -> Result<(), CompileError> {
+    if chunk.code.len() > u16::MAX as usize {
+        return Err(CompileError {
+            message: format!(
+                "{what} compiled to {} bytes of bytecode, more than the 64 KiB a jump \
+                 operand can address; split it into smaller functions",
+                chunk.code.len()
+            ),
+            line,
+        });
+    }
+    Ok(())
+}
+
 /// Environment variable that disables optional compiler optimizations.
 ///
 /// The VM still emits structurally required bytecode, such as parameter

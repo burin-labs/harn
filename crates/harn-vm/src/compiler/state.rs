@@ -282,6 +282,7 @@ impl Compiler {
             self.chunk.emit(Op::Nil, self.line);
         }
         self.chunk.emit(Op::Return, self.line);
+        super::ensure_chunk_addressable(&self.chunk, "the program body", self.line)?;
         Ok(self.chunk)
     }
 
@@ -333,6 +334,7 @@ impl Compiler {
         self.drain_finallys_to_floor(0)?;
         self.chunk.emit(Op::Nil, self.line);
         self.chunk.emit(Op::Return, self.line);
+        super::ensure_chunk_addressable(&self.chunk, "the pipeline body", self.line)?;
         Ok(self.chunk)
     }
 
@@ -1384,6 +1386,7 @@ impl Compiler {
         let param_slots = crate::chunk::ParamSlot::vec_from_typed(params);
         let has_runtime_type_checks =
             CompiledFunction::has_runtime_type_checks_for_params(&param_slots);
+        super::ensure_chunk_addressable(&fn_compiler.chunk, "function body", self.line)?;
         Ok(CompiledFunction {
             name: String::new(),
             type_params: type_params.iter().map(|param| param.name.clone()).collect(),

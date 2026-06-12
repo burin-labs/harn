@@ -18,6 +18,14 @@ pub(crate) struct Comment {
     pub(crate) is_doc: bool,
 }
 
+/// One item of a comma sequence (list element, dict/struct entry) together
+/// with the comments anchored to it in the source.
+pub(super) struct CommentedItem {
+    pub(super) leading: Vec<String>,
+    pub(super) body: String,
+    pub(super) trailing: Option<String>,
+}
+
 pub(crate) struct Formatter<'a> {
     pub(crate) source: &'a str,
     pub(crate) output: String,
@@ -134,6 +142,77 @@ impl<'a> Formatter<'a> {
         }
         out.push_str(&close_indent);
         out
+    }
+
+    /// Render a comma sequence whose items may carry source comments:
+    /// full-line comments that sat above the item inside the literal and a
+    /// trailing same-line comment. Any present comment forces the sequence
+    /// multiline so the comments are emitted in place — previously they
+    /// were left unclaimed and flushed to the end of the file.
+    pub(super) fn format_comma_sequence_commented(
+        &self,
+        items: Vec<CommentedItem>,
+        prefix_len: usize,
+        indent: usize,
+    ) -> String {
+        let has_comments = items
+            .iter()
+            .any(|item| !item.leading.is_empty() || item.trailing.is_some());
+        if !has_comments {
+            let rendered = items.into_iter().map(|item| item.body).collect();
+            return self.format_comma_sequence(rendered, prefix_len, indent);
+        }
+        let item_indent = "  ".repeat(indent + 1);
+        let close_indent = "  ".repeat(indent);
+        let mut out = String::new();
+        out.push('\n');
+        for item in items {
+            for comment in &item.leading {
+                out.push_str(&item_indent);
+                out.push_str(comment);
+                out.push('\n');
+            }
+            out.push_str(&item_indent);
+            out.push_str(&item.body);
+            out.push(',');
+            if let Some(trail) = item.trailing {
+                out.push_str("  ");
+                out.push_str(&trail);
+            }
+            out.push('\n');
+        }
+        out.push_str(&close_indent);
+        out
+    }
+
+    /// Claim the comments that belong to one sequence item: full-line
+    /// comments on the lines `[from_line, item_line)` (inside the literal,
+    /// above the item) and the trailing comment on `item_end_line`. The
+    /// trailing comment is left alone when the item ends on the literal's
+    /// closing line — that comment belongs to the enclosing statement and
+    /// is attached by `attach_trailing_comment`/`format_body_string`.
+    pub(super) fn commented_item(
+        &self,
+        body: String,
+        from_line: usize,
+        item_line: usize,
+        item_end_line: usize,
+        literal_end_line: usize,
+    ) -> CommentedItem {
+        let mut leading = Vec::new();
+        for line in from_line..item_line {
+            if let Some(comment) = self.take_trailing_comment_for_line(line) {
+                leading.push(comment);
+            }
+        }
+        let trailing = (item_end_line < literal_end_line)
+            .then(|| self.take_trailing_comment_for_line(item_end_line))
+            .flatten();
+        CommentedItem {
+            leading,
+            body,
+            trailing,
+        }
     }
 
     pub(super) fn format_typed_params_wrapped(
