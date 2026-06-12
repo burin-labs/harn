@@ -153,6 +153,17 @@ pub(crate) fn env_lock() -> &'static std::sync::Mutex<()> {
     LOCK.get_or_init(|| Mutex::new(()))
 }
 
+/// Acquire the env lock, recovering from poisoning. The mutex only
+/// serializes process-env mutation — a panicking holder leaves nothing
+/// corrupted behind — so treating poison as fatal just cascades one failing
+/// test into failures in every sibling test that touches LLM env vars.
+#[cfg(test)]
+pub(crate) fn env_guard() -> std::sync::MutexGuard<'static, ()> {
+    env_lock()
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
 pub const LLM_CALLS_DISABLED_ENV: &str = "HARN_LLM_CALLS_DISABLED";
 
 pub fn estimate_text_tokens(text: &str) -> i64 {
@@ -271,7 +282,27 @@ pub use self::trace::{
     take_agent_trace, take_trace, AgentTraceEvent, LlmTraceEntry,
 };
 
-/// Reset all thread-local LLM state (cost, trace, mock, rate limits). Call between test runs.
+/// Fully wipe the process-global rate-limiter registry (config-derived
+/// limiters, retry-after cooldowns, usage windows, and runtime overrides).
+///
+/// This is deliberately **not** part of [`reset_llm_state`]: that runs from
+/// parallel unit tests where wiping the shared registry corrupts a sibling
+/// rate-limit test's counters mid-assertion. Only sequential or
+/// separate-process contexts — the CLI test runner between cases, integration
+/// test binaries, and per-job worker resets — may safely call this, which they
+/// do via [`crate::reset_thread_local_state`].
+pub fn reset_rate_limit_registry() {
+    rate_limit::reset_rate_limit_state();
+}
+
+/// Reset thread-local LLM state (cost, trace, mock, providers). Call between
+/// test runs.
+///
+/// Note: the process-global rate-limiter registry is intentionally left alone
+/// here (only leaked *runtime overrides* are scrubbed) so concurrently running
+/// rate-limit tests aren't corrupted. Contexts that need full rate-limit
+/// isolation call [`reset_rate_limit_registry`] via
+/// [`crate::reset_thread_local_state`].
 pub fn reset_llm_state() {
     call::clear_in_flight_llm_calls();
     introspection::reset_snapshot();
@@ -279,7 +310,10 @@ pub fn reset_llm_state() {
     trace::reset_trace_state();
     trace::reset_agent_trace_state();
     provider::register_default_providers();
-    rate_limit::reset_rate_limit_state();
+    // Deliberately the override-scoped reset, not the full registry wipe:
+    // the limiter registry is process-global, and a full wipe here raced
+    // (and corrupted) concurrently running rate-limit tests.
+    rate_limit::reset_runtime_rate_limit_overrides();
     routing::clear_policy_registry();
     mock::reset_llm_mock_state();
     autonomy_budget::reset_autonomy_budget_state();

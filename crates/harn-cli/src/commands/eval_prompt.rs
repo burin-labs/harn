@@ -1038,17 +1038,17 @@ fn render_html(report: &PromptReport) -> String {
     out.push_str("</style></head><body>");
     out.push_str(&format!(
         "<h1>harn eval prompt</h1><div class=\"meta\">{} · mode: {}</div>",
-        html_escape(&report.template_path.to_string_lossy()),
+        crate::format::escape_html(&report.template_path.to_string_lossy()),
         report.mode,
     ));
     out.push_str("<div class=\"grid\">");
     for render in &report.renders {
         out.push_str(&format!(
             "<div class=\"card\"><h2>{} <span class=\"meta\">({} / {} · {})</span></h2>",
-            html_escape(&render.selector),
-            html_escape(&render.provider),
-            html_escape(&render.model),
-            html_escape(&render.family),
+            crate::format::escape_html(&render.selector),
+            crate::format::escape_html(&render.provider),
+            crate::format::escape_html(&render.model),
+            crate::format::escape_html(&render.family),
         ));
         if !render.auth_available {
             out.push_str("<p class=\"skip\">auth: not configured</p>");
@@ -1057,11 +1057,14 @@ fn render_html(report: &PromptReport) -> String {
             (_, Some(error)) => {
                 out.push_str(&format!(
                     "<p class=\"err\">render error: {}</p>",
-                    html_escape(error)
+                    crate::format::escape_html(error)
                 ));
             }
             (Some(rendered), _) => {
-                out.push_str(&format!("<pre>{}</pre>", html_escape(rendered)));
+                out.push_str(&format!(
+                    "<pre>{}</pre>",
+                    crate::format::escape_html(rendered)
+                ));
             }
             _ => {}
         }
@@ -1071,11 +1074,14 @@ fn render_html(report: &PromptReport) -> String {
             } else if let Some(err) = run.error.as_ref() {
                 out.push_str(&format!(
                     "<p class=\"err\">run error: {}</p>",
-                    html_escape(err)
+                    crate::format::escape_html(err)
                 ));
             } else if let Some(response) = run.response.as_ref() {
                 out.push_str("<h3>response</h3>");
-                out.push_str(&format!("<pre>{}</pre>", html_escape(response)));
+                out.push_str(&format!(
+                    "<pre>{}</pre>",
+                    crate::format::escape_html(response)
+                ));
             }
         }
         out.push_str("</div>");
@@ -1089,15 +1095,15 @@ fn render_html(report: &PromptReport) -> String {
         for fixture in &context_eval.fixtures {
             out.push_str(&format!(
                 "<h3>{}</h3><ul>",
-                html_escape(&fixture.path.to_string_lossy()),
+                crate::format::escape_html(&fixture.path.to_string_lossy()),
             ));
             for case in &fixture.cases {
                 out.push_str(&format!(
                     "<li><strong>{}</strong>: {} · score {:.3} · selected [{}] · tokens {}/{}</li>",
-                    html_escape(&case.id),
+                    crate::format::escape_html(&case.id),
                     if case.pass { "pass" } else { "fail" },
                     case.score.overall,
-                    html_escape(&case.selected_artifact_ids.join(", ")),
+                    crate::format::escape_html(&case.selected_artifact_ids.join(", ")),
                     case.budget.total_tokens,
                     case.budget.budget_tokens,
                 ));
@@ -1108,26 +1114,11 @@ fn render_html(report: &PromptReport) -> String {
     if let Some(judge) = report.judge.as_ref() {
         out.push_str(&format!(
             "<h2>Judge ({})</h2><pre>{}</pre>",
-            html_escape(&judge.judge_model),
-            html_escape(&judge.verdict),
+            crate::format::escape_html(&judge.judge_model),
+            crate::format::escape_html(&judge.verdict),
         ));
     }
     out.push_str("</body></html>\n");
-    out
-}
-
-fn html_escape(s: &str) -> String {
-    let mut out = String::with_capacity(s.len());
-    for c in s.chars() {
-        match c {
-            '&' => out.push_str("&amp;"),
-            '<' => out.push_str("&lt;"),
-            '>' => out.push_str("&gt;"),
-            '"' => out.push_str("&quot;"),
-            '\'' => out.push_str("&#39;"),
-            _ => out.push(c),
-        }
-    }
     out
 }
 

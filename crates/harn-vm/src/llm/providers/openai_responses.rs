@@ -64,11 +64,7 @@ impl OpenAiResponsesProvider {
 
         if !response.status().is_success() {
             let status = response.status();
-            let retry_after = response
-                .headers()
-                .get("retry-after")
-                .and_then(|value| value.to_str().ok())
-                .map(str::to_string);
+            let retry_after = crate::llm::api::retry_after_header(response.headers());
             let body = response.text().await.unwrap_or_default();
             let msg = crate::llm::providers::OpenAiCompatibleProvider::classify_http_error(
                 "openai",

@@ -972,6 +972,32 @@ fn strip_indent(text: &str, n: usize) -> String {
     stripped.strip_suffix('\n').unwrap_or(&stripped).to_string()
 }
 
+/// Escape `value` so it round-trips as the body of a double-quoted Harn
+/// string literal: the lexer's escape set (`\n`, `\r`, `\t`, `\0`, `\\`,
+/// `\"`) plus `\$` before `{` so a value containing `${…}` renders as text
+/// instead of becoming live interpolation when the generated source is
+/// compiled. This is the single source of truth for code generators — the
+/// CLI's `harn try` scaffolding and the VM's composition/crystallize
+/// codegen had each grown a private copy that forgot `${`, letting a value
+/// like `${host_call(...)}` execute.
+pub fn escape_string_literal(value: &str) -> String {
+    let mut out = String::with_capacity(value.len());
+    let mut chars = value.chars().peekable();
+    while let Some(ch) = chars.next() {
+        match ch {
+            '\\' => out.push_str("\\\\"),
+            '"' => out.push_str("\\\""),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            '\0' => out.push_str("\\0"),
+            '$' if chars.peek() == Some(&'{') => out.push_str("\\$"),
+            _ => out.push(ch),
+        }
+    }
+    out
+}
+
 /// Remove a trailing-newline-only literal segment (for multiline strings
 /// where the last segment before `"""` is just whitespace).
 fn strip_trailing_newline_segments(mut segments: Vec<StringSegment>) -> Vec<StringSegment> {
@@ -986,6 +1012,29 @@ fn strip_trailing_newline_segments(mut segments: Vec<StringSegment>) -> Vec<Stri
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn escape_string_literal_round_trips_through_the_lexer() {
+        for original in [
+            "plain text",
+            "with \"quotes\" and \\backslash",
+            "newline\ntab\tcr\r",
+            "interpolation ${1 + 1} stays text",
+            "already-escaped \\${x}",
+            "plain $dollar and ${nested ${inner}}",
+        ] {
+            let literal = format!("\"{}\"", escape_string_literal(original));
+            let mut lexer = Lexer::new(&literal);
+            let tokens = lexer.tokenize().expect("escaped literal must lex");
+            let TokenKind::StringLiteral(ref value) = tokens[0].kind else {
+                panic!(
+                    "expected a plain string token for {literal:?}, got {:?}",
+                    tokens[0].kind
+                );
+            };
+            assert_eq!(value, original, "round trip through {literal:?}");
+        }
+    }
 
     #[test]
     fn shebang_at_offset_zero_is_skipped() {

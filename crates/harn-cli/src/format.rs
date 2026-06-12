@@ -69,6 +69,50 @@ pub(crate) fn escape_md(value: &str) -> String {
     value.replace('|', "\\|")
 }
 
+/// Escape `&`, `<`, `>`, `"`, and `'` for embedding text in HTML or XML
+/// output. Uses `&#39;` for the apostrophe because it is valid in both
+/// (`&apos;` is XML-only). The eval-prompt report, MCP landing page, OAuth
+/// callback page, and JUnit report writer had each grown a private copy.
+pub(crate) fn escape_html(value: &str) -> String {
+    let mut out = String::with_capacity(value.len());
+    for ch in value.chars() {
+        match ch {
+            '&' => out.push_str("&amp;"),
+            '<' => out.push_str("&lt;"),
+            '>' => out.push_str("&gt;"),
+            '"' => out.push_str("&quot;"),
+            '\'' => out.push_str("&#39;"),
+            _ => out.push(ch),
+        }
+    }
+    out
+}
+
+/// Escape a string for a TOML basic (double-quoted) string: backslash,
+/// double quote, and the control characters TOML forbids raw in basic
+/// strings. `harn rules` and `harn connector` scaffolding had divergent
+/// copies — the connector one skipped control characters, so a value with a
+/// newline produced invalid TOML.
+pub(crate) fn escape_toml_basic_string(value: &str) -> String {
+    let mut out = String::with_capacity(value.len());
+    for ch in value.chars() {
+        match ch {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            '\n' => out.push_str("\\n"),
+            '\t' => out.push_str("\\t"),
+            '\r' => out.push_str("\\r"),
+            // Remaining C0 control chars (and DEL) must be escaped in TOML
+            // basic strings.
+            c if (c as u32) < 0x20 || c == '\u{7f}' => {
+                out.push_str(&format!("\\u{:04X}", c as u32));
+            }
+            _ => out.push(ch),
+        }
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -77,6 +121,25 @@ mod tests {
     fn timestamp_uses_rfc3339() {
         let value = OffsetDateTime::UNIX_EPOCH;
         assert_eq!(format_timestamp_rfc3339(value), "1970-01-01T00:00:00Z");
+    }
+
+    #[test]
+    fn escape_html_handles_all_five_specials() {
+        assert_eq!(
+            escape_html(r#"<a href="x">&'b'</a>"#),
+            "&lt;a href=&quot;x&quot;&gt;&amp;&#39;b&#39;&lt;/a&gt;"
+        );
+    }
+
+    #[test]
+    fn escape_toml_basic_string_escapes_control_characters() {
+        assert_eq!(
+            escape_toml_basic_string("a\"b\\c\nd\te\rf"),
+            "a\\\"b\\\\c\\nd\\te\\rf"
+        );
+        // Other C0 controls (the case the old connector copy missed
+        // entirely) become \uXXXX escapes.
+        assert_eq!(escape_toml_basic_string("bell\u{7}"), "bell\\u0007");
     }
 
     #[test]

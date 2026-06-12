@@ -752,7 +752,7 @@ async fn ollama_warmup(
 mod tests {
     use super::*;
     use crate::http::framing::{http_content_length_from_header_lines, TEST_HTTP_MAX_BODY_BYTES};
-    use crate::llm::env_lock;
+    use crate::llm::env_guard;
     use std::io::{Read, Write};
     use std::net::TcpListener;
     use std::sync::{Arc, Mutex};
@@ -792,7 +792,7 @@ mod tests {
 
     #[test]
     fn runtime_settings_use_harn_env_before_ollama_env() {
-        let _guard = env_lock().lock().expect("env lock");
+        let _guard = env_guard();
         let _env = [
             ScopedEnvVar::set("HARN_OLLAMA_NUM_CTX", "131072"),
             ScopedEnvVar::set("OLLAMA_CONTEXT_LENGTH", "32768"),
@@ -806,7 +806,7 @@ mod tests {
 
     #[test]
     fn runtime_settings_apply_harn_defaults() {
-        let _guard = env_lock().lock().expect("env lock");
+        let _guard = env_guard();
         let _env = [
             ScopedEnvVar::remove("HARN_OLLAMA_NUM_CTX"),
             ScopedEnvVar::remove("OLLAMA_CONTEXT_LENGTH"),
@@ -821,7 +821,7 @@ mod tests {
 
     #[test]
     fn runtime_settings_use_catalog_context_after_env_and_overrides() {
-        let _guard = env_lock().lock().expect("env lock");
+        let _guard = env_guard();
         let _env = [
             ScopedEnvVar::remove("HARN_OLLAMA_NUM_CTX"),
             ScopedEnvVar::remove("OLLAMA_CONTEXT_LENGTH"),
@@ -887,7 +887,7 @@ mod tests {
 
     #[test]
     fn provider_overrides_beat_env_and_normalize_keep_alive() {
-        let _guard = env_lock().lock().expect("env lock");
+        let _guard = env_guard();
         let _env = [
             ScopedEnvVar::set("HARN_OLLAMA_NUM_CTX", "131072"),
             ScopedEnvVar::set("HARN_OLLAMA_KEEP_ALIVE", "5m"),
@@ -903,7 +903,7 @@ mod tests {
 
     #[test]
     fn apply_runtime_settings_maps_ollama_overrides_to_native_shape() {
-        let _guard = env_lock().lock().expect("env lock");
+        let _guard = env_guard();
         let _env = [
             ScopedEnvVar::remove("HARN_OLLAMA_NUM_CTX"),
             ScopedEnvVar::remove("OLLAMA_CONTEXT_LENGTH"),
@@ -932,7 +932,7 @@ mod tests {
 
     #[test]
     fn apply_runtime_settings_uses_catalog_context_when_body_has_model() {
-        let _guard = env_lock().lock().expect("env lock");
+        let _guard = env_guard();
         let _env = [
             ScopedEnvVar::remove("HARN_OLLAMA_NUM_CTX"),
             ScopedEnvVar::remove("OLLAMA_CONTEXT_LENGTH"),
@@ -1024,7 +1024,7 @@ mod tests {
 
     #[test]
     fn ollama_readiness_verifies_model_and_warms_matched_tag() {
-        let _guard = env_lock().lock().expect("env lock");
+        let _guard = env_guard();
         let _env = [
             ScopedEnvVar::set("HARN_OLLAMA_NUM_CTX", "65536"),
             ScopedEnvVar::remove("OLLAMA_CONTEXT_LENGTH"),
@@ -1100,7 +1100,7 @@ mod tests {
 
     #[test]
     fn ollama_readiness_observes_loaded_runner_and_reports_no_drift() {
-        let _guard = env_lock().lock().expect("env lock");
+        let _guard = env_guard();
         let _env = [
             ScopedEnvVar::set("HARN_OLLAMA_NUM_CTX", "32768"),
             ScopedEnvVar::remove("OLLAMA_CONTEXT_LENGTH"),
@@ -1145,7 +1145,7 @@ mod tests {
 
     #[test]
     fn ollama_readiness_flags_context_drift_when_loaded_exceeds_expected() {
-        let _guard = env_lock().lock().expect("env lock");
+        let _guard = env_guard();
         let _env = [
             ScopedEnvVar::set("HARN_OLLAMA_NUM_CTX", "32768"),
             ScopedEnvVar::remove("OLLAMA_CONTEXT_LENGTH"),
@@ -1184,7 +1184,7 @@ mod tests {
 
     #[test]
     fn ollama_readiness_uses_alias_resolved_runtime_settings() {
-        let _guard = env_lock().lock().expect("env lock");
+        let _guard = env_guard();
         let _env = [
             ScopedEnvVar::remove("HARN_OLLAMA_NUM_CTX"),
             ScopedEnvVar::remove("OLLAMA_CONTEXT_LENGTH"),

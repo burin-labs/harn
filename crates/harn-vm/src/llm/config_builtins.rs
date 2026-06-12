@@ -1878,7 +1878,7 @@ mod tests {
 
     #[test]
     fn test_llm_rate_limit_sets_and_queries_rich_details() {
-        let _guard = crate::llm::env_lock().lock().expect("env lock");
+        let _guard = crate::llm::env_guard();
         crate::llm::reset_llm_state();
         let provider = VmValue::String(std::sync::Arc::from("quota-builtin-provider"));
         let mut out = String::new();
@@ -2028,7 +2028,7 @@ mod tests {
 
     #[test]
     fn test_llm_resolved_options_user_wins_over_defaults() {
-        let _guard = crate::llm::env_lock().lock().expect("env lock");
+        let _guard = crate::llm::env_guard();
         llm_config::clear_user_overrides();
         let mut overlay = llm_config::ProvidersConfig::default();
         let mut model_defaults = BTreeMap::new();
@@ -2065,7 +2065,7 @@ mod tests {
 
     #[test]
     fn test_llm_resolved_options_default_fills_unspecified() {
-        let _guard = crate::llm::env_lock().lock().expect("env lock");
+        let _guard = crate::llm::env_guard();
         llm_config::clear_user_overrides();
         let mut overlay = llm_config::ProvidersConfig::default();
         let mut model_defaults = BTreeMap::new();
@@ -2092,7 +2092,7 @@ mod tests {
 
     #[test]
     fn test_llm_resolved_options_resolves_provider() {
-        let _guard = crate::llm::env_lock().lock().expect("env lock");
+        let _guard = crate::llm::env_guard();
         let prev_default_provider = std::env::var("HARN_DEFAULT_PROVIDER").ok();
         unsafe {
             std::env::remove_var("HARN_DEFAULT_PROVIDER");

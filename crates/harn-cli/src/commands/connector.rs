@@ -815,8 +815,8 @@ fn run_install_import_smoke(package_dir: &Path, metadata_ok: bool) -> ConnectorG
     let consumer = temp.path();
     let manifest = format!(
         "[package]\nname = \"connector-smoke-consumer\"\nversion = \"0.0.0\"\n\n[dependencies]\n\"{}\" = {{ path = \"{}\" }}\n",
-        toml_escape_basic_string(&package_name),
-        toml_escape_basic_string(&package_dependency_path)
+        crate::format::escape_toml_basic_string(&package_name),
+        crate::format::escape_toml_basic_string(&package_dependency_path)
     );
     if let Err(error) = fs::write(consumer.join("harn.toml"), manifest) {
         return gate_check_from_findings(
@@ -889,10 +889,6 @@ fn package_dependency_path(package_dir: &Path) -> Result<String, String> {
                 package_dir.display()
             )
         })
-}
-
-fn toml_escape_basic_string(value: &str) -> String {
-    value.replace('\\', "\\\\").replace('"', "\\\"")
 }
 
 fn validate_doc_examples(package_dir: &Path) -> ConnectorGateCheck {

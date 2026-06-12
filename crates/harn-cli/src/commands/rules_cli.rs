@@ -36,8 +36,8 @@ pub(crate) fn resolve_rules(
             .ok_or_else(|| format!("unknown language `{lang_name}`"))?;
         let toml = format!(
             "id = \"scan\"\nlanguage = \"{}\"\n[rule]\npattern = \"{}\"\n",
-            toml_escape(lang_name),
-            toml_escape(pattern),
+            crate::format::escape_toml_basic_string(lang_name),
+            crate::format::escape_toml_basic_string(pattern),
         );
         Ok(vec![RuleSpec { toml, language }])
     } else if let Some(rule_file) = rule_file {
@@ -282,21 +282,5 @@ fn collect_files(paths: &[String]) -> Vec<PathBuf> {
     }
     out.sort();
     out.dedup();
-    out
-}
-
-/// Escape a string for a TOML basic (double-quoted) string.
-fn toml_escape(s: &str) -> String {
-    let mut out = String::with_capacity(s.len());
-    for ch in s.chars() {
-        match ch {
-            '"' => out.push_str("\\\""),
-            '\\' => out.push_str("\\\\"),
-            '\n' => out.push_str("\\n"),
-            '\t' => out.push_str("\\t"),
-            '\r' => out.push_str("\\r"),
-            _ => out.push(ch),
-        }
-    }
     out
 }

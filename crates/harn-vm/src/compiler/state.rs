@@ -1134,37 +1134,40 @@ impl Compiler {
         Ok(())
     }
 
-    /// Extract the root variable name from a (possibly nested) access expression.
-    pub(super) fn root_var_name(&self, node: &SNode) -> Option<String> {
-        match &node.node {
-            Node::Identifier(name) => Some(name.clone()),
-            Node::PropertyAccess { object, .. } | Node::OptionalPropertyAccess { object, .. } => {
-                self.root_var_name(object)
-            }
-            Node::SubscriptAccess { object, .. } | Node::OptionalSubscriptAccess { object, .. } => {
-                self.root_var_name(object)
-            }
-            _ => None,
-        }
-    }
-
     pub(super) fn compile_top_level_declarations(
         &mut self,
         program: &[SNode],
     ) -> Result<(), CompileError> {
-        // Phase 1: evaluate module-level `let` / `var` bindings first, in
-        // source order. This ensures function closures compiled in phase 2
+        // Phase 1: execute module-level *statements* first, in source order —
+        // bindings, assignments, expression statements, control flow. Running
+        // bindings before phase 2 ensures function closures compiled there
         // capture these names in their env snapshot via `Op::Closure` —
         // fixing the "Undefined variable: FOO" surprise where a top-level
-        // `let FOO = "..."` was silently dropped because it wasn't in this
-        // match list. Keep in step with the import-time init path in
+        // `let FOO = "..."` was silently dropped because it wasn't compiled
+        // at all. Non-binding statements used to be silently dropped in
+        // pipeline mode (`n = 2` or `log(...)` between a binding and a
+        // pipeline simply never ran); they now execute exactly like script
+        // mode. Keep in step with the import-time init path in
         // `crates/harn-vm/src/vm/imports.rs` (`module_state` construction).
         for sn in program {
-            if matches!(
-                &sn.node,
-                Node::LetBinding { .. } | Node::VarBinding { .. } | Node::ConstBinding { .. }
-            ) {
-                self.compile_node(sn)?;
+            let handled_elsewhere = matches!(
+                peel_node(sn),
+                Node::Pipeline { .. }
+                    | Node::ImportDecl { .. }
+                    | Node::SelectiveImport { .. }
+                    | Node::OverrideDecl { .. }
+                    | Node::EvalPackDecl { .. }
+                    | Node::FnDecl { .. }
+                    | Node::ToolDecl { .. }
+                    | Node::SkillDecl { .. }
+                    | Node::ImplBlock { .. }
+                    | Node::StructDecl { .. }
+                    | Node::EnumDecl { .. }
+                    | Node::InterfaceDecl { .. }
+                    | Node::TypeDecl { .. }
+            );
+            if !handled_elsewhere {
+                self.compile_discarded_stmt(sn)?;
             }
         }
         // Phase 2: compile type and function declarations. Function closures

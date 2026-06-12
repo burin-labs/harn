@@ -190,10 +190,16 @@ impl GeminiProvider {
         })?;
         if !response.status().is_success() {
             let status = response.status();
+            let retry_after = crate::llm::api::retry_after_header(response.headers());
             let body = response.text().await.unwrap_or_default();
             return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
-                crate::llm::api::classify_provider_http_error("gemini", status, None, &body)
-                    .message,
+                crate::llm::api::classify_provider_http_error(
+                    "gemini",
+                    status,
+                    retry_after.as_deref(),
+                    &body,
+                )
+                .message,
             ))));
         }
         let json: serde_json::Value = response.json().await.map_err(|error| {

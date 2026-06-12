@@ -422,11 +422,7 @@ async fn vm_call_llm_api_with_body_inner(
             .await?;
             if !response.status().is_success() {
                 let status = response.status();
-                let retry_after = response
-                    .headers()
-                    .get("retry-after")
-                    .and_then(|v| v.to_str().ok())
-                    .map(|s| s.to_string());
+                let retry_after = super::retry_after_header(response.headers());
                 let body = response.text().await.unwrap_or_default();
                 let msg = classify_transport_http_error(
                     provider,
@@ -506,11 +502,7 @@ async fn vm_call_llm_api_with_body_inner(
     // parse results and the agent loop retries against the same bad context.
     if !response.status().is_success() {
         let status = response.status();
-        let retry_after = response
-            .headers()
-            .get("retry-after")
-            .and_then(|v| v.to_str().ok())
-            .map(|s| s.to_string());
+        let retry_after = super::retry_after_header(response.headers());
         let body = response.text().await.unwrap_or_default();
         let msg = classify_transport_http_error(
             provider,

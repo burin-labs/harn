@@ -1,0 +1,53 @@
+fn bump_index() {
+  log("index evaluated")
+  return 1
+}
+
+pipeline test(task) {
+  // Nested property path writes the leaf, not `root.<final>`
+  var a = {b: {c: 1}, c: 99}
+  a.b.c = 2
+  assert_eq(a.b.c, 2, "nested property assignment writes the leaf")
+  assert_eq(a.c, 99, "nested property assignment leaves siblings alone")
+  // Nested subscript path
+  var d = {b: {c: 1}}
+  d["b"]["c"] = 5
+  assert_eq(d.b.c, 5, "nested subscript assignment writes the leaf")
+  // Nested list-of-lists
+  var xs = [[1, 2], [3, 4]]
+  xs[0][1] = 99
+  assert_eq(xs[0][1], 99, "nested list assignment writes the inner cell")
+  assert_eq(xs[1][0], 3, "nested list assignment leaves siblings alone")
+  // Mixed property + subscript
+  var m = {list: [1, 2]}
+  m.list[0] = 7
+  assert_eq(m.list[0], 7, "property-then-subscript writes through the path")
+  var p = [{x: 1}]
+  p[0].x = 8
+  assert_eq(p[0].x, 8, "subscript-then-property writes through the path")
+  // Deep chain
+  var deep = {l1: {l2: {l3: {v: 1}}}}
+  deep.l1.l2.l3.v = 42
+  assert_eq(deep.l1.l2.l3.v, 42, "four-level path writes the leaf")
+  // Compound assignment through a nested path
+  var acc = {inner: {n: 0}}
+  for i in 1 to 3 {
+    acc.inner.n += i
+  }
+  assert_eq(acc.inner.n, 6, "compound assignment accumulates through the path")
+  // A side-effecting index in a compound assignment evaluates exactly once
+  var nums = [10, 20]
+  nums[bump_index()] += 5
+  assert_eq(nums[1], 25, "compound subscript writes through the hoisted index")
+  // Immutability still holds through a nested path
+  let frozen = {b: {c: 1}}
+  var rejected = false
+  try {
+    frozen.b.c = 9
+  } catch (e) {
+    rejected = true
+  }
+  assert_eq(rejected, true, "let roots stay immutable through nested paths")
+  assert_eq(frozen.b.c, 1, "rejected nested write leaves the value untouched")
+  log("nested assignment: all tests passed")
+}

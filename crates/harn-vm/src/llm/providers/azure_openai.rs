@@ -108,10 +108,16 @@ impl AzureOpenAiProvider {
             .map_err(|error| vm_err(format!("azure_openai API error: {error}")))?;
         if !response.status().is_success() {
             let status = response.status();
+            let retry_after = crate::llm::api::retry_after_header(response.headers());
             let body = response.text().await.unwrap_or_default();
             return Err(vm_err(
-                crate::llm::api::classify_provider_http_error("azure_openai", status, None, &body)
-                    .message,
+                crate::llm::api::classify_provider_http_error(
+                    "azure_openai",
+                    status,
+                    retry_after.as_deref(),
+                    &body,
+                )
+                .message,
             ));
         }
         let json: serde_json::Value = response
@@ -155,7 +161,7 @@ impl LlmProviderChat for AzureOpenAiProvider {
 mod tests {
     use super::*;
     use crate::llm::api::{LlmRequestPayload, ThinkingConfig};
-    use crate::llm::env_lock;
+    use crate::llm::env_guard;
     use serde_json::json;
 
     struct ScopedEnv {
@@ -187,7 +193,7 @@ mod tests {
 
     #[test]
     fn deployment_url_uses_model_and_api_version() {
-        let _guard = env_lock().lock().unwrap();
+        let _guard = env_guard();
         let _endpoint = ScopedEnv::set("AZURE_OPENAI_ENDPOINT", "https://acct.openai.azure.com/");
         let _api_version = ScopedEnv::set("AZURE_OPENAI_API_VERSION", "2025-01-01-preview");
         let _deployment = ScopedEnv::remove("AZURE_OPENAI_DEPLOYMENT");
@@ -201,7 +207,7 @@ mod tests {
 
     #[test]
     fn auth_prefers_api_key_then_bearer_token() {
-        let _guard = env_lock().lock().unwrap();
+        let _guard = env_guard();
         let _key = ScopedEnv::set("AZURE_OPENAI_API_KEY", "key");
         let _token = ScopedEnv::set("AZURE_OPENAI_AD_TOKEN", "token");
         assert_eq!(

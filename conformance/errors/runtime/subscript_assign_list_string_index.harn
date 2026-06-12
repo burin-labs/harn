@@ -1,0 +1,4 @@
+pipeline test(task) {
+  var xs = [1, 2]
+  xs["a"] = 9
+}

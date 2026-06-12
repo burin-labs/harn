@@ -1,0 +1,7 @@
+fn get_thing() {
+  return {x: 1}
+}
+
+pipeline test(task) {
+  get_thing().x = 99
+}

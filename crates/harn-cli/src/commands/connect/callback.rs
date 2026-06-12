@@ -210,23 +210,8 @@ pub(super) fn html_response(status: u16, message: &str) -> String {
     } else {
         "Authorization Failed"
     };
-    let escaped_message = html_escape(message);
+    let escaped_message = crate::format::escape_html(message);
     format!(
         "{status_line}\r\nContent-Type: text/html; charset=utf-8\r\nConnection: close\r\n\r\n<!doctype html><html><head><meta charset=\"utf-8\"><title>{title}</title></head><body><h1>{title}</h1><p>{escaped_message}</p></body></html>"
     )
-}
-
-fn html_escape(text: &str) -> String {
-    let mut escaped = String::with_capacity(text.len());
-    for ch in text.chars() {
-        match ch {
-            '&' => escaped.push_str("&amp;"),
-            '<' => escaped.push_str("&lt;"),
-            '>' => escaped.push_str("&gt;"),
-            '"' => escaped.push_str("&quot;"),
-            '\'' => escaped.push_str("&#39;"),
-            _ => escaped.push(ch),
-        }
-    }
-    escaped
 }
