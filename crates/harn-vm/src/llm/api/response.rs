@@ -740,7 +740,9 @@ pub(crate) fn parse_llm_response(
             ))))
         })?;
         let finish_reason = choice["finish_reason"].as_str();
-        let (text, extracted_thinking) = normalize_openai_message_text(message, finish_reason);
+        let caps = crate::llm::capabilities::lookup(provider, model);
+        let (text, extracted_thinking) =
+            normalize_openai_message_text(message, finish_reason, caps.reasoning_text_promotable);
         let reasoning_summary = extract_openai_reasoning_summary(json, message);
         let mut blocks = if text.is_empty() {
             Vec::new()

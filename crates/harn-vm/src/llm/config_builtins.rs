@@ -1343,12 +1343,24 @@ pub(crate) fn capabilities_to_vm_value(
         VmValue::Bool(caps.requires_completion_tokens),
     );
     dict.insert(
+        "requires_streaming".to_string(),
+        VmValue::Bool(caps.requires_streaming),
+    );
+    dict.insert(
         "reasoning_effort_supported".to_string(),
         VmValue::Bool(caps.reasoning_effort_supported),
     );
     dict.insert(
         "reasoning_none_supported".to_string(),
         VmValue::Bool(caps.reasoning_none_supported),
+    );
+    dict.insert(
+        "reasoning_disable_supported".to_string(),
+        VmValue::Bool(caps.reasoning_disable_supported),
+    );
+    dict.insert(
+        "reasoning_text_promotable".to_string(),
+        VmValue::Bool(caps.reasoning_text_promotable),
     );
     dict.insert(
         "reasoning_wire_format".to_string(),
@@ -1387,6 +1399,20 @@ pub(crate) fn capabilities_to_vm_value(
             caps.allowed_tool_choice_modes
                 .iter()
                 .map(|mode| VmValue::String(std::sync::Arc::from(mode.as_str())))
+                .collect(),
+        )),
+    );
+    dict.insert(
+        "auto_reasoning_overrides".to_string(),
+        VmValue::Dict(std::sync::Arc::new(
+            caps.auto_reasoning_overrides
+                .iter()
+                .map(|(task, mode)| {
+                    (
+                        task.clone(),
+                        VmValue::String(std::sync::Arc::from(mode.clone())),
+                    )
+                })
                 .collect(),
         )),
     );

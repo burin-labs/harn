@@ -38,7 +38,7 @@ name = "DeepSeek V3.2"
 provider = "openrouter"
 context_window = 131072
 capabilities = ["tools", "streaming"]
-pricing = { input_per_mtok = 0.28, output_per_mtok = 0.42 }
+pricing = { input_per_mtok = 0.2288, output_per_mtok = 0.3432 }
 tier = "mid"
 open_weight = true
 strengths = ["coding", "tool_use", "cheap"]

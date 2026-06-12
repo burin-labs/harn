@@ -56,7 +56,7 @@ name = "DeepSeek V4 Flash (via OpenRouter)"
 provider = "openrouter"
 context_window = 1048576
 capabilities = ["tools", "streaming"]
-pricing = { input_per_mtok = 0.0983, output_per_mtok = 0.1966, cache_read_per_mtok = 0.0197 }
+pricing = { input_per_mtok = 0.098, output_per_mtok = 0.196, cache_read_per_mtok = 0.020 }
 tier = "mid"
 open_weight = true
 strengths = ["speed", "cheap", "tool_use", "reasoning", "long_context"]
@@ -76,4 +76,3 @@ name = "Qwen3.5 9B"
 provider = "openrouter"
 context_window = 131072
 capabilities = ["tools", "streaming"]
-

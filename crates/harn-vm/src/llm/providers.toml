@@ -723,6 +723,68 @@ provider = "openrouter"
 id = "moonshotai/kimi-k2.7-code"
 provider = "openrouter"
 
+# Qwen 3.7 via OpenRouter/Together. Keep bare aliases on OpenRouter because it
+# exposes both Max and Plus; Together currently serves only Max.
+[aliases."qwen3.7"]
+id = "qwen/qwen3.7-max"
+provider = "openrouter"
+
+[aliases."qwen3.7-max"]
+id = "qwen/qwen3.7-max"
+provider = "openrouter"
+
+[aliases."qwen3.7-plus"]
+id = "qwen/qwen3.7-plus"
+provider = "openrouter"
+
+[aliases."openrouter-qwen3.7-max"]
+id = "qwen/qwen3.7-max"
+provider = "openrouter"
+
+[aliases."openrouter-qwen3.7-plus"]
+id = "qwen/qwen3.7-plus"
+provider = "openrouter"
+
+[aliases."together-qwen3.7-max"]
+id = "Qwen/Qwen3.7-Max"
+provider = "together"
+
+# OpenRouter-only coding specialist.
+[aliases."kat-coder-pro-v2"]
+id = "kwaipilot/kat-coder-pro-v2"
+provider = "openrouter"
+
+[aliases."openrouter-kat-coder-pro-v2"]
+id = "kwaipilot/kat-coder-pro-v2"
+provider = "openrouter"
+
+# Together mirror of DeepSeek V4 Pro.
+[aliases."together-deepseek"]
+id = "deepseek-ai/DeepSeek-V4-Pro"
+provider = "together"
+
+[aliases."together-deepseek-v4-pro"]
+id = "deepseek-ai/DeepSeek-V4-Pro"
+provider = "together"
+
+# StepFun long-context agent route via OpenRouter.
+[aliases."step-3.7-flash"]
+id = "stepfun/step-3.7-flash"
+provider = "openrouter"
+
+[aliases."openrouter-step-3.7-flash"]
+id = "stepfun/step-3.7-flash"
+provider = "openrouter"
+
+# Together mirrors for current GLM/MiniMax agent routes.
+[aliases."together-glm-5.1"]
+id = "zai-org/GLM-5.1"
+provider = "together"
+
+[aliases."together-minimax-m2.7"]
+id = "MiniMaxAI/MiniMax-M2.7"
+provider = "together"
+
 # qwen3.6 has no working Ollama route — Ollama's qwen3.5-family server-side
 # tool-call parser 500s on text-tool output (ollama/ollama#14986, #14570).
 # Use the llamacpp provider for local qwen3.x.
@@ -1407,7 +1469,7 @@ name = "DeepSeek V3.2"
 provider = "openrouter"
 context_window = 131072
 capabilities = ["tools", "streaming"]
-pricing = { input_per_mtok = 0.28, output_per_mtok = 0.42 }
+pricing = { input_per_mtok = 0.2288, output_per_mtok = 0.3432 }
 tier = "mid"
 open_weight = true
 strengths = ["coding", "tool_use", "cheap"]
@@ -1444,6 +1506,103 @@ api_dialect = "openai_chat"
 capabilities = ["tools", "streaming"]
 pricing = { input_per_mtok = 0.15, output_per_mtok = 0.60 }
 architecture = { parameter_count_b = 117.0, active_parameter_count_b = 5.1, moe = true, license = "Apache-2.0", source_url = "https://developers.openai.com/api/docs/models/gpt-oss-120b", last_verified = "2026-06-05" }
+
+# --- source: 60-models/25-openrouter-frontier-agents.toml ---
+# Current OpenRouter-hosted coding/agent models that are not direct provider
+# defaults. Pricing snapshots are from OpenRouter's live `/api/v1/models`.
+
+tier = "frontier"
+open_weight = false
+strengths = ["agentic", "coding", "long_context", "tool_use", "reasoning", "vision"]
+complementary_with = ["anthropic-claude", "openai-gpt", "google-gemini", "deepseek", "kimi"]
+[models."qwen/qwen3.7-plus"]
+name = "Qwen3.7 Plus"
+provider = "openrouter"
+context_window = 1000000
+capabilities = ["tools", "vision", "streaming", "thinking", "prompt_caching"]
+pricing = { input_per_mtok = 0.32, output_per_mtok = 1.28, cache_read_per_mtok = 0.064, cache_write_per_mtok = 0.40 }
+
+tier = "frontier"
+open_weight = false
+strengths = ["agentic", "coding", "long_context", "tool_use", "reasoning"]
+complementary_with = ["anthropic-claude", "openai-gpt", "google-gemini", "deepseek", "kimi"]
+[models."qwen/qwen3.7-max"]
+name = "Qwen3.7 Max"
+provider = "openrouter"
+context_window = 1000000
+capabilities = ["tools", "streaming", "thinking", "prompt_caching"]
+pricing = { input_per_mtok = 1.25, output_per_mtok = 3.75, cache_read_per_mtok = 0.25, cache_write_per_mtok = 1.5625 }
+
+tier = "mid"
+open_weight = false
+strengths = ["coding", "agentic", "tool_use", "long_context", "speed"]
+complementary_with = ["anthropic-claude", "openai-gpt", "google-gemini", "qwen", "deepseek"]
+[models."kwaipilot/kat-coder-pro-v2"]
+name = "KAT-Coder-Pro V2"
+provider = "openrouter"
+context_window = 256000
+capabilities = ["tools", "streaming", "prompt_caching"]
+pricing = { input_per_mtok = 0.30, output_per_mtok = 1.20, cache_read_per_mtok = 0.06 }
+
+tier = "mid"
+open_weight = false
+strengths = ["agentic", "long_context", "tool_use", "reasoning", "speed"]
+complementary_with = ["qwen", "deepseek", "kimi", "minimax", "zai-glm"]
+[models."stepfun/step-3.7-flash"]
+name = "Step 3.7 Flash"
+provider = "openrouter"
+context_window = 256000
+capabilities = ["tools", "streaming", "thinking", "prompt_caching"]
+pricing = { input_per_mtok = 0.20, output_per_mtok = 1.15, cache_read_per_mtok = 0.04 }
+
+# --- source: 60-models/26-together-frontier-agents.toml ---
+# Current Together serverless frontier/agent routes observed through
+# `GET /v1/models`. Keep rows here when Harn supports the provider but the
+# model is absent from direct-provider catalogs.
+
+tier = "frontier"
+open_weight = false
+strengths = ["agentic", "coding", "long_context", "tool_use", "reasoning"]
+complementary_with = ["anthropic-claude", "openai-gpt", "google-gemini", "deepseek", "kimi"]
+[models."Qwen/Qwen3.7-Max"]
+name = "Qwen3.7 Max (Together)"
+provider = "together"
+context_window = 1000000
+capabilities = ["tools", "streaming", "thinking", "prompt_caching"]
+pricing = { input_per_mtok = 1.25, output_per_mtok = 3.75, cache_read_per_mtok = 0.125 }
+
+tier = "frontier"
+open_weight = true
+strengths = ["reasoning", "coding", "tool_use", "long_context"]
+complementary_with = ["anthropic-claude", "openai-gpt", "google-gemini", "qwen", "kimi"]
+[models."deepseek-ai/DeepSeek-V4-Pro"]
+name = "DeepSeek V4 Pro (Together)"
+provider = "together"
+context_window = 512000
+capabilities = ["tools", "streaming", "thinking", "prompt_caching"]
+pricing = { input_per_mtok = 1.74, output_per_mtok = 3.48, cache_read_per_mtok = 0.20 }
+
+tier = "frontier"
+open_weight = true
+strengths = ["agentic", "coding", "long_context", "tool_use", "reasoning"]
+complementary_with = ["anthropic-claude", "openai-gpt", "google-gemini", "qwen", "deepseek"]
+[models."zai-org/GLM-5.1"]
+name = "GLM 5.1 (Together)"
+provider = "together"
+context_window = 202752
+capabilities = ["tools", "streaming", "thinking", "prompt_caching"]
+pricing = { input_per_mtok = 1.40, output_per_mtok = 4.40, cache_read_per_mtok = 0.26 }
+
+tier = "frontier"
+open_weight = true
+strengths = ["agentic", "coding", "long_context", "tool_use", "reasoning"]
+complementary_with = ["anthropic-claude", "openai-gpt", "google-gemini", "qwen", "deepseek"]
+[models."MiniMaxAI/MiniMax-M2.7"]
+name = "MiniMax M2.7 (Together)"
+provider = "together"
+context_window = 196608
+capabilities = ["tools", "streaming", "thinking", "prompt_caching"]
+pricing = { input_per_mtok = 0.30, output_per_mtok = 1.20, cache_read_per_mtok = 0.06 }
 
 # --- source: 60-models/30-cerebras.toml ---
 # Cerebras-hosted open-weight models. Serverless rows mirror
@@ -1729,7 +1888,7 @@ name = "DeepSeek V4 Flash (via OpenRouter)"
 provider = "openrouter"
 context_window = 1048576
 capabilities = ["tools", "streaming"]
-pricing = { input_per_mtok = 0.0983, output_per_mtok = 0.1966, cache_read_per_mtok = 0.0197 }
+pricing = { input_per_mtok = 0.098, output_per_mtok = 0.196, cache_read_per_mtok = 0.020 }
 tier = "mid"
 open_weight = true
 strengths = ["speed", "cheap", "tool_use", "reasoning", "long_context"]

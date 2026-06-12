@@ -97,6 +97,12 @@
 #                     accepted reasoning_effort values when the provider
 #                     accepts only a subset of Harn's neutral enum.
 #   reasoning_none_supported: whether reasoning_effort="none" is accepted.
+#   reasoning_disable_supported:
+#                     whether `reasoning: {enabled:false}` is accepted when
+#                     the provider uses an enabled/disabled reasoning switch.
+#   reasoning_text_promotable:
+#                     whether a reasoning-only clean stop may be promoted into
+#                     visible text when the provider omits content.
 #   reasoning_wire_format:
 #                     OpenAI-compatible non-standard reasoning transport:
 #                     openrouter, enabled, or minimax.
