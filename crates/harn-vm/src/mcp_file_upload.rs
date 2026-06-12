@@ -349,28 +349,35 @@ fn resolve_upload_path(path: &str) -> PathBuf {
 }
 
 fn infer_media_type(path: &Path) -> String {
-    match path
-        .extension()
+    path.extension()
         .and_then(|extension| extension.to_str())
-        .map(|extension| extension.to_ascii_lowercase())
-        .as_deref()
+        .and_then(media_type_for_extension)
+        .unwrap_or("application/octet-stream")
+        .to_string()
+}
+
+fn media_type_for_extension(extension: &str) -> Option<&'static str> {
+    match extension
+        .trim()
+        .trim_start_matches('.')
+        .to_ascii_lowercase()
+        .as_str()
     {
-        Some("pdf") => "application/pdf",
-        Some("mp3") => "audio/mpeg",
-        Some("wav") => "audio/wav",
-        Some("m4a") => "audio/mp4",
-        Some("mp4") => "video/mp4",
-        Some("mpeg") | Some("mpg") => "video/mpeg",
-        Some("png") => "image/png",
-        Some("jpg") | Some("jpeg") => "image/jpeg",
-        Some("gif") => "image/gif",
-        Some("webp") => "image/webp",
-        Some("txt") => "text/plain",
-        Some("csv") => "text/csv",
-        Some("json") => "application/json",
-        _ => "application/octet-stream",
+        "pdf" => Some("application/pdf"),
+        "mp3" => Some("audio/mpeg"),
+        "wav" => Some("audio/wav"),
+        "m4a" => Some("audio/mp4"),
+        "mp4" => Some("video/mp4"),
+        "mpeg" | "mpg" => Some("video/mpeg"),
+        "png" => Some("image/png"),
+        "jpg" | "jpeg" => Some("image/jpeg"),
+        "gif" => Some("image/gif"),
+        "webp" => Some("image/webp"),
+        "txt" => Some("text/plain"),
+        "csv" => Some("text/csv"),
+        "json" => Some("application/json"),
+        _ => None,
     }
-    .to_string()
 }
 
 fn validate_media_type(media_type: &str) -> Result<(), VmError> {
@@ -584,32 +591,46 @@ fn hex_value(byte: u8) -> Option<u8> {
 }
 
 fn media_type_matches_accept(media_type: &str, accept: &[&str]) -> bool {
-    let media = media_type
-        .split(';')
-        .next()
-        .unwrap_or(media_type)
-        .trim()
-        .to_ascii_lowercase();
-    let Some((media_type_part, media_subtype_part)) = media.split_once('/') else {
+    if accept.is_empty() {
+        return true;
+    }
+    let Some((media_type_part, media_subtype_part)) = media_type_parts(media_type) else {
         return false;
     };
-    let mut saw_mime_pattern = false;
-    for raw in accept {
-        let pattern = raw.trim().to_ascii_lowercase();
-        if pattern.is_empty() || pattern.starts_with('.') {
-            continue;
+    accept.iter().any(|raw| {
+        let pattern = raw.trim();
+        if pattern.is_empty() {
+            return false;
         }
-        let Some((type_part, subtype_part)) = pattern.split_once('/') else {
-            continue;
-        };
-        saw_mime_pattern = true;
-        if type_part == media_type_part
-            && (subtype_part == "*" || subtype_part == media_subtype_part)
-        {
-            return true;
+        if pattern.starts_with('.') {
+            return media_type_for_extension(pattern).is_some_and(|mapped| {
+                mime_pattern_matches(&media_type_part, &media_subtype_part, mapped)
+            });
         }
+        mime_pattern_matches(&media_type_part, &media_subtype_part, pattern)
+    })
+}
+
+fn media_type_parts(raw: &str) -> Option<(String, String)> {
+    let media = raw
+        .split(';')
+        .next()
+        .unwrap_or(raw)
+        .trim()
+        .to_ascii_lowercase();
+    let (type_part, subtype_part) = media.split_once('/')?;
+    if type_part.is_empty() || subtype_part.is_empty() {
+        return None;
     }
-    !saw_mime_pattern
+    Some((type_part.to_string(), subtype_part.to_string()))
+}
+
+fn mime_pattern_matches(media_type_part: &str, media_subtype_part: &str, pattern: &str) -> bool {
+    let Some((type_part, subtype_part)) = media_type_parts(pattern) else {
+        return false;
+    };
+    (type_part == "*" || type_part == media_type_part)
+        && (subtype_part == "*" || subtype_part == media_subtype_part)
 }
 
 pub fn redact_data_uris_for_logs(value: &JsonValue) -> JsonValue {
@@ -754,6 +775,52 @@ mod tests {
             &json_schema(),
         )
         .expect_err("wrong media type should fail");
+        assert!(err.contains("does not match accept"));
+    }
+
+    #[test]
+    fn accept_matching_supports_wildcards_and_extensions() {
+        assert!(media_type_matches_accept("image/png", &["*/*"]));
+        assert!(media_type_matches_accept("image/png", &["image/*"]));
+        assert!(media_type_matches_accept("image/png", &[".png"]));
+        assert!(media_type_matches_accept(
+            "image/jpeg; charset=binary",
+            &[".jpg"]
+        ));
+        assert!(!media_type_matches_accept("text/plain", &[".png"]));
+        assert!(!media_type_matches_accept("image/png", &[".unknown"]));
+    }
+
+    #[test]
+    fn extension_only_file_input_accept_rejects_wrong_media_type() {
+        reset_for_tests();
+        FILE_UPLOAD_CONFIG.with(|cell| {
+            *cell.borrow_mut() = Some(FileUploadConfig {
+                spec_revision: SPEC_REVISION.to_string(),
+            });
+        });
+        let schema = serde_json::json!({
+            "type": "object",
+            "properties": {
+                "image": {
+                    "type": "string",
+                    "format": "uri",
+                    "x-mcp-file": {
+                        "accept": [".png"]
+                    }
+                }
+            }
+        });
+        validate_file_inputs_for_call(
+            &serde_json::json!({"image": "data:image/png;base64,aGk="}),
+            &schema,
+        )
+        .expect("matching extension media type");
+        let err = validate_file_inputs_for_call(
+            &serde_json::json!({"image": "data:text/plain;base64,aGk="}),
+            &schema,
+        )
+        .expect_err("extension accept must constrain media type");
         assert!(err.contains("does not match accept"));
     }
 

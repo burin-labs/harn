@@ -458,11 +458,9 @@ fn normalize_path(path: &str) -> String {
 }
 
 fn audience_matches(actual: &[String], expected: &[String]) -> bool {
-    actual.iter().any(|actual| {
-        expected
-            .iter()
-            .any(|expected| actual.eq_ignore_ascii_case(expected))
-    })
+    actual
+        .iter()
+        .any(|actual| expected.iter().any(|expected| actual == expected))
 }
 
 fn split_list_env(name: &str) -> Vec<String> {
@@ -496,4 +494,21 @@ fn env_nonempty(name: &str) -> Option<String> {
         .ok()
         .map(|value| value.trim().to_string())
         .filter(|value| !value.is_empty())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn audience_matching_is_exact() {
+        assert!(audience_matches(
+            &["https://mcp.example.test/mcp".to_string()],
+            &["https://mcp.example.test/mcp".to_string()]
+        ));
+        assert!(!audience_matches(
+            &["https://MCP.example.test/mcp".to_string()],
+            &["https://mcp.example.test/mcp".to_string()]
+        ));
+    }
 }

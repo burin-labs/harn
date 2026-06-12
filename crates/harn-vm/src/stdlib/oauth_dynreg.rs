@@ -51,6 +51,7 @@
 
 use std::cell::RefCell;
 use std::collections::BTreeMap;
+use std::net::IpAddr;
 use std::sync::Mutex;
 
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
@@ -436,7 +437,7 @@ fn validate_redirect_uri(value: &str) -> Result<(), String> {
             let host = url
                 .host_str()
                 .ok_or_else(|| "must specify a host".to_string())?;
-            if host == "localhost" || host == "127.0.0.1" || host == "[::1]" {
+            if is_loopback_redirect_host(host) {
                 Ok(())
             } else {
                 Err(format!(
@@ -448,6 +449,17 @@ fn validate_redirect_uri(value: &str) -> Result<(), String> {
             "scheme `{scheme}` is not allowed; use `https` or loopback `http`"
         )),
     }
+}
+
+fn is_loopback_redirect_host(host: &str) -> bool {
+    let host = host
+        .strip_prefix('[')
+        .and_then(|value| value.strip_suffix(']'))
+        .unwrap_or(host);
+    host.eq_ignore_ascii_case("localhost")
+        || host
+            .parse::<IpAddr>()
+            .is_ok_and(|address| address.is_loopback())
 }
 
 fn validate_enum_list(
@@ -895,6 +907,22 @@ mod tests {
         let mut errors = Vec::new();
         validate_metadata(&m, &mut errors);
         assert!(errors.is_empty(), "expected no errors, got {errors:?}");
+    }
+
+    #[test]
+    fn ipv6_and_127_range_loopback_http_redirects_pass() {
+        for redirect_uri in [
+            "http://[::1]:8765/callback",
+            "http://127.10.20.30:8765/callback",
+        ] {
+            let m = metadata_with_redirect(redirect_uri);
+            let mut errors = Vec::new();
+            validate_metadata(&m, &mut errors);
+            assert!(
+                errors.is_empty(),
+                "expected {redirect_uri} to pass, got {errors:?}"
+            );
+        }
     }
 
     #[test]
