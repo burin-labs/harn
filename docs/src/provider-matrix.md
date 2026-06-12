@@ -129,7 +129,8 @@ Regenerate with `make gen-provider-matrix` and verify with `make check-provider-
 | `openrouter` | `deepseek/deepseek-r1` | `any` | `enabled,effort` | no | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `reasoning_summary` | `native` | yes | yes | `unknown` | yes | no |
 | `openrouter` | `mistralai/mistral*` | `any` | no | no | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `none` | `native` | yes | yes | `unknown` | yes | no |
 | `openrouter` | `mistralai/devstral*` | `any` | no | no | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `none` | `native` | yes | yes | `unknown` | yes | no |
-| `openrouter` | `moonshotai/kimi-k2*` | `any` | `enabled` | no | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `inline` | `native` | yes | yes | `unknown` | yes | no |
+| `openrouter` | `moonshotai/kimi-k2.7-code` | `any` | `enabled` | yes | no | no | yes | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `inline` | `native` | yes | yes | `unknown` | yes | yes |
+| `openrouter` | `moonshotai/kimi-k2*` | `any` | `enabled` | yes | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `inline` | `native` | yes | yes | `unknown` | yes | yes |
 | `openrouter` | `google/gemini-2.5*` | `any` | `enabled,effort` | yes | yes | yes | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `reasoning_summary` | `native` | yes | yes | `unknown` | yes | yes |
 | `openrouter` | `google/gemma-4*` | `any` | no | yes | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `none` | `native` | yes | yes | `unknown` | yes | no |
 | `openrouter` | `meta-llama/llama-4*` | `any` | no | no | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `none` | `native` | yes | yes | `unknown` | yes | no |
@@ -236,6 +237,7 @@ This section starts from the checked-in provider catalog. Recommended format fol
 | `openrouter` | `mistralai/mistral-large-2512` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `openrouter` | `mistralai/mistral-small-2603` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `openrouter` | `moonshotai/kimi-k2.6` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
+| `openrouter` | `moonshotai/kimi-k2.7-code` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `openrouter` | `openai/gpt-oss-120b` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `openrouter` | `qwen/qwen3-coder` | `text` | `native_unreliable` | - | - | - | - | - | `data not yet collected` |
 | `openrouter` | `z-ai/glm-5` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |

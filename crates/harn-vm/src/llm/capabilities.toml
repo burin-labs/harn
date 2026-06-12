@@ -2126,11 +2126,37 @@ prefers_xml_tools = false
 thinking_block_style = "none"
 
 [[provider.openrouter]]
+model_match = "moonshotai/kimi-k2.7-code"
+native_tools = true
+preferred_tool_format = "native"
+structured_output = "native"
+thinking_modes = ["enabled"]
+prompt_caching = true
+vision_supported = true
+video_supported = true
+server_parser = "none"
+honors_chat_template_kwargs = false
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "native_json"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "inline"
+temperature_supported = false
+top_p_supported = false
+frequency_penalty_supported = false
+presence_penalty_supported = false
+allowed_tool_choice_modes = ["auto", "none"]
+
+[[provider.openrouter]]
 model_match = "moonshotai/kimi-k2*"
 native_tools = true
 preferred_tool_format = "native"
 structured_output = "native"
 thinking_modes = ["enabled"]
+prompt_caching = true
+vision_supported = true
 server_parser = "none"
 honors_chat_template_kwargs = false
 prefers_xml_scaffolding = false

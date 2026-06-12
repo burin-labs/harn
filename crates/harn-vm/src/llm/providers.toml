@@ -713,6 +713,16 @@ provider = "openrouter"
 id = "google/gemma-4-31B-it"
 provider = "together"
 
+# Kimi via OpenRouter. Keep the short alias on the current code-focused route;
+# the full model id remains available for callers that want explicit slugs.
+[aliases."kimi-k2.7-code"]
+id = "moonshotai/kimi-k2.7-code"
+provider = "openrouter"
+
+[aliases."openrouter-kimi-k2.7-code"]
+id = "moonshotai/kimi-k2.7-code"
+provider = "openrouter"
+
 # qwen3.6 has no working Ollama route — Ollama's qwen3.5-family server-side
 # tool-call parser 500s on text-tool output (ollama/ollama#14986, #14570).
 # Use the llamacpp provider for local qwen3.x.
@@ -1406,12 +1416,22 @@ complementary_with = ["anthropic-claude", "openai-gpt", "google-gemini", "qwen",
 name = "Kimi K2.6"
 provider = "openrouter"
 context_window = 262144
-capabilities = ["tools", "streaming"]
-pricing = { input_per_mtok = 0.73, output_per_mtok = 3.49 }
+capabilities = ["tools", "vision", "streaming", "thinking", "prompt_caching"]
+pricing = { input_per_mtok = 0.68, output_per_mtok = 3.41, cache_read_per_mtok = 0.34 }
 tier = "frontier"
 open_weight = true
-strengths = ["coding", "agentic", "long_context", "tool_use", "reasoning"]
+strengths = ["coding", "agentic", "long_context", "tool_use", "reasoning", "vision"]
 benchmarks = { swe_bench_pro = 58.6, humanitys_last_exam_with_tools = 54.0 }
+complementary_with = ["anthropic-claude", "openai-gpt", "google-gemini", "qwen", "deepseek"]
+[models."moonshotai/kimi-k2.7-code"]
+name = "Kimi K2.7 Code"
+provider = "openrouter"
+context_window = 262144
+capabilities = ["tools", "vision", "video", "streaming", "thinking", "prompt_caching"]
+pricing = { input_per_mtok = 0.95, output_per_mtok = 4.00, cache_read_per_mtok = 0.19 }
+tier = "frontier"
+open_weight = true
+strengths = ["coding", "agentic", "long_context", "tool_use", "reasoning", "vision"]
 complementary_with = ["anthropic-claude", "openai-gpt", "google-gemini", "qwen", "deepseek"]
 [models."openai/gpt-oss-120b"]
 name = "GPT-OSS 120B"

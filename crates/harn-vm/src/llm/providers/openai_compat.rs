@@ -160,10 +160,10 @@ impl OpenAiCompatibleProvider {
             };
             body[token_limit_field] = serde_json::json!(opts.max_tokens);
         }
-        if let Some(temp) = opts.temperature {
+        if let Some(temp) = opts.temperature.filter(|_| caps.temperature_supported) {
             body["temperature"] = serde_json::json!(temp);
         }
-        if let Some(top_p) = opts.top_p {
+        if let Some(top_p) = opts.top_p.filter(|_| caps.top_p_supported) {
             body["top_p"] = serde_json::json!(top_p);
         }
         if let Some(top_k) = opts.top_k.filter(|_| caps.top_k_supported) {
@@ -178,13 +178,19 @@ impl OpenAiCompatibleProvider {
         if let Some(ref stop) = opts.stop {
             body["stop"] = serde_json::json!(stop);
         }
-        if let Some(seed) = opts.seed {
+        if let Some(seed) = opts.seed.filter(|_| caps.seed_supported) {
             body["seed"] = serde_json::json!(seed);
         }
-        if let Some(fp) = opts.frequency_penalty {
+        if let Some(fp) = opts
+            .frequency_penalty
+            .filter(|_| caps.frequency_penalty_supported)
+        {
             body["frequency_penalty"] = serde_json::json!(fp);
         }
-        if let Some(pp) = opts.presence_penalty {
+        if let Some(pp) = opts
+            .presence_penalty
+            .filter(|_| caps.presence_penalty_supported)
+        {
             body["presence_penalty"] = serde_json::json!(pp);
         }
         match caps.reasoning_wire_format.as_deref() {
@@ -269,7 +275,9 @@ impl OpenAiCompatibleProvider {
             }
         }
         if let Some(ref tc) = opts.tool_choice {
-            body["tool_choice"] = tc.clone();
+            if let Some(tool_choice) = normalize_tool_choice_for_capabilities(tc, &caps) {
+                body["tool_choice"] = tool_choice;
+            }
         }
         if caps.honors_chat_template_kwargs {
             // Always set explicitly for compatible Qwen/DeepSeek
@@ -489,6 +497,52 @@ pub(crate) fn apply_openrouter_route_denylist(body: &mut serde_json::Value, deny
         if !already_present {
             ignore_arr.push(serde_json::Value::String(name.clone()));
         }
+    }
+}
+
+fn normalize_tool_choice_for_capabilities(
+    tool_choice: &serde_json::Value,
+    caps: &crate::llm::capabilities::Capabilities,
+) -> Option<serde_json::Value> {
+    if caps.allowed_tool_choice_modes.is_empty() {
+        return Some(tool_choice.clone());
+    }
+
+    let mode = tool_choice_mode(tool_choice);
+    if mode.as_deref().is_some_and(|mode| {
+        caps.allowed_tool_choice_modes
+            .iter()
+            .any(|allowed| allowed == mode)
+    }) {
+        return Some(tool_choice.clone());
+    }
+
+    if caps
+        .allowed_tool_choice_modes
+        .iter()
+        .any(|mode| mode == "auto")
+    {
+        return Some(serde_json::Value::String("auto".to_string()));
+    }
+    if caps
+        .allowed_tool_choice_modes
+        .iter()
+        .any(|mode| mode == "none")
+    {
+        return Some(serde_json::Value::String("none".to_string()));
+    }
+    None
+}
+
+fn tool_choice_mode(tool_choice: &serde_json::Value) -> Option<String> {
+    match tool_choice {
+        serde_json::Value::String(mode) => Some(mode.to_ascii_lowercase()),
+        serde_json::Value::Object(object) => match object.get("type").and_then(|v| v.as_str()) {
+            Some("function") | Some("tool") => Some("required".to_string()),
+            Some(other) => Some(other.to_ascii_lowercase()),
+            None => None,
+        },
+        _ => None,
     }
 }
 
@@ -998,6 +1052,64 @@ mod tests {
 
         assert_eq!(body["reasoning"]["max_tokens"], 2048);
         assert!(body.get("chat_template_kwargs").is_none());
+    }
+
+    #[test]
+    fn openrouter_kimi27_code_normalizes_forced_tool_choice_to_auto() {
+        let mut payload = base_request_payload();
+        payload.provider = "openrouter".to_string();
+        payload.model = "moonshotai/kimi-k2.7-code".to_string();
+        payload.native_tools = Some(vec![json!({
+            "type": "function",
+            "function": {
+                "name": "add_two",
+                "description": "Add two integers.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "a": {"type": "integer"},
+                        "b": {"type": "integer"}
+                    },
+                    "required": ["a", "b"]
+                }
+            }
+        })]);
+        payload.tool_choice = Some(json!("required"));
+
+        let body = OpenAiCompatibleProvider::build_request_body(&payload, false);
+
+        assert_eq!(body["tool_choice"], "auto");
+        assert_eq!(body["tools"][0]["function"]["name"], "add_two");
+    }
+
+    #[test]
+    fn openrouter_kimi27_code_keeps_allowed_tool_choice_none() {
+        let mut payload = base_request_payload();
+        payload.provider = "openrouter".to_string();
+        payload.model = "moonshotai/kimi-k2.7-code".to_string();
+        payload.tool_choice = Some(json!("none"));
+
+        let body = OpenAiCompatibleProvider::build_request_body(&payload, false);
+
+        assert_eq!(body["tool_choice"], "none");
+    }
+
+    #[test]
+    fn openrouter_kimi27_code_strips_fixed_sampling_params() {
+        let mut payload = base_request_payload();
+        payload.provider = "openrouter".to_string();
+        payload.model = "moonshotai/kimi-k2.7-code".to_string();
+        payload.temperature = Some(0.2);
+        payload.top_p = Some(0.8);
+        payload.frequency_penalty = Some(0.1);
+        payload.presence_penalty = Some(0.2);
+
+        let body = OpenAiCompatibleProvider::build_request_body(&payload, false);
+
+        assert!(body.get("temperature").is_none());
+        assert!(body.get("top_p").is_none());
+        assert!(body.get("frequency_penalty").is_none());
+        assert!(body.get("presence_penalty").is_none());
     }
 
     #[test]

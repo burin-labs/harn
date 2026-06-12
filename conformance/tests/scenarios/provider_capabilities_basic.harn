@@ -92,6 +92,18 @@ pipeline test(task) {
     !together_kimi.honors_chat_template_kwargs,
     "Together Kimi does not use Qwen chat template kwargs",
   )
+  let kimi27 = provider_capabilities("openrouter", "moonshotai/kimi-k2.7-code")
+  assert(kimi27.native_tools, "OpenRouter Kimi K2.7 Code exposes native tools")
+  assert(kimi27.prompt_caching, "Kimi K2.7 Code exposes prompt cache reads")
+  assert(kimi27.vision_supported, "Kimi K2.7 Code accepts image input")
+  assert(kimi27.video, "Kimi K2.7 Code accepts video input")
+  assert(kimi27.thinking_modes[0] == "enabled", "Kimi K2.7 Code always thinks")
+  assert(kimi27.allowed_tool_choice_modes[0] == "auto", "Kimi K2.7 Code allows auto tool choice")
+  assert(kimi27.allowed_tool_choice_modes[1] == "none", "Kimi K2.7 Code allows none tool choice")
+  assert(!kimi27.temperature_supported, "Kimi K2.7 Code has fixed temperature")
+  assert(!kimi27.top_p_supported, "Kimi K2.7 Code has fixed top_p")
+  assert(!kimi27.frequency_penalty_supported, "Kimi K2.7 Code has fixed penalties")
+  assert(!kimi27.presence_penalty_supported, "Kimi K2.7 Code has fixed penalties")
   // OpenRouter inherits the openai family.
   let routed = provider_capabilities("openrouter", "gpt-5.4")
   assert(routed.defer_loading, "openrouter inherits openai defer_loading")
