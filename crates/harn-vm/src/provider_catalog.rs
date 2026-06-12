@@ -215,9 +215,14 @@ fn artifact_from_config(
     config: &llm_config::ProvidersConfig,
     llm_capability_overrides: CatalogCapabilityOverrides<'_>,
 ) -> ProviderCatalogArtifact {
+    // Suppression filters the presentation artifact only: model rows, their
+    // aliases, and (because variants are derived from the surviving rows
+    // below) any recommendation variant that pointed at a suppressed route.
+    let suppressed = suppressed_routes(config);
     let alias_entries = config
         .aliases
         .iter()
+        .filter(|(_, alias)| !is_suppressed(&suppressed, &alias.provider, &alias.id))
         .map(|(name, alias)| (name.clone(), alias.clone()))
         .collect::<Vec<_>>();
     let aliases_by_model = aliases_by_model(&alias_entries);
@@ -228,6 +233,7 @@ fn artifact_from_config(
         .collect();
     let models = llm_config::sorted_model_entries_with_config(config)
         .into_iter()
+        .filter(|(id, model)| !is_suppressed(&suppressed, &model.provider, id))
         .map(|(id, model)| {
             catalog_model(
                 id,
@@ -268,6 +274,27 @@ pub fn artifact_json_embedded(
     explicit_overlay: Option<&llm_config::ProvidersConfig>,
 ) -> Result<String, serde_json::Error> {
     artifact_to_json(&artifact_embedded(explicit_overlay))
+}
+
+/// `[suppress]` route selectors parsed as `(provider, model_id)` pairs.
+/// Split on the first colon only: model ids may themselves contain colons
+/// (e.g. Ollama image tags). Entries without a colon match nothing.
+fn suppressed_routes(config: &llm_config::ProvidersConfig) -> Vec<(String, String)> {
+    config
+        .suppress
+        .routes
+        .iter()
+        .filter_map(|route| route.split_once(':'))
+        .map(|(provider, model_id)| (provider.to_string(), model_id.to_string()))
+        .collect()
+}
+
+fn is_suppressed(suppressed: &[(String, String)], provider: &str, model_id: &str) -> bool {
+    suppressed
+        .iter()
+        .any(|(candidate_provider, candidate_model)| {
+            candidate_provider == provider && candidate_model == model_id
+        })
 }
 
 fn artifact_to_json(artifact: &ProviderCatalogArtifact) -> Result<String, serde_json::Error> {
