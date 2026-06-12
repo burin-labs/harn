@@ -49,6 +49,11 @@ pub(crate) struct ProvidersValidateArgs {
     /// Merge an additional providers.toml-style overlay before validating.
     #[arg(long)]
     pub overlay: Option<PathBuf>,
+    /// Merge a capabilities.toml-style overlay (same layout as the built-in
+    /// capability matrix) before validating, so overlay-declared private or
+    /// local models can claim structured capabilities.
+    #[arg(long = "capabilities-overlay")]
+    pub capabilities_overlay: Option<PathBuf>,
     /// Also verify checked-in generated artifacts match the current catalog.
     #[arg(long = "check-artifacts")]
     pub check_artifacts: bool,
@@ -97,6 +102,13 @@ pub(crate) struct ProvidersExportArgs {
     /// Merge an additional providers.toml-style overlay before exporting.
     #[arg(long)]
     pub overlay: Option<PathBuf>,
+    /// Merge a capabilities.toml-style overlay (same layout as the built-in
+    /// capability matrix) before exporting, so overlay-declared private or
+    /// local models can claim structured capabilities. The serve runtime
+    /// honors the same file through the manifest `[capabilities]` section,
+    /// keeping exported and served catalogs in agreement.
+    #[arg(long = "capabilities-overlay")]
+    pub capabilities_overlay: Option<PathBuf>,
 }
 
 #[derive(Debug, Args)]

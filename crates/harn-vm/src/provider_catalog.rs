@@ -182,13 +182,19 @@ pub fn artifact() -> ProviderCatalogArtifact {
 /// `explicit_overlay` is an optional declared overlay (e.g. a `--overlay` file
 /// named on the command line); it is reproducible input, not ambient machine
 /// state, so it is merged on top of the embedded base while staying hermetic.
+/// `explicit_capabilities` is the matching declared capability overlay (e.g. a
+/// `--capabilities-overlay` file): without one, only the built-in capability
+/// matrix is consulted — never the thread-local capability user-overrides the
+/// CLI may have installed.
 pub fn artifact_embedded(
     explicit_overlay: Option<&llm_config::ProvidersConfig>,
+    explicit_capabilities: Option<&llm::capabilities::CapabilitiesFile>,
 ) -> ProviderCatalogArtifact {
     let config = llm_config::embedded_config(explicit_overlay);
-    // `Explicit(None)` consults only the built-in capability matrix, never the
-    // thread-local capability user-overrides the CLI may have installed.
-    artifact_from_config(&config, CatalogCapabilityOverrides::Explicit(None))
+    artifact_from_config(
+        &config,
+        CatalogCapabilityOverrides::Explicit(explicit_capabilities),
+    )
 }
 
 /// Build a catalog artifact for a runtime that has captured explicit provider
@@ -272,8 +278,9 @@ pub fn artifact_json() -> Result<String, serde_json::Error> {
 /// `provider-catalog.json` artifact. See [`artifact_embedded`].
 pub fn artifact_json_embedded(
     explicit_overlay: Option<&llm_config::ProvidersConfig>,
+    explicit_capabilities: Option<&llm::capabilities::CapabilitiesFile>,
 ) -> Result<String, serde_json::Error> {
-    artifact_to_json(&artifact_embedded(explicit_overlay))
+    artifact_to_json(&artifact_embedded(explicit_overlay, explicit_capabilities))
 }
 
 /// `[suppress]` route selectors parsed as `(provider, model_id)` pairs.

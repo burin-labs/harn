@@ -144,6 +144,29 @@ Because an overlay's `[models]` entries replace whole rows, pairing a
 new row with a `[suppress]` entry for the old id also expresses a route
 rename — no post-export patching required.
 
+Structured capability fields (`tool_support`, `modalities`,
+`reasoning`, `prompt_cache`) come from the capability matrix, not from
+`models.*.capabilities` tags (legacy, parse-only). For overlay-declared
+private or local models, pass a matching capabilities overlay (the same
+layout as the built-in `capabilities.toml`):
+
+```bash
+harn providers export --overlay providers.toml \
+  --capabilities-overlay capabilities.toml --output-dir out
+```
+
+```toml
+[[provider.private]]
+model_match = "*"
+native_tools = true
+vision = true
+prompt_caching = true
+```
+
+The serve runtime honors the same data via the manifest
+`[capabilities]` section, so the exported artifact and the live
+`_harn/providerCatalog` / `GET /v1/provider-catalog` responses agree.
+
 ## Runtime surfaces
 
 Thin clients should prefer the live harn-serve catalog when a runtime is

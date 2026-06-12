@@ -8,9 +8,11 @@ pub fn typescript_binding() -> Result<String, serde_json::Error> {
 /// checked-in `harn-provider-catalog.ts` artifact. See [`artifact_embedded`].
 pub fn typescript_binding_embedded(
     explicit_overlay: Option<&crate::llm_config::ProvidersConfig>,
+    explicit_capabilities: Option<&crate::llm::capabilities::CapabilitiesFile>,
 ) -> Result<String, serde_json::Error> {
     Ok(typescript_binding_from_json(&artifact_json_embedded(
         explicit_overlay,
+        explicit_capabilities,
     )?))
 }
 
@@ -33,9 +35,11 @@ pub fn swift_binding() -> Result<String, serde_json::Error> {
 /// `HarnProviderCatalog.swift` artifact. See [`artifact_embedded`].
 pub fn swift_binding_embedded(
     explicit_overlay: Option<&crate::llm_config::ProvidersConfig>,
+    explicit_capabilities: Option<&crate::llm::capabilities::CapabilitiesFile>,
 ) -> Result<String, serde_json::Error> {
     Ok(swift_binding_from_json(&artifact_json_embedded(
         explicit_overlay,
+        explicit_capabilities,
     )?))
 }
 
