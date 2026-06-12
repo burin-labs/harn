@@ -657,16 +657,28 @@ fn stream_send_error(provider: &str, error: reqwest::Error) -> VmError {
     VmError::Thrown(VmValue::String(std::sync::Arc::from(detail)))
 }
 
-/// Map an Anthropic `tool_use` block id (or, as a fallback, an
-/// iteration-relative index) to the canonical `tool-{id}` shape that
-/// `tool_dispatch.rs` later emits from. Keeping the two sites in sync
-/// lets clients correlate streaming `Pending` updates with the eventual
-/// `InProgress`/`Completed` lifecycle.
+/// Canonical wire id for a streamed tool call.
+///
+/// The streaming announcement (`ToolCall(Pending)` + partial-arg
+/// updates emitted here) and the executed lifecycle the agent loop
+/// emits later (`Pending → InProgress → Completed/Failed`; see
+/// `__tool_envelope` in `stdlib/agent/loop.harn`, which keys on the
+/// dispatched call's `id`) must use the SAME string. A historical
+/// `tool-{id}` prefix here made one logical call appear under two ids
+/// on the wire (`tool-call_<hex>` announcement vs bare `call_<hex>`
+/// lifecycle), double-counting every id-keyed consumer (harn#3270).
+///
+/// Use the provider id verbatim. Only synthesize a fallback when the
+/// provider sent none — the caller must then write the same fallback
+/// into the dispatched call's `id` so the lifecycle still matches
+/// (`__tool_envelope` adopts a non-empty `id` as-is). The fallback
+/// carries a UUID because it becomes the dispatch id: a bare
+/// per-stream index would collide across loop iterations.
 fn streaming_tool_call_id(provider_id: &str, fallback_index: usize) -> String {
     if provider_id.is_empty() {
-        format!("tool-stream-{fallback_index}")
+        format!("stream-tool-{fallback_index}-{}", uuid::Uuid::now_v7())
     } else {
-        format!("tool-{provider_id}")
+        provider_id.to_string()
     }
 }
 
@@ -700,14 +712,15 @@ pub(super) async fn consume_sse_lines<R: tokio::io::AsyncBufRead + Unpin>(
     let mut served_fast = false;
 
     struct ToolBlock {
-        id: String,
         name: String,
         input_json: String,
         /// Stable id used for `AgentEvent::ToolCall*` streaming
-        /// emissions (#693). Must match the shape `tool_dispatch.rs`
-        /// constructs later so clients can correlate the streaming
-        /// `Pending` updates with the eventual `InProgress`/`Completed`
-        /// lifecycle.
+        /// emissions (#693) AND as the dispatched call's `id`. One
+        /// logical call must carry ONE wire id: the agent loop's
+        /// `__tool_envelope` (`stdlib/agent/loop.harn`) reuses this id
+        /// verbatim for the executed `Pending → InProgress →
+        /// Completed/Failed` lifecycle, so clients can correlate the
+        /// streaming announcement with the eventual outcome (harn#3270).
         tool_call_id: String,
         /// Coalescing gate so a tool that arrives in 30 small deltas
         /// emits ~6 `ToolCallUpdate` events instead of 30.
@@ -737,11 +750,15 @@ pub(super) async fn consume_sse_lines<R: tokio::io::AsyncBufRead + Unpin>(
 
     /// Per-tool-call OpenAI streaming state. Tracks the accumulated
     /// arguments string, the tool name (filled when the first delta
-    /// carries `function.name`), the synthetic `tool_call_id` we use
-    /// for `AgentEvent::ToolCall` emission, whether the initial
-    /// `ToolCall(Pending)` event has fired yet, and a coalescer so
-    /// argument-delta storms don't fan out per-byte.
+    /// carries `function.name`), the canonical `tool_call_id` used for
+    /// both `AgentEvent::ToolCall*` emission and the dispatched call's
+    /// `id` (one wire id per logical call, harn#3270), whether the
+    /// initial `ToolCall(Pending)` event has fired yet, and a coalescer
+    /// so argument-delta storms don't fan out per-byte.
     struct OaiToolStream {
+        /// Raw provider-sent id ("" until/unless a delta carries one).
+        /// Only consulted to decide whether a late-arriving id may
+        /// still be adopted into `tool_call_id`.
         id: String,
         name: String,
         args: String,
@@ -842,7 +859,6 @@ pub(super) async fn consume_sse_lines<R: tokio::io::AsyncBufRead + Unpin>(
                                 );
                             }
                             current_tool = Some(ToolBlock {
-                                id,
                                 name,
                                 input_json: String::new(),
                                 tool_call_id,
@@ -925,10 +941,16 @@ pub(super) async fn consume_sse_lines<R: tokio::io::AsyncBufRead + Unpin>(
                     if let Some(tool) = current_tool.take() {
                         let args = serde_json::from_str::<serde_json::Value>(&tool.input_json)
                             .unwrap_or(serde_json::Value::Object(Default::default()));
+                        // Dispatch under the SAME id the streaming
+                        // announcement used (harn#3270): for a real
+                        // provider id these are identical; for the
+                        // synthesized fallback this is what keeps the
+                        // executed lifecycle on one wire id instead of
+                        // letting the agent loop mint a second one.
                         tool_calls.push(serde_json::json!({
-                            "id": tool.id, "name": tool.name, "arguments": args,
+                            "id": tool.tool_call_id, "name": tool.name, "arguments": args,
                         }));
-                        blocks.push(serde_json::json!({"type": "tool_call", "id": tool.id, "name": tool.name, "arguments": args, "visibility": "internal"}));
+                        blocks.push(serde_json::json!({"type": "tool_call", "id": tool.tool_call_id, "name": tool.name, "arguments": args, "visibility": "internal"}));
                     } else if let Some(server_tool) = current_server_tool.take() {
                         // Emit a `tool_search_query` transcript event —
                         // not dispatchable, just observability.
@@ -1074,8 +1096,17 @@ pub(super) async fn consume_sse_lines<R: tokio::io::AsyncBufRead + Unpin>(
                         if let Some(id) = tc["id"].as_str() {
                             if !id.is_empty() {
                                 entry.id = id.to_string();
-                                entry.tool_call_id =
-                                    streaming_tool_call_id(&entry.id, stream_index);
+                                // Adopt a late-arriving provider id only
+                                // while nothing has been emitted under
+                                // the fallback yet. Once announced, the
+                                // published id stays canonical for both
+                                // the remaining updates and dispatch —
+                                // one wire id per logical call
+                                // (harn#3270).
+                                if !entry.announced {
+                                    entry.tool_call_id =
+                                        streaming_tool_call_id(&entry.id, stream_index);
+                                }
                             }
                         }
                     }
@@ -1157,12 +1188,17 @@ pub(super) async fn consume_sse_lines<R: tokio::io::AsyncBufRead + Unpin>(
     for (_, stream) in oai_tool_map {
         let args = serde_json::from_str::<serde_json::Value>(&stream.args)
             .unwrap_or(serde_json::Value::Object(Default::default()));
+        // Dispatch under the SAME id the streaming announcement used
+        // (harn#3270). Identical to the provider id whenever one was
+        // seen before the announcement; otherwise the synthesized
+        // fallback carries through so the executed lifecycle stays on
+        // one wire id instead of the agent loop minting a second one.
         tool_calls.push(serde_json::json!({
-            "id": stream.id, "name": stream.name, "arguments": args,
+            "id": stream.tool_call_id, "name": stream.name, "arguments": args,
         }));
         blocks.push(serde_json::json!({
             "type": "tool_call",
-            "id": stream.id,
+            "id": stream.tool_call_id,
             "name": stream.name,
             "arguments": args,
             "visibility": "internal",
@@ -1879,7 +1915,11 @@ mod streaming_tool_call_tests {
             } => {
                 assert_eq!(tool_name, "search_web");
                 assert_eq!(*status, ToolCallStatus::Pending);
-                assert_eq!(tool_call_id, "tool-toolu_a1");
+                // One wire id per logical call (harn#3270): the
+                // announcement uses the provider id verbatim — no
+                // `tool-` prefix divergence from the executed
+                // lifecycle, which keys on the dispatched call's id.
+                assert_eq!(tool_call_id, "toolu_a1");
                 assert_eq!(*raw_input, serde_json::json!({}));
             }
             _ => unreachable!(),
@@ -1922,6 +1962,11 @@ mod streaming_tool_call_tests {
         assert_eq!(result.tool_calls.len(), 1);
         assert_eq!(result.tool_calls[0]["name"], "search_web");
         assert_eq!(result.tool_calls[0]["arguments"]["q"], "anthropic");
+        // Regression pin for harn#3270: the dispatched call (whose id
+        // the agent loop reuses verbatim for the executed Pending →
+        // InProgress → Completed lifecycle) carries the SAME id the
+        // streaming announcement was emitted under.
+        assert_eq!(result.tool_calls[0]["id"], "toolu_a1");
 
         clear_session_sinks(&session_id);
     }
@@ -2118,7 +2163,9 @@ mod streaming_tool_call_tests {
             } => {
                 assert_eq!(tool_name, "read_file");
                 assert_eq!(*status, ToolCallStatus::Pending);
-                assert_eq!(tool_call_id, "tool-call_a");
+                // One wire id per logical call (harn#3270): provider id
+                // verbatim, no `tool-` prefix.
+                assert_eq!(tool_call_id, "call_a");
             }
             _ => unreachable!(),
         }
@@ -2145,7 +2192,97 @@ mod streaming_tool_call_tests {
         assert_eq!(result.tool_calls.len(), 1);
         assert_eq!(result.tool_calls[0]["name"], "read_file");
         assert_eq!(result.tool_calls[0]["arguments"]["path"], "README.md");
+        // Regression pin for harn#3270: the dispatched call (whose id
+        // the agent loop reuses verbatim for the executed lifecycle)
+        // carries the SAME id the announcement was emitted under.
+        assert_eq!(result.tool_calls[0]["id"], "call_a");
 
+        clear_session_sinks(&session_id);
+    }
+
+    /// Regression test for harn#3270: a streamed-then-executed tool
+    /// call must live under ONE wire id across the streaming
+    /// announcement, every partial-arg update, and the dispatched call
+    /// the agent loop later runs the executed `Pending → InProgress →
+    /// Completed/Failed` lifecycle under (`__tool_envelope` in
+    /// `stdlib/agent/loop.harn` adopts a non-empty dispatched `id`
+    /// verbatim). Covers both the provider-id path and the
+    /// empty-provider-id fallback — the fallback only stays "one id"
+    /// because the transport writes it into the dispatched call.
+    #[tokio::test(flavor = "current_thread")]
+    async fn streamed_tool_call_uses_one_wire_id_across_announcement_and_dispatch() {
+        // ── Provider sent a real id ─────────────────────────────────
+        let body = concat!(
+            "data: {\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call_0a1b2c\",\"function\":{\"name\":\"read_file\",\"arguments\":\"{\\\"pa\"}}]}}]}\n",
+            "data: {\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\"th\\\":\\\"a.md\\\"}\"}}]}}]}\n",
+            "data: {\"choices\":[{\"index\":0,\"finish_reason\":\"tool_calls\",\"delta\":{}}],\"usage\":{\"prompt_tokens\":2,\"completion_tokens\":2}}\n",
+            "data: [DONE]\n",
+        );
+        let session_id = fresh_session_id("oai-one-id");
+        let (result, events) = drive(body.as_bytes(), &session_id, false).await;
+
+        let mut event_ids: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+        for event in &events {
+            match event {
+                AgentEvent::ToolCall { tool_call_id, .. }
+                | AgentEvent::ToolCallUpdate { tool_call_id, .. } => {
+                    event_ids.insert(tool_call_id.clone());
+                }
+                _ => {}
+            }
+        }
+        assert_eq!(
+            event_ids.len(),
+            1,
+            "announcement + partial updates must share one id; got {event_ids:?}"
+        );
+        let announced_id = event_ids.into_iter().next().expect("one id");
+        assert_eq!(announced_id, "call_0a1b2c", "provider id used verbatim");
+        assert_eq!(result.tool_calls.len(), 1);
+        assert_eq!(
+            result.tool_calls[0]["id"], "call_0a1b2c",
+            "dispatched call id (= the executed-lifecycle id) must equal the announced id"
+        );
+        clear_session_sinks(&session_id);
+
+        // ── Provider sent NO id: the synthesized fallback must still
+        //    be the one id on both sides ──────────────────────────────
+        let body = concat!(
+            "data: {\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"name\":\"search_web\",\"arguments\":\"{\\\"q\\\":\"}}]}}]}\n",
+            "data: {\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\"\\\"rust\\\"}\"}}]}}]}\n",
+            "data: {\"choices\":[{\"index\":0,\"finish_reason\":\"tool_calls\",\"delta\":{}}],\"usage\":{\"prompt_tokens\":2,\"completion_tokens\":2}}\n",
+            "data: [DONE]\n",
+        );
+        let session_id = fresh_session_id("oai-one-id-fallback");
+        let (result, events) = drive(body.as_bytes(), &session_id, false).await;
+
+        let mut event_ids: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+        for event in &events {
+            match event {
+                AgentEvent::ToolCall { tool_call_id, .. }
+                | AgentEvent::ToolCallUpdate { tool_call_id, .. } => {
+                    event_ids.insert(tool_call_id.clone());
+                }
+                _ => {}
+            }
+        }
+        assert_eq!(
+            event_ids.len(),
+            1,
+            "fallback announcement + updates must share one id; got {event_ids:?}"
+        );
+        let fallback_id = event_ids.into_iter().next().expect("one id");
+        assert!(
+            fallback_id.starts_with("stream-tool-1-"),
+            "synthesized fallback shape; got {fallback_id:?}"
+        );
+        assert_eq!(result.tool_calls.len(), 1);
+        assert_eq!(
+            result.tool_calls[0]["id"].as_str(),
+            Some(fallback_id.as_str()),
+            "the synthesized fallback must be written into the dispatched call so the \
+             agent loop does not mint a second id for the executed lifecycle"
+        );
         clear_session_sinks(&session_id);
     }
 

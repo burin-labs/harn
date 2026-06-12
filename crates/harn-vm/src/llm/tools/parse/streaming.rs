@@ -16,9 +16,11 @@
 //! - **Candidate promoted.** Args parsed cleanly. Emits
 //!   `AgentEvent::ToolCallUpdate { status: Pending, parsing:
 //!   Some(false), raw_output: Some(<args>), .. }`. The dispatch path
-//!   (`tool_dispatch.rs`) picks up its own `tool_call_id` for the
-//!   subsequent `Pending → InProgress → Completed/Failed` flow; the
-//!   candidate id is only correlated WITHIN the candidate phase.
+//!   (`__tool_envelope` in `stdlib/agent/loop.harn`) picks up its own
+//!   `tool_call_id` for the subsequent `Pending → InProgress →
+//!   Completed/Failed` flow; the candidate id (`text-cand-{n}`, a
+//!   namespace no real call ever dispatches under) is only correlated
+//!   WITHIN the candidate phase.
 //! - **Candidate aborted.** Args parse failed — malformed JSON, unclosed
 //!   tag, fallthrough to prose, or stream ended mid-call. Emits
 //!   `AgentEvent::ToolCallUpdate { status: Failed, parsing:
