@@ -2318,6 +2318,18 @@ fn build_agent_event(
             kind: "tool_parse_error_feedback".to_string(),
             content: get_string("error_summary"),
         }),
+        // `tool_call_blank_name_dropped` fires when a provider emits one or more
+        // tool calls with an empty/whitespace name (JSON malformation). The
+        // engine drops ONLY the nameless calls, keeps valid siblings, and
+        // injects parse-guidance so the loop self-corrects instead of
+        // terminating silently on the malformed call. Surfaced on the
+        // FeedbackInjected stream like the sibling corrections above; `content`
+        // carries the dropped-call count.
+        "tool_call_blank_name_dropped" => Ok(AgentEvent::FeedbackInjected {
+            session_id: session_id.to_string(),
+            kind: "tool_call_blank_name_dropped".to_string(),
+            content: get_usize("dropped_count").to_string(),
+        }),
         // `llm_auto_continue` fires when a length-truncated turn with an
         // incomplete tool call is re-issued with a raised output cap instead of
         // burning the turn on parse-guidance. Engine-emitted (not user
