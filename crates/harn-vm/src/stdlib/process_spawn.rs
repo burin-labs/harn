@@ -106,6 +106,26 @@ impl SpawnEntry {
             .status
             .unwrap_or(SpawnStatus::Running)
     }
+
+    /// Record a terminal status, the first writer winning, and return the
+    /// effective terminal status. A `kill()` request and the detached reaper
+    /// can both reach a terminal state concurrently; whichever records first
+    /// fixes the outcome (a process killed at the same instant it exits
+    /// naturally stays `killed`, matching the caller's intent), and the loser
+    /// becomes a no-op that still reads back the winning status. `exit_code`
+    /// and `ended_at` are stamped only on the first write.
+    fn record_terminal(&self, status: SpawnStatus, exit_code: i32) -> SpawnStatus {
+        let mut state = self.state.lock().expect("spawn state poisoned");
+        match state.status {
+            Some(existing) if existing.is_terminal() => existing,
+            _ => {
+                state.status = Some(status);
+                state.exit_code = Some(exit_code);
+                state.ended_at = Some(audited_utc_now_rfc3339("host_call/process.spawn.ended_at"));
+                status
+            }
+        }
+    }
 }
 
 /// Allocate a monotonic sequence number and the handle id derived from it.
@@ -337,16 +357,16 @@ async fn run_to_completion(
 
     let stdout = std::mem::take(&mut *stdout_buf.lock().expect("stdout buf poisoned"));
     let stderr = std::mem::take(&mut *stderr_buf.lock().expect("stderr buf poisoned"));
-    let ended_at = audited_utc_now_rfc3339("host_call/process.spawn.ended_at");
 
     {
         let mut state = entry.state.lock().expect("spawn state poisoned");
         state.stdout = stdout;
         state.stderr = stderr;
-        state.exit_code = Some(exit_code);
-        state.status = Some(status);
-        state.ended_at = Some(ended_at);
     }
+    // Record the terminal status (first-writer-wins): a concurrent `kill()` may
+    // have already published `killed`, in which case we keep it and only attach
+    // the drained output captured above.
+    entry.record_terminal(status, exit_code);
     entry.completion.notify_waiters();
 }
 
@@ -521,14 +541,27 @@ async fn kill(params: &BTreeMap<String, VmValue>) -> Result<VmValue, VmError> {
         return Ok(kill_result(true, entry.current_status()));
     }
 
-    let notified = entry.completion.notified();
-    tokio::pin!(notified);
+    // Register for the completion notification BEFORE signalling so a fast
+    // reaper can't notify between here and the await below (lost-wakeup guard).
+    let drained = entry.completion.notified();
+    tokio::pin!(drained);
+    // Ask the detached reaper to perform the real OS kill, child reap, and
+    // output drain.
     entry.kill_signal.notify_one();
-
-    // Bounded wait for the status transition so kill is observably done.
-    let _ = tokio::time::timeout(Duration::from_secs(5), &mut notified).await;
-    let status = entry.current_status();
-    Ok(kill_result(status.is_terminal(), status))
+    // Publish the terminal status synchronously: the kill is observably done on
+    // return, regardless of when the reaper's runtime is next scheduled. Under
+    // heavy parallel load the reaper (a `current_thread` test runtime, or a
+    // saturated worker) can be starved well past any bounded wall-clock wait,
+    // so gating the result on *observing* its transition raced the timeout and
+    // spuriously reported `success: false` (the prior flake). `kill_on_drop`
+    // guarantees the OS process is terminated once the reaper finishes or is
+    // cancelled, and first-writer-wins keeps the reaper from clobbering this.
+    let status = entry.record_terminal(SpawnStatus::Killed, -1);
+    // Best-effort: briefly let the reaper finish draining captured output so a
+    // follow-up wait()/poll() observes it. The success above is authoritative,
+    // so a slow/starved reaper can no longer make kill report failure.
+    let _ = tokio::time::timeout(Duration::from_secs(5), &mut drained).await;
+    Ok(kill_result(true, status))
 }
 
 fn kill_result(success: bool, status: SpawnStatus) -> VmValue {

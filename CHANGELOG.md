@@ -8,6 +8,27 @@ highlights live in [CHANGELOG-pre-0.6.md](CHANGELOG-pre-0.6.md).
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.8.104
+
+### Added
+
+- **`region` field on LLM routing chain links + catalog introspection.** Routes
+  can now carry a `region` so region-aware providers (e.g. Bedrock, Vertex,
+  Azure OpenAI) resolve to the correct regional endpoint, and the value is
+  surfaced through catalog introspection alongside the other route fields.
+
+### Fixed
+
+- **Agent loop no longer terminates silently on provider empty-name tool calls
+  (burin-code#2120).** When a provider returns a malformed tool call with an
+  empty / whitespace-only name alongside valid sibling calls in the same turn
+  (observed live as a turn carrying `[look, "", look]`), the loop now drops only
+  the nameless call, keeps and dispatches the valid siblings, and injects
+  parse-guidance so the model re-emits a named call next turn — instead of
+  passing the empty-name call through unguarded and ending the loop, which read
+  as a model give-up (`result=INCOMPLETE, outcome_kind=null`) but was a pure
+  harness dispatch failure that corrupted eval-meter accounting.
+
 ## v0.8.103
 
 ### Added
