@@ -166,6 +166,9 @@ fn canonicalize_schema_dict(
     if let Some(max_items) = schema.get("max_items").or_else(|| schema.get("maxItems")) {
         out.insert("max_items".to_string(), max_items.clone());
     }
+    if schema_bool(schema, "unique_items") || schema_bool(schema, "uniqueItems") {
+        out.insert("unique_items".to_string(), VmValue::Bool(true));
+    }
     if let Some(pattern) = schema.get("pattern") {
         out.insert("pattern".to_string(), pattern.clone());
     }
@@ -245,16 +248,6 @@ fn canonicalize_schema_dict(
             );
         }
         _ => {}
-    }
-
-    if matches!(schema.get("uniqueItems"), Some(VmValue::Bool(true)))
-        && schema_type_name(&out) == Some("list")
-        && !out.contains_key("x-harn-type")
-    {
-        out.insert(
-            "x-harn-type".to_string(),
-            VmValue::String(std::sync::Arc::from("set")),
-        );
     }
 
     if out.get("x-harn-type").map(|v| v.display()) == Some("set".to_string()) {
@@ -522,7 +515,12 @@ fn canonical_to_json_schema_with(
                         serde_json::Value::String("array".into()),
                     );
                     out.insert("uniqueItems".to_string(), serde_json::Value::Bool(true));
+                    out.insert(
+                        "x-harn-type".to_string(),
+                        serde_json::Value::String("set".into()),
+                    );
                 }
+                "any" => {}
                 "closure" => {
                     out.insert(
                         "type".to_string(),
@@ -566,6 +564,9 @@ fn canonical_to_json_schema_with(
         }
         if let Some(max_items) = schema_i64(schema_dict, "max_items") {
             out.insert("maxItems".to_string(), serde_json::json!(max_items));
+        }
+        if schema_bool(schema_dict, "unique_items") {
+            out.insert("uniqueItems".to_string(), serde_json::Value::Bool(true));
         }
         if let Some(VmValue::String(pattern)) = schema_dict.get("pattern") {
             out.insert(
@@ -630,7 +631,7 @@ fn canonical_to_json_schema_with(
                 .map(|value| canonical_to_json_schema_with(value, openapi_style, traversal))
                 .collect::<Result<Vec<_>, _>>()?;
             if openapi_style && branches.len() == 2 {
-                let null_index = branches.iter().position(|value| value == "null");
+                let null_index = branches.iter().position(json_schema_is_null_type);
                 if let Some(null_index) = null_index {
                     let other_index = usize::from(null_index == 0);
                     if let Some(other_type) = branches[other_index].as_object_mut() {
@@ -724,6 +725,14 @@ fn canonical_to_json_schema_with(
 
         Ok(serde_json::Value::Object(out))
     })
+}
+
+fn json_schema_is_null_type(value: &serde_json::Value) -> bool {
+    value
+        .as_object()
+        .and_then(|object| object.get("type"))
+        .and_then(serde_json::Value::as_str)
+        == Some("null")
 }
 
 fn json_type_for_harn(type_name: &str) -> serde_json::Value {

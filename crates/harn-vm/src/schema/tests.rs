@@ -7,7 +7,8 @@ use super::limits::{DEFAULT_SCHEMA_MAX_DEPTH, DEFAULT_SCHEMA_MAX_REF_EXPANSIONS}
 use super::transform::{merge_schema_dicts, schema_partial_dict};
 use super::validate::{validate_schema_value, ValidationOptions};
 use super::{
-    schema_assert_param, schema_is_value, schema_result_value, schema_to_openapi_schema_value,
+    schema_assert_param, schema_is_value, schema_result_value, schema_to_json_schema_value,
+    schema_to_openapi_schema_value,
 };
 
 fn s(v: &str) -> VmValue {
@@ -309,6 +310,31 @@ fn union_still_applies_sibling_constraints() {
 }
 
 #[test]
+fn enum_constraints_apply_to_collection_values() {
+    let list_schema = make_vm_dict(vec![(
+        "enum",
+        make_list(vec![make_list(vec![VmValue::Int(1), VmValue::Int(2)])]),
+    )]);
+    assert!(schema_is_value(
+        &make_list(vec![VmValue::Int(1), VmValue::Int(2)]),
+        &list_schema
+    )
+    .unwrap());
+    assert!(!schema_is_value(
+        &make_list(vec![VmValue::Int(2), VmValue::Int(1)]),
+        &list_schema
+    )
+    .unwrap());
+
+    let dict_schema = make_vm_dict(vec![(
+        "enum",
+        make_list(vec![make_vm_dict(vec![("name", s("Ada"))])]),
+    )]);
+    assert!(schema_is_value(&make_vm_dict(vec![("name", s("Ada"))]), &dict_schema).unwrap());
+    assert!(!schema_is_value(&make_vm_dict(vec![("name", s("Grace"))]), &dict_schema).unwrap());
+}
+
+#[test]
 fn export_openapi_nullable() {
     let schema = make_vm_dict(vec![
         ("type", s("string")),
@@ -318,6 +344,44 @@ fn export_openapi_nullable() {
     let dict = exported.as_dict().unwrap();
     assert_eq!(dict.get("type").unwrap().display(), "string");
     assert_eq!(dict.get("nullable").unwrap().display(), "true");
+}
+
+#[test]
+fn export_openapi_nullable_type_union() {
+    let schema = make_vm_dict(vec![("type", make_list(vec![s("string"), s("null")]))]);
+    let exported = schema_to_openapi_schema_value(&schema).unwrap();
+    let dict = exported.as_dict().unwrap();
+    assert_eq!(dict.get("type").unwrap().display(), "string");
+    assert_eq!(dict.get("nullable").unwrap().display(), "true");
+    assert!(!dict.contains_key("oneOf"));
+}
+
+#[test]
+fn export_json_schema_omits_invalid_any_type() {
+    let schema = make_vm_dict(vec![("type", s("any"))]);
+    let exported = schema_to_json_schema_value(&schema).unwrap();
+    let dict = exported.as_dict().unwrap();
+    assert!(!dict.contains_key("type"));
+}
+
+#[test]
+fn json_schema_unique_items_validates_lists_without_requiring_harn_set() {
+    let schema = make_vm_dict(vec![
+        ("type", s("array")),
+        ("uniqueItems", VmValue::Bool(true)),
+    ]);
+    assert!(schema_is_value(&make_list(vec![VmValue::Int(1), VmValue::Int(2)]), &schema).unwrap());
+    assert!(!schema_is_value(&make_list(vec![VmValue::Int(1), VmValue::Int(1)]), &schema).unwrap());
+}
+
+#[test]
+fn export_set_schema_keeps_harn_marker() {
+    let schema = make_vm_dict(vec![("type", s("set"))]);
+    let exported = schema_to_json_schema_value(&schema).unwrap();
+    let dict = exported.as_dict().unwrap();
+    assert_eq!(dict.get("type").unwrap().display(), "array");
+    assert_eq!(dict.get("uniqueItems").unwrap().display(), "true");
+    assert_eq!(dict.get("x-harn-type").unwrap().display(), "set");
 }
 
 #[test]

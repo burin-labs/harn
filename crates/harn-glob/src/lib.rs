@@ -42,8 +42,20 @@ fn match_path_bytes(pat: &[u8], mut pi: usize, path: &[u8], mut si: usize) -> bo
                 let double = pat.get(pi + 1) == Some(&b'*');
                 let mut next_pi = if double { pi + 2 } else { pi + 1 };
                 if double && pat.get(next_pi) == Some(&b'/') {
-                    // `**/` also matches zero directories.
                     next_pi += 1;
+                    // `**/` matches zero or more complete directory segments.
+                    // It must not start the next pattern in the middle of a
+                    // segment (`**/bar` should not match `foobar`).
+                    if match_path_bytes(pat, next_pi, path, si) {
+                        return true;
+                    }
+                    for try_si in si..path.len() {
+                        if path[try_si] == b'/' && match_path_bytes(pat, next_pi, path, try_si + 1)
+                        {
+                            return true;
+                        }
+                    }
+                    return false;
                 }
                 if next_pi >= pat.len() {
                     if double {
@@ -122,7 +134,7 @@ pub fn match_name(pattern: &str, name: &str) -> bool {
 fn has_name_meta(pattern: &str) -> bool {
     pattern
         .bytes()
-        .any(|byte| matches!(byte, b'*' | b'?' | b'['))
+        .any(|byte| matches!(byte, b'*' | b'?' | b'[' | b'{'))
 }
 
 #[cfg(feature = "name")]
@@ -225,6 +237,16 @@ mod tests {
     }
 
     #[test]
+    fn path_double_star_slash_stays_on_directory_boundaries() {
+        assert!(match_path("**/bar", "bar"));
+        assert!(match_path("**/bar", "foo/bar"));
+        assert!(!match_path("**/bar", "foobar"));
+        assert!(match_path("src/**/main.rs", "src/main.rs"));
+        assert!(match_path("src/**/main.rs", "src/bin/main.rs"));
+        assert!(!match_path("src/**/main.rs", "src/binmain.rs"));
+    }
+
+    #[test]
     fn path_question_mark_matches_one_non_separator() {
         assert!(match_path("src/ma?n.rs", "src/main.rs"));
         assert!(!match_path("src/ma?n.rs", "src/man.rs"));
@@ -289,6 +311,13 @@ mod tests {
         assert!(!match_name("gpt-?o", "gpt-44o"));
         assert!(match_name("file[12]", "file1"));
         assert!(!match_name("file[12]", "file3"));
+    }
+
+    #[test]
+    fn name_brace_alternates_use_glob_syntax() {
+        assert!(match_name("gpt-{4o,5}", "gpt-4o"));
+        assert!(match_name("gpt-{4o,5}", "gpt-5"));
+        assert!(!match_name("gpt-{4o,5}", "gpt-4.1"));
     }
 
     #[test]

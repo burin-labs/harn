@@ -230,6 +230,7 @@ fn validate_against_schema_inner(
                 validate_object_fields(map, None, schema, root_schema, path, options, context);
             normalized = next_value;
             errors.extend(next_errors);
+            validate_enum_membership(&normalized, schema, path, &mut errors);
         }
         VmValue::StructInstance { layout, .. } => {
             let fields = normalized.struct_fields_map().unwrap_or_default();
@@ -244,6 +245,7 @@ fn validate_against_schema_inner(
             );
             normalized = next_value;
             errors.extend(next_errors);
+            validate_enum_membership(&normalized, schema, path, &mut errors);
         }
         VmValue::List(items) | VmValue::Set(items) => {
             if let Some(min_items) = schema_i64(schema, "min_items") {
@@ -288,6 +290,13 @@ fn validate_against_schema_inner(
                     _ => VmValue::List(std::sync::Arc::new(normalized_items)),
                 };
             }
+            if schema_bool(schema, "unique_items") && !items_are_unique(&normalized) {
+                errors.push(format!(
+                    "at {}: expected items to be unique",
+                    location_label(path)
+                ));
+            }
+            validate_enum_membership(&normalized, schema, path, &mut errors);
         }
         VmValue::String(text) => {
             let length = text.chars().count() as i64;
@@ -502,6 +511,22 @@ fn validate_object_fields(
     };
 
     (normalized, errors)
+}
+
+fn items_are_unique(value: &VmValue) -> bool {
+    let items = match value {
+        VmValue::List(items) | VmValue::Set(items) => items,
+        _ => return true,
+    };
+    for (index, item) in items.iter().enumerate() {
+        if items[index + 1..]
+            .iter()
+            .any(|candidate| values_equal(item, candidate))
+        {
+            return false;
+        }
+    }
+    true
 }
 
 fn validate_numeric_constraints(
