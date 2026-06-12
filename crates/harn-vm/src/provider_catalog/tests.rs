@@ -780,10 +780,10 @@ fn catalog_mentions_leak(artifact: &ProviderCatalogArtifact) -> bool {
 fn embedded_artifact_generation_is_hermetic_against_ambient_overlay() {
     // Baseline generated with no ambient config at all.
     llm_config::clear_user_overrides();
-    let baseline = artifact_embedded(None);
-    let baseline_json = artifact_json_embedded(None).expect("baseline json");
-    let baseline_ts = typescript_binding_embedded(None).expect("baseline ts");
-    let baseline_swift = swift_binding_embedded(None).expect("baseline swift");
+    let baseline = artifact_embedded(None, None);
+    let baseline_json = artifact_json_embedded(None, None).expect("baseline json");
+    let baseline_ts = typescript_binding_embedded(None, None).expect("baseline ts");
+    let baseline_swift = swift_binding_embedded(None, None).expect("baseline swift");
 
     assert!(
         !catalog_mentions_leak(&baseline),
@@ -803,23 +803,23 @@ fn embedded_artifact_generation_is_hermetic_against_ambient_overlay() {
             "runtime artifact() must still reflect the ambient overlay"
         );
 
-        let polluted = artifact_embedded(None);
+        let polluted = artifact_embedded(None, None);
         assert!(
             !catalog_mentions_leak(&polluted),
             "embedded catalog leaked ambient overlay aliases/providers/models"
         );
         assert_eq!(
-            artifact_json_embedded(None).expect("polluted json"),
+            artifact_json_embedded(None, None).expect("polluted json"),
             baseline_json,
             "embedded provider-catalog.json must be byte-identical with/without ambient overlay"
         );
         assert_eq!(
-            typescript_binding_embedded(None).expect("polluted ts"),
+            typescript_binding_embedded(None, None).expect("polluted ts"),
             baseline_ts,
             "embedded TypeScript binding must be byte-identical with/without ambient overlay"
         );
         assert_eq!(
-            swift_binding_embedded(None).expect("polluted swift"),
+            swift_binding_embedded(None, None).expect("polluted swift"),
             baseline_swift,
             "embedded Swift binding must be byte-identical with/without ambient overlay"
         );
@@ -827,7 +827,7 @@ fn embedded_artifact_generation_is_hermetic_against_ambient_overlay() {
 
     // After dropping the overlay, generation is unchanged.
     assert_eq!(
-        artifact_json_embedded(None).expect("cleared json"),
+        artifact_json_embedded(None, None).expect("cleared json"),
         baseline_json
     );
 }
@@ -839,7 +839,7 @@ fn embedded_artifact_honors_explicit_declared_overlay() {
     // An *explicit* declared overlay (e.g. a `--overlay` file named on the
     // command line) is reproducible input, not ambient machine state, so the
     // hermetic generator merges it on top of the embedded base.
-    let artifact = artifact_embedded(Some(&overlay));
+    let artifact = artifact_embedded(Some(&overlay), None);
     assert!(
         catalog_mentions_leak(&artifact),
         "explicit overlay should be merged into the embedded catalog"

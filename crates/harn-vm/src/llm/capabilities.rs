@@ -678,9 +678,16 @@ pub fn clear_user_overrides() {
 /// same layout used by the built-in `capabilities.toml`) and install as
 /// the current thread's override.
 pub fn set_user_overrides_toml(src: &str) -> Result<(), String> {
-    let parsed: CapabilitiesFile = toml::from_str(src).map_err(|e| e.to_string())?;
-    set_user_overrides(Some(parsed));
+    set_user_overrides(Some(parse_capabilities_toml(src)?));
     Ok(())
+}
+
+/// Parse a capabilities TOML document (the same layout used by the built-in
+/// `capabilities.toml`) without installing it anywhere, for callers that
+/// thread an explicit capability overlay instead of mutating thread state
+/// (e.g. `harn providers export --capabilities-overlay`).
+pub fn parse_capabilities_toml(src: &str) -> Result<CapabilitiesFile, String> {
+    toml::from_str(src).map_err(|e| e.to_string())
 }
 
 /// Extract the `[capabilities]` section from a full `harn.toml` source
