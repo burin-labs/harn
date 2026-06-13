@@ -7,18 +7,23 @@
 # Keep each host-specific rule explicit so the generic OpenAI fallback does
 # not accidentally claim the wrong wire format.
 
-# gpt-oss is harmonized to ONE tool format across every provider that serves
-# it (cerebras / groq / together): `json` (fenced-JSON), the GLOBAL text-channel
-# default. This row previously omitted native_tools/preferred_tool_format
-# (inheriting json), but `openai/gpt-oss-120b` is a catalogued model, so the
-# catalog invariant requires the rule to set both fields EXPLICITLY. native is
-# avoided because gpt-oss native streaming tool-calls have returned EMPTY
-# payloads in evals; json is structurally delimiter-safe and strictly beats
-# heredoc text. To change, set `preferred_tool_format` ("native" | "text").
+# gpt-oss on Together uses NATIVE tool calls. The prior `json`/text pin was a
+# defensive workaround for an "empty native streaming payload" defect that no
+# longer reproduces: 2026-06-12 live probes (raw curl + Harn's streaming path)
+# confirm gpt-oss-120b returns clean OpenAI-shape `tool_calls` in both
+# non-streaming and SSE modes, and Harn's index-keyed SSE reassembler
+# (transport.rs `oai_tool_map`) accumulates the arg-fragment deltas correctly.
+# Conversely, BOTH `json` and `text` formats yield ZERO parsed calls because
+# gpt-oss does not emit Harn's ```tool/name/args contract — it emits a bare
+# `{"tool":..,"arguments":..}` dialect that the fenced-JSON parser does not
+# recognize. native is therefore the measured-best (and only working) channel.
+# Pinned EXPLICITLY (not inherited) because `openai/gpt-oss-120b` is a
+# catalogued model and the catalog invariant requires the rule to set both
+# fields. To change, set `preferred_tool_format` ("native" | "json" | "text").
 [[provider.together]]
 model_match = "openai/gpt-oss-*"
-native_tools = false
-preferred_tool_format = "json"
+native_tools = true
+preferred_tool_format = "native"
 structured_output = "native"
 thinking_modes = ["effort"]
 reasoning_effort_supported = true
