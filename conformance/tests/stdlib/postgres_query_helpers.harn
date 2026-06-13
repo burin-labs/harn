@@ -9,6 +9,7 @@ import {
   named_raw_sql,
   named_sql,
   nullable_timestamptz_json,
+  nullable_uuid_text,
   one,
   quote_identifier,
   raw_sql,
@@ -150,6 +151,7 @@ LIMIT {limit}
   let qualified = columns(
     [
       uuid_text("vaults.id"),
+      nullable_uuid_text("items.owner_id"),
       timestamptz_json("vaults.created_at"),
       nullable_timestamptz_json("items.expires_at"),
     ],
@@ -159,6 +161,10 @@ LIMIT {limit}
     timestamptz_json("vaults.bad;drop")
   }
   __io_println(is_err(bad_qualified))
+  let bad_nullable_uuid = try {
+    nullable_uuid_text("items.bad;drop")
+  }
+  __io_println(is_err(bad_nullable_uuid))
   // raw_sql: braces are literal, no {name} scanning, positional params.
   let raw_query = raw_sql(
     "SELECT data#>>'{}' AS data FROM events WHERE tags && '{a,b}'::text[] AND tenant_id = $1::uuid",

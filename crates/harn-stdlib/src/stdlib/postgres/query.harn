@@ -541,6 +541,28 @@ pub fn uuid_text(name: string) -> PgSqlFragment {
 }
 
 /**
+ * Render `CASE WHEN column IS NULL THEN NULL ELSE column::text END AS column`
+ * for nullable UUID columns as a trusted fragment, preserving SQL NULLs as JSON
+ * `null` instead of casting them to the string `"null"`.
+ *
+ * Accepts a table-qualified name (`sessions.forked_from_session_id`); the alias
+ * is the trailing segment (`forked_from_session_id`). This is the nullable
+ * counterpart to [`uuid_text`], mirroring [`nullable_timestamptz_json`].
+ *
+ * @effects: []
+ * @errors: validation
+ * @api_stability: experimental
+ * @example: nullable_uuid_text("forked_from_session_id")
+ */
+pub fn nullable_uuid_text(name: string) -> PgSqlFragment {
+  let column = __qualified_column(name)
+  let alias = __column_alias(name)
+  return __sql_fragment(
+    "CASE WHEN " + column + " IS NULL THEN NULL ELSE " + column + "::text END AS " + alias,
+  )
+}
+
+/**
  * Render `to_json(column)#>>'{}' AS column` for timestamp columns as a trusted
  * fragment.
  *

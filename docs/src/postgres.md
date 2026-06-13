@@ -234,6 +234,7 @@ carries the literal `'{}'` JSON path safely:
 |---|---|
 | `uuid_text("id")` | `id::text AS id` |
 | `uuid_text("vaults.id")` | `vaults.id::text AS id` |
+| `nullable_uuid_text("receipt_id")` | `CASE WHEN receipt_id IS NULL THEN NULL ELSE receipt_id::text END AS receipt_id` |
 | `timestamptz_json("created_at")` | `to_json(created_at)#>>'{}' AS created_at` |
 | `timestamptz_json("vaults.created_at")` | `to_json(vaults.created_at)#>>'{}' AS created_at` |
 | `nullable_timestamptz_json("finished_at")` | `CASE WHEN finished_at IS NULL THEN NULL ELSE to_json(finished_at)#>>'{}' END AS finished_at` |

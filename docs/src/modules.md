@@ -824,6 +824,7 @@ repeated projection fragments easier to review:
 | `columns(parts)` | Join projection fragments/strings into one `{projection}` fragment |
 | `select_clause(parts)` | Render `SELECT ...` from projection parts as a fragment |
 | `uuid_text(name)` | Fragment `name::text AS name` |
+| `nullable_uuid_text(name)` | Fragment UUID/`::text` projection that preserves nulls |
 | `timestamptz_json(name)` | Fragment `to_json(name)#>>'{}' AS name` |
 | `nullable_timestamptz_json(name)` | Fragment timestamp projection that preserves nulls |
 
