@@ -947,7 +947,16 @@ async fn run_detector_loop(
 }
 
 /// Configuration for LLM call retries.
-pub(crate) const DEFAULT_LLM_CALL_RETRIES: usize = 0;
+///
+/// Default >= 2 so the existing retry-after + per-route cooldown + bounded
+/// exponential-backoff machinery (`extract_retry_after_ms`,
+/// `observe_retry_after_for_llm_call`, `base_retry_backoff_ms`) actually
+/// engages for the agent/eval path. At 0 the retry loop never executed, so a
+/// single transient 429/5xx/connection blip was a hard failure even though all
+/// the backoff plumbing was correct but dormant. Callers can still override via
+/// the `llm_retries` option; only *retryable* errors consume the budget
+/// (`is_retryable_llm_error`), so non-transient failures still fail fast.
+pub(crate) const DEFAULT_LLM_CALL_RETRIES: usize = 2;
 pub(crate) const DEFAULT_LLM_CALL_BACKOFF_MS: u64 = 250;
 
 /// Built-in retry budget for zero-token empty completions. Applies even when
@@ -1943,6 +1952,79 @@ mod empty_completion_retry_tests {
             .await
             .expect("empty completion without budget returns as today");
             assert!(result.text.is_empty());
+        });
+    }
+
+    #[test]
+    fn rate_limit_429_with_retry_after_triggers_bounded_retry() {
+        // A 429 carrying a Retry-After hint must engage the dormant backoff
+        // loop (retries > 0) and recover on the next turn, rather than failing
+        // hard on the first transient error. The _guard drop asserts BOTH
+        // scripted turns were consumed — i.e. the retry actually fired.
+        current_thread_runtime().block_on(async {
+            reset_agent_trace_state();
+            let _guard = install_fake_llm_script(
+                FakeLlmScript::new()
+                    .push(FakeLlmTurn::Error(
+                        crate::llm::fake::FakeLlmError::new(
+                            crate::value::ErrorCategory::RateLimit,
+                            "429 too many requests",
+                        )
+                        .with_retry_after_ms(10),
+                    ))
+                    .push(FakeLlmTurn::stream(vec![
+                        FakeLlmEvent::Token("recovered".into()),
+                        FakeLlmEvent::Done(FakeStopReason::EndTurn),
+                    ])),
+            );
+            let result = observed_llm_call(
+                &fake_opts(),
+                None,
+                None,
+                &retry_config(2),
+                None,
+                false,
+                false,
+                None,
+            )
+            .await
+            .expect("429 with retry-after should retry and recover");
+            assert_eq!(result.text, "recovered");
+            reset_agent_trace_state();
+        });
+    }
+
+    #[test]
+    fn rate_limit_429_fails_hard_when_retry_budget_is_zero() {
+        // Regression guard: at retries=0 the same 429 is a hard failure (this
+        // is exactly the gap the default bump to >=2 closes). Only one turn is
+        // scripted, so a hidden retry would panic the guard on drop.
+        current_thread_runtime().block_on(async {
+            let _guard = install_fake_llm_script(
+                FakeLlmScript::new().push(FakeLlmTurn::Error(
+                    crate::llm::fake::FakeLlmError::new(
+                        crate::value::ErrorCategory::RateLimit,
+                        "429 too many requests",
+                    )
+                    .with_retry_after_ms(10),
+                )),
+            );
+            let err = observed_llm_call(
+                &fake_opts(),
+                None,
+                None,
+                &retry_config(0),
+                None,
+                false,
+                false,
+                None,
+            )
+            .await
+            .expect_err("429 with no retry budget must surface as an error");
+            assert!(
+                is_retryable_llm_error(&err),
+                "the surfaced 429 should classify as retryable"
+            );
         });
     }
 
