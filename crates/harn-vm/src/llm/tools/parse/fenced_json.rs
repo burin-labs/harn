@@ -337,13 +337,18 @@ fn parse_block_body(
         _ => return Err(BlockError::ExpectedSingleObject),
     };
 
-    let name = match obj.get("name") {
+    // Canonical keys are `name`/`args`. Accept `tool`/`arguments` as aliases so
+    // the bare `{"tool":..,"arguments":..}` dialect emitted by some models on
+    // text/json channels (MiniMax, qwen, gpt-oss on text-only routes) parses
+    // instead of being dropped. Canonical wins when both are present.
+    let name = match obj.get("name").or_else(|| obj.get("tool")) {
         Some(serde_json::Value::String(name)) if !name.trim().is_empty() => name.trim().to_string(),
         _ => return Err(BlockError::MissingName),
     };
 
-    let arguments = match obj.get("args") {
-        Some(serde_json::Value::Object(_)) => obj.get("args").cloned().unwrap_or_else(empty_object),
+    let args_value = obj.get("args").or_else(|| obj.get("arguments"));
+    let arguments = match args_value {
+        Some(value @ serde_json::Value::Object(_)) => value.clone(),
         Some(serde_json::Value::Null) | None => empty_object(),
         Some(_) => return Err(BlockError::ArgsNotObject),
     };
@@ -358,8 +363,8 @@ fn empty_object() -> serde_json::Value {
 fn parse_bare_json_tool_call(body: &str) -> Result<(String, serde_json::Value), BlockError> {
     if body.is_empty()
         || !body.starts_with('{')
-        || !body.contains("\"name\"")
-        || !body.contains("\"args\"")
+        || !(body.contains("\"name\"") || body.contains("\"tool\""))
+        || !(body.contains("\"args\"") || body.contains("\"arguments\""))
     {
         return Err(BlockError::ExpectedSingleObject);
     }
@@ -393,6 +398,29 @@ mod tests {
         assert_eq!(out.calls.len(), 1);
         assert_eq!(out.calls[0]["name"], "read_file");
         assert_eq!(arg(&out.calls[0], "path").unwrap(), "a.rs");
+    }
+
+    // S1b: tool/arguments dialect aliases (MiniMax / qwen / gpt-oss on text).
+    #[test]
+    fn parses_tool_arguments_dialect_aliases() {
+        let out =
+            parse("```tool\n{\"tool\": \"read_file\", \"arguments\": {\"path\": \"a.rs\"}}\n```");
+        assert!(out.errors.is_empty(), "errors: {:?}", out.errors);
+        assert_eq!(out.calls.len(), 1);
+        assert_eq!(out.calls[0]["name"], "read_file");
+        assert_eq!(arg(&out.calls[0], "path").unwrap(), "a.rs");
+    }
+
+    // S1c: canonical name/args win when both canonical and alias are present.
+    #[test]
+    fn canonical_keys_win_over_aliases() {
+        let out = parse(
+            "```tool\n{\"name\": \"canonical\", \"tool\": \"alias\", \"args\": {\"k\": 1}, \"arguments\": {\"k\": 2}}\n```",
+        );
+        assert!(out.errors.is_empty(), "errors: {:?}", out.errors);
+        assert_eq!(out.calls.len(), 1);
+        assert_eq!(out.calls[0]["name"], "canonical");
+        assert_eq!(arg(&out.calls[0], "k").unwrap(), 1);
     }
 
     // S3: delimiter soup — content contains ```, <<EOF, a bare }, and </tool>.
