@@ -2342,6 +2342,52 @@ anthropic_beta_features = ["fine-grained-tool-streaming-2025-05-14"]
     }
 
     #[test]
+    fn openrouter_specific_rules_win_and_family_inheritance_is_preserved() {
+        // Capability resolution is first-match-wins over fragment order
+        // (`first_matching_rule_in_file` -> `Iterator::find`), and when no
+        // `provider.openrouter` rule matches it walks the `[provider_family]`
+        // chain (openrouter -> openai). Both contracts must hold so that:
+        //   1. a specific OpenRouter carve-out beats a broader OpenRouter rule,
+        //   2. gpt-/o-family slugs routed through OpenRouter still inherit the
+        //      rich openai-family capability set (a blanket `*` openrouter row
+        //      would shadow this — see the catalog-or-defaults report).
+        reset();
+
+        // 1. Specific carve-out wins: deepseek/deepseek-v3.2 is pinned to the
+        // Harn text-tool channel even though the broader deepseek/deepseek-v3*
+        // rule below it would otherwise resolve `native`.
+        let deepseek = lookup("openrouter", "deepseek/deepseek-v3.2");
+        assert_eq!(
+            deepseek.preferred_tool_format.as_deref(),
+            Some("text"),
+            "deepseek-v3.2 text carve-out must win over the broader deepseek-v3* rule"
+        );
+        assert_eq!(
+            deepseek.tool_mode_parity.as_deref(),
+            Some("native_unreliable")
+        );
+        // The broader sibling still resolves native for non-3.2 v3 slugs.
+        assert_eq!(
+            lookup("openrouter", "deepseek/deepseek-v3-base")
+                .preferred_tool_format
+                .as_deref(),
+            Some("native")
+        );
+
+        // 2. Family inheritance preserved: an openai-prefixed slug routed via
+        // OpenRouter still picks up openai-family reasoning fields.
+        let prefixed = lookup("openrouter", "openai/o4-mini");
+        assert!(prefixed.requires_completion_tokens);
+        assert!(prefixed.reasoning_effort_supported);
+
+        // The newly added MiniMax M2.5 OR mirror resolves native via the
+        // existing `minimax/minimax-m2*` rule.
+        let m25 = lookup("openrouter", "minimax/minimax-m2.5");
+        assert!(m25.native_tools);
+        assert_eq!(m25.preferred_tool_format.as_deref(), Some("native"));
+    }
+
+    #[test]
     fn enterprise_routes_expose_format_preferences() {
         reset();
         let bedrock_claude = lookup("bedrock", "anthropic.claude-opus-4-7-v1:0");

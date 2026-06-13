@@ -1763,10 +1763,19 @@ name = "MiniMax M2.7 (via OpenRouter)"
 provider = "openrouter"
 context_window = 204800
 capabilities = ["tools", "streaming"]
-pricing = { input_per_mtok = 0.40, output_per_mtok = 1.50 }
+pricing = { input_per_mtok = 0.25, output_per_mtok = 1.00 }
 tier = "frontier"
 open_weight = true
 strengths = ["coding", "agentic", "tool_use", "reasoning", "long_context"]
+[models."minimax/minimax-m2.5"]
+name = "MiniMax M2.5 (via OpenRouter)"
+provider = "openrouter"
+context_window = 205000
+capabilities = ["tools", "streaming"]
+pricing = { input_per_mtok = 0.15, output_per_mtok = 0.90 }
+tier = "frontier"
+open_weight = true
+strengths = ["coding", "agentic", "tool_use", "long_context"]
 [models."minimax/minimax-m2"]
 name = "MiniMax M2 (via OpenRouter)"
 provider = "openrouter"
