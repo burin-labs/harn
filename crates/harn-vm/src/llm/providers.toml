@@ -1629,7 +1629,7 @@ served_variant = "cerebras-wafer-scale"
 api_dialect = "openai_chat"
 capabilities = ["tools", "streaming"]
 pricing = { input_per_mtok = 0.35, output_per_mtok = 0.75 }
-rate_limits = { rpm = 5, tpm = 30000, tph = 1000000, tpd = 1000000, tier = "free", source_url = "https://inference-docs.cerebras.ai/support/rate-limits", last_verified = "2026-06-05", notes = "Published Free Trial row; Developer (Pay as You Go) lists 1K RPM and 1M TPM with no hourly/daily cap." }
+rate_limits = { rpm = 250, tpm = 250000, tph = 1000000, tpd = 1000000, tier = "developer", source_url = "https://inference-docs.cerebras.ai/support/rate-limits", last_verified = "2026-06-12", notes = "Developer (Pay as You Go) tier confirmed live from x-ratelimit-limit-requests/tokens response headers 2026-06-12 (250 RPM / 250K TPM). The prior Free Trial row (5 RPM / 30K TPM) needlessly throttled the proactive sliding-window limiter to a crawl. Override per-deployment with HARN_RATE_LIMIT_CEREBRAS_RPM / HARN_RATE_LIMIT_CEREBRAS_TPM." }
 architecture = { parameter_count_b = 117.0, active_parameter_count_b = 5.1, moe = true, license = "Apache-2.0", source_url = "https://developers.openai.com/api/docs/models/gpt-oss-120b", last_verified = "2026-06-05" }
 tier = "frontier"
 open_weight = true
