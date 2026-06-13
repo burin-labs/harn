@@ -1,0 +1,43 @@
+# ---------- Moonshot AI — direct Kimi K2 (OpenAI-compatible /v1) -------------
+# Moonshot's first-party API serves the Kimi K2 family with reliable native
+# tool calls, an inline thinking mode, prompt caching, and multimodal input.
+# K2.7 Code additionally accepts video. Catalog keys are `moonshot/<wire>`
+# (e.g. `moonshot/kimi-k2.6`), so the patterns match the `*kimi*` substring
+# to cover both the prefixed catalog key and the bare wire id.
+
+[[provider.moonshot]]
+model_match = "*kimi-k2.7-code*"
+native_tools = true
+preferred_tool_format = "native"
+structured_output = "native"
+thinking_modes = ["enabled"]
+vision = true
+vision_supported = true
+video_supported = true
+prompt_caching = true
+text_tool_wire_format_supported = true
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "native_json"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "inline"
+
+[[provider.moonshot]]
+model_match = "*kimi*"
+native_tools = true
+preferred_tool_format = "native"
+structured_output = "native"
+thinking_modes = ["enabled"]
+vision = true
+vision_supported = true
+prompt_caching = true
+text_tool_wire_format_supported = true
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "native_json"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "inline"

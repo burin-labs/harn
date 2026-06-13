@@ -208,6 +208,9 @@ pub(crate) fn register_default_providers() {
             "dashscope",
             "minimax",
             "zai",
+            "moonshot",
+            "deepinfra",
+            "sambanova",
         ] {
             names.insert(name.to_string());
         }

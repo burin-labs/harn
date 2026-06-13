@@ -316,6 +316,72 @@ latency_p50_ms = 1900
 method = "GET"
 path = "/models"
 
+# Moonshot AI — first-party host of the Kimi K2 family. OpenAI-compatible
+# `/v1/chat/completions`; the same models were previously only reachable
+# through OpenRouter/Together aggregator routes. Moonshot also exposes an
+# Anthropic-compatible `/anthropic` surface, but Harn dials the
+# OpenAI-compatible endpoint so the shared openai_chat_completions wire
+# format Just Works. Use the `.cn` base via MOONSHOT_BASE_URL for the
+# China region.
+[providers.moonshot]
+base_url = "https://api.moonshot.ai/v1"
+base_url_env = "MOONSHOT_BASE_URL"
+auth_style = "bearer"
+auth_env = ["MOONSHOT_API_KEY", "KIMI_API_KEY"]
+chat_endpoint = "/chat/completions"
+completion_endpoint = "/completions"
+cost_per_1k_in = 0.0006
+cost_per_1k_out = 0.0025
+latency_p50_ms = 1900
+features = ["native_tools", "reasoning", "prompt_caching"]
+
+[providers.moonshot.healthcheck]
+method = "GET"
+path = "/models"
+
+# DeepInfra — OpenAI-compatible host for open-weight models (DeepSeek,
+# Qwen, Llama, Kimi, GPT-OSS, Gemma). The compat surface lives under the
+# `/v1/openai` path prefix, so the base_url carries it and chat_endpoint
+# stays the standard `/chat/completions`. Catalog rows are keyed with a
+# `deepinfra/<hf-id>` prefix and carry `wire_model` so they stay
+# collision-free with the bare/openrouter ids for the same weights.
+[providers.deepinfra]
+base_url = "https://api.deepinfra.com/v1/openai"
+base_url_env = "DEEPINFRA_BASE_URL"
+auth_style = "bearer"
+auth_env = ["DEEPINFRA_API_KEY", "DEEPINFRA_TOKEN"]
+chat_endpoint = "/chat/completions"
+completion_endpoint = "/completions"
+cost_per_1k_in = 0.0002
+cost_per_1k_out = 0.0006
+latency_p50_ms = 1500
+features = ["native_tools"]
+
+[providers.deepinfra.healthcheck]
+method = "GET"
+path = "/models"
+
+# SambaNova Cloud — OpenAI-compatible RDU-hosted inference with very high
+# token throughput on large open-weight models (DeepSeek, Llama 4, Qwen).
+# A latency-budgeted executor target alongside Groq/Cerebras with a
+# different model mix. Catalog rows use a `sambanova/<wire-id>` prefix +
+# `wire_model` so they don't collide with other hosts of the same weights.
+[providers.sambanova]
+base_url = "https://api.sambanova.ai/v1"
+base_url_env = "SAMBANOVA_BASE_URL"
+auth_style = "bearer"
+auth_env = "SAMBANOVA_API_KEY"
+chat_endpoint = "/chat/completions"
+completion_endpoint = "/completions"
+cost_per_1k_in = 0.0006
+cost_per_1k_out = 0.0012
+latency_p50_ms = 350
+features = ["native_tools"]
+
+[providers.sambanova.healthcheck]
+method = "GET"
+path = "/models"
+
 # AWS Bedrock — resolves credentials through env, profile, container, or
 # EC2 instance roles, then signs Converse API calls with SigV4.
 [providers.bedrock]
@@ -722,6 +788,45 @@ provider = "openrouter"
 [aliases."openrouter-kimi-k2.7-code"]
 id = "moonshotai/kimi-k2.7-code"
 provider = "openrouter"
+
+# Kimi via Moonshot's first-party API. Native tool calls are reliable on
+# the direct route, so pin `native`.
+[aliases."kimi-direct"]
+id = "moonshot/kimi-k2.6"
+provider = "moonshot"
+tool_format = "native"
+
+[aliases."moonshot-kimi"]
+id = "moonshot/kimi-k2.6"
+provider = "moonshot"
+tool_format = "native"
+
+[aliases."moonshot-kimi-k2.7-code"]
+id = "moonshot/kimi-k2.7-code"
+provider = "moonshot"
+tool_format = "native"
+
+# DeepInfra — open-weight OpenAI-compatible host.
+[aliases."deepinfra-deepseek"]
+id = "deepinfra/deepseek-ai/DeepSeek-V4-Pro"
+provider = "deepinfra"
+tool_format = "native"
+
+[aliases."deepinfra-qwen3.6"]
+id = "deepinfra/Qwen/Qwen3.6-35B-A3B"
+provider = "deepinfra"
+tool_format = "native"
+
+# SambaNova Cloud — fast RDU inference.
+[aliases."sambanova-deepseek"]
+id = "sambanova/DeepSeek-V4-Pro"
+provider = "sambanova"
+tool_format = "native"
+
+[aliases."sambanova-llama"]
+id = "sambanova/Llama-4-Maverick"
+provider = "sambanova"
+tool_format = "native"
 
 # Qwen 3.7 via OpenRouter/Together. Keep bare aliases on OpenRouter because it
 # exposes both Max and Plus; Together currently serves only Max.
@@ -2227,3 +2332,117 @@ rate_limits = { rpm = 1800, tpm = 10000000, tier = "us-east-1", source_url = "ht
 tier = "frontier"
 open_weight = false
 strengths = ["coding", "agentic", "tool_use", "reasoning", "vision"]
+
+# --- source: 60-models/95-moonshot-deepinfra-sambanova.toml ---
+# Direct first-party / fast-inference routes for models that were
+# previously only reachable through aggregator providers.
+#
+# Each row is keyed by a `provider/<wire-id>` selector so it stays
+# collision-free with the same weights hosted elsewhere (e.g. the
+# OpenRouter/Together `moonshotai/kimi-k2.6` rows). `normalize_model_id`
+# strips the leading known-provider segment, and `wire_model` records the
+# exact id sent on the wire for clarity.
+#
+# Structure note: this fragment opens with a `[models.X]` header (not a
+# bare defaults block) so it does not collide with the trailing defaults
+# block of the preceding fragment. Each model's `tier`/`open_weight`/
+# `strengths`/`complementary_with` defaults trail its own table.
+
+# ---------- Moonshot AI — direct Kimi K2 routes -------------------------------
+[models."moonshot/kimi-k2.6"]
+name = "Kimi K2.6 (Moonshot direct)"
+provider = "moonshot"
+wire_model = "kimi-k2.6"
+logical_model = "moonshot-kimi-k2.6"
+equivalence_group = "moonshot-kimi-k2.6"
+served_variant = "moonshot-direct"
+api_dialect = "openai_chat"
+context_window = 262144
+capabilities = ["tools", "vision", "streaming", "thinking", "prompt_caching"]
+pricing = { input_per_mtok = 0.60, output_per_mtok = 2.50, cache_read_per_mtok = 0.15 }
+tier = "frontier"
+open_weight = true
+strengths = ["coding", "agentic", "long_context", "tool_use", "reasoning", "vision"]
+complementary_with = ["anthropic-claude", "openai-gpt", "google-gemini", "qwen", "deepseek"]
+
+[models."moonshot/kimi-k2.7-code"]
+name = "Kimi K2.7 Code (Moonshot direct)"
+provider = "moonshot"
+wire_model = "kimi-k2.7-code"
+logical_model = "moonshot-kimi-k2.7-code"
+equivalence_group = "moonshot-kimi-k2.7-code"
+served_variant = "moonshot-direct"
+api_dialect = "openai_chat"
+context_window = 262144
+capabilities = ["tools", "vision", "video", "streaming", "thinking", "prompt_caching"]
+pricing = { input_per_mtok = 0.80, output_per_mtok = 3.20, cache_read_per_mtok = 0.20 }
+tier = "frontier"
+open_weight = true
+strengths = ["coding", "agentic", "long_context", "tool_use", "reasoning", "vision"]
+complementary_with = ["anthropic-claude", "openai-gpt", "google-gemini", "qwen", "deepseek"]
+
+# ---------- DeepInfra — open-weight OpenAI-compatible host --------------------
+[models."deepinfra/deepseek-ai/DeepSeek-V4-Pro"]
+name = "DeepSeek V4 Pro (DeepInfra)"
+provider = "deepinfra"
+wire_model = "deepseek-ai/DeepSeek-V4-Pro"
+logical_model = "deepseek-v4-pro"
+equivalence_group = "deepseek-v4-pro"
+served_variant = "deepinfra"
+api_dialect = "openai_chat"
+context_window = 163840
+capabilities = ["tools", "streaming", "thinking", "prompt_caching"]
+pricing = { input_per_mtok = 0.50, output_per_mtok = 1.50 }
+tier = "frontier"
+open_weight = true
+strengths = ["reasoning", "coding", "tool_use", "long_context", "cheap"]
+complementary_with = ["anthropic-claude", "openai-gpt", "google-gemini", "qwen", "kimi"]
+
+[models."deepinfra/Qwen/Qwen3.6-35B-A3B"]
+name = "Qwen3.6 35B A3B (DeepInfra)"
+provider = "deepinfra"
+wire_model = "Qwen/Qwen3.6-35B-A3B"
+logical_model = "qwen3.6-35b-a3b"
+equivalence_group = "qwen3.6-35b-a3b"
+served_variant = "deepinfra"
+api_dialect = "openai_chat"
+context_window = 262144
+capabilities = ["tools", "vision", "streaming", "thinking"]
+pricing = { input_per_mtok = 0.10, output_per_mtok = 0.30 }
+tier = "mid"
+open_weight = true
+strengths = ["coding", "agentic", "tool_use", "long_context", "cheap", "vision"]
+complementary_with = ["anthropic-claude", "openai-gpt", "google-gemini", "deepseek", "kimi"]
+
+# ---------- SambaNova Cloud — fast RDU inference ------------------------------
+[models."sambanova/DeepSeek-V4-Pro"]
+name = "DeepSeek V4 Pro (SambaNova)"
+provider = "sambanova"
+wire_model = "DeepSeek-V4-Pro"
+logical_model = "deepseek-v4-pro"
+equivalence_group = "deepseek-v4-pro"
+served_variant = "sambanova-rdu"
+api_dialect = "openai_chat"
+context_window = 163840
+capabilities = ["tools", "streaming", "thinking"]
+pricing = { input_per_mtok = 0.60, output_per_mtok = 1.20 }
+tier = "frontier"
+open_weight = true
+strengths = ["speed", "reasoning", "coding", "tool_use", "long_context"]
+complementary_with = ["anthropic-claude", "openai-gpt", "google-gemini", "qwen", "kimi"]
+
+[models."sambanova/Llama-4-Maverick"]
+name = "Llama 4 Maverick (SambaNova)"
+provider = "sambanova"
+wire_model = "Llama-4-Maverick-17B-128E-Instruct"
+logical_model = "llama-4-maverick"
+equivalence_group = "llama-4-maverick"
+served_variant = "sambanova-rdu"
+api_dialect = "openai_chat"
+context_window = 131072
+capabilities = ["tools", "vision", "streaming"]
+pricing = { input_per_mtok = 0.63, output_per_mtok = 1.80 }
+tier = "mid"
+open_weight = true
+strengths = ["speed", "vision", "tool_use", "long_context", "cheap"]
+complementary_with = ["anthropic-claude", "openai-gpt", "google-gemini", "deepseek", "kimi"]
