@@ -1,5 +1,3 @@
-use std::collections::BTreeMap;
-
 use crate::llm::helpers::{
     extract_llm_options, is_transcript_value, new_transcript_with_events, transcript_asset_list,
     transcript_event, transcript_id, transcript_message_list, transcript_summary_text,
@@ -41,8 +39,8 @@ struct TranscriptCompactOptions {
 
 async fn compact_transcript_impl(
     ctx: &crate::vm::AsyncBuiltinCtx,
-    transcript: &BTreeMap<String, VmValue>,
-    options: Option<&BTreeMap<String, VmValue>>,
+    transcript: &crate::value::DictMap,
+    options: Option<&crate::value::DictMap>,
     raw_options: Option<VmValue>,
 ) -> Result<VmValue, VmError> {
     let provider_options = options
@@ -67,7 +65,7 @@ async fn compact_transcript_impl(
         config.token_threshold = 0;
     }
 
-    let original_transcript = VmValue::Dict(std::sync::Arc::new(transcript.clone()));
+    let original_transcript = VmValue::dict(transcript.clone());
     let mut messages: Vec<serde_json::Value> = transcript_message_list(transcript)?
         .iter()
         .map(vm_value_to_json)
@@ -143,7 +141,7 @@ async fn compact_transcript_impl(
 }
 
 fn parse_options(
-    options: Option<&BTreeMap<String, VmValue>>,
+    options: Option<&crate::value::DictMap>,
 ) -> Result<TranscriptCompactOptions, VmError> {
     let mut parsed = TranscriptCompactOptions {
         strategy: CompactStrategy::ObservationMask,
@@ -240,7 +238,7 @@ fn merge_summary(existing: Option<String>, next: &str) -> Option<String> {
     }
 }
 
-fn transcript_state(transcript: &BTreeMap<String, VmValue>) -> Option<&str> {
+fn transcript_state(transcript: &crate::value::DictMap) -> Option<&str> {
     transcript.get("state").and_then(|value| match value {
         VmValue::String(text) if !text.is_empty() => Some(text.as_ref()),
         _ => None,

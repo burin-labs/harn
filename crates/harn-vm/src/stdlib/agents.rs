@@ -13,7 +13,7 @@ mod sub_agent;
 pub(super) mod workflow;
 
 use crate::value::VmDictExt;
-use std::collections::{BTreeMap, HashSet};
+use std::collections::HashSet;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
@@ -77,7 +77,7 @@ pub(super) struct SubAgentRunSpec {
     pub(super) name: String,
     pub(super) task: String,
     pub(super) system: Option<String>,
-    pub(super) options: BTreeMap<String, VmValue>,
+    pub(super) options: crate::value::DictMap,
     pub(super) returns_schema: Option<VmValue>,
     pub(super) session_id: String,
     pub(super) parent_session_id: Option<String>,

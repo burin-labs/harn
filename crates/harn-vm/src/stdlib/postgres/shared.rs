@@ -92,7 +92,7 @@ impl PoolKey {
     pub(super) fn new(
         primary_url: &str,
         replica_urls: &[String],
-        options: Option<&BTreeMap<String, VmValue>>,
+        options: Option<&crate::value::DictMap>,
         single_connection: bool,
     ) -> Self {
         let mut hasher = Sha256::new();
@@ -253,7 +253,7 @@ mod tests {
         VmValue::String(std::sync::Arc::from(value))
     }
 
-    fn opts(pairs: &[(&str, VmValue)]) -> BTreeMap<String, VmValue> {
+    fn opts(pairs: &[(&str, VmValue)]) -> crate::value::DictMap {
         pairs
             .iter()
             .map(|(k, v)| ((*k).to_string(), v.clone()))
@@ -357,14 +357,8 @@ mod tests {
     /// Nested option dicts (e.g. `circuit_breaker`) participate structurally.
     #[test]
     fn nested_option_dicts_affect_key() {
-        let cb1 = VmValue::Dict(std::sync::Arc::new(opts(&[(
-            "failure_threshold",
-            VmValue::Int(3),
-        )])));
-        let cb2 = VmValue::Dict(std::sync::Arc::new(opts(&[(
-            "failure_threshold",
-            VmValue::Int(9),
-        )])));
+        let cb1 = VmValue::dict(opts(&[("failure_threshold", VmValue::Int(3))]));
+        let cb2 = VmValue::dict(opts(&[("failure_threshold", VmValue::Int(9))]));
         let o1 = opts(&[("circuit_breaker", cb1)]);
         let o2 = opts(&[("circuit_breaker", cb2)]);
         assert_ne!(

@@ -408,7 +408,7 @@ fn parse_source(value: Option<&VmValue>) -> Result<MonitorSource, VmError> {
 fn required_dict<'a>(
     value: Option<&'a VmValue>,
     builtin: &str,
-) -> Result<&'a BTreeMap<String, VmValue>, VmError> {
+) -> Result<&'a crate::value::DictMap, VmError> {
     match value {
         Some(VmValue::Dict(map)) => Ok(map),
         Some(other) => Err(VmError::Runtime(format!(
@@ -420,7 +420,7 @@ fn required_dict<'a>(
 }
 
 fn required_closure(
-    map: &BTreeMap<String, VmValue>,
+    map: &crate::value::DictMap,
     field: &str,
     builtin: &str,
 ) -> Result<Arc<VmClosure>, VmError> {
@@ -429,7 +429,7 @@ fn required_closure(
 }
 
 fn optional_closure(
-    map: &BTreeMap<String, VmValue>,
+    map: &crate::value::DictMap,
     field: &str,
     builtin: &str,
 ) -> Result<Option<Arc<VmClosure>>, VmError> {
@@ -464,7 +464,7 @@ fn parse_duration_value(value: &VmValue) -> Result<StdDuration, VmError> {
     )
 }
 
-fn string_field(map: &BTreeMap<String, VmValue>, field: &str) -> Result<Option<String>, VmError> {
+fn string_field(map: &crate::value::DictMap, field: &str) -> Result<Option<String>, VmError> {
     let Some(value) = map.get(field) else {
         return Ok(None);
     };
@@ -479,7 +479,7 @@ fn string_field(map: &BTreeMap<String, VmValue>, field: &str) -> Result<Option<S
     }
 }
 
-fn bool_field(map: &BTreeMap<String, VmValue>, field: &str) -> Result<Option<bool>, VmError> {
+fn bool_field(map: &crate::value::DictMap, field: &str) -> Result<Option<bool>, VmError> {
     let Some(value) = map.get(field) else {
         return Ok(None);
     };

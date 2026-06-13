@@ -76,7 +76,7 @@ async fn self_certainty_builtin(
     let opts = super::helpers::extract_llm_options(&[
         VmValue::String(std::sync::Arc::from(prompt)),
         VmValue::Nil,
-        VmValue::Dict(std::sync::Arc::new(call_options)),
+        VmValue::dict(call_options),
     ])?;
     let result = super::api::vm_call_llm_full(&opts).await?;
     if result.logprobs.is_empty() {

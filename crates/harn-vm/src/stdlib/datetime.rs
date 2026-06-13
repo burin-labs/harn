@@ -1,5 +1,4 @@
 use crate::value::VmDictExt;
-use std::collections::BTreeMap;
 
 use chrono::{
     DateTime, Datelike, LocalResult, NaiveDate, NaiveDateTime, Offset, TimeZone, Timelike, Utc,
@@ -30,7 +29,7 @@ fn date_now_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErro
         "iso8601",
         now.to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
     );
-    Ok(VmValue::Dict(std::sync::Arc::new(result)))
+    Ok(VmValue::dict(result))
 }
 
 #[harn_builtin(sig = "date_now_iso() -> string", category = "datetime")]
@@ -83,7 +82,7 @@ fn date_in_zone_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmE
     let local = dt.with_timezone(&tz);
     let mut result = zoned_datetime_dict(local);
     result.put_str("zone", tz_name);
-    Ok(VmValue::Dict(std::sync::Arc::new(result)))
+    Ok(VmValue::dict(result))
 }
 
 #[harn_builtin(
@@ -267,7 +266,7 @@ fn require_arg<'a>(
 fn require_dict<'a>(
     value: Option<&'a VmValue>,
     builtin: &str,
-) -> Result<&'a BTreeMap<String, VmValue>, VmError> {
+) -> Result<&'a crate::value::DictMap, VmError> {
     match value {
         Some(VmValue::Dict(map)) => Ok(map),
         Some(other) => Err(vm_error(format!(
@@ -282,8 +281,8 @@ pub(crate) fn vm_error(message: impl Into<String>) -> VmError {
     VmError::Thrown(VmValue::String(std::sync::Arc::from(message.into())))
 }
 
-fn utc_datetime_dict(dt: DateTime<Utc>) -> BTreeMap<String, VmValue> {
-    let mut result = BTreeMap::new();
+fn utc_datetime_dict(dt: DateTime<Utc>) -> crate::value::DictMap {
+    let mut result = crate::value::DictMap::new();
     result.insert("year".to_string(), VmValue::Int(dt.year() as i64));
     result.insert("month".to_string(), VmValue::Int(dt.month() as i64));
     result.insert("day".to_string(), VmValue::Int(dt.day() as i64));
@@ -297,8 +296,8 @@ fn utc_datetime_dict(dt: DateTime<Utc>) -> BTreeMap<String, VmValue> {
     result
 }
 
-fn zoned_datetime_dict(dt: DateTime<Tz>) -> BTreeMap<String, VmValue> {
-    let mut result = BTreeMap::new();
+fn zoned_datetime_dict(dt: DateTime<Tz>) -> crate::value::DictMap {
+    let mut result = crate::value::DictMap::new();
     result.insert("year".to_string(), VmValue::Int(dt.year() as i64));
     result.insert("month".to_string(), VmValue::Int(dt.month() as i64));
     result.insert("day".to_string(), VmValue::Int(dt.day() as i64));
@@ -465,7 +464,7 @@ fn timestamp_millis_value(millis: i128) -> Result<VmValue, VmError> {
 }
 
 fn component_i64(
-    map: &BTreeMap<String, VmValue>,
+    map: &crate::value::DictMap,
     key: &str,
     default: Option<i64>,
 ) -> Result<i64, VmError> {
@@ -480,10 +479,7 @@ fn component_i64(
     }
 }
 
-fn datetime_from_components(
-    map: &BTreeMap<String, VmValue>,
-    tz: Tz,
-) -> Result<DateTime<Tz>, VmError> {
+fn datetime_from_components(map: &crate::value::DictMap, tz: Tz) -> Result<DateTime<Tz>, VmError> {
     let year = i32::try_from(component_i64(map, "year", None)?)
         .map_err(|_| vm_error("date_from_components: year out of range"))?;
     let month = u32::try_from(component_i64(map, "month", None)?).unwrap_or(0);

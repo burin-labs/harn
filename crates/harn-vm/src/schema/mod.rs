@@ -1,5 +1,4 @@
 use crate::value::VmValue;
-use std::collections::BTreeMap;
 
 mod api;
 mod canonicalize;
@@ -67,18 +66,18 @@ fn vm_value_to_serde_json(value: &VmValue) -> serde_json::Value {
     }
 }
 
-fn schema_bool(schema: &BTreeMap<String, VmValue>, key: &str) -> bool {
+fn schema_bool(schema: &crate::value::DictMap, key: &str) -> bool {
     matches!(schema.get(key), Some(VmValue::Bool(true)))
 }
 
-fn schema_i64(schema: &BTreeMap<String, VmValue>, key: &str) -> Option<i64> {
+fn schema_i64(schema: &crate::value::DictMap, key: &str) -> Option<i64> {
     match schema.get(key) {
         Some(VmValue::Int(value)) => Some(*value),
         _ => None,
     }
 }
 
-fn schema_number(schema: &BTreeMap<String, VmValue>, key: &str) -> Option<f64> {
+fn schema_number(schema: &crate::value::DictMap, key: &str) -> Option<f64> {
     match schema.get(key) {
         Some(VmValue::Int(value)) => Some(*value as f64),
         Some(VmValue::Float(value)) => Some(*value),

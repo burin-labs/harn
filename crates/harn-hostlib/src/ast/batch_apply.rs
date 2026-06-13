@@ -165,9 +165,7 @@ pub(super) fn run(args: &[VmValue]) -> Result<VmValue, HostlibError> {
 /// Accept the replacement under either `replacement` or its `fix` alias
 /// (the rule model, Epic A, will speak `fix`; the raw primitive accepts
 /// both today). Exactly one must be present.
-fn resolve_replacement(
-    dict: &std::collections::BTreeMap<String, VmValue>,
-) -> Result<String, HostlibError> {
+fn resolve_replacement(dict: &harn_vm::value::DictMap) -> Result<String, HostlibError> {
     let replacement = optional_string(BUILTIN, dict, "replacement")?;
     let fix = optional_string(BUILTIN, dict, "fix")?;
     match (replacement, fix) {
@@ -449,7 +447,7 @@ impl Summary {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::collections::BTreeMap;
+
     use std::io::Write;
     use tempfile::NamedTempFile;
 
@@ -462,11 +460,11 @@ mod tests {
     }
 
     fn dict(pairs: &[(&str, VmValue)]) -> VmValue {
-        let mut map: BTreeMap<String, VmValue> = BTreeMap::new();
+        let mut map: harn_vm::value::DictMap = Default::default();
         for (k, v) in pairs {
             map.insert((*k).to_string(), v.clone());
         }
-        VmValue::Dict(Arc::new(map))
+        VmValue::dict(map)
     }
 
     fn field<'a>(value: &'a VmValue, key: &str) -> &'a VmValue {

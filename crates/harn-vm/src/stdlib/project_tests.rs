@@ -268,12 +268,8 @@ fn context_profile_scans_fingerprint_when_supplied_signals_only_include_remote()
     );
     let mut raw_options = BTreeMap::new();
     raw_options.insert("include_env_credentials".to_string(), VmValue::Bool(false));
-    raw_options.insert(
-        "signals".to_string(),
-        VmValue::Dict(std::sync::Arc::new(signals)),
-    );
-    let options =
-        parse_context_profile_options(Some(&VmValue::Dict(std::sync::Arc::new(raw_options))));
+    raw_options.insert("signals".to_string(), VmValue::dict(signals));
+    let options = parse_context_profile_options(Some(&VmValue::dict(raw_options)));
 
     assert!(options.fingerprint.is_none());
     let resolution = resolve_context_profile(dir.path(), options);

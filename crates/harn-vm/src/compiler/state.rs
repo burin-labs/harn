@@ -478,12 +478,10 @@ impl Compiler {
         match type_expr {
             harn_parser::TypeExpr::Named(name) => match name.as_str() {
                 "int" | "float" | "string" | "bool" | "list" | "dict" | "set" | "nil"
-                | "closure" | "bytes" => {
-                    Some(VmValue::Dict(std::sync::Arc::new(BTreeMap::from([(
-                        "type".to_string(),
-                        VmValue::String(std::sync::Arc::from(name.as_str())),
-                    )]))))
-                }
+                | "closure" | "bytes" => Some(VmValue::dict(BTreeMap::from([(
+                    "type".to_string(),
+                    VmValue::String(std::sync::Arc::from(name.as_str())),
+                )]))),
                 _ => None,
             },
             harn_parser::TypeExpr::Shape(fields)
@@ -499,17 +497,14 @@ impl Compiler {
                 }
                 let mut out = BTreeMap::new();
                 out.put_str("type", "dict");
-                out.insert(
-                    "properties".to_string(),
-                    VmValue::Dict(std::sync::Arc::new(properties)),
-                );
+                out.insert("properties".to_string(), VmValue::dict(properties));
                 if !required.is_empty() {
                     out.insert(
                         "required".to_string(),
                         VmValue::List(std::sync::Arc::new(required)),
                     );
                 }
-                Some(VmValue::Dict(std::sync::Arc::new(out)))
+                Some(VmValue::dict(out))
             }
             harn_parser::TypeExpr::List(inner) => {
                 let mut out = BTreeMap::new();
@@ -517,7 +512,7 @@ impl Compiler {
                 if let Some(item_schema) = Self::type_expr_to_schema_value(inner) {
                     out.insert("items".to_string(), item_schema);
                 }
-                Some(VmValue::Dict(std::sync::Arc::new(out)))
+                Some(VmValue::dict(out))
             }
             harn_parser::TypeExpr::DictType(key, value) => {
                 let mut out = BTreeMap::new();
@@ -527,7 +522,7 @@ impl Compiler {
                         out.insert("additional_properties".to_string(), value_schema);
                     }
                 }
-                Some(VmValue::Dict(std::sync::Arc::new(out)))
+                Some(VmValue::dict(out))
             }
             harn_parser::TypeExpr::Union(members) => {
                 // Special-case unions of literals: emit as `enum: [...]`
@@ -548,7 +543,7 @@ impl Compiler {
                             _ => unreachable!(),
                         })
                         .collect::<Vec<_>>();
-                    return Some(VmValue::Dict(std::sync::Arc::new(BTreeMap::from([
+                    return Some(VmValue::dict(BTreeMap::from([
                         (
                             "type".to_string(),
                             VmValue::String(std::sync::Arc::from("string")),
@@ -557,7 +552,7 @@ impl Compiler {
                             "enum".to_string(),
                             VmValue::List(std::sync::Arc::new(values)),
                         ),
-                    ]))));
+                    ])));
                 }
                 if !members.is_empty()
                     && members
@@ -571,7 +566,7 @@ impl Compiler {
                             _ => unreachable!(),
                         })
                         .collect::<Vec<_>>();
-                    return Some(VmValue::Dict(std::sync::Arc::new(BTreeMap::from([
+                    return Some(VmValue::dict(BTreeMap::from([
                         (
                             "type".to_string(),
                             VmValue::String(std::sync::Arc::from("int")),
@@ -580,7 +575,7 @@ impl Compiler {
                             "enum".to_string(),
                             VmValue::List(std::sync::Arc::new(values)),
                         ),
-                    ]))));
+                    ])));
                 }
                 let branches = members
                     .iter()
@@ -589,10 +584,10 @@ impl Compiler {
                 if branches.is_empty() {
                     None
                 } else {
-                    Some(VmValue::Dict(std::sync::Arc::new(BTreeMap::from([(
+                    Some(VmValue::dict(BTreeMap::from([(
                         "union".to_string(),
                         VmValue::List(std::sync::Arc::new(branches)),
-                    )]))))
+                    )])))
                 }
             }
             harn_parser::TypeExpr::Intersection(members) => {
@@ -606,44 +601,38 @@ impl Compiler {
                 if branches.is_empty() {
                     None
                 } else {
-                    Some(VmValue::Dict(std::sync::Arc::new(BTreeMap::from([(
+                    Some(VmValue::dict(BTreeMap::from([(
                         "all_of".to_string(),
                         VmValue::List(std::sync::Arc::new(branches)),
-                    )]))))
+                    )])))
                 }
             }
-            harn_parser::TypeExpr::FnType { .. } => {
-                Some(VmValue::Dict(std::sync::Arc::new(BTreeMap::from([(
-                    "type".to_string(),
-                    VmValue::String(std::sync::Arc::from("closure")),
-                )]))))
-            }
+            harn_parser::TypeExpr::FnType { .. } => Some(VmValue::dict(BTreeMap::from([(
+                "type".to_string(),
+                VmValue::String(std::sync::Arc::from("closure")),
+            )]))),
             harn_parser::TypeExpr::Applied { .. } => None,
             harn_parser::TypeExpr::Iter(_)
             | harn_parser::TypeExpr::Generator(_)
             | harn_parser::TypeExpr::Stream(_) => None,
             harn_parser::TypeExpr::Never => None,
-            harn_parser::TypeExpr::LitString(s) => {
-                Some(VmValue::Dict(std::sync::Arc::new(BTreeMap::from([
-                    (
-                        "type".to_string(),
-                        VmValue::String(std::sync::Arc::from("string")),
-                    ),
-                    (
-                        "const".to_string(),
-                        VmValue::String(std::sync::Arc::from(s.as_str())),
-                    ),
-                ]))))
-            }
-            harn_parser::TypeExpr::LitInt(v) => {
-                Some(VmValue::Dict(std::sync::Arc::new(BTreeMap::from([
-                    (
-                        "type".to_string(),
-                        VmValue::String(std::sync::Arc::from("int")),
-                    ),
-                    ("const".to_string(), VmValue::Int(*v)),
-                ]))))
-            }
+            harn_parser::TypeExpr::LitString(s) => Some(VmValue::dict(BTreeMap::from([
+                (
+                    "type".to_string(),
+                    VmValue::String(std::sync::Arc::from("string")),
+                ),
+                (
+                    "const".to_string(),
+                    VmValue::String(std::sync::Arc::from(s.as_str())),
+                ),
+            ]))),
+            harn_parser::TypeExpr::LitInt(v) => Some(VmValue::dict(BTreeMap::from([
+                (
+                    "type".to_string(),
+                    VmValue::String(std::sync::Arc::from("int")),
+                ),
+                ("const".to_string(), VmValue::Int(*v)),
+            ]))),
             harn_parser::TypeExpr::Owned(inner) => Self::type_expr_to_schema_value(inner),
         }
     }

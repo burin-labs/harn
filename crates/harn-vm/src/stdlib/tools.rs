@@ -16,7 +16,7 @@ thread_local! {
     /// by `tool_ref` / `tool_def` to resolve tool-name references without
     /// threading the registry through every call site.
     static CURRENT_TOOL_REGISTRY: RefCell<Option<VmValue>> = const { RefCell::new(None) };
-    static TOOL_SYNTHESIS_CACHE: RefCell<BTreeMap<String, SynthesizedToolSpec>> = const { RefCell::new(BTreeMap::new()) };
+    static TOOL_SYNTHESIS_CACHE: RefCell<BTreeMap<String, SynthesizedToolSpec>> = const { RefCell::new(std::collections::BTreeMap::new()) };
 }
 
 #[derive(Clone)]
@@ -66,9 +66,9 @@ pub fn clear_tool_synthesis_cache() {
 }
 
 fn vm_find_tool_entry<'a>(
-    registry: &'a BTreeMap<String, VmValue>,
+    registry: &'a crate::value::DictMap,
     name: &str,
-) -> Option<&'a BTreeMap<String, VmValue>> {
+) -> Option<&'a crate::value::DictMap> {
     let tools = vm_get_tools(registry);
     for tool in tools {
         if let VmValue::Dict(entry) = tool {
@@ -82,7 +82,7 @@ fn vm_find_tool_entry<'a>(
     None
 }
 
-fn vm_registered_names(registry: &BTreeMap<String, VmValue>) -> Vec<String> {
+fn vm_registered_names(registry: &crate::value::DictMap) -> Vec<String> {
     let mut names: Vec<String> = vm_get_tools(registry)
         .iter()
         .filter_map(|tool| match tool {
@@ -203,13 +203,13 @@ fn plan_entries_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmE
     category = "tools"
 )]
 fn tool_registry_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
-    let mut registry = BTreeMap::new();
+    let mut registry = crate::value::DictMap::new();
     registry.put_str("_type", "tool_registry");
     registry.insert(
         "tools".to_string(),
         VmValue::List(std::sync::Arc::new(Vec::new())),
     );
-    Ok(VmValue::Dict(std::sync::Arc::new(registry)))
+    Ok(VmValue::dict(registry))
 }
 
 #[harn_builtin(
@@ -231,14 +231,14 @@ fn tool_list_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErro
     let mut result = Vec::new();
     for tool in tools {
         if let VmValue::Dict(entry) = tool {
-            let mut desc = BTreeMap::new();
+            let mut desc = crate::value::DictMap::new();
             for (key, value) in entry.iter() {
                 if key == "handler" {
                     continue;
                 }
                 desc.insert(key.clone(), value.clone());
             }
-            result.push(VmValue::Dict(std::sync::Arc::new(desc)));
+            result.push(VmValue::dict(desc));
         }
     }
     Ok(VmValue::List(std::sync::Arc::new(result)))
@@ -326,7 +326,7 @@ fn tool_select_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmEr
         "tools".to_string(),
         VmValue::List(std::sync::Arc::new(selected)),
     );
-    Ok(VmValue::Dict(std::sync::Arc::new(new_registry)))
+    Ok(VmValue::dict(new_registry))
 }
 
 #[harn_builtin(
@@ -424,7 +424,7 @@ fn tool_remove_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmEr
         "tools".to_string(),
         VmValue::List(std::sync::Arc::new(filtered)),
     );
-    Ok(VmValue::Dict(std::sync::Arc::new(new_registry)))
+    Ok(VmValue::dict(new_registry))
 }
 
 #[harn_builtin(
@@ -466,7 +466,7 @@ fn tool_schema_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmEr
 
     let tools = match registry.get("tools") {
         Some(VmValue::List(list)) => list,
-        _ => return Ok(VmValue::Dict(std::sync::Arc::new(vm_build_empty_schema()))),
+        _ => return Ok(VmValue::dict(vm_build_empty_schema())),
     };
 
     let mut tool_schemas = Vec::new();
@@ -482,37 +482,31 @@ fn tool_schema_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmEr
             let output_schema =
                 vm_build_output_schema(entry.get("outputSchema"), components.as_ref());
 
-            let mut tool_def = BTreeMap::new();
+            let mut tool_def = crate::value::DictMap::new();
             tool_def.put_str("name", name);
             tool_def.put_str("description", description);
             tool_def.insert("inputSchema".to_string(), input_schema);
             if let Some(output_schema) = output_schema {
                 tool_def.insert("outputSchema".to_string(), output_schema);
             }
-            tool_schemas.push(VmValue::Dict(std::sync::Arc::new(tool_def)));
+            tool_schemas.push(VmValue::dict(tool_def));
         }
     }
 
-    let mut schema = BTreeMap::new();
+    let mut schema = crate::value::DictMap::new();
     schema.put_str("schema_version", "harn-tools/1.0");
 
     if let Some(comps) = &components {
-        let mut comp_wrapper = BTreeMap::new();
-        comp_wrapper.insert(
-            "schemas".to_string(),
-            VmValue::Dict(std::sync::Arc::new(comps.clone())),
-        );
-        schema.insert(
-            "components".to_string(),
-            VmValue::Dict(std::sync::Arc::new(comp_wrapper)),
-        );
+        let mut comp_wrapper = crate::value::DictMap::new();
+        comp_wrapper.insert("schemas".to_string(), VmValue::dict(comps.clone()));
+        schema.insert("components".to_string(), VmValue::dict(comp_wrapper));
     }
 
     schema.insert(
         "tools".to_string(),
         VmValue::List(std::sync::Arc::new(tool_schemas)),
     );
-    Ok(VmValue::Dict(std::sync::Arc::new(schema)))
+    Ok(VmValue::dict(schema))
 }
 
 // Unknown config keys (beyond parameters/handler/returns/annotations) are
@@ -750,10 +744,10 @@ fn tool_define_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmEr
     let parameters = config
         .get("parameters")
         .cloned()
-        .unwrap_or(VmValue::Dict(std::sync::Arc::new(BTreeMap::new())));
+        .unwrap_or(VmValue::dict(crate::value::DictMap::new()));
     let output_schema = config.get("returns").cloned().unwrap_or(VmValue::Nil);
 
-    let mut tool_entry = BTreeMap::new();
+    let mut tool_entry = crate::value::DictMap::new();
     tool_entry.put_str("name", name.as_str());
     tool_entry.put_str("description", description);
     tool_entry.insert("handler".to_string(), handler);
@@ -793,14 +787,14 @@ fn tool_define_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmEr
             .collect(),
         _ => Vec::new(),
     };
-    tools.push(VmValue::Dict(std::sync::Arc::new(tool_entry)));
+    tools.push(VmValue::dict(tool_entry));
 
     let mut new_registry = registry;
     new_registry.insert(
         "tools".to_string(),
         VmValue::List(std::sync::Arc::new(tools)),
     );
-    Ok(VmValue::Dict(std::sync::Arc::new(new_registry)))
+    Ok(VmValue::dict(new_registry))
 }
 
 #[harn_builtin(sig = "tool_parse_call(text: string?) -> list", category = "tools")]
@@ -889,7 +883,7 @@ fn tool_prompt_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmEr
     prompt.push_str("You may make multiple tool calls in a single response. Wait for tool results before proceeding.\n\n");
     prompt.push_str("## Tools\n\n");
 
-    let mut tool_infos: Vec<(&BTreeMap<String, VmValue>, String)> = Vec::new();
+    let mut tool_infos: Vec<(&crate::value::DictMap, String)> = Vec::new();
     for tool in tools.iter() {
         if let VmValue::Dict(entry) = tool {
             let name = entry.get("name").map(|v| v.display()).unwrap_or_default();
@@ -1008,14 +1002,14 @@ fn tool_def_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError
     };
 
     if let Some(entry) = vm_find_tool_entry(registry, &name) {
-        let mut desc = BTreeMap::new();
+        let mut desc = crate::value::DictMap::new();
         for (key, value) in entry.iter() {
             if key == "handler" {
                 continue;
             }
             desc.insert(key.clone(), value.clone());
         }
-        return Ok(VmValue::Dict(std::sync::Arc::new(desc)));
+        return Ok(VmValue::dict(desc));
     }
 
     let registered = vm_registered_names(registry);
@@ -1081,7 +1075,7 @@ fn synthesize_tool_spec(input: Option<&VmValue>) -> Result<SynthesizedToolSpec, 
         .get("parameters")
         .or_else(|| config.get("params"))
         .cloned()
-        .unwrap_or_else(|| VmValue::Dict(std::sync::Arc::new(BTreeMap::new())));
+        .unwrap_or_else(|| VmValue::dict(crate::value::DictMap::new()));
     let return_type = config
         .get("return_type")
         .or_else(|| config.get("returns"))
@@ -1289,7 +1283,7 @@ fn is_optional_param(schema: &VmValue) -> bool {
 }
 
 fn synthesized_tool_dry_run_result(spec: &SynthesizedToolSpec, call_args: VmValue) -> VmValue {
-    let mut result = BTreeMap::new();
+    let mut result = crate::value::DictMap::new();
     result.put_str("_type", "synthesized_tool_result");
     result.put_str("status", "dry_run");
     result.put_str("tool_id", spec.id.as_str());
@@ -1311,11 +1305,11 @@ fn synthesized_tool_dry_run_result(spec: &SynthesizedToolSpec, call_args: VmValu
         "synthesized tool is pinned and validated, but executor is dry_run; \
              set executor: \"host_bridge\" or \"mcp_server\" to dispatch",
     );
-    VmValue::Dict(std::sync::Arc::new(result))
+    VmValue::dict(result)
 }
 
 fn synthesized_tool_spec_value(spec: &SynthesizedToolSpec) -> VmValue {
-    let mut value = BTreeMap::new();
+    let mut value = crate::value::DictMap::new();
     value.put_str("id", spec.id.as_str());
     value.put_str("name", spec.name.as_str());
     value.put_str("description", spec.description.as_str());
@@ -1351,7 +1345,7 @@ fn synthesized_tool_spec_value(spec: &SynthesizedToolSpec) -> VmValue {
             }
         }
     }
-    VmValue::Dict(std::sync::Arc::new(value))
+    VmValue::dict(value)
 }
 
 fn synthesized_tool_hash(spec: &SynthesizedToolSpec) -> String {
@@ -1389,7 +1383,7 @@ fn synthesized_executor_hash_value(executor: &SynthesizedToolExecutor) -> serde_
 }
 
 fn required_string(
-    config: &BTreeMap<String, VmValue>,
+    config: &crate::value::DictMap,
     builtin: &str,
     key: &str,
 ) -> Result<String, VmError> {
@@ -1401,17 +1395,14 @@ fn required_string(
     }
 }
 
-fn optional_string(config: &BTreeMap<String, VmValue>, key: &str) -> Option<String> {
+fn optional_string(config: &crate::value::DictMap, key: &str) -> Option<String> {
     match config.get(key) {
         Some(VmValue::String(value)) => Some(value.to_string()),
         _ => None,
     }
 }
 
-fn optional_string_list(
-    config: &BTreeMap<String, VmValue>,
-    key: &str,
-) -> Result<Vec<String>, VmError> {
+fn optional_string_list(config: &crate::value::DictMap, key: &str) -> Result<Vec<String>, VmError> {
     let Some(value) = config.get(key) else {
         return Ok(Vec::new());
     };
@@ -1506,7 +1497,7 @@ fn infer_side_effect_level(capabilities: &[String]) -> String {
     }
 }
 
-fn vm_validate_registry(name: &str, dict: &BTreeMap<String, VmValue>) -> Result<(), VmError> {
+fn vm_validate_registry(name: &str, dict: &crate::value::DictMap) -> Result<(), VmError> {
     match dict.get("_type") {
         Some(VmValue::String(t)) if &**t == "tool_registry" => Ok(()),
         _ => Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
@@ -1515,7 +1506,7 @@ fn vm_validate_registry(name: &str, dict: &BTreeMap<String, VmValue>) -> Result<
     }
 }
 
-fn vm_get_tools(dict: &BTreeMap<String, VmValue>) -> &[VmValue] {
+fn vm_get_tools(dict: &crate::value::DictMap) -> &[VmValue] {
     match dict.get("tools") {
         Some(VmValue::List(list)) => list,
         _ => &[],
@@ -1558,8 +1549,8 @@ fn vm_format_schema(schema: Option<&VmValue>) -> String {
     }
 }
 
-fn vm_build_empty_schema() -> BTreeMap<String, VmValue> {
-    let mut schema = BTreeMap::new();
+fn vm_build_empty_schema() -> crate::value::DictMap {
+    let mut schema = crate::value::DictMap::new();
     schema.put_str("schema_version", "harn-tools/1.0");
     schema.insert(
         "tools".to_string(),
@@ -1570,9 +1561,9 @@ fn vm_build_empty_schema() -> BTreeMap<String, VmValue> {
 
 fn vm_build_input_schema(
     params: Option<&VmValue>,
-    components: Option<&BTreeMap<String, VmValue>>,
+    components: Option<&crate::value::DictMap>,
 ) -> VmValue {
-    let mut schema = BTreeMap::new();
+    let mut schema = crate::value::DictMap::new();
     schema.put_str("type", "object");
 
     let params_map = match params {
@@ -1580,13 +1571,13 @@ fn vm_build_input_schema(
         _ => {
             schema.insert(
                 "properties".to_string(),
-                VmValue::Dict(std::sync::Arc::new(BTreeMap::new())),
+                VmValue::dict(crate::value::DictMap::new()),
             );
-            return VmValue::Dict(std::sync::Arc::new(schema));
+            return VmValue::dict(schema);
         }
     };
 
-    let mut properties = BTreeMap::new();
+    let mut properties = crate::value::DictMap::new();
     let mut required = Vec::new();
 
     for (key, val) in params_map.iter() {
@@ -1595,10 +1586,7 @@ fn vm_build_input_schema(
         required.push(VmValue::String(std::sync::Arc::from(key.as_str())));
     }
 
-    schema.insert(
-        "properties".to_string(),
-        VmValue::Dict(std::sync::Arc::new(properties)),
-    );
+    schema.insert("properties".to_string(), VmValue::dict(properties));
     if !required.is_empty() {
         required.sort_by_key(|a| a.display());
         schema.insert(
@@ -1607,23 +1595,23 @@ fn vm_build_input_schema(
         );
     }
 
-    VmValue::Dict(std::sync::Arc::new(schema))
+    VmValue::dict(schema)
 }
 
 fn vm_build_output_schema(
     schema: Option<&VmValue>,
-    components: Option<&BTreeMap<String, VmValue>>,
+    components: Option<&crate::value::DictMap>,
 ) -> Option<VmValue> {
     schema.map(|value| vm_resolve_param_type(value, components))
 }
 
-fn vm_resolve_param_type(val: &VmValue, components: Option<&BTreeMap<String, VmValue>>) -> VmValue {
+fn vm_resolve_param_type(val: &VmValue, components: Option<&crate::value::DictMap>) -> VmValue {
     match val {
         VmValue::String(type_name) => {
             let json_type = vm_harn_type_to_json_schema(type_name);
-            let mut prop = BTreeMap::new();
+            let mut prop = crate::value::DictMap::new();
             prop.put_str("type", json_type);
-            VmValue::Dict(std::sync::Arc::new(prop))
+            VmValue::dict(prop)
         }
         VmValue::Dict(map) => {
             if let Some(VmValue::String(ref_name)) = map.get("$ref") {
@@ -1632,17 +1620,17 @@ fn vm_resolve_param_type(val: &VmValue, components: Option<&BTreeMap<String, VmV
                         return resolved.clone();
                     }
                 }
-                let mut prop = BTreeMap::new();
+                let mut prop = crate::value::DictMap::new();
                 prop.put_str("$ref", format!("#/components/schemas/{ref_name}").as_str());
-                VmValue::Dict(std::sync::Arc::new(prop))
+                VmValue::dict(prop)
             } else {
-                VmValue::Dict(std::sync::Arc::new((**map).clone()))
+                VmValue::dict((**map).clone())
             }
         }
         _ => {
-            let mut prop = BTreeMap::new();
+            let mut prop = crate::value::DictMap::new();
             prop.put_str("type", "string");
-            VmValue::Dict(std::sync::Arc::new(prop))
+            VmValue::dict(prop)
         }
     }
 }

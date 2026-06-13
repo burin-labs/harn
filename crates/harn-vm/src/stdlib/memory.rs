@@ -430,14 +430,14 @@ fn coerce_finite_f64(value: &VmValue) -> Option<f64> {
     }
 }
 
-fn option_string(options: Option<&BTreeMap<String, VmValue>>, key: &str) -> Option<String> {
+fn option_string(options: Option<&crate::value::DictMap>, key: &str) -> Option<String> {
     options
         .and_then(|opts| opts.get(key))
         .map(VmValue::display)
         .filter(|value| !value.trim().is_empty())
 }
 
-fn option_bool(options: Option<&BTreeMap<String, VmValue>>, key: &str) -> Option<bool> {
+fn option_bool(options: Option<&crate::value::DictMap>, key: &str) -> Option<bool> {
     match options.and_then(|opts| opts.get(key))? {
         VmValue::Bool(value) => Some(*value),
         VmValue::Nil => None,
@@ -445,7 +445,7 @@ fn option_bool(options: Option<&BTreeMap<String, VmValue>>, key: &str) -> Option
     }
 }
 
-fn memory_root(options: Option<&BTreeMap<String, VmValue>>) -> PathBuf {
+fn memory_root(options: Option<&crate::value::DictMap>) -> PathBuf {
     resolve_memory_root(option_string(options, "root").as_deref())
 }
 
@@ -920,7 +920,7 @@ async fn ensure_embedding(
     if let Some(cached) = read_cached_embedding(&path)? {
         return Ok(cached.vector);
     }
-    let mut params = BTreeMap::new();
+    let mut params = crate::value::DictMap::new();
     params.put_str("text", text);
     params.put_str("model_hint", hint);
     let result = dispatch_host_operation("memory", "embed", &params).await?;
@@ -1271,7 +1271,7 @@ fn values_as_strings(value: &VmValue) -> Vec<String> {
 }
 
 fn memory_record_to_vm(record: &MemoryRecord, score: Option<f64>) -> VmValue {
-    let mut map = BTreeMap::new();
+    let mut map = crate::value::DictMap::new();
     map.put_str("_type", MEMORY_TYPE);
     map.put_str("id", record.id.as_str());
     map.put_str("namespace", record.namespace.as_str());
@@ -1303,7 +1303,7 @@ fn memory_record_to_vm(record: &MemoryRecord, score: Option<f64>) -> VmValue {
     if let Some(score) = score {
         map.insert("score".to_string(), VmValue::Float(score));
     }
-    VmValue::Dict(std::sync::Arc::new(map))
+    VmValue::dict(map)
 }
 
 fn summary_to_vm(namespace: &str, records: Vec<MemoryRecord>) -> VmValue {
@@ -1320,7 +1320,7 @@ fn summary_to_vm(namespace: &str, records: Vec<MemoryRecord>) -> VmValue {
         }
         text.push_str(&line);
     }
-    let mut map = BTreeMap::new();
+    let mut map = crate::value::DictMap::new();
     map.put_str("_type", "memory_summary");
     map.put_str("namespace", namespace);
     map.insert("count".to_string(), VmValue::Int(records.len() as i64));
@@ -1334,11 +1334,11 @@ fn summary_to_vm(namespace: &str, records: Vec<MemoryRecord>) -> VmValue {
                 .collect(),
         )),
     );
-    VmValue::Dict(std::sync::Arc::new(map))
+    VmValue::dict(map)
 }
 
 fn forget_result_to_vm(event: &ForgetEvent) -> VmValue {
-    let mut map = BTreeMap::new();
+    let mut map = crate::value::DictMap::new();
     map.put_str("_type", "memory_forget");
     map.put_str("id", event.id.as_str());
     map.put_str("namespace", event.namespace.as_str());
@@ -1357,11 +1357,11 @@ fn forget_result_to_vm(event: &ForgetEvent) -> VmValue {
         )),
     );
     map.put_str("forgotten_at", event.forgotten_at.as_str());
-    VmValue::Dict(std::sync::Arc::new(map))
+    VmValue::dict(map)
 }
 
 fn memory_open_to_vm(event: &OpenEvent) -> VmValue {
-    let mut map = BTreeMap::new();
+    let mut map = crate::value::DictMap::new();
     map.put_str("_type", "memory_open");
     map.put_str("id", event.id.as_str());
     map.put_str("namespace", event.namespace.as_str());
@@ -1401,7 +1401,7 @@ fn memory_open_to_vm(event: &OpenEvent) -> VmValue {
             .unwrap_or(VmValue::Nil),
     );
     map.put_str("opened_at", event.opened_at.as_str());
-    VmValue::Dict(std::sync::Arc::new(map))
+    VmValue::dict(map)
 }
 
 fn first_line(text: &str) -> String {
@@ -1556,7 +1556,7 @@ mod tests {
 
     #[test]
     fn parse_embedding_response_validates_dim_and_vector_types() {
-        let mut dict = BTreeMap::new();
+        let mut dict = crate::value::DictMap::new();
         dict.insert(
             "vector".to_string(),
             VmValue::List(std::sync::Arc::new(vec![
@@ -1567,19 +1567,19 @@ mod tests {
         );
         dict.insert("dim".to_string(), VmValue::Int(3));
         dict.put_str("model", "test-model");
-        let value = VmValue::Dict(std::sync::Arc::new(dict));
+        let value = VmValue::dict(dict);
         let parsed = parse_embedding_response(value, "fallback").unwrap();
         assert_eq!(parsed.dim, 3);
         assert_eq!(parsed.model, "test-model");
         assert_eq!(parsed.vector, vec![0.1, 0.2, 1.0]);
 
-        let mut bad = BTreeMap::new();
+        let mut bad = crate::value::DictMap::new();
         bad.insert(
             "vector".to_string(),
             VmValue::List(std::sync::Arc::new(vec![VmValue::Float(0.1)])),
         );
         bad.insert("dim".to_string(), VmValue::Int(2));
-        let err = parse_embedding_response(VmValue::Dict(std::sync::Arc::new(bad)), "fallback")
+        let err = parse_embedding_response(VmValue::dict(bad), "fallback")
             .expect_err("dim mismatch must error");
         assert!(err.to_string().contains("dim=2"));
     }

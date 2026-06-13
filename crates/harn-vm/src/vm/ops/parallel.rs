@@ -393,7 +393,7 @@ impl super::super::Vm {
                 );
                 dict.insert("succeeded".to_string(), VmValue::Int(succeeded));
                 dict.insert("failed".to_string(), VmValue::Int(failed));
-                self.stack.push(VmValue::Dict(std::sync::Arc::new(dict)));
+                self.stack.push(VmValue::dict(dict));
             }
             _ => self.stack.push(VmValue::Nil),
         }

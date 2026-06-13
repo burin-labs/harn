@@ -78,7 +78,7 @@ impl Scope {
     #[inline]
     fn empty() -> Self {
         Self {
-            vars: Arc::new(BTreeMap::new()),
+            vars: Arc::new(std::collections::BTreeMap::new()),
         }
     }
 }
@@ -147,8 +147,8 @@ impl VmEnv {
         Ok(())
     }
 
-    pub fn all_variables(&self) -> BTreeMap<String, VmValue> {
-        let mut vars = BTreeMap::new();
+    pub fn all_variables(&self) -> crate::value::DictMap {
+        let mut vars = crate::value::DictMap::new();
         for scope in &self.scopes {
             for (name, (value, _)) in scope.vars.iter() {
                 vars.insert(name.clone(), value.clone());

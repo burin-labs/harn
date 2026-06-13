@@ -129,10 +129,10 @@ impl Compiler {
                 .as_ref()
                 .and_then(Self::type_expr_to_schema_value)
                 .unwrap_or_else(|| {
-                    VmValue::Dict(std::sync::Arc::new(BTreeMap::from([(
+                    VmValue::dict(BTreeMap::from([(
                         "type".to_string(),
                         VmValue::String(std::sync::Arc::from("any")),
-                    )])))
+                    )]))
                 });
             let public_schema =
                 schema::schema_to_json_schema_value(&base_schema).map_err(|error| {
@@ -146,14 +146,14 @@ impl Compiler {
                 })?;
             let mut param_schema = match public_schema {
                 VmValue::Dict(map) => (*map).clone(),
-                _ => BTreeMap::new(),
+                _ => crate::value::DictMap::new(),
             };
 
             if p.default_value.is_some() {
                 param_schema.insert("required".to_string(), VmValue::Bool(false));
             }
 
-            self.emit_vm_value_literal(&VmValue::Dict(std::sync::Arc::new(param_schema)));
+            self.emit_vm_value_literal(&VmValue::dict(param_schema));
 
             if let Some(default_value) = p.default_value.as_ref() {
                 let default_key = self.string_constant("default");

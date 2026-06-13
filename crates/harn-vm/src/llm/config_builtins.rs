@@ -1,5 +1,4 @@
 use crate::value::VmDictExt;
-use std::collections::BTreeMap;
 
 use crate::llm_config;
 use crate::stdlib::json_to_vm_value;
@@ -184,11 +183,11 @@ fn llm_model_defaults_builtin(args: &[VmValue], _out: &mut String) -> Result<VmV
         ));
     }
     let params = llm_config::model_params(&model_id);
-    let mut dict = BTreeMap::new();
+    let mut dict = crate::value::DictMap::new();
     for (k, v) in &params {
         dict.insert(k.clone(), toml_value_to_vm_value(v));
     }
-    Ok(VmValue::Dict(std::sync::Arc::new(dict)))
+    Ok(VmValue::dict(dict))
 }
 
 /// Return the fully-merged llm_call options for `opts`. Requires opts.model.
@@ -230,7 +229,7 @@ fn llm_resolved_options_builtin(args: &[VmValue], _out: &mut String) -> Result<V
     }
     out.put_str("provider", final_provider);
     out.put_str("model", resolved_id);
-    Ok(VmValue::Dict(std::sync::Arc::new(out)))
+    Ok(VmValue::dict(out))
 }
 
 /// Apply Harn's provider-aware reasoning_policy/thinking_policy defaults to an llm_call option dict.
@@ -246,7 +245,7 @@ fn llm_apply_reasoning_policy_builtin(
         VmError::Runtime("llm_apply_reasoning_policy: opts must be a dict".to_string())
     })?;
     let out = super::reasoning_policy::apply_policy_to_vm_options(opts)?;
-    Ok(VmValue::Dict(std::sync::Arc::new(out)))
+    Ok(VmValue::dict(out))
 }
 
 fn toml_value_to_vm_value(value: &toml::Value) -> VmValue {
@@ -261,11 +260,11 @@ fn toml_value_to_vm_value(value: &toml::Value) -> VmValue {
             VmValue::List(std::sync::Arc::new(list))
         }
         toml::Value::Table(table) => {
-            let mut dict = BTreeMap::new();
+            let mut dict = crate::value::DictMap::new();
             for (k, v) in table {
                 dict.insert(k.clone(), toml_value_to_vm_value(v));
             }
-            VmValue::Dict(std::sync::Arc::new(dict))
+            VmValue::dict(dict)
         }
     }
 }
@@ -298,11 +297,11 @@ fn llm_pick_model_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue
         )
     };
 
-    let mut dict = BTreeMap::new();
+    let mut dict = crate::value::DictMap::new();
     dict.put_str("id", id.clone());
     dict.put_str("provider", provider);
     dict.put_str("tier", llm_config::model_tier(&id));
-    Ok(VmValue::Dict(std::sync::Arc::new(dict)))
+    Ok(VmValue::dict(dict))
 }
 
 /// Pick a different-family reviewer model for review, critique, or plan review.
@@ -430,7 +429,7 @@ pub(crate) fn llm_provider_status_value() -> VmValue {
 
     let mut entries = Vec::with_capacity(names.len());
     for name in names {
-        let mut entry = BTreeMap::new();
+        let mut entry = crate::value::DictMap::new();
         entry.put_str("name", name.clone());
 
         // Providers with `auth_style = "none"` (e.g. local Ollama) and
@@ -462,7 +461,7 @@ pub(crate) fn llm_provider_status_value() -> VmValue {
         };
         entry.insert("available".to_string(), VmValue::Bool(available));
         entry.put_str("credential_status", credential_status);
-        entries.push(VmValue::Dict(std::sync::Arc::new(entry)));
+        entries.push(VmValue::dict(entry));
     }
     VmValue::List(std::sync::Arc::new(entries))
 }
@@ -581,13 +580,13 @@ fn llm_config_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, Vm
             }
         }
         None => {
-            let mut dict = BTreeMap::new();
+            let mut dict = crate::value::DictMap::new();
             for name in llm_config::provider_names() {
                 if let Some(pdef) = llm_config::provider_config(&name) {
                     dict.insert(name.clone(), provider_def_to_vm_value(Some(&name), &pdef));
                 }
             }
-            Ok(VmValue::Dict(std::sync::Arc::new(dict)))
+            Ok(VmValue::dict(dict))
         }
     }
 }
@@ -599,7 +598,7 @@ enum RateLimitField<T> {
 }
 
 fn rate_limit_u64_option(
-    opts: &BTreeMap<String, VmValue>,
+    opts: &crate::value::DictMap,
     key: &str,
 ) -> Result<RateLimitField<u64>, VmError> {
     let Some(value) = opts.get(key) else {
@@ -617,7 +616,7 @@ fn rate_limit_u64_option(
 }
 
 fn rate_limit_u32_option(
-    opts: &BTreeMap<String, VmValue>,
+    opts: &crate::value::DictMap,
     key: &str,
 ) -> Result<RateLimitField<u32>, VmError> {
     match rate_limit_u64_option(opts, key)? {
@@ -869,7 +868,7 @@ fn provider_region_value(provider_name: Option<&str>) -> Option<VmValue> {
         "bedrock" => crate::llm::providers::bedrock::current_env_region(),
         _ => None,
     };
-    let mut region = BTreeMap::new();
+    let mut region = crate::value::DictMap::new();
     region.put_str("override_key", "region");
     region.insert(
         "envs".to_string(),
@@ -882,7 +881,7 @@ fn provider_region_value(provider_name: Option<&str>) -> Option<VmValue> {
             None => VmValue::Nil,
         },
     );
-    Some(VmValue::Dict(std::sync::Arc::new(region)))
+    Some(VmValue::dict(region))
 }
 
 /// Convert a ProviderDef to a VmValue dict for the llm_config builtin.
@@ -890,7 +889,7 @@ fn provider_def_to_vm_value(
     provider_name: Option<&str>,
     pdef: &llm_config::ProviderDef,
 ) -> VmValue {
-    let mut dict = BTreeMap::new();
+    let mut dict = crate::value::DictMap::new();
     dict.put_opt_str("display_name", pdef.display_name.as_deref());
     dict.put_opt_str("icon", pdef.icon.as_deref());
     dict.put_opt_str("protocol", pdef.protocol.as_deref());
@@ -936,14 +935,11 @@ fn provider_def_to_vm_value(
     }
     dict.put_opt_str("auth_header", pdef.auth_header.as_deref());
     if !pdef.extra_headers.is_empty() {
-        let mut headers = BTreeMap::new();
+        let mut headers = crate::value::DictMap::new();
         for (k, v) in &pdef.extra_headers {
             headers.insert(k.clone(), VmValue::String(std::sync::Arc::from(v.as_str())));
         }
-        dict.insert(
-            "extra_headers".to_string(),
-            VmValue::Dict(std::sync::Arc::new(headers)),
-        );
+        dict.insert("extra_headers".to_string(), VmValue::dict(headers));
     }
     if !pdef.features.is_empty() {
         let features: Vec<VmValue> = pdef
@@ -979,7 +975,7 @@ fn provider_def_to_vm_value(
     if let Some(latency) = pdef.latency_p50_ms {
         dict.insert("latency_p50_ms".to_string(), VmValue::Int(latency as i64));
     }
-    VmValue::Dict(std::sync::Arc::new(dict))
+    VmValue::dict(dict)
 }
 
 fn string_list_to_vm_value(items: Vec<String>) -> VmValue {
@@ -992,7 +988,7 @@ fn string_list_to_vm_value(items: Vec<String>) -> VmValue {
 }
 
 fn resolved_model_to_vm_value(resolved: &llm_config::ResolvedModel) -> VmValue {
-    let mut dict = BTreeMap::new();
+    let mut dict = crate::value::DictMap::new();
     dict.put_str("id", resolved.id.as_str());
     dict.put_str("provider", resolved.provider.as_str());
     dict.insert(
@@ -1007,7 +1003,7 @@ fn resolved_model_to_vm_value(resolved: &llm_config::ResolvedModel) -> VmValue {
     dict.put_str("tier", resolved.tier.as_str());
     dict.put_str("family", resolved.family.as_str());
     dict.put_str("lineage", resolved.lineage.as_str());
-    VmValue::Dict(std::sync::Arc::new(dict))
+    VmValue::dict(dict)
 }
 
 fn model_info_to_vm_value(resolved: &llm_config::ResolvedModel) -> VmValue {
@@ -1036,7 +1032,7 @@ fn model_info_to_vm_value(resolved: &llm_config::ResolvedModel) -> VmValue {
         "auth_available".to_string(),
         VmValue::Bool(llm_config::provider_key_available(&resolved.provider)),
     );
-    VmValue::Dict(std::sync::Arc::new(dict))
+    VmValue::dict(dict)
 }
 
 pub(crate) fn capabilities_to_vm_value(
@@ -1044,7 +1040,7 @@ pub(crate) fn capabilities_to_vm_value(
     model: &str,
     caps: &super::capabilities::Capabilities,
 ) -> VmValue {
-    let mut dict = BTreeMap::new();
+    let mut dict = crate::value::DictMap::new();
     dict.put_str("provider", provider);
     dict.put_str("model", model);
     dict.insert("native_tools".to_string(), VmValue::Bool(caps.native_tools));
@@ -1299,7 +1295,7 @@ pub(crate) fn capabilities_to_vm_value(
     );
     dict.insert(
         "auto_reasoning_overrides".to_string(),
-        VmValue::Dict(std::sync::Arc::new(
+        VmValue::dict(
             caps.auto_reasoning_overrides
                 .iter()
                 .map(|(task, mode)| {
@@ -1308,8 +1304,8 @@ pub(crate) fn capabilities_to_vm_value(
                         VmValue::String(std::sync::Arc::from(mode.clone())),
                     )
                 })
-                .collect(),
-        )),
+                .collect::<crate::value::DictMap>(),
+        ),
     );
     // Accelerated-serving ("fast mode") tier, read from the catalog so
     // callers can branch on `llm_call(..., { fast: true })` support without
@@ -1327,7 +1323,7 @@ pub(crate) fn capabilities_to_vm_value(
         ),
     );
     if let Some(fast_mode) = fast_mode {
-        let mut fast = BTreeMap::new();
+        let mut fast = crate::value::DictMap::new();
         fast.put_str("param", fast_mode.param.as_str());
         fast.put_str("value", fast_mode.value.as_str());
         fast.insert(
@@ -1353,16 +1349,13 @@ pub(crate) fn capabilities_to_vm_value(
                 .map(VmValue::Float)
                 .unwrap_or(VmValue::Nil),
         );
-        dict.insert(
-            "fast_mode".to_string(),
-            VmValue::Dict(std::sync::Arc::new(fast)),
-        );
+        dict.insert("fast_mode".to_string(), VmValue::dict(fast));
     }
-    VmValue::Dict(std::sync::Arc::new(dict))
+    VmValue::dict(dict)
 }
 
 fn model_def_to_vm_value(id: &str, model: &llm_config::ModelDef) -> VmValue {
-    let mut dict = BTreeMap::new();
+    let mut dict = crate::value::DictMap::new();
     dict.put_str("id", id);
     dict.put_str("name", model.name.as_str());
     dict.put_str("provider", model.provider.as_str());
@@ -1495,15 +1488,12 @@ fn model_def_to_vm_value(id: &str, model: &llm_config::ModelDef) -> VmValue {
         "strengths".to_string(),
         string_list_to_vm_value(model.strengths.clone()),
     );
-    let benchmarks: BTreeMap<String, VmValue> = model
+    let benchmarks: crate::value::DictMap = model
         .benchmarks
         .iter()
         .map(|(key, value)| (key.clone(), VmValue::Float(*value)))
         .collect();
-    dict.insert(
-        "benchmarks".to_string(),
-        VmValue::Dict(std::sync::Arc::new(benchmarks)),
-    );
+    dict.insert("benchmarks".to_string(), VmValue::dict(benchmarks));
     dict.insert(
         "fast_mode".to_string(),
         model
@@ -1512,7 +1502,7 @@ fn model_def_to_vm_value(id: &str, model: &llm_config::ModelDef) -> VmValue {
             .map(fast_mode_to_vm_value)
             .unwrap_or(VmValue::Nil),
     );
-    VmValue::Dict(std::sync::Arc::new(dict))
+    VmValue::dict(dict)
 }
 
 fn rate_limits_to_vm_value(rate_limits: &llm_config::RateLimitsDef) -> VmValue {
@@ -1524,7 +1514,7 @@ fn architecture_to_vm_value(architecture: &llm_config::ModelArchitectureDef) -> 
 }
 
 fn pricing_to_vm_value(pricing: &llm_config::ModelPricing) -> VmValue {
-    let mut dict = BTreeMap::new();
+    let mut dict = crate::value::DictMap::new();
     dict.insert(
         "input_per_mtok".to_string(),
         VmValue::Float(pricing.input_per_mtok),
@@ -1547,11 +1537,11 @@ fn pricing_to_vm_value(pricing: &llm_config::ModelPricing) -> VmValue {
             .map(VmValue::Float)
             .unwrap_or(VmValue::Nil),
     );
-    VmValue::Dict(std::sync::Arc::new(dict))
+    VmValue::dict(dict)
 }
 
 fn fast_mode_to_vm_value(fast: &llm_config::FastModeDef) -> VmValue {
-    let mut dict = BTreeMap::new();
+    let mut dict = crate::value::DictMap::new();
     dict.put_str("param", fast.param.as_str());
     dict.put_str("value", fast.value.as_str());
     dict.insert(
@@ -1588,11 +1578,11 @@ fn fast_mode_to_vm_value(fast: &llm_config::FastModeDef) -> VmValue {
             .map(|note| VmValue::String(std::sync::Arc::from(note)))
             .unwrap_or(VmValue::Nil),
     );
-    VmValue::Dict(std::sync::Arc::new(dict))
+    VmValue::dict(dict)
 }
 
 fn provider_catalog_to_vm_value() -> VmValue {
-    let mut dict = BTreeMap::new();
+    let mut dict = crate::value::DictMap::new();
 
     let mut providers = Vec::new();
     for name in llm_config::provider_names() {
@@ -1602,7 +1592,7 @@ fn provider_catalog_to_vm_value() -> VmValue {
                 _ => unreachable!("provider_def_to_vm_value returns a dict"),
             };
             provider.put_str("name", name.clone());
-            providers.push(VmValue::Dict(std::sync::Arc::new(provider)));
+            providers.push(VmValue::dict(provider));
         }
     }
     dict.insert(
@@ -1636,17 +1626,14 @@ fn provider_catalog_to_vm_value() -> VmValue {
     let qc_defaults = llm_config::qc_defaults()
         .into_iter()
         .map(|(provider, model)| (provider, VmValue::String(std::sync::Arc::from(model))))
-        .collect();
-    dict.insert(
-        "qc_defaults".to_string(),
-        VmValue::Dict(std::sync::Arc::new(qc_defaults)),
-    );
+        .collect::<crate::value::DictMap>();
+    dict.insert("qc_defaults".to_string(), VmValue::dict(qc_defaults));
 
-    VmValue::Dict(std::sync::Arc::new(dict))
+    VmValue::dict(dict)
 }
 
 fn alias_def_to_vm_value(name: &str, alias: &llm_config::AliasDef) -> VmValue {
-    let mut dict = BTreeMap::new();
+    let mut dict = crate::value::DictMap::new();
     dict.put_str("name", name);
     dict.put_str("id", alias.id.as_str());
     dict.put_str("provider", alias.provider.as_str());
@@ -1658,7 +1645,7 @@ fn alias_def_to_vm_value(name: &str, alias: &llm_config::AliasDef) -> VmValue {
             .map(|format| VmValue::String(std::sync::Arc::from(format)))
             .unwrap_or(VmValue::Nil),
     );
-    VmValue::Dict(std::sync::Arc::new(dict))
+    VmValue::dict(dict)
 }
 
 fn healthcheck_model_arg(args: &[VmValue]) -> Option<String> {
@@ -1684,7 +1671,7 @@ fn healthcheck_model_arg(args: &[VmValue]) -> Option<String> {
 }
 
 fn readiness_result(readiness: &super::ModelReadiness) -> VmValue {
-    let mut meta = BTreeMap::new();
+    let mut meta = crate::value::DictMap::new();
     meta.put_str("category", readiness.category.as_str());
     meta.put_str("provider", readiness.provider.as_str());
     meta.put_str("model", readiness.model.as_str());
@@ -1720,16 +1707,13 @@ fn readiness_result(readiness: &super::ModelReadiness) -> VmValue {
 fn healthcheck_result_with_meta(
     valid: bool,
     message: &str,
-    meta: BTreeMap<String, VmValue>,
+    meta: crate::value::DictMap,
 ) -> VmValue {
-    let mut dict = BTreeMap::new();
+    let mut dict = crate::value::DictMap::new();
     dict.insert("valid".to_string(), VmValue::Bool(valid));
     dict.put_str("message", message);
-    dict.insert(
-        "metadata".to_string(),
-        VmValue::Dict(std::sync::Arc::new(meta)),
-    );
-    VmValue::Dict(std::sync::Arc::new(dict))
+    dict.insert("metadata".to_string(), VmValue::dict(meta));
+    VmValue::dict(dict)
 }
 
 #[cfg(test)]
@@ -1737,14 +1721,14 @@ mod tests {
     use super::*;
 
     fn build_dict(entries: Vec<(&str, VmValue)>) -> VmValue {
-        let mut map = BTreeMap::new();
+        let mut map = crate::value::DictMap::new();
         for (k, v) in entries {
             map.insert(k.to_string(), v);
         }
-        VmValue::Dict(std::sync::Arc::new(map))
+        VmValue::dict(map)
     }
 
-    fn expect_int(dict: &BTreeMap<String, VmValue>, key: &str, want: i64) {
+    fn expect_int(dict: &crate::value::DictMap, key: &str, want: i64) {
         match dict.get(key) {
             Some(VmValue::Int(value)) => assert_eq!(*value, want, "{key}"),
             other => panic!("expected Int({want}) for {key}, got {other:?}"),
@@ -1906,7 +1890,7 @@ mod tests {
         let _guard = crate::llm::env_guard();
         llm_config::clear_user_overrides();
         let mut overlay = llm_config::ProvidersConfig::default();
-        let mut model_defaults = BTreeMap::new();
+        let mut model_defaults = std::collections::BTreeMap::new();
         model_defaults.insert(
             "fake-resolved-options-model".to_string(),
             toml::Value::Float(0.5),
@@ -1943,7 +1927,7 @@ mod tests {
         let _guard = crate::llm::env_guard();
         llm_config::clear_user_overrides();
         let mut overlay = llm_config::ProvidersConfig::default();
-        let mut model_defaults = BTreeMap::new();
+        let mut model_defaults = std::collections::BTreeMap::new();
         model_defaults.insert("temperature".to_string(), toml::Value::Float(0.5));
         overlay
             .model_defaults
@@ -2043,11 +2027,10 @@ mod tests {
         )
         .expect("builtin returned error");
         let opus = opus.as_dict().expect("expected dict");
-        let expect_str =
-            |dict: &BTreeMap<String, VmValue>, key: &str, want: &str| match dict.get(key) {
-                Some(VmValue::String(s)) => assert_eq!(s.as_ref(), want, "{key}"),
-                other => panic!("expected String for {key}, got {other:?}"),
-            };
+        let expect_str = |dict: &crate::value::DictMap, key: &str, want: &str| match dict.get(key) {
+            Some(VmValue::String(s)) => assert_eq!(s.as_ref(), want, "{key}"),
+            other => panic!("expected String for {key}, got {other:?}"),
+        };
         assert!(matches!(
             opus.get("fast_mode_supported"),
             Some(VmValue::Bool(true))

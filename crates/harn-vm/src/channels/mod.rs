@@ -1292,7 +1292,7 @@ fn required_string(value: Option<&VmValue>, builtin: &str, name: &str) -> Result
 }
 
 fn option_string(
-    options: &BTreeMap<String, VmValue>,
+    options: &crate::value::DictMap,
     key: &str,
     builtin: &str,
 ) -> Result<Option<String>, VmError> {
@@ -1310,7 +1310,7 @@ fn option_string(
 }
 
 fn option_non_negative_int(
-    options: &BTreeMap<String, VmValue>,
+    options: &crate::value::DictMap,
     key: &str,
     builtin: &str,
 ) -> Result<Option<u64>, VmError> {
@@ -1325,7 +1325,7 @@ fn option_non_negative_int(
 }
 
 fn option_duration_ms(
-    options: &BTreeMap<String, VmValue>,
+    options: &crate::value::DictMap,
     key: &str,
     builtin: &str,
 ) -> Result<Option<i64>, VmError> {
@@ -1340,7 +1340,7 @@ fn option_duration_ms(
     }
 }
 
-fn dict_string(values: &BTreeMap<String, VmValue>, key: &str) -> Option<String> {
+fn dict_string(values: &crate::value::DictMap, key: &str) -> Option<String> {
     match values.get(key) {
         Some(VmValue::String(value)) if !value.is_empty() => Some(value.to_string()),
         _ => None,

@@ -7,12 +7,12 @@ fn s(value: &str) -> VmValue {
 }
 
 fn dict(pairs: &[(&str, VmValue)]) -> VmValue {
-    VmValue::Dict(std::sync::Arc::new(
+    VmValue::dict(
         pairs
             .iter()
             .map(|(key, value)| ((*key).to_string(), value.clone()))
-            .collect(),
-    ))
+            .collect::<crate::value::DictMap>(),
+    )
 }
 
 fn lazy_pool_for_test() -> Arc<PgPool> {
@@ -83,26 +83,30 @@ fn routing_record(replicas: usize, policy: ReadRoutingPolicy) -> Arc<PoolRecord>
 
 #[test]
 fn read_routing_policy_options_parse_named_modes() {
-    let pool_options =
-        BTreeMap::from([("read_routing_policy".to_string(), s("round_robin_replica"))]);
+    let pool_options = crate::value::DictMap::from_iter([(
+        "read_routing_policy".to_string(),
+        s("round_robin_replica"),
+    )]);
     assert_eq!(
         read_routing_policy_from_options(Some(&pool_options)).unwrap(),
         ReadRoutingPolicy::RoundRobinReplica
     );
 
-    let query_options = BTreeMap::from([("route".to_string(), s("replica"))]);
+    let query_options = crate::value::DictMap::from_iter([("route".to_string(), s("replica"))]);
     assert_eq!(
         routing_from_options(Some(&query_options)).unwrap(),
         QueryRouting::Policy(ReadRoutingPolicy::Replica)
     );
 
-    let read_only_options = BTreeMap::from([("read_only".to_string(), VmValue::Bool(true))]);
+    let read_only_options =
+        crate::value::DictMap::from_iter([("read_only".to_string(), VmValue::Bool(true))]);
     assert_eq!(
         routing_from_options(Some(&read_only_options)).unwrap(),
         QueryRouting::ReadOnly
     );
 
-    let bad_options = BTreeMap::from([("routing_policy".to_string(), s("nearby"))]);
+    let bad_options =
+        crate::value::DictMap::from_iter([("routing_policy".to_string(), s("nearby"))]);
     assert!(routing_from_options(Some(&bad_options)).is_err());
 }
 
@@ -188,7 +192,7 @@ fn mock_pool_matches_parameterized_query_and_records_calls() {
             },
         );
     });
-    let handle = handle_value(HANDLE_MOCK, &id, BTreeMap::new());
+    let handle = handle_value(HANDLE_MOCK, &id, crate::value::DictMap::new());
     let rows = mock_query(
         &handle,
         "select * from claims where tenant_id = $1",
@@ -222,7 +226,7 @@ fn mock_execute_returns_rows_affected() {
             },
         );
     });
-    let handle = handle_value(HANDLE_MOCK, &id, BTreeMap::new());
+    let handle = handle_value(HANDLE_MOCK, &id, crate::value::DictMap::new());
     let rows = mock_query(
         &handle,
         "update receipts set status = $1",
@@ -277,7 +281,7 @@ async fn postgres_round_trip_when_env_url_is_set() {
         return;
     };
     reset_postgres_state();
-    let mut options = BTreeMap::new();
+    let mut options = crate::value::DictMap::new();
     options.insert("max_connections".to_string(), VmValue::Int(1));
     options.insert(
         "application_name".to_string(),
@@ -319,7 +323,7 @@ async fn postgres_round_trip_when_env_url_is_set() {
 /// Opens a single-connection pool against the test database so every query
 /// reuses the same physical connection (and prepared-statement cache).
 async fn open_single_conn_pool(url: &str) -> VmValue {
-    let mut options = BTreeMap::new();
+    let mut options = crate::value::DictMap::new();
     options.insert("max_connections".to_string(), VmValue::Int(1));
     options.insert("application_name".to_string(), s("harn-postgres-bind-test"));
     let ctx = crate::vm::AsyncBuiltinCtx::for_test(crate::Vm::new());

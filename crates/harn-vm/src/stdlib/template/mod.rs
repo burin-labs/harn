@@ -27,7 +27,7 @@ use std::collections::{BTreeMap, HashSet};
 use std::path::Path;
 use std::sync::{Mutex, OnceLock};
 
-use crate::value::{VmError, VmValue};
+use crate::value::VmError;
 
 mod assets;
 mod ast;
@@ -247,8 +247,8 @@ static LLM_SHADOW_WARN_CACHE: OnceLock<Mutex<HashSet<String>>> = OnceLock::new()
 /// value win for back-compat).
 fn augment_bindings_with_llm(
     asset: &TemplateAsset,
-    bindings: Option<&BTreeMap<String, VmValue>>,
-) -> Option<BTreeMap<String, VmValue>> {
+    bindings: Option<&crate::value::DictMap>,
+) -> Option<crate::value::DictMap> {
     let ctx = current_llm_render_context()?;
     if bindings.is_some_and(|m| m.contains_key("llm")) {
         warn_user_llm_shadowed(asset);
@@ -298,7 +298,7 @@ pub fn validate_template_syntax(src: &str) -> Result<(), String> {
 /// included in error messages.
 pub(crate) fn render_template_result(
     template: &str,
-    bindings: Option<&BTreeMap<String, VmValue>>,
+    bindings: Option<&crate::value::DictMap>,
     base: Option<&Path>,
     source_path: Option<&Path>,
 ) -> Result<String, TemplateError> {
@@ -311,7 +311,7 @@ pub(crate) fn render_template_result(
 /// prompt-template semantics as `render(...)` / `render_prompt(...)`.
 pub fn render_template_to_string(
     template: &str,
-    bindings: Option<&BTreeMap<String, VmValue>>,
+    bindings: Option<&crate::value::DictMap>,
     base: Option<&Path>,
     source_path: Option<&Path>,
 ) -> Result<String, String> {
@@ -420,7 +420,7 @@ pub enum PromptSpanKind {
 /// non-tracked rendering path that the legacy callers use.
 pub(crate) fn render_template_with_provenance(
     template: &str,
-    bindings: Option<&BTreeMap<String, VmValue>>,
+    bindings: Option<&crate::value::DictMap>,
     base: Option<&Path>,
     source_path: Option<&Path>,
     collect_provenance: bool,
@@ -431,7 +431,7 @@ pub(crate) fn render_template_with_provenance(
 
 pub(crate) fn render_asset_result(
     asset: &TemplateAsset,
-    bindings: Option<&BTreeMap<String, VmValue>>,
+    bindings: Option<&crate::value::DictMap>,
 ) -> Result<String, TemplateError> {
     let (rendered, _spans) = render_asset_with_provenance_result(asset, bindings, false)?;
     Ok(rendered)
@@ -439,7 +439,7 @@ pub(crate) fn render_asset_result(
 
 pub(crate) fn render_stdlib_prompt_asset(
     path: &str,
-    bindings: Option<&BTreeMap<String, VmValue>>,
+    bindings: Option<&crate::value::DictMap>,
 ) -> Result<String, VmError> {
     let target = if path.starts_with("std/") {
         path.to_string()
@@ -467,7 +467,7 @@ pub(crate) fn render_template_collect_branch_trace(
 
 pub(crate) fn render_asset_with_provenance_result(
     asset: &TemplateAsset,
-    bindings: Option<&BTreeMap<String, VmValue>>,
+    bindings: Option<&crate::value::DictMap>,
     collect_provenance: bool,
 ) -> Result<(String, Vec<PromptSourceSpan>), TemplateError> {
     let (rendered, spans, _trace) =
@@ -477,7 +477,7 @@ pub(crate) fn render_asset_with_provenance_result(
 
 fn render_asset_with_provenance_and_trace_result(
     asset: &TemplateAsset,
-    bindings: Option<&BTreeMap<String, VmValue>>,
+    bindings: Option<&crate::value::DictMap>,
     collect_provenance: bool,
     force_branch_trace: bool,
 ) -> Result<(String, Vec<PromptSourceSpan>, Vec<BranchDecision>), TemplateError> {
@@ -529,7 +529,7 @@ fn render_asset_with_provenance_and_trace_result(
 /// that need to score section shape without scraping JSONL artifacts.
 pub fn render_template_to_string_with_branch_trace(
     template: &str,
-    bindings: Option<&BTreeMap<String, VmValue>>,
+    bindings: Option<&crate::value::DictMap>,
     base: Option<&Path>,
     source_path: Option<&Path>,
 ) -> Result<(String, Vec<BranchDecision>), String> {

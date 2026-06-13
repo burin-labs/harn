@@ -159,7 +159,7 @@ fn lifecycle_replay_resume_input_impl(
         Some(crate::llm::vm_value_to_json(&candidate))
     };
     match replay_resume_input(&receipt, candidate_json.as_ref()) {
-        Ok(cached) => Ok(VmValue::Dict(std::sync::Arc::new({
+        Ok(cached) => Ok(VmValue::dict({
             let mut map = BTreeMap::new();
             map.insert("ok".to_string(), VmValue::Bool(true));
             map.insert(
@@ -170,7 +170,7 @@ fn lifecycle_replay_resume_input_impl(
                     .unwrap_or(VmValue::Nil),
             );
             map
-        }))),
+        })),
         Err(error) => Ok(error_value(error)),
     }
 }
@@ -195,12 +195,12 @@ fn lifecycle_replay_drain_decision_impl(
         ))
     })?;
     match replay_drain_decision(&receipt, candidate_prompt.as_deref()) {
-        Ok(action) => Ok(VmValue::Dict(std::sync::Arc::new({
+        Ok(action) => Ok(VmValue::dict({
             let mut map = BTreeMap::new();
             map.insert("ok".to_string(), VmValue::Bool(true));
             map.put_str("action", drain_action_str(action));
             map
-        }))),
+        })),
         Err(error) => Ok(error_value(error)),
     }
 }
@@ -392,7 +392,7 @@ fn drain_action_str(action: DrainAction) -> String {
     .to_string()
 }
 
-fn parse_trigger_match(dict: &BTreeMap<String, VmValue>) -> TriggerMatchInfo {
+fn parse_trigger_match(dict: &crate::value::DictMap) -> TriggerMatchInfo {
     TriggerMatchInfo {
         source: optional_string(dict, "source").unwrap_or_default(),
         event_id: optional_string(dict, "event_id").unwrap_or_default(),
@@ -424,12 +424,12 @@ fn parse_redaction_policy(value: Option<&VmValue>) -> Option<RedactionPolicy> {
     }
 }
 
-fn require_string(dict: &BTreeMap<String, VmValue>, key: &str) -> Result<String, VmError> {
+fn require_string(dict: &crate::value::DictMap, key: &str) -> Result<String, VmError> {
     optional_string(dict, key)
         .ok_or_else(|| VmError::Runtime(format!("lifecycle receipt: missing {key}")))
 }
 
-fn optional_string(dict: &BTreeMap<String, VmValue>, key: &str) -> Option<String> {
+fn optional_string(dict: &crate::value::DictMap, key: &str) -> Option<String> {
     dict.get(key).and_then(|value| match value {
         VmValue::String(text) if !text.is_empty() => Some(text.to_string()),
         VmValue::Nil => None,
@@ -480,7 +480,7 @@ fn verification_value(result: Result<(), LifecycleReceiptError>) -> VmValue {
             map.put_str("error", error.to_string());
         }
     }
-    VmValue::Dict(std::sync::Arc::new(map))
+    VmValue::dict(map)
 }
 
 fn error_value(error: LifecycleReceiptError) -> VmValue {
@@ -496,7 +496,7 @@ fn error_value(error: LifecycleReceiptError) -> VmValue {
         LifecycleReceiptError::Persistence(_) => "HARN-SUS-013",
     };
     map.put_str("code", code);
-    VmValue::Dict(std::sync::Arc::new(map))
+    VmValue::dict(map)
 }
 
 fn json_to_vm(value: &JsonValue) -> VmValue {

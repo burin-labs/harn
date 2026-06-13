@@ -5,8 +5,6 @@
 //! user-facing policy vocabulary (`auto`, `off`, `low`, ...), lowering it
 //! into the canonical [`ThinkingConfig`] that providers already understand.
 
-use std::collections::BTreeMap;
-
 use crate::llm::api::{ReasoningEffort, ThinkingConfig};
 use crate::llm::capabilities::Capabilities;
 use crate::value::{VmError, VmValue};
@@ -45,7 +43,7 @@ pub fn policy_values() -> &'static [&'static str] {
 }
 
 pub(crate) fn resolve_for_llm_call(
-    options: Option<&BTreeMap<String, VmValue>>,
+    options: Option<&crate::value::DictMap>,
     provider: &str,
     model: &str,
     caps: &Capabilities,
@@ -54,8 +52,8 @@ pub(crate) fn resolve_for_llm_call(
 }
 
 pub(crate) fn apply_policy_to_vm_options(
-    opts: &BTreeMap<String, VmValue>,
-) -> Result<BTreeMap<String, VmValue>, VmError> {
+    opts: &crate::value::DictMap,
+) -> Result<crate::value::DictMap, VmError> {
     if caller_set_reasoning(Some(opts)) {
         return Ok(opts.clone());
     }
@@ -80,7 +78,7 @@ pub(crate) fn apply_policy_to_vm_options(
 }
 
 fn resolve_policy(
-    options: Option<&BTreeMap<String, VmValue>>,
+    options: Option<&crate::value::DictMap>,
     provider: &str,
     model: &str,
     caps: &Capabilities,
@@ -133,7 +131,7 @@ fn resolve_policy(
 }
 
 fn selected_policy(
-    options: Option<&BTreeMap<String, VmValue>>,
+    options: Option<&crate::value::DictMap>,
     default_policy: Option<&str>,
 ) -> Result<Option<String>, VmError> {
     if let Some(value) = options.and_then(|opts| {
@@ -150,7 +148,7 @@ fn selected_policy(
     default_policy.map(normalize_policy_str_vm).transpose()
 }
 
-fn caller_set_reasoning(options: Option<&BTreeMap<String, VmValue>>) -> bool {
+fn caller_set_reasoning(options: Option<&crate::value::DictMap>) -> bool {
     let Some(opts) = options else {
         return false;
     };
@@ -200,7 +198,7 @@ fn normalize_policy_str(raw: &str) -> Result<String, String> {
     ))
 }
 
-fn reasoning_scale(options: Option<&BTreeMap<String, VmValue>>) -> Result<String, VmError> {
+fn reasoning_scale(options: Option<&crate::value::DictMap>) -> Result<String, VmError> {
     let raw = options
         .and_then(|opts| {
             opts.get("reasoning_scale")
@@ -220,7 +218,7 @@ fn reasoning_scale(options: Option<&BTreeMap<String, VmValue>>) -> Result<String
     )))
 }
 
-fn reasoning_task(options: Option<&BTreeMap<String, VmValue>>) -> Result<String, VmError> {
+fn reasoning_task(options: Option<&crate::value::DictMap>) -> Result<String, VmError> {
     let raw = options.and_then(|opts| {
         opts.get("reasoning_task")
             .or_else(|| opts.get("task_kind"))
@@ -351,7 +349,7 @@ fn budget_for_reasoning_level(level: &str) -> u32 {
     }
 }
 
-fn resolved_route_from_options(opts: &BTreeMap<String, VmValue>) -> Option<(String, String)> {
+fn resolved_route_from_options(opts: &crate::value::DictMap) -> Option<(String, String)> {
     let model = opts.get("model")?.display();
     if model.trim().is_empty() {
         return None;
@@ -372,12 +370,12 @@ fn resolved_route_from_options(opts: &BTreeMap<String, VmValue>) -> Option<(Stri
 
 fn thinking_to_vm_value(thinking: &ThinkingConfig) -> VmValue {
     match thinking {
-        ThinkingConfig::Disabled => VmValue::Dict(std::sync::Arc::new(BTreeMap::from([(
+        ThinkingConfig::Disabled => VmValue::dict(crate::value::DictMap::from_iter([(
             "mode".to_string(),
             VmValue::String(std::sync::Arc::from("disabled")),
-        )]))),
+        )])),
         ThinkingConfig::Enabled { budget_tokens } => {
-            let mut dict = BTreeMap::from([(
+            let mut dict = crate::value::DictMap::from_iter([(
                 "mode".to_string(),
                 VmValue::String(std::sync::Arc::from("enabled")),
             )]);
@@ -387,13 +385,13 @@ fn thinking_to_vm_value(thinking: &ThinkingConfig) -> VmValue {
                     VmValue::Int(*budget_tokens as i64),
                 );
             }
-            VmValue::Dict(std::sync::Arc::new(dict))
+            VmValue::dict(dict)
         }
-        ThinkingConfig::Adaptive => VmValue::Dict(std::sync::Arc::new(BTreeMap::from([(
+        ThinkingConfig::Adaptive => VmValue::dict(crate::value::DictMap::from_iter([(
             "mode".to_string(),
             VmValue::String(std::sync::Arc::from("adaptive")),
-        )]))),
-        ThinkingConfig::Effort { level } => VmValue::Dict(std::sync::Arc::new(BTreeMap::from([
+        )])),
+        ThinkingConfig::Effort { level } => VmValue::dict(crate::value::DictMap::from_iter([
             (
                 "mode".to_string(),
                 VmValue::String(std::sync::Arc::from("effort")),
@@ -402,12 +400,12 @@ fn thinking_to_vm_value(thinking: &ThinkingConfig) -> VmValue {
                 "level".to_string(),
                 VmValue::String(std::sync::Arc::from(level.as_str())),
             ),
-        ]))),
+        ])),
     }
 }
 
 fn application_metadata_to_vm_value(application: &ReasoningPolicyApplication) -> VmValue {
-    VmValue::Dict(std::sync::Arc::new(BTreeMap::from([
+    VmValue::dict(crate::value::DictMap::from_iter([
         (
             "policy".to_string(),
             VmValue::String(std::sync::Arc::from(application.policy.clone())),
@@ -432,20 +430,20 @@ fn application_metadata_to_vm_value(application: &ReasoningPolicyApplication) ->
             "model".to_string(),
             VmValue::String(std::sync::Arc::from(application.model.clone())),
         ),
-    ])))
+    ]))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    fn apply(opts: BTreeMap<String, VmValue>) -> BTreeMap<String, VmValue> {
+    fn apply(opts: crate::value::DictMap) -> crate::value::DictMap {
         apply_policy_to_vm_options(&opts).expect("policy")
     }
 
     #[test]
     fn high_policy_maps_to_effort_for_openai_reasoning_models() {
-        let opts = BTreeMap::from([
+        let opts = crate::value::DictMap::from_iter([
             (
                 "provider".to_string(),
                 VmValue::String(std::sync::Arc::from("openai")),
@@ -476,7 +474,7 @@ mod tests {
 
     #[test]
     fn off_policy_floors_to_low_for_cerebras_gpt_oss() {
-        let opts = BTreeMap::from([
+        let opts = crate::value::DictMap::from_iter([
             (
                 "provider".to_string(),
                 VmValue::String(std::sync::Arc::from("cerebras")),
@@ -524,7 +522,7 @@ mod tests {
         // to neutralize the Qwen3 tool-call/thinking regression at the
         // data layer. Previously this lived as a hard-coded
         // `local_qwen_route` branch in resolve_policy.
-        let opts = BTreeMap::from([
+        let opts = crate::value::DictMap::from_iter([
             (
                 "provider".to_string(),
                 VmValue::String(std::sync::Arc::from("ollama")),
@@ -569,7 +567,7 @@ mod tests {
         // openrouter qwen rules (matching qwen/qwen3.6-35b-a3b — the
         // exact model whose 5+ minute single-turn finalize bug
         // motivated this work).
-        let opts = BTreeMap::from([
+        let opts = crate::value::DictMap::from_iter([
             (
                 "provider".to_string(),
                 VmValue::String(std::sync::Arc::from("openrouter")),
@@ -604,7 +602,7 @@ mod tests {
         // is `auto`. A caller who explicitly asks for `high` reasoning
         // is acknowledged regardless of the per-route default — the
         // override declares the auto default, not a ceiling.
-        let opts = BTreeMap::from([
+        let opts = crate::value::DictMap::from_iter([
             (
                 "provider".to_string(),
                 VmValue::String(std::sync::Arc::from("openrouter")),
@@ -651,7 +649,7 @@ auto_reasoning_overrides = { agent = "off" }
 "#,
         )
         .expect("override toml");
-        let opts = BTreeMap::from([
+        let opts = crate::value::DictMap::from_iter([
             (
                 "provider".to_string(),
                 VmValue::String(std::sync::Arc::from("acme")),
@@ -683,7 +681,7 @@ auto_reasoning_overrides = { agent = "off" }
 
     #[test]
     fn explicit_thinking_wins_over_policy() {
-        let opts = BTreeMap::from([
+        let opts = crate::value::DictMap::from_iter([
             (
                 "provider".to_string(),
                 VmValue::String(std::sync::Arc::from("openai")),

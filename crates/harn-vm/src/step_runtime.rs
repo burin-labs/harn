@@ -160,9 +160,9 @@ pub struct CompletedStep {
 
 thread_local! {
     static STEP_REGISTRY: RefCell<BTreeMap<String, Arc<StepDefinition>>> =
-        const { RefCell::new(BTreeMap::new()) };
+        const { RefCell::new(std::collections::BTreeMap::new()) };
     static PERSONA_REGISTRY: RefCell<BTreeMap<String, Arc<PersonaDefinition>>> =
-        const { RefCell::new(BTreeMap::new()) };
+        const { RefCell::new(std::collections::BTreeMap::new()) };
     static STEP_REGISTRY_LEN: Cell<usize> = const { Cell::new(0) };
     static PERSONA_REGISTRY_LEN: Cell<usize> = const { Cell::new(0) };
     static PERSONA_STACK: RefCell<Vec<ActivePersona>> = const { RefCell::new(Vec::new()) };
@@ -856,7 +856,7 @@ fn budget_exhausted_error(
     consumed_tokens: f64,
     consumed_cost_usd: f64,
 ) -> VmError {
-    let mut dict: BTreeMap<String, VmValue> = BTreeMap::new();
+    let mut dict: crate::value::DictMap = crate::value::DictMap::new();
     dict.put_str("category", "budget_exceeded");
     dict.put_str("kind", "budget_exhausted");
     dict.put_str("reason", "step_budget_exhausted");
@@ -886,7 +886,7 @@ fn budget_exhausted_error(
             definition.name, limit, consumed_tokens as i64, limit_value as i64
         ),
     );
-    VmError::Thrown(VmValue::Dict(std::sync::Arc::new(dict)))
+    VmError::Thrown(VmValue::dict(dict))
 }
 
 /// Returns true if the thrown value looks like a budget-exhausted
@@ -930,7 +930,7 @@ pub fn mark_escalated(err: VmError, step_name: Option<&str>, function: Option<&s
         next.entry("function".to_string())
             .or_insert_with(|| VmValue::String(std::sync::Arc::from(function.to_string())));
     }
-    VmError::Thrown(VmValue::Dict(std::sync::Arc::new(next)))
+    VmError::Thrown(VmValue::dict(next))
 }
 
 /// Drain the completed-step log. Used by receipt builders that want a
@@ -986,21 +986,18 @@ mod tests {
     #[test]
     fn registers_and_pops_step_from_dict() {
         fresh_state();
-        let mut budget: BTreeMap<String, VmValue> = BTreeMap::new();
+        let mut budget: crate::value::DictMap = crate::value::DictMap::new();
         budget.insert("max_tokens".to_string(), VmValue::Int(100));
         budget.insert("max_usd".to_string(), VmValue::Float(0.05));
-        let mut meta: BTreeMap<String, VmValue> = BTreeMap::new();
+        let mut meta: crate::value::DictMap = crate::value::DictMap::new();
         meta.put_str("name", "plan");
         meta.put_str("model", "claude-haiku-4-5");
         meta.put_str("error_boundary", "continue");
-        meta.insert(
-            "budget".to_string(),
-            VmValue::Dict(std::sync::Arc::new(budget)),
-        );
+        meta.insert("budget".to_string(), VmValue::dict(budget));
 
         register_step_from_dict(vec![
             VmValue::String(std::sync::Arc::from("plan_step")),
-            VmValue::Dict(std::sync::Arc::new(meta)),
+            VmValue::dict(meta),
         ])
         .expect("registration succeeds");
 
@@ -1071,15 +1068,15 @@ mod tests {
     #[test]
     fn stage_policy_narrows_but_does_not_widen_parent_policy() {
         fresh_state();
-        let mut meta: BTreeMap<String, VmValue> = BTreeMap::new();
+        let mut meta: crate::value::DictMap = crate::value::DictMap::new();
         meta.put_str("name", "research");
         register_step_from_dict(vec![
             VmValue::String(std::sync::Arc::from("research_step")),
-            VmValue::Dict(std::sync::Arc::new(meta)),
+            VmValue::dict(meta),
         ])
         .expect("step registration");
 
-        let mut stage_dict: BTreeMap<String, VmValue> = BTreeMap::new();
+        let mut stage_dict: crate::value::DictMap = crate::value::DictMap::new();
         stage_dict.put_str("name", "research");
         // Stage tries to add `edit` on top of a parent that only allowed `read`.
         stage_dict.insert(
@@ -1089,7 +1086,7 @@ mod tests {
                 VmValue::String(std::sync::Arc::from("edit")),
             ])),
         );
-        let mut persona_meta: BTreeMap<String, VmValue> = BTreeMap::new();
+        let mut persona_meta: crate::value::DictMap = crate::value::DictMap::new();
         persona_meta.put_str("name", "scoped");
         persona_meta.insert(
             "stages".to_string(),
@@ -1099,7 +1096,7 @@ mod tests {
         );
         register_persona_from_dict(vec![
             VmValue::String(std::sync::Arc::from("scoped_persona")),
-            VmValue::Dict(std::sync::Arc::new(persona_meta)),
+            VmValue::dict(persona_meta),
         ])
         .expect("persona registration");
 
@@ -1121,15 +1118,15 @@ mod tests {
     #[test]
     fn stage_policy_is_pushed_and_popped_around_step() {
         fresh_state();
-        let mut meta: BTreeMap<String, VmValue> = BTreeMap::new();
+        let mut meta: crate::value::DictMap = crate::value::DictMap::new();
         meta.put_str("name", "research");
         register_step_from_dict(vec![
             VmValue::String(std::sync::Arc::from("research_step")),
-            VmValue::Dict(std::sync::Arc::new(meta)),
+            VmValue::dict(meta),
         ])
         .expect("step registration succeeds");
 
-        let mut stage_dict: BTreeMap<String, VmValue> = BTreeMap::new();
+        let mut stage_dict: crate::value::DictMap = crate::value::DictMap::new();
         stage_dict.put_str("name", "research");
         stage_dict.insert(
             "allowed_tools".to_string(),
@@ -1137,7 +1134,7 @@ mod tests {
                 std::sync::Arc::from("read"),
             )])),
         );
-        let mut persona_meta: BTreeMap<String, VmValue> = BTreeMap::new();
+        let mut persona_meta: crate::value::DictMap = crate::value::DictMap::new();
         persona_meta.put_str("name", "scoped");
         persona_meta.insert(
             "stages".to_string(),
@@ -1147,7 +1144,7 @@ mod tests {
         );
         register_persona_from_dict(vec![
             VmValue::String(std::sync::Arc::from("scoped_persona")),
-            VmValue::Dict(std::sync::Arc::new(persona_meta)),
+            VmValue::dict(persona_meta),
         ])
         .expect("persona registration succeeds");
 

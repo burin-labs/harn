@@ -136,7 +136,7 @@ fn int_arg(args: &[VmValue], index: usize, name: &str) -> Result<i64, VmError> {
 }
 
 fn option_string(
-    options: &BTreeMap<String, VmValue>,
+    options: &crate::value::DictMap,
     key: &str,
     builtin: &str,
 ) -> Result<Option<String>, VmError> {
@@ -151,7 +151,7 @@ fn option_string(
 }
 
 fn option_int(
-    options: &BTreeMap<String, VmValue>,
+    options: &crate::value::DictMap,
     key: &str,
     builtin: &str,
 ) -> Result<Option<i64>, VmError> {
@@ -328,7 +328,7 @@ fn append_query(prefix: &str, query: &str) -> String {
 fn claims_arg<'a>(
     args: &'a [VmValue],
     options: &SignedUrlOptions,
-) -> Result<&'a BTreeMap<String, VmValue>, VmError> {
+) -> Result<&'a crate::value::DictMap, VmError> {
     let Some(value) = args.get(1) else {
         return Err(signed_url_error("claims is required"));
     };
@@ -398,9 +398,9 @@ fn verification_result(
     expired: bool,
     expires_at: Option<i64>,
     kid: Option<String>,
-    claims: BTreeMap<String, VmValue>,
+    claims: crate::value::DictMap,
 ) -> VmValue {
-    let mut result = BTreeMap::new();
+    let mut result = crate::value::DictMap::new();
     result.insert("valid".to_string(), VmValue::Bool(valid));
     result.put_str("reason", reason);
     result.insert(
@@ -417,11 +417,8 @@ fn verification_result(
         kid.map(|kid| VmValue::String(std::sync::Arc::from(kid)))
             .unwrap_or(VmValue::Nil),
     );
-    result.insert(
-        "claims".to_string(),
-        VmValue::Dict(std::sync::Arc::new(claims)),
-    );
-    VmValue::Dict(std::sync::Arc::new(result))
+    result.insert("claims".to_string(), VmValue::dict(claims));
+    VmValue::dict(result)
 }
 
 fn choose_secret(secret_or_keys: &VmValue, kid: Option<&str>) -> Result<Option<String>, VmError> {
@@ -483,7 +480,7 @@ fn verify_signed_url_builtin(args: &[VmValue]) -> Result<VmValue, VmError> {
             false,
             None,
             None,
-            BTreeMap::new(),
+            crate::value::DictMap::new(),
         ));
     }
     let signature = signatures[0].clone();
@@ -502,7 +499,7 @@ fn verify_signed_url_builtin(args: &[VmValue]) -> Result<VmValue, VmError> {
             false,
             None,
             None,
-            BTreeMap::new(),
+            crate::value::DictMap::new(),
         ));
     }
     let expires_at = match expires_values[0].parse::<i64>() {
@@ -515,7 +512,7 @@ fn verify_signed_url_builtin(args: &[VmValue]) -> Result<VmValue, VmError> {
                 false,
                 None,
                 None,
-                BTreeMap::new(),
+                crate::value::DictMap::new(),
             ));
         }
     };
@@ -534,12 +531,12 @@ fn verify_signed_url_builtin(args: &[VmValue]) -> Result<VmValue, VmError> {
             false,
             Some(expires_at),
             None,
-            BTreeMap::new(),
+            crate::value::DictMap::new(),
         ));
     }
     let kid = kid_values.first().cloned();
 
-    let mut claims = BTreeMap::new();
+    let mut claims = crate::value::DictMap::new();
     for (key, value) in &parts.query_pairs {
         if key != &options.signature_param
             && key != &options.expires_param
@@ -599,7 +596,7 @@ fn aws_sigv4_error(message: impl Into<String>) -> VmError {
     VmError::Runtime(format!("aws_sigv4_headers: {}", message.into()))
 }
 
-fn required_spec_string(spec: &BTreeMap<String, VmValue>, key: &str) -> Result<String, VmError> {
+fn required_spec_string(spec: &crate::value::DictMap, key: &str) -> Result<String, VmError> {
     match spec.get(key) {
         Some(VmValue::String(value)) if !value.trim().is_empty() => Ok(value.to_string()),
         Some(value) if !matches!(value, VmValue::Nil) => Err(aws_sigv4_error(format!(
@@ -611,7 +608,7 @@ fn required_spec_string(spec: &BTreeMap<String, VmValue>, key: &str) -> Result<S
 }
 
 fn optional_spec_string(
-    spec: &BTreeMap<String, VmValue>,
+    spec: &crate::value::DictMap,
     key: &str,
 ) -> Result<Option<String>, VmError> {
     match spec.get(key) {
@@ -625,10 +622,10 @@ fn optional_spec_string(
 }
 
 fn aws_sigv4_headers_arg(
-    spec: &BTreeMap<String, VmValue>,
+    spec: &crate::value::DictMap,
 ) -> Result<BTreeMap<String, String>, VmError> {
     match spec.get("headers") {
-        None | Some(VmValue::Nil) => Ok(BTreeMap::new()),
+        None | Some(VmValue::Nil) => Ok(std::collections::BTreeMap::new()),
         Some(VmValue::Dict(headers)) => Ok(headers
             .iter()
             .map(|(key, value)| (key.clone(), value.display()))
@@ -640,7 +637,7 @@ fn aws_sigv4_headers_arg(
     }
 }
 
-fn aws_sigv4_body_bytes(spec: &BTreeMap<String, VmValue>) -> Vec<u8> {
+fn aws_sigv4_body_bytes(spec: &crate::value::DictMap) -> Vec<u8> {
     match spec.get("body") {
         Some(VmValue::Bytes(bytes)) => bytes.as_ref().clone(),
         Some(VmValue::Nil) | None => Vec::new(),
@@ -1161,10 +1158,10 @@ fn ed25519_keypair_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue,
     rand::rng().fill(&mut bytes);
     let signing = SigningKey::from_bytes(&bytes);
     let verifying: VerifyingKey = signing.verifying_key();
-    let mut dict = std::collections::BTreeMap::new();
+    let mut dict = crate::value::DictMap::new();
     dict.put_str("private", hex::encode(signing.to_bytes()));
     dict.put_str("public", hex::encode(verifying.to_bytes()));
-    Ok(VmValue::Dict(std::sync::Arc::new(dict)))
+    Ok(VmValue::dict(dict))
 }
 
 #[harn_builtin(
@@ -1246,10 +1243,10 @@ fn x25519_keypair_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, 
     rand::rng().fill(&mut bytes);
     let secret = StaticSecret::from(bytes);
     let public = PublicKey::from(&secret);
-    let mut dict = std::collections::BTreeMap::new();
+    let mut dict = crate::value::DictMap::new();
     dict.put_str("private", hex::encode(secret.to_bytes()));
     dict.put_str("public", hex::encode(public.to_bytes()));
-    Ok(VmValue::Dict(std::sync::Arc::new(dict)))
+    Ok(VmValue::dict(dict))
 }
 
 #[harn_builtin(
@@ -1345,10 +1342,10 @@ fn jwt_verify_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErr
         ))))
     })?;
     let claims_value = crate::schema::json_to_vm_value(&decoded.claims);
-    let mut dict = std::collections::BTreeMap::new();
+    let mut dict = crate::value::DictMap::new();
     dict.insert("valid".to_string(), VmValue::Bool(true));
     dict.insert("claims".to_string(), claims_value);
-    Ok(VmValue::Dict(std::sync::Arc::new(dict)))
+    Ok(VmValue::dict(dict))
 }
 
 pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
@@ -1396,7 +1393,6 @@ pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
 mod tests {
     use super::*;
     use crate::vm::Vm;
-    use std::collections::BTreeMap;
 
     const ES256_PRIVATE_KEY: &str = "-----BEGIN PRIVATE KEY-----\n\
 MIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQgWTFfCGljY6aw3Hrt\n\
@@ -1426,20 +1422,20 @@ C/edCMRM78P8eQTBCDUTK1ywSYaszvQZvneiW6gNtWEJndSreEcyyUdVvg==\n\
     }
 
     fn jwt_claims() -> VmValue {
-        VmValue::Dict(std::sync::Arc::new(BTreeMap::from([
+        VmValue::dict(crate::value::DictMap::from_iter([
             ("exp".to_string(), VmValue::Int(4_102_444_800)),
             ("iat".to_string(), VmValue::Int(1_700_000_000)),
             ("iss".to_string(), s("12345")),
-        ])))
+        ]))
     }
 
     fn dict(items: &[(&str, VmValue)]) -> VmValue {
-        VmValue::Dict(std::sync::Arc::new(
+        VmValue::dict(
             items
                 .iter()
                 .map(|(key, value)| (key.to_string(), value.clone()))
-                .collect(),
-        ))
+                .collect::<crate::value::DictMap>(),
+        )
     }
 
     #[test]

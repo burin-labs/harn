@@ -594,12 +594,12 @@ pub fn span_to_vm_value(span: &Span) -> VmValue {
     d.insert("duration_ms".into(), VmValue::Int(span.duration_ms as i64));
 
     if !span.metadata.is_empty() {
-        let meta: BTreeMap<String, VmValue> = span
+        let meta: crate::value::DictMap = span
             .metadata
             .iter()
             .map(|(k, v)| (k.clone(), crate::stdlib::json_to_vm_value(v)))
             .collect();
-        d.insert("metadata".into(), VmValue::Dict(std::sync::Arc::new(meta)));
+        d.insert("metadata".into(), VmValue::dict(meta));
     }
     if !span.links.is_empty() {
         d.insert(
@@ -614,7 +614,7 @@ pub fn span_to_vm_value(span: &Span) -> VmValue {
         );
     }
 
-    VmValue::Dict(std::sync::Arc::new(d))
+    VmValue::dict(d)
 }
 
 /// Generate a formatted summary of all spans.

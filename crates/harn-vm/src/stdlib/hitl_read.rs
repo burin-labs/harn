@@ -213,7 +213,7 @@ fn pending_row_to_value(row: PendingHitlRow) -> VmValue {
         "metadata".to_string(),
         crate::stdlib::json_to_vm_value(&row.metadata),
     );
-    VmValue::Dict(std::sync::Arc::new(dict))
+    VmValue::dict(dict)
 }
 
 fn parse_filters(value: Option<&VmValue>) -> Result<HitlPendingFilters, VmError> {

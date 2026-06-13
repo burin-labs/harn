@@ -513,7 +513,7 @@ fn exec_result_from_value(value: VmValue) -> SandboxResult<ExecResult> {
     })
 }
 
-fn dict_string(map: &BTreeMap<String, VmValue>, key: &str) -> SandboxResult<String> {
+fn dict_string(map: &harn_vm::value::DictMap, key: &str) -> SandboxResult<String> {
     match map.get(key) {
         Some(VmValue::String(value)) => Ok(value.to_string()),
         Some(other) => Err(SandboxError::Exec(format!(
@@ -526,7 +526,7 @@ fn dict_string(map: &BTreeMap<String, VmValue>, key: &str) -> SandboxResult<Stri
     }
 }
 
-fn dict_int(map: &BTreeMap<String, VmValue>, key: &str) -> SandboxResult<i32> {
+fn dict_int(map: &harn_vm::value::DictMap, key: &str) -> SandboxResult<i32> {
     match map.get(key) {
         Some(VmValue::Int(value)) => Ok(*value as i32),
         Some(other) => Err(SandboxError::Exec(format!(

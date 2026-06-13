@@ -1,6 +1,5 @@
 //! Integration tests for session-scoped staged filesystem mode.
 
-use std::collections::BTreeMap;
 use std::fs;
 use std::path::Path;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -22,11 +21,11 @@ fn registry() -> BuiltinRegistry {
 }
 
 fn dict_arg(entries: &[(&str, VmValue)]) -> Vec<VmValue> {
-    let mut map: BTreeMap<String, VmValue> = BTreeMap::new();
+    let mut map: harn_vm::value::DictMap = Default::default();
     for (k, v) in entries {
         map.insert(k.to_string(), v.clone());
     }
-    vec![VmValue::Dict(Arc::new(map))]
+    vec![VmValue::dict(map)]
 }
 
 fn vm_string(s: &str) -> VmValue {

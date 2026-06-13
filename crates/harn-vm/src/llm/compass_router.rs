@@ -46,8 +46,6 @@
 //! - `harn.compass.fell_back` — rewrite considered but not provably
 //!   equivalent, so the original freeform call ran.
 
-use std::collections::BTreeMap;
-
 use serde_json::{Map as JsonMap, Value as JsonValue};
 
 use crate::stdlib::observability::{emit_instrument, MetricInstrument};
@@ -655,7 +653,7 @@ pub(crate) fn routing_event(
 
 /// Convert an agent-loop options map into the JSON the config reader and
 /// router consume.
-pub(crate) fn options_to_json(options: &BTreeMap<String, crate::value::VmValue>) -> JsonValue {
+pub(crate) fn options_to_json(options: &crate::value::DictMap) -> JsonValue {
     JsonValue::Object(
         options
             .iter()

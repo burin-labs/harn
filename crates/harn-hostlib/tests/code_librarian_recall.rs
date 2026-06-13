@@ -9,7 +9,7 @@
 //! contract: the librarian must deliver at least the same aggregate
 //! recall the raw Cypher executor does (≥ 80% per #2434).
 
-use std::collections::{BTreeMap, BTreeSet, HashSet};
+use std::collections::{BTreeSet, HashSet};
 use std::path::PathBuf;
 
 use harn_lexer::Lexer;
@@ -50,7 +50,7 @@ fn extract_list(value: &VmValue) -> std::sync::Arc<Vec<VmValue>> {
     }
 }
 
-fn extract_dict(value: &VmValue) -> std::sync::Arc<BTreeMap<String, VmValue>> {
+fn extract_dict(value: &VmValue) -> std::sync::Arc<harn_vm::value::DictMap> {
     match value {
         VmValue::Dict(d) => d.clone(),
         other => panic!("expected dict, got {other:?}"),

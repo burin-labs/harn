@@ -19,7 +19,7 @@
 
 use crate::value::VmDictExt;
 use std::cell::RefCell;
-use std::collections::{BTreeMap, HashMap};
+use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
@@ -218,7 +218,7 @@ pub(crate) fn envelope_from_response(
         )))));
     }
 
-    let mut envelope: BTreeMap<String, VmValue> = BTreeMap::new();
+    let mut envelope: crate::value::DictMap = crate::value::DictMap::new();
     envelope.put_str("action", action);
 
     if action == "accept" {
@@ -230,7 +230,7 @@ pub(crate) fn envelope_from_response(
         envelope.insert("content".to_string(), validated);
     }
 
-    Ok(VmValue::Dict(std::sync::Arc::new(envelope)))
+    Ok(VmValue::dict(envelope))
 }
 
 /// Validate the `content` field of an `accept` response against the
@@ -314,7 +314,7 @@ pub(crate) async fn dispatch_inbound_elicitation(
     // Build the params bundle dispatched to the host bridge / mock.
     // Includes the originating server name so a single host can route
     // by source, and copies the raw schema through unmodified.
-    let mut bridge_params: BTreeMap<String, VmValue> = BTreeMap::new();
+    let mut bridge_params: crate::value::DictMap = crate::value::DictMap::new();
     bridge_params.put_str("server", server_name);
     bridge_params.put_str("message", message.as_str());
     bridge_params.insert(

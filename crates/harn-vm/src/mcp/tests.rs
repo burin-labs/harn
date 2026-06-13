@@ -902,7 +902,7 @@ fn test_vm_value_to_serde_string() {
 fn test_vm_value_to_serde_dict() {
     let mut map = BTreeMap::new();
     map.insert("key".to_string(), VmValue::Int(42));
-    let val = VmValue::Dict(std::sync::Arc::new(map));
+    let val = VmValue::dict(map);
     let json = vm_value_to_serde(&val);
     assert_eq!(json, serde_json::json!({"key": 42}));
 }

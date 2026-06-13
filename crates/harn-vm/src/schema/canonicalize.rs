@@ -1,5 +1,5 @@
 use crate::value::VmDictExt;
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 
 use crate::value::VmValue;
 
@@ -8,9 +8,9 @@ use super::type_check::schema_type_name;
 use super::{schema_bool, schema_i64, schema_number, vm_value_to_serde_json};
 
 pub(super) fn resolve_canonical_ref_with_path(
-    root_schema: &BTreeMap<String, VmValue>,
+    root_schema: &crate::value::DictMap,
     pointer: &str,
-) -> Option<(String, BTreeMap<String, VmValue>)> {
+) -> Option<(String, crate::value::DictMap)> {
     if !pointer.starts_with('#') {
         return None;
     }
@@ -19,7 +19,7 @@ pub(super) fn resolve_canonical_ref_with_path(
         return Some(("#".to_string(), root_schema.clone()));
     }
 
-    let mut current = VmValue::Dict(std::sync::Arc::new(root_schema.clone()));
+    let mut current = VmValue::dict(root_schema.clone());
     let mut normalized_segments = Vec::new();
     for segment in stripped.split('/') {
         let decoded = segment.replace("~1", "/").replace("~0", "~");
@@ -63,17 +63,18 @@ fn canonicalize_schema_value_with(
         let schema_dict = schema
             .as_dict()
             .ok_or_else(|| "schema must be a dict".to_string())?;
-        Ok(VmValue::Dict(std::sync::Arc::new(
-            canonicalize_schema_dict(schema_dict, traversal)?,
-        )))
+        Ok(VmValue::dict(canonicalize_schema_dict(
+            schema_dict,
+            traversal,
+        )?))
     })
 }
 
 fn canonicalize_schema_dict(
-    schema: &BTreeMap<String, VmValue>,
+    schema: &crate::value::DictMap,
     traversal: &mut SchemaTraversal,
-) -> Result<BTreeMap<String, VmValue>, String> {
-    let mut out = BTreeMap::new();
+) -> Result<crate::value::DictMap, String> {
+    let mut out = crate::value::DictMap::new();
 
     for key in [
         "title",
@@ -97,17 +98,14 @@ fn canonicalize_schema_dict(
     }
 
     if let Some(properties) = schema.get("properties").and_then(VmValue::as_dict) {
-        let mut next = BTreeMap::new();
+        let mut next = crate::value::DictMap::new();
         for (key, value) in properties {
             next.insert(
                 key.clone(),
                 canonicalize_schema_value_with(value, traversal)?,
             );
         }
-        out.insert(
-            "properties".to_string(),
-            VmValue::Dict(std::sync::Arc::new(next)),
-        );
+        out.insert("properties".to_string(), VmValue::dict(next));
     }
 
     if let Some(items) = schema.get("items") {
@@ -181,10 +179,7 @@ fn canonicalize_schema_dict(
     if let Some(definitions) = schema.get("definitions").and_then(VmValue::as_dict) {
         out.insert(
             "definitions".to_string(),
-            VmValue::Dict(std::sync::Arc::new(canonicalize_schema_map(
-                definitions,
-                traversal,
-            )?)),
+            VmValue::dict(canonicalize_schema_map(definitions, traversal)?),
         );
     }
 
@@ -193,15 +188,10 @@ fn canonicalize_schema_dict(
         if let Some(schemas) = components.get("schemas").and_then(VmValue::as_dict) {
             next_components.insert(
                 "schemas".to_string(),
-                VmValue::Dict(std::sync::Arc::new(canonicalize_schema_map(
-                    schemas, traversal,
-                )?)),
+                VmValue::dict(canonicalize_schema_map(schemas, traversal)?),
             );
         }
-        out.insert(
-            "components".to_string(),
-            VmValue::Dict(std::sync::Arc::new(next_components)),
-        );
+        out.insert("components".to_string(), VmValue::dict(next_components));
     }
 
     if let Some(union) = schema
@@ -232,9 +222,9 @@ fn canonicalize_schema_dict(
                 .iter()
                 .map(|item| {
                     let type_name = normalize_type_name(&item.display());
-                    let mut branch = BTreeMap::new();
+                    let mut branch = crate::value::DictMap::new();
                     branch.put_str("type", type_name.as_str());
-                    VmValue::Dict(std::sync::Arc::new(branch))
+                    VmValue::dict(branch)
                 })
                 .collect::<Vec<_>>();
             out.insert(
@@ -253,10 +243,10 @@ fn canonicalize_schema_dict(
 }
 
 fn canonicalize_schema_map(
-    source: &BTreeMap<String, VmValue>,
+    source: &crate::value::DictMap,
     traversal: &mut SchemaTraversal,
-) -> Result<BTreeMap<String, VmValue>, String> {
-    let mut next = BTreeMap::new();
+) -> Result<crate::value::DictMap, String> {
+    let mut next = crate::value::DictMap::new();
     for (key, value) in source {
         next.insert(
             key.clone(),
@@ -281,7 +271,7 @@ fn canonicalize_schema_list(
     )))
 }
 
-fn validate_canonical_ref_graph(root_schema: &BTreeMap<String, VmValue>) -> Result<(), String> {
+fn validate_canonical_ref_graph(root_schema: &crate::value::DictMap) -> Result<(), String> {
     let mut traversal = SchemaTraversal::new();
     let mut stack = Vec::new();
     let mut checked = BTreeSet::new();
@@ -296,8 +286,8 @@ fn validate_canonical_ref_graph(root_schema: &BTreeMap<String, VmValue>) -> Resu
 }
 
 fn validate_ref_graph_dict(
-    schema: &BTreeMap<String, VmValue>,
-    root_schema: &BTreeMap<String, VmValue>,
+    schema: &crate::value::DictMap,
+    root_schema: &crate::value::DictMap,
     pointer: &str,
     traversal: &mut SchemaTraversal,
     stack: &mut Vec<String>,
@@ -327,8 +317,8 @@ fn validate_ref_graph_dict(
 }
 
 fn validate_ref_graph_dict_inner(
-    schema: &BTreeMap<String, VmValue>,
-    root_schema: &BTreeMap<String, VmValue>,
+    schema: &crate::value::DictMap,
+    root_schema: &crate::value::DictMap,
     pointer: &str,
     traversal: &mut SchemaTraversal,
     stack: &mut Vec<String>,
@@ -436,7 +426,7 @@ fn validate_ref_graph_dict_inner(
 
 fn validate_ref_graph_value(
     value: &VmValue,
-    root_schema: &BTreeMap<String, VmValue>,
+    root_schema: &crate::value::DictMap,
     pointer: &str,
     traversal: &mut SchemaTraversal,
     stack: &mut Vec<String>,
@@ -756,11 +746,11 @@ pub fn json_to_vm_value(jv: &serde_json::Value) -> VmValue {
             arr.iter().map(json_to_vm_value).collect(),
         )),
         serde_json::Value::Object(map) => {
-            let mut m = BTreeMap::new();
+            let mut m = crate::value::DictMap::new();
             for (k, v) in map {
                 m.insert(k.clone(), json_to_vm_value(v));
             }
-            VmValue::Dict(std::sync::Arc::new(m))
+            VmValue::dict(m)
         }
     }
 }

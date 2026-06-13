@@ -48,9 +48,9 @@ struct MockDb {
 }
 
 thread_local! {
-    static DBS: RefCell<BTreeMap<String, Arc<DbRecord>>> = const { RefCell::new(BTreeMap::new()) };
-    static TXS: RefCell<BTreeMap<String, Arc<DbRecord>>> = const { RefCell::new(BTreeMap::new()) };
-    static MOCKS: RefCell<BTreeMap<String, MockDb>> = const { RefCell::new(BTreeMap::new()) };
+    static DBS: RefCell<BTreeMap<String, Arc<DbRecord>>> = const { RefCell::new(std::collections::BTreeMap::new()) };
+    static TXS: RefCell<BTreeMap<String, Arc<DbRecord>>> = const { RefCell::new(std::collections::BTreeMap::new()) };
+    static MOCKS: RefCell<BTreeMap<String, MockDb>> = const { RefCell::new(std::collections::BTreeMap::new()) };
 }
 
 pub(crate) fn reset_sqlite_state() {
@@ -223,7 +223,7 @@ async fn sqlite_transaction_impl(
     }
 
     register_tx(&tx_id, Arc::clone(&record));
-    let tx_handle = handle_value(HANDLE_TX, &tx_id, BTreeMap::new());
+    let tx_handle = handle_value(HANDLE_TX, &tx_id, crate::value::DictMap::new());
     let mut child_vm = ctx.child_vm();
     let result = child_vm.call_closure_pub(&closure, &[tx_handle]).await;
     ctx.forward_output(&child_vm.take_output());
@@ -322,7 +322,7 @@ fn sqlite_mock_db_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, V
             },
         );
     });
-    Ok(handle_value(HANDLE_MOCK, &id, BTreeMap::new()))
+    Ok(handle_value(HANDLE_MOCK, &id, crate::value::DictMap::new()))
 }
 
 #[harn_builtin(
@@ -341,7 +341,7 @@ fn sqlite_mock_calls_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue
     Ok(VmValue::List(Arc::new(calls)))
 }
 
-fn open_db(path: &str, options: Option<&BTreeMap<String, VmValue>>) -> Result<VmValue, VmError> {
+fn open_db(path: &str, options: Option<&crate::value::DictMap>) -> Result<VmValue, VmError> {
     let create = option_bool(options.and_then(|opts| opts.get("create"))).unwrap_or(false);
     let read_only = option_bool(options.and_then(|opts| opts.get("read_only"))).unwrap_or(false);
     let is_memory = path == ":memory:" || path.trim().eq_ignore_ascii_case("memory");
@@ -398,7 +398,7 @@ fn open_db(path: &str, options: Option<&BTreeMap<String, VmValue>>) -> Result<Vm
 
     configure_connection(&conn, options, read_only)?;
     let id = next_id("sqlitedb");
-    let mut meta = BTreeMap::new();
+    let mut meta = crate::value::DictMap::new();
     meta.insert("read_only".to_string(), VmValue::Bool(read_only));
     meta.insert("memory".to_string(), VmValue::Bool(is_memory));
     if let Some(path) = &stored_path {
@@ -417,7 +417,7 @@ fn open_db(path: &str, options: Option<&BTreeMap<String, VmValue>>) -> Result<Vm
 
 fn configure_connection(
     conn: &Connection,
-    options: Option<&BTreeMap<String, VmValue>>,
+    options: Option<&crate::value::DictMap>,
     read_only: bool,
 ) -> Result<(), VmError> {
     let busy_timeout_ms = option_int(options, "busy_timeout_ms")
@@ -644,7 +644,7 @@ async fn migrate(args: Vec<VmValue>) -> Result<VmValue, VmError> {
         }
     }
 
-    let mut response = BTreeMap::new();
+    let mut response = crate::value::DictMap::new();
     response.insert("applied".to_string(), string_list(applied_now));
     response.insert("skipped".to_string(), string_list(skipped));
     response.insert(
@@ -653,7 +653,7 @@ async fn migrate(args: Vec<VmValue>) -> Result<VmValue, VmError> {
     );
     response.insert("dry_run".to_string(), VmValue::Bool(dry_run));
     response.put_str("table", table);
-    Ok(VmValue::Dict(Arc::new(response)))
+    Ok(VmValue::dict(response))
 }
 
 #[derive(Clone)]
@@ -788,7 +788,7 @@ fn row_to_value(
     names: &[String],
     builtin: &'static str,
 ) -> Result<VmValue, VmError> {
-    let mut map = BTreeMap::new();
+    let mut map = crate::value::DictMap::new();
     for (index, name) in names.iter().enumerate() {
         let value = match row
             .get_ref(index)
@@ -807,7 +807,7 @@ fn row_to_value(
         };
         map.insert(name.clone(), value);
     }
-    Ok(VmValue::Dict(Arc::new(map)))
+    Ok(VmValue::dict(map))
 }
 
 fn bind_params(params: &[VmValue]) -> Vec<Value> {
@@ -908,10 +908,10 @@ fn mock_query(
 }
 
 fn execute_result_value(rows_affected: u64) -> VmValue {
-    VmValue::Dict(Arc::new(BTreeMap::from([(
+    VmValue::dict(crate::value::DictMap::from_iter([(
         "rows_affected".to_string(),
         VmValue::Int(rows_affected as i64),
-    )])))
+    )]))
 }
 
 async fn execute_batch_on_record(
@@ -958,10 +958,10 @@ fn unregister_tx(id: &str) {
     });
 }
 
-fn handle_value(kind: &str, id: &str, mut extra: BTreeMap<String, VmValue>) -> VmValue {
+fn handle_value(kind: &str, id: &str, mut extra: crate::value::DictMap) -> VmValue {
     extra.put_str("_type", kind);
     extra.put_str("id", id);
-    VmValue::Dict(Arc::new(extra))
+    VmValue::dict(extra)
 }
 
 fn handle_kind(value: Option<&VmValue>) -> Option<String> {
@@ -1023,7 +1023,7 @@ fn params_arg(value: Option<&VmValue>, builtin: &'static str) -> Result<Vec<VmVa
     }
 }
 
-fn dir_arg(dict: &BTreeMap<String, VmValue>, key: &str) -> Result<PathBuf, VmError> {
+fn dir_arg(dict: &crate::value::DictMap, key: &str) -> Result<PathBuf, VmError> {
     let value = dict.get(key).ok_or_else(|| {
         runtime_error(format!(
             "sqlite_migrate: option `{key}` is required and must be a path"
@@ -1044,7 +1044,7 @@ fn option_bool(value: Option<&VmValue>) -> Option<bool> {
     }
 }
 
-fn option_int(options: Option<&BTreeMap<String, VmValue>>, key: &str) -> Option<i64> {
+fn option_int(options: Option<&crate::value::DictMap>, key: &str) -> Option<i64> {
     options
         .and_then(|opts| opts.get(key))
         .and_then(|value| match value {
@@ -1058,7 +1058,7 @@ fn option_int(options: Option<&BTreeMap<String, VmValue>>, key: &str) -> Option<
         })
 }
 
-fn option_string(options: Option<&BTreeMap<String, VmValue>>, key: &str) -> Option<String> {
+fn option_string(options: Option<&crate::value::DictMap>, key: &str) -> Option<String> {
     options
         .and_then(|opts| opts.get(key))
         .map(VmValue::display)
@@ -1138,12 +1138,12 @@ mod tests {
     }
 
     fn dict(pairs: &[(&str, VmValue)]) -> VmValue {
-        VmValue::Dict(Arc::new(
+        VmValue::dict(
             pairs
                 .iter()
                 .map(|(key, value)| ((*key).to_string(), value.clone()))
-                .collect(),
-        ))
+                .collect::<crate::value::DictMap>(),
+        )
     }
 
     #[test]
@@ -1193,7 +1193,7 @@ mod tests {
                 },
             );
         });
-        let handle = handle_value(HANDLE_MOCK, &id, BTreeMap::new());
+        let handle = handle_value(HANDLE_MOCK, &id, crate::value::DictMap::new());
         let rows = mock_query(
             &handle,
             "select id from events where topic = ?",

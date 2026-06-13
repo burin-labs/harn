@@ -211,7 +211,7 @@ impl crate::vm::Vm {
                         }
                     }
                 }
-                Ok(VmValue::Dict(std::sync::Arc::new(map)))
+                Ok(VmValue::dict(map))
             }
             "count" => {
                 let mut n: i64 = 0;

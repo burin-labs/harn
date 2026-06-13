@@ -425,7 +425,7 @@ fn runtime_error(message: String) -> VmError {
     VmError::Thrown(VmValue::String(std::sync::Arc::from(message)))
 }
 
-fn parse_string(dict: &BTreeMap<String, VmValue>, key: &str) -> Result<Option<String>, VmError> {
+fn parse_string(dict: &crate::value::DictMap, key: &str) -> Result<Option<String>, VmError> {
     match dict.get(key) {
         Some(VmValue::Nil) | None => Ok(None),
         Some(VmValue::String(s)) => Ok(Some(s.to_string())),
@@ -436,7 +436,7 @@ fn parse_string(dict: &BTreeMap<String, VmValue>, key: &str) -> Result<Option<St
     }
 }
 
-fn parse_bool(dict: &BTreeMap<String, VmValue>, key: &str) -> Result<Option<bool>, VmError> {
+fn parse_bool(dict: &crate::value::DictMap, key: &str) -> Result<Option<bool>, VmError> {
     match dict.get(key) {
         Some(VmValue::Nil) | None => Ok(None),
         Some(VmValue::Bool(b)) => Ok(Some(*b)),
@@ -447,7 +447,7 @@ fn parse_bool(dict: &BTreeMap<String, VmValue>, key: &str) -> Result<Option<bool
     }
 }
 
-fn parse_pos_usize(dict: &BTreeMap<String, VmValue>, key: &str) -> Result<Option<usize>, VmError> {
+fn parse_pos_usize(dict: &crate::value::DictMap, key: &str) -> Result<Option<usize>, VmError> {
     match dict.get(key) {
         Some(VmValue::Nil) | None => Ok(None),
         Some(VmValue::Int(n)) if *n >= 0 => Ok(Some(*n as usize)),
@@ -459,7 +459,7 @@ fn parse_pos_usize(dict: &BTreeMap<String, VmValue>, key: &str) -> Result<Option
 }
 
 fn parse_regex_list(
-    dict: &BTreeMap<String, VmValue>,
+    dict: &crate::value::DictMap,
     key: &str,
 ) -> Result<(Vec<Regex>, Vec<String>), VmError> {
     let value = match dict.get(key) {
@@ -533,7 +533,7 @@ fn parse_command(value: Option<&VmValue>) -> Result<Vec<String>, VmError> {
     }
 }
 
-fn parse_on_fail(dict: &BTreeMap<String, VmValue>, default: FailMode) -> Result<FailMode, VmError> {
+fn parse_on_fail(dict: &crate::value::DictMap, default: FailMode) -> Result<FailMode, VmError> {
     match dict.get("on_fail") {
         Some(VmValue::Nil) | None => Ok(default),
         Some(VmValue::String(s)) => FailMode::parse(s),
@@ -705,7 +705,7 @@ pub(crate) fn verifiers_summary(verifiers: &[Verifier]) -> VmValue {
                     FailMode::Escalate => "escalate",
                 },
             );
-            VmValue::Dict(std::sync::Arc::new(dict))
+            VmValue::dict(dict)
         })
         .collect();
     VmValue::List(std::sync::Arc::new(items))
@@ -715,7 +715,7 @@ pub(crate) fn verifiers_summary(verifiers: &[Verifier]) -> VmValue {
 mod tests {
     use super::*;
 
-    fn dict(items: &[(&str, VmValue)]) -> BTreeMap<String, VmValue> {
+    fn dict(items: &[(&str, VmValue)]) -> crate::value::DictMap {
         items
             .iter()
             .map(|(k, v)| (k.to_string(), v.clone()))

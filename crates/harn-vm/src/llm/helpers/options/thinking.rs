@@ -29,7 +29,7 @@ pub(super) fn parse_reasoning_effort(
 }
 
 pub(super) fn parse_reasoning_effort_option(
-    options: Option<&BTreeMap<String, VmValue>>,
+    options: Option<&crate::value::DictMap>,
 ) -> Result<Option<crate::llm::api::ReasoningEffort>, VmError> {
     let Some(raw) = options.and_then(|o| o.get("reasoning_effort")) else {
         return Ok(None);
@@ -73,7 +73,7 @@ pub(super) fn parse_thinking_budget(raw: Option<&VmValue>) -> Result<Option<u32>
 ///   `{budget_tokens: N}` => enabled with a budget
 ///   `{enabled: false}` / `false` / `nil` => disabled
 pub(super) fn parse_thinking_option(
-    options: Option<&BTreeMap<String, VmValue>>,
+    options: Option<&crate::value::DictMap>,
 ) -> Result<crate::llm::api::ThinkingConfig, VmError> {
     use crate::llm::api::ThinkingConfig;
 
@@ -201,7 +201,7 @@ pub(super) fn validate_reasoning_effort_level_supported(
 }
 
 pub(super) fn parse_anthropic_beta_features_option(
-    options: Option<&BTreeMap<String, VmValue>>,
+    options: Option<&crate::value::DictMap>,
     thinking: &crate::llm::api::ThinkingConfig,
     provider: &str,
     model: &str,

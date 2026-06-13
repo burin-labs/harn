@@ -119,7 +119,7 @@ pub(crate) async fn call_agent_loop(
     ctx: &AsyncBuiltinCtx,
     prompt: String,
     system: Option<String>,
-    options: std::collections::BTreeMap<String, VmValue>,
+    options: crate::value::DictMap,
 ) -> Result<VmValue, VmError> {
     call_harn_export_by_name(
         ctx,
@@ -131,7 +131,7 @@ pub(crate) async fn call_agent_loop(
             system
                 .map(|value| VmValue::String(std::sync::Arc::from(value)))
                 .unwrap_or(VmValue::Nil),
-            VmValue::Dict(std::sync::Arc::new(options)),
+            VmValue::dict(options),
         ],
     )
     .await

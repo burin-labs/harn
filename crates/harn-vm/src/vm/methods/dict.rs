@@ -5,7 +5,7 @@ use crate::value::{VmError, VmValue};
 
 impl crate::vm::Vm {
     pub(super) fn call_dict_method_sync(
-        map: &Arc<BTreeMap<String, VmValue>>,
+        map: &Arc<crate::value::DictMap>,
         method: &str,
         args: &[VmValue],
     ) -> Option<Result<VmValue, VmError>> {
@@ -39,7 +39,7 @@ impl crate::vm::Vm {
                     }
                     let mut result = (**map).clone();
                     result.extend(other.iter().map(|(k, v)| (k.clone(), v.clone())));
-                    Ok(VmValue::Dict(std::sync::Arc::new(result)))
+                    Ok(VmValue::dict(result))
                 } else {
                     Ok(VmValue::Dict(Arc::clone(map)))
                 }
@@ -54,7 +54,7 @@ impl crate::vm::Vm {
                 let key = args.first().map(|a| a.display()).unwrap_or_default();
                 let mut result = (**map).clone();
                 result.remove(&key);
-                Ok(VmValue::Dict(std::sync::Arc::new(result)))
+                Ok(VmValue::dict(result))
             }
             "get" => {
                 let key = args.first().map(|a| a.display()).unwrap_or_default();
@@ -75,7 +75,7 @@ impl crate::vm::Vm {
 
     pub(super) async fn call_dict_method(
         &mut self,
-        map: &Arc<BTreeMap<String, VmValue>>,
+        map: &Arc<crate::value::DictMap>,
         method: &str,
         args: &[VmValue],
     ) -> Result<VmValue, VmError> {
@@ -99,7 +99,7 @@ impl crate::vm::Vm {
                     let mapped = self.call_callable_one(callable, v).await?;
                     result.insert(k.clone(), mapped);
                 }
-                Ok(VmValue::Dict(std::sync::Arc::new(result)))
+                Ok(VmValue::dict(result))
             }
             "rekey" | "map_keys" => {
                 let Some(callable) = args.first().filter(|v| Self::is_callable_value(v)) else {
@@ -112,7 +112,7 @@ impl crate::vm::Vm {
                     let new_key_str = new_key.display();
                     result.insert(new_key_str, v.clone());
                 }
-                Ok(VmValue::Dict(std::sync::Arc::new(result)))
+                Ok(VmValue::dict(result))
             }
             "filter" => {
                 let Some(callable) = args.first().filter(|v| Self::is_callable_value(v)) else {
@@ -125,7 +125,7 @@ impl crate::vm::Vm {
                         result.insert(k.clone(), v.clone());
                     }
                 }
-                Ok(VmValue::Dict(std::sync::Arc::new(result)))
+                Ok(VmValue::dict(result))
             }
             _ => {
                 if let Some(callable) = map.get(method).filter(|v| Self::is_callable_value(v)) {
@@ -137,16 +137,16 @@ impl crate::vm::Vm {
         }
     }
 
-    fn dict_entries(map: &BTreeMap<String, VmValue>) -> Vec<VmValue> {
+    fn dict_entries(map: &crate::value::DictMap) -> Vec<VmValue> {
         map.iter()
             .map(|(k, v)| {
-                VmValue::Dict(std::sync::Arc::new(BTreeMap::from([
+                VmValue::dict(BTreeMap::from([
                     (
                         "key".to_string(),
                         VmValue::String(std::sync::Arc::from(k.as_str())),
                     ),
                     ("value".to_string(), v.clone()),
-                ])))
+                ]))
             })
             .collect()
     }

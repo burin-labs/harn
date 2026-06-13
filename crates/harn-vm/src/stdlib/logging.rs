@@ -1,4 +1,3 @@
-use std::collections::BTreeMap;
 use std::sync::atomic::AtomicU8;
 
 use crate::value::VmValue;
@@ -81,7 +80,7 @@ pub(crate) fn vm_value_to_json_fragment(val: &VmValue) -> String {
 pub(crate) fn vm_build_log_line(
     level: &str,
     msg: &str,
-    fields: Option<&BTreeMap<String, VmValue>>,
+    fields: Option<&crate::value::DictMap>,
 ) -> String {
     let ts = vm_format_timestamp_utc();
     let mut parts: Vec<String> = Vec::new();

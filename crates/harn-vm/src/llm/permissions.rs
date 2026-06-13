@@ -331,14 +331,14 @@ fn parse_pattern_list(value: &VmValue, label: &str) -> Result<Vec<String>, VmErr
     }
 }
 
-fn is_path_scope_matcher(map: &BTreeMap<String, VmValue>) -> bool {
+fn is_path_scope_matcher(map: &crate::value::DictMap) -> bool {
     map.get("type")
         .or_else(|| map.get("kind"))
         .is_some_and(|value| value.display() == "path_scope")
 }
 
 fn parse_path_scope_matcher(
-    map: &BTreeMap<String, VmValue>,
+    map: &crate::value::DictMap,
     label: &str,
 ) -> Result<PathScopeMatcher, VmError> {
     let arg_keys = match map
@@ -1152,7 +1152,7 @@ fn permission_request_value(
             VmValue::Bool(false),
         ])),
     );
-    VmValue::Dict(std::sync::Arc::new(request))
+    VmValue::dict(request)
 }
 
 async fn emit_tier_promotion_if_needed(

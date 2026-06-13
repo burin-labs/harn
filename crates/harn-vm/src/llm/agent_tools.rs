@@ -499,7 +499,7 @@ pub(super) fn mcp_server_for_tool(tools_val: Option<&VmValue>, tool_name: &str) 
         _ => return None,
     };
     for tool in tools_list.iter() {
-        let entry: &std::collections::BTreeMap<String, VmValue> = match tool {
+        let entry: &crate::value::DictMap = match tool {
             VmValue::Dict(d) => d,
             _ => continue,
         };
@@ -548,7 +548,7 @@ pub(super) fn declared_executor_for_tool(
         _ => return None,
     };
     for tool in tools_list.iter() {
-        let entry: &std::collections::BTreeMap<String, VmValue> = match tool {
+        let entry: &crate::value::DictMap = match tool {
             VmValue::Dict(d) => d,
             _ => continue,
         };
@@ -577,7 +577,7 @@ fn declared_mcp_server_for_tool(tools_val: Option<&VmValue>, tool_name: &str) ->
         _ => return None,
     };
     for tool in tools_list.iter() {
-        let entry: &std::collections::BTreeMap<String, VmValue> = match tool {
+        let entry: &crate::value::DictMap = match tool {
             VmValue::Dict(d) => d,
             _ => continue,
         };
@@ -599,7 +599,7 @@ fn declared_mcp_tool_name_for_tool(tools_val: Option<&VmValue>, tool_name: &str)
         _ => return None,
     };
     for tool in tools_list.iter() {
-        let entry: &std::collections::BTreeMap<String, VmValue> = match tool {
+        let entry: &crate::value::DictMap = match tool {
             VmValue::Dict(d) => d,
             _ => continue,
         };
@@ -625,7 +625,7 @@ pub(super) fn find_tool_handler(
         _ => return None,
     };
     for tool in tools_list.iter() {
-        let entry: &std::collections::BTreeMap<String, VmValue> = match tool {
+        let entry: &crate::value::DictMap = match tool {
             VmValue::Dict(d) => d,
             _ => continue,
         };
@@ -652,7 +652,7 @@ mod tests {
 
     use super::*;
     use crate::value::VmDictExt;
-    use std::collections::BTreeMap;
+
     use std::sync::atomic::AtomicBool;
     use std::sync::Arc;
     use tokio::sync::Mutex;
@@ -768,22 +768,22 @@ mod tests {
         assert_eq!(extract_missing_params("Tool call is missing a name."), None);
     }
 
-    fn tools_dict(entries: Vec<(&str, BTreeMap<String, VmValue>)>) -> VmValue {
+    fn tools_dict(entries: Vec<(&str, crate::value::DictMap)>) -> VmValue {
         let list: Vec<VmValue> = entries
             .into_iter()
             .map(|(name, mut entry)| {
                 entry
                     .entry("name".to_string())
                     .or_insert_with(|| VmValue::String(std::sync::Arc::from(name.to_string())));
-                VmValue::Dict(std::sync::Arc::new(entry))
+                VmValue::dict(entry)
             })
             .collect();
-        let mut dict = BTreeMap::new();
+        let mut dict = crate::value::DictMap::new();
         dict.insert(
             "tools".to_string(),
             VmValue::List(std::sync::Arc::new(list)),
         );
-        VmValue::Dict(std::sync::Arc::new(dict))
+        VmValue::dict(dict)
     }
 
     #[test]
@@ -873,7 +873,7 @@ mod tests {
         // mcp_list_tools tags every entry with `_mcp_server`. The
         // helper picks that up so the dispatch site can tag the
         // executor as `McpServer { server_name }`.
-        let mut entry = BTreeMap::new();
+        let mut entry = crate::value::DictMap::new();
         entry.put_str("_mcp_server", "linear");
         let tools = tools_dict(vec![("create_issue", entry)]);
         assert_eq!(
@@ -886,23 +886,20 @@ mod tests {
     fn mcp_server_for_tool_finds_nested_function_annotation() {
         // OpenAI-shape tools nest `_mcp_server` inside a `function`
         // sub-dict; the search must drill down a level.
-        let mut function = BTreeMap::new();
+        let mut function = crate::value::DictMap::new();
         function.put_str("name", "create_issue");
         function.put_str("_mcp_server", "linear");
-        let mut entry = BTreeMap::new();
-        entry.insert(
-            "function".to_string(),
-            VmValue::Dict(std::sync::Arc::new(function)),
-        );
+        let mut entry = crate::value::DictMap::new();
+        entry.insert("function".to_string(), VmValue::dict(function));
         // The outer entry has no `name` — fall back to function.name.
-        let mut dict = BTreeMap::new();
+        let mut dict = crate::value::DictMap::new();
         dict.insert(
             "tools".to_string(),
             VmValue::List(std::sync::Arc::new(vec![VmValue::Dict(
                 std::sync::Arc::new(entry),
             )])),
         );
-        let tools = VmValue::Dict(std::sync::Arc::new(dict));
+        let tools = VmValue::dict(dict);
         assert_eq!(
             mcp_server_for_tool(Some(&tools), "create_issue"),
             Some("linear".to_string())
@@ -911,7 +908,7 @@ mod tests {
 
     #[test]
     fn mcp_server_for_tool_returns_none_for_plain_tool() {
-        let tools = tools_dict(vec![("read", BTreeMap::new())]);
+        let tools = tools_dict(vec![("read", crate::value::DictMap::new())]);
         assert!(mcp_server_for_tool(Some(&tools), "read").is_none());
         assert!(mcp_server_for_tool(Some(&tools), "missing").is_none());
         assert!(mcp_server_for_tool(None, "read").is_none());
@@ -965,7 +962,7 @@ mod tests {
             1,
         );
         let bridge = Arc::new(bridge);
-        let mut entry = BTreeMap::new();
+        let mut entry = crate::value::DictMap::new();
         entry.put_str("_mcp_server", "linear");
         let tools = tools_dict(vec![("create_issue", entry)]);
         let args = serde_json::json!({});
@@ -1003,7 +1000,7 @@ mod tests {
             1,
         );
         let bridge = Arc::new(bridge);
-        let mut entry = BTreeMap::new();
+        let mut entry = crate::value::DictMap::new();
         entry.put_str("executor", "host_bridge");
         entry.put_str("host_capability", "interaction.ask");
         let tools = tools_dict(vec![("ask_user", entry)]);
@@ -1024,7 +1021,7 @@ mod tests {
         // Provider-native tools must never reach a runtime backend.
         // The dispatcher rejects with ProviderNative as the executor so
         // the ACP event reflects "model already executed this".
-        let mut entry = BTreeMap::new();
+        let mut entry = crate::value::DictMap::new();
         entry.put_str("executor", "provider_native");
         let tools = tools_dict(vec![("tool_search", entry)]);
         let outcome = dispatch_tool_execution(
@@ -1051,7 +1048,7 @@ mod tests {
             1,
         );
         let bridge = Arc::new(bridge);
-        let mut entry = BTreeMap::new();
+        let mut entry = crate::value::DictMap::new();
         entry.put_str("executor", "mcp_server");
         entry.put_str("mcp_server", "github");
         let tools = tools_dict(vec![("github_search_issues", entry)]);

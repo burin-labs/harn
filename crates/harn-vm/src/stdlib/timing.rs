@@ -111,7 +111,7 @@ fn timing_start_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmE
     );
     handle.put_str("kind", crate::tracing::SpanKind::UserTiming.as_str());
 
-    Ok(VmValue::Dict(std::sync::Arc::new(handle)))
+    Ok(VmValue::dict(handle))
 }
 
 #[harn_builtin(sig = "__timing_now_monotonic_ms() -> int", category = "timing")]

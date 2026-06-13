@@ -356,7 +356,7 @@ fn completion_sources_from_dict(value: Option<&VmValue>) -> BTreeMap<String, Mcp
 }
 
 fn completion_source_from_argument_dict(
-    dict: &BTreeMap<String, VmValue>,
+    dict: &crate::value::DictMap,
 ) -> Option<McpCompletionSource> {
     let mut source = McpCompletionSource::default();
     for key in ["suggestions", "completions", "values"] {

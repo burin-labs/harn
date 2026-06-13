@@ -32,12 +32,12 @@ pub(crate) fn agent_feedback_message(kind: &str, content: &str) -> VmValue {
     if kind == PREFILL_ASSISTANT_FEEDBACK_KIND {
         msg.put_str("role", "assistant");
         msg.put_str("content", content);
-        return VmValue::Dict(std::sync::Arc::new(msg));
+        return VmValue::dict(msg);
     }
     let body = format!("<runtime_feedback kind=\"{kind}\">\n{content}\n</runtime_feedback>");
     msg.put_str("role", "user");
     msg.put_str("content", body);
-    VmValue::Dict(std::sync::Arc::new(msg))
+    VmValue::dict(msg)
 }
 
 fn system_prompt_transcript_metadata(system: Option<&String>) -> Option<serde_json::Value> {

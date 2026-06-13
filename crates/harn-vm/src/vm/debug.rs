@@ -18,7 +18,7 @@ pub enum DebugAction {
 #[derive(Debug, Clone)]
 pub struct DebugState {
     pub line: usize,
-    pub variables: std::collections::BTreeMap<String, VmValue>,
+    pub variables: crate::value::DictMap,
     pub frame_name: String,
     pub frame_depth: usize,
 }

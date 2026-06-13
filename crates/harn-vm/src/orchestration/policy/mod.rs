@@ -566,7 +566,7 @@ pub fn redact_transcript_visibility(
         "events".to_string(),
         VmValue::List(std::sync::Arc::new(public_events)),
     );
-    Some(VmValue::Dict(std::sync::Arc::new(redacted)))
+    Some(VmValue::dict(redacted))
 }
 
 fn redact_public_message(message: &VmValue) -> Option<VmValue> {
@@ -610,7 +610,7 @@ fn redact_public_message(message: &VmValue) -> Option<VmValue> {
             redacted.put_str("text", public_text.join("\n"));
         }
     }
-    Some(VmValue::Dict(std::sync::Arc::new(redacted)))
+    Some(VmValue::dict(redacted))
 }
 
 fn redact_public_block(block: &VmValue) -> Option<VmValue> {

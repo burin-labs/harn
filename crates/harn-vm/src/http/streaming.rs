@@ -1,4 +1,4 @@
-use crate::value::VmDictExt;
+use crate::value::{DictRetain, VmDictExt};
 use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::net::TcpStream;
@@ -60,7 +60,7 @@ struct FakeSseStream {
 
 pub(super) struct SseServerHandle {
     status: i64,
-    headers: BTreeMap<String, VmValue>,
+    headers: crate::value::DictMap,
     frames: VecDeque<String>,
     max_event_bytes: usize,
     max_buffered_events: usize,
@@ -196,7 +196,7 @@ fn close_websocket_servers() {
     });
 }
 
-fn transport_limit_option(options: &BTreeMap<String, VmValue>, key: &str, default: usize) -> usize {
+fn transport_limit_option(options: &crate::value::DictMap, key: &str, default: usize) -> usize {
     options
         .get(key)
         .and_then(|value| value.as_int())
@@ -218,20 +218,20 @@ fn receive_timeout_arg(args: &[VmValue], index: usize) -> u64 {
 fn timeout_event() -> VmValue {
     let mut dict = BTreeMap::new();
     dict.put_str("type", "timeout");
-    VmValue::Dict(std::sync::Arc::new(dict))
+    VmValue::dict(dict)
 }
 
 fn closed_event() -> VmValue {
     let mut dict = BTreeMap::new();
     dict.put_str("type", "close");
-    VmValue::Dict(std::sync::Arc::new(dict))
+    VmValue::dict(dict)
 }
 
 fn sse_server_closed_event() -> VmValue {
     let mut dict = BTreeMap::new();
     dict.put_str("type", "close");
     dict.insert("server_closed".to_string(), VmValue::Bool(true));
-    VmValue::Dict(std::sync::Arc::new(dict))
+    VmValue::dict(dict)
 }
 
 fn record_transport_call(call: TransportMockCall) {
@@ -300,7 +300,7 @@ fn sse_event_value(event: &MockStreamEvent) -> VmValue {
         "retry_ms".to_string(),
         event.retry_ms.map(VmValue::Int).unwrap_or(VmValue::Nil),
     );
-    VmValue::Dict(std::sync::Arc::new(dict))
+    VmValue::dict(dict)
 }
 
 fn sse_server_response_value(id: &str, handle: &SseServerHandle) -> VmValue {
@@ -308,10 +308,7 @@ fn sse_server_response_value(id: &str, handle: &SseServerHandle) -> VmValue {
     dict.put_str("id", id);
     dict.put_str("type", "sse_response");
     dict.insert("status".to_string(), VmValue::Int(handle.status));
-    dict.insert(
-        "headers".to_string(),
-        VmValue::Dict(std::sync::Arc::new(handle.headers.clone())),
-    );
+    dict.insert("headers".to_string(), VmValue::dict(handle.headers.clone()));
     dict.insert("body".to_string(), VmValue::Nil);
     dict.insert("streaming".to_string(), VmValue::Bool(true));
     dict.insert(
@@ -322,11 +319,11 @@ fn sse_server_response_value(id: &str, handle: &SseServerHandle) -> VmValue {
         "max_buffered_events".to_string(),
         VmValue::Int(handle.max_buffered_events as i64),
     );
-    VmValue::Dict(std::sync::Arc::new(dict))
+    VmValue::dict(dict)
 }
 
-fn default_sse_response_headers() -> BTreeMap<String, VmValue> {
-    BTreeMap::from([
+fn default_sse_response_headers() -> crate::value::DictMap {
+    crate::value::DictMap::from_iter([
         (
             "content-type".to_string(),
             VmValue::String(std::sync::Arc::from("text/event-stream; charset=utf-8")),
@@ -346,7 +343,7 @@ fn default_sse_response_headers() -> BTreeMap<String, VmValue> {
     ])
 }
 
-fn sse_response_headers(options: &BTreeMap<String, VmValue>) -> BTreeMap<String, VmValue> {
+fn sse_response_headers(options: &crate::value::DictMap) -> crate::value::DictMap {
     let mut headers = default_sse_response_headers();
     if let Some(VmValue::Dict(custom)) = options.get("headers") {
         for (name, value) in custom.iter() {
@@ -392,7 +389,7 @@ fn push_sse_multiline_field(frame: &mut String, field: &str, value: &str) {
 
 pub(super) fn vm_sse_event_frame(
     event: &VmValue,
-    options: &BTreeMap<String, VmValue>,
+    options: &crate::value::DictMap,
 ) -> Result<String, VmError> {
     let mut frame = String::new();
     let mut has_event_payload = false;
@@ -504,9 +501,7 @@ fn push_sse_comment(frame: &mut String, comment: &str) {
     }
 }
 
-pub(super) fn vm_sse_server_response(
-    options: &BTreeMap<String, VmValue>,
-) -> Result<VmValue, VmError> {
+pub(super) fn vm_sse_server_response(options: &crate::value::DictMap) -> Result<VmValue, VmError> {
     let id = next_transport_handle("sse-server");
     let status = options
         .get("status")
@@ -554,10 +549,7 @@ fn sse_server_status_value(id: &str, handle: &SseServerHandle) -> VmValue {
     let mut dict = BTreeMap::new();
     dict.put_str("id", id);
     dict.insert("status".to_string(), VmValue::Int(handle.status));
-    dict.insert(
-        "headers".to_string(),
-        VmValue::Dict(std::sync::Arc::new(handle.headers.clone())),
-    );
+    dict.insert("headers".to_string(), VmValue::dict(handle.headers.clone()));
     dict.insert(
         "buffered_events".to_string(),
         VmValue::Int(handle.frames.len() as i64),
@@ -592,7 +584,7 @@ fn sse_server_status_value(id: &str, handle: &SseServerHandle) -> VmValue {
         "max_buffered_events".to_string(),
         VmValue::Int(handle.max_buffered_events as i64),
     );
-    VmValue::Dict(std::sync::Arc::new(dict))
+    VmValue::dict(dict)
 }
 
 pub(super) fn vm_sse_server_status(stream_id: &str) -> Result<VmValue, VmError> {
@@ -608,7 +600,7 @@ pub(super) fn vm_sse_server_status(stream_id: &str) -> Result<VmValue, VmError> 
 pub(super) fn vm_sse_server_send(
     stream_id: &str,
     event: &VmValue,
-    options: &BTreeMap<String, VmValue>,
+    options: &crate::value::DictMap,
 ) -> Result<VmValue, VmError> {
     let frame = vm_sse_event_frame(event, options)?;
     SSE_SERVER_HANDLES.with(|handles| {
@@ -811,12 +803,12 @@ fn sse_server_mock_frame_value(frame: &str) -> VmValue {
         let mut dict = BTreeMap::new();
         dict.put_str("type", "comment");
         dict.put_str("comment", comments.join("\n"));
-        VmValue::Dict(std::sync::Arc::new(dict))
+        VmValue::dict(dict)
     };
     if let VmValue::Dict(dict) = &mut value {
         let mut owned = (**dict).clone();
         owned.put_str("raw", frame);
-        value = VmValue::Dict(std::sync::Arc::new(owned));
+        value = VmValue::dict(owned);
     }
     value
 }
@@ -826,7 +818,7 @@ fn real_sse_event_value(event: SseEvent) -> VmValue {
         SseEvent::Open => {
             let mut dict = BTreeMap::new();
             dict.put_str("type", "open");
-            VmValue::Dict(std::sync::Arc::new(dict))
+            VmValue::dict(dict)
         }
         SseEvent::Message(message) => {
             let retry_ms = message.retry.map(|retry| retry.as_millis() as i64);
@@ -883,13 +875,13 @@ fn transport_mock_call_value(call: &TransportMockCall) -> VmValue {
             .map(|data| VmValue::String(std::sync::Arc::from(data)))
             .unwrap_or(VmValue::Nil),
     );
-    VmValue::Dict(std::sync::Arc::new(dict))
+    VmValue::dict(dict)
 }
 
 pub(super) async fn vm_sse_connect(
     method: &str,
     url: &str,
-    options: &BTreeMap<String, VmValue>,
+    options: &crate::value::DictMap,
 ) -> Result<VmValue, VmError> {
     let id = next_transport_handle("sse");
     let max_events =
@@ -1010,7 +1002,7 @@ pub(super) async fn vm_sse_receive(stream_id: &str, timeout_ms: u64) -> Result<V
                 stream.opened = true;
                 let mut dict = BTreeMap::new();
                 dict.put_str("type", "open");
-                return Ok(VmValue::Dict(std::sync::Arc::new(dict)));
+                return Ok(VmValue::dict(dict));
             }
             let Some(event) = stream.events.pop_front() else {
                 stream.closed = true;

@@ -24,7 +24,7 @@ thread_local! {
 
 #[derive(Debug, Clone)]
 pub(crate) struct CanonicalParamSchema {
-    schema: Arc<std::collections::BTreeMap<String, VmValue>>,
+    schema: Arc<crate::value::DictMap>,
     object_like: bool,
 }
 
@@ -193,10 +193,7 @@ pub(crate) fn schema_extend_value(base: &VmValue, overrides: &VmValue) -> Result
             "schema_extend: schema must be a dict",
         )))
     })?;
-    Ok(VmValue::Dict(std::sync::Arc::new(merge_schema_dicts(
-        base_dict,
-        overrides_dict,
-    ))))
+    Ok(VmValue::dict(merge_schema_dicts(base_dict, overrides_dict)))
 }
 
 pub(crate) fn schema_partial_value(schema: &VmValue) -> Result<VmValue, VmError> {
@@ -207,9 +204,7 @@ pub(crate) fn schema_partial_value(schema: &VmValue) -> Result<VmValue, VmError>
             "schema_partial: schema must be a dict",
         )))
     })?;
-    Ok(VmValue::Dict(std::sync::Arc::new(schema_partial_dict(
-        schema_dict,
-    ))))
+    Ok(VmValue::dict(schema_partial_dict(schema_dict)))
 }
 
 pub(crate) fn schema_pick_value(schema: &VmValue, keys: &[String]) -> Result<VmValue, VmError> {
@@ -220,10 +215,7 @@ pub(crate) fn schema_pick_value(schema: &VmValue, keys: &[String]) -> Result<VmV
             "schema_pick: schema must be a dict",
         )))
     })?;
-    Ok(VmValue::Dict(std::sync::Arc::new(schema_pick_dict(
-        schema_dict,
-        keys,
-    ))))
+    Ok(VmValue::dict(schema_pick_dict(schema_dict, keys)))
 }
 
 pub(crate) fn schema_omit_value(schema: &VmValue, keys: &[String]) -> Result<VmValue, VmError> {
@@ -234,8 +226,5 @@ pub(crate) fn schema_omit_value(schema: &VmValue, keys: &[String]) -> Result<VmV
             "schema_omit: schema must be a dict",
         )))
     })?;
-    Ok(VmValue::Dict(std::sync::Arc::new(schema_omit_dict(
-        schema_dict,
-        keys,
-    ))))
+    Ok(VmValue::dict(schema_omit_dict(schema_dict, keys)))
 }

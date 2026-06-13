@@ -288,7 +288,7 @@ fn read_line_result(outcome: ReadLineOutcome) -> VmValue {
             out.insert("error".to_string(), VmValue::string(error));
         }
     }
-    VmValue::Dict(std::sync::Arc::new(out))
+    VmValue::dict(out)
 }
 
 const READ_LINE_FN: &str = "std/io.read_line";
@@ -1119,17 +1119,11 @@ fn render_progress_line(args: &[VmValue]) -> String {
     }
 }
 
-fn progress_dict_int(
-    options: &std::collections::BTreeMap<String, VmValue>,
-    key: &str,
-) -> Option<i64> {
+fn progress_dict_int(options: &crate::value::DictMap, key: &str) -> Option<i64> {
     options.get(key).and_then(|value| value.as_int())
 }
 
-fn progress_dict_str<'a>(
-    options: &'a std::collections::BTreeMap<String, VmValue>,
-    key: &str,
-) -> Option<&'a str> {
+fn progress_dict_str<'a>(options: &'a crate::value::DictMap, key: &str) -> Option<&'a str> {
     match options.get(key) {
         Some(VmValue::String(value)) => Some(value.as_ref()),
         _ => None,
@@ -1233,7 +1227,7 @@ mod tests {
         let line = render_progress_line(&[
             VmValue::String(std::sync::Arc::from("build")),
             VmValue::String(std::sync::Arc::from("Compiling")),
-            VmValue::Dict(std::sync::Arc::new(options)),
+            VmValue::dict(options),
         ]);
 
         assert_eq!(line, "[build] [######----] Compiling (3/5)\n");
@@ -1248,7 +1242,7 @@ mod tests {
         let line = render_progress_line(&[
             VmValue::String(std::sync::Arc::from("sync")),
             VmValue::String(std::sync::Arc::from("Waiting")),
-            VmValue::Dict(std::sync::Arc::new(options)),
+            VmValue::dict(options),
         ]);
 
         assert_eq!(line, "[sync] - Waiting\n");
@@ -1266,8 +1260,7 @@ mod tests {
         options.put_str("prompt", "  > ");
         options.insert("trim".to_string(), VmValue::Bool(false));
 
-        let parsed =
-            super::parse_read_line_options(&[VmValue::Dict(std::sync::Arc::new(options))]).unwrap();
+        let parsed = super::parse_read_line_options(&[VmValue::dict(options)]).unwrap();
 
         assert_eq!(parsed.prompt, "  > ");
         assert!(!parsed.trim);
@@ -1278,8 +1271,7 @@ mod tests {
         let mut options = BTreeMap::new();
         options.put_str("promtp", "> ");
 
-        let err = super::parse_read_line_options(&[VmValue::Dict(std::sync::Arc::new(options))])
-            .unwrap_err();
+        let err = super::parse_read_line_options(&[VmValue::dict(options)]).unwrap_err();
 
         match err {
             crate::value::VmError::Runtime(message) => assert!(message.contains("promtp")),

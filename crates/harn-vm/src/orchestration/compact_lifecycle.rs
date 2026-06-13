@@ -898,7 +898,7 @@ fn build_snapshot_asset(
     if let Some(source) = config.policy.instruction_source() {
         asset_metadata.put_str("instruction_source", source);
     }
-    let asset = VmValue::Dict(std::sync::Arc::new(BTreeMap::from([
+    let asset = VmValue::dict(BTreeMap::from([
         (
             "id".to_string(),
             VmValue::String(std::sync::Arc::from(format!(
@@ -919,11 +919,8 @@ fn build_snapshot_asset(
             VmValue::String(std::sync::Arc::from("internal")),
         ),
         ("data".to_string(), transcript.clone()),
-        (
-            "metadata".to_string(),
-            VmValue::Dict(std::sync::Arc::new(asset_metadata)),
-        ),
-    ])));
+        ("metadata".to_string(), VmValue::dict(asset_metadata)),
+    ]));
     normalize_transcript_asset(&asset)
 }
 
@@ -940,7 +937,7 @@ fn snapshot_asset_id_of(asset: &VmValue) -> String {
 /// `tool_result` events). This is the canonical filter used by every
 /// transcript-having compaction caller — keeping it in one place stops the
 /// trivial-but-load-bearing filter list from drifting per-callsite.
-pub fn transcript_compactable_events(transcript: &BTreeMap<String, VmValue>) -> Vec<VmValue> {
+pub fn transcript_compactable_events(transcript: &crate::value::DictMap) -> Vec<VmValue> {
     transcript
         .get("events")
         .and_then(|events| match events {
@@ -987,7 +984,7 @@ mod tests {
         event.put_str("kind", "system_reminder");
         event.put_str("role", "system");
         event.insert("reminder".to_string(), reminder_value);
-        VmValue::Dict(std::sync::Arc::new(event))
+        VmValue::dict(event)
     }
 
     #[test]

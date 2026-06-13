@@ -6,7 +6,7 @@ use super::*;
 /// Harn cannot parse but that is known to forward `tool_search` +
 /// `defer_loading` unchanged.
 pub(super) fn provider_overrides_force_native(
-    options: Option<&BTreeMap<String, VmValue>>,
+    options: Option<&crate::value::DictMap>,
     provider: &str,
 ) -> bool {
     let Some(options) = options else { return false };
@@ -29,7 +29,7 @@ pub(super) fn classify_native_shape(
 }
 
 pub(super) fn parse_api_mode_option(
-    options: Option<&BTreeMap<String, VmValue>>,
+    options: Option<&crate::value::DictMap>,
 ) -> Result<crate::llm::api::LlmApiMode, VmError> {
     let Some(raw) = options.and_then(|o| o.get("api_mode").or_else(|| o.get("api"))) else {
         return Ok(crate::llm::api::LlmApiMode::ChatCompletions);
@@ -64,7 +64,7 @@ pub(super) fn enforce_responses_provider_gate(
 }
 
 pub(super) fn parse_provider_tools_option(
-    options: Option<&BTreeMap<String, VmValue>>,
+    options: Option<&crate::value::DictMap>,
 ) -> Result<Vec<serde_json::Value>, VmError> {
     let Some(raw) = options.and_then(|o| o.get("provider_tools").or_else(|| o.get("hosted_tools")))
     else {
@@ -96,7 +96,7 @@ pub(super) fn parse_provider_tools_option(
 }
 
 pub(super) fn opt_bool_field(
-    options: Option<&BTreeMap<String, VmValue>>,
+    options: Option<&crate::value::DictMap>,
     key: &str,
 ) -> Result<Option<bool>, VmError> {
     match options.and_then(|o| o.get(key)) {
@@ -109,7 +109,7 @@ pub(super) fn opt_bool_field(
 }
 
 pub(super) fn opt_responses_store_field(
-    options: Option<&BTreeMap<String, VmValue>>,
+    options: Option<&crate::value::DictMap>,
 ) -> Result<Option<bool>, VmError> {
     if let Some(value) = opt_bool_field(options, "response_store")? {
         return Ok(Some(value));
@@ -151,7 +151,7 @@ pub(super) fn unsupported_option_error(option: &str, provider: &str, model: &str
     ))))
 }
 
-pub(super) fn option_is_enabled(options: Option<&BTreeMap<String, VmValue>>, key: &str) -> bool {
+pub(super) fn option_is_enabled(options: Option<&crate::value::DictMap>, key: &str) -> bool {
     options
         .and_then(|o| o.get(key))
         .is_some_and(|value| value.is_truthy())
@@ -170,7 +170,7 @@ pub(super) fn parse_output_format_kind(raw: &str) -> Result<&'static str, VmErro
 }
 
 pub(super) fn parse_output_format_option(
-    options: Option<&BTreeMap<String, VmValue>>,
+    options: Option<&crate::value::DictMap>,
     legacy_response_format: Option<&str>,
     legacy_json_schema: Option<&serde_json::Value>,
 ) -> Result<crate::llm::api::OutputFormat, VmError> {

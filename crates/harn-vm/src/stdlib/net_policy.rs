@@ -149,7 +149,7 @@ fn net_policy_create_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue
         .cloned()
         .unwrap_or_else(|| VmValue::String(std::sync::Arc::from("error")));
     policy.insert("on_violation".to_string(), on_violation);
-    Ok(VmValue::Dict(std::sync::Arc::new(policy)))
+    Ok(VmValue::dict(policy))
 }
 
 pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
@@ -169,7 +169,7 @@ fn rule_dict(kind: &'static str, fields: &[(&str, VmValue)]) -> VmValue {
     for (key, value) in fields {
         dict.insert((*key).to_string(), value.clone());
     }
-    VmValue::Dict(std::sync::Arc::new(dict))
+    VmValue::dict(dict)
 }
 
 fn require_string(args: &[VmValue], index: usize, callee: &str) -> Result<String, VmError> {

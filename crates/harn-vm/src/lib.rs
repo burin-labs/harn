@@ -475,7 +475,6 @@ mod reset_leak_tests {
     //! the registry is empty again.
     use super::*;
     use crate::value::VmValue;
-    use std::collections::BTreeMap;
 
     #[test]
     fn reset_drains_agent_inbox() {
@@ -511,7 +510,7 @@ mod reset_leak_tests {
     #[test]
     fn reset_drains_routing_policy_registry() {
         llm::routing::clear_policy_registry();
-        let mut config: BTreeMap<String, VmValue> = BTreeMap::new();
+        let mut config: crate::value::DictMap = crate::value::DictMap::new();
         config.insert(
             "chain".to_string(),
             VmValue::List(std::sync::Arc::new(vec![VmValue::String(

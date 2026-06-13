@@ -32,7 +32,7 @@ use super::usage::{llm_usage_delta, llm_usage_snapshot, UsageSnapshot};
 
 thread_local! {
     pub(super) static WORKFLOW_RUN_STATES: RefCell<BTreeMap<String, WorkflowRunState>> =
-        const { RefCell::new(BTreeMap::new()) };
+        const { RefCell::new(std::collections::BTreeMap::new()) };
 }
 
 pub(super) struct WorkflowRunState {
@@ -79,7 +79,7 @@ pub(super) enum StageExecution {
     },
     HarnMapCall {
         artifacts: Vec<ArtifactRecord>,
-        map_options: BTreeMap<String, VmValue>,
+        map_options: crate::value::DictMap,
         usage_before: UsageSnapshot,
         attempt_started_at: String,
         input_transcript: Option<VmValue>,
@@ -97,7 +97,7 @@ pub(super) struct WorkflowExecutedStageRecord {
     pub(super) produced_artifact_ids: Vec<String>,
 }
 
-pub(super) fn parse_options_arg(args: &[VmValue], index: usize) -> BTreeMap<String, VmValue> {
+pub(super) fn parse_options_arg(args: &[VmValue], index: usize) -> crate::value::DictMap {
     args.get(index)
         .and_then(|v| v.as_dict())
         .cloned()
@@ -164,7 +164,7 @@ pub(super) fn workflow_control_to_vm(
     state: &WorkflowRunState,
     include_graph: bool,
 ) -> Result<VmValue, VmError> {
-    let mut dict = BTreeMap::new();
+    let mut dict = crate::value::DictMap::new();
     dict.put_str("state_id", state.state_id.as_str());
     dict.put_str("run_id", state.run.id.as_str());
     dict.insert(
@@ -182,7 +182,7 @@ pub(super) fn workflow_control_to_vm(
     if include_graph {
         dict.insert("graph".to_string(), workflow_graph_to_vm(&state.graph)?);
     }
-    Ok(VmValue::Dict(std::sync::Arc::new(dict)))
+    Ok(VmValue::dict(dict))
 }
 
 pub(super) fn insert_workflow_state(state: WorkflowRunState) {
@@ -260,10 +260,10 @@ fn validate_workflow_skill_registry(value: VmValue) -> Option<VmValue> {
             Some(value)
         }
         VmValue::List(list) => {
-            let mut dict = BTreeMap::new();
+            let mut dict = crate::value::DictMap::new();
             dict.put_str("_type", "skill_registry");
             dict.insert("skills".to_string(), VmValue::List(list.clone()));
-            Some(VmValue::Dict(std::sync::Arc::new(dict)))
+            Some(VmValue::dict(dict))
         }
         _ => None,
     }
@@ -294,7 +294,7 @@ pub(super) fn prepare_workflow_state(
     task: String,
     graph: WorkflowGraph,
     mut artifacts: Vec<ArtifactRecord>,
-    options: &BTreeMap<String, VmValue>,
+    options: &crate::value::DictMap,
 ) -> Result<WorkflowRunState, VmError> {
     crate::llm::enable_tracing();
     crate::tracing::set_tracing_enabled(true);
@@ -383,7 +383,7 @@ pub(super) fn prepare_workflow_state(
         tool_recordings: Vec::new(),
         hitl_questions: Vec::new(),
         persona_runtime: Vec::new(),
-        metadata: BTreeMap::new(),
+        metadata: std::collections::BTreeMap::new(),
         persisted_path: None,
     });
     let requested_mutation_scope = optional_string_option(options, "mutation_scope")
@@ -409,7 +409,7 @@ pub(super) fn prepare_workflow_state(
     let audit_input = options
         .get("audit")
         .cloned()
-        .unwrap_or_else(|| VmValue::Dict(std::sync::Arc::new(BTreeMap::new())));
+        .unwrap_or_else(|| VmValue::dict(crate::value::DictMap::new()));
     let mut mutation_session: MutationSessionRecord =
         serde_json::from_value(crate::llm::vm_value_to_json(&audit_input))
             .map_err(|e| VmError::Runtime(format!("workflow_execute: audit parse error: {e}")))?;
@@ -657,7 +657,7 @@ fn stage_metadata(
 }
 
 fn workflow_stage_plan_to_vm(scope: &StageExecutionScope) -> Result<VmValue, VmError> {
-    let mut dict = BTreeMap::new();
+    let mut dict = crate::value::DictMap::new();
     dict.put_str("kind", scope.node.kind.as_str());
     match &scope.execution {
         StageExecution::Precomputed(executed) => {
@@ -688,11 +688,11 @@ fn workflow_stage_plan_to_vm(scope: &StageExecutionScope) -> Result<VmValue, VmE
                 );
                 dict.insert(
                     "llm_options".to_string(),
-                    VmValue::Dict(std::sync::Arc::new(prepared.llm_options.clone())),
+                    VmValue::dict(prepared.llm_options.clone()),
                 );
                 dict.insert(
                     "agent_loop_options".to_string(),
-                    VmValue::Dict(std::sync::Arc::new(prepared.agent_loop_options.clone())),
+                    VmValue::dict(prepared.agent_loop_options.clone()),
                 );
             }
         }
@@ -706,11 +706,11 @@ fn workflow_stage_plan_to_vm(scope: &StageExecutionScope) -> Result<VmValue, VmE
             dict.insert("artifacts".to_string(), to_vm(artifacts)?);
             dict.insert(
                 "map_options".to_string(),
-                VmValue::Dict(std::sync::Arc::new(map_options.clone())),
+                VmValue::dict(map_options.clone()),
             );
         }
     }
-    Ok(VmValue::Dict(std::sync::Arc::new(dict)))
+    Ok(VmValue::dict(dict))
 }
 
 fn workflow_stage_error_result(error: &VmError) -> serde_json::Value {
@@ -945,7 +945,7 @@ pub(super) async fn prepare_workflow_stage_state(
     ctx: &AsyncBuiltinCtx,
     mut state: WorkflowRunState,
     node_id: String,
-    options: &BTreeMap<String, VmValue>,
+    options: &crate::value::DictMap,
 ) -> Result<(WorkflowRunState, VmValue), VmError> {
     if state.stage_scope.is_some() {
         return Err(VmError::Runtime(format!(
@@ -1045,7 +1045,7 @@ pub(super) async fn prepare_workflow_stage_state(
             .iter()
             .map(|artifact| artifact.id.clone())
             .collect::<Vec<_>>();
-        let mut map_options = BTreeMap::new();
+        let mut map_options = crate::value::DictMap::new();
         map_options.put_str("task", state.run.task.clone());
         if let Some(transcript) = transcript.clone() {
             map_options.insert("transcript".to_string(), transcript);

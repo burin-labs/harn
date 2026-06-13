@@ -35,7 +35,6 @@
 //! opt-in model keeps the deterministic-tool surface sandbox-friendly.
 
 use harn_vm::VmDictExt;
-use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use harn_vm::VmValue;
@@ -218,11 +217,11 @@ fn handle_enable(args: &[VmValue]) -> Result<VmValue, HostlibError> {
     match feature.as_str() {
         permissions::FEATURE_TOOLS_DETERMINISTIC => {
             let newly_enabled = permissions::enable(&feature);
-            let mut map: BTreeMap<String, VmValue> = BTreeMap::new();
+            let mut map: harn_vm::value::DictMap = harn_vm::value::DictMap::new();
             map.put_str("feature", feature);
             map.insert("enabled".to_string(), VmValue::Bool(true));
             map.insert("newly_enabled".to_string(), VmValue::Bool(newly_enabled));
-            Ok(VmValue::Dict(Arc::new(map)))
+            Ok(VmValue::dict(map))
         }
         other => Err(HostlibError::InvalidParameter {
             builtin: "hostlib_enable",

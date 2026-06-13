@@ -24,7 +24,7 @@ pub(super) fn normalize_message_blocks(content: Option<&VmValue>, role: &str) ->
             )]
         }
         Some(VmValue::Nil) | None => Vec::new(),
-        Some(other) => vec![VmValue::Dict(std::sync::Arc::new(BTreeMap::from([
+        Some(other) => vec![VmValue::dict(BTreeMap::from([
             (
                 "type".to_string(),
                 VmValue::String(std::sync::Arc::from("text")),
@@ -37,13 +37,13 @@ pub(super) fn normalize_message_blocks(content: Option<&VmValue>, role: &str) ->
                 "visibility".to_string(),
                 VmValue::String(std::sync::Arc::from(default_visibility)),
             ),
-        ])))],
+        ]))],
     }
 }
 
 fn normalize_transcript_block(block: &VmValue, default_visibility: &str) -> VmValue {
     let mut normalized = block.as_dict().cloned().unwrap_or_else(|| {
-        BTreeMap::from([(
+        crate::value::DictMap::from_iter([(
             "text".to_string(),
             VmValue::String(std::sync::Arc::from(block.display())),
         )])
@@ -54,7 +54,7 @@ fn normalize_transcript_block(block: &VmValue, default_visibility: &str) -> VmVa
     if !normalized.contains_key("visibility") {
         normalized.put_str("visibility", default_visibility);
     }
-    VmValue::Dict(std::sync::Arc::new(normalized))
+    VmValue::dict(normalized)
 }
 
 pub(super) fn overall_visibility(blocks: &[VmValue], default_visibility: &str) -> String {
@@ -119,7 +119,7 @@ pub(super) fn render_blocks_text(blocks: &[VmValue]) -> String {
     parts.join(" ")
 }
 
-fn render_assetish_label(kind: &str, dict: &BTreeMap<String, VmValue>) -> String {
+fn render_assetish_label(kind: &str, dict: &crate::value::DictMap) -> String {
     let label = dict
         .get("name")
         .or_else(|| dict.get("title"))

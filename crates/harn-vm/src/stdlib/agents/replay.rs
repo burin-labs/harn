@@ -1,5 +1,5 @@
 use crate::value::VmDictExt;
-use std::collections::{BTreeMap, HashMap};
+use std::collections::HashMap;
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 
@@ -251,7 +251,7 @@ pub(super) fn apply_worker_replay_config(
 
 pub(super) fn apply_workflow_replay_config(
     artifacts: &mut Vec<ArtifactRecord>,
-    options: &mut BTreeMap<String, VmValue>,
+    options: &mut crate::value::DictMap,
     carry: WorkerReplayCarry,
 ) {
     if !carry.artifacts.is_empty() {

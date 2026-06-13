@@ -4,8 +4,6 @@
 //! so that Harn scripts see structured exceptions rather than panics.
 
 use harn_vm::VmDictExt;
-use std::collections::BTreeMap;
-use std::sync::Arc;
 
 use harn_vm::{VmError, VmValue};
 
@@ -108,13 +106,13 @@ impl From<HostlibError> for VmError {
         let builtin = err.builtin();
         let message = err.to_string();
 
-        let mut dict: BTreeMap<String, VmValue> = BTreeMap::new();
+        let mut dict: harn_vm::value::DictMap = harn_vm::value::DictMap::new();
         dict.put_str("kind", kind);
         dict.put_str("builtin", builtin);
         dict.put_str("message", message);
         if let Some(path) = path {
             dict.put_str("path", path);
         }
-        VmError::Thrown(VmValue::Dict(Arc::new(dict)))
+        VmError::Thrown(VmValue::dict(dict))
     }
 }

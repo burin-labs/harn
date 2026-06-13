@@ -209,7 +209,7 @@ fn applied_response(
     replacement: &str,
     dry_run: bool,
 ) -> VmValue {
-    VmValue::Dict(Arc::new(
+    VmValue::dict(
         [
             ("result".to_string(), str_value("applied")),
             ("applied".to_string(), VmValue::Bool(true)),
@@ -230,8 +230,8 @@ fn applied_response(
             ("preview".to_string(), str_value(lossy_str(after))),
         ]
         .into_iter()
-        .collect(),
-    ))
+        .collect::<harn_vm::value::DictMap>(),
+    )
 }
 
 fn no_match_response(path: &str, query: &str, target_capture: &str, details: &str) -> VmValue {
@@ -246,7 +246,7 @@ fn no_match_response(path: &str, query: &str, target_capture: &str, details: &st
 }
 
 fn ambiguous_response(match_count: usize, spans: &[Span]) -> VmValue {
-    VmValue::Dict(Arc::new(
+    VmValue::dict(
         [
             ("result".to_string(), str_value("ambiguous")),
             ("applied".to_string(), VmValue::Bool(false)),
@@ -264,8 +264,8 @@ fn ambiguous_response(match_count: usize, spans: &[Span]) -> VmValue {
             ),
         ]
         .into_iter()
-        .collect(),
-    ))
+        .collect::<harn_vm::value::DictMap>(),
+    )
 }
 
 fn no_nth_response(match_count: usize, requested: usize, path: &str, query: &str) -> VmValue {
@@ -350,7 +350,7 @@ fn span_to_value(span: &Span) -> VmValue {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::collections::BTreeMap;
+
     use std::io::Write;
     use tempfile::NamedTempFile;
 
@@ -359,11 +359,11 @@ mod tests {
     }
 
     fn dict(pairs: &[(&str, VmValue)]) -> VmValue {
-        let mut map: BTreeMap<String, VmValue> = BTreeMap::new();
+        let mut map: harn_vm::value::DictMap = Default::default();
         for (k, v) in pairs {
             map.insert((*k).to_string(), v.clone());
         }
-        VmValue::Dict(Arc::new(map))
+        VmValue::dict(map)
     }
 
     fn field<'a>(value: &'a VmValue, key: &str) -> &'a VmValue {

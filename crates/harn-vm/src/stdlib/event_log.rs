@@ -118,7 +118,7 @@ fn register_event_log_namespace(vm: &mut Vm) {
     let names = ["emit", "latest", "subscribe"];
     vm.set_global(
         "event_log",
-        VmValue::Dict(std::sync::Arc::new(
+        VmValue::dict(
             std::iter::once((
                 "_namespace".to_string(),
                 VmValue::String(std::sync::Arc::from("event_log")),
@@ -130,7 +130,7 @@ fn register_event_log_namespace(vm: &mut Vm) {
                 )
             }))
             .collect::<BTreeMap<_, _>>(),
-        )),
+        ),
     );
 }
 

@@ -24,12 +24,12 @@ fn b(v: bool) -> VmValue {
 }
 
 fn dict(entries: Vec<(&str, VmValue)>) -> VmValue {
-    VmValue::Dict(std::sync::Arc::new(
+    VmValue::dict(
         entries
             .into_iter()
             .map(|(key, value)| (key.to_string(), value))
-            .collect(),
-    ))
+            .collect::<crate::value::DictMap>(),
+    )
 }
 
 fn drain_feedback(session_id: &str, handle_id: &str) -> serde_json::Value {

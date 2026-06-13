@@ -1,6 +1,5 @@
 use std::collections::BTreeMap;
 
-use harn_vm::VmValue;
 use serde_json::json;
 
 use super::state::Debugger;
@@ -395,7 +394,7 @@ pub(crate) fn condition_for_line(
 #[allow(dead_code)]
 pub(crate) fn check_condition_literal(
     condition: &str,
-    variables: &BTreeMap<String, VmValue>,
+    variables: &harn_vm::value::DictMap,
 ) -> Result<bool, String> {
     for op in &["==", "!=", ">=", "<=", ">", "<"] {
         if let Some((lhs, rhs)) = condition.split_once(op) {
@@ -448,7 +447,7 @@ impl Debugger {
         &mut self,
         bp_conditions: &[(i64, Option<String>)],
         line: i64,
-        variables: &BTreeMap<String, VmValue>,
+        variables: &harn_vm::value::DictMap,
     ) -> BreakpointCondition {
         let Some(condition) = condition_for_line(bp_conditions, line) else {
             return BreakpointCondition::Fire;
@@ -485,7 +484,7 @@ impl Debugger {
     pub(crate) fn classify_breakpoint_hit(
         &mut self,
         line: i64,
-        variables: &BTreeMap<String, VmValue>,
+        variables: &harn_vm::value::DictMap,
     ) -> BreakpointAction {
         // Find the matching breakpoint — there may be more than one on
         // a line in theory, but setBreakpoints de-dupes per file so in

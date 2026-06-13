@@ -337,7 +337,7 @@ impl VmSyncPrimitive {
             "total_held_ms".to_string(),
             VmValue::Int(metrics.total_held_ms as i64),
         );
-        VmValue::Dict(std::sync::Arc::new(dict))
+        VmValue::dict(dict)
     }
 }
 

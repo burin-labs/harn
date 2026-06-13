@@ -91,7 +91,7 @@ fn register_step_namespace(vm: &mut Vm) {
     let names = ["run", "inspect"];
     vm.set_global(
         "step",
-        VmValue::Dict(std::sync::Arc::new(
+        VmValue::dict(
             std::iter::once((
                 "_namespace".to_string(),
                 VmValue::String(std::sync::Arc::from("step")),
@@ -103,7 +103,7 @@ fn register_step_namespace(vm: &mut Vm) {
                 )
             }))
             .collect::<BTreeMap<_, _>>(),
-        )),
+        ),
     );
 }
 
@@ -307,7 +307,7 @@ fn parse_step_inspect_namespace(args: Vec<VmValue>, vm: &Vm) -> Result<String, V
 }
 
 fn reject_unknown_options(
-    dict: &BTreeMap<String, VmValue>,
+    dict: &crate::value::DictMap,
     builtin: &str,
     allowed: &[&str],
 ) -> Result<(), VmError> {
@@ -538,10 +538,7 @@ mod tests {
 
     #[test]
     fn options_reject_unknown_keys() {
-        let options = VmValue::Dict(std::sync::Arc::new(BTreeMap::from([(
-            "namesapce".to_string(),
-            vm_str("oops"),
-        )])));
+        let options = VmValue::dict(BTreeMap::from([("namesapce".to_string(), vm_str("oops"))]));
 
         let err = parse_step_options(&options, "step.run").unwrap_err();
 

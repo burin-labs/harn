@@ -37,7 +37,7 @@ struct CounterEntry {
 
 thread_local! {
     static AUTONOMY_COUNTERS: RefCell<BTreeMap<String, CounterEntry>> =
-        const { RefCell::new(BTreeMap::new()) };
+        const { RefCell::new(std::collections::BTreeMap::new()) };
 }
 
 pub(crate) fn reset_autonomy_budget_state() {
@@ -108,7 +108,7 @@ pub(crate) fn snapshot(key: &str) -> (u64, u64) {
 }
 
 pub(crate) fn parse_autonomy_budget(
-    options: Option<&BTreeMap<String, VmValue>>,
+    options: Option<&crate::value::DictMap>,
     default_key: &str,
     label: &str,
 ) -> Result<Option<AgentAutonomyBudget>, VmError> {
@@ -356,10 +356,10 @@ mod tests {
 
     #[test]
     fn missing_caps_returns_none() {
-        let mut opts = BTreeMap::new();
+        let mut opts = crate::value::DictMap::new();
         opts.insert(
             "autonomy_budget".to_string(),
-            VmValue::Dict(std::sync::Arc::new(BTreeMap::new())),
+            VmValue::dict(crate::value::DictMap::new()),
         );
         let parsed = parse_autonomy_budget(Some(&opts), "session-1", "agent_loop").expect("parse");
         assert!(parsed.is_none());

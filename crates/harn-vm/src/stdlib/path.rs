@@ -6,8 +6,6 @@
 //! called from Harn code without surprises when a Windows-style path
 //! crosses the wire.
 
-use std::collections::BTreeMap;
-
 use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
 use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
@@ -207,7 +205,7 @@ fn relative_to(p: &str, base: &str) -> Option<String> {
 }
 
 fn workspace_path_info_to_vm(info: WorkspacePathInfo) -> VmValue {
-    let mut map: BTreeMap<String, VmValue> = BTreeMap::new();
+    let mut map: crate::value::DictMap = crate::value::DictMap::new();
     map.insert(
         "input".into(),
         VmValue::String(std::sync::Arc::from(info.input)),
@@ -246,7 +244,7 @@ fn workspace_path_info_to_vm(info: WorkspacePathInfo) -> VmValue {
             .map(|value| VmValue::String(std::sync::Arc::from(value)))
             .unwrap_or(VmValue::Nil),
     );
-    VmValue::Dict(std::sync::Arc::new(map))
+    VmValue::dict(map)
 }
 
 pub(crate) fn register_path_helper_builtins(vm: &mut Vm) {
@@ -258,7 +256,7 @@ pub(crate) fn register_path_helper_builtins(vm: &mut Vm) {
 #[harn_builtin(sig = "path_parts(path: string?) -> dict", category = "path")]
 fn path_parts_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let p = args.first().map(|a| a.display()).unwrap_or_default();
-    let mut map: BTreeMap<String, VmValue> = BTreeMap::new();
+    let mut map: crate::value::DictMap = crate::value::DictMap::new();
     map.insert(
         "dir".into(),
         VmValue::String(std::sync::Arc::from(parent(&p))),
@@ -285,7 +283,7 @@ fn path_parts_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErr
                 .collect(),
         )),
     );
-    Ok(VmValue::Dict(std::sync::Arc::new(map)))
+    Ok(VmValue::dict(map))
 }
 
 #[harn_builtin(sig = "path_parent(path: string?) -> string", category = "path")]

@@ -32,7 +32,7 @@ impl OperationHandleInfo {
         dict.put_str("status", "running");
         dict.put_str("operation", self.operation);
         dict.put_str("command_or_op_descriptor", self.descriptor);
-        VmValue::Dict(std::sync::Arc::new(dict))
+        VmValue::dict(dict)
     }
 }
 

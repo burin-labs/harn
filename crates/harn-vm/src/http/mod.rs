@@ -1,6 +1,6 @@
 use crate::value::VmDictExt;
 use std::cell::RefCell;
-use std::collections::{BTreeMap, HashMap};
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use crate::value::{VmClosure, VmError, VmValue};
@@ -27,7 +27,7 @@ pub use mock::{http_mock_calls_snapshot, push_http_mock, HttpMockCallSnapshot, H
 pub(crate) async fn execute_http_request(
     method: &str,
     url: &str,
-    options: &BTreeMap<String, VmValue>,
+    options: &crate::value::DictMap,
 ) -> Result<VmValue, VmError> {
     client::vm_execute_http_request(method, url, options).await
 }
@@ -115,18 +115,18 @@ pub(super) fn handle_from_value(value: &VmValue, builtin: &str) -> Result<String
     }
 }
 
-pub(super) fn get_options_arg(args: &[VmValue], index: usize) -> BTreeMap<String, VmValue> {
+pub(super) fn get_options_arg(args: &[VmValue], index: usize) -> crate::value::DictMap {
     args.get(index)
         .and_then(|value| value.as_dict())
         .cloned()
         .unwrap_or_default()
 }
 
-fn dict_value(entries: BTreeMap<String, VmValue>) -> VmValue {
-    VmValue::Dict(std::sync::Arc::new(entries))
+fn dict_value(entries: crate::value::DictMap) -> VmValue {
+    VmValue::dict(entries)
 }
 
-fn get_bool_option(options: &BTreeMap<String, VmValue>, key: &str, default: bool) -> bool {
+fn get_bool_option(options: &crate::value::DictMap, key: &str, default: bool) -> bool {
     match options.get(key) {
         Some(VmValue::Bool(value)) => *value,
         _ => default,
@@ -134,7 +134,7 @@ fn get_bool_option(options: &BTreeMap<String, VmValue>, key: &str, default: bool
 }
 
 fn get_usize_option(
-    options: &BTreeMap<String, VmValue>,
+    options: &crate::value::DictMap,
     key: &str,
     default: usize,
 ) -> Result<usize, VmError> {
@@ -146,7 +146,7 @@ fn get_usize_option(
 }
 
 fn get_optional_usize_option(
-    options: &BTreeMap<String, VmValue>,
+    options: &crate::value::DictMap,
     key: &str,
 ) -> Result<Option<usize>, VmError> {
     match options.get(key).and_then(VmValue::as_int) {
@@ -178,13 +178,13 @@ fn closure_arg(args: &[VmValue], index: usize, builtin: &str) -> Result<Arc<VmCl
 }
 
 fn http_server_handle_value(id: &str) -> VmValue {
-    let mut dict = BTreeMap::new();
+    let mut dict = crate::value::DictMap::new();
     dict.insert("id".to_string(), VmValue::string(id));
     dict.insert("kind".to_string(), VmValue::string("http_server"));
     dict_value(dict)
 }
 
-fn header_lookup_value(headers: &BTreeMap<String, VmValue>, name: &str) -> VmValue {
+fn header_lookup_value(headers: &crate::value::DictMap, name: &str) -> VmValue {
     headers
         .iter()
         .find(|(candidate, _)| candidate.eq_ignore_ascii_case(name))
@@ -192,7 +192,7 @@ fn header_lookup_value(headers: &BTreeMap<String, VmValue>, name: &str) -> VmVal
         .unwrap_or(VmValue::Nil)
 }
 
-fn headers_from_value(value: &VmValue) -> BTreeMap<String, VmValue> {
+fn headers_from_value(value: &VmValue) -> crate::value::DictMap {
     match value {
         VmValue::Dict(dict) => dict
             .get("headers")
@@ -212,17 +212,17 @@ fn headers_from_value(value: &VmValue) -> BTreeMap<String, VmValue> {
                     })
                     .collect()
             }),
-        _ => BTreeMap::new(),
+        _ => crate::value::DictMap::new(),
     }
 }
 
-fn normalize_headers(value: Option<&VmValue>) -> BTreeMap<String, VmValue> {
+fn normalize_headers(value: Option<&VmValue>) -> crate::value::DictMap {
     match value.and_then(VmValue::as_dict) {
         Some(headers) => headers
             .iter()
             .map(|(key, value)| (key.to_ascii_lowercase(), VmValue::string(value.display())))
             .collect(),
-        None => BTreeMap::new(),
+        None => crate::value::DictMap::new(),
     }
 }
 
@@ -258,9 +258,9 @@ fn hex_val(byte: u8) -> Option<u8> {
     }
 }
 
-fn split_path_and_query(raw_path: &str) -> (String, BTreeMap<String, VmValue>) {
+fn split_path_and_query(raw_path: &str) -> (String, crate::value::DictMap) {
     let (path, query) = raw_path.split_once('?').unwrap_or((raw_path, ""));
-    let mut query_map = BTreeMap::new();
+    let mut query_map = crate::value::DictMap::new();
     for pair in query.split('&').filter(|part| !part.is_empty()) {
         let (key, value) = pair.split_once('=').unwrap_or((pair, ""));
         query_map.insert(percent_decode(key), VmValue::string(percent_decode(value)));
@@ -271,7 +271,7 @@ fn split_path_and_query(raw_path: &str) -> (String, BTreeMap<String, VmValue>) {
     )
 }
 
-fn request_body_bytes(input: &BTreeMap<String, VmValue>) -> Vec<u8> {
+fn request_body_bytes(input: &crate::value::DictMap) -> Vec<u8> {
     match input.get("raw_body").or_else(|| input.get("body")) {
         Some(VmValue::Bytes(bytes)) => bytes.as_ref().clone(),
         Some(value) => value.display().into_bytes(),
@@ -282,9 +282,9 @@ fn request_body_bytes(input: &BTreeMap<String, VmValue>) -> Vec<u8> {
 fn request_value(
     method: &str,
     path: &str,
-    path_params: BTreeMap<String, VmValue>,
-    mut query: BTreeMap<String, VmValue>,
-    input: &BTreeMap<String, VmValue>,
+    path_params: crate::value::DictMap,
+    mut query: crate::value::DictMap,
+    input: &crate::value::DictMap,
     body_bytes: &[u8],
     retain_raw_body: bool,
 ) -> VmValue {
@@ -298,7 +298,7 @@ fn request_value(
 
     let headers = normalize_headers(input.get("headers"));
     let body = String::from_utf8_lossy(body_bytes).into_owned();
-    let mut request = BTreeMap::new();
+    let mut request = crate::value::DictMap::new();
     request.insert("method".to_string(), VmValue::string(method));
     request.insert("path".to_string(), VmValue::string(path));
     let path_params = dict_value(path_params);
@@ -349,12 +349,12 @@ fn normalize_status(status: i64) -> i64 {
 
 fn response_with_kind(
     status: i64,
-    mut headers: BTreeMap<String, VmValue>,
+    mut headers: crate::value::DictMap,
     body: VmValue,
     body_kind: &str,
 ) -> VmValue {
     let status = normalize_status(status);
-    let mut response = BTreeMap::new();
+    let mut response = crate::value::DictMap::new();
     if body_kind == "json" && matches!(header_lookup_value(&headers, "content-type"), VmValue::Nil)
     {
         headers.insert(
@@ -417,13 +417,13 @@ fn normalize_response(value: VmValue) -> VmValue {
                 .unwrap_or(VmValue::Nil);
             response_with_kind(status, headers, body, &body_kind)
         }
-        VmValue::Nil => response_with_kind(204, BTreeMap::new(), VmValue::Nil, "text"),
-        other => response_with_kind(200, BTreeMap::new(), other, "text"),
+        VmValue::Nil => response_with_kind(204, crate::value::DictMap::new(), VmValue::Nil, "text"),
+        other => response_with_kind(200, crate::value::DictMap::new(), other, "text"),
     }
 }
 
 fn body_limit_response(limit: usize, actual: usize) -> VmValue {
-    let mut headers = BTreeMap::new();
+    let mut headers = crate::value::DictMap::new();
     headers.insert(
         "content-type".to_string(),
         VmValue::string("text/plain; charset=utf-8"),
@@ -444,26 +444,31 @@ fn body_limit_response(limit: usize, actual: usize) -> VmValue {
 fn not_found_response(method: &str, path: &str) -> VmValue {
     response_with_kind(
         404,
-        BTreeMap::new(),
+        crate::value::DictMap::new(),
         VmValue::string(format!("no route for {method} {path}")),
         "text",
     )
 }
 
 fn unavailable_response(message: &str) -> VmValue {
-    response_with_kind(503, BTreeMap::new(), VmValue::string(message), "text")
+    response_with_kind(
+        503,
+        crate::value::DictMap::new(),
+        VmValue::string(message),
+        "text",
+    )
 }
 
-fn route_template_match(template: &str, path: &str) -> Option<BTreeMap<String, VmValue>> {
+fn route_template_match(template: &str, path: &str) -> Option<crate::value::DictMap> {
     let template_segments: Vec<&str> = template.trim_matches('/').split('/').collect();
     let path_segments: Vec<&str> = path.trim_matches('/').split('/').collect();
     if template == "/" && path == "/" {
-        return Some(BTreeMap::new());
+        return Some(crate::value::DictMap::new());
     }
     if template_segments.len() != path_segments.len() {
         return None;
     }
-    let mut params = BTreeMap::new();
+    let mut params = crate::value::DictMap::new();
     for (tmpl, actual) in template_segments.iter().zip(path_segments.iter()) {
         if tmpl.starts_with('{') && tmpl.ends_with('}') && tmpl.len() > 2 {
             params.insert(
@@ -486,7 +491,7 @@ fn matching_route(
     server: &HttpServer,
     method: &str,
     path: &str,
-) -> Option<(HttpServerRoute, BTreeMap<String, VmValue>)> {
+) -> Option<(HttpServerRoute, crate::value::DictMap)> {
     server.routes.iter().find_map(|route| {
         if route.method != "*" && !route.method.eq_ignore_ascii_case(method) {
             return None;
@@ -623,7 +628,7 @@ fn register_http_tls_builtins(vm: &mut Vm) {
             false,
             "http",
             false,
-            BTreeMap::new(),
+            crate::value::DictMap::new(),
         ))
     });
     vm.register_builtin("http_server_tls_edge", |args, _out| {
@@ -654,7 +659,7 @@ fn register_http_tls_builtins(vm: &mut Vm) {
                 "http_server_tls_pem: private key not found: {key_path}"
             )));
         }
-        let mut extra = BTreeMap::new();
+        let mut extra = crate::value::DictMap::new();
         extra.put_str("cert_path", cert_path);
         extra.put_str("key_path", key_path);
         Ok(http_server_tls_config_value(
@@ -668,7 +673,7 @@ fn register_http_tls_builtins(vm: &mut Vm) {
                 "http_server_tls_self_signed_dev: failed to generate certificate: {error}"
             ))
         })?;
-        let mut extra = BTreeMap::new();
+        let mut extra = crate::value::DictMap::new();
         extra.insert(
             "hosts".to_string(),
             VmValue::List(std::sync::Arc::new(
@@ -694,9 +699,7 @@ fn register_http_tls_builtins(vm: &mut Vm) {
                 "http_server_security_headers: requires a TLS config dict",
             ));
         };
-        Ok(VmValue::Dict(std::sync::Arc::new(
-            http_server_security_headers(config),
-        )))
+        Ok(VmValue::dict(http_server_security_headers(config)))
     });
 }
 
@@ -1066,9 +1069,9 @@ fn http_server_tls_config_value(
     terminate_tls: bool,
     scheme: &str,
     hsts: bool,
-    extra: BTreeMap<String, VmValue>,
+    extra: crate::value::DictMap,
 ) -> VmValue {
-    let mut dict = BTreeMap::new();
+    let mut dict = crate::value::DictMap::new();
     dict.put_str("mode", mode);
     dict.insert("terminate_tls".to_string(), VmValue::Bool(terminate_tls));
     dict.put_str("scheme", scheme);
@@ -1076,11 +1079,11 @@ fn http_server_tls_config_value(
     for (key, value) in extra {
         dict.insert(key, value);
     }
-    VmValue::Dict(std::sync::Arc::new(dict))
+    VmValue::dict(dict)
 }
 
-fn hsts_options(options: &BTreeMap<String, VmValue>) -> BTreeMap<String, VmValue> {
-    let mut hsts = BTreeMap::new();
+fn hsts_options(options: &crate::value::DictMap) -> crate::value::DictMap {
+    let mut hsts = crate::value::DictMap::new();
     hsts.insert(
         "hsts_max_age_seconds".to_string(),
         VmValue::Int(vm_get_int_option(
@@ -1104,10 +1107,10 @@ fn hsts_options(options: &BTreeMap<String, VmValue>) -> BTreeMap<String, VmValue
     hsts
 }
 
-fn http_server_security_headers(config: &BTreeMap<String, VmValue>) -> BTreeMap<String, VmValue> {
+fn http_server_security_headers(config: &crate::value::DictMap) -> crate::value::DictMap {
     let hsts_enabled = vm_get_bool_option(config, "hsts", false);
     if !hsts_enabled {
-        return BTreeMap::new();
+        return crate::value::DictMap::new();
     }
     let mut value = format!(
         "max-age={}",
@@ -1119,7 +1122,7 @@ fn http_server_security_headers(config: &BTreeMap<String, VmValue>) -> BTreeMap<
     if vm_get_bool_option(config, "hsts_preload", false) {
         value.push_str("; preload");
     }
-    BTreeMap::from([(
+    crate::value::DictMap::from_iter([(
         "strict-transport-security".to_string(),
         VmValue::String(std::sync::Arc::from(value)),
     )])
@@ -1158,16 +1161,12 @@ fn tls_hosts_arg(value: Option<&VmValue>) -> Result<Vec<String>, VmError> {
     }
 }
 
-pub(super) fn vm_get_int_option(
-    options: &BTreeMap<String, VmValue>,
-    key: &str,
-    default: i64,
-) -> i64 {
+pub(super) fn vm_get_int_option(options: &crate::value::DictMap, key: &str, default: i64) -> i64 {
     options.get(key).and_then(|v| v.as_int()).unwrap_or(default)
 }
 
 pub(super) fn vm_get_bool_option(
-    options: &BTreeMap<String, VmValue>,
+    options: &crate::value::DictMap,
     key: &str,
     default: bool,
 ) -> bool {
@@ -1178,7 +1177,7 @@ pub(super) fn vm_get_bool_option(
 }
 
 pub(super) fn vm_get_int_option_prefer(
-    options: &BTreeMap<String, VmValue>,
+    options: &crate::value::DictMap,
     canonical: &str,
     alias: &str,
     default: i64,
@@ -1191,7 +1190,7 @@ pub(super) fn vm_get_int_option_prefer(
 }
 
 pub(super) fn vm_get_optional_int_option(
-    options: &BTreeMap<String, VmValue>,
+    options: &crate::value::DictMap,
     key: &str,
 ) -> Option<u64> {
     options
@@ -1200,7 +1199,7 @@ pub(super) fn vm_get_optional_int_option(
         .map(|value| value.max(0) as u64)
 }
 
-pub(super) fn string_option(options: &BTreeMap<String, VmValue>, key: &str) -> Option<String> {
+pub(super) fn string_option(options: &crate::value::DictMap, key: &str) -> Option<String> {
     options
         .get(key)
         .map(|value| value.display())

@@ -1,5 +1,4 @@
 use crate::value::VmDictExt;
-use std::collections::BTreeMap;
 use std::sync::atomic::Ordering;
 
 use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
@@ -95,12 +94,12 @@ fn trace_start_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmEr
         });
     });
 
-    let mut span = BTreeMap::new();
+    let mut span = crate::value::DictMap::new();
     span.put_str("trace_id", trace_id);
     span.put_str("span_id", span_id);
     span.put_str("name", name);
     span.insert("start_ms".to_string(), VmValue::Int(start_ms));
-    Ok(VmValue::Dict(std::sync::Arc::new(span)))
+    Ok(VmValue::dict(span))
 }
 
 #[harn_builtin(sig = "trace_end(...args: any) -> nil", category = "tracing")]
@@ -108,7 +107,7 @@ fn trace_end_impl(args: &[VmValue], out: &mut String) -> Result<VmValue, VmError
     let (name, trace_id, span_id, duration_ms) = finish_span_from_args(args)?;
     let level_num = 1_u8;
     if level_num >= VM_MIN_LOG_LEVEL.load(Ordering::Relaxed) {
-        let mut fields = BTreeMap::new();
+        let mut fields = crate::value::DictMap::new();
         fields.put_str("trace_id", trace_id);
         fields.put_str("span_id", span_id);
         fields.put_str("name", name);
@@ -138,11 +137,11 @@ fn llm_info_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErro
         resolved.id
     };
     let api_key_set = crate::llm_config::provider_key_available(&provider);
-    let mut info = BTreeMap::new();
+    let mut info = crate::value::DictMap::new();
     info.put_str("provider", provider);
     info.put_str("model", model);
     info.insert("api_key_set".to_string(), VmValue::Bool(api_key_set));
-    Ok(VmValue::Dict(std::sync::Arc::new(info)))
+    Ok(VmValue::dict(info))
 }
 
 #[harn_builtin(sig = "enable_tracing(enabled?: bool) -> nil", category = "tracing")]
@@ -198,7 +197,7 @@ fn lifecycle_span_end_impl(args: &[VmValue], _out: &mut String) -> Result<VmValu
 #[harn_builtin(sig = "llm_usage() -> dict", category = "tracing")]
 fn llm_usage_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let (total_input, total_output, total_duration, call_count) = crate::llm::peek_trace_summary();
-    let mut usage = BTreeMap::new();
+    let mut usage = crate::value::DictMap::new();
     usage.insert("input_tokens".to_string(), VmValue::Int(total_input));
     usage.insert("output_tokens".to_string(), VmValue::Int(total_output));
     usage.insert(
@@ -207,7 +206,7 @@ fn llm_usage_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErr
     );
     usage.insert("call_count".to_string(), VmValue::Int(call_count));
     usage.insert("total_calls".to_string(), VmValue::Int(call_count));
-    Ok(VmValue::Dict(std::sync::Arc::new(usage)))
+    Ok(VmValue::dict(usage))
 }
 
 pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[

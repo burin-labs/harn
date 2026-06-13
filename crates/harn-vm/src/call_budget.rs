@@ -113,7 +113,7 @@ fn budget_exceeded_error(kind: CallBudgetKind, spent: u64, max: u64) -> VmError 
             kind.noun(max != 1),
         ),
     );
-    VmError::Thrown(VmValue::Dict(std::sync::Arc::new(dict)))
+    VmError::Thrown(VmValue::dict(dict))
 }
 
 /// RAII guard for [`install_mcp_call_budget`]. Restores the prior MCP

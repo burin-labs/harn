@@ -38,13 +38,13 @@ fn entries_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError>
         VmValue::Dict(map) => Ok(VmValue::List(std::sync::Arc::new(
             map.iter()
                 .map(|(k, v)| {
-                    VmValue::Dict(std::sync::Arc::new(BTreeMap::from([
+                    VmValue::dict(BTreeMap::from([
                         (
                             "key".to_string(),
                             VmValue::String(std::sync::Arc::from(k.as_str())),
                         ),
                         ("value".to_string(), v.clone()),
-                    ])))
+                    ]))
                 })
                 .collect(),
         ))),
@@ -140,12 +140,12 @@ fn __dict_rest(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> 
                 .collect(),
             _ => std::collections::HashSet::new(),
         };
-        let rest: BTreeMap<String, VmValue> = map
+        let rest: crate::value::DictMap = map
             .iter()
             .filter(|(k, _)| !exclude.contains(k.as_str()))
             .map(|(k, v)| (k.clone(), v.clone()))
             .collect();
-        Ok(VmValue::Dict(std::sync::Arc::new(rest)))
+        Ok(VmValue::dict(rest))
     } else {
         Ok(VmValue::Nil)
     }
@@ -169,11 +169,11 @@ fn __make_struct(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError
             Some(field_names) => Ok(VmValue::struct_instance_with_layout(
                 struct_name,
                 field_names,
-                BTreeMap::new(),
+                crate::value::DictMap::new(),
             )),
             None => Ok(VmValue::struct_instance_from_map(
                 struct_name,
-                BTreeMap::new(),
+                crate::value::DictMap::new(),
             )),
         },
     }

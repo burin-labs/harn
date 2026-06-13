@@ -85,18 +85,17 @@ fn unsupported_language_response(hint: &str) -> VmValue {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::collections::BTreeMap;
 
     fn invoke(dict: VmValue) -> VmValue {
         run(&[dict]).expect("capabilities runs")
     }
 
     fn dict(pairs: &[(&str, VmValue)]) -> VmValue {
-        let mut map: BTreeMap<String, VmValue> = BTreeMap::new();
+        let mut map: harn_vm::value::DictMap = Default::default();
         for (k, v) in pairs {
             map.insert((*k).to_string(), v.clone());
         }
-        VmValue::Dict(Arc::new(map))
+        VmValue::dict(map)
     }
 
     fn field<'a>(value: &'a VmValue, key: &str) -> &'a VmValue {

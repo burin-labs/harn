@@ -488,7 +488,7 @@ fn record_update_response(
 pub(crate) fn register_workflow_message_builtins(vm: &mut Vm) {
     vm.set_global(
         "workflow",
-        VmValue::Dict(std::sync::Arc::new(BTreeMap::from([
+        VmValue::dict(BTreeMap::from([
             (
                 "signal".to_string(),
                 VmValue::BuiltinRef(std::sync::Arc::from("workflow.signal")),
@@ -529,7 +529,7 @@ pub(crate) fn register_workflow_message_builtins(vm: &mut Vm) {
                 "continue_as_new".to_string(),
                 VmValue::BuiltinRef(std::sync::Arc::from("workflow.continue_as_new")),
             ),
-        ]))),
+        ])),
     );
 
     for def in MODULE_BUILTINS {

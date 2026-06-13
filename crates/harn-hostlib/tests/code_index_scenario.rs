@@ -16,7 +16,6 @@
 //! asserts the same set of invariants over a live repo. CI doesn't set the
 //! env var so the synthetic fixture path is the default.
 
-use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -26,11 +25,11 @@ use harn_hostlib::{
 use harn_vm::VmValue;
 
 fn dict(entries: &[(&str, VmValue)]) -> VmValue {
-    let mut map: BTreeMap<String, VmValue> = BTreeMap::new();
+    let mut map: harn_vm::value::DictMap = Default::default();
     for (k, v) in entries {
         map.insert((*k).to_string(), v.clone());
     }
-    VmValue::Dict(Arc::new(map))
+    VmValue::dict(map)
 }
 
 fn call(registry: &BuiltinRegistry, name: &str, payload: VmValue) -> VmValue {
@@ -40,7 +39,7 @@ fn call(registry: &BuiltinRegistry, name: &str, payload: VmValue) -> VmValue {
     (entry.handler)(&[payload]).unwrap_or_else(|err| panic!("builtin {name} failed: {err:?}"))
 }
 
-fn extract_dict(value: &VmValue) -> Arc<BTreeMap<String, VmValue>> {
+fn extract_dict(value: &VmValue) -> Arc<harn_vm::value::DictMap> {
     match value {
         VmValue::Dict(d) => d.clone(),
         other => panic!("expected dict, got {other:?}"),

@@ -34,7 +34,7 @@ impl Default for ObsConfig {
     fn default() -> Self {
         Self {
             backend: serde_json::json!({"kind": "auto", "id": "auto"}),
-            backends: BTreeMap::new(),
+            backends: std::collections::BTreeMap::new(),
             routes: Vec::new(),
             processors: Vec::new(),
             audit_to_pretty_stderr: true,
@@ -501,7 +501,7 @@ fn field_string(value: Option<&VmValue>, key: &str) -> Option<String> {
 }
 
 fn span_to_vm_value(span: &ObsSpan) -> VmValue {
-    let mut out = BTreeMap::new();
+    let mut out = crate::value::DictMap::new();
     out.put_str("trace_id", span.trace_id.as_str());
     out.put_str("span_id", span.id.as_str());
     out.put_str("name", span.name.as_str());
@@ -509,7 +509,7 @@ fn span_to_vm_value(span: &ObsSpan) -> VmValue {
         "attrs".to_string(),
         json_to_vm_value(&serde_json::Value::Object(span.attrs.clone())),
     );
-    VmValue::Dict(std::sync::Arc::new(out))
+    VmValue::dict(out)
 }
 
 fn base_event(
@@ -854,7 +854,7 @@ fn pretty_payload(event: &serde_json::Value) -> serde_json::Value {
         .or_else(|| event.get("name"))
         .and_then(serde_json::Value::as_str)
         .unwrap_or("");
-    let mut fields = BTreeMap::new();
+    let mut fields = crate::value::DictMap::new();
     if let Some(serde_json::Value::Object(map)) = event.get("fields") {
         for (key, value) in map {
             fields.insert(key.clone(), json_to_vm_value(value));

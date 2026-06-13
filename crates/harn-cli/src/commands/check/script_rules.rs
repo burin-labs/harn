@@ -341,7 +341,7 @@ mod imp {
             for (k, v) in pairs {
                 map.insert((*k).to_string(), v.clone());
             }
-            VmValue::Dict(Arc::new(map))
+            VmValue::dict(map)
         }
 
         fn s(text: &str) -> VmValue {

@@ -117,7 +117,7 @@ pub(super) async fn host_workflow_stage_complete_builtin(
             .map(|branch| VmValue::String(std::sync::Arc::from(branch)))
             .unwrap_or(VmValue::Nil),
     );
-    Ok(VmValue::Dict(std::sync::Arc::new(dict)))
+    Ok(VmValue::dict(dict))
 }
 
 /// Record workflow stage transitions and checkpoint low-level run state.

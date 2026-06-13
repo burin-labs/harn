@@ -496,7 +496,7 @@ fn render_fleet(
     bindings: Option<&VmValue>,
 ) -> Vec<ModelRender> {
     let base = template_path.parent();
-    let bindings_dict: Option<BTreeMap<String, VmValue>> = bindings.and_then(|v| match v {
+    let bindings_dict: Option<harn_vm::value::DictMap> = bindings.and_then(|v| match v {
         VmValue::Dict(dict) => Some(dict.as_ref().clone()),
         _ => None,
     });

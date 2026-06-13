@@ -11,7 +11,6 @@
 //! All cases drive the router through `tower::ServiceExt::oneshot`,
 //! mirroring `tests/site_hosting.rs`.
 
-use std::collections::BTreeMap;
 use std::path::Path;
 use std::sync::Arc;
 
@@ -126,7 +125,7 @@ impl HostCallBridge for ContextEchoBridge {
         &self,
         capability: &str,
         operation: &str,
-        _params: &BTreeMap<String, VmValue>,
+        _params: &harn_vm::value::DictMap,
     ) -> Result<Option<VmValue>, VmError> {
         if capability != "embedder" || operation != "auth_context" {
             return Ok(None);

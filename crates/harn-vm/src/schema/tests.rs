@@ -15,12 +15,12 @@ fn s(v: &str) -> VmValue {
     VmValue::String(std::sync::Arc::from(v))
 }
 
-fn make_dict(pairs: Vec<(&str, VmValue)>) -> BTreeMap<String, VmValue> {
+fn make_dict(pairs: Vec<(&str, VmValue)>) -> crate::value::DictMap {
     pairs.into_iter().map(|(k, v)| (k.to_string(), v)).collect()
 }
 
 fn make_vm_dict(pairs: Vec<(&str, VmValue)>) -> VmValue {
-    VmValue::Dict(std::sync::Arc::new(make_dict(pairs)))
+    VmValue::dict(make_dict(pairs))
 }
 
 fn make_list(items: Vec<VmValue>) -> VmValue {
@@ -71,10 +71,7 @@ fn deep_ref_chain_schema(depth: usize) -> VmValue {
     }
     make_vm_dict(vec![
         ("$ref", s("#/definitions/Node0")),
-        (
-            "definitions",
-            VmValue::Dict(std::sync::Arc::new(definitions)),
-        ),
+        ("definitions", VmValue::dict(definitions)),
     ])
 }
 
@@ -166,7 +163,7 @@ fn many_refs_are_rejected_at_expansion_limit() {
 
     let schema = make_vm_dict(vec![
         ("type", s("dict")),
-        ("properties", VmValue::Dict(std::sync::Arc::new(properties))),
+        ("properties", VmValue::dict(properties)),
         (
             "definitions",
             make_vm_dict(vec![("String", make_vm_dict(vec![("type", s("string"))]))]),

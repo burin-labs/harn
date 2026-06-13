@@ -279,7 +279,7 @@ pub fn register_mcp_builtins(vm: &mut Vm) {
             if let Some(card) = entry.card {
                 dict.put_str("card", card.as_str());
             }
-            out.push(VmValue::Dict(std::sync::Arc::new(dict)));
+            out.push(VmValue::dict(dict));
         }
         Ok(VmValue::List(std::sync::Arc::new(out)))
     });
@@ -464,7 +464,7 @@ pub fn register_mcp_builtins(vm: &mut Vm) {
                 json_to_vm_value(&cache_hints_to_json(cache_hints.iter())),
             );
         }
-        Ok(VmValue::Dict(std::sync::Arc::new(info)))
+        Ok(VmValue::dict(info))
     });
 
     vm.register_async_builtin("mcp_disconnect", |_ctx, args| async move {
@@ -648,7 +648,7 @@ pub(crate) fn mcp_roots_builtin(_args: &[VmValue], _out: &mut String) -> Result<
 }
 
 pub(crate) fn register_harn_mcp_namespace(vm: &mut Vm) {
-    let mcp_namespace = VmValue::Dict(std::sync::Arc::new(BTreeMap::from([
+    let mcp_namespace = VmValue::dict(BTreeMap::from([
         (
             "_namespace".to_string(),
             VmValue::String(std::sync::Arc::from("harn.mcp")),
@@ -701,10 +701,10 @@ pub(crate) fn register_harn_mcp_namespace(vm: &mut Vm) {
             "status".to_string(),
             VmValue::BuiltinRef(std::sync::Arc::from("harn.mcp.status")),
         ),
-    ])));
+    ]));
     vm.set_global(
         "harn",
-        VmValue::Dict(std::sync::Arc::new(BTreeMap::from([
+        VmValue::dict(BTreeMap::from([
             (
                 "_namespace".to_string(),
                 VmValue::String(std::sync::Arc::from("harn")),
@@ -714,7 +714,7 @@ pub(crate) fn register_harn_mcp_namespace(vm: &mut Vm) {
                 VmValue::BuiltinRef(std::sync::Arc::from("harn.mcp.roots")),
             ),
             ("mcp".to_string(), mcp_namespace),
-        ]))),
+        ])),
     );
 }
 
@@ -850,7 +850,7 @@ pub(crate) fn register_supervised_mcp_host_builtins(vm: &mut Vm) {
                     "cache_entries".to_string(),
                     VmValue::Int(s.cache_entries as i64),
                 );
-                VmValue::Dict(std::sync::Arc::new(dict))
+                VmValue::dict(dict)
             })
             .collect();
         Ok(VmValue::List(std::sync::Arc::new(list)))

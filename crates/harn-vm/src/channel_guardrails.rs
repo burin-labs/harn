@@ -53,7 +53,6 @@
 //!   of the guardrail.
 
 use std::cell::RefCell;
-use std::collections::BTreeMap;
 use std::sync::OnceLock;
 
 use regex::Regex;
@@ -149,14 +148,14 @@ fn err(message: impl Into<String>) -> VmError {
     VmError::Thrown(VmValue::String(std::sync::Arc::from(message.into())))
 }
 
-fn dict_string(dict: &BTreeMap<String, VmValue>, key: &str) -> Option<String> {
+fn dict_string(dict: &crate::value::DictMap, key: &str) -> Option<String> {
     match dict.get(key) {
         Some(VmValue::String(s)) if !s.is_empty() => Some(s.to_string()),
         _ => None,
     }
 }
 
-fn dict_string_list(dict: &BTreeMap<String, VmValue>, key: &str) -> Vec<String> {
+fn dict_string_list(dict: &crate::value::DictMap, key: &str) -> Vec<String> {
     match dict.get(key) {
         Some(VmValue::List(items)) => items
             .iter()
@@ -174,7 +173,7 @@ fn dict_string_list(dict: &BTreeMap<String, VmValue>, key: &str) -> Vec<String> 
 /// synthesised). Idempotent on `id`: re-registering the same id replaces
 /// the prior entry so callers can update a guardrail's config without
 /// duplicate evaluations.
-pub fn register(config: &BTreeMap<String, VmValue>) -> Result<String, VmError> {
+pub fn register(config: &crate::value::DictMap) -> Result<String, VmError> {
     let kind_label = dict_string(config, "kind")
         .ok_or_else(|| err("channel_guardrail_register: `kind` must be a non-empty string"))?;
     let kind = match kind_label.as_str() {
@@ -497,6 +496,7 @@ fn verdict_from_label(label: &str, reason: String) -> Result<Verdict, VmError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
     use serde_json::json;
 
     fn ctx() -> serde_json::Value {
@@ -506,7 +506,7 @@ mod tests {
     #[test]
     fn prompt_injection_signature_blocks_ignore_previous() {
         clear();
-        let mut cfg = BTreeMap::new();
+        let mut cfg = crate::value::DictMap::new();
         cfg.insert(
             "kind".into(),
             VmValue::String(std::sync::Arc::from("prompt_injection_signature")),
@@ -525,7 +525,7 @@ mod tests {
     #[test]
     fn prompt_injection_signature_walks_nested_strings() {
         clear();
-        let mut cfg = BTreeMap::new();
+        let mut cfg = crate::value::DictMap::new();
         cfg.insert(
             "kind".into(),
             VmValue::String(std::sync::Arc::from("prompt_injection_signature")),
@@ -548,7 +548,7 @@ mod tests {
     #[test]
     fn safe_payload_passes() {
         clear();
-        let mut cfg = BTreeMap::new();
+        let mut cfg = crate::value::DictMap::new();
         cfg.insert(
             "kind".into(),
             VmValue::String(std::sync::Arc::from("prompt_injection_signature")),
@@ -564,7 +564,7 @@ mod tests {
     #[test]
     fn warn_on_hit_yields_warn_verdict() {
         clear();
-        let mut cfg = BTreeMap::new();
+        let mut cfg = crate::value::DictMap::new();
         cfg.insert(
             "kind".into(),
             VmValue::String(std::sync::Arc::from("prompt_injection_signature")),
@@ -584,7 +584,7 @@ mod tests {
     #[test]
     fn applies_to_filter_skips_other_channels() {
         clear();
-        let mut cfg = BTreeMap::new();
+        let mut cfg = crate::value::DictMap::new();
         cfg.insert(
             "kind".into(),
             VmValue::String(std::sync::Arc::from("prompt_injection_signature")),
@@ -613,7 +613,7 @@ mod tests {
     #[test]
     fn unregister_removes_entry() {
         clear();
-        let mut cfg = BTreeMap::new();
+        let mut cfg = crate::value::DictMap::new();
         cfg.insert(
             "kind".into(),
             VmValue::String(std::sync::Arc::from("prompt_injection_signature")),
@@ -632,7 +632,7 @@ mod tests {
     #[test]
     fn duplicate_id_replaces_entry() {
         clear();
-        let mut cfg = BTreeMap::new();
+        let mut cfg = crate::value::DictMap::new();
         cfg.insert(
             "kind".into(),
             VmValue::String(std::sync::Arc::from("prompt_injection_signature")),
@@ -649,14 +649,14 @@ mod tests {
     #[test]
     fn block_short_circuits_after_first_block() {
         clear();
-        let mut a = BTreeMap::new();
+        let mut a = crate::value::DictMap::new();
         a.insert(
             "kind".into(),
             VmValue::String(std::sync::Arc::from("prompt_injection_signature")),
         );
         a.insert("id".into(), VmValue::String(std::sync::Arc::from("first")));
         register(&a).unwrap();
-        let mut b = BTreeMap::new();
+        let mut b = crate::value::DictMap::new();
         b.insert(
             "kind".into(),
             VmValue::String(std::sync::Arc::from("prompt_injection_signature")),

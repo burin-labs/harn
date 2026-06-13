@@ -82,7 +82,7 @@ fn ensure_worker_stage_session_id(
         .cloned()
         .unwrap_or_default();
     raw_model_policy.put_str("session_id", session_id.clone());
-    node.raw_model_policy = Some(VmValue::Dict(std::sync::Arc::new(raw_model_policy)));
+    node.raw_model_policy = Some(VmValue::dict(raw_model_policy));
     session_id
 }
 
@@ -211,7 +211,7 @@ async fn execute_worker_config(
                     crate::stdlib::json_to_vm_value(
                         &serde_json::to_value(&artifacts).unwrap_or_default(),
                     ),
-                    VmValue::Dict(std::sync::Arc::new(options)),
+                    VmValue::dict(options),
                 ],
             )
             .await;
@@ -224,9 +224,7 @@ async fn execute_worker_config(
             let transcript = dict.get("transcript").cloned();
             let artifacts = super::super::parse_artifact_list(dict.get("artifacts"))?;
             Ok(WorkerExecutionResult {
-                payload: crate::llm::vm_value_to_json(&VmValue::Dict(std::sync::Arc::new(
-                    dict.clone(),
-                ))),
+                payload: crate::llm::vm_value_to_json(&VmValue::dict(dict.clone())),
                 transcript,
                 artifacts,
                 execution,

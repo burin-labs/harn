@@ -18,7 +18,7 @@ use crate::value_args;
 pub(crate) fn require_dict_arg(
     builtin: &'static str,
     args: &[VmValue],
-) -> Result<BTreeMap<String, VmValue>, HostlibError> {
+) -> Result<harn_vm::value::DictMap, HostlibError> {
     let first = args.first().ok_or(HostlibError::MissingParameter {
         builtin,
         param: "request",
@@ -39,7 +39,7 @@ pub(crate) fn require_dict_arg(
 /// Optional string field on a request dict.
 pub(crate) fn optional_string(
     builtin: &'static str,
-    map: &BTreeMap<String, VmValue>,
+    map: &harn_vm::value::DictMap,
     key: &'static str,
 ) -> Result<Option<String>, HostlibError> {
     value_args::optional_string(builtin, map, key)
@@ -48,7 +48,7 @@ pub(crate) fn optional_string(
 /// Optional bool field on a request dict.
 pub(crate) fn optional_bool(
     builtin: &'static str,
-    map: &BTreeMap<String, VmValue>,
+    map: &harn_vm::value::DictMap,
     key: &'static str,
 ) -> Result<Option<bool>, HostlibError> {
     value_args::optional_bool(builtin, map, key)
@@ -57,7 +57,7 @@ pub(crate) fn optional_bool(
 /// Optional non-negative integer field on a request dict.
 pub(crate) fn optional_u64(
     builtin: &'static str,
-    map: &BTreeMap<String, VmValue>,
+    map: &harn_vm::value::DictMap,
     key: &'static str,
 ) -> Result<Option<u64>, HostlibError> {
     value_args::optional_u64(builtin, map, key)
@@ -67,7 +67,7 @@ pub(crate) fn optional_u64(
 /// or absent values as "no timeout".
 pub(crate) fn optional_timeout(
     builtin: &'static str,
-    map: &BTreeMap<String, VmValue>,
+    map: &harn_vm::value::DictMap,
     key: &'static str,
 ) -> Result<Option<Duration>, HostlibError> {
     Ok(optional_u64(builtin, map, key)?.and_then(|ms| {
@@ -82,7 +82,7 @@ pub(crate) fn optional_timeout(
 /// Optional `Vec<String>` field on a request dict (e.g. `argv`, `packages`).
 pub(crate) fn optional_string_list(
     builtin: &'static str,
-    map: &BTreeMap<String, VmValue>,
+    map: &harn_vm::value::DictMap,
     key: &'static str,
 ) -> Result<Option<Vec<String>>, HostlibError> {
     value_args::optional_string_list(builtin, map, key)
@@ -91,7 +91,7 @@ pub(crate) fn optional_string_list(
 /// Optional `BTreeMap<String, String>` field on a request dict (e.g. `env`).
 pub(crate) fn optional_string_map(
     builtin: &'static str,
-    map: &BTreeMap<String, VmValue>,
+    map: &harn_vm::value::DictMap,
     key: &'static str,
 ) -> Result<Option<BTreeMap<String, String>>, HostlibError> {
     let Some(value) = map.get(key) else {
@@ -124,7 +124,7 @@ pub(crate) fn optional_string_map(
 /// Required string field on a request dict — fails if missing or wrong type.
 pub(crate) fn require_string(
     builtin: &'static str,
-    map: &BTreeMap<String, VmValue>,
+    map: &harn_vm::value::DictMap,
     key: &'static str,
 ) -> Result<String, HostlibError> {
     value_args::require_string(builtin, map, key)

@@ -57,7 +57,7 @@ pub(super) fn run(args: &[VmValue]) -> Result<VmValue, HostlibError> {
 }
 
 fn parse_kinds_filter(
-    dict: &std::collections::BTreeMap<String, VmValue>,
+    dict: &harn_vm::value::DictMap,
 ) -> Result<Option<HashSet<String>>, HostlibError> {
     let Some(raw) = dict.get("kinds") else {
         return Ok(None);

@@ -22,7 +22,6 @@
 //! consumers: tree-sitter-oriented editor features and line-based file
 //! editing helpers.
 
-use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use harn_vm::VmValue;
@@ -417,11 +416,11 @@ fn not_found_response(available: Vec<String>, suggestions: Vec<String>) -> VmVal
     let suggestions_list = VmValue::List(Arc::new(
         suggestions.into_iter().map(|s| str_value(&s)).collect(),
     ));
-    let mut dict: BTreeMap<String, VmValue> = BTreeMap::new();
+    let mut dict: harn_vm::value::DictMap = harn_vm::value::DictMap::new();
     dict.insert("result".into(), str_value("not_found"));
     dict.insert("available".into(), available_list);
     dict.insert("suggestions".into(), suggestions_list);
-    VmValue::Dict(Arc::new(dict))
+    VmValue::dict(dict)
 }
 
 fn ambiguous_response(match_count: usize) -> VmValue {
@@ -440,11 +439,11 @@ mod tests {
     }
 
     fn dict(pairs: &[(&str, VmValue)]) -> VmValue {
-        let mut map: BTreeMap<String, VmValue> = BTreeMap::new();
+        let mut map: harn_vm::value::DictMap = Default::default();
         for (k, v) in pairs {
             map.insert((*k).to_string(), v.clone());
         }
-        VmValue::Dict(Arc::new(map))
+        VmValue::dict(map)
     }
 
     fn dict_field<'a>(value: &'a VmValue, key: &str) -> &'a VmValue {

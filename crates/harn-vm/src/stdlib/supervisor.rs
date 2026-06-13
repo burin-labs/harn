@@ -916,7 +916,7 @@ fn parse_strategy(value: Option<&VmValue>) -> Result<Strategy, VmError> {
 fn require_dict<'a>(
     value: &'a VmValue,
     builtin: &str,
-) -> Result<&'a BTreeMap<String, VmValue>, VmError> {
+) -> Result<&'a crate::value::DictMap, VmError> {
     value
         .as_dict()
         .ok_or_else(|| VmError::Runtime(format!("{builtin}: expected a dict")))
@@ -974,7 +974,7 @@ fn supervisor_handle_value(state: &SupervisorState) -> VmValue {
     dict.insert("_type".to_string(), VmValue::string("supervisor"));
     dict.insert("id".to_string(), VmValue::string(&state.id));
     dict.insert("name".to_string(), VmValue::string(&state.name));
-    VmValue::Dict(std::sync::Arc::new(dict))
+    VmValue::dict(dict)
 }
 
 fn supervisor_state_value(state: &SupervisorState) -> VmValue {
@@ -994,7 +994,7 @@ fn supervisor_state_value(state: &SupervisorState) -> VmValue {
             state.children.iter().map(child_state_value).collect(),
         )),
     );
-    VmValue::Dict(std::sync::Arc::new(dict))
+    VmValue::dict(dict)
 }
 
 fn child_state_value(child: &ChildSlot) -> VmValue {
@@ -1038,7 +1038,7 @@ fn child_state_value(child: &ChildSlot) -> VmValue {
             .map(VmValue::Int)
             .unwrap_or(VmValue::Nil),
     );
-    VmValue::Dict(std::sync::Arc::new(dict))
+    VmValue::dict(dict)
 }
 
 fn metrics_value(state: &SupervisorState) -> VmValue {
@@ -1052,7 +1052,7 @@ fn metrics_value(state: &SupervisorState) -> VmValue {
         VmValue::Int(state.suppressed_count),
     );
     dict.insert("escalated".to_string(), VmValue::Int(state.escalated_count));
-    VmValue::Dict(std::sync::Arc::new(dict))
+    VmValue::dict(dict)
 }
 
 fn events_value(state: &SupervisorState) -> VmValue {
@@ -1122,7 +1122,7 @@ fn event_value(event: &SupervisorEvent) -> VmValue {
             .map(VmValue::string)
             .unwrap_or(VmValue::Nil),
     );
-    VmValue::Dict(std::sync::Arc::new(dict))
+    VmValue::dict(dict)
 }
 
 fn child_context_value(supervisor_id: &str, spec: &ChildSpec, generation: u64) -> VmValue {
@@ -1132,7 +1132,7 @@ fn child_context_value(supervisor_id: &str, spec: &ChildSpec, generation: u64) -
     dict.insert("child_kind".to_string(), VmValue::string(&spec.kind));
     dict.insert("attempt".to_string(), VmValue::Int(generation as i64 + 1));
     dict.insert("restart_count".to_string(), VmValue::Int(generation as i64));
-    VmValue::Dict(std::sync::Arc::new(dict))
+    VmValue::dict(dict)
 }
 
 fn push_event(
@@ -1246,17 +1246,16 @@ mod tests {
 
     #[test]
     fn parses_restart_policy_aliases() {
-        let policy =
-            parse_restart_policy(Some(&VmValue::Dict(std::sync::Arc::new(BTreeMap::from([
-                ("mode".to_string(), VmValue::string("on-failure")),
-                ("max".to_string(), VmValue::Int(2)),
-                ("window".to_string(), VmValue::Duration(500)),
-                ("backoff".to_string(), VmValue::string("10ms")),
-                ("factor".to_string(), VmValue::Float(3.0)),
-                ("jitter".to_string(), VmValue::Int(4)),
-                ("circuit_open".to_string(), VmValue::string("1s")),
-            ])))))
-            .unwrap();
+        let policy = parse_restart_policy(Some(&VmValue::dict(BTreeMap::from([
+            ("mode".to_string(), VmValue::string("on-failure")),
+            ("max".to_string(), VmValue::Int(2)),
+            ("window".to_string(), VmValue::Duration(500)),
+            ("backoff".to_string(), VmValue::string("10ms")),
+            ("factor".to_string(), VmValue::Float(3.0)),
+            ("jitter".to_string(), VmValue::Int(4)),
+            ("circuit_open".to_string(), VmValue::string("1s")),
+        ]))))
+        .unwrap();
 
         assert_eq!(policy.mode, RestartMode::OnFailure);
         assert_eq!(policy.max_restarts, Some(2));

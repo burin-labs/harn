@@ -1383,7 +1383,7 @@ fn eval_metrics_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, Vm
                     crate::stdlib::json_to_vm_value(meta),
                 );
             }
-            VmValue::Dict(std::sync::Arc::new(dict))
+            VmValue::dict(dict)
         })
         .collect();
     Ok(VmValue::List(std::sync::Arc::from(list)))

@@ -242,7 +242,7 @@ fn resolve_available_tier_model(
     requested
 }
 
-pub(crate) fn vm_resolve_provider(options: &Option<BTreeMap<String, VmValue>>) -> String {
+pub(crate) fn vm_resolve_provider(options: &Option<crate::value::DictMap>) -> String {
     use crate::llm_config;
 
     // Explicit option wins, except "auto" which means "run the normal
@@ -339,10 +339,7 @@ pub(crate) fn vm_resolve_provider(options: &Option<BTreeMap<String, VmValue>>) -
     default
 }
 
-pub(crate) fn vm_resolve_model(
-    options: &Option<BTreeMap<String, VmValue>>,
-    provider: &str,
-) -> String {
+pub(crate) fn vm_resolve_model(options: &Option<crate::value::DictMap>, provider: &str) -> String {
     use crate::llm_config;
 
     if let Some(raw) = options

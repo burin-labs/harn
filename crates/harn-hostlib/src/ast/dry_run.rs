@@ -45,7 +45,7 @@
 //! use `+++ /dev/null`. Missing trailing newlines surface as the
 //! conventional `\ No newline at end of file` markers.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -163,8 +163,8 @@ pub(super) fn run_with_code_index(
 // ---------------------------------------------------------------------------
 
 fn require_plan(
-    dict: &BTreeMap<String, VmValue>,
-) -> Result<Vec<Arc<BTreeMap<String, VmValue>>>, HostlibError> {
+    dict: &harn_vm::value::DictMap,
+) -> Result<Vec<Arc<harn_vm::value::DictMap>>, HostlibError> {
     match dict.get("plan") {
         None | Some(VmValue::Nil) => Err(HostlibError::MissingParameter {
             builtin: BUILTIN,
@@ -237,7 +237,7 @@ fn dispatch_op(
     code_index: Option<&SharedIndex>,
     session_id: &str,
     index: usize,
-    raw: &Arc<BTreeMap<String, VmValue>>,
+    raw: &Arc<harn_vm::value::DictMap>,
 ) -> OpOutcome {
     let dict = raw.as_ref();
     let op_name = match dict.get("op") {
@@ -276,11 +276,11 @@ fn dispatch_op(
     }
 }
 
-fn run_apply_node(session_id: &str, raw: &Arc<BTreeMap<String, VmValue>>) -> OpOutcome {
+fn run_apply_node(session_id: &str, raw: &Arc<harn_vm::value::DictMap>) -> OpOutcome {
     delegate_to_builtin(session_id, raw, "apply_node", super::apply_node::run)
 }
 
-fn run_insert_at_anchor(session_id: &str, raw: &Arc<BTreeMap<String, VmValue>>) -> OpOutcome {
+fn run_insert_at_anchor(session_id: &str, raw: &Arc<harn_vm::value::DictMap>) -> OpOutcome {
     delegate_to_builtin(
         session_id,
         raw,
@@ -296,15 +296,15 @@ fn run_insert_at_anchor(session_id: &str, raw: &Arc<BTreeMap<String, VmValue>>) 
 /// even if the caller passed conflicting values.
 fn delegate_to_builtin(
     session_id: &str,
-    raw: &Arc<BTreeMap<String, VmValue>>,
+    raw: &Arc<harn_vm::value::DictMap>,
     op_label: &'static str,
     runner: fn(&[VmValue]) -> Result<VmValue, HostlibError>,
 ) -> OpOutcome {
-    let mut forwarded: BTreeMap<String, VmValue> = (**raw).clone();
+    let mut forwarded: harn_vm::value::DictMap = (**raw).clone();
     forwarded.remove("op");
     forwarded.insert("session_id".to_string(), str_value(session_id));
     forwarded.insert("dry_run".to_string(), VmValue::Bool(false));
-    let request = VmValue::Dict(Arc::new(forwarded));
+    let request = VmValue::dict(forwarded);
     match runner(&[request]) {
         Ok(VmValue::Dict(result)) => parse_builtin_outcome(&result, op_label),
         Ok(_) => OpOutcome::Error {
@@ -319,7 +319,7 @@ fn delegate_to_builtin(
 }
 
 fn parse_builtin_outcome(
-    result: &Arc<BTreeMap<String, VmValue>>,
+    result: &Arc<harn_vm::value::DictMap>,
     op_label: &'static str,
 ) -> OpOutcome {
     let result_str = match result.get("result") {
@@ -375,7 +375,7 @@ fn classify_builtin_failure(result: &str) -> &'static str {
 fn run_rename_symbol(
     code_index: Option<&SharedIndex>,
     session_id: &str,
-    raw: &Arc<BTreeMap<String, VmValue>>,
+    raw: &Arc<harn_vm::value::DictMap>,
 ) -> OpOutcome {
     let Some(index) = code_index else {
         return OpOutcome::Rejected {
@@ -386,7 +386,7 @@ fn run_rename_symbol(
             path: None,
         };
     };
-    let mut forwarded: BTreeMap<String, VmValue> = (**raw).clone();
+    let mut forwarded: harn_vm::value::DictMap = (**raw).clone();
     forwarded.remove("op");
     forwarded.insert("session_id".to_string(), str_value(session_id));
     forwarded.insert("dry_run".to_string(), VmValue::Bool(false));
@@ -394,7 +394,7 @@ fn run_rename_symbol(
         .entry("scope".to_string())
         .or_insert_with(|| str_value("workspace"));
 
-    let request = VmValue::Dict(Arc::new(forwarded));
+    let request = VmValue::dict(forwarded);
     match crate::code_index::run_rename_symbol(index, &[request]) {
         Ok(VmValue::Dict(result)) => parse_rename_outcome(&result),
         Ok(_) => OpOutcome::Error {
@@ -408,7 +408,7 @@ fn run_rename_symbol(
     }
 }
 
-fn parse_rename_outcome(result: &Arc<BTreeMap<String, VmValue>>) -> OpOutcome {
+fn parse_rename_outcome(result: &Arc<harn_vm::value::DictMap>) -> OpOutcome {
     let result_str = match result.get("result") {
         Some(VmValue::String(s)) => s.to_string(),
         _ => {
@@ -462,7 +462,7 @@ fn classify_rename_failure(result: &str) -> &'static str {
     }
 }
 
-fn rename_touched_paths(result: &Arc<BTreeMap<String, VmValue>>) -> Vec<PathBuf> {
+fn rename_touched_paths(result: &Arc<harn_vm::value::DictMap>) -> Vec<PathBuf> {
     match result.get("touched_files") {
         Some(VmValue::List(files)) => files
             .iter()
@@ -478,14 +478,14 @@ fn rename_touched_paths(result: &Arc<BTreeMap<String, VmValue>>) -> Vec<PathBuf>
     }
 }
 
-fn int_field(result: &Arc<BTreeMap<String, VmValue>>, key: &str) -> Option<i64> {
+fn int_field(result: &Arc<harn_vm::value::DictMap>, key: &str) -> Option<i64> {
     match result.get(key) {
         Some(VmValue::Int(n)) => Some(*n),
         _ => None,
     }
 }
 
-fn run_safe_text_patch(session_id: &str, raw: &Arc<BTreeMap<String, VmValue>>) -> OpOutcome {
+fn run_safe_text_patch(session_id: &str, raw: &Arc<harn_vm::value::DictMap>) -> OpOutcome {
     let dict = raw.as_ref();
     let path_str = match require_string(BUILTIN, dict, "path") {
         Ok(s) => s,
@@ -825,11 +825,11 @@ mod tests {
     }
 
     fn vm_dict(pairs: &[(&str, VmValue)]) -> VmValue {
-        let mut map: BTreeMap<String, VmValue> = BTreeMap::new();
+        let mut map: harn_vm::value::DictMap = Default::default();
         for (k, v) in pairs {
             map.insert((*k).to_string(), v.clone());
         }
-        VmValue::Dict(Arc::new(map))
+        VmValue::dict(map)
     }
 
     fn vm_list(items: &[VmValue]) -> VmValue {

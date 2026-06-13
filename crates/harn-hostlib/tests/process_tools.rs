@@ -40,18 +40,18 @@ fn registry() -> BuiltinRegistry {
     registry
 }
 
-fn call(builtin: &str, request: BTreeMap<String, VmValue>) -> Result<VmValue, HostlibError> {
+fn call(builtin: &str, request: harn_vm::value::DictMap) -> Result<VmValue, HostlibError> {
     harn_hostlib::tools::permissions::enable_for_test();
     let registry = registry();
     let entry = registry
         .find(builtin)
         .unwrap_or_else(|| panic!("builtin {builtin} not registered"));
-    let arg = VmValue::Dict(Arc::new(request));
+    let arg = VmValue::dict(request);
     (entry.handler)(&[arg])
 }
 
-fn dict() -> BTreeMap<String, VmValue> {
-    BTreeMap::new()
+fn dict() -> harn_vm::value::DictMap {
+    harn_vm::value::DictMap::new()
 }
 
 fn vstr(value: &str) -> VmValue {
@@ -62,35 +62,35 @@ fn vlist_str(values: &[&str]) -> VmValue {
     VmValue::List(Arc::new(values.iter().map(|s| vstr(s)).collect()))
 }
 
-fn require_dict(value: VmValue) -> BTreeMap<String, VmValue> {
+fn require_dict(value: VmValue) -> harn_vm::value::DictMap {
     match value {
         VmValue::Dict(map) => (*map).clone(),
         other => panic!("expected dict response, got {other:?}"),
     }
 }
 
-fn require_int(map: &BTreeMap<String, VmValue>, key: &str) -> i64 {
+fn require_int(map: &harn_vm::value::DictMap, key: &str) -> i64 {
     match map.get(key) {
         Some(VmValue::Int(i)) => *i,
         other => panic!("expected int at {key}, got {other:?}"),
     }
 }
 
-fn require_str(map: &BTreeMap<String, VmValue>, key: &str) -> String {
+fn require_str(map: &harn_vm::value::DictMap, key: &str) -> String {
     match map.get(key) {
         Some(VmValue::String(s)) => s.to_string(),
         other => panic!("expected string at {key}, got {other:?}"),
     }
 }
 
-fn require_bool(map: &BTreeMap<String, VmValue>, key: &str) -> bool {
+fn require_bool(map: &harn_vm::value::DictMap, key: &str) -> bool {
     match map.get(key) {
         Some(VmValue::Bool(b)) => *b,
         other => panic!("expected bool at {key}, got {other:?}"),
     }
 }
 
-fn require_nil(map: &BTreeMap<String, VmValue>, key: &str) {
+fn require_nil(map: &harn_vm::value::DictMap, key: &str) {
     assert!(
         matches!(map.get(key), Some(VmValue::Nil)),
         "expected nil at {key}, got {:?}",
@@ -98,7 +98,7 @@ fn require_nil(map: &BTreeMap<String, VmValue>, key: &str) {
     );
 }
 
-fn require_nested_dict(map: &BTreeMap<String, VmValue>, key: &str) -> BTreeMap<String, VmValue> {
+fn require_nested_dict(map: &harn_vm::value::DictMap, key: &str) -> harn_vm::value::DictMap {
     match map.get(key) {
         Some(VmValue::Dict(value)) => (**value).clone(),
         other => panic!("expected dict at {key}, got {other:?}"),
@@ -285,13 +285,13 @@ fn run_command_supports_explicit_shell_mode() {
     let (spawner, _controller, _guard) =
         install_mock_with(MockProcessConfig::with_stdout(0, "shell-ok\n"));
 
-    let mut shell: BTreeMap<String, VmValue> = BTreeMap::new();
+    let mut shell: harn_vm::value::DictMap = Default::default();
     shell.insert("id".into(), vstr("sh"));
 
     let mut req = dict();
     req.insert("mode".into(), vstr("shell"));
     req.insert("command".into(), vstr("echo shell-ok"));
-    req.insert("shell".into(), VmValue::Dict(Arc::new(shell)));
+    req.insert("shell".into(), VmValue::dict(shell));
     let resp = require_dict(call("hostlib_tools_run_command", req).unwrap());
     assert_eq!(require_str(&resp, "stdout").trim(), "shell-ok");
 
@@ -334,7 +334,7 @@ fn run_command_caps_inline_output_and_read_command_output_reads_artifact() {
     let (_spawner, _controller, _guard) =
         install_mock_with(MockProcessConfig::with_stdout(0, payload));
 
-    let mut capture: BTreeMap<String, VmValue> = BTreeMap::new();
+    let mut capture: harn_vm::value::DictMap = Default::default();
     capture.insert("max_inline_bytes".into(), VmValue::Int(8));
 
     let mut req = dict();
@@ -342,7 +342,7 @@ fn run_command_caps_inline_output_and_read_command_output_reads_artifact() {
         "argv".into(),
         vlist_str(&["bash", "-c", "for i in $(seq 1 2000); do printf x; done"]),
     );
-    req.insert("capture".into(), VmValue::Dict(Arc::new(capture)));
+    req.insert("capture".into(), VmValue::dict(capture));
     let resp = require_dict(call("hostlib_tools_run_command", req).unwrap());
 
     assert_eq!(require_str(&resp, "stdout").len(), 8);
@@ -370,7 +370,7 @@ fn run_command_passes_env_when_supplied() {
     let (spawner, _controller, _guard) =
         install_mock_with(MockProcessConfig::with_stdout(0, "value-42\n"));
 
-    let mut env_dict: BTreeMap<String, VmValue> = BTreeMap::new();
+    let mut env_dict: harn_vm::value::DictMap = Default::default();
     env_dict.insert("PATH".into(), vstr("/bin:/usr/bin"));
     env_dict.insert("HOSTLIB_TEST_VAR".into(), vstr("value-42"));
 
@@ -379,7 +379,7 @@ fn run_command_passes_env_when_supplied() {
         "argv".into(),
         vlist_str(&["bash", "-c", "echo $HOSTLIB_TEST_VAR"]),
     );
-    req.insert("env".into(), VmValue::Dict(Arc::new(env_dict)));
+    req.insert("env".into(), VmValue::dict(env_dict));
     let resp = require_dict(call("hostlib_tools_run_command", req).unwrap());
     assert_eq!(require_str(&resp, "stdout").trim(), "value-42");
 
@@ -444,7 +444,7 @@ fn run_command_rejects_out_of_range_capture_limit() {
 
     let mut req = dict();
     req.insert("argv".into(), vlist_str(&["true"]));
-    req.insert("capture".into(), VmValue::Dict(Arc::new(capture)));
+    req.insert("capture".into(), VmValue::dict(capture));
     let err = call("hostlib_tools_run_command", req).unwrap_err();
     assert!(
         matches!(err, HostlibError::InvalidParameter { param, .. } if param == "max_inline_bytes")
@@ -1000,7 +1000,7 @@ fn cancel_handle_can_wait_for_timed_out_result() {
     start_req.insert("capture".into(), {
         let mut capture = BTreeMap::new();
         capture.insert("max_inline_bytes".into(), VmValue::Int(200));
-        VmValue::Dict(Arc::new(capture))
+        VmValue::dict(capture)
     });
     let start = require_dict(call("hostlib_tools_run_command", start_req).unwrap());
     let handle_id = require_str(&start, "handle_id");

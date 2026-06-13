@@ -2,13 +2,13 @@ use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::sync::Arc;
 
 use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
-use crate::value::{value_structural_hash_key, VmError, VmValue};
+use crate::value::{value_structural_hash_key, DictRetain, VmError, VmValue};
 use crate::vm::{AsyncBuiltinCtx, Vm};
 
-fn dict_arg(value: &VmValue, builtin: &str) -> Result<Arc<BTreeMap<String, VmValue>>, VmError> {
+fn dict_arg(value: &VmValue, builtin: &str) -> Result<Arc<crate::value::DictMap>, VmError> {
     match value {
         VmValue::Dict(d) => Ok(Arc::clone(d)),
-        VmValue::Nil => Ok(Arc::new(BTreeMap::new())),
+        VmValue::Nil => Ok(Arc::new(crate::value::DictMap::new())),
         other => Err(VmError::TypeError(format!(
             "{builtin}: expected dict, got {}",
             other.type_name()
@@ -130,12 +130,12 @@ pub(crate) fn register_collection_builtins(vm: &mut Vm) {
             let bucket = string_discriminator(&key, "group_by")?;
             groups.entry(bucket).or_default().push(item.clone());
         }
-        Ok(VmValue::Dict(std::sync::Arc::new(
+        Ok(VmValue::dict(
             groups
                 .into_iter()
                 .map(|(key, values)| (key, VmValue::List(std::sync::Arc::new(values))))
-                .collect(),
-        )))
+                .collect::<crate::value::DictMap>(),
+        ))
     });
 
     vm.register_async_builtin("partition", |ctx, args| async move {
@@ -160,7 +160,7 @@ pub(crate) fn register_collection_builtins(vm: &mut Vm) {
                 no_match.push(item.clone());
             }
         }
-        Ok(VmValue::Dict(std::sync::Arc::new(BTreeMap::from([
+        Ok(VmValue::dict(BTreeMap::from([
             (
                 "match".to_string(),
                 VmValue::List(std::sync::Arc::new(matched)),
@@ -169,7 +169,7 @@ pub(crate) fn register_collection_builtins(vm: &mut Vm) {
                 "no_match".to_string(),
                 VmValue::List(std::sync::Arc::new(no_match)),
             ),
-        ]))))
+        ])))
     });
 
     vm.register_async_builtin("dedup_by", |ctx, args| async move {
@@ -285,12 +285,12 @@ pub(crate) fn register_collection_builtins(vm: &mut Vm) {
             let bucket = string_discriminator(&key, "count_by")?;
             *counts.entry(bucket).or_insert(0) += 1;
         }
-        Ok(VmValue::Dict(std::sync::Arc::new(
+        Ok(VmValue::dict(
             counts
                 .into_iter()
                 .map(|(key, count)| (key, VmValue::Int(count)))
-                .collect(),
-        )))
+                .collect::<crate::value::DictMap>(),
+        ))
     });
 
     register_dict_builder_builtins(vm);
@@ -427,7 +427,7 @@ const DICT_BUILDER_BUILTINS: &[&VmBuiltinDef] = &[
 /// (Arc-cloned handle) or violate identity invariants.
 fn shallow_clone(value: &VmValue) -> VmValue {
     match value {
-        VmValue::Dict(d) => VmValue::Dict(std::sync::Arc::new((**d).clone())),
+        VmValue::Dict(d) => VmValue::dict((**d).clone()),
         VmValue::List(items) => VmValue::List(std::sync::Arc::new((**items).clone())),
         VmValue::Set(items) => VmValue::Set(std::sync::Arc::new((**items).clone())),
         other => other.clone(),
@@ -445,7 +445,7 @@ fn deep_clone_value(value: &VmValue) -> VmValue {
             for (key, val) in d.iter() {
                 out.insert(key.clone(), deep_clone_value(val));
             }
-            VmValue::Dict(std::sync::Arc::new(out))
+            VmValue::dict(out)
         }
         VmValue::List(items) => VmValue::List(std::sync::Arc::new(
             items.iter().map(deep_clone_value).collect(),
@@ -496,7 +496,7 @@ fn deep_merge_value(a: &VmValue, b: &VmValue) -> Result<VmValue, VmError> {
             }
         }
     }
-    Ok(VmValue::Dict(std::sync::Arc::new(merged)))
+    Ok(VmValue::dict(merged))
 }
 
 /// Returns a list with duplicate entries removed while preserving the
@@ -532,7 +532,7 @@ fn list_unique(value: &VmValue) -> Result<VmValue, VmError> {
 fn dict_from_pairs(value: &VmValue) -> Result<VmValue, VmError> {
     let pairs = match value {
         VmValue::List(items) | VmValue::Set(items) => Arc::clone(items),
-        VmValue::Nil => return Ok(VmValue::Dict(std::sync::Arc::new(BTreeMap::new()))),
+        VmValue::Nil => return Ok(VmValue::dict(BTreeMap::new())),
         other => {
             return Err(VmError::TypeError(format!(
                 "dict_from_pairs: expected a list of [key, value] pairs, got {}",
@@ -560,7 +560,7 @@ fn dict_from_pairs(value: &VmValue) -> Result<VmValue, VmError> {
         };
         out.insert(key_string, val);
     }
-    Ok(VmValue::Dict(std::sync::Arc::new(out)))
+    Ok(VmValue::dict(out))
 }
 
 fn dict_filter_nil(value: &VmValue) -> Result<VmValue, VmError> {
@@ -570,7 +570,7 @@ fn dict_filter_nil(value: &VmValue) -> Result<VmValue, VmError> {
     }
     let mut out = Arc::try_unwrap(dict).unwrap_or_else(|d| (*d).clone());
     out.retain(|_, value| keep_filter_nil(value));
-    Ok(VmValue::Dict(std::sync::Arc::new(out)))
+    Ok(VmValue::dict(out))
 }
 
 fn dict_merge(a: &VmValue, b: &VmValue) -> Result<VmValue, VmError> {
@@ -587,7 +587,7 @@ fn dict_merge(a: &VmValue, b: &VmValue) -> Result<VmValue, VmError> {
         Ok(entries) => merged.extend(entries),
         Err(entries) => merged.extend(entries.iter().map(|(k, v)| (k.clone(), v.clone()))),
     }
-    Ok(VmValue::Dict(std::sync::Arc::new(merged)))
+    Ok(VmValue::dict(merged))
 }
 
 fn dict_pick(data: &VmValue, keys: &VmValue) -> Result<VmValue, VmError> {
@@ -602,7 +602,7 @@ fn dict_pick(data: &VmValue, keys: &VmValue) -> Result<VmValue, VmError> {
             }
         }
     }
-    Ok(VmValue::Dict(std::sync::Arc::new(out)))
+    Ok(VmValue::dict(out))
 }
 
 fn dict_pick_keys(data: &VmValue, keys: &VmValue, drop_nil: bool) -> Result<VmValue, VmError> {
@@ -618,7 +618,7 @@ fn dict_pick_keys(data: &VmValue, keys: &VmValue, drop_nil: bool) -> Result<VmVa
             out.insert(key, value.clone());
         }
     }
-    Ok(VmValue::Dict(std::sync::Arc::new(out)))
+    Ok(VmValue::dict(out))
 }
 
 fn dict_omit(data: &VmValue, keys: &VmValue) -> Result<VmValue, VmError> {
@@ -632,7 +632,7 @@ fn dict_omit(data: &VmValue, keys: &VmValue) -> Result<VmValue, VmError> {
     }
     let mut out = Arc::try_unwrap(dict).unwrap_or_else(|d| (*d).clone());
     out.retain(|key, _| !exclude.contains(key));
-    Ok(VmValue::Dict(std::sync::Arc::new(out)))
+    Ok(VmValue::dict(out))
 }
 
 #[cfg(test)]
@@ -644,7 +644,7 @@ mod tests {
         for (k, v) in entries {
             map.insert((*k).to_string(), v.clone());
         }
-        VmValue::Dict(std::sync::Arc::new(map))
+        VmValue::dict(map)
     }
 
     fn keys(items: &[&str]) -> VmValue {
@@ -736,7 +736,7 @@ mod tests {
 
     #[test]
     fn shallow_clone_decouples_dict_from_source() {
-        let inner = VmValue::Dict(std::sync::Arc::new(BTreeMap::new()));
+        let inner = VmValue::dict(BTreeMap::new());
         let source = dict(&[("inner", inner)]);
         let copy = shallow_clone(&source);
         match (&source, &copy) {

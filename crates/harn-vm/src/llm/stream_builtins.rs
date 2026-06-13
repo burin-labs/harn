@@ -76,7 +76,7 @@ fn llm_stream_chunk(
             .map(|reason| VmValue::String(std::sync::Arc::from(reason.to_string())))
             .unwrap_or(VmValue::Nil),
     );
-    VmValue::Dict(std::sync::Arc::new(dict))
+    VmValue::dict(dict)
 }
 
 async fn forward_llm_stream_delta(
@@ -263,7 +263,7 @@ mod tests {
         vec![
             VmValue::String(Arc::from("hello".to_string())),
             VmValue::Nil,
-            VmValue::Dict(Arc::new(options)),
+            VmValue::dict(options),
         ]
     }
 

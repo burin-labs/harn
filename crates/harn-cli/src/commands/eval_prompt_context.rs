@@ -513,7 +513,7 @@ fn context_case_bindings(
     assembled: &AssembledContext,
     selected_artifact_ids: &[String],
     dropped_artifact_ids: &[String],
-) -> Result<BTreeMap<String, VmValue>, String> {
+) -> Result<harn_vm::value::DictMap, String> {
     let mut bindings = match base_bindings {
         Some(VmValue::Dict(dict)) => dict.as_ref().clone(),
         Some(other) => {
@@ -522,7 +522,7 @@ fn context_case_bindings(
                 other.type_name()
             ));
         }
-        None => BTreeMap::new(),
+        None => harn_vm::value::DictMap::new(),
     };
     if let Some(case_bindings) = case_bindings {
         let object = case_bindings
@@ -614,7 +614,7 @@ fn render_context_variants(
     fleet: &[FleetEntry],
     template_source: &str,
     template_path: &Path,
-    bindings: &BTreeMap<String, VmValue>,
+    bindings: &harn_vm::value::DictMap,
     expect: &ContextExpectation,
 ) -> Vec<ContextVariantReport> {
     let base = template_path.parent();

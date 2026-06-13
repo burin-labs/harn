@@ -396,7 +396,7 @@ fn lint_run(args: &[VmValue]) -> Result<VmValue, HostlibError> {
 /// Parse a `severity` dict param (`{rule: "error"|"warning"|"info"}`) into the
 /// linter's override map. Unknown severities are skipped.
 fn parse_severity_overrides(
-    dict: &BTreeMap<String, VmValue>,
+    dict: &harn_vm::value::DictMap,
 ) -> std::collections::HashMap<String, harn_lint::LintSeverity> {
     let mut out = std::collections::HashMap::new();
     if let Some(VmValue::Dict(map)) = dict.get("severity") {
@@ -443,7 +443,7 @@ fn lint_diagnostic_vm(diag: &harn_lint::LintDiagnostic) -> VmValue {
 
 fn compile_rule(
     builtin: &'static str,
-    dict: &BTreeMap<String, VmValue>,
+    dict: &harn_vm::value::DictMap,
 ) -> Result<CompiledRule, HostlibError> {
     let toml = require_string(builtin, dict, "rule")?;
     let rule = Rule::from_toml_str(&toml).map_err(|e| HostlibError::InvalidParameter {
@@ -463,7 +463,7 @@ fn compile_rule(
 /// undetectable files are skipped).
 fn load_files(
     builtin: &'static str,
-    dict: &BTreeMap<String, VmValue>,
+    dict: &harn_vm::value::DictMap,
 ) -> Result<Vec<SourceFile>, HostlibError> {
     if let Some(source) = optional_string(dict, "source") {
         let language_name = require_string(builtin, dict, "language")?;
@@ -505,7 +505,7 @@ fn load_files(
 }
 
 fn match_to_vm(path: &std::path::Path, m: &RuleMatch) -> VmValue {
-    let captures: BTreeMap<String, VmValue> = m
+    let captures: harn_vm::value::DictMap = m
         .bindings
         .iter()
         .map(|(name, b)| (name.clone(), str_vm(&b.text)))
@@ -518,7 +518,7 @@ fn match_to_vm(path: &std::path::Path, m: &RuleMatch) -> VmValue {
         ("start_col", VmValue::Int(m.span.start_col as i64)),
         ("end_row", VmValue::Int(m.span.end_row as i64)),
         ("end_col", VmValue::Int(m.span.end_col as i64)),
-        ("captures", VmValue::Dict(Arc::new(captures))),
+        ("captures", VmValue::dict(captures)),
         ("capture_metadata", capture_metadata),
     ])
 }
@@ -550,7 +550,7 @@ struct ReportSpec {
 /// The `node` value handed to a visitor: the matched text, its metavar
 /// captures, and its span.
 fn node_vm(m: &RuleMatch) -> VmValue {
-    let captures: BTreeMap<String, VmValue> = m
+    let captures: harn_vm::value::DictMap = m
         .bindings
         .iter()
         .map(|(name, b)| (name.clone(), str_vm(&b.text)))
@@ -558,7 +558,7 @@ fn node_vm(m: &RuleMatch) -> VmValue {
     let capture_metadata = capture_metadata_vm(m);
     dict_vm([
         ("text", str_vm(&m.text)),
-        ("captures", VmValue::Dict(Arc::new(captures))),
+        ("captures", VmValue::dict(captures)),
         ("capture_metadata", capture_metadata),
         ("start_row", VmValue::Int(m.span.start_row as i64)),
         ("start_col", VmValue::Int(m.span.start_col as i64)),
@@ -568,13 +568,13 @@ fn node_vm(m: &RuleMatch) -> VmValue {
 }
 
 fn capture_metadata_vm(m: &RuleMatch) -> VmValue {
-    let metadata: BTreeMap<String, VmValue> = m
+    let metadata: harn_vm::value::DictMap = m
         .bindings
         .iter()
         .filter(|(_, binding)| !binding.metadata.is_empty())
         .map(|(name, binding)| (name.clone(), binding_metadata_vm(&binding.metadata)))
         .collect();
-    VmValue::Dict(Arc::new(metadata))
+    VmValue::dict(metadata)
 }
 
 fn binding_metadata_vm(metadata: &BindingMetadata) -> VmValue {
@@ -585,7 +585,7 @@ fn binding_metadata_vm(metadata: &BindingMetadata) -> VmValue {
     if let Some(resolved) = &metadata.resolved {
         entries.insert("resolved".into(), resolved_binding_vm(resolved));
     }
-    VmValue::Dict(Arc::new(entries))
+    VmValue::dict(entries)
 }
 
 fn resolved_binding_vm(resolved: &ResolvedBinding) -> VmValue {
@@ -694,7 +694,7 @@ fn report_from_item(v: &VmValue) -> Option<ReportSpec> {
     }
 }
 
-fn report_from_dict(d: &BTreeMap<String, VmValue>) -> ReportSpec {
+fn report_from_dict(d: &harn_vm::value::DictMap) -> ReportSpec {
     ReportSpec {
         message: optional_string(d, "message"),
         fix: optional_string(d, "fix"),
@@ -736,11 +736,11 @@ fn json_to_vm(value: &serde_json::Value) -> VmValue {
         serde_json::Value::Array(items) => {
             VmValue::List(Arc::new(items.iter().map(json_to_vm).collect()))
         }
-        serde_json::Value::Object(map) => VmValue::Dict(Arc::new(
+        serde_json::Value::Object(map) => VmValue::dict(
             map.iter()
                 .map(|(k, v)| (k.clone(), json_to_vm(v)))
-                .collect(),
-        )),
+                .collect::<harn_vm::value::DictMap>(),
+        ),
     }
 }
 
@@ -751,10 +751,10 @@ fn json_to_vm(value: &serde_json::Value) -> VmValue {
 fn first_dict(
     builtin: &'static str,
     args: &[VmValue],
-) -> Result<Arc<BTreeMap<String, VmValue>>, HostlibError> {
+) -> Result<Arc<harn_vm::value::DictMap>, HostlibError> {
     match args.first() {
         Some(VmValue::Dict(dict)) => Ok(dict.clone()),
-        Some(VmValue::Nil) | None => Ok(Arc::new(BTreeMap::new())),
+        Some(VmValue::Nil) | None => Ok(Arc::new(harn_vm::value::DictMap::new())),
         Some(_) => Err(HostlibError::InvalidParameter {
             builtin,
             param: "params",
@@ -765,7 +765,7 @@ fn first_dict(
 
 fn require_string(
     builtin: &'static str,
-    dict: &BTreeMap<String, VmValue>,
+    dict: &harn_vm::value::DictMap,
     key: &'static str,
 ) -> Result<String, HostlibError> {
     match dict.get(key) {
@@ -777,14 +777,14 @@ fn require_string(
     }
 }
 
-fn optional_string(dict: &BTreeMap<String, VmValue>, key: &str) -> Option<String> {
+fn optional_string(dict: &harn_vm::value::DictMap, key: &str) -> Option<String> {
     match dict.get(key) {
         Some(VmValue::String(s)) => Some(s.to_string()),
         _ => None,
     }
 }
 
-fn optional_string_list(dict: &BTreeMap<String, VmValue>, key: &str) -> Vec<String> {
+fn optional_string_list(dict: &harn_vm::value::DictMap, key: &str) -> Vec<String> {
     match dict.get(key) {
         Some(VmValue::List(items)) => items
             .iter()
@@ -797,7 +797,7 @@ fn optional_string_list(dict: &BTreeMap<String, VmValue>, key: &str) -> Vec<Stri
     }
 }
 
-fn optional_bool(dict: &BTreeMap<String, VmValue>, key: &str, default: bool) -> bool {
+fn optional_bool(dict: &harn_vm::value::DictMap, key: &str, default: bool) -> bool {
     match dict.get(key) {
         Some(VmValue::Bool(b)) => *b,
         _ => default,
@@ -809,11 +809,11 @@ fn str_vm(s: impl AsRef<str>) -> VmValue {
 }
 
 fn dict_vm<const N: usize>(entries: [(&str, VmValue); N]) -> VmValue {
-    let map: BTreeMap<String, VmValue> = entries
+    let map: harn_vm::value::DictMap = entries
         .into_iter()
         .map(|(k, v)| (k.to_string(), v))
         .collect();
-    VmValue::Dict(Arc::new(map))
+    VmValue::dict(map)
 }
 
 #[cfg(test)]
@@ -821,11 +821,11 @@ mod tests {
     use super::*;
 
     fn dict(pairs: &[(&str, VmValue)]) -> VmValue {
-        let map: BTreeMap<String, VmValue> = pairs
+        let map: harn_vm::value::DictMap = pairs
             .iter()
             .map(|(k, v)| (k.to_string(), v.clone()))
             .collect();
-        VmValue::Dict(Arc::new(map))
+        VmValue::dict(map)
     }
 
     fn get<'a>(v: &'a VmValue, key: &str) -> &'a VmValue {

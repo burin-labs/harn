@@ -1,5 +1,3 @@
-use std::collections::BTreeMap;
-
 use super::components::ComponentRegistry;
 use super::json_schema::json_schema_to_type_expr;
 use super::type_expr::TypeExpr;
@@ -13,7 +11,7 @@ use crate::value::VmValue;
 /// lift into TypeExpr. The `root_json` is the whole tool-registry converted
 /// to JSON so `$ref` pointers can resolve against it.
 pub(super) fn extract_params_from_vm_dict(
-    td: &BTreeMap<String, VmValue>,
+    td: &crate::value::DictMap,
     root_json: &serde_json::Value,
     registry: &mut ComponentRegistry,
 ) -> Vec<ToolParamSchema> {
@@ -64,8 +62,8 @@ pub(super) fn extract_params_from_vm_dict(
 /// canonical VmValue → JSON conversion (re-exported via `super::vm_value_to_json`
 /// at the top of this file). We wrap the dict contents in `VmValue::Dict` so
 /// the single shared conversion path handles every field uniformly.
-fn vm_dict_to_json(dict: &BTreeMap<String, VmValue>) -> serde_json::Value {
-    super::super::vm_value_to_json(&VmValue::Dict(std::sync::Arc::new(dict.clone())))
+fn vm_dict_to_json(dict: &crate::value::DictMap) -> serde_json::Value {
+    super::super::vm_value_to_json(&VmValue::dict(dict.clone()))
 }
 
 #[derive(Clone, Debug, serde::Serialize)]
@@ -96,7 +94,7 @@ pub(super) fn extract_examples(
 }
 
 /// Pull examples from a VmValue dict, same dual-key convention.
-pub(super) fn extract_examples_vm(pdef: &BTreeMap<String, VmValue>) -> Vec<serde_json::Value> {
+pub(super) fn extract_examples_vm(pdef: &crate::value::DictMap) -> Vec<serde_json::Value> {
     if let Some(VmValue::List(items)) = pdef.get("examples") {
         return items.iter().map(super::super::vm_value_to_json).collect();
     }

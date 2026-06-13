@@ -41,9 +41,12 @@ fn list(items: Vec<VmValue>) -> VmValue {
 }
 
 fn dict(pairs: Vec<(&str, VmValue)>) -> VmValue {
-    VmValue::Dict(std::sync::Arc::new(
-        pairs.into_iter().map(|(k, v)| (k.to_string(), v)).collect(),
-    ))
+    VmValue::dict(
+        pairs
+            .into_iter()
+            .map(|(k, v)| (k.to_string(), v))
+            .collect::<crate::value::DictMap>(),
+    )
 }
 
 #[test]

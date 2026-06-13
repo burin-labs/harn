@@ -116,7 +116,7 @@ impl Expr {
                         expr.eval(input).into_iter().next().unwrap_or(VmValue::Nil),
                     );
                 }
-                vec![VmValue::Dict(std::sync::Arc::new(out))]
+                vec![VmValue::dict(out)]
             }
             Expr::Literal(value) => vec![value.clone()],
             Expr::Compare { .. } | Expr::Bool { .. } | Expr::Not(_) => {

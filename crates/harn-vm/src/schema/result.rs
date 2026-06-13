@@ -34,9 +34,5 @@ pub(super) fn result_err_value(errors: Vec<String>, value: Option<VmValue>) -> V
     if let Some(value) = value {
         payload.insert("value".to_string(), value);
     }
-    VmValue::enum_variant(
-        "Result",
-        "Err",
-        vec![VmValue::Dict(std::sync::Arc::new(payload))],
-    )
+    VmValue::enum_variant("Result", "Err", vec![VmValue::dict(payload)])
 }

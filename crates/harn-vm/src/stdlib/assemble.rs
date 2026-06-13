@@ -66,7 +66,7 @@ async fn assemble_context_impl(
     Ok(assembled_to_vm(&assembled))
 }
 
-fn parse_assemble_options(dict: &BTreeMap<String, VmValue>) -> Result<AssembleOptions, VmError> {
+fn parse_assemble_options(dict: &crate::value::DictMap) -> Result<AssembleOptions, VmError> {
     let defaults = AssembleOptions::default();
     let mut options = defaults;
     if let Some(value) = dict.get("budget_tokens").and_then(VmValue::as_int) {
@@ -150,7 +150,7 @@ fn chunk_to_vm(chunk: &AssembledChunk, with_score: bool) -> VmValue {
     if with_score {
         map.insert("score".to_string(), VmValue::Float(chunk.score));
     }
-    VmValue::Dict(std::sync::Arc::new(map))
+    VmValue::dict(map)
 }
 
 /// Compact VM representation of a chunk for the ranker callback (no score yet).
@@ -228,7 +228,7 @@ fn assembled_to_vm(assembled: &AssembledContext) -> VmValue {
                 "tokens_included".to_string(),
                 VmValue::Int(summary.tokens_included as i64),
             );
-            VmValue::Dict(std::sync::Arc::new(map))
+            VmValue::dict(map)
         })
         .collect();
 
@@ -255,7 +255,7 @@ fn assembled_to_vm(assembled: &AssembledContext) -> VmValue {
                     .map(|text| VmValue::String(std::sync::Arc::from(text.as_str())))
                     .unwrap_or(VmValue::Nil),
             );
-            VmValue::Dict(std::sync::Arc::new(map))
+            VmValue::dict(map)
         })
         .collect();
 
@@ -270,7 +270,7 @@ fn assembled_to_vm(assembled: &AssembledContext) -> VmValue {
             map.insert("score".to_string(), VmValue::Float(reason.score));
             map.insert("included".to_string(), VmValue::Bool(reason.included));
             map.put_str("reason", reason.reason);
-            VmValue::Dict(std::sync::Arc::new(map))
+            VmValue::dict(map)
         })
         .collect();
 
@@ -301,7 +301,7 @@ fn assembled_to_vm(assembled: &AssembledContext) -> VmValue {
     );
     map.put_str("strategy", assembled.strategy.as_str());
     map.put_str("dedup", assembled.dedup.as_str());
-    VmValue::Dict(std::sync::Arc::new(map))
+    VmValue::dict(map)
 }
 
 /// Convenience entry point used by the agent_loop integration hook:

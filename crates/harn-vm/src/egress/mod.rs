@@ -961,7 +961,7 @@ fn ensure_env_seeded() -> Result<(), VmError> {
     }
 }
 
-fn policy_from_config(config: &BTreeMap<String, VmValue>) -> Result<EgressPolicy, VmError> {
+fn policy_from_config(config: &crate::value::DictMap) -> Result<EgressPolicy, VmError> {
     let allow = match config.get("allow") {
         Some(VmValue::List(items)) => parse_rule_values(items)?,
         Some(VmValue::Nil) => Vec::new(),
@@ -1102,7 +1102,7 @@ fn policy_summary() -> VmValue {
     } else {
         dict.insert("configured".to_string(), VmValue::Bool(false));
     }
-    VmValue::Dict(std::sync::Arc::new(dict))
+    VmValue::dict(dict)
 }
 
 impl EgressRule {
@@ -1283,7 +1283,7 @@ impl EgressBlocked {
                 .unwrap_or(VmValue::Nil),
         );
         dict.put_str("reason", self.reason.as_str());
-        VmError::Thrown(VmValue::Dict(std::sync::Arc::new(dict)))
+        VmError::Thrown(VmValue::dict(dict))
     }
 }
 

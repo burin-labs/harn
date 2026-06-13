@@ -20,7 +20,7 @@
 //! the joined text plus a regex-derived list of return-object field
 //! names for hosts that build API contract summaries.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 use std::sync::Arc;
 
 use harn_vm::VmValue;
@@ -50,7 +50,7 @@ pub(super) struct ExtractedBody {
 
 impl ExtractedBody {
     fn to_vm_value(&self) -> VmValue {
-        let mut dict: BTreeMap<String, VmValue> = BTreeMap::new();
+        let mut dict: harn_vm::value::DictMap = harn_vm::value::DictMap::new();
         dict.insert("name".into(), str_value(&self.name));
         dict.insert("body_text".into(), str_value(&self.body_text));
         dict.insert("start_line".into(), VmValue::Int(self.start_line as i64));
@@ -60,7 +60,7 @@ impl ExtractedBody {
             "return_object_fields".into(),
             VmValue::List(Arc::new(fields)),
         );
-        VmValue::Dict(Arc::new(dict))
+        VmValue::dict(dict)
     }
 }
 
@@ -82,7 +82,7 @@ pub(super) fn run_single(args: &[VmValue]) -> Result<VmValue, HostlibError> {
     );
     let brace_based = !matches!(language, Language::Python);
 
-    let mut response: BTreeMap<String, VmValue> = BTreeMap::new();
+    let mut response: harn_vm::value::DictMap = harn_vm::value::DictMap::new();
     response.insert(
         "path".into(),
         match path_for_response {
@@ -113,7 +113,7 @@ pub(super) fn run_single(args: &[VmValue]) -> Result<VmValue, HostlibError> {
             VmValue::List(Arc::new(Vec::new())),
         );
     }
-    Ok(VmValue::Dict(Arc::new(response)))
+    Ok(VmValue::dict(response))
 }
 
 pub(super) fn run_bulk(args: &[VmValue]) -> Result<VmValue, HostlibError> {
@@ -126,7 +126,7 @@ pub(super) fn run_bulk(args: &[VmValue]) -> Result<VmValue, HostlibError> {
 
     let tree = parse_source(&source, language)?;
     let unique: BTreeSet<String> = names.iter().cloned().collect();
-    let mut bodies_dict: BTreeMap<String, VmValue> = BTreeMap::new();
+    let mut bodies_dict: harn_vm::value::DictMap = harn_vm::value::DictMap::new();
     for name in &unique {
         if let Some(body) = extract_body(&tree, &source, language, name, container.as_deref()) {
             bodies_dict.insert(name.clone(), body.to_vm_value());
@@ -142,7 +142,7 @@ pub(super) fn run_bulk(args: &[VmValue]) -> Result<VmValue, HostlibError> {
         }
     }
 
-    let mut response: BTreeMap<String, VmValue> = BTreeMap::new();
+    let mut response: harn_vm::value::DictMap = harn_vm::value::DictMap::new();
     response.insert(
         "path".into(),
         match path_for_response {
@@ -152,14 +152,14 @@ pub(super) fn run_bulk(args: &[VmValue]) -> Result<VmValue, HostlibError> {
     );
     response.insert("language".into(), str_value(language.name()));
     response.insert("brace_based".into(), VmValue::Bool(brace_based));
-    response.insert("bodies".into(), VmValue::Dict(Arc::new(bodies_dict)));
+    response.insert("bodies".into(), VmValue::dict(bodies_dict));
     response.insert("missing".into(), VmValue::List(Arc::new(missing)));
-    Ok(VmValue::Dict(Arc::new(response)))
+    Ok(VmValue::dict(response))
 }
 
 fn require_string_list(
     builtin: &'static str,
-    dict: &BTreeMap<String, VmValue>,
+    dict: &harn_vm::value::DictMap,
     key: &'static str,
 ) -> Result<Vec<String>, HostlibError> {
     let Some(raw) = dict.get(key) else {
@@ -201,7 +201,7 @@ fn require_string_list(
 /// (with optional `language` override).
 fn load_input(
     builtin: &'static str,
-    dict: &BTreeMap<String, VmValue>,
+    dict: &harn_vm::value::DictMap,
 ) -> Result<(String, Language, Option<String>), HostlibError> {
     let source_in = optional_string(builtin, dict, "source")?;
     let path_in = optional_string(builtin, dict, "path")?;

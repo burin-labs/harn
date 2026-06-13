@@ -18,7 +18,6 @@ use rcgen::generate_simple_self_signed;
 use rustls::pki_types::PrivatePkcs8KeyDer;
 use rustls::{ServerConfig, ServerConnection, StreamOwned};
 use sha2::{Digest, Sha256};
-use std::collections::BTreeMap;
 use std::io::{Read, Write};
 use std::net::TcpListener;
 use std::sync::{Arc, Once};
@@ -73,7 +72,7 @@ async fn typed_mock_api_drives_http_request_retries() {
     let result = vm_execute_http_request(
         "GET",
         "https://api.example.com/retry",
-        &BTreeMap::from([
+        &crate::value::DictMap::from_iter([
             ("retries".to_string(), VmValue::Int(1)),
             ("backoff".to_string(), VmValue::Int(0)),
         ]),
@@ -97,10 +96,10 @@ async fn http_mock_records_normalized_headers_and_final_query_url() {
         "https://api.example.com/items?api_key=secret&limit=2",
         vec![HttpMockResponse::new(200, "ok")],
     );
-    let options = BTreeMap::from([
+    let options = crate::value::DictMap::from_iter([
         (
             "headers".to_string(),
-            VmValue::Dict(std::sync::Arc::new(BTreeMap::from([
+            VmValue::dict(crate::value::DictMap::from_iter([
                 (
                     "Authorization".to_string(),
                     VmValue::String(std::sync::Arc::from("Bearer secret")),
@@ -109,17 +108,17 @@ async fn http_mock_records_normalized_headers_and_final_query_url() {
                     "X-Trace".to_string(),
                     VmValue::String(std::sync::Arc::from("trace-1")),
                 ),
-            ]))),
+            ])),
         ),
         (
             "query".to_string(),
-            VmValue::Dict(std::sync::Arc::new(BTreeMap::from([
+            VmValue::dict(crate::value::DictMap::from_iter([
                 (
                     "api_key".to_string(),
                     VmValue::String(std::sync::Arc::from("secret")),
                 ),
                 ("limit".to_string(), VmValue::Int(2)),
-            ]))),
+            ])),
         ),
     ]);
 
@@ -148,7 +147,7 @@ async fn http_mock_records_normalized_headers_and_final_query_url() {
 
 #[test]
 fn mock_call_headers_redact_sensitive_values() {
-    let headers = BTreeMap::from([
+    let headers = crate::value::DictMap::from_iter([
         (
             "authorization".to_string(),
             VmValue::String(std::sync::Arc::from("Bearer secret")),
@@ -198,10 +197,10 @@ async fn multipart_requests_are_mock_visible() {
         "https://api.example.com/upload",
         vec![HttpMockResponse::new(201, "uploaded")],
     );
-    let options = BTreeMap::from([(
+    let options = crate::value::DictMap::from_iter([(
         "multipart".to_string(),
         VmValue::List(std::sync::Arc::new(vec![
-            VmValue::Dict(std::sync::Arc::new(BTreeMap::from([
+            VmValue::dict(crate::value::DictMap::from_iter([
                 (
                     "name".to_string(),
                     VmValue::String(std::sync::Arc::from("meta")),
@@ -210,8 +209,8 @@ async fn multipart_requests_are_mock_visible() {
                     "value".to_string(),
                     VmValue::String(std::sync::Arc::from("hello")),
                 ),
-            ]))),
-            VmValue::Dict(std::sync::Arc::new(BTreeMap::from([
+            ])),
+            VmValue::dict(crate::value::DictMap::from_iter([
                 (
                     "name".to_string(),
                     VmValue::String(std::sync::Arc::from("blob")),
@@ -228,7 +227,7 @@ async fn multipart_requests_are_mock_visible() {
                     "value".to_string(),
                     VmValue::Bytes(std::sync::Arc::new(vec![0, 1, 2, 3])),
                 ),
-            ]))),
+            ])),
         ])),
     )]);
 
@@ -261,9 +260,12 @@ async fn http_stream_mock_reads_in_chunks() {
         vec![HttpMockResponse::new(200, "stream-body")],
     );
 
-    let handle = vm_http_stream_open("https://api.example.com/stream", &BTreeMap::new())
-        .await
-        .expect("stream open");
+    let handle = vm_http_stream_open(
+        "https://api.example.com/stream",
+        &crate::value::DictMap::new(),
+    )
+    .await
+    .expect("stream open");
     let stream_id = handle.display();
     let info = vm_http_stream_info(&stream_id).expect("stream info");
     let info = info.as_dict().expect("info dict");
@@ -298,7 +300,7 @@ async fn http_download_mock_writes_file() {
     let response = vm_http_download(
         "https://api.example.com/download",
         &path.display().to_string(),
-        &BTreeMap::new(),
+        &crate::value::DictMap::new(),
     )
     .await
     .expect("download response");
@@ -328,12 +330,12 @@ async fn http_download_mock_retries_retryable_status() {
     let response = vm_http_download(
         "https://api.example.com/download-retry",
         &path.display().to_string(),
-        &BTreeMap::from([(
+        &crate::value::DictMap::from_iter([(
             "retry".to_string(),
-            VmValue::Dict(std::sync::Arc::new(BTreeMap::from([
+            VmValue::dict(crate::value::DictMap::from_iter([
                 ("max".to_string(), VmValue::Int(1)),
                 ("backoff_ms".to_string(), VmValue::Int(0)),
-            ]))),
+            ])),
         )]),
     )
     .await
@@ -363,7 +365,7 @@ async fn http_download_mock_enforces_max_response_bytes() {
     let error = vm_http_download(
         "https://api.example.com/download-too-large",
         &path.display().to_string(),
-        &BTreeMap::from([("max_response_bytes".to_string(), VmValue::Int(3))]),
+        &crate::value::DictMap::from_iter([("max_response_bytes".to_string(), VmValue::Int(3))]),
     )
     .await
     .expect_err("oversized mock body should fail");
@@ -402,7 +404,7 @@ async fn http_download_oversize_stream_preserves_existing_file() {
     let error = vm_http_download(
         &format!("http://127.0.0.1:{port}/oversize"),
         &path.display().to_string(),
-        &BTreeMap::from([("max_response_bytes".to_string(), VmValue::Int(1))]),
+        &crate::value::DictMap::from_iter([("max_response_bytes".to_string(), VmValue::Int(1))]),
     )
     .await
     .expect_err("oversized stream should fail");
@@ -436,14 +438,14 @@ async fn http_proxy_routes_requests_through_configured_proxy() {
         })
         .await;
 
-    let options = BTreeMap::from([
+    let options = crate::value::DictMap::from_iter([
         (
             "proxy".to_string(),
             VmValue::String(std::sync::Arc::from(proxy.base_url().to_string())),
         ),
         (
             "proxy_auth".to_string(),
-            VmValue::Dict(std::sync::Arc::new(BTreeMap::from([
+            VmValue::dict(crate::value::DictMap::from_iter([
                 (
                     "user".to_string(),
                     VmValue::String(std::sync::Arc::from("user")),
@@ -452,7 +454,7 @@ async fn http_proxy_routes_requests_through_configured_proxy() {
                     "pass".to_string(),
                     VmValue::String(std::sync::Arc::from("pass")),
                 ),
-            ]))),
+            ])),
         ),
         ("timeout_ms".to_string(), VmValue::Int(1_000)),
     ]);
@@ -504,9 +506,9 @@ async fn custom_tls_ca_bundle_and_pin_allow_request() {
         );
     });
 
-    let options = BTreeMap::from([(
+    let options = crate::value::DictMap::from_iter([(
         "tls".to_string(),
-        VmValue::Dict(std::sync::Arc::new(BTreeMap::from([
+        VmValue::dict(crate::value::DictMap::from_iter([
             (
                 "ca_bundle_path".to_string(),
                 VmValue::String(std::sync::Arc::from(cert_path.display().to_string())),
@@ -517,7 +519,7 @@ async fn custom_tls_ca_bundle_and_pin_allow_request() {
                     std::sync::Arc::from(pin),
                 )])),
             ),
-        ]))),
+        ])),
     )]);
     let response =
         vm_execute_http_request("GET", &format!("https://localhost:{port}/secure"), &options)
@@ -564,9 +566,9 @@ async fn custom_tls_pin_mismatch_is_rejected() {
         );
     });
 
-    let options = BTreeMap::from([(
+    let options = crate::value::DictMap::from_iter([(
         "tls".to_string(),
-        VmValue::Dict(std::sync::Arc::new(BTreeMap::from([
+        VmValue::dict(crate::value::DictMap::from_iter([
             (
                 "ca_bundle_path".to_string(),
                 VmValue::String(std::sync::Arc::from(cert_path.display().to_string())),
@@ -577,7 +579,7 @@ async fn custom_tls_pin_mismatch_is_rejected() {
                     std::sync::Arc::from("deadbeef"),
                 )])),
             ),
-        ]))),
+        ])),
     )]);
     let error =
         vm_execute_http_request("GET", &format!("https://localhost:{port}/secure"), &options)
@@ -642,7 +644,7 @@ fn write_http_response_generic<T: Write>(
 #[test]
 fn formats_sse_event_fields_and_multiline_data() {
     let frame = vm_sse_event_frame(
-        &VmValue::Dict(std::sync::Arc::new(BTreeMap::from([
+        &VmValue::dict(crate::value::DictMap::from_iter([
             (
                 "event".to_string(),
                 VmValue::String(std::sync::Arc::from("progress")),
@@ -656,8 +658,8 @@ fn formats_sse_event_fields_and_multiline_data() {
                 VmValue::String(std::sync::Arc::from("evt-1")),
             ),
             ("retry_ms".to_string(), VmValue::Int(2500)),
-        ]))),
-        &BTreeMap::new(),
+        ])),
+        &crate::value::DictMap::new(),
     )
     .expect("event frame");
     assert_eq!(
@@ -669,11 +671,11 @@ fn formats_sse_event_fields_and_multiline_data() {
 #[test]
 fn rejects_sse_event_control_fields_with_newlines() {
     let err = vm_sse_event_frame(
-        &VmValue::Dict(std::sync::Arc::new(BTreeMap::from([(
+        &VmValue::dict(crate::value::DictMap::from_iter([(
             "event".to_string(),
             VmValue::String(std::sync::Arc::from("bad\nname")),
-        )]))),
-        &BTreeMap::new(),
+        )])),
+        &crate::value::DictMap::new(),
     )
     .expect_err("newline should reject");
     assert!(err.to_string().contains("event must not contain newlines"));
@@ -682,7 +684,7 @@ fn rejects_sse_event_control_fields_with_newlines() {
 #[test]
 fn server_sse_mock_client_observes_heartbeat_disconnect_and_cancel() {
     reset_http_state();
-    let response = vm_sse_server_response(&BTreeMap::from([(
+    let response = vm_sse_server_response(&crate::value::DictMap::from_iter([(
         "max_buffered_events".to_string(),
         VmValue::Int(4),
     )]))
@@ -692,7 +694,7 @@ fn server_sse_mock_client_observes_heartbeat_disconnect_and_cancel() {
     assert!(expect_bool(
         vm_sse_server_send(
             &stream_id,
-            &VmValue::Dict(std::sync::Arc::new(BTreeMap::from([
+            &VmValue::dict(crate::value::DictMap::from_iter([
                 (
                     "event".to_string(),
                     VmValue::String(std::sync::Arc::from("progress")),
@@ -701,8 +703,8 @@ fn server_sse_mock_client_observes_heartbeat_disconnect_and_cancel() {
                     "data".to_string(),
                     VmValue::String(std::sync::Arc::from("50"))
                 ),
-            ]))),
-            &BTreeMap::new(),
+            ])),
+            &crate::value::DictMap::new(),
         )
         .expect("send")
     ));
@@ -734,12 +736,13 @@ fn server_sse_mock_client_observes_heartbeat_disconnect_and_cancel() {
         vm_sse_server_send(
             &stream_id,
             &VmValue::String(std::sync::Arc::from("late")),
-            &BTreeMap::new()
+            &crate::value::DictMap::new()
         )
         .expect("late send")
     ));
 
-    let cancelled = vm_sse_server_response(&BTreeMap::new()).expect("cancelled response");
+    let cancelled =
+        vm_sse_server_response(&crate::value::DictMap::new()).expect("cancelled response");
     let cancelled_id = handle_from_value(&cancelled, "test").expect("cancelled handle");
     assert!(expect_bool(
         vm_sse_server_cancel(
@@ -758,7 +761,7 @@ fn server_sse_mock_client_observes_heartbeat_disconnect_and_cancel() {
 #[test]
 fn server_sse_rejects_oversized_events() {
     reset_http_state();
-    let response = vm_sse_server_response(&BTreeMap::from([(
+    let response = vm_sse_server_response(&crate::value::DictMap::from_iter([(
         "max_event_bytes".to_string(),
         VmValue::Int(12),
     )]))
@@ -767,7 +770,7 @@ fn server_sse_rejects_oversized_events() {
     let err = vm_sse_server_send(
         &stream_id,
         &VmValue::String(std::sync::Arc::from("this is too large")),
-        &BTreeMap::new(),
+        &crate::value::DictMap::new(),
     )
     .expect_err("oversized event should reject");
     assert!(err.to_string().contains("max_event_bytes"));
@@ -804,9 +807,10 @@ async fn ssrf_guard_default_on_blocks_loopback() {
     let _scope = crate::egress::require_ssrf_guard_for_host();
 
     // No server needed: the request must be blocked before any connection.
-    let error = vm_execute_http_request("GET", "http://127.0.0.1:9/x", &BTreeMap::new())
-        .await
-        .expect_err("default-on blocks loopback");
+    let error =
+        vm_execute_http_request("GET", "http://127.0.0.1:9/x", &crate::value::DictMap::new())
+            .await
+            .expect_err("default-on blocks loopback");
     let msg = error.to_string();
     assert!(msg.contains("EgressBlocked"), "{msg}");
     assert!(msg.contains("disallowed address"), "{msg}");
@@ -835,7 +839,7 @@ async fn ssrf_guard_allow_loopback_hatch_permits_capture_server() {
     let response = vm_execute_http_request(
         "GET",
         &format!("http://127.0.0.1:{port}/ok"),
-        &BTreeMap::new(),
+        &crate::value::DictMap::new(),
     )
     .await
     .expect("hatch permits loopback");
@@ -865,7 +869,7 @@ async fn ssrf_guard_block_private_off_permits_capture_server() {
     let response = vm_execute_http_request(
         "GET",
         &format!("http://127.0.0.1:{port}/ok"),
-        &BTreeMap::new(),
+        &crate::value::DictMap::new(),
     )
     .await
     .expect("block_private:off permits loopback");

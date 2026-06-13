@@ -19,7 +19,7 @@ pub(super) enum ToolSearchResolution {
 ///     Non-string strategies are Harn-side custom scorers, so they force
 ///     client-mode resolution.
 pub(super) fn parse_tool_search_option(
-    options: Option<&BTreeMap<String, VmValue>>,
+    options: Option<&crate::value::DictMap>,
 ) -> Result<Option<crate::llm::api::ToolSearchConfig>, VmError> {
     use crate::llm::api::{ToolSearchConfig, ToolSearchMode, ToolSearchVariant};
 

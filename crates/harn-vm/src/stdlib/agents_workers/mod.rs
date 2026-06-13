@@ -35,7 +35,7 @@ pub(super) enum WorkerConfig {
     Workflow {
         graph: Box<WorkflowGraph>,
         artifacts: Vec<ArtifactRecord>,
-        options: BTreeMap<String, VmValue>,
+        options: crate::value::DictMap,
     },
     Stage {
         node: Box<crate::orchestration::WorkflowNode>,
@@ -284,7 +284,7 @@ fn request_items_from_vm_value(value: Option<&VmValue>) -> Vec<serde_json::Value
 }
 
 fn request_items_from_vm_dict(
-    dict: &BTreeMap<String, VmValue>,
+    dict: &crate::value::DictMap,
     keys: &[&str],
 ) -> Vec<serde_json::Value> {
     keys.iter()
@@ -344,7 +344,7 @@ fn canonical_request_payload(
 fn worker_request_from_vm_dict(
     task: &str,
     system: Option<String>,
-    dict: &BTreeMap<String, VmValue>,
+    dict: &crate::value::DictMap,
 ) -> WorkerRequestRecord {
     let research_questions = request_items_from_vm_dict(dict, &["research_questions", "questions"]);
     let action_items = request_items_from_vm_dict(dict, &["action_items", "actions"]);

@@ -100,8 +100,8 @@ const CACHE_BUILTINS: &[&VmBuiltinDef] = &[
     &LLM_CACHE_KEY_BUILTIN_DEF,
 ];
 
-fn cache_envelope_base(options: &CacheOptions) -> BTreeMap<String, VmValue> {
-    let mut envelope = BTreeMap::new();
+fn cache_envelope_base(options: &CacheOptions) -> crate::value::DictMap {
+    let mut envelope = crate::value::DictMap::new();
     envelope.put_str("backend", options.backend.name());
     envelope.put_str("namespace", options.namespace.clone());
     envelope
@@ -123,7 +123,7 @@ fn cache_get_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmE
     if let Some(value) = hit {
         envelope.insert("value".to_string(), crate::stdlib::json_to_vm_value(&value));
     }
-    Ok(VmValue::Dict(std::sync::Arc::new(envelope)))
+    Ok(VmValue::dict(envelope))
 }
 
 /// Persist a cache value with TTL and LRU eviction.
@@ -147,7 +147,7 @@ fn cache_put_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmE
     let mut envelope = cache_envelope_base(&options);
     envelope.insert("stored".to_string(), VmValue::Bool(true));
     envelope.put_str("key", key);
-    Ok(VmValue::Dict(std::sync::Arc::new(envelope)))
+    Ok(VmValue::dict(envelope))
 }
 
 /// Clear one persistent cache namespace.
@@ -188,7 +188,7 @@ fn cache_stats_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, V
         snapshot.hits as f64 / total as f64
     };
     dict.insert("hit_rate".to_string(), VmValue::Float(hit_rate));
-    Ok(VmValue::Dict(std::sync::Arc::new(dict)))
+    Ok(VmValue::dict(dict))
 }
 
 fn saturating_u64_to_i64(value: u64) -> i64 {
@@ -244,7 +244,7 @@ fn llm_cache_key_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue,
         .map(super::helpers::vm_value_to_json)
         .unwrap_or(serde_json::Value::Null);
 
-    let mut identity = BTreeMap::new();
+    let mut identity = std::collections::BTreeMap::new();
     identity.insert("max_tokens", serde_json::json!(max_tokens));
     identity.insert("model", serde_json::Value::String(model));
     identity.insert("prompt", prompt);
@@ -407,7 +407,7 @@ fn parse_backend(value: &str) -> Result<CacheBackend, VmError> {
     }
 }
 
-fn read_string_field(dict: Option<&BTreeMap<String, VmValue>>, key: &str) -> Option<String> {
+fn read_string_field(dict: Option<&crate::value::DictMap>, key: &str) -> Option<String> {
     dict.and_then(|dict| dict.get(key))
         .and_then(|value| match value {
             VmValue::String(text) if !text.is_empty() => Some(text.to_string()),
@@ -416,7 +416,7 @@ fn read_string_field(dict: Option<&BTreeMap<String, VmValue>>, key: &str) -> Opt
 }
 
 fn read_duration_field(
-    dict: Option<&BTreeMap<String, VmValue>>,
+    dict: Option<&crate::value::DictMap>,
     key: &str,
 ) -> Option<Result<u64, VmError>> {
     dict.and_then(|dict| dict.get(key))
@@ -433,7 +433,7 @@ fn read_duration_field(
 }
 
 fn read_usize_field(
-    dict: Option<&BTreeMap<String, VmValue>>,
+    dict: Option<&crate::value::DictMap>,
     key: &str,
 ) -> Option<Result<usize, VmError>> {
     dict.and_then(|dict| dict.get(key))
@@ -839,7 +839,7 @@ fn canonicalize_json_value(value: &serde_json::Value) -> serde_json::Value {
 
 thread_local! {
     static ACCESS_CLOCK: RefCell<BTreeMap<String, i64>> =
-        const { RefCell::new(BTreeMap::new()) };
+        const { RefCell::new(std::collections::BTreeMap::new()) };
 }
 
 fn access_clock_key(options: &CacheOptions) -> String {
@@ -873,7 +873,7 @@ struct MemEntry {
 
 thread_local! {
     static MEM_STORE: RefCell<BTreeMap<String, MemNamespace>> =
-        const { RefCell::new(BTreeMap::new()) };
+        const { RefCell::new(std::collections::BTreeMap::new()) };
 }
 
 #[derive(Default)]
@@ -951,7 +951,7 @@ struct MetricsStore {
 }
 
 thread_local! {
-    static METRICS: RefCell<MetricsStore> = const { RefCell::new(MetricsStore { by_namespace: BTreeMap::new() }) };
+    static METRICS: RefCell<MetricsStore> = const { RefCell::new(MetricsStore { by_namespace: std::collections::BTreeMap::new() }) };
 }
 
 fn metrics_key(options: &CacheOptions) -> String {

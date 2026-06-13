@@ -1,5 +1,4 @@
 use crate::value::VmDictExt;
-use std::collections::BTreeMap;
 
 use crate::value::{VmError, VmValue};
 use crate::vm::{Vm, VmBuiltinArity, VmBuiltinMetadata};
@@ -32,7 +31,7 @@ const CLEAR_REMINDER_KEYS: &[&str] = &["id", "tag", "dedupe_key"];
 fn require_transcript<'a>(
     args: &'a [VmValue],
     context: &str,
-) -> Result<&'a BTreeMap<String, VmValue>, VmError> {
+) -> Result<&'a crate::value::DictMap, VmError> {
     match args.first() {
         Some(VmValue::Dict(d))
             if d.get("_type").map(|v| v.display()).as_deref() == Some("transcript") =>
@@ -420,7 +419,7 @@ pub(crate) fn register_conversation_builtins(vm: &mut Vm) {
             .collect::<Vec<_>>()
             .join("\n");
 
-        let mut bindings = BTreeMap::new();
+        let mut bindings = crate::value::DictMap::new();
         bindings.put_str("prompt", prompt_override);
         bindings.put_str("formatted", formatted);
         let user_message = crate::stdlib::template::render_stdlib_prompt_asset(
@@ -453,13 +452,13 @@ pub(crate) fn register_conversation_builtins(vm: &mut Vm) {
             transcript_state(transcript),
         ) {
             VmValue::Dict(d) => (*d).clone(),
-            _ => BTreeMap::new(),
+            _ => crate::value::DictMap::new(),
         };
         compacted.insert(
             "archived_messages".to_string(),
             VmValue::Int(archived_count as i64),
         );
-        Ok(VmValue::Dict(std::sync::Arc::new(compacted)))
+        Ok(VmValue::dict(compacted))
     });
 
     vm.register_builtin("add_message", |args, _out| match args.first() {
@@ -513,12 +512,12 @@ pub(crate) fn register_conversation_builtins(vm: &mut Vm) {
         Some(VmValue::List(list)) => {
             let tool_use_id = args.get(1).map(|a| a.display()).unwrap_or_default();
             let result_content = args.get(2).map(|a| a.display()).unwrap_or_default();
-            let mut msg = BTreeMap::new();
+            let mut msg = crate::value::DictMap::new();
             msg.put_str("role", "tool_result");
             msg.put_str("tool_use_id", tool_use_id);
             msg.put_str("content", result_content);
             let mut new_messages = (**list).clone();
-            new_messages.push(VmValue::Dict(std::sync::Arc::new(msg)));
+            new_messages.push(VmValue::dict(msg));
             Ok(VmValue::List(std::sync::Arc::new(new_messages)))
         }
         Some(VmValue::Dict(d))
@@ -526,12 +525,12 @@ pub(crate) fn register_conversation_builtins(vm: &mut Vm) {
         {
             let tool_use_id = args.get(1).map(|a| a.display()).unwrap_or_default();
             let result_content = args.get(2).map(|a| a.display()).unwrap_or_default();
-            let mut msg = BTreeMap::new();
+            let mut msg = crate::value::DictMap::new();
             msg.put_str("role", "tool_result");
             msg.put_str("tool_use_id", tool_use_id);
             msg.put_str("content", result_content);
             let mut new_messages = transcript_message_list(d)?;
-            new_messages.push(VmValue::Dict(std::sync::Arc::new(msg)));
+            new_messages.push(VmValue::dict(msg));
             Ok(rebuild_transcript(
                 d,
                 new_messages,
@@ -547,14 +546,14 @@ pub(crate) fn register_conversation_builtins(vm: &mut Vm) {
     });
 }
 
-fn transcript_state(transcript: &BTreeMap<String, VmValue>) -> Option<&str> {
+fn transcript_state(transcript: &crate::value::DictMap) -> Option<&str> {
     transcript.get("state").and_then(|value| match value {
         VmValue::String(text) if !text.is_empty() => Some(text.as_ref()),
         _ => None,
     })
 }
 
-fn transcript_extra_events(transcript: &BTreeMap<String, VmValue>) -> Vec<VmValue> {
+fn transcript_extra_events(transcript: &crate::value::DictMap) -> Vec<VmValue> {
     transcript
         .get("events")
         .and_then(|events| match events {
@@ -576,7 +575,7 @@ fn transcript_extra_events(transcript: &BTreeMap<String, VmValue>) -> Vec<VmValu
 }
 
 fn rebuild_transcript(
-    transcript: &BTreeMap<String, VmValue>,
+    transcript: &crate::value::DictMap,
     messages: Vec<VmValue>,
     summary: Option<String>,
     assets: Vec<VmValue>,
@@ -596,7 +595,7 @@ fn rebuild_transcript(
 }
 
 fn rebuild_transcript_with_preserved_events(
-    transcript: &BTreeMap<String, VmValue>,
+    transcript: &crate::value::DictMap,
     messages: Vec<VmValue>,
     summary: Option<String>,
     assets: Vec<VmValue>,
@@ -680,7 +679,7 @@ fn transcript_inject_reminder_builtin(args: &[VmValue]) -> Result<VmValue, VmErr
         reminder_lifecycle_payload(transcript_id.as_deref(), &reminder),
     );
 
-    Ok(VmValue::Dict(std::sync::Arc::new(BTreeMap::from([
+    Ok(VmValue::dict(crate::value::DictMap::from_iter([
         ("transcript".to_string(), next),
         (
             "reminder_id".to_string(),
@@ -690,7 +689,7 @@ fn transcript_inject_reminder_builtin(args: &[VmValue]) -> Result<VmValue, VmErr
             "deduped_count".to_string(),
             VmValue::Int(deduped_reminder_ids.len() as i64),
         ),
-    ]))))
+    ])))
 }
 
 fn transcript_clear_reminders_builtin(args: &[VmValue]) -> Result<VmValue, VmError> {
@@ -736,17 +735,17 @@ fn transcript_clear_reminders_builtin(args: &[VmValue]) -> Result<VmValue, VmErr
         emit_reminder_lifecycle_event(REMINDER_EXPIRED_EVENT_KIND, payload);
     }
 
-    Ok(VmValue::Dict(std::sync::Arc::new(BTreeMap::from([
+    Ok(VmValue::dict(crate::value::DictMap::from_iter([
         ("transcript".to_string(), next),
         ("removed_count".to_string(), VmValue::Int(removed_count)),
-    ]))))
+    ])))
 }
 
 fn require_reminder_options<'a>(
     args: &'a [VmValue],
     index: usize,
     context: &str,
-) -> Result<&'a BTreeMap<String, VmValue>, VmError> {
+) -> Result<&'a crate::value::DictMap, VmError> {
     match args.get(index) {
         Some(VmValue::Dict(dict)) => Ok(dict),
         Some(other) => Err(reminder_code_error(
@@ -764,7 +763,7 @@ fn require_reminder_options<'a>(
 
 fn ensure_known_reminder_keys(
     context: &str,
-    options: &BTreeMap<String, VmValue>,
+    options: &crate::value::DictMap,
     allowed: &[&str],
 ) -> Result<(), VmError> {
     let unknown = options
@@ -784,7 +783,7 @@ fn ensure_known_reminder_keys(
 }
 
 fn parse_inject_reminder_options(
-    options: &BTreeMap<String, VmValue>,
+    options: &crate::value::DictMap,
     context: &str,
 ) -> Result<SystemReminder, VmError> {
     Ok(SystemReminder {
@@ -813,7 +812,7 @@ struct ClearReminderSelector {
 }
 
 impl ClearReminderSelector {
-    fn matches(&self, reminder: &BTreeMap<String, VmValue>) -> bool {
+    fn matches(&self, reminder: &crate::value::DictMap) -> bool {
         if let Some(expected) = self.id.as_deref() {
             if reminder_string_field(reminder, "id").as_deref() != Some(expected) {
                 return false;
@@ -837,7 +836,7 @@ impl ClearReminderSelector {
 }
 
 fn parse_clear_reminder_selector(
-    options: &BTreeMap<String, VmValue>,
+    options: &crate::value::DictMap,
     context: &str,
 ) -> Result<ClearReminderSelector, VmError> {
     let selector = ClearReminderSelector {
@@ -856,7 +855,7 @@ fn parse_clear_reminder_selector(
 }
 
 fn required_reminder_string(
-    options: &BTreeMap<String, VmValue>,
+    options: &crate::value::DictMap,
     key: &str,
     context: &str,
 ) -> Result<String, VmError> {
@@ -876,7 +875,7 @@ fn required_reminder_string(
 }
 
 fn optional_reminder_string(
-    options: &BTreeMap<String, VmValue>,
+    options: &crate::value::DictMap,
     key: &str,
     context: &str,
 ) -> Result<Option<String>, VmError> {
@@ -898,10 +897,7 @@ fn optional_reminder_string(
     }
 }
 
-fn reminder_tags(
-    options: &BTreeMap<String, VmValue>,
-    context: &str,
-) -> Result<Vec<String>, VmError> {
+fn reminder_tags(options: &crate::value::DictMap, context: &str) -> Result<Vec<String>, VmError> {
     match options.get("tags") {
         None | Some(VmValue::Nil) => Ok(Vec::new()),
         Some(VmValue::List(values)) => {
@@ -937,7 +933,7 @@ fn reminder_tags(
 }
 
 fn optional_reminder_bool(
-    options: &BTreeMap<String, VmValue>,
+    options: &crate::value::DictMap,
     key: &str,
     context: &str,
 ) -> Result<Option<bool>, VmError> {
@@ -953,7 +949,7 @@ fn optional_reminder_bool(
 }
 
 fn optional_reminder_ttl(
-    options: &BTreeMap<String, VmValue>,
+    options: &crate::value::DictMap,
     context: &str,
 ) -> Result<Option<i64>, VmError> {
     match options.get("ttl_turns") {
@@ -976,7 +972,7 @@ fn optional_reminder_ttl(
 }
 
 fn optional_reminder_propagate(
-    options: &BTreeMap<String, VmValue>,
+    options: &crate::value::DictMap,
     context: &str,
 ) -> Result<Option<ReminderPropagate>, VmError> {
     optional_reminder_string(options, "propagate", context)?
@@ -994,7 +990,7 @@ fn optional_reminder_propagate(
 }
 
 fn optional_reminder_role_hint(
-    options: &BTreeMap<String, VmValue>,
+    options: &crate::value::DictMap,
     context: &str,
 ) -> Result<Option<ReminderRoleHint>, VmError> {
     optional_reminder_string(options, "role_hint", context)?
@@ -1012,7 +1008,7 @@ fn optional_reminder_role_hint(
         .transpose()
 }
 
-fn reminder_payload(event: &VmValue) -> Option<&BTreeMap<String, VmValue>> {
+fn reminder_payload(event: &VmValue) -> Option<&crate::value::DictMap> {
     let event = event.as_dict()?;
     if event.get("kind").map(|value| value.display()).as_deref() != Some(SYSTEM_REMINDER_EVENT_KIND)
     {
@@ -1021,7 +1017,7 @@ fn reminder_payload(event: &VmValue) -> Option<&BTreeMap<String, VmValue>> {
     event.get("reminder").and_then(VmValue::as_dict)
 }
 
-fn reminder_string_field(reminder: &BTreeMap<String, VmValue>, key: &str) -> Option<String> {
+fn reminder_string_field(reminder: &crate::value::DictMap, key: &str) -> Option<String> {
     match reminder.get(key) {
         Some(VmValue::String(value)) if !value.is_empty() => Some(value.to_string()),
         _ => None,
@@ -1048,12 +1044,12 @@ mod tests {
     }
 
     fn dict(entries: Vec<(&str, VmValue)>) -> VmValue {
-        VmValue::Dict(std::sync::Arc::new(
+        VmValue::dict(
             entries
                 .into_iter()
                 .map(|(key, value)| (key.to_string(), value))
-                .collect(),
-        ))
+                .collect::<crate::value::DictMap>(),
+        )
     }
 
     fn strings(values: &[&str]) -> VmValue {

@@ -35,24 +35,21 @@ pub(super) fn system_prompt_position(
     }
 }
 
-pub(super) fn enabled_system_prompt_part(part: &BTreeMap<String, VmValue>) -> bool {
+pub(super) fn enabled_system_prompt_part(part: &crate::value::DictMap) -> bool {
     !matches!(
         part.get("enabled"),
         Some(VmValue::Bool(false) | VmValue::Nil)
     )
 }
 
-pub(super) fn system_prompt_part_content(part: &BTreeMap<String, VmValue>) -> Option<String> {
+pub(super) fn system_prompt_part_content(part: &crate::value::DictMap) -> Option<String> {
     part.get("content")
         .or_else(|| part.get("text"))
         .or_else(|| part.get("prompt"))
         .map(VmValue::display)
 }
 
-pub(super) fn render_system_prompt_part(
-    content: String,
-    part: &BTreeMap<String, VmValue>,
-) -> String {
+pub(super) fn render_system_prompt_part(content: String, part: &crate::value::DictMap) -> String {
     let title = part
         .get("label")
         .or_else(|| part.get("title"))
@@ -171,14 +168,14 @@ pub(crate) fn system_prompt_event_metadata(system: &str) -> serde_json::Value {
 
 pub(crate) fn compose_system_prompt(
     system: Option<String>,
-    options: Option<&BTreeMap<String, VmValue>>,
+    options: Option<&crate::value::DictMap>,
 ) -> Result<Option<String>, VmError> {
     compose_system_prompt_with_reminders(system, options, &[])
 }
 
 pub(super) fn compose_system_prompt_with_reminders(
     system: Option<String>,
-    options: Option<&BTreeMap<String, VmValue>>,
+    options: Option<&crate::value::DictMap>,
     rendered_reminders: &[RenderedReminder],
 ) -> Result<Option<String>, VmError> {
     Ok(assemble_system_prompt(system, options, rendered_reminders)?.system)
@@ -193,7 +190,7 @@ pub(super) fn compose_system_prompt_with_reminders(
 /// [`compose_system_prompt_with_reminders`] is the thin string-only wrapper.
 pub(crate) fn assemble_system_prompt(
     system: Option<String>,
-    options: Option<&BTreeMap<String, VmValue>>,
+    options: Option<&crate::value::DictMap>,
     rendered_reminders: &[RenderedReminder],
 ) -> Result<crate::llm::prompt::AssembledPrompt, VmError> {
     use crate::llm::prompt::{assemble, FragmentBucket, PromptFragment};
@@ -290,7 +287,7 @@ pub(crate) fn assemble_system_prompt(
 /// Names of the tools active for this call, read from the `tools` option
 /// (either a list of tool dicts or a `{tools: [...]}` registry).
 pub(super) fn tool_names_from_options(
-    options: Option<&BTreeMap<String, VmValue>>,
+    options: Option<&crate::value::DictMap>,
 ) -> std::collections::BTreeSet<String> {
     let mut names = std::collections::BTreeSet::new();
     let Some(list) = options.and_then(|options| tool_entry_list(options.get("tools"))) else {
@@ -327,7 +324,7 @@ pub(super) fn tool_entry_list(value: Option<&VmValue>) -> Option<Vec<VmValue>> {
 /// on the tool's own presence so instruction and tool can never drift.
 pub(super) fn append_tool_guidance_fragments(
     fragments: &mut Vec<crate::llm::prompt::PromptFragment>,
-    options: Option<&BTreeMap<String, VmValue>>,
+    options: Option<&crate::value::DictMap>,
 ) {
     use crate::llm::prompt::{FragmentBucket, PromptFragment};
     let Some(list) = options.and_then(|options| tool_entry_list(options.get("tools"))) else {
@@ -376,7 +373,7 @@ pub(super) fn append_tool_guidance_fragments(
 /// present: the agent computed zero non-empty parts, so there is no primary.
 pub(super) fn append_decomposed_primary_fragments(
     fragments: &mut Vec<crate::llm::prompt::PromptFragment>,
-    options: Option<&BTreeMap<String, VmValue>>,
+    options: Option<&crate::value::DictMap>,
 ) -> Result<bool, VmError> {
     use crate::llm::prompt::{FragmentBucket, PromptFragment};
     let Some(VmValue::List(items)) = options.and_then(|options| options.get("_system_fragments"))
@@ -436,7 +433,7 @@ pub(super) fn append_decomposed_primary_fragments(
 /// for direct `llm_call` / `prompt_explain` users that pass `context_profile`.
 pub(super) fn append_context_profile_fragments(
     fragments: &mut Vec<crate::llm::prompt::PromptFragment>,
-    options: Option<&BTreeMap<String, VmValue>>,
+    options: Option<&crate::value::DictMap>,
 ) {
     use crate::llm::prompt::{FragmentBucket, PromptFragment};
     let Some(profile) = options
@@ -492,7 +489,7 @@ pub(super) fn append_context_profile_fragments(
 }
 
 pub(super) fn assemble_ctx(
-    options: Option<&BTreeMap<String, VmValue>>,
+    options: Option<&crate::value::DictMap>,
 ) -> crate::llm::prompt::AssembleCtx {
     crate::llm::prompt::AssembleCtx {
         tool_names: tool_names_from_options(options),
@@ -501,7 +498,7 @@ pub(super) fn assemble_ctx(
 }
 
 pub(super) fn caps_from_options(
-    options: Option<&BTreeMap<String, VmValue>>,
+    options: Option<&crate::value::DictMap>,
 ) -> std::collections::BTreeSet<String> {
     let mut caps = std::collections::BTreeSet::new();
     let Some(options) = options else {

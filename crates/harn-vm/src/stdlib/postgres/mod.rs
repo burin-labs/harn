@@ -69,10 +69,10 @@ type PgTxCell = Arc<Mutex<Option<Transaction<'static, Postgres>>>>;
 type PgTxRegistry = BTreeMap<String, PgTxCell>;
 
 thread_local! {
-    static POOLS: RefCell<BTreeMap<String, Arc<PoolRecord>>> = const { RefCell::new(BTreeMap::new()) };
+    static POOLS: RefCell<BTreeMap<String, Arc<PoolRecord>>> = const { RefCell::new(std::collections::BTreeMap::new()) };
     static TXS: RefCell<PgTxRegistry> =
-        const { RefCell::new(BTreeMap::new()) };
-    static MOCKS: RefCell<BTreeMap<String, MockPool>> = const { RefCell::new(BTreeMap::new()) };
+        const { RefCell::new(std::collections::BTreeMap::new()) };
+    static MOCKS: RefCell<BTreeMap<String, MockPool>> = const { RefCell::new(std::collections::BTreeMap::new()) };
     /// Server-described per-slot parameter OIDs, keyed by the SQL string.
     ///
     /// Postgres infers every `$n` slot's type from the query *structure* (casts,
@@ -84,7 +84,7 @@ thread_local! {
     /// to match the `POOLS`/`TXS`/`MOCKS` registries above (the harn VM runs on a
     /// current-thread runtime).
     static DESCRIBED_OIDS: RefCell<BTreeMap<String, Arc<Vec<PgTypeInfo>>>> =
-        const { RefCell::new(BTreeMap::new()) };
+        const { RefCell::new(std::collections::BTreeMap::new()) };
 }
 
 // Counts how many times an *uncached* server describe round-trip is performed.
@@ -144,15 +144,15 @@ fn register_postgres_namespace(vm: &mut Vm) {
     );
     vm.set_global(
         "pg",
-        VmValue::Dict(Arc::new(BTreeMap::from([
+        VmValue::dict(crate::value::DictMap::from_iter([
             ("_namespace".to_string(), VmValue::String(Arc::from("pg"))),
             ("jsonb".to_string(), jsonb),
-        ]))),
+        ])),
     );
 }
 
 fn namespace(name: &str, entries: &[(&str, &str)]) -> VmValue {
-    VmValue::Dict(Arc::new(
+    VmValue::dict(
         std::iter::once((
             "_namespace".to_string(),
             VmValue::String(Arc::from(name.to_string())),
@@ -164,7 +164,7 @@ fn namespace(name: &str, entries: &[(&str, &str)]) -> VmValue {
             )
         }))
         .collect::<BTreeMap<_, _>>(),
-    ))
+    )
 }
 
 pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
@@ -311,7 +311,7 @@ fn stmt_cache_clear_result(
     connections_cleared: i64,
     connections_skipped: i64,
 ) -> VmValue {
-    let mut result = BTreeMap::new();
+    let mut result = crate::value::DictMap::new();
     result.insert("pools".to_string(), VmValue::Int(pools));
     result.insert(
         "connections_cleared".to_string(),
@@ -321,7 +321,7 @@ fn stmt_cache_clear_result(
         "connections_skipped".to_string(),
         VmValue::Int(connections_skipped),
     );
-    VmValue::Dict(std::sync::Arc::new(result))
+    VmValue::dict(result)
 }
 
 async fn clear_idle_statement_caches(
@@ -507,7 +507,7 @@ pub(super) async fn run_managed_transaction(
     let tx_id = next_id("pgtx");
     let tx_cell = Arc::new(Mutex::new(Some(tx)));
     register_tx(&tx_id, Arc::clone(&tx_cell));
-    let tx_handle = handle_value(HANDLE_TX, &tx_id, BTreeMap::new());
+    let tx_handle = handle_value(HANDLE_TX, &tx_id, crate::value::DictMap::new());
 
     if let Err(error) = prepare(&tx_id).await {
         unregister_tx(&tx_id);
@@ -614,7 +614,7 @@ fn pg_mock_pool_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmE
             },
         );
     });
-    Ok(handle_value(HANDLE_MOCK, &id, BTreeMap::new()))
+    Ok(handle_value(HANDLE_MOCK, &id, crate::value::DictMap::new()))
 }
 
 #[harn_builtin(
@@ -636,7 +636,7 @@ fn pg_mock_calls_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, Vm
 async fn open_pool(
     ctx: &crate::vm::AsyncBuiltinCtx,
     source: &VmValue,
-    options: Option<&BTreeMap<String, VmValue>>,
+    options: Option<&crate::value::DictMap>,
     single_connection: bool,
 ) -> Result<VmValue, VmError> {
     let primary_url = resolve_connection_url(ctx, source).await?;
@@ -744,7 +744,7 @@ fn register_local_pool_handle(
     } else {
         "pgpool"
     });
-    let mut meta = BTreeMap::new();
+    let mut meta = crate::value::DictMap::new();
     meta.insert(
         "max_connections".to_string(),
         VmValue::Int(i64::from(record.max_connections)),
@@ -773,7 +773,7 @@ fn register_local_pool_handle(
 
 async fn build_pool(
     url: &str,
-    options: Option<&BTreeMap<String, VmValue>>,
+    options: Option<&crate::value::DictMap>,
     max_connections: u32,
     stmt_cache_capacity: usize,
     label: &'static str,
@@ -816,7 +816,7 @@ async fn build_pool(
 
 async fn collect_replica_urls(
     ctx: &crate::vm::AsyncBuiltinCtx,
-    options: Option<&BTreeMap<String, VmValue>>,
+    options: Option<&crate::value::DictMap>,
 ) -> Result<Vec<String>, VmError> {
     let Some(replicas_value) = options.and_then(|opts| opts.get("replicas")) else {
         return Ok(Vec::new());
@@ -837,7 +837,7 @@ async fn collect_replica_urls(
     Ok(urls)
 }
 
-fn build_circuit_breaker(options: Option<&BTreeMap<String, VmValue>>) -> CircuitBreakerState {
+fn build_circuit_breaker(options: Option<&crate::value::DictMap>) -> CircuitBreakerState {
     let Some(cb) = options
         .and_then(|opts| opts.get("circuit_breaker"))
         .and_then(VmValue::as_dict)
@@ -1145,7 +1145,7 @@ fn is_allowed_transaction_setting(key: &str) -> bool {
 
 async fn apply_transaction_settings(
     tx_id: &str,
-    settings: &BTreeMap<String, VmValue>,
+    settings: &crate::value::DictMap,
 ) -> Result<(), VmError> {
     for (key, value) in settings {
         if !is_allowed_transaction_setting(key) {
@@ -1540,13 +1540,13 @@ async fn run_described_query<T>(
 }
 
 pub(super) fn row_to_value(row: PgRow) -> Result<VmValue, VmError> {
-    let mut map = BTreeMap::new();
+    let mut map = crate::value::DictMap::new();
     for (index, column) in row.columns().iter().enumerate() {
         let name = column.name().to_string();
         let value = column_value(&row, index, column.type_info().name())?;
         map.insert(name, value);
     }
-    Ok(VmValue::Dict(std::sync::Arc::new(map)))
+    Ok(VmValue::dict(map))
 }
 
 fn column_value(row: &PgRow, index: usize, type_name: &str) -> Result<VmValue, VmError> {
@@ -1669,7 +1669,7 @@ fn column_value(row: &PgRow, index: usize, type_name: &str) -> Result<VmValue, V
         // it as `BTreeMap<String, Option<String>>` already.
         "HSTORE" => {
             let map: sqlx_postgres::types::PgHstore = row.try_get(index).map_err(decode_error)?;
-            let mut dict = BTreeMap::new();
+            let mut dict = crate::value::DictMap::new();
             for (key, value) in map.0 {
                 dict.insert(
                     key,
@@ -1678,7 +1678,7 @@ fn column_value(row: &PgRow, index: usize, type_name: &str) -> Result<VmValue, V
                         .unwrap_or(VmValue::Nil),
                 );
             }
-            VmValue::Dict(std::sync::Arc::new(dict))
+            VmValue::dict(dict)
         }
         // Postgres geometric types decode into dictionaries that preserve
         // the native shape while staying idiomatic to Harn callers.
@@ -1797,12 +1797,12 @@ fn point_value(x: f64, y: f64) -> VmValue {
 }
 
 fn dict_value<const N: usize>(pairs: [(&'static str, VmValue); N]) -> VmValue {
-    VmValue::Dict(Arc::new(
+    VmValue::dict(
         pairs
             .into_iter()
             .map(|(key, value)| (key.to_string(), value))
-            .collect(),
-    ))
+            .collect::<crate::value::DictMap>(),
+    )
 }
 
 fn decode_error(error: sqlx_core::error::Error) -> VmError {
@@ -1888,7 +1888,7 @@ fn query_result_value(result: PgQueryResult, duration: std::time::Duration) -> V
 }
 
 fn execute_result_value(rows_affected: u64, duration: std::time::Duration) -> VmValue {
-    let mut map = BTreeMap::new();
+    let mut map = crate::value::DictMap::new();
     map.insert(
         "rows_affected".to_string(),
         VmValue::Int(rows_affected as i64),
@@ -1897,7 +1897,7 @@ fn execute_result_value(rows_affected: u64, duration: std::time::Duration) -> Vm
         "duration_ms".to_string(),
         VmValue::Int(duration.as_millis() as i64),
     );
-    VmValue::Dict(std::sync::Arc::new(map))
+    VmValue::dict(map)
 }
 
 async fn resolve_connection_url(
@@ -2037,10 +2037,10 @@ pub(super) fn unregister_tx(id: &str) {
     });
 }
 
-pub(super) fn handle_value(kind: &str, id: &str, mut extra: BTreeMap<String, VmValue>) -> VmValue {
+pub(super) fn handle_value(kind: &str, id: &str, mut extra: crate::value::DictMap) -> VmValue {
     extra.put_str("_type", kind);
     extra.put_str("id", id);
-    VmValue::Dict(std::sync::Arc::new(extra))
+    VmValue::dict(extra)
 }
 
 pub(super) fn handle_kind(value: &VmValue) -> Option<String> {
@@ -2178,7 +2178,7 @@ impl ReadRoutingPolicy {
 }
 
 fn read_routing_policy_from_options(
-    options: Option<&BTreeMap<String, VmValue>>,
+    options: Option<&crate::value::DictMap>,
 ) -> Result<ReadRoutingPolicy, VmError> {
     Ok(parse_read_routing_policy(
         options
@@ -2190,7 +2190,7 @@ fn read_routing_policy_from_options(
 }
 
 fn query_routing_policy_from_options(
-    options: Option<&BTreeMap<String, VmValue>>,
+    options: Option<&crate::value::DictMap>,
 ) -> Result<Option<ReadRoutingPolicy>, VmError> {
     parse_read_routing_policy(
         options
@@ -2225,7 +2225,7 @@ fn parse_read_routing_policy(
 }
 
 pub(super) fn routing_from_options(
-    options: Option<&BTreeMap<String, VmValue>>,
+    options: Option<&crate::value::DictMap>,
 ) -> Result<QueryRouting, VmError> {
     if let Some(policy) = query_routing_policy_from_options(options)? {
         Ok(QueryRouting::Policy(policy))
@@ -2261,7 +2261,7 @@ pub(super) fn params_arg(value: Option<&VmValue>, builtin: &str) -> Result<Vec<V
     }
 }
 
-fn option_string(options: Option<&BTreeMap<String, VmValue>>, key: &str) -> Option<String> {
+fn option_string(options: Option<&crate::value::DictMap>, key: &str) -> Option<String> {
     options
         .and_then(|opts| opts.get(key))
         .map(VmValue::display)
@@ -2275,7 +2275,7 @@ pub(super) fn option_bool(value: Option<&VmValue>) -> Option<bool> {
     }
 }
 
-fn option_int(options: Option<&BTreeMap<String, VmValue>>, key: &str) -> Option<i64> {
+fn option_int(options: Option<&crate::value::DictMap>, key: &str) -> Option<i64> {
     options
         .and_then(|opts| opts.get(key))
         .and_then(|value| match value {
@@ -2291,7 +2291,7 @@ fn option_int(options: Option<&BTreeMap<String, VmValue>>, key: &str) -> Option<
         })
 }
 
-fn option_duration_ms(options: Option<&BTreeMap<String, VmValue>>, key: &str) -> Option<u64> {
+fn option_duration_ms(options: Option<&crate::value::DictMap>, key: &str) -> Option<u64> {
     options.and_then(|opts| opts.get(key)).and_then(|value| {
         non_negative_millis_from_value(value, "postgres", key, ErrorKind::Runtime).ok()
     })

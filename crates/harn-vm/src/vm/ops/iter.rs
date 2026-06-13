@@ -1,4 +1,3 @@
-use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use crate::value::{VmError, VmValue};
@@ -134,10 +133,10 @@ impl super::super::Vm {
                     let entry_key = VmValue::String(std::sync::Arc::from(key.as_str()));
                     *idx += 1;
                     self.stack
-                        .push(VmValue::Dict(std::sync::Arc::new(BTreeMap::from([
+                        .push(VmValue::dict(crate::value::DictMap::from_iter([
                             ("key".to_string(), entry_key),
                             ("value".to_string(), value),
-                        ]))));
+                        ])));
                 } else {
                     self.iterators.pop();
                     let frame = self.frames.last_mut().unwrap();
@@ -371,7 +370,7 @@ mod tests {
     #[test]
     fn iter_init_dict_keeps_shared_entries_and_snapshots_keys() {
         run_iter_init_test(async {
-            let entries = Arc::new(BTreeMap::from([
+            let entries = Arc::new(crate::value::DictMap::from_iter([
                 ("a".to_string(), VmValue::Int(1)),
                 ("b".to_string(), VmValue::Int(2)),
             ]));

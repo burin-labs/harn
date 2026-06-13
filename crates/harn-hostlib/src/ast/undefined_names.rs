@@ -1401,13 +1401,12 @@ mod ruby {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::collections::BTreeMap;
 
     fn run_with(content: &str, language: &str) -> VmValue {
-        let mut dict: BTreeMap<String, VmValue> = BTreeMap::new();
+        let mut dict: harn_vm::value::DictMap = Default::default();
         dict.insert("content".into(), VmValue::String(Arc::from(content)));
         dict.insert("language".into(), VmValue::String(Arc::from(language)));
-        run(&[VmValue::Dict(Arc::new(dict))]).expect("undefined_names run")
+        run(&[VmValue::dict(dict)]).expect("undefined_names run")
     }
 
     fn names(result: &VmValue) -> Vec<String> {
@@ -1515,8 +1514,8 @@ mod tests {
 
     #[test]
     fn missing_payload_is_rejected() {
-        let dict: std::collections::BTreeMap<String, VmValue> = std::collections::BTreeMap::new();
-        let err = run(&[VmValue::Dict(Arc::new(dict))]).expect_err("must reject");
+        let dict: harn_vm::value::DictMap = harn_vm::value::DictMap::new();
+        let err = run(&[VmValue::dict(dict)]).expect_err("must reject");
         match err {
             HostlibError::MissingParameter { builtin, .. } => assert_eq!(builtin, BUILTIN),
             other => panic!("got {other:?}"),

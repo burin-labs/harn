@@ -510,7 +510,7 @@ fn json_to_vm(jv: &serde_json::Value) -> VmValue {
             for (k, v) in map {
                 m.insert(k.clone(), json_to_vm(v));
             }
-            VmValue::Dict(std::sync::Arc::new(m))
+            VmValue::dict(m)
         }
     }
 }
@@ -520,7 +520,7 @@ fn namespace_fields_to_vm(fields: &BTreeMap<FieldKey, serde_json::Value>) -> VmV
     for (k, v) in fields {
         map.insert(k.clone(), json_to_vm(v));
     }
-    VmValue::Dict(std::sync::Arc::new(map))
+    VmValue::dict(map)
 }
 
 fn directory_metadata_to_vm(meta: &DirectoryMetadata) -> VmValue {
@@ -528,7 +528,7 @@ fn directory_metadata_to_vm(meta: &DirectoryMetadata) -> VmValue {
     for (ns, fields) in &meta.namespaces {
         namespaces.insert(ns.clone(), namespace_fields_to_vm(fields));
     }
-    VmValue::Dict(std::sync::Arc::new(namespaces))
+    VmValue::dict(namespaces)
 }
 
 fn normalize_directory_key(dir: &str) -> String {
@@ -620,14 +620,14 @@ impl Default for ScanOptions {
     }
 }
 
-fn bool_arg(map: &BTreeMap<String, VmValue>, key: &str, default: bool) -> bool {
+fn bool_arg(map: &crate::value::DictMap, key: &str, default: bool) -> bool {
     match map.get(key) {
         Some(VmValue::Bool(value)) => *value,
         _ => default,
     }
 }
 
-fn usize_arg(map: &BTreeMap<String, VmValue>, key: &str, default: usize) -> usize {
+fn usize_arg(map: &crate::value::DictMap, key: &str, default: usize) -> usize {
     match map.get(key) {
         Some(VmValue::Int(value)) if *value >= 0 => *value as usize,
         _ => default,
@@ -650,7 +650,7 @@ fn parse_scan_options(
     options
 }
 
-fn apply_scan_options_dict(options: &mut ScanOptions, dict: &BTreeMap<String, VmValue>) {
+fn apply_scan_options_dict(options: &mut ScanOptions, dict: &crate::value::DictMap) {
     if let Some(pattern) = dict.get("pattern").map(|value| value.display()) {
         if !pattern.is_empty() {
             options.pattern = Some(pattern);
@@ -749,7 +749,7 @@ fn metadata_get_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmE
                     for (k, v) in fields {
                         m.insert(k, json_to_vm(&v));
                     }
-                    Ok(VmValue::Dict(std::sync::Arc::new(m)))
+                    Ok(VmValue::dict(m))
                 }
                 None => Ok(VmValue::Nil),
             }
@@ -764,7 +764,7 @@ fn metadata_get_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmE
             if m.is_empty() {
                 Ok(VmValue::Nil)
             } else {
-                Ok(VmValue::Dict(std::sync::Arc::new(m)))
+                Ok(VmValue::dict(m))
             }
         }
     })
@@ -843,7 +843,7 @@ fn metadata_entries_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue,
                     item.insert("resolved".to_string(), directory_metadata_to_vm(&resolved));
                 }
             }
-            items.push(VmValue::Dict(std::sync::Arc::new(item)));
+            items.push(VmValue::dict(item));
         }
         Ok(VmValue::List(std::sync::Arc::new(items)))
     })
@@ -934,7 +934,7 @@ fn metadata_stale_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, 
             "tier2".to_string(),
             VmValue::List(std::sync::Arc::new(tier2_stale)),
         );
-        Ok(VmValue::Dict(std::sync::Arc::new(m)))
+        Ok(VmValue::dict(m))
     })
 }
 
@@ -1044,7 +1044,7 @@ fn metadata_status_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, 
             VmValue::List(std::sync::Arc::new(missing_content_hash)),
         );
         result.insert("stale".to_string(), stale);
-        Ok(VmValue::Dict(std::sync::Arc::new(result)))
+        Ok(VmValue::dict(result))
     })
 }
 
@@ -1210,7 +1210,7 @@ fn path_metadata_entries_impl(args: &[VmValue], _out: &mut String) -> Result<VmV
                 item.put_str("kind", "file");
                 item.put_str("path", path.as_str());
                 item.insert("local".to_string(), local);
-                items.push(VmValue::Dict(std::sync::Arc::new(item)));
+                items.push(VmValue::dict(item));
             }
         }
         if include_dirs {
@@ -1238,7 +1238,7 @@ fn path_metadata_entries_impl(args: &[VmValue], _out: &mut String) -> Result<VmV
                 item.put_str("path", normalize_directory_key(&dir));
                 item.insert("local".to_string(), local_value);
                 item.insert("resolved".to_string(), resolved_value);
-                items.push(VmValue::Dict(std::sync::Arc::new(item)));
+                items.push(VmValue::dict(item));
             }
         }
         Ok(VmValue::List(std::sync::Arc::new(items)))
@@ -1359,7 +1359,7 @@ fn metadata_stale_value(state: &MetadataState, base_dir: &Path) -> VmValue {
         "tier2".to_string(),
         VmValue::List(std::sync::Arc::new(tier2_stale)),
     );
-    VmValue::Dict(std::sync::Arc::new(m))
+    VmValue::dict(m)
 }
 
 fn scan_dir_recursive(
@@ -1411,7 +1411,7 @@ fn scan_dir_recursive(
         m.insert("modified".to_string(), VmValue::Int(mtime));
         m.insert("is_dir".to_string(), VmValue::Bool(meta.is_dir()));
         if (meta.is_dir() && options.include_dirs) || (!meta.is_dir() && options.include_files) {
-            results.push(VmValue::Dict(std::sync::Arc::new(m)));
+            results.push(VmValue::dict(m));
         }
         if meta.is_dir() {
             scan_dir_recursive(&entry.path(), base, options, results, depth + 1);

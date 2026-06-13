@@ -1,5 +1,4 @@
 use std::cell::RefCell;
-use std::collections::BTreeMap;
 
 use crate::value::{VmError, VmValue};
 
@@ -11,7 +10,7 @@ pub struct RuntimeContext {
     pub task_name: Option<String>,
     pub task_group_id: Option<String>,
     pub scope_id: Option<String>,
-    pub values: BTreeMap<String, VmValue>,
+    pub values: crate::value::DictMap,
 }
 
 impl RuntimeContext {
@@ -23,7 +22,7 @@ impl RuntimeContext {
             task_name: Some("root".to_string()),
             task_group_id: None,
             scope_id: None,
-            values: BTreeMap::new(),
+            values: crate::value::DictMap::new(),
         }
     }
 
@@ -126,9 +125,7 @@ pub(crate) fn dispatch_runtime_context_builtin(
 ) -> Option<Result<VmValue, VmError>> {
     match name {
         "runtime_context" | "task_current" => Some(Ok(runtime_context_value(vm))),
-        "runtime_context_values" => Some(Ok(VmValue::Dict(std::sync::Arc::new(
-            vm.runtime_context.values.clone(),
-        )))),
+        "runtime_context_values" => Some(Ok(VmValue::dict(vm.runtime_context.values.clone()))),
         "runtime_context_get" => Some(runtime_context_get(vm, args)),
         "runtime_context_set" => Some(runtime_context_set(vm, args)),
         "runtime_context_clear" => Some(runtime_context_clear(vm, args)),
@@ -200,7 +197,7 @@ pub(crate) fn runtime_context_value(vm: &crate::vm::Vm) -> VmValue {
             .and_then(|session| session.worker_id.clone())
     });
 
-    let mut values = BTreeMap::new();
+    let mut values = crate::value::DictMap::new();
     insert_string(
         &mut values,
         "task_id",
@@ -313,15 +310,15 @@ pub(crate) fn runtime_context_value(vm: &crate::vm::Vm) -> VmValue {
     insert_string(&mut values, "capacity_class", None);
     values.insert(
         "context_values".to_string(),
-        VmValue::Dict(std::sync::Arc::new(vm.runtime_context.values.clone())),
+        VmValue::dict(vm.runtime_context.values.clone()),
     );
     values.insert("cancelled".to_string(), VmValue::Bool(cancelled));
     values.insert("debug".to_string(), debug_context_value(vm, cancelled));
-    VmValue::Dict(std::sync::Arc::new(values))
+    VmValue::dict(values)
 }
 
 fn debug_context_value(vm: &crate::vm::Vm, cancelled: bool) -> VmValue {
-    let mut debug = BTreeMap::new();
+    let mut debug = crate::value::DictMap::new();
     debug.insert("cancelled".to_string(), VmValue::Bool(cancelled));
     debug.insert("waiting_reason".to_string(), VmValue::Nil);
     debug.insert(
@@ -341,10 +338,10 @@ fn debug_context_value(vm: &crate::vm::Vm, cancelled: bool) -> VmValue {
         "supervisors".to_string(),
         crate::stdlib::supervisor::supervisor_debug_values(),
     );
-    VmValue::Dict(std::sync::Arc::new(debug))
+    VmValue::dict(debug)
 }
 
-fn insert_string(values: &mut BTreeMap<String, VmValue>, key: &str, value: Option<String>) {
+fn insert_string(values: &mut crate::value::DictMap, key: &str, value: Option<String>) {
     values.insert(
         key.to_string(),
         value

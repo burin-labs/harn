@@ -13,7 +13,6 @@
 //! Criterion reports the median + outlier-filtered p95 of every benchmark.
 //! Run with `cargo bench --bench code_index_cypher`.
 
-use std::collections::BTreeMap;
 use std::fs;
 use std::hint::black_box;
 use std::path::PathBuf;
@@ -32,11 +31,11 @@ const FILE_COUNT: usize = 200;
 const LINES_PER_FILE: usize = 500;
 
 fn dict(entries: &[(&str, VmValue)]) -> VmValue {
-    let mut map: BTreeMap<String, VmValue> = BTreeMap::new();
+    let mut map: harn_vm::value::DictMap = Default::default();
     for (k, v) in entries {
         map.insert((*k).to_string(), v.clone());
     }
-    VmValue::Dict(Arc::new(map))
+    VmValue::dict(map)
 }
 
 fn call(registry: &BuiltinRegistry, name: &str, payload: VmValue) -> VmValue {

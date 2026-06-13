@@ -69,7 +69,7 @@ struct DaemonSpawnSpec {
     persist_root: String,
     snapshot_path: String,
     event_queue_capacity: usize,
-    options: BTreeMap<String, VmValue>,
+    options: crate::value::DictMap,
 }
 
 struct DaemonState {
@@ -80,7 +80,7 @@ struct DaemonState {
     session_id: String,
     persist_root: String,
     snapshot_path: String,
-    options: BTreeMap<String, VmValue>,
+    options: crate::value::DictMap,
     bridge: Arc<HostBridge>,
     handle: Option<tokio::task::JoinHandle<Result<VmValue, VmError>>>,
     monitor_handle: Option<tokio::task::JoinHandle<()>>,
@@ -357,7 +357,7 @@ async fn daemon_resume_builtin(
         }
     };
     let spec = parse_spawn_spec(
-        &BTreeMap::from([
+        &crate::value::DictMap::from_iter([
             (
                 "name".to_string(),
                 VmValue::String(std::sync::Arc::from(meta.name.clone())),
@@ -374,10 +374,7 @@ async fn daemon_resume_builtin(
                 "session_id".to_string(),
                 VmValue::String(std::sync::Arc::from(meta.session_id.clone())),
             ),
-            (
-                "options".to_string(),
-                VmValue::Dict(std::sync::Arc::new(options.clone())),
-            ),
+            ("options".to_string(), VmValue::dict(options.clone())),
         ]),
         Some(meta.id.clone()),
         meta.system.clone(),
@@ -503,7 +500,7 @@ async fn daemon_resume_builtin(
     Ok(summary)
 }
 
-fn optional_string(dict: &BTreeMap<String, VmValue>, key: &str) -> Option<String> {
+fn optional_string(dict: &crate::value::DictMap, key: &str) -> Option<String> {
     dict.get(key)
         .map(VmValue::display)
         .map(|value| value.trim().to_string())
@@ -526,7 +523,7 @@ struct DaemonPaths {
 }
 
 fn parse_spawn_spec(
-    config: &BTreeMap<String, VmValue>,
+    config: &crate::value::DictMap,
     explicit_id: Option<String>,
     explicit_system: Option<String>,
 ) -> Result<DaemonSpawnSpec, VmError> {
@@ -781,9 +778,7 @@ fn persist_daemon_meta(daemon: &DaemonState) -> Result<(), VmError> {
         prompt: daemon.prompt.clone(),
         system: daemon.system.clone(),
         session_id: daemon.session_id.clone(),
-        options: crate::llm::vm_value_to_json(&VmValue::Dict(std::sync::Arc::new(
-            daemon.options.clone(),
-        ))),
+        options: crate::llm::vm_value_to_json(&VmValue::dict(daemon.options.clone())),
         event_queue_capacity: daemon.event_queue_capacity.max(1),
         next_event_seq: daemon.next_event_seq,
         pending_events: daemon.pending_events.iter().cloned().collect(),
@@ -818,7 +813,7 @@ fn spawn_daemon_task(state: Arc<parking_lot::Mutex<DaemonState>>, mut vm: crate:
                 Some(text) => VmValue::String(std::sync::Arc::from(text)),
                 None => VmValue::Nil,
             },
-            VmValue::Dict(std::sync::Arc::new(options)),
+            VmValue::dict(options),
         ];
 
         crate::llm::install_current_host_bridge(bridge);

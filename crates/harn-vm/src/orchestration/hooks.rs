@@ -1,7 +1,6 @@
 //! Runtime lifecycle hooks — tool, agent-turn, and worker interception.
 
 use std::cell::RefCell;
-use std::collections::BTreeMap;
 use std::future::Future;
 use std::sync::Arc;
 
@@ -824,7 +823,7 @@ fn unsupported_reminder_event_error(event: HookEvent, context: &str) -> VmError 
 }
 
 fn required_reminder_spec_string(
-    options: &BTreeMap<String, VmValue>,
+    options: &crate::value::DictMap,
     key: &str,
     context: &str,
 ) -> Result<String, VmError> {
@@ -842,7 +841,7 @@ fn required_reminder_spec_string(
 }
 
 fn optional_reminder_spec_string(
-    options: &BTreeMap<String, VmValue>,
+    options: &crate::value::DictMap,
     key: &str,
     context: &str,
 ) -> Result<Option<String>, VmError> {
@@ -864,7 +863,7 @@ fn optional_reminder_spec_string(
 }
 
 fn optional_reminder_spec_bool(
-    options: &BTreeMap<String, VmValue>,
+    options: &crate::value::DictMap,
     key: &str,
     context: &str,
 ) -> Result<Option<bool>, VmError> {
@@ -879,7 +878,7 @@ fn optional_reminder_spec_bool(
 }
 
 fn reminder_spec_tags(
-    options: &BTreeMap<String, VmValue>,
+    options: &crate::value::DictMap,
     context: &str,
 ) -> Result<Vec<String>, VmError> {
     match options.get("tags") {
@@ -914,7 +913,7 @@ fn reminder_spec_tags(
 }
 
 fn optional_reminder_spec_ttl(
-    options: &BTreeMap<String, VmValue>,
+    options: &crate::value::DictMap,
     context: &str,
 ) -> Result<Option<i64>, VmError> {
     match options.get("ttl_turns") {
@@ -932,7 +931,7 @@ fn optional_reminder_spec_ttl(
 }
 
 fn optional_reminder_spec_propagate(
-    options: &BTreeMap<String, VmValue>,
+    options: &crate::value::DictMap,
     context: &str,
 ) -> Result<Option<ReminderPropagate>, VmError> {
     optional_reminder_spec_string(options, "propagate", context)?
@@ -950,7 +949,7 @@ fn optional_reminder_spec_propagate(
 }
 
 fn optional_reminder_spec_role_hint(
-    options: &BTreeMap<String, VmValue>,
+    options: &crate::value::DictMap,
     context: &str,
 ) -> Result<Option<ReminderRoleHint>, VmError> {
     optional_reminder_spec_string(options, "role_hint", context)?
@@ -1013,7 +1012,7 @@ fn parse_reminder_spec(value: &VmValue, context: &str) -> Result<ReminderSpec, V
     })
 }
 
-fn looks_like_reminder_spec(map: &BTreeMap<String, VmValue>) -> bool {
+fn looks_like_reminder_spec(map: &crate::value::DictMap) -> bool {
     map.contains_key("body")
         && !map.contains_key("deny")
         && !map.contains_key("args")
@@ -1129,7 +1128,7 @@ fn action_value_after_effects(value: VmValue, default_action: VmValue) -> VmValu
             "deny" | "args" | "result" | "output" | "modify" | "block" | "decision" | "action"
         )
     }) {
-        VmValue::Dict(std::sync::Arc::new(action))
+        VmValue::dict(action)
     } else {
         default_action
     }
@@ -1773,12 +1772,12 @@ mod tests {
     }
 
     fn dict(entries: Vec<(&str, VmValue)>) -> VmValue {
-        VmValue::Dict(std::sync::Arc::new(
+        VmValue::dict(
             entries
                 .into_iter()
                 .map(|(key, value)| (key.to_string(), value))
-                .collect(),
-        ))
+                .collect::<crate::value::DictMap>(),
+        )
     }
 
     fn error_message(result: Result<Vec<HookEffect>, VmError>) -> String {

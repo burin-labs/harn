@@ -109,7 +109,7 @@ fn parse_page_options(args: &[VmValue]) -> Result<PageOptions, VmError> {
 }
 
 fn required_string(
-    opts: &BTreeMap<String, VmValue>,
+    opts: &crate::value::DictMap,
     key: &str,
     builtin: &str,
 ) -> Result<String, VmError> {
@@ -126,7 +126,7 @@ fn required_string(
 }
 
 fn optional_string(
-    opts: &BTreeMap<String, VmValue>,
+    opts: &crate::value::DictMap,
     key: &str,
     builtin: &str,
 ) -> Result<Option<String>, VmError> {
@@ -141,7 +141,7 @@ fn optional_string(
 }
 
 fn optional_bool(
-    opts: &BTreeMap<String, VmValue>,
+    opts: &crate::value::DictMap,
     key: &str,
     builtin: &str,
 ) -> Result<Option<bool>, VmError> {
@@ -304,7 +304,7 @@ fn page_result(ok: bool, paged: bool, error: Option<String>) -> VmValue {
     if let Some(error) = error {
         result.put_str("error", error);
     }
-    VmValue::Dict(std::sync::Arc::new(result))
+    VmValue::dict(result)
 }
 
 fn terminal_width(default_width: usize) -> usize {
@@ -350,7 +350,7 @@ mod tests {
             .iter()
             .map(|(key, value)| ((*key).to_string(), value.clone()))
             .collect::<BTreeMap<_, _>>();
-        vec![VmValue::Dict(std::sync::Arc::new(map))]
+        vec![VmValue::dict(map)]
     }
 
     #[test]

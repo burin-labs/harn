@@ -1,4 +1,3 @@
-use std::collections::BTreeMap;
 use std::hint::black_box;
 use std::sync::Arc;
 
@@ -11,14 +10,14 @@ const KEY_COUNTS: [usize; 4] = [1, 5, 25, 100];
 struct Fixture {
     key_count: usize,
     args: Vec<VmValue>,
-    options: Option<BTreeMap<String, VmValue>>,
+    options: Option<harn_vm::value::DictMap>,
 }
 
 fn string(value: &str) -> VmValue {
     VmValue::String(Arc::from(value))
 }
 
-fn dict(entries: BTreeMap<String, VmValue>) -> VmValue {
+fn dict(entries: harn_vm::value::DictMap) -> VmValue {
     VmValue::Dict(Arc::new(entries))
 }
 
@@ -37,13 +36,13 @@ fn override_value(index: usize) -> VmValue {
 }
 
 fn provider_overrides() -> VmValue {
-    let mut overrides = BTreeMap::new();
+    let mut overrides = harn_vm::value::DictMap::new();
     overrides.insert("override_000".to_string(), override_value(0));
     dict(overrides)
 }
 
-fn build_options(key_count: usize) -> BTreeMap<String, VmValue> {
-    let mut options = BTreeMap::new();
+fn build_options(key_count: usize) -> harn_vm::value::DictMap {
+    let mut options = harn_vm::value::DictMap::new();
     options.insert("provider".to_string(), string("mock"));
 
     if key_count >= 2 {

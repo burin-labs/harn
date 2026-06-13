@@ -728,7 +728,7 @@ fn register_trust_namespace(vm: &mut Vm) {
     let names = ["query", "record", "score", "policy_for", "verify_chain"];
     vm.set_global(
         "trust",
-        VmValue::Dict(std::sync::Arc::new(
+        VmValue::dict(
             std::iter::once((
                 "_namespace".to_string(),
                 VmValue::String(std::sync::Arc::from("trust")),
@@ -740,7 +740,7 @@ fn register_trust_namespace(vm: &mut Vm) {
                 )
             }))
             .collect::<BTreeMap<_, _>>(),
-        )),
+        ),
     );
 }
 
@@ -748,7 +748,7 @@ fn register_corrections_namespace(vm: &mut Vm) {
     let names = ["query", "record"];
     vm.set_global(
         "corrections",
-        VmValue::Dict(std::sync::Arc::new(
+        VmValue::dict(
             std::iter::once((
                 "_namespace".to_string(),
                 VmValue::String(std::sync::Arc::from("corrections")),
@@ -760,7 +760,7 @@ fn register_corrections_namespace(vm: &mut Vm) {
                 )
             }))
             .collect::<BTreeMap<_, _>>(),
-        )),
+        ),
     );
 }
 
@@ -1240,7 +1240,7 @@ fn trigger_handle_from_args(
     }
 }
 
-fn parse_trigger_config(config: &BTreeMap<String, VmValue>) -> Result<TriggerBindingSpec, VmError> {
+fn parse_trigger_config(config: &crate::value::DictMap) -> Result<TriggerBindingSpec, VmError> {
     let id = optional_string(config, "id").unwrap_or_default();
     let kind = required_string(config, "kind", "trigger_register")?;
     let provider =
@@ -1488,9 +1488,7 @@ fn parse_trigger_config(config: &BTreeMap<String, VmValue>) -> Result<TriggerBin
     })
 }
 
-pub(crate) fn validate_resume_trigger_spec(
-    config: &BTreeMap<String, VmValue>,
-) -> Result<(), VmError> {
+pub(crate) fn validate_resume_trigger_spec(config: &crate::value::DictMap) -> Result<(), VmError> {
     let mut normalized = config.clone();
     normalized.entry("handler".to_string()).or_insert_with(|| {
         VmValue::String(std::sync::Arc::from("worker://__resume_auto_resume__"))
@@ -1617,7 +1615,7 @@ fn sanitize_auto_resume_id(worker_id: &str) -> String {
 }
 
 fn auto_resume_timeout_spec(
-    conditions: &BTreeMap<String, VmValue>,
+    conditions: &crate::value::DictMap,
 ) -> Result<Option<AutoResumeTimeoutSpec>, VmError> {
     let Some(timeout) = conditions.get("timeout") else {
         return Ok(None);
@@ -2032,7 +2030,7 @@ fn parse_query_timestamp(builtin: &str, field: &str, raw: &str) -> Result<Offset
 }
 
 fn parse_retry_config(
-    retry: Option<&BTreeMap<String, VmValue>>,
+    retry: Option<&crate::value::DictMap>,
     builtin: &str,
 ) -> Result<TriggerRetryConfig, VmError> {
     let Some(retry) = retry else {
@@ -2116,7 +2114,7 @@ fn parse_handler_value(
 /// (#1876) both ship as dict-shaped handlers so the trigger DSL keeps a
 /// single uniform `handler:` syntax; future variants plug in here too.
 fn parse_handler_dict(
-    map: &BTreeMap<String, VmValue>,
+    map: &crate::value::DictMap,
     builtin: &str,
     field_name: &str,
 ) -> Result<(TriggerHandlerSpec, serde_json::Value), VmError> {
@@ -2190,7 +2188,7 @@ fn parse_handler_dict(
 /// workers tagged with a given org / tenant). `reason` is propagated to every
 /// suspended worker's `WorkerSuspension::reason` and audit entry.
 fn parse_interrupt_and_suspend_handler(
-    map: &BTreeMap<String, VmValue>,
+    map: &crate::value::DictMap,
     builtin: &str,
 ) -> Result<(TriggerHandlerSpec, serde_json::Value), VmError> {
     let target_value = map.get("target_agents").or_else(|| map.get("target"));
@@ -2272,7 +2270,7 @@ fn parse_interrupt_and_suspend_handler(
 /// `transcript.inject_reminder` (#1815 R-02) shape so authors can reuse
 /// the same mental model.
 fn parse_reminder_inject_handler(
-    map: &BTreeMap<String, VmValue>,
+    map: &crate::value::DictMap,
     builtin: &str,
 ) -> Result<(TriggerHandlerSpec, serde_json::Value), VmError> {
     let target_value = map.get("target").or_else(|| map.get("target_session_id"));
@@ -2359,10 +2357,7 @@ fn parse_reminder_inject_handler(
     ))
 }
 
-fn parse_reminder_tags(
-    map: &BTreeMap<String, VmValue>,
-    builtin: &str,
-) -> Result<Vec<String>, VmError> {
+fn parse_reminder_tags(map: &crate::value::DictMap, builtin: &str) -> Result<Vec<String>, VmError> {
     match map.get("tags") {
         None | Some(VmValue::Nil) => Ok(Vec::new()),
         Some(VmValue::List(list)) => {
@@ -2395,7 +2390,7 @@ fn parse_reminder_tags(
 }
 
 fn parse_reminder_ttl_turns(
-    map: &BTreeMap<String, VmValue>,
+    map: &crate::value::DictMap,
     builtin: &str,
 ) -> Result<Option<i64>, VmError> {
     match map.get("ttl_turns") {
@@ -2417,7 +2412,7 @@ fn parse_reminder_ttl_turns(
 }
 
 fn parse_reminder_propagate(
-    map: &BTreeMap<String, VmValue>,
+    map: &crate::value::DictMap,
     builtin: &str,
 ) -> Result<crate::llm::helpers::ReminderPropagate, VmError> {
     match map.get("propagate") {
@@ -2438,7 +2433,7 @@ fn parse_reminder_propagate(
 }
 
 fn parse_reminder_role_hint(
-    map: &BTreeMap<String, VmValue>,
+    map: &crate::value::DictMap,
     builtin: &str,
 ) -> Result<crate::llm::helpers::ReminderRoleHint, VmError> {
     match map.get("role_hint") {
@@ -2460,7 +2455,7 @@ fn parse_reminder_role_hint(
 }
 
 fn optional_path_string(
-    map: &BTreeMap<String, VmValue>,
+    map: &crate::value::DictMap,
     field: &str,
     variant: &str,
 ) -> Result<Option<String>, VmError> {
@@ -2552,7 +2547,7 @@ fn require_dict_arg<'a>(
     args: &'a [VmValue],
     index: usize,
     builtin: &str,
-) -> Result<&'a BTreeMap<String, VmValue>, VmError> {
+) -> Result<&'a crate::value::DictMap, VmError> {
     match args.get(index) {
         Some(VmValue::Dict(dict)) => Ok(dict),
         Some(other) => Err(VmError::Runtime(format!(
@@ -2594,7 +2589,7 @@ fn optional_string_arg(
 }
 
 fn required_string(
-    map: &BTreeMap<String, VmValue>,
+    map: &crate::value::DictMap,
     key: &str,
     builtin: &str,
 ) -> Result<String, VmError> {
@@ -2602,7 +2597,7 @@ fn required_string(
         .ok_or_else(|| VmError::Runtime(format!("{builtin}: missing string field `{key}`")))
 }
 
-fn optional_string(map: &BTreeMap<String, VmValue>, key: &str) -> Option<String> {
+fn optional_string(map: &crate::value::DictMap, key: &str) -> Option<String> {
     map.get(key).and_then(|value| match value {
         VmValue::String(text) => Some(text.to_string()),
         _ => None,
@@ -2610,7 +2605,7 @@ fn optional_string(map: &BTreeMap<String, VmValue>, key: &str) -> Option<String>
 }
 
 fn optional_bool(
-    map: &BTreeMap<String, VmValue>,
+    map: &crate::value::DictMap,
     key: &str,
     builtin: &str,
 ) -> Result<Option<bool>, VmError> {
@@ -2658,7 +2653,7 @@ fn webhook_intake_error(error: WebhookIntakeError) -> VmError {
 }
 
 fn parse_webhook_intake_config(
-    config: &BTreeMap<String, VmValue>,
+    config: &crate::value::DictMap,
 ) -> Result<WebhookIntakeConfig, VmError> {
     let signature_header = required_string(config, "signature_header", "webhook_intake_register")?;
     let delivery_id_header =
@@ -2731,7 +2726,7 @@ fn parse_webhook_intake_config(
     })
 }
 
-fn parse_intake_secret(config: &BTreeMap<String, VmValue>) -> Result<Vec<u8>, VmError> {
+fn parse_intake_secret(config: &crate::value::DictMap) -> Result<Vec<u8>, VmError> {
     match config.get("secret") {
         Some(VmValue::String(text)) => Ok(text.as_bytes().to_vec()),
         Some(VmValue::Bytes(bytes)) => Ok((**bytes).clone()),
@@ -2746,7 +2741,7 @@ fn parse_intake_secret(config: &BTreeMap<String, VmValue>) -> Result<Vec<u8>, Vm
 }
 
 fn parse_webhook_intake_request(
-    request: &BTreeMap<String, VmValue>,
+    request: &crate::value::DictMap,
 ) -> Result<WebhookIntakeRequest, VmError> {
     let headers = match request.get("headers") {
         Some(VmValue::Dict(dict)) => dict

@@ -12,8 +12,8 @@ fn cookie_error(message: impl Into<String>) -> VmError {
     VmError::Runtime(format!("cookie: {}", message.into()))
 }
 
-fn dict(fields: BTreeMap<String, VmValue>) -> VmValue {
-    VmValue::Dict(std::sync::Arc::new(fields))
+fn dict(fields: crate::value::DictMap) -> VmValue {
+    VmValue::dict(fields)
 }
 
 fn list(items: Vec<VmValue>) -> VmValue {
@@ -43,7 +43,7 @@ fn option_map<'a>(
     args: &'a [VmValue],
     index: usize,
     name: &str,
-) -> Result<Option<&'a BTreeMap<String, VmValue>>, VmError> {
+) -> Result<Option<&'a crate::value::DictMap>, VmError> {
     match args.get(index) {
         Some(VmValue::Dict(map)) => Ok(Some(map)),
         Some(VmValue::Nil) | None => Ok(None),
@@ -55,7 +55,7 @@ fn option_map<'a>(
 }
 
 fn option_value<'a>(
-    options: Option<&'a BTreeMap<String, VmValue>>,
+    options: Option<&'a crate::value::DictMap>,
     names: &[&str],
 ) -> Option<&'a VmValue> {
     let options = options?;
@@ -67,11 +67,11 @@ fn option_value<'a>(
     None
 }
 
-fn option_bool(options: Option<&BTreeMap<String, VmValue>>, names: &[&str], default: bool) -> bool {
+fn option_bool(options: Option<&crate::value::DictMap>, names: &[&str], default: bool) -> bool {
     option_value(options, names).map_or(default, VmValue::is_truthy)
 }
 
-fn option_string(options: Option<&BTreeMap<String, VmValue>>, names: &[&str]) -> Option<String> {
+fn option_string(options: Option<&crate::value::DictMap>, names: &[&str]) -> Option<String> {
     option_value(options, names).and_then(|value| match value {
         VmValue::Nil => None,
         other => Some(other.display()),
@@ -79,7 +79,7 @@ fn option_string(options: Option<&BTreeMap<String, VmValue>>, names: &[&str]) ->
 }
 
 fn option_i64(
-    options: Option<&BTreeMap<String, VmValue>>,
+    options: Option<&crate::value::DictMap>,
     names: &[&str],
 ) -> Result<Option<i64>, VmError> {
     match option_value(options, names) {
@@ -201,23 +201,23 @@ fn raw_cookie_headers(value: &VmValue) -> Result<Vec<String>, VmError> {
 }
 
 fn invalid_segment(segment: &str, reason: &str) -> VmValue {
-    dict(BTreeMap::from([
+    dict(crate::value::DictMap::from_iter([
         ("segment".to_string(), string(segment.to_string())),
         ("reason".to_string(), string(reason.to_string())),
     ]))
 }
 
 struct ParsedCookieHeader {
-    cookies: BTreeMap<String, VmValue>,
+    cookies: crate::value::DictMap,
     pairs: Vec<VmValue>,
     values: BTreeMap<String, Vec<String>>,
     invalid: Vec<VmValue>,
 }
 
 fn parse_cookie_header_value(raw: &str) -> ParsedCookieHeader {
-    let mut cookies = BTreeMap::new();
+    let mut cookies = crate::value::DictMap::new();
     let mut pairs = Vec::new();
-    let mut all_values: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    let mut all_values: BTreeMap<String, Vec<String>> = std::collections::BTreeMap::new();
     let mut invalid = Vec::new();
 
     for segment in raw.split(';') {
@@ -252,7 +252,7 @@ fn parse_cookie_header_value(raw: &str) -> ParsedCookieHeader {
             .entry(name.to_string())
             .or_default()
             .push(value.clone());
-        pairs.push(dict(BTreeMap::from([
+        pairs.push(dict(crate::value::DictMap::from_iter([
             ("name".to_string(), string(name.to_string())),
             ("value".to_string(), string(value)),
         ])));
@@ -268,9 +268,9 @@ fn parse_cookie_header_value(raw: &str) -> ParsedCookieHeader {
 
 fn parse_cookie_builtin(args: &[VmValue]) -> Result<VmValue, VmError> {
     require_args(args, 1, "cookie_parse")?;
-    let mut cookies = BTreeMap::new();
+    let mut cookies = crate::value::DictMap::new();
     let mut pairs = Vec::new();
-    let mut all_values: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    let mut all_values: BTreeMap<String, Vec<String>> = std::collections::BTreeMap::new();
     let mut invalid = Vec::new();
 
     for header in raw_cookie_headers(&args[0])? {
@@ -299,7 +299,7 @@ fn parse_cookie_builtin(args: &[VmValue]) -> Result<VmValue, VmError> {
         })
         .collect();
 
-    Ok(dict(BTreeMap::from([
+    Ok(dict(crate::value::DictMap::from_iter([
         ("cookies".to_string(), dict(cookies)),
         ("pairs".to_string(), list(pairs)),
         ("duplicates".to_string(), dict(duplicates)),
@@ -310,7 +310,7 @@ fn parse_cookie_builtin(args: &[VmValue]) -> Result<VmValue, VmError> {
 fn serialize_cookie_with_defaults(
     name: &str,
     value: &str,
-    options: Option<&BTreeMap<String, VmValue>>,
+    options: Option<&crate::value::DictMap>,
     defaults: CookieDefaults,
 ) -> Result<String, VmError> {
     if !valid_cookie_name(name) {
@@ -465,7 +465,7 @@ fn cookie_sign_builtin(args: &[VmValue]) -> Result<VmValue, VmError> {
 }
 
 fn cookie_verify_result(ok: bool, value: Option<String>, error: Option<&str>) -> VmValue {
-    let mut result = BTreeMap::new();
+    let mut result = crate::value::DictMap::new();
     result.insert("ok".to_string(), bool_value(ok));
     result.insert("value".to_string(), value.map(string).unwrap_or_else(nil));
     result.insert("error".to_string(), error.map(string).unwrap_or_else(nil));
@@ -497,7 +497,7 @@ fn session_sign_builtin(args: &[VmValue]) -> Result<VmValue, VmError> {
 }
 
 fn session_verify_result(ok: bool, payload: VmValue, error: Option<&str>) -> VmValue {
-    dict(BTreeMap::from([
+    dict(crate::value::DictMap::from_iter([
         ("ok".to_string(), bool_value(ok)),
         ("payload".to_string(), payload),
         ("error".to_string(), error.map(string).unwrap_or_else(nil)),
@@ -649,7 +649,7 @@ fn cookie_round_trip_builtin(args: &[VmValue]) -> Result<VmValue, VmError> {
     };
 
     let parsed_request = parse_cookie_builtin(&[request_value])?;
-    let mut cookies = BTreeMap::<String, String>::new();
+    let mut cookies = std::collections::BTreeMap::new();
     if let VmValue::Dict(result) = parsed_request {
         if let Some(VmValue::Dict(parsed)) = result.get("cookies") {
             for (name, value) in parsed.iter() {
@@ -672,8 +672,8 @@ fn cookie_round_trip_builtin(args: &[VmValue]) -> Result<VmValue, VmError> {
     let cookie_values = cookies
         .iter()
         .map(|(name, value)| (name.clone(), string(value.clone())))
-        .collect();
-    Ok(dict(BTreeMap::from([
+        .collect::<crate::value::DictMap>();
+    Ok(dict(crate::value::DictMap::from_iter([
         ("cookie_header".to_string(), string(header)),
         ("cookies".to_string(), dict(cookie_values)),
     ])))

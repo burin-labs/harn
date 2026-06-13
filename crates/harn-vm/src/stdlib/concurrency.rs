@@ -91,7 +91,7 @@ fn select_result(index: usize, value: VmValue, channel_name: &str) -> VmValue {
     result.insert("index".to_string(), VmValue::Int(index as i64));
     result.insert("value".to_string(), value);
     result.put_str("channel", channel_name);
-    VmValue::Dict(std::sync::Arc::new(result))
+    VmValue::dict(result)
 }
 
 /// Build a select result dict indicating no channel was ready (index = -1).
@@ -100,7 +100,7 @@ fn select_none() -> VmValue {
     result.insert("index".to_string(), VmValue::Int(-1));
     result.insert("value".to_string(), VmValue::Nil);
     result.insert("channel".to_string(), VmValue::Nil);
-    VmValue::Dict(std::sync::Arc::new(result))
+    VmValue::dict(result)
 }
 
 fn require_channel_list(args: &[VmValue], builtin: &str) -> Result<Vec<VmValue>, VmError> {
@@ -151,7 +151,7 @@ fn cancelled_vm_error() -> VmError {
 }
 
 fn channel_closed_error(operation: &str, channel_name: &str) -> VmError {
-    VmError::Thrown(VmValue::Dict(std::sync::Arc::new(BTreeMap::from([
+    VmError::Thrown(VmValue::dict(BTreeMap::from([
         (
             "type".to_string(),
             VmValue::String(std::sync::Arc::from("ChannelClosed")),
@@ -170,7 +170,7 @@ fn channel_closed_error(operation: &str, channel_name: &str) -> VmError {
                 "{operation}: channel '{channel_name}' is closed"
             ))),
         ),
-    ]))))
+    ])))
 }
 
 fn guard_sync_self_deadlock(
@@ -244,7 +244,7 @@ fn positive_u32_arg(
         .map_err(|_| VmError::Runtime(format!("{name}: value {value} exceeds u32::MAX")))
 }
 
-fn dict_string(dict: &BTreeMap<String, VmValue>, key: &str) -> Option<String> {
+fn dict_string(dict: &crate::value::DictMap, key: &str) -> Option<String> {
     dict.get(key).and_then(|value| match value {
         VmValue::String(text) if !text.is_empty() => Some(text.to_string()),
         VmValue::Nil => None,
@@ -262,7 +262,7 @@ fn context_string(context: &VmValue, key: &str) -> Option<String> {
 fn resolve_shared_scope(
     vm: &Vm,
     raw_scope: Option<&str>,
-    options: Option<&BTreeMap<String, VmValue>>,
+    options: Option<&crate::value::DictMap>,
     builtin: &str,
 ) -> Result<String, VmError> {
     let context = crate::runtime_context::runtime_context_value(vm);
@@ -313,7 +313,7 @@ fn resolve_shared_scope(
     Ok(format!("{scope}:{resolved}"))
 }
 
-fn shared_options(args: &[VmValue]) -> Option<&BTreeMap<String, VmValue>> {
+fn shared_options(args: &[VmValue]) -> Option<&crate::value::DictMap> {
     args.first().and_then(VmValue::as_dict)
 }
 
@@ -322,7 +322,7 @@ fn scoped_from_open_args(
     args: &[VmValue],
     builtin: &str,
     key_field: &str,
-) -> Result<(ScopedKey, Option<BTreeMap<String, VmValue>>), VmError> {
+) -> Result<(ScopedKey, Option<crate::value::DictMap>), VmError> {
     let options = shared_options(args);
     let key = if let Some(options) = options {
         dict_string(options, key_field)
@@ -1623,7 +1623,7 @@ fn timer_start_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, V
     let mut timer = BTreeMap::new();
     timer.put_str("name", name);
     timer.insert("start_ms".to_string(), VmValue::Int(now_ms));
-    Ok(VmValue::Dict(std::sync::Arc::new(timer)))
+    Ok(VmValue::dict(timer))
 }
 
 #[harn_builtin(

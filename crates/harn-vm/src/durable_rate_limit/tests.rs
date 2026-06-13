@@ -1,7 +1,6 @@
 use super::*;
 use crate::{compile_source, register_vm_stdlib, reset_thread_local_state, Vm};
 use rusqlite::{params, Connection};
-use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Barrier};
 
@@ -134,17 +133,17 @@ fn concurrent_threads_do_not_over_reserve_shared_bucket() {
 
 #[test]
 fn duplicate_bucket_keys_are_rejected() {
-    let options = BTreeMap::from([(
+    let options = crate::value::DictMap::from_iter([(
         "buckets".to_string(),
         VmValue::List(Arc::new(vec![
-            VmValue::Dict(Arc::new(BTreeMap::from([
+            VmValue::dict(crate::value::DictMap::from_iter([
                 ("key".to_string(), VmValue::String(Arc::from("same"))),
                 ("limit".to_string(), VmValue::Int(1)),
-            ]))),
-            VmValue::Dict(Arc::new(BTreeMap::from([
+            ])),
+            VmValue::dict(crate::value::DictMap::from_iter([
                 ("key".to_string(), VmValue::String(Arc::from("same"))),
                 ("limit".to_string(), VmValue::Int(1)),
-            ]))),
+            ])),
         ])),
     )]);
     let error = parse_buckets(&options).expect_err("duplicate keys should fail");

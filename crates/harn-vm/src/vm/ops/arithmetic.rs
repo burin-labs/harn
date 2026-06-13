@@ -491,7 +491,7 @@ impl super::super::Vm {
                         result.extend(entries.iter().map(|(k, v)| (k.clone(), v.clone())));
                     }
                 }
-                Ok(VmValue::Dict(std::sync::Arc::new(result)))
+                Ok(VmValue::dict(result))
             }
             (a, b) => Err(VmError::TypeError(format!(
                 "Cannot add {} and {}",

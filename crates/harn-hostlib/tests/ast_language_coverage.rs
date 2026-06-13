@@ -7,7 +7,6 @@
 //! real edit round-trip through parse → query → splice → re-validate" is
 //! the single contract every language must satisfy.
 
-use std::collections::BTreeMap;
 use std::io::Write;
 use std::sync::Arc;
 
@@ -22,11 +21,11 @@ fn registry() -> BuiltinRegistry {
 }
 
 fn dict(pairs: &[(&str, VmValue)]) -> VmValue {
-    let mut map: BTreeMap<String, VmValue> = BTreeMap::new();
+    let mut map: harn_vm::value::DictMap = Default::default();
     for (k, v) in pairs {
         map.insert((*k).into(), v.clone());
     }
-    VmValue::Dict(Arc::new(map))
+    VmValue::dict(map)
 }
 
 fn vm_string(s: &str) -> VmValue {

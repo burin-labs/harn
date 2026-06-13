@@ -19,7 +19,7 @@
 //! without per-item attributes.
 #![allow(dead_code)]
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 use std::fmt::Display;
 use std::time::Duration as StdDuration;
 
@@ -59,7 +59,7 @@ pub(crate) fn dict_arg<'a>(
     fn_name: &'static str,
     arg_name: &str,
     kind: ErrorKind,
-) -> Result<&'a BTreeMap<String, VmValue>, VmError> {
+) -> Result<&'a crate::value::DictMap, VmError> {
     match args.get(idx) {
         Some(VmValue::Dict(dict)) => Ok(dict.as_ref()),
         Some(value) => Err(fn_err(
@@ -82,7 +82,7 @@ pub(crate) fn optional_dict_arg<'a>(
     fn_name: &'static str,
     arg_name: &str,
     kind: ErrorKind,
-) -> Result<Option<&'a BTreeMap<String, VmValue>>, VmError> {
+) -> Result<Option<&'a crate::value::DictMap>, VmError> {
     match args.get(idx) {
         None | Some(VmValue::Nil) => Ok(None),
         Some(VmValue::Dict(dict)) => Ok(Some(dict.as_ref())),
@@ -215,7 +215,7 @@ pub(crate) fn duration_from_value(
 /// [`OptionsParser::allow`] first.
 pub(crate) struct OptionsParser<'a> {
     fn_name: &'static str,
-    dict: &'a BTreeMap<String, VmValue>,
+    dict: &'a crate::value::DictMap,
     seen: BTreeSet<&'static str>,
     kind: ErrorKind,
 }
@@ -223,7 +223,7 @@ pub(crate) struct OptionsParser<'a> {
 impl<'a> OptionsParser<'a> {
     pub(crate) fn new(
         fn_name: &'static str,
-        dict: &'a BTreeMap<String, VmValue>,
+        dict: &'a crate::value::DictMap,
         kind: ErrorKind,
     ) -> Self {
         Self {
@@ -364,7 +364,7 @@ impl<'a> OptionsParser<'a> {
     pub(crate) fn optional_dict(
         &mut self,
         key: &'static str,
-    ) -> Result<Option<&'a BTreeMap<String, VmValue>>, VmError> {
+    ) -> Result<Option<&'a crate::value::DictMap>, VmError> {
         self.mark(key);
         match self.dict.get(key) {
             None | Some(VmValue::Nil) => Ok(None),
@@ -403,7 +403,7 @@ impl<'a> OptionsParser<'a> {
 mod tests {
     use super::*;
 
-    fn dict(pairs: &[(&str, VmValue)]) -> BTreeMap<String, VmValue> {
+    fn dict(pairs: &[(&str, VmValue)]) -> crate::value::DictMap {
         pairs
             .iter()
             .map(|(k, v)| ((*k).to_string(), v.clone()))
@@ -537,7 +537,7 @@ mod tests {
 
     #[test]
     fn dict_arg_extracts() {
-        let v = VmValue::Dict(std::sync::Arc::new(dict(&[("a", VmValue::Bool(true))])));
+        let v = VmValue::dict(dict(&[("a", VmValue::Bool(true))]));
         let args = vec![v];
         let got = dict_arg(&args, 0, "fn", "config", ErrorKind::Runtime).unwrap();
         assert_eq!(got.len(), 1);

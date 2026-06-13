@@ -456,7 +456,7 @@ fn parse_wait_options(value: Option<&VmValue>, builtin: &str) -> Result<WaitOpti
 }
 
 fn json_dict_field(
-    map: &BTreeMap<String, VmValue>,
+    map: &crate::value::DictMap,
     field: &str,
     builtin: &str,
 ) -> Result<BTreeMap<String, serde_json::Value>, VmError> {
@@ -474,7 +474,7 @@ fn json_dict_field(
         .collect())
 }
 
-fn string_field(map: &BTreeMap<String, VmValue>, field: &str) -> Result<Option<String>, VmError> {
+fn string_field(map: &crate::value::DictMap, field: &str) -> Result<Option<String>, VmError> {
     let Some(value) = map.get(field) else {
         return Ok(None);
     };

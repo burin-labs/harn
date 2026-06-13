@@ -3,7 +3,7 @@
 //! Wraps `notify` to deliver coalesced file-change batches into Harn's
 //! session-scoped `AgentEvent` stream.
 
-use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::collections::{BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{mpsc, Mutex, OnceLock};
@@ -209,7 +209,7 @@ struct SubscribeRequest {
 }
 
 impl SubscribeRequest {
-    fn from_dict(dict: &BTreeMap<String, VmValue>) -> Result<Self, HostlibError> {
+    fn from_dict(dict: &harn_vm::value::DictMap) -> Result<Self, HostlibError> {
         let root_param = optional_string(SUBSCRIBE_BUILTIN, dict, "root")?;
         let raw_paths = optional_string_list(SUBSCRIBE_BUILTIN, dict, "paths")?;
         let raw_globs = optional_string_list(SUBSCRIBE_BUILTIN, dict, "globs")?;
@@ -448,7 +448,7 @@ fn normalize_kind(kind: &EventKind) -> &'static str {
     }
 }
 
-fn parse_kinds(dict: &BTreeMap<String, VmValue>) -> Result<BTreeSet<String>, HostlibError> {
+fn parse_kinds(dict: &harn_vm::value::DictMap) -> Result<BTreeSet<String>, HostlibError> {
     let values = optional_string_list(SUBSCRIBE_BUILTIN, dict, "kinds")?.unwrap_or_else(|| {
         DEFAULT_KINDS
             .iter()
@@ -572,7 +572,7 @@ mod tests {
                     .unwrap()
             }),
             gitignore: None,
-            kinds: parse_kinds(&BTreeMap::new()).unwrap(),
+            kinds: parse_kinds(&harn_vm::value::DictMap::new()).unwrap(),
         }
     }
 
@@ -640,7 +640,7 @@ mod tests {
     #[test]
     fn kind_filter_allows_access_and_other_events() {
         let root = std::env::current_dir().unwrap();
-        let mut config = BTreeMap::new();
+        let mut config = harn_vm::value::DictMap::new();
         config.insert(
             "kinds".to_string(),
             VmValue::List(std::sync::Arc::new(vec![

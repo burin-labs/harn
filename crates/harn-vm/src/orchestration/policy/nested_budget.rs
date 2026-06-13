@@ -15,8 +15,6 @@
 //! child execution, audited consistently, and the error surface is
 //! uniform.
 
-use std::collections::BTreeMap;
-
 use super::CapabilityPolicy;
 use crate::events::log_info_meta;
 use crate::orchestration::{current_execution_policy, pop_execution_policy, push_execution_policy};
@@ -173,7 +171,7 @@ pub fn enter_nested_execution_policy(
 /// stages, spawn_agent worker setup) use this rather than rewriting
 /// the dict-insert pattern.
 pub fn annotate_nested_execution_options(
-    options: &mut BTreeMap<String, VmValue>,
+    options: &mut crate::value::DictMap,
     kind: NestedExecutionKind,
     label: &str,
 ) {
@@ -206,7 +204,7 @@ fn emit_descent_event(
     child_limit: Option<usize>,
     rejected: bool,
 ) {
-    let mut metadata = BTreeMap::new();
+    let mut metadata = std::collections::BTreeMap::new();
     metadata.insert(
         "kind".to_string(),
         serde_json::Value::String(kind.as_str().to_string()),
@@ -380,7 +378,7 @@ mod tests {
         clear_execution_policy_stacks();
         let requested = CapabilityPolicy {
             tools: vec!["read_only".to_string()],
-            capabilities: std::collections::BTreeMap::from([(
+            capabilities: std::collections::BTreeMap::from_iter([(
                 "workspace".to_string(),
                 vec!["read_text".to_string()],
             )]),
@@ -411,7 +409,7 @@ mod tests {
         // a permissive carrier shadowing it.
         clear_execution_policy_stacks();
         let outer = CapabilityPolicy {
-            capabilities: std::collections::BTreeMap::from([(
+            capabilities: std::collections::BTreeMap::from_iter([(
                 "workspace".to_string(),
                 vec!["read_text".to_string()],
             )]),
@@ -467,7 +465,7 @@ mod tests {
 
     #[test]
     fn annotate_nested_execution_options_writes_canonical_keys() {
-        let mut options: BTreeMap<String, VmValue> = BTreeMap::new();
+        let mut options: crate::value::DictMap = crate::value::DictMap::new();
         annotate_nested_execution_options(
             &mut options,
             NestedExecutionKind::SubAgentRun,

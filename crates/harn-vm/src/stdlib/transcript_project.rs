@@ -265,7 +265,7 @@ pub(crate) fn parse_projection_options(options: &VmValue) -> Result<ProjectionPo
 }
 
 fn optional_usize_alias(
-    dict: Option<&BTreeMap<String, VmValue>>,
+    dict: Option<&crate::value::DictMap>,
     keys: &[&str],
     default: usize,
     builtin: &str,
@@ -296,7 +296,7 @@ fn optional_usize_alias(
 }
 
 fn optional_bool_alias(
-    dict: Option<&BTreeMap<String, VmValue>>,
+    dict: Option<&crate::value::DictMap>,
     keys: &[&str],
     default: bool,
     builtin: &str,
@@ -320,7 +320,7 @@ fn optional_bool_alias(
 }
 
 fn parse_reachability_gc_roots(
-    dict: Option<&BTreeMap<String, VmValue>>,
+    dict: Option<&crate::value::DictMap>,
 ) -> (Vec<String>, Vec<String>, bool) {
     let Some(dict) = dict else {
         return (Vec::new(), Vec::new(), false);
@@ -414,7 +414,7 @@ pub(crate) struct ProjectionResult {
 
 pub(crate) async fn project_transcript(
     ctx: Option<&AsyncBuiltinCtx>,
-    transcript: &BTreeMap<String, VmValue>,
+    transcript: &crate::value::DictMap,
     policy: &ProjectionPolicy,
 ) -> Result<ProjectionResult, VmError> {
     let raw_messages = transcript_message_list(transcript)?;
@@ -425,7 +425,7 @@ pub(crate) async fn project_transcript(
 pub(crate) async fn project_messages(
     ctx: Option<&AsyncBuiltinCtx>,
     raw: &[JsonValue],
-    transcript: &BTreeMap<String, VmValue>,
+    transcript: &crate::value::DictMap,
     policy: &ProjectionPolicy,
 ) -> Result<ProjectionResult, VmError> {
     let mut decision = match policy.kind {
@@ -526,7 +526,8 @@ fn project_clean_tool_repair(raw: &[JsonValue]) -> ProjectionDecision {
     let mut dropped: Vec<usize> = Vec::new();
     // Map tool_name -> indices of failed assistant turns calling it, and
     // their corresponding tool_result indices.
-    let mut failed_for_tool: BTreeMap<String, Vec<FailedCallRecord>> = BTreeMap::new();
+    let mut failed_for_tool: BTreeMap<String, Vec<FailedCallRecord>> =
+        std::collections::BTreeMap::new();
 
     for (idx, msg) in raw.iter().enumerate() {
         if msg.get("role").and_then(JsonValue::as_str) != Some("assistant") {
@@ -649,7 +650,7 @@ fn project_squash_failed_calls(raw: &[JsonValue]) -> ProjectionDecision {
 /// the next provider call a compact roll-up.
 fn project_summary_prefix(
     raw: &[JsonValue],
-    transcript: &BTreeMap<String, VmValue>,
+    transcript: &crate::value::DictMap,
     keep_last: usize,
     summary_text: &Option<String>,
 ) -> ProjectionDecision {
@@ -1474,7 +1475,7 @@ fn canonical_json(value: &JsonValue) -> String {
 }
 
 pub(crate) fn result_to_vm(result: &ProjectionResult, policy: &ProjectionPolicy) -> VmValue {
-    let mut dict = BTreeMap::new();
+    let mut dict = crate::value::DictMap::new();
     dict.put_str("policy", policy.kind.as_str());
     dict.put_str("reason", result.reason.clone());
     dict.put_str("prefix_hash", result.prefix_hash.clone());
@@ -1559,7 +1560,7 @@ pub(crate) fn result_to_vm(result: &ProjectionResult, policy: &ProjectionPolicy)
         VmValue::Bool(result.provider_safety_blocked),
     );
     dict.insert("event".to_string(), projection_event_value(result, policy));
-    VmValue::Dict(std::sync::Arc::new(dict))
+    VmValue::dict(dict)
 }
 
 pub(crate) fn projection_event_value(
@@ -1604,17 +1605,14 @@ fn projection_event_metadata(result: &ProjectionResult, policy: &ProjectionPolic
 mod tests {
     use super::*;
 
-    fn json_dict_to_btree(value: &JsonValue) -> BTreeMap<String, VmValue> {
+    fn json_dict_to_btree(value: &JsonValue) -> crate::value::DictMap {
         match json_to_vm_value(value) {
             VmValue::Dict(d) => (*d).clone(),
-            _ => BTreeMap::new(),
+            _ => crate::value::DictMap::new(),
         }
     }
 
-    fn transcript_with(
-        messages: Vec<JsonValue>,
-        summary: Option<&str>,
-    ) -> BTreeMap<String, VmValue> {
+    fn transcript_with(messages: Vec<JsonValue>, summary: Option<&str>) -> crate::value::DictMap {
         let mut transcript = serde_json::json!({
             "_type": "transcript",
             "version": 2,

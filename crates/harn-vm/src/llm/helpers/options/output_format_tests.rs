@@ -4,20 +4,18 @@ use crate::value::VmDictExt;
 
 #[test]
 fn parses_explicit_json_schema_output_format() {
-    let mut fmt = BTreeMap::new();
+    let mut fmt = crate::value::DictMap::new();
     fmt.put_str("kind", "json_schema");
     fmt.insert(
         "schema".to_string(),
-        VmValue::Dict(std::sync::Arc::new(BTreeMap::from([(
+        VmValue::dict(crate::value::DictMap::from_iter([(
             "type".to_string(),
             VmValue::String(std::sync::Arc::from("object")),
-        )]))),
+        )])),
     );
     fmt.insert("strict".to_string(), VmValue::Bool(false));
-    let options = BTreeMap::from([(
-        "output_format".to_string(),
-        VmValue::Dict(std::sync::Arc::new(fmt)),
-    )]);
+    let options =
+        crate::value::DictMap::from_iter([("output_format".to_string(), VmValue::dict(fmt))]);
 
     let parsed = parse_output_format_option(Some(&options), None, None).expect("output_format");
 
@@ -34,8 +32,12 @@ fn parses_explicit_json_schema_output_format() {
 fn legacy_response_format_and_json_schema_map_to_typed_output_format() {
     let schema = serde_json::json!({"type": "object"});
 
-    let parsed = parse_output_format_option(Some(&BTreeMap::new()), Some("json"), Some(&schema))
-        .expect("legacy output format");
+    let parsed = parse_output_format_option(
+        Some(&crate::value::DictMap::new()),
+        Some("json"),
+        Some(&schema),
+    )
+    .expect("legacy output format");
 
     assert_eq!(
         parsed,

@@ -1,5 +1,3 @@
-use std::collections::BTreeMap;
-
 use crate::value::VmValue;
 
 use super::error::TemplateError;
@@ -45,7 +43,7 @@ pub(super) fn is_builtin_section(name: &str) -> bool {
 pub(super) fn render_section(
     name: &str,
     body: &str,
-    args: &BTreeMap<String, VmValue>,
+    args: &crate::value::DictMap,
     llm: Option<&VmValue>,
     line: usize,
     col: usize,
@@ -187,7 +185,7 @@ fn render_system_framing(body: &str, profile: &SectionProfile) -> SectionRender 
 
 fn render_output_format(
     body: &str,
-    args: &BTreeMap<String, VmValue>,
+    args: &crate::value::DictMap,
     profile: &SectionProfile,
     line: usize,
     col: usize,
@@ -244,7 +242,7 @@ fn render_output_format(
 
 fn render_tools(
     body: &str,
-    args: &BTreeMap<String, VmValue>,
+    args: &crate::value::DictMap,
     profile: &SectionProfile,
     line: usize,
     col: usize,
@@ -461,14 +459,14 @@ fn normalized_body(body: &str) -> (&str, usize, usize) {
     (&body[start..end], start, end)
 }
 
-fn cap_bool(caps: Option<&BTreeMap<String, VmValue>>, key: &str) -> bool {
+fn cap_bool(caps: Option<&crate::value::DictMap>, key: &str) -> bool {
     matches!(
         caps.and_then(|caps| caps.get(key)),
         Some(VmValue::Bool(true))
     )
 }
 
-fn cap_string(caps: Option<&BTreeMap<String, VmValue>>, key: &str) -> Option<String> {
+fn cap_string(caps: Option<&crate::value::DictMap>, key: &str) -> Option<String> {
     match caps.and_then(|caps| caps.get(key)) {
         Some(VmValue::String(value)) => Some(value.to_string()),
         _ => None,

@@ -7,7 +7,7 @@
 //! op also reads from the capability's `current_agent` slot, but for
 //! every other op the index mutex is the source of truth.
 
-use std::collections::{BTreeMap, HashSet};
+use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
@@ -853,11 +853,11 @@ pub(super) fn run_cypher(index: &SharedIndex, args: &[VmValue]) -> Result<VmValu
     let rows_vm: Vec<VmValue> = rows
         .into_iter()
         .map(|row| {
-            let mut map: BTreeMap<String, VmValue> = BTreeMap::new();
+            let mut map: harn_vm::value::DictMap = harn_vm::value::DictMap::new();
             for (k, v) in row {
                 map.insert(k, v.to_vm());
             }
-            VmValue::Dict(Arc::new(map))
+            VmValue::dict(map)
         })
         .collect();
 
@@ -1019,7 +1019,7 @@ fn ensure_state<'a>(
 
 fn parse_hash(
     builtin: &'static str,
-    dict: &BTreeMap<String, VmValue>,
+    dict: &harn_vm::value::DictMap,
     key: &'static str,
 ) -> Result<u64, HostlibError> {
     match dict.get(key) {
@@ -1050,7 +1050,7 @@ fn parse_hash(
 
 fn require_positive_u64(
     builtin: &'static str,
-    dict: &BTreeMap<String, VmValue>,
+    dict: &harn_vm::value::DictMap,
     key: &'static str,
 ) -> Result<u64, HostlibError> {
     let raw = require_non_negative_u64(builtin, dict, key)?;
@@ -1066,7 +1066,7 @@ fn require_positive_u64(
 
 fn require_positive_file_id(
     builtin: &'static str,
-    dict: &BTreeMap<String, VmValue>,
+    dict: &harn_vm::value::DictMap,
     key: &'static str,
 ) -> Result<FileId, HostlibError> {
     let raw = require_positive_u64(builtin, dict, key)?;
@@ -1079,7 +1079,7 @@ fn require_positive_file_id(
 
 fn require_non_negative_u64(
     builtin: &'static str,
-    dict: &BTreeMap<String, VmValue>,
+    dict: &harn_vm::value::DictMap,
     key: &'static str,
 ) -> Result<u64, HostlibError> {
     match value_args::optional_i64_no_default(builtin, dict, key)? {
@@ -1098,7 +1098,7 @@ fn require_non_negative_u64(
 
 fn optional_positive_u64(
     builtin: &'static str,
-    dict: &BTreeMap<String, VmValue>,
+    dict: &harn_vm::value::DictMap,
     key: &'static str,
 ) -> Result<Option<u64>, HostlibError> {
     match dict.get(key) {
@@ -1109,7 +1109,7 @@ fn optional_positive_u64(
 
 fn optional_non_negative_u64(
     builtin: &'static str,
-    dict: &BTreeMap<String, VmValue>,
+    dict: &harn_vm::value::DictMap,
     key: &'static str,
     default: u64,
 ) -> Result<u64, HostlibError> {
@@ -1121,7 +1121,7 @@ fn optional_non_negative_u64(
 
 fn optional_positive_i64(
     builtin: &'static str,
-    dict: &BTreeMap<String, VmValue>,
+    dict: &harn_vm::value::DictMap,
     key: &'static str,
 ) -> Result<Option<i64>, HostlibError> {
     match value_args::optional_i64_no_default(builtin, dict, key)? {
@@ -1137,7 +1137,7 @@ fn optional_positive_i64(
 
 fn optional_positive_usize(
     builtin: &'static str,
-    dict: &BTreeMap<String, VmValue>,
+    dict: &harn_vm::value::DictMap,
     key: &'static str,
 ) -> Result<Option<usize>, HostlibError> {
     match optional_positive_u64(builtin, dict, key)? {
@@ -1235,7 +1235,7 @@ fn hit_to_value(hit: Hit) -> VmValue {
 }
 
 fn import_entry(module: &str, resolved: Option<&str>, kind: &str) -> VmValue {
-    let mut map: BTreeMap<String, VmValue> = BTreeMap::new();
+    let mut map: harn_vm::value::DictMap = harn_vm::value::DictMap::new();
     map.insert("module".into(), str_value(module));
     map.insert(
         "resolved_path".into(),
@@ -1245,7 +1245,7 @@ fn import_entry(module: &str, resolved: Option<&str>, kind: &str) -> VmValue {
         },
     );
     map.insert("kind".into(), str_value(kind));
-    VmValue::Dict(Arc::new(map))
+    VmValue::dict(map)
 }
 
 fn empty_query_response() -> VmValue {

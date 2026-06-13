@@ -53,6 +53,11 @@ harn-parser = { path = "../harn-parser", version = "0.8" }
 harn-stdlib = { path = "../harn-stdlib", version = "0.8" }
 async-trait = "0.1"
 bincode = { version = "2.0", features = ["serde"] }
+# Persistent (immutable, structurally shared) collections backing VmValue's
+# Dict/List payloads. Copy-on-write mutation becomes an O(log n) path copy
+# instead of an O(n) BTreeMap/Vec deep clone, which is the dominant allocation
+# cost when an aliased collection is updated in a loop.
+imbl = { version = "7", features = ["serde"] }
 chrono = "0.4"
 chrono-tz = "0.10.4"
 croner = "3.0.1"

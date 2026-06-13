@@ -167,7 +167,7 @@ struct Limits {
 }
 
 impl Limits {
-    fn from_payload(dict: &BTreeMap<String, VmValue>) -> Result<Self, HostlibError> {
+    fn from_payload(dict: &harn_vm::value::DictMap) -> Result<Self, HostlibError> {
         Ok(Self {
             max_bytes: optional_limit(dict, "max_bytes", DEFAULT_MAX_BYTES)?,
             max_nodes: optional_limit(dict, "max_nodes", DEFAULT_MAX_NODES)?,
@@ -209,7 +209,7 @@ impl Limits {
 }
 
 fn optional_limit(
-    dict: &BTreeMap<String, VmValue>,
+    dict: &harn_vm::value::DictMap,
     key: &'static str,
     default: usize,
 ) -> Result<usize, HostlibError> {

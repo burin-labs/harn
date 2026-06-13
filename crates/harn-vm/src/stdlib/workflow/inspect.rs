@@ -23,7 +23,7 @@ pub(super) fn workflow_graph_builtin(
     let input = args
         .first()
         .cloned()
-        .unwrap_or(VmValue::Dict(std::sync::Arc::new(BTreeMap::new())));
+        .unwrap_or(VmValue::dict(BTreeMap::new()));
     let graph = normalize_workflow_value(&input)?;
     workflow_graph_to_vm(&graph)
 }
@@ -40,7 +40,7 @@ pub(super) fn workflow_validate_builtin(
     let input = args
         .first()
         .cloned()
-        .unwrap_or(VmValue::Dict(std::sync::Arc::new(BTreeMap::new())));
+        .unwrap_or(VmValue::dict(BTreeMap::new()));
     let graph = normalize_workflow_value(&input)?;
     let ceiling = args.get(1).map(normalize_policy).transpose()?;
     to_vm(&validate_workflow(
@@ -61,7 +61,7 @@ pub(super) fn workflow_inspect_builtin(
     let input = args
         .first()
         .cloned()
-        .unwrap_or(VmValue::Dict(std::sync::Arc::new(BTreeMap::new())));
+        .unwrap_or(VmValue::dict(BTreeMap::new()));
     let graph = normalize_workflow_value(&input)?;
     let ceiling = args.get(1).map(normalize_policy).transpose()?;
     let builtin = builtin_ceiling();
@@ -86,7 +86,7 @@ pub(super) fn workflow_policy_report_builtin(
     let input = args
         .first()
         .cloned()
-        .unwrap_or(VmValue::Dict(std::sync::Arc::new(BTreeMap::new())));
+        .unwrap_or(VmValue::dict(BTreeMap::new()));
     let graph = normalize_workflow_value(&input)?;
     let ceiling = args.get(1).map(normalize_policy).transpose()?;
     let builtin = builtin_ceiling();
@@ -116,7 +116,7 @@ pub(super) fn workflow_clone_builtin(
     let input = args
         .first()
         .cloned()
-        .unwrap_or(VmValue::Dict(std::sync::Arc::new(BTreeMap::new())));
+        .unwrap_or(VmValue::dict(BTreeMap::new()));
     let mut graph = normalize_workflow_value(&input)?;
     graph.id = format!("{}_clone", graph.id);
     graph.version += 1;

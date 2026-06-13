@@ -88,7 +88,7 @@ pub(super) fn vm_string_list(value: &VmValue) -> Vec<String> {
 }
 
 pub(super) fn parse_route_policy_option(
-    options: Option<&BTreeMap<String, VmValue>>,
+    options: Option<&crate::value::DictMap>,
 ) -> Result<crate::llm::api::LlmRoutePolicy, VmError> {
     use crate::llm::api::LlmRoutePolicy;
     let Some(raw) = options.and_then(|o| o.get("route_policy")) else {
@@ -153,9 +153,7 @@ pub(super) fn parse_route_policy_option(
     }
 }
 
-pub(super) fn parse_fallback_chain_option(
-    options: Option<&BTreeMap<String, VmValue>>,
-) -> Vec<String> {
+pub(super) fn parse_fallback_chain_option(options: Option<&crate::value::DictMap>) -> Vec<String> {
     let Some(raw) = options.and_then(|o| o.get("fallback_chain")) else {
         return Vec::new();
     };
@@ -183,7 +181,7 @@ pub(super) fn parse_fallback_chain_option(
 }
 
 pub(super) fn parse_equivalent_failover_option(
-    options: Option<&BTreeMap<String, VmValue>>,
+    options: Option<&crate::value::DictMap>,
     provider: &str,
     model: &str,
     explicit_routing_policy: bool,

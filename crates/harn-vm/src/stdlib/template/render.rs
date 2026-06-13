@@ -1,5 +1,3 @@
-use std::collections::BTreeMap;
-
 use crate::runtime_limits::RuntimeLimits;
 use crate::value::{values_equal, VmValue};
 
@@ -11,13 +9,13 @@ use super::{BranchDecision, BranchKind, PromptSourceSpan, PromptSpanKind, Templa
 #[derive(Default, Debug, Clone)]
 pub(super) struct Scope<'a> {
     /// Root bindings passed by the caller.
-    root: Option<&'a BTreeMap<String, VmValue>>,
+    root: Option<&'a crate::value::DictMap>,
     /// Override stack — pushed for `for`-loop variables and `include with`.
-    overrides: Vec<BTreeMap<String, VmValue>>,
+    overrides: Vec<crate::value::DictMap>,
 }
 
 impl<'a> Scope<'a> {
-    pub(super) fn new(root: Option<&'a BTreeMap<String, VmValue>>) -> Self {
+    pub(super) fn new(root: Option<&'a crate::value::DictMap>) -> Self {
         Self {
             root,
             overrides: Vec::new(),
@@ -33,7 +31,7 @@ impl<'a> Scope<'a> {
         self.root.and_then(|m| m.get(name)).cloned()
     }
 
-    fn push(&mut self, layer: BTreeMap<String, VmValue>) {
+    fn push(&mut self, layer: crate::value::DictMap) {
         self.overrides.push(layer);
     }
 
@@ -43,8 +41,8 @@ impl<'a> Scope<'a> {
 
     /// Materialize a flat BTreeMap merging root + all overrides. Used when
     /// passing a fresh snapshot into an included partial.
-    fn flatten(&self) -> BTreeMap<String, VmValue> {
-        let mut out = BTreeMap::new();
+    fn flatten(&self) -> crate::value::DictMap {
+        let mut out = crate::value::DictMap::new();
         if let Some(r) = self.root {
             for (k, v) in r.iter() {
                 out.insert(k.clone(), v.clone());
@@ -211,18 +209,18 @@ fn render_node(
             } else {
                 let length = items.len() as i64;
                 for (idx, (k, val)) in items.iter().enumerate() {
-                    let mut layer: BTreeMap<String, VmValue> = BTreeMap::new();
+                    let mut layer: crate::value::DictMap = crate::value::DictMap::new();
                     layer.insert(value_var.clone(), val.clone());
                     if let Some(kv) = key_var {
                         layer.insert(kv.clone(), k.clone());
                     }
-                    let mut loop_map: BTreeMap<String, VmValue> = BTreeMap::new();
+                    let mut loop_map: crate::value::DictMap = crate::value::DictMap::new();
                     loop_map.insert("index".into(), VmValue::Int(idx as i64 + 1));
                     loop_map.insert("index0".into(), VmValue::Int(idx as i64));
                     loop_map.insert("first".into(), VmValue::Bool(idx == 0));
                     loop_map.insert("last".into(), VmValue::Bool(idx as i64 == length - 1));
                     loop_map.insert("length".into(), VmValue::Int(length));
-                    layer.insert("loop".into(), VmValue::Dict(std::sync::Arc::new(loop_map)));
+                    layer.insert("loop".into(), VmValue::dict(loop_map));
                     scope.push(layer);
                     let iter_start = out.len();
                     let res = render_nodes(body, scope, rc, out, spans.as_deref_mut());
@@ -337,7 +335,7 @@ fn render_node(
             line,
             col,
         } => {
-            let mut evaluated_args = BTreeMap::new();
+            let mut evaluated_args = crate::value::DictMap::new();
             for (key, expr) in args {
                 evaluated_args.insert(key.clone(), eval_expr(expr, scope, *line, *col)?);
             }

@@ -271,7 +271,7 @@ impl SystemReminder {
 }
 
 pub(crate) fn transcript_message_list(
-    transcript: &BTreeMap<String, VmValue>,
+    transcript: &crate::value::DictMap,
 ) -> Result<Vec<VmValue>, VmError> {
     match transcript.get("messages") {
         Some(VmValue::List(list)) => Ok((**list).clone()),
@@ -283,7 +283,7 @@ pub(crate) fn transcript_message_list(
 }
 
 pub(crate) fn transcript_asset_list(
-    transcript: &BTreeMap<String, VmValue>,
+    transcript: &crate::value::DictMap,
 ) -> Result<Vec<VmValue>, VmError> {
     match transcript.get("assets") {
         Some(VmValue::List(list)) => Ok((**list).clone()),
@@ -294,18 +294,18 @@ pub(crate) fn transcript_asset_list(
     }
 }
 
-fn transcript_string_field(transcript: &BTreeMap<String, VmValue>, key: &str) -> Option<String> {
+fn transcript_string_field(transcript: &crate::value::DictMap, key: &str) -> Option<String> {
     transcript.get(key).and_then(|v| match v {
         VmValue::String(s) if !s.is_empty() => Some(s.to_string()),
         _ => None,
     })
 }
 
-pub(crate) fn transcript_summary_text(transcript: &BTreeMap<String, VmValue>) -> Option<String> {
+pub(crate) fn transcript_summary_text(transcript: &crate::value::DictMap) -> Option<String> {
     transcript_string_field(transcript, "summary")
 }
 
-pub(crate) fn transcript_id(transcript: &BTreeMap<String, VmValue>) -> Option<String> {
+pub(crate) fn transcript_id(transcript: &crate::value::DictMap) -> Option<String> {
     transcript_string_field(transcript, "id")
 }
 
@@ -385,7 +385,7 @@ pub(crate) fn new_transcript_with_event_prefix(
     if let Some(state) = state {
         transcript.put_str("state", state);
     }
-    VmValue::Dict(std::sync::Arc::new(transcript))
+    VmValue::dict(transcript)
 }
 
 pub(crate) fn transcript_event_from_message(message: &VmValue) -> VmValue {
@@ -435,7 +435,7 @@ pub(crate) fn transcript_event_from_message(message: &VmValue) -> VmValue {
         "blocks".to_string(),
         VmValue::List(std::sync::Arc::new(blocks)),
     );
-    VmValue::Dict(std::sync::Arc::new(event))
+    VmValue::dict(event)
 }
 
 pub(crate) fn transcript_events_from_messages(messages: &[VmValue]) -> Vec<VmValue> {
@@ -503,7 +503,7 @@ pub(crate) fn transcript_event(
     event.insert(
         "blocks".to_string(),
         VmValue::List(std::sync::Arc::new(vec![VmValue::Dict(
-            std::sync::Arc::new(BTreeMap::from([
+            std::sync::Arc::new(crate::value::DictMap::from_iter([
                 (
                     "type".to_string(),
                     VmValue::String(std::sync::Arc::from("text")),
@@ -525,7 +525,7 @@ pub(crate) fn transcript_event(
             crate::stdlib::json_to_vm_value(&metadata),
         );
     }
-    VmValue::Dict(std::sync::Arc::new(event))
+    VmValue::dict(event)
 }
 
 pub(crate) fn normalize_transcript_asset(value: &VmValue) -> VmValue {
@@ -543,13 +543,13 @@ pub(crate) fn normalize_transcript_asset(value: &VmValue) -> VmValue {
     if value.as_dict().is_none() {
         asset.insert(
             "storage".to_string(),
-            VmValue::Dict(std::sync::Arc::new(BTreeMap::from([(
+            VmValue::dict(BTreeMap::from([(
                 "path".to_string(),
                 VmValue::String(std::sync::Arc::from(value.display())),
-            )]))),
+            )])),
         );
     }
-    VmValue::Dict(std::sync::Arc::new(asset))
+    VmValue::dict(asset)
 }
 
 pub(crate) fn is_transcript_value(value: &VmValue) -> bool {
@@ -588,7 +588,7 @@ pub(crate) fn transcript_reminder_event(reminder: &SystemReminder) -> VmValue {
         "reminder".to_string(),
         crate::stdlib::json_to_vm_value(&reminder_json),
     );
-    VmValue::Dict(std::sync::Arc::new(event))
+    VmValue::dict(event)
 }
 
 #[derive(Clone, Debug, Default)]
@@ -663,13 +663,10 @@ pub(crate) fn apply_reminder_post_turn(transcript: &VmValue, turn: i64) -> Remin
     if !expired.is_empty() {
         let mut lifecycle = BTreeMap::new();
         lifecycle.insert("last_post_turn".to_string(), VmValue::Int(turn));
-        next.insert(
-            "reminder_lifecycle".to_string(),
-            VmValue::Dict(std::sync::Arc::new(lifecycle)),
-        );
+        next.insert("reminder_lifecycle".to_string(), VmValue::dict(lifecycle));
     }
     ReminderPostTurnReport {
-        transcript: Some(VmValue::Dict(std::sync::Arc::new(next))),
+        transcript: Some(VmValue::dict(next)),
         decremented_count,
         expired,
         remaining_count,
@@ -854,7 +851,7 @@ fn lifecycle_transcript_event(
         payload_key.to_string(),
         crate::stdlib::json_to_vm_value(payload),
     );
-    VmValue::Dict(std::sync::Arc::new(event))
+    VmValue::dict(event)
 }
 
 pub(crate) fn reminder_from_vm_value(value: &VmValue) -> SystemReminder {
@@ -1000,7 +997,7 @@ pub(crate) fn replace_reminder_payload(event: &VmValue, reminder: &SystemReminde
     let mut dict = event.as_dict().cloned().unwrap_or_default();
     dict.insert("reminder".to_string(), reminder_value.clone());
     dict.insert("metadata".to_string(), reminder_value);
-    VmValue::Dict(std::sync::Arc::new(dict))
+    VmValue::dict(dict)
 }
 
 fn string_value(value: &VmValue) -> Option<String> {
@@ -1104,7 +1101,7 @@ mod tests {
                 })),
             ),
         ]);
-        let event = transcript_event_from_message(&VmValue::Dict(std::sync::Arc::new(dict)));
+        let event = transcript_event_from_message(&VmValue::dict(dict));
         let event_dict = event.as_dict().expect("event is dict");
         assert_eq!(
             event_dict.get("kind").map(|v| v.display()).as_deref(),
@@ -1327,15 +1324,13 @@ mod tests {
         ];
 
         for (kind, slot, payload) in cases {
-            let event = transcript_event_from_message(&VmValue::Dict(std::sync::Arc::new(
-                BTreeMap::from([
-                    (
-                        "kind".to_string(),
-                        VmValue::String(std::sync::Arc::from(kind)),
-                    ),
-                    (slot.to_string(), crate::stdlib::json_to_vm_value(&payload)),
-                ]),
-            )));
+            let event = transcript_event_from_message(&VmValue::dict(BTreeMap::from([
+                (
+                    "kind".to_string(),
+                    VmValue::String(std::sync::Arc::from(kind)),
+                ),
+                (slot.to_string(), crate::stdlib::json_to_vm_value(&payload)),
+            ])));
             let dict = event.as_dict().expect("event is dict");
             assert_eq!(dict.get("kind").map(|v| v.display()).as_deref(), Some(kind));
             assert_eq!(

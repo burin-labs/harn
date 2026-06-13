@@ -94,7 +94,7 @@ pub(crate) fn handle(args: &[VmValue]) -> Result<VmValue, HostlibError> {
     let diagnostic_values: Vec<VmValue> = diagnostics
         .into_iter()
         .map(|d| {
-            let mut entry: BTreeMap<String, VmValue> = BTreeMap::new();
+            let mut entry: harn_vm::value::DictMap = harn_vm::value::DictMap::new();
             entry.put_str("severity", d.severity.as_str());
             entry.put_str("message", d.message);
             entry.insert(
@@ -111,7 +111,7 @@ pub(crate) fn handle(args: &[VmValue]) -> Result<VmValue, HostlibError> {
                 "column".to_string(),
                 d.column.map(VmValue::Int).unwrap_or(VmValue::Nil),
             );
-            VmValue::Dict(Arc::new(entry))
+            VmValue::dict(entry)
         })
         .collect();
 

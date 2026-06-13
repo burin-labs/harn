@@ -3,7 +3,7 @@ use std::collections::BTreeMap;
 use serde::Deserialize;
 
 use super::WorkflowNode;
-use crate::value::{VmError, VmValue};
+use crate::value::VmError;
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
 pub struct WorkflowStageAgentOptions {
@@ -14,11 +14,11 @@ pub struct WorkflowStageAgentOptions {
 }
 
 impl WorkflowStageAgentOptions {
-    pub fn llm_options_vm_dict(&self) -> BTreeMap<String, VmValue> {
+    pub fn llm_options_vm_dict(&self) -> crate::value::DictMap {
         json_map_to_vm_dict(&self.llm_options)
     }
 
-    pub fn agent_loop_options_vm_dict(&self) -> BTreeMap<String, VmValue> {
+    pub fn agent_loop_options_vm_dict(&self) -> crate::value::DictMap {
         json_map_to_vm_dict(&self.agent_loop_options)
     }
 }
@@ -61,7 +61,7 @@ pub async fn prepare_workflow_stage_agent_options(
     Ok(prepared)
 }
 
-fn json_map_to_vm_dict(map: &BTreeMap<String, serde_json::Value>) -> BTreeMap<String, VmValue> {
+fn json_map_to_vm_dict(map: &BTreeMap<String, serde_json::Value>) -> crate::value::DictMap {
     map.iter()
         .map(|(key, value)| (key.clone(), crate::stdlib::json_to_vm_value(value)))
         .collect()

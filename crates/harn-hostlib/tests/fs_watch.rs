@@ -20,12 +20,12 @@ fn list(values: &[&str]) -> VmValue {
 }
 
 fn dict(entries: impl IntoIterator<Item = (&'static str, VmValue)>) -> VmValue {
-    VmValue::Dict(Arc::new(
+    VmValue::dict(
         entries
             .into_iter()
             .map(|(key, value)| (key.to_string(), value))
             .collect::<BTreeMap<_, _>>(),
-    ))
+    )
 }
 
 #[test]

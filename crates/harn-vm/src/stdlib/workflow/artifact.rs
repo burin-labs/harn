@@ -88,10 +88,7 @@ pub(super) fn parse_execution_record(
     }
 }
 
-pub(super) fn optional_string_option(
-    options: &BTreeMap<String, VmValue>,
-    key: &str,
-) -> Option<String> {
+pub(super) fn optional_string_option(options: &crate::value::DictMap, key: &str) -> Option<String> {
     options.get(key).and_then(|value| match value {
         VmValue::Nil => None,
         _ => {

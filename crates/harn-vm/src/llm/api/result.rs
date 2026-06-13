@@ -2,7 +2,6 @@
 //! values, plus the mock-provider completion response.
 
 use crate::value::VmDictExt;
-use std::collections::BTreeMap;
 
 use super::telemetry::ProviderTelemetry;
 use crate::value::VmValue;
@@ -66,7 +65,7 @@ pub(crate) struct LlmResult {
     pub telemetry: ProviderTelemetry,
 }
 
-fn build_usage_dict(result: &LlmResult) -> BTreeMap<String, VmValue> {
+fn build_usage_dict(result: &LlmResult) -> crate::value::DictMap {
     let cache_hit_ratio = crate::llm::cost::cache_hit_ratio(
         result.input_tokens,
         result.cache_read_tokens,
@@ -79,7 +78,7 @@ fn build_usage_dict(result: &LlmResult) -> BTreeMap<String, VmValue> {
         result.cache_write_tokens,
     );
 
-    let mut usage = BTreeMap::new();
+    let mut usage = crate::value::DictMap::new();
     usage.insert(
         "input_tokens".to_string(),
         VmValue::Int(result.input_tokens),
@@ -129,7 +128,7 @@ pub(crate) fn vm_build_llm_result(
 ) -> VmValue {
     use crate::stdlib::json_to_vm_value;
 
-    let mut dict = BTreeMap::new();
+    let mut dict = crate::value::DictMap::new();
     dict.put_str("text", result.text.as_str());
     dict.put_str("model", result.model.as_str());
     dict.put_str("provider", result.provider.as_str());
@@ -174,10 +173,7 @@ pub(crate) fn vm_build_llm_result(
     if let Some(ref telemetry_dict) = telemetry_dict {
         usage.insert("provider_telemetry".to_string(), telemetry_dict.clone());
     }
-    dict.insert(
-        "usage".to_string(),
-        VmValue::Dict(std::sync::Arc::new(usage)),
-    );
+    dict.insert("usage".to_string(), VmValue::dict(usage));
     if let Some(telemetry_dict) = telemetry_dict {
         dict.insert("provider_telemetry".to_string(), telemetry_dict);
     }
@@ -320,7 +316,7 @@ pub(crate) fn vm_build_llm_result(
         );
     }
 
-    VmValue::Dict(std::sync::Arc::new(dict))
+    VmValue::dict(dict)
 }
 
 pub(super) fn mock_completion_response(prefix: &str, suffix: Option<&str>) -> LlmResult {

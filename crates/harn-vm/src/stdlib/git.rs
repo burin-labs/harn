@@ -1,5 +1,4 @@
 use crate::value::VmDictExt;
-use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use serde_json::{json, Value as JsonValue};
@@ -389,7 +388,7 @@ fn register_git_namespace(vm: &mut Vm) {
         ("create", "git.worktree.create"),
         ("remove", "git.worktree.remove"),
     ]);
-    let mut root = BTreeMap::new();
+    let mut root = crate::value::DictMap::new();
     root.put_str("_namespace", "git");
     root.insert("repo".to_string(), repo);
     root.insert("worktree".to_string(), worktree);
@@ -410,11 +409,11 @@ fn register_git_namespace(vm: &mut Vm) {
             VmValue::BuiltinRef(std::sync::Arc::from(builtin)),
         );
     }
-    vm.set_global("git", VmValue::Dict(std::sync::Arc::new(root)));
+    vm.set_global("git", VmValue::dict(root));
 }
 
 fn namespace(entries: &[(&str, &str)]) -> VmValue {
-    VmValue::Dict(std::sync::Arc::new(
+    VmValue::dict(
         entries
             .iter()
             .map(|(name, builtin)| {
@@ -423,8 +422,8 @@ fn namespace(entries: &[(&str, &str)]) -> VmValue {
                     VmValue::BuiltinRef(std::sync::Arc::from(*builtin)),
                 )
             })
-            .collect(),
-    ))
+            .collect::<crate::value::DictMap>(),
+    )
 }
 
 async fn run_git_command(
@@ -579,7 +578,7 @@ const GIT_NONINTERACTIVE_ENV: &[(&str, &str)] = &[
 ];
 
 async fn exec_argv(command: &GitCommand) -> Result<VmValue, VmError> {
-    let mut params = BTreeMap::new();
+    let mut params = crate::value::DictMap::new();
     params.put_str("mode", "argv");
     params.insert(
         "argv".to_string(),
@@ -606,14 +605,14 @@ async fn exec_argv(command: &GitCommand) -> Result<VmValue, VmError> {
     // credential / host-key prompt fails fast instead of hanging a
     // TTY-less runtime. `env_mode: "merge"` keeps inherited PATH/HOME
     // and any credentials already present in the environment.
-    let mut env = BTreeMap::new();
+    let mut env = crate::value::DictMap::new();
     for (key, value) in GIT_NONINTERACTIVE_ENV {
         env.insert(
             (*key).to_string(),
             VmValue::String(std::sync::Arc::from(*value)),
         );
     }
-    params.insert("env".to_string(), VmValue::Dict(std::sync::Arc::new(env)));
+    params.insert("env".to_string(), VmValue::dict(env));
     params.put_str("env_mode", "merge");
     let caller = json!({
         "surface": "stdlib.git",
@@ -843,7 +842,7 @@ async fn persist_receipt_and_trust(
         .unwrap_or_else(|| install_memory_for_current_thread(EVENT_LOG_QUEUE_DEPTH));
     let topic = Topic::new(GIT_RECEIPTS_TOPIC)
         .map_err(|error| VmError::Runtime(format!("git receipt topic: {error}")))?;
-    let mut headers = BTreeMap::new();
+    let mut headers = std::collections::BTreeMap::new();
     if let Some(trace_id) = receipt.get("trace_id").and_then(|value| value.as_str()) {
         headers.insert("trace_id".to_string(), trace_id.to_string());
     }
@@ -1108,7 +1107,7 @@ fn repo_path_arg(args: &[VmValue], index: usize, builtin: &str) -> Result<PathBu
     }
 }
 
-fn repo_path_from_map(map: &BTreeMap<String, VmValue>, builtin: &str) -> Result<PathBuf, VmError> {
+fn repo_path_from_map(map: &crate::value::DictMap, builtin: &str) -> Result<PathBuf, VmError> {
     for key in ["root", "path", "cwd"] {
         if let Some(VmValue::String(path)) = map.get(key) {
             if !path.is_empty() {
@@ -1141,14 +1140,14 @@ fn required_string_arg(
     }
 }
 
-fn optional_dict_arg(args: &[VmValue], index: usize) -> Option<&BTreeMap<String, VmValue>> {
+fn optional_dict_arg(args: &[VmValue], index: usize) -> Option<&crate::value::DictMap> {
     args.get(index).and_then(|value| match value {
         VmValue::Dict(map) => Some(map.as_ref()),
         _ => None,
     })
 }
 
-fn string_option(map: Option<&BTreeMap<String, VmValue>>, key: &str) -> Option<String> {
+fn string_option(map: Option<&crate::value::DictMap>, key: &str) -> Option<String> {
     map.and_then(|map| map.get(key))
         .and_then(|value| match value {
             VmValue::String(value) if !value.is_empty() => Some(value.to_string()),
@@ -1156,7 +1155,7 @@ fn string_option(map: Option<&BTreeMap<String, VmValue>>, key: &str) -> Option<S
         })
 }
 
-fn bool_option(map: Option<&BTreeMap<String, VmValue>>, key: &str) -> Option<bool> {
+fn bool_option(map: Option<&crate::value::DictMap>, key: &str) -> Option<bool> {
     map.and_then(|map| map.get(key))
         .and_then(|value| match value {
             VmValue::Bool(value) => Some(*value),
@@ -1181,7 +1180,7 @@ fn string_list_arg(
 }
 
 fn string_list_option(
-    map: Option<&BTreeMap<String, VmValue>>,
+    map: Option<&crate::value::DictMap>,
     key: &str,
 ) -> Result<Option<Vec<String>>, VmError> {
     let Some(value) = map.and_then(|map| map.get(key)) else {

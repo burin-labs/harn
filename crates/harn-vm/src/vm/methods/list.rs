@@ -74,10 +74,10 @@ impl crate::vm::Vm {
                     .iter()
                     .enumerate()
                     .map(|(i, v)| {
-                        VmValue::Dict(std::sync::Arc::new(BTreeMap::from([
+                        VmValue::dict(BTreeMap::from([
                             ("index".to_string(), VmValue::Int(i as i64)),
                             ("value".to_string(), v.clone()),
-                        ])))
+                        ]))
                     })
                     .collect();
                 Ok(VmValue::List(std::sync::Arc::new(result)))
@@ -291,7 +291,7 @@ impl crate::vm::Vm {
                 // `String`, and the previous `display()` path collapsed
                 // `Int(1)` and `String("1")` into the same bucket — the
                 // exact problem #2467 fixed for `count_by` / `group_by`.
-                let mut counts: BTreeMap<String, VmValue> = BTreeMap::new();
+                let mut counts: crate::value::DictMap = crate::value::DictMap::new();
                 let mut error: Option<VmError> = None;
                 for item in items.iter() {
                     let bucket = match item {
@@ -317,7 +317,7 @@ impl crate::vm::Vm {
                 if let Some(err) = error {
                     Err(err)
                 } else {
-                    Ok(VmValue::Dict(std::sync::Arc::new(counts)))
+                    Ok(VmValue::dict(counts))
                 }
             }
             "to_list" => Ok(VmValue::List(Arc::clone(items))),
@@ -499,11 +499,11 @@ impl crate::vm::Vm {
                         crate::stdlib::collections::string_discriminator(&key, "group_by")?;
                     groups.entry(key_str).or_default().push(item.clone());
                 }
-                let result: BTreeMap<String, VmValue> = groups
+                let result: crate::value::DictMap = groups
                     .into_iter()
                     .map(|(k, v)| (k, VmValue::List(std::sync::Arc::new(v))))
                     .collect();
-                Ok(VmValue::Dict(std::sync::Arc::new(result)))
+                Ok(VmValue::dict(result))
             }
             "min_by" => {
                 if items.is_empty() {
@@ -579,7 +579,7 @@ impl crate::vm::Vm {
             }
             "count_by" => {
                 let Some(callable) = args.first().filter(|v| Self::is_callable_value(v)) else {
-                    return Ok(VmValue::Dict(std::sync::Arc::new(BTreeMap::new())));
+                    return Ok(VmValue::dict(BTreeMap::new()));
                 };
                 let mut counts: BTreeMap<String, i64> = BTreeMap::new();
                 for item in items.iter() {
@@ -588,12 +588,12 @@ impl crate::vm::Vm {
                         crate::stdlib::collections::string_discriminator(&key, "count_by")?;
                     *counts.entry(bucket).or_insert(0) += 1;
                 }
-                Ok(VmValue::Dict(std::sync::Arc::new(
+                Ok(VmValue::dict(
                     counts
                         .into_iter()
                         .map(|(k, v)| (k, VmValue::Int(v)))
-                        .collect(),
-                )))
+                        .collect::<crate::value::DictMap>(),
+                ))
             }
             _ => Err(VmError::Runtime(format!("list has no method `{method}`"))),
         }
