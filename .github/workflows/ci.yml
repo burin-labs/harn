@@ -160,6 +160,11 @@ jobs:
         if: matrix.kind == 'audit'
         run: |
           make conformance
+          # Agent-loop Harn unit tests (stall detector, loop control, judge
+          # verdict, transcript helpers) live outside conformance/, so they were
+          # never run by any workflow and silently rotted. Warm harn binary from
+          # `make conformance` above makes this effectively free.
+          make test-agent-scripts
           make protocol-conformance
           # NOTE: `make mcp-rc-conformance` used to run here as well, but its
           # two `cargo test -p ... --tests` invocations are a strict subset of
