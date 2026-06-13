@@ -1,3 +1,4 @@
+use crate::value::VmDictExt;
 use std::collections::BTreeMap;
 use std::io::{Cursor, Read, Write};
 
@@ -448,10 +449,7 @@ fn tar_extract_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, V
         let mut fields = BTreeMap::new();
         fields.insert("content".to_string(), bytes_value(content));
         fields.insert("mode".to_string(), VmValue::Int(mode));
-        fields.insert(
-            "path".to_string(),
-            VmValue::String(std::sync::Arc::from(path)),
-        );
+        fields.put_str("path", path);
         output.push(entry_value(fields));
     }
 
@@ -523,10 +521,7 @@ fn zip_extract_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, V
 
         let mut fields = BTreeMap::new();
         fields.insert("content".to_string(), bytes_value(content));
-        fields.insert(
-            "path".to_string(),
-            VmValue::String(std::sync::Arc::from(path)),
-        );
+        fields.put_str("path", path);
         output.push(entry_value(fields));
     }
 

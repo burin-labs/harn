@@ -16,6 +16,7 @@
 //! `harness.net.*` surface and is bound per-harness so different
 //! agents in the same process can carry different policies.
 
+use crate::value::VmDictExt;
 use std::collections::BTreeMap;
 use std::net::IpAddr;
 use std::str::FromStr;
@@ -389,33 +390,18 @@ impl NetPolicy {
 /// hosts can route on either consistently.
 pub fn violation_vm_error(audit: &NetPolicyAudit) -> VmError {
     let mut dict = BTreeMap::new();
-    dict.insert(
-        "type".to_string(),
-        VmValue::String(std::sync::Arc::from("NetPolicyViolation")),
-    );
-    dict.insert(
-        "category".to_string(),
-        VmValue::String(std::sync::Arc::from("net_policy_violation")),
-    );
-    dict.insert(
-        "message".to_string(),
-        VmValue::String(std::sync::Arc::from(format!(
+    dict.put_str("type", "NetPolicyViolation");
+    dict.put_str("category", "net_policy_violation");
+    dict.put_str(
+        "message",
+        format!(
             "harness.net.{} blocked {}: {}",
             audit.method, audit.url, audit.reason
-        ))),
+        ),
     );
-    dict.insert(
-        "method".to_string(),
-        VmValue::String(std::sync::Arc::from(audit.method.as_str())),
-    );
-    dict.insert(
-        "url".to_string(),
-        VmValue::String(std::sync::Arc::from(audit.url.as_str())),
-    );
-    dict.insert(
-        "host".to_string(),
-        VmValue::String(std::sync::Arc::from(audit.host.as_str())),
-    );
+    dict.put_str("method", audit.method.as_str());
+    dict.put_str("url", audit.url.as_str());
+    dict.put_str("host", audit.host.as_str());
     dict.insert(
         "port".to_string(),
         audit
@@ -423,14 +409,8 @@ pub fn violation_vm_error(audit: &NetPolicyAudit) -> VmError {
             .map(|port| VmValue::Int(port as i64))
             .unwrap_or(VmValue::Nil),
     );
-    dict.insert(
-        "reason".to_string(),
-        VmValue::String(std::sync::Arc::from(audit.reason.as_str())),
-    );
-    dict.insert(
-        "outcome".to_string(),
-        VmValue::String(std::sync::Arc::from(audit.outcome)),
-    );
+    dict.put_str("reason", audit.reason.as_str());
+    dict.put_str("outcome", audit.outcome);
     dict.insert(
         "matched_rule".to_string(),
         audit
@@ -450,18 +430,9 @@ pub fn violation_vm_error(audit: &NetPolicyAudit) -> VmError {
 /// optional-chaining and `?.` syntax.
 pub fn violation_request_value(audit: &NetPolicyAudit) -> VmValue {
     let mut dict = BTreeMap::new();
-    dict.insert(
-        "method".to_string(),
-        VmValue::String(std::sync::Arc::from(audit.method.as_str())),
-    );
-    dict.insert(
-        "url".to_string(),
-        VmValue::String(std::sync::Arc::from(audit.url.as_str())),
-    );
-    dict.insert(
-        "host".to_string(),
-        VmValue::String(std::sync::Arc::from(audit.host.as_str())),
-    );
+    dict.put_str("method", audit.method.as_str());
+    dict.put_str("url", audit.url.as_str());
+    dict.put_str("host", audit.host.as_str());
     dict.insert(
         "port".to_string(),
         audit
@@ -469,10 +440,7 @@ pub fn violation_request_value(audit: &NetPolicyAudit) -> VmValue {
             .map(|port| VmValue::Int(port as i64))
             .unwrap_or(VmValue::Nil),
     );
-    dict.insert(
-        "reason".to_string(),
-        VmValue::String(std::sync::Arc::from(audit.reason.as_str())),
-    );
+    dict.put_str("reason", audit.reason.as_str());
     dict.insert(
         "matched_rule".to_string(),
         audit

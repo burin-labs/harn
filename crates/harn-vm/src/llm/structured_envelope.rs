@@ -26,6 +26,7 @@
 //! (`auth`, `rate_limit`, `transient_network`, ...) skip repair
 //! since there is no raw text to salvage.
 
+use crate::value::VmDictExt;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
@@ -215,14 +216,8 @@ fn apply_prompt_mode_structured_transport(args: &mut [VmValue]) {
     }
     if let Some(options) = args.get_mut(2) {
         let mut dict = options.as_dict().cloned().unwrap_or_default();
-        dict.insert(
-            "output_format".to_string(),
-            VmValue::String(std::sync::Arc::from("text")),
-        );
-        dict.insert(
-            "response_format".to_string(),
-            VmValue::String(std::sync::Arc::from("text")),
-        );
+        dict.put_str("output_format", "text");
+        dict.put_str("response_format", "text");
         *options = VmValue::Dict(std::sync::Arc::new(dict));
     }
 }
@@ -231,14 +226,8 @@ fn prompt_with_schema_contract(prompt: &str, schema: &VmValue) -> String {
     let schema_json = serde_json::to_string_pretty(&vm_value_to_json(schema))
         .unwrap_or_else(|_| schema.display());
     let mut bindings = BTreeMap::new();
-    bindings.insert(
-        "prompt".to_string(),
-        VmValue::String(std::sync::Arc::from(prompt.to_string())),
-    );
-    bindings.insert(
-        "schema_json".to_string(),
-        VmValue::String(std::sync::Arc::from(schema_json)),
-    );
+    bindings.put_str("prompt", prompt);
+    bindings.put_str("schema_json", schema_json);
     crate::stdlib::template::render_stdlib_prompt_asset(
         "llm/prompts/structured_envelope_schema_contract.harn.prompt",
         Some(&bindings),
@@ -337,14 +326,8 @@ fn build_repair_prompt(raw_text: &str, errors: &[String]) -> String {
         errors.join("; ")
     };
     let mut bindings = BTreeMap::new();
-    bindings.insert(
-        "errors_line".to_string(),
-        VmValue::String(std::sync::Arc::from(errors_line)),
-    );
-    bindings.insert(
-        "raw_text".to_string(),
-        VmValue::String(std::sync::Arc::from(raw_text.to_string())),
-    );
+    bindings.put_str("errors_line", errors_line);
+    bindings.put_str("raw_text", raw_text);
     crate::stdlib::template::render_stdlib_prompt_asset(
         "llm/prompts/structured_envelope_repair.harn.prompt",
         Some(&bindings),
@@ -403,14 +386,8 @@ fn envelope_success(outcome: &SchemaLoopOutcome, repaired: bool) -> VmValue {
     let mut env = BTreeMap::new();
     env.insert("ok".to_string(), VmValue::Bool(true));
     env.insert("data".to_string(), data);
-    env.insert(
-        "raw_text".to_string(),
-        VmValue::String(std::sync::Arc::from(outcome.raw_text.as_str())),
-    );
-    env.insert(
-        "error".to_string(),
-        VmValue::String(std::sync::Arc::from("")),
-    );
+    env.put_str("raw_text", outcome.raw_text.as_str());
+    env.put_str("error", "");
     env.insert("error_category".to_string(), VmValue::Nil);
     env.insert(
         "attempts".to_string(),
@@ -419,14 +396,8 @@ fn envelope_success(outcome: &SchemaLoopOutcome, repaired: bool) -> VmValue {
     env.insert("repaired".to_string(), VmValue::Bool(repaired));
     env.insert("extracted_json".to_string(), VmValue::Bool(extracted_json));
     env.insert("usage".to_string(), usage);
-    env.insert(
-        "model".to_string(),
-        VmValue::String(std::sync::Arc::from(model.as_str())),
-    );
-    env.insert(
-        "provider".to_string(),
-        VmValue::String(std::sync::Arc::from(provider.as_str())),
-    );
+    env.put_str("model", model.as_str());
+    env.put_str("provider", provider.as_str());
     VmValue::Dict(std::sync::Arc::new(env))
 }
 
@@ -447,18 +418,9 @@ fn envelope_failure(
     let mut env = BTreeMap::new();
     env.insert("ok".to_string(), VmValue::Bool(false));
     env.insert("data".to_string(), VmValue::Nil);
-    env.insert(
-        "raw_text".to_string(),
-        VmValue::String(std::sync::Arc::from(outcome.raw_text.as_str())),
-    );
-    env.insert(
-        "error".to_string(),
-        VmValue::String(std::sync::Arc::from(message.as_str())),
-    );
-    env.insert(
-        "error_category".to_string(),
-        VmValue::String(std::sync::Arc::from(kind.category())),
-    );
+    env.put_str("raw_text", outcome.raw_text.as_str());
+    env.put_str("error", message.as_str());
+    env.put_str("error_category", kind.category());
     env.insert(
         "attempts".to_string(),
         VmValue::Int(outcome.attempts as i64),
@@ -466,14 +428,8 @@ fn envelope_failure(
     env.insert("repaired".to_string(), VmValue::Bool(repaired));
     env.insert("extracted_json".to_string(), VmValue::Bool(extracted_json));
     env.insert("usage".to_string(), usage);
-    env.insert(
-        "model".to_string(),
-        VmValue::String(std::sync::Arc::from(model.as_str())),
-    );
-    env.insert(
-        "provider".to_string(),
-        VmValue::String(std::sync::Arc::from(provider.as_str())),
-    );
+    env.put_str("model", model.as_str());
+    env.put_str("provider", provider.as_str());
     VmValue::Dict(std::sync::Arc::new(env))
 }
 
@@ -491,18 +447,9 @@ fn envelope_from_transport_error(err: &VmError, provider: &str, model: &str) -> 
     let mut env = BTreeMap::new();
     env.insert("ok".to_string(), VmValue::Bool(false));
     env.insert("data".to_string(), VmValue::Nil);
-    env.insert(
-        "raw_text".to_string(),
-        VmValue::String(std::sync::Arc::from("")),
-    );
-    env.insert(
-        "error".to_string(),
-        VmValue::String(std::sync::Arc::from(message.as_str())),
-    );
-    env.insert(
-        "error_category".to_string(),
-        VmValue::String(std::sync::Arc::from(category.as_str())),
-    );
+    env.put_str("raw_text", "");
+    env.put_str("error", message.as_str());
+    env.put_str("error_category", category.as_str());
     env.insert("attempts".to_string(), VmValue::Int(0));
     env.insert("repaired".to_string(), VmValue::Bool(false));
     env.insert("extracted_json".to_string(), VmValue::Bool(false));
@@ -510,14 +457,8 @@ fn envelope_from_transport_error(err: &VmError, provider: &str, model: &str) -> 
         "usage".to_string(),
         VmValue::Dict(std::sync::Arc::new(empty_usage_dict())),
     );
-    env.insert(
-        "model".to_string(),
-        VmValue::String(std::sync::Arc::from(model)),
-    );
-    env.insert(
-        "provider".to_string(),
-        VmValue::String(std::sync::Arc::from(provider)),
-    );
+    env.put_str("model", model);
+    env.put_str("provider", provider);
     VmValue::Dict(std::sync::Arc::new(env))
 }
 
@@ -616,6 +557,7 @@ pub(crate) async fn llm_call_structured_result_impl(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::value::VmDictExt;
 
     #[test]
     fn repair_prompt_includes_raw_text_and_errors() {
@@ -651,10 +593,7 @@ mod tests {
         ]));
         // Already prompt-mode text transport -> do NOT re-degrade.
         let mut text_opts = BTreeMap::new();
-        text_opts.insert(
-            "output_format".to_string(),
-            VmValue::String(std::sync::Arc::from("text")),
-        );
+        text_opts.put_str("output_format", "text");
         assert!(!structured_request_uses_response_format(&[
             VmValue::Nil,
             VmValue::Nil,
@@ -662,10 +601,7 @@ mod tests {
         ]));
         // json_object still sends a response_format -> degradable.
         let mut json_object_opts = BTreeMap::new();
-        json_object_opts.insert(
-            "output_format".to_string(),
-            VmValue::String(std::sync::Arc::from("json_object")),
-        );
+        json_object_opts.put_str("output_format", "json_object");
         assert!(structured_request_uses_response_format(&[
             VmValue::Nil,
             VmValue::Nil,
@@ -676,10 +612,7 @@ mod tests {
     #[test]
     fn merge_repair_caps_schema_retries_and_drops_nested_repair() {
         let mut base = BTreeMap::new();
-        base.insert(
-            "provider".to_string(),
-            VmValue::String(std::sync::Arc::from("auto")),
-        );
+        base.put_str("provider", "auto");
         base.insert("schema_retries".to_string(), VmValue::Int(5));
         base.insert(
             "repair".to_string(),
@@ -687,10 +620,7 @@ mod tests {
         );
         let overrides = {
             let mut o = BTreeMap::new();
-            o.insert(
-                "model".to_string(),
-                VmValue::String(std::sync::Arc::from("local:fix")),
-            );
+            o.put_str("model", "local:fix");
             o
         };
         let merged = merge_repair_options(Some(&base), &overrides);

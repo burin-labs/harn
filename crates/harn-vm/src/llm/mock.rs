@@ -1,3 +1,4 @@
+use crate::value::VmDictExt;
 use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -487,30 +488,20 @@ fn mock_error_to_vm_error(err: &MockError) -> VmError {
     if err.has_provider_envelope() {
         let classified = super::api::classify_llm_error(err.category.clone(), &message);
         let mut dict = BTreeMap::new();
-        dict.insert(
-            "category".to_string(),
-            VmValue::String(std::sync::Arc::from(err.category.as_str())),
+        dict.put_str("category", err.category.as_str());
+        dict.put_str(
+            "kind",
+            err.kind
+                .as_deref()
+                .unwrap_or_else(|| classified.kind.as_str()),
         );
-        dict.insert(
-            "kind".to_string(),
-            VmValue::String(std::sync::Arc::from(
-                err.kind
-                    .as_deref()
-                    .unwrap_or_else(|| classified.kind.as_str()),
-            )),
+        dict.put_str(
+            "reason",
+            err.reason
+                .as_deref()
+                .unwrap_or_else(|| classified.reason.as_str()),
         );
-        dict.insert(
-            "reason".to_string(),
-            VmValue::String(std::sync::Arc::from(
-                err.reason
-                    .as_deref()
-                    .unwrap_or_else(|| classified.reason.as_str()),
-            )),
-        );
-        dict.insert(
-            "message".to_string(),
-            VmValue::String(std::sync::Arc::from(message)),
-        );
+        dict.put_str("message", message);
         if let Some(status) = err.status {
             dict.insert("status".to_string(), VmValue::Int(i64::from(status)));
         }

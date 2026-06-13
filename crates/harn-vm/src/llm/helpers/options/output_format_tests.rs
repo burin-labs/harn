@@ -1,13 +1,11 @@
 use super::output::*;
 use super::*;
+use crate::value::VmDictExt;
 
 #[test]
 fn parses_explicit_json_schema_output_format() {
     let mut fmt = BTreeMap::new();
-    fmt.insert(
-        "kind".to_string(),
-        VmValue::String(std::sync::Arc::from("json_schema")),
-    );
+    fmt.put_str("kind", "json_schema");
     fmt.insert(
         "schema".to_string(),
         VmValue::Dict(std::sync::Arc::new(BTreeMap::from([(

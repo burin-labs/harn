@@ -90,83 +90,62 @@ pub struct ProviderDefaults {
     pub presence_penalty_supported: Option<bool>,
 }
 
+/// Copies `src` into `dst` when `src` is set (last-writer-wins overlay).
+fn overlay_opt<T: Clone>(dst: &mut Option<T>, src: &Option<T>) {
+    if src.is_some() {
+        dst.clone_from(src);
+    }
+}
+
+/// Copies `src` into `dst` only when `dst` is still unset (fill-the-gaps).
+fn fill_opt<T: Clone>(dst: &mut Option<T>, src: &Option<T>) {
+    if dst.is_none() {
+        dst.clone_from(src);
+    }
+}
+
+/// Visits every `ProviderDefaults` field once, applying `$op` (`overlay_opt`
+/// or `fill_opt`) to each `(dst, src)` pair. The field roster lives here only;
+/// `overlay`/`fill_missing_from` differ solely in the merge rule they pass.
+macro_rules! merge_provider_defaults {
+    ($dst:expr, $src:expr, $op:path) => {{
+        $op(&mut $dst.message_wire_format, &$src.message_wire_format);
+        $op(
+            &mut $dst.native_tool_wire_format,
+            &$src.native_tool_wire_format,
+        );
+        $op(
+            &mut $dst.image_url_input_supported,
+            &$src.image_url_input_supported,
+        );
+        $op(
+            &mut $dst.file_upload_wire_format,
+            &$src.file_upload_wire_format,
+        );
+        $op(&mut $dst.reasoning_wire_format, &$src.reasoning_wire_format);
+        $op(&mut $dst.files_api_supported, &$src.files_api_supported);
+        $op(&mut $dst.seed_supported, &$src.seed_supported);
+        $op(&mut $dst.top_k_supported, &$src.top_k_supported);
+        $op(&mut $dst.temperature_supported, &$src.temperature_supported);
+        $op(&mut $dst.top_p_supported, &$src.top_p_supported);
+        $op(
+            &mut $dst.frequency_penalty_supported,
+            &$src.frequency_penalty_supported,
+        );
+        $op(
+            &mut $dst.presence_penalty_supported,
+            &$src.presence_penalty_supported,
+        );
+    }};
+}
+
 impl ProviderDefaults {
     fn overlay(&mut self, other: &ProviderDefaults) {
-        if other.message_wire_format.is_some() {
-            self.message_wire_format = other.message_wire_format.clone();
-        }
-        if other.native_tool_wire_format.is_some() {
-            self.native_tool_wire_format = other.native_tool_wire_format.clone();
-        }
-        if other.image_url_input_supported.is_some() {
-            self.image_url_input_supported = other.image_url_input_supported;
-        }
-        if other.file_upload_wire_format.is_some() {
-            self.file_upload_wire_format = other.file_upload_wire_format.clone();
-        }
-        if other.reasoning_wire_format.is_some() {
-            self.reasoning_wire_format = other.reasoning_wire_format.clone();
-        }
-        if other.files_api_supported.is_some() {
-            self.files_api_supported = other.files_api_supported;
-        }
-        if other.seed_supported.is_some() {
-            self.seed_supported = other.seed_supported;
-        }
-        if other.top_k_supported.is_some() {
-            self.top_k_supported = other.top_k_supported;
-        }
-        if other.temperature_supported.is_some() {
-            self.temperature_supported = other.temperature_supported;
-        }
-        if other.top_p_supported.is_some() {
-            self.top_p_supported = other.top_p_supported;
-        }
-        if other.frequency_penalty_supported.is_some() {
-            self.frequency_penalty_supported = other.frequency_penalty_supported;
-        }
-        if other.presence_penalty_supported.is_some() {
-            self.presence_penalty_supported = other.presence_penalty_supported;
-        }
+        merge_provider_defaults!(self, other, overlay_opt);
     }
 
     fn fill_missing_from(&mut self, other: &ProviderDefaults) {
-        if self.message_wire_format.is_none() {
-            self.message_wire_format = other.message_wire_format.clone();
-        }
-        if self.native_tool_wire_format.is_none() {
-            self.native_tool_wire_format = other.native_tool_wire_format.clone();
-        }
-        if self.image_url_input_supported.is_none() {
-            self.image_url_input_supported = other.image_url_input_supported;
-        }
-        if self.file_upload_wire_format.is_none() {
-            self.file_upload_wire_format = other.file_upload_wire_format.clone();
-        }
-        if self.reasoning_wire_format.is_none() {
-            self.reasoning_wire_format = other.reasoning_wire_format.clone();
-        }
-        if self.files_api_supported.is_none() {
-            self.files_api_supported = other.files_api_supported;
-        }
-        if self.seed_supported.is_none() {
-            self.seed_supported = other.seed_supported;
-        }
-        if self.top_k_supported.is_none() {
-            self.top_k_supported = other.top_k_supported;
-        }
-        if self.temperature_supported.is_none() {
-            self.temperature_supported = other.temperature_supported;
-        }
-        if self.top_p_supported.is_none() {
-            self.top_p_supported = other.top_p_supported;
-        }
-        if self.frequency_penalty_supported.is_none() {
-            self.frequency_penalty_supported = other.frequency_penalty_supported;
-        }
-        if self.presence_penalty_supported.is_none() {
-            self.presence_penalty_supported = other.presence_penalty_supported;
-        }
+        merge_provider_defaults!(self, other, fill_opt);
     }
 
     fn has_any_field(&self) -> bool {

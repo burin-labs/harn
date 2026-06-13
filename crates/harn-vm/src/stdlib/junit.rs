@@ -13,6 +13,7 @@
 //! deliberately independent — the format is small and stable, and consoli-
 //! dating later is straightforward if drift becomes a real problem.
 
+use crate::value::VmDictExt;
 use std::collections::BTreeMap;
 use std::time::Duration;
 
@@ -97,14 +98,8 @@ fn parse_junit_xml_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, 
 
 fn record_to_value(record: TestRecord) -> VmValue {
     let mut map: BTreeMap<String, VmValue> = BTreeMap::new();
-    map.insert(
-        "name".to_string(),
-        VmValue::String(std::sync::Arc::from(record.name.as_str())),
-    );
-    map.insert(
-        "status".to_string(),
-        VmValue::String(std::sync::Arc::from(record.status.as_str())),
-    );
+    map.put_str("name", record.name.as_str());
+    map.put_str("status", record.status.as_str());
     map.insert(
         "duration_ms".to_string(),
         VmValue::Int(record.duration_ms as i64),

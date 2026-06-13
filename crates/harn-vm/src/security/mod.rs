@@ -29,6 +29,7 @@
 //! trifecta gate only fires where an interactive approval policy is installed,
 //! so non-interactive embedders (headless evals) are unaffected by it.
 
+use crate::value::VmDictExt;
 use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -764,10 +765,7 @@ fn policy_from_dict(config: &BTreeMap<String, VmValue>) -> SecurityPolicy {
 
 fn policy_summary(policy: &SecurityPolicy) -> VmValue {
     let mut map = BTreeMap::new();
-    map.insert(
-        "mode".to_string(),
-        VmValue::String(std::sync::Arc::from(policy.mode.as_str())),
-    );
+    map.put_str("mode", policy.mode.as_str());
     map.insert(
         "spotlight_external".to_string(),
         VmValue::Bool(policy.spotlight_external),
@@ -792,10 +790,7 @@ fn policy_summary(policy: &SecurityPolicy) -> VmValue {
         "guard_threshold_percent".to_string(),
         VmValue::Int(i64::from(policy.guard_threshold_percent)),
     );
-    map.insert(
-        "guard_model".to_string(),
-        VmValue::String(std::sync::Arc::from(policy.guard_model.as_str())),
-    );
+    map.put_str("guard_model", policy.guard_model.as_str());
     VmValue::Dict(std::sync::Arc::new(map))
 }
 

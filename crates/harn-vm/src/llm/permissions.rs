@@ -1,3 +1,4 @@
+use crate::value::VmDictExt;
 use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
 use std::thread_local;
@@ -1126,48 +1127,21 @@ fn permission_request_value(
     reason: &str,
 ) -> VmValue {
     let mut request = BTreeMap::new();
-    request.insert(
-        "_type".to_string(),
-        VmValue::String(std::sync::Arc::from("PermissionRequest")),
-    );
-    request.insert(
-        "tool".to_string(),
-        VmValue::String(std::sync::Arc::from(tool_name.to_string())),
-    );
+    request.put_str("_type", "PermissionRequest");
+    request.put_str("tool", tool_name);
     request.insert("args".to_string(), crate::stdlib::json_to_vm_value(args));
-    request.insert(
-        "session_id".to_string(),
-        VmValue::String(std::sync::Arc::from(session_id.to_string())),
-    );
-    request.insert(
-        "reason".to_string(),
-        VmValue::String(std::sync::Arc::from(reason.to_string())),
-    );
+    request.put_str("session_id", session_id);
+    request.put_str("reason", reason);
     if let Some(context) = crate::triggers::dispatcher::current_dispatch_context() {
-        request.insert(
-            "agent".to_string(),
-            VmValue::String(std::sync::Arc::from(context.agent_id)),
-        );
-        request.insert(
-            "action".to_string(),
-            VmValue::String(std::sync::Arc::from(context.action)),
-        );
-        request.insert(
-            "trace_id".to_string(),
-            VmValue::String(std::sync::Arc::from(context.trigger_event.trace_id.0)),
-        );
-        request.insert(
-            "autonomy_tier".to_string(),
-            VmValue::String(std::sync::Arc::from(context.autonomy_tier.as_str())),
-        );
+        request.put_str("agent", context.agent_id);
+        request.put_str("action", context.action);
+        request.put_str("trace_id", context.trigger_event.trace_id.0);
+        request.put_str("autonomy_tier", context.autonomy_tier.as_str());
         if matches!(
             context.autonomy_tier,
             AutonomyTier::Shadow | AutonomyTier::Suggest
         ) {
-            request.insert(
-                "requested_tier".to_string(),
-                VmValue::String(std::sync::Arc::from(AutonomyTier::ActWithApproval.as_str())),
-            );
+            request.put_str("requested_tier", AutonomyTier::ActWithApproval.as_str());
         }
     }
     request.insert(

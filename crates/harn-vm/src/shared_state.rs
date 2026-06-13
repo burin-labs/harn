@@ -1,3 +1,4 @@
+use crate::value::VmDictExt;
 use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicI64, AtomicU64, Ordering};
 use std::sync::Arc;
@@ -336,27 +337,15 @@ impl VmSharedStateRuntime {
 
 fn handle_value(kind: &str, scoped: &ScopedKey) -> VmValue {
     let mut value = BTreeMap::new();
-    value.insert(
-        "_type".to_string(),
-        VmValue::String(std::sync::Arc::from(kind.to_string())),
-    );
-    value.insert(
-        "scope".to_string(),
-        VmValue::String(std::sync::Arc::from(scoped.scope.clone())),
-    );
-    value.insert(
-        "key".to_string(),
-        VmValue::String(std::sync::Arc::from(scoped.key.clone())),
-    );
+    value.put_str("_type", kind);
+    value.put_str("scope", scoped.scope.clone());
+    value.put_str("key", scoped.key.clone());
     VmValue::Dict(std::sync::Arc::new(value))
 }
 
 fn snapshot_value(value: VmValue, version: u64) -> VmValue {
     let mut snapshot = BTreeMap::new();
-    snapshot.insert(
-        "_type".to_string(),
-        VmValue::String(std::sync::Arc::from("shared_snapshot")),
-    );
+    snapshot.put_str("_type", "shared_snapshot");
     snapshot.insert("value".to_string(), value);
     snapshot.insert("version".to_string(), VmValue::Int(version as i64));
     VmValue::Dict(std::sync::Arc::new(snapshot))
@@ -454,18 +443,9 @@ fn empty_mailbox_metrics() -> VmValue {
 
 fn with_scope_fields(kind: &str, scoped: &ScopedKey, metrics: VmValue) -> VmValue {
     let mut value = metrics.as_dict().cloned().unwrap_or_default();
-    value.insert(
-        "_type".to_string(),
-        VmValue::String(std::sync::Arc::from(kind.to_string())),
-    );
-    value.insert(
-        "scope".to_string(),
-        VmValue::String(std::sync::Arc::from(scoped.scope.clone())),
-    );
-    value.insert(
-        "key".to_string(),
-        VmValue::String(std::sync::Arc::from(scoped.key.clone())),
-    );
+    value.put_str("_type", kind);
+    value.put_str("scope", scoped.scope.clone());
+    value.put_str("key", scoped.key.clone());
     VmValue::Dict(std::sync::Arc::new(value))
 }
 

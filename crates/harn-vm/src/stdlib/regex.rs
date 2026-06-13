@@ -1,3 +1,4 @@
+use crate::value::VmDictExt;
 use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap};
 use std::rc::Rc;
@@ -186,10 +187,7 @@ fn regex_captures_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, V
     for caps in re.captures_iter(&text) {
         let mut dict = BTreeMap::new();
 
-        dict.insert(
-            "match".to_string(),
-            VmValue::String(std::sync::Arc::from(caps.get(0).map_or("", |m| m.as_str()))),
-        );
+        dict.put_str("match", caps.get(0).map_or("", |m| m.as_str()));
 
         let groups: Vec<VmValue> = (1..caps.len())
             .map(|i| match caps.get(i) {

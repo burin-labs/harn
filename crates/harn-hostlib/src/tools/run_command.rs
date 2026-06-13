@@ -17,6 +17,7 @@
 //!   immediately. The result arrives via `agent_inject_feedback` when the
 //!   process exits. See `tools/long_running.rs`.
 
+use harn_vm::VmDictExt;
 use harn_vm::VmValue;
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -175,19 +176,10 @@ fn initial_background_snapshot(
         VmValue::Dict(map) => (*map).clone(),
         _ => BTreeMap::new(),
     };
-    response.insert(
-        "feedback_kind".to_string(),
-        VmValue::String(Arc::from("tool_progress")),
-    );
+    response.put_str("feedback_kind", "tool_progress");
     response.insert("duration_ms".to_string(), VmValue::Int(wait_ms as i64));
-    response.insert(
-        "stdout".to_string(),
-        VmValue::String(Arc::from(inline_stdout)),
-    );
-    response.insert(
-        "stderr".to_string(),
-        VmValue::String(Arc::from(inline_stderr)),
-    );
+    response.put_str("stdout", inline_stdout);
+    response.put_str("stderr", inline_stderr);
     response.insert("byte_count".to_string(), VmValue::Int(byte_count as i64));
     response.insert("line_count".to_string(), VmValue::Int(line_count as i64));
     VmValue::Dict(Arc::new(response))
@@ -215,15 +207,9 @@ fn parse_command(
                     param: "command",
                 })?;
             let mut invocation = BTreeMap::new();
-            invocation.insert(
-                "command".to_string(),
-                VmValue::String(std::sync::Arc::from(command)),
-            );
+            invocation.put_str("command", command);
             if let Some(shell_id) = optional_string(NAME, map, "shell_id")? {
-                invocation.insert(
-                    "shell_id".to_string(),
-                    VmValue::String(std::sync::Arc::from(shell_id)),
-                );
+                invocation.put_str("shell_id", shell_id);
             }
             if let Some(shell) = map.get("shell") {
                 match shell {

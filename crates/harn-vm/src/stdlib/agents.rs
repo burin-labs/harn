@@ -12,6 +12,7 @@ mod sub_agent;
 #[path = "workflow/mod.rs"]
 pub(super) mod workflow;
 
+use crate::value::VmDictExt;
 use std::collections::{BTreeMap, HashSet};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -406,10 +407,7 @@ async fn suspend_agent_builtin(
                 let mut summary = worker_summary(&state.lock())?;
                 if let VmValue::Dict(map) = &mut summary {
                     let mut entries = (**map).clone();
-                    entries.insert(
-                        "pre_suspend_denied".to_string(),
-                        VmValue::String(std::sync::Arc::from(block_reason.clone())),
-                    );
+                    entries.put_str("pre_suspend_denied", block_reason.clone());
                     *map = std::sync::Arc::new(entries);
                 }
                 Ok(summary)

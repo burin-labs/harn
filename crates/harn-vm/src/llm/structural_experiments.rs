@@ -1,3 +1,4 @@
+use crate::value::VmDictExt;
 use std::collections::BTreeMap;
 
 use crate::value::{VmError, VmValue};
@@ -315,14 +316,8 @@ pub(crate) async fn apply_structural_experiment(
                     .map(|value| VmValue::Int(value as i64))
                     .unwrap_or(VmValue::Nil),
             );
-            ctx.insert(
-                "label".to_string(),
-                VmValue::String(std::sync::Arc::from(config.label.as_str())),
-            );
-            ctx.insert(
-                "name".to_string(),
-                VmValue::String(std::sync::Arc::from(config.name.as_str())),
-            );
+            ctx.put_str("label", config.label.as_str());
+            ctx.put_str("name", config.name.as_str());
             ctx.insert(
                 "args".to_string(),
                 crate::stdlib::json_to_vm_value(&config.args),
@@ -446,10 +441,7 @@ fn apply_builtin_experiment(
             if let Some(index) = latest_string_user_message_index(&messages) {
                 if let Some(content) = message_text(&messages[index]).map(str::to_string) {
                     let mut bindings = BTreeMap::new();
-                    bindings.insert(
-                        "content".to_string(),
-                        VmValue::String(std::sync::Arc::from(content)),
-                    );
+                    bindings.put_str("content", content);
                     let rendered = crate::stdlib::template::render_stdlib_prompt_asset(
                         "llm/prompts/structural_chain_of_draft.harn.prompt",
                         Some(&bindings),

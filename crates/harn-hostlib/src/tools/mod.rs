@@ -34,6 +34,7 @@
 //! [`HostlibError::Backend`] with an explanatory message. The per-session
 //! opt-in model keeps the deterministic-tool surface sandbox-friendly.
 
+use harn_vm::VmDictExt;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
@@ -218,7 +219,7 @@ fn handle_enable(args: &[VmValue]) -> Result<VmValue, HostlibError> {
         permissions::FEATURE_TOOLS_DETERMINISTIC => {
             let newly_enabled = permissions::enable(&feature);
             let mut map: BTreeMap<String, VmValue> = BTreeMap::new();
-            map.insert("feature".to_string(), VmValue::String(Arc::from(feature)));
+            map.put_str("feature", feature);
             map.insert("enabled".to_string(), VmValue::Bool(true));
             map.insert("newly_enabled".to_string(), VmValue::Bool(newly_enabled));
             Ok(VmValue::Dict(Arc::new(map)))

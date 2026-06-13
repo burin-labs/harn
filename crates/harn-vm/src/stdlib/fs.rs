@@ -1,3 +1,4 @@
+use crate::value::VmDictExt;
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -177,10 +178,7 @@ fn walk_dir_entries(
 
 fn walk_entry_to_vm(entry: WalkDirEntry) -> VmValue {
     let mut dict = BTreeMap::new();
-    dict.insert(
-        "path".to_string(),
-        VmValue::String(std::sync::Arc::from(entry.path)),
-    );
+    dict.put_str("path", entry.path);
     dict.insert("is_dir".to_string(), VmValue::Bool(entry.is_dir));
     dict.insert("is_file".to_string(), VmValue::Bool(entry.is_file));
     dict.insert("depth".to_string(), VmValue::Int(entry.depth));

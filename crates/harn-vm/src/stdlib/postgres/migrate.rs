@@ -15,6 +15,7 @@
 //!   mutually exclude. This lets Harn apply an existing SQLx migration
 //!   history idempotently without forking it.
 
+use crate::value::VmDictExt;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -431,7 +432,7 @@ fn build_response(
     response.insert("available".to_string(), str_list(available));
     response.insert("dry_run".to_string(), VmValue::Bool(dry_run));
     response.insert("duration_ms".to_string(), VmValue::Int(duration_ms));
-    response.insert("table".to_string(), VmValue::String(Arc::from(table_name)));
+    response.put_str("table", table_name);
     VmValue::Dict(Arc::new(response))
 }
 

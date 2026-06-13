@@ -5,6 +5,7 @@
 //! ranker is invoked as a Harn closure, which requires an async-builtin VM
 //! context.
 
+use crate::value::VmDictExt;
 use std::collections::BTreeMap;
 
 use crate::orchestration::{
@@ -213,14 +214,8 @@ fn assembled_to_vm(assembled: &AssembledContext) -> VmValue {
         .iter()
         .map(|summary| {
             let mut map = BTreeMap::new();
-            map.insert(
-                "artifact_id".to_string(),
-                VmValue::String(std::sync::Arc::from(summary.artifact_id.as_str())),
-            );
-            map.insert(
-                "artifact_kind".to_string(),
-                VmValue::String(std::sync::Arc::from(summary.artifact_kind.as_str())),
-            );
+            map.put_str("artifact_id", summary.artifact_id.as_str());
+            map.put_str("artifact_kind", summary.artifact_kind.as_str());
             map.insert(
                 "chunks_included".to_string(),
                 VmValue::Int(summary.chunks_included as i64),
@@ -242,10 +237,7 @@ fn assembled_to_vm(assembled: &AssembledContext) -> VmValue {
         .iter()
         .map(|exclusion| {
             let mut map = BTreeMap::new();
-            map.insert(
-                "artifact_id".to_string(),
-                VmValue::String(std::sync::Arc::from(exclusion.artifact_id.as_str())),
-            );
+            map.put_str("artifact_id", exclusion.artifact_id.as_str());
             map.insert(
                 "chunk_id".to_string(),
                 exclusion
@@ -254,10 +246,7 @@ fn assembled_to_vm(assembled: &AssembledContext) -> VmValue {
                     .map(|id| VmValue::String(std::sync::Arc::from(id.as_str())))
                     .unwrap_or(VmValue::Nil),
             );
-            map.insert(
-                "reason".to_string(),
-                VmValue::String(std::sync::Arc::from(exclusion.reason)),
-            );
+            map.put_str("reason", exclusion.reason);
             map.insert(
                 "detail".to_string(),
                 exclusion
@@ -275,24 +264,12 @@ fn assembled_to_vm(assembled: &AssembledContext) -> VmValue {
         .iter()
         .map(|reason| {
             let mut map = BTreeMap::new();
-            map.insert(
-                "chunk_id".to_string(),
-                VmValue::String(std::sync::Arc::from(reason.chunk_id.as_str())),
-            );
-            map.insert(
-                "artifact_id".to_string(),
-                VmValue::String(std::sync::Arc::from(reason.artifact_id.as_str())),
-            );
-            map.insert(
-                "strategy".to_string(),
-                VmValue::String(std::sync::Arc::from(reason.strategy)),
-            );
+            map.put_str("chunk_id", reason.chunk_id.as_str());
+            map.put_str("artifact_id", reason.artifact_id.as_str());
+            map.put_str("strategy", reason.strategy);
             map.insert("score".to_string(), VmValue::Float(reason.score));
             map.insert("included".to_string(), VmValue::Bool(reason.included));
-            map.insert(
-                "reason".to_string(),
-                VmValue::String(std::sync::Arc::from(reason.reason)),
-            );
+            map.put_str("reason", reason.reason);
             VmValue::Dict(std::sync::Arc::new(map))
         })
         .collect();
@@ -322,14 +299,8 @@ fn assembled_to_vm(assembled: &AssembledContext) -> VmValue {
         "budget_tokens".to_string(),
         VmValue::Int(assembled.budget_tokens as i64),
     );
-    map.insert(
-        "strategy".to_string(),
-        VmValue::String(std::sync::Arc::from(assembled.strategy.as_str())),
-    );
-    map.insert(
-        "dedup".to_string(),
-        VmValue::String(std::sync::Arc::from(assembled.dedup.as_str())),
-    );
+    map.put_str("strategy", assembled.strategy.as_str());
+    map.put_str("dedup", assembled.dedup.as_str());
     VmValue::Dict(std::sync::Arc::new(map))
 }
 

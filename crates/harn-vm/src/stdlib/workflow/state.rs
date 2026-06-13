@@ -1,5 +1,6 @@
 //! Workflow run state machine and stage-lifecycle helpers.
 
+use crate::value::VmDictExt;
 use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
@@ -164,14 +165,8 @@ pub(super) fn workflow_control_to_vm(
     include_graph: bool,
 ) -> Result<VmValue, VmError> {
     let mut dict = BTreeMap::new();
-    dict.insert(
-        "state_id".to_string(),
-        VmValue::String(std::sync::Arc::from(state.state_id.as_str())),
-    );
-    dict.insert(
-        "run_id".to_string(),
-        VmValue::String(std::sync::Arc::from(state.run.id.as_str())),
-    );
+    dict.put_str("state_id", state.state_id.as_str());
+    dict.put_str("run_id", state.run.id.as_str());
     dict.insert(
         "ready_nodes".to_string(),
         string_list_to_vm(&state.ready_nodes),
@@ -266,10 +261,7 @@ fn validate_workflow_skill_registry(value: VmValue) -> Option<VmValue> {
         }
         VmValue::List(list) => {
             let mut dict = BTreeMap::new();
-            dict.insert(
-                "_type".to_string(),
-                VmValue::String(std::sync::Arc::from("skill_registry")),
-            );
+            dict.put_str("_type", "skill_registry");
             dict.insert("skills".to_string(), VmValue::List(list.clone()));
             Some(VmValue::Dict(std::sync::Arc::new(dict)))
         }
@@ -666,10 +658,7 @@ fn stage_metadata(
 
 fn workflow_stage_plan_to_vm(scope: &StageExecutionScope) -> Result<VmValue, VmError> {
     let mut dict = BTreeMap::new();
-    dict.insert(
-        "kind".to_string(),
-        VmValue::String(std::sync::Arc::from(scope.node.kind.as_str())),
-    );
+    dict.put_str("kind", scope.node.kind.as_str());
     match &scope.execution {
         StageExecution::Precomputed(executed) => {
             dict.insert(
@@ -684,10 +673,7 @@ fn workflow_stage_plan_to_vm(scope: &StageExecutionScope) -> Result<VmValue, VmE
                     crate::stdlib::json_to_vm_value(result),
                 );
             } else {
-                dict.insert(
-                    "prompt".to_string(),
-                    VmValue::String(std::sync::Arc::from(prepared.prompt.as_str())),
-                );
+                dict.put_str("prompt", prepared.prompt.as_str());
                 dict.insert(
                     "system".to_string(),
                     prepared
@@ -1060,10 +1046,7 @@ pub(super) async fn prepare_workflow_stage_state(
             .map(|artifact| artifact.id.clone())
             .collect::<Vec<_>>();
         let mut map_options = BTreeMap::new();
-        map_options.insert(
-            "task".to_string(),
-            VmValue::String(std::sync::Arc::from(state.run.task.clone())),
-        );
+        map_options.put_str("task", state.run.task.clone());
         if let Some(transcript) = transcript.clone() {
             map_options.insert("transcript".to_string(), transcript);
         }

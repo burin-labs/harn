@@ -14,6 +14,7 @@
 //! `crates/harn-vm/src/llm/`, `crates/harn-vm/src/vm/`, and the compiler
 //! stay focused.
 
+use crate::value::VmDictExt;
 use std::cell::{Cell, RefCell};
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -856,30 +857,12 @@ fn budget_exhausted_error(
     consumed_cost_usd: f64,
 ) -> VmError {
     let mut dict: BTreeMap<String, VmValue> = BTreeMap::new();
-    dict.insert(
-        "category".to_string(),
-        VmValue::String(std::sync::Arc::from("budget_exceeded")),
-    );
-    dict.insert(
-        "kind".to_string(),
-        VmValue::String(std::sync::Arc::from("budget_exhausted")),
-    );
-    dict.insert(
-        "reason".to_string(),
-        VmValue::String(std::sync::Arc::from("step_budget_exhausted")),
-    );
-    dict.insert(
-        "step".to_string(),
-        VmValue::String(std::sync::Arc::from(definition.name.clone())),
-    );
-    dict.insert(
-        "function".to_string(),
-        VmValue::String(std::sync::Arc::from(definition.function.clone())),
-    );
-    dict.insert(
-        "limit".to_string(),
-        VmValue::String(std::sync::Arc::from(limit.to_string())),
-    );
+    dict.put_str("category", "budget_exceeded");
+    dict.put_str("kind", "budget_exhausted");
+    dict.put_str("reason", "step_budget_exhausted");
+    dict.put_str("step", definition.name.clone());
+    dict.put_str("function", definition.function.clone());
+    dict.put_str("limit", limit);
     dict.insert("limit_value".to_string(), VmValue::Float(limit_value));
     dict.insert(
         "consumed_tokens".to_string(),
@@ -889,21 +872,19 @@ fn budget_exhausted_error(
         "consumed_cost_usd".to_string(),
         VmValue::Float(consumed_cost_usd),
     );
-    dict.insert(
-        "error_boundary".to_string(),
-        VmValue::String(std::sync::Arc::from(
-            definition
-                .error_boundary
-                .clone()
-                .unwrap_or_else(|| "fail".to_string()),
-        )),
+    dict.put_str(
+        "error_boundary",
+        definition
+            .error_boundary
+            .clone()
+            .unwrap_or_else(|| "fail".to_string()),
     );
-    dict.insert(
-        "message".to_string(),
-        VmValue::String(std::sync::Arc::from(format!(
+    dict.put_str(
+        "message",
+        format!(
             "step `{}` exceeded {} budget ({} > {})",
             definition.name, limit, consumed_tokens as i64, limit_value as i64
-        ))),
+        ),
     );
     VmError::Thrown(VmValue::Dict(std::sync::Arc::new(dict)))
 }
@@ -940,10 +921,7 @@ pub fn mark_escalated(err: VmError, step_name: Option<&str>, function: Option<&s
     };
     let mut next = (*dict).clone();
     next.insert("escalated".to_string(), VmValue::Bool(true));
-    next.insert(
-        "category".to_string(),
-        VmValue::String(std::sync::Arc::from("handoff_escalation")),
-    );
+    next.put_str("category", "handoff_escalation");
     if let Some(step) = step_name {
         next.entry("step".to_string())
             .or_insert_with(|| VmValue::String(std::sync::Arc::from(step.to_string())));
@@ -999,6 +977,7 @@ fn __register_persona(args: &[VmValue], _out: &mut String) -> Result<VmValue, Vm
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::value::VmDictExt;
 
     fn fresh_state() {
         reset_thread_local_state();
@@ -1011,18 +990,9 @@ mod tests {
         budget.insert("max_tokens".to_string(), VmValue::Int(100));
         budget.insert("max_usd".to_string(), VmValue::Float(0.05));
         let mut meta: BTreeMap<String, VmValue> = BTreeMap::new();
-        meta.insert(
-            "name".to_string(),
-            VmValue::String(std::sync::Arc::from("plan")),
-        );
-        meta.insert(
-            "model".to_string(),
-            VmValue::String(std::sync::Arc::from("claude-haiku-4-5")),
-        );
-        meta.insert(
-            "error_boundary".to_string(),
-            VmValue::String(std::sync::Arc::from("continue")),
-        );
+        meta.put_str("name", "plan");
+        meta.put_str("model", "claude-haiku-4-5");
+        meta.put_str("error_boundary", "continue");
         meta.insert(
             "budget".to_string(),
             VmValue::Dict(std::sync::Arc::new(budget)),
@@ -1102,10 +1072,7 @@ mod tests {
     fn stage_policy_narrows_but_does_not_widen_parent_policy() {
         fresh_state();
         let mut meta: BTreeMap<String, VmValue> = BTreeMap::new();
-        meta.insert(
-            "name".to_string(),
-            VmValue::String(std::sync::Arc::from("research")),
-        );
+        meta.put_str("name", "research");
         register_step_from_dict(vec![
             VmValue::String(std::sync::Arc::from("research_step")),
             VmValue::Dict(std::sync::Arc::new(meta)),
@@ -1113,10 +1080,7 @@ mod tests {
         .expect("step registration");
 
         let mut stage_dict: BTreeMap<String, VmValue> = BTreeMap::new();
-        stage_dict.insert(
-            "name".to_string(),
-            VmValue::String(std::sync::Arc::from("research")),
-        );
+        stage_dict.put_str("name", "research");
         // Stage tries to add `edit` on top of a parent that only allowed `read`.
         stage_dict.insert(
             "allowed_tools".to_string(),
@@ -1126,10 +1090,7 @@ mod tests {
             ])),
         );
         let mut persona_meta: BTreeMap<String, VmValue> = BTreeMap::new();
-        persona_meta.insert(
-            "name".to_string(),
-            VmValue::String(std::sync::Arc::from("scoped")),
-        );
+        persona_meta.put_str("name", "scoped");
         persona_meta.insert(
             "stages".to_string(),
             VmValue::List(std::sync::Arc::new(vec![VmValue::Dict(
@@ -1161,10 +1122,7 @@ mod tests {
     fn stage_policy_is_pushed_and_popped_around_step() {
         fresh_state();
         let mut meta: BTreeMap<String, VmValue> = BTreeMap::new();
-        meta.insert(
-            "name".to_string(),
-            VmValue::String(std::sync::Arc::from("research")),
-        );
+        meta.put_str("name", "research");
         register_step_from_dict(vec![
             VmValue::String(std::sync::Arc::from("research_step")),
             VmValue::Dict(std::sync::Arc::new(meta)),
@@ -1172,10 +1130,7 @@ mod tests {
         .expect("step registration succeeds");
 
         let mut stage_dict: BTreeMap<String, VmValue> = BTreeMap::new();
-        stage_dict.insert(
-            "name".to_string(),
-            VmValue::String(std::sync::Arc::from("research")),
-        );
+        stage_dict.put_str("name", "research");
         stage_dict.insert(
             "allowed_tools".to_string(),
             VmValue::List(std::sync::Arc::new(vec![VmValue::String(
@@ -1183,10 +1138,7 @@ mod tests {
             )])),
         );
         let mut persona_meta: BTreeMap<String, VmValue> = BTreeMap::new();
-        persona_meta.insert(
-            "name".to_string(),
-            VmValue::String(std::sync::Arc::from("scoped")),
-        );
+        persona_meta.put_str("name", "scoped");
         persona_meta.insert(
             "stages".to_string(),
             VmValue::List(std::sync::Arc::new(vec![VmValue::Dict(

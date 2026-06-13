@@ -1,3 +1,4 @@
+use crate::value::VmDictExt;
 use std::collections::{BTreeMap, HashMap};
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
@@ -256,10 +257,7 @@ pub(super) fn apply_workflow_replay_config(
     if !carry.artifacts.is_empty() {
         *artifacts = carry.artifacts;
     }
-    options.insert(
-        "parent_worker_id".to_string(),
-        VmValue::String(std::sync::Arc::from(carry.parent_worker_id)),
-    );
+    options.put_str("parent_worker_id", carry.parent_worker_id);
     if let Some(transcript) = carry.transcript {
         options.insert("transcript".to_string(), transcript);
     } else {
@@ -267,10 +265,7 @@ pub(super) fn apply_workflow_replay_config(
     }
     if carry.resume_workflow {
         if let Some(child_run_path) = carry.child_run_path {
-            options.insert(
-                "resume_path".to_string(),
-                VmValue::String(std::sync::Arc::from(child_run_path)),
-            );
+            options.put_str("resume_path", child_run_path);
         }
     } else {
         options.remove("resume_path");
@@ -296,10 +291,7 @@ pub(super) fn apply_sub_agent_replay_config(
     spec.task = next_task.to_string();
     if reset_session {
         spec.session_id = format!("sub_agent_session_{}", uuid::Uuid::now_v7());
-        spec.options.insert(
-            "session_id".to_string(),
-            VmValue::String(std::sync::Arc::from(spec.session_id.clone())),
-        );
+        spec.options.put_str("session_id", spec.session_id.clone());
     }
 }
 

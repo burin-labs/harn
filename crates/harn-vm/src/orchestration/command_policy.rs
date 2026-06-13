@@ -5,6 +5,7 @@
 //! spawns, records deterministic risk labels, and can block or rewrite
 //! constrained request fields without relying on model prompt text.
 
+use crate::value::VmDictExt;
 use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Component, Path, PathBuf};
@@ -497,56 +498,26 @@ pub fn blocked_command_response(
     let command_id = format!("cmd_blocked_{}", crate::orchestration::new_id("policy"));
     let now = chrono::Utc::now().to_rfc3339();
     let mut result = BTreeMap::new();
-    result.insert(
-        "command_id".to_string(),
-        VmValue::String(std::sync::Arc::from(command_id.clone())),
-    );
-    result.insert(
-        "status".to_string(),
-        VmValue::String(std::sync::Arc::from(status.to_string())),
-    );
+    result.put_str("command_id", command_id.clone());
+    result.put_str("status", status);
     result.insert("pid".to_string(), VmValue::Nil);
     result.insert("process_group_id".to_string(), VmValue::Nil);
     result.insert("handle_id".to_string(), VmValue::Nil);
-    result.insert(
-        "started_at".to_string(),
-        VmValue::String(std::sync::Arc::from(now.clone())),
-    );
-    result.insert(
-        "ended_at".to_string(),
-        VmValue::String(std::sync::Arc::from(now)),
-    );
+    result.put_str("started_at", now.clone());
+    result.put_str("ended_at", now);
     result.insert("duration_ms".to_string(), VmValue::Int(0));
     result.insert("exit_code".to_string(), VmValue::Int(-1));
     result.insert("signal".to_string(), VmValue::Nil);
     result.insert("timed_out".to_string(), VmValue::Bool(false));
-    result.insert(
-        "stdout".to_string(),
-        VmValue::String(std::sync::Arc::from("")),
-    );
-    result.insert(
-        "stderr".to_string(),
-        VmValue::String(std::sync::Arc::from(message.to_string())),
-    );
-    result.insert(
-        "combined".to_string(),
-        VmValue::String(std::sync::Arc::from(message.to_string())),
-    );
+    result.put_str("stdout", "");
+    result.put_str("stderr", message);
+    result.put_str("combined", message);
     result.insert("exit_status".to_string(), VmValue::Int(-1));
     result.insert("legacy_status".to_string(), VmValue::Int(-1));
     result.insert("success".to_string(), VmValue::Bool(false));
-    result.insert(
-        "error".to_string(),
-        VmValue::String(std::sync::Arc::from("permission_denied")),
-    );
-    result.insert(
-        "reason".to_string(),
-        VmValue::String(std::sync::Arc::from(message.to_string())),
-    );
-    result.insert(
-        "audit_id".to_string(),
-        VmValue::String(std::sync::Arc::from(format!("audit_{command_id}"))),
-    );
+    result.put_str("error", "permission_denied");
+    result.put_str("reason", message);
+    result.put_str("audit_id", format!("audit_{command_id}"));
     result.insert(
         "request".to_string(),
         VmValue::Dict(std::sync::Arc::new(redacted_vm_request(params))),

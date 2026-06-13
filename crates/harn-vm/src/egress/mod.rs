@@ -1,3 +1,4 @@
+use crate::value::VmDictExt;
 use std::cell::RefCell;
 use std::collections::BTreeMap;
 #[cfg(test)]
@@ -1059,16 +1060,13 @@ fn policy_summary() -> VmValue {
     let mut dict = BTreeMap::new();
     if let Some(configured) = configured {
         dict.insert("configured".to_string(), VmValue::Bool(true));
-        dict.insert(
-            "source".to_string(),
-            VmValue::String(std::sync::Arc::from(configured.source)),
-        );
-        dict.insert(
-            "default".to_string(),
-            VmValue::String(std::sync::Arc::from(match configured.policy.default {
+        dict.put_str("source", configured.source);
+        dict.put_str(
+            "default",
+            match configured.policy.default {
                 DefaultAction::Allow => "allow",
                 DefaultAction::Deny => "deny",
-            })),
+            },
         );
         dict.insert(
             "allow".to_string(),
@@ -1093,12 +1091,12 @@ fn policy_summary() -> VmValue {
             )),
         );
         let (mode, allow_loopback) = effective_ssrf_settings(Some(&configured.policy));
-        dict.insert(
-            "block_private".to_string(),
-            VmValue::String(std::sync::Arc::from(match mode {
+        dict.put_str(
+            "block_private",
+            match mode {
                 SsrfMode::BlockPrivate => "private",
                 SsrfMode::Off => "off",
-            })),
+            },
         );
         dict.insert("allow_loopback".to_string(), VmValue::Bool(allow_loopback));
     } else {
@@ -1272,40 +1270,19 @@ fn vm_error(message: impl Into<String>) -> VmError {
 impl EgressBlocked {
     pub(crate) fn to_vm_error(&self) -> VmError {
         let mut dict = BTreeMap::new();
-        dict.insert(
-            "type".to_string(),
-            VmValue::String(std::sync::Arc::from("EgressBlocked")),
-        );
-        dict.insert(
-            "category".to_string(),
-            VmValue::String(std::sync::Arc::from("egress_blocked")),
-        );
-        dict.insert(
-            "message".to_string(),
-            VmValue::String(std::sync::Arc::from(self.to_string())),
-        );
-        dict.insert(
-            "surface".to_string(),
-            VmValue::String(std::sync::Arc::from(self.surface.as_str())),
-        );
-        dict.insert(
-            "url".to_string(),
-            VmValue::String(std::sync::Arc::from(self.url.as_str())),
-        );
-        dict.insert(
-            "host".to_string(),
-            VmValue::String(std::sync::Arc::from(self.host.as_str())),
-        );
+        dict.put_str("type", "EgressBlocked");
+        dict.put_str("category", "egress_blocked");
+        dict.put_str("message", self.to_string());
+        dict.put_str("surface", self.surface.as_str());
+        dict.put_str("url", self.url.as_str());
+        dict.put_str("host", self.host.as_str());
         dict.insert(
             "port".to_string(),
             self.port
                 .map(|port| VmValue::Int(port as i64))
                 .unwrap_or(VmValue::Nil),
         );
-        dict.insert(
-            "reason".to_string(),
-            VmValue::String(std::sync::Arc::from(self.reason.as_str())),
-        );
+        dict.put_str("reason", self.reason.as_str());
         VmError::Thrown(VmValue::Dict(std::sync::Arc::new(dict)))
     }
 }

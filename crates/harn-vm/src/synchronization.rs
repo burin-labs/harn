@@ -1,3 +1,4 @@
+use crate::value::VmDictExt;
 use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -297,14 +298,8 @@ impl VmSyncPrimitive {
             .expect("sync metrics mutex poisoned")
             .clone();
         let mut dict = BTreeMap::new();
-        dict.insert(
-            "kind".to_string(),
-            VmValue::String(std::sync::Arc::from(self.kind.as_str())),
-        );
-        dict.insert(
-            "key".to_string(),
-            VmValue::String(std::sync::Arc::from(self.key.as_str())),
-        );
+        dict.put_str("kind", self.kind.as_str());
+        dict.put_str("key", self.key.as_str());
         dict.insert("capacity".to_string(), VmValue::Int(self.capacity as i64));
         dict.insert(
             "acquisition_count".to_string(),

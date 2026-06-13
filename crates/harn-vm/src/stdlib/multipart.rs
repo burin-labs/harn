@@ -32,10 +32,6 @@ fn builtin_error(builtin: &str, message: impl std::fmt::Display) -> VmError {
     VmError::Runtime(format!("{builtin}: {message}"))
 }
 
-fn string_value(value: impl Into<String>) -> VmValue {
-    VmValue::String(std::sync::Arc::from(value.into()))
-}
-
 fn bytes_value(bytes: Vec<u8>) -> VmValue {
     VmValue::Bytes(std::sync::Arc::new(bytes))
 }
@@ -49,7 +45,7 @@ fn list_value(items: Vec<VmValue>) -> VmValue {
 }
 
 fn nil_or_string(value: Option<String>) -> VmValue {
-    value.map(string_value).unwrap_or(VmValue::Nil)
+    value.map(VmValue::string).unwrap_or(VmValue::Nil)
 }
 
 fn expect_string<'a>(args: &'a [VmValue], index: usize, builtin: &str) -> Result<&'a str, VmError> {
@@ -432,18 +428,18 @@ fn parse_multipart_body(
 fn headers_value(headers: &BTreeMap<String, String>) -> VmValue {
     let map = headers
         .iter()
-        .map(|(key, value)| (key.clone(), string_value(value)))
+        .map(|(key, value)| (key.clone(), VmValue::string(value)))
         .collect();
     dict_value(map)
 }
 
 fn parsed_field_value(field: ParsedField) -> VmValue {
     let text = match std::str::from_utf8(&field.bytes) {
-        Ok(text) => string_value(text),
+        Ok(text) => VmValue::string(text),
         Err(_) => VmValue::Nil,
     };
     let mut map = BTreeMap::new();
-    map.insert("name".to_string(), string_value(field.name));
+    map.insert("name".to_string(), VmValue::string(field.name));
     map.insert("filename".to_string(), nil_or_string(field.filename));
     map.insert(
         "content_type".to_string(),
@@ -470,7 +466,7 @@ fn multipart_parse_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValu
     let field_count = fields.len() as i64;
 
     let mut result = BTreeMap::new();
-    result.insert("boundary".to_string(), string_value(boundary));
+    result.insert("boundary".to_string(), VmValue::string(boundary));
     result.insert(
         "fields".to_string(),
         list_value(fields.into_iter().map(parsed_field_value).collect()),
@@ -532,7 +528,7 @@ fn multipart_field_text_builtin(args: &[VmValue], _out: &mut String) -> Result<V
     };
     let text =
         std::str::from_utf8(bytes).map_err(|error| builtin_error("multipart_field_text", error))?;
-    Ok(string_value(text))
+    Ok(VmValue::string(text))
 }
 
 fn field_input_string(
@@ -760,8 +756,8 @@ fn multipart_form_data_builtin(args: &[VmValue], _out: &mut String) -> Result<Vm
 fn form_data_result(boundary: String, body: Vec<u8>) -> Result<VmValue, VmError> {
     let content_type = format!("multipart/form-data; boundary={boundary}");
     let mut result = BTreeMap::new();
-    result.insert("boundary".to_string(), string_value(boundary));
-    result.insert("content_type".to_string(), string_value(content_type));
+    result.insert("boundary".to_string(), VmValue::string(boundary));
+    result.insert("content_type".to_string(), VmValue::string(content_type));
     result.insert("body".to_string(), bytes_value(body));
     Ok(dict_value(result))
 }
@@ -784,7 +780,7 @@ mod tests {
     use super::*;
 
     fn s(value: &str) -> VmValue {
-        string_value(value)
+        VmValue::string(value)
     }
 
     fn b(value: &[u8]) -> VmValue {

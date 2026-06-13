@@ -1,3 +1,4 @@
+use crate::value::VmDictExt;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -482,10 +483,7 @@ fn result_value(
         "retry_after_ms".to_string(),
         VmValue::Int(u64_to_i64(retry_after_ms)),
     );
-    dict.insert(
-        "state_path".to_string(),
-        VmValue::String(Arc::from(state_path.to_string_lossy().into_owned())),
-    );
+    dict.put_str("state_path", state_path.to_string_lossy());
     dict.insert("buckets".to_string(), bucket_list_value(buckets));
     VmValue::Dict(Arc::new(dict))
 }

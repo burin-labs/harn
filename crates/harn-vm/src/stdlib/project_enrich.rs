@@ -1,3 +1,4 @@
+use crate::value::VmDictExt;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -1484,24 +1485,15 @@ fn enrichment_bindings(
     files: &[RelevantFile],
 ) -> BTreeMap<String, VmValue> {
     let mut bindings = BTreeMap::new();
-    bindings.insert(
-        "path".to_string(),
-        VmValue::String(std::sync::Arc::from(root.to_string_lossy().into_owned())),
-    );
+    bindings.put_str("path", root.to_string_lossy());
     bindings.insert("base_evidence".to_string(), base_evidence.clone());
     bindings.insert("evidence".to_string(), base_evidence.clone());
     let file_values = files
         .iter()
         .map(|file| {
             let mut value = BTreeMap::new();
-            value.insert(
-                "path".to_string(),
-                VmValue::String(std::sync::Arc::from(file.rel_path.clone())),
-            );
-            value.insert(
-                "content".to_string(),
-                VmValue::String(std::sync::Arc::from(file.content.clone())),
-            );
+            value.put_str("path", file.rel_path.clone());
+            value.put_str("content", file.content.clone());
             value.insert("truncated".to_string(), VmValue::Bool(file.truncated));
             VmValue::Dict(std::sync::Arc::new(value))
         })
@@ -1520,30 +1512,18 @@ fn enrichment_bindings(
 
 fn llm_options_value(options: &ProjectEnrichOptions, rendered_prompt: &str) -> VmValue {
     let mut llm_options = BTreeMap::new();
-    llm_options.insert(
-        "provider".to_string(),
-        VmValue::String(std::sync::Arc::from(options.provider.clone())),
-    );
-    llm_options.insert(
-        "model".to_string(),
-        VmValue::String(std::sync::Arc::from(options.model.clone())),
-    );
+    llm_options.put_str("provider", options.provider.clone());
+    llm_options.put_str("model", options.model.clone());
     if let Some(temperature) = options.temperature {
         llm_options.insert("temperature".to_string(), VmValue::Float(temperature));
     }
     llm_options.insert("output_schema".to_string(), options.schema.clone());
-    llm_options.insert(
-        "output_validation".to_string(),
-        VmValue::String(std::sync::Arc::from("error")),
-    );
+    llm_options.put_str("output_validation", "error");
     llm_options.insert(
         "schema_retries".to_string(),
         VmValue::Int(options.schema_retries as i64),
     );
-    llm_options.insert(
-        "response_format".to_string(),
-        VmValue::String(std::sync::Arc::from("json")),
-    );
+    llm_options.put_str("response_format", "json");
     llm_options.insert(
         "messages".to_string(),
         VmValue::List(std::sync::Arc::new(vec![json_to_vm_value(
@@ -1565,10 +1545,7 @@ fn validation_envelope(
 ) -> VmValue {
     let mut dict = BTreeMap::new();
     dict.insert("base_evidence".to_string(), base_evidence.clone());
-    dict.insert(
-        "validation_error".to_string(),
-        VmValue::String(std::sync::Arc::from(message)),
-    );
+    dict.put_str("validation_error", message);
     dict.insert(
         "_provenance".to_string(),
         provenance_value(model, input_tokens, output_tokens, false),

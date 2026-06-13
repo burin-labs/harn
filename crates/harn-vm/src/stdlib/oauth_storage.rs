@@ -210,8 +210,8 @@ fn memory_handle() -> VmValue {
         format!("memory-{}", *guard)
     };
     let mut fields = BTreeMap::new();
-    fields.insert(HANDLE_KEY_KIND.to_string(), string_value(KIND_MEMORY));
-    fields.insert(HANDLE_KEY_ID.to_string(), string_value(&id));
+    fields.insert(HANDLE_KEY_KIND.to_string(), VmValue::string(KIND_MEMORY));
+    fields.insert(HANDLE_KEY_ID.to_string(), VmValue::string(&id));
     VmValue::Dict(std::sync::Arc::new(fields))
 }
 
@@ -226,9 +226,9 @@ fn file_handle(path: &str, secret: &[u8]) -> VmValue {
         secrets.borrow_mut().insert(id.clone(), secret.to_vec());
     });
     let mut fields = BTreeMap::new();
-    fields.insert(HANDLE_KEY_KIND.to_string(), string_value(KIND_FILE));
-    fields.insert(HANDLE_KEY_ID.to_string(), string_value(&id));
-    fields.insert(HANDLE_KEY_PATH.to_string(), string_value(path));
+    fields.insert(HANDLE_KEY_KIND.to_string(), VmValue::string(KIND_FILE));
+    fields.insert(HANDLE_KEY_ID.to_string(), VmValue::string(&id));
+    fields.insert(HANDLE_KEY_PATH.to_string(), VmValue::string(path));
     VmValue::Dict(std::sync::Arc::new(fields))
 }
 
@@ -239,14 +239,10 @@ fn cloud_handle(kind: &'static str) -> VmValue {
         "session"
     };
     let mut fields = BTreeMap::new();
-    fields.insert(HANDLE_KEY_KIND.to_string(), string_value(kind));
-    fields.insert(HANDLE_KEY_ID.to_string(), string_value(kind));
-    fields.insert(HANDLE_KEY_SCOPE.to_string(), string_value(scope));
+    fields.insert(HANDLE_KEY_KIND.to_string(), VmValue::string(kind));
+    fields.insert(HANDLE_KEY_ID.to_string(), VmValue::string(kind));
+    fields.insert(HANDLE_KEY_SCOPE.to_string(), VmValue::string(scope));
     VmValue::Dict(std::sync::Arc::new(fields))
-}
-
-fn string_value(value: &str) -> VmValue {
-    VmValue::String(std::sync::Arc::from(value))
 }
 
 fn handle_kind(handle: &BTreeMap<String, VmValue>) -> Result<String, VmError> {
@@ -608,8 +604,8 @@ fn cloud_scope(handle: &BTreeMap<String, VmValue>) -> Result<String, VmError> {
 async fn cloud_get(handle: &BTreeMap<String, VmValue>, key: &str) -> Result<VmValue, VmError> {
     let scope = cloud_scope(handle)?;
     let mut params = BTreeMap::new();
-    params.insert("scope".to_string(), string_value(&scope));
-    params.insert("key".to_string(), string_value(key));
+    params.insert("scope".to_string(), VmValue::string(&scope));
+    params.insert("key".to_string(), VmValue::string(key));
     dispatch_host_operation("oauth_storage", "cloud_get", &params).await
 }
 
@@ -621,8 +617,8 @@ async fn cloud_set(
 ) -> Result<(), VmError> {
     let scope = cloud_scope(handle)?;
     let mut params = BTreeMap::new();
-    params.insert("scope".to_string(), string_value(&scope));
-    params.insert("key".to_string(), string_value(key));
+    params.insert("scope".to_string(), VmValue::string(&scope));
+    params.insert("key".to_string(), VmValue::string(key));
     params.insert("token".to_string(), json_to_vm_dict(&token));
     if let Some(ttl) = ttl_seconds {
         params.insert("ttl_seconds".to_string(), VmValue::Int(ttl));
@@ -634,8 +630,8 @@ async fn cloud_set(
 async fn cloud_delete(handle: &BTreeMap<String, VmValue>, key: &str) -> Result<(), VmError> {
     let scope = cloud_scope(handle)?;
     let mut params = BTreeMap::new();
-    params.insert("scope".to_string(), string_value(&scope));
-    params.insert("key".to_string(), string_value(key));
+    params.insert("scope".to_string(), VmValue::string(&scope));
+    params.insert("key".to_string(), VmValue::string(key));
     dispatch_host_operation("oauth_storage", "cloud_delete", &params).await?;
     Ok(())
 }
@@ -755,7 +751,7 @@ mod tests {
 
     fn token_dict(access: &str) -> BTreeMap<String, VmValue> {
         let mut dict = BTreeMap::new();
-        dict.insert("access_token".to_string(), string_value(access));
+        dict.insert("access_token".to_string(), VmValue::string(access));
         dict
     }
 
@@ -772,7 +768,7 @@ mod tests {
             .get("access_token")
             .unwrap_or_else(|| panic!("missing access_token field"));
         assert!(
-            values_equal(access, &string_value(expected)),
+            values_equal(access, &VmValue::string(expected)),
             "expected access_token=`{expected}`, got {access:?}"
         );
     }

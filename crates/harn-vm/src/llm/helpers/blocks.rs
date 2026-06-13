@@ -1,3 +1,4 @@
+use crate::value::VmDictExt;
 use std::collections::BTreeMap;
 
 use crate::value::VmValue;
@@ -48,16 +49,10 @@ fn normalize_transcript_block(block: &VmValue, default_visibility: &str) -> VmVa
         )])
     });
     if !normalized.contains_key("type") {
-        normalized.insert(
-            "type".to_string(),
-            VmValue::String(std::sync::Arc::from("text")),
-        );
+        normalized.put_str("type", "text");
     }
     if !normalized.contains_key("visibility") {
-        normalized.insert(
-            "visibility".to_string(),
-            VmValue::String(std::sync::Arc::from(default_visibility)),
-        );
+        normalized.put_str("visibility", default_visibility);
     }
     VmValue::Dict(std::sync::Arc::new(normalized))
 }

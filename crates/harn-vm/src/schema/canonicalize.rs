@@ -1,3 +1,4 @@
+use crate::value::VmDictExt;
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::value::VmValue;
@@ -224,10 +225,7 @@ fn canonicalize_schema_dict(
     match schema.get("type") {
         Some(VmValue::String(type_name)) => {
             let normalized_type = normalize_type_name(type_name);
-            out.insert(
-                "type".to_string(),
-                VmValue::String(std::sync::Arc::from(normalized_type.as_str())),
-            );
+            out.put_str("type", normalized_type.as_str());
         }
         Some(VmValue::List(type_names)) => {
             let union = type_names
@@ -235,10 +233,7 @@ fn canonicalize_schema_dict(
                 .map(|item| {
                     let type_name = normalize_type_name(&item.display());
                     let mut branch = BTreeMap::new();
-                    branch.insert(
-                        "type".to_string(),
-                        VmValue::String(std::sync::Arc::from(type_name.as_str())),
-                    );
+                    branch.put_str("type", type_name.as_str());
                     VmValue::Dict(std::sync::Arc::new(branch))
                 })
                 .collect::<Vec<_>>();
@@ -251,10 +246,7 @@ fn canonicalize_schema_dict(
     }
 
     if out.get("x-harn-type").map(|v| v.display()) == Some("set".to_string()) {
-        out.insert(
-            "type".to_string(),
-            VmValue::String(std::sync::Arc::from("set")),
-        );
+        out.put_str("type", "set");
     }
 
     Ok(out)

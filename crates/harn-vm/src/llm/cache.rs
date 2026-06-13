@@ -1,5 +1,6 @@
 //! Persistent cache primitives used by `std/cache` and LLM wrappers.
 
+use crate::value::VmDictExt;
 use std::cell::RefCell;
 use std::collections::{BTreeMap, VecDeque};
 use std::path::{Path, PathBuf};
@@ -101,14 +102,8 @@ const CACHE_BUILTINS: &[&VmBuiltinDef] = &[
 
 fn cache_envelope_base(options: &CacheOptions) -> BTreeMap<String, VmValue> {
     let mut envelope = BTreeMap::new();
-    envelope.insert(
-        "backend".to_string(),
-        VmValue::String(std::sync::Arc::from(options.backend.name())),
-    );
-    envelope.insert(
-        "namespace".to_string(),
-        VmValue::String(std::sync::Arc::from(options.namespace.clone())),
-    );
+    envelope.put_str("backend", options.backend.name());
+    envelope.put_str("namespace", options.namespace.clone());
     envelope
 }
 
@@ -151,10 +146,7 @@ fn cache_put_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmE
 
     let mut envelope = cache_envelope_base(&options);
     envelope.insert("stored".to_string(), VmValue::Bool(true));
-    envelope.insert(
-        "key".to_string(),
-        VmValue::String(std::sync::Arc::from(key)),
-    );
+    envelope.put_str("key", key);
     Ok(VmValue::Dict(std::sync::Arc::new(envelope)))
 }
 

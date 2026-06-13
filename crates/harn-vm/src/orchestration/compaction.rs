@@ -1,5 +1,6 @@
 //! Auto-compaction — transcript size management strategies.
 
+use crate::value::VmDictExt;
 use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
@@ -196,22 +197,13 @@ pub fn compaction_policy_option_keys() -> &'static [&'static str] {
 pub fn compaction_policy_to_vm_value(policy: &CompactionPolicy) -> VmValue {
     let mut map = BTreeMap::new();
     if let Some(instructions) = policy.instructions.as_ref() {
-        map.insert(
-            "instructions".to_string(),
-            VmValue::String(std::sync::Arc::from(instructions.clone())),
-        );
+        map.put_str("instructions", instructions.clone());
     }
     if let Some(mode) = policy.mode.as_ref() {
-        map.insert(
-            "mode".to_string(),
-            VmValue::String(std::sync::Arc::from(mode.clone())),
-        );
+        map.put_str("mode", mode.clone());
     }
     if let Some(scope) = policy.scope.as_ref() {
-        map.insert(
-            "scope".to_string(),
-            VmValue::String(std::sync::Arc::from(scope.clone())),
-        );
+        map.put_str("scope", scope.clone());
     }
     map.insert(
         "preserve".to_string(),
@@ -240,10 +232,7 @@ pub fn compaction_policy_to_vm_value(policy: &CompactionPolicy) -> VmValue {
         );
     }
     if let Some(author) = policy.author.as_ref() {
-        map.insert(
-            "author".to_string(),
-            VmValue::String(std::sync::Arc::from(author.clone())),
-        );
+        map.put_str("author", author.clone());
     }
     VmValue::Dict(std::sync::Arc::new(map))
 }
@@ -862,10 +851,7 @@ fn render_llm_compaction_prompt(
         return render_replacement_compaction_prompt(policy, formatted, archived_count);
     }
     let mut bindings = BTreeMap::new();
-    bindings.insert(
-        "formatted_messages".to_string(),
-        VmValue::String(std::sync::Arc::from(formatted.to_string())),
-    );
+    bindings.put_str("formatted_messages", formatted);
     bindings.insert(
         "archived_count".to_string(),
         VmValue::Int(archived_count as i64),
@@ -892,14 +878,8 @@ fn render_replacement_compaction_prompt(
 ) -> Result<String, VmError> {
     let directives = policy.prompt_directives().unwrap_or_default();
     let mut bindings = BTreeMap::new();
-    bindings.insert(
-        "directives".to_string(),
-        VmValue::String(std::sync::Arc::from(directives)),
-    );
-    bindings.insert(
-        "formatted_messages".to_string(),
-        VmValue::String(std::sync::Arc::from(formatted.to_string())),
-    );
+    bindings.put_str("directives", directives);
+    bindings.put_str("formatted_messages", formatted);
     bindings.insert(
         "archived_count".to_string(),
         VmValue::Int(archived_count as i64),

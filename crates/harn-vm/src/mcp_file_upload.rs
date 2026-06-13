@@ -4,6 +4,7 @@
 //! https://github.com/modelcontextprotocol/modelcontextprotocol/pull/2356.
 //! This should be revisited when the MCP proposal is ratified.
 
+use crate::value::VmDictExt;
 use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::io::Read;
@@ -139,14 +140,8 @@ fn status_value() -> VmValue {
             VmValue::Nil
         },
     );
-    file_upload.insert(
-        "proposal_url".to_string(),
-        VmValue::String(std::sync::Arc::from(SPEC_URL)),
-    );
-    file_upload.insert(
-        "wire_format".to_string(),
-        VmValue::String(std::sync::Arc::from("x-mcp-file+rfc2397-data-uri")),
-    );
+    file_upload.put_str("proposal_url", SPEC_URL);
+    file_upload.put_str("wire_format", "x-mcp-file+rfc2397-data-uri");
 
     let mut experimental = BTreeMap::new();
     experimental.insert(
@@ -208,29 +203,17 @@ fn file_input_schema(options: &VmValue) -> Result<VmValue, VmError> {
     }
 
     let mut schema = BTreeMap::new();
-    schema.insert(
-        "type".to_string(),
-        VmValue::String(std::sync::Arc::from("string")),
-    );
-    schema.insert(
-        "format".to_string(),
-        VmValue::String(std::sync::Arc::from("uri")),
-    );
+    schema.put_str("type", "string");
+    schema.put_str("format", "uri");
     schema.insert(
         X_MCP_FILE.to_string(),
         VmValue::Dict(std::sync::Arc::new(descriptor)),
     );
     if let Some(title) = options.and_then(|opts| string_field(opts, "title")) {
-        schema.insert(
-            "title".to_string(),
-            VmValue::String(std::sync::Arc::from(title)),
-        );
+        schema.put_str("title", title);
     }
     if let Some(description) = options.and_then(|opts| string_field(opts, "description")) {
-        schema.insert(
-            "description".to_string(),
-            VmValue::String(std::sync::Arc::from(description)),
-        );
+        schema.put_str("description", description);
     }
     Ok(VmValue::Dict(std::sync::Arc::new(schema)))
 }

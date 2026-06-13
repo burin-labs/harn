@@ -10,6 +10,7 @@
 //! `cancelled: false` means the handle was not found — either it already
 //! completed or the id was invalid.
 
+use harn_vm::VmDictExt;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::time::Duration;
@@ -37,10 +38,7 @@ pub(crate) fn handle(args: &[VmValue]) -> Result<VmValue, HostlibError> {
     let cancelled = outcome.cancelled || harn_vm::cancel_long_running_handle(&handle_id);
 
     let mut out = BTreeMap::new();
-    out.insert(
-        "handle_id".to_string(),
-        VmValue::String(Arc::from(handle_id)),
-    );
+    out.put_str("handle_id", handle_id);
     out.insert("cancelled".to_string(), VmValue::Bool(cancelled));
     if let Some(result) = outcome.result {
         out.insert("result".to_string(), result);

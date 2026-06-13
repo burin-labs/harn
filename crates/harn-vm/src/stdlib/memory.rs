@@ -12,6 +12,7 @@
 //! responsible for the model choice, rate limiting, and cost accounting.
 //! See `docs/src/host-boundary.md` and `docs/src/memory.md`.
 
+use crate::value::VmDictExt;
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fs::{self, OpenOptions};
@@ -920,14 +921,8 @@ async fn ensure_embedding(
         return Ok(cached.vector);
     }
     let mut params = BTreeMap::new();
-    params.insert(
-        "text".to_string(),
-        VmValue::String(std::sync::Arc::from(text)),
-    );
-    params.insert(
-        "model_hint".to_string(),
-        VmValue::String(std::sync::Arc::from(hint.to_string())),
-    );
+    params.put_str("text", text);
+    params.put_str("model_hint", hint);
     let result = dispatch_host_operation("memory", "embed", &params).await?;
     let cached = parse_embedding_response(result, hint)?;
     write_cached_embedding(&path, &cached)?;
@@ -1277,30 +1272,15 @@ fn values_as_strings(value: &VmValue) -> Vec<String> {
 
 fn memory_record_to_vm(record: &MemoryRecord, score: Option<f64>) -> VmValue {
     let mut map = BTreeMap::new();
-    map.insert(
-        "_type".to_string(),
-        VmValue::String(std::sync::Arc::from(MEMORY_TYPE)),
-    );
-    map.insert(
-        "id".to_string(),
-        VmValue::String(std::sync::Arc::from(record.id.as_str())),
-    );
-    map.insert(
-        "namespace".to_string(),
-        VmValue::String(std::sync::Arc::from(record.namespace.as_str())),
-    );
-    map.insert(
-        "key".to_string(),
-        VmValue::String(std::sync::Arc::from(record.key.as_str())),
-    );
+    map.put_str("_type", MEMORY_TYPE);
+    map.put_str("id", record.id.as_str());
+    map.put_str("namespace", record.namespace.as_str());
+    map.put_str("key", record.key.as_str());
     map.insert(
         "value".to_string(),
         crate::stdlib::json_to_vm_value(&record.value),
     );
-    map.insert(
-        "text".to_string(),
-        VmValue::String(std::sync::Arc::from(record.text.as_str())),
-    );
+    map.put_str("text", record.text.as_str());
     map.insert(
         "tags".to_string(),
         VmValue::List(std::sync::Arc::new(
@@ -1311,10 +1291,7 @@ fn memory_record_to_vm(record: &MemoryRecord, score: Option<f64>) -> VmValue {
                 .collect(),
         )),
     );
-    map.insert(
-        "stored_at".to_string(),
-        VmValue::String(std::sync::Arc::from(record.stored_at.as_str())),
-    );
+    map.put_str("stored_at", record.stored_at.as_str());
     map.insert(
         "provenance".to_string(),
         record
@@ -1344,19 +1321,10 @@ fn summary_to_vm(namespace: &str, records: Vec<MemoryRecord>) -> VmValue {
         text.push_str(&line);
     }
     let mut map = BTreeMap::new();
-    map.insert(
-        "_type".to_string(),
-        VmValue::String(std::sync::Arc::from("memory_summary")),
-    );
-    map.insert(
-        "namespace".to_string(),
-        VmValue::String(std::sync::Arc::from(namespace.to_string())),
-    );
+    map.put_str("_type", "memory_summary");
+    map.put_str("namespace", namespace);
     map.insert("count".to_string(), VmValue::Int(records.len() as i64));
-    map.insert(
-        "text".to_string(),
-        VmValue::String(std::sync::Arc::from(text)),
-    );
+    map.put_str("text", text);
     map.insert(
         "records".to_string(),
         VmValue::List(std::sync::Arc::new(
@@ -1371,18 +1339,9 @@ fn summary_to_vm(namespace: &str, records: Vec<MemoryRecord>) -> VmValue {
 
 fn forget_result_to_vm(event: &ForgetEvent) -> VmValue {
     let mut map = BTreeMap::new();
-    map.insert(
-        "_type".to_string(),
-        VmValue::String(std::sync::Arc::from("memory_forget")),
-    );
-    map.insert(
-        "id".to_string(),
-        VmValue::String(std::sync::Arc::from(event.id.as_str())),
-    );
-    map.insert(
-        "namespace".to_string(),
-        VmValue::String(std::sync::Arc::from(event.namespace.as_str())),
-    );
+    map.put_str("_type", "memory_forget");
+    map.put_str("id", event.id.as_str());
+    map.put_str("namespace", event.namespace.as_str());
     map.insert(
         "forgotten".to_string(),
         VmValue::Int(event.forgotten_ids.len() as i64),
@@ -1397,36 +1356,21 @@ fn forget_result_to_vm(event: &ForgetEvent) -> VmValue {
                 .collect(),
         )),
     );
-    map.insert(
-        "forgotten_at".to_string(),
-        VmValue::String(std::sync::Arc::from(event.forgotten_at.as_str())),
-    );
+    map.put_str("forgotten_at", event.forgotten_at.as_str());
     VmValue::Dict(std::sync::Arc::new(map))
 }
 
 fn memory_open_to_vm(event: &OpenEvent) -> VmValue {
     let mut map = BTreeMap::new();
-    map.insert(
-        "_type".to_string(),
-        VmValue::String(std::sync::Arc::from("memory_open")),
-    );
-    map.insert(
-        "id".to_string(),
-        VmValue::String(std::sync::Arc::from(event.id.as_str())),
-    );
-    map.insert(
-        "namespace".to_string(),
-        VmValue::String(std::sync::Arc::from(event.namespace.as_str())),
-    );
+    map.put_str("_type", "memory_open");
+    map.put_str("id", event.id.as_str());
+    map.put_str("namespace", event.namespace.as_str());
     let backend = match event.backend {
         MemoryBackend::Bm25 => "bm25",
         MemoryBackend::Vector => "vector",
         MemoryBackend::Hybrid => "hybrid",
     };
-    map.insert(
-        "backend".to_string(),
-        VmValue::String(std::sync::Arc::from(backend)),
-    );
+    map.put_str("backend", backend);
     map.insert(
         "embed_model_hint".to_string(),
         event
@@ -1456,10 +1400,7 @@ fn memory_open_to_vm(event: &OpenEvent) -> VmValue {
             .map(VmValue::Float)
             .unwrap_or(VmValue::Nil),
     );
-    map.insert(
-        "opened_at".to_string(),
-        VmValue::String(std::sync::Arc::from(event.opened_at.as_str())),
-    );
+    map.put_str("opened_at", event.opened_at.as_str());
     VmValue::Dict(std::sync::Arc::new(map))
 }
 
@@ -1474,6 +1415,7 @@ fn now_rfc3339() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::value::VmDictExt;
 
     fn temp_root(name: &str) -> PathBuf {
         let root =
@@ -1624,10 +1566,7 @@ mod tests {
             ])),
         );
         dict.insert("dim".to_string(), VmValue::Int(3));
-        dict.insert(
-            "model".to_string(),
-            VmValue::String(std::sync::Arc::from("test-model")),
-        );
+        dict.put_str("model", "test-model");
         let value = VmValue::Dict(std::sync::Arc::new(dict));
         let parsed = parse_embedding_response(value, "fallback").unwrap();
         assert_eq!(parsed.dim, 3);

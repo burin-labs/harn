@@ -4,20 +4,15 @@ use crate::agent_events::{
     AgentEventSink,
 };
 use crate::event_log::{active_event_log, EventLog, Topic};
+use crate::value::VmDictExt;
 use futures::StreamExt as _;
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 
 fn make_msg(role: &str, content: &str) -> VmValue {
     let mut m: BTreeMap<String, VmValue> = BTreeMap::new();
-    m.insert(
-        "role".to_string(),
-        VmValue::String(std::sync::Arc::from(role)),
-    );
-    m.insert(
-        "content".to_string(),
-        VmValue::String(std::sync::Arc::from(content)),
-    );
+    m.put_str("role", role);
+    m.put_str("content", content);
     VmValue::Dict(std::sync::Arc::new(m))
 }
 
@@ -705,18 +700,9 @@ fn inject_identified_user_message_emits_replayable_user_event() {
     register_sink(&id, Arc::new(CapturingSink(captured.clone())));
 
     let mut message = BTreeMap::new();
-    message.insert(
-        "role".to_string(),
-        VmValue::String(std::sync::Arc::from("user")),
-    );
-    message.insert(
-        "content".to_string(),
-        VmValue::String(std::sync::Arc::from("queued follow-up")),
-    );
-    message.insert(
-        "messageId".to_string(),
-        VmValue::String(std::sync::Arc::from("msg_inj_test")),
-    );
+    message.put_str("role", "user");
+    message.put_str("content", "queued follow-up");
+    message.put_str("messageId", "msg_inj_test");
     inject_message(&id, VmValue::Dict(std::sync::Arc::new(message))).unwrap();
 
     let events = captured.lock().expect("capture sink poisoned");

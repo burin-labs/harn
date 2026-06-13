@@ -260,36 +260,32 @@ fn normalize_read_line_value(mut line: String, trim: bool) -> String {
     }
 }
 
-fn vm_string(value: impl Into<String>) -> VmValue {
-    VmValue::String(std::sync::Arc::from(value.into()))
-}
-
 fn read_line_result(outcome: ReadLineOutcome) -> VmValue {
     let mut out = BTreeMap::new();
     match outcome {
         ReadLineOutcome::Ok(value) => {
             out.insert("ok".to_string(), VmValue::Bool(true));
-            out.insert("status".to_string(), vm_string("ok"));
-            out.insert("value".to_string(), vm_string(value));
+            out.insert("status".to_string(), VmValue::string("ok"));
+            out.insert("value".to_string(), VmValue::string(value));
         }
         ReadLineOutcome::Eof => {
             out.insert("ok".to_string(), VmValue::Bool(false));
-            out.insert("status".to_string(), vm_string("eof"));
+            out.insert("status".to_string(), VmValue::string("eof"));
         }
         #[cfg(unix)]
         ReadLineOutcome::Timeout => {
             out.insert("ok".to_string(), VmValue::Bool(false));
-            out.insert("status".to_string(), vm_string("timeout"));
+            out.insert("status".to_string(), VmValue::string("timeout"));
         }
         #[cfg(unix)]
         ReadLineOutcome::Interrupt => {
             out.insert("ok".to_string(), VmValue::Bool(false));
-            out.insert("status".to_string(), vm_string("interrupt"));
+            out.insert("status".to_string(), VmValue::string("interrupt"));
         }
         ReadLineOutcome::Error(error) => {
             out.insert("ok".to_string(), VmValue::Bool(false));
-            out.insert("status".to_string(), vm_string("error"));
-            out.insert("error".to_string(), vm_string(error));
+            out.insert("status".to_string(), VmValue::string("error"));
+            out.insert("error".to_string(), VmValue::string(error));
         }
     }
     VmValue::Dict(std::sync::Arc::new(out))
@@ -1202,6 +1198,7 @@ fn ansi_colorize(text: &str, name: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+    use crate::value::VmDictExt;
     use std::collections::BTreeMap;
 
     use crate::value::VmValue;
@@ -1228,10 +1225,7 @@ mod tests {
     #[test]
     fn progress_bar_mode_renders_hash_bar() {
         let mut options = BTreeMap::new();
-        options.insert(
-            "mode".to_string(),
-            VmValue::String(std::sync::Arc::from("bar")),
-        );
+        options.put_str("mode", "bar");
         options.insert("current".to_string(), VmValue::Int(3));
         options.insert("total".to_string(), VmValue::Int(5));
         options.insert("width".to_string(), VmValue::Int(10));
@@ -1248,10 +1242,7 @@ mod tests {
     #[test]
     fn progress_spinner_mode_uses_step_to_pick_frame() {
         let mut options = BTreeMap::new();
-        options.insert(
-            "mode".to_string(),
-            VmValue::String(std::sync::Arc::from("spinner")),
-        );
+        options.put_str("mode", "spinner");
         options.insert("step".to_string(), VmValue::Int(2));
 
         let line = render_progress_line(&[
@@ -1272,10 +1263,7 @@ mod tests {
     #[test]
     fn read_line_options_preserve_prompt_whitespace() {
         let mut options = BTreeMap::new();
-        options.insert(
-            "prompt".to_string(),
-            VmValue::String(std::sync::Arc::from("  > ")),
-        );
+        options.put_str("prompt", "  > ");
         options.insert("trim".to_string(), VmValue::Bool(false));
 
         let parsed =
@@ -1288,10 +1276,7 @@ mod tests {
     #[test]
     fn read_line_options_reject_unknown_keys() {
         let mut options = BTreeMap::new();
-        options.insert(
-            "promtp".to_string(),
-            VmValue::String(std::sync::Arc::from("> ")),
-        );
+        options.put_str("promtp", "> ");
 
         let err = super::parse_read_line_options(&[VmValue::Dict(std::sync::Arc::new(options))])
             .unwrap_err();

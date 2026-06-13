@@ -36,6 +36,7 @@
 //! handling, and the matching engine runs as a single linear sweep over
 //! catalogues × rules (TH-01 acceptance criterion).
 
+use crate::value::VmDictExt;
 use std::cell::RefCell;
 use std::collections::BTreeMap;
 
@@ -229,14 +230,8 @@ fn validate_rule_dict(
     let _ = optional_int_field(config, "priority", builtin)?;
 
     let mut rule = BTreeMap::new();
-    rule.insert(
-        "_type".to_string(),
-        VmValue::String(std::sync::Arc::from(TOOL_RULE_TYPE)),
-    );
-    rule.insert(
-        "id".to_string(),
-        VmValue::String(std::sync::Arc::from(id.as_str())),
-    );
+    rule.put_str("_type", TOOL_RULE_TYPE);
+    rule.put_str("id", id.as_str());
     rule.insert("pattern".to_string(), pattern.clone());
     rule.insert(
         "applies_to".to_string(),
@@ -247,10 +242,7 @@ fn validate_rule_dict(
                 .collect(),
         )),
     );
-    rule.insert(
-        "severity".to_string(),
-        VmValue::String(std::sync::Arc::from(severity.as_str())),
-    );
+    rule.put_str("severity", severity.as_str());
     rule.insert(
         "rewrite".to_string(),
         config.get("rewrite").cloned().unwrap_or(VmValue::Nil),
@@ -338,26 +330,11 @@ fn build_catalogue(config: &BTreeMap<String, VmValue>) -> Result<VmValue, VmErro
     let rules = extract_rules(config.get("rules"), builtin)?;
 
     let mut catalogue = BTreeMap::new();
-    catalogue.insert(
-        "_type".to_string(),
-        VmValue::String(std::sync::Arc::from(CATALOGUE_TYPE)),
-    );
-    catalogue.insert(
-        "id".to_string(),
-        VmValue::String(std::sync::Arc::from(id.as_str())),
-    );
-    catalogue.insert(
-        "stack".to_string(),
-        VmValue::String(std::sync::Arc::from(stack.as_str())),
-    );
-    catalogue.insert(
-        "version".to_string(),
-        VmValue::String(std::sync::Arc::from(version.as_str())),
-    );
-    catalogue.insert(
-        "source".to_string(),
-        VmValue::String(std::sync::Arc::from(source.as_str())),
-    );
+    catalogue.put_str("_type", CATALOGUE_TYPE);
+    catalogue.put_str("id", id.as_str());
+    catalogue.put_str("stack", stack.as_str());
+    catalogue.put_str("version", version.as_str());
+    catalogue.put_str("source", source.as_str());
     catalogue.insert("priority".to_string(), VmValue::Int(priority));
     catalogue.insert(
         "rules".to_string(),
@@ -497,14 +474,8 @@ fn make_match_record(
     let mut out = BTreeMap::new();
     out.insert("catalogue_id".to_string(), catalogue_id);
     out.insert("stack".to_string(), stack);
-    out.insert(
-        "rule_id".to_string(),
-        VmValue::String(std::sync::Arc::from(rule_id(rule).as_str())),
-    );
-    out.insert(
-        "severity".to_string(),
-        VmValue::String(std::sync::Arc::from(rule_severity(rule).as_str())),
-    );
+    out.put_str("rule_id", rule_id(rule).as_str());
+    out.put_str("severity", rule_severity(rule).as_str());
     out.insert(
         "explanation".to_string(),
         rule.get("explanation")
@@ -561,10 +532,7 @@ fn catalogue_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErro
 #[harn_builtin(sig = "tool_hooks_registry() -> dict", category = "tool_hooks")]
 fn tool_hooks_registry_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let mut registry = BTreeMap::new();
-    registry.insert(
-        "_type".to_string(),
-        VmValue::String(std::sync::Arc::from(REGISTRY_TYPE)),
-    );
+    registry.put_str("_type", REGISTRY_TYPE);
     registry.insert(
         "catalogues".to_string(),
         VmValue::List(std::sync::Arc::new(Vec::new())),
@@ -989,10 +957,7 @@ fn tool_hooks_inject_reminder_impl(
     crate::orchestration::record_lifecycle_audit("tool_hooks.reminder_injected", audit_payload);
 
     let mut out = BTreeMap::new();
-    out.insert(
-        "reminder_id".to_string(),
-        VmValue::String(std::sync::Arc::from(reminder_id.as_str())),
-    );
+    out.put_str("reminder_id", reminder_id.as_str());
     out.insert("deduped_count".to_string(), VmValue::Int(deduped_count));
     out.insert(
         "session_attached".to_string(),
@@ -1157,6 +1122,7 @@ fn classifier_cache_clear() {
 mod tests {
     use super::*;
     use crate::stdlib::register_vm_stdlib;
+    use crate::value::VmDictExt;
 
     fn vm_with_stdlib() -> Vm {
         let mut vm = Vm::new();
@@ -1172,51 +1138,28 @@ mod tests {
 
     fn sample_rule_config() -> VmValue {
         let mut config: BTreeMap<String, VmValue> = BTreeMap::new();
-        config.insert(
-            "id".to_string(),
-            VmValue::String(std::sync::Arc::from("rust.cargo.target_dir_conflict")),
-        );
-        config.insert(
-            "pattern".to_string(),
-            VmValue::String(std::sync::Arc::from(r"^cargo (build|test)\b")),
-        );
+        config.put_str("id", "rust.cargo.target_dir_conflict");
+        config.put_str("pattern", r"^cargo (build|test)\b");
         config.insert(
             "applies_to".to_string(),
             VmValue::List(std::sync::Arc::new(vec![VmValue::String(
                 std::sync::Arc::from("rust"),
             )])),
         );
-        config.insert(
-            "severity".to_string(),
-            VmValue::String(std::sync::Arc::from("warning")),
-        );
-        config.insert(
-            "explanation".to_string(),
-            VmValue::String(std::sync::Arc::from(
-                "Concurrent cargo runs without --target-dir thrash the lockfile",
-            )),
+        config.put_str("severity", "warning");
+        config.put_str(
+            "explanation",
+            "Concurrent cargo runs without --target-dir thrash the lockfile",
         );
         VmValue::Dict(std::sync::Arc::new(config))
     }
 
     fn sample_catalogue_config(rule: VmValue) -> VmValue {
         let mut config: BTreeMap<String, VmValue> = BTreeMap::new();
-        config.insert(
-            "id".to_string(),
-            VmValue::String(std::sync::Arc::from("harn-canon/rust")),
-        );
-        config.insert(
-            "stack".to_string(),
-            VmValue::String(std::sync::Arc::from("rust")),
-        );
-        config.insert(
-            "version".to_string(),
-            VmValue::String(std::sync::Arc::from("0.1.0")),
-        );
-        config.insert(
-            "source".to_string(),
-            VmValue::String(std::sync::Arc::from("harn-canon")),
-        );
+        config.put_str("id", "harn-canon/rust");
+        config.put_str("stack", "rust");
+        config.put_str("version", "0.1.0");
+        config.put_str("source", "harn-canon");
         config.insert(
             "rules".to_string(),
             VmValue::List(std::sync::Arc::new(vec![rule])),
@@ -1242,15 +1185,9 @@ mod tests {
     fn tool_rule_rejects_bad_severity() {
         let vm = vm_with_stdlib();
         let mut config: BTreeMap<String, VmValue> = BTreeMap::new();
-        config.insert("id".to_string(), VmValue::String(std::sync::Arc::from("r")));
-        config.insert(
-            "pattern".to_string(),
-            VmValue::String(std::sync::Arc::from(".")),
-        );
-        config.insert(
-            "severity".to_string(),
-            VmValue::String(std::sync::Arc::from("catastrophic")),
-        );
+        config.put_str("id", "r");
+        config.put_str("pattern", ".");
+        config.put_str("severity", "catastrophic");
         let result = call_sync(
             &vm,
             "tool_rule",
@@ -1263,11 +1200,8 @@ mod tests {
     fn tool_rule_rejects_invalid_regex() {
         let vm = vm_with_stdlib();
         let mut config: BTreeMap<String, VmValue> = BTreeMap::new();
-        config.insert("id".to_string(), VmValue::String(std::sync::Arc::from("r")));
-        config.insert(
-            "pattern".to_string(),
-            VmValue::String(std::sync::Arc::from("[invalid")),
-        );
+        config.put_str("id", "r");
+        config.put_str("pattern", "[invalid");
         let result = call_sync(
             &vm,
             "tool_rule",
@@ -1385,10 +1319,7 @@ mod tests {
         let rust_cat =
             call_sync(&vm, "catalogue", &[sample_catalogue_config(rule.clone())]).expect("cat");
         let mut shell_cfg: BTreeMap<String, VmValue> = BTreeMap::new();
-        shell_cfg.insert(
-            "id".to_string(),
-            VmValue::String(std::sync::Arc::from("harn-canon/shell")),
-        );
+        shell_cfg.put_str("id", "harn-canon/shell");
         // Stackless catalogue: matches every requested stack — universal rules.
         shell_cfg.insert(
             "rules".to_string(),
@@ -1401,14 +1332,8 @@ mod tests {
         )
         .expect("cat");
         let mut python_cfg: BTreeMap<String, VmValue> = BTreeMap::new();
-        python_cfg.insert(
-            "id".to_string(),
-            VmValue::String(std::sync::Arc::from("harn-canon/python")),
-        );
-        python_cfg.insert(
-            "stack".to_string(),
-            VmValue::String(std::sync::Arc::from("python")),
-        );
+        python_cfg.put_str("id", "harn-canon/python");
+        python_cfg.put_str("stack", "python");
         python_cfg.insert(
             "rules".to_string(),
             VmValue::List(std::sync::Arc::new(vec![rule])),
@@ -1491,23 +1416,14 @@ mod tests {
 
     fn audit_payload(rule_id: &str, command: &str) -> VmValue {
         let mut payload: BTreeMap<String, VmValue> = BTreeMap::new();
-        payload.insert(
-            "rule_id".to_string(),
-            VmValue::String(std::sync::Arc::from(rule_id)),
-        );
-        payload.insert(
-            "command".to_string(),
-            VmValue::String(std::sync::Arc::from(command)),
-        );
+        payload.put_str("rule_id", rule_id);
+        payload.put_str("command", command);
         VmValue::Dict(std::sync::Arc::new(payload))
     }
 
     fn reminder_options(body: &str, tag: &str, ttl: i64) -> VmValue {
         let mut options: BTreeMap<String, VmValue> = BTreeMap::new();
-        options.insert(
-            "body".to_string(),
-            VmValue::String(std::sync::Arc::from(body)),
-        );
+        options.put_str("body", body);
         options.insert(
             "tags".to_string(),
             VmValue::List(std::sync::Arc::new(vec![VmValue::String(
@@ -1616,10 +1532,7 @@ mod tests {
 
     fn verdict_value(kind: &str) -> VmValue {
         let mut dict: BTreeMap<String, VmValue> = BTreeMap::new();
-        dict.insert(
-            "kind".to_string(),
-            VmValue::String(std::sync::Arc::from(kind)),
-        );
+        dict.put_str("kind", kind);
         dict.insert("confidence".to_string(), VmValue::Float(0.9));
         VmValue::Dict(std::sync::Arc::new(dict))
     }

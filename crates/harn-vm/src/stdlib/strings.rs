@@ -1,4 +1,5 @@
 use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
+use crate::value::VmDictExt;
 use crate::value::{values_equal, VmError, VmValue};
 use crate::vm::Vm;
 use unicode_normalization::UnicodeNormalization;
@@ -165,18 +166,9 @@ fn provenance_result_dict(
 ) -> VmValue {
     let spans_list: Vec<VmValue> = spans.iter().map(span_to_vm_dict).collect();
     let mut out = std::collections::BTreeMap::new();
-    out.insert(
-        "text".to_string(),
-        VmValue::String(std::sync::Arc::from(rendered)),
-    );
-    out.insert(
-        "template_uri".to_string(),
-        VmValue::String(std::sync::Arc::from(template_uri)),
-    );
-    out.insert(
-        "prompt_id".to_string(),
-        VmValue::String(std::sync::Arc::from(prompt_id)),
-    );
+    out.put_str("text", rendered);
+    out.put_str("template_uri", template_uri);
+    out.put_str("prompt_id", prompt_id);
     out.insert(
         "spans".to_string(),
         VmValue::List(std::sync::Arc::new(spans_list)),

@@ -1,3 +1,4 @@
+use crate::value::VmDictExt;
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
@@ -56,34 +57,22 @@ impl super::super::Vm {
         output: Option<VmValue>,
     ) -> VmValue {
         let mut step = std::collections::BTreeMap::new();
-        step.insert(
-            "name".to_string(),
-            VmValue::String(std::sync::Arc::from(step_name)),
-        );
-        step.insert(
-            "function".to_string(),
-            VmValue::String(std::sync::Arc::from(function_name)),
-        );
+        step.put_str("name", step_name);
+        step.put_str("function", function_name);
         step.insert(
             "args".to_string(),
             VmValue::List(std::sync::Arc::new(args.to_vec())),
         );
         let mut payload = std::collections::BTreeMap::new();
-        payload.insert(
-            "event".to_string(),
-            VmValue::String(std::sync::Arc::from(event.as_str())),
-        );
-        payload.insert(
-            "target".to_string(),
-            VmValue::String(std::sync::Arc::from(match persona {
+        payload.put_str("event", event.as_str());
+        payload.put_str(
+            "target",
+            match persona {
                 Some(persona) if !persona.is_empty() => format!("{persona}.{step_name}"),
                 _ => step_name.to_string(),
-            })),
+            },
         );
-        payload.insert(
-            "persona".to_string(),
-            VmValue::String(std::sync::Arc::from(persona.unwrap_or(""))),
-        );
+        payload.put_str("persona", persona.unwrap_or(""));
         payload.insert("step".to_string(), VmValue::Dict(std::sync::Arc::new(step)));
         if let Some(output) = output {
             payload.insert("output".to_string(), output);

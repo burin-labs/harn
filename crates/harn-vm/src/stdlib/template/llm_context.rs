@@ -22,6 +22,7 @@
 //! push/pop pairs (e.g. an inner `llm_call` from a middleware handler)
 //! shadow the outer frame for the duration of the inner render.
 
+use crate::value::VmDictExt;
 use std::cell::RefCell;
 use std::collections::BTreeMap;
 
@@ -59,18 +60,9 @@ impl LlmRenderContext {
     /// `{provider, model, family, capabilities: <provider_capabilities dict>}`.
     pub fn to_vm_value(&self) -> VmValue {
         let mut dict = BTreeMap::new();
-        dict.insert(
-            "provider".to_string(),
-            VmValue::String(std::sync::Arc::from(self.provider.as_str())),
-        );
-        dict.insert(
-            "model".to_string(),
-            VmValue::String(std::sync::Arc::from(self.model.as_str())),
-        );
-        dict.insert(
-            "family".to_string(),
-            VmValue::String(std::sync::Arc::from(self.family.as_str())),
-        );
+        dict.put_str("provider", self.provider.as_str());
+        dict.put_str("model", self.model.as_str());
+        dict.put_str("family", self.family.as_str());
         dict.insert("capabilities".to_string(), self.capabilities.clone());
         VmValue::Dict(std::sync::Arc::new(dict))
     }

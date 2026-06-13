@@ -1,3 +1,4 @@
+use crate::value::VmDictExt;
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 
@@ -65,22 +66,10 @@ fn llm_stream_chunk(
     finish_reason: Option<&str>,
 ) -> VmValue {
     let mut dict = std::collections::BTreeMap::new();
-    dict.insert(
-        "delta".to_string(),
-        VmValue::String(std::sync::Arc::from(delta.to_string())),
-    );
-    dict.insert(
-        "visible_delta".to_string(),
-        VmValue::String(std::sync::Arc::from(visible_delta.to_string())),
-    );
-    dict.insert(
-        "partial".to_string(),
-        VmValue::String(std::sync::Arc::from(partial.to_string())),
-    );
-    dict.insert(
-        "role".to_string(),
-        VmValue::String(std::sync::Arc::from("assistant")),
-    );
+    dict.put_str("delta", delta);
+    dict.put_str("visible_delta", visible_delta);
+    dict.put_str("partial", partial);
+    dict.put_str("role", "assistant");
     dict.insert(
         "finish_reason".to_string(),
         finish_reason
@@ -201,6 +190,7 @@ pub(super) async fn llm_stream_call_impl(args: Vec<VmValue>) -> Result<VmValue, 
 
 #[cfg(test)]
 mod tests {
+    use crate::value::VmDictExt;
     use std::collections::BTreeMap;
     use std::sync::Arc;
     use std::time::Duration;
@@ -268,14 +258,8 @@ mod tests {
 
     fn fake_stream_args() -> Vec<VmValue> {
         let mut options = BTreeMap::new();
-        options.insert(
-            "provider".to_string(),
-            VmValue::String(Arc::from("fake".to_string())),
-        );
-        options.insert(
-            "model".to_string(),
-            VmValue::String(Arc::from("fake".to_string())),
-        );
+        options.put_str("provider", "fake");
+        options.put_str("model", "fake");
         vec![
             VmValue::String(Arc::from("hello".to_string())),
             VmValue::Nil,

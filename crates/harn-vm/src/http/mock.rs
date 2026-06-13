@@ -1,3 +1,4 @@
+use crate::value::VmDictExt;
 use std::cell::RefCell;
 use std::collections::BTreeMap;
 
@@ -145,17 +146,8 @@ pub(super) fn http_mock_calls_value(redact_sensitive: bool) -> Vec<VmValue> {
             .iter()
             .map(|call| {
                 let mut dict = BTreeMap::new();
-                dict.insert(
-                    "method".to_string(),
-                    VmValue::String(std::sync::Arc::from(call.method.as_str())),
-                );
-                dict.insert(
-                    "url".to_string(),
-                    VmValue::String(std::sync::Arc::from(redact_mock_call_url(
-                        &call.url,
-                        redact_sensitive,
-                    ))),
-                );
+                dict.put_str("method", call.method.as_str());
+                dict.put_str("url", redact_mock_call_url(&call.url, redact_sensitive));
                 dict.insert(
                     "headers".to_string(),
                     VmValue::Dict(std::sync::Arc::new(mock_call_headers_value(

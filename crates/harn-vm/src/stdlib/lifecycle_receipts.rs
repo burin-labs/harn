@@ -6,6 +6,7 @@
 //! between record and replay runs, that cached resume inputs survive a
 //! re-run, and that the signed timestamps reject tampered receipts.
 
+use crate::value::VmDictExt;
 use std::collections::BTreeMap;
 
 use serde_json::Value as JsonValue;
@@ -197,10 +198,7 @@ fn lifecycle_replay_drain_decision_impl(
         Ok(action) => Ok(VmValue::Dict(std::sync::Arc::new({
             let mut map = BTreeMap::new();
             map.insert("ok".to_string(), VmValue::Bool(true));
-            map.insert(
-                "action".to_string(),
-                VmValue::String(std::sync::Arc::from(drain_action_str(action))),
-            );
+            map.put_str("action", drain_action_str(action));
             map
         }))),
         Err(error) => Ok(error_value(error)),
@@ -479,10 +477,7 @@ fn verification_value(result: Result<(), LifecycleReceiptError>) -> VmValue {
         }
         Err(error) => {
             map.insert("verified".to_string(), VmValue::Bool(false));
-            map.insert(
-                "error".to_string(),
-                VmValue::String(std::sync::Arc::from(error.to_string())),
-            );
+            map.put_str("error", error.to_string());
         }
     }
     VmValue::Dict(std::sync::Arc::new(map))
@@ -491,10 +486,7 @@ fn verification_value(result: Result<(), LifecycleReceiptError>) -> VmValue {
 fn error_value(error: LifecycleReceiptError) -> VmValue {
     let mut map = BTreeMap::new();
     map.insert("ok".to_string(), VmValue::Bool(false));
-    map.insert(
-        "error".to_string(),
-        VmValue::String(std::sync::Arc::from(error.to_string())),
-    );
+    map.put_str("error", error.to_string());
     let code = match &error {
         LifecycleReceiptError::ResumeInputHashMismatch { .. } => "HARN-SUS-011",
         LifecycleReceiptError::DrainDecisionPromptHashMismatch { .. } => "HARN-SUS-012",
@@ -503,10 +495,7 @@ fn error_value(error: LifecycleReceiptError) -> VmValue {
         | LifecycleReceiptError::SignatureKeyMismatch { .. } => "HARN-SUS-013",
         LifecycleReceiptError::Persistence(_) => "HARN-SUS-013",
     };
-    map.insert(
-        "code".to_string(),
-        VmValue::String(std::sync::Arc::from(code)),
-    );
+    map.put_str("code", code);
     VmValue::Dict(std::sync::Arc::new(map))
 }
 

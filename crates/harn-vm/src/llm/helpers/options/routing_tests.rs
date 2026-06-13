@@ -1,5 +1,6 @@
 use super::extract::*;
 use super::*;
+use crate::value::VmDictExt;
 
 use crate::llm_config::{
     AliasDef, AuthEnv, ModelAvailability, ModelDef, ProviderDef, ProvidersConfig, TierRule,
@@ -148,10 +149,7 @@ fn install_equivalent_routes() {
 
 fn extract_with_policy(policy: &str) -> crate::llm::api::LlmCallOptions {
     let mut options = BTreeMap::new();
-    options.insert(
-        "route_policy".to_string(),
-        VmValue::String(std::sync::Arc::from(policy.to_string())),
-    );
+    options.put_str("route_policy", policy);
     options.insert(
         "fallback_chain".to_string(),
         VmValue::List(std::sync::Arc::new(vec![VmValue::String(
@@ -273,10 +271,7 @@ fn explicit_options_win_over_model_role_defaults() {
     super::super::reset_provider_key_cache();
 
     let mut options = model_role_options("merge");
-    options.insert(
-        "model".to_string(),
-        VmValue::String(std::sync::Arc::from("mock-explicit".to_string())),
-    );
+    options.put_str("model", "mock-explicit");
     options.insert("max_tokens".to_string(), VmValue::Int(512));
     let opts = extract_with_options(options).expect("options");
 
@@ -410,10 +405,7 @@ fn model_role_config_keys_normalize_like_call_options() {
 
 fn fast_options(model: &str) -> BTreeMap<String, VmValue> {
     let mut options = BTreeMap::new();
-    options.insert(
-        "model".to_string(),
-        VmValue::String(std::sync::Arc::from(model.to_string())),
-    );
+    options.put_str("model", model);
     options.insert("fast".to_string(), VmValue::Bool(true));
     options
 }
@@ -470,14 +462,8 @@ fn fastest_over_quality_selects_lowest_latency_available_candidate() {
 fn preference_list_cheapest_first_sets_route_fallbacks() {
     install_test_routes();
     let mut policy = BTreeMap::new();
-    policy.insert(
-        "mode".to_string(),
-        VmValue::String(std::sync::Arc::from("preference_list".to_string())),
-    );
-    policy.insert(
-        "strategy".to_string(),
-        VmValue::String(std::sync::Arc::from("cheapest_first".to_string())),
-    );
+    policy.put_str("mode", "preference_list");
+    policy.put_str("strategy", "cheapest_first");
     policy.insert(
         "prefer".to_string(),
         VmValue::List(std::sync::Arc::new(vec![
@@ -605,14 +591,8 @@ fn always_policy_accepts_provider_model_selector() {
 #[test]
 fn thinking_dict_enabled_false_disables_thinking() {
     let mut options = BTreeMap::new();
-    options.insert(
-        "provider".to_string(),
-        VmValue::String(std::sync::Arc::from("mock".to_string())),
-    );
-    options.insert(
-        "model".to_string(),
-        VmValue::String(std::sync::Arc::from("gpt-5.4".to_string())),
-    );
+    options.put_str("provider", "mock");
+    options.put_str("model", "gpt-5.4");
     options.insert(
         "thinking".to_string(),
         VmValue::Dict(std::sync::Arc::new(BTreeMap::from([(
@@ -632,14 +612,8 @@ fn thinking_dict_enabled_false_disables_thinking() {
 #[test]
 fn thinking_dict_enabled_budget_parses_typed_config() {
     let mut options = BTreeMap::new();
-    options.insert(
-        "provider".to_string(),
-        VmValue::String(std::sync::Arc::from("mock".to_string())),
-    );
-    options.insert(
-        "model".to_string(),
-        VmValue::String(std::sync::Arc::from("claude-opus-4-6".to_string())),
-    );
+    options.put_str("provider", "mock");
+    options.put_str("model", "claude-opus-4-6");
     options.insert(
         "thinking".to_string(),
         VmValue::Dict(std::sync::Arc::new(BTreeMap::from([
@@ -671,14 +645,8 @@ fn thinking_dict_enabled_budget_parses_typed_config() {
 #[test]
 fn anthropic_beta_features_parse_and_dedupe_with_interleaved_flag() {
     let mut options = BTreeMap::new();
-    options.insert(
-        "provider".to_string(),
-        VmValue::String(std::sync::Arc::from("mock".to_string())),
-    );
-    options.insert(
-        "model".to_string(),
-        VmValue::String(std::sync::Arc::from("claude-opus-4-6".to_string())),
-    );
+    options.put_str("provider", "mock");
+    options.put_str("model", "claude-opus-4-6");
     options.insert(
         "anthropic_beta_features".to_string(),
         VmValue::List(std::sync::Arc::new(vec![
@@ -738,14 +706,8 @@ fn anthropic_beta_features_reject_invalid_header_names() {
 #[test]
 fn thinking_effort_parses_typed_level() {
     let mut options = BTreeMap::new();
-    options.insert(
-        "provider".to_string(),
-        VmValue::String(std::sync::Arc::from("mock".to_string())),
-    );
-    options.insert(
-        "model".to_string(),
-        VmValue::String(std::sync::Arc::from("o3".to_string())),
-    );
+    options.put_str("provider", "mock");
+    options.put_str("model", "o3");
     options.insert(
         "thinking".to_string(),
         VmValue::Dict(std::sync::Arc::new(BTreeMap::from([

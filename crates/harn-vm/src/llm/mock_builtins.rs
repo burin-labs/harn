@@ -1,5 +1,6 @@
 use crate::stdlib::json_to_vm_value;
 use crate::stdlib::macros::{harn_builtin, register_builtin_defs, VmBuiltinDef};
+use crate::value::VmDictExt;
 use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
 
@@ -204,10 +205,7 @@ fn llm_mock_calls_builtin(_args: &[VmValue], _out: &mut String) -> Result<VmValu
         .iter()
         .map(|c| {
             let mut dict = std::collections::BTreeMap::new();
-            dict.insert(
-                "api_mode".to_string(),
-                VmValue::String(std::sync::Arc::from(c.api_mode.as_str())),
-            );
+            dict.put_str("api_mode", c.api_mode.as_str());
             let messages: Vec<VmValue> = c.messages.iter().map(json_to_vm_value).collect();
             dict.insert(
                 "messages".to_string(),

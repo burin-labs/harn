@@ -1,3 +1,4 @@
+use crate::value::VmDictExt;
 use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -231,19 +232,13 @@ fn capability_manifest_with_mocks() -> VmValue {
 
 fn op(name: &str, description: &str) -> (String, VmValue) {
     let mut entry = BTreeMap::new();
-    entry.insert(
-        "description".to_string(),
-        VmValue::String(std::sync::Arc::from(description)),
-    );
+    entry.put_str("description", description);
     (name.to_string(), VmValue::Dict(std::sync::Arc::new(entry)))
 }
 
 fn capability(description: &str, ops: &[(String, VmValue)]) -> VmValue {
     let mut entry = BTreeMap::new();
-    entry.insert(
-        "description".to_string(),
-        VmValue::String(std::sync::Arc::from(description)),
-    );
+    entry.put_str("description", description);
     entry.insert(
         "ops".to_string(),
         VmValue::List(std::sync::Arc::new(
@@ -355,14 +350,8 @@ fn push_host_mock(host_mock: HostMock) {
 
 fn mock_call_value(call: &HostMockCall) -> VmValue {
     let mut item = BTreeMap::new();
-    item.insert(
-        "capability".to_string(),
-        VmValue::String(std::sync::Arc::from(call.capability.clone())),
-    );
-    item.insert(
-        "operation".to_string(),
-        VmValue::String(std::sync::Arc::from(call.operation.clone())),
-    );
+    item.put_str("capability", call.capability.clone());
+    item.put_str("operation", call.operation.clone());
     item.insert(
         "params".to_string(),
         VmValue::Dict(std::sync::Arc::new(call.params.clone())),
@@ -935,18 +924,15 @@ struct ProcessExecResponse<'a> {
 fn process_exec_response(response: ProcessExecResponse<'_>) -> VmValue {
     let combined = format!("{}{}", response.stdout, response.stderr);
     let mut result = BTreeMap::new();
-    result.insert(
-        "command_id".to_string(),
-        VmValue::String(std::sync::Arc::from(format!(
+    result.put_str(
+        "command_id",
+        format!(
             "cmd_{}_{}",
             std::process::id(),
             response.started.elapsed().as_nanos()
-        ))),
+        ),
     );
-    result.insert(
-        "status".to_string(),
-        VmValue::String(std::sync::Arc::from(response.status)),
-    );
+    result.put_str("status", response.status);
     result.insert(
         "pid".to_string(),
         response
@@ -962,15 +948,10 @@ fn process_exec_response(response: ProcessExecResponse<'_>) -> VmValue {
             .unwrap_or(VmValue::Nil),
     );
     result.insert("handle_id".to_string(), VmValue::Nil);
-    result.insert(
-        "started_at".to_string(),
-        VmValue::String(std::sync::Arc::from(response.started_at)),
-    );
-    result.insert(
-        "ended_at".to_string(),
-        VmValue::String(std::sync::Arc::from(audited_utc_now_rfc3339(
-            "host_call/process.exec.ended_at",
-        ))),
+    result.put_str("started_at", response.started_at);
+    result.put_str(
+        "ended_at",
+        audited_utc_now_rfc3339("host_call/process.exec.ended_at"),
     );
     result.insert(
         "duration_ms".to_string(),
@@ -982,18 +963,9 @@ fn process_exec_response(response: ProcessExecResponse<'_>) -> VmValue {
     );
     result.insert("signal".to_string(), VmValue::Nil);
     result.insert("timed_out".to_string(), VmValue::Bool(response.timed_out));
-    result.insert(
-        "stdout".to_string(),
-        VmValue::String(std::sync::Arc::from(response.stdout.to_string())),
-    );
-    result.insert(
-        "stderr".to_string(),
-        VmValue::String(std::sync::Arc::from(response.stderr.to_string())),
-    );
-    result.insert(
-        "combined".to_string(),
-        VmValue::String(std::sync::Arc::from(combined)),
-    );
+    result.put_str("stdout", response.stdout);
+    result.put_str("stderr", response.stderr);
+    result.put_str("combined", combined);
     result.insert(
         "exit_status".to_string(),
         VmValue::Int(response.exit_code as i64),
@@ -1024,10 +996,7 @@ fn process_exec_argv(params: &BTreeMap<String, VmValue>) -> Result<(String, Vec<
         "shell" => {
             let command = require_param(params, "command")?;
             let mut invocation_params = params.clone();
-            invocation_params.insert(
-                "command".to_string(),
-                VmValue::String(std::sync::Arc::from(command)),
-            );
+            invocation_params.put_str("command", command);
             let invocation =
                 crate::shells::resolve_invocation_from_vm_params(&invocation_params)
                     .map_err(|err| VmError::Runtime(format!("host_call process.exec: {err}")))?;
@@ -1277,6 +1246,7 @@ mod tests {
         dispatch_host_tool_call, dispatch_host_tool_list, dispatch_mock_host_call, push_host_mock,
         reset_host_state, resolve_process_exec_cwd, set_host_call_bridge, HostCallBridge, HostMock,
     };
+    use crate::value::VmDictExt;
     use std::collections::BTreeMap;
     use std::sync::{
         atomic::{AtomicUsize, Ordering},
@@ -1354,10 +1324,7 @@ mod tests {
     fn mock_host_call_matches_partial_params_and_overrides_order() {
         reset_host_state();
         let mut exact_params = BTreeMap::new();
-        exact_params.insert(
-            "namespace".to_string(),
-            VmValue::String(std::sync::Arc::from("facts")),
-        );
+        exact_params.put_str("namespace", "facts");
         push_host_mock(HostMock {
             capability: "project".to_string(),
             operation: "metadata_get".to_string(),
@@ -1374,23 +1341,14 @@ mod tests {
         });
 
         let mut call_params = BTreeMap::new();
-        call_params.insert(
-            "dir".to_string(),
-            VmValue::String(std::sync::Arc::from("pkg")),
-        );
-        call_params.insert(
-            "namespace".to_string(),
-            VmValue::String(std::sync::Arc::from("facts")),
-        );
+        call_params.put_str("dir", "pkg");
+        call_params.put_str("namespace", "facts");
         let exact = dispatch_mock_host_call("project", "metadata_get", &call_params)
             .expect("expected exact mock")
             .expect("exact mock should succeed");
         assert_eq!(exact.display(), "facts");
 
-        call_params.insert(
-            "namespace".to_string(),
-            VmValue::String(std::sync::Arc::from("classification")),
-        );
+        call_params.put_str("namespace", "classification");
         let fallback = dispatch_mock_host_call("project", "metadata_get", &call_params)
             .expect("expected fallback mock")
             .expect("fallback mock should succeed");
@@ -1629,10 +1587,7 @@ mod tests {
             ("env".to_string(), env),
         ]);
         if let Some(mode) = env_mode {
-            params.insert(
-                "env_mode".to_string(),
-                VmValue::String(std::sync::Arc::from(mode)),
-            );
+            params.put_str("env_mode", mode);
         }
         let result = super::dispatch_process_exec(&params, serde_json::Value::Null)
             .await

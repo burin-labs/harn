@@ -19,6 +19,7 @@
 //! code that true streaming will accept; only the on-the-wire timing
 //! differs.
 
+use crate::value::VmDictExt;
 use std::collections::BTreeMap;
 
 use sha2::{Digest, Sha256};
@@ -57,10 +58,7 @@ fn http_created_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmE
     let body = args.first().cloned().unwrap_or(VmValue::Nil);
     let mut headers = BTreeMap::new();
     if let Some(location) = args.get(1).and_then(string_or_nil) {
-        headers.insert(
-            "Location".to_string(),
-            VmValue::String(std::sync::Arc::from(location)),
-        );
+        headers.put_str("Location", location);
     }
     Ok(envelope(201, body, BODY_KIND_JSON, headers))
 }
@@ -86,14 +84,8 @@ fn http_error_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErr
     let details = args.get(3).cloned().unwrap_or(VmValue::Nil);
 
     let mut body = BTreeMap::new();
-    body.insert(
-        "code".to_string(),
-        VmValue::String(std::sync::Arc::from(code)),
-    );
-    body.insert(
-        "message".to_string(),
-        VmValue::String(std::sync::Arc::from(message)),
-    );
+    body.put_str("code", code);
+    body.put_str("message", message);
     if !matches!(details, VmValue::Nil) {
         body.insert("details".to_string(), details);
     }
@@ -150,10 +142,7 @@ async fn http_stream_impl(
 
     let chunks = drain_to_list(source, "http_stream").await?;
     let mut headers = BTreeMap::new();
-    headers.insert(
-        "Content-Type".to_string(),
-        VmValue::String(std::sync::Arc::from(content_type)),
-    );
+    headers.put_str("Content-Type", content_type);
     Ok(envelope(
         200,
         VmValue::List(std::sync::Arc::new(chunks)),
@@ -195,14 +184,8 @@ async fn http_sse_impl(
 
     let events = drain_to_list(source, "http_sse").await?;
     let mut headers = BTreeMap::new();
-    headers.insert(
-        "Content-Type".to_string(),
-        VmValue::String(std::sync::Arc::from("text/event-stream")),
-    );
-    headers.insert(
-        "Cache-Control".to_string(),
-        VmValue::String(std::sync::Arc::from("no-cache")),
-    );
+    headers.put_str("Content-Type", "text/event-stream");
+    headers.put_str("Cache-Control", "no-cache");
     let mut env = envelope_map(
         200,
         VmValue::List(std::sync::Arc::new(events)),
@@ -238,10 +221,7 @@ fn envelope_map(
         VmValue::String(std::sync::Arc::from(HTTP_RESPONSE_TAG_VERSION)),
     );
     map.insert("status".to_string(), VmValue::Int(status));
-    map.insert(
-        "body_kind".to_string(),
-        VmValue::String(std::sync::Arc::from(body_kind)),
-    );
+    map.put_str("body_kind", body_kind);
     map.insert(
         "headers".to_string(),
         VmValue::Dict(std::sync::Arc::new(headers)),
@@ -581,10 +561,7 @@ fn expect_string_list(
 fn http_not_modified_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let mut headers = parse_headers(args.get(1), "http_not_modified")?;
     if let Some(etag) = args.first().and_then(string_or_nil) {
-        headers.insert(
-            "ETag".to_string(),
-            VmValue::String(std::sync::Arc::from(etag)),
-        );
+        headers.put_str("ETag", etag);
     }
     Ok(envelope(304, VmValue::Nil, BODY_KIND_NONE, headers))
 }
@@ -762,19 +739,10 @@ fn http_upgrade_ws_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, 
         .cloned();
 
     let mut headers = BTreeMap::new();
-    headers.insert(
-        "Upgrade".to_string(),
-        VmValue::String(std::sync::Arc::from("websocket")),
-    );
-    headers.insert(
-        "Connection".to_string(),
-        VmValue::String(std::sync::Arc::from("Upgrade")),
-    );
+    headers.put_str("Upgrade", "websocket");
+    headers.put_str("Connection", "Upgrade");
     if let Some(name) = &negotiated {
-        headers.insert(
-            "Sec-WebSocket-Protocol".to_string(),
-            VmValue::String(std::sync::Arc::from(name.clone())),
-        );
+        headers.put_str("Sec-WebSocket-Protocol", name.clone());
     }
 
     let idle_ping_ms = options
@@ -818,10 +786,7 @@ fn http_upgrade_ws_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, 
                 map.insert("max_message_bytes".to_string(), VmValue::Int(bytes));
             }
             if let Some(handler) = &on_message {
-                map.insert(
-                    "on_message".to_string(),
-                    VmValue::String(std::sync::Arc::from(handler.clone())),
-                );
+                map.put_str("on_message", handler.clone());
             }
             map
         })),

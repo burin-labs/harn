@@ -14,6 +14,7 @@
 //! conflict through the projection event's `provider_safety_blocked`
 //! flag and pass the original message through.
 
+use crate::value::VmDictExt;
 use std::collections::BTreeMap;
 
 use serde_json::Value as JsonValue;
@@ -1474,18 +1475,9 @@ fn canonical_json(value: &JsonValue) -> String {
 
 pub(crate) fn result_to_vm(result: &ProjectionResult, policy: &ProjectionPolicy) -> VmValue {
     let mut dict = BTreeMap::new();
-    dict.insert(
-        "policy".to_string(),
-        VmValue::String(std::sync::Arc::from(policy.kind.as_str())),
-    );
-    dict.insert(
-        "reason".to_string(),
-        VmValue::String(std::sync::Arc::from(result.reason.clone())),
-    );
-    dict.insert(
-        "prefix_hash".to_string(),
-        VmValue::String(std::sync::Arc::from(result.prefix_hash.clone())),
-    );
+    dict.put_str("policy", policy.kind.as_str());
+    dict.put_str("reason", result.reason.clone());
+    dict.put_str("prefix_hash", result.prefix_hash.clone());
     dict.insert(
         "messages".to_string(),
         VmValue::List(std::sync::Arc::new(

@@ -32,6 +32,7 @@
 //! only worth it for long-running consumers that already manage their
 //! own lifecycle.
 
+use crate::value::VmDictExt;
 use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -176,14 +177,8 @@ async fn pg_listener_recv_impl(
     let channel = notification.channel().to_string();
     let payload = notification.payload().to_string();
     let mut dict = BTreeMap::new();
-    dict.insert(
-        "channel".to_string(),
-        VmValue::String(std::sync::Arc::from(channel.clone())),
-    );
-    dict.insert(
-        "payload".to_string(),
-        VmValue::String(std::sync::Arc::from(payload.clone())),
-    );
+    dict.put_str("channel", channel.clone());
+    dict.put_str("payload", payload.clone());
     dict.insert(
         "process_id".to_string(),
         VmValue::Int(i64::from(notification.process_id())),

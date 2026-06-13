@@ -1,3 +1,4 @@
+use crate::value::VmDictExt;
 use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -203,10 +204,7 @@ fn plan_entries_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmE
 )]
 fn tool_registry_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let mut registry = BTreeMap::new();
-    registry.insert(
-        "_type".to_string(),
-        VmValue::String(std::sync::Arc::from("tool_registry")),
-    );
+    registry.put_str("_type", "tool_registry");
     registry.insert(
         "tools".to_string(),
         VmValue::List(std::sync::Arc::new(Vec::new())),
@@ -485,14 +483,8 @@ fn tool_schema_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmEr
                 vm_build_output_schema(entry.get("outputSchema"), components.as_ref());
 
             let mut tool_def = BTreeMap::new();
-            tool_def.insert(
-                "name".to_string(),
-                VmValue::String(std::sync::Arc::from(name)),
-            );
-            tool_def.insert(
-                "description".to_string(),
-                VmValue::String(std::sync::Arc::from(description)),
-            );
+            tool_def.put_str("name", name);
+            tool_def.put_str("description", description);
             tool_def.insert("inputSchema".to_string(), input_schema);
             if let Some(output_schema) = output_schema {
                 tool_def.insert("outputSchema".to_string(), output_schema);
@@ -502,10 +494,7 @@ fn tool_schema_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmEr
     }
 
     let mut schema = BTreeMap::new();
-    schema.insert(
-        "schema_version".to_string(),
-        VmValue::String(std::sync::Arc::from("harn-tools/1.0")),
-    );
+    schema.put_str("schema_version", "harn-tools/1.0");
 
     if let Some(comps) = &components {
         let mut comp_wrapper = BTreeMap::new();
@@ -765,22 +754,13 @@ fn tool_define_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmEr
     let output_schema = config.get("returns").cloned().unwrap_or(VmValue::Nil);
 
     let mut tool_entry = BTreeMap::new();
-    tool_entry.insert(
-        "name".to_string(),
-        VmValue::String(std::sync::Arc::from(name.as_str())),
-    );
-    tool_entry.insert(
-        "description".to_string(),
-        VmValue::String(std::sync::Arc::from(description)),
-    );
+    tool_entry.put_str("name", name.as_str());
+    tool_entry.put_str("description", description);
     tool_entry.insert("handler".to_string(), handler);
     tool_entry.insert("parameters".to_string(), parameters);
     // Store the canonical executor as a plain string; wire
     // serialization is handled by the ACP adapter.
-    tool_entry.insert(
-        "executor".to_string(),
-        VmValue::String(std::sync::Arc::from(resolved_executor)),
-    );
+    tool_entry.put_str("executor", resolved_executor);
     if !matches!(output_schema, VmValue::Nil) {
         tool_entry.insert("outputSchema".to_string(), output_schema);
     }
@@ -1310,26 +1290,11 @@ fn is_optional_param(schema: &VmValue) -> bool {
 
 fn synthesized_tool_dry_run_result(spec: &SynthesizedToolSpec, call_args: VmValue) -> VmValue {
     let mut result = BTreeMap::new();
-    result.insert(
-        "_type".to_string(),
-        VmValue::String(std::sync::Arc::from("synthesized_tool_result")),
-    );
-    result.insert(
-        "status".to_string(),
-        VmValue::String(std::sync::Arc::from("dry_run")),
-    );
-    result.insert(
-        "tool_id".to_string(),
-        VmValue::String(std::sync::Arc::from(spec.id.as_str())),
-    );
-    result.insert(
-        "name".to_string(),
-        VmValue::String(std::sync::Arc::from(spec.name.as_str())),
-    );
-    result.insert(
-        "description".to_string(),
-        VmValue::String(std::sync::Arc::from(spec.description.as_str())),
-    );
+    result.put_str("_type", "synthesized_tool_result");
+    result.put_str("status", "dry_run");
+    result.put_str("tool_id", spec.id.as_str());
+    result.put_str("name", spec.name.as_str());
+    result.put_str("description", spec.description.as_str());
     result.insert("args".to_string(), call_args);
     result.insert(
         "capabilities".to_string(),
@@ -1340,34 +1305,20 @@ fn synthesized_tool_dry_run_result(spec: &SynthesizedToolSpec, call_args: VmValu
                 .collect(),
         )),
     );
-    result.insert(
-        "side_effect_level".to_string(),
-        VmValue::String(std::sync::Arc::from(spec.side_effect_level.as_str())),
-    );
-    result.insert(
-        "message".to_string(),
-        VmValue::String(std::sync::Arc::from(
-            "synthesized tool is pinned and validated, but executor is dry_run; \
+    result.put_str("side_effect_level", spec.side_effect_level.as_str());
+    result.put_str(
+        "message",
+        "synthesized tool is pinned and validated, but executor is dry_run; \
              set executor: \"host_bridge\" or \"mcp_server\" to dispatch",
-        )),
     );
     VmValue::Dict(std::sync::Arc::new(result))
 }
 
 fn synthesized_tool_spec_value(spec: &SynthesizedToolSpec) -> VmValue {
     let mut value = BTreeMap::new();
-    value.insert(
-        "id".to_string(),
-        VmValue::String(std::sync::Arc::from(spec.id.as_str())),
-    );
-    value.insert(
-        "name".to_string(),
-        VmValue::String(std::sync::Arc::from(spec.name.as_str())),
-    );
-    value.insert(
-        "description".to_string(),
-        VmValue::String(std::sync::Arc::from(spec.description.as_str())),
-    );
+    value.put_str("id", spec.id.as_str());
+    value.put_str("name", spec.name.as_str());
+    value.put_str("description", spec.description.as_str());
     value.insert("parameters".to_string(), spec.parameters.clone());
     value.insert("return_type".to_string(), spec.return_type.clone());
     value.insert(
@@ -1379,45 +1330,24 @@ fn synthesized_tool_spec_value(spec: &SynthesizedToolSpec) -> VmValue {
                 .collect(),
         )),
     );
-    value.insert(
-        "side_effect_level".to_string(),
-        VmValue::String(std::sync::Arc::from(spec.side_effect_level.as_str())),
-    );
+    value.put_str("side_effect_level", spec.side_effect_level.as_str());
     match &spec.executor {
         SynthesizedToolExecutor::DryRun => {
-            value.insert(
-                "executor".to_string(),
-                VmValue::String(std::sync::Arc::from("dry_run")),
-            );
+            value.put_str("executor", "dry_run");
         }
         SynthesizedToolExecutor::HostBridge { host_tool } => {
-            value.insert(
-                "executor".to_string(),
-                VmValue::String(std::sync::Arc::from("host_bridge")),
-            );
-            value.insert(
-                "host_tool".to_string(),
-                VmValue::String(std::sync::Arc::from(host_tool.as_str())),
-            );
+            value.put_str("executor", "host_bridge");
+            value.put_str("host_tool", host_tool.as_str());
         }
         SynthesizedToolExecutor::McpServer {
             tool_name,
             server_name,
             ..
         } => {
-            value.insert(
-                "executor".to_string(),
-                VmValue::String(std::sync::Arc::from("mcp_server")),
-            );
-            value.insert(
-                "mcp_tool".to_string(),
-                VmValue::String(std::sync::Arc::from(tool_name.as_str())),
-            );
+            value.put_str("executor", "mcp_server");
+            value.put_str("mcp_tool", tool_name.as_str());
             if let Some(server_name) = server_name {
-                value.insert(
-                    "mcp_server".to_string(),
-                    VmValue::String(std::sync::Arc::from(server_name.as_str())),
-                );
+                value.put_str("mcp_server", server_name.as_str());
             }
         }
     }
@@ -1630,10 +1560,7 @@ fn vm_format_schema(schema: Option<&VmValue>) -> String {
 
 fn vm_build_empty_schema() -> BTreeMap<String, VmValue> {
     let mut schema = BTreeMap::new();
-    schema.insert(
-        "schema_version".to_string(),
-        VmValue::String(std::sync::Arc::from("harn-tools/1.0")),
-    );
+    schema.put_str("schema_version", "harn-tools/1.0");
     schema.insert(
         "tools".to_string(),
         VmValue::List(std::sync::Arc::new(Vec::new())),
@@ -1646,10 +1573,7 @@ fn vm_build_input_schema(
     components: Option<&BTreeMap<String, VmValue>>,
 ) -> VmValue {
     let mut schema = BTreeMap::new();
-    schema.insert(
-        "type".to_string(),
-        VmValue::String(std::sync::Arc::from("object")),
-    );
+    schema.put_str("type", "object");
 
     let params_map = match params {
         Some(VmValue::Dict(map)) if !map.is_empty() => map,
@@ -1698,10 +1622,7 @@ fn vm_resolve_param_type(val: &VmValue, components: Option<&BTreeMap<String, VmV
         VmValue::String(type_name) => {
             let json_type = vm_harn_type_to_json_schema(type_name);
             let mut prop = BTreeMap::new();
-            prop.insert(
-                "type".to_string(),
-                VmValue::String(std::sync::Arc::from(json_type)),
-            );
+            prop.put_str("type", json_type);
             VmValue::Dict(std::sync::Arc::new(prop))
         }
         VmValue::Dict(map) => {
@@ -1712,12 +1633,7 @@ fn vm_resolve_param_type(val: &VmValue, components: Option<&BTreeMap<String, VmV
                     }
                 }
                 let mut prop = BTreeMap::new();
-                prop.insert(
-                    "$ref".to_string(),
-                    VmValue::String(std::sync::Arc::from(
-                        format!("#/components/schemas/{ref_name}").as_str(),
-                    )),
-                );
+                prop.put_str("$ref", format!("#/components/schemas/{ref_name}").as_str());
                 VmValue::Dict(std::sync::Arc::new(prop))
             } else {
                 VmValue::Dict(std::sync::Arc::new((**map).clone()))
@@ -1725,10 +1641,7 @@ fn vm_resolve_param_type(val: &VmValue, components: Option<&BTreeMap<String, VmV
         }
         _ => {
             let mut prop = BTreeMap::new();
-            prop.insert(
-                "type".to_string(),
-                VmValue::String(std::sync::Arc::from("string")),
-            );
+            prop.put_str("type", "string");
             VmValue::Dict(std::sync::Arc::new(prop))
         }
     }

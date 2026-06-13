@@ -1,3 +1,4 @@
+use crate::value::VmDictExt;
 use std::collections::BTreeMap;
 
 use super::super::parse_context_policy;
@@ -217,18 +218,12 @@ fn fork_worker_transcript(transcript: VmValue) -> VmValue {
     let parent_id = dict.get("id").map(|value| value.display());
     let mut next = dict.clone();
     let new_id = uuid::Uuid::now_v7().to_string();
-    next.insert(
-        "id".to_string(),
-        VmValue::String(std::sync::Arc::from(new_id)),
-    );
+    next.put_str("id", new_id);
     if let Some(parent_id) = parent_id.filter(|value| !value.is_empty()) {
         let metadata = match next.get("metadata") {
             Some(VmValue::Dict(metadata)) => {
                 let mut metadata = metadata.as_ref().clone();
-                metadata.insert(
-                    "parent_transcript_id".to_string(),
-                    VmValue::String(std::sync::Arc::from(parent_id)),
-                );
+                metadata.put_str("parent_transcript_id", parent_id);
                 VmValue::Dict(std::sync::Arc::new(metadata))
             }
             _ => VmValue::Dict(std::sync::Arc::new(BTreeMap::from([(
@@ -298,9 +293,6 @@ pub(in super::super) async fn compact_worker_transcript(
         "events".to_string(),
         VmValue::List(std::sync::Arc::new(events)),
     );
-    next.insert(
-        "summary".to_string(),
-        VmValue::String(std::sync::Arc::from(outcome.summary)),
-    );
+    next.put_str("summary", outcome.summary);
     Ok(VmValue::Dict(std::sync::Arc::new(next)))
 }

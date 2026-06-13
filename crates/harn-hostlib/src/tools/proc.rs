@@ -14,12 +14,12 @@
 //! 3. Timeout enforcement is uniform: when a deadline elapses, the child
 //!    is killed and `timed_out: true` is reported in the response.
 
+use harn_vm::VmDictExt;
 use std::collections::BTreeMap;
 use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc;
-use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, SystemTime};
 
@@ -320,10 +320,7 @@ pub(crate) fn build_response(
         None => builder.nil("handle_id"),
     };
     let mut sandbox = BTreeMap::new();
-    sandbox.insert(
-        "kind".to_string(),
-        VmValue::String(Arc::from(sandbox_kind())),
-    );
+    sandbox.put_str("kind", sandbox_kind());
     sandbox.insert("enforced".to_string(), VmValue::Bool(sandbox_enforced()));
     builder = builder.dict("sandbox", sandbox);
     if let Some(policy_context) = policy_context {
@@ -342,10 +339,7 @@ pub(crate) fn running_response(
 ) -> VmValue {
     let artifacts = planned_artifact_paths(&command_id);
     let mut sandbox = BTreeMap::new();
-    sandbox.insert(
-        "kind".to_string(),
-        VmValue::String(Arc::from(sandbox_kind())),
-    );
+    sandbox.put_str("kind", sandbox_kind());
     sandbox.insert("enforced".to_string(), VmValue::Bool(sandbox_enforced()));
     let mut builder = ResponseBuilder::new()
         .str("command_id", command_id.clone())

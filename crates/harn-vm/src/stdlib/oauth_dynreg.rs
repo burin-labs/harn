@@ -239,13 +239,12 @@ fn next_store_id() -> String {
 
 fn store_handle(id: &str) -> VmValue {
     let mut fields = BTreeMap::new();
-    fields.insert(HANDLE_KEY_KIND.to_string(), string_value(KIND_DYNREG_STORE));
-    fields.insert(HANDLE_KEY_ID.to_string(), string_value(id));
+    fields.insert(
+        HANDLE_KEY_KIND.to_string(),
+        VmValue::string(KIND_DYNREG_STORE),
+    );
+    fields.insert(HANDLE_KEY_ID.to_string(), VmValue::string(id));
     VmValue::Dict(std::sync::Arc::new(fields))
-}
-
-fn string_value(value: &str) -> VmValue {
-    VmValue::String(std::sync::Arc::from(value))
 }
 
 fn handle_id(handle: &BTreeMap<String, VmValue>) -> Result<String, VmError> {
@@ -287,7 +286,7 @@ fn validate_metadata_value(metadata: &BTreeMap<String, VmValue>) -> VmValue {
     out.insert(
         "errors".to_string(),
         VmValue::List(std::sync::Arc::new(
-            errors.iter().map(|e| string_value(e)).collect::<Vec<_>>(),
+            errors.iter().map(VmValue::string).collect::<Vec<_>>(),
         )),
     );
     VmValue::Dict(std::sync::Arc::new(out))
@@ -562,14 +561,14 @@ fn build_client_metadata_value(metadata: &BTreeMap<String, VmValue>) -> Result<V
     // token_endpoint_auth_method defaults to `client_secret_basic`.
     let mut out: BTreeMap<String, VmValue> = metadata.clone();
     out.entry("response_types".to_string())
-        .or_insert_with(|| VmValue::List(std::sync::Arc::new(vec![string_value("code")])));
+        .or_insert_with(|| VmValue::List(std::sync::Arc::new(vec![VmValue::string("code")])));
     out.entry("grant_types".to_string()).or_insert_with(|| {
-        VmValue::List(std::sync::Arc::new(vec![string_value(
+        VmValue::List(std::sync::Arc::new(vec![VmValue::string(
             "authorization_code",
         )]))
     });
     out.entry("token_endpoint_auth_method".to_string())
-        .or_insert_with(|| string_value("client_secret_basic"));
+        .or_insert_with(|| VmValue::string("client_secret_basic"));
     Ok(VmValue::Dict(std::sync::Arc::new(out)))
 }
 
@@ -582,53 +581,56 @@ fn build_authorization_server_metadata_value(
     let issuer = derive_issuer(&auth_url)?;
 
     let mut out: BTreeMap<String, VmValue> = BTreeMap::new();
-    out.insert("issuer".to_string(), string_value(&issuer));
+    out.insert("issuer".to_string(), VmValue::string(&issuer));
     out.insert(
         "authorization_endpoint".to_string(),
-        string_value(&auth_url),
+        VmValue::string(&auth_url),
     );
-    out.insert("token_endpoint".to_string(), string_value(&token_url));
+    out.insert("token_endpoint".to_string(), VmValue::string(&token_url));
     if let Some(VmValue::String(s)) = provider.get("device_code_url") {
         out.insert(
             "device_authorization_endpoint".to_string(),
-            string_value(s.as_ref()),
+            VmValue::string(s.as_ref()),
         );
     }
     if let Some(VmValue::String(s)) = provider.get("revoke_url") {
-        out.insert("revocation_endpoint".to_string(), string_value(s.as_ref()));
+        out.insert(
+            "revocation_endpoint".to_string(),
+            VmValue::string(s.as_ref()),
+        );
     }
     if let Some(VmValue::String(s)) = provider.get("userinfo_url") {
-        out.insert("userinfo_endpoint".to_string(), string_value(s.as_ref()));
+        out.insert("userinfo_endpoint".to_string(), VmValue::string(s.as_ref()));
     }
     out.insert(
         "response_types_supported".to_string(),
-        VmValue::List(std::sync::Arc::new(vec![string_value("code")])),
+        VmValue::List(std::sync::Arc::new(vec![VmValue::string("code")])),
     );
     out.insert(
         "grant_types_supported".to_string(),
         VmValue::List(std::sync::Arc::new(vec![
-            string_value("authorization_code"),
-            string_value("refresh_token"),
-            string_value("urn:ietf:params:oauth:grant-type:device_code"),
+            VmValue::string("authorization_code"),
+            VmValue::string("refresh_token"),
+            VmValue::string("urn:ietf:params:oauth:grant-type:device_code"),
         ])),
     );
     out.insert(
         "token_endpoint_auth_methods_supported".to_string(),
         VmValue::List(std::sync::Arc::new(vec![
-            string_value("client_secret_basic"),
-            string_value("client_secret_post"),
-            string_value("none"),
+            VmValue::string("client_secret_basic"),
+            VmValue::string("client_secret_post"),
+            VmValue::string("none"),
         ])),
     );
     if let Some(VmValue::Bool(true)) | Some(VmValue::Bool(false)) = provider.get("pkce_required") {
         out.insert(
             "code_challenge_methods_supported".to_string(),
-            VmValue::List(std::sync::Arc::new(vec![string_value("S256")])),
+            VmValue::List(std::sync::Arc::new(vec![VmValue::string("S256")])),
         );
     } else {
         out.insert(
             "code_challenge_methods_supported".to_string(),
-            VmValue::List(std::sync::Arc::new(vec![string_value("S256")])),
+            VmValue::List(std::sync::Arc::new(vec![VmValue::string("S256")])),
         );
     }
     if let Some(VmValue::List(scopes)) = provider.get("default_scopes") {
@@ -687,17 +689,17 @@ fn register_client_value(
     let mut canonical = metadata.clone();
     canonical
         .entry("response_types".to_string())
-        .or_insert_with(|| VmValue::List(std::sync::Arc::new(vec![string_value("code")])));
+        .or_insert_with(|| VmValue::List(std::sync::Arc::new(vec![VmValue::string("code")])));
     canonical
         .entry("grant_types".to_string())
         .or_insert_with(|| {
-            VmValue::List(std::sync::Arc::new(vec![string_value(
+            VmValue::List(std::sync::Arc::new(vec![VmValue::string(
                 "authorization_code",
             )]))
         });
     canonical
         .entry("token_endpoint_auth_method".to_string())
-        .or_insert_with(|| string_value("client_secret_basic"));
+        .or_insert_with(|| VmValue::string("client_secret_basic"));
 
     let canonical_dict = VmValue::Dict(std::sync::Arc::new(canonical.clone()));
     let canonical_json = vm_value_to_json(&canonical_dict);
@@ -720,8 +722,8 @@ fn register_client_value(
 
     // Build the response dict — full RFC 7591 §3.2.1 success body.
     let mut response: BTreeMap<String, VmValue> = canonical;
-    response.insert("client_id".to_string(), string_value(&client_id));
-    response.insert("client_secret".to_string(), string_value(&client_secret));
+    response.insert("client_id".to_string(), VmValue::string(&client_id));
+    response.insert("client_secret".to_string(), VmValue::string(&client_secret));
     response.insert("client_id_issued_at".to_string(), VmValue::Int(issued_at));
     // Per RFC 7591 §3.2.1, `client_secret_expires_at: 0` means non-expiring.
     response.insert("client_secret_expires_at".to_string(), VmValue::Int(0));
@@ -750,7 +752,7 @@ fn get_client_value(handle: &BTreeMap<String, VmValue>, client_id: &str) -> VmVa
             VmValue::Dict(dict) => dict.as_ref().clone(),
             _ => BTreeMap::new(),
         };
-        response.insert("client_id".to_string(), string_value(&client.client_id));
+        response.insert("client_id".to_string(), VmValue::string(&client.client_id));
         response.insert(
             "client_id_issued_at".to_string(),
             VmValue::Int(client.client_id_issued_at),
@@ -773,7 +775,7 @@ fn list_clients_value(handle: &BTreeMap<String, VmValue>) -> VmValue {
         let ids: Vec<VmValue> = store
             .clients
             .keys()
-            .map(|id| string_value(id.as_str()))
+            .map(|id| VmValue::string(id.as_str()))
             .collect();
         VmValue::List(std::sync::Arc::new(ids))
     })
@@ -888,7 +890,7 @@ mod tests {
         let mut m = BTreeMap::new();
         m.insert(
             "redirect_uris".to_string(),
-            VmValue::List(std::sync::Arc::new(vec![string_value(uri)])),
+            VmValue::List(std::sync::Arc::new(vec![VmValue::string(uri)])),
         );
         m
     }
@@ -969,7 +971,7 @@ mod tests {
         let mut m = metadata_with_redirect("https://app.example/cb");
         m.insert(
             "grant_types".to_string(),
-            VmValue::List(std::sync::Arc::new(vec![string_value("password")])),
+            VmValue::List(std::sync::Arc::new(vec![VmValue::string("password")])),
         );
         let mut errors = Vec::new();
         validate_metadata(&m, &mut errors);
@@ -993,11 +995,11 @@ mod tests {
         let mut provider = BTreeMap::new();
         provider.insert(
             "auth_url".to_string(),
-            string_value("https://idp.example/authorize"),
+            VmValue::string("https://idp.example/authorize"),
         );
         provider.insert(
             "token_url".to_string(),
-            string_value("https://idp.example/token"),
+            VmValue::string("https://idp.example/token"),
         );
         let built = build_authorization_server_metadata_value(&provider, None).expect("ok");
         let VmValue::Dict(dict) = built else {
@@ -1030,8 +1032,8 @@ mod tests {
                 .insert(id.clone(), DynregStore::default());
         });
         let mut handle = BTreeMap::new();
-        handle.insert("kind".to_string(), string_value(KIND_DYNREG_STORE));
-        handle.insert("id".to_string(), string_value(&id));
+        handle.insert("kind".to_string(), VmValue::string(KIND_DYNREG_STORE));
+        handle.insert("id".to_string(), VmValue::string(&id));
         let m = metadata_with_redirect("https://app.example/cb");
         let response = register_client_value(&handle, &m).expect("registration ok");
         let VmValue::Dict(dict) = response else {
@@ -1063,8 +1065,8 @@ mod tests {
                 .insert(id.clone(), DynregStore::default());
         });
         let mut handle = BTreeMap::new();
-        handle.insert("kind".to_string(), string_value(KIND_DYNREG_STORE));
-        handle.insert("id".to_string(), string_value(&id));
+        handle.insert("kind".to_string(), VmValue::string(KIND_DYNREG_STORE));
+        handle.insert("id".to_string(), VmValue::string(&id));
         let m = metadata_with_redirect("http://attacker.example/cb");
         let err = register_client_value(&handle, &m).unwrap_err();
         let VmError::Runtime(text) = err else {

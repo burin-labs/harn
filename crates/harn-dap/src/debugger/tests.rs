@@ -1,3 +1,4 @@
+use harn_vm::VmDictExt;
 use std::collections::BTreeMap;
 use std::path::Path;
 use std::path::PathBuf;
@@ -1428,10 +1429,7 @@ fn test_hit_condition_matches_parses_all_forms() {
 
     let mut vars = BTreeMap::new();
     vars.insert("count".to_string(), VmValue::Int(5));
-    vars.insert(
-        "label".to_string(),
-        VmValue::String(std::sync::Arc::from("ready")),
-    );
+    vars.put_str("label", "ready");
 
     assert_eq!(check_condition_literal("count >= 5", &vars), Ok(true));
     assert_eq!(

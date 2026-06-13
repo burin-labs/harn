@@ -21,6 +21,7 @@
 //!
 //! Registries mirror the tool-registry shape: `{ _type: "skill_registry", skills: [ ... ] }`.
 
+use crate::value::VmDictExt;
 use std::collections::BTreeMap;
 
 use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
@@ -81,18 +82,9 @@ fn vm_skill_catalog_entries(skills: &[VmValue]) -> Vec<VmValue> {
             .map(|v| v.display())
             .unwrap_or_default();
         let mut rendered = BTreeMap::new();
-        rendered.insert(
-            "name".to_string(),
-            VmValue::String(std::sync::Arc::from(id.as_str())),
-        );
-        rendered.insert(
-            "description".to_string(),
-            VmValue::String(std::sync::Arc::from(description.as_str())),
-        );
-        rendered.insert(
-            "when_to_use".to_string(),
-            VmValue::String(std::sync::Arc::from(when_to_use.as_str())),
-        );
+        rendered.put_str("name", id.as_str());
+        rendered.put_str("description", description.as_str());
+        rendered.put_str("when_to_use", when_to_use.as_str());
         catalog.push((id, VmValue::Dict(std::sync::Arc::new(rendered))));
     }
     catalog.sort_by(|a, b| a.0.cmp(&b.0));
@@ -132,10 +124,7 @@ fn who_signed_entry(entry: &BTreeMap<String, VmValue>) -> VmValue {
         Some(provenance) => provenance.clone(),
         None => BTreeMap::new(),
     };
-    out.insert(
-        "skill_id".to_string(),
-        VmValue::String(std::sync::Arc::from(vm_skill_entry_id(entry).as_str())),
-    );
+    out.put_str("skill_id", vm_skill_entry_id(entry).as_str());
     out.entry("signed".to_string())
         .or_insert(VmValue::Bool(false));
     out.entry("trusted".to_string())
@@ -257,10 +246,7 @@ pub(crate) fn register_skill_builtins(vm: &mut Vm) {
 #[harn_builtin(sig = "skill_registry() -> dict", category = "skills")]
 fn skill_registry_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let mut registry = BTreeMap::new();
-    registry.insert(
-        "_type".to_string(),
-        VmValue::String(std::sync::Arc::from("skill_registry")),
-    );
+    registry.put_str("_type", "skill_registry");
     registry.insert(
         "skills".to_string(),
         VmValue::List(std::sync::Arc::new(Vec::new())),
@@ -360,10 +346,7 @@ fn skill_define_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmE
     }
 
     let mut entry = BTreeMap::new();
-    entry.insert(
-        "name".to_string(),
-        VmValue::String(std::sync::Arc::from(name.as_str())),
-    );
+    entry.put_str("name", name.as_str());
     // Keep `description` at the top level even if missing (empty string)
     // so `skill_describe` / transcript surfaces have a stable shape.
     if !config.contains_key("description") {
@@ -371,15 +354,9 @@ fn skill_define_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmE
             .get("short")
             .map(|value| value.display())
             .unwrap_or_default();
-        entry.insert(
-            "description".to_string(),
-            VmValue::String(std::sync::Arc::from("")),
-        );
+        entry.put_str("description", "");
         if !fallback.is_empty() {
-            entry.insert(
-                "description".to_string(),
-                VmValue::String(std::sync::Arc::from(fallback.as_str())),
-            );
+            entry.put_str("description", fallback.as_str());
         }
     }
     for (k, v) in config.iter() {

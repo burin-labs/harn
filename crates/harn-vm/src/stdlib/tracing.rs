@@ -1,3 +1,4 @@
+use crate::value::VmDictExt;
 use std::collections::BTreeMap;
 use std::sync::atomic::Ordering;
 
@@ -95,18 +96,9 @@ fn trace_start_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmEr
     });
 
     let mut span = BTreeMap::new();
-    span.insert(
-        "trace_id".to_string(),
-        VmValue::String(std::sync::Arc::from(trace_id)),
-    );
-    span.insert(
-        "span_id".to_string(),
-        VmValue::String(std::sync::Arc::from(span_id)),
-    );
-    span.insert(
-        "name".to_string(),
-        VmValue::String(std::sync::Arc::from(name)),
-    );
+    span.put_str("trace_id", trace_id);
+    span.put_str("span_id", span_id);
+    span.put_str("name", name);
     span.insert("start_ms".to_string(), VmValue::Int(start_ms));
     Ok(VmValue::Dict(std::sync::Arc::new(span)))
 }
@@ -117,18 +109,9 @@ fn trace_end_impl(args: &[VmValue], out: &mut String) -> Result<VmValue, VmError
     let level_num = 1_u8;
     if level_num >= VM_MIN_LOG_LEVEL.load(Ordering::Relaxed) {
         let mut fields = BTreeMap::new();
-        fields.insert(
-            "trace_id".to_string(),
-            VmValue::String(std::sync::Arc::from(trace_id)),
-        );
-        fields.insert(
-            "span_id".to_string(),
-            VmValue::String(std::sync::Arc::from(span_id)),
-        );
-        fields.insert(
-            "name".to_string(),
-            VmValue::String(std::sync::Arc::from(name)),
-        );
+        fields.put_str("trace_id", trace_id);
+        fields.put_str("span_id", span_id);
+        fields.put_str("name", name);
         fields.insert("duration_ms".to_string(), VmValue::Int(duration_ms));
         let line = vm_build_log_line("info", "span_end", Some(&fields));
         out.push_str(&line);
@@ -156,14 +139,8 @@ fn llm_info_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErro
     };
     let api_key_set = crate::llm_config::provider_key_available(&provider);
     let mut info = BTreeMap::new();
-    info.insert(
-        "provider".to_string(),
-        VmValue::String(std::sync::Arc::from(provider)),
-    );
-    info.insert(
-        "model".to_string(),
-        VmValue::String(std::sync::Arc::from(model)),
-    );
+    info.put_str("provider", provider);
+    info.put_str("model", model);
     info.insert("api_key_set".to_string(), VmValue::Bool(api_key_set));
     Ok(VmValue::Dict(std::sync::Arc::new(info)))
 }

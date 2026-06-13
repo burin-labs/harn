@@ -1,3 +1,4 @@
+use crate::value::VmDictExt;
 use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, LazyLock, Mutex, OnceLock};
@@ -24,28 +25,13 @@ pub(crate) struct OperationHandleInfo {
 impl OperationHandleInfo {
     pub(crate) fn into_vm_value(self) -> VmValue {
         let mut dict = BTreeMap::new();
-        dict.insert(
-            "handle_id".to_string(),
-            VmValue::String(std::sync::Arc::from(self.handle_id)),
-        );
-        dict.insert(
-            "started_at".to_string(),
-            VmValue::String(std::sync::Arc::from(self.started_at)),
-        );
+        dict.put_str("handle_id", self.handle_id);
+        dict.put_str("started_at", self.started_at);
         dict.insert("ended_at".to_string(), VmValue::Nil);
         dict.insert("duration_ms".to_string(), VmValue::Int(0));
-        dict.insert(
-            "status".to_string(),
-            VmValue::String(std::sync::Arc::from("running")),
-        );
-        dict.insert(
-            "operation".to_string(),
-            VmValue::String(std::sync::Arc::from(self.operation)),
-        );
-        dict.insert(
-            "command_or_op_descriptor".to_string(),
-            VmValue::String(std::sync::Arc::from(self.descriptor)),
-        );
+        dict.put_str("status", "running");
+        dict.put_str("operation", self.operation);
+        dict.put_str("command_or_op_descriptor", self.descriptor);
         VmValue::Dict(std::sync::Arc::new(dict))
     }
 }

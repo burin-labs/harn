@@ -1,3 +1,4 @@
+use crate::value::VmDictExt;
 use std::collections::BTreeMap;
 
 use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
@@ -161,14 +162,8 @@ fn throw_error_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmEr
         .unwrap_or(ErrorCategory::Generic);
 
     let mut err_dict = BTreeMap::new();
-    err_dict.insert(
-        "message".to_string(),
-        VmValue::String(std::sync::Arc::from(message.as_str())),
-    );
-    err_dict.insert(
-        "category".to_string(),
-        VmValue::String(std::sync::Arc::from(category.as_str())),
-    );
+    err_dict.put_str("message", message.as_str());
+    err_dict.put_str("category", category.as_str());
     Err(VmError::Thrown(VmValue::Dict(std::sync::Arc::new(
         err_dict,
     ))))

@@ -7,6 +7,7 @@
 //! attribute the error to the active capability profile rather than an
 //! opaque tool rejection.
 
+use crate::value::VmDictExt;
 use std::collections::BTreeMap;
 use std::time::Duration;
 
@@ -1020,10 +1021,7 @@ impl crate::vm::Vm {
                 }
                 if !(matches!(args.get(1), Some(VmValue::Dict(_))) && args.get(2).is_none()) {
                     if let Some(body) = args.get(1) {
-                        options.insert(
-                            "body".to_string(),
-                            VmValue::String(std::sync::Arc::from(body.display())),
-                        );
+                        options.put_str("body", body.display());
                     }
                 }
             } else if let Some(VmValue::Dict(d)) = args.get(1) {
@@ -1798,10 +1796,7 @@ fn tag_egress_dict(
     ) {
         return std::sync::Arc::new(next);
     }
-    next.insert(
-        "code".to_string(),
-        VmValue::String(std::sync::Arc::from(HARN_CAP_201_CODE)),
-    );
+    next.put_str("code", HARN_CAP_201_CODE);
     std::sync::Arc::new(next)
 }
 
@@ -1966,14 +1961,8 @@ fn mock_read_line_value(state: &crate::harness::MockHarnessState, args: &[VmValu
             if structured {
                 let mut out = std::collections::BTreeMap::new();
                 out.insert("ok".to_string(), VmValue::Bool(true));
-                out.insert(
-                    "status".to_string(),
-                    VmValue::String(std::sync::Arc::from("ok")),
-                );
-                out.insert(
-                    "value".to_string(),
-                    VmValue::String(std::sync::Arc::from(line)),
-                );
+                out.put_str("status", "ok");
+                out.put_str("value", line);
                 VmValue::Dict(std::sync::Arc::new(out))
             } else {
                 VmValue::String(std::sync::Arc::from(line))
@@ -1983,10 +1972,7 @@ fn mock_read_line_value(state: &crate::harness::MockHarnessState, args: &[VmValu
             if structured {
                 let mut out = std::collections::BTreeMap::new();
                 out.insert("ok".to_string(), VmValue::Bool(false));
-                out.insert(
-                    "status".to_string(),
-                    VmValue::String(std::sync::Arc::from("eof")),
-                );
+                out.put_str("status", "eof");
                 VmValue::Dict(std::sync::Arc::new(out))
             } else {
                 VmValue::Nil

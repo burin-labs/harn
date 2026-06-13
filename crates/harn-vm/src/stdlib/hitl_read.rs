@@ -1,3 +1,4 @@
+use crate::value::VmDictExt;
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
@@ -193,30 +194,12 @@ fn parse_request_row(
 
 fn pending_row_to_value(row: PendingHitlRow) -> VmValue {
     let mut dict = BTreeMap::new();
-    dict.insert(
-        "request_id".to_string(),
-        VmValue::String(std::sync::Arc::from(row.request_id)),
-    );
-    dict.insert(
-        "request_kind".to_string(),
-        VmValue::String(std::sync::Arc::from(row.request_kind)),
-    );
-    dict.insert(
-        "agent".to_string(),
-        VmValue::String(std::sync::Arc::from(row.agent)),
-    );
-    dict.insert(
-        "prompt".to_string(),
-        VmValue::String(std::sync::Arc::from(row.prompt)),
-    );
-    dict.insert(
-        "trace_id".to_string(),
-        VmValue::String(std::sync::Arc::from(row.trace_id)),
-    );
-    dict.insert(
-        "timestamp".to_string(),
-        VmValue::String(std::sync::Arc::from(row.timestamp)),
-    );
+    dict.put_str("request_id", row.request_id);
+    dict.put_str("request_kind", row.request_kind);
+    dict.put_str("agent", row.agent);
+    dict.put_str("prompt", row.prompt);
+    dict.put_str("trace_id", row.trace_id);
+    dict.put_str("timestamp", row.timestamp);
     dict.insert(
         "approvers".to_string(),
         VmValue::List(std::sync::Arc::new(

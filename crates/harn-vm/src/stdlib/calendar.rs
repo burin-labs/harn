@@ -696,15 +696,15 @@ fn calendar_business_window_builtin(
     Ok(VmValue::Dict(std::sync::Arc::new(BTreeMap::from([
         ("inside".to_string(), VmValue::Bool(inside)),
         ("business_day".to_string(), VmValue::Bool(business_day)),
-        ("reason".to_string(), string_value(reason)),
+        ("reason".to_string(), VmValue::string(reason)),
         (
             "timezone".to_string(),
-            string_value(calendar.timezone.name()),
+            VmValue::string(calendar.timezone.name()),
         ),
-        ("calendar".to_string(), string_value(&calendar.name)),
+        ("calendar".to_string(), VmValue::string(&calendar.name)),
         (
             "local_date".to_string(),
-            string_value(&date.format("%Y-%m-%d").to_string()),
+            VmValue::string(date.format("%Y-%m-%d").to_string()),
         ),
         (
             "starts_at".to_string(),
@@ -741,7 +741,10 @@ fn parts_dict(dt: DateTime<Tz>) -> BTreeMap<String, VmValue> {
             "quarter".to_string(),
             VmValue::Int(quarter_for_month(dt.month()) as i64),
         ),
-        ("timezone".to_string(), string_value(dt.timezone().name())),
+        (
+            "timezone".to_string(),
+            VmValue::string(dt.timezone().name()),
+        ),
         (
             "offset_seconds".to_string(),
             VmValue::Int(dt.offset().fix().local_minus_utc() as i64),
@@ -750,10 +753,10 @@ fn parts_dict(dt: DateTime<Tz>) -> BTreeMap<String, VmValue> {
             "timestamp".to_string(),
             timestamp_value(dt.with_timezone(&Utc)),
         ),
-        ("iso8601".to_string(), string_value(&dt.to_rfc3339())),
+        ("iso8601".to_string(), VmValue::string(dt.to_rfc3339())),
         (
             "date".to_string(),
-            string_value(&dt.date_naive().format("%Y-%m-%d").to_string()),
+            VmValue::string(dt.date_naive().format("%Y-%m-%d").to_string()),
         ),
     ])
 }
@@ -1001,13 +1004,13 @@ fn country_by_code(raw: &str) -> Option<&'static CountryMeta> {
 
 fn country_value(country: &CountryMeta) -> VmValue {
     let default_timezone = if country.timezones.len() == 1 {
-        string_value(country.timezones[0])
+        VmValue::string(country.timezones[0])
     } else {
         VmValue::Nil
     };
     VmValue::Dict(std::sync::Arc::new(BTreeMap::from([
-        ("code".to_string(), string_value(country.code)),
-        ("name".to_string(), string_value(country.name)),
+        ("code".to_string(), VmValue::string(country.code)),
+        ("name".to_string(), VmValue::string(country.name)),
         (
             "timezones".to_string(),
             string_list_value(country.timezones.iter().copied()),
@@ -1019,11 +1022,11 @@ fn country_value(country: &CountryMeta) -> VmValue {
         ),
         (
             "currency_code".to_string(),
-            string_value(country.currency_code),
+            VmValue::string(country.currency_code),
         ),
         (
             "currency_name".to_string(),
-            string_value(country.currency_name),
+            VmValue::string(country.currency_name),
         ),
         (
             "holiday_calendars".to_string(),
@@ -1034,15 +1037,15 @@ fn country_value(country: &CountryMeta) -> VmValue {
 
 fn holiday_calendar_info(name: &'static str) -> VmValue {
     VmValue::Dict(std::sync::Arc::new(BTreeMap::from([
-        ("name".to_string(), string_value(name)),
-        ("country".to_string(), string_value("US")),
+        ("name".to_string(), VmValue::string(name)),
+        ("country".to_string(), VmValue::string("US")),
         (
             "timezone".to_string(),
-            string_value(DEFAULT_BUSINESS_TIMEZONE),
+            VmValue::string(DEFAULT_BUSINESS_TIMEZONE),
         ),
         (
             "description".to_string(),
-            string_value("United States federal observed holidays"),
+            VmValue::string("United States federal observed holidays"),
         ),
     ])))
 }
@@ -1214,13 +1217,13 @@ fn holiday_value(holiday: &Holiday) -> VmValue {
     VmValue::Dict(std::sync::Arc::new(BTreeMap::from([
         (
             "date".to_string(),
-            string_value(&holiday.date.format("%Y-%m-%d").to_string()),
+            VmValue::string(holiday.date.format("%Y-%m-%d").to_string()),
         ),
         (
             "actual_date".to_string(),
-            string_value(&holiday.actual_date.format("%Y-%m-%d").to_string()),
+            VmValue::string(holiday.actual_date.format("%Y-%m-%d").to_string()),
         ),
-        ("name".to_string(), string_value(holiday.name)),
+        ("name".to_string(), VmValue::string(holiday.name)),
         ("observed".to_string(), VmValue::Bool(holiday.observed)),
     ])))
 }
@@ -1596,12 +1599,8 @@ fn bool_arg(value: Option<&VmValue>, builtin: &str, label: &str) -> Result<Optio
     }
 }
 
-fn string_value(value: &str) -> VmValue {
-    VmValue::String(std::sync::Arc::from(value))
-}
-
 fn string_list_value<'a>(items: impl IntoIterator<Item = &'a str>) -> VmValue {
     VmValue::List(std::sync::Arc::new(
-        items.into_iter().map(string_value).collect(),
+        items.into_iter().map(VmValue::string).collect(),
     ))
 }

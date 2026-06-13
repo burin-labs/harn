@@ -1,6 +1,7 @@
 //! `LlmResult` and the Harn-facing dict builder for `llm_call` return
 //! values, plus the mock-provider completion response.
 
+use crate::value::VmDictExt;
 use std::collections::BTreeMap;
 
 use super::telemetry::ProviderTelemetry;
@@ -110,10 +111,7 @@ fn build_usage_dict(result: &LlmResult) -> BTreeMap<String, VmValue> {
         // mislabel a local model as a 100% cache miss. Surface the unknown
         // explicitly instead of fabricating a number.
         usage.insert("cache_hit_ratio".to_string(), VmValue::Nil);
-        usage.insert(
-            "cache_visibility".to_string(),
-            VmValue::String(std::sync::Arc::from("unsupported")),
-        );
+        usage.put_str("cache_visibility", "unsupported");
     }
     usage.insert(
         "cache_savings_usd".to_string(),
@@ -132,18 +130,9 @@ pub(crate) fn vm_build_llm_result(
     use crate::stdlib::json_to_vm_value;
 
     let mut dict = BTreeMap::new();
-    dict.insert(
-        "text".to_string(),
-        VmValue::String(std::sync::Arc::from(result.text.as_str())),
-    );
-    dict.insert(
-        "model".to_string(),
-        VmValue::String(std::sync::Arc::from(result.model.as_str())),
-    );
-    dict.insert(
-        "provider".to_string(),
-        VmValue::String(std::sync::Arc::from(result.provider.as_str())),
-    );
+    dict.put_str("text", result.text.as_str());
+    dict.put_str("model", result.model.as_str());
+    dict.put_str("provider", result.provider.as_str());
     dict.insert(
         "input_tokens".to_string(),
         VmValue::Int(result.input_tokens),
@@ -261,16 +250,10 @@ pub(crate) fn vm_build_llm_result(
             );
         }
         if let Some(ref body) = parse.done_marker {
-            dict.insert(
-                "done_marker".to_string(),
-                VmValue::String(std::sync::Arc::from(body.as_str())),
-            );
+            dict.put_str("done_marker", body.as_str());
         }
         if !parse.canonical.is_empty() {
-            dict.insert(
-                "canonical_text".to_string(),
-                VmValue::String(std::sync::Arc::from(parse.canonical.as_str())),
-            );
+            dict.put_str("canonical_text", parse.canonical.as_str());
         }
         // Always emit `prose` (fall back to raw text) so callers have a
         // single reliable "the answer" key regardless of whether the model
@@ -280,45 +263,24 @@ pub(crate) fn vm_build_llm_result(
         } else {
             parse.prose.clone()
         };
-        dict.insert(
-            "prose".to_string(),
-            VmValue::String(std::sync::Arc::from(prose.as_str())),
-        );
+        dict.put_str("prose", prose.as_str());
     } else {
-        dict.insert(
-            "prose".to_string(),
-            VmValue::String(std::sync::Arc::from(result.text.as_str())),
-        );
+        dict.put_str("prose", result.text.as_str());
     }
 
     if let Some(ref thinking) = result.thinking {
-        dict.insert(
-            "thinking".to_string(),
-            VmValue::String(std::sync::Arc::from(thinking.as_str())),
-        );
-        dict.insert(
-            "private_reasoning".to_string(),
-            VmValue::String(std::sync::Arc::from(thinking.as_str())),
-        );
+        dict.put_str("thinking", thinking.as_str());
+        dict.put_str("private_reasoning", thinking.as_str());
     }
     if let Some(ref summary) = result.thinking_summary {
-        dict.insert(
-            "thinking_summary".to_string(),
-            VmValue::String(std::sync::Arc::from(summary.as_str())),
-        );
+        dict.put_str("thinking_summary", summary.as_str());
     }
 
     if let Some(ref stop_reason) = result.stop_reason {
-        dict.insert(
-            "stop_reason".to_string(),
-            VmValue::String(std::sync::Arc::from(stop_reason.as_str())),
-        );
+        dict.put_str("stop_reason", stop_reason.as_str());
     }
     if let Some(ref request_id) = result.telemetry.request_id {
-        dict.insert(
-            "provider_response_id".to_string(),
-            VmValue::String(std::sync::Arc::from(request_id.as_str())),
-        );
+        dict.put_str("provider_response_id", request_id.as_str());
     }
 
     if let Some(transcript) = transcript {
@@ -334,10 +296,7 @@ pub(crate) fn vm_build_llm_result(
     } else {
         crate::visible_text::sanitize_visible_assistant_text(&result.text, false)
     };
-    dict.insert(
-        "visible_text".to_string(),
-        VmValue::String(std::sync::Arc::from(visible_text.as_str())),
-    );
+    dict.put_str("visible_text", visible_text.as_str());
     dict.insert(
         "blocks".to_string(),
         VmValue::List(std::sync::Arc::new(

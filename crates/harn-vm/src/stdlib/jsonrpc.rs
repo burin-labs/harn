@@ -21,6 +21,7 @@
 //! mock plumbing, and the egress allowlist apply identically to RPC
 //! traffic.
 
+use crate::value::VmDictExt;
 use std::cell::Cell;
 use std::collections::BTreeMap;
 
@@ -159,14 +160,8 @@ fn build_request_options(
     options: Option<&BTreeMap<String, VmValue>>,
 ) -> BTreeMap<String, VmValue> {
     let mut headers = BTreeMap::new();
-    headers.insert(
-        "Content-Type".to_string(),
-        VmValue::String(std::sync::Arc::from("application/json")),
-    );
-    headers.insert(
-        "Accept".to_string(),
-        VmValue::String(std::sync::Arc::from("application/json")),
-    );
+    headers.put_str("Content-Type", "application/json");
+    headers.put_str("Accept", "application/json");
     if let Some(extra) = options
         .and_then(|d| d.get("headers"))
         .and_then(VmValue::as_dict)
@@ -180,10 +175,7 @@ fn build_request_options(
         }
     }
     let mut request_options = BTreeMap::new();
-    request_options.insert(
-        "body".to_string(),
-        VmValue::String(std::sync::Arc::from(body)),
-    );
+    request_options.put_str("body", body);
     request_options.insert(
         "headers".to_string(),
         VmValue::Dict(std::sync::Arc::new(headers)),
@@ -222,14 +214,8 @@ fn next_id_value() -> VmValue {
 
 fn build_envelope(method: &str, params: &VmValue, id: &VmValue, notify: bool) -> VmValue {
     let mut m = BTreeMap::new();
-    m.insert(
-        "jsonrpc".to_string(),
-        VmValue::String(std::sync::Arc::from("2.0")),
-    );
-    m.insert(
-        "method".to_string(),
-        VmValue::String(std::sync::Arc::from(method)),
-    );
+    m.put_str("jsonrpc", "2.0");
+    m.put_str("method", method);
     if !matches!(params, VmValue::Nil) {
         m.insert("params".to_string(), params.clone());
     }
@@ -306,10 +292,7 @@ fn unwrap_batch_response(response: VmValue, slots: &[BatchSlot]) -> Result<VmVal
             let mut err_dict = BTreeMap::new();
             err_dict.insert("jsonrpc_error".to_string(), VmValue::Bool(true));
             err_dict.insert("code".to_string(), VmValue::Int(0));
-            err_dict.insert(
-                "message".to_string(),
-                VmValue::String(std::sync::Arc::from("missing response for call")),
-            );
+            err_dict.put_str("message", "missing response for call");
             out.push(VmValue::Dict(std::sync::Arc::new(err_dict)));
             continue;
         };
@@ -365,10 +348,7 @@ fn error_to_dict(err: &serde_json::Value) -> BTreeMap<String, VmValue> {
     let mut error_dict = BTreeMap::new();
     error_dict.insert("jsonrpc_error".to_string(), VmValue::Bool(true));
     error_dict.insert("code".to_string(), VmValue::Int(code));
-    error_dict.insert(
-        "message".to_string(),
-        VmValue::String(std::sync::Arc::from(message.to_string())),
-    );
+    error_dict.put_str("message", message);
     if let Some(data) = err.get("data") {
         error_dict.insert("data".to_string(), crate::schema::json_to_vm_value(data));
     }
@@ -396,6 +376,7 @@ fn canonical_id_key_from_vm(id: &VmValue) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::value::VmDictExt;
 
     #[test]
     fn envelope_includes_id_when_not_notify() {
@@ -440,10 +421,7 @@ mod tests {
         let body = serde_json::json!({"jsonrpc":"2.0","result":{"ok":true},"id":1});
         let mut response = BTreeMap::new();
         response.insert("status".to_string(), VmValue::Int(200));
-        response.insert(
-            "body".to_string(),
-            VmValue::String(std::sync::Arc::from(body.to_string())),
-        );
+        response.put_str("body", body.to_string());
         let result = unwrap_jsonrpc_response(VmValue::Dict(std::sync::Arc::new(response))).unwrap();
         let dict = result.as_dict().unwrap();
         match dict.get("ok") {
@@ -461,10 +439,7 @@ mod tests {
         });
         let mut response = BTreeMap::new();
         response.insert("status".to_string(), VmValue::Int(200));
-        response.insert(
-            "body".to_string(),
-            VmValue::String(std::sync::Arc::from(body.to_string())),
-        );
+        response.put_str("body", body.to_string());
         let err =
             unwrap_jsonrpc_response(VmValue::Dict(std::sync::Arc::new(response))).unwrap_err();
         match err {
@@ -482,10 +457,7 @@ mod tests {
     #[test]
     fn build_request_options_case_insensitive_override() {
         let mut user_headers = BTreeMap::new();
-        user_headers.insert(
-            "content-type".to_string(),
-            VmValue::String(std::sync::Arc::from("application/x-test")),
-        );
+        user_headers.put_str("content-type", "application/x-test");
         let mut opts = BTreeMap::new();
         opts.insert(
             "headers".to_string(),
@@ -518,10 +490,7 @@ mod tests {
         ]);
         let mut response = BTreeMap::new();
         response.insert("status".to_string(), VmValue::Int(200));
-        response.insert(
-            "body".to_string(),
-            VmValue::String(std::sync::Arc::from(body.to_string())),
-        );
+        response.put_str("body", body.to_string());
         let slots = vec![
             BatchSlot {
                 id: VmValue::Int(1),
@@ -550,10 +519,7 @@ mod tests {
         ]);
         let mut response = BTreeMap::new();
         response.insert("status".to_string(), VmValue::Int(200));
-        response.insert(
-            "body".to_string(),
-            VmValue::String(std::sync::Arc::from(body.to_string())),
-        );
+        response.put_str("body", body.to_string());
         let slots = vec![
             BatchSlot {
                 id: VmValue::Int(1),

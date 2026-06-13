@@ -1,3 +1,4 @@
+use crate::value::VmDictExt;
 use std::collections::BTreeMap;
 
 use crate::value::{VmError, VmValue};
@@ -74,10 +75,7 @@ pub(crate) fn vm_message(role: &str, content: &str) -> VmValue {
 
 pub(crate) fn vm_message_value(role: &str, content: VmValue) -> VmValue {
     let mut msg = BTreeMap::new();
-    msg.insert(
-        "role".to_string(),
-        VmValue::String(std::sync::Arc::from(role)),
-    );
+    msg.put_str("role", role);
     msg.insert("content".to_string(), content);
     VmValue::Dict(std::sync::Arc::new(msg))
 }
@@ -112,18 +110,9 @@ pub(crate) fn json_messages_to_vm(msg_list: &[serde_json::Value]) -> Vec<VmValue
                                 .and_then(|v| v.as_str())
                                 .unwrap_or_default();
                             let mut result = BTreeMap::new();
-                            result.insert(
-                                "role".to_string(),
-                                VmValue::String(std::sync::Arc::from("tool_result")),
-                            );
-                            result.insert(
-                                "tool_use_id".to_string(),
-                                VmValue::String(std::sync::Arc::from(tool_use_id)),
-                            );
-                            result.insert(
-                                "content".to_string(),
-                                VmValue::String(std::sync::Arc::from(content)),
-                            );
+                            result.put_str("role", "tool_result");
+                            result.put_str("tool_use_id", tool_use_id);
+                            result.put_str("content", content);
                             return Some(VmValue::Dict(std::sync::Arc::new(result)));
                         }
                     }

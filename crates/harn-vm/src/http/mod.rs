@@ -1,3 +1,4 @@
+use crate::value::VmDictExt;
 use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
@@ -121,10 +122,6 @@ pub(super) fn get_options_arg(args: &[VmValue], index: usize) -> BTreeMap<String
         .unwrap_or_default()
 }
 
-fn vm_string(value: impl AsRef<str>) -> VmValue {
-    VmValue::String(std::sync::Arc::from(value.as_ref()))
-}
-
 fn dict_value(entries: BTreeMap<String, VmValue>) -> VmValue {
     VmValue::Dict(std::sync::Arc::new(entries))
 }
@@ -182,8 +179,8 @@ fn closure_arg(args: &[VmValue], index: usize, builtin: &str) -> Result<Arc<VmCl
 
 fn http_server_handle_value(id: &str) -> VmValue {
     let mut dict = BTreeMap::new();
-    dict.insert("id".to_string(), vm_string(id));
-    dict.insert("kind".to_string(), vm_string("http_server"));
+    dict.insert("id".to_string(), VmValue::string(id));
+    dict.insert("kind".to_string(), VmValue::string("http_server"));
     dict_value(dict)
 }
 
@@ -203,12 +200,16 @@ fn headers_from_value(value: &VmValue) -> BTreeMap<String, VmValue> {
             .map(|headers| {
                 headers
                     .iter()
-                    .map(|(key, value)| (key.to_ascii_lowercase(), vm_string(value.display())))
+                    .map(|(key, value)| {
+                        (key.to_ascii_lowercase(), VmValue::string(value.display()))
+                    })
                     .collect()
             })
             .unwrap_or_else(|| {
                 dict.iter()
-                    .map(|(key, value)| (key.to_ascii_lowercase(), vm_string(value.display())))
+                    .map(|(key, value)| {
+                        (key.to_ascii_lowercase(), VmValue::string(value.display()))
+                    })
                     .collect()
             }),
         _ => BTreeMap::new(),
@@ -219,7 +220,7 @@ fn normalize_headers(value: Option<&VmValue>) -> BTreeMap<String, VmValue> {
     match value.and_then(VmValue::as_dict) {
         Some(headers) => headers
             .iter()
-            .map(|(key, value)| (key.to_ascii_lowercase(), vm_string(value.display())))
+            .map(|(key, value)| (key.to_ascii_lowercase(), VmValue::string(value.display())))
             .collect(),
         None => BTreeMap::new(),
     }
@@ -262,7 +263,7 @@ fn split_path_and_query(raw_path: &str) -> (String, BTreeMap<String, VmValue>) {
     let mut query_map = BTreeMap::new();
     for pair in query.split('&').filter(|part| !part.is_empty()) {
         let (key, value) = pair.split_once('=').unwrap_or((pair, ""));
-        query_map.insert(percent_decode(key), vm_string(percent_decode(value)));
+        query_map.insert(percent_decode(key), VmValue::string(percent_decode(value)));
     }
     (
         if path.is_empty() { "/" } else { path }.to_string(),
@@ -298,14 +299,14 @@ fn request_value(
     let headers = normalize_headers(input.get("headers"));
     let body = String::from_utf8_lossy(body_bytes).into_owned();
     let mut request = BTreeMap::new();
-    request.insert("method".to_string(), vm_string(method));
-    request.insert("path".to_string(), vm_string(path));
+    request.insert("method".to_string(), VmValue::string(method));
+    request.insert("path".to_string(), VmValue::string(path));
     let path_params = dict_value(path_params);
     request.insert("path_params".to_string(), path_params.clone());
     request.insert("params".to_string(), path_params);
     request.insert("query".to_string(), dict_value(query));
     request.insert("headers".to_string(), dict_value(headers));
-    request.insert("body".to_string(), vm_string(body));
+    request.insert("body".to_string(), VmValue::string(body));
     request.insert(
         "raw_body".to_string(),
         if retain_raw_body {
@@ -323,7 +324,7 @@ fn request_value(
         input
             .get("remote_addr")
             .or_else(|| input.get("remote"))
-            .map(|value| vm_string(value.display()))
+            .map(|value| VmValue::string(value.display()))
             .unwrap_or(VmValue::Nil),
     );
     request.insert(
@@ -332,7 +333,7 @@ fn request_value(
             .get("client_ip")
             .or_else(|| input.get("remote_ip"))
             .or_else(|| input.get("ip"))
-            .map(|value| vm_string(value.display()))
+            .map(|value| VmValue::string(value.display()))
             .unwrap_or(VmValue::Nil),
     );
     dict_value(request)
@@ -358,14 +359,14 @@ fn response_with_kind(
     {
         headers.insert(
             "content-type".to_string(),
-            vm_string("application/json; charset=utf-8"),
+            VmValue::string("application/json; charset=utf-8"),
         );
     } else if body_kind == "text"
         && matches!(header_lookup_value(&headers, "content-type"), VmValue::Nil)
     {
         headers.insert(
             "content-type".to_string(),
-            vm_string("text/plain; charset=utf-8"),
+            VmValue::string("text/plain; charset=utf-8"),
         );
     }
     response.insert("status".to_string(), VmValue::Int(status));
@@ -374,17 +375,17 @@ fn response_with_kind(
         "ok".to_string(),
         VmValue::Bool((200..300).contains(&status)),
     );
-    response.insert("body_kind".to_string(), vm_string(body_kind));
+    response.insert("body_kind".to_string(), VmValue::string(body_kind));
     match body {
         VmValue::Bytes(bytes) => {
             response.insert(
                 "body".to_string(),
-                vm_string(String::from_utf8_lossy(&bytes)),
+                VmValue::string(String::from_utf8_lossy(&bytes)),
             );
             response.insert("raw_body".to_string(), VmValue::Bytes(bytes));
         }
         other => {
-            response.insert("body".to_string(), vm_string(other.display()));
+            response.insert("body".to_string(), VmValue::string(other.display()));
             response.insert(
                 "raw_body".to_string(),
                 VmValue::Bytes(std::sync::Arc::new(other.display().into_bytes())),
@@ -425,17 +426,17 @@ fn body_limit_response(limit: usize, actual: usize) -> VmValue {
     let mut headers = BTreeMap::new();
     headers.insert(
         "content-type".to_string(),
-        vm_string("text/plain; charset=utf-8"),
+        VmValue::string("text/plain; charset=utf-8"),
     );
-    headers.insert("connection".to_string(), vm_string("close"));
+    headers.insert("connection".to_string(), VmValue::string("close"));
     headers.insert(
         "x-harn-body-limit".to_string(),
-        vm_string(limit.to_string()),
+        VmValue::string(limit.to_string()),
     );
     response_with_kind(
         413,
         headers,
-        vm_string(format!("request body too large: {actual} > {limit} bytes")),
+        VmValue::string(format!("request body too large: {actual} > {limit} bytes")),
         "text",
     )
 }
@@ -444,13 +445,13 @@ fn not_found_response(method: &str, path: &str) -> VmValue {
     response_with_kind(
         404,
         BTreeMap::new(),
-        vm_string(format!("no route for {method} {path}")),
+        VmValue::string(format!("no route for {method} {path}")),
         "text",
     )
 }
 
 fn unavailable_response(message: &str) -> VmValue {
-    response_with_kind(503, BTreeMap::new(), vm_string(message), "text")
+    response_with_kind(503, BTreeMap::new(), VmValue::string(message), "text")
 }
 
 fn route_template_match(template: &str, path: &str) -> Option<BTreeMap<String, VmValue>> {
@@ -467,10 +468,13 @@ fn route_template_match(template: &str, path: &str) -> Option<BTreeMap<String, V
         if tmpl.starts_with('{') && tmpl.ends_with('}') && tmpl.len() > 2 {
             params.insert(
                 tmpl[1..tmpl.len() - 1].to_string(),
-                vm_string(percent_decode(actual)),
+                VmValue::string(percent_decode(actual)),
             );
         } else if tmpl.starts_with(':') && tmpl.len() > 1 {
-            params.insert(tmpl[1..].to_string(), vm_string(percent_decode(actual)));
+            params.insert(
+                tmpl[1..].to_string(),
+                VmValue::string(percent_decode(actual)),
+            );
         } else if tmpl != actual {
             return None;
         }
@@ -651,14 +655,8 @@ fn register_http_tls_builtins(vm: &mut Vm) {
             )));
         }
         let mut extra = BTreeMap::new();
-        extra.insert(
-            "cert_path".to_string(),
-            VmValue::String(std::sync::Arc::from(cert_path)),
-        );
-        extra.insert(
-            "key_path".to_string(),
-            VmValue::String(std::sync::Arc::from(key_path)),
-        );
+        extra.put_str("cert_path", cert_path);
+        extra.put_str("key_path", key_path);
         Ok(http_server_tls_config_value(
             "pem", true, "https", true, extra,
         ))
@@ -680,14 +678,8 @@ fn register_http_tls_builtins(vm: &mut Vm) {
                     .collect(),
             )),
         );
-        extra.insert(
-            "cert_pem".to_string(),
-            VmValue::String(std::sync::Arc::from(cert.cert.pem())),
-        );
-        extra.insert(
-            "key_pem".to_string(),
-            VmValue::String(std::sync::Arc::from(cert.signing_key.serialize_pem())),
-        );
+        extra.put_str("cert_pem", cert.cert.pem());
+        extra.put_str("key_pem", cert.signing_key.serialize_pem());
         Ok(http_server_tls_config_value(
             "self_signed_dev",
             true,
@@ -979,8 +971,8 @@ fn register_http_server_builtins(vm: &mut Vm) {
         let body = args
             .first()
             .map(crate::stdlib::json::vm_value_to_json)
-            .map(vm_string)
-            .unwrap_or_else(|| vm_string("null"));
+            .map(VmValue::string)
+            .unwrap_or_else(|| VmValue::string("null"));
         let options = get_options_arg(args, 1);
         let status = options
             .get("status")
@@ -1077,15 +1069,9 @@ fn http_server_tls_config_value(
     extra: BTreeMap<String, VmValue>,
 ) -> VmValue {
     let mut dict = BTreeMap::new();
-    dict.insert(
-        "mode".to_string(),
-        VmValue::String(std::sync::Arc::from(mode)),
-    );
+    dict.put_str("mode", mode);
     dict.insert("terminate_tls".to_string(), VmValue::Bool(terminate_tls));
-    dict.insert(
-        "scheme".to_string(),
-        VmValue::String(std::sync::Arc::from(scheme)),
-    );
+    dict.put_str("scheme", scheme);
     dict.insert("hsts".to_string(), VmValue::Bool(hsts));
     for (key, value) in extra {
         dict.insert(key, value);

@@ -15,6 +15,7 @@
 //! - `source` identifies which wire format the values were lifted from so
 //!   eval scripts can route on it without re-deriving provider names.
 
+use crate::value::VmDictExt;
 use std::collections::BTreeMap;
 
 use crate::value::VmValue;
@@ -295,10 +296,7 @@ impl ProviderTelemetry {
         }
         let mut dict: BTreeMap<String, VmValue> = BTreeMap::new();
         if !self.source.is_empty() {
-            dict.insert(
-                "source".to_string(),
-                VmValue::String(std::sync::Arc::from(self.source.as_str())),
-            );
+            dict.put_str("source", self.source.as_str());
         }
         insert_opt_u64(&mut dict, "server_total_ms", self.server_total_ms);
         insert_opt_u64(&mut dict, "server_load_ms", self.server_load_ms);
@@ -317,10 +315,7 @@ impl ProviderTelemetry {
             self.runtime_context_length,
         );
         if let Some(ref model) = self.runtime_loaded_model {
-            dict.insert(
-                "runtime_loaded_model".to_string(),
-                VmValue::String(std::sync::Arc::from(model.as_str())),
-            );
+            dict.put_str("runtime_loaded_model", model.as_str());
         }
         insert_opt_u64(&mut dict, "runtime_memory_bytes", self.runtime_memory_bytes);
         insert_opt_u64(
@@ -329,16 +324,10 @@ impl ProviderTelemetry {
             self.runtime_memory_vram_bytes,
         );
         if let Some(ref expires) = self.runtime_keep_alive_until {
-            dict.insert(
-                "runtime_keep_alive_until".to_string(),
-                VmValue::String(std::sync::Arc::from(expires.as_str())),
-            );
+            dict.put_str("runtime_keep_alive_until", expires.as_str());
         }
         if let Some(ref request_id) = self.request_id {
-            dict.insert(
-                "request_id".to_string(),
-                VmValue::String(std::sync::Arc::from(request_id.as_str())),
-            );
+            dict.put_str("request_id", request_id.as_str());
         }
         Some(VmValue::Dict(std::sync::Arc::new(dict)))
     }

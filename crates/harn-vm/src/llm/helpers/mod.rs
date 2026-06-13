@@ -89,6 +89,7 @@ pub fn vm_value_to_json(val: &VmValue) -> serde_json::Value {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::value::VmDictExt;
     use std::collections::BTreeMap;
     use std::rc::Rc;
 
@@ -399,38 +400,20 @@ mod tests {
         reset_provider_key_cache();
 
         let mut opts: BTreeMap<String, VmValue> = BTreeMap::new();
-        opts.insert(
-            "provider".to_string(),
-            VmValue::String(std::sync::Arc::from("auto")),
-        );
-        opts.insert(
-            "model".to_string(),
-            VmValue::String(std::sync::Arc::from("local:gemma-4-e4b-it")),
-        );
+        opts.put_str("provider", "auto");
+        opts.put_str("model", "local:gemma-4-e4b-it");
         assert_eq!(vm_resolve_provider(&Some(opts)), "ollama");
 
         // Case-insensitive: "AUTO" should behave the same.
         let mut opts2: BTreeMap<String, VmValue> = BTreeMap::new();
-        opts2.insert(
-            "provider".to_string(),
-            VmValue::String(std::sync::Arc::from("AUTO")),
-        );
-        opts2.insert(
-            "model".to_string(),
-            VmValue::String(std::sync::Arc::from("local:foo/bar")),
-        );
+        opts2.put_str("provider", "AUTO");
+        opts2.put_str("model", "local:foo/bar");
         assert_eq!(vm_resolve_provider(&Some(opts2)), "ollama");
 
         // Explicit non-auto provider still wins.
         let mut opts3: BTreeMap<String, VmValue> = BTreeMap::new();
-        opts3.insert(
-            "provider".to_string(),
-            VmValue::String(std::sync::Arc::from("anthropic")),
-        );
-        opts3.insert(
-            "model".to_string(),
-            VmValue::String(std::sync::Arc::from("local:foo")),
-        );
+        opts3.put_str("provider", "anthropic");
+        opts3.put_str("model", "local:foo");
         assert_eq!(vm_resolve_provider(&Some(opts3)), "anthropic");
 
         unsafe {
@@ -620,14 +603,8 @@ mod tests {
         // specific model should not be silently overridden by an ACP
         // pin meant only for "no-option" calls.
         let mut explicit_opts: BTreeMap<String, VmValue> = BTreeMap::new();
-        explicit_opts.insert(
-            "model".to_string(),
-            VmValue::String(std::sync::Arc::from("gpt-4o-mini")),
-        );
-        explicit_opts.insert(
-            "provider".to_string(),
-            VmValue::String(std::sync::Arc::from("openai")),
-        );
+        explicit_opts.put_str("model", "gpt-4o-mini");
+        explicit_opts.put_str("provider", "openai");
         let opts = Some(explicit_opts);
         let provider = vm_resolve_provider(&opts);
         let model = vm_resolve_model(&opts, &provider);

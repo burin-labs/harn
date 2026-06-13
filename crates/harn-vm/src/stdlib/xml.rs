@@ -30,6 +30,7 @@
 //! prefixes are preserved verbatim in tag names; they are not
 //! resolved.
 
+use crate::value::VmDictExt;
 use std::collections::BTreeMap;
 
 use base64::engine::general_purpose::STANDARD as BASE64;
@@ -639,10 +640,7 @@ fn finalize_element(
         );
     }
     if !trimmed.is_empty() {
-        out.insert(
-            "@text".to_string(),
-            VmValue::String(std::sync::Arc::from(trimmed.to_string())),
-        );
+        out.put_str("@text", trimmed);
     }
     VmValue::Dict(std::sync::Arc::new(out))
 }

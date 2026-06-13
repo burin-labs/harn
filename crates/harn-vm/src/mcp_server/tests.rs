@@ -1,3 +1,4 @@
+use crate::value::VmDictExt;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
@@ -47,14 +48,8 @@ fn test_params_to_json_schema_empty() {
 fn test_params_to_json_schema_with_params() {
     let mut params = BTreeMap::new();
     let mut param_def = BTreeMap::new();
-    param_def.insert(
-        "type".to_string(),
-        VmValue::String(std::sync::Arc::from("string")),
-    );
-    param_def.insert(
-        "description".to_string(),
-        VmValue::String(std::sync::Arc::from("A file path")),
-    );
+    param_def.put_str("type", "string");
+    param_def.put_str("description", "A file path");
     param_def.insert("required".to_string(), VmValue::Bool(true));
     params.insert(
         "path".to_string(),
@@ -84,14 +79,8 @@ fn test_params_to_json_schema_preserves_file_input_descriptor() {
     file_descriptor.insert("maxSize".to_string(), VmValue::Int(64));
 
     let mut param_def = BTreeMap::new();
-    param_def.insert(
-        "type".to_string(),
-        VmValue::String(std::sync::Arc::from("string")),
-    );
-    param_def.insert(
-        "format".to_string(),
-        VmValue::String(std::sync::Arc::from("uri")),
-    );
+    param_def.put_str("type", "string");
+    param_def.put_str("format", "uri");
     param_def.insert(
         "x-mcp-file".to_string(),
         VmValue::Dict(std::sync::Arc::new(file_descriptor)),
@@ -118,10 +107,7 @@ fn test_params_to_json_schema_preserves_file_input_descriptor() {
 #[test]
 fn test_params_to_json_schema_simple_form() {
     let mut params = BTreeMap::new();
-    params.insert(
-        "query".to_string(),
-        VmValue::String(std::sync::Arc::from("string")),
-    );
+    params.put_str("query", "string");
     let schema = params_to_json_schema(Some(&VmValue::Dict(std::sync::Arc::new(params))));
     assert_eq!(
         schema["properties"]["query"]["type"],
