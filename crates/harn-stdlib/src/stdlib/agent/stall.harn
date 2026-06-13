@@ -585,6 +585,10 @@ fn __agent_stall_feedback_text(warning: AgentStallWarning) -> string {
     "the action `" + warning.tool_name + "` failed with the same error " + count + " times in a row"
   } else if pattern == "no_progress_monologue" {
     count + " consecutive assistant messages made no progress (no tool call)"
+  } else if pattern == "errored_no_tool_call" {
+    "your previous turn ended with a provider error and emitted no tool call ("
+      + count
+      + " in a row) — re-emit the intended tool call"
   } else if pattern == "ping_pong" {
     "the loop is ping-ponging between two actions (" + count + " cycles)"
   } else if pattern == "repeated_context_window_error" {
@@ -740,6 +744,7 @@ fn __agent_stall_observe_no_progress(
   config: AgentStallConfig,
   state: AgentStallState,
   defer_feedback: bool,
+  turn_stop_reason = "",
 ) -> AgentStallObservation {
   // An agent message breaks any action-repeat / ping-pong run.
   var next_state = __agent_stall_reset_action(state)
@@ -756,12 +761,22 @@ fn __agent_stall_observe_no_progress(
     }
   }
   next_state = __agent_stall_register_trip(next_state, config)
+  // A turn that ended with a provider error (stop_reason=error) but emitted no
+  // tool call narrated its intent without landing an action — the cheap-model
+  // eval-meter failure class. Give it cause-specific feedback instead of the
+  // generic "made no progress" nag, so the model knows its turn errored and to
+  // re-emit the intended tool call.
+  let pattern = if to_string(turn_stop_reason) == "error" {
+    "errored_no_tool_call"
+  } else {
+    "no_progress_monologue"
+  }
   let warning = __agent_stall_warning_record(
     iteration,
     "",
     {},
     "",
-    "no_progress_monologue",
+    pattern,
     next_state.no_progress_streak,
     next_state.consecutive_trips,
     next_state.hard_stop,
@@ -965,6 +980,7 @@ fn __agent_stall_observe_core(
   prev_dispatch = nil,
   turn_text = "",
   had_parse_errors = false,
+  turn_stop_reason = "",
 ) -> AgentStallObservation {
   let config = __agent_stall_config(raw_config)
   if !config.enabled {
@@ -1004,7 +1020,14 @@ fn __agent_stall_observe_core(
     // no-progress monologue candidate; a fully empty turn resets the action
     // stream.
     if to_string(turn_text) != "" || len(tool_calls) > 0 {
-      return __agent_stall_observe_no_progress(session_id, iteration, config, state, defer_feedback)
+      return __agent_stall_observe_no_progress(
+        session_id,
+        iteration,
+        config,
+        state,
+        defer_feedback,
+        turn_stop_reason,
+      )
     }
     return {
       state: __agent_stall_register_recovery(__agent_stall_reset_action(state)),
@@ -1155,6 +1178,7 @@ pub fn agent_stall_observe_tool_calls(
   turn_text = "",
   had_parse_errors = false,
   turn_made_edit = false,
+  turn_stop_reason = "",
 ) -> AgentStallObservation {
   let observation = __agent_stall_observe_core(
     session_id,
@@ -1166,6 +1190,7 @@ pub fn agent_stall_observe_tool_calls(
     prev_dispatch,
     turn_text,
     had_parse_errors,
+    turn_stop_reason,
   )
   if !observation.enabled {
     return observation

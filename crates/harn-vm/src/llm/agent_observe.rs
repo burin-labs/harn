@@ -235,6 +235,49 @@ fn is_zero_token_empty_completion(result: &super::api::LlmResult) -> bool {
         && !has_tool_search_block
 }
 
+/// A wire-level "success" whose `stop_reason` reports a provider *error* yet
+/// carries no dispatchable action. Observed live (cheap-model eval meter):
+/// a generation comes back with `stop_reason == "error"` after only narrating
+/// an intended tool call in its text/thinking ("We need to make edit to create
+/// tests/...test.cpp...") but with ZERO parsed tool calls. Unlike
+/// [`is_zero_token_empty_completion`], the reasoning channel is non-empty, so
+/// the zero-token predicate misses it — yet the loop still has no action to run
+/// and would otherwise advance on a broken turn (and reply with a generic
+/// no-progress nag that never tells the model its turn errored). Treated as a
+/// transient provider hiccup and retried in [`observed_llm_call`].
+///
+/// Token-cap truncations are excluded for the same reason as the zero-token
+/// path: a deterministic cap would just re-truncate on every retry. A turn that
+/// errored but still dispatched a tool call, or carried a server-side
+/// tool-search block, is NOT actionless — the loop has real work and is left
+/// untouched.
+fn is_errored_actionless_completion(result: &super::api::LlmResult) -> bool {
+    let stop = result
+        .stop_reason
+        .as_deref()
+        .map(str::to_ascii_lowercase)
+        .unwrap_or_default();
+    if stop != "error" {
+        return false;
+    }
+    let has_tool_search_block = result.blocks.iter().any(|block| {
+        matches!(
+            block.get("type").and_then(|value| value.as_str()),
+            Some("tool_search_query") | Some("tool_search_result")
+        )
+    });
+    result.tool_calls.is_empty() && !has_tool_search_block
+}
+
+/// Unproductive `Ok` generations the agent loop should retry rather than
+/// advance on: the zero-token empty completion (provider stall) and the
+/// errored-but-actionless completion (`stop_reason == "error"` with no
+/// dispatchable tool call). Both leave the loop with no action to run, so
+/// advancing burns an iteration on a broken turn.
+fn is_retryable_unproductive_completion(result: &super::api::LlmResult) -> bool {
+    is_zero_token_empty_completion(result) || is_errored_actionless_completion(result)
+}
+
 /// Extract retry-after delay from an error message if present.
 ///
 /// Supports both forms defined by RFC 7231 §7.1.3:
@@ -1142,23 +1185,36 @@ pub(crate) async fn observed_llm_call(
 
         match llm_result {
             Ok(result) => {
-                // Zero-token empty "success" (no content, no thinking, no tool
-                // calls): a provider hiccup, not an answer. Retry within the
-                // empty-completion budget; once exhausted, fall through and
-                // return the result unchanged so callers see today's shape
+                // An unproductive "success" the loop has no action to run on —
+                // either a zero-token empty completion (provider stall) or an
+                // errored-but-actionless turn (`stop_reason == "error"` that
+                // narrated an intended tool call but emitted none). Both are
+                // provider hiccups, not answers: retry within the
+                // empty-completion budget rather than advancing the loop on a
+                // broken turn (which would only reply with a generic
+                // no-progress nag). Once the budget is exhausted, fall through
+                // and return the result unchanged so callers see today's shape
                 // rather than a novel error.
-                if is_zero_token_empty_completion(&result)
+                if is_retryable_unproductive_completion(&result)
                     && attempt < empty_completion_retry_budget(retry_config, &opts.provider)
                 {
+                    let errored_actionless = is_errored_actionless_completion(&result);
                     annotate_current_span(&[
                         ("status", serde_json::json!("retrying")),
                         ("retry_reason", serde_json::json!("empty_completion")),
                         ("attempt", serde_json::json!(attempt)),
                     ]);
-                    let detail = format!(
-                        "provider {} model {} returned a zero-token empty completion (no content, thinking, or tool calls)",
-                        opts.provider, opts.model
-                    );
+                    let detail = if errored_actionless {
+                        format!(
+                            "provider {} model {} ended with a provider error (stop_reason=error) and emitted no tool call (the intended action went only to the reasoning channel)",
+                            opts.provider, opts.model
+                        )
+                    } else {
+                        format!(
+                            "provider {} model {} returned a zero-token empty completion (no content, thinking, or tool calls)",
+                            opts.provider, opts.model
+                        )
+                    };
                     append_llm_observability_entry(
                         "empty_completion_retry",
                         serde_json::Map::from_iter([
@@ -1860,6 +1916,17 @@ mod empty_completion_retry_tests {
         FakeLlmTurn::stream(vec![FakeLlmEvent::Done(FakeStopReason::EndTurn)])
     }
 
+    /// The live cheap-model failure: the turn narrates an intended tool call in
+    /// its text but finishes with a provider error (`stop_reason == "error"`)
+    /// and emits ZERO tool calls. Non-empty text means the zero-token predicate
+    /// misses it, yet the loop has no action to run.
+    fn errored_actionless_turn() -> FakeLlmTurn {
+        FakeLlmTurn::stream(vec![
+            FakeLlmEvent::Token("We need to make edit to create tests/foo_test.cpp".into()),
+            FakeLlmEvent::Done(FakeStopReason::Custom("error".into())),
+        ])
+    }
+
     fn retry_config(retries: usize) -> LlmRetryConfig {
         LlmRetryConfig {
             retries,
@@ -1905,6 +1972,81 @@ mod empty_completion_retry_tests {
             );
             reset_agent_trace_state();
             // _guard drop asserts both scripted turns were consumed.
+        });
+    }
+
+    #[test]
+    fn errored_actionless_completion_retries_then_succeeds() {
+        // An errored turn that narrated intent but emitted no tool call must be
+        // RETRIED (not advanced on); the next good turn proceeds.
+        current_thread_runtime().block_on(async {
+            reset_agent_trace_state();
+            let _guard =
+                install_fake_llm_script(FakeLlmScript::new().push(errored_actionless_turn()).push(
+                    FakeLlmTurn::stream(vec![
+                        FakeLlmEvent::Token("recovered".into()),
+                        FakeLlmEvent::Done(FakeStopReason::EndTurn),
+                    ]),
+                ));
+            let result = observed_llm_call(
+                &fake_opts(),
+                None,
+                None,
+                &retry_config(1),
+                None,
+                false,
+                false,
+                None,
+            )
+            .await
+            .expect("errored-actionless retry should recover");
+            assert_eq!(result.text, "recovered");
+
+            let retries: Vec<usize> = peek_agent_trace()
+                .iter()
+                .filter_map(|event| match event {
+                    AgentTraceEvent::EmptyCompletionRetry { attempt, .. } => Some(*attempt),
+                    _ => None,
+                })
+                .collect();
+            assert_eq!(retries, vec![1], "expected exactly one retry trace event");
+            reset_agent_trace_state();
+            // _guard drop asserts both scripted turns were consumed.
+        });
+    }
+
+    #[test]
+    fn errored_actionless_completion_returns_unchanged_after_budget_exhausted() {
+        // Retries stay bounded: once the budget is spent, the errored turn is
+        // returned unchanged (callers see today's shape, not a novel error).
+        current_thread_runtime().block_on(async {
+            reset_agent_trace_state();
+            let _guard = install_fake_llm_script(
+                FakeLlmScript::new()
+                    .push(errored_actionless_turn())
+                    .push(errored_actionless_turn()),
+            );
+            let result = observed_llm_call(
+                &fake_opts(),
+                None,
+                None,
+                &retry_config(1),
+                None,
+                false,
+                false,
+                None,
+            )
+            .await
+            .expect("exhausted retries must return Ok, not a new error");
+            assert!(result.tool_calls.is_empty());
+            assert_eq!(result.stop_reason.as_deref(), Some("error"));
+
+            let retries = peek_agent_trace()
+                .iter()
+                .filter(|event| matches!(event, AgentTraceEvent::EmptyCompletionRetry { .. }))
+                .count();
+            assert_eq!(retries, 1, "exactly one retry before the budget is spent");
+            reset_agent_trace_state();
         });
     }
 
@@ -2090,6 +2232,48 @@ mod empty_completion_retry_tests {
         let mut with_tool_search = empty_result();
         with_tool_search.blocks = vec![serde_json::json!({"type": "tool_search_query"})];
         assert!(!is_zero_token_empty_completion(&with_tool_search));
+    }
+
+    #[test]
+    fn errored_actionless_completion_predicate_edges() {
+        // The live failure shape: stop_reason=error, the model narrated an
+        // intended tool call in its text but emitted ZERO tool calls. The
+        // zero-token predicate misses it (non-empty text), but it IS retryable.
+        let mut narrated = empty_result();
+        narrated.stop_reason = Some("error".to_string());
+        narrated.text = "We need to make edit to create tests/foo_test.cpp".to_string();
+        narrated.output_tokens = 42;
+        assert!(is_errored_actionless_completion(&narrated));
+        assert!(!is_zero_token_empty_completion(&narrated));
+        assert!(is_retryable_unproductive_completion(&narrated));
+
+        // Case-insensitive on the stop reason.
+        let mut upper = narrated.clone();
+        upper.stop_reason = Some("ERROR".to_string());
+        assert!(is_errored_actionless_completion(&upper));
+
+        // A clean finish is not the errored-actionless case (it may still be a
+        // genuine answer or a billed-noncommittal parse error — not ours).
+        let mut clean = narrated.clone();
+        clean.stop_reason = Some("stop".to_string());
+        assert!(!is_errored_actionless_completion(&clean));
+
+        // An errored turn that STILL dispatched a tool call has real work — the
+        // loop must not treat it as actionless.
+        let mut errored_with_call = narrated.clone();
+        errored_with_call.tool_calls = vec![serde_json::json!({"id": "t1", "name": "edit"})];
+        assert!(!is_errored_actionless_completion(&errored_with_call));
+
+        // An errored turn whose only activity was a server-side tool search is
+        // not actionless either (no dispatchable call, but the search counts).
+        let mut errored_with_search = narrated;
+        errored_with_search.blocks = vec![serde_json::json!({"type": "tool_search_query"})];
+        assert!(errored_with_search.tool_calls.is_empty());
+        assert!(!is_errored_actionless_completion(&errored_with_search));
+
+        // The zero-token empty completion still flows through the unified
+        // predicate.
+        assert!(is_retryable_unproductive_completion(&empty_result()));
     }
 }
 
