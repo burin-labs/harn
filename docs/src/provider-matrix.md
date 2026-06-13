@@ -147,6 +147,7 @@ Regenerate with `make gen-provider-matrix` and verify with `make check-provider-
 | `openrouter` | `minimax/minimax-m2*` | `any` | no | no | no | no | no | yes | no | `delimited` | `plain` | `none` | no | `system` | `json` | `none` | `native` | yes | yes | `unknown` | yes | no |
 | `openrouter` | `z-ai/glm-5*` | `any` | no | no | no | no | no | yes | no | `native` | `plain` | `native_json` | no | `system` | `json` | `none` | `native` | yes | yes | `unknown` | yes | no |
 | `openrouter` | `kwaipilot/kat-coder-pro-v2` | `any` | no | no | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `none` | `native` | yes | yes | `interchangeable` | yes | yes |
+| `openrouter` | `openai/gpt-oss-*` | `any` | `effort` | no | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `reasoning_summary` | `native` | yes | yes | `unknown` | yes | no |
 | `openrouter` | `stepfun/step-3.7-flash` | `any` | `enabled` | no | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `inline` | `native` | yes | yes | `interchangeable` | yes | yes |
 | `sambanova` | `*deepseek*` | `any` | `enabled` | no | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `inline` | `native` | yes | yes | `unknown` | yes | no |
 | `sambanova` | `*llama*` | `any` | no | yes | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `none` | `native` | yes | yes | `unknown` | yes | no |
