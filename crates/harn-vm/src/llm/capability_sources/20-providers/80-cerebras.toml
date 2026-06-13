@@ -19,8 +19,14 @@
 # (and only working) channel. Pinned EXPLICITLY because `gpt-oss-120b` is a
 # catalogued model and the catalog invariant requires every catalogued model's
 # rule to set native_tools + preferred_tool_format. (groq / together gpt-oss
-# rows carry the same stale json pin and should get the same flip.)
+# rows are now native too.)
 # To change, set `preferred_tool_format` ("native" | "json" | "text").
+#
+# `reasoning_required_for_tools = true`: gpt-oss (Harmony) calls tools INSIDE
+# the chain-of-thought channel, so reasoning-off breaks tool calling. Combined
+# with reasoning_effort_levels above, reasoning_policy floors an auto "off" to
+# the lowest accepted effort ("low") for tool tasks instead of disabling
+# reasoning. Must NOT carry a Qwen-style `auto_reasoning_overrides = "off"`.
 [[provider.cerebras]]
 model_match = "gpt-oss-*"
 native_tools = true
@@ -29,6 +35,7 @@ structured_output = "native"
 thinking_modes = ["effort"]
 reasoning_effort_supported = true
 reasoning_effort_levels = ["low", "medium", "high"]
+reasoning_required_for_tools = true
 prefers_xml_scaffolding = false
 prefers_markdown_scaffolding = true
 structured_output_mode = "native_json"

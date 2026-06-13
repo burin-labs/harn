@@ -104,19 +104,45 @@ fn resolve_policy(
     // known regressions are declared alongside that model's other wire
     // capabilities, not as hard-coded provider/model patterns here.
     //
-    // The canonical case is Qwen3 with native tools: thinking mode plus
-    // tool calls is a binary on/off regression in the model weights — the
-    // model narrates its tool-call intent inside the reasoning trace and
-    // emits zero structured `tool_calls`. Qwen's own guidance is to
-    // disable reasoning when tool-calling. See
-    // https://github.com/QwenLM/Qwen3.6/issues/89 for the trained-behavior
-    // analysis. Routes that need the downgrade declare
-    // `auto_reasoning_overrides = { agent = "off" }`; callers that
-    // explicitly set a non-auto policy keep their override.
+    // Two opposite tool-calling reasoning quirks are declared in the
+    // matrix, not branched on here:
+    //
+    //   * Qwen3 (reasoning-OFF-for-tools): thinking mode plus tool calls
+    //     is a binary on/off regression in the model weights — the model
+    //     narrates its tool-call intent inside the reasoning trace and
+    //     emits zero structured `tool_calls`. Qwen's own guidance is to
+    //     disable reasoning when tool-calling. See
+    //     https://github.com/QwenLM/Qwen3.6/issues/89. Routes that need
+    //     the downgrade declare `auto_reasoning_overrides = { agent =
+    //     "off" }`.
+    //
+    //   * gpt-oss / Harmony (reasoning-ON-for-tools): the model performs
+    //     tool calls *inside* the Harmony chain-of-thought channel, so
+    //     disabling reasoning yields 0 tool_calls and a tiny
+    //     billed-noncommittal completion. Live OpenRouter probe of
+    //     openai/gpt-oss-120b: reasoning disabled -> 0/N tool calls;
+    //     reasoning low/default -> clean native tool calls. Such routes
+    //     declare `reasoning_required_for_tools = true` and MUST NOT carry
+    //     the Qwen-style `agent/verify/code = "off"` override.
+    //
+    // Callers that explicitly set a non-auto policy keep their override.
     if policy == "auto" {
         if let Some(override_level) = caps.auto_reasoning_overrides.get(&task) {
             level = override_level.clone();
         }
+    }
+    // Defense-in-depth for the gpt-oss / Harmony quirk: if this route calls
+    // tools inside its reasoning channel, never resolve a tool-bearing task
+    // to reasoning-off — that is the self-inflicted billed-noncommittal
+    // failure. Floor to the lowest supported effort (or "low") so no future
+    // auto default, capability override, or session pin can re-introduce
+    // it. Explicit non-auto caller policies are honored above; this guard
+    // only rewrites a resolved "off" for the tool tasks.
+    if caps.reasoning_required_for_tools
+        && level == "off"
+        && matches!(task.as_str(), "agent" | "code" | "verify")
+    {
+        level = lowest_tool_reasoning_level(caps);
     }
     let Some((thinking, effective_level)) = thinking_for_reasoning_level(&level, caps) else {
         return Ok(None);
@@ -341,6 +367,24 @@ fn lowest_supported_effort(caps: &Capabilities) -> Option<ReasoningEffort> {
                 .then(|| reasoning_effort_from_level(candidate))
                 .flatten()
         })
+}
+
+/// Lowest reasoning level to use when a route requires reasoning for tool
+/// calls (`reasoning_required_for_tools`) but the policy resolved to "off".
+/// Prefer the route's lowest declared `reasoning_effort_levels` entry (so
+/// Cerebras gpt-oss, which rejects "minimal"/"none", floors to its accepted
+/// "low"); fall back to "low" otherwise.
+fn lowest_tool_reasoning_level(caps: &Capabilities) -> String {
+    for candidate in ["minimal", "low", "medium", "high", "xhigh"] {
+        if caps
+            .reasoning_effort_levels
+            .iter()
+            .any(|supported| supported == candidate)
+        {
+            return candidate.to_string();
+        }
+    }
+    "low".to_string()
 }
 
 fn budget_for_reasoning_level(level: &str) -> u32 {
@@ -679,6 +723,127 @@ auto_reasoning_overrides = { agent = "off" }
             Some("disabled")
         );
         crate::llm::capabilities::clear_user_overrides();
+    }
+
+    fn agent_opts(provider: &str, model: &str, task: &str, policy: &str) -> BTreeMap<String, VmValue> {
+        BTreeMap::from([
+            (
+                "provider".to_string(),
+                VmValue::String(std::sync::Arc::from(provider)),
+            ),
+            (
+                "model".to_string(),
+                VmValue::String(std::sync::Arc::from(model)),
+            ),
+            (
+                "reasoning_policy".to_string(),
+                VmValue::String(std::sync::Arc::from(policy)),
+            ),
+            (
+                "reasoning_task".to_string(),
+                VmValue::String(std::sync::Arc::from(task)),
+            ),
+        ])
+    }
+
+    #[test]
+    fn gpt_oss_tool_tasks_keep_reasoning_on_across_providers() {
+        // gpt-oss performs tool calls inside the reasoning channel, so the
+        // auto policy must NEVER resolve a tool-bearing task to disabled
+        // reasoning. Verified for every catalogued gpt-oss route.
+        for (provider, model) in [
+            ("openrouter", "openai/gpt-oss-120b"),
+            ("groq", "openai/gpt-oss-120b"),
+            ("groq", "groq/openai/gpt-oss-120b"),
+            ("cerebras", "gpt-oss-120b"),
+            ("together", "openai/gpt-oss-120b"),
+        ] {
+            for task in ["agent", "code", "verify"] {
+                let out = apply(agent_opts(provider, model, task, "auto"));
+                let thinking = out
+                    .get("thinking")
+                    .and_then(VmValue::as_dict)
+                    .unwrap_or_else(|| panic!("{provider}:{model} task={task} produced no thinking"));
+                let mode = thinking.get("mode").map(VmValue::display);
+                assert_ne!(
+                    mode.as_deref(),
+                    Some("disabled"),
+                    "{provider}:{model} task={task} disabled reasoning (breaks gpt-oss tool calls)"
+                );
+                assert_eq!(
+                    mode.as_deref(),
+                    Some("effort"),
+                    "{provider}:{model} task={task} expected effort thinking"
+                );
+                // Never the reasoning-off `none` effort either.
+                assert_ne!(
+                    thinking.get("level").map(VmValue::display).as_deref(),
+                    Some("none"),
+                    "{provider}:{model} task={task} floored to reasoning-off effort"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn gpt_oss_off_pin_floors_to_low_for_tool_tasks() {
+        // Even an explicit `off` pin must not disable reasoning for a
+        // gpt-oss tool task — the required-for-tools guard floors it to the
+        // lowest supported effort.
+        let out = apply(agent_opts("cerebras", "gpt-oss-120b", "agent", "off"));
+        let thinking = out
+            .get("thinking")
+            .and_then(VmValue::as_dict)
+            .expect("thinking");
+        assert_eq!(
+            thinking.get("mode").map(VmValue::display).as_deref(),
+            Some("effort")
+        );
+        assert_eq!(
+            thinking.get("level").map(VmValue::display).as_deref(),
+            Some("low"),
+            "cerebras gpt-oss off-pin should floor to its lowest accepted effort"
+        );
+    }
+
+    #[test]
+    fn gpt_oss_chat_task_may_still_disable_reasoning() {
+        // The guard only protects tool-bearing tasks. A plain chat turn (no
+        // tools) is free to run reasoning-off — the quirk is specifically
+        // about tool calls in the reasoning channel.
+        let out = apply(agent_opts("cerebras", "gpt-oss-120b", "chat", "auto"));
+        let thinking = out.get("thinking").and_then(VmValue::as_dict);
+        // chat+auto resolves to "off"; cerebras gpt-oss floors off to its
+        // lowest accepted effort ("low") via reasoning_effort_levels, but is
+        // NOT forced on by the required-for-tools guard. Either way it must
+        // not be the disabled-thinking mode.
+        if let Some(thinking) = thinking {
+            assert_ne!(
+                thinking.get("mode").map(VmValue::display).as_deref(),
+                Some("disabled")
+            );
+        }
+    }
+
+    #[test]
+    fn qwen_tool_tasks_still_disable_reasoning() {
+        // Regression guard: the gpt-oss fix must not change the opposite
+        // Qwen3 quirk. Qwen agent tool tasks still resolve to disabled.
+        for (provider, model) in [
+            ("ollama", "qwen3.6:35b-a3b-coding-nvfp4"),
+            ("openrouter", "qwen/qwen3.6-35b-a3b"),
+        ] {
+            let out = apply(agent_opts(provider, model, "agent", "auto"));
+            let thinking = out
+                .get("thinking")
+                .and_then(VmValue::as_dict)
+                .expect("thinking");
+            assert_eq!(
+                thinking.get("mode").map(VmValue::display).as_deref(),
+                Some("disabled"),
+                "{provider}:{model} qwen agent reasoning should stay disabled"
+            );
+        }
     }
 
     #[test]

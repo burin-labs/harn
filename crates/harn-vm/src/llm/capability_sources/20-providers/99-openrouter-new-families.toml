@@ -61,6 +61,41 @@ prefers_role_developer = false
 prefers_xml_tools = false
 thinking_block_style = "none"
 
+# OpenAI gpt-oss (Harmony) served via OpenRouter. Without an explicit row this
+# slug fell through provider_family openrouter -> openai, matched no `gpt-*`
+# rule (the `openai/` prefix and the unparseable `oss` "version" both fail the
+# match), and landed on a capability-less catch-all that declares NO reasoning
+# support — so the policy resolver could not even materialize reasoning.
+#
+# `reasoning_required_for_tools = true`: gpt-oss performs tool calls INSIDE the
+# Harmony chain-of-thought channel, so disabling reasoning breaks tool calling.
+# Live OpenRouter probe (openai/gpt-oss-120b, 2026-06-13, identical tool
+# request): reasoning {enabled:false} -> 0 tool_calls + null completion_tokens
+# (the billed-noncommittal failure); reasoning {effort:low} -> 1 clean native
+# tool call; no reasoning field (provider default) -> 1 clean native tool call.
+# `reasoning_disable_supported = false` keeps Harn from ever emitting the
+# `reasoning:{enabled:false}` disable directive on the wire, and the
+# required-for-tools flag keeps the auto policy from flooring tool tasks to off.
+# Must NOT carry a Qwen-style `auto_reasoning_overrides = "off"`.
+[[provider.openrouter]]
+model_match = "openai/gpt-oss-*"
+native_tools = true
+preferred_tool_format = "native"
+structured_output = "native"
+thinking_modes = ["effort"]
+reasoning_effort_supported = true
+reasoning_effort_levels = ["low", "medium", "high"]
+reasoning_disable_supported = false
+reasoning_required_for_tools = true
+text_tool_wire_format_supported = true
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "native_json"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "reasoning_summary"
+
 [[provider.openrouter]]
 model_match = "stepfun/step-3.7-flash"
 native_tools = true

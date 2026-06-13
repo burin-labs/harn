@@ -100,6 +100,13 @@
 #   reasoning_disable_supported:
 #                     whether `reasoning: {enabled:false}` is accepted when
 #                     the provider uses an enabled/disabled reasoning switch.
+#   reasoning_required_for_tools:
+#                     whether the model calls tools *inside* its reasoning
+#                     channel, so disabling reasoning breaks tool calling
+#                     (the gpt-oss / Harmony quirk — opposite of Qwen3).
+#                     When true, reasoning_policy never resolves the auto
+#                     reasoning level to "off" for tool tasks (agent/code/
+#                     verify); it floors to the lowest supported effort.
 #   reasoning_text_promotable:
 #                     whether a reasoning-only clean stop may be promoted into
 #                     visible text when the provider omits content.

@@ -104,6 +104,13 @@
 #   reasoning_disable_supported:
 #                     whether `reasoning: {enabled:false}` is accepted when
 #                     the provider uses an enabled/disabled reasoning switch.
+#   reasoning_required_for_tools:
+#                     whether the model calls tools *inside* its reasoning
+#                     channel, so disabling reasoning breaks tool calling
+#                     (the gpt-oss / Harmony quirk — opposite of Qwen3).
+#                     When true, reasoning_policy never resolves the auto
+#                     reasoning level to "off" for tool tasks (agent/code/
+#                     verify); it floors to the lowest supported effort.
 #   reasoning_text_promotable:
 #                     whether a reasoning-only clean stop may be promoted into
 #                     visible text when the provider omits content.
@@ -1575,6 +1582,17 @@ thinking_block_style = "inline"
 # https://github.com/QwenLM/Qwen3.6/issues/89 for the trained-behavior
 # analysis and Qwen's own recommendation to disable reasoning when
 # tool-calling.
+#
+# NOTE — two opposite tool-calling reasoning quirks live in this matrix:
+#   * Qwen3 = reasoning-OFF-for-tools (this row): Qwen narrates its
+#     tool-call intent inside the reasoning trace and emits zero structured
+#     `tool_calls`, so the override forces reasoning off for tool tasks.
+#   * gpt-oss / Harmony = reasoning-ON-for-tools (see the gpt-oss rows in
+#     60-together / 70-...-groq / 80-cerebras / 99-openrouter-new-families):
+#     gpt-oss performs tool calls INSIDE the chain-of-thought channel, so
+#     disabling reasoning breaks tool calling. Those rows carry
+#     `reasoning_required_for_tools = true` and must NOT copy this Qwen-style
+#     `auto_reasoning_overrides = "off"`. Do not conflate the two.
 # OpenRouter routes Anthropic models verbatim — same wire shape as
 # direct anthropic, just wrapped in the OpenAI-compat chat-completions
 # envelope at the OpenRouter edge. The provider_family chain takes
@@ -2612,6 +2630,13 @@ thinking_block_style = "none"
 # Pinned EXPLICITLY (not inherited) because `openai/gpt-oss-120b` is a
 # catalogued model and the catalog invariant requires the rule to set both
 # fields. To change, set `preferred_tool_format` ("native" | "json" | "text").
+#
+# `reasoning_required_for_tools = true`: gpt-oss (Harmony) performs tool
+# calls INSIDE the chain-of-thought channel, so reasoning-off breaks tool
+# calling (billed-noncommittal: 0 tool_calls + tiny completion). This is the
+# OPPOSITE of the Qwen3 quirk — gpt-oss must NOT carry an
+# `auto_reasoning_overrides = { agent/verify/code = "off" }` override; the
+# flag makes reasoning_policy refuse to floor tool tasks to off.
 [[provider.together]]
 model_match = "openai/gpt-oss-*"
 native_tools = true
@@ -2619,6 +2644,7 @@ preferred_tool_format = "native"
 structured_output = "native"
 thinking_modes = ["effort"]
 reasoning_effort_supported = true
+reasoning_required_for_tools = true
 prefers_xml_scaffolding = false
 prefers_markdown_scaffolding = true
 structured_output_mode = "native_json"
@@ -2806,6 +2832,14 @@ thinking_block_style = "reasoning_summary"
 # catalogued model and the catalog invariant requires every catalogued model's
 # rule to set native_tools + preferred_tool_format. To change, set
 # `preferred_tool_format` ("native" | "json" | "text").
+#
+# `reasoning_required_for_tools = true`: gpt-oss (Harmony) calls tools INSIDE
+# the chain-of-thought channel, so reasoning-off breaks tool calling. Live
+# Groq probe (2026-06-13): reasoning_effort=low -> 1 clean tool call;
+# reasoning_effort=none -> rejected ("must be one of low/medium/high"). So
+# this row only ever sends {low,medium,high} (reasoning_effort_levels) and
+# never floors to off for tool tasks. Must NOT carry a Qwen-style
+# `auto_reasoning_overrides = "off"`.
 [[provider.groq]]
 model_match = "*gpt-oss-*"
 native_tools = true
@@ -2815,6 +2849,8 @@ text_tool_wire_format_supported = true
 structured_output = "native"
 thinking_modes = ["effort"]
 reasoning_effort_supported = true
+reasoning_effort_levels = ["low", "medium", "high"]
+reasoning_required_for_tools = true
 prefers_xml_scaffolding = false
 prefers_markdown_scaffolding = true
 structured_output_mode = "native_json"
@@ -2860,8 +2896,14 @@ thinking_block_style = "none"
 # (and only working) channel. Pinned EXPLICITLY because `gpt-oss-120b` is a
 # catalogued model and the catalog invariant requires every catalogued model's
 # rule to set native_tools + preferred_tool_format. (groq / together gpt-oss
-# rows carry the same stale json pin and should get the same flip.)
+# rows are now native too.)
 # To change, set `preferred_tool_format` ("native" | "json" | "text").
+#
+# `reasoning_required_for_tools = true`: gpt-oss (Harmony) calls tools INSIDE
+# the chain-of-thought channel, so reasoning-off breaks tool calling. Combined
+# with reasoning_effort_levels above, reasoning_policy floors an auto "off" to
+# the lowest accepted effort ("low") for tool tasks instead of disabling
+# reasoning. Must NOT carry a Qwen-style `auto_reasoning_overrides = "off"`.
 [[provider.cerebras]]
 model_match = "gpt-oss-*"
 native_tools = true
@@ -2870,6 +2912,7 @@ structured_output = "native"
 thinking_modes = ["effort"]
 reasoning_effort_supported = true
 reasoning_effort_levels = ["low", "medium", "high"]
+reasoning_required_for_tools = true
 prefers_xml_scaffolding = false
 prefers_markdown_scaffolding = true
 structured_output_mode = "native_json"
@@ -3332,6 +3375,41 @@ supports_assistant_prefill = false
 prefers_role_developer = false
 prefers_xml_tools = false
 thinking_block_style = "none"
+
+# OpenAI gpt-oss (Harmony) served via OpenRouter. Without an explicit row this
+# slug fell through provider_family openrouter -> openai, matched no `gpt-*`
+# rule (the `openai/` prefix and the unparseable `oss` "version" both fail the
+# match), and landed on a capability-less catch-all that declares NO reasoning
+# support — so the policy resolver could not even materialize reasoning.
+#
+# `reasoning_required_for_tools = true`: gpt-oss performs tool calls INSIDE the
+# Harmony chain-of-thought channel, so disabling reasoning breaks tool calling.
+# Live OpenRouter probe (openai/gpt-oss-120b, 2026-06-13, identical tool
+# request): reasoning {enabled:false} -> 0 tool_calls + null completion_tokens
+# (the billed-noncommittal failure); reasoning {effort:low} -> 1 clean native
+# tool call; no reasoning field (provider default) -> 1 clean native tool call.
+# `reasoning_disable_supported = false` keeps Harn from ever emitting the
+# `reasoning:{enabled:false}` disable directive on the wire, and the
+# required-for-tools flag keeps the auto policy from flooring tool tasks to off.
+# Must NOT carry a Qwen-style `auto_reasoning_overrides = "off"`.
+[[provider.openrouter]]
+model_match = "openai/gpt-oss-*"
+native_tools = true
+preferred_tool_format = "native"
+structured_output = "native"
+thinking_modes = ["effort"]
+reasoning_effort_supported = true
+reasoning_effort_levels = ["low", "medium", "high"]
+reasoning_disable_supported = false
+reasoning_required_for_tools = true
+text_tool_wire_format_supported = true
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "native_json"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "reasoning_summary"
 
 [[provider.openrouter]]
 model_match = "stepfun/step-3.7-flash"
