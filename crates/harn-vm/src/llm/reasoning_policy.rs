@@ -723,7 +723,12 @@ auto_reasoning_overrides = { agent = "off" }
         crate::llm::capabilities::clear_user_overrides();
     }
 
-    fn agent_opts(provider: &str, model: &str, task: &str, policy: &str) -> BTreeMap<String, VmValue> {
+    fn agent_opts(
+        provider: &str,
+        model: &str,
+        task: &str,
+        policy: &str,
+    ) -> BTreeMap<String, VmValue> {
         BTreeMap::from([
             (
                 "provider".to_string(),
@@ -761,7 +766,9 @@ auto_reasoning_overrides = { agent = "off" }
                 let thinking = out
                     .get("thinking")
                     .and_then(VmValue::as_dict)
-                    .unwrap_or_else(|| panic!("{provider}:{model} task={task} produced no thinking"));
+                    .unwrap_or_else(|| {
+                        panic!("{provider}:{model} task={task} produced no thinking")
+                    });
                 let mode = thinking.get("mode").map(VmValue::display);
                 assert_ne!(
                     mode.as_deref(),
