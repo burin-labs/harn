@@ -14,7 +14,7 @@ No benchmark summary is baked into this checked-in page. To layer local empirica
 | `Anthropic` | Anthropic Messages API | `haiku` | `native` | yes | yes | `tool_use` / `xml_tagged` | `enabled` | yes | `high` | `not_recorded` |
 | `Azure Openai` | OpenAI-compatible chat completions | `azure_openai:gpt-*` | `native` | yes | yes | `none` / `native_json` | none | no | `provider_default` | `not_recorded` |
 | `Bedrock` | AWS Bedrock Converse | `bedrock:anthropic.claude-*` | `native` | yes | yes | `none` / `xml_tagged` | none | no | `provider_default` | `not_recorded` |
-| `Cerebras` | OpenAI-compatible chat completions | `cerebras/gpt-oss-120b` | `native` | no | yes | `native` / `native_json` | `effort,reasoning_effort` | no | `high` | `not_recorded` |
+| `Cerebras` | OpenAI-compatible chat completions | `cerebras/gpt-oss-120b` | `native` | yes | yes | `native` / `native_json` | `effort,reasoning_effort` | no | `high` | `not_recorded` |
 | `Cohere` | OpenAI-compatible chat completions | `cohere:command-a-plus-05-2026` | `native` | yes | yes | `native` / `native_json` | `adaptive` | no | `high` | `not_recorded` |
 | `Dashscope` | OpenAI-compatible chat completions | `dashscope:qwen3.6*` | `native` | yes | yes | `native` / `delimited` | `disable_directive:/no_think,enabled` | no | `provider_default` | `not_recorded` |
 | `Deepseek` | OpenAI-compatible chat completions | `deepseek:deepseek-v4-flash` | `native` | yes | yes | `native` / `native_json` | `enabled` | yes | `high` | `not_recorded` |

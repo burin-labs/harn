@@ -6,23 +6,25 @@
 # floors to the lowest accepted effort (`low`) instead of sending a value the
 # endpoint cannot template.
 #
-# gpt-oss is harmonized to ONE tool format across every provider that serves
-# it (cerebras / groq / together): `json` (fenced-JSON), the GLOBAL text-channel
-# default. This row used to pin `native`, but gpt-oss native streaming
-# tool-calls have returned EMPTY payloads in evals (the user's
-# ~/.config/harn/providers.toml pins cerebras-gpt-oss to a text format for
-# exactly that reason). json is structurally delimiter-safe (a JSON string
-# can't carry a raw newline, so `<<EOF` content never collides with the call
-# wrapper) and strictly beats heredoc text, so json is the evidenced-best
-# direction for the unmeasured native defect. Pinned EXPLICITLY (not inherited)
-# because `gpt-oss-120b` is a catalogued model and the catalog invariant
-# requires every catalogued model's rule to set native_tools +
-# preferred_tool_format. To change, set `preferred_tool_format` ("native" |
-# "text").
+# gpt-oss on Cerebras uses NATIVE tool calls. The prior `json`/text pin was a
+# defensive workaround for an "empty native streaming payload" defect that no
+# longer reproduces: 2026-06-12 live probes (raw curl + Harn's streaming path)
+# confirm Cerebras gpt-oss-120b returns clean OpenAI-shape `tool_calls` in both
+# non-streaming and SSE modes, and Harn's index-keyed SSE reassembler
+# (transport.rs `oai_tool_map`) accumulates the arg-fragment deltas correctly
+# (3/3 tool_calls=1 end-to-end). Conversely, BOTH `json` and `text` formats
+# yield ZERO parsed calls because gpt-oss does not emit Harn's ```tool/name/args
+# contract — it emits a bare `{"tool":..,"arguments":..}` dialect that the
+# fenced-JSON parser does not recognize. native is therefore the measured-best
+# (and only working) channel. Pinned EXPLICITLY because `gpt-oss-120b` is a
+# catalogued model and the catalog invariant requires every catalogued model's
+# rule to set native_tools + preferred_tool_format. (groq / together gpt-oss
+# rows carry the same stale json pin and should get the same flip.)
+# To change, set `preferred_tool_format` ("native" | "json" | "text").
 [[provider.cerebras]]
 model_match = "gpt-oss-*"
-native_tools = false
-preferred_tool_format = "json"
+native_tools = true
+preferred_tool_format = "native"
 structured_output = "native"
 thinking_modes = ["effort"]
 reasoning_effort_supported = true

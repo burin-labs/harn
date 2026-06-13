@@ -2099,13 +2099,13 @@ anthropic_beta_features = ["fine-grained-tool-streaming-2025-05-14"]
         let caps = lookup("cerebras", "gpt-oss-120b");
         assert_eq!(caps.message_wire_format, "openai");
         assert_eq!(caps.native_tool_wire_format, "openai");
-        // gpt-oss is harmonized to ONE tool format across cerebras/groq/together:
-        // the global text-channel `json` default. The cerebras row no longer
-        // advertises `native_tools` (native streaming tool-calls return empty
-        // payloads in evals), so it resolves to the json text channel — matching
-        // the together gpt-oss row, not the family `native` fallback.
-        assert!(!caps.native_tools);
-        assert_eq!(caps.preferred_tool_format.as_deref(), Some("json"));
+        // gpt-oss uses NATIVE tool calls across cerebras/groq/together. The
+        // prior `json` pin was a defensive workaround for an empty-native-payload
+        // defect that no longer reproduces; under json/text gpt-oss emits a bare
+        // {"tool","arguments"} dialect the fenced-JSON parser rejects (zero
+        // parsed calls), so native is the only working channel.
+        assert!(caps.native_tools);
+        assert_eq!(caps.preferred_tool_format.as_deref(), Some("native"));
     }
 
     #[test]

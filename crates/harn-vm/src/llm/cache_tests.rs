@@ -232,3 +232,80 @@ fn mem_cache_clear_resets_metrics_and_entries() {
     assert_eq!(metrics_snapshot(&options).hits, 0);
     assert_eq!(metrics_snapshot(&options).misses, 0);
 }
+
+// Regression for the cache-key omission bug: tools, structured-output schema,
+// and stop sequences each change the model's output, so two calls differing
+// only in one of them must produce DIFFERENT cache keys (otherwise a wrong
+// cached response is returned). Calls that don't carry these keep stable keys.
+#[cfg(test)]
+mod cache_key_identity_tests {
+    use super::*;
+    use std::sync::Arc;
+
+    fn key(prompt: &str, options: VmValue) -> String {
+        let mut out = String::new();
+        let result = llm_cache_key_builtin(
+            &[VmValue::String(Arc::from(prompt)), VmValue::Nil, options],
+            &mut out,
+        )
+        .expect("cache key");
+        match result {
+            VmValue::String(s) => s.to_string(),
+            other => panic!("expected string key, got {other:?}"),
+        }
+    }
+
+    fn base_options() -> std::collections::BTreeMap<String, VmValue> {
+        let mut map = std::collections::BTreeMap::new();
+        map.insert("provider".to_string(), VmValue::String(Arc::from("mock")));
+        map.insert("model".to_string(), VmValue::String(Arc::from("mock")));
+        map
+    }
+
+    fn dict(map: std::collections::BTreeMap<String, VmValue>) -> VmValue {
+        VmValue::Dict(Arc::new(map))
+    }
+
+    #[test]
+    fn identical_options_produce_identical_keys() {
+        let a = key("hello", dict(base_options()));
+        let b = key("hello", dict(base_options()));
+        assert_eq!(a, b);
+    }
+
+    #[test]
+    fn differing_tools_produce_different_keys() {
+        let without = key("hello", dict(base_options()));
+        let mut with_tools = base_options();
+        with_tools.insert(
+            "tools".to_string(),
+            VmValue::List(Arc::new(vec![VmValue::String(Arc::from("read_file"))])),
+        );
+        let with = key("hello", dict(with_tools));
+        assert_ne!(without, with, "tools must participate in the cache key");
+    }
+
+    #[test]
+    fn differing_schema_produces_different_keys() {
+        let without = key("hello", dict(base_options()));
+        let mut with_schema = base_options();
+        with_schema.insert(
+            "json_schema".to_string(),
+            VmValue::String(Arc::from(r#"{"type":"object"}"#)),
+        );
+        let with = key("hello", dict(with_schema));
+        assert_ne!(without, with, "schema must participate in the cache key");
+    }
+
+    #[test]
+    fn differing_stop_produces_different_keys() {
+        let without = key("hello", dict(base_options()));
+        let mut with_stop = base_options();
+        with_stop.insert(
+            "stop".to_string(),
+            VmValue::List(Arc::new(vec![VmValue::String(Arc::from("\n\n"))])),
+        );
+        let with = key("hello", dict(with_stop));
+        assert_ne!(without, with, "stop must participate in the cache key");
+    }
+}

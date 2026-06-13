@@ -19,10 +19,6 @@ fn _progress_only() {
   return [{name: "agent_progress", arguments: {message: "still working"}}]
 }
 
-fn _real_only() {
-  return [{name: "edit", arguments: {path: "x.rs"}}]
-}
-
 fn _observe(state, calls, iteration) {
   return agent_stall_observe_tool_calls("unit", calls, iteration, CONFIG, state, true, nil, "")
 }
@@ -40,20 +36,35 @@ pipeline test_agent_progress_spam_trips_no_progress(task) {
 }
 
 pipeline test_real_tool_calls_do_not_trip_no_progress(task) {
-  // Real (substantive) tool calls are genuine activity — no no-progress trip.
-  let o1 = _observe(agent_stall_initial_state(), _real_only(), 1)
-  let o2 = _observe(o1.state, _real_only(), 2)
-  let o3 = _observe(o2.state, _real_only(), 3)
+  // Real (substantive) tool calls that make genuine progress are activity — no
+  // no-progress trip. The calls must be DISTINCT: three byte-identical calls
+  // with no dispatch outcome would (correctly) trip the signature-only
+  // repeated-same-signature fallback (threshold 3), which is thrash, not
+  // progress. Distinct edits are real forward motion.
+  let o1 = _observe(agent_stall_initial_state(), [{name: "edit", arguments: {path: "a.rs"}}], 1)
+  let o2 = _observe(o1.state, [{name: "edit", arguments: {path: "b.rs"}}], 2)
+  let o3 = _observe(o2.state, [{name: "edit", arguments: {path: "c.rs"}}], 3)
   assert(o3.warning == nil)
 }
 
 pipeline test_mixed_turn_with_real_call_is_progress(task) {
-  // agent_progress alongside a real edit is progress — the real call carries the
-  // action stream, so the no-progress streak never accumulates.
-  let mixed = [{name: "agent_progress", arguments: {}}, {name: "edit", arguments: {path: "y.rs"}}]
-  let o1 = _observe(agent_stall_initial_state(), mixed, 1)
-  let o2 = _observe(o1.state, mixed, 2)
-  let o3 = _observe(o2.state, mixed, 3)
+  // agent_progress alongside a real (distinct) edit is progress — the real call
+  // carries the action stream, so the no-progress streak never accumulates.
+  let o1 = _observe(
+    agent_stall_initial_state(),
+    [{name: "agent_progress", arguments: {}}, {name: "edit", arguments: {path: "a.rs"}}],
+    1,
+  )
+  let o2 = _observe(
+    o1.state,
+    [{name: "agent_progress", arguments: {}}, {name: "edit", arguments: {path: "b.rs"}}],
+    2,
+  )
+  let o3 = _observe(
+    o2.state,
+    [{name: "agent_progress", arguments: {}}, {name: "edit", arguments: {path: "c.rs"}}],
+    3,
+  )
   assert(o3.warning == nil)
 }
 

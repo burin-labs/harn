@@ -65,22 +65,24 @@ prefers_role_developer = false
 prefers_xml_tools = false
 thinking_block_style = "reasoning_summary"
 
-# gpt-oss is harmonized to ONE tool format across every provider that serves
-# it (cerebras / groq / together): `json` (fenced-JSON), the GLOBAL text-channel
-# default. This row used to pin `native`, but gpt-oss native streaming
-# tool-calls have returned EMPTY payloads in evals (the user's
-# ~/.config/harn/providers.toml pins cerebras-gpt-oss to a text format for
-# exactly that reason). json is structurally delimiter-safe and strictly beats
-# heredoc text, so json is the evidenced-best direction for the unmeasured
-# native defect. Pinned EXPLICITLY (not inherited) because
-# `groq/openai/gpt-oss-120b` is a catalogued model and the catalog invariant
-# requires every catalogued model's rule to set native_tools +
-# preferred_tool_format. To change, set `preferred_tool_format`
-# ("native" | "text").
+# gpt-oss on Groq uses NATIVE tool calls. The prior `json`/text pin was a
+# defensive workaround for an "empty native streaming payload" defect that no
+# longer reproduces: 2026-06-12 live probes (raw curl + Harn's streaming path)
+# confirm gpt-oss-120b returns clean OpenAI-shape `tool_calls` in both
+# non-streaming and SSE modes, and Harn's index-keyed SSE reassembler
+# (transport.rs `oai_tool_map`) accumulates the arg-fragment deltas correctly.
+# Conversely, BOTH `json` and `text` formats yield ZERO parsed calls because
+# gpt-oss does not emit Harn's ```tool/name/args contract — it emits a bare
+# `{"tool":..,"arguments":..}` dialect that the fenced-JSON parser does not
+# recognize. native is therefore the measured-best (and only working) channel.
+# Pinned EXPLICITLY (not inherited) because `groq/openai/gpt-oss-120b` is a
+# catalogued model and the catalog invariant requires every catalogued model's
+# rule to set native_tools + preferred_tool_format. To change, set
+# `preferred_tool_format` ("native" | "json" | "text").
 [[provider.groq]]
 model_match = "*gpt-oss-*"
-native_tools = false
-preferred_tool_format = "json"
+native_tools = true
+preferred_tool_format = "native"
 recommended_endpoint = "/chat/completions"
 text_tool_wire_format_supported = true
 structured_output = "native"

@@ -138,6 +138,70 @@ fn is_denied_tool_result_object(value: &serde_json::Value) -> bool {
             .is_some_and(|status| status == "blocked")
 }
 
+/// Classify a tool result that came back as `Ok(value)` (no Rust-level error).
+///
+/// A tool/host primitive can complete the dispatch without throwing yet still
+/// signal a *failure* in the result body — e.g. the host bridge returns a
+/// structured `{"ok": false, ...}` / `{"status": "error", ...}` / `{"error":
+/// "..."}` envelope, or an MCP-shaped `{"isError": true}` body that wasn't
+/// already converted to a thrown error. Returning `None` means the result is a
+/// genuine success; `Some(error_category)` means it represents a failure that
+/// must be surfaced as `ok: false` to the agent loop, not laundered into a
+/// success. Denials are classified by [`is_denied_tool_result`] upstream; this
+/// covers the broader failure shapes.
+pub(super) fn ok_result_failure_category(value: &serde_json::Value) -> Option<&'static str> {
+    // The body may be a JSON string carrying the real object (host bridges that
+    // stringify their envelope) — inspect the parsed form in that case.
+    if let Some(parsed) = value
+        .as_str()
+        .and_then(|text| serde_json::from_str::<serde_json::Value>(text).ok())
+    {
+        return ok_result_failure_category_object(&parsed);
+    }
+    ok_result_failure_category_object(value)
+}
+
+fn ok_result_failure_category_object(value: &serde_json::Value) -> Option<&'static str> {
+    // Only structured objects carry these signals; scalars/strings/arrays are
+    // ordinary successful output.
+    let obj = value.as_object()?;
+
+    // Explicit boolean failure flags win first.
+    if obj.get("ok").and_then(serde_json::Value::as_bool) == Some(false)
+        || obj.get("success").and_then(serde_json::Value::as_bool) == Some(false)
+        || obj.get("isError").and_then(serde_json::Value::as_bool) == Some(true)
+    {
+        return Some("tool_error");
+    }
+
+    // Failure status strings.
+    if let Some(status) = obj.get("status").and_then(serde_json::Value::as_str) {
+        let status = status.trim().to_ascii_lowercase();
+        if matches!(status.as_str(), "error" | "failed" | "failure") {
+            return Some("tool_error");
+        }
+    }
+
+    // A non-empty `error` string with no contradicting success signal. Guard
+    // against false positives: `{"ok": true, "error": null}` and an empty error
+    // are successes; only a populated error with no positive ok/status counts.
+    if let Some(error) = obj.get("error").and_then(serde_json::Value::as_str) {
+        if !error.trim().is_empty()
+            && obj.get("ok").and_then(serde_json::Value::as_bool) != Some(true)
+            && obj.get("success").and_then(serde_json::Value::as_bool) != Some(true)
+            && obj
+                .get("status")
+                .and_then(serde_json::Value::as_str)
+                .map(str::trim)
+                != Some("ok")
+        {
+            return Some("tool_error");
+        }
+    }
+
+    None
+}
+
 pub(super) fn next_call_id() -> String {
     uuid::Uuid::now_v7().to_string()
 }
@@ -737,6 +801,71 @@ mod tests {
             "status": "completed",
             "stdout": "ok"
         })));
+    }
+
+    #[test]
+    fn ok_result_failure_category_detects_failure_bodies() {
+        // The pre-fix bug: these all returned Ok(value) from dispatch and were
+        // laundered into `ok: true` because they aren't *denials*.
+        assert_eq!(
+            ok_result_failure_category(&serde_json::json!({"ok": false, "error": "boom"})),
+            Some("tool_error")
+        );
+        assert_eq!(
+            ok_result_failure_category(&serde_json::json!({"success": false})),
+            Some("tool_error")
+        );
+        assert_eq!(
+            ok_result_failure_category(&serde_json::json!({"status": "error", "stderr": "x"})),
+            Some("tool_error")
+        );
+        assert_eq!(
+            ok_result_failure_category(&serde_json::json!({"status": "failed"})),
+            Some("tool_error")
+        );
+        assert_eq!(
+            ok_result_failure_category(&serde_json::json!({"isError": true, "content": []})),
+            Some("tool_error")
+        );
+        assert_eq!(
+            ok_result_failure_category(&serde_json::json!({"error": "disk full"})),
+            Some("tool_error")
+        );
+        // Stringified envelope (host bridges that stringify) still detected.
+        let stringified =
+            serde_json::Value::String(r#"{"ok": false, "error": "boom"}"#.to_string());
+        assert_eq!(ok_result_failure_category(&stringified), Some("tool_error"));
+    }
+
+    #[test]
+    fn ok_result_failure_category_passes_through_successes() {
+        assert_eq!(
+            ok_result_failure_category(&serde_json::json!({"ok": true, "stdout": "done"})),
+            None
+        );
+        assert_eq!(
+            ok_result_failure_category(&serde_json::json!({"status": "completed"})),
+            None
+        );
+        // A null/empty error with positive signals is a success, not a failure.
+        assert_eq!(
+            ok_result_failure_category(&serde_json::json!({"ok": true, "error": null})),
+            None
+        );
+        assert_eq!(
+            ok_result_failure_category(&serde_json::json!({"ok": true, "error": "  "})),
+            None
+        );
+        // Plain string output and arrays are ordinary success.
+        assert_eq!(
+            ok_result_failure_category(&serde_json::Value::String("file contents".to_string())),
+            None
+        );
+        assert_eq!(
+            ok_result_failure_category(&serde_json::json!(["a", "b"])),
+            None
+        );
+        assert_eq!(ok_result_failure_category(&serde_json::Value::Null), None);
     }
 
     #[test]

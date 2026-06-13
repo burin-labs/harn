@@ -947,6 +947,17 @@ async fn run_detector_loop(
 }
 
 /// Configuration for LLM call retries.
+///
+/// Default 0: a raw `llm_call` is fail-fast by default (documented contract;
+/// see the quickref), and the `llm_retries` option is deprecated in favor of
+/// `with_retry` (removed in v0.9.0). Resilience for the agent/eval path comes
+/// from the agent options presets (`agent/options.harn` sets `llm_retries: 2`)
+/// and the proactive per-route rate limiter (sliding-window + cooldown), NOT
+/// from a global default — flipping this to >=2 silently retried transient
+/// errors for EVERY caller (one-shot library calls, conformance scenarios, the
+/// CLI playground replay), changing the documented fail-fast semantics. Callers
+/// that want retries opt in via `llm_retries`/`with_retry`; only *retryable*
+/// errors would consume the budget (`is_retryable_llm_error`).
 pub(crate) const DEFAULT_LLM_CALL_RETRIES: usize = 0;
 pub(crate) const DEFAULT_LLM_CALL_BACKOFF_MS: u64 = 250;
 
@@ -1943,6 +1954,79 @@ mod empty_completion_retry_tests {
             .await
             .expect("empty completion without budget returns as today");
             assert!(result.text.is_empty());
+        });
+    }
+
+    #[test]
+    fn rate_limit_429_with_retry_after_triggers_bounded_retry() {
+        // A 429 carrying a Retry-After hint must engage the dormant backoff
+        // loop (retries > 0) and recover on the next turn, rather than failing
+        // hard on the first transient error. The _guard drop asserts BOTH
+        // scripted turns were consumed — i.e. the retry actually fired.
+        current_thread_runtime().block_on(async {
+            reset_agent_trace_state();
+            let _guard = install_fake_llm_script(
+                FakeLlmScript::new()
+                    .push(FakeLlmTurn::Error(
+                        crate::llm::fake::FakeLlmError::new(
+                            crate::value::ErrorCategory::RateLimit,
+                            "429 too many requests",
+                        )
+                        .with_retry_after_ms(10),
+                    ))
+                    .push(FakeLlmTurn::stream(vec![
+                        FakeLlmEvent::Token("recovered".into()),
+                        FakeLlmEvent::Done(FakeStopReason::EndTurn),
+                    ])),
+            );
+            let result = observed_llm_call(
+                &fake_opts(),
+                None,
+                None,
+                &retry_config(2),
+                None,
+                false,
+                false,
+                None,
+            )
+            .await
+            .expect("429 with retry-after should retry and recover");
+            assert_eq!(result.text, "recovered");
+            reset_agent_trace_state();
+        });
+    }
+
+    #[test]
+    fn rate_limit_429_fails_hard_when_retry_budget_is_zero() {
+        // Regression guard: at retries=0 the same 429 is a hard failure (this
+        // is exactly the gap the default bump to >=2 closes). Only one turn is
+        // scripted, so a hidden retry would panic the guard on drop.
+        current_thread_runtime().block_on(async {
+            let _guard = install_fake_llm_script(
+                FakeLlmScript::new().push(FakeLlmTurn::Error(
+                    crate::llm::fake::FakeLlmError::new(
+                        crate::value::ErrorCategory::RateLimit,
+                        "429 too many requests",
+                    )
+                    .with_retry_after_ms(10),
+                )),
+            );
+            let err = observed_llm_call(
+                &fake_opts(),
+                None,
+                None,
+                &retry_config(0),
+                None,
+                false,
+                false,
+                None,
+            )
+            .await
+            .expect_err("429 with no retry budget must surface as an error");
+            assert!(
+                is_retryable_llm_error(&err),
+                "the surfaced 429 should classify as retryable"
+            );
         });
     }
 

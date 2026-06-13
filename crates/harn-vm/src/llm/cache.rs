@@ -253,6 +253,40 @@ fn llm_cache_key_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue,
     identity.insert("temperature", json_float_or_null(temperature));
     identity.insert("top_p", json_float_or_null(top_p));
 
+    // Tools, structured-output schema, and stop sequences all change the
+    // model's output, so two calls that differ ONLY in one of these must NOT
+    // collide on the same cache key. They were previously omitted, which
+    // returned a wrong cached response (e.g. a tool-less reply served to a
+    // tool-bearing call, or a free-text reply served to a json_schema call).
+    // Inserted only when present so plain-text calls keep stable keys.
+    let opt_json = |key: &str| -> Option<serde_json::Value> {
+        options
+            .as_ref()
+            .and_then(|map| map.get(key))
+            .filter(|v| !matches!(v, VmValue::Nil))
+            .map(super::helpers::vm_value_to_json)
+    };
+    if let Some(tools) = opt_json("tools") {
+        identity.insert("tools", tools);
+    }
+    // Structured-output identity: any of the schema-carrying option keys
+    // (set by `llm_call_structured` and friends) participate in the key.
+    for schema_key in [
+        "output_schema",
+        "json_schema",
+        "output_format",
+        "response_format",
+    ] {
+        if let Some(schema) = opt_json(schema_key) {
+            identity.insert(schema_key, schema);
+        }
+    }
+    for stop_key in ["stop", "stop_sequences"] {
+        if let Some(stop) = opt_json(stop_key) {
+            identity.insert(stop_key, stop);
+        }
+    }
+
     let canonical = canonical_json_bytes(&serde_json::to_value(identity).map_err(|error| {
         VmError::Runtime(format!(
             "__llm_cache_key: failed to encode identity: {error}"

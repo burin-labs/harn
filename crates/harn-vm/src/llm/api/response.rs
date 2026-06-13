@@ -184,6 +184,17 @@ pub(super) fn extract_openai_choice_logprobs(choice: &serde_json::Value) -> Vec<
         .collect()
 }
 
+/// Char-boundary-safe preview of the first `max_chars` characters of `s`.
+///
+/// `&s[..s.len().min(N)]` panics when byte index `N` lands mid-UTF8-codepoint
+/// — which happens whenever a model emits malformed tool-argument JSON that
+/// contains multibyte characters straddling the cut. These previews only feed a
+/// `__parse_error` message, so a panic here would crash response parsing for an
+/// otherwise-recoverable error. Slicing by chars is always boundary-safe.
+fn preview_chars(s: &str, max_chars: usize) -> String {
+    s.chars().take(max_chars).collect()
+}
+
 fn parse_tool_arguments(arguments: Option<&serde_json::Value>) -> serde_json::Value {
     match arguments {
         Some(serde_json::Value::String(text)) => serde_json::from_str(text).unwrap_or_else(|err| {
@@ -191,7 +202,7 @@ fn parse_tool_arguments(arguments: Option<&serde_json::Value>) -> serde_json::Va
                 "__parse_error": format!(
                     "Could not parse tool arguments as JSON: {}. Raw input: {}",
                     err,
-                    &text[..text.len().min(200)]
+                    preview_chars(text, 200)
                 )
             })
         }),
@@ -822,7 +833,7 @@ pub(crate) fn parse_llm_response(
                             "__parse_error": format!(
                                 "Could not parse tool arguments as JSON: {}. Raw input: {}",
                                 e,
-                                &args_str[..args_str.len().min(200)]
+                                preview_chars(args_str, 200)
                             )
                         })
                     }
@@ -1036,8 +1047,33 @@ mod tests {
     use super::{
         extract_cache_read_tokens, extract_cache_write_tokens, extract_openai_choice_logprobs,
         is_billed_noncommittal_completion, parse_llm_response, parse_openai_responses_response,
-        CompletionContractSignals,
+        parse_tool_arguments, preview_chars, CompletionContractSignals,
     };
+
+    #[test]
+    fn parse_tool_arguments_preview_does_not_panic_mid_utf8() {
+        // 199 ASCII bytes + a 3-byte char means byte index 200 lands INSIDE the
+        // multibyte char. The old `&text[..text.len().min(200)]` slice panicked
+        // here; the char-safe preview must not. The body is invalid JSON so we
+        // hit the __parse_error path that builds the preview.
+        let mut malformed = "a".repeat(199);
+        malformed.push('→'); // 3 bytes (E2 86 92), straddles byte 200
+        malformed.push_str(" not json");
+        let value = parse_tool_arguments(Some(&serde_json::Value::String(malformed.clone())));
+        let preview = value["__parse_error"]
+            .as_str()
+            .expect("parse error preview");
+        assert!(preview.contains("Could not parse tool arguments"));
+    }
+
+    #[test]
+    fn preview_chars_is_char_boundary_safe_and_caps_chars() {
+        let s = format!("{}é", "x".repeat(199)); // 199 ASCII + 2-byte char
+        let out = preview_chars(&s, 200);
+        assert_eq!(out.chars().count(), 200);
+        // Multibyte content survives intact without a panic.
+        assert!(preview_chars("→→→", 1).chars().count() <= 1);
+    }
 
     #[test]
     fn contract_violation_fires_on_billed_noop_tool_turn() {

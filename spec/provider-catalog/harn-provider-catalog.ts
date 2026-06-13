@@ -2270,14 +2270,14 @@ export const harnProviderCatalog: HarnProviderCatalog = {
       "served_variant": "cerebras-wafer-scale",
       "api_dialect": "openai_chat",
       "rate_limits": {
-        "rpm": 5,
-        "tpm": 30000,
+        "rpm": 250,
+        "tpm": 250000,
         "tph": 1000000,
         "tpd": 1000000,
-        "tier": "free",
+        "tier": "developer",
         "source_url": "https://inference-docs.cerebras.ai/support/rate-limits",
-        "last_verified": "2026-06-05",
-        "notes": "Published Free Trial row; Developer (Pay as You Go) lists 1K RPM and 1M TPM with no hourly/daily cap."
+        "last_verified": "2026-06-12",
+        "notes": "Developer (Pay as You Go) tier confirmed live from x-ratelimit-limit-requests/tokens response headers 2026-06-12 (250 RPM / 250K TPM). The prior Free Trial row (5 RPM / 30K TPM) needlessly throttled the proactive sliding-window limiter to a crawl. Override per-deployment with HARN_RATE_LIMIT_CEREBRAS_RPM / HARN_RATE_LIMIT_CEREBRAS_TPM."
       },
       "architecture": {
         "parameter_count_b": 117.0,
@@ -2296,10 +2296,10 @@ export const harnProviderCatalog: HarnProviderCatalog = {
         ]
       },
       "tool_support": {
-        "native": false,
+        "native": true,
         "text": true,
-        "preferred_format": "json",
-        "parity": "text_only",
+        "preferred_format": "native",
+        "parity": "unknown",
         "tool_search": []
       },
       "structured_output": "native",
@@ -3213,10 +3213,10 @@ export const harnProviderCatalog: HarnProviderCatalog = {
         ]
       },
       "tool_support": {
-        "native": false,
+        "native": true,
         "text": true,
-        "preferred_format": "json",
-        "parity": "text_only",
+        "preferred_format": "native",
+        "parity": "unknown",
         "tool_search": []
       },
       "structured_output": "native",

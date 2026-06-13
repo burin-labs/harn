@@ -188,10 +188,10 @@
         ]
       },
       "capabilities": {
-        "native_tools": false,
+        "native_tools": true,
         "text_tools": true,
-        "preferred_tool_format": "json",
-        "tool_mode_parity": "text_only",
+        "preferred_tool_format": "native",
+        "tool_mode_parity": "unknown",
         "structured_output_transport": "native",
         "structured_output_mode": "native_json",
         "streaming": true,
