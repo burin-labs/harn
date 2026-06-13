@@ -948,15 +948,17 @@ async fn run_detector_loop(
 
 /// Configuration for LLM call retries.
 ///
-/// Default >= 2 so the existing retry-after + per-route cooldown + bounded
-/// exponential-backoff machinery (`extract_retry_after_ms`,
-/// `observe_retry_after_for_llm_call`, `base_retry_backoff_ms`) actually
-/// engages for the agent/eval path. At 0 the retry loop never executed, so a
-/// single transient 429/5xx/connection blip was a hard failure even though all
-/// the backoff plumbing was correct but dormant. Callers can still override via
-/// the `llm_retries` option; only *retryable* errors consume the budget
-/// (`is_retryable_llm_error`), so non-transient failures still fail fast.
-pub(crate) const DEFAULT_LLM_CALL_RETRIES: usize = 2;
+/// Default 0: a raw `llm_call` is fail-fast by default (documented contract;
+/// see the quickref), and the `llm_retries` option is deprecated in favor of
+/// `with_retry` (removed in v0.9.0). Resilience for the agent/eval path comes
+/// from the agent options presets (`agent/options.harn` sets `llm_retries: 2`)
+/// and the proactive per-route rate limiter (sliding-window + cooldown), NOT
+/// from a global default — flipping this to >=2 silently retried transient
+/// errors for EVERY caller (one-shot library calls, conformance scenarios, the
+/// CLI playground replay), changing the documented fail-fast semantics. Callers
+/// that want retries opt in via `llm_retries`/`with_retry`; only *retryable*
+/// errors would consume the budget (`is_retryable_llm_error`).
+pub(crate) const DEFAULT_LLM_CALL_RETRIES: usize = 0;
 pub(crate) const DEFAULT_LLM_CALL_BACKOFF_MS: u64 = 250;
 
 /// Built-in retry budget for zero-token empty completions. Applies even when
