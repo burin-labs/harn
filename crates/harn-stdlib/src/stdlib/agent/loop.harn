@@ -2648,6 +2648,7 @@ fn __agent_loop_run(message, session, initial_opts) {
         visible_text,
         had_parse_errors,
         stall_prev_turn_made_edit,
+        llm_result?.stop_reason ?? "",
       )
       stall_state = stall_observation.state
       stall_enabled_seen = stall_enabled_seen || stall_observation.enabled

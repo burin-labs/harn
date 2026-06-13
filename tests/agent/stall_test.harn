@@ -116,6 +116,38 @@ pipeline test_parse_error_turn_is_not_no_progress(task) {
   assert(o3.state.no_progress_streak == 0)
 }
 
+fn _observe_errored_no_call(state, iteration) {
+  // 0 tool calls + narration text, turn ended with a PROVIDER ERROR
+  // (turn_stop_reason = "error"): the cheap-model eval-meter failure class.
+  return agent_stall_observe_tool_calls(
+    "unit",
+    [],
+    iteration,
+    CONFIG,
+    state,
+    true,
+    nil,
+    "We need to make edit to create tests/foo_test.cpp",
+    false,
+    false,
+    "error",
+  )
+}
+
+pipeline test_errored_no_tool_call_gets_cause_specific_feedback(task) {
+  // A turn that ended with a provider error and emitted no tool call gets the
+  // cause-specific `errored_no_tool_call` warning (so the model is told its
+  // turn errored and to re-emit the intended call), NOT the generic
+  // no_progress_monologue nag.
+  let o1 = _observe_errored_no_call(agent_stall_initial_state(), 1)
+  assert(o1.warning == nil)
+  let o2 = _observe_errored_no_call(o1.state, 2)
+  assert(o2.warning == nil)
+  let o3 = _observe_errored_no_call(o2.state, 3)
+  assert(o3.warning != nil)
+  assert(o3.warning.pattern == "errored_no_tool_call")
+}
+
 pipeline test_text_only_turn_without_parse_errors_still_trips(task) {
   // Control: the SAME 0-call + text turn WITHOUT parse errors is a real
   // no-progress monologue and must still trip at the threshold. Guards against
