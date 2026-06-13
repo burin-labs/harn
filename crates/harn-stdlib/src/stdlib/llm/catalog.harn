@@ -130,6 +130,18 @@ pub fn lineage_of(model_id) {
  * Options: `{author_model, author_provider?, intent?, max_price_multiplier?}`.
  * `intent` is `"review"`, `"critique"`, or `"plan_review"`.
  *
+ * Returns `{intent, author, reviewer, fallback, reason, ...}`. When no priced
+ * different-family reviewer is available the selector does NOT fail; it returns
+ * `fallback == true` with `reviewer == author` (self-review). A caller that
+ * needs structural independence must check `fallback` and refuse to proceed,
+ * branching on the machine-readable `fallback_code` rather than parsing the
+ * human-readable `reason`/`fallback_reason`. `fallback_code` is one of:
+ *   - `"unknown_author_family"`       — author family unresolved
+ *   - `"no_diff_family_within_price"` — a peer exists but exceeds max_price_multiplier
+ *   - `"no_diff_family_serverless"`   — no active serverless cross-family peer cataloged
+ *   - `"all_diff_family_excluded"`    — peers exist but were all excluded
+ * It is absent on the success path (`fallback == false`).
+ *
  * @effects: []
  * @errors: ["llm_complementary_reviewer: ..."]
  * @api_stability: experimental
