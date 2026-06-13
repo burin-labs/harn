@@ -97,6 +97,11 @@
 #                     accepted reasoning_effort values when the provider
 #                     accepts only a subset of Harn's neutral enum.
 #   reasoning_none_supported: whether reasoning_effort="none" is accepted.
+#   max_thinking_budget:
+#                     max thinkingBudget tokens for high/xhigh reasoning when
+#                     the provider takes an explicit token budget (native
+#                     Gemini API thinkingConfig). Differs per model
+#                     (2.5 Flash 24576, 2.5 Pro 32768).
 #   reasoning_disable_supported:
 #                     whether `reasoning: {enabled:false}` is accepted when
 #                     the provider uses an enabled/disabled reasoning switch.

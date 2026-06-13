@@ -101,6 +101,11 @@
 #                     accepted reasoning_effort values when the provider
 #                     accepts only a subset of Harn's neutral enum.
 #   reasoning_none_supported: whether reasoning_effort="none" is accepted.
+#   max_thinking_budget:
+#                     max thinkingBudget tokens for high/xhigh reasoning when
+#                     the provider takes an explicit token budget (native
+#                     Gemini API thinkingConfig). Differs per model
+#                     (2.5 Flash 24576, 2.5 Pro 32768).
 #   reasoning_disable_supported:
 #                     whether `reasoning: {enabled:false}` is accepted when
 #                     the provider uses an enabled/disabled reasoning switch.
@@ -2490,12 +2495,60 @@ prefers_role_developer = false
 prefers_xml_tools = false
 thinking_block_style = "inline"
 
+# Native Gemini API thinking budgets (generationConfig.thinkingConfig.
+# thinkingBudget) are declared here instead of hard-coded model.contains()
+# branches in gemini.rs. Flash caps at 24576 and CAN disable thinking
+# (thinkingBudget:0); Pro caps at 32768 and CANNOT disable. Flash rows are
+# listed first (first match wins). Effort levels map to budgets in the
+# provider: minimal/low -> 1024, medium -> 8192, high/xhigh -> this ceiling.
+[[provider.gemini]]
+model_match = "gemini-2.5-flash*"
+native_tools = true
+preferred_tool_format = "native"
+structured_output = "native"
+thinking_modes = ["enabled", "adaptive", "effort"]
+max_thinking_budget = 24576
+reasoning_disable_supported = true
+vision_supported = true
+audio_supported = true
+pdf_supported = true
+files_api_supported = true
+prefers_xml_scaffolding = true
+prefers_markdown_scaffolding = true
+structured_output_mode = "native_json"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "reasoning_summary"
+
+[[provider.gemini]]
+model_match = "models/gemini-2.5-flash*"
+native_tools = true
+preferred_tool_format = "native"
+structured_output = "native"
+thinking_modes = ["enabled", "adaptive", "effort"]
+max_thinking_budget = 24576
+reasoning_disable_supported = true
+vision_supported = true
+audio_supported = true
+pdf_supported = true
+files_api_supported = true
+prefers_xml_scaffolding = true
+prefers_markdown_scaffolding = true
+structured_output_mode = "native_json"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "reasoning_summary"
+
 [[provider.gemini]]
 model_match = "gemini-2.5*"
 native_tools = true
 preferred_tool_format = "native"
 structured_output = "native"
 thinking_modes = ["enabled", "adaptive", "effort"]
+max_thinking_budget = 32768
+reasoning_disable_supported = false
 vision_supported = true
 audio_supported = true
 pdf_supported = true
@@ -2514,6 +2567,8 @@ native_tools = true
 preferred_tool_format = "native"
 structured_output = "native"
 thinking_modes = ["enabled", "adaptive", "effort"]
+max_thinking_budget = 32768
+reasoning_disable_supported = false
 vision_supported = true
 audio_supported = true
 pdf_supported = true
