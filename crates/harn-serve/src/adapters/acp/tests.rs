@@ -1063,6 +1063,7 @@ async fn acp_fs_mode_commit_and_discard_staged_hostlib_writes() {
         tools::{permissions, ToolsCapability},
         BuiltinRegistry, HostlibCapability,
     };
+    use harn_vm::VmDictExt;
 
     permissions::reset();
     permissions::enable_for_test();
