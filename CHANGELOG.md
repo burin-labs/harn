@@ -8,6 +8,135 @@ highlights live in [CHANGELOG-pre-0.6.md](CHANGELOG-pre-0.6.md).
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.8.108
+
+### Added
+
+- `std/agent/best_of_n` adds `best_of_n_candidates(opts)` — a generic best-of-N candidate selector with an optional
+  pre-generation spec-contract gate. The host supplies `generate` / `select_callback` / `spec_contract_callback`
+  closures (it owns candidate generation, including any workspace reset, and the selection signal); Harn owns the
+  advance / fallthrough policy. Host-callback errors degrade gracefully — a non-true spec contract aborts to a single
+  candidate, a failing `generate` skips it, and a nil/out-of-range/erroring `select_callback` falls through to a
+  deterministic candidate — so best-of-N is a safe overlay over plain single-attempt behavior.
+- `std/context` gains `context_artifact_select_one(artifacts, options)` — a single-best context-artifact selector that
+  hard-suppresses stale artifacts, scores candidates with a depth/altitude-aware path term (a deeper, more-specific
+  directory scope outranks a shallower ancestor), and abstains on a score tie by returning
+  `{reason: "ambiguous_context_artifact", candidates}` rather than injecting an arbitrary sibling. Complements the
+  existing list-budgeting `context_artifact_select`.
+- `std/fs` gains `fs_snapshot(paths, opts?)`, `fs_restore(snapshot_id, paths?, opts?)`, `fs_list_snapshots(opts?)`, and
+  `fs_drop_snapshot(snapshot_id, opts?)` — thin pipeline-facing wrappers over the existing host
+  `hostlib_fs_*` snapshot builtins. Pipelines can now checkpoint the workspace and roll a mutation back between
+  independent retry attempts (the substrate for a verify-gated best-of-N agent loop). Snapshots are session-scoped:
+  the session id defaults to the active agent session (`agent_session_current_id()`) so each conversation's snapshots
+  stay isolated and are cleaned up on session close.
+- Added three OpenAI-compatible LLM providers to the bundled catalog:
+  `moonshot` (first-party Kimi K2 host), `deepinfra` (open-weight host), and
+  `sambanova` (fast RDU inference). Each ships catalog rows, capability matrix
+  entries, and short aliases (`kimi-direct`/`moonshot-kimi-k2.7-code`,
+  `deepinfra-deepseek`/`deepinfra-qwen3.6`, `sambanova-deepseek`/`sambanova-llama`).
+- `std/postgres/query` gains `nullable_uuid_text(name)` — the nullable counterpart to `uuid_text(name)`, rendering
+  `CASE WHEN name IS NULL THEN NULL ELSE name::text END AS name` as a trusted projection fragment. It preserves SQL
+  NULLs as JSON `null` instead of casting them to the string `"null"`, mirroring `nullable_timestamptz_json`, and
+  accepts table-qualified names (`sessions.forked_from_session_id`). This replaces the hand-rolled `CASE WHEN … END`
+  string concatenation that data-access modules wrote for nullable UUID/foreign-key columns.
+
+### Changed
+
+- **VM hot paths.** Local property and subscript assignment now compile to
+  slot-addressed bytecode, builtin ID dispatch uses a hash-indexed side table,
+  and ASCII string `len` / `count` paths avoid unnecessary scalar iteration
+  while preserving Unicode behavior (#3295).
+- **Allocator.** The `harn` binary now links [mimalloc](https://github.com/microsoft/mimalloc)
+  as its global allocator by default, lowering per-allocation latency and
+  fragmentation on the runtime's allocation-heavy copy-on-write workload.
+  Opt out with `--no-default-features` (or omit the new default-on `mimalloc`
+  Cargo feature) to fall back to the system allocator.
+- **VM value size.** `VmValue` is now 24 bytes (down from 32). The two
+  oversized inline payloads — `Range` (a `start`/`end`/`inclusive` triple) and
+  `BuiltinRefId` (an id plus an `Arc<str>` name) — are boxed behind a shared
+  pointer, so no variant inflates the common `Int` / `Float` / `List` / `Dict` /
+  `String` shapes the interpreter copies on every push, pop, clone, and
+  local-slot write.
+
+### Removed
+
+- Removed three dead codepaths: the unused `std/collections` helpers `store_stale` / `store_refresh` (zero call
+  sites), and the dead `"adapter_shim"` `callsite_strategy` branch in `std/edit`'s `add_parameter` (it only ever
+  returned "not yet supported"). Internal: `harn-cli`'s bundle signer now uses `hex::encode` instead of a duplicate
+  local `hex_encode` helper.
+
+### Fixed
+
+- **LLM-layer reliability and correctness wave.**
+  - *Cerebras/Groq/Together gpt-oss now use native tools.* The prior
+    `native_tools=false`/json pin was a stale workaround for an
+    "empty native streaming payload" defect that no longer reproduces; under
+    json/text gpt-oss emits a `{"tool","arguments"}` dialect the fenced parser
+    rejected, yielding zero parsed calls. Native is the measured-best (and only
+    working) channel; verified live end-to-end through the streaming reassembler.
+  - *Cerebras rate limits corrected to the Developer tier* (250 rpm / 250k tpm)
+    so the proactive sliding-window limiter no longer throttles a paid key to
+    the 5 rpm Free-Trial pin.
+  - *429 retries now engage by default.* `DEFAULT_LLM_CALL_RETRIES` was `0`, so
+    the existing `Retry-After` + per-route cooldown + bounded backoff never ran
+    and a single 429 was a hard failure; the default is now `2`.
+  - *Fenced-JSON tool parser accepts the `tool`/`arguments` dialect* as aliases
+    for `name`/`args` (canonical wins), recovering text-route calls from models
+    that emit that shape.
+  - *Tool-body failures are surfaced as failures, not ok.* A host-bridge
+    `{ok:false}` / `{status:"error"}` / `{error:...}` result was laundered into
+    success; the terminal-status reader now classifies these as failures.
+  - *LLM response cache key now includes tools, structured-output schema, and
+    stop sequences.* Two calls differing only in those fields previously
+    collided and returned the wrong cached response.
+  - *Char-boundary-safe tool-argument error previews.* Malformed-JSON previews
+    sliced by byte index and could panic mid-UTF8-codepoint.
+  - *Agent stall/loop test suite now runs in CI* (`make test-agent-scripts`),
+    and two stall tests that had rotted (un-gated by any CI target) are fixed.
+- **`parse_set_cookie` now trims whitespace around the cookie name and value
+  before validation (#3297).** A `Set-Cookie: name = value` header was
+  previously dropped entirely (the un-trimmed `name` failed `valid_cookie_name`)
+  and parsed values kept a stray leading space, diverging from the
+  `Cookie`-header parser, which already trims both sides.
+- **Billed-noncommittal provider completions are now retried instead of
+  terminating the agent loop (#3303).** When an upstream bills output but
+  serializes the tool call onto the reasoning channel only — finishing *clean*
+  yet committing no dispatchable tool call or answer (`upstream contract
+  violation`) — the response/transport parsers *throw* that error. The agent
+  loop's `Err` arm routed it through the generic terminal-error classifier,
+  which did not match its signature, so it was never retried and the loop
+  hard-broke as a silent `provider_error`, bypassing all completion/verify
+  machinery. The thrown shape now folds onto the **same bounded
+  empty-completion retry budget** the zero-token empty-completion path already
+  uses (floored at one retry for real providers, unaffected by the global
+  fail-fast `DEFAULT_LLM_CALL_RETRIES`) — one unified retry path, no new
+  parallel mechanism. Once that budget is exhausted on a chronically-broken
+  upstream, the loud thrown error is surfaced unchanged and still names the
+  `upstream contract violation` so the eval layer can classify it as infra, not
+  model capability. Complements #3219 (zero-token empty retry) and #3292
+  (errored-but-actionless `Ok` retry), closing the remaining *thrown*
+  unproductive-completion shape.
+- **Agent session redo checkpoints survive rejected transcript-budget writes.** Failed
+  transcript mutations that leave the transcript unchanged no longer discard redo
+  state captured by the previous rollback.
+- **Errored / tool-call-less generations are retried instead of advancing the
+  loop on a broken turn.** A cheap model sometimes returns a generation that
+  ends with a provider error (`stop_reason == "error"`) after only *narrating*
+  an intended tool call in its text/reasoning (e.g. "We need to make edit to
+  create tests/...test.cpp...") while emitting ZERO parsed tool calls. The agent
+  loop used to advance on that turn and reply with a generic
+  `no_progress`/`stall_diagnostics` nag that never told the model its turn
+  errored, so after a few such turns the model gave up having written nothing.
+  This is distinct from the zero-token empty-completion retry (those have
+  non-zero reasoning tokens, so the zero-token predicate misses them).
+  `observed_llm_call` now treats an errored-but-actionless `Ok` generation as a
+  transient provider hiccup and retries it within the same bounded
+  empty-completion budget (no change to the global retry default). When the
+  budget is exhausted and the loop does advance, the stall detector emits
+  cause-specific feedback ("your previous turn ended with a provider error and
+  emitted no tool call — re-emit the intended tool call") instead of the generic
+  no-progress nag, while genuine no-tool-intent stalls keep the existing nag.
+
 ## v0.8.107
 
 ### Added
