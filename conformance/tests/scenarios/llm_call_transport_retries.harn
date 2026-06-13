@@ -30,14 +30,14 @@ pipeline default() {
   )
   with_llm_script(
     [
-      {error: {category: "server_error", message: "HTTP 503 default fail-fast"}},
-      llm_text("unreachable without explicit retries"),
+      {error: {category: "server_error", message: "HTTP 503 default budget retry"}},
+      llm_text("recovered on default budget"),
     ],
     { ->
-      let default_fail_fast = try {
+      let default_budget_recovers = try {
         llm_call("default retry budget", nil, {provider: "mock", llm_backoff_ms: 0})
       }
-      __io_println(is_err(default_fail_fast))
+      __io_println(is_err(default_budget_recovers))
       __io_println(len(llm_mock_calls()))
     },
   )
@@ -86,3 +86,6 @@ pipeline default() {
     },
   )
 }
+// The default llm_retries budget is now >= 2 (agent/eval resilience), so a
+// transient 503 retries and recovers without an explicit override; only
+// NON-retryable errors fail fast on the default budget.
