@@ -543,13 +543,16 @@ impl super::super::Vm {
                         return Err(Self::list_index_type_error(&index));
                     };
                     let idx = resolve_list_assign_index(i, items.len())?;
-                    Arc::make_mut(items)[idx] = new_value;
+                    let cell = &mut Arc::make_mut(items)[idx];
+                    crate::value::recursion::dismantle(std::mem::replace(cell, new_value));
                     slot.synced = false;
                     return Ok(());
                 }
                 VmValue::Dict(map) => {
                     let key = index.display();
-                    Arc::make_mut(map).insert(key, new_value);
+                    if let Some(previous) = Arc::make_mut(map).insert(key, new_value) {
+                        crate::value::recursion::dismantle(previous);
+                    }
                     slot.synced = false;
                     return Ok(());
                 }
@@ -618,7 +621,9 @@ impl super::super::Vm {
         }
 
         if let VmValue::Dict(map) = &mut slot.value {
-            Arc::make_mut(map).insert(prop_name.to_string(), new_value);
+            if let Some(previous) = Arc::make_mut(map).insert(prop_name.to_string(), new_value) {
+                crate::value::recursion::dismantle(previous);
+            }
             slot.synced = false;
             return Ok(());
         }
@@ -673,13 +678,16 @@ impl super::super::Vm {
                     return Err(Self::list_index_type_error(&index));
                 };
                 let idx = resolve_list_assign_index(i, items.len())?;
-                Arc::make_mut(items)[idx] = new_value;
+                let cell = &mut Arc::make_mut(items)[idx];
+                crate::value::recursion::dismantle(std::mem::replace(cell, new_value));
                 slot.synced = false;
                 Ok(())
             }
             VmValue::Dict(map) => {
                 let key = index.display();
-                Arc::make_mut(map).insert(key, new_value);
+                if let Some(previous) = Arc::make_mut(map).insert(key, new_value) {
+                    crate::value::recursion::dismantle(previous);
+                }
                 slot.synced = false;
                 Ok(())
             }

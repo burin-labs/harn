@@ -78,6 +78,11 @@ hmac = "0.13"
 sha1 = "0.11"
 sha2 = "0.11"
 sha3 = "0.12"
+# On-demand native stack growth for recursive walks over arbitrarily deep
+# `VmValue` trees (display, equality, ordering, hashing, JSON). Same approach
+# serde/rustc/syn use to keep deeply nested data from overflowing the OS
+# thread stack and aborting the process. See `value::recursion`.
+stacker = "0.1"
 blake3 = "1"
 md-5 = "0.11"
 aes-gcm = "0.10"

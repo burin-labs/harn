@@ -185,7 +185,9 @@ impl super::super::Vm {
                 "Invalid local slot index: {slot_idx}"
             )));
         };
-        slot.value = val;
+        // Tear down any nested value being overwritten iteratively so a deep
+        // local cannot overflow the stack on drop (scalars are a no-op).
+        crate::value::recursion::dismantle(std::mem::replace(&mut slot.value, val));
         slot.initialized = true;
         slot.synced = false;
         Ok(())
@@ -216,7 +218,9 @@ impl super::super::Vm {
         if !slot.initialized {
             return Err(VmError::UndefinedVariable(info.name.clone()));
         }
-        slot.value = val;
+        // Tear down any nested value being overwritten iteratively so a deep
+        // local cannot overflow the stack on drop (scalars are a no-op).
+        crate::value::recursion::dismantle(std::mem::replace(&mut slot.value, val));
         slot.synced = false;
         Ok(())
     }
