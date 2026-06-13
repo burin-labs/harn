@@ -11,9 +11,16 @@ static_assertions::assert_impl_all!(VmAsyncBuiltinFn: Send, Sync);
 #[cfg(target_pointer_width = "64")]
 #[test]
 fn vm_value_layout_budget() {
-    assert_eq!(std::mem::size_of::<VmValue>(), 32);
-    assert_eq!(std::mem::size_of::<Option<VmValue>>(), 32);
+    // The two oversized inline payloads (`Range` and `BuiltinRefId`, each 24
+    // bytes) are boxed behind a `Shared` pointer, so the widest variant is now
+    // a 16-byte fat pointer (`Arc<str>`) and the whole enum is 24 bytes — down
+    // from 32. Shrinking further requires a thin-pointer string type (tracked
+    // separately); `Arc<str>` is what currently sets the 16-byte floor.
+    assert_eq!(std::mem::size_of::<VmValue>(), 24);
+    assert_eq!(std::mem::size_of::<Option<VmValue>>(), 24);
     assert_eq!(std::mem::size_of::<Arc<VmEnumVariant>>(), 8);
+    assert_eq!(std::mem::size_of::<Arc<VmRange>>(), 8);
+    assert_eq!(std::mem::size_of::<Arc<VmBuiltinRefId>>(), 8);
     assert_eq!(std::mem::size_of::<VmChannelHandle>(), 40);
     assert_eq!(std::mem::size_of::<Arc<VmChannelHandle>>(), 8);
     assert_eq!(std::mem::size_of::<VmAtomicHandle>(), 8);

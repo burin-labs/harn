@@ -149,7 +149,7 @@ fn matches_type_with_generics(
             "struct" => matches!(value, VmValue::StructInstance { .. }),
             "closure" => matches!(
                 value,
-                VmValue::Closure(_) | VmValue::BuiltinRef(_) | VmValue::BuiltinRefId { .. }
+                VmValue::Closure(_) | VmValue::BuiltinRef(_) | VmValue::BuiltinRefId(_)
             ),
             _ => {
                 if !nominal_type_names.iter().any(|ty| ty == name) {
@@ -235,7 +235,7 @@ fn matches_type_with_generics(
         },
         TypeExpr::FnType { .. } => matches!(
             value,
-            VmValue::Closure(_) | VmValue::BuiltinRef(_) | VmValue::BuiltinRefId { .. }
+            VmValue::Closure(_) | VmValue::BuiltinRef(_) | VmValue::BuiltinRefId(_)
         ),
         TypeExpr::Never => false,
         TypeExpr::LitString(s) => matches!(value, VmValue::String(rs) if rs.as_ref() == s),

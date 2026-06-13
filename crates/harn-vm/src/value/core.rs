@@ -120,12 +120,30 @@ impl VmEnumVariant {
     }
 }
 
+/// Boxed payload for [`VmValue::BuiltinRefId`].
+///
+/// Pairs the compact [`BuiltinId`] used for direct dispatch with the builtin's
+/// registered name (kept for policy checks, diagnostics, and name-keyed
+/// fallback). Stored behind a `Shared` pointer in the value so the `{ id, name
+/// }` pair does not widen every `VmValue` to its 24-byte footprint.
+#[derive(Debug, Clone)]
+pub struct VmBuiltinRefId {
+    pub id: BuiltinId,
+    pub name: Shared<str>,
+}
+
 /// VM runtime value.
 ///
 /// Rare compound payloads use shared pointers so stack/local-slot traffic is
-/// bounded by the common scalar and pointer-sized value shapes. Unsafe layouts
-/// such as NaN boxing or tagged pointers are deliberately deferred until Harn
-/// has a stronger object/heap story.
+/// bounded by the common scalar and pointer-sized value shapes. The two
+/// oversized inline payloads — `Range` (a 24-byte `start/end/inclusive`
+/// triple) and `BuiltinRefId` (an id + `Arc<str>` name) — are boxed behind a
+/// `Shared` pointer so no variant exceeds a fat pointer. That keeps `VmValue`
+/// at 24 bytes (down from 32) without inflating the common `Int` / `Float` /
+/// `List` / `Dict` / `String` shapes the interpreter moves on every push,
+/// pop, clone, and local-slot write. Unsafe layouts such as NaN boxing or
+/// tagged pointers are deliberately deferred until Harn has a stronger
+/// object/heap story.
 #[derive(Debug, Clone)]
 pub enum VmValue {
     Int(i64),
@@ -141,12 +159,11 @@ pub enum VmValue {
     /// referenced as a value (e.g. `snake_dict.rekey(snake_to_camel)`). The
     /// contained string is the builtin's registered name.
     BuiltinRef(Shared<str>),
-    /// Compact builtin reference for callback positions. Carries the name for
-    /// policy, diagnostics, and fallback if the ID cannot be used.
-    BuiltinRefId {
-        id: BuiltinId,
-        name: Shared<str>,
-    },
+    /// Compact builtin reference for callback positions. The boxed
+    /// [`VmBuiltinRefId`] carries the id plus the name for policy,
+    /// diagnostics, and fallback if the ID cannot be used. Boxed so the
+    /// `{ id, name }` pair does not widen every `VmValue`.
+    BuiltinRefId(Shared<VmBuiltinRefId>),
     Duration(i64),
     EnumVariant(Shared<VmEnumVariant>),
     StructInstance {
@@ -162,7 +179,10 @@ pub enum VmValue {
     Set(Shared<Vec<VmValue>>),
     Generator(Shared<VmGenerator>),
     Stream(Shared<VmStream>),
-    Range(VmRange),
+    /// Lazy numeric range. Boxed behind a `Shared` pointer so its 24-byte
+    /// `start/end/inclusive` payload does not set the whole-enum size; cloning
+    /// a range value is then a refcount bump.
+    Range(Shared<VmRange>),
     /// Lazy iterator handle. Single-pass, fused. See `crate::vm::iter::VmIter`.
     Iter(crate::vm::iter::VmIterHandle),
     /// Two-element pair value. Produced by `pair(a, b)`, yielded by the
@@ -239,6 +259,19 @@ impl VmValue {
         VmValue::TaskHandle(id.into())
     }
 
+    /// Construct a boxed [`VmValue::Range`] from a [`VmRange`].
+    pub fn range(range: VmRange) -> Self {
+        VmValue::Range(Shared::new(range))
+    }
+
+    /// Construct a boxed [`VmValue::BuiltinRefId`] from its id and name.
+    pub fn builtin_ref_id(id: BuiltinId, name: impl Into<Shared<str>>) -> Self {
+        VmValue::BuiltinRefId(Shared::new(VmBuiltinRefId {
+            id,
+            name: name.into(),
+        }))
+    }
+
     pub fn channel(handle: VmChannelHandle) -> Self {
         VmValue::Channel(Shared::new(handle))
     }
@@ -290,7 +323,7 @@ impl VmValue {
             VmValue::Dict(d) => !d.is_empty(),
             VmValue::Closure(_) => true,
             VmValue::BuiltinRef(_) => true,
-            VmValue::BuiltinRefId { .. } => true,
+            VmValue::BuiltinRefId(_) => true,
             VmValue::Duration(ms) => *ms != 0,
             VmValue::EnumVariant(_) => true,
             VmValue::StructInstance { .. } => true,
@@ -324,7 +357,7 @@ impl VmValue {
             VmValue::Dict(_) => "dict",
             VmValue::Closure(_) => "closure",
             VmValue::BuiltinRef(_) => "builtin",
-            VmValue::BuiltinRefId { .. } => "builtin",
+            VmValue::BuiltinRefId(_) => "builtin",
             VmValue::Duration(_) => "duration",
             VmValue::EnumVariant(_) => "enum",
             VmValue::StructInstance { .. } => "struct",
@@ -508,8 +541,8 @@ impl VmValue {
             VmValue::BuiltinRef(name) => {
                 let _ = write!(out, "<builtin {name}>");
             }
-            VmValue::BuiltinRefId { name, .. } => {
-                let _ = write!(out, "<builtin {name}>");
+            VmValue::BuiltinRefId(r) => {
+                let _ = write!(out, "<builtin {}>", r.name);
             }
             VmValue::Duration(ms) => {
                 let sign = if *ms < 0 { "-" } else { "" };

@@ -376,13 +376,13 @@ impl Vm {
                 }
                 self.call_named_builtin(name, args.into_vec()).await
             }
-            VmValue::BuiltinRefId { id, name } => {
+            VmValue::BuiltinRefId(r) => {
                 if let Some(result) =
-                    self.try_call_sync_builtin_id_or_name_args(Some(*id), name, &args)
+                    self.try_call_sync_builtin_id_or_name_args(Some(r.id), &r.name, &args)
                 {
                     return result;
                 }
-                self.call_builtin_id_or_name(*id, name, args.into_vec())
+                self.call_builtin_id_or_name(r.id, &r.name, args.into_vec())
                     .await
             }
             other => Err(VmError::TypeError(format!(
@@ -404,7 +404,7 @@ impl Vm {
     pub(crate) fn is_callable_value(v: &VmValue) -> bool {
         matches!(
             v,
-            VmValue::Closure(_) | VmValue::BuiltinRef(_) | VmValue::BuiltinRefId { .. }
+            VmValue::Closure(_) | VmValue::BuiltinRef(_) | VmValue::BuiltinRefId(_)
         )
     }
 

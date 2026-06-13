@@ -72,10 +72,10 @@ impl super::super::Vm {
             self.stack.push(val.clone());
         } else if let Some(id) = self.registered_builtin_id(name) {
             // Allow bare builtin references so they can be passed as callbacks.
-            self.stack.push(VmValue::BuiltinRefId {
+            self.stack.push(VmValue::builtin_ref_id(
                 id,
-                name: Self::constant_name_rc(&chunk, idx, name),
-            });
+                Self::constant_name_rc(&chunk, idx, name),
+            ));
         } else if self.builtins.contains_key(name) || self.async_builtins.contains_key(name) {
             // Collided IDs cannot use the direct index, but remain valid callbacks.
             self.stack.push(VmValue::BuiltinRef(Self::constant_name_rc(
