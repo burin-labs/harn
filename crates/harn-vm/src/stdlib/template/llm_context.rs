@@ -64,7 +64,7 @@ impl LlmRenderContext {
         dict.put_str("model", self.model.as_str());
         dict.put_str("family", self.family.as_str());
         dict.insert("capabilities".to_string(), self.capabilities.clone());
-        VmValue::Dict(std::sync::Arc::new(dict))
+        VmValue::dict(dict)
     }
 }
 

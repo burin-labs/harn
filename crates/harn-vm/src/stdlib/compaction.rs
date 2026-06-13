@@ -42,7 +42,7 @@ fn register_compaction_namespace(vm: &mut Vm) {
     let names = ["policy", "check", "run"];
     vm.set_global(
         "compaction",
-        VmValue::Dict(std::sync::Arc::new(
+        VmValue::dict(
             std::iter::once((
                 "_namespace".to_string(),
                 VmValue::String(std::sync::Arc::from("compaction")),
@@ -54,7 +54,7 @@ fn register_compaction_namespace(vm: &mut Vm) {
                 )
             }))
             .collect::<std::collections::BTreeMap<_, _>>(),
-        )),
+        ),
     );
 }
 
@@ -127,7 +127,7 @@ async fn compaction_run_impl(
     let session_id = resolve_session_id(args.first(), "compaction.run")?;
     let plan = match args.get(1) {
         Some(VmValue::Dict(map)) => (**map).clone(),
-        Some(VmValue::Nil) | None => BTreeMap::new(),
+        Some(VmValue::Nil) | None => crate::value::DictMap::new(),
         Some(other) => {
             return Err(VmError::Runtime(format!(
                 "compaction.run: `plan` must be a dict or nil, got {}",
@@ -156,7 +156,7 @@ async fn compaction_run_impl(
         let raw = if plan.is_empty() {
             VmValue::Nil
         } else {
-            VmValue::Dict(std::sync::Arc::new(plan.clone()))
+            VmValue::dict(plan.clone())
         };
         Some(extract_llm_options(&[
             VmValue::String(std::sync::Arc::from("")),
@@ -244,7 +244,7 @@ fn require_dict(
     value: Option<&VmValue>,
     builtin: &str,
     name: &str,
-) -> Result<BTreeMap<String, VmValue>, VmError> {
+) -> Result<crate::value::DictMap, VmError> {
     match value {
         Some(VmValue::Dict(map)) => Ok((**map).clone()),
         Some(other) => Err(VmError::Runtime(format!(
@@ -256,7 +256,7 @@ fn require_dict(
 }
 
 fn optional_string(
-    dict: &BTreeMap<String, VmValue>,
+    dict: &crate::value::DictMap,
     key: &str,
     builtin: &str,
 ) -> Result<Option<String>, VmError> {
@@ -327,7 +327,7 @@ fn session_compactable_events(id: &str) -> Vec<VmValue> {
 
 fn apply_plan_overrides(
     policy: &mut CompactionPolicyDeclaration,
-    plan: &BTreeMap<String, VmValue>,
+    plan: &crate::value::DictMap,
 ) -> Result<(), VmError> {
     if plan.is_empty() {
         return Ok(());
@@ -373,7 +373,7 @@ fn apply_plan_overrides(
 }
 
 fn plan_int(
-    plan: &BTreeMap<String, VmValue>,
+    plan: &crate::value::DictMap,
     key: &str,
     builtin: &str,
 ) -> Result<Option<usize>, VmError> {
@@ -425,7 +425,7 @@ fn decision_value(
         map.insert("turn_threshold".to_string(), VmValue::Int(value as i64));
     }
     map.insert("policy_inherited".to_string(), VmValue::Bool(inherited));
-    VmValue::Dict(std::sync::Arc::new(map))
+    VmValue::dict(map)
 }
 
 fn policy_snapshot_value(
@@ -479,7 +479,7 @@ fn policy_snapshot_value(
         );
     }
     map.insert("policy_inherited".to_string(), VmValue::Bool(inherited));
-    VmValue::Dict(std::sync::Arc::new(map))
+    VmValue::dict(map)
 }
 
 fn run_result_value(
@@ -521,7 +521,7 @@ fn run_result_value(
         );
     }
     map.insert("transcript".to_string(), transcript);
-    VmValue::Dict(std::sync::Arc::new(map))
+    VmValue::dict(map)
 }
 
 pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[

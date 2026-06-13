@@ -81,7 +81,7 @@ struct XmlOptions {
 }
 
 impl XmlOptions {
-    fn from_dict(options: Option<&BTreeMap<String, VmValue>>) -> Self {
+    fn from_dict(options: Option<&crate::value::DictMap>) -> Self {
         let mut out = XmlOptions {
             root: "root".to_string(),
             item_tag: "item".to_string(),
@@ -313,7 +313,7 @@ struct ParseOptions {
 }
 
 impl ParseOptions {
-    fn from_dict(options: Option<&BTreeMap<String, VmValue>>) -> Self {
+    fn from_dict(options: Option<&crate::value::DictMap>) -> Self {
         let mut out = ParseOptions::default();
         let Some(dict) = options else {
             return out;
@@ -335,13 +335,13 @@ fn parse_xml(text: &str, parse_opts: &ParseOptions) -> Result<VmValue, VmError> 
     };
     p.skip_ws_and_prologue()?;
     if p.pos >= p.src.len() {
-        return Ok(VmValue::Dict(std::sync::Arc::new(BTreeMap::new())));
+        return Ok(VmValue::dict(BTreeMap::new()));
     }
     let (tag, value) = p.parse_element()?;
     p.skip_ws_and_prologue().ok();
     let mut out = BTreeMap::new();
     out.insert(tag, value);
-    Ok(VmValue::Dict(std::sync::Arc::new(out)))
+    Ok(VmValue::dict(out))
 }
 
 struct Parser<'a> {
@@ -613,13 +613,13 @@ fn finalize_element(
             if opts.preserve_repeated_tag {
                 let mut out = BTreeMap::new();
                 out.insert(tag, VmValue::List(std::sync::Arc::new(values)));
-                return VmValue::Dict(std::sync::Arc::new(out));
+                return VmValue::dict(out);
             }
             return VmValue::List(std::sync::Arc::new(values));
         }
         let mut out = BTreeMap::new();
         out.insert(tag, values.into_iter().next().unwrap());
-        return VmValue::Dict(std::sync::Arc::new(out));
+        return VmValue::dict(out);
     }
     let mut out = BTreeMap::new();
     for (tag, mut values) in children {
@@ -634,15 +634,12 @@ fn finalize_element(
         for (k, v) in attrs {
             attr_dict.insert(k, VmValue::String(std::sync::Arc::from(v)));
         }
-        out.insert(
-            "@attr".to_string(),
-            VmValue::Dict(std::sync::Arc::new(attr_dict)),
-        );
+        out.insert("@attr".to_string(), VmValue::dict(attr_dict));
     }
     if !trimmed.is_empty() {
         out.put_str("@text", trimmed);
     }
-    VmValue::Dict(std::sync::Arc::new(out))
+    VmValue::dict(out)
 }
 
 fn scalar_from_text(text: &str) -> VmValue {
@@ -667,11 +664,8 @@ fn attrs_to_value(attrs: Vec<(String, String)>) -> VmValue {
     for (k, v) in attrs {
         attr_dict.insert(k, VmValue::String(std::sync::Arc::from(v)));
     }
-    out.insert(
-        "@attr".to_string(),
-        VmValue::Dict(std::sync::Arc::new(attr_dict)),
-    );
-    VmValue::Dict(std::sync::Arc::new(out))
+    out.insert("@attr".to_string(), VmValue::dict(attr_dict));
+    VmValue::dict(out)
 }
 
 #[cfg(test)]
@@ -683,7 +677,7 @@ mod tests {
         for (k, v) in entries {
             map.insert((*k).to_string(), v.clone());
         }
-        VmValue::Dict(std::sync::Arc::new(map))
+        VmValue::dict(map)
     }
 
     fn opts() -> XmlOptions {

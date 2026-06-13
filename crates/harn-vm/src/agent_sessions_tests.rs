@@ -6,18 +6,17 @@ use crate::agent_events::{
 use crate::event_log::{active_event_log, EventLog, Topic};
 use crate::value::VmDictExt;
 use futures::StreamExt as _;
-use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 
 fn make_msg(role: &str, content: &str) -> VmValue {
-    let mut m: BTreeMap<String, VmValue> = BTreeMap::new();
+    let mut m: crate::value::DictMap = crate::value::DictMap::new();
     m.put_str("role", role);
     m.put_str("content", content);
-    VmValue::Dict(std::sync::Arc::new(m))
+    VmValue::dict(m)
 }
 
 fn scratchpad_value(note: &str) -> VmValue {
-    VmValue::Dict(std::sync::Arc::new(BTreeMap::from([
+    VmValue::dict(crate::value::DictMap::from_iter([
         (
             "schema".to_string(),
             VmValue::String(std::sync::Arc::from("harn.agent_scratchpad.v1")),
@@ -25,7 +24,7 @@ fn scratchpad_value(note: &str) -> VmValue {
         (
             "facts".to_string(),
             VmValue::List(std::sync::Arc::new(vec![VmValue::Dict(
-                std::sync::Arc::new(BTreeMap::from([
+                std::sync::Arc::new(crate::value::DictMap::from_iter([
                     (
                         "text".to_string(),
                         VmValue::String(std::sync::Arc::from(note.to_string())),
@@ -40,13 +39,13 @@ fn scratchpad_value(note: &str) -> VmValue {
         (
             "refs".to_string(),
             VmValue::List(std::sync::Arc::new(vec![VmValue::Dict(
-                std::sync::Arc::new(BTreeMap::from([(
+                std::sync::Arc::new(crate::value::DictMap::from_iter([(
                     "id".to_string(),
                     VmValue::String(std::sync::Arc::from("turn:1")),
                 )])),
             )])),
         ),
-    ])))
+    ]))
 }
 
 fn message_count(id: &str) -> usize {
@@ -669,10 +668,10 @@ fn scratchpad_rejects_non_dict_and_oversized_values() {
     .unwrap_err();
     assert!(non_dict_error.contains("must be a dict"));
 
-    let oversized = VmValue::Dict(std::sync::Arc::new(BTreeMap::from([(
+    let oversized = VmValue::dict(crate::value::DictMap::from_iter([(
         "notes".to_string(),
         VmValue::String(std::sync::Arc::from("x".repeat(MAX_SCRATCHPAD_BYTES + 1))),
-    )])));
+    )]));
     let oversized_error =
         set_scratchpad(&id, oversized, "test", None, serde_json::json!({})).unwrap_err();
     assert!(
@@ -728,11 +727,11 @@ fn inject_identified_user_message_emits_replayable_user_event() {
     let captured = Arc::new(Mutex::new(Vec::new()));
     register_sink(&id, Arc::new(CapturingSink(captured.clone())));
 
-    let mut message = BTreeMap::new();
+    let mut message = crate::value::DictMap::new();
     message.put_str("role", "user");
     message.put_str("content", "queued follow-up");
     message.put_str("messageId", "msg_inj_test");
-    inject_message(&id, VmValue::Dict(std::sync::Arc::new(message))).unwrap();
+    inject_message(&id, VmValue::dict(message)).unwrap();
 
     let events = captured.lock().expect("capture sink poisoned");
     assert_eq!(events.len(), 1);
@@ -956,7 +955,7 @@ fn child_sessions_record_parent_lineage() {
 fn branch_event_index_counts_non_message_events() {
     reset_session_store();
     let src = open_or_create(Some("branch-event-index".into()));
-    let transcript = VmValue::Dict(std::sync::Arc::new(BTreeMap::from([
+    let transcript = VmValue::dict(crate::value::DictMap::from_iter([
         (
             "id".to_string(),
             VmValue::String(std::sync::Arc::from(src.clone())),
@@ -971,21 +970,21 @@ fn branch_event_index_counts_non_message_events() {
         (
             "events".to_string(),
             VmValue::List(std::sync::Arc::new(vec![
-                VmValue::Dict(std::sync::Arc::new(BTreeMap::from([(
+                VmValue::dict(crate::value::DictMap::from_iter([(
                     "kind".to_string(),
                     VmValue::String(std::sync::Arc::from("message")),
-                )]))),
-                VmValue::Dict(std::sync::Arc::new(BTreeMap::from([(
+                )])),
+                VmValue::dict(crate::value::DictMap::from_iter([(
                     "kind".to_string(),
                     VmValue::String(std::sync::Arc::from("sub_agent_start")),
-                )]))),
-                VmValue::Dict(std::sync::Arc::new(BTreeMap::from([(
+                )])),
+                VmValue::dict(crate::value::DictMap::from_iter([(
                     "kind".to_string(),
                     VmValue::String(std::sync::Arc::from("message")),
-                )]))),
+                )])),
             ])),
         ),
-    ])));
+    ]));
     store_transcript(&src, transcript).unwrap();
 
     let dst = fork_at(&src, 2, Some("branch-event-index-child".into())).expect("fork_at");

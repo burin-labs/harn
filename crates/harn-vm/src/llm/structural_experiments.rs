@@ -1,5 +1,4 @@
 use crate::value::VmDictExt;
-use std::collections::BTreeMap;
 
 use crate::value::{VmError, VmValue};
 
@@ -36,7 +35,7 @@ pub(crate) struct AppliedStructuralExperiment {
 const STRUCTURAL_EXPERIMENT_ENV: &str = "HARN_STRUCTURAL_EXPERIMENT";
 
 pub(crate) fn parse_structural_experiment_option(
-    options: Option<&BTreeMap<String, VmValue>>,
+    options: Option<&crate::value::DictMap>,
 ) -> Result<Option<StructuralExperimentConfig>, VmError> {
     let explicit = options.and_then(|dict| dict.get("structural_experiment"));
     match explicit {
@@ -63,7 +62,7 @@ pub(crate) fn parse_structural_experiment_option(
 }
 
 fn parse_structural_experiment_dict(
-    dict: &BTreeMap<String, VmValue>,
+    dict: &crate::value::DictMap,
 ) -> Result<Option<StructuralExperimentConfig>, VmError> {
     let label = dict
         .get("label")
@@ -296,7 +295,7 @@ pub(crate) async fn apply_structural_experiment(
                         "structural_experiment requires an async builtin VM context".to_string(),
                     )
                 })?;
-            let mut ctx = BTreeMap::new();
+            let mut ctx = crate::value::DictMap::new();
             ctx.insert(
                 "messages".to_string(),
                 VmValue::List(std::sync::Arc::new(
@@ -325,8 +324,7 @@ pub(crate) async fn apply_structural_experiment(
             interpret_closure_result(
                 &current_messages,
                 current_system.as_deref(),
-                &vm.call_closure_pub(closure, &[VmValue::Dict(std::sync::Arc::new(ctx))])
-                    .await?,
+                &vm.call_closure_pub(closure, &[VmValue::dict(ctx)]).await?,
                 &config,
             )?
         }
@@ -440,7 +438,7 @@ fn apply_builtin_experiment(
         BuiltInStructuralExperiment::ChainOfDraft => {
             if let Some(index) = latest_string_user_message_index(&messages) {
                 if let Some(content) = message_text(&messages[index]).map(str::to_string) {
-                    let mut bindings = BTreeMap::new();
+                    let mut bindings = crate::value::DictMap::new();
                     bindings.put_str("content", content);
                     let rendered = crate::stdlib::template::render_stdlib_prompt_asset(
                         "llm/prompts/structural_chain_of_draft.harn.prompt",

@@ -749,11 +749,7 @@ fn status_value(status: &JsonStreamStatus) -> VmValue {
                     VmValue::String(std::sync::Arc::from(path.as_str())),
                 ),
             ]);
-            VmValue::enum_variant(
-                "JsonStreamStatus",
-                "Invalid",
-                vec![VmValue::Dict(std::sync::Arc::new(payload))],
-            )
+            VmValue::enum_variant("JsonStreamStatus", "Invalid", vec![VmValue::dict(payload)])
         }
     }
 }
@@ -778,7 +774,7 @@ fn verdict_value(status: &JsonStreamStatus) -> VmValue {
             dict.put_str("path", path.as_str());
         }
     }
-    VmValue::Dict(std::sync::Arc::new(dict))
+    VmValue::dict(dict)
 }
 
 fn early_invalid(buffer: &str, schema: &VmValue) -> Option<EarlyInvalid> {
@@ -795,7 +791,7 @@ fn early_invalid(buffer: &str, schema: &VmValue) -> Option<EarlyInvalid> {
 
 fn early_invalid_object(
     buffer: &str,
-    schema: &BTreeMap<String, VmValue>,
+    schema: &crate::value::DictMap,
     path: &str,
 ) -> Option<EarlyInvalid> {
     if !schema_is_object_like(schema) {
@@ -846,7 +842,7 @@ fn early_invalid_object(
                     let value = schema::json_to_vm_value(&json);
                     if let Some(invalid) = schema_validation_error(
                         &value,
-                        &VmValue::Dict(std::sync::Arc::new(child_schema.clone())),
+                        &VmValue::dict(child_schema.clone()),
                         &child_path,
                     ) {
                         return Some(invalid);
@@ -866,7 +862,7 @@ fn early_invalid_object(
 
 fn invalid_type_start(
     first: char,
-    schema: &BTreeMap<String, VmValue>,
+    schema: &crate::value::DictMap,
     path: &str,
 ) -> Option<EarlyInvalid> {
     let expected = expected_type(schema)?;
@@ -915,7 +911,7 @@ fn schema_validation_error(value: &VmValue, schema: &VmValue, path: &str) -> Opt
     }
 }
 
-fn expected_type(schema: &BTreeMap<String, VmValue>) -> Option<&str> {
+fn expected_type(schema: &crate::value::DictMap) -> Option<&str> {
     if schema_is_object_like(schema) {
         return Some("dict");
     }
@@ -925,7 +921,7 @@ fn expected_type(schema: &BTreeMap<String, VmValue>) -> Option<&str> {
     }
 }
 
-fn schema_is_object_like(schema: &BTreeMap<String, VmValue>) -> bool {
+fn schema_is_object_like(schema: &crate::value::DictMap) -> bool {
     matches!(schema.get("type"), Some(VmValue::String(value)) if value.as_ref() == "dict")
         || schema.contains_key("properties")
         || schema.contains_key("required")
@@ -1091,12 +1087,12 @@ mod tests {
     }
 
     fn dict(entries: impl IntoIterator<Item = (&'static str, VmValue)>) -> VmValue {
-        VmValue::Dict(std::sync::Arc::new(
+        VmValue::dict(
             entries
                 .into_iter()
                 .map(|(key, value)| (key.to_string(), value))
-                .collect(),
-        ))
+                .collect::<crate::value::DictMap>(),
+        )
     }
 
     fn list(items: Vec<VmValue>) -> VmValue {

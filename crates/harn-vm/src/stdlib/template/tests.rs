@@ -1,8 +1,7 @@
-use std::collections::BTreeMap;
-
 use super::*;
+use crate::value::VmValue;
 
-fn dict(pairs: &[(&str, VmValue)]) -> BTreeMap<String, VmValue> {
+fn dict(pairs: &[(&str, VmValue)]) -> crate::value::DictMap {
     pairs
         .iter()
         .map(|(k, v)| (k.to_string(), v.clone()))
@@ -13,11 +12,11 @@ fn s(v: &str) -> VmValue {
     VmValue::String(std::sync::Arc::from(v))
 }
 
-fn render(tpl: &str, b: &BTreeMap<String, VmValue>) -> String {
+fn render(tpl: &str, b: &crate::value::DictMap) -> String {
     render_template_result(tpl, Some(b), None, None).unwrap()
 }
 
-fn render_with_spans(tpl: &str, b: &BTreeMap<String, VmValue>) -> (String, Vec<PromptSourceSpan>) {
+fn render_with_spans(tpl: &str, b: &crate::value::DictMap) -> (String, Vec<PromptSourceSpan>) {
     render_template_with_provenance(tpl, Some(b), None, None, true).unwrap()
 }
 
@@ -33,12 +32,9 @@ fn bare_interp() {
 
 #[test]
 fn provenance_expr_span_matches_output_range() {
-    let mut user = BTreeMap::new();
+    let mut user = crate::value::DictMap::new();
     user.insert("name".to_string(), s("alice"));
-    let b = dict(&[
-        ("user", VmValue::Dict(std::sync::Arc::new(user))),
-        ("count", VmValue::Int(42)),
-    ]);
+    let b = dict(&[("user", VmValue::dict(user)), ("count", VmValue::Int(42))]);
     let (out, spans) = render_with_spans("hello {{ user.name }} ({{ count | default: 0 }})", &b);
     assert_eq!(out, "hello alice (42)");
 
@@ -99,9 +95,9 @@ fn provenance_includes_loop_iterations() {
 
 #[test]
 fn provenance_preview_is_truncated() {
-    let mut wrap = BTreeMap::new();
+    let mut wrap = crate::value::DictMap::new();
     wrap.insert("val".to_string(), s(&"x".repeat(500)));
-    let b = dict(&[("blob", VmValue::Dict(std::sync::Arc::new(wrap)))]);
+    let b = dict(&[("blob", VmValue::dict(wrap))]);
     let (_, spans) = render_with_spans("{{blob.val}}", &b);
     let expr = spans
         .iter()
@@ -173,10 +169,10 @@ fn for_empty_else() {
 
 #[test]
 fn for_dict_kv() {
-    let mut d: BTreeMap<String, VmValue> = BTreeMap::new();
+    let mut d: crate::value::DictMap = crate::value::DictMap::new();
     d.insert("a".into(), VmValue::Int(1));
     d.insert("b".into(), VmValue::Int(2));
-    let b = dict(&[("m", VmValue::Dict(std::sync::Arc::new(d)))]);
+    let b = dict(&[("m", VmValue::dict(d))]);
     assert_eq!(
         render("{{for k, v in m}}{{k}}={{v}};{{end}}", &b),
         "a=1;b=2;"
@@ -185,9 +181,9 @@ fn for_dict_kv() {
 
 #[test]
 fn nested_path() {
-    let mut inner: BTreeMap<String, VmValue> = BTreeMap::new();
+    let mut inner: crate::value::DictMap = crate::value::DictMap::new();
     inner.insert("name".into(), s("Alice"));
-    let b = dict(&[("user", VmValue::Dict(std::sync::Arc::new(inner)))]);
+    let b = dict(&[("user", VmValue::dict(inner))]);
     assert_eq!(render("{{user.name}}", &b), "Alice");
 }
 
@@ -278,20 +274,20 @@ fn logical_section_scaffolding_follows_llm_capabilities() {
 
 #[test]
 fn logical_section_tools_and_output_format_use_section_args() {
-    let tool = VmValue::Dict(std::sync::Arc::new(BTreeMap::from([
+    let tool = VmValue::dict(crate::value::DictMap::from_iter([
         ("name".to_string(), s("read_file")),
         ("description".to_string(), s("Read a file")),
-    ])));
-    let schema = VmValue::Dict(std::sync::Arc::new(BTreeMap::from([
+    ]));
+    let schema = VmValue::dict(crate::value::DictMap::from_iter([
         ("type".to_string(), s("object")),
         (
             "properties".to_string(),
-            VmValue::Dict(std::sync::Arc::new(BTreeMap::from([(
+            VmValue::dict(crate::value::DictMap::from_iter([(
                 "answer".to_string(),
                 s("string"),
-            )]))),
+            )])),
         ),
-    ])));
+    ]));
     let b = dict(&[("tools", list(vec![tool])), ("schema", schema)]);
 
     {
@@ -415,11 +411,11 @@ fn logical_section_provenance_adjusts_child_spans() {
 fn filter_json() {
     let b = dict(&[(
         "x",
-        VmValue::Dict(std::sync::Arc::new({
-            let mut m = BTreeMap::new();
+        VmValue::dict({
+            let mut m = crate::value::DictMap::new();
             m.insert("a".into(), VmValue::Int(1));
             m
-        })),
+        }),
     )]);
     assert_eq!(render("{{x | json}}", &b), r#"{"a":1}"#);
 }

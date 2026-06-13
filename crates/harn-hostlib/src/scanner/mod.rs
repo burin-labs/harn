@@ -540,7 +540,7 @@ fn scan_incremental_handler(args: &[VmValue]) -> Result<VmValue, HostlibError> {
 
 fn parse_options(
     builtin: &'static str,
-    dict: &std::collections::BTreeMap<String, VmValue>,
+    dict: &harn_vm::value::DictMap,
 ) -> Result<ScanProjectOptions, HostlibError> {
     let include_hidden = optional_bool(builtin, dict, "include_hidden", false)?;
     let respect_gitignore = optional_bool(builtin, dict, "respect_gitignore", true)?;
@@ -578,7 +578,7 @@ fn parse_options(
 
 fn parse_changed_paths(
     builtin: &'static str,
-    dict: &std::collections::BTreeMap<String, VmValue>,
+    dict: &harn_vm::value::DictMap,
 ) -> Result<Option<Vec<String>>, HostlibError> {
     let value = match dict.get("changed_paths") {
         None | Some(VmValue::Nil) => return Ok(None),
@@ -771,7 +771,7 @@ mod tests {
 
     #[test]
     fn builtin_option_defaults_match_request_schemas() {
-        let dict = std::collections::BTreeMap::new();
+        let dict = harn_vm::value::DictMap::new();
 
         let scan_project = parse_options(SCAN_PROJECT_BUILTIN, &dict).unwrap();
         let scan_incremental = parse_options(SCAN_INCREMENTAL_BUILTIN, &dict).unwrap();

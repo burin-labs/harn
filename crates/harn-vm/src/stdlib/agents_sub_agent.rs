@@ -1,5 +1,4 @@
 use crate::value::VmDictExt;
-use std::collections::BTreeMap;
 
 use super::agents_workers;
 use super::{SubAgentExecutionResult, SubAgentRunSpec};
@@ -213,7 +212,7 @@ fn validate_child_anchor_against_parent(
 
 fn validate_sub_agent_request_envelope(
     args: &[VmValue],
-) -> Result<&BTreeMap<String, VmValue>, VmError> {
+) -> Result<&crate::value::DictMap, VmError> {
     match args.first() {
         Some(VmValue::Dict(map)) => Ok(map.as_ref()),
         _ => Err(invalid_sub_agent_request()),
@@ -227,7 +226,7 @@ fn invalid_sub_agent_request() -> VmError {
 }
 
 fn resolve_sub_agent_policies(
-    request: &BTreeMap<String, VmValue>,
+    request: &crate::value::DictMap,
     parser: &mut OptionsParser<'_>,
 ) -> Result<SubAgentPolicyResolution, VmError> {
     let allowed_tools =
@@ -258,7 +257,7 @@ fn prepare_sub_agent_options(
     parser: &mut OptionsParser<'_>,
     session_id: &str,
     requested_policy: Option<&CapabilityPolicy>,
-) -> Result<BTreeMap<String, VmValue>, VmError> {
+) -> Result<crate::value::DictMap, VmError> {
     let mut options = parser
         .optional_dict("options")?
         .cloned()
@@ -276,7 +275,7 @@ fn prepare_sub_agent_options(
     Ok(options)
 }
 
-fn inject_sub_agent_skill_context(options: &mut BTreeMap<String, VmValue>) {
+fn inject_sub_agent_skill_context(options: &mut crate::value::DictMap) {
     let Some(context) = crate::orchestration::current_workflow_skill_context() else {
         return;
     };
@@ -297,13 +296,13 @@ fn sub_agent_error_dict(
     message: impl Into<String>,
     tool: Option<String>,
 ) -> VmValue {
-    let mut error = BTreeMap::new();
+    let mut error = crate::value::DictMap::new();
     error.put_str("category", category);
     error.put_str("message", message.into());
     if let Some(tool) = tool {
         error.put_str("tool", tool);
     }
-    VmValue::Dict(std::sync::Arc::new(error))
+    VmValue::dict(error)
 }
 
 fn sub_agent_base_envelope(
@@ -313,8 +312,8 @@ fn sub_agent_base_envelope(
     tokens_used: i64,
     budget_exceeded: bool,
     session_id: &str,
-) -> BTreeMap<String, VmValue> {
-    let mut envelope = BTreeMap::new();
+) -> crate::value::DictMap {
+    let mut envelope = crate::value::DictMap::new();
     envelope.insert("ok".to_string(), VmValue::Bool(true));
     envelope.put_str("summary", summary);
     envelope.insert("artifacts".to_string(), artifacts);
@@ -353,7 +352,7 @@ fn wrap_sub_agent_error(
     if let Some(transcript) = transcript {
         envelope.insert("transcript".to_string(), transcript);
     }
-    VmValue::Dict(std::sync::Arc::new(envelope))
+    VmValue::dict(envelope)
 }
 
 fn append_parent_sub_agent_event(parent_session_id: Option<&str>, event: VmValue) {
@@ -632,7 +631,7 @@ fn collect_transcript_fallbacks(transcript: &VmValue) -> TranscriptFallbacks {
     fallbacks
 }
 
-fn option_requests_structured_output(options: &BTreeMap<String, VmValue>) -> bool {
+fn option_requests_structured_output(options: &crate::value::DictMap) -> bool {
     matches!(
         options.get("response_format"),
         Some(VmValue::String(value)) if value.as_ref() == "json"
@@ -742,7 +741,7 @@ pub(super) async fn execute_sub_agent(
             .as_ref()
             .map(|system| VmValue::String(std::sync::Arc::from(system.clone())))
             .unwrap_or(VmValue::Nil),
-        VmValue::Dict(std::sync::Arc::new(loop_options)),
+        VmValue::dict(loop_options),
     ];
     let result = crate::stdlib::harn_entry::call_harn_export_by_name(
         ctx,
@@ -967,7 +966,7 @@ pub(super) async fn execute_sub_agent(
     );
 
     Ok(SubAgentExecutionResult {
-        payload: crate::llm::vm_value_to_json(&VmValue::Dict(std::sync::Arc::new(envelope))),
+        payload: crate::llm::vm_value_to_json(&VmValue::dict(envelope)),
         transcript,
     })
 }
@@ -995,7 +994,7 @@ mod tests {
     }
 
     fn assistant_message(text: &str) -> VmValue {
-        VmValue::Dict(std::sync::Arc::new(BTreeMap::from([
+        VmValue::dict(crate::value::DictMap::from_iter([
             (
                 "role".to_string(),
                 VmValue::String(std::sync::Arc::from("assistant")),
@@ -1004,11 +1003,11 @@ mod tests {
                 "content".to_string(),
                 VmValue::String(std::sync::Arc::from(text)),
             ),
-        ])))
+        ]))
     }
 
     fn normalized_request(extra: Vec<(&str, VmValue)>) -> VmValue {
-        let mut request = BTreeMap::from([
+        let mut request = crate::value::DictMap::from_iter([
             (
                 "_type".to_string(),
                 VmValue::String(std::sync::Arc::from("sub_agent_request")),
@@ -1021,7 +1020,7 @@ mod tests {
         for (key, value) in extra {
             request.insert(key.to_string(), value);
         }
-        VmValue::Dict(std::sync::Arc::new(request))
+        VmValue::dict(request)
     }
 
     #[test]
@@ -1054,7 +1053,7 @@ mod tests {
     fn anchor_dict(primary: &str, additional: Vec<(&str, &str)>) -> VmValue {
         let mut roots = Vec::new();
         for (path, mount_mode) in additional {
-            roots.push(VmValue::Dict(std::sync::Arc::new(BTreeMap::from([
+            roots.push(VmValue::dict(crate::value::DictMap::from_iter([
                 (
                     "path".to_string(),
                     VmValue::String(std::sync::Arc::from(path)),
@@ -1067,9 +1066,9 @@ mod tests {
                     "mounted_at".to_string(),
                     VmValue::String(std::sync::Arc::from("2026-05-24T00:00:00Z")),
                 ),
-            ]))));
+            ])));
         }
-        let mut anchor = BTreeMap::from([
+        let mut anchor = crate::value::DictMap::from_iter([
             (
                 "primary".to_string(),
                 VmValue::String(std::sync::Arc::from(primary)),
@@ -1085,7 +1084,7 @@ mod tests {
                 VmValue::List(std::sync::Arc::new(roots)),
             );
         }
-        VmValue::Dict(std::sync::Arc::new(anchor))
+        VmValue::dict(anchor)
     }
 
     fn path_string(path: &std::path::Path) -> String {
@@ -1273,7 +1272,7 @@ mod tests {
             name: "research-worker".to_string(),
             task: "inspect the repo".to_string(),
             system: None,
-            options: BTreeMap::from([
+            options: crate::value::DictMap::from_iter([
                 (
                     "provider".to_string(),
                     VmValue::String(std::sync::Arc::from("mock")),
@@ -1337,7 +1336,7 @@ mod tests {
         reset_llm_mock_state();
         let _policy = push_recursion_policy(0);
         let parent = crate::agent_sessions::open_or_create(Some("parent-budget".into()));
-        let mut options = BTreeMap::from([
+        let mut options = crate::value::DictMap::from_iter([
             (
                 "provider".to_string(),
                 VmValue::String(std::sync::Arc::from("mock")),

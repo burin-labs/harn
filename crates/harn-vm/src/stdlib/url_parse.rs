@@ -10,7 +10,7 @@ use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
 use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
 
-fn dict_str<'a>(d: &'a BTreeMap<String, VmValue>, key: &str) -> Option<&'a str> {
+fn dict_str<'a>(d: &'a crate::value::DictMap, key: &str) -> Option<&'a str> {
     match d.get(key) {
         Some(VmValue::String(s)) => Some(s.as_ref()),
         _ => None,
@@ -85,7 +85,7 @@ fn url_parse_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErro
             .map(|p| VmValue::String(std::sync::Arc::from(p)))
             .unwrap_or(VmValue::Nil),
     );
-    Ok(VmValue::Dict(std::sync::Arc::new(dict)))
+    Ok(VmValue::dict(dict))
 }
 
 #[harn_builtin(sig = "url_build(parts: dict) -> string", category = "url")]
@@ -168,7 +168,7 @@ fn query_parse_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmEr
             let mut row = BTreeMap::new();
             row.put_str("key", &k);
             row.put_str("value", &v);
-            VmValue::Dict(std::sync::Arc::new(row))
+            VmValue::dict(row)
         })
         .collect();
     Ok(VmValue::List(std::sync::Arc::new(pairs)))

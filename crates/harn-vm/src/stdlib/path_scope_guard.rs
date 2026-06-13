@@ -8,7 +8,6 @@
 //! a typed alert body listing the three handoff options (add_root,
 //! reanchor, fork to sub-agent) before rejecting the call.
 
-use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use crate::llm::helpers::{ReminderPropagate, ReminderRoleHint, ReminderSource, SystemReminder};
@@ -59,7 +58,7 @@ pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] =
 )]
 fn register_path_scope_guard(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let opts = match args.first() {
-        None | Some(VmValue::Nil) => BTreeMap::new(),
+        None | Some(VmValue::Nil) => crate::value::DictMap::new(),
         Some(VmValue::Dict(map)) => map.as_ref().clone(),
         Some(other) => {
             return Err(VmError::Runtime(format!(
@@ -183,7 +182,7 @@ enum Violation {
     Reminder,
 }
 
-fn parse_arg_keys(opts: &BTreeMap<String, VmValue>) -> Result<Vec<String>, VmError> {
+fn parse_arg_keys(opts: &crate::value::DictMap) -> Result<Vec<String>, VmError> {
     match opts.get("arg_keys") {
         None | Some(VmValue::Nil) => {
             Ok(DEFAULT_ARG_KEYS.iter().map(|key| key.to_string()).collect())
@@ -208,7 +207,7 @@ fn parse_arg_keys(opts: &BTreeMap<String, VmValue>) -> Result<Vec<String>, VmErr
     }
 }
 
-fn parse_on_violation(opts: &BTreeMap<String, VmValue>) -> Result<Violation, VmError> {
+fn parse_on_violation(opts: &crate::value::DictMap) -> Result<Violation, VmError> {
     match opts.get("on_violation") {
         None | Some(VmValue::Nil) => Ok(Violation::Deny),
         Some(VmValue::String(value)) => match value.as_ref() {
@@ -225,7 +224,7 @@ fn parse_on_violation(opts: &BTreeMap<String, VmValue>) -> Result<Violation, VmE
     }
 }
 
-fn parse_mount_modes(opts: &BTreeMap<String, VmValue>) -> Result<Vec<MountMode>, VmError> {
+fn parse_mount_modes(opts: &crate::value::DictMap) -> Result<Vec<MountMode>, VmError> {
     let raw = match opts.get("mount_modes") {
         None | Some(VmValue::Nil) => {
             return Ok(vec![MountMode::Extend, MountMode::Sandboxed]);
@@ -313,13 +312,13 @@ mod tests {
 
     #[test]
     fn parse_mount_modes_defaults_to_writable_mounts() {
-        let modes = parse_mount_modes(&BTreeMap::new()).expect("default modes");
+        let modes = parse_mount_modes(&crate::value::DictMap::new()).expect("default modes");
         assert_eq!(modes, vec![MountMode::Extend, MountMode::Sandboxed]);
     }
 
     #[test]
     fn parse_on_violation_rejects_unknown_value() {
-        let opts = BTreeMap::from([(
+        let opts = crate::value::DictMap::from_iter([(
             "on_violation".to_string(),
             VmValue::String(std::sync::Arc::from("warn")),
         )]);

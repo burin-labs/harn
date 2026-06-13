@@ -1,4 +1,3 @@
-use std::collections::BTreeMap;
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 
@@ -13,12 +12,12 @@ fn vm_string(value: &str) -> VmValue {
 }
 
 fn vm_dict(pairs: Vec<(&str, VmValue)>) -> VmValue {
-    VmValue::Dict(std::sync::Arc::new(
+    VmValue::dict(
         pairs
             .into_iter()
             .map(|(key, value)| (key.to_string(), value))
-            .collect(),
-    ))
+            .collect::<crate::value::DictMap>(),
+    )
 }
 
 #[test]
@@ -50,10 +49,10 @@ fn worker_snapshot_round_trip_preserves_resume_fields() {
                 ..Default::default()
             }),
             artifacts: Vec::new(),
-            transcript: Some(VmValue::Dict(std::sync::Arc::new(BTreeMap::from([(
+            transcript: Some(VmValue::dict(crate::value::DictMap::from_iter([(
                 "_type".to_string(),
                 VmValue::String(std::sync::Arc::from("transcript")),
-            )])))),
+            )]))),
         },
         handle: None,
         cancel_token: Arc::new(AtomicBool::new(false)),
@@ -78,10 +77,10 @@ fn worker_snapshot_round_trip_preserves_resume_fields() {
         },
         latest_payload: Some(serde_json::json!({"status": "completed"})),
         latest_error: None,
-        transcript: Some(VmValue::Dict(std::sync::Arc::new(BTreeMap::from([(
+        transcript: Some(VmValue::dict(crate::value::DictMap::from_iter([(
             "_type".to_string(),
             VmValue::String(std::sync::Arc::from("transcript")),
-        )])))),
+        )]))),
         artifacts: vec![ArtifactRecord {
             type_name: "artifact".to_string(),
             id: "artifact_1".to_string(),
@@ -97,7 +96,7 @@ fn worker_snapshot_round_trip_preserves_resume_fields() {
             relevance: Some(1.0),
             estimated_tokens: Some(1),
             stage: Some("stage".to_string()),
-            metadata: BTreeMap::new(),
+            metadata: std::collections::BTreeMap::new(),
         }],
         parent_worker_id: Some("parent".to_string()),
         parent_stage_id: Some("stage".to_string()),
@@ -226,7 +225,7 @@ fn worker_summary_exposes_request_and_provenance() {
                 name: "worker".to_string(),
                 task: "latest task".to_string(),
                 system: Some("system".to_string()),
-                options: BTreeMap::new(),
+                options: crate::value::DictMap::new(),
                 returns_schema: None,
                 session_id: "session_worker".to_string(),
                 parent_session_id: Some("session_parent".to_string()),
@@ -368,7 +367,7 @@ fn transcript_carry_policy_can_reset_or_fork_transcripts() {
 #[tokio::test(flavor = "current_thread")]
 async fn compact_transcript_mode_reduces_carried_messages() {
     let messages = vec![
-        VmValue::Dict(std::sync::Arc::new(BTreeMap::from([
+        VmValue::dict(crate::value::DictMap::from_iter([
             (
                 "role".to_string(),
                 VmValue::String(std::sync::Arc::from("user")),
@@ -377,8 +376,8 @@ async fn compact_transcript_mode_reduces_carried_messages() {
                 "content".to_string(),
                 VmValue::String(std::sync::Arc::from("one")),
             ),
-        ]))),
-        VmValue::Dict(std::sync::Arc::new(BTreeMap::from([
+        ])),
+        VmValue::dict(crate::value::DictMap::from_iter([
             (
                 "role".to_string(),
                 VmValue::String(std::sync::Arc::from("assistant")),
@@ -387,8 +386,8 @@ async fn compact_transcript_mode_reduces_carried_messages() {
                 "content".to_string(),
                 VmValue::String(std::sync::Arc::from("two")),
             ),
-        ]))),
-        VmValue::Dict(std::sync::Arc::new(BTreeMap::from([
+        ])),
+        VmValue::dict(crate::value::DictMap::from_iter([
             (
                 "role".to_string(),
                 VmValue::String(std::sync::Arc::from("user")),
@@ -397,8 +396,8 @@ async fn compact_transcript_mode_reduces_carried_messages() {
                 "content".to_string(),
                 VmValue::String(std::sync::Arc::from("three")),
             ),
-        ]))),
-        VmValue::Dict(std::sync::Arc::new(BTreeMap::from([
+        ])),
+        VmValue::dict(crate::value::DictMap::from_iter([
             (
                 "role".to_string(),
                 VmValue::String(std::sync::Arc::from("assistant")),
@@ -407,7 +406,7 @@ async fn compact_transcript_mode_reduces_carried_messages() {
                 "content".to_string(),
                 VmValue::String(std::sync::Arc::from("four")),
             ),
-        ]))),
+        ])),
     ];
     let transcript = crate::llm::helpers::new_transcript_with_events(
         Some("compact-transcript".to_string()),
@@ -452,7 +451,7 @@ fn worker_policy_inherits_parent_ceiling_when_unspecified() {
         ..Default::default()
     });
 
-    let dict = BTreeMap::from([(
+    let dict = crate::value::DictMap::from_iter([(
         "task".to_string(),
         VmValue::String(std::sync::Arc::from("draft note")),
     )]);
@@ -478,20 +477,20 @@ fn worker_policy_intersects_explicit_policy_and_tools_shorthand() {
         ..Default::default()
     });
 
-    let dict = BTreeMap::from([
+    let dict = crate::value::DictMap::from_iter([
         (
             "task".to_string(),
             VmValue::String(std::sync::Arc::from("draft note")),
         ),
         (
             "policy".to_string(),
-            VmValue::Dict(std::sync::Arc::new(BTreeMap::from([(
+            VmValue::dict(crate::value::DictMap::from_iter([(
                 "tools".to_string(),
                 VmValue::List(std::sync::Arc::new(vec![
                     VmValue::String(std::sync::Arc::from("read")),
                     VmValue::String(std::sync::Arc::from("write")),
                 ])),
-            )]))),
+            )])),
         ),
         (
             "tools".to_string(),

@@ -53,7 +53,7 @@ pub struct Debugger {
     pub(crate) next_bp_id: i64,
     pub(crate) vm: Option<Vm>,
     /// Variables captured at the current stop point.
-    pub(crate) variables: BTreeMap<String, VmValue>,
+    pub(crate) variables: harn_vm::value::DictMap,
     /// Current execution state.
     pub(crate) stopped: bool,
     /// Current line in the source.
@@ -196,7 +196,7 @@ impl Debugger {
             breakpoints: Vec::new(),
             next_bp_id: 1,
             vm: None,
-            variables: BTreeMap::new(),
+            variables: harn_vm::value::DictMap::new(),
             stopped: false,
             current_line: 0,
             step_mode: StepMode::Continue,

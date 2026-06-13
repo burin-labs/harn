@@ -1800,18 +1800,18 @@ fn test_host_signal_token_dispatches_matching_signal() {
             out.push_str("[harn] int\n");
             Ok(VmValue::Nil)
         });
-        let term_options = VmValue::Dict(std::sync::Arc::new(BTreeMap::from([(
+        let term_options = VmValue::dict(BTreeMap::from([(
             "signals".to_string(),
             VmValue::List(std::sync::Arc::new(vec![VmValue::String(
                 std::sync::Arc::from("SIGTERM"),
             )])),
-        )])));
-        let int_options = VmValue::Dict(std::sync::Arc::new(BTreeMap::from([(
+        )]));
+        let int_options = VmValue::dict(BTreeMap::from([(
             "signals".to_string(),
             VmValue::List(std::sync::Arc::new(vec![VmValue::String(
                 std::sync::Arc::from("SIGINT"),
             )])),
-        )])));
+        )]));
         vm.register_interrupt_handler(
             VmValue::BuiltinRef(std::sync::Arc::from("term_marker")),
             Some(&term_options),

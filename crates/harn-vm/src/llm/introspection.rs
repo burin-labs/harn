@@ -120,7 +120,7 @@ pub fn snapshot_to_vm_value(snapshot: Option<&RuntimeIntrospectionSnapshot>) -> 
         dict.insert("context_window".to_string(), VmValue::Nil);
         dict.insert("runtime_context_window".to_string(), VmValue::Nil);
         dict.insert("capabilities".to_string(), VmValue::Nil);
-        return VmValue::Dict(std::sync::Arc::new(dict));
+        return VmValue::dict(dict);
     };
     dict.put_str("provider", snap.provider.as_str());
     dict.put_str("model", snap.model.as_str());
@@ -147,7 +147,7 @@ pub fn snapshot_to_vm_value(snapshot: Option<&RuntimeIntrospectionSnapshot>) -> 
             .unwrap_or(VmValue::Nil),
     );
     dict.insert("capabilities".to_string(), snap.capabilities.clone());
-    VmValue::Dict(std::sync::Arc::new(dict))
+    VmValue::dict(dict)
 }
 
 /// Tool names registered by `runtime_introspection_tools`. Kept in

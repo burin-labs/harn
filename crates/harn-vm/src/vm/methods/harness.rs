@@ -8,7 +8,6 @@
 //! opaque tool rejection.
 
 use crate::value::VmDictExt;
-use std::collections::BTreeMap;
 use std::time::Duration;
 
 use crate::harness::{vm_string, HarnessKind, HarnessMode, VmHarness};
@@ -1012,7 +1011,7 @@ impl crate::vm::Vm {
         };
         if let Some((http_method, has_body)) = verb {
             let url = string_arg(args, 0, &format!("HarnessNet.{method}"))?.to_string();
-            let mut options: BTreeMap<String, VmValue> = BTreeMap::new();
+            let mut options: crate::value::DictMap = crate::value::DictMap::new();
             if has_body {
                 match (args.get(1), args.get(2)) {
                     (Some(VmValue::Dict(d)), None) => options = (**d).clone(),
@@ -1037,7 +1036,7 @@ impl crate::vm::Vm {
                 let url = string_arg(args, 1, "HarnessNet.request")?.to_string();
                 let options = match args.get(2) {
                     Some(VmValue::Dict(d)) => (**d).clone(),
-                    _ => BTreeMap::new(),
+                    _ => crate::value::DictMap::new(),
                 };
                 crate::http::execute_http_request(&http_method.to_uppercase(), &url, &options)
                     .await
@@ -1212,10 +1211,7 @@ fn state_counts(state: &VmValue) -> Result<UnsettledCounts, VmError> {
     })
 }
 
-fn state_bucket_len(
-    dict: &std::collections::BTreeMap<String, VmValue>,
-    key: &str,
-) -> Result<usize, VmError> {
+fn state_bucket_len(dict: &crate::value::DictMap, key: &str) -> Result<usize, VmError> {
     match dict.get(key) {
         Some(VmValue::List(items)) => Ok(items.len()),
         Some(other) => Err(VmError::TypeError(format!(
@@ -1779,7 +1775,7 @@ fn tag_sandbox_denied(error: VmError) -> VmError {
 
 const HARN_CAP_201_CODE: &str = "HARN-CAP-201";
 
-fn is_egress_blocked_dict(dict: &std::collections::BTreeMap<String, VmValue>) -> bool {
+fn is_egress_blocked_dict(dict: &crate::value::DictMap) -> bool {
     matches!(
         dict.get("type"),
         Some(VmValue::String(value)) if value.as_ref() == "EgressBlocked"
@@ -1787,8 +1783,8 @@ fn is_egress_blocked_dict(dict: &std::collections::BTreeMap<String, VmValue>) ->
 }
 
 fn tag_egress_dict(
-    dict: std::sync::Arc<std::collections::BTreeMap<String, VmValue>>,
-) -> std::sync::Arc<std::collections::BTreeMap<String, VmValue>> {
+    dict: std::sync::Arc<crate::value::DictMap>,
+) -> std::sync::Arc<crate::value::DictMap> {
     let mut next = (*dict).clone();
     if matches!(
         next.get("code"),
@@ -1963,7 +1959,7 @@ fn mock_read_line_value(state: &crate::harness::MockHarnessState, args: &[VmValu
                 out.insert("ok".to_string(), VmValue::Bool(true));
                 out.put_str("status", "ok");
                 out.put_str("value", line);
-                VmValue::Dict(std::sync::Arc::new(out))
+                VmValue::dict(out)
             } else {
                 VmValue::String(std::sync::Arc::from(line))
             }
@@ -1973,7 +1969,7 @@ fn mock_read_line_value(state: &crate::harness::MockHarnessState, args: &[VmValu
                 let mut out = std::collections::BTreeMap::new();
                 out.insert("ok".to_string(), VmValue::Bool(false));
                 out.put_str("status", "eof");
-                VmValue::Dict(std::sync::Arc::new(out))
+                VmValue::dict(out)
             } else {
                 VmValue::Nil
             }

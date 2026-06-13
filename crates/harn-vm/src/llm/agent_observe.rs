@@ -1587,12 +1587,12 @@ mod retry_tests {
         // (mirrors the `tools` registry the request used).
         fn run_tool_registry() -> VmValue {
             let dict = |pairs: &[(&str, VmValue)]| -> VmValue {
-                VmValue::Dict(std::sync::Arc::new(
+                VmValue::dict(
                     pairs
                         .iter()
                         .map(|(k, v)| ((*k).to_string(), v.clone()))
-                        .collect(),
-                ))
+                        .collect::<crate::value::DictMap>(),
+                )
             };
             let s = |v: &str| VmValue::String(std::sync::Arc::from(v));
             let run_tool = dict(&[
@@ -1871,32 +1871,28 @@ mod retry_tests {
 
     #[test]
     fn llm_error_kind_dict_gates_retry() {
-        let transient = VmError::Thrown(VmValue::Dict(std::sync::Arc::new(
-            std::collections::BTreeMap::from([
-                (
-                    "kind".to_string(),
-                    VmValue::String(std::sync::Arc::from("transient")),
-                ),
-                (
-                    "reason".to_string(),
-                    VmValue::String(std::sync::Arc::from("network_error")),
-                ),
-            ]),
-        )));
+        let transient = VmError::Thrown(VmValue::dict(std::collections::BTreeMap::from([
+            (
+                "kind".to_string(),
+                VmValue::String(std::sync::Arc::from("transient")),
+            ),
+            (
+                "reason".to_string(),
+                VmValue::String(std::sync::Arc::from("network_error")),
+            ),
+        ])));
         assert!(is_retryable_llm_error(&transient));
 
-        let terminal = VmError::Thrown(VmValue::Dict(std::sync::Arc::new(
-            std::collections::BTreeMap::from([
-                (
-                    "kind".to_string(),
-                    VmValue::String(std::sync::Arc::from("terminal")),
-                ),
-                (
-                    "reason".to_string(),
-                    VmValue::String(std::sync::Arc::from("context_overflow")),
-                ),
-            ]),
-        )));
+        let terminal = VmError::Thrown(VmValue::dict(std::collections::BTreeMap::from([
+            (
+                "kind".to_string(),
+                VmValue::String(std::sync::Arc::from("terminal")),
+            ),
+            (
+                "reason".to_string(),
+                VmValue::String(std::sync::Arc::from("context_overflow")),
+            ),
+        ])));
         assert!(!is_retryable_llm_error(&terminal));
     }
 

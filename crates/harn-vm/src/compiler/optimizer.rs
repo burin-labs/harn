@@ -79,7 +79,7 @@ fn constant_value(expr: &SNode) -> Option<VmValue> {
                     constant_value(&entry.value)?,
                 );
             }
-            Some(VmValue::Dict(std::sync::Arc::new(values)))
+            Some(VmValue::dict(values))
         }
         _ => None,
     }
@@ -170,7 +170,7 @@ fn fold_add(left: VmValue, right: VmValue) -> Option<VmValue> {
                     .iter()
                     .map(|(key, value)| (key.clone(), value.clone())),
             );
-            Some(VmValue::Dict(std::sync::Arc::new(out)))
+            Some(VmValue::dict(out))
         }
         _ => None,
     }

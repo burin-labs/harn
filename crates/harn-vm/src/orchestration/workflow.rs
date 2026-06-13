@@ -855,9 +855,7 @@ fn resolve_node_session_id(node: &WorkflowNode) -> String {
     format!("workflow_stage_{}", uuid::Uuid::now_v7())
 }
 
-fn raw_auto_compact_dict(
-    node: &WorkflowNode,
-) -> Option<&std::collections::BTreeMap<String, VmValue>> {
+fn raw_auto_compact_dict(node: &WorkflowNode) -> Option<&crate::value::DictMap> {
     node.raw_auto_compact
         .as_ref()
         .and_then(|value| value.as_dict())
@@ -880,14 +878,14 @@ fn raw_auto_compact_string(node: &WorkflowNode, key: &str) -> Option<String> {
         })
 }
 
-fn raw_model_policy_dict(node: &WorkflowNode) -> Option<&BTreeMap<String, VmValue>> {
+fn raw_model_policy_dict(node: &WorkflowNode) -> Option<&crate::value::DictMap> {
     node.raw_model_policy
         .as_ref()
         .and_then(|value| value.as_dict())
 }
 
 fn insert_json_vm_option<T: Serialize>(
-    options: &mut BTreeMap<String, VmValue>,
+    options: &mut crate::value::DictMap,
     key: &str,
     value: &T,
 ) -> Result<(), VmError> {
@@ -898,7 +896,7 @@ fn insert_json_vm_option<T: Serialize>(
     Ok(())
 }
 
-fn merge_raw_model_policy_options(options: &mut BTreeMap<String, VmValue>, node: &WorkflowNode) {
+fn merge_raw_model_policy_options(options: &mut crate::value::DictMap, node: &WorkflowNode) {
     if let Some(raw) = raw_model_policy_dict(node) {
         for (key, value) in raw {
             if !matches!(value, VmValue::Nil) {
@@ -908,7 +906,7 @@ fn merge_raw_model_policy_options(options: &mut BTreeMap<String, VmValue>, node:
     }
 }
 
-fn preserve_nested_command_policy(options: &mut BTreeMap<String, VmValue>, node: &WorkflowNode) {
+fn preserve_nested_command_policy(options: &mut crate::value::DictMap, node: &WorkflowNode) {
     if options.contains_key("command_policy") {
         return;
     }
@@ -933,7 +931,7 @@ fn stage_tools_value(node: &WorkflowNode) -> Option<VmValue> {
 }
 
 fn add_stage_tools_option(
-    options: &mut BTreeMap<String, VmValue>,
+    options: &mut crate::value::DictMap,
     tools_value: &Option<VmValue>,
     tool_names: &[String],
 ) {
@@ -950,7 +948,7 @@ fn workflow_stage_llm_options(
     tools_value: &Option<VmValue>,
     tool_names: &[String],
     stage_agent_options: &super::WorkflowStageAgentOptions,
-) -> BTreeMap<String, VmValue> {
+) -> crate::value::DictMap {
     let mut options = stage_agent_options.llm_options_vm_dict();
     merge_raw_model_policy_options(&mut options, node);
     options.put_str("session_id", stage_session_id);
@@ -959,10 +957,7 @@ fn workflow_stage_llm_options(
     options
 }
 
-fn add_workflow_agent_compaction_options(
-    options: &mut BTreeMap<String, VmValue>,
-    node: &WorkflowNode,
-) {
+fn add_workflow_agent_compaction_options(options: &mut crate::value::DictMap, node: &WorkflowNode) {
     if !node.auto_compact.enabled {
         options.insert("auto_compact".to_string(), VmValue::Bool(false));
         return;
@@ -1012,7 +1007,7 @@ fn workflow_stage_agent_loop_options(
     tools_value: &Option<VmValue>,
     tool_names: &[String],
     stage_agent_options: &super::WorkflowStageAgentOptions,
-) -> Result<BTreeMap<String, VmValue>, VmError> {
+) -> Result<crate::value::DictMap, VmError> {
     let mut options = stage_agent_options.agent_loop_options_vm_dict();
     merge_raw_model_policy_options(&mut options, node);
     if let Some(context) = crate::orchestration::current_workflow_skill_context() {
@@ -1055,8 +1050,8 @@ pub struct PreparedWorkflowStageNode {
     pub prompt: String,
     pub system: Option<String>,
     pub run_agent_loop: bool,
-    pub llm_options: BTreeMap<String, VmValue>,
-    pub agent_loop_options: BTreeMap<String, VmValue>,
+    pub llm_options: crate::value::DictMap,
+    pub agent_loop_options: crate::value::DictMap,
     pub result: Option<serde_json::Value>,
     pub selected: Vec<ArtifactRecord>,
     pub rendered_context: String,
@@ -1211,7 +1206,7 @@ pub async fn prepare_stage_node(
                 &stage_agent_options,
             )?
         } else {
-            BTreeMap::new()
+            crate::value::DictMap::new()
         };
         return Ok(PreparedWorkflowStageNode {
             prompt,
@@ -1233,8 +1228,8 @@ pub async fn prepare_stage_node(
         prompt,
         system: node.system.clone(),
         run_agent_loop: false,
-        llm_options: BTreeMap::new(),
-        agent_loop_options: BTreeMap::new(),
+        llm_options: crate::value::DictMap::new(),
+        agent_loop_options: crate::value::DictMap::new(),
         result: Some(result),
         selected,
         rendered_context,
@@ -1399,7 +1394,7 @@ pub async fn execute_stage_node(
                 .clone()
                 .map(|s| VmValue::String(std::sync::Arc::from(s)))
                 .unwrap_or(VmValue::Nil),
-            VmValue::Dict(std::sync::Arc::new(prepared.llm_options.clone())),
+            VmValue::dict(prepared.llm_options.clone()),
         ];
         let opts = extract_llm_options(&args)?;
         let result = vm_call_llm_full(&opts).await?;

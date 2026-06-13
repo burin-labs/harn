@@ -16,7 +16,7 @@ use super::{
 };
 
 thread_local! {
-    static IN_FLIGHT_LLM_CALLS: RefCell<BTreeMap<String, InFlightLlmCall>> = const { RefCell::new(BTreeMap::new()) };
+    static IN_FLIGHT_LLM_CALLS: RefCell<BTreeMap<String, InFlightLlmCall>> = const { RefCell::new(std::collections::BTreeMap::new()) };
 }
 
 #[derive(Clone, Debug)]
@@ -178,9 +178,7 @@ pub(crate) enum SchemaNudge {
     Disabled,
 }
 
-pub(crate) fn parse_schema_nudge(
-    options: &Option<std::collections::BTreeMap<String, VmValue>>,
-) -> SchemaNudge {
+pub(crate) fn parse_schema_nudge(options: &Option<crate::value::DictMap>) -> SchemaNudge {
     let Some(opts) = options.as_ref() else {
         return SchemaNudge::Auto;
     };
@@ -412,7 +410,7 @@ pub(crate) fn build_llm_error_dict(err: &VmError, provider: &str, model: &str) -
             .or_insert_with(|| VmValue::String(std::sync::Arc::from(message.as_str())));
         dict.put_str("provider", provider);
         dict.put_str("model", model);
-        return VmValue::Dict(std::sync::Arc::new(dict));
+        return VmValue::dict(dict);
     }
     let mut dict = std::collections::BTreeMap::new();
     dict.put_str("category", category.as_str());
@@ -424,7 +422,7 @@ pub(crate) fn build_llm_error_dict(err: &VmError, provider: &str, model: &str) -
     }
     dict.put_str("provider", provider);
     dict.put_str("model", model);
-    VmValue::Dict(std::sync::Arc::new(dict))
+    VmValue::dict(dict)
 }
 
 fn llm_error_message(err: &VmError) -> String {
@@ -442,7 +440,7 @@ fn llm_error_message(err: &VmError) -> String {
 pub(crate) async fn execute_llm_call(
     ctx: Option<&crate::vm::AsyncBuiltinCtx>,
     opts: api::LlmCallOptions,
-    options: Option<std::collections::BTreeMap<String, VmValue>>,
+    options: Option<crate::value::DictMap>,
     bridge: Option<&Arc<crate::bridge::HostBridge>>,
 ) -> Result<VmValue, VmError> {
     // Publish the resolved provider/model facts for the introspection
@@ -491,7 +489,7 @@ async fn execute_routing_schema_retry_loop(
     ctx: Option<&crate::vm::AsyncBuiltinCtx>,
     policy: Arc<routing::RoutingPolicyConfig>,
     mut opts: api::LlmCallOptions,
-    options: Option<std::collections::BTreeMap<String, VmValue>>,
+    options: Option<crate::value::DictMap>,
     bridge: Option<&Arc<crate::bridge::HostBridge>>,
 ) -> Result<SchemaLoopOutcome, VmError> {
     let _ = structural_experiments::apply_structural_experiment(ctx, &mut opts, None).await?;
@@ -606,11 +604,8 @@ fn attach_routing_block(
         "session_cost_usd".to_string(),
         VmValue::Float(trace.session_cost_usd),
     );
-    dict.insert(
-        "routing".to_string(),
-        VmValue::Dict(std::sync::Arc::new(routing_dict)),
-    );
-    VmValue::Dict(std::sync::Arc::new(dict))
+    dict.insert("routing".to_string(), VmValue::dict(routing_dict));
+    VmValue::dict(dict)
 }
 
 /// Outcome of the schema-retry loop, exposing both the final attempt's
@@ -639,7 +634,7 @@ pub(crate) struct SchemaLoopOutcome {
 pub(crate) async fn execute_schema_retry_loop(
     ctx: Option<&crate::vm::AsyncBuiltinCtx>,
     mut opts: api::LlmCallOptions,
-    options: Option<std::collections::BTreeMap<String, VmValue>>,
+    options: Option<crate::value::DictMap>,
     bridge: Option<&Arc<crate::bridge::HostBridge>>,
 ) -> Result<SchemaLoopOutcome, VmError> {
     let _ = structural_experiments::apply_structural_experiment(ctx, &mut opts, None).await?;
@@ -786,7 +781,7 @@ pub(super) fn llm_safe_envelope_ok(response: VmValue) -> VmValue {
     dict.insert("ok".to_string(), VmValue::Bool(true));
     dict.insert("response".to_string(), response);
     dict.insert("error".to_string(), VmValue::Nil);
-    VmValue::Dict(std::sync::Arc::new(dict))
+    VmValue::dict(dict)
 }
 
 pub(super) fn llm_safe_envelope_err(err: &VmError) -> VmValue {
@@ -800,7 +795,7 @@ pub(super) fn llm_safe_envelope_err(err: &VmError) -> VmValue {
         dict.insert("ok".to_string(), VmValue::Bool(false));
         dict.insert("response".to_string(), VmValue::Nil);
         dict.insert("error".to_string(), VmValue::Dict(d.clone()));
-        return VmValue::Dict(std::sync::Arc::new(dict));
+        return VmValue::dict(dict);
     }
     let category = crate::value::error_to_category(err);
     let message = llm_error_message(err);
@@ -813,11 +808,8 @@ pub(super) fn llm_safe_envelope_err(err: &VmError) -> VmValue {
     let mut dict = std::collections::BTreeMap::new();
     dict.insert("ok".to_string(), VmValue::Bool(false));
     dict.insert("response".to_string(), VmValue::Nil);
-    dict.insert(
-        "error".to_string(),
-        VmValue::Dict(std::sync::Arc::new(err_dict)),
-    );
-    VmValue::Dict(std::sync::Arc::new(dict))
+    dict.insert("error".to_string(), VmValue::dict(err_dict));
+    VmValue::dict(dict)
 }
 
 /// Rewrite `(prompt, schema, options?)` — the ergonomic
@@ -891,7 +883,7 @@ pub(crate) fn rewrite_structured_args(args: Vec<VmValue>) -> Result<Vec<VmValue>
             fmt.put_str("kind", "json_schema");
             fmt.insert("schema".to_string(), schema);
             fmt.insert("strict".to_string(), VmValue::Bool(true));
-            VmValue::Dict(std::sync::Arc::new(fmt))
+            VmValue::dict(fmt)
         });
     options
         .entry("response_format".to_string())
@@ -903,7 +895,7 @@ pub(crate) fn rewrite_structured_args(args: Vec<VmValue>) -> Result<Vec<VmValue>
     Ok(vec![
         prompt,
         system.unwrap_or(VmValue::Nil),
-        VmValue::Dict(std::sync::Arc::new(options)),
+        VmValue::dict(options),
     ])
 }
 
@@ -925,7 +917,7 @@ pub(crate) fn structured_safe_envelope_ok(data: VmValue) -> VmValue {
     dict.insert("ok".to_string(), VmValue::Bool(true));
     dict.insert("data".to_string(), data);
     dict.insert("error".to_string(), VmValue::Nil);
-    VmValue::Dict(std::sync::Arc::new(dict))
+    VmValue::dict(dict)
 }
 
 pub(crate) fn structured_safe_envelope_err(err: &VmError) -> VmValue {
@@ -934,7 +926,7 @@ pub(crate) fn structured_safe_envelope_err(err: &VmError) -> VmValue {
         dict.insert("ok".to_string(), VmValue::Bool(false));
         dict.insert("data".to_string(), VmValue::Nil);
         dict.insert("error".to_string(), VmValue::Dict(d.clone()));
-        return VmValue::Dict(std::sync::Arc::new(dict));
+        return VmValue::dict(dict);
     }
     let category = crate::value::error_to_category(err);
     let message = llm_error_message(err);
@@ -947,11 +939,8 @@ pub(crate) fn structured_safe_envelope_err(err: &VmError) -> VmValue {
     let mut dict = std::collections::BTreeMap::new();
     dict.insert("ok".to_string(), VmValue::Bool(false));
     dict.insert("data".to_string(), VmValue::Nil);
-    dict.insert(
-        "error".to_string(),
-        VmValue::Dict(std::sync::Arc::new(err_dict)),
-    );
-    VmValue::Dict(std::sync::Arc::new(dict))
+    dict.insert("error".to_string(), VmValue::dict(err_dict));
+    VmValue::dict(dict)
 }
 
 #[cfg(test)]
@@ -970,16 +959,14 @@ mod schema_stream_abort_retry_tests {
     //! reason verbatim, so callers see why the retry happened rather
     //! than a generic stream failure.
 
-    use std::collections::BTreeMap;
-
     use super::*;
     use crate::llm::fake::{
         install_fake_llm_script, FakeLlmEvent, FakeLlmScript, FakeLlmTurn, FakeStopReason,
     };
     use crate::llm::trace::{peek_agent_trace, reset_agent_trace_state, AgentTraceEvent};
 
-    fn options_with_retries(retries: i64) -> BTreeMap<String, VmValue> {
-        let mut opts = BTreeMap::new();
+    fn options_with_retries(retries: i64) -> crate::value::DictMap {
+        let mut opts = crate::value::DictMap::new();
         opts.insert("schema_retries".to_string(), VmValue::Int(retries));
         opts
     }
@@ -1014,7 +1001,7 @@ mod schema_stream_abort_retry_tests {
     fn fake_routing_policy() -> Arc<routing::RoutingPolicyConfig> {
         routing::clear_policy_registry();
         let chain = VmValue::List(std::sync::Arc::new(vec![VmValue::Dict(
-            std::sync::Arc::new(BTreeMap::from([
+            std::sync::Arc::new(crate::value::DictMap::from_iter([
                 (
                     "provider".to_string(),
                     VmValue::String(std::sync::Arc::from("fake")),
@@ -1025,9 +1012,12 @@ mod schema_stream_abort_retry_tests {
                 ),
             ])),
         )]));
-        let tagged = routing::build_routing_policy(&BTreeMap::from([("chain".to_string(), chain)]))
-            .expect("routing policy validates");
-        let options = BTreeMap::from([("routing".to_string(), tagged)]);
+        let tagged = routing::build_routing_policy(&crate::value::DictMap::from_iter([(
+            "chain".to_string(),
+            chain,
+        )]))
+        .expect("routing policy validates");
+        let options = crate::value::DictMap::from_iter([("routing".to_string(), tagged)]);
         routing::extract_routing_policy(Some(&options))
             .expect("routing policy extracts")
             .expect("routing policy present")
@@ -1042,10 +1032,10 @@ mod schema_stream_abort_retry_tests {
     fn structured_output_truncation_detected_case_insensitively() {
         let opts = api::options::base_opts("fake");
         for spelling in ["max_tokens", "MAX_TOKENS", "length", "LENGTH"] {
-            let dict = VmValue::Dict(std::sync::Arc::new(BTreeMap::from([(
+            let dict = VmValue::dict(crate::value::DictMap::from_iter([(
                 "stop_reason".to_string(),
                 VmValue::String(std::sync::Arc::from(spelling)),
-            )])));
+            )]));
             let errors = structured_output_errors(&dict, &opts);
             assert!(
                 errors.iter().any(|e| e.contains("hit the token limit")),
@@ -1053,10 +1043,10 @@ mod schema_stream_abort_retry_tests {
             );
         }
         // A non-truncation stop_reason must NOT add the token-limit error.
-        let dict = VmValue::Dict(std::sync::Arc::new(BTreeMap::from([(
+        let dict = VmValue::dict(crate::value::DictMap::from_iter([(
             "stop_reason".to_string(),
             VmValue::String(std::sync::Arc::from("stop")),
-        )])));
+        )]));
         let errors = structured_output_errors(&dict, &opts);
         assert!(
             !errors.iter().any(|e| e.contains("hit the token limit")),

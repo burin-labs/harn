@@ -28,7 +28,7 @@ use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
 use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
 
-fn vm_validate_registry(name: &str, dict: &BTreeMap<String, VmValue>) -> Result<(), VmError> {
+fn vm_validate_registry(name: &str, dict: &crate::value::DictMap) -> Result<(), VmError> {
     match dict.get("_type") {
         Some(VmValue::String(t)) if &**t == "skill_registry" => Ok(()),
         _ => Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
@@ -37,14 +37,14 @@ fn vm_validate_registry(name: &str, dict: &BTreeMap<String, VmValue>) -> Result<
     }
 }
 
-fn vm_get_skills(dict: &BTreeMap<String, VmValue>) -> &[VmValue] {
+fn vm_get_skills(dict: &crate::value::DictMap) -> &[VmValue] {
     match dict.get("skills") {
         Some(VmValue::List(list)) => list,
         _ => &[],
     }
 }
 
-fn vm_skill_entry_id(entry: &BTreeMap<String, VmValue>) -> String {
+fn vm_skill_entry_id(entry: &crate::value::DictMap) -> String {
     let name = entry.get("name").map(|v| v.display()).unwrap_or_default();
     let namespace = entry
         .get("namespace")
@@ -85,14 +85,14 @@ fn vm_skill_catalog_entries(skills: &[VmValue]) -> Vec<VmValue> {
         rendered.put_str("name", id.as_str());
         rendered.put_str("description", description.as_str());
         rendered.put_str("when_to_use", when_to_use.as_str());
-        catalog.push((id, VmValue::Dict(std::sync::Arc::new(rendered))));
+        catalog.push((id, VmValue::dict(rendered)));
     }
     catalog.sort_by(|a, b| a.0.cmp(&b.0));
     catalog.into_iter().map(|(_, value)| value).collect()
 }
 
 fn vm_skill_who_signed(skills: &[VmValue], target: &str) -> Result<VmValue, VmError> {
-    let mut bare_matches: Vec<&BTreeMap<String, VmValue>> = Vec::new();
+    let mut bare_matches: Vec<&crate::value::DictMap> = Vec::new();
     for skill in skills {
         let Some(entry) = skill.as_dict() else {
             continue;
@@ -119,10 +119,10 @@ fn vm_skill_who_signed(skills: &[VmValue], target: &str) -> Result<VmValue, VmEr
     }
 }
 
-fn who_signed_entry(entry: &BTreeMap<String, VmValue>) -> VmValue {
+fn who_signed_entry(entry: &crate::value::DictMap) -> VmValue {
     let mut out = match entry.get("provenance").and_then(VmValue::as_dict) {
         Some(provenance) => provenance.clone(),
-        None => BTreeMap::new(),
+        None => crate::value::DictMap::new(),
     };
     out.put_str("skill_id", vm_skill_entry_id(entry).as_str());
     out.entry("signed".to_string())
@@ -131,10 +131,10 @@ fn who_signed_entry(entry: &BTreeMap<String, VmValue>) -> VmValue {
         .or_insert(VmValue::Bool(false));
     out.entry("endorsements".to_string())
         .or_insert_with(|| VmValue::List(std::sync::Arc::new(Vec::new())));
-    VmValue::Dict(std::sync::Arc::new(out))
+    VmValue::dict(out)
 }
 
-fn render_catalog_entry(entry: &BTreeMap<String, VmValue>) -> Option<String> {
+fn render_catalog_entry(entry: &crate::value::DictMap) -> Option<String> {
     let name = entry.get("name").map(|v| v.display()).unwrap_or_default();
     if name.is_empty() {
         return None;
@@ -251,7 +251,7 @@ fn skill_registry_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, 
         "skills".to_string(),
         VmValue::List(std::sync::Arc::new(Vec::new())),
     );
-    Ok(VmValue::Dict(std::sync::Arc::new(registry)))
+    Ok(VmValue::dict(registry))
 }
 
 #[harn_builtin(
@@ -286,7 +286,7 @@ fn skill_define_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmE
 
     let config = match &args[2] {
         VmValue::Dict(map) => (**map).clone(),
-        VmValue::Nil => BTreeMap::new(),
+        VmValue::Nil => crate::value::DictMap::new(),
         _ => {
             return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
                 "skill_define: third argument must be a config dict",
@@ -362,7 +362,7 @@ fn skill_define_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmE
     for (k, v) in config.iter() {
         entry.insert(k.clone(), v.clone());
     }
-    let entry_value = VmValue::Dict(std::sync::Arc::new(entry));
+    let entry_value = VmValue::dict(entry);
 
     let skills = vm_get_skills(&registry);
     let mut new_skills: Vec<VmValue> = Vec::with_capacity(skills.len() + 1);
@@ -388,7 +388,7 @@ fn skill_define_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmE
         "skills".to_string(),
         VmValue::List(std::sync::Arc::new(new_skills)),
     );
-    Ok(VmValue::Dict(std::sync::Arc::new(new_registry)))
+    Ok(VmValue::dict(new_registry))
 }
 
 #[harn_builtin(sig = "skill_list(registry: dict) -> list", category = "skills")]
@@ -416,7 +416,7 @@ fn skill_list_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErr
                 }
                 desc.insert(key.clone(), value.clone());
             }
-            result.push(VmValue::Dict(std::sync::Arc::new(desc)));
+            result.push(VmValue::dict(desc));
         }
     }
     Ok(VmValue::List(std::sync::Arc::new(result)))
@@ -574,7 +574,7 @@ fn skill_select_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmE
         "skills".to_string(),
         VmValue::List(std::sync::Arc::new(selected)),
     );
-    Ok(VmValue::Dict(std::sync::Arc::new(new_registry)))
+    Ok(VmValue::dict(new_registry))
 }
 
 #[harn_builtin(sig = "skill_describe(registry: dict) -> string", category = "skills")]
@@ -667,7 +667,7 @@ fn skill_remove_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmE
         "skills".to_string(),
         VmValue::List(std::sync::Arc::new(filtered)),
     );
-    Ok(VmValue::Dict(std::sync::Arc::new(new_registry)))
+    Ok(VmValue::dict(new_registry))
 }
 
 // `skill_render(skill, args_list)` — substitute `$ARGUMENTS`, `$N`,
@@ -865,7 +865,7 @@ mod tests {
     #[test]
     fn catalog_entries_use_fully_qualified_ids_and_sort() {
         let skills = vec![
-            VmValue::Dict(std::sync::Arc::new(BTreeMap::from([
+            VmValue::dict(BTreeMap::from([
                 (
                     "name".to_string(),
                     VmValue::String(std::sync::Arc::from("beta")),
@@ -874,8 +874,8 @@ mod tests {
                     "description".to_string(),
                     VmValue::String(std::sync::Arc::from("Second skill")),
                 ),
-            ]))),
-            VmValue::Dict(std::sync::Arc::new(BTreeMap::from([
+            ])),
+            VmValue::dict(BTreeMap::from([
                 (
                     "name".to_string(),
                     VmValue::String(std::sync::Arc::from("deploy")),
@@ -892,7 +892,7 @@ mod tests {
                     "when_to_use".to_string(),
                     VmValue::String(std::sync::Arc::from("Ship a release")),
                 ),
-            ]))),
+            ])),
         ];
 
         let catalog = vm_skill_catalog_entries(&skills);
@@ -906,7 +906,7 @@ mod tests {
     #[test]
     fn render_catalog_is_deterministic_and_budgeted() {
         let entries = vec![
-            VmValue::Dict(std::sync::Arc::new(BTreeMap::from([
+            VmValue::dict(BTreeMap::from([
                 (
                     "name".to_string(),
                     VmValue::String(std::sync::Arc::from("alpha")),
@@ -919,8 +919,8 @@ mod tests {
                     "when_to_use".to_string(),
                     VmValue::String(std::sync::Arc::from("Use alpha first")),
                 ),
-            ]))),
-            VmValue::Dict(std::sync::Arc::new(BTreeMap::from([
+            ])),
+            VmValue::dict(BTreeMap::from([
                 (
                     "name".to_string(),
                     VmValue::String(std::sync::Arc::from("beta")),
@@ -933,7 +933,7 @@ mod tests {
                     "when_to_use".to_string(),
                     VmValue::String(std::sync::Arc::from("Use beta second")),
                 ),
-            ]))),
+            ])),
         ];
 
         let once = render_catalog(&entries, 10_000);

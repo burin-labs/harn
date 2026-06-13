@@ -296,7 +296,7 @@ fn runtime_error(message: String) -> VmError {
     VmError::Thrown(VmValue::String(std::sync::Arc::from(message)))
 }
 
-fn parse_label(dict: &BTreeMap<String, VmValue>, key: &str) -> Result<String, VmError> {
+fn parse_label(dict: &crate::value::DictMap, key: &str) -> Result<String, VmError> {
     match dict.get(key) {
         Some(VmValue::String(s)) => Ok(s.to_string()),
         Some(VmValue::Nil) | None => Ok(String::new()),
@@ -307,7 +307,7 @@ fn parse_label(dict: &BTreeMap<String, VmValue>, key: &str) -> Result<String, Vm
     }
 }
 
-fn parse_pos_u64(dict: &BTreeMap<String, VmValue>, key: &str) -> Result<Option<u64>, VmError> {
+fn parse_pos_u64(dict: &crate::value::DictMap, key: &str) -> Result<Option<u64>, VmError> {
     match dict.get(key) {
         Some(VmValue::Nil) | None => Ok(None),
         Some(VmValue::Int(n)) if *n >= 0 => Ok(Some(*n as u64)),
@@ -319,11 +319,11 @@ fn parse_pos_u64(dict: &BTreeMap<String, VmValue>, key: &str) -> Result<Option<u
     }
 }
 
-fn parse_pos_usize(dict: &BTreeMap<String, VmValue>, key: &str) -> Result<Option<usize>, VmError> {
+fn parse_pos_usize(dict: &crate::value::DictMap, key: &str) -> Result<Option<usize>, VmError> {
     parse_pos_u64(dict, key).map(|opt| opt.map(|v| v as usize))
 }
 
-fn parse_pos_f64(dict: &BTreeMap<String, VmValue>, key: &str) -> Result<Option<f64>, VmError> {
+fn parse_pos_f64(dict: &crate::value::DictMap, key: &str) -> Result<Option<f64>, VmError> {
     match dict.get(key) {
         Some(VmValue::Nil) | None => Ok(None),
         Some(VmValue::Int(n)) if *n >= 0 => Ok(Some(*n as f64)),
@@ -335,7 +335,7 @@ fn parse_pos_f64(dict: &BTreeMap<String, VmValue>, key: &str) -> Result<Option<f
     }
 }
 
-fn parse_string_list(dict: &BTreeMap<String, VmValue>, key: &str) -> Result<Vec<String>, VmError> {
+fn parse_string_list(dict: &crate::value::DictMap, key: &str) -> Result<Vec<String>, VmError> {
     match dict.get(key) {
         Some(VmValue::Nil) | None => Ok(Vec::new()),
         Some(VmValue::List(items)) => {
@@ -362,7 +362,7 @@ fn parse_string_list(dict: &BTreeMap<String, VmValue>, key: &str) -> Result<Vec<
     }
 }
 
-fn parse_status_list(dict: &BTreeMap<String, VmValue>, key: &str) -> Result<Vec<u16>, VmError> {
+fn parse_status_list(dict: &crate::value::DictMap, key: &str) -> Result<Vec<u16>, VmError> {
     let Some(value) = dict.get(key) else {
         return Ok(Vec::new());
     };
@@ -578,7 +578,7 @@ fn parse_observe(value: Option<&VmValue>) -> Result<ObserveRules, VmError> {
 /// Validate a user-facing config dict and return a tagged copy. The
 /// tag (`__routing_policy__: true`) is what `llm_call` looks for when
 /// it decides whether to dispatch through the routing executor.
-pub(crate) fn build_routing_policy(config: &BTreeMap<String, VmValue>) -> Result<VmValue, VmError> {
+pub(crate) fn build_routing_policy(config: &crate::value::DictMap) -> Result<VmValue, VmError> {
     let chain_value = config.get("chain").ok_or_else(|| {
         runtime_error("routing_policy: `chain` is required (list of {provider, model})".to_string())
     })?;
@@ -652,7 +652,7 @@ pub(crate) fn build_routing_policy(config: &BTreeMap<String, VmValue>) -> Result
     };
     let handle = intern_policy(parsed);
     summary.insert(HANDLE_KEY.to_string(), VmValue::Int(handle as i64));
-    Ok(VmValue::Dict(std::sync::Arc::new(summary)))
+    Ok(VmValue::dict(summary))
 }
 
 fn chain_summary_value(chain: &[ChainLink]) -> VmValue {
@@ -671,7 +671,7 @@ fn chain_summary_value(chain: &[ChainLink]) -> VmValue {
             if let Some(region) = &link.region {
                 dict.put_str("region", region.clone());
             }
-            VmValue::Dict(std::sync::Arc::new(dict))
+            VmValue::dict(dict)
         })
         .collect();
     VmValue::List(std::sync::Arc::new(items))
@@ -703,7 +703,7 @@ fn failover_value(failover: &FailoverRules) -> VmValue {
     if let Some(max) = failover.max_attempts {
         dict.insert("max_attempts".to_string(), VmValue::Int(max as i64));
     }
-    VmValue::Dict(std::sync::Arc::new(dict))
+    VmValue::dict(dict)
 }
 
 fn latency_value(latency: &LatencyRules) -> VmValue {
@@ -714,7 +714,7 @@ fn latency_value(latency: &LatencyRules) -> VmValue {
     if let Some(ms) = latency.race_after_ms {
         dict.insert("race_after_ms".to_string(), VmValue::Int(ms as i64));
     }
-    VmValue::Dict(std::sync::Arc::new(dict))
+    VmValue::dict(dict)
 }
 
 fn budget_value(budget: &BudgetRules) -> VmValue {
@@ -726,7 +726,7 @@ fn budget_value(budget: &BudgetRules) -> VmValue {
         dict.insert("session_usd".to_string(), VmValue::Float(v));
     }
     dict.put_str("on_exceed", budget.on_exceed_or_abort().as_str());
-    VmValue::Dict(std::sync::Arc::new(dict))
+    VmValue::dict(dict)
 }
 
 fn observe_value(observe: &ObserveRules) -> VmValue {
@@ -734,7 +734,7 @@ fn observe_value(observe: &ObserveRules) -> VmValue {
     if let Some(event) = &observe.emit_event {
         dict.put_str("emit_event", event.clone());
     }
-    VmValue::Dict(std::sync::Arc::new(dict))
+    VmValue::dict(dict)
 }
 
 /// Pull the parsed config off a dict produced by `routing_policy(...)`.
@@ -742,7 +742,7 @@ fn observe_value(observe: &ObserveRules) -> VmValue {
 /// the historical resolution path; returns an error when the tag is
 /// present but the handle is missing (corruption indicator).
 pub(crate) fn extract_routing_policy(
-    options: Option<&BTreeMap<String, VmValue>>,
+    options: Option<&crate::value::DictMap>,
 ) -> Result<Option<Arc<RoutingPolicyConfig>>, VmError> {
     let Some(opts) = options else {
         return Ok(None);
@@ -1909,10 +1909,7 @@ pub(crate) fn trace_to_vm_attempts(trace: &RoutingTrace) -> VmValue {
                 if let Some(status) = error.status {
                     err_dict.insert("status".to_string(), VmValue::Int(status as i64));
                 }
-                dict.insert(
-                    "error".to_string(),
-                    VmValue::Dict(std::sync::Arc::new(err_dict)),
-                );
+                dict.insert("error".to_string(), VmValue::dict(err_dict));
             }
             if let Some(outcome) = attempt.verifier_outcome {
                 dict.put_str("verifier_outcome", outcome.as_str());
@@ -1929,7 +1926,7 @@ pub(crate) fn trace_to_vm_attempts(trace: &RoutingTrace) -> VmValue {
                         if let Some(reason) = &signal.reason {
                             sig_dict.put_str("reason", reason.clone());
                         }
-                        VmValue::Dict(std::sync::Arc::new(sig_dict))
+                        VmValue::dict(sig_dict)
                     })
                     .collect();
                 dict.insert(
@@ -1937,7 +1934,7 @@ pub(crate) fn trace_to_vm_attempts(trace: &RoutingTrace) -> VmValue {
                     VmValue::List(std::sync::Arc::new(signals)),
                 );
             }
-            VmValue::Dict(std::sync::Arc::new(dict))
+            VmValue::dict(dict)
         })
         .collect();
     VmValue::List(std::sync::Arc::new(items))
@@ -1947,7 +1944,7 @@ pub(crate) fn trace_to_vm_attempts(trace: &RoutingTrace) -> VmValue {
 mod tests {
     use super::*;
 
-    fn dict(items: &[(&str, VmValue)]) -> BTreeMap<String, VmValue> {
+    fn dict(items: &[(&str, VmValue)]) -> crate::value::DictMap {
         items
             .iter()
             .map(|(k, v)| (k.to_string(), v.clone()))
@@ -1962,15 +1959,15 @@ mod tests {
                 "chain",
                 VmValue::List(std::sync::Arc::new(vec![
                     VmValue::String(std::sync::Arc::from("mock:mock")),
-                    VmValue::Dict(std::sync::Arc::new(dict(&[
+                    VmValue::dict(dict(&[
                         ("provider", VmValue::String(std::sync::Arc::from("mock"))),
                         ("model", VmValue::String(std::sync::Arc::from("mock-2"))),
-                    ]))),
+                    ])),
                 ])),
             ),
             (
                 "failover",
-                VmValue::Dict(std::sync::Arc::new(dict(&[
+                VmValue::dict(dict(&[
                     (
                         "on_status",
                         VmValue::List(std::sync::Arc::new(vec![
@@ -1979,14 +1976,14 @@ mod tests {
                         ])),
                     ),
                     ("max_attempts", VmValue::Int(2)),
-                ]))),
+                ])),
             ),
             (
                 "budget",
-                VmValue::Dict(std::sync::Arc::new(dict(&[
+                VmValue::dict(dict(&[
                     ("per_call_usd", VmValue::Float(0.5)),
                     ("on_exceed", VmValue::String(std::sync::Arc::from("abort"))),
-                ]))),
+                ])),
             ),
         ]);
         let tagged = build_routing_policy(&config).expect("validates");
@@ -2009,14 +2006,14 @@ mod tests {
             "chain",
             VmValue::List(std::sync::Arc::new(vec![
                 // Link 0: explicit region override.
-                VmValue::Dict(std::sync::Arc::new(dict(&[
+                VmValue::dict(dict(&[
                     ("provider", VmValue::String(std::sync::Arc::from("bedrock"))),
                     (
                         "model",
                         VmValue::String(std::sync::Arc::from("anthropic.claude-3-5-sonnet-v2:0")),
                     ),
                     ("region", VmValue::String(std::sync::Arc::from("eu-west-1"))),
-                ]))),
+                ])),
                 // Link 1: no region -> falls back to env at call time.
                 VmValue::String(std::sync::Arc::from("mock:mock")),
             ])),
@@ -2080,10 +2077,10 @@ mod tests {
             ),
             (
                 "failover",
-                VmValue::Dict(std::sync::Arc::new(dict(&[(
+                VmValue::dict(dict(&[(
                     "on_status",
                     VmValue::List(std::sync::Arc::new(vec![VmValue::Int(42)])),
-                )]))),
+                )])),
             ),
         ]);
         let err = build_routing_policy(&config).unwrap_err();

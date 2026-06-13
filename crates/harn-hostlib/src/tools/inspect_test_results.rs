@@ -145,7 +145,7 @@ pub(crate) fn handle(args: &[VmValue]) -> Result<VmValue, HostlibError> {
     }
     let entries: Vec<VmValue> = records
         .into_iter()
-        .map(|r| VmValue::Dict(Arc::new(record_to_map(r))))
+        .map(|r| VmValue::dict(record_to_map(r)))
         .collect();
     Ok(ResponseBuilder::new()
         .str("result_handle", handle)
@@ -153,8 +153,8 @@ pub(crate) fn handle(args: &[VmValue]) -> Result<VmValue, HostlibError> {
         .build())
 }
 
-fn record_to_map(record: test_parsers::TestRecord) -> BTreeMap<String, VmValue> {
-    let mut map = BTreeMap::new();
+fn record_to_map(record: test_parsers::TestRecord) -> harn_vm::value::DictMap {
+    let mut map = harn_vm::value::DictMap::new();
     map.put_str("name", record.name);
     map.put_str("status", record.status.as_str());
     map.insert(

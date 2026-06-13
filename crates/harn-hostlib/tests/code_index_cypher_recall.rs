@@ -5,7 +5,7 @@
 //! every Cypher query, and asserts that aggregate recall is ≥ 80% — the
 //! threshold defined in issue #2434's acceptance criteria.
 
-use std::collections::{BTreeMap, BTreeSet, HashSet};
+use std::collections::{BTreeSet, HashSet};
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -19,11 +19,11 @@ fn fixture_root() -> PathBuf {
 }
 
 fn dict(entries: &[(&str, VmValue)]) -> VmValue {
-    let mut map: BTreeMap<String, VmValue> = BTreeMap::new();
+    let mut map: harn_vm::value::DictMap = Default::default();
     for (k, v) in entries {
         map.insert((*k).to_string(), v.clone());
     }
-    VmValue::Dict(Arc::new(map))
+    VmValue::dict(map)
 }
 
 fn call(registry: &BuiltinRegistry, name: &str, payload: VmValue) -> VmValue {
@@ -33,7 +33,7 @@ fn call(registry: &BuiltinRegistry, name: &str, payload: VmValue) -> VmValue {
     (entry.handler)(&[payload]).unwrap_or_else(|err| panic!("builtin {name} failed: {err:?}"))
 }
 
-fn extract_dict(value: &VmValue) -> Arc<BTreeMap<String, VmValue>> {
+fn extract_dict(value: &VmValue) -> Arc<harn_vm::value::DictMap> {
     match value {
         VmValue::Dict(d) => d.clone(),
         other => panic!("expected dict, got {other:?}"),

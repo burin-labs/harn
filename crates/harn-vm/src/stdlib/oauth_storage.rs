@@ -68,12 +68,12 @@ const FILE_ENVELOPE_VERSION: u32 = 1;
 
 thread_local! {
     static MEMORY_STORE: RefCell<BTreeMap<String, BTreeMap<String, StoredEntry>>> =
-        const { RefCell::new(BTreeMap::new()) };
+        const { RefCell::new(std::collections::BTreeMap::new()) };
 
     /// File-handle encryption keys, kept off the user-visible handle
     /// dict so a stray `to_string(handle)` cannot exfiltrate the secret.
     static FILE_SECRETS: RefCell<BTreeMap<String, Vec<u8>>> =
-        const { RefCell::new(BTreeMap::new()) };
+        const { RefCell::new(std::collections::BTreeMap::new()) };
 }
 
 static MEMORY_ID_COUNTER: Mutex<u64> = Mutex::new(0);
@@ -209,10 +209,10 @@ fn memory_handle() -> VmValue {
         *guard = guard.wrapping_add(1);
         format!("memory-{}", *guard)
     };
-    let mut fields = BTreeMap::new();
+    let mut fields = crate::value::DictMap::new();
     fields.insert(HANDLE_KEY_KIND.to_string(), VmValue::string(KIND_MEMORY));
     fields.insert(HANDLE_KEY_ID.to_string(), VmValue::string(&id));
-    VmValue::Dict(std::sync::Arc::new(fields))
+    VmValue::dict(fields)
 }
 
 fn file_handle(path: &str, secret: &[u8]) -> VmValue {
@@ -225,11 +225,11 @@ fn file_handle(path: &str, secret: &[u8]) -> VmValue {
     FILE_SECRETS.with(|secrets| {
         secrets.borrow_mut().insert(id.clone(), secret.to_vec());
     });
-    let mut fields = BTreeMap::new();
+    let mut fields = crate::value::DictMap::new();
     fields.insert(HANDLE_KEY_KIND.to_string(), VmValue::string(KIND_FILE));
     fields.insert(HANDLE_KEY_ID.to_string(), VmValue::string(&id));
     fields.insert(HANDLE_KEY_PATH.to_string(), VmValue::string(path));
-    VmValue::Dict(std::sync::Arc::new(fields))
+    VmValue::dict(fields)
 }
 
 fn cloud_handle(kind: &'static str) -> VmValue {
@@ -238,14 +238,14 @@ fn cloud_handle(kind: &'static str) -> VmValue {
     } else {
         "session"
     };
-    let mut fields = BTreeMap::new();
+    let mut fields = crate::value::DictMap::new();
     fields.insert(HANDLE_KEY_KIND.to_string(), VmValue::string(kind));
     fields.insert(HANDLE_KEY_ID.to_string(), VmValue::string(kind));
     fields.insert(HANDLE_KEY_SCOPE.to_string(), VmValue::string(scope));
-    VmValue::Dict(std::sync::Arc::new(fields))
+    VmValue::dict(fields)
 }
 
-fn handle_kind(handle: &BTreeMap<String, VmValue>) -> Result<String, VmError> {
+fn handle_kind(handle: &crate::value::DictMap) -> Result<String, VmError> {
     handle
         .get(HANDLE_KEY_KIND)
         .and_then(|value| match value {
@@ -260,7 +260,7 @@ fn handle_kind(handle: &BTreeMap<String, VmValue>) -> Result<String, VmError> {
         })
 }
 
-fn handle_id(handle: &BTreeMap<String, VmValue>) -> Result<String, VmError> {
+fn handle_id(handle: &crate::value::DictMap) -> Result<String, VmError> {
     handle
         .get(HANDLE_KEY_ID)
         .and_then(|value| match value {
@@ -270,7 +270,7 @@ fn handle_id(handle: &BTreeMap<String, VmValue>) -> Result<String, VmError> {
         .ok_or_else(|| VmError::Runtime("oauth storage handle is missing `id`".to_string()))
 }
 
-async fn backend_get(handle: &BTreeMap<String, VmValue>, key: &str) -> Result<VmValue, VmError> {
+async fn backend_get(handle: &crate::value::DictMap, key: &str) -> Result<VmValue, VmError> {
     match handle_kind(handle)?.as_str() {
         KIND_MEMORY => Ok(memory_get(&handle_id(handle)?, key)),
         KIND_FILE => file_get(handle, key),
@@ -280,12 +280,12 @@ async fn backend_get(handle: &BTreeMap<String, VmValue>, key: &str) -> Result<Vm
 }
 
 async fn backend_set(
-    handle: &BTreeMap<String, VmValue>,
+    handle: &crate::value::DictMap,
     key: &str,
-    token: &BTreeMap<String, VmValue>,
+    token: &crate::value::DictMap,
     ttl_seconds: Option<i64>,
 ) -> Result<(), VmError> {
-    let json_token = vm_value_to_json(&VmValue::Dict(std::sync::Arc::new(token.clone())));
+    let json_token = vm_value_to_json(&VmValue::dict(token.clone()));
     match handle_kind(handle)?.as_str() {
         KIND_MEMORY => {
             memory_set(&handle_id(handle)?, key, json_token, ttl_seconds);
@@ -302,7 +302,7 @@ async fn backend_set(
     }
 }
 
-async fn backend_delete(handle: &BTreeMap<String, VmValue>, key: &str) -> Result<(), VmError> {
+async fn backend_delete(handle: &crate::value::DictMap, key: &str) -> Result<(), VmError> {
     match handle_kind(handle)?.as_str() {
         KIND_MEMORY => {
             memory_delete(&handle_id(handle)?, key);
@@ -353,7 +353,7 @@ fn memory_delete(handle_id: &str, key: &str) {
     });
 }
 
-fn file_path(handle: &BTreeMap<String, VmValue>) -> Result<PathBuf, VmError> {
+fn file_path(handle: &crate::value::DictMap) -> Result<PathBuf, VmError> {
     handle
         .get(HANDLE_KEY_PATH)
         .and_then(|value| match value {
@@ -363,7 +363,7 @@ fn file_path(handle: &BTreeMap<String, VmValue>) -> Result<PathBuf, VmError> {
         .ok_or_else(|| VmError::Runtime("oauth storage file handle is missing `path`".to_string()))
 }
 
-fn file_secret(handle: &BTreeMap<String, VmValue>) -> Result<Vec<u8>, VmError> {
+fn file_secret(handle: &crate::value::DictMap) -> Result<Vec<u8>, VmError> {
     let id = handle_id(handle)?;
     FILE_SECRETS
         .with(|secrets| secrets.borrow().get(&id).cloned())
@@ -386,7 +386,7 @@ fn read_file_entries(path: &Path, secret: &[u8]) -> Result<BTreeMap<String, Stor
     let raw = match fs::read(path) {
         Ok(bytes) => bytes,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            return Ok(BTreeMap::new());
+            return Ok(std::collections::BTreeMap::new());
         }
         Err(error) => {
             return Err(VmError::Runtime(format!(
@@ -396,7 +396,7 @@ fn read_file_entries(path: &Path, secret: &[u8]) -> Result<BTreeMap<String, Stor
         }
     };
     if raw.is_empty() {
-        return Ok(BTreeMap::new());
+        return Ok(std::collections::BTreeMap::new());
     }
     let envelope: FileEnvelope = serde_json::from_slice(&raw).map_err(|error| {
         VmError::Runtime(format!(
@@ -545,7 +545,7 @@ fn write_file_entries(
 /// meaningfully constraining an attacker who can already move files.
 const FILE_AAD: &[u8] = HKDF_INFO;
 
-fn file_get(handle: &BTreeMap<String, VmValue>, key: &str) -> Result<VmValue, VmError> {
+fn file_get(handle: &crate::value::DictMap, key: &str) -> Result<VmValue, VmError> {
     let path = file_path(handle)?;
     let secret = file_secret(handle)?;
     let entries = read_file_entries(&path, &secret)?;
@@ -556,7 +556,7 @@ fn file_get(handle: &BTreeMap<String, VmValue>, key: &str) -> Result<VmValue, Vm
 }
 
 fn file_set(
-    handle: &BTreeMap<String, VmValue>,
+    handle: &crate::value::DictMap,
     key: &str,
     token: JsonValue,
     ttl_seconds: Option<i64>,
@@ -568,7 +568,7 @@ fn file_set(
     write_file_entries(&path, &secret, &entries)
 }
 
-fn file_delete(handle: &BTreeMap<String, VmValue>, key: &str) -> Result<(), VmError> {
+fn file_delete(handle: &crate::value::DictMap, key: &str) -> Result<(), VmError> {
     let path = file_path(handle)?;
     let secret = file_secret(handle)?;
     let mut entries = read_file_entries(&path, &secret)?;
@@ -589,7 +589,7 @@ fn file_delete(handle: &BTreeMap<String, VmValue>, key: &str) -> Result<(), VmEr
     }
 }
 
-fn cloud_scope(handle: &BTreeMap<String, VmValue>) -> Result<String, VmError> {
+fn cloud_scope(handle: &crate::value::DictMap) -> Result<String, VmError> {
     handle
         .get(HANDLE_KEY_SCOPE)
         .and_then(|value| match value {
@@ -601,22 +601,22 @@ fn cloud_scope(handle: &BTreeMap<String, VmValue>) -> Result<String, VmError> {
         })
 }
 
-async fn cloud_get(handle: &BTreeMap<String, VmValue>, key: &str) -> Result<VmValue, VmError> {
+async fn cloud_get(handle: &crate::value::DictMap, key: &str) -> Result<VmValue, VmError> {
     let scope = cloud_scope(handle)?;
-    let mut params = BTreeMap::new();
+    let mut params = crate::value::DictMap::new();
     params.insert("scope".to_string(), VmValue::string(&scope));
     params.insert("key".to_string(), VmValue::string(key));
     dispatch_host_operation("oauth_storage", "cloud_get", &params).await
 }
 
 async fn cloud_set(
-    handle: &BTreeMap<String, VmValue>,
+    handle: &crate::value::DictMap,
     key: &str,
     token: JsonValue,
     ttl_seconds: Option<i64>,
 ) -> Result<(), VmError> {
     let scope = cloud_scope(handle)?;
-    let mut params = BTreeMap::new();
+    let mut params = crate::value::DictMap::new();
     params.insert("scope".to_string(), VmValue::string(&scope));
     params.insert("key".to_string(), VmValue::string(key));
     params.insert("token".to_string(), json_to_vm_dict(&token));
@@ -627,9 +627,9 @@ async fn cloud_set(
     Ok(())
 }
 
-async fn cloud_delete(handle: &BTreeMap<String, VmValue>, key: &str) -> Result<(), VmError> {
+async fn cloud_delete(handle: &crate::value::DictMap, key: &str) -> Result<(), VmError> {
     let scope = cloud_scope(handle)?;
-    let mut params = BTreeMap::new();
+    let mut params = crate::value::DictMap::new();
     params.insert("scope".to_string(), VmValue::string(&scope));
     params.insert("key".to_string(), VmValue::string(key));
     dispatch_host_operation("oauth_storage", "cloud_delete", &params).await?;
@@ -644,7 +644,7 @@ fn require_handle(
     args: &[VmValue],
     index: usize,
     fn_name: &str,
-) -> Result<BTreeMap<String, VmValue>, VmError> {
+) -> Result<crate::value::DictMap, VmError> {
     match args.get(index) {
         Some(VmValue::Dict(dict)) => Ok(dict.as_ref().clone()),
         Some(other) => Err(VmError::Runtime(format!(
@@ -714,7 +714,7 @@ fn require_dict_arg(
     index: usize,
     fn_name: &str,
     arg_name: &str,
-) -> Result<BTreeMap<String, VmValue>, VmError> {
+) -> Result<crate::value::DictMap, VmError> {
     match args.get(index) {
         Some(VmValue::Dict(dict)) => Ok(dict.as_ref().clone()),
         Some(other) => Err(VmError::Runtime(format!(
@@ -749,13 +749,13 @@ mod tests {
     use super::*;
     use crate::value::values_equal;
 
-    fn token_dict(access: &str) -> BTreeMap<String, VmValue> {
-        let mut dict = BTreeMap::new();
+    fn token_dict(access: &str) -> crate::value::DictMap {
+        let mut dict = crate::value::DictMap::new();
         dict.insert("access_token".to_string(), VmValue::string(access));
         dict
     }
 
-    fn dict_from_vm(value: &VmValue) -> BTreeMap<String, VmValue> {
+    fn dict_from_vm(value: &VmValue) -> crate::value::DictMap {
         match value {
             VmValue::Dict(dict) => dict.as_ref().clone(),
             other => panic!("expected dict, got {}", other.type_name()),

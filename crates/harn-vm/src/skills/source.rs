@@ -12,7 +12,6 @@
 //! `harn doctor` can report where each skill came from.
 
 use crate::value::VmDictExt;
-use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -143,9 +142,7 @@ const COMMAND_FRONTMATTER_FIELDS: &[&str] = &["hooks", "command", "run"];
 
 /// Remove frontmatter fields that downstream hosts may execute as
 /// commands when the registry entry carries failed provenance.
-pub fn strip_untrusted_command_frontmatter(
-    entry: &mut BTreeMap<String, crate::value::VmValue>,
-) -> bool {
+pub fn strip_untrusted_command_frontmatter(entry: &mut crate::value::DictMap) -> bool {
     if !has_failed_provenance(entry) {
         return false;
     }
@@ -156,7 +153,7 @@ pub fn strip_untrusted_command_frontmatter(
     stripped
 }
 
-fn has_failed_provenance(entry: &BTreeMap<String, crate::value::VmValue>) -> bool {
+fn has_failed_provenance(entry: &crate::value::DictMap) -> bool {
     let Some(provenance) = entry
         .get("provenance")
         .and_then(crate::value::VmValue::as_dict)
@@ -407,7 +404,7 @@ impl SkillSource for HostSkillSource {
 pub fn skill_entry_to_vm(skill: &Skill) -> crate::value::VmValue {
     use crate::value::VmValue;
 
-    let mut entry: BTreeMap<String, VmValue> = BTreeMap::new();
+    let mut entry: crate::value::DictMap = crate::value::DictMap::new();
     entry.put_str("name", skill.manifest.name.as_str());
     entry.put_str("short", skill.manifest.short.as_str());
     entry.put_str(
@@ -454,14 +451,11 @@ pub fn skill_entry_to_vm(skill: &Skill) -> crate::value::VmValue {
     entry.put_opt_str("context", skill.manifest.context.as_deref());
     entry.put_opt_str("agent", skill.manifest.agent.as_deref());
     if !skill.manifest.hooks.is_empty() {
-        let mut hooks: BTreeMap<String, VmValue> = BTreeMap::new();
+        let mut hooks: crate::value::DictMap = crate::value::DictMap::new();
         for (k, v) in &skill.manifest.hooks {
             hooks.insert(k.clone(), VmValue::String(std::sync::Arc::from(v.as_str())));
         }
-        entry.insert(
-            "hooks".to_string(),
-            VmValue::Dict(std::sync::Arc::new(hooks)),
-        );
+        entry.insert("hooks".to_string(), VmValue::dict(hooks));
     }
     entry.put_opt_str("model", skill.manifest.model.as_deref());
     entry.put_opt_str("effort", skill.manifest.effort.as_deref());
@@ -489,13 +483,13 @@ pub fn skill_entry_to_vm(skill: &Skill) -> crate::value::VmValue {
     }
     entry.put_str("source", skill.layer.label());
     entry.put_opt_str("namespace", skill.namespace.as_deref());
-    VmValue::Dict(std::sync::Arc::new(entry))
+    VmValue::dict(entry)
 }
 
 pub fn skill_manifest_ref_to_vm(skill: &SkillManifestRef) -> crate::value::VmValue {
     use crate::value::VmValue;
 
-    let mut entry: BTreeMap<String, VmValue> = BTreeMap::new();
+    let mut entry: crate::value::DictMap = crate::value::DictMap::new();
     entry.put_str("name", skill.manifest.name.as_str());
     entry.put_str("short", skill.manifest.short.as_str());
     entry.put_str(
@@ -542,17 +536,14 @@ pub fn skill_manifest_ref_to_vm(skill: &SkillManifestRef) -> crate::value::VmVal
     entry.put_opt_str("context", skill.manifest.context.as_deref());
     entry.put_opt_str("agent", skill.manifest.agent.as_deref());
     if !skill.manifest.hooks.is_empty() {
-        let mut hooks: BTreeMap<String, VmValue> = BTreeMap::new();
+        let mut hooks: crate::value::DictMap = crate::value::DictMap::new();
         for (key, value) in &skill.manifest.hooks {
             hooks.insert(
                 key.clone(),
                 VmValue::String(std::sync::Arc::from(value.as_str())),
             );
         }
-        entry.insert(
-            "hooks".to_string(),
-            VmValue::Dict(std::sync::Arc::new(hooks)),
-        );
+        entry.insert("hooks".to_string(), VmValue::dict(hooks));
     }
     entry.put_opt_str("model", skill.manifest.model.as_deref());
     entry.put_opt_str("effort", skill.manifest.effort.as_deref());
@@ -560,7 +551,7 @@ pub fn skill_manifest_ref_to_vm(skill: &SkillManifestRef) -> crate::value::VmVal
     entry.put_opt_str("argument_hint", skill.manifest.argument_hint.as_deref());
     entry.put_str("source", skill.layer.label());
     entry.put_opt_str("namespace", skill.namespace.as_deref());
-    VmValue::Dict(std::sync::Arc::new(entry))
+    VmValue::dict(entry)
 }
 
 #[cfg(test)]

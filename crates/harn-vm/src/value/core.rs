@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, HashMap};
+use std::collections::HashMap;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::{future::Future, pin::Pin};
@@ -28,6 +28,19 @@ pub type VmAsyncBuiltinFn = Arc<
 >;
 
 type Shared<T> = Arc<T>;
+
+/// Backing store for [`VmValue::Dict`]: a persistent, ordered, structurally
+/// shared map.
+///
+/// Replacing the former `BTreeMap` with `imbl::OrdMap` turns the copy-on-write
+/// `Arc::make_mut` clone — performed on every dict mutation whenever the value
+/// is aliased (on the stack, in another local, captured by a closure) — from an
+/// O(n) deep copy of every key and entry into an O(log n) path copy. Ordering
+/// and the read API (`get` / `iter` / `keys` / `values` / `contains_key` /
+/// `range` / `len`) match `BTreeMap`, so dict reads are unchanged. The `Arc`
+/// wrapper is retained so reference identity (`Arc::ptr_eq`) — used by the `===`
+/// operator and `value_identity_key` — keeps its current semantics.
+pub type DictMap = imbl::OrdMap<String, VmValue>;
 
 /// Character count with a byte-length fast path for ASCII text.
 ///
@@ -70,7 +83,7 @@ impl StructLayout {
         }
     }
 
-    pub fn from_map(struct_name: impl Into<String>, fields: &BTreeMap<String, VmValue>) -> Self {
+    pub fn from_map(struct_name: impl Into<String>, fields: &crate::value::DictMap) -> Self {
         Self::new(struct_name, fields.keys().cloned().collect())
     }
 
@@ -153,7 +166,7 @@ pub enum VmValue {
     Bool(bool),
     Nil,
     List(Shared<Vec<VmValue>>),
-    Dict(Shared<BTreeMap<String, VmValue>>),
+    Dict(Shared<DictMap>),
     Closure(Shared<VmClosure>),
     /// Reference to a registered builtin function, used when a builtin name is
     /// referenced as a value (e.g. `snake_dict.rekey(snake_to_camel)`). The
@@ -272,6 +285,20 @@ impl VmValue {
         }))
     }
 
+    /// Construct a [`VmValue::Dict`] from any iterator of `(key, value)`
+    /// entries. Accepts the `BTreeMap` that most builders still assemble (it is
+    /// `IntoIterator<Item = (String, VmValue)>`) and collects it into the
+    /// persistent [`DictMap`], so callers keep their familiar map-building code
+    /// while the stored value gains structural sharing.
+    pub fn dict(entries: impl IntoIterator<Item = (String, VmValue)>) -> Self {
+        VmValue::Dict(Shared::new(entries.into_iter().collect::<DictMap>()))
+    }
+
+    /// Construct a [`VmValue::Dict`] from an already-built [`DictMap`].
+    pub fn dict_map(map: DictMap) -> Self {
+        VmValue::Dict(Shared::new(map))
+    }
+
     pub fn channel(handle: VmChannelHandle) -> Self {
         VmValue::Channel(Shared::new(handle))
     }
@@ -306,7 +333,7 @@ impl VmValue {
 
     pub fn struct_instance(
         struct_name: impl Into<Shared<str>>,
-        fields: BTreeMap<String, VmValue>,
+        fields: crate::value::DictMap,
     ) -> Self {
         Self::struct_instance_from_map(struct_name.into().to_string(), fields)
     }
@@ -406,7 +433,7 @@ impl VmValue {
         }
     }
 
-    pub fn struct_fields_map(&self) -> Option<BTreeMap<String, VmValue>> {
+    pub fn struct_fields_map(&self) -> Option<crate::value::DictMap> {
         match self {
             VmValue::StructInstance { layout, fields } => {
                 Some(struct_fields_to_map(layout, fields))
@@ -417,7 +444,7 @@ impl VmValue {
 
     pub fn struct_instance_from_map(
         struct_name: impl Into<String>,
-        fields: BTreeMap<String, VmValue>,
+        fields: crate::value::DictMap,
     ) -> Self {
         let layout = Shared::new(StructLayout::from_map(struct_name, &fields));
         let slots = layout
@@ -434,7 +461,7 @@ impl VmValue {
     pub fn struct_instance_with_layout(
         struct_name: impl Into<String>,
         field_names: Vec<String>,
-        field_values: BTreeMap<String, VmValue>,
+        field_values: crate::value::DictMap,
     ) -> Self {
         let layout = Shared::new(StructLayout::new(struct_name, field_names));
         let fields = layout
@@ -657,8 +684,8 @@ impl VmValue {
         }
     }
 
-    /// Get the value as a BTreeMap reference, if it's a Dict.
-    pub fn as_dict(&self) -> Option<&BTreeMap<String, VmValue>> {
+    /// Get the value as a [`DictMap`] reference, if it's a Dict.
+    pub fn as_dict(&self) -> Option<&DictMap> {
         if let VmValue::Dict(d) = self {
             Some(d)
         } else {
@@ -686,7 +713,7 @@ impl VmValue {
 pub fn struct_fields_to_map(
     layout: &StructLayout,
     fields: &[Option<VmValue>],
-) -> BTreeMap<String, VmValue> {
+) -> crate::value::DictMap {
     layout
         .field_names()
         .iter()

@@ -1,5 +1,4 @@
 use crate::value::VmDictExt;
-use std::collections::BTreeMap;
 use std::io::{Cursor, Read, Write};
 
 use flate2::read::GzDecoder;
@@ -258,8 +257,8 @@ fn bytes_value(bytes: Vec<u8>) -> VmValue {
     VmValue::Bytes(std::sync::Arc::new(bytes))
 }
 
-fn entry_value(fields: BTreeMap<String, VmValue>) -> VmValue {
-    VmValue::Dict(std::sync::Arc::new(fields))
+fn entry_value(fields: crate::value::DictMap) -> VmValue {
+    VmValue::dict(fields)
 }
 
 #[harn_builtin(
@@ -446,7 +445,7 @@ fn tar_extract_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, V
         let content = read_with_cap(&mut entry, remaining, "tar_extract")?;
         total_extracted = total_extracted.saturating_add(content.len() as u64);
 
-        let mut fields = BTreeMap::new();
+        let mut fields = crate::value::DictMap::new();
         fields.insert("content".to_string(), bytes_value(content));
         fields.insert("mode".to_string(), VmValue::Int(mode));
         fields.put_str("path", path);
@@ -519,7 +518,7 @@ fn zip_extract_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, V
         let content = read_with_cap(&mut file, remaining, "zip_extract")?;
         total_extracted = total_extracted.saturating_add(content.len() as u64);
 
-        let mut fields = BTreeMap::new();
+        let mut fields = crate::value::DictMap::new();
         fields.insert("content".to_string(), bytes_value(content));
         fields.put_str("path", path);
         output.push(entry_value(fields));
@@ -591,12 +590,12 @@ mod tests {
             ],
         )
         .unwrap();
-        let mut options = BTreeMap::new();
+        let mut options = crate::value::DictMap::new();
         options.insert("max_decompressed_bytes".to_string(), VmValue::Int(1024));
         let result = call(
             &mut vm,
             "gzip_decode",
-            vec![encoded, VmValue::Dict(std::sync::Arc::new(options))],
+            vec![encoded, VmValue::dict(options)],
         );
         let err = result.expect_err("gzip_decode should reject output past cap");
         let message = match err {
@@ -622,19 +621,19 @@ mod tests {
             ],
         )
         .unwrap();
-        let mut options = BTreeMap::new();
+        let mut options = crate::value::DictMap::new();
         options.insert("max_decompressed_bytes".to_string(), VmValue::Int(1024));
         let result = call(
             &mut vm,
             "zstd_decode",
-            vec![encoded, VmValue::Dict(std::sync::Arc::new(options))],
+            vec![encoded, VmValue::dict(options)],
         );
         assert!(result.is_err(), "zstd_decode should reject output past cap");
     }
 
     #[test]
     fn tar_round_trip_preserves_mode() {
-        let mut fields = BTreeMap::new();
+        let mut fields = crate::value::DictMap::new();
         fields.insert("path".to_string(), text("bin/run"));
         fields.insert("content".to_string(), text("echo hi"));
         fields.insert("mode".to_string(), VmValue::Int(0o755));

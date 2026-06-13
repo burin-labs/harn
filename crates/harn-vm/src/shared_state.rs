@@ -19,7 +19,7 @@ struct SharedCell {
 
 #[derive(Default)]
 struct SharedMap {
-    entries: BTreeMap<String, VmValue>,
+    entries: crate::value::DictMap,
     version: u64,
     metrics: SharedMetrics,
 }
@@ -119,7 +119,7 @@ impl VmSharedStateRuntime {
     pub(crate) fn open_map(
         &self,
         scoped: ScopedKey,
-        initial: Option<BTreeMap<String, VmValue>>,
+        initial: Option<crate::value::DictMap>,
     ) -> VmValue {
         self.maps
             .lock()
@@ -153,7 +153,7 @@ impl VmSharedStateRuntime {
         let mut maps = self.maps.lock();
         let map = maps.entry(scoped.clone()).or_default();
         map.metrics.read_count += 1;
-        VmValue::Dict(std::sync::Arc::new(map.entries.clone()))
+        VmValue::dict(map.entries.clone())
     }
 
     pub(crate) fn map_set(&self, scoped: &ScopedKey, key: String, value: VmValue) -> VmValue {
@@ -340,7 +340,7 @@ fn handle_value(kind: &str, scoped: &ScopedKey) -> VmValue {
     value.put_str("_type", kind);
     value.put_str("scope", scoped.scope.clone());
     value.put_str("key", scoped.key.clone());
-    VmValue::Dict(std::sync::Arc::new(value))
+    VmValue::dict(value)
 }
 
 fn snapshot_value(value: VmValue, version: u64) -> VmValue {
@@ -348,7 +348,7 @@ fn snapshot_value(value: VmValue, version: u64) -> VmValue {
     snapshot.put_str("_type", "shared_snapshot");
     snapshot.insert("value".to_string(), value);
     snapshot.insert("version".to_string(), VmValue::Int(version as i64));
-    VmValue::Dict(std::sync::Arc::new(snapshot))
+    VmValue::dict(snapshot)
 }
 
 fn snapshot_expected(value: &VmValue) -> (VmValue, Option<u64>) {
@@ -394,7 +394,7 @@ fn shared_metrics_value(metrics: &SharedMetrics, version: u64) -> VmValue {
         "stale_read_count".to_string(),
         VmValue::Int(metrics.stale_read_count as i64),
     );
-    VmValue::Dict(std::sync::Arc::new(value))
+    VmValue::dict(value)
 }
 
 fn empty_shared_metrics() -> VmValue {
@@ -427,7 +427,7 @@ fn mailbox_metrics_value(mailbox: &Mailbox) -> VmValue {
         "closed".to_string(),
         VmValue::Bool(mailbox.channel.is_closed()),
     );
-    VmValue::Dict(std::sync::Arc::new(value))
+    VmValue::dict(value)
 }
 
 fn empty_mailbox_metrics() -> VmValue {
@@ -438,7 +438,7 @@ fn empty_mailbox_metrics() -> VmValue {
     value.insert("received_count".to_string(), VmValue::Int(0));
     value.insert("failed_send_count".to_string(), VmValue::Int(0));
     value.insert("closed".to_string(), VmValue::Bool(false));
-    VmValue::Dict(std::sync::Arc::new(value))
+    VmValue::dict(value)
 }
 
 fn with_scope_fields(kind: &str, scoped: &ScopedKey, metrics: VmValue) -> VmValue {
@@ -446,7 +446,7 @@ fn with_scope_fields(kind: &str, scoped: &ScopedKey, metrics: VmValue) -> VmValu
     value.put_str("_type", kind);
     value.put_str("scope", scoped.scope.clone());
     value.put_str("key", scoped.key.clone());
-    VmValue::Dict(std::sync::Arc::new(value))
+    VmValue::dict(value)
 }
 
 impl Default for SharedCell {

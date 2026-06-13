@@ -60,10 +60,10 @@ async fn recv_json(rx: &mut mpsc::UnboundedReceiver<String>) -> serde_json::Valu
 /// `clippy --all-targets -D warnings` run stays clean.
 #[cfg(feature = "hostlib")]
 fn make_acp_test_message(role: &str, content: &str) -> VmValue {
-    VmValue::Dict(Arc::new(BTreeMap::from([
+    VmValue::dict(BTreeMap::from([
         ("role".to_string(), VmValue::String(Arc::from(role))),
         ("content".to_string(), VmValue::String(Arc::from(content))),
-    ])))
+    ]))
 }
 
 async fn start_acp_channel_session() -> (
@@ -1119,7 +1119,7 @@ async fn acp_fs_mode_commit_and_discard_staged_hostlib_writes() {
         (registry
             .find("hostlib_tools_write_file")
             .expect("write_file builtin")
-            .handler)(&[VmValue::Dict(Arc::new(args))])
+            .handler)(&[VmValue::dict(args)])
         .expect("stage write");
     };
     stage_write(&committed_file, "draft");
@@ -1386,7 +1386,7 @@ fn normalize_host_capabilities_wraps_array_entries_in_ops_dicts() {
         ))])),
     );
 
-    let normalized = normalize_host_capability_manifest(VmValue::Dict(Arc::new(root)));
+    let normalized = normalize_host_capability_manifest(VmValue::dict(root));
     let manifest = normalized.as_dict().expect("dict manifest");
     let project = manifest
         .get("project")
@@ -1410,17 +1410,14 @@ fn normalize_host_capabilities_derives_ops_from_operation_metadata() {
     let mut operations = BTreeMap::new();
     operations.insert(
         "get_default_shell".to_string(),
-        VmValue::Dict(Arc::new(BTreeMap::new())),
+        VmValue::dict(BTreeMap::new()),
     );
     let mut process = BTreeMap::new();
-    process.insert(
-        "operations".to_string(),
-        VmValue::Dict(Arc::new(operations)),
-    );
+    process.insert("operations".to_string(), VmValue::dict(operations));
     let mut root = BTreeMap::new();
-    root.insert("process".to_string(), VmValue::Dict(Arc::new(process)));
+    root.insert("process".to_string(), VmValue::dict(process));
 
-    let normalized = normalize_host_capability_manifest(VmValue::Dict(Arc::new(root)));
+    let normalized = normalize_host_capability_manifest(VmValue::dict(root));
     let manifest = normalized.as_dict().expect("dict manifest");
     let process = manifest
         .get("process")

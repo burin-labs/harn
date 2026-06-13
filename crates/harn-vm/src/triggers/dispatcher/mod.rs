@@ -2668,7 +2668,7 @@ impl Dispatcher {
         // body strings without `{{ ... }}` round-trip unchanged.
         let event_json =
             serde_json::to_value(event).map_err(|error| DispatchError::Serde(error.to_string()))?;
-        let mut bindings = BTreeMap::new();
+        let mut bindings = crate::value::DictMap::new();
         bindings.insert(
             "event".to_string(),
             crate::schema::json_to_vm_value(&event_json),

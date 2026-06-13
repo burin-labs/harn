@@ -6,7 +6,6 @@
 //! [`HostlibError`] variants on shape mismatches so the script side gets a
 //! structured exception.
 
-use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use harn_vm::VmValue;
@@ -20,10 +19,10 @@ use crate::value_args;
 pub fn dict_arg(
     builtin: &'static str,
     args: &[VmValue],
-) -> Result<Arc<BTreeMap<String, VmValue>>, HostlibError> {
+) -> Result<Arc<harn_vm::value::DictMap>, HostlibError> {
     match args.first() {
         Some(VmValue::Dict(dict)) => Ok(dict.clone()),
-        Some(VmValue::Nil) | None => Ok(Arc::new(BTreeMap::new())),
+        Some(VmValue::Nil) | None => Ok(Arc::new(harn_vm::value::DictMap::new())),
         Some(other) => Err(HostlibError::InvalidParameter {
             builtin,
             param: "params",
@@ -39,7 +38,7 @@ pub fn dict_arg(
 /// Required string field.
 pub fn require_string(
     builtin: &'static str,
-    dict: &BTreeMap<String, VmValue>,
+    dict: &harn_vm::value::DictMap,
     key: &'static str,
 ) -> Result<String, HostlibError> {
     value_args::require_string(builtin, dict, key)
@@ -48,7 +47,7 @@ pub fn require_string(
 /// Optional string field. Missing/`Nil` returns `None`.
 pub fn optional_string(
     builtin: &'static str,
-    dict: &BTreeMap<String, VmValue>,
+    dict: &harn_vm::value::DictMap,
     key: &'static str,
 ) -> Result<Option<String>, HostlibError> {
     value_args::optional_string(builtin, dict, key)
@@ -57,7 +56,7 @@ pub fn optional_string(
 /// Optional `bool`. Defaults to `default` when missing or `Nil`.
 pub fn optional_bool(
     builtin: &'static str,
-    dict: &BTreeMap<String, VmValue>,
+    dict: &harn_vm::value::DictMap,
     key: &'static str,
     default: bool,
 ) -> Result<bool, HostlibError> {
@@ -70,7 +69,7 @@ pub fn optional_bool(
 /// floats).
 pub fn optional_int(
     builtin: &'static str,
-    dict: &BTreeMap<String, VmValue>,
+    dict: &harn_vm::value::DictMap,
     key: &'static str,
     default: i64,
 ) -> Result<i64, HostlibError> {
@@ -80,7 +79,7 @@ pub fn optional_int(
 /// Optional list of strings. Missing/`Nil` returns `Vec::new()`.
 pub fn optional_string_list(
     builtin: &'static str,
-    dict: &BTreeMap<String, VmValue>,
+    dict: &harn_vm::value::DictMap,
     key: &'static str,
 ) -> Result<Vec<String>, HostlibError> {
     value_args::optional_string_list(builtin, dict, key).map(|value| value.unwrap_or_default())
@@ -93,7 +92,7 @@ pub fn optional_string_list(
 #[cfg(feature = "ast")]
 pub fn optional_int_list(
     builtin: &'static str,
-    dict: &BTreeMap<String, VmValue>,
+    dict: &harn_vm::value::DictMap,
     key: &'static str,
 ) -> Result<Vec<i64>, HostlibError> {
     match dict.get(key) {
@@ -123,11 +122,11 @@ where
     I: IntoIterator<Item = (K, VmValue)>,
     K: Into<String>,
 {
-    let mut map: BTreeMap<String, VmValue> = BTreeMap::new();
+    let mut map: harn_vm::value::DictMap = harn_vm::value::DictMap::new();
     for (k, v) in entries {
         map.insert(k.into(), v);
     }
-    VmValue::Dict(Arc::new(map))
+    VmValue::dict(map)
 }
 
 /// Convenience constructor for `VmValue::String` from a `&str`.
@@ -139,7 +138,7 @@ pub fn str_value(s: impl AsRef<str>) -> VmValue {
 mod tests {
     use super::*;
 
-    fn dict(entries: [(&'static str, VmValue); 1]) -> BTreeMap<String, VmValue> {
+    fn dict(entries: [(&'static str, VmValue); 1]) -> harn_vm::value::DictMap {
         entries
             .into_iter()
             .map(|(key, value)| (key.to_string(), value))

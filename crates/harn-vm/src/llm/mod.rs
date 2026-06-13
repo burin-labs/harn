@@ -211,7 +211,7 @@ pub mod bench_internals {
 
     pub fn llm_options_roundtrip_probe(
         args: &[VmValue],
-        options: &Option<std::collections::BTreeMap<String, VmValue>>,
+        options: &Option<crate::value::DictMap>,
     ) -> Result<usize, VmError> {
         let resolved_provider = helpers::vm_resolve_provider(options);
         let extracted = extract_llm_options(args)?;
@@ -824,7 +824,7 @@ mod tests {
         let opts = base_opts();
         let mut map = std::collections::BTreeMap::new();
         map.put_str("name", "Ada");
-        let data = VmValue::Dict(std::sync::Arc::new(map));
+        let data = VmValue::dict(map);
         let errors = compute_validation_errors(&data, &opts);
         assert!(errors.is_empty(), "schema should pass: {errors:?}");
     }
@@ -834,7 +834,7 @@ mod tests {
         let opts = base_opts();
         let mut map = std::collections::BTreeMap::new();
         map.insert("name".to_string(), VmValue::Int(42));
-        let data = VmValue::Dict(std::sync::Arc::new(map));
+        let data = VmValue::dict(map);
         let errors = compute_validation_errors(&data, &opts);
         assert!(!errors.is_empty(), "schema should fail");
         assert!(errors.join(" ").contains("string"));
@@ -842,7 +842,7 @@ mod tests {
 
     #[test]
     fn structured_output_errors_report_missing_json() {
-        let result = VmValue::Dict(std::sync::Arc::new(std::collections::BTreeMap::from([
+        let result = VmValue::dict(std::collections::BTreeMap::from([
             (
                 "text".to_string(),
                 VmValue::String(std::sync::Arc::from("Analyzing the task")),
@@ -857,7 +857,7 @@ mod tests {
                 "stop_reason".to_string(),
                 VmValue::String(std::sync::Arc::from("length")),
             ),
-        ])));
+        ]));
 
         let errors = structured_output_errors(&result, &base_opts());
         assert!(errors.iter().any(|err| err.contains("parseable JSON")));

@@ -113,7 +113,7 @@ pub(crate) enum IterState {
         idx: usize,
     },
     Dict {
-        entries: Arc<BTreeMap<String, VmValue>>,
+        entries: Arc<crate::value::DictMap>,
         keys: Vec<String>,
         idx: usize,
     },
@@ -274,7 +274,7 @@ pub struct Vm {
     pub(crate) project_root: Option<std::path::PathBuf>,
     /// Global constants (e.g. `pi`, `e`). Checked as a fallback in `GetVar`
     /// after the environment, so user-defined variables can shadow them.
-    pub(crate) globals: Arc<BTreeMap<String, VmValue>>,
+    pub(crate) globals: Arc<crate::value::DictMap>,
     /// Optional debugger hook invoked when execution advances to a new source line.
     pub(crate) debug_hook: Option<parking_lot::Mutex<Box<DebugHook>>>,
     /// Effective runtime ceilings for this VM execution.
@@ -299,7 +299,7 @@ pub struct VmBaseline {
     source_file: Option<String>,
     source_text: Option<String>,
     project_root: Option<std::path::PathBuf>,
-    globals: Arc<BTreeMap<String, VmValue>>,
+    globals: Arc<crate::value::DictMap>,
     denied_builtins: Arc<HashSet<String>>,
     runtime_limits: RuntimeLimits,
 }
@@ -439,7 +439,7 @@ impl Vm {
         }
     }
 
-    pub(crate) fn visible_variables(&self) -> BTreeMap<String, VmValue> {
+    pub(crate) fn visible_variables(&self) -> crate::value::DictMap {
         let mut vars = self.env.all_variables();
         let Some(frame) = self.frames.last() else {
             return vars;
@@ -611,7 +611,7 @@ impl Vm {
             error_stack_trace: Vec::new(),
             yield_sender: None,
             project_root: None,
-            globals: Arc::new(BTreeMap::new()),
+            globals: Arc::new(crate::value::DictMap::new()),
             debug_hook: None,
             runtime_limits: RuntimeLimits::default(),
         }

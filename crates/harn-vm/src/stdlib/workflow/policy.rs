@@ -47,7 +47,7 @@ pub(super) fn set_node_policy(
 
 pub(super) fn apply_runtime_node_overrides(
     mut node: crate::orchestration::WorkflowNode,
-    options: &BTreeMap<String, VmValue>,
+    options: &crate::value::DictMap,
 ) -> crate::orchestration::WorkflowNode {
     if node.model_policy.provider.is_none() {
         node.model_policy.provider = options

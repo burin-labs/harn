@@ -36,7 +36,7 @@ pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
 struct HostMock {
     capability: String,
     operation: String,
-    params: Option<BTreeMap<String, VmValue>>,
+    params: Option<crate::value::DictMap>,
     result: Option<VmValue>,
     error: Option<String>,
 }
@@ -45,7 +45,7 @@ struct HostMock {
 struct HostMockCall {
     capability: String,
     operation: String,
-    params: BTreeMap<String, VmValue>,
+    params: crate::value::DictMap,
 }
 
 thread_local! {
@@ -87,8 +87,8 @@ fn pop_host_mock_scope() -> bool {
     }
 }
 
-fn capability_manifest_map() -> BTreeMap<String, VmValue> {
-    let mut root = BTreeMap::new();
+fn capability_manifest_map() -> crate::value::DictMap {
+    let mut root = crate::value::DictMap::new();
     root.insert(
         "process".to_string(),
         capability(
@@ -168,7 +168,7 @@ fn mocked_operation_entry() -> VmValue {
 }
 
 fn ensure_mocked_capability(
-    root: &mut BTreeMap<String, VmValue>,
+    root: &mut crate::value::DictMap,
     capability_name: &str,
     operation_name: &str,
 ) {
@@ -210,14 +210,8 @@ fn ensure_mocked_capability(
         .or_insert_with(mocked_operation_entry);
 
     entry.insert("ops".to_string(), VmValue::List(std::sync::Arc::new(ops)));
-    entry.insert(
-        "operations".to_string(),
-        VmValue::Dict(std::sync::Arc::new(operations)),
-    );
-    root.insert(
-        capability_name.to_string(),
-        VmValue::Dict(std::sync::Arc::new(entry)),
-    );
+    entry.insert("operations".to_string(), VmValue::dict(operations));
+    root.insert(capability_name.to_string(), VmValue::dict(entry));
 }
 
 fn capability_manifest_with_mocks() -> VmValue {
@@ -227,17 +221,17 @@ fn capability_manifest_with_mocks() -> VmValue {
             ensure_mocked_capability(&mut root, &host_mock.capability, &host_mock.operation);
         }
     });
-    VmValue::Dict(std::sync::Arc::new(root))
+    VmValue::dict(root)
 }
 
 fn op(name: &str, description: &str) -> (String, VmValue) {
-    let mut entry = BTreeMap::new();
+    let mut entry = crate::value::DictMap::new();
     entry.put_str("description", description);
-    (name.to_string(), VmValue::Dict(std::sync::Arc::new(entry)))
+    (name.to_string(), VmValue::dict(entry))
 }
 
 fn capability(description: &str, ops: &[(String, VmValue)]) -> VmValue {
-    let mut entry = BTreeMap::new();
+    let mut entry = crate::value::DictMap::new();
     entry.put_str("description", description);
     entry.insert(
         "ops".to_string(),
@@ -247,21 +241,15 @@ fn capability(description: &str, ops: &[(String, VmValue)]) -> VmValue {
                 .collect(),
         )),
     );
-    let mut op_dict = BTreeMap::new();
+    let mut op_dict = crate::value::DictMap::new();
     for (name, op) in ops {
         op_dict.insert(name.clone(), op.clone());
     }
-    entry.insert(
-        "operations".to_string(),
-        VmValue::Dict(std::sync::Arc::new(op_dict)),
-    );
-    VmValue::Dict(std::sync::Arc::new(entry))
+    entry.insert("operations".to_string(), VmValue::dict(op_dict));
+    VmValue::dict(entry)
 }
 
-pub(crate) fn require_param(
-    params: &BTreeMap<String, VmValue>,
-    key: &str,
-) -> Result<String, VmError> {
+pub(crate) fn require_param(params: &crate::value::DictMap, key: &str) -> Result<String, VmError> {
     params
         .get(key)
         .map(|v| v.display())
@@ -275,7 +263,7 @@ pub(crate) fn require_param(
 
 fn render_template(
     path: &str,
-    bindings: Option<&BTreeMap<String, VmValue>>,
+    bindings: Option<&crate::value::DictMap>,
 ) -> Result<String, VmError> {
     let asset = crate::stdlib::template::TemplateAsset::render_target(path).map_err(|msg| {
         VmError::Thrown(VmValue::String(std::sync::Arc::from(format!(
@@ -285,10 +273,7 @@ fn render_template(
     crate::stdlib::template::render_asset_result(&asset, bindings).map_err(VmError::from)
 }
 
-fn params_match(
-    expected: Option<&BTreeMap<String, VmValue>>,
-    actual: &BTreeMap<String, VmValue>,
-) -> bool {
+fn params_match(expected: Option<&crate::value::DictMap>, actual: &crate::value::DictMap) -> bool {
     let Some(expected) = expected else {
         return true;
     };
@@ -349,17 +334,14 @@ fn push_host_mock(host_mock: HostMock) {
 }
 
 fn mock_call_value(call: &HostMockCall) -> VmValue {
-    let mut item = BTreeMap::new();
+    let mut item = crate::value::DictMap::new();
     item.put_str("capability", call.capability.clone());
     item.put_str("operation", call.operation.clone());
-    item.insert(
-        "params".to_string(),
-        VmValue::Dict(std::sync::Arc::new(call.params.clone())),
-    );
-    VmValue::Dict(std::sync::Arc::new(item))
+    item.insert("params".to_string(), VmValue::dict(call.params.clone()));
+    VmValue::dict(item)
 }
 
-fn record_mock_call(capability: &str, operation: &str, params: &BTreeMap<String, VmValue>) {
+fn record_mock_call(capability: &str, operation: &str, params: &crate::value::DictMap) {
     HOST_MOCK_CALLS.with(|calls| {
         calls.borrow_mut().push(HostMockCall {
             capability: capability.to_string(),
@@ -372,7 +354,7 @@ fn record_mock_call(capability: &str, operation: &str, params: &BTreeMap<String,
 pub(crate) fn dispatch_mock_host_call(
     capability: &str,
     operation: &str,
-    params: &BTreeMap<String, VmValue>,
+    params: &crate::value::DictMap,
 ) -> Option<Result<VmValue, VmError>> {
     let matched = HOST_MOCKS.with(|mocks| {
         mocks
@@ -415,7 +397,7 @@ pub trait HostCallBridge: Send + Sync {
         &self,
         capability: &str,
         operation: &str,
-        params: &BTreeMap<String, VmValue>,
+        params: &crate::value::DictMap,
     ) -> Result<Option<VmValue>, VmError>;
 
     fn list_tools(&self) -> Result<Option<VmValue>, VmError> {
@@ -456,7 +438,7 @@ pub fn clear_host_call_bridge() {
 pub fn dispatch_host_call_bridge(
     capability: &str,
     operation: &str,
-    params: &BTreeMap<String, VmValue>,
+    params: &crate::value::DictMap,
 ) -> Option<Result<VmValue, VmError>> {
     let bridge = HOST_CALL_BRIDGE.with(|b| b.borrow().clone())?;
     match bridge.dispatch(capability, operation, params) {
@@ -540,7 +522,7 @@ pub(crate) async fn dispatch_host_tool_call_with_ctx(
 pub(crate) async fn dispatch_host_operation(
     capability: &str,
     operation: &str,
-    params: &BTreeMap<String, VmValue>,
+    params: &crate::value::DictMap,
 ) -> Result<VmValue, VmError> {
     dispatch_host_operation_with_ctx(None, capability, operation, params).await
 }
@@ -549,7 +531,7 @@ pub(crate) async fn dispatch_host_operation_with_ctx(
     ctx: Option<&AsyncBuiltinCtx>,
     capability: &str,
     operation: &str,
-    params: &BTreeMap<String, VmValue>,
+    params: &crate::value::DictMap,
 ) -> Result<VmValue, VmError> {
     if let Some(mocked) = dispatch_mock_host_call(capability, operation, params) {
         return mocked;
@@ -599,7 +581,7 @@ pub(crate) async fn dispatch_host_operation_with_ctx(
 async fn dispatch_builtin_host_operation(
     capability: &str,
     operation: &str,
-    params: &BTreeMap<String, VmValue>,
+    params: &crate::value::DictMap,
 ) -> Result<VmValue, VmError> {
     match (capability, operation) {
         ("process", "list_shells") => Ok(crate::shells::list_shells_vm_value()),
@@ -661,7 +643,7 @@ async fn dispatch_builtin_host_operation(
 }
 
 pub(crate) async fn dispatch_process_exec(
-    params: &BTreeMap<String, VmValue>,
+    params: &crate::value::DictMap,
     caller: serde_json::Value,
 ) -> Result<VmValue, VmError> {
     dispatch_process_exec_with_policy(None, params, caller).await
@@ -669,7 +651,7 @@ pub(crate) async fn dispatch_process_exec(
 
 async fn dispatch_process_exec_with_policy(
     ctx: Option<&AsyncBuiltinCtx>,
-    params: &BTreeMap<String, VmValue>,
+    params: &crate::value::DictMap,
     caller: serde_json::Value,
 ) -> Result<VmValue, VmError> {
     let (params, command_policy_context, command_policy_decisions) =
@@ -724,7 +706,7 @@ async fn dispatch_process_exec_with_policy(
 /// poll/wait, which are not themselves command executions.
 async fn dispatch_process_spawn_with_policy(
     ctx: Option<&AsyncBuiltinCtx>,
-    params: &BTreeMap<String, VmValue>,
+    params: &crate::value::DictMap,
     caller: serde_json::Value,
 ) -> Result<VmValue, VmError> {
     let params =
@@ -754,7 +736,7 @@ async fn dispatch_process_spawn_with_policy(
 
 async fn dispatch_process_exec_after_policy(
     ctx: Option<&AsyncBuiltinCtx>,
-    params: &BTreeMap<String, VmValue>,
+    params: &crate::value::DictMap,
     command_policy_context: JsonValue,
     command_policy_decisions: Vec<crate::orchestration::CommandPolicyDecision>,
 ) -> Result<VmValue, VmError> {
@@ -859,7 +841,7 @@ async fn dispatch_process_exec_after_policy(
 /// behaviour on the returned command. `label` ("process.exec" or
 /// "process.spawn") is woven into error messages.
 pub(crate) fn build_sandboxed_command(
-    params: &BTreeMap<String, VmValue>,
+    params: &crate::value::DictMap,
     label: &str,
 ) -> Result<tokio::process::Command, VmError> {
     let (program, args) = process_exec_argv(params)?;
@@ -923,7 +905,7 @@ struct ProcessExecResponse<'a> {
 
 fn process_exec_response(response: ProcessExecResponse<'_>) -> VmValue {
     let combined = format!("{}{}", response.stdout, response.stderr);
-    let mut result = BTreeMap::new();
+    let mut result = crate::value::DictMap::new();
     result.put_str(
         "command_id",
         format!(
@@ -975,14 +957,14 @@ fn process_exec_response(response: ProcessExecResponse<'_>) -> VmValue {
         VmValue::Int(response.exit_code as i64),
     );
     result.insert("success".to_string(), VmValue::Bool(response.success));
-    VmValue::Dict(std::sync::Arc::new(result))
+    VmValue::dict(result)
 }
 
 fn resolve_process_exec_cwd(cwd: &str) -> std::path::PathBuf {
     crate::stdlib::process::resolve_source_relative_path(cwd)
 }
 
-fn process_exec_argv(params: &BTreeMap<String, VmValue>) -> Result<(String, Vec<String>), VmError> {
+fn process_exec_argv(params: &crate::value::DictMap) -> Result<(String, Vec<String>), VmError> {
     match optional_string(params, "mode")
         .as_deref()
         .unwrap_or("shell")
@@ -1052,7 +1034,7 @@ impl Drop for SandboxProfileGuard {
     }
 }
 
-pub(crate) fn optional_i64(params: &BTreeMap<String, VmValue>, key: &str) -> Option<i64> {
+pub(crate) fn optional_i64(params: &crate::value::DictMap, key: &str) -> Option<i64> {
     match params.get(key) {
         Some(VmValue::Int(value)) => Some(*value),
         Some(VmValue::Float(value)) if value.fract() == 0.0 => Some(*value as i64),
@@ -1060,11 +1042,11 @@ pub(crate) fn optional_i64(params: &BTreeMap<String, VmValue>, key: &str) -> Opt
     }
 }
 
-pub(crate) fn optional_string(params: &BTreeMap<String, VmValue>, key: &str) -> Option<String> {
+pub(crate) fn optional_string(params: &crate::value::DictMap, key: &str) -> Option<String> {
     params.get(key).and_then(vm_string).map(ToString::to_string)
 }
 
-fn optional_string_list(params: &BTreeMap<String, VmValue>, key: &str) -> Option<Vec<String>> {
+fn optional_string_list(params: &crate::value::DictMap, key: &str) -> Option<Vec<String>> {
     let VmValue::List(values) = params.get(key)? else {
         return None;
     };
@@ -1075,7 +1057,7 @@ fn optional_string_list(params: &BTreeMap<String, VmValue>, key: &str) -> Option
 }
 
 fn optional_string_dict(
-    params: &BTreeMap<String, VmValue>,
+    params: &crate::value::DictMap,
     key: &str,
 ) -> Result<Option<BTreeMap<String, String>>, VmError> {
     let Some(value) = params.get(key) else {
@@ -1086,7 +1068,7 @@ fn optional_string_dict(
             "host_call process.exec {key} must be a dict"
         )));
     };
-    let mut out = BTreeMap::new();
+    let mut out = std::collections::BTreeMap::new();
     for (key, value) in dict.iter() {
         let Some(value) = vm_string(value) else {
             return Err(VmError::Runtime(format!(
@@ -1247,7 +1229,7 @@ mod tests {
         reset_host_state, resolve_process_exec_cwd, set_host_call_bridge, HostCallBridge, HostMock,
     };
     use crate::value::VmDictExt;
-    use std::collections::BTreeMap;
+
     use std::sync::{
         atomic::{AtomicUsize, Ordering},
         Arc,
@@ -1262,7 +1244,7 @@ mod tests {
             crate::orchestration::RunExecutionRecord {
                 cwd: Some(dir.path().to_string_lossy().into_owned()),
                 source_dir: Some(dir.path().join("src").to_string_lossy().into_owned()),
-                env: BTreeMap::new(),
+                env: std::collections::BTreeMap::new(),
                 adapter: None,
                 repo_path: None,
                 worktree_path: None,
@@ -1303,7 +1285,7 @@ mod tests {
             capability: "project".to_string(),
             operation: "metadata_get".to_string(),
             params: None,
-            result: Some(VmValue::Dict(std::sync::Arc::new(BTreeMap::new()))),
+            result: Some(VmValue::dict(crate::value::DictMap::new())),
             error: None,
         });
         let manifest = capability_manifest_with_mocks();
@@ -1323,7 +1305,7 @@ mod tests {
     #[test]
     fn mock_host_call_matches_partial_params_and_overrides_order() {
         reset_host_state();
-        let mut exact_params = BTreeMap::new();
+        let mut exact_params = crate::value::DictMap::new();
         exact_params.put_str("namespace", "facts");
         push_host_mock(HostMock {
             capability: "project".to_string(),
@@ -1340,7 +1322,7 @@ mod tests {
             error: None,
         });
 
-        let mut call_params = BTreeMap::new();
+        let mut call_params = crate::value::DictMap::new();
         call_params.put_str("dir", "pkg");
         call_params.put_str("namespace", "facts");
         let exact = dispatch_mock_host_call("project", "metadata_get", &call_params)
@@ -1366,7 +1348,7 @@ mod tests {
             result: None,
             error: Some("boom".to_string()),
         });
-        let params = BTreeMap::new();
+        let params = crate::value::DictMap::new();
         let result = dispatch_mock_host_call("project", "metadata_get", &params)
             .expect("expected mock result");
         match result {
@@ -1384,13 +1366,13 @@ mod tests {
             &self,
             _capability: &str,
             _operation: &str,
-            _params: &BTreeMap<String, VmValue>,
+            _params: &crate::value::DictMap,
         ) -> Result<Option<VmValue>, VmError> {
             Ok(None)
         }
 
         fn list_tools(&self) -> Result<Option<VmValue>, VmError> {
-            let tool = VmValue::Dict(std::sync::Arc::new(BTreeMap::from([
+            let tool = VmValue::dict(crate::value::DictMap::from_iter([
                 (
                     "name".to_string(),
                     VmValue::String(std::sync::Arc::from("Read".to_string())),
@@ -1403,13 +1385,13 @@ mod tests {
                 ),
                 (
                     "schema".to_string(),
-                    VmValue::Dict(std::sync::Arc::new(BTreeMap::from([(
+                    VmValue::dict(crate::value::DictMap::from_iter([(
                         "type".to_string(),
                         VmValue::String(std::sync::Arc::from("object".to_string())),
-                    )]))),
+                    )])),
                 ),
                 ("deprecated".to_string(), VmValue::Bool(false)),
-            ])));
+            ]));
             Ok(Some(VmValue::List(std::sync::Arc::new(vec![tool]))))
         }
 
@@ -1437,20 +1419,20 @@ mod tests {
             &self,
             capability: &str,
             operation: &str,
-            _params: &BTreeMap<String, VmValue>,
+            _params: &crate::value::DictMap,
         ) -> Result<Option<VmValue>, VmError> {
             if (capability, operation) != ("process", "exec") {
                 return Ok(None);
             }
             self.calls.fetch_add(1, Ordering::SeqCst);
-            Ok(Some(VmValue::Dict(std::sync::Arc::new(BTreeMap::from([
+            Ok(Some(VmValue::dict(crate::value::DictMap::from_iter([
                 (
                     "status".to_string(),
                     VmValue::String(std::sync::Arc::from("completed".to_string())),
                 ),
                 ("exit_code".to_string(), VmValue::Int(0)),
                 ("success".to_string(), VmValue::Bool(true)),
-            ])))))
+            ]))))
         }
     }
 
@@ -1491,10 +1473,10 @@ mod tests {
     fn host_tool_call_uses_installed_host_call_bridge() {
         run_host_async_test(|| async {
             set_host_call_bridge(Arc::new(TestHostToolBridge));
-            let args = VmValue::Dict(std::sync::Arc::new(BTreeMap::from([(
+            let args = VmValue::dict(crate::value::DictMap::from_iter([(
                 "path".to_string(),
                 VmValue::String(std::sync::Arc::from("README.md".to_string())),
-            )])));
+            )]));
             let value = dispatch_host_tool_call("Read", &args)
                 .await
                 .expect("tool call");
@@ -1525,7 +1507,7 @@ mod tests {
             let result = dispatch_host_operation(
                 "process",
                 "exec",
-                &BTreeMap::from([
+                &crate::value::DictMap::from_iter([
                     (
                         "mode".to_string(),
                         VmValue::String(std::sync::Arc::from("shell")),
@@ -1567,7 +1549,7 @@ mod tests {
         // explicitly-provided child var. The parent var is set on this
         // process's environment immediately before the spawn.
         std::env::set_var("PARENT_VAR", "inherited");
-        let mut params = BTreeMap::from([
+        let mut params = crate::value::DictMap::from_iter([
             (
                 "mode".to_string(),
                 VmValue::String(std::sync::Arc::from("argv")),
@@ -1605,10 +1587,10 @@ mod tests {
         run_host_async_test(|| async {
             // No `env_mode`: the provided key must be added WITHOUT clearing
             // the inherited parent environment (the env-clear footgun fix).
-            let child_env = VmValue::Dict(std::sync::Arc::new(BTreeMap::from([(
+            let child_env = VmValue::dict(crate::value::DictMap::from_iter([(
                 "CHILD_VAR".to_string(),
                 VmValue::String(std::sync::Arc::from("provided")),
-            )])));
+            )]));
             let (parent, child) = process_exec_env_probe(child_env, None).await;
             assert_eq!(
                 parent, "inherited",
@@ -1628,10 +1610,10 @@ mod tests {
             // Explicit `replace`: the inherited parent var must be gone and
             // only the provided key survives. This preserves the ability to
             // fully replace the environment when intentionally requested.
-            let child_env = VmValue::Dict(std::sync::Arc::new(BTreeMap::from([(
+            let child_env = VmValue::dict(crate::value::DictMap::from_iter([(
                 "CHILD_VAR".to_string(),
                 VmValue::String(std::sync::Arc::from("provided")),
-            )])));
+            )]));
             let (parent, child) = process_exec_env_probe(child_env, Some("replace")).await;
             assert_eq!(parent, "", "explicit replace must clear parent env");
             assert_eq!(
@@ -1645,7 +1627,7 @@ mod tests {
     #[test]
     fn process_exec_env_mode_unknown_is_rejected() {
         run_host_async_test(|| async {
-            let params = BTreeMap::from([
+            let params = crate::value::DictMap::from_iter([
                 (
                     "mode".to_string(),
                     VmValue::String(std::sync::Arc::from("argv")),
@@ -1658,10 +1640,10 @@ mod tests {
                 ),
                 (
                     "env".to_string(),
-                    VmValue::Dict(std::sync::Arc::new(BTreeMap::from([(
+                    VmValue::dict(crate::value::DictMap::from_iter([(
                         "CHILD_VAR".to_string(),
                         VmValue::String(std::sync::Arc::from("x")),
-                    )]))),
+                    )])),
                 ),
                 (
                     "env_mode".to_string(),

@@ -187,10 +187,7 @@ fn llm_mock_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmEr
     Ok(VmValue::Nil)
 }
 
-fn optional_display_field(
-    dict: &std::collections::BTreeMap<String, VmValue>,
-    key: &str,
-) -> Option<String> {
+fn optional_display_field(dict: &crate::value::DictMap, key: &str) -> Option<String> {
     match dict.get(key) {
         None | Some(VmValue::Nil) => None,
         Some(value) => Some(value.display()),
@@ -294,7 +291,7 @@ fn llm_mock_calls_builtin(_args: &[VmValue], _out: &mut String) -> Result<VmValu
                 "max_tool_calls".to_string(),
                 c.max_tool_calls.map(VmValue::Int).unwrap_or(VmValue::Nil),
             );
-            VmValue::Dict(std::sync::Arc::new(dict))
+            VmValue::dict(dict)
         })
         .collect();
     Ok(VmValue::List(std::sync::Arc::new(result)))

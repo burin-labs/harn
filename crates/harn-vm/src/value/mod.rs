@@ -7,9 +7,9 @@ mod structural;
 
 pub type VmMutex<T> = parking_lot::Mutex<T>;
 
-pub use build::VmDictExt;
+pub use build::{DictRetain, VmDictExt};
 pub use core::{
-    string_char_count, struct_fields_to_map, StructLayout, VmAsyncBuiltinFn, VmBuiltinFn,
+    string_char_count, struct_fields_to_map, DictMap, StructLayout, VmAsyncBuiltinFn, VmBuiltinFn,
     VmBuiltinRefId, VmEnumVariant, VmValue,
 };
 pub use env::{closest_match, ModuleFunctionRegistry, ModuleState, VmClosure, VmEnv};

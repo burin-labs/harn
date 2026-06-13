@@ -5,8 +5,6 @@ mod options;
 mod provider;
 mod transcript;
 
-use std::collections::BTreeMap;
-
 use crate::value::VmValue;
 
 pub(crate) use messages::{
@@ -59,7 +57,7 @@ pub(super) const TRANSCRIPT_ASSET_TYPE: &str = "transcript_asset";
 pub(super) const TRANSCRIPT_VERSION: i64 = 2;
 
 /// Convert a VmValue dict to serde_json::Value for API payloads.
-pub(crate) fn vm_value_dict_to_json(dict: &BTreeMap<String, VmValue>) -> serde_json::Value {
+pub(crate) fn vm_value_dict_to_json(dict: &crate::value::DictMap) -> serde_json::Value {
     let mut map = serde_json::Map::new();
     for (k, v) in dict {
         map.insert(k.clone(), vm_value_to_json(v));
@@ -90,7 +88,7 @@ pub fn vm_value_to_json(val: &VmValue) -> serde_json::Value {
 mod tests {
     use super::*;
     use crate::value::VmDictExt;
-    use std::collections::BTreeMap;
+
     use std::rc::Rc;
 
     #[test]
@@ -164,7 +162,7 @@ mod tests {
         // `anthropic/claude-sonnet-4-6` is a catalog alias that resolves
         // to the openrouter provider. With LOCAL_LLM_BASE_URL set the
         // pre-fix code would have returned "local".
-        let opts = Some(BTreeMap::from([(
+        let opts = Some(crate::value::DictMap::from_iter([(
             "model".to_string(),
             VmValue::String(std::sync::Arc::from("anthropic/claude-sonnet-4-6")),
         )]));
@@ -172,7 +170,7 @@ mod tests {
 
         // An unknown id with no catalog hit still falls into "local"
         // so users with a custom local server keep working.
-        let opts_unknown = Some(BTreeMap::from([(
+        let opts_unknown = Some(crate::value::DictMap::from_iter([(
             "model".to_string(),
             VmValue::String(std::sync::Arc::from("my-custom-local-tag")),
         )]));
@@ -201,7 +199,7 @@ mod tests {
 
     #[test]
     fn vm_messages_to_json_preserves_tool_message_fields() {
-        let message = VmValue::Dict(std::sync::Arc::new(BTreeMap::from([
+        let message = VmValue::dict(crate::value::DictMap::from_iter([
             (
                 "role".to_string(),
                 VmValue::String(std::sync::Arc::from("tool")),
@@ -214,7 +212,7 @@ mod tests {
                 "content".to_string(),
                 VmValue::String(std::sync::Arc::from("ok")),
             ),
-        ])));
+        ]));
 
         let json = vm_messages_to_json(&[message]).expect("message json");
         assert_eq!(json[0]["role"], "tool");
@@ -233,10 +231,10 @@ mod tests {
         }
 
         let transcript = new_transcript_with(None, Vec::new(), None, None);
-        let options = VmValue::Dict(std::sync::Arc::new(BTreeMap::from([(
+        let options = VmValue::dict(crate::value::DictMap::from_iter([(
             "transcript".to_string(),
             transcript,
-        )])));
+        )]));
         let err = extract_llm_options(&[
             VmValue::String(std::sync::Arc::from("")),
             VmValue::Nil,
@@ -281,7 +279,7 @@ mod tests {
         }
         reset_provider_key_cache();
 
-        let options = Some(BTreeMap::from([(
+        let options = Some(crate::value::DictMap::from_iter([(
             "model_tier".to_string(),
             VmValue::String(std::sync::Arc::from("small")),
         )]));
@@ -326,7 +324,7 @@ mod tests {
         }
         reset_provider_key_cache();
 
-        let options = Some(BTreeMap::from([(
+        let options = Some(crate::value::DictMap::from_iter([(
             "model_tier".to_string(),
             VmValue::String(std::sync::Arc::from("small")),
         )]));
@@ -399,19 +397,19 @@ mod tests {
         }
         reset_provider_key_cache();
 
-        let mut opts: BTreeMap<String, VmValue> = BTreeMap::new();
+        let mut opts: crate::value::DictMap = crate::value::DictMap::new();
         opts.put_str("provider", "auto");
         opts.put_str("model", "local:gemma-4-e4b-it");
         assert_eq!(vm_resolve_provider(&Some(opts)), "ollama");
 
         // Case-insensitive: "AUTO" should behave the same.
-        let mut opts2: BTreeMap<String, VmValue> = BTreeMap::new();
+        let mut opts2: crate::value::DictMap = crate::value::DictMap::new();
         opts2.put_str("provider", "AUTO");
         opts2.put_str("model", "local:foo/bar");
         assert_eq!(vm_resolve_provider(&Some(opts2)), "ollama");
 
         // Explicit non-auto provider still wins.
-        let mut opts3: BTreeMap<String, VmValue> = BTreeMap::new();
+        let mut opts3: crate::value::DictMap = crate::value::DictMap::new();
         opts3.put_str("provider", "anthropic");
         opts3.put_str("model", "local:foo");
         assert_eq!(vm_resolve_provider(&Some(opts3)), "anthropic");
@@ -452,7 +450,7 @@ mod tests {
         let sink = Rc::new(crate::events::CollectorSink::new());
         crate::events::add_event_sink(sink.clone());
 
-        let opts = BTreeMap::from([
+        let opts = crate::value::DictMap::from_iter([
             (
                 "provider".to_string(),
                 VmValue::String(std::sync::Arc::from("auto")),
@@ -602,7 +600,7 @@ mod tests {
         // Call-site `model:` option must win — scripts opting into a
         // specific model should not be silently overridden by an ACP
         // pin meant only for "no-option" calls.
-        let mut explicit_opts: BTreeMap<String, VmValue> = BTreeMap::new();
+        let mut explicit_opts: crate::value::DictMap = crate::value::DictMap::new();
         explicit_opts.put_str("model", "gpt-4o-mini");
         explicit_opts.put_str("provider", "openai");
         let opts = Some(explicit_opts);

@@ -14,7 +14,6 @@
 //! dating later is straightforward if drift becomes a real problem.
 
 use crate::value::VmDictExt;
-use std::collections::BTreeMap;
 use std::time::Duration;
 
 use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
@@ -97,7 +96,7 @@ fn parse_junit_xml_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, 
 }
 
 fn record_to_value(record: TestRecord) -> VmValue {
-    let mut map: BTreeMap<String, VmValue> = BTreeMap::new();
+    let mut map: crate::value::DictMap = crate::value::DictMap::new();
     map.put_str("name", record.name.as_str());
     map.put_str("status", record.status.as_str());
     map.insert(
@@ -125,7 +124,7 @@ fn record_to_value(record: TestRecord) -> VmValue {
             .map(|s| VmValue::String(std::sync::Arc::from(s)))
             .unwrap_or(VmValue::Nil),
     );
-    VmValue::Dict(std::sync::Arc::new(map))
+    VmValue::dict(map)
 }
 
 fn parse_junit_xml(bytes: &[u8]) -> Vec<TestRecord> {

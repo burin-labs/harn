@@ -30,8 +30,6 @@
 //! identifiers ("migrations", "release-cut") work without callers picking
 //! a magic number.
 
-use std::collections::BTreeMap;
-
 use sqlx_core::query::query;
 
 use crate::stdlib::macros::{harn_builtin, BuiltinSignature, Param, TY_ANY, TY_BOOL};
@@ -197,7 +195,7 @@ enum LockKey {
 
 fn resolve_key(
     value: &VmValue,
-    options: Option<&BTreeMap<String, VmValue>>,
+    options: Option<&crate::value::DictMap>,
     builtin: &'static str,
 ) -> Result<LockKey, VmError> {
     let mut key = match value {

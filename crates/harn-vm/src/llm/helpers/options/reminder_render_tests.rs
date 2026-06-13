@@ -94,7 +94,7 @@ fn local_fallback_renders_plain_system_text() {
 
 #[test]
 fn system_text_reminders_are_excluded_from_system_string() {
-    let options = BTreeMap::from([
+    let options = crate::value::DictMap::from_iter([
         (
             "system_prompt_parts".to_string(),
             VmValue::String(std::sync::Arc::from("parts")),
@@ -131,12 +131,12 @@ fn s(text: &str) -> VmValue {
 }
 
 fn dict(pairs: &[(&str, VmValue)]) -> VmValue {
-    VmValue::Dict(std::sync::Arc::new(
+    VmValue::dict(
         pairs
             .iter()
             .map(|(k, v)| (k.to_string(), v.clone()))
-            .collect(),
-    ))
+            .collect::<crate::value::DictMap>(),
+    )
 }
 
 fn list(items: Vec<VmValue>) -> VmValue {
@@ -145,7 +145,7 @@ fn list(items: Vec<VmValue>) -> VmValue {
 
 #[test]
 fn full_host_option_ordering_is_faithful() {
-    let options = BTreeMap::from([
+    let options = crate::value::DictMap::from_iter([
         ("system_preamble".to_string(), s("P")),
         ("system_prefix".to_string(), s("X")),
         ("system_context".to_string(), s("C")),
@@ -174,7 +174,7 @@ fn system_string_is_byte_stable_across_changing_reminder_sets() {
     // the live reminder set. Turn N has no reminders; turn N+1 fires a
     // token-pressure reminder. The assembled `system` string must be
     // byte-identical so the non-Anthropic prefix cache stays warm.
-    let options = BTreeMap::from([
+    let options = crate::value::DictMap::from_iter([
         ("system_prompt_parts".to_string(), s("parts")),
         ("system_appendix".to_string(), s("appendix")),
     ]);
@@ -276,7 +276,7 @@ fn multiple_system_text_reminders_coalesce_into_one_trailing_message() {
 
 #[test]
 fn dict_part_position_override_moves_to_after() {
-    let options = BTreeMap::from([(
+    let options = crate::value::DictMap::from_iter([(
         "system_prompt_parts".to_string(),
         dict(&[("content", s("moved")), ("position", s("after"))]),
     )]);
@@ -288,7 +288,7 @@ fn dict_part_position_override_moves_to_after() {
 
 #[test]
 fn dict_part_with_title_renders_heading() {
-    let options = BTreeMap::from([(
+    let options = crate::value::DictMap::from_iter([(
         "system_prompt_parts".to_string(),
         dict(&[("content", s("body")), ("title", s("Title"))]),
     )]);
@@ -300,7 +300,7 @@ fn dict_part_with_title_renders_heading() {
 
 #[test]
 fn list_parts_expand_in_declaration_order() {
-    let options = BTreeMap::from([(
+    let options = crate::value::DictMap::from_iter([(
         "system_prompt_parts".to_string(),
         list(vec![s("one"), s("two")]),
     )]);
@@ -312,7 +312,7 @@ fn list_parts_expand_in_declaration_order() {
 
 #[test]
 fn nil_system_arg_falls_back_to_opts_system() {
-    let options = BTreeMap::from([("system".to_string(), s("fromopts"))]);
+    let options = crate::value::DictMap::from_iter([("system".to_string(), s("fromopts"))]);
     let prompt = compose_system_prompt(None, Some(&options))
         .expect("system prompt")
         .expect("non-empty prompt");
@@ -322,7 +322,7 @@ fn nil_system_arg_falls_back_to_opts_system() {
 #[test]
 fn tool_guidance_is_injected_only_when_the_tool_is_present() {
     // Tool carrying `guidance` → instruction auto-included after primary.
-    let with_guidance = BTreeMap::from([(
+    let with_guidance = crate::value::DictMap::from_iter([(
         "tools".to_string(),
         list(vec![dict(&[
             ("name", s("todo")),
@@ -342,7 +342,7 @@ fn tool_guidance_is_injected_only_when_the_tool_is_present() {
     );
 
     // Same tool without `guidance`, or a different tool set → no fragment.
-    let no_guidance = BTreeMap::from([(
+    let no_guidance = crate::value::DictMap::from_iter([(
         "tools".to_string(),
         list(vec![dict(&[
             ("name", s("read")),
@@ -357,7 +357,7 @@ fn tool_guidance_is_injected_only_when_the_tool_is_present() {
 
 #[test]
 fn assemble_records_provenance_for_every_fragment() {
-    let options = BTreeMap::from([
+    let options = crate::value::DictMap::from_iter([
         ("system_prompt_parts".to_string(), s("parts")),
         (
             "tools".to_string(),
@@ -392,7 +392,7 @@ fn fragment(id: &str, body: &str) -> VmValue {
 fn system_fragments_expand_in_place_of_the_single_primary() {
     // The decomposed channel yields the same bytes as the equivalent
     // joined-string primary, while keeping each part individually traced.
-    let decomposed = BTreeMap::from([
+    let decomposed = crate::value::DictMap::from_iter([
         ("system_prefix".to_string(), s("X")),
         (
             "_system_fragments".to_string(),
@@ -405,7 +405,7 @@ fn system_fragments_expand_in_place_of_the_single_primary() {
         ("system_appendix".to_string(), s("A")),
     ]);
     let joined = "base\n\n## Active skills\n\nKeep going until done.";
-    let baseline = BTreeMap::from([
+    let baseline = crate::value::DictMap::from_iter([
         ("system_prefix".to_string(), s("X")),
         ("system_appendix".to_string(), s("A")),
     ]);
@@ -435,7 +435,7 @@ fn system_fragments_expand_in_place_of_the_single_primary() {
 fn system_fragments_supersede_the_system_arg() {
     // When the channel is present, the `system` arg / `opts.system` no
     // longer contributes a primary fragment — the channel owns that block.
-    let options = BTreeMap::from([
+    let options = crate::value::DictMap::from_iter([
         ("system".to_string(), s("ignored opts.system")),
         (
             "_system_fragments".to_string(),
@@ -452,7 +452,8 @@ fn system_fragments_supersede_the_system_arg() {
 fn empty_system_fragments_yield_no_primary() {
     // An empty list still claims the primary block: the agent computed zero
     // non-empty parts, so the `system` arg must not leak back in.
-    let options = BTreeMap::from([("_system_fragments".to_string(), list(vec![]))]);
+    let options =
+        crate::value::DictMap::from_iter([("_system_fragments".to_string(), list(vec![]))]);
     let prompt = compose_system_prompt(Some("should not appear".to_string()), Some(&options))
         .expect("system prompt");
     assert_eq!(prompt, None);
@@ -460,7 +461,7 @@ fn empty_system_fragments_yield_no_primary() {
 
 #[test]
 fn system_fragments_honor_per_part_tool_gating() {
-    let options = BTreeMap::from([(
+    let options = crate::value::DictMap::from_iter([(
         "_system_fragments".to_string(),
         list(vec![dict(&[
             ("id", s("primary:todo_nudge")),
@@ -482,7 +483,7 @@ fn system_fragments_honor_per_part_tool_gating() {
 
 #[test]
 fn system_fragments_can_target_the_tail_bucket() {
-    let options = BTreeMap::from([
+    let options = crate::value::DictMap::from_iter([
         (
             "_system_fragments".to_string(),
             list(vec![
@@ -514,7 +515,7 @@ fn system_fragments_can_target_the_tail_bucket() {
 
 #[test]
 fn system_fragments_reject_unknown_bucket() {
-    let options = BTreeMap::from([(
+    let options = crate::value::DictMap::from_iter([(
         "_system_fragments".to_string(),
         list(vec![dict(&[
             ("id", s("primary:bad")),
@@ -531,7 +532,7 @@ fn system_fragments_reject_unknown_bucket() {
 
 #[test]
 fn context_profile_fragments_join_prompt_explain_provenance() {
-    let options = BTreeMap::from([(
+    let options = crate::value::DictMap::from_iter([(
         "context_profile".to_string(),
         dict(&[
             ("caps", list(vec![s("remote.github")])),

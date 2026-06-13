@@ -1,4 +1,3 @@
-use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -23,7 +22,7 @@ struct UnixSocketOptions {
     max_response_bytes: usize,
 }
 
-fn option_int(options: Option<&BTreeMap<String, VmValue>>, key: &str, default: i64) -> i64 {
+fn option_int(options: Option<&crate::value::DictMap>, key: &str, default: i64) -> i64 {
     options
         .and_then(|opts| opts.get(key))
         .and_then(VmValue::as_int)
@@ -45,11 +44,11 @@ fn unix_socket_options(value: Option<&VmValue>) -> UnixSocketOptions {
     }
 }
 
-fn insert_string(dict: &mut BTreeMap<String, VmValue>, key: &str, value: impl Into<String>) {
+fn insert_string(dict: &mut crate::value::DictMap, key: &str, value: impl Into<String>) {
     dict.insert(key.to_string(), VmValue::String(Arc::from(value.into())));
 }
 
-fn insert_int(dict: &mut BTreeMap<String, VmValue>, key: &str, value: i64) {
+fn insert_int(dict: &mut crate::value::DictMap, key: &str, value: i64) {
     dict.insert(key.to_string(), VmValue::Int(value));
 }
 
@@ -66,7 +65,7 @@ fn socket_result(
     raw_response: Option<String>,
     response: Option<VmValue>,
 ) -> VmValue {
-    let mut out = BTreeMap::new();
+    let mut out = crate::value::DictMap::new();
     out.insert("ok".to_string(), VmValue::Bool(ok));
     insert_string(&mut out, "status", status);
     insert_string(&mut out, "path", path);
@@ -81,7 +80,7 @@ fn socket_result(
     if let Some(response) = response {
         out.insert("response".to_string(), response);
     }
-    VmValue::Dict(Arc::new(out))
+    VmValue::dict(out)
 }
 
 #[cfg(unix)]

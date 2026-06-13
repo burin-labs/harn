@@ -59,7 +59,7 @@ fn testbench_fs_diff_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValu
             };
             d.put_str("kind", kind_str);
             d.insert("content".to_string(), content_val);
-            VmValue::Dict(std::sync::Arc::new(d))
+            VmValue::dict(d)
         })
         .collect();
     Ok(VmValue::List(std::sync::Arc::new(entries)))
@@ -80,7 +80,7 @@ fn testbench_clock_leaks_impl(_args: &[VmValue], _out: &mut String) -> Result<Vm
             let mut d = BTreeMap::new();
             d.put_str("capability", leak.capability_id);
             d.insert("count".to_string(), VmValue::Int(leak.count as i64));
-            VmValue::Dict(std::sync::Arc::new(d))
+            VmValue::dict(d)
         })
         .collect();
     Ok(VmValue::List(std::sync::Arc::new(entries)))

@@ -1,4 +1,4 @@
-//! Ergonomic builders for the `BTreeMap<String, VmValue>` that backs
+//! Ergonomic builders for the string-keyed `VmValue` maps that back
 //! `VmValue::Dict`.
 //!
 //! Harn builtins assemble result dicts by hand, and the raw
@@ -7,16 +7,37 @@
 //! field. [`VmDictExt`] collapses each field to a single call while keeping
 //! the receiver, so the common shapes read as `dict.put_str("key", v)` /
 //! `dict.put_opt_str("key", maybe.as_deref())`. There is no behavioural
-//! change: every method is a thin wrapper over `BTreeMap::insert`.
+//! change: every method is a thin wrapper over the map's `insert`.
 
 use std::collections::BTreeMap;
 
-use super::VmValue;
+use super::{DictMap, VmValue};
+
+/// Minimal string-keyed insert, implemented for both the transient `BTreeMap`
+/// builders still used at call sites and the persistent [`DictMap`] that backs
+/// a live `VmValue::Dict`. Keeps [`VmDictExt`] a single generic impl rather
+/// than two near-identical copies.
+pub trait DictInsert {
+    fn dict_insert(&mut self, key: String, value: VmValue);
+}
+
+impl DictInsert for BTreeMap<String, VmValue> {
+    fn dict_insert(&mut self, key: String, value: VmValue) {
+        self.insert(key, value);
+    }
+}
+
+impl DictInsert for DictMap {
+    fn dict_insert(&mut self, key: String, value: VmValue) {
+        self.insert(key, value);
+    }
+}
 
 /// Field-insertion helpers for a `VmValue::Dict` backing map.
 ///
-/// Implemented for the concrete `BTreeMap<String, VmValue>` only, so the
-/// methods are unavailable on unrelated maps and cannot be applied by mistake.
+/// Implemented for any [`DictInsert`] map (the transient `BTreeMap` builders
+/// and the persistent [`DictMap`]), so the methods are unavailable on unrelated
+/// maps and cannot be applied by mistake.
 pub trait VmDictExt {
     /// Inserts `value` under `key` (owning the key as a `String`).
     fn put(&mut self, key: &str, value: VmValue);
@@ -32,33 +53,57 @@ pub trait VmDictExt {
     fn put_int(&mut self, key: &str, value: i64);
 }
 
-impl VmDictExt for BTreeMap<String, VmValue> {
+/// `retain` for the persistent [`DictMap`].
+///
+/// `imbl::OrdMap` has no in-place `retain` (it is structurally shared), so this
+/// rebuilds the map keeping only the entries for which `keep` returns true. The
+/// closure signature mirrors `BTreeMap::retain` (`&K, &mut V`) so call sites
+/// read identically. Cold-path helper (filter/dedup), so the rebuild cost is
+/// not on any hot loop.
+pub trait DictRetain {
+    fn retain(&mut self, keep: impl FnMut(&String, &mut VmValue) -> bool);
+}
+
+impl DictRetain for DictMap {
+    fn retain(&mut self, mut keep: impl FnMut(&String, &mut VmValue) -> bool) {
+        let mut result = DictMap::new();
+        for (k, v) in self.iter() {
+            let mut v = v.clone();
+            if keep(k, &mut v) {
+                result.insert(k.clone(), v);
+            }
+        }
+        *self = result;
+    }
+}
+
+impl<M: DictInsert> VmDictExt for M {
     fn put(&mut self, key: &str, value: VmValue) {
-        self.insert(key.to_string(), value);
+        self.dict_insert(key.to_string(), value);
     }
 
     fn put_str(&mut self, key: &str, value: impl AsRef<str>) {
-        self.insert(key.to_string(), VmValue::string(value));
+        self.dict_insert(key.to_string(), VmValue::string(value));
     }
 
     fn put_opt_str(&mut self, key: &str, value: Option<impl AsRef<str>>) {
         if let Some(value) = value {
-            self.insert(key.to_string(), VmValue::string(value));
+            self.dict_insert(key.to_string(), VmValue::string(value));
         }
     }
 
     fn put_opt(&mut self, key: &str, value: Option<VmValue>) {
         if let Some(value) = value {
-            self.insert(key.to_string(), value);
+            self.dict_insert(key.to_string(), value);
         }
     }
 
     fn put_bool(&mut self, key: &str, value: bool) {
-        self.insert(key.to_string(), VmValue::Bool(value));
+        self.dict_insert(key.to_string(), VmValue::Bool(value));
     }
 
     fn put_int(&mut self, key: &str, value: i64) {
-        self.insert(key.to_string(), VmValue::Int(value));
+        self.dict_insert(key.to_string(), VmValue::Int(value));
     }
 }
 

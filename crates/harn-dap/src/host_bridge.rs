@@ -218,7 +218,7 @@ impl HostCallBridge for DapHostBridge {
         &self,
         capability: &str,
         operation: &str,
-        params: &BTreeMap<String, VmValue>,
+        params: &harn_vm::value::DictMap,
     ) -> Result<Option<VmValue>, VmError> {
         let start = std::time::Instant::now();
         self.emit_output("host_call", &format!("→ {capability}.{operation}"));
@@ -334,7 +334,7 @@ pub fn deliver_reply(pending: &PendingMap, request_seq: i64, reply: DapHostCallR
 // (private to the LLM module). This is a small, stable surface that's
 // straightforward to keep in sync with `VmValue`.
 
-fn vm_dict_to_json(params: &BTreeMap<String, VmValue>) -> Value {
+fn vm_dict_to_json(params: &harn_vm::value::DictMap) -> Value {
     let mut map = serde_json::Map::with_capacity(params.len());
     for (k, v) in params.iter() {
         map.insert(k.clone(), vm_value_to_json(v));
@@ -383,11 +383,11 @@ fn json_to_vm_value(value: Value) -> VmValue {
             arr.into_iter().map(json_to_vm_value).collect(),
         )),
         Value::Object(obj) => {
-            let map: BTreeMap<String, VmValue> = obj
+            let map: harn_vm::value::DictMap = obj
                 .into_iter()
                 .map(|(k, v)| (k, json_to_vm_value(v)))
                 .collect();
-            VmValue::Dict(std::sync::Arc::new(map))
+            VmValue::dict(map)
         }
     }
 }
@@ -531,7 +531,7 @@ mod tests {
             },
         );
 
-        let mut params = BTreeMap::new();
+        let mut params = harn_vm::value::DictMap::new();
         params.insert("path".into(), VmValue::String(std::sync::Arc::from("foo")));
         let result = bridge
             .dispatch("workspace", "read_text", &params)
@@ -563,7 +563,7 @@ mod tests {
             },
         );
 
-        let result = bridge.dispatch("workspace", "missing_op", &BTreeMap::new());
+        let result = bridge.dispatch("workspace", "missing_op", &harn_vm::value::DictMap::new());
         helper.join().expect("helper panicked");
 
         match result {
@@ -587,7 +587,7 @@ mod tests {
         );
 
         let result = bridge
-            .dispatch("session", "active_roots", &BTreeMap::new())
+            .dispatch("session", "active_roots", &harn_vm::value::DictMap::new())
             .expect("dispatch ok")
             .expect("Some");
         helper.join().expect("helper panicked");

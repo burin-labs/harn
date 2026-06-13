@@ -268,7 +268,7 @@ impl super::super::Vm {
                 map.insert(key.display(), value);
             }
         }
-        self.stack.push(VmValue::Dict(std::sync::Arc::new(map)));
+        self.stack.push(VmValue::dict(map));
     }
 
     pub(super) fn execute_subscript(&mut self, optional: bool) -> Result<(), VmError> {
@@ -496,7 +496,7 @@ impl super::super::Vm {
                 VmValue::Dict(map) => {
                     let mut new_map = (*map).clone();
                     new_map.insert(prop_name.to_string(), new_value);
-                    assign_value(self, VmValue::Dict(std::sync::Arc::new(new_map)))?;
+                    assign_value(self, VmValue::dict(new_map))?;
                 }
                 VmValue::StructInstance { .. } => {
                     let new_obj = obj
@@ -578,8 +578,7 @@ impl super::super::Vm {
                     let key = index.display();
                     let mut new_map = Arc::try_unwrap(map).unwrap_or_else(|map| (*map).clone());
                     new_map.insert(key, new_value);
-                    self.env
-                        .assign(var_name, VmValue::Dict(std::sync::Arc::new(new_map)))?;
+                    self.env.assign(var_name, VmValue::dict(new_map))?;
                 }
                 other => return Err(Self::subscript_assign_type_error(&other)),
             }

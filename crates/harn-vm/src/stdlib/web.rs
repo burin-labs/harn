@@ -1,7 +1,5 @@
 //! Pure web-source helpers backing `std/web`.
 
-use std::collections::BTreeMap;
-
 use regex::Regex;
 use scraper::{ElementRef, Html, Selector};
 use url::Url;
@@ -19,8 +17,8 @@ fn vm_list(values: Vec<VmValue>) -> VmValue {
     VmValue::List(std::sync::Arc::new(values))
 }
 
-fn vm_dict(values: BTreeMap<String, VmValue>) -> VmValue {
-    VmValue::Dict(std::sync::Arc::new(values))
+fn vm_dict(values: crate::value::DictMap) -> VmValue {
+    VmValue::dict(values)
 }
 
 fn selector(pattern: &str) -> Selector {
@@ -83,7 +81,7 @@ fn html_text_without_scripts(html: &str) -> String {
 
 fn extract_meta(document: &Html) -> VmValue {
     let meta_selector = selector("meta");
-    let mut meta = BTreeMap::new();
+    let mut meta = crate::value::DictMap::new();
     for element in document.select(&meta_selector) {
         let value = element
             .value()
@@ -132,7 +130,7 @@ fn extract_links(document: &Html, base: Option<&Url>) -> VmValue {
         else {
             continue;
         };
-        let mut row = BTreeMap::new();
+        let mut row = crate::value::DictMap::new();
         row.insert("href".to_string(), vm_str(href));
         row.insert("url".to_string(), vm_str(resolve_url(base, href)));
         row.insert("text".to_string(), vm_str(element_text(element)));
@@ -192,7 +190,7 @@ fn extract_tables(document: &Html) -> VmValue {
     let mut tables = Vec::new();
 
     for table in document.select(&table_selector) {
-        let mut rendered = BTreeMap::new();
+        let mut rendered = crate::value::DictMap::new();
         let caption = table
             .select(&caption_selector)
             .next()
@@ -245,7 +243,7 @@ fn extract_html(html: &str, source_url: Option<&str>) -> VmValue {
         .map(vm_str)
         .unwrap_or(VmValue::Nil);
 
-    let mut out = BTreeMap::new();
+    let mut out = crate::value::DictMap::new();
     out.insert("title".to_string(), title);
     out.insert("meta".to_string(), extract_meta(&document));
     out.insert(

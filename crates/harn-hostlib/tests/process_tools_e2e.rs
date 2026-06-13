@@ -15,7 +15,6 @@
 
 #![cfg(unix)]
 
-use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use harn_hostlib::tools::ToolsCapability;
@@ -28,18 +27,18 @@ fn registry() -> BuiltinRegistry {
     registry
 }
 
-fn call(builtin: &str, request: BTreeMap<String, VmValue>) -> Result<VmValue, HostlibError> {
+fn call(builtin: &str, request: harn_vm::value::DictMap) -> Result<VmValue, HostlibError> {
     harn_hostlib::tools::permissions::enable_for_test();
     let registry = registry();
     let entry = registry
         .find(builtin)
         .unwrap_or_else(|| panic!("builtin {builtin} not registered"));
-    let arg = VmValue::Dict(Arc::new(request));
+    let arg = VmValue::dict(request);
     (entry.handler)(&[arg])
 }
 
-fn dict() -> BTreeMap<String, VmValue> {
-    BTreeMap::new()
+fn dict() -> harn_vm::value::DictMap {
+    harn_vm::value::DictMap::new()
 }
 
 fn vstr(value: &str) -> VmValue {
@@ -50,28 +49,28 @@ fn vlist_str(values: &[&str]) -> VmValue {
     VmValue::List(Arc::new(values.iter().map(|s| vstr(s)).collect()))
 }
 
-fn require_dict(value: VmValue) -> BTreeMap<String, VmValue> {
+fn require_dict(value: VmValue) -> harn_vm::value::DictMap {
     match value {
         VmValue::Dict(map) => (*map).clone(),
         other => panic!("expected dict response, got {other:?}"),
     }
 }
 
-fn require_int(map: &BTreeMap<String, VmValue>, key: &str) -> i64 {
+fn require_int(map: &harn_vm::value::DictMap, key: &str) -> i64 {
     match map.get(key) {
         Some(VmValue::Int(i)) => *i,
         other => panic!("expected int at {key}, got {other:?}"),
     }
 }
 
-fn require_str(map: &BTreeMap<String, VmValue>, key: &str) -> String {
+fn require_str(map: &harn_vm::value::DictMap, key: &str) -> String {
     match map.get(key) {
         Some(VmValue::String(s)) => s.to_string(),
         other => panic!("expected string at {key}, got {other:?}"),
     }
 }
 
-fn require_bool(map: &BTreeMap<String, VmValue>, key: &str) -> bool {
+fn require_bool(map: &harn_vm::value::DictMap, key: &str) -> bool {
     match map.get(key) {
         Some(VmValue::Bool(b)) => *b,
         other => panic!("expected bool at {key}, got {other:?}"),

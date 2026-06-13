@@ -162,7 +162,7 @@ fn handle_list(args: &[VmValue]) -> Result<VmValue, HostlibError> {
 
 fn require_nonempty_string(
     builtin: &'static str,
-    dict: &std::collections::BTreeMap<String, VmValue>,
+    dict: &harn_vm::value::DictMap,
     key: &'static str,
 ) -> Result<String, HostlibError> {
     let value = require_string(builtin, dict, key)?;

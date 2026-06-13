@@ -115,7 +115,7 @@ struct DynregStore {
 
 thread_local! {
     static DYNREG_STORES: RefCell<BTreeMap<String, DynregStore>> =
-        const { RefCell::new(BTreeMap::new()) };
+        const { RefCell::new(std::collections::BTreeMap::new()) };
 }
 
 static STORE_ID_COUNTER: Mutex<u64> = Mutex::new(0);
@@ -238,16 +238,16 @@ fn next_store_id() -> String {
 }
 
 fn store_handle(id: &str) -> VmValue {
-    let mut fields = BTreeMap::new();
+    let mut fields = crate::value::DictMap::new();
     fields.insert(
         HANDLE_KEY_KIND.to_string(),
         VmValue::string(KIND_DYNREG_STORE),
     );
     fields.insert(HANDLE_KEY_ID.to_string(), VmValue::string(id));
-    VmValue::Dict(std::sync::Arc::new(fields))
+    VmValue::dict(fields)
 }
 
-fn handle_id(handle: &BTreeMap<String, VmValue>) -> Result<String, VmError> {
+fn handle_id(handle: &crate::value::DictMap) -> Result<String, VmError> {
     let kind = handle.get(HANDLE_KEY_KIND).and_then(|value| match value {
         VmValue::String(s) => Some(s.to_string()),
         _ => None,
@@ -278,10 +278,10 @@ fn handle_id(handle: &BTreeMap<String, VmValue>) -> Result<String, VmError> {
 
 // ----- Validation -----------------------------------------------------------
 
-fn validate_metadata_value(metadata: &BTreeMap<String, VmValue>) -> VmValue {
+fn validate_metadata_value(metadata: &crate::value::DictMap) -> VmValue {
     let mut errors: Vec<String> = Vec::new();
     validate_metadata(metadata, &mut errors);
-    let mut out = BTreeMap::new();
+    let mut out = crate::value::DictMap::new();
     out.insert("ok".to_string(), VmValue::Bool(errors.is_empty()));
     out.insert(
         "errors".to_string(),
@@ -289,12 +289,12 @@ fn validate_metadata_value(metadata: &BTreeMap<String, VmValue>) -> VmValue {
             errors.iter().map(VmValue::string).collect::<Vec<_>>(),
         )),
     );
-    VmValue::Dict(std::sync::Arc::new(out))
+    VmValue::dict(out)
 }
 
 /// Run RFC 7591 §2 validation, pushing human-readable errors. Each error
 /// is prefixed `HARN-OAU-005: ` so callers can pattern-match consistently.
-fn validate_metadata(metadata: &BTreeMap<String, VmValue>, errors: &mut Vec<String>) {
+fn validate_metadata(metadata: &crate::value::DictMap, errors: &mut Vec<String>) {
     // redirect_uris: required, non-empty list, https or loopback http, no
     // fragments. RFC 7591 §2 + §5 — server may reject otherwise.
     let redirect_uris = metadata.get("redirect_uris");
@@ -462,7 +462,7 @@ fn is_loopback_redirect_host(host: &str) -> bool {
 }
 
 fn validate_enum_list(
-    metadata: &BTreeMap<String, VmValue>,
+    metadata: &crate::value::DictMap,
     field: &str,
     allowed: &[&str],
     optional: bool,
@@ -500,7 +500,7 @@ fn validate_enum_list(
 }
 
 fn validate_optional_bounded_string(
-    metadata: &BTreeMap<String, VmValue>,
+    metadata: &crate::value::DictMap,
     field: &str,
     max_len: usize,
     errors: &mut Vec<String>,
@@ -521,11 +521,7 @@ fn validate_optional_bounded_string(
     }
 }
 
-fn validate_optional_url(
-    metadata: &BTreeMap<String, VmValue>,
-    field: &str,
-    errors: &mut Vec<String>,
-) {
+fn validate_optional_url(metadata: &crate::value::DictMap, field: &str, errors: &mut Vec<String>) {
     if let Some(value) = metadata.get(field) {
         match value {
             VmValue::Nil => {}
@@ -546,7 +542,7 @@ fn validate_optional_url(
 
 // ----- Metadata builders ----------------------------------------------------
 
-fn build_client_metadata_value(metadata: &BTreeMap<String, VmValue>) -> Result<VmValue, VmError> {
+fn build_client_metadata_value(metadata: &crate::value::DictMap) -> Result<VmValue, VmError> {
     let mut errors: Vec<String> = Vec::new();
     validate_metadata(metadata, &mut errors);
     if !errors.is_empty() {
@@ -559,7 +555,7 @@ fn build_client_metadata_value(metadata: &BTreeMap<String, VmValue>) -> Result<V
     // Apply RFC 7591 §2 defaults when fields are omitted: response_types
     // defaults to `["code"]`; grant_types defaults to `["authorization_code"]`;
     // token_endpoint_auth_method defaults to `client_secret_basic`.
-    let mut out: BTreeMap<String, VmValue> = metadata.clone();
+    let mut out: crate::value::DictMap = metadata.clone();
     out.entry("response_types".to_string())
         .or_insert_with(|| VmValue::List(std::sync::Arc::new(vec![VmValue::string("code")])));
     out.entry("grant_types".to_string()).or_insert_with(|| {
@@ -569,18 +565,18 @@ fn build_client_metadata_value(metadata: &BTreeMap<String, VmValue>) -> Result<V
     });
     out.entry("token_endpoint_auth_method".to_string())
         .or_insert_with(|| VmValue::string("client_secret_basic"));
-    Ok(VmValue::Dict(std::sync::Arc::new(out)))
+    Ok(VmValue::dict(out))
 }
 
 fn build_authorization_server_metadata_value(
-    provider: &BTreeMap<String, VmValue>,
-    overrides: Option<&BTreeMap<String, VmValue>>,
+    provider: &crate::value::DictMap,
+    overrides: Option<&crate::value::DictMap>,
 ) -> Result<VmValue, VmError> {
     let auth_url = require_string_field(provider, "auth_url", "provider")?;
     let token_url = require_string_field(provider, "token_url", "provider")?;
     let issuer = derive_issuer(&auth_url)?;
 
-    let mut out: BTreeMap<String, VmValue> = BTreeMap::new();
+    let mut out: crate::value::DictMap = crate::value::DictMap::new();
     out.insert("issuer".to_string(), VmValue::string(&issuer));
     out.insert(
         "authorization_endpoint".to_string(),
@@ -646,7 +642,7 @@ fn build_authorization_server_metadata_value(
             out.insert(k.clone(), v.clone());
         }
     }
-    Ok(VmValue::Dict(std::sync::Arc::new(out)))
+    Ok(VmValue::dict(out))
 }
 
 fn derive_issuer(auth_url: &str) -> Result<String, VmError> {
@@ -670,8 +666,8 @@ fn derive_issuer(auth_url: &str) -> Result<String, VmError> {
 // ----- Registration ---------------------------------------------------------
 
 fn register_client_value(
-    handle: &BTreeMap<String, VmValue>,
-    metadata: &BTreeMap<String, VmValue>,
+    handle: &crate::value::DictMap,
+    metadata: &crate::value::DictMap,
 ) -> Result<VmValue, VmError> {
     let mut errors: Vec<String> = Vec::new();
     validate_metadata(metadata, &mut errors);
@@ -701,7 +697,7 @@ fn register_client_value(
         .entry("token_endpoint_auth_method".to_string())
         .or_insert_with(|| VmValue::string("client_secret_basic"));
 
-    let canonical_dict = VmValue::Dict(std::sync::Arc::new(canonical.clone()));
+    let canonical_dict = VmValue::dict(canonical.clone());
     let canonical_json = vm_value_to_json(&canonical_dict);
 
     let stored = StoredClient {
@@ -721,16 +717,16 @@ fn register_client_value(
     })?;
 
     // Build the response dict — full RFC 7591 §3.2.1 success body.
-    let mut response: BTreeMap<String, VmValue> = canonical;
+    let mut response: crate::value::DictMap = canonical;
     response.insert("client_id".to_string(), VmValue::string(&client_id));
     response.insert("client_secret".to_string(), VmValue::string(&client_secret));
     response.insert("client_id_issued_at".to_string(), VmValue::Int(issued_at));
     // Per RFC 7591 §3.2.1, `client_secret_expires_at: 0` means non-expiring.
     response.insert("client_secret_expires_at".to_string(), VmValue::Int(0));
-    Ok(VmValue::Dict(std::sync::Arc::new(response)))
+    Ok(VmValue::dict(response))
 }
 
-fn get_client_value(handle: &BTreeMap<String, VmValue>, client_id: &str) -> VmValue {
+fn get_client_value(handle: &crate::value::DictMap, client_id: &str) -> VmValue {
     let store_id = match handle_id(handle) {
         Ok(v) => v,
         Err(_) => return VmValue::Nil,
@@ -748,9 +744,9 @@ fn get_client_value(handle: &BTreeMap<String, VmValue>, client_id: &str) -> VmVa
         // metadata + id + issued_at so logs/audits cannot accidentally
         // leak credentials.
         let metadata_value = json_to_vm_value(&client.metadata);
-        let mut response: BTreeMap<String, VmValue> = match metadata_value {
+        let mut response: crate::value::DictMap = match metadata_value {
             VmValue::Dict(dict) => dict.as_ref().clone(),
-            _ => BTreeMap::new(),
+            _ => crate::value::DictMap::new(),
         };
         response.insert("client_id".to_string(), VmValue::string(&client.client_id));
         response.insert(
@@ -758,11 +754,11 @@ fn get_client_value(handle: &BTreeMap<String, VmValue>, client_id: &str) -> VmVa
             VmValue::Int(client.client_id_issued_at),
         );
         response.insert("client_secret_expires_at".to_string(), VmValue::Int(0));
-        VmValue::Dict(std::sync::Arc::new(response))
+        VmValue::dict(response)
     })
 }
 
-fn list_clients_value(handle: &BTreeMap<String, VmValue>) -> VmValue {
+fn list_clients_value(handle: &crate::value::DictMap) -> VmValue {
     let store_id = match handle_id(handle) {
         Ok(v) => v,
         Err(_) => return VmValue::List(std::sync::Arc::new(Vec::new())),
@@ -801,7 +797,7 @@ fn require_handle(
     args: &[VmValue],
     index: usize,
     fn_name: &str,
-) -> Result<BTreeMap<String, VmValue>, VmError> {
+) -> Result<crate::value::DictMap, VmError> {
     match args.get(index) {
         Some(VmValue::Dict(dict)) => Ok(dict.as_ref().clone()),
         Some(other) => Err(VmError::Runtime(format!(
@@ -819,7 +815,7 @@ fn require_dict_arg(
     index: usize,
     fn_name: &str,
     arg_name: &str,
-) -> Result<BTreeMap<String, VmValue>, VmError> {
+) -> Result<crate::value::DictMap, VmError> {
     match args.get(index) {
         Some(VmValue::Dict(dict)) => Ok(dict.as_ref().clone()),
         Some(other) => Err(VmError::Runtime(format!(
@@ -837,7 +833,7 @@ fn optional_dict_arg(
     index: usize,
     fn_name: &str,
     arg_name: &str,
-) -> Result<Option<BTreeMap<String, VmValue>>, VmError> {
+) -> Result<Option<crate::value::DictMap>, VmError> {
     match args.get(index) {
         None | Some(VmValue::Nil) => Ok(None),
         Some(VmValue::Dict(dict)) => Ok(Some(dict.as_ref().clone())),
@@ -867,7 +863,7 @@ fn required_string_arg(
 }
 
 fn require_string_field(
-    metadata: &BTreeMap<String, VmValue>,
+    metadata: &crate::value::DictMap,
     field: &str,
     owner: &str,
 ) -> Result<String, VmError> {
@@ -886,8 +882,8 @@ fn require_string_field(
 mod tests {
     use super::*;
 
-    fn metadata_with_redirect(uri: &str) -> BTreeMap<String, VmValue> {
-        let mut m = BTreeMap::new();
+    fn metadata_with_redirect(uri: &str) -> crate::value::DictMap {
+        let mut m = crate::value::DictMap::new();
         m.insert(
             "redirect_uris".to_string(),
             VmValue::List(std::sync::Arc::new(vec![VmValue::string(uri)])),
@@ -948,7 +944,7 @@ mod tests {
 
     #[test]
     fn empty_redirect_uris_fails() {
-        let mut m = BTreeMap::new();
+        let mut m = crate::value::DictMap::new();
         m.insert(
             "redirect_uris".to_string(),
             VmValue::List(std::sync::Arc::new(Vec::new())),
@@ -960,7 +956,7 @@ mod tests {
 
     #[test]
     fn missing_redirect_uris_fails() {
-        let m: BTreeMap<String, VmValue> = BTreeMap::new();
+        let m: crate::value::DictMap = crate::value::DictMap::new();
         let mut errors = Vec::new();
         validate_metadata(&m, &mut errors);
         assert!(errors[0].contains("redirect_uris is required"));
@@ -992,7 +988,7 @@ mod tests {
 
     #[test]
     fn build_authorization_server_metadata_minimal() {
-        let mut provider = BTreeMap::new();
+        let mut provider = crate::value::DictMap::new();
         provider.insert(
             "auth_url".to_string(),
             VmValue::string("https://idp.example/authorize"),
@@ -1031,7 +1027,7 @@ mod tests {
                 .borrow_mut()
                 .insert(id.clone(), DynregStore::default());
         });
-        let mut handle = BTreeMap::new();
+        let mut handle = crate::value::DictMap::new();
         handle.insert("kind".to_string(), VmValue::string(KIND_DYNREG_STORE));
         handle.insert("id".to_string(), VmValue::string(&id));
         let m = metadata_with_redirect("https://app.example/cb");
@@ -1064,7 +1060,7 @@ mod tests {
                 .borrow_mut()
                 .insert(id.clone(), DynregStore::default());
         });
-        let mut handle = BTreeMap::new();
+        let mut handle = crate::value::DictMap::new();
         handle.insert("kind".to_string(), VmValue::string(KIND_DYNREG_STORE));
         handle.insert("id".to_string(), VmValue::string(&id));
         let m = metadata_with_redirect("http://attacker.example/cb");

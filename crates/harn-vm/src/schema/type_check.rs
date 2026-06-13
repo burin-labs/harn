@@ -1,15 +1,13 @@
-use std::collections::BTreeMap;
-
 use crate::value::VmValue;
 
-pub(super) fn schema_is_object_like(schema: &BTreeMap<String, VmValue>) -> bool {
+pub(super) fn schema_is_object_like(schema: &crate::value::DictMap) -> bool {
     schema_type_name(schema) == Some("dict")
         || schema.contains_key("properties")
         || schema.contains_key("required")
         || schema.contains_key("additional_properties")
 }
 
-pub(super) fn schema_expected_label(schema: &BTreeMap<String, VmValue>) -> String {
+pub(super) fn schema_expected_label(schema: &crate::value::DictMap) -> String {
     if schema_is_object_like(schema) {
         return "dict".to_string();
     }
@@ -29,7 +27,7 @@ pub(super) fn schema_expected_label(schema: &BTreeMap<String, VmValue>) -> Strin
     "value".to_string()
 }
 
-pub(super) fn schema_type_name(schema: &BTreeMap<String, VmValue>) -> Option<&str> {
+pub(super) fn schema_type_name(schema: &crate::value::DictMap) -> Option<&str> {
     match schema.get("type") {
         Some(VmValue::String(type_name)) => Some(type_name.as_ref()),
         _ => None,

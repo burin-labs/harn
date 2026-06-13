@@ -255,15 +255,15 @@ mod cache_key_identity_tests {
         }
     }
 
-    fn base_options() -> std::collections::BTreeMap<String, VmValue> {
-        let mut map = std::collections::BTreeMap::new();
+    fn base_options() -> crate::value::DictMap {
+        let mut map = crate::value::DictMap::new();
         map.insert("provider".to_string(), VmValue::String(Arc::from("mock")));
         map.insert("model".to_string(), VmValue::String(Arc::from("mock")));
         map
     }
 
-    fn dict(map: std::collections::BTreeMap<String, VmValue>) -> VmValue {
-        VmValue::Dict(Arc::new(map))
+    fn dict(map: crate::value::DictMap) -> VmValue {
+        VmValue::dict(map)
     }
 
     #[test]

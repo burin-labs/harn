@@ -375,7 +375,7 @@ fn runtime_paths_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, V
         "worktree_root",
         crate::runtime_paths::worktree_root(&runtime_base).to_string_lossy(),
     );
-    Ok(VmValue::Dict(std::sync::Arc::new(paths)))
+    Ok(VmValue::dict(paths))
 }
 
 #[harn_builtin(sig = "spawn_captured(opts: dict) -> dict", category = "process")]
@@ -525,7 +525,7 @@ pub(crate) fn spawn_captured_value(args: &[VmValue]) -> Result<VmValue, VmError>
     result.insert("duration_ms".to_string(), VmValue::Int(duration_ms));
     result.insert("success".to_string(), VmValue::Bool(success));
     result.insert("timed_out".to_string(), VmValue::Bool(timed_out));
-    Ok(VmValue::Dict(std::sync::Arc::new(result)))
+    Ok(VmValue::dict(result))
 }
 
 /// Parameters for [`run_captured_spawn`]: a single synchronous subprocess
@@ -765,7 +765,7 @@ fn captured_run_to_value(run: &CapturedRun) -> VmValue {
     result.insert("success".to_string(), VmValue::Bool(success));
     result.insert("timed_out".to_string(), VmValue::Bool(run.timed_out));
     result.insert("duration_ms".to_string(), VmValue::Int(run.duration_ms));
-    VmValue::Dict(std::sync::Arc::new(result))
+    VmValue::dict(result)
 }
 
 #[harn_builtin(
@@ -904,7 +904,7 @@ fn vm_output_to_value(output: std::process::Output) -> VmValue {
         "success".to_string(),
         VmValue::Bool(output.status.success()),
     );
-    VmValue::Dict(std::sync::Arc::new(result))
+    VmValue::dict(result)
 }
 
 fn exec_command(
@@ -1250,12 +1250,12 @@ mod tests {
 
     #[cfg(unix)]
     fn exec_opts_dict(pairs: &[(&str, VmValue)]) -> VmValue {
-        VmValue::Dict(std::sync::Arc::new(
+        VmValue::dict(
             pairs
                 .iter()
                 .map(|(k, v)| (k.to_string(), v.clone()))
-                .collect(),
-        ))
+                .collect::<crate::value::DictMap>(),
+        )
     }
 
     #[cfg(unix)]

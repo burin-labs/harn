@@ -232,7 +232,7 @@ fn regex_captures_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, V
             }
         }
 
-        results.push(VmValue::Dict(std::sync::Arc::new(dict)));
+        results.push(VmValue::dict(dict));
     }
     Ok(VmValue::List(std::sync::Arc::new(results)))
 }

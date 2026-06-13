@@ -1,4 +1,4 @@
-use std::{cell::RefCell, collections::BTreeMap, thread_local};
+use std::{cell::RefCell, thread_local};
 
 use crate::runtime_limits::RuntimeLimits;
 use crate::schema;
@@ -14,7 +14,10 @@ use crate::vm::Vm;
 const JSON_PARSE_CACHE_LIMIT: usize = RuntimeLimits::DEFAULT.max_json_parse_cache_entries;
 
 thread_local! {
-    static JSON_PARSE_CACHE: RefCell<BTreeMap<String, VmValue>> = const { RefCell::new(BTreeMap::new()) };
+    // Internal parse cache (source -> parsed value), not a Dict payload, so it
+    // stays a plain `BTreeMap`: it is mutated in place and needs a `const` init.
+    static JSON_PARSE_CACHE: RefCell<std::collections::BTreeMap<String, VmValue>> =
+        const { RefCell::new(std::collections::BTreeMap::new()) };
 }
 
 pub(crate) fn reset_json_state() {
@@ -499,10 +502,10 @@ fn pointer_set_at(value: &VmValue, tokens: &[String], replacement: VmValue) -> V
             let mut next = map.as_ref().clone();
             if tail.is_empty() {
                 next.insert(head.clone(), replacement);
-                VmValue::Dict(std::sync::Arc::new(next))
+                VmValue::dict(next)
             } else if let Some(child) = map.get(head) {
                 next.insert(head.clone(), pointer_set_at(child, tail, replacement));
-                VmValue::Dict(std::sync::Arc::new(next))
+                VmValue::dict(next)
             } else {
                 value.clone()
             }
@@ -553,10 +556,10 @@ fn pointer_delete_at(value: &VmValue, tokens: &[String]) -> VmValue {
             let mut next = map.as_ref().clone();
             if tail.is_empty() {
                 next.remove(head);
-                VmValue::Dict(std::sync::Arc::new(next))
+                VmValue::dict(next)
             } else if let Some(child) = map.get(head) {
                 next.insert(head.clone(), pointer_delete_at(child, tail));
-                VmValue::Dict(std::sync::Arc::new(next))
+                VmValue::dict(next)
             } else {
                 value.clone()
             }

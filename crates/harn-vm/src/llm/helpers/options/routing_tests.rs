@@ -105,7 +105,7 @@ fn test_equivalent_model(provider: &str, group: &str) -> ModelDef {
         tier: Some("mid".to_string()),
         open_weight: Some(true),
         strengths: Vec::new(),
-        benchmarks: BTreeMap::new(),
+        benchmarks: std::collections::BTreeMap::new(),
         family: Some("test-equivalent-family".to_string()),
         lineage: None,
         complementary_with: Vec::new(),
@@ -148,7 +148,7 @@ fn install_equivalent_routes() {
 }
 
 fn extract_with_policy(policy: &str) -> crate::llm::api::LlmCallOptions {
-    let mut options = BTreeMap::new();
+    let mut options = crate::value::DictMap::new();
     options.put_str("route_policy", policy);
     options.insert(
         "fallback_chain".to_string(),
@@ -159,7 +159,7 @@ fn extract_with_policy(policy: &str) -> crate::llm::api::LlmCallOptions {
     extract_llm_options(&[
         VmValue::String(std::sync::Arc::from("hello".to_string())),
         VmValue::Nil,
-        VmValue::Dict(std::sync::Arc::new(options)),
+        VmValue::dict(options),
     ])
     .expect("options")
 }
@@ -182,17 +182,17 @@ fn cheapest_over_quality_selects_lowest_cost_available_candidate() {
 }
 
 fn extract_with_options(
-    opts: BTreeMap<String, VmValue>,
+    opts: crate::value::DictMap,
 ) -> Result<crate::llm::api::LlmCallOptions, VmError> {
     extract_llm_options(&[
         VmValue::String(std::sync::Arc::from("hello".to_string())),
         VmValue::Nil,
-        VmValue::Dict(std::sync::Arc::new(opts)),
+        VmValue::dict(opts),
     ])
 }
 
-fn model_role_options(role: &str) -> BTreeMap<String, VmValue> {
-    BTreeMap::from([(
+fn model_role_options(role: &str) -> crate::value::DictMap {
+    crate::value::DictMap::from_iter([(
         "model_role".to_string(),
         VmValue::String(std::sync::Arc::from(role.to_string())),
     )])
@@ -220,7 +220,7 @@ fn model_role_defaults_fill_missing_llm_options() {
     let mut overlay = ProvidersConfig::default();
     overlay.model_roles.insert(
         "merge".to_string(),
-        BTreeMap::from([
+        std::collections::BTreeMap::from_iter([
             (
                 "provider".to_string(),
                 toml::Value::String("mock".to_string()),
@@ -255,7 +255,7 @@ fn explicit_options_win_over_model_role_defaults() {
     let mut overlay = ProvidersConfig::default();
     overlay.model_roles.insert(
         "merge".to_string(),
-        BTreeMap::from([
+        std::collections::BTreeMap::from_iter([
             (
                 "provider".to_string(),
                 toml::Value::String("mock".to_string()),
@@ -310,7 +310,7 @@ fn model_role_aliases_do_not_override_exact_role_defaults() {
     let mut overlay = ProvidersConfig::default();
     overlay.model_roles.insert(
         "fast_apply".to_string(),
-        BTreeMap::from([
+        std::collections::BTreeMap::from_iter([
             (
                 "provider".to_string(),
                 toml::Value::String("mock".to_string()),
@@ -323,7 +323,7 @@ fn model_role_aliases_do_not_override_exact_role_defaults() {
     );
     overlay.model_roles.insert(
         "merge".to_string(),
-        BTreeMap::from([
+        std::collections::BTreeMap::from_iter([
             (
                 "provider".to_string(),
                 toml::Value::String("mock".to_string()),
@@ -379,7 +379,7 @@ fn model_role_config_keys_normalize_like_call_options() {
     let mut overlay = ProvidersConfig::default();
     overlay.model_roles.insert(
         "fast-apply".to_string(),
-        BTreeMap::from([
+        std::collections::BTreeMap::from_iter([
             (
                 "provider".to_string(),
                 toml::Value::String("mock".to_string()),
@@ -403,8 +403,8 @@ fn model_role_config_keys_normalize_like_call_options() {
     super::super::reset_provider_key_cache();
 }
 
-fn fast_options(model: &str) -> BTreeMap<String, VmValue> {
-    let mut options = BTreeMap::new();
+fn fast_options(model: &str) -> crate::value::DictMap {
+    let mut options = crate::value::DictMap::new();
     options.put_str("model", model);
     options.insert("fast".to_string(), VmValue::Bool(true));
     options
@@ -461,7 +461,7 @@ fn fastest_over_quality_selects_lowest_latency_available_candidate() {
 #[test]
 fn preference_list_cheapest_first_sets_route_fallbacks() {
     install_test_routes();
-    let mut policy = BTreeMap::new();
+    let mut policy = crate::value::DictMap::new();
     policy.put_str("mode", "preference_list");
     policy.put_str("strategy", "cheapest_first");
     policy.insert(
@@ -471,15 +471,12 @@ fn preference_list_cheapest_first_sets_route_fallbacks() {
             VmValue::String(std::sync::Arc::from("cheap-mid")),
         ])),
     );
-    let mut options = BTreeMap::new();
-    options.insert(
-        "route_policy".to_string(),
-        VmValue::Dict(std::sync::Arc::new(policy)),
-    );
+    let mut options = crate::value::DictMap::new();
+    options.insert("route_policy".to_string(), VmValue::dict(policy));
     let opts = extract_llm_options(&[
         VmValue::String(std::sync::Arc::from("hello".to_string())),
         VmValue::Nil,
-        VmValue::Dict(std::sync::Arc::new(options)),
+        VmValue::dict(options),
     ])
     .expect("options");
 
@@ -495,9 +492,9 @@ fn preference_list_cheapest_first_sets_route_fallbacks() {
 #[test]
 fn equivalent_failover_builds_catalog_backed_routing_policy() {
     install_equivalent_routes();
-    let mut failover = BTreeMap::new();
+    let mut failover = crate::value::DictMap::new();
     failover.insert("max_routes".to_string(), VmValue::Int(2));
-    let opts = extract_with_options(BTreeMap::from([
+    let opts = extract_with_options(crate::value::DictMap::from_iter([
         (
             "provider".to_string(),
             VmValue::String(std::sync::Arc::from("primary")),
@@ -506,10 +503,7 @@ fn equivalent_failover_builds_catalog_backed_routing_policy() {
             "model".to_string(),
             VmValue::String(std::sync::Arc::from("primary-model")),
         ),
-        (
-            "equivalent_failover".to_string(),
-            VmValue::Dict(std::sync::Arc::new(failover)),
-        ),
+        ("equivalent_failover".to_string(), VmValue::dict(failover)),
     ]))
     .expect("options");
 
@@ -536,7 +530,7 @@ fn equivalent_failover_builds_catalog_backed_routing_policy() {
 fn equivalent_failover_rejects_explicit_routing_policy() {
     install_equivalent_routes();
     let chain = VmValue::List(std::sync::Arc::new(vec![VmValue::Dict(
-        std::sync::Arc::new(BTreeMap::from([
+        std::sync::Arc::new(crate::value::DictMap::from_iter([
             (
                 "provider".to_string(),
                 VmValue::String(std::sync::Arc::from("primary")),
@@ -547,11 +541,13 @@ fn equivalent_failover_rejects_explicit_routing_policy() {
             ),
         ])),
     )]));
-    let routing =
-        crate::llm::routing::build_routing_policy(&BTreeMap::from([("chain".to_string(), chain)]))
-            .expect("routing policy");
+    let routing = crate::llm::routing::build_routing_policy(&crate::value::DictMap::from_iter([(
+        "chain".to_string(),
+        chain,
+    )]))
+    .expect("routing policy");
 
-    let err = match extract_with_options(BTreeMap::from([
+    let err = match extract_with_options(crate::value::DictMap::from_iter([
         (
             "provider".to_string(),
             VmValue::String(std::sync::Arc::from("primary")),
@@ -590,20 +586,20 @@ fn always_policy_accepts_provider_model_selector() {
 
 #[test]
 fn thinking_dict_enabled_false_disables_thinking() {
-    let mut options = BTreeMap::new();
+    let mut options = crate::value::DictMap::new();
     options.put_str("provider", "mock");
     options.put_str("model", "gpt-5.4");
     options.insert(
         "thinking".to_string(),
-        VmValue::Dict(std::sync::Arc::new(BTreeMap::from([(
+        VmValue::dict(crate::value::DictMap::from_iter([(
             "enabled".to_string(),
             VmValue::Bool(false),
-        )]))),
+        )])),
     );
     let opts = extract_llm_options(&[
         VmValue::String(std::sync::Arc::from("hello".to_string())),
         VmValue::Nil,
-        VmValue::Dict(std::sync::Arc::new(options)),
+        VmValue::dict(options),
     ])
     .expect("options");
     assert!(opts.thinking.is_disabled());
@@ -611,23 +607,23 @@ fn thinking_dict_enabled_false_disables_thinking() {
 
 #[test]
 fn thinking_dict_enabled_budget_parses_typed_config() {
-    let mut options = BTreeMap::new();
+    let mut options = crate::value::DictMap::new();
     options.put_str("provider", "mock");
     options.put_str("model", "claude-opus-4-6");
     options.insert(
         "thinking".to_string(),
-        VmValue::Dict(std::sync::Arc::new(BTreeMap::from([
+        VmValue::dict(crate::value::DictMap::from_iter([
             (
                 "mode".to_string(),
                 VmValue::String(std::sync::Arc::from("enabled".to_string())),
             ),
             ("budget_tokens".to_string(), VmValue::Int(8000)),
-        ]))),
+        ])),
     );
     let opts = extract_llm_options(&[
         VmValue::String(std::sync::Arc::from("hello".to_string())),
         VmValue::Nil,
-        VmValue::Dict(std::sync::Arc::new(options)),
+        VmValue::dict(options),
     ])
     .expect("options");
     assert_eq!(
@@ -644,7 +640,7 @@ fn thinking_dict_enabled_budget_parses_typed_config() {
 
 #[test]
 fn anthropic_beta_features_parse_and_dedupe_with_interleaved_flag() {
-    let mut options = BTreeMap::new();
+    let mut options = crate::value::DictMap::new();
     options.put_str("provider", "mock");
     options.put_str("model", "claude-opus-4-6");
     options.insert(
@@ -663,7 +659,7 @@ fn anthropic_beta_features_parse_and_dedupe_with_interleaved_flag() {
     let opts = extract_llm_options(&[
         VmValue::String(std::sync::Arc::from("hello".to_string())),
         VmValue::Nil,
-        VmValue::Dict(std::sync::Arc::new(options)),
+        VmValue::dict(options),
     ])
     .expect("options");
     assert_eq!(
@@ -677,7 +673,7 @@ fn anthropic_beta_features_parse_and_dedupe_with_interleaved_flag() {
 
 #[test]
 fn anthropic_beta_features_reject_invalid_header_names() {
-    let options = BTreeMap::from([
+    let options = crate::value::DictMap::from_iter([
         (
             "provider".to_string(),
             VmValue::String(std::sync::Arc::from("mock".to_string())),
@@ -695,7 +691,7 @@ fn anthropic_beta_features_reject_invalid_header_names() {
     let err = match extract_llm_options(&[
         VmValue::String(std::sync::Arc::from("hello".to_string())),
         VmValue::Nil,
-        VmValue::Dict(std::sync::Arc::new(options)),
+        VmValue::dict(options),
     ]) {
         Ok(_) => panic!("invalid beta feature should fail before transport"),
         Err(err) => err,
@@ -705,12 +701,12 @@ fn anthropic_beta_features_reject_invalid_header_names() {
 
 #[test]
 fn thinking_effort_parses_typed_level() {
-    let mut options = BTreeMap::new();
+    let mut options = crate::value::DictMap::new();
     options.put_str("provider", "mock");
     options.put_str("model", "o3");
     options.insert(
         "thinking".to_string(),
-        VmValue::Dict(std::sync::Arc::new(BTreeMap::from([
+        VmValue::dict(crate::value::DictMap::from_iter([
             (
                 "mode".to_string(),
                 VmValue::String(std::sync::Arc::from("effort".to_string())),
@@ -719,12 +715,12 @@ fn thinking_effort_parses_typed_level() {
                 "level".to_string(),
                 VmValue::String(std::sync::Arc::from("high".to_string())),
             ),
-        ]))),
+        ])),
     );
     let opts = extract_llm_options(&[
         VmValue::String(std::sync::Arc::from("hello".to_string())),
         VmValue::Nil,
-        VmValue::Dict(std::sync::Arc::new(options)),
+        VmValue::dict(options),
     ])
     .expect("options");
     assert_eq!(
@@ -736,7 +732,7 @@ fn thinking_effort_parses_typed_level() {
 }
 
 fn unsupported_local_options(extra: Vec<(&str, VmValue)>) -> VmError {
-    let mut options = BTreeMap::from([
+    let mut options = crate::value::DictMap::from_iter([
         (
             "provider".to_string(),
             VmValue::String(std::sync::Arc::from("local".to_string())),
@@ -752,7 +748,7 @@ fn unsupported_local_options(extra: Vec<(&str, VmValue)>) -> VmError {
     match extract_llm_options(&[
         VmValue::String(std::sync::Arc::from("hello".to_string())),
         VmValue::Nil,
-        VmValue::Dict(std::sync::Arc::new(options)),
+        VmValue::dict(options),
     ]) {
         Ok(_) => panic!("unsupported option should fail"),
         Err(err) => err,
@@ -776,7 +772,7 @@ fn assert_unsupported_local_option(option: &str, extra: Vec<(&str, VmValue)>) {
 
 fn one_tool_list() -> VmValue {
     VmValue::List(std::sync::Arc::new(vec![VmValue::Dict(
-        std::sync::Arc::new(BTreeMap::from([
+        std::sync::Arc::new(crate::value::DictMap::from_iter([
             (
                 "name".to_string(),
                 VmValue::String(std::sync::Arc::from("lookup")),
@@ -787,7 +783,7 @@ fn one_tool_list() -> VmValue {
             ),
             (
                 "parameters".to_string(),
-                VmValue::Dict(std::sync::Arc::new(BTreeMap::new())),
+                VmValue::dict(crate::value::DictMap::new()),
             ),
         ])),
     )]))
@@ -865,7 +861,7 @@ fn tool_choice_accepted_on_text_tool_routes() {
     crate::llm_config::clear_user_overrides();
     super::super::reset_provider_key_cache();
 
-    let options = BTreeMap::from([
+    let options = crate::value::DictMap::from_iter([
         (
             "provider".to_string(),
             VmValue::String(std::sync::Arc::from("ollama".to_string())),
@@ -882,7 +878,7 @@ fn tool_choice_accepted_on_text_tool_routes() {
     extract_llm_options(&[
         VmValue::String(std::sync::Arc::from("hello".to_string())),
         VmValue::Nil,
-        VmValue::Dict(std::sync::Arc::new(options)),
+        VmValue::dict(options),
     ])
     .expect("tool_choice accepted on text-format routes");
 }
@@ -893,7 +889,7 @@ fn text_tool_format_does_not_emit_native_provider_tools() {
     crate::llm_config::clear_user_overrides();
     super::super::reset_provider_key_cache();
 
-    let options = BTreeMap::from([
+    let options = crate::value::DictMap::from_iter([
         (
             "provider".to_string(),
             VmValue::String(std::sync::Arc::from("ollama".to_string())),
@@ -911,7 +907,7 @@ fn text_tool_format_does_not_emit_native_provider_tools() {
     let opts = extract_llm_options(&[
         VmValue::String(std::sync::Arc::from("hello".to_string())),
         VmValue::Nil,
-        VmValue::Dict(std::sync::Arc::new(options)),
+        VmValue::dict(options),
     ])
     .expect("text-format tools accepted");
 
@@ -921,7 +917,7 @@ fn text_tool_format_does_not_emit_native_provider_tools() {
 
 #[test]
 fn standalone_reasoning_effort_maps_to_thinking_effort_when_supported() {
-    let options = BTreeMap::from([
+    let options = crate::value::DictMap::from_iter([
         (
             "provider".to_string(),
             VmValue::String(std::sync::Arc::from("mock".to_string())),
@@ -939,7 +935,7 @@ fn standalone_reasoning_effort_maps_to_thinking_effort_when_supported() {
     let opts = extract_llm_options(&[
         VmValue::String(std::sync::Arc::from("hello".to_string())),
         VmValue::Nil,
-        VmValue::Dict(std::sync::Arc::new(options)),
+        VmValue::dict(options),
     ])
     .expect("supported reasoning_effort");
 
@@ -953,7 +949,7 @@ fn standalone_reasoning_effort_maps_to_thinking_effort_when_supported() {
 
 #[test]
 fn standalone_reasoning_effort_accepts_minimal_when_supported() {
-    let options = BTreeMap::from([
+    let options = crate::value::DictMap::from_iter([
         (
             "provider".to_string(),
             VmValue::String(std::sync::Arc::from("mock".to_string())),
@@ -971,7 +967,7 @@ fn standalone_reasoning_effort_accepts_minimal_when_supported() {
     let opts = extract_llm_options(&[
         VmValue::String(std::sync::Arc::from("hello".to_string())),
         VmValue::Nil,
-        VmValue::Dict(std::sync::Arc::new(options)),
+        VmValue::dict(options),
     ])
     .expect("minimal reasoning_effort");
 
@@ -985,7 +981,7 @@ fn standalone_reasoning_effort_accepts_minimal_when_supported() {
 
 #[test]
 fn reasoning_policy_maps_to_provider_aware_thinking_when_explicit() {
-    let options = BTreeMap::from([
+    let options = crate::value::DictMap::from_iter([
         (
             "provider".to_string(),
             VmValue::String(std::sync::Arc::from("mock".to_string())),
@@ -1003,7 +999,7 @@ fn reasoning_policy_maps_to_provider_aware_thinking_when_explicit() {
     let opts = extract_llm_options(&[
         VmValue::String(std::sync::Arc::from("hello".to_string())),
         VmValue::Nil,
-        VmValue::Dict(std::sync::Arc::new(options)),
+        VmValue::dict(options),
     ])
     .expect("reasoning_policy");
 
@@ -1023,7 +1019,7 @@ fn session_pinned_reasoning_policy_is_llm_call_default() {
     crate::agent_sessions::set_pinned_reasoning_policy(&session_id, Some("high".to_string()))
         .expect("set policy");
     let _session_guard = crate::agent_sessions::enter_current_session(session_id);
-    let options = BTreeMap::from([
+    let options = crate::value::DictMap::from_iter([
         (
             "provider".to_string(),
             VmValue::String(std::sync::Arc::from("mock".to_string())),
@@ -1037,7 +1033,7 @@ fn session_pinned_reasoning_policy_is_llm_call_default() {
     let opts = extract_llm_options(&[
         VmValue::String(std::sync::Arc::from("hello".to_string())),
         VmValue::Nil,
-        VmValue::Dict(std::sync::Arc::new(options)),
+        VmValue::dict(options),
     ])
     .expect("session reasoning_policy");
 
@@ -1061,7 +1057,7 @@ fn explicit_thinking_wins_over_session_pinned_reasoning_policy() {
     crate::agent_sessions::set_pinned_reasoning_policy(&session_id, Some("high".to_string()))
         .expect("set policy");
     let _session_guard = crate::agent_sessions::enter_current_session(session_id);
-    let options = BTreeMap::from([
+    let options = crate::value::DictMap::from_iter([
         (
             "provider".to_string(),
             VmValue::String(std::sync::Arc::from("mock".to_string())),
@@ -1076,7 +1072,7 @@ fn explicit_thinking_wins_over_session_pinned_reasoning_policy() {
     let opts = extract_llm_options(&[
         VmValue::String(std::sync::Arc::from("hello".to_string())),
         VmValue::Nil,
-        VmValue::Dict(std::sync::Arc::new(options)),
+        VmValue::dict(options),
     ])
     .expect("explicit thinking");
 
@@ -1092,7 +1088,7 @@ fn standalone_reasoning_effort_accepts_none_and_xhigh_when_supported() {
         ("none", crate::llm::api::ReasoningEffort::None),
         ("xhigh", crate::llm::api::ReasoningEffort::XHigh),
     ] {
-        let options = BTreeMap::from([
+        let options = crate::value::DictMap::from_iter([
             (
                 "provider".to_string(),
                 VmValue::String(std::sync::Arc::from("mock".to_string())),
@@ -1110,7 +1106,7 @@ fn standalone_reasoning_effort_accepts_none_and_xhigh_when_supported() {
         let opts = extract_llm_options(&[
             VmValue::String(std::sync::Arc::from("hello".to_string())),
             VmValue::Nil,
-            VmValue::Dict(std::sync::Arc::new(options)),
+            VmValue::dict(options),
         ])
         .expect("reasoning_effort");
 
@@ -1131,7 +1127,7 @@ fn standalone_reasoning_effort_rejects_cerebras_gpt_oss_unsupported_levels() {
         ),
         (
             "thinking",
-            VmValue::Dict(std::sync::Arc::new(BTreeMap::from([
+            VmValue::dict(crate::value::DictMap::from_iter([
                 (
                     "mode".to_string(),
                     VmValue::String(std::sync::Arc::from("effort".to_string())),
@@ -1140,10 +1136,10 @@ fn standalone_reasoning_effort_rejects_cerebras_gpt_oss_unsupported_levels() {
                     "level".to_string(),
                     VmValue::String(std::sync::Arc::from("minimal".to_string())),
                 ),
-            ]))),
+            ])),
         ),
     ] {
-        let options = BTreeMap::from([
+        let options = crate::value::DictMap::from_iter([
             (
                 "provider".to_string(),
                 VmValue::String(std::sync::Arc::from("cerebras".to_string())),
@@ -1170,7 +1166,7 @@ fn standalone_reasoning_effort_rejects_cerebras_gpt_oss_unsupported_levels() {
 
 #[test]
 fn standalone_reasoning_effort_none_disables_thinking_without_effort_capability() {
-    let options = BTreeMap::from([
+    let options = crate::value::DictMap::from_iter([
         (
             "provider".to_string(),
             VmValue::String(std::sync::Arc::from("local".to_string())),
@@ -1188,7 +1184,7 @@ fn standalone_reasoning_effort_none_disables_thinking_without_effort_capability(
     let opts = extract_llm_options(&[
         VmValue::String(std::sync::Arc::from("hello".to_string())),
         VmValue::Nil,
-        VmValue::Dict(std::sync::Arc::new(options)),
+        VmValue::dict(options),
     ])
     .expect("reasoning_effort none should be universally accepted");
 
@@ -1233,7 +1229,7 @@ thinking_modes = ["effort"]
 
 #[test]
 fn image_content_sets_vision_and_requires_capability() {
-    let image_block = VmValue::Dict(std::sync::Arc::new(BTreeMap::from([
+    let image_block = VmValue::dict(crate::value::DictMap::from_iter([
         (
             "type".to_string(),
             VmValue::String(std::sync::Arc::from("image")),
@@ -1246,8 +1242,8 @@ fn image_content_sets_vision_and_requires_capability() {
             "media_type".to_string(),
             VmValue::String(std::sync::Arc::from("image/png")),
         ),
-    ])));
-    let message = VmValue::Dict(std::sync::Arc::new(BTreeMap::from([
+    ]));
+    let message = VmValue::dict(crate::value::DictMap::from_iter([
         (
             "role".to_string(),
             VmValue::String(std::sync::Arc::from("user")),
@@ -1256,8 +1252,8 @@ fn image_content_sets_vision_and_requires_capability() {
             "content".to_string(),
             VmValue::List(std::sync::Arc::new(vec![image_block])),
         ),
-    ])));
-    let options = VmValue::Dict(std::sync::Arc::new(BTreeMap::from([
+    ]));
+    let options = VmValue::dict(crate::value::DictMap::from_iter([
         (
             "provider".to_string(),
             VmValue::String(std::sync::Arc::from("mock")),
@@ -1270,7 +1266,7 @@ fn image_content_sets_vision_and_requires_capability() {
             "messages".to_string(),
             VmValue::List(std::sync::Arc::new(vec![message.clone()])),
         ),
-    ])));
+    ]));
     let opts = extract_llm_options(&[
         VmValue::String(std::sync::Arc::from("")),
         VmValue::Nil,
@@ -1279,7 +1275,7 @@ fn image_content_sets_vision_and_requires_capability() {
     .unwrap();
     assert!(opts.vision);
 
-    let bad_options = VmValue::Dict(std::sync::Arc::new(BTreeMap::from([
+    let bad_options = VmValue::dict(crate::value::DictMap::from_iter([
         (
             "provider".to_string(),
             VmValue::String(std::sync::Arc::from("mock")),
@@ -1292,7 +1288,7 @@ fn image_content_sets_vision_and_requires_capability() {
             "messages".to_string(),
             VmValue::List(std::sync::Arc::new(vec![message])),
         ),
-    ])));
+    ]));
     let err = extract_llm_options(&[
         VmValue::String(std::sync::Arc::from("")),
         VmValue::Nil,
@@ -1302,7 +1298,7 @@ fn image_content_sets_vision_and_requires_capability() {
     .expect("non-vision model should reject image content");
     assert!(err.to_string().contains("option `vision` is not supported"));
 
-    let url_image = VmValue::Dict(std::sync::Arc::new(BTreeMap::from([
+    let url_image = VmValue::dict(crate::value::DictMap::from_iter([
         (
             "type".to_string(),
             VmValue::String(std::sync::Arc::from("image")),
@@ -1315,8 +1311,8 @@ fn image_content_sets_vision_and_requires_capability() {
             "media_type".to_string(),
             VmValue::String(std::sync::Arc::from("image/png")),
         ),
-    ])));
-    let url_message = VmValue::Dict(std::sync::Arc::new(BTreeMap::from([
+    ]));
+    let url_message = VmValue::dict(crate::value::DictMap::from_iter([
         (
             "role".to_string(),
             VmValue::String(std::sync::Arc::from("user")),
@@ -1325,8 +1321,8 @@ fn image_content_sets_vision_and_requires_capability() {
             "content".to_string(),
             VmValue::List(std::sync::Arc::new(vec![url_image])),
         ),
-    ])));
-    let ollama_options = VmValue::Dict(std::sync::Arc::new(BTreeMap::from([
+    ]));
+    let ollama_options = VmValue::dict(crate::value::DictMap::from_iter([
         (
             "provider".to_string(),
             VmValue::String(std::sync::Arc::from("ollama")),
@@ -1339,7 +1335,7 @@ fn image_content_sets_vision_and_requires_capability() {
             "messages".to_string(),
             VmValue::List(std::sync::Arc::new(vec![url_message])),
         ),
-    ])));
+    ]));
     let err = extract_llm_options(&[
         VmValue::String(std::sync::Arc::from("")),
         VmValue::Nil,
@@ -1352,7 +1348,7 @@ fn image_content_sets_vision_and_requires_capability() {
 
 #[test]
 fn pdf_and_audio_content_require_capabilities() {
-    let pdf_block = VmValue::Dict(std::sync::Arc::new(BTreeMap::from([
+    let pdf_block = VmValue::dict(crate::value::DictMap::from_iter([
         (
             "type".to_string(),
             VmValue::String(std::sync::Arc::from("pdf")),
@@ -1361,8 +1357,8 @@ fn pdf_and_audio_content_require_capabilities() {
             "file_id".to_string(),
             VmValue::String(std::sync::Arc::from("file_123")),
         ),
-    ])));
-    let audio_block = VmValue::Dict(std::sync::Arc::new(BTreeMap::from([
+    ]));
+    let audio_block = VmValue::dict(crate::value::DictMap::from_iter([
         (
             "type".to_string(),
             VmValue::String(std::sync::Arc::from("audio")),
@@ -1375,8 +1371,8 @@ fn pdf_and_audio_content_require_capabilities() {
             "media_type".to_string(),
             VmValue::String(std::sync::Arc::from("audio/wav")),
         ),
-    ])));
-    let message = VmValue::Dict(std::sync::Arc::new(BTreeMap::from([
+    ]));
+    let message = VmValue::dict(crate::value::DictMap::from_iter([
         (
             "role".to_string(),
             VmValue::String(std::sync::Arc::from("user")),
@@ -1385,8 +1381,8 @@ fn pdf_and_audio_content_require_capabilities() {
             "content".to_string(),
             VmValue::List(std::sync::Arc::new(vec![pdf_block, audio_block])),
         ),
-    ])));
-    let options = VmValue::Dict(std::sync::Arc::new(BTreeMap::from([
+    ]));
+    let options = VmValue::dict(crate::value::DictMap::from_iter([
         (
             "provider".to_string(),
             VmValue::String(std::sync::Arc::from("mock")),
@@ -1399,7 +1395,7 @@ fn pdf_and_audio_content_require_capabilities() {
             "messages".to_string(),
             VmValue::List(std::sync::Arc::new(vec![message.clone()])),
         ),
-    ])));
+    ]));
     let opts = extract_llm_options(&[
         VmValue::String(std::sync::Arc::from("")),
         VmValue::Nil,
@@ -1410,7 +1406,7 @@ fn pdf_and_audio_content_require_capabilities() {
         .anthropic_beta_features
         .contains(&crate::stdlib::files::ANTHROPIC_FILES_API_BETA.to_string()));
 
-    let bad_options = VmValue::Dict(std::sync::Arc::new(BTreeMap::from([
+    let bad_options = VmValue::dict(crate::value::DictMap::from_iter([
         (
             "provider".to_string(),
             VmValue::String(std::sync::Arc::from("mock")),
@@ -1423,7 +1419,7 @@ fn pdf_and_audio_content_require_capabilities() {
             "messages".to_string(),
             VmValue::List(std::sync::Arc::new(vec![message])),
         ),
-    ])));
+    ]));
     let err = extract_llm_options(&[
         VmValue::String(std::sync::Arc::from("")),
         VmValue::Nil,
@@ -1444,7 +1440,7 @@ video_supported = true
 "#,
     )
     .expect("capability override");
-    let video_block = VmValue::Dict(std::sync::Arc::new(BTreeMap::from([
+    let video_block = VmValue::dict(crate::value::DictMap::from_iter([
         (
             "type".to_string(),
             VmValue::String(std::sync::Arc::from("video")),
@@ -1457,8 +1453,8 @@ video_supported = true
             "media_type".to_string(),
             VmValue::String(std::sync::Arc::from("video/mp4")),
         ),
-    ])));
-    let message = VmValue::Dict(std::sync::Arc::new(BTreeMap::from([
+    ]));
+    let message = VmValue::dict(crate::value::DictMap::from_iter([
         (
             "role".to_string(),
             VmValue::String(std::sync::Arc::from("user")),
@@ -1467,8 +1463,8 @@ video_supported = true
             "content".to_string(),
             VmValue::List(std::sync::Arc::new(vec![video_block])),
         ),
-    ])));
-    let options = VmValue::Dict(std::sync::Arc::new(BTreeMap::from([
+    ]));
+    let options = VmValue::dict(crate::value::DictMap::from_iter([
         (
             "provider".to_string(),
             VmValue::String(std::sync::Arc::from("local")),
@@ -1481,7 +1477,7 @@ video_supported = true
             "messages".to_string(),
             VmValue::List(std::sync::Arc::new(vec![message.clone()])),
         ),
-    ])));
+    ]));
     extract_llm_options(&[
         VmValue::String(std::sync::Arc::from("")),
         VmValue::Nil,
@@ -1490,7 +1486,7 @@ video_supported = true
     .expect("video-capable route should accept video content");
     crate::llm::capabilities::clear_user_overrides();
 
-    let bad_options = VmValue::Dict(std::sync::Arc::new(BTreeMap::from([
+    let bad_options = VmValue::dict(crate::value::DictMap::from_iter([
         (
             "provider".to_string(),
             VmValue::String(std::sync::Arc::from("mock")),
@@ -1503,7 +1499,7 @@ video_supported = true
             "messages".to_string(),
             VmValue::List(std::sync::Arc::new(vec![message])),
         ),
-    ])));
+    ]));
     let err = extract_llm_options(&[
         VmValue::String(std::sync::Arc::from("")),
         VmValue::Nil,

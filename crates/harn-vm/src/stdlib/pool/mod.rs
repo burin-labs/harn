@@ -168,7 +168,7 @@ struct PoolEntry {
     /// Optional per-create user-supplied config (queue strategy, priority
     /// fn, backpressure). Queue strategy is evaluated by this module;
     /// later pool tickets wire the other config knobs.
-    config: BTreeMap<String, VmValue>,
+    config: crate::value::DictMap,
     /// Durability scope. `Session` is in-memory only.
     /// `Pipeline` writes a JSONL append-log under `.harn/pools/` so the
     /// pool's pending queue + in-flight task metadata survives process
@@ -587,12 +587,9 @@ fn task_handle_from_value(value: &VmValue, builtin: &str) -> Result<(String, Str
     Ok((pool_id, task_id))
 }
 
-fn parse_options(
-    value: Option<&VmValue>,
-    builtin: &str,
-) -> Result<BTreeMap<String, VmValue>, VmError> {
+fn parse_options(value: Option<&VmValue>, builtin: &str) -> Result<crate::value::DictMap, VmError> {
     match value {
-        None | Some(VmValue::Nil) => Ok(BTreeMap::new()),
+        None | Some(VmValue::Nil) => Ok(crate::value::DictMap::new()),
         Some(VmValue::Dict(map)) => Ok((**map).clone()),
         Some(other) => Err(VmError::Runtime(format!(
             "{builtin}: options must be a dict (got {})",
@@ -601,7 +598,7 @@ fn parse_options(
     }
 }
 
-fn parse_max_concurrent(opts: &BTreeMap<String, VmValue>) -> Result<usize, VmError> {
+fn parse_max_concurrent(opts: &crate::value::DictMap) -> Result<usize, VmError> {
     match opts.get("max_concurrent") {
         None | Some(VmValue::Nil) => Ok(DEFAULT_MAX_CONCURRENT),
         Some(VmValue::Int(n)) => {
@@ -619,14 +616,14 @@ fn parse_max_concurrent(opts: &BTreeMap<String, VmValue>) -> Result<usize, VmErr
     }
 }
 
-fn parse_name(opts: &BTreeMap<String, VmValue>) -> Option<String> {
+fn parse_name(opts: &crate::value::DictMap) -> Option<String> {
     opts.get("name").and_then(|value| match value {
         VmValue::String(text) if !text.trim().is_empty() => Some(text.to_string()),
         _ => None,
     })
 }
 
-fn parse_scope(opts: &BTreeMap<String, VmValue>) -> Result<PoolScope, VmError> {
+fn parse_scope(opts: &crate::value::DictMap) -> Result<PoolScope, VmError> {
     match opts.get("scope") {
         None | Some(VmValue::Nil) => Ok(PoolScope::Session),
         Some(VmValue::String(text)) => PoolScope::parse(text),
@@ -637,7 +634,7 @@ fn parse_scope(opts: &BTreeMap<String, VmValue>) -> Result<PoolScope, VmError> {
     }
 }
 
-fn parse_scope_id_override(opts: &BTreeMap<String, VmValue>) -> Option<String> {
+fn parse_scope_id_override(opts: &crate::value::DictMap) -> Option<String> {
     for key in ["scope_id", "pipeline_id", "run_id"] {
         if let Some(VmValue::String(text)) = opts.get(key) {
             if !text.trim().is_empty() {
@@ -648,7 +645,7 @@ fn parse_scope_id_override(opts: &BTreeMap<String, VmValue>) -> Option<String> {
     None
 }
 
-fn parse_stale_after_ms(opts: &BTreeMap<String, VmValue>) -> Result<i64, VmError> {
+fn parse_stale_after_ms(opts: &crate::value::DictMap) -> Result<i64, VmError> {
     match opts.get("stale_after_ms") {
         None | Some(VmValue::Nil) => Ok(DEFAULT_STALE_AFTER_MS),
         Some(VmValue::Int(n)) if *n >= 0 => Ok(*n),
@@ -660,7 +657,7 @@ fn parse_stale_after_ms(opts: &BTreeMap<String, VmValue>) -> Result<i64, VmError
     }
 }
 
-fn parse_idempotency_key(opts: &BTreeMap<String, VmValue>) -> Result<Option<String>, VmError> {
+fn parse_idempotency_key(opts: &crate::value::DictMap) -> Result<Option<String>, VmError> {
     match opts.get("idempotency_key").or_else(|| opts.get("id")) {
         None | Some(VmValue::Nil) => Ok(None),
         Some(VmValue::String(text)) if !text.trim().is_empty() => Ok(Some(text.to_string())),
@@ -680,7 +677,7 @@ fn parse_idempotency_key(opts: &BTreeMap<String, VmValue>) -> Result<Option<Stri
 /// channel scope contract when no pipeline id is in scope.
 fn resolve_pipeline_scope_id(
     ctx: Option<&AsyncBuiltinCtx>,
-    opts: &BTreeMap<String, VmValue>,
+    opts: &crate::value::DictMap,
 ) -> Result<String, VmError> {
     if let Some(explicit) = parse_scope_id_override(opts) {
         return Ok(explicit);
@@ -703,7 +700,7 @@ fn resolve_pipeline_scope_id(
     ))
 }
 
-fn parse_priority(opts: &BTreeMap<String, VmValue>) -> Result<i64, VmError> {
+fn parse_priority(opts: &crate::value::DictMap) -> Result<i64, VmError> {
     match opts.get("priority") {
         None | Some(VmValue::Nil) => Ok(0),
         Some(VmValue::Int(n)) => Ok(*n),
@@ -714,7 +711,7 @@ fn parse_priority(opts: &BTreeMap<String, VmValue>) -> Result<i64, VmError> {
     }
 }
 
-fn parse_key(opts: &BTreeMap<String, VmValue>) -> Result<Option<String>, VmError> {
+fn parse_key(opts: &crate::value::DictMap) -> Result<Option<String>, VmError> {
     match opts.get("key") {
         None | Some(VmValue::Nil) => Ok(None),
         Some(VmValue::String(text)) => Ok(Some(text.to_string())),
@@ -726,7 +723,7 @@ fn parse_key(opts: &BTreeMap<String, VmValue>) -> Result<Option<String>, VmError
 }
 
 fn parse_submit_key(
-    opts: &BTreeMap<String, VmValue>,
+    opts: &crate::value::DictMap,
     queue_strategy: &QueueStrategy,
 ) -> Result<Option<String>, VmError> {
     if let Some(field) = queue_strategy.key_field() {
@@ -744,7 +741,7 @@ fn parse_submit_key(
     parse_key(opts)
 }
 
-fn parse_queue_strategy(opts: &BTreeMap<String, VmValue>) -> Result<QueueStrategy, VmError> {
+fn parse_queue_strategy(opts: &crate::value::DictMap) -> Result<QueueStrategy, VmError> {
     let Some(value) = opts.get("queue") else {
         return Ok(QueueStrategy::Priority);
     };
@@ -794,7 +791,7 @@ fn parse_queue_strategy_name(name: &str) -> Result<QueueStrategy, VmError> {
     }
 }
 
-fn parse_backpressure(opts: &BTreeMap<String, VmValue>) -> Result<BackpressureStrategy, VmError> {
+fn parse_backpressure(opts: &crate::value::DictMap) -> Result<BackpressureStrategy, VmError> {
     let Some(value) = opts.get("backpressure") else {
         return Ok(BackpressureStrategy::Unbounded);
     };
@@ -901,7 +898,7 @@ fn pool_snapshot_value(pool: &PoolEntry) -> VmValue {
             _ => {}
         }
     }
-    let mut snapshot = BTreeMap::new();
+    let mut snapshot = crate::value::DictMap::new();
     snapshot.put_str("_type", POOL_TYPE);
     snapshot.put_str("id", pool.id.as_str());
     snapshot.put_str("name", pool.name.as_str());
@@ -939,16 +936,13 @@ fn pool_snapshot_value(pool: &PoolEntry) -> VmValue {
         VmValue::Int(pool.stale_after_ms),
     );
     if !pool.config.is_empty() {
-        snapshot.insert(
-            "config".to_string(),
-            VmValue::Dict(std::sync::Arc::new(pool.config.clone())),
-        );
+        snapshot.insert("config".to_string(), VmValue::dict(pool.config.clone()));
     }
-    VmValue::Dict(std::sync::Arc::new(snapshot))
+    VmValue::dict(snapshot)
 }
 
 fn backpressure_snapshot_value(backpressure: &BackpressureStrategy) -> VmValue {
-    let mut value = BTreeMap::new();
+    let mut value = crate::value::DictMap::new();
     value.put_str("_type", "backpressure");
     value.put_str("kind", backpressure.name());
     if let Some(max_depth) = backpressure.max_depth() {
@@ -957,7 +951,7 @@ fn backpressure_snapshot_value(backpressure: &BackpressureStrategy) -> VmValue {
     if let BackpressureStrategy::Queue { on_full, .. } = backpressure {
         value.put_str("on_full", on_full.as_str());
     }
-    VmValue::Dict(std::sync::Arc::new(value))
+    VmValue::dict(value)
 }
 
 fn task_sort_key(task: &VmValue) -> String {
@@ -971,7 +965,7 @@ fn task_sort_key(task: &VmValue) -> String {
 }
 
 fn task_snapshot_value(task: &TaskState) -> VmValue {
-    let mut entry = BTreeMap::new();
+    let mut entry = crate::value::DictMap::new();
     entry.put_str("_type", POOL_TASK_TYPE);
     entry.put_str("id", task.id.as_str());
     entry.put_str("pool_id", task.pool_id.as_str());
@@ -988,11 +982,11 @@ fn task_snapshot_value(task: &TaskState) -> VmValue {
     entry.put_opt_str("error", task.error.as_deref());
     entry.put_opt_str("rejection_reason", task.rejection_reason.as_deref());
     entry.put_opt_str("rejection_policy", task.rejection_policy.as_deref());
-    VmValue::Dict(std::sync::Arc::new(entry))
+    VmValue::dict(entry)
 }
 
 fn task_handle_value(task: &TaskState) -> VmValue {
-    let mut handle = BTreeMap::new();
+    let mut handle = crate::value::DictMap::new();
     handle.put_str("_type", POOL_TASK_TYPE);
     handle.put_str("id", task.id.as_str());
     handle.put_str("pool_id", task.pool_id.as_str());
@@ -1003,11 +997,11 @@ fn task_handle_value(task: &TaskState) -> VmValue {
     handle.put_opt_str("error", task.error.as_deref());
     handle.put_opt_str("rejection_reason", task.rejection_reason.as_deref());
     handle.put_opt_str("rejection_policy", task.rejection_policy.as_deref());
-    VmValue::Dict(std::sync::Arc::new(handle))
+    VmValue::dict(handle)
 }
 
-fn ordered_pool_config(opts: &BTreeMap<String, VmValue>) -> BTreeMap<String, VmValue> {
-    let mut config = BTreeMap::new();
+fn ordered_pool_config(opts: &crate::value::DictMap) -> crate::value::DictMap {
+    let mut config = crate::value::DictMap::new();
     for key in ["queue", "backpressure", "priority"] {
         if let Some(value) = opts.get(key) {
             config.insert(key.to_string(), value.clone());
@@ -1092,7 +1086,7 @@ async fn pool_create_sync(
         round_robin_after: None,
         active: HashMap::new(),
         reserved_slots: 0,
-        tasks: BTreeMap::new(),
+        tasks: std::collections::BTreeMap::new(),
         space_waiters: Vec::new(),
         config: ordered_pool_config(&opts),
         scope,
@@ -1145,7 +1139,7 @@ fn pipeline_pool_file_path(dir_override: Option<&str>, pipeline_id: &str, name: 
     ))
 }
 
-fn parse_durable_dir(opts: &BTreeMap<String, VmValue>) -> Result<Option<String>, VmError> {
+fn parse_durable_dir(opts: &crate::value::DictMap) -> Result<Option<String>, VmError> {
     match opts.get("dir") {
         None | Some(VmValue::Nil) => Ok(None),
         Some(VmValue::String(text)) if !text.trim().is_empty() => Ok(Some(text.to_string())),
@@ -1829,7 +1823,8 @@ fn rehydrate_persisted_state(
 ) -> Result<(), VmError> {
     let now = now_ms_for_pool();
     let mut idempotency_index: HashMap<String, String> = HashMap::new();
-    let mut tasks: BTreeMap<String, Arc<parking_lot::Mutex<TaskState>>> = BTreeMap::new();
+    let mut tasks: BTreeMap<String, Arc<parking_lot::Mutex<TaskState>>> =
+        std::collections::BTreeMap::new();
     let mut rehydrated_persisted: Vec<PersistedTask> = Vec::new();
 
     {
@@ -2050,7 +2045,7 @@ fn pool_drop_audit(
 
 async fn emit_pool_drop(audit: PoolDropAudit) {
     let topic = Topic::new(POOL_AUDIT_TOPIC).expect("static pool audit topic is valid");
-    let mut headers = BTreeMap::new();
+    let mut headers = std::collections::BTreeMap::new();
     headers.insert("schema".to_string(), "harn.pool_drop.v1".to_string());
     headers.insert("policy".to_string(), audit.policy.clone());
     let payload = json!({
@@ -2087,7 +2082,7 @@ fn pool_submit_receipt(pool: &PoolEntry, task: &TaskState) -> PoolSubmitReceipt 
 
 async fn emit_pool_submit_receipt(receipt: PoolSubmitReceipt) {
     let topic = Topic::new(POOL_AUDIT_TOPIC).expect("static pool audit topic is valid");
-    let mut headers = BTreeMap::new();
+    let mut headers = std::collections::BTreeMap::new();
     headers.insert("schema".to_string(), "harn.pool_submit.v1".to_string());
     let payload = json!({
         "pool_id": receipt.pool_id,
@@ -2132,7 +2127,7 @@ async fn emit_pool_dequeue_receipt(
     receipt: PoolDequeueReceipt,
 ) {
     let topic = Topic::new(POOL_AUDIT_TOPIC).expect("static pool audit topic is valid");
-    let mut headers = BTreeMap::new();
+    let mut headers = std::collections::BTreeMap::new();
     headers.insert("schema".to_string(), "harn.pool_dequeue.v1".to_string());
     let payload = json!({
         "pool_id": receipt.pool_id,
@@ -2238,7 +2233,7 @@ fn spawn_task(pool: Arc<parking_lot::Mutex<PoolEntry>>, pending: PendingTask) {
     let span_links: Vec<crate::tracing::SpanLink> = submit_link
         .into_iter()
         .map(|link| {
-            link.with_attributes(BTreeMap::from([(
+            link.with_attributes(std::collections::BTreeMap::from([(
                 "harn.link.kind".to_string(),
                 "pool_submit".to_string(),
             )]))

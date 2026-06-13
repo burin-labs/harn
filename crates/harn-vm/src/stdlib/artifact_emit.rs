@@ -4,8 +4,6 @@
 //! transcript event when the session is known locally, and publishes the same
 //! payload on the live agent event stream for ACP/A2A surfaces.
 
-use std::collections::BTreeMap;
-
 use serde_json::{json, Value as JsonValue};
 
 use crate::agent_events::AgentEvent;
@@ -151,7 +149,7 @@ fn err(message: impl Into<String>) -> VmError {
 
 fn parse_options(value: Option<&VmValue>) -> Result<ArtifactEmitOptions, VmError> {
     let opts = match value {
-        None | Some(VmValue::Nil) => BTreeMap::new(),
+        None | Some(VmValue::Nil) => crate::value::DictMap::new(),
         Some(VmValue::Dict(map)) => map.as_ref().clone(),
         Some(other) => {
             return Err(err(format!(
@@ -210,7 +208,7 @@ fn parse_options(value: Option<&VmValue>) -> Result<ArtifactEmitOptions, VmError
     })
 }
 
-fn opt_string(opts: &BTreeMap<String, VmValue>, key: &str) -> Result<Option<String>, VmError> {
+fn opt_string(opts: &crate::value::DictMap, key: &str) -> Result<Option<String>, VmError> {
     match opts.get(key) {
         None | Some(VmValue::Nil) => Ok(None),
         Some(VmValue::String(value)) => {
@@ -231,7 +229,7 @@ fn opt_string(opts: &BTreeMap<String, VmValue>, key: &str) -> Result<Option<Stri
     }
 }
 
-fn opt_int(opts: &BTreeMap<String, VmValue>, key: &str) -> Result<Option<i64>, VmError> {
+fn opt_int(opts: &crate::value::DictMap, key: &str) -> Result<Option<i64>, VmError> {
     match opts.get(key) {
         None | Some(VmValue::Nil) => Ok(None),
         Some(value) => value
@@ -241,7 +239,7 @@ fn opt_int(opts: &BTreeMap<String, VmValue>, key: &str) -> Result<Option<i64>, V
     }
 }
 
-fn opt_object(opts: &BTreeMap<String, VmValue>, key: &str) -> Result<Option<JsonValue>, VmError> {
+fn opt_object(opts: &crate::value::DictMap, key: &str) -> Result<Option<JsonValue>, VmError> {
     match opts.get(key) {
         None | Some(VmValue::Nil) => Ok(None),
         Some(VmValue::Dict(_)) => {

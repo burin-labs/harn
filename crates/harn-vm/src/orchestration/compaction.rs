@@ -1,7 +1,6 @@
 //! Auto-compaction — transcript size management strategies.
 
 use crate::value::VmDictExt;
-use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
@@ -195,7 +194,7 @@ pub fn compaction_policy_option_keys() -> &'static [&'static str] {
 }
 
 pub fn compaction_policy_to_vm_value(policy: &CompactionPolicy) -> VmValue {
-    let mut map = BTreeMap::new();
+    let mut map = crate::value::DictMap::new();
     if let Some(instructions) = policy.instructions.as_ref() {
         map.put_str("instructions", instructions.clone());
     }
@@ -234,11 +233,11 @@ pub fn compaction_policy_to_vm_value(policy: &CompactionPolicy) -> VmValue {
     if let Some(author) = policy.author.as_ref() {
         map.put_str("author", author.clone());
     }
-    VmValue::Dict(std::sync::Arc::new(map))
+    VmValue::dict(map)
 }
 
 pub fn parse_compaction_policy_options(
-    options: Option<&BTreeMap<String, VmValue>>,
+    options: Option<&crate::value::DictMap>,
     builtin: &str,
 ) -> Result<CompactionPolicy, VmError> {
     let mut policy = options
@@ -286,7 +285,7 @@ fn parse_compaction_policy_value(
 
 fn apply_compaction_policy_fields(
     policy: &mut CompactionPolicy,
-    map: &BTreeMap<String, VmValue>,
+    map: &crate::value::DictMap,
     builtin: &str,
 ) -> Result<(), VmError> {
     if let Some(value) = optional_policy_string(map, "instructions", builtin)? {
@@ -314,7 +313,7 @@ fn apply_compaction_policy_fields(
 }
 
 fn optional_policy_string(
-    map: &BTreeMap<String, VmValue>,
+    map: &crate::value::DictMap,
     key: &str,
     builtin: &str,
 ) -> Result<Option<String>, VmError> {
@@ -336,7 +335,7 @@ fn optional_policy_string(
 }
 
 fn optional_policy_bool(
-    map: &BTreeMap<String, VmValue>,
+    map: &crate::value::DictMap,
     key: &str,
     builtin: &str,
 ) -> Result<Option<bool>, VmError> {
@@ -850,7 +849,7 @@ fn render_llm_compaction_prompt(
     if policy.has_prompt_directives() && policy.extend_default_instructions == Some(false) {
         return render_replacement_compaction_prompt(policy, formatted, archived_count);
     }
-    let mut bindings = BTreeMap::new();
+    let mut bindings = crate::value::DictMap::new();
     bindings.put_str("formatted_messages", formatted);
     bindings.insert(
         "archived_count".to_string(),
@@ -877,7 +876,7 @@ fn render_replacement_compaction_prompt(
     archived_count: usize,
 ) -> Result<String, VmError> {
     let directives = policy.prompt_directives().unwrap_or_default();
-    let mut bindings = BTreeMap::new();
+    let mut bindings = crate::value::DictMap::new();
     bindings.put_str("directives", directives);
     bindings.put_str("formatted_messages", formatted);
     bindings.insert(

@@ -157,9 +157,7 @@ pub(crate) fn json_schema_to_type_expr(
     }
 }
 
-pub(super) fn vm_build_json_schema(
-    params: Option<&std::collections::BTreeMap<String, VmValue>>,
-) -> serde_json::Value {
+pub(super) fn vm_build_json_schema(params: Option<&crate::value::DictMap>) -> serde_json::Value {
     let mut properties = serde_json::Map::new();
     let mut required = Vec::new();
 

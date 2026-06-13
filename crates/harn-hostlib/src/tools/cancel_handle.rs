@@ -12,7 +12,6 @@
 
 use harn_vm::VmDictExt;
 use std::collections::BTreeMap;
-use std::sync::Arc;
 use std::time::Duration;
 
 use harn_vm::VmValue;
@@ -43,5 +42,5 @@ pub(crate) fn handle(args: &[VmValue]) -> Result<VmValue, HostlibError> {
     if let Some(result) = outcome.result {
         out.insert("result".to_string(), result);
     }
-    Ok(VmValue::Dict(Arc::new(out)))
+    Ok(VmValue::dict(out))
 }

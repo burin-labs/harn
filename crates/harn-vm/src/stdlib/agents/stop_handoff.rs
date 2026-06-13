@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, HashSet};
+use std::collections::HashSet;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 
@@ -136,7 +136,7 @@ pub(super) fn vm_value_i64(value: &VmValue) -> Option<i64> {
     }
 }
 
-pub(super) fn vm_options_token_budget(options: &BTreeMap<String, VmValue>) -> Option<i64> {
+pub(super) fn vm_options_token_budget(options: &crate::value::DictMap) -> Option<i64> {
     options
         .get("token_budget")
         .and_then(vm_value_i64)

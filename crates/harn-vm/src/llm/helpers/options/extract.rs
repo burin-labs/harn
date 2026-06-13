@@ -666,7 +666,7 @@ pub(crate) fn extract_llm_options(
 }
 
 pub(crate) fn opt_str_list(
-    options: &Option<BTreeMap<String, VmValue>>,
+    options: &Option<crate::value::DictMap>,
     key: &str,
 ) -> Option<Vec<String>> {
     let val = options.as_ref()?.get(key)?;

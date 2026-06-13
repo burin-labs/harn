@@ -1126,7 +1126,7 @@ fn next_sequence(
 }
 
 fn required_string(
-    dict: &BTreeMap<String, VmValue>,
+    dict: &crate::value::DictMap,
     key: &str,
     builtin: &str,
 ) -> Result<String, VmError> {
@@ -1138,7 +1138,7 @@ fn required_string(
         .ok_or_else(|| VmError::Runtime(format!("{builtin}: missing string field `{key}`")))
 }
 
-fn optional_string(dict: &BTreeMap<String, VmValue>, key: &str) -> Option<String> {
+fn optional_string(dict: &crate::value::DictMap, key: &str) -> Option<String> {
     dict.get(key).and_then(|value| match value {
         VmValue::String(text) if !text.is_empty() => Some(text.to_string()),
         _ => None,

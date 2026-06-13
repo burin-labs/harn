@@ -7,7 +7,6 @@ use crate::orchestration::{
     VerificationContract, WorkflowGraph, WorkflowNode,
 };
 use crate::tracing::{set_tracing_enabled, span_end, span_start, SpanKind};
-use std::collections::BTreeMap;
 
 #[test]
 fn load_run_tree_recurses_into_child_runs() {
@@ -71,7 +70,7 @@ fn load_run_tree_recovers_child_runs_from_stage_worker_metadata() {
         stages: vec![RunStageRecord {
             id: "stage_1".to_string(),
             node_id: "delegate".to_string(),
-            metadata: BTreeMap::from([(
+            metadata: std::collections::BTreeMap::from_iter([(
                 "worker".to_string(),
                 serde_json::json!({
                     "id": "worker_1",
@@ -108,7 +107,7 @@ fn deterministic_replay_preserves_worker_child_run_metadata() {
         status: "completed".to_string(),
         outcome: "subagent_completed".to_string(),
         branch: Some("success".to_string()),
-        metadata: BTreeMap::from([(
+        metadata: std::collections::BTreeMap::from_iter([(
             "worker".to_string(),
             serde_json::json!({
                 "id": "worker_1",
@@ -180,9 +179,7 @@ async fn verify_stage_reads_transcript_from_session_store() {
             output_kinds: vec!["verification_result".to_string()],
             ..Default::default()
         },
-        raw_model_policy: Some(crate::value::VmValue::Dict(std::sync::Arc::new(
-            raw_model_policy,
-        ))),
+        raw_model_policy: Some(crate::value::VmValue::dict(raw_model_policy)),
         ..Default::default()
     };
 
@@ -209,7 +206,7 @@ async fn verify_stage_reads_transcript_from_session_store() {
 fn workflow_verification_contracts_collect_exact_requirements() {
     let graph = WorkflowGraph {
         entry: "act".to_string(),
-        nodes: BTreeMap::from([(
+        nodes: std::collections::BTreeMap::from_iter([(
             "verify".to_string(),
             WorkflowNode {
                 id: Some("verify".to_string()),
@@ -299,7 +296,7 @@ fn stage_verification_contracts_can_scope_to_local_contract_only() {
             "required_paths": ["src/current.ts"],
             "notes": ["Only the current batch path is in scope."],
         })),
-        metadata: BTreeMap::from([
+        metadata: std::collections::BTreeMap::from_iter([
             (
                 crate::orchestration::WORKFLOW_VERIFICATION_SCOPE_METADATA_KEY.to_string(),
                 serde_json::json!("local_only"),
@@ -334,7 +331,7 @@ fn reset_drains_interned_workflow_run_state() {
     crate::reset_thread_local_state();
     let graph = WorkflowGraph {
         entry: "act".to_string(),
-        nodes: BTreeMap::from([(
+        nodes: std::collections::BTreeMap::from_iter([(
             "act".to_string(),
             WorkflowNode {
                 id: Some("act".to_string()),
@@ -348,7 +345,7 @@ fn reset_drains_interned_workflow_run_state() {
         "leak-probe".to_string(),
         graph,
         Vec::new(),
-        &BTreeMap::new(),
+        &crate::value::DictMap::new(),
     )
     .expect("prepare workflow state");
     super::state::insert_workflow_state(state);

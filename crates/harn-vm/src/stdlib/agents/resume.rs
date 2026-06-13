@@ -111,7 +111,7 @@ pub(super) fn parse_resume_options(args: &[VmValue]) -> WorkerResumeOptions {
 }
 
 pub(super) fn summary_message(summary: &str) -> VmValue {
-    VmValue::Dict(std::sync::Arc::new(BTreeMap::from([
+    VmValue::dict(BTreeMap::from([
         (
             "role".to_string(),
             VmValue::String(std::sync::Arc::from("user".to_string())),
@@ -120,7 +120,7 @@ pub(super) fn summary_message(summary: &str) -> VmValue {
             "content".to_string(),
             VmValue::String(std::sync::Arc::from(summary.to_string())),
         ),
-    ])))
+    ]))
 }
 
 pub(super) fn summary_only_resume_transcript(

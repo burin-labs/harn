@@ -811,14 +811,11 @@ fn probe_tool_registry() -> VmValue {
         vm_str("The marker value to echo."),
     );
     let mut params = BTreeMap::new();
-    params.insert(
-        "value".to_string(),
-        VmValue::Dict(std::sync::Arc::new(value_param)),
-    );
+    params.insert("value".to_string(), VmValue::dict(value_param));
     let tool = vm_dict(&[
         ("name", vm_str(TOOL_PROBE_TOOL_NAME)),
         ("description", vm_str("Echo the probe marker exactly.")),
-        ("parameters", VmValue::Dict(std::sync::Arc::new(params))),
+        ("parameters", VmValue::dict(params)),
     ]);
     vm_dict(&[("tools", VmValue::List(std::sync::Arc::new(vec![tool])))])
 }
@@ -832,7 +829,7 @@ fn vm_dict(pairs: &[(&str, VmValue)]) -> VmValue {
     for (key, value) in pairs {
         map.insert((*key).to_string(), value.clone());
     }
-    VmValue::Dict(std::sync::Arc::new(map))
+    VmValue::dict(map)
 }
 
 fn has_raw_model_tool_tag(content: &str) -> bool {

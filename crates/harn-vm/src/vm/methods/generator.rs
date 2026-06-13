@@ -14,7 +14,7 @@ impl crate::vm::Vm {
                     let mut dict = BTreeMap::new();
                     dict.insert("value".to_string(), VmValue::Nil);
                     dict.insert("done".to_string(), VmValue::Bool(true));
-                    Ok(VmValue::Dict(std::sync::Arc::new(dict)))
+                    Ok(VmValue::dict(dict))
                 } else {
                     let rx = gen.receiver.clone();
                     let mut guard = rx.lock().await;
@@ -23,7 +23,7 @@ impl crate::vm::Vm {
                             let mut dict = BTreeMap::new();
                             dict.insert("done".to_string(), VmValue::Bool(false));
                             dict.insert("value".to_string(), val);
-                            Ok(VmValue::Dict(std::sync::Arc::new(dict)))
+                            Ok(VmValue::dict(dict))
                         }
                         Some(Err(error)) => {
                             gen.mark_done();
@@ -34,7 +34,7 @@ impl crate::vm::Vm {
                             let mut dict = BTreeMap::new();
                             dict.insert("value".to_string(), VmValue::Nil);
                             dict.insert("done".to_string(), VmValue::Bool(true));
-                            Ok(VmValue::Dict(std::sync::Arc::new(dict)))
+                            Ok(VmValue::dict(dict))
                         }
                     }
                 }
@@ -56,7 +56,7 @@ impl crate::vm::Vm {
                     let mut dict = BTreeMap::new();
                     dict.insert("value".to_string(), VmValue::Nil);
                     dict.insert("done".to_string(), VmValue::Bool(true));
-                    Ok(VmValue::Dict(std::sync::Arc::new(dict)))
+                    Ok(VmValue::dict(dict))
                 } else {
                     let rx = stream.receiver.clone();
                     let mut guard = rx.lock().await;
@@ -65,7 +65,7 @@ impl crate::vm::Vm {
                             let mut dict = BTreeMap::new();
                             dict.insert("done".to_string(), VmValue::Bool(false));
                             dict.insert("value".to_string(), val);
-                            Ok(VmValue::Dict(std::sync::Arc::new(dict)))
+                            Ok(VmValue::dict(dict))
                         }
                         Some(Err(error)) => {
                             stream.mark_done();
@@ -76,7 +76,7 @@ impl crate::vm::Vm {
                             let mut dict = BTreeMap::new();
                             dict.insert("value".to_string(), VmValue::Nil);
                             dict.insert("done".to_string(), VmValue::Bool(true));
-                            Ok(VmValue::Dict(std::sync::Arc::new(dict)))
+                            Ok(VmValue::dict(dict))
                         }
                     }
                 }

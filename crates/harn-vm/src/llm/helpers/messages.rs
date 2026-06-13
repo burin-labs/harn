@@ -77,7 +77,7 @@ pub(crate) fn vm_message_value(role: &str, content: VmValue) -> VmValue {
     let mut msg = BTreeMap::new();
     msg.put_str("role", role);
     msg.insert("content".to_string(), content);
-    VmValue::Dict(std::sync::Arc::new(msg))
+    VmValue::dict(msg)
 }
 
 pub(crate) fn json_messages_to_vm(msg_list: &[serde_json::Value]) -> Vec<VmValue> {
@@ -113,7 +113,7 @@ pub(crate) fn json_messages_to_vm(msg_list: &[serde_json::Value]) -> Vec<VmValue
                             result.put_str("role", "tool_result");
                             result.put_str("tool_use_id", tool_use_id);
                             result.put_str("content", content);
-                            return Some(VmValue::Dict(std::sync::Arc::new(result)));
+                            return Some(VmValue::dict(result));
                         }
                     }
                 }

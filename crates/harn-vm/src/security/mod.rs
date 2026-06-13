@@ -725,7 +725,7 @@ fn vm_u8(value: &VmValue) -> Option<u8> {
     Some(raw.clamp(0, 100) as u8)
 }
 
-fn policy_from_dict(config: &BTreeMap<String, VmValue>) -> SecurityPolicy {
+fn policy_from_dict(config: &crate::value::DictMap) -> SecurityPolicy {
     let mut base = SecurityConfig::default();
     if let Some(VmValue::String(mode)) = config.get("mode") {
         base.mode = SecurityMode::parse(mode.as_ref());
@@ -791,7 +791,7 @@ fn policy_summary(policy: &SecurityPolicy) -> VmValue {
         VmValue::Int(i64::from(policy.guard_threshold_percent)),
     );
     map.put_str("guard_model", policy.guard_model.as_str());
-    VmValue::Dict(std::sync::Arc::new(map))
+    VmValue::dict(map)
 }
 
 /// Register the `security_policy(config: dict) -> dict` builtin. Embedders
@@ -823,7 +823,7 @@ mod tests {
         let mut map = BTreeMap::new();
         map.insert("kind".to_string(), vm_str("mcp_server"));
         map.insert("server_name".to_string(), vm_str(server));
-        VmValue::Dict(std::sync::Arc::new(map))
+        VmValue::dict(map)
     }
 
     #[test]

@@ -242,7 +242,7 @@ fn token_redaction_drain_audit_impl(
     let list: Vec<VmValue> = events
         .into_iter()
         .map(|event| {
-            let mut entry: BTreeMap<String, VmValue> = BTreeMap::new();
+            let mut entry: crate::value::DictMap = crate::value::DictMap::new();
             entry.put_str("code", TOKEN_REDACTION_DIAGNOSTIC);
             entry.put_str("pattern", event.pattern_name.as_str());
             entry.insert(
@@ -253,7 +253,7 @@ fn token_redaction_drain_audit_impl(
                 "bytes_redacted".to_string(),
                 VmValue::Int(event.bytes_redacted as i64),
             );
-            VmValue::Dict(std::sync::Arc::new(entry))
+            VmValue::dict(entry)
         })
         .collect();
     Ok(VmValue::List(std::sync::Arc::new(list)))

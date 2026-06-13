@@ -6,7 +6,6 @@
 //! pattern; unknown inputs are hard errors.
 
 use crate::value::VmDictExt;
-use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 use crate::agent_sessions;
@@ -121,7 +120,7 @@ fn arg_int_required(
 }
 
 fn arg_bool_opt(
-    opts: &BTreeMap<String, VmValue>,
+    opts: &crate::value::DictMap,
     fn_name: &str,
     arg_name: &str,
     default: bool,
@@ -134,7 +133,7 @@ fn arg_bool_opt(
 }
 
 fn opt_string(
-    opts: &BTreeMap<String, VmValue>,
+    opts: &crate::value::DictMap,
     fn_name: &str,
     arg_name: &str,
 ) -> Result<Option<String>, VmError> {
@@ -155,7 +154,7 @@ fn opt_string(
 }
 
 fn opt_usize(
-    opts: &BTreeMap<String, VmValue>,
+    opts: &crate::value::DictMap,
     fn_name: &str,
     arg_name: &str,
 ) -> Result<Option<usize>, VmError> {
@@ -173,7 +172,7 @@ fn opt_usize(
     }
 }
 
-fn opt_json(opts: &BTreeMap<String, VmValue>, arg_name: &str) -> serde_json::Value {
+fn opt_json(opts: &crate::value::DictMap, arg_name: &str) -> serde_json::Value {
     opts.get(arg_name)
         .map(crate::llm::helpers::vm_value_to_json)
         .unwrap_or(serde_json::Value::Null)
@@ -183,16 +182,16 @@ fn opts_dict_arg(
     args: &[VmValue],
     idx: usize,
     fn_name: &str,
-) -> Result<BTreeMap<String, VmValue>, VmError> {
+) -> Result<crate::value::DictMap, VmError> {
     match args.get(idx) {
-        None | Some(VmValue::Nil) => Ok(BTreeMap::new()),
+        None | Some(VmValue::Nil) => Ok(crate::value::DictMap::new()),
         Some(VmValue::Dict(opts)) => Ok(opts.as_ref().clone()),
         _ => Err(err(format!("{fn_name}: `opts` must be a dict or nil"))),
     }
 }
 
 fn reject_unknown_opts(
-    opts: &BTreeMap<String, VmValue>,
+    opts: &crate::value::DictMap,
     fn_name: &str,
     allowed: &[&str],
 ) -> Result<(), VmError> {
@@ -208,7 +207,7 @@ fn reject_unknown_opts(
 }
 
 fn opt_bool(
-    opts: &BTreeMap<String, VmValue>,
+    opts: &crate::value::DictMap,
     fn_name: &str,
     arg_name: &str,
 ) -> Result<Option<bool>, VmError> {
@@ -235,7 +234,7 @@ fn ok_result(fields: &[(&str, serde_json::Value)]) -> VmValue {
     crate::stdlib::json_to_vm_value(&serde_json::Value::Object(result))
 }
 
-fn dict_string_field(dict: &BTreeMap<String, VmValue>, key: &str) -> Option<String> {
+fn dict_string_field(dict: &crate::value::DictMap, key: &str) -> Option<String> {
     match dict.get(key) {
         Some(VmValue::String(value)) if !value.trim().is_empty() => Some(value.to_string()),
         _ => None,
@@ -300,7 +299,7 @@ const AGENT_SESSION_METADATA_OPT_KEYS: &[&str] = &["metadata"];
 fn agent_session_open_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let id = arg_string_opt(args, 0, "agent_session_open", "id")?;
     let opts = match args.get(1) {
-        None | Some(VmValue::Nil) => BTreeMap::new(),
+        None | Some(VmValue::Nil) => crate::value::DictMap::new(),
         Some(VmValue::Dict(opts)) => opts.as_ref().clone(),
         _ => return Err(err("agent_session_open: `opts` must be a dict or nil")),
     };
@@ -553,7 +552,7 @@ fn agent_session_ancestry_builtin(args: &[VmValue], _out: &mut String) -> Result
     let Some(ancestry) = agent_sessions::ancestry(&id) else {
         return Ok(VmValue::Nil);
     };
-    Ok(VmValue::Dict(std::sync::Arc::new(BTreeMap::from([
+    Ok(VmValue::dict(crate::value::DictMap::from_iter([
         (
             "parent_id".to_string(),
             ancestry
@@ -575,7 +574,7 @@ fn agent_session_ancestry_builtin(args: &[VmValue], _out: &mut String) -> Result
             "root_id".to_string(),
             VmValue::String(std::sync::Arc::from(ancestry.root_id)),
         ),
-    ]))))
+    ])))
 }
 
 #[harn_builtin(
@@ -634,10 +633,7 @@ fn agent_session_system_prompt_builtin(
 
 const AGENT_SESSION_SCRATCHPAD_OPT_KEYS: &[&str] = &["source", "reason", "metadata"];
 
-fn validate_scratchpad_opts(
-    opts: &BTreeMap<String, VmValue>,
-    fn_name: &str,
-) -> Result<(), VmError> {
+fn validate_scratchpad_opts(opts: &crate::value::DictMap, fn_name: &str) -> Result<(), VmError> {
     for key in opts.keys() {
         if !AGENT_SESSION_SCRATCHPAD_OPT_KEYS.contains(&key.as_str()) {
             let expected = AGENT_SESSION_SCRATCHPAD_OPT_KEYS.join(", ");
@@ -650,11 +646,11 @@ fn validate_scratchpad_opts(
 }
 
 fn scratchpad_result(version: u64, scratchpad: VmValue) -> VmValue {
-    VmValue::Dict(std::sync::Arc::new(BTreeMap::from([
+    VmValue::dict(crate::value::DictMap::from_iter([
         ("ok".to_string(), VmValue::Bool(true)),
         ("version".to_string(), VmValue::Int(version as i64)),
         ("scratchpad".to_string(), scratchpad),
-    ])))
+    ]))
 }
 
 #[harn_builtin(
@@ -1087,7 +1083,7 @@ fn agent_session_route_permission_builtin(
 }
 
 fn live_client_mode(
-    opts: &BTreeMap<String, VmValue>,
+    opts: &crate::value::DictMap,
     fn_name: &str,
 ) -> Result<agent_sessions::LiveClientMode, VmError> {
     match opt_string(opts, fn_name, "mode")?
@@ -1163,13 +1159,13 @@ fn agent_session_drain_inbox_builtin(
     let entries = crate::orchestration::agent_inbox::drain(&id)
         .into_iter()
         .map(|entry| {
-            let mut dict = BTreeMap::new();
+            let mut dict = crate::value::DictMap::new();
             dict.insert("sequence".to_string(), VmValue::Int(entry.sequence as i64));
             dict.put_str("kind", entry.kind);
             dict.put_str("content", entry.content);
             dict.put_str("source", entry.source);
             dict.insert("ts_ms".to_string(), VmValue::Int(entry.ts_ms));
-            VmValue::Dict(std::sync::Arc::new(dict))
+            VmValue::dict(dict)
         })
         .collect::<Vec<_>>();
     Ok(VmValue::List(std::sync::Arc::new(entries)))
@@ -1294,7 +1290,7 @@ async fn agent_session_reanchor_builtin(
     )
     .map_err(|message| err(format!("agent_session_reanchor: {message}")))?;
     let opts = match args.get(2) {
-        None | Some(VmValue::Nil) => BTreeMap::new(),
+        None | Some(VmValue::Nil) => crate::value::DictMap::new(),
         Some(VmValue::Dict(d)) => d.as_ref().clone(),
         _ => return Err(err("agent_session_reanchor: `opts` must be a dict or nil")),
     };
@@ -1378,7 +1374,7 @@ async fn agent_session_compact_builtin(
     }
     let opts_dict = match args.get(1) {
         Some(VmValue::Dict(d)) => (**d).clone(),
-        None | Some(VmValue::Nil) => BTreeMap::new(),
+        None | Some(VmValue::Nil) => crate::value::DictMap::new(),
         _ => return Err(err("agent_session_compact: `opts` must be a dict or nil")),
     };
     let mut config = build_compact_config(&opts_dict)?;
@@ -1458,7 +1454,7 @@ const COMPACT_OPT_KEYS: &[&str] = &[
 ];
 
 fn build_compact_config(
-    opts: &BTreeMap<String, VmValue>,
+    opts: &crate::value::DictMap,
 ) -> Result<crate::orchestration::AutoCompactConfig, VmError> {
     for key in opts.keys() {
         if !COMPACT_OPT_KEYS.contains(&key.as_str()) {
@@ -1601,7 +1597,7 @@ async fn cancel_in_flight_tool_call_builtin(
         }
     }
 
-    let mut result = BTreeMap::new();
+    let mut result = crate::value::DictMap::new();
     result.put_str("status", final_status);
     result.put_str("call_id", call_id);
     result.insert(
@@ -1612,7 +1608,7 @@ async fn cancel_in_flight_tool_call_builtin(
             .unwrap_or(VmValue::Nil),
     );
     result.put_str("reason", reason);
-    Ok(VmValue::Dict(std::sync::Arc::new(result)))
+    Ok(VmValue::dict(result))
 }
 
 async fn push_cancellation_reminder(
@@ -1649,7 +1645,7 @@ async fn push_cancellation_reminder(
 }
 
 fn compact_usize_opt(
-    opts: &BTreeMap<String, VmValue>,
+    opts: &crate::value::DictMap,
     key: &'static str,
 ) -> Result<Option<usize>, VmError> {
     let Some(value) = opts.get(key) else {
@@ -1668,7 +1664,6 @@ fn compact_usize_opt(
 
 #[cfg(test)]
 mod tests {
-    use std::collections::BTreeMap;
 
     use super::build_compact_config;
     use crate::value::VmValue;
@@ -1715,7 +1710,7 @@ mod tests {
             "tool_output_max_chars",
             "hard_limit_tokens",
         ] {
-            let mut opts = BTreeMap::new();
+            let mut opts = crate::value::DictMap::new();
             opts.insert(key.to_string(), VmValue::Int(-1));
             let err = build_compact_config(&opts).expect_err("negative option must fail");
             assert!(err.to_string().contains(key), "{err}");

@@ -212,7 +212,7 @@ fn integer_value(value: &VmValue, key: &str) -> Result<i64, VmError> {
 }
 
 fn parse_budget_fields(
-    fields: &BTreeMap<String, VmValue>,
+    fields: &crate::value::DictMap,
     envelope: &mut LlmBudgetEnvelope,
 ) -> Result<(), VmError> {
     if let Some(value) = fields.get("max_cost_usd") {
@@ -231,7 +231,7 @@ fn parse_budget_fields(
 }
 
 pub(crate) fn parse_budget_envelope(
-    options: Option<&BTreeMap<String, VmValue>>,
+    options: Option<&crate::value::DictMap>,
 ) -> Result<Option<LlmBudgetEnvelope>, VmError> {
     let Some(options) = options else {
         return Ok(None);
@@ -374,7 +374,7 @@ pub(crate) fn budget_exceeded_error(
             limit_kind.as_str(),
         ),
     );
-    VmError::Thrown(VmValue::Dict(std::sync::Arc::new(dict)))
+    VmError::Thrown(VmValue::dict(dict))
 }
 
 pub(crate) fn budget_exceeded_limit(
@@ -722,7 +722,7 @@ pub(crate) fn register_cost_builtins(vm: &mut Vm) {
         result.insert("input_tokens".to_string(), VmValue::Int(total_input));
         result.insert("output_tokens".to_string(), VmValue::Int(total_output));
         result.insert("call_count".to_string(), VmValue::Int(call_count));
-        Ok(VmValue::Dict(std::sync::Arc::new(result)))
+        Ok(VmValue::dict(result))
     });
 
     vm.register_builtin("llm_budget", |args, _out| {
@@ -815,7 +815,7 @@ fn pricing_detail_to_vm_value(provider: &str, model: &str, detail: &PricingDetai
             .unwrap_or(VmValue::Nil),
     );
     dict.put_str("source", detail.source.as_str());
-    VmValue::Dict(std::sync::Arc::new(dict))
+    VmValue::dict(dict)
 }
 
 fn resolve_pricing_args(args: &[VmValue]) -> (String, String) {
@@ -1034,7 +1034,7 @@ fn llm_compare_costs_builtin(args: &[VmValue], _out: &mut String) -> Result<VmVa
         );
         row.insert("calls".to_string(), VmValue::Int(calls));
         row.insert("pricing_known".to_string(), VmValue::Bool(detail.is_some()));
-        rows.push((projection, VmValue::Dict(std::sync::Arc::new(row))));
+        rows.push((projection, VmValue::dict(row)));
     }
 
     rows.sort_by(|left, right| match (left.0, right.0) {
@@ -1081,7 +1081,7 @@ fn tokenizer_info_to_vm_value(model: &str, info: super::token_count::TokenizerIn
             .map(|encoder| VmValue::String(std::sync::Arc::from(encoder)))
             .unwrap_or(VmValue::Nil),
     );
-    VmValue::Dict(std::sync::Arc::new(result))
+    VmValue::dict(result)
 }
 
 #[cfg(test)]

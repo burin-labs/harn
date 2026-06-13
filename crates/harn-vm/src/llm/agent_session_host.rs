@@ -122,7 +122,7 @@ impl Drop for SessionPolicyGuard {
 
 thread_local! {
     static AGENT_HOST_SESSIONS: RefCell<BTreeMap<String, AgentHostSession>> =
-        const { RefCell::new(BTreeMap::new()) };
+        const { RefCell::new(std::collections::BTreeMap::new()) };
 }
 
 pub(crate) fn reset_agent_session_host_state() {
@@ -161,10 +161,10 @@ pub(crate) fn session_taint_snapshot(session_id: &str) -> Vec<crate::security::T
     .unwrap_or_default()
 }
 
-fn opts_dict(value: Option<&VmValue>) -> BTreeMap<String, VmValue> {
+fn opts_dict(value: Option<&VmValue>) -> crate::value::DictMap {
     match value {
         Some(VmValue::Dict(d)) => (**d).clone(),
-        _ => BTreeMap::new(),
+        _ => crate::value::DictMap::new(),
     }
 }
 
@@ -190,14 +190,14 @@ fn dict_get<'a>(value: &'a VmValue, key: &str) -> Option<&'a VmValue> {
     }
 }
 
-fn opt_str(map: &BTreeMap<String, VmValue>, key: &str) -> Option<String> {
+fn opt_str(map: &crate::value::DictMap, key: &str) -> Option<String> {
     map.get(key).and_then(|v| match v {
         VmValue::String(s) => Some(s.to_string()),
         _ => None,
     })
 }
 
-fn opt_int(map: &BTreeMap<String, VmValue>, key: &str) -> Option<i64> {
+fn opt_int(map: &crate::value::DictMap, key: &str) -> Option<i64> {
     map.get(key).and_then(|v| match v {
         VmValue::Int(i) => Some(*i),
         VmValue::Float(f) => Some(*f as i64),
@@ -205,14 +205,14 @@ fn opt_int(map: &BTreeMap<String, VmValue>, key: &str) -> Option<i64> {
     })
 }
 
-fn opt_json(map: &BTreeMap<String, VmValue>, key: &str) -> Option<serde_json::Value> {
+fn opt_json(map: &crate::value::DictMap, key: &str) -> Option<serde_json::Value> {
     map.get(key)
         .filter(|value| !matches!(value, VmValue::Nil))
         .map(vm_to_json)
 }
 
 fn initial_user_content(
-    opts_map: &BTreeMap<String, VmValue>,
+    opts_map: &crate::value::DictMap,
     fallback_message: &str,
 ) -> serde_json::Value {
     opt_json(opts_map, "initial_user_content")
@@ -363,7 +363,7 @@ async fn host_agent_session_init(
         daemon_state: None,
         daemon_snapshot_path: None,
         resumed_iterations,
-        daemon_watch_state: BTreeMap::new(),
+        daemon_watch_state: std::collections::BTreeMap::new(),
         daemon_idle_backoff_ms: 100,
         host_bridge,
         last_llm_stop_reason: None,
@@ -406,7 +406,7 @@ async fn host_agent_session_init(
     )
     .await?;
 
-    let mut control = BTreeMap::new();
+    let mut control = crate::value::DictMap::new();
     control.put_str("session_id", resolved);
     control.put_str("task", message);
     control.insert(
@@ -421,7 +421,7 @@ async fn host_agent_session_init(
         VmValue::Int(max_verify_attempts),
     );
     control.insert("done".to_string(), VmValue::Bool(false));
-    Ok(VmValue::Dict(std::sync::Arc::new(control)))
+    Ok(VmValue::dict(control))
 }
 
 enum AutonomyCheck {
@@ -431,7 +431,7 @@ enum AutonomyCheck {
 }
 
 async fn check_autonomy_budget(
-    opts_map: &BTreeMap<String, VmValue>,
+    opts_map: &crate::value::DictMap,
     session_id: &str,
 ) -> Result<AutonomyCheck, VmError> {
     let Some(config) =
@@ -523,7 +523,7 @@ fn agent_init_control_done(
     system: Option<&str>,
     result: VmValue,
 ) -> VmValue {
-    let mut control = BTreeMap::new();
+    let mut control = crate::value::DictMap::new();
     control.put_str("session_id", session_id);
     control.put_str("task", task);
     control.insert(
@@ -536,7 +536,7 @@ fn agent_init_control_done(
     control.insert("max_verify_attempts".to_string(), VmValue::Int(0));
     control.insert("done".to_string(), VmValue::Bool(true));
     control.insert("result".to_string(), result);
-    VmValue::Dict(std::sync::Arc::new(control))
+    VmValue::dict(control)
 }
 
 /// Tear down a Harn-driven agent session and emit the final result dict.
@@ -906,10 +906,10 @@ fn assistant_message_from_llm_result(llm_result: &VmValue) -> VmValue {
         .map(vm_to_json)
         .collect::<Vec<_>>();
     if native_calls_json.is_empty() {
-        let mut msg = BTreeMap::new();
+        let mut msg = crate::value::DictMap::new();
         msg.put_str("role", "assistant");
         msg.put_str("content", text);
-        return VmValue::Dict(std::sync::Arc::new(msg));
+        return VmValue::dict(msg);
     }
 
     let thinking = dict_get(llm_result, "thinking").map(|v| v.display());
@@ -993,7 +993,7 @@ fn tool_result_message_for_provider(
     tool_call_id: &str,
     observation: &str,
 ) -> VmValue {
-    let mut msg = BTreeMap::new();
+    let mut msg = crate::value::DictMap::new();
     // A text-channel tool_format (`text` or `json`) carries tool results back
     // as an ordinary `user` message — there is no provider tool-result role on
     // the text channel. `native` uses the provider's tool_result/tool role.
@@ -1014,7 +1014,7 @@ fn tool_result_message_for_provider(
         }
     }
     msg.put_str("content", observation);
-    VmValue::Dict(std::sync::Arc::new(msg))
+    VmValue::dict(msg)
 }
 
 /// Recover the plan artifact from a dispatched emit_plan/update_plan result.
@@ -1286,10 +1286,10 @@ fn host_agent_session_record_usage_builtin(
         ),
     )
     .map_err(VmError::Runtime)?;
-    let mut out = BTreeMap::new();
+    let mut out = crate::value::DictMap::new();
     out.insert("tokens_used".to_string(), VmValue::Int(totals.0));
     out.insert("cost_usd".to_string(), VmValue::Float(totals.1));
-    Ok(VmValue::Dict(std::sync::Arc::new(out)))
+    Ok(VmValue::dict(out))
 }
 
 /// Deterministic "should the loop auto-continue this truncated turn?" gate.
@@ -1348,13 +1348,13 @@ fn host_agent_session_drain_feedback_builtin(
     let drained = crate::orchestration::agent_inbox::drain(&session_id)
         .into_iter()
         .map(|entry| {
-            let mut item = BTreeMap::new();
+            let mut item = crate::value::DictMap::new();
             item.put_str("kind", entry.kind);
             item.put_str("content", entry.content);
             item.put_str("source", entry.source);
             item.insert("sequence".to_string(), VmValue::Int(entry.sequence as i64));
             item.insert("ts_ms".to_string(), VmValue::Int(entry.ts_ms));
-            VmValue::Dict(std::sync::Arc::new(item))
+            VmValue::dict(item)
         })
         .collect::<Vec<_>>();
     Ok(VmValue::List(std::sync::Arc::new(drained)))
@@ -1374,10 +1374,10 @@ fn host_agent_session_totals_builtin(
     let totals = with_session(&session_id, HOST_SESSION_TOTALS, |session| {
         Ok((session.tokens_used, session.cost_used))
     })?;
-    let mut out = BTreeMap::new();
+    let mut out = crate::value::DictMap::new();
     out.insert("tokens_used".to_string(), VmValue::Int(totals.0));
     out.insert("cost_usd".to_string(), VmValue::Float(totals.1));
-    Ok(VmValue::Dict(std::sync::Arc::new(out)))
+    Ok(VmValue::dict(out))
 }
 
 /// Append a runtime-feedback note to the session as a synthetic user turn.
@@ -1511,9 +1511,9 @@ fn host_agent_session_active_skills_builtin(
     let list = ids
         .into_iter()
         .map(|id| {
-            let mut entry = BTreeMap::new();
+            let mut entry = crate::value::DictMap::new();
             entry.put_str("id", id);
-            VmValue::Dict(std::sync::Arc::new(entry))
+            VmValue::dict(entry)
         })
         .collect();
     Ok(VmValue::List(std::sync::Arc::new(list)))
@@ -2997,21 +2997,21 @@ async fn host_autonomy_budget_check(
         .map(|value| value.display())
         .filter(|value| !value.is_empty())
         .unwrap_or_else(|| format!("agent_session_{}", now_id()));
-    let mut opts = BTreeMap::new();
+    let mut opts = crate::value::DictMap::new();
     if let Some(config) = args.get(1) {
         opts.insert("autonomy_budget".to_string(), config.clone());
     }
     match check_autonomy_budget(&opts, &session_id).await? {
         AutonomyCheck::Denied(result) => {
-            let mut out = BTreeMap::new();
+            let mut out = crate::value::DictMap::new();
             out.insert("approved".to_string(), VmValue::Bool(false));
             out.insert("denial_result".to_string(), result);
-            Ok(VmValue::Dict(std::sync::Arc::new(out)))
+            Ok(VmValue::dict(out))
         }
         AutonomyCheck::Approved(_) | AutonomyCheck::NoBudget => {
-            let mut out = BTreeMap::new();
+            let mut out = crate::value::DictMap::new();
             out.insert("approved".to_string(), VmValue::Bool(true));
-            Ok(VmValue::Dict(std::sync::Arc::new(out)))
+            Ok(VmValue::dict(out))
         }
     }
 }
@@ -3027,7 +3027,7 @@ async fn host_autonomy_budget_check(
 /// returning, so the caller never has to worry about leaked policy
 /// state.
 pub(crate) fn install_session_policy_guard(
-    opts_map: &BTreeMap<String, VmValue>,
+    opts_map: &crate::value::DictMap,
 ) -> Result<SessionPolicyGuard, VmError> {
     let mut installed = InstalledPolicies::default();
     match install_session_policies_inner(opts_map, &mut installed) {
@@ -3040,7 +3040,7 @@ pub(crate) fn install_session_policy_guard(
 }
 
 fn install_session_policies_inner(
-    opts_map: &BTreeMap<String, VmValue>,
+    opts_map: &crate::value::DictMap,
     installed: &mut InstalledPolicies,
 ) -> Result<(), VmError> {
     if let Some(requested) = parse_capability_policy(opts_map.get("policy"))? {
@@ -3111,7 +3111,7 @@ fn parse_capability_policy(value: Option<&VmValue>) -> Result<Option<CapabilityP
 /// can pass `_nested_kind` and `_nested_label` to refine the audit and
 /// error wording; we default to `agent_loop` + the session id.
 fn install_session_nested_budget(
-    opts_map: &BTreeMap<String, VmValue>,
+    opts_map: &crate::value::DictMap,
     session_id: &str,
 ) -> Result<NestedExecutionGuard, VmError> {
     let requested = parse_capability_policy(opts_map.get("policy"))?;

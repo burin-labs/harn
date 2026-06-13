@@ -250,7 +250,7 @@ mod tests {
                 VmValue::String(std::sync::Arc::from("rust")),
             ),
         ]);
-        let payload = VmValue::Dict(std::sync::Arc::new(raw));
+        let payload = VmValue::dict(raw);
         let result = run(&[payload]).expect("handler runs");
         match &result {
             VmValue::Dict(d) => {

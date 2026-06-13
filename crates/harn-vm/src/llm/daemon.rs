@@ -88,7 +88,7 @@ pub(crate) fn persist_snapshot(path: &str, snapshot: &DaemonSnapshot) -> Result<
 }
 
 pub(crate) fn parse_daemon_loop_config(
-    options: Option<&BTreeMap<String, VmValue>>,
+    options: Option<&crate::value::DictMap>,
 ) -> DaemonLoopConfig {
     let Some(options) = options else {
         return DaemonLoopConfig::default();

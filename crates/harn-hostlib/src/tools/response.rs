@@ -1,7 +1,6 @@
 //! Helpers for assembling [`VmValue::Dict`] response bodies that match the
 //! `schemas/tools/<method>.response.json` contracts.
 
-use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use harn_vm::VmValue;
@@ -9,13 +8,13 @@ use harn_vm::VmValue;
 /// Type-erased builder for the dict that becomes a tool's response.
 #[derive(Default)]
 pub(crate) struct ResponseBuilder {
-    inner: BTreeMap<String, VmValue>,
+    inner: harn_vm::value::DictMap,
 }
 
 impl ResponseBuilder {
     pub(crate) fn new() -> Self {
         Self {
-            inner: BTreeMap::new(),
+            inner: harn_vm::value::DictMap::new(),
         }
     }
 
@@ -53,9 +52,8 @@ impl ResponseBuilder {
         self
     }
 
-    pub(crate) fn dict(mut self, key: &str, value: BTreeMap<String, VmValue>) -> Self {
-        self.inner
-            .insert(key.to_string(), VmValue::Dict(Arc::new(value)));
+    pub(crate) fn dict(mut self, key: &str, value: harn_vm::value::DictMap) -> Self {
+        self.inner.insert(key.to_string(), VmValue::dict(value));
         self
     }
 
@@ -66,6 +64,6 @@ impl ResponseBuilder {
     }
 
     pub(crate) fn build(self) -> VmValue {
-        VmValue::Dict(Arc::new(self.inner))
+        VmValue::dict(self.inner)
     }
 }

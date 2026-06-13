@@ -49,7 +49,7 @@ pub struct CommandPolicyDecision {
 #[derive(Clone, Debug)]
 pub enum CommandPolicyPreflight {
     Proceed {
-        params: BTreeMap<String, VmValue>,
+        params: crate::value::DictMap,
         context: JsonValue,
         decisions: Vec<CommandPolicyDecision>,
     },
@@ -148,11 +148,8 @@ pub fn normalize_command_policy_value(config: &VmValue) -> Result<VmValue, VmErr
     normalized
         .entry("require_approval".to_string())
         .or_insert_with(|| VmValue::List(std::sync::Arc::new(Vec::new())));
-    parse_command_policy_value(
-        Some(&VmValue::Dict(std::sync::Arc::new(normalized.clone()))),
-        "command_policy",
-    )?;
-    Ok(VmValue::Dict(std::sync::Arc::new(normalized)))
+    parse_command_policy_value(Some(&VmValue::dict(normalized.clone())), "command_policy")?;
+    Ok(VmValue::dict(normalized))
 }
 
 pub fn command_risk_scan_value(ctx: &VmValue) -> Result<VmValue, VmError> {
@@ -218,7 +215,7 @@ pub fn command_llm_risk_scan_value(
 }
 
 pub async fn run_command_policy_preflight(
-    params: &BTreeMap<String, VmValue>,
+    params: &crate::value::DictMap,
     caller: JsonValue,
 ) -> Result<CommandPolicyPreflight, VmError> {
     run_command_policy_preflight_with_ctx(None, params, caller).await
@@ -226,7 +223,7 @@ pub async fn run_command_policy_preflight(
 
 pub async fn run_command_policy_preflight_with_ctx(
     ctx: Option<&crate::vm::AsyncBuiltinCtx>,
-    params: &BTreeMap<String, VmValue>,
+    params: &crate::value::DictMap,
     caller: JsonValue,
 ) -> Result<CommandPolicyPreflight, VmError> {
     let Some(policy) = current_command_policy() else {
@@ -440,7 +437,7 @@ pub async fn run_command_policy_preflight_with_ctx(
 }
 
 pub async fn run_command_policy_postflight(
-    params: &BTreeMap<String, VmValue>,
+    params: &crate::value::DictMap,
     result: VmValue,
     pre_context: JsonValue,
     decisions: Vec<CommandPolicyDecision>,
@@ -450,7 +447,7 @@ pub async fn run_command_policy_postflight(
 
 pub async fn run_command_policy_postflight_with_ctx(
     ctx: Option<&crate::vm::AsyncBuiltinCtx>,
-    _params: &BTreeMap<String, VmValue>,
+    _params: &crate::value::DictMap,
     result: VmValue,
     pre_context: JsonValue,
     mut decisions: Vec<CommandPolicyDecision>,
@@ -489,7 +486,7 @@ pub async fn run_command_policy_postflight_with_ctx(
 }
 
 pub fn blocked_command_response(
-    params: &BTreeMap<String, VmValue>,
+    params: &crate::value::DictMap,
     status: &str,
     message: &str,
     context: JsonValue,
@@ -520,14 +517,9 @@ pub fn blocked_command_response(
     result.put_str("audit_id", format!("audit_{command_id}"));
     result.insert(
         "request".to_string(),
-        VmValue::Dict(std::sync::Arc::new(redacted_vm_request(params))),
+        VmValue::dict(redacted_vm_request(params)),
     );
-    attach_policy_audit(
-        VmValue::Dict(std::sync::Arc::new(result)),
-        context,
-        decisions,
-        None,
-    )
+    attach_policy_audit(VmValue::dict(result), context, decisions, None)
 }
 
 fn attach_policy_audit(
@@ -551,7 +543,7 @@ fn attach_policy_audit(
         "command_policy".to_string(),
         crate::stdlib::json_to_vm_value(&audit),
     );
-    VmValue::Dict(std::sync::Arc::new(out))
+    VmValue::dict(out)
 }
 
 fn decision(
@@ -603,7 +595,7 @@ enum ParsedPreHookAction {
     Allow,
     Deny(String),
     RequireApproval(String, Option<JsonValue>),
-    Rewrite(BTreeMap<String, VmValue>),
+    Rewrite(crate::value::DictMap),
     DryRun(String),
     ExplainOnly(String),
 }
@@ -702,10 +694,8 @@ fn parse_post_hook_action(
                             .get("content")
                             .map(|v| v.display())
                             .unwrap_or_else(|| {
-                                crate::llm::vm_value_to_json(&VmValue::Dict(std::sync::Arc::new(
-                                    feedback.clone(),
-                                )))
-                                .to_string()
+                                crate::llm::vm_value_to_json(&VmValue::dict(feedback.clone()))
+                                    .to_string()
                             });
                     crate::orchestration::agent_inbox::push(
                         &session_id,
@@ -733,8 +723,8 @@ fn parse_post_hook_action(
 }
 
 fn apply_command_rewrite(
-    params: &mut BTreeMap<String, VmValue>,
-    rewrite: &BTreeMap<String, VmValue>,
+    params: &mut crate::value::DictMap,
+    rewrite: &crate::value::DictMap,
 ) -> Result<(), VmError> {
     for (key, value) in rewrite {
         match key.as_str() {
@@ -753,7 +743,7 @@ fn apply_command_rewrite(
 }
 
 fn command_context_json(
-    params: &BTreeMap<String, VmValue>,
+    params: &crate::value::DictMap,
     policy: &CommandPolicy,
     caller: JsonValue,
 ) -> JsonValue {
@@ -796,7 +786,7 @@ fn command_context_json(
     })
 }
 
-fn command_request_json(params: &BTreeMap<String, VmValue>) -> JsonValue {
+fn command_request_json(params: &crate::value::DictMap) -> JsonValue {
     let mode = string_field_raw(params, "mode")
         .or_else(|| params.get("argv").map(|_| "argv".to_string()))
         .unwrap_or_else(|| "shell".to_string());
@@ -1167,7 +1157,7 @@ fn inline_output_for_scan(value: Option<&JsonValue>) -> String {
         .unwrap_or_default()
 }
 
-fn redacted_vm_request(params: &BTreeMap<String, VmValue>) -> BTreeMap<String, VmValue> {
+fn redacted_vm_request(params: &crate::value::DictMap) -> crate::value::DictMap {
     params
         .iter()
         .map(|(key, value)| {
@@ -1183,7 +1173,7 @@ fn redacted_vm_request(params: &BTreeMap<String, VmValue>) -> BTreeMap<String, V
         .collect()
 }
 
-fn string_field(map: &BTreeMap<String, VmValue>, key: &str) -> Result<Option<String>, VmError> {
+fn string_field(map: &crate::value::DictMap, key: &str) -> Result<Option<String>, VmError> {
     match map.get(key) {
         None | Some(VmValue::Nil) => Ok(None),
         Some(VmValue::String(value)) => Ok(Some(value.to_string())),
@@ -1194,7 +1184,7 @@ fn string_field(map: &BTreeMap<String, VmValue>, key: &str) -> Result<Option<Str
     }
 }
 
-fn string_field_raw(map: &BTreeMap<String, VmValue>, key: &str) -> Option<String> {
+fn string_field_raw(map: &crate::value::DictMap, key: &str) -> Option<String> {
     match map.get(key) {
         Some(VmValue::String(value)) => Some(value.to_string()),
         _ => None,
@@ -1202,7 +1192,7 @@ fn string_field_raw(map: &BTreeMap<String, VmValue>, key: &str) -> Option<String
 }
 
 fn string_list_field(
-    map: &BTreeMap<String, VmValue>,
+    map: &crate::value::DictMap,
     key: &str,
 ) -> Result<Option<Vec<String>>, VmError> {
     match map.get(key) {
@@ -1225,7 +1215,7 @@ fn string_list_field(
     }
 }
 
-fn bool_field(map: &BTreeMap<String, VmValue>, key: &str) -> Result<Option<bool>, VmError> {
+fn bool_field(map: &crate::value::DictMap, key: &str) -> Result<Option<bool>, VmError> {
     match map.get(key) {
         None | Some(VmValue::Nil) => Ok(None),
         Some(VmValue::Bool(value)) => Ok(Some(*value)),
@@ -1237,7 +1227,7 @@ fn bool_field(map: &BTreeMap<String, VmValue>, key: &str) -> Result<Option<bool>
 }
 
 fn closure_field(
-    map: &BTreeMap<String, VmValue>,
+    map: &crate::value::DictMap,
     key: &str,
 ) -> Result<Option<Arc<VmClosure>>, VmError> {
     match map.get(key) {

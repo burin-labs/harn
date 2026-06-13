@@ -95,21 +95,21 @@ fn events_list(transcript: &VmValue) -> Vec<VmValue> {
         .unwrap_or_default()
 }
 
-fn list_field(dict: &BTreeMap<String, VmValue>, key: &str) -> Vec<VmValue> {
+fn list_field(dict: &crate::value::DictMap, key: &str) -> Vec<VmValue> {
     match dict.get(key) {
         Some(VmValue::List(list)) => (**list).clone(),
         _ => Vec::new(),
     }
 }
 
-fn string_field(dict: &BTreeMap<String, VmValue>, key: &str) -> Option<String> {
+fn string_field(dict: &crate::value::DictMap, key: &str) -> Option<String> {
     match dict.get(key) {
         Some(VmValue::String(s)) => Some(s.to_string()),
         _ => None,
     }
 }
 
-fn count_tool_calls(msg: &BTreeMap<String, VmValue>) -> i64 {
+fn count_tool_calls(msg: &crate::value::DictMap) -> i64 {
     match msg.get("tool_calls") {
         Some(VmValue::List(list)) => list.len() as i64,
         _ => 0,
@@ -146,7 +146,7 @@ fn stats_to_vm(stats: &TranscriptStats) -> VmValue {
         "visible_event_count".to_string(),
         VmValue::Int(stats.visible_event_count),
     );
-    VmValue::Dict(std::sync::Arc::new(dict))
+    VmValue::dict(dict)
 }
 
 #[cfg(test)]

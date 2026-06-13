@@ -402,7 +402,7 @@ pub fn to_auto_compact_config(policy: &CompactionPolicyDeclaration) -> super::Au
 /// mismatch so the builtin layer can surface a meaningful error.
 pub fn parse_policy_dict(
     builtin: &str,
-    dict: &BTreeMap<String, VmValue>,
+    dict: &crate::value::DictMap,
 ) -> Result<CompactionPolicyDeclaration, String> {
     let mut policy = CompactionPolicyDeclaration::default();
     if let Some(value) = dict.get("strategy") {
@@ -513,7 +513,7 @@ fn display_vm_error(error: &crate::value::VmError) -> String {
 }
 
 fn optional_usize(
-    dict: &BTreeMap<String, VmValue>,
+    dict: &crate::value::DictMap,
     key: &str,
     builtin: &str,
 ) -> Result<Option<usize>, String> {
@@ -533,7 +533,7 @@ fn optional_usize(
 }
 
 fn optional_f64(
-    dict: &BTreeMap<String, VmValue>,
+    dict: &crate::value::DictMap,
     key: &str,
     builtin: &str,
 ) -> Result<Option<f64>, String> {

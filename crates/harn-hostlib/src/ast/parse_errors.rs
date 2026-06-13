@@ -416,11 +416,10 @@ mod tests {
     use super::*;
 
     fn run_with(content: &str, language: &str) -> VmValue {
-        use std::collections::BTreeMap;
-        let mut dict: BTreeMap<String, VmValue> = BTreeMap::new();
+        let mut dict: harn_vm::value::DictMap = Default::default();
         dict.insert("content".into(), VmValue::String(Arc::from(content)));
         dict.insert("language".into(), VmValue::String(Arc::from(language)));
-        run(&[VmValue::Dict(Arc::new(dict))]).expect("parse_errors run")
+        run(&[VmValue::dict(dict)]).expect("parse_errors run")
     }
 
     fn list_field(value: &VmValue, key: &str) -> Arc<Vec<VmValue>> {
@@ -600,9 +599,8 @@ mod tests {
 
     #[test]
     fn rejects_when_no_content_or_path() {
-        use std::collections::BTreeMap;
-        let dict: BTreeMap<String, VmValue> = BTreeMap::new();
-        let err = run(&[VmValue::Dict(Arc::new(dict))]).expect_err("must reject empty payload");
+        let dict: harn_vm::value::DictMap = Default::default();
+        let err = run(&[VmValue::dict(dict)]).expect_err("must reject empty payload");
         match err {
             HostlibError::MissingParameter { builtin, param } => {
                 assert_eq!(builtin, BUILTIN);

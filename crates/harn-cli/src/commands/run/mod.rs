@@ -2378,7 +2378,7 @@ pub(crate) async fn connect_mcp_servers(
     harn_vm::mcp_register_servers(registrations);
 
     if !mcp_dict.is_empty() {
-        vm.set_global("mcp", harn_vm::VmValue::Dict(std::sync::Arc::new(mcp_dict)));
+        vm.set_global("mcp", harn_vm::VmValue::dict(mcp_dict));
     }
 }
 

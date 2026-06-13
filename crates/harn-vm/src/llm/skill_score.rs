@@ -70,14 +70,14 @@ pub(crate) async fn score_skill_registry(
         score_via_bridge(bridge.as_deref(), &skills, &task, &working_files, strategy).await?;
 
     let scored_values = scored.into_iter().map(candidate_to_vm).collect();
-    Ok(VmValue::Dict(std::sync::Arc::new(BTreeMap::from([(
+    Ok(VmValue::dict(BTreeMap::from([(
         "scored".to_string(),
         VmValue::List(std::sync::Arc::new(scored_values)),
-    )]))))
+    )])))
 }
 
 fn candidate_to_vm(candidate: SkillCandidate) -> VmValue {
-    VmValue::Dict(std::sync::Arc::new(BTreeMap::from([
+    VmValue::dict(BTreeMap::from([
         (
             "id".to_string(),
             VmValue::String(std::sync::Arc::from(candidate.id.clone())),
@@ -95,7 +95,7 @@ fn candidate_to_vm(candidate: SkillCandidate) -> VmValue {
             "reason".to_string(),
             VmValue::String(std::sync::Arc::from(candidate.trigger)),
         ),
-    ])))
+    ]))
 }
 
 fn extract_skills(registry: &VmValue) -> Vec<VmValue> {

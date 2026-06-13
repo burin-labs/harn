@@ -277,7 +277,7 @@ impl ProjectFingerprint {
                     .collect(),
             )),
         );
-        VmValue::Dict(std::sync::Arc::new(value))
+        VmValue::dict(value)
     }
 }
 
@@ -348,7 +348,7 @@ impl ProjectTreeEntry {
         value.put_str("dir", self.metadata_path);
         value.put_str("structure_hash", self.structure_hash);
         value.put_str("content_hash", self.content_hash);
-        VmValue::Dict(std::sync::Arc::new(value))
+        VmValue::dict(value)
     }
 }
 
@@ -443,12 +443,12 @@ impl ProjectEvidence {
         );
         result.insert(
             "declared_scripts".to_string(),
-            VmValue::Dict(std::sync::Arc::new(
+            VmValue::dict(
                 self.declared_scripts
                     .into_iter()
                     .map(|(k, v)| (k, VmValue::String(std::sync::Arc::from(v))))
-                    .collect(),
-            )),
+                    .collect::<crate::value::DictMap>(),
+            ),
         );
         result.insert(
             "readme_code_fences".to_string(),
@@ -477,7 +477,7 @@ impl ProjectEvidence {
                     .collect(),
             )),
         );
-        VmValue::Dict(std::sync::Arc::new(result))
+        VmValue::dict(result)
     }
 }
 
@@ -645,11 +645,8 @@ impl ContextProfileResolution {
             "prompt_fragments".to_string(),
             VmValue::List(std::sync::Arc::new(prompt_fragments)),
         );
-        out.insert(
-            "token_delta".to_string(),
-            VmValue::Dict(std::sync::Arc::new(token_delta)),
-        );
-        VmValue::Dict(std::sync::Arc::new(out))
+        out.insert("token_delta".to_string(), VmValue::dict(token_delta));
+        VmValue::dict(out)
     }
 }
 
@@ -668,7 +665,7 @@ impl ContextSignals {
             "credentials".to_string(),
             string_list_value(self.credentials.into_iter().collect()),
         );
-        VmValue::Dict(std::sync::Arc::new(out))
+        VmValue::dict(out)
     }
 }
 
@@ -682,7 +679,7 @@ impl GitRemoteSignal {
             self.slug.map(VmValue::string).unwrap_or(VmValue::Nil),
         );
         out.insert("url".to_string(), VmValue::string(self.redacted_url));
-        VmValue::Dict(std::sync::Arc::new(out))
+        VmValue::dict(out)
     }
 }
 
@@ -696,7 +693,7 @@ impl ContextProfileFragment {
             "requires_caps".to_string(),
             string_list_value(self.requires_caps),
         );
-        VmValue::Dict(std::sync::Arc::new(out))
+        VmValue::dict(out)
     }
 }
 
@@ -709,7 +706,7 @@ impl McpPresetCandidate {
             "missing_credentials".to_string(),
             string_list_value(self.missing_credentials),
         );
-        VmValue::Dict(std::sync::Arc::new(out))
+        VmValue::dict(out)
     }
 }
 
@@ -741,7 +738,7 @@ impl ContextProfileActivation {
             "prompt_fragment".to_string(),
             self.prompt_fragment.into_vm_value(),
         );
-        VmValue::Dict(std::sync::Arc::new(out))
+        VmValue::dict(out)
     }
 }
 
@@ -833,11 +830,11 @@ fn project_scan_tree_native_impl(args: &[VmValue], _out: &mut String) -> Result<
     let options = parse_project_options(args.get(1));
     let base = resolve_existing_directory(&path)?;
     let tree = scan_project_tree(&base, &options)?;
-    Ok(VmValue::Dict(std::sync::Arc::new(
+    Ok(VmValue::dict(
         tree.into_iter()
             .map(|(rel, evidence)| (rel, evidence.into_vm_value()))
-            .collect(),
-    )))
+            .collect::<crate::value::DictMap>(),
+    ))
 }
 
 #[crate::stdlib::macros::harn_builtin(
@@ -1225,7 +1222,7 @@ fn project_fingerprint_from_value(value: &VmValue) -> Option<ProjectFingerprint>
     project_fingerprint_from_dict(value.as_dict()?)
 }
 
-fn project_fingerprint_from_dict(dict: &BTreeMap<String, VmValue>) -> Option<ProjectFingerprint> {
+fn project_fingerprint_from_dict(dict: &crate::value::DictMap) -> Option<ProjectFingerprint> {
     if !dict_has_project_fingerprint_shape(dict) {
         return None;
     }
@@ -1262,7 +1259,7 @@ fn project_fingerprint_from_dict(dict: &BTreeMap<String, VmValue>) -> Option<Pro
     })
 }
 
-fn dict_has_project_fingerprint_shape(dict: &BTreeMap<String, VmValue>) -> bool {
+fn dict_has_project_fingerprint_shape(dict: &crate::value::DictMap) -> bool {
     [
         "primary_language",
         "languages",
@@ -1497,7 +1494,7 @@ fn strip_url_suffix(value: &str) -> &str {
     sanitized
 }
 
-fn string_list_field(dict: &BTreeMap<String, VmValue>, key: &str) -> Vec<String> {
+fn string_list_field(dict: &crate::value::DictMap, key: &str) -> Vec<String> {
     match dict.get(key) {
         Some(VmValue::List(items)) => items
             .iter()
@@ -1516,7 +1513,7 @@ fn string_list_field(dict: &BTreeMap<String, VmValue>, key: &str) -> Vec<String>
     }
 }
 
-fn optional_string_field(dict: &BTreeMap<String, VmValue>, key: &str) -> Option<String> {
+fn optional_string_field(dict: &crate::value::DictMap, key: &str) -> Option<String> {
     dict.get(key)
         .and_then(value_as_string)
         .filter(|value| !value.is_empty())
@@ -2857,7 +2854,7 @@ fn confidence_value(evidence: &ProjectEvidence) -> VmValue {
     {
         confidence.insert(label.clone(), VmValue::Float(*score));
     }
-    VmValue::Dict(std::sync::Arc::new(confidence))
+    VmValue::dict(confidence)
 }
 
 fn sorted_confident_labels(scores: &BTreeMap<String, f64>) -> Vec<String> {
@@ -2965,7 +2962,7 @@ fn catalog_entry_value(entry: &ProjectCatalogEntry) -> VmValue {
             .map(|value| VmValue::String(std::sync::Arc::from(value.to_string())))
             .unwrap_or(VmValue::Nil),
     );
-    VmValue::Dict(std::sync::Arc::new(value))
+    VmValue::dict(value)
 }
 
 #[cfg(test)]

@@ -1,4 +1,3 @@
-use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
@@ -31,7 +30,7 @@ fn worker_config_to_json(config: &WorkerConfig) -> serde_json::Value {
             "mode": "workflow",
             "graph": graph,
             "artifacts": artifacts,
-            "options": options.iter().map(|(key, value)| (key.clone(), crate::llm::vm_value_to_json(value))).collect::<BTreeMap<_, _>>(),
+            "options": options.iter().map(|(key, value)| (key.clone(), crate::llm::vm_value_to_json(value))).collect::<std::collections::BTreeMap<_, _>>(),
         }),
         WorkerConfig::Stage {
             node,
@@ -59,7 +58,7 @@ fn sub_agent_spec_to_json(spec: &SubAgentRunSpec) -> serde_json::Value {
             .options
             .iter()
             .map(|(key, value)| (key.clone(), crate::llm::vm_value_to_json(value)))
-            .collect::<BTreeMap<_, _>>(),
+            .collect::<std::collections::BTreeMap<_, _>>(),
         "returns_schema": spec
             .returns_schema
             .as_ref()
@@ -81,7 +80,7 @@ fn sub_agent_spec_from_json(value: &serde_json::Value) -> Result<SubAgentRunSpec
             options
                 .iter()
                 .map(|(key, value)| (key.clone(), crate::stdlib::json_to_vm_value(value)))
-                .collect::<BTreeMap<_, _>>()
+                .collect::<crate::value::DictMap>()
         })
         .unwrap_or_default();
     Ok(SubAgentRunSpec {
@@ -150,7 +149,7 @@ fn worker_config_from_json(value: &serde_json::Value) -> Result<WorkerConfig, Vm
             object
                 .iter()
                 .map(|(key, value)| (key.clone(), crate::stdlib::json_to_vm_value(value)))
-                .collect::<BTreeMap<_, _>>()
+                .collect::<crate::value::DictMap>()
         })
         .unwrap_or_default();
     let mut parser = OptionsParser::new(WORKER_SNAPSHOT_CONFIG, &parser_dict, ErrorKind::Runtime);
@@ -502,7 +501,7 @@ pub(in super::super) fn parse_worker_config(value: &VmValue) -> Result<WorkerIni
                 .cloned()
                 .unwrap_or_default();
             raw_model_policy.insert("permissions".to_string(), permissions);
-            node.raw_model_policy = Some(VmValue::Dict(std::sync::Arc::new(raw_model_policy)));
+            node.raw_model_policy = Some(VmValue::dict(raw_model_policy));
         }
         let artifacts = parse_artifact_list(artifacts_value)?;
         WorkerConfig::Stage {

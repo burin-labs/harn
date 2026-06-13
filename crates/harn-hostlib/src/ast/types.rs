@@ -8,7 +8,6 @@
 
 #![allow(missing_docs)]
 
-use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use harn_vm::VmValue;
@@ -81,7 +80,7 @@ pub struct Symbol {
 impl Symbol {
     /// Render as a `VmValue::Dict` matching `schemas/ast/symbols.response.json`.
     pub fn to_vm_value(&self) -> VmValue {
-        let mut dict: BTreeMap<String, VmValue> = BTreeMap::new();
+        let mut dict: harn_vm::value::DictMap = harn_vm::value::DictMap::new();
         dict.insert(
             "name".into(),
             VmValue::String(Arc::from(self.name.as_str())),
@@ -105,7 +104,7 @@ impl Symbol {
         dict.insert("start_col".into(), VmValue::Int(self.start_col as i64));
         dict.insert("end_row".into(), VmValue::Int(self.end_row as i64));
         dict.insert("end_col".into(), VmValue::Int(self.end_col as i64));
-        VmValue::Dict(Arc::new(dict))
+        VmValue::dict(dict)
     }
 }
 
@@ -123,7 +122,7 @@ pub struct OutlineItem {
 
 impl OutlineItem {
     pub fn to_vm_value(&self) -> VmValue {
-        let mut dict: BTreeMap<String, VmValue> = BTreeMap::new();
+        let mut dict: harn_vm::value::DictMap = harn_vm::value::DictMap::new();
         dict.insert(
             "name".into(),
             VmValue::String(Arc::from(self.name.as_str())),
@@ -140,7 +139,7 @@ impl OutlineItem {
         dict.insert("end_row".into(), VmValue::Int(self.end_row as i64));
         let kids: Vec<VmValue> = self.children.iter().map(OutlineItem::to_vm_value).collect();
         dict.insert("children".into(), VmValue::List(Arc::new(kids)));
-        VmValue::Dict(Arc::new(dict))
+        VmValue::dict(dict)
     }
 }
 
@@ -162,7 +161,7 @@ pub struct ParsedNode {
 
 impl ParsedNode {
     pub fn to_vm_value(&self) -> VmValue {
-        let mut dict: BTreeMap<String, VmValue> = BTreeMap::new();
+        let mut dict: harn_vm::value::DictMap = harn_vm::value::DictMap::new();
         dict.insert("id".into(), VmValue::Int(self.id as i64));
         dict.insert(
             "parent_id".into(),
@@ -180,7 +179,7 @@ impl ParsedNode {
         dict.insert("start_col".into(), VmValue::Int(self.start_col as i64));
         dict.insert("end_row".into(), VmValue::Int(self.end_row as i64));
         dict.insert("end_col".into(), VmValue::Int(self.end_col as i64));
-        VmValue::Dict(Arc::new(dict))
+        VmValue::dict(dict)
     }
 }
 
@@ -216,7 +215,7 @@ impl ParseError {
     /// localized, model-authored syntax mistake. Edit-validation gates use this
     /// to avoid hard-rejecting a correct edit on a grammar blind spot.
     pub fn to_vm_value_with_span(&self, spans_full_source: bool) -> VmValue {
-        let mut dict: BTreeMap<String, VmValue> = BTreeMap::new();
+        let mut dict: harn_vm::value::DictMap = harn_vm::value::DictMap::new();
         dict.insert("start_row".into(), VmValue::Int(self.start_row as i64));
         dict.insert("start_col".into(), VmValue::Int(self.start_col as i64));
         dict.insert("end_row".into(), VmValue::Int(self.end_row as i64));
@@ -233,7 +232,7 @@ impl ParseError {
         );
         dict.insert("missing".into(), VmValue::Bool(self.missing));
         dict.insert("spans_full_source".into(), VmValue::Bool(spans_full_source));
-        VmValue::Dict(Arc::new(dict))
+        VmValue::dict(dict)
     }
 }
 
@@ -250,7 +249,7 @@ pub struct UndefinedName {
 
 impl UndefinedName {
     pub fn to_vm_value(&self) -> VmValue {
-        let mut dict: BTreeMap<String, VmValue> = BTreeMap::new();
+        let mut dict: harn_vm::value::DictMap = harn_vm::value::DictMap::new();
         dict.insert(
             "name".into(),
             VmValue::String(Arc::from(self.name.as_str())),
@@ -263,6 +262,6 @@ impl UndefinedName {
             "message".into(),
             VmValue::String(Arc::from(message.as_str())),
         );
-        VmValue::Dict(Arc::new(dict))
+        VmValue::dict(dict)
     }
 }

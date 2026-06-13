@@ -16,7 +16,6 @@
 //!   eval scripts can route on it without re-deriving provider names.
 
 use crate::value::VmDictExt;
-use std::collections::BTreeMap;
 
 use crate::value::VmValue;
 
@@ -294,7 +293,7 @@ impl ProviderTelemetry {
         if self.is_empty() {
             return None;
         }
-        let mut dict: BTreeMap<String, VmValue> = BTreeMap::new();
+        let mut dict: crate::value::DictMap = crate::value::DictMap::new();
         if !self.source.is_empty() {
             dict.put_str("source", self.source.as_str());
         }
@@ -329,7 +328,7 @@ impl ProviderTelemetry {
         if let Some(ref request_id) = self.request_id {
             dict.put_str("request_id", request_id.as_str());
         }
-        Some(VmValue::Dict(std::sync::Arc::new(dict)))
+        Some(VmValue::dict(dict))
     }
 }
 
@@ -391,13 +390,13 @@ fn ms_or_round(value: Option<&serde_json::Value>) -> Option<u64> {
     value.as_f64().map(|n| n.round().max(0.0) as u64)
 }
 
-fn insert_opt_u64(dict: &mut BTreeMap<String, VmValue>, key: &str, value: Option<u64>) {
+fn insert_opt_u64(dict: &mut crate::value::DictMap, key: &str, value: Option<u64>) {
     if let Some(value) = value {
         dict.insert(key.to_string(), VmValue::Int(value as i64));
     }
 }
 
-fn insert_opt_i64(dict: &mut BTreeMap<String, VmValue>, key: &str, value: Option<i64>) {
+fn insert_opt_i64(dict: &mut crate::value::DictMap, key: &str, value: Option<i64>) {
     if let Some(value) = value {
         dict.insert(key.to_string(), VmValue::Int(value));
     }

@@ -144,17 +144,11 @@ fn status_value() -> VmValue {
     file_upload.put_str("wire_format", "x-mcp-file+rfc2397-data-uri");
 
     let mut experimental = BTreeMap::new();
-    experimental.insert(
-        "file_upload".to_string(),
-        VmValue::Dict(std::sync::Arc::new(file_upload)),
-    );
+    experimental.insert("file_upload".to_string(), VmValue::dict(file_upload));
 
     let mut root = BTreeMap::new();
-    root.insert(
-        "experimental".to_string(),
-        VmValue::Dict(std::sync::Arc::new(experimental)),
-    );
-    VmValue::Dict(std::sync::Arc::new(root))
+    root.insert("experimental".to_string(), VmValue::dict(experimental));
+    VmValue::dict(root)
 }
 
 fn ensure_enabled(name: &str) -> Result<(), VmError> {
@@ -205,17 +199,14 @@ fn file_input_schema(options: &VmValue) -> Result<VmValue, VmError> {
     let mut schema = BTreeMap::new();
     schema.put_str("type", "string");
     schema.put_str("format", "uri");
-    schema.insert(
-        X_MCP_FILE.to_string(),
-        VmValue::Dict(std::sync::Arc::new(descriptor)),
-    );
+    schema.insert(X_MCP_FILE.to_string(), VmValue::dict(descriptor));
     if let Some(title) = options.and_then(|opts| string_field(opts, "title")) {
         schema.put_str("title", title);
     }
     if let Some(description) = options.and_then(|opts| string_field(opts, "description")) {
         schema.put_str("description", description);
     }
-    Ok(VmValue::Dict(std::sync::Arc::new(schema)))
+    Ok(VmValue::dict(schema))
 }
 
 fn upload_file(args: &[VmValue]) -> Result<VmValue, VmError> {
@@ -644,21 +635,21 @@ fn redact_data_uri(raw: &str) -> String {
     format!("data:{media_type};redacted;sha256={}", &digest[..16])
 }
 
-fn string_field(map: &BTreeMap<String, VmValue>, key: &str) -> Option<String> {
+fn string_field(map: &crate::value::DictMap, key: &str) -> Option<String> {
     match map.get(key) {
         Some(VmValue::String(value)) => Some(value.to_string()),
         _ => None,
     }
 }
 
-fn int_field(map: &BTreeMap<String, VmValue>, key: &str) -> Option<i64> {
+fn int_field(map: &crate::value::DictMap, key: &str) -> Option<i64> {
     match map.get(key) {
         Some(VmValue::Int(value)) => Some(*value),
         _ => None,
     }
 }
 
-fn optional_bool(map: &BTreeMap<String, VmValue>, key: &str) -> Option<bool> {
+fn optional_bool(map: &crate::value::DictMap, key: &str) -> Option<bool> {
     match map.get(key) {
         Some(VmValue::Bool(value)) => Some(*value),
         _ => None,
@@ -683,7 +674,7 @@ fn list_of_strings(
 }
 
 fn string_vec_field(
-    map: &BTreeMap<String, VmValue>,
+    map: &crate::value::DictMap,
     key: &str,
     callee: &str,
 ) -> Result<Option<Vec<String>>, VmError> {
@@ -815,10 +806,7 @@ mod tests {
                 spec_revision: SPEC_REVISION.to_string(),
             });
         });
-        let options = VmValue::Dict(std::sync::Arc::new(BTreeMap::from([(
-            "max_size".to_string(),
-            VmValue::Int(-1),
-        )])));
+        let options = VmValue::dict(BTreeMap::from([("max_size".to_string(), VmValue::Int(-1))]));
         let err = file_input_schema(&options).expect_err("negative max_size should fail");
         assert!(err.to_string().contains("max_size must be non-negative"));
     }

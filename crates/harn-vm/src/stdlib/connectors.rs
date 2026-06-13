@@ -47,7 +47,7 @@ async fn connector_call_impl(
                 "connector_call: params must be a dict when provided",
             ))));
         }
-        _ => vm_value_to_json(&VmValue::Dict(std::sync::Arc::new(BTreeMap::new()))),
+        _ => vm_value_to_json(&VmValue::dict(BTreeMap::new())),
     };
 
     let client = active_connector_client(&provider).ok_or_else(|| {

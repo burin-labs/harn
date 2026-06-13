@@ -1,5 +1,4 @@
 use std::cell::RefCell;
-use std::collections::BTreeMap;
 #[cfg(not(windows))]
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
@@ -98,7 +97,7 @@ pub fn default_shell_vm_value() -> VmValue {
         .unwrap_or(VmValue::Nil)
 }
 
-pub fn set_default_shell_vm_value(params: &BTreeMap<String, VmValue>) -> Result<VmValue, VmError> {
+pub fn set_default_shell_vm_value(params: &crate::value::DictMap) -> Result<VmValue, VmError> {
     let shell_id = params
         .get("shell_id")
         .or_else(|| params.get("id"))
@@ -111,7 +110,7 @@ pub fn set_default_shell_vm_value(params: &BTreeMap<String, VmValue>) -> Result<
         .map_err(|err| VmError::Runtime(format!("process.set_default_shell: {err}")))
 }
 
-pub fn shell_invocation_vm_value(params: &BTreeMap<String, VmValue>) -> Result<VmValue, VmError> {
+pub fn shell_invocation_vm_value(params: &crate::value::DictMap) -> Result<VmValue, VmError> {
     resolve_invocation_from_vm_params(params)
         .map(|invocation| shell_invocation_to_vm_value(&invocation))
         .map_err(|err| VmError::Runtime(format!("process.shell_invocation: {err}")))
@@ -128,7 +127,7 @@ pub fn default_shell_invocation(command: &str) -> Result<ShellInvocation, String
 }
 
 pub fn resolve_invocation_from_vm_params(
-    params: &BTreeMap<String, VmValue>,
+    params: &crate::value::DictMap,
 ) -> Result<ShellInvocation, String> {
     // "{command}" is a downstream template placeholder, not a format string.
     #[allow(clippy::literal_string_with_formatting_args)]
@@ -144,7 +143,7 @@ pub fn resolve_invocation_from_vm_params(
 }
 
 pub fn resolve_shell_from_vm_params(
-    params: &BTreeMap<String, VmValue>,
+    params: &crate::value::DictMap,
 ) -> Result<ShellDescriptor, String> {
     if let Some(value) = params.get("shell") {
         if let Some(shell) = value.as_dict() {
@@ -169,7 +168,7 @@ pub fn resolve_shell_from_vm_params(
 }
 
 pub fn shell_descriptor_to_vm_value(shell: &ShellDescriptor) -> VmValue {
-    let mut map = BTreeMap::new();
+    let mut map = crate::value::DictMap::new();
     map.insert("id".to_string(), string(&shell.id));
     map.insert("label".to_string(), string(&shell.label));
     map.insert("path".to_string(), string(&shell.path));
@@ -186,11 +185,11 @@ pub fn shell_descriptor_to_vm_value(shell: &ShellDescriptor) -> VmValue {
     map.insert("default_args".to_string(), string_list(&shell.default_args));
     map.insert("login_args".to_string(), string_list(&shell.login_args));
     map.insert("source".to_string(), string(&shell.source));
-    VmValue::Dict(std::sync::Arc::new(map))
+    VmValue::dict(map)
 }
 
 pub fn shell_invocation_to_vm_value(invocation: &ShellInvocation) -> VmValue {
-    let mut map = BTreeMap::new();
+    let mut map = crate::value::DictMap::new();
     map.insert("program".to_string(), string(&invocation.program));
     map.insert("args".to_string(), string_list(&invocation.args));
     map.insert(
@@ -201,11 +200,11 @@ pub fn shell_invocation_to_vm_value(invocation: &ShellInvocation) -> VmValue {
         "shell".to_string(),
         shell_descriptor_to_vm_value(&invocation.shell),
     );
-    VmValue::Dict(std::sync::Arc::new(map))
+    VmValue::dict(map)
 }
 
 fn shell_catalog_to_vm_value(catalog: &ShellCatalog) -> VmValue {
-    let mut map = BTreeMap::new();
+    let mut map = crate::value::DictMap::new();
     map.insert(
         "shells".to_string(),
         VmValue::List(std::sync::Arc::new(
@@ -224,12 +223,10 @@ fn shell_catalog_to_vm_value(catalog: &ShellCatalog) -> VmValue {
             .map(|id| string(id))
             .unwrap_or(VmValue::Nil),
     );
-    VmValue::Dict(std::sync::Arc::new(map))
+    VmValue::dict(map)
 }
 
-fn shell_descriptor_from_vm_dict(
-    dict: &BTreeMap<String, VmValue>,
-) -> Result<ShellDescriptor, String> {
+fn shell_descriptor_from_vm_dict(dict: &crate::value::DictMap) -> Result<ShellDescriptor, String> {
     if let Some(path) = dict.get("path").and_then(vm_string) {
         let id = dict
             .get("id")
@@ -547,7 +544,7 @@ fn shells_from_etc_shells() -> Vec<String> {
         .collect()
 }
 
-fn optional_bool(params: &BTreeMap<String, VmValue>, key: &str) -> Option<bool> {
+fn optional_bool(params: &crate::value::DictMap, key: &str) -> Option<bool> {
     match params.get(key) {
         Some(VmValue::Bool(value)) => Some(*value),
         _ => None,
@@ -632,7 +629,7 @@ mod tests {
         clear_selected_default_shell_for_test();
         let default_shell = get_default_shell().expect("test host should expose a default shell");
 
-        let mut params = BTreeMap::new();
+        let mut params = crate::value::DictMap::new();
         params.insert("command".to_string(), string("echo default-shell"));
 
         let invocation = resolve_invocation_from_vm_params(&params).unwrap();
@@ -646,14 +643,14 @@ mod tests {
 
     #[test]
     fn malformed_explicit_shell_fields_do_not_fall_back_to_default() {
-        let mut params = BTreeMap::new();
+        let mut params = crate::value::DictMap::new();
         params.insert("shell".to_string(), VmValue::Int(1));
         assert_eq!(
             resolve_shell_from_vm_params(&params).unwrap_err(),
             "shell must be a dict, got int"
         );
 
-        let mut params = BTreeMap::new();
+        let mut params = crate::value::DictMap::new();
         params.insert("shell_id".to_string(), VmValue::Int(1));
         assert_eq!(
             resolve_shell_from_vm_params(&params).unwrap_err(),

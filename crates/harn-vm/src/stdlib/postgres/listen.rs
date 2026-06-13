@@ -70,7 +70,7 @@ impl ListenerRecord {
 
 thread_local! {
     static LISTENERS: RefCell<BTreeMap<String, Arc<ListenerRecord>>> =
-        const { RefCell::new(BTreeMap::new()) };
+        const { RefCell::new(std::collections::BTreeMap::new()) };
 }
 
 pub(super) fn reset_state() {
@@ -120,7 +120,7 @@ async fn pg_listen_impl(
             .insert(id.clone(), Arc::clone(&record));
     });
 
-    let mut meta = BTreeMap::new();
+    let mut meta = crate::value::DictMap::new();
     meta.insert(
         "channels".to_string(),
         VmValue::List(std::sync::Arc::new(
@@ -176,14 +176,14 @@ async fn pg_listener_recv_impl(
 
     let channel = notification.channel().to_string();
     let payload = notification.payload().to_string();
-    let mut dict = BTreeMap::new();
+    let mut dict = crate::value::DictMap::new();
     dict.put_str("channel", channel.clone());
     dict.put_str("payload", payload.clone());
     dict.insert(
         "process_id".to_string(),
         VmValue::Int(i64::from(notification.process_id())),
     );
-    let value = VmValue::Dict(std::sync::Arc::new(dict));
+    let value = VmValue::dict(dict);
 
     if record.bridge {
         let parsed_payload: serde_json::Value = serde_json::from_str(&payload)

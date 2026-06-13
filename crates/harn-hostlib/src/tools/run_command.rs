@@ -19,8 +19,6 @@
 
 use harn_vm::VmDictExt;
 use harn_vm::VmValue;
-use std::collections::BTreeMap;
-use std::sync::Arc;
 use std::time::Duration;
 
 use crate::error::HostlibError;
@@ -174,7 +172,7 @@ fn initial_background_snapshot(
         info.command_display.clone(),
     ) {
         VmValue::Dict(map) => (*map).clone(),
-        _ => BTreeMap::new(),
+        _ => harn_vm::value::DictMap::new(),
     };
     response.put_str("feedback_kind", "tool_progress");
     response.insert("duration_ms".to_string(), VmValue::Int(wait_ms as i64));
@@ -182,12 +180,10 @@ fn initial_background_snapshot(
     response.put_str("stderr", inline_stderr);
     response.insert("byte_count".to_string(), VmValue::Int(byte_count as i64));
     response.insert("line_count".to_string(), VmValue::Int(line_count as i64));
-    VmValue::Dict(Arc::new(response))
+    VmValue::dict(response)
 }
 
-fn parse_command(
-    map: &std::collections::BTreeMap<String, VmValue>,
-) -> Result<(String, Vec<String>), HostlibError> {
+fn parse_command(map: &harn_vm::value::DictMap) -> Result<(String, Vec<String>), HostlibError> {
     match optional_string(NAME, map, "mode")?
         .as_deref()
         .unwrap_or("argv")
@@ -206,7 +202,7 @@ fn parse_command(
                     builtin: NAME,
                     param: "command",
                 })?;
-            let mut invocation = BTreeMap::new();
+            let mut invocation = harn_vm::value::DictMap::new();
             invocation.put_str("command", command);
             if let Some(shell_id) = optional_string(NAME, map, "shell_id")? {
                 invocation.put_str("shell_id", shell_id);
@@ -249,7 +245,7 @@ fn parse_command(
 }
 
 fn parse_env_mode(
-    map: &std::collections::BTreeMap<String, VmValue>,
+    map: &harn_vm::value::DictMap,
     env_supplied: bool,
 ) -> Result<EnvMode, HostlibError> {
     match optional_string(NAME, map, "env_mode")?.as_deref() {
@@ -268,9 +264,7 @@ fn parse_env_mode(
     }
 }
 
-fn parse_capture(
-    map: &std::collections::BTreeMap<String, VmValue>,
-) -> Result<CaptureConfig, HostlibError> {
+fn parse_capture(map: &harn_vm::value::DictMap) -> Result<CaptureConfig, HostlibError> {
     let mut capture = CaptureConfig::default();
     if let Some(capture_value) = map.get("capture") {
         match capture_value {

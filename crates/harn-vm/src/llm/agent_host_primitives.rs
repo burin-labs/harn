@@ -1,4 +1,3 @@
-use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use futures::stream::{FuturesUnordered, StreamExt};
@@ -89,13 +88,13 @@ async fn host_agent_capture_events_impl(
                 .collect::<Vec<_>>()
         })
         .unwrap_or_default();
-    let mut envelope = std::collections::BTreeMap::new();
+    let mut envelope = crate::value::DictMap::new();
     envelope.insert("result".to_string(), result);
     envelope.insert(
         "events".to_string(),
         json_to_vm_value(&serde_json::Value::Array(events)),
     );
-    Ok(VmValue::Dict(std::sync::Arc::new(envelope)))
+    Ok(VmValue::dict(envelope))
 }
 
 fn agent_primitive_tools_arg(
@@ -130,12 +129,12 @@ fn agent_primitive_tools_value_arg(
 fn agent_primitive_options_value_arg(
     value: Option<VmValue>,
     label: &str,
-) -> Result<std::collections::BTreeMap<String, VmValue>, VmError> {
+) -> Result<crate::value::DictMap, VmError> {
     match value {
         Some(VmValue::Dict(options)) => {
             Ok(Arc::try_unwrap(options).unwrap_or_else(|options| options.as_ref().clone()))
         }
-        Some(VmValue::Nil) | None => Ok(std::collections::BTreeMap::new()),
+        Some(VmValue::Nil) | None => Ok(crate::value::DictMap::new()),
         Some(other) => Err(VmError::Runtime(format!(
             "{label}: options must be a dict or nil; got {}",
             other.type_name()
@@ -143,20 +142,14 @@ fn agent_primitive_options_value_arg(
     }
 }
 
-fn agent_primitive_option_str(
-    options: &std::collections::BTreeMap<String, VmValue>,
-    key: &str,
-) -> Option<String> {
+fn agent_primitive_option_str(options: &crate::value::DictMap, key: &str) -> Option<String> {
     match options.get(key)? {
         VmValue::Nil => None,
         value => Some(value.display()),
     }
 }
 
-fn agent_primitive_option_int(
-    options: &std::collections::BTreeMap<String, VmValue>,
-    key: &str,
-) -> Option<i64> {
+fn agent_primitive_option_int(options: &crate::value::DictMap, key: &str) -> Option<i64> {
     options.get(key)?.as_int()
 }
 
@@ -521,7 +514,7 @@ async fn host_agent_parse_tool_calls_impl(
     })))
 }
 
-fn agent_primitive_max_concurrent_tools(options: &BTreeMap<String, VmValue>) -> usize {
+fn agent_primitive_max_concurrent_tools(options: &crate::value::DictMap) -> usize {
     agent_primitive_option_int(options, "_max_concurrent_tools")
         .or_else(|| agent_primitive_option_int(options, "max_concurrent_tools"))
         .unwrap_or(1)
@@ -533,7 +526,7 @@ async fn host_agent_dispatch_tool_call_indexed<'a>(
     index: usize,
     call: VmValue,
     tools: Option<&'a VmValue>,
-    options: &'a BTreeMap<String, VmValue>,
+    options: &'a crate::value::DictMap,
 ) -> (usize, Result<VmValue, VmError>) {
     (
         index,
@@ -545,7 +538,7 @@ async fn host_agent_dispatch_tool_batch_capped(
     ctx: crate::vm::AsyncBuiltinCtx,
     calls: Vec<VmValue>,
     tools: Option<&VmValue>,
-    options: &BTreeMap<String, VmValue>,
+    options: &crate::value::DictMap,
     cap: usize,
 ) -> Result<Vec<VmValue>, VmError> {
     let total = calls.len();
@@ -826,7 +819,7 @@ async fn host_agent_dispatch_tool_call(
     ctx: crate::vm::AsyncBuiltinCtx,
     call: VmValue,
     tools: Option<&VmValue>,
-    options: &BTreeMap<String, VmValue>,
+    options: &crate::value::DictMap,
 ) -> Result<VmValue, VmError> {
     let call = match call {
         VmValue::Dict(call) => call,
@@ -1299,7 +1292,8 @@ async fn host_agent_dispatch_tool_call(
     // Session-scoped MCP clients (from opts.mcp_servers) bypass the bridge.
     let session_mcp = {
         use std::collections::BTreeMap;
-        let mut clients: BTreeMap<String, crate::mcp::VmMcpClientHandle> = BTreeMap::new();
+        let mut clients: BTreeMap<String, crate::mcp::VmMcpClientHandle> =
+            std::collections::BTreeMap::new();
         if let Some(server_name) = agent_tools::mcp_server_for_tool(tools, &tool_name) {
             if let Some(handle) = agent_runtime::session_mcp_client(&session_id, &server_name) {
                 clients.insert(server_name, handle);
@@ -1641,7 +1635,8 @@ async fn host_mcp_bootstrap_impl(
         }
     };
 
-    let mut clients: BTreeMap<String, crate::mcp::VmMcpClientHandle> = BTreeMap::new();
+    let mut clients: BTreeMap<String, crate::mcp::VmMcpClientHandle> =
+        std::collections::BTreeMap::new();
     let mut tools_added: Vec<serde_json::Value> = Vec::new();
     let mut server_infos: Vec<serde_json::Value> = Vec::new();
     let mut errors: Vec<serde_json::Value> = Vec::new();
@@ -1830,7 +1825,7 @@ async fn host_agent_reminder_providers_fire_impl(
 mod security_gate_tests {
     use super::{tool_descriptor_for, trifecta_gate_reason, upgrade_to_trifecta_ask};
     use crate::value::VmValue;
-    use std::collections::BTreeMap;
+
     use std::sync::Arc;
 
     fn allow_decision() -> crate::orchestration::PolicyEvaluation {
@@ -1966,18 +1961,18 @@ mod security_gate_tests {
 
     #[test]
     fn tool_descriptor_extracts_description_and_schema_changed() {
-        let mut tool = BTreeMap::new();
+        let mut tool = crate::value::DictMap::new();
         tool.insert("name".to_string(), vm_str("linear__create"));
         tool.insert("description".to_string(), vm_str("Create an issue"));
         tool.insert("_mcp_server".to_string(), vm_str("linear"));
         tool.insert("_schema_changed".to_string(), VmValue::Bool(true));
         let catalog = {
-            let mut dict = BTreeMap::new();
+            let mut dict = crate::value::DictMap::new();
             dict.insert(
                 "tools".to_string(),
-                VmValue::List(Arc::new(vec![VmValue::Dict(Arc::new(tool))])),
+                VmValue::List(Arc::new(vec![VmValue::dict(tool)])),
             );
-            VmValue::Dict(Arc::new(dict))
+            VmValue::dict(dict)
         };
 
         let descriptor = tool_descriptor_for(Some(&catalog), "linear__create").expect("descriptor");

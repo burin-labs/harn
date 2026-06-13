@@ -121,7 +121,7 @@ pub(super) fn event_to_handler_value(event: &TriggerEvent) -> Result<VmValue, Di
                 "raw_body".to_string(),
                 VmValue::Bytes(std::sync::Arc::new(raw_body.clone())),
             );
-            Ok(VmValue::Dict(std::sync::Arc::new(map)))
+            Ok(VmValue::dict(map))
         }
         (_, other) => Ok(other),
     }

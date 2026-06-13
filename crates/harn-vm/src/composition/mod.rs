@@ -880,7 +880,7 @@ fn register_composition_map_bounded_builtin(vm: &mut Vm, runtime: CompositionRun
             );
             dict.insert("succeeded".to_string(), VmValue::Int(succeeded));
             dict.insert("failed".to_string(), VmValue::Int(failed));
-            Ok(VmValue::Dict(std::sync::Arc::new(dict)))
+            Ok(VmValue::dict(dict))
         }
     });
 }

@@ -1,13 +1,12 @@
 use crate::value::VmDictExt;
-use std::collections::BTreeMap;
 
 use crate::value::{VmError, VmValue};
 
 tokio::task_local! {
-    static COST_ROUTE_STACK: Vec<BTreeMap<String, VmValue>>;
+    static COST_ROUTE_STACK: Vec<crate::value::DictMap>;
 }
 
-fn strategy_text(config: &BTreeMap<String, VmValue>) -> Option<String> {
+fn strategy_text(config: &crate::value::DictMap) -> Option<String> {
     config
         .get("fallback_strategy")
         .or_else(|| config.get("strategy"))
@@ -15,7 +14,7 @@ fn strategy_text(config: &BTreeMap<String, VmValue>) -> Option<String> {
         .filter(|value| !value.trim().is_empty())
 }
 
-fn quality_text(config: &BTreeMap<String, VmValue>) -> String {
+fn quality_text(config: &crate::value::DictMap) -> String {
     config
         .get("quality")
         .or_else(|| config.get("min_quality"))
@@ -30,7 +29,7 @@ fn route_policy_dict(
     prefer: Option<VmValue>,
     strategy: Option<String>,
 ) -> VmValue {
-    let mut dict = BTreeMap::new();
+    let mut dict = crate::value::DictMap::new();
     dict.put_str("mode", mode);
     if let Some(target) = target {
         dict.put_str("target", target);
@@ -41,16 +40,16 @@ fn route_policy_dict(
     if let Some(strategy) = strategy {
         dict.put_str("strategy", strategy);
     }
-    VmValue::Dict(std::sync::Arc::new(dict))
+    VmValue::dict(dict)
 }
 
-fn merge_budget_aliases(options: &mut BTreeMap<String, VmValue>) {
+fn merge_budget_aliases(options: &mut crate::value::DictMap) {
     let Some(budget_usd) = options.get("budget_usd").cloned() else {
         return;
     };
     let mut budget = match options.get("budget") {
         Some(VmValue::Dict(existing)) => existing.as_ref().clone(),
-        _ => BTreeMap::new(),
+        _ => crate::value::DictMap::new(),
     };
     budget
         .entry("max_cost_usd".to_string())
@@ -58,13 +57,10 @@ fn merge_budget_aliases(options: &mut BTreeMap<String, VmValue>) {
     options
         .entry("max_cost_usd".to_string())
         .or_insert(budget_usd);
-    options.insert(
-        "budget".to_string(),
-        VmValue::Dict(std::sync::Arc::new(budget)),
-    );
+    options.insert("budget".to_string(), VmValue::dict(budget));
 }
 
-fn normalize_config(mut config: BTreeMap<String, VmValue>) -> BTreeMap<String, VmValue> {
+fn normalize_config(mut config: crate::value::DictMap) -> crate::value::DictMap {
     merge_budget_aliases(&mut config);
     if config.contains_key("route_policy") {
         return config;
@@ -101,11 +97,11 @@ fn merge_budget(inherited: Option<&VmValue>, explicit: Option<&VmValue>) -> Opti
     let mut merged = match inherited {
         Some(VmValue::Dict(dict)) => dict.as_ref().clone(),
         Some(value) => {
-            let mut dict = BTreeMap::new();
+            let mut dict = crate::value::DictMap::new();
             dict.insert("max_cost_usd".to_string(), value.clone());
             dict
         }
-        None => BTreeMap::new(),
+        None => crate::value::DictMap::new(),
     };
     if let Some(VmValue::Dict(dict)) = explicit {
         for (key, value) in dict.iter() {
@@ -114,15 +110,15 @@ fn merge_budget(inherited: Option<&VmValue>, explicit: Option<&VmValue>) -> Opti
     } else if let Some(value) = explicit {
         merged.insert("max_cost_usd".to_string(), value.clone());
     }
-    (!merged.is_empty()).then(|| VmValue::Dict(std::sync::Arc::new(merged)))
+    (!merged.is_empty()).then(|| VmValue::dict(merged))
 }
 
 pub(crate) fn merge_context_options(
-    explicit: Option<BTreeMap<String, VmValue>>,
-) -> Option<BTreeMap<String, VmValue>> {
+    explicit: Option<crate::value::DictMap>,
+) -> Option<crate::value::DictMap> {
     let inherited = COST_ROUTE_STACK
         .try_with(|stack| {
-            let mut merged = BTreeMap::new();
+            let mut merged = crate::value::DictMap::new();
             for frame in stack.iter() {
                 for (key, value) in frame {
                     merged.insert(key.clone(), value.clone());

@@ -358,13 +358,11 @@ fn test_evaluate() {
 
 #[test]
 fn test_evaluate_dot_access() {
-    use std::sync::Arc;
-
     let mut dbg = Debugger::new();
     let mut inner = BTreeMap::new();
     inner.insert("bar".to_string(), VmValue::Int(99));
     dbg.variables
-        .insert("foo".to_string(), VmValue::Dict(Arc::new(inner)));
+        .insert("foo".to_string(), VmValue::dict(inner));
 
     let responses = dbg.handle_message(make_request(
         1,
@@ -379,15 +377,12 @@ fn test_evaluate_dot_access() {
 
 #[test]
 fn test_evaluate_nested_dot_access() {
-    use std::sync::Arc;
-
     let mut dbg = Debugger::new();
     let mut inner = BTreeMap::new();
     inner.insert("c".to_string(), VmValue::String("deep".into()));
     let mut outer = BTreeMap::new();
-    outer.insert("b".to_string(), VmValue::Dict(Arc::new(inner)));
-    dbg.variables
-        .insert("a".to_string(), VmValue::Dict(Arc::new(outer)));
+    outer.insert("b".to_string(), VmValue::dict(inner));
+    dbg.variables.insert("a".to_string(), VmValue::dict(outer));
 
     let responses = dbg.handle_message(make_request(
         1,
@@ -401,13 +396,10 @@ fn test_evaluate_nested_dot_access() {
 
 #[test]
 fn test_evaluate_complex_value_has_var_ref() {
-    use std::sync::Arc;
-
     let mut dbg = Debugger::new();
     let mut map = BTreeMap::new();
     map.insert("key".to_string(), VmValue::Int(1));
-    dbg.variables
-        .insert("d".to_string(), VmValue::Dict(Arc::new(map)));
+    dbg.variables.insert("d".to_string(), VmValue::dict(map));
 
     let responses = dbg.handle_message(make_request(
         1,
@@ -1012,7 +1004,6 @@ fn test_modules_with_explicit_zero_module_count_returns_all() {
 #[test]
 fn test_triggered_breakpoint_skipped_until_trigger_fires() {
     use super::breakpoints::BreakpointAction;
-    use std::collections::BTreeMap;
 
     let mut dbg = Debugger::new();
     // Arrange two breakpoints: trigger (id=1, line 5) and dependent
@@ -1036,7 +1027,7 @@ fn test_triggered_breakpoint_skipped_until_trigger_fires() {
         .expect("dep BP present");
 
     // With no trigger fired, hitting line 10 must skip.
-    let vars: BTreeMap<String, harn_vm::VmValue> = BTreeMap::new();
+    let vars: harn_vm::value::DictMap = Default::default();
     let action = dbg.classify_breakpoint_hit(10, &vars);
     assert!(
         matches!(action, BreakpointAction::Skip),
@@ -1427,7 +1418,7 @@ fn test_hit_condition_matches_parses_all_forms() {
     assert_eq!(hit_condition_matches("hello", 1), None);
     assert_eq!(hit_condition_matches("= =1", 1), None);
 
-    let mut vars = BTreeMap::new();
+    let mut vars = harn_vm::value::DictMap::new();
     vars.insert("count".to_string(), VmValue::Int(5));
     vars.put_str("label", "ready");
 

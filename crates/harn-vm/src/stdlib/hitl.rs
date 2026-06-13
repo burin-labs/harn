@@ -619,7 +619,7 @@ pub(crate) async fn request_approval_for_side_effect(
     reviewers: Vec<String>,
     capabilities_requested: Vec<String>,
 ) -> Result<VmValue, VmError> {
-    let mut options = BTreeMap::new();
+    let mut options = crate::value::DictMap::new();
     options.insert("args".to_string(), crate::stdlib::json_to_vm_value(&detail));
     options.insert(
         "detail".to_string(),
@@ -646,7 +646,7 @@ pub(crate) async fn request_approval_for_side_effect(
     );
     let args = vec![
         VmValue::String(std::sync::Arc::from(action.to_string())),
-        VmValue::Dict(std::sync::Arc::new(options)),
+        VmValue::dict(options),
     ];
     request_approval_impl(None, &args).await
 }
@@ -1397,7 +1397,7 @@ async fn maybe_apply_mock_response(
         .unwrap_or_default()
         .into_iter()
         .map(|(key, value)| (key, crate::stdlib::json_to_vm_value(&value)))
-        .collect::<BTreeMap<_, _>>();
+        .collect::<crate::value::DictMap>();
     params.put_str("request_id", request_id);
     let Some(result) = dispatch_mock_host_call("hitl", kind.as_str(), &params) else {
         return Ok(());
@@ -1424,7 +1424,7 @@ async fn maybe_apply_mock_response(
 
 fn parse_hitl_response_dict(
     request_id: &str,
-    response_dict: &BTreeMap<String, VmValue>,
+    response_dict: &crate::value::DictMap,
 ) -> Result<HitlHostResponse, VmError> {
     Ok(HitlHostResponse {
         request_id: request_id.to_string(),
@@ -1707,7 +1707,7 @@ fn request_headers(request: &HitlRequestEnvelope) -> BTreeMap<String, String> {
 }
 
 fn response_headers(request_id: &str) -> BTreeMap<String, String> {
-    let mut headers = BTreeMap::new();
+    let mut headers = std::collections::BTreeMap::new();
     headers.insert("request_id".to_string(), request_id.to_string());
     headers
 }

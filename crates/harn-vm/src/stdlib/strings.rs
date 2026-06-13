@@ -173,7 +173,7 @@ fn provenance_result_dict(
         "spans".to_string(),
         VmValue::List(std::sync::Arc::new(spans_list)),
     );
-    VmValue::Dict(std::sync::Arc::new(out))
+    VmValue::dict(out)
 }
 
 fn span_to_vm_dict(span: &PromptSourceSpan) -> VmValue {
@@ -208,7 +208,7 @@ fn span_to_vm_dict(span: &PromptSourceSpan) -> VmValue {
     if let Some(parent) = span.parent_span.as_deref() {
         d.insert("parent_span".into(), span_to_vm_dict(parent));
     }
-    VmValue::Dict(std::sync::Arc::new(d))
+    VmValue::dict(d)
 }
 
 fn span_kind_label(kind: PromptSpanKind) -> &'static str {

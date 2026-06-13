@@ -36,7 +36,7 @@ fn display_non_empty(value: Option<&VmValue>) -> Option<String> {
 }
 
 pub(in crate::stdlib::agents) fn parse_worker_carry_policy(
-    dict: &BTreeMap<String, VmValue>,
+    dict: &crate::value::DictMap,
 ) -> Result<WorkerCarryPolicy, VmError> {
     let mut parent = OptionsParser::new(SPAWN_AGENT_FN, dict, ErrorKind::Runtime);
     let Some(carry) = parent.optional_dict("carry")? else {
@@ -141,7 +141,7 @@ fn parse_worker_tools_policy(value: Option<&VmValue>) -> Result<Option<Capabilit
 }
 
 pub(super) fn resolve_worker_policy(
-    dict: &BTreeMap<String, VmValue>,
+    dict: &crate::value::DictMap,
 ) -> Result<Option<CapabilityPolicy>, VmError> {
     let carry = dict
         .get("carry")
@@ -224,16 +224,16 @@ fn fork_worker_transcript(transcript: VmValue) -> VmValue {
             Some(VmValue::Dict(metadata)) => {
                 let mut metadata = metadata.as_ref().clone();
                 metadata.put_str("parent_transcript_id", parent_id);
-                VmValue::Dict(std::sync::Arc::new(metadata))
+                VmValue::dict(metadata)
             }
-            _ => VmValue::Dict(std::sync::Arc::new(BTreeMap::from([(
+            _ => VmValue::dict(BTreeMap::from([(
                 "parent_transcript_id".to_string(),
                 VmValue::String(std::sync::Arc::from(parent_id)),
-            )]))),
+            )])),
         };
         next.insert("metadata".to_string(), metadata);
     }
-    VmValue::Dict(std::sync::Arc::new(next))
+    VmValue::dict(next)
 }
 
 pub(in super::super) async fn compact_worker_transcript(
@@ -294,5 +294,5 @@ pub(in super::super) async fn compact_worker_transcript(
         VmValue::List(std::sync::Arc::new(events)),
     );
     next.put_str("summary", outcome.summary);
-    Ok(VmValue::Dict(std::sync::Arc::new(next)))
+    Ok(VmValue::dict(next))
 }

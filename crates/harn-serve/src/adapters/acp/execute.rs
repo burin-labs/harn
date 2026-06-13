@@ -133,7 +133,7 @@ pub(super) async fn execute_chunk(
 
     let mcp_globals = load_host_mcp_clients(host_bridge.clone()).await;
     if !mcp_globals.is_empty() {
-        vm.set_global("mcp", harn_vm::VmValue::Dict(Arc::new(mcp_globals)));
+        vm.set_global("mcp", harn_vm::VmValue::dict(mcp_globals));
     }
 
     builtins::register_acp_builtins(&mut vm, bridge.clone()).await;

@@ -422,7 +422,7 @@ pub fn violation_vm_error(audit: &NetPolicyAudit) -> VmError {
     if audit.bypass {
         dict.insert("bypass".to_string(), VmValue::Bool(true));
     }
-    VmError::Thrown(VmValue::Dict(std::sync::Arc::new(dict)))
+    VmError::Thrown(VmValue::dict(dict))
 }
 
 /// Build the request envelope handed to the user `on_violation`
@@ -449,7 +449,7 @@ pub fn violation_request_value(audit: &NetPolicyAudit) -> VmValue {
             .map(|raw| VmValue::String(std::sync::Arc::from(raw)))
             .unwrap_or(VmValue::Nil),
     );
-    VmValue::Dict(std::sync::Arc::new(dict))
+    VmValue::dict(dict)
 }
 
 /// Emit a `harness.net.policy.audit` event to the active event log,
@@ -530,7 +530,7 @@ pub mod parse {
         }
     }
 
-    fn rule_from_dict(dict: &BTreeMap<String, VmValue>) -> Result<NetPolicyRule, VmError> {
+    fn rule_from_dict(dict: &crate::value::DictMap) -> Result<NetPolicyRule, VmError> {
         let tag = dict
             .get(RULE_TAG_KEY)
             .and_then(|v| match v {
@@ -585,7 +585,7 @@ pub mod parse {
     }
 
     fn require_string(
-        dict: &BTreeMap<String, VmValue>,
+        dict: &crate::value::DictMap,
         key: &str,
         callee: &str,
     ) -> Result<String, VmError> {
@@ -601,7 +601,7 @@ pub mod parse {
 
     /// Build a `NetPolicy` value from the `{allow, deny, default,
     /// on_violation}` dict produced by `NetPolicy.create(...)`.
-    pub fn policy_from_dict(dict: &BTreeMap<String, VmValue>) -> Result<NetPolicy, VmError> {
+    pub fn policy_from_dict(dict: &crate::value::DictMap) -> Result<NetPolicy, VmError> {
         let allow = parse_rule_list(dict.get("allow"), "allow")?;
         let deny = parse_rule_list(dict.get("deny"), "deny")?;
         let default = match dict.get("default") {

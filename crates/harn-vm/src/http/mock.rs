@@ -8,7 +8,7 @@ use crate::value::VmValue;
 pub(super) struct MockResponse {
     pub(super) status: i64,
     pub(super) body: String,
-    pub(super) headers: BTreeMap<String, VmValue>,
+    pub(super) headers: crate::value::DictMap,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -58,7 +58,7 @@ struct HttpMock {
 struct HttpMockCall {
     method: String,
     url: String,
-    headers: BTreeMap<String, VmValue>,
+    headers: crate::value::DictMap,
     body: Option<String>,
 }
 
@@ -150,10 +150,7 @@ pub(super) fn http_mock_calls_value(redact_sensitive: bool) -> Vec<VmValue> {
                 dict.put_str("url", redact_mock_call_url(&call.url, redact_sensitive));
                 dict.insert(
                     "headers".to_string(),
-                    VmValue::Dict(std::sync::Arc::new(mock_call_headers_value(
-                        &call.headers,
-                        redact_sensitive,
-                    ))),
+                    VmValue::dict(mock_call_headers_value(&call.headers, redact_sensitive)),
                 );
                 dict.insert(
                     "body".to_string(),
@@ -162,13 +159,13 @@ pub(super) fn http_mock_calls_value(redact_sensitive: bool) -> Vec<VmValue> {
                         None => VmValue::Nil,
                     },
                 );
-                VmValue::Dict(std::sync::Arc::new(dict))
+                VmValue::dict(dict)
             })
             .collect()
     })
 }
 
-pub(super) fn parse_mock_responses(response: &BTreeMap<String, VmValue>) -> Vec<MockResponse> {
+pub(super) fn parse_mock_responses(response: &crate::value::DictMap) -> Vec<MockResponse> {
     let scripted = response
         .get("responses")
         .and_then(|value| match value {
@@ -189,7 +186,7 @@ pub(super) fn parse_mock_responses(response: &BTreeMap<String, VmValue>) -> Vec<
     }
 }
 
-fn parse_mock_response_dict(response: &BTreeMap<String, VmValue>) -> MockResponse {
+fn parse_mock_response_dict(response: &crate::value::DictMap) -> MockResponse {
     let status = response
         .get("status")
         .and_then(|v| v.as_int())
@@ -213,7 +210,7 @@ fn parse_mock_response_dict(response: &BTreeMap<String, VmValue>) -> MockRespons
 pub(super) fn consume_http_mock(
     method: &str,
     url: &str,
-    headers: BTreeMap<String, VmValue>,
+    headers: crate::value::DictMap,
     body: Option<String>,
 ) -> Option<MockResponse> {
     let response = HTTP_MOCKS.with(|mocks| {
@@ -291,9 +288,9 @@ pub(super) fn redact_mock_call_url(url: &str, redact: bool) -> String {
 }
 
 pub(super) fn mock_call_headers_value(
-    headers: &BTreeMap<String, VmValue>,
+    headers: &crate::value::DictMap,
     redact_headers: bool,
-) -> BTreeMap<String, VmValue> {
+) -> crate::value::DictMap {
     if !redact_headers {
         return headers.clone();
     }

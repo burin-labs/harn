@@ -164,9 +164,7 @@ fn throw_error_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmEr
     let mut err_dict = BTreeMap::new();
     err_dict.put_str("message", message.as_str());
     err_dict.put_str("category", category.as_str());
-    Err(VmError::Thrown(VmValue::Dict(std::sync::Arc::new(
-        err_dict,
-    ))))
+    Err(VmError::Thrown(VmValue::dict(err_dict)))
 }
 
 #[harn_builtin(sig = "is_timeout(error: any) -> bool", category = "testing")]
@@ -245,10 +243,10 @@ mod tests {
     use super::*;
 
     fn dict_err(category: &str) -> VmValue {
-        VmValue::Dict(std::sync::Arc::new(std::collections::BTreeMap::from([(
+        VmValue::dict(std::collections::BTreeMap::from([(
             "category".to_string(),
             VmValue::String(std::sync::Arc::from(category)),
-        )])))
+        )]))
     }
 
     fn as_bool(result: Result<VmValue, VmError>) -> bool {

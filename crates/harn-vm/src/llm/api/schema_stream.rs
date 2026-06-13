@@ -200,11 +200,8 @@ pub(crate) fn aborted_result_value(abort: &SchemaStreamAbort) -> VmValue {
     dict.insert("input_tokens".to_string(), VmValue::Int(0));
     dict.insert("output_tokens".to_string(), VmValue::Int(0));
     dict.insert("data".to_string(), VmValue::Nil);
-    dict.insert(
-        "schema_stream_aborted".to_string(),
-        VmValue::Dict(std::sync::Arc::new(meta)),
-    );
-    VmValue::Dict(std::sync::Arc::new(dict))
+    dict.insert("schema_stream_aborted".to_string(), VmValue::dict(meta));
+    VmValue::dict(dict)
 }
 
 #[cfg(test)]

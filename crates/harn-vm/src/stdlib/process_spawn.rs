@@ -201,7 +201,7 @@ fn evict_if_needed(registry: &mut BTreeMap<String, Arc<SpawnEntry>>) {
 /// can fall through.
 pub(crate) async fn dispatch(
     operation: &str,
-    params: &BTreeMap<String, VmValue>,
+    params: &crate::value::DictMap,
 ) -> Option<Result<VmValue, VmError>> {
     match operation {
         "spawn" => Some(spawn(params).await),
@@ -213,7 +213,7 @@ pub(crate) async fn dispatch(
     }
 }
 
-async fn spawn(params: &BTreeMap<String, VmValue>) -> Result<VmValue, VmError> {
+async fn spawn(params: &crate::value::DictMap) -> Result<VmValue, VmError> {
     let timeout_ms = optional_i64(params, "timeout")
         .or_else(|| optional_i64(params, "timeout_ms"))
         .filter(|value| *value > 0)
@@ -276,7 +276,7 @@ async fn spawn(params: &BTreeMap<String, VmValue>) -> Result<VmValue, VmError> {
     result.put_str("started_at", started_at);
     result.put_str("command", command_display);
     result.put_str("status", "running");
-    Ok(VmValue::Dict(std::sync::Arc::new(result)))
+    Ok(VmValue::dict(result))
 }
 
 /// Detached task: drain stdout/stderr, await exit vs kill vs timeout, then
@@ -380,7 +380,7 @@ async fn drain_into<R: AsyncReadExt + Unpin>(mut reader: R, buf: Arc<Mutex<Vec<u
     }
 }
 
-fn command_display(params: &BTreeMap<String, VmValue>) -> String {
+fn command_display(params: &crate::value::DictMap) -> String {
     if let Some(command) = optional_string(params, "command") {
         return command;
     }
@@ -394,7 +394,7 @@ fn command_display(params: &BTreeMap<String, VmValue>) -> String {
     String::new()
 }
 
-fn poll(params: &BTreeMap<String, VmValue>) -> Result<VmValue, VmError> {
+fn poll(params: &crate::value::DictMap) -> Result<VmValue, VmError> {
     let handle_id = require_param(params, "handle_id")?;
     let entry = lookup(&handle_id)?;
     let state = entry.state.lock().expect("spawn state poisoned");
@@ -423,10 +423,10 @@ fn poll(params: &BTreeMap<String, VmValue>) -> Result<VmValue, VmError> {
     );
     result.put_str("stdout", String::from_utf8_lossy(&state.stdout));
     result.put_str("stderr", String::from_utf8_lossy(&state.stderr));
-    Ok(VmValue::Dict(std::sync::Arc::new(result)))
+    Ok(VmValue::dict(result))
 }
 
-async fn wait(params: &BTreeMap<String, VmValue>) -> Result<VmValue, VmError> {
+async fn wait(params: &crate::value::DictMap) -> Result<VmValue, VmError> {
     let handle_id = require_param(params, "handle_id")?;
     let entry = lookup(&handle_id)?;
     let timeout_ms = optional_i64(params, "timeout")
@@ -453,7 +453,7 @@ async fn wait(params: &BTreeMap<String, VmValue>) -> Result<VmValue, VmError> {
                     result.insert("timed_out".to_string(), VmValue::Bool(true));
                     result.insert("running".to_string(), VmValue::Bool(true));
                     result.put_str("status", "running");
-                    return Ok(VmValue::Dict(std::sync::Arc::new(result)));
+                    return Ok(VmValue::dict(result));
                 }
             }
             None => {
@@ -480,10 +480,10 @@ async fn wait(params: &BTreeMap<String, VmValue>) -> Result<VmValue, VmError> {
         VmValue::Bool(status == SpawnStatus::TimedOut),
     );
     result.insert("running".to_string(), VmValue::Bool(false));
-    Ok(VmValue::Dict(std::sync::Arc::new(result)))
+    Ok(VmValue::dict(result))
 }
 
-async fn kill(params: &BTreeMap<String, VmValue>) -> Result<VmValue, VmError> {
+async fn kill(params: &crate::value::DictMap) -> Result<VmValue, VmError> {
     let handle_id = require_param(params, "handle_id")?;
     let entry = lookup(&handle_id)?;
 
@@ -519,10 +519,10 @@ fn kill_result(success: bool, status: SpawnStatus) -> VmValue {
     let mut result = BTreeMap::new();
     result.insert("success".to_string(), VmValue::Bool(success));
     result.put_str("status", status.as_str());
-    VmValue::Dict(std::sync::Arc::new(result))
+    VmValue::dict(result)
 }
 
-fn release(params: &BTreeMap<String, VmValue>) -> Result<VmValue, VmError> {
+fn release(params: &crate::value::DictMap) -> Result<VmValue, VmError> {
     let handle_id = require_param(params, "handle_id")?;
     let removed = {
         let mut registry = SPAWN_REGISTRY.lock().expect("spawn registry poisoned");
@@ -537,7 +537,7 @@ fn release(params: &BTreeMap<String, VmValue>) -> Result<VmValue, VmError> {
     }
     let mut result = BTreeMap::new();
     result.insert("released".to_string(), VmValue::Bool(removed.is_some()));
-    Ok(VmValue::Dict(std::sync::Arc::new(result)))
+    Ok(VmValue::dict(result))
 }
 
 #[cfg(all(test, unix))]
@@ -553,7 +553,7 @@ mod tests {
     use super::*;
     use std::sync::Arc as StdArc;
 
-    fn params(pairs: &[(&str, VmValue)]) -> BTreeMap<String, VmValue> {
+    fn params(pairs: &[(&str, VmValue)]) -> crate::value::DictMap {
         pairs
             .iter()
             .map(|(k, v)| (k.to_string(), v.clone()))

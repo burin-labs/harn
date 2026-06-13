@@ -1,5 +1,3 @@
-use std::collections::BTreeMap;
-
 use harn_vm::VmValue;
 
 use crate::error::HostlibError;
@@ -21,7 +19,7 @@ pub(crate) fn describe(value: &VmValue) -> &'static str {
 
 pub(crate) fn require_string(
     builtin: &'static str,
-    dict: &BTreeMap<String, VmValue>,
+    dict: &harn_vm::value::DictMap,
     key: &'static str,
 ) -> Result<String, HostlibError> {
     optional_string(builtin, dict, key)?.ok_or(HostlibError::MissingParameter {
@@ -32,7 +30,7 @@ pub(crate) fn require_string(
 
 pub(crate) fn optional_string(
     builtin: &'static str,
-    dict: &BTreeMap<String, VmValue>,
+    dict: &harn_vm::value::DictMap,
     key: &'static str,
 ) -> Result<Option<String>, HostlibError> {
     match dict.get(key) {
@@ -48,7 +46,7 @@ pub(crate) fn optional_string(
 
 pub(crate) fn optional_bool(
     builtin: &'static str,
-    dict: &BTreeMap<String, VmValue>,
+    dict: &harn_vm::value::DictMap,
     key: &'static str,
 ) -> Result<Option<bool>, HostlibError> {
     match dict.get(key) {
@@ -64,7 +62,7 @@ pub(crate) fn optional_bool(
 
 pub(crate) fn optional_i64(
     builtin: &'static str,
-    dict: &BTreeMap<String, VmValue>,
+    dict: &harn_vm::value::DictMap,
     key: &'static str,
     default: i64,
 ) -> Result<i64, HostlibError> {
@@ -76,7 +74,7 @@ pub(crate) fn optional_i64(
 
 pub(crate) fn optional_i64_no_default(
     builtin: &'static str,
-    dict: &BTreeMap<String, VmValue>,
+    dict: &harn_vm::value::DictMap,
     key: &'static str,
 ) -> Result<Option<i64>, HostlibError> {
     match dict.get(key) {
@@ -87,7 +85,7 @@ pub(crate) fn optional_i64_no_default(
 
 pub(crate) fn optional_u64(
     builtin: &'static str,
-    dict: &BTreeMap<String, VmValue>,
+    dict: &harn_vm::value::DictMap,
     key: &'static str,
 ) -> Result<Option<u64>, HostlibError> {
     match optional_i64_no_default(builtin, dict, key)? {
@@ -103,7 +101,7 @@ pub(crate) fn optional_u64(
 
 pub(crate) fn optional_string_list(
     builtin: &'static str,
-    dict: &BTreeMap<String, VmValue>,
+    dict: &harn_vm::value::DictMap,
     key: &'static str,
 ) -> Result<Option<Vec<String>>, HostlibError> {
     match dict.get(key) {

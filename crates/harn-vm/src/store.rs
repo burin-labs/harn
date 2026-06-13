@@ -128,7 +128,7 @@ fn json_to_vm(jv: &serde_json::Value) -> VmValue {
             for (k, v) in map {
                 m.insert(k.clone(), json_to_vm(v));
             }
-            VmValue::Dict(std::sync::Arc::new(m))
+            VmValue::dict(m)
         }
     }
 }

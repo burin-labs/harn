@@ -284,7 +284,7 @@ pub(crate) fn process_error_to_hostlib(builtin: &'static str, err: ProcessError)
 pub(crate) fn build_response(
     outcome: SpawnOutcome,
     handle_id: Option<String>,
-    policy_context: Option<BTreeMap<String, VmValue>>,
+    policy_context: Option<harn_vm::value::DictMap>,
 ) -> VmValue {
     let mut builder = ResponseBuilder::new()
         .str("command_id", outcome.command_id.clone())
@@ -319,7 +319,7 @@ pub(crate) fn build_response(
         Some(handle_id) => builder.str("handle_id", handle_id),
         None => builder.nil("handle_id"),
     };
-    let mut sandbox = BTreeMap::new();
+    let mut sandbox = harn_vm::value::DictMap::new();
     sandbox.put_str("kind", sandbox_kind());
     sandbox.insert("enforced".to_string(), VmValue::Bool(sandbox_enforced()));
     builder = builder.dict("sandbox", sandbox);
@@ -338,7 +338,7 @@ pub(crate) fn running_response(
     command_display: String,
 ) -> VmValue {
     let artifacts = planned_artifact_paths(&command_id);
-    let mut sandbox = BTreeMap::new();
+    let mut sandbox = harn_vm::value::DictMap::new();
     sandbox.put_str("kind", sandbox_kind());
     sandbox.insert("enforced".to_string(), VmValue::Bool(sandbox_enforced()));
     let mut builder = ResponseBuilder::new()

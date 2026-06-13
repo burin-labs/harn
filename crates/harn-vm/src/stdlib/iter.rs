@@ -136,7 +136,7 @@ fn register_stream_namespace(vm: &mut Vm) {
     ];
     vm.set_global(
         "stream",
-        VmValue::Dict(std::sync::Arc::new(
+        VmValue::dict(
             std::iter::once((
                 "_namespace".to_string(),
                 VmValue::String(std::sync::Arc::from("stream")),
@@ -148,7 +148,7 @@ fn register_stream_namespace(vm: &mut Vm) {
                 )
             }))
             .collect::<BTreeMap<_, _>>(),
-        )),
+        ),
     );
 }
 

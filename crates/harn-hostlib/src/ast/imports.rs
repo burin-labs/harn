@@ -23,7 +23,6 @@
 //! }
 //! ```
 
-use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use harn_vm::VmValue;
@@ -108,10 +107,10 @@ pub(super) fn run(args: &[VmValue]) -> Result<VmValue, HostlibError> {
         .iter()
         .map(|stmt| {
             let line = locate_first_line(stmt, &lines);
-            let mut entry: BTreeMap<String, VmValue> = BTreeMap::new();
+            let mut entry: harn_vm::value::DictMap = harn_vm::value::DictMap::new();
             entry.insert("text".into(), str_value(stmt));
             entry.insert("line".into(), VmValue::Int(line as i64));
-            VmValue::Dict(Arc::new(entry))
+            VmValue::dict(entry)
         })
         .collect();
 

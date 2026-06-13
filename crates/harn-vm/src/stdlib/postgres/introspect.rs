@@ -39,7 +39,7 @@
 //! partitions so inserts never hit the DEFAULT partition.
 
 use crate::value::VmDictExt;
-use std::collections::{BTreeMap, HashSet};
+use std::collections::HashSet;
 use std::future::Future;
 use std::pin::Pin;
 
@@ -209,7 +209,7 @@ async fn pg_pool_stats_impl(
     let max = record.max_connections;
     let in_use = (size as usize).saturating_sub(idle);
 
-    let mut dict = BTreeMap::new();
+    let mut dict = crate::value::DictMap::new();
     dict.insert("size".to_string(), VmValue::Int(i64::from(size)));
     dict.insert("idle".to_string(), VmValue::Int(idle as i64));
     dict.insert("in_use".to_string(), VmValue::Int(in_use as i64));
@@ -228,10 +228,10 @@ async fn pg_pool_stats_impl(
             .replicas
             .iter()
             .map(|pool| {
-                let mut entry = BTreeMap::new();
+                let mut entry = crate::value::DictMap::new();
                 entry.insert("size".to_string(), VmValue::Int(i64::from(pool.size())));
                 entry.insert("idle".to_string(), VmValue::Int(pool.num_idle() as i64));
-                VmValue::Dict(std::sync::Arc::new(entry))
+                VmValue::dict(entry)
             })
             .collect();
         dict.insert(
@@ -252,7 +252,7 @@ async fn pg_pool_stats_impl(
             .map(VmValue::Int)
             .unwrap_or(VmValue::Nil),
     );
-    Ok(VmValue::Dict(std::sync::Arc::new(dict)))
+    Ok(VmValue::dict(dict))
 }
 
 #[harn_builtin(
@@ -638,7 +638,7 @@ async fn existing_partition_names(
 /// the matching granularity so it compares correctly against partition
 /// upper bounds under bytewise ordering.
 fn retention_cutoff(
-    options: &BTreeMap<String, VmValue>,
+    options: &crate::value::DictMap,
     now: chrono::DateTime<chrono::Utc>,
 ) -> Result<String, VmError> {
     if let Some(days) = options.get("keep_days") {
@@ -794,7 +794,7 @@ fn qualified_identifier(input: &str, builtin: &'static str) -> Result<QualifiedI
     })
 }
 
-fn render_bounds_clause(bounds: &BTreeMap<String, VmValue>) -> Result<String, VmError> {
+fn render_bounds_clause(bounds: &crate::value::DictMap) -> Result<String, VmError> {
     if let (Some(from), Some(to)) = (bounds.get("from"), bounds.get("to")) {
         let from_lit = sql_literal(from, "pg_partition_attach.bounds.from")?;
         let to_lit = sql_literal(to, "pg_partition_attach.bounds.to")?;
@@ -918,7 +918,7 @@ mod tests {
 
     #[test]
     fn render_bounds_clause_handles_three_shapes() {
-        let from_to = BTreeMap::from([
+        let from_to = crate::value::DictMap::from_iter([
             (
                 "from".to_string(),
                 VmValue::String(std::sync::Arc::from("2026-01-01")),
@@ -932,7 +932,7 @@ mod tests {
             render_bounds_clause(&from_to).unwrap(),
             "FOR VALUES FROM ('2026-01-01') TO ('2026-02-01')"
         );
-        let in_clause = BTreeMap::from([(
+        let in_clause = crate::value::DictMap::from_iter([(
             "in".to_string(),
             VmValue::List(std::sync::Arc::new(vec![VmValue::Int(1), VmValue::Int(2)])),
         )]);
@@ -940,9 +940,10 @@ mod tests {
             render_bounds_clause(&in_clause).unwrap(),
             "FOR VALUES IN (1, 2)"
         );
-        let default = BTreeMap::from([("default".to_string(), VmValue::Bool(true))]);
+        let default =
+            crate::value::DictMap::from_iter([("default".to_string(), VmValue::Bool(true))]);
         assert_eq!(render_bounds_clause(&default).unwrap(), "DEFAULT");
-        let bad = BTreeMap::new();
+        let bad = crate::value::DictMap::new();
         assert!(render_bounds_clause(&bad).is_err());
     }
 
@@ -956,7 +957,7 @@ mod tests {
 
     #[test]
     fn render_bounds_clause_handles_hash() {
-        let hash = BTreeMap::from([
+        let hash = crate::value::DictMap::from_iter([
             ("modulus".to_string(), VmValue::Int(4)),
             ("remainder".to_string(), VmValue::Int(0)),
         ]);
@@ -965,13 +966,13 @@ mod tests {
             "FOR VALUES WITH (MODULUS 4, REMAINDER 0)"
         );
         // remainder must be strictly less than modulus.
-        let bad_remainder = BTreeMap::from([
+        let bad_remainder = crate::value::DictMap::from_iter([
             ("modulus".to_string(), VmValue::Int(4)),
             ("remainder".to_string(), VmValue::Int(4)),
         ]);
         assert!(render_bounds_clause(&bad_remainder).is_err());
         // modulus must be >= 1.
-        let zero_modulus = BTreeMap::from([
+        let zero_modulus = crate::value::DictMap::from_iter([
             ("modulus".to_string(), VmValue::Int(0)),
             ("remainder".to_string(), VmValue::Int(0)),
         ]);
@@ -1019,14 +1020,14 @@ mod tests {
         let now = chrono::DateTime::parse_from_rfc3339("2026-05-28T12:34:56Z")
             .unwrap()
             .with_timezone(&chrono::Utc);
-        let days = BTreeMap::from([("keep_days".to_string(), VmValue::Int(90))]);
+        let days = crate::value::DictMap::from_iter([("keep_days".to_string(), VmValue::Int(90))]);
         assert_eq!(retention_cutoff(&days, now).unwrap(), "2026-02-27");
-        let hours = BTreeMap::from([("keep_hours".to_string(), VmValue::Int(6))]);
+        let hours = crate::value::DictMap::from_iter([("keep_hours".to_string(), VmValue::Int(6))]);
         assert_eq!(
             retention_cutoff(&hours, now).unwrap(),
             "2026-05-28 06:00:00"
         );
-        let empty = BTreeMap::new();
+        let empty = crate::value::DictMap::new();
         assert!(retention_cutoff(&empty, now).is_err());
     }
 

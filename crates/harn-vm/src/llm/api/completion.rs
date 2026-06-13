@@ -4,7 +4,6 @@
 //! user message and re-enters the chat path.
 
 use crate::value::VmDictExt;
-use std::collections::BTreeMap;
 
 use crate::value::{VmError, VmValue};
 
@@ -273,7 +272,7 @@ async fn vm_call_completion_fallback(
 ) -> Result<LlmResult, VmError> {
     let mut fallback_opts = opts.clone();
     let has_suffix = suffix.is_some_and(|s| !s.is_empty());
-    let mut bindings = BTreeMap::new();
+    let mut bindings = crate::value::DictMap::new();
     bindings.put_str("prefix", prefix);
     bindings.insert("has_suffix".to_string(), VmValue::Bool(has_suffix));
     bindings.put_str("suffix", suffix.unwrap_or_default());

@@ -30,7 +30,7 @@ pub(super) fn vm_dict(pairs: &[(&str, VmValue)]) -> VmValue {
     for (key, value) in pairs {
         map.insert((*key).to_string(), value.clone());
     }
-    VmValue::Dict(std::sync::Arc::new(map))
+    VmValue::dict(map)
 }
 
 pub(super) fn vm_str(s: &str) -> VmValue {
@@ -121,7 +121,7 @@ pub(super) fn sample_tool_registry() -> VmValue {
     let edit_tool = vm_dict(&[
         ("name", vm_str("edit")),
         ("description", vm_str("Precise code edit.")),
-        ("parameters", VmValue::Dict(std::sync::Arc::new(params))),
+        ("parameters", VmValue::dict(params)),
     ]);
 
     // run tool
@@ -136,7 +136,7 @@ pub(super) fn sample_tool_registry() -> VmValue {
     let run_tool = vm_dict(&[
         ("name", vm_str("run")),
         ("description", vm_str("Run a shell command.")),
-        ("parameters", VmValue::Dict(std::sync::Arc::new(run_params))),
+        ("parameters", VmValue::dict(run_params)),
     ]);
 
     vm_dict(&[("tools", vm_list(vec![edit_tool, run_tool]))])
@@ -155,10 +155,7 @@ pub(super) fn defer_loading_registry() -> VmValue {
     let eager = vm_dict(&[
         ("name", vm_str("look")),
         ("description", vm_str("Read file contents")),
-        (
-            "parameters",
-            VmValue::Dict(std::sync::Arc::new(eager_params)),
-        ),
+        ("parameters", VmValue::dict(eager_params)),
     ]);
 
     let mut deferred_params = BTreeMap::new();
@@ -166,10 +163,7 @@ pub(super) fn defer_loading_registry() -> VmValue {
     let deferred = vm_dict(&[
         ("name", vm_str("deploy")),
         ("description", vm_str("Deploy the app")),
-        (
-            "parameters",
-            VmValue::Dict(std::sync::Arc::new(deferred_params)),
-        ),
+        ("parameters", VmValue::dict(deferred_params)),
         ("defer_loading", vm_bool(true)),
     ]);
 

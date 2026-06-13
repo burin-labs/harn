@@ -281,9 +281,7 @@ fn calendar_parts_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue
         "timezone",
     )?;
     let dt = datetime_like_arg(args.first(), timezone, "__calendar_parts")?;
-    Ok(VmValue::Dict(std::sync::Arc::new(parts_dict(
-        dt.with_timezone(&timezone),
-    ))))
+    Ok(VmValue::dict(parts_dict(dt.with_timezone(&timezone))))
 }
 
 #[harn_builtin(
@@ -693,7 +691,7 @@ fn calendar_business_window_builtin(
     } else {
         "after_window"
     };
-    Ok(VmValue::Dict(std::sync::Arc::new(BTreeMap::from([
+    Ok(VmValue::dict(BTreeMap::from([
         ("inside".to_string(), VmValue::Bool(inside)),
         ("business_day".to_string(), VmValue::Bool(business_day)),
         ("reason".to_string(), VmValue::string(reason)),
@@ -714,12 +712,12 @@ fn calendar_business_window_builtin(
             "ends_at".to_string(),
             timestamp_value(ends_at.with_timezone(&Utc)),
         ),
-    ]))))
+    ])))
 }
 
-fn parts_dict(dt: DateTime<Tz>) -> BTreeMap<String, VmValue> {
+fn parts_dict(dt: DateTime<Tz>) -> crate::value::DictMap {
     let iso = dt.iso_week();
-    BTreeMap::from([
+    crate::value::DictMap::from_iter([
         ("year".to_string(), VmValue::Int(dt.year() as i64)),
         ("month".to_string(), VmValue::Int(dt.month() as i64)),
         ("day".to_string(), VmValue::Int(dt.day() as i64)),
@@ -912,7 +910,7 @@ fn parse_datetime_or_date(
 }
 
 fn naive_datetime_from_parts(
-    parts: &BTreeMap<String, VmValue>,
+    parts: &crate::value::DictMap,
     builtin: &str,
 ) -> Result<NaiveDateTime, VmError> {
     let year = i32::try_from(required_i64_field(parts, "year", builtin)?)
@@ -931,7 +929,7 @@ fn naive_datetime_from_parts(
 }
 
 fn required_i64_field(
-    parts: &BTreeMap<String, VmValue>,
+    parts: &crate::value::DictMap,
     field: &str,
     builtin: &str,
 ) -> Result<i64, VmError> {
@@ -940,7 +938,7 @@ fn required_i64_field(
 }
 
 fn optional_i64_field(
-    parts: &BTreeMap<String, VmValue>,
+    parts: &crate::value::DictMap,
     field: &str,
     default: i64,
     builtin: &str,
@@ -1008,7 +1006,7 @@ fn country_value(country: &CountryMeta) -> VmValue {
     } else {
         VmValue::Nil
     };
-    VmValue::Dict(std::sync::Arc::new(BTreeMap::from([
+    VmValue::dict(BTreeMap::from([
         ("code".to_string(), VmValue::string(country.code)),
         ("name".to_string(), VmValue::string(country.name)),
         (
@@ -1032,11 +1030,11 @@ fn country_value(country: &CountryMeta) -> VmValue {
             "holiday_calendars".to_string(),
             string_list_value(country.holiday_calendars.iter().copied()),
         ),
-    ])))
+    ]))
 }
 
 fn holiday_calendar_info(name: &'static str) -> VmValue {
-    VmValue::Dict(std::sync::Arc::new(BTreeMap::from([
+    VmValue::dict(BTreeMap::from([
         ("name".to_string(), VmValue::string(name)),
         ("country".to_string(), VmValue::string("US")),
         (
@@ -1047,7 +1045,7 @@ fn holiday_calendar_info(name: &'static str) -> VmValue {
             "description".to_string(),
             VmValue::string("United States federal observed holidays"),
         ),
-    ])))
+    ]))
 }
 
 fn supported_holidays_for_year(calendar: &str, year: i32) -> Result<Vec<Holiday>, VmError> {
@@ -1214,7 +1212,7 @@ fn last_weekday_of_month(year: i32, month: u32, weekday: Weekday) -> NaiveDate {
 }
 
 fn holiday_value(holiday: &Holiday) -> VmValue {
-    VmValue::Dict(std::sync::Arc::new(BTreeMap::from([
+    VmValue::dict(BTreeMap::from([
         (
             "date".to_string(),
             VmValue::string(holiday.date.format("%Y-%m-%d").to_string()),
@@ -1225,7 +1223,7 @@ fn holiday_value(holiday: &Holiday) -> VmValue {
         ),
         ("name".to_string(), VmValue::string(holiday.name)),
         ("observed".to_string(), VmValue::Bool(holiday.observed)),
-    ])))
+    ]))
 }
 
 fn business_calendar_arg(
@@ -1267,7 +1265,7 @@ fn supported_business_calendar(raw: &str) -> Result<BusinessCalendar, VmError> {
 }
 
 fn custom_business_calendar(
-    map: &BTreeMap<String, VmValue>,
+    map: &crate::value::DictMap,
     builtin: &str,
 ) -> Result<BusinessCalendar, VmError> {
     let name = map
@@ -1368,7 +1366,7 @@ fn is_holiday_date(date: NaiveDate, calendar: &BusinessCalendar) -> Result<bool,
 }
 
 fn business_time_option(
-    options: Option<&BTreeMap<String, VmValue>>,
+    options: Option<&crate::value::DictMap>,
     time_key: &str,
     hour_key: &str,
     default_hour: u32,
@@ -1415,7 +1413,7 @@ fn require_dict<'a>(
     value: Option<&'a VmValue>,
     builtin: &str,
     label: &str,
-) -> Result<&'a BTreeMap<String, VmValue>, VmError> {
+) -> Result<&'a crate::value::DictMap, VmError> {
     match value {
         Some(VmValue::Dict(map)) => Ok(map),
         Some(other) => Err(vm_error(format!(
@@ -1430,7 +1428,7 @@ fn optional_dict<'a>(
     value: Option<&'a VmValue>,
     builtin: &str,
     label: &str,
-) -> Result<Option<&'a BTreeMap<String, VmValue>>, VmError> {
+) -> Result<Option<&'a crate::value::DictMap>, VmError> {
     match value {
         Some(VmValue::Dict(map)) => Ok(Some(map)),
         Some(VmValue::Nil) | None => Ok(None),

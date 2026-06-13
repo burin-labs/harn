@@ -98,7 +98,7 @@ async fn durable_rate_limit_acquire_impl(
 
 pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[&DURABLE_RATE_LIMIT_ACQUIRE_IMPL_DEF];
 
-fn parse_state_path(options: &BTreeMap<String, VmValue>) -> Result<PathBuf, VmError> {
+fn parse_state_path(options: &crate::value::DictMap) -> Result<PathBuf, VmError> {
     match options.get("state_path") {
         Some(VmValue::String(path)) if !path.trim().is_empty() => Ok(
             crate::stdlib::process::resolve_source_relative_path(path.trim()),
@@ -114,7 +114,7 @@ fn parse_state_path(options: &BTreeMap<String, VmValue>) -> Result<PathBuf, VmEr
     }
 }
 
-fn parse_buckets(options: &BTreeMap<String, VmValue>) -> Result<Vec<RateBucket>, VmError> {
+fn parse_buckets(options: &crate::value::DictMap) -> Result<Vec<RateBucket>, VmError> {
     let buckets = match options.get("buckets") {
         Some(VmValue::List(items)) => {
             let mut parsed = Vec::with_capacity(items.len());
@@ -155,7 +155,7 @@ fn parse_buckets(options: &BTreeMap<String, VmValue>) -> Result<Vec<RateBucket>,
     Ok(buckets)
 }
 
-fn parse_bucket(dict: &BTreeMap<String, VmValue>) -> Result<RateBucket, VmError> {
+fn parse_bucket(dict: &crate::value::DictMap) -> Result<RateBucket, VmError> {
     let key = required_string_field(dict, "key")?;
     let limit = required_positive_u64_field(dict, "limit")?;
     let units = optional_non_negative_u64_field(dict, "units")?.unwrap_or(1);
@@ -169,7 +169,7 @@ fn parse_bucket(dict: &BTreeMap<String, VmValue>) -> Result<RateBucket, VmError>
 }
 
 fn required_string_field(
-    dict: &BTreeMap<String, VmValue>,
+    dict: &crate::value::DictMap,
     key: &'static str,
 ) -> Result<String, VmError> {
     match dict.get(key) {
@@ -185,7 +185,7 @@ fn required_string_field(
 }
 
 fn required_positive_u64_field(
-    dict: &BTreeMap<String, VmValue>,
+    dict: &crate::value::DictMap,
     key: &'static str,
 ) -> Result<u64, VmError> {
     let value = optional_non_negative_u64_field(dict, key)?.ok_or_else(|| {
@@ -202,7 +202,7 @@ fn required_positive_u64_field(
 }
 
 fn optional_non_negative_u64_field(
-    dict: &BTreeMap<String, VmValue>,
+    dict: &crate::value::DictMap,
     key: &'static str,
 ) -> Result<Option<u64>, VmError> {
     match dict.get(key) {
@@ -224,7 +224,7 @@ fn optional_non_negative_u64_field(
 }
 
 fn optional_duration_ms(
-    dict: &BTreeMap<String, VmValue>,
+    dict: &crate::value::DictMap,
     key: &'static str,
 ) -> Result<Option<u64>, VmError> {
     match dict.get(key) {
@@ -485,7 +485,7 @@ fn result_value(
     );
     dict.put_str("state_path", state_path.to_string_lossy());
     dict.insert("buckets".to_string(), bucket_list_value(buckets));
-    VmValue::Dict(Arc::new(dict))
+    VmValue::dict(dict)
 }
 
 fn bucket_list_value(buckets: &[RateBucket]) -> VmValue {
@@ -493,7 +493,7 @@ fn bucket_list_value(buckets: &[RateBucket]) -> VmValue {
         buckets
             .iter()
             .map(|bucket| {
-                VmValue::Dict(Arc::new(BTreeMap::from([
+                VmValue::dict(BTreeMap::from([
                     (
                         "key".to_string(),
                         VmValue::String(Arc::from(bucket.key.as_str())),
@@ -508,7 +508,7 @@ fn bucket_list_value(buckets: &[RateBucket]) -> VmValue {
                         "window_ms".to_string(),
                         VmValue::Int(u64_to_i64(bucket.window_ms)),
                     ),
-                ])))
+                ]))
             })
             .collect(),
     ))

@@ -744,8 +744,8 @@ fn first_param_is_harness(function: &crate::ExportedFunction) -> bool {
 fn build_pipeline_globals(
     arguments: &CallArguments,
     function: &crate::ExportedFunction,
-) -> Result<BTreeMap<String, VmValue>, DispatchError> {
-    let mut globals = BTreeMap::new();
+) -> Result<harn_vm::value::DictMap, DispatchError> {
+    let mut globals = harn_vm::value::DictMap::new();
     match arguments {
         CallArguments::Positional(values) => {
             for (index, param) in function.params.iter().enumerate() {
@@ -805,11 +805,11 @@ fn json_to_vm_value(value: &serde_json::Value) -> VmValue {
         serde_json::Value::Array(items) => VmValue::List(Arc::new(
             items.iter().map(json_to_vm_value).collect::<Vec<_>>(),
         )),
-        serde_json::Value::Object(map) => VmValue::Dict(Arc::new(
+        serde_json::Value::Object(map) => VmValue::dict(
             map.iter()
                 .map(|(key, value)| (key.clone(), json_to_vm_value(value)))
-                .collect(),
-        )),
+                .collect::<harn_vm::value::DictMap>(),
+        ),
     }
 }
 
@@ -1287,18 +1287,16 @@ pub fn whoami(harness: Harness) -> string {
         // Structured guards (mcp/pg call counts, LLM preflight) carry the
         // dimension on the `limit` field.
         let structured = |limit: &str| {
-            harn_vm::VmError::Thrown(harn_vm::VmValue::Dict(std::sync::Arc::new(
-                std::collections::BTreeMap::from([
-                    (
-                        "category".to_string(),
-                        harn_vm::VmValue::String(std::sync::Arc::from("budget_exceeded")),
-                    ),
-                    (
-                        "limit".to_string(),
-                        harn_vm::VmValue::String(std::sync::Arc::from(limit)),
-                    ),
-                ]),
-            )))
+            harn_vm::VmError::Thrown(harn_vm::VmValue::dict(std::collections::BTreeMap::from([
+                (
+                    "category".to_string(),
+                    harn_vm::VmValue::String(std::sync::Arc::from("budget_exceeded")),
+                ),
+                (
+                    "limit".to_string(),
+                    harn_vm::VmValue::String(std::sync::Arc::from(limit)),
+                ),
+            ])))
         };
         assert_eq!(
             budget_category_from_error(&structured("mcp_calls")).as_deref(),

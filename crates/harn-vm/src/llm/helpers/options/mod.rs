@@ -31,7 +31,6 @@ mod routing_tests;
 
 // Shared imports re-exported across the whole `options` subtree so each
 // submodule only needs `use super::*;`.
-pub(super) use std::collections::BTreeMap;
 
 pub(super) use crate::stdlib::xml::escape_xml_text;
 pub(super) use crate::value::{VmError, VmValue};

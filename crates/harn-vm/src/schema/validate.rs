@@ -1,4 +1,3 @@
-use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, OnceLock};
 
@@ -85,8 +84,8 @@ impl ValidationContext {
 
 fn validate_against_schema(
     value: &VmValue,
-    schema: &BTreeMap<String, VmValue>,
-    root_schema: &BTreeMap<String, VmValue>,
+    schema: &crate::value::DictMap,
+    root_schema: &crate::value::DictMap,
     path: &str,
     options: ValidationOptions,
     context: &mut ValidationContext,
@@ -101,8 +100,8 @@ fn validate_against_schema(
 
 fn validate_against_schema_inner(
     value: &VmValue,
-    schema: &BTreeMap<String, VmValue>,
-    root_schema: &BTreeMap<String, VmValue>,
+    schema: &crate::value::DictMap,
+    root_schema: &crate::value::DictMap,
     path: &str,
     options: ValidationOptions,
     context: &mut ValidationContext,
@@ -384,10 +383,10 @@ fn validation_limit_error(value: &VmValue, path: &str, error: String) -> Validat
 }
 
 fn validate_object_fields(
-    fields: &BTreeMap<String, VmValue>,
+    fields: &crate::value::DictMap,
     struct_layout: Option<&StructLayout>,
-    schema: &BTreeMap<String, VmValue>,
-    root_schema: &BTreeMap<String, VmValue>,
+    schema: &crate::value::DictMap,
+    root_schema: &crate::value::DictMap,
     path: &str,
     options: ValidationOptions,
     context: &mut ValidationContext,
@@ -507,7 +506,7 @@ fn validate_object_fields(
         }
         VmValue::struct_instance_with_layout(layout.struct_name().to_string(), field_names, merged)
     } else {
-        VmValue::Dict(std::sync::Arc::new(merged))
+        VmValue::dict(merged)
     };
 
     (normalized, errors)
@@ -531,7 +530,7 @@ fn items_are_unique(value: &VmValue) -> bool {
 
 fn validate_numeric_constraints(
     value: f64,
-    schema: &BTreeMap<String, VmValue>,
+    schema: &crate::value::DictMap,
     path: &str,
     errors: &mut Vec<String>,
 ) {
@@ -559,7 +558,7 @@ fn validate_numeric_constraints(
 
 fn validate_enum_membership(
     value: &VmValue,
-    schema: &BTreeMap<String, VmValue>,
+    schema: &crate::value::DictMap,
     path: &str,
     errors: &mut Vec<String>,
 ) {
@@ -583,8 +582,8 @@ fn validate_enum_membership(
 
 pub(super) fn first_param_validation_error(
     value: &VmValue,
-    schema: &BTreeMap<String, VmValue>,
-    root_schema: &BTreeMap<String, VmValue>,
+    schema: &crate::value::DictMap,
+    root_schema: &crate::value::DictMap,
     param_name: &str,
     options: ValidationOptions,
 ) -> Option<String> {
@@ -601,8 +600,8 @@ pub(super) fn first_param_validation_error(
 
 fn first_param_validation_error_inner(
     value: &VmValue,
-    schema: &BTreeMap<String, VmValue>,
-    root_schema: &BTreeMap<String, VmValue>,
+    schema: &crate::value::DictMap,
+    root_schema: &crate::value::DictMap,
     param_name: &str,
     options: ValidationOptions,
     context: &mut ValidationContext,
@@ -618,8 +617,8 @@ fn first_param_validation_error_inner(
 
 fn first_param_validation_error_body(
     value: &VmValue,
-    schema: &BTreeMap<String, VmValue>,
-    root_schema: &BTreeMap<String, VmValue>,
+    schema: &crate::value::DictMap,
+    root_schema: &crate::value::DictMap,
     param_name: &str,
     options: ValidationOptions,
     context: &mut ValidationContext,
@@ -755,9 +754,9 @@ fn first_param_validation_error_body(
 }
 
 fn first_object_param_error(
-    fields: &BTreeMap<String, VmValue>,
-    schema: &BTreeMap<String, VmValue>,
-    root_schema: &BTreeMap<String, VmValue>,
+    fields: &crate::value::DictMap,
+    schema: &crate::value::DictMap,
+    root_schema: &crate::value::DictMap,
     param_name: &str,
     options: ValidationOptions,
     context: &mut ValidationContext,

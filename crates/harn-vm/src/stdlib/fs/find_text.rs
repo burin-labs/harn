@@ -273,7 +273,7 @@ fn text_match_to_vm(hit: TextMatch) -> VmValue {
     dict.insert("col".to_string(), VmValue::Int(hit.col));
     dict.insert("column".to_string(), VmValue::Int(hit.col));
     dict.put_str("text", hit.text);
-    VmValue::Dict(std::sync::Arc::new(dict))
+    VmValue::dict(dict)
 }
 
 fn text_matches_to_json(hits: Vec<TextMatch>) -> serde_json::Value {

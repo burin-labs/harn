@@ -511,7 +511,7 @@ fn mock_error_to_vm_error(err: &MockError) -> VmError {
                 VmValue::Int(retry_after_ms as i64),
             );
         }
-        return VmError::Thrown(VmValue::Dict(std::sync::Arc::new(dict)));
+        return VmError::Thrown(VmValue::dict(dict));
     }
 
     VmError::CategorizedError {

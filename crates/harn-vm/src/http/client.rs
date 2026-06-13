@@ -1,6 +1,6 @@
 use crate::value::VmDictExt;
 use std::cell::RefCell;
-use std::collections::{BTreeMap, HashMap, VecDeque};
+use std::collections::{HashMap, VecDeque};
 use std::fs::{File, OpenOptions};
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -75,13 +75,13 @@ struct HttpProxyConfig {
 #[derive(Clone)]
 pub(super) struct HttpSession {
     pub(super) client: reqwest::Client,
-    options: BTreeMap<String, VmValue>,
+    options: crate::value::DictMap,
 }
 
 pub(super) struct HttpRequestParts {
     pub(super) method: reqwest::Method,
     pub(super) headers: reqwest::header::HeaderMap,
-    recorded_headers: BTreeMap<String, VmValue>,
+    recorded_headers: crate::value::DictMap,
     pub(super) body: Option<String>,
     multipart: Option<MultipartRequest>,
 }
@@ -103,7 +103,7 @@ struct MultipartField {
 struct HttpStreamHandle {
     kind: HttpStreamKind,
     status: i64,
-    headers: BTreeMap<String, VmValue>,
+    headers: crate::value::DictMap,
     pending: VecDeque<u8>,
     closed: bool,
 }
@@ -131,36 +131,30 @@ pub(super) fn clear_http_streams() {
 
 fn build_http_response(
     status: i64,
-    headers: BTreeMap<String, VmValue>,
+    headers: crate::value::DictMap,
     body: String,
     final_url: &str,
 ) -> VmValue {
-    let mut result = BTreeMap::new();
+    let mut result = crate::value::DictMap::new();
     result.insert("status".to_string(), VmValue::Int(status));
-    result.insert(
-        "headers".to_string(),
-        VmValue::Dict(std::sync::Arc::new(headers)),
-    );
+    result.insert("headers".to_string(), VmValue::dict(headers));
     result.put_str("body", body);
     result.put_str("final_url", final_url);
     result.insert(
         "ok".to_string(),
         VmValue::Bool((200..300).contains(&(status as u16))),
     );
-    VmValue::Dict(std::sync::Arc::new(result))
+    VmValue::dict(result)
 }
 
 fn build_http_download_response(
     status: i64,
-    headers: BTreeMap<String, VmValue>,
+    headers: crate::value::DictMap,
     bytes_written: u64,
 ) -> VmValue {
-    let mut result = BTreeMap::new();
+    let mut result = crate::value::DictMap::new();
     result.insert("status".to_string(), VmValue::Int(status));
-    result.insert(
-        "headers".to_string(),
-        VmValue::Dict(std::sync::Arc::new(headers)),
-    );
+    result.insert("headers".to_string(), VmValue::dict(headers));
     result.insert(
         "bytes_written".to_string(),
         VmValue::Int(u64_to_vm_int(bytes_written)),
@@ -169,15 +163,15 @@ fn build_http_download_response(
         "ok".to_string(),
         VmValue::Bool((200..300).contains(&(status as u16))),
     );
-    VmValue::Dict(std::sync::Arc::new(result))
+    VmValue::dict(result)
 }
 
 fn u64_to_vm_int(value: u64) -> i64 {
     value.min(i64::MAX as u64) as i64
 }
 
-fn response_headers(headers: &reqwest::header::HeaderMap) -> BTreeMap<String, VmValue> {
-    let mut resp_headers = BTreeMap::new();
+fn response_headers(headers: &reqwest::header::HeaderMap) -> crate::value::DictMap {
+    let mut resp_headers = crate::value::DictMap::new();
     for (name, value) in headers {
         if let Ok(v) = value.to_str() {
             resp_headers.insert(
@@ -190,9 +184,9 @@ fn response_headers(headers: &reqwest::header::HeaderMap) -> BTreeMap<String, Vm
 }
 
 fn merge_options(
-    base: &BTreeMap<String, VmValue>,
-    overrides: &BTreeMap<String, VmValue>,
-) -> BTreeMap<String, VmValue> {
+    base: &crate::value::DictMap,
+    overrides: &crate::value::DictMap,
+) -> crate::value::DictMap {
     let mut merged = base.clone();
     for (key, value) in overrides {
         merged.insert(key.clone(), value.clone());
@@ -274,7 +268,7 @@ fn parse_multipart_field(value: &VmValue) -> Result<MultipartField, VmError> {
 }
 
 fn parse_multipart_request(
-    options: &BTreeMap<String, VmValue>,
+    options: &crate::value::DictMap,
 ) -> Result<Option<MultipartRequest>, VmError> {
     let Some(value) = options.get("multipart") else {
         return Ok(None);
@@ -351,12 +345,12 @@ async fn http_verb_handler(
         match (args.get(1), args.get(2)) {
             (Some(VmValue::Dict(d)), None) => (**d).clone(),
             (_, Some(VmValue::Dict(d))) => (**d).clone(),
-            _ => BTreeMap::new(),
+            _ => crate::value::DictMap::new(),
         }
     } else {
         match args.get(1) {
             Some(VmValue::Dict(d)) => (**d).clone(),
-            _ => BTreeMap::new(),
+            _ => crate::value::DictMap::new(),
         }
     };
     if has_body && !(matches!(args.get(1), Some(VmValue::Dict(_))) && args.get(2).is_none()) {
@@ -366,7 +360,7 @@ async fn http_verb_handler(
     vm_execute_http_request(method, &url, &options).await
 }
 
-fn parse_proxy_config(options: &BTreeMap<String, VmValue>) -> Option<HttpProxyConfig> {
+fn parse_proxy_config(options: &crate::value::DictMap) -> Option<HttpProxyConfig> {
     let proxy = options.get("proxy")?;
     let (url, no_proxy) = match proxy {
         VmValue::Dict(dict) => (
@@ -404,7 +398,7 @@ fn parse_proxy_config(options: &BTreeMap<String, VmValue>) -> Option<HttpProxyCo
     })
 }
 
-fn parse_tls_config(options: &BTreeMap<String, VmValue>) -> HttpTlsConfig {
+fn parse_tls_config(options: &crate::value::DictMap) -> HttpTlsConfig {
     let Some(tls) = options.get("tls").and_then(|value| value.as_dict()) else {
         return HttpTlsConfig::default();
     };
@@ -433,7 +427,7 @@ fn parse_tls_config(options: &BTreeMap<String, VmValue>) -> HttpTlsConfig {
     }
 }
 
-fn parse_retry_statuses(options: &BTreeMap<String, VmValue>) -> Vec<u16> {
+fn parse_retry_statuses(options: &crate::value::DictMap) -> Vec<u16> {
     match options.get("retry_on") {
         Some(VmValue::List(values)) => {
             let statuses: Vec<u16> = values
@@ -452,7 +446,7 @@ fn parse_retry_statuses(options: &BTreeMap<String, VmValue>) -> Vec<u16> {
     }
 }
 
-fn parse_retry_methods(options: &BTreeMap<String, VmValue>) -> Vec<String> {
+fn parse_retry_methods(options: &crate::value::DictMap) -> Vec<String> {
     match options.get("retry_methods") {
         Some(VmValue::List(values)) => {
             let methods: Vec<String> = values
@@ -476,7 +470,7 @@ fn parse_retry_methods(options: &BTreeMap<String, VmValue>) -> Vec<String> {
     }
 }
 
-pub(super) fn parse_http_options(options: &BTreeMap<String, VmValue>) -> HttpRequestConfig {
+pub(super) fn parse_http_options(options: &crate::value::DictMap) -> HttpRequestConfig {
     let (ssrf_block_private, ssrf_allow_loopback) = crate::egress::current_ssrf_client_settings();
     let resolved_ip_rules = crate::egress::current_resolved_ip_rules();
     let total_timeout_ms = vm_get_int_option(options, "total_timeout_ms", -1);
@@ -784,14 +778,14 @@ fn verify_tls_pin(response: &reqwest::Response, pins: &[String]) -> Result<(), V
 
 pub(super) fn parse_http_request_parts(
     method: &str,
-    options: &BTreeMap<String, VmValue>,
+    options: &crate::value::DictMap,
 ) -> Result<HttpRequestParts, VmError> {
     let req_method = method
         .parse::<reqwest::Method>()
         .map_err(|e| vm_error(format!("http: invalid method '{method}': {e}")))?;
 
     let mut header_map = reqwest::header::HeaderMap::new();
-    let mut recorded_headers = BTreeMap::new();
+    let mut recorded_headers = crate::value::DictMap::new();
 
     if let Some(auth_val) = options.get("auth") {
         match auth_val {
@@ -871,7 +865,7 @@ pub(super) fn parse_http_request_parts(
 
 fn final_http_url(
     url: &str,
-    options: &BTreeMap<String, VmValue>,
+    options: &crate::value::DictMap,
     builtin: &str,
 ) -> Result<String, VmError> {
     let Some(query) = options.get("query").and_then(VmValue::as_dict) else {
@@ -890,7 +884,7 @@ fn final_http_url(
     Ok(parsed.to_string())
 }
 
-pub(super) fn session_from_options(options: &BTreeMap<String, VmValue>) -> Option<String> {
+pub(super) fn session_from_options(options: &crate::value::DictMap) -> Option<String> {
     options
         .get("session")
         .and_then(|value| handle_from_value(value, "http_request").ok())
@@ -958,7 +952,7 @@ fn parse_retry_after_header(value: &reqwest::header::HeaderValue) -> Option<Dura
     value.to_str().ok().and_then(parse_retry_after_value)
 }
 
-fn mock_retry_after(status: u16, headers: &BTreeMap<String, VmValue>) -> Option<Duration> {
+fn mock_retry_after(status: u16, headers: &crate::value::DictMap) -> Option<Duration> {
     if !(status == 429 || status == 503) {
         return None;
     }
@@ -1041,7 +1035,7 @@ pub(super) fn compute_retry_delay(
 pub(super) async fn vm_execute_http_request(
     method: &str,
     url: &str,
-    options: &BTreeMap<String, VmValue>,
+    options: &crate::value::DictMap,
 ) -> Result<VmValue, VmError> {
     if let Some(session_id) = session_from_options(options) {
         return vm_execute_http_session_request(&session_id, method, url, options).await;
@@ -1056,7 +1050,7 @@ pub(super) async fn vm_execute_http_session_request(
     session_id: &str,
     method: &str,
     url: &str,
-    options: &BTreeMap<String, VmValue>,
+    options: &crate::value::DictMap,
 ) -> Result<VmValue, VmError> {
     let session = HTTP_SESSIONS.with(|sessions| sessions.borrow().get(session_id).cloned());
     let Some(session) = session else {
@@ -1074,7 +1068,7 @@ async fn vm_execute_http_request_with_client(
     config: &HttpRequestConfig,
     method: &str,
     url: &str,
-    options: &BTreeMap<String, VmValue>,
+    options: &crate::value::DictMap,
 ) -> Result<VmValue, VmError> {
     let parts = parse_http_request_parts(method, options)?;
     let final_url = final_http_url(url, options, "http")?;
@@ -1176,7 +1170,7 @@ async fn vm_execute_http_request_with_client(
 pub(super) async fn vm_http_download(
     url: &str,
     dst_path: &str,
-    options: &BTreeMap<String, VmValue>,
+    options: &crate::value::DictMap,
 ) -> Result<VmValue, VmError> {
     let method = options
         .get("method")
@@ -1429,7 +1423,7 @@ fn finalize_http_download_temp(
 
 pub(super) async fn vm_http_stream_open(
     url: &str,
-    options: &BTreeMap<String, VmValue>,
+    options: &crate::value::DictMap,
 ) -> Result<VmValue, VmError> {
     let method = options
         .get("method")
@@ -1579,17 +1573,14 @@ pub(super) fn vm_http_stream_info(stream_id: &str) -> Result<VmValue, VmError> {
         let handle = streams
             .get(stream_id)
             .ok_or_else(|| vm_error(format!("http_stream_info: unknown stream '{stream_id}'")))?;
-        let mut dict = BTreeMap::new();
+        let mut dict = crate::value::DictMap::new();
         dict.insert("status".to_string(), VmValue::Int(handle.status));
-        dict.insert(
-            "headers".to_string(),
-            VmValue::Dict(std::sync::Arc::new(handle.headers.clone())),
-        );
+        dict.insert("headers".to_string(), VmValue::dict(handle.headers.clone()));
         dict.insert(
             "ok".to_string(),
             VmValue::Bool((200..300).contains(&(handle.status as u16))),
         );
-        Ok(VmValue::Dict(std::sync::Arc::new(dict)))
+        Ok(VmValue::dict(dict))
     })
 }
 
@@ -1631,7 +1622,7 @@ pub(super) fn register_http_client_builtins(vm: &mut Vm) {
         }
         let options = match args.get(2) {
             Some(VmValue::Dict(d)) => (**d).clone(),
-            _ => BTreeMap::new(),
+            _ => crate::value::DictMap::new(),
         };
         vm_execute_http_request(&method, &url, &options).await
     });
@@ -1739,15 +1730,15 @@ pub(super) fn register_http_client_builtins(vm: &mut Vm) {
 mod tests {
     use super::*;
 
-    fn proxy_options(password: &str) -> BTreeMap<String, VmValue> {
-        BTreeMap::from([
+    fn proxy_options(password: &str) -> crate::value::DictMap {
+        crate::value::DictMap::from_iter([
             (
                 "proxy".to_string(),
                 VmValue::String(std::sync::Arc::from("http://proxy.local:8080")),
             ),
             (
                 "proxy_auth".to_string(),
-                VmValue::Dict(std::sync::Arc::new(BTreeMap::from([
+                VmValue::dict(crate::value::DictMap::from_iter([
                     (
                         "user".to_string(),
                         VmValue::String(std::sync::Arc::from("alice")),
@@ -1756,7 +1747,7 @@ mod tests {
                         "pass".to_string(),
                         VmValue::String(std::sync::Arc::from(password)),
                     ),
-                ]))),
+                ])),
             ),
         ])
     }
@@ -1781,7 +1772,7 @@ mod tests {
 
     #[test]
     fn download_response_saturates_large_byte_count() {
-        let response = build_http_download_response(200, BTreeMap::new(), u64::MAX);
+        let response = build_http_download_response(200, crate::value::DictMap::new(), u64::MAX);
         let response = response.as_dict().expect("response dict");
         assert_eq!(response["bytes_written"].as_int(), Some(i64::MAX));
     }

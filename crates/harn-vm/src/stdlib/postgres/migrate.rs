@@ -54,7 +54,7 @@ enum Ledger {
 }
 
 impl Ledger {
-    fn parse(opts: &BTreeMap<String, VmValue>) -> Result<Self, VmError> {
+    fn parse(opts: &crate::value::DictMap) -> Result<Self, VmError> {
         match opts.get("ledger") {
             None => Ok(Ledger::Harn),
             Some(VmValue::String(s)) => match s.as_ref() {
@@ -198,7 +198,7 @@ async fn run_harn(
     ))
 }
 
-fn dir_arg(dict: &BTreeMap<String, VmValue>, key: &str) -> Result<PathBuf, VmError> {
+fn dir_arg(dict: &crate::value::DictMap, key: &str) -> Result<PathBuf, VmError> {
     let value = dict.get(key).ok_or_else(|| {
         runtime_error(format!(
             "pg_migrate: option `{key}` is required and must be a path"
@@ -433,7 +433,7 @@ fn build_response(
     response.insert("dry_run".to_string(), VmValue::Bool(dry_run));
     response.insert("duration_ms".to_string(), VmValue::Int(duration_ms));
     response.put_str("table", table_name);
-    VmValue::Dict(Arc::new(response))
+    VmValue::dict(response)
 }
 
 // ---------------------------------------------------------------------------

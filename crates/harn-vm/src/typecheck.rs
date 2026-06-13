@@ -568,12 +568,9 @@ mod tests {
         }]);
         let mut good = std::collections::BTreeMap::new();
         good.insert("x".to_string(), vm_int(7));
-        assert!(matches_type(
-            &VmValue::Dict(std::sync::Arc::new(good)),
-            &shape
-        ));
+        assert!(matches_type(&VmValue::dict(good), &shape));
         assert!(!matches_type(
-            &VmValue::Dict(std::sync::Arc::new(std::collections::BTreeMap::new())),
+            &VmValue::dict(std::collections::BTreeMap::new()),
             &shape
         ));
     }
@@ -639,11 +636,10 @@ mod tests {
 
     #[test]
     fn validate_user_call_uses_cached_runtime_guard_metadata() {
-        let string_schema =
-            VmValue::Dict(std::sync::Arc::new(std::collections::BTreeMap::from([(
-                "type".to_string(),
-                VmValue::String(std::sync::Arc::from("string")),
-            )])));
+        let string_schema = VmValue::dict(std::collections::BTreeMap::from([(
+            "type".to_string(),
+            VmValue::String(std::sync::Arc::from("string")),
+        )]));
         let guard = RuntimeParamGuard::CanonicalSchema(
             crate::schema::canonical_param_schema(&string_schema).unwrap(),
         );

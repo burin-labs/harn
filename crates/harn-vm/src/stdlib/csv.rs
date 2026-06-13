@@ -12,7 +12,7 @@ use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
 use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
 
-fn opt_bool(opts: Option<&BTreeMap<String, VmValue>>, key: &str, default: bool) -> bool {
+fn opt_bool(opts: Option<&crate::value::DictMap>, key: &str, default: bool) -> bool {
     opts.and_then(|d| match d.get(key) {
         Some(VmValue::Bool(b)) => Some(*b),
         _ => None,
@@ -21,7 +21,7 @@ fn opt_bool(opts: Option<&BTreeMap<String, VmValue>>, key: &str, default: bool) 
 }
 
 fn opt_delimiter(
-    opts: Option<&BTreeMap<String, VmValue>>,
+    opts: Option<&crate::value::DictMap>,
     key: &str,
     default: u8,
     builtin: &str,
@@ -92,7 +92,7 @@ fn csv_parse_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErro
                 let cell = record.get(i).unwrap_or("");
                 row.insert(h.to_string(), VmValue::String(std::sync::Arc::from(cell)));
             }
-            rows.push(VmValue::Dict(std::sync::Arc::new(row)));
+            rows.push(VmValue::dict(row));
         }
         Ok(VmValue::List(std::sync::Arc::new(rows)))
     } else {
@@ -226,12 +226,12 @@ mod tests {
     }
 
     fn dict(items: impl IntoIterator<Item = (&'static str, VmValue)>) -> VmValue {
-        VmValue::Dict(std::sync::Arc::new(
+        VmValue::dict(
             items
                 .into_iter()
                 .map(|(key, value)| (key.to_string(), value))
-                .collect(),
-        ))
+                .collect::<crate::value::DictMap>(),
+        )
     }
 
     #[test]

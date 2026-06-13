@@ -168,7 +168,7 @@ fn agent_state_handoff_impl(args: &[VmValue], _out: &mut String) -> Result<VmVal
 fn handle_from_args<'a>(
     args: &'a [VmValue],
     fn_name: &str,
-) -> Result<&'a BTreeMap<String, VmValue>, VmError> {
+) -> Result<&'a crate::value::DictMap, VmError> {
     let handle = args
         .first()
         .ok_or_else(|| VmError::Runtime(format!("{fn_name}: `handle` is required")))?;
@@ -256,7 +256,7 @@ fn resolve_root(root: &str) -> PathBuf {
     crate::stdlib::process::resolve_source_relative_path(root)
 }
 
-fn conflict_policy(options: Option<&BTreeMap<String, VmValue>>) -> Result<ConflictPolicy, VmError> {
+fn conflict_policy(options: Option<&crate::value::DictMap>) -> Result<ConflictPolicy, VmError> {
     let Some(options) = options else {
         return Ok(ConflictPolicy::Ignore);
     };
@@ -268,7 +268,7 @@ fn conflict_policy(options: Option<&BTreeMap<String, VmValue>>) -> Result<Confli
     ConflictPolicy::parse(&raw)
 }
 
-fn option_string(options: Option<&BTreeMap<String, VmValue>>, key: &str) -> Option<String> {
+fn option_string(options: Option<&crate::value::DictMap>, key: &str) -> Option<String> {
     options
         .and_then(|options| options.get(key))
         .map(VmValue::display)
@@ -276,7 +276,7 @@ fn option_string(options: Option<&BTreeMap<String, VmValue>>, key: &str) -> Opti
 }
 
 fn writer_identity(
-    options: Option<&BTreeMap<String, VmValue>>,
+    options: Option<&crate::value::DictMap>,
     session_id: Option<&str>,
 ) -> WriterIdentity {
     let mutation = crate::orchestration::current_mutation_session();
@@ -337,7 +337,7 @@ fn handle_value(
     handle.put_str("handoff_key", HANDOFF_KEY);
     handle.put_str("conflict_policy", conflict_policy.as_str());
     handle.insert("writer".to_string(), writer_vm_value(writer));
-    VmValue::Dict(std::sync::Arc::new(handle))
+    VmValue::dict(handle)
 }
 
 fn writer_vm_value(writer: &WriterIdentity) -> VmValue {
@@ -374,10 +374,10 @@ fn writer_vm_value(writer: &WriterIdentity) -> VmValue {
             .map(|item| VmValue::String(std::sync::Arc::from(item.clone())))
             .unwrap_or(VmValue::Nil),
     );
-    VmValue::Dict(std::sync::Arc::new(value))
+    VmValue::dict(value)
 }
 
-fn scope_from_handle(handle: &BTreeMap<String, VmValue>) -> Result<BackendScope, VmError> {
+fn scope_from_handle(handle: &crate::value::DictMap) -> Result<BackendScope, VmError> {
     let root = handle
         .get("root")
         .map(VmValue::display)
@@ -394,7 +394,7 @@ fn scope_from_handle(handle: &BTreeMap<String, VmValue>) -> Result<BackendScope,
     })
 }
 
-fn writer_from_handle(handle: &BTreeMap<String, VmValue>) -> WriterIdentity {
+fn writer_from_handle(handle: &crate::value::DictMap) -> WriterIdentity {
     let writer = handle.get("writer").and_then(VmValue::as_dict);
     WriterIdentity {
         writer_id: option_string(writer, "writer_id"),
@@ -405,7 +405,7 @@ fn writer_from_handle(handle: &BTreeMap<String, VmValue>) -> WriterIdentity {
 }
 
 fn write_options_from_handle(
-    handle: &BTreeMap<String, VmValue>,
+    handle: &crate::value::DictMap,
 ) -> Result<BackendWriteOptions, VmError> {
     let policy = handle
         .get("conflict_policy")
@@ -418,7 +418,7 @@ fn write_options_from_handle(
 }
 
 fn enforce_conflict_policy(
-    handle: &BTreeMap<String, VmValue>,
+    handle: &crate::value::DictMap,
     outcome: &backend::BackendWriteOutcome,
 ) -> Result<(), VmError> {
     let Some(conflict) = &outcome.conflict else {

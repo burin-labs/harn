@@ -1,5 +1,4 @@
 use crate::value::VmDictExt;
-use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use crate::chunk::{Chunk, CompiledFunction};
@@ -46,17 +45,14 @@ fn test_params_to_json_schema_empty() {
 
 #[test]
 fn test_params_to_json_schema_with_params() {
-    let mut params = BTreeMap::new();
-    let mut param_def = BTreeMap::new();
+    let mut params = crate::value::DictMap::new();
+    let mut param_def = crate::value::DictMap::new();
     param_def.put_str("type", "string");
     param_def.put_str("description", "A file path");
     param_def.insert("required".to_string(), VmValue::Bool(true));
-    params.insert(
-        "path".to_string(),
-        VmValue::Dict(std::sync::Arc::new(param_def)),
-    );
+    params.insert("path".to_string(), VmValue::dict(param_def));
 
-    let schema = params_to_json_schema(Some(&VmValue::Dict(std::sync::Arc::new(params))));
+    let schema = params_to_json_schema(Some(&VmValue::dict(params)));
     assert_eq!(
         schema,
         serde_json::json!({
@@ -69,7 +65,7 @@ fn test_params_to_json_schema_with_params() {
 
 #[test]
 fn test_params_to_json_schema_preserves_file_input_descriptor() {
-    let mut file_descriptor = BTreeMap::new();
+    let mut file_descriptor = crate::value::DictMap::new();
     file_descriptor.insert(
         "accept".to_string(),
         VmValue::List(std::sync::Arc::new(vec![VmValue::String(
@@ -78,22 +74,16 @@ fn test_params_to_json_schema_preserves_file_input_descriptor() {
     );
     file_descriptor.insert("maxSize".to_string(), VmValue::Int(64));
 
-    let mut param_def = BTreeMap::new();
+    let mut param_def = crate::value::DictMap::new();
     param_def.put_str("type", "string");
     param_def.put_str("format", "uri");
-    param_def.insert(
-        "x-mcp-file".to_string(),
-        VmValue::Dict(std::sync::Arc::new(file_descriptor)),
-    );
+    param_def.insert("x-mcp-file".to_string(), VmValue::dict(file_descriptor));
     param_def.insert("required".to_string(), VmValue::Bool(true));
 
-    let mut params = BTreeMap::new();
-    params.insert(
-        "upload".to_string(),
-        VmValue::Dict(std::sync::Arc::new(param_def)),
-    );
+    let mut params = crate::value::DictMap::new();
+    params.insert("upload".to_string(), VmValue::dict(param_def));
 
-    let schema = params_to_json_schema(Some(&VmValue::Dict(std::sync::Arc::new(params))));
+    let schema = params_to_json_schema(Some(&VmValue::dict(params)));
     assert_eq!(schema["properties"]["upload"]["type"], "string");
     assert_eq!(schema["properties"]["upload"]["format"], "uri");
     assert_eq!(
@@ -106,9 +96,9 @@ fn test_params_to_json_schema_preserves_file_input_descriptor() {
 
 #[test]
 fn test_params_to_json_schema_simple_form() {
-    let mut params = BTreeMap::new();
+    let mut params = crate::value::DictMap::new();
     params.put_str("query", "string");
-    let schema = params_to_json_schema(Some(&VmValue::Dict(std::sync::Arc::new(params))));
+    let schema = params_to_json_schema(Some(&VmValue::dict(params)));
     assert_eq!(
         schema["properties"]["query"]["type"],
         serde_json::json!("string")
@@ -122,7 +112,7 @@ fn test_tool_registry_to_mcp_tools_invalid() {
 
 #[test]
 fn test_tool_registry_to_mcp_tools_empty() {
-    let mut registry = BTreeMap::new();
+    let mut registry = crate::value::DictMap::new();
     registry.insert(
         "_type".into(),
         VmValue::String(std::sync::Arc::from("tool_registry")),
@@ -131,7 +121,7 @@ fn test_tool_registry_to_mcp_tools_empty() {
         "tools".into(),
         VmValue::List(std::sync::Arc::new(Vec::new())),
     );
-    let result = tool_registry_to_mcp_tools(&VmValue::Dict(std::sync::Arc::new(registry)));
+    let result = tool_registry_to_mcp_tools(&VmValue::dict(registry));
     assert!(result.unwrap().is_empty());
 }
 
@@ -139,12 +129,12 @@ fn test_tool_registry_to_mcp_tools_empty() {
 fn test_tool_registry_to_mcp_tools_preserves_metadata() {
     let handler = VmValue::Closure(Arc::new(empty_closure("echo")));
 
-    let mut annotations = BTreeMap::new();
+    let mut annotations = crate::value::DictMap::new();
     annotations.insert("readOnlyHint".into(), VmValue::Bool(true));
     annotations.insert("idempotentHint".into(), VmValue::Bool(true));
 
-    let icon = VmValue::Dict(std::sync::Arc::new({
-        let mut icon = BTreeMap::new();
+    let icon = VmValue::dict({
+        let mut icon = crate::value::DictMap::new();
         icon.insert(
             "src".into(),
             VmValue::String(std::sync::Arc::from("https://example.com/tool.png")),
@@ -154,9 +144,9 @@ fn test_tool_registry_to_mcp_tools_preserves_metadata() {
             VmValue::String(std::sync::Arc::from("image/png")),
         );
         icon
-    }));
+    });
 
-    let mut tool = BTreeMap::new();
+    let mut tool = crate::value::DictMap::new();
     tool.insert("name".into(), VmValue::String(std::sync::Arc::from("echo")));
     tool.insert(
         "title".into(),
@@ -169,29 +159,26 @@ fn test_tool_registry_to_mcp_tools_preserves_metadata() {
     tool.insert("handler".into(), handler);
     tool.insert(
         "parameters".into(),
-        VmValue::Dict(std::sync::Arc::new(BTreeMap::new())),
+        VmValue::dict(crate::value::DictMap::new()),
     );
-    tool.insert(
-        "annotations".into(),
-        VmValue::Dict(std::sync::Arc::new(annotations)),
-    );
+    tool.insert("annotations".into(), VmValue::dict(annotations));
     tool.insert(
         "icons".into(),
         VmValue::List(std::sync::Arc::new(vec![icon])),
     );
     tool.insert(
         "outputSchema".into(),
-        VmValue::Dict(std::sync::Arc::new({
-            let mut schema = BTreeMap::new();
+        VmValue::dict({
+            let mut schema = crate::value::DictMap::new();
             schema.insert(
                 "type".into(),
                 VmValue::String(std::sync::Arc::from("string")),
             );
             schema
-        })),
+        }),
     );
 
-    let mut registry = BTreeMap::new();
+    let mut registry = crate::value::DictMap::new();
     registry.insert(
         "_type".into(),
         VmValue::String(std::sync::Arc::from("tool_registry")),
@@ -203,7 +190,7 @@ fn test_tool_registry_to_mcp_tools_preserves_metadata() {
         )])),
     );
 
-    let tools = tool_registry_to_mcp_tools(&VmValue::Dict(std::sync::Arc::new(registry))).unwrap();
+    let tools = tool_registry_to_mcp_tools(&VmValue::dict(registry)).unwrap();
     assert_eq!(tools[0].title.as_deref(), Some("Echo"));
     assert_eq!(tools[0].annotations.as_ref().unwrap()["readOnlyHint"], true);
     assert_eq!(
@@ -224,17 +211,17 @@ fn test_prompt_value_to_messages_string() {
 #[test]
 fn test_prompt_value_to_messages_list() {
     let items = vec![
-        VmValue::Dict(std::sync::Arc::new({
-            let mut d = BTreeMap::new();
+        VmValue::dict({
+            let mut d = crate::value::DictMap::new();
             d.insert("role".into(), VmValue::String(std::sync::Arc::from("user")));
             d.insert(
                 "content".into(),
                 VmValue::String(std::sync::Arc::from("hi")),
             );
             d
-        })),
-        VmValue::Dict(std::sync::Arc::new({
-            let mut d = BTreeMap::new();
+        }),
+        VmValue::dict({
+            let mut d = crate::value::DictMap::new();
             d.insert(
                 "role".into(),
                 VmValue::String(std::sync::Arc::from("assistant")),
@@ -244,7 +231,7 @@ fn test_prompt_value_to_messages_list() {
                 VmValue::String(std::sync::Arc::from("hello")),
             );
             d
-        })),
+        }),
     ];
     let msgs = prompt_value_to_messages(&VmValue::List(std::sync::Arc::new(items)));
     assert_eq!(msgs.len(), 2);
@@ -253,8 +240,8 @@ fn test_prompt_value_to_messages_list() {
 
 #[test]
 fn test_prompt_value_to_messages_preserves_image_content() {
-    let items = vec![VmValue::Dict(std::sync::Arc::new({
-        let mut image = BTreeMap::new();
+    let items = vec![VmValue::dict({
+        let mut image = crate::value::DictMap::new();
         image.insert(
             "type".into(),
             VmValue::String(std::sync::Arc::from("image")),
@@ -268,11 +255,11 @@ fn test_prompt_value_to_messages_preserves_image_content() {
             VmValue::String(std::sync::Arc::from("image/png")),
         );
 
-        let mut message = BTreeMap::new();
+        let mut message = crate::value::DictMap::new();
         message.insert("role".into(), VmValue::String(std::sync::Arc::from("user")));
-        message.insert("content".into(), VmValue::Dict(std::sync::Arc::new(image)));
+        message.insert("content".into(), VmValue::dict(image));
         message
-    }))];
+    })];
     let msgs = prompt_value_to_messages(&VmValue::List(std::sync::Arc::new(items)));
     assert_eq!(msgs.len(), 1);
     assert_eq!(msgs[0]["content"]["type"], "image");
@@ -300,14 +287,14 @@ fn test_match_uri_template_no_match() {
 
 #[test]
 fn test_annotations_to_json() {
-    let mut d = BTreeMap::new();
+    let mut d = crate::value::DictMap::new();
     d.insert(
         "title".into(),
         VmValue::String(std::sync::Arc::from("My Tool")),
     );
     d.insert("readOnlyHint".into(), VmValue::Bool(true));
     d.insert("destructiveHint".into(), VmValue::Bool(false));
-    let json = annotations_to_json(&VmValue::Dict(std::sync::Arc::new(d))).unwrap();
+    let json = annotations_to_json(&VmValue::dict(d)).unwrap();
     assert_eq!(json["title"], "My Tool");
     assert_eq!(json["readOnlyHint"], true);
     assert_eq!(json["destructiveHint"], false);
@@ -315,8 +302,8 @@ fn test_annotations_to_json() {
 
 #[test]
 fn test_annotations_empty_returns_none() {
-    let d = BTreeMap::new();
-    assert!(annotations_to_json(&VmValue::Dict(std::sync::Arc::new(d))).is_none());
+    let d = crate::value::DictMap::new();
+    assert!(annotations_to_json(&VmValue::dict(d)).is_none());
 }
 
 #[tokio::test]
@@ -439,7 +426,7 @@ async fn server_advertises_elicitation_capability() {
 
 #[tokio::test]
 async fn server_completion_complete_returns_prompt_and_resource_suggestions() {
-    let mut resource_completions = BTreeMap::new();
+    let mut resource_completions = std::collections::BTreeMap::new();
     resource_completions.insert(
         "key".to_string(),
         McpCompletionSource {

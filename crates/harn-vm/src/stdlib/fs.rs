@@ -87,37 +87,37 @@ fn result_err(value: VmValue) -> VmValue {
     VmValue::enum_variant("Result", "Err", vec![value])
 }
 
-fn bool_option(opts: &BTreeMap<String, VmValue>, key: &str) -> Option<bool> {
+fn bool_option(opts: &crate::value::DictMap, key: &str) -> Option<bool> {
     match opts.get(key) {
         Some(VmValue::Bool(value)) => Some(*value),
         _ => None,
     }
 }
 
-fn string_option(opts: &BTreeMap<String, VmValue>, key: &str) -> Option<String> {
+fn string_option(opts: &crate::value::DictMap, key: &str) -> Option<String> {
     match opts.get(key) {
         Some(VmValue::String(value)) => Some(value.to_string()),
         _ => None,
     }
 }
 
-fn usize_option(opts: &BTreeMap<String, VmValue>, key: &str) -> Option<usize> {
+fn usize_option(opts: &crate::value::DictMap, key: &str) -> Option<usize> {
     opts.get(key)
         .and_then(VmValue::as_int)
         .and_then(|value| usize::try_from(value).ok())
 }
 
-fn u64_option(opts: &BTreeMap<String, VmValue>, key: &str) -> Option<u64> {
+fn u64_option(opts: &crate::value::DictMap, key: &str) -> Option<u64> {
     opts.get(key)
         .and_then(VmValue::as_int)
         .and_then(|value| u64::try_from(value).ok())
 }
 
-fn int_option(opts: &BTreeMap<String, VmValue>, key: &str) -> Option<i64> {
+fn int_option(opts: &crate::value::DictMap, key: &str) -> Option<i64> {
     opts.get(key).and_then(VmValue::as_int)
 }
 
-fn string_list_option(opts: &BTreeMap<String, VmValue>, key: &str) -> Vec<String> {
+fn string_list_option(opts: &crate::value::DictMap, key: &str) -> Vec<String> {
     match opts.get(key) {
         Some(VmValue::String(value)) => vec![value.to_string()],
         Some(VmValue::List(values)) => values
@@ -182,7 +182,7 @@ fn walk_entry_to_vm(entry: WalkDirEntry) -> VmValue {
     dict.insert("is_dir".to_string(), VmValue::Bool(entry.is_dir));
     dict.insert("is_file".to_string(), VmValue::Bool(entry.is_file));
     dict.insert("depth".to_string(), VmValue::Int(entry.depth));
-    VmValue::Dict(std::sync::Arc::new(dict))
+    VmValue::dict(dict)
 }
 
 fn walk_entries_to_json(entries: Vec<WalkDirEntry>) -> serde_json::Value {
@@ -785,7 +785,7 @@ fn stat_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError>
             info.insert("modified".to_string(), VmValue::Float(dur.as_secs_f64()));
         }
     }
-    Ok(VmValue::Dict(std::sync::Arc::new(info)))
+    Ok(VmValue::dict(info))
 }
 
 #[harn_builtin(

@@ -37,7 +37,7 @@ impl Vm {
             handler,
         });
 
-        Ok(VmValue::Dict(std::sync::Arc::new(BTreeMap::from([
+        Ok(VmValue::dict(BTreeMap::from([
             ("handle".to_string(), VmValue::Int(handle)),
             (
                 "signals".to_string(),
@@ -49,7 +49,7 @@ impl Vm {
                 )),
             ),
             ("once".to_string(), VmValue::Bool(once)),
-        ]))))
+        ])))
     }
 
     pub(crate) fn unregister_interrupt_handler(&mut self, handle: &VmValue) -> Result<(), VmError> {

@@ -1,7 +1,6 @@
 //! Tool, persona, and step hook registration builtins for workflow execution.
 
 use crate::value::VmDictExt;
-use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use crate::stdlib::macros::harn_builtin;
@@ -615,7 +614,7 @@ pub(super) async fn fire_session_hook_builtin(
         },
         payload: payload.clone(),
     });
-    let mut out: BTreeMap<String, VmValue> = BTreeMap::new();
+    let mut out: crate::value::DictMap = crate::value::DictMap::new();
     match control {
         crate::orchestration::HookControl::Allow => {
             out.put_str("control", "allow");
@@ -639,7 +638,7 @@ pub(super) async fn fire_session_hook_builtin(
             );
         }
     }
-    Ok(VmValue::Dict(std::sync::Arc::new(out)))
+    Ok(VmValue::dict(out))
 }
 
 /// Synchronous emit-only entry point: explicitly notify the session
@@ -708,12 +707,12 @@ mod tests {
     use super::*;
 
     fn dict(entries: &[(&str, VmValue)]) -> VmValue {
-        VmValue::Dict(std::sync::Arc::new(
+        VmValue::dict(
             entries
                 .iter()
                 .map(|(key, value)| ((*key).to_string(), value.clone()))
-                .collect(),
-        ))
+                .collect::<crate::value::DictMap>(),
+        )
     }
 
     #[test]

@@ -1,7 +1,7 @@
 //! System reminder provider registry and canonical provider implementations.
 
 use std::cell::RefCell;
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 use std::sync::Arc;
 
 use serde_json::Value as JsonValue;
@@ -10,7 +10,7 @@ use harn_parser::diagnostic_codes::Code;
 
 use crate::llm::helpers::{ReminderPropagate, ReminderRoleHint, ReminderSource, SystemReminder};
 use crate::orchestration::{HookEffect, HookEvent, ReminderSpec};
-use crate::value::{VmClosure, VmError, VmValue};
+use crate::value::{VmClosure, VmError};
 
 const TOKEN_PRESSURE_ID: &str = "token_pressure";
 const IDLE_NUDGE_ID: &str = "idle_nudge";
@@ -1617,7 +1617,7 @@ fn json_bool(value: &JsonValue, key: &str) -> Option<bool> {
     value.get(key).and_then(JsonValue::as_bool)
 }
 
-pub(crate) fn options_map_to_json(options: &BTreeMap<String, VmValue>) -> JsonValue {
+pub(crate) fn options_map_to_json(options: &crate::value::DictMap) -> JsonValue {
     JsonValue::Object(
         options
             .iter()

@@ -127,7 +127,7 @@ async fn project_enrich_impl(
             "_provenance".to_string(),
             provenance_value(None, estimated_input_tokens, 0, false),
         );
-        return Ok(VmValue::Dict(std::sync::Arc::new(budget_result)));
+        return Ok(VmValue::dict(budget_result));
     }
 
     let llm_options_value = llm_options_value(&options, &rendered_prompt);
@@ -459,7 +459,7 @@ fn augment_project_evidence(
             ci_evidence_value(collect_ci_evidence(root)),
         );
     }
-    VmValue::Dict(std::sync::Arc::new(merged))
+    VmValue::dict(merged)
 }
 
 fn collect_ci_evidence(root: &Path) -> CiEvidence {
@@ -691,7 +691,7 @@ fn classify_workflow_job(
 fn collect_hook_evidence(root: &Path) -> HookEvidence {
     let mut providers = Vec::new();
     let mut files = Vec::new();
-    let mut stages = BTreeMap::new();
+    let mut stages = std::collections::BTreeMap::new();
     let mut warnings = Vec::new();
 
     let githooks_dir = root.join(".githooks");
@@ -1483,19 +1483,19 @@ fn enrichment_bindings(
     root: &Path,
     base_evidence: &VmValue,
     files: &[RelevantFile],
-) -> BTreeMap<String, VmValue> {
-    let mut bindings = BTreeMap::new();
+) -> crate::value::DictMap {
+    let mut bindings = crate::value::DictMap::new();
     bindings.put_str("path", root.to_string_lossy());
     bindings.insert("base_evidence".to_string(), base_evidence.clone());
     bindings.insert("evidence".to_string(), base_evidence.clone());
     let file_values = files
         .iter()
         .map(|file| {
-            let mut value = BTreeMap::new();
+            let mut value = crate::value::DictMap::new();
             value.put_str("path", file.rel_path.clone());
             value.put_str("content", file.content.clone());
             value.insert("truncated".to_string(), VmValue::Bool(file.truncated));
-            VmValue::Dict(std::sync::Arc::new(value))
+            VmValue::dict(value)
         })
         .collect::<Vec<_>>();
     bindings.insert(
@@ -1511,7 +1511,7 @@ fn enrichment_bindings(
 }
 
 fn llm_options_value(options: &ProjectEnrichOptions, rendered_prompt: &str) -> VmValue {
-    let mut llm_options = BTreeMap::new();
+    let mut llm_options = crate::value::DictMap::new();
     llm_options.put_str("provider", options.provider.clone());
     llm_options.put_str("model", options.model.clone());
     if let Some(temperature) = options.temperature {
@@ -1533,7 +1533,7 @@ fn llm_options_value(options: &ProjectEnrichOptions, rendered_prompt: &str) -> V
             }),
         )])),
     );
-    VmValue::Dict(std::sync::Arc::new(llm_options))
+    VmValue::dict(llm_options)
 }
 
 fn validation_envelope(
@@ -1543,14 +1543,14 @@ fn validation_envelope(
     input_tokens: i64,
     output_tokens: i64,
 ) -> VmValue {
-    let mut dict = BTreeMap::new();
+    let mut dict = crate::value::DictMap::new();
     dict.insert("base_evidence".to_string(), base_evidence.clone());
     dict.put_str("validation_error", message);
     dict.insert(
         "_provenance".to_string(),
         provenance_value(model, input_tokens, output_tokens, false),
     );
-    VmValue::Dict(std::sync::Arc::new(dict))
+    VmValue::dict(dict)
 }
 
 fn attach_provenance(
@@ -1567,16 +1567,16 @@ fn attach_provenance(
                 "_provenance".to_string(),
                 provenance_value(model, input_tokens, output_tokens, cached),
             );
-            VmValue::Dict(std::sync::Arc::new(merged))
+            VmValue::dict(merged)
         }
         other => {
-            let mut wrapped = BTreeMap::new();
+            let mut wrapped = crate::value::DictMap::new();
             wrapped.insert("data".to_string(), other);
             wrapped.insert(
                 "_provenance".to_string(),
                 provenance_value(model, input_tokens, output_tokens, cached),
             );
-            VmValue::Dict(std::sync::Arc::new(wrapped))
+            VmValue::dict(wrapped)
         }
     }
 }
@@ -1590,14 +1590,14 @@ fn attach_ci_metadata(value: VmValue, base_evidence: &VmValue) -> VmValue {
         return value;
     };
     let Some(dict) = value.as_dict() else {
-        let mut wrapped = BTreeMap::new();
+        let mut wrapped = crate::value::DictMap::new();
         wrapped.insert("data".to_string(), value);
         wrapped.insert("ci".to_string(), ci_value);
-        return VmValue::Dict(std::sync::Arc::new(wrapped));
+        return VmValue::dict(wrapped);
     };
     let mut merged = (*dict).clone();
     merged.insert("ci".to_string(), ci_value);
-    VmValue::Dict(std::sync::Arc::new(merged))
+    VmValue::dict(merged)
 }
 
 fn provenance_value(
@@ -1606,23 +1606,20 @@ fn provenance_value(
     output_tokens: i64,
     cached: bool,
 ) -> VmValue {
-    let mut tokens = BTreeMap::new();
+    let mut tokens = crate::value::DictMap::new();
     tokens.insert("in".to_string(), VmValue::Int(input_tokens));
     tokens.insert("out".to_string(), VmValue::Int(output_tokens));
 
-    let mut provenance = BTreeMap::new();
+    let mut provenance = crate::value::DictMap::new();
     provenance.insert(
         "model".to_string(),
         model
             .map(|value| VmValue::String(std::sync::Arc::from(value)))
             .unwrap_or(VmValue::Nil),
     );
-    provenance.insert(
-        "tokens".to_string(),
-        VmValue::Dict(std::sync::Arc::new(tokens)),
-    );
+    provenance.insert("tokens".to_string(), VmValue::dict(tokens));
     provenance.insert("cached".to_string(), VmValue::Bool(cached));
-    VmValue::Dict(std::sync::Arc::new(provenance))
+    VmValue::dict(provenance)
 }
 
 fn result_with_cached_flag(value: VmValue, cached: bool) -> VmValue {
@@ -1636,11 +1633,8 @@ fn result_with_cached_flag(value: VmValue, cached: bool) -> VmValue {
         .map(|value| (*value).clone())
         .unwrap_or_default();
     provenance.insert("cached".to_string(), VmValue::Bool(cached));
-    merged.insert(
-        "_provenance".to_string(),
-        VmValue::Dict(std::sync::Arc::new(provenance)),
-    );
-    VmValue::Dict(std::sync::Arc::new(merged))
+    merged.insert("_provenance".to_string(), VmValue::dict(provenance));
+    VmValue::dict(merged)
 }
 
 fn hash_relevant_files(files: &[RelevantFile]) -> String {
@@ -1921,7 +1915,7 @@ commands:
         let options = ProjectEnrichOptions {
             base_evidence: None,
             prompt: "Return JSON.".to_string(),
-            schema: VmValue::Dict(std::sync::Arc::new(BTreeMap::new())),
+            schema: VmValue::dict(crate::value::DictMap::new()),
             budget_tokens: 4000,
             model: "mock-model".to_string(),
             provider: "mock".to_string(),
@@ -2120,7 +2114,7 @@ jobs:
             "pub fn greet() -> &'static str { \"hi\" }\n",
         );
 
-        let base = VmValue::Dict(std::sync::Arc::new(BTreeMap::from([
+        let base = VmValue::dict(crate::value::DictMap::from_iter([
             (
                 "languages".to_string(),
                 VmValue::List(std::sync::Arc::new(vec![VmValue::String(
@@ -2139,7 +2133,7 @@ jobs:
                     std::sync::Arc::from("Cargo.lock"),
                 )])),
             ),
-        ])));
+        ]));
         let files = collect_relevant_files(dir.path(), &base);
         let paths = files
             .iter()
@@ -2152,21 +2146,21 @@ jobs:
 
     #[test]
     fn attach_ci_metadata_merges_ci_block_into_result() {
-        let base = VmValue::Dict(std::sync::Arc::new(BTreeMap::from([(
+        let base = VmValue::dict(crate::value::DictMap::from_iter([(
             "ci".to_string(),
-            VmValue::Dict(std::sync::Arc::new(BTreeMap::from([(
+            VmValue::dict(crate::value::DictMap::from_iter([(
                 "merge_policy".to_string(),
-                VmValue::Dict(std::sync::Arc::new(BTreeMap::from([(
+                VmValue::dict(crate::value::DictMap::from_iter([(
                     "squash_only".to_string(),
                     VmValue::Bool(true),
-                )]))),
-            )]))),
-        )])));
+                )])),
+            )])),
+        )]));
         let result = attach_ci_metadata(
-            VmValue::Dict(std::sync::Arc::new(BTreeMap::from([(
+            VmValue::dict(crate::value::DictMap::from_iter([(
                 "summary".to_string(),
                 VmValue::String(std::sync::Arc::from("ok")),
-            )]))),
+            )])),
             &base,
         );
         let dict = result.as_dict().expect("dict");

@@ -36,8 +36,8 @@ fn bytes_value(bytes: Vec<u8>) -> VmValue {
     VmValue::Bytes(std::sync::Arc::new(bytes))
 }
 
-fn dict_value(fields: BTreeMap<String, VmValue>) -> VmValue {
-    VmValue::Dict(std::sync::Arc::new(fields))
+fn dict_value(fields: crate::value::DictMap) -> VmValue {
+    VmValue::dict(fields)
 }
 
 fn list_value(items: Vec<VmValue>) -> VmValue {
@@ -93,7 +93,7 @@ fn expect_dict<'a>(
     value: &'a VmValue,
     builtin: &str,
     label: &str,
-) -> Result<&'a BTreeMap<String, VmValue>, VmError> {
+) -> Result<&'a crate::value::DictMap, VmError> {
     match value {
         VmValue::Dict(map) => Ok(map.as_ref()),
         other => Err(builtin_error(
@@ -107,7 +107,7 @@ fn optional_options<'a>(
     args: &'a [VmValue],
     index: usize,
     builtin: &str,
-) -> Result<Option<&'a BTreeMap<String, VmValue>>, VmError> {
+) -> Result<Option<&'a crate::value::DictMap>, VmError> {
     match args.get(index) {
         Some(VmValue::Dict(map)) => Ok(Some(map.as_ref())),
         Some(VmValue::Nil) | None => Ok(None),
@@ -123,7 +123,7 @@ fn optional_options<'a>(
 }
 
 fn opt_usize(
-    opts: Option<&BTreeMap<String, VmValue>>,
+    opts: Option<&crate::value::DictMap>,
     key: &str,
     default: usize,
     builtin: &str,
@@ -142,10 +142,7 @@ fn opt_usize(
     }
 }
 
-fn parse_limits(
-    opts: Option<&BTreeMap<String, VmValue>>,
-    builtin: &str,
-) -> Result<Limits, VmError> {
+fn parse_limits(opts: Option<&crate::value::DictMap>, builtin: &str) -> Result<Limits, VmError> {
     Ok(Limits {
         max_total_bytes: opt_usize(opts, "max_total_bytes", DEFAULT_MAX_TOTAL_BYTES, builtin)?,
         max_field_bytes: opt_usize(opts, "max_field_bytes", DEFAULT_MAX_FIELD_BYTES, builtin)?,
@@ -214,7 +211,7 @@ fn unquote_param(value: &str) -> String {
 fn parse_header_value_params(value: &str) -> (String, BTreeMap<String, String>) {
     let mut parts = split_params(value).into_iter();
     let base = parts.next().unwrap_or_default().to_ascii_lowercase();
-    let mut params = BTreeMap::new();
+    let mut params = std::collections::BTreeMap::new();
     for part in parts {
         let Some((name, value)) = part.split_once('=') else {
             continue;
@@ -290,7 +287,7 @@ fn find_subslice(haystack: &[u8], needle: &[u8]) -> Option<usize> {
 fn parse_part_headers(raw: &[u8], builtin: &str) -> Result<BTreeMap<String, String>, VmError> {
     let text = std::str::from_utf8(raw)
         .map_err(|error| builtin_error(builtin, format!("part headers are not UTF-8: {error}")))?;
-    let mut headers = BTreeMap::new();
+    let mut headers = std::collections::BTreeMap::new();
     if text.is_empty() {
         return Ok(headers);
     }
@@ -438,7 +435,7 @@ fn parsed_field_value(field: ParsedField) -> VmValue {
         Ok(text) => VmValue::string(text),
         Err(_) => VmValue::Nil,
     };
-    let mut map = BTreeMap::new();
+    let mut map = crate::value::DictMap::new();
     map.insert("name".to_string(), VmValue::string(field.name));
     map.insert("filename".to_string(), nil_or_string(field.filename));
     map.insert(
@@ -465,7 +462,7 @@ fn multipart_parse_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValu
     let fields = parse_multipart_body(&body, &boundary, &limits, "multipart_parse")?;
     let field_count = fields.len() as i64;
 
-    let mut result = BTreeMap::new();
+    let mut result = crate::value::DictMap::new();
     result.insert("boundary".to_string(), VmValue::string(boundary));
     result.insert(
         "fields".to_string(),
@@ -479,7 +476,7 @@ fn multipart_parse_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValu
 fn field_dict<'a>(
     args: &'a [VmValue],
     builtin: &str,
-) -> Result<&'a BTreeMap<String, VmValue>, VmError> {
+) -> Result<&'a crate::value::DictMap, VmError> {
     match args.first() {
         Some(value) => expect_dict(value, builtin, "field"),
         None => Err(builtin_error(builtin, "missing argument 1")),
@@ -532,7 +529,7 @@ fn multipart_field_text_builtin(args: &[VmValue], _out: &mut String) -> Result<V
 }
 
 fn field_input_string(
-    field: &BTreeMap<String, VmValue>,
+    field: &crate::value::DictMap,
     key: &str,
     builtin: &str,
     required: bool,
@@ -551,10 +548,7 @@ fn field_input_string(
     }
 }
 
-fn field_input_content(
-    field: &BTreeMap<String, VmValue>,
-    builtin: &str,
-) -> Result<Vec<u8>, VmError> {
+fn field_input_content(field: &crate::value::DictMap, builtin: &str) -> Result<Vec<u8>, VmError> {
     match field.get("content").or_else(|| field.get("value")) {
         Some(VmValue::Bytes(bytes)) => Ok(bytes.as_ref().clone()),
         Some(VmValue::String(text)) => Ok(text.as_bytes().to_vec()),
@@ -567,14 +561,14 @@ fn field_input_content(
 }
 
 fn input_headers(
-    field: &BTreeMap<String, VmValue>,
+    field: &crate::value::DictMap,
     builtin: &str,
 ) -> Result<BTreeMap<String, String>, VmError> {
     let Some(value) = field.get("headers") else {
-        return Ok(BTreeMap::new());
+        return Ok(std::collections::BTreeMap::new());
     };
     let headers = expect_dict(value, builtin, "headers")?;
-    let mut out = BTreeMap::new();
+    let mut out = std::collections::BTreeMap::new();
     for (name, value) in headers {
         if name.contains('\r') || name.contains('\n') || name.trim().is_empty() {
             return Err(builtin_error(builtin, "header names must be single-line"));
@@ -608,7 +602,7 @@ fn quote_header_param(value: &str) -> String {
 fn write_field_part(
     out: &mut Vec<u8>,
     boundary: &str,
-    field: &BTreeMap<String, VmValue>,
+    field: &crate::value::DictMap,
 ) -> Result<(), VmError> {
     let name = field_input_string(field, "name", "multipart_form_data", true)?.unwrap();
     if name.contains('\r') || name.contains('\n') {
@@ -755,7 +749,7 @@ fn multipart_form_data_builtin(args: &[VmValue], _out: &mut String) -> Result<Vm
 
 fn form_data_result(boundary: String, body: Vec<u8>) -> Result<VmValue, VmError> {
     let content_type = format!("multipart/form-data; boundary={boundary}");
-    let mut result = BTreeMap::new();
+    let mut result = crate::value::DictMap::new();
     result.insert("boundary".to_string(), VmValue::string(boundary));
     result.insert("content_type".to_string(), VmValue::string(content_type));
     result.insert("body".to_string(), bytes_value(body));
@@ -840,7 +834,7 @@ mod tests {
             vec![
                 body,
                 s("multipart/form-data; boundary=x"),
-                dict_value(BTreeMap::from([(
+                dict_value(crate::value::DictMap::from_iter([(
                     "max_fields".to_string(),
                     VmValue::Int(0),
                 )])),

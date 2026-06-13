@@ -6,7 +6,6 @@ use super::{
     last_assistant_text, text_has_tool_call_prefix, tool_result_message_for_provider,
     truncated_tool_call_should_continue, vm_to_json,
 };
-use std::collections::BTreeMap;
 
 #[test]
 fn model_less_turn_is_flagged_as_no_llm_call() {
@@ -53,7 +52,7 @@ fn native_tool_calls_replay_with_openai_wire_shape() {
 
 #[test]
 fn initial_user_content_preserves_multimodal_blocks() {
-    let mut opts = BTreeMap::new();
+    let mut opts = crate::value::DictMap::new();
     opts.insert(
         "initial_user_content".to_string(),
         crate::stdlib::json_to_vm_value(&json!([
@@ -75,7 +74,7 @@ fn initial_user_content_preserves_multimodal_blocks() {
 
 #[test]
 fn initial_user_content_falls_back_to_text_message() {
-    let opts = BTreeMap::new();
+    let opts = crate::value::DictMap::new();
 
     assert_eq!(
         initial_user_content(&opts, "hello"),
@@ -353,7 +352,6 @@ mod nested_budget_tests {
         push_execution_policy, CapabilityPolicy,
     };
     use crate::value::{VmDictExt, VmError, VmValue};
-    use std::collections::BTreeMap;
 
     use super::super::{build_nested_budget_denial, install_session_nested_budget};
     use super::vm_to_json;
@@ -375,7 +373,7 @@ mod nested_budget_tests {
         };
         push_execution_policy(parent);
 
-        let opts_map = BTreeMap::new();
+        let opts_map = crate::value::DictMap::new();
         let session_id = empty_session_id();
         let error = install_session_nested_budget(&opts_map, &session_id).unwrap_err();
         match error {
@@ -397,7 +395,7 @@ mod nested_budget_tests {
             ..Default::default()
         });
 
-        let opts_map = BTreeMap::new();
+        let opts_map = crate::value::DictMap::new();
         let guard = install_session_nested_budget(&opts_map, "child").unwrap();
         assert_eq!(guard.parent_limit, Some(3));
         assert_eq!(guard.child_limit, Some(2));
@@ -414,7 +412,7 @@ mod nested_budget_tests {
             ..Default::default()
         });
 
-        let mut opts_map = BTreeMap::new();
+        let mut opts_map = crate::value::DictMap::new();
         opts_map.put_str("_nested_kind", "sub_agent_run");
         opts_map.put_str("_nested_label", "research-worker");
         let error = install_session_nested_budget(&opts_map, "ignored").unwrap_err();
@@ -442,7 +440,7 @@ mod nested_budget_tests {
             ..Default::default()
         });
 
-        let mut opts_map = BTreeMap::new();
+        let mut opts_map = crate::value::DictMap::new();
         opts_map.insert(
             "policy".to_string(),
             policy_value(&CapabilityPolicy {

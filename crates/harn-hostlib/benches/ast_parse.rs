@@ -8,7 +8,6 @@
 //!
 //! Run with `cargo bench --bench ast_parse`.
 
-use std::collections::BTreeMap;
 use std::hint::black_box;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -24,11 +23,11 @@ fn ast_registry() -> BuiltinRegistry {
 }
 
 fn dict(pairs: &[(&str, VmValue)]) -> VmValue {
-    let mut map: BTreeMap<String, VmValue> = BTreeMap::new();
+    let mut map: harn_vm::value::DictMap = Default::default();
     for (k, v) in pairs {
         map.insert((*k).into(), v.clone());
     }
-    VmValue::Dict(Arc::new(map))
+    VmValue::dict(map)
 }
 
 fn fixture_path(rel: &str) -> PathBuf {

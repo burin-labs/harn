@@ -254,7 +254,7 @@ fn parse_tool_annotations(map: &serde_json::Map<String, serde_json::Value>) -> T
 
 pub fn tool_annotations_from_spec(value: &serde_json::Value) -> BTreeMap<String, ToolAnnotations> {
     match value {
-        serde_json::Value::Null => BTreeMap::new(),
+        serde_json::Value::Null => std::collections::BTreeMap::new(),
         serde_json::Value::Array(items) => items
             .iter()
             .filter_map(|item| match item {
@@ -277,20 +277,20 @@ pub fn tool_annotations_from_spec(value: &serde_json::Value) -> BTreeMap<String,
                 .and_then(|value| value.as_str())
                 .filter(|name| !name.is_empty())
                 .map(|name| {
-                    let mut annotations = BTreeMap::new();
+                    let mut annotations = std::collections::BTreeMap::new();
                     annotations.insert(name.to_string(), parse_tool_annotations(map));
                     annotations
                 })
                 .unwrap_or_default()
         }
-        _ => BTreeMap::new(),
+        _ => std::collections::BTreeMap::new(),
     }
 }
 
 pub fn tool_capability_policy_from_spec(value: &serde_json::Value) -> CapabilityPolicy {
     let tools = tool_names_from_spec(value);
     let tool_annotations = tool_annotations_from_spec(value);
-    let mut capabilities: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    let mut capabilities: BTreeMap<String, Vec<String>> = std::collections::BTreeMap::new();
     for annotations in tool_annotations.values() {
         for (capability, ops) in &annotations.capabilities {
             let entry = capabilities.entry(capability.clone()).or_default();
@@ -1311,7 +1311,7 @@ mod tests {
         policy
             .tool_annotations
             .insert("run".into(), execute_annotations());
-        let tools = VmValue::Dict(std::sync::Arc::new(BTreeMap::from([
+        let tools = VmValue::dict(std::collections::BTreeMap::from_iter([
             (
                 "_type".into(),
                 VmValue::String(std::sync::Arc::from("tool_registry")),
@@ -1319,20 +1319,23 @@ mod tests {
             (
                 "tools".into(),
                 VmValue::List(std::sync::Arc::new(vec![VmValue::Dict(
-                    std::sync::Arc::new(BTreeMap::from([
-                        ("name".into(), VmValue::String(std::sync::Arc::from("run"))),
+                    std::sync::Arc::new(crate::value::DictMap::from_iter([
                         (
-                            "parameters".into(),
-                            VmValue::Dict(std::sync::Arc::new(BTreeMap::new())),
+                            "name".to_string(),
+                            VmValue::String(std::sync::Arc::from("run")),
                         ),
                         (
-                            "executor".into(),
+                            "parameters".to_string(),
+                            VmValue::dict(crate::value::DictMap::new()),
+                        ),
+                        (
+                            "executor".to_string(),
                             VmValue::String(std::sync::Arc::from("host_bridge")),
                         ),
                     ])),
                 )])),
             ),
-        ])));
+        ]));
         let report = validate_tool_surface(&ToolSurfaceInput {
             tools: Some(tools),
             policy: Some(policy),

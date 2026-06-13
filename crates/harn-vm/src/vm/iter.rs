@@ -4,7 +4,7 @@
 //! iterator; once `next` returns `None` the variant is replaced with
 //! `Exhausted`.
 
-use std::collections::{BTreeMap, VecDeque};
+use std::collections::VecDeque;
 use std::sync::Arc;
 
 use parking_lot::Mutex;
@@ -65,7 +65,7 @@ pub enum VmIter {
     },
     /// Snapshot over a dict; yields `Pair(key, value)` items.
     Dict {
-        entries: Arc<BTreeMap<String, VmValue>>,
+        entries: Arc<crate::value::DictMap>,
         keys: Vec<String>,
         idx: usize,
     },

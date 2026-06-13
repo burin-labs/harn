@@ -1,19 +1,17 @@
-use std::collections::BTreeMap;
-
 use crate::value::VmValue;
 
-pub(crate) fn opt_str(options: &Option<BTreeMap<String, VmValue>>, key: &str) -> Option<String> {
+pub(crate) fn opt_str(options: &Option<crate::value::DictMap>, key: &str) -> Option<String> {
     match options.as_ref()?.get(key)? {
         VmValue::Nil => None,
         value => Some(value.display()),
     }
 }
 
-pub(crate) fn opt_int(options: &Option<BTreeMap<String, VmValue>>, key: &str) -> Option<i64> {
+pub(crate) fn opt_int(options: &Option<crate::value::DictMap>, key: &str) -> Option<i64> {
     options.as_ref()?.get(key)?.as_int()
 }
 
-pub(crate) fn opt_float(options: &Option<BTreeMap<String, VmValue>>, key: &str) -> Option<f64> {
+pub(crate) fn opt_float(options: &Option<crate::value::DictMap>, key: &str) -> Option<f64> {
     options.as_ref()?.get(key).and_then(|v| match v {
         VmValue::Float(f) => Some(*f),
         VmValue::Int(i) => Some(*i as f64),
@@ -21,7 +19,7 @@ pub(crate) fn opt_float(options: &Option<BTreeMap<String, VmValue>>, key: &str) 
     })
 }
 
-pub(crate) fn opt_bool(options: &Option<BTreeMap<String, VmValue>>, key: &str) -> bool {
+pub(crate) fn opt_bool(options: &Option<crate::value::DictMap>, key: &str) -> bool {
     options
         .as_ref()
         .and_then(|o| o.get(key))
@@ -32,7 +30,6 @@ pub(crate) fn opt_bool(options: &Option<BTreeMap<String, VmValue>>, key: &str) -
 #[cfg(test)]
 mod tests {
     use crate::value::VmDictExt;
-    use std::collections::BTreeMap;
 
     use crate::value::VmValue;
 
@@ -40,7 +37,7 @@ mod tests {
 
     #[test]
     fn opt_str_treats_nil_as_unset() {
-        let mut options = BTreeMap::new();
+        let mut options = crate::value::DictMap::new();
         options.insert("path".to_string(), VmValue::Nil);
 
         assert_eq!(opt_str(&Some(options), "path"), None);
@@ -48,7 +45,7 @@ mod tests {
 
     #[test]
     fn opt_str_preserves_string_values() {
-        let mut options = BTreeMap::new();
+        let mut options = crate::value::DictMap::new();
         options.put_str("path", "transcripts");
 
         assert_eq!(

@@ -39,16 +39,10 @@ pub(in crate::stdlib) fn workflow_graph_to_vm(graph: &WorkflowGraph) -> Result<V
         };
         let mut node_map = (*node_dict).clone();
         node_map.insert("tools".to_string(), raw_tools);
-        nodes.insert(
-            node_id.clone(),
-            VmValue::Dict(std::sync::Arc::new(node_map)),
-        );
+        nodes.insert(node_id.clone(), VmValue::dict(node_map));
     }
-    graph_dict.insert(
-        "nodes".to_string(),
-        VmValue::Dict(std::sync::Arc::new(nodes)),
-    );
-    Ok(VmValue::Dict(std::sync::Arc::new(graph_dict)))
+    graph_dict.insert("nodes".to_string(), VmValue::dict(nodes));
+    Ok(VmValue::dict(graph_dict))
 }
 
 pub(super) fn filter_workflow_tools(
@@ -124,7 +118,7 @@ pub(super) fn filter_workflow_tools_vm(tools: &VmValue, allowed: &[String]) -> V
                 .map(|value| filter_workflow_tools_vm(value, allowed))
                 .unwrap_or_else(|| VmValue::List(std::sync::Arc::new(Vec::new())));
             filtered.insert("tools".to_string(), tool_items);
-            VmValue::Dict(std::sync::Arc::new(filtered))
+            VmValue::dict(filtered)
         }
         VmValue::Dict(map) => {
             let keep = map

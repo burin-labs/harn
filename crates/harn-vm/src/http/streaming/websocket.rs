@@ -140,7 +140,7 @@ fn closed_event_with(code: Option<u16>, reason: Option<String>) -> VmValue {
     if let Some(reason) = reason {
         dict.put_str("reason", reason);
     }
-    VmValue::Dict(std::sync::Arc::new(dict))
+    VmValue::dict(dict)
 }
 
 fn ws_event_value(message: MockWsMessage) -> VmValue {
@@ -163,7 +163,7 @@ fn ws_event_value(message: MockWsMessage) -> VmValue {
             );
         }
     }
-    VmValue::Dict(std::sync::Arc::new(dict))
+    VmValue::dict(dict)
 }
 
 fn real_ws_event_value(message: WsMessage) -> VmValue {
@@ -202,7 +202,7 @@ fn real_ws_event_value(message: WsMessage) -> VmValue {
     }
 }
 
-fn websocket_route_from_options(path: &str, options: &BTreeMap<String, VmValue>) -> WebSocketRoute {
+fn websocket_route_from_options(path: &str, options: &crate::value::DictMap) -> WebSocketRoute {
     let bearer_token = options.get("auth").and_then(|auth| match auth {
         VmValue::Dict(dict) => dict.get("bearer").map(|value| value.display()),
         other => {
@@ -233,7 +233,7 @@ fn websocket_route_from_options(path: &str, options: &BTreeMap<String, VmValue>)
 
 pub(super) fn vm_websocket_server(
     bind: &str,
-    options: &BTreeMap<String, VmValue>,
+    options: &crate::value::DictMap,
 ) -> Result<VmValue, VmError> {
     let listener = TcpListener::bind(bind)
         .map_err(|error| vm_error(format!("websocket_server: bind failed: {error}")))?;
@@ -292,13 +292,13 @@ pub(super) fn vm_websocket_server(
     dict.put_str("id", id);
     dict.put_str("addr", addr);
     dict.put_str("url", url);
-    Ok(VmValue::Dict(std::sync::Arc::new(dict)))
+    Ok(VmValue::dict(dict))
 }
 
 pub(super) fn vm_websocket_route(
     server_id: &str,
     path: &str,
-    options: &BTreeMap<String, VmValue>,
+    options: &crate::value::DictMap,
 ) -> Result<VmValue, VmError> {
     let routes = WEBSOCKET_SERVERS.with(|servers| {
         servers
@@ -387,14 +387,14 @@ fn register_accepted_websocket(event: WebSocketServerEvent) -> Result<VmValue, V
     metadata.put_str("peer", peer);
     metadata.insert(
         "headers".to_string(),
-        VmValue::Dict(std::sync::Arc::new(
+        VmValue::dict(
             headers
                 .into_iter()
                 .map(|(name, value)| (name, VmValue::String(std::sync::Arc::from(value))))
-                .collect(),
-        )),
+                .collect::<crate::value::DictMap>(),
+        ),
     );
-    Ok(VmValue::Dict(std::sync::Arc::new(metadata)))
+    Ok(VmValue::dict(metadata))
 }
 
 pub(super) fn vm_websocket_server_close(server_id: &str) -> Result<VmValue, VmError> {
@@ -606,7 +606,7 @@ fn websocket_connection_thread(
 
 pub(super) async fn vm_websocket_connect(
     url: &str,
-    options: &BTreeMap<String, VmValue>,
+    options: &crate::value::DictMap,
 ) -> Result<VmValue, VmError> {
     let id = next_transport_handle("websocket");
     let max_messages =
@@ -690,7 +690,7 @@ pub(super) async fn vm_websocket_connect(
 /// Permanent failures (DNS, refused, TLS, protocol) bypass the retry.
 async fn connect_with_retry(
     url: &str,
-    options: &BTreeMap<String, VmValue>,
+    options: &crate::value::DictMap,
     timeout_ms: u64,
 ) -> Result<
     tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>,
@@ -747,7 +747,7 @@ fn is_transient_connect_error(message: &str) -> bool {
 
 fn websocket_message_from_vm(
     value: VmValue,
-    options: &BTreeMap<String, VmValue>,
+    options: &crate::value::DictMap,
 ) -> Result<MockWsMessage, VmError> {
     let message_type = options
         .get("type")
@@ -792,7 +792,7 @@ fn websocket_message_from_vm(
 
 fn websocket_client_request(
     url: &str,
-    options: &BTreeMap<String, VmValue>,
+    options: &crate::value::DictMap,
 ) -> Result<tokio_tungstenite::tungstenite::http::Request<()>, VmError> {
     let mut request = url
         .into_client_request()
@@ -909,7 +909,7 @@ fn mock_ws_message_from_real(message: WsMessage) -> MockWsMessage {
 pub(super) async fn vm_websocket_send(
     socket_id: &str,
     value: VmValue,
-    options: &BTreeMap<String, VmValue>,
+    options: &crate::value::DictMap,
 ) -> Result<VmValue, VmError> {
     let message = websocket_message_from_vm(value, options)?;
     let socket = WEBSOCKET_HANDLES.with(|handles| {

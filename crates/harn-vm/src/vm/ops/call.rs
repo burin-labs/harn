@@ -74,11 +74,11 @@ impl super::super::Vm {
             },
         );
         payload.put_str("persona", persona.unwrap_or(""));
-        payload.insert("step".to_string(), VmValue::Dict(std::sync::Arc::new(step)));
+        payload.insert("step".to_string(), VmValue::dict(step));
         if let Some(output) = output {
             payload.insert("output".to_string(), output);
         }
-        VmValue::Dict(std::sync::Arc::new(payload))
+        VmValue::dict(payload)
     }
 
     fn parse_step_pre_hook_result(
@@ -215,26 +215,24 @@ impl super::super::Vm {
     }
 
     fn step_hook_denied(step_name: &str, reason: String) -> VmError {
-        VmError::Thrown(VmValue::Dict(std::sync::Arc::new(
-            std::collections::BTreeMap::from([
-                (
-                    "category".to_string(),
-                    VmValue::String(std::sync::Arc::from("hook_denied")),
-                ),
-                (
-                    "event".to_string(),
-                    VmValue::String(std::sync::Arc::from("PreStep")),
-                ),
-                (
-                    "reason".to_string(),
-                    VmValue::String(std::sync::Arc::from(reason)),
-                ),
-                (
-                    "step".to_string(),
-                    VmValue::String(std::sync::Arc::from(step_name.to_string())),
-                ),
-            ]),
-        )))
+        VmError::Thrown(VmValue::dict(std::collections::BTreeMap::from([
+            (
+                "category".to_string(),
+                VmValue::String(std::sync::Arc::from("hook_denied")),
+            ),
+            (
+                "event".to_string(),
+                VmValue::String(std::sync::Arc::from("PreStep")),
+            ),
+            (
+                "reason".to_string(),
+                VmValue::String(std::sync::Arc::from(reason)),
+            ),
+            (
+                "step".to_string(),
+                VmValue::String(std::sync::Arc::from(step_name.to_string())),
+            ),
+        ])))
     }
 
     pub(crate) async fn run_step_post_hooks_for_current_frame(
