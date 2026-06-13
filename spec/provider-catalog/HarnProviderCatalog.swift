@@ -679,6 +679,33 @@ public let harnProviderCatalogJSON = #"""
       "latency_p50_ms": 1600
     },
     {
+      "id": "deepinfra",
+      "display_name": "Deepinfra",
+      "classification": "hosted",
+      "endpoint": {
+        "base_url": "https://api.deepinfra.com/v1/openai",
+        "base_url_env": "DEEPINFRA_BASE_URL",
+        "chat_endpoint": "/chat/completions",
+        "completion_endpoint": "/completions"
+      },
+      "auth": {
+        "style": "bearer",
+        "env": [
+          "DEEPINFRA_API_KEY",
+          "DEEPINFRA_TOKEN"
+        ],
+        "required": true
+      },
+      "protocols": [
+        "openai_chat_completions"
+      ],
+      "features": [
+        "native_tools"
+      ],
+      "caveats": [],
+      "latency_p50_ms": 1500
+    },
+    {
       "id": "deepseek",
       "display_name": "Deepseek",
       "classification": "hosted",
@@ -959,6 +986,35 @@ public let harnProviderCatalogJSON = #"""
       "latency_p50_ms": 900
     },
     {
+      "id": "moonshot",
+      "display_name": "Moonshot",
+      "classification": "hosted",
+      "endpoint": {
+        "base_url": "https://api.moonshot.ai/v1",
+        "base_url_env": "MOONSHOT_BASE_URL",
+        "chat_endpoint": "/chat/completions",
+        "completion_endpoint": "/completions"
+      },
+      "auth": {
+        "style": "bearer",
+        "env": [
+          "MOONSHOT_API_KEY",
+          "KIMI_API_KEY"
+        ],
+        "required": true
+      },
+      "protocols": [
+        "openai_chat_completions"
+      ],
+      "features": [
+        "native_tools",
+        "reasoning",
+        "prompt_caching"
+      ],
+      "caveats": [],
+      "latency_p50_ms": 1900
+    },
+    {
       "id": "ollama",
       "display_name": "Ollama",
       "classification": "local",
@@ -1036,6 +1092,32 @@ public let harnProviderCatalogJSON = #"""
       "features": [],
       "caveats": [],
       "latency_p50_ms": 2200
+    },
+    {
+      "id": "sambanova",
+      "display_name": "Sambanova",
+      "classification": "hosted",
+      "endpoint": {
+        "base_url": "https://api.sambanova.ai/v1",
+        "base_url_env": "SAMBANOVA_BASE_URL",
+        "chat_endpoint": "/chat/completions",
+        "completion_endpoint": "/completions"
+      },
+      "auth": {
+        "style": "bearer",
+        "env": [
+          "SAMBANOVA_API_KEY"
+        ],
+        "required": true
+      },
+      "protocols": [
+        "openai_chat_completions"
+      ],
+      "features": [
+        "native_tools"
+      ],
+      "caveats": [],
+      "latency_p50_ms": 350
     },
     {
       "id": "tgi",
@@ -2840,6 +2922,178 @@ public let harnProviderCatalogJSON = #"""
         "reasoning",
         "multilingual",
         "vision"
+      ]
+    },
+    {
+      "id": "deepinfra/Qwen/Qwen3.6-35B-A3B",
+      "name": "Qwen3.6 35B A3B (DeepInfra)",
+      "provider": "deepinfra",
+      "aliases": [
+        "deepinfra-qwen3.6"
+      ],
+      "context_window": 262144,
+      "logical_model": "qwen3.6-35b-a3b",
+      "equivalence_group": "qwen3.6-35b-a3b",
+      "served_variant": "deepinfra",
+      "wire_model": "Qwen/Qwen3.6-35B-A3B",
+      "api_dialect": "openai_chat",
+      "modalities": {
+        "input": [
+          "text",
+          "image"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
+        "tool_search": []
+      },
+      "structured_output": "native",
+      "format_preferences": {
+        "prefers_xml_scaffolding": false,
+        "prefers_markdown_scaffolding": true,
+        "structured_output_mode": "native_json",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "inline"
+      },
+      "reasoning": {
+        "modes": [
+          "enabled"
+        ],
+        "effort_supported": false,
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": false,
+      "pricing": {
+        "input_per_mtok": 0.1,
+        "output_per_mtok": 0.3,
+        "cache_read_per_mtok": null,
+        "cache_write_per_mtok": null
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "vision",
+        "thinking",
+        "structured_output"
+      ],
+      "family": "qwen",
+      "lineage": "qwen3",
+      "complementary_with": [
+        "anthropic-claude",
+        "openai-gpt",
+        "google-gemini",
+        "deepseek",
+        "kimi"
+      ],
+      "tier": "mid",
+      "open_weight": true,
+      "strengths": [
+        "coding",
+        "agentic",
+        "tool_use",
+        "long_context",
+        "cheap",
+        "vision"
+      ]
+    },
+    {
+      "id": "deepinfra/deepseek-ai/DeepSeek-V4-Pro",
+      "name": "DeepSeek V4 Pro (DeepInfra)",
+      "provider": "deepinfra",
+      "aliases": [
+        "deepinfra-deepseek"
+      ],
+      "context_window": 163840,
+      "logical_model": "deepseek-v4-pro",
+      "equivalence_group": "deepseek-v4-pro",
+      "served_variant": "deepinfra",
+      "wire_model": "deepseek-ai/DeepSeek-V4-Pro",
+      "api_dialect": "openai_chat",
+      "modalities": {
+        "input": [
+          "text"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
+        "tool_search": []
+      },
+      "structured_output": "native",
+      "format_preferences": {
+        "prefers_xml_scaffolding": false,
+        "prefers_markdown_scaffolding": true,
+        "structured_output_mode": "native_json",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "inline"
+      },
+      "reasoning": {
+        "modes": [
+          "enabled"
+        ],
+        "effort_supported": false,
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": true,
+      "pricing": {
+        "input_per_mtok": 0.5,
+        "output_per_mtok": 1.5,
+        "cache_read_per_mtok": null,
+        "cache_write_per_mtok": null
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "prompt_caching",
+        "thinking",
+        "structured_output"
+      ],
+      "family": "deepseek",
+      "lineage": "deepseek",
+      "complementary_with": [
+        "anthropic-claude",
+        "openai-gpt",
+        "google-gemini",
+        "qwen",
+        "kimi"
+      ],
+      "tier": "frontier",
+      "open_weight": true,
+      "strengths": [
+        "reasoning",
+        "coding",
+        "tool_use",
+        "long_context",
+        "cheap"
       ]
     },
     {
@@ -4969,6 +5223,185 @@ public let harnProviderCatalogJSON = #"""
       "open_weight": true,
       "strengths": [
         "coding",
+        "vision"
+      ]
+    },
+    {
+      "id": "moonshot/kimi-k2.6",
+      "name": "Kimi K2.6 (Moonshot direct)",
+      "provider": "moonshot",
+      "aliases": [
+        "kimi-direct",
+        "moonshot-kimi"
+      ],
+      "context_window": 262144,
+      "logical_model": "moonshot-kimi-k2.6",
+      "equivalence_group": "moonshot-kimi-k2.6",
+      "served_variant": "moonshot-direct",
+      "wire_model": "kimi-k2.6",
+      "api_dialect": "openai_chat",
+      "modalities": {
+        "input": [
+          "text",
+          "image"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
+        "tool_search": []
+      },
+      "structured_output": "native",
+      "format_preferences": {
+        "prefers_xml_scaffolding": false,
+        "prefers_markdown_scaffolding": true,
+        "structured_output_mode": "native_json",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "inline"
+      },
+      "reasoning": {
+        "modes": [
+          "enabled"
+        ],
+        "effort_supported": false,
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": true,
+      "pricing": {
+        "input_per_mtok": 0.6,
+        "output_per_mtok": 2.5,
+        "cache_read_per_mtok": 0.15,
+        "cache_write_per_mtok": null
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "vision",
+        "prompt_caching",
+        "thinking",
+        "structured_output"
+      ],
+      "family": "kimi",
+      "lineage": "kimi",
+      "complementary_with": [
+        "anthropic-claude",
+        "openai-gpt",
+        "google-gemini",
+        "qwen",
+        "deepseek"
+      ],
+      "tier": "frontier",
+      "open_weight": true,
+      "strengths": [
+        "coding",
+        "agentic",
+        "long_context",
+        "tool_use",
+        "reasoning",
+        "vision"
+      ]
+    },
+    {
+      "id": "moonshot/kimi-k2.7-code",
+      "name": "Kimi K2.7 Code (Moonshot direct)",
+      "provider": "moonshot",
+      "aliases": [
+        "moonshot-kimi-k2.7-code"
+      ],
+      "context_window": 262144,
+      "logical_model": "moonshot-kimi-k2.7-code",
+      "equivalence_group": "moonshot-kimi-k2.7-code",
+      "served_variant": "moonshot-direct",
+      "wire_model": "kimi-k2.7-code",
+      "api_dialect": "openai_chat",
+      "modalities": {
+        "input": [
+          "text",
+          "image",
+          "video"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
+        "tool_search": []
+      },
+      "structured_output": "native",
+      "format_preferences": {
+        "prefers_xml_scaffolding": false,
+        "prefers_markdown_scaffolding": true,
+        "structured_output_mode": "native_json",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "inline"
+      },
+      "reasoning": {
+        "modes": [
+          "enabled"
+        ],
+        "effort_supported": false,
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": true,
+      "pricing": {
+        "input_per_mtok": 0.8,
+        "output_per_mtok": 3.2,
+        "cache_read_per_mtok": 0.2,
+        "cache_write_per_mtok": null
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "vision",
+        "video",
+        "prompt_caching",
+        "thinking",
+        "structured_output"
+      ],
+      "family": "kimi",
+      "lineage": "kimi",
+      "complementary_with": [
+        "anthropic-claude",
+        "openai-gpt",
+        "google-gemini",
+        "qwen",
+        "deepseek"
+      ],
+      "tier": "frontier",
+      "open_weight": true,
+      "strengths": [
+        "coding",
+        "agentic",
+        "long_context",
+        "tool_use",
+        "reasoning",
         "vision"
       ]
     },
@@ -7888,6 +8321,173 @@ public let harnProviderCatalogJSON = #"""
       ]
     },
     {
+      "id": "sambanova/DeepSeek-V4-Pro",
+      "name": "DeepSeek V4 Pro (SambaNova)",
+      "provider": "sambanova",
+      "aliases": [
+        "sambanova-deepseek"
+      ],
+      "context_window": 163840,
+      "logical_model": "deepseek-v4-pro",
+      "equivalence_group": "deepseek-v4-pro",
+      "served_variant": "sambanova-rdu",
+      "wire_model": "DeepSeek-V4-Pro",
+      "api_dialect": "openai_chat",
+      "modalities": {
+        "input": [
+          "text"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
+        "tool_search": []
+      },
+      "structured_output": "native",
+      "format_preferences": {
+        "prefers_xml_scaffolding": false,
+        "prefers_markdown_scaffolding": true,
+        "structured_output_mode": "native_json",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "inline"
+      },
+      "reasoning": {
+        "modes": [
+          "enabled"
+        ],
+        "effort_supported": false,
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": false,
+      "pricing": {
+        "input_per_mtok": 0.6,
+        "output_per_mtok": 1.2,
+        "cache_read_per_mtok": null,
+        "cache_write_per_mtok": null
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "thinking",
+        "structured_output"
+      ],
+      "family": "deepseek",
+      "lineage": "deepseek",
+      "complementary_with": [
+        "anthropic-claude",
+        "openai-gpt",
+        "google-gemini",
+        "qwen",
+        "kimi"
+      ],
+      "tier": "frontier",
+      "open_weight": true,
+      "strengths": [
+        "speed",
+        "reasoning",
+        "coding",
+        "tool_use",
+        "long_context"
+      ]
+    },
+    {
+      "id": "sambanova/Llama-4-Maverick",
+      "name": "Llama 4 Maverick (SambaNova)",
+      "provider": "sambanova",
+      "aliases": [
+        "sambanova-llama"
+      ],
+      "context_window": 131072,
+      "logical_model": "llama-4-maverick",
+      "equivalence_group": "llama-4-maverick",
+      "served_variant": "sambanova-rdu",
+      "wire_model": "Llama-4-Maverick-17B-128E-Instruct",
+      "api_dialect": "openai_chat",
+      "modalities": {
+        "input": [
+          "text",
+          "image"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
+        "tool_search": []
+      },
+      "structured_output": "native",
+      "format_preferences": {
+        "prefers_xml_scaffolding": false,
+        "prefers_markdown_scaffolding": true,
+        "structured_output_mode": "native_json",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "none"
+      },
+      "reasoning": {
+        "modes": [],
+        "effort_supported": false,
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": false,
+      "pricing": {
+        "input_per_mtok": 0.63,
+        "output_per_mtok": 1.8,
+        "cache_read_per_mtok": null,
+        "cache_write_per_mtok": null
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "vision",
+        "structured_output"
+      ],
+      "family": "llama",
+      "lineage": "llama",
+      "complementary_with": [
+        "anthropic-claude",
+        "openai-gpt",
+        "google-gemini",
+        "deepseek",
+        "kimi"
+      ],
+      "tier": "mid",
+      "open_weight": true,
+      "strengths": [
+        "speed",
+        "vision",
+        "tool_use",
+        "long_context",
+        "cheap"
+      ]
+    },
+    {
       "id": "MiniMaxAI/MiniMax-M2.7",
       "name": "MiniMax M2.7 (Together)",
       "provider": "together",
@@ -8590,6 +9190,18 @@ public let harnProviderCatalogJSON = #"""
       "provider": "cohere"
     },
     {
+      "name": "deepinfra-deepseek",
+      "model_id": "deepinfra/deepseek-ai/DeepSeek-V4-Pro",
+      "provider": "deepinfra",
+      "tool_format": "native"
+    },
+    {
+      "name": "deepinfra-qwen3.6",
+      "model_id": "deepinfra/Qwen/Qwen3.6-35B-A3B",
+      "provider": "deepinfra",
+      "tool_format": "native"
+    },
+    {
       "name": "deepseek",
       "model_id": "deepseek-v4-flash",
       "provider": "deepseek"
@@ -8673,6 +9285,12 @@ public let harnProviderCatalogJSON = #"""
       "name": "kat-coder-pro-v2",
       "model_id": "kwaipilot/kat-coder-pro-v2",
       "provider": "openrouter"
+    },
+    {
+      "name": "kimi-direct",
+      "model_id": "moonshot/kimi-k2.6",
+      "provider": "moonshot",
+      "tool_format": "native"
     },
     {
       "name": "kimi-k2.7-code",
@@ -8814,6 +9432,18 @@ public let harnProviderCatalogJSON = #"""
       "provider": "mlx"
     },
     {
+      "name": "moonshot-kimi",
+      "model_id": "moonshot/kimi-k2.6",
+      "provider": "moonshot",
+      "tool_format": "native"
+    },
+    {
+      "name": "moonshot-kimi-k2.7-code",
+      "model_id": "moonshot/kimi-k2.7-code",
+      "provider": "moonshot",
+      "tool_format": "native"
+    },
+    {
       "name": "ollama-devstral-small-2",
       "model_id": "devstral-small-2:24b",
       "provider": "ollama"
@@ -8910,6 +9540,18 @@ public let harnProviderCatalogJSON = #"""
       "name": "qwen3.7-plus",
       "model_id": "qwen/qwen3.7-plus",
       "provider": "openrouter"
+    },
+    {
+      "name": "sambanova-deepseek",
+      "model_id": "sambanova/DeepSeek-V4-Pro",
+      "provider": "sambanova",
+      "tool_format": "native"
+    },
+    {
+      "name": "sambanova-llama",
+      "model_id": "sambanova/Llama-4-Maverick",
+      "provider": "sambanova",
+      "tool_format": "native"
     },
     {
       "name": "small",

@@ -17,6 +17,7 @@ No benchmark summary is baked into this checked-in page. To layer local empirica
 | `Cerebras` | OpenAI-compatible chat completions | `cerebras/gpt-oss-120b` | `native` | yes | yes | `native` / `native_json` | `effort,reasoning_effort` | no | `high` | `not_recorded` |
 | `Cohere` | OpenAI-compatible chat completions | `cohere:command-a-plus-05-2026` | `native` | yes | yes | `native` / `native_json` | `adaptive` | no | `high` | `not_recorded` |
 | `Dashscope` | OpenAI-compatible chat completions | `dashscope:qwen3.6*` | `native` | yes | yes | `native` / `delimited` | `disable_directive:/no_think,enabled` | no | `provider_default` | `not_recorded` |
+| `Deepinfra` | OpenAI-compatible chat completions | `deepinfra:deepinfra/Qwen/Qwen3.6-35B-A3B` | `native` | yes | yes | `native` / `native_json` | `enabled` | no | `high` | `not_recorded` |
 | `Deepseek` | OpenAI-compatible chat completions | `deepseek:deepseek-v4-flash` | `native` | yes | yes | `native` / `native_json` | `enabled` | yes | `high` | `not_recorded` |
 | `Fireworks` | OpenAI-compatible chat completions | `fireworks:*qwen3.6*` | `native` | yes | yes | `native` / `delimited` | `disable_directive:/no_think,enabled` | no | `provider_default` | `not_recorded` |
 | `Gemini API` | Gemini generateContent | `gemini:gemini-2.5-flash` | `native` | yes | yes | `native` / `native_json` | `adaptive,effort,enabled` | yes | `medium` | `not_recorded` |
@@ -27,9 +28,11 @@ No benchmark summary is baked into this checked-in page. To layer local empirica
 | `Minimax` | OpenAI-compatible chat completions | `minimax:MiniMax-M2.5-highspeed` | `native` | yes | yes | `delimited` / `delimited` | `enabled` | yes | `high` | `not_recorded` |
 | `Mistral via OpenRouter` | OpenAI-compatible chat completions through OpenRouter | `openrouter:mistralai/mistral-small-2603` | `native` | yes | yes | `native` / `native_json` | none | yes | `medium` | `not_recorded` |
 | `MLX OpenAI-compatible server` | OpenAI-compatible MLX server | `mlx-qwen3.6-27b` | `native` | yes | yes | `native` / `delimited` | `disable_directive:/no_think,enabled` | no | `medium` | `not_recorded` |
+| `Moonshot` | OpenAI-compatible chat completions | `moonshot:moonshot/kimi-k2.6` | `native` | yes | yes | `native` / `native_json` | `enabled` | yes | `high` | `not_recorded` |
 | `Ollama` | Ollama native chat API | `devstral-small-2` | `text` | no | yes | `format_kw` / `delimited` | none | no | `high` | `not_recorded` |
 | `OpenAI` | OpenAI chat completions / Responses-compatible routes | `mid` | `native` | yes | yes | `native` / `native_json` | none | no | `high` | `not_recorded` |
 | `Openrouter` | OpenAI-compatible chat completions | `openrouter:google/gemini-2.5-flash` | `native` | yes | yes | `native` / `native_json` | `effort,enabled` | yes | `high` | `not_recorded` |
+| `Sambanova` | OpenAI-compatible chat completions | `sambanova:sambanova/DeepSeek-V4-Pro` | `native` | yes | yes | `native` / `native_json` | `enabled` | no | `high` | `not_recorded` |
 | `Tgi` | OpenAI-compatible chat completions | `tgi` | `text` | no | yes | `none` / `none` | none | no | `local_zero_cost` | `not_recorded` |
 | `Together` | OpenAI-compatible chat completions | `together:Qwen/Qwen3-Coder-Next-FP8` | `native` | yes | yes | `native` / `delimited` | none | no | `high` | `not_recorded` |
 | `Vertex` | Gemini generateContent | `vertex:gemini-*` | `native` | yes | yes | `none` / `native_json` | none | no | `provider_default` | `not_recorded` |

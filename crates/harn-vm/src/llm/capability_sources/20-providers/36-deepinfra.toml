@@ -1,0 +1,53 @@
+# ---------- DeepInfra — open-weight OpenAI-compatible host -------------------
+# DeepInfra serves open weights (DeepSeek, Qwen, Llama, Kimi, GPT-OSS) on a
+# standard OpenAI chat-completions surface with native tool calls. Reasoning
+# families expose an inline thinking trace; DeepSeek routes honor prompt
+# caching. Catalog keys are `deepinfra/<hf-id>`, so patterns match the
+# family substring.
+
+[[provider.deepinfra]]
+model_match = "*deepseek*"
+native_tools = true
+preferred_tool_format = "native"
+structured_output = "native"
+thinking_modes = ["enabled"]
+prompt_caching = true
+text_tool_wire_format_supported = true
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "native_json"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "inline"
+
+[[provider.deepinfra]]
+model_match = "*qwen3.6*"
+native_tools = true
+preferred_tool_format = "native"
+structured_output = "native"
+thinking_modes = ["enabled"]
+vision = true
+vision_supported = true
+text_tool_wire_format_supported = true
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "native_json"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "inline"
+
+[[provider.deepinfra]]
+model_match = "*"
+native_tools = true
+preferred_tool_format = "native"
+structured_output = "native"
+text_tool_wire_format_supported = true
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "native_json"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "none"

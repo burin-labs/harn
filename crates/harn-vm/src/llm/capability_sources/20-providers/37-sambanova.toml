@@ -1,0 +1,50 @@
+# ---------- SambaNova Cloud — fast RDU OpenAI-compatible inference -----------
+# SambaNova serves large open weights (DeepSeek, Llama 4, Qwen) at high
+# throughput on an OpenAI chat-completions surface with native tool calls.
+# DeepSeek reasoning routes expose an inline thinking trace; Llama 4 routes
+# are non-thinking multimodal. Catalog keys are `sambanova/<wire>`.
+
+[[provider.sambanova]]
+model_match = "*deepseek*"
+native_tools = true
+preferred_tool_format = "native"
+structured_output = "native"
+thinking_modes = ["enabled"]
+text_tool_wire_format_supported = true
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "native_json"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "inline"
+
+[[provider.sambanova]]
+model_match = "*llama*"
+native_tools = true
+preferred_tool_format = "native"
+structured_output = "native"
+vision = true
+vision_supported = true
+text_tool_wire_format_supported = true
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "native_json"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "none"
+
+[[provider.sambanova]]
+model_match = "*"
+native_tools = true
+preferred_tool_format = "native"
+structured_output = "native"
+text_tool_wire_format_supported = true
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "native_json"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "none"

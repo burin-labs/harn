@@ -43,3 +43,12 @@ top_k_supported = false
 [provider_defaults.xai]
 top_k_supported = false
 
+[provider_defaults.moonshot]
+top_k_supported = false
+
+[provider_defaults.deepinfra]
+top_k_supported = false
+
+[provider_defaults.sambanova]
+top_k_supported = false
+

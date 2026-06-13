@@ -125,6 +125,45 @@ provider = "openrouter"
 id = "moonshotai/kimi-k2.7-code"
 provider = "openrouter"
 
+# Kimi via Moonshot's first-party API. Native tool calls are reliable on
+# the direct route, so pin `native`.
+[aliases."kimi-direct"]
+id = "moonshot/kimi-k2.6"
+provider = "moonshot"
+tool_format = "native"
+
+[aliases."moonshot-kimi"]
+id = "moonshot/kimi-k2.6"
+provider = "moonshot"
+tool_format = "native"
+
+[aliases."moonshot-kimi-k2.7-code"]
+id = "moonshot/kimi-k2.7-code"
+provider = "moonshot"
+tool_format = "native"
+
+# DeepInfra — open-weight OpenAI-compatible host.
+[aliases."deepinfra-deepseek"]
+id = "deepinfra/deepseek-ai/DeepSeek-V4-Pro"
+provider = "deepinfra"
+tool_format = "native"
+
+[aliases."deepinfra-qwen3.6"]
+id = "deepinfra/Qwen/Qwen3.6-35B-A3B"
+provider = "deepinfra"
+tool_format = "native"
+
+# SambaNova Cloud — fast RDU inference.
+[aliases."sambanova-deepseek"]
+id = "sambanova/DeepSeek-V4-Pro"
+provider = "sambanova"
+tool_format = "native"
+
+[aliases."sambanova-llama"]
+id = "sambanova/Llama-4-Maverick"
+provider = "sambanova"
+tool_format = "native"
+
 # Qwen 3.7 via OpenRouter/Together. Keep bare aliases on OpenRouter because it
 # exposes both Max and Plus; Together currently serves only Max.
 [aliases."qwen3.7"]

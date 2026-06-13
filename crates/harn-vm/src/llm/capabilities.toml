@@ -174,6 +174,15 @@ top_k_supported = false
 [provider_defaults.xai]
 top_k_supported = false
 
+[provider_defaults.moonshot]
+top_k_supported = false
+
+[provider_defaults.deepinfra]
+top_k_supported = false
+
+[provider_defaults.sambanova]
+top_k_supported = false
+
 # --- source: 20-providers/00-anthropic.toml ---
 # ---------- Anthropic (Claude) ------------------------------------------------
 
@@ -2000,6 +2009,158 @@ supports_assistant_prefill = false
 prefers_role_developer = false
 prefers_xml_tools = false
 thinking_block_style = "inline"
+
+# --- source: 20-providers/35-moonshot.toml ---
+# ---------- Moonshot AI — direct Kimi K2 (OpenAI-compatible /v1) -------------
+# Moonshot's first-party API serves the Kimi K2 family with reliable native
+# tool calls, an inline thinking mode, prompt caching, and multimodal input.
+# K2.7 Code additionally accepts video. Catalog keys are `moonshot/<wire>`
+# (e.g. `moonshot/kimi-k2.6`), so the patterns match the `*kimi*` substring
+# to cover both the prefixed catalog key and the bare wire id.
+
+[[provider.moonshot]]
+model_match = "*kimi-k2.7-code*"
+native_tools = true
+preferred_tool_format = "native"
+structured_output = "native"
+thinking_modes = ["enabled"]
+vision = true
+vision_supported = true
+video_supported = true
+prompt_caching = true
+text_tool_wire_format_supported = true
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "native_json"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "inline"
+
+[[provider.moonshot]]
+model_match = "*kimi*"
+native_tools = true
+preferred_tool_format = "native"
+structured_output = "native"
+thinking_modes = ["enabled"]
+vision = true
+vision_supported = true
+prompt_caching = true
+text_tool_wire_format_supported = true
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "native_json"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "inline"
+
+# --- source: 20-providers/36-deepinfra.toml ---
+# ---------- DeepInfra — open-weight OpenAI-compatible host -------------------
+# DeepInfra serves open weights (DeepSeek, Qwen, Llama, Kimi, GPT-OSS) on a
+# standard OpenAI chat-completions surface with native tool calls. Reasoning
+# families expose an inline thinking trace; DeepSeek routes honor prompt
+# caching. Catalog keys are `deepinfra/<hf-id>`, so patterns match the
+# family substring.
+
+[[provider.deepinfra]]
+model_match = "*deepseek*"
+native_tools = true
+preferred_tool_format = "native"
+structured_output = "native"
+thinking_modes = ["enabled"]
+prompt_caching = true
+text_tool_wire_format_supported = true
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "native_json"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "inline"
+
+[[provider.deepinfra]]
+model_match = "*qwen3.6*"
+native_tools = true
+preferred_tool_format = "native"
+structured_output = "native"
+thinking_modes = ["enabled"]
+vision = true
+vision_supported = true
+text_tool_wire_format_supported = true
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "native_json"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "inline"
+
+[[provider.deepinfra]]
+model_match = "*"
+native_tools = true
+preferred_tool_format = "native"
+structured_output = "native"
+text_tool_wire_format_supported = true
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "native_json"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "none"
+
+# --- source: 20-providers/37-sambanova.toml ---
+# ---------- SambaNova Cloud — fast RDU OpenAI-compatible inference -----------
+# SambaNova serves large open weights (DeepSeek, Llama 4, Qwen) at high
+# throughput on an OpenAI chat-completions surface with native tool calls.
+# DeepSeek reasoning routes expose an inline thinking trace; Llama 4 routes
+# are non-thinking multimodal. Catalog keys are `sambanova/<wire>`.
+
+[[provider.sambanova]]
+model_match = "*deepseek*"
+native_tools = true
+preferred_tool_format = "native"
+structured_output = "native"
+thinking_modes = ["enabled"]
+text_tool_wire_format_supported = true
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "native_json"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "inline"
+
+[[provider.sambanova]]
+model_match = "*llama*"
+native_tools = true
+preferred_tool_format = "native"
+structured_output = "native"
+vision = true
+vision_supported = true
+text_tool_wire_format_supported = true
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "native_json"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "none"
+
+[[provider.sambanova]]
+model_match = "*"
+native_tools = true
+preferred_tool_format = "native"
+structured_output = "native"
+text_tool_wire_format_supported = true
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "native_json"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "none"
 
 # --- source: 20-providers/40-deepseek-reasoning.toml ---
 # ---------- DeepSeek reasoning (across host providers) -----------------------

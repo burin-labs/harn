@@ -285,6 +285,72 @@ latency_p50_ms = 1900
 method = "GET"
 path = "/models"
 
+# Moonshot AI — first-party host of the Kimi K2 family. OpenAI-compatible
+# `/v1/chat/completions`; the same models were previously only reachable
+# through OpenRouter/Together aggregator routes. Moonshot also exposes an
+# Anthropic-compatible `/anthropic` surface, but Harn dials the
+# OpenAI-compatible endpoint so the shared openai_chat_completions wire
+# format Just Works. Use the `.cn` base via MOONSHOT_BASE_URL for the
+# China region.
+[providers.moonshot]
+base_url = "https://api.moonshot.ai/v1"
+base_url_env = "MOONSHOT_BASE_URL"
+auth_style = "bearer"
+auth_env = ["MOONSHOT_API_KEY", "KIMI_API_KEY"]
+chat_endpoint = "/chat/completions"
+completion_endpoint = "/completions"
+cost_per_1k_in = 0.0006
+cost_per_1k_out = 0.0025
+latency_p50_ms = 1900
+features = ["native_tools", "reasoning", "prompt_caching"]
+
+[providers.moonshot.healthcheck]
+method = "GET"
+path = "/models"
+
+# DeepInfra — OpenAI-compatible host for open-weight models (DeepSeek,
+# Qwen, Llama, Kimi, GPT-OSS, Gemma). The compat surface lives under the
+# `/v1/openai` path prefix, so the base_url carries it and chat_endpoint
+# stays the standard `/chat/completions`. Catalog rows are keyed with a
+# `deepinfra/<hf-id>` prefix and carry `wire_model` so they stay
+# collision-free with the bare/openrouter ids for the same weights.
+[providers.deepinfra]
+base_url = "https://api.deepinfra.com/v1/openai"
+base_url_env = "DEEPINFRA_BASE_URL"
+auth_style = "bearer"
+auth_env = ["DEEPINFRA_API_KEY", "DEEPINFRA_TOKEN"]
+chat_endpoint = "/chat/completions"
+completion_endpoint = "/completions"
+cost_per_1k_in = 0.0002
+cost_per_1k_out = 0.0006
+latency_p50_ms = 1500
+features = ["native_tools"]
+
+[providers.deepinfra.healthcheck]
+method = "GET"
+path = "/models"
+
+# SambaNova Cloud — OpenAI-compatible RDU-hosted inference with very high
+# token throughput on large open-weight models (DeepSeek, Llama 4, Qwen).
+# A latency-budgeted executor target alongside Groq/Cerebras with a
+# different model mix. Catalog rows use a `sambanova/<wire-id>` prefix +
+# `wire_model` so they don't collide with other hosts of the same weights.
+[providers.sambanova]
+base_url = "https://api.sambanova.ai/v1"
+base_url_env = "SAMBANOVA_BASE_URL"
+auth_style = "bearer"
+auth_env = "SAMBANOVA_API_KEY"
+chat_endpoint = "/chat/completions"
+completion_endpoint = "/completions"
+cost_per_1k_in = 0.0006
+cost_per_1k_out = 0.0012
+latency_p50_ms = 350
+features = ["native_tools"]
+
+[providers.sambanova.healthcheck]
+method = "GET"
+path = "/models"
+
 # AWS Bedrock — resolves credentials through env, profile, container, or
 # EC2 instance roles, then signs Converse API calls with SigV4.
 [providers.bedrock]

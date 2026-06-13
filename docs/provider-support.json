@@ -330,6 +330,59 @@
       "local_setup_notes": []
     },
     {
+      "id": "deepinfra",
+      "display_name": "Deepinfra",
+      "catalog_provider": "deepinfra",
+      "endpoint_style": "OpenAI-compatible chat completions",
+      "classification": "hosted",
+      "auth_env": [
+        "DEEPINFRA_API_KEY",
+        "DEEPINFRA_TOKEN"
+      ],
+      "recommended": {
+        "selector": "deepinfra:deepinfra/Qwen/Qwen3.6-35B-A3B",
+        "provider": "deepinfra",
+        "model": "deepinfra/Qwen/Qwen3.6-35B-A3B",
+        "display_name": "Qwen3.6 35B A3B (DeepInfra)",
+        "tool_format": "native",
+        "harn_options": [
+          "provider = \"deepinfra\"",
+          "model = \"deepinfra/Qwen/Qwen3.6-35B-A3B\"",
+          "tool_format = \"native\"",
+          "structured_output_mode = \"native_json\""
+        ]
+      },
+      "capabilities": {
+        "native_tools": true,
+        "text_tools": true,
+        "preferred_tool_format": "native",
+        "tool_mode_parity": "unknown",
+        "structured_output_transport": "native",
+        "structured_output_mode": "native_json",
+        "streaming": true,
+        "reasoning_knobs": [
+          "enabled"
+        ],
+        "prompt_or_context_cache": false,
+        "usage_accounting_confidence": "high"
+      },
+      "empirical": {
+        "status": "not_recorded",
+        "sources": [],
+        "total_runs": 0,
+        "passed_runs": 0,
+        "failed_runs": 0,
+        "skipped_runs": 0,
+        "best_tool_format": null,
+        "native_text_parity": null,
+        "evidence": []
+      },
+      "notes": [],
+      "caveats": [],
+      "mcp_notes": [],
+      "local_setup_notes": []
+    },
+    {
       "id": "deepseek",
       "display_name": "Deepseek",
       "catalog_provider": "deepseek",
@@ -878,6 +931,59 @@
       ]
     },
     {
+      "id": "moonshot",
+      "display_name": "Moonshot",
+      "catalog_provider": "moonshot",
+      "endpoint_style": "OpenAI-compatible chat completions",
+      "classification": "hosted",
+      "auth_env": [
+        "MOONSHOT_API_KEY",
+        "KIMI_API_KEY"
+      ],
+      "recommended": {
+        "selector": "moonshot:moonshot/kimi-k2.6",
+        "provider": "moonshot",
+        "model": "moonshot/kimi-k2.6",
+        "display_name": "Kimi K2.6 (Moonshot direct)",
+        "tool_format": "native",
+        "harn_options": [
+          "provider = \"moonshot\"",
+          "model = \"moonshot/kimi-k2.6\"",
+          "tool_format = \"native\"",
+          "structured_output_mode = \"native_json\""
+        ]
+      },
+      "capabilities": {
+        "native_tools": true,
+        "text_tools": true,
+        "preferred_tool_format": "native",
+        "tool_mode_parity": "unknown",
+        "structured_output_transport": "native",
+        "structured_output_mode": "native_json",
+        "streaming": true,
+        "reasoning_knobs": [
+          "enabled"
+        ],
+        "prompt_or_context_cache": true,
+        "usage_accounting_confidence": "high"
+      },
+      "empirical": {
+        "status": "not_recorded",
+        "sources": [],
+        "total_runs": 0,
+        "passed_runs": 0,
+        "failed_runs": 0,
+        "skipped_runs": 0,
+        "best_tool_format": null,
+        "native_text_parity": null,
+        "evidence": []
+      },
+      "notes": [],
+      "caveats": [],
+      "mcp_notes": [],
+      "local_setup_notes": []
+    },
+    {
       "id": "ollama",
       "display_name": "Ollama",
       "catalog_provider": "ollama",
@@ -1026,6 +1132,58 @@
           "enabled"
         ],
         "prompt_or_context_cache": true,
+        "usage_accounting_confidence": "high"
+      },
+      "empirical": {
+        "status": "not_recorded",
+        "sources": [],
+        "total_runs": 0,
+        "passed_runs": 0,
+        "failed_runs": 0,
+        "skipped_runs": 0,
+        "best_tool_format": null,
+        "native_text_parity": null,
+        "evidence": []
+      },
+      "notes": [],
+      "caveats": [],
+      "mcp_notes": [],
+      "local_setup_notes": []
+    },
+    {
+      "id": "sambanova",
+      "display_name": "Sambanova",
+      "catalog_provider": "sambanova",
+      "endpoint_style": "OpenAI-compatible chat completions",
+      "classification": "hosted",
+      "auth_env": [
+        "SAMBANOVA_API_KEY"
+      ],
+      "recommended": {
+        "selector": "sambanova:sambanova/DeepSeek-V4-Pro",
+        "provider": "sambanova",
+        "model": "sambanova/DeepSeek-V4-Pro",
+        "display_name": "DeepSeek V4 Pro (SambaNova)",
+        "tool_format": "native",
+        "harn_options": [
+          "provider = \"sambanova\"",
+          "model = \"sambanova/DeepSeek-V4-Pro\"",
+          "tool_format = \"native\"",
+          "structured_output_mode = \"native_json\""
+        ]
+      },
+      "capabilities": {
+        "native_tools": true,
+        "text_tools": true,
+        "preferred_tool_format": "native",
+        "tool_mode_parity": "unknown",
+        "structured_output_transport": "native",
+        "structured_output_mode": "native_json",
+        "streaming": true,
+        "reasoning_knobs": [
+          "enabled"
+        ],
+        "prompt_or_context_cache": false,
         "usage_accounting_confidence": "high"
       },
       "empirical": {
