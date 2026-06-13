@@ -163,7 +163,7 @@ pub struct Vm {
     pub(crate) builtin_metadata: Arc<BTreeMap<String, VmBuiltinMetadata>>,
     /// Numeric side index for builtins. Name-keyed maps remain authoritative;
     /// this index is the hot path for direct builtin bytecode and callback refs.
-    pub(crate) builtins_by_id: Arc<BTreeMap<BuiltinId, VmBuiltinEntry>>,
+    pub(crate) builtins_by_id: Arc<HashMap<BuiltinId, VmBuiltinEntry>>,
     /// IDs with detected name collisions. Collided names safely fall back to
     /// the authoritative name-keyed lookup path.
     pub(crate) builtin_id_collisions: Arc<HashSet<BuiltinId>>,
@@ -293,7 +293,7 @@ pub struct VmBaseline {
     builtins: Arc<BTreeMap<String, VmBuiltinFn>>,
     async_builtins: Arc<BTreeMap<String, VmAsyncBuiltinFn>>,
     builtin_metadata: Arc<BTreeMap<String, VmBuiltinMetadata>>,
-    builtins_by_id: Arc<BTreeMap<BuiltinId, VmBuiltinEntry>>,
+    builtins_by_id: Arc<HashMap<BuiltinId, VmBuiltinEntry>>,
     builtin_id_collisions: Arc<HashSet<BuiltinId>>,
     source_dir: Option<std::path::PathBuf>,
     source_file: Option<String>,
@@ -516,9 +516,9 @@ impl Vm {
     }
 
     /// Returns the slot index of an initialized active local with the given
-    /// name, walking from innermost to outermost scope. Used by hot paths
-    /// (subscript-store, etc.) that want to mutate the slot value in place
-    /// without paying a defensive `VmValue::clone` first.
+    /// name, walking from innermost to outermost scope. Used by legacy by-name
+    /// hot paths that still want to mutate the slot value in place without
+    /// paying a defensive `VmValue::clone` first.
     pub(crate) fn active_local_slot_index(&self, name: &str) -> Option<usize> {
         let frame = self.frames.last()?;
         for (idx, info) in frame.chunk.local_slots.iter().enumerate().rev() {
@@ -566,7 +566,7 @@ impl Vm {
             builtins: Arc::new(BTreeMap::new()),
             async_builtins: Arc::new(BTreeMap::new()),
             builtin_metadata: Arc::new(BTreeMap::new()),
-            builtins_by_id: Arc::new(BTreeMap::new()),
+            builtins_by_id: Arc::new(HashMap::new()),
             builtin_id_collisions: Arc::new(HashSet::new()),
             iterators: Vec::new(),
             frames: Vec::new(),

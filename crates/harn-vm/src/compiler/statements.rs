@@ -76,9 +76,8 @@ impl Compiler {
             }
         } else if let Node::PropertyAccess { object, property } = &target.node {
             if let Node::Identifier(var_name) = &object.node {
-                // Single-level `x.prop (op)= value` — SetProperty reads the
-                // variable, sets the property, and writes it back.
-                let var_idx = self.string_constant(var_name);
+                // Single-level `x.prop (op)= value` can store straight into
+                // a resolved local slot; non-locals keep the env-aware opcode.
                 let prop_idx = self.string_constant(property);
                 if let Some(op) = op {
                     self.compile_node(target)?;
@@ -87,16 +86,22 @@ impl Compiler {
                 } else {
                     self.compile_node(value)?;
                 }
-                // The variable name index is encoded as a second u16.
-                self.chunk.emit_u16(Op::SetProperty, prop_idx, self.line);
-                let hi = (var_idx >> 8) as u8;
-                let lo = var_idx as u8;
-                self.chunk.code.push(hi);
-                self.chunk.code.push(lo);
-                self.chunk.lines.push(self.line);
-                self.chunk.columns.push(self.column);
-                self.chunk.lines.push(self.line);
-                self.chunk.columns.push(self.column);
+                if let Some(binding) = self.resolve_local_slot(var_name) {
+                    self.chunk
+                        .emit_set_local_slot_property(prop_idx, binding.slot, self.line);
+                } else {
+                    // The variable name index is encoded as a second u16.
+                    let var_idx = self.string_constant(var_name);
+                    self.chunk.emit_u16(Op::SetProperty, prop_idx, self.line);
+                    let hi = (var_idx >> 8) as u8;
+                    let lo = var_idx as u8;
+                    self.chunk.code.push(hi);
+                    self.chunk.code.push(lo);
+                    self.chunk.lines.push(self.line);
+                    self.chunk.columns.push(self.column);
+                    self.chunk.lines.push(self.line);
+                    self.chunk.columns.push(self.column);
+                }
             } else {
                 self.compile_path_assignment(target, value, op)?;
             }
@@ -109,7 +114,6 @@ impl Compiler {
                 if op.is_some() && !Self::is_effect_free_index(index) {
                     self.compile_path_assignment(target, value, op)?;
                 } else {
-                    let var_idx = self.string_constant(var_name);
                     if let Some(op) = op {
                         self.compile_node(target)?;
                         self.compile_node(value)?;
@@ -118,7 +122,13 @@ impl Compiler {
                         self.compile_node(value)?;
                     }
                     self.compile_node(index)?;
-                    self.chunk.emit_u16(Op::SetSubscript, var_idx, self.line);
+                    if let Some(binding) = self.resolve_local_slot(var_name) {
+                        self.chunk
+                            .emit_u16(Op::SetLocalSlotSubscript, binding.slot, self.line);
+                    } else {
+                        let var_idx = self.string_constant(var_name);
+                        self.chunk.emit_u16(Op::SetSubscript, var_idx, self.line);
+                    }
                 }
             } else {
                 self.compile_path_assignment(target, value, op)?;

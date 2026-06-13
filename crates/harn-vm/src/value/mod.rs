@@ -9,7 +9,8 @@ pub type VmMutex<T> = parking_lot::Mutex<T>;
 
 pub use build::VmDictExt;
 pub use core::{
-    struct_fields_to_map, StructLayout, VmAsyncBuiltinFn, VmBuiltinFn, VmEnumVariant, VmValue,
+    string_char_count, struct_fields_to_map, StructLayout, VmAsyncBuiltinFn, VmBuiltinFn,
+    VmEnumVariant, VmValue,
 };
 pub use env::{closest_match, ModuleFunctionRegistry, ModuleState, VmClosure, VmEnv};
 pub use error::{

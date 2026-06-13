@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use crate::value::{VmError, VmValue};
+use crate::value::{string_char_count, VmError, VmValue};
 
 impl crate::vm::Vm {
     pub(super) fn call_string_method(
@@ -9,7 +9,7 @@ impl crate::vm::Vm {
         args: &[VmValue],
     ) -> Result<VmValue, VmError> {
         match method {
-            "count" => Ok(VmValue::Int(s.chars().count() as i64)),
+            "count" => Ok(VmValue::Int(string_char_count(s) as i64)),
             "empty" => Ok(VmValue::Bool(s.is_empty())),
             "contains" => Ok(VmValue::Bool(
                 s.contains(&*args.first().map(|a| a.as_str_cow()).unwrap_or_default()),
@@ -68,7 +68,7 @@ impl crate::vm::Vm {
                     .map(|a| a.display())
                     .and_then(|s| s.chars().next())
                     .unwrap_or(' ');
-                let current_len = s.chars().count();
+                let current_len = string_char_count(s);
                 if current_len >= width {
                     Ok(VmValue::String(Arc::clone(s)))
                 } else {
@@ -115,7 +115,7 @@ impl crate::vm::Vm {
             }
             "lower" | "to_lower" => Ok(VmValue::String(std::sync::Arc::from(s.to_lowercase()))),
             "upper" | "to_upper" => Ok(VmValue::String(std::sync::Arc::from(s.to_uppercase()))),
-            "len" => Ok(VmValue::Int(s.chars().count() as i64)),
+            "len" => Ok(VmValue::Int(string_char_count(s) as i64)),
             _ => Err(VmError::Runtime(format!("string has no method `{method}`"))),
         }
     }

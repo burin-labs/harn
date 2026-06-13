@@ -1,6 +1,6 @@
 use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
 use crate::value::VmDictExt;
-use crate::value::{values_equal, VmError, VmValue};
+use crate::value::{string_char_count, values_equal, VmError, VmValue};
 use crate::vm::Vm;
 use unicode_normalization::UnicodeNormalization;
 use unicode_segmentation::UnicodeSegmentation;
@@ -487,7 +487,7 @@ fn join_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
 /// of the string. This matches the documented spec `substring(start, end?)`,
 /// the `s[a:b]` slice operator, `list.slice`, and `bytes_slice`.
 pub(crate) fn char_substring(s: &str, start: i64, end: Option<i64>) -> String {
-    let len = s.chars().count() as i64;
+    let len = string_char_count(s) as i64;
     let start = start.clamp(0, len);
     let end = end.unwrap_or(len).clamp(0, len).max(start);
     s.chars()

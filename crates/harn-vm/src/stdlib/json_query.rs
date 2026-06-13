@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use crate::value::{values_equal, VmValue};
+use crate::value::{string_char_count, values_equal, VmValue};
 
 pub(crate) fn eval_jq(input: &VmValue, source: &str) -> Result<Vec<VmValue>, String> {
     let mut parser = Parser::new(source);
@@ -246,7 +246,7 @@ fn collect_recursive(value: &VmValue, out: &mut Vec<VmValue>) {
 fn eval_builtin(builtin: Builtin, input: &VmValue) -> VmValue {
     match builtin {
         Builtin::Length => VmValue::Int(match input {
-            VmValue::String(s) => s.chars().count() as i64,
+            VmValue::String(s) => string_char_count(s) as i64,
             VmValue::Bytes(bytes) => bytes.len() as i64,
             VmValue::List(items) | VmValue::Set(items) => items.len() as i64,
             VmValue::Dict(map) => map.len() as i64,
