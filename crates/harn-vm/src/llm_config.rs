@@ -935,8 +935,44 @@ pub struct ComplementaryReviewerSelection {
     pub reviewer: ComplementaryModelIdentity,
     pub fallback: bool,
     pub fallback_reason: Option<String>,
+    /// Machine-readable reason a caller can branch on when `fallback` is
+    /// `true`, distinct from the human-readable `fallback_reason`/`reason`
+    /// prose. `None` on the success path. Lets a caller hard-fail an
+    /// independent-review step rather than silently degrade to self-review.
+    /// See [`ReviewerFallbackCode`] for the stable set of values.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub fallback_code: Option<String>,
     pub reason: String,
     pub estimated_incremental_cost: Option<ComplementaryCostEstimate>,
+}
+
+/// Stable, machine-readable reasons `pick_complementary_reviewer` falls back
+/// to the author model. Serialized as the `fallback_code` string so harn
+/// pipelines and Rust callers can branch deterministically instead of parsing
+/// prose. New variants are additive; existing codes are append-only contract.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReviewerFallbackCode {
+    /// The author model's family could not be resolved, so no independent
+    /// family comparison is possible.
+    UnknownAuthorFamily,
+    /// Different-family candidates exist but none satisfy `max_price_multiplier`.
+    NoDiffFamilyWithinPrice,
+    /// No active, serverless, different-family reviewer is cataloged at all.
+    NoDiffFamilyServerless,
+    /// Different-family candidates exist but were all excluded (e.g. every
+    /// one declares `avoid_as_reviewer_for` the author).
+    AllDiffFamilyExcluded,
+}
+
+impl ReviewerFallbackCode {
+    pub fn as_code(self) -> &'static str {
+        match self {
+            Self::UnknownAuthorFamily => "unknown_author_family",
+            Self::NoDiffFamilyWithinPrice => "no_diff_family_within_price",
+            Self::NoDiffFamilyServerless => "no_diff_family_serverless",
+            Self::AllDiffFamilyExcluded => "all_diff_family_excluded",
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
@@ -2244,24 +2280,29 @@ pub fn pick_complementary_reviewer(
         author_entry.and_then(|model| model.pricing.clone()),
     );
 
-    let fallback = |fallback_reason: String| ComplementaryReviewerSelection {
-        intent: options.intent.as_str().to_string(),
-        reviewer: author_identity.clone(),
-        estimated_incremental_cost: cost_estimate(
-            author_identity.pricing.as_ref(),
-            author_identity.pricing.as_ref(),
-        ),
-        author: author_identity.clone(),
-        fallback: true,
-        reason: format!(
-            "using author model {} because {fallback_reason}",
-            author_identity.id
-        ),
-        fallback_reason: Some(fallback_reason),
-    };
+    let fallback =
+        |code: ReviewerFallbackCode, fallback_reason: String| ComplementaryReviewerSelection {
+            intent: options.intent.as_str().to_string(),
+            reviewer: author_identity.clone(),
+            estimated_incremental_cost: cost_estimate(
+                author_identity.pricing.as_ref(),
+                author_identity.pricing.as_ref(),
+            ),
+            author: author_identity.clone(),
+            fallback: true,
+            reason: format!(
+                "using author model {} because {fallback_reason}",
+                author_identity.id
+            ),
+            fallback_reason: Some(fallback_reason),
+            fallback_code: Some(code.as_code().to_string()),
+        };
 
     if author_identity.family == "unknown" {
-        return fallback("author model family is unknown".to_string());
+        return fallback(
+            ReviewerFallbackCode::UnknownAuthorFamily,
+            "author model family is unknown".to_string(),
+        );
     }
 
     let preferred_families = author_entry
@@ -2333,16 +2374,21 @@ pub fn pick_complementary_reviewer(
     let Some(best) = candidates.into_iter().next() else {
         if rejected_by_price > 0 {
             let cap = options.max_price_multiplier.unwrap_or_default();
-            return fallback(format!(
-                "no different-family reviewer satisfied max_price_multiplier {cap}"
-            ));
+            return fallback(
+                ReviewerFallbackCode::NoDiffFamilyWithinPrice,
+                format!("no different-family reviewer satisfied max_price_multiplier {cap}"),
+            );
         }
         if diff_family_seen == 0 {
             return fallback(
+                ReviewerFallbackCode::NoDiffFamilyServerless,
                 "no active serverless different-family reviewer is cataloged".to_string(),
             );
         }
-        return fallback("all different-family reviewer candidates were excluded".to_string());
+        return fallback(
+            ReviewerFallbackCode::AllDiffFamilyExcluded,
+            "all different-family reviewer candidates were excluded".to_string(),
+        );
     };
 
     let estimate = cost_estimate(
@@ -2357,6 +2403,7 @@ pub fn pick_complementary_reviewer(
         reviewer: best.identity,
         fallback: false,
         fallback_reason: None,
+        fallback_code: None,
     }
 }
 
@@ -2900,6 +2947,9 @@ mod tests {
         assert_ne!(selection.reviewer.family, selection.author.family);
         assert_eq!(selection.reviewer.tier, "frontier");
         assert!(selection.estimated_incremental_cost.is_some());
+        // Success path carries no machine-readable fallback code, so a caller
+        // can treat `fallback_code.is_some()` as "must not self-review".
+        assert_eq!(selection.fallback_code, None, "{selection:?}");
     }
 
     #[test]
@@ -2918,6 +2968,40 @@ mod tests {
             .fallback_reason
             .as_deref()
             .is_some_and(|reason| reason.contains("max_price_multiplier")));
+        // The machine-readable code is stable regardless of the prose; a caller
+        // hard-fails an independent-review step by branching on this, never by
+        // parsing `fallback_reason`.
+        assert_eq!(
+            selection.fallback_code.as_deref(),
+            Some(ReviewerFallbackCode::NoDiffFamilyWithinPrice.as_code()),
+            "{selection:?}"
+        );
+        assert_eq!(
+            ReviewerFallbackCode::NoDiffFamilyWithinPrice.as_code(),
+            "no_diff_family_within_price"
+        );
+    }
+
+    #[test]
+    fn test_reviewer_fallback_codes_are_stable_strings() {
+        // Append-only contract: harn pipelines and Rust callers branch on these
+        // exact strings, so changing one is a breaking change.
+        assert_eq!(
+            ReviewerFallbackCode::UnknownAuthorFamily.as_code(),
+            "unknown_author_family"
+        );
+        assert_eq!(
+            ReviewerFallbackCode::NoDiffFamilyWithinPrice.as_code(),
+            "no_diff_family_within_price"
+        );
+        assert_eq!(
+            ReviewerFallbackCode::NoDiffFamilyServerless.as_code(),
+            "no_diff_family_serverless"
+        );
+        assert_eq!(
+            ReviewerFallbackCode::AllDiffFamilyExcluded.as_code(),
+            "all_diff_family_excluded"
+        );
     }
 
     #[test]
