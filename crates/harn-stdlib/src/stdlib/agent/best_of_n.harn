@@ -1,0 +1,162 @@
+/**
+ * agent/best_of_n.harn
+ *
+ * Generic best-of-N candidate selection with an optional pre-generation
+ * spec-contract gate — the reusable "callback contract" half of an agent_loop
+ * best-of-N strategy. Harn owns the advance/stop + fallthrough POLICY; the host
+ * owns candidate GENERATION (including any workspace reset) and the selection
+ * SIGNAL, both supplied as callbacks. A host (e.g. an eval driver) wires its own
+ * candidate generator + an oracle-independent scorer in, without this module
+ * knowing how candidates are produced or scored.
+ *
+ * Host-callback errors never hard-fail the run: a non-true/erroring
+ * spec_contract_callback aborts to the single-candidate path, a failing
+ * generate skips that candidate, and a nil/out-of-range/erroring
+ * select_callback falls through to a deterministic candidate. Best-of-N is thus
+ * a safe overlay that degrades to plain single-attempt behavior.
+ */
+fn __bon_clamp_int(value, lo, hi) {
+  let n = if type_of(value) == "int" {
+    value
+  } else {
+    lo
+  }
+  if n < lo {
+    return lo
+  }
+  if n > hi {
+    return hi
+  }
+  return n
+}
+
+/**
+ * Run best-of-N candidate selection with an optional spec-contract gate.
+ *
+ * opts:
+ *   k: int                            candidate count (clamped to [1, 64])
+ *   generate: closure(index) -> any   REQUIRED — produce candidate `index` (0-based)
+ *   select_callback: closure(candidates) -> int?  pick the winning index;
+ *                                       nil/out-of-range/error -> fallthrough
+ *   spec_contract_callback: closure() -> bool?  optional pre-generation gate; a
+ *                                       non-true or erroring return ABORTS to the
+ *                                       single-candidate path
+ *   fallthrough_index: int            winner when select yields none (default: last candidate)
+ *   on_candidate: closure({index, candidate}) -> nil  optional progress hook
+ *
+ * Returns `{reason, selected_index, candidate, candidates, contract_ok}` where
+ * `reason` is one of: `selected`, `fallthrough_no_winner`, `fallthrough_contract`,
+ * `no_candidates`, `no_generate`.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn best_of_n_candidates(opts) {
+  let o = if type_of(opts) == "dict" {
+    opts
+  } else {
+    {}
+  }
+  let generate = o?.generate
+  if generate == nil {
+    return {reason: "no_generate", selected_index: nil, candidate: nil, candidates: [], contract_ok: false}
+  }
+  let k = __bon_clamp_int(o?.k ?? 1, 1, 64)
+  let select_callback = o?.select_callback
+  let spec_contract_callback = o?.spec_contract_callback
+  let on_candidate = o?.on_candidate
+  // Pre-generation spec-contract gate. A non-true or erroring contract aborts
+  // best-of-N to a single-candidate run (never a hard failure).
+  var contract_ok = true
+  if spec_contract_callback != nil {
+    contract_ok = false
+    let cr = try {
+      spec_contract_callback()
+    }
+    if is_ok(cr) {
+      let verdict = unwrap(cr)
+      // Only a boolean true proceeds; nil / non-bool / false all abort.
+      contract_ok = type_of(verdict) == "bool" && verdict
+    }
+  }
+  let target = if contract_ok {
+    k
+  } else {
+    1
+  }
+  // Host-driven candidate generation; a failing candidate is simply skipped.
+  var candidates = []
+  var idx = 0
+  while idx < target {
+    let gr = try {
+      generate(idx)
+    }
+    if is_ok(gr) {
+      let cand = unwrap(gr)
+      candidates = candidates.push(cand)
+      if on_candidate != nil {
+        let _ = try {
+          on_candidate({index: idx, candidate: cand})
+        }
+      }
+    }
+    idx = idx + 1
+  }
+  if len(candidates) == 0 {
+    return {
+      reason: "no_candidates",
+      selected_index: nil,
+      candidate: nil,
+      candidates: [],
+      contract_ok: contract_ok,
+    }
+  }
+  if !contract_ok {
+    return {
+      reason: "fallthrough_contract",
+      selected_index: 0,
+      candidate: candidates[0],
+      candidates: candidates,
+      contract_ok: false,
+    }
+  }
+  if len(candidates) == 1 {
+    return {
+      reason: "selected",
+      selected_index: 0,
+      candidate: candidates[0],
+      candidates: candidates,
+      contract_ok: true,
+    }
+  }
+  // Host selection signal. nil / out-of-range / error -> deterministic fallthrough.
+  var winner = nil
+  if select_callback != nil {
+    let sr = try {
+      select_callback(candidates)
+    }
+    if is_ok(sr) {
+      let w = unwrap(sr)
+      if type_of(w) == "int" && w >= 0 && w < len(candidates) {
+        winner = w
+      }
+    }
+  }
+  if winner == nil {
+    let fallback_idx = __bon_clamp_int(o?.fallthrough_index ?? (len(candidates) - 1), 0, len(candidates) - 1)
+    return {
+      reason: "fallthrough_no_winner",
+      selected_index: fallback_idx,
+      candidate: candidates[fallback_idx],
+      candidates: candidates,
+      contract_ok: true,
+    }
+  }
+  return {
+    reason: "selected",
+    selected_index: winner,
+    candidate: candidates[winner],
+    candidates: candidates,
+    contract_ok: true,
+  }
+}
