@@ -88,8 +88,8 @@ const SOFT_PROGRESS_TOOLS = ["agent_progress"]
  *     from the turn's verification result, and deliberately NOT cleared by
  *     __agent_stall_reset_action so a different corrective action does not clear
  *     "same root failure"): last_diagnostic_class / last_diagnostic_signature /
- *     last_diagnostic_snippet / write_epoch / diagnostic_epoch_at_failure /
- *     same_diagnostic_streak / edit_since_failure / reverify_owed.
+ *     last_diagnostic_snippet / write_epoch / same_diagnostic_streak /
+ *     edit_since_failure / reverify_owed.
  */
 type AgentStallConfig = {
   enabled: bool,
@@ -148,7 +148,6 @@ type AgentStallState = {
   last_diagnostic_signature: string,
   last_diagnostic_snippet: string,
   write_epoch: int,
-  diagnostic_epoch_at_failure: int,
   same_diagnostic_streak: int,
   edit_since_failure: bool,
   reverify_owed: bool,
@@ -293,7 +292,6 @@ pub fn agent_stall_initial_state() -> AgentStallState {
     last_diagnostic_signature: "",
     last_diagnostic_snippet: "",
     write_epoch: 0,
-    diagnostic_epoch_at_failure: 0,
     same_diagnostic_streak: 0,
     edit_since_failure: false,
     reverify_owed: false,
@@ -433,77 +431,73 @@ fn __agent_stall_turn_result(prev_dispatch) {
 }
 
 /**
- * ProbeOutcome-shaped classification ("pass" | "fail" | "unknown") of a turn
- * result, composing __agent_stall_result_outcome's kind. We deliberately
- * reuse ProbeOutcome rather than invent a VerificationOutcome type.
- */
-fn __agent_stall_probe_class(outcome) -> string {
-  if outcome == nil {
-    return "unknown"
-  }
-  if outcome.kind == "ok" {
-    return "pass"
-  }
-  return "fail"
-}
-
-/**
  * __agent_stall_fold_diagnostic folds the current-failure model for one turn.
- * It is a PURE function of (state, prev_dispatch, turn_made_edit, config):
+ * It is a PURE function of (state, prev_dispatch, turn_made_edit):
  *
  *  - It classifies the turn's representative verification result (the first
  *    failing dispatch result, else the first result) into a ProbeOutcome-shaped
  *    class and a byte-stable signature via __agent_stall_result_outcome (never
  *    reimplementing the sha256/normalization).
- *  - On a successful workspace-mutating edit this turn it bumps `write_epoch`.
- *  - When an edit follows a "fail" it sets `edit_since_failure` / `reverify_owed`
- *    (the post-edit re-verify mandate the loop honors).
+ *  - On a successful workspace-mutating edit this turn it bumps `write_epoch`
+ *    (which arms the post-edit re-verify mandate the loop honors).
+ *  - The failure SIGNATURE is the progress signal: a productive edit changes
+ *    the error (signature changes => streak resets — legitimate progress, no
+ *    false positive); a flailing edit leaves the SAME error (signature
+ *    identical => streak advances — real thrash). So the streak advances on the
+ *    same signature REGARDLESS of intervening edits.
  *  - It advances/resets `same_diagnostic_streak`:
- *      same signature AND same epoch-since-fail            => futile  (streak + 1)
- *      same signature but NEW epoch (an edit intervened)   => reset to 1
- *                                  (the key false-positive safety property:
- *                                   a legitimate post-edit retry is not futile)
- *      different signature                                 => reset to 1
- *      "pass"                                              => clear streak,
- *                                  reverify_owed, edit_since_failure
+ *      same failure signature  => futile  (streak + 1), even across edits
+ *      different signature      => reset to 1 (a different mistake, or progress)
+ *      "pass"                   => clear streak, reverify_owed, edit_since_failure
  *
- * When the turn produced no classifiable result (prev_dispatch nil/empty) the
- * model is left untouched except for the edit-epoch bump.
+ * Result handling:
+ *  - a FAILING result  => fold the streak as above; this is verification
+ *    evidence, so any owed re-verify is satisfied (clear reverify_owed /
+ *    edit_since_failure). A turn that BOTH edits and re-tests still classifies
+ *    here: __agent_stall_turn_result returns the FIRST failing result, so the
+ *    re-test's failure is seen past the edit's own "ok" (the edit bumps the
+ *    epoch; the fail still advances the streak).
+ *  - a non-failing result, NOT an edit turn => a genuine passing verification
+ *    clears the current-failure model.
+ *  - a non-failing result on an EDIT turn => the result is the edit's own
+ *    success, NOT verification of the failure. Owe a re-verify and preserve the
+ *    failure model (same as the no-result edit case).
+ *  - no result (prev_dispatch nil/empty) => if this turn made an edit on top of
+ *    a live failure, owe a re-verify (reverify_owed / edit_since_failure) and
+ *    bump the epoch; otherwise leave the model untouched (epoch still bumps on
+ *    an edit).
  */
 fn __agent_stall_fold_diagnostic(state: AgentStallState, prev_dispatch, turn_made_edit: bool) -> AgentStallState {
-  // Edit bookkeeping first: a successful workspace mutation advances the epoch
-  // so a subsequent same-signature failure is recognized as a NEW attempt.
+  // Edit bookkeeping first: a successful workspace mutation advances the epoch,
+  // which arms the post-edit re-verify mandate in the loop.
   let new_write_epoch = if turn_made_edit {
     state.write_epoch + 1
   } else {
     state.write_epoch
   }
-  // A turn that made a successful corrective edit is NOT verification evidence:
-  // the edit succeeding ("ok") does not mean the failure is resolved. Mark the
-  // edit as having intervened and (when it follows a known failure) owe a
-  // re-verify before the loop may continue or stop. The current-failure
-  // signature/class is deliberately preserved so the next re-fail of the SAME
-  // diagnostic is recognized across the intervening edit (with a NEW epoch, so
-  // the streak resets — the legitimate-post-edit-retry safety property).
-  if turn_made_edit {
-    let owed = state.reverify_owed || state.last_diagnostic_class == "fail"
-    return state
-      + {write_epoch: new_write_epoch, edit_since_failure: true, reverify_owed: owed}
-  }
   let result = __agent_stall_turn_result(prev_dispatch)
-  if result == nil {
-    // No verification evidence and no edit this turn: leave the model untouched.
-    return state + {write_epoch: new_write_epoch}
-  }
-  let outcome = __agent_stall_result_outcome(result)
-  let probe_class = __agent_stall_probe_class(outcome)
-  let signature = outcome.signature
-  if probe_class == "pass" {
+  let result_is_fail = result != nil && !__agent_stall_result_ok(result)
+  if !result_is_fail {
+    // No FAILING verification this turn. A successful edit on top of a live
+    // failure is NOT proof the failure is resolved (its "ok" is the edit
+    // succeeding, not the check passing): owe a re-verify and preserve the
+    // current-failure model so the next re-fail of the SAME diagnostic is
+    // recognized across the edit. A genuine passing result on a NON-edit turn
+    // is real verification evidence and clears the model.
+    if turn_made_edit && state.last_diagnostic_class == "fail" {
+      return state
+        + {write_epoch: new_write_epoch, edit_since_failure: true, reverify_owed: true}
+    }
+    if result == nil {
+      // No verification evidence and no edit-on-failure: leave the model alone.
+      return state + {write_epoch: new_write_epoch}
+    }
     // A passing verification clears the current-failure model.
+    let pass_outcome = __agent_stall_result_outcome(result)
     return state
       + {
       last_diagnostic_class: "pass",
-      last_diagnostic_signature: signature,
+      last_diagnostic_signature: pass_outcome.signature,
       last_diagnostic_snippet: "",
       write_epoch: new_write_epoch,
       same_diagnostic_streak: 0,
@@ -511,11 +505,16 @@ fn __agent_stall_fold_diagnostic(state: AgentStallState, prev_dispatch, turn_mad
       reverify_owed: false,
     }
   }
-  // probe_class == "fail": fold against the prior failure model.
+  // result_is_fail: fold against the prior failure model. The signature
+  // is the progress signal, so the streak advances on the SAME signature
+  // regardless of whether an edit intervened — a flailing edit that leaves the
+  // same error counts as thrash, while a productive edit changes the signature
+  // and resets the streak (the false-positive safety property).
+  let outcome = __agent_stall_result_outcome(result)
+  let signature = outcome.signature
   let same_signature = signature == state.last_diagnostic_signature
     && state.last_diagnostic_class == "fail"
-  let same_epoch = new_write_epoch == state.diagnostic_epoch_at_failure
-  let new_streak = if same_signature && same_epoch {
+  let new_streak = if same_signature {
     state.same_diagnostic_streak + 1
   } else {
     1
@@ -529,16 +528,12 @@ fn __agent_stall_fold_diagnostic(state: AgentStallState, prev_dispatch, turn_mad
     last_diagnostic_signature: signature,
     last_diagnostic_snippet: __agent_stall_result_snippet(result),
     write_epoch: new_write_epoch,
-    diagnostic_epoch_at_failure: new_write_epoch,
     same_diagnostic_streak: new_streak,
     edit_since_failure: false,
     reverify_owed: false,
   }
 }
 
-// Same failure, no edit intervened => futile retry.
-// Either a new failure signature, or the same one after an intervening
-// edit (a legitimate post-edit retry, new epoch). Start a fresh streak.
 /**
  * Find the dispatch result for the given tool name. The detector tracks one
  * action at a time, so the first matching result is the relevant observation.
@@ -1092,12 +1087,17 @@ fn __agent_stall_apply_repair(
     return observation
   }
   let folded = __agent_stall_fold_diagnostic(observation.state, prev_dispatch, turn_made_edit)
-  // Trip ONCE when the streak first crosses the threshold (== not >=), so the
-  // strategy-shift nudge fires a single time per stuck episode rather than on
-  // every subsequent identical failure. A post-edit streak reset re-arms the
-  // trip for the next genuinely-stuck episode. Also require that no other stall
-  // pattern already fired this turn (avoid double-nudging).
+  // Trip ONCE when the streak first crosses the threshold, so the strategy-shift
+  // nudge fires a single time per stuck episode rather than on every subsequent
+  // identical failure. Require that the streak ADVANCED this turn (a fresh
+  // same-signature failure was folded) — an edit/owe turn preserves the streak
+  // at the threshold without re-folding a failure, and must not re-trip. A later
+  // streak reset (a different/passing signature) re-arms the trip for the next
+  // genuinely-stuck episode. Also require that no other stall pattern already
+  // fired this turn (avoid double-nudging).
+  let streak_advanced = folded.same_diagnostic_streak > observation.state.same_diagnostic_streak
   let should_trip = folded.same_diagnostic_streak == config.stuck_same_diagnostic_after
+    && streak_advanced
     && observation.warning == nil
   if !should_trip {
     return observation + {state: folded}
@@ -1220,6 +1220,25 @@ pub fn agent_stall_current_failure(stall_state: AgentStallState) {
     snippet: stall_state.last_diagnostic_snippet,
     same_diagnostic_streak: stall_state.same_diagnostic_streak,
   }
+}
+
+/**
+ * agent_stall_clear_current_failure clears the current-failure model so a
+ * SUCCESSFUL terminal hand-back (clean done / a passing `verify_completion`)
+ * does not report a stale `current_failure`. A run can complete without ever
+ * flowing a passing verification result through the fold (e.g. the loop stops
+ * `done` after the model's prose, or `verify_completion` passes out-of-band),
+ * which would otherwise leave `last_diagnostic_class == "fail"`. The loop calls
+ * this on the successful-termination signal before `agent_stall_apply_result`.
+ * A stuck / exhausted run does NOT call this, so it still carries the failure.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn agent_stall_clear_current_failure(stall_state: AgentStallState) -> AgentStallState {
+  return stall_state
+    + {last_diagnostic_class: "pass", same_diagnostic_streak: 0, reverify_owed: false}
 }
 
 /**

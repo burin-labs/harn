@@ -4,16 +4,17 @@ import { llm_text, with_llm_script } from "std/testing"
 /**
  * Evidence-aware repair loop (#repair-diagnostics): FALSE-POSITIVE SAFETY PROOF.
  *
- * A legitimate post-edit retry is NOT a futile loop. When a successful edit
- * intervenes between two identical failures, the write-epoch advances and the
- * same-diagnostic streak RESETS to 1 — so the stuck-diagnostic strategy-shift
- * nudge does NOT fire. A blind failure counter (no epoch model) would trip here
- * after the second or third identical failure; the evidence-aware model does
- * not, because each failure followed a real corrective edit.
+ * The failure SIGNATURE is the progress signal. A productive edit changes the
+ * error, so the next failure carries a DIFFERENT signature and the
+ * same-diagnostic streak resets — legitimate progress is never flagged as
+ * thrash. An edit that does NOT change the error (same signature) is real
+ * thrash, covered by `repair_edit_retest_thrash_trips`.
  *
- * Sequence: fail, edit, fail, edit, fail. With `stuck_same_diagnostic_after: 2`
- * a blind counter would trip; the epoch-aware model keeps the streak at 1 and
- * fires zero repair warnings.
+ * Sequence: fail(sigA), edit, fail(sigB-different), edit, fail(sigC-different).
+ * Each `run_test` reports a distinct error (modeling a productive edit moving
+ * the failure forward). With `stuck_same_diagnostic_after: 2` a blind counter
+ * would trip; the signature-keyed model keeps the streak at 1 each time the
+ * error changes and fires zero repair warnings.
  */
 fn events_of(events, kind) {
   return events.filter({ event -> event.type == kind })
@@ -21,15 +22,17 @@ fn events_of(events, kind) {
 
 fn repair_tools() {
   var tools = tool_registry()
+  // The error echoes a per-call `tag`, so successive runs carry DIFFERENT
+  // failure signatures without relying on mutable closure state.
   tools = tool_define(
     tools,
     "run_test",
     "Run the test suite",
     {
-      handler: { _args ->
-        throw "AssertionError: same failure"
+      handler: { args ->
+        throw "AssertionError: failure " + to_string(args?.tag ?? "x")
       },
-      parameters: {},
+      parameters: {tag: {type: "string"}},
       returns: {type: "string"},
       annotations: {kind: "read"},
     },
@@ -48,8 +51,8 @@ fn repair_tools() {
   return tools
 }
 
-fn run_test_call(id) {
-  return {text: "", tool_calls: [{id: id, name: "run_test", arguments: {}}]}
+fn run_test_call(id, tag) {
+  return {text: "", tool_calls: [{id: id, name: "run_test", arguments: {tag: tag}}]}
 }
 
 fn apply_fix_call(id) {
@@ -59,13 +62,13 @@ fn apply_fix_call(id) {
 pipeline default() {
   with_llm_script(
     [
-      run_test_call("r1"),
+      run_test_call("r1", "A"),
       apply_fix_call("e1"),
-      run_test_call("r2"),
+      run_test_call("r2", "B"),
       apply_fix_call("e2"),
-      run_test_call("r3"),
+      run_test_call("r3", "C"),
       apply_fix_call("e3"),
-      run_test_call("r4"),
+      run_test_call("r4", "D"),
       llm_text("Stopping. ##DONE##"),
     ],
     { ->

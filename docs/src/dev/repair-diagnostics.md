@@ -25,9 +25,9 @@ inert and the detector behaves exactly as before — verified by
    `last_diagnostic_class` (ProbeOutcome-shaped `pass`/`fail`), a
    `last_diagnostic_signature` (the SHA-256 of the normalized failure evidence,
    reusing `__agent_stall_result_outcome` — never re-implemented), a
-   `write_epoch` bumped on each successful workspace-mutating tool, the
-   `diagnostic_epoch_at_failure`, a `same_diagnostic_streak`,
-   `edit_since_failure`, and `reverify_owed`. These seven fields are folded each
+   `write_epoch` bumped on each successful workspace-mutating tool (it arms the
+   post-edit re-verify mandate), a `same_diagnostic_streak`,
+   `edit_since_failure`, and `reverify_owed`. These six fields are folded each
    turn by `__agent_stall_fold_diagnostic`.
 
 2. **Post-edit re-verify mandate.** A successful corrective edit is *not* proof
@@ -38,11 +38,14 @@ inert and the detector behaves exactly as before — verified by
    `continue`, and before allowing it to stop `done`. It routes through the
    existing `max_verify_attempts` cap; there is no new verify engine.
 
-3. **Strategy-shift nudge on a stuck diagnostic.** When the *same* diagnostic
-   (same signature, same epoch — i.e. no intervening edit) recurs across
-   `stuck_same_diagnostic_after` repair turns, the detector trips a new
-   `stuck_same_diagnostic` pattern on the **existing** `agent_loop_stall_warning`
-   event, riding the existing `__agent_stall_register_trip` escalation. The
+3. **Strategy-shift nudge on a stuck diagnostic.** When the *same* failure
+   **signature** recurs across `stuck_same_diagnostic_after` repair turns — even
+   when corrective edits intervened, as long as those edits did not change the
+   error — the detector trips a new `stuck_same_diagnostic` pattern on the
+   **existing** `agent_loop_stall_warning` event, riding the existing
+   `__agent_stall_register_trip` escalation. The trip fires only on the turn the
+   streak *advances* to the threshold (a fresh same-signature failure), so an
+   edit/owe turn that holds the streak at the threshold does not re-trip. The
    injected feedback is grounded in the actual diagnostic snippet ("the same
    failure has persisted... the failing evidence is unchanged: `<the snippet>`"),
    nudging the model to change approach rather than retry harder.
@@ -51,23 +54,51 @@ inert and the detector behaves exactly as before — verified by
    `current_failure` block (`{class, signature, snippet,
    same_diagnostic_streak}`) on the run result via `agent_stall_apply_result`,
    so the hand-back says *what* is failing, not just "budget exhausted" /
-   "thrash".
+   "thrash". A **successful** termination (clean `done` / a passing
+   `verify_completion`) clears the model first, so it never reports a stale
+   failure (`agent_stall_clear_current_failure`).
 
-## The false-positive safety property
+## The signature IS the progress signal
 
-The key correctness property is in the streak fold:
+The key correctness property is in the streak fold, and it is **signature-keyed,
+not epoch-keyed**. The failure signature — the SHA-256 of the normalized failure
+evidence — is the progress signal:
 
-- **same signature AND same epoch-since-fail** ⇒ futile retry (`streak + 1`).
-- **same signature but a NEW epoch** (a successful edit intervened) ⇒ reset to
-  `1`. This is the legitimate post-edit retry: re-running the test after a real
-  fix is *not* thrashing, so it must not trip.
-- **different signature** ⇒ reset to `1`.
+- **same failure signature** ⇒ futile retry (`streak + 1`), **even across
+  intervening edits**. An edit that leaves the *same* error did not make
+  progress; that is exactly the edit-between-retest thrash the feature exists to
+  catch. (An earlier design keyed the streak on a write-epoch and reset it on
+  *every* successful edit — which meant the `fail, edit, fail, edit, fail`
+  thrash case could never trip. That was the bug this design fixes.)
+- **different signature** ⇒ reset to `1`. A productive edit *changes* the error,
+  so a different (or passing) signature is real progress and is never flagged.
+  This is the false-positive safety property: progress always resets the streak.
 - **pass** ⇒ clear the streak, `reverify_owed`, and `edit_since_failure`.
 
-Proven by `conformance/tests/agents/repair_post_edit_resets_streak.harn` (a
-fail/edit/fail/edit/fail sequence trips a blind counter but not the epoch-aware
-model) and the field-by-field unit test
-`tests/agent/stall_test.harn::test_fold_post_edit_resets_streak`.
+Because the streak can sit at the threshold across a no-result edit turn (which
+*preserves* the model and owes a re-verify rather than re-folding a failure), the
+trip only fires on the turn the streak **advances** to the threshold, so it
+nudges once per stuck episode rather than on every subsequent turn.
+
+A turn that BOTH edits and re-tests still classifies: `__agent_stall_turn_result`
+returns the first *failing* dispatch result, so the re-test's failure is seen
+past the edit's own "ok". A non-failing result on an edit turn is the edit's own
+success, *not* verification of the failure, so it owes a re-verify and preserves
+the model rather than clearing it.
+
+Proven by:
+
+- `conformance/tests/agents/repair_edit_retest_thrash_trips.harn` and
+  `tests/agent/stall_test.harn::test_fold_edit_retest_thrash_increments_streak`
+  (the primary case: same signature across edits ⇒ trips).
+- `conformance/tests/agents/repair_edit_and_test_same_turn_thrash.harn`
+  (single-turn edit+retest with the same signature ⇒ trips).
+- `conformance/tests/agents/repair_post_edit_resets_streak.harn` and
+  `tests/agent/stall_test.harn::test_fold_productive_edit_resets_streak`
+  (a *different* failure after an edit ⇒ resets, no trip).
+- `tests/agent/stall_test.harn::test_clear_current_failure_on_success` and
+  `conformance/tests/agents/repair_success_clears_current_failure.harn` (no
+  stale `current_failure` on a successful hand-back; still carried when stuck).
 
 The current-failure fields are **deliberately not cleared by
 `__agent_stall_reset_action`** — a *different* corrective action does not clear
@@ -111,9 +142,12 @@ tool-using defaults preset (`presets.harn`), default-safe-off:
 This feature subsumes Burin's product-side `futile-retry-guard.harn`. That guard
 was a Burin-local approximation of the same intent — detect a model retrying a
 fix that is not working and steer it off — but it lived on the host product
-layer, lacked the epoch-aware false-positive protection (it could not tell a
-legitimate post-edit retry from a futile one), and could not force a re-verify
-through the loop's own verify entrypoint.
+layer, and could not force a re-verify through the loop's own verify entrypoint.
+The signature-keyed streak here catches the exact case the guard targets: the
+`fail, edit, fail, edit, fail` edit-between-retest thrash trips
+`stuck_same_diagnostic` (proven by `repair_edit_retest_thrash_trips.harn`),
+while a productive edit that changes the error never trips, so the subsumption
+is real and not merely a single-failure counter.
 
 Because retry/verify/stuck policy is Harn-owned (orchestration policy,
 transcript lifecycle, retry/verify/repair all belong in Harn per the Burin/Harn

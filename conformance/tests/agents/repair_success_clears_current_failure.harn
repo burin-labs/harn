@@ -1,0 +1,121 @@
+import { llm_text, with_llm_script } from "std/testing"
+
+/**
+ * Evidence-aware repair loop (#repair-diagnostics): FIX #2 — a successful
+ * terminal hand-back must not report a stale `current_failure`.
+ *
+ * A run can complete (clean DONE) right after a corrective edit without ever
+ * flowing a passing verification result through the fold, so
+ * `last_diagnostic_class` stays "fail". The loop clears the current-failure
+ * model on the successful-termination signal before projecting it.
+ *
+ * Scenario A (success): fail, edit, DONE => result.current_failure is nil.
+ * Scenario B (stuck): the same failure persists and the loop hard-stops =>
+ * result.current_failure is present (the hand-back says WHAT failed).
+ */
+fn repair_tools() {
+  var tools = tool_registry()
+  tools = tool_define(
+    tools,
+    "run_test",
+    "Run the test suite",
+    {
+      handler: { _args ->
+        throw "AssertionError: expected 5 got 4"
+      },
+      parameters: {},
+      returns: {type: "string"},
+      annotations: {kind: "read"},
+    },
+  )
+  tools = tool_define(
+    tools,
+    "apply_fix",
+    "Apply a corrective edit",
+    {
+      handler: { _args -> "edit applied" },
+      parameters: {},
+      returns: {type: "string"},
+      annotations: {kind: "edit", side_effect_level: "workspace_write"},
+    },
+  )
+  return tools
+}
+
+fn run_test_call(id) {
+  return {text: "", tool_calls: [{id: id, name: "run_test", arguments: {}}]}
+}
+
+fn apply_fix_call(id) {
+  return {text: "", tool_calls: [{id: id, name: "apply_fix", arguments: {}}]}
+}
+
+fn scenario_success() {
+  return with_llm_script(
+    [
+      run_test_call("r1"),
+      apply_fix_call("e1"),
+      llm_text("All set. ##DONE##"),
+      llm_text("All set. ##DONE##"),
+    ],
+    { ->
+      let session = "repair-success-clear-" + uuid()
+      let result = agent_loop(
+        "Make the failing test pass, then finish.",
+        nil,
+        {
+          provider: "mock",
+          tools: repair_tools(),
+          tool_format: "native",
+          loop_until_done: true,
+          max_iterations: 8,
+          session_id: session,
+          done_sentinel: "##DONE##",
+          stall_diagnostics: {enabled: true, repair_aware: true, stuck_same_diagnostic_after: 2},
+        },
+      )
+      return result?.current_failure == nil
+    },
+  )
+}
+
+fn scenario_stuck() {
+  return with_llm_script(
+    [
+      run_test_call("r1"),
+      run_test_call("r2"),
+      run_test_call("r3"),
+      run_test_call("r4"),
+      run_test_call("r5"),
+      run_test_call("r6"),
+      run_test_call("r7"),
+      run_test_call("r8"),
+    ],
+    { ->
+      let session = "repair-stuck-keeps-" + uuid()
+      let result = agent_loop(
+        "Make the failing test pass.",
+        nil,
+        {
+          provider: "mock",
+          tools: repair_tools(),
+          tool_format: "native",
+          loop_until_done: true,
+          max_iterations: 8,
+          session_id: session,
+          done_sentinel: "##DONE##",
+          stall_diagnostics: {enabled: true, repair_aware: true, stuck_same_diagnostic_after: 2, hard_stop_after_trips: 1},
+        },
+      )
+      let cf = result?.current_failure
+      return cf != nil && cf.class == "fail"
+    },
+  )
+}
+
+pipeline default() {
+  // Success: no stale failure on the hand-back.
+  __io_println(scenario_success())
+  // Stuck: the failure-carrying hand-back is preserved.
+  __io_println(scenario_stuck())
+}

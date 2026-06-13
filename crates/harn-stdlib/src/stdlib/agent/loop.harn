@@ -36,6 +36,7 @@ import { agent_scratchpad_init, agent_scratchpad_reorganize_if_due } from "std/a
 import { agent_skills_match } from "std/agent/skills"
 import {
   agent_stall_apply_result,
+  agent_stall_clear_current_failure,
   agent_stall_done_judge_due,
   agent_stall_initial_state,
   agent_stall_inject_feedback,
@@ -3256,7 +3257,15 @@ fn __agent_loop_run(message, session, initial_opts) {
       },
     )
     session_finalized = true
-    let result_with_stalls = agent_stall_apply_result(result, stall_enabled_seen, stall_state)
+    let terminated_ok = terminal_error == nil
+      && suspend_result == nil
+      && (final_status == "" || final_status == "done")
+    let final_stall_state = if terminated_ok {
+      agent_stall_clear_current_failure(stall_state)
+    } else {
+      stall_state
+    }
+    let result_with_stalls = agent_stall_apply_result(result, stall_enabled_seen, final_stall_state)
     let enforced = if suspend_result != nil {
       result_with_stalls
     } else {
@@ -3313,58 +3322,12 @@ fn __agent_loop_run(message, session, initial_opts) {
   return unwrap(run)
 }
 
-// The terminal stuck hand-back is enriched with the current-failure
-// summary at the RESULT level (see `agent_stall_apply_result`), which is
-// the durable surface consumers read. The `loop_control_decision` event
-// is a typed event (fixed schema in agent_session_host.rs) and cannot
-// carry an extra `current_failure` field without a new event type, which
-// the design forbids — so the diagnostic context rides the verbatim
-// `agent_loop_stall_warning` payload (already enriched with the
-// diagnostic snippet/signature) plus the run result.
-// Evidence-aware repair loop: post-edit re-verify mandate. When the repair
-// loop is enabled and configured for post-edit re-verification, a turn
-// that made a successful corrective edit on top of a LIVE failure must be
-// re-verified before the loop continues OR stops — a successful edit is
-// not proof the failure is resolved. We force this even when the model
-// proposed `continue` (no completion). Routes through the EXISTING verify
-// entrypoint and the existing max_verify_attempts cap; no new engine.
-// The re-verify mandate fires even on a `continue` outcome: run the verify
-// entrypoint before allowing the loop to proceed. A verify pass clears the
-// owed flag; a veto injects feedback and continues (handled below).
-// Verify passed: the post-edit re-verify mandate (if any) is now
-// satisfied. Clearing the owed flag prevents a redundant forced
-// re-verify on a later turn.
-// Provider-malformed empty-name calls were filtered out of `tool_calls`
-// by `__resolve_tool_calls`; inject parse-guidance for the drop so the
-// model re-emits a named call instead of the loop terminating silently
-// on the nameless sibling.
-// #3220: this turn attempted a tool call that did not dispatch — the
-// native-fallback contract rejected text-emitted calls (corrective
-// feedback queued), or the parser dropped every call and parse
-// guidance was injected. Post-turn must not read the turn's prose as
-// a completion signal.
-// A turn whose calls were all dropped by the parser gets the purpose-built
-// parse-guidance feedback (not the generic no-progress nudge), and is
-// excluded from the no-progress stall streak below.
-// Host pushed an `interrupt_immediate` injection between the
-// model emitting tool calls and the dispatcher starting. Honor
-// the host's "stop, do this instead" by skipping the pending
-// tool batch — the injection is already in the transcript, so
-// the next iteration's LLM call will see it and the model can
-// decide whether to re-issue, modify, or abandon the call. The
-// post-turn machinery (judge, required-tools, done sentinel) is
-// intentionally bypassed because nothing dispatched; budget is
-// still honored because the LLM call's tokens were spent.
-// Drain async events (long-running tool completions, MCP server
-// progress, command-policy feedback, file-edited nudges, trigger
-// events) BEFORE compaction so the summarizer sees the freshest
-// transcript. Without this, anything that landed between turns
-// would be elided from the summary.
-// Drain again AFTER compaction: when Tier-2 LLM summarization
-// runs it can take 5-30s, and any async producer (tool worker,
-// MCP `notifications/progress`, GitHub PR merge trigger,
-// `command_policy` post-hook) firing in that window must be
-// visible in *this* turn's prompt, not the one after.
+// A SUCCESSFUL terminal hand-back (clean done / a passing verify_completion)
+// must not report a stale current_failure: a run can complete without ever
+// flowing a passing verification result through the fold. Clear the
+// current-failure model on the successful-termination signal (mirrors the
+// host's `final_status.is_empty() || == "done"` success predicate) before
+// projecting it; a stuck / exhausted / suspended run keeps the failure.
 /**
  * agent_loop.
  *

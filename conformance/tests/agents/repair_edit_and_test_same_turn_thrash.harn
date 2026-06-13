@@ -1,0 +1,99 @@
+import { agent_capture_events } from "std/agent/events"
+import { llm_text, with_llm_script } from "std/testing"
+
+/**
+ * Evidence-aware repair loop (#repair-diagnostics): single-turn edit+retest
+ * thrash. Each turn BOTH applies a corrective edit AND re-runs the failing test
+ * in one dispatch, and the test keeps failing with the SAME signature. The
+ * representative verification result is the FIRST failing dispatch result (the
+ * re-test), seen past the edit's own "ok" — so removing the old
+ * `if turn_made_edit { return }` short-circuit lets this turn classify and the
+ * streak advances across the repeated edit+retest turns until it trips.
+ *
+ * This case previously could NOT classify at all (the short-circuit skipped any
+ * turn that made an edit), so it could never trip.
+ */
+fn events_of(events, kind) {
+  return events.filter({ event -> event.type == kind })
+}
+
+fn repair_tools() {
+  var tools = tool_registry()
+  tools = tool_define(
+    tools,
+    "run_test",
+    "Run the test suite",
+    {
+      handler: { _args ->
+        throw "AssertionError: expected 5 got 4"
+      },
+      parameters: {},
+      returns: {type: "string"},
+      annotations: {kind: "read"},
+    },
+  )
+  tools = tool_define(
+    tools,
+    "apply_fix",
+    "Apply a corrective edit",
+    {
+      handler: { _args -> "edit applied" },
+      parameters: {},
+      returns: {type: "string"},
+      annotations: {kind: "edit", side_effect_level: "workspace_write"},
+    },
+  )
+  return tools
+}
+
+/**
+ * One turn that BOTH edits (apply_fix) and re-tests (run_test) in a single
+ * dispatch. The edit is listed first; the re-test fails with the same error.
+ */
+fn fix_and_test(edit_id, test_id) {
+  return {
+    text: "",
+    tool_calls: [{id: edit_id, name: "apply_fix", arguments: {}}, {id: test_id, name: "run_test", arguments: {}}],
+  }
+}
+
+pipeline default() {
+  with_llm_script(
+    [
+      fix_and_test("e1", "t1"),
+      fix_and_test("e2", "t2"),
+      fix_and_test("e3", "t3"),
+      llm_text("Giving up. ##DONE##"),
+    ],
+    { ->
+      let session = "repair-same-turn-thrash-" + uuid()
+      let captured = agent_capture_events(
+        session,
+        fn() { return agent_loop(
+          "Make the failing test pass.",
+          nil,
+          {
+            provider: "mock",
+            tools: repair_tools(),
+            tool_format: "native",
+            loop_until_done: true,
+            max_iterations: 10,
+            session_id: session,
+            done_sentinel: "##DONE##",
+            stall_diagnostics: {
+              enabled: true,
+              repair_aware: true,
+              stuck_same_diagnostic_after: 2,
+              inject_feedback: true,
+              max_feedback: 1,
+            },
+          },
+        ) },
+      )
+      let stalls = events_of(captured.events, "agent_loop_stall_warning")
+      let repair_stalls = stalls.filter({ s -> s.warning.pattern == "stuck_same_diagnostic" })
+      __io_println(len(repair_stalls))
+      __io_println(repair_stalls[0].warning.pattern)
+    },
+  )
+}

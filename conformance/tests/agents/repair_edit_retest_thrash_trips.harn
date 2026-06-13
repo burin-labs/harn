@@ -1,0 +1,103 @@
+import { agent_capture_events } from "std/agent/events"
+import { llm_text, with_llm_script } from "std/testing"
+
+/**
+ * Evidence-aware repair loop (#repair-diagnostics): THE PRIMARY CASE.
+ *
+ * Edit-between-retest thrash: fail(sigA), edit, fail(sigA), edit, fail(sigA) —
+ * separate turns, the SAME failure signature across the intervening edits. A
+ * flailing edit that leaves the same error is real thrash, so the
+ * same-diagnostic streak advances ACROSS the edits and trips the
+ * `stuck_same_diagnostic` strategy-shift nudge. The old epoch-keyed model reset
+ * the streak on every successful edit and could NEVER trip this case — this is
+ * the regression that exposed the feature's core value being inert.
+ *
+ * With `stuck_same_diagnostic_after: 2` and the one-turn fold lag, the trip
+ * fires when the second same-signature failure is folded (after the edit
+ * between them).
+ */
+fn events_of(events, kind) {
+  return events.filter({ event -> event.type == kind })
+}
+
+fn repair_tools() {
+  var tools = tool_registry()
+  tools = tool_define(
+    tools,
+    "run_test",
+    "Run the test suite",
+    {
+      handler: { _args ->
+        throw "AssertionError: expected 5 got 4"
+      },
+      parameters: {},
+      returns: {type: "string"},
+      annotations: {kind: "read"},
+    },
+  )
+  tools = tool_define(
+    tools,
+    "apply_fix",
+    "Apply a corrective edit",
+    {
+      handler: { _args -> "edit applied" },
+      parameters: {},
+      returns: {type: "string"},
+      annotations: {kind: "edit", side_effect_level: "workspace_write"},
+    },
+  )
+  return tools
+}
+
+fn run_test_call(id) {
+  return {text: "", tool_calls: [{id: id, name: "run_test", arguments: {}}]}
+}
+
+fn apply_fix_call(id) {
+  return {text: "", tool_calls: [{id: id, name: "apply_fix", arguments: {}}]}
+}
+
+pipeline default() {
+  with_llm_script(
+    [
+      run_test_call("r1"),
+      apply_fix_call("e1"),
+      run_test_call("r2"),
+      apply_fix_call("e2"),
+      run_test_call("r3"),
+      llm_text("Giving up. ##DONE##"),
+    ],
+    { ->
+      let session = "repair-thrash-" + uuid()
+      let captured = agent_capture_events(
+        session,
+        fn() { return agent_loop(
+          "Make the failing test pass.",
+          nil,
+          {
+            provider: "mock",
+            tools: repair_tools(),
+            tool_format: "native",
+            loop_until_done: true,
+            max_iterations: 10,
+            session_id: session,
+            done_sentinel: "##DONE##",
+            // No verify_completion closure, so the post-edit re-verify mandate
+            // does not fire — this isolates the cross-edit streak advance.
+            stall_diagnostics: {
+              enabled: true,
+              repair_aware: true,
+              stuck_same_diagnostic_after: 2,
+              inject_feedback: true,
+              max_feedback: 1,
+            },
+          },
+        ) },
+      )
+      let stalls = events_of(captured.events, "agent_loop_stall_warning")
+      let repair_stalls = stalls.filter({ s -> s.warning.pattern == "stuck_same_diagnostic" })
+      __io_println(len(repair_stalls))
+      __io_println(repair_stalls[0].warning.pattern)
+    },
+  )
+}
