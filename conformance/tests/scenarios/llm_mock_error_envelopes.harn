@@ -15,7 +15,7 @@ pipeline default(task) {
       {text: "recovered", tool_calls: []},
     ],
     { ->
-      let first = llm_call_safe("first", nil, {provider: "mock", model: "mock-model"})
+      let first = llm_call_safe("first", nil, {provider: "mock", model: "mock-model", llm_retries: 0})
       __io_println(first.ok)
       __io_println(first.response == nil)
       __io_println(first.error.status)
@@ -30,3 +30,7 @@ pipeline default(task) {
     },
   )
 }
+// Pin llm_retries:0 so this assertion observes the raw error envelope.
+// The default retry budget is now 2, which would retry the scripted 503
+// (transient) into the "recovered" response — hiding the envelope under
+// test and consuming the script entry meant for `second`.
