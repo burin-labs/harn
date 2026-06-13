@@ -2529,10 +2529,7 @@ fn __refactor_def_op(spec, path, fn_name, new_inner) {
  * - `"manual"` — rewrite the definition only and report the untouched call
  *   sites in `warnings` for the agent to fix.
  *
- * `adapter_shim` from the epic is not yet supported (it needs the old
- * signature + a delegating body); use `add_parameter` / `reorder_parameters`
- * for the structured cases instead. Languages: rust, python, typescript,
- * tsx, javascript, jsx, go.
+ * Languages: rust, python, typescript, tsx, javascript, jsx, go.
  *
  * @effects: [host, fs]
  * @errors: [backend]
@@ -2636,7 +2633,6 @@ pub fn edit_change_signature(params) {
  * - `"default_fill"` (default) — insert `default` (required) at the same
  *   index in every call's argument list.
  * - `"strict"` — refuse with `result: "conflict"` when call sites exist.
- * - `"adapter_shim"` — not yet supported.
  *
  * `param` is the full declaration text (e.g. `"c: i64"`, `"c"`, `"c int"`).
  * Languages: rust, python, typescript, tsx, javascript, jsx, go.
@@ -2697,13 +2693,6 @@ pub fn edit_add_parameter(params) {
           call_count: calls.count,
         },
       ],
-    )
-  }
-  if strategy == "adapter_shim" {
-    return __refactor_unsupported(
-      "add_parameter",
-      language,
-      "adapter_shim is not yet supported; use default_fill (with `default`) or strict",
     )
   }
   let default_val = p?.default

@@ -91,30 +91,3 @@ pub fn index_by<V>(items: list<V>, key_fn) -> dict<string, V> {
   }
   return __dict_from_pairs(pairs)
 }
-
-// Check if a store key is stale (older than max_age_seconds).
-// Uses store_get/store_set convention: timestamps stored as key + "_ts".
-/**
- * store_stale.
- *
- * @effects: [time, store.read]
- * @errors: []
- */
-pub fn store_stale(key, max_age_seconds) {
-  let ts = store_get(key + "_ts")
-  if ts == nil {
-    return true
-  }
-  return harness.clock.timestamp() - ts > max_age_seconds
-}
-
-// Refresh a store key's timestamp to now.
-/**
- * store_refresh.
- *
- * @effects: [time, store.write]
- * @errors: []
- */
-pub fn store_refresh(key) {
-  store_set(key + "_ts", harness.clock.timestamp())
-}
