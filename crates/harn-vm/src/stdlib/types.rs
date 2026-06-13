@@ -1,5 +1,5 @@
 use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
-use crate::value::{VmError, VmValue};
+use crate::value::{string_char_count, VmError, VmValue};
 use crate::vm::Vm;
 
 const I64_FLOAT_UPPER_BOUND_EXCLUSIVE: f64 = 9_223_372_036_854_775_808.0;
@@ -161,7 +161,7 @@ fn to_list_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError>
 )]
 fn len_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     match args.first().unwrap_or(&VmValue::Nil) {
-        VmValue::String(s) => Ok(VmValue::Int(s.chars().count() as i64)),
+        VmValue::String(s) => Ok(VmValue::Int(string_char_count(s) as i64)),
         VmValue::Bytes(bytes) => Ok(VmValue::Int(bytes.len() as i64)),
         VmValue::List(items) => Ok(VmValue::Int(items.len() as i64)),
         VmValue::Dict(map) => Ok(VmValue::Int(map.len() as i64)),

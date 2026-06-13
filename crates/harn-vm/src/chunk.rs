@@ -649,7 +649,8 @@ fn op_stack_delta(op: Op, count: u16) -> Option<i32> {
         // Consume one value (into a binding / property / discard). `SetVar`,
         // `SetProperty` and the local-slot stores read their target by name
         // or slot index, so they only pop the value being stored.
-        DefLet | DefVar | SetVar | DefLocalSlot | SetLocalSlot | SetProperty | Pop => -1,
+        DefLet | DefVar | SetVar | DefLocalSlot | SetLocalSlot | SetProperty
+        | SetLocalSlotProperty | Pop => -1,
         // Value-preserving: unary ops, by-name lookups/checks, and scope /
         // iterator / exception-handler bookkeeping (the last three touch
         // side stacks, not the operand stack).
@@ -665,8 +666,9 @@ fn op_stack_delta(op: Op, count: u16) -> Option<i32> {
         // `IterInit` consumes the iterable and pushes nothing (the iterator
         // lives on a side stack).
         IterInit => -1,
-        // Pop three (or two values + a by-name target), push one.
-        Slice | SetSubscript => -2,
+        // Net -2: `Slice` pops object/start/end and pushes one value;
+        // subscript stores pop value/index and read the target from bytecode.
+        Slice | SetSubscript | SetLocalSlotSubscript => -2,
         // Variadic whose arity is the emit argument: pop `count`, push one.
         BuildList | Concat | CallBuiltin => 1 - count,
         BuildDict => 1 - 2 * count,
@@ -775,6 +777,23 @@ impl Chunk {
         }
         if op_reads_outer_name(op) {
             self.references_outer_names = true;
+        }
+    }
+
+    /// Emit a local-slot property assignment:
+    /// opcode + u16 property constant index + u16 local slot index.
+    pub fn emit_set_local_slot_property(&mut self, prop_idx: u16, slot: u16, line: u32) {
+        #[cfg(debug_assertions)]
+        self.note_balance(Op::SetLocalSlotProperty, 0);
+        let col = self.current_col;
+        self.code.push(Op::SetLocalSlotProperty as u8);
+        self.code.push((prop_idx >> 8) as u8);
+        self.code.push((prop_idx & 0xFF) as u8);
+        self.code.push((slot >> 8) as u8);
+        self.code.push((slot & 0xFF) as u8);
+        for _ in 0..5 {
+            self.lines.push(line);
+            self.columns.push(col);
         }
     }
 
@@ -1290,6 +1309,21 @@ pub(crate) fn disasm_local_slot_u16(chunk: &Chunk, ip: &mut usize, label: &str) 
     let slot = chunk.read_u16(*ip);
     *ip += 2;
     let mut out = format!("{label} {slot:>4}");
+    if let Some(info) = chunk.local_slots.get(slot as usize) {
+        out.push_str(&format!(" ({})", info.name));
+    }
+    out
+}
+
+pub(crate) fn disasm_const_pool_local_slot(chunk: &Chunk, ip: &mut usize, label: &str) -> String {
+    let prop = chunk.read_u16(*ip);
+    *ip += 2;
+    let slot = chunk.read_u16(*ip);
+    *ip += 2;
+    let mut out = format!(
+        "{label} prop {prop:>4} ({}) slot {slot:>4}",
+        chunk.constants[prop as usize]
+    );
     if let Some(info) = chunk.local_slots.get(slot as usize) {
         out.push_str(&format!(" ({})", info.name));
     }

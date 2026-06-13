@@ -777,3 +777,48 @@ fn inplace_concat_skips_scalar_compound_assign() {
         "scalar assign should emit a single store, not the in-place doubling:\n{d}"
     );
 }
+
+#[test]
+fn local_property_assignment_uses_slot_opcode() {
+    let chunk = compile_source("pipeline t(task) {\n  var out = {}\n  out.a = 1\n}");
+    let d = chunk.disassemble("t");
+    let opcodes = disasm_opcodes(&d);
+    assert!(
+        opcodes.contains(&"SET_LOCAL_SLOT_PROPERTY"),
+        "local property assignment should store by slot:\n{d}"
+    );
+    assert!(
+        !opcodes.contains(&"SET_PROPERTY"),
+        "slot-resolved local property assignment should skip by-name store:\n{d}"
+    );
+}
+
+#[test]
+fn local_subscript_assignment_uses_slot_opcode() {
+    let chunk = compile_source("pipeline t(task) {\n  var out = {}\n  out[\"a\"] = 1\n}");
+    let d = chunk.disassemble("t");
+    let opcodes = disasm_opcodes(&d);
+    assert!(
+        opcodes.contains(&"SET_LOCAL_SLOT_SUBSCRIPT"),
+        "local subscript assignment should store by slot:\n{d}"
+    );
+    assert!(
+        !opcodes.contains(&"SET_SUBSCRIPT"),
+        "slot-resolved local subscript assignment should skip by-name store:\n{d}"
+    );
+}
+
+#[test]
+fn nonlocal_subscript_assignment_keeps_by_name_opcode() {
+    let chunk = compile_source("var out = {}\npipeline t(task) {\n  out[\"a\"] = 1\n}");
+    let d = chunk.disassemble("t");
+    let opcodes = disasm_opcodes(&d);
+    assert!(
+        opcodes.contains(&"SET_SUBSCRIPT"),
+        "non-local subscript assignment must keep env-aware store:\n{d}"
+    );
+    assert!(
+        !opcodes.contains(&"SET_LOCAL_SLOT_SUBSCRIPT"),
+        "non-local assignment cannot be lowered to a frame-local slot:\n{d}"
+    );
+}

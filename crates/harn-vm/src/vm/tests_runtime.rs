@@ -686,6 +686,20 @@ log("hello".substring(1, 3)) }"#,
 }
 
 #[test]
+fn test_string_length_fast_paths_keep_unicode_scalar_semantics() {
+    let out = run_output(
+        r#"pipeline t(task) {
+log(len("abcd"))
+log(len("é🙂"))
+log("é🙂".count)
+log("é🙂".count())
+log("é🙂".len())
+}"#,
+    );
+    assert_eq!(out, "[harn] 4\n[harn] 2\n[harn] 2\n[harn] 2\n[harn] 2");
+}
+
+#[test]
 fn test_list_properties() {
     let out = run_output(
         "pipeline t(task) { let list = [1, 2, 3]\nlog(list.count)\nlog(list.empty)\nlog(list.first)\nlog(list.last) }",
@@ -1292,6 +1306,21 @@ log(d.count)
 }",
     );
     assert_eq!(out, "[harn] 3");
+}
+
+#[test]
+fn test_slot_subscript_assignment_updates_slot_value() {
+    let out = run_output(
+        r#"pipeline t(task) {
+var d = {}
+d["a"] = 1
+d["b"] = 2
+var xs = [0, 0]
+xs[1] = 3
+log(d.a + d["b"] + xs[1])
+}"#,
+    );
+    assert_eq!(out, "[harn] 6");
 }
 
 // --- Error handling tests ---

@@ -29,6 +29,19 @@ pub type VmAsyncBuiltinFn = Arc<
 
 type Shared<T> = Arc<T>;
 
+/// Character count with a byte-length fast path for ASCII text.
+///
+/// Harn exposes string lengths as Unicode scalar counts. ASCII is one byte per
+/// scalar, so cached string `count` / `len` paths can avoid a full iterator
+/// scan without changing behavior for non-ASCII text.
+pub fn string_char_count(text: &str) -> usize {
+    if text.is_ascii() {
+        text.len()
+    } else {
+        text.chars().count()
+    }
+}
+
 /// Indexed runtime layout for a Harn struct instance.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StructLayout {

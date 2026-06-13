@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use crate::chunk::{InlineCacheEntry, PropertyCacheTarget};
-use crate::value::{VmError, VmValue};
+use crate::value::{string_char_count, VmError, VmValue};
 
 /// Resolve a (possibly negative) list-assignment index against `len`, erroring
 /// if it falls outside the list. A negative index counts from the end (`-1` is
@@ -121,7 +121,7 @@ impl super::super::Vm {
                 Some(items.last().cloned().unwrap_or(VmValue::Nil))
             }
             (PropertyCacheTarget::StringCount, VmValue::String(s)) => {
-                Some(VmValue::Int(s.chars().count() as i64))
+                Some(VmValue::Int(string_char_count(s) as i64))
             }
             (PropertyCacheTarget::StringEmpty, VmValue::String(s)) => {
                 Some(VmValue::Bool(s.is_empty()))
@@ -195,7 +195,7 @@ impl super::super::Vm {
                 _ => VmValue::Nil,
             },
             VmValue::String(s) => match name {
-                "count" => VmValue::Int(s.chars().count() as i64),
+                "count" => VmValue::Int(string_char_count(s) as i64),
                 "empty" => VmValue::Bool(s.is_empty()),
                 _ => VmValue::Nil,
             },
@@ -368,7 +368,7 @@ impl super::super::Vm {
                 }
             }
             VmValue::String(s) => {
-                let char_count = s.chars().count() as i64;
+                let char_count = string_char_count(s) as i64;
                 let start = match &start_val {
                     VmValue::Nil => 0i64,
                     VmValue::Int(i) => {
@@ -585,6 +585,106 @@ impl super::super::Vm {
             }
         }
         Ok(())
+    }
+
+    pub(super) fn execute_set_local_slot_property(&mut self) -> Result<(), VmError> {
+        let (chunk, prop_idx, slot_idx) = {
+            let frame = self.frames.last_mut().unwrap();
+            let prop_idx = frame.chunk.read_u16(frame.ip) as usize;
+            frame.ip += 2;
+            let slot_idx = frame.chunk.read_u16(frame.ip) as usize;
+            frame.ip += 2;
+            (Arc::clone(&frame.chunk), prop_idx, slot_idx)
+        };
+        let prop_name = Self::const_str(&chunk.constants[prop_idx])?;
+        let new_value = self.pop()?;
+
+        let frame = self.frames.last_mut().unwrap();
+        let Some(info) = frame.chunk.local_slots.get(slot_idx) else {
+            return Err(VmError::Runtime(format!(
+                "Invalid local slot index: {slot_idx}"
+            )));
+        };
+        if !info.mutable {
+            return Err(VmError::ImmutableAssignment(info.name.clone()));
+        }
+        let Some(slot) = frame.local_slots.get_mut(slot_idx) else {
+            return Err(VmError::Runtime(format!(
+                "Invalid local slot index: {slot_idx}"
+            )));
+        };
+        if !slot.initialized {
+            return Err(VmError::UndefinedVariable(info.name.clone()));
+        }
+
+        if let VmValue::Dict(map) = &mut slot.value {
+            Arc::make_mut(map).insert(prop_name.to_string(), new_value);
+            slot.synced = false;
+            return Ok(());
+        }
+
+        if matches!(slot.value, VmValue::StructInstance { .. }) {
+            let next = slot
+                .value
+                .struct_instance_with_property(prop_name, new_value)
+                .expect("struct instance matched above");
+            slot.value = next;
+            slot.synced = false;
+            return Ok(());
+        }
+
+        Err(VmError::TypeError(format!(
+            "cannot set property `{prop_name}` on {}",
+            slot.value.type_name()
+        )))
+    }
+
+    pub(super) fn execute_set_local_slot_subscript(&mut self) -> Result<(), VmError> {
+        let slot_idx = {
+            let frame = self.frames.last_mut().unwrap();
+            let slot_idx = frame.chunk.read_u16(frame.ip) as usize;
+            frame.ip += 2;
+            slot_idx
+        };
+        let index = self.pop()?;
+        let new_value = self.pop()?;
+
+        let frame = self.frames.last_mut().unwrap();
+        let Some(info) = frame.chunk.local_slots.get(slot_idx) else {
+            return Err(VmError::Runtime(format!(
+                "Invalid local slot index: {slot_idx}"
+            )));
+        };
+        if !info.mutable {
+            return Err(VmError::ImmutableAssignment(info.name.clone()));
+        }
+        let Some(slot) = frame.local_slots.get_mut(slot_idx) else {
+            return Err(VmError::Runtime(format!(
+                "Invalid local slot index: {slot_idx}"
+            )));
+        };
+        if !slot.initialized {
+            return Err(VmError::UndefinedVariable(info.name.clone()));
+        }
+
+        match &mut slot.value {
+            VmValue::List(items) => {
+                let Some(i) = index.as_int() else {
+                    return Err(Self::list_index_type_error(&index));
+                };
+                let idx = resolve_list_assign_index(i, items.len())?;
+                Arc::make_mut(items)[idx] = new_value;
+                slot.synced = false;
+                Ok(())
+            }
+            VmValue::Dict(map) => {
+                let key = index.display();
+                Arc::make_mut(map).insert(key, new_value);
+                slot.synced = false;
+                Ok(())
+            }
+            other => Err(Self::subscript_assign_type_error(other)),
+        }
     }
 
     /// Index-assignment on a list requires an int index — mirrors the read

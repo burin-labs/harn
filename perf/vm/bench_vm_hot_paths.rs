@@ -384,6 +384,28 @@ pipeline default(task) {
             runtime,
         ),
         VmHotPathFixture::new(
+            "local_collection_assignment",
+            r#"
+pipeline default(task) {
+  var dict = {}
+  var list = [0, 0, 0, 0]
+  var i = 0
+  var total = 0
+  while i < 2500 {
+    dict["a"] = i
+    dict.b = i + 1
+    list[2] = i
+    total = total + dict["a"] + dict.b + list[2]
+    i = i + 1
+  }
+  if total < 0 {
+    log("unreachable")
+  }
+}
+"#,
+            runtime,
+        ),
+        VmHotPathFixture::new(
             "string_interpolation_many_parts",
             r#"
 pipeline default(task) {

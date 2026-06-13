@@ -6,7 +6,8 @@ use std::sync::Arc;
 use crate::chunk::{DirectCallState, DirectCallTarget, InlineCacheEntry, MethodCacheTarget};
 use crate::orchestration::HookEvent;
 use crate::value::{
-    values_equal, DeadlockError, VmClosure, VmError, VmJoinHandle, VmTaskHandle, VmValue,
+    string_char_count, values_equal, DeadlockError, VmClosure, VmError, VmJoinHandle, VmTaskHandle,
+    VmValue,
 };
 use crate::BuiltinId;
 
@@ -376,7 +377,7 @@ impl super::super::Vm {
                 Some(VmValue::Bool(items.iter().any(|v| values_equal(v, needle))))
             }
             (MethodCacheTarget::StringCount, VmValue::String(s)) => {
-                Some(VmValue::Int(s.chars().count() as i64))
+                Some(VmValue::Int(string_char_count(s) as i64))
             }
             (MethodCacheTarget::StringEmpty, VmValue::String(s)) => {
                 Some(VmValue::Bool(s.is_empty()))

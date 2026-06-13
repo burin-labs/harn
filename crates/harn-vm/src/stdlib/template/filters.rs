@@ -1,4 +1,4 @@
-use crate::value::VmValue;
+use crate::value::{string_char_count, VmValue};
 
 use super::error::TemplateError;
 use super::render::{display_value, truthy};
@@ -76,7 +76,7 @@ pub(super) fn apply_filter(
         "length" => {
             need(0, args)?;
             let n: i64 = match v {
-                VmValue::String(s) => s.chars().count() as i64,
+                VmValue::String(s) => string_char_count(s) as i64,
                 VmValue::List(items) => items.len() as i64,
                 VmValue::Set(items) => items.len() as i64,
                 VmValue::Dict(d) => d.len() as i64,
