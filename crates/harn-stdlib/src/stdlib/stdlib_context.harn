@@ -816,6 +816,146 @@ pub fn context_artifact_select(artifacts = nil, options = nil) {
   return context_artifact_budget(artifacts, options).artifacts ?? []
 }
 
+/**
+ * Select the single best-matching context artifact for a request, or abstain.
+ *
+ * Unlike `context_artifact_select` (which budgets a LIST), this returns exactly
+ * one artifact, or a machine-readable reason to inject none. It (1) HARD-
+ * suppresses stale artifacts (a staleness gate, not a soft down-rank), (2)
+ * scores eligible artifacts with `context_artifact_rank` plus an explicit path
+ * depth/ALTITUDE term so a deeper, more-specific directory scope outranks a
+ * shallower ancestor, and (3) ABSTAINS on a score tie — returning
+ * `{reason: "ambiguous_context_artifact", candidates}` rather than injecting an
+ * arbitrary sibling.
+ *
+ * Request `options` (any `context_artifact_rank` option is also honored):
+ *   `role`, `task`, `language`        — applicability match signals
+ *   `dir` / `path` / `paths`          — requested directory scope for altitude
+ *   `min_freshness_rank` (default 1)  — staleness floor; lower to admit weaker
+ *   `require_path_match` (default false) — drop artifacts with no path relation
+ *   `altitude_weight` (default 1.0)   — multiplier on the depth/altitude term
+ *   `ambiguity_epsilon` (default 1e-4)— score gap within which top picks tie
+ *
+ * Returns `{reason, artifact?, score?, candidates}` where `reason` is one of
+ * `selected | ambiguous_context_artifact | stale_context_artifacts |
+ * no_eligible_context_artifact | no_context_artifacts`.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn context_artifact_select_one(artifacts = nil, options = nil) {
+  let opts = options ?? {}
+  let items = artifacts ?? []
+  if len(items) == 0 {
+    return {reason: "no_context_artifacts", candidates: []}
+  }
+  let request_dir = opts?.dir ?? opts?.path ?? opts?.paths
+  let min_freshness = __context_num(opts?.min_freshness_rank, 1.0)
+  let altitude_weight = __context_num(opts?.altitude_weight, 1.0)
+  let require_path = opts?.require_path_match ?? false
+  var eligible = []
+  var saw_stale = false
+  for raw in items {
+    let item = context_artifact(raw)
+    if !__context_artifact_matches_policy(item, opts) {
+      continue
+    }
+    let freshness = __context_freshness_rank(item.freshness)
+    if freshness <= 0.0 || freshness < min_freshness {
+      saw_stale = true
+      continue
+    }
+    let altitude = __context_path_altitude(item.applicability.paths ?? item.path, request_dir)
+    if require_path && altitude < 0.0 {
+      continue
+    }
+    let score = context_artifact_rank(item, opts) + altitude * altitude_weight
+    eligible = eligible.push({id: item.id, score: score, artifact: item})
+  }
+  if len(eligible) == 0 {
+    let reason = if saw_stale {
+      "stale_context_artifacts"
+    } else {
+      "no_eligible_context_artifact"
+    }
+    return {reason: reason, candidates: []}
+  }
+  var best = eligible[0]
+  for entry in eligible {
+    if entry.score > best.score {
+      best = entry
+    }
+  }
+  let epsilon = __context_num(opts?.ambiguity_epsilon, 0.0001)
+  var ties = []
+  for entry in eligible {
+    if best.score - entry.score <= epsilon {
+      ties = ties.push(entry.id)
+    }
+  }
+  if len(ties) > 1 {
+    return {reason: "ambiguous_context_artifact", candidates: ties}
+  }
+  return {reason: "selected", artifact: best.artifact, score: best.score, candidates: [best.id]}
+}
+
+fn __context_dir_norm(raw) {
+  let normalized = trim(regex_replace("/+$", "", __context_string(raw).replace("\\", "/")))
+  if normalized == "." || normalized == "/" {
+    return ""
+  }
+  return normalized
+}
+
+fn __context_path_depth(dir) {
+  let norm = __context_dir_norm(dir)
+  if norm == "" {
+    return 0
+  }
+  return len(split(norm, "/"))
+}
+
+/**
+ * Depth-aware path score: exact scope beats ancestor; among ancestors, a
+ * deeper (more-specific) scope scores higher; a root/empty scope is a weak
+ * general match; no upward relation is -1 (only excluded under
+ * `require_path_match`). This is the "altitude" term the soft `__context_path_match`
+ * lacks.
+ */
+fn __context_path_altitude(paths, query) {
+  let scopes = __context_string_list(paths)
+  let queries = __context_string_list(query)
+  if len(queries) == 0 {
+    return if len(scopes) == 0 {
+      1.0
+    } else {
+      0.0
+    }
+  }
+  if len(scopes) == 0 {
+    return 0.0
+  }
+  var best = -1.0
+  for raw_query in queries {
+    let want = __context_dir_norm(raw_query)
+    for raw_scope in scopes {
+      let scope = __context_dir_norm(raw_scope)
+      var candidate = -1.0
+      if scope == want {
+        candidate = 12.0 + __context_path_depth(scope) * 1.0
+      } else if scope == "" {
+        candidate = 2.0
+      } else if starts_with(want + "/", scope + "/") {
+        candidate = 6.0 + __context_path_depth(scope) * 1.0
+      }
+      if candidate > best {
+        best = candidate
+      }
+    }
+  }
+  return best
+}
+
 fn __context_render_caps(options) {
   let opts = options ?? {}
   if opts?.capabilities != nil {
