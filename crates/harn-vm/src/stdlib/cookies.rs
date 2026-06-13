@@ -603,6 +603,12 @@ fn parse_set_cookie(header: &str) -> Option<(String, String, bool)> {
     let mut segments = header.split(';');
     let first = segments.next()?.trim_matches(|ch| ch == ' ' || ch == '\t');
     let (name, value) = first.split_once('=')?;
+    // Trim optional whitespace around the name/value, the same way
+    // `parse_cookie_header_value` does — `valid_cookie_name` rejects spaces, so
+    // without this a `name = value` pair would be dropped entirely (and the
+    // value would keep a stray leading space).
+    let name = name.trim_matches(|ch| ch == ' ' || ch == '\t');
+    let value = value.trim_matches(|ch| ch == ' ' || ch == '\t');
     if !valid_cookie_name(name) {
         return None;
     }
@@ -771,3 +777,26 @@ pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
     &SESSION_FROM_COOKIES_IMPL_DEF,
     &COOKIE_ROUND_TRIP_IMPL_DEF,
 ];
+
+#[cfg(test)]
+mod tests {
+    use super::parse_set_cookie;
+
+    #[test]
+    fn parse_set_cookie_trims_name_before_validation() {
+        // Whitespace around the name (`name = value`) must not cause the whole
+        // Set-Cookie to be dropped, matching `parse_cookie_header_value`.
+        let (name, value, delete) = parse_set_cookie("sid = abc; Path=/")
+            .expect("whitespace around name should still parse");
+        assert_eq!(name, "sid");
+        assert_eq!(value, "abc");
+        assert!(!delete);
+    }
+
+    #[test]
+    fn parse_set_cookie_flags_expired_max_age_as_delete() {
+        let (name, _value, delete) = parse_set_cookie("sid=abc; Max-Age=0").expect("should parse");
+        assert_eq!(name, "sid");
+        assert!(delete);
+    }
+}
