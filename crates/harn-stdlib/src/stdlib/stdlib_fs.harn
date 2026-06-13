@@ -274,3 +274,92 @@ pub fn file_size(path: string) {
   }
   return nil
 }
+
+/**
+ * Workspace snapshots — thin pipeline-facing wrappers over the host
+ * `hostlib_fs_*` snapshot builtins (crates/harn-hostlib/src/fs_snapshot.rs).
+ * They capture the pre-image of explicit paths so a pipeline can checkpoint
+ * the workspace and roll it back between independent retry attempts — the
+ * substrate for a verify-gated best-of-N agent loop.
+ *
+ * Snapshots are session-scoped: the session id defaults to the active agent
+ * session (`agent_session_current_id()`), so each conversation's snapshots
+ * stay isolated and are cleaned up when the host closes the session. Callers
+ * outside an agent session must pass an explicit `session_id`. This helper
+ * resolves and validates that session id.
+ *
+ * @effects: [host]
+ * @errors: []
+ */
+fn __fs_snapshot_session(opts) -> string {
+  let session = opts?.session_id ?? agent_session_current_id()
+  if session == nil || session == "" {
+    throw "fs_snapshot: no active agent session; pass an explicit `session_id`"
+  }
+  return session
+}
+
+/**
+ * Capture a workspace snapshot of `paths`, returning `{snapshot_id,
+ * captured_paths, byte_count}`.
+ *
+ * `opts.session_id` defaults to the active agent session. `opts.snapshot_id`
+ * defaults to a fresh `snapshot-<uuid>` id so independent attempts never
+ * collide. `paths` are captured immediately; restoring later reinstates
+ * their pre-image (including deleting paths that were absent at capture).
+ *
+ * @effects: [host, fs]
+ * @errors: [backend]
+ * @api_stability: experimental
+ * @example: let snap = fs_snapshot(["src/lib.rs"]); fs_restore(snap.snapshot_id)
+ */
+pub fn fs_snapshot(paths: list<string> = [], opts = {}) -> dict {
+  let session = __fs_snapshot_session(opts)
+  let scope = opts?.snapshot_id ?? ("snapshot-" + uuid_v7())
+  return hostlib_fs_snapshot({session_id: session, scope_id: scope, paths: paths ?? [], root: opts?.root})
+}
+
+/**
+ * Restore a previously-captured snapshot, returning `{snapshot_id,
+ * restored_paths, skipped_paths_with_reasons}`. With an empty `paths` every
+ * captured path is restored; otherwise only the listed subset.
+ *
+ * @effects: [host, fs]
+ * @errors: [backend]
+ * @api_stability: experimental
+ * @example: fs_restore(snap.snapshot_id)
+ */
+pub fn fs_restore(snapshot_id: string, paths: list<string> = [], opts = {}) -> dict {
+  let session = __fs_snapshot_session(opts)
+  return hostlib_fs_restore({session_id: session, snapshot_id: snapshot_id, paths: paths ?? []})
+}
+
+/**
+ * List the snapshots registered for the session, oldest first. Each entry is
+ * `{snapshot_id, scope_id, taken_at_ms, captured_paths, byte_count}`.
+ *
+ * @effects: [host]
+ * @errors: [backend]
+ * @api_stability: experimental
+ * @example: for snap in fs_list_snapshots() { log(snap.snapshot_id) }
+ */
+pub fn fs_list_snapshots(opts = {}) -> list<dict> {
+  let session = __fs_snapshot_session(opts)
+  let result = hostlib_fs_list_snapshots({session_id: session})
+  return result?.snapshots ?? []
+}
+
+/**
+ * Drop a snapshot's in-memory and on-disk state, returning `{snapshot_id,
+ * dropped}`. Idempotent: dropping an unknown id reports `dropped: false`.
+ * The best-of-N loop calls this to release each attempt's checkpoint.
+ *
+ * @effects: [host, fs]
+ * @errors: [backend]
+ * @api_stability: experimental
+ * @example: fs_drop_snapshot(snap.snapshot_id)
+ */
+pub fn fs_drop_snapshot(snapshot_id: string, opts = {}) -> dict {
+  let session = __fs_snapshot_session(opts)
+  return hostlib_fs_drop_snapshot({session_id: session, snapshot_id: snapshot_id})
+}

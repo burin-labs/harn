@@ -1,0 +1,32 @@
+import { fs_drop_snapshot, fs_list_snapshots, fs_restore, fs_snapshot } from "std/fs"
+
+/**
+ * Pipeline-facing workspace snapshot/restore: capture a file's pre-image,
+ * clobber it, then roll the change back. This is the substrate the best-of-N
+ * agent loop uses to retry from a clean workspace. Snapshots are
+ * session-scoped; an explicit `session_id` keeps the fixture hermetic.
+ */
+fn main(harness: Harness) {
+  let session = "conformance-snapshot-session"
+  let path = harness.fs.path_join(harness.fs.temp_dir(), "harn_fs_snapshot.txt")
+  if harness.fs.exists(path) {
+    harness.fs.delete(path)
+  }
+  harness.fs.write_text(path, "original")
+  let snap = fs_snapshot([path], {session_id: session, snapshot_id: "attempt-1"})
+  harness.stdio.println(snap.snapshot_id)
+  harness.stdio.println(len(snap.captured_paths))
+  // List sees exactly the one snapshot we took.
+  harness.stdio.println(len(fs_list_snapshots({session_id: session})))
+  // Mutate the workspace, then restore the captured pre-image.
+  harness.fs.write_text(path, "clobbered")
+  harness.stdio.println(harness.fs.read_text(path))
+  let restored = fs_restore(snap.snapshot_id, [], {session_id: session})
+  harness.stdio.println(len(restored.restored_paths))
+  harness.stdio.println(harness.fs.read_text(path))
+  // Drop releases the checkpoint and is idempotent.
+  harness.stdio.println(fs_drop_snapshot(snap.snapshot_id, {session_id: session}).dropped)
+  harness.stdio.println(fs_drop_snapshot(snap.snapshot_id, {session_id: session}).dropped)
+  harness.stdio.println(len(fs_list_snapshots({session_id: session})))
+  harness.fs.delete(path)
+}
