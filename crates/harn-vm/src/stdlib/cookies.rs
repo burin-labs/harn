@@ -786,8 +786,8 @@ mod tests {
     fn parse_set_cookie_trims_name_before_validation() {
         // Whitespace around the name (`name = value`) must not cause the whole
         // Set-Cookie to be dropped, matching `parse_cookie_header_value`.
-        let (name, value, delete) =
-            parse_set_cookie("sid = abc; Path=/").expect("whitespace around name should still parse");
+        let (name, value, delete) = parse_set_cookie("sid = abc; Path=/")
+            .expect("whitespace around name should still parse");
         assert_eq!(name, "sid");
         assert_eq!(value, "abc");
         assert!(!delete);
@@ -795,8 +795,7 @@ mod tests {
 
     #[test]
     fn parse_set_cookie_flags_expired_max_age_as_delete() {
-        let (name, _value, delete) =
-            parse_set_cookie("sid=abc; Max-Age=0").expect("should parse");
+        let (name, _value, delete) = parse_set_cookie("sid=abc; Max-Age=0").expect("should parse");
         assert_eq!(name, "sid");
         assert!(delete);
     }
