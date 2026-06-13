@@ -236,6 +236,35 @@ fn transcript_budget_rejects_event_count_growth() {
 }
 
 #[test]
+fn transcript_budget_rejection_preserves_redo_stack() {
+    reset_session_store();
+    let id = open_or_create(Some("budget-redo-reject".into()));
+    inject_message(&id, make_msg("user", "one")).unwrap();
+    let before = transcript(&id).expect("before transcript");
+    inject_message(&id, make_msg("assistant", "two")).unwrap();
+    record_completed_turn_checkpoint(&id, before, vec!["tool-1".to_string()])
+        .expect("checkpoint")
+        .expect("changed");
+    rollback_last_completed_turn(&id, vec!["redo-tool-1".to_string()]).expect("rollback");
+    assert!(redo_plan(&id).is_ok());
+
+    set_transcript_budget_policy(&id, SessionTranscriptBudgetPolicy::reject(1, 16))
+        .expect("tighten budget to current transcript");
+    let error = inject_message(&id, make_msg("assistant", "rejected")).unwrap_err();
+
+    assert!(error.contains("message_count"), "{error}");
+    assert_eq!(message_count(&id), 1);
+    assert_eq!(
+        redo_plan(&id)
+            .expect("redo survives rejected write")
+            .fs_snapshot_ids,
+        ["redo-tool-1"]
+    );
+
+    reset_session_store();
+}
+
+#[test]
 fn transcript_budget_compaction_recovers_and_preserves_prompt_state() {
     reset_session_store();
     let _mock = install_budget_fallback_mock();

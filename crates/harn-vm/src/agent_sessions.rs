@@ -198,6 +198,18 @@ impl SessionState {
             redo_stack: Vec::new(),
         }
     }
+
+    fn touch(&mut self) {
+        self.last_accessed = Instant::now();
+    }
+
+    fn replace_transcript(&mut self, transcript: VmValue) {
+        if !crate::values_equal(&self.transcript, &transcript) {
+            self.redo_stack.clear();
+        }
+        self.transcript = transcript;
+        self.touch();
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -395,7 +407,6 @@ pub fn set_transcript_budget_policy(
             state.last_transcript_budget_action = previous_action;
             return Err(error);
         }
-        state.last_accessed = Instant::now();
         Ok(())
     })
 }
@@ -544,7 +555,7 @@ pub fn set_scratchpad(
         append_event_to_state(state, event, "set_scratchpad")?;
         state.scratchpad = Some(scratchpad);
         state.scratchpad_version = version;
-        state.last_accessed = Instant::now();
+        state.touch();
         Ok(version)
     })
 }
@@ -566,7 +577,7 @@ pub fn clear_scratchpad(
         append_event_to_state(state, event, "clear_scratchpad")?;
         state.scratchpad = None;
         state.scratchpad_version = version;
-        state.last_accessed = Instant::now();
+        state.touch();
         Ok(version)
     })
 }
@@ -676,7 +687,7 @@ pub fn open_or_create(id: Option<String>) -> String {
     SESSIONS.with(|s| {
         let mut map = s.borrow_mut();
         if let Some(state) = map.get_mut(&resolved) {
-            state.last_accessed = Instant::now();
+            state.touch();
             return;
         }
         was_new = true;
@@ -819,7 +830,7 @@ pub fn attach_live_client(id: &str, request: AttachLiveClient) -> Result<LiveCli
             metadata: request.metadata,
         };
         state.live_clients.insert(client_id, client.clone());
-        state.last_accessed = Instant::now();
+        state.touch();
         let active_controller_id = state.live_controller_id.clone();
         append_live_client_event(
             state,
@@ -880,7 +891,7 @@ pub fn detach_live_client(
         if state.live_controller_id.as_deref() == Some(client_id.as_str()) {
             state.live_controller_id = None;
         }
-        state.last_accessed = Instant::now();
+        state.touch();
         let active_controller_id = state.live_controller_id.clone();
         append_live_client_event(
             state,
@@ -922,7 +933,7 @@ pub fn heartbeat_live_client(
             client.metadata = metadata.clone();
         }
         let client = client.clone();
-        state.last_accessed = Instant::now();
+        state.touch();
         let active_controller_id = state.live_controller_id.clone();
         append_live_client_event(
             state,
@@ -1201,7 +1212,7 @@ pub fn reset_transcript(id: &str) -> bool {
         state.last_transcript_budget_action = None;
         state.completed_turn_checkpoints.clear();
         state.redo_stack.clear();
-        state.last_accessed = Instant::now();
+        state.touch();
         true
     })
 }
@@ -1229,7 +1240,7 @@ pub fn fork(src_id: &str, dst_id: Option<String>) -> Option<String> {
     ) = SESSIONS.with(|s| {
         let mut map = s.borrow_mut();
         let src = map.get_mut(src_id)?;
-        src.last_accessed = Instant::now();
+        src.touch();
         let dst = dst_id.unwrap_or_else(|| uuid::Uuid::now_v7().to_string());
         let forked_transcript = clone_transcript_with_id(&src.transcript, &dst);
         Some((
@@ -1263,7 +1274,7 @@ pub fn fork(src_id: &str, dst_id: Option<String>) -> Option<String> {
             state.scratchpad_version = src_scratchpad_version;
             state.transcript_budget_policy = src_transcript_budget_policy;
             state.last_transcript_budget_action = src_last_transcript_budget_action;
-            state.last_accessed = Instant::now();
+            state.touch();
         }
         update_lineage(&mut map, src_id, &dst, None);
     });
@@ -1370,7 +1381,7 @@ fn truncate_state(state: &mut SessionState, keep_first: usize) -> Option<Session
         apply_transcript_with_budget(state, VmValue::Dict(std::sync::Arc::new(next)), "truncate")
             .ok()?;
     }
-    state.last_accessed = Instant::now();
+    state.touch();
     Some(SessionTruncateResult {
         kept_turn_count,
         removed_turn_count,
@@ -1444,7 +1455,6 @@ pub fn trim(id: &str, keep_last: usize) -> Option<usize> {
         );
         apply_transcript_with_budget(state, VmValue::Dict(std::sync::Arc::new(next)), "trim")
             .ok()?;
-        state.last_accessed = Instant::now();
         Some(kept)
     })
 }
@@ -1509,7 +1519,6 @@ pub fn inject_message(id: &str, message: VmValue) -> Result<(), String> {
         )?;
         emit_identified_user_message_event(id, &persisted_message);
         emit_llm_message_event(id, message_index, &persisted_message);
-        state.last_accessed = Instant::now();
         Ok(())
     })
 }
@@ -1919,13 +1928,12 @@ fn apply_transcript_with_budget(
     candidate: VmValue,
     source: &str,
 ) -> Result<(), String> {
-    state.redo_stack.clear();
     let policy = state.transcript_budget_policy.normalized();
     let include_bytes = policy.max_approx_bytes.is_some();
     let usage_before = transcript_usage(&state.transcript, include_bytes);
     let usage_attempted = transcript_usage(&candidate, include_bytes);
     let Some(reason) = transcript_budget_exceeded_reason(&usage_attempted, &policy) else {
-        state.transcript = candidate;
+        state.replace_transcript(candidate);
         return Ok(());
     };
 
@@ -1979,7 +1987,7 @@ fn apply_transcript_with_budget(
                 ));
             }
             state.last_transcript_budget_action = Some(audit);
-            state.transcript = with_audit;
+            state.replace_transcript(with_audit);
             Ok(())
         }
         TranscriptBudgetRecovery::Compact { keep_last } => {
@@ -2014,7 +2022,7 @@ fn apply_transcript_with_budget(
                 ));
             }
             state.last_transcript_budget_action = Some(audit);
-            state.transcript = with_audit;
+            state.replace_transcript(with_audit);
             if let Some(event) = compacted.live_event {
                 crate::orchestration::emit_transcript_compacted_event_sync(
                     &state.id,
@@ -2111,7 +2119,6 @@ pub fn seed_from_messages(
             ))),
         );
         apply_transcript_with_budget(state, candidate, "seed_from_messages")?;
-        state.last_accessed = Instant::now();
         Ok(resolved)
     })
 }
@@ -2206,7 +2213,6 @@ pub fn store_transcript(id: &str, transcript: VmValue) -> Result<(), String> {
         };
         let transcript = transcript_with_session_metadata(transcript, state);
         apply_transcript_with_budget(state, transcript, "store_transcript")?;
-        state.last_accessed = Instant::now();
         Ok(())
     })
 }
@@ -2242,7 +2248,7 @@ pub fn invalidate_redo(id: &str) -> bool {
         };
         let had_redo = !state.redo_stack.is_empty();
         state.redo_stack.clear();
-        state.last_accessed = Instant::now();
+        state.touch();
         had_redo
     })
 }
@@ -2281,7 +2287,7 @@ pub fn record_completed_turn_checkpoint(
         };
         state.redo_stack.clear();
         state.completed_turn_checkpoints.push(checkpoint.clone());
-        state.last_accessed = Instant::now();
+        state.touch();
         Ok(Some(checkpoint_summary(&checkpoint)))
     })
 }
@@ -2335,7 +2341,7 @@ pub fn rollback_last_completed_turn(
             checkpoint: checkpoint.clone(),
             redo_fs_snapshot_ids: redo_fs_snapshot_ids.clone(),
         });
-        state.last_accessed = Instant::now();
+        state.touch();
         Ok(SessionCheckpointOutcome {
             status: "rolled_back",
             checkpoint: checkpoint_summary(&checkpoint),
@@ -2356,7 +2362,7 @@ pub fn redo_last_rollback(id: &str) -> Result<SessionCheckpointOutcome, SessionC
         let checkpoint = entry.checkpoint;
         state.transcript = checkpoint.after_transcript.clone();
         state.completed_turn_checkpoints.push(checkpoint.clone());
-        state.last_accessed = Instant::now();
+        state.touch();
         Ok(SessionCheckpointOutcome {
             status: "redone",
             checkpoint: checkpoint_summary(&checkpoint),
@@ -2412,7 +2418,7 @@ pub fn prune_invalid_reminder_events(id: &str) -> usize {
                 VmValue::Dict(std::sync::Arc::new(next)),
                 "prune_invalid_reminder_events",
             );
-            state.last_accessed = Instant::now();
+            state.touch();
         }
         pruned
     })
@@ -2435,7 +2441,7 @@ pub fn apply_reminder_post_turn(id: &str, turn: i64) -> Result<serde_json::Value
             if let Some(next) = report.transcript.clone() {
                 apply_transcript_with_budget(state, next, "apply_reminder_post_turn")?;
             }
-            state.last_accessed = Instant::now();
+            state.touch();
         }
         Ok(report)
     })?;
@@ -2528,7 +2534,7 @@ pub fn inject_reminder(
             VmValue::Dict(std::sync::Arc::new(next)),
             "inject_reminder",
         )?;
-        state.last_accessed = Instant::now();
+        state.touch();
         Ok(())
     })?;
 
@@ -2582,7 +2588,6 @@ pub fn append_event(id: &str, event: VmValue) -> Result<(), String> {
             ));
         };
         append_event_to_state(state, event, "append_event")?;
-        state.last_accessed = Instant::now();
         Ok(())
     })
 }
@@ -2669,7 +2674,6 @@ pub fn replace_messages_with_summary(
             VmValue::Dict(std::sync::Arc::new(next)),
             "replace_messages",
         )?;
-        state.last_accessed = Instant::now();
         Ok(())
     })
 }
@@ -2679,7 +2683,7 @@ pub fn append_subscriber(id: &str, callback: VmValue) {
     SESSIONS.with(|s| {
         if let Some(state) = s.borrow_mut().get_mut(id) {
             state.subscribers.push(callback);
-            state.last_accessed = Instant::now();
+            state.touch();
         }
     });
 }
@@ -2709,7 +2713,7 @@ pub fn set_active_skills(id: &str, skills: Vec<String>) {
     SESSIONS.with(|s| {
         if let Some(state) = s.borrow_mut().get_mut(id) {
             state.active_skills = skills;
-            state.last_accessed = Instant::now();
+            state.touch();
         }
     });
 }
@@ -2746,12 +2750,12 @@ pub fn claim_tool_format(id: &str, tool_format: &str) -> Result<(), String> {
                 "agent session '{id}' is locked to tool_format='{existing}', but this run requested tool_format='{tool_format}'. Start a new session or fork/reset the transcript before changing tool mode."
             )),
             Some(_) => {
-                state.last_accessed = Instant::now();
+                state.touch();
                 Ok(())
             }
             None => {
                 state.tool_format = Some(tool_format.to_string());
-                state.last_accessed = Instant::now();
+                state.touch();
                 Ok(())
             }
         }
@@ -2810,7 +2814,6 @@ pub fn record_system_prompt(id: &str, system_prompt: &str) -> Result<(), String>
             VmValue::Dict(std::sync::Arc::new(next)),
             "record_system_prompt",
         )?;
-        state.last_accessed = Instant::now();
         Ok(())
     })
 }
@@ -2866,7 +2869,7 @@ pub fn set_pinned_model(id: &str, model: Option<String>) -> Result<bool, String>
         };
         let changed = state.pinned_model != normalized;
         state.pinned_model = normalized;
-        state.last_accessed = Instant::now();
+        state.touch();
         Ok(changed)
     })
 }
@@ -2895,7 +2898,7 @@ pub fn set_pinned_reasoning_policy(id: &str, policy: Option<String>) -> Result<b
         };
         let changed = state.pinned_reasoning_policy != normalized;
         state.pinned_reasoning_policy = normalized;
-        state.last_accessed = Instant::now();
+        state.touch();
         Ok(changed)
     })
 }
@@ -2924,7 +2927,7 @@ pub fn set_workspace_anchor(id: &str, anchor: Option<WorkspaceAnchor>) -> Result
             state.redo_stack.clear();
             crate::llm::permissions::clear_session_grants(id);
         }
-        state.last_accessed = Instant::now();
+        state.touch();
         Ok(changed)
     })
 }
@@ -2970,7 +2973,7 @@ pub fn reanchor_session(
         if changed {
             crate::llm::permissions::clear_session_grants(id);
         }
-        state.last_accessed = Instant::now();
+        state.touch();
         Ok(ReanchorOutcome {
             previous,
             current: new_anchor,
@@ -3021,7 +3024,7 @@ pub fn set_workspace_policy(id: &str, policy: WorkspacePolicy) -> Result<bool, S
         if changed {
             state.redo_stack.clear();
         }
-        state.last_accessed = Instant::now();
+        state.touch();
         Ok(changed)
     })
 }
@@ -3090,7 +3093,7 @@ pub fn add_workspace_root(
         );
         append_event_to_state(state, event, "add_workspace_root")?;
         crate::llm::permissions::clear_session_grants(id);
-        state.last_accessed = Instant::now();
+        state.touch();
         Ok(mounted_at.clone())
     })
 }
@@ -3116,7 +3119,7 @@ pub fn remove_workspace_root(id: &str, root: &str) -> Result<bool, String> {
             state.redo_stack.clear();
             crate::llm::permissions::clear_session_grants(id);
         }
-        state.last_accessed = Instant::now();
+        state.touch();
         Ok(removed)
     })
 }
@@ -3394,17 +3397,17 @@ fn update_lineage(
     if let Some(old_parent_id) = old_parent_id.filter(|old_parent_id| old_parent_id != parent_id) {
         if let Some(old_parent) = map.get_mut(&old_parent_id) {
             old_parent.child_ids.retain(|id| id != child_id);
-            old_parent.last_accessed = Instant::now();
+            old_parent.touch();
         }
     }
     if let Some(parent) = map.get_mut(parent_id) {
-        parent.last_accessed = Instant::now();
+        parent.touch();
         if !parent.child_ids.iter().any(|id| id == child_id) {
             parent.child_ids.push(child_id.to_string());
         }
     }
     if let Some(child) = map.get_mut(child_id) {
-        child.last_accessed = Instant::now();
+        child.touch();
         child.parent_id = Some(parent_id.to_string());
         child.branched_at_event_index = branched_at_event_index;
         child.transcript = clone_transcript_with_parent(&child.transcript, parent_id);
