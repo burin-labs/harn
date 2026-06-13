@@ -3,6 +3,7 @@
 //! Builtins translate this into VM-level errors via [`Into<harn_vm::VmError>`]
 //! so that Harn scripts see structured exceptions rather than panics.
 
+use harn_vm::VmDictExt;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
@@ -108,11 +109,11 @@ impl From<HostlibError> for VmError {
         let message = err.to_string();
 
         let mut dict: BTreeMap<String, VmValue> = BTreeMap::new();
-        dict.insert("kind".to_string(), VmValue::String(Arc::from(kind)));
-        dict.insert("builtin".to_string(), VmValue::String(Arc::from(builtin)));
-        dict.insert("message".to_string(), VmValue::String(Arc::from(message)));
+        dict.put_str("kind", kind);
+        dict.put_str("builtin", builtin);
+        dict.put_str("message", message);
         if let Some(path) = path {
-            dict.insert("path".to_string(), VmValue::String(Arc::from(path)));
+            dict.put_str("path", path);
         }
         VmError::Thrown(VmValue::Dict(Arc::new(dict)))
     }

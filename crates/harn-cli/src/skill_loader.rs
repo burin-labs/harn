@@ -8,6 +8,7 @@
 //! scripts can call `skill_count(skills)` / `skill_find(skills, name)`
 //! without any new language surface.
 
+use harn_vm::VmDictExt;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -178,10 +179,7 @@ pub fn load_skills(inputs: &SkillLoaderInputs) -> LoadedSkills {
         .collect();
 
     let mut registry: BTreeMap<String, VmValue> = BTreeMap::new();
-    registry.insert(
-        "_type".to_string(),
-        VmValue::String(std::sync::Arc::from("skill_registry")),
-    );
+    registry.put_str("_type", "skill_registry");
     registry.insert(
         "skills".to_string(),
         VmValue::List(std::sync::Arc::new(entries)),
@@ -369,27 +367,16 @@ fn build_provenance_report(
 
 fn provenance_to_vm(report: &VerificationReport) -> VmValue {
     let mut dict = BTreeMap::new();
-    dict.insert(
-        "skill_sha256".to_string(),
-        VmValue::String(std::sync::Arc::from(report.skill_sha256.as_str())),
-    );
+    dict.put_str("skill_sha256", report.skill_sha256.as_str());
     dict.insert("signed".to_string(), VmValue::Bool(report.signed));
     dict.insert("trusted".to_string(), VmValue::Bool(report.trusted));
-    dict.insert(
-        "status".to_string(),
-        VmValue::String(std::sync::Arc::from(status_label(report.status))),
-    );
-    dict.insert(
-        "signature_path".to_string(),
-        VmValue::String(std::sync::Arc::from(
-            report.signature_path.display().to_string(),
-        )),
+    dict.put_str("status", status_label(report.status));
+    dict.put_str(
+        "signature_path",
+        report.signature_path.display().to_string(),
     );
     if let Some(fingerprint) = report.signer_fingerprint.as_deref() {
-        dict.insert(
-            "signer_fingerprint".to_string(),
-            VmValue::String(std::sync::Arc::from(fingerprint)),
-        );
+        dict.put_str("signer_fingerprint", fingerprint);
         dict.insert(
             "author".to_string(),
             signer_policy_input(fingerprint, report.signed_at.as_deref()),
@@ -407,15 +394,9 @@ fn provenance_to_vm(report: &VerificationReport) -> VmValue {
                 _ => BTreeMap::new(),
             };
             item.insert("trusted".to_string(), VmValue::Bool(endorsement.trusted));
-            item.insert(
-                "status".to_string(),
-                VmValue::String(std::sync::Arc::from(status_label(endorsement.status))),
-            );
+            item.put_str("status", status_label(endorsement.status));
             if let Some(error) = endorsement.error.as_deref() {
-                item.insert(
-                    "error".to_string(),
-                    VmValue::String(std::sync::Arc::from(error)),
-                );
+                item.put_str("error", error);
             }
             VmValue::Dict(std::sync::Arc::new(item))
         })
@@ -425,15 +406,9 @@ fn provenance_to_vm(report: &VerificationReport) -> VmValue {
         VmValue::List(std::sync::Arc::new(endorsements)),
     );
     let mut policy_input = BTreeMap::new();
-    policy_input.insert(
-        "action".to_string(),
-        VmValue::String(std::sync::Arc::from("skill.provenance")),
-    );
+    policy_input.put_str("action", "skill.provenance");
     if let Some(fingerprint) = report.signer_fingerprint.as_deref() {
-        policy_input.insert(
-            "author_actor_id".to_string(),
-            VmValue::String(std::sync::Arc::from(fingerprint)),
-        );
+        policy_input.put_str("author_actor_id", fingerprint);
     }
     policy_input.insert(
         "endorser_actor_ids".to_string(),
@@ -454,33 +429,18 @@ fn provenance_to_vm(report: &VerificationReport) -> VmValue {
         VmValue::Dict(std::sync::Arc::new(policy_input)),
     );
     if let Some(error) = report.error.as_deref() {
-        dict.insert(
-            "error".to_string(),
-            VmValue::String(std::sync::Arc::from(error)),
-        );
+        dict.put_str("error", error);
     }
     VmValue::Dict(std::sync::Arc::new(dict))
 }
 
 fn signer_policy_input(fingerprint: &str, signed_at: Option<&str>) -> VmValue {
     let mut dict = BTreeMap::new();
-    dict.insert(
-        "fingerprint".to_string(),
-        VmValue::String(std::sync::Arc::from(fingerprint)),
-    );
-    dict.insert(
-        "trust_actor_id".to_string(),
-        VmValue::String(std::sync::Arc::from(fingerprint)),
-    );
-    dict.insert(
-        "trust_action".to_string(),
-        VmValue::String(std::sync::Arc::from("skill.provenance")),
-    );
+    dict.put_str("fingerprint", fingerprint);
+    dict.put_str("trust_actor_id", fingerprint);
+    dict.put_str("trust_action", "skill.provenance");
     if let Some(signed_at) = signed_at {
-        dict.insert(
-            "signed_at".to_string(),
-            VmValue::String(std::sync::Arc::from(signed_at)),
-        );
+        dict.put_str("signed_at", signed_at);
     }
     VmValue::Dict(std::sync::Arc::new(dict))
 }

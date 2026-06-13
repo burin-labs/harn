@@ -9,6 +9,7 @@ use super::{
 };
 use crate::{ApiKeyAuthConfig, AuthMethodConfig, AuthPolicy};
 use harn_vm::visible_text::VisibleTextState;
+use harn_vm::VmDictExt;
 use harn_vm::VmValue;
 use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -1112,15 +1113,9 @@ async fn acp_fs_mode_commit_and_discard_staged_hostlib_writes() {
     ToolsCapability.register_builtins(&mut registry);
     let stage_write = |path: &std::path::Path, content: &str| {
         let mut args = BTreeMap::new();
-        args.insert(
-            "session_id".to_string(),
-            VmValue::String(Arc::from(session_id.as_str())),
-        );
-        args.insert(
-            "path".to_string(),
-            VmValue::String(Arc::from(path.to_string_lossy().as_ref())),
-        );
-        args.insert("content".to_string(), VmValue::String(Arc::from(content)));
+        args.put_str("session_id", session_id.as_str());
+        args.put_str("path", path.to_string_lossy().as_ref());
+        args.put_str("content", content);
         (registry
             .find("hostlib_tools_write_file")
             .expect("write_file builtin")

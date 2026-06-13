@@ -13,6 +13,7 @@
 //! - `release: true` and `target` are forwarded as flags where supported
 //!   (cargo, swift, dotnet).
 
+use harn_vm::VmDictExt;
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -94,11 +95,8 @@ pub(crate) fn handle(args: &[VmValue]) -> Result<VmValue, HostlibError> {
         .into_iter()
         .map(|d| {
             let mut entry: BTreeMap<String, VmValue> = BTreeMap::new();
-            entry.insert(
-                "severity".to_string(),
-                VmValue::String(Arc::from(d.severity.as_str())),
-            );
-            entry.insert("message".to_string(), VmValue::String(Arc::from(d.message)));
+            entry.put_str("severity", d.severity.as_str());
+            entry.put_str("message", d.message);
             entry.insert(
                 "path".to_string(),
                 d.path

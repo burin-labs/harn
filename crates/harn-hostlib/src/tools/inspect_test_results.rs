@@ -14,6 +14,7 @@
 //! That keeps the contract simple and avoids inventing a cross-session
 //! handle namespace before there's a real consumer for one.
 
+use harn_vm::VmDictExt;
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -154,11 +155,8 @@ pub(crate) fn handle(args: &[VmValue]) -> Result<VmValue, HostlibError> {
 
 fn record_to_map(record: test_parsers::TestRecord) -> BTreeMap<String, VmValue> {
     let mut map = BTreeMap::new();
-    map.insert("name".to_string(), VmValue::String(Arc::from(record.name)));
-    map.insert(
-        "status".to_string(),
-        VmValue::String(Arc::from(record.status.as_str())),
-    );
+    map.put_str("name", record.name);
+    map.put_str("status", record.status.as_str());
     map.insert(
         "duration_ms".to_string(),
         VmValue::Int(record.duration_ms as i64),
