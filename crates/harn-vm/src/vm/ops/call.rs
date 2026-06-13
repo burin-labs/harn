@@ -990,8 +990,8 @@ impl super::super::Vm {
                 self.call_named_value_from_stack_args(&name, args_start, callee_idx, None)
                     .await?;
             }
-            VmValue::BuiltinRefId { id, name } => {
-                self.call_named_value_from_stack_args(&name, args_start, callee_idx, Some(id))
+            VmValue::BuiltinRefId(r) => {
+                self.call_named_value_from_stack_args(&r.name, args_start, callee_idx, Some(r.id))
                     .await?;
             }
             _ => {
@@ -1024,8 +1024,8 @@ impl super::super::Vm {
             VmValue::BuiltinRef(name) => {
                 self.call_named_value(&name, args, None).await?;
             }
-            VmValue::BuiltinRefId { id, name } => {
-                self.call_named_value(&name, args, Some(id)).await?;
+            VmValue::BuiltinRefId(r) => {
+                self.call_named_value(&r.name, args, Some(r.id)).await?;
             }
             _ => {
                 return Err(VmError::TypeError(format!(
@@ -1724,8 +1724,8 @@ impl super::super::Vm {
                 self.call_named_value_from_stack_args(&name, args_start, args_start, None)
                     .await?;
             }
-            VmValue::BuiltinRefId { id, name } => {
-                self.call_named_value_from_stack_args(&name, args_start, args_start, Some(id))
+            VmValue::BuiltinRefId(r) => {
+                self.call_named_value_from_stack_args(&r.name, args_start, args_start, Some(r.id))
                     .await?;
             }
             _ => {

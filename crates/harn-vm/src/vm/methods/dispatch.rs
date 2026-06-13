@@ -71,8 +71,8 @@ impl crate::vm::Vm {
                         )))
                     }
                 }
-                VmValue::BuiltinRefId { name, .. } => {
-                    let qualified = format!("{name}.{method}");
+                VmValue::BuiltinRefId(r) => {
+                    let qualified = format!("{}.{method}", r.name);
                     if self.builtins.contains_key(&qualified)
                         || self.async_builtins.contains_key(&qualified)
                     {

@@ -16,9 +16,9 @@ pub fn values_identical(a: &VmValue, b: &VmValue) -> bool {
         (VmValue::String(x), VmValue::String(y)) => Arc::ptr_eq(x, y) || x == y,
         (VmValue::Bytes(x), VmValue::Bytes(y)) => Arc::ptr_eq(x, y) || x == y,
         (VmValue::BuiltinRef(x), VmValue::BuiltinRef(y)) => x == y,
-        (VmValue::BuiltinRefId { name: x, .. }, VmValue::BuiltinRefId { name: y, .. }) => x == y,
-        (VmValue::BuiltinRef(x), VmValue::BuiltinRefId { name: y, .. })
-        | (VmValue::BuiltinRefId { name: y, .. }, VmValue::BuiltinRef(x)) => x == y,
+        (VmValue::BuiltinRefId(x), VmValue::BuiltinRefId(y)) => x.name == y.name,
+        (VmValue::BuiltinRef(x), VmValue::BuiltinRefId(y))
+        | (VmValue::BuiltinRefId(y), VmValue::BuiltinRef(x)) => x.as_ref() == y.name.as_ref(),
         (VmValue::Pair(x), VmValue::Pair(y)) => Arc::ptr_eq(x, y),
         // Primitives: identity collapses to structural equality.
         _ => values_equal(a, b),
@@ -38,7 +38,7 @@ pub fn value_identity_key(v: &VmValue) -> String {
         VmValue::String(x) => format!("string@{:p}", x.as_ptr()),
         VmValue::Bytes(x) => format!("bytes@{:p}", Arc::as_ptr(x)),
         VmValue::BuiltinRef(name) => format!("builtin@{name}"),
-        VmValue::BuiltinRefId { name, .. } => format!("builtin@{name}"),
+        VmValue::BuiltinRefId(r) => format!("builtin@{}", r.name),
         other => format!("{}@{}", other.type_name(), other.display()),
     }
 }
@@ -203,9 +203,9 @@ pub fn values_equal(a: &VmValue, b: &VmValue) -> bool {
         (VmValue::String(x), VmValue::String(y)) => x == y,
         (VmValue::Bytes(x), VmValue::Bytes(y)) => x == y,
         (VmValue::BuiltinRef(x), VmValue::BuiltinRef(y)) => x == y,
-        (VmValue::BuiltinRefId { name: x, .. }, VmValue::BuiltinRefId { name: y, .. }) => x == y,
-        (VmValue::BuiltinRef(x), VmValue::BuiltinRefId { name: y, .. })
-        | (VmValue::BuiltinRefId { name: y, .. }, VmValue::BuiltinRef(x)) => x == y,
+        (VmValue::BuiltinRefId(x), VmValue::BuiltinRefId(y)) => x.name == y.name,
+        (VmValue::BuiltinRef(x), VmValue::BuiltinRefId(y))
+        | (VmValue::BuiltinRefId(y), VmValue::BuiltinRef(x)) => x.as_ref() == y.name.as_ref(),
         (VmValue::Bool(x), VmValue::Bool(y)) => x == y,
         (VmValue::Nil, VmValue::Nil) => true,
         (VmValue::Int(x), VmValue::Float(y)) => (*x as f64) == *y,

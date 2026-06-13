@@ -399,7 +399,7 @@ mod tests {
     fn iter_init_inclusive_range_at_i64_max_is_not_empty() {
         run_iter_init_test(async {
             let mut vm = Vm::new();
-            vm.stack.push(VmValue::Range(crate::value::VmRange {
+            vm.stack.push(VmValue::range(crate::value::VmRange {
                 start: i64::MAX,
                 end: i64::MAX,
                 inclusive: true,

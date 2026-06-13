@@ -389,7 +389,7 @@ fn range_internal_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, V
     let start = args.first().and_then(|a| a.as_int()).unwrap_or(0);
     let end = args.get(1).and_then(|a| a.as_int()).unwrap_or(0);
     let inclusive = args.get(2).map(|a| a.is_truthy()).unwrap_or(false);
-    Ok(VmValue::Range(VmRange {
+    Ok(VmValue::range(VmRange {
         start,
         end,
         inclusive,
@@ -422,7 +422,7 @@ fn range_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
             )));
         }
     };
-    Ok(VmValue::Range(VmRange {
+    Ok(VmValue::range(VmRange {
         start,
         end,
         inclusive: false,
