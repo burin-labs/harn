@@ -2690,6 +2690,7 @@ dependencies = [
  "harn-rules",
  "harn-vm",
  "serde_json",
+ "tempfile",
 ]
 
 [[package]]

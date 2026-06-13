@@ -468,6 +468,16 @@ mod tests {
     }
 
     #[test]
+    fn extracts_scala_sealed_trait_symbol() {
+        let src = "package rulekit\n\nsealed trait Rule:\n  def name: String\n";
+        let symbols = extract_symbols(src, "scala", "Rule.scala");
+        assert!(
+            symbols.iter().any(|s| s.name == "Rule"),
+            "expected sealed trait Rule to be indexed, got {symbols:?}"
+        );
+    }
+
+    #[test]
     fn ids_are_stable_per_file_name_line() {
         let src = "fn one() {}\nfn two() {}\n";
         let symbols = extract_symbols(src, "rs", "lib.rs");
