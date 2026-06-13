@@ -26,9 +26,10 @@ curl -fsSL https://harnlang.com/install.sh | sh
 Detects OS/CPU, downloads the matching signed binary for the current
 [GitHub release](https://github.com/burin-labs/harn/releases),
 verifies it against the release's `SHA256SUMS` manifest, and installs
-`harn`, `harn-dap`, and `harn-lsp` into the first writable directory
-among `$HARN_INSTALL_DIR`, `$XDG_BIN_DIR`, `$HOME/bin`,
-`$HOME/.local/bin`, or `$HOME/.harn/bin`. macOS binaries are notarized.
+`harn`, `harn-dap`, and `harn-lsp`. It honors `$HARN_INSTALL_DIR` or
+`$XDG_BIN_DIR` when set, otherwise uses `$HOME/bin` or `$HOME/.local/bin`
+when one already exists and is on `PATH`, and falls back to creating
+`$HOME/.harn/bin`. macOS binaries are notarized.
 To upgrade later: `harn upgrade`.
 
 With Cargo:

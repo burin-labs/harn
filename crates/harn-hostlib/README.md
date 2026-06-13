@@ -183,7 +183,7 @@ ask for it.
 Conversely, the work that *does* belong in `harn-vm` — orchestration,
 transcript lifecycle, replay/eval, mutation session audit metadata —
 stays there. See
-[`AGENTS.md`](../../CLAUDE.md#trust-boundary) for the canonical trust
+[`AGENTS.md`](../../AGENTS.md#trust-boundary) for the canonical trust
 boundary.
 
 ## Scanner host capability
