@@ -7498,11 +7498,13 @@ export const harnProviderCatalog: HarnProviderCatalog = {
         "supports_assistant_prefill": false,
         "prefers_role_developer": false,
         "prefers_xml_tools": false,
-        "thinking_block_style": "none"
+        "thinking_block_style": "reasoning_summary"
       },
       "reasoning": {
-        "modes": [],
-        "effort_supported": false,
+        "modes": [
+          "effort"
+        ],
+        "effort_supported": true,
         "none_supported": false,
         "interleaved_supported": false,
         "preserve_thinking": false
@@ -7522,6 +7524,8 @@ export const harnProviderCatalog: HarnProviderCatalog = {
       "capability_tags": [
         "streaming",
         "tools",
+        "thinking",
+        "extended_thinking",
         "structured_output"
       ],
       "family": "openai-gpt",
