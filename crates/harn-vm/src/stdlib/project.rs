@@ -656,7 +656,7 @@ impl ContextProfileResolution {
 impl ContextSignals {
     fn into_vm_value(self) -> VmValue {
         let mut out = BTreeMap::new();
-        out.insert("source".to_string(), string_value(self.source));
+        out.insert("source".to_string(), VmValue::string(self.source));
         out.insert("fingerprint".to_string(), self.fingerprint.into_vm_value());
         out.insert(
             "remote".to_string(),
@@ -675,13 +675,13 @@ impl ContextSignals {
 impl GitRemoteSignal {
     fn into_vm_value(self) -> VmValue {
         let mut out = BTreeMap::new();
-        out.insert("name".to_string(), string_value(self.name));
-        out.insert("host".to_string(), string_value(self.host));
+        out.insert("name".to_string(), VmValue::string(self.name));
+        out.insert("host".to_string(), VmValue::string(self.host));
         out.insert(
             "slug".to_string(),
-            self.slug.map(string_value).unwrap_or(VmValue::Nil),
+            self.slug.map(VmValue::string).unwrap_or(VmValue::Nil),
         );
-        out.insert("url".to_string(), string_value(self.redacted_url));
+        out.insert("url".to_string(), VmValue::string(self.redacted_url));
         VmValue::Dict(std::sync::Arc::new(out))
     }
 }
@@ -689,9 +689,9 @@ impl GitRemoteSignal {
 impl ContextProfileFragment {
     fn into_vm_value(self) -> VmValue {
         let mut out = BTreeMap::new();
-        out.insert("id".to_string(), string_value(self.id));
-        out.insert("source".to_string(), string_value(self.source));
-        out.insert("body".to_string(), string_value(self.body));
+        out.insert("id".to_string(), VmValue::string(self.id));
+        out.insert("source".to_string(), VmValue::string(self.source));
+        out.insert("body".to_string(), VmValue::string(self.body));
         out.insert(
             "requires_caps".to_string(),
             string_list_value(self.requires_caps),
@@ -703,8 +703,8 @@ impl ContextProfileFragment {
 impl McpPresetCandidate {
     fn into_vm_value(self) -> VmValue {
         let mut out = BTreeMap::new();
-        out.insert("id".to_string(), string_value(self.id));
-        out.insert("status".to_string(), string_value(self.status));
+        out.insert("id".to_string(), VmValue::string(self.id));
+        out.insert("status".to_string(), VmValue::string(self.status));
         out.insert(
             "missing_credentials".to_string(),
             string_list_value(self.missing_credentials),
@@ -716,8 +716,8 @@ impl McpPresetCandidate {
 impl ContextProfileActivation {
     fn into_vm_value(self) -> VmValue {
         let mut out = BTreeMap::new();
-        out.insert("id".to_string(), string_value(self.id));
-        out.insert("reason".to_string(), string_value(self.reason));
+        out.insert("id".to_string(), VmValue::string(self.id));
+        out.insert("reason".to_string(), VmValue::string(self.reason));
         out.insert("caps".to_string(), string_list_value(self.caps));
         out.insert("skills".to_string(), string_list_value(self.skills));
         out.insert(
@@ -1530,13 +1530,9 @@ fn value_as_string(value: &VmValue) -> Option<String> {
     }
 }
 
-fn string_value(value: impl Into<String>) -> VmValue {
-    VmValue::String(std::sync::Arc::from(value.into()))
-}
-
 fn string_list_value(values: Vec<String>) -> VmValue {
     VmValue::List(std::sync::Arc::new(
-        values.into_iter().map(string_value).collect(),
+        values.into_iter().map(VmValue::string).collect(),
     ))
 }
 
@@ -3240,7 +3236,7 @@ mod tests {
         let mut signals = BTreeMap::new();
         signals.insert(
             "remote".to_string(),
-            string_value("https://github.com/burin-labs/harn.git"),
+            VmValue::string("https://github.com/burin-labs/harn.git"),
         );
         let mut raw_options = BTreeMap::new();
         raw_options.insert("include_env_credentials".to_string(), VmValue::Bool(false));

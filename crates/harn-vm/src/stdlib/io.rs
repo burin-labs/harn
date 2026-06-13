@@ -260,36 +260,32 @@ fn normalize_read_line_value(mut line: String, trim: bool) -> String {
     }
 }
 
-fn vm_string(value: impl Into<String>) -> VmValue {
-    VmValue::String(std::sync::Arc::from(value.into()))
-}
-
 fn read_line_result(outcome: ReadLineOutcome) -> VmValue {
     let mut out = BTreeMap::new();
     match outcome {
         ReadLineOutcome::Ok(value) => {
             out.insert("ok".to_string(), VmValue::Bool(true));
-            out.insert("status".to_string(), vm_string("ok"));
-            out.insert("value".to_string(), vm_string(value));
+            out.insert("status".to_string(), VmValue::string("ok"));
+            out.insert("value".to_string(), VmValue::string(value));
         }
         ReadLineOutcome::Eof => {
             out.insert("ok".to_string(), VmValue::Bool(false));
-            out.insert("status".to_string(), vm_string("eof"));
+            out.insert("status".to_string(), VmValue::string("eof"));
         }
         #[cfg(unix)]
         ReadLineOutcome::Timeout => {
             out.insert("ok".to_string(), VmValue::Bool(false));
-            out.insert("status".to_string(), vm_string("timeout"));
+            out.insert("status".to_string(), VmValue::string("timeout"));
         }
         #[cfg(unix)]
         ReadLineOutcome::Interrupt => {
             out.insert("ok".to_string(), VmValue::Bool(false));
-            out.insert("status".to_string(), vm_string("interrupt"));
+            out.insert("status".to_string(), VmValue::string("interrupt"));
         }
         ReadLineOutcome::Error(error) => {
             out.insert("ok".to_string(), VmValue::Bool(false));
-            out.insert("status".to_string(), vm_string("error"));
-            out.insert("error".to_string(), vm_string(error));
+            out.insert("status".to_string(), VmValue::string("error"));
+            out.insert("error".to_string(), VmValue::string(error));
         }
     }
     VmValue::Dict(std::sync::Arc::new(out))

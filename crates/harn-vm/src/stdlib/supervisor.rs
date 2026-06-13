@@ -971,21 +971,21 @@ fn next_supervisor_id() -> String {
 
 fn supervisor_handle_value(state: &SupervisorState) -> VmValue {
     let mut dict = BTreeMap::new();
-    dict.insert("_type".to_string(), string_value("supervisor"));
-    dict.insert("id".to_string(), string_value(&state.id));
-    dict.insert("name".to_string(), string_value(&state.name));
+    dict.insert("_type".to_string(), VmValue::string("supervisor"));
+    dict.insert("id".to_string(), VmValue::string(&state.id));
+    dict.insert("name".to_string(), VmValue::string(&state.name));
     VmValue::Dict(std::sync::Arc::new(dict))
 }
 
 fn supervisor_state_value(state: &SupervisorState) -> VmValue {
     let mut dict = BTreeMap::new();
-    dict.insert("_type".to_string(), string_value("supervisor_state"));
-    dict.insert("id".to_string(), string_value(&state.id));
-    dict.insert("name".to_string(), string_value(&state.name));
-    dict.insert("status".to_string(), string_value(&state.status));
+    dict.insert("_type".to_string(), VmValue::string("supervisor_state"));
+    dict.insert("id".to_string(), VmValue::string(&state.id));
+    dict.insert("name".to_string(), VmValue::string(&state.name));
+    dict.insert("status".to_string(), VmValue::string(&state.status));
     dict.insert(
         "strategy".to_string(),
-        string_value(strategy_name(state.strategy)),
+        VmValue::string(strategy_name(state.strategy)),
     );
     dict.insert("metrics".to_string(), metrics_value(state));
     dict.insert(
@@ -999,9 +999,9 @@ fn supervisor_state_value(state: &SupervisorState) -> VmValue {
 
 fn child_state_value(child: &ChildSlot) -> VmValue {
     let mut dict = BTreeMap::new();
-    dict.insert("name".to_string(), string_value(&child.spec.name));
-    dict.insert("kind".to_string(), string_value(&child.spec.kind));
-    dict.insert("status".to_string(), string_value(&child.status));
+    dict.insert("name".to_string(), VmValue::string(&child.spec.name));
+    dict.insert("kind".to_string(), VmValue::string(&child.spec.kind));
+    dict.insert("status".to_string(), VmValue::string(&child.status));
     dict.insert(
         "restart_count".to_string(),
         VmValue::Int(child.restart_count as i64),
@@ -1011,7 +1011,7 @@ fn child_state_value(child: &ChildSlot) -> VmValue {
         child
             .last_error
             .as_deref()
-            .map(string_value)
+            .map(VmValue::string)
             .unwrap_or(VmValue::Nil),
     );
     dict.insert(
@@ -1019,7 +1019,7 @@ fn child_state_value(child: &ChildSlot) -> VmValue {
         child
             .current_wait_reason
             .as_deref()
-            .map(string_value)
+            .map(VmValue::string)
             .unwrap_or(VmValue::Nil),
     );
     dict.insert(
@@ -1028,7 +1028,7 @@ fn child_state_value(child: &ChildSlot) -> VmValue {
             .spec
             .active_lease
             .as_deref()
-            .map(string_value)
+            .map(VmValue::string)
             .unwrap_or(VmValue::Nil),
     );
     dict.insert(
@@ -1103,23 +1103,23 @@ fn event_value(event: &SupervisorEvent) -> VmValue {
     dict.insert("at_ms".to_string(), VmValue::Int(event.at_ms));
     dict.insert(
         "supervisor_id".to_string(),
-        string_value(&event.supervisor_id),
+        VmValue::string(&event.supervisor_id),
     );
     dict.insert(
         "child".to_string(),
         event
             .child
             .as_deref()
-            .map(string_value)
+            .map(VmValue::string)
             .unwrap_or(VmValue::Nil),
     );
-    dict.insert("kind".to_string(), string_value(&event.kind));
+    dict.insert("kind".to_string(), VmValue::string(&event.kind));
     dict.insert(
         "message".to_string(),
         event
             .message
             .as_deref()
-            .map(string_value)
+            .map(VmValue::string)
             .unwrap_or(VmValue::Nil),
     );
     VmValue::Dict(std::sync::Arc::new(dict))
@@ -1127,9 +1127,9 @@ fn event_value(event: &SupervisorEvent) -> VmValue {
 
 fn child_context_value(supervisor_id: &str, spec: &ChildSpec, generation: u64) -> VmValue {
     let mut dict = BTreeMap::new();
-    dict.insert("supervisor_id".to_string(), string_value(supervisor_id));
-    dict.insert("child_name".to_string(), string_value(&spec.name));
-    dict.insert("child_kind".to_string(), string_value(&spec.kind));
+    dict.insert("supervisor_id".to_string(), VmValue::string(supervisor_id));
+    dict.insert("child_name".to_string(), VmValue::string(&spec.name));
+    dict.insert("child_kind".to_string(), VmValue::string(&spec.kind));
     dict.insert("attempt".to_string(), VmValue::Int(generation as i64 + 1));
     dict.insert("restart_count".to_string(), VmValue::Int(generation as i64));
     VmValue::Dict(std::sync::Arc::new(dict))
@@ -1171,10 +1171,6 @@ fn emit_event_log(event: &SupervisorEvent) {
     tokio::task::spawn_local(async move {
         let _ = log.append(&topic, log_event).await;
     });
-}
-
-fn string_value(value: &str) -> VmValue {
-    VmValue::String(std::sync::Arc::from(value))
 }
 
 fn duration_ms(value: &VmValue) -> Option<u64> {
@@ -1252,13 +1248,13 @@ mod tests {
     fn parses_restart_policy_aliases() {
         let policy =
             parse_restart_policy(Some(&VmValue::Dict(std::sync::Arc::new(BTreeMap::from([
-                ("mode".to_string(), string_value("on-failure")),
+                ("mode".to_string(), VmValue::string("on-failure")),
                 ("max".to_string(), VmValue::Int(2)),
                 ("window".to_string(), VmValue::Duration(500)),
-                ("backoff".to_string(), string_value("10ms")),
+                ("backoff".to_string(), VmValue::string("10ms")),
                 ("factor".to_string(), VmValue::Float(3.0)),
                 ("jitter".to_string(), VmValue::Int(4)),
-                ("circuit_open".to_string(), string_value("1s")),
+                ("circuit_open".to_string(), VmValue::string("1s")),
             ])))))
             .unwrap();
 
