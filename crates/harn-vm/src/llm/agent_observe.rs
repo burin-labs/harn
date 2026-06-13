@@ -191,6 +191,29 @@ pub(super) fn is_retryable_llm_error(err: &VmError) -> bool {
         || lower.contains("eof")
 }
 
+/// A *thrown* provider response the agent loop should retry within the
+/// empty-completion budget rather than terminate on. Two shapes, both surfaced
+/// as a thrown error by the response/transport parsers:
+///
+/// 1. **Zero-token empty completion** — `completion_tokens=N ... delivered no
+///    content` (the transport's billed-but-empty 200 guard). A provider stall,
+///    not an answer.
+/// 2. **Billed-noncommittal completion** — `... returned billed output
+///    (completion_tokens=N) with no dispatchable tool call or answer (upstream
+///    contract violation)` (the [`super::api::is_billed_noncommittal_completion`]
+///    backstop in `response.rs`/`transport.rs`). The upstream serialized the
+///    tool call onto the reasoning channel only and finished *clean*
+///    (`stop_reason == "stop"`), so it is THROWN rather than returned as an
+///    `Ok` with `stop_reason == "error"`; the `Ok`-arm
+///    [`is_errored_actionless_completion`] retry therefore never sees it, and
+///    the generic terminal-error classifier ([`is_retryable_llm_error`]) does
+///    not match its signature. Routing it through the same empty-completion
+///    budget unifies all three unproductive-completion shapes onto one bounded
+///    retry path instead of hard-breaking the loop as a silent `provider_error`.
+///
+/// Matches the message regardless of the `VmError` carrier (`Thrown(String)`
+/// from the parsers, or `CategorizedError`/`Runtime` should a future caller
+/// re-wrap it).
 fn is_empty_completion_retry_error(err: &VmError) -> bool {
     let msg = match err {
         VmError::Thrown(crate::value::VmValue::String(s)) => s.as_ref(),
@@ -199,7 +222,13 @@ fn is_empty_completion_retry_error(err: &VmError) -> bool {
         _ => return false,
     };
     let lower = msg.to_lowercase();
-    lower.contains("completion_tokens=") && lower.contains("delivered no content")
+    if !lower.contains("completion_tokens=") {
+        return false;
+    }
+    // (1) zero-token empty completion, or (2) billed-noncommittal completion.
+    lower.contains("delivered no content")
+        || (lower.contains("no dispatchable tool call or answer")
+            && lower.contains("upstream contract violation"))
 }
 
 /// A wire-level "success" that carries nothing at all: zero output tokens, no
@@ -1356,7 +1385,22 @@ pub(crate) async fn observed_llm_call(
                     }
                 }
                 let retryable = is_retryable_llm_error(&error);
-                let can_retry = retryable && attempt < retry_config.retries;
+                // A *thrown* unproductive completion (zero-token empty, or the
+                // billed-noncommittal contract violation whose tool call went
+                // only to the reasoning channel) is retried within the same
+                // bounded empty-completion budget the `Ok` arm uses — which
+                // floors at 1 for real providers even when the caller's
+                // transient-retry budget is 0. This unifies the thrown shape
+                // onto the existing empty-completion retry path rather than
+                // hard-breaking the loop as a silent `provider_error`; it does
+                // NOT change `DEFAULT_LLM_CALL_RETRIES`. Once the budget is
+                // exhausted the loud thrown error (which names the
+                // `upstream contract violation`) is surfaced unchanged, so the
+                // eval layer can still classify it as infra, not capability.
+                let empty_completion_retry = is_empty_completion_retry_error(&error)
+                    && attempt < empty_completion_retry_budget(retry_config, &opts.provider);
+                let can_retry =
+                    (retryable && attempt < retry_config.retries) || empty_completion_retry;
                 let status = if can_retry {
                     "retrying"
                 } else if retryable {
@@ -1770,6 +1814,61 @@ mod retry_tests {
         )));
     }
 
+    /// The billed-noncommittal thrown error (`response.rs`/`transport.rs`
+    /// `billed_noncommittal_completion_error`) is NOT matched by the generic
+    /// terminal-error classifier — that is precisely why the loop used to
+    /// hard-break on it — but IS matched by the empty-completion retry
+    /// predicate so it routes onto the bounded empty-completion budget.
+    #[test]
+    fn billed_noncommittal_is_empty_completion_retry_not_generic_retryable() {
+        let billed = thrown(
+            "provider openrouter model qwen/qwen3.6-35b-a3b returned billed output \
+             (completion_tokens=342) with no dispatchable tool call or answer \
+             (upstream contract violation): the model finished cleanly but committed \
+             neither a tool call nor a substantive text answer.",
+        );
+        assert!(
+            !is_retryable_llm_error(&billed),
+            "generic terminal classifier must NOT match (root cause of the hard-break)"
+        );
+        assert!(
+            is_empty_completion_retry_error(&billed),
+            "must route onto the empty-completion retry budget"
+        );
+    }
+
+    /// Edge truth-table for `is_empty_completion_retry_error`: both thrown
+    /// unproductive shapes match; unrelated errors and partial signatures do
+    /// not (so a real terminal error never gets laundered into a retry).
+    #[test]
+    fn empty_completion_retry_error_edges() {
+        // (1) zero-token empty completion (transport guard).
+        assert!(is_empty_completion_retry_error(&thrown(
+            "openai-compatible model m reported completion_tokens=12 but delivered no content, reasoning, or tool calls"
+        )));
+        // (2) billed-noncommittal contract violation.
+        assert!(is_empty_completion_retry_error(&thrown(
+            "provider p model m returned billed output (completion_tokens=5) with no dispatchable tool call or answer (upstream contract violation)"
+        )));
+        // Also matches when re-wrapped as a categorized error.
+        assert!(is_empty_completion_retry_error(&categorized(
+            "model m returned billed output (completion_tokens=5) with no dispatchable tool call or answer (upstream contract violation)",
+            ErrorCategory::Generic,
+        )));
+        // No `completion_tokens=` token: not the billed shape.
+        assert!(!is_empty_completion_retry_error(&thrown(
+            "upstream contract violation with no dispatchable tool call or answer"
+        )));
+        // A genuine terminal/context error must never match.
+        assert!(!is_empty_completion_retry_error(&thrown(
+            "local HTTP 400 Bad Request [context_overflow]: prompt is too long"
+        )));
+        // A 429 is retryable elsewhere but is not an empty-completion shape.
+        assert!(!is_empty_completion_retry_error(&thrown(
+            "429 too many requests"
+        )));
+    }
+
     #[test]
     fn llm_error_kind_dict_gates_retry() {
         let transient = VmError::Thrown(VmValue::Dict(std::sync::Arc::new(
@@ -1934,6 +2033,23 @@ mod empty_completion_retry_tests {
         }
     }
 
+    /// The *thrown* billed-noncommittal failure. The response/transport parsers
+    /// raise `billed_noncommittal_completion_error` when a clean-finish turn
+    /// bills output but commits no tool call or answer (the action went only to
+    /// the reasoning channel). The fake provider can't drive the real parser,
+    /// so we re-create the exact wire-error message under a *non-transient*
+    /// `Generic` category — proving the retry comes from the empty-completion
+    /// budget, not from `is_retryable_llm_error` (which returns false here).
+    fn billed_noncommittal_turn() -> FakeLlmTurn {
+        FakeLlmTurn::Error(crate::llm::fake::FakeLlmError::new(
+            crate::value::ErrorCategory::Generic,
+            "provider openrouter model qwen/qwen3.6-35b-a3b returned billed output \
+             (completion_tokens=342) with no dispatchable tool call or answer \
+             (upstream contract violation): the model finished cleanly but committed \
+             neither a tool call nor a substantive text answer.",
+        ))
+    }
+
     #[test]
     fn empty_completion_retries_then_succeeds_on_second_attempt() {
         current_thread_runtime().block_on(async {
@@ -2071,6 +2187,97 @@ mod empty_completion_retry_tests {
             assert!(result.text.is_empty());
             assert!(result.tool_calls.is_empty());
             assert_eq!(result.output_tokens, 0);
+            reset_agent_trace_state();
+        });
+    }
+
+    #[test]
+    fn billed_noncommittal_completion_retries_then_succeeds() {
+        // The KEY missing case: a *thrown* billed-noncommittal turn (clean
+        // finish, billed output, tool call only on the reasoning channel) must
+        // be RETRIED within the empty-completion budget — not hard-break the
+        // loop as a silent `provider_error` — and the next good turn proceeds.
+        current_thread_runtime().block_on(async {
+            reset_agent_trace_state();
+            let _guard = install_fake_llm_script(
+                FakeLlmScript::new()
+                    .push(billed_noncommittal_turn())
+                    .push(FakeLlmTurn::stream(vec![
+                        FakeLlmEvent::Token("recovered".into()),
+                        FakeLlmEvent::Done(FakeStopReason::EndTurn),
+                    ])),
+            );
+            let result = observed_llm_call(
+                &fake_opts(),
+                None,
+                None,
+                &retry_config(1),
+                None,
+                false,
+                false,
+                None,
+            )
+            .await
+            .expect("billed-noncommittal retry should recover");
+            assert_eq!(result.text, "recovered");
+
+            let retries: Vec<usize> = peek_agent_trace()
+                .iter()
+                .filter_map(|event| match event {
+                    AgentTraceEvent::EmptyCompletionRetry { attempt, .. } => Some(*attempt),
+                    _ => None,
+                })
+                .collect();
+            assert_eq!(
+                retries,
+                vec![1],
+                "expected exactly one EmptyCompletionRetry trace event"
+            );
+            reset_agent_trace_state();
+            // _guard drop asserts both scripted turns were consumed.
+        });
+    }
+
+    #[test]
+    fn billed_noncommittal_completion_surfaces_contract_violation_after_budget_exhausted() {
+        // Bounded retry on a chronically-broken upstream: once the budget is
+        // spent the LOUD thrown error is surfaced unchanged (NOT a silent
+        // advance), and it still names the `upstream contract violation` so the
+        // Burin eval layer can classify it as infra, not capability.
+        current_thread_runtime().block_on(async {
+            reset_agent_trace_state();
+            let _guard = install_fake_llm_script(
+                FakeLlmScript::new()
+                    .push(billed_noncommittal_turn())
+                    .push(billed_noncommittal_turn()),
+            );
+            let err = observed_llm_call(
+                &fake_opts(),
+                None,
+                None,
+                &retry_config(1),
+                None,
+                false,
+                false,
+                None,
+            )
+            .await
+            .expect_err("exhausted billed-noncommittal retries must surface the loud error");
+            let message = err.to_string();
+            assert!(
+                message.contains("upstream contract violation"),
+                "exhausted-path error must stay tagged as a provider contract violation: {message}"
+            );
+            assert!(
+                message.contains("completion_tokens="),
+                "exhausted-path error must keep the billed-output signature: {message}"
+            );
+
+            let retries = peek_agent_trace()
+                .iter()
+                .filter(|event| matches!(event, AgentTraceEvent::EmptyCompletionRetry { .. }))
+                .count();
+            assert_eq!(retries, 1, "exactly one retry before the budget is spent");
             reset_agent_trace_state();
         });
     }
