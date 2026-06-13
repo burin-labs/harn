@@ -460,6 +460,25 @@ pub struct ProviderRule {
     /// natively. Only consulted for the `openrouter` provider.
     #[serde(default)]
     pub provider_route_denylist: Option<Vec<String>>,
+    /// OpenRouter upstream provider names this `(provider, model)` row is
+    /// PINNED to, in preference order. Materialized into the request body's
+    /// `provider.order` array with `allow_fallbacks = false` (see
+    /// [`crate::llm::providers::openai_compat::apply_openrouter_provider_order`]),
+    /// so OpenRouter only ever routes the model to these known-clean upstreams
+    /// and never silently falls back to a sketchier one. This is the
+    /// *allowlist* counterpart to [`Self::provider_route_denylist`]: prefer it
+    /// when the bad upstreams are intermittent / hard to enumerate but the
+    /// clean ones are few and stable. The canonical case is OpenRouter's
+    /// `openai/gpt-oss-*` route, which fans out across ~17 upstreams in a
+    /// sub-provider lottery; some mis-serialize the Harmony tool call even with
+    /// reasoning ON (billed-noncommittal: 0 tool_calls), while Cerebras and
+    /// Groq serve it cleanly. Only consulted for the `openrouter` provider. An
+    /// empty / unset list means "no pin" (free OpenRouter routing). When both a
+    /// pin and a denylist are present the pin wins (a closed allowlist already
+    /// excludes everything not on it). Validated by the footgun gate in
+    /// [`crate::llm::capability_audit`].
+    #[serde(default)]
+    pub openrouter_provider_order: Option<Vec<String>>,
 }
 
 /// Resolved capabilities for a `(provider, model)` pair. Unset rule
@@ -541,6 +560,10 @@ pub struct Capabilities {
     /// row. See [`ProviderRule::provider_route_denylist`]. Empty means "no
     /// route restriction".
     pub provider_route_denylist: Vec<String>,
+    /// OpenRouter upstream provider names this row is PINNED to (allowlist), in
+    /// preference order. See [`ProviderRule::openrouter_provider_order`]. Empty
+    /// means "no pin" (free OpenRouter routing).
+    pub openrouter_provider_order: Vec<String>,
 }
 
 impl Default for Capabilities {
@@ -610,6 +633,7 @@ impl Default for Capabilities {
             thinking_disable_directive: None,
             auto_reasoning_overrides: BTreeMap::new(),
             provider_route_denylist: Vec::new(),
+            openrouter_provider_order: Vec::new(),
         }
     }
 }
@@ -722,6 +746,12 @@ fn builtin() -> &'static CapabilitiesFile {
         toml::from_str::<CapabilitiesFile>(BUILTIN_TOML)
             .expect("capabilities.toml must parse at build time")
     })
+}
+
+/// The shipped (built-in) capability matrix. Public so the footgun gate in
+/// [`crate::llm::capability_audit`] can audit exactly what Harn ships.
+pub fn builtin_file() -> &'static CapabilitiesFile {
+    builtin()
 }
 
 /// Install project-level overrides for the current thread. Usually
@@ -1256,6 +1286,7 @@ fn defaults_to_caps(defaults: &ProviderDefaults) -> Capabilities {
         thinking_disable_directive: None,
         auto_reasoning_overrides: None,
         provider_route_denylist: None,
+        openrouter_provider_order: None,
     };
     let mut caps = rule_to_caps(&empty, defaults);
     caps.preferred_tool_format = None;
@@ -1374,6 +1405,7 @@ fn rule_to_caps(rule: &ProviderRule, defaults: &ProviderDefaults) -> Capabilitie
         thinking_disable_directive: rule.thinking_disable_directive.clone(),
         auto_reasoning_overrides: rule.auto_reasoning_overrides.clone().unwrap_or_default(),
         provider_route_denylist: rule.provider_route_denylist.clone().unwrap_or_default(),
+        openrouter_provider_order: rule.openrouter_provider_order.clone().unwrap_or_default(),
     }
 }
 

@@ -77,6 +77,23 @@ thinking_block_style = "none"
 # `reasoning:{enabled:false}` disable directive on the wire, and the
 # required-for-tools flag keeps the auto policy from flooring tool tasks to off.
 # Must NOT carry a Qwen-style `auto_reasoning_overrides = "off"`.
+#
+# SECOND footgun — the OpenRouter sub-provider lottery. `openai/gpt-oss-120b`
+# fans out across ~17 upstreams on OpenRouter; even with reasoning ON, some
+# mis-serialize the Harmony tool call and finish billed-noncommittal (0
+# tool_calls). The bad upstreams are intermittent and hard to enumerate, so we
+# ALLOWLIST the known-clean ones instead of denylisting the bad ones.
+# `openrouter_provider_order = ["Cerebras", "Groq"]` materializes to
+# `provider: { order: ["Cerebras","Groq"], allow_fallbacks: false }`, so the
+# route only ever lands on those two upstreams. Live OpenRouter probe
+# (openai/gpt-oss-120b, 2026-06-13, reasoning effort=low, weather-tool request):
+#   - free routing (lottery) x12          -> Groq, 12/12 clean tool calls
+#   - order=[Cerebras,Groq] pin x6        -> Cerebras, 6/6 clean, 0 noncommittal
+#   - Cerebras-only pin x3 / Groq-only x3 -> 6/6 clean
+#   - Together pin x3                      -> 1/3 clean (2 "Provider returned
+#                                             error") -> NOT allowlisted
+# Cerebras and Groq are the blessed upstreams. The footgun gate (capability
+# audit) requires this pin on any reasoning_required_for_tools OpenRouter route.
 [[provider.openrouter]]
 model_match = "openai/gpt-oss-*"
 native_tools = true
@@ -87,6 +104,7 @@ reasoning_effort_supported = true
 reasoning_effort_levels = ["low", "medium", "high"]
 reasoning_disable_supported = false
 reasoning_required_for_tools = true
+openrouter_provider_order = ["Cerebras", "Groq"]
 text_tool_wire_format_supported = true
 prefers_xml_scaffolding = false
 prefers_markdown_scaffolding = true
