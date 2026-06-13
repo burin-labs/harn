@@ -79,6 +79,14 @@ thinking_block_style = "reasoning_summary"
 # catalogued model and the catalog invariant requires every catalogued model's
 # rule to set native_tools + preferred_tool_format. To change, set
 # `preferred_tool_format` ("native" | "json" | "text").
+#
+# `reasoning_required_for_tools = true`: gpt-oss (Harmony) calls tools INSIDE
+# the chain-of-thought channel, so reasoning-off breaks tool calling. Live
+# Groq probe (2026-06-13): reasoning_effort=low -> 1 clean tool call;
+# reasoning_effort=none -> rejected ("must be one of low/medium/high"). So
+# this row only ever sends {low,medium,high} (reasoning_effort_levels) and
+# never floors to off for tool tasks. Must NOT carry a Qwen-style
+# `auto_reasoning_overrides = "off"`.
 [[provider.groq]]
 model_match = "*gpt-oss-*"
 native_tools = true
@@ -88,6 +96,8 @@ text_tool_wire_format_supported = true
 structured_output = "native"
 thinking_modes = ["effort"]
 reasoning_effort_supported = true
+reasoning_effort_levels = ["low", "medium", "high"]
+reasoning_required_for_tools = true
 prefers_xml_scaffolding = false
 prefers_markdown_scaffolding = true
 structured_output_mode = "native_json"

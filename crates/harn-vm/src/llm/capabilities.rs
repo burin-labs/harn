@@ -362,6 +362,20 @@ pub struct ProviderRule {
     /// 400 when sent `reasoning: {enabled:false}`.
     #[serde(default)]
     pub reasoning_disable_supported: Option<bool>,
+    /// Whether this model performs *tool calls inside its reasoning channel*,
+    /// so disabling reasoning silently breaks tool calling. The canonical case
+    /// is the OpenAI gpt-oss (Harmony) family: with reasoning disabled it emits
+    /// 0 tool_calls and a tiny billed-noncommittal completion; with reasoning
+    /// enabled (even `low`) it emits clean native tool calls. This is the
+    /// *opposite* of the Qwen3 quirk (Qwen narrates tool intent in the
+    /// reasoning trace and emits zero `tool_calls`, so Qwen needs reasoning
+    /// OFF for tools). When set, `reasoning_policy` refuses to downgrade the
+    /// auto reasoning level to `off` for tool-bearing tasks (agent/code/verify)
+    /// — flooring instead to the lowest supported effort — so no future
+    /// auto-policy default or session pin can re-introduce the
+    /// billed-noncommittal failure at the data layer.
+    #[serde(default)]
+    pub reasoning_required_for_tools: Option<bool>,
     /// Whether reasoning-only clean stops may be promoted into visible text.
     /// Disable this for providers whose `reasoning` field is always private
     /// trace, even when `content` is empty.
@@ -503,6 +517,8 @@ pub struct Capabilities {
     /// the provider's own default ceiling.
     pub max_thinking_budget: Option<i64>,
     pub reasoning_disable_supported: bool,
+    /// See [`ProviderRule::reasoning_required_for_tools`].
+    pub reasoning_required_for_tools: bool,
     pub reasoning_text_promotable: bool,
     pub reasoning_wire_format: Option<String>,
     pub seed_supported: bool,
@@ -576,6 +592,7 @@ impl Default for Capabilities {
             reasoning_none_supported: false,
             max_thinking_budget: None,
             reasoning_disable_supported: true,
+            reasoning_required_for_tools: false,
             reasoning_text_promotable: true,
             reasoning_wire_format: None,
             seed_supported: true,
@@ -1221,6 +1238,7 @@ fn defaults_to_caps(defaults: &ProviderDefaults) -> Capabilities {
         reasoning_none_supported: None,
         max_thinking_budget: None,
         reasoning_disable_supported: None,
+        reasoning_required_for_tools: None,
         reasoning_text_promotable: None,
         reasoning_wire_format: None,
         seed_supported: None,
@@ -1317,6 +1335,7 @@ fn rule_to_caps(rule: &ProviderRule, defaults: &ProviderDefaults) -> Capabilitie
         reasoning_none_supported: rule.reasoning_none_supported.unwrap_or(false),
         max_thinking_budget: rule.max_thinking_budget,
         reasoning_disable_supported: rule.reasoning_disable_supported.unwrap_or(true),
+        reasoning_required_for_tools: rule.reasoning_required_for_tools.unwrap_or(false),
         reasoning_text_promotable: rule.reasoning_text_promotable.unwrap_or(true),
         reasoning_wire_format: rule
             .reasoning_wire_format

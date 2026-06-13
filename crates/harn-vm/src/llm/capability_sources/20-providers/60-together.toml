@@ -20,6 +20,13 @@
 # Pinned EXPLICITLY (not inherited) because `openai/gpt-oss-120b` is a
 # catalogued model and the catalog invariant requires the rule to set both
 # fields. To change, set `preferred_tool_format` ("native" | "json" | "text").
+#
+# `reasoning_required_for_tools = true`: gpt-oss (Harmony) performs tool
+# calls INSIDE the chain-of-thought channel, so reasoning-off breaks tool
+# calling (billed-noncommittal: 0 tool_calls + tiny completion). This is the
+# OPPOSITE of the Qwen3 quirk — gpt-oss must NOT carry an
+# `auto_reasoning_overrides = { agent/verify/code = "off" }` override; the
+# flag makes reasoning_policy refuse to floor tool tasks to off.
 [[provider.together]]
 model_match = "openai/gpt-oss-*"
 native_tools = true
@@ -27,6 +34,7 @@ preferred_tool_format = "native"
 structured_output = "native"
 thinking_modes = ["effort"]
 reasoning_effort_supported = true
+reasoning_required_for_tools = true
 prefers_xml_scaffolding = false
 prefers_markdown_scaffolding = true
 structured_output_mode = "native_json"
