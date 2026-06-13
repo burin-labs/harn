@@ -1,0 +1,104 @@
+import { agent_capture_events } from "std/agent/events"
+import { llm_text, with_llm_script } from "std/testing"
+
+/**
+ * Evidence-aware repair loop (#repair-diagnostics): FALSE-POSITIVE SAFETY PROOF.
+ *
+ * A legitimate post-edit retry is NOT a futile loop. When a successful edit
+ * intervenes between two identical failures, the write-epoch advances and the
+ * same-diagnostic streak RESETS to 1 — so the stuck-diagnostic strategy-shift
+ * nudge does NOT fire. A blind failure counter (no epoch model) would trip here
+ * after the second or third identical failure; the evidence-aware model does
+ * not, because each failure followed a real corrective edit.
+ *
+ * Sequence: fail, edit, fail, edit, fail. With `stuck_same_diagnostic_after: 2`
+ * a blind counter would trip; the epoch-aware model keeps the streak at 1 and
+ * fires zero repair warnings.
+ */
+fn events_of(events, kind) {
+  return events.filter({ event -> event.type == kind })
+}
+
+fn repair_tools() {
+  var tools = tool_registry()
+  tools = tool_define(
+    tools,
+    "run_test",
+    "Run the test suite",
+    {
+      handler: { _args ->
+        throw "AssertionError: same failure"
+      },
+      parameters: {},
+      returns: {type: "string"},
+      annotations: {kind: "read"},
+    },
+  )
+  tools = tool_define(
+    tools,
+    "apply_fix",
+    "Apply a corrective edit",
+    {
+      handler: { _args -> "edit applied" },
+      parameters: {},
+      returns: {type: "string"},
+      annotations: {kind: "edit", side_effect_level: "workspace_write"},
+    },
+  )
+  return tools
+}
+
+fn run_test_call(id) {
+  return {text: "", tool_calls: [{id: id, name: "run_test", arguments: {}}]}
+}
+
+fn apply_fix_call(id) {
+  return {text: "", tool_calls: [{id: id, name: "apply_fix", arguments: {}}]}
+}
+
+pipeline default() {
+  with_llm_script(
+    [
+      run_test_call("r1"),
+      apply_fix_call("e1"),
+      run_test_call("r2"),
+      apply_fix_call("e2"),
+      run_test_call("r3"),
+      apply_fix_call("e3"),
+      run_test_call("r4"),
+      llm_text("Stopping. ##DONE##"),
+    ],
+    { ->
+      let session = "repair-reset-streak-" + uuid()
+      let captured = agent_capture_events(
+        session,
+        fn() { return agent_loop(
+          "Make the failing test pass.",
+          nil,
+          {
+            provider: "mock",
+            tools: repair_tools(),
+            tool_format: "native",
+            loop_until_done: true,
+            max_iterations: 10,
+            session_id: session,
+            done_sentinel: "##DONE##",
+            // verify_completion absent so the post-edit re-verify mandate has no
+            // closure to fire — this test isolates the streak-reset property.
+            stall_diagnostics: {
+              enabled: true,
+              repair_aware: true,
+              stuck_same_diagnostic_after: 2,
+              inject_feedback: true,
+              max_feedback: 3,
+            },
+          },
+        ) },
+      )
+      let stalls = events_of(captured.events, "agent_loop_stall_warning")
+      __io_println(len(stalls.filter({ s -> s.warning.pattern == "stuck_same_diagnostic" })))
+      __io_println(len(stalls))
+      __io_println(captured.result.status)
+    },
+  )
+}

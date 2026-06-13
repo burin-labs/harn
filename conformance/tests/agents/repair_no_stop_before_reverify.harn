@@ -1,0 +1,84 @@
+import { agent_capture_events } from "std/agent/events"
+import { llm_text, with_llm_script } from "std/testing"
+
+/**
+ * Evidence-aware repair loop (#repair-diagnostics): a successful corrective edit
+ * that ALSO proposes completion (done-sentinel) must not terminate the loop
+ * "done" until the post-edit re-verify has run. When the verify closure vetoes,
+ * the loop continues instead of stopping — the edit was re-verified, not taken
+ * on faith.
+ */
+fn repair_tools() {
+  var tools = tool_registry()
+  tools = tool_define(
+    tools,
+    "run_test",
+    "Run the test suite",
+    {
+      handler: { _args ->
+        throw "test failed: assertion X"
+      },
+      parameters: {},
+      returns: {type: "string"},
+      annotations: {kind: "read"},
+    },
+  )
+  tools = tool_define(
+    tools,
+    "apply_fix",
+    "Apply a corrective edit",
+    {
+      handler: { _args -> "edit applied" },
+      parameters: {},
+      returns: {type: "string"},
+      annotations: {kind: "edit", side_effect_level: "workspace_write"},
+    },
+  )
+  return tools
+}
+
+/** Vetoes the FIRST completion (the unverified post-edit done), confirms after. */
+fn verify_once_then_confirm(info) {
+  if info.iteration <= 1 {
+    return "not verified yet — re-check before finishing"
+  }
+  nil
+}
+
+pipeline default() {
+  with_llm_script(
+    [
+      // Turn 1: run the tests -> fail.
+      {text: "", tool_calls: [{id: "t1", name: "run_test", arguments: {}}]},
+      // Turn 2: apply a fix AND claim done in the same turn.
+      {text: "Fixed it. ##DONE##", tool_calls: [{id: "e1", name: "apply_fix", arguments: {}}]},
+      // Turn 3: claim done again -> confirmed this time.
+      llm_text("Done for real. ##DONE##"),
+      llm_text("Done for real. ##DONE##"),
+    ],
+    { ->
+      let session = "repair-no-stop-" + uuid()
+      let captured = agent_capture_events(
+        session,
+        fn() { return agent_loop(
+          "Make the tests pass, then finish.",
+          nil,
+          {
+            provider: "mock",
+            tools: repair_tools(),
+            tool_format: "native",
+            loop_until_done: true,
+            max_iterations: 6,
+            session_id: session,
+            done_sentinel: "##DONE##",
+            verify_completion: verify_once_then_confirm,
+            stall_diagnostics: {enabled: true, repair_aware: true, post_edit_reverify: true, stuck_same_diagnostic_after: 3},
+          },
+        ) },
+      )
+      __io_println(captured.result.status)
+      __io_println(captured.result.llm.iterations > 2)
+      __io_println(contains(json_stringify(llm_mock_calls()), "re-check before finishing"))
+    },
+  )
+}

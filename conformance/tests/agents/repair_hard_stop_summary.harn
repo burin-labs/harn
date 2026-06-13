@@ -1,0 +1,89 @@
+import { agent_capture_events } from "std/agent/events"
+import { llm_text, with_llm_script } from "std/testing"
+
+/**
+ * Evidence-aware repair loop (#repair-diagnostics): a stuck hand-back carries
+ * the current-failure summary, not just "budget exhausted" / "thrash". When the
+ * stuck-diagnostic trip escalates to a hard stop, the terminal `stuck` decision
+ * and the run result both carry a `current_failure` block naming WHAT failed
+ * (class, signature, snippet, streak).
+ */
+fn events_of(events, kind) {
+  return events.filter({ event -> event.type == kind })
+}
+
+fn repair_tools() {
+  var tools = tool_registry()
+  tools = tool_define(
+    tools,
+    "run_test",
+    "Run the test suite",
+    {
+      handler: { _args ->
+        throw "FATAL: linker error in module X"
+      },
+      parameters: {},
+      returns: {type: "string"},
+      annotations: {kind: "read"},
+    },
+  )
+  return tools
+}
+
+fn run_test_call(id) {
+  return {text: "", tool_calls: [{id: id, name: "run_test", arguments: {}}]}
+}
+
+pipeline default() {
+  with_llm_script(
+    [
+      run_test_call("r1"),
+      run_test_call("r2"),
+      run_test_call("r3"),
+      run_test_call("r4"),
+      run_test_call("r5"),
+      llm_text("unreachable ##DONE##"),
+    ],
+    { ->
+      let session = "repair-hard-stop-" + uuid()
+      let captured = agent_capture_events(
+        session,
+        fn() { return agent_loop(
+          "Make the failing test pass.",
+          nil,
+          {
+            provider: "mock",
+            tools: repair_tools(),
+            tool_format: "native",
+            loop_until_done: true,
+            max_iterations: 10,
+            session_id: session,
+            done_sentinel: "##DONE##",
+            stall_diagnostics: {
+              enabled: true,
+              repair_aware: true,
+              stuck_same_diagnostic_after: 3,
+              // A single stuck-diagnostic trip escalates straight to a hard stop.
+              hard_stop_after_trips: 1,
+            },
+          },
+        ) },
+      )
+      __io_println(captured.result.status)
+      __io_println(captured.result.stop_reason)
+      let cf = captured.result?.current_failure
+      __io_println(cf != nil)
+      __io_println(cf?.class)
+      __io_println(contains(to_string(cf?.snippet ?? ""), "FATAL: linker error in module X"))
+      __io_println(cf?.same_diagnostic_streak)
+      let decisions = events_of(captured.events, "loop_control_decision")
+        .filter({ d -> d.reason == "thrash_hard_stop" })
+      __io_println(len(decisions))
+      let stalls = events_of(captured.events, "agent_loop_stall_warning")
+        .filter({ s -> s.warning.pattern == "stuck_same_diagnostic" })
+      __io_println(
+        contains(to_string(stalls[0].warning?.diagnostic_snippet ?? ""), "FATAL: linker error in module X"),
+      )
+    },
+  )
+}

@@ -1,0 +1,78 @@
+import { agent_capture_events } from "std/agent/events"
+import { llm_text, with_llm_script } from "std/testing"
+
+/**
+ * Evidence-aware repair loop (#repair-diagnostics): a PASSING verification clears
+ * the current-failure model. After a fail then a pass, no repair warning fires
+ * and the loop completes done — the failure is resolved, not still tracked.
+ */
+fn events_of(events, kind) {
+  return events.filter({ event -> event.type == kind })
+}
+
+fn repair_tools() {
+  var tools = tool_registry()
+  tools = tool_define(
+    tools,
+    "run_test",
+    "Run the test suite (fails)",
+    {
+      handler: { _args ->
+        throw "AssertionError: expected 5 got 4"
+      },
+      parameters: {},
+      returns: {type: "string"},
+      annotations: {kind: "read"},
+    },
+  )
+  tools = tool_define(
+    tools,
+    "run_test_ok",
+    "Run the test suite (passes)",
+    {
+      handler: { _args -> "all tests pass" },
+      parameters: {},
+      returns: {type: "string"},
+      annotations: {kind: "read"},
+    },
+  )
+  return tools
+}
+
+pipeline default() {
+  with_llm_script(
+    [
+      // Turn 1: tests fail.
+      {text: "", tool_calls: [{id: "r1", name: "run_test", arguments: {}}]},
+      // Turn 2: tests now pass.
+      {text: "", tool_calls: [{id: "r2", name: "run_test_ok", arguments: {}}]},
+      // Turn 3+: finish.
+      llm_text("Tests green. ##DONE##"),
+      llm_text("Tests green. ##DONE##"),
+    ],
+    { ->
+      let session = "repair-pass-clears-" + uuid()
+      let captured = agent_capture_events(
+        session,
+        fn() { return agent_loop(
+          "Make the tests pass, then finish.",
+          nil,
+          {
+            provider: "mock",
+            tools: repair_tools(),
+            tool_format: "native",
+            loop_until_done: true,
+            max_iterations: 6,
+            session_id: session,
+            done_sentinel: "##DONE##",
+            stall_diagnostics: {enabled: true, repair_aware: true, stuck_same_diagnostic_after: 2},
+          },
+        ) },
+      )
+      let stalls = events_of(captured.events, "agent_loop_stall_warning")
+      __io_println(len(stalls))
+      __io_println(captured.result.status)
+      __io_println(captured.result?.current_failure == nil)
+    },
+  )
+}
