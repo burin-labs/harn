@@ -1,0 +1,102 @@
+import { llm_text, with_llm_script } from "std/testing"
+
+/**
+ * Evidence-aware repair loop (#repair-diagnostics): the post-edit re-verify
+ * mandate. When the repair loop is enabled, a turn that makes a successful
+ * corrective edit on top of a LIVE failure must force a verification before the
+ * loop continues — a successful edit is not proof the failure is resolved. The
+ * verify routes through the EXISTING `verify_completion` entrypoint.
+ *
+ * Positive: repair_aware:true => after the fail->edit sequence the mandate fires
+ * `verify_completion` with stop_reason "post_edit_reverify" (observed via the
+ * veto feedback injected into the next LLM turn).
+ * Negative control: repair_aware:false => no forced verify, the marker feedback
+ * never appears.
+ */
+fn repair_tools() {
+  var tools = tool_registry()
+  tools = tool_define(
+    tools,
+    "run_test",
+    "Run the test suite",
+    {
+      handler: { _args ->
+        throw "test failed: assertion X"
+      },
+      parameters: {},
+      returns: {type: "string"},
+      annotations: {kind: "read"},
+    },
+  )
+  tools = tool_define(
+    tools,
+    "apply_fix",
+    "Apply a corrective edit",
+    {
+      handler: { _args -> "edit applied" },
+      parameters: {},
+      returns: {type: "string"},
+      annotations: {kind: "edit", side_effect_level: "workspace_write"},
+    },
+  )
+  return tools
+}
+
+const REVERIFY_MARKER = "REVERIFY_MANDATE_FIRED"
+
+/**
+ * Confirms on every stop EXCEPT the post-edit re-verify, which it vetoes with a
+ * recognizable marker so the test can observe that the mandate fired.
+ */
+fn reverify_probe(info) {
+  if info.stop_reason == "post_edit_reverify" {
+    return REVERIFY_MARKER
+  }
+  nil
+}
+
+fn run_scenario(repair_aware) {
+  return with_llm_script(
+    [
+      // Turn 1: run the tests -> fail.
+      {text: "", tool_calls: [{id: "t1", name: "run_test", arguments: {}}]},
+      // Turn 2: apply a corrective edit (no completion proposed -> continue).
+      {text: "", tool_calls: [{id: "e1", name: "apply_fix", arguments: {}}]},
+      // Turn 3+: finish.
+      llm_text("All set. ##DONE##"),
+      llm_text("All set. ##DONE##"),
+    ],
+    { ->
+      let session = "repair-reverify-" + uuid()
+      let _result = agent_loop(
+        "Make the tests pass.",
+        nil,
+        {
+          provider: "mock",
+          tools: repair_tools(),
+          tool_format: "native",
+          loop_until_done: true,
+          max_iterations: 6,
+          session_id: session,
+          done_sentinel: "##DONE##",
+          verify_completion: reverify_probe,
+          stall_diagnostics: {
+            enabled: true,
+            repair_aware: repair_aware,
+            post_edit_reverify: true,
+            stuck_same_diagnostic_after: 3,
+          },
+        },
+      )
+      let all_messages = json_stringify(llm_mock_calls())
+      return contains(all_messages, REVERIFY_MARKER)
+    },
+  )
+}
+
+pipeline default() {
+  // Positive: the mandate fires after fail->edit.
+  __io_println(run_scenario(true))
+  // Negative control: repair_aware:false => mandate never fires.
+  __io_println(run_scenario(false))
+}

@@ -226,6 +226,7 @@
 - [Process sandboxing](./sandboxing.md)
 - [OpenTrustGraph v0 spec](./spec/open-trust-graph/v0.md)
 - [Agent loop runtime notes](./dev/agent-loops.md)
+- [Evidence-aware repair loop](./dev/repair-diagnostics.md)
 
 ## Protocol contributions
 

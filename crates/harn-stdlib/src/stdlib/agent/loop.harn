@@ -36,10 +36,12 @@ import { agent_scratchpad_init, agent_scratchpad_reorganize_if_due } from "std/a
 import { agent_skills_match } from "std/agent/skills"
 import {
   agent_stall_apply_result,
+  agent_stall_clear_current_failure,
   agent_stall_done_judge_due,
   agent_stall_initial_state,
   agent_stall_inject_feedback,
   agent_stall_observe_tool_calls,
+  agent_stall_repair_config,
 } from "std/agent/stall"
 import {
   agent_emit_event,
@@ -1396,6 +1398,33 @@ fn __tool_names_by_status(dispatch, want_ok) {
   return names
 }
 
+// Workspace-mutating annotation kinds (mirrors postturn's tool-surface
+// classifier vocabulary). A successful call to a tool of one of these kinds is
+// a corrective edit for the evidence-aware repair loop's `write_epoch`.
+const __REPAIR_EDIT_KINDS = ["edit", "write", "scaffold", "delete", "mutation", "mutate"]
+
+/**
+ * __turn_made_edit reports whether `dispatch` (a single turn's dispatch
+ * results) contains a SUCCESSFUL workspace-mutating tool call, by looking up
+ * each successful tool's annotation kind in the registry. Reuses
+ * `__tool_names_by_status` + `__tool_registry_entry`; only consulted when the
+ * evidence-aware repair loop is enabled.
+ */
+fn __turn_made_edit(dispatch, tools) -> bool {
+  if dispatch == nil {
+    return false
+  }
+  for name in __tool_names_by_status(dispatch, true) {
+    let entry = __tool_registry_entry(tools, name)
+    let annotations = entry?.annotations
+    let kind = lowercase(to_string(annotations?.kind ?? annotations?.tool_kind ?? annotations?.toolKind ?? ""))
+    if contains(__REPAIR_EDIT_KINDS, kind) {
+      return true
+    }
+  }
+  return false
+}
+
 fn __merge_tool_names(existing, additions) {
   var merged = existing ?? []
   let values = additions ?? []
@@ -2607,6 +2636,7 @@ fn __agent_loop_run(message, session, initial_opts) {
         break
       }
       let stall_judge_due = agent_stall_done_judge_due(turn_opts, done_judge_invocations, iteration_index + 1)
+      let stall_prev_turn_made_edit = __turn_made_edit(stall_prev_dispatch, opts?.tools)
       let stall_observation = agent_stall_observe_tool_calls(
         session.session_id,
         tool_calls,
@@ -2617,6 +2647,7 @@ fn __agent_loop_run(message, session, initial_opts) {
         stall_prev_dispatch,
         visible_text,
         had_parse_errors,
+        stall_prev_turn_made_edit,
       )
       stall_state = stall_observation.state
       stall_enabled_seen = stall_enabled_seen || stall_observation.enabled
@@ -3004,14 +3035,51 @@ fn __agent_loop_run(message, session, initial_opts) {
         ) },
       )
       opts = __apply_post_turn_options(opts, outcome)
+      let repair_cfg = agent_stall_repair_config(turn_opts?.stall_diagnostics)
+      let has_live_failure = stall_state.last_diagnostic_class == "fail" || stall_state.reverify_owed
+      let this_turn_made_edit = __turn_made_edit(dispatch, opts?.tools)
+      let verify_closure_exists = turn_opts?.verify_completion != nil
+        || turn_opts?.verify_completion_judge != nil
+      let reverify_mandated = repair_cfg.repair_aware
+        && repair_cfg.post_edit_reverify
+        && verify_closure_exists
+        && has_live_failure
+        && this_turn_made_edit
       var should_continue = outcome.kind == "continue" || bridge_step_delivered > 0
       var verdict_record = nil
+      if should_continue && reverify_mandated && verify_attempts < max_verify_attempts {
+        let reverify_opts = turn_opts
+          + {
+          _done_judge_due: false,
+          _done_judge_invocations: done_judge_invocations,
+          _verify_completion_judge_invocations: verify_completion_judge_invocations,
+        }
+        let reverdict = agent_verify_or_continue(
+          session,
+          reverify_opts,
+          "post_edit_reverify",
+          llm_result.text,
+          iteration_index,
+        )
+        verdict_record = reverdict
+        if reverdict?.verify_completion_judge_invoked ?? false {
+          verify_completion_judge_invocations = verify_completion_judge_invocations + 1
+        }
+        if reverdict.vetoed {
+          verify_attempts = verify_attempts + 1
+          if reverdict?.verify_completion_judge_invoked ?? false {
+            verify_completion_judge_vetoes = verify_completion_judge_vetoes + 1
+          }
+        } else {
+          stall_state = stall_state + {reverify_owed: false}
+        }
+      }
       if should_continue {
         if opts?.daemon && len(tool_calls) == 0 {
           agent_daemon_step(session, opts, iteration)
         }
       } else {
-        if outcome.needs_verify {
+        if outcome.needs_verify || reverify_mandated {
           if verify_attempts >= max_verify_attempts {
             final_status = "verify_exhausted"
             stop_reason = outcome.stop_reason
@@ -3054,6 +3122,8 @@ fn __agent_loop_run(message, session, initial_opts) {
             final_status = "verify_capped"
             stop_reason = "done_judge_cap_reached"
             break
+          } else {
+            stall_state = stall_state + {reverify_owed: false}
           }
         }
         let missing_now = agent_required_tools_missing_from_session(opts, successful_tools_seen)
@@ -3187,7 +3257,15 @@ fn __agent_loop_run(message, session, initial_opts) {
       },
     )
     session_finalized = true
-    let result_with_stalls = agent_stall_apply_result(result, stall_enabled_seen, stall_state)
+    let terminated_ok = terminal_error == nil
+      && suspend_result == nil
+      && (final_status == "" || final_status == "done")
+    let final_stall_state = if terminated_ok {
+      agent_stall_clear_current_failure(stall_state)
+    } else {
+      stall_state
+    }
+    let result_with_stalls = agent_stall_apply_result(result, stall_enabled_seen, final_stall_state)
     let enforced = if suspend_result != nil {
       result_with_stalls
     } else {
@@ -3244,37 +3322,12 @@ fn __agent_loop_run(message, session, initial_opts) {
   return unwrap(run)
 }
 
-// Provider-malformed empty-name calls were filtered out of `tool_calls`
-// by `__resolve_tool_calls`; inject parse-guidance for the drop so the
-// model re-emits a named call instead of the loop terminating silently
-// on the nameless sibling.
-// #3220: this turn attempted a tool call that did not dispatch — the
-// native-fallback contract rejected text-emitted calls (corrective
-// feedback queued), or the parser dropped every call and parse
-// guidance was injected. Post-turn must not read the turn's prose as
-// a completion signal.
-// A turn whose calls were all dropped by the parser gets the purpose-built
-// parse-guidance feedback (not the generic no-progress nudge), and is
-// excluded from the no-progress stall streak below.
-// Host pushed an `interrupt_immediate` injection between the
-// model emitting tool calls and the dispatcher starting. Honor
-// the host's "stop, do this instead" by skipping the pending
-// tool batch — the injection is already in the transcript, so
-// the next iteration's LLM call will see it and the model can
-// decide whether to re-issue, modify, or abandon the call. The
-// post-turn machinery (judge, required-tools, done sentinel) is
-// intentionally bypassed because nothing dispatched; budget is
-// still honored because the LLM call's tokens were spent.
-// Drain async events (long-running tool completions, MCP server
-// progress, command-policy feedback, file-edited nudges, trigger
-// events) BEFORE compaction so the summarizer sees the freshest
-// transcript. Without this, anything that landed between turns
-// would be elided from the summary.
-// Drain again AFTER compaction: when Tier-2 LLM summarization
-// runs it can take 5-30s, and any async producer (tool worker,
-// MCP `notifications/progress`, GitHub PR merge trigger,
-// `command_policy` post-hook) firing in that window must be
-// visible in *this* turn's prompt, not the one after.
+// A SUCCESSFUL terminal hand-back (clean done / a passing verify_completion)
+// must not report a stale current_failure: a run can complete without ever
+// flowing a passing verification result through the fold. Clear the
+// current-failure model on the successful-termination signal (mirrors the
+// host's `final_status.is_empty() || == "done"` success predicate) before
+// projecting it; a stuck / exhausted / suspended run keeps the failure.
 /**
  * agent_loop.
  *

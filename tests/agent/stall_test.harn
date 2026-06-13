@@ -6,7 +6,12 @@
 // that spams `agent_progress` after getting stuck should trip the detector
 // rather than masquerade as activity. A turn that also makes a real tool call
 // is unaffected.
-import { agent_stall_initial_state, agent_stall_observe_tool_calls } from "std/agent/stall"
+import {
+  agent_stall_clear_current_failure,
+  agent_stall_current_failure,
+  agent_stall_initial_state,
+  agent_stall_observe_tool_calls,
+} from "std/agent/stall"
 
 const CONFIG = {enabled: true, no_progress_messages: 3}
 
@@ -111,4 +116,215 @@ pipeline test_text_only_turn_without_parse_errors_still_trips(task) {
   assert(o2.warning == nil)
   let o3 = _observe_text_only(o2.state, 3)
   assert(o3.warning != nil)
+}
+
+/**
+ * Evidence-aware repair loop: __agent_stall_fold_diagnostic purity (#repair).
+ *
+ * The fold is private, so we exercise it through the public observe surface
+ * with `repair_aware: true`. Each observe call returns an observation whose
+ * `.state` is the folded current-failure model. We drive the fold with a
+ * substantive non-edit call ("run") plus a synthetic `prev_dispatch` (the
+ * PRIOR turn's verification result) and the prior turn's `turn_made_edit`.
+ */
+const REPAIR_CONFIG = {enabled: true, repair_aware: true, stuck_same_diagnostic_after: 3, post_edit_reverify: true}
+
+fn _run_call() {
+  return [{name: "run", arguments: {cmd: "test"}}]
+}
+
+fn _fail_dispatch(error_text) {
+  // A failing verification result for tool "run".
+  return [{tool_name: "run", ok: false, error: error_text}]
+}
+
+fn _ok_dispatch() {
+  return [{tool_name: "run", ok: true, result: "all tests pass"}]
+}
+
+/**
+ * Fold one repair turn: observe a substantive "run" call, classifying
+ * `prev_dispatch` (the prior turn's result) with `prior_made_edit`.
+ */
+fn _fold(state, prev_dispatch, prior_made_edit) {
+  return agent_stall_observe_tool_calls(
+    "unit-repair",
+    _run_call(),
+    1,
+    REPAIR_CONFIG,
+    state,
+    true,
+    prev_dispatch,
+    "",
+    false,
+    prior_made_edit,
+  )
+}
+
+pipeline test_fold_first_failure_records_model(task) {
+  // First failing verification: class "fail", streak 1, epoch 0, no edit owed.
+  let o = _fold(agent_stall_initial_state(), _fail_dispatch("boom: assertion X"), false)
+  assert(o.state.last_diagnostic_class == "fail")
+  assert(o.state.same_diagnostic_streak == 1)
+  assert(o.state.write_epoch == 0)
+  assert(!o.state.reverify_owed)
+  assert(o.state.last_diagnostic_snippet == "boom: assertion X")
+  assert(o.warning == nil)
+}
+
+pipeline test_fold_same_failure_no_edit_increments_streak(task) {
+  // Same failure twice with no intervening edit => futile retry, streak grows.
+  let o1 = _fold(agent_stall_initial_state(), _fail_dispatch("boom"), false)
+  assert(o1.state.same_diagnostic_streak == 1)
+  let o2 = _fold(o1.state, _fail_dispatch("boom"), false)
+  assert(o2.state.same_diagnostic_streak == 2)
+  let o3 = _fold(o2.state, _fail_dispatch("boom"), false)
+  // Streak hit stuck_same_diagnostic_after (3) => trip with the new pattern.
+  assert(o3.state.same_diagnostic_streak == 3)
+  assert(o3.warning != nil)
+  assert(o3.warning.pattern == "stuck_same_diagnostic")
+  // The strategy-shift nudge is grounded in the diagnostic snippet.
+  assert(o3.warning.diagnostic_snippet == "boom")
+}
+
+pipeline test_fold_productive_edit_resets_streak(task) {
+  // FALSE-POSITIVE PROOF (signature-keyed): the SIGNATURE is the progress
+  // signal. fail(sigA), an edit bumps the epoch (no result yet, owes a
+  // re-verify), then a DIFFERENT failure (sigB) => the productive edit changed
+  // the error, so the streak resets to 1 and nothing trips. A blind counter
+  // would keep climbing; the evidence-aware model recognizes the progress.
+  let o1 = _fold(agent_stall_initial_state(), _fail_dispatch("boom A"), false)
+  assert(o1.state.same_diagnostic_streak == 1)
+  // The PRIOR turn made a successful edit (turn_made_edit = true). The fold sees
+  // no new verification result this turn (prev_dispatch is the edit's ok result),
+  // so it bumps the epoch and owes a re-verify; the failure model is preserved.
+  let oe = _fold(o1.state, _ok_dispatch(), true)
+  assert(oe.state.write_epoch == 1)
+  assert(oe.state.reverify_owed)
+  assert(oe.state.last_diagnostic_class == "fail")
+  assert(oe.state.same_diagnostic_streak == 1)
+  // A DIFFERENT failure recurs => productive edit, streak resets to 1, no trip.
+  let of = _fold(oe.state, _fail_dispatch("boom B different"), false)
+  assert(of.state.same_diagnostic_streak == 1)
+  assert(of.warning == nil)
+  // The verification result satisfied the owed re-verify.
+  assert(!of.state.reverify_owed)
+}
+
+pipeline test_fold_edit_retest_thrash_increments_streak(task) {
+  // THRASH PROOF (the PRIMARY case): fail(sigA), edit, fail(sigA), edit,
+  // fail(sigA) — separate turns, SAME failure signature across the edits. A
+  // flailing edit that leaves the same error is real thrash, so the streak
+  // advances ACROSS the intervening edits and trips at
+  // stuck_same_diagnostic_after (3). The old epoch-keyed model reset on every
+  // edit and could NEVER trip this case.
+  let o1 = _fold(agent_stall_initial_state(), _fail_dispatch("boom"), false)
+  assert(o1.state.same_diagnostic_streak == 1)
+  // Edit turn: no result yet, owes a re-verify, model + streak preserved.
+  let e1 = _fold(o1.state, _ok_dispatch(), true)
+  assert(e1.state.same_diagnostic_streak == 1)
+  assert(e1.state.reverify_owed)
+  // Same failure recurs after the edit => streak advances to 2 (not reset).
+  let o2 = _fold(e1.state, _fail_dispatch("boom"), false)
+  assert(o2.state.same_diagnostic_streak == 2)
+  assert(!o2.state.reverify_owed)
+  let e2 = _fold(o2.state, _ok_dispatch(), true)
+  assert(e2.state.same_diagnostic_streak == 2)
+  // Same failure recurs again => streak hits 3 => trip.
+  let o3 = _fold(e2.state, _fail_dispatch("boom"), false)
+  assert(o3.state.same_diagnostic_streak == 3)
+  assert(o3.warning != nil)
+  assert(o3.warning.pattern == "stuck_same_diagnostic")
+}
+
+pipeline test_fold_pass_clears_model(task) {
+  // A passing verification clears the current-failure model entirely.
+  let o1 = _fold(agent_stall_initial_state(), _fail_dispatch("boom"), false)
+  let o2 = _fold(o1.state, _fail_dispatch("boom"), false)
+  assert(o2.state.same_diagnostic_streak == 2)
+  let op = _fold(o2.state, _ok_dispatch(), false)
+  assert(op.state.last_diagnostic_class == "pass")
+  assert(op.state.same_diagnostic_streak == 0)
+  assert(!op.state.reverify_owed)
+  assert(!op.state.edit_since_failure)
+  assert(op.warning == nil)
+}
+
+pipeline test_fold_different_failure_resets_streak(task) {
+  // A DIFFERENT failure signature is a different mistake, not a futile retry.
+  let o1 = _fold(agent_stall_initial_state(), _fail_dispatch("boom A"), false)
+  let o2 = _fold(o1.state, _fail_dispatch("boom A"), false)
+  assert(o2.state.same_diagnostic_streak == 2)
+  let o3 = _fold(o2.state, _fail_dispatch("totally different B"), false)
+  assert(o3.state.same_diagnostic_streak == 1)
+  assert(o3.warning == nil)
+}
+
+pipeline test_fold_repair_off_is_inert(task) {
+  // repair_aware:false => the fold is a no-op: no current-failure model, no
+  // new fields populated beyond their initial defaults.
+  let off_config = {enabled: true, repair_aware: false}
+  let o = agent_stall_observe_tool_calls(
+    "unit-repair-off",
+    _run_call(),
+    1,
+    off_config,
+    agent_stall_initial_state(),
+    true,
+    _fail_dispatch("boom"),
+    "",
+    false,
+    false,
+  )
+  assert(o.state.last_diagnostic_class == "")
+  assert(o.state.same_diagnostic_streak == 0)
+  assert(o.warning == nil)
+}
+
+pipeline test_reset_action_preserves_failure_model(task) {
+  // The current-failure model must SURVIVE a tool-stream reset: a different
+  // corrective action does not clear "same root failure". We force a reset by
+  // observing an exempt tool after a recorded failure, and assert the repair
+  // fields persist.
+  let o1 = _fold(agent_stall_initial_state(), _fail_dispatch("boom"), false)
+  let o2 = _fold(o1.state, _fail_dispatch("boom"), false)
+  assert(o2.state.same_diagnostic_streak == 2)
+  assert(o2.state.last_diagnostic_class == "fail")
+  // An exempt tool triggers __agent_stall_reset_action inside the core observe.
+  let reset_config = REPAIR_CONFIG + {exempt_tools: ["search"]}
+  let o3 = agent_stall_observe_tool_calls(
+    "unit-repair",
+    [{name: "search", arguments: {q: "x"}}],
+    3,
+    reset_config,
+    o2.state,
+    true,
+    nil,
+    "",
+    false,
+    false,
+  )
+  // Action-stream fields were reset, but the current-failure model survives.
+  assert(o3.state.last_signature == "")
+  assert(o3.state.last_diagnostic_class == "fail")
+  assert(o3.state.same_diagnostic_streak == 2)
+  assert(o3.state.last_diagnostic_signature == o2.state.last_diagnostic_signature)
+}
+
+pipeline test_clear_current_failure_on_success(task) {
+  // FIX #2: a SUCCESSFUL terminal hand-back must not carry a stale failure. A
+  // run can end (clean done / verify_completion pass) without ever folding a
+  // passing result, leaving last_diagnostic_class == "fail". The loop clears
+  // the model on the successful-termination signal before projecting it.
+  let o1 = _fold(agent_stall_initial_state(), _fail_dispatch("boom"), false)
+  let o2 = _fold(o1.state, _fail_dispatch("boom"), false)
+  assert(o2.state.last_diagnostic_class == "fail")
+  // A live failure projects a current_failure on a STUCK hand-back.
+  assert(agent_stall_current_failure(o2.state) != nil)
+  // Clearing on success drops the stale failure.
+  let cleared = agent_stall_clear_current_failure(o2.state)
+  assert(agent_stall_current_failure(cleared) == nil)
+  assert(cleared.last_diagnostic_class == "pass")
+  assert(cleared.same_diagnostic_streak == 0)
+  assert(!cleared.reverify_owed)
 }

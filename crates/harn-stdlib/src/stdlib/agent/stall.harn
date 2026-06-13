@@ -53,6 +53,11 @@ const STALL_PING_PONG_CYCLES = 6
 // repeated context-window / token-limit errors before tripping.
 const STALL_REPEAT_CONTEXT_WINDOW_ERROR = 2
 
+// Evidence-aware repair loop (#repair-diagnostics): default number of repair
+// turns the SAME diagnostic may recur (same signature, no intervening edit)
+// before the detector trips the "stuck_same_diagnostic" strategy-shift nudge.
+const STALL_STUCK_SAME_DIAGNOSTIC_AFTER = 3
+
 // consecutive un-recovered trips before a hard stop is recommended. A trip
 // "recovers" when a turn produces a step that does not itself trip (the agent
 // broke the loop). Past this many back-to-back trips the detector flags
@@ -68,6 +73,24 @@ const STALL_HARD_STOP_AFTER_TRIPS = 3
 // tool call is unaffected — the real call carries the action stream.
 const SOFT_PROGRESS_TOOLS = ["agent_progress"]
 
+/**
+ * Evidence-aware repair loop (#repair-diagnostics), spanning AgentStallConfig /
+ * AgentStallWarning / AgentStallState below. Default OFF: when `repair_aware`
+ * is false every repair field is inert and the detector behaves exactly as
+ * before. When ON, the loop tracks a current-failure model (signature + epoch)
+ * instead of a blind counter, forces a post-edit re-verify, and nudges a
+ * strategy shift after the same diagnostic recurs across
+ * `stuck_same_diagnostic_after` repair turns.
+ *   - Config knobs: repair_aware / stuck_same_diagnostic_after / post_edit_reverify.
+ *   - Warning extras (only on the "stuck_same_diagnostic" pattern):
+ *     diagnostic_class / diagnostic_signature / diagnostic_snippet.
+ *   - State (the current-failure model — folded by __agent_stall_fold_diagnostic
+ *     from the turn's verification result, and deliberately NOT cleared by
+ *     __agent_stall_reset_action so a different corrective action does not clear
+ *     "same root failure"): last_diagnostic_class / last_diagnostic_signature /
+ *     last_diagnostic_snippet / write_epoch / same_diagnostic_streak /
+ *     edit_since_failure / reverify_owed.
+ */
 type AgentStallConfig = {
   enabled: bool,
   threshold: int,
@@ -81,6 +104,9 @@ type AgentStallConfig = {
   ping_pong_cycles: int,
   repeat_context_window_error: int,
   hard_stop_after_trips: int,
+  repair_aware: bool,
+  stuck_same_diagnostic_after: int,
+  post_edit_reverify: bool,
 }
 
 type AgentStallWarning = {
@@ -96,6 +122,9 @@ type AgentStallWarning = {
   consecutive_trips: int,
   hard_stop: bool,
   arguments?: dict,
+  diagnostic_class?: string,
+  diagnostic_signature?: string,
+  diagnostic_snippet?: string,
 }
 
 type AgentStallState = {
@@ -115,6 +144,13 @@ type AgentStallState = {
   ping_pong_alternations: int,
   consecutive_trips: int,
   hard_stop: bool,
+  last_diagnostic_class: string,
+  last_diagnostic_signature: string,
+  last_diagnostic_snippet: string,
+  write_epoch: int,
+  same_diagnostic_streak: int,
+  edit_since_failure: bool,
+  reverify_owed: bool,
 }
 
 type AgentStallObservation = {
@@ -167,6 +203,9 @@ fn __agent_stall_default_config() -> AgentStallConfig {
     ping_pong_cycles: STALL_PING_PONG_CYCLES,
     repeat_context_window_error: STALL_REPEAT_CONTEXT_WINDOW_ERROR,
     hard_stop_after_trips: STALL_HARD_STOP_AFTER_TRIPS,
+    repair_aware: false,
+    stuck_same_diagnostic_after: STALL_STUCK_SAME_DIAGNOSTIC_AFTER,
+    post_edit_reverify: true,
   }
 }
 
@@ -218,6 +257,9 @@ fn __agent_stall_config(value) -> AgentStallConfig {
     ping_pong_cycles: __agent_stall_int(value?.ping_pong_cycles, STALL_PING_PONG_CYCLES, 2),
     repeat_context_window_error: __agent_stall_int(value?.repeat_context_window_error, STALL_REPEAT_CONTEXT_WINDOW_ERROR, 1),
     hard_stop_after_trips: __agent_stall_int(value?.hard_stop_after_trips, STALL_HARD_STOP_AFTER_TRIPS, 1),
+    repair_aware: __agent_stall_bool(value?.repair_aware, false, "repair_aware"),
+    stuck_same_diagnostic_after: __agent_stall_int(value?.stuck_same_diagnostic_after, STALL_STUCK_SAME_DIAGNOSTIC_AFTER, 2),
+    post_edit_reverify: __agent_stall_bool(value?.post_edit_reverify, true, "post_edit_reverify"),
   }
 }
 
@@ -246,6 +288,13 @@ pub fn agent_stall_initial_state() -> AgentStallState {
     ping_pong_alternations: 0,
     consecutive_trips: 0,
     hard_stop: false,
+    last_diagnostic_class: "",
+    last_diagnostic_signature: "",
+    last_diagnostic_snippet: "",
+    write_epoch: 0,
+    same_diagnostic_streak: 0,
+    edit_since_failure: false,
+    reverify_owed: false,
   }
 }
 
@@ -337,6 +386,155 @@ fn __agent_stall_result_outcome(result) -> dict {
 }
 
 /**
+ * Short, human-readable evidence snippet for a failing result (used to ground
+ * the strategy-shift nudge and the terminal current-failure payload). Never
+ * hashed — the byte-stable signature stays in __agent_stall_result_outcome.
+ */
+fn __agent_stall_result_snippet(result) -> string {
+  if __agent_stall_result_ok(result) {
+    return ""
+  }
+  let text = to_string(result?.error ?? result?.message ?? result?.result ?? "")
+  let normalized = trim(text)
+  if len(normalized) <= 240 {
+    return normalized
+  }
+  return normalized.slice(0, 240)
+}
+
+/**
+ * Pick the representative verification result for a turn from its dispatch:
+ * the FIRST failing result (the diagnostic the agent must fix) if any,
+ * otherwise the first result (a "pass" turn). Returns nil when there is no
+ * dispatch result to classify (the turn made no observed tool call), so the
+ * caller leaves the current-failure model untouched.
+ */
+fn __agent_stall_turn_result(prev_dispatch) {
+  if prev_dispatch == nil {
+    return nil
+  }
+  let results = if type_of(prev_dispatch) == "list" {
+    prev_dispatch
+  } else {
+    prev_dispatch?.results ?? []
+  }
+  var first = nil
+  for result in results {
+    if !__agent_stall_result_ok(result) {
+      return result
+    }
+    if first == nil {
+      first = result
+    }
+  }
+  return first
+}
+
+/**
+ * __agent_stall_fold_diagnostic folds the current-failure model for one turn.
+ * It is a PURE function of (state, prev_dispatch, turn_made_edit):
+ *
+ *  - It classifies the turn's representative verification result (the first
+ *    failing dispatch result, else the first result) into a ProbeOutcome-shaped
+ *    class and a byte-stable signature via __agent_stall_result_outcome (never
+ *    reimplementing the sha256/normalization).
+ *  - On a successful workspace-mutating edit this turn it bumps `write_epoch`
+ *    (which arms the post-edit re-verify mandate the loop honors).
+ *  - The failure SIGNATURE is the progress signal: a productive edit changes
+ *    the error (signature changes => streak resets — legitimate progress, no
+ *    false positive); a flailing edit leaves the SAME error (signature
+ *    identical => streak advances — real thrash). So the streak advances on the
+ *    same signature REGARDLESS of intervening edits.
+ *  - It advances/resets `same_diagnostic_streak`:
+ *      same failure signature  => futile  (streak + 1), even across edits
+ *      different signature      => reset to 1 (a different mistake, or progress)
+ *      "pass"                   => clear streak, reverify_owed, edit_since_failure
+ *
+ * Result handling:
+ *  - a FAILING result  => fold the streak as above; this is verification
+ *    evidence, so any owed re-verify is satisfied (clear reverify_owed /
+ *    edit_since_failure). A turn that BOTH edits and re-tests still classifies
+ *    here: __agent_stall_turn_result returns the FIRST failing result, so the
+ *    re-test's failure is seen past the edit's own "ok" (the edit bumps the
+ *    epoch; the fail still advances the streak).
+ *  - a non-failing result, NOT an edit turn => a genuine passing verification
+ *    clears the current-failure model.
+ *  - a non-failing result on an EDIT turn => the result is the edit's own
+ *    success, NOT verification of the failure. Owe a re-verify and preserve the
+ *    failure model (same as the no-result edit case).
+ *  - no result (prev_dispatch nil/empty) => if this turn made an edit on top of
+ *    a live failure, owe a re-verify (reverify_owed / edit_since_failure) and
+ *    bump the epoch; otherwise leave the model untouched (epoch still bumps on
+ *    an edit).
+ */
+fn __agent_stall_fold_diagnostic(state: AgentStallState, prev_dispatch, turn_made_edit: bool) -> AgentStallState {
+  // Edit bookkeeping first: a successful workspace mutation advances the epoch,
+  // which arms the post-edit re-verify mandate in the loop.
+  let new_write_epoch = if turn_made_edit {
+    state.write_epoch + 1
+  } else {
+    state.write_epoch
+  }
+  let result = __agent_stall_turn_result(prev_dispatch)
+  let result_is_fail = result != nil && !__agent_stall_result_ok(result)
+  if !result_is_fail {
+    // No FAILING verification this turn. A successful edit on top of a live
+    // failure is NOT proof the failure is resolved (its "ok" is the edit
+    // succeeding, not the check passing): owe a re-verify and preserve the
+    // current-failure model so the next re-fail of the SAME diagnostic is
+    // recognized across the edit. A genuine passing result on a NON-edit turn
+    // is real verification evidence and clears the model.
+    if turn_made_edit && state.last_diagnostic_class == "fail" {
+      return state
+        + {write_epoch: new_write_epoch, edit_since_failure: true, reverify_owed: true}
+    }
+    if result == nil {
+      // No verification evidence and no edit-on-failure: leave the model alone.
+      return state + {write_epoch: new_write_epoch}
+    }
+    // A passing verification clears the current-failure model.
+    let pass_outcome = __agent_stall_result_outcome(result)
+    return state
+      + {
+      last_diagnostic_class: "pass",
+      last_diagnostic_signature: pass_outcome.signature,
+      last_diagnostic_snippet: "",
+      write_epoch: new_write_epoch,
+      same_diagnostic_streak: 0,
+      edit_since_failure: false,
+      reverify_owed: false,
+    }
+  }
+  // result_is_fail: fold against the prior failure model. The signature
+  // is the progress signal, so the streak advances on the SAME signature
+  // regardless of whether an edit intervened — a flailing edit that leaves the
+  // same error counts as thrash, while a productive edit changes the signature
+  // and resets the streak (the false-positive safety property).
+  let outcome = __agent_stall_result_outcome(result)
+  let signature = outcome.signature
+  let same_signature = signature == state.last_diagnostic_signature
+    && state.last_diagnostic_class == "fail"
+  let new_streak = if same_signature {
+    state.same_diagnostic_streak + 1
+  } else {
+    1
+  }
+  // This is a verification result, so the post-edit re-verify mandate (if any)
+  // has now been satisfied: clear reverify_owed and the edit-since marker. The
+  // NEXT edit after this failure re-arms them.
+  return state
+    + {
+    last_diagnostic_class: "fail",
+    last_diagnostic_signature: signature,
+    last_diagnostic_snippet: __agent_stall_result_snippet(result),
+    write_epoch: new_write_epoch,
+    same_diagnostic_streak: new_streak,
+    edit_since_failure: false,
+    reverify_owed: false,
+  }
+}
+
+/**
  * Find the dispatch result for the given tool name. The detector tracks one
  * action at a time, so the first matching result is the relevant observation.
  */
@@ -360,6 +558,26 @@ fn __agent_stall_outcome_for(prev_dispatch, tool_name: string) {
 fn __agent_stall_feedback_text(warning: AgentStallWarning) -> string {
   let pattern = warning.pattern
   let count = to_string(warning.count)
+  // Evidence-aware repair loop: a strategy-shift nudge grounded in the actual
+  // diagnostic, not a blind "you repeated yourself" counter. This fires when
+  // the same failure has survived `stuck_same_diagnostic_after` repair turns
+  // with no intervening successful edit (or with edits that did not change the
+  // failure), so the right move is to change approach, not to retry harder.
+  if pattern == "stuck_same_diagnostic" {
+    let snippet = to_string(warning.diagnostic_snippet ?? "")
+    let evidence = if snippet != "" {
+      " The failing evidence is unchanged:\n" + snippet
+    } else {
+      ""
+    }
+    return "Repair diagnostic: the same failure has persisted across "
+      + count
+      + " repair turns without changing."
+      + evidence
+      + "\nStop retrying the same fix. Re-read the relevant code, form a NEW hypothesis "
+      + "about the root cause, or gather different evidence before editing again. If you "
+      + "cannot make progress, report this specific blocker instead of repeating."
+  }
   let core = if pattern == "repeated_same_observation" {
     "the action `" + warning.tool_name + "` produced the same observation " + count
       + " times in a row"
@@ -662,28 +880,62 @@ fn __agent_stall_process_call(
     context_window_error_streak: new_context_streak,
   }
   let ping_pong_cycles = next_state.ping_pong_alternations / 2
-  let trip = if new_context_streak >= config.repeat_context_window_error {
+  let trip = __agent_stall_classify_trip(
+    config,
     {
+      context_streak: new_context_streak,
+      same_error_streak: new_same_error_streak,
+      same_observation_streak: new_same_observation_streak,
+      outcome_kind: outcome_kind,
+      ping_pong_cycles: ping_pong_cycles,
+      outcome_present: outcome != nil,
+      streak: streak,
+    },
+  )
+  return {state: next_state, trip: trip}
+}
+
+/**
+ * Decide which stall condition, if any, tripped for a single processed call.
+ * Extracted from `__agent_stall_process_call` to keep both within the
+ * cyclomatic-complexity budget. Trip ordering: context-window, repeated error,
+ * repeated identical observation, ping-pong, then the legacy signature-only
+ * threshold. When the evidence-aware repair loop is enabled it OWNS the
+ * repeated-failure semantics (same diagnostic across repair turns) via the
+ * diagnostic-grounded `stuck_same_diagnostic` pattern in the repair overlay, so
+ * the legacy `repeated_error` / `repeated_same_observation` trips are suppressed
+ * here (no double-fire; the richer repair nudge wins). Context-window and
+ * ping-pong remain — they are orthogonal failure modes the repair model does
+ * not cover.
+ */
+fn __agent_stall_classify_trip(config: AgentStallConfig, s) {
+  let repair_owns_repeat = config.repair_aware
+  if s.context_streak >= config.repeat_context_window_error {
+    return {
       pattern: "repeated_context_window_error",
-      count: new_context_streak,
+      count: s.context_streak,
       threshold: config.repeat_context_window_error,
     }
-  } else if new_same_error_streak >= config.repeat_same_error {
-    {pattern: "repeated_error", count: new_same_error_streak, threshold: config.repeat_same_error}
-  } else if outcome_kind == "ok" && new_same_observation_streak >= config.repeat_same_observation {
-    {
+  }
+  if !repair_owns_repeat && s.same_error_streak >= config.repeat_same_error {
+    return {pattern: "repeated_error", count: s.same_error_streak, threshold: config.repeat_same_error}
+  }
+  if !repair_owns_repeat
+    && s.outcome_kind == "ok"
+    && s.same_observation_streak >= config.repeat_same_observation {
+    return {
       pattern: "repeated_same_observation",
-      count: new_same_observation_streak,
+      count: s.same_observation_streak,
       threshold: config.repeat_same_observation,
     }
-  } else if ping_pong_cycles >= config.ping_pong_cycles {
-    {pattern: "ping_pong", count: ping_pong_cycles, threshold: config.ping_pong_cycles}
-  } else if outcome == nil && streak >= config.threshold {
-    {pattern: "repeated_same_signature", count: streak, threshold: config.threshold}
-  } else {
-    nil
   }
-  return {state: next_state, trip: trip}
+  if s.ping_pong_cycles >= config.ping_pong_cycles {
+    return {pattern: "ping_pong", count: s.ping_pong_cycles, threshold: config.ping_pong_cycles}
+  }
+  if !s.outcome_present && s.streak >= config.threshold {
+    return {pattern: "repeated_same_signature", count: s.streak, threshold: config.threshold}
+  }
+  return nil
 }
 
 /**
@@ -703,7 +955,7 @@ fn __agent_stall_process_call(
  * @errors: [agent_loop]
  * @api_stability: experimental
  */
-pub fn agent_stall_observe_tool_calls(
+fn __agent_stall_observe_core(
   session_id: string,
   tool_calls: list,
   iteration: int,
@@ -811,7 +1063,188 @@ pub fn agent_stall_observe_tool_calls(
 }
 
 /**
- * agent_stall_apply_result adds stall diagnostics to an agent-loop result.
+ * Evidence-aware repair overlay (#repair-diagnostics). Default OFF. When
+ * `repair_aware` is enabled this:
+ *   1. folds the current-failure model from the PRIOR turn's verification
+ *      result + whether that turn made a successful edit (turn_made_edit), and
+ *   2. trips the "stuck_same_diagnostic" strategy-shift nudge when the same
+ *      diagnostic has survived `stuck_same_diagnostic_after` repair turns.
+ * The trip rides the EXISTING `agent_loop_stall_warning` event +
+ * `__agent_stall_register_trip` escalation; no new event type is introduced.
+ * When the core observation already produced a warning this turn we keep it
+ * and only fold the model (we do not stack two warnings in one turn).
+ */
+fn __agent_stall_apply_repair(
+  session_id: string,
+  config: AgentStallConfig,
+  observation: AgentStallObservation,
+  iteration: int,
+  prev_dispatch,
+  turn_made_edit: bool,
+  defer_feedback: bool,
+) -> AgentStallObservation {
+  if !config.repair_aware {
+    return observation
+  }
+  let folded = __agent_stall_fold_diagnostic(observation.state, prev_dispatch, turn_made_edit)
+  // Trip ONCE when the streak first crosses the threshold, so the strategy-shift
+  // nudge fires a single time per stuck episode rather than on every subsequent
+  // identical failure. Require that the streak ADVANCED this turn (a fresh
+  // same-signature failure was folded) — an edit/owe turn preserves the streak
+  // at the threshold without re-folding a failure, and must not re-trip. A later
+  // streak reset (a different/passing signature) re-arms the trip for the next
+  // genuinely-stuck episode. Also require that no other stall pattern already
+  // fired this turn (avoid double-nudging).
+  let streak_advanced = folded.same_diagnostic_streak > observation.state.same_diagnostic_streak
+  let should_trip = folded.same_diagnostic_streak == config.stuck_same_diagnostic_after
+    && streak_advanced
+    && observation.warning == nil
+  if !should_trip {
+    return observation + {state: folded}
+  }
+  let tripped = __agent_stall_register_trip(folded, config)
+  let warning = __agent_stall_warning_record(
+    iteration,
+    "",
+    {},
+    tripped.last_diagnostic_signature,
+    "stuck_same_diagnostic",
+    tripped.same_diagnostic_streak,
+    tripped.consecutive_trips,
+    tripped.hard_stop,
+    config,
+    config.stuck_same_diagnostic_after,
+  )
+    + {
+    diagnostic_class: tripped.last_diagnostic_class,
+    diagnostic_signature: tripped.last_diagnostic_signature,
+    diagnostic_snippet: tripped.last_diagnostic_snippet,
+  }
+  let emitted = __agent_stall_maybe_emit(session_id, warning, config, tripped, defer_feedback)
+  let next_state = emitted.state + {warnings: emitted.state.warnings.push(warning)}
+  return {
+    state: next_state,
+    enabled: true,
+    warning: warning,
+    feedback_deferred: emitted.feedback_deferred ?? false,
+    config: config,
+    hard_stop: next_state.hard_stop,
+  }
+}
+
+/**
+ * agent_stall_observe_tool_calls detects degenerate agent loops and, when the
+ * evidence-aware repair loop is enabled (`stall_diagnostics.repair_aware`),
+ * folds a current-failure model and nudges a strategy shift on a stuck
+ * diagnostic. `turn_made_edit` reports whether the PRIOR turn (the one
+ * `prev_dispatch` describes) made a successful workspace-mutating edit; it is
+ * inert unless `repair_aware` is set.
+ *
+ * @effects: [agent]
+ * @errors: [agent_loop]
+ * @api_stability: experimental
+ */
+pub fn agent_stall_observe_tool_calls(
+  session_id: string,
+  tool_calls: list,
+  iteration: int,
+  raw_config,
+  state: AgentStallState,
+  defer_feedback: bool,
+  prev_dispatch = nil,
+  turn_text = "",
+  had_parse_errors = false,
+  turn_made_edit = false,
+) -> AgentStallObservation {
+  let observation = __agent_stall_observe_core(
+    session_id,
+    tool_calls,
+    iteration,
+    raw_config,
+    state,
+    defer_feedback,
+    prev_dispatch,
+    turn_text,
+    had_parse_errors,
+  )
+  if !observation.enabled {
+    return observation
+  }
+  return __agent_stall_apply_repair(
+    session_id,
+    observation.config,
+    observation,
+    iteration,
+    prev_dispatch,
+    turn_made_edit,
+    defer_feedback,
+  )
+}
+
+/**
+ * agent_stall_repair_config exposes the parsed evidence-aware repair knobs
+ * (repair_aware / post_edit_reverify / stuck_same_diagnostic_after) so the
+ * agent loop can decide whether to honor the post-edit re-verify mandate
+ * without reaching into the private config parser.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn agent_stall_repair_config(raw_config) -> dict {
+  let config = __agent_stall_config(raw_config)
+  return {
+    repair_aware: config.repair_aware,
+    post_edit_reverify: config.post_edit_reverify,
+    stuck_same_diagnostic_after: config.stuck_same_diagnostic_after,
+  }
+}
+
+/**
+ * agent_stall_current_failure projects the current-failure model into a
+ * stop-payload block (nil when there is no live failure). Used to enrich the
+ * terminal `stuck` and budget-exhaustion payloads with WHAT failed, not just
+ * "budget exhausted".
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn agent_stall_current_failure(stall_state: AgentStallState) {
+  if stall_state.last_diagnostic_class != "fail" {
+    return nil
+  }
+  return {
+    class: stall_state.last_diagnostic_class,
+    signature: stall_state.last_diagnostic_signature,
+    snippet: stall_state.last_diagnostic_snippet,
+    same_diagnostic_streak: stall_state.same_diagnostic_streak,
+  }
+}
+
+/**
+ * agent_stall_clear_current_failure clears the current-failure model so a
+ * SUCCESSFUL terminal hand-back (clean done / a passing `verify_completion`)
+ * does not report a stale `current_failure`. A run can complete without ever
+ * flowing a passing verification result through the fold (e.g. the loop stops
+ * `done` after the model's prose, or `verify_completion` passes out-of-band),
+ * which would otherwise leave `last_diagnostic_class == "fail"`. The loop calls
+ * this on the successful-termination signal before `agent_stall_apply_result`.
+ * A stuck / exhausted run does NOT call this, so it still carries the failure.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn agent_stall_clear_current_failure(stall_state: AgentStallState) -> AgentStallState {
+  return stall_state
+    + {last_diagnostic_class: "pass", same_diagnostic_streak: 0, reverify_owed: false}
+}
+
+/**
+ * agent_stall_apply_result adds stall diagnostics to an agent-loop result,
+ * including the evidence-aware repair loop's `current_failure` summary on the
+ * terminal hand-back when a live failure remains.
  *
  * @effects: []
  * @errors: []
@@ -821,12 +1254,17 @@ pub fn agent_stall_apply_result(result: dict, stall_enabled: bool, stall_state: 
   if !stall_enabled && len(stall_state.warnings) == 0 {
     return result
   }
-  return result
+  let base = result
     + {
     repeated_tool_calls: stall_state.repeated_tool_calls,
     stall_warnings: stall_state.warnings,
     suspected_loop: len(stall_state.warnings) > 0,
   }
+  let current_failure = agent_stall_current_failure(stall_state)
+  if current_failure == nil {
+    return base
+  }
+  return base + {current_failure: current_failure}
 }
 
 fn __agent_done_judge_stall_cadence(opts) {

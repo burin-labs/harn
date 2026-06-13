@@ -232,7 +232,23 @@ fn __tool_using_defaults(kind) {
     done_judge: nil,
     native_tool_fallback: "allow_once",
     max_nudges: max_nudges,
-    stall_diagnostics: {enabled: true, threshold: 3, inject_feedback: true, max_feedback: 1},
+    // The repair knobs ride inside `stall_diagnostics` (where
+    // `__agent_stall_config` parses them) and default OFF, so the preset is
+    // backward-compatible: `repair_aware:false` makes every repair field inert.
+    stall_diagnostics: {
+      enabled: true,
+      threshold: 3,
+      inject_feedback: true,
+      max_feedback: 1,
+      repair_aware: false,
+      stuck_same_diagnostic_after: 3,
+      post_edit_reverify: true,
+    },
+    // Discovery surface (#repair-diagnostics). Mirrors the repair knobs above
+    // so consumers (e.g. Burin, via a feature flag) can find and opt into the
+    // evidence-aware repair loop without spelunking `stall_diagnostics`.
+    // Subsumes Burin's futile-retry-guard.harn.
+    repair_diagnostics: {repair_aware: false, stuck_same_diagnostic_after: 3, post_edit_reverify: true},
   }
 }
 

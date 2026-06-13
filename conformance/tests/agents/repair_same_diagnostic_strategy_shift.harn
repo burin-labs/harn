@@ -1,0 +1,89 @@
+import { agent_capture_events } from "std/agent/events"
+import { agent_session_messages } from "std/agent/state"
+import { llm_text, with_llm_script } from "std/testing"
+
+/**
+ * Evidence-aware repair loop (#repair-diagnostics): when the SAME diagnostic
+ * recurs across `stuck_same_diagnostic_after` repair turns with no intervening
+ * edit, the detector trips a single `stuck_same_diagnostic` stall warning and
+ * injects a strategy-shift nudge GROUNDED in the diagnostic snippet — not a
+ * blind "you repeated yourself" counter.
+ *
+ * Note: the current-failure model is folded from the PRIOR turn's verification
+ * result, so the streak lags the action stream by one turn. With
+ * `stuck_same_diagnostic_after: 3` the trip fires after the 4th identical
+ * failing `run_test` turn (folding the 3rd same-failure observation).
+ */
+fn events_of(events, kind) {
+  return events.filter({ event -> event.type == kind })
+}
+
+fn repair_tools() {
+  var tools = tool_registry()
+  tools = tool_define(
+    tools,
+    "run_test",
+    "Run the test suite",
+    {
+      handler: { _args ->
+        throw "AssertionError: expected 5 got 4"
+      },
+      parameters: {},
+      returns: {type: "string"},
+      annotations: {kind: "read"},
+    },
+  )
+  return tools
+}
+
+fn run_test_call(id) {
+  return {text: "", tool_calls: [{id: id, name: "run_test", arguments: {}}]}
+}
+
+pipeline default() {
+  with_llm_script(
+    [
+      run_test_call("r1"),
+      run_test_call("r2"),
+      run_test_call("r3"),
+      run_test_call("r4"),
+      run_test_call("r5"),
+      llm_text("Giving up. ##DONE##"),
+    ],
+    { ->
+      let session = "repair-strategy-shift-" + uuid()
+      let captured = agent_capture_events(
+        session,
+        fn() { return agent_loop(
+          "Make the failing test pass.",
+          nil,
+          {
+            provider: "mock",
+            tools: repair_tools(),
+            tool_format: "native",
+            loop_until_done: true,
+            max_iterations: 8,
+            session_id: session,
+            done_sentinel: "##DONE##",
+            stall_diagnostics: {
+              enabled: true,
+              repair_aware: true,
+              stuck_same_diagnostic_after: 3,
+              inject_feedback: true,
+              max_feedback: 1,
+            },
+          },
+        ) },
+      )
+      let stalls = events_of(captured.events, "agent_loop_stall_warning")
+      let repair_stalls = stalls.filter({ s -> s.warning.pattern == "stuck_same_diagnostic" })
+      __io_println(len(repair_stalls))
+      __io_println(repair_stalls[0].warning.pattern)
+      __io_println(repair_stalls[0].warning.count)
+      __io_println(len(stalls.filter({ s -> s.warning.pattern == "repeated_error" })))
+      let messages = json_stringify(agent_session_messages(session))
+      __io_println(contains(messages, "AssertionError: expected 5 got 4"))
+      __io_println(contains(messages, "Repair diagnostic"))
+    },
+  )
+}
