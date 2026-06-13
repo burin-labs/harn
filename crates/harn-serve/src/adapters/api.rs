@@ -833,11 +833,7 @@ async fn create_workspace(
         return response;
     }
     let Ok(input) = parse_json_body(&body) else {
-        return api_error(
-            StatusCode::BAD_REQUEST,
-            "invalid_json",
-            "request body must be JSON",
-        );
+        return invalid_json_response();
     };
     let now = now_rfc3339();
     let id = format!("workspace_{}", Uuid::now_v7());
@@ -896,11 +892,7 @@ async fn update_workspace(
         return response;
     }
     let Ok(input) = parse_json_body(&body) else {
-        return api_error(
-            StatusCode::BAD_REQUEST,
-            "invalid_json",
-            "request body must be JSON",
-        );
+        return invalid_json_response();
     };
     let mut inner = state.inner.lock().expect("api state poisoned");
     let Some(workspace) = inner.workspaces.get_mut(&workspace_id) else {
@@ -1000,11 +992,7 @@ async fn write_workspace_file(
         None => return api_error(StatusCode::NOT_FOUND, "not_found", "workspace not found"),
     };
     let Ok(input) = parse_json_body(&body) else {
-        return api_error(
-            StatusCode::BAD_REQUEST,
-            "invalid_json",
-            "request body must be JSON",
-        );
+        return invalid_json_response();
     };
     let path = input
         .get("path")
@@ -1159,11 +1147,7 @@ async fn update_session(
         return response;
     }
     let Ok(input) = parse_json_body(&body) else {
-        return api_error(
-            StatusCode::BAD_REQUEST,
-            "invalid_json",
-            "request body must be JSON",
-        );
+        return invalid_json_response();
     };
     let session = {
         let mut inner = state.inner.lock().expect("api state poisoned");
@@ -1275,11 +1259,7 @@ async fn truncate_session(
         return response;
     }
     let Ok(input) = parse_json_body(&body) else {
-        return api_error(
-            StatusCode::BAD_REQUEST,
-            "invalid_json",
-            "request body must be JSON",
-        );
+        return invalid_json_response();
     };
     let keep_first = match input
         .get("keep_first")
@@ -1401,11 +1381,7 @@ async fn append_session_message(
         return response;
     }
     let Ok(input) = parse_json_body(&body) else {
-        return api_error(
-            StatusCode::BAD_REQUEST,
-            "invalid_json",
-            "request body must be JSON",
-        );
+        return invalid_json_response();
     };
     let message_input = input.get("message").cloned().unwrap_or(input.clone());
     let message = message_resource(&session_id, None, message_input.clone());
@@ -1499,11 +1475,7 @@ async fn submit_task_inner(
         return response;
     }
     let Ok(input) = parse_json_body(&body) else {
-        return api_error(
-            StatusCode::BAD_REQUEST,
-            "invalid_json",
-            "request body must be JSON",
-        );
+        return invalid_json_response();
     };
     let Some(session_id) = path_session_id.or_else(|| {
         input
@@ -1908,11 +1880,7 @@ async fn respond_permission_request(
         return response;
     }
     let Ok(input) = parse_json_body(&body) else {
-        return api_error(
-            StatusCode::BAD_REQUEST,
-            "invalid_json",
-            "request body must be JSON",
-        );
+        return invalid_json_response();
     };
     let approved = input
         .get("approved")
@@ -2147,11 +2115,7 @@ async fn put_permissions_policy(
         return response;
     }
     let Ok(input) = parse_json_body(&body) else {
-        return api_error(
-            StatusCode::BAD_REQUEST,
-            "invalid_json",
-            "request body must be JSON",
-        );
+        return invalid_json_response();
     };
     let policy_value = input.get("policy").cloned().unwrap_or(input.clone());
     let policy: PermissionPolicy = match serde_json::from_value(policy_value) {
@@ -2207,11 +2171,7 @@ async fn create_permission_rule(
         return response;
     }
     let Ok(input) = parse_json_body(&body) else {
-        return api_error(
-            StatusCode::BAD_REQUEST,
-            "invalid_json",
-            "request body must be JSON",
-        );
+        return invalid_json_response();
     };
     let rule: RememberRule = match serde_json::from_value(input) {
         Ok(rule) => rule,
@@ -2290,11 +2250,7 @@ async fn check_permission(
         return response;
     }
     let Ok(input) = parse_json_body(&body) else {
-        return api_error(
-            StatusCode::BAD_REQUEST,
-            "invalid_json",
-            "request body must be JSON",
-        );
+        return invalid_json_response();
     };
     let mut request: PermissionRequest = match serde_json::from_value(input) {
         Ok(request) => request,
@@ -2372,6 +2328,15 @@ fn forbidden_api_error(required: &BTreeSet<String>, granted: &BTreeSet<String>) 
         );
     }
     (StatusCode::FORBIDDEN, Json(json!({ "error": body }))).into_response()
+}
+
+/// 400 response for a request body that failed to parse as JSON.
+fn invalid_json_response() -> Response {
+    api_error(
+        StatusCode::BAD_REQUEST,
+        "invalid_json",
+        "request body must be JSON",
+    )
 }
 
 fn parse_json_body(body: &Bytes) -> Result<Value, serde_json::Error> {

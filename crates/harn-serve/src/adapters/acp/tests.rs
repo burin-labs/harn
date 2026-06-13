@@ -9,7 +9,6 @@ use super::{
 };
 use crate::{ApiKeyAuthConfig, AuthMethodConfig, AuthPolicy};
 use harn_vm::visible_text::VisibleTextState;
-use harn_vm::VmDictExt;
 use harn_vm::VmValue;
 use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicU64, Ordering};
