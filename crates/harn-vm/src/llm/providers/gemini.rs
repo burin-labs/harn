@@ -28,30 +28,36 @@ impl LlmProviderChat for GeminiProvider {
     }
 }
 
-fn gemini_supports_thinking_config(model: &str) -> bool {
-    let model = model.to_ascii_lowercase();
-    model.contains("gemini-2.5")
+// Per-model Gemini thinking quirks are read from the capability matrix
+// (capabilities.toml `[[provider.gemini]]` rows) instead of hard-coded
+// `model.contains(...)` branches here:
+//   * thinking-config support  -> the row declares effort in `thinking_modes`
+//     (only the gemini-2.5* rows do; gemma / older gemini do not).
+//   * can disable thinking     -> `reasoning_disable_supported` (Flash true,
+//     Pro false).
+//   * high/xhigh budget ceiling -> `max_thinking_budget` (Flash 24576, Pro
+//     32768).
+fn gemini_supports_thinking_config(caps: &crate::llm::capabilities::Capabilities) -> bool {
+    caps.thinking_modes.iter().any(|mode| mode == "effort")
 }
 
-fn gemini_max_thinking_budget(model: &str) -> i64 {
-    if model.to_ascii_lowercase().contains("flash") {
-        24_576
-    } else {
-        32_768
-    }
+fn gemini_max_thinking_budget(caps: &crate::llm::capabilities::Capabilities) -> i64 {
+    caps.max_thinking_budget.unwrap_or(32_768)
 }
 
-fn gemini_can_disable_thinking(model: &str) -> bool {
-    let model = model.to_ascii_lowercase();
-    model.contains("flash") || model.contains("robotics")
+fn gemini_can_disable_thinking(caps: &crate::llm::capabilities::Capabilities) -> bool {
+    caps.reasoning_disable_supported
 }
 
-fn gemini_thinking_budget(model: &str, thinking: &ThinkingConfig) -> Option<i64> {
-    if !gemini_supports_thinking_config(model) {
+fn gemini_thinking_budget(
+    caps: &crate::llm::capabilities::Capabilities,
+    thinking: &ThinkingConfig,
+) -> Option<i64> {
+    if !gemini_supports_thinking_config(caps) {
         return None;
     }
     match thinking {
-        ThinkingConfig::Disabled => gemini_can_disable_thinking(model).then_some(0),
+        ThinkingConfig::Disabled => gemini_can_disable_thinking(caps).then_some(0),
         ThinkingConfig::Enabled {
             budget_tokens: Some(tokens),
         } => Some((*tokens).into()),
@@ -61,13 +67,13 @@ fn gemini_thinking_budget(model: &str, thinking: &ThinkingConfig) -> Option<i64>
         | ThinkingConfig::Adaptive => Some(-1),
         ThinkingConfig::Effort { level } => Some(match level {
             ReasoningEffort::None => {
-                return gemini_can_disable_thinking(model).then_some(0);
+                return gemini_can_disable_thinking(caps).then_some(0);
             }
             ReasoningEffort::Minimal => 1_024,
             ReasoningEffort::Low => 1_024,
             ReasoningEffort::Medium => 8_192,
-            ReasoningEffort::High => gemini_max_thinking_budget(model),
-            ReasoningEffort::XHigh => gemini_max_thinking_budget(model),
+            ReasoningEffort::High => gemini_max_thinking_budget(caps),
+            ReasoningEffort::XHigh => gemini_max_thinking_budget(caps),
         }),
     }
 }
@@ -127,7 +133,8 @@ impl GeminiProvider {
         if let Some(stop) = &opts.stop {
             generation_config.insert("stopSequences".to_string(), serde_json::json!(stop));
         }
-        if let Some(budget) = gemini_thinking_budget(&opts.model, &opts.thinking) {
+        let caps = crate::llm::capabilities::lookup("gemini", &opts.model);
+        if let Some(budget) = gemini_thinking_budget(&caps, &opts.thinking) {
             generation_config.insert(
                 "thinkingConfig".to_string(),
                 serde_json::json!({ "thinkingBudget": budget }),

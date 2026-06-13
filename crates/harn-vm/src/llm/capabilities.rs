@@ -348,6 +348,15 @@ pub struct ProviderRule {
     /// floor at `minimal`.
     #[serde(default)]
     pub reasoning_none_supported: Option<bool>,
+    /// Maximum thinking-budget tokens this model accepts for its high/xhigh
+    /// reasoning levels, when the provider takes an explicit token budget
+    /// rather than an effort enum. The canonical case is the native Gemini
+    /// API `generationConfig.thinkingConfig.thinkingBudget` field, whose
+    /// ceiling differs by model (Gemini 2.5 Flash caps at 24576, Pro at
+    /// 32768). Declared alongside the model's other wire capabilities instead
+    /// of a hard-coded `model.contains("flash")` branch in the provider.
+    #[serde(default)]
+    pub max_thinking_budget: Option<i64>,
     /// Whether this route accepts an explicit enabled/disabled reasoning switch
     /// set to false. Some OpenRouter endpoints require reasoning and return
     /// 400 when sent `reasoning: {enabled:false}`.
@@ -490,6 +499,9 @@ pub struct Capabilities {
     pub reasoning_effort_supported: bool,
     pub reasoning_effort_levels: Vec<String>,
     pub reasoning_none_supported: bool,
+    /// See [`ProviderRule::max_thinking_budget`]. `None` means the model uses
+    /// the provider's own default ceiling.
+    pub max_thinking_budget: Option<i64>,
     pub reasoning_disable_supported: bool,
     pub reasoning_text_promotable: bool,
     pub reasoning_wire_format: Option<String>,
@@ -562,6 +574,7 @@ impl Default for Capabilities {
             reasoning_effort_supported: false,
             reasoning_effort_levels: Vec::new(),
             reasoning_none_supported: false,
+            max_thinking_budget: None,
             reasoning_disable_supported: true,
             reasoning_text_promotable: true,
             reasoning_wire_format: None,
@@ -1206,6 +1219,7 @@ fn defaults_to_caps(defaults: &ProviderDefaults) -> Capabilities {
         reasoning_effort_supported: None,
         reasoning_effort_levels: None,
         reasoning_none_supported: None,
+        max_thinking_budget: None,
         reasoning_disable_supported: None,
         reasoning_text_promotable: None,
         reasoning_wire_format: None,
@@ -1301,6 +1315,7 @@ fn rule_to_caps(rule: &ProviderRule, defaults: &ProviderDefaults) -> Capabilitie
         reasoning_effort_supported: rule.reasoning_effort_supported.unwrap_or(false),
         reasoning_effort_levels: rule.reasoning_effort_levels.clone().unwrap_or_default(),
         reasoning_none_supported: rule.reasoning_none_supported.unwrap_or(false),
+        max_thinking_budget: rule.max_thinking_budget,
         reasoning_disable_supported: rule.reasoning_disable_supported.unwrap_or(true),
         reasoning_text_promotable: rule.reasoning_text_promotable.unwrap_or(true),
         reasoning_wire_format: rule
@@ -1720,6 +1735,29 @@ anthropic_beta_features = ["fine-grained-tool-streaming-2025-05-14"]
         assert_eq!(caps.thinking_modes, vec!["effort"]);
         assert!(caps.reasoning_effort_supported);
         assert!(!caps.reasoning_none_supported);
+    }
+
+    #[test]
+    fn gemini_thinking_budget_quirks_are_declared_in_matrix() {
+        reset();
+        // Flash: 24576 ceiling, can disable thinking.
+        let flash = lookup("gemini", "gemini-2.5-flash");
+        assert_eq!(flash.max_thinking_budget, Some(24_576));
+        assert!(flash.reasoning_disable_supported);
+        assert!(flash.thinking_modes.iter().any(|m| m == "effort"));
+        // Pro: 32768 ceiling, cannot disable thinking.
+        let pro = lookup("gemini", "gemini-2.5-pro");
+        assert_eq!(pro.max_thinking_budget, Some(32_768));
+        assert!(!pro.reasoning_disable_supported);
+        assert!(pro.thinking_modes.iter().any(|m| m == "effort"));
+        // The `models/` REST resource name resolves the same.
+        let flash_resource = lookup("gemini", "models/gemini-2.5-flash");
+        assert_eq!(flash_resource.max_thinking_budget, Some(24_576));
+        assert!(flash_resource.reasoning_disable_supported);
+        // Non-2.5 gemini has no effort thinking support -> provider sends no
+        // thinkingConfig (unchanged behavior).
+        let legacy = lookup("gemini", "gemini-1.5-pro");
+        assert!(!legacy.thinking_modes.iter().any(|m| m == "effort"));
     }
 
     #[test]
