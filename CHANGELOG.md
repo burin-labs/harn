@@ -8,6 +8,24 @@ highlights live in [CHANGELOG-pre-0.6.md](CHANGELOG-pre-0.6.md).
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.8.107
+
+### Added
+
+- `complementary_reviewer` now returns a stable, machine-readable
+  `fallback_code` whenever it falls back to the author model: one of
+  `unknown_author_family`, `no_diff_family_within_price`,
+  `no_diff_family_serverless`, or `all_diff_family_excluded`. Callers that
+  require a structurally independent reviewer can branch on `fallback` plus
+  `fallback_code` to hard-fail a degraded self-review instead of parsing the
+  human-readable reason prose.
+
+### Fixed
+
+- `rules.search` and related path-based rule builtins now skip non-UTF8 files
+  such as `.DS_Store` instead of failing the whole run; scanner tests also pin
+  Scala sealed-trait symbol discovery.
+
 ## v0.8.106
 
 ### Added
