@@ -31,6 +31,7 @@ pub(crate) fn opt_bool(options: &Option<BTreeMap<String, VmValue>>, key: &str) -
 
 #[cfg(test)]
 mod tests {
+    use crate::value::VmDictExt;
     use std::collections::BTreeMap;
 
     use crate::value::VmValue;
@@ -48,10 +49,7 @@ mod tests {
     #[test]
     fn opt_str_preserves_string_values() {
         let mut options = BTreeMap::new();
-        options.insert(
-            "path".to_string(),
-            VmValue::String(std::sync::Arc::from("transcripts")),
-        );
+        options.put_str("path", "transcripts");
 
         assert_eq!(
             opt_str(&Some(options), "path"),

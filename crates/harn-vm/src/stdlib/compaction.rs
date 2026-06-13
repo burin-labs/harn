@@ -12,6 +12,7 @@
 //! consumer (TUI, IDE, cloud) and into the runtime so all surfaces see
 //! the same trigger semantics and telemetry shape.
 
+use crate::value::VmDictExt;
 use std::collections::BTreeMap;
 
 use crate::agent_sessions;
@@ -401,14 +402,8 @@ fn decision_value(
     inherited: bool,
 ) -> VmValue {
     let mut map = BTreeMap::new();
-    map.insert(
-        "action".to_string(),
-        VmValue::String(std::sync::Arc::from(action.as_str())),
-    );
-    map.insert(
-        "session_id".to_string(),
-        VmValue::String(std::sync::Arc::from(session_id.to_string())),
-    );
+    map.put_str("action", action.as_str());
+    map.put_str("session_id", session_id);
     map.insert(
         "estimated_tokens".to_string(),
         VmValue::Int(ctx.estimated_tokens as i64),
@@ -417,19 +412,11 @@ fn decision_value(
         "message_count".to_string(),
         VmValue::Int(ctx.message_count as i64),
     );
-    map.insert(
-        "trigger".to_string(),
-        VmValue::String(std::sync::Arc::from(ctx.trigger_label())),
-    );
-    map.insert(
-        "strategy".to_string(),
-        VmValue::String(std::sync::Arc::from(ctx.strategy.as_str())),
-    );
-    map.insert(
-        "engine_strategy".to_string(),
-        VmValue::String(std::sync::Arc::from(compact_strategy_name(
-            &ctx.strategy.engine_strategy(),
-        ))),
+    map.put_str("trigger", ctx.trigger_label());
+    map.put_str("strategy", ctx.strategy.as_str());
+    map.put_str(
+        "engine_strategy",
+        compact_strategy_name(&ctx.strategy.engine_strategy()),
     );
     if let Some(value) = ctx.token_threshold {
         map.insert("token_threshold".to_string(), VmValue::Int(value as i64));
@@ -448,20 +435,11 @@ fn policy_snapshot_value(
 ) -> VmValue {
     let mut map = BTreeMap::new();
     if let Some(id) = session_id {
-        map.insert(
-            "session_id".to_string(),
-            VmValue::String(std::sync::Arc::from(id.to_string())),
-        );
+        map.put_str("session_id", id);
     } else {
-        map.insert(
-            "session_id".to_string(),
-            VmValue::String(std::sync::Arc::from("")),
-        );
+        map.put_str("session_id", "");
     }
-    map.insert(
-        "strategy".to_string(),
-        VmValue::String(std::sync::Arc::from(policy.strategy.as_str())),
-    );
+    map.put_str("strategy", policy.strategy.as_str());
     if let Some(value) = policy.max_tokens {
         map.insert("max_tokens".to_string(), VmValue::Int(value as i64));
     }
@@ -515,10 +493,7 @@ fn run_result_value(
     transcript: VmValue,
 ) -> VmValue {
     let mut map = BTreeMap::new();
-    map.insert(
-        "session_id".to_string(),
-        VmValue::String(std::sync::Arc::from(session_id.to_string())),
-    );
+    map.put_str("session_id", session_id);
     let compacted = strategy.is_some();
     map.insert("compacted".to_string(), VmValue::Bool(compacted));
     map.insert(
@@ -533,16 +508,11 @@ fn run_result_value(
         "archived_messages".to_string(),
         VmValue::Int(archived as i64),
     );
-    map.insert(
-        "engine_strategy".to_string(),
-        VmValue::String(std::sync::Arc::from(
-            strategy.map(compact_strategy_name).unwrap_or("none"),
-        )),
+    map.put_str(
+        "engine_strategy",
+        strategy.map(compact_strategy_name).unwrap_or("none"),
     );
-    map.insert(
-        "strategy".to_string(),
-        VmValue::String(std::sync::Arc::from(policy.strategy.as_str())),
-    );
+    map.put_str("strategy", policy.strategy.as_str());
     map.insert("latency_ms".to_string(), VmValue::Int(latency_ms as i64));
     if let Some(threshold) = policy.token_threshold() {
         map.insert(

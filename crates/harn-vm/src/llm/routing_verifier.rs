@@ -15,6 +15,7 @@
 //! construction — type-check / lint stay in-process via harn-parser;
 //! test-run shells out under a per-verifier timeout.
 
+use crate::value::VmDictExt;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::time::Duration;
@@ -690,25 +691,19 @@ pub(crate) fn verifiers_summary(verifiers: &[Verifier]) -> VmValue {
         .iter()
         .map(|v| {
             let mut dict = BTreeMap::new();
-            dict.insert(
-                "kind".to_string(),
-                VmValue::String(std::sync::Arc::from(v.kind_label())),
-            );
-            dict.insert(
-                "name".to_string(),
-                VmValue::String(std::sync::Arc::from(v.name().to_string())),
-            );
+            dict.put_str("kind", v.kind_label());
+            dict.put_str("name", v.name());
             let on_fail = match v {
                 Verifier::TypeCheck { on_fail, .. }
                 | Verifier::Lint { on_fail, .. }
                 | Verifier::TestRun { on_fail, .. } => *on_fail,
             };
-            dict.insert(
-                "on_fail".to_string(),
-                VmValue::String(std::sync::Arc::from(match on_fail {
+            dict.put_str(
+                "on_fail",
+                match on_fail {
                     FailMode::Refine => "refine",
                     FailMode::Escalate => "escalate",
-                })),
+                },
             );
             VmValue::Dict(std::sync::Arc::new(dict))
         })

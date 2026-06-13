@@ -14,6 +14,7 @@
 //! from leaking a tighter budget outward or a wider one back into a
 //! finished inner scope.
 
+use crate::value::VmDictExt;
 use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::thread::LocalKey;
@@ -96,33 +97,21 @@ fn charge(
 /// the precise `@budget(...)` field that fired.
 fn budget_exceeded_error(kind: CallBudgetKind, spent: u64, max: u64) -> VmError {
     let mut dict = BTreeMap::new();
-    dict.insert(
-        "category".to_string(),
-        VmValue::String(std::sync::Arc::from("budget_exceeded")),
-    );
-    dict.insert(
-        "kind".to_string(),
-        VmValue::String(std::sync::Arc::from("terminal")),
-    );
-    dict.insert(
-        "reason".to_string(),
-        VmValue::String(std::sync::Arc::from("budget_exceeded")),
-    );
-    dict.insert(
-        "limit".to_string(),
-        VmValue::String(std::sync::Arc::from(kind.limit_label())),
-    );
+    dict.put_str("category", "budget_exceeded");
+    dict.put_str("kind", "terminal");
+    dict.put_str("reason", "budget_exceeded");
+    dict.put_str("limit", kind.limit_label());
     dict.insert("limit_value".to_string(), VmValue::Int(max as i64));
     dict.insert("spent".to_string(), VmValue::Int(spent as i64));
-    dict.insert(
-        "message".to_string(),
-        VmValue::String(std::sync::Arc::from(format!(
+    dict.put_str(
+        "message",
+        format!(
             "{} budget exceeded: this dispatch attempted {} of {} permitted {}",
             kind.limit_label(),
             spent,
             max,
             kind.noun(max != 1),
-        ))),
+        ),
     );
     VmError::Thrown(VmValue::Dict(std::sync::Arc::new(dict)))
 }

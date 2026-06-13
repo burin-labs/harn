@@ -1,3 +1,4 @@
+use crate::value::VmDictExt;
 use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap};
 use std::sync::atomic::{AtomicI64, Ordering};
@@ -89,10 +90,7 @@ fn select_result(index: usize, value: VmValue, channel_name: &str) -> VmValue {
     let mut result = BTreeMap::new();
     result.insert("index".to_string(), VmValue::Int(index as i64));
     result.insert("value".to_string(), value);
-    result.insert(
-        "channel".to_string(),
-        VmValue::String(std::sync::Arc::from(channel_name)),
-    );
+    result.put_str("channel", channel_name);
     VmValue::Dict(std::sync::Arc::new(result))
 }
 
@@ -1623,10 +1621,7 @@ fn timer_start_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, V
         .unwrap_or_default()
         .as_millis() as i64;
     let mut timer = BTreeMap::new();
-    timer.insert(
-        "name".to_string(),
-        VmValue::String(std::sync::Arc::from(name)),
-    );
+    timer.put_str("name", name);
     timer.insert("start_ms".to_string(), VmValue::Int(now_ms));
     Ok(VmValue::Dict(std::sync::Arc::new(timer)))
 }

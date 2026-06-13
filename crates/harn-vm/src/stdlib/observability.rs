@@ -1,3 +1,4 @@
+use crate::value::VmDictExt;
 use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::sync::atomic::Ordering;
@@ -501,18 +502,9 @@ fn field_string(value: Option<&VmValue>, key: &str) -> Option<String> {
 
 fn span_to_vm_value(span: &ObsSpan) -> VmValue {
     let mut out = BTreeMap::new();
-    out.insert(
-        "trace_id".to_string(),
-        VmValue::String(std::sync::Arc::from(span.trace_id.as_str())),
-    );
-    out.insert(
-        "span_id".to_string(),
-        VmValue::String(std::sync::Arc::from(span.id.as_str())),
-    );
-    out.insert(
-        "name".to_string(),
-        VmValue::String(std::sync::Arc::from(span.name.as_str())),
-    );
+    out.put_str("trace_id", span.trace_id.as_str());
+    out.put_str("span_id", span.id.as_str());
+    out.put_str("name", span.name.as_str());
     out.insert(
         "attrs".to_string(),
         json_to_vm_value(&serde_json::Value::Object(span.attrs.clone())),

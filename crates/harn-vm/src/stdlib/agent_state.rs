@@ -1,5 +1,6 @@
 pub mod backend;
 
+use crate::value::VmDictExt;
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 
@@ -329,32 +330,12 @@ fn handle_value(
     conflict_policy: ConflictPolicy,
 ) -> VmValue {
     let mut handle = BTreeMap::new();
-    handle.insert(
-        "_type".to_string(),
-        VmValue::String(std::sync::Arc::from(HANDLE_TYPE)),
-    );
-    handle.insert(
-        "backend".to_string(),
-        VmValue::String(std::sync::Arc::from(backend.backend_name())),
-    );
-    handle.insert(
-        "root".to_string(),
-        VmValue::String(std::sync::Arc::from(
-            scope.root.to_string_lossy().into_owned(),
-        )),
-    );
-    handle.insert(
-        "session_id".to_string(),
-        VmValue::String(std::sync::Arc::from(scope.namespace.clone())),
-    );
-    handle.insert(
-        "handoff_key".to_string(),
-        VmValue::String(std::sync::Arc::from(HANDOFF_KEY)),
-    );
-    handle.insert(
-        "conflict_policy".to_string(),
-        VmValue::String(std::sync::Arc::from(conflict_policy.as_str())),
-    );
+    handle.put_str("_type", HANDLE_TYPE);
+    handle.put_str("backend", backend.backend_name());
+    handle.put_str("root", scope.root.to_string_lossy());
+    handle.put_str("session_id", scope.namespace.clone());
+    handle.put_str("handoff_key", HANDOFF_KEY);
+    handle.put_str("conflict_policy", conflict_policy.as_str());
     handle.insert("writer".to_string(), writer_vm_value(writer));
     VmValue::Dict(std::sync::Arc::new(handle))
 }

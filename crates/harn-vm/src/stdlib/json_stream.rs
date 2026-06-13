@@ -1,3 +1,4 @@
+use crate::value::VmDictExt;
 use std::cell::{Cell, RefCell};
 use std::collections::BTreeMap;
 
@@ -766,30 +767,15 @@ fn verdict_value(status: &JsonStreamStatus) -> VmValue {
     let mut dict = BTreeMap::new();
     match status {
         JsonStreamStatus::Pending => {
-            dict.insert(
-                "verdict".to_string(),
-                VmValue::String(std::sync::Arc::from("pending")),
-            );
+            dict.put_str("verdict", "pending");
         }
         JsonStreamStatus::Valid => {
-            dict.insert(
-                "verdict".to_string(),
-                VmValue::String(std::sync::Arc::from("valid")),
-            );
+            dict.put_str("verdict", "valid");
         }
         JsonStreamStatus::Invalid { reason, path } => {
-            dict.insert(
-                "verdict".to_string(),
-                VmValue::String(std::sync::Arc::from("invalid")),
-            );
-            dict.insert(
-                "reason".to_string(),
-                VmValue::String(std::sync::Arc::from(reason.as_str())),
-            );
-            dict.insert(
-                "path".to_string(),
-                VmValue::String(std::sync::Arc::from(path.as_str())),
-            );
+            dict.put_str("verdict", "invalid");
+            dict.put_str("reason", reason.as_str());
+            dict.put_str("path", path.as_str());
         }
     }
     VmValue::Dict(std::sync::Arc::new(dict))

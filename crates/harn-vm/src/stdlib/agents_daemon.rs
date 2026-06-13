@@ -1,3 +1,4 @@
+use crate::value::VmDictExt;
 use std::cell::{Cell, RefCell};
 use std::collections::{BTreeMap, VecDeque};
 use std::future::Future;
@@ -405,18 +406,15 @@ async fn daemon_resume_builtin(
             daemon
                 .options
                 .insert("loop_until_done".to_string(), VmValue::Bool(false));
-            daemon.options.insert(
-                "session_id".to_string(),
-                VmValue::String(std::sync::Arc::from(spec.session_id.clone())),
-            );
-            daemon.options.insert(
-                "persist_path".to_string(),
-                VmValue::String(std::sync::Arc::from(spec.snapshot_path.clone())),
-            );
-            daemon.options.insert(
-                "resume_path".to_string(),
-                VmValue::String(std::sync::Arc::from(spec.snapshot_path.clone())),
-            );
+            daemon
+                .options
+                .put_str("session_id", spec.session_id.clone());
+            daemon
+                .options
+                .put_str("persist_path", spec.snapshot_path.clone());
+            daemon
+                .options
+                .put_str("resume_path", spec.snapshot_path.clone());
             daemon.status = "running".to_string();
             daemon.last_error = None;
             daemon.last_result = None;
@@ -453,18 +451,9 @@ async fn daemon_resume_builtin(
     let mut resume_options = options;
     resume_options.insert("daemon".to_string(), VmValue::Bool(true));
     resume_options.insert("loop_until_done".to_string(), VmValue::Bool(false));
-    resume_options.insert(
-        "session_id".to_string(),
-        VmValue::String(std::sync::Arc::from(spec.session_id.clone())),
-    );
-    resume_options.insert(
-        "persist_path".to_string(),
-        VmValue::String(std::sync::Arc::from(spec.snapshot_path.clone())),
-    );
-    resume_options.insert(
-        "resume_path".to_string(),
-        VmValue::String(std::sync::Arc::from(spec.snapshot_path.clone())),
-    );
+    resume_options.put_str("session_id", spec.session_id.clone());
+    resume_options.put_str("persist_path", spec.snapshot_path.clone());
+    resume_options.put_str("resume_path", spec.snapshot_path.clone());
 
     let state = Arc::new(parking_lot::Mutex::new(DaemonState {
         id: spec.id.clone(),
@@ -578,14 +567,8 @@ fn parse_spawn_spec(
 
     options.insert("daemon".to_string(), VmValue::Bool(true));
     options.insert("loop_until_done".to_string(), VmValue::Bool(false));
-    options.insert(
-        "session_id".to_string(),
-        VmValue::String(std::sync::Arc::from(session_id.clone())),
-    );
-    options.insert(
-        "persist_path".to_string(),
-        VmValue::String(std::sync::Arc::from(paths.snapshot_path.clone())),
-    );
+    options.put_str("session_id", session_id.clone());
+    options.put_str("persist_path", paths.snapshot_path.clone());
     options.remove("resume_path");
 
     Ok(DaemonSpawnSpec {

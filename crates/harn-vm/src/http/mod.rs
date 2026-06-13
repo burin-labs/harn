@@ -1,3 +1,4 @@
+use crate::value::VmDictExt;
 use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
@@ -651,14 +652,8 @@ fn register_http_tls_builtins(vm: &mut Vm) {
             )));
         }
         let mut extra = BTreeMap::new();
-        extra.insert(
-            "cert_path".to_string(),
-            VmValue::String(std::sync::Arc::from(cert_path)),
-        );
-        extra.insert(
-            "key_path".to_string(),
-            VmValue::String(std::sync::Arc::from(key_path)),
-        );
+        extra.put_str("cert_path", cert_path);
+        extra.put_str("key_path", key_path);
         Ok(http_server_tls_config_value(
             "pem", true, "https", true, extra,
         ))
@@ -680,14 +675,8 @@ fn register_http_tls_builtins(vm: &mut Vm) {
                     .collect(),
             )),
         );
-        extra.insert(
-            "cert_pem".to_string(),
-            VmValue::String(std::sync::Arc::from(cert.cert.pem())),
-        );
-        extra.insert(
-            "key_pem".to_string(),
-            VmValue::String(std::sync::Arc::from(cert.signing_key.serialize_pem())),
-        );
+        extra.put_str("cert_pem", cert.cert.pem());
+        extra.put_str("key_pem", cert.signing_key.serialize_pem());
         Ok(http_server_tls_config_value(
             "self_signed_dev",
             true,
@@ -1077,15 +1066,9 @@ fn http_server_tls_config_value(
     extra: BTreeMap<String, VmValue>,
 ) -> VmValue {
     let mut dict = BTreeMap::new();
-    dict.insert(
-        "mode".to_string(),
-        VmValue::String(std::sync::Arc::from(mode)),
-    );
+    dict.put_str("mode", mode);
     dict.insert("terminate_tls".to_string(), VmValue::Bool(terminate_tls));
-    dict.insert(
-        "scheme".to_string(),
-        VmValue::String(std::sync::Arc::from(scheme)),
-    );
+    dict.put_str("scheme", scheme);
     dict.insert("hsts".to_string(), VmValue::Bool(hsts));
     for (key, value) in extra {
         dict.insert(key, value);

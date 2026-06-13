@@ -1,3 +1,4 @@
+use crate::value::VmDictExt;
 use std::collections::BTreeMap;
 
 use super::agents_workers;
@@ -263,10 +264,7 @@ fn prepare_sub_agent_options(
         .cloned()
         .unwrap_or_default();
     inject_sub_agent_skill_context(&mut options);
-    options.insert(
-        "session_id".to_string(),
-        VmValue::String(std::sync::Arc::from(session_id.to_string())),
-    );
+    options.put_str("session_id", session_id);
     match requested_policy {
         Some(policy) => {
             options.insert("policy".to_string(), super::to_vm(policy)?);
@@ -300,19 +298,10 @@ fn sub_agent_error_dict(
     tool: Option<String>,
 ) -> VmValue {
     let mut error = BTreeMap::new();
-    error.insert(
-        "category".to_string(),
-        VmValue::String(std::sync::Arc::from(category.to_string())),
-    );
-    error.insert(
-        "message".to_string(),
-        VmValue::String(std::sync::Arc::from(message.into())),
-    );
+    error.put_str("category", category);
+    error.put_str("message", message.into());
     if let Some(tool) = tool {
-        error.insert(
-            "tool".to_string(),
-            VmValue::String(std::sync::Arc::from(tool)),
-        );
+        error.put_str("tool", tool);
     }
     VmValue::Dict(std::sync::Arc::new(error))
 }
@@ -327,10 +316,7 @@ fn sub_agent_base_envelope(
 ) -> BTreeMap<String, VmValue> {
     let mut envelope = BTreeMap::new();
     envelope.insert("ok".to_string(), VmValue::Bool(true));
-    envelope.insert(
-        "summary".to_string(),
-        VmValue::String(std::sync::Arc::from(summary)),
-    );
+    envelope.put_str("summary", summary);
     envelope.insert("artifacts".to_string(), artifacts);
     envelope.insert("evidence_added".to_string(), VmValue::Int(evidence_added));
     envelope.insert("tokens_used".to_string(), VmValue::Int(tokens_used));
@@ -340,10 +326,7 @@ fn sub_agent_base_envelope(
     );
     envelope.insert("data".to_string(), VmValue::Nil);
     envelope.insert("error".to_string(), VmValue::Nil);
-    envelope.insert(
-        "session_id".to_string(),
-        VmValue::String(std::sync::Arc::from(session_id.to_string())),
-    );
+    envelope.put_str("session_id", session_id);
     envelope
 }
 
@@ -752,10 +735,7 @@ pub(super) async fn execute_sub_agent(
     );
 
     let mut loop_options = spec.options.clone();
-    loop_options.insert(
-        "session_id".to_string(),
-        VmValue::String(std::sync::Arc::from(spec.session_id.clone())),
-    );
+    loop_options.put_str("session_id", spec.session_id.clone());
     let args = vec![
         VmValue::String(std::sync::Arc::from(spec.task.clone())),
         spec.system

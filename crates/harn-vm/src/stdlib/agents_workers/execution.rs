@@ -1,3 +1,4 @@
+use crate::value::VmDictExt;
 use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -80,10 +81,7 @@ fn ensure_worker_stage_session_id(
         .and_then(|value| value.as_dict())
         .cloned()
         .unwrap_or_default();
-    raw_model_policy.insert(
-        "session_id".to_string(),
-        VmValue::String(std::sync::Arc::from(session_id.clone())),
-    );
+    raw_model_policy.put_str("session_id", session_id.clone());
     node.raw_model_policy = Some(VmValue::Dict(std::sync::Arc::new(raw_model_policy)));
     session_id
 }
@@ -173,10 +171,7 @@ async fn execute_worker_config(
                 options.contains_key("resume_path") || options.contains_key("resume_run");
             if !resumes_existing_run && !options.contains_key("parent_run_id") {
                 if let Some(parent_run_id) = parent_run_id.clone() {
-                    options.insert(
-                        "parent_run_id".to_string(),
-                        VmValue::String(std::sync::Arc::from(parent_run_id)),
-                    );
+                    options.put_str("parent_run_id", parent_run_id);
                 }
             }
             if let Some(parent_worker_id) = options

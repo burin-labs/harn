@@ -1,3 +1,4 @@
+use crate::value::VmDictExt;
 use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -409,44 +410,20 @@ pub(crate) fn build_llm_error_dict(err: &VmError, provider: &str, model: &str) -
             .or_insert_with(|| VmValue::String(std::sync::Arc::from(llm_error.reason.as_str())));
         dict.entry("message".to_string())
             .or_insert_with(|| VmValue::String(std::sync::Arc::from(message.as_str())));
-        dict.insert(
-            "provider".to_string(),
-            VmValue::String(std::sync::Arc::from(provider)),
-        );
-        dict.insert(
-            "model".to_string(),
-            VmValue::String(std::sync::Arc::from(model)),
-        );
+        dict.put_str("provider", provider);
+        dict.put_str("model", model);
         return VmValue::Dict(std::sync::Arc::new(dict));
     }
     let mut dict = std::collections::BTreeMap::new();
-    dict.insert(
-        "category".to_string(),
-        VmValue::String(std::sync::Arc::from(category.as_str())),
-    );
-    dict.insert(
-        "kind".to_string(),
-        VmValue::String(std::sync::Arc::from(llm_error.kind.as_str())),
-    );
-    dict.insert(
-        "reason".to_string(),
-        VmValue::String(std::sync::Arc::from(llm_error.reason.as_str())),
-    );
-    dict.insert(
-        "message".to_string(),
-        VmValue::String(std::sync::Arc::from(message)),
-    );
+    dict.put_str("category", category.as_str());
+    dict.put_str("kind", llm_error.kind.as_str());
+    dict.put_str("reason", llm_error.reason.as_str());
+    dict.put_str("message", message);
     if let Some(ms) = agent_observe::extract_retry_after_ms(err) {
         dict.insert("retry_after_ms".to_string(), VmValue::Int(ms as i64));
     }
-    dict.insert(
-        "provider".to_string(),
-        VmValue::String(std::sync::Arc::from(provider)),
-    );
-    dict.insert(
-        "model".to_string(),
-        VmValue::String(std::sync::Arc::from(model)),
-    );
+    dict.put_str("provider", provider);
+    dict.put_str("model", model);
     VmValue::Dict(std::sync::Arc::new(dict))
 }
 
@@ -620,10 +597,7 @@ fn attach_routing_block(
     } else {
         trace.label.clone()
     };
-    routing_dict.insert(
-        "policy".to_string(),
-        VmValue::String(std::sync::Arc::from(label)),
-    );
+    routing_dict.put_str("policy", label);
     routing_dict.insert("attempts".to_string(), routing::trace_to_vm_attempts(trace));
     if let Some(selected) = trace.selected {
         routing_dict.insert("selected".to_string(), VmValue::Int(selected as i64));
@@ -832,22 +806,10 @@ pub(super) fn llm_safe_envelope_err(err: &VmError) -> VmValue {
     let message = llm_error_message(err);
     let llm_error = api::classify_llm_error(category.clone(), &message);
     let mut err_dict = std::collections::BTreeMap::new();
-    err_dict.insert(
-        "category".to_string(),
-        VmValue::String(std::sync::Arc::from(category.as_str())),
-    );
-    err_dict.insert(
-        "kind".to_string(),
-        VmValue::String(std::sync::Arc::from(llm_error.kind.as_str())),
-    );
-    err_dict.insert(
-        "reason".to_string(),
-        VmValue::String(std::sync::Arc::from(llm_error.reason.as_str())),
-    );
-    err_dict.insert(
-        "message".to_string(),
-        VmValue::String(std::sync::Arc::from(message)),
-    );
+    err_dict.put_str("category", category.as_str());
+    err_dict.put_str("kind", llm_error.kind.as_str());
+    err_dict.put_str("reason", llm_error.reason.as_str());
+    err_dict.put_str("message", message);
     let mut dict = std::collections::BTreeMap::new();
     dict.insert("ok".to_string(), VmValue::Bool(false));
     dict.insert("response".to_string(), VmValue::Nil);
@@ -926,10 +888,7 @@ pub(crate) fn rewrite_structured_args(args: Vec<VmValue>) -> Result<Vec<VmValue>
         .entry("output_format".to_string())
         .or_insert_with(|| {
             let mut fmt = std::collections::BTreeMap::new();
-            fmt.insert(
-                "kind".to_string(),
-                VmValue::String(std::sync::Arc::from("json_schema")),
-            );
+            fmt.put_str("kind", "json_schema");
             fmt.insert("schema".to_string(), schema);
             fmt.insert("strict".to_string(), VmValue::Bool(true));
             VmValue::Dict(std::sync::Arc::new(fmt))
@@ -981,22 +940,10 @@ pub(crate) fn structured_safe_envelope_err(err: &VmError) -> VmValue {
     let message = llm_error_message(err);
     let llm_error = api::classify_llm_error(category.clone(), &message);
     let mut err_dict = std::collections::BTreeMap::new();
-    err_dict.insert(
-        "category".to_string(),
-        VmValue::String(std::sync::Arc::from(category.as_str())),
-    );
-    err_dict.insert(
-        "kind".to_string(),
-        VmValue::String(std::sync::Arc::from(llm_error.kind.as_str())),
-    );
-    err_dict.insert(
-        "reason".to_string(),
-        VmValue::String(std::sync::Arc::from(llm_error.reason.as_str())),
-    );
-    err_dict.insert(
-        "message".to_string(),
-        VmValue::String(std::sync::Arc::from(message)),
-    );
+    err_dict.put_str("category", category.as_str());
+    err_dict.put_str("kind", llm_error.kind.as_str());
+    err_dict.put_str("reason", llm_error.reason.as_str());
+    err_dict.put_str("message", message);
     let mut dict = std::collections::BTreeMap::new();
     dict.insert("ok".to_string(), VmValue::Bool(false));
     dict.insert("data".to_string(), VmValue::Nil);

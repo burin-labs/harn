@@ -3,6 +3,7 @@
 //! `/api/generate`, and a chat-based fallback that wraps the prompt in a
 //! user message and re-enters the chat path.
 
+use crate::value::VmDictExt;
 use std::collections::BTreeMap;
 
 use crate::value::{VmError, VmValue};
@@ -273,15 +274,9 @@ async fn vm_call_completion_fallback(
     let mut fallback_opts = opts.clone();
     let has_suffix = suffix.is_some_and(|s| !s.is_empty());
     let mut bindings = BTreeMap::new();
-    bindings.insert(
-        "prefix".to_string(),
-        VmValue::String(std::sync::Arc::from(prefix)),
-    );
+    bindings.put_str("prefix", prefix);
     bindings.insert("has_suffix".to_string(), VmValue::Bool(has_suffix));
-    bindings.insert(
-        "suffix".to_string(),
-        VmValue::String(std::sync::Arc::from(suffix.unwrap_or_default())),
-    );
+    bindings.put_str("suffix", suffix.unwrap_or_default());
     let instruction = crate::stdlib::template::render_stdlib_prompt_asset(
         "llm/prompts/completion_fallback_system.harn.prompt",
         Some(&bindings),

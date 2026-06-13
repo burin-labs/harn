@@ -26,6 +26,7 @@
 //! 10. Emit `AgentEvent::TranscriptCompacted` when the call carries a
 //!     `session_id`.
 
+use crate::value::VmDictExt;
 use std::collections::BTreeMap;
 
 use serde_json::Value as JsonValue;
@@ -895,10 +896,7 @@ fn build_snapshot_asset(
         );
     }
     if let Some(source) = config.policy.instruction_source() {
-        asset_metadata.insert(
-            "instruction_source".to_string(),
-            VmValue::String(std::sync::Arc::from(source)),
-        );
+        asset_metadata.put_str("instruction_source", source);
     }
     let asset = VmValue::Dict(std::sync::Arc::new(BTreeMap::from([
         (
@@ -967,6 +965,7 @@ pub fn transcript_compactable_events(transcript: &BTreeMap<String, VmValue>) -> 
 mod tests {
     use super::*;
     use crate::llm::helpers::{ReminderPropagate, ReminderRoleHint, ReminderSource};
+    use crate::value::VmDictExt;
 
     fn reminder_event_value(body: &str, preserve: bool, ttl: Option<i64>) -> VmValue {
         let reminder = SystemReminder {
@@ -985,14 +984,8 @@ mod tests {
         let reminder_value =
             crate::stdlib::json_to_vm_value(&serde_json::to_value(&reminder).unwrap());
         let mut event = BTreeMap::new();
-        event.insert(
-            "kind".to_string(),
-            VmValue::String(std::sync::Arc::from("system_reminder")),
-        );
-        event.insert(
-            "role".to_string(),
-            VmValue::String(std::sync::Arc::from("system")),
-        );
+        event.put_str("kind", "system_reminder");
+        event.put_str("role", "system");
         event.insert("reminder".to_string(), reminder_value);
         VmValue::Dict(std::sync::Arc::new(event))
     }

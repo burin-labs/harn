@@ -1,3 +1,4 @@
+use crate::value::VmDictExt;
 use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::time::Duration;
@@ -1532,10 +1533,7 @@ pub(crate) async fn register_auto_resume_trigger(
     };
 
     let mut normalized = trigger_config.as_ref().clone();
-    normalized.insert(
-        "handler".to_string(),
-        VmValue::String(std::sync::Arc::from("worker://__resume_auto_resume__")),
-    );
+    normalized.put_str("handler", "worker://__resume_auto_resume__");
     let mut spec = parse_trigger_config(&normalized).map_err(|error| {
         suspend_diagnostic_error(
             Code::ResumeTriggerRegistrationFailed,

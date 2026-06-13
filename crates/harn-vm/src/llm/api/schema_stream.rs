@@ -16,6 +16,7 @@
 
 use crate::llm::trace::{emit_agent_event, AgentTraceEvent};
 use crate::stdlib::json_stream::{JsonStreamStatus, StreamSchemaValidator};
+use crate::value::VmDictExt;
 use crate::value::{ErrorCategory, VmError, VmValue};
 
 use super::options::LlmRequestPayload;
@@ -184,39 +185,18 @@ fn parse_abort_message(message: &str) -> Option<SchemaStreamAbort> {
 /// callers (e.g. `llm_call_safe`) still expect a dict envelope.
 pub(crate) fn aborted_result_value(abort: &SchemaStreamAbort) -> VmValue {
     let mut meta = std::collections::BTreeMap::new();
-    meta.insert(
-        "reason".to_string(),
-        VmValue::String(std::sync::Arc::from(abort.reason.as_str())),
-    );
-    meta.insert(
-        "path".to_string(),
-        VmValue::String(std::sync::Arc::from(abort.path.as_str())),
-    );
+    meta.put_str("reason", abort.reason.as_str());
+    meta.put_str("path", abort.path.as_str());
     meta.insert(
         "chunks_consumed".to_string(),
         VmValue::Int(abort.chunks_consumed as i64),
     );
-    meta.insert(
-        "provider".to_string(),
-        VmValue::String(std::sync::Arc::from(abort.provider.as_str())),
-    );
-    meta.insert(
-        "model".to_string(),
-        VmValue::String(std::sync::Arc::from(abort.model.as_str())),
-    );
+    meta.put_str("provider", abort.provider.as_str());
+    meta.put_str("model", abort.model.as_str());
     let mut dict = std::collections::BTreeMap::new();
-    dict.insert(
-        "text".to_string(),
-        VmValue::String(std::sync::Arc::from("")),
-    );
-    dict.insert(
-        "model".to_string(),
-        VmValue::String(std::sync::Arc::from(abort.model.as_str())),
-    );
-    dict.insert(
-        "provider".to_string(),
-        VmValue::String(std::sync::Arc::from(abort.provider.as_str())),
-    );
+    dict.put_str("text", "");
+    dict.put_str("model", abort.model.as_str());
+    dict.put_str("provider", abort.provider.as_str());
     dict.insert("input_tokens".to_string(), VmValue::Int(0));
     dict.insert("output_tokens".to_string(), VmValue::Int(0));
     dict.insert("data".to_string(), VmValue::Nil);

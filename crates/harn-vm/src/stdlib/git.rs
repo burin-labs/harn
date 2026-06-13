@@ -1,3 +1,4 @@
+use crate::value::VmDictExt;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
@@ -389,10 +390,7 @@ fn register_git_namespace(vm: &mut Vm) {
         ("remove", "git.worktree.remove"),
     ]);
     let mut root = BTreeMap::new();
-    root.insert(
-        "_namespace".to_string(),
-        VmValue::String(std::sync::Arc::from("git")),
-    );
+    root.put_str("_namespace", "git");
     root.insert("repo".to_string(), repo);
     root.insert("worktree".to_string(), worktree);
     for (name, builtin) in [
@@ -582,10 +580,7 @@ const GIT_NONINTERACTIVE_ENV: &[(&str, &str)] = &[
 
 async fn exec_argv(command: &GitCommand) -> Result<VmValue, VmError> {
     let mut params = BTreeMap::new();
-    params.insert(
-        "mode".to_string(),
-        VmValue::String(std::sync::Arc::from("argv")),
-    );
+    params.put_str("mode", "argv");
     params.insert(
         "argv".to_string(),
         VmValue::List(std::sync::Arc::new(
@@ -596,10 +591,7 @@ async fn exec_argv(command: &GitCommand) -> Result<VmValue, VmError> {
                 .collect(),
         )),
     );
-    params.insert(
-        "cwd".to_string(),
-        VmValue::String(std::sync::Arc::from(display_path(&command.cwd))),
-    );
+    params.put_str("cwd", display_path(&command.cwd));
     params.insert("timeout_ms".to_string(), VmValue::Int(120_000));
     params.insert(
         "env_remove".to_string(),
@@ -622,10 +614,7 @@ async fn exec_argv(command: &GitCommand) -> Result<VmValue, VmError> {
         );
     }
     params.insert("env".to_string(), VmValue::Dict(std::sync::Arc::new(env)));
-    params.insert(
-        "env_mode".to_string(),
-        VmValue::String(std::sync::Arc::from("merge")),
-    );
+    params.put_str("env_mode", "merge");
     let caller = json!({
         "surface": "stdlib.git",
         "operation": command.operation,

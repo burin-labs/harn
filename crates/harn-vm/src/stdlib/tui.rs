@@ -1,5 +1,6 @@
 //! Terminal UI builtins backing the Harn `std/tui` module.
 
+use crate::value::VmDictExt;
 use std::collections::BTreeMap;
 use std::io::{ErrorKind, Write};
 use std::process::{Command, Stdio};
@@ -301,10 +302,7 @@ fn page_result(ok: bool, paged: bool, error: Option<String>) -> VmValue {
         ("paged".to_string(), VmValue::Bool(paged)),
     ]);
     if let Some(error) = error {
-        result.insert(
-            "error".to_string(),
-            VmValue::String(std::sync::Arc::from(error)),
-        );
+        result.put_str("error", error);
     }
     VmValue::Dict(std::sync::Arc::new(result))
 }

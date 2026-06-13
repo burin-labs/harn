@@ -1,3 +1,4 @@
+use crate::value::VmDictExt;
 use std::collections::BTreeMap;
 
 use chrono::{
@@ -25,11 +26,9 @@ fn date_now_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErro
         "timestamp".to_string(),
         VmValue::Float(now.timestamp_millis() as f64 / 1000.0),
     );
-    result.insert(
-        "iso8601".to_string(),
-        VmValue::String(std::sync::Arc::from(
-            now.to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
-        )),
+    result.put_str(
+        "iso8601",
+        now.to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
     );
     Ok(VmValue::Dict(std::sync::Arc::new(result)))
 }
@@ -83,10 +82,7 @@ fn date_in_zone_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmE
     let tz = parse_timezone(&tz_name, "date_in_zone")?;
     let local = dt.with_timezone(&tz);
     let mut result = zoned_datetime_dict(local);
-    result.insert(
-        "zone".to_string(),
-        VmValue::String(std::sync::Arc::from(tz_name)),
-    );
+    result.put_str("zone", tz_name);
     Ok(VmValue::Dict(std::sync::Arc::new(result)))
 }
 
@@ -321,10 +317,7 @@ fn zoned_datetime_dict(dt: DateTime<Tz>) -> BTreeMap<String, VmValue> {
         "timestamp".to_string(),
         timestamp_value(dt.with_timezone(&Utc)),
     );
-    result.insert(
-        "iso8601".to_string(),
-        VmValue::String(std::sync::Arc::from(dt.to_rfc3339())),
-    );
+    result.put_str("iso8601", dt.to_rfc3339());
     result
 }
 

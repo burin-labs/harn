@@ -1,6 +1,7 @@
 //! URL parse / build / query builtins. The module is named `url_parse`
 //! rather than `url` to avoid colliding with the `url` crate.
 
+use crate::value::VmDictExt;
 use std::collections::BTreeMap;
 
 use url::Url;
@@ -38,10 +39,7 @@ fn url_parse_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErro
         ))))
     })?;
     let mut dict = BTreeMap::new();
-    dict.insert(
-        "scheme".to_string(),
-        VmValue::String(std::sync::Arc::from(parsed.scheme())),
-    );
+    dict.put_str("scheme", parsed.scheme());
     dict.insert(
         "host".to_string(),
         parsed
@@ -56,10 +54,7 @@ fn url_parse_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErro
             .map(|p| VmValue::Int(p as i64))
             .unwrap_or(VmValue::Nil),
     );
-    dict.insert(
-        "path".to_string(),
-        VmValue::String(std::sync::Arc::from(parsed.path())),
-    );
+    dict.put_str("path", parsed.path());
     dict.insert(
         "query".to_string(),
         parsed
@@ -171,14 +166,8 @@ fn query_parse_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmEr
     let pairs: Vec<VmValue> = url::form_urlencoded::parse(trimmed.as_bytes())
         .map(|(k, v)| {
             let mut row = BTreeMap::new();
-            row.insert(
-                "key".to_string(),
-                VmValue::String(std::sync::Arc::from(k.into_owned())),
-            );
-            row.insert(
-                "value".to_string(),
-                VmValue::String(std::sync::Arc::from(v.into_owned())),
-            );
+            row.put_str("key", &k);
+            row.put_str("value", &v);
             VmValue::Dict(std::sync::Arc::new(row))
         })
         .collect();

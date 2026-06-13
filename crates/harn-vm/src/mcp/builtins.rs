@@ -1,4 +1,5 @@
 use super::*;
+use crate::value::VmDictExt;
 
 pub(crate) fn vm_value_to_serde(val: &VmValue) -> serde_json::Value {
     match val {
@@ -268,10 +269,7 @@ pub fn register_mcp_builtins(vm: &mut Vm) {
         let mut out = Vec::new();
         for entry in crate::mcp_registry::snapshot_status() {
             let mut dict = BTreeMap::new();
-            dict.insert(
-                "name".to_string(),
-                VmValue::String(std::sync::Arc::from(entry.name.as_str())),
-            );
+            dict.put_str("name", entry.name.as_str());
             dict.insert("lazy".to_string(), VmValue::Bool(entry.lazy));
             dict.insert("active".to_string(), VmValue::Bool(entry.active));
             dict.insert(
@@ -279,10 +277,7 @@ pub fn register_mcp_builtins(vm: &mut Vm) {
                 VmValue::Int(entry.ref_count as i64),
             );
             if let Some(card) = entry.card {
-                dict.insert(
-                    "card".to_string(),
-                    VmValue::String(std::sync::Arc::from(card.as_str())),
-                );
+                dict.put_str("card", card.as_str());
             }
             out.push(VmValue::Dict(std::sync::Arc::new(dict)));
         }
@@ -439,10 +434,7 @@ pub fn register_mcp_builtins(vm: &mut Vm) {
         drop(guard);
 
         let mut info = BTreeMap::new();
-        info.insert(
-            "name".to_string(),
-            VmValue::String(std::sync::Arc::from(client.name.as_str())),
-        );
+        info.put_str("name", client.name.as_str());
         info.insert("connected".to_string(), VmValue::Bool(true));
         let initialize = client
             .initialize_result
@@ -461,10 +453,7 @@ pub fn register_mcp_builtins(vm: &mut Vm) {
                 .and_then(|value| value.as_str())
                 .filter(|value| !value.is_empty())
             {
-                info.insert(
-                    "instructions".to_string(),
-                    VmValue::String(std::sync::Arc::from(instructions)),
-                );
+                info.put_str("instructions", instructions);
             }
             info.insert("initialize".to_string(), json_to_vm_value(&initialize));
         }
@@ -843,10 +832,7 @@ pub(crate) fn register_supervised_mcp_host_builtins(vm: &mut Vm) {
             .into_iter()
             .map(|s| {
                 let mut dict = BTreeMap::new();
-                dict.insert(
-                    "name".to_string(),
-                    VmValue::String(std::sync::Arc::from(s.name)),
-                );
+                dict.put_str("name", s.name);
                 dict.insert("active".to_string(), VmValue::Bool(s.active));
                 dict.insert("lazy".to_string(), VmValue::Bool(s.lazy));
                 dict.insert("ref_count".to_string(), VmValue::Int(s.ref_count as i64));
@@ -858,10 +844,7 @@ pub(crate) fn register_supervised_mcp_host_builtins(vm: &mut Vm) {
                     "consecutive_failures".to_string(),
                     VmValue::Int(s.consecutive_failures as i64),
                 );
-                dict.insert(
-                    "circuit".to_string(),
-                    VmValue::String(std::sync::Arc::from(s.circuit.as_str())),
-                );
+                dict.put_str("circuit", s.circuit.as_str());
                 dict.insert("ejected".to_string(), VmValue::Bool(s.ejected));
                 dict.insert(
                     "cache_entries".to_string(),

@@ -1,3 +1,4 @@
+use crate::value::VmDictExt;
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
@@ -267,17 +268,11 @@ fn find_text_matcher(pattern: &str, options: &FindTextOptions) -> Result<RegexMa
 
 fn text_match_to_vm(hit: TextMatch) -> VmValue {
     let mut dict = BTreeMap::new();
-    dict.insert(
-        "path".to_string(),
-        VmValue::String(std::sync::Arc::from(hit.path)),
-    );
+    dict.put_str("path", hit.path);
     dict.insert("line".to_string(), VmValue::Int(hit.line));
     dict.insert("col".to_string(), VmValue::Int(hit.col));
     dict.insert("column".to_string(), VmValue::Int(hit.col));
-    dict.insert(
-        "text".to_string(),
-        VmValue::String(std::sync::Arc::from(hit.text)),
-    );
+    dict.put_str("text", hit.text);
     VmValue::Dict(std::sync::Arc::new(dict))
 }
 

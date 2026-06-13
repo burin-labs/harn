@@ -7,6 +7,7 @@
 //! structured tape event so transcripts and replay can attribute the
 //! outcome to a specific chain link.
 
+use crate::value::VmDictExt;
 use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -623,10 +624,7 @@ pub(crate) fn build_routing_policy(config: &BTreeMap<String, VmValue>) -> Result
 
     let mut summary = BTreeMap::new();
     summary.insert(ROUTING_POLICY_TAG.to_string(), VmValue::Bool(true));
-    summary.insert(
-        "label".to_string(),
-        VmValue::String(std::sync::Arc::from(label.clone())),
-    );
+    summary.put_str("label", label.clone());
     summary.insert("chain".to_string(), chain_summary_value(&chain));
     if budget.envelope().is_some() {
         summary.insert("budget".to_string(), budget_value(&budget));
@@ -662,28 +660,16 @@ fn chain_summary_value(chain: &[ChainLink]) -> VmValue {
         .iter()
         .map(|link| {
             let mut dict = BTreeMap::new();
-            dict.insert(
-                "provider".to_string(),
-                VmValue::String(std::sync::Arc::from(link.provider.clone())),
-            );
-            dict.insert(
-                "model".to_string(),
-                VmValue::String(std::sync::Arc::from(link.model.clone())),
-            );
+            dict.put_str("provider", link.provider.clone());
+            dict.put_str("model", link.model.clone());
             if let Some(timeout) = link.timeout_ms {
                 dict.insert("timeout_ms".to_string(), VmValue::Int(timeout as i64));
             }
             if let Some(label) = &link.label {
-                dict.insert(
-                    "label".to_string(),
-                    VmValue::String(std::sync::Arc::from(label.clone())),
-                );
+                dict.put_str("label", label.clone());
             }
             if let Some(region) = &link.region {
-                dict.insert(
-                    "region".to_string(),
-                    VmValue::String(std::sync::Arc::from(region.clone())),
-                );
+                dict.put_str("region", region.clone());
             }
             VmValue::Dict(std::sync::Arc::new(dict))
         })
@@ -739,20 +725,14 @@ fn budget_value(budget: &BudgetRules) -> VmValue {
     if let Some(v) = budget.session_usd {
         dict.insert("session_usd".to_string(), VmValue::Float(v));
     }
-    dict.insert(
-        "on_exceed".to_string(),
-        VmValue::String(std::sync::Arc::from(budget.on_exceed_or_abort().as_str())),
-    );
+    dict.put_str("on_exceed", budget.on_exceed_or_abort().as_str());
     VmValue::Dict(std::sync::Arc::new(dict))
 }
 
 fn observe_value(observe: &ObserveRules) -> VmValue {
     let mut dict = BTreeMap::new();
     if let Some(event) = &observe.emit_event {
-        dict.insert(
-            "emit_event".to_string(),
-            VmValue::String(std::sync::Arc::from(event.clone())),
-        );
+        dict.put_str("emit_event", event.clone());
     }
     VmValue::Dict(std::sync::Arc::new(dict))
 }
@@ -1905,22 +1885,10 @@ pub(crate) fn trace_to_vm_attempts(trace: &RoutingTrace) -> VmValue {
         .map(|attempt| {
             let mut dict = BTreeMap::new();
             dict.insert("index".to_string(), VmValue::Int(attempt.index as i64));
-            dict.insert(
-                "provider".to_string(),
-                VmValue::String(std::sync::Arc::from(attempt.provider.clone())),
-            );
-            dict.insert(
-                "model".to_string(),
-                VmValue::String(std::sync::Arc::from(attempt.model.clone())),
-            );
-            dict.insert(
-                "label".to_string(),
-                VmValue::String(std::sync::Arc::from(attempt.label.clone())),
-            );
-            dict.insert(
-                "status".to_string(),
-                VmValue::String(std::sync::Arc::from(attempt.status.as_str())),
-            );
+            dict.put_str("provider", attempt.provider.clone());
+            dict.put_str("model", attempt.model.clone());
+            dict.put_str("label", attempt.label.clone());
+            dict.put_str("status", attempt.status.as_str());
             dict.insert(
                 "duration_ms".to_string(),
                 VmValue::Int(attempt.duration_ms as i64),
@@ -1936,14 +1904,8 @@ pub(crate) fn trace_to_vm_attempts(trace: &RoutingTrace) -> VmValue {
             }
             if let Some(error) = &attempt.error {
                 let mut err_dict = BTreeMap::new();
-                err_dict.insert(
-                    "category".to_string(),
-                    VmValue::String(std::sync::Arc::from(error.category.clone())),
-                );
-                err_dict.insert(
-                    "message".to_string(),
-                    VmValue::String(std::sync::Arc::from(error.message.clone())),
-                );
+                err_dict.put_str("category", error.category.clone());
+                err_dict.put_str("message", error.message.clone());
                 if let Some(status) = error.status {
                     err_dict.insert("status".to_string(), VmValue::Int(status as i64));
                 }
@@ -1953,10 +1915,7 @@ pub(crate) fn trace_to_vm_attempts(trace: &RoutingTrace) -> VmValue {
                 );
             }
             if let Some(outcome) = attempt.verifier_outcome {
-                dict.insert(
-                    "verifier_outcome".to_string(),
-                    VmValue::String(std::sync::Arc::from(outcome.as_str())),
-                );
+                dict.put_str("verifier_outcome", outcome.as_str());
             }
             if !attempt.verifier_signals.is_empty() {
                 let signals: Vec<VmValue> = attempt
@@ -1964,23 +1923,11 @@ pub(crate) fn trace_to_vm_attempts(trace: &RoutingTrace) -> VmValue {
                     .iter()
                     .map(|signal| {
                         let mut sig_dict = BTreeMap::new();
-                        sig_dict.insert(
-                            "name".to_string(),
-                            VmValue::String(std::sync::Arc::from(signal.name.clone())),
-                        );
-                        sig_dict.insert(
-                            "kind".to_string(),
-                            VmValue::String(std::sync::Arc::from(signal.kind.clone())),
-                        );
-                        sig_dict.insert(
-                            "signal".to_string(),
-                            VmValue::String(std::sync::Arc::from(signal.signal.clone())),
-                        );
+                        sig_dict.put_str("name", signal.name.clone());
+                        sig_dict.put_str("kind", signal.kind.clone());
+                        sig_dict.put_str("signal", signal.signal.clone());
                         if let Some(reason) = &signal.reason {
-                            sig_dict.insert(
-                                "reason".to_string(),
-                                VmValue::String(std::sync::Arc::from(reason.clone())),
-                            );
+                            sig_dict.put_str("reason", reason.clone());
                         }
                         VmValue::Dict(std::sync::Arc::new(sig_dict))
                     })

@@ -1,3 +1,4 @@
+use crate::value::VmDictExt;
 use std::collections::BTreeMap;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
@@ -458,10 +459,7 @@ pub(super) async fn warm_resume_worker(
             let mut summary = worker_summary(&state.lock())?;
             if let VmValue::Dict(map) = &mut summary {
                 let mut entries = (**map).clone();
-                entries.insert(
-                    "pre_resume_denied".to_string(),
-                    VmValue::String(std::sync::Arc::from(reason)),
-                );
+                entries.put_str("pre_resume_denied", reason);
                 *map = std::sync::Arc::new(entries);
             }
             return Ok(summary);

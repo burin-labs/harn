@@ -1,3 +1,4 @@
+use crate::value::VmDictExt;
 use std::collections::BTreeMap;
 
 use crate::value::VmValue;
@@ -14,14 +15,12 @@ pub(super) fn result_ok_value(value: VmValue) -> VmValue {
 
 pub(super) fn result_err_value(errors: Vec<String>, value: Option<VmValue>) -> VmValue {
     let mut payload = BTreeMap::new();
-    payload.insert(
-        "message".to_string(),
-        VmValue::String(std::sync::Arc::from(
-            errors
-                .first()
-                .cloned()
-                .unwrap_or_else(|| "schema validation failed".to_string()),
-        )),
+    payload.put_str(
+        "message",
+        errors
+            .first()
+            .cloned()
+            .unwrap_or_else(|| "schema validation failed".to_string()),
     );
     payload.insert(
         "errors".to_string(),

@@ -1,3 +1,4 @@
+use crate::value::VmDictExt;
 use std::collections::BTreeMap;
 
 use crate::value::{VmError, VmValue};
@@ -420,14 +421,8 @@ pub(crate) fn register_conversation_builtins(vm: &mut Vm) {
             .join("\n");
 
         let mut bindings = BTreeMap::new();
-        bindings.insert(
-            "prompt".to_string(),
-            VmValue::String(std::sync::Arc::from(prompt_override)),
-        );
-        bindings.insert(
-            "formatted".to_string(),
-            VmValue::String(std::sync::Arc::from(formatted)),
-        );
+        bindings.put_str("prompt", prompt_override);
+        bindings.put_str("formatted", formatted);
         let user_message = crate::stdlib::template::render_stdlib_prompt_asset(
             "llm/prompts/transcript_summarize_user.harn.prompt",
             Some(&bindings),
@@ -519,18 +514,9 @@ pub(crate) fn register_conversation_builtins(vm: &mut Vm) {
             let tool_use_id = args.get(1).map(|a| a.display()).unwrap_or_default();
             let result_content = args.get(2).map(|a| a.display()).unwrap_or_default();
             let mut msg = BTreeMap::new();
-            msg.insert(
-                "role".to_string(),
-                VmValue::String(std::sync::Arc::from("tool_result")),
-            );
-            msg.insert(
-                "tool_use_id".to_string(),
-                VmValue::String(std::sync::Arc::from(tool_use_id)),
-            );
-            msg.insert(
-                "content".to_string(),
-                VmValue::String(std::sync::Arc::from(result_content)),
-            );
+            msg.put_str("role", "tool_result");
+            msg.put_str("tool_use_id", tool_use_id);
+            msg.put_str("content", result_content);
             let mut new_messages = (**list).clone();
             new_messages.push(VmValue::Dict(std::sync::Arc::new(msg)));
             Ok(VmValue::List(std::sync::Arc::new(new_messages)))
@@ -541,18 +527,9 @@ pub(crate) fn register_conversation_builtins(vm: &mut Vm) {
             let tool_use_id = args.get(1).map(|a| a.display()).unwrap_or_default();
             let result_content = args.get(2).map(|a| a.display()).unwrap_or_default();
             let mut msg = BTreeMap::new();
-            msg.insert(
-                "role".to_string(),
-                VmValue::String(std::sync::Arc::from("tool_result")),
-            );
-            msg.insert(
-                "tool_use_id".to_string(),
-                VmValue::String(std::sync::Arc::from(tool_use_id)),
-            );
-            msg.insert(
-                "content".to_string(),
-                VmValue::String(std::sync::Arc::from(result_content)),
-            );
+            msg.put_str("role", "tool_result");
+            msg.put_str("tool_use_id", tool_use_id);
+            msg.put_str("content", result_content);
             let mut new_messages = transcript_message_list(d)?;
             new_messages.push(VmValue::Dict(std::sync::Arc::new(msg)));
             Ok(rebuild_transcript(

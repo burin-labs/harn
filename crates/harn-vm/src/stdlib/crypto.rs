@@ -1,3 +1,4 @@
+use crate::value::VmDictExt;
 use std::collections::BTreeMap;
 
 use chrono::{DateTime, NaiveDateTime, TimeZone, Utc};
@@ -401,10 +402,7 @@ fn verification_result(
 ) -> VmValue {
     let mut result = BTreeMap::new();
     result.insert("valid".to_string(), VmValue::Bool(valid));
-    result.insert(
-        "reason".to_string(),
-        VmValue::String(std::sync::Arc::from(reason)),
-    );
+    result.put_str("reason", reason);
     result.insert(
         "signature_valid".to_string(),
         VmValue::Bool(signature_valid),
@@ -1164,14 +1162,8 @@ fn ed25519_keypair_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue,
     let signing = SigningKey::from_bytes(&bytes);
     let verifying: VerifyingKey = signing.verifying_key();
     let mut dict = std::collections::BTreeMap::new();
-    dict.insert(
-        "private".to_string(),
-        VmValue::String(std::sync::Arc::from(hex::encode(signing.to_bytes()))),
-    );
-    dict.insert(
-        "public".to_string(),
-        VmValue::String(std::sync::Arc::from(hex::encode(verifying.to_bytes()))),
-    );
+    dict.put_str("private", hex::encode(signing.to_bytes()));
+    dict.put_str("public", hex::encode(verifying.to_bytes()));
     Ok(VmValue::Dict(std::sync::Arc::new(dict)))
 }
 
@@ -1255,14 +1247,8 @@ fn x25519_keypair_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, 
     let secret = StaticSecret::from(bytes);
     let public = PublicKey::from(&secret);
     let mut dict = std::collections::BTreeMap::new();
-    dict.insert(
-        "private".to_string(),
-        VmValue::String(std::sync::Arc::from(hex::encode(secret.to_bytes()))),
-    );
-    dict.insert(
-        "public".to_string(),
-        VmValue::String(std::sync::Arc::from(hex::encode(public.to_bytes()))),
-    );
+    dict.put_str("private", hex::encode(secret.to_bytes()));
+    dict.put_str("public", hex::encode(public.to_bytes()));
     Ok(VmValue::Dict(std::sync::Arc::new(dict)))
 }
 

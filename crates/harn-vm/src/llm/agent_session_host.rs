@@ -6,6 +6,7 @@
 //! continue/break) lives in Harn; Rust is reduced to data plumbing,
 //! provider/tool capability surfaces, and resource lifecycle.
 
+use crate::value::VmDictExt;
 use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -406,14 +407,8 @@ async fn host_agent_session_init(
     .await?;
 
     let mut control = BTreeMap::new();
-    control.insert(
-        "session_id".to_string(),
-        VmValue::String(std::sync::Arc::from(resolved)),
-    );
-    control.insert(
-        "task".to_string(),
-        VmValue::String(std::sync::Arc::from(message)),
-    );
+    control.put_str("session_id", resolved);
+    control.put_str("task", message);
     control.insert(
         "system".to_string(),
         system
@@ -529,14 +524,8 @@ fn agent_init_control_done(
     result: VmValue,
 ) -> VmValue {
     let mut control = BTreeMap::new();
-    control.insert(
-        "session_id".to_string(),
-        VmValue::String(std::sync::Arc::from(session_id.to_string())),
-    );
-    control.insert(
-        "task".to_string(),
-        VmValue::String(std::sync::Arc::from(task.to_string())),
-    );
+    control.put_str("session_id", session_id);
+    control.put_str("task", task);
     control.insert(
         "system".to_string(),
         system
@@ -918,14 +907,8 @@ fn assistant_message_from_llm_result(llm_result: &VmValue) -> VmValue {
         .collect::<Vec<_>>();
     if native_calls_json.is_empty() {
         let mut msg = BTreeMap::new();
-        msg.insert(
-            "role".to_string(),
-            VmValue::String(std::sync::Arc::from("assistant")),
-        );
-        msg.insert(
-            "content".to_string(),
-            VmValue::String(std::sync::Arc::from(text)),
-        );
+        msg.put_str("role", "assistant");
+        msg.put_str("content", text);
         return VmValue::Dict(std::sync::Arc::new(msg));
     }
 
@@ -1019,39 +1002,18 @@ fn tool_result_message_for_provider(
         Some(crate::llm_config::ToolFormatChannel::Text)
     );
     if is_text_channel {
-        msg.insert(
-            "role".to_string(),
-            VmValue::String(std::sync::Arc::from("user")),
-        );
+        msg.put_str("role", "user");
     } else if crate::llm::provider::provider_uses_anthropic_messages(provider, model) {
-        msg.insert(
-            "role".to_string(),
-            VmValue::String(std::sync::Arc::from("tool_result")),
-        );
-        msg.insert(
-            "tool_use_id".to_string(),
-            VmValue::String(std::sync::Arc::from(tool_call_id)),
-        );
+        msg.put_str("role", "tool_result");
+        msg.put_str("tool_use_id", tool_call_id);
     } else {
-        msg.insert(
-            "role".to_string(),
-            VmValue::String(std::sync::Arc::from("tool")),
-        );
-        msg.insert(
-            "name".to_string(),
-            VmValue::String(std::sync::Arc::from(name)),
-        );
+        msg.put_str("role", "tool");
+        msg.put_str("name", name);
         if !tool_call_id.is_empty() {
-            msg.insert(
-                "tool_call_id".to_string(),
-                VmValue::String(std::sync::Arc::from(tool_call_id)),
-            );
+            msg.put_str("tool_call_id", tool_call_id);
         }
     }
-    msg.insert(
-        "content".to_string(),
-        VmValue::String(std::sync::Arc::from(observation)),
-    );
+    msg.put_str("content", observation);
     VmValue::Dict(std::sync::Arc::new(msg))
 }
 
@@ -1387,18 +1349,9 @@ fn host_agent_session_drain_feedback_builtin(
         .into_iter()
         .map(|entry| {
             let mut item = BTreeMap::new();
-            item.insert(
-                "kind".to_string(),
-                VmValue::String(std::sync::Arc::from(entry.kind)),
-            );
-            item.insert(
-                "content".to_string(),
-                VmValue::String(std::sync::Arc::from(entry.content)),
-            );
-            item.insert(
-                "source".to_string(),
-                VmValue::String(std::sync::Arc::from(entry.source)),
-            );
+            item.put_str("kind", entry.kind);
+            item.put_str("content", entry.content);
+            item.put_str("source", entry.source);
             item.insert("sequence".to_string(), VmValue::Int(entry.sequence as i64));
             item.insert("ts_ms".to_string(), VmValue::Int(entry.ts_ms));
             VmValue::Dict(std::sync::Arc::new(item))
@@ -1559,7 +1512,7 @@ fn host_agent_session_active_skills_builtin(
         .into_iter()
         .map(|id| {
             let mut entry = BTreeMap::new();
-            entry.insert("id".to_string(), VmValue::String(std::sync::Arc::from(id)));
+            entry.put_str("id", id);
             VmValue::Dict(std::sync::Arc::new(entry))
         })
         .collect();
@@ -3645,6 +3598,7 @@ mod nested_budget_tests {
     use crate::orchestration::{
         clear_execution_policy_stacks, current_execution_policy, CapabilityPolicy,
     };
+    use crate::value::VmDictExt;
 
     fn policy_value(policy: &CapabilityPolicy) -> VmValue {
         crate::stdlib::json_to_vm_value(&serde_json::to_value(policy).unwrap())
@@ -3703,14 +3657,8 @@ mod nested_budget_tests {
         });
 
         let mut opts_map = BTreeMap::new();
-        opts_map.insert(
-            "_nested_kind".to_string(),
-            VmValue::String(std::sync::Arc::from("sub_agent_run")),
-        );
-        opts_map.insert(
-            "_nested_label".to_string(),
-            VmValue::String(std::sync::Arc::from("research-worker")),
-        );
+        opts_map.put_str("_nested_kind", "sub_agent_run");
+        opts_map.put_str("_nested_label", "research-worker");
         let error = install_session_nested_budget(&opts_map, "ignored").unwrap_err();
         match error {
             VmError::CategorizedError { message, .. } => {

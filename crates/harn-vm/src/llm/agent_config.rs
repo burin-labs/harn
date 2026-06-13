@@ -1,6 +1,7 @@
 //! Agent loop configuration, builtin registration, and result building
 //! extracted from `agent.rs` for maintainability.
 
+use crate::value::VmDictExt;
 use std::sync::Arc;
 
 use crate::stdlib::harn_entry::register_harn_entrypoint_category;
@@ -29,25 +30,13 @@ const AGENT_CONTROL_BUILTINS: &[&VmBuiltinDef] = &[
 pub(crate) fn agent_feedback_message(kind: &str, content: &str) -> VmValue {
     let mut msg = std::collections::BTreeMap::new();
     if kind == PREFILL_ASSISTANT_FEEDBACK_KIND {
-        msg.insert(
-            "role".to_string(),
-            VmValue::String(std::sync::Arc::from("assistant")),
-        );
-        msg.insert(
-            "content".to_string(),
-            VmValue::String(std::sync::Arc::from(content.to_string())),
-        );
+        msg.put_str("role", "assistant");
+        msg.put_str("content", content);
         return VmValue::Dict(std::sync::Arc::new(msg));
     }
     let body = format!("<runtime_feedback kind=\"{kind}\">\n{content}\n</runtime_feedback>");
-    msg.insert(
-        "role".to_string(),
-        VmValue::String(std::sync::Arc::from("user")),
-    );
-    msg.insert(
-        "content".to_string(),
-        VmValue::String(std::sync::Arc::from(body)),
-    );
+    msg.put_str("role", "user");
+    msg.put_str("content", body);
     VmValue::Dict(std::sync::Arc::new(msg))
 }
 

@@ -38,6 +38,7 @@
 //! `run_maintenance` equivalent: it pre-creates the next N day/hour
 //! partitions so inserts never hit the DEFAULT partition.
 
+use crate::value::VmDictExt;
 use std::collections::{BTreeMap, HashSet};
 use std::future::Future;
 use std::pin::Pin;
@@ -217,10 +218,7 @@ async fn pg_pool_stats_impl(
         "statement_cache_capacity".to_string(),
         VmValue::Int(record.statement_cache_capacity as i64),
     );
-    dict.insert(
-        "read_routing_policy".to_string(),
-        VmValue::String(std::sync::Arc::from(record.read_routing_policy.as_str())),
-    );
+    dict.put_str("read_routing_policy", record.read_routing_policy.as_str());
     dict.insert(
         "replicas".to_string(),
         VmValue::Int(record.replicas.len() as i64),
@@ -242,10 +240,7 @@ async fn pg_pool_stats_impl(
         );
     }
     let circuit_state = record.circuit.snapshot();
-    dict.insert(
-        "circuit_state".to_string(),
-        VmValue::String(std::sync::Arc::from(circuit_state.state)),
-    );
+    dict.put_str("circuit_state", circuit_state.state);
     dict.insert(
         "circuit_failures".to_string(),
         VmValue::Int(circuit_state.failures as i64),

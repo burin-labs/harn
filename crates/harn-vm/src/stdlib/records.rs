@@ -1,5 +1,6 @@
 //! Artifact and run-record builtins.
 
+use crate::value::VmDictExt;
 use std::cell::RefCell;
 use std::collections::BTreeMap;
 
@@ -1371,10 +1372,7 @@ fn eval_metrics_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, Vm
         .iter()
         .map(|metric| {
             let mut dict = BTreeMap::new();
-            dict.insert(
-                "name".to_string(),
-                VmValue::String(std::sync::Arc::from(metric.name.as_str())),
-            );
+            dict.put_str("name", metric.name.as_str());
             dict.insert(
                 "value".to_string(),
                 crate::stdlib::json_to_vm_value(&metric.value),

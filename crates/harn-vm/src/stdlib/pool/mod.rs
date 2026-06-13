@@ -16,6 +16,7 @@
 //!   the API level so user code is portable; today they fail with a clear
 //!   diagnostic until an embedding host wires a tenant/org pool backend.
 
+use crate::value::VmDictExt;
 use std::any::Any;
 use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::future::Future;
@@ -901,36 +902,21 @@ fn pool_snapshot_value(pool: &PoolEntry) -> VmValue {
         }
     }
     let mut snapshot = BTreeMap::new();
-    snapshot.insert(
-        "_type".to_string(),
-        VmValue::String(std::sync::Arc::from(POOL_TYPE)),
-    );
-    snapshot.insert(
-        "id".to_string(),
-        VmValue::String(std::sync::Arc::from(pool.id.as_str())),
-    );
-    snapshot.insert(
-        "name".to_string(),
-        VmValue::String(std::sync::Arc::from(pool.name.as_str())),
-    );
+    snapshot.put_str("_type", POOL_TYPE);
+    snapshot.put_str("id", pool.id.as_str());
+    snapshot.put_str("name", pool.name.as_str());
     snapshot.insert(
         "max_concurrent".to_string(),
         VmValue::Int(pool.max_concurrent as i64),
     );
-    snapshot.insert(
-        "created_at".to_string(),
-        VmValue::String(std::sync::Arc::from(pool.created_at.as_str())),
-    );
+    snapshot.put_str("created_at", pool.created_at.as_str());
     snapshot.insert("active".to_string(), VmValue::Int(active));
     snapshot.insert("queued".to_string(), VmValue::Int(queued));
     snapshot.insert("completed".to_string(), VmValue::Int(completed));
     snapshot.insert("failed".to_string(), VmValue::Int(failed));
     snapshot.insert("rejected".to_string(), VmValue::Int(rejected));
     snapshot.insert("total".to_string(), VmValue::Int(pool.tasks.len() as i64));
-    snapshot.insert(
-        "queue_strategy".to_string(),
-        VmValue::String(std::sync::Arc::from(pool.queue_strategy.name())),
-    );
+    snapshot.put_str("queue_strategy", pool.queue_strategy.name());
     snapshot.insert(
         "backpressure".to_string(),
         backpressure_snapshot_value(&pool.backpressure),
@@ -943,15 +929,9 @@ fn pool_snapshot_value(pool: &PoolEntry) -> VmValue {
         "tasks".to_string(),
         VmValue::List(std::sync::Arc::new(tasks)),
     );
-    snapshot.insert(
-        "scope".to_string(),
-        VmValue::String(std::sync::Arc::from(pool.scope.as_str())),
-    );
+    snapshot.put_str("scope", pool.scope.as_str());
     if !pool.scope_id.is_empty() {
-        snapshot.insert(
-            "scope_id".to_string(),
-            VmValue::String(std::sync::Arc::from(pool.scope_id.as_str())),
-        );
+        snapshot.put_str("scope_id", pool.scope_id.as_str());
     }
     snapshot.insert("durable".to_string(), VmValue::Bool(pool.store.is_some()));
     snapshot.insert(
@@ -969,22 +949,13 @@ fn pool_snapshot_value(pool: &PoolEntry) -> VmValue {
 
 fn backpressure_snapshot_value(backpressure: &BackpressureStrategy) -> VmValue {
     let mut value = BTreeMap::new();
-    value.insert(
-        "_type".to_string(),
-        VmValue::String(std::sync::Arc::from("backpressure")),
-    );
-    value.insert(
-        "kind".to_string(),
-        VmValue::String(std::sync::Arc::from(backpressure.name())),
-    );
+    value.put_str("_type", "backpressure");
+    value.put_str("kind", backpressure.name());
     if let Some(max_depth) = backpressure.max_depth() {
         value.insert("max_depth".to_string(), VmValue::Int(max_depth as i64));
     }
     if let BackpressureStrategy::Queue { on_full, .. } = backpressure {
-        value.insert(
-            "on_full".to_string(),
-            VmValue::String(std::sync::Arc::from(on_full.as_str())),
-        );
+        value.put_str("on_full", on_full.as_str());
     }
     VmValue::Dict(std::sync::Arc::new(value))
 }
@@ -1001,123 +972,37 @@ fn task_sort_key(task: &VmValue) -> String {
 
 fn task_snapshot_value(task: &TaskState) -> VmValue {
     let mut entry = BTreeMap::new();
-    entry.insert(
-        "_type".to_string(),
-        VmValue::String(std::sync::Arc::from(POOL_TASK_TYPE)),
-    );
-    entry.insert(
-        "id".to_string(),
-        VmValue::String(std::sync::Arc::from(task.id.as_str())),
-    );
-    entry.insert(
-        "pool_id".to_string(),
-        VmValue::String(std::sync::Arc::from(task.pool_id.as_str())),
-    );
-    entry.insert(
-        "pool".to_string(),
-        VmValue::String(std::sync::Arc::from(task.pool_name.as_str())),
-    );
-    entry.insert(
-        "status".to_string(),
-        VmValue::String(std::sync::Arc::from(task.status.as_str())),
-    );
+    entry.put_str("_type", POOL_TASK_TYPE);
+    entry.put_str("id", task.id.as_str());
+    entry.put_str("pool_id", task.pool_id.as_str());
+    entry.put_str("pool", task.pool_name.as_str());
+    entry.put_str("status", task.status.as_str());
     entry.insert("priority".to_string(), VmValue::Int(task.priority));
-    entry.insert(
-        "submitted_at".to_string(),
-        VmValue::String(std::sync::Arc::from(task.submitted_at.as_str())),
-    );
-    if let Some(key) = &task.key {
-        entry.insert(
-            "key".to_string(),
-            VmValue::String(std::sync::Arc::from(key.as_str())),
-        );
-    }
-    if let Some(started_at) = &task.started_at {
-        entry.insert(
-            "started_at".to_string(),
-            VmValue::String(std::sync::Arc::from(started_at.as_str())),
-        );
-    }
-    if let Some(finished_at) = &task.finished_at {
-        entry.insert(
-            "finished_at".to_string(),
-            VmValue::String(std::sync::Arc::from(finished_at.as_str())),
-        );
-    }
+    entry.put_str("submitted_at", task.submitted_at.as_str());
+    entry.put_opt_str("key", task.key.as_deref());
+    entry.put_opt_str("started_at", task.started_at.as_deref());
+    entry.put_opt_str("finished_at", task.finished_at.as_deref());
     if let Some(result) = &task.result {
         entry.insert("result".to_string(), result.clone());
     }
-    if let Some(error) = &task.error {
-        entry.insert(
-            "error".to_string(),
-            VmValue::String(std::sync::Arc::from(error.as_str())),
-        );
-    }
-    if let Some(reason) = &task.rejection_reason {
-        entry.insert(
-            "rejection_reason".to_string(),
-            VmValue::String(std::sync::Arc::from(reason.as_str())),
-        );
-    }
-    if let Some(policy) = &task.rejection_policy {
-        entry.insert(
-            "rejection_policy".to_string(),
-            VmValue::String(std::sync::Arc::from(policy.as_str())),
-        );
-    }
+    entry.put_opt_str("error", task.error.as_deref());
+    entry.put_opt_str("rejection_reason", task.rejection_reason.as_deref());
+    entry.put_opt_str("rejection_policy", task.rejection_policy.as_deref());
     VmValue::Dict(std::sync::Arc::new(entry))
 }
 
 fn task_handle_value(task: &TaskState) -> VmValue {
     let mut handle = BTreeMap::new();
-    handle.insert(
-        "_type".to_string(),
-        VmValue::String(std::sync::Arc::from(POOL_TASK_TYPE)),
-    );
-    handle.insert(
-        "id".to_string(),
-        VmValue::String(std::sync::Arc::from(task.id.as_str())),
-    );
-    handle.insert(
-        "pool_id".to_string(),
-        VmValue::String(std::sync::Arc::from(task.pool_id.as_str())),
-    );
-    handle.insert(
-        "pool".to_string(),
-        VmValue::String(std::sync::Arc::from(task.pool_name.as_str())),
-    );
-    handle.insert(
-        "submitted_at".to_string(),
-        VmValue::String(std::sync::Arc::from(task.submitted_at.as_str())),
-    );
-    handle.insert(
-        "status".to_string(),
-        VmValue::String(std::sync::Arc::from(task.status.as_str())),
-    );
-    if let Some(key) = &task.key {
-        handle.insert(
-            "key".to_string(),
-            VmValue::String(std::sync::Arc::from(key.as_str())),
-        );
-    }
-    if let Some(error) = &task.error {
-        handle.insert(
-            "error".to_string(),
-            VmValue::String(std::sync::Arc::from(error.as_str())),
-        );
-    }
-    if let Some(reason) = &task.rejection_reason {
-        handle.insert(
-            "rejection_reason".to_string(),
-            VmValue::String(std::sync::Arc::from(reason.as_str())),
-        );
-    }
-    if let Some(policy) = &task.rejection_policy {
-        handle.insert(
-            "rejection_policy".to_string(),
-            VmValue::String(std::sync::Arc::from(policy.as_str())),
-        );
-    }
+    handle.put_str("_type", POOL_TASK_TYPE);
+    handle.put_str("id", task.id.as_str());
+    handle.put_str("pool_id", task.pool_id.as_str());
+    handle.put_str("pool", task.pool_name.as_str());
+    handle.put_str("submitted_at", task.submitted_at.as_str());
+    handle.put_str("status", task.status.as_str());
+    handle.put_opt_str("key", task.key.as_deref());
+    handle.put_opt_str("error", task.error.as_deref());
+    handle.put_opt_str("rejection_reason", task.rejection_reason.as_deref());
+    handle.put_opt_str("rejection_policy", task.rejection_policy.as_deref());
     VmValue::Dict(std::sync::Arc::new(handle))
 }
 

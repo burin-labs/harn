@@ -1,3 +1,4 @@
+use crate::value::VmDictExt;
 use std::collections::BTreeMap;
 
 use crate::value::{VmError, VmValue};
@@ -30,24 +31,15 @@ fn route_policy_dict(
     strategy: Option<String>,
 ) -> VmValue {
     let mut dict = BTreeMap::new();
-    dict.insert(
-        "mode".to_string(),
-        VmValue::String(std::sync::Arc::from(mode.to_string())),
-    );
+    dict.put_str("mode", mode);
     if let Some(target) = target {
-        dict.insert(
-            "target".to_string(),
-            VmValue::String(std::sync::Arc::from(target)),
-        );
+        dict.put_str("target", target);
     }
     if let Some(prefer) = prefer {
         dict.insert("prefer".to_string(), prefer);
     }
     if let Some(strategy) = strategy {
-        dict.insert(
-            "strategy".to_string(),
-            VmValue::String(std::sync::Arc::from(strategy)),
-        );
+        dict.put_str("strategy", strategy);
     }
     VmValue::Dict(std::sync::Arc::new(dict))
 }

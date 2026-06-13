@@ -1,3 +1,4 @@
+use crate::value::VmDictExt;
 use std::cell::RefCell;
 use std::collections::BTreeMap;
 
@@ -327,22 +328,10 @@ pub(crate) fn budget_exceeded_error(
     limit_value: f64,
 ) -> VmError {
     let mut dict = BTreeMap::new();
-    dict.insert(
-        "category".to_string(),
-        VmValue::String(std::sync::Arc::from("budget_exceeded")),
-    );
-    dict.insert(
-        "kind".to_string(),
-        VmValue::String(std::sync::Arc::from("terminal")),
-    );
-    dict.insert(
-        "reason".to_string(),
-        VmValue::String(std::sync::Arc::from("budget_exceeded")),
-    );
-    dict.insert(
-        "limit".to_string(),
-        VmValue::String(std::sync::Arc::from(limit_kind.as_str())),
-    );
+    dict.put_str("category", "budget_exceeded");
+    dict.put_str("kind", "terminal");
+    dict.put_str("reason", "budget_exceeded");
+    dict.put_str("limit", limit_kind.as_str());
     dict.insert("limit_value".to_string(), VmValue::Float(limit_value));
     dict.insert(
         "projected_cost_usd".to_string(),
@@ -360,17 +349,11 @@ pub(crate) fn budget_exceeded_error(
         "projected_output_tokens".to_string(),
         VmValue::Int(projection.projected_output_tokens),
     );
-    dict.insert(
-        "provider".to_string(),
-        VmValue::String(std::sync::Arc::from(projection.provider.clone())),
-    );
-    dict.insert(
-        "model".to_string(),
-        VmValue::String(std::sync::Arc::from(projection.model.clone())),
-    );
-    dict.insert(
-        "message".to_string(),
-        VmValue::String(std::sync::Arc::from(format!(
+    dict.put_str("provider", projection.provider.clone());
+    dict.put_str("model", projection.model.clone());
+    dict.put_str(
+        "message",
+        format!(
             "LLM budget exceeded before provider call: {} would exceed {}",
             match limit_kind {
                 BudgetLimitKind::PerCallCost =>
@@ -389,7 +372,7 @@ pub(crate) fn budget_exceeded_error(
                 ),
             },
             limit_kind.as_str(),
-        ))),
+        ),
     );
     VmError::Thrown(VmValue::Dict(std::sync::Arc::new(dict)))
 }
@@ -807,14 +790,8 @@ pub(crate) fn register_cost_builtins(vm: &mut Vm) {
 
 fn pricing_detail_to_vm_value(provider: &str, model: &str, detail: &PricingDetail) -> VmValue {
     let mut dict = BTreeMap::new();
-    dict.insert(
-        "provider".to_string(),
-        VmValue::String(std::sync::Arc::from(provider.to_string())),
-    );
-    dict.insert(
-        "model".to_string(),
-        VmValue::String(std::sync::Arc::from(model.to_string())),
-    );
+    dict.put_str("provider", provider);
+    dict.put_str("model", model);
     dict.insert(
         "input_per_mtok".to_string(),
         VmValue::Float(detail.input_per_1k * 1000.0),
@@ -837,10 +814,7 @@ fn pricing_detail_to_vm_value(provider: &str, model: &str, detail: &PricingDetai
             .map(|rate| VmValue::Float(rate * 1000.0))
             .unwrap_or(VmValue::Nil),
     );
-    dict.insert(
-        "source".to_string(),
-        VmValue::String(std::sync::Arc::from(detail.source.as_str())),
-    );
+    dict.put_str("source", detail.source.as_str());
     VmValue::Dict(std::sync::Arc::new(dict))
 }
 
@@ -1045,14 +1019,8 @@ fn llm_compare_costs_builtin(args: &[VmValue], _out: &mut String) -> Result<VmVa
             ) * calls as f64
         });
         let mut row = BTreeMap::new();
-        row.insert(
-            "provider".to_string(),
-            VmValue::String(std::sync::Arc::from(provider.clone())),
-        );
-        row.insert(
-            "model".to_string(),
-            VmValue::String(std::sync::Arc::from(model.clone())),
-        );
+        row.put_str("provider", provider.clone());
+        row.put_str("model", model.clone());
         row.insert(
             "pricing".to_string(),
             detail
@@ -1099,18 +1067,9 @@ pub(crate) fn project_call_cost(
 
 fn tokenizer_info_to_vm_value(model: &str, info: super::token_count::TokenizerInfo) -> VmValue {
     let mut result = BTreeMap::new();
-    result.insert(
-        "model".to_string(),
-        VmValue::String(std::sync::Arc::from(model)),
-    );
-    result.insert(
-        "model_family".to_string(),
-        VmValue::String(std::sync::Arc::from(info.model_family)),
-    );
-    result.insert(
-        "source".to_string(),
-        VmValue::String(std::sync::Arc::from(info.source.as_str())),
-    );
+    result.put_str("model", model);
+    result.put_str("model_family", info.model_family);
+    result.put_str("source", info.source.as_str());
     result.insert("exact".to_string(), VmValue::Bool(info.exact));
     result.insert(
         "known_model_family".to_string(),

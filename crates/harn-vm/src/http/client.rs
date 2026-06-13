@@ -1,3 +1,4 @@
+use crate::value::VmDictExt;
 use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::fs::{File, OpenOptions};
@@ -140,14 +141,8 @@ fn build_http_response(
         "headers".to_string(),
         VmValue::Dict(std::sync::Arc::new(headers)),
     );
-    result.insert(
-        "body".to_string(),
-        VmValue::String(std::sync::Arc::from(body)),
-    );
-    result.insert(
-        "final_url".to_string(),
-        VmValue::String(std::sync::Arc::from(final_url)),
-    );
+    result.put_str("body", body);
+    result.put_str("final_url", final_url);
     result.insert(
         "ok".to_string(),
         VmValue::Bool((200..300).contains(&(status as u16))),
@@ -366,10 +361,7 @@ async fn http_verb_handler(
     };
     if has_body && !(matches!(args.get(1), Some(VmValue::Dict(_))) && args.get(2).is_none()) {
         let body = args.get(1).map(|a| a.display()).unwrap_or_default();
-        options.insert(
-            "body".to_string(),
-            VmValue::String(std::sync::Arc::from(body)),
-        );
+        options.put_str("body", body);
     }
     vm_execute_http_request(method, &url, &options).await
 }
@@ -807,10 +799,7 @@ pub(super) fn parse_http_request_parts(
                 let hv = reqwest::header::HeaderValue::from_str(s)
                     .map_err(|e| vm_error(format!("http: invalid auth header value: {e}")))?;
                 header_map.insert(reqwest::header::AUTHORIZATION, hv);
-                recorded_headers.insert(
-                    "authorization".to_string(),
-                    VmValue::String(std::sync::Arc::from(s.as_ref())),
-                );
+                recorded_headers.put_str("authorization", s.as_ref());
             }
             VmValue::Dict(d) => {
                 if let Some(bearer) = d.get("bearer") {
@@ -819,10 +808,7 @@ pub(super) fn parse_http_request_parts(
                     let hv = reqwest::header::HeaderValue::from_str(&authorization)
                         .map_err(|e| vm_error(format!("http: invalid bearer token: {e}")))?;
                     header_map.insert(reqwest::header::AUTHORIZATION, hv);
-                    recorded_headers.insert(
-                        "authorization".to_string(),
-                        VmValue::String(std::sync::Arc::from(authorization)),
-                    );
+                    recorded_headers.put_str("authorization", authorization);
                 } else if let Some(VmValue::Dict(basic)) = d.get("basic") {
                     let user = basic.get("user").map(|v| v.display()).unwrap_or_default();
                     let password = basic
@@ -836,10 +822,7 @@ pub(super) fn parse_http_request_parts(
                     let hv = reqwest::header::HeaderValue::from_str(&authorization)
                         .map_err(|e| vm_error(format!("http: invalid basic auth: {e}")))?;
                     header_map.insert(reqwest::header::AUTHORIZATION, hv);
-                    recorded_headers.insert(
-                        "authorization".to_string(),
-                        VmValue::String(std::sync::Arc::from(authorization)),
-                    );
+                    recorded_headers.put_str("authorization", authorization);
                 }
             }
             _ => {}
@@ -867,11 +850,9 @@ pub(super) fn parse_http_request_parts(
                 "http: body and multipart options are mutually exclusive",
             ));
         }
-        recorded_headers.insert(
-            "content-type".to_string(),
-            VmValue::String(std::sync::Arc::from(format!(
-                "multipart/form-data; boundary={MULTIPART_MOCK_BOUNDARY}"
-            ))),
+        recorded_headers.put_str(
+            "content-type",
+            format!("multipart/form-data; boundary={MULTIPART_MOCK_BOUNDARY}"),
         );
     }
 

@@ -1,3 +1,4 @@
+use crate::value::VmDictExt;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
@@ -497,10 +498,7 @@ impl Compiler {
                     }
                 }
                 let mut out = BTreeMap::new();
-                out.insert(
-                    "type".to_string(),
-                    VmValue::String(std::sync::Arc::from("dict")),
-                );
+                out.put_str("type", "dict");
                 out.insert(
                     "properties".to_string(),
                     VmValue::Dict(std::sync::Arc::new(properties)),
@@ -515,10 +513,7 @@ impl Compiler {
             }
             harn_parser::TypeExpr::List(inner) => {
                 let mut out = BTreeMap::new();
-                out.insert(
-                    "type".to_string(),
-                    VmValue::String(std::sync::Arc::from("list")),
-                );
+                out.put_str("type", "list");
                 if let Some(item_schema) = Self::type_expr_to_schema_value(inner) {
                     out.insert("items".to_string(), item_schema);
                 }
@@ -526,10 +521,7 @@ impl Compiler {
             }
             harn_parser::TypeExpr::DictType(key, value) => {
                 let mut out = BTreeMap::new();
-                out.insert(
-                    "type".to_string(),
-                    VmValue::String(std::sync::Arc::from("dict")),
-                );
+                out.put_str("type", "dict");
                 if matches!(key.as_ref(), harn_parser::TypeExpr::Named(name) if name == "string") {
                     if let Some(value_schema) = Self::type_expr_to_schema_value(value) {
                         out.insert("additional_properties".to_string(), value_schema);

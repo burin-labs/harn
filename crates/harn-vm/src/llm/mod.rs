@@ -724,6 +724,7 @@ mod tests {
     use super::call::{build_schema_nudge, compute_validation_errors, SchemaNudge};
     use super::{execute_llm_call, reset_llm_state, structured_output_errors};
     use crate::llm::mock;
+    use crate::value::VmDictExt;
     use crate::value::VmValue;
 
     fn base_opts() -> LlmCallOptions {
@@ -822,10 +823,7 @@ mod tests {
     fn output_validation_accepts_matching_schema() {
         let opts = base_opts();
         let mut map = std::collections::BTreeMap::new();
-        map.insert(
-            "name".to_string(),
-            VmValue::String(std::sync::Arc::from("Ada")),
-        );
+        map.put_str("name", "Ada");
         let data = VmValue::Dict(std::sync::Arc::new(map));
         let errors = compute_validation_errors(&data, &opts);
         assert!(errors.is_empty(), "schema should pass: {errors:?}");

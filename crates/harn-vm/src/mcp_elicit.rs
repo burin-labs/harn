@@ -17,6 +17,7 @@
 //! See the spec at
 //! <https://modelcontextprotocol.io/specification/2025-11-25/client/elicitation>.
 
+use crate::value::VmDictExt;
 use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -218,10 +219,7 @@ pub(crate) fn envelope_from_response(
     }
 
     let mut envelope: BTreeMap<String, VmValue> = BTreeMap::new();
-    envelope.insert(
-        "action".to_string(),
-        VmValue::String(std::sync::Arc::from(action)),
-    );
+    envelope.put_str("action", action);
 
     if action == "accept" {
         let content = result
@@ -317,14 +315,8 @@ pub(crate) async fn dispatch_inbound_elicitation(
     // Includes the originating server name so a single host can route
     // by source, and copies the raw schema through unmodified.
     let mut bridge_params: BTreeMap<String, VmValue> = BTreeMap::new();
-    bridge_params.insert(
-        "server".to_string(),
-        VmValue::String(std::sync::Arc::from(server_name)),
-    );
-    bridge_params.insert(
-        "message".to_string(),
-        VmValue::String(std::sync::Arc::from(message.as_str())),
-    );
+    bridge_params.put_str("server", server_name);
+    bridge_params.put_str("message", message.as_str());
     bridge_params.insert(
         "requestedSchema".to_string(),
         json_to_vm_value(&requested_schema),

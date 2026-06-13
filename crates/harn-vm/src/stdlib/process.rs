@@ -1,3 +1,4 @@
+use crate::value::VmDictExt;
 use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::io::Write as _;
@@ -360,41 +361,19 @@ fn asset_root_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmEr
 fn runtime_paths_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let runtime_base = runtime_root_base();
     let mut paths = BTreeMap::new();
-    paths.insert(
-        "execution_root".to_string(),
-        VmValue::String(std::sync::Arc::from(
-            execution_root_path().to_string_lossy().into_owned(),
-        )),
+    paths.put_str("execution_root", execution_root_path().to_string_lossy());
+    paths.put_str("asset_root", asset_root_path().to_string_lossy());
+    paths.put_str(
+        "state_root",
+        crate::runtime_paths::state_root(&runtime_base).to_string_lossy(),
     );
-    paths.insert(
-        "asset_root".to_string(),
-        VmValue::String(std::sync::Arc::from(
-            asset_root_path().to_string_lossy().into_owned(),
-        )),
+    paths.put_str(
+        "run_root",
+        crate::runtime_paths::run_root(&runtime_base).to_string_lossy(),
     );
-    paths.insert(
-        "state_root".to_string(),
-        VmValue::String(std::sync::Arc::from(
-            crate::runtime_paths::state_root(&runtime_base)
-                .to_string_lossy()
-                .into_owned(),
-        )),
-    );
-    paths.insert(
-        "run_root".to_string(),
-        VmValue::String(std::sync::Arc::from(
-            crate::runtime_paths::run_root(&runtime_base)
-                .to_string_lossy()
-                .into_owned(),
-        )),
-    );
-    paths.insert(
-        "worktree_root".to_string(),
-        VmValue::String(std::sync::Arc::from(
-            crate::runtime_paths::worktree_root(&runtime_base)
-                .to_string_lossy()
-                .into_owned(),
-        )),
+    paths.put_str(
+        "worktree_root",
+        crate::runtime_paths::worktree_root(&runtime_base).to_string_lossy(),
     );
     Ok(VmValue::Dict(std::sync::Arc::new(paths)))
 }
@@ -541,18 +520,8 @@ pub(crate) fn spawn_captured_value(args: &[VmValue]) -> Result<VmValue, VmError>
     };
     let mut result = BTreeMap::new();
     result.insert("exit_code".to_string(), VmValue::Int(exit_code));
-    result.insert(
-        "stdout".to_string(),
-        VmValue::String(std::sync::Arc::from(
-            String::from_utf8_lossy(&output.stdout).as_ref(),
-        )),
-    );
-    result.insert(
-        "stderr".to_string(),
-        VmValue::String(std::sync::Arc::from(
-            String::from_utf8_lossy(&output.stderr).as_ref(),
-        )),
-    );
+    result.put_str("stdout", String::from_utf8_lossy(&output.stdout).as_ref());
+    result.put_str("stderr", String::from_utf8_lossy(&output.stderr).as_ref());
     result.insert("duration_ms".to_string(), VmValue::Int(duration_ms));
     result.insert("success".to_string(), VmValue::Bool(success));
     result.insert("timed_out".to_string(), VmValue::Bool(timed_out));
@@ -784,17 +753,13 @@ fn captured_run_to_value(run: &CapturedRun) -> VmValue {
     };
     let success = !run.timed_out && run.output.status.success();
     let mut result = BTreeMap::new();
-    result.insert(
-        "stdout".to_string(),
-        VmValue::String(std::sync::Arc::from(
-            String::from_utf8_lossy(&run.output.stdout).as_ref(),
-        )),
+    result.put_str(
+        "stdout",
+        String::from_utf8_lossy(&run.output.stdout).as_ref(),
     );
-    result.insert(
-        "stderr".to_string(),
-        VmValue::String(std::sync::Arc::from(
-            String::from_utf8_lossy(&run.output.stderr).as_ref(),
-        )),
+    result.put_str(
+        "stderr",
+        String::from_utf8_lossy(&run.output.stderr).as_ref(),
     );
     result.insert("status".to_string(), VmValue::Int(status));
     result.insert("success".to_string(), VmValue::Bool(success));
@@ -929,18 +894,8 @@ const PATH_BUILTINS: &[&VmBuiltinDef] = &[&SOURCE_DIR_IMPL_DEF, &PROJECT_ROOT_IM
 
 fn vm_output_to_value(output: std::process::Output) -> VmValue {
     let mut result = BTreeMap::new();
-    result.insert(
-        "stdout".to_string(),
-        VmValue::String(std::sync::Arc::from(
-            String::from_utf8_lossy(&output.stdout).as_ref(),
-        )),
-    );
-    result.insert(
-        "stderr".to_string(),
-        VmValue::String(std::sync::Arc::from(
-            String::from_utf8_lossy(&output.stderr).as_ref(),
-        )),
-    );
+    result.put_str("stdout", String::from_utf8_lossy(&output.stdout).as_ref());
+    result.put_str("stderr", String::from_utf8_lossy(&output.stderr).as_ref());
     result.insert(
         "status".to_string(),
         VmValue::Int(output.status.code().unwrap_or(-1) as i64),

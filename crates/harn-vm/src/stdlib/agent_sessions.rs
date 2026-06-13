@@ -5,6 +5,7 @@
 //! store in `crate::agent_sessions`. There is no policy-as-verb
 //! pattern; unknown inputs are hard errors.
 
+use crate::value::VmDictExt;
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 
@@ -1164,18 +1165,9 @@ fn agent_session_drain_inbox_builtin(
         .map(|entry| {
             let mut dict = BTreeMap::new();
             dict.insert("sequence".to_string(), VmValue::Int(entry.sequence as i64));
-            dict.insert(
-                "kind".to_string(),
-                VmValue::String(std::sync::Arc::from(entry.kind)),
-            );
-            dict.insert(
-                "content".to_string(),
-                VmValue::String(std::sync::Arc::from(entry.content)),
-            );
-            dict.insert(
-                "source".to_string(),
-                VmValue::String(std::sync::Arc::from(entry.source)),
-            );
+            dict.put_str("kind", entry.kind);
+            dict.put_str("content", entry.content);
+            dict.put_str("source", entry.source);
             dict.insert("ts_ms".to_string(), VmValue::Int(entry.ts_ms));
             VmValue::Dict(std::sync::Arc::new(dict))
         })
@@ -1610,14 +1602,8 @@ async fn cancel_in_flight_tool_call_builtin(
     }
 
     let mut result = BTreeMap::new();
-    result.insert(
-        "status".to_string(),
-        VmValue::String(std::sync::Arc::from(final_status)),
-    );
-    result.insert(
-        "call_id".to_string(),
-        VmValue::String(std::sync::Arc::from(call_id)),
-    );
+    result.put_str("status", final_status);
+    result.put_str("call_id", call_id);
     result.insert(
         "tool".to_string(),
         outcome
@@ -1625,10 +1611,7 @@ async fn cancel_in_flight_tool_call_builtin(
             .map(|name| VmValue::String(std::sync::Arc::from(name)))
             .unwrap_or(VmValue::Nil),
     );
-    result.insert(
-        "reason".to_string(),
-        VmValue::String(std::sync::Arc::from(reason)),
-    );
+    result.put_str("reason", reason);
     Ok(VmValue::Dict(std::sync::Arc::new(result)))
 }
 

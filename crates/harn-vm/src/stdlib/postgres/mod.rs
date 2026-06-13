@@ -1,3 +1,4 @@
+use crate::value::VmDictExt;
 use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::ops::Bound;
@@ -760,15 +761,9 @@ fn register_local_pool_handle(
         "statement_cache_capacity".to_string(),
         VmValue::Int(record.statement_cache_capacity as i64),
     );
-    meta.insert(
-        "read_routing_policy".to_string(),
-        VmValue::String(Arc::from(record.read_routing_policy.as_str())),
-    );
+    meta.put_str("read_routing_policy", record.read_routing_policy.as_str());
     if let Some(application_name) = application_name {
-        meta.insert(
-            "application_name".to_string(),
-            VmValue::String(std::sync::Arc::from(application_name)),
-        );
+        meta.put_str("application_name", application_name);
     }
     POOLS.with(|pools| {
         pools.borrow_mut().insert(id.clone(), record);
@@ -2043,14 +2038,8 @@ pub(super) fn unregister_tx(id: &str) {
 }
 
 pub(super) fn handle_value(kind: &str, id: &str, mut extra: BTreeMap<String, VmValue>) -> VmValue {
-    extra.insert(
-        "_type".to_string(),
-        VmValue::String(std::sync::Arc::from(kind)),
-    );
-    extra.insert(
-        "id".to_string(),
-        VmValue::String(std::sync::Arc::from(id.to_string())),
-    );
+    extra.put_str("_type", kind);
+    extra.put_str("id", id);
     VmValue::Dict(std::sync::Arc::new(extra))
 }
 

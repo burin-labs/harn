@@ -6,6 +6,7 @@
 //! `harn test-bench` CLI. They're no-ops when no testbench session is
 //! active, so they're always safe to call.
 
+use crate::value::VmDictExt;
 use std::collections::BTreeMap;
 
 use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
@@ -40,10 +41,7 @@ fn testbench_fs_diff_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValu
         .into_iter()
         .map(|entry| {
             let mut d = BTreeMap::new();
-            d.insert(
-                "path".to_string(),
-                VmValue::String(std::sync::Arc::from(entry.path.to_string_lossy().as_ref())),
-            );
+            d.put_str("path", entry.path.to_string_lossy().as_ref());
             let (kind_str, content_val) = match entry.kind {
                 DiffKind::Added { content } => (
                     "added",
@@ -59,10 +57,7 @@ fn testbench_fs_diff_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValu
                 ),
                 DiffKind::Deleted => ("deleted", VmValue::Nil),
             };
-            d.insert(
-                "kind".to_string(),
-                VmValue::String(std::sync::Arc::from(kind_str)),
-            );
+            d.put_str("kind", kind_str);
             d.insert("content".to_string(), content_val);
             VmValue::Dict(std::sync::Arc::new(d))
         })
@@ -83,10 +78,7 @@ fn testbench_clock_leaks_impl(_args: &[VmValue], _out: &mut String) -> Result<Vm
         .into_iter()
         .map(|leak| {
             let mut d = BTreeMap::new();
-            d.insert(
-                "capability".to_string(),
-                VmValue::String(std::sync::Arc::from(leak.capability_id)),
-            );
+            d.put_str("capability", leak.capability_id);
             d.insert("count".to_string(), VmValue::Int(leak.count as i64));
             VmValue::Dict(std::sync::Arc::new(d))
         })

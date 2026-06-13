@@ -1,3 +1,4 @@
+use crate::value::VmDictExt;
 use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
@@ -401,10 +402,7 @@ fn open_db(path: &str, options: Option<&BTreeMap<String, VmValue>>) -> Result<Vm
     meta.insert("read_only".to_string(), VmValue::Bool(read_only));
     meta.insert("memory".to_string(), VmValue::Bool(is_memory));
     if let Some(path) = &stored_path {
-        meta.insert(
-            "path".to_string(),
-            VmValue::String(Arc::from(path.to_string_lossy().into_owned())),
-        );
+        meta.put_str("path", path.to_string_lossy());
     }
     let record = Arc::new(DbRecord {
         conn: Arc::new(Mutex::new(conn)),
@@ -654,7 +652,7 @@ async fn migrate(args: Vec<VmValue>) -> Result<VmValue, VmError> {
         string_list(entries.iter().map(|entry| entry.name.clone()).collect()),
     );
     response.insert("dry_run".to_string(), VmValue::Bool(dry_run));
-    response.insert("table".to_string(), VmValue::String(Arc::from(table)));
+    response.put_str("table", table);
     Ok(VmValue::Dict(Arc::new(response)))
 }
 
@@ -961,8 +959,8 @@ fn unregister_tx(id: &str) {
 }
 
 fn handle_value(kind: &str, id: &str, mut extra: BTreeMap<String, VmValue>) -> VmValue {
-    extra.insert("_type".to_string(), VmValue::String(Arc::from(kind)));
-    extra.insert("id".to_string(), VmValue::String(Arc::from(id.to_string())));
+    extra.put_str("_type", kind);
+    extra.put_str("id", id);
     VmValue::Dict(Arc::new(extra))
 }
 

@@ -1,3 +1,4 @@
+use crate::value::VmDictExt;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
@@ -204,10 +205,7 @@ struct ProjectFingerprint {
 impl ProjectFingerprint {
     fn into_vm_value(self) -> VmValue {
         let mut value = BTreeMap::new();
-        value.insert(
-            "primary_language".to_string(),
-            VmValue::String(std::sync::Arc::from(self.primary_language)),
-        );
+        value.put_str("primary_language", self.primary_language);
         value.insert(
             "languages".to_string(),
             VmValue::List(std::sync::Arc::new(
@@ -346,22 +344,10 @@ struct ProjectTreeEntry {
 impl ProjectTreeEntry {
     fn into_vm_value(self) -> VmValue {
         let mut value = BTreeMap::new();
-        value.insert(
-            "path".to_string(),
-            VmValue::String(std::sync::Arc::from(self.relative_path)),
-        );
-        value.insert(
-            "dir".to_string(),
-            VmValue::String(std::sync::Arc::from(self.metadata_path)),
-        );
-        value.insert(
-            "structure_hash".to_string(),
-            VmValue::String(std::sync::Arc::from(self.structure_hash)),
-        );
-        value.insert(
-            "content_hash".to_string(),
-            VmValue::String(std::sync::Arc::from(self.content_hash)),
-        );
+        value.put_str("path", self.relative_path);
+        value.put_str("dir", self.metadata_path);
+        value.put_str("structure_hash", self.structure_hash);
+        value.put_str("content_hash", self.content_hash);
         VmValue::Dict(std::sync::Arc::new(value))
     }
 }
@@ -387,12 +373,7 @@ impl ProjectEvidence {
     fn into_vm_value(self) -> VmValue {
         let confidence = confidence_value(&self);
         let mut result = BTreeMap::new();
-        result.insert(
-            "path".to_string(),
-            VmValue::String(std::sync::Arc::from(
-                self.path.to_string_lossy().into_owned(),
-            )),
-        );
+        result.put_str("path", self.path.to_string_lossy());
         result.insert(
             "languages".to_string(),
             VmValue::List(std::sync::Arc::new(
@@ -635,12 +616,7 @@ impl ContextProfileResolution {
             "schema_version".to_string(),
             VmValue::Int(CONTEXT_PROFILE_SCHEMA_VERSION),
         );
-        out.insert(
-            "path".to_string(),
-            VmValue::String(std::sync::Arc::from(
-                self.path.to_string_lossy().into_owned(),
-            )),
-        );
+        out.put_str("path", self.path.to_string_lossy());
         out.insert("signals".to_string(), self.signals.into_vm_value());
         out.insert("profile_ids".to_string(), string_list_value(profile_ids));
         out.insert(
@@ -2918,10 +2894,7 @@ fn push_unique(values: &mut Vec<String>, value: String) {
 
 fn catalog_entry_value(entry: &ProjectCatalogEntry) -> VmValue {
     let mut value = BTreeMap::new();
-    value.insert(
-        "id".to_string(),
-        VmValue::String(std::sync::Arc::from(entry.id.to_string())),
-    );
+    value.put_str("id", entry.id);
     value.insert(
         "languages".to_string(),
         VmValue::List(std::sync::Arc::new(

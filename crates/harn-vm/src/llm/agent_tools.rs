@@ -587,6 +587,7 @@ mod tests {
     //! loop.
 
     use super::*;
+    use crate::value::VmDictExt;
     use std::collections::BTreeMap;
     use std::sync::atomic::AtomicBool;
     use std::sync::Arc;
@@ -744,10 +745,7 @@ mod tests {
         // helper picks that up so the dispatch site can tag the
         // executor as `McpServer { server_name }`.
         let mut entry = BTreeMap::new();
-        entry.insert(
-            "_mcp_server".to_string(),
-            VmValue::String(std::sync::Arc::from("linear".to_string())),
-        );
+        entry.put_str("_mcp_server", "linear");
         let tools = tools_dict(vec![("create_issue", entry)]);
         assert_eq!(
             mcp_server_for_tool(Some(&tools), "create_issue"),
@@ -760,14 +758,8 @@ mod tests {
         // OpenAI-shape tools nest `_mcp_server` inside a `function`
         // sub-dict; the search must drill down a level.
         let mut function = BTreeMap::new();
-        function.insert(
-            "name".to_string(),
-            VmValue::String(std::sync::Arc::from("create_issue".to_string())),
-        );
-        function.insert(
-            "_mcp_server".to_string(),
-            VmValue::String(std::sync::Arc::from("linear".to_string())),
-        );
+        function.put_str("name", "create_issue");
+        function.put_str("_mcp_server", "linear");
         let mut entry = BTreeMap::new();
         entry.insert(
             "function".to_string(),
@@ -845,10 +837,7 @@ mod tests {
         );
         let bridge = Arc::new(bridge);
         let mut entry = BTreeMap::new();
-        entry.insert(
-            "_mcp_server".to_string(),
-            VmValue::String(std::sync::Arc::from("linear".to_string())),
-        );
+        entry.put_str("_mcp_server", "linear");
         let tools = tools_dict(vec![("create_issue", entry)]);
         let args = serde_json::json!({});
         let outcome =
@@ -886,14 +875,8 @@ mod tests {
         );
         let bridge = Arc::new(bridge);
         let mut entry = BTreeMap::new();
-        entry.insert(
-            "executor".to_string(),
-            VmValue::String(std::sync::Arc::from("host_bridge")),
-        );
-        entry.insert(
-            "host_capability".to_string(),
-            VmValue::String(std::sync::Arc::from("interaction.ask")),
-        );
+        entry.put_str("executor", "host_bridge");
+        entry.put_str("host_capability", "interaction.ask");
         let tools = tools_dict(vec![("ask_user", entry)]);
         let outcome = dispatch_tool_execution(
             "ask_user",
@@ -913,10 +896,7 @@ mod tests {
         // The dispatcher rejects with ProviderNative as the executor so
         // the ACP event reflects "model already executed this".
         let mut entry = BTreeMap::new();
-        entry.insert(
-            "executor".to_string(),
-            VmValue::String(std::sync::Arc::from("provider_native")),
-        );
+        entry.put_str("executor", "provider_native");
         let tools = tools_dict(vec![("tool_search", entry)]);
         let outcome = dispatch_tool_execution(
             "tool_search",
@@ -943,14 +923,8 @@ mod tests {
         );
         let bridge = Arc::new(bridge);
         let mut entry = BTreeMap::new();
-        entry.insert(
-            "executor".to_string(),
-            VmValue::String(std::sync::Arc::from("mcp_server")),
-        );
-        entry.insert(
-            "mcp_server".to_string(),
-            VmValue::String(std::sync::Arc::from("github")),
-        );
+        entry.put_str("executor", "mcp_server");
+        entry.put_str("mcp_server", "github");
         let tools = tools_dict(vec![("github_search_issues", entry)]);
         let outcome = dispatch_tool_execution(
             "github_search_issues",

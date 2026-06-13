@@ -1,4 +1,5 @@
 use super::*;
+use crate::value::VmDictExt;
 
 /// Layer the active step's defaults onto the call options dict before
 /// model/provider resolution and budget parsing run. The model override
@@ -22,10 +23,7 @@ pub(super) fn apply_active_step_defaults(options: &mut Option<BTreeMap<String, V
     }
     let opts = options.get_or_insert_with(BTreeMap::new);
     if let Some(model_name) = step_default {
-        opts.insert(
-            "model".to_string(),
-            VmValue::String(std::sync::Arc::from(model_name)),
-        );
+        opts.put_str("model", model_name);
     }
     if let Some((max_tokens, max_usd)) = step_budget {
         if max_tokens.is_some() || max_usd.is_some() {

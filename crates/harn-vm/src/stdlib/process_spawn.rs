@@ -24,6 +24,7 @@
 //! it kills the child first. `kill_on_drop(true)` on the command is a
 //! second backstop so a dropped `Child` does not outlive the registry.
 
+use crate::value::VmDictExt;
 use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, LazyLock, Mutex};
@@ -267,26 +268,14 @@ async fn spawn(params: &BTreeMap<String, VmValue>) -> Result<VmValue, VmError> {
     }
 
     let mut result = BTreeMap::new();
-    result.insert(
-        "handle_id".to_string(),
-        VmValue::String(std::sync::Arc::from(handle_id)),
-    );
+    result.put_str("handle_id", handle_id);
     result.insert(
         "pid".to_string(),
         pid.map(|p| VmValue::Int(p as i64)).unwrap_or(VmValue::Nil),
     );
-    result.insert(
-        "started_at".to_string(),
-        VmValue::String(std::sync::Arc::from(started_at)),
-    );
-    result.insert(
-        "command".to_string(),
-        VmValue::String(std::sync::Arc::from(command_display)),
-    );
-    result.insert(
-        "status".to_string(),
-        VmValue::String(std::sync::Arc::from("running")),
-    );
+    result.put_str("started_at", started_at);
+    result.put_str("command", command_display);
+    result.put_str("status", "running");
     Ok(VmValue::Dict(std::sync::Arc::new(result)))
 }
 
@@ -413,23 +402,11 @@ fn poll(params: &BTreeMap<String, VmValue>) -> Result<VmValue, VmError> {
     let running = status == SpawnStatus::Running;
 
     let mut result = BTreeMap::new();
-    result.insert(
-        "handle_id".to_string(),
-        VmValue::String(std::sync::Arc::from(entry.handle_id.clone())),
-    );
-    result.insert(
-        "status".to_string(),
-        VmValue::String(std::sync::Arc::from(status.as_str())),
-    );
+    result.put_str("handle_id", entry.handle_id.clone());
+    result.put_str("status", status.as_str());
     result.insert("running".to_string(), VmValue::Bool(running));
-    result.insert(
-        "command".to_string(),
-        VmValue::String(std::sync::Arc::from(entry.command_display.clone())),
-    );
-    result.insert(
-        "started_at".to_string(),
-        VmValue::String(std::sync::Arc::from(entry.started_at.clone())),
-    );
+    result.put_str("command", entry.command_display.clone());
+    result.put_str("started_at", entry.started_at.clone());
     result.insert(
         "pid".to_string(),
         entry
@@ -444,18 +421,8 @@ fn poll(params: &BTreeMap<String, VmValue>) -> Result<VmValue, VmError> {
             .map(|c| VmValue::Int(c as i64))
             .unwrap_or(VmValue::Nil),
     );
-    result.insert(
-        "stdout".to_string(),
-        VmValue::String(std::sync::Arc::from(
-            String::from_utf8_lossy(&state.stdout).into_owned(),
-        )),
-    );
-    result.insert(
-        "stderr".to_string(),
-        VmValue::String(std::sync::Arc::from(
-            String::from_utf8_lossy(&state.stderr).into_owned(),
-        )),
-    );
+    result.put_str("stdout", String::from_utf8_lossy(&state.stdout));
+    result.put_str("stderr", String::from_utf8_lossy(&state.stderr));
     Ok(VmValue::Dict(std::sync::Arc::new(result)))
 }
 
@@ -485,10 +452,7 @@ async fn wait(params: &BTreeMap<String, VmValue>) -> Result<VmValue, VmError> {
                     let mut result = BTreeMap::new();
                     result.insert("timed_out".to_string(), VmValue::Bool(true));
                     result.insert("running".to_string(), VmValue::Bool(true));
-                    result.insert(
-                        "status".to_string(),
-                        VmValue::String(std::sync::Arc::from("running")),
-                    );
+                    result.put_str("status", "running");
                     return Ok(VmValue::Dict(std::sync::Arc::new(result)));
                 }
             }
@@ -501,10 +465,7 @@ async fn wait(params: &BTreeMap<String, VmValue>) -> Result<VmValue, VmError> {
     let state = entry.state.lock().expect("spawn state poisoned");
     let status = state.status.unwrap_or(SpawnStatus::Running);
     let mut result = BTreeMap::new();
-    result.insert(
-        "status".to_string(),
-        VmValue::String(std::sync::Arc::from(status.as_str())),
-    );
+    result.put_str("status", status.as_str());
     result.insert(
         "exit_code".to_string(),
         state
@@ -512,18 +473,8 @@ async fn wait(params: &BTreeMap<String, VmValue>) -> Result<VmValue, VmError> {
             .map(|c| VmValue::Int(c as i64))
             .unwrap_or(VmValue::Nil),
     );
-    result.insert(
-        "stdout".to_string(),
-        VmValue::String(std::sync::Arc::from(
-            String::from_utf8_lossy(&state.stdout).into_owned(),
-        )),
-    );
-    result.insert(
-        "stderr".to_string(),
-        VmValue::String(std::sync::Arc::from(
-            String::from_utf8_lossy(&state.stderr).into_owned(),
-        )),
-    );
+    result.put_str("stdout", String::from_utf8_lossy(&state.stdout));
+    result.put_str("stderr", String::from_utf8_lossy(&state.stderr));
     result.insert(
         "timed_out".to_string(),
         VmValue::Bool(status == SpawnStatus::TimedOut),
@@ -567,10 +518,7 @@ async fn kill(params: &BTreeMap<String, VmValue>) -> Result<VmValue, VmError> {
 fn kill_result(success: bool, status: SpawnStatus) -> VmValue {
     let mut result = BTreeMap::new();
     result.insert("success".to_string(), VmValue::Bool(success));
-    result.insert(
-        "status".to_string(),
-        VmValue::String(std::sync::Arc::from(status.as_str())),
-    );
+    result.put_str("status", status.as_str());
     VmValue::Dict(std::sync::Arc::new(result))
 }
 

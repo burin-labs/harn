@@ -11,6 +11,7 @@
 //! label so higher-priority layers can shadow lower ones cleanly and
 //! `harn doctor` can report where each skill came from.
 
+use crate::value::VmDictExt;
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -407,30 +408,17 @@ pub fn skill_entry_to_vm(skill: &Skill) -> crate::value::VmValue {
     use crate::value::VmValue;
 
     let mut entry: BTreeMap<String, VmValue> = BTreeMap::new();
-    entry.insert(
-        "name".to_string(),
-        VmValue::String(std::sync::Arc::from(skill.manifest.name.as_str())),
+    entry.put_str("name", skill.manifest.name.as_str());
+    entry.put_str("short", skill.manifest.short.as_str());
+    entry.put_str(
+        "description",
+        if skill.manifest.description.is_empty() {
+            skill.manifest.short.as_str()
+        } else {
+            skill.manifest.description.as_str()
+        },
     );
-    entry.insert(
-        "short".to_string(),
-        VmValue::String(std::sync::Arc::from(skill.manifest.short.as_str())),
-    );
-    entry.insert(
-        "description".to_string(),
-        VmValue::String(std::sync::Arc::from(
-            if skill.manifest.description.is_empty() {
-                skill.manifest.short.as_str()
-            } else {
-                skill.manifest.description.as_str()
-            },
-        )),
-    );
-    if let Some(when) = &skill.manifest.when_to_use {
-        entry.insert(
-            "when_to_use".to_string(),
-            VmValue::String(std::sync::Arc::from(when.as_str())),
-        );
-    }
+    entry.put_opt_str("when_to_use", skill.manifest.when_to_use.as_deref());
     if skill.manifest.disable_model_invocation {
         entry.insert("disable_model_invocation".to_string(), VmValue::Bool(true));
     }
@@ -463,18 +451,8 @@ pub fn skill_entry_to_vm(skill: &Skill) -> crate::value::VmValue {
             )),
         );
     }
-    if let Some(context) = &skill.manifest.context {
-        entry.insert(
-            "context".to_string(),
-            VmValue::String(std::sync::Arc::from(context.as_str())),
-        );
-    }
-    if let Some(agent) = &skill.manifest.agent {
-        entry.insert(
-            "agent".to_string(),
-            VmValue::String(std::sync::Arc::from(agent.as_str())),
-        );
-    }
+    entry.put_opt_str("context", skill.manifest.context.as_deref());
+    entry.put_opt_str("agent", skill.manifest.agent.as_deref());
     if !skill.manifest.hooks.is_empty() {
         let mut hooks: BTreeMap<String, VmValue> = BTreeMap::new();
         for (k, v) in &skill.manifest.hooks {
@@ -485,18 +463,8 @@ pub fn skill_entry_to_vm(skill: &Skill) -> crate::value::VmValue {
             VmValue::Dict(std::sync::Arc::new(hooks)),
         );
     }
-    if let Some(model) = &skill.manifest.model {
-        entry.insert(
-            "model".to_string(),
-            VmValue::String(std::sync::Arc::from(model.as_str())),
-        );
-    }
-    if let Some(effort) = &skill.manifest.effort {
-        entry.insert(
-            "effort".to_string(),
-            VmValue::String(std::sync::Arc::from(effort.as_str())),
-        );
-    }
+    entry.put_opt_str("model", skill.manifest.model.as_deref());
+    entry.put_opt_str("effort", skill.manifest.effort.as_deref());
     if skill.manifest.require_signature {
         entry.insert("require_signature".to_string(), VmValue::Bool(true));
     }
@@ -513,38 +481,14 @@ pub fn skill_entry_to_vm(skill: &Skill) -> crate::value::VmValue {
             )),
         );
     }
-    if let Some(shell) = &skill.manifest.shell {
-        entry.insert(
-            "shell".to_string(),
-            VmValue::String(std::sync::Arc::from(shell.as_str())),
-        );
-    }
-    if let Some(hint) = &skill.manifest.argument_hint {
-        entry.insert(
-            "argument_hint".to_string(),
-            VmValue::String(std::sync::Arc::from(hint.as_str())),
-        );
-    }
-    entry.insert(
-        "body".to_string(),
-        VmValue::String(std::sync::Arc::from(skill.body.as_str())),
-    );
+    entry.put_opt_str("shell", skill.manifest.shell.as_deref());
+    entry.put_opt_str("argument_hint", skill.manifest.argument_hint.as_deref());
+    entry.put_str("body", skill.body.as_str());
     if let Some(dir) = &skill.skill_dir {
-        entry.insert(
-            "skill_dir".to_string(),
-            VmValue::String(std::sync::Arc::from(dir.display().to_string())),
-        );
+        entry.put_str("skill_dir", dir.display().to_string());
     }
-    entry.insert(
-        "source".to_string(),
-        VmValue::String(std::sync::Arc::from(skill.layer.label())),
-    );
-    if let Some(ns) = &skill.namespace {
-        entry.insert(
-            "namespace".to_string(),
-            VmValue::String(std::sync::Arc::from(ns.as_str())),
-        );
-    }
+    entry.put_str("source", skill.layer.label());
+    entry.put_opt_str("namespace", skill.namespace.as_deref());
     VmValue::Dict(std::sync::Arc::new(entry))
 }
 
@@ -552,30 +496,17 @@ pub fn skill_manifest_ref_to_vm(skill: &SkillManifestRef) -> crate::value::VmVal
     use crate::value::VmValue;
 
     let mut entry: BTreeMap<String, VmValue> = BTreeMap::new();
-    entry.insert(
-        "name".to_string(),
-        VmValue::String(std::sync::Arc::from(skill.manifest.name.as_str())),
+    entry.put_str("name", skill.manifest.name.as_str());
+    entry.put_str("short", skill.manifest.short.as_str());
+    entry.put_str(
+        "description",
+        if skill.manifest.description.is_empty() {
+            skill.manifest.short.as_str()
+        } else {
+            skill.manifest.description.as_str()
+        },
     );
-    entry.insert(
-        "short".to_string(),
-        VmValue::String(std::sync::Arc::from(skill.manifest.short.as_str())),
-    );
-    entry.insert(
-        "description".to_string(),
-        VmValue::String(std::sync::Arc::from(
-            if skill.manifest.description.is_empty() {
-                skill.manifest.short.as_str()
-            } else {
-                skill.manifest.description.as_str()
-            },
-        )),
-    );
-    if let Some(when) = &skill.manifest.when_to_use {
-        entry.insert(
-            "when_to_use".to_string(),
-            VmValue::String(std::sync::Arc::from(when.as_str())),
-        );
-    }
+    entry.put_opt_str("when_to_use", skill.manifest.when_to_use.as_deref());
     if skill.manifest.disable_model_invocation {
         entry.insert("disable_model_invocation".to_string(), VmValue::Bool(true));
     }
@@ -608,18 +539,8 @@ pub fn skill_manifest_ref_to_vm(skill: &SkillManifestRef) -> crate::value::VmVal
             )),
         );
     }
-    if let Some(context) = &skill.manifest.context {
-        entry.insert(
-            "context".to_string(),
-            VmValue::String(std::sync::Arc::from(context.as_str())),
-        );
-    }
-    if let Some(agent) = &skill.manifest.agent {
-        entry.insert(
-            "agent".to_string(),
-            VmValue::String(std::sync::Arc::from(agent.as_str())),
-        );
-    }
+    entry.put_opt_str("context", skill.manifest.context.as_deref());
+    entry.put_opt_str("agent", skill.manifest.agent.as_deref());
     if !skill.manifest.hooks.is_empty() {
         let mut hooks: BTreeMap<String, VmValue> = BTreeMap::new();
         for (key, value) in &skill.manifest.hooks {
@@ -633,40 +554,12 @@ pub fn skill_manifest_ref_to_vm(skill: &SkillManifestRef) -> crate::value::VmVal
             VmValue::Dict(std::sync::Arc::new(hooks)),
         );
     }
-    if let Some(model) = &skill.manifest.model {
-        entry.insert(
-            "model".to_string(),
-            VmValue::String(std::sync::Arc::from(model.as_str())),
-        );
-    }
-    if let Some(effort) = &skill.manifest.effort {
-        entry.insert(
-            "effort".to_string(),
-            VmValue::String(std::sync::Arc::from(effort.as_str())),
-        );
-    }
-    if let Some(shell) = &skill.manifest.shell {
-        entry.insert(
-            "shell".to_string(),
-            VmValue::String(std::sync::Arc::from(shell.as_str())),
-        );
-    }
-    if let Some(hint) = &skill.manifest.argument_hint {
-        entry.insert(
-            "argument_hint".to_string(),
-            VmValue::String(std::sync::Arc::from(hint.as_str())),
-        );
-    }
-    entry.insert(
-        "source".to_string(),
-        VmValue::String(std::sync::Arc::from(skill.layer.label())),
-    );
-    if let Some(ns) = &skill.namespace {
-        entry.insert(
-            "namespace".to_string(),
-            VmValue::String(std::sync::Arc::from(ns.as_str())),
-        );
-    }
+    entry.put_opt_str("model", skill.manifest.model.as_deref());
+    entry.put_opt_str("effort", skill.manifest.effort.as_deref());
+    entry.put_opt_str("shell", skill.manifest.shell.as_deref());
+    entry.put_opt_str("argument_hint", skill.manifest.argument_hint.as_deref());
+    entry.put_str("source", skill.layer.label());
+    entry.put_opt_str("namespace", skill.namespace.as_deref());
     VmValue::Dict(std::sync::Arc::new(entry))
 }
 

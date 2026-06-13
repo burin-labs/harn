@@ -1,5 +1,6 @@
 //! Tool, persona, and step hook registration builtins for workflow execution.
 
+use crate::value::VmDictExt;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
@@ -617,42 +618,21 @@ pub(super) async fn fire_session_hook_builtin(
     let mut out: BTreeMap<String, VmValue> = BTreeMap::new();
     match control {
         crate::orchestration::HookControl::Allow => {
-            out.insert(
-                "control".to_string(),
-                VmValue::String(std::sync::Arc::from("allow")),
-            );
+            out.put_str("control", "allow");
         }
         crate::orchestration::HookControl::Block { reason } => {
-            out.insert(
-                "control".to_string(),
-                VmValue::String(std::sync::Arc::from("block")),
-            );
-            out.insert(
-                "reason".to_string(),
-                VmValue::String(std::sync::Arc::from(reason)),
-            );
+            out.put_str("control", "block");
+            out.put_str("reason", reason);
         }
         crate::orchestration::HookControl::Decision { kind, reason } => {
-            out.insert(
-                "control".to_string(),
-                VmValue::String(std::sync::Arc::from("decision")),
-            );
-            out.insert(
-                "decision".to_string(),
-                VmValue::String(std::sync::Arc::from(kind)),
-            );
+            out.put_str("control", "decision");
+            out.put_str("decision", kind);
             if let Some(reason) = reason {
-                out.insert(
-                    "reason".to_string(),
-                    VmValue::String(std::sync::Arc::from(reason)),
-                );
+                out.put_str("reason", reason);
             }
         }
         crate::orchestration::HookControl::Modify { payload: modified } => {
-            out.insert(
-                "control".to_string(),
-                VmValue::String(std::sync::Arc::from("modify")),
-            );
+            out.put_str("control", "modify");
             out.insert(
                 "modify".to_string(),
                 crate::stdlib::json_to_vm_value(&modified),

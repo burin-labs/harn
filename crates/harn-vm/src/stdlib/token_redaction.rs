@@ -13,6 +13,7 @@
 //! optional process-wide async forwarder that appends events to the
 //! `audit.token_redaction` event-log topic.
 
+use crate::value::VmDictExt;
 use std::collections::BTreeMap;
 use std::rc::Rc;
 use std::sync::Once;
@@ -242,14 +243,8 @@ fn token_redaction_drain_audit_impl(
         .into_iter()
         .map(|event| {
             let mut entry: BTreeMap<String, VmValue> = BTreeMap::new();
-            entry.insert(
-                "code".to_string(),
-                VmValue::String(std::sync::Arc::from(TOKEN_REDACTION_DIAGNOSTIC)),
-            );
-            entry.insert(
-                "pattern".to_string(),
-                VmValue::String(std::sync::Arc::from(event.pattern_name.as_str())),
-            );
+            entry.put_str("code", TOKEN_REDACTION_DIAGNOSTIC);
+            entry.put_str("pattern", event.pattern_name.as_str());
             entry.insert(
                 "match_count".to_string(),
                 VmValue::Int(event.match_count as i64),

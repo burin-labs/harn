@@ -1,3 +1,4 @@
+use crate::value::VmDictExt;
 use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
@@ -624,10 +625,7 @@ pub(crate) async fn request_approval_for_side_effect(
         "detail".to_string(),
         crate::stdlib::json_to_vm_value(&detail),
     );
-    options.insert(
-        "principal".to_string(),
-        VmValue::String(std::sync::Arc::from(principal)),
-    );
+    options.put_str("principal", principal);
     options.insert(
         "reviewers".to_string(),
         VmValue::List(std::sync::Arc::new(
@@ -1400,10 +1398,7 @@ async fn maybe_apply_mock_response(
         .into_iter()
         .map(|(key, value)| (key, crate::stdlib::json_to_vm_value(&value)))
         .collect::<BTreeMap<_, _>>();
-    params.insert(
-        "request_id".to_string(),
-        VmValue::String(std::sync::Arc::from(request_id.to_string())),
-    );
+    params.put_str("request_id", request_id);
     let Some(result) = dispatch_mock_host_call("hitl", kind.as_str(), &params) else {
         return Ok(());
     };

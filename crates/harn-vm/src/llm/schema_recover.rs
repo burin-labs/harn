@@ -43,6 +43,7 @@
 //! prose or that used `output_validation: "off"`, when the caller
 //! wants to recover the schema-shaped payload after the fact.
 
+use crate::value::VmDictExt;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
@@ -583,14 +584,8 @@ async fn run_llm_repair(
 fn build_repair_prompt(raw_text: &str, schema: &VmValue) -> String {
     let schema_text = schema_to_compact_json(schema);
     let mut bindings = BTreeMap::new();
-    bindings.insert(
-        "schema_text".to_string(),
-        VmValue::String(std::sync::Arc::from(schema_text)),
-    );
-    bindings.insert(
-        "raw_text".to_string(),
-        VmValue::String(std::sync::Arc::from(raw_text.to_string())),
-    );
+    bindings.put_str("schema_text", schema_text);
+    bindings.put_str("raw_text", raw_text);
     crate::stdlib::template::render_stdlib_prompt_asset(
         "llm/prompts/schema_recover_repair.harn.prompt",
         Some(&bindings),
@@ -626,10 +621,7 @@ fn merge_repair_options(
         .entry("output_format".to_string())
         .or_insert_with(|| {
             let mut fmt = BTreeMap::new();
-            fmt.insert(
-                "kind".to_string(),
-                VmValue::String(std::sync::Arc::from("json_schema")),
-            );
+            fmt.put_str("kind", "json_schema");
             fmt.insert("schema".to_string(), schema.clone());
             fmt.insert("strict".to_string(), VmValue::Bool(true));
             VmValue::Dict(std::sync::Arc::new(fmt))
@@ -656,20 +648,11 @@ fn envelope_success(
     let mut env = BTreeMap::new();
     env.insert("ok".to_string(), VmValue::Bool(true));
     env.insert("data".to_string(), data);
-    env.insert(
-        "raw_text".to_string(),
-        VmValue::String(std::sync::Arc::from(raw_text)),
-    );
-    env.insert(
-        "error".to_string(),
-        VmValue::String(std::sync::Arc::from("")),
-    );
+    env.put_str("raw_text", raw_text);
+    env.put_str("error", "");
     env.insert("error_category".to_string(), VmValue::Nil);
     env.insert("attempts".to_string(), VmValue::Int(attempts as i64));
-    env.insert(
-        "stage".to_string(),
-        VmValue::String(std::sync::Arc::from(stage)),
-    );
+    env.put_str("stage", stage);
     env.insert("repaired".to_string(), VmValue::Bool(repaired));
     VmValue::Dict(std::sync::Arc::new(env))
 }
@@ -684,23 +667,11 @@ fn envelope_failure(
     let mut env = BTreeMap::new();
     env.insert("ok".to_string(), VmValue::Bool(false));
     env.insert("data".to_string(), VmValue::Nil);
-    env.insert(
-        "raw_text".to_string(),
-        VmValue::String(std::sync::Arc::from(raw_text)),
-    );
-    env.insert(
-        "error".to_string(),
-        VmValue::String(std::sync::Arc::from(error_message)),
-    );
-    env.insert(
-        "error_category".to_string(),
-        VmValue::String(std::sync::Arc::from(error_category)),
-    );
+    env.put_str("raw_text", raw_text);
+    env.put_str("error", error_message);
+    env.put_str("error_category", error_category);
     env.insert("attempts".to_string(), VmValue::Int(attempts as i64));
-    env.insert(
-        "stage".to_string(),
-        VmValue::String(std::sync::Arc::from(stage)),
-    );
+    env.put_str("stage", stage);
     env.insert("repaired".to_string(), VmValue::Bool(false));
     VmValue::Dict(std::sync::Arc::new(env))
 }
@@ -708,23 +679,15 @@ fn envelope_failure(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::value::VmDictExt;
 
     fn person_schema() -> VmValue {
         let mut name = BTreeMap::new();
-        name.insert(
-            "type".to_string(),
-            VmValue::String(std::sync::Arc::from("string")),
-        );
+        name.put_str("type", "string");
         let mut age = BTreeMap::new();
-        age.insert(
-            "type".to_string(),
-            VmValue::String(std::sync::Arc::from("integer")),
-        );
+        age.put_str("type", "integer");
         let mut active = BTreeMap::new();
-        active.insert(
-            "type".to_string(),
-            VmValue::String(std::sync::Arc::from("boolean")),
-        );
+        active.put_str("type", "boolean");
         let mut props = BTreeMap::new();
         props.insert("name".to_string(), VmValue::Dict(std::sync::Arc::new(name)));
         props.insert("age".to_string(), VmValue::Dict(std::sync::Arc::new(age)));
@@ -737,10 +700,7 @@ mod tests {
             VmValue::String(std::sync::Arc::from("age")),
         ]));
         let mut schema = BTreeMap::new();
-        schema.insert(
-            "type".to_string(),
-            VmValue::String(std::sync::Arc::from("object")),
-        );
+        schema.put_str("type", "object");
         schema.insert(
             "properties".to_string(),
             VmValue::Dict(std::sync::Arc::new(props)),
@@ -856,10 +816,7 @@ mod tests {
     #[test]
     fn regex_recover_skips_when_schema_is_not_object() {
         let mut scalar = BTreeMap::new();
-        scalar.insert(
-            "type".to_string(),
-            VmValue::String(std::sync::Arc::from("string")),
-        );
+        scalar.put_str("type", "string");
         let schema = VmValue::Dict(std::sync::Arc::new(scalar));
         let outcome = try_regex_recover("hello", &schema, false).unwrap();
         assert!(outcome.is_none());
@@ -868,10 +825,7 @@ mod tests {
     #[test]
     fn coerce_handles_unquoted_string_with_trailing_punct() {
         let mut field = BTreeMap::new();
-        field.insert(
-            "type".to_string(),
-            VmValue::String(std::sync::Arc::from("string")),
-        );
+        field.put_str("type", "string");
         let v =
             coerce_scalar("Ada,", "string", &VmValue::Dict(std::sync::Arc::new(field))).unwrap();
         assert_eq!(v.display(), "Ada");
@@ -880,10 +834,7 @@ mod tests {
     #[test]
     fn coerce_handles_escaped_quotes_in_string() {
         let mut field = BTreeMap::new();
-        field.insert(
-            "type".to_string(),
-            VmValue::String(std::sync::Arc::from("string")),
-        );
+        field.put_str("type", "string");
         let v = coerce_scalar(
             "he said \\\"hi\\\"",
             "string",
@@ -896,10 +847,7 @@ mod tests {
     #[test]
     fn coerce_rejects_null_for_non_nullable_string() {
         let mut field = BTreeMap::new();
-        field.insert(
-            "type".to_string(),
-            VmValue::String(std::sync::Arc::from("string")),
-        );
+        field.put_str("type", "string");
         let v = coerce_scalar("null", "string", &VmValue::Dict(std::sync::Arc::new(field)));
         assert!(v.is_none());
     }
@@ -921,10 +869,7 @@ mod tests {
     #[test]
     fn parse_repair_config_dict_extracts_overrides() {
         let mut repair = BTreeMap::new();
-        repair.insert(
-            "model".to_string(),
-            VmValue::String(std::sync::Arc::from("local:fix")),
-        );
+        repair.put_str("model", "local:fix");
         repair.insert("max_tokens".to_string(), VmValue::Int(400));
         let mut opts = BTreeMap::new();
         opts.insert(
@@ -971,15 +916,9 @@ mod tests {
     fn merge_repair_overrides_win_over_base() {
         let schema = person_schema();
         let mut base = BTreeMap::new();
-        base.insert(
-            "model".to_string(),
-            VmValue::String(std::sync::Arc::from("base:big")),
-        );
+        base.put_str("model", "base:big");
         let mut overrides = BTreeMap::new();
-        overrides.insert(
-            "model".to_string(),
-            VmValue::String(std::sync::Arc::from("override:small")),
-        );
+        overrides.put_str("model", "override:small");
         let merged = merge_repair_options(Some(&base), &overrides, &schema);
         assert_eq!(
             merged.get("model").map(VmValue::display).as_deref(),

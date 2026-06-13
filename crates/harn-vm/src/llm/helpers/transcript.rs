@@ -1,3 +1,4 @@
+use crate::value::VmDictExt;
 use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
@@ -360,17 +361,9 @@ pub(crate) fn new_transcript_with_event_prefix(
     let mut events = prefix_events;
     events.extend(transcript_events_from_messages(&messages));
     events.extend(extra_events);
-    transcript.insert(
-        "_type".to_string(),
-        VmValue::String(std::sync::Arc::from(TRANSCRIPT_TYPE)),
-    );
+    transcript.put_str("_type", TRANSCRIPT_TYPE);
     transcript.insert("version".to_string(), VmValue::Int(TRANSCRIPT_VERSION));
-    transcript.insert(
-        "id".to_string(),
-        VmValue::String(std::sync::Arc::from(
-            id.unwrap_or_else(|| uuid::Uuid::now_v7().to_string()),
-        )),
-    );
+    transcript.put_str("id", id.unwrap_or_else(|| uuid::Uuid::now_v7().to_string()));
     transcript.insert(
         "messages".to_string(),
         VmValue::List(std::sync::Arc::new(messages)),
@@ -384,19 +377,13 @@ pub(crate) fn new_transcript_with_event_prefix(
         VmValue::List(std::sync::Arc::new(assets)),
     );
     if let Some(summary) = summary {
-        transcript.insert(
-            "summary".to_string(),
-            VmValue::String(std::sync::Arc::from(summary)),
-        );
+        transcript.put_str("summary", summary);
     }
     if let Some(metadata) = metadata {
         transcript.insert("metadata".to_string(), metadata);
     }
     if let Some(state) = state {
-        transcript.insert(
-            "state".to_string(),
-            VmValue::String(std::sync::Arc::from(state)),
-        );
+        transcript.put_str("state", state);
     }
     VmValue::Dict(std::sync::Arc::new(transcript))
 }
@@ -439,26 +426,11 @@ pub(crate) fn transcript_event_from_message(message: &VmValue) -> VmValue {
         "message"
     };
     let mut event = BTreeMap::new();
-    event.insert(
-        "id".to_string(),
-        VmValue::String(std::sync::Arc::from(uuid::Uuid::now_v7().to_string())),
-    );
-    event.insert(
-        "kind".to_string(),
-        VmValue::String(std::sync::Arc::from(kind)),
-    );
-    event.insert(
-        "role".to_string(),
-        VmValue::String(std::sync::Arc::from(role.as_str())),
-    );
-    event.insert(
-        "visibility".to_string(),
-        VmValue::String(std::sync::Arc::from(visibility)),
-    );
-    event.insert(
-        "text".to_string(),
-        VmValue::String(std::sync::Arc::from(text)),
-    );
+    event.put_str("id", uuid::Uuid::now_v7().to_string());
+    event.put_str("kind", kind);
+    event.put_str("role", role.as_str());
+    event.put_str("visibility", visibility);
+    event.put_str("text", text);
     event.insert(
         "blocks".to_string(),
         VmValue::List(std::sync::Arc::new(blocks)),
@@ -523,26 +495,11 @@ pub(crate) fn transcript_event(
     metadata: Option<serde_json::Value>,
 ) -> VmValue {
     let mut event = BTreeMap::new();
-    event.insert(
-        "id".to_string(),
-        VmValue::String(std::sync::Arc::from(uuid::Uuid::now_v7().to_string())),
-    );
-    event.insert(
-        "kind".to_string(),
-        VmValue::String(std::sync::Arc::from(kind)),
-    );
-    event.insert(
-        "role".to_string(),
-        VmValue::String(std::sync::Arc::from(role)),
-    );
-    event.insert(
-        "visibility".to_string(),
-        VmValue::String(std::sync::Arc::from(visibility)),
-    );
-    event.insert(
-        "text".to_string(),
-        VmValue::String(std::sync::Arc::from(text)),
-    );
+    event.put_str("id", uuid::Uuid::now_v7().to_string());
+    event.put_str("kind", kind);
+    event.put_str("role", role);
+    event.put_str("visibility", visibility);
+    event.put_str("text", text);
     event.insert(
         "blocks".to_string(),
         VmValue::List(std::sync::Arc::new(vec![VmValue::Dict(
@@ -573,27 +530,15 @@ pub(crate) fn transcript_event(
 
 pub(crate) fn normalize_transcript_asset(value: &VmValue) -> VmValue {
     let mut asset = value.as_dict().cloned().unwrap_or_default();
-    asset.insert(
-        "_type".to_string(),
-        VmValue::String(std::sync::Arc::from(TRANSCRIPT_ASSET_TYPE)),
-    );
+    asset.put_str("_type", TRANSCRIPT_ASSET_TYPE);
     if !asset.contains_key("id") {
-        asset.insert(
-            "id".to_string(),
-            VmValue::String(std::sync::Arc::from(uuid::Uuid::now_v7().to_string())),
-        );
+        asset.put_str("id", uuid::Uuid::now_v7().to_string());
     }
     if !asset.contains_key("kind") {
-        asset.insert(
-            "kind".to_string(),
-            VmValue::String(std::sync::Arc::from("blob")),
-        );
+        asset.put_str("kind", "blob");
     }
     if !asset.contains_key("visibility") {
-        asset.insert(
-            "visibility".to_string(),
-            VmValue::String(std::sync::Arc::from("internal")),
-        );
+        asset.put_str("visibility", "internal");
     }
     if value.as_dict().is_none() {
         asset.insert(

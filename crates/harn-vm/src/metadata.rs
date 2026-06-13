@@ -7,6 +7,7 @@
 //! Resolution uses hierarchical inheritance: child directories inherit from
 //! parent directories, with overrides at each level.
 
+use crate::value::VmDictExt;
 use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -817,10 +818,7 @@ fn metadata_entries_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue,
             let local = st.local_directory(&dir);
             let resolved = st.resolve(&dir);
             let mut item = BTreeMap::new();
-            item.insert(
-                "dir".to_string(),
-                VmValue::String(std::sync::Arc::from(normalize_directory_key(&dir))),
-            );
+            item.put_str("dir", normalize_directory_key(&dir));
             match &namespace {
                 Some(ns) => {
                     item.insert(
@@ -1209,14 +1207,8 @@ fn path_metadata_entries_impl(args: &[VmValue], _out: &mut String) -> Result<VmV
                     None => directory_metadata_to_vm(meta),
                 };
                 let mut item = BTreeMap::new();
-                item.insert(
-                    "kind".to_string(),
-                    VmValue::String(std::sync::Arc::from("file")),
-                );
-                item.insert(
-                    "path".to_string(),
-                    VmValue::String(std::sync::Arc::from(path.as_str())),
-                );
+                item.put_str("kind", "file");
+                item.put_str("path", path.as_str());
                 item.insert("local".to_string(), local);
                 items.push(VmValue::Dict(std::sync::Arc::new(item)));
             }
@@ -1242,14 +1234,8 @@ fn path_metadata_entries_impl(args: &[VmValue], _out: &mut String) -> Result<VmV
                     None => directory_metadata_to_vm(&resolved),
                 };
                 let mut item = BTreeMap::new();
-                item.insert(
-                    "kind".to_string(),
-                    VmValue::String(std::sync::Arc::from("dir")),
-                );
-                item.insert(
-                    "path".to_string(),
-                    VmValue::String(std::sync::Arc::from(normalize_directory_key(&dir))),
-                );
+                item.put_str("kind", "dir");
+                item.put_str("path", normalize_directory_key(&dir));
                 item.insert("local".to_string(), local_value);
                 item.insert("resolved".to_string(), resolved_value);
                 items.push(VmValue::Dict(std::sync::Arc::new(item)));
@@ -1420,10 +1406,7 @@ fn scan_dir_recursive(
             .map(|d| d.as_secs() as i64)
             .unwrap_or(0);
         let mut m = BTreeMap::new();
-        m.insert(
-            "path".to_string(),
-            VmValue::String(std::sync::Arc::from(rel_path)),
-        );
+        m.put_str("path", rel_path);
         m.insert("size".to_string(), VmValue::Int(meta.len() as i64));
         m.insert("modified".to_string(), VmValue::Int(mtime));
         m.insert("is_dir".to_string(), VmValue::Bool(meta.is_dir()));

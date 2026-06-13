@@ -5,6 +5,7 @@ mod effects;
 mod nested_budget;
 mod types;
 
+use crate::value::VmDictExt;
 use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::thread_local;
@@ -606,10 +607,7 @@ fn redact_public_message(message: &VmValue) -> Option<VmValue> {
         if public_text.is_empty() {
             redacted.remove("text");
         } else {
-            redacted.insert(
-                "text".to_string(),
-                VmValue::String(std::sync::Arc::from(public_text.join("\n"))),
-            );
+            redacted.put_str("text", public_text.join("\n"));
         }
     }
     Some(VmValue::Dict(std::sync::Arc::new(redacted)))

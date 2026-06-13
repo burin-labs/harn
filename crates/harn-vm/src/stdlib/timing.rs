@@ -23,6 +23,7 @@
 //! stack — and missing handles surface as a typed thrown error so
 //! callers never silently drop work.
 
+use crate::value::VmDictExt;
 use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::sync::OnceLock;
@@ -87,15 +88,9 @@ fn timing_start_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmE
         crate::tracing::span_start_user_timing(name.clone(), attrs_btree);
 
     let mut handle = BTreeMap::new();
-    handle.insert(
-        "name".to_string(),
-        VmValue::String(std::sync::Arc::from(name.as_str())),
-    );
+    handle.put_str("name", name.as_str());
     handle.insert("span_id".to_string(), VmValue::Int(span_id as i64));
-    handle.insert(
-        "trace_id".to_string(),
-        VmValue::String(std::sync::Arc::from(trace_id.as_str())),
-    );
+    handle.put_str("trace_id", trace_id.as_str());
     handle.insert(
         "parent_span_id".to_string(),
         parent_id
@@ -114,12 +109,7 @@ fn timing_start_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmE
         "attributes".to_string(),
         json_to_vm_value(&serde_json::Value::Object(attrs)),
     );
-    handle.insert(
-        "kind".to_string(),
-        VmValue::String(std::sync::Arc::from(
-            crate::tracing::SpanKind::UserTiming.as_str(),
-        )),
-    );
+    handle.put_str("kind", crate::tracing::SpanKind::UserTiming.as_str());
 
     Ok(VmValue::Dict(std::sync::Arc::new(handle)))
 }

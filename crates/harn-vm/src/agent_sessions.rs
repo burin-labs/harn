@@ -16,6 +16,7 @@
 //! the store directly — there is no "policy" config dict that
 //! performs lifecycle as a side effect.
 
+use crate::value::VmDictExt;
 use std::cell::{Cell, RefCell};
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::future::Future;
@@ -952,10 +953,7 @@ pub fn inject_prompt_from_live_client(
     let client_id = validate_live_client_id(client_id.into())?;
     ensure_live_controller(id, &client_id, LiveControllerCapability::PromptInjection)?;
     let mut message = BTreeMap::new();
-    message.insert(
-        "role".to_string(),
-        VmValue::String(std::sync::Arc::from("user")),
-    );
+    message.put_str("role", "user");
     message.insert("content".to_string(), content);
     message.insert(
         "metadata".to_string(),
@@ -1869,10 +1867,7 @@ fn compact_transcript_for_budget(
         VmValue::List(std::sync::Arc::new(retained)),
     );
     if let Some(summary) = summary {
-        next.insert(
-            "summary".to_string(),
-            VmValue::String(std::sync::Arc::from(summary)),
-        );
+        next.put_str("summary", summary);
     } else {
         next.remove("summary");
     }
@@ -2665,10 +2660,7 @@ pub fn replace_messages_with_summary(
             VmValue::List(std::sync::Arc::new(vm_messages)),
         );
         if let Some(summary) = summary {
-            next.insert(
-                "summary".to_string(),
-                VmValue::String(std::sync::Arc::from(summary.to_string())),
-            );
+            next.put_str("summary", summary);
         } else {
             next.remove("summary");
         }
@@ -3171,10 +3163,7 @@ fn clone_transcript_with_id(transcript: &VmValue, new_id: &str) -> VmValue {
         return empty_transcript(new_id);
     };
     let mut next = dict.clone();
-    next.insert(
-        "id".to_string(),
-        VmValue::String(std::sync::Arc::from(new_id.to_string())),
-    );
+    next.put_str("id", new_id);
     VmValue::Dict(std::sync::Arc::new(next))
 }
 
@@ -3186,10 +3175,7 @@ fn clone_transcript_with_parent(transcript: &VmValue, parent_id: &str) -> VmValu
     let metadata = match next.get("metadata") {
         Some(VmValue::Dict(metadata)) => {
             let mut metadata = metadata.as_ref().clone();
-            metadata.insert(
-                "parent_session_id".to_string(),
-                VmValue::String(std::sync::Arc::from(parent_id.to_string())),
-            );
+            metadata.put_str("parent_session_id", parent_id);
             VmValue::Dict(std::sync::Arc::new(metadata))
         }
         _ => VmValue::Dict(std::sync::Arc::new(BTreeMap::from([(
@@ -3228,10 +3214,7 @@ fn transcript_with_session_metadata(transcript: VmValue, state: &SessionState) -
         _ => BTreeMap::new(),
     };
     if let Some(tool_format) = state.tool_format.as_ref() {
-        metadata.insert(
-            "tool_format".to_string(),
-            VmValue::String(std::sync::Arc::from(tool_format.clone())),
-        );
+        metadata.put_str("tool_format", tool_format.clone());
         metadata.insert("tool_mode_locked".to_string(), VmValue::Bool(true));
     }
     if let Some(system_prompt) = state.system_prompt.as_ref() {
@@ -3297,10 +3280,7 @@ fn session_snapshot(state: &SessionState) -> VmValue {
         })
         .unwrap_or(0);
     next.insert("length".to_string(), VmValue::Int(length));
-    next.insert(
-        "created_at".to_string(),
-        VmValue::String(std::sync::Arc::from(state.created_at.clone())),
-    );
+    next.put_str("created_at", state.created_at.clone());
     next.insert(
         "parent_id".to_string(),
         state
