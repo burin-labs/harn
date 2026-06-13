@@ -1,0 +1,8 @@
+selected idx=1 id=1 n=3
+fallthrough_no_winner idx=2
+fallthrough_no_winner idx=2
+fallthrough_contract idx=0 n=1 contract=false
+selected idx=0 contract=true
+selected idx=0 n=1
+no_generate
+selected n=2 id=0

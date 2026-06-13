@@ -1,0 +1,42 @@
+import "std/agent/best_of_n"
+
+pipeline default() {
+  let gen = { i -> {id: i} }
+  // 1. host signal selects a winner.
+  let r1 = best_of_n_candidates({k: 3, generate: gen, select_callback: { c -> 1 }})
+  __io_println("${r1.reason} idx=${r1.selected_index} id=${r1.candidate.id} n=${len(r1.candidates)}")
+  // 2. nil winner -> deterministic fallthrough to the last candidate.
+  let r2 = best_of_n_candidates({k: 3, generate: gen, select_callback: { c -> nil }})
+  __io_println("${r2.reason} idx=${r2.selected_index}")
+  // 3. out-of-range winner -> fallthrough.
+  let r3 = best_of_n_candidates({k: 3, generate: gen, select_callback: { c -> 99 }})
+  __io_println("${r3.reason} idx=${r3.selected_index}")
+  // 4. spec_contract false -> abort to single-candidate path (one generated).
+  let r4 = best_of_n_candidates(
+    {k: 3, generate: gen, select_callback: { c -> 1 }, spec_contract_callback: { -> false }},
+  )
+  __io_println(
+    "${r4.reason} idx=${r4.selected_index} n=${len(r4.candidates)} contract=${r4.contract_ok}",
+  )
+  // 5. spec_contract true -> normal best-of-N.
+  let r5 = best_of_n_candidates(
+    {k: 2, generate: gen, select_callback: { c -> 0 }, spec_contract_callback: { -> true }},
+  )
+  __io_println("${r5.reason} idx=${r5.selected_index} contract=${r5.contract_ok}")
+  // 6. k=1 short-circuits to a single candidate, no select needed.
+  let r6 = best_of_n_candidates({k: 1, generate: gen})
+  __io_println("${r6.reason} idx=${r6.selected_index} n=${len(r6.candidates)}")
+  // 7. missing generate callback.
+  let r7 = best_of_n_candidates({k: 3})
+  __io_println(r7.reason)
+  // 8. a failing candidate is skipped, not fatal.
+  let gen_flaky = { i ->
+    if i == 1 {
+      assert(false, "boom")
+    } else {
+      {id: i}
+    }
+  }
+  let r8 = best_of_n_candidates({k: 3, generate: gen_flaky, select_callback: { c -> 0 }})
+  __io_println("${r8.reason} n=${len(r8.candidates)} id=${r8.candidate.id}")
+}
