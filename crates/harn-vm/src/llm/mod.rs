@@ -20,6 +20,7 @@ pub(crate) mod autonomy_budget;
 pub(crate) mod cache;
 mod call;
 pub mod capabilities;
+pub mod capability_audit;
 pub(crate) mod compass_router;
 pub(crate) mod config_builtins;
 pub(crate) mod content;

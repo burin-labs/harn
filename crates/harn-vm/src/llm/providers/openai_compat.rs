@@ -266,8 +266,20 @@ impl OpenAiCompatibleProvider {
         // empty tool_calls) while still advertising the model. We merge those
         // names into the request body's `provider.ignore` so OpenRouter reroutes
         // to a healthy upstream. Pure capability lookup — no model-name branch.
-        if opts.provider == "openrouter" && !caps.provider_route_denylist.is_empty() {
-            apply_openrouter_route_denylist(&mut body, &caps.provider_route_denylist);
+        // Data-driven OpenRouter upstream pin (allowlist). When the row pins a
+        // closed set of known-clean upstreams, route ONLY to them in order with
+        // `allow_fallbacks:false` so OpenRouter never silently falls back to a
+        // sketchier upstream that mis-serializes the route. The canonical case
+        // is `openai/gpt-oss-*`, pinned to Cerebras/Groq (clean for Harmony
+        // tool calls). A closed allowlist already excludes everything not on it,
+        // so the pin takes precedence over `provider_route_denylist` when both
+        // are present. Pure capability lookup — no model-name branch.
+        if opts.provider == "openrouter" {
+            if !caps.openrouter_provider_order.is_empty() {
+                apply_openrouter_provider_order(&mut body, &caps.openrouter_provider_order);
+            } else if !caps.provider_route_denylist.is_empty() {
+                apply_openrouter_route_denylist(&mut body, &caps.provider_route_denylist);
+            }
         }
         if let Some(ref tools) = opts.native_tools {
             if !tools.is_empty() {
@@ -502,6 +514,51 @@ pub(crate) fn apply_openrouter_route_denylist(body: &mut serde_json::Value, deny
             ignore_arr.push(serde_json::Value::String(name.clone()));
         }
     }
+}
+
+/// Pin the OpenRouter request body to a closed, ordered allowlist of upstream
+/// providers: sets `provider.order` to `order` and `provider.allow_fallbacks`
+/// to `false`, so OpenRouter routes the model only to those upstreams (in
+/// preference order) and never silently falls back to one not on the list.
+/// This is the wire materialization of the capability-row
+/// `openrouter_provider_order` — provider-agnostic data plumbing with no
+/// model-specific logic; the caller decides whether a pin applies by consulting
+/// the capability matrix. A pre-existing `provider.order` (e.g. a caller
+/// override) is left untouched; `allow_fallbacks` is always forced to `false`
+/// so the pin is genuinely closed. No-op when `order` is empty.
+pub(crate) fn apply_openrouter_provider_order(body: &mut serde_json::Value, order: &[String]) {
+    if order.is_empty() {
+        return;
+    }
+    if !body.is_object() {
+        return;
+    }
+    let provider = body
+        .as_object_mut()
+        .expect("body is an object")
+        .entry("provider".to_string())
+        .or_insert_with(|| serde_json::json!({}));
+    let Some(provider_obj) = provider.as_object_mut() else {
+        return;
+    };
+    // Only set the order when the caller has not already pinned one; respect an
+    // explicit caller override rather than clobbering it.
+    if !provider_obj.contains_key("order") {
+        provider_obj.insert(
+            "order".to_string(),
+            serde_json::Value::Array(
+                order
+                    .iter()
+                    .map(|name| serde_json::Value::String(name.clone()))
+                    .collect(),
+            ),
+        );
+    }
+    // A closed allowlist must not fall back off-list.
+    provider_obj.insert(
+        "allow_fallbacks".to_string(),
+        serde_json::Value::Bool(false),
+    );
 }
 
 fn normalize_tool_choice_for_capabilities(
@@ -1851,6 +1908,87 @@ thinking_modes = ["enabled"]
         assert!(
             other_body.get("provider").is_none(),
             "non-openrouter provider must not receive provider.ignore: {other_body}"
+        );
+    }
+
+    #[test]
+    fn provider_order_pins_closed_allowlist() {
+        let mut body = json!({"model": "openai/gpt-oss-120b"});
+        apply_openrouter_provider_order(&mut body, &["Cerebras".to_string(), "Groq".to_string()]);
+        assert_eq!(body["provider"]["order"], json!(["Cerebras", "Groq"]));
+        assert_eq!(body["provider"]["allow_fallbacks"], json!(false));
+    }
+
+    #[test]
+    fn provider_order_respects_caller_order_but_forces_closed() {
+        // A caller-supplied order is preserved; allow_fallbacks is still forced
+        // false so the pin is genuinely closed.
+        let mut body = json!({
+            "model": "openai/gpt-oss-120b",
+            "provider": { "order": ["Groq"], "allow_fallbacks": true }
+        });
+        apply_openrouter_provider_order(&mut body, &["Cerebras".to_string(), "Groq".to_string()]);
+        assert_eq!(body["provider"]["order"], json!(["Groq"]));
+        assert_eq!(body["provider"]["allow_fallbacks"], json!(false));
+    }
+
+    #[test]
+    fn provider_order_noop_for_empty() {
+        let mut body = json!({"model": "openai/gpt-oss-120b"});
+        apply_openrouter_provider_order(&mut body, &[]);
+        assert!(body.get("provider").is_none());
+    }
+
+    #[test]
+    fn build_request_body_pins_gpt_oss_openrouter_to_clean_subproviders() {
+        // The openrouter openai/gpt-oss-* capability row carries
+        // openrouter_provider_order = ["Cerebras", "Groq"]; build_request_body
+        // must materialize it into provider.order + allow_fallbacks:false so the
+        // sub-provider lottery only lands on known-clean upstreams.
+        let mut payload = base_request_payload();
+        payload.provider = "openrouter".to_string();
+        payload.model = "openai/gpt-oss-120b".to_string();
+        let body = OpenAiCompatibleProvider::build_request_body(&payload, false);
+        assert_eq!(
+            body["provider"]["order"],
+            json!(["Cerebras", "Groq"]),
+            "gpt-oss openrouter body must pin the clean upstream order: {body}"
+        );
+        assert_eq!(
+            body["provider"]["allow_fallbacks"],
+            json!(false),
+            "gpt-oss openrouter pin must be closed (no fallbacks): {body}"
+        );
+    }
+
+    #[test]
+    fn build_request_body_does_not_pin_other_openrouter_models() {
+        // A non-gpt-oss openrouter model must not receive a provider.order pin —
+        // the allowlist is row-scoped, so unrelated routes keep free routing.
+        let mut payload = base_request_payload();
+        payload.provider = "openrouter".to_string();
+        payload.model = "anthropic/claude-sonnet-4.5".to_string();
+        let body = OpenAiCompatibleProvider::build_request_body(&payload, false);
+        let order = body
+            .get("provider")
+            .and_then(|provider| provider.get("order"));
+        assert!(
+            order.is_none(),
+            "non-gpt-oss openrouter route must not be pinned: {body}"
+        );
+    }
+
+    #[test]
+    fn build_request_body_does_not_pin_gpt_oss_on_other_providers() {
+        // gpt-oss served by a NON-openrouter provider (groq/cerebras direct)
+        // must NOT get a provider.order block — the pin is openrouter-scoped.
+        let mut payload = base_request_payload();
+        payload.provider = "groq".to_string();
+        payload.model = "openai/gpt-oss-120b".to_string();
+        let body = OpenAiCompatibleProvider::build_request_body(&payload, false);
+        assert!(
+            body.get("provider").is_none(),
+            "non-openrouter gpt-oss route must not be pinned: {body}"
         );
     }
 }

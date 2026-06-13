@@ -144,8 +144,21 @@ fn generated_provider_capabilities(source_dir: &Path) -> Result<GeneratedProvide
         body.push('\n');
     }
 
-    toml::from_str::<harn_vm::llm::capabilities::CapabilitiesFile>(&body)
+    let parsed = toml::from_str::<harn_vm::llm::capabilities::CapabilitiesFile>(&body)
         .map_err(|error| format!("generated provider capabilities do not parse: {error}"))?;
+
+    // Opinionated footgun gate: refuse to generate (or pass --check on) a
+    // capability matrix that declares a known-footgun provider/model/config
+    // combo (e.g. a tool route with reasoning forced off, or an OpenRouter
+    // Harmony tool route with no clean-sub-provider pin). Data-driven over the
+    // matrix — see harn_vm::llm::capability_audit.
+    let audit = harn_vm::llm::capability_audit::audit_capabilities(&parsed);
+    if !audit.is_clean() {
+        return Err(format!(
+            "capability matrix footgun check failed:\n{}",
+            audit.render()
+        ));
+    }
 
     Ok(GeneratedProviderConfig {
         body,
