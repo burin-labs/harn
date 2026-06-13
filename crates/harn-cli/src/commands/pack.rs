@@ -748,20 +748,12 @@ fn sign_bundle(
     let signature = signing_key.sign(bundle_hash.as_bytes());
     bundle.signature = Some(Ed25519Signature {
         key_id: Some(skill_provenance::fingerprint_for_key(&verifying_key)),
-        public_key: hex_encode(&verifying_key.to_bytes()),
-        signature: hex_encode(&signature.to_bytes()),
+        public_key: hex::encode(verifying_key.to_bytes()),
+        signature: hex::encode(signature.to_bytes()),
         manifest_hash_blake3: bundle_hash,
         algorithm: "ed25519".to_string(),
     });
     Ok(())
-}
-
-fn hex_encode(bytes: &[u8]) -> String {
-    let mut out = String::with_capacity(bytes.len() * 2);
-    for byte in bytes {
-        out.push_str(&format!("{byte:02x}"));
-    }
-    out
 }
 
 fn emit_release_trust_record(
