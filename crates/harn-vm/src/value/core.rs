@@ -180,6 +180,17 @@ static ASCII_CHAR_STRINGS: std::sync::LazyLock<[Arc<str>; 128]> = std::sync::Laz
 });
 
 impl VmValue {
+    /// Canonical `VmValue::String` constructor from anything string-like.
+    ///
+    /// Collapses the ubiquitous `VmValue::String(std::sync::Arc::from(..))`
+    /// spelling to a single call and performs exactly one allocation via
+    /// `Arc::<str>::from(&str)` regardless of whether the input is a `&str`,
+    /// `String`, `&String`, or `Cow<str>`. Prefer this over hand-writing the
+    /// `Arc::from` at call sites.
+    pub fn string(value: impl AsRef<str>) -> Self {
+        VmValue::String(Arc::from(value.as_ref()))
+    }
+
     /// Builds a `VmValue::String` holding a single character, reusing the
     /// interned ASCII table (see [`ASCII_CHAR_STRINGS`]) so the common ASCII
     /// path does not allocate.

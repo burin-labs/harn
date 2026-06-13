@@ -1,3 +1,4 @@
+mod build;
 mod core;
 mod env;
 mod error;
@@ -6,6 +7,7 @@ mod structural;
 
 pub type VmMutex<T> = parking_lot::Mutex<T>;
 
+pub use build::VmDictExt;
 pub use core::{
     struct_fields_to_map, StructLayout, VmAsyncBuiltinFn, VmBuiltinFn, VmEnumVariant, VmValue,
 };
