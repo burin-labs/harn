@@ -1447,12 +1447,29 @@ async fn host_agent_dispatch_tool_call(
             ))
             .await?;
             let denied = agent_tools::is_denied_tool_result(&raw_result);
+            // A dispatch that returned `Ok(..)` can still carry a failure in the
+            // result body (host-bridge `{ok:false}` / `{status:"error"}` /
+            // `{error:".."}` envelopes, or an MCP-shaped `{isError:true}` that
+            // wasn't already thrown). Surface those as a failure instead of
+            // laundering them into `ok:true` — the agent loop reads `ok`/`status`
+            // to decide whether the tool succeeded.
+            let body_failure = if denied {
+                None
+            } else {
+                agent_tools::ok_result_failure_category(&raw_result)
+            };
+            let is_failure = denied || body_failure.is_some();
+            let error_category = if denied {
+                Some("tool_rejected")
+            } else {
+                body_failure
+            };
             let observation =
                 format!("[result of {tool_name}]\n{rendered}\n[end of {tool_name} result]\n");
-            let error = denied.then(|| rendered.clone());
+            let error = is_failure.then(|| rendered.clone());
             let result = serde_json::json!({
-                "ok": !denied,
-                "status": if denied { "error" } else { "ok" },
+                "ok": !is_failure,
+                "status": if is_failure { "error" } else { "ok" },
                 "tool_name": tool_name.clone(),
                 "tool_call_id": tool_id,
                 "arguments": tool_args,
@@ -1460,7 +1477,7 @@ async fn host_agent_dispatch_tool_call(
                 "rendered_result": rendered,
                 "observation": observation,
                 "error": error,
-                "error_category": if denied { Some("tool_rejected") } else { None },
+                "error_category": error_category,
                 "executor": executor,
                 "approval": approval_status,
                 "execution_duration_ms": execution_duration_ms,
