@@ -459,8 +459,8 @@ fn compile_rule(
 }
 
 /// Load the fileset: inline `source` (+ `language`) for a single buffer, or
-/// `paths` read from disk (language inferred per file; undetectable files
-/// are skipped).
+/// `paths` read from disk (language inferred per file; non-UTF8 and
+/// undetectable files are skipped).
 fn load_files(
     builtin: &'static str,
     dict: &BTreeMap<String, VmValue>,
@@ -490,10 +490,13 @@ fn load_files(
     }
     let mut files = Vec::new();
     for path in paths {
-        let contents = std::fs::read_to_string(&path).map_err(|e| HostlibError::Backend {
+        let bytes = std::fs::read(&path).map_err(|e| HostlibError::Backend {
             builtin,
             message: format!("read `{path}`: {e}"),
         })?;
+        let Ok(contents) = String::from_utf8(bytes) else {
+            continue;
+        };
         if let Some(file) = SourceFile::detect(&path, contents) {
             files.push(file);
         }
@@ -874,6 +877,37 @@ mod tests {
             _ => panic!(),
         };
         assert_eq!(s(get(get(&matches[0], "captures"), "FN")), "foo");
+    }
+
+    #[test]
+    fn search_skips_non_utf8_paths() {
+        let dir = tempfile::tempdir().unwrap();
+        let source_path = dir.path().join("calls.ts");
+        let binary_path = dir.path().join(".DS_Store");
+        std::fs::write(&source_path, b"foo();\n").unwrap();
+        std::fs::write(&binary_path, [0xff, 0xfe, 0xfd]).unwrap();
+
+        let result = search_run(&[dict(&[
+            ("rule", str_vm(SEARCH_RULE)),
+            (
+                "paths",
+                VmValue::List(Arc::new(vec![
+                    str_vm(source_path.display().to_string()),
+                    str_vm(binary_path.display().to_string()),
+                ])),
+            ),
+        ])])
+        .unwrap();
+
+        assert_eq!(int(get(&result, "match_count")), 1);
+        let matches = match get(&result, "matches") {
+            VmValue::List(l) => l.clone(),
+            _ => panic!(),
+        };
+        assert_eq!(
+            s(get(&matches[0], "path")),
+            source_path.display().to_string()
+        );
     }
 
     #[test]
