@@ -548,6 +548,44 @@ fn emit(
     });
 }
 
+/// Canonical snake_case JSON for one prepare outcome — the "outcome as data"
+/// shape consumed by script/CLI surfaces (e.g. the `mcp.reauth_expired()`
+/// builtin, harn#3358). A `Pending` flow needs interactive consent, so it is
+/// reported as `reauth_required` with its `authorize_url`/`state`; `Skipped`
+/// and `Failed` carry their reason/error. (The ACP wire uses its own camelCase
+/// grouping — different consumer, different convention.)
+pub fn prepare_outcome_to_json(outcome: &PrepareOutcome) -> serde_json::Value {
+    match outcome {
+        PrepareOutcome::Pending(flow) => serde_json::json!({
+            "server": flow.name,
+            "server_url": flow.server_url,
+            "status": "reauth_required",
+            "authorize_url": flow.authorize_url,
+            "state": flow.state,
+        }),
+        PrepareOutcome::Skipped {
+            name,
+            server_url,
+            reason,
+        } => serde_json::json!({
+            "server": name,
+            "server_url": server_url,
+            "status": "skipped",
+            "reason": reason,
+        }),
+        PrepareOutcome::Failed {
+            name,
+            server_url,
+            error,
+        } => serde_json::json!({
+            "server": name,
+            "server_url": server_url,
+            "status": "failed",
+            "error": error,
+        }),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -757,6 +795,64 @@ mod tests {
         assert!(
             matches!(none, PrepareOutcome::Skipped { reason, .. } if reason == "no stored token")
         );
+    }
+
+    #[tokio::test]
+    async fn reauth_expired_outcomes_as_json_drive_only_stale() {
+        // The `mcp.reauth_expired()` (harn#3358) acceptance: two servers with
+        // expired (stored-but-invalid) tokens + one valid → exactly the two are
+        // driven to re-auth and the valid one is left untouched (Skipped).
+        let engine = MockEngine {
+            valid: vec!["https://fresh.example/mcp".to_string()],
+            stored: vec![
+                "https://stale1.example/mcp".to_string(),
+                "https://stale2.example/mcp".to_string(),
+                "https://fresh.example/mcp".to_string(),
+            ],
+            ..Default::default()
+        };
+        let driver = driver(engine);
+        let outcomes = driver
+            .prepare(
+                vec![
+                    server("stale1", "https://stale1.example/mcp"),
+                    server("stale2", "https://stale2.example/mcp"),
+                    server("fresh", "https://fresh.example/mcp"),
+                ],
+                BulkAuthMode::Expired,
+                "http://127.0.0.1:9783/callback",
+            )
+            .await;
+
+        let json: Vec<serde_json::Value> = outcomes.iter().map(prepare_outcome_to_json).collect();
+        let by_server = |name: &str| {
+            json.iter()
+                .find(|value| value["server"] == name)
+                .cloned()
+                .unwrap()
+        };
+
+        let reauthed: Vec<_> = json
+            .iter()
+            .filter(|value| value["status"] == "reauth_required")
+            .collect();
+        assert_eq!(
+            reauthed.len(),
+            2,
+            "exactly the two stale servers are driven"
+        );
+
+        let stale1 = by_server("stale1");
+        assert_eq!(stale1["status"], "reauth_required");
+        assert!(
+            stale1["authorize_url"].as_str().is_some(),
+            "a re-auth outcome carries an authorize_url for the caller to open"
+        );
+        assert_eq!(by_server("stale2")["status"], "reauth_required");
+
+        let fresh = by_server("fresh");
+        assert_eq!(fresh["status"], "skipped");
+        assert_eq!(fresh["reason"], "token still valid");
     }
 
     #[tokio::test]

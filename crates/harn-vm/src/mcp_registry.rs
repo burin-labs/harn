@@ -98,6 +98,19 @@ pub fn get_registration(name: &str) -> Option<RegisteredMcpServer> {
         .cloned()
 }
 
+/// Snapshot every declared MCP server's registration. Lets harn-vm enumerate
+/// the configured servers (e.g. to find OAuth-backed ones for bulk re-auth,
+/// harn#3358) without reparsing `harn.toml` — the CLI already registered them.
+pub fn all_registrations() -> Vec<RegisteredMcpServer> {
+    REGISTRY
+        .lock()
+        .expect("mcp registry poisoned")
+        .servers
+        .values()
+        .cloned()
+        .collect()
+}
+
 /// Drop every registration and active connection. Used by
 /// `reset_thread_local_state` and tests.
 pub fn reset() {

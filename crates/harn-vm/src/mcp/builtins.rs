@@ -286,6 +286,19 @@ pub fn register_mcp_builtins(vm: &mut Vm) {
         Ok(VmValue::List(std::sync::Arc::new(out)))
     });
 
+    // Bulk re-auth of expired/revoked OAuth MCP tokens (harn#3358). Enumerates
+    // the declared OAuth-backed HTTP servers, silently refreshes whatever can be
+    // refreshed, and returns one outcome dict per server (status =
+    // reauth_required | skipped | failed) so a trigger/worker can act on the
+    // ones that still need interactive consent. Headless: it never opens a
+    // browser; `reauth_required` outcomes carry an `authorize_url`/`state`.
+    vm.register_async_builtin("harn.mcp.reauth_expired", |_ctx, _args| async move {
+        reauth_expired_impl().await
+    });
+    vm.register_async_builtin("mcp_reauth_expired", |_ctx, _args| async move {
+        reauth_expired_impl().await
+    });
+
     // Fetch (or read from cache) the Server Card for a registered MCP
     // server, or from an explicit URL / local path.
     //
@@ -703,6 +716,10 @@ pub(crate) fn register_harn_mcp_namespace(vm: &mut Vm) {
             "status".to_string(),
             VmValue::BuiltinRef(std::sync::Arc::from("harn.mcp.status")),
         ),
+        (
+            "reauth_expired".to_string(),
+            VmValue::BuiltinRef(std::sync::Arc::from("harn.mcp.reauth_expired")),
+        ),
     ]));
     vm.set_global(
         "harn",
@@ -857,4 +874,110 @@ pub(crate) fn register_supervised_mcp_host_builtins(vm: &mut Vm) {
             .collect();
         Ok(VmValue::List(std::sync::Arc::new(list)))
     });
+}
+
+/// Loopback redirect used when minting an authorize URL for an interactive
+/// re-auth fallback (harn#3358). Matches the CLI/ACP default so a captured
+/// callback can be completed through the same path.
+const REAUTH_REDIRECT_URI: &str = "http://127.0.0.1:9783/oauth/callback";
+
+/// Select the OAuth-backed HTTP MCP servers from registry specs and map them to
+/// bulk-auth driver inputs. An OAuth server is HTTP with a URL and no static
+/// bearer (`auth_token`): static/secret-backed servers resolve a bearer at
+/// registration time and are excluded. Client/scope details are left unset —
+/// silent refresh reuses the stored token's client, and the interactive
+/// fallback uses the CIMD default.
+fn oauth_servers_from_specs(
+    specs: &[serde_json::Value],
+) -> Vec<crate::mcp_bulk_auth::BulkAuthServer> {
+    specs
+        .iter()
+        .filter_map(|spec| {
+            let transport = spec
+                .get("transport")
+                .and_then(|value| value.as_str())
+                .unwrap_or("stdio");
+            let url = spec
+                .get("url")
+                .and_then(|value| value.as_str())
+                .unwrap_or("");
+            let has_static_bearer = spec
+                .get("auth_token")
+                .and_then(|value| value.as_str())
+                .is_some_and(|token| !token.is_empty());
+            if transport != "http" || url.is_empty() || has_static_bearer {
+                return None;
+            }
+            let name = spec
+                .get("name")
+                .and_then(|value| value.as_str())
+                .unwrap_or(url)
+                .to_string();
+            Some(crate::mcp_bulk_auth::BulkAuthServer {
+                name,
+                server_url: url.to_string(),
+                ..Default::default()
+            })
+        })
+        .collect()
+}
+
+/// Shared body for `mcp.reauth_expired()` / `mcp_reauth_expired` — enumerate the
+/// declared OAuth servers and drive them through the bulk driver in `Expired`
+/// mode, returning one outcome dict per server.
+async fn reauth_expired_impl() -> Result<VmValue, VmError> {
+    let specs: Vec<serde_json::Value> = crate::mcp_registry::all_registrations()
+        .into_iter()
+        .map(|registration| registration.spec)
+        .collect();
+    let servers = oauth_servers_from_specs(&specs);
+    let driver = crate::mcp_bulk_auth::McpBulkAuth::new();
+    let outcomes = driver
+        .prepare(
+            servers,
+            crate::mcp_bulk_auth::BulkAuthMode::Expired,
+            REAUTH_REDIRECT_URI,
+        )
+        .await;
+    let list: Vec<VmValue> = outcomes
+        .iter()
+        .map(|outcome| json_to_vm_value(&crate::mcp_bulk_auth::prepare_outcome_to_json(outcome)))
+        .collect();
+    Ok(VmValue::List(std::sync::Arc::new(list)))
+}
+
+#[cfg(test)]
+mod reauth_tests {
+    use super::*;
+
+    #[test]
+    fn oauth_servers_from_specs_selects_only_interactive_http() {
+        let specs = vec![
+            // OAuth HTTP server (no static token) → selected.
+            serde_json::json!({
+                "name": "Notion",
+                "transport": "http",
+                "url": "https://mcp.notion.com/mcp",
+            }),
+            // HTTP server with a static bearer → excluded.
+            serde_json::json!({
+                "name": "Internal",
+                "transport": "http",
+                "url": "https://internal/mcp",
+                "auth_token": "secret",
+            }),
+            // stdio server → excluded.
+            serde_json::json!({
+                "name": "Local",
+                "transport": "stdio",
+                "command": "./server",
+            }),
+            // HTTP with no URL → excluded.
+            serde_json::json!({ "name": "Bad", "transport": "http", "url": "" }),
+        ];
+        let servers = oauth_servers_from_specs(&specs);
+        assert_eq!(servers.len(), 1);
+        assert_eq!(servers[0].name, "Notion");
+        assert_eq!(servers[0].server_url, "https://mcp.notion.com/mcp");
+    }
 }
