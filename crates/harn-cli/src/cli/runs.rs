@@ -1,4 +1,6 @@
 use clap::{Args, Subcommand};
+use std::path::Path;
+use std::process;
 
 #[derive(Debug, Args)]
 pub(crate) struct RunsArgs {
@@ -33,6 +35,45 @@ pub(crate) struct RunsViewArgs {
     /// Emit JSON. Accepted for consistency with other CLI surfaces.
     #[arg(long)]
     pub json: bool,
+}
+
+pub(crate) fn print_view(path: &str, force_session: bool, _json: bool) {
+    let paths = crate::collect_run_record_paths(path);
+    if paths.is_empty() {
+        eprintln!("No run records found at {path}");
+        process::exit(1);
+    }
+
+    if force_session || paths.len() > 1 || Path::new(path).is_dir() {
+        let views = paths
+            .iter()
+            .map(|path| {
+                harn_vm::orchestration::build_run_view_with_path(
+                    &crate::load_run_record_or_exit(path),
+                    Some(path.display().to_string()),
+                )
+            })
+            .collect();
+        print_json(&harn_vm::orchestration::build_session_view_from_run_views(
+            views,
+            harn_vm::orchestration::SessionViewOptions::default(),
+        ));
+    } else {
+        print_json(&harn_vm::orchestration::build_run_view_with_path(
+            &crate::load_run_record_or_exit(&paths[0]),
+            Some(paths[0].display().to_string()),
+        ));
+    }
+}
+
+fn print_json<T: serde::Serialize>(value: &T) {
+    match serde_json::to_string_pretty(value) {
+        Ok(rendered) => println!("{rendered}"),
+        Err(error) => {
+            eprintln!("Failed to render JSON: {error}");
+            process::exit(1);
+        }
+    }
 }
 
 #[derive(Debug, Args)]

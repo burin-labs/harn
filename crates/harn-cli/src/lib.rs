@@ -1228,7 +1228,7 @@ async fn async_main(raw_args: Vec<String>, runtime_mode: CliRuntimeMode) {
                 inspect_run_record(&inspect.path, inspect.compare.as_deref());
             }
             RunsCommand::View(view) => {
-                print_run_view(&view.path, view.session, view.json);
+                cli::print_runs_view(&view.path, view.session, view.json);
             }
         },
         Command::Session(args) => commands::session::run(args),
@@ -2111,7 +2111,7 @@ fn verify_provenance_receipt(path: &str, json: bool) -> Result<(), String> {
     Ok(())
 }
 
-fn load_run_record_or_exit(path: &Path) -> harn_vm::orchestration::RunRecord {
+pub(crate) fn load_run_record_or_exit(path: &Path) -> harn_vm::orchestration::RunRecord {
     match harn_vm::orchestration::load_run_record(path) {
         Ok(run) => run,
         Err(error) => {
@@ -2209,7 +2209,7 @@ fn file_looks_like_persona_eval_ladder_manifest(path: &Path) -> bool {
     )
 }
 
-fn collect_run_record_paths(path: &str) -> Vec<PathBuf> {
+pub(crate) fn collect_run_record_paths(path: &str) -> Vec<PathBuf> {
     let path = Path::new(path);
     if path.is_file() {
         return vec![path.to_path_buf()];
@@ -2400,47 +2400,6 @@ fn inspect_run_record(path: &str, compare: Option<&str>) {
     if let Some(compare_path) = compare {
         let baseline = load_run_record_or_exit(Path::new(compare_path));
         print_run_diff(&harn_vm::orchestration::diff_run_records(&baseline, &run));
-    }
-}
-
-fn print_run_view(path: &str, force_session: bool, _json: bool) {
-    let paths = collect_run_record_paths(path);
-    if paths.is_empty() {
-        eprintln!("No run records found at {path}");
-        process::exit(1);
-    }
-    let emit_session = force_session || paths.len() > 1 || Path::new(path).is_dir();
-    if emit_session {
-        let mut views = Vec::new();
-        for path in &paths {
-            let run = load_run_record_or_exit(path);
-            views.push(harn_vm::orchestration::build_run_view_with_path(
-                &run,
-                Some(path.display().to_string()),
-            ));
-        }
-        let view = harn_vm::orchestration::build_session_view_from_run_views(
-            views,
-            harn_vm::orchestration::SessionViewOptions::default(),
-        );
-        print_json_or_exit(&view);
-    } else {
-        let run = load_run_record_or_exit(&paths[0]);
-        let view = harn_vm::orchestration::build_run_view_with_path(
-            &run,
-            Some(paths[0].display().to_string()),
-        );
-        print_json_or_exit(&view);
-    }
-}
-
-fn print_json_or_exit<T: serde::Serialize>(value: &T) {
-    match serde_json::to_string_pretty(value) {
-        Ok(rendered) => println!("{rendered}"),
-        Err(error) => {
-            eprintln!("Failed to render JSON: {error}");
-            process::exit(1);
-        }
     }
 }
 

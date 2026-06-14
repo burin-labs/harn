@@ -182,7 +182,7 @@ pub(crate) use quickstart::QuickstartArgs;
 pub(crate) use routes::RoutesArgs;
 pub(crate) use rule::{RuleArgs, RuleCommand, RuleTestArgs};
 pub(crate) use run::RunArgs;
-pub(crate) use runs::{ReplayArgs, RunsArgs, RunsCommand};
+pub(crate) use runs::{print_view as print_runs_view, ReplayArgs, RunsArgs, RunsCommand};
 pub(crate) use scan::ScanArgs;
 pub(crate) use serve::{
     A2aServeArgs, AcpServeTransport, ApiServeArgs, McpServeTransport, ServeAcpArgs, ServeArgs,
