@@ -167,6 +167,24 @@ pub(crate) struct McpLoginArgs {
         default_value = "http://127.0.0.1:9783/oauth/callback"
     )]
     pub redirect_uri: String,
+    /// Bulk first-auth: log in to every OAuth-backed MCP server in the nearest
+    /// harn.toml that isn't already connected.
+    #[arg(long, conflicts_with_all = ["target", "url"])]
+    pub all: bool,
+    /// Bulk re-auth: re-authenticate servers whose stored token is expired or
+    /// revoked. Combine with --all to force-reauth every server.
+    #[arg(long, conflicts_with_all = ["target", "url"])]
+    pub reauth: bool,
+    /// With --all/--reauth, limit the bulk set to these server names.
+    #[arg(long = "only", value_delimiter = ',', value_name = "NAME")]
+    pub only: Vec<String>,
+    /// Max concurrent flows to prepare during a bulk login (overrides config).
+    #[arg(long)]
+    pub concurrency: Option<usize>,
+    /// Emit machine-readable JSON status lines (one per event) during a bulk
+    /// login instead of the human-readable progress display.
+    #[arg(long)]
+    pub json: bool,
 }
 
 #[derive(Debug, Args)]
