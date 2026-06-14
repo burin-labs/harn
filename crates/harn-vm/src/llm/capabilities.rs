@@ -362,6 +362,20 @@ pub struct ProviderRule {
     /// 400 when sent `reasoning: {enabled:false}`.
     #[serde(default)]
     pub reasoning_disable_supported: Option<bool>,
+    /// Whether this model performs *tool calls inside its reasoning channel*,
+    /// so disabling reasoning silently breaks tool calling. The canonical case
+    /// is the OpenAI gpt-oss (Harmony) family: with reasoning disabled it emits
+    /// 0 tool_calls and a tiny billed-noncommittal completion; with reasoning
+    /// enabled (even `low`) it emits clean native tool calls. This is the
+    /// *opposite* of the Qwen3 quirk (Qwen narrates tool intent in the
+    /// reasoning trace and emits zero `tool_calls`, so Qwen needs reasoning
+    /// OFF for tools). When set, `reasoning_policy` refuses to downgrade the
+    /// auto reasoning level to `off` for tool-bearing tasks (agent/code/verify)
+    /// — flooring instead to the lowest supported effort — so no future
+    /// auto-policy default or session pin can re-introduce the
+    /// billed-noncommittal failure at the data layer.
+    #[serde(default)]
+    pub reasoning_required_for_tools: Option<bool>,
     /// Whether reasoning-only clean stops may be promoted into visible text.
     /// Disable this for providers whose `reasoning` field is always private
     /// trace, even when `content` is empty.
@@ -446,6 +460,25 @@ pub struct ProviderRule {
     /// natively. Only consulted for the `openrouter` provider.
     #[serde(default)]
     pub provider_route_denylist: Option<Vec<String>>,
+    /// OpenRouter upstream provider names this `(provider, model)` row is
+    /// PINNED to, in preference order. Materialized into the request body's
+    /// `provider.order` array with `allow_fallbacks = false` (see
+    /// [`crate::llm::providers::openai_compat::apply_openrouter_provider_order`]),
+    /// so OpenRouter only ever routes the model to these known-clean upstreams
+    /// and never silently falls back to a sketchier one. This is the
+    /// *allowlist* counterpart to [`Self::provider_route_denylist`]: prefer it
+    /// when the bad upstreams are intermittent / hard to enumerate but the
+    /// clean ones are few and stable. The canonical case is OpenRouter's
+    /// `openai/gpt-oss-*` route, which fans out across ~17 upstreams in a
+    /// sub-provider lottery; some mis-serialize the Harmony tool call even with
+    /// reasoning ON (billed-noncommittal: 0 tool_calls), while Cerebras and
+    /// Groq serve it cleanly. Only consulted for the `openrouter` provider. An
+    /// empty / unset list means "no pin" (free OpenRouter routing). When both a
+    /// pin and a denylist are present the pin wins (a closed allowlist already
+    /// excludes everything not on it). Validated by the footgun gate in
+    /// [`crate::llm::capability_audit`].
+    #[serde(default)]
+    pub openrouter_provider_order: Option<Vec<String>>,
 }
 
 /// Resolved capabilities for a `(provider, model)` pair. Unset rule
@@ -503,6 +536,8 @@ pub struct Capabilities {
     /// the provider's own default ceiling.
     pub max_thinking_budget: Option<i64>,
     pub reasoning_disable_supported: bool,
+    /// See [`ProviderRule::reasoning_required_for_tools`].
+    pub reasoning_required_for_tools: bool,
     pub reasoning_text_promotable: bool,
     pub reasoning_wire_format: Option<String>,
     pub seed_supported: bool,
@@ -525,6 +560,10 @@ pub struct Capabilities {
     /// row. See [`ProviderRule::provider_route_denylist`]. Empty means "no
     /// route restriction".
     pub provider_route_denylist: Vec<String>,
+    /// OpenRouter upstream provider names this row is PINNED to (allowlist), in
+    /// preference order. See [`ProviderRule::openrouter_provider_order`]. Empty
+    /// means "no pin" (free OpenRouter routing).
+    pub openrouter_provider_order: Vec<String>,
 }
 
 impl Default for Capabilities {
@@ -576,6 +615,7 @@ impl Default for Capabilities {
             reasoning_none_supported: false,
             max_thinking_budget: None,
             reasoning_disable_supported: true,
+            reasoning_required_for_tools: false,
             reasoning_text_promotable: true,
             reasoning_wire_format: None,
             seed_supported: true,
@@ -593,6 +633,7 @@ impl Default for Capabilities {
             thinking_disable_directive: None,
             auto_reasoning_overrides: BTreeMap::new(),
             provider_route_denylist: Vec::new(),
+            openrouter_provider_order: Vec::new(),
         }
     }
 }
@@ -705,6 +746,12 @@ fn builtin() -> &'static CapabilitiesFile {
         toml::from_str::<CapabilitiesFile>(BUILTIN_TOML)
             .expect("capabilities.toml must parse at build time")
     })
+}
+
+/// The shipped (built-in) capability matrix. Public so the footgun gate in
+/// [`crate::llm::capability_audit`] can audit exactly what Harn ships.
+pub fn builtin_file() -> &'static CapabilitiesFile {
+    builtin()
 }
 
 /// Install project-level overrides for the current thread. Usually
@@ -1221,6 +1268,7 @@ fn defaults_to_caps(defaults: &ProviderDefaults) -> Capabilities {
         reasoning_none_supported: None,
         max_thinking_budget: None,
         reasoning_disable_supported: None,
+        reasoning_required_for_tools: None,
         reasoning_text_promotable: None,
         reasoning_wire_format: None,
         seed_supported: None,
@@ -1238,6 +1286,7 @@ fn defaults_to_caps(defaults: &ProviderDefaults) -> Capabilities {
         thinking_disable_directive: None,
         auto_reasoning_overrides: None,
         provider_route_denylist: None,
+        openrouter_provider_order: None,
     };
     let mut caps = rule_to_caps(&empty, defaults);
     caps.preferred_tool_format = None;
@@ -1317,6 +1366,7 @@ fn rule_to_caps(rule: &ProviderRule, defaults: &ProviderDefaults) -> Capabilitie
         reasoning_none_supported: rule.reasoning_none_supported.unwrap_or(false),
         max_thinking_budget: rule.max_thinking_budget,
         reasoning_disable_supported: rule.reasoning_disable_supported.unwrap_or(true),
+        reasoning_required_for_tools: rule.reasoning_required_for_tools.unwrap_or(false),
         reasoning_text_promotable: rule.reasoning_text_promotable.unwrap_or(true),
         reasoning_wire_format: rule
             .reasoning_wire_format
@@ -1355,6 +1405,7 @@ fn rule_to_caps(rule: &ProviderRule, defaults: &ProviderDefaults) -> Capabilitie
         thinking_disable_directive: rule.thinking_disable_directive.clone(),
         auto_reasoning_overrides: rule.auto_reasoning_overrides.clone().unwrap_or_default(),
         provider_route_denylist: rule.provider_route_denylist.clone().unwrap_or_default(),
+        openrouter_provider_order: rule.openrouter_provider_order.clone().unwrap_or_default(),
     }
 }
 

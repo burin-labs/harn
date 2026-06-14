@@ -137,6 +137,17 @@ thinking_block_style = "inline"
 # https://github.com/QwenLM/Qwen3.6/issues/89 for the trained-behavior
 # analysis and Qwen's own recommendation to disable reasoning when
 # tool-calling.
+#
+# NOTE — two opposite tool-calling reasoning quirks live in this matrix:
+#   * Qwen3 = reasoning-OFF-for-tools (this row): Qwen narrates its
+#     tool-call intent inside the reasoning trace and emits zero structured
+#     `tool_calls`, so the override forces reasoning off for tool tasks.
+#   * gpt-oss / Harmony = reasoning-ON-for-tools (see the gpt-oss rows in
+#     60-together / 70-...-groq / 80-cerebras / 99-openrouter-new-families):
+#     gpt-oss performs tool calls INSIDE the chain-of-thought channel, so
+#     disabling reasoning breaks tool calling. Those rows carry
+#     `reasoning_required_for_tools = true` and must NOT copy this Qwen-style
+#     `auto_reasoning_overrides = "off"`. Do not conflate the two.
 # OpenRouter routes Anthropic models verbatim — same wire shape as
 # direct anthropic, just wrapped in the OpenAI-compat chat-completions
 # envelope at the OpenRouter edge. The provider_family chain takes
