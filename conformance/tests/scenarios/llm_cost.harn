@@ -1,16 +1,22 @@
 pipeline test(task) {
-  // Test llm_cost builtin with known model pricing
+  // Test llm_cost builtin with known model pricing. `llm_cost` returns an
+  // exact `decimal` (money), so it is compared against decimal literals —
+  // decimals form a clean island and never compare equal/ordered against
+  // binary floats.
   let cost = llm_cost("gpt-4o-mini", 1000, 500)
   // gpt-4o-mini: $0.15/M input, $0.60/M output
   // 1000 * 0.15 / 1000000 = 0.00015
   // 500 * 0.60 / 1000000 = 0.0003
-  // total = 0.00045
-  assert(cost > 0.0004, "cost should be > 0.0004")
-  assert(cost < 0.0005, "cost should be < 0.0005")
+  // total = 0.00045 — exact, no float drift
+  assert_eq(cost, decimal("0.00045"))
+  assert(cost > decimal("0.0004"), "cost should be > 0.0004")
+  assert(cost < decimal("0.0005"), "cost should be < 0.0005")
+  // Formatting accepts the decimal amount directly.
+  assert_eq(llm_format_usd(cost), "$0.000450")
   log("cost ok")
-  // Unknown model returns 0
+  // Unknown model returns an exact zero decimal
   let unknown_cost = llm_cost("unknown-model", 1000, 500)
-  assert_eq(unknown_cost, 0.0)
+  assert_eq(unknown_cost, decimal("0"))
   log("unknown ok")
   // Budget builtins
   llm_budget(10.0)

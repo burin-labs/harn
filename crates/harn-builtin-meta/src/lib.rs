@@ -363,6 +363,7 @@ pub const TY_ANY: Ty = Ty::Any;
 pub const TY_BOOL: Ty = Ty::Named("bool");
 pub const TY_BYTES: Ty = Ty::Named("bytes");
 pub const TY_CLOSURE: Ty = Ty::Named("closure");
+pub const TY_DECIMAL: Ty = Ty::Named("decimal");
 pub const TY_DICT: Ty = Ty::Named("dict");
 pub const TY_DURATION: Ty = Ty::Named("duration");
 pub const TY_FLOAT: Ty = Ty::Named("float");

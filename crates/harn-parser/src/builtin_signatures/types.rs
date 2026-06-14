@@ -11,8 +11,8 @@ use crate::ast::{ShapeField, TypeExpr};
 
 pub use harn_builtin_meta::{
     BuiltinMetadata, BuiltinSignature, Param, ShapeFieldDescriptor, Ty, TY_ANY, TY_BOOL, TY_BYTES,
-    TY_BYTES_OR_NIL, TY_CLOSURE, TY_DICT, TY_DICT_OR_NIL, TY_DURATION, TY_FLOAT, TY_INT,
-    TY_INT_OR_NIL, TY_LIST, TY_NEVER, TY_NIL, TY_NUMBER, TY_STRING, TY_STRING_OR_NIL,
+    TY_BYTES_OR_NIL, TY_CLOSURE, TY_DECIMAL, TY_DICT, TY_DICT_OR_NIL, TY_DURATION, TY_FLOAT,
+    TY_INT, TY_INT_OR_NIL, TY_LIST, TY_NEVER, TY_NIL, TY_NUMBER, TY_STRING, TY_STRING_OR_NIL,
 };
 
 /// Convert a const-IR [`Ty`] into the parser's owned [`TypeExpr`]. Generic

@@ -5,8 +5,8 @@ use super::shapes::{
     SUB_AGENT_OPTIONS, SUB_AGENT_RESULT, TRANSCRIPT, WORKER_SUMMARY,
 };
 use super::{
-    BuiltinSignature, Param, Ty, TY_ANY, TY_BOOL, TY_CLOSURE, TY_DICT, TY_DICT_OR_NIL, TY_FLOAT,
-    TY_INT, TY_LIST, TY_NIL, TY_STRING, TY_STRING_OR_NIL,
+    BuiltinSignature, Param, Ty, TY_ANY, TY_BOOL, TY_CLOSURE, TY_DECIMAL, TY_DICT, TY_DICT_OR_NIL,
+    TY_FLOAT, TY_INT, TY_LIST, TY_NIL, TY_STRING, TY_STRING_OR_NIL,
 };
 
 /// `list | dict | Transcript | SessionSnapshot` — used for
@@ -357,12 +357,13 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
             Param::new("input_tokens", TY_INT),
             Param::new("output_tokens", TY_INT),
         ],
-        TY_FLOAT,
+        // Exact money: `llm_cost` returns a `decimal`, not a binary `float`.
+        TY_DECIMAL,
     ),
     BuiltinSignature::simple(
         "llm_format_usd",
         &[
-            Param::new("amount", Ty::Union(&[TY_FLOAT, TY_INT])),
+            Param::new("amount", Ty::Union(&[TY_DECIMAL, TY_FLOAT, TY_INT])),
             Param::optional("options", TY_DICT),
         ],
         TY_STRING,

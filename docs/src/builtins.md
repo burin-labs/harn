@@ -1819,7 +1819,7 @@ See [LLM calls and agent loops](llm-and-agents.md) for full documentation.
 | `llm_catalog()` | — | list | Free-builtin alias for `harness.llm.catalog()`, available to scripts that do not receive a `Harness` parameter |
 | `llm_catalog_refresh(options?)` | `options?: dict\|nil` | dict | Free-builtin alias for `harness.llm.catalog_refresh(options?)`, available to scripts that do not receive a `Harness` parameter |
 | `llm_config(provider?)` | provider: string | dict | Get provider config (base_url, auth_style, etc.) |
-| `llm_cost(model, input_tokens, output_tokens)` | model: string, input_tokens: int, output_tokens: int | float | Estimate USD cost from catalog pricing, falling back to embedded pricing |
+| `llm_cost(model, input_tokens, output_tokens)` | model: string, input_tokens: int, output_tokens: int | decimal | Estimate USD cost (exact `decimal`) from catalog pricing, falling back to embedded pricing |
 | `llm_session_cost()` | — | dict | Session totals: `{total_cost, input_tokens, output_tokens, call_count}` |
 | `llm_budget(max_cost)` | max_cost: float | nil | Set session budget in USD. LLM calls pre-flight and throw if projected cost would exceed it |
 | `llm_budget_remaining()` | — | float or nil | Remaining budget (nil if no budget set) |
