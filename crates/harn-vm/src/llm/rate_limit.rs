@@ -28,6 +28,15 @@ const WINDOW_SECS: u64 = 60;
 const RATE_LIMIT_ENV_FIELD_SUFFIXES: [&str; 5] =
     ["_RPM", "_TPM", "_INPUT_TPM", "_OUTPUT_TPM", "_CONCURRENCY"];
 
+/// Consecutive NetworkError/Timeout failures on one route that trip the
+/// network-only circuit breaker open. Distinct from 429 handling, which uses
+/// `cooldown_until_ms` + provider Retry-After and never feeds the breaker.
+const NETWORK_BREAKER_FAILURE_THRESHOLD: u32 = 4;
+/// How long the breaker stays open (fail-fast) before allowing a half-open probe.
+/// Short on purpose: a laptop reconnect or DNS recovery should be retried soon,
+/// we only want to stop burning the per-call retry budget while the link is down.
+const NETWORK_BREAKER_OPEN_MS: u64 = 5_000;
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 struct RateLimitRequest {
     input_tokens: u64,
@@ -193,6 +202,78 @@ impl SlidingWindow {
     }
 }
 
+/// Per-process, network-only circuit breaker for one route.
+///
+/// Opens ONLY on sustained `NetworkError`/`Timeout` (laptop disconnect, DNS
+/// failure, dropped link) — never on 429, which the rate limiter already handles
+/// via `cooldown_until_ms` + provider Retry-After. While open it fails fast so a
+/// call does not burn its whole retry budget against a dead link; after a short
+/// window it half-opens to admit a single probe, then closes on success or
+/// re-opens on another network failure.
+///
+/// Network reachability is a property of THIS process, so the breaker is
+/// per-process state (not shared via the durable rate-limit DB). It is distinct
+/// from the opt-in routing-policy breaker; this one is always-on and only ever
+/// reacts to transport-level network failures.
+#[derive(Debug, Default, PartialEq, Eq)]
+enum BreakerState {
+    #[default]
+    Closed,
+    /// Failing fast until `until_ms`, after which one half-open probe is admitted.
+    Open { until_ms: u128 },
+    /// A single probe is in flight; further calls fail fast until it resolves.
+    HalfOpen,
+}
+
+#[derive(Debug, Default)]
+struct NetworkBreaker {
+    state: BreakerState,
+    consecutive_network_failures: u32,
+}
+
+impl NetworkBreaker {
+    /// Whether a call should be admitted now, transitioning Open→HalfOpen when
+    /// the open window has elapsed. Returns `None` to admit (Closed/HalfOpen
+    /// probe), or `Some(remaining)` to fail fast while open.
+    fn admit(&mut self, now_ms: u128) -> Option<Duration> {
+        match self.state {
+            BreakerState::Closed => None,
+            BreakerState::HalfOpen => {
+                // A probe is already in flight; do not admit a second.
+                Some(Duration::from_millis(0))
+            }
+            BreakerState::Open { until_ms } => {
+                if now_ms >= until_ms {
+                    self.state = BreakerState::HalfOpen;
+                    None
+                } else {
+                    Some(Duration::from_millis(
+                        until_ms.saturating_sub(now_ms).min(u128::from(u64::MAX)) as u64,
+                    ))
+                }
+            }
+        }
+    }
+
+    fn record_network_failure(&mut self, now_ms: u128) {
+        self.consecutive_network_failures = self.consecutive_network_failures.saturating_add(1);
+        // A failed half-open probe (or crossing the threshold while closed)
+        // (re)opens the breaker for a fresh window.
+        if matches!(self.state, BreakerState::HalfOpen)
+            || self.consecutive_network_failures >= NETWORK_BREAKER_FAILURE_THRESHOLD
+        {
+            self.state = BreakerState::Open {
+                until_ms: now_ms.saturating_add(u128::from(NETWORK_BREAKER_OPEN_MS)),
+            };
+        }
+    }
+
+    fn record_success(&mut self) {
+        self.consecutive_network_failures = 0;
+        self.state = BreakerState::Closed;
+    }
+}
+
 struct RouteLimiter {
     request_window: Option<SlidingWindow>,
     total_token_window: Option<SlidingWindow>,
@@ -200,6 +281,7 @@ struct RouteLimiter {
     output_token_window: Option<SlidingWindow>,
     concurrency: Option<Arc<Semaphore>>,
     cooldown_until_ms: Option<u128>,
+    breaker: NetworkBreaker,
     limits: EffectiveRateLimits,
 }
 
@@ -214,6 +296,7 @@ impl RouteLimiter {
                 .concurrency
                 .map(|limit| Arc::new(Semaphore::new(limit.max(1) as usize))),
             cooldown_until_ms: None,
+            breaker: NetworkBreaker::default(),
             limits,
         }
     }
@@ -264,6 +347,19 @@ impl RouteLimiter {
         }
         let until_ms = now_ms.saturating_add(u128::from(retry_after_ms));
         self.cooldown_until_ms = Some(self.cooldown_until_ms.unwrap_or(0).max(until_ms));
+    }
+
+    /// Fail-fast wait if the network breaker is open; `None` admits the call.
+    fn breaker_block(&mut self, now_ms: u128) -> Option<Duration> {
+        self.breaker.admit(now_ms)
+    }
+
+    fn observe_network_failure(&mut self, now_ms: u128) {
+        self.breaker.record_network_failure(now_ms);
+    }
+
+    fn observe_success(&mut self) {
+        self.breaker.record_success();
     }
 }
 
@@ -799,6 +895,83 @@ pub(crate) fn observe_retry_after_for_llm_call(
     }
 }
 
+/// Fail-fast error returned when the network breaker is open for a route.
+fn breaker_open_error(provider: &str, model: &str, remaining: Duration) -> crate::value::VmError {
+    let route = if model.trim().is_empty() {
+        provider.to_string()
+    } else {
+        format!(
+            "{provider}/{}",
+            crate::llm_config::normalize_model_id(model)
+        )
+    };
+    crate::value::VmError::CategorizedError {
+        message: format!(
+            "network circuit breaker open for '{route}': sustained network failures; \
+             failing fast for {}ms (a half-open probe will follow)",
+            remaining.as_millis()
+        ),
+        category: crate::value::ErrorCategory::TransientNetwork,
+    }
+}
+
+/// Fail-fast if the per-route network breaker is open. Returns `Ok(())` to admit
+/// the call (Closed, or an admitted half-open probe), or a typed transient error
+/// to short-circuit the retry loop while the link is down.
+///
+/// Separate from `acquire_permit_for_llm_call` so the breaker decision is taken
+/// once per call attempt at the same seam that observes the outcome, rather than
+/// being entangled with the (durable) rate-limit wait loop.
+pub(crate) fn check_network_breaker_for_llm_call(
+    opts: &super::api::LlmCallOptions,
+) -> Result<(), crate::value::VmError> {
+    ensure_initialized_from_config();
+    let keys = limiter_keys(&opts.provider, &opts.model);
+    let now_ms = crate::clock_mock::instant_now().as_millis();
+    let mut registry = registry().lock().expect("rate limiter mutex poisoned");
+    // Use the max remaining-open across the route's keys: if any key is open, the
+    // call fails fast. `breaker_block` also performs the Open→HalfOpen
+    // transition, so probe admission is consistent across sibling callers.
+    let mut blocked: Option<Duration> = None;
+    for key in &keys {
+        let limiter = limiter_for_key(&mut registry.limiters, key);
+        if let Some(remaining) = limiter.breaker_block(now_ms) {
+            blocked = Some(match blocked {
+                Some(prev) => prev.max(remaining),
+                None => remaining,
+            });
+        }
+    }
+    drop(registry);
+    match blocked {
+        Some(remaining) => Err(breaker_open_error(&opts.provider, &opts.model, remaining)),
+        None => Ok(()),
+    }
+}
+
+/// Feed a completed LLM-call outcome to the route's network breaker.
+///
+/// `network_failure == true` ONLY for transport-level `NetworkError`/`Timeout`
+/// (never 429 — that is rate limiting, not unreachability). A success closes the
+/// breaker; a network failure increments toward / re-opens it.
+pub(crate) fn observe_network_outcome_for_llm_call(
+    opts: &super::api::LlmCallOptions,
+    network_failure: bool,
+) {
+    ensure_initialized_from_config();
+    let keys = limiter_keys(&opts.provider, &opts.model);
+    let now_ms = crate::clock_mock::instant_now().as_millis();
+    let mut registry = registry().lock().expect("rate limiter mutex poisoned");
+    for key in keys {
+        let limiter = limiter_for_key(&mut registry.limiters, &key);
+        if network_failure {
+            limiter.observe_network_failure(now_ms);
+        } else {
+            limiter.observe_success();
+        }
+    }
+}
+
 /// Wait until the provider rate limit allows an opaque request, then record it.
 /// Returns immediately if no limit is configured or the window has capacity.
 pub(crate) async fn acquire_permit(
@@ -1308,5 +1481,145 @@ mod tests {
         drop(registry);
 
         reset_test_rate_limit_state();
+    }
+
+    // ---- network circuit breaker (pure state-machine tests) ----------------
+
+    #[test]
+    fn breaker_opens_after_threshold_consecutive_network_failures() {
+        let mut b = NetworkBreaker::default();
+        // Below threshold: still closed, calls admitted.
+        for i in 1..NETWORK_BREAKER_FAILURE_THRESHOLD {
+            b.record_network_failure(u128::from(i));
+            assert!(
+                b.admit(u128::from(i)).is_none(),
+                "must stay closed below threshold ({i} failures)"
+            );
+        }
+        // Crossing the threshold opens it.
+        b.record_network_failure(100);
+        let blocked = b.admit(100).expect("breaker must be open at threshold");
+        assert!(
+            blocked.as_millis() > 0 && blocked.as_millis() <= u128::from(NETWORK_BREAKER_OPEN_MS),
+            "open window remaining {}ms out of (0, {NETWORK_BREAKER_OPEN_MS}]",
+            blocked.as_millis()
+        );
+    }
+
+    #[test]
+    fn breaker_fails_fast_while_open_then_half_opens_then_closes_on_probe_success() {
+        let mut b = NetworkBreaker::default();
+        let open_at = 1_000u128;
+        for _ in 0..NETWORK_BREAKER_FAILURE_THRESHOLD {
+            b.record_network_failure(open_at);
+        }
+        // Fail fast inside the open window.
+        assert!(
+            b.admit(open_at + 1).is_some(),
+            "must fail fast while open window is active"
+        );
+        // After the window elapses, exactly one half-open probe is admitted...
+        let after = open_at + u128::from(NETWORK_BREAKER_OPEN_MS) + 1;
+        assert!(
+            b.admit(after).is_none(),
+            "half-open probe must be admitted once the window elapses"
+        );
+        // ...and a concurrent caller while the probe is in flight is blocked.
+        assert!(
+            b.admit(after).is_some(),
+            "second concurrent call must not get a second half-open probe"
+        );
+        // A successful probe closes the breaker and clears the failure count.
+        b.record_success();
+        assert!(
+            b.admit(after).is_none(),
+            "breaker must close after probe success"
+        );
+        assert_eq!(b.consecutive_network_failures, 0);
+    }
+
+    #[test]
+    fn breaker_reopens_when_half_open_probe_fails() {
+        let mut b = NetworkBreaker::default();
+        let open_at = 0u128;
+        for _ in 0..NETWORK_BREAKER_FAILURE_THRESHOLD {
+            b.record_network_failure(open_at);
+        }
+        let after = u128::from(NETWORK_BREAKER_OPEN_MS) + 1;
+        assert!(b.admit(after).is_none(), "half-open probe admitted");
+        // The probe fails (still no network): the breaker re-opens immediately,
+        // even though the *count* logic alone is irrelevant in half-open state.
+        b.record_network_failure(after);
+        assert!(
+            b.admit(after + 1).is_some(),
+            "a failed half-open probe must re-open the breaker"
+        );
+    }
+
+    #[test]
+    fn breaker_success_resets_failure_streak() {
+        let mut b = NetworkBreaker::default();
+        b.record_network_failure(0);
+        b.record_network_failure(0);
+        b.record_success();
+        assert_eq!(b.consecutive_network_failures, 0);
+        // One post-success failure must not be enough to re-open (streak reset).
+        b.record_network_failure(0);
+        assert!(
+            b.admit(0).is_none(),
+            "single failure after reset must stay closed"
+        );
+    }
+
+    #[test]
+    fn breaker_does_not_open_on_rate_limit_or_server_errors() {
+        // 429 / 5xx must NOT feed the breaker. Drive the same number of NON-network
+        // outcomes well past the threshold and assert it never opens. (The wiring
+        // in agent_observe only calls `observe_network_failure` for true network
+        // failures; here we assert the classifier that gates that call.)
+        use super::super::agent_observe::is_network_failure_llm_error;
+        use crate::value::{ErrorCategory, VmError, VmValue};
+
+        let rate_limited = VmError::CategorizedError {
+            message: "429 too many requests".to_string(),
+            category: ErrorCategory::RateLimit,
+        };
+        let server_error = VmError::CategorizedError {
+            message: "503 service unavailable".to_string(),
+            category: ErrorCategory::ServerError,
+        };
+        let thrown_429 = VmError::Thrown(VmValue::String(std::sync::Arc::from(
+            "[rate_limited] too many requests",
+        )));
+        assert!(
+            !is_network_failure_llm_error(&rate_limited),
+            "429 is not a network failure"
+        );
+        assert!(
+            !is_network_failure_llm_error(&server_error),
+            "5xx is not a network failure"
+        );
+        assert!(
+            !is_network_failure_llm_error(&thrown_429),
+            "thrown 429 is not a network failure"
+        );
+
+        // A genuine network/timeout failure IS one.
+        let connect = VmError::CategorizedError {
+            message: "openai request error (connect): connection refused".to_string(),
+            category: ErrorCategory::TransientNetwork,
+        };
+        let timeout = VmError::CategorizedError {
+            message: "openai request error (timeout): operation timed out".to_string(),
+            category: ErrorCategory::Timeout,
+        };
+        assert!(
+            is_network_failure_llm_error(&connect),
+            "connect failure is a network failure"
+        );
+        assert!(
+            is_network_failure_llm_error(&timeout),
+            "timeout is a network failure"
+        );
     }
 }

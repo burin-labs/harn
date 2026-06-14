@@ -191,6 +191,30 @@ pub(super) fn is_retryable_llm_error(err: &VmError) -> bool {
         || lower.contains("eof")
 }
 
+/// Whether an LLM-call failure is a transport-level *network* failure
+/// (connection refused/reset, DNS failure, dropped link, request timeout) — the
+/// ONLY failures that feed the per-route network circuit breaker.
+///
+/// Deliberately excludes `RateLimit` (429): a 429 means the link is healthy and
+/// the provider is throttling us; that is handled by the rate limiter's cooldown
+/// and Retry-After, not by the breaker. `ServerError` (5xx) is likewise the
+/// provider's fault on a reachable link and must not trip the breaker either.
+pub(super) fn is_network_failure_llm_error(err: &VmError) -> bool {
+    let (category, message) = match err {
+        VmError::CategorizedError { category, message } => (category.clone(), message.clone()),
+        VmError::Thrown(crate::value::VmValue::String(s)) => {
+            (crate::value::classify_error_message(s), s.to_string())
+        }
+        VmError::Runtime(s) => (crate::value::classify_error_message(s), s.clone()),
+        _ => return false,
+    };
+    let reason = crate::llm::api::classify_llm_error(category, &message).reason;
+    matches!(
+        reason,
+        crate::llm::api::LlmErrorReason::NetworkError | crate::llm::api::LlmErrorReason::Timeout
+    )
+}
+
 /// A *thrown* provider response the agent loop should retry within the
 /// empty-completion budget rather than terminate on. Two shapes, both surfaced
 /// as a thrown error by the response/transport parsers:
@@ -1081,13 +1105,50 @@ fn llm_retry_backoff_ms(
     if crate::llm::providers::MockProvider::should_intercept(provider) {
         return 0;
     }
-    extract_retry_after_ms(error).unwrap_or_else(|| base_retry_backoff_ms(retry_config, attempt))
+    // Honor an explicit provider Retry-After, but still add a small jitter on
+    // top so concurrent same-key callers (eval --concurrency K plus a coexisting
+    // session) that all received the same Retry-After do not resume in lockstep
+    // and re-stampede the provider the instant the window opens.
+    match extract_retry_after_ms(error) {
+        Some(retry_after_ms) => retry_after_ms.saturating_add(retry_after_jitter_ms()),
+        None => base_retry_backoff_ms(retry_config, attempt),
+    }
 }
 
-/// Exponential backoff base shared by the error-retry and empty-completion
-/// retry paths (no `retry-after` hint available on the latter).
+/// Equal-jitter exponential backoff base shared by the error-retry and
+/// empty-completion retry paths (no `retry-after` hint available on the latter).
+///
+/// AWS "equal jitter": `wait = ceil/2 + rand(0, ceil/2)`, where
+/// `ceil = backoff_ms * 2^min(attempt, 4)`. Keeping the lower half fixed avoids
+/// the near-zero waits that pure "full jitter" can produce, while randomizing
+/// the upper half desynchronizes retries across concurrent same-key processes
+/// (avoids the thundering herd that the old zero-jitter `ceil` produced).
 fn base_retry_backoff_ms(retry_config: &LlmRetryConfig, attempt: usize) -> u64 {
-    retry_config.backoff_ms.saturating_mul(1 << attempt.min(4))
+    let ceil = retry_config.backoff_ms.saturating_mul(1 << attempt.min(4));
+    equal_jitter_ms(ceil, &mut rand::rng())
+}
+
+/// Pure equal-jitter computation, seamed on an injectable RNG so tests can
+/// assert the `[ceil/2, ceil]` bounds and desynchronization deterministically.
+fn equal_jitter_ms<R: rand::RngExt>(ceil: u64, rng: &mut R) -> u64 {
+    let half = ceil / 2;
+    if half == 0 {
+        return ceil;
+    }
+    // `ceil/2` fixed lower half + `rand(0, ceil/2)` upper half → `[ceil/2, ceil]`.
+    half + rand_range_inclusive(half, rng)
+}
+
+/// Small additive jitter (0..=backoff base) layered on top of a provider
+/// Retry-After so identical Retry-After values do not resume in lockstep.
+fn retry_after_jitter_ms() -> u64 {
+    rand_range_inclusive(DEFAULT_LLM_CALL_BACKOFF_MS, &mut rand::rng())
+}
+
+/// `rand(0, max)` inclusive, seamed on an injectable RNG. Centralizes the
+/// half-open-to-inclusive conversion (`random_range` is exclusive of its end).
+fn rand_range_inclusive<R: rand::RngExt>(max: u64, rng: &mut R) -> u64 {
+    rng.random_range(0..max.saturating_add(1))
 }
 
 // ---------------------------------------------------------------------------
@@ -1118,6 +1179,12 @@ pub(crate) async fn observed_llm_call(
         .unwrap_or_else(|| crate::llm_config::default_tool_format(&opts.model, &opts.provider));
     let mut attempt = 0usize;
     loop {
+        // Network-only circuit breaker: if this route has seen sustained
+        // NetworkError/Timeout failures, fail fast instead of burning the retry
+        // budget against a dead link (laptop disconnect / DNS failure). 429s do
+        // NOT trip this — they are handled by the rate-limiter cooldown below.
+        super::rate_limit::check_network_breaker_for_llm_call(opts)?;
+
         let rate_limit_permit = super::rate_limit::acquire_permit_for_llm_call(opts).await?;
 
         let call_id = next_call_id();
@@ -1373,6 +1440,9 @@ pub(crate) async fn observed_llm_call(
                     duration_ms,
                     iteration: iteration.unwrap_or(0),
                 });
+                // A reachable, answering provider closes the network breaker
+                // (and resets any half-open probe).
+                super::rate_limit::observe_network_outcome_for_llm_call(opts, false);
                 return Ok(result);
             }
             Err(error) => {
@@ -1384,6 +1454,13 @@ pub(crate) async fn observed_llm_call(
                         super::rate_limit::observe_retry_after_for_llm_call(opts, retry_after_ms);
                     }
                 }
+                // Feed ONLY transport-level network failures (connection/DNS/
+                // timeout) to the breaker — never 429 (rate limit) or 5xx
+                // (server error on a reachable link).
+                super::rate_limit::observe_network_outcome_for_llm_call(
+                    opts,
+                    is_network_failure_llm_error(&error),
+                );
                 let retryable = is_retryable_llm_error(&error);
                 // A *thrown* unproductive completion (zero-token empty, or the
                 // billed-noncommittal contract violation whose tool call went
@@ -1780,6 +1857,96 @@ mod retry_tests {
             llm_retry_backoff_ms(&thrown("HTTP 503"), &config, 1, "mock"),
             0
         );
+    }
+
+    #[test]
+    fn equal_jitter_stays_within_ceil_half_to_ceil_bounds() {
+        use rand::{rngs::StdRng, SeedableRng};
+        // Sweep many seeds across the exponential ceil ladder and assert every
+        // draw lands in `[ceil/2, ceil]` — never near-zero (the win over full
+        // jitter), never above the exponential ceiling.
+        for attempt in 0..8usize {
+            let ceil = 250u64.saturating_mul(1 << attempt.min(4));
+            let half = ceil / 2;
+            for seed in 0..256u64 {
+                let mut rng = StdRng::seed_from_u64(seed);
+                let wait = equal_jitter_ms(ceil, &mut rng);
+                assert!(
+                    wait >= half && wait <= ceil,
+                    "attempt={attempt} ceil={ceil} seed={seed} wait={wait} out of [{half}, {ceil}]"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn equal_jitter_desynchronizes_concurrent_callers() {
+        use rand::{rngs::StdRng, SeedableRng};
+        // Two callers drawing from distinct entropy must not resume in lockstep:
+        // at least one differing pair proves the herd is broken (the old
+        // zero-jitter path returned the identical `ceil` for every caller).
+        let ceil = 4000u64;
+        let mut any_differ = false;
+        for seed in 0..64u64 {
+            let a = equal_jitter_ms(ceil, &mut StdRng::seed_from_u64(seed));
+            let b = equal_jitter_ms(ceil, &mut StdRng::seed_from_u64(seed + 10_000));
+            if a != b {
+                any_differ = true;
+                break;
+            }
+        }
+        assert!(any_differ, "equal jitter failed to desynchronize any pair");
+    }
+
+    #[test]
+    fn equal_jitter_tiny_ceil_floors_at_ceil() {
+        use rand::{rngs::StdRng, SeedableRng};
+        // ceil/2 == 0 (e.g. ceil < 2) cannot host a range; return the ceil.
+        let mut rng = StdRng::seed_from_u64(1);
+        assert_eq!(equal_jitter_ms(0, &mut rng), 0);
+        assert_eq!(equal_jitter_ms(1, &mut rng), 1);
+    }
+
+    #[test]
+    fn retry_after_path_adds_bounded_jitter() {
+        // A provider Retry-After is honored as a floor; the layered jitter never
+        // exceeds `retry_after + backoff_base`, so the wait stays in a tight band
+        // around the requested cooldown while desynchronizing siblings.
+        let config = LlmRetryConfig {
+            retries: 3,
+            backoff_ms: DEFAULT_LLM_CALL_BACKOFF_MS,
+        };
+        let err = thrown("HTTP 429 rate_limited retry-after: 5");
+        let base = extract_retry_after_ms(&err).expect("retry-after parsed");
+        for _ in 0..256 {
+            let wait = llm_retry_backoff_ms(&err, &config, 1, "openai");
+            assert!(
+                wait >= base && wait <= base + DEFAULT_LLM_CALL_BACKOFF_MS,
+                "retry-after jitter {wait} out of [{base}, {}]",
+                base + DEFAULT_LLM_CALL_BACKOFF_MS
+            );
+        }
+    }
+
+    #[test]
+    fn base_backoff_real_provider_respects_exponential_ceiling() {
+        // The live (un-seamed) path must still land in the equal-jitter band for
+        // the configured base, exercising `rand::rng()` rather than the test RNG.
+        let config = LlmRetryConfig {
+            retries: 5,
+            backoff_ms: DEFAULT_LLM_CALL_BACKOFF_MS,
+        };
+        for attempt in 1..=6usize {
+            let ceil = DEFAULT_LLM_CALL_BACKOFF_MS.saturating_mul(1 << attempt.min(4));
+            for _ in 0..64 {
+                let wait = base_retry_backoff_ms(&config, attempt);
+                assert!(
+                    wait >= ceil / 2 && wait <= ceil,
+                    "attempt={attempt} wait={wait} out of [{}, {ceil}]",
+                    ceil / 2
+                );
+            }
+        }
     }
 
     #[test]
