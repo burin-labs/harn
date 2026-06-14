@@ -44,6 +44,7 @@ pub mod llm_config;
 pub mod mcp;
 pub mod mcp_allowlist;
 pub mod mcp_auth;
+pub mod mcp_bulk_auth;
 pub mod mcp_card;
 pub mod mcp_elicit;
 pub mod mcp_file_upload;
