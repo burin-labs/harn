@@ -156,6 +156,32 @@ pre_commit = false
 pre_push = false
 
 [[artifact]]
+id = "run-session-view-fixtures"
+description = "Expected harn.run_view.v1 and harn.session_view.v1 projection snapshots generated from sanitized shared run-record fixtures."
+gen = "gen-run-view-fixtures"
+check = "check-run-view-fixtures"
+outputs = [
+  "spec/run-view-fixtures/cases/legacy-sparse/expected/runs/run.run_view.json",
+  "spec/run-view-fixtures/cases/legacy-sparse/expected/session_view.json",
+  "spec/run-view-fixtures/cases/root-transcript/expected/runs/run.run_view.json",
+  "spec/run-view-fixtures/cases/root-transcript/expected/session_view.json",
+  "spec/run-view-fixtures/cases/session-lineage-failure-approval/expected/runs/00-root.run_view.json",
+  "spec/run-view-fixtures/cases/session-lineage-failure-approval/expected/runs/01-child.run_view.json",
+  "spec/run-view-fixtures/cases/session-lineage-failure-approval/expected/session_view.json",
+  "spec/run-view-fixtures/cases/stage-transcript-active-auth/expected/runs/run.run_view.json",
+  "spec/run-view-fixtures/cases/stage-transcript-active-auth/expected/session_view.json",
+]
+sources = [
+  "crates/harn-vm/src/orchestration/records/view.rs",
+  "crates/harn-vm/tests/run_view_fixtures.rs",
+  "spec/run-view-fixtures/cases/",
+]
+ci = true
+make_all = true
+pre_commit = false
+pre_push = false
+
+[[artifact]]
 id = "provider-config"
 description = "Generated embedded provider/model TOML snapshot, built from small catalog source fragments."
 gen = "gen-provider-config"

@@ -1,0 +1,61 @@
+{
+  "_type": "run_record",
+  "id": "run_stage_transcript_active",
+  "workflow_id": "workflow_view_fixture",
+  "workflow_name": "View fixture",
+  "task": "Wait for sanitized connector authorization",
+  "status": "running",
+  "started_at": "2026-01-03T00:00:00Z",
+  "pending_nodes": [
+    "auth_gate"
+  ],
+  "metadata": {
+    "session_id": "session_stage_transcript",
+    "pending_auth": [
+      {
+        "provider": "github",
+        "server": "github.example",
+        "scope": "repo",
+        "message": "Connect the fixture GitHub account."
+      }
+    ]
+  },
+  "stages": [
+    {
+      "id": "stage_plan",
+      "node_id": "plan",
+      "kind": "llm",
+      "status": "running",
+      "outcome": "pending_auth",
+      "started_at": "2026-01-03T00:00:00Z",
+      "visible_text": "Waiting for connector authorization.",
+      "transcript": {
+        "summary": "Stage transcript captured the authorization pause.",
+        "messages": [
+          {
+            "role": "assistant",
+            "content": "I need connector authorization before continuing."
+          },
+          {
+            "role": "tool",
+            "content": "authorization_required"
+          }
+        ],
+        "events": [
+          {
+            "kind": "auth_required",
+            "id": "evt_auth_1"
+          }
+        ]
+      },
+      "metadata": {
+        "auth_required": {
+          "provider": "mcp",
+          "server_name": "fixture-mcp",
+          "scope": "tools:read",
+          "message": "Authorize fixture MCP access."
+        }
+      }
+    }
+  ]
+}

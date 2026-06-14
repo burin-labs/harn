@@ -1,0 +1,101 @@
+{
+  "artifacts": [],
+  "checkpoints": [],
+  "failure": {
+    "message": "{\"code\":\"fixture_error\",\"message\":\"fixture validation failed\"}",
+    "node_id": "child_check",
+    "outcome": "error",
+    "stage_id": "stage_child_check",
+    "status": "failed"
+  },
+  "metadata": {
+    "artifact_count": 0,
+    "checkpoint_count": 0,
+    "child_run_count": 0,
+    "execution": null,
+    "observability_present": false,
+    "planner_round_count": 0,
+    "record_type": "run_record",
+    "replay_fixture_id": null,
+    "stage_count": 1,
+    "tool_recording_count": 0,
+    "transition_count": 0
+  },
+  "pending": {
+    "approvals": [],
+    "auth": [],
+    "nodes": []
+  },
+  "producer": {
+    "name": "harn",
+    "version": "fixture"
+  },
+  "projection": {
+    "last_event_id": null,
+    "prefix_hash": null,
+    "projection_hash": "sha256:be56519bdfd76a2078d4d1370b9eae1bcb094f9042095643d190792f4d9412bf",
+    "projection_id": "run_view:run_lineage_child:be56519bdfd7"
+  },
+  "providers": [],
+  "run": {
+    "child_runs": [],
+    "duration_ms": 3000,
+    "finished_at": "2026-01-04T00:00:05Z",
+    "parent_run_id": "run_lineage_root",
+    "parent_session_id": "session_lineage",
+    "root_run_id": "run_lineage_root",
+    "run_id": "run_lineage_child",
+    "run_path": "spec/run-view-fixtures/cases/session-lineage-failure-approval/records/01-child.json",
+    "session_id": "session_lineage",
+    "started_at": "2026-01-04T00:00:02Z",
+    "status": "failed",
+    "task": "Investigate sanitized child failure",
+    "workflow_id": "workflow_view_fixture",
+    "workflow_name": "View fixture"
+  },
+  "schema": "harn.run_view.v1",
+  "schema_version": 1,
+  "stages": [
+    {
+      "artifact_refs": [],
+      "attempt_count": 1,
+      "branch": null,
+      "duration_ms": 3000,
+      "error": "{\"code\":\"fixture_error\",\"message\":\"fixture validation failed\"}",
+      "finished_at": "2026-01-04T00:00:05Z",
+      "id": "stage_child_check",
+      "kind": "tool",
+      "model": null,
+      "node_id": "child_check",
+      "outcome": "error",
+      "provider": null,
+      "started_at": "2026-01-04T00:00:02Z",
+      "status": "failed",
+      "usage": {
+        "call_count": 0,
+        "input_tokens": 0,
+        "models": [],
+        "output_tokens": 0,
+        "total_cost": 0.0,
+        "total_duration_ms": 0
+      },
+      "visible_text": "Child validation failed."
+    }
+  ],
+  "transcript": {
+    "event_count": 0,
+    "message_count": 0,
+    "present": false,
+    "source": null,
+    "summary": null
+  },
+  "usage": {
+    "call_count": 0,
+    "input_tokens": 0,
+    "models": [],
+    "output_tokens": 0,
+    "total_cost": 0.0,
+    "total_duration_ms": 0
+  },
+  "visible_text": "Child validation failed."
+}

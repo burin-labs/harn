@@ -18,6 +18,10 @@ scripts/release_smoke.sh eol=lf
 # break `checked_session_bundle_fixtures_match_export`.
 spec/session-bundles/fixtures/*.json eol=lf
 
+# Run/session view fixtures are compared byte-for-byte against
+# `serde_json::to_string_pretty` output.
+spec/run-view-fixtures/cases/**/*.json eol=lf
+
 # The Scala cascade-repro fixture is embedded via include_str! and asserted
 # to start with real LF newlines (`scala3_indented_match_cascade_is_flagged_
 # not_localized`); autocrlf on the Windows runners otherwise checks it out

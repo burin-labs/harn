@@ -314,6 +314,7 @@ pub struct SessionViewMetadata {
 
 #[derive(Clone, Debug, Default)]
 pub struct RunViewOptions {
+    pub producer: ViewProducer,
     pub run_path: Option<String>,
     pub last_event_id: Option<EventId>,
     pub prefix_hash: Option<String>,
@@ -321,6 +322,7 @@ pub struct RunViewOptions {
 
 #[derive(Clone, Debug, Default)]
 pub struct SessionViewOptions {
+    pub producer: ViewProducer,
     pub session_id: Option<String>,
     pub parent_session_id: Option<String>,
     pub root_session_id: Option<String>,
@@ -411,7 +413,7 @@ pub fn build_run_view_with_options(run: &RunRecord, options: RunViewOptions) -> 
     let mut view = RunView {
         schema: RUN_VIEW_SCHEMA.to_string(),
         schema_version: RUN_VIEW_SCHEMA_VERSION,
-        producer: ViewProducer::default(),
+        producer: options.producer.clone(),
         run: RunViewRun {
             run_id: run.id.clone(),
             session_id,
@@ -442,7 +444,7 @@ pub fn build_run_view_with_options(run: &RunRecord, options: RunViewOptions) -> 
             last_event_id: options.last_event_id,
         },
         visible_text,
-        transcript: transcript_summary(run.transcript.as_ref(), &policy),
+        transcript: transcript_summary_for_run(run, &policy),
         usage,
         providers: provider_summary(run),
         stages,
@@ -544,7 +546,7 @@ pub fn build_session_view_from_run_views(
     let mut view = SessionView {
         schema: SESSION_VIEW_SCHEMA.to_string(),
         schema_version: SESSION_VIEW_SCHEMA_VERSION,
-        producer: ViewProducer::default(),
+        producer: options.producer.clone(),
         session: SessionViewSession {
             session_id,
             parent_session_id: options.parent_session_id.clone().or_else(|| {
@@ -805,6 +807,40 @@ fn provider_summary(run: &RunRecord) -> Vec<RunViewProvider> {
         }
     }
     providers.into_values().collect()
+}
+
+fn transcript_summary_for_run(run: &RunRecord, policy: &RedactionPolicy) -> TranscriptSummary {
+    if let Some(transcript) = run.transcript.as_ref() {
+        return transcript_summary(Some(transcript), policy);
+    }
+    transcript_summary_from_stages(&run.stages, policy)
+}
+
+fn transcript_summary_from_stages(
+    stages: &[RunStageRecord],
+    policy: &RedactionPolicy,
+) -> TranscriptSummary {
+    let mut out = TranscriptSummary::default();
+    let mut summaries = Vec::new();
+    for stage in stages {
+        let Some(transcript) = stage.transcript.as_ref() else {
+            continue;
+        };
+        out.present = true;
+        out.message_count += count_array_field(transcript, "messages");
+        out.event_count += count_array_field(transcript, "events");
+        if let Some(summary) = transcript_summary(Some(transcript), policy).summary {
+            let label = non_empty_string(&stage.node_id)
+                .or_else(|| non_empty_string(&stage.id))
+                .unwrap_or_else(|| "stage".to_string());
+            summaries.push(format!("{label}: {summary}"));
+        }
+    }
+    if out.present {
+        out.summary = bounded_join(summaries, PREVIEW_LIMIT);
+        out.source = Some("stages".to_string());
+    }
+    out
 }
 
 fn transcript_summary(value: Option<&Value>, policy: &RedactionPolicy) -> TranscriptSummary {
@@ -1361,6 +1397,27 @@ mod tests {
             .projection
             .projection_id
             .starts_with("session_view:session_1:"));
+    }
+
+    #[test]
+    fn build_run_view_summarizes_stage_only_transcripts() {
+        let mut run = sample_run();
+        run.transcript = None;
+        run.stages[0].transcript = Some(json!({
+            "summary": "stage transcript only",
+            "messages": [{"role": "assistant"}, {"role": "tool"}],
+            "events": [{"kind": "tool_result"}]
+        }));
+
+        let view = build_run_view(&run);
+        assert!(view.transcript.present);
+        assert_eq!(view.transcript.source.as_deref(), Some("stages"));
+        assert_eq!(view.transcript.message_count, 2);
+        assert_eq!(view.transcript.event_count, 1);
+        assert_eq!(
+            view.transcript.summary.as_deref(),
+            Some("plan: stage transcript only")
+        );
     }
 
     #[test]
