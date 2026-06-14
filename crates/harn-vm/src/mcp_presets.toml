@@ -1,0 +1,67 @@
+# Canonical catalog of well-known MCP server presets (harn#2650).
+#
+# This is the harn-owned source of truth for one-click MCP servers, rendered
+# identically by every client (the burin-code TUI and the macOS GUI). It is
+# **data, not code** (harn#3348): edit it here to change the shipped defaults,
+# or override/extend it at runtime without a recompile via
+# `~/.config/harn/mcp_presets.toml` (or the `HARN_MCP_PRESETS_CONFIG` env var).
+# Runtime overlays merge last-writer-wins by `id`, then append new presets.
+#
+# Field names are snake_case here; the stable JSON contract serializes them as
+# camelCase (see `mcp_presets.rs`). Transport-specific fields: `command`/`args`
+# populate a stdio spec, `url` populates an HTTP spec. Omit what does not apply.
+
+[[presets]]
+id = "notion"
+name = "Notion"
+description = "Pages, databases, and comments from your Notion workspace."
+icon = "doc.text.fill"
+category = "productivity"
+transport = "http"
+url = "https://mcp.notion.com/mcp"
+auth_kind = "oauth"
+
+[[presets]]
+id = "linear"
+name = "Linear"
+description = "Issues, projects, and cycles from your Linear workspace."
+icon = "list.bullet.rectangle.fill"
+category = "productivity"
+transport = "http"
+url = "https://mcp.linear.app/mcp"
+auth_kind = "oauth"
+oauth_scopes = "read write"
+
+[[presets]]
+id = "github"
+name = "GitHub"
+description = "Repositories, issues, and pull requests via the GitHub MCP server."
+icon = "chevron.left.forwardslash.chevron.right"
+category = "development"
+transport = "stdio"
+command = "npx"
+args = ["-y", "@modelcontextprotocol/server-github"]
+auth_kind = "api_token"
+
+[[presets.placeholders]]
+key = "GITHUB_PERSONAL_ACCESS_TOKEN"
+label = "GitHub personal access token"
+target = "env"
+required = true
+
+[[presets]]
+id = "filesystem"
+name = "Filesystem"
+description = "Read and write files under one or more allowed local directories."
+icon = "folder.fill"
+category = "local"
+transport = "stdio"
+command = "npx"
+args = ["-y", "@modelcontextprotocol/server-filesystem"]
+auth_kind = "none"
+
+[[presets.placeholders]]
+key = "allowed_root"
+label = "Allowed directory"
+target = "arg"
+required = true
