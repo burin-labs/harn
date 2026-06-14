@@ -1,0 +1,31 @@
+// std/harness/policy.require_policy: imperative auth-policy guard composing
+// the ambient `harness.auth` principal. In a plain test context no principal
+// is bound, so harness.auth is anonymous (kind() == nil, no scopes) and every
+// guard with a requirement must fail closed with a tenant-safe HTTP 403.
+import { require_policy } from "std/harness/policy"
+
+pipeline test(task) {
+  // kinds clause: an unclassified principal can never satisfy a non-empty
+  // allow-set, so it is denied.
+  let kind_denial = require_policy({kinds: ["operator", "platform_admin"]})
+  assert(kind_denial != nil, "unclassified principal must be denied")
+  assert_eq(kind_denial.status, 403)
+  assert_eq(kind_denial.body.code, "forbidden")
+  assert_eq(kind_denial.body.details.kind, "forbidden_principal_kind")
+  assert_eq(kind_denial.body.details.allowed_kinds, ["operator", "platform_admin"])
+  // Tenant-safe: the denial names the route's allow-set but never echoes the
+  // caller's own kind.
+  assert_eq(kind_denial.body.details["caller_kind"], nil)
+  log("kind deny ok")
+  // scopes clause: a scope the principal was not granted is denied.
+  let scope_denial = require_policy({scopes: ["secrets:write"]})
+  assert(scope_denial != nil, "missing scope must be denied")
+  assert_eq(scope_denial.status, 403)
+  assert_eq(scope_denial.body.details.kind, "forbidden")
+  assert_eq(scope_denial.body.details.missing_scope, "secrets:write")
+  log("scope deny ok")
+  // No clauses (or an empty allow-set) → nothing to enforce → allowed (nil).
+  assert_eq(require_policy({}), nil)
+  assert_eq(require_policy({kinds: []}), nil)
+  log("noop allow ok")
+}

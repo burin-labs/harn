@@ -1,0 +1,70 @@
+/**
+ * @harn-entrypoint-category harness.stdlib
+ *
+ * std/harness/policy — imperative route auth-policy guards that compose the
+ * ambient `harness.auth` principal. Reach for these when an authorization
+ * decision depends on runtime data (a path or body field, resource
+ * ownership) that the declarative `@scopes(...)` / `@policy(kinds: ...)`
+ * route annotations cannot see; the annotations remain the right tool for
+ * static, request-independent gates.
+ *
+ * Each guard returns `nil` when the bound principal satisfies the policy, or
+ * a ready-to-return HTTP 403 envelope (built by `http_error`) when it does
+ * not — so a handler denies in one line:
+ *
+ *   let denial = require_policy({kinds: ["operator"], scopes: ["secrets:write"]})
+ *   if denial != nil { return denial }
+ *   // ...authorized work...
+ *
+ * Denials are tenant-safe: the body names the *route's* requirement
+ * (`allowed_kinds`, or the missing scope) but never echoes the caller's own
+ * principal kind, mirroring the declarative `@policy` denial. Guards fail
+ * closed — an unauthenticated or unclassified principal (kind `nil`) can
+ * never satisfy a non-empty `kinds` allow-set.
+ */
+fn __policy_list(value, label) {
+  if value == nil {
+    return []
+  }
+  if type_of(value) != "list" {
+    throw label + " must be a list of strings"
+  }
+  return value
+}
+
+/**
+ * Enforce a principal-kind and/or scope policy against the ambient
+ * `harness.auth` principal. `opts`:
+ *   {kinds?: [string], scopes?: [string]}
+ * `kinds` (when non-empty) requires the principal's embedder-assigned kind
+ * to be one of the listed values; `scopes` requires every listed scope to be
+ * granted. Returns `nil` when the principal satisfies every clause, otherwise
+ * an HTTP 403 envelope the caller should return verbatim.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn require_policy(opts) {
+  if opts != nil && type_of(opts) != "dict" {
+    throw "require_policy: opts must be a dict"
+  }
+  let kinds = __policy_list(opts?.kinds, "require_policy: kinds")
+  if len(kinds) > 0 {
+    let kind = harness.auth.kind()
+    if kind == nil || !kinds.contains(kind) {
+      // Tenant-safe: report the route's allow-set, never the caller's kind.
+      return http_error(
+        403,
+        "forbidden",
+        "principal kind not permitted for this route",
+        {kind: "forbidden_principal_kind", allowed_kinds: kinds},
+      )
+    }
+  }
+  for scope in __policy_list(opts?.scopes, "require_policy: scopes") {
+    if !harness.auth.has_scope(scope) {
+      return http_error(403, "forbidden", "missing required scope", {kind: "forbidden", missing_scope: scope})
+    }
+  }
+  return nil
+}
