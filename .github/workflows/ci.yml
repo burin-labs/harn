@@ -408,6 +408,96 @@ jobs:
           echo 'fn main(harness: Harness) { harness.stdio.println("ok") }' > smoke.harn
           ./target/debug/harn.exe run smoke.harn
 
+  macos-plan:
+    name: macOS CI routing
+    runs-on: ubuntu-latest
+    outputs:
+      run_macos: ${{ steps.detect.outputs.run_macos }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: ${{ github.event_name == 'pull_request' && '0' || '1' }}
+      - name: Detect macOS-relevant changes
+        id: detect
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha || '' }}
+        run: |
+          set -euo pipefail
+          run_macos=false
+
+          if [[ "$EVENT_NAME" == "push" ]]; then
+            run_macos=true
+          elif [[ "$EVENT_NAME" == "pull_request" ]]; then
+            if [[ -z "$BASE_SHA" ]]; then
+              echo "macos: missing pull_request base SHA; running macOS check defensively."
+              run_macos=true
+            else
+              git diff --name-only "$BASE_SHA" HEAD > "$RUNNER_TEMP/macos-changed-files.txt"
+              cat "$RUNNER_TEMP/macos-changed-files.txt"
+              # Route on the files that carry `#[cfg(target_os = "macos")]`
+              # (or `cfg(any(macos, windows))`) code. Linux PR lanes never
+              # compile these paths, so a stray unused import / dead_code /
+              # deprecation only surfaces on a Mac — historically at release
+              # `prepare` time under `-D warnings`. Keep this list in sync with
+              # `grep -rl 'target_os = "macos"' crates/` plus the workflow
+              # itself and the Cargo graph roots. When in doubt, the push +
+              # merge-queue backstop and the full macos-nightly.yml cover the
+              # rest.
+              if grep -E -q '^(Cargo\.lock|Cargo\.toml|rust-toolchain\.toml|\.config/nextest\.toml|crates/harn-vm/src/(shells\.rs|stdlib/(process\.rs|sandbox(/|\.rs))|vm/tests_runtime\.rs)|crates/harn-vm/tests/sandbox_hardened\.rs|crates/harn-hostlib/(src/(secret_store(/|\.rs)|tools/proc\.rs)|tests/(secret_store_os_native|sandbox_npm_offline_install)\.rs)|crates/harn-cli/src/(commands/(test|upgrade|doctor|quickstart|hardware|models/install)\.rs|package/manifest\.rs)|\.github/workflows/(ci|macos-nightly|build-release-binaries|release-smoke)\.yml|scripts/(release_smoke|smoke_installed_binary)\.sh)$' "$RUNNER_TEMP/macos-changed-files.txt"; then
+                run_macos=true
+              fi
+            fi
+          fi
+
+          echo "run_macos=$run_macos" >> "$GITHUB_OUTPUT"
+          echo "macos: run=$run_macos"
+
+  macos:
+    name: Rust on macOS (deny-warnings build + lint)
+    runs-on: macos-latest
+    needs: macos-plan
+    # macOS coverage stays off the default PR / merge-queue critical path, but
+    # runs before merge for changes that touch macOS-gated process, sandbox,
+    # secret-store, or CLI paths. Other PRs rely on the main-push backstop plus
+    # the full macos-nightly.yml surface. This lane is the PR-time guard that
+    # keeps `#[cfg(target_os = "macos")]` warnings (unused imports, dead_code,
+    # deprecations) from slipping to main and breaking the release `prepare`
+    # build one `-D warnings` error at a time. It compiles + clippy-lints every
+    # target — including the cfg-gated test targets like
+    # `secret_store_os_native` that no Linux lane ever builds — but does NOT
+    # execute the live-Keychain tests (that's the nightly's job).
+    if: needs.macos-plan.outputs.run_macos == 'true'
+    env:
+      RUSTFLAGS: "-D warnings"
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+        with:
+          components: clippy
+      - uses: mozilla-actions/sccache-action@9e7fa8a12102821edf02ca5dbea1acd0f89a2696 # v0.0.10
+        continue-on-error: true
+      - name: Configure Cargo to use sccache
+        if: env.SCCACHE_PATH != ''
+        shell: bash
+        run: echo "RUSTC_WRAPPER=${SCCACHE_PATH}" >> "$GITHUB_ENV"
+      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+        continue-on-error: true
+        with:
+          shared-key: workspace-macos
+          cache-on-failure: true
+          cache-bin: false
+      - name: Clippy all targets (deny warnings)
+        shell: bash
+        # `--all-targets` so the cfg-gated *test* targets compile (that's
+        # exactly where the v0.8.109 release blocker — an unused
+        # `BTreeMap` import in `secret_store_os_native.rs` — hid). Clippy
+        # subsumes a plain `cargo build`/`check` and adds the lint surface;
+        # `-D warnings` (from the job env) promotes every warning to a hard
+        # failure so it fails the PR instead of the release.
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
   portal:
     name: Portal frontend
     # ~30 s npm pipeline; setup-node's cache covers the only meaningful
@@ -522,7 +612,7 @@ jobs:
     name: CI status
     runs-on: ubuntu-latest
     if: always()
-    needs: [fmt, lint-md, rust-builds, audit-scripts, windows-plan, windows, portal, docs-site, actions, e2e]
+    needs: [fmt, lint-md, rust-builds, audit-scripts, windows-plan, windows, macos-plan, macos, portal, docs-site, actions, e2e]
     steps:
       - name: Verify required CI jobs
         run: |
@@ -532,6 +622,7 @@ jobs:
             ["Rust build group"]="${{ needs['rust-builds'].result }}"
             ["Audit scripts"]="${{ needs['audit-scripts'].result }}"
             ["Windows CI routing"]="${{ needs['windows-plan'].result }}"
+            ["macOS CI routing"]="${{ needs['macos-plan'].result }}"
             ["Portal frontend"]="${{ needs.portal.result }}"
             ["Docs site"]="${{ needs['docs-site'].result }}"
             ["GitHub Actions hygiene"]="${{ needs.actions.result }}"
@@ -545,6 +636,17 @@ jobs:
           echo "Rust on Windows (build + smoke test): $windows_result"
           if [ "$windows_result" != "success" ] && [ "$windows_result" != "skipped" ]; then
             echo "::error::Windows job failed."
+            exit 1
+          fi
+
+          # The macOS job runs on `push` to main and on pull requests whose
+          # diff touches macOS-gated process/sandbox/secret-store/CLI paths. It
+          # skips on routine PRs and merge_group events. Treat `skipped` as
+          # passing here; only an actual failure should fail the gate.
+          macos_result="${{ needs.macos.result }}"
+          echo "Rust on macOS (deny-warnings build + lint): $macos_result"
+          if [ "$macos_result" != "success" ] && [ "$macos_result" != "skipped" ]; then
+            echo "::error::macOS job failed."
             exit 1
           fi
 
