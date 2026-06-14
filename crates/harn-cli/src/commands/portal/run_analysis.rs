@@ -353,57 +353,52 @@ pub(super) fn build_run_summary(
     updated_at_ms: u128,
     run: &harn_vm::orchestration::RunRecord,
 ) -> PortalRunSummary {
-    let usage = run.usage.clone().unwrap_or_default();
-    let (last_stage_node_id, failure_summary) = latest_stage_summary(run);
+    let view = harn_vm::orchestration::build_run_view_with_path(run, Some(path.to_string()));
     let extracted = extract_skill_events(run);
     PortalRunSummary {
         path: path.to_string(),
-        id: run.id.clone(),
-        workflow_name: run
+        id: view.run.run_id.clone(),
+        workflow_name: view
+            .run
             .workflow_name
             .clone()
-            .unwrap_or_else(|| run.workflow_id.clone()),
-        status: run.status.clone(),
-        last_stage_node_id,
-        failure_summary,
-        started_at: run.started_at.clone(),
-        finished_at: run.finished_at.clone(),
-        duration_ms: run_duration_ms(run),
-        stage_count: run.stages.len(),
-        child_run_count: run.child_runs.len(),
-        call_count: usage.call_count,
-        input_tokens: usage.input_tokens,
-        output_tokens: usage.output_tokens,
-        models: usage.models,
+            .unwrap_or_else(|| view.run.workflow_id.clone()),
+        status: view.run.status.clone(),
+        last_stage_node_id: view.stages.last().map(|stage| stage.node_id.clone()),
+        failure_summary: view.failure.as_ref().map(portal_failure_summary),
+        started_at: view.run.started_at.clone(),
+        finished_at: view.run.finished_at.clone(),
+        duration_ms: view.run.duration_ms,
+        stage_count: view.metadata.stage_count,
+        child_run_count: view.metadata.child_run_count,
+        call_count: view.usage.call_count,
+        input_tokens: view.usage.input_tokens,
+        output_tokens: view.usage.output_tokens,
+        models: view.usage.models.clone(),
         updated_at_ms,
         skills: extracted.active_skills,
     }
 }
 
-fn latest_stage_summary(
-    run: &harn_vm::orchestration::RunRecord,
-) -> (Option<String>, Option<String>) {
-    let last_stage = run.stages.last();
-    let last_stage_node_id = last_stage.map(|stage| stage.node_id.clone());
-    let failure_summary = run
-        .stages
-        .iter()
-        .rev()
-        .find(|stage| is_failed_status(&stage.status) || is_failed_status(&stage.outcome))
-        .map(|stage| {
-            let error = stage.metadata.get("error").map(compact_json).or_else(|| {
-                stage
-                    .attempts
-                    .iter()
-                    .rev()
-                    .find_map(|attempt| attempt.error.clone())
-            });
-            match error {
-                Some(error) if !error.is_empty() => format!("{} failed: {}", stage.node_id, error),
-                _ => format!("{} failed with {}", stage.node_id, stage.outcome),
-            }
-        });
-    (last_stage_node_id, failure_summary)
+fn portal_failure_summary(failure: &harn_vm::orchestration::RunViewFailure) -> String {
+    let detail = failure
+        .message
+        .clone()
+        .filter(|message| !message.is_empty())
+        .unwrap_or_else(|| failure.outcome.clone());
+    let Some(node_id) = failure
+        .node_id
+        .as_deref()
+        .filter(|node_id| !node_id.is_empty())
+    else {
+        return detail;
+    };
+    let fallback_prefix = format!("{node_id} failed");
+    if detail.starts_with(&fallback_prefix) {
+        detail
+    } else {
+        format!("{node_id} failed: {detail}")
+    }
 }
 
 pub(super) fn summarize_runs(runs: &[PortalRunSummary]) -> PortalStats {
@@ -445,6 +440,8 @@ pub(super) fn build_run_detail(
     run: &harn_vm::orchestration::RunRecord,
 ) -> PortalRunDetail {
     let summary = build_run_summary(relative_path, 0, run);
+    let view =
+        harn_vm::orchestration::build_run_view_with_path(run, Some(relative_path.to_string()));
     let spans = build_spans(run);
     let stages = build_stages(run);
     let audit_index = build_tool_call_audit_index(run);
@@ -484,6 +481,7 @@ pub(super) fn build_run_detail(
 
     PortalRunDetail {
         summary,
+        view,
         task: run.task.clone(),
         workflow_id: run.workflow_id.clone(),
         parent_run_id: run.parent_run_id.clone(),
@@ -1028,34 +1026,6 @@ fn stage_duration_ms(stage: &harn_vm::orchestration::RunStageRecord) -> Option<u
             None
         }
     })
-}
-
-fn run_duration_ms(run: &harn_vm::orchestration::RunRecord) -> Option<u64> {
-    if let Some(usage) = &run.usage {
-        let duration = usage.total_duration_ms.max(0) as u64;
-        if duration > 0 {
-            return Some(duration);
-        }
-    }
-    if let Some(max_end) = run.trace_spans.iter().map(trace_span_end_ms).max() {
-        if max_end > 0 {
-            return Some(max_end);
-        }
-    }
-    let stage_total = run
-        .stages
-        .iter()
-        .filter_map(stage_duration_ms)
-        .fold(0u64, u64::saturating_add);
-    if stage_total > 0 {
-        return Some(stage_total);
-    }
-    if let Some(finished) = &run.finished_at {
-        let start = date_ms(&run.started_at)?;
-        let finish = date_ms(finished)?;
-        return finish.checked_sub(start);
-    }
-    None
 }
 
 fn span_depth(

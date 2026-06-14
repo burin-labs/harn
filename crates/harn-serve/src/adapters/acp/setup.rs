@@ -49,6 +49,73 @@ impl AcpServer {
         }
     }
 
+    pub(super) async fn handle_session_view_query(
+        &self,
+        id: &serde_json::Value,
+        params: &serde_json::Value,
+    ) {
+        let query = match parse_session_timeline_query(params) {
+            Ok(query) => query,
+            Err(message) => {
+                self.send_error(id, -32602, &message);
+                return;
+            }
+        };
+        let log = harn_vm::event_log::active_event_log();
+        let view = if let Some(run_path) = query.run_path.as_deref() {
+            let run = match harn_vm::orchestration::load_run_record(std::path::Path::new(run_path))
+            {
+                Ok(run) => run,
+                Err(error) => {
+                    self.send_error(id, -32000, &format!("session view run load: {error}"));
+                    return;
+                }
+            };
+            let run_view = match harn_vm::orchestration::build_run_view_with_event_log(
+                &run,
+                Some(run_path.to_string()),
+                log.as_deref(),
+            )
+            .await
+            {
+                Ok(view) => view,
+                Err(error) => {
+                    self.send_error(id, -32000, &format!("session view query: {error}"));
+                    return;
+                }
+            };
+            let session_id = query
+                .session_id
+                .clone()
+                .or_else(|| run_view.run.session_id.clone());
+            harn_vm::orchestration::build_session_view_from_run_views(
+                vec![run_view],
+                harn_vm::orchestration::SessionViewOptions {
+                    session_id,
+                    has_event_log: log.is_some(),
+                    ..harn_vm::orchestration::SessionViewOptions::default()
+                },
+            )
+        } else {
+            match harn_vm::orchestration::build_empty_session_view(
+                query.session_id.clone(),
+                log.as_deref(),
+            )
+            .await
+            {
+                Ok(view) => view,
+                Err(error) => {
+                    self.send_error(id, -32000, &format!("session view query: {error}"));
+                    return;
+                }
+            }
+        };
+        self.send_response(
+            id,
+            serde_json::to_value(view).expect("session view serializes"),
+        );
+    }
+
     pub(super) async fn handle_session_timeline_subscribe(
         &mut self,
         id: &serde_json::Value,

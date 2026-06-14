@@ -122,6 +122,11 @@ pub(super) fn harn_acp_extension_meta() -> serde_json::Value {
                     "schema": harn_vm::provider_catalog::PROVIDER_CATALOG_SCHEMA_ID,
                     "schemaVersion": harn_vm::provider_catalog::PROVIDER_CATALOG_SCHEMA_VERSION,
                 },
+                harn_vm::orchestration::SESSION_VIEW_QUERY_METHOD: {
+                    "description": "Return the harn.session_view.v1 projection for a live or persisted session.",
+                    "schema": harn_vm::orchestration::SESSION_VIEW_SCHEMA,
+                    "schemaVersion": harn_vm::orchestration::SESSION_VIEW_SCHEMA_VERSION,
+                },
             },
             "hostCapabilityOperations": {
                 "process": [

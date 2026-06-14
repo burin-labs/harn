@@ -394,6 +394,7 @@ pub(super) struct PortalToolLoadEvent {
 #[derive(Debug, Clone, Serialize)]
 pub(super) struct PortalRunDetail {
     pub(super) summary: PortalRunSummary,
+    pub(super) view: harn_vm::orchestration::RunView,
     pub(super) task: String,
     pub(super) workflow_id: String,
     pub(super) parent_run_id: Option<String>,

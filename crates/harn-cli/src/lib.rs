@@ -1227,6 +1227,9 @@ async fn async_main(raw_args: Vec<String>, runtime_mode: CliRuntimeMode) {
             RunsCommand::Inspect(inspect) => {
                 inspect_run_record(&inspect.path, inspect.compare.as_deref());
             }
+            RunsCommand::View(view) => {
+                cli::print_runs_view(&view.path, view.session, view.json);
+            }
         },
         Command::Session(args) => commands::session::run(args),
         Command::Replay(args) => {
@@ -2108,7 +2111,7 @@ fn verify_provenance_receipt(path: &str, json: bool) -> Result<(), String> {
     Ok(())
 }
 
-fn load_run_record_or_exit(path: &Path) -> harn_vm::orchestration::RunRecord {
+pub(crate) fn load_run_record_or_exit(path: &Path) -> harn_vm::orchestration::RunRecord {
     match harn_vm::orchestration::load_run_record(path) {
         Ok(run) => run,
         Err(error) => {
@@ -2206,7 +2209,7 @@ fn file_looks_like_persona_eval_ladder_manifest(path: &Path) -> bool {
     )
 }
 
-fn collect_run_record_paths(path: &str) -> Vec<PathBuf> {
+pub(crate) fn collect_run_record_paths(path: &str) -> Vec<PathBuf> {
     let path = Path::new(path);
     if path.is_file() {
         return vec![path.to_path_buf()];

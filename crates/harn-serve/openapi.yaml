@@ -511,6 +511,24 @@ paths:
         default:
           $ref: "#/components/responses/Error"
 
+  /v1/sessions/{session_id}/view:
+    get:
+      tags: [Sessions]
+      operationId: getSessionView
+      summary: Retrieve the versioned harn.session_view.v1 projection for a Session.
+      parameters:
+        - $ref: "#/components/parameters/ProtocolVersion"
+        - $ref: "#/components/parameters/SessionId"
+      responses:
+        "200":
+          description: Stable Session projection.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SessionView"
+        default:
+          $ref: "#/components/responses/Error"
+
   /v1/sessions/{session_id}/close:
     post:
       tags: [Sessions]
@@ -2517,6 +2535,61 @@ components:
               oneOf:
                 - $ref: "#/components/schemas/Timestamp"
                 - type: "null"
+    SessionView:
+      type: object
+      required: [schema, schema_version, producer, session, projection, runs, history, metadata]
+      additionalProperties: true
+      properties:
+        schema:
+          type: string
+          enum: [harn.session_view.v1]
+        schema_version:
+          type: integer
+          enum: [1]
+        producer:
+          type: object
+          additionalProperties: true
+        session:
+          type: object
+          additionalProperties: true
+          required: [session_id, status, run_count, last_event_id, chain_root_hash]
+          properties:
+            session_id:
+              type: [string, "null"]
+            status:
+              type: string
+            run_count:
+              type: integer
+            last_event_id:
+              type: [integer, "null"]
+            chain_root_hash:
+              type: [string, "null"]
+        projection:
+          type: object
+          additionalProperties: true
+          required: [projection_id, projection_hash, prefix_hash, last_event_id]
+          properties:
+            projection_id:
+              type: string
+            projection_hash:
+              type: [string, "null"]
+            prefix_hash:
+              type: [string, "null"]
+            last_event_id:
+              type: [integer, "null"]
+        runs:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+        history:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+        metadata:
+          type: object
+          additionalProperties: true
     SessionList:
       allOf:
         - $ref: "#/components/schemas/PaginatedList"

@@ -16,8 +16,8 @@ use serde_json::{json, Value};
 
 use super::event::{AppendEvent, EventId, EventSignature, SessionEventKind};
 use super::store::{
-    CreateSession, ListFilter, ReadRange, SessionId, SessionStore, SharedSessionStore, SnapshotId,
-    StoreError,
+    CreateSession, ListFilter, ReadRange, SessionId, SessionMeta, SessionStatus, SessionStore,
+    SharedSessionStore, SnapshotId, StoreError,
 };
 
 /// Build an unprefixed router. Callers nest it under whichever prefix
@@ -31,6 +31,7 @@ pub fn sessions_router(store: SharedSessionStore) -> Router {
             "/sessions/{id}",
             get(describe_session).delete(soft_delete_session),
         )
+        .route("/sessions/{id}/view", get(session_view))
         .route("/sessions/{id}/events", post(append_event).get(read_events))
         .route("/sessions/{id}/fork", post(fork_session))
         .route("/sessions/{id}/truncate", post(truncate_session))
@@ -165,6 +166,24 @@ async fn describe_session(
 }
 
 #[tracing::instrument(
+    name = "harn.session.view",
+    skip_all,
+    fields(harn.session.id = %id),
+)]
+async fn session_view(
+    State(state): State<SessionsState>,
+    Path(id): Path<String>,
+) -> impl IntoResponse {
+    match state.store.describe(&id).await {
+        Ok(meta) => {
+            let view = session_view_from_meta(&meta);
+            (StatusCode::OK, Json(json!(view))).into_response()
+        }
+        Err(error) => map_error(error).into_response(),
+    }
+}
+
+#[tracing::instrument(
     name = "harn.session.soft_delete",
     skip_all,
     fields(harn.session.id = %id),
@@ -254,6 +273,34 @@ async fn read_events(
             .into_response(),
         Err(error) => map_error(error).into_response(),
     }
+}
+
+fn session_view_from_meta(meta: &SessionMeta) -> harn_vm::orchestration::SessionView {
+    harn_vm::orchestration::build_session_view_from_run_views(
+        Vec::new(),
+        harn_vm::orchestration::SessionViewOptions {
+            session_id: Some(meta.id.clone()),
+            parent_session_id: meta.parent_session_id.clone(),
+            status: Some(session_status_string(meta.status)),
+            started_at: Some(meta.created_at.clone()),
+            updated_at: Some(meta.updated_at.clone()),
+            last_event_id: meta.last_event_id,
+            chain_root_hash: meta.chain_root_hash.clone(),
+            event_count: meta.event_count,
+            has_event_log: true,
+            ..harn_vm::orchestration::SessionViewOptions::default()
+        },
+    )
+}
+
+fn session_status_string(status: SessionStatus) -> String {
+    match status {
+        SessionStatus::Open => "open",
+        SessionStatus::Closed => "closed",
+        SessionStatus::SoftDeleted => "soft_deleted",
+        SessionStatus::HardDeleted => "hard_deleted",
+    }
+    .to_string()
 }
 
 #[tracing::instrument(
