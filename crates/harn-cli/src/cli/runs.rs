@@ -10,6 +10,8 @@ pub(crate) struct RunsArgs {
 pub(crate) enum RunsCommand {
     /// Inspect a persisted run record and optionally diff it against another.
     Inspect(RunsInspectArgs),
+    /// Print the stable harn.run_view.v1 / harn.session_view.v1 JSON projection.
+    View(RunsViewArgs),
 }
 
 #[derive(Debug, Args)]
@@ -19,6 +21,18 @@ pub(crate) struct RunsInspectArgs {
     /// Optional baseline run record to diff against.
     #[arg(long)]
     pub compare: Option<String>,
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct RunsViewArgs {
+    /// Path to a run record JSON file or a directory containing run records.
+    pub path: String,
+    /// Aggregate matching records into a harn.session_view.v1 projection.
+    #[arg(long)]
+    pub session: bool,
+    /// Emit JSON. Accepted for consistency with other CLI surfaces.
+    #[arg(long)]
+    pub json: bool,
 }
 
 #[derive(Debug, Args)]

@@ -43,6 +43,12 @@ impl AcpServer {
                 }
                 self.handle_session_timeline_query(&id, &params).await;
             }
+            harn_vm::orchestration::SESSION_VIEW_QUERY_METHOD => {
+                if self.reject_unauthenticated(&id) {
+                    return;
+                }
+                self.handle_session_view_query(&id, &params).await;
+            }
             harn_vm::session_timeline::SESSION_TIMELINE_SUBSCRIBE_METHOD => {
                 if self.reject_unauthenticated(&id) {
                     return;

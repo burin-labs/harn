@@ -189,6 +189,24 @@ async fn acp_session_timeline_query_and_subscribe_use_event_log() {
                 serde_json::json!(harn_vm::redact::REDACTED_PLACEHOLDER)
             );
 
+            request_tx
+                .send(serde_json::json!({
+                    "jsonrpc": "2.0",
+                    "id": 24,
+                    "method": harn_vm::orchestration::SESSION_VIEW_QUERY_METHOD,
+                    "params": {"sessionId": session_id.clone()},
+                }))
+                .expect("send session view query");
+            let session_view = recv_json(&mut response_rx).await;
+            assert_eq!(session_view["id"], 24);
+            assert_eq!(session_view["result"]["schema"], "harn.session_view.v1");
+            assert_eq!(session_view["result"]["session"]["session_id"], session_id);
+            assert_eq!(session_view["result"]["session"]["last_event_id"], 1);
+            assert!(session_view["result"]["projection"]["projection_hash"]
+                .as_str()
+                .unwrap()
+                .starts_with("sha256:"));
+
             let temp = tempfile::tempdir().unwrap();
             let run_path = temp.path().join("timeline-run.json");
             save_run_record(

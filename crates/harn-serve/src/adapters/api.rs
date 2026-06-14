@@ -629,6 +629,7 @@ fn api_router(state: ApiState) -> Router {
             "/v1/sessions/{session_id}",
             get(get_session).patch(update_session),
         )
+        .route("/v1/sessions/{session_id}/view", get(get_session_view))
         .route("/v1/sessions/{session_id}/close", post(close_session))
         .route("/v1/sessions/{session_id}/fork", post(fork_session))
         .route("/v1/sessions/{session_id}/truncate", post(truncate_session))
@@ -722,6 +723,7 @@ async fn api_root() -> Response {
             "tools": "/v1/tools",
             "workspaces": "/v1/workspaces",
             "sessions": "/v1/sessions",
+            "session_view": "/v1/sessions/{session_id}/view",
             "tasks": "/v1/tasks",
             "events": "/v1/events/stream",
             "permission_requests": "/v1/permission-requests",
@@ -1134,6 +1136,31 @@ async fn get_session(
         Some(session) => Json(session).into_response(),
         None => api_error(StatusCode::NOT_FOUND, "not_found", "session not found"),
     }
+}
+
+async fn get_session_view(
+    State(state): State<ApiState>,
+    AxumPath(session_id): AxumPath<String>,
+    OriginalUri(uri): OriginalUri,
+    headers: HeaderMap,
+) -> Response {
+    if let Err(response) = authorize(&state, Method::GET, &uri, &headers, Bytes::new()).await {
+        return response;
+    }
+    let (session, history) = {
+        let inner = state.inner.lock().expect("api state poisoned");
+        let Some(session) = inner.sessions.get(&session_id).cloned() else {
+            return api_error(StatusCode::NOT_FOUND, "not_found", "session not found");
+        };
+        let history = inner
+            .events
+            .iter()
+            .filter(|event| event.session_id.as_deref() == Some(session_id.as_str()))
+            .cloned()
+            .collect::<Vec<_>>();
+        (session, history)
+    };
+    Json(api_session_view(&session, &history)).into_response()
 }
 
 async fn update_session(
@@ -2362,6 +2389,45 @@ fn limit_values(mut values: Vec<Value>, limit: Option<usize>) -> Vec<Value> {
     values
 }
 
+fn api_session_view(session: &Value, history: &[ApiEvent]) -> harn_vm::orchestration::SessionView {
+    let session_id = session
+        .get("id")
+        .and_then(Value::as_str)
+        .map(str::to_string);
+    let last_event_id = history.iter().map(|event| event_seq(&event.id)).max();
+    harn_vm::orchestration::build_session_view_from_run_views(
+        Vec::new(),
+        harn_vm::orchestration::SessionViewOptions {
+            session_id,
+            parent_session_id: session
+                .get("parent_session_id")
+                .and_then(Value::as_str)
+                .map(str::to_string),
+            root_session_id: session
+                .get("root_session_id")
+                .and_then(Value::as_str)
+                .map(str::to_string),
+            status: session
+                .get("state")
+                .and_then(Value::as_str)
+                .map(str::to_string)
+                .or_else(|| Some("unknown".to_string())),
+            started_at: session
+                .get("created_at")
+                .and_then(Value::as_str)
+                .map(str::to_string),
+            updated_at: session
+                .get("updated_at")
+                .and_then(Value::as_str)
+                .map(str::to_string),
+            last_event_id,
+            event_count: history.len(),
+            has_event_log: true,
+            ..harn_vm::orchestration::SessionViewOptions::default()
+        },
+    )
+}
+
 fn api_error(status: StatusCode, code: &str, message: &str) -> Response {
     (
         status,
@@ -2705,6 +2771,57 @@ mod tests {
         assert_eq!(task["object"], "task");
         assert_eq!(task["status"], "WORKING");
         assert_eq!(task["session_id"], session_id);
+    }
+
+    #[tokio::test]
+    async fn local_api_returns_session_view() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let script = dir.path().join("agent.harn");
+        std::fs::write(&script, "pipeline main() { __io_println(prompt) }\n")
+            .expect("write script");
+        let server = ApiServer::new(ApiServerConfig::for_pipeline(
+            script.to_string_lossy().to_string(),
+        ));
+        let app = api_router(server.state);
+
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/v1/sessions")
+                    .header("content-type", "application/json")
+                    .body(Body::from(r#"{"workspace_id":"local"}"#))
+                    .expect("request"),
+            )
+            .await
+            .expect("session response");
+        assert_eq!(response.status(), StatusCode::CREATED);
+        let body = to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("body");
+        let session: Value = serde_json::from_slice(&body).expect("session");
+        let session_id = session["id"].as_str().expect("session id");
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri(format!("/v1/sessions/{session_id}/view"))
+                    .body(Body::empty())
+                    .expect("request"),
+            )
+            .await
+            .expect("view response");
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("body");
+        let view: Value = serde_json::from_slice(&body).expect("view");
+        assert_eq!(view["schema"], "harn.session_view.v1");
+        assert_eq!(view["session"]["session_id"], session_id);
+        assert_eq!(view["session"]["last_event_id"], 1);
+        assert_eq!(view["metadata"]["event_count"], 1);
     }
 
     #[tokio::test]

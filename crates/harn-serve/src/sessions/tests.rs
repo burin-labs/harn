@@ -509,6 +509,51 @@ async fn http_router_round_trips_events() {
 }
 
 #[tokio::test]
+async fn http_router_returns_session_view() {
+    use axum::body::Body;
+    use axum::http::{Request, StatusCode};
+    use tower::ServiceExt as _;
+
+    let store: SharedSessionStore = Arc::new(MemorySessionStore::new());
+    let router = api::sessions_router(store.clone());
+    let meta = store
+        .create(CreateSession::default())
+        .await
+        .expect("create");
+    store
+        .append(
+            &meta.id,
+            AppendEvent::new(SessionEventKind::Message, json!({"text": "hello"})),
+        )
+        .await
+        .expect("append");
+
+    let response = router
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri(format!("/sessions/{}/view", meta.id))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let bytes = axum::body::to_bytes(response.into_body(), 1 << 20)
+        .await
+        .unwrap();
+    let body: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(body["schema"], "harn.session_view.v1");
+    assert_eq!(body["session"]["session_id"], meta.id);
+    assert_eq!(body["session"]["last_event_id"], 1);
+    assert_eq!(body["metadata"]["event_count"], 1);
+    assert!(body["projection"]["projection_hash"]
+        .as_str()
+        .unwrap()
+        .starts_with("sha256:"));
+}
+
+#[tokio::test]
 async fn signed_event_roundtrips_via_verify() {
     let signer = dummy_signer(7);
     let hooks = StoreHooks {

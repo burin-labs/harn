@@ -44,9 +44,26 @@ fn test_parses_runs_inspect_compare() {
     let Command::Runs(args) = cli.command.unwrap() else {
         panic!("expected runs command");
     };
-    let RunsCommand::Inspect(inspect) = args.command;
+    let RunsCommand::Inspect(inspect) = args.command else {
+        panic!("expected runs inspect command");
+    };
     assert_eq!(inspect.path, "run.json");
     assert_eq!(inspect.compare.as_deref(), Some("baseline.json"));
+}
+
+#[test]
+fn test_parses_runs_view_json_session() {
+    let cli = Cli::parse_from(["harn", "runs", "view", "runs", "--session", "--json"]);
+
+    let Command::Runs(args) = cli.command.unwrap() else {
+        panic!("expected runs command");
+    };
+    let RunsCommand::View(view) = args.command else {
+        panic!("expected runs view command");
+    };
+    assert_eq!(view.path, "runs");
+    assert!(view.session);
+    assert!(view.json);
 }
 
 #[test]
