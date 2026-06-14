@@ -75,6 +75,12 @@ category = "runtime_registry"
 plan = "arc_registry_scope"
 
 [[thread_local]]
+path = "src/harness_auth.rs"
+statics = ["ACTIVE_PRINCIPAL_STACK"]
+category = "logical_task"
+plan = "task_local_or_explicit"
+
+[[thread_local]]
 path = "src/harness_tenant.rs"
 statics = ["ACTIVE_TENANT_STACK"]
 category = "logical_task"

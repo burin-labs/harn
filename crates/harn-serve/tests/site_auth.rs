@@ -53,12 +53,28 @@ pub fn ctx_route(req: dict) -> dict {
 pub fn per_method_route(req: dict) -> dict {
   return http_ok({ "ok": true })
 }
+
+@scopes("personas:read")
+@route("GET", "/whoami")
+pub fn whoami_route(harness: Harness, req: dict) -> dict {
+  return http_ok({
+    "authed": harness.auth.is_authenticated(),
+    "subject": harness.auth.try_subject(),
+    "kind": harness.auth.kind(),
+    "has_read": harness.auth.has_scope("personas:read"),
+    "has_admin": harness.auth.has_scope("admin:write"),
+    "scopes": harness.auth.scopes(),
+  })
+}
 "#;
 
 /// `SiteAuth` hook that always admits with a fixed identity.
+#[derive(Default)]
 struct AllowAuth {
     tenant: Option<&'static str>,
     scopes: &'static [&'static str],
+    subject: Option<&'static str>,
+    kind: Option<&'static str>,
     context: Option<Value>,
 }
 
@@ -68,6 +84,9 @@ impl SiteAuth for AllowAuth {
         SiteAuthOutcome::Allow(SiteAuthContext {
             tenant_id: self.tenant.map(TenantId::new),
             scopes: self.scopes.iter().map(|scope| scope.to_string()).collect(),
+            subject: self.subject.map(str::to_string),
+            scheme: Some("apikey".to_string()),
+            kind: self.kind.map(str::to_string),
             context: self.context.clone(),
         })
     }
@@ -112,6 +131,7 @@ impl SiteAuth for HeaderAuth {
             tenant_id: None,
             scopes: ["personas:read".to_string()].into(),
             context: Some(json!({ "route": route.path, "method": route.method })),
+            ..Default::default()
         })
     }
 }
@@ -227,6 +247,7 @@ async fn allow_with_tenant_and_scopes_reaches_scoped_route() {
         tenant: Some("acme"),
         scopes: &["personas:read", "sessions:write"],
         context: None,
+        ..Default::default()
     });
     let (_dir, router) = site_router(Some(hook), None);
     let (status, body) = read_json(get(router, "/scoped").await).await;
@@ -242,6 +263,7 @@ async fn allow_with_missing_scopes_yields_canonical_403() {
         tenant: Some("acme"),
         scopes: &["sessions:read"],
         context: None,
+        ..Default::default()
     });
     let (_dir, router) = site_router(Some(hook), None);
     let (status, body) = read_json(get(router, "/scoped").await).await;
@@ -273,6 +295,7 @@ async fn public_route_admits_tenantless_scopeless_allow() {
         tenant: None,
         scopes: &[],
         context: None,
+        ..Default::default()
     });
     let (_dir, router) = site_router(Some(hook), None);
     let (status, body) = read_json(get(router, "/public").await).await;
@@ -289,6 +312,7 @@ async fn auth_context_is_visible_to_the_host_call_bridge() {
         tenant: None,
         scopes: &[],
         context: Some(json!({ "key_id": "k_123", "session": "s_9" })),
+        ..Default::default()
     });
     let (_dir, router) = site_router(Some(hook), Some(Arc::new(BridgeConfigurator)));
     let (status, body) = read_json(get(router, "/ctx").await).await;
@@ -306,6 +330,7 @@ async fn absent_auth_context_is_absent_at_the_bridge() {
         tenant: None,
         scopes: &[],
         context: None,
+        ..Default::default()
     });
     let (_dir, router) = site_router(Some(hook), Some(Arc::new(BridgeConfigurator)));
     let (status, body) = read_json(get(router, "/ctx").await).await;
@@ -356,6 +381,7 @@ async fn per_method_get_requires_only_the_baseline_scope() {
         tenant: None,
         scopes: &["base:read"],
         context: None,
+        ..Default::default()
     });
     let (_dir, router) = site_router(Some(hook), None);
     let (status, body) = read_json(request(router, "GET", "/per_method").await).await;
@@ -373,6 +399,7 @@ async fn per_method_put_demands_the_method_scoped_extra() {
         tenant: None,
         scopes: &["base:read"],
         context: None,
+        ..Default::default()
     });
     let (_dir, router) = site_router(Some(hook), None);
     let (status, body) = read_json(request(router, "PUT", "/per_method").await).await;
@@ -391,6 +418,7 @@ async fn per_method_put_admits_with_baseline_plus_extra() {
         tenant: None,
         scopes: &["base:read", "personas:write"],
         context: None,
+        ..Default::default()
     });
     let (_dir, router) = site_router(Some(hook), None);
     let (status, body) = read_json(request(router, "PUT", "/per_method").await).await;
@@ -406,9 +434,75 @@ async fn per_method_unlisted_method_falls_back_to_baseline() {
         tenant: None,
         scopes: &["base:read"],
         context: None,
+        ..Default::default()
     });
     let (_dir, router) = site_router(Some(hook), None);
     let (status, body) = read_json(request(router, "DELETE", "/per_method").await).await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(body["ok"], true);
+}
+
+/// The hook-resolved identity is threaded to the `.harn` route as the
+/// ambient `harness.auth` handle: a route can read the subject, the
+/// embedder-assigned principal kind, and test/enumerate the granted
+/// scopes — the foundation a `.harn`-side auth policy composes (issue
+/// burin-labs/harn#3323; unblocks harn-cloud route-policy adoption).
+#[tokio::test]
+async fn harness_auth_exposes_bound_principal_to_route() {
+    let hook = Arc::new(AllowAuth {
+        tenant: Some("acme"),
+        scopes: &["personas:read", "sessions:write"],
+        subject: Some("k_operator"),
+        kind: Some("operator"),
+        ..Default::default()
+    });
+    let (_dir, router) = site_router(Some(hook), None);
+    let (status, body) = read_json(get(router, "/whoami").await).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["authed"], true);
+    assert_eq!(body["subject"], "k_operator");
+    assert_eq!(body["kind"], "operator");
+    assert_eq!(body["has_read"], true);
+    assert_eq!(body["has_admin"], false);
+    // `scopes()` returns the granted set as a sorted list.
+    let scopes: Vec<&str> = body["scopes"]
+        .as_array()
+        .expect("scopes array")
+        .iter()
+        .map(|scope| scope.as_str().expect("scope string"))
+        .collect();
+    assert_eq!(scopes, vec!["personas:read", "sessions:write"]);
+}
+
+/// Without an embedder hook the dispatch is unauthenticated end to end:
+/// `harness.auth.is_authenticated()` is `false` and `scopes()` is empty.
+/// (The `/whoami` route's own `@scopes` is dropped here so the request
+/// reaches the handler under the allow-all default — proving the
+/// `harness.auth` view, not the admission gate.)
+#[tokio::test]
+async fn harness_auth_reports_anonymous_without_hook() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let path = dir.path().join("anon.harn");
+    std::fs::write(
+        &path,
+        r#"
+@route("GET", "/whoami")
+pub fn whoami_route(harness: Harness, req: dict) -> dict {
+  return http_ok({
+    "authed": harness.auth.is_authenticated(),
+    "subject": harness.auth.try_subject(),
+    "scopes": harness.auth.scopes(),
+  })
+}
+"#,
+    )
+    .expect("write script");
+    let config = SiteServerConfig::new(build_core(&path, None));
+    let router = SiteServer::new(config).router().expect("site router");
+
+    let (status, body) = read_json(get(router, "/whoami").await).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["authed"], false);
+    assert_eq!(body["subject"], Value::Null);
+    assert_eq!(body["scopes"].as_array().expect("scopes array").len(), 0);
 }

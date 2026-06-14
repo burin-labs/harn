@@ -134,6 +134,20 @@ pub fn harness_tenant_ambient(method: &str) -> Option<&'static str> {
     }
 }
 
+pub fn harness_auth_ambient(method: &str) -> Option<&'static str> {
+    match method {
+        "is_authenticated" => Some("harness_auth_is_authenticated"),
+        "subject" => Some("harness_auth_subject"),
+        "try_subject" => Some("harness_auth_try_subject"),
+        "scheme" => Some("harness_auth_scheme"),
+        "try_scheme" => Some("harness_auth_try_scheme"),
+        "kind" => Some("harness_auth_kind"),
+        "scopes" => Some("harness_auth_scopes"),
+        "has_scope" => Some("harness_auth_has_scope"),
+        _ => None,
+    }
+}
+
 pub fn harness_obs_ambient(method: &str) -> Option<&'static str> {
     match method {
         "span" | "start_span" => Some("__obs_start_span"),
@@ -161,6 +175,7 @@ pub fn harness_sub_handle_ambient(sub_handle: &str, method: &str) -> Option<&'st
         "system" => harness_system_ambient(method),
         "llm" => harness_llm_ambient(method),
         "tenant" => harness_tenant_ambient(method),
+        "auth" => harness_auth_ambient(method),
         "obs" => harness_obs_ambient(method),
         _ => None,
     }
@@ -180,6 +195,7 @@ pub fn harness_type_sub_handle(type_name: &str) -> Option<&'static str> {
         "HarnessSystem" => Some("system"),
         "HarnessLlm" => Some("llm"),
         "HarnessTenant" => Some("tenant"),
+        "HarnessAuth" => Some("auth"),
         "HarnessObs" => Some("obs"),
         _ => None,
     }

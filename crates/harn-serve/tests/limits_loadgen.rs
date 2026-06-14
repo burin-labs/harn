@@ -45,6 +45,7 @@ fn synth_request(function: &str) -> CallRequest {
         tenant_id: None,
         request_id: None,
         auth_context: None,
+        auth_principal: None,
     }
 }
 

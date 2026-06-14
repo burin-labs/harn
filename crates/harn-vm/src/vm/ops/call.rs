@@ -523,6 +523,17 @@ impl super::super::Vm {
             ),
             crate::harness::HarnessKind::Crypto => matches!(method, "sha256"),
             crate::harness::HarnessKind::Tenant => matches!(method, "id" | "try_id"),
+            crate::harness::HarnessKind::Auth => matches!(
+                method,
+                "is_authenticated"
+                    | "subject"
+                    | "try_subject"
+                    | "scheme"
+                    | "try_scheme"
+                    | "kind"
+                    | "scopes"
+                    | "has_scope"
+            ),
             crate::harness::HarnessKind::Root
             | crate::harness::HarnessKind::Fs
             | crate::harness::HarnessKind::Net

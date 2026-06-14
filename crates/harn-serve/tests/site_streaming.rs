@@ -101,6 +101,7 @@ impl SiteAuth for AllowAuth {
             tenant_id: self.tenant.map(TenantId::new),
             scopes: self.scopes.iter().map(|scope| scope.to_string()).collect(),
             context: None,
+            ..Default::default()
         })
     }
 }

@@ -147,6 +147,16 @@ pub struct CallRequest {
     /// [`crate::current_auth_context`] for the duration of the
     /// dispatch. `None` (the default) installs nothing.
     pub auth_context: Option<serde_json::Value>,
+    /// Authenticated principal resolved at admission — subject, scheme,
+    /// granted scopes, and optional principal kind. Unlike
+    /// [`Self::auth_context`] (the opaque embedder blob surfaced only to
+    /// the host-call bridge), this is the generic identity harn-serve
+    /// itself vouches for; `invoke_*` installs it as the ambient
+    /// `harness.auth` handle (see [`harn_vm::enter_auth_principal`]) so a
+    /// `.harn` route can read scopes/subject/kind and compose its own
+    /// authorization policy. `None` (the default) leaves the dispatch
+    /// unauthenticated (`harness.auth.is_authenticated()` is `false`).
+    pub auth_principal: Option<harn_vm::AuthPrincipal>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -264,7 +274,24 @@ impl DispatchCore {
                 // span attributes consistent with the value the .harn
                 // callee actually sees.
                 if request.tenant_id.is_none() {
-                    request.tenant_id = principal.tenant_id;
+                    request.tenant_id = principal.tenant_id.clone();
+                }
+                // Surface the same authenticated identity to the `.harn`
+                // callee as the ambient `harness.auth` handle. An adapter
+                // that already resolved the principal (e.g. the site
+                // adapter's `SiteAuth` hook) wins; otherwise project the
+                // policy-resolved principal. The synthetic anonymous
+                // principal (allow-all, no credential) binds nothing, so a
+                // `.harn` route reads `harness.auth.is_authenticated() ==
+                // false`. The AuthPolicy path carries no embedder-assigned
+                // `kind`, so it stays `None`.
+                if request.auth_principal.is_none() && !principal.is_anonymous() {
+                    request.auth_principal = Some(harn_vm::AuthPrincipal {
+                        subject: principal.subject.clone(),
+                        scheme: principal.scheme.clone(),
+                        scopes: principal.granted_scopes,
+                        kind: None,
+                    });
                 }
             }
             AuthorizationDecision::Rejected(message) => {
@@ -499,6 +526,7 @@ impl DispatchCore {
         let budget = function.budget.clone();
         let request_id = request.request_id.clone();
         let auth_context = request.auth_context.clone();
+        let auth_principal = request.auth_principal.clone();
         let local = LocalSet::new();
         local
             .run_until(harn_vm::mcp_progress::scope_context(progress, async move {
@@ -511,6 +539,7 @@ impl DispatchCore {
                 let _budget_guard = budget.as_ref().and_then(BudgetSpec::install);
                 let _request_id_guard = request_id.map(harn_vm::enter_request_id);
                 let _auth_context_guard = auth_context.map(crate::enter_auth_context);
+                let _auth_principal_guard = auth_principal.map(harn_vm::enter_auth_principal);
 
                 let mut vm = Vm::new();
                 harn_vm::register_vm_stdlib(&mut vm);
@@ -580,6 +609,7 @@ impl DispatchCore {
         let budget = function.budget.clone();
         let request_id = request.request_id.clone();
         let auth_context = request.auth_context.clone();
+        let auth_principal = request.auth_principal.clone();
         let local = LocalSet::new();
         local
             .run_until(harn_vm::mcp_progress::scope_context(progress, async move {
@@ -592,6 +622,7 @@ impl DispatchCore {
                 let _budget_guard = budget.as_ref().and_then(BudgetSpec::install);
                 let _request_id_guard = request_id.map(harn_vm::enter_request_id);
                 let _auth_context_guard = auth_context.map(crate::enter_auth_context);
+                let _auth_principal_guard = auth_principal.map(harn_vm::enter_auth_principal);
 
                 let mut vm = Vm::new();
                 harn_vm::register_vm_stdlib(&mut vm);
@@ -852,6 +883,7 @@ pub fn greet(name: string) -> string {
                 tenant_id: None,
                 request_id: None,
                 auth_context: None,
+                auth_principal: None,
             })
             .await
             .expect("dispatch");
@@ -895,6 +927,7 @@ pipeline default(task) {
                 tenant_id: None,
                 request_id: None,
                 auth_context: None,
+                auth_principal: None,
             })
             .await
             .expect("dispatch");
@@ -955,6 +988,7 @@ pub fn greet(name: string) -> string {
                 tenant_id: None,
                 request_id: None,
                 auth_context: None,
+                auth_principal: None,
             })
             .await
             .expect("dispatch");
@@ -994,6 +1028,7 @@ pub fn inspect(upload: string) -> string {
             tenant_id: None,
             request_id: None,
             auth_context: None,
+            auth_principal: None,
         };
 
         let first = core
@@ -1048,6 +1083,7 @@ pub fn greet(name: string) -> string {
                 tenant_id: None,
                 request_id: None,
                 auth_context: None,
+                auth_principal: None,
             })
             .await
             .expect("dispatch");
@@ -1099,6 +1135,7 @@ pub fn spin() -> string {
                 tenant_id: None,
                 request_id: None,
                 auth_context: None,
+                auth_principal: None,
             })
             .await
             .expect("dispatch");
@@ -1161,6 +1198,7 @@ pub fn whoami(harness: Harness) -> string {
                 tenant_id: None,
                 request_id: None,
                 auth_context: None,
+                auth_principal: None,
             })
             .await
             .expect("dispatch");
@@ -1211,6 +1249,7 @@ pub fn whoami(harness: Harness) -> string {
                 tenant_id: None,
                 request_id: None,
                 auth_context: None,
+                auth_principal: None,
             })
             .await
             .expect_err("missing tenant should error");
@@ -1275,6 +1314,7 @@ pub fn whoami(harness: Harness) -> string {
                 tenant_id: Some(harn_vm::TenantId::new("override-tenant")),
                 request_id: None,
                 auth_context: None,
+                auth_principal: None,
             })
             .await
             .expect("dispatch");

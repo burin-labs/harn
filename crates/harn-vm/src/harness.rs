@@ -48,6 +48,11 @@ pub enum HarnessKind {
     /// the dispatching host bound to this call. See
     /// [`crate::harness_tenant`].
     Tenant,
+    /// Auth sub-handle exposing the ambient authenticated principal (if
+    /// any) — subject, scheme, granted scopes, and optional principal
+    /// kind — that the dispatching host bound to this call. See
+    /// [`crate::harness_auth`].
+    Auth,
     /// Observability sub-handle: spans, counter/histogram/gauge
     /// instruments, structured logs, and the ambient request_id
     /// surfaced by the dispatching host. See
@@ -75,6 +80,7 @@ impl HarnessKind {
             HarnessKind::System => "HarnessSystem",
             HarnessKind::Llm => "HarnessLlm",
             HarnessKind::Tenant => "HarnessTenant",
+            HarnessKind::Auth => "HarnessAuth",
             HarnessKind::Obs => "HarnessObs",
         }
     }
@@ -96,6 +102,7 @@ impl HarnessKind {
             HarnessKind::System => Some("system"),
             HarnessKind::Llm => Some("llm"),
             HarnessKind::Tenant => Some("tenant"),
+            HarnessKind::Auth => Some("auth"),
             HarnessKind::Obs => Some("obs"),
         }
     }
@@ -115,6 +122,7 @@ impl HarnessKind {
             "system" => Some(HarnessKind::System),
             "llm" => Some(HarnessKind::Llm),
             "tenant" => Some(HarnessKind::Tenant),
+            "auth" => Some(HarnessKind::Auth),
             "obs" => Some(HarnessKind::Obs),
             _ => None,
         }
@@ -134,6 +142,7 @@ impl HarnessKind {
         HarnessKind::System,
         HarnessKind::Llm,
         HarnessKind::Tenant,
+        HarnessKind::Auth,
         HarnessKind::Obs,
     ];
 
@@ -152,6 +161,7 @@ impl HarnessKind {
         HarnessKind::System,
         HarnessKind::Llm,
         HarnessKind::Tenant,
+        HarnessKind::Auth,
         HarnessKind::Obs,
     ];
 }
@@ -679,6 +689,13 @@ impl Harness {
         }
     }
 
+    /// Field access for `harness.auth`.
+    pub fn auth(&self) -> HarnessAuth {
+        HarnessAuth {
+            inner: Arc::clone(&self.inner),
+        }
+    }
+
     /// Field access for `harness.obs`.
     pub fn obs(&self) -> HarnessObs {
         HarnessObs {
@@ -800,6 +817,18 @@ pub struct HarnessTenant {
     inner: Arc<HarnessInner>,
 }
 
+/// auth sub-handle: `is_authenticated`, `subject` / `try_subject`,
+/// `scheme` / `try_scheme`, `kind`, `scopes`, `has_scope`. Surfaces the
+/// ambient authenticated principal bound by the dispatching host (see
+/// [`crate::harness_auth`]). Like [`HarnessTenant`] it holds no host
+/// state — the methods consult a thread-local stack — but rides the
+/// shared `Arc<HarnessInner>` so null/mock-mode gating in
+/// [`crate::vm::methods::harness`] applies uniformly.
+#[derive(Debug, Clone)]
+pub struct HarnessAuth {
+    inner: Arc<HarnessInner>,
+}
+
 /// obs sub-handle: `span` / `start_span` / `end_span` / `counter` /
 /// `histogram` / `gauge` / `log` / `request_id`. Wraps the existing
 /// `__obs_*` builtins and the request_id ambient pushed by the
@@ -838,6 +867,7 @@ sub_handle_inner!(
     HarnessSystem,
     HarnessLlm,
     HarnessTenant,
+    HarnessAuth,
     HarnessObs,
 );
 
@@ -1044,6 +1074,7 @@ mod tests {
             r"fn main(harness: Harness) { harness.system.cpu() }",
             r"fn main(harness: Harness) { harness.llm.catalog() }",
             r"fn main(harness: Harness) { harness.tenant.id() }",
+            r"fn main(harness: Harness) { harness.auth.subject() }",
             r#"fn main(harness: Harness) { harness.obs.log("blocked", "info", {}) }"#,
         ] {
             let error = run_harness_source(source, harness.clone()).expect_err("call denied");
@@ -1073,11 +1104,65 @@ mod tests {
                 (HarnessKind::System, "cpu"),
                 (HarnessKind::Llm, "catalog"),
                 (HarnessKind::Tenant, "id"),
+                (HarnessKind::Auth, "subject"),
                 (HarnessKind::Obs, "log"),
             ]
         );
         assert_eq!(events[0].args, vec!["blocked"]);
         assert_eq!(events[3].args, vec!["/x"]);
+    }
+
+    #[test]
+    fn auth_sub_handle_reads_bound_principal() {
+        use crate::harness_auth::{enter_auth_principal, AuthPrincipal};
+        let _principal = enter_auth_principal(AuthPrincipal {
+            subject: "k_123".to_string(),
+            scheme: "apikey".to_string(),
+            scopes: ["admin:dlq:write", "read:events"]
+                .iter()
+                .map(|scope| scope.to_string())
+                .collect(),
+            kind: Some("operator".to_string()),
+        });
+        let source = r#"
+fn main(harness: Harness) {
+  __io_println(harness.auth.is_authenticated())
+  __io_println(harness.auth.subject())
+  __io_println(harness.auth.scheme())
+  __io_println(harness.auth.kind())
+  __io_println(harness.auth.has_scope("admin:dlq:write"))
+  __io_println(harness.auth.has_scope("missing:scope"))
+  __io_println(len(harness.auth.scopes()))
+}
+"#;
+        let output = run_harness_source(source, Harness::real()).expect("dispatch succeeds");
+        assert_eq!(output, "true\nk_123\napikey\noperator\ntrue\nfalse\n2\n");
+    }
+
+    #[test]
+    fn auth_sub_handle_without_principal_reports_anonymous() {
+        // No `enter_auth_principal` guard — the dispatch is unauthenticated,
+        // so the presence/scope getters degrade rather than error and
+        // `subject()` raises the canonical Auth error.
+        let source = r#"
+fn main(harness: Harness) {
+  if harness.auth.is_authenticated() { __io_println("auth") } else { __io_println("anon") }
+  __io_println(harness.auth.has_scope("x"))
+  __io_println(len(harness.auth.scopes()))
+}
+"#;
+        let output = run_harness_source(source, Harness::real()).expect("dispatch succeeds");
+        assert_eq!(output, "anon\nfalse\n0\n");
+
+        let error = run_harness_source(
+            r"fn main(harness: Harness) { harness.auth.subject() }",
+            Harness::real(),
+        )
+        .expect_err("subject() requires a bound principal");
+        assert!(
+            error.contains("no principal bound"),
+            "unexpected error: {error}"
+        );
     }
 
     #[test]

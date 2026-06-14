@@ -129,6 +129,7 @@ mod tests {
             tenant_id: None,
             request_id: None,
             auth_context: None,
+            auth_principal: None,
         }
     }
 
