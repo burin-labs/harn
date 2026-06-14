@@ -121,6 +121,7 @@ impl A2aServer {
                 tenant_id: None,
                 request_id: Some(task.id.clone()),
                 auth_context: None,
+                auth_principal: None,
             })
             .await;
 

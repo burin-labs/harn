@@ -39,6 +39,7 @@ pub(super) fn build_call_request(
         tenant_id: None,
         request_id,
         auth_context: None,
+        auth_principal: None,
     })
 }
 

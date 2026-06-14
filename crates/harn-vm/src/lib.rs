@@ -32,6 +32,7 @@ pub mod events;
 pub mod external_agent;
 pub mod flow;
 pub mod harness;
+pub mod harness_auth;
 pub(crate) mod harness_crypto;
 pub mod harness_net;
 pub mod harness_system;
@@ -166,6 +167,10 @@ pub use harness::{
     DenyEvent, Harness, HarnessCall, HarnessClock, HarnessCrypto, HarnessEnv, HarnessFs,
     HarnessKind, HarnessLlm, HarnessNet, HarnessObs, HarnessProcess, HarnessRandom, HarnessStdio,
     HarnessSystem, HarnessTenant, HarnessTerm, MockAwareClock, MockHarnessBuilder, VmHarness,
+};
+pub use harness_auth::{
+    current_auth_principal, enter_auth_principal, AuthPrincipal, AuthPrincipalScopeGuard,
+    MISSING_PRINCIPAL_MESSAGE,
 };
 pub use harness_net::{
     bypass_enabled as net_policy_bypass_enabled, NetMatcher, NetPolicy, NetPolicyAudit,

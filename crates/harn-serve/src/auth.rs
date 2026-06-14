@@ -6,6 +6,19 @@ use harn_vm::{ProviderId, TenantId};
 use subtle::ConstantTimeEq;
 use time::{Duration, OffsetDateTime};
 
+/// Subject assigned to the synthetic principal harn-serve admits when a
+/// request carries no authenticated credential — no auth method
+/// configured (allow-all), or an allow-all MCP/agent handshake. Paired
+/// with [`ANONYMOUS_SCHEME`]; see [`AuthenticatedPrincipal::is_anonymous`].
+pub const ANONYMOUS_SUBJECT: &str = "anonymous";
+
+/// Scheme marking the [`ANONYMOUS_SUBJECT`] synthetic principal — the
+/// dispatch authenticated no identity. Real auth methods set a concrete
+/// scheme (`api_key`, `hmac`, `oauth21`), so this string never collides
+/// with a genuinely authenticated principal. The ambient `harness.auth`
+/// handle treats such a principal as unauthenticated and binds nothing.
+pub const ANONYMOUS_SCHEME: &str = "none";
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct AuthenticatedPrincipal {
     pub subject: String,
@@ -20,6 +33,17 @@ pub struct AuthenticatedPrincipal {
     /// an admin/system bearer). Threaded through `DispatchCtx` into
     /// the `.harn` callee as `harness.tenant.id()`.
     pub tenant_id: Option<TenantId>,
+}
+
+impl AuthenticatedPrincipal {
+    /// Whether this is the synthetic [`ANONYMOUS_SUBJECT`] principal
+    /// harn-serve admits when no credential authenticated the request
+    /// (allow-all). The ambient `harness.auth` handle binds nothing for
+    /// an anonymous principal, so a `.harn` route sees
+    /// `harness.auth.is_authenticated() == false`.
+    pub fn is_anonymous(&self) -> bool {
+        self.scheme == ANONYMOUS_SCHEME
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -347,8 +371,8 @@ impl AuthPolicy {
     ) -> AuthorizationDecision {
         let mut principal = if self.methods.is_empty() {
             AuthenticatedPrincipal {
-                subject: "anonymous".to_string(),
-                scheme: "none".to_string(),
+                subject: ANONYMOUS_SUBJECT.to_string(),
+                scheme: ANONYMOUS_SCHEME.to_string(),
                 granted_scopes: BTreeSet::new(),
                 tenant_id: None,
             }
@@ -408,16 +432,16 @@ impl AuthPolicy {
     pub fn authorize_mcp(&self, server: &str, tool: Option<&str>) -> AuthorizationDecision {
         let Some(allowlist) = &self.mcp_allowlist else {
             return AuthorizationDecision::Authorized(AuthenticatedPrincipal {
-                subject: "anonymous".to_string(),
-                scheme: "none".to_string(),
+                subject: ANONYMOUS_SUBJECT.to_string(),
+                scheme: ANONYMOUS_SCHEME.to_string(),
                 granted_scopes: BTreeSet::new(),
                 tenant_id: None,
             });
         };
         match allowlist.check(server, tool) {
             AllowlistOutcome::Allow => AuthorizationDecision::Authorized(AuthenticatedPrincipal {
-                subject: "anonymous".to_string(),
-                scheme: "none".to_string(),
+                subject: ANONYMOUS_SUBJECT.to_string(),
+                scheme: ANONYMOUS_SCHEME.to_string(),
                 granted_scopes: BTreeSet::new(),
                 tenant_id: None,
             }),

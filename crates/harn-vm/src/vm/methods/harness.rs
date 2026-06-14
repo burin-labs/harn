@@ -93,6 +93,7 @@ impl crate::vm::Vm {
             HarnessKind::Crypto => self.call_harness_crypto_method(handle, method, args),
             HarnessKind::Llm => self.call_harness_llm_method(handle, method, args).await,
             HarnessKind::Tenant => self.call_harness_tenant_method(handle, method, args),
+            HarnessKind::Auth => self.call_harness_auth_method(handle, method, args),
             HarnessKind::Obs => self.call_harness_obs_method(handle, method, args).await,
         }
     }
@@ -124,6 +125,7 @@ impl crate::vm::Vm {
             HarnessKind::Random => Self::call_harness_random_method_sync_fast(method, args),
             HarnessKind::Crypto => Self::call_harness_crypto_method_sync_fast(method, args),
             HarnessKind::Tenant => Self::call_harness_tenant_method_sync_fast(method, args),
+            HarnessKind::Auth => Self::call_harness_auth_method_sync_fast(method, args),
             HarnessKind::Root
             | HarnessKind::Fs
             | HarnessKind::Net
@@ -494,6 +496,7 @@ impl crate::vm::Vm {
                 Some(Ok(crate::stdlib::json_to_vm_value(&json)))
             }
             HarnessKind::Tenant => Self::call_harness_tenant_method_sync_fast(method, args),
+            HarnessKind::Auth => Self::call_harness_auth_method_sync_fast(method, args),
             HarnessKind::Root
             | HarnessKind::Fs
             | HarnessKind::Net
@@ -711,6 +714,104 @@ impl crate::vm::Vm {
     ) -> Result<VmValue, VmError> {
         Self::call_harness_tenant_method_sync_fast(method, args)
             .unwrap_or_else(|| Err(method_unsupported(handle, method)))
+    }
+
+    fn call_harness_auth_method(
+        &mut self,
+        handle: &VmHarness,
+        method: &str,
+        args: &[VmValue],
+    ) -> Result<VmValue, VmError> {
+        Self::call_harness_auth_method_sync_fast(method, args)
+            .unwrap_or_else(|| Err(method_unsupported(handle, method)))
+    }
+
+    /// Read-only getters over the ambient authenticated principal (see
+    /// [`crate::harness_auth`]). Pure thread-local reads — no host state —
+    /// so the whole surface rides the sync-fast path. `subject`/`scheme`
+    /// raise a typed [`ErrorCategory::Auth`] error when no principal is
+    /// bound (mirroring `harness.tenant.id()`); the `try_*` and `kind`
+    /// getters return `nil`, and `scopes`/`has_scope`/`is_authenticated`
+    /// degrade to empty/false so an unauthenticated route can branch
+    /// without try/catch.
+    fn call_harness_auth_method_sync_fast(
+        method: &str,
+        args: &[VmValue],
+    ) -> Option<Result<VmValue, VmError>> {
+        use crate::harness_auth::{current_auth_principal, MISSING_PRINCIPAL_MESSAGE};
+
+        // `has_scope` is the one arity-1 method; everything else is nullary.
+        if method == "has_scope" {
+            let scope = match args {
+                [VmValue::String(scope)] => scope.to_string(),
+                [other] => {
+                    return Some(Err(VmError::TypeError(format!(
+                        "HarnessAuth.has_scope expects a string scope, got {}",
+                        other.type_name()
+                    ))));
+                }
+                _ => {
+                    return Some(Err(VmError::TypeError(
+                        "HarnessAuth.has_scope expects exactly one string argument".to_string(),
+                    )));
+                }
+            };
+            let granted = current_auth_principal()
+                .map(|principal| principal.scopes.contains(&scope))
+                .unwrap_or(false);
+            return Some(Ok(VmValue::Bool(granted)));
+        }
+
+        if !args.is_empty() {
+            return Some(Err(VmError::TypeError(format!(
+                "HarnessAuth.{method} takes no arguments"
+            ))));
+        }
+        let principal = current_auth_principal();
+        let auth_error = || VmError::CategorizedError {
+            message: MISSING_PRINCIPAL_MESSAGE.to_string(),
+            category: ErrorCategory::Auth,
+        };
+        match method {
+            "is_authenticated" => Some(Ok(VmValue::Bool(principal.is_some()))),
+            "scopes" => {
+                let scopes = principal
+                    .map(|principal| {
+                        principal
+                            .scopes
+                            .iter()
+                            .map(|scope| vm_string(scope.clone()))
+                            .collect::<Vec<_>>()
+                    })
+                    .unwrap_or_default();
+                Some(Ok(VmValue::List(std::sync::Arc::new(scopes))))
+            }
+            "subject" => Some(match principal {
+                Some(principal) if !principal.subject.is_empty() => {
+                    Ok(vm_string(principal.subject.clone()))
+                }
+                _ => Err(auth_error()),
+            }),
+            "try_subject" => Some(Ok(principal
+                .filter(|principal| !principal.subject.is_empty())
+                .map(|principal| vm_string(principal.subject.clone()))
+                .unwrap_or(VmValue::Nil))),
+            "scheme" => Some(match principal {
+                Some(principal) if !principal.scheme.is_empty() => {
+                    Ok(vm_string(principal.scheme.clone()))
+                }
+                _ => Err(auth_error()),
+            }),
+            "try_scheme" => Some(Ok(principal
+                .filter(|principal| !principal.scheme.is_empty())
+                .map(|principal| vm_string(principal.scheme.clone()))
+                .unwrap_or(VmValue::Nil))),
+            "kind" => Some(Ok(principal
+                .and_then(|principal| principal.kind.clone())
+                .map(vm_string)
+                .unwrap_or(VmValue::Nil))),
+            _ => None,
+        }
     }
 
     async fn call_harness_obs_method(
@@ -1094,7 +1195,8 @@ impl crate::vm::Vm {
             | HarnessKind::Random
             | HarnessKind::Crypto
             | HarnessKind::System
-            | HarnessKind::Tenant => Err(method_unsupported(handle, method)),
+            | HarnessKind::Tenant
+            | HarnessKind::Auth => Err(method_unsupported(handle, method)),
             HarnessKind::Fs => match method {
                 "read_file" | "read" => {
                     let path = string_arg(args, 0, "HarnessFs.read_file")?;

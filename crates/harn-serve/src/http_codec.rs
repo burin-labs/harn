@@ -854,6 +854,7 @@ mod tests {
             tenant_id: None,
             request_id: None,
             auth_context: None,
+            auth_principal: None,
         };
         core.dispatch(request).await.map(|response| response.value)
     }
@@ -1153,6 +1154,7 @@ pub fn handler() -> dict {
             tenant_id: None,
             request_id,
             auth_context: None,
+            auth_principal: None,
         };
         core.dispatch(request).await.map(|response| response.value)
     }

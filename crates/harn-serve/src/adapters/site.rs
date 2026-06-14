@@ -213,11 +213,44 @@ pub struct SiteAuthContext {
     /// principal (via [`AuthRequest::granted_scopes`]) so the
     /// dispatch-level scope check agrees with the edge.
     pub scopes: BTreeSet<String>,
+    /// Stable identifier for the authenticated subject (e.g. the
+    /// embedder's API-key id or session subject). Surfaced read-only to
+    /// the `.harn` callee as `harness.auth.subject()` for attribution and
+    /// policy. `None` admits an anonymous/public request.
+    pub subject: Option<String>,
+    /// Auth scheme the embedder admitted the request under (e.g.
+    /// `"apikey"`, `"oauth"`, `"session"`). Surfaced as
+    /// `harness.auth.scheme()`. `None` when the embedder does not
+    /// classify the credential scheme.
+    pub scheme: Option<String>,
+    /// Optional principal classification the embedder assigned (e.g.
+    /// `"operator"` vs `"tenant"` vs `"worker"`). Surfaced as
+    /// `harness.auth.kind()` so a `.harn` route policy can gate on
+    /// allowed principal kinds. Generic — harn-serve never interprets it.
+    pub kind: Option<String>,
     /// Opaque embedder context (e.g. the API-key record or session
     /// claims). Never interpreted by harn-serve; surfaced to the
     /// embedder's [`harn_vm::HostCallBridge`] for the duration of the
     /// dispatch via [`crate::current_auth_context`].
     pub context: Option<Value>,
+}
+
+impl SiteAuthContext {
+    /// Project the embedder identity into the generic
+    /// [`harn_vm::AuthPrincipal`] threaded onto the dispatch as the
+    /// ambient `harness.auth` handle. Carries only identity facts —
+    /// subject, scheme, granted scopes, and principal kind — never the
+    /// opaque embedder `context` (that stays the host-call-bridge channel
+    /// via [`crate::current_auth_context`]) and never the tenant (that is
+    /// the single-sourced `harness.tenant` ambient).
+    pub(crate) fn principal(&self) -> harn_vm::AuthPrincipal {
+        harn_vm::AuthPrincipal {
+            subject: self.subject.clone().unwrap_or_default(),
+            scheme: self.scheme.clone().unwrap_or_default(),
+            scopes: self.scopes.clone(),
+            kind: self.kind.clone(),
+        }
+    }
 }
 
 impl SiteAuthOutcome {
@@ -891,6 +924,7 @@ async fn site_dispatch(State(state): State<SiteState>, request: Request) -> Resp
         auth_context: auth_context
             .as_ref()
             .and_then(|context| context.context.clone()),
+        auth_principal: auth_context.as_ref().map(SiteAuthContext::principal),
     };
 
     let response = match state.runtime.call(call).await {
@@ -1081,6 +1115,7 @@ async fn drive_ws_session(
             auth_context: auth_context
                 .as_ref()
                 .and_then(|context| context.context.clone()),
+            auth_principal: auth_context.as_ref().map(SiteAuthContext::principal),
         };
         match runtime.call(call).await {
             Ok(response) => {
