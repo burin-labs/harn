@@ -45,9 +45,25 @@ const messages = defineMessages({
   pageSummary: { id: "portal.runsPage.pageSummary", defaultMessage: "Page {page} of {total}" },
 })
 
-function readNumber(value: string | null, fallback: number) {
+const RUN_STATUS_FILTERS = ["all", "active", "completed", "failed"] as const satisfies readonly RunStatusFilter[]
+const RUN_SORT_ORDERS = ["newest", "oldest", "duration"] as const satisfies readonly RunSortOrder[]
+const RUN_PAGE_SIZES = [25, 50, 100] as const
+
+function readChoice<T extends string>(value: string | null, allowed: readonly T[], fallback: T): T {
+  return value && (allowed as readonly string[]).includes(value) ? (value as T) : fallback
+}
+
+function readPositiveInteger(value: string | null, fallback: number) {
+  if (!value || !/^\d+$/.test(value)) {
+    return fallback
+  }
   const parsed = Number(value)
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback
+  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : fallback
+}
+
+function readPageSize(value: string | null) {
+  const parsed = readPositiveInteger(value, 25)
+  return (RUN_PAGE_SIZES as readonly number[]).includes(parsed) ? parsed : 25
 }
 
 export function RunsPage() {
@@ -55,10 +71,10 @@ export function RunsPage() {
   const navigate = useNavigate()
   const [searchParams, setSearchParams] = useSearchParams()
   const q = searchParams.get("q") ?? ""
-  const status = (searchParams.get("status") as RunStatusFilter | null) ?? "all"
-  const sort = (searchParams.get("sort") as RunSortOrder | null) ?? "newest"
-  const page = readNumber(searchParams.get("page"), 1)
-  const pageSize = readNumber(searchParams.get("page_size"), 25)
+  const status = readChoice(searchParams.get("status"), RUN_STATUS_FILTERS, "all")
+  const sort = readChoice(searchParams.get("sort"), RUN_SORT_ORDERS, "newest")
+  const page = readPositiveInteger(searchParams.get("page"), 1)
+  const pageSize = readPageSize(searchParams.get("page_size"))
   const skill = searchParams.get("skill") ?? ""
   const { runs, filteredCount, pagination, loading, lastError, lastRefreshAt, loadRuns } = useRunsData({
     q,

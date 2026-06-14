@@ -1,10 +1,11 @@
-import { render, screen, waitFor } from "@testing-library/react"
+import { cleanup, render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { IntlProvider } from "react-intl"
 import { MemoryRouter } from "react-router-dom"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
 import { App } from "./App"
+import { RunsPage } from "./pages/RunsPage"
 
 const runsPayload = {
   stats: {
@@ -161,10 +162,33 @@ const detailPayload = {
 }
 
 afterEach(() => {
+  cleanup()
   vi.unstubAllGlobals()
 })
 
 describe("App", () => {
+  it("normalizes malformed runs query params before fetching", async () => {
+    const fetchMock = vi.fn(async (input: string) => {
+      if (input.startsWith("/api/runs")) {
+        return { ok: true, json: async () => ({ ...runsPayload, runs: [] }) }
+      }
+      throw new Error(`unexpected fetch ${input}`)
+    })
+    vi.stubGlobal("fetch", fetchMock)
+
+    render(
+      <MemoryRouter initialEntries={["/runs?page=1.5&page_size=37&status=bogus&sort=weird"]}>
+        <IntlProvider locale="en">
+          <RunsPage />
+        </IntlProvider>
+      </MemoryRouter>,
+    )
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith("/api/runs?status=all&sort=newest&page=1&page_size=25")
+    })
+  })
+
   it("shows a paginated runs page and navigates into run detail", async () => {
     const fetchMock = vi.fn(async (input: string) => {
       if (input.startsWith("/api/runs")) {
