@@ -444,15 +444,15 @@
         "FIREWORKS_API_KEY"
       ],
       "recommended": {
-        "selector": "fireworks:*qwen3.6*",
+        "selector": "fireworks:*gpt-oss*",
         "provider": "fireworks",
-        "model": "*qwen3.6*",
+        "model": "*gpt-oss*",
         "display_name": null,
         "tool_format": "native",
         "harn_options": [
           "provider = \"fireworks\"",
           "tool_format = \"native\"",
-          "structured_output_mode = \"delimited\""
+          "structured_output_mode = \"native_json\""
         ]
       },
       "capabilities": {
@@ -461,11 +461,11 @@
         "preferred_tool_format": "native",
         "tool_mode_parity": "unknown",
         "structured_output_transport": "native",
-        "structured_output_mode": "delimited",
+        "structured_output_mode": "native_json",
         "streaming": true,
         "reasoning_knobs": [
-          "disable_directive:/no_think",
-          "enabled"
+          "effort",
+          "reasoning_effort"
         ],
         "prompt_or_context_cache": false,
         "usage_accounting_confidence": "provider_default"

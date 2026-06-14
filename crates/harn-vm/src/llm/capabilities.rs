@@ -2210,6 +2210,47 @@ anthropic_beta_features = ["fine-grained-tool-streaming-2025-05-14"]
     }
 
     #[test]
+    fn fireworks_deepinfra_sambanova_gpt_oss_require_reasoning_for_tools() {
+        // gpt-oss (Harmony) calls tools INSIDE the chain-of-thought channel, so
+        // reasoning-off breaks tool calling. The fireworks/deepinfra/sambanova
+        // catch-all rules carry no reasoning fields, so without a dedicated
+        // `*gpt-oss*` row gpt-oss would fall through to reasoning-OFF and the
+        // eval loop would bill a noncommittal. These rows mirror the Cerebras
+        // gpt-oss capability row. Regression guard for that resolution.
+        reset();
+        for (provider, model) in [
+            ("fireworks", "accounts/fireworks/models/gpt-oss-120b"),
+            ("deepinfra", "openai/gpt-oss-120b"),
+            ("sambanova", "gpt-oss-120b"),
+        ] {
+            let caps = lookup(provider, model);
+            assert!(
+                caps.reasoning_required_for_tools,
+                "{provider}/{model}: reasoning_required_for_tools must be true"
+            );
+            assert!(
+                caps.reasoning_effort_supported,
+                "{provider}/{model}: reasoning_effort_supported must be true"
+            );
+            assert_eq!(
+                caps.reasoning_effort_levels,
+                vec!["low", "medium", "high"],
+                "{provider}/{model}: effort levels"
+            );
+            assert_eq!(caps.thinking_modes, vec!["effort"], "{provider}/{model}");
+            assert_eq!(
+                caps.preferred_tool_format.as_deref(),
+                Some("native"),
+                "{provider}/{model}: native tools"
+            );
+            assert_eq!(
+                caps.thinking_block_style, "reasoning_summary",
+                "{provider}/{model}"
+            );
+        }
+    }
+
+    #[test]
     fn cerebras_glm_47_supports_reasoning_none() {
         // Cerebras documents GLM 4.7's no-reasoning value as
         // reasoning_effort="none"; the older disable_reasoning knob is
