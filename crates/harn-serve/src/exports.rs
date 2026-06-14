@@ -22,6 +22,31 @@ pub enum ExportedCallableKind {
     Pipeline,
 }
 
+/// Declarative route auth policy declared via `@policy(...)`, composing
+/// with the `@scopes` requirement rather than replacing it. Today it
+/// carries the set of allowed principal kinds (matched against
+/// `harness.auth.kind()` at admission); a route with a non-empty
+/// `allowed_kinds` admits only a principal whose kind is in the set.
+/// Surfaced in the export catalog so audit tooling can see which routes
+/// declare a principal-kind guard, and enforced by the `harn serve site`
+/// admission layer after the scope check. The host keeps any
+/// defense-in-depth Rust check during migration (the issue's
+/// non-replacement rule).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct RoutePolicy {
+    /// Principal kinds permitted to invoke the route (e.g. `"operator"`,
+    /// `"tenant"`). Empty means the policy imposes no kind restriction.
+    pub allowed_kinds: BTreeSet<String>,
+}
+
+impl RoutePolicy {
+    /// Whether the policy imposes no restriction at all — used to collapse
+    /// a `@policy` that parsed to nothing effective back to `None`.
+    pub fn is_empty(&self) -> bool {
+        self.allowed_kinds.is_empty()
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct ExportedFunction {
     pub name: String,
@@ -51,6 +76,13 @@ pub struct ExportedFunction {
     /// surface and use `required_scopes` alone. Empty for the common
     /// uniform case, keeping the per-method path zero-cost.
     pub method_scopes: BTreeMap<String, BTreeSet<String>>,
+    /// Declarative auth policy declared via `@policy(...)` — today, the set
+    /// of allowed principal kinds the dispatch must match, composing with
+    /// `required_scopes`. `None` when no `@policy` is present (or it parsed
+    /// to nothing effective). Consulted by the `harn serve site` admission
+    /// layer (after the scope check) and exposed for audit. See
+    /// [`RoutePolicy`].
+    pub policy: Option<RoutePolicy>,
     /// Rate / backpressure ceilings declared via `@limits(...)`. `None`
     /// when the route is unbounded — the dispatch path short-circuits
     /// cheaply when both `limits` and `budget` are absent.
@@ -272,6 +304,12 @@ pub const WS_WITHOUT_ROUTE: &str = "HARN-SRV-015";
 /// (`@ws` + `@stream` is *not* a conflict — it is the combined route that
 /// upgrades a genuine handshake and falls through to the stream otherwise.)
 pub const WS_CONFLICTS_WITH_STREAM_OR_RAW: &str = "HARN-SRV-016";
+/// `@policy(...)` carries an argument that is not the supported
+/// `kinds: "..."` string form (an unknown key, a positional argument, or a
+/// non-string value). The offending argument is dropped, leaving the
+/// route's principal-kind guard incomplete; any host-side defense-in-depth
+/// check still applies.
+pub const POLICY_BAD_ARGS: &str = "HARN-SRV-017";
 
 impl std::fmt::Display for ExportDiagnostic {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -331,6 +369,7 @@ impl ExportCatalog {
             }
 
             let scopes = scopes_from_attributes(attrs, name, &mut diagnostics);
+            let policy = policy_from_attributes(attrs, name, &mut diagnostics);
             let (limits, budget) = limits_and_budget_from_attributes(attrs);
             let route = route_from_attributes(attrs, name, &mut diagnostics);
             let stream = stream_from_attributes(attrs, name, route.as_ref(), &mut diagnostics);
@@ -349,6 +388,7 @@ impl ExportCatalog {
                         .and_then(harn_vm::json_schema_for_type_expr),
                     required_scopes: scopes.baseline,
                     method_scopes: scopes.per_method,
+                    policy,
                     limits,
                     budget,
                     route,
@@ -377,6 +417,7 @@ impl ExportCatalog {
                 continue;
             }
             let scopes = scopes_from_attributes(attrs, name, &mut diagnostics);
+            let policy = policy_from_attributes(attrs, name, &mut diagnostics);
             let (limits, budget) = limits_and_budget_from_attributes(attrs);
             // Pipelines never carry a route, so a `@stream` / `@raw` on
             // one is inert — diagnose it the same way as on an unrouted fn.
@@ -396,6 +437,7 @@ impl ExportCatalog {
                         .and_then(harn_vm::json_schema_for_type_expr),
                     required_scopes: scopes.baseline,
                     method_scopes: scopes.per_method,
+                    policy,
                     limits,
                     budget,
                     // Pipelines are dispatch-only; they never carry an
@@ -540,6 +582,49 @@ fn scopes_from_attributes(
         }
     }
     parsed
+}
+
+/// Parse `@policy(...)` declarations into a [`RoutePolicy`].
+///
+/// Today the only supported argument is `kinds: "operator team_admin"` — a
+/// whitespace-separated string of allowed principal kinds, unioned across
+/// repeated `@policy` attributes and repeated `kinds:` arguments. Any other
+/// argument shape (unknown key, positional, or non-string value) is dropped
+/// with a [`POLICY_BAD_ARGS`] diagnostic, leaving the route's principal-kind
+/// guard incomplete — mirroring how a dropped `@scopes` literal leaves the
+/// route less restricted. Returns `None` when no `@policy` is present, or
+/// when every declaration parsed to nothing effective (so the catalog's
+/// `policy` field means "has an effective policy").
+fn policy_from_attributes(
+    attrs: &[Attribute],
+    fn_name: &str,
+    diagnostics: &mut Vec<ExportDiagnostic>,
+) -> Option<RoutePolicy> {
+    let mut policy = RoutePolicy::default();
+    for attr in attrs {
+        if attr.name != "policy" {
+            continue;
+        }
+        for arg in &attr.args {
+            match (arg.name.as_deref(), &arg.value.node) {
+                (Some("kinds"), Node::StringLiteral(value) | Node::RawStringLiteral(value)) => {
+                    for kind in value.split_whitespace() {
+                        policy.allowed_kinds.insert(kind.to_string());
+                    }
+                }
+                _ => diagnostics.push(ExportDiagnostic {
+                    code: POLICY_BAD_ARGS,
+                    line: arg.span.line,
+                    message: format!(
+                        "`@policy` on `{fn_name}` accepts only `kinds: \"...\"` (a whitespace-separated \
+                         string of allowed principal kinds); dropping an unrecognized argument leaves \
+                         the route's principal-kind guard incomplete"
+                    ),
+                }),
+            }
+        }
+    }
+    (!policy.is_empty()).then_some(policy)
 }
 
 /// Split a `@scopes` literal into an optional `(METHOD, scope)` pair.
@@ -1560,6 +1645,72 @@ pub fn list_sessions() -> string { return "ok" }
             .find(|d| d.code == SCOPES_ARG_NOT_STRING)
             .expect("scopes diagnostic");
         assert!(diagnostic.message.contains("list_sessions"));
+    }
+
+    #[test]
+    fn policy_attribute_parses_allowed_kinds() {
+        let catalog = catalog_from_source(
+            r#"
+@scopes("admin:dlq:write")
+@policy(kinds: "operator platform_admin")
+@route("POST", "/admin/dlq/replay")
+pub fn replay_dlq(req: dict) -> dict { return req }
+"#,
+        );
+        assert!(
+            catalog.diagnostics().is_empty(),
+            "unexpected diagnostics: {:?}",
+            catalog.diagnostics()
+        );
+        let policy = catalog
+            .function("replay_dlq")
+            .expect("replay_dlq")
+            .policy
+            .as_ref()
+            .expect("policy present");
+        assert_eq!(
+            policy.allowed_kinds,
+            BTreeSet::from(["operator".to_string(), "platform_admin".to_string()])
+        );
+    }
+
+    #[test]
+    fn policy_without_attribute_leaves_policy_none() {
+        let catalog = catalog_from_source(
+            r#"
+@route("GET", "/open")
+pub fn open_route(req: dict) -> dict { return req }
+"#,
+        );
+        assert!(catalog
+            .function("open_route")
+            .expect("open_route")
+            .policy
+            .is_none());
+    }
+
+    #[test]
+    fn policy_with_unknown_arg_is_diagnosed_and_dropped() {
+        let catalog = catalog_from_source(
+            r#"
+@policy(roles: "operator")
+@route("POST", "/x")
+pub fn guarded(req: dict) -> dict { return req }
+"#,
+        );
+        // The unrecognized `roles:` key is dropped, leaving no effective
+        // policy — and a loud diagnostic is emitted.
+        assert!(catalog
+            .function("guarded")
+            .expect("guarded")
+            .policy
+            .is_none());
+        let diagnostic = catalog
+            .diagnostics()
+            .iter()
+            .find(|d| d.code == POLICY_BAD_ARGS)
+            .expect("policy diagnostic");
+        assert!(diagnostic.message.contains("guarded"));
     }
 
     #[test]

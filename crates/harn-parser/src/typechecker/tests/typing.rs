@@ -580,6 +580,55 @@ pipeline review_branch(task) {}
 }
 
 #[test]
+fn test_policy_attribute_is_recognized_and_validates_args() {
+    // A well-formed `@policy(kinds: ...)` is recognized (no unknown-attr
+    // warning) and clean.
+    let clean = warnings(
+        r#"
+@policy(kinds: "operator platform_admin")
+@route("POST", "/admin/x")
+fn admin_x(req) { return req }
+"#,
+    );
+    assert!(
+        clean
+            .iter()
+            .all(|w| !w.contains("unknown attribute") && !w.contains("@policy")),
+        "well-formed @policy should not warn: {clean:?}"
+    );
+
+    // An unknown key warns but the attribute is still recognized.
+    let bad_key = warnings(
+        r#"
+@policy(roles: "operator")
+@route("POST", "/admin/x")
+fn admin_x(req) { return req }
+"#,
+    );
+    assert!(
+        bad_key
+            .iter()
+            .any(|w| w.contains("unknown `@policy` argument `roles`")),
+        "expected unknown-arg warning, got {bad_key:?}"
+    );
+
+    // A non-string value warns.
+    let bad_value = warnings(
+        r#"
+@policy(kinds: 42)
+@route("POST", "/admin/x")
+fn admin_x(req) { return req }
+"#,
+    );
+    assert!(
+        bad_value
+            .iter()
+            .any(|w| w.contains("`@policy(kinds: ...)` must be a string literal")),
+        "expected non-string warning, got {bad_value:?}"
+    );
+}
+
+#[test]
 fn test_command_attribute_warns_on_function_decls() {
     let warns = warnings(
         r#"

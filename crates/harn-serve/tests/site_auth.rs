@@ -66,6 +66,13 @@ pub fn whoami_route(harness: Harness, req: dict) -> dict {
     "scopes": harness.auth.scopes(),
   })
 }
+
+@scopes("personas:read")
+@policy(kinds: "operator")
+@route("POST", "/operator/action")
+pub fn operator_action(req: dict) -> dict {
+  return http_ok({ "ok": true })
+}
 "#;
 
 /// `SiteAuth` hook that always admits with a fixed identity.
@@ -505,4 +512,59 @@ pub fn whoami_route(harness: Harness, req: dict) -> dict {
     assert_eq!(body["authed"], false);
     assert_eq!(body["subject"], Value::Null);
     assert_eq!(body["scopes"].as_array().expect("scopes array").len(), 0);
+}
+
+/// `@policy(kinds: "operator")` composes with `@scopes`: a principal that
+/// carries the scope *and* the allowed kind is admitted.
+#[tokio::test]
+async fn policy_kinds_admits_matching_principal_kind() {
+    let hook = Arc::new(AllowAuth {
+        scopes: &["personas:read"],
+        kind: Some("operator"),
+        ..Default::default()
+    });
+    let (_dir, router) = site_router(Some(hook), None);
+    let (status, body) = read_json(request(router, "POST", "/operator/action").await).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["ok"], true);
+}
+
+/// A principal with the required scope but a *disallowed* kind is refused
+/// at admission with a tenant-safe `forbidden_principal_kind` envelope
+/// that names the allowed kinds but never the caller's own kind.
+#[tokio::test]
+async fn policy_kinds_denies_wrong_principal_kind() {
+    let hook = Arc::new(AllowAuth {
+        scopes: &["personas:read"],
+        kind: Some("tenant"),
+        ..Default::default()
+    });
+    let (_dir, router) = site_router(Some(hook), None);
+    let (status, body) = read_json(request(router, "POST", "/operator/action").await).await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    assert_eq!(body["code"], "forbidden");
+    assert_eq!(body["details"]["kind"], "forbidden_principal_kind");
+    assert_eq!(body["details"]["allowed_kinds"][0], "operator");
+    // Tenant-safe: the denial never echoes the caller's own kind.
+    let rendered = body.to_string();
+    assert!(
+        !rendered.contains("tenant"),
+        "denial leaked caller kind: {rendered}"
+    );
+    assert!(body["request_id"].as_str().is_some());
+}
+
+/// A principal the embedder did not classify (no `kind`) can never satisfy
+/// a non-empty `@policy(kinds:)` allow-set — the gate fails closed.
+#[tokio::test]
+async fn policy_kinds_denies_unclassified_principal() {
+    let hook = Arc::new(AllowAuth {
+        scopes: &["personas:read"],
+        // no `kind` set
+        ..Default::default()
+    });
+    let (_dir, router) = site_router(Some(hook), None);
+    let (status, body) = read_json(request(router, "POST", "/operator/action").await).await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    assert_eq!(body["details"]["kind"], "forbidden_principal_kind");
 }

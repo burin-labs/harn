@@ -752,6 +752,13 @@ impl McpServer {
             Err(DispatchError::Forbidden { required, granted }) => {
                 forbidden_jsonrpc_error_response(job.request_id, &required, &granted)
             }
+            // `@policy(kinds:)` is a `harn serve site` admission gate; the
+            // MCP transport never raises it, but map it to the same
+            // authorization error code defensively, using its tenant-safe
+            // message.
+            Err(error @ DispatchError::ForbiddenPrincipalKind { .. }) => {
+                harn_vm::jsonrpc::error_response(job.request_id, -32001, &error.message())
+            }
             Err(DispatchError::MissingExport(message)) => {
                 harn_vm::jsonrpc::error_response(job.request_id, -32602, &message)
             }

@@ -14,6 +14,14 @@ pub enum DispatchError {
         required: BTreeSet<String>,
         granted: BTreeSet<String>,
     },
+    /// The caller authenticated and carries the required scopes, but their
+    /// principal `kind` is not in the route's `@policy(kinds: ...)`
+    /// allow-set. Adapters render this as HTTP 403. The body reports the
+    /// route's `allowed_kinds` (route configuration, not tenant data) but
+    /// never echoes the caller's own kind, keeping the denial tenant-safe.
+    ForbiddenPrincipalKind {
+        allowed: BTreeSet<String>,
+    },
     /// One of the route's declared rate-limit buckets (per-route /
     /// per-tenant / per-scope) or the backpressure watermark rejected
     /// this dispatch. Adapters render this as HTTP 429 with a
@@ -54,6 +62,7 @@ impl DispatchError {
             | Self::Io(message)
             | Self::Cache(message) => message.clone(),
             Self::Forbidden { required, granted } => forbidden_message(required, granted),
+            Self::ForbiddenPrincipalKind { allowed } => forbidden_principal_kind_message(allowed),
             Self::RateLimited {
                 scope,
                 retry_after_ms,
@@ -75,6 +84,22 @@ pub fn forbidden_message(required: &BTreeSet<String>, granted: &BTreeSet<String>
         "missing required scope".to_string()
     } else {
         format!("missing required scope(s): {}", missing.join(", "))
+    }
+}
+
+/// Render a stable, tenant-safe diagnostic for a `@policy(kinds: ...)`
+/// principal-kind denial. Names the route's allowed kinds (route config)
+/// but never the caller's own kind, so the text is safe to surface in
+/// logs, receipts, and the HTTP body without leaking identity detail.
+pub fn forbidden_principal_kind_message(allowed: &BTreeSet<String>) -> String {
+    if allowed.is_empty() {
+        "principal kind not permitted for this route".to_string()
+    } else {
+        let allowed: Vec<&str> = allowed.iter().map(String::as_str).collect();
+        format!(
+            "principal kind not permitted for this route; allowed: {}",
+            allowed.join(", ")
+        )
     }
 }
 
