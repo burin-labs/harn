@@ -582,7 +582,7 @@ mod tests {
         }
         async fn begin(&self, request: BeginAuthorization) -> Result<PendingAuthorization, String> {
             self.begin_calls.fetch_add(1, Ordering::SeqCst);
-            if self.begin_fails.iter().any(|u| *u == request.server_url) {
+            if self.begin_fails.contains(&request.server_url) {
                 return Err("discovery exploded".to_string());
             }
             let n = self.state_counter.fetch_add(1, Ordering::SeqCst);
@@ -591,7 +591,7 @@ mod tests {
                 authorize_url: format!("https://auth.example/authorize?state={state}"),
                 state,
                 redirect_uri: request.redirect_uri,
-                resource: request.server_url.clone(),
+                resource: request.server_url,
                 issuer: "https://auth.example".to_string(),
             })
         }
