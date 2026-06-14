@@ -290,6 +290,12 @@ impl AcpServer {
                 }
                 self.handle_mcp_authorize(&id, &params).await;
             }
+            "mcp/authorize_batch" | "harn.mcp.authorize_batch" => {
+                if self.reject_unauthenticated(&id) {
+                    return;
+                }
+                self.handle_mcp_authorize_batch(&id, &params).await;
+            }
             "mcp/oauth_callback" | "harn.mcp.oauth_callback" => {
                 if self.reject_unauthenticated(&id) {
                     return;

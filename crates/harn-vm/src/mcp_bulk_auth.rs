@@ -391,6 +391,18 @@ impl<E: OAuthFlowEngine> McpBulkAuth<E> {
             .unwrap_or_else(|poison| poison.into_inner())
             .len()
     }
+
+    /// Whether `state` belongs to a flow this driver began (and has not yet
+    /// completed). A surface that multiplexes single-URL and batch callbacks on
+    /// one channel uses this to route a captured `{ state, code }` to the driver
+    /// (so completion streams `Exchanging`/`Connected`) only when the state is
+    /// one of ours — otherwise it falls back to its per-flow path unchanged.
+    pub fn knows_state(&self, state: &str) -> bool {
+        self.pending
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner())
+            .contains_key(state)
+    }
 }
 
 /// Begin (or skip) one server, emitting its phase events. Free function so the
