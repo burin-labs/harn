@@ -97,6 +97,21 @@ pub async fn install_manifest_hooks(
     vm: &mut harn_vm::Vm,
     extensions: &RuntimeExtensions,
 ) -> Result<(), PackageError> {
+    install_manifest_hooks_with_mode(vm, extensions, false).await
+}
+
+/// Install manifest hooks. When `lazy` is set, each hook's handler closure
+/// is resolved on first fire (against the firing VM) instead of now — the
+/// resolution loads the handler module's whole import graph, which for
+/// burin-code is ~1s. Eager resolution made every harn test (even pure
+/// unit tests that never fire a hook) pay that cost during setup; the test
+/// runner therefore installs hooks lazily. Production callers stay eager so
+/// a misconfigured handler fails fast at startup, not mid-turn.
+pub async fn install_manifest_hooks_with_mode(
+    vm: &mut harn_vm::Vm,
+    extensions: &RuntimeExtensions,
+    lazy: bool,
+) -> Result<(), PackageError> {
     harn_vm::orchestration::clear_runtime_hooks();
     let mut loaded_exports: HashMap<ManifestModuleCacheKey, ManifestModuleExports> = HashMap::new();
     for hook in &extensions.hooks {
@@ -107,6 +122,25 @@ pub async fn install_manifest_hooks(
             )
             .into());
         };
+        if lazy {
+            let module_path = crate::package::manifest_module_source_path(
+                &hook.manifest_dir,
+                hook.package_name.as_deref(),
+                &hook.exports,
+                Some(module_name),
+            )?;
+            harn_vm::orchestration::register_vm_hook_lazy(
+                hook.event,
+                hook.pattern.clone(),
+                hook.handler.clone(),
+                harn_vm::orchestration::LazyVmHookHandler {
+                    manifest_dir: hook.manifest_dir.clone(),
+                    module_path,
+                    function_name: function_name.to_string(),
+                },
+            );
+            continue;
+        }
         let cache_key = (
             hook.manifest_dir.clone(),
             hook.package_name.clone(),
