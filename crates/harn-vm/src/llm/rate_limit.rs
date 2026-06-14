@@ -35,6 +35,23 @@ struct RateLimitRequest {
 }
 
 impl RateLimitRequest {
+    /// Charge GROSS projected tokens against TPM — this is intentional, not a
+    /// bug, and must not be "optimized" to net out prompt-cached tokens.
+    ///
+    /// `projected_input_tokens` is the whole prompt (system + every message +
+    /// tools) with no subtraction for prompt-cached prefixes. A reasonable
+    /// instinct is that re-sending a cached transcript prefix shouldn't count
+    /// against the per-minute token budget. It does: provider TPM enforcement
+    /// is on GROSS prompt tokens regardless of cache hits. Verified live
+    /// (2026-06-12) against Cerebras gpt-oss-120b — with 6400/6482 prompt
+    /// tokens served from cache (usage.prompt_tokens_details.cached_tokens),
+    /// the x-ratelimit-remaining-tokens-minute header still decremented by the
+    /// full ~6480 gross prompt tokens. Caching reduces BILLED cost (see
+    /// cost.rs, which does net out cache_read_tokens for dollars), not the rate
+    /// limit. Netting cached tokens out here would make the proactive limiter
+    /// UNDER-throttle and provoke provider 429s. The lever for cache-heavy,
+    /// growing-transcript workloads is footprint reduction (compaction / fewer
+    /// turns), not limiter accounting.
     fn for_llm_call(opts: &super::api::LlmCallOptions) -> Self {
         let projection = super::cost::project_llm_call_cost(opts, 0.0);
         Self {
