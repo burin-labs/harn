@@ -66,6 +66,7 @@ mod file_table;
 mod graph;
 mod imports;
 mod overlay;
+mod readonly;
 mod rename;
 mod snapshot;
 mod state;
@@ -89,6 +90,7 @@ pub use cypher::{CypherError, CypherRow, CypherValue};
 pub use file_table::{FileId, IndexedFile, IndexedSymbol};
 pub use graph::DepGraph;
 pub use overlay::{BranchOverlay, OverlayState};
+pub use readonly::ReadonlyRoots;
 pub use snapshot::{CodeIndexSnapshot, SnapshotMeta};
 pub use state::{BuildOutcome, IndexState};
 pub use symbol_graph::{Edge, EdgeKind, Node, NodeId, NodeKind, SymbolGraph};
@@ -106,6 +108,11 @@ pub use words::{WordHit, WordIndex};
 #[derive(Clone, Default)]
 pub struct CodeIndexCapability {
     index: SharedIndex,
+    /// Additive, read-only secondary roots (issue #2403 follow-up). Live
+    /// beside the primary slot; query/read_range merge them in but no
+    /// mutating builtin ever touches them, so indexing a dependency root
+    /// never clobbers the project index.
+    readonly: ReadonlyRoots,
     current_agent: Arc<Mutex<Option<AgentId>>>,
 }
 
@@ -115,6 +122,7 @@ impl CodeIndexCapability {
     pub fn new() -> Self {
         Self {
             index: Arc::new(Mutex::new(None)),
+            readonly: Arc::new(Mutex::new(Vec::new())),
             current_agent: Arc::new(Mutex::new(None)),
         }
     }
@@ -188,14 +196,21 @@ impl HostlibCapability for CodeIndexCapability {
     }
 
     fn register_builtins(&self, registry: &mut BuiltinRegistry) {
-        // Workspace queries (original 5).
-        register(
-            registry,
-            self.index.clone(),
-            builtins::BUILTIN_QUERY,
-            "query",
-            builtins::run_query,
-        );
+        // Workspace queries (original 5). `query` and `read_range` merge in
+        // the read-only secondary roots (issue #2403 follow-up), so they
+        // capture both the primary and the read-only cells.
+        {
+            let index = self.index.clone();
+            let readonly = self.readonly.clone();
+            let handler: SyncHandler =
+                Arc::new(move |args| builtins::run_query_merged(&index, Some(&readonly), args));
+            registry.register(RegisteredBuiltin {
+                name: builtins::BUILTIN_QUERY,
+                module: "code_index",
+                method: "query",
+                handler,
+            });
+        }
         register(
             registry,
             self.index.clone(),
@@ -224,6 +239,21 @@ impl HostlibCapability for CodeIndexCapability {
             "importers_of",
             builtins::run_importers_of,
         );
+
+        // Additive read-only secondary roots (issue #2403 follow-up).
+        // Captures the read-only cell directly — it never touches the
+        // primary index slot.
+        {
+            let readonly = self.readonly.clone();
+            let handler: SyncHandler =
+                Arc::new(move |args| readonly::run_add_readonly_roots(&readonly, args));
+            registry.register(RegisteredBuiltin {
+                name: readonly::BUILTIN_ADD_READONLY_ROOTS,
+                module: "code_index",
+                method: "add_readonly_roots",
+                handler,
+            });
+        }
 
         // File table accessors.
         register(
@@ -262,14 +292,22 @@ impl HostlibCapability for CodeIndexCapability {
             builtins::run_file_hash,
         );
 
-        // Cached read paths.
-        register(
-            registry,
-            self.index.clone(),
-            builtins::BUILTIN_READ_RANGE,
-            "read_range",
-            builtins::run_read_range,
-        );
+        // Cached read paths. `read_range` falls back to the read-only
+        // secondary roots (issue #2403 follow-up) so a symbol discovered in
+        // a dependency root can be read back.
+        {
+            let index = self.index.clone();
+            let readonly = self.readonly.clone();
+            let handler: SyncHandler = Arc::new(move |args| {
+                builtins::run_read_range_merged(&index, Some(&readonly), args)
+            });
+            registry.register(RegisteredBuiltin {
+                name: builtins::BUILTIN_READ_RANGE,
+                module: "code_index",
+                method: "read_range",
+                handler,
+            });
+        }
         register(
             registry,
             self.index.clone(),

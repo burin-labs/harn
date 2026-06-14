@@ -104,6 +104,8 @@ fn code_index_capability_registers_documented_methods() {
             "hostlib_code_index_stats",
             "hostlib_code_index_imports_for",
             "hostlib_code_index_importers_of",
+            // Additive read-only secondary roots (#2403 follow-up).
+            "hostlib_code_index_add_readonly_roots",
             // File table accessors (#776).
             "hostlib_code_index_path_to_id",
             "hostlib_code_index_id_to_path",
@@ -436,9 +438,10 @@ fn install_default_wires_every_module_into_a_vm() {
         ]
     );
     // Builtin count: 15 ast (incl. apply_node + insert_at_anchor) +
-    // 27 code_index + 2 scanner + 4 fs + 4 fs_snapshot + 2 fs_watch
-    // + 14 tools + 1 hostlib_enable + 4 secret_store = 73.
-    assert!(registry.builtins().len() >= 73);
+    // 28 code_index (incl. add_readonly_roots, #2403 follow-up) + 2 scanner
+    // + 4 fs + 4 fs_snapshot + 2 fs_watch + 14 tools + 1 hostlib_enable
+    // + 4 secret_store = 74.
+    assert!(registry.builtins().len() >= 74);
 }
 
 #[test]

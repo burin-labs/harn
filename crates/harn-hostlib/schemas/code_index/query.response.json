@@ -21,9 +21,13 @@
       "properties": {
         "path": { "type": "string" },
         "score": { "type": "number" },
-        "match_count": { "type": "integer", "minimum": 0 }
+        "match_count": { "type": "integer", "minimum": 0 },
+        "root": {
+          "type": ["string", "null"],
+          "description": "Absolute path of the read-only dependency root this hit came from (#2403 follow-up), or null for a primary-workspace hit."
+        }
       },
-      "required": ["path", "score", "match_count"],
+      "required": ["path", "score", "match_count", "root"],
       "additionalProperties": false
     }
   }

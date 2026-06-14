@@ -79,7 +79,16 @@ pub(super) const BUILTIN_FRESHNESS: &str = "hostlib_code_index_freshness";
 
 // === Search / rebuild / stats ===
 
-pub(super) fn run_query(index: &SharedIndex, args: &[VmValue]) -> Result<VmValue, HostlibError> {
+/// Shared body for `query`. When `readonly` is supplied, hits from every
+/// read-only secondary root (issue #2403 follow-up) are merged in after the
+/// primary index so library/dependency symbols are discoverable without
+/// clobbering the project index. Primary hits keep `root: nil`; read-only
+/// hits carry the absolute path of their dependency root.
+pub(super) fn run_query_merged(
+    index: &SharedIndex,
+    readonly: Option<&super::readonly::ReadonlyRoots>,
+    args: &[VmValue],
+) -> Result<VmValue, HostlibError> {
     let raw = dict_arg(BUILTIN_QUERY, args)?;
     let dict = raw.as_ref();
     let needle = require_string(BUILTIN_QUERY, dict, "needle")?;
@@ -94,33 +103,25 @@ pub(super) fn run_query(index: &SharedIndex, args: &[VmValue]) -> Result<VmValue
     let max_results = optional_positive_usize(BUILTIN_QUERY, dict, "max_results")?.unwrap_or(100);
     let scope = optional_string_list(BUILTIN_QUERY, dict, "scope")?;
 
-    let guard = index.lock().expect("code_index mutex poisoned");
-    let Some(state) = guard.as_ref() else {
-        return Ok(empty_query_response());
-    };
-
-    let candidate_ids = candidates_for(state, &needle);
     let mut hits: Vec<Hit> = Vec::new();
-    for id in candidate_ids {
-        let Some(file) = state.files.get(&id) else {
-            continue;
-        };
-        if !scope_allows(&scope, &file.relative_path) {
-            continue;
+    {
+        let guard = index.lock().expect("code_index mutex poisoned");
+        if let Some(state) = guard.as_ref() {
+            collect_hits_scoped(state, &needle, case_sensitive, &scope, &mut hits);
         }
-        let Some(text) = read_file_text(&state.root, &file.relative_path) else {
-            continue;
-        };
-        let count = count_matches(&text, &needle, case_sensitive);
-        if count == 0 {
-            continue;
-        }
-        hits.push(Hit {
-            path: file.relative_path.clone(),
-            score: count as f64,
-            match_count: count,
-        });
     }
+    if let Some(readonly) = readonly {
+        // Dependency roots ignore `scope` (it is a project-relative
+        // restriction) — they are an additive symbol-discovery surface.
+        if scope.is_empty() {
+            hits.extend(super::readonly::query_readonly_hits(
+                readonly,
+                &needle,
+                case_sensitive,
+            ));
+        }
+    }
+
     hits.sort_by(|a, b| {
         b.match_count
             .cmp(&a.match_count)
@@ -137,6 +138,57 @@ pub(super) fn run_query(index: &SharedIndex, args: &[VmValue]) -> Result<VmValue
         ),
         ("truncated", VmValue::Bool(truncated)),
     ]))
+}
+
+/// Score `needle` against every file in `state`, honoring `scope`, and push
+/// matching files onto `hits`. Hits are tagged with the index's root only
+/// when it is a read-only secondary root (the caller passes the primary
+/// index with an empty `scope` to leave `root: nil`).
+fn collect_hits_scoped(
+    state: &IndexState,
+    needle: &str,
+    case_sensitive: bool,
+    scope: &[String],
+    hits: &mut Vec<Hit>,
+) {
+    let candidate_ids = candidates_for(state, needle);
+    for id in candidate_ids {
+        let Some(file) = state.files.get(&id) else {
+            continue;
+        };
+        if !scope_allows(scope, &file.relative_path) {
+            continue;
+        }
+        let Some(text) = read_file_text(&state.root, &file.relative_path) else {
+            continue;
+        };
+        let count = count_matches(&text, needle, case_sensitive);
+        if count == 0 {
+            continue;
+        }
+        hits.push(Hit {
+            path: file.relative_path.clone(),
+            match_count: count,
+            root: None,
+        });
+    }
+}
+
+/// Read-only entry point used by [`super::readonly::query_readonly_hits`]:
+/// score `needle` against `state` (a dependency root) with no scope filter
+/// and tag every hit with the root's absolute path.
+pub(super) fn collect_hits_into(
+    state: &IndexState,
+    needle: &str,
+    case_sensitive: bool,
+    hits: &mut Vec<Hit>,
+) {
+    let before = hits.len();
+    collect_hits_scoped(state, needle, case_sensitive, &[], hits);
+    let root = state.root.to_string_lossy().to_string();
+    for hit in &mut hits[before..] {
+        hit.root = Some(root.clone());
+    }
 }
 
 pub(super) fn run_rebuild(index: &SharedIndex, args: &[VmValue]) -> Result<VmValue, HostlibError> {
@@ -396,8 +448,15 @@ pub(super) fn run_file_hash(
 
 // === Cached reads ===
 
-pub(super) fn run_read_range(
+/// Shared body for `read_range`. When `readonly` is supplied, a path that
+/// is not inside the primary workspace root is resolved against the
+/// read-only secondary roots (issue #2403 follow-up) so a symbol
+/// discovered in a dependency root can be read back. Resolution stays
+/// confined to a known indexed root in every case — arbitrary host paths
+/// are still rejected.
+pub(super) fn run_read_range_merged(
     index: &SharedIndex,
+    readonly: Option<&super::readonly::ReadonlyRoots>,
     args: &[VmValue],
 ) -> Result<VmValue, HostlibError> {
     let raw = dict_arg(BUILTIN_READ_RANGE, args)?;
@@ -405,20 +464,30 @@ pub(super) fn run_read_range(
     let path = require_string(BUILTIN_READ_RANGE, dict, "path")?;
     let start = optional_positive_i64(BUILTIN_READ_RANGE, dict, "start")?;
     let end = optional_positive_i64(BUILTIN_READ_RANGE, dict, "end")?;
-    let guard = index.lock().expect("code_index mutex poisoned");
-    let abs = match guard.as_ref() {
-        Some(state) => {
-            state
-                .absolute_path(&path)
+    let abs =
+        match readonly {
+            Some(readonly) => super::readonly::resolve_read_path(index, readonly, &path)
                 .ok_or_else(|| HostlibError::InvalidParameter {
                     builtin: BUILTIN_READ_RANGE,
                     param: "path",
-                    message: "path must stay within the indexed workspace root".to_string(),
-                })?
-        }
-        None => PathBuf::from(&path),
-    };
-    drop(guard);
+                    message: "path must stay within the indexed workspace root or a read-only \
+                          dependency root"
+                        .to_string(),
+                })?,
+            None => {
+                let guard = index.lock().expect("code_index mutex poisoned");
+                match guard.as_ref() {
+                    Some(state) => state.absolute_path(&path).ok_or_else(|| {
+                        HostlibError::InvalidParameter {
+                            builtin: BUILTIN_READ_RANGE,
+                            param: "path",
+                            message: "path must stay within the indexed workspace root".to_string(),
+                        }
+                    })?,
+                    None => PathBuf::from(&path),
+                }
+            }
+        };
 
     let content_result = match crate::fs::read_to_string(&abs, None) {
         Some(result) => result,
@@ -1215,22 +1284,31 @@ fn scope_allows(scope: &[String], relative: &str) -> bool {
         .any(|s| relative == s || relative.starts_with(&format!("{s}/")) || s.is_empty())
 }
 
-struct Hit {
-    path: String,
-    score: f64,
-    match_count: u64,
+pub(super) struct Hit {
+    pub(super) path: String,
+    pub(super) match_count: u64,
+    /// Absolute path of the read-only dependency root this hit came from,
+    /// or `None` for a primary-workspace hit (issue #2403 follow-up).
+    pub(super) root: Option<String>,
 }
 
 fn hit_to_value(hit: Hit) -> VmValue {
     let Hit {
         path,
-        score,
         match_count,
+        root,
     } = hit;
     build_dict([
         ("path", str_value(&path)),
-        ("score", VmValue::Float(score)),
+        ("score", VmValue::Float(match_count as f64)),
         ("match_count", VmValue::Int(match_count as i64)),
+        (
+            "root",
+            match root {
+                Some(r) => str_value(&r),
+                None => VmValue::Nil,
+            },
+        ),
     ])
 }
 
@@ -1246,13 +1324,6 @@ fn import_entry(module: &str, resolved: Option<&str>, kind: &str) -> VmValue {
     );
     map.insert("kind".into(), str_value(kind));
     VmValue::dict(map)
-}
-
-fn empty_query_response() -> VmValue {
-    build_dict([
-        ("results", VmValue::List(Arc::new(Vec::new()))),
-        ("truncated", VmValue::Bool(false)),
-    ])
 }
 
 fn empty_stats_response() -> VmValue {

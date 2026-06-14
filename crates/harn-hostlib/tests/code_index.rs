@@ -520,3 +520,249 @@ fn query_recall_gold_fixture_rare_symbol_and_definition_burial() {
         "definition recovered by recall@3, order {ranked:?}"
     );
 }
+
+// === Additive read-only secondary roots (issue #2403 follow-up) ===
+
+/// Build a tiny "dependency/SDK" root containing a symbol that exists
+/// nowhere in the project, mimicking e.g. the macOS IOKit header that
+/// declares `kIOPSTimeToFullChargeKey`.
+fn write_dep_root() -> tempfile::TempDir {
+    let dir = tempfile::tempdir().unwrap();
+    fs::create_dir_all(dir.path().join("IOKit")).unwrap();
+    fs::write(
+        dir.path().join("IOKit/IOPowerSources.h"),
+        "#define kIOPSTimeToFullChargeKey \"Time to Full Charge\"\n\
+         int IOPSGetTimeRemainingEstimate(void);\n",
+    )
+    .unwrap();
+    dir
+}
+
+/// Build a minimal project workspace with its own unique symbol.
+fn write_project_root() -> tempfile::TempDir {
+    let dir = tempfile::tempdir().unwrap();
+    fs::create_dir_all(dir.path().join("src")).unwrap();
+    fs::write(
+        dir.path().join("src/battery.rs"),
+        "pub fn project_only_symbol() -> i32 { 7 }\n",
+    )
+    .unwrap();
+    dir
+}
+
+fn query_roots(registry: &BuiltinRegistry, needle: &str) -> Vec<(String, Option<String>)> {
+    let resp = call(
+        registry,
+        "hostlib_code_index_query",
+        dict(&[("needle", VmValue::String(Arc::from(needle)))]),
+    );
+    let d = extract_dict(&resp);
+    extract_list(d.get("results").unwrap())
+        .iter()
+        .map(|hit| {
+            let hd = extract_dict(hit);
+            let path = extract_str(hd.get("path").unwrap());
+            let root = match hd.get("root") {
+                Some(VmValue::String(s)) => Some(s.to_string()),
+                _ => None,
+            };
+            (path, root)
+        })
+        .collect()
+}
+
+#[test]
+fn readonly_roots_do_not_clobber_the_project_index() {
+    let project = write_project_root();
+    let dep = write_dep_root();
+    let (registry, _cap) = build_registry();
+    call(
+        &registry,
+        "hostlib_code_index_rebuild",
+        dict(&[(
+            "root",
+            VmValue::String(Arc::from(project.path().to_string_lossy().to_string())),
+        )]),
+    );
+
+    // Project symbol is discoverable before adding dep roots.
+    assert!(
+        !query_roots(&registry, "project_only_symbol").is_empty(),
+        "project symbol must be indexed by rebuild"
+    );
+
+    let add = call(
+        &registry,
+        "hostlib_code_index_add_readonly_roots",
+        dict(&[(
+            "roots",
+            VmValue::List(Arc::new(vec![VmValue::String(Arc::from(
+                dep.path().to_string_lossy().to_string(),
+            ))])),
+        )]),
+    );
+    assert_eq!(
+        extract_int(extract_dict(&add).get("readonly_root_count").unwrap()),
+        1
+    );
+
+    // The project index SURVIVES — adding a dep root did not flip the slot.
+    let project_hits = query_roots(&registry, "project_only_symbol");
+    assert!(
+        project_hits
+            .iter()
+            .any(|(p, root)| p == "src/battery.rs" && root.is_none()),
+        "project symbol must still resolve against the primary index after \
+         adding dep roots, got {project_hits:?}"
+    );
+    // stats still reflect the project, not the dependency.
+    let stats = extract_dict(&call(&registry, "hostlib_code_index_stats", VmValue::Nil));
+    assert_eq!(
+        extract_int(stats.get("indexed_files").unwrap()),
+        1,
+        "primary stats must count only project files"
+    );
+}
+
+#[test]
+fn symbol_only_in_dep_root_is_found_via_query() {
+    let project = write_project_root();
+    let dep = write_dep_root();
+    let (registry, _cap) = build_registry();
+    call(
+        &registry,
+        "hostlib_code_index_rebuild",
+        dict(&[(
+            "root",
+            VmValue::String(Arc::from(project.path().to_string_lossy().to_string())),
+        )]),
+    );
+
+    // Before adding the dep root, the SDK symbol is undiscoverable.
+    assert!(
+        query_roots(&registry, "kIOPSTimeToFullChargeKey").is_empty(),
+        "dep symbol must not resolve before the dep root is added"
+    );
+
+    call(
+        &registry,
+        "hostlib_code_index_add_readonly_roots",
+        dict(&[(
+            "roots",
+            VmValue::List(Arc::new(vec![VmValue::String(Arc::from(
+                dep.path().to_string_lossy().to_string(),
+            ))])),
+        )]),
+    );
+
+    let hits = query_roots(&registry, "kIOPSTimeToFullChargeKey");
+    assert_eq!(
+        hits.len(),
+        1,
+        "dep symbol must resolve via read-only root, got {hits:?}"
+    );
+    let (path, root) = &hits[0];
+    assert_eq!(path, "IOKit/IOPowerSources.h");
+    assert!(
+        root.as_deref()
+            .is_some_and(|r| r.contains(dep.path().file_name().unwrap().to_str().unwrap())),
+        "dep hit must be tagged with its dependency root, got {root:?}"
+    );
+
+    // And the discovered file is readable back through read_range.
+    let read = call(
+        &registry,
+        "hostlib_code_index_read_range",
+        dict(&[("path", VmValue::String(Arc::from(path.as_str())))]),
+    );
+    let content = extract_str(extract_dict(&read).get("content").unwrap());
+    assert!(content.contains("kIOPSTimeToFullChargeKey"));
+}
+
+#[test]
+fn dep_root_path_is_read_only_writes_are_rejected() {
+    let project = write_project_root();
+    let dep = write_dep_root();
+    let (registry, _cap) = build_registry();
+    call(
+        &registry,
+        "hostlib_code_index_rebuild",
+        dict(&[(
+            "root",
+            VmValue::String(Arc::from(project.path().to_string_lossy().to_string())),
+        )]),
+    );
+    call(
+        &registry,
+        "hostlib_code_index_add_readonly_roots",
+        dict(&[(
+            "roots",
+            VmValue::List(Arc::new(vec![VmValue::String(Arc::from(
+                dep.path().to_string_lossy().to_string(),
+            ))])),
+        )]),
+    );
+
+    // reindex_file is a WRITE path scoped to the primary index — a dep-root
+    // path must be rejected (it is not inside the project root).
+    let dep_abs = dep.path().join("IOKit/IOPowerSources.h");
+    let reindex = registry
+        .find("hostlib_code_index_reindex_file")
+        .expect("registered");
+    let result = (reindex.handler)(&[dict(&[(
+        "path",
+        VmValue::String(Arc::from(dep_abs.to_string_lossy().to_string())),
+    )])]);
+    assert!(
+        result.is_err(),
+        "reindex_file must reject a dependency-root path (read-only scope), got {result:?}"
+    );
+}
+
+#[test]
+fn add_readonly_roots_is_idempotent() {
+    let project = write_project_root();
+    let dep = write_dep_root();
+    let (registry, _cap) = build_registry();
+    call(
+        &registry,
+        "hostlib_code_index_rebuild",
+        dict(&[(
+            "root",
+            VmValue::String(Arc::from(project.path().to_string_lossy().to_string())),
+        )]),
+    );
+
+    let dep_val = VmValue::List(Arc::new(vec![VmValue::String(Arc::from(
+        dep.path().to_string_lossy().to_string(),
+    ))]));
+    let first = call(
+        &registry,
+        "hostlib_code_index_add_readonly_roots",
+        dict(&[("roots", dep_val.clone())]),
+    );
+    let second = call(
+        &registry,
+        "hostlib_code_index_add_readonly_roots",
+        dict(&[("roots", dep_val)]),
+    );
+
+    // Re-adding the same root must not append a duplicate.
+    assert_eq!(
+        extract_int(extract_dict(&first).get("readonly_root_count").unwrap()),
+        1
+    );
+    assert_eq!(
+        extract_int(extract_dict(&second).get("readonly_root_count").unwrap()),
+        1,
+        "re-adding the same dep root must be idempotent, not duplicated"
+    );
+
+    // The symbol still resolves exactly once.
+    let hits = query_roots(&registry, "kIOPSTimeToFullChargeKey");
+    assert_eq!(
+        hits.len(),
+        1,
+        "idempotent re-add must not duplicate hits, got {hits:?}"
+    );
+}
