@@ -16,7 +16,6 @@
 
 #![cfg(any(target_os = "macos", target_os = "windows"))]
 
-use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
