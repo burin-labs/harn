@@ -8,6 +8,58 @@ highlights live in [CHANGELOG-pre-0.6.md](CHANGELOG-pre-0.6.md).
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.8.111
+
+### Added
+
+- **MCP authenticated-identity resolution (#3349).** New `harn_vm::mcp_identity`
+  turns the per-server identity recipes from the preset catalog into a
+  human-readable "logged in as …" string. The OAuth engine now captures the
+  non-credential extras a token endpoint returns (Notion, for one, inlines the
+  workspace + authorizing user) onto the stored token, so the headline
+  `token_response` source resolves with no extra network call. The bundled
+  Notion preset ships the first vetted descriptor; the preset-catalog schema is
+  now version 2.
+
+- **`harn mcp status` now shows who you're logged in as (#3350).** The status
+  report carries a `display_identity` field — "Jane Doe <jane@acme.com> — Acme",
+  for example — for connected servers with a vetted identity recipe and a
+  captured token payload (the `mcp status --json` schema is now version 3, and
+  the human output appends `as=…`). The ACP `mcp/oauth_callback` response gains a
+  `displayIdentity` so an embedding GUI can show it the moment a server connects.
+
+- **Bulk MCP OAuth driver + per-server status stream (#3355).** New
+  `harn_vm::mcp_bulk_auth` orchestrates authenticating *all* pending OAuth-backed
+  MCP servers at once on top of the unchanged per-server engine, and publishes a
+  per-server `McpAuthStatus` event stream (`discovering → awaiting_consent →
+  exchanging → connected/failed/skipped`). `prepare()` begins every selected
+  flow concurrently and returns the authorize URLs (keyed by OAuth `state`) for
+  a surface to open against one shared loopback listener; `complete()` routes
+  each captured callback back by `state`. Modes cover first-auth (`Missing`),
+  re-auth of stale tokens (`Expired`), and forced re-auth (`All`); concurrency
+  and per-server timeout are overlayable via `[bulk_auth]`
+  (`~/.config/harn/mcp_bulk_auth.toml`). The keystone for `mcp login --all`
+  (#3356), ACP `authorize_batch` (#3357), and bulk re-auth (#3358).
+
+- **`harn mcp login --all` / `--reauth` — bulk OAuth login (#3356).** Authenticate
+  every OAuth-backed MCP server in the nearest `harn.toml` in one command instead
+  of one `harn mcp login <server>` at a time. `--all` first-auths every
+  unconnected server; `--reauth` re-authenticates servers whose stored token has
+  expired or been revoked (`--all --reauth` force-reauths everything); `--only`
+  narrows the set and `--concurrency` overrides the prepare fan-out. One shared
+  loopback listener captures every redirect (demuxed by the OAuth `state`),
+  browser consents open serially to avoid a popup storm, and per-server progress
+  streams live (`--json` emits one status object per line). Built on the bulk
+  driver (#3355); single-server `harn mcp login <server>` is unchanged.
+
+- Added a `serving_precision` provider capability field (`trusted` / `degraded` /
+  `throttled` / `unverified`) so the capability matrix can label routes that serve
+  a model at degraded quality or unusable timing. Seeded the known gpt-oss-120b
+  verdicts (Fireworks + OpenRouter = trusted, SambaNova = degraded/quantized,
+  Cerebras = throttled) and exposed the field on `harn check --provider-matrix
+  --json`, giving the Burin meter precision canary a data-driven signal instead of
+  trusting provider liveness alone.
+
 ## v0.8.110
 
 ### Added
