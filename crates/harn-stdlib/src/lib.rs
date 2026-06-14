@@ -310,6 +310,10 @@ pub const STDLIB_SOURCES: &[StdlibSource] = &[
         source: include_str!("stdlib/llm/safe.harn"),
     },
     StdlibSource {
+        module: "harness/policy",
+        source: include_str!("stdlib/harness/policy.harn"),
+    },
+    StdlibSource {
         module: "llm/budget",
         source: include_str!("stdlib/llm/budget.harn"),
     },

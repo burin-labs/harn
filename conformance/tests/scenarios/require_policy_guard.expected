@@ -1,0 +1,3 @@
+[harn] kind deny ok
+[harn] scope deny ok
+[harn] noop allow ok
