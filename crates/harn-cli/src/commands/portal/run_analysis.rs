@@ -365,12 +365,7 @@ pub(super) fn build_run_summary(
             .unwrap_or_else(|| view.run.workflow_id.clone()),
         status: view.run.status.clone(),
         last_stage_node_id: view.stages.last().map(|stage| stage.node_id.clone()),
-        failure_summary: view.failure.as_ref().map(|failure| {
-            failure
-                .message
-                .clone()
-                .unwrap_or_else(|| failure.outcome.clone())
-        }),
+        failure_summary: view.failure.as_ref().map(portal_failure_summary),
         started_at: view.run.started_at.clone(),
         finished_at: view.run.finished_at.clone(),
         duration_ms: view.run.duration_ms,
@@ -382,6 +377,27 @@ pub(super) fn build_run_summary(
         models: view.usage.models.clone(),
         updated_at_ms,
         skills: extracted.active_skills,
+    }
+}
+
+fn portal_failure_summary(failure: &harn_vm::orchestration::RunViewFailure) -> String {
+    let detail = failure
+        .message
+        .clone()
+        .filter(|message| !message.is_empty())
+        .unwrap_or_else(|| failure.outcome.clone());
+    let Some(node_id) = failure
+        .node_id
+        .as_deref()
+        .filter(|node_id| !node_id.is_empty())
+    else {
+        return detail;
+    };
+    let fallback_prefix = format!("{node_id} failed");
+    if detail.starts_with(&fallback_prefix) {
+        detail
+    } else {
+        format!("{node_id} failed: {detail}")
     }
 }
 
