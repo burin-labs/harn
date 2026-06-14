@@ -1,9 +1,14 @@
 use std::io::{Read, Write};
 use std::net::TcpListener;
 use std::path::PathBuf;
+use std::time::{Duration, Instant};
 use std::{env, fs, process};
 
 use harn_vm::mcp_auth::OAuthClientAuthMode;
+use harn_vm::mcp_bulk_auth::{
+    BulkAuthConfig, BulkAuthMode, BulkAuthServer, McpAuthPhase, McpAuthStatus, McpBulkAuth,
+    PrepareOutcome, RealOAuthFlowEngine,
+};
 use harn_vm::mcp_oauth::{self, BeginAuthorization};
 use serde::{Deserialize, Serialize};
 use url::Url;
@@ -408,6 +413,10 @@ pub(crate) async fn resolve_auth_for_server(
 /// All OAuth state lives in [`harn_vm::mcp_oauth`]; this command only owns the
 /// browser + loopback IO.
 async fn login(options: &McpLoginArgs) -> Result<(), String> {
+    if options.all || options.reauth {
+        return login_bulk(options).await;
+    }
+
     let server = resolve_server_reference(&McpServerRefArgs {
         target: options.target.clone(),
         url: options.url.clone(),
@@ -463,6 +472,340 @@ async fn login(options: &McpLoginArgs) -> Result<(), String> {
         .await?;
     println!("OAuth token stored for {}.", server.name);
     Ok(())
+}
+
+/// Stagger between opening consecutive browser consents so a bulk login does
+/// not trigger a popup storm (open the next tab shortly after the previous).
+const BROWSER_OPEN_STAGGER_MS: u64 = 400;
+/// Overall budget for collecting all callbacks in a bulk login.
+const BULK_CALLBACK_TIMEOUT_SECS: u64 = 300;
+
+/// Bulk login: authenticate every (selected) OAuth-backed MCP server in the
+/// nearest `harn.toml` at once, driven by [`McpBulkAuth`]. One shared loopback
+/// listener captures every redirect (demuxed by the OAuth `state`); browser
+/// consents are opened serially to avoid a popup storm; per-server status
+/// streams to the terminal as each flow advances.
+async fn login_bulk(options: &McpLoginArgs) -> Result<(), String> {
+    let mode = match (options.all, options.reauth) {
+        (true, true) => BulkAuthMode::All,
+        (false, true) => BulkAuthMode::Expired,
+        _ => BulkAuthMode::Missing,
+    };
+    let servers = enumerate_oauth_servers(&options.only).await?;
+    if servers.is_empty() {
+        if !options.json {
+            println!("No OAuth-backed [[mcp]] servers found in the nearest harn.toml.");
+        }
+        return Ok(());
+    }
+    if !options.json {
+        let verb = if mode == BulkAuthMode::Expired {
+            "Re-authenticating"
+        } else {
+            "Authenticating"
+        };
+        println!(
+            "{verb} {} OAuth-backed MCP server(s) via {}…",
+            servers.len(),
+            options.redirect_uri
+        );
+    }
+
+    let listener = bind_callback_listener(&options.redirect_uri)?;
+    let expected_path = Url::parse(&options.redirect_uri)
+        .map_err(|error| format!("Invalid redirect URI: {error}"))?
+        .path()
+        .to_string();
+
+    let mut config = BulkAuthConfig::load();
+    if let Some(concurrency) = options.concurrency {
+        config.concurrency = concurrency.max(1);
+    }
+    let driver = McpBulkAuth::with_engine(RealOAuthFlowEngine, config);
+    let json = options.json;
+    let mut rx = driver.subscribe();
+    let printer = tokio::spawn(async move {
+        loop {
+            match rx.recv().await {
+                Ok(status) => print_bulk_status(&status, json),
+                Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
+                Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+            }
+        }
+    });
+
+    let outcomes = driver.prepare(servers, mode, &options.redirect_uri).await;
+    let mut pending = Vec::new();
+    let mut skipped = 0usize;
+    let mut failed = 0usize;
+    for outcome in outcomes {
+        match outcome {
+            PrepareOutcome::Pending(flow) => pending.push(flow),
+            PrepareOutcome::Skipped { .. } => skipped += 1,
+            PrepareOutcome::Failed { .. } => failed += 1,
+        }
+    }
+
+    if pending.is_empty() {
+        drop(driver);
+        let _ = printer.await;
+        if !json {
+            println!(
+                "\nNothing to authorize: {skipped} already satisfied, {failed} failed to prepare."
+            );
+        }
+        return Ok(());
+    }
+
+    // Open each consent serially (stagger to avoid a popup storm). All flows
+    // share the one listener; callbacks are demuxed by `state`.
+    for flow in &pending {
+        if webbrowser::open(&flow.authorize_url).is_err() && !json {
+            println!(
+                "Open this URL to authorize {}:\n  {}",
+                flow.name, flow.authorize_url
+            );
+        }
+        tokio::time::sleep(Duration::from_millis(BROWSER_OPEN_STAGGER_MS)).await;
+    }
+
+    let deadline = Instant::now() + Duration::from_secs(BULK_CALLBACK_TIMEOUT_SECS);
+    let mut remaining = pending.len();
+    let mut connected = 0usize;
+    // `failed` already counts prepare-time failures; callback failures add on.
+    while remaining > 0 {
+        match accept_bulk_callback(&listener, &expected_path, deadline).await? {
+            None => break,
+            Some(BulkCallback::WrongPath) => continue,
+            Some(BulkCallback::Denied { .. }) => {
+                failed += 1;
+                remaining -= 1;
+            }
+            Some(BulkCallback::Code {
+                state,
+                code,
+                issuer,
+            }) => {
+                match driver.complete(&state, &code, issuer.as_deref()).await {
+                    Ok(_) => connected += 1,
+                    // The driver already streamed the Failed status with detail.
+                    Err(_) => failed += 1,
+                }
+                remaining -= 1;
+            }
+        }
+    }
+
+    drop(driver);
+    let _ = printer.await;
+    if !json {
+        println!(
+            "\nBulk login complete: {connected} connected, {skipped} skipped, {failed} failed, {remaining} pending."
+        );
+        if remaining > 0 {
+            println!(
+                "Timed out after {BULK_CALLBACK_TIMEOUT_SECS}s waiting for {remaining} consent(s). Re-run with --reauth to retry."
+            );
+        }
+    }
+    Ok(())
+}
+
+/// Collect the OAuth-backed MCP servers from the nearest manifest, optionally
+/// filtered to `only` names, resolving each server's BYO client secret (when it
+/// declares one) the same way the single-server login does.
+async fn enumerate_oauth_servers(only: &[String]) -> Result<Vec<BulkAuthServer>, String> {
+    // No manifest is "no servers", not a hard error — bulk login over an empty
+    // set just reports there is nothing to do (mirrors `mcp status`).
+    let manifest = match find_manifest() {
+        Ok((_, manifest)) => manifest,
+        Err(_) => return Ok(Vec::new()),
+    };
+    let mut out = Vec::new();
+    for server in manifest.mcp {
+        if !is_oauth_server(&server) {
+            continue;
+        }
+        if !only.is_empty() && !only.iter().any(|name| name == &server.name) {
+            continue;
+        }
+        let client_secret = match server
+            .auth
+            .as_ref()
+            .and_then(|auth| auth.client_secret_id.as_deref())
+        {
+            Some(secret_id) => {
+                Some(crate::commands::connect::store::load_connect_secret_text(secret_id).await?)
+            }
+            None => server.client_secret.clone(),
+        };
+        out.push(BulkAuthServer {
+            name: server.name.clone(),
+            server_url: server.url.clone(),
+            mode: server.auth.as_ref().and_then(|auth| auth.mode),
+            client_id: server
+                .auth
+                .as_ref()
+                .and_then(|auth| auth.client_id.clone())
+                .or(server.client_id.clone()),
+            client_secret,
+            static_secret_id: server.auth.as_ref().and_then(|auth| auth.secret_id.clone()),
+            scopes: server
+                .auth
+                .as_ref()
+                .and_then(|auth| auth.scopes.clone())
+                .or(server.scopes.clone()),
+        });
+    }
+    Ok(out)
+}
+
+/// Whether a manifest server is authenticated by an interactive OAuth flow (so
+/// bulk login should drive it): an HTTP server with a URL and no static bearer.
+fn is_oauth_server(server: &McpServerConfig) -> bool {
+    let transport = server.transport.as_deref().unwrap_or("stdio");
+    if transport != "http" || server.url.is_empty() {
+        return false;
+    }
+    if server.auth_token.as_deref().is_some_and(|t| !t.is_empty()) {
+        return false;
+    }
+    if let Some(auth) = &server.auth {
+        if auth.mode == Some(OAuthClientAuthMode::Static) || auth.secret_id.is_some() {
+            return false;
+        }
+    }
+    true
+}
+
+/// One parsed bulk-login redirect.
+enum BulkCallback {
+    Code {
+        state: String,
+        code: String,
+        issuer: Option<String>,
+    },
+    Denied {
+        #[allow(dead_code)]
+        error: String,
+    },
+    WrongPath,
+}
+
+/// Accept one callback on the shared listener without blocking the runtime,
+/// returning `None` once `deadline` passes. Unlike the single-login path this
+/// does not validate `state` — the driver demuxes by it.
+async fn accept_bulk_callback(
+    listener: &TcpListener,
+    expected_path: &str,
+    deadline: Instant,
+) -> Result<Option<BulkCallback>, String> {
+    listener
+        .set_nonblocking(true)
+        .map_err(|error| format!("Failed to configure redirect listener: {error}"))?;
+    loop {
+        match listener.accept() {
+            Ok((mut stream, _)) => {
+                stream.set_nonblocking(false).ok();
+                return Ok(Some(read_bulk_callback(&mut stream, expected_path)?));
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                if Instant::now() >= deadline {
+                    return Ok(None);
+                }
+                tokio::time::sleep(Duration::from_millis(200)).await;
+            }
+            Err(error) => return Err(format!("Failed to accept OAuth callback: {error}")),
+        }
+    }
+}
+
+fn read_bulk_callback(
+    stream: &mut std::net::TcpStream,
+    expected_path: &str,
+) -> Result<BulkCallback, String> {
+    let mut buffer = [0u8; 8192];
+    let bytes_read = stream
+        .read(&mut buffer)
+        .map_err(|error| format!("Failed to read OAuth callback: {error}"))?;
+    let request = String::from_utf8_lossy(&buffer[..bytes_read]);
+    let request_line = request
+        .lines()
+        .next()
+        .ok_or_else(|| "OAuth callback request was empty".to_string())?;
+    let path_and_query = request_line
+        .split_whitespace()
+        .nth(1)
+        .ok_or_else(|| "OAuth callback request line was invalid".to_string())?;
+    let callback_url = Url::parse(&format!("http://127.0.0.1{path_and_query}"))
+        .map_err(|error| format!("OAuth callback URL was invalid: {error}"))?;
+
+    if callback_url.path() != expected_path {
+        let _ = stream.write_all(html_response(404, "Invalid callback path").as_bytes());
+        return Ok(BulkCallback::WrongPath);
+    }
+    let query = parse_callback_query(&callback_url);
+    if let Some(error) = query_get(&query, "error") {
+        let _ = stream
+            .write_all(html_response(400, &format!("Authorization failed: {error}")).as_bytes());
+        return Ok(BulkCallback::Denied { error });
+    }
+    let Some(code) = query_get(&query, "code") else {
+        let _ = stream.write_all(html_response(400, "Missing authorization code").as_bytes());
+        return Ok(BulkCallback::Denied {
+            error: "missing authorization code".to_string(),
+        });
+    };
+    let Some(state) = query_get(&query, "state") else {
+        let _ = stream.write_all(html_response(400, "Missing state").as_bytes());
+        return Ok(BulkCallback::Denied {
+            error: "missing state".to_string(),
+        });
+    };
+    let _ = stream.write_all(
+        html_response(200, "Authorization complete. You can close this window.").as_bytes(),
+    );
+    Ok(BulkCallback::Code {
+        state,
+        code,
+        issuer: query_get(&query, "iss"),
+    })
+}
+
+fn parse_callback_query(url: &Url) -> Vec<(String, String)> {
+    url.query_pairs()
+        .map(|(key, value)| (key.into_owned(), value.into_owned()))
+        .collect()
+}
+
+fn query_get(query: &[(String, String)], key: &str) -> Option<String> {
+    query
+        .iter()
+        .find(|(name, _)| name == key)
+        .map(|(_, value)| value.clone())
+}
+
+fn print_bulk_status(status: &McpAuthStatus, json: bool) {
+    if json {
+        if let Ok(line) = serde_json::to_string(status) {
+            println!("{line}");
+        }
+        return;
+    }
+    let (symbol, label) = match status.phase {
+        McpAuthPhase::Discovering => ("→", "discovering"),
+        McpAuthPhase::AwaitingConsent => ("→", "awaiting consent"),
+        McpAuthPhase::Exchanging => ("→", "exchanging"),
+        McpAuthPhase::Connected => ("✓", "connected"),
+        McpAuthPhase::Failed => ("✗", "failed"),
+        McpAuthPhase::Skipped => ("·", "skipped"),
+    };
+    let detail = status
+        .detail
+        .as_deref()
+        .map(|detail| format!(" ({detail})"))
+        .unwrap_or_default();
+    println!("  {symbol} {}: {label}{detail}", status.server);
 }
 
 fn resolve_server_reference(server_ref: &McpServerRefArgs) -> Result<ResolvedMcpServer, String> {
@@ -757,6 +1100,67 @@ mod tests {
 
     fn parse_server(toml_table: &str) -> McpServerConfig {
         toml::from_str::<McpServerConfig>(toml_table).expect("mcp server config")
+    }
+
+    #[test]
+    fn oauth_server_classification() {
+        let oauth = parse_server(
+            "name = \"notion\"\ntransport = \"http\"\nurl = \"https://mcp.notion.com/mcp\"\n",
+        );
+        assert!(is_oauth_server(&oauth), "http server with a url is OAuth");
+
+        let stdio = parse_server("name = \"fs\"\ntransport = \"stdio\"\ncommand = \"npx\"\n");
+        assert!(!is_oauth_server(&stdio), "stdio is not OAuth");
+
+        let static_bearer = parse_server(
+            "name = \"api\"\ntransport = \"http\"\nurl = \"https://mcp.example/mcp\"\nauth_token = \"static\"\n",
+        );
+        assert!(
+            !is_oauth_server(&static_bearer),
+            "a static bearer token is not interactive OAuth"
+        );
+
+        let static_secret = parse_server(
+            "name = \"api\"\ntransport = \"http\"\nurl = \"https://mcp.example/mcp\"\n[auth]\nsecret_id = \"my-secret\"\n",
+        );
+        assert!(
+            !is_oauth_server(&static_secret),
+            "an [auth].secret_id static token is not interactive OAuth"
+        );
+
+        let no_url = parse_server("name = \"x\"\ntransport = \"http\"\n");
+        assert!(!is_oauth_server(&no_url), "http without a url is not OAuth");
+    }
+
+    #[test]
+    fn callback_query_parsing_extracts_code_state_issuer() {
+        let url = Url::parse(
+            "http://127.0.0.1:9783/oauth/callback?code=abc&state=xyz&iss=https%3A%2F%2Fauth.example",
+        )
+        .unwrap();
+        let query = parse_callback_query(&url);
+        assert_eq!(query_get(&query, "code").as_deref(), Some("abc"));
+        assert_eq!(query_get(&query, "state").as_deref(), Some("xyz"));
+        assert_eq!(
+            query_get(&query, "iss").as_deref(),
+            Some("https://auth.example")
+        );
+        assert!(query_get(&query, "error").is_none());
+    }
+
+    #[test]
+    fn bulk_status_json_is_one_line_per_event() {
+        let status = McpAuthStatus {
+            server: "Notion".to_string(),
+            server_url: "https://mcp.notion.com/mcp".to_string(),
+            phase: McpAuthPhase::Connected,
+            detail: None,
+        };
+        let line = serde_json::to_string(&status).expect("serialize status");
+        assert!(!line.contains('\n'), "one status per line");
+        let value: serde_json::Value = serde_json::from_str(&line).unwrap();
+        assert_eq!(value["phase"], serde_json::json!("connected"));
+        assert_eq!(value["server"], serde_json::json!("Notion"));
     }
 
     #[tokio::test]
