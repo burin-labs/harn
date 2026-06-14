@@ -38,6 +38,32 @@ prefers_role_developer = false
 prefers_xml_tools = false
 thinking_block_style = "inline"
 
+# DeepInfra-hosted GPT-OSS is the same Harmony model as cerebras/fireworks
+# gpt-oss-120b. Placed BEFORE the catch-all `*` rule (first match wins) so it
+# does not fall through to the non-reasoning default — without it
+# `reasoning_required_for_tools` resolves OFF and the eval loop bills a
+# noncommittal because gpt-oss calls tools INSIDE the chain-of-thought channel.
+# Mirror the Cerebras gpt-oss row: NATIVE tools, reasoning-effort thinking
+# {low, medium, high}, `reasoning_required_for_tools = true`. Must NOT carry a
+# Qwen-style `auto_reasoning_overrides = "off"`.
+[[provider.deepinfra]]
+model_match = "*gpt-oss*"
+native_tools = true
+preferred_tool_format = "native"
+structured_output = "native"
+thinking_modes = ["effort"]
+reasoning_effort_supported = true
+reasoning_effort_levels = ["low", "medium", "high"]
+reasoning_required_for_tools = true
+text_tool_wire_format_supported = true
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "native_json"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "reasoning_summary"
+
 [[provider.deepinfra]]
 model_match = "*"
 native_tools = true
