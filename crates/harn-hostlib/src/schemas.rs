@@ -314,6 +314,19 @@ pub const SCHEMAS: &[(&str, &str, SchemaKind, &str)] = &[
         SchemaKind::Response,
         include_str!("../schemas/code_index/importers_of.response.json"),
     ),
+    // code_index — additive read-only secondary roots (#2403 follow-up)
+    (
+        "code_index",
+        "add_readonly_roots",
+        SchemaKind::Request,
+        include_str!("../schemas/code_index/add_readonly_roots.request.json"),
+    ),
+    (
+        "code_index",
+        "add_readonly_roots",
+        SchemaKind::Response,
+        include_str!("../schemas/code_index/add_readonly_roots.response.json"),
+    ),
     // code_index — file table accessors
     (
         "code_index",
