@@ -4,6 +4,7 @@ mod env;
 mod error;
 mod handles;
 pub(crate) mod recursion;
+mod storage_json;
 mod structural;
 
 pub type VmMutex<T> = parking_lot::Mutex<T>;
@@ -22,6 +23,7 @@ pub use handles::{
     VmAtomicHandle, VmChannelCloseState, VmChannelHandle, VmGenerator, VmJoinHandle, VmRange,
     VmRngHandle, VmStream, VmStreamCancel, VmSyncPermitHandle, VmTaskHandle,
 };
+pub(crate) use storage_json::vm_to_storage_json;
 pub use structural::{
     compare_values, dedup_values, try_compare_values, value_identity_key,
     value_structural_hash_key, values_equal, values_identical,

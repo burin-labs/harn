@@ -471,26 +471,7 @@ fn namespace_path_component(namespace: &str) -> String {
     }
 }
 
-fn vm_to_json(val: &VmValue) -> serde_json::Value {
-    match val {
-        VmValue::String(s) => serde_json::Value::String(s.to_string()),
-        VmValue::Int(n) => serde_json::json!(*n),
-        VmValue::Float(n) => serde_json::json!(*n),
-        // Decimal serializes as a string to preserve exact precision.
-        VmValue::Decimal(d) => serde_json::json!(d.to_string()),
-        VmValue::Bool(b) => serde_json::Value::Bool(*b),
-        VmValue::Nil => serde_json::Value::Null,
-        VmValue::List(items) => serde_json::Value::Array(items.iter().map(vm_to_json).collect()),
-        VmValue::Dict(map) => {
-            let obj: serde_json::Map<String, serde_json::Value> = map
-                .iter()
-                .map(|(k, v)| (k.clone(), vm_to_json(v)))
-                .collect();
-            serde_json::Value::Object(obj)
-        }
-        _ => serde_json::Value::Null,
-    }
-}
+use crate::value::vm_to_storage_json as vm_to_json;
 
 fn json_to_vm(jv: &serde_json::Value) -> VmValue {
     match jv {
