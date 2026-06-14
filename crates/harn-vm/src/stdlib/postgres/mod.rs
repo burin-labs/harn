@@ -1572,9 +1572,11 @@ fn column_value(row: &PgRow, index: usize, type_name: &str) -> Result<VmValue, V
             row.try_get::<f32, _>(index).map_err(decode_error)?,
         )),
         "FLOAT8" => VmValue::Float(row.try_get::<f64, _>(index).map_err(decode_error)?),
-        // Harn has no Decimal type — surface NUMERIC as its canonical
-        // textual representation so downstream JSON / Decimal callers can
-        // round-trip without precision loss.
+        // NUMERIC decodes to its canonical textual representation (not the
+        // `decimal` type) for backward compatibility — existing data-access
+        // code reads money columns as `::text`. Wrap the text in `decimal(...)`
+        // to get an exact decimal value. (The bind path above DOES accept a
+        // `decimal` and encodes it to NUMERIC natively.)
         "NUMERIC" => VmValue::String(std::sync::Arc::from(
             row.try_get::<rust_decimal::Decimal, _>(index)
                 .map_err(decode_error)?

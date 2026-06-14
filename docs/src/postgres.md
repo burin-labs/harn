@@ -79,14 +79,18 @@ let receipt = pg_query_one(
 )
 ```
 
-Primitive Harn values bind as booleans, integers, floats, text, bytea, or null.
-Lists, dicts, structs, sets, and other compound values bind as JSON.
+Primitive Harn values bind as booleans, integers, floats, text, bytea, or null;
+a `decimal` binds natively to a `NUMERIC`/`DECIMAL` column (exact, no float
+round-trip). Lists, dicts, structs, sets, and other compound values bind as JSON.
 
 Rows decode into dictionaries keyed by column name. Built-in decoding covers
 nulls, booleans, integer and float types, text, `uuid`, `json`/`jsonb`, `bytea`,
 `date`, `time`, `timestamp`, `timestamptz`, common arrays, `hstore`, range
 types, and Postgres geometric types. Unknown types are decoded as text when the
-Postgres driver can expose them that way.
+Postgres driver can expose them that way. **`NUMERIC`/`DECIMAL` decodes as a
+string** (not a `decimal`) for backward compatibility — wrap it in `decimal(...)`
+when you need exact arithmetic. So binding is decimal-aware while reading stays
+text; this asymmetry is intentional.
 
 ## Query ergonomics
 

@@ -6,6 +6,8 @@ pub(crate) fn vm_value_to_serde(val: &VmValue) -> serde_json::Value {
         VmValue::String(s) => serde_json::Value::String(s.to_string()),
         VmValue::Int(n) => serde_json::json!(*n),
         VmValue::Float(n) => serde_json::json!(*n),
+        // Decimal as a string to preserve exact precision (was silently `null`).
+        VmValue::Decimal(d) => serde_json::Value::String(d.to_string()),
         VmValue::Bool(b) => serde_json::Value::Bool(*b),
         VmValue::Nil => serde_json::Value::Null,
         VmValue::List(items) => {

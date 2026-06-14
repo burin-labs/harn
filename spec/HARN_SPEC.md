@@ -1098,7 +1098,8 @@ unresolved import itself still surfaces via the runtime loader.
 | `bytes` | builtin-produced | Immutable byte buffer |
 | `int` | `42` | Platform-width integer |
 | `float` | `3.14` | Double-precision float |
-| `number` | `42` / `3.14` | Built-in alias for `int \| float` |
+| `decimal` | `decimal("0.10")` | Exact base-10 number (96-bit) for money/precise arithmetic. No literal syntax — constructed via the `decimal()` builtin. Arithmetic promotes `int` exactly but never mixes with `float` (a type error); equality/ordering compare only against `decimal` (scale-insensitive). Excluded from the `number` alias. |
+| `number` | `42` / `3.14` | Built-in alias for `int \| float` (does **not** include `decimal`) |
 | `bool` | `true` / `false` | Boolean |
 | `nil` | `nil` | Null value |
 | `list` | `[1, 2, 3]` | Ordered collection |

@@ -465,17 +465,10 @@ impl Debugger {
             .and_then(|s| s.strip_suffix(')'))
         {
             let val = self.resolve_expression(inner)?;
-            let type_name = match &val {
-                VmValue::Int(_) => "int",
-                VmValue::Float(_) => "float",
-                VmValue::String(_) => "string",
-                VmValue::Bool(_) => "bool",
-                VmValue::Nil => "nil",
-                VmValue::List(_) => "list",
-                VmValue::Dict(_) => "dict",
-                _ => "unknown",
-            };
-            return Some(VmValue::String(std::sync::Arc::from(type_name)));
+            // Delegate to the canonical type name so the debugger watch matches
+            // the language's `type_of` for every kind (decimal, duration, set,
+            // …), instead of a hardcoded subset that returned "unknown".
+            return Some(VmValue::String(std::sync::Arc::from(val.type_name())));
         }
 
         // Tokenize into a path of `Field(name)` and `Index(n)` segments.
