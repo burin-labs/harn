@@ -188,3 +188,33 @@ skill release {
         (string_delimiter)
         (string_content)
         (string_delimiter)))))
+
+==================
+Attribute followed by doc comment then declaration
+==================
+
+@complexity(allow)
+/**
+ * doc
+ */
+pub fn foo(raw) {
+  return 1
+}
+
+---
+
+(source_file
+  (attributed_declaration
+    (attribute
+      name: (identifier)
+      (attribute_arg
+        (identifier)))
+    (comment)
+    (fn_declaration
+      name: (identifier)
+      (parameter_list
+        (typed_parameter
+          name: (identifier)))
+      body: (block
+        (return_statement
+          (integer_literal))))))
