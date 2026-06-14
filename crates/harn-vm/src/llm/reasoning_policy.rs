@@ -723,13 +723,8 @@ auto_reasoning_overrides = { agent = "off" }
         crate::llm::capabilities::clear_user_overrides();
     }
 
-    fn agent_opts(
-        provider: &str,
-        model: &str,
-        task: &str,
-        policy: &str,
-    ) -> BTreeMap<String, VmValue> {
-        BTreeMap::from([
+    fn agent_opts(provider: &str, model: &str, task: &str, policy: &str) -> crate::value::DictMap {
+        crate::value::DictMap::from_iter([
             (
                 "provider".to_string(),
                 VmValue::String(std::sync::Arc::from(provider)),
