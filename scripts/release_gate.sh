@@ -142,7 +142,13 @@ run_grammar_audit() {
     return 1
   fi
   time_phase "verify_release_metadata" cargo run --quiet --bin harn -- run scripts/verify_release_metadata.harn
-  time_phase "sync_language_spec" cargo run --quiet --bin harn -- run scripts/sync_language_spec.harn
+  # NOTE: `sync_language_spec` is intentionally NOT run here. It is the docs
+  # mirror writer (spec/HARN_SPEC.md -> docs/src/language-spec.md) and already
+  # runs in `run_docs_audit`, which executes in a sibling parallel lane. Running
+  # it in both lanes both duplicated ~72s of work and raced two writers on the
+  # same `docs/src/language-spec.md` output. `verify_language_spec` below reads
+  # the canonical spec source directly (SPEC_PATH = spec/HARN_SPEC.md), not the
+  # mirror, so it does not depend on the sync having run in this lane.
   time_phase "verify_language_spec" cargo run --quiet --bin harn -- run scripts/verify_language_spec.harn
   if [[ ! -d tree-sitter-harn ]]; then
     echo "warning: tree-sitter-harn not present; skipping tree-sitter grammar audit"
@@ -263,8 +269,42 @@ cmd_audit() {
   done
 
   if [[ "$failed" -ne 0 ]]; then
+    # ── Failure summary FIRST (so the real cause is at the TOP of the
+    # output / audit md, not buried thousands of lines into the full dump). ──
     echo ""
-    echo "=== Failed audit steps ==="
+    echo "=== RELEASE AUDIT FAILED — failing step(s) ==="
+    for step in "${steps[@]}"; do
+      local log="$tmp/$step.log"
+      [[ -f "$log" ]] || continue
+      # Heuristic: a lane failed if it has a `time_phase` sub-step that opened
+      # (`  -> label ...`) without a matching close (`  <- label (Ns)`). The
+      # last such unmatched label is the failing sub-step. This pinpoints e.g.
+      # "grammar-audit / verify_tree_sitter_parse" instead of just "grammar-audit".
+      local failing_sub
+      failing_sub="$(awk '
+        /^  -> / { sub(/^  -> /, ""); sub(/ \.\.\.$/, ""); open=$0 }
+        /^  <- / { open="" }
+        END { if (open != "") print open }
+      ' "$log")"
+      # Surface the lane only if it looks like it failed: either it has an
+      # unmatched sub-step, or its log contains an obvious error marker near
+      # the end. We always include lanes with an unmatched sub-step; for the
+      # rest we check the tail for error signatures.
+      if [[ -n "$failing_sub" ]] || tail -n 50 "$log" | grep -qiE "error|fail|panic|✗|status completed|sweep failed|assertion"; then
+        echo ""
+        if [[ -n "$failing_sub" ]]; then
+          echo ">>> ${step} / ${failing_sub}  <<< (failing sub-step)"
+        else
+          echo ">>> ${step}  <<<"
+        fi
+        echo "    last 40 lines of $step.log:"
+        tail -n 40 "$log" | sed 's/^/      /'
+      fi
+    done
+
+    # ── Full logs AFTER the summary, for deep debugging. ──
+    echo ""
+    echo "=== Full failed-audit logs ==="
     for step in "${steps[@]}"; do
       if [[ -f "$tmp/$step.log" ]] && [[ -s "$tmp/$step.log" ]]; then
         echo "--- $step ---"
