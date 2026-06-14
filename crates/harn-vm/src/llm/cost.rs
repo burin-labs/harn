@@ -1,6 +1,8 @@
 use crate::value::VmDictExt;
+use rust_decimal::Decimal;
 use std::cell::RefCell;
 use std::collections::BTreeMap;
+use std::str::FromStr;
 
 use crate::value::{categorized_error, ErrorCategory, VmError, VmValue};
 use crate::vm::{Vm, VmBuiltinArity, VmBuiltinMetadata};
@@ -530,18 +532,39 @@ pub(crate) fn latency_p50_ms_for(provider: &str) -> Option<u64> {
     latency
 }
 
-/// Calculate cost for a given model and token counts using the exact-id
-/// catalog pricing entry. Returns 0.0 when the model has no catalog entry,
-/// even if the inferred provider has provider-level economics — callers that
-/// know the provider should use `calculate_cost_for_provider` instead so
-/// they pick up provider economics, and `pricing_detail_for` when they need
-/// to surface unknown pricing explicitly.
-pub fn calculate_cost(model: &str, input_tokens: i64, output_tokens: i64) -> f64 {
+/// Recover the *authored* decimal value of a catalog rate that was parsed
+/// from a TOML float literal. The pricing catalog
+/// (`crates/harn-vm/src/llm/providers.toml`) writes short, human-authored
+/// decimals like `input_per_mtok = 0.15`; TOML deserializes them to `f64`,
+/// which cannot store `0.15` exactly. Rust's `{}` float formatter emits the
+/// *shortest* decimal string that round-trips to the same `f64` — for these
+/// short literals that is exactly the digits the author wrote (`"0.15"`,
+/// not `0.150000000000000008…`). Parsing that string straight into a
+/// `Decimal` therefore reconstructs the intended exact value without ever
+/// laundering the float's binary rounding error into false precision (which
+/// `Decimal::from_f64_retain` would). The `from_f64_retain` fallback only
+/// fires for non-finite inputs, which the catalog never contains.
+fn authored_rate_decimal(rate: f64) -> Decimal {
+    Decimal::from_str(&format!("{rate}"))
+        .ok()
+        .or_else(|| Decimal::from_f64_retain(rate))
+        .unwrap_or(Decimal::ZERO)
+}
+
+/// Compute the per-call USD cost for a model and token counts as an exact
+/// `Decimal`. Sources each rate directly from the per-MTok catalog literal
+/// via [`authored_rate_decimal`] (never through the derived per-1k rate,
+/// which would round-trip the value through an extra `f64` multiply) and
+/// does all arithmetic in `Decimal`. Division by 1,000,000 is an exact
+/// base-10 rescale, so the result carries no representational error.
+/// Returns `Decimal::ZERO` when the model has no catalog entry.
+pub fn calculate_cost_decimal(model: &str, input_tokens: i64, output_tokens: i64) -> Decimal {
     let Some(pricing) = crate::llm_config::model_pricing_per_mtok(model) else {
-        return 0.0;
+        return Decimal::ZERO;
     };
-    (input_tokens as f64 * pricing.input_per_mtok + output_tokens as f64 * pricing.output_per_mtok)
-        / 1_000_000.0
+    let gross = Decimal::from(input_tokens) * authored_rate_decimal(pricing.input_per_mtok)
+        + Decimal::from(output_tokens) * authored_rate_decimal(pricing.output_per_mtok);
+    gross / Decimal::from(1_000_000i64)
 }
 
 /// Calculate cost using catalog model pricing first, then provider catalog
@@ -672,8 +695,12 @@ pub(crate) fn register_cost_builtins(vm: &mut Vm) {
         let model = args.first().map(|a| a.display()).unwrap_or_default();
         let input_tokens = args.get(1).and_then(|a| a.as_int()).unwrap_or(0);
         let output_tokens = args.get(2).and_then(|a| a.as_int()).unwrap_or(0);
-        let cost = calculate_cost(&model, input_tokens, output_tokens);
-        Ok(VmValue::Float(cost))
+        // Return the cost as an exact `decimal` (not a binary `float`): the
+        // value names money, summing it should not drift, and the catalog
+        // rates are recovered exactly. Callers that want a formatted string
+        // pass the result to `llm_format_usd`, which accepts decimals.
+        let cost = calculate_cost_decimal(&model, input_tokens, output_tokens);
+        Ok(VmValue::Decimal(cost))
     });
 
     vm.register_builtin_with_metadata(
@@ -864,6 +891,14 @@ fn llm_format_usd_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue
     let amount = match args.first() {
         Some(VmValue::Float(value)) => *value,
         Some(VmValue::Int(value)) => *value as f64,
+        // Accept exact `decimal` amounts (e.g. the result of `llm_cost`).
+        // Formatting rounds to a fixed number of display decimals anyway, so
+        // converting to `f64` for the digit layout is lossless at that
+        // precision; the exact value never feeds back into money math here.
+        Some(VmValue::Decimal(value)) => {
+            use rust_decimal::prelude::ToPrimitive;
+            value.to_f64().unwrap_or(0.0)
+        }
         Some(VmValue::Nil) | None => 0.0,
         Some(other) => {
             return Err(VmError::Runtime(format!(
@@ -1133,8 +1168,11 @@ mod tests {
         );
         crate::llm_config::set_user_overrides(Some(overlay));
 
-        let cost = calculate_cost("gpt-4o-mini", 1000, 1000);
-        assert!((cost - 0.03).abs() < f64::EPSILON);
+        // 1000*10 + 1000*20 = 30000; /1e6 = 0.03, exactly.
+        assert_eq!(
+            calculate_cost_decimal("gpt-4o-mini", 1000, 1000),
+            Decimal::from_str("0.03").unwrap()
+        );
 
         crate::llm_config::clear_user_overrides();
     }
@@ -1144,9 +1182,93 @@ mod tests {
         let _guard = crate::llm::env_guard();
         crate::llm_config::clear_user_overrides();
         assert_eq!(
-            calculate_cost("definitely-unpriced-model", 1_000, 1_000),
-            0.0
+            calculate_cost_decimal("definitely-unpriced-model", 1_000, 1_000),
+            Decimal::ZERO
         );
+    }
+
+    #[test]
+    fn authored_rate_decimal_recovers_the_written_literal_not_float_noise() {
+        // Catalog rates are short literals parsed from TOML into f64; many
+        // (0.15, 0.8, 0.08) are not exactly representable in binary. The
+        // recovery must reconstruct the *authored* decimal, never the f64's
+        // binary-rounding tail that `from_f64_retain` would expose.
+        for (raw, written) in [
+            (0.15_f64, "0.15"),
+            (0.8, "0.8"),
+            (0.08, "0.08"),
+            (4.0, "4"),
+            (0.0, "0"),
+            (3.75, "3.75"),
+        ] {
+            let recovered = authored_rate_decimal(raw);
+            assert_eq!(
+                recovered,
+                Decimal::from_str(written).unwrap(),
+                "rate {raw} should recover as {written}"
+            );
+        }
+        // Guard the whole point of the helper: it must NOT equal the lossy
+        // `from_f64_retain` decimal for an inexact literal.
+        assert_ne!(
+            authored_rate_decimal(0.1),
+            Decimal::from_f64_retain(0.1).unwrap()
+        );
+    }
+
+    #[test]
+    fn calculate_cost_decimal_is_exact_for_inexact_catalog_rates() {
+        let _guard = crate::llm::env_guard();
+        let mut overlay = crate::llm_config::ProvidersConfig::default();
+        overlay.models.insert(
+            "gpt-4o-mini".to_string(),
+            crate::llm_config::ModelDef {
+                name: "Test GPT-4o Mini".to_string(),
+                provider: "openai".to_string(),
+                context_window: 128_000,
+                logical_model: None,
+                equivalence_group: None,
+                served_variant: None,
+                wire_model: None,
+                api_dialect: None,
+                rate_limits: None,
+                architecture: None,
+                local_memory: None,
+                runtime_context_window: None,
+                stream_timeout: None,
+                capabilities: Vec::new(),
+                // Inexact-in-binary rates, like the real catalog.
+                pricing: Some(crate::llm_config::ModelPricing {
+                    input_per_mtok: 0.15,
+                    output_per_mtok: 0.60,
+                    cache_read_per_mtok: None,
+                    cache_write_per_mtok: None,
+                }),
+                deprecated: false,
+                deprecation_note: None,
+                superseded_by: None,
+                fast_mode: None,
+                quality_tags: Vec::new(),
+                availability: crate::llm_config::ModelAvailability::default(),
+                tier: None,
+                open_weight: None,
+                strengths: Vec::new(),
+                benchmarks: std::collections::BTreeMap::new(),
+                family: None,
+                lineage: None,
+                complementary_with: Vec::new(),
+                avoid_as_reviewer_for: Vec::new(),
+            },
+        );
+        crate::llm_config::set_user_overrides(Some(overlay));
+
+        // 1000 * 0.15 + 500 * 0.60 = 150 + 300 = 450; /1e6 = 0.00045 exactly.
+        assert_eq!(
+            calculate_cost_decimal("gpt-4o-mini", 1000, 500),
+            Decimal::from_str("0.00045").unwrap()
+        );
+
+        crate::llm_config::clear_user_overrides();
     }
 
     #[test]

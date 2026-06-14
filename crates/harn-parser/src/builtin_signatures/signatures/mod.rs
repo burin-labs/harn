@@ -15,9 +15,9 @@ mod stdlib;
 mod workflow;
 
 pub(crate) use super::types::{
-    BuiltinSignature, Param, Ty, TY_ANY, TY_BOOL, TY_BYTES, TY_BYTES_OR_NIL, TY_CLOSURE, TY_DICT,
-    TY_DICT_OR_NIL, TY_DURATION, TY_FLOAT, TY_INT, TY_LIST, TY_NEVER, TY_NIL, TY_NUMBER, TY_STRING,
-    TY_STRING_OR_NIL,
+    BuiltinSignature, Param, Ty, TY_ANY, TY_BOOL, TY_BYTES, TY_BYTES_OR_NIL, TY_CLOSURE,
+    TY_DECIMAL, TY_DICT, TY_DICT_OR_NIL, TY_DURATION, TY_FLOAT, TY_INT, TY_LIST, TY_NEVER, TY_NIL,
+    TY_NUMBER, TY_STRING, TY_STRING_OR_NIL,
 };
 
 pub(crate) fn groups() -> [&'static [BuiltinSignature]; 6] {
