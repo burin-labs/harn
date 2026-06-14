@@ -1152,17 +1152,17 @@ fn missing_preset_credentials(id: &str, credentials: &BTreeSet<String>) -> Vec<S
         return Vec::new();
     };
     let mut missing = Vec::new();
-    for placeholder in preset.placeholders {
+    for placeholder in &preset.placeholders {
         if !placeholder.required {
             continue;
         }
         if placeholder.target != crate::mcp_presets::PlaceholderTarget::Env {
-            missing.push(placeholder.key.to_string());
+            missing.push(placeholder.key.clone());
             continue;
         }
-        let alias = credential_alias(placeholder.key);
+        let alias = credential_alias(&placeholder.key);
         if !credentials.contains(&alias) {
-            missing.push(placeholder.key.to_string());
+            missing.push(placeholder.key.clone());
         }
     }
     missing

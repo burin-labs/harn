@@ -68,15 +68,15 @@ fn write_preset(out: &mut String, preset: &McpPreset) {
     if preset.transport == mcp_presets::PresetTransport::Http {
         writeln!(out, "  url:       {}", preset.url).ok();
     } else {
-        let argv = std::iter::once(preset.command)
-            .chain(preset.args.iter().copied())
+        let argv = std::iter::once(preset.command.as_str())
+            .chain(preset.args.iter().map(String::as_str))
             .collect::<Vec<_>>()
             .join(" ");
         writeln!(out, "  command:   {argv}").ok();
     }
     let auth = match preset.auth_kind {
         mcp_presets::PresetAuthKind::None => "none".to_string(),
-        mcp_presets::PresetAuthKind::Oauth => match preset.oauth_scopes {
+        mcp_presets::PresetAuthKind::Oauth => match &preset.oauth_scopes {
             Some(scopes) => format!("oauth (scopes: {scopes})"),
             None => "oauth".to_string(),
         },
@@ -133,7 +133,7 @@ mod tests {
         let text = render_text();
         for preset in mcp_presets::presets() {
             assert!(
-                text.contains(preset.name),
+                text.contains(&preset.name),
                 "text catalog missing preset {}",
                 preset.id
             );
