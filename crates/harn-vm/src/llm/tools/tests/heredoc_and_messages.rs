@@ -596,6 +596,24 @@ fn native_json_fallback_parses_flat_jsonrpc_envelope() {
 }
 
 #[test]
+fn native_json_fallback_parses_gpt_oss_tool_key_dialect() {
+    // gpt-oss / Harmony channel-leak shape: when the native channel collapses
+    // into `content`, the model emits its bare `{"tool":..,"arguments":..}`
+    // dialect inline after a reasoning preamble (no `function`, no `name`,
+    // `tool` instead). Before the `tool`-key alias the acceptance gate dropped
+    // it entirely (zero parsed calls), so the call was lost and the dirty
+    // content was persisted verbatim. `tool` must map to `name`.
+    let known = known_tools_set();
+    let text = "We should inspect the model first.\n\n\
+                {\"tool\":\"read\",\"arguments\":{\"path\":\"BatteryInfo.swift\"}}";
+    let (calls, errors) = parse_native_json_tool_calls(text, &known);
+    assert!(errors.is_empty(), "no errors expected: {errors:?}");
+    assert_eq!(calls.len(), 1, "tool-key dialect should parse: {calls:?}");
+    assert_eq!(calls[0]["name"], json!("read"));
+    assert_eq!(calls[0]["arguments"]["path"], json!("BatteryInfo.swift"));
+}
+
+#[test]
 fn native_json_fallback_parses_flat_envelope_with_string_encoded_arguments() {
     // Regression: OpenAI's on-the-wire flat shape encodes `arguments` as a JSON
     // STRING (`{"name":"read","arguments":"{\"path\":\"a\"}"}`), which local

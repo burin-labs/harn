@@ -905,14 +905,72 @@ fn assistant_message_from_llm_result(llm_result: &VmValue) -> VmValue {
         .iter()
         .map(vm_to_json)
         .collect::<Vec<_>>();
+    let thinking = dict_get(llm_result, "thinking").map(|v| v.display());
     if native_calls_json.is_empty() {
+        // gpt-oss / harmony channel-leak backstop. A native-tools model is
+        // supposed to split its harmony channels at the wire: analysis ->
+        // `reasoning`, commentary/tool -> `tool_calls`, final -> `content`. On
+        // ~23% of gpt-oss-120b turns the provider FAILS to split and collapses
+        // the analysis reasoning AND the inline tool-call JSON into a single
+        // `content` blob (empty `reasoning` field, empty `tool_calls`). The
+        // tagged-parser merge in `vm_build_llm_result` recovers the call into
+        // the unified `tool_calls` (the `tool`-key dialect now recovers too,
+        // see native_json.rs), but the recovered prose is discarded, so the
+        // dirty `text` would still be persisted verbatim. Replaying that raw
+        // blob back into history wastes input tokens AND re-feeds the model its
+        // own private chain-of-thought (incl. "game the verifier" plans) on
+        // every later turn.
+        //
+        // For a native-tools model the canonical persisted shape is structured
+        // `tool_calls` + a private `reasoning` trace + a clean `content` (this
+        // is exactly what a NON-leaked gpt-oss turn produces, and what the
+        // native-calls-present branch below builds). So we reconstruct that
+        // shape: move the leaked blob into the private `reasoning` field (it is
+        // analysis CoT, not a committed answer — clean tool-call turns carry no
+        // `content`), attach the recovered call to `tool_calls`, and leave
+        // `content` empty. The next request's openai-compat wire already strips
+        // prior-turn `reasoning` (harn#3319), so nothing dirty is re-fed.
+        //
+        // Pure text-format models (`native_tools == false`, e.g. local
+        // llamacpp) legitimately keep their calls inline in `content` for the
+        // NEXT turn's text parser to re-read, so those keep the verbatim-text
+        // path below.
+        let caps = crate::llm::capabilities::lookup(&provider, &model);
+        if caps.native_tools {
+            let recovered_calls = list_items(
+                &dict_get(llm_result, "tool_calls")
+                    .cloned()
+                    .unwrap_or(VmValue::Nil),
+            )
+            .iter()
+            .map(vm_to_json)
+            .collect::<Vec<_>>();
+            if !recovered_calls.is_empty() {
+                // A call was recovered from the dirty content. The accompanying
+                // prose is private analysis CoT — route it to `reasoning`
+                // (preferring the wire `thinking` field when the provider did
+                // populate it) and keep `content` empty, matching a clean turn.
+                let reasoning = thinking
+                    .as_deref()
+                    .filter(|t| !t.is_empty())
+                    .unwrap_or(text.as_str());
+                let msg = build_assistant_response_message(
+                    "",
+                    &[],
+                    &recovered_calls,
+                    Some(reasoning),
+                    &provider,
+                    &model,
+                );
+                return json_to_vm(&msg);
+            }
+        }
         let mut msg = crate::value::DictMap::new();
         msg.put_str("role", "assistant");
         msg.put_str("content", text);
         return VmValue::dict(msg);
     }
 
-    let thinking = dict_get(llm_result, "thinking").map(|v| v.display());
     let msg = build_assistant_response_message(
         &text,
         &[],

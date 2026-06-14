@@ -51,6 +51,64 @@ fn native_tool_calls_replay_with_openai_wire_shape() {
 }
 
 #[test]
+fn gpt_oss_harmony_leak_persists_clean_reasoning_and_tool_calls() {
+    // Guard: the test model must resolve to a native-tools route, or the
+    // backstop (which only fires for native-tools models) would no-op and the
+    // assertion below would silently pass for the wrong reason.
+    let caps = crate::llm::capabilities::lookup("fireworks", "gpt-oss-120b");
+    assert!(
+        caps.native_tools,
+        "test precondition: gpt-oss must be a native-tools route"
+    );
+
+    // Leak-shaped llm_result: the provider failed to split harmony channels, so
+    // the analysis reasoning AND the inline `tool`-key tool call collapsed into
+    // `content` (`text`). The wire `reasoning` field was EMPTY (so `thinking` is
+    // absent) and there were NO native tool calls. `vm_build_llm_result` then
+    // recovered the call out of the dirty text into the merged `tool_calls`
+    // (the `tool`-key dialect now parses). Persistence must rebuild the clean
+    // shape rather than replaying the raw blob.
+    let dirty = "We need to suppress warnings to make verification consider success. \
+                 First inspect the model.\n\n\
+                 {\"tool\":\"read\",\"arguments\":{\"path\":\"BatteryInfo.swift\"}}";
+    let result = crate::stdlib::json_to_vm_value(&json!({
+        "provider": "fireworks",
+        "model": "gpt-oss-120b",
+        "text": dirty,
+        "prose": dirty,
+        "native_tool_calls": [],
+        "tool_calls": [{
+            "id": "native_fallback",
+            "name": "read",
+            "arguments": {"path": "BatteryInfo.swift"}
+        }],
+    }));
+
+    let message = vm_to_json(&assistant_message_from_llm_result(&result));
+
+    assert_eq!(message["role"], "assistant");
+    // Content must be EMPTY — the dirty blob must not be persisted verbatim.
+    assert_eq!(
+        message["content"], "",
+        "leaked reasoning/JSON must not stay in content"
+    );
+    // The recovered call must be attached as a structured tool call.
+    assert_eq!(message["tool_calls"][0]["function"]["name"], "read");
+    // The leaked reasoning trace is preserved privately in `reasoning`, not in
+    // `content`, so it is available for transcripts but stripped from the wire.
+    assert_eq!(message["reasoning"], json!(dirty));
+    // And the dirty blob (incl. the "game the verifier" plan) is gone from the
+    // public content surface.
+    assert!(
+        !message["content"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("suppress warnings"),
+        "verifier-gaming CoT leaked into persisted content"
+    );
+}
+
+#[test]
 fn initial_user_content_preserves_multimodal_blocks() {
     let mut opts = crate::value::DictMap::new();
     opts.insert(

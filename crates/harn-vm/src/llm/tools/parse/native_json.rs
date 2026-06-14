@@ -34,8 +34,14 @@ pub(crate) fn parse_native_json_tool_calls(
             .get("function")
             .and_then(|function| function.as_object())
             .unwrap_or(item_obj);
+        // Canonical key is `name`. Accept `tool` as an alias so the bare
+        // `{"tool":..,"arguments":..}` dialect gpt-oss / Harmony emits when its
+        // native channel leaks into `content` is recovered (the fenced-JSON
+        // parser already honors this alias). Without it, a leaked gpt-oss call
+        // is silently dropped and the dirty content is persisted verbatim.
         let name = func
             .get("name")
+            .or_else(|| func.get("tool"))
             .and_then(|name| name.as_str())
             .unwrap_or("");
         if name.is_empty() {
@@ -126,10 +132,17 @@ fn find_native_json_items(text: &str) -> Option<Vec<serde_json::Value>> {
             item.get(key)
                 .is_some_and(|slot| slot.is_object() || slot.is_string())
         };
+        // `tool` is accepted as a `name` alias for the gpt-oss / Harmony
+        // `{"tool":..,"arguments":..}` channel-leak dialect (mirrors the
+        // extractor and the fenced-JSON parser).
+        let name_slot_present = |item: &serde_json::Value| {
+            item.get("name").is_some_and(serde_json::Value::is_string)
+                || item.get("tool").is_some_and(serde_json::Value::is_string)
+        };
         if items.iter().any(|item| {
             item.get("function")
                 .is_some_and(serde_json::Value::is_object)
-                || (item.get("name").is_some_and(serde_json::Value::is_string)
+                || (name_slot_present(item)
                     && (args_slot_present(item, "arguments")
                         || args_slot_present(item, "parameters")))
         }) {
