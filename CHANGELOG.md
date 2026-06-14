@@ -8,6 +8,77 @@ highlights live in [CHANGELOG-pre-0.6.md](CHANGELOG-pre-0.6.md).
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.8.113
+
+### Added
+
+- **`@policy(kinds: "...")` — a declarative route auth policy for
+  `harn serve site`.** A routed `pub fn` can now declare the principal
+  kinds permitted to invoke it, composing with `@scopes` rather than
+  replacing it: `@policy(kinds: "operator platform_admin")` admits a
+  request only when the embedder-resolved principal `kind` (see
+  `harness.auth.kind()`) is in the allow-set. Enforcement runs at site
+  admission immediately after the scope check and **fails closed** — a
+  principal the embedder did not classify can never satisfy a non-empty
+  allow-set. Denials render the tenant-safe `forbidden_principal_kind`
+  403 envelope, which names the route's allowed kinds (route
+  configuration) but never echoes the caller's own kind. The parsed policy
+  is carried on the route's export entry (`ExportedFunction.policy`) so
+  audit tooling can see which routes declare a principal-kind guard. A
+  malformed argument (unknown key, positional, or non-string value) is
+  dropped with a `HARN-SRV-017` diagnostic and a typechecker warning,
+  leaving any host-side defense-in-depth check in place. Together with the
+  `harness.auth` handle this is the declarative half of the Harn-side route
+  auth policy (issue #3323); the imperative `require_policy(...)` helper for
+  method-specific / resource-match cases is a follow-up.
+
+- **`std/harness/policy.require_policy` — imperative route auth-policy guard.**
+  The second half of the route-policy toolkit (the declarative
+  `@policy(kinds: ...)` annotation is the first): a `.harn` handler can call
+  `require_policy({kinds: [...], scopes: [...]})` to enforce a principal-kind
+  / scope policy that depends on runtime data the annotation cannot see (a
+  path or body field, resource ownership). It composes the ambient
+  `harness.auth` principal and returns `nil` when the policy is satisfied, or
+  a ready-to-return tenant-safe HTTP 403 envelope (`http_error`) when it is
+  not — `let denial = require_policy({...}); if denial != nil { return denial }`.
+  Denials name the route's requirement (`allowed_kinds`, the missing scope)
+  but never echo the caller's own kind, matching the `@policy` denial, and
+  fail closed: an unauthenticated or unclassified principal never satisfies a
+  non-empty `kinds` allow-set.
+
+- **ACP `mcp/authorize_batch` + streamed status.** Added an ACP method that
+  begins OAuth for many MCP servers at once over the bulk-auth driver, returning
+  `{ flows, skipped, failed }` and streaming per-server progress as
+  `mcp/authorize_status` notifications. Captured callbacks posted to
+  `mcp/oauth_callback` now route through the active batch (streaming
+  `Exchanging`/`Connected`) when their `state` matches; the single-URL path is
+  unchanged (#3357).
+
+- **`mcp.reauth_expired()` bulk re-auth builtin.** Added a harn-script builtin
+  (`harn.mcp.reauth_expired` / `mcp_reauth_expired`) that enumerates the declared
+  OAuth-backed MCP servers, drives the bulk-auth driver in `Expired` mode
+  (silently refreshing what it can), and returns one outcome per server
+  (`reauth_required` / `skipped` / `failed`) so triggers and workers can satisfy
+  401-mid-loop re-auth declaratively rather than failing one call at a time
+  (#3358).
+
+### Changed
+
+- **`llm_cost` returns an exact `decimal` instead of a binary `float`.** The
+  per-call cost is money, so it is now computed and returned as a `decimal`:
+  summing many calls no longer drifts, and the value compares exactly. Each
+  catalog rate is recovered to its *authored* decimal value (the short literal
+  in `providers.toml`, e.g. `0.15`) via shortest-round-trip recovery, so the
+  result is genuinely exact rather than `float`-rounding laundered into
+  false precision. `llm_format_usd` now accepts a `decimal` amount (alongside
+  `float`/`int`), so `llm_format_usd(llm_cost(...))` keeps working. This is a
+  breaking type change for scripts that compared `llm_cost(...)` against a
+  `float` literal — `decimal` is a clean island and never compares
+  equal/ordered with `float`, so compare against `decimal("…")` instead. The
+  `@budget` enforcement accumulator and `llm_session_cost`/`llm_pricing`/
+  `llm_compare_costs` continue to report `float` for now; migrating that
+  family to `decimal` is tracked separately.
+
 ## v0.8.112
 
 ### Added
