@@ -8,6 +8,132 @@ highlights live in [CHANGELOG-pre-0.6.md](CHANGELOG-pre-0.6.md).
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.8.109
+
+### Added
+
+- **Exact `decimal` type for money and precise arithmetic.** A new `decimal`
+  value type (96-bit base-10, up to 28–29 significant digits) backed by
+  `rust_decimal`, so `decimal("0.1") + decimal("0.2")` is exactly `0.3` instead
+  of the binary-float `0.30000000000000004`. Construct via the `decimal(value)`
+  builtin (string/int/float/decimal; throws on un-parseable input rather than
+  returning `nil`). Arithmetic (`+ - * / %`, unary `-`) promotes `int` operands
+  exactly but refuses to mix with `float` (a compile-time error — binary float
+  would corrupt exact values); `to_int`/`to_float`/`to_string` convert out.
+  Equality and ordering are a clean island: `decimal` compares only against
+  `decimal` (scale-insensitive, so `1.5 == 1.50`), and `decimal("1") == 1` is
+  `false`. Decimals serialize across the host/JSON boundary as strings to
+  preserve precision and bind natively to Postgres `NUMERIC`/`DECIMAL` columns.
+
+- **Opinionated provider-route policy: gpt-oss on OpenRouter is now pinned to
+  clean sub-providers, plus a compile-time footgun-validation gate.** OpenRouter
+  routes `openai/gpt-oss-120b` across a ~17-upstream sub-provider lottery, and
+  some upstreams mis-serialize the Harmony tool call even with reasoning ON
+  (billed-noncommittal: 0 tool_calls), so the route was a runtime footgun even
+  after the reasoning fix. Two declarative pieces close it: (1) a new
+  `openrouter_provider_order` capability field (the allowlist counterpart to
+  `provider_route_denylist`) materializes to the OpenRouter request body's
+  `provider: { order: [...], allow_fallbacks: false }`, and the
+  `openai/gpt-oss-*` OpenRouter row pins it to `["Cerebras", "Groq"]` — the
+  upstreams that served Harmony tool calls cleanly in a live 2026-06-13 probe
+  (order-pinned requests gave 0 billed-noncommittal; Together was flaky 1/3);
+  (2) a data-driven footgun gate (`harn providers build-capabilities --check` /
+  `make check-provider-capabilities`) that FAILS the build on known-footgun
+  provider/model/config combos — a `reasoning_required_for_tools` route that
+  also forces a tool task to reasoning-off, and a `reasoning_required_for_tools`
+  OpenRouter route with no clean-sub-provider pin. The gate reads the
+  capability matrix's own invariants (no hard-coded model-name patterns), so a
+  new footgun route is caught the moment it forgets a pin. The blessed-vs-
+  forbidden policy is documented in the `capabilities.toml` base shard.
+
+### Changed
+
+- **Documented the rate limiter's gross-token accounting.** The LLM rate
+  limiter counts GROSS prompt tokens against TPM by design — prompt-cached
+  tokens are intentionally NOT netted out, because provider TPM enforcement is
+  on gross tokens regardless of cache hits (verified live against Cerebras
+  gpt-oss-120b: with 6400/6482 prompt tokens served from cache, the per-minute
+  token budget still decremented by the full gross prompt). Comment-only at the
+  charge site in `rate_limit.rs`; no behavior change.
+
+- **Gemini thinking-budget quirks moved from hard-coded Rust branches into the
+  `capabilities.toml` declarative matrix.** `gemini.rs` previously decided
+  whether a Gemini model supported a thinking budget, whether thinking could be
+  disabled, and what the high/xhigh budget ceiling was via inline
+  `model.contains("gemini-2.5")` / `model.contains("flash")` branches. Those
+  facts are now declared alongside each model's other wire capabilities: a new
+  `max_thinking_budget` capability field (Gemini 2.5 Flash 24576, Pro 32768)
+  plus the existing `reasoning_disable_supported` (Flash can disable thinking,
+  Pro cannot) and `thinking_modes` (effort support gates thinkingConfig). The
+  provider now reads `capabilities::lookup("gemini", model)` and the
+  per-model patterns live in the matrix, matching the
+  `auto_reasoning_overrides` precedent. Behavior is identical (the unreachable
+  speculative `robotics` branch — no such catalogued model exists — is the only
+  dropped path, folded into the declared per-row flags). Verified by the
+  existing `gemini_thinking_config_maps_from_typed_thinking` golden test.
+
+- **VM dicts are now persistent.** `VmValue::Dict` is backed by a structurally
+  shared `imbl::OrdMap` instead of a `BTreeMap`. Copy-on-write dict mutation —
+  performed on every `dict[key] = value` / property assignment when the value is
+  aliased (on the stack, in another local, or captured by a closure) — drops
+  from an O(n) deep clone of every key and entry to an O(log n) path copy,
+  removing the dominant allocation cost in mutation-heavy scripts. Dict
+  ordering, equality, identity (`===`), iteration, and the full read/write API
+  are unchanged.
+
+### Fixed
+
+- **gpt-oss (Harmony) now keeps reasoning ON for tool calls — kills the
+  billed-noncommittal failure at its root.** gpt-oss performs tool calls
+  *inside* the Harmony chain-of-thought channel, so disabling reasoning breaks
+  tool calling entirely (live OpenRouter probe of `openai/gpt-oss-120b`:
+  `reasoning {enabled:false}` → 0 tool_calls + null completion_tokens; `effort:
+  low` / provider default → clean native tool calls). This is the *opposite* of
+  the Qwen3 quirk (Qwen narrates tool intent in the reasoning trace and emits
+  zero `tool_calls`, so Qwen needs reasoning OFF for tools), and #3303's retry
+  was masking this self-inflicted misconfig. The fix is declarative, in the
+  `capabilities.toml` family: a new `reasoning_required_for_tools` capability
+  flag is set on every gpt-oss row (Together, Groq, Cerebras, and a newly-added
+  OpenRouter `openai/gpt-oss-*` row that previously fell through to a
+  reasoning-less catch-all), and `reasoning_policy` now refuses to resolve a
+  tool-bearing task (agent/code/verify) to reasoning-off when that flag is set —
+  flooring to the lowest supported effort instead — so no future auto default,
+  capability override, or session pin can re-introduce the failure. The Qwen3
+  reasoning-off-for-tools behavior is unchanged. Both quirks are now documented
+  side by side in the capability matrix.
+
+- **macOS-gated `#[cfg(target_os = "macos")]` warnings can no longer slip to
+  `main` and break the release `prepare` build.** The Linux per-PR CI lanes
+  never compile macOS-only code, so a stray unused import / dead_code /
+  deprecation in a `target_os = "macos"` (or `cfg(any(macos, windows))`) path
+  only surfaced on a contributor's Mac — historically at release `prepare`
+  time under `-D warnings`, one error at a time (the v0.8.109 blocker was an
+  unused `BTreeMap` import in `crates/harn-hostlib/tests/secret_store_os_native.rs`,
+  a `#![cfg(any(macos, windows))]` test file Linux CI skips). Removed that
+  import and added a path-routed `macos` CI lane (analogue of the existing
+  `windows` lane) that runs `cargo clippy --workspace --all-targets -D
+  warnings` on `macos-latest` for PRs touching macOS-gated process/sandbox/
+  secret-store/CLI paths, plus unconditionally on push/merge — compiling even
+  the cfg-gated *test* targets so the class fails the PR instead of the
+  release.
+
+### Security
+
+- **Deeply nested values can no longer abort the process with a native stack
+  overflow.** A script could build a value nested far deeper than the call
+  stack tolerates (`x = [x]` in a loop adds no VM frames, so `max_vm_frames`
+  never fired), then crash the whole host — `SIGABRT`, bypassing every runtime
+  limit — simply by comparing (`==`), printing, `json_stringify`-ing, sorting,
+  hashing (set/dict de-dup), or even just dropping it. The recursive value
+  walks (equality, ordering, structural hashing, display, JSON) now grow the
+  native stack on demand (the approach serde/rustc/syn take, via `stacker`), so
+  deep-but-finite data completes instead of crashing; value teardown across the
+  VM's slot/scope lifecycle is now iterative; and the `serde`-backed
+  pretty-JSON / YAML encoders reject values past `max_value_depth` (1024) with a
+  catchable error rather than overflowing. Mirrors `serde_json`'s
+  deserialization recursion limit and CPython's recursion guards in its C-level
+  `json`/comparison paths.
+
 ## v0.8.108
 
 ### Added
