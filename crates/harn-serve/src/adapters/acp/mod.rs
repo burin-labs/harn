@@ -841,6 +841,13 @@ pub struct AcpServer {
     /// Server-level budget inherited by sessions unless they override it.
     default_budget: Option<BudgetSpec>,
     sandbox: AcpSandboxConfig,
+    /// Active bulk-OAuth driver from the most recent `mcp/authorize_batch`
+    /// (harn#3357). Held across requests so a follow-up `mcp/oauth_callback`
+    /// whose `state` belongs to a batch flow routes through the driver
+    /// (streaming `Exchanging`/`Connected` status notifications) instead of the
+    /// single-URL completion path. `None` until the first batch is begun;
+    /// replaced wholesale by each new batch.
+    active_bulk_auth: std::sync::Mutex<Option<Arc<harn_vm::mcp_bulk_auth::McpBulkAuth>>>,
 }
 
 impl Drop for AcpServer {

@@ -42,6 +42,7 @@ impl AcpServer {
             llm_capability_overrides,
             default_budget: config.budget,
             sandbox: config.sandbox,
+            active_bulk_auth: std::sync::Mutex::new(None),
         }
     }
 

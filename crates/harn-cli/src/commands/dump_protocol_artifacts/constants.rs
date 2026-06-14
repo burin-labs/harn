@@ -97,6 +97,8 @@ pub(super) const ACP_DISPATCHED_METHODS: &[&str] = &[
     "harn.mcp.catalog",
     "mcp/authorize",
     "harn.mcp.authorize",
+    "mcp/authorize_batch",
+    "harn.mcp.authorize_batch",
     "mcp/oauth_callback",
     "harn.mcp.oauth_callback",
     "mcp/import_token",

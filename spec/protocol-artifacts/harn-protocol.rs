@@ -110,6 +110,8 @@ pub const ACP_DISPATCHED_METHOD_MCP_CATALOG: &str = "mcp/catalog";
 pub const ACP_DISPATCHED_METHOD_HARN_MCP_CATALOG: &str = "harn.mcp.catalog";
 pub const ACP_DISPATCHED_METHOD_MCP_AUTHORIZE: &str = "mcp/authorize";
 pub const ACP_DISPATCHED_METHOD_HARN_MCP_AUTHORIZE: &str = "harn.mcp.authorize";
+pub const ACP_DISPATCHED_METHOD_MCP_AUTHORIZE_BATCH: &str = "mcp/authorize_batch";
+pub const ACP_DISPATCHED_METHOD_HARN_MCP_AUTHORIZE_BATCH: &str = "harn.mcp.authorize_batch";
 pub const ACP_DISPATCHED_METHOD_MCP_OAUTH_CALLBACK: &str = "mcp/oauth_callback";
 pub const ACP_DISPATCHED_METHOD_HARN_MCP_OAUTH_CALLBACK: &str = "harn.mcp.oauth_callback";
 pub const ACP_DISPATCHED_METHOD_MCP_IMPORT_TOKEN: &str = "mcp/import_token";
@@ -166,6 +168,8 @@ pub const ACP_DISPATCHED_METHODS: &[&str] = &[
     "harn.mcp.catalog",
     "mcp/authorize",
     "harn.mcp.authorize",
+    "mcp/authorize_batch",
+    "harn.mcp.authorize_batch",
     "mcp/oauth_callback",
     "harn.mcp.oauth_callback",
     "mcp/import_token",

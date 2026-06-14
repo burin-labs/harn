@@ -127,10 +127,88 @@ impl AcpServer {
         }
     }
 
+    /// `mcp/authorize_batch` (harn#3357): begin OAuth for many MCP servers at
+    /// once over the [`harn_vm::mcp_bulk_auth`] driver. The request carries the
+    /// explicit `servers` to consider plus a batch selection `mode`
+    /// (`missing` = first-auth servers without a valid bearer, the default;
+    /// `expired` = re-auth stale stored tokens; `all` = force a fresh flow for
+    /// every server). harn begins all selected flows concurrently and returns
+    /// `{ flows, skipped, failed }`; the client opens each `flows[].authorizeUrl`
+    /// (serialized, to avoid a popup storm) and posts each captured callback
+    /// back via `mcp/oauth_callback` — whose `state` routes to this batch's
+    /// driver automatically. Per-server progress streams as `mcp/authorize_status`
+    /// notifications so a GUI updates each row live. Pure adapter: all flow
+    /// logic lives in the driver; this serializes its outcomes and events.
+    pub(super) async fn handle_mcp_authorize_batch(
+        &self,
+        id: &serde_json::Value,
+        params: &serde_json::Value,
+    ) {
+        let servers = match parse_bulk_auth_servers(params) {
+            Ok(servers) => servers,
+            Err(error) => {
+                self.send_error(id, -32602, &error);
+                return;
+            }
+        };
+        let mode = match parse_bulk_auth_mode(params) {
+            Ok(mode) => mode,
+            Err(error) => {
+                self.send_error(id, -32602, &error);
+                return;
+            }
+        };
+        let redirect_uri = params
+            .get("redirectUri")
+            .and_then(|value| value.as_str())
+            .unwrap_or(MCP_DEFAULT_OAUTH_REDIRECT_URI)
+            .to_string();
+
+        // Fresh driver per batch. Subscribe *before* prepare so no phase event
+        // is missed, and forward each as an `mcp/authorize_status` notification
+        // on a background task (the transport sink is Clone + Send + 'static).
+        let driver = Arc::new(harn_vm::mcp_bulk_auth::McpBulkAuth::new());
+        let mut status_rx = driver.subscribe();
+        let output = self.output.clone();
+        tokio::spawn(async move {
+            loop {
+                match status_rx.recv().await {
+                    Ok(status) => {
+                        let notification = harn_vm::jsonrpc::notification(
+                            MCP_AUTHORIZE_STATUS_METHOD,
+                            authorize_status_params(&status),
+                        );
+                        if let Ok(line) = serde_json::to_string(&notification) {
+                            output.write_line(&line);
+                        }
+                    }
+                    Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
+                    Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+                }
+            }
+        });
+
+        // Store as the active batch so the matching `mcp/oauth_callback`s route
+        // through it. Replacing any prior driver drops its sender, which ends
+        // that batch's forwarder task on the next `recv`.
+        *self
+            .active_bulk_auth
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner()) = Some(driver.clone());
+
+        let outcomes = driver.prepare(servers, mode, &redirect_uri).await;
+        self.send_response(id, authorize_batch_response(&outcomes));
+    }
+
     /// `mcp/oauth_callback`: complete an authorization begun by `mcp/authorize`.
     /// Accepts either explicit `state`+`code` (+optional `issuer`) or a full
     /// `redirectUrl` (the captured `burin://…?code=…&state=…&iss=…`) to parse
     /// them from. harn exchanges the code and stores the token.
+    ///
+    /// When `state` belongs to an active `mcp/authorize_batch` (harn#3357), the
+    /// completion is routed through that driver so it streams `Exchanging`/
+    /// `Connected` status notifications; otherwise the single-URL path is taken
+    /// unchanged. The response is identical either way.
     pub(super) async fn handle_mcp_oauth_callback(
         &self,
         id: &serde_json::Value,
@@ -164,7 +242,25 @@ impl AcpServer {
                 (state, code, field("issuer"))
             }
         };
-        match harn_vm::mcp_oauth::complete_authorization(&state, &code, issuer.as_deref()).await {
+        // Route through the active batch driver when this state is one of its
+        // flows (so completion streams status); else complete directly.
+        let batch_driver = {
+            let guard = self
+                .active_bulk_auth
+                .lock()
+                .unwrap_or_else(|poison| poison.into_inner());
+            match guard.as_ref() {
+                Some(driver) if driver.knows_state(&state) => Some(driver.clone()),
+                _ => None,
+            }
+        };
+        let result = match &batch_driver {
+            Some(driver) => driver.complete(&state, &code, issuer.as_deref()).await,
+            None => {
+                harn_vm::mcp_oauth::complete_authorization(&state, &code, issuer.as_deref()).await
+            }
+        };
+        match result {
             Ok(token) => {
                 // Surface the "logged in as …" identity (harn#3350) so an
                 // embedding GUI can show it immediately on a successful connect.
@@ -392,5 +488,298 @@ impl AcpServer {
             Ok(result) => self.send_response(id, result),
             Err(error) => self.send_error(id, -32000, &error),
         }
+    }
+}
+
+/// JSON-RPC notification method that streams per-server bulk-auth progress
+/// (harn#3357). One frame per [`harn_vm::mcp_bulk_auth::McpAuthStatus`].
+const MCP_AUTHORIZE_STATUS_METHOD: &str = "mcp/authorize_status";
+
+/// Parse the `servers` array of an `mcp/authorize_batch` request into driver
+/// inputs. Each item needs a `url` (or `serverUrl`); `name` defaults to the URL.
+/// An empty/missing array is an error — there is nothing to authorize. The
+/// optional per-server `mode` is the OAuth *client* auth mode (cimd/dcr/static/
+/// byo), distinct from the batch-level selection mode parsed separately.
+fn parse_bulk_auth_servers(
+    params: &serde_json::Value,
+) -> Result<Vec<harn_vm::mcp_bulk_auth::BulkAuthServer>, String> {
+    let Some(items) = params.get("servers").and_then(|value| value.as_array()) else {
+        return Err("mcp/authorize_batch requires servers (an array of { name, url })".to_string());
+    };
+    let mut out = Vec::with_capacity(items.len());
+    for (index, item) in items.iter().enumerate() {
+        let url = item
+            .get("url")
+            .or_else(|| item.get("serverUrl"))
+            .and_then(|value| value.as_str())
+            .ok_or_else(|| format!("mcp/authorize_batch servers[{index}] requires url"))?;
+        let name = item
+            .get("name")
+            .and_then(|value| value.as_str())
+            .unwrap_or(url)
+            .to_string();
+        let string_field = |key: &str| {
+            item.get(key)
+                .and_then(|value| value.as_str())
+                .map(str::to_string)
+        };
+        let client_mode = match item.get("mode").and_then(|value| value.as_str()) {
+            Some(raw) => Some(serde_json::from_value(serde_json::json!(raw)).map_err(|_| {
+                format!(
+                    "mcp/authorize_batch servers[{index}]: invalid mode (expected cimd|dcr|static|byo)"
+                )
+            })?),
+            None => None,
+        };
+        out.push(harn_vm::mcp_bulk_auth::BulkAuthServer {
+            name,
+            server_url: url.to_string(),
+            mode: client_mode,
+            client_id: string_field("clientId"),
+            client_secret: string_field("clientSecret"),
+            static_secret_id: string_field("staticSecretId"),
+            scopes: string_field("scope"),
+        });
+    }
+    Ok(out)
+}
+
+/// Parse the batch selection `mode` (which servers to authenticate). Defaults to
+/// `missing` (first-auth) when omitted.
+fn parse_bulk_auth_mode(
+    params: &serde_json::Value,
+) -> Result<harn_vm::mcp_bulk_auth::BulkAuthMode, String> {
+    use harn_vm::mcp_bulk_auth::BulkAuthMode;
+    match params.get("mode").and_then(|value| value.as_str()) {
+        None | Some("missing") => Ok(BulkAuthMode::Missing),
+        Some("expired") => Ok(BulkAuthMode::Expired),
+        Some("all") => Ok(BulkAuthMode::All),
+        Some(other) => Err(format!(
+            "mcp/authorize_batch: invalid mode '{other}' (expected missing|expired|all)"
+        )),
+    }
+}
+
+/// Group the driver's prepare outcomes into the `{ flows, skipped, failed }`
+/// response. `flows` carries the camelCase [`harn_vm::mcp_bulk_auth::PreparedFlow`]
+/// (authorizeUrl/state/…) the client opens; each `state` is distinct.
+fn authorize_batch_response(
+    outcomes: &[harn_vm::mcp_bulk_auth::PrepareOutcome],
+) -> serde_json::Value {
+    use harn_vm::mcp_bulk_auth::PrepareOutcome;
+    let mut flows = Vec::new();
+    let mut skipped = Vec::new();
+    let mut failed = Vec::new();
+    for outcome in outcomes {
+        match outcome {
+            PrepareOutcome::Pending(flow) => {
+                flows.push(serde_json::to_value(flow).unwrap_or(serde_json::Value::Null));
+            }
+            PrepareOutcome::Skipped {
+                name,
+                server_url,
+                reason,
+            } => skipped.push(serde_json::json!({
+                "name": name,
+                "serverUrl": server_url,
+                "reason": reason,
+            })),
+            PrepareOutcome::Failed {
+                name,
+                server_url,
+                error,
+            } => failed.push(serde_json::json!({
+                "name": name,
+                "serverUrl": server_url,
+                "error": error,
+            })),
+        }
+    }
+    serde_json::json!({ "flows": flows, "skipped": skipped, "failed": failed })
+}
+
+/// Project a driver status event into the camelCase params of an
+/// `mcp/authorize_status` notification (kept camelCase for ACP wire consistency
+/// even though the shared type serializes snake_case for the CLI `--json`).
+fn authorize_status_params(status: &harn_vm::mcp_bulk_auth::McpAuthStatus) -> serde_json::Value {
+    let mut params = serde_json::json!({
+        "server": status.server,
+        "serverUrl": status.server_url,
+        "phase": status.phase,
+    });
+    if let Some(detail) = &status.detail {
+        params["detail"] = serde_json::json!(detail);
+    }
+    params
+}
+
+#[cfg(test)]
+mod authorize_batch_tests {
+    use super::*;
+    use harn_vm::mcp_bulk_auth::{
+        BulkAuthMode, McpAuthPhase, McpAuthStatus, PrepareOutcome, PreparedFlow,
+    };
+    use tokio::sync::mpsc;
+
+    #[test]
+    fn parse_servers_reads_name_url_and_client_fields() {
+        let params = serde_json::json!({
+            "servers": [
+                { "name": "Notion", "url": "https://mcp.notion.com/mcp" },
+                { "url": "https://mcp.linear.app/mcp", "scope": "read", "clientId": "abc" },
+            ]
+        });
+        let servers = parse_bulk_auth_servers(&params).expect("valid");
+        assert_eq!(servers.len(), 2);
+        assert_eq!(servers[0].name, "Notion");
+        assert_eq!(servers[0].server_url, "https://mcp.notion.com/mcp");
+        // name defaults to the URL when omitted.
+        assert_eq!(servers[1].name, "https://mcp.linear.app/mcp");
+        assert_eq!(servers[1].scopes.as_deref(), Some("read"));
+        assert_eq!(servers[1].client_id.as_deref(), Some("abc"));
+    }
+
+    #[test]
+    fn parse_servers_requires_array_and_url() {
+        assert!(parse_bulk_auth_servers(&serde_json::json!({})).is_err());
+        let no_url = serde_json::json!({ "servers": [ { "name": "x" } ] });
+        assert!(parse_bulk_auth_servers(&no_url).is_err());
+    }
+
+    #[test]
+    fn parse_servers_rejects_bad_client_mode() {
+        let params =
+            serde_json::json!({ "servers": [ { "url": "https://x/mcp", "mode": "bogus" } ] });
+        assert!(parse_bulk_auth_servers(&params).is_err());
+    }
+
+    #[test]
+    fn parse_servers_empty_array_is_ok() {
+        let servers = parse_bulk_auth_servers(&serde_json::json!({ "servers": [] })).unwrap();
+        assert!(servers.is_empty());
+    }
+
+    #[test]
+    fn parse_mode_defaults_to_missing() {
+        assert_eq!(
+            parse_bulk_auth_mode(&serde_json::json!({})).unwrap(),
+            BulkAuthMode::Missing
+        );
+        assert_eq!(
+            parse_bulk_auth_mode(&serde_json::json!({ "mode": "expired" })).unwrap(),
+            BulkAuthMode::Expired
+        );
+        assert_eq!(
+            parse_bulk_auth_mode(&serde_json::json!({ "mode": "all" })).unwrap(),
+            BulkAuthMode::All
+        );
+        assert!(parse_bulk_auth_mode(&serde_json::json!({ "mode": "nope" })).is_err());
+    }
+
+    #[test]
+    fn response_groups_outcomes_with_distinct_flow_states() {
+        let outcomes = vec![
+            PrepareOutcome::Pending(PreparedFlow {
+                name: "a".to_string(),
+                server_url: "https://a/mcp".to_string(),
+                authorize_url: "https://auth/a?state=s1".to_string(),
+                state: "s1".to_string(),
+                redirect_uri: "http://127.0.0.1/cb".to_string(),
+            }),
+            PrepareOutcome::Pending(PreparedFlow {
+                name: "b".to_string(),
+                server_url: "https://b/mcp".to_string(),
+                authorize_url: "https://auth/b?state=s2".to_string(),
+                state: "s2".to_string(),
+                redirect_uri: "http://127.0.0.1/cb".to_string(),
+            }),
+            PrepareOutcome::Skipped {
+                name: "c".to_string(),
+                server_url: "https://c/mcp".to_string(),
+                reason: "already connected".to_string(),
+            },
+            PrepareOutcome::Failed {
+                name: "d".to_string(),
+                server_url: "https://d/mcp".to_string(),
+                error: "discovery failed".to_string(),
+            },
+        ];
+        let response = authorize_batch_response(&outcomes);
+        let flows = response["flows"].as_array().unwrap();
+        assert_eq!(flows.len(), 2);
+        assert_eq!(flows[0]["authorizeUrl"], "https://auth/a?state=s1");
+        let s1 = flows[0]["state"].as_str().unwrap();
+        let s2 = flows[1]["state"].as_str().unwrap();
+        assert_ne!(s1, s2, "each prepared flow carries a distinct state");
+        assert_eq!(response["skipped"].as_array().unwrap().len(), 1);
+        assert_eq!(response["skipped"][0]["reason"], "already connected");
+        assert_eq!(response["failed"].as_array().unwrap().len(), 1);
+        assert_eq!(response["failed"][0]["error"], "discovery failed");
+    }
+
+    #[test]
+    fn status_params_are_camelcase() {
+        let params = authorize_status_params(&McpAuthStatus {
+            server: "Notion".to_string(),
+            server_url: "https://mcp.notion.com/mcp".to_string(),
+            phase: McpAuthPhase::AwaitingConsent,
+            detail: None,
+        });
+        assert_eq!(params["server"], "Notion");
+        assert_eq!(params["serverUrl"], "https://mcp.notion.com/mcp");
+        assert_eq!(params["phase"], "awaiting_consent");
+        assert!(params.get("detail").is_none());
+
+        let with_detail = authorize_status_params(&McpAuthStatus {
+            server: "Linear".to_string(),
+            server_url: "https://mcp.linear.app/mcp".to_string(),
+            phase: McpAuthPhase::Failed,
+            detail: Some("discovery failed".to_string()),
+        });
+        assert_eq!(with_detail["phase"], "failed");
+        assert_eq!(with_detail["detail"], "discovery failed");
+    }
+
+    async fn recv_value(rx: &mut mpsc::UnboundedReceiver<String>) -> serde_json::Value {
+        let line = rx.recv().await.expect("a frame");
+        serde_json::from_str(&line).expect("valid json frame")
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn authorize_batch_empty_servers_returns_empty_groups() {
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let mut server =
+            AcpServer::new_with_output(AcpServerConfig::new(None), AcpOutput::Channel(tx));
+        server
+            .handle_incoming_message(serde_json::json!({
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "mcp/authorize_batch",
+                "params": { "servers": [] }
+            }))
+            .await;
+        let frame = recv_value(&mut rx).await;
+        assert_eq!(frame["id"], 1);
+        assert_eq!(frame["result"]["flows"].as_array().unwrap().len(), 0);
+        assert_eq!(frame["result"]["skipped"].as_array().unwrap().len(), 0);
+        assert_eq!(frame["result"]["failed"].as_array().unwrap().len(), 0);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn authorize_batch_missing_servers_is_invalid_params() {
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let mut server =
+            AcpServer::new_with_output(AcpServerConfig::new(None), AcpOutput::Channel(tx));
+        server
+            .handle_incoming_message(serde_json::json!({
+                "jsonrpc": "2.0",
+                "id": 7,
+                "method": "mcp/authorize_batch",
+                "params": {}
+            }))
+            .await;
+        let frame = recv_value(&mut rx).await;
+        assert_eq!(frame["id"], 7);
+        assert_eq!(frame["error"]["code"], -32602);
     }
 }
