@@ -498,11 +498,10 @@ async fn vm_call_llm_api_with_body_inner(
         unreachable!("streaming LLM attempt loop exhausted without returning");
     }
 
-    let response = req.send().await.map_err(|e| {
-        VmError::Thrown(VmValue::String(std::sync::Arc::from(format!(
-            "{provider} API error: {e}"
-        ))))
-    })?;
+    let response = req
+        .send()
+        .await
+        .map_err(|e| non_stream_send_error(provider, e))?;
 
     // Check HTTP status BEFORE parsing the body as LLM response, or error
     // responses (e.g. vLLM "prompt too long" 400) silently become malformed
@@ -636,24 +635,49 @@ async fn send_stream_request_with_ollama_warmup(
 }
 
 fn stream_send_error(provider: &str, error: reqwest::Error) -> VmError {
-    let kind = if error.is_timeout() {
-        "timeout"
+    reqwest_send_error(provider, "stream", error)
+}
+
+/// Classify a non-streaming `req.send()` transport failure with the *same*
+/// reqwest-kind classifier the streaming path uses, so timeouts and connection
+/// failures are typed (`ErrorCategory::Timeout` / `TransientNetwork`) at the
+/// source instead of being reclassified downstream by fragile substring
+/// matching of a bare `"{provider} API error: {e}"` string.
+fn non_stream_send_error(provider: &str, error: reqwest::Error) -> VmError {
+    reqwest_send_error(provider, "request", error)
+}
+
+/// Shared reqwest-`Error`-kind classifier for both the streaming and
+/// non-streaming send paths. Maps the reqwest kind to an explicit
+/// [`crate::value::ErrorCategory`] (carried on a `CategorizedError`) so the
+/// retry/observability layer reads a typed category rather than re-deriving it
+/// from the message text. `phase` ("stream" / "request") only flavors the
+/// human-readable message; the typed category drives retry decisions.
+fn reqwest_send_error(provider: &str, phase: &str, error: reqwest::Error) -> VmError {
+    use crate::value::ErrorCategory;
+    let (kind, category) = if error.is_timeout() {
+        ("timeout", Some(ErrorCategory::Timeout))
     } else if error.is_connect() {
-        "connect"
+        ("connect", Some(ErrorCategory::TransientNetwork))
     } else if error.is_request() {
-        "request_build"
+        // A malformed request build is the caller's fault, not a transient
+        // network blip — leave it uncategorized so it is not blindly retried.
+        ("request_build", None)
     } else if error.is_body() {
-        "body"
+        ("body", Some(ErrorCategory::TransientNetwork))
     } else {
-        "unknown"
+        ("unknown", None)
     };
     // "unknown" uses Debug repr to surface the inner cause.
-    let detail = if kind == "unknown" {
-        format!("{provider} stream error ({kind}): {error:?}")
+    let message = if kind == "unknown" {
+        format!("{provider} {phase} error ({kind}): {error:?}")
     } else {
-        format!("{provider} stream error ({kind}): {error}")
+        format!("{provider} {phase} error ({kind}): {error}")
     };
-    VmError::Thrown(VmValue::String(std::sync::Arc::from(detail)))
+    match category {
+        Some(category) => VmError::CategorizedError { message, category },
+        None => VmError::Thrown(VmValue::String(std::sync::Arc::from(message))),
+    }
 }
 
 /// Canonical wire id for a streamed tool call.
@@ -1571,10 +1595,78 @@ fn is_ollama_empty_content_parser_bug(err: &VmError) -> bool {
 #[cfg(test)]
 mod tests {
     use super::{
-        append_ollama_tool_calls, consume_ollama_ndjson_lines, parse_ollama_tool_arguments,
-        should_request_stream_usage, telemetry_source,
+        append_ollama_tool_calls, consume_ollama_ndjson_lines, non_stream_send_error,
+        parse_ollama_tool_arguments, reqwest_send_error, should_request_stream_usage,
+        telemetry_source,
     };
+    use crate::value::{error_to_category, ErrorCategory, VmError};
     use std::time::Duration;
+
+    /// Drive a real `reqwest::Error` of the requested kind so the classifier is
+    /// exercised against genuine reqwest internals (its `is_*` predicates), not a
+    /// hand-rolled stand-in. `192.0.2.1` is reserved TEST-NET-1 (RFC 5737) and is
+    /// guaranteed unroutable, producing a connect/timeout failure deterministically.
+    async fn real_send_error(timeout: Duration) -> reqwest::Error {
+        let client = reqwest::Client::builder()
+            .timeout(timeout)
+            .connect_timeout(timeout)
+            .build()
+            .expect("client builds");
+        client
+            .get("http://192.0.2.1:9/never")
+            .send()
+            .await
+            .expect_err("send to unroutable TEST-NET-1 address must fail")
+    }
+
+    #[tokio::test]
+    async fn non_stream_send_error_is_typed_network_not_substring() {
+        // Connect/timeout failures must arrive as a typed CategorizedError whose
+        // category is transient — NOT a bare Thrown string reclassified by
+        // substring downstream.
+        let raw = real_send_error(Duration::from_millis(150)).await;
+        let typed = non_stream_send_error("openai", raw);
+        match &typed {
+            VmError::CategorizedError { category, .. } => {
+                assert!(
+                    matches!(
+                        category,
+                        ErrorCategory::Timeout | ErrorCategory::TransientNetwork
+                    ),
+                    "expected Timeout/TransientNetwork, got {category:?}"
+                );
+                assert!(
+                    category.is_transient(),
+                    "network send error must be transient"
+                );
+            }
+            other => panic!("expected typed CategorizedError, got {other:?}"),
+        }
+        // And the canonical category extractor reads the explicit category
+        // (proving no substring re-derivation is needed).
+        assert!(error_to_category(&typed).is_transient());
+    }
+
+    #[tokio::test]
+    async fn stream_and_non_stream_send_paths_share_one_classifier() {
+        // DRY check: both phases route through `reqwest_send_error` and yield the
+        // same typed category for the same underlying reqwest failure.
+        let stream_err = reqwest_send_error(
+            "anthropic",
+            "stream",
+            real_send_error(Duration::from_millis(150)).await,
+        );
+        let request_err = reqwest_send_error(
+            "anthropic",
+            "request",
+            real_send_error(Duration::from_millis(150)).await,
+        );
+        assert_eq!(
+            error_to_category(&stream_err).is_transient(),
+            error_to_category(&request_err).is_transient(),
+            "stream and non-stream send errors must classify identically"
+        );
+    }
 
     #[test]
     fn stream_usage_requested_for_openai_compatible_endpoints() {
