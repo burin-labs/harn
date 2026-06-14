@@ -168,7 +168,8 @@ impl super::super::Vm {
                 &args,
                 None,
             );
-            let raw = self.call_lifecycle_hook(&hook.closure, payload).await?;
+            let closure = hook.resolve(self).await?;
+            let raw = self.call_lifecycle_hook(&closure, payload).await?;
             let (raw, effects) = crate::orchestration::collect_hook_effects_and_action(
                 HookEvent::PreStep,
                 raw,
@@ -272,7 +273,8 @@ impl super::super::Vm {
                     &step.args,
                     Some(current.clone()),
                 );
-                let raw = self.call_lifecycle_hook(&hook.closure, payload).await?;
+                let closure = hook.resolve(self).await?;
+                let raw = self.call_lifecycle_hook(&closure, payload).await?;
                 let (raw, effects) = crate::orchestration::collect_hook_effects_and_action(
                     HookEvent::PostStep,
                     raw,

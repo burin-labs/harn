@@ -139,7 +139,8 @@ impl Vm {
         let mut current_payload = payload.clone();
         for invocation in invocations {
             let arg = crate::stdlib::json_to_vm_value(&current_payload);
-            let raw = self.call_closure_pub(&invocation.closure, &[arg]).await?;
+            let closure = invocation.resolve(self).await?;
+            let raw = self.call_closure_pub(&closure, &[arg]).await?;
             let (action, effects) = crate::orchestration::collect_hook_effects_and_action(
                 event,
                 raw,

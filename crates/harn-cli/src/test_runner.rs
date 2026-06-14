@@ -1109,7 +1109,13 @@ async fn execute_case(
             crate::package::install_manifest_triggers(&mut vm, &extensions)
                 .await
                 .map_err(|error| format!("failed to install manifest triggers: {error}"))?;
-            crate::package::install_manifest_hooks(&mut vm, &extensions)
+            // Install manifest hooks lazily: a pure-logic unit test that
+            // never fires a hook must not pay the ~1s cost of instantiating
+            // the handler module's whole import graph during setup. Lazy
+            // hooks resolve on first fire against the firing VM (a cache hit
+            // when the test already imported the graph), preserving per-test
+            // module-state isolation.
+            crate::package::install_manifest_hooks_with_mode(&mut vm, &extensions, true)
                 .await
                 .map_err(|error| format!("failed to install manifest hooks: {error}"))?;
             vm.set_harness(harn_vm::Harness::real());
