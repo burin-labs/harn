@@ -5,6 +5,15 @@ use crate::value::{try_compare_values, values_equal, VmError, VmValue};
 
 const ADAPTIVE_QUICKEN_THRESHOLD: u8 = 3;
 
+/// Wrap a checked `rust_decimal` arithmetic result: `Some` → a `Decimal`
+/// value, `None` → a runtime error (the 96-bit mantissa overflowed) rather
+/// than a panic, mirroring how the integer path wraps instead of aborting.
+fn decimal_result(value: Option<rust_decimal::Decimal>, op: &str) -> Result<VmValue, VmError> {
+    value
+        .map(VmValue::Decimal)
+        .ok_or_else(|| VmError::Runtime(format!("decimal {op} overflowed")))
+}
+
 impl super::super::Vm {
     fn push_binary_result(
         &mut self,
@@ -46,6 +55,7 @@ impl super::super::Vm {
         self.stack.push(match v {
             VmValue::Int(n) => VmValue::Int(n.wrapping_neg()),
             VmValue::Float(n) => VmValue::Float(-n),
+            VmValue::Decimal(d) => VmValue::Decimal(-d),
             _ => {
                 return Err(VmError::Runtime(format!(
                     "Cannot negate value of type {}",
@@ -448,6 +458,20 @@ impl super::super::Vm {
             (VmValue::Float(x), VmValue::Float(y)) => Ok(VmValue::Float(x + y)),
             (VmValue::Int(x), VmValue::Float(y)) => Ok(VmValue::Float(x as f64 + y)),
             (VmValue::Float(x), VmValue::Int(y)) => Ok(VmValue::Float(x + y as f64)),
+            // Decimal arithmetic: Decimal⊕Decimal and Decimal⊕Int (Int promoted
+            // exactly). Decimal⊕Float is intentionally absent — it falls to the
+            // type-error arm below so lossy binary floats never silently enter
+            // exact money math. `checked_*` returns an error (not a panic) on
+            // the rare overflow of a 96-bit mantissa.
+            (VmValue::Decimal(x), VmValue::Decimal(y)) => {
+                decimal_result(x.checked_add(y), "addition")
+            }
+            (VmValue::Decimal(x), VmValue::Int(y)) => {
+                decimal_result(x.checked_add(rust_decimal::Decimal::from(y)), "addition")
+            }
+            (VmValue::Int(x), VmValue::Decimal(y)) => {
+                decimal_result(rust_decimal::Decimal::from(x).checked_add(y), "addition")
+            }
             (VmValue::String(x), VmValue::String(y)) => {
                 if x.is_empty() {
                     return Ok(VmValue::String(y));
@@ -507,6 +531,17 @@ impl super::super::Vm {
             (VmValue::Float(x), VmValue::Float(y)) => Ok(VmValue::Float(x - y)),
             (VmValue::Int(x), VmValue::Float(y)) => Ok(VmValue::Float(*x as f64 - y)),
             (VmValue::Float(x), VmValue::Int(y)) => Ok(VmValue::Float(x - *y as f64)),
+            (VmValue::Decimal(x), VmValue::Decimal(y)) => {
+                decimal_result(x.checked_sub(*y), "subtraction")
+            }
+            (VmValue::Decimal(x), VmValue::Int(y)) => decimal_result(
+                x.checked_sub(rust_decimal::Decimal::from(*y)),
+                "subtraction",
+            ),
+            (VmValue::Int(x), VmValue::Decimal(y)) => decimal_result(
+                rust_decimal::Decimal::from(*x).checked_sub(*y),
+                "subtraction",
+            ),
             _ => Err(VmError::TypeError(format!(
                 "Cannot subtract {} from {}",
                 b.type_name(),
@@ -521,6 +556,17 @@ impl super::super::Vm {
             (VmValue::Float(x), VmValue::Float(y)) => Ok(VmValue::Float(x * y)),
             (VmValue::Int(x), VmValue::Float(y)) => Ok(VmValue::Float(*x as f64 * y)),
             (VmValue::Float(x), VmValue::Int(y)) => Ok(VmValue::Float(x * *y as f64)),
+            (VmValue::Decimal(x), VmValue::Decimal(y)) => {
+                decimal_result(x.checked_mul(*y), "multiplication")
+            }
+            (VmValue::Decimal(x), VmValue::Int(y)) => decimal_result(
+                x.checked_mul(rust_decimal::Decimal::from(*y)),
+                "multiplication",
+            ),
+            (VmValue::Int(x), VmValue::Decimal(y)) => decimal_result(
+                rust_decimal::Decimal::from(*x).checked_mul(*y),
+                "multiplication",
+            ),
             (VmValue::String(s), VmValue::Int(n)) | (VmValue::Int(n), VmValue::String(s)) => {
                 // Guard script-controlled repeat counts so `"a" * 1_000_000_000`
                 // errors cleanly instead of OOM-ing / panicking `capacity overflow`.
@@ -544,6 +590,22 @@ impl super::super::Vm {
             (VmValue::Float(x), VmValue::Float(y)) => Ok(VmValue::Float(x / y)),
             (VmValue::Int(x), VmValue::Float(y)) => Ok(VmValue::Float(*x as f64 / y)),
             (VmValue::Float(x), VmValue::Int(y)) => Ok(VmValue::Float(x / *y as f64)),
+            (VmValue::Decimal(_), VmValue::Decimal(y)) if *y == rust_decimal::Decimal::ZERO => {
+                Err(VmError::DivisionByZero)
+            }
+            (VmValue::Decimal(x), VmValue::Decimal(y)) => {
+                decimal_result(x.checked_div(*y), "division")
+            }
+            (VmValue::Decimal(_), VmValue::Int(0)) => Err(VmError::DivisionByZero),
+            (VmValue::Decimal(x), VmValue::Int(y)) => {
+                decimal_result(x.checked_div(rust_decimal::Decimal::from(*y)), "division")
+            }
+            (VmValue::Int(_), VmValue::Decimal(y)) if *y == rust_decimal::Decimal::ZERO => {
+                Err(VmError::DivisionByZero)
+            }
+            (VmValue::Int(x), VmValue::Decimal(y)) => {
+                decimal_result(rust_decimal::Decimal::from(*x).checked_div(*y), "division")
+            }
             _ => Err(VmError::Runtime(format!(
                 "Cannot divide {} by {}",
                 a.type_name(),
@@ -562,6 +624,22 @@ impl super::super::Vm {
             (VmValue::Int(x), VmValue::Float(y)) => Ok(VmValue::Float(*x as f64 % y)),
             (VmValue::Float(_), VmValue::Int(y)) if *y == 0 => Err(VmError::DivisionByZero),
             (VmValue::Float(x), VmValue::Int(y)) => Ok(VmValue::Float(x % *y as f64)),
+            (VmValue::Decimal(_), VmValue::Decimal(y)) if *y == rust_decimal::Decimal::ZERO => {
+                Err(VmError::DivisionByZero)
+            }
+            (VmValue::Decimal(x), VmValue::Decimal(y)) => {
+                decimal_result(x.checked_rem(*y), "modulo")
+            }
+            (VmValue::Decimal(_), VmValue::Int(0)) => Err(VmError::DivisionByZero),
+            (VmValue::Decimal(x), VmValue::Int(y)) => {
+                decimal_result(x.checked_rem(rust_decimal::Decimal::from(*y)), "modulo")
+            }
+            (VmValue::Int(_), VmValue::Decimal(y)) if *y == rust_decimal::Decimal::ZERO => {
+                Err(VmError::DivisionByZero)
+            }
+            (VmValue::Int(x), VmValue::Decimal(y)) => {
+                decimal_result(rust_decimal::Decimal::from(*x).checked_rem(*y), "modulo")
+            }
             _ => Err(VmError::Runtime(format!(
                 "Cannot modulo {} by {}",
                 a.type_name(),

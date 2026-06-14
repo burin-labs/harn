@@ -28,6 +28,11 @@ fn to_int_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> 
     match val {
         VmValue::Int(n) => Ok(VmValue::Int(*n)),
         VmValue::Float(n) => Ok(float_to_int(*n).map(VmValue::Int).unwrap_or(VmValue::Nil)),
+        // Truncates toward zero, like the float path.
+        VmValue::Decimal(d) => {
+            use rust_decimal::prelude::ToPrimitive;
+            Ok(d.trunc().to_i64().map(VmValue::Int).unwrap_or(VmValue::Nil))
+        }
         VmValue::Bool(value) => Ok(VmValue::Int(i64::from(*value))),
         VmValue::String(s) => Ok(s.parse::<i64>().map(VmValue::Int).unwrap_or(VmValue::Nil)),
         _ => Ok(VmValue::Nil),
@@ -47,8 +52,45 @@ fn to_float_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError
     match val {
         VmValue::Float(n) => Ok(VmValue::Float(*n)),
         VmValue::Int(n) => Ok(VmValue::Float(*n as f64)),
+        // Lossy: a 96-bit decimal may not be exactly representable as f64.
+        VmValue::Decimal(d) => {
+            use rust_decimal::prelude::ToPrimitive;
+            Ok(d.to_f64().map(VmValue::Float).unwrap_or(VmValue::Nil))
+        }
         VmValue::String(s) => Ok(s.parse::<f64>().map(VmValue::Float).unwrap_or(VmValue::Nil)),
         _ => Ok(VmValue::Nil),
+    }
+}
+
+/// Construct an exact decimal. Unlike `to_int`/`to_float` (which return `nil`
+/// on a bad value), `decimal` THROWS on un-parseable input, because silently
+/// dropping a money value to `nil` is dangerous. Accepts a string (exact
+/// parse), an int (exact), a float (explicit opt-in to the lossy binary→decimal
+/// conversion), or a decimal (identity).
+#[harn_builtin(
+    sig = "decimal(value: string | int | float | decimal) -> decimal",
+    category = "types"
+)]
+fn decimal_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    fn throw(message: String) -> VmError {
+        VmError::Thrown(VmValue::String(std::sync::Arc::from(message)))
+    }
+    let val = args.first().unwrap_or(&VmValue::Nil);
+    match val {
+        VmValue::Decimal(d) => Ok(VmValue::Decimal(*d)),
+        VmValue::Int(n) => Ok(VmValue::Decimal(rust_decimal::Decimal::from(*n))),
+        VmValue::String(s) => s
+            .trim()
+            .parse::<rust_decimal::Decimal>()
+            .map(VmValue::Decimal)
+            .map_err(|_| throw(format!("decimal: cannot parse {s:?} as a decimal"))),
+        VmValue::Float(f) => rust_decimal::Decimal::from_f64_retain(*f)
+            .map(VmValue::Decimal)
+            .ok_or_else(|| throw(format!("decimal: cannot represent {f} as a decimal"))),
+        other => Err(throw(format!(
+            "decimal: cannot convert {} to a decimal",
+            other.type_name()
+        ))),
     }
 }
 
@@ -217,6 +259,7 @@ pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
     &TO_STRING_IMPL_DEF,
     &TO_INT_IMPL_DEF,
     &TO_FLOAT_IMPL_DEF,
+    &DECIMAL_IMPL_DEF,
     &OK_CTOR_IMPL_DEF,
     &ERR_CTOR_IMPL_DEF,
     &IS_OK_IMPL_DEF,

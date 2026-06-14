@@ -469,3 +469,58 @@ fn depth_within_reports_nesting_correctly() {
     assert!(!depth_within(&deep, 1024));
     super::recursion::dismantle(deep);
 }
+
+fn dec(s: &str) -> VmValue {
+    VmValue::Decimal(s.parse().unwrap())
+}
+
+#[test]
+fn decimal_equality_is_a_scale_insensitive_island() {
+    // Equal by value, ignoring scale.
+    assert!(values_equal(&dec("1.5"), &dec("1.50")));
+    assert!(values_equal(&dec("0.30"), &dec("0.3")));
+    // Distinct type from int/float (no cross-type coercion), so equality stays
+    // transitive given the existing `Int == Float` rule.
+    assert!(!values_equal(&dec("1"), &i(1)));
+    assert!(!values_equal(&dec("1"), &VmValue::Float(1.0)));
+    assert!(!values_equal(&i(1), &dec("1")));
+}
+
+#[test]
+fn decimal_hash_key_matches_equality() {
+    // `values_equal` and the structural hash key must agree: equal decimals
+    // (differing only in scale) share a key, and a decimal never collides with
+    // the numerically-equal int/float (which live in their own normalized key
+    // space) because decimal equality is a separate island.
+    assert_eq!(
+        value_structural_hash_key(&dec("1.5")),
+        value_structural_hash_key(&dec("1.50"))
+    );
+    assert_ne!(
+        value_structural_hash_key(&dec("1")),
+        value_structural_hash_key(&i(1))
+    );
+    // Dedup honors the island: equal-scale decimals collapse; decimal and int
+    // do not.
+    let deduped = dedup_values(&[dec("2.0"), dec("2.00"), i(2)]);
+    assert_eq!(deduped.len(), 2);
+}
+
+#[test]
+fn decimal_orders_only_against_decimal() {
+    assert_eq!(try_compare_values(&dec("9.99"), &dec("10")), Some(-1));
+    assert_eq!(try_compare_values(&dec("10.00"), &dec("10")), Some(0));
+    // A decimal-vs-int/float comparison is unordered (no lossy coercion).
+    assert_eq!(try_compare_values(&dec("1"), &i(1)), None);
+    assert_eq!(try_compare_values(&dec("1"), &VmValue::Float(1.0)), None);
+}
+
+#[test]
+fn decimal_truthiness_and_type_name() {
+    assert!(dec("0.01").is_truthy());
+    assert!(!dec("0").is_truthy());
+    assert!(!dec("0.00").is_truthy());
+    assert_eq!(dec("1.5").type_name(), "decimal");
+    // Display preserves the stored scale.
+    assert_eq!(dec("1.50").display(), "1.50");
+}

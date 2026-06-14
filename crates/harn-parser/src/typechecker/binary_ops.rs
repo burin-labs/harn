@@ -110,6 +110,9 @@ pub(super) fn infer_binary_op_type(
             (Some(TypeExpr::Named(l)), Some(TypeExpr::Named(r))) => {
                 match (l.as_str(), r.as_str()) {
                     ("int", "int") => Some(TypeExpr::Named("int".into())),
+                    ("decimal", "int") | ("int", "decimal") | ("decimal", "decimal") => {
+                        Some(TypeExpr::Named("decimal".into()))
+                    }
                     ("float", _) | (_, "float") => Some(TypeExpr::Named("float".into())),
                     ("string", "string") => Some(TypeExpr::Named("string".into())),
                     ("list", "list") => Some(TypeExpr::Named("list".into())),
@@ -139,6 +142,9 @@ pub(super) fn infer_binary_op_type(
             (Some(TypeExpr::Named(l)), Some(TypeExpr::Named(r))) => {
                 match (l.as_str(), r.as_str()) {
                     ("int", "int") => Some(TypeExpr::Named("int".into())),
+                    ("decimal", "int") | ("int", "decimal") | ("decimal", "decimal") => {
+                        Some(TypeExpr::Named("decimal".into()))
+                    }
                     ("float", _) | (_, "float") => Some(TypeExpr::Named("float".into())),
                     _ => None,
                 }
@@ -160,6 +166,9 @@ pub(super) fn infer_binary_op_type(
                 match (l.as_str(), r.as_str()) {
                     ("string", "int") | ("int", "string") => Some(TypeExpr::Named("string".into())),
                     ("int", "int") => Some(TypeExpr::Named("int".into())),
+                    ("decimal", "int") | ("int", "decimal") | ("decimal", "decimal") => {
+                        Some(TypeExpr::Named("decimal".into()))
+                    }
                     ("float", _) | (_, "float") => Some(TypeExpr::Named("float".into())),
                     _ => None,
                 }

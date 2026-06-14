@@ -98,6 +98,15 @@ fn write_structural_hash_key(v: &VmValue, out: &mut String) {
             out.push_str(&ms.to_string());
             out.push(';');
         }
+        // Normalize the scale so equal decimals hash alike (`1.5` and `1.50`
+        // are `values_equal`, so their keys must match). Decimal is its own
+        // namespace ('M') — it never collides with Int/Float keys, mirroring
+        // that `values_equal` treats Decimal as a distinct type from them.
+        VmValue::Decimal(dec) => {
+            out.push('M');
+            out.push_str(&dec.normalize().to_string());
+            out.push(';');
+        }
         VmValue::List(items) => {
             out.push('L');
             guard_recursion(|| {
@@ -212,6 +221,13 @@ pub fn values_equal(a: &VmValue, b: &VmValue) -> bool {
     match (a, b) {
         (VmValue::Int(x), VmValue::Int(y)) => x == y,
         (VmValue::Float(x), VmValue::Float(y)) => x == y,
+        // Decimal is a distinct type for equality (a clean island): it compares
+        // equal only to another Decimal, by value (rust_decimal's `==` ignores
+        // scale, so `1.5 == 1.50`). It is deliberately NOT cross-type-equal to
+        // Int/Float — that keeps equality transitive given the existing
+        // `Int == Float` coercion, and avoids silently equating exact money to
+        // lossy binary floats. Convert explicitly with `decimal(x)` to compare.
+        (VmValue::Decimal(x), VmValue::Decimal(y)) => x == y,
         (VmValue::String(x), VmValue::String(y)) => x == y,
         (VmValue::Bytes(x), VmValue::Bytes(y)) => x == y,
         (VmValue::BuiltinRef(x), VmValue::BuiltinRef(y)) => x == y,
@@ -344,6 +360,14 @@ pub fn try_compare_values(a: &VmValue, b: &VmValue) -> Option<i32> {
         (VmValue::Float(x), VmValue::Float(y)) => float_ordering(*x, *y),
         (VmValue::Int(x), VmValue::Float(y)) => float_ordering(*x as f64, *y),
         (VmValue::Float(x), VmValue::Int(y)) => float_ordering(*x, *y as f64),
+        // Decimal orders only against Decimal (the same island rule as
+        // `values_equal`); a Decimal-vs-Int/Float comparison is *unordered*
+        // (`None`) so relational operators yield false rather than coercing
+        // through a lossy float or the `Some(0)` "equal" fallback below. `cmp`
+        // is exact and scale-insensitive.
+        (VmValue::Decimal(x), VmValue::Decimal(y)) => Some(x.cmp(y) as i32),
+        (VmValue::Decimal(_), VmValue::Int(_) | VmValue::Float(_))
+        | (VmValue::Int(_) | VmValue::Float(_), VmValue::Decimal(_)) => None,
         (VmValue::String(x), VmValue::String(y)) => Some(x.cmp(y) as i32),
         (VmValue::Pair(x), VmValue::Pair(y)) => guard_recursion(|| {
             let c = try_compare_values(&x.0, &y.0)?;

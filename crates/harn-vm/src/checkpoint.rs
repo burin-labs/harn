@@ -136,6 +136,8 @@ fn vm_to_json(val: &VmValue) -> serde_json::Value {
         VmValue::String(s) => serde_json::Value::String(s.to_string()),
         VmValue::Int(n) => serde_json::json!(*n),
         VmValue::Float(n) => serde_json::json!(*n),
+        // Decimal serializes as a string to preserve exact precision.
+        VmValue::Decimal(d) => serde_json::json!(d.to_string()),
         VmValue::Bool(b) => serde_json::Value::Bool(*b),
         VmValue::Nil => serde_json::Value::Null,
         VmValue::List(items) => serde_json::Value::Array(items.iter().map(vm_to_json).collect()),

@@ -1295,6 +1295,9 @@ fn bind_one<'q>(
         VmValue::String(value) => query.bind(value.to_string()),
         VmValue::Bytes(value) => query.bind((**value).clone()),
         VmValue::Duration(ms) => query.bind(*ms),
+        // Bind exact decimals to NUMERIC/DECIMAL columns without going through
+        // a lossy float — sqlx encodes `rust_decimal::Decimal` natively.
+        VmValue::Decimal(value) => query.bind(*value),
         value => query.bind(sqlx_core::types::Json(vm_value_to_json(value))),
     })
 }

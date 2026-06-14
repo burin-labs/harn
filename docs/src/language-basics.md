@@ -76,6 +76,7 @@ Harn is dynamically typed with optional type annotations.
 |---|---|---|
 | `int` | `42` | Platform-width integer |
 | `float` | `3.14` | Double-precision |
+| `decimal` | `decimal("0.10")` | Exact base-10 (money); see below |
 | `string` | `"hello"` | UTF-8, supports interpolation |
 | `bool` | `true`, `false` | |
 | `nil` | `nil` | Null value |
@@ -98,9 +99,34 @@ fn add(a: int, b: int) -> int {
 }
 ```
 
-Supported type expressions: `int`, `float`, `string`, `bool`, `nil`, `list`,
-`list<T>`, `dict`, `dict<K, V>`, union types (`string | nil`), and structural
-shape types (`{name: string, age: int}`).
+Supported type expressions: `int`, `float`, `decimal`, `string`, `bool`, `nil`,
+`list`, `list<T>`, `dict`, `dict<K, V>`, union types (`string | nil`), and
+structural shape types (`{name: string, age: int}`).
+
+### Decimal (exact arithmetic)
+
+`decimal` is an exact base-10 number (96-bit, up to 28–29 significant digits)
+for money and other values where binary-float rounding is unacceptable —
+`decimal("0.1") + decimal("0.2")` is exactly `0.3`, not `0.30000000000000004`.
+
+Construct one with the `decimal(value)` builtin from a string (exact parse), an
+int (exact), a float (an explicit opt-in to the lossy binary→decimal step), or
+another decimal. Unlike `to_int`/`to_float`, `decimal` **throws** on an
+un-parseable value rather than returning `nil`, so a bad money string fails loud.
+
+```harn
+let price = decimal("19.99")
+let total = price * 3            // 59.97 — int operands promote exactly
+let half  = decimal("1") / decimal("2")  // 0.5
+```
+
+Decimal is a distinct type. It arithmetic-promotes `int` operands, but
+**`decimal` and `float` never mix** — `decimal("1") + 1.5` is a compile-time
+error; convert explicitly with `decimal(x)` or `to_float(x)`. For
+equality/ordering, `decimal` only compares against `decimal` (scale-insensitive,
+so `decimal("1.5") == decimal("1.50")`); `decimal("1") == 1` is `false`. Decimals
+cross the host/JSON boundary as strings to preserve precision, and bind natively
+to Postgres `NUMERIC`/`DECIMAL` columns.
 
 Parameter type annotations for primitive types (`int`, `float`, `string`,
 `bool`, `list`, `dict`, `set`, `nil`, `closure`) are enforced at runtime.

@@ -69,6 +69,9 @@ pub fn vm_value_to_json(val: &VmValue) -> serde_json::Value {
     match val {
         VmValue::Int(i) => serde_json::json!(i),
         VmValue::Float(f) => serde_json::json!(f),
+        // Decimal crosses the host bridge as a string to preserve exact
+        // precision (binary-float JSON numbers would corrupt money values).
+        VmValue::Decimal(d) => serde_json::json!(d.to_string()),
         VmValue::String(s) => serde_json::json!(s.as_ref()),
         VmValue::Bytes(bytes) => crate::schema::tagged_bytes_json(bytes),
         VmValue::Bool(b) => serde_json::json!(b),
