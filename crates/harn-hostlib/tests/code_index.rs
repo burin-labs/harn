@@ -766,3 +766,33 @@ fn add_readonly_roots_is_idempotent() {
         "idempotent re-add must not duplicate hits, got {hits:?}"
     );
 }
+
+#[test]
+fn read_range_reads_raw_path_when_primary_index_is_unbuilt() {
+    // Regression for the read-range fallback dropped by the read-only
+    // secondary-roots work (#3352): before any `rebuild`, the primary index
+    // slot is `None`, so there is no workspace root to confine the path
+    // against. `read_range` must still read the file straight off disk (the
+    // pre-#3352 `None => PathBuf::from(&path)` behavior) instead of
+    // rejecting it as out-of-scope. This is the path `agent_run` and
+    // eval/verify take when scanning a process-output temp file to surface
+    // buried test-failure lines.
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("run-output.txt");
+    fs::write(&file, "=== RUN\n--- FAIL: TestX\nfoo_test.go:42: boom\n").unwrap();
+
+    let (registry, _cap) = build_registry(); // no rebuild — primary slot is None
+    let read = call(
+        &registry,
+        "hostlib_code_index_read_range",
+        dict(&[(
+            "path",
+            VmValue::String(Arc::from(file.to_string_lossy().as_ref())),
+        )]),
+    );
+    let content = extract_str(extract_dict(&read).get("content").unwrap());
+    assert!(
+        content.contains("foo_test.go:42: boom"),
+        "unbuilt-index read_range must return raw file contents, got {content:?}"
+    );
+}
