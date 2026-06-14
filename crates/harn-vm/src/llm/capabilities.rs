@@ -479,6 +479,21 @@ pub struct ProviderRule {
     /// [`crate::llm::capability_audit`].
     #[serde(default)]
     pub openrouter_provider_order: Option<Vec<String>>,
+    /// Serving-quality / precision trust verdict for this `(provider, model)`
+    /// route. A provider can be live and fast yet still serve a model at
+    /// DEGRADED quality (e.g. an undocumented quantization) or reject otherwise
+    /// valid requests, silently contaminating any eval/meter that trusts its
+    /// numbers. This is the data-driven sibling of [`Self::provider_route_denylist`]
+    /// / [`Self::openrouter_provider_order`]: instead of routing *around* a bad
+    /// upstream, it labels the route's measured precision so tooling (the Burin
+    /// meter precision canary) can refuse to trust a `degraded` route and flag a
+    /// `throttled` one. Known values are `trusted` (full-precision verified
+    /// against a reference), `degraded` (proven to serve at reduced quality),
+    /// `throttled` (full-precision but rate-limited to unusable timing), and
+    /// `unverified` (no verdict — treated the same as unset). Unset means
+    /// `unverified`.
+    #[serde(default)]
+    pub serving_precision: Option<String>,
 }
 
 /// Resolved capabilities for a `(provider, model)` pair. Unset rule
@@ -564,6 +579,9 @@ pub struct Capabilities {
     /// preference order. See [`ProviderRule::openrouter_provider_order`]. Empty
     /// means "no pin" (free OpenRouter routing).
     pub openrouter_provider_order: Vec<String>,
+    /// Serving-quality / precision trust verdict for this route. See
+    /// [`ProviderRule::serving_precision`]. `"unverified"` when unset.
+    pub serving_precision: String,
 }
 
 impl Default for Capabilities {
@@ -634,6 +652,7 @@ impl Default for Capabilities {
             auto_reasoning_overrides: BTreeMap::new(),
             provider_route_denylist: Vec::new(),
             openrouter_provider_order: Vec::new(),
+            serving_precision: "unverified".to_string(),
         }
     }
 }
@@ -670,6 +689,9 @@ pub struct ProviderCapabilityMatrixRow {
     pub tool_mode_parity: String,
     pub tools: bool,
     pub cache: bool,
+    /// Serving-quality / precision trust verdict for this route. See
+    /// [`ProviderRule::serving_precision`]. `"unverified"` when unset.
+    pub serving_precision: String,
     pub source: String,
 }
 
@@ -1089,6 +1111,10 @@ fn rule_to_matrix_row(
         tools: rule.native_tools.unwrap_or(false)
             || rule.text_tool_wire_format_supported.unwrap_or(true),
         cache: rule.prompt_caching.unwrap_or(false),
+        serving_precision: rule
+            .serving_precision
+            .clone()
+            .unwrap_or_else(|| "unverified".to_string()),
         source: source.to_string(),
     }
 }
@@ -1287,6 +1313,7 @@ fn defaults_to_caps(defaults: &ProviderDefaults) -> Capabilities {
         auto_reasoning_overrides: None,
         provider_route_denylist: None,
         openrouter_provider_order: None,
+        serving_precision: None,
     };
     let mut caps = rule_to_caps(&empty, defaults);
     caps.preferred_tool_format = None;
@@ -1406,6 +1433,10 @@ fn rule_to_caps(rule: &ProviderRule, defaults: &ProviderDefaults) -> Capabilitie
         auto_reasoning_overrides: rule.auto_reasoning_overrides.clone().unwrap_or_default(),
         provider_route_denylist: rule.provider_route_denylist.clone().unwrap_or_default(),
         openrouter_provider_order: rule.openrouter_provider_order.clone().unwrap_or_default(),
+        serving_precision: rule
+            .serving_precision
+            .clone()
+            .unwrap_or_else(|| "unverified".to_string()),
     }
 }
 
@@ -1655,6 +1686,41 @@ preferred_tool_format = "native"
         reset();
         let caps = lookup("anthropic", "claude-opus-4-7");
         assert!(caps.provider_route_denylist.is_empty());
+    }
+
+    #[test]
+    fn serving_precision_seeds_known_gpt_oss_verdicts() {
+        reset();
+        // Full-precision routes verified during the 2026-06 meter effort.
+        assert_eq!(
+            lookup("fireworks", "accounts/fireworks/models/gpt-oss-120b").serving_precision,
+            "trusted"
+        );
+        assert_eq!(
+            lookup("openrouter", "openai/gpt-oss-120b").serving_precision,
+            "trusted"
+        );
+        // SambaNova serves gpt-oss quantized (proven 0/5 vs reference 3/3).
+        assert_eq!(
+            lookup("sambanova", "gpt-oss-120b").serving_precision,
+            "degraded"
+        );
+        // Cerebras is full precision but rate-throttled to unusable timing.
+        assert_eq!(
+            lookup("cerebras", "gpt-oss-120b").serving_precision,
+            "throttled"
+        );
+    }
+
+    #[test]
+    fn serving_precision_defaults_unverified_for_unmarked_rows() {
+        reset();
+        // A route with no serving_precision verdict resolves to "unverified",
+        // never an empty string, so callers can branch on a stable enum.
+        assert_eq!(
+            lookup("anthropic", "claude-opus-4-7").serving_precision,
+            "unverified"
+        );
     }
 
     #[test]

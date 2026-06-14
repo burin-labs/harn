@@ -60,6 +60,12 @@ supports_assistant_prefill = false
 prefers_role_developer = false
 prefers_xml_tools = false
 thinking_block_style = "reasoning_summary"
+# SambaNova serves gpt-oss at DEGRADED quality (quantized). PROVEN during the
+# 2026-06 meter-convergence effort: c-feat 0/5 and cpp-storage 0/5 on SambaNova
+# vs 3/3 and 1/1 on the OpenRouter full-precision reference. The numbers looked
+# like a capability collapse but were provider contamination. The precision
+# canary MUST refuse to ledger a meter baseline on this route.
+serving_precision = "degraded"
 
 [[provider.sambanova]]
 model_match = "*"

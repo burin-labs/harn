@@ -43,6 +43,12 @@ supports_assistant_prefill = false
 prefers_role_developer = false
 prefers_xml_tools = false
 thinking_block_style = "reasoning_summary"
+# Cerebras serves gpt-oss-120b at FULL precision, but request-rate throttling
+# (~57K tok/req capping to ~4.4 req/min during the 2026-06 effort) makes the
+# *timing* unusable for a durable N>=5 meter baseline even though the OUTPUTS
+# are trustworthy. The precision canary should not reject this route on quality
+# grounds, but the meter must budget for the throughput ceiling.
+serving_precision = "throttled"
 
 # Cerebras GLM 4.7 is a public preview model with native tools, native
 # structured output, and top-level `reasoning_effort`; `none` is the documented

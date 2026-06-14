@@ -158,6 +158,21 @@
 #                     pinned to ["Cerebras","Groq"]). When both a pin and a
 #                     denylist are set the pin wins (a closed allowlist already
 #                     excludes everything else).
+#   serving_precision:
+#                     serving-quality / precision trust verdict for the route.
+#                     A provider can be live and fast yet serve a model at
+#                     DEGRADED quality (undocumented quantization) or reject
+#                     valid requests, silently contaminating any eval/meter that
+#                     trusts its numbers. This is the data-driven sibling of the
+#                     route-around fields above: instead of routing AROUND a bad
+#                     upstream it LABELS the measured precision so tooling (the
+#                     Burin meter precision canary) can refuse to trust a
+#                     `degraded` route. Known values: `trusted` (full precision,
+#                     reference-verified), `degraded` (proven reduced quality —
+#                     e.g. SambaNova gpt-oss quantized: 0/5 vs OpenRouter 3/3),
+#                     `throttled` (full precision but rate-limited to unusable
+#                     timing — e.g. Cerebras gpt-oss), `unverified` (no verdict;
+#                     same as unset). Defaults to `unverified`.
 #
 # OPINIONATED PROVIDER/MODEL/CONFIG POLICY (enforced by the footgun gate in
 # crate::llm::capability_audit, wired into `providers build-capabilities
@@ -1568,6 +1583,10 @@ supports_assistant_prefill = false
 prefers_role_developer = false
 prefers_xml_tools = false
 thinking_block_style = "reasoning_summary"
+# Fireworks serves gpt-oss-120b at FULL precision (verified against the
+# OpenRouter full-precision reference during the 2026-06 meter-convergence
+# effort, once the harn #3319 reasoning-echo HTTP400 was fixed). Trusted.
+serving_precision = "trusted"
 
 [[provider.fireworks]]
 model_match = "*qwen3.6*"
@@ -2294,6 +2313,12 @@ supports_assistant_prefill = false
 prefers_role_developer = false
 prefers_xml_tools = false
 thinking_block_style = "reasoning_summary"
+# SambaNova serves gpt-oss at DEGRADED quality (quantized). PROVEN during the
+# 2026-06 meter-convergence effort: c-feat 0/5 and cpp-storage 0/5 on SambaNova
+# vs 3/3 and 1/1 on the OpenRouter full-precision reference. The numbers looked
+# like a capability collapse but were provider contamination. The precision
+# canary MUST refuse to ledger a meter baseline on this route.
+serving_precision = "degraded"
 
 [[provider.sambanova]]
 model_match = "*"
@@ -3099,6 +3124,12 @@ supports_assistant_prefill = false
 prefers_role_developer = false
 prefers_xml_tools = false
 thinking_block_style = "reasoning_summary"
+# Cerebras serves gpt-oss-120b at FULL precision, but request-rate throttling
+# (~57K tok/req capping to ~4.4 req/min during the 2026-06 effort) makes the
+# *timing* unusable for a durable N>=5 meter baseline even though the OUTPUTS
+# are trustworthy. The precision canary should not reject this route on quality
+# grounds, but the meter must budget for the throughput ceiling.
+serving_precision = "throttled"
 
 # Cerebras GLM 4.7 is a public preview model with native tools, native
 # structured output, and top-level `reasoning_effort`; `none` is the documented
@@ -3607,6 +3638,11 @@ supports_assistant_prefill = false
 prefers_role_developer = false
 prefers_xml_tools = false
 thinking_block_style = "reasoning_summary"
+# Full-precision route: the Cerebras/Groq upstream allowlist above only ever
+# lands on full-precision upstreams, so OpenRouter openai/gpt-oss-120b is the
+# trusted-precision REFERENCE the meter precision canary pairs candidates
+# against. Verified clean across the 2026-06-13 live probes documented above.
+serving_precision = "trusted"
 
 [[provider.openrouter]]
 model_match = "stepfun/step-3.7-flash"
