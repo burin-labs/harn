@@ -64,10 +64,20 @@ module.exports = grammar({
 
     // Attributes: `@name` or `@name(arg, key: value)`. Stack on the
     // declaration that follows. Mirrors the parser in
-    // crates/harn-parser/src/parser.rs (parse_attributed_decl).
+    // crates/harn-parser/src/parser.rs (parse_attributed_decl), whose
+    // `skip_newlines()` swallows any run of newlines between an attribute and
+    // the declaration it decorates.
+    //
+    // `repeat($._line_sep)` (not `optional`) is required because a comment
+    // between the attribute and the declaration (e.g. a doc comment:
+    // `@complexity(allow)` / `/** ... */` / `pub fn`) is lexed as an `extras`
+    // node sandwiched between TWO separators — the newline after the attribute
+    // and the newline after the comment. `optional` only consumed the first,
+    // leaving the second to error out before the declaration. The canonical
+    // lexer treats comments as trivia, so this construct is valid Harn.
     attributed_declaration: ($) =>
       seq(
-        repeat1(seq($.attribute, optional($._line_sep))),
+        repeat1(seq($.attribute, repeat($._line_sep))),
         choice(
           $.pipeline_declaration,
           $.fn_declaration,
