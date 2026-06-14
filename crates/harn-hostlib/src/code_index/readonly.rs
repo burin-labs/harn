@@ -125,9 +125,12 @@ pub(super) fn resolve_read_path(
     // not-yet-existing paths (it is shared with write paths), so the
     // existence filter is what lets a dependency-only path win over the
     // phantom project path it would otherwise resolve to.
-    let primary_resolved = {
+    let (primary_resolved, primary_built) = {
         let guard = primary.lock().expect("code_index mutex poisoned");
-        guard.as_ref().and_then(|state| state.absolute_path(path))
+        (
+            guard.as_ref().and_then(|state| state.absolute_path(path)),
+            guard.is_some(),
+        )
     };
     if let Some(abs) = primary_resolved.as_ref().filter(|p| p.exists()) {
         return Some(abs.clone());
@@ -140,6 +143,20 @@ pub(super) fn resolve_read_path(
         {
             return Some(abs);
         }
+    }
+    // When the primary index has never been built, there is no workspace
+    // root to confine `path` against, so `absolute_path` yields `None` and
+    // both lookups above miss. Pre-#3352 `read_range` handled this by
+    // reading the raw path straight off the filesystem (the old
+    // `None => PathBuf::from(&path)` arm). Restore that fallback so callers
+    // that read a path before any rebuild — e.g. `agent_run` scanning a
+    // process-output temp file to surface buried test-failure lines, and
+    // eval/verify reads over arbitrary shell output — still resolve instead
+    // of erroring "path must stay within the indexed workspace root". The
+    // read step still returns a genuine "file not found" for a missing
+    // path, so the contract is unchanged.
+    if !primary_built {
+        return Some(PathBuf::from(path));
     }
     primary_resolved
 }
