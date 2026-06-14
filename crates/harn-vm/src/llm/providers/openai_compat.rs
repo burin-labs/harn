@@ -124,6 +124,22 @@ impl OpenAiCompatibleProvider {
         }
         msgs.extend(opts.messages.iter().cloned().map(|mut message| {
             if let Some(object) = message.as_object_mut() {
+                // The durable transcript stores a prior assistant turn's
+                // private reasoning as a top-level `reasoning` field (see
+                // `build_assistant_response_message`). That field is for
+                // host/run-record storage only — no provider consumes a prior
+                // assistant message's `reasoning` on the chat-completions wire.
+                // Strict OpenAI-compat providers (e.g. Fireworks) reject any
+                // unknown top-level message field with HTTP 400 `Extra inputs
+                // are not permitted, field: 'messages[N].reasoning'`, which is
+                // terminal and non-retryable. Tolerant providers (Cerebras,
+                // groq, OpenRouter, DeepInfra, SambaNova) silently ignore it.
+                // Drop it here at the single, comprehensive wire boundary so the
+                // request is portable across every strict provider; reasoning
+                // continuity that DOES matter rides separate, typed channels
+                // (Gemini `thoughtSignature`, Anthropic signed thinking blocks,
+                // the OpenAI Responses reasoning items API).
+                object.remove("reasoning");
                 if let Some(content) = object.get("content").cloned() {
                     let content = if remap_tool_call {
                         remap_tool_call_content(&content)
@@ -1774,6 +1790,48 @@ thinking_modes = ["enabled"]
             serialized.contains("[[CALL]]") && serialized.contains("[[/CALL]]"),
             "non-special wire delimiters must be present: {serialized}"
         );
+    }
+
+    #[test]
+    fn build_request_body_strips_prior_assistant_reasoning_field() {
+        // The durable transcript carries a prior assistant turn's private
+        // reasoning as a top-level `messages[N].reasoning` field. Strict
+        // OpenAI-compat providers (Fireworks) reject any unknown top-level
+        // message field with a terminal HTTP 400
+        // `Extra inputs are not permitted, field: 'messages[N].reasoning'`.
+        // No provider consumes this field on the chat-completions wire, so it
+        // must be dropped at the request boundary for every provider.
+        let mut payload = base_request_payload();
+        payload.provider = "fireworks".to_string();
+        payload.model = "accounts/fireworks/models/gpt-oss-120b".to_string();
+        payload.messages = vec![
+            json!({"role": "user", "content": "hello"}),
+            json!({
+                "role": "assistant",
+                "content": "",
+                "reasoning": "let me inspect the file before editing",
+                "tool_calls": [{
+                    "id": "call_001",
+                    "type": "function",
+                    "function": {"name": "read", "arguments": "{\"path\":\"main.rs\"}"},
+                }],
+            }),
+            json!({"role": "user", "content": "continue"}),
+        ];
+        let body = OpenAiCompatibleProvider::build_request_body(&payload, false);
+        let messages = body["messages"].as_array().expect("messages array");
+        for message in messages {
+            assert!(
+                message.get("reasoning").is_none(),
+                "outgoing message must not carry a `reasoning` field: {message}"
+            );
+        }
+        // The rest of the assistant turn (tool_calls + role) must survive intact.
+        let assistant = messages
+            .iter()
+            .find(|message| message["role"] == "assistant")
+            .expect("assistant message preserved");
+        assert_eq!(assistant["tool_calls"][0]["id"], "call_001");
     }
 
     #[test]
