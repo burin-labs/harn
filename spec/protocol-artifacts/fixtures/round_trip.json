@@ -16,7 +16,7 @@
       "state": "working"
     }
   },
-  "artifactVersion": "0.8.109",
+  "artifactVersion": "0.8.110",
   "envelopes": {
     "agentEventNotification": {
       "jsonrpc": "2.0",
@@ -108,7 +108,7 @@
     "resultType": "complete",
     "serverInfo": {
       "name": "harn",
-      "version": "0.8.109"
+      "version": "0.8.110"
     },
     "supportedVersions": [
       "DRAFT-2026-v1",
