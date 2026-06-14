@@ -546,7 +546,18 @@ fn sqlite_connection(path: &Path) -> Result<Connection, VmError> {
         })?;
     }
     let conn = Connection::open(path).map_err(sqlite_error)?;
+    // Set busy_timeout BEFORE the WAL pragma so SQLite waits out a transient
+    // SQLITE_BUSY while another process/connection is mid-write rather than
+    // failing the WAL-mode promotion fast. WAL then lets one writer and many
+    // readers proceed concurrently, which is what makes the cache safe when
+    // two sessions in the same project run read-heavy roles (evaluator,
+    // enrichment, QC) at once. Matches the proven event-log setup
+    // (crates/harn-vm/src/event_log/sqlite.rs).
     conn.busy_timeout(Duration::from_secs(5))
+        .map_err(sqlite_error)?;
+    conn.pragma_update(None, "journal_mode", "WAL")
+        .map_err(sqlite_error)?;
+    conn.pragma_update(None, "synchronous", "NORMAL")
         .map_err(sqlite_error)?;
     conn.execute_batch(SQLITE_CREATE_TABLE)
         .map_err(sqlite_error)?;

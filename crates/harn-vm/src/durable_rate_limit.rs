@@ -257,7 +257,17 @@ fn try_reserve_once(
     }
 
     let mut conn = Connection::open(path).map_err(sql_error)?;
+    // Set busy_timeout BEFORE the WAL pragma so the WAL-mode promotion waits
+    // out a transient SQLITE_BUSY from another session's writer instead of
+    // failing fast. WAL lets concurrent sessions sharing this project's
+    // rate-limit DB serialize on the write lock for at most busy_timeout
+    // rather than throwing "database is locked" up into the agent loop.
+    // Matches the proven event-log setup (crates/harn-vm/src/event_log/sqlite.rs).
     conn.busy_timeout(Duration::from_millis(DEFAULT_BUSY_TIMEOUT_MS))
+        .map_err(sql_error)?;
+    conn.pragma_update(None, "journal_mode", "WAL")
+        .map_err(sql_error)?;
+    conn.pragma_update(None, "synchronous", "NORMAL")
         .map_err(sql_error)?;
     conn.execute_batch(
         "CREATE TABLE IF NOT EXISTS durable_rate_limit_entries (

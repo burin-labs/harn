@@ -233,6 +233,28 @@ fn mem_cache_clear_resets_metrics_and_entries() {
     assert_eq!(metrics_snapshot(&options).misses, 0);
 }
 
+// Multi-session hardening: the sqlite cache must open in WAL mode so two
+// sessions in the same project can run read-heavy LLM roles concurrently
+// without a writer blocking readers into "database is locked".
+#[test]
+fn sqlite_cache_connection_uses_wal_journal_mode() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let path = dir.path().join("cache.sqlite");
+    // Force the file (and its pragmas) to be created via the production path.
+    let options = sqlite_options(path.clone());
+    cache_put_at(&options, "a", serde_json::json!({"value": "a"}), 1_000).unwrap();
+
+    let conn = sqlite_connection(&path).expect("open cache connection");
+    let mode: String = conn
+        .query_row("PRAGMA journal_mode", [], |row| row.get(0))
+        .expect("read journal_mode");
+    assert_eq!(
+        mode.to_lowercase(),
+        "wal",
+        "cache sqlite must be WAL for cross-session concurrency"
+    );
+}
+
 // Regression for the cache-key omission bug: tools, structured-output schema,
 // and stop sequences each change the model's output, so two calls differing
 // only in one of them must produce DIFFERENT cache keys (otherwise a wrong

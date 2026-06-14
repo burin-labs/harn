@@ -61,6 +61,29 @@ fn reserve_blocks_until_window_expires() {
     );
 }
 
+// Multi-session hardening: the durable rate-limit DB must open in WAL mode so
+// several sessions sharing one project's limiter serialize on the write lock
+// (bounded by busy_timeout) instead of throwing "database is locked" into the
+// agent loop.
+#[test]
+fn rate_limit_db_uses_wal_journal_mode() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let path = temp.path().join("rate.sqlite");
+    let buckets = vec![bucket("provider:rpm", 10, 1, 1_000)];
+    // Create the DB (and apply its pragmas) via the production reserve path.
+    try_reserve_once(&path, &buckets, 1_000).expect("reserve");
+
+    let conn = Connection::open(&path).expect("open sqlite");
+    let mode: String = conn
+        .query_row("PRAGMA journal_mode", [], |row| row.get(0))
+        .expect("read journal_mode");
+    assert_eq!(
+        mode.to_lowercase(),
+        "wal",
+        "rate-limit sqlite must be WAL for cross-session concurrency"
+    );
+}
+
 #[test]
 fn multi_bucket_reservation_is_atomic_when_one_bucket_is_full() {
     let temp = tempfile::tempdir().expect("tempdir");
