@@ -113,6 +113,11 @@ supports_assistant_prefill = false
 prefers_role_developer = false
 prefers_xml_tools = false
 thinking_block_style = "reasoning_summary"
+# Full-precision route: the Cerebras/Groq upstream allowlist above only ever
+# lands on full-precision upstreams, so OpenRouter openai/gpt-oss-120b is the
+# trusted-precision REFERENCE the meter precision canary pairs candidates
+# against. Verified clean across the 2026-06-13 live probes documented above.
+serving_precision = "trusted"
 
 [[provider.openrouter]]
 model_match = "stepfun/step-3.7-flash"

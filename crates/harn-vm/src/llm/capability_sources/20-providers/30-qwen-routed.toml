@@ -75,6 +75,10 @@ supports_assistant_prefill = false
 prefers_role_developer = false
 prefers_xml_tools = false
 thinking_block_style = "reasoning_summary"
+# Fireworks serves gpt-oss-120b at FULL precision (verified against the
+# OpenRouter full-precision reference during the 2026-06 meter-convergence
+# effort, once the harn #3319 reasoning-echo HTTP400 was fixed). Trusted.
+serving_precision = "trusted"
 
 [[provider.fireworks]]
 model_match = "*qwen3.6*"

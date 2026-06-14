@@ -154,6 +154,21 @@
 #                     pinned to ["Cerebras","Groq"]). When both a pin and a
 #                     denylist are set the pin wins (a closed allowlist already
 #                     excludes everything else).
+#   serving_precision:
+#                     serving-quality / precision trust verdict for the route.
+#                     A provider can be live and fast yet serve a model at
+#                     DEGRADED quality (undocumented quantization) or reject
+#                     valid requests, silently contaminating any eval/meter that
+#                     trusts its numbers. This is the data-driven sibling of the
+#                     route-around fields above: instead of routing AROUND a bad
+#                     upstream it LABELS the measured precision so tooling (the
+#                     Burin meter precision canary) can refuse to trust a
+#                     `degraded` route. Known values: `trusted` (full precision,
+#                     reference-verified), `degraded` (proven reduced quality —
+#                     e.g. SambaNova gpt-oss quantized: 0/5 vs OpenRouter 3/3),
+#                     `throttled` (full precision but rate-limited to unusable
+#                     timing — e.g. Cerebras gpt-oss), `unverified` (no verdict;
+#                     same as unset). Defaults to `unverified`.
 #
 # OPINIONATED PROVIDER/MODEL/CONFIG POLICY (enforced by the footgun gate in
 # crate::llm::capability_audit, wired into `providers build-capabilities
