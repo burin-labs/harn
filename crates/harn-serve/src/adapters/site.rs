@@ -509,6 +509,12 @@ struct SiteRoute {
     /// HTTP method. Unioned onto `required_scopes` for the matching method;
     /// empty for the common uniform route. See [`SiteRoute::scopes_for`].
     method_scopes: BTreeMap<String, BTreeSet<String>>,
+    /// `@policy(...)` allowed principal kinds declared on the function.
+    /// When non-empty, admission additionally requires the hook-resolved
+    /// principal's `kind` to be in this set (checked after `@scopes`).
+    /// Empty for routes without a `@policy(kinds:)` guard. See
+    /// [`crate::exports::RoutePolicy`].
+    allowed_kinds: BTreeSet<String>,
     /// `@stream` marker: after admission, hand the request head to the
     /// [`SiteStreamProvider`] instead of dispatching into the VM. The
     /// request body is never read.
@@ -618,6 +624,11 @@ fn build_site_router(
             spec: spec.clone(),
             required_scopes: function.required_scopes.clone(),
             method_scopes: function.method_scopes.clone(),
+            allowed_kinds: function
+                .policy
+                .as_ref()
+                .map(|policy| policy.allowed_kinds.clone())
+                .unwrap_or_default(),
             stream: function.stream,
             raw: function.raw,
             ws: function.ws,
@@ -742,6 +753,26 @@ async fn site_dispatch(State(state): State<SiteState>, request: Request) -> Resp
                         DispatchError::Forbidden {
                             required: required_scopes.into_owned(),
                             granted: context.scopes,
+                        },
+                        &request_id,
+                    );
+                }
+                // `@policy(kinds: ...)` composes with `@scopes`: once the
+                // scope floor is met, a route that declares allowed
+                // principal kinds additionally requires the hook-resolved
+                // principal's `kind` to be one of them. A request whose
+                // principal carries no kind (the embedder did not classify
+                // it) can never satisfy a non-empty allow-set, so it is
+                // refused — fail-closed on the principal-class gate.
+                if !route.allowed_kinds.is_empty()
+                    && !context
+                        .kind
+                        .as_deref()
+                        .is_some_and(|kind| route.allowed_kinds.contains(kind))
+                {
+                    return axum_response_from_dispatch_error(
+                        DispatchError::ForbiddenPrincipalKind {
+                            allowed: route.allowed_kinds.clone(),
                         },
                         &request_id,
                     );

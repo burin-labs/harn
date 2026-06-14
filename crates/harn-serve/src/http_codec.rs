@@ -514,6 +514,14 @@ pub fn dispatch_error_payload(error: DispatchError, request_id: &str) -> (Status
             let message = crate::error::forbidden_message(&required, &granted);
             (StatusCode::FORBIDDEN, "forbidden", message, payload)
         }
+        DispatchError::ForbiddenPrincipalKind { allowed } => {
+            let message = crate::error::forbidden_principal_kind_message(&allowed);
+            let details = json!({
+                "kind": "forbidden_principal_kind",
+                "allowed_kinds": allowed.iter().collect::<Vec<_>>(),
+            });
+            (StatusCode::FORBIDDEN, "forbidden", message, details)
+        }
         DispatchError::RateLimited {
             scope,
             retry_after_ms,

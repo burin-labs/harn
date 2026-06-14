@@ -33,7 +33,7 @@ impl TypeChecker {
                 "deprecated" | "test" | "complexity" | "acp_tool" | "acp_skill" | "invariant"
                 | "deterministic" | "semantic" | "archivist" | "retroactive" | "persona"
                 | "step" | "trigger" | "handoff" | "budget" | "command" | "serial" | "heavy"
-                | "scopes" | "route" | "job" | "schedule" | "queue" | "retry" => {}
+                | "scopes" | "policy" | "route" | "job" | "schedule" | "queue" | "retry" => {}
                 other => {
                     self.warning_at(
                         Code::UnknownAttribute,
@@ -224,6 +224,7 @@ impl TypeChecker {
             "serial" => self.validate_serial_args(attr),
             "heavy" => self.validate_heavy_args(attr),
             "scopes" => self.validate_scopes_args(attr),
+            "policy" => self.validate_policy_args(attr),
             "job" => self.validate_job_args(attr),
             "schedule" => self.validate_schedule_args(attr),
             "queue" => self.validate_queue_args(attr),
@@ -236,6 +237,53 @@ impl TypeChecker {
                 );
             }
             _ => {}
+        }
+    }
+
+    /// `@policy(kinds: "operator team_admin")` — a declarative route auth
+    /// policy that composes with `@scopes`. Today the only key is `kinds`:
+    /// a whitespace-separated list of allowed principal kinds the dispatch
+    /// must match (see `harness.auth.kind()`). Empty or non-string values
+    /// warn; the route still mounts (the host keeps any defense-in-depth
+    /// check) but the declared guard is ignored for the bad argument.
+    pub(super) fn validate_policy_args(&mut self, attr: &Attribute) {
+        const KNOWN_KEYS: &[&str] = &["kinds"];
+        if attr.args.is_empty() {
+            self.warning_at(
+                Code::InvalidAttributeArgument,
+                "`@policy(...)` requires at least one argument, e.g. `@policy(kinds: \"operator\")`"
+                    .to_string(),
+                attr.span,
+            );
+            return;
+        }
+        for arg in &attr.args {
+            let Some(name) = self.require_named_arg("@policy", arg) else {
+                continue;
+            };
+            if !KNOWN_KEYS.contains(&name) {
+                self.warning_at(
+                    Code::InvalidAttributeArgument,
+                    format!("unknown `@policy` argument `{name}`; expected one of {KNOWN_KEYS:?}"),
+                    arg.span,
+                );
+                continue;
+            }
+            let Some(value) = symbol_like_value(&arg.value.node) else {
+                self.warning_at(
+                    Code::InvalidAttributeArgument,
+                    format!("`@policy({name}: ...)` must be a string literal"),
+                    arg.span,
+                );
+                continue;
+            };
+            if value.split_whitespace().next().is_none() {
+                self.warning_at(
+                    Code::InvalidAttributeArgument,
+                    format!("`@policy({name}: ...)` cannot be empty"),
+                    arg.span,
+                );
+            }
         }
     }
 
