@@ -8,6 +8,157 @@ highlights live in [CHANGELOG-pre-0.6.md](CHANGELOG-pre-0.6.md).
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.8.110
+
+### Added
+
+- Added shared `harn.run_view.v1` and `harn.session_view.v1` projections for
+  persisted run records, CLI JSON output, portal details, and live session APIs.
+
+- **MCP server presets are now overlayable data, not Rust constants (#3348).**
+  The well-known preset catalog (Notion, Linear, GitHub, Filesystem) moved from
+  a compiled-in table to bundled TOML (`mcp_presets.toml`) that can be overridden
+  or extended at runtime without a recompile — point `HARN_MCP_PRESETS_CONFIG` at
+  a file or drop one at `~/.config/harn/mcp_presets.toml`; overlays merge
+  last-writer-wins by preset `id`, then append new presets. The catalog also
+  gains an optional, inert `identity` descriptor schema (`IdentityProbeDescriptor`)
+  describing how to fetch a human-readable "logged in as …" string per server;
+  the probe runner that consumes it ships separately (#3349). The serialized JSON
+  catalog contract is unchanged.
+
+- **`code_index` gains additive, read-only secondary roots so dependency/SDK
+  symbols are discoverable without clobbering the project index (#3352).**
+  `hostlib_code_index_rebuild({root})` still owns exactly one writable root and
+  flips its slot wholesale, so indexing a dependency root through it would
+  destroy the project index. The new `hostlib_code_index_add_readonly_roots({roots, replace?})`
+  builds each extra root into a parallel, read-only `IndexState` that lives
+  beside the primary. `hostlib_code_index_query` now merges hits from every
+  read-only root (each tagged with a `root` field; primary hits carry
+  `root: null`), and `hostlib_code_index_read_range` falls back to the
+  read-only roots so a symbol discovered in a dependency root can be read back.
+  No mutating builtin (`version_record`, `reindex_file`, `rename_symbol`,
+  locks) ever touches the read-only set — writes to a dependency-root path stay
+  rejected exactly as before. Adding the same root twice is idempotent.
+  Enables the deferred burin dependency-grounding wiring (burin #2403 follow-up).
+
+- **gpt-oss reasoning capability rows for fireworks, deepinfra, and sambanova
+  (#3318).** Added declarative reasoning-capability matrix rows so gpt-oss
+  served through these providers correctly advertises and negotiates its
+  reasoning channel.
+
+### Changed
+
+- **`scripts/release_gate.sh audit` is faster and surfaces failures up front.**
+  `sync_language_spec` (the `spec/HARN_SPEC.md` -> `docs/src/language-spec.md`
+  mirror writer) was being run in *both* the `docs-audit` and `grammar-audit`
+  lanes, which run in parallel — duplicating ~72s of work and racing two writers
+  on the same mirror file. It now runs only in `docs-audit`; `grammar-audit`'s
+  `verify_language_spec` reads the canonical spec source directly and does not
+  depend on the mirror. On failure, the gate now prints a `RELEASE AUDIT FAILED`
+  summary at the TOP of the output naming the failing lane *and the specific
+  failing sub-step* (e.g. `grammar-audit / verify_tree_sitter_parse`), derived
+  from the unmatched `time_phase` banner, plus the last 40 log lines — instead
+  of forcing a maintainer to scroll thousands of lines into the full per-lane
+  log dump (which is still emitted afterward for deep debugging).
+
+- **LLM retry/throttle layer is more robust under concurrency and network loss
+  (#3360).** Three deterministic, unit-tested hardenings to the outbound-LLM
+  retry path:
+  - **Equal-jitter backoff.** Transient-error backoff was a fixed exponential
+    (`250/500/1000/2000/4000ms`) with zero jitter, so concurrent same-key
+    callers (e.g. `eval --concurrency K` alongside a live session) retried in
+    lockstep and re-stampeded the provider. Backoff now uses AWS "equal jitter"
+    (`wait = ceil/2 + rand(0, ceil/2)`, `ceil = 250 * 2^min(attempt, 4)`), which
+    desynchronizes retries while avoiding the near-zero waits of full jitter. A
+    small additive jitter is also layered on top of an honored provider
+    `Retry-After` so identical `Retry-After` values do not resume in unison.
+  - **Typed non-streaming send errors.** Streaming `req.send()` failures were
+    already classified by reqwest error kind, but non-streaming send failures
+    became a bare `"{provider} API error: {e}"` string that the retry layer
+    had to re-classify by substring. Both paths now share one reqwest-kind
+    classifier that tags timeouts/connection failures as typed
+    `ErrorCategory::Timeout` / `TransientNetwork` at the source.
+  - **Network-only circuit breaker.** A per-route, per-process breaker now opens
+    after sustained `NetworkError`/`Timeout` failures (laptop disconnect, DNS
+    failure, dropped link), fails fast for a short window, then admits a single
+    half-open probe and closes on success. It deliberately does **not** react to
+    429 (handled by the existing rate-limiter cooldown + `Retry-After`) or 5xx,
+    so it only stops the retry budget from burning against a truly dead link.
+
+### Fixed
+
+- **gpt-oss / Harmony channel leaks no longer pollute conversation history
+  (#3359).** On ~23% of gpt-oss-120b turns the provider fails to split its
+  harmony channels and collapses the analysis reasoning plus the inline tool
+  call into the assistant `content` (empty `reasoning` field, empty native
+  `tool_calls`). The bare `{"tool":..,"arguments":..}` dialect emitted in that
+  case is now recovered (the native-JSON parser accepts `tool` as a `name`
+  alias, in both the acceptance gate and the extractor — previously the call was
+  dropped and the loop saw a stall), and the persisted assistant turn is rebuilt
+  into the canonical shape a non-leaked turn produces: structured `tool_calls`,
+  the leaked trace moved to the private `reasoning` field (stripped from the wire
+  by the prior-turn reasoning fix), and empty `content`. This stops the model's
+  raw chain-of-thought — including "game the verifier" plans — from being
+  re-serialized into every later request and wasting input tokens.
+
+- **Strip prior-turn assistant `reasoning` from the openai-compat wire (#3319).**
+  Echoing a previous turn's `reasoning` field back on the next request made
+  Fireworks reject the call with a 400; the reasoning is now stripped from
+  outbound openai-compat history so multi-turn loops do not break.
+
+- **The tree-sitter-harn grammar now parses an attribute followed by a doc
+  comment before a declaration**, e.g. `@complexity(allow)` on one line, a
+  `/** ... */` (or `//`) comment on the next, then `pub fn ...`. Previously the
+  external scanner emitted a line separator after the attribute's newline, the
+  comment was lexed as `extras`, and the *second* newline (after the comment)
+  arrived in a parser state that no longer accepted a separator before the
+  declaration — producing a hard parse `ERROR` and failing
+  `scripts/verify_tree_sitter_parse.py --strict`. The canonical lexer treats
+  comments as trivia and `parse_attributed_decl` `skip_newlines()` swallows the
+  whole run, so the construct is valid Harn; this was a tree-sitter grammar gap,
+  not a malformed source file. Fixed by changing `attributed_declaration` to
+  accept `repeat($._line_sep)` (rather than `optional`) after each attribute so
+  the trailing separator on either side of the comment is absorbed. This was the
+  v0.8.109 release `grammar-audit` blocker (it tripped on a vendored
+  `.harn/packages/harn-slack-connector/src/lib.harn` whose `normalize_inbound`
+  carried exactly this `@attr` + doc-comment shape). Added a corpus regression
+  test.
+
+- **`harn-vm` compiles again after the persistent-`imbl::OrdMap` dict migration.**
+  The iterative value-teardown worklist (`value/recursion.rs::dismantle_values`,
+  added to bound native-stack depth when dropping deeply nested values) called
+  `into_values()` on an owned `DictMap` — but `DictMap` is now an
+  `imbl::OrdMap`, which (unlike `BTreeMap`/`HashMap`) has no `into_values`.
+  This was a hard `error[E0599]` that broke every Rust compile of `harn-vm`
+  (the `Audit scripts`, `Harn conformance + audit`, and crate-packaging release
+  gates all failed on it). Fixed by moving owned values out via the map's
+  owning `IntoIterator` (`into_iter().map(|(_, v)| v)`), preserving the iterative
+  teardown semantics.
+
+- **Portal input validation (#3317).** Runs-page URL params now fall back to
+  valid filters, sort order, page, and row-count values, and launch env
+  overrides now reject non-object JSON and non-string values before submitting.
+
+- **Structured judge/router calls no longer silently truncate into a dead-judge
+  fall-through, and a truncation is now its own integrity category.** A
+  `safe_structured_call` (judge / router / cheap-classifier) that went out with
+  a tiny `max_tokens` budget truncated mid-object on a reasoning model — gpt-oss
+  on Cerebras emits its structured output *inside* the reasoning channel, so the
+  reasoning and the JSON share the same output budget — and the unparseable
+  result was classified as a generic `missing_json` miss indistinguishable from
+  a model that just returned prose. Two provider-generic fixes: (1)
+  `safe_structured_call` now floors a structured call's `max_tokens` to 512 (it
+  only RAISES an unset/too-small budget; an explicit larger value such as a
+  1200-token rubric judge is untouched), so a small verdict object always has
+  room to finish; live-probed against `cerebras gpt-oss-120b`, a historical
+  `max_tokens: 180` call (which produced zero JSON, 180/180 tokens spent on
+  reasoning) now returns clean bounded JSON at ~207 tokens with `stop_reason=
+  stop`. (2) A token-limit truncation gets its own `error_category:
+  "length_truncation"` on the result envelope (kept even after a failed repair
+  pass) so a caller can detect a DEAD structured call — one that fell through to
+  a deterministic grader without ever rendering a verdict — instead of laundering
+  it as an ordinary abstention.
+
 ## v0.8.109
 
 ### Added
