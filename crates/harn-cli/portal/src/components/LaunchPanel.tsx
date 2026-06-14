@@ -129,6 +129,27 @@ type LaunchPanelProps = {
   onOpenRun: (path: string) => void
 }
 
+function parseEnvOverrides(envJson: string): Record<string, string> {
+  const trimmed = envJson.trim()
+  if (!trimmed) {
+    return {}
+  }
+
+  const parsed = JSON.parse(trimmed) as unknown
+  if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new Error("Env JSON must be an object")
+  }
+
+  const env: Record<string, string> = {}
+  for (const [key, value] of Object.entries(parsed)) {
+    if (typeof value !== "string") {
+      throw new Error("Env JSON values must be strings")
+    }
+    env[key] = value
+  }
+  return env
+}
+
 export function LaunchPanel({ meta, llmOptions, targets, jobs, onLaunch, onOpenRun }: LaunchPanelProps) {
   const intl = useIntl()
   const [mode, setMode] = useState<"file" | "source" | "playground">("playground")
@@ -189,10 +210,7 @@ export function LaunchPanel({ meta, llmOptions, targets, jobs, onLaunch, onOpenR
     setSubmitting(true)
     setError(null)
     try {
-      const env = envJson.trim() ? (JSON.parse(envJson) as Record<string, string>) : {}
-      if (typeof env !== "object" || Array.isArray(env)) {
-        throw new Error("Env JSON must be an object")
-      }
+      const env = parseEnvOverrides(envJson)
       if (selectedProvider?.base_url_env && endpointUrl.trim()) {
         env[selectedProvider.base_url_env] = endpointUrl.trim()
       }

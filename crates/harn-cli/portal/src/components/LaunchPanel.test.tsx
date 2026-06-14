@@ -1,9 +1,13 @@
-import { fireEvent, render, screen } from "@testing-library/react"
+import { cleanup, fireEvent, render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { IntlProvider } from "react-intl"
-import { describe, expect, it, vi } from "vitest"
+import { afterEach, describe, expect, it, vi } from "vitest"
 
 import { LaunchPanel } from "./LaunchPanel"
+
+afterEach(() => {
+  cleanup()
+})
 
 describe("LaunchPanel", () => {
   it("submits playground launches with provider, model, and env overrides", async () => {
@@ -163,5 +167,55 @@ describe("LaunchPanel", () => {
       source: undefined,
       task: "Summarize the repository in a few bullets.",
     })
+  })
+
+  it("rejects null env JSON before launching", async () => {
+    const onLaunch = vi.fn(async () => {})
+
+    render(
+      <IntlProvider locale="en">
+        <LaunchPanel
+          meta={{ workspace_root: "/workspace/harn", run_dir: ".harn-runs/portal-demo" }}
+          llmOptions={null}
+          targets={[]}
+          jobs={[]}
+          onLaunch={onLaunch}
+          onOpenRun={() => {}}
+        />
+      </IntlProvider>,
+    )
+
+    fireEvent.change(screen.getByLabelText("Env JSON overrides"), {
+      target: { value: "null" },
+    })
+    await userEvent.click(screen.getAllByRole("button", { name: "Run now" }).at(-1)!)
+
+    expect(await screen.findByText("Env JSON must be an object")).toBeInTheDocument()
+    expect(onLaunch).not.toHaveBeenCalled()
+  })
+
+  it("rejects non-string env JSON values before launching", async () => {
+    const onLaunch = vi.fn(async () => {})
+
+    render(
+      <IntlProvider locale="en">
+        <LaunchPanel
+          meta={{ workspace_root: "/workspace/harn", run_dir: ".harn-runs/portal-demo" }}
+          llmOptions={null}
+          targets={[]}
+          jobs={[]}
+          onLaunch={onLaunch}
+          onOpenRun={() => {}}
+        />
+      </IntlProvider>,
+    )
+
+    fireEvent.change(screen.getByLabelText("Env JSON overrides"), {
+      target: { value: '{"OPENAI_API_KEY":123}' },
+    })
+    await userEvent.click(screen.getAllByRole("button", { name: "Run now" }).at(-1)!)
+
+    expect(await screen.findByText("Env JSON values must be strings")).toBeInTheDocument()
+    expect(onLaunch).not.toHaveBeenCalled()
   })
 })
