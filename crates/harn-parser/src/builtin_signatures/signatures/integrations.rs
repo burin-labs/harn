@@ -100,6 +100,7 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
         &[Param::optional("options", TY_DICT)],
         TY_DICT,
     ),
+    BuiltinSignature::simple("harn.mcp.reauth_expired", &[], TY_LIST),
     BuiltinSignature::simple(
         "harn.mcp.reload",
         &[Param::new("server", TY_STRING)],
@@ -458,6 +459,7 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
         &[Param::new("client", TY_ANY), Param::new("uri", TY_STRING)],
         Ty::Union(&[TY_STRING, TY_LIST, TY_NIL]),
     ),
+    BuiltinSignature::simple("mcp_reauth_expired", &[], TY_LIST),
     BuiltinSignature::simple("mcp_registry_status", &[], TY_LIST),
     BuiltinSignature::simple("mcp_release", &[Param::new("name", TY_STRING)], TY_NIL),
     BuiltinSignature::simple(
