@@ -1332,7 +1332,7 @@ mod tests {
         let view = build_run_view(&run);
         assert_eq!(view.run.run_id, "legacy");
         assert_eq!(view.run.session_id, None);
-        assert_eq!(view.transcript.present, false);
+        assert!(!view.transcript.present);
         assert_eq!(
             view.failure.as_ref().map(|failure| failure.status.as_str()),
             Some("failed")
