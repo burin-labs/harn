@@ -1,0 +1,12 @@
+pipeline test(task) {
+  // Decimal flows through min/max/sign/round exactly (was silently nil).
+  log(min(decimal("19.99"), decimal("9.99")))
+  log(max(decimal("19.99"), decimal("9.99")))
+  log(sign(decimal("-2.5")))
+  log(sign(decimal("0")))
+  log(sign(decimal("4.2")))
+  log(round(decimal("2.4")))
+  // sum() accumulates decimals exactly, promoting int operands.
+  log([decimal("1.50"), decimal("2.50"), decimal("0.99")].sum())
+  log([decimal("10"), 5, decimal("0.50")].sum())
+}

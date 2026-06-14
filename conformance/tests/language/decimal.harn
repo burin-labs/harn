@@ -1,0 +1,27 @@
+pipeline test(task) {
+  // Exactness: the canonical float-rounding counterexample.
+  log(decimal("0.1") + decimal("0.2"))
+  // Scale is preserved through addition/subtraction.
+  log(decimal("1.10") + decimal("2.20"))
+  log(decimal("5.00") - decimal("1.50"))
+  // Multiplication and division.
+  log(decimal("1.5") * decimal("4"))
+  log(decimal("7") / decimal("2"))
+  log(decimal("7") % decimal("3"))
+  // Int promotes into decimal arithmetic (exact, ergonomic).
+  log(decimal("2.50") * 3)
+  log(decimal("10") + 5)
+  log(-decimal("4.25"))
+  // Equality ignores scale, but decimal is a distinct type from int/float.
+  log(decimal("1.50") == decimal("1.5"))
+  log(decimal("1") == 1)
+  // Ordering.
+  log(decimal("9.99") < decimal("10"))
+  log(decimal("10.00") >= decimal("10"))
+  // Reflection + conversions.
+  log(type_of(decimal("3")))
+  log(to_int(decimal("3.9")))
+  log(to_string(decimal("42.50")))
+  // Construction from int and from a decimal (identity).
+  log(decimal(7) + decimal("0.5"))
+}

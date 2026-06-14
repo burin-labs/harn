@@ -161,6 +161,14 @@ pub struct VmBuiltinRefId {
 pub enum VmValue {
     Int(i64),
     Float(f64),
+    /// Exact base-10 decimal (96-bit mantissa, up to 28–29 significant digits)
+    /// for money and other values where binary float rounding is unacceptable.
+    /// Inline (`rust_decimal::Decimal` is `Copy` and 16 bytes, the same width as
+    /// the existing widest variants). Constructed via the `decimal(value)`
+    /// builtin; it is a distinct type from `Int`/`Float` for
+    /// equality/ordering/hashing (a clean island) but promotes `Int` operands
+    /// exactly in arithmetic. See `docs/src/decimal.md`.
+    Decimal(rust_decimal::Decimal),
     String(Shared<str>),
     Bytes(Shared<Vec<u8>>),
     Bool(bool),
@@ -344,6 +352,7 @@ impl VmValue {
             VmValue::Nil => false,
             VmValue::Int(n) => *n != 0,
             VmValue::Float(n) => *n != 0.0,
+            VmValue::Decimal(d) => *d != rust_decimal::Decimal::ZERO,
             VmValue::String(s) => !s.is_empty(),
             VmValue::Bytes(bytes) => !bytes.is_empty(),
             VmValue::List(l) => !l.is_empty(),
@@ -378,6 +387,7 @@ impl VmValue {
             VmValue::Bytes(_) => "bytes",
             VmValue::Int(_) => "int",
             VmValue::Float(_) => "float",
+            VmValue::Decimal(_) => "decimal",
             VmValue::Bool(_) => "bool",
             VmValue::Nil => "nil",
             VmValue::List(_) => "list",
@@ -523,6 +533,13 @@ impl VmValue {
                 } else {
                     let _ = write!(out, "{n}");
                 }
+            }
+            // Render the decimal at its stored scale (e.g. `1.50` stays `1.50`),
+            // which is what money formatting expects. Equality normalizes scale,
+            // so `1.5` and `1.50` are still equal even though they display
+            // differently.
+            VmValue::Decimal(d) => {
+                let _ = write!(out, "{d}");
             }
             VmValue::String(s) => out.push_str(s),
             VmValue::Bytes(bytes) => {

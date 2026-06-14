@@ -642,6 +642,8 @@ pub(crate) fn vm_value_to_data_value(value: &VmValue) -> serde_json::Value {
         VmValue::Int(i) => serde_json::json!(i),
         VmValue::Float(f) if f.is_finite() => serde_json::json!(f),
         VmValue::Float(_) => serde_json::Value::Null,
+        // Decimal serializes as a string to preserve exact precision.
+        VmValue::Decimal(d) => serde_json::json!(d.to_string()),
         VmValue::String(s) => serde_json::json!(s.as_ref()),
         VmValue::Bool(b) => serde_json::json!(b),
         VmValue::Nil => serde_json::Value::Null,
@@ -697,6 +699,8 @@ fn write_vm_value_to_json(val: &VmValue, out: &mut String) {
         VmValue::Int(n) => out.push_str(&n.to_string()),
         VmValue::Float(n) if n.is_finite() => out.push_str(&n.to_string()),
         VmValue::Float(_) => out.push_str("null"),
+        // Decimal serializes as a JSON string to preserve exact precision.
+        VmValue::Decimal(d) => out.push_str(&escape_json_string_vm(&d.to_string())),
         VmValue::Bool(b) => out.push_str(if *b { "true" } else { "false" }),
         VmValue::Nil => out.push_str("null"),
         VmValue::List(items) | VmValue::Set(items) => {

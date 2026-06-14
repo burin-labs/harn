@@ -6,6 +6,7 @@ pub(crate) fn describe(value: &VmValue) -> &'static str {
     match value {
         VmValue::Int(_) => "int",
         VmValue::Float(_) => "float",
+        VmValue::Decimal(_) => "decimal",
         VmValue::String(_) => "string",
         VmValue::Bytes(_) => "bytes",
         VmValue::Bool(_) => "bool",

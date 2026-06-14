@@ -906,6 +906,8 @@ pub(crate) fn vm_value_to_json(value: &VmValue) -> serde_json::Value {
         VmValue::Bool(value) => serde_json::json!(value),
         VmValue::Int(value) => serde_json::json!(value),
         VmValue::Float(value) => serde_json::json!(value),
+        // Decimal serializes as a string to preserve exact precision.
+        VmValue::Decimal(d) => serde_json::json!(d.to_string()),
         VmValue::String(value) => serde_json::json!(&**value),
         VmValue::List(items) => {
             serde_json::Value::Array(items.iter().map(vm_value_to_json).collect())

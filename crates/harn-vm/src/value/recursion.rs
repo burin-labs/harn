@@ -129,7 +129,10 @@ pub fn dismantle_values<I: IntoIterator<Item = VmValue>>(values: I) {
             }
             VmValue::Dict(map) => {
                 if let Some(map) = Arc::into_inner(map) {
-                    stack.extend(map.into_values());
+                    // `imbl::OrdMap` has no `into_values`; consume it via
+                    // `into_iter` (which yields `(key, value)`) and keep the
+                    // values so the dict's children tear down iteratively.
+                    stack.extend(map.into_iter().map(|(_, value)| value));
                 }
             }
             VmValue::Pair(pair) => {

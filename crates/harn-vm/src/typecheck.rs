@@ -125,6 +125,9 @@ fn matches_type_with_generics(
             "any" | "unknown" => true,
             "int" => matches!(value, VmValue::Int(_)),
             "float" => matches!(value, VmValue::Float(_) | VmValue::Int(_)),
+            // `decimal` is strict (no Int/Float coercion) to match its
+            // equality/arithmetic island semantics; convert with `decimal(x)`.
+            "decimal" => matches!(value, VmValue::Decimal(_)),
             "number" => matches!(value, VmValue::Int(_) | VmValue::Float(_)),
             "string" => matches!(value, VmValue::String(_)),
             "bool" => matches!(value, VmValue::Bool(_)),

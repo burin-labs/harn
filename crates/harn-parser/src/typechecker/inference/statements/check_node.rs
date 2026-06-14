@@ -880,7 +880,16 @@ impl TypeChecker {
                 };
                 if let Some((l, r)) = named_pair {
                     match op.as_str() {
-                        "-" | "/" | "%" | "**" => {
+                        "-" | "/" | "%" if !super::super::binary_ops::numeric_binop_ok(l, r) => {
+                            self.error_at(
+                                Code::InvalidBinaryOperator,
+                                format!("can't use '{op}' on {l} and {r} (needs numeric operands)"),
+                                span,
+                            );
+                        }
+                        "**" => {
+                            // Exponentiation is int/float only; `decimal` has no
+                            // `**` at runtime (convert explicitly if needed).
                             let numeric = ["int", "float"];
                             if !numeric.contains(&l.as_str()) || !numeric.contains(&r.as_str()) {
                                 self.error_at(
@@ -893,9 +902,7 @@ impl TypeChecker {
                             }
                         }
                         "*" => {
-                            let numeric = ["int", "float"];
-                            let is_numeric =
-                                numeric.contains(&l.as_str()) && numeric.contains(&r.as_str());
+                            let is_numeric = super::super::binary_ops::numeric_binop_ok(l, r);
                             let is_string_repeat =
                                 (l == "string" && r == "int") || (l == "int" && r == "string");
                             if !is_numeric && !is_string_repeat {
@@ -907,13 +914,11 @@ impl TypeChecker {
                             }
                         }
                         "+" => {
-                            let valid = matches!(
-                                (l.as_str(), r.as_str()),
-                                ("int" | "float", "int" | "float")
-                                    | ("string", "string")
-                                    | ("list", "list")
-                                    | ("dict", "dict")
-                            );
+                            let valid = super::super::binary_ops::numeric_binop_ok(l, r)
+                                || matches!(
+                                    (l.as_str(), r.as_str()),
+                                    ("string", "string") | ("list", "list") | ("dict", "dict")
+                                );
                             if !valid {
                                 let msg = format!("can't add {l} and {r}");
                                 // Offer interpolation fix when one side is string
@@ -935,7 +940,7 @@ impl TypeChecker {
                             }
                         }
                         "<" | ">" | "<=" | ">=" => {
-                            let comparable = ["int", "float", "string"];
+                            let comparable = ["int", "float", "string", "decimal"];
                             if !comparable.contains(&l.as_str())
                                 || !comparable.contains(&r.as_str())
                             {
@@ -946,7 +951,13 @@ impl TypeChecker {
                                     ),
                                     span,
                                 );
-                            } else if (l == "string") != (r == "string") {
+                            } else if (l == "string") != (r == "string")
+                                || (l == "decimal") != (r == "decimal")
+                            {
+                                // `decimal` only orders against `decimal` at
+                                // runtime (a decimal-vs-int/float comparison is
+                                // unordered and yields false); flag the mix like
+                                // the string-vs-non-string case.
                                 self.warning_at(Code::InvalidBinaryOperator,
                                     format!(
                                         "Comparing {l} with {r} using '{op}' may give unexpected results"

@@ -554,6 +554,9 @@ fn vm_value_to_json(value: &VmValue) -> JsonValue {
         VmValue::Float(f) => serde_json::Number::from_f64(*f)
             .map(JsonValue::Number)
             .unwrap_or(JsonValue::Null),
+        // Decimal as a string to preserve exact precision (was the `<decimal>`
+        // sentinel, which dropped the value).
+        VmValue::Decimal(d) => JsonValue::String(d.to_string()),
         VmValue::String(s) => JsonValue::String(s.to_string()),
         VmValue::List(items) => JsonValue::Array(items.iter().map(vm_value_to_json).collect()),
         VmValue::Dict(d) => {

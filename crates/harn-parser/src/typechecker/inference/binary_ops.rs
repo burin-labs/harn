@@ -13,6 +13,16 @@ use harn_lexer::{FixEdit, Span};
 use super::super::scope::TypeScope;
 use super::super::{is_gradual_type_name, TypeChecker};
 
+/// Whether `l <op> r` is a valid numeric arithmetic pair. `int` promotes to
+/// either `float` or `decimal`, but `float` and `decimal` never mix (binary
+/// float would corrupt exact decimals) — mirroring the VM's runtime rule.
+pub(in crate::typechecker) fn numeric_binop_ok(l: &str, r: &str) -> bool {
+    matches!(
+        (l, r),
+        ("int" | "float", "int" | "float") | ("int" | "decimal", "int" | "decimal")
+    )
+}
+
 impl TypeChecker {
     /// Recursively validate binary operations in an expression tree.
     /// Unlike `check_node`, this only checks BinaryOp type compatibility
@@ -46,13 +56,11 @@ impl TypeChecker {
                     let span = snode.span;
                     match op.as_str() {
                         "+" => {
-                            let valid = matches!(
-                                (l.as_str(), r.as_str()),
-                                ("int" | "float", "int" | "float")
-                                    | ("string", "string")
-                                    | ("list", "list")
-                                    | ("dict", "dict")
-                            );
+                            let valid = numeric_binop_ok(l, r)
+                                || matches!(
+                                    (l.as_str(), r.as_str()),
+                                    ("string", "string") | ("list", "list") | ("dict", "dict")
+                                );
                             if !valid {
                                 let msg = format!("can't add {l} and {r}");
                                 let fix = if l == "string" || r == "string" {
@@ -72,7 +80,16 @@ impl TypeChecker {
                                 }
                             }
                         }
-                        "-" | "/" | "%" | "**" => {
+                        "-" | "/" | "%" if !numeric_binop_ok(l, r) => {
+                            self.error_at(
+                                Code::InvalidBinaryOperator,
+                                format!("can't use '{op}' on {l} and {r} (needs numeric operands)"),
+                                span,
+                            );
+                        }
+                        "**" => {
+                            // Exponentiation is int/float only; `decimal` has no
+                            // `**` at runtime (convert explicitly if needed).
                             let numeric = ["int", "float"];
                             if !numeric.contains(&l.as_str()) || !numeric.contains(&r.as_str()) {
                                 self.error_at(
@@ -85,9 +102,7 @@ impl TypeChecker {
                             }
                         }
                         "*" => {
-                            let numeric = ["int", "float"];
-                            let is_numeric =
-                                numeric.contains(&l.as_str()) && numeric.contains(&r.as_str());
+                            let is_numeric = numeric_binop_ok(l, r);
                             let is_string_repeat =
                                 (l == "string" && r == "int") || (l == "int" && r == "string");
                             if !is_numeric && !is_string_repeat {

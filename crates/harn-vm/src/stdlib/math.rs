@@ -32,6 +32,7 @@ fn min_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
             (VmValue::Float(x), VmValue::Float(y)) => Ok(VmValue::Float(x.min(*y))),
             (VmValue::Int(x), VmValue::Float(y)) => Ok(VmValue::Float((*x as f64).min(*y))),
             (VmValue::Float(x), VmValue::Int(y)) => Ok(VmValue::Float(x.min(*y as f64))),
+            (VmValue::Decimal(x), VmValue::Decimal(y)) => Ok(VmValue::Decimal((*x).min(*y))),
             _ => Ok(VmValue::Nil),
         }
     } else {
@@ -47,6 +48,7 @@ fn max_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
             (VmValue::Float(x), VmValue::Float(y)) => Ok(VmValue::Float(x.max(*y))),
             (VmValue::Int(x), VmValue::Float(y)) => Ok(VmValue::Float((*x as f64).max(*y))),
             (VmValue::Float(x), VmValue::Int(y)) => Ok(VmValue::Float(x.max(*y as f64))),
+            (VmValue::Decimal(x), VmValue::Decimal(y)) => Ok(VmValue::Decimal((*x).max(*y))),
             _ => Ok(VmValue::Nil),
         }
     } else {
@@ -77,6 +79,9 @@ fn round_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     match args.first().unwrap_or(&VmValue::Nil) {
         VmValue::Float(n) => finite_float_to_i64(n.round()).map(VmValue::Int),
         VmValue::Int(n) => Ok(VmValue::Int(*n)),
+        // Round to a whole-unit decimal (stays exact + keeps the decimal type),
+        // rather than collapsing money to an int.
+        VmValue::Decimal(d) => Ok(VmValue::Decimal(d.round())),
         _ => Ok(VmValue::Nil),
     }
 }
@@ -86,6 +91,8 @@ fn sqrt_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     match args.first().unwrap_or(&VmValue::Nil) {
         VmValue::Float(n) => Ok(VmValue::Float(n.sqrt())),
         VmValue::Int(n) => Ok(VmValue::Float((*n as f64).sqrt())),
+        // No exact decimal square root; refuse rather than silently return nil.
+        VmValue::Decimal(_) => Err(decimal_not_supported("sqrt")),
         _ => Ok(VmValue::Nil),
     }
 }
@@ -115,6 +122,10 @@ fn pow_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
                 Ok(VmValue::Float((*base as f64).powf(*exp)))
             }
             (VmValue::Float(base), VmValue::Float(exp)) => Ok(VmValue::Float(base.powf(*exp))),
+            // No exact decimal exponentiation; refuse rather than return nil.
+            (VmValue::Decimal(_), _) | (_, VmValue::Decimal(_)) => {
+                Err(decimal_not_supported("pow"))
+            }
             _ => Ok(VmValue::Nil),
         }
     } else {
@@ -360,6 +371,11 @@ fn sign_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
                 Ok(VmValue::Int(-1))
             }
         }
+        VmValue::Decimal(d) => Ok(VmValue::Int(match d.cmp(&rust_decimal::Decimal::ZERO) {
+            std::cmp::Ordering::Less => -1,
+            std::cmp::Ordering::Equal => 0,
+            std::cmp::Ordering::Greater => 1,
+        })),
         _ => Ok(VmValue::Nil),
     }
 }
@@ -500,9 +516,21 @@ fn unary_float(args: &[VmValue], f: fn(f64) -> f64) -> Result<VmValue, VmError> 
     let n = match args.first().unwrap_or(&VmValue::Nil) {
         VmValue::Float(n) => *n,
         VmValue::Int(n) => *n as f64,
+        // Transcendental float math has no exact decimal result; refuse rather
+        // than silently return nil.
+        VmValue::Decimal(_) => return Err(decimal_not_supported("this function")),
         _ => return Ok(VmValue::Nil),
     };
     Ok(VmValue::Float(f(n)))
+}
+
+/// A `decimal` operand was passed to a float-only math builtin (sqrt, pow,
+/// trig, …). These have no exact base-10 result, so we error with guidance
+/// instead of silently returning `nil`.
+fn decimal_not_supported(name: &str) -> VmError {
+    VmError::TypeError(format!(
+        "{name} is not defined for decimal; convert with to_float(value) first"
+    ))
 }
 
 pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[

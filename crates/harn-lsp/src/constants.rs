@@ -801,6 +801,7 @@ pub(crate) const DICT_METHODS: &[&str] = &[
 pub(crate) const TYPE_NAMES: &[&str] = &[
     "int",
     "float",
+    "decimal",
     "string",
     "bool",
     "nil",

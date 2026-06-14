@@ -17,10 +17,11 @@ Complete reference for all built-in functions available in Harn.
 
 | Function | Parameters | Returns | Description |
 |---|---|---|---|
-| `type_of(value)` | value: any | string | Returns type name: `"int"`, `"float"`, `"string"`, `"bool"`, `"nil"`, `"list"`, `"dict"`, `"closure"`, `"taskHandle"`, `"duration"`, `"enum"`, `"struct"` |
+| `type_of(value)` | value: any | string | Returns type name: `"int"`, `"float"`, `"decimal"`, `"string"`, `"bool"`, `"nil"`, `"list"`, `"dict"`, `"closure"`, `"taskHandle"`, `"duration"`, `"enum"`, `"struct"` |
 | `to_string(value)` | value: any | string | Convert to string representation |
-| `to_int(value)` | value: any | int or nil | Parse/convert to integer. Floats truncate, bools become 0/1; non-finite or out-of-range floats return `nil` |
-| `to_float(value)` | value: any | float or nil | Parse/convert to float |
+| `to_int(value)` | value: any | int or nil | Parse/convert to integer. Floats and decimals truncate, bools become 0/1; non-finite or out-of-range values return `nil` |
+| `to_float(value)` | value: any | float or nil | Parse/convert to float (a decimal converts lossily) |
+| `decimal(value)` | value: string, int, float, or decimal | decimal | Exact base-10 number (money/precise arithmetic). Parses a string exactly; an int is exact; a float is an explicit opt-in to the lossy binary→decimal step. **Throws** on un-parseable input (unlike `to_int`/`to_float`, which return `nil`). See [Decimal](./language-basics.md#decimal-exact-arithmetic). |
 | `unreachable(value?)` | value: any (optional) | never | Throws "unreachable code was reached" at runtime. When the argument is a variable, the type checker verifies it has been narrowed to `never` (exhaustiveness check) |
 | `iter(x)` | x: list, dict, set, string, generator, channel, or iter | `Iter<T>` | Lift an iterable source into a lazy, single-pass, fused iterator. No-op on an existing iter. Dict iters yield `Pair(key, value)`; string iters yield chars. See [Iterator methods](#iterator-methods) |
 | `pair(a, b)` | a: any, b: any | `Pair` | Construct a two-element `Pair` value. Access via `.first` / `.second`, or destructure in a for-loop: `for (k, v) in ...` |

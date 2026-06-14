@@ -281,7 +281,7 @@ fn jq_type_name(input: &VmValue) -> &'static str {
     match input {
         VmValue::Nil => "null",
         VmValue::Bool(_) => "boolean",
-        VmValue::Int(_) | VmValue::Float(_) => "number",
+        VmValue::Int(_) | VmValue::Float(_) | VmValue::Decimal(_) => "number",
         VmValue::String(_) => "string",
         VmValue::List(_) | VmValue::Set(_) => "array",
         VmValue::Dict(_) | VmValue::StructInstance { .. } => "object",
@@ -305,6 +305,7 @@ fn ordering_cmp(left: &VmValue, right: &VmValue) -> Option<std::cmp::Ordering> {
         (VmValue::Int(a), VmValue::Float(b)) => (*a as f64).partial_cmp(b),
         (VmValue::Float(a), VmValue::Int(b)) => a.partial_cmp(&(*b as f64)),
         (VmValue::String(a), VmValue::String(b)) => Some(a.cmp(b)),
+        (VmValue::Decimal(a), VmValue::Decimal(b)) => Some(a.cmp(b)),
         _ => None,
     }
 }
