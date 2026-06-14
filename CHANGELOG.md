@@ -8,6 +8,61 @@ highlights live in [CHANGELOG-pre-0.6.md](CHANGELOG-pre-0.6.md).
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.8.112
+
+### Added
+
+- **Run/session view compatibility fixtures.** Added a shared fixture corpus
+  and drift check for `harn.run_view.v1` and `harn.session_view.v1` projections
+  so downstream clients can detect intentional view-contract changes (#3322).
+
+- **`harness.auth` — a read-only authenticated-principal handle for `.harn`
+  routes.** A `harn-serve` dispatch now threads the principal it
+  authenticated at admission — subject, scheme, granted scopes, and an
+  optional embedder-assigned principal `kind` — to the `.harn` callee as the
+  ambient `harness.auth` sub-handle, alongside the existing `harness.tenant`.
+  Routes can read identity and compose their own authorization without a
+  host-side dispatch guard: `harness.auth.is_authenticated()`,
+  `harness.auth.subject()` / `try_subject()`, `harness.auth.scheme()` /
+  `try_scheme()`, `harness.auth.kind()`, `harness.auth.scopes()`, and
+  `harness.auth.has_scope(scope)`. `subject()`/`scheme()` raise a typed
+  `Auth` error when no principal is bound (mirroring `harness.tenant.id()`);
+  the `try_*`/`kind` getters return `nil` and `scopes()`/`has_scope()`/
+  `is_authenticated()` degrade to empty/false so an unauthenticated route can
+  branch without try/catch. The handle is identity-only: it carries no
+  credentials or secrets, never the tenant (that stays the single-sourced
+  `harness.tenant` ambient), and never the opaque embedder auth context (that
+  stays the host-call-bridge channel). The synthetic anonymous principal
+  harn-serve admits under allow-all binds nothing, so `is_authenticated()` is
+  `false` when no credential authenticated the request. Foundation for
+  Harn-side route auth policies (issue #3323); unblocks harn-cloud's adoption
+  of declarative route policies in place of duplicated Rust dispatch guards.
+
+### Changed
+
+- **Lazy manifest-hook install for `harn test`.** A hook's handler closure is
+  resolved (loading its module's whole import graph) on first fire against the
+  firing VM, instead of eagerly during every test's setup. Pure-logic unit
+  tests that never fire a hook no longer pay that cost — for a large manifest
+  like burin-code this cut per-test setup from ~1s to single-digit ms (suite
+  wall 840s -> 550s). Hook semantics are unchanged: closures still resolve
+  against the firing VM, preserving per-test module-state isolation. Production
+  callers (`harn run`, agent loops) stay eager via `install_manifest_hooks`, so
+  a misconfigured handler still fails fast at startup; the lazy path is opt-in
+  via `install_manifest_hooks_with_mode(.., lazy = true)` (#3370).
+
+### Fixed
+
+- **`read_range` reads a raw path again when the code index is unbuilt.** The
+  read-only secondary-roots work (#3352) routed `read_range` through a resolver
+  that returned no path when the primary index slot was `None` (never rebuilt),
+  so reads erred with "path must stay within the indexed workspace root". This
+  broke callers that read a file before any rebuild — `agent_run` scanning a
+  process-output temp file to surface buried test-failure lines, and eval/verify
+  reads over arbitrary shell output. Restored the pre-#3352 fallback: with an
+  unbuilt primary index, resolve the raw path so the read still succeeds (a
+  genuinely missing path still fails with "file not found") (#3372).
+
 ## v0.8.111
 
 ### Added
