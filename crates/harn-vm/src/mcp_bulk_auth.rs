@@ -615,6 +615,7 @@ mod tests {
                 issuer: "https://auth.example".to_string(),
                 resource: "https://mcp.example/mcp".to_string(),
                 scopes: None,
+                token_response_extra: None,
             })
         }
     }

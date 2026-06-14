@@ -145,6 +145,11 @@ pub(crate) async fn handle_mcp_command(command: &McpCommand) {
                     println!("Client ID: {}", token.client_id);
                     println!("Token auth method: {}", token.token_endpoint_auth_method);
                     println!("Issuer: {}", token.issuer);
+                    if let Some(identity) =
+                        harn_vm::mcp_identity::display_identity(&server.url, &token)
+                    {
+                        println!("Identity: {identity}");
+                    }
                 }
                 Ok(None) => {
                     if server_ref.json {
@@ -183,8 +188,9 @@ pub(crate) async fn handle_mcp_command(command: &McpCommand) {
 }
 
 /// Schema version for `harn mcp status --json`. Bump when the
-/// `McpStatusReport` shape changes in a way agents must detect.
-pub(crate) const MCP_STATUS_SCHEMA_VERSION: u32 = 2;
+/// `McpStatusReport` shape changes in a way agents must detect. Bumped to 3 in
+/// harn#3350 with the `display_identity` field.
+pub(crate) const MCP_STATUS_SCHEMA_VERSION: u32 = 3;
 
 /// Aggregate readiness report for every MCP server declared in the
 /// nearest `harn.toml`. Mirrors the `connect status` report shape: a
@@ -229,6 +235,10 @@ pub(crate) struct McpServerStatus {
     pub token_client_id: Option<String>,
     /// OAuth issuer bound to the stored token when known.
     pub token_issuer: Option<String>,
+    /// Human-readable "logged in as …" identity for the authorized account,
+    /// when the server has a vetted identity recipe and a captured token
+    /// payload (harn#3350). `None` otherwise.
+    pub display_identity: Option<String>,
 }
 
 /// Build and print the all-servers MCP status report.
@@ -252,6 +262,9 @@ async fn run_mcp_status_report(json: bool) -> Result<(), String> {
                 "{}\t{}\t{}\t{}",
                 server.name, server.transport, server.state, counts
             );
+            if let Some(identity) = &server.display_identity {
+                line.push_str(&format!("\tas={identity}"));
+            }
             if let Some(error) = &server.last_error {
                 line.push_str(&format!("\terror={error}"));
             }
@@ -321,6 +334,15 @@ async fn derive_server_status(server: &McpServerConfig) -> McpServerStatus {
         "disconnected".to_string()
     };
 
+    // Resolve a "logged in as …" string for connected servers that have a
+    // vetted identity recipe (harn#3350). Cheap-guarded so only descriptor-
+    // bearing servers (e.g. Notion) pay for a token load.
+    let display_identity = if state == "connected" {
+        server_display_identity(server).await
+    } else {
+        None
+    };
+
     McpServerStatus {
         name: server.name.clone(),
         transport,
@@ -336,7 +358,23 @@ async fn derive_server_status(server: &McpServerConfig) -> McpServerStatus {
         token_expires_at_unix: None,
         token_client_id: None,
         token_issuer: None,
+        display_identity,
     }
+}
+
+/// Resolve the authenticated-identity display string for a server, if it has a
+/// catalog identity recipe and a stored OAuth token carrying the captured
+/// token-response payload. Returns `None` (never errors) so status reporting
+/// degrades gracefully.
+async fn server_display_identity(server: &McpServerConfig) -> Option<String> {
+    // Only descriptor-bearing servers pay for a token load.
+    harn_vm::mcp_identity::descriptor_for(&server.url)?;
+    let discovery = mcp_oauth::discover(&server.url).await.ok()?;
+    let resource = canonical_server_resource(&server.url).ok()?;
+    let token = mcp_oauth::load_token(&resource, &discovery.authorization_server_issuer, None)
+        .await
+        .ok()??;
+    harn_vm::mcp_identity::display_identity(&server.url, &token)
 }
 
 fn print_focused_status_report(
@@ -361,6 +399,8 @@ fn print_focused_status_report(
             token_expires_at_unix: token.and_then(|token| token.expires_at_unix),
             token_client_id: token.map(|token| token.client_id.clone()),
             token_issuer: token.map(|token| token.issuer.clone()),
+            display_identity: token
+                .and_then(|token| harn_vm::mcp_identity::display_identity(&server.url, token)),
         }],
     };
     println!(
@@ -1205,10 +1245,11 @@ mod tests {
                 token_expires_at_unix: None,
                 token_client_id: None,
                 token_issuer: None,
+                display_identity: None,
             }],
         };
         let value: serde_json::Value = serde_json::to_value(&report).expect("serialize");
-        assert_eq!(value["schema_version"], 2);
+        assert_eq!(value["schema_version"], 3);
         assert_eq!(value["manifest"], "/repo/harn.toml");
         assert_eq!(value["servers"][0]["name"], "fs");
         assert_eq!(value["servers"][0]["transport"], "stdio");
@@ -1217,5 +1258,6 @@ mod tests {
         assert!(value["servers"][0]["tools"].is_null());
         assert!(value["servers"][0]["last_error"].is_null());
         assert!(value["servers"][0]["token_expires_at_unix"].is_null());
+        assert!(value["servers"][0]["display_identity"].is_null());
     }
 }
