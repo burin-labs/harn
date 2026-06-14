@@ -289,6 +289,16 @@ pub fn schema_retry_nudge_for(schema, hint) {
  *   repair.max_tokens-> 600
  *   repair.temperature -> 0.0
  *   schema_retry_nudge -> derived via `schema_retry_nudge_for`
+ *   max_tokens       -> floored to `STRUCTURED_MIN_MAX_TOKENS` (512)
+ *
+ * The `max_tokens` FLOOR is a measurement-integrity guard, not a tuning knob:
+ * a judge/router structured call that goes out with a tiny budget (e.g. the
+ * historical `max_tokens: 180` completion-judge default) truncates mid-object
+ * on a reasoning model — which spends part of the same output budget on its
+ * reasoning channel — yielding unparseable JSON and a silent dead-judge
+ * fall-through. Flooring (never lowering) the budget keeps the JSON bounded by
+ * the schema yet large enough to finish. Provider-generic: it never inspects
+ * the provider or model.
  *
  * @effects: []
  * @errors: []
@@ -304,8 +314,22 @@ pub fn safe_structured_call(prompt, schema, options) {
   return __augment_envelope(envelope)
 }
 
+/**
+ * Minimum output-token budget for a structured judge/router call. A call that
+ * goes out under this floor risks truncating its JSON mid-object on a reasoning
+ * model (the reasoning channel shares the same `max_tokens` budget), which then
+ * masquerades as a dead-judge abstention. The floor only RAISES an unset or
+ * too-small budget; an explicit larger `max_tokens` (e.g. a 1200-token rubric
+ * judge) is left untouched.
+ */
+let STRUCTURED_MIN_MAX_TOKENS = 512
+
 fn __apply_judge_defaults(schema, options) {
   var resolved = options
+  let requested_max_tokens = to_int(resolved?.max_tokens ?? 0) ?? 0
+  if requested_max_tokens < STRUCTURED_MIN_MAX_TOKENS {
+    resolved = resolved + {max_tokens: STRUCTURED_MIN_MAX_TOKENS}
+  }
   if resolved?.temperature == nil {
     resolved = resolved + {temperature: 0.0}
   }
