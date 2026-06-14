@@ -1,0 +1,187 @@
+{
+  "failure": null,
+  "history": [
+    {
+      "finished_at": null,
+      "last_event_id": null,
+      "run_id": "run_stage_transcript_active",
+      "run_path": "spec/run-view-fixtures/cases/stage-transcript-active-auth/records/run.json",
+      "session_id": "session_stage_transcript",
+      "started_at": "2026-01-03T00:00:00Z",
+      "status": "running",
+      "visible_text": "Waiting for connector authorization."
+    }
+  ],
+  "metadata": {
+    "event_count": 0,
+    "has_event_log": false,
+    "record_count": 1
+  },
+  "pending": {
+    "approvals": [],
+    "auth": [
+      {
+        "message": "Connect the fixture GitHub account.",
+        "provider": "github",
+        "scope": "repo",
+        "server": "github.example",
+        "stage_id": null
+      },
+      {
+        "message": "Authorize fixture MCP access.",
+        "provider": "mcp",
+        "scope": "tools:read",
+        "server": "fixture-mcp",
+        "stage_id": "stage_plan"
+      }
+    ],
+    "nodes": [
+      "auth_gate"
+    ]
+  },
+  "producer": {
+    "name": "harn",
+    "version": "fixture"
+  },
+  "projection": {
+    "last_event_id": null,
+    "prefix_hash": null,
+    "projection_hash": "sha256:38e7a9cfe8ff5212f504459dabd1ae06d1d17a67dd400efdc8012639712376d0",
+    "projection_id": "session_view:session_stage_transcript:38e7a9cfe8ff"
+  },
+  "runs": [
+    {
+      "artifacts": [],
+      "checkpoints": [],
+      "failure": null,
+      "metadata": {
+        "artifact_count": 0,
+        "checkpoint_count": 0,
+        "child_run_count": 0,
+        "execution": null,
+        "observability_present": false,
+        "planner_round_count": 0,
+        "record_type": "run_record",
+        "replay_fixture_id": null,
+        "stage_count": 1,
+        "tool_recording_count": 0,
+        "transition_count": 0
+      },
+      "pending": {
+        "approvals": [],
+        "auth": [
+          {
+            "message": "Connect the fixture GitHub account.",
+            "provider": "github",
+            "scope": "repo",
+            "server": "github.example",
+            "stage_id": null
+          },
+          {
+            "message": "Authorize fixture MCP access.",
+            "provider": "mcp",
+            "scope": "tools:read",
+            "server": "fixture-mcp",
+            "stage_id": "stage_plan"
+          }
+        ],
+        "nodes": [
+          "auth_gate"
+        ]
+      },
+      "producer": {
+        "name": "harn",
+        "version": "fixture"
+      },
+      "projection": {
+        "last_event_id": null,
+        "prefix_hash": null,
+        "projection_hash": "sha256:3f4576cf7939bfa3f16262b4c6059ccc097113044dfc540dde520398e3e740fd",
+        "projection_id": "run_view:run_stage_transcript_active:3f4576cf7939"
+      },
+      "providers": [],
+      "run": {
+        "child_runs": [],
+        "duration_ms": null,
+        "finished_at": null,
+        "parent_run_id": null,
+        "parent_session_id": null,
+        "root_run_id": null,
+        "run_id": "run_stage_transcript_active",
+        "run_path": "spec/run-view-fixtures/cases/stage-transcript-active-auth/records/run.json",
+        "session_id": "session_stage_transcript",
+        "started_at": "2026-01-03T00:00:00Z",
+        "status": "running",
+        "task": "Wait for sanitized connector authorization",
+        "workflow_id": "workflow_view_fixture",
+        "workflow_name": "View fixture"
+      },
+      "schema": "harn.run_view.v1",
+      "schema_version": 1,
+      "stages": [
+        {
+          "artifact_refs": [],
+          "attempt_count": 0,
+          "branch": null,
+          "duration_ms": null,
+          "error": null,
+          "finished_at": null,
+          "id": "stage_plan",
+          "kind": "llm",
+          "model": null,
+          "node_id": "plan",
+          "outcome": "pending_auth",
+          "provider": null,
+          "started_at": "2026-01-03T00:00:00Z",
+          "status": "running",
+          "usage": {
+            "call_count": 0,
+            "input_tokens": 0,
+            "models": [],
+            "output_tokens": 0,
+            "total_cost": 0.0,
+            "total_duration_ms": 0
+          },
+          "visible_text": "Waiting for connector authorization."
+        }
+      ],
+      "transcript": {
+        "event_count": 1,
+        "message_count": 2,
+        "present": true,
+        "source": "stages",
+        "summary": "plan: Stage transcript captured the authorization pause."
+      },
+      "usage": {
+        "call_count": 0,
+        "input_tokens": 0,
+        "models": [],
+        "output_tokens": 0,
+        "total_cost": 0.0,
+        "total_duration_ms": 0
+      },
+      "visible_text": "Waiting for connector authorization."
+    }
+  ],
+  "schema": "harn.session_view.v1",
+  "schema_version": 1,
+  "session": {
+    "chain_root_hash": null,
+    "last_event_id": null,
+    "parent_session_id": null,
+    "root_session_id": null,
+    "run_count": 1,
+    "session_id": "session_stage_transcript",
+    "started_at": "2026-01-03T00:00:00Z",
+    "status": "active",
+    "updated_at": "2026-01-03T00:00:00Z"
+  },
+  "usage": {
+    "call_count": 0,
+    "input_tokens": 0,
+    "models": [],
+    "output_tokens": 0,
+    "total_cost": 0.0,
+    "total_duration_ms": 0
+  }
+}

@@ -197,11 +197,13 @@ jobs:
           # spec/openapi.yaml or the SessionBundle DTO and ship stale
           # generated artifacts with green CI. The generated-artifact
           # registry (scripts/generated_artifacts.toml) now forces every
-          # ci = true check to be referenced here. Same warm binary, so
-          # they're effectively free.
+          # ci = true check to be referenced here. Most reuse the warm harn
+          # binary; the run/session view fixture check is a narrow harn-vm
+          # contract test.
           make check-protocol-artifacts
           make check-connector-schemas
           make check-session-bundle-schema
+          make check-run-view-fixtures
           make check-provider-catalog
           make check-provider-catalog-drift
           make check-docs-workflow-quickstart

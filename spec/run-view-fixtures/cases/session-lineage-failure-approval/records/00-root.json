@@ -1,0 +1,53 @@
+{
+  "_type": "run_record",
+  "id": "run_lineage_root",
+  "workflow_id": "workflow_view_fixture",
+  "workflow_name": "View fixture",
+  "task": "Delegate sanitized follow-up work",
+  "status": "completed",
+  "started_at": "2026-01-04T00:00:00Z",
+  "finished_at": "2026-01-04T00:00:05Z",
+  "metadata": {
+    "session_id": "session_lineage",
+    "parent_session_id": "session_parent"
+  },
+  "stages": [
+    {
+      "id": "stage_delegate",
+      "node_id": "delegate",
+      "kind": "worker",
+      "status": "completed",
+      "outcome": "ok",
+      "started_at": "2026-01-04T00:00:00Z",
+      "finished_at": "2026-01-04T00:00:02Z",
+      "visible_text": "Delegated child work."
+    }
+  ],
+  "child_runs": [
+    {
+      "worker_id": "worker_child",
+      "worker_name": "Child worker",
+      "parent_stage_id": "stage_delegate",
+      "session_id": "session_lineage",
+      "parent_session_id": "session_lineage",
+      "task": "Investigate sanitized child failure",
+      "status": "failed",
+      "started_at": "2026-01-04T00:00:02Z",
+      "finished_at": "2026-01-04T00:00:05Z",
+      "run_id": "run_lineage_child",
+      "run_path": "spec/run-view-fixtures/cases/session-lineage-failure-approval/records/01-child.json"
+    }
+  ],
+  "hitl_questions": [
+    {
+      "request_id": "approval_fixture_1",
+      "prompt": "Approve the sanitized retry plan?",
+      "agent": "fixture-agent",
+      "trace_id": "trace_fixture_approval",
+      "asked_at": "2026-01-04T00:00:04Z"
+    }
+  ],
+  "pending_nodes": [
+    "approval_gate"
+  ]
+}

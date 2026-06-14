@@ -1,0 +1,139 @@
+{
+  "failure": {
+    "message": null,
+    "node_id": null,
+    "outcome": "failed",
+    "stage_id": null,
+    "status": "failed"
+  },
+  "history": [
+    {
+      "finished_at": null,
+      "last_event_id": null,
+      "run_id": "run_legacy_sparse",
+      "run_path": "spec/run-view-fixtures/cases/legacy-sparse/records/run.json",
+      "session_id": null,
+      "started_at": null,
+      "status": "failed",
+      "visible_text": null
+    }
+  ],
+  "metadata": {
+    "event_count": 0,
+    "has_event_log": false,
+    "record_count": 1
+  },
+  "pending": {
+    "approvals": [],
+    "auth": [],
+    "nodes": []
+  },
+  "producer": {
+    "name": "harn",
+    "version": "fixture"
+  },
+  "projection": {
+    "last_event_id": null,
+    "prefix_hash": null,
+    "projection_hash": "sha256:b6c78eebc054e818d1553a20ebb529852402936163c48657a7a96963cb4d6c4b",
+    "projection_id": "session_view:unknown:b6c78eebc054"
+  },
+  "runs": [
+    {
+      "artifacts": [],
+      "checkpoints": [],
+      "failure": {
+        "message": null,
+        "node_id": null,
+        "outcome": "failed",
+        "stage_id": null,
+        "status": "failed"
+      },
+      "metadata": {
+        "artifact_count": 0,
+        "checkpoint_count": 0,
+        "child_run_count": 0,
+        "execution": null,
+        "observability_present": false,
+        "planner_round_count": 0,
+        "record_type": "run_record",
+        "replay_fixture_id": null,
+        "stage_count": 0,
+        "tool_recording_count": 0,
+        "transition_count": 0
+      },
+      "pending": {
+        "approvals": [],
+        "auth": [],
+        "nodes": []
+      },
+      "producer": {
+        "name": "harn",
+        "version": "fixture"
+      },
+      "projection": {
+        "last_event_id": null,
+        "prefix_hash": null,
+        "projection_hash": "sha256:57c0067975c3aa2a1e5c85247e5dcb9460288be78bc036d88cf988eed8f10a7d",
+        "projection_id": "run_view:run_legacy_sparse:57c0067975c3"
+      },
+      "providers": [],
+      "run": {
+        "child_runs": [],
+        "duration_ms": null,
+        "finished_at": null,
+        "parent_run_id": null,
+        "parent_session_id": null,
+        "root_run_id": null,
+        "run_id": "run_legacy_sparse",
+        "run_path": "spec/run-view-fixtures/cases/legacy-sparse/records/run.json",
+        "session_id": null,
+        "started_at": "",
+        "status": "failed",
+        "task": "",
+        "workflow_id": "",
+        "workflow_name": null
+      },
+      "schema": "harn.run_view.v1",
+      "schema_version": 1,
+      "stages": [],
+      "transcript": {
+        "event_count": 0,
+        "message_count": 0,
+        "present": false,
+        "source": null,
+        "summary": null
+      },
+      "usage": {
+        "call_count": 0,
+        "input_tokens": 0,
+        "models": [],
+        "output_tokens": 0,
+        "total_cost": 0.0,
+        "total_duration_ms": 0
+      },
+      "visible_text": null
+    }
+  ],
+  "schema": "harn.session_view.v1",
+  "schema_version": 1,
+  "session": {
+    "chain_root_hash": null,
+    "last_event_id": null,
+    "parent_session_id": null,
+    "root_session_id": null,
+    "run_count": 1,
+    "session_id": null,
+    "started_at": null,
+    "status": "failed",
+    "updated_at": null
+  },
+  "usage": {
+    "call_count": 0,
+    "input_tokens": 0,
+    "models": [],
+    "output_tokens": 0,
+    "total_cost": 0.0,
+    "total_duration_ms": 0
+  }
+}

@@ -1,0 +1,44 @@
+{
+  "_type": "run_record",
+  "id": "run_lineage_child",
+  "workflow_id": "workflow_view_fixture",
+  "workflow_name": "View fixture",
+  "task": "Investigate sanitized child failure",
+  "status": "failed",
+  "started_at": "2026-01-04T00:00:02Z",
+  "finished_at": "2026-01-04T00:00:05Z",
+  "parent_run_id": "run_lineage_root",
+  "root_run_id": "run_lineage_root",
+  "metadata": {
+    "session_id": "session_lineage",
+    "parent_session_id": "session_lineage"
+  },
+  "stages": [
+    {
+      "id": "stage_child_check",
+      "node_id": "child_check",
+      "kind": "tool",
+      "status": "failed",
+      "outcome": "error",
+      "started_at": "2026-01-04T00:00:02Z",
+      "finished_at": "2026-01-04T00:00:05Z",
+      "visible_text": "Child validation failed.",
+      "metadata": {
+        "error": {
+          "message": "fixture validation failed",
+          "code": "fixture_error"
+        }
+      },
+      "attempts": [
+        {
+          "attempt": 1,
+          "status": "failed",
+          "outcome": "error",
+          "error": "fixture validation failed",
+          "started_at": "2026-01-04T00:00:02Z",
+          "finished_at": "2026-01-04T00:00:05Z"
+        }
+      ]
+    }
+  ]
+}
