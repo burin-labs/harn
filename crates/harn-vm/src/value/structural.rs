@@ -1,6 +1,7 @@
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 
+use super::recursion::guard_recursion;
 use super::VmValue;
 
 /// Reference / identity equality. For heap-allocated refcounted values
@@ -99,25 +100,30 @@ fn write_structural_hash_key(v: &VmValue, out: &mut String) {
         }
         VmValue::List(items) => {
             out.push('L');
-            for item in items.iter() {
-                write_structural_hash_key(item, out);
-                out.push(',');
-            }
+            guard_recursion(|| {
+                for item in items.iter() {
+                    write_structural_hash_key(item, out);
+                    out.push(',');
+                }
+            });
             out.push(']');
         }
         VmValue::Dict(map) => {
             out.push('D');
-            for (k, v) in map.iter() {
-                write_len_prefixed(k, out);
-                out.push('=');
-                write_structural_hash_key(v, out);
-                out.push(',');
-            }
+            guard_recursion(|| {
+                for (k, v) in map.iter() {
+                    write_len_prefixed(k, out);
+                    out.push('=');
+                    write_structural_hash_key(v, out);
+                    out.push(',');
+                }
+            });
             out.push('}');
         }
         VmValue::Set(items) => {
             // Sets need sorted keys for order-independence
-            let mut keys: Vec<String> = items.iter().map(value_structural_hash_key).collect();
+            let mut keys: Vec<String> =
+                guard_recursion(|| items.iter().map(value_structural_hash_key).collect());
             keys.sort();
             out.push('S');
             for k in &keys {
@@ -132,19 +138,23 @@ fn write_structural_hash_key(v: &VmValue, out: &mut String) {
         // `values_equal` treats as equal, must hash alike.
         VmValue::Pair(pair) => {
             out.push('P');
-            write_structural_hash_key(&pair.0, out);
-            out.push(',');
-            write_structural_hash_key(&pair.1, out);
+            guard_recursion(|| {
+                write_structural_hash_key(&pair.0, out);
+                out.push(',');
+                write_structural_hash_key(&pair.1, out);
+            });
             out.push(';');
         }
         VmValue::EnumVariant(ev) => {
             out.push('E');
             write_len_prefixed(&ev.enum_name, out);
             write_len_prefixed(&ev.variant, out);
-            for field in ev.fields.iter() {
-                write_structural_hash_key(field, out);
-                out.push(',');
-            }
+            guard_recursion(|| {
+                for field in ev.fields.iter() {
+                    write_structural_hash_key(field, out);
+                    out.push(',');
+                }
+            });
             out.push(';');
         }
         VmValue::StructInstance { layout, fields } => {
@@ -152,12 +162,14 @@ fn write_structural_hash_key(v: &VmValue, out: &mut String) {
             // order in the layout never affects the key.
             out.push('I');
             write_len_prefixed(layout.struct_name(), out);
-            for (k, v) in super::struct_fields_to_map(layout, fields) {
-                write_len_prefixed(&k, out);
-                out.push('=');
-                write_structural_hash_key(&v, out);
-                out.push(',');
-            }
+            guard_recursion(|| {
+                for (k, v) in super::struct_fields_to_map(layout, fields) {
+                    write_len_prefixed(&k, out);
+                    out.push('=');
+                    write_structural_hash_key(&v, out);
+                    out.push(',');
+                }
+            });
             out.push('}');
         }
         other => {
@@ -218,22 +230,27 @@ pub fn values_equal(a: &VmValue, b: &VmValue) -> bool {
             a.value.load(Ordering::SeqCst) == b.value.load(Ordering::SeqCst)
         }
         (VmValue::List(a), VmValue::List(b)) => {
-            a.len() == b.len() && a.iter().zip(b.iter()).all(|(x, y)| values_equal(x, y))
+            a.len() == b.len()
+                && guard_recursion(|| a.iter().zip(b.iter()).all(|(x, y)| values_equal(x, y)))
         }
         (VmValue::Dict(a), VmValue::Dict(b)) => {
             a.len() == b.len()
-                && a.iter()
-                    .zip(b.iter())
-                    .all(|((k1, v1), (k2, v2))| k1 == k2 && values_equal(v1, v2))
+                && guard_recursion(|| {
+                    a.iter()
+                        .zip(b.iter())
+                        .all(|((k1, v1), (k2, v2))| k1 == k2 && values_equal(v1, v2))
+                })
         }
         (VmValue::EnumVariant(a), VmValue::EnumVariant(b)) => {
             a.enum_name == b.enum_name
                 && a.variant == b.variant
                 && a.fields.len() == b.fields.len()
-                && a.fields
-                    .iter()
-                    .zip(b.fields.iter())
-                    .all(|(x, y)| values_equal(x, y))
+                && guard_recursion(|| {
+                    a.fields
+                        .iter()
+                        .zip(b.fields.iter())
+                        .all(|(x, y)| values_equal(x, y))
+                })
         }
         (
             VmValue::StructInstance {
@@ -251,13 +268,16 @@ pub fn values_equal(a: &VmValue, b: &VmValue) -> bool {
             let a_map = super::struct_fields_to_map(a_layout, a_fields);
             let b_map = super::struct_fields_to_map(b_layout, b_fields);
             a_map.len() == b_map.len()
-                && a_map
-                    .iter()
-                    .zip(b_map.iter())
-                    .all(|((k1, v1), (k2, v2))| k1 == k2 && values_equal(v1, v2))
+                && guard_recursion(|| {
+                    a_map
+                        .iter()
+                        .zip(b_map.iter())
+                        .all(|((k1, v1), (k2, v2))| k1 == k2 && values_equal(v1, v2))
+                })
         }
         (VmValue::Set(a), VmValue::Set(b)) => {
-            a.len() == b.len() && a.iter().all(|x| b.iter().any(|y| values_equal(x, y)))
+            a.len() == b.len()
+                && guard_recursion(|| a.iter().all(|x| b.iter().any(|y| values_equal(x, y))))
         }
         (VmValue::Generator(_), VmValue::Generator(_)) => false, // generators are never equal
         (VmValue::Stream(_), VmValue::Stream(_)) => false,       // streams are never equal
@@ -266,7 +286,7 @@ pub fn values_equal(a: &VmValue, b: &VmValue) -> bool {
         }
         (VmValue::Iter(a), VmValue::Iter(b)) => Arc::ptr_eq(a, b),
         (VmValue::Pair(a), VmValue::Pair(b)) => {
-            values_equal(&a.0, &b.0) && values_equal(&a.1, &b.1)
+            guard_recursion(|| values_equal(&a.0, &b.0) && values_equal(&a.1, &b.1))
         }
         // Harness handles carry runtime capability state, not values. Two
         // handles that refer to the same backing capability are still
@@ -325,14 +345,14 @@ pub fn try_compare_values(a: &VmValue, b: &VmValue) -> Option<i32> {
         (VmValue::Int(x), VmValue::Float(y)) => float_ordering(*x as f64, *y),
         (VmValue::Float(x), VmValue::Int(y)) => float_ordering(*x, *y as f64),
         (VmValue::String(x), VmValue::String(y)) => Some(x.cmp(y) as i32),
-        (VmValue::Pair(x), VmValue::Pair(y)) => {
+        (VmValue::Pair(x), VmValue::Pair(y)) => guard_recursion(|| {
             let c = try_compare_values(&x.0, &y.0)?;
             if c != 0 {
                 Some(c)
             } else {
                 try_compare_values(&x.1, &y.1)
             }
-        }
+        }),
         _ => Some(0),
     }
 }

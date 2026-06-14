@@ -83,6 +83,29 @@ impl Scope {
     }
 }
 
+impl Drop for Scope {
+    fn drop(&mut self) {
+        // Deeply nested script values (e.g. `x = [x]` built in a loop, which
+        // adds no VM call frames and so never trips `max_vm_frames`) live in
+        // scope bindings. Their default recursive drop would overflow the
+        // native stack and abort the whole process — an uncatchable failure.
+        // When this scope holds the last reference to its bindings and any
+        // value is a nested container, tear the bindings down iteratively
+        // instead. `Arc::get_mut` succeeds only for a uniquely-owned scope, so
+        // shared snapshots fall through to the cheap default drop and the real
+        // teardown happens later at the last owner (also a `Scope`).
+        if let Some(map) = Arc::get_mut(&mut self.vars) {
+            if map
+                .values()
+                .any(|(value, _)| super::recursion::is_recursive_container(value))
+            {
+                let bindings = std::mem::take(map);
+                super::recursion::dismantle_values(bindings.into_values().map(|(value, _)| value));
+            }
+        }
+    }
+}
+
 impl Default for VmEnv {
     fn default() -> Self {
         Self::new()
@@ -142,7 +165,11 @@ impl VmEnv {
                     )));
                 }
             }
-            Arc::make_mut(&mut scope.vars).insert(name.to_string(), (value, mutable));
+            if let Some((previous, _)) =
+                Arc::make_mut(&mut scope.vars).insert(name.to_string(), (value, mutable))
+            {
+                super::recursion::dismantle(previous);
+            }
         }
         Ok(())
     }
@@ -163,7 +190,13 @@ impl VmEnv {
                 if !mutable {
                     return Err(VmError::ImmutableAssignment(name.to_string()));
                 }
-                Arc::make_mut(&mut scope.vars).insert(name.to_string(), (value, true));
+                if let Some((previous, _)) =
+                    Arc::make_mut(&mut scope.vars).insert(name.to_string(), (value, true))
+                {
+                    // Iterative teardown so overwriting a deeply nested binding
+                    // cannot overflow the stack on drop (scalars are a no-op).
+                    super::recursion::dismantle(previous);
+                }
                 return Ok(());
             }
         }

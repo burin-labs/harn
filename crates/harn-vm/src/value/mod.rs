@@ -3,6 +3,7 @@ mod core;
 mod env;
 mod error;
 mod handles;
+pub(crate) mod recursion;
 mod structural;
 
 pub type VmMutex<T> = parking_lot::Mutex<T>;

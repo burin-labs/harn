@@ -51,6 +51,12 @@ pub struct RuntimeLimits {
     pub max_schema_nudge_lines: usize,
     /// Maximum object keys listed in LLM schema-correction nudges.
     pub max_schema_nudge_keys: usize,
+    /// Maximum `VmValue` nesting depth accepted by serializers that hand the
+    /// value tree to a third-party recursive encoder we cannot make
+    /// stack-safe internally (pretty JSON, YAML). Our own walks grow the
+    /// native stack on demand (see `value::recursion`); this ceiling keeps
+    /// adversarially nested data from overflowing those external encoders.
+    pub max_value_depth: usize,
 }
 
 impl RuntimeLimits {
@@ -76,6 +82,7 @@ impl RuntimeLimits {
         max_schema_nudge_depth: 3,
         max_schema_nudge_lines: 8,
         max_schema_nudge_keys: 16,
+        max_value_depth: 1024,
     };
 
     /// Return the value for a named limit.
@@ -101,6 +108,7 @@ impl RuntimeLimits {
             "max_schema_nudge_depth" => self.max_schema_nudge_depth,
             "max_schema_nudge_lines" => self.max_schema_nudge_lines,
             "max_schema_nudge_keys" => self.max_schema_nudge_keys,
+            "max_value_depth" => self.max_value_depth,
             _ => return None,
         })
     }
@@ -276,6 +284,12 @@ pub const RUNTIME_LIMIT_DESCRIPTIONS: &[RuntimeLimitDescription] = &[
         host_configurable: false,
         protects: "keeps schema-retry object-key previews compact for wide objects",
     },
+    RuntimeLimitDescription {
+        name: "max_value_depth",
+        user_visible: false,
+        host_configurable: false,
+        protects: "bounds value nesting handed to external pretty-JSON/YAML encoders so deep data cannot overflow their recursion",
+    },
 ];
 
 #[cfg(test)]
@@ -305,6 +319,7 @@ mod tests {
         assert_eq!(limits.max_schema_nudge_depth, 3);
         assert_eq!(limits.max_schema_nudge_lines, 8);
         assert_eq!(limits.max_schema_nudge_keys, 16);
+        assert_eq!(limits.max_value_depth, 1024);
     }
 
     #[test]
@@ -338,6 +353,7 @@ mod tests {
                 "max_schema_nudge_depth",
                 "max_schema_nudge_lines",
                 "max_schema_nudge_keys",
+                "max_value_depth",
             ]
         );
         assert!(report.entries.iter().all(|entry| entry.value > 0));

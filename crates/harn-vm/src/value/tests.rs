@@ -365,3 +365,107 @@ fn try_compare_reports_nan_as_unordered() {
     // The total-order wrapper keeps a sort-stable fallback of 0.
     assert_eq!(compare_values(&nan, &VmValue::Float(5.0)), 0);
 }
+
+// --- Deeply nested value recursion guards -------------------------------
+//
+// A Harn script can build a value nested far deeper than the native call
+// stack tolerates (e.g. `x = [x]` in a loop, which adds no VM call frames and
+// so never trips `max_vm_frames`). Before the recursion guards, walking or
+// dropping such a value overflowed the OS thread stack and aborted the whole
+// process. These tests build a value far deeper than any stack frame budget
+// and assert the core operations complete and the value tears down safely.
+//
+// NOTE: each test must `dismantle` the deep value before it leaves scope —
+// a bare `VmValue` dropped in plain Rust (outside the VM's guarded
+// slot/scope teardown) would otherwise recurse on drop.
+
+const DEEP: usize = 200_000;
+
+fn deep_list(depth: usize) -> VmValue {
+    let mut v = i(0);
+    for _ in 0..depth {
+        v = list(vec![v]);
+    }
+    v
+}
+
+#[test]
+fn deeply_nested_equality_does_not_overflow() {
+    let a = deep_list(DEEP);
+    let b = deep_list(DEEP);
+    assert!(values_equal(&a, &a));
+    assert!(values_equal(&a, &b));
+    // A divergence deep in the structure is still detected correctly.
+    let c = {
+        let mut v = i(1);
+        for _ in 0..DEEP {
+            v = list(vec![v]);
+        }
+        v
+    };
+    assert!(!values_equal(&a, &c));
+    super::recursion::dismantle(a);
+    super::recursion::dismantle(b);
+    super::recursion::dismantle(c);
+}
+
+#[test]
+fn deeply_nested_display_and_hash_do_not_overflow() {
+    let a = deep_list(DEEP);
+    // Display produces a string and structural hashing produces a key; both
+    // walk the whole structure. We only assert they return without aborting.
+    assert!(a.display().starts_with('['));
+    assert!(!value_structural_hash_key(&a).is_empty());
+    // Hash keys remain consistent with equality for deep values.
+    let b = deep_list(DEEP);
+    assert_eq!(value_structural_hash_key(&a), value_structural_hash_key(&b));
+    super::recursion::dismantle(a);
+    super::recursion::dismantle(b);
+}
+
+#[test]
+fn deeply_nested_compare_does_not_overflow() {
+    // Ordering only recurses through nested pairs; build a deep pair chain.
+    let mut a = i(0);
+    let mut b = i(0);
+    for _ in 0..DEEP {
+        a = VmValue::Pair(std::sync::Arc::new((i(1), a)));
+        b = VmValue::Pair(std::sync::Arc::new((i(1), b)));
+    }
+    assert_eq!(try_compare_values(&a, &b), Some(0));
+    super::recursion::dismantle(a);
+    super::recursion::dismantle(b);
+}
+
+#[test]
+fn dismantle_tears_down_deep_value_without_recursing() {
+    // The whole point: this value's recursive drop would overflow the stack,
+    // but `dismantle` reclaims it iteratively.
+    let deep = deep_list(DEEP);
+    super::recursion::dismantle(deep);
+}
+
+#[test]
+fn dismantle_preserves_shared_children() {
+    // A child still referenced elsewhere must survive dismantling its parent.
+    let shared = list(vec![i(1), i(2)]);
+    let parent = list(vec![shared.clone(), i(3)]);
+    super::recursion::dismantle(parent);
+    // `shared` is intact and usable.
+    assert!(values_equal(&shared, &list(vec![i(1), i(2)])));
+}
+
+#[test]
+fn depth_within_reports_nesting_correctly() {
+    use super::recursion::depth_within;
+    assert!(depth_within(&i(0), 0));
+    assert!(depth_within(&list(vec![i(1)]), 1));
+    assert!(!depth_within(&list(vec![i(1)]), 0));
+    let three = list(vec![list(vec![list(vec![i(1)])])]);
+    assert!(depth_within(&three, 3));
+    assert!(!depth_within(&three, 2));
+    // A value deeper than the limit is rejected without overflowing.
+    let deep = deep_list(DEEP);
+    assert!(!depth_within(&deep, 1024));
+    super::recursion::dismantle(deep);
+}

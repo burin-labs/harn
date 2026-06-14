@@ -541,24 +541,28 @@ impl VmValue {
             VmValue::Nil => out.push_str("nil"),
             VmValue::List(items) => {
                 out.push('[');
-                for (i, item) in items.iter().enumerate() {
-                    if i > 0 {
-                        out.push_str(", ");
+                crate::value::recursion::guard_recursion(|| {
+                    for (i, item) in items.iter().enumerate() {
+                        if i > 0 {
+                            out.push_str(", ");
+                        }
+                        item.write_display(out);
                     }
-                    item.write_display(out);
-                }
+                });
                 out.push(']');
             }
             VmValue::Dict(map) => {
                 out.push('{');
-                for (i, (k, v)) in map.iter().enumerate() {
-                    if i > 0 {
-                        out.push_str(", ");
+                crate::value::recursion::guard_recursion(|| {
+                    for (i, (k, v)) in map.iter().enumerate() {
+                        if i > 0 {
+                            out.push_str(", ");
+                        }
+                        out.push_str(k);
+                        out.push_str(": ");
+                        v.write_display(out);
                     }
-                    out.push_str(k);
-                    out.push_str(": ");
-                    v.write_display(out);
-                }
+                });
                 out.push('}');
             }
             VmValue::Closure(c) => {
@@ -593,25 +597,29 @@ impl VmValue {
                     let _ = write!(out, "{}.{}", enum_variant.enum_name, enum_variant.variant);
                 } else {
                     let _ = write!(out, "{}.{}(", enum_variant.enum_name, enum_variant.variant);
-                    for (i, v) in enum_variant.fields.iter().enumerate() {
-                        if i > 0 {
-                            out.push_str(", ");
+                    crate::value::recursion::guard_recursion(|| {
+                        for (i, v) in enum_variant.fields.iter().enumerate() {
+                            if i > 0 {
+                                out.push_str(", ");
+                            }
+                            v.write_display(out);
                         }
-                        v.write_display(out);
-                    }
+                    });
                     out.push(')');
                 }
             }
             VmValue::StructInstance { layout, fields } => {
                 let _ = write!(out, "{} {{", layout.struct_name());
-                for (i, (k, v)) in struct_fields_to_map(layout, fields).iter().enumerate() {
-                    if i > 0 {
-                        out.push_str(", ");
+                crate::value::recursion::guard_recursion(|| {
+                    for (i, (k, v)) in struct_fields_to_map(layout, fields).iter().enumerate() {
+                        if i > 0 {
+                            out.push_str(", ");
+                        }
+                        out.push_str(k);
+                        out.push_str(": ");
+                        v.write_display(out);
                     }
-                    out.push_str(k);
-                    out.push_str(": ");
-                    v.write_display(out);
-                }
+                });
                 out.push('}');
             }
             VmValue::TaskHandle(id) => {
@@ -634,12 +642,14 @@ impl VmValue {
             }
             VmValue::Set(items) => {
                 out.push_str("set(");
-                for (i, item) in items.iter().enumerate() {
-                    if i > 0 {
-                        out.push_str(", ");
+                crate::value::recursion::guard_recursion(|| {
+                    for (i, item) in items.iter().enumerate() {
+                        if i > 0 {
+                            out.push_str(", ");
+                        }
+                        item.write_display(out);
                     }
-                    item.write_display(out);
-                }
+                });
                 out.push(')');
             }
             VmValue::Generator(g) => {
@@ -676,9 +686,11 @@ impl VmValue {
             }
             VmValue::Pair(p) => {
                 out.push('(');
-                p.0.write_display(out);
-                out.push_str(", ");
-                p.1.write_display(out);
+                crate::value::recursion::guard_recursion(|| {
+                    p.0.write_display(out);
+                    out.push_str(", ");
+                    p.1.write_display(out);
+                });
                 out.push(')');
             }
         }

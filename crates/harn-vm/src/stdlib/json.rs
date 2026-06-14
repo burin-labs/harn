@@ -13,6 +13,27 @@ use crate::vm::Vm;
 /// VM's per-thread parse caches share a predictable ceiling.
 const JSON_PARSE_CACHE_LIMIT: usize = RuntimeLimits::DEFAULT.max_json_parse_cache_entries;
 
+/// Deepest `VmValue` nesting we will hand to a third-party recursive encoder
+/// (pretty JSON via `serde_json`, YAML via `serde_yml`). Our own JSON writer
+/// grows the stack on demand, but those library serializers recurse without a
+/// hook we can guard, so a value past this depth is rejected with a catchable
+/// error rather than aborting the process. See `value::recursion`.
+const MAX_SERIALIZE_DEPTH: usize = RuntimeLimits::DEFAULT.max_value_depth;
+
+/// Reject values nested too deep for the external (serde) encoders to walk
+/// without overflowing the native stack.
+fn ensure_serializable_depth(value: &VmValue, builtin: &str) -> Result<(), VmError> {
+    if crate::value::recursion::depth_within(value, MAX_SERIALIZE_DEPTH) {
+        Ok(())
+    } else {
+        Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+            format!(
+                "{builtin}: value nesting exceeds the maximum serialization depth ({MAX_SERIALIZE_DEPTH})"
+            ),
+        ))))
+    }
+}
+
 thread_local! {
     // Internal parse cache (source -> parsed value), not a Dict payload, so it
     // stays a plain `BTreeMap`: it is mutated in place and needs a `const` init.
@@ -60,6 +81,7 @@ fn json_stringify_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, V
 #[harn_builtin(sig = "json_stringify_pretty(value: any) -> string", category = "json")]
 fn json_stringify_pretty_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let val = args.first().unwrap_or(&VmValue::Nil);
+    ensure_serializable_depth(val, "json_stringify_pretty")?;
     serde_json::to_string_pretty(&vm_value_to_data_value(val))
         .map(|text| VmValue::String(std::sync::Arc::from(text)))
         .map_err(|error| {
@@ -112,6 +134,7 @@ fn yaml_parse_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErr
 #[harn_builtin(sig = "yaml_stringify(value: any) -> string", category = "json")]
 fn yaml_stringify_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let value = args.first().unwrap_or(&VmValue::Nil);
+    ensure_serializable_depth(value, "yaml_stringify")?;
     let data_value = vm_value_to_data_value(value);
     serde_yml::to_string(&data_value)
         .map(|text| VmValue::String(std::sync::Arc::from(text)))
@@ -623,21 +646,27 @@ pub(crate) fn vm_value_to_data_value(value: &VmValue) -> serde_json::Value {
         VmValue::Bool(b) => serde_json::json!(b),
         VmValue::Nil => serde_json::Value::Null,
         VmValue::List(items) | VmValue::Set(items) => {
-            serde_json::Value::Array(items.iter().map(vm_value_to_data_value).collect())
+            crate::value::recursion::guard_recursion(|| {
+                serde_json::Value::Array(items.iter().map(vm_value_to_data_value).collect())
+            })
         }
-        VmValue::Dict(map) => serde_json::Value::Object(
-            map.iter()
-                .map(|(key, value)| (key.clone(), vm_value_to_data_value(value)))
-                .collect(),
-        ),
-        VmValue::StructInstance { .. } => serde_json::Value::Object(
-            value
-                .struct_fields_map()
-                .unwrap_or_default()
-                .iter()
-                .map(|(key, value)| (key.clone(), vm_value_to_data_value(value)))
-                .collect(),
-        ),
+        VmValue::Dict(map) => crate::value::recursion::guard_recursion(|| {
+            serde_json::Value::Object(
+                map.iter()
+                    .map(|(key, value)| (key.clone(), vm_value_to_data_value(value)))
+                    .collect(),
+            )
+        }),
+        VmValue::StructInstance { .. } => crate::value::recursion::guard_recursion(|| {
+            serde_json::Value::Object(
+                value
+                    .struct_fields_map()
+                    .unwrap_or_default()
+                    .iter()
+                    .map(|(key, value)| (key.clone(), vm_value_to_data_value(value)))
+                    .collect(),
+            )
+        }),
         // Ranges stringify like Display (`"1 to 5"`); use `.to_list()` in Harn
         // to materialise an int array.
         VmValue::Range(_) => serde_json::json!(value.display()),
@@ -672,41 +701,47 @@ fn write_vm_value_to_json(val: &VmValue, out: &mut String) {
         VmValue::Nil => out.push_str("null"),
         VmValue::List(items) | VmValue::Set(items) => {
             out.push('[');
-            for (i, item) in items.iter().enumerate() {
-                if i > 0 {
-                    out.push(',');
+            crate::value::recursion::guard_recursion(|| {
+                for (i, item) in items.iter().enumerate() {
+                    if i > 0 {
+                        out.push(',');
+                    }
+                    write_vm_value_to_json(item, out);
                 }
-                write_vm_value_to_json(item, out);
-            }
+            });
             out.push(']');
         }
         VmValue::Dict(map) => {
             out.push('{');
-            for (i, (k, v)) in map.iter().enumerate() {
-                if i > 0 {
-                    out.push(',');
+            crate::value::recursion::guard_recursion(|| {
+                for (i, (k, v)) in map.iter().enumerate() {
+                    if i > 0 {
+                        out.push(',');
+                    }
+                    out.push_str(&escape_json_string_vm(k));
+                    out.push(':');
+                    write_vm_value_to_json(v, out);
                 }
-                out.push_str(&escape_json_string_vm(k));
-                out.push(':');
-                write_vm_value_to_json(v, out);
-            }
+            });
             out.push('}');
         }
         VmValue::StructInstance { .. } => {
             out.push('{');
-            for (i, (k, v)) in val
-                .struct_fields_map()
-                .unwrap_or_default()
-                .iter()
-                .enumerate()
-            {
-                if i > 0 {
-                    out.push(',');
+            crate::value::recursion::guard_recursion(|| {
+                for (i, (k, v)) in val
+                    .struct_fields_map()
+                    .unwrap_or_default()
+                    .iter()
+                    .enumerate()
+                {
+                    if i > 0 {
+                        out.push(',');
+                    }
+                    out.push_str(&escape_json_string_vm(k));
+                    out.push(':');
+                    write_vm_value_to_json(v, out);
                 }
-                out.push_str(&escape_json_string_vm(k));
-                out.push(':');
-                write_vm_value_to_json(v, out);
-            }
+            });
             out.push('}');
         }
         VmValue::Range(_) => out.push_str(&escape_json_string_vm(&val.display())),
@@ -790,6 +825,41 @@ mod tests {
     fn extract_from_code_fence() {
         let text = "Here is the result:\n```json\n{\"key\": \"value\"}\n```\nDone.";
         assert_eq!(extract_json_from_text(text), "{\"key\": \"value\"}");
+    }
+
+    fn deep_list(depth: usize) -> VmValue {
+        let mut v = VmValue::Int(0);
+        for _ in 0..depth {
+            v = VmValue::List(std::sync::Arc::new(vec![v]));
+        }
+        v
+    }
+
+    #[test]
+    fn compact_json_handles_deeply_nested_value_without_overflow() {
+        // `json_stringify` writes JSON directly with a stack-growing walk, so a
+        // value far deeper than any frame budget serializes instead of
+        // aborting the process.
+        let deep = deep_list(200_000);
+        let json = vm_value_to_json(&deep);
+        assert!(json.starts_with("[[") || json.starts_with('['));
+        assert!(json.ends_with("0]") || json.ends_with(']'));
+        crate::value::recursion::dismantle(deep);
+    }
+
+    #[test]
+    fn pretty_serializer_rejects_values_too_deep_for_serde() {
+        // The serde-backed pretty/YAML encoders recurse without a hook we can
+        // guard, so values past `max_value_depth` are rejected with a
+        // catchable error rather than overflowing the stack.
+        let deep = deep_list(MAX_SERIALIZE_DEPTH + 10);
+        let err = ensure_serializable_depth(&deep, "json_stringify_pretty")
+            .expect_err("value deeper than the limit must be rejected");
+        assert!(matches!(err, VmError::Thrown(_)));
+        // A value within the limit is accepted.
+        let shallow = deep_list(8);
+        assert!(ensure_serializable_depth(&shallow, "json_stringify_pretty").is_ok());
+        crate::value::recursion::dismantle(deep);
     }
 
     #[test]

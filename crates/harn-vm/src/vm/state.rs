@@ -35,6 +35,21 @@ pub(crate) struct LocalSlot {
     pub(crate) synced: bool,
 }
 
+impl Drop for LocalSlot {
+    fn drop(&mut self) {
+        // Slot locals hold script values directly (e.g. a `var` bound to a
+        // deeply nested list). When a frame is torn down, the default
+        // recursive drop of such a value would overflow the native stack and
+        // abort the process. For the overwhelmingly common scalar slot this is
+        // a single `matches!` check and then the normal trivial drop; only a
+        // nested container is moved out and torn down iteratively, so hot
+        // frame teardown is unaffected.
+        if crate::value::recursion::is_recursive_container(&self.value) {
+            crate::value::recursion::dismantle(std::mem::replace(&mut self.value, VmValue::Nil));
+        }
+    }
+}
+
 #[derive(Clone)]
 pub(crate) struct InterruptHandler {
     pub(crate) handle: i64,
@@ -548,7 +563,7 @@ impl Vm {
                     return Err(VmError::ImmutableAssignment(name.to_string()));
                 }
                 if let Some(slot) = frame.local_slots.get_mut(idx) {
-                    slot.value = value;
+                    crate::value::recursion::dismantle(std::mem::replace(&mut slot.value, value));
                     slot.initialized = true;
                     slot.synced = false;
                     return Ok(true);
