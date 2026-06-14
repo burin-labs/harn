@@ -144,12 +144,16 @@ pub(crate) async fn run_structured_envelope(
             // Repair didn't recover — fall through to the main-call
             // failure envelope, but mark the category as repair_failed
             // so callers can distinguish "tried repair, didn't help"
-            // from "repair was disabled".
-            return Ok(envelope_failure(
-                &main_outcome,
-                EnvelopeFailureKind::RepairFailed,
-                false,
-            ));
+            // from "repair was disabled". A token-limit truncation keeps its
+            // own integrity category even after a failed repair: the root
+            // cause is an under-budgeted call, and masking it as repair_failed
+            // would hide a dead-judge truncation from the meter.
+            let kind = if outcome_hit_token_limit(&main_outcome) {
+                EnvelopeFailureKind::LengthTruncation
+            } else {
+                EnvelopeFailureKind::RepairFailed
+            };
+            return Ok(envelope_failure(&main_outcome, kind, false));
         }
     }
 
@@ -235,6 +239,19 @@ fn prompt_with_schema_contract(prompt: &str, schema: &VmValue) -> String {
 }
 
 fn classify_main_failure(outcome: &SchemaLoopOutcome) -> EnvelopeFailureKind {
+    // A token-limit truncation is a MEASUREMENT-INTEGRITY signal, not an
+    // ordinary "the model returned prose instead of JSON" miss: the request
+    // ran out of `max_tokens` mid-object, so the JSON is unparseable purely
+    // because it was cut off. `structured_output_errors` (the schema-retry
+    // loop) already appends the canonical truncation marker derived from a
+    // provider-agnostic `is_length_truncation(stop_reason)` check, so we key
+    // off that marker here rather than re-inspecting the raw stop_reason.
+    // Surfacing it as its own category lets judge/router callers distinguish a
+    // DEAD (truncated) judge — which silently falls through to a deterministic
+    // grader — from a model that genuinely could not produce a verdict.
+    if outcome_hit_token_limit(outcome) {
+        return EnvelopeFailureKind::LengthTruncation;
+    }
     let has_data = outcome
         .vm_result
         .as_dict()
@@ -244,6 +261,19 @@ fn classify_main_failure(outcome: &SchemaLoopOutcome) -> EnvelopeFailureKind {
     } else {
         EnvelopeFailureKind::MissingJson
     }
+}
+
+/// Whether the structured failure was caused by the response running out of
+/// output-token budget mid-JSON. Detected from the canonical truncation marker
+/// `structured_output_errors` appends (see `call.rs::structured_output_errors`),
+/// which is itself derived from the provider-agnostic
+/// `is_length_truncation(stop_reason)` classifier — so this stays correct across
+/// every provider's stop_reason spelling without a per-provider branch here.
+fn outcome_hit_token_limit(outcome: &SchemaLoopOutcome) -> bool {
+    outcome
+        .errors
+        .iter()
+        .any(|e| e.contains("hit the token limit"))
 }
 
 /// Returned-`{enabled, ...overrides}`-dict-or-`nil` repair config.
@@ -361,6 +391,12 @@ enum EnvelopeFailureKind {
     SchemaValidation,
     /// Repair pass was attempted and also failed.
     RepairFailed,
+    /// The response was truncated by the `max_tokens` budget before it could
+    /// emit complete JSON — a measurement-integrity signal distinct from a
+    /// model that returned no JSON at all. Callers (judges/routers) use this to
+    /// detect a DEAD structured call instead of treating the truncation as an
+    /// ordinary abstention.
+    LengthTruncation,
 }
 
 impl EnvelopeFailureKind {
@@ -369,6 +405,7 @@ impl EnvelopeFailureKind {
             EnvelopeFailureKind::MissingJson => "missing_json",
             EnvelopeFailureKind::SchemaValidation => "schema_validation",
             EnvelopeFailureKind::RepairFailed => "repair_failed",
+            EnvelopeFailureKind::LengthTruncation => "length_truncation",
         }
     }
 }
@@ -554,6 +591,39 @@ pub(crate) async fn llm_call_structured_result_impl(
 mod tests {
     use super::*;
     use crate::value::VmDictExt;
+
+    fn outcome_with_errors(errors: Vec<&str>) -> SchemaLoopOutcome {
+        SchemaLoopOutcome {
+            vm_result: VmValue::dict(crate::value::DictMap::new()),
+            raw_text: String::from("{\"verdict\":\"do"),
+            errors: errors.into_iter().map(String::from).collect(),
+            attempts: 1,
+            schema_retries_budget: 2,
+            output_validation_mode: String::from("error"),
+        }
+    }
+
+    #[test]
+    fn token_limit_truncation_gets_its_own_integrity_category() {
+        // The canonical marker `structured_output_errors` appends on a length
+        // stop_reason must be classified as `length_truncation`, NOT lumped
+        // into the generic `missing_json` bucket — otherwise a dead (truncated)
+        // judge is invisible to the meter.
+        let outcome = outcome_with_errors(vec![
+            "response did not contain parseable JSON",
+            "response hit the token limit before producing complete JSON",
+        ]);
+        assert!(outcome_hit_token_limit(&outcome));
+        let kind = classify_main_failure(&outcome);
+        assert_eq!(kind.category(), "length_truncation");
+    }
+
+    #[test]
+    fn non_truncation_missing_json_stays_missing_json() {
+        let outcome = outcome_with_errors(vec!["response did not contain parseable JSON"]);
+        assert!(!outcome_hit_token_limit(&outcome));
+        assert_eq!(classify_main_failure(&outcome).category(), "missing_json");
+    }
 
     #[test]
     fn repair_prompt_includes_raw_text_and_errors() {
