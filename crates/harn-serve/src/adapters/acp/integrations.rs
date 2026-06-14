@@ -165,15 +165,22 @@ impl AcpServer {
             }
         };
         match harn_vm::mcp_oauth::complete_authorization(&state, &code, issuer.as_deref()).await {
-            Ok(token) => self.send_response(
-                id,
-                serde_json::json!({
-                    "ok": true,
-                    "resource": token.resource,
-                    "issuer": token.issuer,
-                    "expiresAt": token.expires_at_unix,
-                }),
-            ),
+            Ok(token) => {
+                // Surface the "logged in as …" identity (harn#3350) so an
+                // embedding GUI can show it immediately on a successful connect.
+                let display_identity =
+                    harn_vm::mcp_identity::display_identity(&token.resource, &token);
+                self.send_response(
+                    id,
+                    serde_json::json!({
+                        "ok": true,
+                        "resource": token.resource,
+                        "issuer": token.issuer,
+                        "expiresAt": token.expires_at_unix,
+                        "displayIdentity": display_identity,
+                    }),
+                );
+            }
             Err(error) => self.send_error(id, -32000, &error),
         }
     }

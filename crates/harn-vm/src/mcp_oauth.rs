@@ -85,9 +85,18 @@ pub struct StoredMcpToken {
     pub resource: String,
     #[serde(default)]
     pub scopes: Option<String>,
+    /// Non-credential extras the token endpoint returned alongside the tokens
+    /// (everything except `access_token`/`refresh_token`/`expires_in`). Notion,
+    /// for example, returns `workspace_name` + `owner.user` here. Captured so an
+    /// identity probe (harn#3349) can render a "logged in as …" string without a
+    /// follow-up network call. `None` for tokens stored before this existed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub token_response_extra: Option<serde_json::Value>,
 }
 
-/// The raw token-endpoint response shape (a subset; unknown fields ignored).
+/// The raw token-endpoint response shape. The named fields are the credential
+/// material; `extra` flat-captures every other field (workspace/identity hints
+/// some providers inline) without it touching the stored credentials.
 #[derive(Clone, Debug, Deserialize)]
 struct TokenResponse {
     access_token: String,
@@ -95,6 +104,15 @@ struct TokenResponse {
     refresh_token: Option<String>,
     #[serde(default)]
     expires_in: Option<i64>,
+    #[serde(flatten)]
+    extra: serde_json::Map<String, serde_json::Value>,
+}
+
+/// Wrap non-empty token-response extras as a JSON object for persistence.
+fn token_response_extra(
+    extra: serde_json::Map<String, serde_json::Value>,
+) -> Option<serde_json::Value> {
+    (!extra.is_empty()).then_some(serde_json::Value::Object(extra))
 }
 
 /// Inputs to [`begin_authorization`]. The server is identified by its URL; the
@@ -303,6 +321,7 @@ pub async fn complete_authorization(
         issuer: flow.issuer,
         resource: flow.resource,
         scopes: flow.scopes,
+        token_response_extra: token_response_extra(token.extra),
     };
     save_stored_token(&stored).await?;
     Ok(stored)
@@ -529,6 +548,10 @@ async fn refresh_token(
         issuer: token.issuer.clone(),
         resource,
         scopes: token.scopes.clone(),
+        // Prefer fresh extras if the refresh carried any; otherwise keep the
+        // identity hints captured at first authorization.
+        token_response_extra: token_response_extra(refreshed.extra)
+            .or_else(|| token.token_response_extra.clone()),
     })
 }
 
@@ -1021,6 +1044,8 @@ fn stored_token_for_import(
             .map(str::trim)
             .filter(|scopes| !scopes.is_empty())
             .map(str::to_string),
+        // Imported legacy tokens carry no captured token-response payload.
+        token_response_extra: None,
     })
 }
 
@@ -1096,6 +1121,7 @@ mod tests {
             issuer: "https://auth".into(),
             resource: "https://mcp".into(),
             scopes: None,
+            token_response_extra: None,
         };
         assert!(!token_needs_refresh(&token));
         token.expires_at_unix = Some(current_unix_timestamp() + 3600);
@@ -1315,6 +1341,7 @@ mod tests {
             issuer: "https://auth.example".to_string(),
             resource: "https://mcp.example/mcp".to_string(),
             scopes: None,
+            token_response_extra: None,
         };
         store.save_token(&stale).await.unwrap();
 

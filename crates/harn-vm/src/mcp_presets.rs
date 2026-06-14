@@ -30,10 +30,10 @@ use serde::{Deserialize, Serialize};
 
 /// JSON schema version for the preset catalog. Increment on any breaking
 /// shape change to [`PresetCatalog`] / [`McpPreset`]. The optional
-/// [`McpPreset::identity`] field added in harn#3348 is omitted when absent, so
-/// the shipped output is unchanged and the version holds at 1 until a vetted
-/// identity descriptor actually ships in the catalog.
-pub const PRESET_CATALOG_SCHEMA_VERSION: u32 = 1;
+/// [`McpPreset::identity`] field. Bumped to 2 in harn#3349 when the first vetted
+/// identity descriptor (Notion) began shipping in the catalog, so consumers can
+/// detect that presets may now carry an `identity` recipe.
+pub const PRESET_CATALOG_SCHEMA_VERSION: u32 = 2;
 
 /// Bundled default catalog. Editable here; overlayable at runtime.
 const BUILTIN_TOML: &str = include_str!("mcp_presets.toml");
@@ -374,7 +374,7 @@ mod tests {
     #[test]
     fn json_shape_is_stable() {
         let json = serde_json::to_value(catalog()).expect("serialize catalog");
-        assert_eq!(json["schemaVersion"], serde_json::json!(1));
+        assert_eq!(json["schemaVersion"], serde_json::json!(2));
         let notion = json["presets"]
             .as_array()
             .expect("presets array")
@@ -391,9 +391,14 @@ mod tests {
             notion.get("oauthScopes").is_none(),
             "Notion MCP does not currently expose configurable OAuth scopes"
         );
-        assert!(
-            notion.get("identity").is_none(),
-            "no identity descriptor ships in the catalog yet (harn#3349 runner pending)"
+        // Notion now ships a token_response identity descriptor (harn#3349).
+        assert_eq!(
+            notion["identity"]["displayTemplate"],
+            serde_json::json!("{name} <{email}> — {workspace}")
+        );
+        assert_eq!(
+            notion["identity"]["sources"][0]["kind"],
+            serde_json::json!("token_response")
         );
     }
 

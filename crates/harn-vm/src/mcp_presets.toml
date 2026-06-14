@@ -21,6 +21,18 @@ transport = "http"
 url = "https://mcp.notion.com/mcp"
 auth_kind = "oauth"
 
+# Notion returns the authorizing user + workspace inline in its OAuth token
+# response, so the "logged in as …" string needs no extra call (harn#3349).
+[presets.identity]
+display_template = "{name} <{email}> — {workspace}"
+
+[[presets.identity.sources]]
+kind = "token_response"
+[presets.identity.sources.fields]
+name = "owner.user.name"
+email = "owner.user.person.email"
+workspace = "workspace_name"
+
 [[presets]]
 id = "linear"
 name = "Linear"
