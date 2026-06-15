@@ -438,8 +438,16 @@ installs repo-local Node tooling including the portal frontend, builds
 `crates/harn-cli/portal-dist`, enables the sccache rustc wrapper, and runs a
 workspace `cargo check`. When `CODEX_WORKTREE_PATH` is set, it also writes a
 per-worktree temp `target-dir` into `.cargo/config.toml` so parallel Codex
-worktrees do not fight over one shared Cargo target. `make portal` launches the
-built-in observability UI for persisted runs under `.harn-runs/`.
+worktrees do not fight over one shared Cargo target. Heavy setup phases are
+fingerprinted under `.codex/dev-setup/`, so rerunning the script in an already
+prepared checkout is normally a fast no-op; set `HARN_DEV_SETUP_FORCE=1` to
+refresh all phases. The tracked Codex local
+environment at `.codex/environments/environment.toml` calls the same script for
+new app-managed worktrees. Claude Code project settings use a `SessionStart`
+hook to run `scripts/claude-dev-setup-once.sh`, which delegates to this script
+once per dependency fingerprint and writes logs under `.claude/dev-setup/`.
+`make portal` launches the built-in observability UI
+for persisted runs under `.harn-runs/`.
 
 The repo-root portal scripts (`npm run portal:lint`, `portal:test`,
 `portal:build`, and `portal:dev`) self-bootstrap

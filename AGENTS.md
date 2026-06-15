@@ -26,6 +26,14 @@ local `harn` binary so it matches the version in use.
   tools, repo-local Node tooling when available, sccache config, per-worktree
   Cargo target config when `CODEX_WORKTREE_PATH` is set, and
   `cargo check --workspace`.
+- Setup phases are fingerprinted under `.codex/dev-setup/`, so repeated setup
+  is normally a fast no-op. Use `HARN_DEV_SETUP_FORCE=1 make setup` to refresh
+  every phase.
+- Codex app worktrees use `.codex/environments/environment.toml`, which calls
+  `make setup` through the same repo bootstrap path.
+- Claude Code project settings run `scripts/claude-dev-setup-once.sh` on
+  session startup. It delegates to the same setup path once per dependency
+  fingerprint and stores ignored logs under `.claude/dev-setup/`.
 - Use `make test` for workspace Rust tests. It uses `cargo nextest` when
   available and falls back to `cargo test --workspace`.
 - Use `make test-cargo` only when you need baseline Cargo behavior.
