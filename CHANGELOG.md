@@ -8,6 +8,25 @@ highlights live in [CHANGELOG-pre-0.6.md](CHANGELOG-pre-0.6.md).
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.8.114
+
+### Added
+
+- **harn-serve route policies and embedded-agent facade.** `std/harness/policy`
+  now supports typed missing-auth, scope, principal-kind, resource, tenant, and
+  method-specific denials for route handlers; `harn-serve` exports matching
+  policy metadata and a stable `EmbeddedAgentClient` facade over ACP lifecycle
+  calls and run/session views; public examples now prefer argv-style command
+  execution and stable `harn runs view` projections (#3323, #3324, #3325).
+- **Actor chains.** `harn-vm` now exposes an RFC 8693-compatible
+  `ActorChain`/`Principal` type with nested `act` JSON serde, optional
+  `may_act`, current/origin helpers, and plain `VmValue` dictionary conversion
+  for Harn scripts (#3332).
+- **Equivalent LLM failover can now opt into no-dispatch upstream contract violations.**
+  `equivalent_failover: {on_no_dispatch: true}` lets same-logical-model
+  fallback routes advance after the normal empty-completion retry is exhausted
+  for billed no-dispatch provider responses.
+
 ## v0.8.113
 
 ### Added
