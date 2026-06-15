@@ -8,6 +8,23 @@ highlights live in [CHANGELOG-pre-0.6.md](CHANGELOG-pre-0.6.md).
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.8.115
+
+### Fixed
+
+Enable SQLite WAL mode (with `busy_timeout` + `synchronous=NORMAL`) on the LLM read cache
+(`llm.sqlite`) and the durable rate limiter (`llm-rate-limits.sqlite`) so multiple concurrent
+Harn sessions on one machine no longer hit `SQLITE_BUSY` (silently dropped usage rows / blocked
+LLM calls). Matches the WAL pattern already used by `events.sqlite`.
+Fix `matching_paren_len` (stdlib public-function signature parser) so a top-level `]` or `}`
+terminates the scan when bracket depth returns to zero, matching its symmetric opener arm and the
+sibling `split_top_level_params`. Previously only `)` triggered the return, so a mismatched closing
+bracket made the scan run to the end and yield `None`.
+- **Provider capability audits now catch native-tool contradictions.** The
+  OpenRouter Claude capability rows also track direct Anthropic thinking,
+  prefill, structured-output, and tool-format breakpoints for the covered
+  Claude 4.6/4.7 and Mythos-class routes.
+
 ## v0.8.114
 
 ### Added
