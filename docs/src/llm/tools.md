@@ -319,9 +319,9 @@ form) can opt out of eager loading:
 ```harn
 var registry = tool_registry()
 registry = tool_define(registry, "deploy", "Deploy to production", {
-  parameters: {env: {type: "string"}},
+  parameters: {env: {type: "string", enum: ["staging", "prod"]}},
   defer_loading: true,
-  handler: { args -> shell("deploy " + args.env) },
+  handler: { args -> exec("deploy", args.env) },
 })
 ```
 
@@ -391,10 +391,10 @@ ignores the label — harmless passthrough for replay fidelity.
 
 ```harn
 tool_define(registry, "deploy_api", "Deploy the API", {
-  parameters: {env: {type: "string"}},
+  parameters: {env: {type: "string", enum: ["staging", "prod"]}},
   defer_loading: true,
   namespace: "ops",
-  handler: { args -> shell("deploy api " + args.env) },
+  handler: { args -> exec("deploy", "api", args.env) },
 })
 ```
 

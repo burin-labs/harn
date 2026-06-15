@@ -8,19 +8,18 @@
  * route annotations cannot see; the annotations remain the right tool for
  * static, request-independent gates.
  *
- * Each guard returns `nil` when the bound principal satisfies the policy, or
- * a ready-to-return HTTP 403 envelope (built by `http_error`) when it does
- * not — so a handler denies in one line:
+ * Each guard returns `nil` when the bound principal and request context
+ * satisfy the policy, or a ready-to-return HTTP envelope (built by
+ * `http_error`) when they do not — so a handler denies in one line:
  *
  *   let denial = require_policy({kinds: ["operator"], scopes: ["secrets:write"]})
  *   if denial != nil { return denial }
  *   // ...authorized work...
  *
- * Denials are tenant-safe: the body names the *route's* requirement
- * (`allowed_kinds`, or the missing scope) but never echoes the caller's own
- * principal kind, mirroring the declarative `@policy` denial. Guards fail
- * closed — an unauthenticated or unclassified principal (kind `nil`) can
- * never satisfy a non-empty `kinds` allow-set.
+ * Denials are tenant-safe: the body names the route's requirement or the
+ * failing comparison label, but never echoes the caller's own principal kind,
+ * tenant, subject, or resource ids. Guards fail closed — unauthenticated
+ * callers cannot satisfy scope/kind clauses or auth/tenant-bound matches.
  */
 fn __policy_list(value, label) {
   if value == nil {
@@ -32,23 +31,124 @@ fn __policy_list(value, label) {
   return value
 }
 
-/**
- * Enforce a principal-kind and/or scope policy against the ambient
- * `harness.auth` principal. `opts`:
- *   {kinds?: [string], scopes?: [string]}
- * `kinds` (when non-empty) requires the principal's embedder-assigned kind
- * to be one of the listed values; `scopes` requires every listed scope to be
- * granted. Returns `nil` when the principal satisfies every clause, otherwise
- * an HTTP 403 envelope the caller should return verbatim.
- *
- * @effects: []
- * @errors: []
- */
-pub fn require_policy(opts) {
-  if opts != nil && type_of(opts) != "dict" {
-    throw "require_policy: opts must be a dict"
+fn __policy_match_list(value, label) {
+  if value == nil {
+    return []
   }
+  if type_of(value) != "list" {
+    throw label + " must be a list of match specs"
+  }
+  return value
+}
+
+fn __policy_missing_auth() {
+  return http_error(401, "unauthorized", "authentication required", {kind: "missing_auth"})
+}
+
+fn __policy_auth_view() {
+  return {
+    subject: harness.auth.try_subject(),
+    scheme: harness.auth.try_scheme(),
+    kind: harness.auth.kind(),
+    scopes: harness.auth.scopes(),
+  }
+}
+
+fn __policy_tenant_view() {
+  return {id: harness.tenant.try_id()}
+}
+
+fn __policy_request_body(req) {
+  let raw = req?.body
+  if raw == nil {
+    return nil
+  }
+  if type_of(raw) == "string" {
+    let text = trim(raw)
+    if text == "" {
+      return nil
+    }
+    let parsed = try {
+      json_parse(text)
+    }
+    if is_ok(parsed) {
+      return unwrap(parsed)
+    }
+    return nil
+  }
+  return raw
+}
+
+fn __policy_follow_path(root, parts, start_index) {
+  var current = root
+  var index = start_index
+  while index < len(parts) {
+    if current == nil || type_of(current) != "dict" {
+      return nil
+    }
+    current = current[parts[index]]
+    index = index + 1
+  }
+  return current
+}
+
+fn __policy_path_root(path) {
+  if type_of(path) != "string" || trim(path) == "" {
+    return nil
+  }
+  return split(path, ".")[0]
+}
+
+fn __policy_ref_path(ref) {
+  if type_of(ref) == "dict" {
+    return ref.path
+  }
+  if type_of(ref) == "string" {
+    return ref
+  }
+  return nil
+}
+
+fn __policy_ref_needs_auth(ref) {
+  let root = __policy_path_root(__policy_ref_path(ref))
+  return root == "auth" || root == "tenant"
+}
+
+fn __policy_resolve_ref(ref, req, ctx) {
+  if type_of(ref) == "dict" && ref.keys().contains("value") {
+    return ref.value
+  }
+  let path = __policy_ref_path(ref)
+  if path == nil {
+    return ref
+  }
+  let parts = split(path, ".")
+  let root = parts[0]
+  if root == "req" || root == "request" {
+    return __policy_follow_path(req ?? {}, parts, 1)
+  }
+  if root == "body" || root == "json" {
+    return __policy_follow_path(__policy_request_body(req), parts, 1)
+  }
+  if root == "auth" {
+    return __policy_follow_path(__policy_auth_view(), parts, 1)
+  }
+  if root == "tenant" {
+    return __policy_follow_path(__policy_tenant_view(), parts, 1)
+  }
+  if root == "ctx" || root == "context" {
+    return __policy_follow_path(ctx ?? {}, parts, 1)
+  }
+  return __policy_follow_path(req ?? {}, parts, 0)
+}
+
+fn __policy_enforce_segment(opts, req, ctx) {
   let kinds = __policy_list(opts?.kinds, "require_policy: kinds")
+  let scopes = __policy_list(opts?.scopes, "require_policy: scopes")
+  let matches = __policy_match_list(opts?.matches, "require_policy: matches")
+  if (len(kinds) > 0 || len(scopes) > 0) && !harness.auth.is_authenticated() {
+    return __policy_missing_auth()
+  }
   if len(kinds) > 0 {
     let kind = harness.auth.kind()
     if kind == nil || !kinds.contains(kind) {
@@ -61,9 +161,88 @@ pub fn require_policy(opts) {
       )
     }
   }
-  for scope in __policy_list(opts?.scopes, "require_policy: scopes") {
+  for scope in scopes {
     if !harness.auth.has_scope(scope) {
-      return http_error(403, "forbidden", "missing required scope", {kind: "forbidden", missing_scope: scope})
+      return http_error(
+        403,
+        "forbidden",
+        "missing required scope",
+        {kind: "missing_scope", missing_scope: scope},
+      )
+    }
+  }
+  for spec in matches {
+    if type_of(spec) != "dict" {
+      throw "require_policy: each match must be a dict"
+    }
+    let left = spec.left ?? spec.path
+    let right = spec.right ?? spec.equals
+    if left == nil || right == nil {
+      throw "require_policy: match requires left and right"
+    }
+    if (__policy_ref_needs_auth(left) || __policy_ref_needs_auth(right))
+      && !harness.auth.is_authenticated() {
+      return __policy_missing_auth()
+    }
+    let left_value = __policy_resolve_ref(left, req, ctx)
+    let right_value = __policy_resolve_ref(right, req, ctx)
+    if left_value != right_value {
+      let kind = spec.kind ?? "resource_mismatch"
+      let label = spec.label ?? "resource"
+      let message = spec.message ?? "request is not authorized for this resource"
+      return http_error(
+        403,
+        "forbidden",
+        message,
+        {kind: kind, label: label, left: __policy_ref_path(left), right: __policy_ref_path(right)},
+      )
+    }
+  }
+  return nil
+}
+
+/**
+ * Enforce a principal-kind and/or scope policy against the ambient
+ * `harness.auth` principal and request context. `opts`:
+ *   {
+ *     kinds?: [string],
+ *     scopes?: [string],
+ *     matches?: [{left, right, kind?, label?, message?}],
+ *     methods?: {selector: policy},
+ *     method_path?: string,
+ *   }
+ * `kinds` (when non-empty) requires the principal's embedder-assigned kind
+ * to be one of the listed values; `scopes` requires every listed scope to be
+ * granted. `matches` compares request/body/auth/tenant/context fields without
+ * echoing their values in denials. `methods` applies an additional policy
+ * selected by `req.method` by default, or by `method_path` for JSON-RPC-style
+ * bodies. Returns `nil` when every clause passes, otherwise an HTTP envelope
+ * the caller should return verbatim.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn require_policy(opts, req = nil, ctx = nil) {
+  if opts != nil && type_of(opts) != "dict" {
+    throw "require_policy: opts must be a dict"
+  }
+  let base = __policy_enforce_segment(opts ?? {}, req, ctx)
+  if base != nil {
+    return base
+  }
+  let methods = opts?.methods
+  if methods != nil {
+    if type_of(methods) != "dict" {
+      throw "require_policy: methods must be a dict"
+    }
+    let selector_path = opts?.method_path ?? "req.method"
+    let selector = __policy_resolve_ref(selector_path, req, ctx)
+    if selector != nil && methods[to_string(selector)] != nil {
+      let method = methods[to_string(selector)]
+      if type_of(method) != "dict" {
+        throw "require_policy: method policy must be a dict"
+      }
+      return __policy_enforce_segment(method, req, ctx)
     }
   }
   return nil

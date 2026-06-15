@@ -1487,11 +1487,11 @@ See [Harn Portal](./portal.md) for the full guide.
 
 ## harn runs
 
-Inspect persisted workflow run records.
+Inspect persisted workflow runs through stable view schemas.
 
 ```bash
-harn runs inspect .harn-runs/<run>.json
-harn runs inspect .harn-runs/<run>.json --compare baseline.json
+harn runs view --json .harn-runs/<run>.json
+harn runs view --json --session .harn-runs/
 ```
 
 ## harn replay

@@ -69,29 +69,33 @@ JSON body:
 IDEs can parse these to show a live LLM-call ledger alongside the
 debug session.
 
-## Run records
+## Run views
 
-Every `agent_loop()` or `workflow_execute()` call can produce a run record —
-a JSON file in `.harn-runs/` that captures the full execution trace including
-LLM calls, tool invocations, and intermediate results.
+Every `agent_loop()` or `workflow_execute()` call can produce a persisted run
+under `.harn-runs/`. Inspect it through the stable `harn.run_view.v1` /
+`harn.session_view.v1` projections rather than depending on private record
+fields.
 
 ```bash
 # List recent runs
 ls .harn-runs/
 
-# Inspect a run record
-harn runs inspect .harn-runs/<run-id>.json
+# Inspect a stable run view
+harn runs view --json .harn-runs/<run-id>.json
 ```
 
-The inspect command shows a structured summary: stages executed, tools called,
+The view command shows a structured summary: stages executed, tools called,
 token usage, timing, and final output.
 
 ## Comparing runs
 
-Compare a run against a baseline to identify regressions:
+Compare two stable views with your normal JSON diff tool to identify
+regressions:
 
 ```bash
-harn runs inspect .harn-runs/new.json --compare .harn-runs/old.json
+harn runs view --json .harn-runs/new.json > new.view.json
+harn runs view --json .harn-runs/old.json > old.view.json
+diff -u old.view.json new.view.json
 ```
 
 This highlights differences in tool calls, outputs, and token consumption.

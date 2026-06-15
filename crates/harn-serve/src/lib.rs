@@ -43,9 +43,9 @@ pub use adapters::acp::{
     AcpSessionPromptParams, AcpSessionPromptResult, AcpSessionReplaceInjectParams,
     AcpSessionRestoreResult, AcpWebSocketServeOptions, NoopAcpRuntimeConfigurator,
     ACP_METHOD_INITIALIZE, ACP_METHOD_SESSION_CANCEL, ACP_METHOD_SESSION_CANCEL_TOOL_CALL,
-    ACP_METHOD_SESSION_CLOSE, ACP_METHOD_SESSION_INJECT, ACP_METHOD_SESSION_NEW,
-    ACP_METHOD_SESSION_PENDING_INJECTIONS, ACP_METHOD_SESSION_PROMPT,
-    ACP_METHOD_SESSION_REPLACE_INJECT, ACP_METHOD_SESSION_REVOKE_INJECT,
+    ACP_METHOD_SESSION_CLOSE, ACP_METHOD_SESSION_INJECT, ACP_METHOD_SESSION_LOAD,
+    ACP_METHOD_SESSION_NEW, ACP_METHOD_SESSION_PENDING_INJECTIONS, ACP_METHOD_SESSION_PROMPT,
+    ACP_METHOD_SESSION_REPLACE_INJECT, ACP_METHOD_SESSION_RESUME, ACP_METHOD_SESSION_REVOKE_INJECT,
 };
 pub use adapters::api::{ApiHttpServeOptions, ApiServer, ApiServerConfig};
 pub use adapters::mcp::{
@@ -70,11 +70,12 @@ pub use core::{
     CallArguments, CallRequest, CallResponse, DispatchCore, DispatchCoreConfig, NoopVmConfigurator,
     VmConfigurator,
 };
-pub use embed::EmbeddedAgent;
+pub use embed::{EmbeddedAgent, EmbeddedAgentClient, EmbeddedAgentError, EmbeddedAgentEvent};
 pub use error::{forbidden_data_payload, forbidden_message, DispatchError};
 pub use exports::{
     emit_export_diagnostics, ExportCatalog, ExportDiagnostic, ExportedCallableKind,
-    ExportedFunction, ExportedParam, JobSpec, RetryBackoff, RetrySpec, RouteSpec, ScheduleSpec,
+    ExportedFunction, ExportedParam, JobSpec, RetryBackoff, RetrySpec, RoutePolicy, RouteSpec,
+    ScheduleSpec,
 };
 /// Install the process-lifetime shared Postgres pool registry.
 ///

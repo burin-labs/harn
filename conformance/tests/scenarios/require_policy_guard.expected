@@ -1,3 +1,7 @@
-[harn] kind deny ok
-[harn] scope deny ok
+[harn] kind missing auth ok
+[harn] scope missing auth ok
+[harn] tenant mismatch ok
+[harn] body match ok
+[harn] auth match missing auth ok
+[harn] json-rpc method policy ok
 [harn] noop allow ok

@@ -207,6 +207,76 @@ Mapping:
 - unlike the dispatch adapters, the site host **never replay-caches** — an
   HTTP server must re-run its handler on every request
 
+Route auth policies:
+
+```harn
+import { require_policy } from "std/harness/policy"
+
+@scopes("resources:write")
+@policy(kinds: "tenant", matches: "tenant owner")
+@route("POST", "/tenants/{tenant}/resources")
+pub fn update_resource(req: dict) -> dict {
+  let denial = require_policy({
+    kinds: ["tenant"],
+    scopes: ["resources:write"],
+    matches: [
+      {
+        kind: "tenant_mismatch",
+        label: "tenant",
+        left: "req.path_params.tenant",
+        right: "tenant.id",
+      },
+      {
+        kind: "resource_mismatch",
+        label: "owner",
+        left: "body.owner",
+        right: "auth.subject",
+      },
+    ],
+  }, req,)
+  if denial != nil {
+    return denial
+  }
+  return http_ok({ok: true})
+}
+```
+
+`@scopes(...)` and `@policy(kinds: "...")` are admission gates checked before
+the handler runs. `@policy(matches: "...", methods: "...")` is exported
+metadata for audits; enforce those runtime comparisons with
+`require_policy(...)` inside the handler. Path roots are `req`, `body` (JSON
+parsed from `req.body`), `auth`, `tenant`, and optional `ctx`. Denials use
+typed `details.kind` values such as `missing_auth`, `forbidden_principal_kind`,
+`missing_scope`, `tenant_mismatch`, and `resource_mismatch`, and do not echo
+compared tenant, subject, or resource ids.
+
+For JSON-RPC-shaped POST bodies, select method-specific policies from
+`body.method`:
+
+```harn
+import { require_policy } from "std/harness/policy"
+
+@policy(methods: "doc.read doc.write")
+@route("POST", "/rpc")
+pub fn rpc(req: dict) -> dict {
+  let denial = require_policy({
+    method_path: "body.method",
+    methods: {
+      "doc.read": {scopes: ["doc:read"]},
+      "doc.write": {
+        kinds: ["operator"],
+        scopes: ["doc:write"],
+        matches: [{left: "body.owner", right: "auth.subject"}],
+      },
+    },
+  }, req,)
+  if denial != nil {
+    return denial
+  }
+  return http_ok({ok: true})
+}
+```
+
 ### A2A
 
 Choose A2A when the caller wants a peer agent rather than a bag of tools.

@@ -137,7 +137,7 @@ pipeline default(task) {
     parameters: {query: {type: "string", description: "Query to search"}},
     returns: {type: "string"},
     handler: { query ->
-      let result = shell("grep -r '${query}' src/ || true")
+      let result = exec("grep", "-r", query, "src/")
       return result.stdout
     }
   })

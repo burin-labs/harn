@@ -13,6 +13,9 @@ The recipes use `harn,ignore` fences because they show full agent-loop
 topologies (handler + dispatch + transcript wiring) that need an active
 session to type-check end-to-end. Each fragment matches a conformance
 fixture under `conformance/tests/stdlib/tool_hooks/tool_hooks_*.harn`.
+They intentionally wrap a command-string tool so the preset catalogues can
+rewrite or deny shell input. Prefer argv-style `exec(...)` calls for tools
+whose interface does not require shell syntax.
 
 ## Rust agent: safe `cargo`
 

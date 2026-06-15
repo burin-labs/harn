@@ -581,11 +581,11 @@ pipeline review_branch(task) {}
 
 #[test]
 fn test_policy_attribute_is_recognized_and_validates_args() {
-    // A well-formed `@policy(kinds: ...)` is recognized (no unknown-attr
-    // warning) and clean.
+    // A well-formed `@policy(...)` is recognized (no unknown-attr warning)
+    // and clean.
     let clean = warnings(
         r#"
-@policy(kinds: "operator platform_admin")
+@policy(kinds: "operator platform_admin", matches: "tenant owner", methods: "doc.read doc.write")
 @route("POST", "/admin/x")
 fn admin_x(req) { return req }
 "#,
