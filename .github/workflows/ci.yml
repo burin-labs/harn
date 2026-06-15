@@ -108,7 +108,7 @@ jobs:
           cache-bin: false
       - name: Install cargo-nextest
         if: matrix.kind == 'test'
-        uses: taiki-e/install-action@e49978b799e49ff429d162b7a30601a569ab6538 # v2.81.1
+        uses: taiki-e/install-action@0631aa6515c7d545823c67cfae7ef4fc7f490154 # v2.81.8
         continue-on-error: true
         with:
           tool: nextest@0.9.133
@@ -337,7 +337,7 @@ jobs:
           cache-on-failure: true
           cache-bin: false
       - name: Install cargo-nextest
-        uses: taiki-e/install-action@e49978b799e49ff429d162b7a30601a569ab6538 # v2.81.1
+        uses: taiki-e/install-action@0631aa6515c7d545823c67cfae7ef4fc7f490154 # v2.81.8
         continue-on-error: true
         with:
           tool: nextest@0.9.133
@@ -603,7 +603,7 @@ jobs:
           shared-key: e2e
           cache-bin: false
       - name: Install cargo-nextest
-        uses: taiki-e/install-action@e49978b799e49ff429d162b7a30601a569ab6538 # v2.81.1
+        uses: taiki-e/install-action@0631aa6515c7d545823c67cfae7ef4fc7f490154 # v2.81.8
         with:
           tool: nextest@0.9.133
       - run: make test-e2e
