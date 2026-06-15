@@ -54,6 +54,7 @@ adapter renders it into a real `axum::Response`:
 | `http_stream(source, content_type?)`             | streamed body, `source` is a list or channel of chunks  |
 | `http_sse(source, retry_ms?)`                    | Server-Sent Events, `source` is a list or channel       |
 | `http_reply(status, body?, headers?)`            | low-level escape hatch for arbitrary 1xx-5xx codes; a `bytes` body is rendered byte-exact |
+| `http_reply_from(result)`                        | convert a `{status, body, headers, body_kind?}` record into the same tagged response envelope |
 
 Plain values returned from a handler still work — they degrade to
 `200 OK` with `Content-Type: application/json`. Untagged dicts that

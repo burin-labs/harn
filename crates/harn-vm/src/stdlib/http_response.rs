@@ -132,6 +132,94 @@ fn http_reply_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErr
     Ok(envelope(status, body_for_envelope, body_kind, headers))
 }
 
+/// Convert a host/adapter response record with `status`, `body`, `headers`,
+/// and optional `body_kind` into a tagged HTTP response envelope.
+#[harn_builtin(
+    sig = "http_reply_from(result: dict) -> dict",
+    category = "http_response"
+)]
+fn http_reply_from_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let result = args
+        .first()
+        .and_then(VmValue::as_dict)
+        .ok_or_else(|| thrown_err("http_reply_from: result must be a dict"))?;
+
+    if is_http_response_envelope(result) {
+        return Ok(VmValue::Dict(result.clone().into()));
+    }
+
+    let status = require_status(result.get("status"), "http_reply_from")?;
+    let headers = parse_headers(result.get("headers"), "http_reply_from")?;
+    let body_kind = match result.get("body_kind") {
+        None | Some(VmValue::Nil) => None,
+        Some(VmValue::String(kind)) => Some(kind.as_ref()),
+        Some(other) => {
+            return Err(thrown_err(format!(
+                "http_reply_from: body_kind must be a string (got {})",
+                other.type_name()
+            )));
+        }
+    };
+
+    match body_kind {
+        Some(BODY_KIND_NONE) => Ok(envelope(status, VmValue::Nil, BODY_KIND_NONE, headers)),
+        Some(BODY_KIND_BYTES) => {
+            let body = result
+                .get("raw_body")
+                .filter(|value| matches!(value, VmValue::Bytes(_)))
+                .or_else(|| result.get("body"))
+                .cloned()
+                .unwrap_or(VmValue::Nil);
+            match body {
+                VmValue::Bytes(_) | VmValue::Nil => {
+                    Ok(envelope(status, body, BODY_KIND_BYTES, headers))
+                }
+                other => Err(thrown_err(format!(
+                    "http_reply_from: body_kind bytes requires bytes `raw_body` or `body` (got {})",
+                    other.type_name()
+                ))),
+            }
+        }
+        Some(BODY_KIND_STREAM) => {
+            let body = result
+                .get("body")
+                .cloned()
+                .map(stream_body_chunks)
+                .unwrap_or_else(empty_list);
+            Ok(envelope(status, body, BODY_KIND_STREAM, headers))
+        }
+        Some(BODY_KIND_SSE) => {
+            let body = result
+                .get("body")
+                .cloned()
+                .map(stream_body_chunks)
+                .unwrap_or_else(empty_list);
+            Ok(envelope(status, body, BODY_KIND_SSE, headers))
+        }
+        Some(BODY_KIND_JSON) => {
+            let body = result.get("body").cloned().unwrap_or(VmValue::Nil);
+            Ok(envelope(status, body, BODY_KIND_JSON, headers))
+        }
+        _ => {
+            let body = result.get("body").cloned().unwrap_or(VmValue::Nil);
+            let args = [VmValue::Int(status), body, VmValue::dict(headers)];
+            http_reply_impl(&args, &mut String::new())
+        }
+    }
+}
+
+fn empty_list() -> VmValue {
+    VmValue::List(std::sync::Arc::new(Vec::new()))
+}
+
+fn stream_body_chunks(body: VmValue) -> VmValue {
+    match body {
+        VmValue::List(_) => body,
+        VmValue::Nil => empty_list(),
+        other => VmValue::List(std::sync::Arc::new(vec![other])),
+    }
+}
+
 #[harn_builtin(
     sig = "http_stream(source: any, content_type?: string?) -> dict",
     kind = "async",
@@ -923,6 +1011,7 @@ pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
     &HTTP_NO_CONTENT_IMPL_DEF,
     &HTTP_ERROR_IMPL_DEF,
     &HTTP_REPLY_IMPL_DEF,
+    &HTTP_REPLY_FROM_IMPL_DEF,
     &HTTP_STREAM_IMPL_DEF,
     &HTTP_SSE_IMPL_DEF,
     &HTTP_ETAG_IMPL_DEF,
@@ -1085,6 +1174,143 @@ mod tests {
             Some(BODY_KIND_BYTES)
         );
         assert!(matches!(map.get("body"), Some(VmValue::Bytes(_))));
+    }
+
+    #[test]
+    fn http_reply_from_wraps_stream_body_as_chunk_list() {
+        let result = VmValue::dict(crate::value::DictMap::from_iter([
+            ("status".to_string(), VmValue::Int(202)),
+            ("body_kind".to_string(), VmValue::string("stream")),
+            (
+                "headers".to_string(),
+                VmValue::dict(crate::value::DictMap::from_iter([(
+                    "Content-Type".to_string(),
+                    VmValue::string("text/plain"),
+                )])),
+            ),
+            ("body".to_string(), VmValue::string("queued")),
+        ]));
+
+        let response = http_reply_from_impl(&[result], &mut String::new()).unwrap();
+        let map = dict(&response);
+        assert!(matches!(map.get("status"), Some(VmValue::Int(202))));
+        assert_eq!(
+            map.get("body_kind").and_then(|v| match v {
+                VmValue::String(s) => Some(s.as_ref()),
+                _ => None,
+            }),
+            Some(BODY_KIND_STREAM)
+        );
+        let body = match map.get("body") {
+            Some(VmValue::List(items)) => items,
+            other => panic!("expected stream body chunk list, got {other:?}"),
+        };
+        assert_eq!(body.len(), 1);
+        assert_eq!(body[0].display(), "queued");
+    }
+
+    #[test]
+    fn http_reply_from_preserves_existing_stream_chunks() {
+        let chunks = VmValue::List(std::sync::Arc::new(vec![
+            VmValue::string("alpha"),
+            VmValue::string("bravo"),
+        ]));
+        let result = VmValue::dict(crate::value::DictMap::from_iter([
+            ("status".to_string(), VmValue::Int(200)),
+            ("body_kind".to_string(), VmValue::string("stream")),
+            ("body".to_string(), chunks),
+        ]));
+
+        let response = http_reply_from_impl(&[result], &mut String::new()).unwrap();
+        let map = dict(&response);
+        let body = match map.get("body") {
+            Some(VmValue::List(items)) => items,
+            other => panic!("expected stream body chunk list, got {other:?}"),
+        };
+        assert_eq!(body.len(), 2);
+        assert_eq!(body[0].display(), "alpha");
+        assert_eq!(body[1].display(), "bravo");
+    }
+
+    #[test]
+    fn http_reply_from_preserves_raw_body_for_bytes_kind() {
+        let raw = VmValue::Bytes(std::sync::Arc::new(vec![0x00, 0xff, 0xfe, 0x80]));
+        let result = VmValue::dict(crate::value::DictMap::from_iter([
+            ("status".to_string(), VmValue::Int(200)),
+            ("body_kind".to_string(), VmValue::string("bytes")),
+            ("body".to_string(), VmValue::string("<lossy>")),
+            ("raw_body".to_string(), raw),
+        ]));
+
+        let response = http_reply_from_impl(&[result], &mut String::new()).unwrap();
+        let map = dict(&response);
+        assert_eq!(
+            map.get("body_kind").and_then(|v| match v {
+                VmValue::String(s) => Some(s.as_ref()),
+                _ => None,
+            }),
+            Some(BODY_KIND_BYTES)
+        );
+        match map.get("body") {
+            Some(VmValue::Bytes(bytes)) => assert_eq!(bytes.as_ref(), &[0x00, 0xff, 0xfe, 0x80]),
+            other => panic!("expected bytes body, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn http_reply_from_rejects_non_bytes_for_bytes_kind() {
+        let result = VmValue::dict(crate::value::DictMap::from_iter([
+            ("status".to_string(), VmValue::Int(200)),
+            ("body_kind".to_string(), VmValue::string("bytes")),
+            ("body".to_string(), VmValue::string("not bytes")),
+        ]));
+
+        let err =
+            http_reply_from_impl(&[result], &mut String::new()).expect_err("expected bytes error");
+        match err {
+            VmError::Thrown(VmValue::String(text)) => {
+                assert!(text.contains("requires bytes"), "unexpected error: {text}");
+            }
+            other => panic!("unexpected error: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn http_reply_from_falls_back_to_http_reply_for_text_kind() {
+        let result = VmValue::dict(crate::value::DictMap::from_iter([
+            ("status".to_string(), VmValue::Int(200)),
+            ("body_kind".to_string(), VmValue::string("text")),
+            ("body".to_string(), VmValue::string("hello")),
+        ]));
+
+        let response = http_reply_from_impl(&[result], &mut String::new()).unwrap();
+        let map = dict(&response);
+        assert_eq!(
+            map.get("body_kind").and_then(|v| match v {
+                VmValue::String(s) => Some(s.as_ref()),
+                _ => None,
+            }),
+            Some(BODY_KIND_JSON)
+        );
+        assert_eq!(
+            map.get("body").map(VmValue::display).as_deref(),
+            Some("hello")
+        );
+    }
+
+    #[test]
+    fn http_reply_from_rejects_non_dict_result() {
+        let err = http_reply_from_impl(&[VmValue::string("nope")], &mut String::new())
+            .expect_err("expected result type error");
+        match err {
+            VmError::Thrown(VmValue::String(text)) => {
+                assert!(
+                    text.contains("result must be a dict"),
+                    "unexpected error: {text}"
+                );
+            }
+            other => panic!("unexpected error: {other:?}"),
+        }
     }
 
     #[test]
