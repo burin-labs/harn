@@ -95,7 +95,7 @@ impl ReminderProvider for TokenPressureProvider {
     }
 
     fn evaluate(&self, ctx: &ProviderContext) -> Option<ReminderSpec> {
-        let tokens_used = json_i64(&ctx.payload, "tokens_used")?;
+        let tokens_used = token_pressure_tokens_used(ctx)?;
         let context_window = token_pressure_context_window(ctx)?;
         if context_window <= 0 {
             return None;
@@ -112,7 +112,7 @@ impl ReminderProvider for TokenPressureProvider {
         };
         let percent = (ratio * 100.0).round() as i64;
         let body = format!(
-            "Token pressure {severity}: session has used about {percent}% of the context window ({tokens_used}/{context_window} tokens). Compact or summarize before continuing."
+            "Token pressure {severity}: current prompt/context is about {percent}% of the context window ({tokens_used}/{context_window} tokens). Compact or summarize before continuing."
         );
         let mut reminder = provider_reminder(body, TOKEN_PRESSURE_ID, ctx);
         reminder.tags = vec![TOKEN_PRESSURE_ID.to_string()];
@@ -1500,6 +1500,25 @@ fn token_pressure_context_window(ctx: &ProviderContext) -> Option<i64> {
         .or_else(|| model_context_window(ctx))
 }
 
+fn non_negative_i64(value: Option<i64>) -> Option<i64> {
+    value.filter(|tokens| *tokens >= 0)
+}
+
+fn token_pressure_tokens_used(ctx: &ProviderContext) -> Option<i64> {
+    if let Some(tokens) = non_negative_i64(json_i64(&ctx.payload, "context_tokens"))
+        .or_else(|| non_negative_i64(json_i64(&ctx.payload, "prompt_tokens")))
+    {
+        return Some(tokens);
+    }
+
+    if let Some(input_tokens) = non_negative_i64(json_i64(&ctx.payload, "input_tokens")) {
+        let output_tokens = non_negative_i64(json_i64(&ctx.payload, "output_tokens")).unwrap_or(0);
+        return Some(input_tokens.saturating_add(output_tokens));
+    }
+
+    non_negative_i64(json_i64(&ctx.payload, "tokens_used"))
+}
+
 fn model_context_window(ctx: &ProviderContext) -> Option<i64> {
     let model = ctx
         .payload
@@ -1777,7 +1796,7 @@ fn under_budget_pressure(ctx: &ProviderContext, config: Option<&JsonValue>) -> b
         .and_then(JsonValue::as_f64)
         .filter(|value| value.is_finite() && (0.0..=1.0).contains(value))
         .unwrap_or(PROJECT_FACTS_REFRESH_RATIO);
-    let Some(tokens_used) = json_i64(&ctx.payload, "tokens_used") else {
+    let Some(tokens_used) = token_pressure_tokens_used(ctx) else {
         return false;
     };
     let Some(window) = token_pressure_context_window(ctx) else {
@@ -1954,6 +1973,71 @@ mod tests {
         let payload_mid = json!({"tokens_used": 80, "context_window": 100});
         let mid = ctx(HookEvent::OnBudgetThreshold, payload_mid, JsonValue::Null);
         assert!(!under_budget_pressure(&mid, Some(&custom_ratio)));
+    }
+
+    #[test]
+    fn token_pressure_prefers_live_context_tokens_over_session_totals() {
+        let cumulative_only = ctx(
+            HookEvent::OnBudgetThreshold,
+            json!({"tokens_used": 500, "context_window": 100}),
+            JsonValue::Null,
+        );
+        assert!(TokenPressureProvider.evaluate(&cumulative_only).is_some());
+
+        let live_under_pressure = ctx(
+            HookEvent::OnBudgetThreshold,
+            json!({
+                "input_tokens": 40,
+                "output_tokens": 5,
+                "tokens_used": 500,
+                "context_window": 100,
+            }),
+            JsonValue::Null,
+        );
+        assert!(
+            TokenPressureProvider
+                .evaluate(&live_under_pressure)
+                .is_none(),
+            "cumulative billing/session tokens must not trigger context-pressure advice"
+        );
+
+        let live_over_pressure = ctx(
+            HookEvent::OnBudgetThreshold,
+            json!({
+                "input_tokens": 90,
+                "output_tokens": 6,
+                "tokens_used": 96,
+                "context_window": 100,
+            }),
+            JsonValue::Null,
+        );
+        let reminder = TokenPressureProvider
+            .evaluate(&live_over_pressure)
+            .expect("live prompt/context pressure should still fire");
+        assert!(reminder.body.contains("(96/100 tokens)"));
+    }
+
+    #[test]
+    fn project_facts_budget_gate_uses_live_context_tokens() {
+        let payload = json!({
+            "input_tokens": 40,
+            "output_tokens": 5,
+            "tokens_used": 500,
+            "context_window": 100,
+        });
+        let low_live_context = ctx(HookEvent::OnBudgetThreshold, payload, JsonValue::Null);
+        assert!(
+            !under_budget_pressure(&low_live_context, None),
+            "project facts refresh should not key off cumulative session token totals"
+        );
+
+        let payload = json!({
+            "prompt_tokens": 80,
+            "tokens_used": 500,
+            "context_window": 100,
+        });
+        let high_live_context = ctx(HookEvent::OnBudgetThreshold, payload, JsonValue::Null);
+        assert!(under_budget_pressure(&high_live_context, None));
     }
 
     #[test]
