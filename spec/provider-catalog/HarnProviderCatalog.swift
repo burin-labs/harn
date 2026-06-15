@@ -6547,7 +6547,7 @@ public let harnProviderCatalogJSON = #"""
       },
       "reasoning": {
         "modes": [
-          "adaptive"
+          "enabled"
         ],
         "effort_supported": false,
         "none_supported": false,
@@ -6571,7 +6571,6 @@ public let harnProviderCatalogJSON = #"""
         "tools",
         "prompt_caching",
         "thinking",
-        "extended_thinking",
         "structured_output"
       ],
       "family": "anthropic-claude",

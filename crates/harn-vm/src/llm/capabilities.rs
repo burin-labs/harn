@@ -1557,6 +1557,68 @@ mod tests {
         assert_eq!(caps.thinking_block_style, thinking_block_style);
     }
 
+    fn assert_openrouter_anthropic_runtime_parity(model: &str) {
+        let direct = lookup("anthropic", model);
+        let routed = lookup("openrouter", model);
+
+        assert_eq!(
+            routed.native_tools, direct.native_tools,
+            "{model}: native tool support should match direct Anthropic"
+        );
+        assert_eq!(
+            routed.preferred_tool_format, direct.preferred_tool_format,
+            "{model}: preferred tool format should match direct Anthropic"
+        );
+        assert_eq!(
+            routed.structured_output, direct.structured_output,
+            "{model}: structured output transport should match direct Anthropic"
+        );
+        assert_eq!(
+            routed.structured_output_mode, direct.structured_output_mode,
+            "{model}: structured output mode should match direct Anthropic"
+        );
+        assert_eq!(
+            routed.thinking_modes, direct.thinking_modes,
+            "{model}: thinking mode breakpoint should match direct Anthropic"
+        );
+        assert_eq!(
+            routed.interleaved_thinking_supported, direct.interleaved_thinking_supported,
+            "{model}: interleaved thinking support should match direct Anthropic"
+        );
+        assert_eq!(
+            routed.supports_assistant_prefill, direct.supports_assistant_prefill,
+            "{model}: assistant prefill support should match direct Anthropic"
+        );
+        assert_eq!(
+            routed.prompt_caching, direct.prompt_caching,
+            "{model}: prompt cache support should match direct Anthropic"
+        );
+        assert_eq!(
+            routed.prefers_xml_scaffolding, direct.prefers_xml_scaffolding,
+            "{model}: XML scaffolding preference should match direct Anthropic"
+        );
+        assert_eq!(
+            routed.prefers_markdown_scaffolding, direct.prefers_markdown_scaffolding,
+            "{model}: Markdown scaffolding preference should match direct Anthropic"
+        );
+        assert_eq!(
+            routed.prefers_role_developer, direct.prefers_role_developer,
+            "{model}: developer role preference should match direct Anthropic"
+        );
+        assert_eq!(
+            routed.prefers_xml_tools, direct.prefers_xml_tools,
+            "{model}: XML tool preference should match direct Anthropic"
+        );
+        assert_eq!(
+            routed.thinking_block_style, direct.thinking_block_style,
+            "{model}: thinking block style should match direct Anthropic"
+        );
+        assert_eq!(
+            routed.text_tool_wire_format_supported, direct.text_tool_wire_format_supported,
+            "{model}: text-tool fallback support should match direct Anthropic"
+        );
+    }
+
     #[test]
     fn every_catalogued_chat_model_has_explicit_tool_capabilities() {
         reset();
@@ -1762,6 +1824,23 @@ preferred_tool_format = "native"
         assert_eq!(caps.thinking_modes, vec!["enabled"]);
         assert!(!caps.interleaved_thinking_supported);
         assert!(caps.supports_assistant_prefill);
+    }
+
+    #[test]
+    fn openrouter_claude_rows_track_direct_anthropic_runtime_quirks() {
+        reset();
+        for model in [
+            "anthropic/claude-fable-5-0",
+            "anthropic/claude-mythos-5-0",
+            "anthropic/claude-haiku-4-5",
+            "anthropic/claude-haiku-4-7",
+            "anthropic/claude-sonnet-4-6",
+            "anthropic/claude-sonnet-4-7",
+            "anthropic/claude-opus-4-6",
+            "anthropic/claude-opus-4-7",
+        ] {
+            assert_openrouter_anthropic_runtime_parity(model);
+        }
     }
 
     #[test]
