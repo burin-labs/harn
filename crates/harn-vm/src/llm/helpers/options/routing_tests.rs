@@ -521,6 +521,72 @@ fn equivalent_failover_builds_catalog_backed_routing_policy() {
         .iter()
         .all(|link| link.model != "same-provider-model"));
     assert_eq!(policy.failover.max_attempts, Some(2));
+    assert!(!policy.failover.on_no_dispatch);
+
+    crate::llm_config::clear_user_overrides();
+    super::super::reset_provider_key_cache();
+}
+
+#[test]
+fn equivalent_failover_enables_no_dispatch_failover_when_requested() {
+    install_equivalent_routes();
+    let mut failover = crate::value::DictMap::new();
+    failover.insert("max_routes".to_string(), VmValue::Int(2));
+    failover.insert("on_no_dispatch".to_string(), VmValue::Bool(true));
+    let opts = extract_with_options(crate::value::DictMap::from_iter([
+        (
+            "provider".to_string(),
+            VmValue::String(std::sync::Arc::from("primary")),
+        ),
+        (
+            "model".to_string(),
+            VmValue::String(std::sync::Arc::from("primary-model")),
+        ),
+        ("equivalent_failover".to_string(), VmValue::dict(failover)),
+    ]))
+    .expect("options");
+
+    let policy = opts.routing_policy.expect("equivalent routing policy");
+    assert_eq!(policy.failover.max_attempts, Some(2));
+    assert!(policy.failover.on_no_dispatch);
+
+    crate::llm_config::clear_user_overrides();
+    super::super::reset_provider_key_cache();
+}
+
+#[test]
+fn equivalent_failover_rejects_non_bool_no_dispatch_option() {
+    install_equivalent_routes();
+    let mut failover = crate::value::DictMap::new();
+    failover.insert(
+        "on_no_dispatch".to_string(),
+        VmValue::String(std::sync::Arc::from("yes")),
+    );
+
+    let err = match extract_with_options(crate::value::DictMap::from_iter([
+        (
+            "provider".to_string(),
+            VmValue::String(std::sync::Arc::from("primary")),
+        ),
+        (
+            "model".to_string(),
+            VmValue::String(std::sync::Arc::from("primary-model")),
+        ),
+        ("equivalent_failover".to_string(), VmValue::dict(failover)),
+    ])) {
+        Ok(_) => panic!("non-bool on_no_dispatch should fail"),
+        Err(err) => err,
+    };
+
+    match err {
+        VmError::Thrown(VmValue::String(message)) => {
+            assert!(
+                message.contains("equivalent_failover.on_no_dispatch"),
+                "{message}"
+            );
+        }
+        other => panic!("expected thrown on_no_dispatch error, got {other:?}"),
+    }
 
     crate::llm_config::clear_user_overrides();
     super::super::reset_provider_key_cache();
