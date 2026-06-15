@@ -5,6 +5,7 @@ impl AcpServer {
         let session = self.sessions.get(session_id)?;
         let session_value = self.session_item_json(session_id, "live", None)?;
         Some(serde_json::json!({
+            "sessionId": session_id,
             "session": session_value,
             "modes": modes::session_mode_state(&session.current_mode_id),
             "configOptions": self.config_options_for_session(session_id, &session.current_mode_id),

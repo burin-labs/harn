@@ -194,8 +194,10 @@ let run = workflow_execute(
 
 log(run.status)
 log(run.path)
-log(run.run.stages)
 ```
+
+Use `harn runs view --json <path>` on `run.path` for the stable
+`harn.run_view.v1` projection, including stage summaries.
 
 Agent-backed stages pass `model_policy.iteration_budget` directly into the
 per-stage `agent_loop`. Treat that structured budget as the source of truth for
@@ -466,8 +468,8 @@ CLI support:
 
 ```bash
 harn portal
-harn runs inspect .harn-runs/<run>.json
-harn runs inspect .harn-runs/<run>.json --compare baseline.json
+harn runs view --json .harn-runs/<run>.json
+harn runs view --json --session .harn-runs/
 harn replay .harn-runs/<run>.json
 harn eval .harn-runs/<run>.json
 harn eval .harn-runs/

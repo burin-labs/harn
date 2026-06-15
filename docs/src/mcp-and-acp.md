@@ -593,6 +593,8 @@ The ACP server supports these JSON-RPC methods:
 | `initialize` | Handshake with capabilities |
 | `authenticate` | Authenticate the ACP connection when `authMethods` is non-empty |
 | `session/new` | Create a new session (returns session ID) |
+| `session/load` | Replay persisted session events and reattach a live in-process session |
+| `session/resume` | Resume a live or loaded session without replay notifications |
 | `session/fork` | Fork an existing session into an independent branch |
 | `session/list` | List active sessions known to the ACP adapter |
 | `session/prompt` | Send a prompt to the agent for execution |
@@ -614,6 +616,7 @@ The ACP server supports these JSON-RPC methods:
 | `harn.session_workspace_roots` | Return the live session's primary workspace anchor and mounted roots |
 | `harn.session_add_root` | Mount an additional root into the live session |
 | `harn.session_reanchor` | Replace the live session's primary workspace anchor |
+| `harn.session_view.query` | Return the stable `harn.session_view.v1` projection for a live or persisted session |
 | `harn.session_timeline.query` | Return the Harn-owned redacted session timeline snapshot |
 | `harn.session_timeline.subscribe` | Subscribe to newly appended timeline events |
 | `harn.session_timeline.unsubscribe` | Stop a timeline subscription |
@@ -723,6 +726,25 @@ session handoff envelope.
   }
 }
 ```
+
+### Stable session and run views
+
+Use `harn.session_view.query` when an ACP client needs a durable projection
+instead of private persisted run-record fields. The query accepts
+`sessionId`/`session_id` and optional `runPath`/`run_path` or `runId`/`run_id`;
+the response schema is `harn.session_view.v1`. A single persisted run can also
+be inspected as `harn.run_view.v1` with the CLI:
+
+```bash
+harn runs view --json .harn-runs/<run>.json
+harn runs view --json --session .harn-runs/
+```
+
+Rust embedders get the same facade through `EmbeddedAgentClient`:
+`start_run(...)`, `load_run(...)`, `resume_run(...)`, `send_user_input(...)`,
+`cancel_session(...)`, `subscribe_session_events(...)`, `session_view(...)`,
+and `run_view_from_path(...)` all use the ACP/server projection paths instead
+of private record parsing.
 
 ### Session timeline extension
 

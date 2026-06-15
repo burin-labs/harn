@@ -22,6 +22,12 @@ they coexist — `register_tool_hook` runs at the dispatcher around every
 tool, while `preset_run_command` is the in-tool wrapper specifically
 for `run_command`-shaped tools that take a shell command string.
 
+The examples on this page intentionally wrap a shell-command tool: the point
+is to intercept, rewrite, deny, and audit command strings before a trusted
+host executes them. For ordinary tools that do not need shell syntax, prefer
+argv-style calls such as `exec("rg", "--", pattern)` or a narrow host
+capability instead of building a shell string.
+
 The quickref companion (LLM-friendly) lives in the "Catalogue-driven
 `run_command` hooks" section of
 [`docs/llm/harn-quickref.md`](https://harnlang.com/docs/llm/harn-quickref.html).

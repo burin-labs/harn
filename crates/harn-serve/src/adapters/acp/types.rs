@@ -10,6 +10,8 @@ use serde::{Deserialize, Serialize};
 
 pub const ACP_METHOD_INITIALIZE: &str = "initialize";
 pub const ACP_METHOD_SESSION_NEW: &str = "session/new";
+pub const ACP_METHOD_SESSION_LOAD: &str = "session/load";
+pub const ACP_METHOD_SESSION_RESUME: &str = "session/resume";
 pub const ACP_METHOD_SESSION_PROMPT: &str = "session/prompt";
 pub const ACP_METHOD_SESSION_CANCEL: &str = "session/cancel";
 pub const ACP_METHOD_SESSION_CANCEL_TOOL_CALL: &str = "session/cancel_tool_call";
@@ -100,6 +102,14 @@ impl AcpJsonRpcRequest<AcpSessionPromptParams> {
 }
 
 impl AcpJsonRpcRequest<AcpSessionIdParams> {
+    pub fn session_load(id: impl Into<AcpJsonRpcId>, params: AcpSessionIdParams) -> Self {
+        Self::new(id, ACP_METHOD_SESSION_LOAD, params)
+    }
+
+    pub fn session_resume(id: impl Into<AcpJsonRpcId>, params: AcpSessionIdParams) -> Self {
+        Self::new(id, ACP_METHOD_SESSION_RESUME, params)
+    }
+
     pub fn session_cancel(id: impl Into<AcpJsonRpcId>, params: AcpSessionIdParams) -> Self {
         Self::new(id, ACP_METHOD_SESSION_CANCEL, params)
     }

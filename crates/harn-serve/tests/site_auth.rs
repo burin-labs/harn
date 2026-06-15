@@ -32,6 +32,8 @@ use tower::ServiceExt;
 /// route that also reports the bound tenant, and a route that asks the
 /// embedder's host-call bridge for the ambient auth context.
 const SITE_SCRIPT: &str = r#"
+import { require_policy } from "std/harness/policy"
+
 @route("GET", "/public")
 pub fn open_route(req: dict) -> dict {
   return http_ok({ "ok": true })
@@ -71,6 +73,65 @@ pub fn whoami_route(harness: Harness, req: dict) -> dict {
 @policy(kinds: "operator")
 @route("POST", "/operator/action")
 pub fn operator_action(req: dict) -> dict {
+  return http_ok({ "ok": true })
+}
+
+@scopes("resources:write")
+@policy(kinds: "tenant", matches: "tenant owner")
+@route("POST", "/tenants/{tenant}/resources")
+pub fn resource_policy_route(req: dict) -> dict {
+  let denial = require_policy({
+    kinds: ["tenant"],
+    scopes: ["resources:write"],
+    matches: [
+      {
+        kind: "tenant_mismatch",
+        label: "tenant",
+        left: "req.path_params.tenant",
+        right: "tenant.id",
+        message: "tenant does not match route"
+      },
+      {
+        kind: "resource_mismatch",
+        label: "owner",
+        left: "body.owner",
+        right: "auth.subject",
+        message: "principal does not own resource"
+      }
+    ]
+  }, req)
+  if denial != nil {
+    return denial
+  }
+  return http_ok({ "ok": true })
+}
+
+@policy(methods: "doc.read doc.write")
+@route("POST", "/rpc")
+pub fn rpc_policy_route(req: dict) -> dict {
+  let denial = require_policy({
+    method_path: "body.method",
+    methods: {
+      "doc.read": {
+        scopes: ["doc:read"]
+      },
+      "doc.write": {
+        kinds: ["operator"],
+        scopes: ["doc:write"],
+        matches: [
+          {
+            kind: "resource_mismatch",
+            label: "doc",
+            left: "body.owner",
+            right: "auth.subject"
+          }
+        ]
+      }
+    }
+  }, req)
+  if denial != nil {
+    return denial
+  }
   return http_ok({ "ok": true })
 }
 "#;
@@ -214,6 +275,20 @@ async fn request(router: Router, method: &str, uri: &str) -> Response {
                 .method(method)
                 .uri(uri)
                 .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap()
+}
+
+async fn request_json(router: Router, method: &str, uri: &str, body: Value) -> Response {
+    router
+        .oneshot(
+            Request::builder()
+                .method(method)
+                .uri(uri)
+                .header("content-type", "application/json")
+                .body(Body::from(body.to_string()))
                 .unwrap(),
         )
         .await
@@ -567,4 +642,176 @@ async fn policy_kinds_denies_unclassified_principal() {
     let (status, body) = read_json(request(router, "POST", "/operator/action").await).await;
     assert_eq!(status, StatusCode::FORBIDDEN);
     assert_eq!(body["details"]["kind"], "forbidden_principal_kind");
+}
+
+/// Runtime route policies can compare the matched path tenant and JSON body
+/// owner against the ambient tenant/auth principal without leaking either
+/// side's value in the denial envelope.
+#[tokio::test]
+async fn require_policy_admits_matching_tenant_resource_owner() {
+    let hook = Arc::new(AllowAuth {
+        tenant: Some("acme"),
+        scopes: &["resources:write"],
+        subject: Some("user_1"),
+        kind: Some("tenant"),
+        ..Default::default()
+    });
+    let (_dir, router) = site_router(Some(hook), None);
+    let (status, body) = read_json(
+        request_json(
+            router,
+            "POST",
+            "/tenants/acme/resources",
+            json!({ "owner": "user_1" }),
+        )
+        .await,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["ok"], true);
+}
+
+#[tokio::test]
+async fn require_policy_denies_tenant_mismatch_without_echoing_values() {
+    let hook = Arc::new(AllowAuth {
+        tenant: Some("globex"),
+        scopes: &["resources:write"],
+        subject: Some("user_1"),
+        kind: Some("tenant"),
+        ..Default::default()
+    });
+    let (_dir, router) = site_router(Some(hook), None);
+    let (status, body) = read_json(
+        request_json(
+            router,
+            "POST",
+            "/tenants/acme/resources",
+            json!({ "owner": "user_1" }),
+        )
+        .await,
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    assert_eq!(body["details"]["kind"], "tenant_mismatch");
+    let rendered = body.to_string();
+    assert!(
+        !rendered.contains("globex") && !rendered.contains("acme"),
+        "denial leaked tenant values: {rendered}"
+    );
+}
+
+#[tokio::test]
+async fn require_policy_denies_resource_owner_mismatch() {
+    let hook = Arc::new(AllowAuth {
+        tenant: Some("acme"),
+        scopes: &["resources:write"],
+        subject: Some("user_2"),
+        kind: Some("tenant"),
+        ..Default::default()
+    });
+    let (_dir, router) = site_router(Some(hook), None);
+    let (status, body) = read_json(
+        request_json(
+            router,
+            "POST",
+            "/tenants/acme/resources",
+            json!({ "owner": "user_1" }),
+        )
+        .await,
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    assert_eq!(body["details"]["kind"], "resource_mismatch");
+    let rendered = body.to_string();
+    assert!(
+        !rendered.contains("user_1") && !rendered.contains("user_2"),
+        "denial leaked owner values: {rendered}"
+    );
+}
+
+#[tokio::test]
+async fn require_policy_json_rpc_method_read_uses_body_method_scope() {
+    let hook = Arc::new(AllowAuth {
+        scopes: &["doc:read"],
+        subject: Some("doc_1"),
+        kind: Some("tenant"),
+        ..Default::default()
+    });
+    let (_dir, router) = site_router(Some(hook), None);
+    let (status, body) = read_json(
+        request_json(
+            router,
+            "POST",
+            "/rpc",
+            json!({ "method": "doc.read", "owner": "doc_1" }),
+        )
+        .await,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["ok"], true);
+}
+
+#[tokio::test]
+async fn require_policy_json_rpc_method_write_requires_write_scope_and_operator_kind() {
+    let missing_scope = Arc::new(AllowAuth {
+        scopes: &["doc:read"],
+        subject: Some("doc_1"),
+        kind: Some("operator"),
+        ..Default::default()
+    });
+    let (_dir, router) = site_router(Some(missing_scope), None);
+    let (status, body) = read_json(
+        request_json(
+            router,
+            "POST",
+            "/rpc",
+            json!({ "method": "doc.write", "owner": "doc_1" }),
+        )
+        .await,
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    assert_eq!(body["details"]["kind"], "missing_scope");
+    assert_eq!(body["details"]["missing_scope"], "doc:write");
+
+    let wrong_kind = Arc::new(AllowAuth {
+        scopes: &["doc:write"],
+        subject: Some("doc_1"),
+        kind: Some("tenant"),
+        ..Default::default()
+    });
+    let (_dir, router) = site_router(Some(wrong_kind), None);
+    let (status, body) = read_json(
+        request_json(
+            router,
+            "POST",
+            "/rpc",
+            json!({ "method": "doc.write", "owner": "doc_1" }),
+        )
+        .await,
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    assert_eq!(body["details"]["kind"], "forbidden_principal_kind");
+
+    let allowed = Arc::new(AllowAuth {
+        scopes: &["doc:write"],
+        subject: Some("doc_1"),
+        kind: Some("operator"),
+        ..Default::default()
+    });
+    let (_dir, router) = site_router(Some(allowed), None);
+    let (status, body) = read_json(
+        request_json(
+            router,
+            "POST",
+            "/rpc",
+            json!({ "method": "doc.write", "owner": "doc_1" }),
+        )
+        .await,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["ok"], true);
 }

@@ -240,14 +240,14 @@ impl TypeChecker {
         }
     }
 
-    /// `@policy(kinds: "operator team_admin")` — a declarative route auth
-    /// policy that composes with `@scopes`. Today the only key is `kinds`:
-    /// a whitespace-separated list of allowed principal kinds the dispatch
-    /// must match (see `harness.auth.kind()`). Empty or non-string values
-    /// warn; the route still mounts (the host keeps any defense-in-depth
-    /// check) but the declared guard is ignored for the bad argument.
+    /// `@policy(kinds: "operator", matches: "tenant", methods: "doc.read")`
+    /// — declarative route auth-policy metadata that composes with `@scopes`.
+    /// `kinds` is enforced by `harn serve site`; `matches` and `methods`
+    /// catalog runtime guards implemented with `std/harness/policy`.
+    /// Empty or non-string values warn; the route still mounts but the bad
+    /// argument is ignored.
     pub(super) fn validate_policy_args(&mut self, attr: &Attribute) {
-        const KNOWN_KEYS: &[&str] = &["kinds"];
+        const KNOWN_KEYS: &[&str] = &["kinds", "matches", "methods"];
         if attr.args.is_empty() {
             self.warning_at(
                 Code::InvalidAttributeArgument,

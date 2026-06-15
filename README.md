@@ -143,7 +143,8 @@ tool read(path: string) -> string {
 
 tool search(pattern: string) -> string {
   description "Search project files"
-  shell("rg " + pattern)
+  let result = exec("rg", "--", pattern)
+  result.stdout + result.stderr
 }
 
 tool edit(path: string, content: string) -> string {
@@ -151,9 +152,10 @@ tool edit(path: string, content: string) -> string {
   write_file(path, content)
 }
 
-tool run(command: string) -> string {
-  description "Run a command"
-  shell(command)
+tool test(filter: string) -> string {
+  description "Run a targeted cargo test filter"
+  let result = exec("cargo", "test", filter)
+  result.stdout + result.stderr
 }
 
 let result = agent_loop(
@@ -518,11 +520,12 @@ let run = workflow_execute(
 
 log(run.status)
 log(run.path)
-log(run.run.stages)
 ```
 
-`verify` nodes can either run an explicit command as shown above or use an
-agent/LLM mode when verification should stay provider-driven.
+Use `harn runs view --json <path>` on `run.path` for the stable
+`harn.run_view.v1` projection, including stage summaries. `verify` nodes can
+either run an explicit command as shown above or use an agent/LLM mode when
+verification should stay provider-driven.
 
 ## Transcript and artifact model
 
@@ -566,11 +569,12 @@ harn serve acp --api-key "$HARN_ACP_KEY" agent.harn
 HARN_PROFILE_JSON=/tmp/acp.ndjson harn serve acp agent.harn
 ```
 
-Inspect persisted run records:
+Inspect stable run/session views:
 
 ```bash
 harn portal
-harn runs inspect .harn-runs/<run>.json
+harn runs view --json .harn-runs/<run>.json
+harn runs view --json --session .harn-runs/
 harn replay .harn-runs/<run>.json
 harn eval .harn-runs/<run>.json
 ```

@@ -78,44 +78,74 @@ take effect in builds that do **not** pull in the full CLI.
 
 ## Start an embedded agent
 
-`EmbeddedAgent` owns the required worker thread and current-thread Tokio
-runtime. It returns typed control handles plus the ACP JSON-RPC channels:
+`EmbeddedAgentClient` owns the required worker thread, current-thread Tokio
+runtime, ACP JSON-RPC channels, and event demux. Use it when a Rust host wants
+the stable lifecycle facade instead of hand-routing JSON-RPC lines:
 
 ```rust
 #![recursion_limit = "256"]
 
 use harn_serve::{
-    AcpJsonRpcRequest, AcpServerConfig, AcpSessionNewParams, EmbeddedAgent,
+    AcpServerConfig, AcpSessionNewParams, AcpSessionPromptParams,
+    EmbeddedAgentClient, EmbeddedAgentEvent,
 };
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let mut agent = EmbeddedAgent::spawn(AcpServerConfig::new(None));
-    let requests = agent.requests();
-    let _responses = agent
-        .take_responses()
-        .expect("responses are single-consumer");
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let mut agent = EmbeddedAgentClient::spawn(AcpServerConfig::new(None)).await?;
+    let session = agent.start_run(AcpSessionNewParams::cwd(".")).await?;
+    let view = agent.session_view(session.session_id.clone()).await?;
+    assert_eq!(view.schema, "harn.session_view.v1");
 
-    let request = AcpJsonRpcRequest::session_new(
-        1,
-        AcpSessionNewParams::cwd("."),
-    )
-    .into_json_value()?;
-    if requests.send(request).is_err() {
-        return Err(std::io::Error::other("ACP worker stopped").into());
+    let _prompt_id = agent.begin_user_input(AcpSessionPromptParams::text(
+        session.session_id,
+        "Summarize this workspace.",
+    ))?;
+    loop {
+        match agent.next_event().await? {
+            EmbeddedAgentEvent::HostRequest { id, method, params, .. } => {
+                // Answer approval/auth/capability callbacks through the same
+                // JSON-RPC channel. Shape `result` to the callback method.
+                let result = approve_callback(&method, params)?;
+                agent.respond_to_host_request(id, result)?;
+            }
+            EmbeddedAgentEvent::SessionUpdate { update, .. } => {
+                render_update(update);
+            }
+            EmbeddedAgentEvent::RequestCompleted { result, .. } => {
+                let _prompt_result = result;
+                break;
+            }
+            EmbeddedAgentEvent::RequestFailed { error, .. } => {
+                return Err(std::io::Error::other(error.message).into());
+            }
+            _ => {}
+        }
     }
 
     agent.shutdown();
-    if agent.join().is_err() {
-        return Err(std::io::Error::other("ACP worker panicked").into());
-    }
+    agent.join()?;
     Ok(())
 }
+
+# fn approve_callback(
+#     _method: &str,
+#     _params: serde_json::Value,
+# ) -> Result<serde_json::Value, Box<dyn std::error::Error>> {
+#     Ok(serde_json::json!({}))
+# }
+# fn render_update(_update: serde_json::Value) {}
 ```
 
 The ACP channel server is `!Send` because it owns a `LocalSet` and uses
-`spawn_local`. `EmbeddedAgent` keeps that detail out of the host: the server
-future is built and driven entirely on the dedicated worker thread, while the
-host keeps `Send` channels and an `AcpChannelHandle`.
+`spawn_local`. `EmbeddedAgentClient` keeps that detail out of the host: the
+server future is built and driven entirely on the dedicated worker thread,
+while the host gets typed lifecycle calls, `harn.session_view.v1` /
+`harn.run_view.v1` helpers, and a single event stream. Use
+`EmbeddedAgentClient::load_run(...)` / `resume_run(...)` to reattach persisted
+sessions, `subscribe_session_events(...)` for live timeline updates, and
+`run_view_from_path(...)` to inspect a persisted run without reading private
+record internals.
 
 ## Send typed ACP requests
 

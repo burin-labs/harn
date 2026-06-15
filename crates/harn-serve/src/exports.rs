@@ -22,21 +22,24 @@ pub enum ExportedCallableKind {
     Pipeline,
 }
 
-/// Declarative route auth policy declared via `@policy(...)`, composing
-/// with the `@scopes` requirement rather than replacing it. Today it
-/// carries the set of allowed principal kinds (matched against
-/// `harness.auth.kind()` at admission); a route with a non-empty
-/// `allowed_kinds` admits only a principal whose kind is in the set.
-/// Surfaced in the export catalog so audit tooling can see which routes
-/// declare a principal-kind guard, and enforced by the `harn serve site`
-/// admission layer after the scope check. The host keeps any
-/// defense-in-depth Rust check during migration (the issue's
-/// non-replacement rule).
+/// Declarative route auth-policy metadata declared via `@policy(...)`,
+/// composing with the `@scopes` requirement rather than replacing it.
+/// `allowed_kinds` is enforced by the `harn serve site` admission layer;
+/// `match_labels` and `method_guards` are exported for audit tooling that
+/// needs to confirm a handler declares resource/tenant/JSON-RPC method
+/// guards implemented by `std/harness/policy.require_policy(...)`.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct RoutePolicy {
     /// Principal kinds permitted to invoke the route (e.g. `"operator"`,
     /// `"tenant"`). Empty means the policy imposes no kind restriction.
     pub allowed_kinds: BTreeSet<String>,
+    /// Runtime match labels this route declares (e.g. `"tenant"` or
+    /// `"owner"`). The `.harn` handler enforces the comparison with
+    /// `require_policy`; the catalog surfaces the labels for reviewers.
+    pub match_labels: BTreeSet<String>,
+    /// Method-specific runtime guard names this route declares (e.g.
+    /// `"doc.read"` / `"doc.write"` for JSON-RPC bodies).
+    pub method_guards: BTreeSet<String>,
 }
 
 impl RoutePolicy {
@@ -44,6 +47,8 @@ impl RoutePolicy {
     /// a `@policy` that parsed to nothing effective back to `None`.
     pub fn is_empty(&self) -> bool {
         self.allowed_kinds.is_empty()
+            && self.match_labels.is_empty()
+            && self.method_guards.is_empty()
     }
 }
 
@@ -586,15 +591,16 @@ fn scopes_from_attributes(
 
 /// Parse `@policy(...)` declarations into a [`RoutePolicy`].
 ///
-/// Today the only supported argument is `kinds: "operator team_admin"` — a
-/// whitespace-separated string of allowed principal kinds, unioned across
-/// repeated `@policy` attributes and repeated `kinds:` arguments. Any other
-/// argument shape (unknown key, positional, or non-string value) is dropped
-/// with a [`POLICY_BAD_ARGS`] diagnostic, leaving the route's principal-kind
-/// guard incomplete — mirroring how a dropped `@scopes` literal leaves the
-/// route less restricted. Returns `None` when no `@policy` is present, or
-/// when every declaration parsed to nothing effective (so the catalog's
-/// `policy` field means "has an effective policy").
+/// Supported arguments are whitespace-separated string values:
+/// `kinds`, `matches`, and `methods`. `kinds` is enforced at admission;
+/// the others are stable audit metadata for runtime `require_policy`
+/// guards. Any other argument shape (unknown key, positional, or
+/// non-string value) is dropped with a [`POLICY_BAD_ARGS`] diagnostic,
+/// leaving the route's cataloged policy incomplete — mirroring how a
+/// dropped `@scopes` literal leaves the route less restricted. Returns
+/// `None` when no `@policy` is present, or when every declaration parsed to
+/// nothing effective (so the catalog's `policy` field means "has an
+/// effective policy").
 fn policy_from_attributes(
     attrs: &[Attribute],
     fn_name: &str,
@@ -606,19 +612,23 @@ fn policy_from_attributes(
             continue;
         }
         for arg in &attr.args {
-            match (arg.name.as_deref(), &arg.value.node) {
-                (Some("kinds"), Node::StringLiteral(value) | Node::RawStringLiteral(value)) => {
-                    for kind in value.split_whitespace() {
-                        policy.allowed_kinds.insert(kind.to_string());
-                    }
+            let target = match arg.name.as_deref() {
+                Some("kinds") => Some(&mut policy.allowed_kinds),
+                Some("matches") => Some(&mut policy.match_labels),
+                Some("methods") => Some(&mut policy.method_guards),
+                _ => None,
+            };
+            match (target, &arg.value.node) {
+                (Some(target), Node::StringLiteral(value) | Node::RawStringLiteral(value)) => {
+                    target.extend(value.split_whitespace().map(str::to_string));
                 }
                 _ => diagnostics.push(ExportDiagnostic {
                     code: POLICY_BAD_ARGS,
                     line: arg.span.line,
                     message: format!(
-                        "`@policy` on `{fn_name}` accepts only `kinds: \"...\"` (a whitespace-separated \
-                         string of allowed principal kinds); dropping an unrecognized argument leaves \
-                         the route's principal-kind guard incomplete"
+                        "`@policy` on `{fn_name}` accepts only string-valued `kinds`, `matches`, \
+                         and `methods` arguments; dropping an unrecognized argument leaves the \
+                         route's policy catalog incomplete"
                     ),
                 }),
             }
@@ -1652,7 +1662,7 @@ pub fn list_sessions() -> string { return "ok" }
         let catalog = catalog_from_source(
             r#"
 @scopes("admin:dlq:write")
-@policy(kinds: "operator platform_admin")
+@policy(kinds: "operator platform_admin", matches: "tenant owner", methods: "doc.read doc.write")
 @route("POST", "/admin/dlq/replay")
 pub fn replay_dlq(req: dict) -> dict { return req }
 "#,
@@ -1671,6 +1681,14 @@ pub fn replay_dlq(req: dict) -> dict { return req }
         assert_eq!(
             policy.allowed_kinds,
             BTreeSet::from(["operator".to_string(), "platform_admin".to_string()])
+        );
+        assert_eq!(
+            policy.match_labels,
+            BTreeSet::from(["owner".to_string(), "tenant".to_string()])
+        );
+        assert_eq!(
+            policy.method_guards,
+            BTreeSet::from(["doc.read".to_string(), "doc.write".to_string()])
         );
     }
 
