@@ -2,9 +2,9 @@ use crate::value::VmDictExt;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
-use rusqlite::{params, Connection, TransactionBehavior};
+use rusqlite::{params, Connection, ErrorCode, TransactionBehavior};
 
 use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
 use crate::stdlib::options::{non_negative_millis_from_value, ErrorKind};
@@ -14,6 +14,8 @@ use crate::vm::Vm;
 
 const DEFAULT_WINDOW_MS: u64 = 60_000;
 const DEFAULT_BUSY_TIMEOUT_MS: u64 = 5_000;
+const SQLITE_BUSY_RETRY_INITIAL_MS: u64 = 2;
+const SQLITE_BUSY_RETRY_MAX_MS: u64 = 50;
 const MAX_SLEEP_MS: u64 = 60_000;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -244,6 +246,86 @@ fn try_reserve_once(
     buckets: &[RateBucket],
     now_ms: i64,
 ) -> Result<ReserveAttempt, VmError> {
+    try_reserve_once_with_options(
+        path,
+        buckets,
+        now_ms,
+        DEFAULT_BUSY_TIMEOUT_MS,
+        DEFAULT_BUSY_TIMEOUT_MS,
+        || {},
+    )
+}
+
+fn try_reserve_once_with_options<F>(
+    path: &Path,
+    buckets: &[RateBucket],
+    now_ms: i64,
+    sqlite_busy_timeout_ms: u64,
+    retry_timeout_ms: u64,
+    mut on_busy: F,
+) -> Result<ReserveAttempt, VmError>
+where
+    F: FnMut(),
+{
+    let started = Instant::now();
+    let mut backoff = Duration::from_millis(SQLITE_BUSY_RETRY_INITIAL_MS);
+    let retry_timeout = Duration::from_millis(retry_timeout_ms);
+    loop {
+        match try_reserve_once_inner(path, buckets, now_ms, sqlite_busy_timeout_ms) {
+            Ok(attempt) => return Ok(attempt),
+            Err(error) if error.is_sqlite_busy_or_locked() && started.elapsed() < retry_timeout => {
+                on_busy();
+                std::thread::sleep(backoff);
+                backoff = (backoff * 2).min(Duration::from_millis(SQLITE_BUSY_RETRY_MAX_MS));
+            }
+            Err(error) => return Err(error.into_vm_error()),
+        }
+    }
+}
+
+#[derive(Debug)]
+enum ReserveOnceError {
+    Vm(VmError),
+    Sqlite(rusqlite::Error),
+}
+
+impl ReserveOnceError {
+    fn is_sqlite_busy_or_locked(&self) -> bool {
+        let Self::Sqlite(rusqlite::Error::SqliteFailure(error, _)) = self else {
+            return false;
+        };
+        matches!(
+            error.code,
+            ErrorCode::DatabaseBusy | ErrorCode::DatabaseLocked
+        )
+    }
+
+    fn into_vm_error(self) -> VmError {
+        match self {
+            Self::Vm(error) => error,
+            Self::Sqlite(error) => sql_error(error),
+        }
+    }
+}
+
+impl From<rusqlite::Error> for ReserveOnceError {
+    fn from(error: rusqlite::Error) -> Self {
+        Self::Sqlite(error)
+    }
+}
+
+impl From<VmError> for ReserveOnceError {
+    fn from(error: VmError) -> Self {
+        Self::Vm(error)
+    }
+}
+
+fn try_reserve_once_inner(
+    path: &Path,
+    buckets: &[RateBucket],
+    now_ms: i64,
+    sqlite_busy_timeout_ms: u64,
+) -> Result<ReserveAttempt, ReserveOnceError> {
     if let Some(parent) = path
         .parent()
         .filter(|parent| !parent.as_os_str().is_empty())
@@ -256,9 +338,17 @@ fn try_reserve_once(
         })?;
     }
 
-    let mut conn = Connection::open(path).map_err(sql_error)?;
-    conn.busy_timeout(Duration::from_millis(DEFAULT_BUSY_TIMEOUT_MS))
-        .map_err(sql_error)?;
+    let mut conn = Connection::open(path)?;
+    // Set busy_timeout BEFORE the WAL pragma so the WAL-mode promotion waits
+    // out a transient SQLITE_BUSY from another session's writer instead of
+    // failing fast. WAL lets concurrent sessions sharing this project's
+    // rate-limit DB serialize on the write lock for at most busy_timeout
+    // rather than throwing "database is locked" up into the agent loop.
+    // Matches the proven event-log setup (crates/harn-vm/src/event_log/sqlite.rs).
+    conn.busy_timeout(Duration::from_millis(sqlite_busy_timeout_ms))
+        .map_err(ReserveOnceError::Sqlite)?;
+    conn.pragma_update(None, "journal_mode", "WAL")?;
+    conn.pragma_update(None, "synchronous", "NORMAL")?;
     conn.execute_batch(
         "CREATE TABLE IF NOT EXISTS durable_rate_limit_entries (
             bucket_key TEXT NOT NULL,
@@ -268,11 +358,9 @@ fn try_reserve_once(
          CREATE INDEX IF NOT EXISTS durable_rate_limit_entries_key_ts_idx
             ON durable_rate_limit_entries(bucket_key, ts_ms);",
     )
-    .map_err(sql_error)?;
+    .map_err(ReserveOnceError::Sqlite)?;
 
-    let tx = conn
-        .transaction_with_behavior(TransactionBehavior::Immediate)
-        .map_err(sql_error)?;
+    let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
     let mut retry_after_ms = 0_u64;
     for bucket in buckets {
         prune_bucket(&tx, bucket, now_ms)?;
@@ -285,7 +373,7 @@ fn try_reserve_once(
     }
 
     if retry_after_ms > 0 {
-        tx.commit().map_err(sql_error)?;
+        tx.commit()?;
         return Ok(ReserveAttempt {
             acquired: false,
             retry_after_ms,
@@ -305,9 +393,9 @@ fn try_reserve_once(
                 i64::try_from(bucket.charged_units).unwrap_or(i64::MAX)
             ],
         )
-        .map_err(sql_error)?;
+        .map_err(ReserveOnceError::Sqlite)?;
     }
-    tx.commit().map_err(sql_error)?;
+    tx.commit()?;
     Ok(ReserveAttempt {
         acquired: true,
         retry_after_ms: 0,
@@ -390,13 +478,13 @@ fn prune_bucket(
     tx: &rusqlite::Transaction<'_>,
     bucket: &RateBucket,
     now_ms: i64,
-) -> Result<(), VmError> {
+) -> Result<(), ReserveOnceError> {
     let cutoff_ms = now_ms.saturating_sub(u64_to_i64(bucket.window_ms));
     tx.execute(
         "DELETE FROM durable_rate_limit_entries WHERE bucket_key = ?1 AND ts_ms <= ?2",
         params![&bucket.key, cutoff_ms],
     )
-    .map_err(sql_error)?;
+    .map_err(ReserveOnceError::Sqlite)?;
     Ok(())
 }
 
@@ -404,16 +492,14 @@ fn bucket_wait_ms(
     tx: &rusqlite::Transaction<'_>,
     bucket: &RateBucket,
     now_ms: i64,
-) -> Result<Option<u64>, VmError> {
-    let usage: i64 = tx
-        .query_row(
-            "SELECT COALESCE(SUM(units), 0)
+) -> Result<Option<u64>, ReserveOnceError> {
+    let usage: i64 = tx.query_row(
+        "SELECT COALESCE(SUM(units), 0)
              FROM durable_rate_limit_entries
              WHERE bucket_key = ?1",
-            params![&bucket.key],
-            |row| row.get(0),
-        )
-        .map_err(sql_error)?;
+        params![&bucket.key],
+        |row| row.get(0),
+    )?;
     let usage = usage.max(0) as u64;
     if usage.saturating_add(bucket.charged_units) <= bucket.limit {
         return Ok(None);
@@ -422,19 +508,17 @@ fn bucket_wait_ms(
     let needed = usage
         .saturating_add(bucket.charged_units)
         .saturating_sub(bucket.limit);
-    let mut stmt = tx
-        .prepare(
-            "SELECT ts_ms, units
+    let mut stmt = tx.prepare(
+        "SELECT ts_ms, units
              FROM durable_rate_limit_entries
              WHERE bucket_key = ?1
              ORDER BY ts_ms ASC",
-        )
-        .map_err(sql_error)?;
-    let mut rows = stmt.query(params![&bucket.key]).map_err(sql_error)?;
+    )?;
+    let mut rows = stmt.query(params![&bucket.key])?;
     let mut freed = 0_u64;
-    while let Some(row) = rows.next().map_err(sql_error)? {
-        let ts_ms: i64 = row.get(0).map_err(sql_error)?;
-        let units: i64 = row.get(1).map_err(sql_error)?;
+    while let Some(row) = rows.next()? {
+        let ts_ms: i64 = row.get(0)?;
+        let units: i64 = row.get(1)?;
         freed = freed.saturating_add(units.max(0) as u64);
         if freed >= needed {
             let expiry_ms = ts_ms.saturating_add(u64_to_i64(bucket.window_ms));

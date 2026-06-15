@@ -1,8 +1,12 @@
 use super::*;
 use crate::{compile_source, register_vm_stdlib, reset_thread_local_state, Vm};
-use rusqlite::{params, Connection};
+use rusqlite::{params, Connection, TransactionBehavior};
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Barrier};
+use std::sync::{mpsc, Arc, Barrier};
+use std::time::Duration;
+
+const TRANSIENT_LOCK_TEST_BUSY_TIMEOUT_MS: u64 = 25;
+const TRANSIENT_LOCK_SIGNAL_TIMEOUT: Duration = Duration::from_secs(2);
 
 async fn run_harn(base_dir: &std::path::Path, source: &str) -> Vec<String> {
     reset_thread_local_state();
@@ -58,6 +62,29 @@ fn reserve_blocks_until_window_expires() {
         try_reserve_once(&path, &buckets, 11_000)
             .expect("expired reserve")
             .acquired
+    );
+}
+
+// Multi-session hardening: the durable rate-limit DB must open in WAL mode so
+// several sessions sharing one project's limiter serialize on the write lock
+// (bounded by busy_timeout) instead of throwing "database is locked" into the
+// agent loop.
+#[test]
+fn rate_limit_db_uses_wal_journal_mode() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let path = temp.path().join("rate.sqlite");
+    let buckets = vec![bucket("provider:rpm", 10, 1, 1_000)];
+    // Create the DB (and apply its pragmas) via the production reserve path.
+    try_reserve_once(&path, &buckets, 1_000).expect("reserve");
+
+    let conn = Connection::open(&path).expect("open sqlite");
+    let mode: String = conn
+        .query_row("PRAGMA journal_mode", [], |row| row.get(0))
+        .expect("read journal_mode");
+    assert_eq!(
+        mode.to_lowercase(),
+        "wal",
+        "rate-limit sqlite must be WAL for cross-session concurrency"
     );
 }
 
@@ -127,6 +154,53 @@ fn concurrent_threads_do_not_over_reserve_shared_bucket() {
     assert_eq!(
         attempts.iter().filter(|attempt| !attempt.acquired).count(),
         7
+    );
+    assert_eq!(usage(&path, "provider:rpm"), 1);
+}
+
+#[test]
+fn transient_sqlite_write_lock_retries_instead_of_erroring() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let path = temp.path().join("rate.sqlite");
+    let setup = vec![bucket("setup", 1, 0, 60_000)];
+    try_reserve_once(&path, &setup, 1_000).expect("create schema");
+
+    let mut locker = Connection::open(&path).expect("open sqlite");
+    locker
+        .busy_timeout(Duration::from_millis(DEFAULT_BUSY_TIMEOUT_MS))
+        .expect("busy timeout");
+    let tx = locker
+        .transaction_with_behavior(TransactionBehavior::Immediate)
+        .expect("hold write lock");
+
+    let path_for_thread = path.clone();
+    let buckets = vec![bucket("provider:rpm", 1, 1, 60_000)];
+    let (busy_tx, busy_rx) = mpsc::channel();
+    let handle = std::thread::spawn(move || {
+        try_reserve_once_with_options(
+            &path_for_thread,
+            &buckets,
+            1_000,
+            TRANSIENT_LOCK_TEST_BUSY_TIMEOUT_MS,
+            DEFAULT_BUSY_TIMEOUT_MS,
+            move || {
+                let _ = busy_tx.send(());
+            },
+        )
+    });
+
+    busy_rx
+        .recv_timeout(TRANSIENT_LOCK_SIGNAL_TIMEOUT)
+        .expect("worker should observe the transient sqlite lock before retrying");
+    drop(tx);
+
+    let attempt = handle
+        .join()
+        .expect("thread")
+        .expect("reserve should retry the transient sqlite lock");
+    assert!(
+        attempt.acquired,
+        "reservation succeeds once the write lock clears"
     );
     assert_eq!(usage(&path, "provider:rpm"), 1);
 }
