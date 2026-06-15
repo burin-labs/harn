@@ -23,6 +23,18 @@ This script:
 - reuses the repo-root portal bootstrap path for `npm run portal:*` commands
 - runs `cargo check --workspace`
 
+Heavy setup phases are fingerprinted under `.codex/dev-setup/`, so rerunning
+the script in an already prepared checkout is normally a fast no-op. Set
+`HARN_DEV_SETUP_FORCE=1` to refresh every phase.
+
+Codex app-managed worktrees use the tracked local environment config at
+`.codex/environments/environment.toml`, which delegates to this same setup
+script.
+Claude Code uses the tracked project settings at `.claude/settings.json` to run
+`scripts/claude-dev-setup-once.sh` on new sessions. The hook delegates to this
+same setup script once per dependency fingerprint and writes logs under
+`.claude/dev-setup/`.
+
 ## Running checks
 
 Before submitting a PR, run the full check suite:

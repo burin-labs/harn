@@ -41,6 +41,7 @@ conformance/tests/**/.harn/test-timings.json
 
 # Shared Claude skill definitions are tracked; local Claude state is not.
 .claude/*
+!.claude/settings.json
 !.claude/commands/
 !.claude/skills/
 !.claude/skills/harn-scripting/
@@ -50,8 +51,12 @@ conformance/tests/**/.harn/test-timings.json
 # so it lives only in burin-code's local `.claude/commands/`.
 .claude/commands/merge-captain.md
 
-# Codex worktree environment files are per-worktree local state.
-.codex/environments/
+# Codex local environment config is reviewed repo setup; other generated
+# environment files remain local state.
+.codex/*
+!.codex/environments/
+.codex/environments/*
+!.codex/environments/environment.toml
 
 # JavaScript, portal, and website artifacts.
 node_modules/
