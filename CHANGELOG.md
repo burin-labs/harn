@@ -8,6 +8,20 @@ highlights live in [CHANGELOG-pre-0.6.md](CHANGELOG-pre-0.6.md).
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.8.116
+
+### Added
+
+- **HTTP response stdlib.** Added `http_reply_from(result)` to convert host or
+  adapter response records into tagged HTTP response envelopes while preserving
+  headers, status, bytes, stream, SSE, JSON, and no-body semantics (#3400).
+
+### Fixed
+
+- Fixed token-pressure reminders to use the current prompt/context token count
+  when available instead of cumulative session token totals, preventing false
+  "compact or summarize" warnings in long agent loops.
+
 ## v0.8.115
 
 ### Fixed
