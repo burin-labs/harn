@@ -6283,7 +6283,7 @@ export const harnProviderCatalog: HarnProviderCatalog = {
       },
       "reasoning": {
         "modes": [
-          "adaptive"
+          "enabled"
         ],
         "effort_supported": false,
         "none_supported": false,
@@ -6307,7 +6307,6 @@ export const harnProviderCatalog: HarnProviderCatalog = {
         "tools",
         "prompt_caching",
         "thinking",
-        "extended_thinking",
         "structured_output"
       ],
       "family": "anthropic-claude",

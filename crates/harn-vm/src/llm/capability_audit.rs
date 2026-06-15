@@ -26,6 +26,12 @@
 //!     (materialized to `provider.order` + `allow_fallbacks:false`). Without a
 //!     pin the route can silently land on a sketchy upstream.
 //!
+//!   * **native-tool declaration contradictions** — a row that prefers the
+//!     native tool-call wire format, or declares native tool-choice modes, must
+//!     also explicitly enable `native_tools`. Otherwise downstream request
+//!     builders see mutually incompatible capability facts and harness authors
+//!     get provider-specific surprises instead of one normalized toolchain.
+//!
 //! Both checks are driven entirely by capability-row fields, so adding a new
 //! footgun route is a data edit (set the flag / forget the pin) rather than a
 //! code change — and forgetting the pin trips this gate.
@@ -144,6 +150,45 @@ pub fn audit_capabilities(file: &CapabilitiesFile) -> CapabilityAuditReport {
                             .to_string(),
                     });
                 }
+            }
+
+            // Footgun 3: native tool declaration contradictions. These fields
+            // describe native tool-call request shape and must not be set on a
+            // text-tool-only row.
+            if rule
+                .preferred_tool_format
+                .as_deref()
+                .map(|format| format.eq_ignore_ascii_case("native"))
+                .unwrap_or(false)
+                && !rule.native_tools.unwrap_or(false)
+            {
+                report.footguns.push(CapabilityFootgun {
+                    provider: provider.clone(),
+                    model_match: rule.model_match.clone(),
+                    message: "declares preferred_tool_format = \"native\" without \
+                        native_tools = true. Native tool format is only coherent \
+                        for rows that enable native tool calls; either set \
+                        native_tools = true or choose a text-channel tool format."
+                        .to_string(),
+                });
+            }
+
+            if rule
+                .allowed_tool_choice_modes
+                .as_ref()
+                .map(|modes| !modes.is_empty())
+                .unwrap_or(false)
+                && !rule.native_tools.unwrap_or(false)
+            {
+                report.footguns.push(CapabilityFootgun {
+                    provider: provider.clone(),
+                    model_match: rule.model_match.clone(),
+                    message: "declares allowed_tool_choice_modes while native_tools is \
+                        not true. Tool-choice modes are native request-shape \
+                        capabilities; enable native_tools or remove the native \
+                        tool-choice declaration."
+                        .to_string(),
+                });
             }
         }
     }
@@ -276,5 +321,38 @@ native_tools = true
 "#,
         );
         assert!(report.is_clean(), "{}", report.render());
+    }
+
+    #[test]
+    fn flags_native_tool_format_without_native_tools() {
+        let report = audit_toml(
+            r#"
+[[provider.someprov]]
+model_match = "some-model"
+native_tools = false
+preferred_tool_format = "native"
+"#,
+        );
+        assert_eq!(report.footguns.len(), 1, "{}", report.render());
+        assert!(report.footguns[0]
+            .message
+            .contains("preferred_tool_format = \"native\""));
+    }
+
+    #[test]
+    fn flags_tool_choice_modes_without_native_tools() {
+        let report = audit_toml(
+            r#"
+[[provider.someprov]]
+model_match = "some-model"
+native_tools = false
+preferred_tool_format = "text"
+allowed_tool_choice_modes = ["auto", "none"]
+"#,
+        );
+        assert_eq!(report.footguns.len(), 1, "{}", report.render());
+        assert!(report.footguns[0]
+            .message
+            .contains("allowed_tool_choice_modes"));
     }
 }

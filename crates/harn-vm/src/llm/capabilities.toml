@@ -1699,6 +1699,60 @@ thinking_block_style = "inline"
 # back in for `openrouter:anthropic/claude-*` so native tools, prompt
 # caching, and the right preferred-format defaults all flow through.
 [[provider.openrouter]]
+model_match = "anthropic/claude-fable-*"
+native_tools = true
+preferred_tool_format = "native"
+prompt_caching = true
+cache_breakpoint_style = "top_level"
+structured_output = "tool_use"
+thinking_modes = ["adaptive"]
+interleaved_thinking_supported = true
+text_tool_wire_format_supported = true
+prefers_xml_scaffolding = true
+prefers_markdown_scaffolding = false
+structured_output_mode = "xml_tagged"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = true
+thinking_block_style = "thinking_blocks"
+
+[[provider.openrouter]]
+model_match = "anthropic/claude-mythos-*"
+native_tools = true
+preferred_tool_format = "native"
+prompt_caching = true
+cache_breakpoint_style = "top_level"
+structured_output = "tool_use"
+thinking_modes = ["adaptive"]
+interleaved_thinking_supported = true
+text_tool_wire_format_supported = true
+prefers_xml_scaffolding = true
+prefers_markdown_scaffolding = false
+structured_output_mode = "xml_tagged"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = true
+thinking_block_style = "thinking_blocks"
+
+[[provider.openrouter]]
+model_match = "anthropic/claude-haiku-*"
+version_min = [4, 7]
+native_tools = true
+preferred_tool_format = "native"
+prompt_caching = true
+cache_breakpoint_style = "top_level"
+structured_output = "tool_use"
+thinking_modes = ["adaptive"]
+text_tool_wire_format_supported = true
+prefers_xml_scaffolding = true
+prefers_markdown_scaffolding = false
+structured_output_mode = "xml_tagged"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = true
+thinking_block_style = "thinking_blocks"
+
+[[provider.openrouter]]
 model_match = "anthropic/claude-haiku-*"
 version_min = [4, 5]
 native_tools = true
@@ -1718,13 +1772,50 @@ thinking_block_style = "thinking_blocks"
 
 [[provider.openrouter]]
 model_match = "anthropic/claude-sonnet-*"
-version_min = [4, 6]
+version_min = [4, 7]
 native_tools = true
 preferred_tool_format = "native"
 prompt_caching = true
 cache_breakpoint_style = "top_level"
 structured_output = "tool_use"
 thinking_modes = ["adaptive"]
+text_tool_wire_format_supported = true
+prefers_xml_scaffolding = true
+prefers_markdown_scaffolding = false
+structured_output_mode = "xml_tagged"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = true
+thinking_block_style = "thinking_blocks"
+
+[[provider.openrouter]]
+model_match = "anthropic/claude-sonnet-*"
+version_min = [4, 6]
+native_tools = true
+preferred_tool_format = "native"
+prompt_caching = true
+cache_breakpoint_style = "top_level"
+structured_output = "tool_use"
+thinking_modes = ["enabled"]
+text_tool_wire_format_supported = true
+prefers_xml_scaffolding = true
+prefers_markdown_scaffolding = false
+structured_output_mode = "xml_tagged"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = true
+thinking_block_style = "thinking_blocks"
+
+[[provider.openrouter]]
+model_match = "anthropic/claude-opus-*"
+version_min = [4, 7]
+native_tools = true
+preferred_tool_format = "native"
+prompt_caching = true
+cache_breakpoint_style = "top_level"
+structured_output = "tool_use"
+thinking_modes = ["adaptive"]
+interleaved_thinking_supported = true
 text_tool_wire_format_supported = true
 prefers_xml_scaffolding = true
 prefers_markdown_scaffolding = false
@@ -1742,7 +1833,8 @@ preferred_tool_format = "native"
 prompt_caching = true
 cache_breakpoint_style = "top_level"
 structured_output = "tool_use"
-thinking_modes = ["adaptive"]
+thinking_modes = ["enabled"]
+interleaved_thinking_supported = true
 text_tool_wire_format_supported = true
 prefers_xml_scaffolding = true
 prefers_markdown_scaffolding = false
