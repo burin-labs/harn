@@ -7,6 +7,7 @@
 pub use harn_clock as clock;
 
 pub mod a2a;
+pub mod actor_chain;
 pub mod agent_events;
 pub mod agent_sessions;
 pub mod atomic_io;
@@ -133,6 +134,7 @@ pub mod waitpoints;
 pub mod workspace_anchor;
 pub mod workspace_path;
 
+pub use actor_chain::{ActorChain, ActorChainError, Principal};
 pub use builtin_id::BuiltinId;
 pub use call_budget::{
     charge_mcp_call, charge_pg_query, install_mcp_call_budget, install_pg_query_budget,
