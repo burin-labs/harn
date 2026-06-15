@@ -1239,7 +1239,7 @@ mod tests {
             ("status".to_string(), VmValue::Int(200)),
             ("body_kind".to_string(), VmValue::string("bytes")),
             ("body".to_string(), VmValue::string("<lossy>")),
-            ("raw_body".to_string(), raw.clone()),
+            ("raw_body".to_string(), raw),
         ]));
 
         let response = http_reply_from_impl(&[result], &mut String::new()).unwrap();
