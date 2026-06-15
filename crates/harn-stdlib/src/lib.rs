@@ -1207,13 +1207,12 @@ fn matching_paren_len(input: &str) -> Option<usize> {
     for (offset, ch) in input.char_indices() {
         match ch {
             '(' | '[' | '{' => depth += 1,
-            ')' => {
+            ')' | ']' | '}' => {
                 depth = depth.saturating_sub(1);
                 if depth == 0 {
                     return Some(offset);
                 }
             }
-            ']' | '}' => depth = depth.saturating_sub(1),
             _ => {}
         }
     }
@@ -1245,7 +1244,8 @@ mod tests {
 
     use super::{
         entrypoint_modules, find_cli_script, get_stdlib_prompt_asset, get_stdlib_source,
-        public_functions_for_module, STDLIB_CLI_SCRIPTS, STDLIB_PROMPT_ASSETS, STDLIB_SOURCES,
+        matching_paren_len, parse_public_function_line, public_functions_for_module,
+        STDLIB_CLI_SCRIPTS, STDLIB_PROMPT_ASSETS, STDLIB_SOURCES,
     };
 
     #[test]
@@ -1582,5 +1582,30 @@ mod tests {
         ] {
             assert!(entries.contains(&entry), "{entry:?} should be declared");
         }
+    }
+
+    #[test]
+    fn matching_paren_len_closes_on_every_bracket_kind() {
+        // Each closer kind must terminate the scan once depth returns to zero,
+        // mirroring the symmetric opener arm and `split_top_level_params`.
+        assert_eq!(matching_paren_len("a, b)"), Some(4));
+        assert_eq!(matching_paren_len("x: [int])"), Some(8));
+        assert_eq!(matching_paren_len("x: {a: int})"), Some(11));
+        // A top-level `]`/`}` is the matching close for the consumed opener and
+        // must return rather than scanning to the end and yielding `None`.
+        assert_eq!(matching_paren_len("x]"), Some(1));
+        assert_eq!(matching_paren_len("x}"), Some(1));
+        assert_eq!(matching_paren_len("unterminated"), None);
+    }
+
+    #[test]
+    fn parse_public_function_line_handles_record_typed_params() {
+        let parsed =
+            parse_public_function_line("pub fn configure(opts: {retries: int}) -> bool", None)
+                .expect("signature with a record-typed parameter should parse");
+        assert_eq!(parsed.name, "configure");
+        assert_eq!(parsed.signature, "configure(opts: {retries: int}) -> bool");
+        assert_eq!(parsed.total_params, 1);
+        assert_eq!(parsed.required_params, 1);
     }
 }
