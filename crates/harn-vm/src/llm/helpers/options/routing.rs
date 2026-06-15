@@ -192,6 +192,7 @@ pub(super) fn parse_equivalent_failover_option(
 
     let mut enabled = true;
     let mut max_routes = DEFAULT_EQUIVALENT_FAILOVER_MAX_ROUTES;
+    let mut on_no_dispatch = false;
     match raw {
         VmValue::Nil | VmValue::Bool(false) => return Ok(None),
         VmValue::Bool(true) => {}
@@ -204,6 +205,20 @@ pub(super) fn parse_equivalent_failover_option(
                         return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
                             format!(
                                 "equivalent_failover.enabled: expected bool, got {}",
+                                other.type_name()
+                            ),
+                        ))));
+                    }
+                };
+            }
+            if let Some(value) = dict.get("on_no_dispatch") {
+                on_no_dispatch = match value {
+                    VmValue::Nil => false,
+                    VmValue::Bool(value) => *value,
+                    other => {
+                        return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+                            format!(
+                                "equivalent_failover.on_no_dispatch: expected bool, got {}",
                                 other.type_name()
                             ),
                         ))));
@@ -244,7 +259,10 @@ pub(super) fn parse_equivalent_failover_option(
     }
 
     Ok(crate::llm::routing::build_equivalent_failover_policy(
-        provider, model, max_routes,
+        provider,
+        model,
+        max_routes,
+        on_no_dispatch,
     ))
 }
 

@@ -46,6 +46,7 @@ pub(crate) fn build_equivalent_failover_policy(
     provider: &str,
     model: &str,
     max_routes: usize,
+    on_no_dispatch: bool,
 ) -> Option<Arc<RoutingPolicyConfig>> {
     if max_routes < 2 {
         return None;
@@ -92,6 +93,7 @@ pub(crate) fn build_equivalent_failover_policy(
     Some(Arc::new(RoutingPolicyConfig {
         failover: FailoverRules {
             max_attempts: Some(chain.len()),
+            on_no_dispatch,
             ..FailoverRules::default()
         },
         latency: LatencyRules::default(),
@@ -167,6 +169,10 @@ pub(crate) struct FailoverRules {
     pub on_status: Vec<u16>,
     pub on_timeout_ms: Option<u64>,
     pub on_error_kinds: Vec<String>,
+    /// Opt-in for billed no-dispatch upstream contract violations. Kept out
+    /// of default failover because these errors are already retried once by
+    /// `observed_llm_call` before routing sees the exhausted error.
+    pub on_no_dispatch: bool,
     pub max_attempts: Option<usize>,
 }
 
@@ -486,6 +492,7 @@ fn parse_failover(value: Option<&VmValue>) -> Result<FailoverRules, VmError> {
         on_status: parse_status_list(&dict, "on_status")?,
         on_timeout_ms: parse_pos_u64(&dict, "on_timeout_ms")?,
         on_error_kinds: parse_string_list(&dict, "on_error_kinds")?,
+        on_no_dispatch: false,
         max_attempts: parse_pos_usize(&dict, "max_attempts")?,
     })
 }
@@ -700,6 +707,9 @@ fn failover_value(failover: &FailoverRules) -> VmValue {
     if let Some(ms) = failover.on_timeout_ms {
         dict.insert("on_timeout_ms".to_string(), VmValue::Int(ms as i64));
     }
+    if failover.on_no_dispatch {
+        dict.insert("on_no_dispatch".to_string(), VmValue::Bool(true));
+    }
     if let Some(max) = failover.max_attempts {
         dict.insert("max_attempts".to_string(), VmValue::Int(max as i64));
     }
@@ -906,6 +916,10 @@ fn matches_failover(rules: &FailoverRules, error: &VmError) -> (bool, RoutingErr
         status,
     };
 
+    if rules.on_no_dispatch && is_no_dispatch_contract_violation(&snapshot.message) {
+        return (true, snapshot);
+    }
+
     if let Some(code) = status {
         if rules.on_status.contains(&code) {
             return (true, snapshot);
@@ -972,6 +986,14 @@ fn matches_failover(rules: &FailoverRules, error: &VmError) -> (bool, RoutingErr
     }
 
     (false, snapshot)
+}
+
+fn is_no_dispatch_contract_violation(message: &str) -> bool {
+    let lower = message.to_ascii_lowercase();
+    lower.contains("returned billed output")
+        && lower.contains("completion_tokens=")
+        && lower.contains("no dispatchable tool call or answer")
+        && lower.contains("upstream contract violation")
 }
 
 fn extract_status_code(error: &VmError) -> Option<u16> {
@@ -2112,6 +2134,62 @@ mod tests {
         };
         let (eligible, _) = matches_failover(&rules, &err);
         assert!(eligible);
+    }
+
+    #[test]
+    fn no_dispatch_contract_violation_does_not_failover_by_default() {
+        let rules = FailoverRules::default();
+        let err = VmError::Runtime(
+            "provider openrouter model qwen/qwen3.6-35b-a3b returned billed output \
+             (completion_tokens=342) with no dispatchable tool call or answer \
+             (upstream contract violation): the model finished cleanly"
+                .to_string(),
+        );
+
+        let (eligible, _) = matches_failover(&rules, &err);
+
+        assert!(!eligible);
+    }
+
+    #[test]
+    fn no_dispatch_contract_violation_can_opt_into_failover() {
+        let rules = FailoverRules {
+            on_no_dispatch: true,
+            ..Default::default()
+        };
+        let err = VmError::Runtime(
+            "provider openrouter model qwen/qwen3.6-35b-a3b returned billed output \
+             (completion_tokens=342) with no dispatchable tool call or answer \
+             (upstream contract violation): the model finished cleanly"
+                .to_string(),
+        );
+
+        let (eligible, snap) = matches_failover(&rules, &err);
+
+        assert!(eligible);
+        assert!(snap.message.contains("upstream contract violation"));
+    }
+
+    #[test]
+    fn no_dispatch_matcher_requires_billed_completion_token_contract_shape() {
+        let rules = FailoverRules {
+            on_no_dispatch: true,
+            ..Default::default()
+        };
+        let cases = [
+            "returned billed output with no dispatchable tool call or answer \
+             (upstream contract violation)",
+            "returned billed output (completion_tokens=12) with no answer \
+             (upstream contract violation)",
+            "returned billed output (completion_tokens=12) with no dispatchable tool call or answer",
+            "completion_tokens=12 with no dispatchable tool call or answer \
+             (upstream contract violation)",
+        ];
+
+        for message in cases {
+            let (eligible, _) = matches_failover(&rules, &VmError::Runtime(message.to_string()));
+            assert!(!eligible, "message should not be eligible: {message}");
+        }
     }
 
     #[test]
