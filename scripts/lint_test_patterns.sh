@@ -426,6 +426,10 @@ NON_TEST_WALL_CLOCK_ALLOWLIST=(
   "crates/harn-vm/src/a2a/mod.rs"
   "crates/harn-vm/src/agent_events/sinks.rs"
   "crates/harn-vm/src/agent_sessions.rs"
+  # Durable rate limiting retries real SQLite writer-lock contention and bounds
+  # wall-clock backoff with host monotonic time; VM clock injection would not
+  # model the blocking rusqlite calls it is defending.
+  "crates/harn-vm/src/durable_rate_limit.rs"
   "crates/harn-vm/src/connectors/a2a_push/mod.rs"
   "crates/harn-vm/src/connectors/harn_module.rs"
   "crates/harn-vm/src/connectors/shared.rs"
