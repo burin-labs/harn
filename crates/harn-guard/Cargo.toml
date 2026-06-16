@@ -20,7 +20,7 @@ thiserror = "2"
 # default binary never links an ONNX runtime or a tokenizer. `ort` downloads a
 # prebuilt ONNX Runtime at build time (pyke CDN); `tokenizers` loads the model's
 # `tokenizer.json`. Both are off by default and never built in CI.
-ort = { version = "=2.0.0-rc.10", optional = true, default-features = false, features = [
+ort = { version = "=2.0.0-rc.12", optional = true, default-features = false, features = [
     "download-binaries",
 ] }
 tokenizers = { version = "0.23", optional = true, default-features = false, features = [
