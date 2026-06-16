@@ -33,8 +33,8 @@ impl TypeChecker {
                 "deprecated" | "test" | "complexity" | "acp_tool" | "acp_skill" | "invariant"
                 | "deterministic" | "semantic" | "archivist" | "retroactive" | "persona"
                 | "step" | "trigger" | "handoff" | "budget" | "command" | "serial" | "heavy"
-                | "scopes" | "policy" | "route" | "stream" | "job" | "schedule" | "queue"
-                | "retry" => {}
+                | "scopes" | "policy" | "route" | "stream" | "raw" | "job" | "schedule"
+                | "queue" | "retry" => {}
                 other => {
                     self.warning_at(
                         Code::UnknownAttribute,

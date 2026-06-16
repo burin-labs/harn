@@ -646,6 +646,23 @@ fn events(req) { return req }
 }
 
 #[test]
+fn test_raw_route_attribute_is_recognized() {
+    let warns = warnings(
+        r#"
+@raw
+@route("POST", "/hooks")
+fn hooks(req) { return req }
+"#,
+    );
+    assert!(
+        warns
+            .iter()
+            .all(|w| !w.contains("unknown attribute") && !w.contains("@raw")),
+        "raw route attribute should not warn as unknown: {warns:?}"
+    );
+}
+
+#[test]
 fn test_command_attribute_warns_on_function_decls() {
     let warns = warnings(
         r#"
