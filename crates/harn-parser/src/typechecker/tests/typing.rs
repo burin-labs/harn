@@ -629,6 +629,23 @@ fn admin_x(req) { return req }
 }
 
 #[test]
+fn test_stream_route_attribute_is_recognized() {
+    let warns = warnings(
+        r#"
+@stream
+@route("GET", "/events")
+fn events(req) { return req }
+"#,
+    );
+    assert!(
+        warns
+            .iter()
+            .all(|w| !w.contains("unknown attribute") && !w.contains("@stream")),
+        "stream route attribute should not warn as unknown: {warns:?}"
+    );
+}
+
+#[test]
 fn test_command_attribute_warns_on_function_decls() {
     let warns = warnings(
         r#"
