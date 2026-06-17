@@ -14,12 +14,15 @@ stage
 manual
 true
 ship_approval
+approval
 stage
 command
 cargo
+command_result
 stage
 4000
 6
+summary
 join
 verify
 read_fact

@@ -112,6 +112,10 @@ harn test tests/
 harn portal
 ```
 
+The `agent` template creates an `agent/` app layout with instructions,
+skills, tools, subagents, channels, sandbox, and schedules folders wired
+through the existing Harn agent runtime.
+
 Remote MCP OAuth:
 
 ```bash

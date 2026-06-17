@@ -230,7 +230,10 @@ harn doctor
 ```
 
 This creates a directory with `harn.toml` (project config) and starter files
-for the selected template. Run it with:
+for the selected template. The `agent` template uses an opinionated `agent/`
+layout: `agent/instructions.md`, `agent/app.harn`, `agent/skills/`, and
+convention folders for tools, subagents, channels, sandbox policy, and durable
+schedules. Run it with:
 
 ```bash
 harn run main.harn

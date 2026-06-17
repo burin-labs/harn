@@ -1019,6 +1019,10 @@ harn new package my-lib
 the default quick-start flow and `new` when you want the template choice to be
 explicit.
 
+The `agent` template creates an `agent/` app layout with `instructions.md`,
+`app.harn`, local skills, and convention folders for tools, subagents,
+channels, sandbox policy, and schedules.
+
 ## harn tool
 
 Scaffold Harn-native custom tool packages.

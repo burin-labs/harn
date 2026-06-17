@@ -1,3 +1,4 @@
+import { clear_host_mocks, mock_host_response } from "std/testing"
 import {
   workflow_classify_stage_outcome,
   workflow_evaluate_condition,
@@ -78,4 +79,53 @@ pipeline default() {
   __io_println(static_escalation.result.text)
   __io_println(static_escalation.artifacts[0].data.queue)
   __io_println(static_escalation.branch)
+  clear_host_mocks()
+  mock_host_response("hitl", "approval", {approved: true, reviewer: "lead", reason: "ready"})
+  let static_gate = workflow_prepare_static_stage(
+    {
+      node_id: "gate",
+      node: {
+        kind: "stage",
+        mode: "manual",
+        metadata: {human_gate: true, approval_id: "ship", approval_prompt: "Approve ship"},
+      },
+      artifacts: [{id: "input", kind: "plan", text: "ship plan"}],
+    },
+  )
+  __io_println(static_gate.branch)
+  __io_println(static_gate.artifacts[0].data.approval_id)
+  __io_println(static_gate.artifacts[0].data.approved)
+  let argv = if platform() == "windows" {
+    ["cmd", "/C", "echo|set /p=command-ok"]
+  } else {
+    ["printf", "command-ok"]
+  }
+  let static_command = workflow_prepare_static_stage(
+    {
+      node_id: "cmd",
+      node: {kind: "stage", mode: "command", metadata: {command_tool: "run", command_args: argv}},
+      artifacts: [{id: "input", kind: "plan", text: "ship plan"}],
+    },
+  )
+  __io_println(static_command.branch)
+  __io_println(static_command.result.ok)
+  __io_println(contains(static_command.result.text, "command-ok"))
+  __io_println(static_command.artifacts[0].kind)
+  let static_compact = workflow_prepare_static_stage(
+    {
+      node_id: "compact",
+      node: {
+        kind: "stage",
+        mode: "compact",
+        metadata: {compact_preserve_recent: 1},
+        auto_compact: {token_threshold: 1},
+        output_contract: {output_kinds: ["context_summary"]},
+      },
+      artifacts: [{id: "a", kind: "summary", text: "first"}, {id: "b", kind: "summary", text: "second"}],
+    },
+  )
+  __io_println(static_compact.branch)
+  __io_println(static_compact.artifacts[0].kind)
+  __io_println(contains(static_compact.artifacts[0].text, "auto-compacted"))
+  __io_println(static_compact.artifacts[0].data.compact_options.keep_last)
 }
