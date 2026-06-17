@@ -8,6 +8,44 @@ highlights live in [CHANGELOG-pre-0.6.md](CHANGELOG-pre-0.6.md).
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.8.117
+
+### Added
+
+- Threaded RFC 8693 actor chains through agent-session context and exposed them with `agent_session_actor_chain(id?)`.
+
+### Changed
+
+- **ACP websocket control attribution now references `ActorChain` (#3334).**
+  Forwarded controls and control-outcome audit events keep the legacy
+  `clientId`/`connectionId`/`role`/`source` fields while carrying the canonical
+  RFC 8693 actor chain for downstream provenance.
+
+### Fixed
+
+- Resume interactive HTTP MCP tool calls after a mid-loop OAuth 401 once the host
+  completes authorization, while headless runs now fail with a clear auth error
+  instead of hanging.
+- **`harn check` now recognizes `@stream` route attributes (#3403).** Stream
+  routes no longer emit an `unknown attribute @stream` warning during static
+  checking.
+- **Route attribute checking now recognizes `@raw` (#3404).** Static
+  typechecking no longer reports declaration-only raw HTTP routes as unknown
+  attributes.
+- **Hostlib command artifacts now expire stale temp directories.** Command output
+  artifact creation now performs a throttled best-effort sweep of old
+  `harn-command-*` temp directories while preserving fresh artifacts, live-PID
+  artifacts, malformed names, and symlinks.
+- **JSONL agent event logs are now line-durable during live runs.** The flat
+  `JsonlEventSink` flushes after each appended event so replay/eval consumers
+  can read terminal tail records such as `iteration_end`, `typed_checkpoint`,
+  and `judge_decision` before the sink is dropped.
+- **Harn target-dir cleanup now recognizes nested Codex worktrees.** The
+  `prune_stale_targets.sh` helper scans bounded nested repo roots such as
+  `$HOME/.codex/worktrees` and uses portable mtimes, so per-worktree Cargo
+  targets are kept or pruned based on the live worktree set instead of only
+  direct children of `$HOME/projects`.
+
 ## v0.8.116
 
 ### Added
