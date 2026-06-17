@@ -1,5 +1,7 @@
 use super::*;
 
+const MCP_AUTH_COMPLETION_TIMEOUT: std::time::Duration = std::time::Duration::from_mins(10);
+
 pub(crate) async fn stdio_call_raw(
     inner: &mut StdioMcpClientInner,
     server_name: &str,
@@ -208,7 +210,11 @@ pub(crate) async fn send_http_request(
     params: serde_json::Value,
     id: Option<u64>,
 ) -> Result<serde_json::Value, VmError> {
-    for attempt in 0..2 {
+    let mut legacy_session_retry_used = false;
+    let mut auth_retry_used = false;
+    let mut protocol_version_retry_used = false;
+    loop {
+        let auth_completion_rx = crate::mcp_oauth::subscribe_authorization_completions();
         let response = send_http_request_once(inner, method, params.clone(), id).await?;
 
         let status = response.status().as_u16();
@@ -229,8 +235,9 @@ pub(crate) async fn send_http_request(
             && status == 404
             && inner.session_id.is_some()
             && method != "initialize"
-            && attempt == 0
+            && !legacy_session_retry_used
         {
+            legacy_session_retry_used = true;
             inner.session_id = None;
             inner.abort_get_stream();
             reinitialize_http_client(inner).await?;
@@ -239,9 +246,16 @@ pub(crate) async fn send_http_request(
 
         if status == 401 {
             emit_mcp_auth_required_event(server_name, &inner.url, &headers);
-            return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
-                "MCP authorization required",
-            ))));
+            if auth_retry_used {
+                return Err(mcp_auth_required_error(
+                    server_name,
+                    &inner.url,
+                    "server still returned 401 after authorization completed",
+                ));
+            }
+            auth_retry_used = true;
+            wait_for_http_mcp_authorization(inner, server_name, auth_completion_rx).await?;
+            continue;
         }
 
         let body = response
@@ -279,8 +293,9 @@ pub(crate) async fn send_http_request(
         };
 
         if maybe_retry_unsupported_protocol(inner.protocol_mode, &mut inner.protocol_version, &msg)
-            && attempt == 0
+            && !protocol_version_retry_used
         {
+            protocol_version_retry_used = true;
             continue;
         }
 
@@ -290,8 +305,49 @@ pub(crate) async fn send_http_request(
         }
         return Ok(msg);
     }
+}
 
-    Err(VmError::Runtime("MCP HTTP request failed".into()))
+async fn wait_for_http_mcp_authorization(
+    inner: &mut HttpMcpClientInner,
+    server_name: &str,
+    auth_completion_rx: tokio::sync::broadcast::Receiver<crate::mcp_oauth::StoredMcpToken>,
+) -> Result<(), VmError> {
+    if crate::llm::current_agent_session_id().is_none() {
+        return Err(mcp_auth_required_error(
+            server_name,
+            &inner.url,
+            "no active agent session is available to surface an authorization prompt",
+        ));
+    }
+    if crate::llm::current_host_bridge().is_none() {
+        return Err(mcp_auth_required_error(
+            server_name,
+            &inner.url,
+            "no interactive host is available to complete OAuth",
+        ));
+    }
+
+    let resource = crate::mcp_auth::canonical_resource_indicator(&inner.url)
+        .unwrap_or_else(|_| inner.url.clone());
+    let token = crate::mcp_oauth::wait_for_authorization_completion(
+        &resource,
+        MCP_AUTH_COMPLETION_TIMEOUT,
+        auth_completion_rx,
+    )
+    .await
+    .map_err(|error| mcp_auth_required_error(server_name, &inner.url, &error))?;
+    inner.auth_token = Some(token.access_token);
+    inner.abort_get_stream();
+    Ok(())
+}
+
+fn mcp_auth_required_error(server_name: &str, server_url: &str, reason: &str) -> VmError {
+    let resource = crate::mcp_auth::canonical_resource_indicator(server_url)
+        .unwrap_or_else(|_| server_url.to_string());
+    VmError::CategorizedError {
+        category: crate::value::ErrorCategory::Auth,
+        message: format!("MCP authorization required for {server_name} ({resource}): {reason}"),
+    }
 }
 
 pub(crate) async fn send_http_request_once(

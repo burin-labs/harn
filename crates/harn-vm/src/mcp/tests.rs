@@ -2,12 +2,41 @@ use super::*;
 use crate::http::framing::{http_content_length_from_headers, TEST_HTTP_MAX_BODY_BYTES};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, oneshot};
 
 #[derive(Debug)]
 struct RecordedHttpRequest {
     headers: BTreeMap<String, String>,
     body: serde_json::Value,
+}
+
+struct CapturingAgentEventSink(Arc<std::sync::Mutex<Vec<crate::agent_events::AgentEvent>>>);
+
+impl crate::agent_events::AgentEventSink for CapturingAgentEventSink {
+    fn handle_event(&self, event: &crate::agent_events::AgentEvent) {
+        self.0.lock().unwrap().push(event.clone());
+    }
+}
+
+struct CurrentHostBridgeGuard;
+
+impl CurrentHostBridgeGuard {
+    fn install() -> Self {
+        let bridge = crate::bridge::HostBridge::from_parts_with_writer(
+            Arc::new(Mutex::new(std::collections::HashMap::new())),
+            Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            Arc::new(|_| Ok(())),
+            1,
+        );
+        crate::llm::install_current_host_bridge(Arc::new(bridge));
+        Self
+    }
+}
+
+impl Drop for CurrentHostBridgeGuard {
+    fn drop(&mut self) {
+        crate::llm::clear_current_host_bridge();
+    }
 }
 
 // The loopback HTTP tests start background GET streams against in-process
@@ -348,6 +377,119 @@ async fn modern_input_required_result_dispatches_and_retries() {
         .await;
 }
 
+#[tokio::test(flavor = "current_thread")]
+async fn modern_http_401_auth_required_waits_for_oauth_and_retries_tool_call() {
+    let _guard = http_mcp_test_guard().await;
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let (base_url, mut requests, auth_challenged) =
+                spawn_auth_required_modern_http_mcp_server().await;
+            let handle = modern_http_handle(&base_url).await;
+            let server_url = format!("{base_url}/mcp");
+            let resource = crate::mcp_auth::canonical_resource_indicator(&server_url).unwrap();
+            let session_id =
+                crate::agent_sessions::open_or_create(Some("mcp-auth-retry".to_string()));
+            let _session_guard = crate::agent_sessions::enter_current_session(session_id.clone());
+            let _bridge_guard = CurrentHostBridgeGuard::install();
+            let captured_events = install_capturing_agent_sink(&session_id);
+
+            let notifier = tokio::spawn({
+                let resource = resource.clone();
+                async move {
+                    auth_challenged
+                        .await
+                        .expect("mock server should issue an auth challenge");
+                    let token = test_stored_mcp_token(&resource, "fresh-token");
+                    crate::mcp_oauth::notify_authorization_completed(&token);
+                }
+            });
+
+            let result = call_mcp_tool(
+                &handle,
+                "execute_sql",
+                serde_json::json!({"region": "us-west1", "query": "select 1"}),
+            )
+            .await
+            .unwrap();
+            notifier.await.expect("auth notifier task should complete");
+            assert_eq!(result, serde_json::json!("ok"));
+
+            let discover = recv_recorded_request(&mut requests).await;
+            assert_modern_http_request(&discover, "server/discover", None);
+            let first_call = recv_recorded_request(&mut requests).await;
+            assert_modern_http_request(&first_call, "tools/call", Some("execute_sql"));
+            assert!(!first_call.headers.contains_key("authorization"));
+            let retry_call = recv_recorded_request(&mut requests).await;
+            assert_modern_http_request(&retry_call, "tools/call", Some("execute_sql"));
+            assert_eq!(
+                retry_call.headers.get("authorization").map(String::as_str),
+                Some("Bearer fresh-token")
+            );
+
+            let events = captured_events.lock().unwrap().clone();
+            assert!(
+                events.iter().any(|event| matches!(
+                    event,
+                    crate::agent_events::AgentEvent::McpAuthRequired {
+                        session_id: event_session_id,
+                        server,
+                        resource: event_resource,
+                        scope: Some(scope),
+                    } if event_session_id == &session_id
+                        && server == "modern-http"
+                        && event_resource == &resource
+                        && scope == "repo"
+                )),
+                "expected McpAuthRequired event, got {events:?}"
+            );
+            crate::agent_events::clear_session_sinks(&session_id);
+            handle.disconnect().await.unwrap();
+        })
+        .await;
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn modern_http_401_without_interactive_host_returns_auth_error() {
+    let _guard = http_mcp_test_guard().await;
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            crate::llm::clear_current_host_bridge();
+            let (base_url, mut requests, _auth_challenged) =
+                spawn_auth_required_modern_http_mcp_server().await;
+            let handle = modern_http_handle(&base_url).await;
+            let session_id =
+                crate::agent_sessions::open_or_create(Some("mcp-auth-headless".to_string()));
+            let _session_guard = crate::agent_sessions::enter_current_session(session_id);
+            let error = call_mcp_tool(
+                &handle,
+                "execute_sql",
+                serde_json::json!({"region": "us-west1", "query": "select 1"}),
+            )
+            .await
+            .expect_err("headless MCP auth challenge should fail clearly");
+
+            match error {
+                VmError::CategorizedError { category, message } => {
+                    assert_eq!(category, crate::value::ErrorCategory::Auth);
+                    assert!(message.contains("modern-http"), "{message}");
+                    assert!(message.contains("no interactive host"), "{message}");
+                }
+                other => panic!("expected categorized auth error, got {other:?}"),
+            }
+
+            let discover = recv_recorded_request(&mut requests).await;
+            assert_modern_http_request(&discover, "server/discover", None);
+            let first_call = recv_recorded_request(&mut requests).await;
+            assert_modern_http_request(&first_call, "tools/call", Some("execute_sql"));
+            assert!(
+                matches!(requests.try_recv(), Err(mpsc::error::TryRecvError::Empty)),
+                "headless path should not retry"
+            );
+            handle.disconnect().await.unwrap();
+        })
+        .await;
+}
+
 #[test]
 fn x_mcp_header_validation_filters_invalid_tools_and_encodes_values() {
     let tools = vec![
@@ -500,6 +642,95 @@ async fn spawn_modern_http_mcp_server() -> (String, mpsc::UnboundedReceiver<Reco
     });
 
     (format!("http://{addr}"), request_rx)
+}
+
+async fn spawn_auth_required_modern_http_mcp_server() -> (
+    String,
+    mpsc::UnboundedReceiver<RecordedHttpRequest>,
+    oneshot::Receiver<()>,
+) {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let (request_tx, request_rx) = mpsc::unbounded_channel();
+    let (auth_challenged_tx, auth_challenged_rx) = oneshot::channel();
+
+    tokio::spawn(async move {
+        let mut challenged = false;
+        let mut auth_challenged_tx = Some(auth_challenged_tx);
+        loop {
+            let Ok((mut stream, _)) = listener.accept().await else {
+                break;
+            };
+            let Ok((_request_line, headers, body)) = read_http_request(&mut stream).await else {
+                continue;
+            };
+            let Ok(request) = serde_json::from_slice::<serde_json::Value>(&body) else {
+                continue;
+            };
+            let _ = request_tx.send(RecordedHttpRequest {
+                headers: headers.clone(),
+                body: request.clone(),
+            });
+            let method = request.get("method").and_then(|value| value.as_str());
+            if method == Some("tools/call") && !challenged {
+                challenged = true;
+                if let Some(sender) = auth_challenged_tx.take() {
+                    let _ = sender.send(());
+                }
+                let _ = write_http_json(
+                    &mut stream,
+                    "401 Unauthorized",
+                    &[("WWW-Authenticate", r#"Bearer scope="repo""#)],
+                    serde_json::json!({"error": "authorization required"}),
+                )
+                .await;
+                continue;
+            }
+            if method == Some("tools/call")
+                && headers.get("authorization").map(String::as_str) != Some("Bearer fresh-token")
+            {
+                let _ = write_http_json(
+                    &mut stream,
+                    "401 Unauthorized",
+                    &[("WWW-Authenticate", r#"Bearer scope="repo""#)],
+                    serde_json::json!({"error": "authorization required"}),
+                )
+                .await;
+                continue;
+            }
+            let response = modern_http_response(&request, method);
+            let _ = write_http_json(&mut stream, "200 OK", &[], response).await;
+        }
+    });
+
+    (format!("http://{addr}"), request_rx, auth_challenged_rx)
+}
+
+fn install_capturing_agent_sink(
+    session_id: &str,
+) -> Arc<std::sync::Mutex<Vec<crate::agent_events::AgentEvent>>> {
+    let events = Arc::new(std::sync::Mutex::new(Vec::new()));
+    crate::agent_events::register_sink(
+        session_id.to_string(),
+        Arc::new(CapturingAgentEventSink(events.clone())),
+    );
+    events
+}
+
+fn test_stored_mcp_token(resource: &str, access_token: &str) -> crate::mcp_oauth::StoredMcpToken {
+    crate::mcp_oauth::StoredMcpToken {
+        access_token: access_token.to_string(),
+        refresh_token: None,
+        expires_at_unix: None,
+        token_endpoint: "https://auth.example/token".to_string(),
+        client_id: "test-client".to_string(),
+        client_secret: None,
+        token_endpoint_auth_method: "none".to_string(),
+        issuer: "https://auth.example".to_string(),
+        resource: resource.to_string(),
+        scopes: Some("repo".to_string()),
+        token_response_extra: None,
+    }
 }
 
 async fn spawn_legacy_http_fallback_server(

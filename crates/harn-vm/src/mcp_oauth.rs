@@ -36,7 +36,7 @@ use base64::Engine;
 use fs2::FileExt;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use tokio::sync::Mutex as AsyncMutex;
+use tokio::sync::{broadcast, Mutex as AsyncMutex};
 
 use crate::mcp_auth::{
     authorization_code_token_form, build_oauth_authorization_url, canonical_resource_indicator,
@@ -66,6 +66,8 @@ const TOKEN_REFRESH_SKEW_SECS: i64 = 60;
 /// Upper bound on concurrently pending (begun-but-not-completed) authorizations.
 /// Caps memory from abandoned flows in a long-lived server.
 const MAX_PENDING_FLOWS: usize = 32;
+
+const AUTH_COMPLETION_CHANNEL_CAPACITY: usize = 64;
 
 /// A persisted MCP OAuth token plus everything needed to refresh it without
 /// re-running discovery. Keyed in the keyring by `(resource, issuer, client_id)`.
@@ -324,6 +326,7 @@ pub async fn complete_authorization(
         token_response_extra: token_response_extra(token.extra),
     };
     save_stored_token(&stored).await?;
+    notify_authorization_completed(&stored);
     Ok(stored)
 }
 
@@ -356,7 +359,44 @@ pub async fn import_stored_token(request: ImportStoredToken) -> Result<StoredMcp
     let discovery = discover(&request.server_url).await?;
     let stored = stored_token_for_import(&request, &discovery)?;
     save_stored_token(&stored).await?;
+    notify_authorization_completed(&stored);
     Ok(stored)
+}
+
+fn auth_completion_sender() -> &'static broadcast::Sender<StoredMcpToken> {
+    static SENDER: OnceLock<broadcast::Sender<StoredMcpToken>> = OnceLock::new();
+    SENDER.get_or_init(|| {
+        let (sender, _) = broadcast::channel(AUTH_COMPLETION_CHANNEL_CAPACITY);
+        sender
+    })
+}
+
+pub(crate) fn subscribe_authorization_completions() -> broadcast::Receiver<StoredMcpToken> {
+    auth_completion_sender().subscribe()
+}
+
+pub(crate) fn notify_authorization_completed(token: &StoredMcpToken) {
+    let _ = auth_completion_sender().send(token.clone());
+}
+
+pub(crate) async fn wait_for_authorization_completion(
+    resource: &str,
+    timeout: std::time::Duration,
+    mut receiver: broadcast::Receiver<StoredMcpToken>,
+) -> Result<StoredMcpToken, String> {
+    tokio::time::timeout(timeout, async {
+        loop {
+            match receiver.recv().await {
+                Ok(token) if token.resource == resource => return Ok(token),
+                Ok(_) | Err(broadcast::error::RecvError::Lagged(_)) => continue,
+                Err(broadcast::error::RecvError::Closed) => {
+                    return Err("MCP authorization completion channel closed".to_string());
+                }
+            }
+        }
+    })
+    .await
+    .map_err(|_| format!("timed out waiting for MCP authorization for {resource}"))?
 }
 
 /// Discover the OAuth authorization server protecting an MCP server URL.
