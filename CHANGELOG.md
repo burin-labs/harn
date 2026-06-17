@@ -8,6 +8,16 @@ highlights live in [CHANGELOG-pre-0.6.md](CHANGELOG-pre-0.6.md).
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.8.118
+
+### Added
+
+- **Agent lifecycle tools can now skip the self-suspend surface (#3413).**
+  `agent_lifecycle_tools` and `agent_loop` accept
+  `agent_await_resumption_enabled: false` to avoid exposing
+  `agent_await_resumption` when a host does not want model-initiated
+  suspension in the active tool schema.
+
 ## v0.8.117
 
 ### Added
