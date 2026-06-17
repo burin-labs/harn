@@ -1,0 +1,32 @@
+// Run: harn test tests/agent/lifecycle_tools_test.harn
+//
+// Unit tests for agent lifecycle tool injection. These stay at the registry
+// seam so they do not need a mock model or a full agent_loop run.
+import { agent_lifecycle_tools } from "std/agent/workers"
+
+fn _has_tool(registry, name) {
+  for entry in registry?.tools ?? [] {
+    if entry?.name == name {
+      return true
+    }
+  }
+  return false
+}
+
+pipeline test_agent_await_resumption_injected_by_default(task) {
+  let tools = agent_lifecycle_tools(tool_registry(), {})
+  assert(_has_tool(tools, "agent_await_resumption"))
+}
+
+pipeline test_agent_await_resumption_can_be_disabled(task) {
+  let tools = agent_lifecycle_tools(tool_registry(), {agent_await_resumption_enabled: false})
+  assert(!_has_tool(tools, "agent_await_resumption"))
+}
+
+pipeline test_agent_await_resumption_opt_out_keeps_parent_subagent_tools(task) {
+  let tools = agent_lifecycle_tools(tool_registry(), {agent_await_resumption_enabled: false, subagents: true})
+  assert(!_has_tool(tools, "agent_await_resumption"))
+  assert(_has_tool(tools, "subagent_pause"))
+  assert(_has_tool(tools, "subagent_resume"))
+  assert(_has_tool(tools, "subagent_stop"))
+}

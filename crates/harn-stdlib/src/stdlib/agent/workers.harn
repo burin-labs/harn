@@ -256,6 +256,17 @@ fn __agent_lifecycle_has_subagent_capability(registry, opts) {
     || __agent_tool_registry_has(registry, "spawn_agent")
 }
 
+fn __agent_lifecycle_await_enabled(opts) {
+  let value = opts?.agent_await_resumption_enabled
+  if value == nil {
+    return true
+  }
+  if type_of(value) != "bool" {
+    throw "agent_lifecycle_tools: agent_await_resumption_enabled must be bool or nil"
+  }
+  return value
+}
+
 fn __agent_lifecycle_add_await_tool(registry) {
   if __agent_tool_registry_has(registry, "agent_await_resumption") {
     return registry
@@ -346,9 +357,10 @@ fn __agent_lifecycle_add_subagent_tools(registry) {
 /**
  * agent_lifecycle_tools adds model-facing suspend/resume lifecycle tools.
  *
- * Every returned registry includes `agent_await_resumption`. Parent-side
- * `subagent_pause`, `subagent_resume`, and `subagent_stop` are added only
- * when the caller opts into subagent lifecycle control with `{subagents: true}` or
+ * Every returned registry includes `agent_await_resumption` unless the caller
+ * passes `{agent_await_resumption_enabled: false}`. Parent-side
+ * `subagent_pause`, `subagent_resume`, and `subagent_stop` are added only when
+ * the caller opts into subagent lifecycle control with `{subagents: true}` or
  * `{subagent_tools: true}`, or when the supplied registry already exposes a
  * `sub_agent_run` / `spawn_agent` tool.
  *
@@ -359,7 +371,11 @@ fn __agent_lifecycle_add_subagent_tools(registry) {
 pub fn agent_lifecycle_tools(registry = nil, options = nil) {
   let opts = __worker_options(options, "agent_lifecycle_tools")
   let base = registry ?? tool_registry()
-  var tools = __agent_lifecycle_add_await_tool(base)
+  var tools = if __agent_lifecycle_await_enabled(opts) {
+    __agent_lifecycle_add_await_tool(base)
+  } else {
+    base
+  }
   if __agent_lifecycle_has_subagent_capability(base, opts) {
     tools = __agent_lifecycle_add_subagent_tools(tools)
   }
