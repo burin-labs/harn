@@ -16,14 +16,13 @@ use crate::orchestration::{CapabilityPolicy, EffectRecord};
 pub const OPENTRUSTGRAPH_SCHEMA_V0: &str = "opentrustgraph/v0";
 /// OpenTrustGraph v0.1: additive metadata schema. Reserves lineage keys under
 /// `TrustRecord.metadata` so chain validators can prove that child-agent
-/// effects and actors stay inside the parent chain.
+/// effects, actors, and actor-chain policy alerts stay inside the parent chain.
 ///
 /// Backwards compatible: v0 records are still accepted (the new keys are
 /// optional). One patch release window after this bump, v0 will be
 /// dropped per `opentrustgraph-spec/CONFORMANCE.md` §5.
 pub const OPENTRUSTGRAPH_SCHEMA_V0_1: &str = "opentrustgraph/v0.1";
-/// Set of schema discriminators accepted by the v0.1 validator. v0 stays
-/// here for one patch release window before being retired.
+/// Set of schema discriminators accepted by the v0.1 validator.
 pub const OPENTRUSTGRAPH_ACCEPTED_SCHEMAS: &[&str] =
     &[OPENTRUSTGRAPH_SCHEMA_V0_1, OPENTRUSTGRAPH_SCHEMA_V0];
 pub const OPENTRUSTGRAPH_CHAIN_SCHEMA_V0: &str = "opentrustgraph-chain/v0";
@@ -42,6 +41,8 @@ pub const METADATA_KEY_PARENT_RECORD_ID: &str = "parent_record_id";
 /// When paired with `parent_record_id`, the nested `act` chain must extend
 /// the parent's actor chain by exactly one hop.
 pub const METADATA_KEY_ACTOR_CHAIN: &str = "actor_chain";
+/// Reserved metadata key for actor-chain policy alerts.
+pub const METADATA_KEY_ACTOR_CHAIN_ALERT: &str = "actor_chain_alert";
 pub const TRUST_GRAPH_RECORDS_TOPIC: &str = "trust_graph.records";
 pub const TRUST_GRAPH_GLOBAL_TOPIC: &str = "trust_graph";
 pub const TRUST_GRAPH_LEGACY_GLOBAL_TOPIC: &str = "trust.graph";
@@ -303,6 +304,27 @@ impl TrustRecord {
             .map(ActorChain::from_json_value)
             .transpose()
     }
+
+    pub fn with_actor_chain_alert(mut self, alert: serde_json::Value) -> Self {
+        self.set_actor_chain_alert(Some(alert));
+        self
+    }
+
+    pub fn set_actor_chain_alert(&mut self, alert: Option<serde_json::Value>) {
+        match alert {
+            Some(alert) => {
+                self.metadata
+                    .insert(METADATA_KEY_ACTOR_CHAIN_ALERT.to_string(), alert);
+            }
+            None => {
+                self.metadata.remove(METADATA_KEY_ACTOR_CHAIN_ALERT);
+            }
+        }
+    }
+
+    pub fn actor_chain_alert(&self) -> Option<&serde_json::Value> {
+        self.metadata.get(METADATA_KEY_ACTOR_CHAIN_ALERT)
+    }
 }
 
 fn decode_effect_list(value: Option<&serde_json::Value>) -> Vec<EffectRecord> {
@@ -492,6 +514,35 @@ pub async fn append_active_trust_record(record: &TrustRecord) -> Result<TrustRec
     let log = active_event_log()
         .ok_or_else(|| LogError::Config("trust graph requires an active event log".to_string()))?;
     append_trust_record(&log, record).await
+}
+
+pub async fn append_scope_attenuation_alert(
+    log: &Arc<AnyEventLog>,
+    actor_chain: &crate::ActorChain,
+    violation: &crate::ScopeAttenuationViolation,
+    trace_id: impl Into<String>,
+) -> Result<TrustRecord, LogError> {
+    let record = TrustRecord::new(
+        violation.child_subject(),
+        "identity.scope_attenuation",
+        None,
+        TrustOutcome::Denied,
+        trace_id,
+        AutonomyTier::ActAuto,
+    )
+    .with_actor_chain(actor_chain.clone())
+    .with_actor_chain_alert(violation.to_json_value());
+    append_trust_record(log, &record).await
+}
+
+pub async fn append_active_scope_attenuation_alert(
+    actor_chain: &crate::ActorChain,
+    violation: &crate::ScopeAttenuationViolation,
+    trace_id: impl Into<String>,
+) -> Result<TrustRecord, LogError> {
+    let log = active_event_log()
+        .ok_or_else(|| LogError::Config("trust graph requires an active event log".to_string()))?;
+    append_scope_attenuation_alert(&log, actor_chain, violation, trace_id).await
 }
 
 pub async fn query_trust_records(
@@ -1950,6 +2001,79 @@ mod tests {
     }
 
     #[test]
+    fn v0_1_actor_chain_metadata_round_trips_through_json() {
+        let chain = crate::ActorChain::new_with_scopes("user:kenneth", ["repo:read", "repo:write"])
+            .pushed_with_scopes("agent:burin", ["repo:read"])
+            .pushed_with_scopes("agent:merge-captain", ["repo:read"]);
+        let alert = serde_json::json!({
+            "kind": "scope_attenuation_violation",
+            "mode": "non-increasing",
+            "parent_subject": "agent:burin",
+            "child_subject": "agent:merge-captain",
+            "parent_scopes": ["repo:read"],
+            "child_scopes": ["repo:read", "repo:write"],
+            "extra_scopes": ["repo:write"]
+        });
+        let record = TrustRecord::new(
+            "agent:merge-captain",
+            "identity.scope_attenuation",
+            None,
+            TrustOutcome::Denied,
+            "trace-actor-chain-1",
+            AutonomyTier::ActAuto,
+        )
+        .with_actor_chain(chain.clone())
+        .with_actor_chain_alert(alert.clone());
+
+        let encoded = serde_json::to_string(&record).unwrap();
+        let decoded: TrustRecord = serde_json::from_str(&encoded).unwrap();
+        assert_eq!(decoded.actor_chain(), Some(chain));
+        assert_eq!(decoded.actor_chain_alert(), Some(&alert));
+    }
+
+    #[tokio::test]
+    async fn scope_attenuation_alert_appends_denied_actor_chain_record() {
+        let log: Arc<AnyEventLog> = Arc::new(AnyEventLog::Memory(MemoryEventLog::new(16)));
+        let chain = crate::ActorChain::new_with_scopes("user:owner", ["repo:read"])
+            .pushed_with_scopes("agent:writer", ["repo:read", "repo:write"]);
+        let violation = chain
+            .validate_scope_attenuation(&crate::ScopeAttenuationPolicy::default())
+            .unwrap_err();
+
+        let record = append_scope_attenuation_alert(&log, &chain, &violation, "trace-scope-alert")
+            .await
+            .unwrap();
+
+        assert_eq!(record.agent, "agent:writer");
+        assert_eq!(record.action, "identity.scope_attenuation");
+        assert_eq!(record.outcome, TrustOutcome::Denied);
+        assert_eq!(record.trace_id, "trace-scope-alert");
+        assert_eq!(record.actor_chain(), Some(chain));
+        assert_eq!(
+            record
+                .actor_chain_alert()
+                .and_then(|value| value.get("kind"))
+                .and_then(serde_json::Value::as_str),
+            Some("scope_attenuation_violation")
+        );
+
+        let records = query_trust_records(
+            &log,
+            &TrustQueryFilters {
+                agent: Some("agent:writer".to_string()),
+                action: Some("identity.scope_attenuation".to_string()),
+                outcome: Some(TrustOutcome::Denied),
+                ..TrustQueryFilters::default()
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!(records.len(), 1);
+        let report = verify_trust_chain(&log).await.unwrap();
+        assert!(report.verified, "verification errors: {:?}", report.errors);
+    }
+
+    #[test]
     fn lineage_helpers_remove_keys_on_empty_input() {
         let mut record = TrustRecord::new(
             "agent",
@@ -1961,17 +2085,21 @@ mod tests {
         )
         .with_effects_grant(vec![EffectRecord::new(EffectKind::Net, EffectScope::Write)])
         .with_parent_record_id("parent-1")
-        .with_actor_chain(ActorChain::new("user:kenneth").pushed("agent:agent"));
+        .with_actor_chain(ActorChain::new("user:kenneth").pushed("agent:agent"))
+        .with_actor_chain_alert(serde_json::json!({"kind": "test_alert"}));
         assert!(record.metadata.contains_key(METADATA_KEY_EFFECTS_GRANT));
         assert!(record.metadata.contains_key(METADATA_KEY_PARENT_RECORD_ID));
         assert!(record.metadata.contains_key(METADATA_KEY_ACTOR_CHAIN));
+        assert!(record.metadata.contains_key(METADATA_KEY_ACTOR_CHAIN_ALERT));
 
         record.set_effects_grant(Vec::new());
         record.set_parent_record_id(None);
         record.set_actor_chain(None);
+        record.set_actor_chain_alert(None);
         assert!(!record.metadata.contains_key(METADATA_KEY_EFFECTS_GRANT));
         assert!(!record.metadata.contains_key(METADATA_KEY_PARENT_RECORD_ID));
         assert!(!record.metadata.contains_key(METADATA_KEY_ACTOR_CHAIN));
+        assert!(!record.metadata.contains_key(METADATA_KEY_ACTOR_CHAIN_ALERT));
     }
 
     #[tokio::test]
@@ -2111,6 +2239,46 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn trust_chain_verifies_actor_chain_parentage() {
+        let log: Arc<AnyEventLog> = Arc::new(AnyEventLog::Memory(MemoryEventLog::new(16)));
+        let parent_chain = ActorChain::new("user:kenneth").pushed("agent:burin");
+        let child_chain = parent_chain.clone().pushed("agent:merge-captain");
+
+        let parent = append_trust_record(
+            &log,
+            &TrustRecord::new(
+                "agent:burin",
+                "agent.spawn",
+                None,
+                TrustOutcome::Success,
+                "trace-parent",
+                AutonomyTier::ActAuto,
+            )
+            .with_actor_chain(parent_chain),
+        )
+        .await
+        .unwrap();
+        append_trust_record(
+            &log,
+            &TrustRecord::new(
+                "agent:merge-captain",
+                "agent.spawn",
+                None,
+                TrustOutcome::Success,
+                "trace-child",
+                AutonomyTier::ActAuto,
+            )
+            .with_actor_chain(child_chain)
+            .with_parent_record_id(parent.record_id),
+        )
+        .await
+        .unwrap();
+
+        let report = verify_trust_chain(&log).await.unwrap();
+        assert!(report.verified, "verification errors: {:?}", report.errors);
+    }
+
+    #[tokio::test]
     async fn verify_chain_rejects_actor_chain_that_escapes_parentage() {
         let log: Arc<AnyEventLog> = Arc::new(AnyEventLog::Memory(MemoryEventLog::new(16)));
         let parent = append_trust_record(
@@ -2127,7 +2295,6 @@ mod tests {
         )
         .await
         .unwrap();
-
         append_trust_record(
             &log,
             &TrustRecord::new(

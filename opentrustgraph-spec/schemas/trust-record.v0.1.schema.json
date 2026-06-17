@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://harnlang.com/schemas/opentrustgraph/v0.1/trust-record.schema.json",
   "title": "OpenTrustGraph TrustRecord v0.1",
-  "description": "One autonomy, approval, or control-plane event in an append-only OpenTrustGraph chain. v0.1 reserves lineage metadata keys (`effects_grant`, `effects_used`, `parent_record_id`, `actor_chain`) so chain validators can prove that a child agent's effects and actors stayed inside the parent chain. v0 records still validate against this schema for one patch release window (see CONFORMANCE.md §5).",
+  "description": "One autonomy, approval, or control-plane event in an append-only OpenTrustGraph chain. v0.1 reserves lineage metadata keys (`effects_grant`, `effects_used`, `parent_record_id`, `actor_chain`, `actor_chain_alert`) so chain validators can prove child effect inheritance, actor-chain parentage, and actor-chain policy alerts. v0 records still validate against this schema for one patch release window (see CONFORMANCE.md §5).",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -77,12 +77,8 @@
     },
     "metadata": {
       "type": "object",
-      "description": "Runtime-specific detail bag. Consumers must preserve unknown keys. v0.1 reserves the lineage keys below; older consumers MAY ignore them.",
+      "description": "Runtime-specific detail bag. Consumers must preserve unknown keys. v0.1 reserves the lineage and actor-chain alert keys below; older consumers MAY ignore them.",
       "properties": {
-        "actor_chain": {
-          "$ref": "#/$defs/actorChain",
-          "description": "RFC 8693 actor chain for the principal that caused this record. When `parent_record_id` is present, verifiers MUST check this chain extends the parent's `actor_chain` by exactly one nested `act` hop."
-        },
         "effects_grant": {
           "type": "array",
           "description": "Typed effect set the parent extended to this record. Empty/absent means no grant tracking. Items follow the EffectRecord shape (kind, scope, optional resource).",
@@ -97,6 +93,14 @@
           "type": ["string", "null"],
           "minLength": 1,
           "description": "Pointer at the parent record's `record_id`. null/absent for root records."
+        },
+        "actor_chain": {
+          "$ref": "#/$defs/actorChain",
+          "description": "RFC 8693 actor chain for the principal that caused this record. When `parent_record_id` is present, verifiers MUST check this chain extends the parent's `actor_chain` by exactly one nested `act` hop."
+        },
+        "actor_chain_alert": {
+          "$ref": "#/$defs/scopeAttenuationViolation",
+          "description": "Typed actor-chain policy alert. Harn writes this for scope attenuation violations."
         }
       }
     }
@@ -158,33 +162,6 @@
         }
       }
     },
-    "actorChain": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["sub"],
-      "properties": {
-        "sub": { "type": "string", "minLength": 1 },
-        "act": { "$ref": "#/$defs/actorNode" },
-        "may_act": { "$ref": "#/$defs/principalClaim" }
-      }
-    },
-    "actorNode": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["sub"],
-      "properties": {
-        "sub": { "type": "string", "minLength": 1 },
-        "act": { "$ref": "#/$defs/actorNode" }
-      }
-    },
-    "principalClaim": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["sub"],
-      "properties": {
-        "sub": { "type": "string", "minLength": 1 }
-      }
-    },
     "effectRecord": {
       "type": "object",
       "additionalProperties": false,
@@ -242,6 +219,70 @@
           "type": "string",
           "minLength": 1,
           "description": "Opaque, statically-known target identifier (path, URL, tool id, persona id)."
+        }
+      }
+    },
+    "actorChain": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sub"],
+      "properties": {
+        "sub": { "type": "string", "minLength": 1 },
+        "scopes": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 },
+          "uniqueItems": true
+        },
+        "scope": { "type": "string", "minLength": 1 },
+        "act": { "$ref": "#/$defs/actorChain" },
+        "may_act": { "$ref": "#/$defs/actorChainPrincipal" }
+      }
+    },
+    "actorChainPrincipal": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sub"],
+      "properties": {
+        "sub": { "type": "string", "minLength": 1 },
+        "scopes": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 },
+          "uniqueItems": true
+        },
+        "scope": { "type": "string", "minLength": 1 }
+      }
+    },
+    "scopeAttenuationViolation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "mode",
+        "parent_subject",
+        "child_subject",
+        "parent_scopes",
+        "child_scopes",
+        "extra_scopes"
+      ],
+      "properties": {
+        "kind": { "const": "scope_attenuation_violation" },
+        "mode": {
+          "type": "string",
+          "enum": ["non-increasing", "strict-subset", "off"]
+        },
+        "parent_subject": { "type": "string", "minLength": 1 },
+        "child_subject": { "type": "string", "minLength": 1 },
+        "parent_scopes": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "child_scopes": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "extra_scopes": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
         }
       }
     }

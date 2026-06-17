@@ -19,12 +19,13 @@ Version markers:
 {"schema":"opentrustgraph-chain/v0"}
 ```
 
-`v0.1` is an additive bump over `v0`. It reserves four lineage keys under
-`TrustRecord.metadata` — `actor_chain`, `effects_grant`, `effects_used`, and
-`parent_record_id` — so chain validators can prove that a child agent's
-effects and actors stayed inside the parent chain. The chain hash inputs are
-unchanged because metadata was already hash-covered. `v0` records still
-parse for one patch release window per
+`v0.1` is an additive bump over `v0`. It reserves five lineage and alert keys under
+`TrustRecord.metadata` — `effects_grant`, `effects_used`,
+`parent_record_id`, `actor_chain`, and `actor_chain_alert` — so chain
+validators can prove that a child agent's
+`effects_used ⊆ parent.effects_grant` and that actor-chain parentage follows
+the same lineage. The chain hash inputs are unchanged because metadata was
+already hash-covered. `v0` records still parse for one patch release window per
 [`opentrustgraph-spec/CONFORMANCE.md` §5](../opentrustgraph-spec/CONFORMANCE.md#5-versioning),
 then are dropped. The chain export envelope (`opentrustgraph-chain/v0`)
 is unchanged.
@@ -76,11 +77,7 @@ Fields:
 - `entry_hash`: SHA-256 hash over the canonical record with `entry_hash`
   removed. Harn stores it with the `sha256:` prefix.
 - `metadata`: extensible runtime-specific detail bag. `v0.1` reserves
-  lineage keys at this layer:
-  - `actor_chain`: RFC 8693 `{sub, act}` actor chain for the principal
-    that caused the record. When `parent_record_id` is present, verifiers
-    MUST check that this chain extends the parent's `actor_chain` by
-    exactly one nested `act` hop.
+  five lineage and alert keys at this layer:
   - `effects_grant`: typed `EffectRecord` list (`kind`, `scope`, optional
     `resource`) the parent extended to this record.
   - `effects_used`: typed `EffectRecord` list the action actually
@@ -91,6 +88,13 @@ Fields:
     separate `parent_trust_record_id` key for the Harn release
     lineage; `parent_record_id` is the
     generic spawn-lineage pointer.
+  - `actor_chain`: RFC 8693 `{sub, act}` actor chain for this record.
+    Each entry may carry `scopes` or an OAuth-style `scope` string.
+    When `parent_record_id` is present, verifiers MUST check that dropping
+    the current actor produces the parent chain.
+  - `actor_chain_alert`: typed actor-chain policy alert. Harn writes
+    `kind: "scope_attenuation_violation"` with the violating parent and
+    child subjects plus the parent, child, and extra scope sets.
 
 Outcome enum:
 

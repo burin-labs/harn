@@ -11,7 +11,7 @@ use std::path::PathBuf;
 use crate::agent_sessions;
 use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
 use crate::stdlib::options::{self, ErrorKind};
-use crate::value::{VmError, VmValue};
+use crate::value::{ErrorCategory, VmError, VmValue};
 
 /// Sessions raise catchable errors (callers may `try`/`recover`).
 const ERR_KIND: ErrorKind = ErrorKind::Thrown;
@@ -31,6 +31,7 @@ pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
     &AGENT_SESSION_ANCESTRY_BUILTIN_DEF,
     &AGENT_SESSION_CURRENT_ID_BUILTIN_DEF,
     &AGENT_SESSION_ACTOR_CHAIN_BUILTIN_DEF,
+    &ACTOR_CHAIN_VALIDATE_SCOPE_ATTENUATION_BUILTIN_DEF,
     &AGENT_SESSION_TOOL_FORMAT_BUILTIN_DEF,
     &AGENT_SESSION_SYSTEM_PROMPT_BUILTIN_DEF,
     &AGENT_SESSION_WORKSPACE_ANCHOR_BUILTIN_DEF,
@@ -614,6 +615,100 @@ fn agent_session_actor_chain_builtin(
     Ok(agent_sessions::actor_chain(&id)
         .map(|chain| chain.to_vm_value())
         .unwrap_or(VmValue::Nil))
+}
+
+const ACTOR_CHAIN_VALIDATE_SCOPE_ATTENUATION_OPT_KEYS: &[&str] =
+    &["policy", "raise", "alert", "trace_id"];
+
+#[harn_builtin(
+    sig = "actor_chain_validate_scope_attenuation(chain: dict, opts?: dict) -> dict",
+    kind = "async",
+    category = "agent.session",
+    doc = "Validate that each actor-chain hop has non-increasing scopes under the configured identity.scope_attenuation policy."
+)]
+async fn actor_chain_validate_scope_attenuation_builtin(
+    _ctx: crate::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
+    let chain_value = args.first().ok_or_else(|| {
+        err("actor_chain_validate_scope_attenuation: `chain` argument is required")
+    })?;
+    let chain = crate::ActorChain::from_vm_value(chain_value)
+        .map_err(|error| err(format!("actor_chain_validate_scope_attenuation: {error}")))?;
+    let opts = opts_dict_arg(&args, 1, "actor_chain_validate_scope_attenuation")?;
+    reject_unknown_opts(
+        &opts,
+        "actor_chain_validate_scope_attenuation",
+        ACTOR_CHAIN_VALIDATE_SCOPE_ATTENUATION_OPT_KEYS,
+    )?;
+    let policy = attenuation_policy_from_opts(&opts)?;
+    let should_raise = arg_bool_opt(
+        &opts,
+        "actor_chain_validate_scope_attenuation",
+        "raise",
+        true,
+    )?;
+    let should_alert = arg_bool_opt(
+        &opts,
+        "actor_chain_validate_scope_attenuation",
+        "alert",
+        policy.alert_on_violation,
+    )?;
+    let trace_id = opt_string(&opts, "actor_chain_validate_scope_attenuation", "trace_id")?
+        .unwrap_or_else(|| "identity.scope_attenuation".to_string());
+
+    match chain.validate_scope_attenuation(&policy) {
+        Ok(()) => Ok(crate::stdlib::json_to_vm_value(&serde_json::json!({
+            "ok": true,
+            "policy": {
+                "mode": policy.mode.as_str(),
+                "alert_on_violation": policy.alert_on_violation,
+            }
+        }))),
+        Err(violation) => {
+            let alert_record = if should_alert {
+                match crate::append_active_scope_attenuation_alert(&chain, &violation, trace_id)
+                    .await
+                {
+                    Ok(record) => serde_json::json!({"record_id": record.record_id}),
+                    Err(error) => serde_json::json!({"error": error.to_string()}),
+                }
+            } else {
+                serde_json::Value::Null
+            };
+            if should_raise {
+                return Err(VmError::CategorizedError {
+                    message: violation.to_string(),
+                    category: ErrorCategory::Auth,
+                });
+            }
+            Ok(crate::stdlib::json_to_vm_value(&serde_json::json!({
+                "ok": false,
+                "error": violation.to_json_value(),
+                "alert": alert_record,
+            })))
+        }
+    }
+}
+
+fn attenuation_policy_from_opts(
+    opts: &crate::value::DictMap,
+) -> Result<crate::ScopeAttenuationPolicy, VmError> {
+    let Some(value) = opts.get("policy") else {
+        return Ok(crate::config::HarnConfig::default()
+            .identity
+            .scope_attenuation);
+    };
+    if matches!(value, VmValue::Nil) {
+        return Ok(crate::config::HarnConfig::default()
+            .identity
+            .scope_attenuation);
+    }
+    serde_json::from_value(crate::llm::helpers::vm_value_to_json(value)).map_err(|error| {
+        err(format!(
+            "actor_chain_validate_scope_attenuation: `policy` parse error: {error}"
+        ))
+    })
 }
 
 #[harn_builtin(

@@ -150,6 +150,28 @@
       },
       "type": "object"
     },
+    "identity": {
+      "additionalProperties": false,
+      "properties": {
+        "scope_attenuation": {
+          "additionalProperties": false,
+          "properties": {
+            "alert_on_violation": {
+              "type": "boolean"
+            },
+            "mode": {
+              "enum": [
+                "off",
+                "non-increasing",
+                "strict-subset"
+              ]
+            }
+          },
+          "type": "object"
+        }
+      },
+      "type": "object"
+    },
     "limits": {
       "additionalProperties": false,
       "properties": {
@@ -390,6 +412,20 @@
     "security": {
       "additionalProperties": false,
       "properties": {
+        "detect_injection": {
+          "type": "boolean"
+        },
+        "gate_secret_reads": {
+          "type": "boolean"
+        },
+        "guard_model": {
+          "type": "string"
+        },
+        "guard_threshold_percent": {
+          "maximum": 100,
+          "minimum": 0,
+          "type": "integer"
+        },
         "mode": {
           "enum": [
             "off",
@@ -398,28 +434,14 @@
             "local-ml"
           ]
         },
+        "pin_mcp_schemas": {
+          "type": "boolean"
+        },
         "spotlight_external": {
           "type": "boolean"
         },
         "trifecta_gate": {
           "type": "boolean"
-        },
-        "pin_mcp_schemas": {
-          "type": "boolean"
-        },
-        "gate_secret_reads": {
-          "type": "boolean"
-        },
-        "detect_injection": {
-          "type": "boolean"
-        },
-        "guard_threshold_percent": {
-          "maximum": 100,
-          "minimum": 0,
-          "type": "integer"
-        },
-        "guard_model": {
-          "type": "string"
         },
         "trusted_mcp_servers": {
           "items": {
