@@ -179,10 +179,16 @@ impl AgentEventSink for JsonlEventSink {
             // Errors here are swallowed on purpose; a failing write
             // must never crash the agent loop, and the run record
             // itself is a secondary artifact.
-            let _ = state.writer.write_all(line.as_bytes());
-            let _ = state.writer.write_all(b"\n");
-            state.bytes_written += line.len() as u64 + 1;
-            let _ = self.rotate_if_needed(&mut state);
+            if state
+                .writer
+                .write_all(line.as_bytes())
+                .and_then(|_| state.writer.write_all(b"\n"))
+                .is_ok()
+            {
+                state.bytes_written += line.len() as u64 + 1;
+                let _ = state.writer.flush();
+                let _ = self.rotate_if_needed(&mut state);
+            }
         }
     }
 }
