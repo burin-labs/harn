@@ -2989,7 +2989,7 @@ See the [Sessions](./sessions.md) chapter for the full model.
 | `agent_session_trim(id, keep_last)` | id, keep_last: int | int | Retain last `keep_last` messages; returns kept count |
 | `agent_session_compact(id, opts)` | id, opts: dict | int | Runs the LLM/truncate/observation-mask/custom compactor; custom strategies use `custom_compactor`, `mask_callback`, or `compress_callback` closures |
 | `agent_session_inject(id, message)` | id, message: dict | nil | Appends `{role, content, …}`; missing `role` errors |
-| `agent_session_seed_from_jsonl(jsonl_path, opts?)` | jsonl_path: string, opts: dict | dict | Create a new session from a replayable `llm_transcript.jsonl` sidecar. Options: `truncate_to_last`, `drop_tool_calls`, `rename_session`, `validate`, `provider`, `model` |
+| `agent_session_seed_from_jsonl(jsonl_path, opts?)` | jsonl_path: string, opts: dict | dict | Create a new session from a replayable `llm_transcript.jsonl` sidecar. Options: `truncate_to_last`, `drop_tool_calls`, `rename_session`, `validate`, `provider`, `model`, `source_agent`, `source_session_id`, `source_kind`, `source_label`, `source_provenance`, `recommend_compaction` |
 | `agent_session_close(id, status?)` | id, optional status string/dict | nil | Evicts immediately regardless of LRU cap and records an `agent_session_closed` event with the close reason |
 
 Pair with `agent_loop(..., {session_id: id, ...})`: prior messages load

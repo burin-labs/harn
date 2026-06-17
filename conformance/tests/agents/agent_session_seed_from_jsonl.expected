@@ -2,6 +2,13 @@ true
 3
 message_events
 false
+external_agent_session
+codex
+codex-session-1
+true
+Codex import
+harn
+true
 true
 native
 3

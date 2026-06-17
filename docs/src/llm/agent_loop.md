@@ -985,8 +985,11 @@ the loop picks which skill(s) to activate:
   imports exact prompt-visible `message` events or older full request
   snapshots, optionally checks `provider` / `model`, and supports
   `truncate_to_last` plus `drop_tool_calls` for oversized histories.
-  Provider-response-only sidecars require `validate: false` because
-  they lack user and tool-result turns.
+  Hosts can also attach external-session provenance with
+  `source_agent`, `source_session_id`, `source_label`,
+  `source_provenance`, and `recommend_compaction`. Provider-response-only
+  sidecars require `validate: false` because they lack user and
+  tool-result turns.
 
 ### Scoped tools
 

@@ -145,10 +145,19 @@ messages:
 ```harn
 let seeded = agent_session_seed_from_jsonl(
   ".harn-runs/audit/agent-llm/llm_transcript.jsonl",
-  {truncate_to_last: 40, rename_session: "audit-recovery"},
+  {
+    truncate_to_last: 40,
+    rename_session: "audit-recovery",
+    source_agent: "codex",
+    source_session_id: "7f9f9a2e",
+    recommend_compaction: true,
+  },
 )
 
 if seeded.ok {
+  if seeded.recommend_compaction {
+    agent_session_compact(seeded.session_id, {compact_strategy: "llm"})
+  }
   agent_loop("Continue from the failed release step.", nil, {
     session_id: seeded.session_id,
     provider: seeded.provider,
@@ -168,13 +177,30 @@ Options:
   turns cannot be reconstructed from them.
 - `provider` / `model` (string): optional guardrails. When set, validation
   checks the transcript's recorded request provider/model before seeding.
+- `source_agent` / `source_session_id` / `source_label` (string): optional
+  provenance for external coding-agent imports. Use stable agent slugs such as
+  `codex`, `claude-code`, or `cursor` when a host imports user-selected chats.
+- `source_kind` (string, default `external_agent_session` when source identity
+  is present, otherwise `harn_jsonl`): classifies the source without changing
+  replay behavior.
+- `source_provenance` (dict): adapter-specific, non-secret metadata that helps
+  a UI explain where the transcript came from.
+- `recommend_compaction` (bool, default `false`): records that a host should
+  offer or run compaction before resuming. This is useful for outside sessions
+  produced by a different model, tool schema, or transcript format.
 
 The result shape is `{ok, session_id?, turns_loaded?, messages_loaded?,
 source_records?, source_format?, partial?, truncated?, provider?, model?,
-tool_format?, error?}`. `source_format` is `message_events`,
-`request_snapshots`, or `provider_responses_only`; the last is available only
-with `validate: false` and is assistant-response best effort, not prefix-cache
-equivalent replay.
+tool_format?, source?, recommend_compaction?, error?}`. `source` has schema
+`harn.session_seed_source.v1` and is also stored under
+`agent_session_snapshot(session_id).metadata.seeded_from_jsonl.source`.
+`source_format` is `message_events`, `request_snapshots`, or
+`provider_responses_only`; the last is available only with `validate: false`
+and is assistant-response best effort, not prefix-cache equivalent replay.
+
+For third-party coding-agent chats, keep discovery and user consent in the host
+or product layer. Harn only needs the explicit JSONL file and provenance
+metadata; it should not crawl private agent state directories by itself.
 
 ## Portable session bundles
 

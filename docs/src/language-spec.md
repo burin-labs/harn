@@ -1658,7 +1658,10 @@ replayable LLM transcript sidecar. Exact replay uses prompt-visible `message`
 events or full request snapshots; provider-response-only sidecars are
 assistant-response best effort and require `validate: false`. Options include
 `truncate_to_last`, `drop_tool_calls`, `rename_session`, `validate`, `provider`,
-and `model`.
+`model`, `source_agent`, `source_session_id`, `source_kind`, `source_label`,
+`source_provenance`, and `recommend_compaction`. Source metadata is recorded
+under `metadata.seeded_from_jsonl.source` so hosts can explain externally
+imported sessions before resuming or compacting them.
 
 Delegated workers accept `carry.transcript_mode` to define continuation
 semantics across `send_input(...)`, retriggered workers, and resumed snapshots.
