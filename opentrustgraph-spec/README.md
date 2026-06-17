@@ -22,11 +22,12 @@ inventing another envelope.
 - Chain export: `opentrustgraph-chain/v0` (unchanged in v0.1 — the bump
   is additive at the record metadata layer).
 
-`v0.1` reserves four lineage keys under `TrustRecord.metadata`:
-`actor_chain` (RFC 8693 subject/actor chain for who caused this record),
+`v0.1` reserves five lineage and alert keys under `TrustRecord.metadata`:
 `effects_grant` (typed effect list the parent extended to this record),
 `effects_used` (typed effect list the action actually exercised), and
-`parent_record_id` (pointer to the parent record's `record_id`).
+`parent_record_id` (pointer to the parent record's `record_id`),
+`actor_chain` (the RFC 8693 actor chain for the record), and
+`actor_chain_alert` (typed actor-chain policy alert metadata).
 Verifiers MUST check that a child's `effects_used` is a subset of the
 parent's `effects_grant`; when `actor_chain` is present with
 `parent_record_id`, verifiers MUST also check that the child's nested `act`

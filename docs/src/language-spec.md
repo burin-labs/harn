@@ -1653,6 +1653,23 @@ session enters execution, and child agent sessions push their deterministic
 actor name onto the chain. Snapshots expose the same value at `actor_chain` and
 `metadata.actor_chain`.
 
+Actor-chain entries may carry authority scopes as either `scopes: [string]` or
+the OAuth/RFC-style `scope: "space separated"` string. The layered runtime
+config section `[identity.scope_attenuation]` controls the monotonic
+attenuation check. The default policy is `mode = "non-increasing"`, which means
+each child actor's scope set must be a subset of its parent actor's set; equal
+sets are allowed. `mode = "strict-subset"` additionally requires each hop to
+drop at least one scope, and `mode = "off"` disables the check. Policy
+violations surface as an auth-category error from
+`actor_chain_validate_scope_attenuation(chain, opts?)`; callers that pass
+`{raise: false}` receive a typed
+`{kind: "scope_attenuation_violation", mode, parent_subject, child_subject,
+parent_scopes, child_scopes, extra_scopes}` dict instead. When alerting is
+enabled, the runtime appends a denied `identity.scope_attenuation`
+OpenTrustGraph record with `metadata.actor_chain` and
+`metadata.actor_chain_alert` so supervision tools can inspect the violation
+without treating nested actors as authorization grants.
+
 `agent_session_seed_from_jsonl(path, opts?)` creates a new session from a
 replayable LLM transcript sidecar. Exact replay uses prompt-visible `message`
 events or full request snapshots; provider-response-only sidecars are

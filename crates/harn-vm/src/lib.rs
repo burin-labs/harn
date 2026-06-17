@@ -134,7 +134,10 @@ pub mod waitpoints;
 pub mod workspace_anchor;
 pub mod workspace_path;
 
-pub use actor_chain::{ActorChain, ActorChainError, Principal};
+pub use actor_chain::{
+    ActorChain, ActorChainEntry, ActorChainError, Principal, ScopeAttenuationMode,
+    ScopeAttenuationPolicy, ScopeAttenuationViolation,
+};
 pub use builtin_id::BuiltinId;
 pub use call_budget::{
     charge_mcp_call, charge_pg_query, install_mcp_call_budget, install_pg_query_budget,
@@ -351,17 +354,19 @@ pub use triggers::{
     WORKER_QUEUE_CATALOG_TOPIC,
 };
 pub use trust_graph::{
-    append_active_trust_record, append_trust_record, export_trust_chain,
+    append_active_scope_attenuation_alert, append_active_trust_record,
+    append_scope_attenuation_alert, append_trust_record, export_trust_chain,
     group_trust_records_by_trace, policy_for_agent, policy_for_autonomy_tier,
     query_trust_graph_records, query_trust_records, resolve_agent_autonomy_tier,
     summarize_trust_records, topic_for_agent, trust_score_for, verify_trust_chain, AutonomyTier,
     TrustAgentSummary, TrustChainExport, TrustChainExportMetadata, TrustChainExportProducer,
     TrustChainReport, TrustGraphRecord, TrustOutcome, TrustQueryFilters, TrustRecord,
-    TrustRecordActionKind, TrustScore, TrustTraceGroup, METADATA_KEY_EFFECTS_GRANT,
-    METADATA_KEY_EFFECTS_USED, METADATA_KEY_PARENT_RECORD_ID, OPENTRUSTGRAPH_ACCEPTED_SCHEMAS,
-    OPENTRUSTGRAPH_CHAIN_SCHEMA_V0, OPENTRUSTGRAPH_SCHEMA_V0, OPENTRUSTGRAPH_SCHEMA_V0_1,
-    TRUST_ACTION_RELEASE, TRUST_GRAPH_GLOBAL_TOPIC, TRUST_GRAPH_LEGACY_GLOBAL_TOPIC,
-    TRUST_GRAPH_LEGACY_TOPIC_PREFIX, TRUST_GRAPH_RECORDS_TOPIC, TRUST_GRAPH_TOPIC_PREFIX,
+    TrustRecordActionKind, TrustScore, TrustTraceGroup, METADATA_KEY_ACTOR_CHAIN,
+    METADATA_KEY_ACTOR_CHAIN_ALERT, METADATA_KEY_EFFECTS_GRANT, METADATA_KEY_EFFECTS_USED,
+    METADATA_KEY_PARENT_RECORD_ID, OPENTRUSTGRAPH_ACCEPTED_SCHEMAS, OPENTRUSTGRAPH_CHAIN_SCHEMA_V0,
+    OPENTRUSTGRAPH_SCHEMA_V0, OPENTRUSTGRAPH_SCHEMA_V0_1, TRUST_ACTION_RELEASE,
+    TRUST_GRAPH_GLOBAL_TOPIC, TRUST_GRAPH_LEGACY_GLOBAL_TOPIC, TRUST_GRAPH_LEGACY_TOPIC_PREFIX,
+    TRUST_GRAPH_RECORDS_TOPIC, TRUST_GRAPH_TOPIC_PREFIX,
 };
 pub use value::*;
 pub use vm::*;

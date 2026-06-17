@@ -69,6 +69,7 @@ the "one-shot" call shape.
 | `agent_session_snapshot(id)` | `dict` or `nil` | Read-only transcript snapshot plus `length`, `created_at`, `system_prompt`, `tool_format`, `actor_chain`, `scratchpad`, `scratchpad_version`, `parent_id`, `child_ids`, and `branched_at_event_index`. |
 | `agent_session_ancestry(id)` | `dict` or `nil` | Returns `{parent_id, child_ids, root_id}` for the in-VM session graph. |
 | `agent_session_actor_chain(id?)` | `dict` or `nil` | Returns the RFC 8693 `{sub, act}` actor chain for `id`, or for the current active session when `id` is omitted. |
+| `actor_chain_validate_scope_attenuation(chain, opts?)` | `dict` | Validates monotonic actor-chain scopes. `opts` accepts `policy`, `raise`, `alert`, and `trace_id`. |
 | `agent_session_reset(id)` | `nil` | Wipes history; preserves id and subscribers. |
 | `agent_session_fork(src, dst?)` | `string` | Copies transcript, sets parent/child lineage, and does NOT copy subscribers. |
 | `agent_session_fork_at(src, keep_first, dst?)` | `string` | Forks then keeps only the first `keep_first` messages on the child. Records `branched_at_event_index`. |
@@ -243,6 +244,14 @@ When `id` is omitted, it reads the current active session. Hosts bind the
 originating principal at session entry, and child agent sessions push their
 own deterministic actor name onto the chain. Snapshots also expose the same
 value at `actor_chain` and `metadata.actor_chain`.
+
+Actor-chain entries may include `scopes: ["..."]` or the OAuth-style
+`scope: "space separated"` string. `actor_chain_validate_scope_attenuation`
+checks the chain against `[identity.scope_attenuation]`, which defaults to
+non-increasing scope sets from parent to child. Violations raise an auth error
+by default; `{raise: false}` returns a typed violation dict instead. When
+alerting is enabled, the runtime writes a denied `identity.scope_attenuation`
+trust record carrying `metadata.actor_chain` and `metadata.actor_chain_alert`.
 
 ## Lineage
 

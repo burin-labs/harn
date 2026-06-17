@@ -142,6 +142,10 @@ level = "info"
 mode = "standard"
 extra_fields = ["internal_audit_token"]
 
+[identity.scope_attenuation]
+mode = "non-increasing"
+alert_on_violation = true
+
 [security]
 mode = "spotlight"
 trusted_mcp_servers = ["internal-docs"]
@@ -171,6 +175,18 @@ locked_fields = [
 ]
 denied_fields = ["endpoints.mcp.experimental"]
 ```
+
+## Identity
+
+The `[identity.scope_attenuation]` section controls actor-chain scope checks.
+Each actor-chain entry may carry `scopes = ["..."]` or an OAuth-style
+`scope = "space separated"` string. The default policy requires every child
+actor's scope set to be no wider than its parent.
+
+| Key | Type | Default | Meaning |
+| --- | --- | --- | --- |
+| `mode` | `off` \| `non-increasing` \| `strict-subset` | `non-increasing` | `non-increasing` allows equal or narrower child scope sets. `strict-subset` requires every hop to drop at least one scope. `off` disables the check. |
+| `alert_on_violation` | bool | `true` | Append a denied `identity.scope_attenuation` OpenTrustGraph record with `metadata.actor_chain` and `metadata.actor_chain_alert` when validation fails. |
 
 ## Security (prompt-injection defense)
 

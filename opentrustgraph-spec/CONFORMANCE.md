@@ -124,7 +124,8 @@ or `actor_chain escaped parentage` so operators can triage failures quickly.
 - The schema version moves with the on-disk shape. Adding a new optional
   property at the top level is backwards compatible. Reserving new
   metadata keys (as `v0.1` does for `effects_grant`, `effects_used`,
-  `parent_record_id`, and `actor_chain`) is also additive and gets a minor bump.
+  `parent_record_id`, `actor_chain`, and `actor_chain_alert`) is also
+  additive and gets a minor bump.
 - A minor bump (`v0.1`) MUST stay record-shape compatible with the prior
   minor version. Consumers MUST continue to accept the prior minor
   version's discriminator for one patch release window after the bump
@@ -138,17 +139,18 @@ or `actor_chain escaped parentage` so operators can triage failures quickly.
 - Multiple major versions MAY coexist on the same stream; consumers
   dispatch on the `schema` discriminator.
 
-### 5.1 v0.1 Reserved Metadata Keys
+### 5.1 v0.1 reserved metadata keys
 
-`v0.1` adds four reserved lineage keys under `TrustRecord.metadata`. Producers
-MAY omit them; consumers MUST preserve them when re-emitting records.
+`v0.1` adds five reserved lineage and alert keys under `TrustRecord.metadata`.
+Producers MAY omit them; consumers MUST preserve them when re-emitting records.
 
-| Key                 | Type                          | Meaning                                                                     |
-| ------------------- | ----------------------------- | --------------------------------------------------------------------------- |
-| `actor_chain`       | RFC 8693 actor chain object   | Subject plus nested `act` chain for the principal that caused this record.  |
-| `effects_grant`     | array of `EffectRecord`       | Typed effect set the parent extended to this record at spawn time.          |
-| `effects_used`      | array of `EffectRecord`       | Typed effect set the action actually exercised.                             |
-| `parent_record_id`  | string (UUID) or null/absent  | Pointer at the parent record's `record_id`. `null`/absent for root records. |
+| Key                 | Type                          | Meaning                                                                              |
+| ------------------- | ----------------------------- | ------------------------------------------------------------------------------------ |
+| `effects_grant`     | array of `EffectRecord`       | Typed effect set the parent extended to this record at spawn time.                   |
+| `effects_used`      | array of `EffectRecord`       | Typed effect set the action actually exercised.                                      |
+| `parent_record_id`  | string (UUID) or null/absent  | Pointer at the parent record's `record_id`. `null`/absent for root records.          |
+| `actor_chain`       | RFC 8693 actor-chain object   | Subject plus nested `act` chain for the principal that caused this record.           |
+| `actor_chain_alert` | object                        | Typed actor-chain policy alert metadata.                                             |
 
 `EffectRecord` follows the shape defined in
 `schemas/trust-record.v0.1.schema.json#/$defs/effectRecord`, which mirrors
@@ -181,3 +183,5 @@ must produce `p.actor_chain`; the top-level `sub` must be identical. The
 comparison intentionally ignores `may_act`, which is an authorization hint,
 not audit lineage. Verifiers report failures with an error message
 containing the substring `actor_chain escaped parentage`.
+Actor-chain alerts are audit data; consumers MUST preserve
+`actor_chain_alert` but MUST NOT treat nested actors as authorization grants.

@@ -33,6 +33,7 @@ pub struct HarnConfig {
     pub limits: RuntimeLimitsConfig,
     pub policy: ManagedPolicyConfig,
     pub security: SecurityConfig,
+    pub identity: IdentityConfig,
 }
 
 impl Default for HarnConfig {
@@ -52,6 +53,7 @@ impl Default for HarnConfig {
             limits: RuntimeLimitsConfig::default(),
             policy: ManagedPolicyConfig::default(),
             security: SecurityConfig::default(),
+            identity: IdentityConfig::default(),
         }
     }
 }
@@ -107,6 +109,12 @@ impl Default for PermissionConfig {
             capabilities: BTreeMap::new(),
         }
     }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(default, deny_unknown_fields)]
+pub struct IdentityConfig {
+    pub scope_attenuation: crate::actor_chain::ScopeAttenuationPolicy,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
@@ -1003,6 +1011,35 @@ pub fn schema_json() -> JsonValue {
                     "locked_fields": {"type": "array", "items": {"type": "string"}},
                     "denied_fields": {"type": "array", "items": {"type": "string"}}
                 }
+            },
+            "security": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                    "mode": {"enum": ["off", "spotlight", "strict", "local-ml"]},
+                    "spotlight_external": {"type": "boolean"},
+                    "trifecta_gate": {"type": "boolean"},
+                    "pin_mcp_schemas": {"type": "boolean"},
+                    "gate_secret_reads": {"type": "boolean"},
+                    "detect_injection": {"type": "boolean"},
+                    "guard_threshold_percent": {"type": "integer", "minimum": 0, "maximum": 100},
+                    "guard_model": {"type": "string"},
+                    "trusted_mcp_servers": {"type": "array", "items": {"type": "string"}}
+                }
+            },
+            "identity": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                    "scope_attenuation": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "properties": {
+                            "mode": {"enum": ["off", "non-increasing", "strict-subset"]},
+                            "alert_on_violation": {"type": "boolean"}
+                        }
+                    }
+                }
             }
         },
         "$defs": {
@@ -1653,6 +1690,36 @@ level = "trace"
     }
 
     #[test]
+    fn scope_attenuation_policy_merges_from_toml() {
+        let project = parse_config_toml(
+            r#"
+[identity.scope_attenuation]
+mode = "strict-subset"
+alert_on_violation = false
+"#,
+            "harn.config.toml",
+        )
+        .unwrap();
+        let resolved = merge_layers(vec![
+            built_in_defaults_layer(),
+            layer(ConfigLayerKind::ProjectConfig, "project", project),
+        ])
+        .unwrap();
+
+        assert_eq!(
+            resolved.config.identity.scope_attenuation.mode,
+            crate::actor_chain::ScopeAttenuationMode::StrictSubset
+        );
+        assert!(
+            !resolved
+                .config
+                .identity
+                .scope_attenuation
+                .alert_on_violation
+        );
+    }
+
+    #[test]
     fn environment_overrides_are_typed() {
         let env = environment_layer([
             ("HARN_LOG_LEVEL", "debug"),
@@ -1691,6 +1758,15 @@ level = "trace"
         assert_eq!(
             schema["properties"]["limits"]["properties"]["network"]["enum"][3],
             "offline"
+        );
+        assert_eq!(
+            schema["properties"]["identity"]["properties"]["scope_attenuation"]["properties"]
+                ["mode"]["enum"][1],
+            "non-increasing"
+        );
+        assert_eq!(
+            schema["properties"]["security"]["properties"]["mode"]["enum"][1],
+            "spotlight"
         );
     }
 

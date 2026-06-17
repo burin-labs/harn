@@ -1,0 +1,44 @@
+pipeline main(task) {
+  let narrower = actor_chain_validate_scope_attenuation(
+    {
+      sub: "user:owner",
+      scopes: ["repo:read", "repo:write"],
+      act: {sub: "agent:reviewer", scopes: ["repo:read"]},
+    },
+    {raise: false, alert: false},
+  )
+  __io_println(narrower.ok)
+  let equal = actor_chain_validate_scope_attenuation(
+    {
+      sub: "user:owner",
+      scope: "repo:read repo:write",
+      act: {sub: "agent:reviewer", scopes: ["repo:read", "repo:write"]},
+    },
+    {raise: false, alert: false},
+  )
+  __io_println(equal.ok)
+  let widened = actor_chain_validate_scope_attenuation(
+    {
+      sub: "user:owner",
+      scopes: ["repo:read"],
+      act: {sub: "agent:writer", scopes: ["repo:read", "repo:write"]},
+    },
+    {raise: false, alert: false},
+  )
+  __io_println(widened.ok)
+  __io_println(widened.error.kind)
+  __io_println(widened.error.mode)
+  __io_println(widened.error.parent_subject)
+  __io_println(widened.error.child_subject)
+  __io_println(widened.error.extra_scopes[0])
+  let strict = actor_chain_validate_scope_attenuation(
+    {
+      sub: "user:owner",
+      scopes: ["repo:read", "repo:write"],
+      act: {sub: "agent:reviewer", scopes: ["repo:read", "repo:write"]},
+    },
+    {policy: {mode: "strict-subset", alert_on_violation: false}, raise: false, alert: false},
+  )
+  __io_println(strict.ok)
+  __io_println(strict.error.mode)
+}
