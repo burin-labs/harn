@@ -1,12 +1,11 @@
 import "std/triggers"
 
 /**
- * Verifies the v0.1 schema bump (#1778): a 3-agent chain
- * (parent → child → grandchild) round-trips `effects_grant`,
- * `effects_used`, and `parent_record_id` end-to-end through the
- * stdlib `trust_graph_record` / `trust_query` surface, and the
- * inheritance invariant `effects_used ⊆ child.effects_grant ⊆
- * parent.effects_grant` holds.
+ * Verifies v0.1 lineage metadata: a 3-agent chain
+ * (parent → child → grandchild) round-trips `actor_chain`,
+ * `effects_grant`, `effects_used`, and `parent_record_id` end-to-end
+ * through the stdlib `trust_graph_record` / `trust_query` surface, and
+ * the effect plus actor-chain inheritance invariants hold.
  */
 pipeline test(task) {
   let unique = to_string(to_int(harness.clock.timestamp())) + "-"
@@ -24,6 +23,13 @@ pipeline test(task) {
   let parent_agent = "trust-graph-v0-1-parent-" + unique
   let child_agent = "trust-graph-v0-1-child-" + unique
   let grandchild_agent = "trust-graph-v0-1-grandchild-" + unique
+  let actor_origin = "user:operator-" + unique
+  let parent_actor = "agent:" + parent_agent
+  let child_actor = "agent:" + child_agent
+  let grandchild_actor = "agent:" + grandchild_agent
+  let parent_actor_chain = {sub: actor_origin, act: {sub: parent_actor}}
+  let child_actor_chain = {sub: actor_origin, act: {sub: child_actor, act: {sub: parent_actor}}}
+  let grandchild_actor_chain = {sub: actor_origin, act: {sub: grandchild_actor, act: {sub: child_actor, act: {sub: parent_actor}}}}
   let parent_id: TrustEntryId = trust_graph_record(
     {
       agent: parent_agent,
@@ -32,7 +38,7 @@ pipeline test(task) {
       outcome: "success",
       trace_id: "trace-parent-" + unique,
       autonomy_tier: "act_auto",
-      metadata: {effects_grant: parent_grant},
+      metadata: {actor_chain: parent_actor_chain, effects_grant: parent_grant},
     },
   )
   let child_id: TrustEntryId = trust_graph_record(
@@ -43,7 +49,7 @@ pipeline test(task) {
       outcome: "success",
       trace_id: "trace-child-" + unique,
       autonomy_tier: "act_auto",
-      metadata: {effects_grant: child_grant, parent_record_id: parent_id},
+      metadata: {actor_chain: child_actor_chain, effects_grant: child_grant, parent_record_id: parent_id},
     },
   )
   let _grandchild_id: TrustEntryId = trust_graph_record(
@@ -54,7 +60,7 @@ pipeline test(task) {
       outcome: "success",
       trace_id: "trace-grandchild-" + unique,
       autonomy_tier: "act_auto",
-      metadata: {effects_used: grandchild_used, parent_record_id: child_id},
+      metadata: {actor_chain: grandchild_actor_chain, effects_used: grandchild_used, parent_record_id: child_id},
     },
   )
   let parent: list<TrustRecord> = trust_query({agent: parent_agent})
@@ -68,5 +74,11 @@ pipeline test(task) {
   __io_println(len(parent[0].metadata?.effects_grant) == 3)
   __io_println(len(child[0].metadata?.effects_grant) == 2)
   __io_println(len(grandchild[0].metadata?.effects_used) == 1)
+  __io_println(parent[0].metadata?.actor_chain?.sub == actor_origin)
+  __io_println(child[0].metadata?.actor_chain?.act?.sub == child_actor)
+  __io_println(child[0].metadata?.actor_chain?.act?.act?.sub == parent_actor)
+  __io_println(grandchild[0].metadata?.actor_chain?.act?.sub == grandchild_actor)
+  __io_println(grandchild[0].metadata?.actor_chain?.act?.act?.sub == child_actor)
+  __io_println(grandchild[0].metadata?.actor_chain?.act?.act?.act?.sub == parent_actor)
   __io_println(report.verified)
 }

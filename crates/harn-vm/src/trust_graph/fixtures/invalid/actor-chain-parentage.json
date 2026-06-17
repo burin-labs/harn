@@ -1,14 +1,14 @@
 {
   "chain": {
-    "generated_at": "2026-04-19T20:33:00Z",
+    "generated_at": "2026-04-19T20:34:00Z",
     "producer": {
       "name": "harn",
       "version": "0.8.x"
     },
-    "root_hash": "sha256:39ff5a2c614a49c14059863afe5c3320343ff1198514b7d9060ef079aa23b6eb",
+    "root_hash": "sha256:3683b2872a27f01bfaa48f586644a35f193addef81a7d9c2ccd736e2ef9e152c",
     "topic": "trust_graph",
     "total": 3,
-    "verified": true
+    "verified": false
   },
   "records": [
     {
@@ -64,12 +64,12 @@
       "autonomy_tier": "act_auto",
       "chain_index": 2,
       "cost_usd": null,
-      "entry_hash": "sha256:ffcb9cb912d2a48b3400be9469e8f2601ca5ae8926fc8787d23597eb913d6701",
+      "entry_hash": "sha256:c615ab724f9662673f0af61da0e2c843c08c66b5ac10262ac1ff4cbc63351e30",
       "metadata": {
         "actor_chain": {
           "act": {
             "act": {
-              "sub": "agent:parent-orchestrator"
+              "sub": "agent:other-parent"
             },
             "sub": "agent:child-spawner"
           },
@@ -107,13 +107,13 @@
       "autonomy_tier": "act_auto",
       "chain_index": 3,
       "cost_usd": 0.001,
-      "entry_hash": "sha256:39ff5a2c614a49c14059863afe5c3320343ff1198514b7d9060ef079aa23b6eb",
+      "entry_hash": "sha256:3683b2872a27f01bfaa48f586644a35f193addef81a7d9c2ccd736e2ef9e152c",
       "metadata": {
         "actor_chain": {
           "act": {
             "act": {
               "act": {
-                "sub": "agent:parent-orchestrator"
+                "sub": "agent:other-parent"
               },
               "sub": "agent:child-spawner"
             },
@@ -133,7 +133,7 @@
         "parent_record_id": "01966f4c-3001-7002-a000-000000000002"
       },
       "outcome": "success",
-      "previous_hash": "sha256:ffcb9cb912d2a48b3400be9469e8f2601ca5ae8926fc8787d23597eb913d6701",
+      "previous_hash": "sha256:c615ab724f9662673f0af61da0e2c843c08c66b5ac10262ac1ff4cbc63351e30",
       "record_id": "01966f4c-3002-7003-a000-000000000003",
       "schema": "opentrustgraph/v0.1",
       "timestamp": "2026-04-19T20:32:00Z",

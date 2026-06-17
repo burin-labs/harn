@@ -714,9 +714,7 @@ impl DispatchCore {
             .metadata
             .insert("function".to_string(), serde_json::json!(request.function));
         if let Some(actor_chain) = request.actor_chain.as_ref() {
-            record
-                .metadata
-                .insert("actor_chain".to_string(), actor_chain.to_json_value());
+            record.set_actor_chain(Some(actor_chain.clone()));
         }
         if let Some(tenant) = request.tenant_id.as_ref() {
             record

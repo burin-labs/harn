@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://harnlang.com/schemas/opentrustgraph/v0.1/trust-record.schema.json",
   "title": "OpenTrustGraph TrustRecord v0.1",
-  "description": "One autonomy, approval, or control-plane event in an append-only OpenTrustGraph chain. v0.1 reserves three additional `metadata` keys (`effects_grant`, `effects_used`, `parent_record_id`) so chain validators can prove that a child agent's `effects_used ⊆ parent.effects_grant`. v0 records still validate against this schema for one patch release window (see CONFORMANCE.md §5).",
+  "description": "One autonomy, approval, or control-plane event in an append-only OpenTrustGraph chain. v0.1 reserves lineage metadata keys (`effects_grant`, `effects_used`, `parent_record_id`, `actor_chain`) so chain validators can prove that a child agent's effects and actors stayed inside the parent chain. v0 records still validate against this schema for one patch release window (see CONFORMANCE.md §5).",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -77,8 +77,12 @@
     },
     "metadata": {
       "type": "object",
-      "description": "Runtime-specific detail bag. Consumers must preserve unknown keys. v0.1 reserves the three keys below; older consumers MAY ignore them.",
+      "description": "Runtime-specific detail bag. Consumers must preserve unknown keys. v0.1 reserves the lineage keys below; older consumers MAY ignore them.",
       "properties": {
+        "actor_chain": {
+          "$ref": "#/$defs/actorChain",
+          "description": "RFC 8693 actor chain for the principal that caused this record. When `parent_record_id` is present, verifiers MUST check this chain extends the parent's `actor_chain` by exactly one nested `act` hop."
+        },
         "effects_grant": {
           "type": "array",
           "description": "Typed effect set the parent extended to this record. Empty/absent means no grant tracking. Items follow the EffectRecord shape (kind, scope, optional resource).",
@@ -152,6 +156,33 @@
             }
           }
         }
+      }
+    },
+    "actorChain": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sub"],
+      "properties": {
+        "sub": { "type": "string", "minLength": 1 },
+        "act": { "$ref": "#/$defs/actorNode" },
+        "may_act": { "$ref": "#/$defs/principalClaim" }
+      }
+    },
+    "actorNode": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sub"],
+      "properties": {
+        "sub": { "type": "string", "minLength": 1 },
+        "act": { "$ref": "#/$defs/actorNode" }
+      }
+    },
+    "principalClaim": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sub"],
+      "properties": {
+        "sub": { "type": "string", "minLength": 1 }
       }
     },
     "effectRecord": {

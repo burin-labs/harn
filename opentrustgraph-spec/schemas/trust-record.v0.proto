@@ -47,7 +47,8 @@ enum AutonomyTier {
 // proto3 convention; the runtime validator enforces them and the JSON
 // Schema is the normative source of truth.
 message TrustRecord {
-  // Schema discriminator, always "opentrustgraph/v0".
+  // Schema discriminator, "opentrustgraph/v0.1" for current records.
+  // "opentrustgraph/v0" remains valid during the compatibility window.
   string schema = 1;
 
   // Globally unique record id. UUIDv7 is recommended.
@@ -89,6 +90,8 @@ message TrustRecord {
   string entry_hash = 14;
 
   // Runtime-specific metadata bag. Consumers MUST preserve unknown keys.
+  // v0.1 reserves actor_chain, effects_grant, effects_used, and
+  // parent_record_id as lineage metadata.
   google.protobuf.Struct metadata = 15;
 }
 

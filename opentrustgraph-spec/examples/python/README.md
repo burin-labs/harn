@@ -9,10 +9,12 @@ linkage contract is interoperable with non-Harn runtimes.
 # Verify a chain export.
 python3 verify_chain.py ../../fixtures/valid/decision-chain.json
 python3 verify_chain.py ../../fixtures/valid/tier-transition.json
+python3 verify_chain.py ../../fixtures/valid/effect-inheritance-chain.json
 
 # Reject tampered or missing-approval fixtures.
 python3 verify_chain.py ../../fixtures/invalid/tampered-chain.json
 python3 verify_chain.py ../../fixtures/invalid/missing-approval.json
+python3 verify_chain.py ../../fixtures/invalid/actor-chain-parentage.json
 
 # Read from stdin (for piping out of a producer):
 harn trust-graph export | python3 verify_chain.py

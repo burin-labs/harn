@@ -23,7 +23,7 @@ from __future__ import annotations
 import hashlib
 import json
 import sys
-from typing import Any, Iterator, List
+from typing import Any, Iterator, List, Tuple
 
 CHAIN_SCHEMA = "opentrustgraph-chain/v0"
 # v0.1 is the current record discriminator. v0 is accepted for one patch
@@ -62,6 +62,39 @@ def canonical_record_bytes(record: dict[str, Any]) -> bytes:
 def compute_entry_hash(record: dict[str, Any]) -> str:
     digest = hashlib.sha256(canonical_record_bytes(record)).hexdigest()
     return f"sha256:{digest}"
+
+
+def actor_chain_parts(value: Any, path: str) -> Tuple[str, List[str]]:
+    if not isinstance(value, dict):
+        raise ValueError(f"{path} must be an object")
+    origin = value.get("sub")
+    if not isinstance(origin, str) or not origin:
+        raise ValueError(f"{path}.sub must be a string")
+    actors: List[str] = []
+    current = value.get("act")
+    current_path = f"{path}.act"
+    while current is not None:
+        if not isinstance(current, dict):
+            raise ValueError(f"{current_path} must be an object")
+        subject = current.get("sub")
+        if not isinstance(subject, str) or not subject:
+            raise ValueError(f"{current_path}.sub must be a string")
+        actors.append(subject)
+        current = current.get("act")
+        current_path = f"{current_path}.act"
+    return origin, actors
+
+
+def actor_chain_extends_parent(
+    child: Tuple[str, List[str]], parent: Tuple[str, List[str]]
+) -> bool:
+    child_origin, child_actors = child
+    parent_origin, parent_actors = parent
+    return (
+        child_origin == parent_origin
+        and len(child_actors) == len(parent_actors) + 1
+        and child_actors[1:] == parent_actors
+    )
 
 
 def verify_chain(envelope: dict[str, Any]) -> List[str]:
@@ -116,29 +149,58 @@ def verify_chain(envelope: dict[str, Any]) -> List[str]:
             if not signatures:
                 errors.append(f"{label}: approval required but signatures are empty")
 
-        # v0.1: when a record claims `effects_used` and points at a
-        # parent record via `parent_record_id`, the used set MUST be a
-        # subset of the parent's `effects_grant`. See CONFORMANCE.md §5.1.
+        # v0.1 lineage: when a record carries effects or actor-chain
+        # metadata and points at a parent record via `parent_record_id`,
+        # those child claims must stay inside the parent record's lineage.
         metadata = record.get("metadata") or {}
         parent_id = metadata.get("parent_record_id")
         effects_used = metadata.get("effects_used") or []
-        if parent_id and effects_used:
+        actor_chain = None
+        if metadata.get("actor_chain") is not None:
+            try:
+                actor_chain = actor_chain_parts(metadata["actor_chain"], f"{label}.actor_chain")
+            except ValueError as error:
+                errors.append(f"{label}: actor_chain invalid: {error}")
+        if parent_id and (effects_used or actor_chain is not None):
             parent_record = by_id.get(parent_id)
             if parent_record is None:
                 errors.append(
                     f"{label}: parent_record_id {parent_id!r} not found in chain"
                 )
             else:
-                parent_grant = (parent_record.get("metadata") or {}).get(
-                    "effects_grant"
-                ) or []
-                canonical_parent_grant = [_canonicalize(e) for e in parent_grant]
-                for effect in effects_used:
-                    if _canonicalize(effect) not in canonical_parent_grant:
+                parent_metadata = parent_record.get("metadata") or {}
+                if effects_used:
+                    parent_grant = parent_metadata.get("effects_grant") or []
+                    canonical_parent_grant = [_canonicalize(e) for e in parent_grant]
+                    for effect in effects_used:
+                        if _canonicalize(effect) not in canonical_parent_grant:
+                            errors.append(
+                                f"{label}: effects_used escaped grant from parent "
+                                f"{parent_id!r}: {effect!r}"
+                            )
+                if actor_chain is not None:
+                    parent_actor_raw = parent_metadata.get("actor_chain")
+                    if parent_actor_raw is None:
                         errors.append(
-                            f"{label}: effects_used escaped grant from parent "
-                            f"{parent_id!r}: {effect!r}"
+                            f"{label}: actor_chain parent {parent_id!r} missing actor_chain"
                         )
+                    else:
+                        try:
+                            parent_actor_chain = actor_chain_parts(
+                                parent_actor_raw,
+                                f"parent {parent_id!r}.actor_chain",
+                            )
+                            if not actor_chain_extends_parent(
+                                actor_chain, parent_actor_chain
+                            ):
+                                errors.append(
+                                    f"{label}: actor_chain escaped parentage from "
+                                    f"parent {parent_id!r}"
+                                )
+                        except ValueError as error:
+                            errors.append(
+                                f"{label}: parent actor_chain invalid: {error}"
+                            )
 
         record_id = record.get("record_id")
         if isinstance(record_id, str) and record_id:

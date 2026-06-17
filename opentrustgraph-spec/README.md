@@ -22,12 +22,15 @@ inventing another envelope.
 - Chain export: `opentrustgraph-chain/v0` (unchanged in v0.1 — the bump
   is additive at the record metadata layer).
 
-`v0.1` reserves three additional keys under `TrustRecord.metadata`:
+`v0.1` reserves four lineage keys under `TrustRecord.metadata`:
+`actor_chain` (RFC 8693 subject/actor chain for who caused this record),
 `effects_grant` (typed effect list the parent extended to this record),
 `effects_used` (typed effect list the action actually exercised), and
 `parent_record_id` (pointer to the parent record's `record_id`).
 Verifiers MUST check that a child's `effects_used` is a subset of the
-parent's `effects_grant`.
+parent's `effects_grant`; when `actor_chain` is present with
+`parent_record_id`, verifiers MUST also check that the child's nested `act`
+chain extends the parent's `actor_chain` by exactly one hop.
 
 ## Contents
 
@@ -52,7 +55,9 @@ parent's `effects_grant`.
 - `fixtures/valid/effect-inheritance-chain.json`: a v0.1 three-agent chain
   (parent → child → grandchild) that demonstrates the effect-inheritance
   invariant `effects_used ⊆ child.effects_grant ⊆ parent.effects_grant`,
-  plus `parent_record_id` linkage.
+  plus `parent_record_id` and `actor_chain` linkage.
+- `fixtures/invalid/actor-chain-parentage.json`: a self-consistent v0.1 chain
+  whose `actor_chain` no longer extends the referenced parent record.
 - `fixtures/invalid/missing-approval.json`: a record that declares approval was
   required but omits the approver/signature evidence.
 - `examples/python/verify_chain.py`: reference, stdlib-only verifier in pure
