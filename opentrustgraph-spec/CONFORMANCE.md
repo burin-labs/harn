@@ -116,15 +116,15 @@ appending the same logical records.
 
 The fixtures under `fixtures/invalid/` are negative test vectors. A
 conformant verifier MUST reject them and SHOULD report an error that
-mentions either `previous_hash mismatch`, `entry_hash mismatch`, or
-`approval required` so operators can triage failures quickly.
+mentions `previous_hash mismatch`, `entry_hash mismatch`, `approval required`,
+or `actor_chain escaped parentage` so operators can triage failures quickly.
 
 ## 5. Versioning
 
 - The schema version moves with the on-disk shape. Adding a new optional
   property at the top level is backwards compatible. Reserving new
-  metadata keys (as `v0.1` does for `effects_grant`, `effects_used`, and
-  `parent_record_id`) is also additive and gets a minor bump.
+  metadata keys (as `v0.1` does for `effects_grant`, `effects_used`,
+  `parent_record_id`, and `actor_chain`) is also additive and gets a minor bump.
 - A minor bump (`v0.1`) MUST stay record-shape compatible with the prior
   minor version. Consumers MUST continue to accept the prior minor
   version's discriminator for one patch release window after the bump
@@ -138,16 +138,17 @@ mentions either `previous_hash mismatch`, `entry_hash mismatch`, or
 - Multiple major versions MAY coexist on the same stream; consumers
   dispatch on the `schema` discriminator.
 
-### 5.1 v0.1 reserved metadata keys (#1778)
+### 5.1 v0.1 Reserved Metadata Keys
 
-`v0.1` adds three reserved keys under `TrustRecord.metadata`. Producers
+`v0.1` adds four reserved lineage keys under `TrustRecord.metadata`. Producers
 MAY omit them; consumers MUST preserve them when re-emitting records.
 
-| Key                 | Type                          | Meaning                                                                              |
-| ------------------- | ----------------------------- | ------------------------------------------------------------------------------------ |
-| `effects_grant`     | array of `EffectRecord`       | Typed effect set the parent extended to this record at spawn time.                   |
-| `effects_used`      | array of `EffectRecord`       | Typed effect set the action actually exercised.                                      |
-| `parent_record_id`  | string (UUID) or null/absent  | Pointer at the parent record's `record_id`. `null`/absent for root records.          |
+| Key                 | Type                          | Meaning                                                                     |
+| ------------------- | ----------------------------- | --------------------------------------------------------------------------- |
+| `actor_chain`       | RFC 8693 actor chain object   | Subject plus nested `act` chain for the principal that caused this record.  |
+| `effects_grant`     | array of `EffectRecord`       | Typed effect set the parent extended to this record at spawn time.          |
+| `effects_used`      | array of `EffectRecord`       | Typed effect set the action actually exercised.                             |
+| `parent_record_id`  | string (UUID) or null/absent  | Pointer at the parent record's `record_id`. `null`/absent for root records. |
 
 `EffectRecord` follows the shape defined in
 `schemas/trust-record.v0.1.schema.json#/$defs/effectRecord`, which mirrors
@@ -166,3 +167,17 @@ Verifiers report failures with an error message containing the substring
 `effects_used escaped grant` so operators can triage them quickly. The
 subset check uses structural equality of the canonical `EffectRecord`
 shape (`kind`, `scope`, `resource`).
+
+When a record `r` carries both `actor_chain` and a `parent_record_id`
+referencing `p`, a v0.1-conformant chain verifier MUST check:
+
+```text
+r.actor_chain.act == current_actor + p.actor_chain.act
+r.actor_chain.sub == p.actor_chain.sub
+```
+
+In other words, dropping the current nested `act` hop from `r.actor_chain`
+must produce `p.actor_chain`; the top-level `sub` must be identical. The
+comparison intentionally ignores `may_act`, which is an authorization hint,
+not audit lineage. Verifiers report failures with an error message
+containing the substring `actor_chain escaped parentage`.

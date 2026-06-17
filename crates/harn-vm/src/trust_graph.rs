@@ -6,6 +6,7 @@ use sha2::{Digest, Sha256};
 use time::{Duration, OffsetDateTime};
 use uuid::Uuid;
 
+use crate::actor_chain::ActorChain;
 use crate::event_log::{
     active_event_log, sanitize_topic_component, AnyEventLog, EventId, EventLog, LogError, LogEvent,
     Topic,
@@ -13,10 +14,9 @@ use crate::event_log::{
 use crate::orchestration::{CapabilityPolicy, EffectRecord};
 
 pub const OPENTRUSTGRAPH_SCHEMA_V0: &str = "opentrustgraph/v0";
-/// OpenTrustGraph v0.1: additive metadata schema (#1778). Adds the
-/// `effects_grant`, `effects_used`, and `parent_record_id` reserved keys
-/// under `TrustRecord.metadata` so chain validators can prove that a
-/// child agent's `effects_used ⊆ parent.effects_grant` (E5.5).
+/// OpenTrustGraph v0.1: additive metadata schema. Reserves lineage keys under
+/// `TrustRecord.metadata` so chain validators can prove that child-agent
+/// effects and actors stay inside the parent chain.
 ///
 /// Backwards compatible: v0 records are still accepted (the new keys are
 /// optional). One patch release window after this bump, v0 will be
@@ -29,16 +29,19 @@ pub const OPENTRUSTGRAPH_ACCEPTED_SCHEMAS: &[&str] =
 pub const OPENTRUSTGRAPH_CHAIN_SCHEMA_V0: &str = "opentrustgraph-chain/v0";
 
 /// Reserved metadata key for the effect grant attached to a record by its
-/// spawning parent. v0.1 addition (#1778).
+/// spawning parent.
 pub const METADATA_KEY_EFFECTS_GRANT: &str = "effects_grant";
 /// Reserved metadata key for the effects the recorded action actually
-/// exercised. Must be a subset of the parent's `effects_grant`. v0.1
-/// addition (#1778).
+/// exercised. Must be a subset of the parent's `effects_grant`.
 pub const METADATA_KEY_EFFECTS_USED: &str = "effects_used";
 /// Reserved metadata key pointing at the parent record's `record_id`.
 /// Lets verifiers reconstruct the agent chain without scanning the whole
-/// stream. v0.1 addition (#1778).
+/// stream.
 pub const METADATA_KEY_PARENT_RECORD_ID: &str = "parent_record_id";
+/// Reserved metadata key carrying the RFC 8693 actor chain for the record.
+/// When paired with `parent_record_id`, the nested `act` chain must extend
+/// the parent's actor chain by exactly one hop.
+pub const METADATA_KEY_ACTOR_CHAIN: &str = "actor_chain";
 pub const TRUST_GRAPH_RECORDS_TOPIC: &str = "trust_graph.records";
 pub const TRUST_GRAPH_GLOBAL_TOPIC: &str = "trust_graph";
 pub const TRUST_GRAPH_LEGACY_GLOBAL_TOPIC: &str = "trust.graph";
@@ -189,9 +192,9 @@ impl TrustRecord {
         record
     }
 
-    /// Attach the typed effect grant a parent extended to this record. v0.1
-    /// (#1778). Empty grants are skipped so legacy `metadata` shape is
-    /// preserved when there is nothing to record.
+    /// Attach the typed effect grant a parent extended to this record.
+    /// Empty grants are skipped so records stay compact when there is
+    /// nothing to prove.
     pub fn with_effects_grant(mut self, effects: Vec<EffectRecord>) -> Self {
         self.set_effects_grant(effects);
         self
@@ -212,9 +215,9 @@ impl TrustRecord {
         decode_effect_list(self.metadata.get(METADATA_KEY_EFFECTS_GRANT))
     }
 
-    /// Attach the typed effect set the action actually exercised. v0.1
-    /// (#1778). Verifiers must check `effects_used ⊆ effects_grant` (and
-    /// transitively up the parent chain).
+    /// Attach the typed effect set the action actually exercised.
+    /// Verifiers must check `effects_used ⊆ effects_grant` through the
+    /// parent chain.
     pub fn with_effects_used(mut self, effects: Vec<EffectRecord>) -> Self {
         self.set_effects_used(effects);
         self
@@ -235,9 +238,9 @@ impl TrustRecord {
         decode_effect_list(self.metadata.get(METADATA_KEY_EFFECTS_USED))
     }
 
-    /// Point this record at its parent's `record_id`. v0.1 (#1778). The
-    /// existing release-record key (`parent_trust_record_id`) is retained
-    /// for the release flow; this is the generic spawn-lineage pointer.
+    /// Point this record at its parent's `record_id`. The existing
+    /// release-record key (`parent_trust_record_id`) is retained for the
+    /// release flow; this is the generic spawn-lineage pointer.
     pub fn with_parent_record_id(mut self, parent_record_id: impl Into<String>) -> Self {
         self.set_parent_record_id(Some(parent_record_id.into()));
         self
@@ -262,6 +265,43 @@ impl TrustRecord {
             .get(METADATA_KEY_PARENT_RECORD_ID)
             .and_then(|value| value.as_str())
             .map(str::to_string)
+    }
+
+    /// Attach the RFC 8693 actor chain for the principal that caused this
+    /// record.
+    pub fn with_actor_chain(mut self, actor_chain: ActorChain) -> Self {
+        self.set_actor_chain(Some(actor_chain));
+        self
+    }
+
+    /// Set or clear the reserved `actor_chain` metadata entry.
+    pub fn set_actor_chain(&mut self, actor_chain: Option<ActorChain>) {
+        match actor_chain {
+            Some(actor_chain) => {
+                self.metadata.insert(
+                    METADATA_KEY_ACTOR_CHAIN.to_string(),
+                    actor_chain.to_json_value(),
+                );
+            }
+            None => {
+                self.metadata.remove(METADATA_KEY_ACTOR_CHAIN);
+            }
+        }
+    }
+
+    /// Decode the reserved actor-chain metadata entry, dropping malformed
+    /// values for callers that only need best-effort display data.
+    pub fn actor_chain(&self) -> Option<ActorChain> {
+        self.try_actor_chain().ok().flatten()
+    }
+
+    /// Decode the reserved actor-chain metadata entry and report malformed
+    /// RFC 8693 claim shapes to strict validators.
+    pub fn try_actor_chain(&self) -> Result<Option<ActorChain>, crate::ActorChainError> {
+        self.metadata
+            .get(METADATA_KEY_ACTOR_CHAIN)
+            .map(ActorChain::from_json_value)
+            .transpose()
     }
 }
 
@@ -592,6 +632,15 @@ pub async fn verify_trust_chain(log: &Arc<AnyEventLog>) -> Result<TrustChainRepo
         }
         previous_hash = Some(record.entry_hash.clone());
     }
+    let lineage_errors = validate_lineage_invariants(
+        records
+            .iter()
+            .map(|(event_id, record)| (format!("event {event_id}"), Some(*event_id), record)),
+    );
+    if broken_at_event_id.is_none() {
+        broken_at_event_id = lineage_errors.iter().find_map(|error| error.event_id);
+    }
+    errors.extend(lineage_errors.into_iter().map(|error| error.message));
 
     Ok(TrustChainReport {
         topic: topic.as_str().to_string(),
@@ -631,6 +680,141 @@ pub fn compute_trust_record_hash(record: &TrustRecord) -> Result<String, LogErro
         .map_err(|error| LogError::Serde(format!("trust record canonicalize error: {error}")))?;
     let digest = Sha256::digest(canonical.as_bytes());
     Ok(format!("sha256:{}", hex::encode(digest)))
+}
+
+struct LineageInvariantError {
+    event_id: Option<EventId>,
+    message: String,
+}
+
+impl LineageInvariantError {
+    fn new(event_id: Option<EventId>, message: String) -> Self {
+        Self { event_id, message }
+    }
+}
+
+fn validate_lineage_invariants<'a, I>(records: I) -> Vec<LineageInvariantError>
+where
+    I: IntoIterator<Item = (String, Option<EventId>, &'a TrustRecord)>,
+{
+    let mut errors = Vec::new();
+    let mut by_id: HashMap<&'a str, &'a TrustRecord> = HashMap::new();
+
+    for (label, event_id, record) in records {
+        let actor_chain = match record.try_actor_chain() {
+            Ok(actor_chain) => actor_chain,
+            Err(error) => {
+                errors.push(LineageInvariantError::new(
+                    event_id,
+                    format!("{label}: actor_chain invalid: {error}"),
+                ));
+                None
+            }
+        };
+        let effects_used = record.effects_used();
+        if let Some(parent_id) = record.parent_record_id() {
+            let parent = by_id.get(parent_id.as_str()).copied();
+            if parent.is_none() && (!effects_used.is_empty() || actor_chain.is_some()) {
+                errors.push(LineageInvariantError::new(
+                    event_id,
+                    format!("{label}: parent_record_id {parent_id:?} not found in chain"),
+                ));
+            }
+            if let Some(parent) = parent {
+                validate_effect_lineage(
+                    &mut errors,
+                    &label,
+                    event_id,
+                    &parent_id,
+                    parent,
+                    &effects_used,
+                );
+                validate_actor_lineage(
+                    &mut errors,
+                    &label,
+                    event_id,
+                    &parent_id,
+                    parent,
+                    actor_chain,
+                );
+            }
+        }
+
+        if !record.record_id.is_empty() {
+            by_id.insert(record.record_id.as_str(), record);
+        }
+    }
+
+    errors
+}
+
+fn validate_effect_lineage(
+    errors: &mut Vec<LineageInvariantError>,
+    label: &str,
+    event_id: Option<EventId>,
+    parent_id: &str,
+    parent: &TrustRecord,
+    effects_used: &[EffectRecord],
+) {
+    if effects_used.is_empty() {
+        return;
+    }
+    let parent_grant = parent.effects_grant();
+    for effect in effects_used {
+        if !parent_grant.contains(effect) {
+            errors.push(LineageInvariantError::new(
+                event_id,
+                format!(
+                    "{label}: effects_used escaped grant from parent {parent_id:?}: {effect:?}"
+                ),
+            ));
+        }
+    }
+}
+
+fn validate_actor_lineage(
+    errors: &mut Vec<LineageInvariantError>,
+    label: &str,
+    event_id: Option<EventId>,
+    parent_id: &str,
+    parent: &TrustRecord,
+    actor_chain: Option<ActorChain>,
+) {
+    let Some(actor_chain) = actor_chain else {
+        return;
+    };
+    let parent_actor_chain = match parent.try_actor_chain() {
+        Ok(Some(parent_actor_chain)) => parent_actor_chain,
+        Ok(None) => {
+            errors.push(LineageInvariantError::new(
+                event_id,
+                format!("{label}: actor_chain parent {parent_id:?} missing actor_chain"),
+            ));
+            return;
+        }
+        Err(error) => {
+            errors.push(LineageInvariantError::new(
+                event_id,
+                format!("{label}: parent actor_chain invalid: {error}"),
+            ));
+            return;
+        }
+    };
+    if !actor_chain_extends_parent(&actor_chain, &parent_actor_chain) {
+        errors.push(LineageInvariantError::new(
+            event_id,
+            format!("{label}: actor_chain escaped parentage from parent {parent_id:?}"),
+        ));
+    }
+}
+
+fn actor_chain_extends_parent(child: &ActorChain, parent: &ActorChain) -> bool {
+    if child.origin() != parent.origin() {
+        return false;
+    }
+    let child_actors: Vec<&str> = child.actors().collect();
+    let parent_actors: Vec<&str> = parent.actors().collect();
+    child_actors.len() == parent_actors.len() + 1 && child_actors[1..] == parent_actors[..]
 }
 
 pub fn group_trust_records_by_trace(records: &[TrustRecord]) -> Vec<TrustTraceGroup> {
@@ -846,6 +1030,7 @@ async fn finalize_trust_record(
     log: &Arc<AnyEventLog>,
     mut record: TrustRecord,
 ) -> Result<TrustRecord, LogError> {
+    attach_current_actor_chain(&mut record);
     let latest = latest_chain_record(log).await?;
     record.chain_index = latest
         .as_ref()
@@ -861,6 +1046,15 @@ async fn finalize_trust_record(
     record.entry_hash.clear();
     record.entry_hash = compute_trust_record_hash(&record)?;
     Ok(record)
+}
+
+fn attach_current_actor_chain(record: &mut TrustRecord) {
+    if record.metadata.contains_key(METADATA_KEY_ACTOR_CHAIN) {
+        return;
+    }
+    if let Some(actor_chain) = crate::agent_sessions::current_actor_chain() {
+        record.set_actor_chain(Some(actor_chain));
+    }
 }
 
 async fn latest_chain_record(
@@ -1075,6 +1269,8 @@ mod tests {
         include_str!("trust_graph/fixtures/invalid/tampered-chain.json");
     const INVALID_MISSING_APPROVAL_JSON: &str =
         include_str!("trust_graph/fixtures/invalid/missing-approval.json");
+    const INVALID_ACTOR_CHAIN_PARENTAGE_JSON: &str =
+        include_str!("trust_graph/fixtures/invalid/actor-chain-parentage.json");
 
     #[derive(Debug, serde::Deserialize)]
     struct TrustChainFixture {
@@ -1127,6 +1323,10 @@ mod tests {
             (
                 "fixtures/invalid/missing-approval.json",
                 INVALID_MISSING_APPROVAL_JSON,
+            ),
+            (
+                "fixtures/invalid/actor-chain-parentage.json",
+                INVALID_ACTOR_CHAIN_PARENTAGE_JSON,
             ),
         ] {
             let source = std::fs::read_to_string(spec_dir.join(relative)).unwrap_or_else(|e| {
@@ -1485,6 +1685,15 @@ mod tests {
                 .any(|error| error.contains("approval required")),
             "missing-approval errors: {missing_errors:?}"
         );
+
+        let actor_parentage = parse_chain_fixture(INVALID_ACTOR_CHAIN_PARENTAGE_JSON);
+        let actor_errors = validate_chain_fixture(&actor_parentage);
+        assert!(
+            actor_errors
+                .iter()
+                .any(|error| error.contains("actor_chain escaped parentage")),
+            "actor-chain-parentage errors: {actor_errors:?}"
+        );
     }
 
     fn parse_chain_fixture(input: &str) -> TrustChainFixture {
@@ -1530,6 +1739,17 @@ mod tests {
             errors.extend(validate_fixture_record_contract(index, record));
         }
         errors.extend(validate_fixture_hash_chain(fixture));
+        errors.extend(
+            validate_lineage_invariants(
+                fixture
+                    .records
+                    .iter()
+                    .enumerate()
+                    .map(|(index, record)| (format!("record {index}"), None, record)),
+            )
+            .into_iter()
+            .map(|error| error.message),
+        );
 
         let expected_verified = errors.is_empty();
         if fixture.chain.verified != expected_verified {
@@ -1647,7 +1867,7 @@ mod tests {
             .unwrap_or(0)
     }
 
-    // ----- OpenTrustGraph v0.1 schema bump (#1778) -----
+    // ----- OpenTrustGraph v0.1 schema and lineage metadata -----
 
     use crate::orchestration::{EffectKind, EffectScope};
 
@@ -1688,10 +1908,11 @@ mod tests {
         assert!(decoded.effects_grant().is_empty());
         assert!(decoded.effects_used().is_empty());
         assert!(decoded.parent_record_id().is_none());
+        assert!(decoded.actor_chain().is_none());
     }
 
     #[test]
-    fn v0_1_effect_metadata_round_trips_through_json() {
+    fn v0_1_lineage_metadata_round_trips_through_json() {
         let grant = vec![
             EffectRecord::new(EffectKind::Net, EffectScope::Write)
                 .with_resource("https://api.example"),
@@ -1700,6 +1921,9 @@ mod tests {
         let used =
             vec![EffectRecord::new(EffectKind::Fs, EffectScope::Read)
                 .with_resource("/workspace/src")];
+        let actor_chain = ActorChain::new("user:kenneth")
+            .pushed("agent:parent")
+            .pushed("agent:child");
         let record = TrustRecord::new(
             "child-agent",
             "fs.read",
@@ -1710,7 +1934,8 @@ mod tests {
         )
         .with_effects_grant(grant.clone())
         .with_effects_used(used.clone())
-        .with_parent_record_id("parent-record-001");
+        .with_parent_record_id("parent-record-001")
+        .with_actor_chain(actor_chain.clone());
 
         let encoded = serde_json::to_string(&record).unwrap();
         let decoded: TrustRecord = serde_json::from_str(&encoded).unwrap();
@@ -1721,10 +1946,11 @@ mod tests {
             decoded.parent_record_id().as_deref(),
             Some("parent-record-001")
         );
+        assert_eq!(decoded.actor_chain(), Some(actor_chain));
     }
 
     #[test]
-    fn effect_helpers_remove_keys_on_empty_input() {
+    fn lineage_helpers_remove_keys_on_empty_input() {
         let mut record = TrustRecord::new(
             "agent",
             "noop",
@@ -1734,14 +1960,46 @@ mod tests {
             AutonomyTier::Suggest,
         )
         .with_effects_grant(vec![EffectRecord::new(EffectKind::Net, EffectScope::Write)])
-        .with_parent_record_id("parent-1");
+        .with_parent_record_id("parent-1")
+        .with_actor_chain(ActorChain::new("user:kenneth").pushed("agent:agent"));
         assert!(record.metadata.contains_key(METADATA_KEY_EFFECTS_GRANT));
         assert!(record.metadata.contains_key(METADATA_KEY_PARENT_RECORD_ID));
+        assert!(record.metadata.contains_key(METADATA_KEY_ACTOR_CHAIN));
 
         record.set_effects_grant(Vec::new());
         record.set_parent_record_id(None);
+        record.set_actor_chain(None);
         assert!(!record.metadata.contains_key(METADATA_KEY_EFFECTS_GRANT));
         assert!(!record.metadata.contains_key(METADATA_KEY_PARENT_RECORD_ID));
+        assert!(!record.metadata.contains_key(METADATA_KEY_ACTOR_CHAIN));
+    }
+
+    #[tokio::test]
+    async fn append_attaches_current_session_actor_chain() {
+        crate::reset_thread_local_state();
+        let log: Arc<AnyEventLog> = Arc::new(AnyEventLog::Memory(MemoryEventLog::new(16)));
+        let actor_chain = ActorChain::new("user:kenneth").pushed("agent:reviewer");
+        let session_id = crate::agent_sessions::open_or_create_with_actor_chain(
+            Some("trust-actor-session".to_string()),
+            Some(actor_chain.clone()),
+        );
+        let _session = crate::agent_sessions::enter_current_session(session_id);
+
+        let appended = append_trust_record(
+            &log,
+            &TrustRecord::new(
+                "reviewer",
+                "fs.read",
+                None,
+                TrustOutcome::Success,
+                "trace-actor-session",
+                AutonomyTier::ActAuto,
+            ),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(appended.actor_chain(), Some(actor_chain));
     }
 
     #[tokio::test]
@@ -1764,7 +2022,8 @@ mod tests {
                 "trace-parent",
                 AutonomyTier::ActAuto,
             )
-            .with_effects_grant(parent_grant.clone()),
+            .with_effects_grant(parent_grant.clone())
+            .with_actor_chain(ActorChain::new("user:kenneth").pushed("agent:parent")),
         )
         .await
         .unwrap();
@@ -1785,7 +2044,12 @@ mod tests {
                 AutonomyTier::ActAuto,
             )
             .with_effects_grant(child_grant.clone())
-            .with_parent_record_id(parent.record_id.clone()),
+            .with_parent_record_id(parent.record_id.clone())
+            .with_actor_chain(
+                ActorChain::new("user:kenneth")
+                    .pushed("agent:parent")
+                    .pushed("agent:child"),
+            ),
         )
         .await
         .unwrap();
@@ -1804,7 +2068,13 @@ mod tests {
                 AutonomyTier::ActAuto,
             )
             .with_effects_used(grandchild_used.clone())
-            .with_parent_record_id(child.record_id.clone()),
+            .with_parent_record_id(child.record_id.clone())
+            .with_actor_chain(
+                ActorChain::new("user:kenneth")
+                    .pushed("agent:parent")
+                    .pushed("agent:child")
+                    .pushed("agent:grandchild"),
+            ),
         )
         .await
         .unwrap();
@@ -1838,5 +2108,51 @@ mod tests {
         let report = verify_trust_chain(&log).await.unwrap();
         assert!(report.verified, "verification errors: {:?}", report.errors);
         assert_eq!(report.total, 3);
+    }
+
+    #[tokio::test]
+    async fn verify_chain_rejects_actor_chain_that_escapes_parentage() {
+        let log: Arc<AnyEventLog> = Arc::new(AnyEventLog::Memory(MemoryEventLog::new(16)));
+        let parent = append_trust_record(
+            &log,
+            &TrustRecord::new(
+                "parent",
+                "agent.spawn",
+                None,
+                TrustOutcome::Success,
+                "trace-parent",
+                AutonomyTier::ActAuto,
+            )
+            .with_actor_chain(ActorChain::new("user:kenneth").pushed("agent:parent")),
+        )
+        .await
+        .unwrap();
+
+        append_trust_record(
+            &log,
+            &TrustRecord::new(
+                "child",
+                "agent.spawn",
+                None,
+                TrustOutcome::Success,
+                "trace-child",
+                AutonomyTier::ActAuto,
+            )
+            .with_parent_record_id(parent.record_id)
+            .with_actor_chain(
+                ActorChain::new("user:kenneth")
+                    .pushed("agent:other-parent")
+                    .pushed("agent:child"),
+            ),
+        )
+        .await
+        .unwrap();
+
+        let report = verify_trust_chain(&log).await.unwrap();
+        assert!(!report.verified);
+        assert!(report
+            .errors
+            .iter()
+            .any(|error| error.contains("actor_chain escaped parentage")));
     }
 }

@@ -19,10 +19,10 @@ Version markers:
 {"schema":"opentrustgraph-chain/v0"}
 ```
 
-`v0.1` is an additive bump over `v0`. It reserves three new keys under
-`TrustRecord.metadata` — `effects_grant`, `effects_used`, and
+`v0.1` is an additive bump over `v0`. It reserves four lineage keys under
+`TrustRecord.metadata` — `actor_chain`, `effects_grant`, `effects_used`, and
 `parent_record_id` — so chain validators can prove that a child agent's
-`effects_used ⊆ parent.effects_grant`. The chain hash inputs are
+effects and actors stayed inside the parent chain. The chain hash inputs are
 unchanged because metadata was already hash-covered. `v0` records still
 parse for one patch release window per
 [`opentrustgraph-spec/CONFORMANCE.md` §5](../opentrustgraph-spec/CONFORMANCE.md#5-versioning),
@@ -76,7 +76,11 @@ Fields:
 - `entry_hash`: SHA-256 hash over the canonical record with `entry_hash`
   removed. Harn stores it with the `sha256:` prefix.
 - `metadata`: extensible runtime-specific detail bag. `v0.1` reserves
-  three keys at this layer:
+  lineage keys at this layer:
+  - `actor_chain`: RFC 8693 `{sub, act}` actor chain for the principal
+    that caused the record. When `parent_record_id` is present, verifiers
+    MUST check that this chain extends the parent's `actor_chain` by
+    exactly one nested `act` hop.
   - `effects_grant`: typed `EffectRecord` list (`kind`, `scope`, optional
     `resource`) the parent extended to this record.
   - `effects_used`: typed `EffectRecord` list the action actually

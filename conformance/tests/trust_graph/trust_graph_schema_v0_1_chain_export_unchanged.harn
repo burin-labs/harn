@@ -1,7 +1,7 @@
 import "std/triggers"
 
 /**
- * Verifies that the v0.1 schema bump (#1778) is additive at the record
+ * Verifies that the v0.1 schema bump is additive at the record
  * metadata layer only: the chain-export envelope discriminator stays
  * `opentrustgraph-chain/v0`, and a v0.1 record + chain still validates
  * end-to-end. Backwards compatibility of the prior `opentrustgraph/v0`

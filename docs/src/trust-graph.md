@@ -27,9 +27,9 @@ Each record carries:
 - `chain_index`
 - `previous_hash`
 - `entry_hash`
-- `metadata` (v0.1 reserves `effects_grant`, `effects_used`, and
-  `parent_record_id` so chain validators can prove that a child agent's
-  `effects_used ⊆ parent.effects_grant`)
+- `metadata` (v0.1 reserves `actor_chain`, `effects_grant`, `effects_used`,
+  and `parent_record_id` so chain validators can prove that a child agent's
+  effects and actors stayed inside the parent chain)
 
 [otg-versioning]: https://github.com/burin-labs/harn/blob/main/opentrustgraph-spec/CONFORMANCE.md#5-versioning
 

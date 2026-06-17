@@ -1,7 +1,7 @@
 import "std/triggers"
 
 /**
- * Verifies the v0.1 schema bump (#1778): newly-appended records carry
+ * Verifies the v0.1 schema bump: newly-appended records carry
  * the `opentrustgraph/v0.1` discriminator end-to-end, and the chain still
  * verifies cleanly.
  */
