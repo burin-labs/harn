@@ -1,6 +1,7 @@
 use std::collections::BTreeMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{LazyLock, Mutex};
+use std::time::{Duration, Instant, SystemTime};
 
 use sha2::{Digest, Sha256};
 
@@ -8,6 +9,14 @@ use crate::error::HostlibError;
 
 static ARTIFACTS: LazyLock<Mutex<BTreeMap<String, CommandArtifacts>>> =
     LazyLock::new(|| Mutex::new(BTreeMap::new()));
+static LAST_RETENTION_SWEEP: LazyLock<Mutex<Option<Instant>>> = LazyLock::new(|| Mutex::new(None));
+
+const RETENTION_ENV: &str = "HARN_COMMAND_ARTIFACT_RETENTION_SECS";
+const DEFAULT_RETENTION: Duration = Duration::from_hours(168);
+const SWEEP_INTERVAL: Duration = Duration::from_hours(1);
+const SWEEP_MAX_CANDIDATES: usize = 4096;
+const SWEEP_MAX_DELETIONS: usize = 256;
+const ARTIFACT_PREFIX: &str = "harn-command-cmd_";
 
 #[derive(Clone, Debug)]
 pub(crate) struct CommandArtifacts {
@@ -25,6 +34,7 @@ pub(crate) fn persist_artifacts(
     stderr: &[u8],
     handle_id: Option<&str>,
 ) -> Result<CommandArtifacts, HostlibError> {
+    maybe_sweep_stale_artifacts();
     let artifacts = planned_artifact_paths(command_id);
     std::fs::create_dir_all(artifacts.output_path.parent().unwrap()).map_err(|e| {
         HostlibError::Backend {
@@ -100,5 +110,250 @@ fn register_artifacts(command_id: &str, handle_id: Option<&str>, artifacts: &Com
     store.insert(command_id.to_string(), artifacts.clone());
     if let Some(handle_id) = handle_id {
         store.insert(handle_id.to_string(), artifacts.clone());
+    }
+}
+
+fn maybe_sweep_stale_artifacts() {
+    let Some(retention) = retention_duration() else {
+        return;
+    };
+    let now = Instant::now();
+    {
+        let mut last = LAST_RETENTION_SWEEP
+            .lock()
+            .expect("command artifact retention state poisoned");
+        if last
+            .map(|last_run| now.duration_since(last_run) < SWEEP_INTERVAL)
+            .unwrap_or(false)
+        {
+            return;
+        }
+        *last = Some(now);
+    }
+    sweep_command_artifact_dirs(&std::env::temp_dir(), retention, SystemTime::now());
+}
+
+fn retention_duration() -> Option<Duration> {
+    let secs = std::env::var(RETENTION_ENV)
+        .ok()
+        .and_then(|value| value.parse::<u64>().ok())
+        .unwrap_or(DEFAULT_RETENTION.as_secs());
+    if secs == 0 {
+        None
+    } else {
+        Some(Duration::from_secs(secs))
+    }
+}
+
+fn sweep_command_artifact_dirs(temp_dir: &Path, retention: Duration, now: SystemTime) {
+    let Ok(entries) = std::fs::read_dir(temp_dir) else {
+        return;
+    };
+    let mut candidates = 0;
+    let mut deletions = 0;
+    for entry in entries.flatten() {
+        if candidates >= SWEEP_MAX_CANDIDATES || deletions >= SWEEP_MAX_DELETIONS {
+            break;
+        }
+        let path = entry.path();
+        let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
+            continue;
+        };
+        let Some(pid) = parse_command_artifact_dir_name(name) else {
+            continue;
+        };
+        candidates += 1;
+        let Ok(metadata) = std::fs::symlink_metadata(&path) else {
+            continue;
+        };
+        if !metadata.file_type().is_dir() {
+            continue;
+        }
+        let Ok(modified) = metadata.modified() else {
+            continue;
+        };
+        if now
+            .duration_since(modified)
+            .map(|age| age < retention)
+            .unwrap_or(true)
+        {
+            continue;
+        }
+        if process_is_alive(pid) {
+            continue;
+        }
+        if std::fs::remove_dir_all(&path).is_ok() {
+            deletions += 1;
+        }
+    }
+}
+
+fn parse_command_artifact_dir_name(name: &str) -> Option<u32> {
+    let suffix = name.strip_prefix(ARTIFACT_PREFIX)?;
+    let mut parts = suffix.split('_');
+    let pid = parts.next()?.parse::<u32>().ok()?;
+    parts.next()?.parse::<u128>().ok()?;
+    parts.next()?.parse::<u64>().ok()?;
+    if parts.next().is_some() {
+        return None;
+    }
+    Some(pid)
+}
+
+#[cfg(unix)]
+fn process_is_alive(pid: u32) -> bool {
+    if pid == 0 || pid > i32::MAX as u32 {
+        return true;
+    }
+    extern "C" {
+        fn kill(pid: i32, sig: i32) -> i32;
+    }
+    let result = unsafe { kill(pid as i32, 0) };
+    result == 0
+        || std::io::Error::last_os_error()
+            .raw_os_error()
+            .map(|code| code != 3)
+            .unwrap_or(true)
+}
+
+#[cfg(windows)]
+fn process_is_alive(pid: u32) -> bool {
+    use std::ffi::c_void;
+
+    if pid == 0 {
+        return true;
+    }
+
+    const ERROR_ACCESS_DENIED: i32 = 5;
+    const PROCESS_QUERY_LIMITED_INFORMATION: u32 = 0x1000;
+    const STILL_ACTIVE: u32 = 259;
+
+    type Handle = *mut c_void;
+
+    extern "system" {
+        fn CloseHandle(hObject: Handle) -> i32;
+        fn GetExitCodeProcess(hProcess: Handle, lpExitCode: *mut u32) -> i32;
+        fn OpenProcess(dwDesiredAccess: u32, bInheritHandle: i32, dwProcessId: u32) -> Handle;
+    }
+
+    let handle = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid) };
+    if handle.is_null() {
+        return std::io::Error::last_os_error()
+            .raw_os_error()
+            .map(|code| code == ERROR_ACCESS_DENIED)
+            .unwrap_or(true);
+    }
+
+    let mut exit_code = 0;
+    let alive =
+        unsafe { GetExitCodeProcess(handle, &mut exit_code) } != 0 && exit_code == STILL_ACTIVE;
+    let _ = unsafe { CloseHandle(handle) };
+    alive
+}
+
+#[cfg(not(any(unix, windows)))]
+fn process_is_alive(pid: u32) -> bool {
+    // Without a portable liveness probe, be conservative for this safety check.
+    let _ = pid;
+    true
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use filetime::FileTime;
+    use tempfile::tempdir;
+
+    fn artifact_dir(parent: &Path, pid: u32, nanos: u128, counter: u64) -> PathBuf {
+        parent.join(format!("harn-command-cmd_{pid}_{nanos}_{counter}"))
+    }
+
+    fn create_artifact_dir(parent: &Path, pid: u32, nanos: u128, counter: u64) -> PathBuf {
+        let path = artifact_dir(parent, pid, nanos, counter);
+        std::fs::create_dir(&path).unwrap();
+        std::fs::write(path.join("combined.txt"), "output").unwrap();
+        path
+    }
+
+    fn set_dir_mtime(path: &Path, time: SystemTime) {
+        let file_time = FileTime::from_system_time(time);
+        filetime::set_file_mtime(path, file_time).unwrap();
+    }
+
+    fn dead_pid() -> u32 {
+        (900_000..=999_999)
+            .find(|pid| !process_is_alive(*pid))
+            .expect("test host should have an unused high pid")
+    }
+
+    #[test]
+    fn command_artifact_sweep_deletes_stale_artifact_dirs() {
+        let temp = tempdir().unwrap();
+        let now = SystemTime::now();
+        let stale = create_artifact_dir(temp.path(), dead_pid(), 100, 1);
+        set_dir_mtime(&stale, now - Duration::from_secs(10));
+
+        sweep_command_artifact_dirs(temp.path(), Duration::from_secs(5), now);
+
+        assert!(!stale.exists());
+    }
+
+    #[test]
+    fn command_artifact_sweep_preserves_recent_artifact_dirs() {
+        let temp = tempdir().unwrap();
+        let now = SystemTime::now();
+        let recent = create_artifact_dir(temp.path(), dead_pid(), 100, 1);
+        set_dir_mtime(&recent, now - Duration::from_secs(3));
+
+        sweep_command_artifact_dirs(temp.path(), Duration::from_secs(5), now);
+
+        assert!(recent.exists());
+    }
+
+    #[test]
+    fn command_artifact_sweep_preserves_live_pid_artifact_dirs() {
+        let temp = tempdir().unwrap();
+        let now = SystemTime::now();
+        let live = create_artifact_dir(temp.path(), std::process::id(), 100, 1);
+        set_dir_mtime(&live, now - Duration::from_secs(10));
+
+        sweep_command_artifact_dirs(temp.path(), Duration::from_secs(5), now);
+
+        assert!(live.exists());
+    }
+
+    #[test]
+    fn command_artifact_sweep_preserves_malformed_names() {
+        let temp = tempdir().unwrap();
+        let now = SystemTime::now();
+        let malformed = temp.path().join("harn-command-cmd_123_not-nanos_1");
+        std::fs::create_dir(&malformed).unwrap();
+        set_dir_mtime(&malformed, now - Duration::from_secs(10));
+
+        sweep_command_artifact_dirs(temp.path(), Duration::from_secs(5), now);
+
+        assert!(malformed.exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn command_artifact_sweep_does_not_follow_symlinks() {
+        use std::os::unix::fs::symlink;
+
+        let temp = tempdir().unwrap();
+        let now = SystemTime::now();
+        let target = temp.path().join("target");
+        std::fs::create_dir(&target).unwrap();
+        std::fs::write(target.join("keep.txt"), "keep").unwrap();
+        let link = artifact_dir(temp.path(), dead_pid(), 100, 1);
+        symlink(&target, &link).unwrap();
+
+        sweep_command_artifact_dirs(temp.path(), Duration::from_secs(5), now);
+
+        assert!(link.exists());
+        assert_eq!(
+            std::fs::read_to_string(target.join("keep.txt")).unwrap(),
+            "keep"
+        );
     }
 }
