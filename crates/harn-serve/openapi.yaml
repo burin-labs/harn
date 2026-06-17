@@ -1486,6 +1486,35 @@ paths:
         default:
           $ref: "#/components/responses/Error"
 
+  /v1/workflow-trigger-runs:
+    get:
+      tags: [Events]
+      operationId: listWorkflowTriggerRuns
+      summary: Read recent trigger-dispatched workflow runs.
+      description: |
+        Returns dispatch observations from the Harn trigger outbox joined with
+        matching action-graph telemetry. This endpoint is read-only; connector
+        webhook parsing and workflow dispatch semantics remain owned by Harn.
+      parameters:
+        - $ref: "#/components/parameters/ProtocolVersion"
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 500
+            default: 100
+      responses:
+        "200":
+          description: Recent workflow trigger runs, newest first.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WorkflowTriggerRunList"
+        default:
+          $ref: "#/components/responses/Error"
+
   /v1/events/{event_id}:
     get:
       tags: [Events]
@@ -3830,6 +3859,82 @@ components:
               type: array
               items:
                 $ref: "#/components/schemas/Event"
+    WorkflowTriggerRunList:
+      allOf:
+        - $ref: "#/components/schemas/PaginatedList"
+        - type: object
+          properties:
+            data:
+              type: array
+              items:
+                $ref: "#/components/schemas/WorkflowTriggerRun"
+    WorkflowTriggerRun:
+      type: object
+      required:
+        - id
+        - object
+        - event_log_id
+        - kind
+        - status
+        - occurred_at_ms
+        - action_graph
+      properties:
+        id:
+          type: string
+        object:
+          type: string
+          enum: [workflow_trigger_run]
+        event_log_id:
+          type: integer
+          minimum: 1
+        kind:
+          type: string
+          enum: [dispatch_succeeded, dispatch_failed, dispatch_skipped]
+        status:
+          type: string
+          enum: [succeeded, failed, skipped]
+        occurred_at_ms:
+          type: integer
+          format: int64
+        trigger_id:
+          type: [string, "null"]
+        event_id:
+          type: [string, "null"]
+        binding_key:
+          type: [string, "null"]
+        attempt:
+          type: [integer, "null"]
+          minimum: 0
+        replay_of_event_id:
+          type: [string, "null"]
+        handler_kind:
+          type: [string, "null"]
+        target_uri:
+          type: [string, "null"]
+        error:
+          type: [string, "null"]
+        result:
+          $ref: "#/components/schemas/JsonValue"
+        skip_stage:
+          type: [string, "null"]
+        detail:
+          $ref: "#/components/schemas/JsonValue"
+        action_graph:
+          oneOf:
+            - $ref: "#/components/schemas/ActionGraphObservation"
+            - type: "null"
+    ActionGraphObservation:
+      type: object
+      required: [nodes, edges]
+      properties:
+        nodes:
+          type: array
+          items:
+            $ref: "#/components/schemas/JsonObject"
+        edges:
+          type: array
+          items:
+            $ref: "#/components/schemas/JsonObject"
     EventStream:
       type: string
       description: UTF-8 Server-Sent Events. Each frame `data` field is an Event JSON object.

@@ -15,6 +15,7 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use futures::{stream, Stream, StreamExt};
+use harn_vm::event_log::{AnyEventLog, EventLog, LogEvent, Topic};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use time::format_description::well_known::Rfc3339;
@@ -32,6 +33,7 @@ use crate::tls::HttpTlsConfig;
 
 const OPENAPI_YAML: &str = include_str!("../../openapi.yaml");
 const API_PROTOCOL_VERSION: &str = "agents-protocol-2026-04-25";
+const ACTION_GRAPH_TOPIC: &str = "observability.action_graph";
 
 #[derive(Clone, Debug)]
 pub struct ApiHttpServeOptions {
@@ -50,11 +52,7 @@ pub struct ApiServerConfig {
 impl ApiServerConfig {
     pub fn for_pipeline(path: impl Into<String>) -> Self {
         let path = path.into();
-        let root = Path::new(&path)
-            .parent()
-            .filter(|parent| !parent.as_os_str().is_empty())
-            .map(Path::to_path_buf)
-            .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
+        let root = api_workspace_root_for_pipeline(&path);
         Self {
             acp: AcpServerConfig::for_pipeline(path),
             auth_policy: AuthPolicy::allow_all(),
@@ -73,6 +71,19 @@ impl ApiServerConfig {
     }
 }
 
+fn api_workspace_root_for_pipeline(path: &str) -> PathBuf {
+    if let Ok(root) = std::env::var("HARN_PROJECT_ROOT") {
+        if !root.trim().is_empty() {
+            return PathBuf::from(root);
+        }
+    }
+    Path::new(path)
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .map(Path::to_path_buf)
+        .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")))
+}
+
 #[derive(Clone)]
 pub struct ApiServer {
     state: ApiState,
@@ -87,6 +98,11 @@ impl ApiServer {
         };
         let (client, response_rx) = AcpClient::start(config.acp);
         let (events_tx, _) = broadcast::channel(1024);
+        let (event_log, event_log_error) =
+            match harn_vm::event_log::install_default_for_base_dir(&config.workspace_root) {
+                Ok(log) => (Some(log), None),
+                Err(error) => (None, Some(error.to_string())),
+            };
         let state = ApiState {
             acp: client.clone(),
             inner: Arc::new(Mutex::new(ApiStateInner::new(config.workspace_root))),
@@ -94,6 +110,8 @@ impl ApiServer {
             auth_policy: config.auth_policy,
             permissions: Arc::new(InMemoryPermissionStore::default()),
             provider_catalog,
+            event_log,
+            event_log_error,
         };
         client.spawn_output_loop(response_rx, state.clone());
         Self { state }
@@ -132,6 +150,8 @@ struct ApiState {
     /// all read and write the same store.
     permissions: Arc<InMemoryPermissionStore>,
     provider_catalog: ProviderCatalogRuntime,
+    event_log: Option<Arc<AnyEventLog>>,
+    event_log_error: Option<String>,
 }
 
 #[derive(Clone, Default)]
@@ -186,6 +206,7 @@ impl ApiStateInner {
                     "tasks",
                     "events",
                     "permissions",
+                    "workflow_trigger_runs",
                     "workspace.files.read"
                 ],
                 "connectors": [],
@@ -645,6 +666,7 @@ fn api_router(state: ApiState) -> Router {
         .route("/v1/tasks/{task_id}", get(get_task))
         .route("/v1/tasks/{task_id}/cancel", post(cancel_task))
         .route("/v1/events", get(list_events))
+        .route("/v1/workflow-trigger-runs", get(list_workflow_trigger_runs))
         .route("/v1/events/stream", get(stream_events))
         .route("/v1/sessions/{session_id}/events", get(list_session_events))
         .route(
@@ -726,6 +748,7 @@ async fn api_root() -> Response {
             "session_view": "/v1/sessions/{session_id}/view",
             "tasks": "/v1/tasks",
             "events": "/v1/events/stream",
+            "workflow_trigger_runs": "/v1/workflow-trigger-runs",
             "permission_requests": "/v1/permission-requests",
             "permission_policy": "/v1/permissions/policy",
             "permission_rules": "/v1/permissions/rules",
@@ -1733,6 +1756,55 @@ async fn list_events(
     Json(list_response(state.history(&filter))).into_response()
 }
 
+async fn list_workflow_trigger_runs(
+    State(state): State<ApiState>,
+    Query(query): Query<ListQuery>,
+    OriginalUri(uri): OriginalUri,
+    headers: HeaderMap,
+) -> Response {
+    if let Err(response) = authorize(&state, Method::GET, &uri, &headers, Bytes::new()).await {
+        return response;
+    }
+    let Some(event_log) = state.event_log.clone() else {
+        return api_error(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "event_log_unavailable",
+            state
+                .event_log_error
+                .as_deref()
+                .unwrap_or("event log unavailable"),
+        );
+    };
+    let limit = query.limit.unwrap_or(100).clamp(1, 500);
+    let dispatches = match read_api_event_log_topic(&event_log, harn_vm::TRIGGER_OUTBOX_TOPIC).await
+    {
+        Ok(events) => events,
+        Err(message) => {
+            return api_error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "event_log_read_failed",
+                &message,
+            );
+        }
+    };
+    let action_graph = match read_api_event_log_topic(&event_log, ACTION_GRAPH_TOPIC).await {
+        Ok(events) => events,
+        Err(message) => {
+            return api_error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "event_log_read_failed",
+                &message,
+            );
+        }
+    };
+    Json(list_response(workflow_trigger_run_values(
+        &dispatches,
+        &action_graph,
+        limit,
+    )))
+    .into_response()
+}
+
 async fn list_session_events(
     State(state): State<ApiState>,
     AxumPath(session_id): AxumPath<String>,
@@ -2389,6 +2461,127 @@ fn limit_values(mut values: Vec<Value>, limit: Option<usize>) -> Vec<Value> {
     values
 }
 
+async fn read_api_event_log_topic(
+    log: &Arc<AnyEventLog>,
+    topic_name: &str,
+) -> Result<Vec<(u64, LogEvent)>, String> {
+    let topic = Topic::new(topic_name).map_err(|error| error.to_string())?;
+    log.read_range(&topic, None, usize::MAX)
+        .await
+        .map_err(|error| error.to_string())
+}
+
+fn payload_string(payload: Option<&serde_json::Map<String, Value>>, field: &str) -> Option<String> {
+    payload
+        .and_then(|payload| payload.get(field))
+        .and_then(Value::as_str)
+        .map(str::to_string)
+}
+
+fn payload_value(payload: Option<&serde_json::Map<String, Value>>, field: &str) -> Option<Value> {
+    payload.and_then(|payload| payload.get(field).cloned())
+}
+
+fn workflow_trigger_run_values(
+    dispatches: &[(u64, LogEvent)],
+    action_graph: &[(u64, LogEvent)],
+    limit: usize,
+) -> Vec<Value> {
+    let graph_by_event_id = action_graph_by_event_id(action_graph);
+    let mut recent: Vec<_> = dispatches
+        .iter()
+        .filter_map(|(event_log_id, event)| {
+            if !matches!(
+                event.kind.as_str(),
+                "dispatch_succeeded" | "dispatch_failed" | "dispatch_skipped"
+            ) {
+                return None;
+            }
+            let payload = event.payload.as_object();
+            let event_id = event.headers.get("event_id").cloned();
+            let kind = event.kind.clone();
+            let status = event
+                .kind
+                .strip_prefix("dispatch_")
+                .unwrap_or(event.kind.as_str())
+                .to_string();
+            let action_graph = event_id
+                .as_deref()
+                .and_then(|id| graph_by_event_id.get(id))
+                .cloned()
+                .unwrap_or(Value::Null);
+            Some(json!({
+                "id": format!("workflow_trigger_run_{event_log_id}"),
+                "object": "workflow_trigger_run",
+                "event_log_id": event_log_id,
+                "kind": kind,
+                "status": status,
+                "occurred_at_ms": event.occurred_at_ms,
+                "trigger_id": event.headers.get("trigger_id").cloned(),
+                "event_id": event_id,
+                "binding_key": event.headers.get("binding_key").cloned(),
+                "attempt": event.headers.get("attempt").and_then(|attempt| attempt.parse::<u32>().ok()),
+                "replay_of_event_id": event.headers.get("replay_of_event_id").cloned(),
+                "handler_kind": payload_string(payload, "handler_kind"),
+                "target_uri": payload_string(payload, "target_uri"),
+                "error": payload_string(payload, "error"),
+                "result": payload_value(payload, "result"),
+                "skip_stage": payload_string(payload, "skip_stage"),
+                "detail": payload_value(payload, "detail"),
+                "action_graph": action_graph,
+            }))
+        })
+        .collect();
+
+    recent.sort_by_key(|value| {
+        value
+            .get("occurred_at_ms")
+            .and_then(Value::as_i64)
+            .unwrap_or_default()
+    });
+    if recent.len() > limit {
+        recent.drain(0..recent.len() - limit);
+    }
+    recent.reverse();
+    recent
+}
+
+fn action_graph_by_event_id(events: &[(u64, LogEvent)]) -> BTreeMap<String, Value> {
+    let mut by_event_id = BTreeMap::<String, (Vec<Value>, Vec<Value>)>::new();
+    for (_, event) in events {
+        let Some(event_id) = event.headers.get("event_id").cloned() else {
+            continue;
+        };
+        let entry = by_event_id.entry(event_id).or_default();
+        if let Some(nodes) = event
+            .payload
+            .pointer("/observability/action_graph_nodes")
+            .and_then(Value::as_array)
+        {
+            entry.0.extend(nodes.iter().cloned());
+        }
+        if let Some(edges) = event
+            .payload
+            .pointer("/observability/action_graph_edges")
+            .and_then(Value::as_array)
+        {
+            entry.1.extend(edges.iter().cloned());
+        }
+    }
+    by_event_id
+        .into_iter()
+        .map(|(event_id, (nodes, edges))| {
+            (
+                event_id,
+                json!({
+                    "nodes": nodes,
+                    "edges": edges,
+                }),
+            )
+        })
+        .collect()
+}
+
 fn api_session_view(session: &Value, history: &[ApiEvent]) -> harn_vm::orchestration::SessionView {
     let session_id = session
         .get("id")
@@ -2626,6 +2819,7 @@ fn capability_values() -> Vec<Value> {
         json!({"id": "sessions", "description": "Create, inspect, fork, truncate, update, and close ACP-backed Harn sessions."}),
         json!({"id": "tasks", "description": "Submit prompts asynchronously, track task status, and abort active tasks."}),
         json!({"id": "events", "description": "Read snapshots and stream live session, task, tool, permission, and runtime events over SSE."}),
+        json!({"id": "workflow_trigger_runs", "description": "Read recent Harn trigger dispatches and joined action-graph observations for local workflow operators."}),
         json!({"id": "permissions", "description": "Approve or deny host permission and HITL requests through the same ACP runtime path."}),
         json!({"id": "provider_catalog", "description": "Read the normalized Harn provider/model catalog used by this runtime."}),
         json!({"id": "tools", "description": "Inspect the local control-plane tool registry exposed by this server."}),
@@ -2934,6 +3128,99 @@ mod tests {
             .await
             .expect("response");
         assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn workflow_trigger_runs_endpoint_projects_dispatch_events() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let script = dir.path().join("agent.harn");
+        std::fs::write(&script, "pipeline main() { __io_println(prompt) }\n")
+            .expect("write script");
+        let server = ApiServer::new(ApiServerConfig::for_pipeline(
+            script.to_string_lossy().to_string(),
+        ));
+        let event_log = server.state.event_log.as_ref().expect("event log").clone();
+        let outbox_topic = Topic::new(harn_vm::TRIGGER_OUTBOX_TOPIC).expect("outbox topic");
+        let action_graph_topic = Topic::new(ACTION_GRAPH_TOPIC).expect("action graph topic");
+
+        let mut dispatch_headers = BTreeMap::new();
+        dispatch_headers.insert("trigger_id".to_string(), "github.comment".to_string());
+        dispatch_headers.insert("event_id".to_string(), "evt-123".to_string());
+        dispatch_headers.insert("binding_key".to_string(), "github-comment".to_string());
+        dispatch_headers.insert("attempt".to_string(), "2".to_string());
+
+        event_log
+            .append(
+                &outbox_topic,
+                LogEvent {
+                    kind: "dispatch_succeeded".to_string(),
+                    payload: json!({
+                        "handler_kind": "workflow",
+                        "target_uri": "harn://workflows/comment_triage",
+                        "result": {"session_id": "session-123"}
+                    }),
+                    headers: dispatch_headers,
+                    occurred_at_ms: 2_000,
+                },
+            )
+            .await
+            .expect("append dispatch");
+        event_log
+            .append(
+                &outbox_topic,
+                LogEvent {
+                    kind: "diagnostic".to_string(),
+                    payload: json!({}),
+                    headers: BTreeMap::new(),
+                    occurred_at_ms: 2_001,
+                },
+            )
+            .await
+            .expect("append ignored event");
+
+        let mut graph_headers = BTreeMap::new();
+        graph_headers.insert("event_id".to_string(), "evt-123".to_string());
+        event_log
+            .append(
+                &action_graph_topic,
+                LogEvent {
+                    kind: "action_graph_observed".to_string(),
+                    payload: json!({
+                        "observability": {
+                            "action_graph_nodes": [{"id": "trigger", "label": "GitHub comment"}],
+                            "action_graph_edges": [{"from": "trigger", "to": "workflow"}]
+                        }
+                    }),
+                    headers: graph_headers,
+                    occurred_at_ms: 2_002,
+                },
+            )
+            .await
+            .expect("append graph");
+
+        let response = api_router(server.state)
+            .oneshot(
+                Request::builder()
+                    .uri("/v1/workflow-trigger-runs?limit=1")
+                    .body(Body::empty())
+                    .expect("request"),
+            )
+            .await
+            .expect("response");
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = read_json(response).await;
+        let data = body["data"].as_array().expect("data");
+        assert_eq!(data.len(), 1);
+        assert_eq!(data[0]["object"], "workflow_trigger_run");
+        assert_eq!(data[0]["status"], "succeeded");
+        assert_eq!(data[0]["trigger_id"], "github.comment");
+        assert_eq!(data[0]["event_id"], "evt-123");
+        assert_eq!(data[0]["binding_key"], "github-comment");
+        assert_eq!(data[0]["attempt"], 2);
+        assert_eq!(data[0]["handler_kind"], "workflow");
+        assert_eq!(data[0]["target_uri"], "harn://workflows/comment_triage");
+        assert_eq!(data[0]["result"]["session_id"], "session-123");
+        assert_eq!(data[0]["action_graph"]["nodes"][0]["id"], "trigger");
     }
 
     async fn build_test_router() -> axum::Router {
