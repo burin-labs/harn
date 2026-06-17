@@ -145,6 +145,59 @@ fn simple_event(kind: &str) -> VmValue {
 }
 
 #[test]
+fn actor_chain_is_stored_on_session_and_snapshot_metadata() {
+    reset_session_store();
+    let chain = crate::ActorChain::new("user:kenneth").pushed("agent:root");
+    let id = open_or_create_with_actor_chain(Some("actor-session".into()), Some(chain.clone()));
+
+    assert_eq!(actor_chain(&id), Some(chain.clone()));
+
+    let snapshot_json =
+        crate::llm::helpers::vm_value_to_json(&snapshot(&id).expect("session snapshot"));
+    assert_eq!(snapshot_json["actor_chain"], chain.to_json_value());
+    assert_eq!(
+        snapshot_json["metadata"]["actor_chain"],
+        chain.to_json_value()
+    );
+}
+
+#[test]
+fn child_session_pushes_actor_onto_parent_chain() {
+    reset_session_store();
+    let parent_chain = crate::ActorChain::new("user:kenneth").pushed("agent:root");
+    let parent = open_or_create_with_actor_chain(Some("actor-parent".into()), Some(parent_chain));
+
+    let child = open_child_session_with_actor(
+        &parent,
+        Some("actor-child".into()),
+        Some("agent:merge-captain"),
+    );
+
+    assert_eq!(
+        actor_chain(&child).map(|chain| chain.to_json_value()),
+        Some(serde_json::json!({
+            "sub": "user:kenneth",
+            "act": {
+                "sub": "agent:merge-captain",
+                "act": {
+                    "sub": "agent:root"
+                }
+            }
+        }))
+    );
+}
+
+#[test]
+fn fork_preserves_actor_chain() {
+    reset_session_store();
+    let chain = crate::ActorChain::new("user:kenneth").pushed("agent:root");
+    let src = open_or_create_with_actor_chain(Some("actor-fork-src".into()), Some(chain.clone()));
+    let dst = fork(&src, Some("actor-fork-dst".into())).expect("fork");
+
+    assert_eq!(actor_chain(&dst), Some(chain));
+}
+
+#[test]
 fn completed_turn_checkpoint_rolls_back_and_redoes_transcript() {
     reset_session_store();
     let id = open_or_create(Some("checkpoint-basic".into()));

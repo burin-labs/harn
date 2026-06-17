@@ -35,6 +35,8 @@ pub(super) fn build_call_request(
         metadata: BTreeMap::new(),
         cancel_token: Some(cancel_token),
         agent_session_id: None,
+        actor_chain: None,
+        actor_chain_hop: None,
         progress,
         tenant_id: None,
         request_id,

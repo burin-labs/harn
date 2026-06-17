@@ -237,6 +237,20 @@ impl AcpServer {
         })
     }
 
+    pub(super) fn actor_chain(&self) -> Option<harn_vm::ActorChain> {
+        self.authenticated_principal
+            .as_ref()
+            .map(|principal| principal.subject.trim())
+            .filter(|subject| !subject.is_empty())
+            .map(harn_vm::ActorChain::new)
+            .or_else(|| {
+                self.auth_policy
+                    .methods
+                    .is_empty()
+                    .then(|| harn_vm::ActorChain::new(crate::auth::ANONYMOUS_SUBJECT))
+            })
+    }
+
     pub(super) fn send_auth_required(&self, id: &serde_json::Value) {
         self.send_error_with_data(
             id,
@@ -396,7 +410,10 @@ impl AcpServer {
                 profile_turn: 0,
             },
         );
-        harn_vm::agent_sessions::open_or_create(Some(session_id.clone()));
+        harn_vm::agent_sessions::open_or_create_with_actor_chain(
+            Some(session_id.clone()),
+            self.actor_chain(),
+        );
         #[cfg(feature = "hostlib")]
         if let Some(session) = self.sessions.get(&session_id) {
             harn_hostlib::fs::configure_session_root(&session_id, &session.cwd);

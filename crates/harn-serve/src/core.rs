@@ -11,11 +11,11 @@ use harn_vm::event_log::{
 use harn_vm::llm::vm_value_to_json;
 use harn_vm::mcp_progress::ProgressContext;
 use harn_vm::trust_graph::{append_trust_record, AutonomyTier, TrustOutcome, TrustRecord};
-use harn_vm::{TenantId, TraceId, Vm, VmValue};
+use harn_vm::{ActorChain, TenantId, TraceId, Vm, VmValue};
 use tokio::task::LocalSet;
 use tracing::Instrument;
 
-use crate::auth::{AuthPolicy, AuthRequest, AuthorizationDecision};
+use crate::auth::{AuthPolicy, AuthRequest, AuthenticatedPrincipal, AuthorizationDecision};
 use crate::limits::{LimitContext, LimitDecision, LimitGuard, LimitRegistry};
 use crate::replay::{InMemoryReplayCache, ReplayCache, ReplayCacheEntry, ReplayKey};
 use crate::{BudgetSpec, DispatchError, ExportCatalog, ExportedCallableKind};
@@ -116,6 +116,13 @@ pub struct CallRequest {
     /// session id and registers a sink that publishes worker updates
     /// onto the task event stream).
     pub agent_session_id: Option<String>,
+    /// Actor chain to bind to the active agent session for this
+    /// dispatch. When unset, `DispatchCore` derives the origin from the
+    /// authenticated principal after admission.
+    pub actor_chain: Option<ActorChain>,
+    /// Deterministic local actor to push onto the resolved chain for
+    /// adapters that dispatch through a named agent hop.
+    pub actor_chain_hop: Option<String>,
     /// Optional progress context — when supplied, the dispatched
     /// function can call the `mcp_report_progress` builtin to emit
     /// `notifications/progress` for the bound `progressToken`. Only
@@ -157,6 +164,33 @@ pub struct CallRequest {
     /// authorization policy. `None` (the default) leaves the dispatch
     /// unauthenticated (`harness.auth.is_authenticated()` is `false`).
     pub auth_principal: Option<harn_vm::AuthPrincipal>,
+}
+
+fn resolve_request_actor_chain(
+    request: &CallRequest,
+    principal: &AuthenticatedPrincipal,
+) -> Option<ActorChain> {
+    let mut chain = request.actor_chain.clone().or_else(|| {
+        request
+            .auth_principal
+            .as_ref()
+            .map(|principal| principal.subject.trim())
+            .filter(|subject| !subject.is_empty())
+            .map(ActorChain::new)
+            .or_else(|| {
+                let subject = principal.subject.trim();
+                (!subject.is_empty()).then(|| ActorChain::new(subject))
+            })
+    })?;
+    if let Some(actor) = request
+        .actor_chain_hop
+        .as_deref()
+        .map(str::trim)
+        .filter(|actor| !actor.is_empty())
+    {
+        chain.push(actor);
+    }
+    Some(chain)
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -289,10 +323,11 @@ impl DispatchCore {
                     request.auth_principal = Some(harn_vm::AuthPrincipal {
                         subject: principal.subject.clone(),
                         scheme: principal.scheme.clone(),
-                        scopes: principal.granted_scopes,
+                        scopes: principal.granted_scopes.clone(),
                         kind: None,
                     });
                 }
+                request.actor_chain = resolve_request_actor_chain(&request, &principal);
             }
             AuthorizationDecision::Rejected(message) => {
                 self.record_trust(
@@ -478,27 +513,22 @@ impl DispatchCore {
     }
 
     fn default_replay_key(&self, request: &CallRequest) -> ReplayKey {
-        let rendered_args = match &request.arguments {
-            CallArguments::Named(values) => {
-                let value = serde_json::Value::Object(
-                    values
-                        .iter()
-                        .map(|(key, value)| (key.clone(), value.clone()))
-                        .collect(),
-                );
-                serde_json::to_string(&harn_vm::mcp_file_upload::redact_data_uris_for_logs(&value))
-                    .unwrap_or_default()
-            }
-            CallArguments::Positional(values) => {
-                let value = serde_json::Value::Array(values.clone());
-                serde_json::to_string(&harn_vm::mcp_file_upload::redact_data_uris_for_logs(&value))
-                    .unwrap_or_default()
-            }
+        let args = match &request.arguments {
+            CallArguments::Named(values) => serde_json::Value::Object(
+                values
+                    .iter()
+                    .map(|(key, value)| (key.clone(), value.clone()))
+                    .collect(),
+            ),
+            CallArguments::Positional(values) => serde_json::Value::Array(values.clone()),
         };
-        ReplayKey(format!(
-            "{}:{}:{}",
-            request.adapter, request.function, rendered_args
-        ))
+        let key = serde_json::json!({
+            "adapter": &request.adapter,
+            "function": &request.function,
+            "actor_chain": request.actor_chain.as_ref().map(ActorChain::to_json_value),
+            "arguments": harn_vm::mcp_file_upload::redact_data_uris_for_logs(&args),
+        });
+        ReplayKey(serde_json::to_string(&key).unwrap_or_default())
     }
 
     async fn invoke_function(
@@ -520,6 +550,7 @@ impl DispatchCore {
             .clone()
             .unwrap_or_else(|| Arc::new(AtomicBool::new(false)));
         let agent_session_id = request.agent_session_id.clone();
+        let actor_chain = request.actor_chain.clone();
         let progress = request.progress.clone();
 
         let tenant_id = request.tenant_id.clone();
@@ -532,7 +563,10 @@ impl DispatchCore {
             .run_until(harn_vm::mcp_progress::scope_context(progress, async move {
                 let _event_log = install_scoped_event_log(self.event_log.clone());
                 let _session_guard = agent_session_id.as_deref().map(|session_id| {
-                    harn_vm::agent_sessions::open_or_create(Some(session_id.to_string()));
+                    harn_vm::agent_sessions::open_or_create_with_actor_chain(
+                        Some(session_id.to_string()),
+                        actor_chain.clone(),
+                    );
                     harn_vm::agent_sessions::enter_current_session(session_id.to_string())
                 });
                 let _tenant_guard = tenant_id.map(harn_vm::enter_tenant);
@@ -603,6 +637,7 @@ impl DispatchCore {
             .clone()
             .unwrap_or_else(|| Arc::new(AtomicBool::new(false)));
         let agent_session_id = request.agent_session_id.clone();
+        let actor_chain = request.actor_chain.clone();
         let progress = request.progress.clone();
 
         let tenant_id = request.tenant_id.clone();
@@ -615,7 +650,10 @@ impl DispatchCore {
             .run_until(harn_vm::mcp_progress::scope_context(progress, async move {
                 let _event_log = install_scoped_event_log(self.event_log.clone());
                 let _session_guard = agent_session_id.as_deref().map(|session_id| {
-                    harn_vm::agent_sessions::open_or_create(Some(session_id.to_string()));
+                    harn_vm::agent_sessions::open_or_create_with_actor_chain(
+                        Some(session_id.to_string()),
+                        actor_chain.clone(),
+                    );
                     harn_vm::agent_sessions::enter_current_session(session_id.to_string())
                 });
                 let _tenant_guard = tenant_id.map(harn_vm::enter_tenant);
@@ -675,6 +713,11 @@ impl DispatchCore {
         record
             .metadata
             .insert("function".to_string(), serde_json::json!(request.function));
+        if let Some(actor_chain) = request.actor_chain.as_ref() {
+            record
+                .metadata
+                .insert("actor_chain".to_string(), actor_chain.to_json_value());
+        }
         if let Some(tenant) = request.tenant_id.as_ref() {
             record
                 .metadata
@@ -879,6 +922,8 @@ pub fn greet(name: string) -> string {
                 metadata: BTreeMap::new(),
                 cancel_token: None,
                 agent_session_id: None,
+                actor_chain: None,
+                actor_chain_hop: None,
                 progress: None,
                 tenant_id: None,
                 request_id: None,
@@ -923,6 +968,8 @@ pipeline default(task) {
                 metadata: BTreeMap::new(),
                 cancel_token: None,
                 agent_session_id: None,
+                actor_chain: None,
+                actor_chain_hop: None,
                 progress: None,
                 tenant_id: None,
                 request_id: None,
@@ -984,6 +1031,8 @@ pub fn greet(name: string) -> string {
                 metadata: BTreeMap::new(),
                 cancel_token: None,
                 agent_session_id: None,
+                actor_chain: None,
+                actor_chain_hop: None,
                 progress: None,
                 tenant_id: None,
                 request_id: None,
@@ -1024,6 +1073,8 @@ pub fn inspect(upload: string) -> string {
             metadata: BTreeMap::new(),
             cancel_token: None,
             agent_session_id: None,
+            actor_chain: None,
+            actor_chain_hop: None,
             progress: None,
             tenant_id: None,
             request_id: None,
@@ -1046,6 +1097,59 @@ pub fn inspect(upload: string) -> string {
         assert!(!first.contains("aGVsbG8="));
         assert!(!second.contains("d29ybGQ="));
         assert_ne!(first, second);
+    }
+
+    #[test]
+    fn default_replay_key_includes_actor_chain() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let script = dir.path().join("server.harn");
+        std::fs::write(
+            &script,
+            r"
+pub fn inspect(value: string) -> string {
+  return value
+}
+",
+        )
+        .expect("write script");
+
+        let core = DispatchCore::new(DispatchCoreConfig::for_script(&script)).expect("core");
+        let request = |actor_chain: ActorChain| CallRequest {
+            adapter: "mcp".to_string(),
+            function: "inspect".to_string(),
+            arguments: CallArguments::Named(BTreeMap::from([(
+                "value".to_string(),
+                serde_json::json!("same"),
+            )])),
+            auth: AuthRequest::default(),
+            caller: "tester".to_string(),
+            replay_key: None,
+            trace_id: None,
+            parent_span_id: None,
+            metadata: BTreeMap::new(),
+            cancel_token: None,
+            agent_session_id: None,
+            actor_chain: Some(actor_chain),
+            actor_chain_hop: None,
+            progress: None,
+            tenant_id: None,
+            request_id: None,
+            auth_context: None,
+            auth_principal: None,
+        };
+
+        let first = core
+            .default_replay_key(&request(
+                ActorChain::new("user:kenneth").pushed("agent:root"),
+            ))
+            .0;
+        let second = core
+            .default_replay_key(&request(ActorChain::new("user:maya").pushed("agent:root")))
+            .0;
+
+        assert_ne!(first, second);
+        assert!(first.contains(r#""sub":"user:kenneth""#));
+        assert!(second.contains(r#""sub":"user:maya""#));
     }
 
     #[tokio::test]
@@ -1079,6 +1183,8 @@ pub fn greet(name: string) -> string {
                 metadata: BTreeMap::new(),
                 cancel_token: None,
                 agent_session_id: None,
+                actor_chain: None,
+                actor_chain_hop: None,
                 progress: None,
                 tenant_id: None,
                 request_id: None,
@@ -1131,6 +1237,8 @@ pub fn spin() -> string {
                 metadata: BTreeMap::new(),
                 cancel_token: Some(cancel_token),
                 agent_session_id: None,
+                actor_chain: None,
+                actor_chain_hop: None,
                 progress: None,
                 tenant_id: None,
                 request_id: None,
@@ -1194,6 +1302,8 @@ pub fn whoami(harness: Harness) -> string {
                 metadata: BTreeMap::new(),
                 cancel_token: None,
                 agent_session_id: None,
+                actor_chain: None,
+                actor_chain_hop: None,
                 progress: None,
                 tenant_id: None,
                 request_id: None,
@@ -1211,6 +1321,76 @@ pub fn whoami(harness: Harness) -> string {
                 .expect("records");
         assert_eq!(records.len(), 1);
         assert_eq!(records[0].metadata["tenant_id"], "acme-corp");
+    }
+
+    #[tokio::test]
+    async fn dispatch_threads_actor_chain_into_agent_session() {
+        harn_vm::reset_thread_local_state();
+        let dir = tempfile::tempdir().expect("tempdir");
+        let script = dir.path().join("server.harn");
+        std::fs::write(
+            &script,
+            r"
+pub fn actor_chain() -> any {
+  return agent_session_actor_chain()
+}
+",
+        )
+        .expect("write script");
+
+        let mut config = DispatchCoreConfig::for_script(&script);
+        config.auth_policy = crate::auth::AuthPolicy {
+            methods: vec![crate::auth::AuthMethodConfig::ApiKey(
+                crate::auth::ApiKeyAuthConfig {
+                    keys: vec![crate::auth::ApiKeyEntry::new("actor-key", [])],
+                },
+            )],
+            mcp_allowlist: None,
+        };
+        let core = DispatchCore::new(config).expect("core");
+
+        let response = core
+            .dispatch(CallRequest {
+                adapter: "a2a".to_string(),
+                function: "actor_chain".to_string(),
+                arguments: CallArguments::Positional(Vec::new()),
+                auth: AuthRequest {
+                    headers: BTreeMap::from([(
+                        "authorization".to_string(),
+                        "Bearer actor-key".to_string(),
+                    )]),
+                    ..AuthRequest::default()
+                },
+                caller: "tester".to_string(),
+                replay_key: Some("actor-chain".to_string()),
+                trace_id: None,
+                parent_span_id: None,
+                metadata: BTreeMap::new(),
+                cancel_token: None,
+                agent_session_id: Some("dispatch-actor-chain".to_string()),
+                actor_chain: None,
+                actor_chain_hop: Some("agent:merge-captain".to_string()),
+                progress: None,
+                tenant_id: None,
+                request_id: None,
+                auth_context: None,
+                auth_principal: None,
+            })
+            .await
+            .expect("dispatch");
+
+        let expected = serde_json::json!({
+            "sub": "api-key",
+            "act": {
+                "sub": "agent:merge-captain"
+            }
+        });
+        assert_eq!(response.value, expected);
+        assert_eq!(
+            harn_vm::agent_sessions::actor_chain("dispatch-actor-chain")
+                .map(|chain| chain.to_json_value()),
+            Some(expected)
+        );
     }
 
     /// `harness.tenant.id()` raises a typed runtime error (categorized
@@ -1245,6 +1425,8 @@ pub fn whoami(harness: Harness) -> string {
                 metadata: BTreeMap::new(),
                 cancel_token: None,
                 agent_session_id: None,
+                actor_chain: None,
+                actor_chain_hop: None,
                 progress: None,
                 tenant_id: None,
                 request_id: None,
@@ -1310,6 +1492,8 @@ pub fn whoami(harness: Harness) -> string {
                 metadata: BTreeMap::new(),
                 cancel_token: None,
                 agent_session_id: None,
+                actor_chain: None,
+                actor_chain_hop: None,
                 progress: None,
                 tenant_id: Some(harn_vm::TenantId::new("override-tenant")),
                 request_id: None,

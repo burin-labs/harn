@@ -125,6 +125,8 @@ mod tests {
             metadata: BTreeMap::new(),
             cancel_token: None,
             agent_session_id: None,
+            actor_chain: None,
+            actor_chain_hop: None,
             progress: None,
             tenant_id: None,
             request_id: None,

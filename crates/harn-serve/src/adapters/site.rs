@@ -947,6 +947,8 @@ async fn site_dispatch(State(state): State<SiteState>, request: Request) -> Resp
         metadata: BTreeMap::new(),
         cancel_token: None,
         agent_session_id: None,
+        actor_chain: None,
+        actor_chain_hop: None,
         progress: None,
         tenant_id: auth_context
             .as_ref()
@@ -1138,6 +1140,8 @@ async fn drive_ws_session(
             metadata: BTreeMap::new(),
             cancel_token: None,
             agent_session_id: None,
+            actor_chain: None,
+            actor_chain_hop: None,
             progress: None,
             tenant_id: auth_context
                 .as_ref()

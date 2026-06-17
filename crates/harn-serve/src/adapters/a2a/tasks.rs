@@ -117,6 +117,8 @@ impl A2aServer {
                 metadata: BTreeMap::new(),
                 cancel_token: Some(task.cancel_token.clone()),
                 agent_session_id: Some(session_id.clone()),
+                actor_chain: None,
+                actor_chain_hop: Some(self.agent_name.clone()),
                 progress: None,
                 tenant_id: None,
                 request_id: Some(task.id.clone()),

@@ -23,6 +23,7 @@ use std::future::Future;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
+use crate::actor_chain::ActorChain;
 use crate::runtime_limits::RuntimeLimits;
 use crate::value::VmValue;
 use crate::workspace_anchor::{
@@ -121,6 +122,7 @@ pub struct SessionState {
     pub parent_id: Option<String>,
     pub child_ids: Vec<String>,
     pub branched_at_event_index: Option<usize>,
+    pub actor_chain: Option<ActorChain>,
     /// Names of skills that were active at the end of the most recent
     /// `agent_loop` run on this session. Empty when no skills were
     /// matched, when the skill system wasn't used, or when the
@@ -181,6 +183,7 @@ impl SessionState {
             parent_id: None,
             child_ids: Vec::new(),
             branched_at_event_index: None,
+            actor_chain: None,
             active_skills: Vec::new(),
             tool_format: None,
             system_prompt: None,
@@ -436,6 +439,10 @@ pub fn current_session_id() -> Option<String> {
     CURRENT_SESSION_STACK.with(|stack| stack.borrow().last().cloned())
 }
 
+pub fn current_actor_chain() -> Option<ActorChain> {
+    current_session_id().as_deref().and_then(actor_chain)
+}
+
 pub fn enter_current_session(id: impl Into<String>) -> CurrentSessionGuard {
     let id = id.into();
     if id.trim().is_empty() {
@@ -443,6 +450,27 @@ pub fn enter_current_session(id: impl Into<String>) -> CurrentSessionGuard {
     }
     push_current_session(id);
     CurrentSessionGuard { active: true }
+}
+
+pub fn actor_chain(id: &str) -> Option<ActorChain> {
+    SESSIONS.with(|s| {
+        s.borrow()
+            .get(id)
+            .and_then(|state| state.actor_chain.clone())
+    })
+}
+
+pub fn set_actor_chain(id: &str, actor_chain: Option<ActorChain>) -> Result<bool, String> {
+    SESSIONS.with(|s| {
+        let mut map = s.borrow_mut();
+        let Some(state) = map.get_mut(id) else {
+            return Err(format!("agent session '{id}' does not exist"));
+        };
+        let changed = state.actor_chain != actor_chain;
+        state.actor_chain = actor_chain;
+        state.touch();
+        Ok(changed)
+    })
 }
 
 fn push_current_tool_call(id: String) {
@@ -681,12 +709,25 @@ pub fn transcript(id: &str) -> Option<VmValue> {
 /// as a compatibility fallback. Re-opening an existing session does not
 /// re-register — sinks are per-session, owned by the first opener.
 pub fn open_or_create(id: Option<String>) -> String {
+    open_or_create_with_actor_chain(id, None)
+}
+
+pub fn open_or_create_with_actor_chain(
+    id: Option<String>,
+    requested_actor_chain: Option<ActorChain>,
+) -> String {
     let resolved = id.unwrap_or_else(|| uuid::Uuid::now_v7().to_string());
     let parent_session = current_session_id();
+    let inherited_actor_chain = requested_actor_chain
+        .clone()
+        .or_else(|| parent_session.as_deref().and_then(actor_chain));
     let mut was_new = false;
     SESSIONS.with(|s| {
         let mut map = s.borrow_mut();
         if let Some(state) = map.get_mut(&resolved) {
+            if let Some(actor_chain) = requested_actor_chain.clone() {
+                state.actor_chain = Some(actor_chain);
+            }
             state.touch();
             return;
         }
@@ -701,7 +742,9 @@ pub fn open_or_create(id: Option<String>) -> String {
                 map.remove(&victim);
             }
         }
-        map.insert(resolved.clone(), SessionState::new(resolved.clone()));
+        let mut state = SessionState::new(resolved.clone());
+        state.actor_chain = inherited_actor_chain.clone();
+        map.insert(resolved.clone(), state);
     });
     if was_new {
         if let Some(parent) = parent_session.as_deref() {
@@ -713,7 +756,19 @@ pub fn open_or_create(id: Option<String>) -> String {
 }
 
 pub fn open_child_session(parent_id: &str, id: Option<String>) -> String {
-    let resolved = open_or_create(id);
+    open_child_session_with_actor(parent_id, id, None)
+}
+
+pub fn open_child_session_with_actor(
+    parent_id: &str,
+    id: Option<String>,
+    actor: Option<&str>,
+) -> String {
+    let actor_chain = actor_chain(parent_id).map(|chain| match actor {
+        Some(actor) if !actor.trim().is_empty() => chain.pushed(actor.trim()),
+        _ => chain,
+    });
+    let resolved = open_or_create_with_actor_chain(id, actor_chain);
     link_child_session(parent_id, &resolved);
     resolved
 }
@@ -1230,6 +1285,7 @@ pub fn fork(src_id: &str, dst_id: Option<String>) -> Option<String> {
         src_system_prompt,
         src_pinned_model,
         src_pinned_reasoning_policy,
+        src_actor_chain,
         src_workspace_anchor,
         src_workspace_policy,
         src_scratchpad,
@@ -1249,6 +1305,7 @@ pub fn fork(src_id: &str, dst_id: Option<String>) -> Option<String> {
             src.system_prompt.clone(),
             src.pinned_model.clone(),
             src.pinned_reasoning_policy.clone(),
+            src.actor_chain.clone(),
             src.workspace_anchor.clone(),
             src.workspace_policy.clone(),
             src.scratchpad.clone(),
@@ -1268,6 +1325,7 @@ pub fn fork(src_id: &str, dst_id: Option<String>) -> Option<String> {
             state.system_prompt = src_system_prompt;
             state.pinned_model = src_pinned_model;
             state.pinned_reasoning_policy = src_pinned_reasoning_policy;
+            state.actor_chain = src_actor_chain;
             state.workspace_anchor = src_workspace_anchor;
             state.workspace_policy = src_workspace_policy;
             state.scratchpad = src_scratchpad;
@@ -3213,6 +3271,11 @@ fn transcript_with_session_metadata(transcript: VmValue, state: &SessionState) -
             )),
         );
     }
+    if let Some(actor_chain) = state.actor_chain.as_ref() {
+        metadata.insert("actor_chain".to_string(), actor_chain.to_vm_value());
+    } else {
+        metadata.remove("actor_chain");
+    }
     if let Some(anchor) = state.workspace_anchor.as_ref() {
         metadata.insert(
             WORKSPACE_ANCHOR_METADATA_KEY.to_string(),
@@ -3322,6 +3385,14 @@ fn session_snapshot(state: &SessionState) -> VmValue {
             .pinned_reasoning_policy
             .as_ref()
             .map(|policy| VmValue::String(std::sync::Arc::from(policy.clone())))
+            .unwrap_or(VmValue::Nil),
+    );
+    next.insert(
+        "actor_chain".to_string(),
+        state
+            .actor_chain
+            .as_ref()
+            .map(ActorChain::to_vm_value)
             .unwrap_or(VmValue::Nil),
     );
     next.insert(

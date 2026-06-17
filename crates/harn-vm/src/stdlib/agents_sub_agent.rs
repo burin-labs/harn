@@ -719,7 +719,11 @@ pub(super) async fn execute_sub_agent(
     spec: SubAgentRunSpec,
 ) -> Result<SubAgentExecutionResult, VmError> {
     if let Some(parent_session_id) = spec.parent_session_id.as_deref() {
-        crate::agent_sessions::open_child_session(parent_session_id, Some(spec.session_id.clone()));
+        crate::agent_sessions::open_child_session_with_actor(
+            parent_session_id,
+            Some(spec.session_id.clone()),
+            Some(&spec.name),
+        );
     } else {
         crate::agent_sessions::open_or_create(Some(spec.session_id.clone()));
     }
@@ -1246,6 +1250,8 @@ mod tests {
         crate::agent_sessions::reset_session_store();
         reset_llm_mock_state();
         let parent = crate::agent_sessions::open_or_create(Some("parent-subagent".into()));
+        let parent_chain = crate::ActorChain::new("user:kenneth").pushed("agent:root");
+        crate::agent_sessions::set_actor_chain(&parent, Some(parent_chain)).unwrap();
         crate::agent_sessions::inject_message(&parent, assistant_message("parent context"))
             .unwrap();
         crate::agent_sessions::claim_tool_format(&parent, "text").unwrap();
@@ -1308,6 +1314,18 @@ mod tests {
         assert_eq!(
             crate::agent_sessions::tool_format("child-subagent").as_deref(),
             Some("json")
+        );
+        assert_eq!(
+            crate::agent_sessions::actor_chain("child-subagent").map(|chain| chain.to_json_value()),
+            Some(serde_json::json!({
+                "sub": "user:kenneth",
+                "act": {
+                    "sub": "research-worker",
+                    "act": {
+                        "sub": "agent:root"
+                    }
+                }
+            }))
         );
 
         let parent_events = crate::agent_sessions::snapshot(&parent)
