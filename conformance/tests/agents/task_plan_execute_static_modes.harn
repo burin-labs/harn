@@ -1,0 +1,60 @@
+import { task_plan_compile } from "std/agent/task_plan"
+import { clear_host_mocks, mock_host_response } from "std/testing"
+
+pipeline main() {
+  clear_host_mocks()
+  mock_host_response("hitl", "approval", {approved: true, reviewer: "lead", reason: "ready"})
+  let argv = if platform() == "windows" {
+    ["cmd", "/C", "echo|set /p=task-plan-command-ok"]
+  } else {
+    ["printf", "task-plan-command-ok"]
+  }
+  let plan = {
+    schema_version: "1",
+    objective: "Execute static task-plan modes",
+    entry: "gate",
+    nodes: {
+      gate: {
+        kind: "human_gate",
+        purpose: "Require operator approval before running deterministic work",
+        human_gate: {approval_id: "ship_static_modes", prompt: "Approve static task-plan modes"},
+      },
+      cmd: {
+        kind: "deterministic_command",
+        purpose: "Run a deterministic command without an LLM turn",
+        command: {tool: "run", args: argv},
+      },
+      compact: {
+        kind: "compact",
+        purpose: "Compact accumulated artifacts",
+        compact: {threshold_tokens: 1, preserve_recent: 1},
+      },
+    },
+    edges: [{from: "gate", to: "cmd", branch: "approved"}, {from: "cmd", to: "compact"}],
+    capabilities: {tools: ["run"], side_effect_level: "runs_commands"},
+  }
+  let compiled = task_plan_compile(plan)
+  __io_println(compiled.ok)
+  let validation = workflow_validate(compiled.workflow)
+  __io_println(validation.valid)
+  let result = workflow_execute(
+    "Execute static task-plan modes",
+    compiled.workflow,
+    [{id: "seed", kind: "summary", text: "seed artifact"}],
+    {max_steps: 4},
+  )
+  __io_println(result.status)
+  __io_println(len(result.run.stages))
+  let gate = result.run.stages[0]
+  let cmd = result.run.stages[1]
+  let compact = result.run.stages[2]
+  __io_println(gate.branch)
+  __io_println(gate.artifacts[0].data.approval_id)
+  __io_println(cmd.outcome)
+  __io_println(cmd.artifacts[0].data.ok)
+  __io_println(contains(cmd.visible_text, "task-plan-command-ok"))
+  __io_println(compact.branch)
+  __io_println(compact.artifacts[0].kind)
+  __io_println(contains(compact.artifacts[0].text, "auto-compacted"))
+  __io_println(len(llm_mock_calls()))
+}

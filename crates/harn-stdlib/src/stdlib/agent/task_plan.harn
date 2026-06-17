@@ -815,19 +815,27 @@ fn __task_plan_compact_policy(node) {
 
 fn __task_plan_kind_fields(node) {
   let kind = node?.kind
+  var fields = {}
+  if kind == "human_gate" {
+    fields = fields + {output_contract: {output_kinds: ["approval"]}}
+  } else if kind == "deterministic_command" {
+    fields = fields + {output_contract: {output_kinds: ["command_result"]}}
+  } else if kind == "compact" {
+    fields = fields + {output_contract: {output_kinds: ["summary"]}}
+  }
   if kind == "verify" && node?.verify != nil {
-    return {verify: node.verify}
+    fields = fields + {verify: node.verify}
   }
   if kind == "agent_loop" && node?.agent_loop?.done_sentinel != nil {
-    return {done_sentinel: node.agent_loop.done_sentinel}
+    fields = fields + {done_sentinel: node.agent_loop.done_sentinel}
   }
   if kind == "workflow_map" && node?.map != nil {
-    return {map_policy: __task_plan_map_policy(node)}
+    fields = fields + {map_policy: __task_plan_map_policy(node)}
   }
   if kind == "compact" && node?.compact != nil {
-    return {auto_compact: __task_plan_compact_policy(node)}
+    fields = fields + {auto_compact: __task_plan_compact_policy(node)}
   }
-  return {}
+  return fields
 }
 
 fn __task_plan_compile_node(node_id, node, budget_policy) {

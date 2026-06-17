@@ -1,3 +1,6 @@
+import { command_run } from "std/command"
+import "std/hitl"
+
 fn __stage_list(value) {
   if type_of(value) == "list" {
     return value
@@ -24,6 +27,18 @@ fn __stage_i64(value) {
     return value
   }
   return nil
+}
+
+fn __stage_has_key(value, key) {
+  return type_of(value) == "dict" && contains(value.keys(), key)
+}
+
+fn __stage_string_list(values) {
+  var out = []
+  for value in __stage_list(values) {
+    out = out.push(to_string(value))
+  }
+  return out
 }
 
 fn __stage_visible_text(result) {
@@ -72,6 +87,22 @@ fn __stage_artifact_from_value(node_id, kind, index, value, lineage, title) {
   }
 }
 
+fn __stage_artifact_from_text_and_data(node_id, kind, index, text, data, lineage, title) {
+  return {
+    _type: "artifact",
+    kind: kind,
+    title: title,
+    text: text,
+    data: data,
+    source: node_id,
+    freshness: "fresh",
+    relevance: 1.0,
+    lineage: lineage,
+    stage: node_id,
+    metadata: {index: index},
+  }
+}
+
 fn __stage_texts(artifacts) {
   var texts = []
   for artifact in artifacts {
@@ -80,6 +111,23 @@ fn __stage_texts(artifacts) {
     }
   }
   return texts
+}
+
+fn __stage_error_message(error) {
+  if error == nil {
+    return ""
+  }
+  if type_of(error) == "dict" {
+    return error?.message ?? json_stringify(error)
+  }
+  return to_string(error)
+}
+
+fn __stage_error_category(error) {
+  if type_of(error) == "dict" && type_of(error?.category) == "string" {
+    return error.category
+  }
+  return ""
 }
 
 fn __stage_artifacts_contain_text(artifacts, needle) {
@@ -98,6 +146,98 @@ fn __stage_artifacts_contain_kind(artifacts, kind) {
     }
   }
   return false
+}
+
+fn __stage_logical_command_runner(command_tool) {
+  return command_tool == "run" || command_tool == "command_run" || command_tool == "process.exec"
+}
+
+fn __stage_command_argv(command_tool, args) {
+  if type_of(args) == "list" {
+    let argv = __stage_string_list(args)
+    if __stage_logical_command_runner(command_tool) {
+      return argv
+    }
+    return [command_tool] + argv
+  }
+  if args == nil {
+    if __stage_logical_command_runner(command_tool) {
+      return []
+    }
+    return [command_tool]
+  }
+  if type_of(args) == "string" {
+    if __stage_logical_command_runner(command_tool) {
+      return [args]
+    }
+    return [command_tool, args]
+  }
+  if __stage_logical_command_runner(command_tool) {
+    return [json_stringify(args)]
+  }
+  return [command_tool, json_stringify(args)]
+}
+
+fn __stage_command_spec(node) {
+  let metadata = node?.metadata ?? {}
+  let explicit = metadata?.command_spec
+  if type_of(explicit) == "dict" || type_of(explicit) == "list" {
+    return explicit
+  }
+  let command_tool = __stage_string(metadata?.command_tool, "")
+  let args = metadata?.command_args
+  if type_of(args) == "dict" {
+    if __stage_has_key(args, "mode") || __stage_has_key(args, "command") {
+      return args
+    }
+    if type_of(args?.argv) == "list" {
+      let argv = if command_tool == "" || __stage_logical_command_runner(command_tool) {
+        __stage_string_list(args.argv)
+      } else {
+        [command_tool] + __stage_string_list(args.argv)
+      }
+      return args + {mode: args?.mode ?? "argv", argv: argv}
+    }
+    if type_of(args?.args) == "list" && command_tool != "" {
+      return args + {mode: "argv", argv: __stage_command_argv(command_tool, args.args)}
+    }
+    if type_of(args?.spec) == "dict" || type_of(args?.spec) == "list" {
+      return args.spec
+    }
+  }
+  if command_tool == "" {
+    return nil
+  }
+  let argv = __stage_command_argv(command_tool, args)
+  if len(argv) == 0 {
+    return nil
+  }
+  return {mode: "argv", argv: argv}
+}
+
+fn __stage_command_options(node) {
+  let metadata = node?.metadata ?? {}
+  let args = metadata?.command_args
+  var options = {capture: {max_inline_bytes: 65536}}
+  if type_of(args) == "dict" {
+    for key in [
+      "cwd",
+      "env",
+      "env_mode",
+      "stdin",
+      "timeout_ms",
+      "background",
+      "background_after_ms",
+      "capture",
+      "max_inline_bytes",
+      "policy_context",
+    ] {
+      if args?[key] != nil {
+        options = options + {[key]: args[key]}
+      }
+    }
+  }
+  return options
 }
 
 fn __stage_prepare_fork() {
@@ -186,6 +326,227 @@ fn __stage_prepare_escalation(node_id, node, consumed_artifact_ids) {
     ],
     outcome: "escalated",
     branch: "escalated",
+  }
+}
+
+fn __stage_prepare_manual_gate(node_id, node, artifacts) {
+  let metadata = node?.metadata ?? {}
+  let approval_id = __stage_string(metadata?.approval_id, node_id)
+  let prompt = __stage_string(
+    metadata?.approval_prompt,
+    __stage_string(node?.prompt, "Approve task-plan gate `" + approval_id + "`"),
+  )
+  let skippable = __stage_bool(metadata?.approval_skippable, false)
+  let consumed_artifact_ids = __stage_artifact_ids(artifacts)
+  var options = {
+    detail: {
+      node_id: node_id,
+      approval_id: approval_id,
+      prompt: prompt,
+      artifact_ids: consumed_artifact_ids,
+      task_plan_kind: metadata?.task_plan_kind,
+      task_plan_purpose: metadata?.task_plan_purpose,
+    },
+  }
+  for key in ["reviewers", "quorum", "deadline"] {
+    if metadata[key] != nil {
+      options = options + {[key]: metadata[key]}
+    }
+  }
+  let requested = try {
+    request_approval(prompt, options)
+  }
+  if is_err(requested) {
+    let error = unwrap_err(requested)
+    let category = __stage_error_category(error)
+    let skipped = skippable && category == "timeout"
+    let branch = if skipped {
+      "skipped"
+    } else if category == "approval_denied" || contains(__stage_error_message(error), "denied") {
+      "denied"
+    } else {
+      "failed"
+    }
+    let status = if branch == "failed" {
+      "failed"
+    } else {
+      "completed"
+    }
+    let data = {approval_id: approval_id, approved: false, skipped: skipped, error: error}
+    let output_kind = __stage_first_string(node?.output_contract?.output_kinds, "approval")
+    return {
+      handled: true,
+      result: {status: status, text: branch, visible_text: branch, approval: data},
+      artifacts: [
+        __stage_artifact_from_text_and_data(
+          node_id,
+          output_kind,
+          0,
+          branch,
+          data,
+          consumed_artifact_ids,
+          "approval " + approval_id,
+        ),
+      ],
+      outcome: branch,
+      branch: branch,
+    }
+  }
+  let approval = unwrap(requested)
+  let approved = __stage_bool(approval?.approved, false)
+  let branch = if approved {
+    "approved"
+  } else if skippable {
+    "skipped"
+  } else {
+    "denied"
+  }
+  let text = if approved {
+    "approved"
+  } else if skippable {
+    "skipped"
+  } else {
+    "denied"
+  }
+  let data = {approval_id: approval_id, approved: approved, skipped: !approved && skippable, approval: approval}
+  let output_kind = __stage_first_string(node?.output_contract?.output_kinds, "approval")
+  return {
+    handled: true,
+    result: {status: "completed", text: text, visible_text: text, approval: data},
+    artifacts: [
+      __stage_artifact_from_text_and_data(
+        node_id,
+        output_kind,
+        0,
+        text,
+        data,
+        consumed_artifact_ids,
+        "approval " + approval_id,
+      ),
+    ],
+    outcome: branch,
+    branch: branch,
+  }
+}
+
+fn __stage_prepare_command(node_id, node, consumed_artifact_ids) {
+  let spec = __stage_command_spec(node)
+  let output_kind = __stage_first_string(node?.output_contract?.output_kinds, "command_result")
+  if spec == nil {
+    let data = {ok: false, status: "failed", error: "missing deterministic command argv"}
+    return {
+      handled: true,
+      result: {status: "failed", text: data.error, visible_text: data.error, error: data.error},
+      artifacts: [
+        __stage_artifact_from_text_and_data(
+          node_id,
+          output_kind,
+          0,
+          data.error,
+          data,
+          consumed_artifact_ids,
+          "command " + node_id + " result",
+        ),
+      ],
+      outcome: "command_failed",
+      branch: "failed",
+    }
+  }
+  let command_result = command_run(spec, __stage_command_options(node))
+  let ok = __stage_bool(command_result?.ok ?? command_result?.success, false)
+  let text = __stage_string(command_result?.combined, __stage_string(command_result?.stdout, ""))
+  let status = if ok {
+    "completed"
+  } else {
+    "failed"
+  }
+  let result = command_result
+    + {status: status, text: text, visible_text: text, exit_status: command_result?.exit_code}
+  return {
+    handled: true,
+    result: result,
+    artifacts: [
+      __stage_artifact_from_text_and_data(
+        node_id,
+        output_kind,
+        0,
+        text,
+        command_result,
+        consumed_artifact_ids,
+        "command " + node_id + " result",
+      ),
+    ],
+    outcome: if ok {
+      "command_completed"
+    } else {
+      "command_failed"
+    },
+    branch: if ok {
+      "success"
+    } else {
+      "failed"
+    },
+  }
+}
+
+fn __stage_compaction_messages(artifacts) {
+  var messages = []
+  for artifact in artifacts {
+    let text = __stage_string(artifact?.text, "")
+    if text != "" {
+      messages = messages.push({role: "assistant", content: text})
+    }
+  }
+  if len(messages) == 0 {
+    return [{role: "assistant", content: "No artifact text was available to compact."}]
+  }
+  return messages
+}
+
+fn __stage_compaction_options(node) {
+  let metadata = node?.metadata ?? {}
+  let policy = node?.auto_compact ?? {}
+  var options = {strategy: "truncate"}
+  let keep_last = __stage_i64(metadata?.compact_preserve_recent ?? policy?.keep_last)
+  if keep_last != nil {
+    options = options + {keep_last: keep_last}
+  }
+  let threshold = __stage_i64(policy?.token_threshold ?? policy?.target_tokens)
+  if threshold != nil {
+    options = options + {target_tokens: threshold}
+  }
+  return options
+}
+
+fn __stage_prepare_compact(node_id, node, artifacts, consumed_artifact_ids) {
+  let options = __stage_compaction_options(node)
+  let transcript = transcript_from_messages(__stage_compaction_messages(artifacts))
+  let compacted = transcript_compact(transcript, options)
+  let fallback = __stage_texts(artifacts).join("\n\n")
+  let summary = __stage_string(transcript_summary(compacted), fallback)
+  let text = if summary == "" {
+    "compacted"
+  } else {
+    summary
+  }
+  let output_kind = __stage_first_string(node?.output_contract?.output_kinds, "summary")
+  let data = {summary: text, transcript: compacted, compact_options: options}
+  return {
+    handled: true,
+    result: {status: "completed", text: text, visible_text: text, compacted: true},
+    artifacts: [
+      __stage_artifact_from_text_and_data(
+        node_id,
+        output_kind,
+        0,
+        text,
+        data,
+        consumed_artifact_ids,
+        "compact " + node_id + " output",
+      ),
+    ],
+    outcome: "compacted",
+    branch: "compacted",
   }
 }
 
@@ -335,6 +696,7 @@ pub fn workflow_prepare_static_stage(config = nil) {
   let node_id = __stage_string(config?.node_id, "stage")
   let node = config?.node ?? {}
   let kind = __stage_string(node?.kind, "")
+  let mode = __stage_string(node?.mode, "")
   let artifacts = __stage_list(config?.artifacts)
   let consumed_artifact_ids = __stage_artifact_ids(artifacts)
   if kind == "fork" {
@@ -351,6 +713,15 @@ pub fn workflow_prepare_static_stage(config = nil) {
   }
   if kind == "escalation" {
     return __stage_prepare_escalation(node_id, node, consumed_artifact_ids)
+  }
+  if kind == "stage" && mode == "manual" && __stage_bool(node?.metadata?.human_gate, false) {
+    return __stage_prepare_manual_gate(node_id, node, artifacts)
+  }
+  if kind == "stage" && mode == "command" {
+    return __stage_prepare_command(node_id, node, consumed_artifact_ids)
+  }
+  if kind == "stage" && mode == "compact" {
+    return __stage_prepare_compact(node_id, node, artifacts, consumed_artifact_ids)
   }
   return {handled: false}
 }

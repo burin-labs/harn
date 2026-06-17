@@ -1061,7 +1061,14 @@ pub(super) async fn prepare_workflow_stage_state(
     } else if matches!(
         node.kind.as_str(),
         "subagent" | "fork" | "join" | "condition" | "reduce" | "escalation"
-    ) {
+    ) || matches!(node.mode.as_deref(), Some("command" | "compact"))
+        || (node.mode.as_deref() == Some("manual")
+            && node
+                .metadata
+                .get("human_gate")
+                .and_then(|value| value.as_bool())
+                .unwrap_or(false))
+    {
         StageExecution::Precomputed(
             execute_stage_attempts(
                 ctx,

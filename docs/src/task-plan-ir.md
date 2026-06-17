@@ -141,23 +141,31 @@ The IR is intentionally a *compile-time* surface. It does **not**:
 
 ## Execution support today
 
-The existing `workflow_execute` runtime treats `mode: "agent"` as the
-trigger for the agent-loop run path; other modes flow through as plain
-LLM stages. That covers the executable kinds (`read_fact`, `search`,
-`context_pack`, `agent_loop`, `sub_agent`, `workflow_map`, `verify`,
-`join`) end-to-end today.
+`workflow_execute` runs the full IR vocabulary through the existing
+`WorkflowGraph` runtime. LLM-backed kinds (`read_fact`, `search`,
+`context_pack`, `verify`) use single model calls, `agent_loop` uses the
+agent-loop run path, `sub_agent` delegates through the worker/subagent
+runtime, `workflow_map` uses the bounded map executor, and `join`
+remains a synchronization barrier.
 
-`human_gate`, `deterministic_command`, and `compact` lower correctly and
-preserve enough metadata (`metadata.human_gate`, `metadata.command_tool`,
-`auto_compact.token_threshold`, etc.) for `workflow_inspect` and the
-mermaid renderer to recover authorial intent. Running them with their
-intended semantics — block on approval, skip the LLM, force compaction —
-requires runtime hooks that are out of scope for the IR landing; until
-those land, those three kinds execute as LLM stages with their metadata
-intact, and the validator surfaces them on the lowered graph so a
-follow-up executor can opt in. Plans that need execution today should
-prefer the executable kinds; plans for review-only flows can use the
-full vocabulary.
+The static modes also execute without an LLM turn:
+
+* `human_gate` calls the existing HITL `request_approval` primitive with
+  `approval_id`, `approval_prompt`, and consumed artifact IDs in the
+  approval detail. It emits an `approval` artifact and branches to
+  `approved`, `denied`, or `skipped` when the gate is skippable.
+* `deterministic_command` calls `std/command.command_run`, emits a
+  `command_result` artifact, and branches to `success` or `failed`.
+  `command: {tool: "cargo", args: ["test"]}` executes `cargo test`;
+  `command: {tool: "run", args: ["cargo", "test"]}` treats `args` as
+  the full argv for compatibility with planner-authored run-tool plans.
+* `compact` builds a transcript from consumed artifact text, calls
+  `transcript_compact` with `compact.threshold_tokens` /
+  `compact.preserve_recent`, and emits a summary artifact on the
+  `compacted` branch.
+
+These semantics stay inside the existing workflow runtime; there is no
+separate task-plan executor or generated-Harn eval path.
 
 ## Evaluation protocol (deferred)
 
