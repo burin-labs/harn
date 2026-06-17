@@ -16,7 +16,9 @@
 # Usage:
 #   scripts/prune_stale_targets.sh [--dry-run]
 # Env:
-#   HARN_TARGET_GC_ROOTS        space-separated repo search roots (default "$HOME/projects")
+#   HARN_TARGET_GC_ROOTS        space-separated repo search roots
+#                               (default: "$HOME/projects $HOME/.codex/worktrees /private/tmp")
+#   HARN_TARGET_GC_FIND_DEPTH   max depth for nested worktree discovery (default 3)
 #   HARN_TARGET_GC_MIN_AGE_SECS minimum idle age before deletion (default 10800)
 #   TMPDIR                      base for harn-target (default /tmp)
 set -euo pipefail
@@ -28,22 +30,49 @@ target_root="${TMPDIR:-/tmp}/harn-target"
 target_root="${target_root//\/\///}"   # collapse accidental double slash
 [[ -d "$target_root" ]] || { echo "no harn-target dir at $target_root; nothing to prune"; exit 0; }
 
-roots="${HARN_TARGET_GC_ROOTS:-$HOME/projects}"
+default_roots() {
+  printf '%s\n' "$HOME/projects"
+  printf '%s\n' "$HOME/.codex/worktrees"
+  printf '%s\n' "/private/tmp"
+}
+
+if [[ -n "${HARN_TARGET_GC_ROOTS:-}" ]]; then
+  roots="${HARN_TARGET_GC_ROOTS}"
+else
+  roots="$(default_roots | tr '\n' ' ')"
+fi
+find_depth="${HARN_TARGET_GC_FIND_DEPTH:-3}"
 min_age="${HARN_TARGET_GC_MIN_AGE_SECS:-10800}"
 cutoff=$(( $(date +%s) - min_age ))
+
+discover_repo_roots() {
+  local root git_marker
+  for root in $roots; do
+    [ -d "$root" ] || continue
+    if [ -d "$root/.git" ] || [ -f "$root/.git" ]; then
+      printf '%s\n' "$root"
+    fi
+    find "$root" -maxdepth "$find_depth" \
+      \( -name .git -type d -o -name .git -type f \) -print 2>/dev/null \
+      | while IFS= read -r git_marker; do
+          dirname "$git_marker"
+        done
+  done | sort -u
+}
+
+mtime_epoch() {
+  stat -f %m "$1" 2>/dev/null || stat -c %Y "$1" 2>/dev/null || echo 0
+}
 
 # Build the keep-set: the basename of every harn-target dir that a live
 # worktree still points at. Prefer the authoritative target-dir baked into the
 # worktree's .cargo/config.toml; fall back to the derived <parent>-<leaf> name.
 keep_file="$(mktemp)"
 trap 'rm -f "$keep_file"' EXIT
-for root in $roots; do
-  [ -d "$root" ] || continue
-  for repo in "$root"/*; do
-    [ -d "$repo/.git" ] || [ -f "$repo/.git" ] || continue
-    git -C "$repo" worktree list --porcelain 2>/dev/null \
-      | awk '/^worktree /{print substr($0,10)}'
-  done
+discover_repo_roots | while read -r repo; do
+  [ -n "$repo" ] || continue
+  git -C "$repo" worktree list --porcelain 2>/dev/null \
+    | awk '/^worktree /{print substr($0,10)}' || true
 done | sort -u | while read -r wt; do
   [ -n "$wt" ] || continue
   cfg="$wt/.cargo/config.toml"
@@ -61,7 +90,7 @@ for d in "$target_root"/*; do
   [ -d "$d" ] || continue
   name="$(basename "$d")"
   if grep -qxF "$name" "$keep_file"; then kept=$((kept+1)); continue; fi
-  m=$(stat -f %m "$d" 2>/dev/null || echo 0)
+  m="$(mtime_epoch "$d")"
   if [ "${m:-0}" -ge "$cutoff" ]; then
     echo "skip (recently active): $name"; kept=$((kept+1)); continue
   fi
