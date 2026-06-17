@@ -179,6 +179,22 @@ fn opt_json(opts: &crate::value::DictMap, arg_name: &str) -> serde_json::Value {
         .unwrap_or(serde_json::Value::Null)
 }
 
+fn opt_dict_json(
+    opts: &crate::value::DictMap,
+    fn_name: &str,
+    arg_name: &str,
+) -> Result<serde_json::Value, VmError> {
+    match opts.get(arg_name) {
+        None | Some(VmValue::Nil) => Ok(serde_json::Value::Null),
+        Some(VmValue::Dict(_)) => Ok(crate::llm::helpers::vm_value_to_json(
+            opts.get(arg_name).expect("checked above"),
+        )),
+        _ => Err(err(format!(
+            "{fn_name}: `{arg_name}` must be a dict or nil"
+        ))),
+    }
+}
+
 fn opts_dict_arg(
     args: &[VmValue],
     idx: usize,
@@ -1203,6 +1219,12 @@ const SEED_FROM_JSONL_OPT_KEYS: &[&str] = &[
     "validate",
     "provider",
     "model",
+    "source_agent",
+    "source_session_id",
+    "source_kind",
+    "source_label",
+    "source_provenance",
+    "recommend_compaction",
 ];
 
 #[harn_builtin(
@@ -1238,6 +1260,19 @@ fn agent_session_seed_from_jsonl_builtin(
         target_model: opt_string(&opts, "agent_session_seed_from_jsonl", "model")?,
     };
     let rename_session = opt_string(&opts, "agent_session_seed_from_jsonl", "rename_session")?;
+    let source_agent = opt_string(&opts, "agent_session_seed_from_jsonl", "source_agent")?;
+    let source_session_id =
+        opt_string(&opts, "agent_session_seed_from_jsonl", "source_session_id")?;
+    let source_kind = opt_string(&opts, "agent_session_seed_from_jsonl", "source_kind")?;
+    let source_label = opt_string(&opts, "agent_session_seed_from_jsonl", "source_label")?;
+    let source_provenance =
+        opt_dict_json(&opts, "agent_session_seed_from_jsonl", "source_provenance")?;
+    let recommend_compaction = arg_bool_opt(
+        &opts,
+        "agent_session_seed_from_jsonl",
+        "recommend_compaction",
+        false,
+    )?;
     let path_buf = PathBuf::from(&path);
     let seeded = match crate::llm::transcript_seed::load_seeded_transcript_from_jsonl(
         &path_buf,
@@ -1246,10 +1281,18 @@ fn agent_session_seed_from_jsonl_builtin(
         Ok(seeded) => seeded,
         Err(message) => return Ok(seed_result_error(message)),
     };
+    let source = seed_source_metadata(
+        source_kind,
+        source_agent,
+        source_session_id,
+        source_label,
+        source_provenance,
+    );
 
     let metadata = serde_json::json!({
         "seeded_from_jsonl": {
             "path": path,
+            "source": source,
             "source_records": seeded.record_count,
             "source_format": seeded.source_format.as_str(),
             "partial": seeded.partial,
@@ -1257,6 +1300,7 @@ fn agent_session_seed_from_jsonl_builtin(
             "provider": seeded.provider,
             "model": seeded.model,
             "tool_format": seeded.tool_format,
+            "recommend_compaction": recommend_compaction,
         }
     });
     let session_id = match agent_sessions::seed_from_messages(
@@ -1281,8 +1325,43 @@ fn agent_session_seed_from_jsonl_builtin(
         "provider": seeded.provider,
         "model": seeded.model,
         "tool_format": seeded.tool_format,
+        "source": source,
+        "recommend_compaction": recommend_compaction,
         "error": serde_json::Value::Null,
     })))
+}
+
+fn seed_source_metadata(
+    source_kind: Option<String>,
+    source_agent: Option<String>,
+    source_session_id: Option<String>,
+    source_label: Option<String>,
+    source_provenance: serde_json::Value,
+) -> serde_json::Value {
+    let has_external_identity = source_agent.is_some()
+        || source_session_id.is_some()
+        || source_label.is_some()
+        || source_provenance
+            .as_object()
+            .map(|map| !map.is_empty())
+            .unwrap_or(false);
+    serde_json::json!({
+        "schema": "harn.session_seed_source.v1",
+        "kind": source_kind.unwrap_or_else(|| {
+            if has_external_identity {
+                "external_agent_session".to_string()
+            } else {
+                "harn_jsonl".to_string()
+            }
+        }),
+        "agent": source_agent,
+        "session_id": source_session_id,
+        "label": source_label,
+        "provenance": match source_provenance {
+            serde_json::Value::Null => serde_json::Value::Object(serde_json::Map::new()),
+            value => value,
+        },
+    })
 }
 
 const REANCHOR_OPT_KEYS: &[&str] = &["carry_transcript", "compact", "reason"];

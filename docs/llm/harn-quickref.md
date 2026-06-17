@@ -2564,7 +2564,8 @@ Lifecycle builtins (all hard-error on unknown ids except `exists`, `open`,
 - `agent_session_seed_from_jsonl(path, opts?)` creates a new session from a
   replayable `llm_transcript.jsonl` sidecar. Useful opts:
   `truncate_to_last`, `drop_tool_calls`, `rename_session`, `validate`,
-  `provider`, `model`.
+  `provider`, `model`, `source_agent`, `source_session_id`, `source_kind`,
+  `source_label`, `source_provenance`, `recommend_compaction`.
 - `agent_session_compact(id, opts)` — supports LLM/truncate/observation-mask/custom
   compaction, accepts the same compaction policy fields as
   `transcript_auto_compact`, and errors on unknown option keys.

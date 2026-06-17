@@ -42,13 +42,26 @@ pipeline main() {
       truncate_to_last: 3,
       provider: "mock",
       model: "mock",
+      source_agent: "codex",
+      source_session_id: "codex-session-1",
+      source_label: "Codex import",
+      source_provenance: {workspace: "harn"},
+      recommend_compaction: true,
     },
   )
   __io_println(seeded.ok)
   __io_println(seeded.turns_loaded)
   __io_println(seeded.source_format)
   __io_println(seeded.partial)
+  __io_println(seeded.source.kind)
+  __io_println(seeded.source.agent)
+  __io_println(seeded.source.session_id)
+  __io_println(seeded.recommend_compaction)
   let snap = agent_session_snapshot(seeded.session_id)
+  let seeded_meta = snap.metadata.seeded_from_jsonl
+  __io_println(seeded_meta.source.label)
+  __io_println(seeded_meta.source.provenance.workspace)
+  __io_println(seeded_meta.recommend_compaction)
   __io_println(agent_session_system_prompt(seeded.session_id) != nil)
   __io_println(agent_session_tool_format(seeded.session_id))
   __io_println(len(snap.messages))
