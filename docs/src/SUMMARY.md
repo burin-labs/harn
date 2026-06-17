@@ -97,6 +97,7 @@
 - [Diff stdlib](./stdlib/diff.md)
 - [OAuth storage stdlib](./stdlib/oauth-storage.md)
 - [Prompt library stdlib](./stdlib/prompt-library.md)
+- [Disclosure stdlib](./stdlib/disclosure.md)
 - [Human in the loop](./hitl.md)
 - [Trust graph](./trust-graph.md)
   - [Autonomy tiers](./autonomy.md)

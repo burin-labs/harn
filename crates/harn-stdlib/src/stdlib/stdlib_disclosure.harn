@@ -1,0 +1,309 @@
+// std/disclosure — render surface-native authorship disclosure from ActorChain.
+//
+// Import: import { render } from "std/disclosure"
+import { deep_merge } from "std/collections"
+
+type DisclosureRenderOptions = {project?: bool, project_root?: string, env?: bool, config?: dict}
+
+const __BUILTIN_DISCLOSURE_CONFIG = """
+[defaults]
+email_domain = "actors.harn.invalid"
+
+[surfaces.git]
+kind = "text"
+template = "{{ if delegated }}Co-Authored-By: {{ current.name }} <{{ current.email }}>{{ for actor in prior_actors }}\nAssisted-by: {{ actor.name }} <{{ actor.email }}>{{ end }}{{ else }}Co-Authored-By: {{ origin.name }} <{{ origin.email }}>{{ end }}"
+
+[surfaces.slack]
+kind = "text"
+template = "AI-assisted by {{ current.label }} for {{ origin.label }}."
+
+[surfaces.github]
+kind = "github_author_choice"
+mode = "human_author_agent_coauthor"
+author = "origin"
+co_author = "current"
+"""
+
+fn __dict(value) -> dict {
+  if type_of(value) == "dict" {
+    return value
+  }
+  return {}
+}
+
+fn __as_config(value) -> dict {
+  let dict = __dict(value)
+  if contains(dict.keys(), "disclosure") {
+    return __dict(dict.disclosure)
+  }
+  return dict
+}
+
+fn __as_project_config(value) -> dict {
+  let dict = __dict(value)
+  if contains(dict.keys(), "disclosure") {
+    return __dict(dict.disclosure)
+  }
+  return {}
+}
+
+fn __parse_config_toml(text: string, label: string, project: bool = false) -> dict {
+  let parsed = try {
+    toml_parse(text)
+  }
+  if is_ok(parsed) {
+    let data = unwrap(parsed)
+    if project {
+      return __as_project_config(data)
+    }
+    return __as_config(data)
+  }
+  throw "std/disclosure: invalid TOML in " + label
+}
+
+fn __read_config_file(path: string, project: bool = false) -> dict {
+  if path == "" || !harness.fs.exists(path) {
+    return {}
+  }
+  return __parse_config_toml(harness.fs.read_text(path), path, project)
+}
+
+fn __looks_like_toml(text: string) -> bool {
+  let trimmed = trim(text)
+  return contains(text, "\n") || starts_with(trimmed, "[")
+}
+
+fn __project_config(options: dict) -> dict {
+  if options?.project == false {
+    return {}
+  }
+  let root = options?.project_root ?? project_root()
+  if root == nil || root == "" {
+    return {}
+  }
+  return __read_config_file(path_join(root, "harn.toml"), true)
+}
+
+fn __env_config(options: dict) -> dict {
+  if options?.env == false {
+    return {}
+  }
+  var config = {}
+  let path = harness.env.get("HARN_DISCLOSURE_CONFIG_PATH")
+  if path != nil && path != "" {
+    config = deep_merge(config, __read_config_file(to_string(path)))
+  }
+  let raw = harness.env.get("HARN_DISCLOSURE_CONFIG")
+  if raw == nil || raw == "" {
+    return config
+  }
+  let text = to_string(raw)
+  if __looks_like_toml(text) {
+    return deep_merge(config, __parse_config_toml(text, "HARN_DISCLOSURE_CONFIG"))
+  }
+  if harness.fs.exists(text) {
+    return deep_merge(config, __read_config_file(text))
+  }
+  return deep_merge(config, __parse_config_toml(text, "HARN_DISCLOSURE_CONFIG"))
+}
+
+fn __config(options) -> dict {
+  let opts = __dict(options)
+  var config = __parse_config_toml(__BUILTIN_DISCLOSURE_CONFIG, "built-in disclosure config")
+  config = deep_merge(config, __project_config(opts))
+  config = deep_merge(config, __env_config(opts))
+  config = deep_merge(config, __as_config(opts?.config))
+  return config
+}
+
+fn __chain_subjects(chain) -> list<string> {
+  require type_of(chain) == "dict", "std/disclosure: chain must be an ActorChain dict"
+  require chain?.sub != nil && chain.sub != "", "std/disclosure: chain.sub is required"
+  var subjects = []
+  var node = chain?.act
+  while node != nil {
+    require type_of(node) == "dict", "std/disclosure: chain.act entries must be dicts"
+    require node?.sub != nil && node.sub != "", "std/disclosure: chain.act.sub is required"
+    subjects = subjects + [to_string(node.sub)]
+    node = node?.act
+  }
+  return subjects + [to_string(chain.sub)]
+}
+
+fn __subject_parts(subject: string) -> dict {
+  let split_at = subject.index_of(":")
+  if split_at < 0 {
+    return {kind: "principal", id: subject}
+  }
+  return {kind: substring(subject, 0, split_at), id: substring(subject, split_at + 1)}
+}
+
+fn __slug(value: string) -> string {
+  let lowered = lowercase(trim(value))
+  let cleaned = regex_replace("[^a-z0-9._+-]+", "-", lowered)
+  let stripped = regex_replace("(^-+|-+$)", "", cleaned)
+  if stripped == "" {
+    return "actor"
+  }
+  return stripped
+}
+
+fn __profile_for(subject: string, config: dict) -> dict {
+  let identities = __dict(config?.identities)
+  if contains(identities.keys(), subject) {
+    return __dict(identities[subject])
+  }
+  return {}
+}
+
+fn __principal(subject: string, config: dict, role: string, position: int) -> dict {
+  let profile = __profile_for(subject, config)
+  let parts = __subject_parts(subject)
+  let name = to_string(profile?.name ?? profile?.display_name ?? profile?.label ?? parts.id ?? subject)
+  let label = to_string(profile?.label ?? profile?.slack_label ?? profile?.display_name ?? name)
+  let email_domain = to_string(config?.defaults?.email_domain ?? "actors.harn.invalid")
+  let email = to_string(profile?.email ?? (__slug(parts.kind + "+" + parts.id) + "@" + email_domain))
+  var principal = {
+    subject: subject,
+    kind: parts.kind,
+    id: parts.id,
+    role: role,
+    position: position,
+    name: name,
+    label: label,
+    email: email,
+  }
+  if profile?.github != nil {
+    principal = principal + {github: to_string(profile.github)}
+  }
+  if profile?.github_login != nil {
+    principal = principal + {github: to_string(profile.github_login)}
+  }
+  if profile?.login != nil {
+    principal = principal + {github: to_string(profile.login)}
+  }
+  if profile?.slack != nil {
+    principal = principal + {slack: to_string(profile.slack)}
+  }
+  if profile?.slack_id != nil {
+    principal = principal + {slack: to_string(profile.slack_id)}
+  }
+  return principal
+}
+
+fn __context(chain, config: dict) -> dict {
+  let subjects = __chain_subjects(chain)
+  let origin_index = len(subjects) - 1
+  var principals = []
+  for {index, value} in subjects.enumerate() {
+    let role = if index == 0 {
+      "current"
+    } else if index == origin_index {
+      "origin"
+    } else {
+      "actor"
+    }
+    principals = principals + [__principal(value, config, role, index)]
+  }
+  let origin = principals[origin_index]
+  let actors = if len(principals) > 1 {
+    principals.slice(0, origin_index)
+  } else {
+    []
+  }
+  let current = principals[0]
+  let prior_actors = if len(actors) > 1 {
+    actors.slice(1, len(actors))
+  } else {
+    []
+  }
+  return {
+    chain: chain,
+    principals: principals,
+    subjects: subjects,
+    current: current,
+    origin: origin,
+    actors: actors,
+    prior_actors: prior_actors,
+    delegated: len(actors) > 0,
+  }
+}
+
+fn __surface_config(config: dict, surface: string) -> dict {
+  let surfaces = __dict(config?.surfaces)
+  if !contains(surfaces.keys(), surface) {
+    throw "std/disclosure: unknown disclosure surface `" + surface + "`"
+  }
+  let surface_config = __dict(surfaces[surface])
+  if len(surface_config.keys()) == 0 {
+    throw "std/disclosure: disclosure surface `" + surface + "` must be a table"
+  }
+  return surface_config
+}
+
+fn __select_principal(ctx: dict, selector) {
+  let name = to_string(selector ?? "")
+  if name == "origin" {
+    return ctx.origin
+  }
+  if name == "current" {
+    return ctx.current
+  }
+  if name == "none" || name == "" {
+    return nil
+  }
+  for principal in ctx.principals {
+    if principal.subject == name || principal.role == name {
+      return principal
+    }
+  }
+  throw "std/disclosure: unknown principal selector `" + name + "`"
+}
+
+fn __render_text(surface_config: dict, ctx: dict) -> string {
+  let template = surface_config?.template
+  require template != nil && template != "", "std/disclosure: text disclosure surfaces require a template"
+  return render_string(to_string(template), ctx)
+}
+
+fn __render_github(surface_config: dict, ctx: dict) -> dict {
+  let author = __select_principal(ctx, surface_config?.author ?? "origin")
+  var co_author = __select_principal(ctx, surface_config?.co_author ?? "current")
+  if author != nil && co_author != nil && author.subject == co_author.subject {
+    co_author = nil
+  }
+  return {
+    surface: "github",
+    kind: "github_author_choice",
+    mode: to_string(surface_config?.mode ?? "human_author_agent_coauthor"),
+    author: author,
+    co_author: co_author,
+    principals: ctx.principals,
+    actor_chain: ctx.chain,
+  }
+}
+
+/**
+ * Render a surface-native authorship disclosure artifact from an ActorChain.
+ *
+ * Built-in surface config is overlaid by `[disclosure]` in `harn.toml`, then
+ * `HARN_DISCLOSURE_CONFIG_PATH` / `HARN_DISCLOSURE_CONFIG`, then
+ * `options.config`. Supported built-in surfaces are `git`, `slack`, and
+ * `github`.
+ *
+ * @effects: [fs-read, env-read]
+ * @errors: [TypeError, ValueError]
+ */
+pub fn render(chain, surface: string, options: DisclosureRenderOptions = {}) -> any {
+  let config = __config(options)
+  let surface_config = __surface_config(config, surface)
+  let ctx = __context(chain, config)
+  let kind = to_string(surface_config?.kind ?? "text")
+  if kind == "text" {
+    return __render_text(surface_config, ctx)
+  }
+  if kind == "github_author_choice" {
+    return __render_github(surface_config, ctx)
+  }
+  throw "std/disclosure: unsupported disclosure surface kind `" + kind + "`"
+}

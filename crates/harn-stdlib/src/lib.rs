@@ -146,6 +146,10 @@ pub const STDLIB_SOURCES: &[StdlibSource] = &[
         source: include_str!("stdlib/stdlib_schema.harn"),
     },
     StdlibSource {
+        module: "disclosure",
+        source: include_str!("stdlib/stdlib_disclosure.harn"),
+    },
+    StdlibSource {
         module: "testing",
         source: include_str!("stdlib/stdlib_testing.harn"),
     },
@@ -1320,6 +1324,7 @@ mod tests {
             "eval/stats",
             "eval/agreement",
             "edit",
+            "disclosure",
             "artifact/web",
             "command",
             "waitpoint",
@@ -1403,6 +1408,18 @@ mod tests {
         ] {
             assert!(exports.contains(name), "std/command should export {name}");
         }
+    }
+
+    #[test]
+    fn disclosure_stdlib_module_exports_render_helpers() {
+        let exports = public_functions_for_module("disclosure")
+            .into_iter()
+            .map(|function| function.name)
+            .collect::<BTreeSet<_>>();
+        assert!(
+            exports.contains("render"),
+            "std/disclosure should export render"
+        );
     }
 
     #[test]

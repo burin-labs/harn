@@ -1,0 +1,11 @@
+{
+  "mode": "mock",
+  "env": {
+    "HARN_DISCLOSURE_CONFIG": "[disclosure.surfaces.slack]\nkind = \"text\"\ntemplate = \"Env {{ current.name }} for {{ origin.name }}\"\n\n[disclosure.identities.\"agent:merge-captain\"]\nname = \"Env Bot\"\n\n[disclosure.identities.\"user:kenneth\"]\nname = \"Env Human\"\n"
+  },
+  "expect_calls": [
+    {"sub_handle": "env", "method": "get", "args": ["HARN_DISCLOSURE_CONFIG_PATH"]},
+    {"sub_handle": "env", "method": "get", "args": ["HARN_DISCLOSURE_CONFIG"]},
+    {"sub_handle": "stdio", "method": "println", "args": ["Env Env Bot for Env Human"]}
+  ]
+}

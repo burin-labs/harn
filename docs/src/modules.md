@@ -80,7 +80,7 @@ code or inside any pipeline.
 `import "std/..."` is only needed for the Harn-written helper modules
 described below (`std/text`, `std/json`, `std/math`, `std/collections`,
 `std/ansi`, `std/table`, `std/diff`, `std/path`, `std/fs`, `std/os`,
-`std/edit`, `std/artifact/web`, `std/ui_resource`, `std/cache`,
+`std/edit`, `std/disclosure`, `std/artifact/web`, `std/ui_resource`, `std/cache`,
 `std/llm/handlers`, `std/llm/budget`, `std/llm/prompts`, `std/vision`,
 `std/context`, `std/agent_state`, `std/agents`, `std/agent/user`,
 `std/agent/fact`, `std/agent/probe`, `std/agent/scratchpad`,
@@ -110,6 +110,7 @@ import "std/cache"
 import "std/collections"
 import "std/connectors/shared"
 import "std/context"
+import "std/disclosure"
 import "std/edit"
 import "std/artifact/web"
 import "std/ui_resource"
