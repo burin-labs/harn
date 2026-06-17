@@ -12,6 +12,7 @@ use serde_json::{json, Value as JsonValue};
 use tokio::sync::mpsc;
 
 use harn_vm::event_log::{AnyEventLog, EventLog, LogEvent, Topic};
+use harn_vm::ActorChain;
 
 use super::routes::{normalize_headers, HttpError, ListenerAuth};
 use crate::commands::orchestrator::errors::OrchestratorError;
@@ -125,7 +126,7 @@ enum AcpClientRequestError {
     },
     AlreadyDecided {
         decision: Box<AcpHostDecision>,
-        attempted_actor: AcpControlActor,
+        attempted_actor: Box<AcpControlEnvelope>,
         attempted_payload: JsonValue,
     },
     Forbidden {
@@ -153,7 +154,8 @@ struct AcpHostRequests {
 }
 
 #[derive(Clone, Debug)]
-struct AcpControlActor {
+struct AcpControlEnvelope {
+    actor_chain: ActorChain,
     client_id: String,
     connection_id: Option<String>,
     role: AcpAttachRole,
@@ -165,7 +167,7 @@ struct AcpHostDecision {
     request_id: String,
     method: String,
     session_id: Option<String>,
-    actor: AcpControlActor,
+    actor: AcpControlEnvelope,
     payload: JsonValue,
     decided_at_ms: u128,
 }
@@ -502,12 +504,36 @@ impl AcpAttachRole {
     }
 }
 
-impl AcpControlActor {
-    fn to_json(&self) -> JsonValue {
+impl AcpControlEnvelope {
+    fn new(
+        client_id: impl Into<String>,
+        connection_id: Option<String>,
+        role: AcpAttachRole,
+        source: impl Into<String>,
+    ) -> Self {
+        let client_id = client_id.into();
+        let source = source.into();
+        let actor_chain = ActorChain::new(acp_operator_subject(&client_id))
+            .pushed(acp_surface_actor_subject(&source, &client_id));
+        Self {
+            actor_chain,
+            client_id,
+            connection_id,
+            role,
+            source,
+        }
+    }
+
+    fn actor_chain_json(&self) -> JsonValue {
+        self.actor_chain.to_json_value()
+    }
+
+    fn legacy_actor_json(&self) -> JsonValue {
         let mut value = json!({
             "clientId": self.client_id,
             "role": self.role.as_str(),
             "source": self.source,
+            "actorChain": self.actor_chain_json(),
         });
         if let Some(connection_id) = self.connection_id.as_ref() {
             value["connectionId"] = json!(connection_id);
@@ -517,12 +543,12 @@ impl AcpControlActor {
 }
 
 impl AcpHostDecision {
-    fn error_data(&self, reason: &str, attempted_actor: Option<&AcpControlActor>) -> JsonValue {
+    fn error_data(&self, reason: &str, attempted_actor: Option<&AcpControlEnvelope>) -> JsonValue {
         let mut data = json!({
             "reason": reason,
             "requestId": self.request_id,
             "method": self.method,
-            "decidedBy": self.actor.to_json(),
+            "decidedBy": self.actor.legacy_actor_json(),
             "decidedAtMs": self.decided_at_ms,
             "decision": self.payload,
         });
@@ -530,7 +556,7 @@ impl AcpHostDecision {
             data["sessionId"] = json!(session_id);
         }
         if let Some(actor) = attempted_actor {
-            data["attemptedBy"] = actor.to_json();
+            data["attemptedBy"] = actor.legacy_actor_json();
         }
         data
     }
@@ -611,22 +637,17 @@ impl AcpWorker {
         Some((client_id, role))
     }
 
-    fn client_actor(&self, client_id: &str, role: AcpAttachRole) -> AcpControlActor {
+    fn client_control_envelope(&self, client_id: &str, role: AcpAttachRole) -> AcpControlEnvelope {
         let connection_id = self
             .clients
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .get(client_id)
             .map(|client| client.connection_id.clone());
-        AcpControlActor {
-            client_id: client_id.to_string(),
-            connection_id,
-            role,
-            source: "websocket".to_string(),
-        }
+        AcpControlEnvelope::new(client_id, connection_id, role, "websocket")
     }
 
-    fn annotate_control_actor(&self, value: &mut JsonValue, actor: &AcpControlActor) {
+    fn annotate_control_actor(&self, value: &mut JsonValue, actor: &AcpControlEnvelope) {
         let Some(params) = value.get_mut("params") else {
             return;
         };
@@ -637,7 +658,8 @@ impl AcpWorker {
             .entry("_harn".to_string())
             .or_insert_with(|| json!({}));
         if let Some(harn) = harn.as_object_mut() {
-            harn.insert("actor".to_string(), actor.to_json());
+            harn.insert("actor".to_string(), actor.legacy_actor_json());
+            harn.insert("actorChain".to_string(), actor.actor_chain_json());
             harn.entry("clientId".to_string())
                 .or_insert_with(|| json!(actor.client_id));
             harn.entry("role".to_string())
@@ -663,14 +685,15 @@ impl AcpWorker {
         &self,
         id_key: &str,
         role: AcpAttachRole,
-        actor: AcpControlActor,
+        actor: AcpControlEnvelope,
         value: &JsonValue,
         sender: &mpsc::UnboundedSender<JsonValue>,
     ) -> Result<AcpHostDecision, AcpClientRequestError> {
         let attempted_payload = Self::decision_payload(value);
         let mut requests = self.host_requests.lock().unwrap_or_else(|e| e.into_inner());
         if let Some(decision) = requests.decided.get(id_key).cloned() {
-            if decision.actor.client_id == actor.client_id && decision.payload == attempted_payload
+            if decision.actor.actor_chain == actor.actor_chain
+                && decision.payload == attempted_payload
             {
                 return Err(AcpClientRequestError::IdempotentHostDecision {
                     decision: Box::new(decision),
@@ -678,7 +701,7 @@ impl AcpWorker {
             }
             return Err(AcpClientRequestError::AlreadyDecided {
                 decision: Box::new(decision),
-                attempted_actor: actor,
+                attempted_actor: Box::new(actor),
                 attempted_payload,
             });
         }
@@ -723,22 +746,37 @@ impl AcpWorker {
     }
 
     async fn append_control_outcome(&self, decision: &AcpHostDecision, status: &str, reason: &str) {
+        self.append_control_outcome_with_attempt(decision, status, reason, None, None)
+            .await;
+    }
+
+    async fn append_control_outcome_with_attempt(
+        &self,
+        decision: &AcpHostDecision,
+        status: &str,
+        reason: &str,
+        attempted_actor: Option<&AcpControlEnvelope>,
+        attempted_payload: Option<&JsonValue>,
+    ) {
         let topic_id = decision.session_id.as_deref().unwrap_or(&self.id);
-        append_acp_event(
-            &self.event_log,
-            topic_id,
-            "control_outcome",
-            json!({
-                "request_id": decision.request_id,
-                "method": decision.method,
-                "status": status,
-                "reason": reason,
-                "actor": decision.actor.to_json(),
-                "decision": decision.payload,
-                "decided_at_ms": decision.decided_at_ms,
-            }),
-        )
-        .await;
+        let mut payload = json!({
+            "request_id": decision.request_id,
+            "method": decision.method,
+            "status": status,
+            "reason": reason,
+            "actor": decision.actor.legacy_actor_json(),
+            "actor_chain": decision.actor.actor_chain_json(),
+            "decision": decision.payload,
+            "decided_at_ms": decision.decided_at_ms,
+        });
+        if let Some(actor) = attempted_actor {
+            payload["attempted_actor"] = actor.legacy_actor_json();
+            payload["attempted_actor_chain"] = actor.actor_chain_json();
+        }
+        if let Some(attempted_payload) = attempted_payload {
+            payload["attempted_decision"] = attempted_payload.clone();
+        }
+        append_acp_event(&self.event_log, topic_id, "control_outcome", payload).await;
     }
 
     async fn send_client_request(
@@ -747,7 +785,7 @@ impl AcpWorker {
         role: AcpAttachRole,
         mut value: JsonValue,
     ) -> Result<(), AcpClientRequestError> {
-        let actor = self.client_actor(client_id, role);
+        let actor = self.client_control_envelope(client_id, role);
         if let Some(method) = value.get("method").and_then(JsonValue::as_str) {
             if !role_may_send_method(role, method) {
                 return Err(AcpClientRequestError::Forbidden {
@@ -1401,14 +1439,19 @@ async fn run_acp_websocket(socket: WebSocket, state: Arc<AcpWebSocketState>) {
                                         attempted_payload,
                                     }) => {
                                         worker
-                                            .append_control_outcome(
+                                            .append_control_outcome_with_attempt(
                                                 &decision,
                                                 "rejected",
                                                 "already_decided",
+                                                Some(attempted_actor.as_ref()),
+                                                Some(&attempted_payload),
                                             )
                                             .await;
                                         let mut data = decision
-                                            .error_data("already_decided", Some(&attempted_actor));
+                                            .error_data(
+                                                "already_decided",
+                                                Some(attempted_actor.as_ref()),
+                                            );
                                         data["attemptedDecision"] = attempted_payload;
                                         send_socket_jsonrpc_error_with_data(
                                             &socket_tx,
@@ -1903,6 +1946,14 @@ fn client_id_from_request(value: &JsonValue, connection_id: &str) -> String {
         .to_string()
 }
 
+fn acp_operator_subject(client_id: &str) -> String {
+    format!("acp:operator:{client_id}")
+}
+
+fn acp_surface_actor_subject(source: &str, client_id: &str) -> String {
+    format!("acp:{source}:{client_id}")
+}
+
 fn request_harn_value<'a>(value: &'a JsonValue, key: &str) -> Option<&'a JsonValue> {
     value
         .get("_harn")
@@ -2128,6 +2179,15 @@ mod tests {
         mpsc::UnboundedReceiver<String>,
     );
 
+    fn expected_acp_actor_chain(client_id: &str) -> JsonValue {
+        json!({
+            "sub": acp_operator_subject(client_id),
+            "act": {
+                "sub": acp_surface_actor_subject("websocket", client_id),
+            },
+        })
+    }
+
     fn test_worker() -> TestWorkerChannels {
         let (request_tx, request_rx) = mpsc::unbounded_channel();
         let (owner_tx, owner_rx) = mpsc::unbounded_channel();
@@ -2228,6 +2288,23 @@ mod tests {
         assert_eq!(forwarded["result"]["outcome"]["outcome"], "selected");
         assert_eq!(forwarded["result"]["outcome"]["optionId"], "allow");
 
+        let controller_chain = expected_acp_actor_chain("controller");
+        let control_events = worker
+            .event_log
+            .read_range(
+                &Topic::new("acp.session.session-1").expect("session topic"),
+                None,
+                16,
+            )
+            .await
+            .expect("control outcome event log");
+        let accepted = control_events
+            .iter()
+            .find(|(_, event)| event.kind == "control_outcome")
+            .expect("accepted control outcome");
+        assert_eq!(accepted.1.payload["actor_chain"], controller_chain);
+        assert_eq!(accepted.1.payload["actor"]["actorChain"], controller_chain);
+
         let duplicate = worker
             .send_client_request(
                 "controller",
@@ -2264,8 +2341,57 @@ mod tests {
                 attempted_payload,
             } => {
                 assert_eq!(decision.actor.client_id, "controller");
+                assert_eq!(
+                    decision.actor.actor_chain.current(),
+                    "acp:websocket:controller"
+                );
                 assert_eq!(attempted_actor.client_id, "owner");
+                assert_eq!(attempted_actor.actor_chain.current(), "acp:websocket:owner");
                 assert_eq!(attempted_payload["result"]["outcome"]["optionId"], "reject");
+                let data = decision.error_data("already_decided", Some(attempted_actor.as_ref()));
+                assert_eq!(
+                    data["decidedBy"]["actorChain"],
+                    expected_acp_actor_chain("controller")
+                );
+                assert_eq!(
+                    data["attemptedBy"]["actorChain"],
+                    expected_acp_actor_chain("owner")
+                );
+                worker
+                    .append_control_outcome_with_attempt(
+                        &decision,
+                        "rejected",
+                        "already_decided",
+                        Some(attempted_actor.as_ref()),
+                        Some(&attempted_payload),
+                    )
+                    .await;
+                let control_events = worker
+                    .event_log
+                    .read_range(
+                        &Topic::new("acp.session.session-1").expect("session topic"),
+                        None,
+                        16,
+                    )
+                    .await
+                    .expect("control outcome event log");
+                let rejected = control_events
+                    .iter()
+                    .find(|(_, event)| {
+                        event.kind == "control_outcome"
+                            && event.payload.get("status").and_then(JsonValue::as_str)
+                                == Some("rejected")
+                    })
+                    .expect("rejected control outcome");
+                assert_eq!(
+                    rejected.1.payload["attempted_actor_chain"],
+                    expected_acp_actor_chain("owner")
+                );
+                assert_eq!(
+                    rejected.1.payload["attempted_actor"]["actorChain"],
+                    expected_acp_actor_chain("owner")
+                );
+                assert_eq!(rejected.1.payload["attempted_decision"], attempted_payload);
             }
             other => panic!("expected AlreadyDecided, got {other:?}"),
         }
@@ -2288,6 +2414,7 @@ mod tests {
             .await
             .expect("controller cancel forwards");
         let forwarded = request_rx.recv().await.expect("forwarded cancel");
+        let actor_chain = expected_acp_actor_chain("controller");
         assert_eq!(
             forwarded["params"]["_harn"]["actor"],
             json!({
@@ -2295,8 +2422,14 @@ mod tests {
                 "connectionId": "controller-conn",
                 "role": "controller",
                 "source": "websocket",
+                "actorChain": actor_chain,
             })
         );
+        assert_eq!(forwarded["params"]["_harn"]["actorChain"], actor_chain);
+        let decoded =
+            harn_vm::ActorChain::from_json_value(&forwarded["params"]["_harn"]["actorChain"])
+                .expect("forwarded actorChain decodes");
+        assert_eq!(decoded.current(), "acp:websocket:controller");
     }
 
     #[tokio::test(flavor = "current_thread")]

@@ -274,12 +274,20 @@ race on the same `session/request_permission` request:
   `status: "already_applied"`;
 - conflicting late responses fail with `code: -32013` and `data.reason:
   "already_decided"`, including `decidedBy`, `decidedAtMs`, and the attempted
-  actor.
+  actor. `decidedBy` and `attemptedBy` preserve the compatibility actor fields
+  and include `actorChain` for canonical attribution.
 
-Forwarded controls carry `_harn.actor` with `clientId`, `connectionId`, `role`,
-and `source: "websocket"`. ACP adapter audit/replay emits matching
+Forwarded controls carry `_harn.actorChain` in the RFC 8693 `{sub, act}` shape
+and a compatibility `_harn.actor` object with `clientId`, `connectionId`,
+`role`, `source: "websocket"`, and the same `actorChain`. Until a broker
+provides a separate authenticated operator subject, Harn derives `sub` from the
+ACP client id and the current actor from the controlling surface
+(`acp:<source>:<clientId>`). ACP adapter audit/replay emits matching
 `_harn/agentEvent` frames with `kind: "control_outcome"` for accepted,
-idempotent, and rejected outcomes.
+idempotent, and rejected outcomes; those events keep the legacy `actor` object
+and store the canonical chain at `actor_chain`. Rejected late-decision events
+also include `attempted_actor`, `attempted_actor_chain`, and
+`attempted_decision`.
 
 Retained workers expire after 5 minutes by default. `HARN_ACP_WS_RETAIN_SECS`
 can tune that window for controlled deployments and tests. After expiry, or
