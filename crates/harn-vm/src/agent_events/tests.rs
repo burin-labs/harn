@@ -164,6 +164,57 @@ fn judge_decision_round_trips_through_jsonl_sink() {
 }
 
 #[test]
+fn jsonl_sink_lines_are_durable_without_drop_or_explicit_flush() {
+    let dir = std::env::temp_dir().join(format!("harn-durable-event-log-{}", uuid::Uuid::now_v7()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("event_log.jsonl");
+    let sink = JsonlEventSink::open(&path).unwrap();
+
+    sink.handle_event(&AgentEvent::IterationEnd {
+        session_id: "s".into(),
+        iteration: 7,
+        iteration_info: serde_json::json!({"reason": "verified"}),
+    });
+    sink.handle_event(&AgentEvent::TypedCheckpoint {
+        session_id: "s".into(),
+        checkpoint: serde_json::json!({"schema": "burin.completion.v1"}),
+    });
+    sink.handle_event(&AgentEvent::JudgeDecision {
+        session_id: "s".into(),
+        iteration: 7,
+        verdict: "done".into(),
+        reasoning: "verification passed".into(),
+        next_step: None,
+        judge_duration_ms: 11,
+        trigger: Some("completion_check".into()),
+    });
+
+    let text = std::fs::read_to_string(&path).unwrap();
+    let lines = text.lines().collect::<Vec<_>>();
+    assert_eq!(
+        lines.len(),
+        3,
+        "tail events must be readable before sink drop"
+    );
+    assert!(
+        text.contains("\"type\":\"iteration_end\""),
+        "iteration_end tail must be line-durable"
+    );
+    assert!(
+        text.contains("\"type\":\"typed_checkpoint\""),
+        "typed_checkpoint tail must be line-durable"
+    );
+    assert!(
+        text.contains("\"type\":\"judge_decision\""),
+        "judge_decision tail must be line-durable"
+    );
+
+    drop(sink);
+    let _ = std::fs::remove_file(&path);
+    let _ = std::fs::remove_dir(&dir);
+}
+
+#[test]
 fn structural_validator_decision_round_trips_through_jsonl_sink() {
     use std::io::{BufRead, BufReader};
     let dir = std::env::temp_dir().join(format!(
