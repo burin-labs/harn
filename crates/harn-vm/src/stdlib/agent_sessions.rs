@@ -30,6 +30,7 @@ pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
     &AGENT_SESSION_SNAPSHOT_BUILTIN_DEF,
     &AGENT_SESSION_ANCESTRY_BUILTIN_DEF,
     &AGENT_SESSION_CURRENT_ID_BUILTIN_DEF,
+    &AGENT_SESSION_ACTOR_CHAIN_BUILTIN_DEF,
     &AGENT_SESSION_TOOL_FORMAT_BUILTIN_DEF,
     &AGENT_SESSION_SYSTEM_PROMPT_BUILTIN_DEF,
     &AGENT_SESSION_WORKSPACE_ANCHOR_BUILTIN_DEF,
@@ -588,6 +589,30 @@ fn agent_session_current_id_builtin(
 ) -> Result<VmValue, VmError> {
     Ok(agent_sessions::current_session_id()
         .map(|id| VmValue::String(std::sync::Arc::from(id)))
+        .unwrap_or(VmValue::Nil))
+}
+
+#[harn_builtin(
+    sig = "agent_session_actor_chain(id?: string) -> dict?",
+    category = "agent.session",
+    doc = "Return the RFC 8693 actor chain for an agent session. Defaults to the current session."
+)]
+fn agent_session_actor_chain_builtin(
+    args: &[VmValue],
+    _out: &mut String,
+) -> Result<VmValue, VmError> {
+    let explicit_id = arg_string_opt(args, 0, "agent_session_actor_chain", "id")?;
+    let id = explicit_id.or_else(agent_sessions::current_session_id);
+    let Some(id) = id else {
+        return Ok(VmValue::Nil);
+    };
+    if !agent_sessions::exists(&id) {
+        return Err(err(format!(
+            "agent_session_actor_chain: unknown session id '{id}'"
+        )));
+    }
+    Ok(agent_sessions::actor_chain(&id)
+        .map(|chain| chain.to_vm_value())
         .unwrap_or(VmValue::Nil))
 }
 
@@ -1668,7 +1693,7 @@ mod tests {
     use super::build_compact_config;
     use crate::value::VmValue;
 
-    fn call_current_id_builtin() -> VmValue {
+    fn call_agent_session_builtin(name: &str) -> VmValue {
         let rt = tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .build()
@@ -1679,12 +1704,16 @@ mod tests {
                 .run_until(async {
                     let mut vm = crate::Vm::new();
                     crate::register_vm_stdlib(&mut vm);
-                    vm.call_named_builtin("agent_session_current_id", Vec::new())
+                    vm.call_named_builtin(name, Vec::new())
                         .await
                         .expect("builtin call")
                 })
                 .await
         })
+    }
+
+    fn call_current_id_builtin() -> VmValue {
+        call_agent_session_builtin("agent_session_current_id")
     }
 
     #[test]
@@ -1700,6 +1729,23 @@ mod tests {
         let current = call_current_id_builtin();
         crate::agent_sessions::pop_current_session();
         assert!(matches!(current, VmValue::String(value) if value.as_ref() == "unit-test-session"));
+    }
+
+    #[test]
+    fn actor_chain_returns_current_session_chain() {
+        crate::reset_thread_local_state();
+        let chain = crate::ActorChain::new("user:kenneth").pushed("agent:root");
+        let id = crate::agent_sessions::open_or_create_with_actor_chain(
+            Some("actor-chain-current".to_string()),
+            Some(chain.clone()),
+        );
+        crate::agent_sessions::push_current_session(id);
+        let current = call_agent_session_builtin("agent_session_actor_chain");
+        crate::agent_sessions::pop_current_session();
+        assert_eq!(
+            crate::llm::helpers::vm_value_to_json(&current),
+            chain.to_json_value()
+        );
     }
 
     #[test]

@@ -1645,6 +1645,14 @@ full scratchpad into the event. Snapshots expose `scratchpad` and
 `scratchpad_version`; final transcripts also mirror the current values under
 `metadata.agent_scratchpad` and `metadata.agent_scratchpad_version`.
 
+Named sessions may carry an RFC 8693 actor chain describing who the session is
+acting as and on whose behalf. `agent_session_actor_chain(id?)` returns the
+canonical `{sub, act}` dict for an explicit session id, or for the current
+active session when `id` is omitted. Hosts bind the originating principal when a
+session enters execution, and child agent sessions push their deterministic
+actor name onto the chain. Snapshots expose the same value at `actor_chain` and
+`metadata.actor_chain`.
+
 `agent_session_seed_from_jsonl(path, opts?)` creates a new session from a
 replayable LLM transcript sidecar. Exact replay uses prompt-visible `message`
 events or full request snapshots; provider-response-only sidecars are

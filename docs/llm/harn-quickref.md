@@ -2537,6 +2537,8 @@ Lifecycle builtins (all hard-error on unknown ids except `exists`, `open`,
 - `agent_session_open(id?, opts?)` / `_close(id)` / `_exists(id)`. `opts` may
   include `workspace_anchor` and `workspace_policy: {default_mount_mode}`.
 - `agent_session_current_id()` returns the innermost active session id or `nil`.
+- `agent_session_actor_chain(id?)` returns the RFC 8693 `{sub, act}` actor
+  chain for `id`, or for the current active session when `id` is omitted.
 - `agent_session_workspace_anchor(id)` / `_set_workspace_anchor(id, anchor)`
   read and replace the typed anchor.
 - `agent_session_workspace_policy(id)` / `_set_workspace_policy(id, policy)`

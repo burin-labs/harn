@@ -2977,8 +2977,9 @@ See the [Sessions](./sessions.md) chapter for the full model.
 | `agent_session_exists(id)` | id | bool | Safe on unknown ids |
 | `agent_session_current_id()` | none | string or nil | Returns the innermost active session id, or `nil` outside any active session |
 | `agent_session_length(id)` | id | int | Message count; errors on unknown id |
-| `agent_session_snapshot(id)` | id | dict or nil | Read-only transcript snapshot plus `length`, `created_at`, `system_prompt`, `tool_format`, `scratchpad`, `scratchpad_version`, `parent_id`, `child_ids`, and `branched_at_event_index` |
+| `agent_session_snapshot(id)` | id | dict or nil | Read-only transcript snapshot plus `length`, `created_at`, `system_prompt`, `tool_format`, `actor_chain`, `scratchpad`, `scratchpad_version`, `parent_id`, `child_ids`, and `branched_at_event_index` |
 | `agent_session_ancestry(id)` | id | dict or nil | Returns `{parent_id, child_ids, root_id}` for the current in-VM lineage |
+| `agent_session_actor_chain(id?)` | id: string or nil | dict or nil | Returns the RFC 8693 `{sub, act}` actor chain for `id`, or for the current active session when `id` is omitted |
 | `agent_session_reset(id)` | id | nil | Wipes history; preserves id and subscribers |
 | `agent_session_fork(src, dst?)` | src, dst | string | Copies transcript, sets `dst.parent_id`, and appends `dst` to `src.child_ids` |
 | `agent_session_fork_at(src, keep_first, dst?)` | src, keep_first: int, dst | string | Forks then keeps the first `keep_first` messages on the child; records `branched_at_event_index` |

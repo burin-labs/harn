@@ -66,8 +66,9 @@ the "one-shot" call shape.
 | `agent_session_exists(id)` | `bool` | Safe on unknown ids. |
 | `agent_session_current_id()` | `string` or `nil` | Returns the innermost active session id for the current thread, or `nil` outside any active session. |
 | `agent_session_length(id)` | `int` | Message count. Errors if `id` doesn't exist. |
-| `agent_session_snapshot(id)` | `dict` or `nil` | Read-only transcript snapshot plus `length`, `created_at`, `system_prompt`, `tool_format`, `scratchpad`, `scratchpad_version`, `parent_id`, `child_ids`, and `branched_at_event_index`. |
+| `agent_session_snapshot(id)` | `dict` or `nil` | Read-only transcript snapshot plus `length`, `created_at`, `system_prompt`, `tool_format`, `actor_chain`, `scratchpad`, `scratchpad_version`, `parent_id`, `child_ids`, and `branched_at_event_index`. |
 | `agent_session_ancestry(id)` | `dict` or `nil` | Returns `{parent_id, child_ids, root_id}` for the in-VM session graph. |
+| `agent_session_actor_chain(id?)` | `dict` or `nil` | Returns the RFC 8693 `{sub, act}` actor chain for `id`, or for the current active session when `id` is omitted. |
 | `agent_session_reset(id)` | `nil` | Wipes history; preserves id and subscribers. |
 | `agent_session_fork(src, dst?)` | `string` | Copies transcript, sets parent/child lineage, and does NOT copy subscribers. |
 | `agent_session_fork_at(src, keep_first, dst?)` | `string` | Forks then keeps only the first `keep_first` messages on the child. Records `branched_at_event_index`. |
@@ -210,6 +211,12 @@ not an event fanout.
 Inside those callbacks, `agent_session_current_id()` resolves to the
 session currently being driven by the agent loop. Outside any active
 session, it returns `nil`.
+
+`agent_session_actor_chain(id?)` returns the session's RFC 8693 actor chain.
+When `id` is omitted, it reads the current active session. Hosts bind the
+originating principal at session entry, and child agent sessions push their
+own deterministic actor name onto the chain. Snapshots also expose the same
+value at `actor_chain` and `metadata.actor_chain`.
 
 ## Lineage
 

@@ -46,7 +46,10 @@ impl AcpServer {
             SessionBudget::Unlimited => None,
             SessionBudget::Custom(spec) => Some(spec),
         };
-        harn_vm::agent_sessions::open_or_create(Some(session_id.clone()));
+        harn_vm::agent_sessions::open_or_create_with_actor_chain(
+            Some(session_id.clone()),
+            self.actor_chain(),
+        );
         let _session_guard = harn_vm::agent_sessions::enter_current_session(session_id.clone());
         #[cfg(feature = "hostlib")]
         harn_hostlib::fs::configure_session_root(&session_id, &cwd);
