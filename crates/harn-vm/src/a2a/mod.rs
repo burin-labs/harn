@@ -17,6 +17,34 @@ const A2A_PROTOCOL_VERSION: &str = "0.3.0";
 const A2A_JSONRPC_TRANSPORT: &str = "JSONRPC";
 const A2A_PUSH_URL_ENV: &str = "HARN_A2A_PUSH_URL";
 const A2A_PUSH_TOKEN_ENV: &str = "HARN_A2A_PUSH_TOKEN";
+const A2A_ACTOR_CHAIN_METADATA_POINTERS: &[&str] = &[
+    "/actor_chain",
+    "/actorChain",
+    "/metadata/actor_chain",
+    "/metadata/actorChain",
+    "/metadata/harn/actor_chain",
+    "/metadata/harn/actorChain",
+    "/metadata/_harn/actorChain",
+    "/statusUpdate/actor_chain",
+    "/statusUpdate/actorChain",
+    "/statusUpdate/metadata/actor_chain",
+    "/statusUpdate/metadata/actorChain",
+    "/statusUpdate/metadata/harn/actor_chain",
+    "/statusUpdate/metadata/harn/actorChain",
+    "/statusUpdate/metadata/_harn/actorChain",
+    "/task/actor_chain",
+    "/task/actorChain",
+    "/task/metadata/actor_chain",
+    "/task/metadata/actorChain",
+    "/task/metadata/harn/actor_chain",
+    "/task/metadata/harn/actorChain",
+    "/task/metadata/_harn/actorChain",
+    "/message/metadata/actor_chain",
+    "/message/metadata/actorChain",
+    "/message/metadata/harn/actor_chain",
+    "/message/metadata/harn/actorChain",
+    "/message/metadata/_harn/actorChain",
+];
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ResolvedA2aEndpoint {
@@ -110,6 +138,24 @@ impl A2aClient for RealA2aClient {
     }
 }
 
+/// Return the first actor-chain metadata candidate accepted by Harn's A2A
+/// surfaces. Callers that accept invalid metadata should use
+/// [`actor_chain_from_metadata`]; callers that must reject malformed input can
+/// parse the returned value themselves and keep the pointer for diagnostics.
+pub fn actor_chain_metadata_candidate(value: &Value) -> Option<(&'static str, &Value)> {
+    for pointer in A2A_ACTOR_CHAIN_METADATA_POINTERS {
+        if let Some(candidate) = value.pointer(pointer) {
+            return Some((pointer, candidate));
+        }
+    }
+    None
+}
+
+pub fn actor_chain_from_metadata(value: &Value) -> Option<crate::actor_chain::ActorChain> {
+    actor_chain_metadata_candidate(value)
+        .and_then(|(_, candidate)| crate::actor_chain::ActorChain::from_json_value(candidate).ok())
+}
+
 #[derive(Debug)]
 enum AgentCardFetchError {
     Cancelled(String),
@@ -143,7 +189,10 @@ pub async fn dispatch_trigger_event(
         }
     };
     let message_id = format!("{}.{}", event.trace_id.0, event.id.0);
-    let envelope = serde_json::json!({
+    let actor_chain = crate::agent_sessions::current_actor_chain()
+        .as_ref()
+        .map(crate::actor_chain::ActorChain::to_json_value);
+    let mut envelope = serde_json::json!({
         "kind": "harn.trigger.dispatch",
         "message_id": message_id,
         "trace_id": event.trace_id.0,
@@ -153,9 +202,24 @@ pub async fn dispatch_trigger_event(
         "target_agent": endpoint.target_agent,
         "event": event,
     });
+    if let Some(chain) = actor_chain.as_ref() {
+        envelope["actor_chain"] = chain.clone();
+    }
     let text = serde_json::to_string(&envelope)
         .map_err(|error| A2aClientError::Protocol(format!("serialize A2A envelope: {error}")))?;
     let push_config = push_notification_config();
+    let mut metadata = serde_json::json!({
+        "kind": "harn.trigger.dispatch",
+        "trace_id": event.trace_id.0,
+        "event_id": event.id.0,
+        "trigger_id": binding_id,
+        "binding_key": binding_key,
+        "target_agent": endpoint.target_agent,
+    });
+    if let Some(chain) = actor_chain.as_ref() {
+        metadata["actor_chain"] = chain.clone();
+        metadata["harn"] = serde_json::json!({"actor_chain": chain});
+    }
     let mut params = serde_json::json!({
         "contextId": event.trace_id.0,
         "message": {
@@ -165,14 +229,7 @@ pub async fn dispatch_trigger_event(
                 "type": "text",
                 "text": text,
             }],
-            "metadata": {
-                "kind": "harn.trigger.dispatch",
-                "trace_id": event.trace_id.0,
-                "event_id": event.id.0,
-                "trigger_id": binding_id,
-                "binding_key": binding_key,
-                "target_agent": endpoint.target_agent,
-            },
+            "metadata": metadata,
         },
     });
     if let Some(config) = push_config.clone() {

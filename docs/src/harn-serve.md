@@ -330,6 +330,9 @@ Behavior today:
 - one-cycle compatibility aliases for `a2a.*`, `tasks/send`,
   `tasks/send_and_wait`, `tasks/sendSubscribe`, and `tasks/list`, with
   `Deprecation: true` on legacy HTTP responses
+- RFC 8693 actor-chain metadata accepted at `message.metadata.actor_chain`;
+  the adapter stores the incoming chain on task metadata and appends the served
+  agent hop for the execution session
 - REST-style POST paths at `/message/send`, `/message/stream`,
   `/tasks/resubscribe`, and `/tasks/cancel`, plus deprecated `/tasks/send` and
   `/tasks/send_and_wait` aliases

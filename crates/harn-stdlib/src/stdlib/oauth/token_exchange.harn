@@ -23,6 +23,8 @@ type OAuthTokenExchangeCapability = {
   issued_token_types: list<string>,
   delegation: bool,
   impersonation: bool,
+  provider_metadata_fields: list<string>,
+  tracking?: dict,
   notes: list<string>,
 }
 
@@ -37,6 +39,15 @@ fn __normalize_token_type(name) {
   let key = lowercase(raw)
   if key == "access" {
     return __TOKEN_TYPE_PREFIX + "access_token"
+  }
+  if key == "id-jag" || key == "id_jag" {
+    return __TOKEN_TYPE_PREFIX + "id-jag"
+  }
+  if key == "txn" || key == "txn_token" {
+    return __TOKEN_TYPE_PREFIX + "txn_token"
+  }
+  if key == "self_signed" || key == "unsigned_json" {
+    return __TOKEN_TYPE_PREFIX + key
   }
   if key == "access_token"
     || key == "refresh_token"
@@ -80,6 +91,8 @@ fn __normalize_row(raw) {
     issued_token_types: __normalize_token_types(raw?.issued_token_types ?? raw?.requested_token_types ?? []),
     delegation: raw?.delegation ?? true,
     impersonation: raw?.impersonation ?? true,
+    provider_metadata_fields: raw?.provider_metadata_fields ?? [],
+    tracking: raw?.tracking,
     notes: raw?.notes ?? [],
   }
 }

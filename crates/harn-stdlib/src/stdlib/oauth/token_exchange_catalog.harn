@@ -8,6 +8,20 @@ let __JWT = "urn:ietf:params:oauth:token-type:jwt"
 
 let __ACCESS_TOKEN = "urn:ietf:params:oauth:token-type:access_token"
 
+let __REFRESH_TOKEN = "urn:ietf:params:oauth:token-type:refresh_token"
+
+let __ID_TOKEN = "urn:ietf:params:oauth:token-type:id_token"
+
+let __SAML2 = "urn:ietf:params:oauth:token-type:saml2"
+
+let __ID_JAG = "urn:ietf:params:oauth:token-type:id-jag"
+
+let __TXN_TOKEN = "urn:ietf:params:oauth:token-type:txn_token"
+
+let __SELF_SIGNED = "urn:ietf:params:oauth:token-type:self_signed"
+
+let __UNSIGNED_JSON = "urn:ietf:params:oauth:token-type:unsigned_json"
+
 /**
  * token_exchange_capability_rows returns the shipped capability catalog.
  *
@@ -28,8 +42,96 @@ pub fn token_exchange_capability_rows() -> list {
       issued_token_types: [__ACCESS_TOKEN, __JWT],
       delegation: true,
       impersonation: true,
+      provider_metadata_fields: [],
+      tracking: {status: "reference", drafts: []},
       notes: [
         "Reference row used by conformance tests and examples. Real authorization servers should ship or pass their own overlay row.",
+      ],
+    },
+    {
+      id: "id-jag",
+      label: "Identity Assertion JWT Authorization Grant",
+      supported: true,
+      subject_token_types: [__ID_TOKEN, __SAML2, __REFRESH_TOKEN],
+      actor_token_types: [__JWT],
+      requested_token_types: [__ID_JAG],
+      issued_token_types: [__ID_JAG],
+      delegation: true,
+      impersonation: true,
+      provider_metadata_fields: ["identity_chaining_requested_token_types_supported", "authorization_grant_profiles_supported"],
+      tracking: {
+        status: "ietf-draft",
+        drafts: [
+          {
+            name: "draft-ietf-oauth-identity-assertion-authz-grant-04",
+            url: "https://datatracker.ietf.org/doc/draft-ietf-oauth-identity-assertion-authz-grant/",
+          },
+          {
+            name: "draft-ietf-oauth-identity-chaining-14",
+            url: "https://datatracker.ietf.org/doc/draft-ietf-oauth-identity-chaining/",
+          },
+        ],
+      },
+      notes: [
+        "ID-JAG support is detected when RFC 8414 metadata includes urn:ietf:params:oauth:token-type:id-jag in identity_chaining_requested_token_types_supported.",
+        "Resource authorization servers advertise the profile with urn:ietf:params:oauth:grant-profile:id-jag in authorization_grant_profiles_supported.",
+        "draft-ietf-oauth-identity-assertion-authz-grant-04 allows actor_token but leaves normative actor processing to future profiles.",
+      ],
+    },
+    {
+      id: "txn-token",
+      label: "OAuth Transaction Tokens",
+      supported: true,
+      subject_token_types: [__ACCESS_TOKEN, __JWT, __ID_TOKEN, __SAML2, __SELF_SIGNED, __UNSIGNED_JSON],
+      actor_token_types: [],
+      requested_token_types: [__TXN_TOKEN],
+      issued_token_types: [__TXN_TOKEN],
+      delegation: false,
+      impersonation: true,
+      provider_metadata_fields: [],
+      tracking: {
+        status: "ietf-draft",
+        drafts: [
+          {
+            name: "draft-ietf-oauth-transaction-tokens-08",
+            url: "https://datatracker.ietf.org/doc/draft-ietf-oauth-transaction-tokens/",
+          },
+          {
+            name: "draft-araut-oauth-transaction-tokens-for-agents-02",
+            url: "https://datatracker.ietf.org/doc/draft-araut-oauth-transaction-tokens-for-agents/",
+          },
+        ],
+      },
+      notes: [
+        "Transaction tokens use RFC 8693 token exchange with requested_token_type urn:ietf:params:oauth:token-type:txn_token.",
+        "The base draft defines self_signed and unsigned_json subject token type URNs and forbids refresh_token responses.",
+        "The agent draft tracks actor-chain usage by preserving existing sub and act claims rather than defining a new grant type.",
+      ],
+    },
+    {
+      id: "wimse-wit-wpt",
+      label: "WIMSE Workload Identity Token and Workload Proof Token",
+      supported: false,
+      subject_token_types: [__JWT],
+      actor_token_types: [],
+      requested_token_types: [],
+      issued_token_types: [],
+      delegation: false,
+      impersonation: false,
+      provider_metadata_fields: ["Workload-Identity-Token", "Workload-Proof-Token"],
+      tracking: {
+        status: "tracking-only",
+        drafts: [
+          {
+            name: "draft-ietf-wimse-workload-creds-01",
+            url: "https://datatracker.ietf.org/doc/draft-ietf-wimse-workload-creds/",
+          },
+          {name: "draft-ietf-wimse-wpt-01", url: "https://datatracker.ietf.org/doc/draft-ietf-wimse-wpt/"},
+        ],
+      },
+      notes: [
+        "WIMSE WIT is a workload credential and WPT is proof of possession, not a bearer token-exchange profile.",
+        "Do not treat a WIT as a bearer token; WPT validation must prove possession of the key bound in the WIT.",
       ],
     },
   ]

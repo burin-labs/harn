@@ -62,7 +62,9 @@ For `a2a://host[:port]/path` routes, the dispatcher:
   read-only legacy fallback for peers that have not cut over yet
 - treats the URI path as the `target_agent` label that propagates into the
   outbound envelope and the action graph
-- sends the `TriggerEvent` envelope over `message/send`
+- sends the `TriggerEvent` envelope over `message/send`; when dispatch runs
+  inside an active agent session, the current RFC 8693 actor chain is included
+  as `message.metadata.actor_chain`
 - returns either the inline agent result (when the peer completes
   synchronously) or a pending task handle payload for the caller
 

@@ -204,6 +204,7 @@ struct PreparedTask {
     auth: AuthRequest,
     caller: String,
     trace_id: Option<harn_vm::TraceId>,
+    actor_chain: Option<harn_vm::actor_chain::ActorChain>,
     cancel_token: Arc<AtomicBool>,
 }
 

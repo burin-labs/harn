@@ -39,6 +39,99 @@ pub fn triage(task: string) -> string {
 }
 
 #[tokio::test]
+async fn send_message_threads_actor_chain_into_task_and_session() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let script = dir.path().join("server.harn");
+    std::fs::write(
+        &script,
+        r#"
+pub fn actor_chain(task: string) -> string {
+  let chain = agent_session_actor_chain()
+  return chain.sub + "|" + chain.act.sub + "|" + chain.act.act.sub
+}
+"#,
+    )
+    .expect("write script");
+    let core = DispatchCore::new(DispatchCoreConfig::for_script(&script)).expect("core");
+    let server = Arc::new(A2aServer::new(A2aServerConfig::new(core)));
+    let request = harn_vm::jsonrpc::request(
+        "actor-chain-1",
+        "message/send",
+        json!({
+            "message": {
+                "metadata": {
+                    "target_agent": "actor_chain",
+                    "actor_chain": {
+                        "sub": "user:kenneth",
+                        "act": {"sub": "agent:caller"}
+                    }
+                },
+                "parts": [{"type": "text", "text": "hello"}]
+            }
+        }),
+    );
+
+    let processed = server.process_rpc(request, AuthRequest::default()).await;
+    let RpcOutcome::Json(response) = processed.outcome else {
+        panic!("expected json response");
+    };
+
+    assert_eq!(response["result"]["status"]["state"], "completed");
+    assert_eq!(
+        response["result"]["metadata"]["actor_chain"],
+        json!({"sub": "user:kenneth", "act": {"sub": "agent:caller"}}),
+    );
+    assert_eq!(
+        response["result"]["metadata"]["harn"]["actor_chain"],
+        response["result"]["metadata"]["actor_chain"],
+    );
+    assert_eq!(
+        response["result"]["history"][1]["parts"][0]["text"],
+        "user:kenneth|server|agent:caller",
+    );
+}
+
+#[tokio::test]
+async fn send_message_rejects_invalid_actor_chain_metadata() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let script = dir.path().join("server.harn");
+    std::fs::write(
+        &script,
+        r"
+pub fn triage(task: string) -> string {
+  return task
+}
+",
+    )
+    .expect("write script");
+    let core = DispatchCore::new(DispatchCoreConfig::for_script(&script)).expect("core");
+    let server = Arc::new(A2aServer::new(A2aServerConfig::new(core)));
+    let request = harn_vm::jsonrpc::request(
+        "actor-chain-invalid",
+        "message/send",
+        json!({
+            "message": {
+                "metadata": {
+                    "target_agent": "triage",
+                    "actor_chain": {"act": {"sub": "agent:caller"}}
+                },
+                "parts": [{"type": "text", "text": "hello"}]
+            }
+        }),
+    );
+
+    let processed = server.process_rpc(request, AuthRequest::default()).await;
+    let RpcOutcome::Json(response) = processed.outcome else {
+        panic!("expected json response");
+    };
+
+    assert_eq!(response["error"]["code"], -32602);
+    assert!(response["error"]["message"]
+        .as_str()
+        .is_some_and(|message| message.contains("actor_chain metadata is invalid")));
+}
+
+#[tokio::test]
 async fn send_message_round_trips_file_and_data_parts() {
     let dir = tempfile::tempdir().expect("tempdir");
     let script = dir.path().join("server.harn");

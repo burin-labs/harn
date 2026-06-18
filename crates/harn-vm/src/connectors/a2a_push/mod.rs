@@ -72,6 +72,16 @@ struct A2aPushJwtClaims {
     iat: i64,
     exp: i64,
     jti: String,
+    #[serde(default)]
+    sub: Option<String>,
+    #[serde(default)]
+    act: Option<JsonValue>,
+    #[serde(default)]
+    may_act: Option<JsonValue>,
+    #[serde(default)]
+    scope: Option<String>,
+    #[serde(default)]
+    scopes: Option<Vec<String>>,
     #[serde(default, rename = "taskId")]
     task_id_camel: Option<String>,
     #[serde(default)]
@@ -469,6 +479,9 @@ fn normalize_a2a_push(body: &JsonValue, claims: Option<&A2aPushJwtClaims>) -> A2
     let artifact_update = body.get("artifactUpdate");
     let task = body.get("task");
     let message = body.get("message");
+    let actor_chain = crate::a2a::actor_chain_from_metadata(body)
+        .map(|chain| chain.to_json_value())
+        .or_else(|| claims.and_then(A2aPushJwtClaims::actor_chain));
     let task_id = status_update
         .and_then(|value| value.get("taskId"))
         .or_else(|| artifact_update.and_then(|value| value.get("taskId")))
@@ -510,6 +523,7 @@ fn normalize_a2a_push(body: &JsonValue, claims: Option<&A2aPushJwtClaims>) -> A2
         task_state,
         artifact,
         sender,
+        actor_chain,
         raw: body.clone(),
         kind,
     }
@@ -518,6 +532,38 @@ fn normalize_a2a_push(body: &JsonValue, claims: Option<&A2aPushJwtClaims>) -> A2
 impl A2aPushJwtClaims {
     fn task_id(&self) -> Option<String> {
         self.task_id.clone().or_else(|| self.task_id_camel.clone())
+    }
+
+    fn actor_chain(&self) -> Option<JsonValue> {
+        let sub = self.sub.as_deref()?.trim();
+        if sub.is_empty() {
+            return None;
+        }
+        let mut root = serde_json::Map::new();
+        root.insert("sub".to_string(), JsonValue::String(sub.to_string()));
+        if let Some(act) = self.act.as_ref() {
+            root.insert("act".to_string(), act.clone());
+        }
+        if let Some(may_act) = self.may_act.as_ref() {
+            root.insert("may_act".to_string(), may_act.clone());
+        }
+        if let Some(scopes) = self.scopes.as_ref().filter(|scopes| !scopes.is_empty()) {
+            root.insert(
+                "scopes".to_string(),
+                JsonValue::Array(
+                    scopes
+                        .iter()
+                        .cloned()
+                        .map(JsonValue::String)
+                        .collect::<Vec<_>>(),
+                ),
+            );
+        } else if let Some(scope) = self.scope.as_ref().filter(|scope| !scope.trim().is_empty()) {
+            root.insert("scope".to_string(), JsonValue::String(scope.clone()));
+        }
+        crate::actor_chain::ActorChain::from_json_value(&JsonValue::Object(root))
+            .ok()
+            .map(|chain| chain.to_json_value())
     }
 }
 
@@ -677,6 +723,16 @@ mod tests {
     }
 
     fn jwt(jti: &str, token: &str) -> String {
+        jwt_with_actor_chain(jti, token, None, None, None)
+    }
+
+    fn jwt_with_actor_chain(
+        jti: &str,
+        token: &str,
+        sub: Option<&str>,
+        act: Option<JsonValue>,
+        scope: Option<&str>,
+    ) -> String {
         let mut header = Header::new(Algorithm::HS256);
         header.kid = Some("test-key".to_string());
         encode(
@@ -687,6 +743,11 @@ mod tests {
                 iat: OffsetDateTime::now_utc().unix_timestamp(),
                 exp: OffsetDateTime::now_utc().unix_timestamp() + 300,
                 jti: jti.to_string(),
+                sub: sub.map(ToString::to_string),
+                act,
+                may_act: None,
+                scope: scope.map(ToString::to_string),
+                scopes: None,
                 task_id_camel: Some("task-123".to_string()),
                 task_id: None,
                 token: Some(token.to_string()),
@@ -735,7 +796,13 @@ mod tests {
             "statusUpdate": {
                 "taskId": "task-123",
                 "contextId": "ctx-1",
-                "status": {"state": "completed"}
+                "status": {"state": "completed"},
+                "metadata": {
+                    "actor_chain": {
+                        "sub": "user:kenneth",
+                        "act": {"sub": "agent:reviewer"}
+                    }
+                }
             }
         }))
         .unwrap();
@@ -757,6 +824,53 @@ mod tests {
         };
         assert_eq!(payload.task_id.as_deref(), Some("task-123"));
         assert_eq!(payload.task_state.as_deref(), Some("completed"));
+        assert_eq!(
+            payload.actor_chain,
+            Some(json!({"sub": "user:kenneth", "act": {"sub": "agent:reviewer"}})),
+        );
+    }
+
+    #[tokio::test]
+    async fn normalizes_actor_chain_from_jwt_claims_when_metadata_is_absent() {
+        let (connector, _inbox) = connector_with_binding(jwt_binding()).await;
+        let body = serde_json::to_vec(&json!({
+            "statusUpdate": {
+                "taskId": "task-123",
+                "contextId": "ctx-1",
+                "status": {"state": "completed"}
+            }
+        }))
+        .unwrap();
+        let mut headers = BTreeMap::new();
+        headers.insert(
+            "authorization".to_string(),
+            format!(
+                "Bearer {}",
+                jwt_with_actor_chain(
+                    "jti-actor-chain",
+                    "opaque-token",
+                    Some("user:kenneth"),
+                    Some(json!({"sub": "agent:reviewer"})),
+                    Some("read write"),
+                ),
+            ),
+        );
+        let mut raw = RawInbound::new("", headers, body);
+        raw.metadata = json!({"binding_id": "reviewer-task-update"});
+
+        let event = connector.normalize_inbound(raw).await.unwrap();
+        let ProviderPayload::Known(KnownProviderPayload::A2aPush(payload)) = event.provider_payload
+        else {
+            panic!("expected a2a payload");
+        };
+        assert_eq!(
+            payload.actor_chain,
+            Some(json!({
+                "sub": "user:kenneth",
+                "scopes": ["read", "write"],
+                "act": {"sub": "agent:reviewer"}
+            })),
+        );
     }
 
     #[tokio::test]

@@ -40,6 +40,51 @@ pipeline test(task) {
     "https://idp.example/exchange",
     "overlay row installed",
   )
+  assert_eq(
+    token_type("id-jag"),
+    "urn:ietf:params:oauth:token-type:id-jag",
+    "ID-JAG token alias normalized",
+  )
+  assert_eq(
+    token_type("txn_token"),
+    "urn:ietf:params:oauth:token-type:txn_token",
+    "transaction-token alias normalized",
+  )
+  assert_eq(
+    catalog["id-jag"].requested_token_types,
+    ["urn:ietf:params:oauth:token-type:id-jag"],
+    "ID-JAG requested token type pinned",
+  )
+  assert(
+    catalog["id-jag"].provider_metadata_fields
+      .contains("identity_chaining_requested_token_types_supported"),
+    "ID-JAG metadata detection field recorded",
+  )
+  assert_eq(
+    catalog["id-jag"].tracking.drafts[0].name,
+    "draft-ietf-oauth-identity-assertion-authz-grant-04",
+    "ID-JAG draft revision pinned",
+  )
+  assert_eq(
+    catalog["txn-token"].requested_token_types,
+    ["urn:ietf:params:oauth:token-type:txn_token"],
+    "transaction-token requested token type pinned",
+  )
+  assert_eq(
+    catalog["txn-token"].tracking.drafts[0].name,
+    "draft-ietf-oauth-transaction-tokens-08",
+    "transaction-token draft revision pinned",
+  )
+  assert_eq(catalog["wimse-wit-wpt"].supported, false, "WIMSE row is tracking-only")
+  assert(
+    catalog["wimse-wit-wpt"].provider_metadata_fields.contains("Workload-Proof-Token"),
+    "WIMSE WPT detection field recorded",
+  )
+  assert_eq(
+    catalog["wimse-wit-wpt"].tracking.drafts[0].name,
+    "draft-ietf-wimse-workload-creds-01",
+    "WIMSE workload credential draft revision pinned",
+  )
   catches_message(
     "malformed overlay entries fail closed",
     { -> token_exchange_catalog({broken: true}) },

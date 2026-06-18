@@ -54,7 +54,13 @@ The connector accepts A2A stream-response push payloads:
   "statusUpdate": {
     "taskId": "task-123",
     "contextId": "ctx-123",
-    "status": {"state": "completed"}
+    "status": {"state": "completed"},
+    "metadata": {
+      "actor_chain": {
+        "sub": "user:42",
+        "act": {"sub": "agent:reviewer"}
+      }
+    }
   }
 }
 ```
@@ -64,12 +70,21 @@ Task status updates map to `TriggerEvent.kind` values like
 Artifact and message pushes map to `a2a.task.artifact` and
 `a2a.task.message`.
 
+When a peer supports delegated actor-chain echo, Harn reads the RFC 8693
+chain from `metadata.actor_chain` on `statusUpdate`, `task`, or `message`
+objects. `metadata.actorChain`, `metadata.harn.actor_chain`, and
+`metadata._harn.actorChain` are accepted for peers that use camelCase or
+vendor metadata containers. If the metadata echo is absent, the JWT `sub`,
+`act`, `may_act`, and `scope`/`scopes` claims are used as a fallback actor-chain
+source.
+
 Handlers receive `provider_payload` with:
 
 - `task_id`
 - `task_state`
 - `artifact`
 - `sender`
+- `actor_chain`
 - `kind`
 - `raw`
 
@@ -78,6 +93,10 @@ Handlers receive `provider_payload` with:
 When `HARN_A2A_PUSH_URL` is set, outbound `a2a://...` dispatches include
 and register a `pushNotificationConfig` for pending tasks. Set
 `HARN_A2A_PUSH_TOKEN` to include a bearer credential in that config.
+Outbound dispatches from an active Harn agent session also include the current
+session actor chain as `message.metadata.actor_chain` and mirror it under
+`message.metadata.harn.actor_chain`, so the served peer can append its own
+actor hop and keep callbacks auditable.
 
 The built-in `harn serve a2a` adapter advertises push notification
 support, stores push configs, and posts `statusUpdate` payloads to each

@@ -266,6 +266,20 @@ RFC 8693 nested `act` claims with actors ordered current-to-prior, so
 `delegated_claims({sub: "user"}, [{sub: "svc16"}, {sub: "svc77"}])`
 produces `{sub: "user", act: {sub: "svc16", act: {sub: "svc77"}}}`.
 
+The shipped catalog also records fast-moving identity-chain drafts so provider
+overlays can opt in without changing runtime code:
+
+| Row | Detection/tracking |
+| --- | --- |
+| `id-jag` | Detects `urn:ietf:params:oauth:token-type:id-jag` in `identity_chaining_requested_token_types_supported` and tracks `draft-ietf-oauth-identity-assertion-authz-grant-04` plus `draft-ietf-oauth-identity-chaining-14`. |
+| `txn-token` | Tracks `draft-ietf-oauth-transaction-tokens-08` and the agent-context companion `draft-araut-oauth-transaction-tokens-for-agents-02`. Uses `requested_token_type = urn:ietf:params:oauth:token-type:txn_token`. |
+| `wimse-wit-wpt` | Tracking-only row for `draft-ietf-wimse-workload-creds-01` and `draft-ietf-wimse-wpt-01`. WIT/WPT are proof-of-possession workload credentials, not a bearer token-exchange profile. |
+
+Rows expose `provider_metadata_fields` and `tracking.drafts` so applications can
+surface provider capability matches, keep draft links near policy decisions, and
+replace a tracking row with a stricter provider-specific overlay when an
+authorization server publishes concrete support.
+
 ## Device flow (`std/oauth/device_flow`)
 
 For CI runners, daemons, and IDE side panes that cannot redirect a
