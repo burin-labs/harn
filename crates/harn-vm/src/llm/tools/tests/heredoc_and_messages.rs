@@ -614,6 +614,37 @@ fn native_json_fallback_parses_gpt_oss_tool_key_dialect() {
 }
 
 #[test]
+fn native_json_fallback_unwraps_generic_tool_envelope() {
+    // Fireworks GPT-OSS JSON-mode evidence: the provider returned a
+    // dispatchable-looking function named `tool`, whose arguments contained
+    // the real Harn tool name and args. Policy must see `look`, not the generic
+    // wrapper, or the turn trips the tool ceiling before it can self-repair.
+    let known: std::collections::BTreeSet<String> =
+        ["look", "run"].into_iter().map(String::from).collect();
+    let text = r#"{"name":"tool","arguments":{"name":"look","args":{"intent":"read","file":"src/storage/page_cache.h"}}}"#;
+    let (calls, errors) = parse_native_json_tool_calls(text, &known);
+    assert!(errors.is_empty(), "no errors expected: {errors:?}");
+    assert_eq!(calls.len(), 1, "wrapper should unwrap: {calls:?}");
+    assert_eq!(calls[0]["name"], json!("look"));
+    assert_eq!(calls[0]["arguments"]["intent"], json!("read"));
+    assert_eq!(
+        calls[0]["arguments"]["file"],
+        json!("src/storage/page_cache.h")
+    );
+}
+
+#[test]
+fn native_json_fallback_strips_harmony_channel_suffix() {
+    let known = known_tools_set();
+    let text = r#"{"name":"run<|channel|>commentary","arguments":{"command":"cargo test"}}"#;
+    let (calls, errors) = parse_native_json_tool_calls(text, &known);
+    assert!(errors.is_empty(), "no errors expected: {errors:?}");
+    assert_eq!(calls.len(), 1, "channel suffix should strip: {calls:?}");
+    assert_eq!(calls[0]["name"], json!("run"));
+    assert_eq!(calls[0]["arguments"]["command"], json!("cargo test"));
+}
+
+#[test]
 fn native_json_fallback_parses_flat_envelope_with_string_encoded_arguments() {
     // Regression: OpenAI's on-the-wire flat shape encodes `arguments` as a JSON
     // STRING (`{"name":"read","arguments":"{\"path\":\"a\"}"}`), which local

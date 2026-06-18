@@ -366,7 +366,7 @@ pub(crate) fn parse_openai_responses_response(
                     .and_then(|value| value.as_str())
                     .unwrap_or(provider_id)
                     .to_string();
-                let name = item
+                let raw_name = item
                     .get("name")
                     .or_else(|| item.get("function").and_then(|value| value.get("name")))
                     .and_then(|value| value.as_str())
@@ -376,6 +376,8 @@ pub(crate) fn parse_openai_responses_response(
                     item.get("function")
                         .and_then(|value| value.get("arguments"))
                 }));
+                let (name, arguments) =
+                    crate::llm::tools::normalize_tool_call_shape(&raw_name, arguments);
                 tool_calls.push(serde_json::json!({
                     "id": id,
                     "provider_id": provider_id,
@@ -637,9 +639,11 @@ pub(crate) fn parse_llm_response(
                     }
                 }
                 Some("tool_use") => {
-                    let name = block["name"].as_str().unwrap_or("").to_string();
+                    let raw_name = block["name"].as_str().unwrap_or("").to_string();
                     let id = block["id"].as_str().unwrap_or("").to_string();
                     let input = block["input"].clone();
+                    let (name, input) =
+                        crate::llm::tools::normalize_tool_call_shape(&raw_name, input);
                     tool_calls.push(serde_json::json!({
                         "id": id,
                         "name": name,
@@ -648,8 +652,8 @@ pub(crate) fn parse_llm_response(
                     blocks.push(serde_json::json!({
                         "type": "tool_call",
                         "id": block["id"].clone(),
-                        "name": block["name"].clone(),
-                        "arguments": block["input"].clone(),
+                        "name": name,
+                        "arguments": input,
                         "visibility": "internal",
                     }));
                 }
@@ -824,7 +828,7 @@ pub(crate) fn parse_llm_response(
                     }));
                     continue;
                 }
-                let name = call["function"]["name"].as_str().unwrap_or("").to_string();
+                let raw_name = call["function"]["name"].as_str().unwrap_or("").to_string();
                 let args_str = call["function"]["arguments"].as_str().unwrap_or("{}");
                 let arguments: serde_json::Value = match serde_json::from_str(args_str) {
                     Ok(v) => v,
@@ -838,6 +842,8 @@ pub(crate) fn parse_llm_response(
                         })
                     }
                 };
+                let (name, arguments) =
+                    crate::llm::tools::normalize_tool_call_shape(&raw_name, arguments);
                 let id = call["id"].as_str().unwrap_or("").to_string();
                 tool_calls.push(serde_json::json!({
                     "id": id,
@@ -847,7 +853,7 @@ pub(crate) fn parse_llm_response(
                 blocks.push(serde_json::json!({
                     "type": "tool_call",
                     "id": call["id"].clone(),
-                    "name": call["function"]["name"].clone(),
+                    "name": name,
                     "arguments": arguments.clone(),
                     "visibility": "internal",
                 }));
@@ -1522,6 +1528,77 @@ mod tests {
             assert_eq!(result.tool_calls[0]["name"], "edit");
             assert_eq!(result.tool_calls[0]["arguments"], serde_json::json!({}));
         }
+    }
+
+    #[test]
+    fn openai_parser_normalizes_harmony_wrapper_tool_call() {
+        let response = serde_json::json!({
+            "choices": [{
+                "message": {
+                    "content": "",
+                    "tool_calls": [
+                        {
+                            "id": "chatcmpl-tool-1",
+                            "type": "function",
+                            "function": {
+                                "name": "tool",
+                                "arguments": "{\"name\":\"look\",\"args\":{\"intent\":\"read\",\"file\":\"src/lib.rs\"}}"
+                            }
+                        }
+                    ]
+                },
+                "finish_reason": "tool_calls"
+            }],
+            "usage": {"prompt_tokens": 10, "completion_tokens": 20}
+        });
+
+        let result = parse_llm_response(
+            &response,
+            "fireworks",
+            "accounts/fireworks/models/gpt-oss-120b",
+            false,
+            false,
+        )
+        .expect("parser succeeds");
+        assert_eq!(result.tool_calls.len(), 1);
+        assert_eq!(result.tool_calls[0]["name"], "look");
+        assert_eq!(result.tool_calls[0]["arguments"]["intent"], "read");
+        assert_eq!(result.tool_calls[0]["arguments"]["file"], "src/lib.rs");
+    }
+
+    #[test]
+    fn openai_parser_strips_harmony_channel_suffix_from_tool_name() {
+        let response = serde_json::json!({
+            "choices": [{
+                "message": {
+                    "content": "",
+                    "tool_calls": [
+                        {
+                            "id": "chatcmpl-tool-1",
+                            "type": "function",
+                            "function": {
+                                "name": "run<|channel|>commentary",
+                                "arguments": "{\"command\":\"cargo test\"}"
+                            }
+                        }
+                    ]
+                },
+                "finish_reason": "tool_calls"
+            }],
+            "usage": {"prompt_tokens": 10, "completion_tokens": 20}
+        });
+
+        let result = parse_llm_response(
+            &response,
+            "fireworks",
+            "accounts/fireworks/models/gpt-oss-120b",
+            false,
+            false,
+        )
+        .expect("parser succeeds");
+        assert_eq!(result.tool_calls.len(), 1);
+        assert_eq!(result.tool_calls[0]["name"], "run");
+        assert_eq!(result.tool_calls[0]["arguments"]["command"], "cargo test");
     }
 
     #[test]
