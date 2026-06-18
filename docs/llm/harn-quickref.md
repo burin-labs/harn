@@ -4125,7 +4125,9 @@ import { providers } from "std/oauth/providers"             // github, slack, li
                                                             // github_enterprise, custom
 import { memory } from "std/oauth/storage"                  // memory, file, harn_cloud_*,
                                                             // custom
-import { client, request, token } from "std/oauth/client"   // RFC 6749 + 7636 + 9700
+import { client, request, token, token_exchange } from "std/oauth/client"
+                                                            // RFC 6749 + 7636 + 8693 + 9700
+import { delegated_claims, token_type } from "std/oauth/token_exchange"
 import { device_flow } from "std/oauth/device_flow"         // RFC 8628 (CI / headless)
 import { register_pattern } from "std/oauth/redaction"      // HARN-OAU-001 catalog
 ```
@@ -4142,7 +4144,7 @@ backend it's holding.
 ```harn
 import { providers } from "std/oauth/providers"
 import { memory } from "std/oauth/storage"
-import { client, exchange_code, start_authorization, token, request } from "std/oauth/client"
+import { client, exchange_code, request, start_authorization, token, token_exchange } from "std/oauth/client"
 
 let cli = client(
   providers().github,
@@ -4179,6 +4181,12 @@ let response = request(cli, "GET", "https://api.github.com/user")
   `oauth.client.audit` with `token_refreshed` / `token_exchanged`. The
   payload carries presence flags + expiry timestamps; it never
   includes the new access or refresh token.
+- **Token exchange.** `token_exchange(cli, opts)` performs RFC 8693:
+  `subject_token` and `subject_token_type` are required; `actor_token`
+  with `actor_token_type` selects delegation, and actor absence selects
+  impersonation. Provider support is data-gated by
+  `std/oauth/token_exchange` capability rows; custom providers opt in
+  with a `token_exchange` row.
 - **Concurrency.** Storage is the source of truth. Two concurrent
   `token(cli)` calls may both observe staleness and both refresh; the
   later `set` wins and both callers see the same token. Pre-refresh
@@ -4188,6 +4196,37 @@ let response = request(cli, "GET", "https://api.github.com/user")
 
 Full reference: conformance fixtures at
 `conformance/tests/stdlib/oauth/oauth_client_*.harn`.
+
+## OAuth token exchange (`std/oauth/token_exchange`)
+
+RFC 8693 constants, overlayable capability rows, and nested `act`
+claim helpers.
+
+```harn,ignore
+import { token_exchange } from "std/oauth/client"
+import { delegated_claims, token_type } from "std/oauth/token_exchange"
+
+let delegated = token_exchange(cli, {
+  subject_token: human_token,
+  subject_token_type: token_type("access_token"),
+  actor_token: agent_jwt,
+  actor_token_type: token_type("jwt"),
+  requested_token_type: token_type("access_token"),
+  audience: "hr-service",
+  scope: ["employee:read"],
+})
+
+let claims = delegated_claims(
+  {sub: "user@example.com"},
+  [{sub: "https://service16.example.com"}, {sub: "https://service77.example.com"}],
+)
+```
+
+Rows are data in `std/oauth/token_exchange_catalog`, not provider code.
+`token_exchange_catalog(overlays?)` returns rows keyed by authorization-server id, and
+`token_exchange_capability(provider_or_id, overlays?)` resolves the
+effective row. A provider record can carry `token_exchange: {...}` to
+override or add support for custom enterprise authorization servers.
 
 ## OAuth storage (`std/oauth/storage`)
 

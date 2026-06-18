@@ -20,6 +20,7 @@ type OAuthProvider = {
   default_scopes: list<string>,
   pkce_required: bool,
   refresh_handling: OAuthRefreshHandling,
+  token_exchange?: dict,
   documented_quirks: list<string>,
   documentation_url: string?,
 }
@@ -575,6 +576,7 @@ pub fn custom(config, overrides = nil) -> OAuthProvider {
       userinfo_url: config?.userinfo_url,
       default_scopes: config?.default_scopes ?? [],
       pkce_required: config?.pkce_required ?? false,
+      token_exchange: config?.token_exchange,
       refresh_handling: config?.refresh_handling
         ?? __refresh(
         "custom provider; use token response metadata and provider documentation",

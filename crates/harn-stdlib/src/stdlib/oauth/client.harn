@@ -53,6 +53,11 @@
  * window narrow.
  */
 import { merge } from "std/json"
+import {
+  token_exchange_capability,
+  token_exchange_grant_type,
+  token_type,
+} from "std/oauth/token_exchange"
 
 let __DEFAULT_PKCE_VERIFIER_BYTES = 64
 
@@ -333,6 +338,10 @@ fn __safe_json_parse(text) {
 
 fn __build_token_set(parsed, scopes, issued_at, prev_refresh) {
   var token_set = {access_token: to_string(parsed.access_token), issued_at_unix: issued_at}
+  let issued_token_type = parsed?.issued_token_type
+  if issued_token_type != nil && to_string(issued_token_type) != "" {
+    token_set = token_set + {issued_token_type: to_string(issued_token_type)}
+  }
   let token_type = parsed?.token_type
   if token_type != nil {
     token_set = token_set + {token_type: to_string(token_type)}
@@ -374,6 +383,19 @@ fn __audit_refresh(provider_id, storage_key, prev, next, reason) {
 
 fn __audit_exchange(provider_id, storage_key, next) {
   let payload = {provider: to_string(provider_id), storage_key: to_string(storage_key), next: __redact_token(next)}
+  let _ = event_log.emit(__AUDIT_TOPIC, __AUDIT_KIND_EXCHANGE, payload, {provider: to_string(provider_id)})
+}
+
+fn __audit_token_exchange(provider_id, storage_key, next, mode, requested_token_type) {
+  let payload = {
+    provider: to_string(provider_id),
+    storage_key: storage_key,
+    grant_type: token_exchange_grant_type(),
+    mode: mode,
+    requested_token_type: requested_token_type,
+    issued_token_type: next?.issued_token_type,
+    next: __redact_token(next),
+  }
   let _ = event_log.emit(__AUDIT_TOPIC, __AUDIT_KIND_EXCHANGE, payload, {provider: to_string(provider_id)})
 }
 
@@ -555,6 +577,186 @@ fn __exchange_code(harness: Harness, cfg, pkce, code, state) {
   return token_set
 }
 
+fn __append_repeated_form_values(form, key, values) {
+  if values == nil {
+    return form
+  }
+  if type_of(values) == "list" {
+    var out = form
+    for value in values {
+      if value != nil && to_string(value) != "" {
+        out = out + [{key: key, value: value}]
+      }
+    }
+    return out
+  }
+  if to_string(values) == "" {
+    return form
+  }
+  return form + [{key: key, value: values}]
+}
+
+fn __scope_string(scope) {
+  if scope == nil {
+    return nil
+  }
+  if type_of(scope) == "list" {
+    return __join_scopes(scope, " ")
+  }
+  let text = trim(to_string(scope))
+  return text == "" ? nil : text
+}
+
+fn __scope_list(scope) {
+  if scope == nil {
+    return nil
+  }
+  if type_of(scope) == "list" {
+    var out = []
+    for raw in scope {
+      let text = trim(to_string(raw ?? ""))
+      if text != "" {
+        out = out + [text]
+      }
+    }
+    return out
+  }
+  let text = trim(to_string(scope))
+  if text == "" {
+    return nil
+  }
+  var out = []
+  for raw in split(text, " ") {
+    let part = trim(to_string(raw ?? ""))
+    if part != "" {
+      out = out + [part]
+    }
+  }
+  return out
+}
+
+fn __list_allows(values, value) {
+  if value == nil {
+    return true
+  }
+  if values == nil || len(values) == 0 {
+    return false
+  }
+  return values.contains(value)
+}
+
+fn __require_token_exchange_capability(cfg) {
+  let capability = token_exchange_capability({id: cfg.provider_id, token_exchange: cfg.token_exchange})
+  if capability == nil || !capability.supported {
+    throw "std/oauth/client: token exchange is not supported for provider `" + cfg.provider_id + "`"
+  }
+  return capability
+}
+
+fn __validate_token_exchange(capability, subject_token_type, actor_token_type, requested_token_type) {
+  if !__list_allows(capability?.subject_token_types, subject_token_type) {
+    throw "std/oauth/client: subject_token_type `" + subject_token_type + "` is not supported by "
+      + capability.id
+  }
+  if actor_token_type != nil && !__list_allows(capability?.actor_token_types, actor_token_type) {
+    throw "std/oauth/client: actor_token_type `" + actor_token_type + "` is not supported by "
+      + capability.id
+  }
+  if requested_token_type != nil
+    && !__list_allows(capability?.requested_token_types, requested_token_type) {
+    throw "std/oauth/client: requested_token_type `" + requested_token_type + "` is not supported by "
+      + capability.id
+  }
+  if actor_token_type == nil && !(capability?.impersonation ?? true) {
+    throw "std/oauth/client: token exchange impersonation is not supported by " + capability.id
+  }
+  if actor_token_type != nil && !(capability?.delegation ?? true) {
+    throw "std/oauth/client: token exchange delegation is not supported by " + capability.id
+  }
+}
+
+fn __token_exchange(harness: Harness, cfg, opts) {
+  if type_of(opts) != "dict" {
+    throw "std/oauth/client: token_exchange opts must be a dict"
+  }
+  let capability = __require_token_exchange_capability(cfg)
+  let subject_token = __require_string(opts?.subject_token, "opts.subject_token")
+  let subject_token_type = token_type(__require_string(opts?.subject_token_type, "opts.subject_token_type"))
+  let actor_token = opts?.actor_token
+  let has_actor = actor_token != nil && to_string(actor_token) != ""
+  let actor_token_type = if has_actor {
+    token_type(__require_string(opts?.actor_token_type, "opts.actor_token_type"))
+  } else {
+    nil
+  }
+  if !has_actor && opts?.actor_token_type != nil {
+    throw "std/oauth/client: actor_token_type must not be sent without actor_token"
+  }
+  let requested_token_type = if opts?.requested_token_type == nil {
+    nil
+  } else {
+    token_type(opts.requested_token_type)
+  }
+  __validate_token_exchange(capability, subject_token_type, actor_token_type, requested_token_type)
+  var form = [
+    {key: "grant_type", value: token_exchange_grant_type()},
+    {key: "subject_token", value: subject_token},
+    {key: "subject_token_type", value: subject_token_type},
+  ]
+  form = __append_repeated_form_values(form, "resource", opts?.resource)
+  form = __append_repeated_form_values(form, "audience", opts?.audience)
+  let scope = __scope_string(opts?.scope)
+  if scope != nil {
+    form = form + [{key: "scope", value: scope}]
+  }
+  if requested_token_type != nil {
+    form = form + [{key: "requested_token_type", value: requested_token_type}]
+  }
+  if has_actor {
+    form = form
+      + [{key: "actor_token", value: actor_token}, {key: "actor_token_type", value: actor_token_type}]
+  }
+  if opts?.extra_params != nil {
+    for key in opts.extra_params.keys() {
+      form = __append_repeated_form_values(form, key, opts.extra_params[key])
+    }
+  }
+  let issued_at = __now_seconds(harness)
+  let parsed = __post_token_request(
+    harness,
+    capability?.token_url ?? cfg.token_url,
+    cfg.client_id,
+    cfg.client_secret,
+    cfg.token_auth_method,
+    form,
+  )
+  let issued_token_type = token_type(__require_string(parsed?.issued_token_type, "token response issued_token_type"))
+  if !__list_allows(capability?.issued_token_types, issued_token_type) {
+    throw "std/oauth/client: issued_token_type `" + issued_token_type + "` is not supported by "
+      + capability.id
+  }
+  var token_set = __build_token_set(parsed, __scope_list(opts?.scope), issued_at, nil)
+  let mode = has_actor ? "delegation" : "impersonation"
+  token_set = token_set
+    + {
+    issued_token_type: issued_token_type,
+    token_exchange_mode: mode,
+    subject_token_type: subject_token_type,
+    actor_token_type: actor_token_type,
+    requested_token_type: requested_token_type,
+  }
+  var storage_key = nil
+  if opts?.store ?? false {
+    storage_key = trim(to_string(opts?.storage_key ?? ""))
+    if storage_key == "" {
+      throw "std/oauth/client: token_exchange store=true requires storage_key"
+    }
+    cfg.storage.set(storage_key, token_set)
+  }
+  __audit_token_exchange(cfg.provider_id, storage_key, token_set, mode, requested_token_type)
+  return token_set
+}
+
 fn __with_bearer(headers, access_token) {
   let base = headers ?? {}
   return merge(base, {Authorization: "Bearer " + to_string(access_token)})
@@ -630,6 +832,7 @@ pub fn client(provider, opts) -> OAuthClient {
     storage_key: storage_key,
     audience: opts?.audience,
     extra_auth_params: opts?.extra_auth_params,
+    token_exchange: provider_record?.token_exchange,
   }
   return {
     _namespace: "oauth_client",
@@ -645,6 +848,7 @@ pub fn client(provider, opts) -> OAuthClient {
     refresh: { -> __maybe_refresh(harness, cfg, "forced") },
     token: { -> __get_valid_token(harness, cfg).access_token },
     current_token: { -> cfg.storage.get(cfg.storage_key) },
+    token_exchange: { exchange_opts -> __token_exchange(harness, cfg, exchange_opts) },
     request: { method, url, http_opts = nil -> __token_request(harness, cfg, method, url, http_opts) },
     revoke: { -> __revoke_locked(harness, cfg) },
   }
@@ -735,6 +939,30 @@ pub fn exchange_code(cli, pkce, code, state) {
     throw "std/oauth/client: exchange_code() requires an OAuth client handle"
   }
   return cli.exchange_code(pkce, code, state)
+}
+
+/**
+ * token_exchange performs an RFC 8693 token-exchange grant.
+ *
+ * Required opts:
+ *   - subject_token:       token representing the subject.
+ *   - subject_token_type:  RFC 8693 token type URI or alias.
+ *
+ * Optional opts:
+ *   - actor_token / actor_token_type: present for delegation, absent
+ *     for impersonation.
+ *   - requested_token_type, resource, audience, scope, extra_params.
+ *   - store: true plus storage_key persists the returned TokenSet.
+ *
+ * @effects: [time, net]
+ * @errors: [invalid_argument]
+ * @api_stability: experimental
+ */
+pub fn token_exchange(cli, opts) {
+  if type_of(cli) != "dict" || cli?._namespace != "oauth_client" {
+    throw "std/oauth/client: token_exchange() requires an OAuth client handle"
+  }
+  return cli.token_exchange(opts)
 }
 
 /**

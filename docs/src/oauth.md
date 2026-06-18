@@ -10,8 +10,10 @@ without provider-specific Rust code.
 | Module | RFC | Purpose |
 |---|---|---|
 | `std/oauth/providers` | — | Catalogue of preconfigured providers + `custom(...)` factory |
+| `std/oauth/token_exchange_catalog` | 8693 | Shipped token-exchange capability row data |
+| `std/oauth/token_exchange` | 8693 | Token-exchange row loading + `act` claim helpers |
 | `std/oauth/storage` | — | Five interchangeable token stores (memory, file, harn-cloud session/org, custom) |
-| `std/oauth/client` | 6749 + 7636 + 9700 | Authorization-code flow with PKCE S256, transparent refresh, 401-retry |
+| `std/oauth/client` | 6749 + 7636 + 8693 + 9700 | Authorization-code flow with PKCE S256, RFC 8693 token exchange, transparent refresh, 401-retry |
 | `std/oauth/device_flow` | 8628 | Headless device authorization grant |
 | `std/oauth/dynamic_registration` | 7591 + 8414 | Worker-side metadata + dynamic client registration |
 | `std/oauth/redaction` | — | OAuth-token catalog + `HARN-OAU-001` audit ring |
@@ -25,7 +27,7 @@ scripting API for code that runs *inside* a Harn pipeline.
 ```harn,ignore
 import { providers } from "std/oauth/providers"
 import { memory } from "std/oauth/storage"
-import { client, exchange_code, request, start_authorization, token } from "std/oauth/client"
+import { client, exchange_code, request, start_authorization, token, token_exchange } from "std/oauth/client"
 
 let cli = client(
   providers().github,
@@ -81,6 +83,7 @@ A provider record carries:
 | `default_scopes` | Used when `opts.scopes` is not set |
 | `pkce_required` | Informational; PKCE is unconditionally used by the client |
 | `refresh_handling` | `{strategy, refresh_grant, rotates_refresh_token, notes}` |
+| `token_exchange?` | RFC 8693 support row; custom providers can opt in with data |
 | `documented_quirks` | Provider-specific constraints and gotchas |
 | `documentation_url` | Vendor doc link for "go read the source" |
 
@@ -130,7 +133,16 @@ in [OAuth storage stdlib](./stdlib/oauth-storage.md).
 `client(provider, opts)` builds a handle that owns the token lifecycle.
 
 ```harn,ignore
-import { client, exchange_code, refresh, request, revoke, start_authorization, token } from "std/oauth/client"
+import {
+  client,
+  exchange_code,
+  refresh,
+  request,
+  revoke,
+  start_authorization,
+  token,
+  token_exchange,
+} from "std/oauth/client"
 
 let cli = client(provider, {
   client_id:          string,
@@ -155,6 +167,7 @@ standalone helper that takes the handle as the first argument:
 | `token(cli)` | Returns a valid access token (refresh on >=75% TTL) |
 | `refresh(cli)` | Forces a refresh, ignoring TTL |
 | `request(cli, method, url, opts?)` | Token-bearing HTTP with 1x 401 retry |
+| `token_exchange(cli, opts)` | RFC 8693 token exchange; `actor_token` present means delegation, absent means impersonation |
 | `revoke(cli)` | RFC 7009 best-effort + local storage delete |
 | `cli.current_token()` | Reads the stored TokenSet without refresh |
 
@@ -169,6 +182,11 @@ standalone helper that takes the handle as the first argument:
   refreshes if the stored TokenSet is past 75% TTL or already expired.
 - **One retry on 401.** `request(cli, ...)` performs a forced refresh
   and replays the request exactly once when the server returns 401.
+- **Token exchange is data-gated.** `token_exchange(cli, opts)` validates
+  subject, actor, and requested token types against `std/oauth/token_exchange`
+  capability rows. Custom providers opt in with a `token_exchange` row; the
+  grant returns a TokenSet and only persists it when `store: true` and
+  `storage_key` are supplied.
 - **Refresh-token preservation.** Token responses that omit a fresh
   `refresh_token` keep the prior one (relevant for Google + Slack +
   Discord, which only rotate on consent).
@@ -195,6 +213,58 @@ standalone helper that takes the handle as the first argument:
 `HARN-OAU-002` is the signal to drive a fresh `start_authorization` (or
 `device_flow`) — refresh failure is terminal until human consent runs
 again.
+
+## Token exchange (`std/oauth/token_exchange`)
+
+RFC 8693 lets an OAuth client trade one token for another at the token
+endpoint. Harn keeps provider support in overlayable data rows under
+`std/oauth/token_exchange_catalog`, not provider-specific code.
+
+```harn,ignore
+import { client, token_exchange } from "std/oauth/client"
+import { custom } from "std/oauth/providers"
+import { memory } from "std/oauth/storage"
+import { delegated_claims, token_type } from "std/oauth/token_exchange"
+
+let provider = custom({
+  id: "enterprise-as",
+  auth_url: "https://idp.example/authorize",
+  token_url: "https://idp.example/token",
+  token_exchange: {
+    supported: true,
+    token_url: "https://idp.example/token",
+    subject_token_types: [token_type("access_token")],
+    actor_token_types: [token_type("jwt")],
+    requested_token_types: [token_type("access_token")],
+    issued_token_types: [token_type("access_token")],
+    delegation: true,
+    impersonation: true,
+  },
+})
+
+let cli = client(provider, {client_id: "agent-client", storage: memory()})
+let delegated = token_exchange(cli, {
+  subject_token: user_access_token,
+  subject_token_type: token_type("access_token"),
+  actor_token: agent_jwt,
+  actor_token_type: token_type("jwt"),
+  requested_token_type: token_type("access_token"),
+  audience: "hr-service",
+  scope: ["employee:read"],
+})
+```
+
+`actor_token` present selects delegation; omitting it selects
+impersonation. `resource`, `audience`, and `scope` accept the RFC 8693
+targeting parameters, and `extra_params` carries deployment-specific
+fields. Returned tokens are not written to the client's normal
+`storage_key`; pass `{store: true, storage_key: "..."}` when the
+delegated token should be persisted separately.
+
+The companion `delegated_claims(subject_claims, actors)` helper builds
+RFC 8693 nested `act` claims with actors ordered current-to-prior, so
+`delegated_claims({sub: "user"}, [{sub: "svc16"}, {sub: "svc77"}])`
+produces `{sub: "user", act: {sub: "svc16", act: {sub: "svc77"}}}`.
 
 ## Device flow (`std/oauth/device_flow`)
 
