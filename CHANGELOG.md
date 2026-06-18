@@ -8,6 +8,34 @@ highlights live in [CHANGELOG-pre-0.6.md](CHANGELOG-pre-0.6.md).
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.8.119
+
+### Added
+
+- Added OpenTrustGraph actor-chain lineage metadata on trust records and
+  verifier checks that nested actor chains stay aligned with `parent_record_id`
+  lineage.
+- Added actor-chain scope attenuation policy, validation, conformance coverage,
+  and OpenTrustGraph alerts for widened delegation scopes.
+- Added `std/disclosure` for rendering Git trailers, Slack bylines, and GitHub
+  author choices from ActorChain values with layered TOML configuration.
+- Add provenance and compaction recommendation options to
+  `agent_session_seed_from_jsonl` for explicit external coding-agent transcript
+  imports.
+- **Agents API trigger-run observation.** `harn serve api` now exposes recent
+  trigger-dispatched workflow runs at `/v1/workflow-trigger-runs`, including
+  trigger outbox metadata joined with matching action-graph observations for
+  Burin's local comment-trigger workflow surfaces (burin-code#2232).
+
+### Changed
+
+- Make task-plan `human_gate`, `deterministic_command`, and `compact` nodes
+  execute as first-class workflow stages instead of falling through to LLM
+  stages.
+- Upgrade the `agent` project scaffold to an opinionated `agent/` app layout
+  with instructions, skills, tools, subagent, channel, sandbox, and schedule
+  convention folders.
+
 ## v0.8.118
 
 ### Added
