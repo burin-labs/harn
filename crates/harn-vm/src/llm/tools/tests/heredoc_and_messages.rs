@@ -645,6 +645,21 @@ fn native_json_fallback_strips_harmony_channel_suffix() {
 }
 
 #[test]
+fn native_json_fallback_infers_run_from_harmony_marker_wrapper() {
+    let known = known_tools_set();
+    let text = r#"{"name":"<|constrain|>json","arguments":{"command":"cargo test"}}"#;
+    let (calls, errors) = parse_native_json_tool_calls(text, &known);
+    assert!(errors.is_empty(), "no errors expected: {errors:?}");
+    assert_eq!(
+        calls.len(),
+        1,
+        "marker wrapper command shape should parse: {calls:?}"
+    );
+    assert_eq!(calls[0]["name"], json!("run"));
+    assert_eq!(calls[0]["arguments"]["command"], json!("cargo test"));
+}
+
+#[test]
 fn native_json_fallback_parses_flat_envelope_with_string_encoded_arguments() {
     // Regression: OpenAI's on-the-wire flat shape encodes `arguments` as a JSON
     // STRING (`{"name":"read","arguments":"{\"path\":\"a\"}"}`), which local
