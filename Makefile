@@ -321,10 +321,15 @@ release-smoke:
 
 # Faster `release-smoke` variant that reuses the debug `harn` binary.
 # Used by the parallel audit lanes in release_gate.sh because the warm
-# prebuild already populated target/debug; rebuilding release would
+# prebuild already populated Cargo's active target dir; rebuilding release would
 # fight the cargo lock with rust-audit's clippy + nextest.
 smoke-audit:
-	HARN_BINARY=$(or $(CARGO_TARGET_DIR),target)/debug/harn$(if $(filter Windows_NT,$(OS)),.exe,) ./scripts/release_smoke.sh
+	@target_dir="$$(cargo metadata --format-version=1 --no-deps | python3 -c 'import json, sys; print(json.load(sys.stdin)["target_directory"])')" && \
+	harn_binary="$$target_dir/debug/harn$(if $(filter Windows_NT,$(OS)),.exe,)" && \
+	if [ ! -x "$$harn_binary" ]; then \
+		CARGO_PROFILE_DEV_DEBUG=0 cargo build -p harn-cli --bin harn; \
+	fi && \
+	HARN_BINARY="$$harn_binary" ./scripts/release_smoke.sh
 
 # Build-verify the portal frontend (TypeScript type check + Vite bundle).
 # The repo-root npm scripts bootstrap portal dependencies when needed so this
