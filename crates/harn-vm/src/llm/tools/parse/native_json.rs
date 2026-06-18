@@ -1,5 +1,6 @@
 use std::collections::BTreeSet;
 
+use super::super::normalize_tool_call_shape;
 use super::syntax::{preview_str, unknown_tool_feedback};
 
 /// Detect and parse OpenAI-style native function calling JSON that a model
@@ -47,10 +48,6 @@ pub(crate) fn parse_native_json_tool_calls(
         if name.is_empty() {
             continue;
         }
-        if !known_tools.contains(name) {
-            errors.push(unknown_tool_feedback(name, known_tools));
-            continue;
-        }
         // OpenAI format encodes arguments as a JSON string; others as an object.
         // The flat JSON-RPC/MCP envelope sometimes names the slot `parameters`.
         let arguments = match func.get("arguments").or_else(|| func.get("parameters")) {
@@ -69,6 +66,11 @@ pub(crate) fn parse_native_json_tool_calls(
             Some(obj @ serde_json::Value::Object(_)) => obj.clone(),
             _ => serde_json::Value::Object(Default::default()),
         };
+        let (name, arguments) = normalize_tool_call_shape(name, arguments);
+        if !known_tools.contains(&name) {
+            errors.push(unknown_tool_feedback(&name, known_tools));
+            continue;
+        }
         let call_id = item
             .get("id")
             .and_then(|id| id.as_str())

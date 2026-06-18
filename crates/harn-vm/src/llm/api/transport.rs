@@ -74,6 +74,7 @@ fn append_ollama_tool_calls(
                     .map(|index| format!("ollama_tool_{index}"))
             })
             .unwrap_or_else(|| format!("ollama_tool_{}", tool_calls.len() + idx));
+        let (name, arguments) = crate::llm::tools::normalize_tool_call_shape(&name, arguments);
         tool_calls.push(serde_json::json!({
             "id": id,
             "name": name,
@@ -956,13 +957,15 @@ pub(super) async fn consume_sse_lines<R: tokio::io::AsyncBufRead + Unpin>(
                     if let Some(tool) = current_tool.take() {
                         let args = serde_json::from_str::<serde_json::Value>(&tool.input_json)
                             .unwrap_or(serde_json::Value::Object(Default::default()));
+                        let (name, args) =
+                            crate::llm::tools::normalize_tool_call_shape(&tool.name, args);
                         // Dispatch under the id already used for
                         // streaming progress so the executed lifecycle
                         // continues on the same wire id.
                         tool_calls.push(serde_json::json!({
-                            "id": tool.tool_call_id, "name": tool.name, "arguments": args,
+                            "id": tool.tool_call_id, "name": name, "arguments": args,
                         }));
-                        blocks.push(serde_json::json!({"type": "tool_call", "id": tool.tool_call_id, "name": tool.name, "arguments": args, "visibility": "internal"}));
+                        blocks.push(serde_json::json!({"type": "tool_call", "id": tool.tool_call_id, "name": name, "arguments": args, "visibility": "internal"}));
                     } else if let Some(server_tool) = current_server_tool.take() {
                         // Emit a `tool_search_query` transcript event —
                         // not dispatchable, just observability.
@@ -1200,13 +1203,14 @@ pub(super) async fn consume_sse_lines<R: tokio::io::AsyncBufRead + Unpin>(
             .unwrap_or(serde_json::Value::Object(Default::default()));
         // Dispatch under the id already used for streaming progress so
         // the executed lifecycle continues on the same wire id.
+        let (name, args) = crate::llm::tools::normalize_tool_call_shape(&stream.name, args);
         tool_calls.push(serde_json::json!({
-            "id": stream.tool_call_id, "name": stream.name, "arguments": args,
+            "id": stream.tool_call_id, "name": name, "arguments": args,
         }));
         blocks.push(serde_json::json!({
             "type": "tool_call",
             "id": stream.tool_call_id,
-            "name": stream.name,
+            "name": name,
             "arguments": args,
             "visibility": "internal",
         }));
@@ -2167,6 +2171,25 @@ mod streaming_tool_call_tests {
         );
         assert_eq!(result.tool_calls.len(), 1);
         assert_eq!(result.tool_calls[0]["name"], "look");
+
+        clear_session_sinks(&session_id);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn openai_stream_normalizes_harmony_wrapper_tool_call() {
+        let body = concat!(
+            "data: {\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call_a\",\"function\":{\"name\":\"tool\",\"arguments\":\"{\\\"na\"}}]}}]}\n",
+            "data: {\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\"me\\\":\\\"look\\\",\\\"args\\\":{\\\"path\\\":\\\"parser.rs\\\"}}\"}}]}}]}\n",
+            "data: {\"choices\":[{\"index\":0,\"finish_reason\":\"tool_calls\",\"delta\":{}}],\"usage\":{\"prompt_tokens\":4,\"completion_tokens\":6}}\n",
+            "data: [DONE]\n",
+        );
+        let session_id = fresh_session_id("oai-wrapper-toolcall");
+        let (result, _events) = drive(body.as_bytes(), &session_id, false).await;
+
+        assert_eq!(result.stop_reason.as_deref(), Some("tool_calls"));
+        assert_eq!(result.tool_calls.len(), 1);
+        assert_eq!(result.tool_calls[0]["name"], "look");
+        assert_eq!(result.tool_calls[0]["arguments"]["path"], "parser.rs");
 
         clear_session_sinks(&session_id);
     }

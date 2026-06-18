@@ -353,7 +353,7 @@ fn parse_block_body(
         Some(_) => return Err(BlockError::ArgsNotObject),
     };
 
-    Ok((name, arguments))
+    Ok(super::super::normalize_tool_call_shape(&name, arguments))
 }
 
 fn empty_object() -> serde_json::Value {
@@ -409,6 +409,29 @@ mod tests {
         assert_eq!(out.calls.len(), 1);
         assert_eq!(out.calls[0]["name"], "read_file");
         assert_eq!(arg(&out.calls[0], "path").unwrap(), "a.rs");
+    }
+
+    #[test]
+    fn unwraps_generic_tool_wrapper_envelope() {
+        let out = parse(
+            "```tool\n{\"name\":\"tool\",\"args\":{\"name\":\"look\",\"args\":{\"intent\":\"read\",\"file\":\"src/lib.rs\"}}}\n```",
+        );
+        assert!(out.errors.is_empty(), "errors: {:?}", out.errors);
+        assert_eq!(out.calls.len(), 1);
+        assert_eq!(out.calls[0]["name"], "look");
+        assert_eq!(arg(&out.calls[0], "intent").unwrap(), "read");
+        assert_eq!(arg(&out.calls[0], "file").unwrap(), "src/lib.rs");
+    }
+
+    #[test]
+    fn strips_harmony_channel_suffix_from_tool_name() {
+        let out = parse(
+            "```tool\n{\"name\":\"run<|channel|>commentary\",\"args\":{\"command\":\"cargo test\"}}\n```",
+        );
+        assert!(out.errors.is_empty(), "errors: {:?}", out.errors);
+        assert_eq!(out.calls.len(), 1);
+        assert_eq!(out.calls[0]["name"], "run");
+        assert_eq!(arg(&out.calls[0], "command").unwrap(), "cargo test");
     }
 
     // S1c: canonical name/args win when both canonical and alias are present.
