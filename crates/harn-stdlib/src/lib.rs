@@ -1420,6 +1420,14 @@ mod tests {
             exports.contains("render"),
             "std/disclosure should export render"
         );
+        assert!(
+            exports.contains("git_trailers"),
+            "std/disclosure should export git_trailers"
+        );
+        assert!(
+            exports.contains("append_git_trailers"),
+            "std/disclosure should export append_git_trailers"
+        );
     }
 
     #[test]
