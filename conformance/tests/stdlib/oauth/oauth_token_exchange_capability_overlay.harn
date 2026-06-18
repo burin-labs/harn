@@ -1,0 +1,171 @@
+// std/oauth/token_exchange: provider capability rows are overlayable data.
+import { client, token_exchange } from "std/oauth/client"
+import { custom } from "std/oauth/providers"
+import { memory } from "std/oauth/storage"
+import {
+  token_exchange_capability,
+  token_exchange_catalog,
+  token_type,
+} from "std/oauth/token_exchange"
+
+fn catches_message(label, fn_call, needle) {
+  var matched = false
+  try {
+    let _ = fn_call()
+  } catch (err) {
+    matched = contains(to_string(err), needle)
+  }
+  require matched, label
+}
+
+pipeline test(task) {
+  let subject_type = token_type("access_token")
+  let actor_type = token_type("jwt")
+  let requested_type = token_type("access_token")
+  let overlay_row = {
+    id: "enterprise-as",
+    supported: true,
+    token_url: "https://idp.example/exchange",
+    subject_token_types: [subject_type],
+    actor_token_types: [actor_type],
+    requested_token_types: [requested_type],
+    issued_token_types: [requested_type],
+    delegation: true,
+    impersonation: false,
+    notes: ["test overlay"],
+  }
+  let catalog = token_exchange_catalog([overlay_row])
+  assert_eq(
+    catalog["enterprise-as"].token_url,
+    "https://idp.example/exchange",
+    "overlay row installed",
+  )
+  catches_message(
+    "malformed overlay entries fail closed",
+    { -> token_exchange_catalog({broken: true}) },
+    "must be a dict",
+  )
+  let overlay_capability = token_exchange_capability("enterprise-as", [overlay_row])
+  assert(overlay_capability != nil, "overlay capability should exist")
+  assert_eq(overlay_capability?.actor_token_types, [actor_type], "overlay lookup by id")
+  let bare_provider = custom(
+    {
+      id: "enterprise-as",
+      auth_url: "https://idp.example/authorize",
+      token_url: "https://idp.example/token",
+      default_scopes: [],
+    },
+  )
+  let bare_cli = client(bare_provider, {client_id: "cli-id", storage: memory()})
+  catches_message(
+    "unsupported provider should fail closed",
+    { -> token_exchange(
+      bare_cli,
+      {subject_token: "subject", subject_token_type: subject_type, requested_token_type: requested_type},
+    ) },
+    "not supported",
+  )
+  let incomplete_provider = custom(
+    {
+      id: "incomplete-as",
+      auth_url: "https://idp.example/authorize",
+      token_url: "https://idp.example/token",
+      default_scopes: [],
+      token_exchange: {supported: true},
+    },
+  )
+  let incomplete_cli = client(incomplete_provider, {client_id: "cli-id", storage: memory()})
+  catches_message(
+    "capability rows without token types fail closed",
+    { -> token_exchange(
+      incomplete_cli,
+      {subject_token: "subject", subject_token_type: subject_type, requested_token_type: requested_type},
+    ) },
+    "subject_token_type",
+  )
+  let provider = custom(
+    {
+      id: "enterprise-as",
+      auth_url: "https://idp.example/authorize",
+      token_url: "https://idp.example/token",
+      default_scopes: [],
+      token_exchange: overlay_row,
+    },
+  )
+  let cli = client(provider, {client_id: "cli-id", storage: memory()})
+  catches_message(
+    "overlay can disable impersonation",
+    { -> token_exchange(
+      cli,
+      {subject_token: "subject", subject_token_type: subject_type, requested_token_type: requested_type},
+    ) },
+    "impersonation",
+  )
+  catches_message(
+    "actor_token_type without actor_token is rejected",
+    { -> token_exchange(
+      cli,
+      {
+        subject_token: "subject",
+        subject_token_type: subject_type,
+        actor_token_type: actor_type,
+        requested_token_type: requested_type,
+      },
+    ) },
+    "without actor_token",
+  )
+  http_mock_clear()
+  http_mock(
+    "POST",
+    "https://idp.example/exchange",
+    {
+      status: 200,
+      body: "{\"access_token\":\"bad-issued\",\"issued_token_type\":\"urn:ietf:params:oauth:token-type:jwt\",\"token_type\":\"Bearer\",\"expires_in\":60}",
+      headers: {"content-type": "application/json"},
+    },
+  )
+  catches_message(
+    "overlay constrains issued token type",
+    { -> token_exchange(
+      cli,
+      {
+        subject_token: "subject",
+        subject_token_type: subject_type,
+        actor_token: "actor",
+        actor_token_type: actor_type,
+        requested_token_type: requested_type,
+      },
+    ) },
+    "issued_token_type",
+  )
+  http_mock_clear()
+  http_mock(
+    "POST",
+    "https://idp.example/exchange",
+    {
+      status: 200,
+      body: "{\"access_token\":\"delegated-access\",\"issued_token_type\":\"urn:ietf:params:oauth:token-type:access_token\",\"token_type\":\"Bearer\",\"expires_in\":60}",
+      headers: {"content-type": "application/json"},
+    },
+  )
+  let exchanged = token_exchange(
+    cli,
+    {
+      subject_token: "subject",
+      subject_token_type: subject_type,
+      actor_token: "actor",
+      actor_token_type: actor_type,
+      requested_token_type: requested_type,
+      store: true,
+      storage_key: "delegated/hr",
+    },
+  )
+  assert_eq(exchanged.access_token, "delegated-access", "overlay exchange returned token")
+  assert_eq(exchanged.token_exchange_mode, "delegation", "overlay exchange mode")
+  let calls = http_mock_calls({include_sensitive: true})
+  assert_eq(len(calls), 1, "one overlay token exchange call")
+  assert_eq(calls[0].url, "https://idp.example/exchange", "overlay token_url used")
+  assert(contains(calls[0].body, "actor_token=actor"), "actor token sent")
+  assert_eq(cli.current_token(), nil, "token exchange does not overwrite client access token")
+  log("oauth token exchange capability overlay ok")
+}

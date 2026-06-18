@@ -511,24 +511,6 @@ paths:
         default:
           $ref: "#/components/responses/Error"
 
-  /v1/sessions/{session_id}/view:
-    get:
-      tags: [Sessions]
-      operationId: getSessionView
-      summary: Retrieve the versioned harn.session_view.v1 projection for a Session.
-      parameters:
-        - $ref: "#/components/parameters/ProtocolVersion"
-        - $ref: "#/components/parameters/SessionId"
-      responses:
-        "200":
-          description: Stable Session projection.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/SessionView"
-        default:
-          $ref: "#/components/responses/Error"
-
   /v1/sessions/{session_id}/close:
     post:
       tags: [Sessions]
@@ -1483,35 +1465,6 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/EventList"
-        default:
-          $ref: "#/components/responses/Error"
-
-  /v1/workflow-trigger-runs:
-    get:
-      tags: [Events]
-      operationId: listWorkflowTriggerRuns
-      summary: Read recent trigger-dispatched workflow runs.
-      description: |
-        Returns dispatch observations from the Harn trigger outbox joined with
-        matching action-graph telemetry. This endpoint is read-only; connector
-        webhook parsing and workflow dispatch semantics remain owned by Harn.
-      parameters:
-        - $ref: "#/components/parameters/ProtocolVersion"
-        - name: limit
-          in: query
-          required: false
-          schema:
-            type: integer
-            minimum: 1
-            maximum: 500
-            default: 100
-      responses:
-        "200":
-          description: Recent workflow trigger runs, newest first.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/WorkflowTriggerRunList"
         default:
           $ref: "#/components/responses/Error"
 
@@ -2564,61 +2517,6 @@ components:
               oneOf:
                 - $ref: "#/components/schemas/Timestamp"
                 - type: "null"
-    SessionView:
-      type: object
-      required: [schema, schema_version, producer, session, projection, runs, history, metadata]
-      additionalProperties: true
-      properties:
-        schema:
-          type: string
-          enum: [harn.session_view.v1]
-        schema_version:
-          type: integer
-          enum: [1]
-        producer:
-          type: object
-          additionalProperties: true
-        session:
-          type: object
-          additionalProperties: true
-          required: [session_id, status, run_count, last_event_id, chain_root_hash]
-          properties:
-            session_id:
-              type: [string, "null"]
-            status:
-              type: string
-            run_count:
-              type: integer
-            last_event_id:
-              type: [integer, "null"]
-            chain_root_hash:
-              type: [string, "null"]
-        projection:
-          type: object
-          additionalProperties: true
-          required: [projection_id, projection_hash, prefix_hash, last_event_id]
-          properties:
-            projection_id:
-              type: string
-            projection_hash:
-              type: [string, "null"]
-            prefix_hash:
-              type: [string, "null"]
-            last_event_id:
-              type: [integer, "null"]
-        runs:
-          type: array
-          items:
-            type: object
-            additionalProperties: true
-        history:
-          type: array
-          items:
-            type: object
-            additionalProperties: true
-        metadata:
-          type: object
-          additionalProperties: true
     SessionList:
       allOf:
         - $ref: "#/components/schemas/PaginatedList"
@@ -3859,82 +3757,6 @@ components:
               type: array
               items:
                 $ref: "#/components/schemas/Event"
-    WorkflowTriggerRunList:
-      allOf:
-        - $ref: "#/components/schemas/PaginatedList"
-        - type: object
-          properties:
-            data:
-              type: array
-              items:
-                $ref: "#/components/schemas/WorkflowTriggerRun"
-    WorkflowTriggerRun:
-      type: object
-      required:
-        - id
-        - object
-        - event_log_id
-        - kind
-        - status
-        - occurred_at_ms
-        - action_graph
-      properties:
-        id:
-          type: string
-        object:
-          type: string
-          enum: [workflow_trigger_run]
-        event_log_id:
-          type: integer
-          minimum: 1
-        kind:
-          type: string
-          enum: [dispatch_succeeded, dispatch_failed, dispatch_skipped]
-        status:
-          type: string
-          enum: [succeeded, failed, skipped]
-        occurred_at_ms:
-          type: integer
-          format: int64
-        trigger_id:
-          type: [string, "null"]
-        event_id:
-          type: [string, "null"]
-        binding_key:
-          type: [string, "null"]
-        attempt:
-          type: [integer, "null"]
-          minimum: 0
-        replay_of_event_id:
-          type: [string, "null"]
-        handler_kind:
-          type: [string, "null"]
-        target_uri:
-          type: [string, "null"]
-        error:
-          type: [string, "null"]
-        result:
-          $ref: "#/components/schemas/JsonValue"
-        skip_stage:
-          type: [string, "null"]
-        detail:
-          $ref: "#/components/schemas/JsonValue"
-        action_graph:
-          oneOf:
-            - $ref: "#/components/schemas/ActionGraphObservation"
-            - type: "null"
-    ActionGraphObservation:
-      type: object
-      required: [nodes, edges]
-      properties:
-        nodes:
-          type: array
-          items:
-            $ref: "#/components/schemas/JsonObject"
-        edges:
-          type: array
-          items:
-            $ref: "#/components/schemas/JsonObject"
     EventStream:
       type: string
       description: UTF-8 Server-Sent Events. Each frame `data` field is an Event JSON object.

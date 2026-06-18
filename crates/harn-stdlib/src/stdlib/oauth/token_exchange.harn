@@ -1,0 +1,232 @@
+/**
+ * std/oauth/token_exchange — RFC 8693 constants, provider capability rows,
+ * and actor-claim helpers.
+ *
+ * Capability rows are data: callers can replace or extend the shipped rows
+ * with provider `token_exchange` overrides or by passing overlay rows to
+ * `token_exchange_catalog(...)`.
+ */
+import { token_exchange_capability_rows } from "std/oauth/token_exchange_catalog"
+
+let __GRANT_TYPE = "urn:ietf:params:oauth:grant-type:token-exchange"
+
+let __TOKEN_TYPE_PREFIX = "urn:ietf:params:oauth:token-type:"
+
+type OAuthTokenExchangeCapability = {
+  id: string,
+  label?: string,
+  supported: bool,
+  token_url?: string,
+  subject_token_types: list<string>,
+  actor_token_types: list<string>,
+  requested_token_types: list<string>,
+  issued_token_types: list<string>,
+  delegation: bool,
+  impersonation: bool,
+  notes: list<string>,
+}
+
+fn __normalize_token_type(name) {
+  let raw = trim(to_string(name ?? ""))
+  if raw == "" {
+    throw "std/oauth/token_exchange: token type is required"
+  }
+  if starts_with(raw, "urn:") {
+    return raw
+  }
+  let key = lowercase(raw)
+  if key == "access" {
+    return __TOKEN_TYPE_PREFIX + "access_token"
+  }
+  if key == "access_token"
+    || key == "refresh_token"
+    || key == "id_token"
+    || key == "jwt"
+    || key == "saml1"
+    || key == "saml2" {
+    return __TOKEN_TYPE_PREFIX + key
+  }
+  throw "std/oauth/token_exchange: unsupported token type `" + raw + "`"
+}
+
+fn __normalize_token_types(values) {
+  var out = []
+  for value in values ?? [] {
+    out = out + [__normalize_token_type(value)]
+  }
+  return out
+}
+
+fn __default_rows() {
+  return token_exchange_capability_rows()
+}
+
+fn __normalize_row(raw) {
+  if type_of(raw) != "dict" {
+    throw "std/oauth/token_exchange: capability row must be a dict"
+  }
+  let id = trim(to_string(raw?.id ?? raw?.provider ?? raw?.authorization_server ?? ""))
+  if id == "" {
+    throw "std/oauth/token_exchange: capability row id is required"
+  }
+  return {
+    id: id,
+    label: raw?.label,
+    supported: raw?.supported ?? true,
+    token_url: raw?.token_url,
+    subject_token_types: __normalize_token_types(raw?.subject_token_types ?? []),
+    actor_token_types: __normalize_token_types(raw?.actor_token_types ?? []),
+    requested_token_types: __normalize_token_types(raw?.requested_token_types ?? []),
+    issued_token_types: __normalize_token_types(raw?.issued_token_types ?? raw?.requested_token_types ?? []),
+    delegation: raw?.delegation ?? true,
+    impersonation: raw?.impersonation ?? true,
+    notes: raw?.notes ?? [],
+  }
+}
+
+fn __catalog_from_rows(rows) {
+  var out = {}
+  for raw in rows ?? [] {
+    let row = __normalize_row(raw)
+    out = out + {[row.id]: row}
+  }
+  return out
+}
+
+fn __overlay_rows(overlays) {
+  if overlays == nil {
+    return []
+  }
+  if type_of(overlays) == "list" {
+    return overlays
+  }
+  if type_of(overlays) == "dict" {
+    var rows = []
+    for id in overlays.keys() {
+      let value = overlays[id]
+      if type_of(value) != "dict" {
+        throw "std/oauth/token_exchange: overlay `" + to_string(id) + "` must be a dict"
+      }
+      rows = rows + [value + {id: value?.id ?? id}]
+    }
+    return rows
+  }
+  throw "std/oauth/token_exchange: overlays must be a list or dict"
+}
+
+fn __provider_id(provider_or_id) {
+  if type_of(provider_or_id) == "dict" {
+    return trim(to_string(provider_or_id?.id ?? ""))
+  }
+  return trim(to_string(provider_or_id ?? ""))
+}
+
+/**
+ * token_exchange_grant_type returns the RFC 8693 extension grant URI.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn token_exchange_grant_type() -> string {
+  return __GRANT_TYPE
+}
+
+/**
+ * token_type normalizes RFC 8693 token-type aliases to their URI values.
+ *
+ * @effects: []
+ * @errors: [invalid_argument]
+ * @api_stability: experimental
+ * @example: token_type("access_token")
+ */
+pub fn token_type(name: string) -> string {
+  return __normalize_token_type(name)
+}
+
+/**
+ * token_exchange_catalog returns shipped capability rows plus overlays keyed by id.
+ *
+ * @effects: []
+ * @errors: [invalid_argument]
+ * @api_stability: experimental
+ */
+pub fn token_exchange_catalog(overlays = nil) -> dict {
+  return __catalog_from_rows(__default_rows() + __overlay_rows(overlays))
+}
+
+/**
+ * token_exchange_capability returns the effective row for a provider id or record.
+ *
+ * A provider record's `token_exchange` field wins over the shipped catalog so
+ * package and project data can opt in without changing stdlib source.
+ *
+ * @effects: []
+ * @errors: [invalid_argument]
+ * @api_stability: experimental
+ */
+pub fn token_exchange_capability(provider_or_id, overlays = nil) -> OAuthTokenExchangeCapability? {
+  if type_of(provider_or_id) == "dict" && provider_or_id?.token_exchange != nil {
+    return __normalize_row(provider_or_id.token_exchange + {id: provider_or_id?.id})
+  }
+  let id = __provider_id(provider_or_id)
+  if id == "" {
+    return nil
+  }
+  return token_exchange_catalog(overlays)[id]
+}
+
+fn __actor_dict(actor) {
+  if type_of(actor) == "dict" {
+    let sub = trim(to_string(actor?.sub ?? ""))
+    if sub == "" {
+      throw "std/oauth/token_exchange: actor.sub is required"
+    }
+    return actor
+  }
+  return {sub: trim(to_string(actor ?? ""))}
+}
+
+/**
+ * actor_claim builds the RFC 8693 nested `act` claim.
+ *
+ * Actors are ordered current-to-prior: `actor_claim([current, prior])`
+ * returns `{sub: current, act: {sub: prior}}`.
+ *
+ * @effects: []
+ * @errors: [invalid_argument]
+ * @api_stability: experimental
+ */
+pub fn actor_claim(actors: list) -> dict {
+  if len(actors) == 0 {
+    throw "std/oauth/token_exchange: at least one actor is required"
+  }
+  var out = nil
+  var index = len(actors) - 1
+  while index >= 0 {
+    var actor = __actor_dict(actors[index])
+    if trim(to_string(actor.sub ?? "")) == "" {
+      throw "std/oauth/token_exchange: actor.sub is required"
+    }
+    if out != nil {
+      actor = actor + {act: out}
+    }
+    out = actor
+    index = index - 1
+  }
+  return out ?? {}
+}
+
+/**
+ * delegated_claims adds a nested RFC 8693 `act` claim to subject claims.
+ *
+ * @effects: []
+ * @errors: [invalid_argument]
+ * @api_stability: experimental
+ */
+pub fn delegated_claims(subject_claims: dict, actors: list) -> dict {
+  if type_of(subject_claims) != "dict" {
+    throw "std/oauth/token_exchange: subject_claims must be a dict"
+  }
+  return subject_claims + {act: actor_claim(actors)}
+}

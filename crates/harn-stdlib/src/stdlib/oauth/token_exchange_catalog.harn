@@ -1,0 +1,36 @@
+/**
+ * Data rows for RFC 8693 token-exchange authorization-server capabilities.
+ *
+ * Keep this module declarative: helpers that interpret rows live in
+ * `std/oauth/token_exchange`.
+ */
+let __JWT = "urn:ietf:params:oauth:token-type:jwt"
+
+let __ACCESS_TOKEN = "urn:ietf:params:oauth:token-type:access_token"
+
+/**
+ * token_exchange_capability_rows returns the shipped capability catalog.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn token_exchange_capability_rows() -> list {
+  return [
+    {
+      id: "rfc8693",
+      label: "RFC 8693 reference authorization server",
+      supported: true,
+      token_url: "https://as.example.com/as/token.oauth2",
+      subject_token_types: [__ACCESS_TOKEN, __JWT],
+      actor_token_types: [__JWT],
+      requested_token_types: [__ACCESS_TOKEN, __JWT],
+      issued_token_types: [__ACCESS_TOKEN, __JWT],
+      delegation: true,
+      impersonation: true,
+      notes: [
+        "Reference row used by conformance tests and examples. Real authorization servers should ship or pass their own overlay row.",
+      ],
+    },
+  ]
+}

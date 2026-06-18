@@ -650,6 +650,14 @@ pub const STDLIB_SOURCES: &[StdlibSource] = &[
         source: include_str!("stdlib/oauth/providers.harn"),
     },
     StdlibSource {
+        module: "oauth/token_exchange_catalog",
+        source: include_str!("stdlib/oauth/token_exchange_catalog.harn"),
+    },
+    StdlibSource {
+        module: "oauth/token_exchange",
+        source: include_str!("stdlib/oauth/token_exchange.harn"),
+    },
+    StdlibSource {
         module: "oauth/storage",
         source: include_str!("stdlib/oauth/storage.harn"),
     },
