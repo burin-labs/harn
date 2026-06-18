@@ -1,14 +1,27 @@
 import { filter_nil } from "std/collections"
+import { slack_message_disclosure } from "std/disclosure"
 import { merge } from "std/json"
 import { wait_for } from "std/monitors"
 
 var slack_connector_config = {}
 
+/**
+ * Configure default parameters merged into every Slack connector call.
+ *
+ * @effects: []
+ * @errors: []
+ */
 pub fn configure(config) {
   slack_connector_config = filter_nil(config ?? {})
   return slack_connector_config
 }
 
+/**
+ * Clear module-level Slack connector defaults.
+ *
+ * @effects: []
+ * @errors: []
+ */
 pub fn reset() {
   slack_connector_config = {}
 }
@@ -17,10 +30,52 @@ fn __call(method, params = {}) {
   return connector_call("slack", method, filter_nil(merge(slack_connector_config, params ?? {})))
 }
 
-pub fn post_message(channel, text, blocks = nil, options = nil) {
-  return __call("post_message", filter_nil(options ?? {} + {channel: channel, text: text, blocks: blocks}))
+fn __configured_slack_disclosure(options) {
+  return options?._harn?.disclosure?.slack ?? options?.slack_disclosure ?? options?.disclosure?.slack
 }
 
+fn __slack_actor_chain(options) {
+  return options?.actor_chain ?? options?._harn?.actor_chain ?? options?.harn_actor_chain
+}
+
+fn __slack_disclosure_options(options) {
+  return options?.disclosure_options ?? options?._harn?.disclosure_options ?? {}
+}
+
+fn __with_slack_disclosure(options) {
+  let opts = options ?? {}
+  if __configured_slack_disclosure(opts) != nil {
+    return opts
+  }
+  let chain = __slack_actor_chain(opts)
+  if chain == nil {
+    return opts
+  }
+  let disclosure = slack_message_disclosure(chain, __slack_disclosure_options(opts))
+  let harn = merge(opts?._harn ?? {}, {disclosure: merge(opts?._harn?.disclosure ?? {}, {slack: disclosure})})
+  return merge(opts, {_harn: harn})
+}
+
+/**
+ * Post a Slack channel or thread message.
+ *
+ * When `options.actor_chain` is present, the call carries Slack disclosure
+ * metadata for connector-side byline and AI-mark handling.
+ *
+ * @effects: [net]
+ * @errors: [ConnectorError]
+ */
+pub fn post_message(channel, text, blocks = nil, options = nil) {
+  let opts = __with_slack_disclosure(options)
+  return __call("post_message", filter_nil(merge(opts, {channel: channel, text: text, blocks: blocks})))
+}
+
+/**
+ * Update an existing Slack message.
+ *
+ * @effects: [net]
+ * @errors: [ConnectorError]
+ */
 pub fn update_message(channel, ts, text, blocks = nil, options = nil) {
   return __call(
     "update_message",
@@ -28,22 +83,52 @@ pub fn update_message(channel, ts, text, blocks = nil, options = nil) {
   )
 }
 
+/**
+ * Add a reaction to a Slack message.
+ *
+ * @effects: [net]
+ * @errors: [ConnectorError]
+ */
 pub fn add_reaction(channel, ts, name, options = nil) {
   return __call("add_reaction", options ?? {} + {channel: channel, ts: ts, name: name})
 }
 
+/**
+ * Open a Slack modal view for an interaction trigger.
+ *
+ * @effects: [net]
+ * @errors: [ConnectorError]
+ */
 pub fn open_view(trigger_id, view, options = nil) {
   return __call("open_view", options ?? {} + {trigger_id: trigger_id, view: view})
 }
 
+/**
+ * Fetch Slack user profile information.
+ *
+ * @effects: [net]
+ * @errors: [ConnectorError]
+ */
 pub fn user_info(user_id, options = nil) {
   return __call("user_info", options ?? {} + {user_id: user_id})
 }
 
+/**
+ * Call a raw Slack Web API method through the active connector.
+ *
+ * @effects: [net]
+ * @errors: [ConnectorError]
+ */
 pub fn api_call(method, args = nil, options = nil) {
   return __call("api_call", filter_nil(options ?? {} + {method: method, args: args ?? {}}))
 }
 
+/**
+ * Upload file content through the active Slack connector.
+ *
+ * @effects: [net]
+ * @errors: [ConnectorError]
+ */
 pub fn upload_file(filename, content, options = nil) {
   return __call("upload_file", options ?? {} + {filename: filename, content: content})
 }

@@ -1437,6 +1437,10 @@ mod tests {
             "std/disclosure should export git_trailers"
         );
         assert!(
+            exports.contains("slack_message_disclosure"),
+            "std/disclosure should export slack_message_disclosure"
+        );
+        assert!(
             exports.contains("append_git_trailers"),
             "std/disclosure should export append_git_trailers"
         );
