@@ -2332,9 +2332,11 @@ pub(crate) async fn connect_mcp_servers(
             "env": server.env,
             "url": server.url,
             "auth_token": match resolved_auth {
-                AuthResolution::Bearer(token) => Some(token),
+                AuthResolution::StaticBearer(token) => Some(token),
+                AuthResolution::OAuthStore => None,
                 AuthResolution::None => server.auth_token.clone(),
             },
+            "token_exchange": server.token_exchange.clone(),
             "protocol_version": server.protocol_version,
             "protocol_mode": server.protocol_mode,
             "proxy_server_name": server.proxy_server_name,

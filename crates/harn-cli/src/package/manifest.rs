@@ -759,6 +759,8 @@ pub struct McpServerConfig {
     #[serde(default)]
     pub auth_token: Option<String>,
     #[serde(default)]
+    pub token_exchange: Option<harn_vm::mcp_oauth::McpTokenExchangeConfig>,
+    #[serde(default)]
     pub auth: Option<McpAuthConfig>,
     #[serde(default)]
     pub client_id: Option<String>,
