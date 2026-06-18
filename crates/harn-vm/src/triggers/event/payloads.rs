@@ -617,6 +617,8 @@ pub struct A2aPushPayload {
     pub task_state: Option<String>,
     pub artifact: Option<JsonValue>,
     pub sender: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub actor_chain: Option<JsonValue>,
     pub raw: JsonValue,
     pub kind: String,
 }

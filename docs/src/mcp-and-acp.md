@@ -1370,6 +1370,12 @@ the legacy `a2a.*`, `tasks/send`, and `tasks/send_and_wait` names for one minor
 cycle and marks those HTTP responses with a `Deprecation` header. If the served
 file exports exactly one function, the function selector can be omitted.
 
+Delegated peers can include an RFC 8693 actor chain in
+`message.metadata.actor_chain`. Harn validates that shape, stores it on the A2A
+task metadata, and appends the served agent as the current `act` hop before
+executing the exported Harn function. Scripts can inspect the resulting chain
+with `agent_session_actor_chain()`.
+
 ### Canonical HTTP+JSON/REST binding
 
 The same task lifecycle is also exposed over the canonical A2A 0.3.0

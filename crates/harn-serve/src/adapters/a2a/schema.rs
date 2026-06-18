@@ -600,6 +600,32 @@ pub(super) fn caller_label(params: &JsonValue) -> String {
         .to_string()
 }
 
+pub(super) fn actor_chain_param(
+    params: &JsonValue,
+) -> Result<Option<harn_vm::actor_chain::ActorChain>, A2aPrepareError> {
+    let Some((pointer, value)) = harn_vm::a2a::actor_chain_metadata_candidate(params) else {
+        return Ok(None);
+    };
+    harn_vm::actor_chain::ActorChain::from_json_value(value)
+        .map(Some)
+        .map_err(|error| {
+            A2aPrepareError::new(
+                -32602,
+                format!("A2A actor_chain metadata is invalid at {pointer}: {error}"),
+            )
+        })
+}
+
+pub(super) fn actor_chain_task_metadata(
+    chain: &harn_vm::actor_chain::ActorChain,
+) -> BTreeMap<String, JsonValue> {
+    let chain = chain.to_json_value();
+    BTreeMap::from([
+        ("actor_chain".to_string(), chain.clone()),
+        ("harn".to_string(), json!({"actor_chain": chain})),
+    ])
+}
+
 /// Construct the A2A prepare-error for a scope mismatch. Shared by the
 /// task-prepare scope preflight and any future preflight at the protocol
 /// layer so the wire format (`-32003`, `data.required_scopes`, etc.) and

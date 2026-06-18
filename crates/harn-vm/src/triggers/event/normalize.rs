@@ -674,6 +674,8 @@ pub(super) fn a2a_push_payload(
     _headers: &BTreeMap<String, String>,
     raw: JsonValue,
 ) -> ProviderPayload {
+    let actor_chain =
+        crate::a2a::actor_chain_from_metadata(&raw).map(|chain| chain.to_json_value());
     let task_id = raw
         .get("task_id")
         .and_then(JsonValue::as_str)
@@ -703,6 +705,7 @@ pub(super) fn a2a_push_payload(
         task_state,
         artifact,
         sender,
+        actor_chain,
         raw,
         kind,
     }))

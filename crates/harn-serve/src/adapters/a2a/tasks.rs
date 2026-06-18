@@ -45,6 +45,11 @@ impl A2aServer {
             .cloned()
             .or_else(|| context_id.clone())
             .map(harn_vm::TraceId);
+        let actor_chain = actor_chain_param(params)?;
+        let metadata = actor_chain
+            .as_ref()
+            .map(actor_chain_task_metadata)
+            .unwrap_or_default();
         let push_config = params
             .pointer("/configuration/pushNotificationConfig")
             .cloned();
@@ -59,7 +64,7 @@ impl A2aServer {
                 parts: parts.clone(),
             }],
             artifacts: a2a_artifacts_from_parts(&parts),
-            metadata: BTreeMap::new(),
+            metadata,
             events: Vec::new(),
             subscribers: Vec::new(),
             cancel_token: Some(cancel_token.clone()),
@@ -85,6 +90,7 @@ impl A2aServer {
             auth,
             caller: caller_label(params),
             trace_id,
+            actor_chain,
             cancel_token,
         })
     }
@@ -117,7 +123,7 @@ impl A2aServer {
                 metadata: BTreeMap::new(),
                 cancel_token: Some(task.cancel_token.clone()),
                 agent_session_id: Some(session_id.clone()),
-                actor_chain: None,
+                actor_chain: task.actor_chain.clone(),
                 actor_chain_hop: Some(self.agent_name.clone()),
                 progress: None,
                 tenant_id: None,
