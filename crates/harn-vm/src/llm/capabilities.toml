@@ -1555,23 +1555,15 @@ prefers_role_developer = false
 prefers_xml_tools = false
 thinking_block_style = "inline"
 
-# Fireworks-hosted GPT-OSS (`accounts/fireworks/models/gpt-oss-120b`) is the
-# same Harmony model as cerebras/groq/openrouter gpt-oss-120b. Without this
-# row gpt-oss would fall through to no fireworks-specific reasoning rule, so
-# `reasoning_required_for_tools` resolves OFF and the eval loop bills a
-# noncommittal (tools never fire inside the chain-of-thought channel). Mirror
-# the Cerebras gpt-oss capability row: NATIVE tool calls (gpt-oss emits a bare
-# `{"tool":..,"arguments":..}` dialect that the fenced-JSON/text parsers do
-# not recognize, so native is the only working channel), reasoning-effort
-# thinking with {low, medium, high}, and `reasoning_required_for_tools = true`
-# so an auto "off" floors to the lowest accepted effort rather than disabling
-# the channel tools call from. Must NOT carry a Qwen-style
-# `auto_reasoning_overrides = "off"` — that would break tool calling.
+# Fireworks-hosted GPT-OSS (`accounts/fireworks/models/gpt-oss-120b`) currently
+# bills empty native completions with no dispatchable tool calls in eval JSONL.
+# Keep this route on Harn's fenced-JSON text channel until Fireworks' native
+# tool-call path is proven clean.
 [[provider.fireworks]]
-model_match = "*gpt-oss*"
-native_tools = true
-preferred_tool_format = "native"
-structured_output = "native"
+model_match = "accounts/fireworks/models/gpt-oss-*"
+native_tools = false
+preferred_tool_format = "json"
+text_tool_wire_format_supported = true
 thinking_modes = ["effort"]
 reasoning_effort_supported = true
 reasoning_effort_levels = ["low", "medium", "high"]
