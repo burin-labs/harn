@@ -28,9 +28,10 @@ template = "AI-assisted by {{ current.label }} for {{ origin.label }}."
 
 [surfaces.github]
 kind = "github_author_choice"
-mode = "human_author_agent_coauthor"
+author_mode = "human"
 author = "origin"
 co_author = "current"
+bot_author = "current"
 """
 
 fn __dict(value) -> dict {
@@ -281,18 +282,95 @@ fn __render_text(surface_config: dict, ctx: dict) -> string {
   return render_string(to_string(template), ctx)
 }
 
-fn __render_github(surface_config: dict, ctx: dict) -> dict {
-  let author = __select_principal(ctx, surface_config?.author ?? "origin")
-  var co_author = __select_principal(ctx, surface_config?.co_author ?? "current")
-  if author != nil && co_author != nil && author.subject == co_author.subject {
+fn __github_author_mode(surface_config: dict) -> string {
+  let mode = lowercase(trim(to_string(surface_config?.author_mode ?? "human")))
+  if mode == "human" || mode == "bot" {
+    return mode
+  }
+  throw "std/disclosure: github.author_mode must be `human` or `bot`, got `" + mode + "`"
+}
+
+fn __github_mode_label(author_mode: string) -> string {
+  if author_mode == "bot" {
+    return "bot_author"
+  }
+  return "human_author_agent_coauthor"
+}
+
+fn __git_identity(principal) {
+  if principal == nil {
+    return nil
+  }
+  return {name: principal.name, email: principal.email}
+}
+
+fn __github_auth_identity(author_mode: string) -> string {
+  if author_mode == "bot" {
+    return "github_app"
+  }
+  return "user"
+}
+
+fn __github_commit_auth_identity(author_mode: string) -> string {
+  if author_mode == "bot" {
+    return "github_app"
+  }
+  return "any"
+}
+
+fn __github_trailers(config: dict, ctx: dict) -> string {
+  let surface_config = __surface_config(config, "git")
+  if !__git_trailers_switch_enabled(surface_config) {
+    return ""
+  }
+  return __safe_git_trailers(__render_text(surface_config, ctx), ctx)
+}
+
+fn __render_github(surface_config: dict, ctx: dict, config: dict) -> dict {
+  let author_mode = __github_author_mode(surface_config)
+  let human_author = __select_principal(ctx, surface_config?.author ?? "origin")
+  let bot_author = __select_principal(ctx, surface_config?.bot_author ?? "current")
+  let selected_author = if author_mode == "bot" {
+    bot_author
+  } else {
+    human_author
+  }
+  var co_author = if author_mode == "bot" {
+    nil
+  } else {
+    __select_principal(ctx, surface_config?.co_author ?? "current")
+  }
+  if selected_author != nil && co_author != nil && selected_author.subject == co_author.subject {
     co_author = nil
+  }
+  let trailers = if author_mode == "human" {
+    __github_trailers(config, ctx)
+  } else {
+    ""
+  }
+  let custom_commit_author = if author_mode == "human" {
+    __git_identity(human_author)
+  } else {
+    nil
   }
   return {
     surface: "github",
     kind: "github_author_choice",
-    mode: to_string(surface_config?.mode ?? "human_author_agent_coauthor"),
-    author: author,
+    author_mode: author_mode,
+    mode: __github_mode_label(author_mode),
+    auth_identity: __github_auth_identity(author_mode),
+    required_auth_identity: __github_auth_identity(author_mode),
+    commit_auth_identity: __github_commit_auth_identity(author_mode),
+    pull_request_auth_identity: __github_auth_identity(author_mode),
+    author: selected_author,
+    human_author: human_author,
+    bot_author: bot_author,
     co_author: co_author,
+    commit_author: custom_commit_author,
+    commit_committer: nil,
+    omit_custom_commit_author: author_mode == "bot",
+    append_git_trailers: author_mode == "human" && trailers != "",
+    trailers: trailers,
     principals: ctx.principals,
     actor_chain: ctx.chain,
   }
@@ -421,7 +499,7 @@ pub fn render(chain, surface: string, options: DisclosureRenderOptions = {}) -> 
     return __render_text(surface_config, ctx)
   }
   if kind == "github_author_choice" {
-    return __render_github(surface_config, ctx)
+    return __render_github(surface_config, ctx, config)
   }
   throw "std/disclosure: unsupported disclosure surface kind `" + kind + "`"
 }

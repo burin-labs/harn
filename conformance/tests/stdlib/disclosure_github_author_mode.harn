@@ -1,0 +1,45 @@
+import { render } from "std/disclosure"
+
+pipeline default() {
+  let chain = {sub: "user:kenneth", act: {sub: "agent:merge-captain"}}
+  let config = {
+    identities: {
+      "user:kenneth": {name: "Kenneth Sinder", email: "kenneth@example.com", github: "kennethsinder"},
+      "agent:merge-captain": {name: "Merge Captain", email: "merge-captain@bots.example", github: "merge-captain-bot"},
+    },
+  }
+  let options = {project: false, env: false, config: config}
+  let human = render(chain, "github", options)
+  __io_println(human.author_mode)
+  __io_println(human.mode)
+  __io_println(human.required_auth_identity)
+  __io_println(human.commit_auth_identity)
+  __io_println(human.pull_request_auth_identity)
+  __io_println(human.author.subject)
+  __io_println(human.co_author.subject)
+  __io_println(human.commit_author.name)
+  __io_println(human.commit_author.email)
+  __io_println(to_string(human.commit_committer == nil))
+  __io_println(to_string(human.append_git_trailers))
+  __io_println(human.trailers)
+  let root = path_join(harness.fs.temp_dir(), "harn-disclosure-github-mode-" + uuid())
+  harness.fs.mkdir(root)
+  let project_config = "[disclosure.surfaces.github]\n" + "author_mode = \"bot\"\n"
+  harness.fs.write_text(path_join(root, "harn.toml"), project_config)
+  let bot = render(chain, "github", options + {project: true, project_root: root})
+  __io_println(bot.author_mode)
+  __io_println(bot.mode)
+  __io_println(bot.required_auth_identity)
+  __io_println(bot.commit_auth_identity)
+  __io_println(bot.pull_request_auth_identity)
+  __io_println(bot.author.subject)
+  __io_println(to_string(bot.co_author == nil))
+  __io_println(to_string(bot.commit_author == nil))
+  __io_println(to_string(bot.omit_custom_commit_author))
+  __io_println(to_string(bot.append_git_trailers))
+  let invalid = try {
+    render(chain, "github", options + {config: {surfaces: {github: {author_mode: "robot"}}}})
+  }
+  require is_err(invalid), "invalid github author_mode must fail"
+  __io_println(unwrap_err(invalid))
+}
