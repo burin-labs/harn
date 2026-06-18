@@ -444,23 +444,23 @@
         "FIREWORKS_API_KEY"
       ],
       "recommended": {
-        "selector": "fireworks:*gpt-oss*",
+        "selector": "fireworks:accounts/fireworks/models/gpt-oss-*",
         "provider": "fireworks",
-        "model": "*gpt-oss*",
+        "model": "accounts/fireworks/models/gpt-oss-*",
         "display_name": null,
-        "tool_format": "native",
+        "tool_format": "json",
         "harn_options": [
           "provider = \"fireworks\"",
-          "tool_format = \"native\"",
+          "tool_format = \"json\"",
           "structured_output_mode = \"native_json\""
         ]
       },
       "capabilities": {
-        "native_tools": true,
+        "native_tools": false,
         "text_tools": true,
-        "preferred_tool_format": "native",
-        "tool_mode_parity": "unknown",
-        "structured_output_transport": "native",
+        "preferred_tool_format": "json",
+        "tool_mode_parity": "text_only",
+        "structured_output_transport": "none",
         "structured_output_mode": "native_json",
         "streaming": true,
         "reasoning_knobs": [

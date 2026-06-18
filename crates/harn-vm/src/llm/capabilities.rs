@@ -2355,18 +2355,24 @@ anthropic_beta_features = ["fine-grained-tool-streaming-2025-05-14"]
     }
 
     #[test]
-    fn fireworks_deepinfra_sambanova_gpt_oss_require_reasoning_for_tools() {
+    fn routed_gpt_oss_requires_reasoning_for_tools_with_provider_specific_tool_wire() {
         // gpt-oss (Harmony) calls tools INSIDE the chain-of-thought channel, so
-        // reasoning-off breaks tool calling. The fireworks/deepinfra/sambanova
-        // catch-all rules carry no reasoning fields, so without a dedicated
-        // `*gpt-oss*` row gpt-oss would fall through to reasoning-OFF and the
-        // eval loop would bill a noncommittal. These rows mirror the Cerebras
-        // gpt-oss capability row. Regression guard for that resolution.
+        // reasoning-off breaks tool calling. Provider catch-all rules carry no
+        // reasoning fields, so without a dedicated `*gpt-oss*` row gpt-oss
+        // would fall through to reasoning-OFF and the eval loop would bill a
+        // noncommittal. Tool wire support is provider-specific: Fireworks'
+        // native channel currently bills empty eval completions, while
+        // DeepInfra/SambaNova still use the native Harmony channel.
         reset();
-        for (provider, model) in [
-            ("fireworks", "accounts/fireworks/models/gpt-oss-120b"),
-            ("deepinfra", "openai/gpt-oss-120b"),
-            ("sambanova", "gpt-oss-120b"),
+        for (provider, model, native_tools, preferred_tool_format) in [
+            (
+                "fireworks",
+                "accounts/fireworks/models/gpt-oss-120b",
+                false,
+                "json",
+            ),
+            ("deepinfra", "openai/gpt-oss-120b", true, "native"),
+            ("sambanova", "gpt-oss-120b", true, "native"),
         ] {
             let caps = lookup(provider, model);
             assert!(
@@ -2384,9 +2390,13 @@ anthropic_beta_features = ["fine-grained-tool-streaming-2025-05-14"]
             );
             assert_eq!(caps.thinking_modes, vec!["effort"], "{provider}/{model}");
             assert_eq!(
+                caps.native_tools, native_tools,
+                "{provider}/{model}: native_tools"
+            );
+            assert_eq!(
                 caps.preferred_tool_format.as_deref(),
-                Some("native"),
-                "{provider}/{model}: native tools"
+                Some(preferred_tool_format),
+                "{provider}/{model}: preferred tool format"
             );
             assert_eq!(
                 caps.thinking_block_style, "reasoning_summary",
