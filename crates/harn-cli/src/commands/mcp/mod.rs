@@ -36,7 +36,8 @@ pub(crate) struct ResolvedMcpServer {
 
 pub(crate) enum AuthResolution {
     None,
-    Bearer(String),
+    StaticBearer(String),
+    OAuthStore,
 }
 
 pub(crate) async fn handle_mcp_command(command: &McpCommand) {
@@ -318,7 +319,9 @@ async fn derive_server_status(server: &McpServerConfig) -> McpServerStatus {
             "connected".to_string()
         } else {
             match resolve_auth_for_server(server).await {
-                Ok(AuthResolution::Bearer(_)) => "connected".to_string(),
+                Ok(AuthResolution::StaticBearer(_) | AuthResolution::OAuthStore) => {
+                    "connected".to_string()
+                }
                 Ok(AuthResolution::None) => "auth_required".to_string(),
                 Err(error) => {
                     last_error = Some(error);
@@ -426,13 +429,13 @@ pub(crate) async fn resolve_auth_for_server(
             })?;
             let token =
                 crate::commands::connect::store::load_connect_secret_text(secret_id).await?;
-            return Ok(AuthResolution::Bearer(token));
+            return Ok(AuthResolution::StaticBearer(token));
         }
     }
 
     if let Some(token) = &server.auth_token {
         if !token.is_empty() {
-            return Ok(AuthResolution::Bearer(token.clone()));
+            return Ok(AuthResolution::StaticBearer(token.clone()));
         }
     }
 
@@ -442,7 +445,7 @@ pub(crate) async fn resolve_auth_for_server(
     }
 
     match mcp_oauth::resolve_bearer(&server.url).await? {
-        Some(bearer) => Ok(AuthResolution::Bearer(bearer)),
+        Some(_) => Ok(AuthResolution::OAuthStore),
         None => Ok(AuthResolution::None),
     }
 }
@@ -1140,6 +1143,47 @@ mod tests {
 
     fn parse_server(toml_table: &str) -> McpServerConfig {
         toml::from_str::<McpServerConfig>(toml_table).expect("mcp server config")
+    }
+
+    #[test]
+    fn mcp_server_config_parses_token_exchange_row() {
+        let server = parse_server(
+            r#"
+name = "api"
+transport = "http"
+url = "https://mcp.example/mcp"
+
+[token_exchange]
+token_url = "https://auth.example/token"
+actor_token = "agent.jwt"
+actor_token_type = "jwt"
+subject_token_type = "access_token"
+client_id = "agent-client"
+client_secret = "agent-secret"
+token_endpoint_auth_method = "client_secret_basic"
+scope = "repo"
+
+[token_exchange.extra_params]
+deployment = "enterprise"
+"#,
+        );
+        let exchange = server
+            .token_exchange
+            .as_ref()
+            .expect("token exchange row parsed");
+        assert_eq!(
+            exchange.token_url.as_deref(),
+            Some("https://auth.example/token")
+        );
+        assert_eq!(exchange.actor_token.as_deref(), Some("agent.jwt"));
+        assert_eq!(
+            exchange.token_endpoint_auth_method.as_deref(),
+            Some("client_secret_basic")
+        );
+        assert_eq!(
+            exchange.extra_params.get("deployment"),
+            Some(&serde_json::json!("enterprise"))
+        );
     }
 
     #[test]

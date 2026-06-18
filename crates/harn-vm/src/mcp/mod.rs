@@ -71,6 +71,8 @@ pub struct McpServerSpec {
     #[serde(default)]
     pub auth_token: Option<String>,
     #[serde(default)]
+    pub token_exchange: Option<crate::mcp_oauth::McpTokenExchangeConfig>,
+    #[serde(default)]
     pub protocol_version: Option<String>,
     #[serde(default)]
     pub protocol_mode: Option<String>,
@@ -101,6 +103,8 @@ pub(crate) struct HttpMcpClientInner {
     client: reqwest::Client,
     url: String,
     auth_token: Option<String>,
+    auth_token_source: HttpAuthTokenSource,
+    token_exchange: Option<Arc<crate::mcp_oauth::McpTokenExchangeConfig>>,
     protocol_mode: McpProtocolMode,
     protocol_version: String,
     session_id: Option<String>,
@@ -108,6 +112,19 @@ pub(crate) struct HttpMcpClientInner {
     proxy_server_name: Option<String>,
     get_stream_task: Option<tokio::task::JoinHandle<()>>,
     tool_headers: BTreeMap<String, Vec<McpToolHeader>>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum HttpAuthTokenSource {
+    None,
+    Config,
+    OAuthStore,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct ResolvedHttpAuthToken {
+    pub token: Option<String>,
+    pub source: HttpAuthTokenSource,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

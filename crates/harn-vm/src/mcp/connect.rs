@@ -65,14 +65,16 @@ pub(crate) async fn mcp_connect_http_impl(
         .protocol_version
         .clone()
         .unwrap_or_else(|| default_protocol_version(protocol_mode).to_string());
-    let auth_token = resolve_http_auth_token(spec).await;
+    let resolved_auth = resolve_http_auth_token_source(spec).await;
 
     let handle = VmMcpClientHandle {
         name: spec.name.clone(),
         inner: Arc::new(Mutex::new(Some(McpClientInner::Http(HttpMcpClientInner {
             client,
             url: spec.url.clone(),
-            auth_token,
+            auth_token: resolved_auth.token,
+            auth_token_source: resolved_auth.source,
+            token_exchange: spec.token_exchange.clone().map(Arc::new),
             protocol_mode,
             protocol_version,
             session_id: None,
@@ -90,28 +92,43 @@ pub(crate) async fn mcp_connect_http_impl(
     Ok(handle)
 }
 
-pub(crate) async fn resolve_http_auth_token(spec: &McpServerSpec) -> Option<String> {
-    resolve_http_auth_token_with(spec, |server_url| async move {
+pub(crate) async fn resolve_http_auth_token_source(spec: &McpServerSpec) -> ResolvedHttpAuthToken {
+    resolve_http_auth_token_source_with(spec, |server_url| async move {
         crate::mcp_oauth::resolve_bearer(&server_url).await
     })
     .await
 }
 
-pub(crate) async fn resolve_http_auth_token_with<R, Fut>(
+pub(crate) async fn resolve_http_auth_token_source_with<R, Fut>(
     spec: &McpServerSpec,
     resolver: R,
-) -> Option<String>
+) -> ResolvedHttpAuthToken
 where
     R: FnOnce(String) -> Fut,
     Fut: Future<Output = Result<Option<String>, String>>,
 {
     if let Some(token) = spec.auth_token.as_deref().filter(|token| !token.is_empty()) {
-        return Some(token.to_string());
+        return ResolvedHttpAuthToken {
+            token: Some(token.to_string()),
+            source: HttpAuthTokenSource::Config,
+        };
     }
     if spec.url.is_empty() {
-        return None;
+        return ResolvedHttpAuthToken {
+            token: None,
+            source: HttpAuthTokenSource::None,
+        };
     }
-    resolver(spec.url.clone()).await.unwrap_or(None)
+    match resolver(spec.url.clone()).await.unwrap_or(None) {
+        Some(token) => ResolvedHttpAuthToken {
+            token: Some(token),
+            source: HttpAuthTokenSource::OAuthStore,
+        },
+        None => ResolvedHttpAuthToken {
+            token: None,
+            source: HttpAuthTokenSource::None,
+        },
+    }
 }
 
 pub(crate) async fn initialize_client(handle: &VmMcpClientHandle) -> Result<(), VmError> {

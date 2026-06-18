@@ -337,6 +337,7 @@ async fn wait_for_http_mcp_authorization(
     .await
     .map_err(|error| mcp_auth_required_error(server_name, &inner.url, &error))?;
     inner.auth_token = Some(token.access_token);
+    inner.auth_token_source = HttpAuthTokenSource::OAuthStore;
     inner.abort_get_stream();
     Ok(())
 }
@@ -367,6 +368,7 @@ pub(crate) async fn send_http_request_once(
         payload["id"] = serde_json::json!(id);
     }
     let payload = wrap_http_payload(payload, inner.proxy_server_name.as_deref());
+    let auth_token = resolve_http_request_auth_token(inner).await?;
 
     let request = inner
         .client
@@ -376,7 +378,7 @@ pub(crate) async fn send_http_request_once(
         .json(&payload);
     let request = apply_http_headers(
         request,
-        &inner.auth_token,
+        &auth_token,
         inner.protocol_mode,
         &inner.protocol_version,
         legacy_session_id(inner),
@@ -390,6 +392,58 @@ pub(crate) async fn send_http_request_once(
         .send()
         .await
         .map_err(|e| VmError::Runtime(format!("MCP HTTP request error: {e}")))
+}
+
+async fn resolve_http_request_auth_token(
+    inner: &mut HttpMcpClientInner,
+) -> Result<Option<String>, VmError> {
+    let Some(base_token) = inner.auth_token.clone() else {
+        return Ok(None);
+    };
+    let Some(config) = inner
+        .token_exchange
+        .clone()
+        .filter(|config| config.is_enabled())
+    else {
+        return Ok(Some(base_token));
+    };
+    let Some(actor_chain) = crate::agent_sessions::current_actor_chain() else {
+        return Ok(Some(base_token));
+    };
+    if !actor_chain.is_delegated() {
+        return Ok(Some(base_token));
+    }
+
+    match inner.auth_token_source {
+        HttpAuthTokenSource::OAuthStore => {
+            match crate::mcp_oauth::resolve_delegated_bearer_from_store(
+                &inner.url,
+                &config,
+                &actor_chain,
+            )
+            .await
+            .map_err(|error| VmError::Runtime(format!("MCP token exchange failed: {error}")))?
+            {
+                Some(resolved) => {
+                    inner.auth_token = Some(resolved.base_bearer);
+                    Ok(Some(resolved.bearer))
+                }
+                None => Ok(Some(base_token)),
+            }
+        }
+        HttpAuthTokenSource::Config => {
+            let exchanged = crate::mcp_oauth::exchange_configured_bearer_for_actor_chain(
+                &inner.url,
+                &base_token,
+                &config,
+                &actor_chain,
+            )
+            .await
+            .map_err(|error| VmError::Runtime(format!("MCP token exchange failed: {error}")))?;
+            Ok(exchanged.or(Some(base_token)))
+        }
+        HttpAuthTokenSource::None => Ok(None),
+    }
 }
 
 pub(crate) fn ensure_http_get_stream(inner: &mut HttpMcpClientInner, server_name: &str) {

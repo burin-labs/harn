@@ -26,7 +26,7 @@
 //! serialize concurrent refreshers (clients + daemon) so they don't stampede
 //! the token endpoint or revoke each other's rotated refresh tokens.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::fs::{self, File, OpenOptions};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock};
@@ -68,6 +68,63 @@ const TOKEN_REFRESH_SKEW_SECS: i64 = 60;
 const MAX_PENDING_FLOWS: usize = 32;
 
 const AUTH_COMPLETION_CHANNEL_CAPACITY: usize = 64;
+const TOKEN_EXCHANGE_GRANT_TYPE: &str = "urn:ietf:params:oauth:grant-type:token-exchange";
+const TOKEN_TYPE_PREFIX: &str = "urn:ietf:params:oauth:token-type:";
+const TOKEN_TYPE_ACCESS_TOKEN: &str = "urn:ietf:params:oauth:token-type:access_token";
+const TOKEN_TYPE_JWT: &str = "urn:ietf:params:oauth:token-type:jwt";
+
+/// Per-MCP-server opt-in for exchanging the stored subject bearer for a
+/// delegated request bearer before outbound HTTP MCP calls.
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct McpTokenExchangeConfig {
+    /// `None` means enabled when the table is present. The enclosing
+    /// `Option<McpTokenExchangeConfig>` keeps the default server behavior off.
+    pub enabled: Option<bool>,
+    /// Override token endpoint. When absent, MCP OAuth discovery supplies the
+    /// authorization server token endpoint.
+    pub token_url: Option<String>,
+    pub actor_token: Option<String>,
+    pub actor_token_type: Option<String>,
+    pub subject_token_type: Option<String>,
+    pub requested_token_type: Option<String>,
+    /// Optional client authentication for the token-exchange request when the
+    /// subject bearer came from static config. Stored OAuth bearers use their
+    /// persisted client credentials by default.
+    pub client_id: Option<String>,
+    pub client_secret: Option<String>,
+    pub token_endpoint_auth_method: Option<String>,
+    /// Optional RFC 8693 `resource` parameter. Defaults to the MCP resource
+    /// indicator; accepts a string or list of strings.
+    pub resource: Option<serde_json::Value>,
+    /// Optional RFC 8693 `audience` parameter; accepts a string or list of
+    /// strings.
+    pub audience: Option<serde_json::Value>,
+    /// Optional requested scope string. Defaults to the current actor's scoped
+    /// hop when the session actor chain carries scopes.
+    pub scope: Option<String>,
+    /// Deployment-specific token-exchange form fields.
+    pub extra_params: BTreeMap<String, serde_json::Value>,
+}
+
+impl McpTokenExchangeConfig {
+    pub fn is_enabled(&self) -> bool {
+        self.enabled.unwrap_or(true)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DelegatedMcpBearer {
+    pub bearer: String,
+    pub base_bearer: String,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct TokenExchangeClientAuth<'a> {
+    client_id: &'a str,
+    client_secret: Option<&'a str>,
+    token_endpoint_auth_method: &'a str,
+}
 
 /// A persisted MCP OAuth token plus everything needed to refresh it without
 /// re-running discovery. Keyed in the keyring by `(resource, issuer, client_id)`.
@@ -334,6 +391,107 @@ pub async fn complete_authorization(
 /// (single-flight) if it is within the expiry skew. Returns `None` when no
 /// token is stored (the caller should treat this as "auth required").
 pub async fn resolve_bearer(server_url: &str) -> Result<Option<String>, String> {
+    Ok(resolve_stored_token_with_discovery(server_url)
+        .await?
+        .map(|(token, _)| token.access_token))
+}
+
+/// Resolve a bearer for an MCP request by refreshing the stored subject token
+/// under the existing single-flight lock, then exchanging it for a transient
+/// delegated token when the server has opted in.
+pub async fn resolve_delegated_bearer_from_store(
+    server_url: &str,
+    config: &McpTokenExchangeConfig,
+    actor_chain: &crate::actor_chain::ActorChain,
+) -> Result<Option<DelegatedMcpBearer>, String> {
+    let Some((stored, discovery)) = resolve_stored_token_with_discovery(server_url).await? else {
+        return Ok(None);
+    };
+    validate_issuer_binding(&stored.issuer, &discovery.authorization_server_issuer)?;
+    let exchanged = exchange_bearer_for_actor_chain(
+        server_url,
+        &stored.access_token,
+        &discovery,
+        config,
+        actor_chain,
+        TokenExchangeClientAuth {
+            client_id: &stored.client_id,
+            client_secret: stored.client_secret.as_deref(),
+            token_endpoint_auth_method: &stored.token_endpoint_auth_method,
+        },
+    )
+    .await?;
+    let bearer = exchanged.unwrap_or_else(|| stored.access_token.clone());
+    Ok(Some(DelegatedMcpBearer {
+        bearer,
+        base_bearer: stored.access_token,
+    }))
+}
+
+/// Exchange a caller-supplied subject bearer. Used for static MCP bearer
+/// configs, which have no Harn-owned refresh token to update.
+pub async fn exchange_configured_bearer_for_actor_chain(
+    server_url: &str,
+    subject_bearer: &str,
+    config: &McpTokenExchangeConfig,
+    actor_chain: &crate::actor_chain::ActorChain,
+) -> Result<Option<String>, String> {
+    let discovery = if config
+        .token_url
+        .as_deref()
+        .is_some_and(|token_url| !token_url.trim().is_empty())
+    {
+        None
+    } else {
+        Some(discover(server_url).await?)
+    };
+    match discovery.as_ref() {
+        Some(discovery) => {
+            exchange_bearer_for_actor_chain(
+                server_url,
+                subject_bearer,
+                discovery,
+                config,
+                actor_chain,
+                config_token_exchange_client_auth(config),
+            )
+            .await
+        }
+        None => {
+            exchange_bearer_for_actor_chain_with_endpoint(
+                server_url,
+                subject_bearer,
+                config
+                    .token_url
+                    .as_deref()
+                    .expect("checked token_url presence above"),
+                config,
+                actor_chain,
+                config_token_exchange_client_auth(config),
+            )
+            .await
+        }
+    }
+}
+
+fn config_token_exchange_client_auth(
+    config: &McpTokenExchangeConfig,
+) -> TokenExchangeClientAuth<'_> {
+    TokenExchangeClientAuth {
+        client_id: config.client_id.as_deref().unwrap_or(""),
+        client_secret: config.client_secret.as_deref(),
+        token_endpoint_auth_method: config
+            .token_endpoint_auth_method
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .unwrap_or("none"),
+    }
+}
+
+async fn resolve_stored_token_with_discovery(
+    server_url: &str,
+) -> Result<Option<(StoredMcpToken, McpOAuthDiscovery)>, String> {
     let discovery = discover(server_url).await?;
     let resource = canonical_resource_indicator(server_url).map_err(|e| e.to_string())?;
     let store = KeyringOAuthTokenStorage::default();
@@ -351,7 +509,7 @@ pub async fn resolve_bearer(server_url: &str) -> Result<Option<String>, String> 
     if token_needs_refresh(&stored) {
         stored = refresh_stored_token_with_store(&store, &stored, &discovery, None).await?;
     }
-    Ok(Some(stored.access_token))
+    Ok(Some((stored, discovery)))
 }
 
 /// Import an existing token into the canonical Harn MCP OAuth store.
@@ -633,6 +791,269 @@ async fn request_token(
         .json::<TokenResponse>()
         .await
         .map_err(|error| format!("Invalid token response: {error}"))
+}
+
+async fn exchange_bearer_for_actor_chain(
+    server_url: &str,
+    subject_bearer: &str,
+    discovery: &McpOAuthDiscovery,
+    config: &McpTokenExchangeConfig,
+    actor_chain: &crate::actor_chain::ActorChain,
+    client_auth: TokenExchangeClientAuth<'_>,
+) -> Result<Option<String>, String> {
+    let token_endpoint = config
+        .token_url
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or(&discovery.authorization_server_metadata.token_endpoint);
+    exchange_bearer_for_actor_chain_with_endpoint(
+        server_url,
+        subject_bearer,
+        token_endpoint,
+        config,
+        actor_chain,
+        client_auth,
+    )
+    .await
+}
+
+async fn exchange_bearer_for_actor_chain_with_endpoint(
+    server_url: &str,
+    subject_bearer: &str,
+    token_endpoint: &str,
+    config: &McpTokenExchangeConfig,
+    actor_chain: &crate::actor_chain::ActorChain,
+    client_auth: TokenExchangeClientAuth<'_>,
+) -> Result<Option<String>, String> {
+    let Some(form) = token_exchange_form(server_url, subject_bearer, config, actor_chain)? else {
+        return Ok(None);
+    };
+    validate_token_endpoint_auth_method(client_auth.token_endpoint_auth_method)?;
+    let client = reqwest::Client::new();
+    let response = send_token_exchange_request(&client, token_endpoint, &form, client_auth).await?;
+    let status = response.status();
+    if !status.is_success() {
+        let body = response.text().await.unwrap_or_default();
+        if token_exchange_unsupported(status, &body) {
+            return Ok(None);
+        }
+        return Err(oauth_http_error("Token exchange failed", status, &body));
+    }
+    let token = response
+        .json::<TokenResponse>()
+        .await
+        .map_err(|error| format!("Invalid token exchange response: {error}"))?;
+    Ok(Some(token.access_token))
+}
+
+async fn send_token_exchange_request(
+    client: &reqwest::Client,
+    token_endpoint: &str,
+    form: &[(String, String)],
+    client_auth: TokenExchangeClientAuth<'_>,
+) -> Result<reqwest::Response, String> {
+    let mut request = client.post(token_endpoint).form(form);
+    match client_auth.token_endpoint_auth_method {
+        "client_secret_basic" => {
+            let client_secret = client_auth
+                .client_secret
+                .ok_or_else(|| "Missing client secret for client_secret_basic".to_string())?;
+            if client_auth.client_id.trim().is_empty() {
+                return Err("Missing client_id for client_secret_basic".to_string());
+            }
+            request = request.basic_auth(client_auth.client_id, Some(client_secret));
+        }
+        "client_secret_post" => {
+            let client_secret = client_auth
+                .client_secret
+                .ok_or_else(|| "Missing client secret for client_secret_post".to_string())?;
+            if client_auth.client_id.trim().is_empty() {
+                return Err("Missing client_id for client_secret_post".to_string());
+            }
+            let mut extended = form.to_vec();
+            extended.push(("client_id".to_string(), client_auth.client_id.to_string()));
+            extended.push(("client_secret".to_string(), client_secret.to_string()));
+            request = client.post(token_endpoint).form(&extended);
+        }
+        "none" => {}
+        other => {
+            return Err(format!(
+                "unsupported token auth method '{other}'; expected none, client_secret_post, or client_secret_basic"
+            ))
+        }
+    }
+    request
+        .send()
+        .await
+        .map_err(|error| format!("Token exchange request failed: {error}"))
+}
+
+fn token_exchange_form(
+    server_url: &str,
+    subject_bearer: &str,
+    config: &McpTokenExchangeConfig,
+    actor_chain: &crate::actor_chain::ActorChain,
+) -> Result<Option<Vec<(String, String)>>, String> {
+    if !config.is_enabled() || !actor_chain.is_delegated() {
+        return Ok(None);
+    }
+    let actor_token = match config
+        .actor_token
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        Some(actor_token) => actor_token,
+        None => {
+            return Err(
+                "MCP token exchange actor_token is required for delegated actor-chain requests"
+                    .to_string(),
+            )
+        }
+    };
+    let subject_token_type = normalize_token_type(
+        config.subject_token_type.as_deref(),
+        TOKEN_TYPE_ACCESS_TOKEN,
+        "subject_token_type",
+    )?;
+    let actor_token_type = normalize_token_type(
+        config.actor_token_type.as_deref(),
+        TOKEN_TYPE_JWT,
+        "actor_token_type",
+    )?;
+    let requested_token_type = config
+        .requested_token_type
+        .as_deref()
+        .map(|value| {
+            normalize_token_type(Some(value), TOKEN_TYPE_ACCESS_TOKEN, "requested_token_type")
+        })
+        .transpose()?;
+    let mut form = vec![
+        (
+            "grant_type".to_string(),
+            TOKEN_EXCHANGE_GRANT_TYPE.to_string(),
+        ),
+        ("subject_token".to_string(), subject_bearer.to_string()),
+        ("subject_token_type".to_string(), subject_token_type),
+        ("actor_token".to_string(), actor_token.to_string()),
+        ("actor_token_type".to_string(), actor_token_type),
+    ];
+    if let Some(requested_token_type) = requested_token_type {
+        form.push(("requested_token_type".to_string(), requested_token_type));
+    }
+
+    match config.resource.as_ref() {
+        Some(value) => append_form_values(&mut form, "resource", value)?,
+        None => {
+            let resource =
+                canonical_resource_indicator(server_url).map_err(|error| error.to_string())?;
+            form.push(("resource".to_string(), resource));
+        }
+    }
+    if let Some(value) = config.audience.as_ref() {
+        append_form_values(&mut form, "audience", value)?;
+    }
+    if let Some(scope) = requested_scope(config, actor_chain) {
+        form.push(("scope".to_string(), scope));
+    }
+    for (key, value) in &config.extra_params {
+        append_form_values(&mut form, key, value)?;
+    }
+    Ok(Some(form))
+}
+
+fn requested_scope(
+    config: &McpTokenExchangeConfig,
+    actor_chain: &crate::actor_chain::ActorChain,
+) -> Option<String> {
+    config
+        .scope
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+        .or_else(|| {
+            let scopes = actor_chain.current_entry().scopes().collect::<Vec<_>>();
+            (!scopes.is_empty()).then(|| scopes.join(" "))
+        })
+}
+
+fn normalize_token_type(
+    value: Option<&str>,
+    default_value: &str,
+    field: &str,
+) -> Result<String, String> {
+    let raw = value.unwrap_or(default_value).trim();
+    if raw.is_empty() {
+        return Err(format!("MCP token exchange {field} must not be empty"));
+    }
+    if raw.starts_with("urn:") {
+        return Ok(raw.to_string());
+    }
+    let normalized = match raw.to_ascii_lowercase().as_str() {
+        "access" | "access_token" => "access_token",
+        "refresh_token" => "refresh_token",
+        "id_token" => "id_token",
+        "jwt" => "jwt",
+        "saml1" => "saml1",
+        "saml2" => "saml2",
+        _ => {
+            return Err(format!(
+                "MCP token exchange {field} uses unsupported token type `{raw}`"
+            ))
+        }
+    };
+    Ok(format!("{TOKEN_TYPE_PREFIX}{normalized}"))
+}
+
+fn append_form_values(
+    form: &mut Vec<(String, String)>,
+    key: &str,
+    value: &serde_json::Value,
+) -> Result<(), String> {
+    for item in form_value_strings(key, value)? {
+        form.push((key.to_string(), item));
+    }
+    Ok(())
+}
+
+fn form_value_strings(key: &str, value: &serde_json::Value) -> Result<Vec<String>, String> {
+    match value {
+        serde_json::Value::Null => Ok(Vec::new()),
+        serde_json::Value::String(value) => Ok(vec![value.clone()]),
+        serde_json::Value::Bool(value) => Ok(vec![value.to_string()]),
+        serde_json::Value::Number(value) => Ok(vec![value.to_string()]),
+        serde_json::Value::Array(values) => {
+            let mut out = Vec::new();
+            for value in values {
+                match value {
+                    serde_json::Value::String(value) => out.push(value.clone()),
+                    serde_json::Value::Bool(value) => out.push(value.to_string()),
+                    serde_json::Value::Number(value) => out.push(value.to_string()),
+                    serde_json::Value::Null => {}
+                    _ => return Err(format!("MCP token exchange `{key}` values must be scalars")),
+                }
+            }
+            Ok(out)
+        }
+        _ => Err(format!(
+            "MCP token exchange `{key}` must be a scalar or list"
+        )),
+    }
+}
+
+fn token_exchange_unsupported(status: reqwest::StatusCode, body: &str) -> bool {
+    if status != reqwest::StatusCode::BAD_REQUEST {
+        return false;
+    }
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(body) else {
+        return false;
+    };
+    matches!(
+        value.get("error").and_then(serde_json::Value::as_str),
+        Some("unsupported_grant_type" | "unsupported_token_type")
+    )
 }
 
 fn token_needs_refresh(token: &StoredMcpToken) -> bool {

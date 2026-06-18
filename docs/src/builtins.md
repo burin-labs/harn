@@ -2305,11 +2305,21 @@ Each entry requires:
 | `transport` | string | `stdio` (default) or `http` |
 | `url` | string | Remote MCP server URL for HTTP transports |
 | `auth_token` | string | Optional explicit bearer token for HTTP transports |
+| `token_exchange` | dict | Optional RFC 8693 token-exchange opt-in for HTTP transports |
 | `client_id` | string | Optional pre-registered OAuth client ID for HTTP transports |
 | `client_secret` | string | Optional pre-registered OAuth client secret |
 | `scopes` | string | Optional OAuth scope string for login/consent |
 | `protocol_version` | string | Optional MCP protocol version override |
 | `protocol_mode` | string | Optional MCP client profile: `legacy` (default) or `rc` |
+
+`token_exchange` is off when omitted. When present, Harn exchanges the base
+bearer for a transient delegated bearer while a session actor chain is active,
+then sends the delegated token on the MCP HTTP request. The token is not stored
+as the base credential. Common keys are `token_url`, required `actor_token`,
+`actor_token_type` (`jwt` by default), `subject_token_type` (`access_token` by
+default), `requested_token_type`, `scope`, `resource`, `audience`, and optional
+client-auth fields `client_id`, `client_secret`, and
+`token_endpoint_auth_method`.
 
 The connected clients are available as properties on the `mcp` global dict:
 
