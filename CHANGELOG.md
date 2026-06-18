@@ -8,6 +8,15 @@ highlights live in [CHANGELOG-pre-0.6.md](CHANGELOG-pre-0.6.md).
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.8.122
+
+### Fixed
+
+- **Provider-native tool-call normalization.** Harmony marker-wrapper tool names
+  such as `<|constrain|>json` now normalize command-shaped calls before policy
+  checks, preventing valid provider-native tool calls from tripping tool-ceiling
+  enforcement before dispatch.
+
 ## v0.8.121
 
 ### Added
