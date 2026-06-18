@@ -6,7 +6,7 @@ same actor chain represented in a surface-native form such as Git trailers,
 a Slack byline, or a GitHub author-mode decision.
 
 ```harn
-import { append_git_trailers, render } from "std/disclosure"
+import { append_git_trailers, render, slack_message_disclosure } from "std/disclosure"
 
 pipeline default() {
   let chain = {
@@ -17,6 +17,7 @@ pipeline default() {
   let trailers = render(chain, "git")
   let commit_message = append_git_trailers("Fix the merge gate", chain)
   let byline = render(chain, "slack")
+  let slack = slack_message_disclosure(chain)
   let github = render(chain, "github")
 }
 ```
@@ -28,6 +29,13 @@ Built-in surfaces:
 | `git` | Trailer block string |
 | `slack` | Byline string |
 | `github` | `{kind: "github_author_choice", author_mode, commit_auth_identity, pull_request_auth_identity, author, co_author, commit_author, trailers, principals, actor_chain}` |
+
+`slack_message_disclosure(chain, options?)` returns the connector-facing Slack
+artifact: `{kind: "slack_message_disclosure", byline, customize, ai_mark,
+principals, actor_chain}`. Slack connector packages use `customize` only when
+the granted scopes include `chat:write.customize`; otherwise they post under
+the app identity and render `byline` as text. `ai_mark` is default-on and is
+designed to be embedded in surfaces that support machine-readable metadata.
 
 `git_trailers(chain, options?)` is a typed convenience wrapper around the
 `git` surface. `append_git_trailers(message, chain, options?)` appends that
@@ -68,6 +76,10 @@ github = "merge-captain-bot"
 [disclosure.surfaces.slack]
 kind = "text"
 template = "AI-assisted by {{ current.label }} for {{ origin.label }}."
+customize_name_template = "{{ current.label }}"
+customize_icon_emoji = ":robot_face:"
+ai_mark_enabled = true
+ai_mark_event_type = "harn.ai_disclosure.v1"
 
 [disclosure.surfaces.github]
 kind = "github_author_choice"

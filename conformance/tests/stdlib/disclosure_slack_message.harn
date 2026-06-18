@@ -1,0 +1,30 @@
+import { render, slack_message_disclosure } from "std/disclosure"
+
+pipeline default() {
+  let chain = {sub: "user:kenneth", act: {sub: "agent:merge-captain"}}
+  let config = {
+    identities: {
+      "user:kenneth": {name: "Kenneth Sinder", email: "kenneth@example.com"},
+      "agent:merge-captain": {name: "Merge Captain", label: "Merge Captain", email: "merge-captain@bots.example"},
+    },
+    surfaces: {slack: {customize_icon_emoji: ":harn:"}},
+  }
+  let options = {project: false, env: false, config: config}
+  let byline = render(chain, "slack", options)
+  let disclosure = slack_message_disclosure(chain, options)
+  __io_println(byline)
+  __io_println(disclosure.kind)
+  __io_println(disclosure.byline)
+  __io_println(disclosure.customize.scope)
+  __io_println(disclosure.customize.username)
+  __io_println(disclosure.customize.icon_emoji)
+  __io_println(disclosure.ai_mark.event_type)
+  __io_println(disclosure.ai_mark.event_payload.kind)
+  __io_println(disclosure.ai_mark.event_payload.standard)
+  __io_println(disclosure.ai_mark.event_payload.principals[0].subject)
+  __io_println(disclosure.ai_mark.event_payload.principals[0].email == nil)
+  __io_println(disclosure.ai_mark.event_payload.actor_chain[0].email == nil)
+  __io_println(disclosure.principals[0].email == nil)
+  __io_println(disclosure.actor_chain[0].email == nil)
+  __io_println(disclosure.ai_mark.event_payload.principals[1].subject)
+}

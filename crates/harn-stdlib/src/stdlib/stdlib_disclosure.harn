@@ -25,6 +25,10 @@ template = "{{ if delegated }}Co-Authored-By: {{ current.name }} <{{ current.ema
 [surfaces.slack]
 kind = "text"
 template = "AI-assisted by {{ current.label }} for {{ origin.label }}."
+customize_name_template = "{{ current.label }}"
+ai_mark_enabled = true
+ai_mark_event_type = "harn.ai_disclosure.v1"
+ai_mark_standard = "eu_ai_act_article_50"
 
 [surfaces.github]
 kind = "github_author_choice"
@@ -282,6 +286,17 @@ fn __render_text(surface_config: dict, ctx: dict) -> string {
   return render_string(to_string(template), ctx)
 }
 
+fn __render_optional_template(template, ctx: dict) {
+  if template == nil || trim(to_string(template)) == "" {
+    return nil
+  }
+  let rendered = trim(render_string(to_string(template), ctx))
+  if rendered == "" {
+    return nil
+  }
+  return rendered
+}
+
 fn __github_author_mode(surface_config: dict) -> string {
   let mode = lowercase(trim(to_string(surface_config?.author_mode ?? "human")))
   if mode == "human" || mode == "bot" {
@@ -373,6 +388,77 @@ fn __render_github(surface_config: dict, ctx: dict, config: dict) -> dict {
     trailers: trailers,
     principals: ctx.principals,
     actor_chain: ctx.chain,
+  }
+}
+
+fn __public_principals(ctx: dict) -> list<dict> {
+  var principals = []
+  for principal in ctx.principals {
+    principals = principals
+      .push(
+      {
+        subject: principal.subject,
+        kind: principal.kind,
+        role: principal.role,
+        position: principal.position,
+        label: principal.label,
+        human: principal?.human,
+      },
+    )
+  }
+  return principals
+}
+
+fn __slack_customize(surface_config: dict, ctx: dict) -> dict {
+  let username = __render_optional_template(surface_config?.customize_name_template, ctx)
+  var customize = {scope: "chat:write.customize", enabled: surface_config?.customize_enabled != false}
+  if username != nil {
+    customize["username"] = username
+  }
+  if surface_config?.customize_icon_url != nil
+    && trim(to_string(surface_config.customize_icon_url)) != "" {
+    customize["icon_url"] = to_string(surface_config.customize_icon_url)
+  }
+  if surface_config?.customize_icon_emoji != nil
+    && trim(to_string(surface_config.customize_icon_emoji)) != "" {
+    customize["icon_emoji"] = to_string(surface_config.customize_icon_emoji)
+  }
+  return customize
+}
+
+fn __slack_ai_mark(surface_config: dict, ctx: dict, byline: string) -> dict {
+  let enabled = surface_config?.ai_mark_enabled != false
+  let standard = to_string(surface_config?.ai_mark_standard ?? "eu_ai_act_article_50")
+  let event_type = to_string(surface_config?.ai_mark_event_type ?? "harn.ai_disclosure.v1")
+  let principals = __public_principals(ctx)
+  return {
+    enabled: enabled,
+    event_type: event_type,
+    event_payload: {
+      kind: "ai_generated",
+      standard: standard,
+      generator: "harn",
+      surface: "slack",
+      disclosure: byline,
+      actor_chain: principals,
+      principals: principals,
+    },
+  }
+}
+
+fn __slack_message_disclosure(config: dict, ctx: dict) -> dict {
+  let surface_config = __surface_config(config, "slack")
+  let byline = __render_text(surface_config, ctx)
+  let principals = __public_principals(ctx)
+  return {
+    surface: "slack",
+    kind: "slack_message_disclosure",
+    byline: byline,
+    text_prefix: byline + "\n\n",
+    customize: __slack_customize(surface_config, ctx),
+    ai_mark: __slack_ai_mark(surface_config, ctx, byline),
+    principals: principals,
+    actor_chain: principals,
   }
 }
 
@@ -502,6 +588,23 @@ pub fn render(chain, surface: string, options: DisclosureRenderOptions = {}) -> 
     return __render_github(surface_config, ctx, config)
   }
   throw "std/disclosure: unsupported disclosure surface kind `" + kind + "`"
+}
+
+/**
+ * Render Slack outbound disclosure metadata for connector calls.
+ *
+ * `render(chain, "slack")` remains the human-readable byline string. This
+ * helper returns the structured payload consumed by Slack connector packages:
+ * textual fallback byline, optional `chat:write.customize` identity hints, and
+ * a default-on machine-readable AI marker.
+ *
+ * @effects: [fs-read, env-read]
+ * @errors: [TypeError, ValueError]
+ */
+pub fn slack_message_disclosure(chain, options: DisclosureRenderOptions = {}) -> dict {
+  let config = __config(options)
+  let ctx = __context(chain, config)
+  return __slack_message_disclosure(config, ctx)
 }
 
 /**
