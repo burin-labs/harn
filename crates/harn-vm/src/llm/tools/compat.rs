@@ -4,8 +4,9 @@
 //! structured tool calls. GPT-OSS/Harmony is the common case: a call can arrive
 //! as a generic `tool`/`tool.call`/`tool.exec` function whose arguments contain
 //! the real `{ name, args }`, or the tool name can carry a channel suffix such
-//! as `run<|channel|>commentary`. Normalize those shapes before policy and
-//! dispatch see them.
+//! as `run<|channel|>commentary`. Some providers also surface marker-only
+//! wrapper names such as `<|constrain|>json`; normalize those shapes before
+//! policy and dispatch see them.
 
 const HARMONY_CHANNEL_MARKERS: &[&str] =
     &["<|channel|>", "<|message|>", "<|recipient|>", "<|end|>"];
@@ -31,12 +32,19 @@ pub(crate) fn normalize_tool_call_shape(
     arguments: serde_json::Value,
 ) -> (String, serde_json::Value) {
     let normalized_name = normalize_tool_name(name);
-    if !is_generic_wrapper_name(&normalized_name) {
+    let is_marker_wrapper = is_harmony_marker_wrapper_name(&normalized_name);
+    if !is_generic_wrapper_name(&normalized_name) && !is_marker_wrapper {
         return (normalized_name, arguments);
     }
 
     if let Some((inner_name, inner_arguments)) = unwrap_generic_tool_arguments(&arguments) {
         return (normalize_tool_name(&inner_name), inner_arguments);
+    }
+
+    if is_marker_wrapper {
+        if let Some(inferred_name) = infer_tool_name_from_arguments(&arguments) {
+            return (inferred_name, arguments);
+        }
     }
 
     (normalized_name, arguments)
@@ -47,6 +55,25 @@ fn is_generic_wrapper_name(name: &str) -> bool {
         name,
         "tool" | "tool.call" | "tool.exec" | "function" | "function.call" | "call"
     )
+}
+
+fn is_harmony_marker_wrapper_name(name: &str) -> bool {
+    let trimmed = name.trim();
+    trimmed.starts_with("<|") && trimmed.contains("|>")
+}
+
+fn infer_tool_name_from_arguments(arguments: &serde_json::Value) -> Option<String> {
+    let object = arguments.as_object()?;
+    let has_command_shape = object
+        .get("command")
+        .or_else(|| object.get("commands"))
+        .or_else(|| object.get("cmd"))
+        .is_some();
+    if has_command_shape {
+        return Some("run".to_string());
+    }
+
+    None
 }
 
 fn unwrap_generic_tool_arguments(
@@ -99,6 +126,26 @@ mod tests {
         assert_eq!(name, "look");
         assert_eq!(arguments["intent"], "read");
         assert_eq!(arguments["file"], "src/lib.rs");
+    }
+
+    #[test]
+    fn infers_run_from_harmony_marker_wrapper_command_shape() {
+        let arguments = serde_json::json!({"command": "cargo test"});
+        let (name, normalized_arguments) =
+            normalize_tool_call_shape("<|constrain|>json", arguments.clone());
+
+        assert_eq!(name, "run");
+        assert_eq!(normalized_arguments, arguments);
+    }
+
+    #[test]
+    fn preserves_unrecognized_harmony_marker_wrapper_shape() {
+        let arguments = serde_json::json!({"intent": "read", "file": "src/lib.rs"});
+        let (name, normalized_arguments) =
+            normalize_tool_call_shape("<|constrain|>json", arguments.clone());
+
+        assert_eq!(name, "<|constrain|>json");
+        assert_eq!(normalized_arguments, arguments);
     }
 
     #[test]
