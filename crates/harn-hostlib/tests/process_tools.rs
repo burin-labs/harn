@@ -1005,25 +1005,55 @@ fn cancel_handle_can_wait_for_timed_out_result() {
     let start = require_dict(call("hostlib_tools_run_command", start_req).unwrap());
     let handle_id = require_str(&start, "handle_id");
 
-    let mut cancel_req = dict();
-    cancel_req.insert("handle_id".into(), vstr(&handle_id));
-    cancel_req.insert("wait_result_ms".into(), VmValue::Int(500));
-    cancel_req.insert("timed_out".into(), VmValue::Bool(true));
-    let cancel = require_dict(call("hostlib_tools_cancel_handle", cancel_req).unwrap());
+    let completion_rx =
+        register_completion_notifier(&handle_id).expect("handle should still be live");
+    let cancel_handle_id = handle_id.clone();
+    let cancel_thread = std::thread::spawn(move || {
+        let mut cancel_req = dict();
+        cancel_req.insert("handle_id".into(), vstr(&cancel_handle_id));
+        cancel_req.insert("wait_result_ms".into(), VmValue::Int(60_000));
+        cancel_req.insert("timed_out".into(), VmValue::Bool(true));
+        let cancel = require_dict(call("hostlib_tools_cancel_handle", cancel_req).unwrap());
 
-    assert!(require_bool(&cancel, "cancelled"));
-    let result = require_nested_dict(&cancel, "result");
-    assert_eq!(require_str(&result, "handle_id"), handle_id);
-    assert_eq!(require_str(&result, "status"), "timed_out");
-    assert!(require_bool(&result, "timed_out"));
-    assert_eq!(require_int(&result, "exit_code"), -1);
-    assert_eq!(require_str(&result, "stdout"), "before timeout\n");
-    assert!(require_str(&result, "output_path").contains("combined.txt"));
+        assert!(require_bool(&cancel, "cancelled"));
+        let result = require_nested_dict(&cancel, "result");
+        (
+            require_str(&cancel, "handle_id"),
+            require_str(&result, "handle_id"),
+            require_str(&result, "status"),
+            require_bool(&result, "timed_out"),
+            require_int(&result, "exit_code"),
+            require_str(&result, "stdout"),
+            require_str(&result, "output_path"),
+            require_str(&result, "stdout_path"),
+            require_int(&result, "byte_count"),
+        )
+    });
+    completion_rx.recv().expect("waiter completion never fired");
+    let (
+        cancelled_handle_id,
+        result_handle_id,
+        status,
+        timed_out,
+        exit_code,
+        stdout,
+        output_path,
+        stdout_path,
+        byte_count,
+    ) = cancel_thread.join().expect("cancel thread panicked");
+
+    assert_eq!(cancelled_handle_id, handle_id);
+    assert_eq!(result_handle_id, handle_id);
+    assert_eq!(status, "timed_out");
+    assert!(timed_out);
+    assert_eq!(exit_code, -1);
+    assert_eq!(stdout, "before timeout\n");
+    assert!(output_path.contains("combined.txt"));
     assert_eq!(
-        std::fs::read_to_string(require_str(&result, "stdout_path")).unwrap(),
+        std::fs::read_to_string(stdout_path).unwrap(),
         "before timeout\n"
     );
-    assert!(require_int(&result, "byte_count") >= 15);
+    assert!(byte_count >= 15);
 
     let items = harn_vm::orchestration::agent_inbox::drain(&session_id);
     assert!(

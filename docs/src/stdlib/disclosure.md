@@ -27,7 +27,7 @@ Built-in surfaces:
 |---|---|
 | `git` | Trailer block string |
 | `slack` | Byline string |
-| `github` | `{kind: "github_author_choice", mode, author, co_author, principals, actor_chain}` |
+| `github` | `{kind: "github_author_choice", author_mode, commit_auth_identity, pull_request_auth_identity, author, co_author, commit_author, trailers, principals, actor_chain}` |
 
 `git_trailers(chain, options?)` is a typed convenience wrapper around the
 `git` surface. `append_git_trailers(message, chain, options?)` appends that
@@ -68,7 +68,22 @@ github = "merge-captain-bot"
 [disclosure.surfaces.slack]
 kind = "text"
 template = "AI-assisted by {{ current.label }} for {{ origin.label }}."
+
+[disclosure.surfaces.github]
+kind = "github_author_choice"
+author_mode = "human" # "human" or "bot"
 ```
+
+The GitHub surface defaults to `author_mode = "human"`. Human mode selects the
+origin principal as the commit author, keeps the current agent as `co_author`,
+and exposes the Git trailer block that commit and PR adapters should append.
+For human mode, commit adapters can send the explicit `commit_author`, while PR
+adapters need user auth because GitHub assigns PR authorship from the
+authenticated identity. Bot mode selects the current agent as the display
+author, sets both auth-identity hints to `github_app`, and sets
+`omit_custom_commit_author` so write adapters route through the authenticated
+GitHub App `[bot]` identity instead of sending custom author or committer
+fields.
 
 Text surfaces use the regular Harn prompt-template renderer with these
 bindings:
