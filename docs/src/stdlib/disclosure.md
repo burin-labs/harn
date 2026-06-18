@@ -6,7 +6,7 @@ same actor chain represented in a surface-native form such as Git trailers,
 a Slack byline, or a GitHub author-mode decision.
 
 ```harn
-import { render } from "std/disclosure"
+import { append_git_trailers, render } from "std/disclosure"
 
 pipeline default() {
   let chain = {
@@ -15,6 +15,7 @@ pipeline default() {
   }
 
   let trailers = render(chain, "git")
+  let commit_message = append_git_trailers("Fix the merge gate", chain)
   let byline = render(chain, "slack")
   let github = render(chain, "github")
 }
@@ -27,6 +28,14 @@ Built-in surfaces:
 | `git` | Trailer block string |
 | `slack` | Byline string |
 | `github` | `{kind: "github_author_choice", mode, author, co_author, principals, actor_chain}` |
+
+`git_trailers(chain, options?)` is a typed convenience wrapper around the
+`git` surface. `append_git_trailers(message, chain, options?)` appends that
+block to a commit message or PR body, deduping exact trailer lines. Pass
+`{enabled: false}` / `{suppress: true}`, or set those fields on
+`[surfaces.git]`, to leave the text unchanged. DCO sign-off stays human-only:
+`Signed-off-by:` lines for non-human actor-chain principals are omitted even
+when an overlaid template includes them.
 
 ## Configuration
 

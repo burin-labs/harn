@@ -5,13 +5,22 @@ import { deep_merge } from "std/collections"
 
 type DisclosureRenderOptions = {project?: bool, project_root?: string, env?: bool, config?: dict}
 
+type DisclosureGitTrailerOptions = {
+  project?: bool,
+  project_root?: string,
+  env?: bool,
+  config?: dict,
+  enabled?: bool,
+  suppress?: bool,
+}
+
 const __BUILTIN_DISCLOSURE_CONFIG = """
 [defaults]
 email_domain = "actors.harn.invalid"
 
 [surfaces.git]
 kind = "text"
-template = "{{ if delegated }}Co-Authored-By: {{ current.name }} <{{ current.email }}>{{ for actor in prior_actors }}\nAssisted-by: {{ actor.name }} <{{ actor.email }}>{{ end }}{{ else }}Co-Authored-By: {{ origin.name }} <{{ origin.email }}>{{ end }}"
+template = "{{ if delegated }}Co-Authored-By: {{ current.name }} <{{ current.email }}>{{ for actor in prior_actors }}\nAssisted-by: {{ actor.name }} <{{ actor.email }}>{{ end }}{{ end }}"
 
 [surfaces.slack]
 kind = "text"
@@ -188,6 +197,12 @@ fn __principal(subject: string, config: dict, role: string, position: int) -> di
   if profile?.slack_id != nil {
     principal = principal + {slack: to_string(profile.slack_id)}
   }
+  if profile?.human != nil {
+    principal = principal + {human: profile.human}
+  }
+  if profile?.is_human != nil {
+    principal = principal + {human: profile.is_human}
+  }
   return principal
 }
 
@@ -283,6 +298,109 @@ fn __render_github(surface_config: dict, ctx: dict) -> dict {
   }
 }
 
+fn __git_trailers_switch_enabled(value: dict) -> bool {
+  return value?.enabled != false && value?.suppress != true
+}
+
+fn __principal_is_human(principal: dict) -> bool {
+  if principal?.human == true {
+    return true
+  }
+  if principal?.human == false {
+    return false
+  }
+  let kind = lowercase(trim(to_string(principal?.kind ?? "")))
+  return kind == "user" || kind == "human" || kind == "person"
+}
+
+fn __email_from_signature(signature: string) -> string {
+  let open = signature.index_of("<")
+  let close = signature.last_index_of(">")
+  if open < 0 || close <= open {
+    return ""
+  }
+  return lowercase(trim(signature.substring(open + 1, close)))
+}
+
+fn __principal_matches_signature(principal: dict, signature: string) -> bool {
+  let normalized = lowercase(trim(signature))
+  let signed_email = __email_from_signature(normalized)
+  let principal_email = lowercase(trim(to_string(principal?.email ?? "")))
+  if signed_email != "" && principal_email != "" {
+    return signed_email == principal_email
+  }
+  let name = lowercase(trim(to_string(principal?.name ?? "")))
+  if principal_email != "" && name != "" && normalized == name + " <" + principal_email + ">" {
+    return true
+  }
+  if signed_email == "" && name != "" && normalized == name {
+    return true
+  }
+  let subject = lowercase(trim(to_string(principal?.subject ?? "")))
+  return signed_email == "" && subject != "" && normalized == subject
+}
+
+fn __signed_off_by_targets_non_human(line: string, ctx: dict) -> bool {
+  let trimmed = trim(line)
+  if !starts_with(lowercase(trimmed), "signed-off-by:") {
+    return false
+  }
+  let signature = lowercase(trim(substring(trimmed, len("Signed-off-by:"))))
+  for principal in ctx.principals {
+    if __principal_is_human(principal) {
+      continue
+    }
+    if __principal_matches_signature(principal, signature) {
+      return true
+    }
+  }
+  return false
+}
+
+fn __safe_git_trailers(block: string, ctx: dict) -> string {
+  var lines = []
+  for line in split(trim(block), "\n") {
+    let cleaned = trim(line)
+    if cleaned == "" || __signed_off_by_targets_non_human(cleaned, ctx) {
+      continue
+    }
+    if !contains(lines, cleaned) {
+      lines = lines + [cleaned]
+    }
+  }
+  return join(lines, "\n")
+}
+
+fn __message_has_line(message: string, line: string) -> bool {
+  let want = trim(line)
+  for existing in split(message, "\n") {
+    if trim(existing) == want {
+      return true
+    }
+  }
+  return false
+}
+
+fn __append_trailer_block(message: string, block: string) -> string {
+  var lines = []
+  for line in split(trim(block), "\n") {
+    let cleaned = trim(line)
+    if cleaned == "" || __message_has_line(message, cleaned) || contains(lines, cleaned) {
+      continue
+    }
+    lines = lines + [cleaned]
+  }
+  if len(lines) == 0 {
+    return message
+  }
+  let body = message.trim_end()
+  let trailers = join(lines, "\n")
+  if body == "" {
+    return trailers
+  }
+  return body + "\n\n" + trailers
+}
+
 /**
  * Render a surface-native authorship disclosure artifact from an ActorChain.
  *
@@ -306,4 +424,40 @@ pub fn render(chain, surface: string, options: DisclosureRenderOptions = {}) -> 
     return __render_github(surface_config, ctx)
   }
   throw "std/disclosure: unsupported disclosure surface kind `" + kind + "`"
+}
+
+/**
+ * Render the configured Git attribution trailers for an ActorChain.
+ *
+ * The trailer text comes from the `git` disclosure surface. A `Signed-off-by`
+ * line targeting a non-human actor is omitted so DCO sign-off remains
+ * human-only even when callers override the template.
+ *
+ * @effects: [fs-read, env-read]
+ * @errors: [TypeError, ValueError]
+ */
+pub fn git_trailers(chain, options: DisclosureGitTrailerOptions = {}) -> string {
+  let opts = __dict(options)
+  if !__git_trailers_switch_enabled(opts) {
+    return ""
+  }
+  let config = __config(opts)
+  let ctx = __context(chain, config)
+  let surface_config = __surface_config(config, "git")
+  if !__git_trailers_switch_enabled(surface_config) {
+    return ""
+  }
+  return __safe_git_trailers(__render_text(surface_config, ctx), ctx)
+}
+
+/**
+ * Append actor-chain Git attribution trailers to a commit message or PR body.
+ *
+ * Pass `{enabled: false}` or `{suppress: true}` to leave the text unchanged.
+ *
+ * @effects: [fs-read, env-read]
+ * @errors: [TypeError, ValueError]
+ */
+pub fn append_git_trailers(message: string, chain, options: DisclosureGitTrailerOptions = {}) -> string {
+  return __append_trailer_block(message, git_trailers(chain, options))
 }

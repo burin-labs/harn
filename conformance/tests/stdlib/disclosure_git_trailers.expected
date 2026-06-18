@@ -1,0 +1,18 @@
+Co-Authored-By: Merge Captain <merge-captain@bots.example>
+Signed-off-by: Human Merge Captain <kenneth@example.com>
+Signed-off-by: Kenneth Sinder <kenneth@example.com>
+--- default ---
+Co-Authored-By: Merge Captain <merge-captain@bots.example>
+Assisted-by: Burin <burin@bots.example>
+--- assembled ---
+Fix identity trailers
+
+Use the actor chain.
+
+Co-Authored-By: Merge Captain <merge-captain@bots.example>
+Signed-off-by: Human Merge Captain <kenneth@example.com>
+Signed-off-by: Kenneth Sinder <kenneth@example.com>
+--- suppressed ---
+Fix identity trailers
+--- config suppressed ---
+Fix identity trailers
