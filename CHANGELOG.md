@@ -8,6 +8,33 @@ highlights live in [CHANGELOG-pre-0.6.md](CHANGELOG-pre-0.6.md).
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.8.120
+
+### Added
+
+- **Disclosure stdlib Git trailer helpers (#3338).** `std/disclosure` now
+  exposes `git_trailers` and `append_git_trailers` so commit messages and PR
+  bodies can append actor-chain `Co-Authored-By` / `Assisted-by` attribution
+  from the configured disclosure templates while filtering non-human
+  `Signed-off-by` lines.
+- Added `std/disclosure` GitHub `author_mode` output so commit and PR
+  adapters can choose between human-authored commits with actor-chain trailers
+  and GitHub App bot-authored writes.
+- Added RFC 8693 OAuth token exchange to `std/oauth/client`, including
+  data-backed provider capability rows, delegation/impersonation validation,
+  and nested `act` claim helpers.
+- Added opt-in RFC 8693 token exchange for HTTP MCP clients so servers can
+  receive transient delegated bearer tokens for active actor-chain sessions.
+- Added `std/agent/completions` helpers for completion context, policy,
+  proposal, telemetry, usage, and TrustGraph projection.
+
+### Fixed
+
+- **Fireworks GPT-OSS provider capabilities (#3426).** Fireworks-hosted GPT-OSS
+  routes now default to fenced-JSON text tools instead of native tool calls, so
+  agent loops avoid billed empty native completions with no dispatchable tool
+  calls.
+
 ## v0.8.119
 
 ### Added
