@@ -8,6 +8,30 @@ highlights live in [CHANGELOG-pre-0.6.md](CHANGELOG-pre-0.6.md).
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.8.121
+
+### Added
+
+- Carry RFC 8693 actor-chain metadata across A2A dispatch, serve, and
+  push-trigger flows, and add draft-tracking OAuth token-exchange capability
+  rows for ID-JAG, transaction tokens, and WIMSE WIT/WPT.
+- **Slack outbound disclosure now carries actor-chain bylines and AI markers (#3340).**
+  `std/disclosure` exposes `slack_message_disclosure(...)`, and
+  `std/connectors/slack.post_message` attaches that artifact from an
+  `actor_chain` option so Slack connector packages can fall back to textual
+  bylines unless `chat:write.customize` is granted and can emit
+  machine-readable AI metadata where the surface supports it.
+
+### Changed
+
+- **Release binary size gate now allows the current stripped Linux binary (#3432).**
+  The release artifact budget was raised to 186 MiB so v0.8.120 binary builds can
+  publish without failing just above the previous threshold.
+
+### Fixed
+
+Normalize wrapped GPT-OSS tool-call envelopes before policy and dispatch.
+
 ## v0.8.120
 
 ### Added
