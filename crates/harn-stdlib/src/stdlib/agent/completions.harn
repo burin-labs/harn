@@ -1,0 +1,868 @@
+/*
+ * std/agent/completions - inline completion and next-edit primitives.
+ *
+ * Import with: `import "std/agent/completions"`.
+ *
+ * Hosts own editor state and UI. Harn owns the reusable envelopes for context,
+ * policy decisions, proposals, telemetry events, usage, and trust projection.
+ */
+import { filter_nil, unique } from "std/collections"
+import { pick_model } from "std/llm/catalog"
+
+type CompletionKind = "inline_insert" | "inline_replace" | "next_edit" | "workspace_edit"
+
+type CompletionTriggerKind = "automatic" | "invoked" | "edit_chain"
+
+type CompletionDecisionKind = "accepted" | "rejected" | "dismissed" | "timed_out" | "invalidated"
+
+type CompletionPromptRecordingMode = "full" | "metadata" | "off"
+
+type CompletionCursor = {offset?: int, line?: int, character?: int}
+
+type CompletionContext = {
+  schema: string,
+  surface: string,
+  project_root?: string,
+  file_path?: string,
+  language: string,
+  stack: list<string>,
+  trigger_kind: CompletionTriggerKind,
+  cursor: CompletionCursor,
+  selection_count: int,
+  prefix: string,
+  suffix: string,
+  recent_edits: list<any>,
+  open_files: list<any>,
+  symbols: list<any>,
+  local_scope: dict,
+  diagnostics: list<any>,
+  intellisense: dict,
+  codebase_context: list<any>,
+  metadata: dict,
+}
+
+type CompletionPolicy = {
+  schema: string,
+  enabled: bool,
+  allowed_languages: list<string>,
+  denied_languages: list<string>,
+  allowed_providers: list<string>,
+  denied_providers: list<string>,
+  allowed_models: list<string>,
+  denied_models: list<string>,
+  remote_models_allowed: bool,
+  codebase_context_allowed: bool,
+  max_latency_ms: int,
+  max_cost_per_1k_usd?: float,
+  max_prompt_chars: int,
+  prompt_recording: CompletionPromptRecordingMode,
+  emit_trust_events: bool,
+  min_confidence?: float,
+  retention_days: int,
+  metadata: dict,
+}
+
+type CompletionPolicyDecision = {
+  allowed: bool,
+  reason_code: string,
+  reason: string,
+  policy: CompletionPolicy,
+}
+
+type CompletionRoute = {
+  schema: string,
+  provider?: string,
+  model_id?: string,
+  local: bool,
+  source: string,
+  query: dict,
+  catalog?: dict,
+}
+
+type CompletionProposal = {
+  schema: string,
+  id: string,
+  kind: CompletionKind,
+  provider?: string,
+  model_id?: string,
+  local?: bool,
+  confidence?: float,
+  priority: int,
+  file_path?: string,
+  cursor_offset?: int,
+  insert_text: string,
+  filter_text?: string,
+  replacement_range?: dict,
+  original_text?: string,
+  command?: any,
+  metadata: dict,
+}
+
+type CompletionUsage = {
+  schema: string,
+  provider?: string,
+  model_id?: string,
+  input_tokens: int,
+  output_tokens: int,
+  cache_read_tokens: int,
+  cache_write_tokens: int,
+  total_tokens: int,
+  cost_usd?: float,
+  pricing_known?: bool,
+}
+
+type CompletionEvent = {
+  schema: string,
+  event: "shown" | "decision",
+  id: string,
+  record_id: string,
+  shown_event_id?: string,
+  session_id?: string,
+  timestamp: string,
+  surface?: string,
+  completion_kind: CompletionKind,
+  provider?: string,
+  model_id?: string,
+  local?: bool,
+  context_hash?: string,
+  proposal?: CompletionProposal,
+  context?: CompletionContext,
+  usage?: CompletionUsage,
+  cost_usd?: float,
+  latency_ms?: int | float,
+  cached?: bool,
+  timed_out?: bool,
+  governance?: dict,
+  policy_decision?: CompletionPolicyDecision,
+  tape_path?: string,
+  prompt?: string,
+  prompt_hash?: string,
+  prompt_chars?: int,
+  decision?: CompletionDecisionKind,
+  accepted?: bool,
+  decision_latency_ms?: int | float,
+  metadata: dict,
+}
+
+type CompletionTrustRecord = {
+  actor_id: string,
+  action: string,
+  approver: string,
+  outcome: string,
+  evidence_refs: list<dict>,
+  trace_id: string,
+  timestamp: string,
+  autonomy_tier_at_time: string,
+}
+
+type CompletionUsageRecord = {
+  schema_version: int,
+  recorded_at_ms?: int,
+  session_id?: string,
+  provider?: string,
+  model?: string,
+  input_tokens: int,
+  output_tokens: int,
+  cached_input_tokens: int,
+  total_tokens: int,
+  cost_usd?: float,
+  surface: string,
+  event?: string,
+  completion_kind?: CompletionKind,
+  record_id?: string,
+  context_hash?: string,
+}
+
+fn __dict(value) {
+  if type_of(value) == "dict" {
+    return value
+  }
+  return {}
+}
+
+fn __list(value) {
+  if type_of(value) == "list" {
+    return value
+  }
+  if value == nil {
+    return []
+  }
+  return [value]
+}
+
+fn __text(value) -> string {
+  if value == nil {
+    return ""
+  }
+  return trim(to_string(value))
+}
+
+fn __text_or_nil(value) {
+  let text = __text(value)
+  if text == "" {
+    return nil
+  }
+  return text
+}
+
+fn __lower(value) -> string {
+  return lowercase(__text(value))
+}
+
+fn __bool(value, fallback) -> bool {
+  if value == nil {
+    return fallback
+  }
+  if type_of(value) == "bool" {
+    return value
+  }
+  let text = __lower(value)
+  if text == "true" || text == "yes" || text == "1" || text == "on" {
+    return true
+  }
+  if text == "false" || text == "no" || text == "0" || text == "off" {
+    return false
+  }
+  return fallback
+}
+
+fn __int_or(value, fallback) -> int {
+  if value == nil || __text(value) == "" {
+    return fallback
+  }
+  return to_int(value)
+}
+
+fn __float_or_nil(value) {
+  if value == nil || __text(value) == "" {
+    return nil
+  }
+  return to_float(value)
+}
+
+fn __string_list(value) -> list<string> {
+  var out = []
+  for item in __list(value) {
+    let text = __lower(item)
+    if text != "" {
+      out = out + [text]
+    }
+  }
+  return unique(out)
+}
+
+fn __contains_ci(values, value) -> bool {
+  let needle = __lower(value)
+  if needle == "" {
+    return false
+  }
+  return __string_list(values).contains(needle)
+}
+
+fn __allow_list_allows(values, value) -> bool {
+  let normalized = __string_list(values)
+  if len(normalized) == 0 {
+    return true
+  }
+  return normalized.contains(__lower(value))
+}
+
+fn __recording_mode(value) -> string {
+  let mode = __lower(value)
+  if mode == "full" {
+    return "full"
+  }
+  if mode == "off" || mode == "none" || mode == "disabled" {
+    return "off"
+  }
+  return "metadata"
+}
+
+fn __completion_kind(value) -> string {
+  let kind = __lower(value)
+  if kind == "inline_replace" || kind == "replace" {
+    return "inline_replace"
+  }
+  if kind == "next_edit" || kind == "next-action" || kind == "next_action" {
+    return "next_edit"
+  }
+  if kind == "workspace_edit" || kind == "multi_file" || kind == "cross_file" {
+    return "workspace_edit"
+  }
+  return "inline_insert"
+}
+
+fn __trigger_kind(value) -> string {
+  let trigger = __lower(value)
+  if trigger == "invoked" || trigger == "manual" {
+    return "invoked"
+  }
+  if trigger == "edit_chain" || trigger == "next_edit" {
+    return "edit_chain"
+  }
+  return "automatic"
+}
+
+fn __decision(value) -> string {
+  if type_of(value) == "bool" {
+    return value ? "accepted" : "rejected"
+  }
+  let decision = __lower(value)
+  if decision == "accept" || decision == "accepted" || decision == "applied" {
+    return "accepted"
+  }
+  if decision == "timeout" || decision == "timed_out" {
+    return "timed_out"
+  }
+  if decision == "invalid" || decision == "invalidated" || decision == "stale" {
+    return "invalidated"
+  }
+  if decision == "dismissed" || decision == "escape" || decision == "esc" {
+    return "dismissed"
+  }
+  return "rejected"
+}
+
+fn __local_provider(provider) -> bool {
+  let p = __lower(provider)
+  return p == "ollama" || p == "local" || p == "llamacpp" || p == "mlx" || p == "vllm" || p == "tgi"
+}
+
+fn __prompt_chars(context) -> int {
+  let ctx = __dict(context)
+  return len(__text(ctx?.prefix)) + len(__text(ctx?.suffix)) + len(json_stringify(ctx?.metadata ?? {}))
+}
+
+fn __range(raw) {
+  if type_of(raw) == "dict" {
+    return raw
+  }
+  return nil
+}
+
+fn __completion_id(prefix, body) -> string {
+  return "cmp_" + substring(sha256(prefix + ":" + json_stringify(body)), 0, 16)
+}
+
+/**
+ * Normalize editor facts into the Harn completion context envelope.
+ *
+ * The host stays responsible for collecting LSP symbols, diagnostics, open
+ * files, recent edits, codebase snippets, stack facts, and current scope.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn completion_context(input = {}) -> CompletionContext {
+  let raw = __dict(input)
+  let cursor = __dict(raw?.cursor)
+  return filter_nil(
+    {
+      schema: "harn.completion.context.v1",
+      surface: __text(raw?.surface ?? "editor"),
+      project_root: __text_or_nil(raw?.project_root ?? raw?.projectRoot),
+      file_path: __text_or_nil(raw?.file_path ?? raw?.filePath),
+      language: __lower(raw?.language),
+      stack: __string_list(raw?.stack),
+      trigger_kind: __trigger_kind(raw?.trigger_kind ?? raw?.triggerKind),
+      cursor: filter_nil(
+        {
+          offset: raw?.cursor_offset ?? raw?.cursorOffset ?? cursor?.offset,
+          line: raw?.line ?? cursor?.line,
+          character: raw?.character ?? cursor?.character,
+        },
+      ),
+      selection_count: __int_or(raw?.selection_count ?? raw?.selectionCount, 1),
+      prefix: __text(raw?.prefix),
+      suffix: __text(raw?.suffix),
+      recent_edits: __list(raw?.recent_edits ?? raw?.recentEdits),
+      open_files: __list(raw?.open_files ?? raw?.openFiles),
+      symbols: __list(raw?.symbols),
+      local_scope: __dict(raw?.local_scope ?? raw?.localScope),
+      diagnostics: __list(raw?.diagnostics),
+      intellisense: __dict(raw?.intellisense ?? raw?.lsp),
+      codebase_context: __list(raw?.codebase_context ?? raw?.codebaseContext),
+      metadata: __dict(raw?.metadata),
+    },
+  )
+}
+
+/**
+ * Normalize workspace or enterprise completion policy.
+ *
+ * Empty allow-lists mean "allow anything not denied". Deny-lists win over
+ * allow-lists. `prompt_recording` is one of `full`, `metadata`, or `off`.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn completion_policy(input = {}) -> CompletionPolicy {
+  let raw = __dict(input)
+  let languages = __dict(raw?.languages)
+  let providers = __dict(raw?.providers)
+  let models = __dict(raw?.models)
+  return {
+    schema: "harn.completion.policy.v1",
+    enabled: __bool(raw?.enabled, true),
+    allowed_languages: __string_list(raw?.allowed_languages ?? raw?.allowedLanguages ?? languages?.allow),
+    denied_languages: __string_list(
+      raw?.denied_languages ?? raw?.deniedLanguages ?? raw?.disabled_languages
+        ?? raw?.disabledLanguages
+        ?? languages?.deny,
+    ),
+    allowed_providers: __string_list(raw?.allowed_providers ?? raw?.allowedProviders ?? providers?.allow),
+    denied_providers: __string_list(raw?.denied_providers ?? raw?.deniedProviders ?? providers?.deny),
+    allowed_models: __string_list(raw?.allowed_models ?? raw?.allowedModels ?? models?.allow),
+    denied_models: __string_list(raw?.denied_models ?? raw?.deniedModels ?? models?.deny),
+    remote_models_allowed: __bool(
+      raw?.remote_models_allowed ?? raw?.remoteModelsAllowed ?? raw?.allow_remote_models
+        ?? raw?.allowRemoteModels,
+      true,
+    ),
+    codebase_context_allowed: __bool(
+      raw?.codebase_context_allowed
+        ?? raw?.codebaseContextAllowed
+        ?? raw?.allow_codebase_context
+        ?? raw?.allowCodebaseContext,
+      true,
+    ),
+    max_latency_ms: __int_or(
+      raw?.max_latency_ms ?? raw?.maxLatencyMs ?? raw?.latency_budget_ms ?? raw?.latencyBudgetMs,
+      200,
+    ),
+    max_cost_per_1k_usd: __float_or_nil(raw?.max_cost_per_1k_usd ?? raw?.maxCostPer1kUSD ?? raw?.max_cost_usd_per_1k),
+    max_prompt_chars: __int_or(raw?.max_prompt_chars ?? raw?.maxPromptChars, 32000),
+    prompt_recording: __recording_mode(
+      raw?.prompt_recording ?? raw?.promptRecording ?? raw?.record_prompts ?? raw?.recordPrompts
+        ?? raw?.replay_mode,
+    ),
+    emit_trust_events: __bool(raw?.emit_trust_events ?? raw?.emitTrustEvents ?? raw?.trust_events_enabled, true),
+    min_confidence: __float_or_nil(raw?.min_confidence ?? raw?.minConfidence ?? raw?.min_acceptance_confidence),
+    retention_days: __int_or(raw?.retention_days ?? raw?.retentionDays, 30),
+    metadata: __dict(raw?.metadata),
+  }
+}
+
+/**
+ * Decide whether a proposed completion route is allowed by policy.
+ *
+ * Returns `{allowed, reason_code, reason, policy}` so hosts can show a friendly
+ * string while code branches on the stable reason code.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn completion_policy_decision(context = {}, route = {}, policy = {}) -> CompletionPolicyDecision {
+  let ctx = completion_context(context)
+  let r = __dict(route)
+  let p = completion_policy(policy)
+  let provider = __text(r?.provider)
+  let model = __text(r?.model_id ?? r?.modelID ?? r?.model ?? r?.id)
+  if !p.enabled {
+    return {allowed: false, reason_code: "disabled", reason: "Suggestions are turned off.", policy: p}
+  }
+  if __contains_ci(p.denied_languages, ctx.language)
+    || !__allow_list_allows(p.allowed_languages, ctx.language) {
+    return {
+      allowed: false,
+      reason_code: "language_blocked",
+      reason: "Suggestions are off for this file type.",
+      policy: p,
+    }
+  }
+  if provider != ""
+    && (__contains_ci(p.denied_providers, provider) || !__allow_list_allows(p.allowed_providers, provider)) {
+    return {
+      allowed: false,
+      reason_code: "provider_blocked",
+      reason: "This suggestion provider is not allowed here.",
+      policy: p,
+    }
+  }
+  if model != ""
+    && (__contains_ci(p.denied_models, model) || !__allow_list_allows(p.allowed_models, model)) {
+    return {
+      allowed: false,
+      reason_code: "model_blocked",
+      reason: "This suggestion model is not allowed here.",
+      policy: p,
+    }
+  }
+  if provider != "" && !p.remote_models_allowed && !__local_provider(provider) {
+    return {
+      allowed: false,
+      reason_code: "remote_models_blocked",
+      reason: "Cloud suggestions are off for this workspace.",
+      policy: p,
+    }
+  }
+  if !p.codebase_context_allowed && len(ctx.codebase_context) > 0 {
+    return {
+      allowed: false,
+      reason_code: "codebase_context_blocked",
+      reason: "Project context is off for this workspace.",
+      policy: p,
+    }
+  }
+  if p.max_prompt_chars > 0 && __prompt_chars(ctx) > p.max_prompt_chars {
+    return {
+      allowed: false,
+      reason_code: "prompt_too_large",
+      reason: "The suggestion context is too large.",
+      policy: p,
+    }
+  }
+  return {allowed: true, reason_code: "allowed", reason: "Allowed.", policy: p}
+}
+
+/**
+ * Pick a coding-oriented model route from the catalog for completion use.
+ *
+ * Hosts may still override the selected route. This helper gives harness
+ * authors a shared default: coding strength, non-deprecated, low latency/cost
+ * when the catalog can satisfy it.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn completion_model_route(opts = {}) -> CompletionRoute {
+  let raw = __dict(opts)
+  let constraints = __dict(raw?.constraints)
+  var query = {
+    strengths: constraints?.strengths ?? ["coding"],
+    exclude_deprecated: constraints?.exclude_deprecated ?? true,
+    available_only: constraints?.available_only ?? raw?.available_only ?? false,
+    max_input_per_mtok: constraints?.max_input_per_mtok ?? raw?.max_input_per_mtok,
+    min_tpm: constraints?.min_tpm ?? raw?.min_tpm,
+  }
+  if raw?.provider != nil {
+    query = query + {provider: raw.provider}
+  }
+  if raw?.tier != nil {
+    query = query + {tier: raw.tier}
+  }
+  let selected = pick_model(query)
+  if selected == nil {
+    return {
+      schema: "harn.completion.route.v1",
+      provider: __text_or_nil(raw?.provider),
+      model_id: __text_or_nil(raw?.model ?? raw?.model_id),
+      local: __local_provider(raw?.provider),
+      source: "explicit_or_empty",
+      query: query,
+    }
+  }
+  return {
+    schema: "harn.completion.route.v1",
+    provider: selected.provider,
+    model_id: selected.id ?? selected.model ?? selected.name,
+    local: __local_provider(selected.provider),
+    source: "catalog",
+    query: query,
+    catalog: selected,
+  }
+}
+
+/**
+ * Normalize a candidate insertion, replacement, or next-edit into a proposal.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn completion_proposal(input = {}) -> CompletionProposal {
+  let raw = __dict(input)
+  let kind = __completion_kind(raw?.kind ?? raw?.completion_kind)
+  let insert_text = __text(raw?.insert_text ?? raw?.suggestion ?? raw?.text)
+  let body = filter_nil(
+    {
+      kind: kind,
+      file_path: __text_or_nil(raw?.file_path ?? raw?.filePath),
+      cursor_offset: raw?.cursor_offset ?? raw?.cursorOffset,
+      insert_text: insert_text,
+      replacement_range: __range(raw?.replacement_range ?? raw?.replacementRange),
+    },
+  )
+  return filter_nil(
+    {
+      schema: "harn.completion.proposal.v1",
+      id: __text_or_nil(raw?.id) ?? __completion_id("proposal", body),
+      kind: kind,
+      provider: __text_or_nil(raw?.provider),
+      model_id: __text_or_nil(raw?.model_id ?? raw?.model),
+      local: raw?.local,
+      confidence: __float_or_nil(raw?.confidence),
+      priority: __int_or(raw?.priority, 0),
+      file_path: body.file_path,
+      cursor_offset: body.cursor_offset,
+      insert_text: insert_text,
+      filter_text: __text_or_nil(raw?.filter_text ?? raw?.filterText),
+      replacement_range: body.replacement_range,
+      original_text: __text_or_nil(raw?.original_text ?? raw?.originalText),
+      command: raw?.command,
+      metadata: __dict(raw?.metadata),
+    },
+  )
+}
+
+/**
+ * Return a stable content hash for completion context de-duplication.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn completion_context_hash(context = {}, route = {}) -> string {
+  let ctx = completion_context(context)
+  let r = __dict(route)
+  return "sha256:"
+    + sha256(
+    json_stringify(
+      {
+        surface: ctx.surface,
+        file_path: ctx.file_path,
+        language: ctx.language,
+        cursor: ctx.cursor,
+        prefix: ctx.prefix,
+        suffix: ctx.suffix,
+        provider: r?.provider,
+        model_id: r?.model_id ?? r?.modelID ?? r?.model,
+      },
+    ),
+  )
+}
+
+/**
+ * Normalize token and cost accounting for a completion inference.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn completion_usage(input = {}) -> CompletionUsage {
+  let raw = __dict(input)
+  let input_tokens = __int_or(raw?.input_tokens ?? raw?.prompt_tokens, 0)
+  let output_tokens = __int_or(raw?.output_tokens ?? raw?.completion_tokens, 0)
+  let cache_read_tokens = __int_or(raw?.cache_read_tokens ?? raw?.cached_input_tokens, 0)
+  let cache_write_tokens = __int_or(raw?.cache_write_tokens, 0)
+  return filter_nil(
+    {
+      schema: "harn.completion.usage.v1",
+      provider: __text_or_nil(raw?.provider),
+      model_id: __text_or_nil(raw?.model_id ?? raw?.modelID ?? raw?.model),
+      input_tokens: input_tokens,
+      output_tokens: output_tokens,
+      cache_read_tokens: cache_read_tokens,
+      cache_write_tokens: cache_write_tokens,
+      total_tokens: input_tokens + output_tokens + cache_read_tokens + cache_write_tokens,
+      cost_usd: __float_or_nil(raw?.cost_usd),
+      pricing_known: raw?.pricing_known,
+    },
+  )
+}
+
+fn __event_id(prefix, record_id, timestamp) -> string {
+  return prefix + "_" + substring(sha256(__text(record_id) + ":" + __text(timestamp)), 0, 16)
+}
+
+fn __event_timestamp(opts) -> string {
+  let explicit = __text_or_nil(opts?.timestamp)
+  if explicit != nil {
+    return explicit
+  }
+  return date_now_iso()
+}
+
+fn __usage_from(proposal, usage) {
+  let u = completion_usage(usage)
+  return u
+    + filter_nil({provider: u.provider ?? proposal.provider, model_id: u.model_id ?? proposal.model_id})
+}
+
+/**
+ * Build the normalized "suggestion shown" event.
+ *
+ * Prompt text is included only when policy `prompt_recording` is `full`.
+ * Metadata mode records prompt length/hash; off records neither.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn completion_shown_event(proposal = {}, context = {}, usage = {}, opts = {}) -> CompletionEvent {
+  let prop = completion_proposal(proposal)
+  let ctx = completion_context(context)
+  let options = __dict(opts)
+  let policy = completion_policy(options?.policy)
+  let timestamp = __event_timestamp(options)
+  let record_id = __text_or_nil(options?.record_id ?? prop.id)
+    ?? __completion_id("record", {proposal: prop, context: ctx})
+  let route = {provider: prop.provider, model_id: prop.model_id}
+  let u = __usage_from(prop, usage)
+  var event = filter_nil(
+    {
+      schema: "harn.completion.event.v1",
+      event: "shown",
+      id: __text_or_nil(options?.id) ?? __event_id("shown", record_id, timestamp),
+      record_id: record_id,
+      session_id: __text_or_nil(options?.session_id ?? options?.sessionID),
+      timestamp: timestamp,
+      surface: ctx.surface,
+      completion_kind: prop.kind,
+      provider: prop.provider,
+      model_id: prop.model_id,
+      local: prop.local,
+      context_hash: options?.context_hash ?? options?.contextHash ?? completion_context_hash(ctx, route),
+      proposal: prop,
+      context: ctx,
+      usage: u,
+      cost_usd: u.cost_usd,
+      latency_ms: options?.latency_ms ?? options?.latencyMs,
+      cached: __bool(options?.cached, false),
+      timed_out: __bool(options?.timed_out ?? options?.timedOut, false),
+      governance: {
+        policy_schema: policy.schema,
+        prompt_recording: policy.prompt_recording,
+        remote_models_allowed: policy.remote_models_allowed,
+        codebase_context_allowed: policy.codebase_context_allowed,
+        retention_days: policy.retention_days,
+      },
+      policy_decision: completion_policy_decision(ctx, route, policy),
+      tape_path: __text_or_nil(options?.tape_path ?? options?.tapePath),
+      metadata: __dict(options?.metadata),
+    },
+  )
+  let prompt = __text_or_nil(options?.prompt)
+  if prompt != nil && policy.prompt_recording == "full" {
+    event = event + {prompt: prompt}
+  } else if prompt != nil && policy.prompt_recording == "metadata" {
+    event = event + {prompt_hash: "sha256:" + sha256(prompt), prompt_chars: len(prompt)}
+  }
+  return event
+}
+
+/**
+ * Build the normalized user decision event for a shown completion.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn completion_decision_event(shown_event = {}, decision = "rejected", opts = {}) -> CompletionEvent {
+  let shown = __dict(shown_event)
+  let options = __dict(opts)
+  let timestamp = __event_timestamp(options)
+  let normalized = __decision(decision)
+  let record_id = __text_or_nil(options?.record_id ?? options?.recordID ?? shown?.record_id)
+    ?? __completion_id("record", shown)
+  return filter_nil(
+    {
+      schema: "harn.completion.event.v1",
+      event: "decision",
+      id: __text_or_nil(options?.id) ?? __event_id("decision", record_id + ":" + normalized, timestamp),
+      record_id: record_id,
+      shown_event_id: __text_or_nil(shown?.id),
+      session_id: __text_or_nil(options?.session_id ?? options?.sessionID ?? shown?.session_id),
+      timestamp: timestamp,
+      surface: __text_or_nil(options?.surface ?? shown?.surface),
+      completion_kind: __completion_kind(options?.completion_kind ?? shown?.completion_kind),
+      provider: __text_or_nil(options?.provider ?? shown?.provider),
+      model_id: __text_or_nil(options?.model_id ?? options?.modelID ?? shown?.model_id),
+      context_hash: __text_or_nil(options?.context_hash ?? options?.contextHash ?? shown?.context_hash),
+      decision: normalized,
+      accepted: normalized == "accepted",
+      decision_latency_ms: options?.decision_latency_ms ?? options?.decisionLatencyMs,
+      cost_usd: options?.cost_usd ?? options?.costUSD ?? shown?.cost_usd,
+      usage: shown?.usage,
+      metadata: __dict(options?.metadata),
+    },
+  )
+}
+
+/**
+ * Project a completion shown/decision event into the TrustGraph record shape.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn completion_trust_record(event = {}, opts = {}) -> CompletionTrustRecord {
+  let row = __dict(event)
+  let options = __dict(opts)
+  let decision = __decision(row?.decision ?? options?.decision)
+  let kind = __completion_kind(row?.completion_kind)
+  let provider = __text(row?.provider ?? options?.provider ?? "unknown")
+  let model = __text(
+    row?.model_id ?? row?.modelID ?? row?.model ?? options?.model_id ?? options?.modelID
+      ?? "unknown",
+  )
+  let outcome = if decision == "accepted" {
+    "success"
+  } else if decision == "timed_out" {
+    "timeout"
+  } else {
+    "denied"
+  }
+  return filter_nil(
+    {
+      actor_id: __text_or_nil(options?.actor_id) ?? ("inline-completion/" + provider + "/" + model),
+      action: __text_or_nil(options?.action) ?? ("inline_completion." + kind),
+      approver: __text_or_nil(options?.approver) ?? "user",
+      outcome: outcome,
+      evidence_refs: [
+        filter_nil(
+          {
+            kind: "completion_event",
+            event_id: row?.id,
+            record_id: row?.record_id,
+            context_hash: row?.context_hash,
+            tape_path: row?.tape_path,
+            decision: decision,
+          },
+        ),
+      ],
+      trace_id: __text_or_nil(row?.record_id ?? row?.id ?? options?.trace_id ?? options?.traceID) ?? uuid_v7(),
+      timestamp: __text_or_nil(row?.timestamp ?? options?.timestamp) ?? date_now_iso(),
+      autonomy_tier_at_time: __text_or_nil(options?.autonomy_tier) ?? "suggest",
+    },
+  )
+}
+
+/**
+ * Project completion usage into the Burin/TUI usage-store row shape.
+ *
+ * This keeps completion spend visible beside chat/agent spend without forcing
+ * every host to invent a second accounting schema.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn completion_usage_record(event = {}, opts = {}) -> CompletionUsageRecord {
+  let row = __dict(event)
+  let options = __dict(opts)
+  let usage = completion_usage(row?.usage)
+  return filter_nil(
+    {
+      schema_version: 1,
+      recorded_at_ms: options?.recorded_at_ms,
+      session_id: __text_or_nil(row?.session_id ?? options?.session_id),
+      provider: usage.provider ?? row?.provider,
+      model: usage.model_id ?? row?.model_id,
+      input_tokens: usage.input_tokens,
+      output_tokens: usage.output_tokens,
+      cached_input_tokens: usage.cache_read_tokens,
+      total_tokens: usage.total_tokens,
+      cost_usd: usage.cost_usd,
+      surface: "completion",
+      event: row?.event,
+      completion_kind: row?.completion_kind,
+      record_id: row?.record_id,
+      context_hash: row?.context_hash,
+    },
+  )
+}

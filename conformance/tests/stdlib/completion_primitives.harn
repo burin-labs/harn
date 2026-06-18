@@ -1,0 +1,76 @@
+import {
+  completion_context,
+  completion_decision_event,
+  completion_policy,
+  completion_policy_decision,
+  completion_proposal,
+  completion_shown_event,
+  completion_trust_record,
+  completion_usage_record,
+} from "std/agent/completions"
+
+pipeline test(task) {
+  let context = completion_context(
+    {
+      surface: "editor",
+      file_path: "Sources/App.swift",
+      language: "Swift",
+      stack: ["swift", "swiftui"],
+      trigger_kind: "automatic",
+      cursor_offset: 42,
+      prefix: "let name = user.",
+      suffix: "\nprint(name)",
+      symbols: [{name: "user", kind: "variable"}],
+      diagnostics: [],
+      codebase_context: [{path: "Sources/User.swift", text: "struct User { let name: String }"}],
+    },
+  )
+  let policy = completion_policy(
+    {
+      disabled_languages: ["markdown"],
+      allowed_providers: ["ollama"],
+      allow_remote_models: false,
+      prompt_recording: "metadata",
+    },
+  )
+  let allowed = completion_policy_decision(context, {provider: "ollama", model_id: "qwen"}, policy)
+  let blocked = completion_policy_decision(context, {provider: "openai", model_id: "gpt"}, policy)
+  let camel_policy = completion_policy(
+    {allowedProviders: ["ollama"], allowRemoteModels: false, promptRecording: "off", maxPromptChars: 12},
+  )
+  let camel_blocked = completion_policy_decision(context, {provider: "openai", modelID: "gpt"}, camel_policy)
+  let proposal = completion_proposal(
+    {
+      kind: "inline_replace",
+      provider: "ollama",
+      model_id: "qwen",
+      suggestion: "name",
+      replacement_range: {location: 42, length: 0},
+    },
+  )
+  let shown = completion_shown_event(
+    proposal,
+    context,
+    {input_tokens: 100, output_tokens: 4, cost_usd: 0.0},
+    {record_id: "rec-1", session_id: "session-1", prompt: "private prompt", policy: policy},
+  )
+  let decision = completion_decision_event(shown, "accepted", {decision_latency_ms: 120})
+  let trust = completion_trust_record(decision)
+  let usage = completion_usage_record(shown, {recorded_at_ms: 12345})
+  log(context.schema)
+  log(context.language)
+  log(policy.prompt_recording)
+  log(allowed.allowed)
+  log(blocked.reason_code)
+  log(camel_policy.prompt_recording)
+  log(camel_blocked.reason_code)
+  log(proposal.kind)
+  log(starts_with(shown.context_hash, "sha256:"))
+  log(shown.prompt == nil)
+  log(starts_with(shown.prompt_hash, "sha256:"))
+  log(decision.accepted)
+  log(trust.actor_id)
+  log(trust.outcome)
+  log(usage.surface)
+  log(usage.input_tokens)
+}

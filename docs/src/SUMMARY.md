@@ -84,6 +84,7 @@
 - [Calendar stdlib](./stdlib/calendar.md)
 - [Daemon stdlib](./stdlib/daemon.md)
 - [Current session builtin](./stdlib/agent_session_current_id.md)
+- [Agent completions stdlib](./stdlib/agent-completions.md)
 - [Runtime introspection tools](./stdlib/runtime-introspection.md)
 - [Monitor stdlib](./stdlib/monitors.md)
 - [Pool stdlib](./stdlib/lifecycle-pool.md)
