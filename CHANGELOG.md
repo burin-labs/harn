@@ -8,6 +8,63 @@ highlights live in [CHANGELOG-pre-0.6.md](CHANGELOG-pre-0.6.md).
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.8.125
+
+### Added
+
+- Tool-call dialect validity gate: the provider/model capability registry now
+  *enforces* its tool-call dialect facts instead of leaving them advisory. A
+  requested `tool_format` whose wire channel a route is known not to return
+  parseable tool calls on — by `tool_mode_parity` (e.g. a `native` pin on the
+  `native_unreliable` DeepSeek V3.2 route, which silently drops to unparsed DSML
+  text) or by an explicit `text_tool_wire_format_supported = false` (e.g. the
+  native-only local Ollama Qwen3 route) — is auto-corrected to a working channel,
+  preferring the route's `preferred_tool_format`, with an actionable message
+  naming the bad combo and the working alternative. A route with no working
+  channel at all passes through untouched rather than rewriting to another broken
+  format. Enforced at `resolve_model_info` and at the tool-bearing `llm_call`
+  seam, so a harness can no longer silently get vanishing tool calls from an
+  invalid model×provider×tool_format combination.
+
+### Changed
+
+- **`assert(cond)` and `require cond` now narrow types like a guard.** Both
+  diverge (throw) when `cond` is falsy, so code after them may rely on the
+  truthy refinement: `assert(x != nil, ...)` (or `require x != nil`) followed
+  by `x + 1` now type-checks without a `??`, matching how an `if x == nil`
+  guard already narrows. This is the TypeScript "assertion function" model and
+  removes friction for the idiomatic `assert(value != nil)` test/precondition
+  pattern.
+- **Entering a lexical block no longer allocates an empty binding map.** Every
+  block pushes a scope, but inside a function body its bindings compile to local
+  slots rather than env writes, so the pushed scope is almost always empty — yet
+  it used to `Arc::new(BTreeMap::new())`-allocate (and free) one map per entry, a
+  per-iteration cost in any loop whose body is a block. Empty scopes now share a
+  single process-wide immutable map (a refcount bump), and the first real
+  binding copies-on-write away from it, so scopes that never bind anything never
+  allocate. No behavior change.
+- **The hosted language specification is now navigable chapter-by-chapter.**
+  `scripts/sync_language_spec.harn` generates a per-chapter page under
+  `docs/src/spec/language/` for each section after the overview and rewrites the
+  chapter list in `docs/src/SUMMARY.md`, so the site nav and search index cover
+  every chapter instead of one ~7k-line page. `docs/src/language-spec.md` is now
+  a landing page (the overview plus a table of contents); deep links to the old
+  monolithic anchors were repointed to their chapter pages. The single-file
+  `spec/HARN_SPEC.md` assembly is unchanged, and the per-chapter
+  `spec/chapters/*.md` sources remain the one place to edit.
+- **The core `VmValue` runtime value is now 16 bytes (down from 24).** Every
+  value the interpreter pushes, pops, clones, and writes to a local slot — plus
+  every element of a `list` and every entry on the stack — is a third smaller,
+  improving cache density across the whole VM. The shrink boxes the four
+  oversized payloads (`Decimal`, `StructInstance`, and the `Range`/`BuiltinRefId`
+  already-boxed cases) behind a shared pointer and replaces the 16-byte
+  `Arc<str>` fat pointer behind the string-shaped variants (`String`,
+  `BuiltinRef`, `TaskHandle`) with a one-word thin string (`arcstr::ArcStr`,
+  re-exported as `harn_vm::value::HarnStr`). String-literal loads and enum/struct
+  field reads stay zero-copy refcount bumps. No `harn` language behavior changes;
+  this is an internal representation change (the unsafe pointer work lives in the
+  vetted `arcstr` crate, not in Harn).
+
 ## v0.8.124
 
 ### Breaking
