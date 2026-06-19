@@ -776,6 +776,26 @@ fn native_json_unknown_read_suggests_look_alias() {
     );
 }
 
+// Cheap models commonly emit cross-harness edit aliases (`apply_patch`,
+// `str_replace`, `edit_file`). Instead of a hard "Unknown tool" denial that
+// thrashes the loop, the feedback must point at Harn's `edit` tool.
+#[test]
+fn native_json_unknown_apply_patch_suggests_edit_alias() {
+    let known: std::collections::BTreeSet<String> = ["edit", "look", "run"]
+        .into_iter()
+        .map(String::from)
+        .collect();
+    let text = r#"[{"function":{"name":"apply_patch","arguments":"{}"}}]"#;
+    let (calls, errors) = parse_native_json_tool_calls(text, &known);
+    assert_eq!(calls.len(), 0);
+    assert_eq!(errors.len(), 1, "errors: {errors:?}");
+    assert!(
+        errors[0].contains("edit("),
+        "apply_patch should be aliased to edit: {}",
+        errors[0]
+    );
+}
+
 #[test]
 fn native_json_fallback_reports_malformed_arguments() {
     let known = known_tools_set();
