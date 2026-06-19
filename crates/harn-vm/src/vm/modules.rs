@@ -191,7 +191,7 @@ impl Vm {
                 // so module loading is invisible to the step-tracking
                 // surface.
                 let active_context = crate::step_runtime::take_active_context();
-                let init_result = self.run_chunk(&fresh_init_chunk).await;
+                let init_result = self.run_chunk(std::sync::Arc::new(fresh_init_chunk)).await;
                 crate::step_runtime::restore_active_context(active_context);
                 init_env = std::mem::replace(&mut self.env, saved_env);
                 self.frames = saved_frames;

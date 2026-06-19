@@ -627,9 +627,11 @@ impl DispatchCore {
                 self.config.script_path.display()
             ))
         })?;
-        let chunk = harn_vm::Compiler::new()
-            .compile_named(&program, &function.name)
-            .map_err(|error| DispatchError::Validation(format!("compile error: {error}")))?;
+        let chunk = Arc::new(
+            harn_vm::Compiler::new()
+                .compile_named(&program, &function.name)
+                .map_err(|error| DispatchError::Validation(format!("compile error: {error}")))?,
+        );
         let globals = build_pipeline_globals(&request.arguments, function)?;
         let script_path = self.config.script_path.clone();
         let cancel_token = request
@@ -676,7 +678,7 @@ impl DispatchCore {
                     vm.set_global(&name, value);
                 }
 
-                let result = vm.execute(&chunk).await;
+                let result = vm.execute_arc(Arc::clone(&chunk)).await;
 
                 match result {
                     Ok(_) => {

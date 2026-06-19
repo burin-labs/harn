@@ -2,16 +2,16 @@ use std::sync::Arc;
 
 use serde_json::Value as JsonValue;
 
+use crate::chunk::ChunkRef;
 use crate::stdlib::json_to_vm_value;
 use crate::value::{VmClosure, VmError};
 use crate::vm::Vm;
-use crate::Chunk;
 
 const FILTER_FN_NAME: &str = "__harn_record_filter";
 
 pub struct CompiledRecordFilter {
     vm: Vm,
-    chunk: Chunk,
+    chunk: ChunkRef,
     closure: Option<Arc<VmClosure>>,
     normalized_expr: String,
 }
@@ -33,7 +33,7 @@ fn {FILTER_FN_NAME}(record) {{
         );
         Ok(Self {
             vm: Vm::new(),
-            chunk: crate::compile_source(&source)?,
+            chunk: Arc::new(crate::compile_source(&source)?),
             closure: None,
             normalized_expr,
         })
@@ -45,7 +45,7 @@ fn {FILTER_FN_NAME}(record) {{
 
     pub async fn matches(&mut self, record: &JsonValue) -> Result<bool, VmError> {
         if self.closure.is_none() {
-            self.vm.execute(&self.chunk).await?;
+            self.vm.execute_arc(Arc::clone(&self.chunk)).await?;
             self.closure = self.vm.resolve_named_closure(FILTER_FN_NAME);
         }
         let closure = self.closure.as_ref().ok_or_else(|| {
