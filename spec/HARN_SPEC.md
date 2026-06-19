@@ -3549,7 +3549,7 @@ A type parameter may carry more than one bound, written either as repeated
 clauses or additively — the two forms are equivalent and `T` must satisfy
 every bound:
 
-```harn
+```harn,ignore
 fn describe<T>(item: T) -> string where T: Named, T: Aged { ... }
 fn describe<T>(item: T) -> string where T: Named + Aged { ... }
 ```
