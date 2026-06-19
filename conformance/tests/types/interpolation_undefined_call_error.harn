@@ -1,0 +1,3 @@
+pipeline default() {
+  __io_println("${totally_undefined_fn()}")
+}

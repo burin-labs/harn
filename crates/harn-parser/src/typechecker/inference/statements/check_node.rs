@@ -1540,7 +1540,9 @@ impl TypeChecker {
                 }
             }
 
-            Node::InterpolatedString(_) => {}
+            Node::InterpolatedString(segments) => {
+                self.check_interpolation_segments(segments, scope);
+            }
 
             Node::StringLiteral(_)
             | Node::RawStringLiteral(_)
@@ -1601,6 +1603,36 @@ impl TypeChecker {
                     self.check_node(alt, scope);
                 }
             }
+        }
+    }
+
+    /// Type-check the expression holes inside an interpolated string
+    /// (`"... ${expr} ..."`). Each `${...}` hole is captured by the lexer
+    /// as raw source text, so we re-lex and re-parse it at its original
+    /// position and run it through the normal expression walk — name
+    /// resolution, argument/return type checking, nil-flow, etc. all apply
+    /// exactly as they would outside the string. A hole that fails to
+    /// lex/parse is left to the bytecode compiler, which raises a precise
+    /// `invalid interpolation` error at compile time; surfacing a second,
+    /// lower-quality parse diagnostic here would only add noise.
+    fn check_interpolation_segments(
+        &mut self,
+        segments: &[harn_lexer::StringSegment],
+        scope: &mut TypeScope,
+    ) {
+        for seg in segments {
+            let harn_lexer::StringSegment::Expression(src, line, col) = seg else {
+                continue;
+            };
+            let mut lexer = harn_lexer::Lexer::with_position(src, *line, *col);
+            let Ok(tokens) = lexer.tokenize() else {
+                continue;
+            };
+            let mut parser = crate::Parser::new(tokens);
+            let Ok(expr) = parser.parse_single_expression() else {
+                continue;
+            };
+            self.check_node(&expr, scope);
         }
     }
 }

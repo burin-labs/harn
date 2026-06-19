@@ -1,0 +1,7 @@
+fn needs_int(p: int) -> int {
+  return p + 1
+}
+
+pipeline default() {
+  __io_println("${needs_int("not an int")}")
+}

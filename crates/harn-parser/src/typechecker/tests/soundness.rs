@@ -379,3 +379,68 @@ fn check_strict_with_source_enables_strict_mode() {
         "expected strict unvalidated warning, got: {diagnostics:?}"
     );
 }
+
+#[test]
+fn interpolation_holes_are_type_checked() {
+    let errs = errors(
+        r#"
+fn needs_int(p: int) -> int { return p + 1 }
+pipeline p() { log("${needs_int("nope")}") }
+"#,
+    );
+    assert!(
+        errs.iter()
+            .any(|e| e.contains("expected int, found string")),
+        "expected argument-type error inside interpolation, got: {errs:?}"
+    );
+}
+
+#[test]
+fn interpolation_holes_accept_valid_expressions() {
+    // Well-typed holes must not produce spurious errors.
+    let errs = errors(
+        r#"
+fn p(name: string, n: int) -> string { return "hi ${name} ${n + 1}" }
+"#,
+    );
+    assert!(errs.is_empty(), "expected no errors, got: {errs:?}");
+}
+
+#[test]
+fn exhaustive_bool_match_does_not_report_fallthrough() {
+    // A `match` on a bool covering both `true` and `false` with returning
+    // arms is exhaustive and terminating — no wildcard required.
+    let errs = errors(
+        r#"
+fn classify(b: bool) -> string {
+  match b {
+    true -> { return "yes" }
+    false -> { return "no" }
+  }
+}
+"#,
+    );
+    assert!(
+        !errs.iter().any(|e| e.contains("fall through")),
+        "exhaustive bool match should not report fall-through, got: {errs:?}"
+    );
+}
+
+#[test]
+fn partial_bool_match_still_can_fall_through() {
+    // Only `true` is covered (no `false`, no wildcard) — still able to fall
+    // through, so the missing-return diagnostic must remain.
+    let errs = errors(
+        r#"
+fn classify(b: bool) -> string {
+  match b {
+    true -> { return "yes" }
+  }
+}
+"#,
+    );
+    assert!(
+        errs.iter().any(|e| e.contains("fall through")),
+        "partial bool match should still report fall-through, got: {errs:?}"
+    );
+}
