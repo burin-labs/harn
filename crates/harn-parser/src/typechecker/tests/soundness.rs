@@ -509,3 +509,29 @@ fn g() -> int {
         "expected no errors after path narrowing, got: {errs:?}"
     );
 }
+
+#[test]
+fn assert_condition_narrows_like_a_guard() {
+    // `assert(cond, msg?)` throws when `cond` is falsy, so code after it may
+    // rely on the truthy refinement — `assert(x != nil)` then `x - 1` is fine.
+    let errs =
+        errors("fn g(x: float?) -> float {\n  assert(x != nil, \"nn\")\n  return x - 1.0\n}");
+    assert!(errs.is_empty(), "assert should narrow, got: {errs:?}");
+}
+
+#[test]
+fn require_condition_narrows_after_statement() {
+    let errs = errors("fn g(x: int?) -> int { require x != nil\n  return x + 1 }");
+    assert!(errs.is_empty(), "require should narrow, got: {errs:?}");
+}
+
+#[test]
+fn arithmetic_without_assert_guard_still_flagged() {
+    // Sanity: the narrowing is gated on the assert/require actually being
+    // present — a bare nilable operand is still an error.
+    let errs = errors("fn g(x: int?) -> int { return x + 1 }");
+    assert!(
+        errs.iter().any(|e| e.contains("may be nil")),
+        "expected nilable error without a guard, got: {errs:?}"
+    );
+}

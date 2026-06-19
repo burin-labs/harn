@@ -1,0 +1,19 @@
+/**
+ * `assert(cond)` and `require cond` both throw when `cond` is falsy, so code
+ * after them may rely on the truthy refinement — a nilable value checked with
+ * `!= nil` is narrowed to non-nil afterward, no `??` needed.
+ */
+fn after_assert(x: int?) -> int {
+  assert(x != nil, "x present")
+  return x + 1
+}
+
+fn after_require(x: int?) -> int {
+  require x != nil
+  return x + 1
+}
+
+pipeline default() {
+  __io_println(after_assert(41))
+  __io_println(after_require(9))
+}
