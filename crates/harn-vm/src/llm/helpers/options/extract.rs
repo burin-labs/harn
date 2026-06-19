@@ -331,8 +331,28 @@ pub(crate) fn extract_llm_options(
         .and_then(|o| o.get("tools"))
         .filter(|value| !matches!(value, VmValue::Nil))
         .cloned();
-    let tool_format = opt_str(&options, "tool_format")
+    let requested_tool_format = opt_str(&options, "tool_format")
         .unwrap_or_else(|| crate::llm_config::default_tool_format(&model, &provider));
+    // FOOTGUN-REMOVAL: a tool-bearing call must use a tool_format whose channel
+    // the capability registry trusts to return parseable tool calls for this
+    // route. An explicit pin (or alias) can request a channel the route is
+    // known to drop silently (the DeepSeek V3.2 `native` -> unparsed DSML
+    // text case); steer it to the route's safe format instead of letting the
+    // calls vanish. Calls without tools keep the requested format verbatim.
+    let tool_format = if enforce_capability_gates && tools_val.is_some() {
+        let decision = crate::llm::capabilities::validate_tool_format_with_caps(
+            &provider,
+            &model,
+            &requested_tool_format,
+            &caps,
+        );
+        if let Some(reason) = &decision.correction {
+            tracing::warn!(target: "harn::llm::tool_format", "{reason}");
+        }
+        decision.effective
+    } else {
+        requested_tool_format
+    };
     if enforce_capability_gates
         && tools_val.is_some()
         && tool_format == "native"
