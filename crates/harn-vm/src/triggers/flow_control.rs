@@ -73,17 +73,13 @@ pub struct TriggerFlowControlConfig {
 }
 
 pub fn parse_flow_control_duration(raw: &str) -> Result<Duration, String> {
-    let trimmed = raw.trim();
-    if trimmed.len() < 2 {
+    let Some((amount, unit)) = crate::duration_parse::split_amount_unit(raw) else {
         return Err(format!("invalid duration '{raw}': expected <int><unit>"));
+    };
+    if unit.is_empty() {
+        return Err(format!("invalid duration '{raw}': missing unit suffix"));
     }
-    let split = trimmed
-        .find(|ch: char| !ch.is_ascii_digit())
-        .ok_or_else(|| format!("invalid duration '{raw}': missing unit suffix"))?;
-    if split == 0 || split == trimmed.len() {
-        return Err(format!("invalid duration '{raw}': expected <int><unit>"));
-    }
-    let value = trimmed[..split]
+    let value = amount
         .parse::<u64>()
         .map_err(|_| format!("invalid duration '{raw}': expected integer prefix"))?;
     if value == 0 {
@@ -91,17 +87,17 @@ pub fn parse_flow_control_duration(raw: &str) -> Result<Duration, String> {
             "invalid duration '{raw}': duration must be positive"
         ));
     }
-    let factor = match trimmed[split..].to_ascii_lowercase().as_str() {
-        "s" => 1,
-        "m" => 60,
-        "h" => 60 * 60,
-        "d" => 60 * 60 * 24,
-        "w" => 60 * 60 * 24 * 7,
+    // Seconds-resolution units only (no ms): s/m/h/d/w. The shared table is
+    // in milliseconds, so divide to whole seconds.
+    let secs_factor = match unit.as_str() {
+        "s" | "m" | "h" | "d" | "w" => {
+            crate::duration_parse::unit_to_millis(&unit).unwrap() / 1_000
+        }
         other => {
             return Err(format!(
                 "invalid duration '{raw}': unsupported unit '{other}', expected s/m/h/d/w"
             ))
         }
     };
-    Ok(Duration::from_secs(value.saturating_mul(factor)))
+    Ok(Duration::from_secs(value.saturating_mul(secs_factor)))
 }

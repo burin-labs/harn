@@ -1184,20 +1184,14 @@ fn duration_ms(value: &VmValue) -> Option<u64> {
 }
 
 fn parse_duration_string(value: &str) -> Option<u64> {
-    let trimmed = value.trim();
-    if trimmed.is_empty() {
-        return None;
-    }
-    let split_at = trimmed
-        .find(|ch: char| !ch.is_ascii_digit())
-        .unwrap_or(trimmed.len());
-    let (number, unit) = trimmed.split_at(split_at);
+    let (number, unit) = crate::duration_parse::split_amount_unit(value)?;
     let amount = number.parse::<u64>().ok()?;
-    match unit.trim() {
-        "" | "ms" => Some(amount),
-        "s" => Some(amount.saturating_mul(1000)),
-        "m" => Some(amount.saturating_mul(60_000)),
-        "h" => Some(amount.saturating_mul(3_600_000)),
+    // Bare numbers are milliseconds; this caller accepts only ms/s/m/h.
+    match unit.as_str() {
+        "" => Some(amount),
+        "ms" | "s" | "m" | "h" => {
+            Some(amount.saturating_mul(crate::duration_parse::unit_to_millis(&unit)?))
+        }
         _ => None,
     }
 }
