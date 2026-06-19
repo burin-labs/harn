@@ -1093,7 +1093,20 @@ impl super::super::Vm {
 
         let closure = match self.try_cached_named_direct_call(cached_state.as_ref(), name, argc) {
             Some(closure) => closure,
-            None => self.resolve_named_closure(name)?,
+            None => match self.resolve_named_closure(name) {
+                Some(closure) => closure,
+                // Not a user closure, so this bare call targets a builtin.
+                // Most builtins are synchronous; dispatch them right here on
+                // the sync path instead of bailing to
+                // `execute_call_builtin_async`, which would spin up the async
+                // state machine and re-run `resolve_named_closure` (a second
+                // local-slot scan + env walk + module mutexes) only to reach
+                // the same builtin. Async builtins return `None` and still take
+                // the async path. Resolution semantics are unchanged: a user
+                // `fn` of the same name is still found by `resolve_named_closure`
+                // above and wins over the builtin.
+                None => return self.try_dispatch_sync_builtin_inline(name, argc),
+            },
         };
         if !Self::direct_call_cacheable(&closure) {
             return None;
@@ -1112,6 +1125,49 @@ impl super::super::Vm {
         frame.ip += 11;
         let args_start = self.stack.len().checked_sub(argc)?;
         Some(self.push_closure_frame_from_stack_args(&closure, args_start, args_start))
+    }
+
+    /// Dispatch a synchronous builtin directly from the `Op::CallBuiltin` sync
+    /// handler, bypassing the async path for the common case.
+    ///
+    /// Returns `Some(result)` when the named builtin is synchronous — consuming
+    /// its `argc` stack arguments and advancing `ip` past the 11 operand bytes,
+    /// exactly as the closure path does. Returns `None` when the builtin is
+    /// asynchronous, bridge-backed, side-effect-gated, or otherwise not
+    /// sync-dispatchable, leaving the operand stack and `ip` untouched so
+    /// `execute_call_builtin_async` re-reads and handles it.
+    ///
+    /// Only reached after `resolve_named_closure` has already established the
+    /// name is not a user closure, so this never shadows a user `fn`.
+    fn try_dispatch_sync_builtin_inline(
+        &mut self,
+        name: &str,
+        argc: usize,
+    ) -> Option<Result<(), VmError>> {
+        let id = {
+            let frame = self.frames.last()?;
+            BuiltinId::from_raw(frame.chunk.read_u64(frame.ip))
+        };
+        let args_start = self.stack.len().checked_sub(argc)?;
+        // Dispatch straight off the operand stack — `*_from_stack_args` reads
+        // the argument slice in place (no owned `Vec`), exactly as the async
+        // handler does at its builtin branch. `None` means the builtin is not
+        // synchronously dispatchable (async / bridge / side-effect-gated); the
+        // stack is left untouched so `execute_call_builtin_async` handles it.
+        match self.try_call_sync_builtin_id_or_name_from_stack_args(Some(id), name, args_start) {
+            Some(result) => {
+                self.frames.last_mut()?.ip += 11;
+                self.stack.truncate(args_start);
+                Some(match result {
+                    Ok(value) => {
+                        self.stack.push(value);
+                        Ok(())
+                    }
+                    Err(error) => Err(error),
+                })
+            }
+            None => None,
+        }
     }
 
     fn try_cached_named_direct_call(
