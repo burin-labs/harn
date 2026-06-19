@@ -650,7 +650,7 @@ fn op_stack_delta(op: Op, count: u16) -> Option<i32> {
         // `SetProperty` and the local-slot stores read their target by name
         // or slot index, so they only pop the value being stored.
         DefLet | DefVar | SetVar | DefLocalSlot | SetLocalSlot | SetProperty
-        | SetLocalSlotProperty | Pop => -1,
+        | SetLocalSlotProperty | ConcatAssignLocal | Pop => -1,
         // Value-preserving: unary ops, by-name lookups/checks, and scope /
         // iterator / exception-handler bookkeeping (the last three touch
         // side stacks, not the operand stack).
@@ -771,7 +771,7 @@ impl Chunk {
         self.columns.push(col);
         if matches!(
             op,
-            Op::GetProperty | Op::GetPropertyOpt | Op::MethodCallSpread
+            Op::GetProperty | Op::GetPropertyOpt | Op::MethodCallSpread | Op::ConcatAssignLocal
         ) {
             self.register_inline_cache(op_offset);
         }

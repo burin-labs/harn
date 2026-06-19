@@ -25,6 +25,13 @@ pipeline test(task) {
   var z = [1, 2]
   z = z + z
   log(z)
+  // Aliasing via a separate binding: the in-place extend must observe that
+  // `a`'s buffer is still shared with `b` and copy instead of mutating it.
+  var a = [1]
+  let b = a
+  a = a + [2]
+  log(a)
+  log(b)
   // Dict merge accumulator.
   var d = {a: 1}
   d = d + {b: 2}

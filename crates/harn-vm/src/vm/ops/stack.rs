@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use crate::chunk::{Chunk, Constant};
+use crate::chunk::{AdaptiveBinaryOp, Chunk, Constant};
 use crate::value::{VmError, VmValue};
 
 impl super::super::Vm {
@@ -221,6 +221,86 @@ impl super::super::Vm {
         // Tear down any nested value being overwritten iteratively so a deep
         // local cannot overflow the stack on drop (scalars are a no-op).
         crate::value::recursion::dismantle(std::mem::replace(&mut slot.value, val));
+        slot.synced = false;
+        Ok(())
+    }
+
+    /// In-place `+`-concat into a local slot: the runtime for `x = x + e` and
+    /// `x += e` where `x` resolves to a local slot.
+    ///
+    /// Pops `e`, reads slot `x`, and stores `x + e`. When `x` and `e` are
+    /// matching collection kinds (`list + list` / `dict + dict` — adds that
+    /// always succeed), `x`'s value is *taken* out of the slot before the add,
+    /// so the slot no longer aliases the buffer and `Arc::try_unwrap` extends
+    /// it in place — turning the `out = out + [item]` / `out += [item]`
+    /// accumulator loop from O(n^2) into amortized O(n). The earlier
+    /// compile-time emission only fired this fast path for statically-typed
+    /// collections; gating on the *runtime* shapes here also covers
+    /// dynamically-typed (`any`) accumulators.
+    ///
+    /// Every other case clones the slot value and routes the add through the
+    /// shared adaptive-binary core, so (a) numeric accumulators keep their
+    /// `Int`/`Float` inline-cache specialization and (b) a throwing add (e.g.
+    /// `x += y` with incompatible operands) leaves the binding at its previous
+    /// value rather than a placeholder — the take only happens for adds proven
+    /// to succeed.
+    pub(super) fn execute_concat_assign_local(&mut self) -> Result<(), VmError> {
+        let (slot_idx, cache_id, slot_count, cache_slot) = {
+            let frame = self.frames.last_mut().unwrap();
+            let op_offset = frame.ip.saturating_sub(1);
+            let slot_idx = frame.chunk.read_u16(frame.ip) as usize;
+            frame.ip += 2;
+            let cache_id = frame.chunk.cache_id();
+            let slot_count = frame.chunk.inline_cache_slot_count();
+            let cache_slot = frame.chunk.inline_cache_slot(op_offset);
+            (slot_idx, cache_id, slot_count, cache_slot)
+        };
+        let rhs = self.pop()?;
+        let frame = self.frames.last_mut().unwrap();
+        let Some(info) = frame.chunk.local_slots.get(slot_idx) else {
+            return Err(VmError::Runtime(format!(
+                "Invalid local slot index: {slot_idx}"
+            )));
+        };
+        if !info.mutable {
+            return Err(VmError::ImmutableAssignment(info.name.clone()));
+        }
+        let Some(slot) = frame.local_slots.get_mut(slot_idx) else {
+            return Err(VmError::Runtime(format!(
+                "Invalid local slot index: {slot_idx}"
+            )));
+        };
+        if !slot.initialized {
+            return Err(VmError::UndefinedVariable(info.name.clone()));
+        }
+        // Take the value in place only when the add is guaranteed to succeed
+        // (matching collection kinds). Releasing the slot's reference lets the
+        // concat's `Arc::try_unwrap` extend the buffer in place when it is not
+        // otherwise aliased; for everything else the slot is cloned so a
+        // throwing add leaves the binding intact.
+        let take_in_place = matches!(
+            (&slot.value, &rhs),
+            (VmValue::List(_), VmValue::List(_)) | (VmValue::Dict(_), VmValue::Dict(_))
+        );
+        let lhs = if take_in_place {
+            std::mem::replace(&mut slot.value, VmValue::Nil)
+        } else {
+            slot.value.clone()
+        };
+        let result = self.adaptive_binary_compute(
+            AdaptiveBinaryOp::Add,
+            lhs,
+            rhs,
+            cache_id,
+            slot_count,
+            cache_slot,
+        )?;
+        let frame = self.frames.last_mut().unwrap();
+        let slot = frame
+            .local_slots
+            .get_mut(slot_idx)
+            .expect("slot index validated above");
+        crate::value::recursion::dismantle(std::mem::replace(&mut slot.value, result));
         slot.synced = false;
         Ok(())
     }

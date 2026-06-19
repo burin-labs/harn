@@ -725,40 +725,47 @@ pipeline default() {}
 }
 
 #[test]
-fn inplace_list_concat_clears_binding_before_add() {
-    // `x = x + [i]` on a list compiles to the in-place accumulator form: the
-    // binding's reference is cleared (`NIL; SET_LOCAL_SLOT`) before the `ADD`
-    // so the runtime concat's `Arc::try_unwrap` extends the existing
-    // allocation rather than cloning it (O(n^2) -> O(1) amortized). The signal
-    // is a *single* assignment emitting *two* SET_LOCAL_SLOT (clear + store).
+fn inplace_list_concat_uses_fused_opcode() {
+    // `x = x + [i]` on a local list accumulator compiles to the single fused
+    // `CONCAT_ASSIGN_LOCAL` opcode. At runtime it takes the slot's value in
+    // place before the concat so `Arc::try_unwrap` extends the existing
+    // allocation rather than cloning it (O(n^2) -> O(1) amortized).
     let chunk = compile_source("pipeline t(task) {\n  var x = []\n  x = x + [1]\n}");
     let d = chunk.disassemble("t");
-    assert_eq!(
-        d.matches("SET_LOCAL_SLOT").count(),
-        2,
-        "in-place list concat should emit clear-binding + store:\n{d}"
-    );
     assert!(
-        d.contains("NIL"),
-        "expected a NIL clear before the concat:\n{d}"
+        d.contains("CONCAT_ASSIGN_LOCAL"),
+        "in-place list concat should emit the fused opcode:\n{d}"
     );
     assert!(
         !d.contains("ADD_INT"),
-        "a list concat must use the generic list ADD, not a scalar op:\n{d}"
+        "a list concat must not use a scalar op:\n{d}"
     );
 }
 
 #[test]
 fn inplace_list_concat_compound_assign_form() {
-    // `x += [i]` gets the same in-place treatment as `x = x + [i]`.
+    // `x += [i]` gets the same fused opcode as `x = x + [i]`.
     let chunk = compile_source("pipeline t(task) {\n  var x = []\n  x += [1]\n}");
     let d = chunk.disassemble("t");
-    assert_eq!(
-        d.matches("SET_LOCAL_SLOT").count(),
-        2,
-        "compound `x += [..]` should also emit the in-place form:\n{d}"
+    assert!(
+        d.contains("CONCAT_ASSIGN_LOCAL"),
+        "compound `x += [..]` should also emit the fused opcode:\n{d}"
     );
-    assert!(d.contains("NIL"), "{d}");
+}
+
+#[test]
+fn inplace_concat_fires_for_untyped_local_accumulator() {
+    // The fused opcode is gated on the *runtime* value, so an accumulator
+    // whose static type is unknown (`any`-returning helper) still gets the
+    // in-place path — the gap the compile-time-typed peephole could not close.
+    let chunk = compile_source(
+        "fn seed() -> any { return [] }\npipeline t(task) {\n  var x = seed()\n  x = x + [1]\n}",
+    );
+    let d = chunk.disassemble("t");
+    assert!(
+        d.contains("CONCAT_ASSIGN_LOCAL"),
+        "untyped local accumulator should still use the fused opcode:\n{d}"
+    );
 }
 
 #[test]

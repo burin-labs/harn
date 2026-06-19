@@ -196,6 +196,7 @@ harn_opcode_macros::define_opcodes! {
     GetLocalSlot { sync(self.execute_get_local_slot()), disasm: local_slot_u16("GET_LOCAL_SLOT") };
     DefLocalSlot { sync(self.execute_def_local_slot()), disasm: local_slot_u16("DEF_LOCAL_SLOT") };
     SetLocalSlot { sync(self.execute_set_local_slot()), disasm: local_slot_u16("SET_LOCAL_SLOT") };
+    ConcatAssignLocal { sync(self.execute_concat_assign_local()), disasm: local_slot_u16("CONCAT_ASSIGN_LOCAL") };
 }
 
 impl super::Vm {

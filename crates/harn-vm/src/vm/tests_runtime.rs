@@ -2877,3 +2877,43 @@ fn monomorphic_counter_loop_result_is_correct() {
     let (out, _) = run_harn(source);
     assert_eq!(out.trim_end(), "[harn] 140");
 }
+
+#[test]
+fn inplace_concat_untyped_accumulator_builds_correctly() {
+    // An accumulator whose static type is unknown (`any`-returning seed) goes
+    // through the fused `ConcatAssignLocal` opcode, which gates the in-place
+    // take on the runtime value. The accumulated list must be correct.
+    let source = r#"
+fn seed() -> any { return [] }
+pipeline t(task) {
+  var x = seed()
+  for i in [1, 2, 3] {
+    x = x + [i]
+  }
+  var y = seed()
+  for i in [4, 5] {
+    y += [i]
+  }
+  log("${x} ${y}")
+}"#;
+    assert_eq!(run_output(source), "[harn] [1, 2, 3] [4, 5]");
+}
+
+#[test]
+fn inplace_concat_preserves_binding_when_add_throws() {
+    // The fused opcode only takes the slot in place for List/Dict values. A
+    // scalar accumulator hit with an incompatible `+=` throws, and the binding
+    // must retain its previous value (it was cloned, not taken) rather than be
+    // left as the placeholder.
+    let source = r#"
+pipeline t(task) {
+  var x = 5
+  try {
+    x += [1]
+  } catch (e) {
+    log("caught")
+  }
+  log("${x}")
+}"#;
+    assert_eq!(run_output(source), "[harn] caught\n[harn] 5");
+}
