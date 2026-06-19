@@ -1377,6 +1377,29 @@ fn test_statement_comment_after_inline_dict_stays_on_statement() {
 }
 
 #[test]
+fn test_multiline_binary_operand_comments_preserved() {
+    // A comment on the first line of a binary expression that breaks across
+    // lines used to be dropped (top level) or relocated out of its block (in a
+    // body), because only the statement's last line got a trailing-comment
+    // pass. Each broken operand's comment must now survive in place.
+    let source = "fn f() -> int {\n  let r = aaa // c1\n    + bbb // c2\n  r\n}\n";
+    let result = format_source(source).unwrap();
+    assert!(
+        result.contains("aaa  // c1"),
+        "left-operand comment must stay on its line, got:\n{result}"
+    );
+    assert!(
+        result.contains("+ bbb  // c2"),
+        "right-operand comment must stay on its line, got:\n{result}"
+    );
+    assert!(
+        !result.trim_end().ends_with("// c1"),
+        "left-operand comment must not be relocated to EOF, got:\n{result}"
+    );
+    assert_roundtrip(source);
+}
+
+#[test]
 fn test_plain_double_slash_comment_preserved_verbatim() {
     let source = "// plain comment\npub fn exposed() -> string {\n  return \"x\"\n}\n";
     let result = format_source(source).unwrap();
