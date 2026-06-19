@@ -225,7 +225,7 @@ if hook_paths_match "$changed" "$HOOK_LANGSPEC_PATTERN"; then
   # inline rather than failing the commit. Mirrors the highlight stanza.
   echo "=== Pre-commit: syncing generated language spec ==="
   "$(hook_ensure_harn)" run scripts/sync_language_spec.harn
-  git add spec/HARN_SPEC.md docs/src/language-spec.md
+  git add spec/HARN_SPEC.md docs/src/language-spec.md docs/src/spec/language docs/src/SUMMARY.md
   echo "    Language spec OK."
 else
   echo "=== Pre-commit: skipping language spec sync (no spec changes) ==="

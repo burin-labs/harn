@@ -139,7 +139,7 @@ false`, writes a `harn.fact.v1` Observation with
 `provenance.source = "probe"` and `provenance.probe_kind = "<kind>"`. Recall
 those observations with `recall_facts(query, "Observation", 0.0, scope)`
 to surface prior probe outcomes before re-running. See
-[`std/agent/probe` in the language spec](language-spec.md#stdagentprobe-module)
+[`std/agent/probe` in the language spec](spec/language/26-checkpoint-resume.md#stdagentprobe-module)
 for the full surface area and `HARN-PROBE-NNN` diagnostics.
 
 ## Vector and hybrid backends

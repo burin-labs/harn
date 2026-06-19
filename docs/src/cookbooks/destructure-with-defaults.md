@@ -12,7 +12,7 @@ let opts = input?.opts ?? {}
 ```
 
 Every line repeats the source and the `?.` / `??` dance. Harn supports
-[destructuring with defaults](../language-spec.md#default-values), so the whole
+[destructuring with defaults](../spec/language/05-destructuring-patterns.md#default-values), so the whole
 block collapses to one bind:
 
 ```harn,ignore

@@ -35,6 +35,11 @@
     // H2) or MD012 (the inter-section trailing blank) without breaking the
     // byte-identical reassembly into the single-file spec.
     "spec/chapters/**/*.md",
+    // Generated per-chapter docs pages: header-prefixed copies of the
+    // spec/chapters sources above (same H2-start / blank-line shape), mirrored
+    // into docs/src so the hosted site is navigable chapter-by-chapter. The
+    // assembled docs/src/language-spec.md landing page IS linted.
+    "docs/src/spec/language/**/*.md",
     "conformance/tests/**/.harn/**/*.md",
     // Generated drift report fixture for the provider catalog refresh
     // workflow. Adapter run rows can exceed 120 cols when a URL and a

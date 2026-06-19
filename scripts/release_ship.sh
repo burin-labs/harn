@@ -558,7 +558,7 @@ prepare_here() {
   # changes (changelog, code, docs, generated mirrors) so the human's
   # next `git commit` captures the whole release in one shot.
   git add Cargo.toml Cargo.lock crates/*/Cargo.toml
-  git add docs/src/language-spec.md docs/theme/harn-keywords.js
+  git add docs/src/language-spec.md docs/src/spec/language docs/src/SUMMARY.md docs/theme/harn-keywords.js
   git add -u
 
   log_step "Prepare-here ready"
