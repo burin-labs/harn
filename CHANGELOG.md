@@ -8,6 +8,102 @@ highlights live in [CHANGELOG-pre-0.6.md](CHANGELOG-pre-0.6.md).
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.8.124
+
+### Breaking
+
+- **Selective imports now respect `pub` visibility.** `import { name } from "m"`
+  could previously bind a non-`pub` function of `m`, even though a wildcard
+  `import "m"` would not see it — selective imports silently bypassed
+  visibility. Now both forms expose the same surface: a module that marks any
+  function `pub` exports only its `pub` functions (and `pub import`
+  re-exports); a module that marks nothing `pub` still exports everything
+  (the zero-ceremony fallback is unchanged). Importing a non-`pub` name from a
+  module that has opted into explicit exports is rejected at `harn check` time
+  with `HARN-IMP-002` (pointing at the import, suggesting `pub`) and at load
+  time. **Migration:** mark the symbol `pub` if it is meant to be importable;
+  to test a private helper, co-locate the test in the same file (it sees
+  module-private functions directly). This matches TypeScript, Rust, and Go.
+
+### Added
+
+- **The `harn-diagnostics` skill now indexes the HARN-* error codes.** `harn
+  skills get harn-diagnostics` points at how to look up any `HARN-<CAT>-<NNN>`
+  code — `harn explain <CODE>` (and `--json`), the full `harn explain --catalog`
+  index, and the committed `docs/src/diagnostics.md` / `docs/diagnostics-catalog.json`.
+- **Arithmetic on a possibly-nil operand is now a compile-time error, with
+  control-flow narrowing for assignments.** `x + 1` where `x: int?` is flagged
+  (`operand of '+' may be nil`) instead of throwing `nil + 1` at runtime, for
+  `+ - * / % **`. A binding proven non-nil by an earlier assignment
+  (`x = 5`), a `!= nil` guard, or `??` is narrowed and not flagged — assignment
+  now participates in nil-narrowing (vars and `obj.field` paths), matching
+  TypeScript/Flow control-flow narrowing. This also sharpens the existing
+  nilable property-access diagnostics after an assignment.
+- **`harn test` now supports duration-aware user-test sharding.** User test
+  suites can pass `--shard-index` and `--shard-total` (or the matching
+  `HARN_TEST_SHARD_INDEX` / `HARN_TEST_SHARD_TOTAL` environment variables) to
+  split CI matrix work after discovery and balance shards using the existing
+  timing cache.
+
+### Changed
+
+- **Running a compiled chunk no longer deep-copies its bytecode.** `Vm::execute`
+  used to clone the entire `Chunk` (bytecode + constant pool + side tables) on
+  every top-level run. The internal run path now threads the shared
+  `Arc<Chunk>` straight into the call frame, and a new `Vm::execute_arc(ChunkRef)`
+  entry point lets callers that re-run the same chunk (the `harn serve` request
+  path, ACP, record filters) pay a refcount bump instead of an `O(code)` copy.
+  `Vm::execute(&Chunk)` is unchanged for one-shot callers.
+- **In-place list/dict concat now also speeds up dynamically-typed
+  accumulators.** The `out = out + [item]` / `out += [item]` loop already
+  extended the accumulator's buffer in place (amortized O(n)) when its type was
+  statically known to be a list or dict. A new fused `ConcatAssignLocal` opcode
+  gates that in-place extend on the *runtime* value instead, so untyped (`any`)
+  accumulators get the same O(n²) → O(n) win — and a throwing `+=` on a scalar
+  now reliably leaves the binding at its previous value.
+- **Set membership is now O(1).** `set` values previously stored only a plain
+  list and rebuilt a hash index from every element on each `contains` /
+  `union` / `intersect` / `difference` / subset/superset/disjoint call — O(n)
+  work (plus an allocation) per query. They now carry a resident structural-key
+  index alongside the items, so membership is O(1) and the set-algebra builtins
+  and methods drop from rebuild-per-call to a single probe per element.
+  Observable semantics (insertion-ordered iteration, structural dedup,
+  order-independent equality and hashing) are unchanged.
+
+### Fixed
+
+- **Generic type parameters now support multiple `where` bounds.** A
+  constraint written as repeated clauses (`where T: A, T: B`) no longer lets
+  the second bound clobber the first — both apply, so a method guaranteed by
+  the first interface is resolved correctly in the function body. The additive
+  spelling `where T: A + B` now parses as well; the two forms are equivalent.
+  Method resolution on a multiply-bound `T` accepts a method declared on any
+  bound interface, and call-site checking enforces every bound.
+- **Imports across a module cycle now bind reliably.** A plain `import "m"`
+  or `import { name } from "m"` that resolved to a module still mid-load (an
+  import cycle) used to silently skip binding the name, so calling it later
+  failed with `Undefined builtin: <name>` — and which module got starved
+  depended on load order, making the failure look nondeterministic. Cyclic
+  imports are now bound late, once every module in the cycle finishes loading,
+  for both bare references and calls. A `pub import` re-export across a cycle
+  remains unsupported but now fails with a message that names the cycle
+  instead of the misleading "imported module was not loaded".
+- **The formatter no longer drops or relocates comments on multi-line binary
+  and pipe expressions.** A trailing comment on the first line of an
+  expression that breaks across lines (e.g. `let r = aaa // note` followed by
+  `+ bbb`) was silently dropped at the top level, or moved out of its
+  enclosing block to the end of the file inside a function. Each broken
+  operand's trailing comment is now preserved in place.
+- **`json_stringify` now preserves the decimal point on whole-number floats.**
+  A `float` like `2.0` serialized to `"2"` (so `json_parse` read it back as an
+  `int`) and disagreed with `json_stringify_pretty`, which emitted `"2.0"`.
+  Compact output now routes finite floats through the same serde `Number`
+  formatter as the pretty printer, so floats round-trip as floats.
+- **`to_int` / `to_float` now trim surrounding whitespace before parsing.**
+  `to_int("  42  ")` and `to_float(" 1.5\n")` returned `nil`; they now parse to
+  `42` / `1.5`, matching the sibling `decimal(...)` builtin and Python/JS
+  numeric coercion. Non-numeric strings still return `nil`.
+
 ## v0.8.123
 
 ### Added
