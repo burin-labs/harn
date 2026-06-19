@@ -373,17 +373,15 @@ updated = re.sub(r'tag = "v\d+\.\d+\.\d+"', f'tag = "v{next_version}"', text)
 if updated != text:
     doc.write_text(updated)
 PY
-  # The audit lanes that ran before prepare populate `target/debug/incremental/`
-  # with object-file references keyed to the *old* version's crate hashes.
-  # Once `bump_version` rewrites Cargo.toml the workspace crates rebuild with
-  # fresh hashes, and the stale incremental directory has dangling .o refs —
-  # cargo aborts with "failed to open object file ... No such file or
-  # directory" and "extern location for harn_modules does not exist". Forcing
-  # `CARGO_INCREMENTAL=0` for the prepare-time cargo calls skips the
-  # incremental fast path entirely (these are one-shot builds anyway). Export
-  # so child make/cargo invocations downstream of release_ship.sh's
-  # `regenerate_derived_files` step inherit it too.
+  # The audit lanes that ran before prepare populate cache state keyed to the
+  # old workspace crate hashes. Once `bump_version` rewrites Cargo.toml, the
+  # prepare-time cargo calls are one-shot rebuilds of generated-artifact
+  # helpers; caching them has little value and has failed under macOS sccache
+  # file-descriptor pressure. Use direct rustc and skip incremental state for
+  # this post-bump phase.
   export CARGO_INCREMENTAL=0
+  export RUSTC_WRAPPER=
+  export SCCACHE_DISABLE=1
   make gen-protocol-artifacts
   cargo check --workspace --all-targets >/dev/null
   echo "Version updated: $current -> $next"

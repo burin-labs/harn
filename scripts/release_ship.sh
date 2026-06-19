@@ -544,12 +544,13 @@ prepare_here() {
     exit 1
   fi
 
-  # `release_gate.sh prepare` already exported CARGO_INCREMENTAL=0 to
-  # work around incremental-cache corruption after parallel audit builds
-  # + a Cargo.toml version bump. That export does not survive the
-  # subprocess boundary, so re-apply it for the cargo invocations
-  # `regenerate_derived_files` runs in this shell.
+  # `release_gate.sh prepare` disables cargo/sccache state for post-bump
+  # one-shot rebuilds. That export does not survive the subprocess boundary,
+  # so re-apply it for the cargo invocations `regenerate_derived_files` runs in
+  # this shell.
   export CARGO_INCREMENTAL=0
+  export RUSTC_WRAPPER=
+  export SCCACHE_DISABLE=1
   regenerate_derived_files
 
   log_step "Stage release content"
