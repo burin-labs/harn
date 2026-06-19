@@ -1,6 +1,7 @@
 use std::collections::BTreeMap;
 use std::fmt;
 use std::sync::Arc;
+use std::time::Duration;
 
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
@@ -73,6 +74,153 @@ pub struct RotationHandle {
     pub to_version: Option<u64>,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq, Hash, Ord, PartialOrd, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SecretScope {
+    Tenant { id: Option<String> },
+    Workspace { id: String },
+    System,
+    Custom { kind: String, id: Option<String> },
+}
+
+impl Default for SecretScope {
+    fn default() -> Self {
+        Self::Tenant { id: None }
+    }
+}
+
+impl SecretScope {
+    pub fn tenant(id: Option<String>) -> Self {
+        Self::Tenant { id }
+    }
+
+    pub fn workspace(id: impl Into<String>) -> Self {
+        Self::Workspace { id: id.into() }
+    }
+
+    pub fn system() -> Self {
+        Self::System
+    }
+
+    pub fn custom(kind: impl Into<String>, id: Option<String>) -> Self {
+        Self::Custom {
+            kind: kind.into(),
+            id,
+        }
+    }
+
+    pub fn namespace(&self) -> String {
+        match self {
+            Self::Tenant { id: Some(id) } if !id.is_empty() => format!("harn.tenant.{id}"),
+            Self::Tenant { .. } => "harn.tenant".to_string(),
+            Self::Workspace { id } => format!("harn.workspace.{id}"),
+            Self::System => "harn.system".to_string(),
+            Self::Custom { kind, id: Some(id) } if !id.is_empty() => {
+                format!("harn.{kind}.{id}")
+            }
+            Self::Custom { kind, .. } => format!("harn.{kind}"),
+        }
+    }
+
+    pub fn kind(&self) -> &str {
+        match self {
+            Self::Tenant { .. } => "tenant",
+            Self::Workspace { .. } => "workspace",
+            Self::System => "system",
+            Self::Custom { kind, .. } => kind.as_str(),
+        }
+    }
+
+    pub fn id(&self) -> Option<&str> {
+        match self {
+            Self::Tenant { id } | Self::Custom { id, .. } => id.as_deref(),
+            Self::Workspace { id } => Some(id.as_str()),
+            Self::System => None,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+pub struct SecretWriteOptions {
+    pub ttl: Option<Duration>,
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+pub struct SecretRotationOptions {
+    pub grace: Option<Duration>,
+    pub ttl: Option<Duration>,
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+pub struct SecretAuditContext {
+    pub request_id: Option<String>,
+    pub actor_subject: Option<String>,
+    pub actor_kind: Option<String>,
+}
+
+#[derive(Debug)]
+pub struct SecretReadRequest {
+    pub id: SecretId,
+    pub scope: SecretScope,
+    pub audit: SecretAuditContext,
+}
+
+#[derive(Debug)]
+pub struct SecretWriteRequest {
+    pub id: SecretId,
+    pub scope: SecretScope,
+    pub value: SecretBytes,
+    pub options: SecretWriteOptions,
+    pub audit: SecretAuditContext,
+}
+
+#[derive(Debug)]
+pub struct SecretRotateRequest {
+    pub id: SecretId,
+    pub scope: SecretScope,
+    pub value: SecretBytes,
+    pub options: SecretRotationOptions,
+    pub audit: SecretAuditContext,
+}
+
+#[derive(Debug)]
+pub struct SecretLeaseRequest {
+    pub id: SecretId,
+    pub scope: SecretScope,
+    pub duration: Duration,
+    pub audit: SecretAuditContext,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct SecretWriteReceipt {
+    pub provider: String,
+    pub id: SecretId,
+    pub scope: SecretScope,
+    pub version: Option<u64>,
+    pub expires_at_unix_ms: Option<i64>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct SecretRotationReceipt {
+    pub provider: String,
+    pub id: SecretId,
+    pub scope: SecretScope,
+    pub from_version: Option<u64>,
+    pub to_version: Option<u64>,
+    pub grace_until_unix_ms: Option<i64>,
+    pub expires_at_unix_ms: Option<i64>,
+}
+
+#[derive(Debug)]
+pub struct SecretLeaseGrant {
+    pub provider: String,
+    pub id: SecretId,
+    pub scope: SecretScope,
+    pub lease_id: String,
+    pub value: SecretBytes,
+    pub expires_at_unix_ms: i64,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum SecretError {
     NotFound {
@@ -88,6 +236,7 @@ pub enum SecretError {
         message: String,
     },
     InvalidConfig(String),
+    InvalidInput(String),
     NoProviders {
         namespace: String,
     },
@@ -106,6 +255,7 @@ impl fmt::Display for SecretError {
             } => write!(f, "{provider}: operation '{operation}' is unsupported"),
             Self::Backend { provider, message } => write!(f, "{provider}: {message}"),
             Self::InvalidConfig(message) => write!(f, "{message}"),
+            Self::InvalidInput(message) => write!(f, "{message}"),
             Self::NoProviders { namespace } => {
                 write!(
                     f,
@@ -252,6 +402,52 @@ pub trait SecretProvider: Send + Sync {
     async fn put(&self, id: &SecretId, value: SecretBytes) -> Result<(), SecretError>;
     async fn rotate(&self, id: &SecretId) -> Result<RotationHandle, SecretError>;
     async fn list(&self, prefix: &SecretId) -> Result<Vec<SecretMeta>, SecretError>;
+
+    async fn read_scoped(&self, request: SecretReadRequest) -> Result<SecretBytes, SecretError> {
+        self.get(&request.id).await
+    }
+
+    async fn write_scoped(
+        &self,
+        request: SecretWriteRequest,
+    ) -> Result<SecretWriteReceipt, SecretError> {
+        if request.options.ttl.is_some() {
+            return Err(SecretError::Unsupported {
+                provider: self.namespace().to_string(),
+                operation: "write_ttl",
+            });
+        }
+        self.put(&request.id, request.value).await?;
+        Ok(SecretWriteReceipt {
+            provider: self.namespace().to_string(),
+            id: request.id,
+            scope: request.scope,
+            version: None,
+            expires_at_unix_ms: None,
+        })
+    }
+
+    async fn rotate_scoped(
+        &self,
+        request: SecretRotateRequest,
+    ) -> Result<SecretRotationReceipt, SecretError> {
+        let _ = request;
+        Err(SecretError::Unsupported {
+            provider: self.namespace().to_string(),
+            operation: "rotate_to",
+        })
+    }
+
+    async fn lease_scoped(
+        &self,
+        request: SecretLeaseRequest,
+    ) -> Result<SecretLeaseGrant, SecretError> {
+        let _ = request;
+        Err(SecretError::Unsupported {
+            provider: self.namespace().to_string(),
+            operation: "lease",
+        })
+    }
 
     fn namespace(&self) -> &str;
     fn supports_versions(&self) -> bool;

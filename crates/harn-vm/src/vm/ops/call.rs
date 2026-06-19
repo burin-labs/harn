@@ -539,6 +539,7 @@ impl super::super::Vm {
             | crate::harness::HarnessKind::Net
             | crate::harness::HarnessKind::Process
             | crate::harness::HarnessKind::System
+            | crate::harness::HarnessKind::Secrets
             | crate::harness::HarnessKind::Llm
             | crate::harness::HarnessKind::Obs => false,
         };

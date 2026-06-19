@@ -1164,6 +1164,7 @@ impl TypeChecker {
                 "process" => Some(TypeExpr::Named("HarnessProcess".into())),
                 "crypto" => Some(TypeExpr::Named("HarnessCrypto".into())),
                 "system" => Some(TypeExpr::Named("HarnessSystem".into())),
+                "secrets" => Some(TypeExpr::Named("HarnessSecrets".into())),
                 "llm" => Some(TypeExpr::Named("HarnessLlm".into())),
                 "tenant" => Some(TypeExpr::Named("HarnessTenant".into())),
                 "auth" => Some(TypeExpr::Named("HarnessAuth".into())),
