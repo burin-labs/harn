@@ -1,15 +1,42 @@
 ---
 name: harn-diagnostics
-short: Diagnostics, explain output, repair plans, and fix-safety classes.
-description: Use for Harn diagnostics, error codes, explain output, repair metadata, and fix application safety.
-when_to_use: Use when working on typechecker diagnostics, lint diagnostics, harn explain, or repair flows.
+short: Diagnostics, the HARN-* error-code index, explain output, repair plans, and fix-safety classes.
+description: Use for Harn diagnostics, looking up any HARN-* error code, the full code index/catalog, explain output, repair metadata, and fix application safety.
+when_to_use: Use when working on typechecker diagnostics, lint diagnostics, harn explain, or repair flows — or when you hit a `HARN-<CAT>-<NNN>` code and want to look up what it means.
 ---
 
 # Harn diagnostics
 
-Use this skill when changing errors, warnings, explain output, repair metadata, or fix application behavior.
+Use this skill when changing errors, warnings, explain output, repair metadata,
+or fix application behavior — or when you need to look up what a
+`HARN-<CAT>-<NNN>` code means.
 
 Pair it with [[harn-language]] for syntax and type contracts and [[harn-agent]] for autonomy gating.
+
+## Code index (look up any HARN-* code)
+
+Every diagnostic `harn check`, `harn lint`, and `harn fmt` emit carries a stable
+`HARN-<CAT>-<NNN>` code. The code registry is the single source of truth
+(`crates/harn-parser/src/diagnostic_codes.rs` plus the per-code explanation in
+`crates/harn-parser/src/diagnostic_codes/explanations/<CODE>.md`); everything
+below is generated from it, so never hand-maintain a parallel list.
+
+- **Look up one code:** `harn explain HARN-TYP-014` (human-readable) or
+  `harn explain HARN-TYP-014 --json` (structured: category, summary, repair,
+  safety class, related codes).
+- **Full index of every code:** `harn explain --catalog` (add
+  `--format markdown` or `--format json`). This is the complete cheat sheet —
+  one entry per code with its summary, repair, and safety class.
+- **Committed artifacts** (kept in sync by CI):
+  - `docs/src/diagnostics.md` — the rendered index, grouped by category.
+  - `docs/diagnostics-catalog.json` — `schemaVersion: 1` structured contract
+    consumed by downstream tooling (IDE diagnostic panels, hosted error pages).
+    Tools should read this, not regex prose.
+- **Regenerate** after changing the registry or an explanation:
+  `make sync-diagnostics-catalog` (CI guard: `make check-diagnostics-catalog`).
+
+The category prefixes below are the mental map for the index; `harn explain`
+resolves any individual code.
 
 ## Start here
 
