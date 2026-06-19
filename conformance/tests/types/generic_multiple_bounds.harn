@@ -1,0 +1,24 @@
+pipeline test(task) {
+  interface Named {
+    fn name(self) -> string
+  }
+  interface Aged {
+    fn age(self) -> int
+  }
+  struct Person {
+    name: string
+    age: int
+  }
+  impl Person {
+    fn name(self) -> string {
+      return self.name
+    }
+    fn age(self) -> int {
+      return self.age
+    }
+  }
+  fn describe<T>(item: T) -> string where T: Named, T: Aged {
+    return "${item.name()} is ${item.age()}"
+  }
+  log(describe(Person({name: "Alice", age: 30})))
+}

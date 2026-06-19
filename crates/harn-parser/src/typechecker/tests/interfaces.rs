@@ -196,3 +196,50 @@ log(collection.get(0))
         warns[0]
     );
 }
+
+#[test]
+fn test_multiple_where_bounds_comma_form_resolve_methods() {
+    // `where T: A, T: B` must keep BOTH bounds — previously the second clause
+    // clobbered the first, so a method from A was wrongly reported missing.
+    let errs = errors(
+        r"pipeline t(task) {
+  interface A { fn a(self) -> string }
+  interface B { fn b(self) -> string }
+  fn run<T>(x: T) -> string where T: A, T: B { return x.a() + x.b() }
+}",
+    );
+    assert!(errs.is_empty(), "expected no errors, got: {errs:?}");
+}
+
+#[test]
+fn test_multiple_where_bounds_additive_form_resolve_methods() {
+    // `where T: A + B` is the additive spelling of the same constraint.
+    let errs = errors(
+        r"pipeline t(task) {
+  interface A { fn a(self) -> string }
+  interface B { fn b(self) -> string }
+  fn run<T>(x: T) -> string where T: A + B { return x.a() + x.b() }
+}",
+    );
+    assert!(errs.is_empty(), "expected no errors, got: {errs:?}");
+}
+
+#[test]
+fn test_multiple_where_bounds_unknown_method_lists_all_interfaces() {
+    let warns: Vec<String> = warnings(
+        r"pipeline t(task) {
+  interface A { fn a(self) -> string }
+  interface B { fn b(self) -> string }
+  fn run<T>(x: T) -> string where T: A + B { return x.nope() }
+}",
+    )
+    .into_iter()
+    .filter(|w| w.contains("not found in"))
+    .collect();
+    assert_eq!(warns.len(), 1, "expected 1 warning, got: {warns:?}");
+    assert!(
+        warns[0].contains("constraint interfaces A + B"),
+        "expected both bounds listed, got: {}",
+        warns[0]
+    );
+}

@@ -91,9 +91,11 @@ pub(super) struct TypeScope {
     pub(super) impl_methods: BTreeMap<String, Vec<ImplMethodSig>>,
     /// Generic type parameter names in scope (treated as compatible with any type).
     pub(super) generic_type_params: std::collections::BTreeSet<String>,
-    /// Where-clause constraints: type_param → interface_bound.
+    /// Where-clause constraints: type_param → interface_bounds. A single type
+    /// parameter may carry multiple bounds, written either as repeated clauses
+    /// (`where T: A, T: B`) or additively (`where T: A + B`); all of them apply.
     /// Used for definition-site checking of generic function bodies.
-    pub(super) where_constraints: BTreeMap<String, String>,
+    pub(super) where_constraints: BTreeMap<String, Vec<String>>,
     /// Variables declared with `var` (mutable). Variables not in this set
     /// are immutable (`let`, function params, loop vars, etc.).
     pub(super) mutable_vars: std::collections::BTreeSet<String>,
@@ -391,15 +393,24 @@ impl TypeScope {
                 .is_some_and(|p| p.is_generic_type_param(name))
     }
 
-    pub(super) fn get_where_constraint(&self, type_param: &str) -> Option<&str> {
-        self.where_constraints
+    /// All interface bounds declared for `type_param`, walking the scope chain.
+    /// A type parameter constrained as `where T: A, T: B` (or `where T: A + B`)
+    /// must satisfy every returned bound; method resolution in a generic body
+    /// succeeds if the method is declared on *any* of them.
+    pub(super) fn get_where_constraints(&self, type_param: &str) -> Vec<String> {
+        let mut bounds: Vec<String> = self
+            .where_constraints
             .get(type_param)
-            .map(|s| s.as_str())
-            .or_else(|| {
-                self.parent
-                    .as_ref()
-                    .and_then(|p| p.get_where_constraint(type_param))
-            })
+            .cloned()
+            .unwrap_or_default();
+        if let Some(parent) = self.parent.as_ref() {
+            for bound in parent.get_where_constraints(type_param) {
+                if !bounds.contains(&bound) {
+                    bounds.push(bound);
+                }
+            }
+        }
+        bounds
     }
 
     pub(super) fn get_enum(&self, name: &str) -> Option<&EnumDeclInfo> {

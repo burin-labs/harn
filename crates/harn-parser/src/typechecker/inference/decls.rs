@@ -450,11 +450,18 @@ impl TypeChecker {
         for tp in type_params {
             fn_scope.generic_type_params.insert(tp.name.clone());
         }
-        // Store where-clause constraints for definition-site checking
+        // Store where-clause constraints for definition-site checking. A type
+        // parameter can appear in more than one clause (`where T: A, T: B`) or
+        // carry additive bounds (`where T: A + B`); accumulate them all rather
+        // than letting a later clause clobber an earlier one.
         for wc in where_clauses {
-            fn_scope
+            let bounds = fn_scope
                 .where_constraints
-                .insert(wc.type_name.clone(), wc.bound.clone());
+                .entry(wc.type_name.clone())
+                .or_default();
+            if !bounds.contains(&wc.bound) {
+                bounds.push(wc.bound.clone());
+            }
         }
         for param in params {
             let param_type = if param.rest {
