@@ -51,6 +51,7 @@ exempt_checks = [
   "check-docs-cli-flags",           # validates docs bash/sh harn flags, not a mirror
   "check-docs-links",               # validates docs/src local links resolve, not a mirror
   "check-site-snippets",            # validates website Harn fixtures parse, not a mirror
+  "check-grammar-keywords",         # validates spec grammar keyword literals vs the lexer, not a mirror
   "check-generated-registry",       # the auditor itself
 ]
 
