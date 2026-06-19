@@ -183,6 +183,7 @@ jobs:
           # `make conformance` above, so they're effectively free here.
           make check-highlight
           make check-language-spec
+          make check-grammar-keywords
           make check-trigger-quickref
           make check-provider-matrix
           make check-provider-support

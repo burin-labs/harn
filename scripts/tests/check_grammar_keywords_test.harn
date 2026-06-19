@@ -1,0 +1,26 @@
+// Tests for scripts/check_grammar_keywords.harn helpers.
+import "../check_grammar_keywords.harn"
+
+@test
+pipeline test_grammar_section_extracts_body(task) {
+  let spec = "intro\n\n## Grammar\nrule ::= 'fn'\n\n## Next\nother\n"
+  let section = grammar_section(spec)
+  assert(section != nil)
+  assert(section.contains("rule ::= 'fn'"))
+  assert(!section.contains("other"))
+}
+
+@test
+pipeline test_grammar_section_missing_returns_nil(task) {
+  assert_eq(grammar_section("no grammar header here"), nil)
+}
+
+@test
+pipeline test_single_quoted_words_extracts_alpha_literals(task) {
+  let words = single_quoted_words("a ::= 'fn' | 'where' ':' '->' 'fn'")
+  assert(words.contains("fn"))
+  assert(words.contains("where"))
+  // punctuation literals and duplicates are excluded
+  assert(!words.contains(":"))
+  assert_eq(words.count, 2)
+}
