@@ -174,17 +174,8 @@ fn run_plan_source_inner(source: &str, plan_path: &Path) -> Result<JsonValue, St
         .parse()
         .map_err(|error| format!("counterfactual plan parse error: {error}"))?;
 
-    let mut checker = TypeChecker::new();
-    let graph = harn_modules::build(&[plan_path.to_path_buf()]);
-    if let Some(imported) = graph.imported_names_for_file(plan_path) {
-        checker = checker.with_imported_names(imported);
-    }
-    if let Some(imported) = graph.imported_type_declarations_for_file(plan_path) {
-        checker = checker.with_imported_type_decls(imported);
-    }
-    if let Some(imported) = graph.imported_callable_declarations_for_file(plan_path) {
-        checker = checker.with_imported_callable_decls(imported);
-    }
+    let checker =
+        crate::typecheck_imports::checker_with_resolved_imports(TypeChecker::new(), plan_path);
     for diag in checker.check(&program) {
         if matches!(diag.severity, DiagnosticSeverity::Error) {
             return Err(format!("counterfactual plan type error: {}", diag.message));

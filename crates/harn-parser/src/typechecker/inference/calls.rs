@@ -1475,12 +1475,31 @@ impl TypeChecker {
                     }
                 }
             }
-        } else if let Some(sig) = builtin_signatures::lookup(name) {
+        } else if let Some(sig) =
+            builtin_signatures::lookup(name).filter(|_| !self.name_is_imported(name))
+        {
+            // An explicit `import { name } from ...` shadows a same-named
+            // builtin, matching the VM's runtime resolution. Guards the
+            // case where an imported symbol is known by name but its
+            // signature was not resolved into scope: without this, e.g.
+            // `render` imported from `std/disclosure` (3 params) would be
+            // checked against the `render` builtin (`path: string?,
+            // bindings: dict`) and report phantom errors. Like every other
+            // imported call in that mode, we then only check the arguments.
             self.check_builtin_signature_call(name, sig, type_args, args, has_spread, scope, span);
         } else {
             for arg in args {
                 self.check_node(arg, scope);
             }
         }
+    }
+
+    /// Whether `name` was brought into scope by an `import` in the
+    /// resolved cross-module mode (`with_imported_names`). Outside that
+    /// mode there is no import set, so builtins are never shadowed.
+    fn name_is_imported(&self, name: &str) -> bool {
+        self.imported_names
+            .as_ref()
+            .is_some_and(|names| names.contains(name))
     }
 }

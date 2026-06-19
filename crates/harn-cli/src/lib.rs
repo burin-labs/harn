@@ -19,6 +19,7 @@ pub mod test_report;
 pub mod test_runner;
 #[doc(hidden)]
 pub mod tests;
+mod typecheck_imports;
 
 pub use harn_skills::{get_embedded_skill, list_embedded_skills, EmbeddedSkill, SkillFrontmatter};
 
@@ -3109,16 +3110,7 @@ async fn execute_with_skill_dirs_and_optional_harness(
     // is no importing file context; we fall back to no-imports checking.
     let mut checker = TypeChecker::new();
     if let Some(path) = source_path {
-        let graph = harn_modules::build(&[path.to_path_buf()]);
-        if let Some(imported) = graph.imported_names_for_file(path) {
-            checker = checker.with_imported_names(imported);
-        }
-        if let Some(imported) = graph.imported_type_declarations_for_file(path) {
-            checker = checker.with_imported_type_decls(imported);
-        }
-        if let Some(imported) = graph.imported_callable_declarations_for_file(path) {
-            checker = checker.with_imported_callable_decls(imported);
-        }
+        checker = crate::typecheck_imports::checker_with_resolved_imports(checker, path);
     }
     let type_diagnostics = checker.check(&program);
     let mut warning_lines = Vec::new();

@@ -33,6 +33,7 @@ use crate::commands::collect_harn_files;
 use crate::dispatch;
 use crate::env_guard::ScopedEnvVar;
 use crate::parse_source_file;
+use crate::typecheck_imports::checker_with_resolved_imports;
 
 /// Env var the embedded `cli/precompile` script reads to find the
 /// running `harn` binary path. Set from `std::env::current_exe()` so
@@ -171,9 +172,13 @@ fn precompile_one(
     let (parsed_source, program) = parse_source_file(&path_str);
     debug_assert_eq!(parsed_source, source);
 
+    // Resolve imports like `execute`/`harn check` so a call to an imported
+    // symbol that shadows a builtin is checked against the right signature.
+    let checker = checker_with_resolved_imports(harn_parser::TypeChecker::new(), source_path);
+
     let mut had_type_error = false;
     let mut messages = String::new();
-    for diag in harn_parser::TypeChecker::new().check_with_source(&program, &source) {
+    for diag in checker.check_with_source(&program, &source) {
         let rendered = harn_parser::diagnostic::render_type_diagnostic(&source, &path_str, &diag);
         if matches!(diag.severity, DiagnosticSeverity::Error) {
             had_type_error = true;
