@@ -126,7 +126,21 @@ pub(crate) fn extract_llm_options(
         opt_int(&options, "timeout_ms"),
     );
     let idle_timeout = opt_int(&options, "idle_timeout").map(|t| t as u64);
-    let cache = opt_bool(&options, "cache");
+    // Provider-side prompt caching now defaults ON for routes that support
+    // it. Marking the stable system+tools+history prefix cacheable discounts
+    // the re-sent prefix heavily across multi-turn agent loops and the rubric
+    // grader (Anthropic ephemeral ~90% off cached input; OpenRouter passes
+    // cache_control through; DeepSeek/gpt-oss cache implicitly). When the route
+    // does not support caching, the default resolves to `false` so the request
+    // stays byte-identical (and the strict gate below never fires on the
+    // default). An explicit `cache:` value is always honoured verbatim — an
+    // explicit `cache: true` on a non-supporting route still errors loudly via
+    // the capability gate so misconfiguration is surfaced, and `cache: false`
+    // opts out everywhere.
+    let cache = match options.as_ref().and_then(|o| o.get("cache")) {
+        Some(value) => value.is_truthy(),
+        None => caps.prompt_caching,
+    };
     let stream = options
         .as_ref()
         .and_then(|o| o.get("stream"))
@@ -757,6 +771,102 @@ pub(super) fn validate_options(opts: &crate::llm::api::LlmCallOptions) {
     }
     if opts.cache && !caps.prompt_caching {
         warn("cache");
+    }
+}
+
+#[cfg(test)]
+mod cache_default_tests {
+    use super::extract_llm_options;
+    use crate::value::{DictMap, VmDictExt, VmValue};
+
+    fn opts_with(options: DictMap) -> crate::llm::api::LlmCallOptions {
+        extract_llm_options(&[
+            VmValue::String(arcstr::ArcStr::from("hello")),
+            VmValue::Nil,
+            VmValue::dict(options),
+        ])
+        .expect("options")
+    }
+
+    fn try_opts_with(options: DictMap) -> Result<crate::llm::api::LlmCallOptions, super::VmError> {
+        extract_llm_options(&[
+            VmValue::String(arcstr::ArcStr::from("hello")),
+            VmValue::Nil,
+            VmValue::dict(options),
+        ])
+    }
+
+    // The `mock` provider needs no API key and resolves its capability row by
+    // spoofing the real provider family of the model-id shape: a Claude-shaped
+    // id lands on the Anthropic row (prompt_caching = true), while a bare,
+    // unrecognised id falls through to defaults (prompt_caching = false). This
+    // lets us exercise both default branches against the real capability
+    // lookup, offline.
+    fn caching_route() -> DictMap {
+        let mut options = DictMap::new();
+        options.put_str("provider", "mock");
+        options.put_str("model", "claude-sonnet-4.6");
+        options
+    }
+
+    fn non_caching_route() -> DictMap {
+        let mut options = DictMap::new();
+        options.put_str("provider", "mock");
+        options.put_str("model", "no-cache-model");
+        options
+    }
+
+    #[test]
+    fn cache_defaults_off_for_non_supporting_route() {
+        // A route whose capability matrix says `prompt_caching = false` must
+        // resolve the default to OFF so the outgoing request stays byte-
+        // identical and the strict capability gate never trips on a default.
+        assert!(
+            !crate::llm::capabilities::lookup("mock", "no-cache-model").prompt_caching,
+            "precondition: route must not support caching"
+        );
+        assert!(
+            !opts_with(non_caching_route()).cache,
+            "cache default must be OFF when the route does not support caching"
+        );
+    }
+
+    #[test]
+    fn cache_defaults_on_for_supporting_route() {
+        // When the route supports prompt caching, the stable system+tools+
+        // history prefix is marked cacheable by default so multi-turn loops
+        // and the rubric grader pay the discounted cached-input rate.
+        assert!(
+            crate::llm::capabilities::lookup("mock", "claude-sonnet-4.6").prompt_caching,
+            "precondition: route must support caching"
+        );
+        assert!(
+            opts_with(caching_route()).cache,
+            "cache must default ON for a caching-capable route"
+        );
+    }
+
+    #[test]
+    fn explicit_cache_false_opts_out_on_supporting_route() {
+        let mut options = caching_route();
+        options.insert("cache".to_string(), VmValue::Bool(false));
+        assert!(
+            !opts_with(options).cache,
+            "explicit `cache: false` must opt out"
+        );
+    }
+
+    #[test]
+    fn explicit_cache_true_errors_on_non_supporting_route() {
+        // The strict capability gate is preserved: an explicit `cache: true`
+        // on a route that cannot cache surfaces a loud error rather than a
+        // silent no-op (unchanged behavior).
+        let mut options = non_caching_route();
+        options.insert("cache".to_string(), VmValue::Bool(true));
+        assert!(
+            try_opts_with(options).is_err(),
+            "explicit `cache: true` on a non-supporting route must error"
+        );
     }
 }
 
