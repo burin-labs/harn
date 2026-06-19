@@ -1,0 +1,5 @@
+import { public_api } from "selective_import_private_rejected_lib"
+
+pipeline default() {
+  __io_println(public_api())
+}

@@ -1041,9 +1041,40 @@ providers = "runtime/providers.harn"
 With the example above, `import "acme/capabilities"` resolves to the
 declared file inside the installed `acme` package.
 
+#### Export visibility
+
+A module's **export surface** — the set of names other modules can import,
+whether by wildcard (`import "m"`) or selectively (`import { x } from "m"`) —
+is determined by `pub`:
+
+- If the module marks **at least one** function `pub`, it opts into explicit
+  exports: **only** the `pub` functions (plus any `pub import` re-exports) are
+  importable. Non-`pub` functions are private to the module — usable by its
+  own functions, but not importable by name or by wildcard.
+- If the module marks **nothing** `pub`, every function is exported (a
+  zero-ceremony convenience for small modules and scripts, similar to Python's
+  public-by-default model).
+
+The same rule applies to both import forms — a selective import cannot reach a
+private function that a wildcard import would not see. Importing a non-`pub`
+name from a module that has opted into explicit exports is an error
+(`HARN-IMP-002`) at `harn check` time and at load time; the message points at
+the import and suggests marking the symbol `pub`.
+
+**Gotcha — adding the first `pub` is a breaking change to importers.** A
+module with no `pub` exports everything; marking *one* function `pub` flips the
+module into explicit-export mode and makes every *other* function private. If
+downstream code imported those now-private names, it will stop resolving.
+Prefer marking every intended export `pub` from the start.
+
+**Testing private functions.** A non-`pub` function is visible to any
+`pipeline` or `fn` declared in the **same file**, so co-locate unit tests with
+the code under test (the Rust/Go white-box pattern) rather than importing the
+private name into a separate test module.
+
 Selective imports: `import { name1, name2 } from "module"` imports only
-the specified functions. Functions marked `pub` are exported by default;
-if no `pub` functions exist, all functions are exported.
+the specified functions, each of which must be part of the module's export
+surface (see above).
 
 Scoped selective imports are shorthand for slash-delimited module paths:
 `import std::personas::prelude::{verify_then_act}` is equivalent to

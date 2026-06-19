@@ -100,6 +100,72 @@ pub(super) fn scan_import_collisions(
     }
 }
 
+/// Flag selective imports that name a symbol the target module declares but
+/// does not export — a non-`pub` function in a module that marks something
+/// else `pub`. Such names are not importable (matching the runtime loader and
+/// strict-visibility languages like TypeScript/Rust/Go), so point at the
+/// import with an actionable "mark it `pub`" message instead of leaving the
+/// author to discover it only as a runtime failure. Fires even when the
+/// imported name is never called.
+///
+/// The "is it exported?" determination is owned by the module graph
+/// ([`harn_modules::ModuleGraph::non_exported_selective_imports`]) — the single
+/// source of truth shared with the typechecker and runtime; here we only map
+/// that result onto the import spans in this file, mirroring
+/// [`scan_re_export_conflicts`].
+pub(super) fn scan_selective_import_visibility(
+    file_path: &Path,
+    source: &str,
+    program: &[SNode],
+    graph: &harn_modules::ModuleGraph,
+    diagnostics: &mut Vec<PreflightDiagnostic>,
+) {
+    let offenders = graph.non_exported_selective_imports(file_path);
+    if offenders.is_empty() {
+        return;
+    }
+
+    // Selective-import spans keyed by (name, module-as-written) so each
+    // diagnostic lands on the exact `import { name } from "module"` line.
+    let mut spans: std::collections::HashMap<(String, String), harn_lexer::Span> =
+        std::collections::HashMap::new();
+    for node in program {
+        if let Node::SelectiveImport { names, path, .. } = &node.node {
+            for name in names {
+                spans
+                    .entry((name.clone(), path.clone()))
+                    .or_insert(node.span);
+            }
+        }
+    }
+    let fallback_span = program
+        .first()
+        .map(|n| n.span)
+        .unwrap_or_else(|| harn_lexer::Span::with_offsets(0, 0, 1, 1));
+
+    for offender in offenders {
+        let span = spans
+            .get(&(offender.name.clone(), offender.module.clone()))
+            .copied()
+            .unwrap_or(fallback_span);
+        diagnostics.push(PreflightDiagnostic {
+            code: Code::ImportSymbolMissing,
+            path: file_path.display().to_string(),
+            source: source.to_string(),
+            span,
+            message: format!(
+                "imported symbol `{}` is not exported by `{}` — it is defined there but not `pub`",
+                offender.name, offender.module
+            ),
+            help: Some(format!(
+                "mark `{}` as `pub` in `{}` to export it",
+                offender.name, offender.module
+            )),
+            tags: None,
+        });
+    }
+}
+
 /// Emit diagnostics for ambiguous or conflicting `pub import` re-exports
 /// declared in `file_path`. Two re-exports of the same name from
 /// different source modules — or a re-export that shadows a locally

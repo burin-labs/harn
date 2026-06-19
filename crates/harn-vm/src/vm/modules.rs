@@ -312,7 +312,28 @@ impl Vm {
         loaded: &LoadedModule,
         selected_names: Option<&[String]>,
     ) -> Result<(), VmError> {
+        let module_name = module_path.display().to_string();
         let export_names: Vec<String> = if let Some(names) = selected_names {
+            // Selective imports may only name symbols the module actually
+            // exports: its `pub` surface, or — when nothing is marked `pub` —
+            // all of its functions (the same set a wildcard import would see).
+            // Reaching a non-`pub` symbol by name used to succeed, which was
+            // inconsistent with wildcard imports and with every strict-
+            // visibility language (TypeScript, Rust, Go).
+            if !loaded.public_names.is_empty() {
+                for name in names {
+                    if !loaded.public_names.contains(name) {
+                        let hint = if loaded.functions.contains_key(name) {
+                            " — it is defined there but not `pub`; mark it `pub` to export it"
+                        } else {
+                            ""
+                        };
+                        return Err(VmError::Runtime(format!(
+                            "Import error: '{name}' is not exported by {module_name}{hint}"
+                        )));
+                    }
+                }
+            }
             names.to_vec()
         } else if !loaded.public_names.is_empty() {
             loaded.public_names.iter().cloned().collect()
@@ -320,7 +341,6 @@ impl Vm {
             loaded.functions.keys().cloned().collect()
         };
 
-        let module_name = module_path.display().to_string();
         for name in export_names {
             let Some(closure) = loaded.functions.get(&name) else {
                 return Err(VmError::Runtime(format!(
