@@ -340,6 +340,15 @@ impl TypeChecker {
                 args,
             } => {
                 self.check_call(name, type_args, args, scope, span);
+                // `assert(cond, msg?)` throws when `cond` is falsy, so after the
+                // call the truthy refinement of `cond` holds — narrow the
+                // continuing scope like `require`/guard. Lets the idiomatic
+                // `assert(x != nil)` then `x - 1` type-check.
+                if name == "assert" {
+                    if let Some(cond) = args.first() {
+                        self.extract_refinements(cond, scope).apply_truthy(scope);
+                    }
+                }
                 // Strict types: schema_expect clears untyped source status
                 if self.strict_types && name == "schema_expect" && args.len() >= 2 {
                     if let Node::Identifier(var_name) = &args[0].node {
@@ -457,6 +466,12 @@ impl TypeChecker {
                 if let Some(message) = message {
                     self.check_node(message, scope);
                 }
+                // `require cond` throws when `cond` is falsy, so after it the
+                // truthy refinement holds — narrow the continuing scope just
+                // like a guard's else-diverges case (e.g. `require x != nil`
+                // then `x + 1`).
+                self.extract_refinements(condition, scope)
+                    .apply_truthy(scope);
             }
 
             Node::TryCatch {
