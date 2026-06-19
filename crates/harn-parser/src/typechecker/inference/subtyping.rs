@@ -267,7 +267,10 @@ impl TypeChecker {
                 }
                 if let Some(type_name) = Self::base_type_name(&actual) {
                     if scope.is_generic_type_param(type_name)
-                        && scope.get_where_constraint(type_name) == Some(iface_name)
+                        && scope
+                            .get_where_constraints(type_name)
+                            .iter()
+                            .any(|bound| bound == iface_name)
                     {
                         return true;
                     }

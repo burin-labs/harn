@@ -105,8 +105,22 @@ impl Parser {
                         }
                         let type_name = self.consume_identifier("type parameter name")?;
                         self.consume(&TokenKind::Colon, ":")?;
-                        let bound = self.consume_identifier("type bound")?;
-                        clauses.push(WhereClause { type_name, bound });
+                        // A bound may be additive: `where T: A + B` constrains T
+                        // by both A and B. Desugar each additive term into its
+                        // own clause so downstream consumers see a flat list.
+                        loop {
+                            let bound = self.consume_identifier("type bound")?;
+                            clauses.push(WhereClause {
+                                type_name: type_name.clone(),
+                                bound,
+                            });
+                            if self.check(&TokenKind::Plus) {
+                                self.advance();
+                                self.skip_newlines();
+                            } else {
+                                break;
+                            }
+                        }
                         if self.check(&TokenKind::Comma) {
                             self.advance();
                             self.skip_newlines();

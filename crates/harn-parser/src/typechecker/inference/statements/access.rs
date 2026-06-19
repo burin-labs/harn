@@ -14,20 +14,35 @@ impl TypeChecker {
         if !scope.is_generic_type_param(&type_name) {
             return;
         }
-        let Some(iface_name) = scope.get_where_constraint(&type_name) else {
-            return;
-        };
-        let Some(iface_methods) = scope.get_interface(iface_name) else {
-            return;
-        };
-        if iface_methods.methods.iter().any(|m| m.name == method) {
+        let bounds = scope.get_where_constraints(&type_name);
+        if bounds.is_empty() {
             return;
         }
+        // A method call on a constrained type parameter is valid if *any* of
+        // its bound interfaces declares the method. Only consider bounds whose
+        // interface we can actually resolve — an unknown bound is left to other
+        // diagnostics rather than producing a misleading "not found" here.
+        let mut resolved_ifaces: Vec<&str> = Vec::new();
+        for bound in &bounds {
+            let Some(iface_methods) = scope.get_interface(bound) else {
+                continue;
+            };
+            if iface_methods.methods.iter().any(|m| m.name == method) {
+                return;
+            }
+            resolved_ifaces.push(bound.as_str());
+        }
+        if resolved_ifaces.is_empty() {
+            return;
+        }
+        let iface_desc = if resolved_ifaces.len() == 1 {
+            format!("interface '{}'", resolved_ifaces[0])
+        } else {
+            format!("constraint interfaces {}", resolved_ifaces.join(" + "))
+        };
         self.warning_at(
             Code::UnknownMethod,
-            format!(
-                "Method '{method}' not found in interface '{iface_name}' (constraint on '{type_name}')"
-            ),
+            format!("Method '{method}' not found in {iface_desc} (constraint on '{type_name}')"),
             span,
         );
     }

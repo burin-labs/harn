@@ -535,8 +535,8 @@ continue_stmt      ::= 'continue'
 
 generic_params     ::= '<' generic_param (',' generic_param)* '>'
 generic_param      ::= ['in' | 'out'] IDENTIFIER
-where_clause       ::= 'where' IDENTIFIER ':' IDENTIFIER
-                       (',' IDENTIFIER ':' IDENTIFIER)*
+where_clause       ::= 'where' where_bound (',' where_bound)*
+where_bound        ::= IDENTIFIER ':' IDENTIFIER ('+' IDENTIFIER)*
 
 fn_param_list      ::= (fn_param (',' fn_param)*)? [',' rest_param]
                      | rest_param
@@ -3564,6 +3564,19 @@ the constraint produces a compile-time error. Generic parameters must bind
 consistently across all arguments in the call, and container bindings such as
 `list<T>` propagate the concrete element type instead of collapsing to an
 unconstrained generic.
+
+A type parameter may carry more than one bound, written either as repeated
+clauses or additively — the two forms are equivalent and `T` must satisfy
+every bound:
+
+```harn,ignore
+fn describe<T>(item: T) -> string where T: Named, T: Aged { ... }
+fn describe<T>(item: T) -> string where T: Named + Aged { ... }
+```
+
+Inside the body, a method call on `T` resolves against all of its bounds:
+it is accepted when the method is declared on any bound interface, and a
+call to a method on none of them is flagged.
 
 ### Subtyping and variance
 
