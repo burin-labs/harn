@@ -160,6 +160,27 @@ fn test_parses_test_determinism_flag() {
 }
 
 #[test]
+fn test_parses_test_shard_flags() {
+    let cli = Cli::parse_from([
+        "harn",
+        "test",
+        "--parallel",
+        "--shard-index",
+        "2",
+        "--shard-total",
+        "4",
+        "tests/",
+    ]);
+
+    let Command::Test(args) = cli.command.unwrap() else {
+        panic!("expected test command");
+    };
+    assert_eq!(args.shard_index, Some(2));
+    assert_eq!(args.shard_total, Some(4));
+    assert_eq!(args.target.as_deref(), Some("tests/"));
+}
+
+#[test]
 fn test_parses_new_template() {
     let cli = Cli::parse_from(["harn", "new", "review-bot", "--template", "agent"]);
 

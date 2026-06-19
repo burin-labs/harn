@@ -769,15 +769,22 @@ async fn async_main(raw_args: Vec<String>, runtime_mode: CliRuntimeMode) {
                     "`harn test --watch` cannot combine with --junit or --json-out; the watch loop never terminates so the report would never be written",
                 );
             }
+            let shard_requested = args.shard_index.is_some() || args.shard_total.is_some();
             if args.target.as_deref() == Some("agents-conformance") {
                 if args.selection.is_some() {
                     command_error(
                         "`harn test agents-conformance` does not accept a second positional target; use --category instead",
                     );
                 }
-                if args.evals || args.determinism || args.record || args.replay || args.watch {
+                if args.evals
+                    || args.determinism
+                    || args.record
+                    || args.replay
+                    || args.watch
+                    || shard_requested
+                {
                     command_error(
-                        "`harn test agents-conformance` cannot be combined with --evals, --determinism, --record, --replay, or --watch",
+                        "`harn test agents-conformance` cannot be combined with --evals, --determinism, --record, --replay, --watch, or test sharding",
                     );
                 }
                 let Some(target_url) = args.agents_target.clone() else {
@@ -814,6 +821,7 @@ async fn async_main(raw_args: Vec<String>, runtime_mode: CliRuntimeMode) {
                     || args.agents_workspace_id.is_some()
                     || args.agents_session_id.is_some()
                     || args.parallel
+                    || shard_requested
                     || !args.skill_dir.is_empty()
                 {
                     command_error(
@@ -828,6 +836,9 @@ async fn async_main(raw_args: Vec<String>, runtime_mode: CliRuntimeMode) {
                 return;
             }
             if args.evals {
+                if shard_requested {
+                    command_error("--evals cannot be combined with test sharding");
+                }
                 if args.determinism || args.record || args.replay || args.watch {
                     command_error("--evals cannot be combined with --determinism, --record, --replay, or --watch");
                 }
@@ -836,6 +847,9 @@ async fn async_main(raw_args: Vec<String>, runtime_mode: CliRuntimeMode) {
                 }
                 run_package_evals();
             } else if args.determinism {
+                if shard_requested {
+                    command_error("--determinism cannot be combined with test sharding");
+                }
                 let cli_skill_dirs: Vec<PathBuf> =
                     args.skill_dir.iter().map(PathBuf::from).collect();
                 if args.watch {
@@ -903,6 +917,9 @@ async fn async_main(raw_args: Vec<String>, runtime_mode: CliRuntimeMode) {
 
                 if let Some(t) = args.target.as_deref() {
                     if t == "conformance" {
+                        if shard_requested {
+                            command_error("test sharding is only supported for user test suites");
+                        }
                         commands::test::run_conformance_tests(
                             t,
                             args.selection.as_deref(),
@@ -923,6 +940,7 @@ async fn async_main(raw_args: Vec<String>, runtime_mode: CliRuntimeMode) {
                             "only `harn test conformance` accepts a second positional target",
                         );
                     } else {
+                        let shard = resolve_user_test_shard(args.shard_index, args.shard_total);
                         let run_args = commands::test::UserTestRunArgs {
                             filter: args.filter.as_deref(),
                             timeout_ms: args.timeout,
@@ -930,6 +948,7 @@ async fn async_main(raw_args: Vec<String>, runtime_mode: CliRuntimeMode) {
                             max_execute_ms: args.max_execute_ms,
                             parallel: args.parallel,
                             jobs: args.jobs,
+                            shard,
                             verbose: args.verbose,
                             timing: args.timing,
                             diagnose: args.diagnose,
@@ -960,6 +979,7 @@ async fn async_main(raw_args: Vec<String>, runtime_mode: CliRuntimeMode) {
                             "only `harn test conformance` accepts a second positional target",
                         );
                     }
+                    let shard = resolve_user_test_shard(args.shard_index, args.shard_total);
                     let run_args = commands::test::UserTestRunArgs {
                         filter: args.filter.as_deref(),
                         timeout_ms: args.timeout,
@@ -967,6 +987,7 @@ async fn async_main(raw_args: Vec<String>, runtime_mode: CliRuntimeMode) {
                         max_execute_ms: args.max_execute_ms,
                         parallel: args.parallel,
                         jobs: args.jobs,
+                        shard,
                         verbose: args.verbose,
                         timing: args.timing,
                         diagnose: args.diagnose,
@@ -3299,6 +3320,20 @@ fn connector_secret_namespace(base_dir: &Path) -> String {
                 .unwrap_or("workspace");
             format!("harn/{leaf}")
         }
+    }
+}
+
+fn resolve_user_test_shard(
+    shard_index: Option<usize>,
+    shard_total: Option<usize>,
+) -> Option<test_runner::TestShard> {
+    match (shard_index, shard_total) {
+        (None, None) => None,
+        (Some(index), Some(total)) => match test_runner::TestShard::new(index, total) {
+            Ok(shard) => Some(shard),
+            Err(error) => command_error(&error),
+        },
+        _ => command_error("test sharding requires both --shard-index and --shard-total"),
     }
 }
 
