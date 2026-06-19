@@ -219,13 +219,13 @@ else
 fi
 
 if hook_paths_match "$changed" "$HOOK_LANGSPEC_PATTERN"; then
-  # spec/HARN_SPEC.md is the authoring source; docs/src/language-spec.md
-  # is a `cat`-with-header mirror. Regen + restage is sub-second, so do
-  # the consistency fixup inline rather than failing the commit and
-  # leaving the human to run the script. Mirrors the highlight stanza.
+  # spec/chapters/*.md are the authoring source; spec/HARN_SPEC.md (single-file
+  # assembly) and docs/src/language-spec.md (header-prefixed mirror) are both
+  # generated. Regen + restage is sub-second, so do the consistency fixup
+  # inline rather than failing the commit. Mirrors the highlight stanza.
   echo "=== Pre-commit: syncing generated language spec ==="
   "$(hook_ensure_harn)" run scripts/sync_language_spec.harn
-  git add docs/src/language-spec.md
+  git add spec/HARN_SPEC.md docs/src/language-spec.md
   echo "    Language spec OK."
 else
   echo "=== Pre-commit: skipping language spec sync (no spec changes) ==="

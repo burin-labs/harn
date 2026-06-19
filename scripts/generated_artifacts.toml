@@ -72,11 +72,11 @@ pre_push = true
 
 [[artifact]]
 id = "language-spec"
-description = "docs/src/language-spec.md is a generated mirror of spec/HARN_SPEC.md (the authoring source)."
+description = "spec/HARN_SPEC.md (single-file assembly) and docs/src/language-spec.md (docs mirror) are generated from the per-chapter sources in spec/chapters/."
 gen = "sync-language-spec"
 check = "check-language-spec"
-outputs = ["docs/src/language-spec.md"]
-sources = ["spec/HARN_SPEC.md"]
+outputs = ["spec/HARN_SPEC.md", "docs/src/language-spec.md"]
+sources = ["spec/chapters/*.md"]
 ci = true
 make_all = true
 pre_commit = true

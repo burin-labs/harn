@@ -30,6 +30,11 @@
     ".harn-runs",
     "meta_scratch",
     "docs/src/SUMMARY.md",
+    // Per-chapter spec sources are assembled into spec/HARN_SPEC.md, which IS
+    // linted. Individually they can't satisfy MD041 (each section starts at
+    // H2) or MD012 (the inter-section trailing blank) without breaking the
+    // byte-identical reassembly into the single-file spec.
+    "spec/chapters/**/*.md",
     "conformance/tests/**/.harn/**/*.md",
     // Generated drift report fixture for the provider catalog refresh
     // workflow. Adapter run rows can exceed 120 cols when a URL and a
