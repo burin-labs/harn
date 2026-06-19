@@ -66,7 +66,20 @@ impl Formatter<'_> {
                 if should_break {
                     let pad = "  ".repeat(indent + 1);
                     if op_safe_after_newline(op_str) {
-                        format!("{l}\n{pad}{op_str} {r}")
+                        // Claim any trailing comment on the left operand's last
+                        // line before we break, so it isn't orphaned. The
+                        // statement-level trailing-comment pass only sees the
+                        // whole expression's end line (the right operand), so
+                        // without this the left operand's comment is dropped or
+                        // relocated out of its block. Safe only here: a `//`
+                        // comment before the `\` line-continuation below would
+                        // comment out the continuation, so that branch is left
+                        // to the statement-level pass.
+                        let left_comment = self
+                            .take_trailing_comment_for_line(left.span.end_line)
+                            .map(|c| format!("  {c}"))
+                            .unwrap_or_default();
+                        format!("{l}{left_comment}\n{pad}{op_str} {r}")
                     } else {
                         format!("{l} \\\n{pad}{op_str} {r}")
                     }
