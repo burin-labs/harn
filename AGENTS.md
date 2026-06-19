@@ -64,7 +64,8 @@ broader `make test` gate before pushing.
 - `crates/harn-lsp`, `crates/harn-dap`: editor and debugger integrations.
 - `crates/harn-cli/portal/`: React/Vite persisted-run UI.
 - `conformance/tests/`: executable language/runtime spec.
-- `spec/HARN_SPEC.md`: canonical language spec.
+- `spec/chapters/*.md`: canonical language spec, one file per section
+  (`spec/HARN_SPEC.md` is the generated single-file assembly).
 - `docs/src/`: Markdown docs (Diataxis IA), rendered by the `website/` site.
 - `website/`: Vite + React + Tailwind site for harnlang.com; builds to `docs/dist/`.
 - `tree-sitter-harn/`: tree-sitter grammar and tests.
@@ -118,8 +119,9 @@ polling loops, `SystemTime::now()`, or short `recv_timeout` calls to tests. Use
 
 ## Generated files
 
-- Edit `spec/HARN_SPEC.md`, not `docs/src/language-spec.md`; regenerate with
-  `make sync-language-spec`.
+- Edit the per-chapter sources in `spec/chapters/*.md`, not the generated
+  `spec/HARN_SPEC.md` (single-file assembly) or `docs/src/language-spec.md`
+  (docs mirror); regenerate both with `make sync-language-spec`.
 - Do not hand-edit `docs/theme/harn-keywords.js`; regenerate with
   `make gen-highlight`.
 - Do not hand-edit `spec/protocol-artifacts/*` except `*_test.go`. Regenerate

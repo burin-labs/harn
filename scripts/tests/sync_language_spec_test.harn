@@ -1,32 +1,26 @@
 // Tests for scripts/sync_language_spec.harn — verify the
 // generated-mirror header and that the spec body is preserved verbatim
-// under it. Uses `render_from(spec_text)` so the test is independent of
-// the test runner's working directory.
+// under it. Uses `render_mirror_from(spec_text)` so the test is
+// independent of the test runner's working directory.
 import "../sync_language_spec.harn"
 
+let EXPECTED_HEADER = "<!-- Generated from spec/chapters/*.md by scripts/sync_language_spec.harn -->\n\n"
+
 @test
-pipeline test_render_from_starts_with_header(task) {
-  let rendered = render_from("hello\n")
-  assert(
-    rendered
-      .starts_with(
-      "<!-- Generated from spec/HARN_SPEC.md by scripts/sync_language_spec.harn -->\n\n",
-    ),
-  )
+pipeline test_render_mirror_starts_with_header(task) {
+  let rendered = render_mirror_from("hello\n")
+  assert(rendered.starts_with(EXPECTED_HEADER))
 }
 
 @test
-pipeline test_render_from_preserves_body(task) {
+pipeline test_render_mirror_preserves_body(task) {
   let body = "## Title\n\nbody line\n"
-  let rendered = render_from(body)
+  let rendered = render_mirror_from(body)
   assert(rendered.ends_with(body))
 }
 
 @test
-pipeline test_render_from_empty_body(task) {
-  let rendered = render_from("")
-  assert_eq(
-    rendered,
-    "<!-- Generated from spec/HARN_SPEC.md by scripts/sync_language_spec.harn -->\n\n",
-  )
+pipeline test_render_mirror_empty_body(task) {
+  let rendered = render_mirror_from("")
+  assert_eq(rendered, EXPECTED_HEADER)
 }

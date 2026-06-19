@@ -14,9 +14,12 @@ tree-walking VM, tree-sitter grammar, and CLI/runtime tooling. Programs consist 
 containing imperative statements, expressions, and calls to registered builtins
 that perform I/O, LLM calls, and tool execution.
 
-This file is the canonical language specification. The hosted docs page
-`docs/src/language-spec.md` is generated from it by
-`scripts/sync_language_spec.harn`.
+The canonical specification is authored as per-chapter Markdown files in
+`spec/chapters/` (one file per top-level section). `spec/HARN_SPEC.md` is a
+generated single-file assembly of those chapters — do not edit it directly —
+and the hosted docs page `docs/src/language-spec.md` is generated alongside it
+by `scripts/sync_language_spec.harn`. Edit the chapter files and run
+`make sync-language-spec` (the pre-commit hook does this automatically).
 
 ## Lexical rules
 

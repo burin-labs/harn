@@ -4,21 +4,22 @@
 # authoring source.
 #
 # Why this hook exists:
-#   `docs/src/language-spec.md` is a header-prefixed `cat` of
-#   `spec/HARN_SPEC.md`. The repo configures a custom merge driver
-#   `merge.harn-generated.driver = true` (see scripts/configure_merge_drivers.sh)
-#   that silently keeps the current side of the merge instead of trying
-#   to combine both. That works during plain merges where the user
-#   regenerates afterwards, but during a rebase it silently drops the
-#   author's mirror update — the spec is preserved (it has its own
-#   3-way merge), but the mirror reverts to the upstream version. CI
-#   then fails on `make check-language-spec`.
+#   `spec/HARN_SPEC.md` and `docs/src/language-spec.md` are both generated
+#   from the per-chapter sources in `spec/chapters/`. The repo configures a
+#   custom merge driver `merge.harn-generated.driver = true` (see
+#   scripts/configure_merge_drivers.sh) that silently keeps the current side
+#   of the merge instead of combining both. That works during plain merges
+#   where the user regenerates afterwards, but during a rebase it silently
+#   drops the author's regenerated files — the chapter sources are preserved
+#   (they have their own 3-way merge), but the generated copies revert to the
+#   upstream version. CI then fails on `make check-language-spec`.
 #
 # What this does:
-#   When the most recent rewrite touched `spec/HARN_SPEC.md`, regenerate
-#   `docs/src/language-spec.md`. If that produces changes, fold them
-#   into the latest rewritten commit via `--amend --no-edit --no-verify`.
-#   `--no-verify` skips the pre-commit hook so we don't recurse.
+#   When the most recent rewrite touched a `spec/chapters/*.md` source,
+#   regenerate `spec/HARN_SPEC.md` + `docs/src/language-spec.md`. If that
+#   produces changes, fold them into the latest rewritten commit via
+#   `--amend --no-edit --no-verify`. `--no-verify` skips pre-commit so we
+#   don't recurse.
 #
 # Safety:
 #   - Only fires when the trigger is `rebase` (skips `amend` to avoid
@@ -39,23 +40,23 @@ cd "$repo_root"
 rewrites=$(cat) || exit 0
 [ -n "$rewrites" ] || exit 0
 
-# `spec/HARN_SPEC.md` → `docs/src/language-spec.md` is the only mirror
-# pair we cheaply regenerate here. The sync logic itself is a `.harn`
-# script invoked through the workspace's debug harn binary; we
-# fast-path skip the regen if the binary isn't built yet, so a clean
-# checkout doesn't pay a Rust build cost during a rebase.
-spec_path="spec/HARN_SPEC.md"
-mirror_path="docs/src/language-spec.md"
+# `spec/chapters/*.md` (the authoring source) → `spec/HARN_SPEC.md` +
+# `docs/src/language-spec.md` (both generated) is the mirror set we cheaply
+# regenerate here. The sync logic itself is a `.harn` script invoked through
+# the workspace's debug harn binary; we fast-path skip the regen if the binary
+# isn't built yet, so a clean checkout doesn't pay a Rust build cost.
+source_pattern='^spec/chapters/.*\.md$'
+generated_paths="spec/HARN_SPEC.md docs/src/language-spec.md"
 sync_script="scripts/sync_language_spec.harn"
 harn_bin="target/debug/harn"
 
 [ -f "$sync_script" ] || exit 0
 [ -x "$harn_bin" ] || exit 0
 
-# How many of the rewritten commits touched the spec?
+# How many of the rewritten commits touched a spec chapter source?
 spec_touching_news=$(echo "$rewrites" | awk '{print $2}' | while read -r sha; do
   [ -n "$sha" ] || continue
-  if git show --name-only --pretty=format: "$sha" 2>/dev/null | grep -Fxq "$spec_path"; then
+  if git show --name-only --pretty=format: "$sha" 2>/dev/null | grep -Eq "$source_pattern"; then
     echo "$sha"
   fi
 done)
@@ -77,13 +78,13 @@ fi
 
 "$harn_bin" run "$sync_script" >/dev/null 2>&1 || exit 0
 
-if git diff --quiet --exit-code -- "$mirror_path"; then
+if git diff --quiet --exit-code -- $generated_paths; then
   exit 0
 fi
 
 if [ "$count" -eq 1 ] && [ "$last_touched" = "$last_sha" ]; then
-  echo "post-rewrite: regenerated $mirror_path from $spec_path; folding into $(git rev-parse --short HEAD)" >&2
-  git add -- "$mirror_path"
+  echo "post-rewrite: regenerated $generated_paths from spec/chapters; folding into $(git rev-parse --short HEAD)" >&2
+  git add -- $generated_paths
   GIT_EDITOR=true git commit --amend --no-edit --no-verify >/dev/null
   exit 0
 fi
@@ -92,14 +93,14 @@ fi
 # would put the regen in the wrong commit. Leave the regenerated file
 # in the working tree and let the user fold it in manually.
 echo "" >&2
-echo "post-rewrite: docs/src/language-spec.md is stale relative to spec/HARN_SPEC.md." >&2
+echo "post-rewrite: generated spec files are stale relative to spec/chapters." >&2
 echo "" >&2
-echo "  $count rewritten commit(s) touched the spec; auto-amend would land the" >&2
-echo "  mirror update on the wrong commit. The regenerated mirror is in your" >&2
-echo "  working tree." >&2
+echo "  $count rewritten commit(s) touched spec chapters; auto-amend would land" >&2
+echo "  the regen on the wrong commit. The regenerated files are in your working" >&2
+echo "  tree." >&2
 echo "" >&2
-echo "  Fold it into the right commit, e.g.:" >&2
-echo "    git add $mirror_path" >&2
+echo "  Fold them into the right commit, e.g.:" >&2
+echo "    git add $generated_paths" >&2
 echo "    git rebase -i ${last_touched}^   # squash the regen into the spec commit" >&2
 echo "" >&2
 exit 0

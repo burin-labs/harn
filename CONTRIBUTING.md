@@ -459,6 +459,7 @@ helper produces the same split layout deterministically.
 ## Key references
 
 - [Language spec](spec/HARN_SPEC.md): authoritative language specification
+  (generated single-file assembly; edit the per-chapter sources in `spec/chapters/`)
 - [AST docs](spec/AST.md): AST node types
 - [Builtin reference](docs/src/builtins.md): all built-in functions
 - [Language basics](docs/src/language-basics.md): syntax guide
