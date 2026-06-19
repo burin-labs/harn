@@ -150,7 +150,7 @@ impl ElicitationBus {
                 .get("code")
                 .and_then(|value| value.as_i64())
                 .unwrap_or(-1);
-            return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+            return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
                 format!("mcp_elicit: client error ({code}): {message}"),
             ))));
         }
@@ -182,16 +182,16 @@ fn canonical_id(value: &JsonValue) -> String {
 /// validation has well-defined semantics.
 fn validate_requested_schema(schema: &JsonValue) -> Result<(), VmError> {
     let object = schema.as_object().ok_or_else(|| {
-        VmError::Thrown(VmValue::String(std::sync::Arc::from(
+        VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
             "mcp_elicit: requestedSchema must be a JSON object",
         )))
     })?;
     match object.get("type").and_then(|value| value.as_str()) {
         Some("object") => Ok(()),
-        Some(other) => Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+        Some(other) => Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
             format!("mcp_elicit: requestedSchema.type must be \"object\" (got {other:?})"),
         )))),
-        None => Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+        None => Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
             "mcp_elicit: requestedSchema.type is required and must be \"object\"",
         )))),
     }
@@ -208,12 +208,12 @@ pub(crate) fn envelope_from_response(
         .get("action")
         .and_then(|value| value.as_str())
         .ok_or_else(|| {
-            VmError::Thrown(VmValue::String(std::sync::Arc::from(
+            VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
                 "mcp_elicit: client response missing 'action'",
             )))
         })?;
     if !matches!(action, "accept" | "decline" | "cancel") {
-        return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(format!(
+        return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
             "mcp_elicit: client response action must be 'accept'/'decline'/'cancel' (got {action:?})"
         )))));
     }
@@ -243,14 +243,14 @@ pub(crate) fn validate_accepted_content(
     let canonical_schema = elicitation_validate_schema(&json_to_vm_value(requested_schema))
         .map_err(|error| match error {
             VmError::Thrown(VmValue::String(s)) => VmError::Thrown(VmValue::String(
-                std::sync::Arc::from(format!("mcp_elicit: invalid requestedSchema: {s}")),
+                arcstr::ArcStr::from(format!("mcp_elicit: invalid requestedSchema: {s}")),
             )),
             other => other,
         })?;
     let content_vm = json_to_vm_value(content);
     elicitation_validate(&content_vm, &canonical_schema).map_err(|error| match error {
         VmError::Thrown(VmValue::String(s)) => VmError::Thrown(VmValue::String(
-            std::sync::Arc::from(format!("mcp_elicit: content failed schema validation: {s}")),
+            arcstr::ArcStr::from(format!("mcp_elicit: content failed schema validation: {s}")),
         )),
         other => other,
     })

@@ -1,7 +1,6 @@
 //! Integration tests for `hostlib_tools_get_file_outline`.
 
 use std::fs;
-use std::sync::Arc;
 
 use harn_hostlib::tools::permissions;
 use harn_hostlib::{tools::ToolsCapability, BuiltinRegistry, HostlibCapability};
@@ -25,7 +24,7 @@ fn dict_arg(entries: &[(&str, VmValue)]) -> Vec<VmValue> {
 }
 
 fn vm_string(s: &str) -> VmValue {
-    VmValue::String(Arc::from(s))
+    VmValue::String(arcstr::ArcStr::from(s))
 }
 
 fn outline_items(value: &VmValue) -> Vec<(String, String)> {

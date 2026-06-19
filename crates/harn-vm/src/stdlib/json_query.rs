@@ -265,7 +265,7 @@ fn eval_builtin(builtin: Builtin, input: &VmValue) -> VmValue {
         Builtin::Keys => match input {
             VmValue::Dict(map) => VmValue::List(std::sync::Arc::new(
                 map.keys()
-                    .map(|key| VmValue::String(std::sync::Arc::from(key.as_str())))
+                    .map(|key| VmValue::String(arcstr::ArcStr::from(key.as_str())))
                     .collect(),
             )),
             VmValue::List(items) => VmValue::List(std::sync::Arc::new(
@@ -283,7 +283,7 @@ fn eval_builtin(builtin: Builtin, input: &VmValue) -> VmValue {
             VmValue::Set(set) => VmValue::List(set.shared_items()),
             _ => VmValue::List(std::sync::Arc::new(Vec::new())),
         },
-        Builtin::Type => VmValue::String(std::sync::Arc::from(jq_type_name(input))),
+        Builtin::Type => VmValue::String(arcstr::ArcStr::from(jq_type_name(input))),
     }
 }
 
@@ -449,7 +449,7 @@ impl<'a> Parser<'a> {
             return self.parse_object();
         }
         if self.peek_char() == Some('"') {
-            return Ok(Expr::Literal(VmValue::String(std::sync::Arc::from(
+            return Ok(Expr::Literal(VmValue::String(arcstr::ArcStr::from(
                 self.parse_string()?.as_str(),
             ))));
         }

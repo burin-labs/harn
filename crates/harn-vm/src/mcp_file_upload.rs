@@ -135,7 +135,7 @@ fn status_value() -> VmValue {
     file_upload.insert(
         "spec_revision".to_string(),
         if let Some(config) = config {
-            VmValue::String(std::sync::Arc::from(config.spec_revision))
+            VmValue::String(arcstr::ArcStr::from(config.spec_revision))
         } else {
             VmValue::Nil
         },
@@ -313,7 +313,7 @@ fn upload_file(args: &[VmValue]) -> Result<VmValue, VmError> {
     }
 
     let encoded = base64::engine::general_purpose::STANDARD.encode(bytes);
-    Ok(VmValue::String(std::sync::Arc::from(format!(
+    Ok(VmValue::String(arcstr::ArcStr::from(format!(
         "data:{media_type};base64,{encoded}"
     ))))
 }
@@ -666,7 +666,7 @@ fn list_of_strings(
             string_vec(value, field, callee).map(|items| {
                 items
                     .into_iter()
-                    .map(|item| VmValue::String(std::sync::Arc::from(item)))
+                    .map(|item| VmValue::String(arcstr::ArcStr::from(item)))
                     .collect()
             })
         })

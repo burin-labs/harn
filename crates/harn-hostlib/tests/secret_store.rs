@@ -7,7 +7,6 @@
 //! by `os_native.rs` on the matching target.
 
 use std::collections::BTreeMap;
-use std::sync::Arc;
 use std::sync::Mutex;
 
 use harn_hostlib::{
@@ -78,7 +77,7 @@ fn dict_arg(entries: &[(&str, VmValue)]) -> Vec<VmValue> {
 }
 
 fn vm_string(s: &str) -> VmValue {
-    VmValue::String(Arc::from(s))
+    VmValue::String(arcstr::ArcStr::from(s))
 }
 
 fn dict_get<'a>(value: &'a VmValue, key: &str) -> &'a VmValue {
@@ -90,7 +89,7 @@ fn dict_get<'a>(value: &'a VmValue, key: &str) -> &'a VmValue {
 
 fn as_string(value: &VmValue) -> &str {
     match value {
-        VmValue::String(s) => s.as_ref(),
+        VmValue::String(s) => s.as_str(),
         other => panic!("not a string: {other:?}"),
     }
 }

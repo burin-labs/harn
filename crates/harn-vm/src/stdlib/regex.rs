@@ -41,7 +41,7 @@ fn get_cached_regex(pattern: &str, flags: &str) -> Result<Rc<regex::Regex>, VmEr
             return Ok(Rc::clone(re));
         }
         let re = Rc::new(build_regex(pattern, flags).map_err(|e| {
-            VmError::Thrown(VmValue::String(std::sync::Arc::from(format!(
+            VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
                 "Invalid regex: {e}"
             ))))
         })?);
@@ -126,7 +126,7 @@ fn regex_match_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmEr
     let re = get_cached_regex(&pattern, &flags)?;
     let matches: Vec<VmValue> = re
         .find_iter(&text)
-        .map(|m| VmValue::String(std::sync::Arc::from(m.as_str())))
+        .map(|m| VmValue::String(arcstr::ArcStr::from(m.as_str())))
         .collect();
     if matches.is_empty() {
         return Ok(VmValue::Nil);
@@ -152,7 +152,7 @@ fn regex_replace_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, Vm
     };
     let flags = optional_flags(args, 3);
     let re = get_cached_regex(&pattern, &flags)?;
-    Ok(VmValue::String(std::sync::Arc::from(
+    Ok(VmValue::String(arcstr::ArcStr::from(
         re.replace_all(&text, replacement.as_ref()).into_owned(),
     )))
 }
@@ -191,7 +191,7 @@ fn regex_captures_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, V
 
         let groups: Vec<VmValue> = (1..caps.len())
             .map(|i| match caps.get(i) {
-                Some(m) => VmValue::String(std::sync::Arc::from(m.as_str())),
+                Some(m) => VmValue::String(arcstr::ArcStr::from(m.as_str())),
                 None => VmValue::Nil,
             })
             .collect();
@@ -227,7 +227,7 @@ fn regex_captures_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, V
             if let Some(m) = caps.name(name) {
                 dict.insert(
                     name.to_string(),
-                    VmValue::String(std::sync::Arc::from(m.as_str())),
+                    VmValue::String(arcstr::ArcStr::from(m.as_str())),
                 );
             }
         }
@@ -249,7 +249,7 @@ fn regex_split_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmEr
     let re = get_cached_regex(&pattern, &flags)?;
     Ok(VmValue::List(std::sync::Arc::new(
         re.split(&text)
-            .map(|part| VmValue::String(std::sync::Arc::from(part)))
+            .map(|part| VmValue::String(arcstr::ArcStr::from(part)))
             .collect(),
     )))
 }
@@ -272,7 +272,7 @@ mod tests {
     }
 
     fn s(v: &str) -> VmValue {
-        VmValue::String(std::sync::Arc::from(v))
+        VmValue::String(arcstr::ArcStr::from(v))
     }
 
     fn unwrap_list(v: &VmValue) -> &Vec<VmValue> {

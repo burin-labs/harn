@@ -95,8 +95,8 @@ pub fn depth_within(value: &VmValue, limit: usize) -> bool {
                     stack.push((field, depth + 1));
                 }
             }
-            VmValue::StructInstance { fields, .. } => {
-                for field in fields.iter().flatten() {
+            VmValue::StructInstance(data) => {
+                for field in data.fields.iter().flatten() {
                     stack.push((field, depth + 1));
                 }
             }
@@ -158,9 +158,11 @@ pub fn dismantle_values<I: IntoIterator<Item = VmValue>>(values: I) {
                     }
                 }
             }
-            VmValue::StructInstance { fields, .. } => {
-                if let Some(fields) = Arc::into_inner(fields) {
-                    stack.extend(fields.into_iter().flatten());
+            VmValue::StructInstance(data) => {
+                if let Some(sid) = Arc::into_inner(data) {
+                    if let Some(fields) = Arc::into_inner(sid.fields) {
+                        stack.extend(fields.into_iter().flatten());
+                    }
                 }
             }
             VmValue::Closure(closure) => {

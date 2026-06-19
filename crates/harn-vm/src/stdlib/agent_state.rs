@@ -89,7 +89,7 @@ fn agent_state_read_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue,
     let key = required_arg_string(args, 1, "__agent_state_read", "key")?;
     let scope = scope_from_handle(handle)?;
     match backend.read(&scope, &key)? {
-        Some(content) => Ok(VmValue::String(std::sync::Arc::from(content))),
+        Some(content) => Ok(VmValue::String(arcstr::ArcStr::from(content))),
         None => Ok(VmValue::Nil),
     }
 }
@@ -106,7 +106,7 @@ fn agent_state_list_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue,
     let items = backend
         .list(&scope)?
         .into_iter()
-        .map(|key| VmValue::String(std::sync::Arc::from(key)))
+        .map(|key| VmValue::String(arcstr::ArcStr::from(key)))
         .collect();
     Ok(VmValue::List(std::sync::Arc::new(items)))
 }
@@ -347,7 +347,7 @@ fn writer_vm_value(writer: &WriterIdentity) -> VmValue {
         writer
             .writer_id
             .as_ref()
-            .map(|item| VmValue::String(std::sync::Arc::from(item.clone())))
+            .map(|item| VmValue::String(arcstr::ArcStr::from(item.clone())))
             .unwrap_or(VmValue::Nil),
     );
     value.insert(
@@ -355,7 +355,7 @@ fn writer_vm_value(writer: &WriterIdentity) -> VmValue {
         writer
             .stage_id
             .as_ref()
-            .map(|item| VmValue::String(std::sync::Arc::from(item.clone())))
+            .map(|item| VmValue::String(arcstr::ArcStr::from(item.clone())))
             .unwrap_or(VmValue::Nil),
     );
     value.insert(
@@ -363,7 +363,7 @@ fn writer_vm_value(writer: &WriterIdentity) -> VmValue {
         writer
             .session_id
             .as_ref()
-            .map(|item| VmValue::String(std::sync::Arc::from(item.clone())))
+            .map(|item| VmValue::String(arcstr::ArcStr::from(item.clone())))
             .unwrap_or(VmValue::Nil),
     );
     value.insert(
@@ -371,7 +371,7 @@ fn writer_vm_value(writer: &WriterIdentity) -> VmValue {
         writer
             .worker_id
             .as_ref()
-            .map(|item| VmValue::String(std::sync::Arc::from(item.clone())))
+            .map(|item| VmValue::String(arcstr::ArcStr::from(item.clone())))
             .unwrap_or(VmValue::Nil),
     );
     VmValue::dict(value)

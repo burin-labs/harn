@@ -29,7 +29,7 @@ fn dict_arg(entries: &[(&str, VmValue)]) -> Vec<VmValue> {
 }
 
 fn vm_string(s: &str) -> VmValue {
-    VmValue::String(Arc::from(s))
+    VmValue::String(arcstr::ArcStr::from(s))
 }
 
 fn dict_get<'a>(value: &'a VmValue, key: &str) -> &'a VmValue {
@@ -81,7 +81,7 @@ fn staged_write_is_read_through_until_commit() {
         ("path", vm_string(&path_str(&file))),
     ]))
     .unwrap();
-    assert!(matches!(dict_get(&result, "content"), VmValue::String(s) if s.as_ref() == "draft"));
+    assert!(matches!(dict_get(&result, "content"), VmValue::String(s) if s.as_str() == "draft"));
 
     let status = (reg.find("hostlib_fs_staged_status").unwrap().handler)(&dict_arg(&[(
         "session_id",
@@ -199,7 +199,7 @@ fn staged_delete_masks_disk_and_discard_restores_view() {
         ("path", vm_string(&path_str(&file))),
     ]))
     .unwrap();
-    assert!(matches!(dict_get(&result, "content"), VmValue::String(s) if s.as_ref() == "disk"));
+    assert!(matches!(dict_get(&result, "content"), VmValue::String(s) if s.as_str() == "disk"));
 }
 
 #[test]
@@ -229,7 +229,7 @@ fn staged_overlay_uses_current_agent_session_when_args_omit_session_id() {
         vm_string(&path_str(&file)),
     )]))
     .unwrap();
-    assert!(matches!(dict_get(&result, "content"), VmValue::String(s) if s.as_ref() == "implicit"));
+    assert!(matches!(dict_get(&result, "content"), VmValue::String(s) if s.as_str() == "implicit"));
 }
 
 #[test]
@@ -264,7 +264,7 @@ fn staged_write_with_new_parent_is_visible_in_directory_overlay() {
         other => panic!("expected directory entries, got {other:?}"),
     };
     let parent = entries.iter().find(|entry| {
-        matches!(dict_get(entry, "name"), VmValue::String(name) if name.as_ref() == "new-parent")
+        matches!(dict_get(entry, "name"), VmValue::String(name) if name.as_str() == "new-parent")
     });
     assert!(matches!(
         parent.map(|entry| dict_get(entry, "is_dir")),
@@ -281,7 +281,7 @@ fn staged_write_with_new_parent_is_visible_in_directory_overlay() {
         other => panic!("expected nested directory entries, got {other:?}"),
     };
     assert!(entries.iter().any(|entry| {
-        matches!(dict_get(entry, "name"), VmValue::String(name) if name.as_ref() == "file.txt")
+        matches!(dict_get(entry, "name"), VmValue::String(name) if name.as_str() == "file.txt")
     }));
     assert!(!nested.exists());
 }
@@ -398,7 +398,7 @@ fn sha256_of(bytes: &[u8]) -> String {
 
 fn dict_str<'a>(value: &'a VmValue, key: &str) -> &'a str {
     match dict_get(value, key) {
-        VmValue::String(s) => s.as_ref(),
+        VmValue::String(s) => s.as_str(),
         other => panic!("expected string at `{key}`, got {other:?}"),
     }
 }
@@ -592,7 +592,6 @@ fn safe_text_patch_skips_stale_base_when_no_expected_hash() {
 /// later one wins — which is the bug.
 #[test]
 fn safe_text_patch_serializes_concurrent_staged_commits() {
-    use std::sync::Arc;
     use std::thread;
 
     let dir = TempDir::new().unwrap();

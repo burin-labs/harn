@@ -228,7 +228,7 @@ fn fork_worker_transcript(transcript: VmValue) -> VmValue {
             }
             _ => VmValue::dict(BTreeMap::from([(
                 "parent_transcript_id".to_string(),
-                VmValue::String(std::sync::Arc::from(parent_id)),
+                VmValue::String(arcstr::ArcStr::from(parent_id)),
             )])),
         };
         next.insert("metadata".to_string(), metadata);

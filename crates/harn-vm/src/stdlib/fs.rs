@@ -2,7 +2,6 @@ use crate::value::VmDictExt;
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
 use std::time::SystemTime;
 use std::{cell::RefCell, thread_local};
 
@@ -45,7 +44,7 @@ pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
 
 #[derive(Clone)]
 struct FileTextCacheEntry {
-    content: Arc<str>,
+    content: arcstr::ArcStr,
     len: u64,
     modified: Option<SystemTime>,
 }
@@ -236,11 +235,11 @@ fn glob_matches(
 ) -> Result<Vec<String>, VmError> {
     let mut builder = globset::GlobSetBuilder::new();
     let glob = globset::Glob::new(pattern).map_err(|e| {
-        VmError::Thrown(VmValue::String(std::sync::Arc::from(format!("glob: {e}"))))
+        VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!("glob: {e}"))))
     })?;
     builder.add(glob);
     let set = builder.build().map_err(|e| {
-        VmError::Thrown(VmValue::String(std::sync::Arc::from(format!("glob: {e}"))))
+        VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!("glob: {e}"))))
     })?;
     let mut matches = Vec::new();
     for entry in walkdir::WalkDir::new(base)
@@ -271,7 +270,7 @@ fn metadata_signature(path: &PathBuf) -> Option<(u64, Option<SystemTime>)> {
     Some((metadata.len(), metadata.modified().ok()))
 }
 
-fn read_cached_text(path: &PathBuf) -> Option<Arc<str>> {
+fn read_cached_text(path: &PathBuf) -> Option<arcstr::ArcStr> {
     FILE_TEXT_CACHE.with(|cache| {
         let mut cache = cache.borrow_mut();
         let entry = cache.get(path).cloned()?;
@@ -287,7 +286,7 @@ fn read_cached_text(path: &PathBuf) -> Option<Arc<str>> {
     })
 }
 
-fn write_cached_text(path: PathBuf, content: Arc<str>) {
+fn write_cached_text(path: PathBuf, content: arcstr::ArcStr) {
     let Some((len, modified)) = metadata_signature(&path) else {
         return;
     };
@@ -321,10 +320,10 @@ pub(crate) fn register_fs_builtins(vm: &mut Vm) {
 fn read_file_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let path = args.first().map(|a| a.display()).unwrap_or_default();
     if let Some(source) = crate::stdlib_modules::get_stdlib_prompt_asset(&path) {
-        return Ok(VmValue::String(std::sync::Arc::from(source)));
+        return Ok(VmValue::String(arcstr::ArcStr::from(source)));
     }
     if crate::stdlib::asset_paths::stdlib_prompt_asset_path(&path).is_some() {
-        return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+        return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
             format!("Unknown stdlib prompt asset {path}"),
         ))));
     }
@@ -339,11 +338,11 @@ fn read_file_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmE
     }
     match overlay::read_to_string(&resolved) {
         Ok(content) => {
-            let shared: Arc<str> = Arc::from(content);
+            let shared: arcstr::ArcStr = arcstr::ArcStr::from(content);
             write_cached_text(resolved.clone(), shared.clone());
             Ok(VmValue::String(shared))
         }
-        Err(e) => Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+        Err(e) => Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
             format!("Failed to read file {}: {e}", resolved.display()),
         )))),
     }
@@ -357,10 +356,10 @@ fn read_file_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmE
 fn read_file_result_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let path = args.first().map(|a| a.display()).unwrap_or_default();
     if let Some(source) = crate::stdlib_modules::get_stdlib_prompt_asset(&path) {
-        return Ok(result_ok(VmValue::String(std::sync::Arc::from(source))));
+        return Ok(result_ok(VmValue::String(arcstr::ArcStr::from(source))));
     }
     if crate::stdlib::asset_paths::stdlib_prompt_asset_path(&path).is_some() {
-        return Ok(result_err(VmValue::String(std::sync::Arc::from(format!(
+        return Ok(result_err(VmValue::String(arcstr::ArcStr::from(format!(
             "Unknown stdlib prompt asset {path}"
         )))));
     }
@@ -370,7 +369,7 @@ fn read_file_result_builtin(args: &[VmValue], _out: &mut String) -> Result<VmVal
         &resolved,
         crate::stdlib::sandbox::FsAccess::Read,
     ) {
-        return Ok(result_err(VmValue::String(std::sync::Arc::from(
+        return Ok(result_err(VmValue::String(arcstr::ArcStr::from(
             error.to_string(),
         ))));
     }
@@ -379,11 +378,11 @@ fn read_file_result_builtin(args: &[VmValue], _out: &mut String) -> Result<VmVal
     }
     match overlay::read_to_string(&resolved) {
         Ok(content) => {
-            let shared: Arc<str> = Arc::from(content);
+            let shared: arcstr::ArcStr = arcstr::ArcStr::from(content);
             write_cached_text(resolved.clone(), shared.clone());
             Ok(result_ok(VmValue::String(shared)))
         }
-        Err(e) => Ok(result_err(VmValue::String(std::sync::Arc::from(format!(
+        Err(e) => Ok(result_err(VmValue::String(arcstr::ArcStr::from(format!(
             "Failed to read file {}: {e}",
             resolved.display()
         ))))),
@@ -405,7 +404,7 @@ fn read_file_bytes_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValu
     )?;
     match overlay::read(&resolved) {
         Ok(content) => Ok(VmValue::Bytes(std::sync::Arc::new(content))),
-        Err(e) => Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+        Err(e) => Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
             format!("Failed to read file {}: {e}", resolved.display()),
         )))),
     }
@@ -427,13 +426,13 @@ fn write_file_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, Vm
             crate::stdlib::sandbox::FsAccess::Write,
         )?;
         overlay::write(&resolved, content.as_bytes()).map_err(|e| {
-            VmError::Thrown(VmValue::String(std::sync::Arc::from(format!(
+            VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
                 "Failed to write file {}: {e}",
                 resolved.display()
             ))))
         })?;
         let bytes = content.len();
-        write_cached_text(resolved.clone(), Arc::from(content));
+        write_cached_text(resolved.clone(), arcstr::ArcStr::from(content));
         queue_file_edited_for(&resolved, "write", bytes);
     }
     Ok(VmValue::Nil)
@@ -451,7 +450,7 @@ fn write_file_bytes_builtin(args: &[VmValue], _out: &mut String) -> Result<VmVal
         let content = match &args[1] {
             VmValue::Bytes(bytes) => bytes.as_slice(),
             other => {
-                return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+                return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
                     format!(
                         "write_file_bytes expects bytes content, got {}",
                         other.type_name()
@@ -466,7 +465,7 @@ fn write_file_bytes_builtin(args: &[VmValue], _out: &mut String) -> Result<VmVal
             crate::stdlib::sandbox::FsAccess::Write,
         )?;
         overlay::write(&resolved, content).map_err(|e| {
-            VmError::Thrown(VmValue::String(std::sync::Arc::from(format!(
+            VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
                 "Failed to write file {}: {e}",
                 resolved.display()
             ))))
@@ -534,21 +533,21 @@ fn delete_file_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, V
     // Overlay treats files and directories alike by recording an overlay deletion marker.
     if crate::testbench::overlay_fs::active_overlay().is_some() {
         overlay::remove_file(&resolved).map_err(|e| {
-            VmError::Thrown(VmValue::String(std::sync::Arc::from(format!(
+            VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
                 "Failed to delete {}: {e}",
                 resolved.display()
             ))))
         })?;
     } else if resolved.is_dir() {
         std::fs::remove_dir_all(&resolved).map_err(|e| {
-            VmError::Thrown(VmValue::String(std::sync::Arc::from(format!(
+            VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
                 "Failed to delete directory {}: {e}",
                 resolved.display()
             ))))
         })?;
     } else {
         std::fs::remove_file(&resolved).map_err(|e| {
-            VmError::Thrown(VmValue::String(std::sync::Arc::from(format!(
+            VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
                 "Failed to delete file {}: {e}",
                 resolved.display()
             ))))
@@ -577,7 +576,7 @@ fn append_file_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, V
             crate::stdlib::sandbox::FsAccess::Write,
         )?;
         overlay::append(&resolved, content.as_bytes()).map_err(|e| {
-            VmError::Thrown(VmValue::String(std::sync::Arc::from(format!(
+            VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
                 "Failed to append to file {}: {e}",
                 resolved.display()
             ))))
@@ -608,7 +607,7 @@ fn list_dir_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmEr
         crate::stdlib::sandbox::FsAccess::Read,
     )?;
     let entries = overlay::read_dir(&resolved).map_err(|e| {
-        VmError::Thrown(VmValue::String(std::sync::Arc::from(format!(
+        VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
             "Failed to list directory {}: {e}",
             resolved.display()
         ))))
@@ -619,7 +618,7 @@ fn list_dir_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmEr
             continue;
         };
         let name = name.to_string_lossy().into_owned();
-        result.push(VmValue::String(std::sync::Arc::from(name)));
+        result.push(VmValue::String(arcstr::ArcStr::from(name)));
     }
     result.sort_by_key(|a| a.display());
     Ok(VmValue::List(std::sync::Arc::new(result)))
@@ -639,7 +638,7 @@ fn mkdir_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError
         crate::stdlib::sandbox::FsAccess::Write,
     )?;
     overlay::create_dir_all(&resolved).map_err(|e| {
-        VmError::Thrown(VmValue::String(std::sync::Arc::from(format!(
+        VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
             "Failed to create directory {}: {e}",
             resolved.display()
         ))))
@@ -658,7 +657,7 @@ fn path_join_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmE
     for arg in args {
         path.push(arg.display());
     }
-    Ok(VmValue::String(std::sync::Arc::from(
+    Ok(VmValue::String(arcstr::ArcStr::from(
         path.to_string_lossy().into_owned().as_str(),
     )))
 }
@@ -685,7 +684,7 @@ fn copy_file_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmE
             crate::stdlib::sandbox::FsAccess::Write,
         )?;
         let bytes = overlay::copy(&resolved_src, &resolved_dst).map_err(|e| {
-            VmError::Thrown(VmValue::String(std::sync::Arc::from(format!(
+            VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
                 "Failed to copy {} to {}: {e}",
                 resolved_src.display(),
                 resolved_dst.display()
@@ -705,7 +704,7 @@ fn copy_file_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmE
     doc = "Return the host temporary directory path."
 )]
 fn temp_dir_builtin(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
-    Ok(VmValue::String(std::sync::Arc::from(
+    Ok(VmValue::String(arcstr::ArcStr::from(
         std::env::temp_dir().to_string_lossy().into_owned().as_str(),
     )))
 }
@@ -743,12 +742,12 @@ fn mkdtemp_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErr
         crate::stdlib::sandbox::FsAccess::Write,
     )?;
     std::fs::create_dir(&path).map_err(|error| {
-        VmError::Thrown(VmValue::String(std::sync::Arc::from(format!(
+        VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
             "mkdtemp: failed to create {}: {error}",
             path.display()
         ))))
     })?;
-    Ok(VmValue::String(std::sync::Arc::from(
+    Ok(VmValue::String(arcstr::ArcStr::from(
         path.to_string_lossy().into_owned(),
     )))
 }
@@ -767,7 +766,7 @@ fn stat_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError>
         crate::stdlib::sandbox::FsAccess::Read,
     )?;
     let metadata = std::fs::metadata(&resolved).map_err(|e| {
-        VmError::Thrown(VmValue::String(std::sync::Arc::from(format!(
+        VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
             "Failed to stat {}: {e}",
             resolved.display()
         ))))
@@ -795,7 +794,7 @@ fn stat_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError>
 )]
 fn move_file_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     if args.len() < 2 {
-        return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+        return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
             "move_file: src and dst are required",
         ))));
     }
@@ -827,12 +826,12 @@ fn move_file_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmE
         return Ok(VmValue::Nil);
     }
     let bytes = overlay::copy(&src, &dst).map_err(|e| {
-        VmError::Thrown(VmValue::String(std::sync::Arc::from(format!(
+        VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
             "move_file: copy failed: {e}"
         ))))
     })?;
     overlay::remove_file(&src).map_err(|e| {
-        VmError::Thrown(VmValue::String(std::sync::Arc::from(format!(
+        VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
             "move_file: remove src failed: {e}"
         ))))
     })?;
@@ -860,14 +859,14 @@ fn read_lines_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, Vm
         crate::stdlib::sandbox::FsAccess::Read,
     )?;
     let content = overlay::read_to_string(&resolved).map_err(|e| {
-        VmError::Thrown(VmValue::String(std::sync::Arc::from(format!(
+        VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
             "read_lines: {}: {e}",
             resolved.display()
         ))))
     })?;
     let lines: Vec<VmValue> = content
         .lines()
-        .map(|l| VmValue::String(std::sync::Arc::from(l)))
+        .map(|l| VmValue::String(arcstr::ArcStr::from(l)))
         .collect();
     Ok(VmValue::List(std::sync::Arc::new(lines)))
 }
@@ -880,7 +879,7 @@ fn read_lines_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, Vm
 fn walk_dir_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let root = args.first().map(|a| a.display()).unwrap_or_default();
     if root.is_empty() {
-        return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+        return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
             "walk_dir: root path is required",
         ))));
     }
@@ -924,7 +923,7 @@ fn walk_dir_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmEr
 fn glob_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let pattern = args.first().map(|a| a.display()).unwrap_or_default();
     if pattern.is_empty() {
-        return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+        return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
             "glob: pattern is required",
         ))));
     }
@@ -953,7 +952,7 @@ fn glob_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError>
     }
     let matches = glob_matches(&pattern, &base, None)?
         .into_iter()
-        .map(|path| VmValue::String(std::sync::Arc::from(path)))
+        .map(|path| VmValue::String(arcstr::ArcStr::from(path)))
         .collect::<Vec<_>>();
     Ok(VmValue::List(std::sync::Arc::new(matches)))
 }

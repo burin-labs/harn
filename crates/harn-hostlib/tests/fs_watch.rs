@@ -12,7 +12,7 @@ fn registry() -> BuiltinRegistry {
 }
 
 fn str_value(value: impl AsRef<str>) -> VmValue {
-    VmValue::String(Arc::from(value.as_ref()))
+    VmValue::string(value)
 }
 
 fn list(values: &[&str]) -> VmValue {

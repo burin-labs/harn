@@ -52,11 +52,11 @@ pub(super) fn apply_active_step_defaults(options: &mut Option<crate::value::Dict
 
 pub(super) fn toml_value_to_vm_value(value: &toml::Value) -> VmValue {
     match value {
-        toml::Value::String(s) => VmValue::String(std::sync::Arc::from(s.as_str())),
+        toml::Value::String(s) => VmValue::String(arcstr::ArcStr::from(s.as_str())),
         toml::Value::Integer(i) => VmValue::Int(*i),
         toml::Value::Float(f) => VmValue::Float(*f),
         toml::Value::Boolean(b) => VmValue::Bool(*b),
-        toml::Value::Datetime(dt) => VmValue::String(std::sync::Arc::from(dt.to_string())),
+        toml::Value::Datetime(dt) => VmValue::String(arcstr::ArcStr::from(dt.to_string())),
         toml::Value::Array(items) => VmValue::List(std::sync::Arc::new(
             items.iter().map(toml_value_to_vm_value).collect(),
         )),

@@ -261,7 +261,7 @@ mod tests {
     fn parse_anchor_dict_accepts_minimal_shape() {
         let dict = VmValue::dict(BTreeMap::from([(
             "primary".to_string(),
-            VmValue::String(std::sync::Arc::from("/workspace/main")),
+            VmValue::String(arcstr::ArcStr::from("/workspace/main")),
         )]));
         let anchor = parse_anchor_dict(&dict).expect("parse minimal");
         assert_eq!(anchor.primary, PathBuf::from("/workspace/main"));
@@ -281,21 +281,21 @@ mod tests {
         let roots = vec![VmValue::dict(BTreeMap::from([
             (
                 "path".to_string(),
-                VmValue::String(std::sync::Arc::from("/workspace/lib")),
+                VmValue::String(arcstr::ArcStr::from("/workspace/lib")),
             ),
             (
                 "mount_mode".to_string(),
-                VmValue::String(std::sync::Arc::from("extend")),
+                VmValue::String(arcstr::ArcStr::from("extend")),
             ),
             (
                 "mounted_at".to_string(),
-                VmValue::String(std::sync::Arc::from("2026-05-23T00:00:00Z")),
+                VmValue::String(arcstr::ArcStr::from("2026-05-23T00:00:00Z")),
             ),
         ]))];
         let dict = VmValue::dict(BTreeMap::from([
             (
                 "primary".to_string(),
-                VmValue::String(std::sync::Arc::from("/workspace/main")),
+                VmValue::String(arcstr::ArcStr::from("/workspace/main")),
             ),
             (
                 "additional_roots".to_string(),
@@ -311,12 +311,12 @@ mod tests {
     fn parse_anchor_dict_uses_supplied_default_mount_mode() {
         let roots = vec![VmValue::dict(BTreeMap::from([(
             "path".to_string(),
-            VmValue::String(std::sync::Arc::from("/workspace/lib")),
+            VmValue::String(arcstr::ArcStr::from("/workspace/lib")),
         )]))];
         let dict = VmValue::dict(BTreeMap::from([
             (
                 "primary".to_string(),
-                VmValue::String(std::sync::Arc::from("/workspace/main")),
+                VmValue::String(arcstr::ArcStr::from("/workspace/main")),
             ),
             (
                 "additional_roots".to_string(),
@@ -332,7 +332,7 @@ mod tests {
     fn parse_workspace_policy_accepts_default_mount_mode() {
         let dict = VmValue::dict(BTreeMap::from([(
             "default_mount_mode".to_string(),
-            VmValue::String(std::sync::Arc::from("sandboxed")),
+            VmValue::String(arcstr::ArcStr::from("sandboxed")),
         )]));
         let policy = parse_workspace_policy_dict(&dict).expect("parse policy");
         assert_eq!(policy.default_mount_mode, MountMode::Sandboxed);

@@ -31,7 +31,7 @@ use crate::vm::Vm;
 fn vm_validate_registry(name: &str, dict: &crate::value::DictMap) -> Result<(), VmError> {
     match dict.get("_type") {
         Some(VmValue::String(t)) if &**t == "skill_registry" => Ok(()),
-        _ => Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+        _ => Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
             format!("{name}: argument must be a skill registry (created with skill_registry())"),
         )))),
     }
@@ -110,10 +110,10 @@ fn vm_skill_who_signed(skills: &[VmValue], target: &str) -> Result<VmValue, VmEr
     }
     match bare_matches.as_slice() {
         [entry] => Ok(who_signed_entry(entry)),
-        [] => Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(format!(
+        [] => Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
             "skill_who_signed: skill '{target}' not found"
         ))))),
-        _ => Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(format!(
+        _ => Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
             "skill_who_signed: skill '{target}' is ambiguous; use the fully qualified id from the catalog"
         ))))),
     }
@@ -260,14 +260,14 @@ fn skill_registry_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, 
 )]
 fn skill_define_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     if args.len() < 3 {
-        return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+        return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
             "skill_define: requires registry, name, and config dict",
         ))));
     }
     let registry = match &args[0] {
         VmValue::Dict(map) => (**map).clone(),
         _ => {
-            return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+            return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
                 "skill_define: first argument must be a skill registry",
             ))));
         }
@@ -279,7 +279,7 @@ fn skill_define_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmE
         other => other.display(),
     };
     if name.is_empty() {
-        return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+        return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
             "skill_define: skill name must be a non-empty string",
         ))));
     }
@@ -288,7 +288,7 @@ fn skill_define_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmE
         VmValue::Dict(map) => (**map).clone(),
         VmValue::Nil => crate::value::DictMap::new(),
         _ => {
-            return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+            return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
                 "skill_define: third argument must be a config dict",
             ))));
         }
@@ -307,7 +307,7 @@ fn skill_define_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmE
     ] {
         if let Some(value) = config.get(key) {
             if !matches!(value, VmValue::String(_) | VmValue::Nil) {
-                return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+                return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
                     format!("skill_define: '{key}' must be a string"),
                 ))));
             }
@@ -316,7 +316,7 @@ fn skill_define_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmE
     for key in ["paths", "allowed_tools", "mcp", "requires_mcp"] {
         if let Some(value) = config.get(key) {
             if !matches!(value, VmValue::List(_) | VmValue::Nil) {
-                return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+                return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
                     format!("skill_define: '{key}' must be a list"),
                 ))));
             }
@@ -333,12 +333,12 @@ fn skill_define_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmE
             let rendered = entry.display();
             if let Some(tag) = rendered.strip_prefix("namespace:") {
                 if tag.is_empty() {
-                    return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+                    return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
                         "skill_define: 'allowed_tools' entry 'namespace:' missing a tag after the colon",
                     ))));
                 }
             } else if rendered.contains(':') {
-                return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(format!(
+                return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
                     "skill_define: 'allowed_tools' entry '{rendered}' contains ':' — only the `namespace:<tag>` prefix is recognized"
                 )))));
             }
@@ -396,7 +396,7 @@ fn skill_list_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErr
     let registry = match args.first() {
         Some(VmValue::Dict(map)) => map,
         _ => {
-            return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+            return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
                 "skill_list: requires a skill registry",
             ))));
         }
@@ -430,7 +430,7 @@ fn skills_catalog_entries_impl(args: &[VmValue], _out: &mut String) -> Result<Vm
     let registry = match args.first() {
         Some(VmValue::Dict(map)) => map,
         _ => {
-            return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+            return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
                 "skills_catalog_entries: requires a skill registry",
             ))));
         }
@@ -447,14 +447,14 @@ fn skills_catalog_entries_impl(args: &[VmValue], _out: &mut String) -> Result<Vm
 )]
 fn skill_who_signed_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     if args.len() < 2 {
-        return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+        return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
             "skill_who_signed: requires registry and skill name",
         ))));
     }
     let registry = match args.first() {
         Some(VmValue::Dict(map)) => map,
         _ => {
-            return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+            return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
                 "skill_who_signed: first argument must be a skill registry",
             ))));
         }
@@ -475,7 +475,7 @@ fn render_always_on_catalog_impl(args: &[VmValue], _out: &mut String) -> Result<
             vm_skill_catalog_entries(vm_get_skills(map))
         }
         _ => {
-            return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+            return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
                 "render_always_on_catalog: first argument must be a catalog entry list or skill registry",
             ))));
         }
@@ -484,13 +484,13 @@ fn render_always_on_catalog_impl(args: &[VmValue], _out: &mut String) -> Result<
         Some(VmValue::Int(value)) if *value > 0 => *value as usize,
         Some(VmValue::Nil) | None => 2000usize,
         Some(_) => {
-            return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+            return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
                 "render_always_on_catalog: second argument must be a positive integer budget",
             ))));
         }
     };
     let rendered = render_catalog(&entries, budget);
-    Ok(VmValue::String(std::sync::Arc::from(rendered.as_str())))
+    Ok(VmValue::String(arcstr::ArcStr::from(rendered.as_str())))
 }
 
 #[harn_builtin(
@@ -499,14 +499,14 @@ fn render_always_on_catalog_impl(args: &[VmValue], _out: &mut String) -> Result<
 )]
 fn skill_find_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     if args.len() < 2 {
-        return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+        return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
             "skill_find: requires registry and name",
         ))));
     }
     let registry = match &args[0] {
         VmValue::Dict(map) => map,
         _ => {
-            return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+            return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
                 "skill_find: first argument must be a skill registry",
             ))));
         }
@@ -532,14 +532,14 @@ fn skill_find_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErr
 )]
 fn skill_select_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     if args.len() < 2 {
-        return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+        return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
             "skill_select: requires registry and names list",
         ))));
     }
     let registry = match &args[0] {
         VmValue::Dict(map) => map,
         _ => {
-            return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+            return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
                 "skill_select: first argument must be a skill registry",
             ))));
         }
@@ -551,7 +551,7 @@ fn skill_select_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmE
             .map(|value| value.display())
             .collect::<std::collections::BTreeSet<_>>(),
         _ => {
-            return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+            return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
                 "skill_select: second argument must be a list of skill names",
             ))));
         }
@@ -582,7 +582,7 @@ fn skill_describe_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, V
     let registry = match args.first() {
         Some(VmValue::Dict(map)) => map,
         _ => {
-            return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+            return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
                 "skill_describe: requires a skill registry",
             ))));
         }
@@ -592,7 +592,7 @@ fn skill_describe_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, V
     let skills = vm_get_skills(registry);
 
     if skills.is_empty() {
-        return Ok(VmValue::String(std::sync::Arc::from(
+        return Ok(VmValue::String(arcstr::ArcStr::from(
             "Available skills:\n(none)",
         )));
     }
@@ -625,7 +625,7 @@ fn skill_describe_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, V
             lines.push(format!("  when: {when}"));
         }
     }
-    Ok(VmValue::String(std::sync::Arc::from(lines.join("\n"))))
+    Ok(VmValue::String(arcstr::ArcStr::from(lines.join("\n"))))
 }
 
 #[harn_builtin(
@@ -634,14 +634,14 @@ fn skill_describe_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, V
 )]
 fn skill_remove_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     if args.len() < 2 {
-        return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+        return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
             "skill_remove: requires registry and name",
         ))));
     }
     let registry = match &args[0] {
         VmValue::Dict(map) => (**map).clone(),
         _ => {
-            return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+            return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
                 "skill_remove: first argument must be a skill registry",
             ))));
         }
@@ -682,7 +682,7 @@ fn skill_remove_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmE
 )]
 fn skill_render_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     if args.is_empty() {
-        return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+        return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
             "skill_render: requires a skill entry or body string",
         ))));
     }
@@ -709,7 +709,7 @@ fn skill_render_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmE
             }
         }
         _ => {
-            return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+            return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
                 "skill_render: first argument must be a skill entry or a string body",
             ))));
         }
@@ -718,7 +718,7 @@ fn skill_render_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmE
         Some(VmValue::List(list)) => list.iter().map(|v| v.display()).collect(),
         Some(VmValue::Nil) | None => Vec::new(),
         Some(_) => {
-            return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+            return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
                 "skill_render: second argument must be a list of strings",
             ))));
         }
@@ -730,7 +730,7 @@ fn skill_render_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmE
         extra_env: Default::default(),
     };
     let rendered = crate::skills::substitute_skill_body(&body, &ctx);
-    Ok(VmValue::String(std::sync::Arc::from(rendered.as_str())))
+    Ok(VmValue::String(arcstr::ArcStr::from(rendered.as_str())))
 }
 
 #[harn_builtin(
@@ -757,7 +757,7 @@ async fn load_skill_impl(
         },
     )
     .map_err(crate::skills::tool_rejected_error)?;
-    Ok(VmValue::String(std::sync::Arc::from(
+    Ok(VmValue::String(arcstr::ArcStr::from(
         loaded.rendered_body.as_str(),
     )))
 }
@@ -767,7 +767,7 @@ fn skill_count_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmEr
     let registry = match args.first() {
         Some(VmValue::Dict(map)) => map,
         _ => {
-            return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+            return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
                 "skill_count: requires a skill registry",
             ))));
         }
@@ -868,29 +868,29 @@ mod tests {
             VmValue::dict(BTreeMap::from([
                 (
                     "name".to_string(),
-                    VmValue::String(std::sync::Arc::from("beta")),
+                    VmValue::String(arcstr::ArcStr::from("beta")),
                 ),
                 (
                     "description".to_string(),
-                    VmValue::String(std::sync::Arc::from("Second skill")),
+                    VmValue::String(arcstr::ArcStr::from("Second skill")),
                 ),
             ])),
             VmValue::dict(BTreeMap::from([
                 (
                     "name".to_string(),
-                    VmValue::String(std::sync::Arc::from("deploy")),
+                    VmValue::String(arcstr::ArcStr::from("deploy")),
                 ),
                 (
                     "namespace".to_string(),
-                    VmValue::String(std::sync::Arc::from("acme/ops")),
+                    VmValue::String(arcstr::ArcStr::from("acme/ops")),
                 ),
                 (
                     "description".to_string(),
-                    VmValue::String(std::sync::Arc::from("Deploy service")),
+                    VmValue::String(arcstr::ArcStr::from("Deploy service")),
                 ),
                 (
                     "when_to_use".to_string(),
-                    VmValue::String(std::sync::Arc::from("Ship a release")),
+                    VmValue::String(arcstr::ArcStr::from("Ship a release")),
                 ),
             ])),
         ];
@@ -909,29 +909,29 @@ mod tests {
             VmValue::dict(BTreeMap::from([
                 (
                     "name".to_string(),
-                    VmValue::String(std::sync::Arc::from("alpha")),
+                    VmValue::String(arcstr::ArcStr::from("alpha")),
                 ),
                 (
                     "description".to_string(),
-                    VmValue::String(std::sync::Arc::from("First skill")),
+                    VmValue::String(arcstr::ArcStr::from("First skill")),
                 ),
                 (
                     "when_to_use".to_string(),
-                    VmValue::String(std::sync::Arc::from("Use alpha first")),
+                    VmValue::String(arcstr::ArcStr::from("Use alpha first")),
                 ),
             ])),
             VmValue::dict(BTreeMap::from([
                 (
                     "name".to_string(),
-                    VmValue::String(std::sync::Arc::from("beta")),
+                    VmValue::String(arcstr::ArcStr::from("beta")),
                 ),
                 (
                     "description".to_string(),
-                    VmValue::String(std::sync::Arc::from("Second skill")),
+                    VmValue::String(arcstr::ArcStr::from("Second skill")),
                 ),
                 (
                     "when_to_use".to_string(),
-                    VmValue::String(std::sync::Arc::from("Use beta second")),
+                    VmValue::String(arcstr::ArcStr::from("Use beta second")),
                 ),
             ])),
         ];

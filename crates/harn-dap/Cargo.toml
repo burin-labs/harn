@@ -12,6 +12,7 @@ name = "harn-dap"
 path = "src/main.rs"
 
 [dependencies]
+arcstr = { version = "1", features = ["serde", "std"] }
 harn-modules = { path = "../harn-modules", version = "0.8" }
 harn-parser = { path = "../harn-parser", version = "0.8" }
 harn-vm = { path = "../harn-vm", version = "0.8" }

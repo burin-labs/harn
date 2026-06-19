@@ -821,7 +821,7 @@ fn probe_tool_registry() -> VmValue {
 }
 
 fn vm_str(value: &str) -> VmValue {
-    VmValue::String(std::sync::Arc::from(value))
+    VmValue::String(arcstr::ArcStr::from(value))
 }
 
 fn vm_dict(pairs: &[(&str, VmValue)]) -> VmValue {

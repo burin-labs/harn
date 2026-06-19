@@ -16,7 +16,7 @@ pub(super) fn route_target_from_short(
 ) -> Result<(String, String), crate::value::VmError> {
     let target = target.trim();
     if target.is_empty() {
-        return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+        return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
             "route_policy: target must not be empty",
         ))));
     }
@@ -58,7 +58,7 @@ pub(super) fn parse_route_policy_text(
     if let Some(target) = arg("fastest_over_quality") {
         return Ok(LlmRoutePolicy::FastestOverQuality(target));
     }
-    Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(format!(
+    Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
         "route_policy: expected manual, always(id), cheapest_over_quality(t), or fastest_over_quality(t), got {text:?}"
     )))))
 }
@@ -131,7 +131,7 @@ pub(super) fn parse_route_policy_option(
                         .map(vm_string_list)
                         .unwrap_or_default();
                     if targets.is_empty() {
-                        return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+                        return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
                             "route_policy.prefer: expected at least one model/provider target",
                         ))));
                     }
@@ -142,12 +142,12 @@ pub(super) fn parse_route_policy_option(
                         .unwrap_or_else(|| "prefer_order".to_string());
                     Ok(LlmRoutePolicy::PreferenceList { targets, strategy })
                 }
-                other => Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+                other => Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
                     format!("route_policy.mode: unsupported value {other:?}"),
                 )))),
             }
         }
-        _ => Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+        _ => Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
             "route_policy: expected string or dict",
         )))),
     }
@@ -202,7 +202,7 @@ pub(super) fn parse_equivalent_failover_option(
                     VmValue::Nil => true,
                     VmValue::Bool(value) => *value,
                     other => {
-                        return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+                        return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
                             format!(
                                 "equivalent_failover.enabled: expected bool, got {}",
                                 other.type_name()
@@ -216,7 +216,7 @@ pub(super) fn parse_equivalent_failover_option(
                     VmValue::Nil => false,
                     VmValue::Bool(value) => *value,
                     other => {
-                        return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+                        return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
                             format!(
                                 "equivalent_failover.on_no_dispatch: expected bool, got {}",
                                 other.type_name()
@@ -227,12 +227,12 @@ pub(super) fn parse_equivalent_failover_option(
             }
             if let Some(value) = dict.get("max_routes") {
                 let raw_max = value.as_int().ok_or_else(|| {
-                    VmError::Thrown(VmValue::String(std::sync::Arc::from(
+                    VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
                         "equivalent_failover.max_routes: expected a positive integer",
                     )))
                 })?;
                 if raw_max < 1 {
-                    return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+                    return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
                         "equivalent_failover.max_routes: expected a positive integer",
                     ))));
                 }
@@ -240,7 +240,7 @@ pub(super) fn parse_equivalent_failover_option(
             }
         }
         other => {
-            return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+            return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
                 format!(
                     "equivalent_failover: expected bool or dict, got {}",
                     other.type_name()
@@ -253,7 +253,7 @@ pub(super) fn parse_equivalent_failover_option(
         return Ok(None);
     }
     if explicit_routing_policy {
-        return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+        return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
             "equivalent_failover cannot be combined with explicit routing_policy(...)",
         ))));
     }

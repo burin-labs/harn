@@ -87,7 +87,7 @@ async fn project_enrich_impl(
     let enriched_evidence =
         augment_project_evidence(&root, &base_evidence, options.include_operator_meta);
     let base_dict = enriched_evidence.as_dict().ok_or_else(|| {
-        VmError::Thrown(VmValue::String(std::sync::Arc::from(
+        VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
             "project.enrich: base_evidence must be a dict",
         )))
     })?;
@@ -132,14 +132,14 @@ async fn project_enrich_impl(
 
     let llm_options_value = llm_options_value(&options, &rendered_prompt);
     let extracted = extract_llm_options(&[
-        VmValue::String(std::sync::Arc::from(rendered_prompt.as_str())),
+        VmValue::String(arcstr::ArcStr::from(rendered_prompt.as_str())),
         VmValue::Nil,
         llm_options_value.clone(),
     ])?;
     match execute_llm_call(ctx, extracted, llm_options_value.as_dict().cloned(), None).await {
         Ok(response) => {
             let response_dict = response.as_dict().ok_or_else(|| {
-                VmError::Thrown(VmValue::String(std::sync::Arc::from(
+                VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
                     "project.enrich: expected llm response dict",
                 )))
             })?;
@@ -184,7 +184,7 @@ async fn project_enrich_impl(
 
 fn parse_project_enrich_options(value: Option<&VmValue>) -> Result<ProjectEnrichOptions, VmError> {
     let dict = value.and_then(VmValue::as_dict).ok_or_else(|| {
-        VmError::Thrown(VmValue::String(std::sync::Arc::from(
+        VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
             "project.enrich: options dict is required",
         )))
     })?;
@@ -193,12 +193,12 @@ fn parse_project_enrich_options(value: Option<&VmValue>) -> Result<ProjectEnrich
         .and_then(value_as_string)
         .filter(|value| !value.is_empty())
         .ok_or_else(|| {
-            VmError::Thrown(VmValue::String(std::sync::Arc::from(
+            VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
                 "project.enrich: options.prompt must be a non-empty string",
             )))
         })?;
     let schema = dict.get("schema").cloned().ok_or_else(|| {
-        VmError::Thrown(VmValue::String(std::sync::Arc::from(
+        VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
             "project.enrich: options.schema is required",
         )))
     })?;
@@ -258,12 +258,12 @@ fn resolve_existing_directory(path: &str) -> Result<PathBuf, VmError> {
     };
     if target.exists() {
         target.canonicalize().map_err(|error| {
-            VmError::Thrown(VmValue::String(std::sync::Arc::from(format!(
+            VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
                 "project.enrich: failed to resolve path: {error}"
             ))))
         })
     } else {
-        Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+        Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
             format!("project.enrich: path does not exist: {}", target.display()),
         ))))
     }
@@ -1614,7 +1614,7 @@ fn provenance_value(
     provenance.insert(
         "model".to_string(),
         model
-            .map(|value| VmValue::String(std::sync::Arc::from(value)))
+            .map(|value| VmValue::String(arcstr::ArcStr::from(value)))
             .unwrap_or(VmValue::Nil),
     );
     provenance.insert("tokens".to_string(), VmValue::dict(tokens));
@@ -1680,7 +1680,7 @@ fn read_cached_result(path: &Path) -> Result<Option<CacheRecord>, VmError> {
     serde_json::from_str::<CacheRecord>(&content)
         .map(Some)
         .map_err(|error| {
-            VmError::Thrown(VmValue::String(std::sync::Arc::from(format!(
+            VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
                 "project.enrich: failed to parse cache {}: {error}",
                 path.display()
             ))))
@@ -1690,7 +1690,7 @@ fn read_cached_result(path: &Path) -> Result<Option<CacheRecord>, VmError> {
 fn write_cached_result(path: &Path, value: &VmValue) -> Result<(), VmError> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent).map_err(|error| {
-            VmError::Thrown(VmValue::String(std::sync::Arc::from(format!(
+            VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
                 "project.enrich: failed to create cache dir {}: {error}",
                 parent.display()
             ))))
@@ -1700,12 +1700,12 @@ fn write_cached_result(path: &Path, value: &VmValue) -> Result<(), VmError> {
         result: vm_value_to_json(value),
     };
     let serialized = serde_json::to_string_pretty(&record).map_err(|error| {
-        VmError::Thrown(VmValue::String(std::sync::Arc::from(format!(
+        VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
             "project.enrich: failed to serialize cache record: {error}"
         ))))
     })?;
     std::fs::write(path, serialized).map_err(|error| {
-        VmError::Thrown(VmValue::String(std::sync::Arc::from(format!(
+        VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
             "project.enrich: failed to write cache {}: {error}",
             path.display()
         ))))
@@ -1890,7 +1890,7 @@ commands:
     #[test]
     fn attach_provenance_wraps_non_dict_results() {
         let result = attach_provenance(
-            VmValue::String(std::sync::Arc::from("hi")),
+            VmValue::String(arcstr::ArcStr::from("hi")),
             Some("mock-model".to_string()),
             10,
             4,
@@ -2118,19 +2118,19 @@ jobs:
             (
                 "languages".to_string(),
                 VmValue::List(std::sync::Arc::new(vec![VmValue::String(
-                    std::sync::Arc::from("rust"),
+                    arcstr::ArcStr::from("rust"),
                 )])),
             ),
             (
                 "anchors".to_string(),
                 VmValue::List(std::sync::Arc::new(vec![VmValue::String(
-                    std::sync::Arc::from("Cargo.toml"),
+                    arcstr::ArcStr::from("Cargo.toml"),
                 )])),
             ),
             (
                 "lockfiles".to_string(),
                 VmValue::List(std::sync::Arc::new(vec![VmValue::String(
-                    std::sync::Arc::from("Cargo.lock"),
+                    arcstr::ArcStr::from("Cargo.lock"),
                 )])),
             ),
         ]));
@@ -2159,7 +2159,7 @@ jobs:
         let result = attach_ci_metadata(
             VmValue::dict(crate::value::DictMap::from_iter([(
                 "summary".to_string(),
-                VmValue::String(std::sync::Arc::from("ok")),
+                VmValue::String(arcstr::ArcStr::from("ok")),
             )])),
             &base,
         );

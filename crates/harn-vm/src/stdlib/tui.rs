@@ -114,7 +114,7 @@ fn required_string(
     builtin: &str,
 ) -> Result<String, VmError> {
     match opts.get(key) {
-        Some(VmValue::String(value)) => Ok(value.as_ref().to_string()),
+        Some(VmValue::String(value)) => Ok(value.as_str().to_string()),
         Some(VmValue::Nil) | None => Err(VmError::Runtime(format!(
             "{builtin}: missing string field '{key}'"
         ))),
@@ -131,7 +131,7 @@ fn optional_string(
     builtin: &str,
 ) -> Result<Option<String>, VmError> {
     match opts.get(key) {
-        Some(VmValue::String(value)) => Ok(Some(value.as_ref().to_string())),
+        Some(VmValue::String(value)) => Ok(Some(value.as_str().to_string())),
         Some(VmValue::Nil) | None => Ok(None),
         Some(other) => Err(VmError::Runtime(format!(
             "{builtin}: field '{key}' must be a string, got {}",
@@ -356,10 +356,10 @@ mod tests {
     #[test]
     fn page_content_adds_title_rule_and_default_footer() {
         let opts = parse_page_options(&dict(&[
-            ("title", VmValue::String(std::sync::Arc::from("Audit"))),
+            ("title", VmValue::String(arcstr::ArcStr::from("Audit"))),
             (
                 "body",
-                VmValue::String(std::sync::Arc::from("line one\nline two")),
+                VmValue::String(arcstr::ArcStr::from("line one\nline two")),
             ),
         ]))
         .unwrap();
@@ -373,8 +373,8 @@ mod tests {
     #[test]
     fn page_options_accept_markdown_passthrough() {
         let opts = parse_page_options(&dict(&[
-            ("body", VmValue::String(std::sync::Arc::from("# Heading"))),
-            ("format", VmValue::String(std::sync::Arc::from("markdown"))),
+            ("body", VmValue::String(arcstr::ArcStr::from("# Heading"))),
+            ("format", VmValue::String(arcstr::ArcStr::from("markdown"))),
             ("no_pager", VmValue::Bool(true)),
         ]))
         .unwrap();

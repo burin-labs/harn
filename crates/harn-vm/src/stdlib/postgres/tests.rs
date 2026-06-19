@@ -3,7 +3,7 @@ use super::*;
 use crate::{compile_source, register_vm_stdlib, Vm};
 
 fn s(value: &str) -> VmValue {
-    VmValue::String(std::sync::Arc::from(value))
+    VmValue::String(arcstr::ArcStr::from(value))
 }
 
 fn dict(pairs: &[(&str, VmValue)]) -> VmValue {

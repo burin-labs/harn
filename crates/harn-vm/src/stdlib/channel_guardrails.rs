@@ -17,7 +17,7 @@ use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
 
 fn err(message: impl Into<String>) -> VmError {
-    VmError::Thrown(VmValue::String(std::sync::Arc::from(message.into())))
+    VmError::Thrown(VmValue::String(arcstr::ArcStr::from(message.into())))
 }
 
 pub(crate) fn register_channel_guardrail_builtins(vm: &mut Vm) {
@@ -52,7 +52,7 @@ fn channel_guardrail_register_impl(
         None => return Err(err("channel_guardrail_register: requires a config dict")),
     };
     let id = crate::channel_guardrails::register(&config)?;
-    Ok(VmValue::String(std::sync::Arc::from(id)))
+    Ok(VmValue::String(arcstr::ArcStr::from(id)))
 }
 
 #[harn_builtin(
@@ -84,7 +84,7 @@ fn channel_guardrail_list_impl(_args: &[VmValue], _out: &mut String) -> Result<V
     let ids = crate::channel_guardrails::list_ids();
     let values: Vec<VmValue> = ids
         .into_iter()
-        .map(|id| VmValue::String(std::sync::Arc::from(id)))
+        .map(|id| VmValue::String(arcstr::ArcStr::from(id)))
         .collect();
     Ok(VmValue::List(std::sync::Arc::new(values)))
 }

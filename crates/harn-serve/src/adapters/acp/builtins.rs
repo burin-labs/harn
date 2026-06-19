@@ -220,7 +220,7 @@ pub(super) async fn acp_terminal_exec(
     let cmd = args.first().map(|a| a.display()).unwrap_or_default();
     if cmd.is_empty() {
         return Err(harn_vm::VmError::Thrown(harn_vm::VmValue::String(
-            Arc::from("exec: command is required"),
+            arcstr::ArcStr::from("exec: command is required"),
         )));
     }
 
@@ -251,7 +251,7 @@ pub(super) async fn acp_terminal_exec(
     if terminal_id.is_empty() {
         // Client doesn't support terminal — fall back to local exec.
         let output = local_shell_exec(&cmd, shell).map_err(|e| {
-            harn_vm::VmError::Thrown(harn_vm::VmValue::String(Arc::from(format!(
+            harn_vm::VmError::Thrown(harn_vm::VmValue::String(arcstr::ArcStr::from(format!(
                 "exec failed: {e}"
             ))))
         })?;
@@ -261,15 +261,15 @@ pub(super) async fn acp_terminal_exec(
         let mut map = std::collections::BTreeMap::new();
         map.insert(
             "stdout".to_string(),
-            harn_vm::VmValue::String(Arc::from(stdout)),
+            harn_vm::VmValue::String(arcstr::ArcStr::from(stdout)),
         );
         map.insert(
             "stderr".to_string(),
-            harn_vm::VmValue::String(Arc::from(stderr)),
+            harn_vm::VmValue::String(arcstr::ArcStr::from(stderr)),
         );
         map.insert(
             "combined".to_string(),
-            harn_vm::VmValue::String(Arc::from(format!(
+            harn_vm::VmValue::String(arcstr::ArcStr::from(format!(
                 "{}{}",
                 map.get("stdout").map(|v| v.display()).unwrap_or_default(),
                 map.get("stderr").map(|v| v.display()).unwrap_or_default()
@@ -334,7 +334,7 @@ pub(super) async fn acp_terminal_exec(
         if !normalized.contains_key("combined") {
             normalized.insert(
                 "combined".to_string(),
-                harn_vm::VmValue::String(Arc::from(format!("{stdout}{stderr}"))),
+                harn_vm::VmValue::String(arcstr::ArcStr::from(format!("{stdout}{stderr}"))),
             );
         }
         if !normalized.contains_key("status") {
@@ -416,7 +416,7 @@ fn operation_names_from_value(
         harn_vm::VmValue::List(list) => Some(list.clone()),
         harn_vm::VmValue::Dict(dict) => Some(Arc::new(
             dict.keys()
-                .map(|name| harn_vm::VmValue::String(Arc::from(name.clone())))
+                .map(|name| harn_vm::VmValue::String(arcstr::ArcStr::from(name.clone())))
                 .collect(),
         )),
         _ => None,
@@ -443,7 +443,7 @@ fn local_shell_exec(cmd: &str, shell: &harn_vm::VmValue) -> std::io::Result<std:
     let mut params = harn_vm::value::DictMap::new();
     params.insert(
         "command".to_string(),
-        harn_vm::VmValue::String(Arc::from(cmd.to_string())),
+        harn_vm::VmValue::String(arcstr::ArcStr::from(cmd.to_string())),
     );
     params.insert("shell".to_string(), shell.clone());
     let invocation =

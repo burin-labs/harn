@@ -416,7 +416,7 @@ pub fn violation_vm_error(audit: &NetPolicyAudit) -> VmError {
         audit
             .matched_rule
             .as_deref()
-            .map(|raw| VmValue::String(std::sync::Arc::from(raw)))
+            .map(|raw| VmValue::String(arcstr::ArcStr::from(raw)))
             .unwrap_or(VmValue::Nil),
     );
     if audit.bypass {
@@ -446,7 +446,7 @@ pub fn violation_request_value(audit: &NetPolicyAudit) -> VmValue {
         audit
             .matched_rule
             .as_deref()
-            .map(|raw| VmValue::String(std::sync::Arc::from(raw)))
+            .map(|raw| VmValue::String(arcstr::ArcStr::from(raw)))
             .unwrap_or(VmValue::Nil),
     );
     VmValue::dict(dict)
@@ -492,7 +492,7 @@ fn normalize_host(host: &str) -> String {
 }
 
 fn vm_error(message: impl Into<String>) -> VmError {
-    VmError::Thrown(VmValue::String(std::sync::Arc::from(message.into())))
+    VmError::Thrown(VmValue::String(arcstr::ArcStr::from(message.into())))
 }
 
 /// VM-side helpers used by both the constructor builtins
@@ -514,7 +514,7 @@ pub mod parse {
         match value {
             VmValue::Dict(dict) => rule_from_dict(dict),
             VmValue::String(raw) => {
-                let raw = raw.as_ref();
+                let raw = raw.as_str();
                 if raw.starts_with("*.") {
                     NetPolicyRule::parse_domain_wildcard(raw)
                 } else if raw.contains('/') {
@@ -590,7 +590,7 @@ pub mod parse {
         callee: &str,
     ) -> Result<String, VmError> {
         match dict.get(key) {
-            Some(VmValue::String(s)) => Ok(s.as_ref().to_string()),
+            Some(VmValue::String(s)) => Ok(s.as_str().to_string()),
             Some(other) => Err(vm_error(format!(
                 "{callee}: `{key}` must be a string, got {}",
                 other.type_name()
@@ -605,7 +605,7 @@ pub mod parse {
         let allow = parse_rule_list(dict.get("allow"), "allow")?;
         let deny = parse_rule_list(dict.get("deny"), "deny")?;
         let default = match dict.get("default") {
-            Some(VmValue::String(s)) => NetPolicyDefault::parse(s.as_ref())?,
+            Some(VmValue::String(s)) => NetPolicyDefault::parse(s.as_str())?,
             Some(VmValue::Nil) | None => NetPolicyDefault::Deny,
             Some(other) => {
                 return Err(vm_error(format!(
@@ -615,7 +615,7 @@ pub mod parse {
             }
         };
         let on_violation = match dict.get("on_violation") {
-            Some(VmValue::String(s)) => OnViolation::parse_str(s.as_ref())?,
+            Some(VmValue::String(s)) => OnViolation::parse_str(s.as_str())?,
             Some(VmValue::Closure(closure)) => OnViolation::Callback(Arc::clone(closure)),
             Some(VmValue::Nil) | None => OnViolation::Error,
             Some(other) => {
@@ -794,13 +794,13 @@ mod tests {
     #[test]
     fn parse_string_rule_branches_on_shape() {
         let domain =
-            parse::rule_from_vm(&VmValue::String(std::sync::Arc::from("github.com"))).unwrap();
+            parse::rule_from_vm(&VmValue::String(arcstr::ArcStr::from("github.com"))).unwrap();
         assert!(matches!(domain.matcher, NetMatcher::Host(_)));
         let wildcard =
-            parse::rule_from_vm(&VmValue::String(std::sync::Arc::from("*.github.com"))).unwrap();
+            parse::rule_from_vm(&VmValue::String(arcstr::ArcStr::from("*.github.com"))).unwrap();
         assert!(matches!(wildcard.matcher, NetMatcher::Suffix(_)));
         let cidr_rule =
-            parse::rule_from_vm(&VmValue::String(std::sync::Arc::from("10.0.0.0/8"))).unwrap();
+            parse::rule_from_vm(&VmValue::String(arcstr::ArcStr::from("10.0.0.0/8"))).unwrap();
         assert!(matches!(cidr_rule.matcher, NetMatcher::Cidr(_)));
     }
 

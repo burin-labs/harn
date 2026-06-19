@@ -210,7 +210,7 @@ pub fn compaction_policy_to_vm_value(policy: &CompactionPolicy) -> VmValue {
             policy
                 .preserve
                 .iter()
-                .map(|item| VmValue::String(std::sync::Arc::from(item.clone())))
+                .map(|item| VmValue::String(arcstr::ArcStr::from(item.clone())))
                 .collect(),
         )),
     );
@@ -220,7 +220,7 @@ pub fn compaction_policy_to_vm_value(policy: &CompactionPolicy) -> VmValue {
             policy
                 .drop_items
                 .iter()
-                .map(|item| VmValue::String(std::sync::Arc::from(item.clone())))
+                .map(|item| VmValue::String(arcstr::ArcStr::from(item.clone())))
                 .collect(),
         )),
     );
@@ -1198,7 +1198,7 @@ async fn invoke_compress_callback(
     };
     let mut vm = ctx.child_vm();
     let args = [
-        VmValue::String(std::sync::Arc::from(content)),
+        VmValue::String(arcstr::ArcStr::from(content)),
         VmValue::Int(max_chars as i64),
     ];
     let result = vm.call_closure_pub(&closure, &args).await?;

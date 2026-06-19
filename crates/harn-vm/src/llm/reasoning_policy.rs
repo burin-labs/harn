@@ -416,12 +416,12 @@ fn thinking_to_vm_value(thinking: &ThinkingConfig) -> VmValue {
     match thinking {
         ThinkingConfig::Disabled => VmValue::dict(crate::value::DictMap::from_iter([(
             "mode".to_string(),
-            VmValue::String(std::sync::Arc::from("disabled")),
+            VmValue::String(arcstr::ArcStr::from("disabled")),
         )])),
         ThinkingConfig::Enabled { budget_tokens } => {
             let mut dict = crate::value::DictMap::from_iter([(
                 "mode".to_string(),
-                VmValue::String(std::sync::Arc::from("enabled")),
+                VmValue::String(arcstr::ArcStr::from("enabled")),
             )]);
             if let Some(budget_tokens) = budget_tokens {
                 dict.insert(
@@ -433,16 +433,16 @@ fn thinking_to_vm_value(thinking: &ThinkingConfig) -> VmValue {
         }
         ThinkingConfig::Adaptive => VmValue::dict(crate::value::DictMap::from_iter([(
             "mode".to_string(),
-            VmValue::String(std::sync::Arc::from("adaptive")),
+            VmValue::String(arcstr::ArcStr::from("adaptive")),
         )])),
         ThinkingConfig::Effort { level } => VmValue::dict(crate::value::DictMap::from_iter([
             (
                 "mode".to_string(),
-                VmValue::String(std::sync::Arc::from("effort")),
+                VmValue::String(arcstr::ArcStr::from("effort")),
             ),
             (
                 "level".to_string(),
-                VmValue::String(std::sync::Arc::from(level.as_str())),
+                VmValue::String(arcstr::ArcStr::from(level.as_str())),
             ),
         ])),
     }
@@ -452,27 +452,27 @@ fn application_metadata_to_vm_value(application: &ReasoningPolicyApplication) ->
     VmValue::dict(crate::value::DictMap::from_iter([
         (
             "policy".to_string(),
-            VmValue::String(std::sync::Arc::from(application.policy.clone())),
+            VmValue::String(arcstr::ArcStr::from(application.policy.clone())),
         ),
         (
             "task".to_string(),
-            VmValue::String(std::sync::Arc::from(application.task.clone())),
+            VmValue::String(arcstr::ArcStr::from(application.task.clone())),
         ),
         (
             "scale".to_string(),
-            VmValue::String(std::sync::Arc::from(application.scale.clone())),
+            VmValue::String(arcstr::ArcStr::from(application.scale.clone())),
         ),
         (
             "level".to_string(),
-            VmValue::String(std::sync::Arc::from(application.level.clone())),
+            VmValue::String(arcstr::ArcStr::from(application.level.clone())),
         ),
         (
             "provider".to_string(),
-            VmValue::String(std::sync::Arc::from(application.provider.clone())),
+            VmValue::String(arcstr::ArcStr::from(application.provider.clone())),
         ),
         (
             "model".to_string(),
-            VmValue::String(std::sync::Arc::from(application.model.clone())),
+            VmValue::String(arcstr::ArcStr::from(application.model.clone())),
         ),
     ]))
 }
@@ -490,15 +490,15 @@ mod tests {
         let opts = crate::value::DictMap::from_iter([
             (
                 "provider".to_string(),
-                VmValue::String(std::sync::Arc::from("openai")),
+                VmValue::String(arcstr::ArcStr::from("openai")),
             ),
             (
                 "model".to_string(),
-                VmValue::String(std::sync::Arc::from("gpt-5")),
+                VmValue::String(arcstr::ArcStr::from("gpt-5")),
             ),
             (
                 "reasoning_policy".to_string(),
-                VmValue::String(std::sync::Arc::from("high")),
+                VmValue::String(arcstr::ArcStr::from("high")),
             ),
         ]);
         let out = apply(opts);
@@ -521,15 +521,15 @@ mod tests {
         let opts = crate::value::DictMap::from_iter([
             (
                 "provider".to_string(),
-                VmValue::String(std::sync::Arc::from("cerebras")),
+                VmValue::String(arcstr::ArcStr::from("cerebras")),
             ),
             (
                 "model".to_string(),
-                VmValue::String(std::sync::Arc::from("gpt-oss-120b")),
+                VmValue::String(arcstr::ArcStr::from("gpt-oss-120b")),
             ),
             (
                 "reasoning_policy".to_string(),
-                VmValue::String(std::sync::Arc::from("off")),
+                VmValue::String(arcstr::ArcStr::from("off")),
             ),
         ]);
         let out = apply(opts);
@@ -569,19 +569,19 @@ mod tests {
         let opts = crate::value::DictMap::from_iter([
             (
                 "provider".to_string(),
-                VmValue::String(std::sync::Arc::from("ollama")),
+                VmValue::String(arcstr::ArcStr::from("ollama")),
             ),
             (
                 "model".to_string(),
-                VmValue::String(std::sync::Arc::from("qwen3.6:35b-a3b-coding-nvfp4")),
+                VmValue::String(arcstr::ArcStr::from("qwen3.6:35b-a3b-coding-nvfp4")),
             ),
             (
                 "reasoning_policy".to_string(),
-                VmValue::String(std::sync::Arc::from("auto")),
+                VmValue::String(arcstr::ArcStr::from("auto")),
             ),
             (
                 "reasoning_task".to_string(),
-                VmValue::String(std::sync::Arc::from("agent")),
+                VmValue::String(arcstr::ArcStr::from("agent")),
             ),
         ]);
         let out = apply(opts);
@@ -614,19 +614,19 @@ mod tests {
         let opts = crate::value::DictMap::from_iter([
             (
                 "provider".to_string(),
-                VmValue::String(std::sync::Arc::from("openrouter")),
+                VmValue::String(arcstr::ArcStr::from("openrouter")),
             ),
             (
                 "model".to_string(),
-                VmValue::String(std::sync::Arc::from("qwen/qwen3.6-35b-a3b")),
+                VmValue::String(arcstr::ArcStr::from("qwen/qwen3.6-35b-a3b")),
             ),
             (
                 "reasoning_policy".to_string(),
-                VmValue::String(std::sync::Arc::from("auto")),
+                VmValue::String(arcstr::ArcStr::from("auto")),
             ),
             (
                 "reasoning_task".to_string(),
-                VmValue::String(std::sync::Arc::from("agent")),
+                VmValue::String(arcstr::ArcStr::from("agent")),
             ),
         ]);
         let out = apply(opts);
@@ -649,19 +649,19 @@ mod tests {
         let opts = crate::value::DictMap::from_iter([
             (
                 "provider".to_string(),
-                VmValue::String(std::sync::Arc::from("openrouter")),
+                VmValue::String(arcstr::ArcStr::from("openrouter")),
             ),
             (
                 "model".to_string(),
-                VmValue::String(std::sync::Arc::from("qwen/qwen3.6-35b-a3b")),
+                VmValue::String(arcstr::ArcStr::from("qwen/qwen3.6-35b-a3b")),
             ),
             (
                 "reasoning_policy".to_string(),
-                VmValue::String(std::sync::Arc::from("high")),
+                VmValue::String(arcstr::ArcStr::from("high")),
             ),
             (
                 "reasoning_task".to_string(),
-                VmValue::String(std::sync::Arc::from("agent")),
+                VmValue::String(arcstr::ArcStr::from("agent")),
             ),
         ]);
         let out = apply(opts);
@@ -696,19 +696,19 @@ auto_reasoning_overrides = { agent = "off" }
         let opts = crate::value::DictMap::from_iter([
             (
                 "provider".to_string(),
-                VmValue::String(std::sync::Arc::from("acme")),
+                VmValue::String(arcstr::ArcStr::from("acme")),
             ),
             (
                 "model".to_string(),
-                VmValue::String(std::sync::Arc::from("custom-thinker")),
+                VmValue::String(arcstr::ArcStr::from("custom-thinker")),
             ),
             (
                 "reasoning_policy".to_string(),
-                VmValue::String(std::sync::Arc::from("auto")),
+                VmValue::String(arcstr::ArcStr::from("auto")),
             ),
             (
                 "reasoning_task".to_string(),
-                VmValue::String(std::sync::Arc::from("agent")),
+                VmValue::String(arcstr::ArcStr::from("agent")),
             ),
         ]);
         let out = apply(opts);
@@ -727,19 +727,19 @@ auto_reasoning_overrides = { agent = "off" }
         crate::value::DictMap::from_iter([
             (
                 "provider".to_string(),
-                VmValue::String(std::sync::Arc::from(provider)),
+                VmValue::String(arcstr::ArcStr::from(provider)),
             ),
             (
                 "model".to_string(),
-                VmValue::String(std::sync::Arc::from(model)),
+                VmValue::String(arcstr::ArcStr::from(model)),
             ),
             (
                 "reasoning_policy".to_string(),
-                VmValue::String(std::sync::Arc::from(policy)),
+                VmValue::String(arcstr::ArcStr::from(policy)),
             ),
             (
                 "reasoning_task".to_string(),
-                VmValue::String(std::sync::Arc::from(task)),
+                VmValue::String(arcstr::ArcStr::from(task)),
             ),
         ])
     }
@@ -851,15 +851,15 @@ auto_reasoning_overrides = { agent = "off" }
         let opts = crate::value::DictMap::from_iter([
             (
                 "provider".to_string(),
-                VmValue::String(std::sync::Arc::from("openai")),
+                VmValue::String(arcstr::ArcStr::from("openai")),
             ),
             (
                 "model".to_string(),
-                VmValue::String(std::sync::Arc::from("gpt-5")),
+                VmValue::String(arcstr::ArcStr::from("gpt-5")),
             ),
             (
                 "reasoning_policy".to_string(),
-                VmValue::String(std::sync::Arc::from("high")),
+                VmValue::String(arcstr::ArcStr::from("high")),
             ),
             ("thinking".to_string(), VmValue::Bool(true)),
         ]);

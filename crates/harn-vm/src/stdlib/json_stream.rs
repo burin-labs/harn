@@ -233,7 +233,7 @@ fn create_validator(builtin: &str, args: &[VmValue]) -> Result<VmValue, VmError>
             },
         );
     });
-    Ok(VmValue::String(std::sync::Arc::from(handle)))
+    Ok(VmValue::String(arcstr::ArcStr::from(handle)))
 }
 
 #[harn_builtin(
@@ -742,11 +742,11 @@ fn status_value(status: &JsonStreamStatus) -> VmValue {
             let payload = BTreeMap::from([
                 (
                     "reason".to_string(),
-                    VmValue::String(std::sync::Arc::from(reason.as_str())),
+                    VmValue::String(arcstr::ArcStr::from(reason.as_str())),
                 ),
                 (
                     "path".to_string(),
-                    VmValue::String(std::sync::Arc::from(path.as_str())),
+                    VmValue::String(arcstr::ArcStr::from(path.as_str())),
                 ),
             ]);
             VmValue::enum_variant("JsonStreamStatus", "Invalid", vec![VmValue::dict(payload)])
@@ -916,13 +916,13 @@ fn expected_type(schema: &crate::value::DictMap) -> Option<&str> {
         return Some("dict");
     }
     match schema.get("type") {
-        Some(VmValue::String(value)) => Some(value.as_ref()),
+        Some(VmValue::String(value)) => Some(value.as_str()),
         _ => None,
     }
 }
 
 fn schema_is_object_like(schema: &crate::value::DictMap) -> bool {
-    matches!(schema.get("type"), Some(VmValue::String(value)) if value.as_ref() == "dict")
+    matches!(schema.get("type"), Some(VmValue::String(value)) if value.as_str() == "dict")
         || schema.contains_key("properties")
         || schema.contains_key("required")
         || schema.contains_key("additional_properties")
@@ -1075,7 +1075,7 @@ fn char_at(buffer: &str, index: usize) -> Option<char> {
 }
 
 fn thrown(message: String) -> VmError {
-    VmError::Thrown(VmValue::String(std::sync::Arc::from(message)))
+    VmError::Thrown(VmValue::String(arcstr::ArcStr::from(message)))
 }
 
 #[cfg(test)]
@@ -1083,7 +1083,7 @@ mod tests {
     use super::*;
 
     fn string(value: &str) -> VmValue {
-        VmValue::String(std::sync::Arc::from(value))
+        VmValue::String(arcstr::ArcStr::from(value))
     }
 
     fn dict(entries: impl IntoIterator<Item = (&'static str, VmValue)>) -> VmValue {

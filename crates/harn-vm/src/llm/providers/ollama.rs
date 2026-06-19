@@ -229,7 +229,7 @@ impl OllamaProvider {
         let req = crate::llm::api::apply_auth_headers(req, &request.api_key, pdef.as_ref());
         let started = Instant::now();
         let response = req.send().await.map_err(|error| {
-            VmError::Thrown(VmValue::String(std::sync::Arc::from(format!(
+            VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
                 "ollama raw generate API error: {error}"
             ))))
         })?;
@@ -238,7 +238,7 @@ impl OllamaProvider {
             let retry_after = crate::llm::api::retry_after_header(response.headers());
             let body = response.text().await.unwrap_or_default();
             let msg = Self::classify_http_error(status, retry_after.as_deref(), &body).message;
-            return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(msg))));
+            return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(msg))));
         }
         let mut result = if request.stream {
             let tx = delta_tx.unwrap_or_else(|| {
@@ -361,12 +361,12 @@ async fn parse_raw_generate_response(
     request: &LlmRequestPayload,
 ) -> Result<LlmResult, VmError> {
     let json: serde_json::Value = response.json().await.map_err(|error| {
-        VmError::Thrown(VmValue::String(std::sync::Arc::from(format!(
+        VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
             "ollama raw generate response parse error: {error}"
         ))))
     })?;
     if let Some(error) = json.get("error").and_then(|value| value.as_str()) {
-        return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+        return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
             format!("ollama raw generate API error: {error}"),
         ))));
     }
@@ -387,7 +387,7 @@ async fn parse_raw_generate_response(
         .and_then(|value| value.as_i64())
         .unwrap_or(0);
     if text.is_empty() && output_tokens > 0 {
-        return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(format!(
+        return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
             "ollama raw-generate model {} reported eval_count={output_tokens} but delivered no content or thinking",
             request.model
         )))));
@@ -454,7 +454,7 @@ async fn parse_raw_generate_stream(
             Err(_) => continue,
         };
         if let Some(error) = json.get("error").and_then(|value| value.as_str()) {
-            return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+            return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
                 format!("ollama raw generate API error: {error}"),
             ))));
         }
@@ -496,7 +496,7 @@ async fn parse_raw_generate_stream(
         text = thinking.clone();
     }
     if text.is_empty() && output_tokens > 0 {
-        return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(format!(
+        return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
             "ollama raw-generate model {model} reported eval_count={output_tokens} but delivered no content or thinking"
         )))));
     }

@@ -139,7 +139,7 @@ fn next_handle(pid: Option<u32>) -> (String, u64) {
 }
 
 fn unknown_handle_error(handle_id: &str) -> VmError {
-    VmError::Thrown(VmValue::String(std::sync::Arc::from(format!(
+    VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
         "host_call process: unknown spawn handle {handle_id:?}"
     ))))
 }
@@ -561,7 +561,7 @@ mod tests {
     }
 
     fn vstr(s: &str) -> VmValue {
-        VmValue::String(StdArc::from(s))
+        VmValue::String(arcstr::ArcStr::from(s))
     }
 
     fn argv(items: &[&str]) -> VmValue {

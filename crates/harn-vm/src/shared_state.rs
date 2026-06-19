@@ -357,7 +357,7 @@ fn snapshot_expected(value: &VmValue) -> (VmValue, Option<u64>) {
     };
     let is_snapshot = matches!(
         dict.get("_type"),
-        Some(VmValue::String(kind)) if kind.as_ref() == "shared_snapshot"
+        Some(VmValue::String(kind)) if kind.as_str() == "shared_snapshot"
     );
     if !is_snapshot {
         return (value.clone(), None);

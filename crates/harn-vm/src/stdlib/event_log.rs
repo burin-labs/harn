@@ -121,12 +121,12 @@ fn register_event_log_namespace(vm: &mut Vm) {
         VmValue::dict(
             std::iter::once((
                 "_namespace".to_string(),
-                VmValue::String(std::sync::Arc::from("event_log")),
+                VmValue::String(arcstr::ArcStr::from("event_log")),
             ))
             .chain(names.into_iter().map(|name| {
                 (
                     name.to_string(),
-                    VmValue::BuiltinRef(std::sync::Arc::from(format!("event_log.{name}"))),
+                    VmValue::BuiltinRef(arcstr::ArcStr::from(format!("event_log.{name}"))),
                 )
             }))
             .collect::<BTreeMap<_, _>>(),

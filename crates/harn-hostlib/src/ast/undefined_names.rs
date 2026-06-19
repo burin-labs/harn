@@ -1404,8 +1404,14 @@ mod tests {
 
     fn run_with(content: &str, language: &str) -> VmValue {
         let mut dict: harn_vm::value::DictMap = Default::default();
-        dict.insert("content".into(), VmValue::String(Arc::from(content)));
-        dict.insert("language".into(), VmValue::String(Arc::from(language)));
+        dict.insert(
+            "content".into(),
+            VmValue::String(arcstr::ArcStr::from(content)),
+        );
+        dict.insert(
+            "language".into(),
+            VmValue::String(arcstr::ArcStr::from(language)),
+        );
         run(&[VmValue::dict(dict)]).expect("undefined_names run")
     }
 

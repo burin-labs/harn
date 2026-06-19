@@ -310,7 +310,7 @@ pub(crate) fn parse_openai_responses_response(
     model: &str,
 ) -> Result<LlmResult, VmError> {
     if let Some(err) = json["error"]["message"].as_str() {
-        return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+        return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
             format!("{provider} API error: {err}"),
         ))));
     }
@@ -319,7 +319,7 @@ pub(crate) fn parse_openai_responses_response(
         .get("output")
         .and_then(|value| value.as_array())
         .ok_or_else(|| {
-            VmError::Thrown(VmValue::String(std::sync::Arc::from(format!(
+            VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
                 "{provider} Responses API response missing output array"
             ))))
         })?;
@@ -457,7 +457,7 @@ pub(crate) fn parse_openai_responses_response(
 
     let has_blocks = !blocks.is_empty();
     if text.is_empty() && thinking_summary.is_empty() && tool_calls.is_empty() && !has_blocks {
-        return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+        return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
             format!(
                 "openai Responses model {model} delivered no content, reasoning, or tool calls"
             ),
@@ -577,7 +577,7 @@ pub(crate) fn billed_noncommittal_completion_error(
     model: &str,
     output_tokens: i64,
 ) -> VmError {
-    VmError::Thrown(VmValue::String(std::sync::Arc::from(format!(
+    VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
         "provider {provider} model {model} returned billed output \
          (completion_tokens={output_tokens}) with no dispatchable tool call or answer \
          (upstream contract violation): the model finished cleanly but committed neither a \
@@ -606,7 +606,7 @@ pub(crate) fn parse_llm_response(
 
     if is_anthropic_style {
         if let Some(err) = json["error"]["message"].as_str() {
-            return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+            return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
                 format!("{provider} API error: {err}"),
             ))));
         }
@@ -620,7 +620,7 @@ pub(crate) fn parse_llm_response(
             .get("content")
             .and_then(|value| value.as_array())
             .ok_or_else(|| {
-                VmError::Thrown(VmValue::String(std::sync::Arc::from(format!(
+                VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
                     "{provider} API response missing content array"
                 ))))
             })?;
@@ -695,7 +695,7 @@ pub(crate) fn parse_llm_response(
 
         if text.is_empty() && thinking_text.is_empty() && tool_calls.is_empty() && blocks.is_empty()
         {
-            return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+            return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
                 format!(
                     "anthropic-style model {model} delivered no content, reasoning, or tool calls"
                 ),
@@ -734,7 +734,7 @@ pub(crate) fn parse_llm_response(
         })
     } else {
         if let Some(err) = json["error"]["message"].as_str() {
-            return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+            return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
                 format!("{provider} API error: {err}"),
             ))));
         }
@@ -744,13 +744,13 @@ pub(crate) fn parse_llm_response(
             .and_then(|value| value.as_array())
             .filter(|choices| !choices.is_empty())
             .ok_or_else(|| {
-                VmError::Thrown(VmValue::String(std::sync::Arc::from(format!(
+                VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
                     "{provider} API response missing non-empty choices array"
                 ))))
             })?;
         let choice = &choices[0];
         let message = choice.get("message").ok_or_else(|| {
-            VmError::Thrown(VmValue::String(std::sync::Arc::from(format!(
+            VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
                 "{provider} API response missing choices[0].message"
             ))))
         })?;
@@ -887,7 +887,7 @@ pub(crate) fn parse_llm_response(
             && tool_calls.is_empty()
             && !has_tool_search_block
         {
-            return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+            return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
                 format!(
                 "openai-compatible model {model} delivered no content, reasoning, or tool calls"
             ),

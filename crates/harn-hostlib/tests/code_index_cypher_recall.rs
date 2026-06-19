@@ -58,7 +58,10 @@ fn ground_truth_recall_at_least_80_percent() {
     let _ = call(
         &registry,
         "hostlib_code_index_rebuild",
-        dict(&[("root", VmValue::String(Arc::from(root_str.as_str())))]),
+        dict(&[(
+            "root",
+            VmValue::String(arcstr::ArcStr::from(root_str.as_str())),
+        )]),
     );
 
     let qa_text =
@@ -85,7 +88,7 @@ fn ground_truth_recall_at_least_80_percent() {
             .map(|v| v.as_str().unwrap().to_string())
             .collect();
 
-        let payload = dict(&[("query", VmValue::String(Arc::from(cypher)))]);
+        let payload = dict(&[("query", VmValue::String(arcstr::ArcStr::from(cypher)))]);
         let result = call(&registry, "hostlib_code_index_cypher", payload);
         let dict_view = extract_dict(&result);
         let rows = extract_list(dict_view.get("rows").expect("rows in cypher response"));

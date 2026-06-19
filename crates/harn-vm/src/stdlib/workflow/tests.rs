@@ -161,7 +161,7 @@ async fn verify_stage_reads_transcript_from_session_store() {
     let mut raw_model_policy = std::collections::BTreeMap::new();
     raw_model_policy.insert(
         "session_id".to_string(),
-        crate::value::VmValue::String(std::sync::Arc::from(session_id.clone())),
+        crate::value::VmValue::String(arcstr::ArcStr::from(session_id.clone())),
     );
 
     let node = crate::orchestration::WorkflowNode {

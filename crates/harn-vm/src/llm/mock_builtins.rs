@@ -211,7 +211,7 @@ fn llm_mock_calls_builtin(_args: &[VmValue], _out: &mut String) -> Result<VmValu
             dict.insert(
                 "system".to_string(),
                 match &c.system {
-                    Some(s) => VmValue::String(std::sync::Arc::from(s.as_str())),
+                    Some(s) => VmValue::String(arcstr::ArcStr::from(s.as_str())),
                     None => VmValue::Nil,
                 },
             );
@@ -251,7 +251,7 @@ fn llm_mock_calls_builtin(_args: &[VmValue], _out: &mut String) -> Result<VmValu
                 "previous_response_id".to_string(),
                 c.previous_response_id
                     .as_deref()
-                    .map(|value| VmValue::String(std::sync::Arc::from(value)))
+                    .map(|value| VmValue::String(arcstr::ArcStr::from(value)))
                     .unwrap_or(VmValue::Nil),
             );
             dict.insert(
@@ -266,7 +266,7 @@ fn llm_mock_calls_builtin(_args: &[VmValue], _out: &mut String) -> Result<VmValu
                 "truncation".to_string(),
                 c.truncation
                     .as_deref()
-                    .map(|value| VmValue::String(std::sync::Arc::from(value)))
+                    .map(|value| VmValue::String(arcstr::ArcStr::from(value)))
                     .unwrap_or(VmValue::Nil),
             );
             dict.insert(
@@ -281,7 +281,7 @@ fn llm_mock_calls_builtin(_args: &[VmValue], _out: &mut String) -> Result<VmValu
                         VmValue::List(std::sync::Arc::new(
                             items
                                 .iter()
-                                .map(|item| VmValue::String(std::sync::Arc::from(item.as_str())))
+                                .map(|item| VmValue::String(arcstr::ArcStr::from(item.as_str())))
                                 .collect(),
                         ))
                     })
@@ -315,7 +315,7 @@ fn llm_mock_push_scope_builtin(_args: &[VmValue], _out: &mut String) -> Result<V
 #[harn_builtin(sig = "llm_mock_pop_scope() -> nil", category = "llm.mock")]
 fn llm_mock_pop_scope_builtin(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     if !mock::pop_llm_mock_scope() {
-        return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+        return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
             "llm_mock_pop_scope: no scope to pop",
         ))));
     }

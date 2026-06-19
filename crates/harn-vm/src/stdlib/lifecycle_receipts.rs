@@ -117,7 +117,7 @@ fn lifecycle_resume_input_hash_impl(
         Some(crate::llm::vm_value_to_json(&input))
     };
     let hash = hash_resume_input(json.as_ref());
-    Ok(VmValue::String(std::sync::Arc::from(hash)))
+    Ok(VmValue::String(arcstr::ArcStr::from(hash)))
 }
 
 #[harn_builtin(
@@ -132,7 +132,7 @@ fn lifecycle_drain_decision_prompt_hash_impl(
         .first()
         .map(|value| value.display())
         .unwrap_or_default();
-    Ok(VmValue::String(std::sync::Arc::from(
+    Ok(VmValue::String(arcstr::ArcStr::from(
         hash_drain_decision_prompt(&prompt),
     )))
 }

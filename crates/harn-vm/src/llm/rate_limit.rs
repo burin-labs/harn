@@ -1588,7 +1588,7 @@ mod tests {
             message: "503 service unavailable".to_string(),
             category: ErrorCategory::ServerError,
         };
-        let thrown_429 = VmError::Thrown(VmValue::String(std::sync::Arc::from(
+        let thrown_429 = VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
             "[rate_limited] too many requests",
         )));
         assert!(

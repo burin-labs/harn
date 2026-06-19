@@ -233,7 +233,7 @@ pub fn register_persona_from_dict(args: Vec<VmValue>) -> Result<VmValue, VmError
         .and_then(vm_str)
         .map(|s| s.to_string())
         .ok_or_else(|| {
-            VmError::Thrown(VmValue::String(std::sync::Arc::from(
+            VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
                 "__register_persona: expected (function_name, metadata_dict)",
             )))
         })?;
@@ -242,7 +242,7 @@ pub fn register_persona_from_dict(args: Vec<VmValue>) -> Result<VmValue, VmError
         .and_then(VmValue::as_dict)
         .cloned()
         .ok_or_else(|| {
-            VmError::Thrown(VmValue::String(std::sync::Arc::from(
+            VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
                 "__register_persona: metadata argument must be a dict",
             )))
         })?;
@@ -266,7 +266,7 @@ fn parse_stage_decls(value: Option<&VmValue>) -> Result<Vec<StageDecl>, VmError>
         VmValue::Nil => return Ok(Vec::new()),
         VmValue::List(list) => list.as_ref(),
         _ => {
-            return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+            return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
                 "__register_persona: stages argument must be a list of dicts",
             ))));
         }
@@ -274,12 +274,12 @@ fn parse_stage_decls(value: Option<&VmValue>) -> Result<Vec<StageDecl>, VmError>
     let mut out = Vec::with_capacity(entries.len());
     for entry in entries {
         let dict = entry.as_dict().ok_or_else(|| {
-            VmError::Thrown(VmValue::String(std::sync::Arc::from(
+            VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
                 "__register_persona: each stage entry must be a dict",
             )))
         })?;
         let Some(name) = dict.get("name").and_then(vm_str) else {
-            return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+            return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
                 "__register_persona: stage dict missing required 'name'",
             ))));
         };
@@ -290,7 +290,7 @@ fn parse_stage_decls(value: Option<&VmValue>) -> Result<Vec<StageDecl>, VmError>
                     .iter()
                     .map(|item| {
                         vm_str(item).map(str::to_string).ok_or_else(|| {
-                            VmError::Thrown(VmValue::String(std::sync::Arc::from(
+                            VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
                                 "__register_persona: stage allowed_tools entries must be strings",
                             )))
                         })
@@ -298,7 +298,7 @@ fn parse_stage_decls(value: Option<&VmValue>) -> Result<Vec<StageDecl>, VmError>
                     .collect::<Result<Vec<_>, _>>()?,
             ),
             _ => {
-                return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+                return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
                     "__register_persona: stage allowed_tools must be a list of strings",
                 ))));
             }
@@ -333,7 +333,7 @@ pub fn register_step_from_dict(args: Vec<VmValue>) -> Result<VmValue, VmError> {
         .and_then(vm_str)
         .map(|s| s.to_string())
         .ok_or_else(|| {
-            VmError::Thrown(VmValue::String(std::sync::Arc::from(
+            VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
                 "__register_step: expected (function_name, metadata_dict)",
             )))
         })?;
@@ -342,7 +342,7 @@ pub fn register_step_from_dict(args: Vec<VmValue>) -> Result<VmValue, VmError> {
         .and_then(VmValue::as_dict)
         .cloned()
         .ok_or_else(|| {
-            VmError::Thrown(VmValue::String(std::sync::Arc::from(
+            VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
                 "__register_step: metadata argument must be a dict",
             )))
         })?;
@@ -924,11 +924,11 @@ pub fn mark_escalated(err: VmError, step_name: Option<&str>, function: Option<&s
     next.put_str("category", "handoff_escalation");
     if let Some(step) = step_name {
         next.entry("step".to_string())
-            .or_insert_with(|| VmValue::String(std::sync::Arc::from(step.to_string())));
+            .or_insert_with(|| VmValue::String(arcstr::ArcStr::from(step.to_string())));
     }
     if let Some(function) = function {
         next.entry("function".to_string())
-            .or_insert_with(|| VmValue::String(std::sync::Arc::from(function.to_string())));
+            .or_insert_with(|| VmValue::String(arcstr::ArcStr::from(function.to_string())));
     }
     VmError::Thrown(VmValue::dict(next))
 }
@@ -996,7 +996,7 @@ mod tests {
         meta.insert("budget".to_string(), VmValue::dict(budget));
 
         register_step_from_dict(vec![
-            VmValue::String(std::sync::Arc::from("plan_step")),
+            VmValue::String(arcstr::ArcStr::from("plan_step")),
             VmValue::dict(meta),
         ])
         .expect("registration succeeds");
@@ -1071,7 +1071,7 @@ mod tests {
         let mut meta: crate::value::DictMap = crate::value::DictMap::new();
         meta.put_str("name", "research");
         register_step_from_dict(vec![
-            VmValue::String(std::sync::Arc::from("research_step")),
+            VmValue::String(arcstr::ArcStr::from("research_step")),
             VmValue::dict(meta),
         ])
         .expect("step registration");
@@ -1082,8 +1082,8 @@ mod tests {
         stage_dict.insert(
             "allowed_tools".to_string(),
             VmValue::List(std::sync::Arc::new(vec![
-                VmValue::String(std::sync::Arc::from("read")),
-                VmValue::String(std::sync::Arc::from("edit")),
+                VmValue::String(arcstr::ArcStr::from("read")),
+                VmValue::String(arcstr::ArcStr::from("edit")),
             ])),
         );
         let mut persona_meta: crate::value::DictMap = crate::value::DictMap::new();
@@ -1095,7 +1095,7 @@ mod tests {
             )])),
         );
         register_persona_from_dict(vec![
-            VmValue::String(std::sync::Arc::from("scoped_persona")),
+            VmValue::String(arcstr::ArcStr::from("scoped_persona")),
             VmValue::dict(persona_meta),
         ])
         .expect("persona registration");
@@ -1121,7 +1121,7 @@ mod tests {
         let mut meta: crate::value::DictMap = crate::value::DictMap::new();
         meta.put_str("name", "research");
         register_step_from_dict(vec![
-            VmValue::String(std::sync::Arc::from("research_step")),
+            VmValue::String(arcstr::ArcStr::from("research_step")),
             VmValue::dict(meta),
         ])
         .expect("step registration succeeds");
@@ -1131,7 +1131,7 @@ mod tests {
         stage_dict.insert(
             "allowed_tools".to_string(),
             VmValue::List(std::sync::Arc::new(vec![VmValue::String(
-                std::sync::Arc::from("read"),
+                arcstr::ArcStr::from("read"),
             )])),
         );
         let mut persona_meta: crate::value::DictMap = crate::value::DictMap::new();
@@ -1143,7 +1143,7 @@ mod tests {
             )])),
         );
         register_persona_from_dict(vec![
-            VmValue::String(std::sync::Arc::from("scoped_persona")),
+            VmValue::String(arcstr::ArcStr::from("scoped_persona")),
             VmValue::dict(persona_meta),
         ])
         .expect("persona registration succeeds");

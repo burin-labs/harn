@@ -480,7 +480,7 @@ impl Compiler {
                 "int" | "float" | "string" | "bool" | "list" | "dict" | "set" | "nil"
                 | "closure" | "bytes" => Some(VmValue::dict(BTreeMap::from([(
                     "type".to_string(),
-                    VmValue::String(std::sync::Arc::from(name.as_str())),
+                    VmValue::String(arcstr::ArcStr::from(name.as_str())),
                 )]))),
                 _ => None,
             },
@@ -492,7 +492,7 @@ impl Compiler {
                     let field_schema = Self::type_expr_to_schema_value(&field.type_expr)?;
                     properties.insert(field.name.clone(), field_schema);
                     if !field.optional {
-                        required.push(VmValue::String(std::sync::Arc::from(field.name.as_str())));
+                        required.push(VmValue::String(arcstr::ArcStr::from(field.name.as_str())));
                     }
                 }
                 let mut out = BTreeMap::new();
@@ -538,7 +538,7 @@ impl Compiler {
                         .iter()
                         .map(|m| match m {
                             harn_parser::TypeExpr::LitString(s) => {
-                                VmValue::String(std::sync::Arc::from(s.as_str()))
+                                VmValue::String(arcstr::ArcStr::from(s.as_str()))
                             }
                             _ => unreachable!(),
                         })
@@ -546,7 +546,7 @@ impl Compiler {
                     return Some(VmValue::dict(BTreeMap::from([
                         (
                             "type".to_string(),
-                            VmValue::String(std::sync::Arc::from("string")),
+                            VmValue::String(arcstr::ArcStr::from("string")),
                         ),
                         (
                             "enum".to_string(),
@@ -569,7 +569,7 @@ impl Compiler {
                     return Some(VmValue::dict(BTreeMap::from([
                         (
                             "type".to_string(),
-                            VmValue::String(std::sync::Arc::from("int")),
+                            VmValue::String(arcstr::ArcStr::from("int")),
                         ),
                         (
                             "enum".to_string(),
@@ -609,7 +609,7 @@ impl Compiler {
             }
             harn_parser::TypeExpr::FnType { .. } => Some(VmValue::dict(BTreeMap::from([(
                 "type".to_string(),
-                VmValue::String(std::sync::Arc::from("closure")),
+                VmValue::String(arcstr::ArcStr::from("closure")),
             )]))),
             harn_parser::TypeExpr::Applied { .. } => None,
             harn_parser::TypeExpr::Iter(_)
@@ -619,17 +619,17 @@ impl Compiler {
             harn_parser::TypeExpr::LitString(s) => Some(VmValue::dict(BTreeMap::from([
                 (
                     "type".to_string(),
-                    VmValue::String(std::sync::Arc::from("string")),
+                    VmValue::String(arcstr::ArcStr::from("string")),
                 ),
                 (
                     "const".to_string(),
-                    VmValue::String(std::sync::Arc::from(s.as_str())),
+                    VmValue::String(arcstr::ArcStr::from(s.as_str())),
                 ),
             ]))),
             harn_parser::TypeExpr::LitInt(v) => Some(VmValue::dict(BTreeMap::from([
                 (
                     "type".to_string(),
-                    VmValue::String(std::sync::Arc::from("int")),
+                    VmValue::String(arcstr::ArcStr::from("int")),
                 ),
                 ("const".to_string(), VmValue::Int(*v)),
             ]))),

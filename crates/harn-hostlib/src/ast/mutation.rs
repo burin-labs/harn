@@ -435,7 +435,7 @@ mod tests {
     use super::*;
 
     fn vm_string(s: &str) -> VmValue {
-        VmValue::String(Arc::from(s))
+        VmValue::String(arcstr::ArcStr::from(s))
     }
 
     fn dict(pairs: &[(&str, VmValue)]) -> VmValue {

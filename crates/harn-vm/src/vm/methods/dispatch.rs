@@ -55,7 +55,7 @@ impl crate::vm::Vm {
                 VmValue::Dict(map) => self.call_dict_method(map, method, args).await,
                 VmValue::Set(items) => self.call_set_method(items, method, args).await,
                 VmValue::Range(r) => self.call_range_method(&obj, r, method, args).await,
-                VmValue::StructInstance { .. } => {
+                VmValue::StructInstance(_) => {
                     self.call_struct_instance_method(&obj, method, args).await
                 }
                 VmValue::BuiltinRef(name) => {

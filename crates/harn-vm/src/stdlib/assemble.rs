@@ -43,7 +43,7 @@ async fn assemble_context_impl(
     {
         let mut candidate_dropped = Vec::new();
         let candidates = build_candidate_chunks(&artifacts, &options, &mut candidate_dropped);
-        let query_vm = VmValue::String(std::sync::Arc::from(
+        let query_vm = VmValue::String(arcstr::ArcStr::from(
             options.query.clone().unwrap_or_default().as_str(),
         ));
         let chunks_vm = VmValue::List(std::sync::Arc::new(
@@ -123,7 +123,7 @@ fn value_as_float(value: &VmValue) -> Option<f64> {
 /// result-only `score` field; a key added here can never desync the two sites.
 fn chunk_to_vm(chunk: &AssembledChunk, with_score: bool) -> VmValue {
     fn str_val(value: &str) -> VmValue {
-        VmValue::String(std::sync::Arc::from(value))
+        VmValue::String(arcstr::ArcStr::from(value))
     }
     fn opt_str(value: Option<&String>) -> VmValue {
         value.map(|value| str_val(value)).unwrap_or(VmValue::Nil)
@@ -243,7 +243,7 @@ fn assembled_to_vm(assembled: &AssembledContext) -> VmValue {
                 exclusion
                     .chunk_id
                     .as_ref()
-                    .map(|id| VmValue::String(std::sync::Arc::from(id.as_str())))
+                    .map(|id| VmValue::String(arcstr::ArcStr::from(id.as_str())))
                     .unwrap_or(VmValue::Nil),
             );
             map.put_str("reason", exclusion.reason);
@@ -252,7 +252,7 @@ fn assembled_to_vm(assembled: &AssembledContext) -> VmValue {
                 exclusion
                     .detail
                     .as_ref()
-                    .map(|text| VmValue::String(std::sync::Arc::from(text.as_str())))
+                    .map(|text| VmValue::String(arcstr::ArcStr::from(text.as_str())))
                     .unwrap_or(VmValue::Nil),
             );
             VmValue::dict(map)
@@ -322,7 +322,7 @@ pub async fn assemble_from_options(
     {
         let mut candidate_dropped = Vec::new();
         let candidates = build_candidate_chunks(artifacts, &options, &mut candidate_dropped);
-        let query_vm = VmValue::String(std::sync::Arc::from(
+        let query_vm = VmValue::String(arcstr::ArcStr::from(
             options.query.clone().unwrap_or_default().as_str(),
         ));
         let chunks_vm = VmValue::List(std::sync::Arc::new(

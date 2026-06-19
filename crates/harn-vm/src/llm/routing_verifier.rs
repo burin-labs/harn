@@ -422,7 +422,7 @@ pub(crate) fn build_refine_nudge(reasons: &[String]) -> String {
 // ---------------------------------------------------------------------------
 
 fn runtime_error(message: String) -> VmError {
-    VmError::Thrown(VmValue::String(std::sync::Arc::from(message)))
+    VmError::Thrown(VmValue::String(arcstr::ArcStr::from(message)))
 }
 
 fn parse_string(dict: &crate::value::DictMap, key: &str) -> Result<Option<String>, VmError> {
@@ -725,7 +725,7 @@ mod tests {
     #[test]
     fn shorthand_typecheck_parses() {
         let spec = VmValue::List(std::sync::Arc::new(vec![VmValue::String(
-            std::sync::Arc::from("typecheck"),
+            arcstr::ArcStr::from("typecheck"),
         )]));
         let verifiers = parse_escalate_on(Some(&spec)).expect("parses");
         assert_eq!(verifiers.len(), 1);
@@ -737,7 +737,7 @@ mod tests {
         let spec = VmValue::List(std::sync::Arc::new(vec![VmValue::Dict(
             std::sync::Arc::new(dict(&[(
                 "kind",
-                VmValue::String(std::sync::Arc::from("lint")),
+                VmValue::String(arcstr::ArcStr::from("lint")),
             )])),
         )]));
         let err = parse_escalate_on(Some(&spec)).unwrap_err();
@@ -753,7 +753,7 @@ mod tests {
         let spec = VmValue::List(std::sync::Arc::new(vec![VmValue::Dict(
             std::sync::Arc::new(dict(&[(
                 "kind",
-                VmValue::String(std::sync::Arc::from("test_run")),
+                VmValue::String(arcstr::ArcStr::from("test_run")),
             )])),
         )]));
         let err = parse_escalate_on(Some(&spec)).unwrap_err();

@@ -100,7 +100,7 @@ async fn pg_introspect_tables_impl(
     rows_to_list(
         pool.as_ref(),
         sql,
-        &[VmValue::String(std::sync::Arc::from(schema))],
+        &[VmValue::String(arcstr::ArcStr::from(schema))],
         "pg_introspect_tables",
     )
     .await
@@ -138,8 +138,8 @@ async fn pg_introspect_columns_impl(
         pool.as_ref(),
         sql,
         &[
-            VmValue::String(std::sync::Arc::from(schema)),
-            VmValue::String(std::sync::Arc::from(table)),
+            VmValue::String(arcstr::ArcStr::from(schema)),
+            VmValue::String(arcstr::ArcStr::from(table)),
         ],
         "pg_introspect_columns",
     )
@@ -183,8 +183,8 @@ async fn pg_introspect_indexes_impl(
         pool.as_ref(),
         sql,
         &[
-            VmValue::String(std::sync::Arc::from(schema)),
-            VmValue::String(std::sync::Arc::from(table)),
+            VmValue::String(arcstr::ArcStr::from(schema)),
+            VmValue::String(arcstr::ArcStr::from(table)),
         ],
         "pg_introspect_indexes",
     )
@@ -484,7 +484,7 @@ async fn pg_partition_create_for_window_impl(
                 .await
                 .map_err(|error| runtime_error(format!("{builtin}: {error}")))?;
         }
-        created.push(VmValue::String(std::sync::Arc::from(format!(
+        created.push(VmValue::String(arcstr::ArcStr::from(format!(
             "{}.{}",
             parent.schema, window.name
         ))));
@@ -581,7 +581,7 @@ fn prune_subtree<'a>(
                             .await
                             .map_err(|error| runtime_error(format!("{builtin}: {error}")))?;
                     }
-                    pruned.push(VmValue::String(std::sync::Arc::from(format!(
+                    pruned.push(VmValue::String(arcstr::ArcStr::from(format!(
                         "{schema}.{part_name}"
                     ))));
                 }
@@ -602,7 +602,7 @@ async fn resolve_regclass_oid(
 ) -> Result<i64, VmError> {
     let row = bind_params(
         query("SELECT ($1::regclass)::oid::bigint AS oid"),
-        &[VmValue::String(std::sync::Arc::from(qualified))],
+        &[VmValue::String(arcstr::ArcStr::from(qualified))],
     )?
     .fetch_one(pool)
     .await
@@ -622,7 +622,7 @@ async fn existing_partition_names(
              JOIN pg_class c ON c.oid = inh.inhrelid
              WHERE inh.inhparent = ($1::regclass)::oid",
         ),
-        &[VmValue::String(std::sync::Arc::from(qualified))],
+        &[VmValue::String(arcstr::ArcStr::from(qualified))],
     )?
     .fetch_all(pool)
     .await
@@ -921,11 +921,11 @@ mod tests {
         let from_to = crate::value::DictMap::from_iter([
             (
                 "from".to_string(),
-                VmValue::String(std::sync::Arc::from("2026-01-01")),
+                VmValue::String(arcstr::ArcStr::from("2026-01-01")),
             ),
             (
                 "to".to_string(),
-                VmValue::String(std::sync::Arc::from("2026-02-01")),
+                VmValue::String(arcstr::ArcStr::from("2026-02-01")),
             ),
         ]);
         assert_eq!(
@@ -1062,14 +1062,14 @@ mod tests {
     #[test]
     fn parse_interval_validates() {
         assert!(matches!(
-            parse_interval(Some(&VmValue::String(std::sync::Arc::from("day")))),
+            parse_interval(Some(&VmValue::String(arcstr::ArcStr::from("day")))),
             Ok(Interval::Day)
         ));
         assert!(matches!(
-            parse_interval(Some(&VmValue::String(std::sync::Arc::from("hour")))),
+            parse_interval(Some(&VmValue::String(arcstr::ArcStr::from("hour")))),
             Ok(Interval::Hour)
         ));
-        assert!(parse_interval(Some(&VmValue::String(std::sync::Arc::from("week")))).is_err());
+        assert!(parse_interval(Some(&VmValue::String(arcstr::ArcStr::from("week")))).is_err());
         assert!(parse_interval(None).is_err());
     }
 }

@@ -20,7 +20,7 @@ impl OpenAiResponsesProvider {
         delta_tx: Option<DeltaSender>,
     ) -> Result<LlmResult, VmError> {
         if request.provider != "openai" {
-            return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(format!(
+            return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
                 "api_mode: \"responses\" is only supported by provider \"openai\"; got provider \"{}\"",
                 request.provider
             )))));
@@ -57,7 +57,7 @@ impl OpenAiResponsesProvider {
             .json(&body);
         let req = resolved.apply_headers(req, &request.api_key);
         let response = req.send().await.map_err(|error| {
-            VmError::Thrown(VmValue::String(std::sync::Arc::from(format!(
+            VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
                 "openai Responses API error: {error}"
             ))))
         })?;
@@ -73,11 +73,11 @@ impl OpenAiResponsesProvider {
                 &body,
             )
             .message;
-            return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(msg))));
+            return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(msg))));
         }
 
         let json: serde_json::Value = response.json().await.map_err(|error| {
-            VmError::Thrown(VmValue::String(std::sync::Arc::from(format!(
+            VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
                 "openai Responses API response parse error: {error}"
             ))))
         })?;

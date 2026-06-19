@@ -46,6 +46,7 @@ tower-http = { version = "0.6", features = ["compression-br", "compression-gzip"
 tracing = "0.1"
 url = "2"
 uuid = { version = "1", features = ["v4", "v7"] }
+arcstr = { version = "1", features = ["serde", "std"] }
 
 [features]
 default = []

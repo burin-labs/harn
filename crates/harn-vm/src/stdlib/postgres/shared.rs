@@ -250,7 +250,7 @@ mod tests {
     use super::*;
 
     fn s(value: &str) -> VmValue {
-        VmValue::String(std::sync::Arc::from(value))
+        VmValue::String(arcstr::ArcStr::from(value))
     }
 
     fn opts(pairs: &[(&str, VmValue)]) -> crate::value::DictMap {

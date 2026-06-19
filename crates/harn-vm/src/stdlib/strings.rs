@@ -113,7 +113,7 @@ fn render_template_string(args: &[VmValue]) -> Result<VmValue, VmError> {
     let bindings = args.get(1).and_then(|a| a.as_dict());
     let rendered =
         render_template_result(&template, bindings, None, None).map_err(VmError::from)?;
-    Ok(VmValue::String(std::sync::Arc::from(rendered)))
+    Ok(VmValue::String(arcstr::ArcStr::from(rendered)))
 }
 
 fn render_asset(args: &[VmValue]) -> Result<VmValue, VmError> {
@@ -121,7 +121,7 @@ fn render_asset(args: &[VmValue]) -> Result<VmValue, VmError> {
     let asset = resolve_render_target(&path)?;
     let bindings = args.get(1).and_then(|a| a.as_dict());
     let rendered = render_asset_result(&asset, bindings).map_err(VmError::from)?;
-    Ok(VmValue::String(std::sync::Arc::from(rendered)))
+    Ok(VmValue::String(arcstr::ArcStr::from(rendered)))
 }
 
 /// Resolve a `render(...)` / `render_prompt(...)` target, honoring the
@@ -129,7 +129,7 @@ fn render_asset(args: &[VmValue]) -> Result<VmValue, VmError> {
 /// to the legacy source-relative path resolver for plain strings.
 fn resolve_render_target(path: &str) -> Result<TemplateAsset, VmError> {
     TemplateAsset::render_target(path)
-        .map_err(|msg| VmError::Thrown(VmValue::String(std::sync::Arc::from(msg))))
+        .map_err(|msg| VmError::Thrown(VmValue::String(arcstr::ArcStr::from(msg))))
 }
 
 /// `render_with_provenance(path, bindings)` — the debugger's hook for
@@ -193,16 +193,16 @@ fn span_to_vm_dict(span: &PromptSourceSpan) -> VmValue {
     d.insert("output_end".into(), VmValue::Int(span.output_end as i64));
     d.insert(
         "kind".into(),
-        VmValue::String(std::sync::Arc::from(span_kind_label(span.kind))),
+        VmValue::String(arcstr::ArcStr::from(span_kind_label(span.kind))),
     );
     d.insert(
         "template_uri".into(),
-        VmValue::String(std::sync::Arc::from(span.template_uri.as_str())),
+        VmValue::String(arcstr::ArcStr::from(span.template_uri.as_str())),
     );
     if let Some(ref v) = span.bound_value {
         d.insert(
             "bound_value".into(),
-            VmValue::String(std::sync::Arc::from(v.as_str())),
+            VmValue::String(arcstr::ArcStr::from(v.as_str())),
         );
     }
     if let Some(parent) = span.parent_span.as_deref() {
@@ -257,7 +257,7 @@ fn format_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> 
             }
         }
         result.push_str(rest);
-        return Ok(VmValue::String(std::sync::Arc::from(result)));
+        return Ok(VmValue::String(arcstr::ArcStr::from(result)));
     }
 
     // Otherwise: positional `{}` placeholders.
@@ -274,25 +274,25 @@ fn format_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> 
         rest = &rest[pos + 2..];
     }
     result.push_str(rest);
-    Ok(VmValue::String(std::sync::Arc::from(result)))
+    Ok(VmValue::String(arcstr::ArcStr::from(result)))
 }
 
 #[harn_builtin(sig = "trim(text: string?) -> string", category = "strings")]
 fn trim_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let s = args.first().map(|a| a.display()).unwrap_or_default();
-    Ok(VmValue::String(std::sync::Arc::from(s.trim())))
+    Ok(VmValue::String(arcstr::ArcStr::from(s.trim())))
 }
 
 #[harn_builtin(sig = "lowercase(text: string?) -> string", category = "strings")]
 fn lowercase_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let s = args.first().map(|a| a.display()).unwrap_or_default();
-    Ok(VmValue::String(std::sync::Arc::from(s.to_lowercase())))
+    Ok(VmValue::String(arcstr::ArcStr::from(s.to_lowercase())))
 }
 
 #[harn_builtin(sig = "uppercase(text: string?) -> string", category = "strings")]
 fn uppercase_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let s = args.first().map(|a| a.display()).unwrap_or_default();
-    Ok(VmValue::String(std::sync::Arc::from(s.to_uppercase())))
+    Ok(VmValue::String(arcstr::ArcStr::from(s.to_uppercase())))
 }
 
 #[harn_builtin(
@@ -307,7 +307,7 @@ fn split_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
         .unwrap_or_else(|| " ".to_string());
     let parts: Vec<VmValue> = s
         .split(&sep)
-        .map(|p| VmValue::String(std::sync::Arc::from(p)))
+        .map(|p| VmValue::String(arcstr::ArcStr::from(p)))
         .collect();
     Ok(VmValue::List(std::sync::Arc::new(parts)))
 }
@@ -333,7 +333,7 @@ fn unicode_normalize_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue
             ));
         }
     };
-    Ok(VmValue::String(std::sync::Arc::from(normalized)))
+    Ok(VmValue::String(arcstr::ArcStr::from(normalized)))
 }
 
 #[harn_builtin(sig = "unicode_graphemes(text: string?) -> list", category = "strings")]
@@ -341,7 +341,7 @@ fn unicode_graphemes_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue
     let s = args.first().map(|a| a.display()).unwrap_or_default();
     Ok(VmValue::List(std::sync::Arc::new(
         UnicodeSegmentation::graphemes(s.as_str(), true)
-            .map(|grapheme| VmValue::String(std::sync::Arc::from(grapheme)))
+            .map(|grapheme| VmValue::String(arcstr::ArcStr::from(grapheme)))
             .collect(),
     )))
 }
@@ -367,7 +367,7 @@ fn str_pad_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError>
         .unwrap_or_else(|| "right".to_string());
     let grapheme_count = UnicodeSegmentation::graphemes(s.as_str(), true).count();
     if grapheme_count >= width {
-        return Ok(VmValue::String(std::sync::Arc::from(s)));
+        return Ok(VmValue::String(arcstr::ArcStr::from(s)));
     }
     let needed = width - grapheme_count;
     let (left, right) = match side.as_str() {
@@ -380,7 +380,7 @@ fn str_pad_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError>
             ));
         }
     };
-    Ok(VmValue::String(std::sync::Arc::from(format!(
+    Ok(VmValue::String(arcstr::ArcStr::from(format!(
         "{}{}{}",
         crate::limits::checked_repeat(fill, left)?,
         s,
@@ -459,7 +459,7 @@ fn replace_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError>
     let s = args.first().map(|a| a.display()).unwrap_or_default();
     let old = args.get(1).map(|a| a.display()).unwrap_or_default();
     let new = args.get(2).map(|a| a.display()).unwrap_or_default();
-    Ok(VmValue::String(std::sync::Arc::from(s.replace(&old, &new))))
+    Ok(VmValue::String(arcstr::ArcStr::from(s.replace(&old, &new))))
 }
 
 #[harn_builtin(
@@ -471,9 +471,9 @@ fn join_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     match args.first() {
         Some(VmValue::List(items)) => {
             let parts: Vec<String> = items.iter().map(|v| v.display()).collect();
-            Ok(VmValue::String(std::sync::Arc::from(parts.join(&sep))))
+            Ok(VmValue::String(arcstr::ArcStr::from(parts.join(&sep))))
         }
-        _ => Ok(VmValue::String(std::sync::Arc::from(""))),
+        _ => Ok(VmValue::String(arcstr::ArcStr::from(""))),
     }
 }
 
@@ -504,7 +504,7 @@ fn substring_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErro
     let s = args.first().map(|a| a.display()).unwrap_or_default();
     let start = args.get(1).and_then(|a| a.as_int()).unwrap_or(0);
     let end = args.get(2).and_then(|a| a.as_int());
-    Ok(VmValue::String(std::sync::Arc::from(char_substring(
+    Ok(VmValue::String(arcstr::ArcStr::from(char_substring(
         &s, start, end,
     ))))
 }
@@ -523,7 +523,7 @@ fn chars_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
 #[harn_builtin(sig = "snake_to_camel(text: string?) -> string", category = "strings")]
 fn snake_to_camel_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let s = args.first().map(|a| a.display()).unwrap_or_default();
-    Ok(VmValue::String(std::sync::Arc::from(words_to_camel(
+    Ok(VmValue::String(arcstr::ArcStr::from(words_to_camel(
         &split_snake(&s),
     ))))
 }
@@ -531,7 +531,7 @@ fn snake_to_camel_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, V
 #[harn_builtin(sig = "snake_to_pascal(text: string?) -> string", category = "strings")]
 fn snake_to_pascal_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let s = args.first().map(|a| a.display()).unwrap_or_default();
-    Ok(VmValue::String(std::sync::Arc::from(words_to_pascal(
+    Ok(VmValue::String(arcstr::ArcStr::from(words_to_pascal(
         &split_snake(&s),
     ))))
 }
@@ -539,7 +539,7 @@ fn snake_to_pascal_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, 
 #[harn_builtin(sig = "camel_to_snake(text: string?) -> string", category = "strings")]
 fn camel_to_snake_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let s = args.first().map(|a| a.display()).unwrap_or_default();
-    Ok(VmValue::String(std::sync::Arc::from(words_to_snake(
+    Ok(VmValue::String(arcstr::ArcStr::from(words_to_snake(
         &split_camel(&s),
     ))))
 }
@@ -547,7 +547,7 @@ fn camel_to_snake_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, V
 #[harn_builtin(sig = "pascal_to_snake(text: string?) -> string", category = "strings")]
 fn pascal_to_snake_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let s = args.first().map(|a| a.display()).unwrap_or_default();
-    Ok(VmValue::String(std::sync::Arc::from(words_to_snake(
+    Ok(VmValue::String(arcstr::ArcStr::from(words_to_snake(
         &split_camel(&s),
     ))))
 }
@@ -555,7 +555,7 @@ fn pascal_to_snake_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, 
 #[harn_builtin(sig = "kebab_to_camel(text: string?) -> string", category = "strings")]
 fn kebab_to_camel_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let s = args.first().map(|a| a.display()).unwrap_or_default();
-    Ok(VmValue::String(std::sync::Arc::from(words_to_camel(
+    Ok(VmValue::String(arcstr::ArcStr::from(words_to_camel(
         &split_kebab(&s),
     ))))
 }
@@ -563,7 +563,7 @@ fn kebab_to_camel_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, V
 #[harn_builtin(sig = "camel_to_kebab(text: string?) -> string", category = "strings")]
 fn camel_to_kebab_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let s = args.first().map(|a| a.display()).unwrap_or_default();
-    Ok(VmValue::String(std::sync::Arc::from(words_to_kebab(
+    Ok(VmValue::String(arcstr::ArcStr::from(words_to_kebab(
         &split_camel(&s),
     ))))
 }
@@ -571,7 +571,7 @@ fn camel_to_kebab_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, V
 #[harn_builtin(sig = "snake_to_kebab(text: string?) -> string", category = "strings")]
 fn snake_to_kebab_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let s = args.first().map(|a| a.display()).unwrap_or_default();
-    Ok(VmValue::String(std::sync::Arc::from(words_to_kebab(
+    Ok(VmValue::String(arcstr::ArcStr::from(words_to_kebab(
         &split_snake(&s),
     ))))
 }
@@ -579,7 +579,7 @@ fn snake_to_kebab_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, V
 #[harn_builtin(sig = "kebab_to_snake(text: string?) -> string", category = "strings")]
 fn kebab_to_snake_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let s = args.first().map(|a| a.display()).unwrap_or_default();
-    Ok(VmValue::String(std::sync::Arc::from(words_to_snake(
+    Ok(VmValue::String(arcstr::ArcStr::from(words_to_snake(
         &split_kebab(&s),
     ))))
 }
@@ -587,7 +587,7 @@ fn kebab_to_snake_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, V
 #[harn_builtin(sig = "pascal_to_camel(text: string?) -> string", category = "strings")]
 fn pascal_to_camel_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let s = args.first().map(|a| a.display()).unwrap_or_default();
-    Ok(VmValue::String(std::sync::Arc::from(lowercase_first_str(
+    Ok(VmValue::String(arcstr::ArcStr::from(lowercase_first_str(
         &s,
     ))))
 }
@@ -595,7 +595,7 @@ fn pascal_to_camel_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, 
 #[harn_builtin(sig = "camel_to_pascal(text: string?) -> string", category = "strings")]
 fn camel_to_pascal_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let s = args.first().map(|a| a.display()).unwrap_or_default();
-    Ok(VmValue::String(std::sync::Arc::from(uppercase_first_str(
+    Ok(VmValue::String(arcstr::ArcStr::from(uppercase_first_str(
         &s,
     ))))
 }
@@ -616,13 +616,13 @@ fn title_case_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErr
             out.extend(c.to_lowercase());
         }
     }
-    Ok(VmValue::String(std::sync::Arc::from(out)))
+    Ok(VmValue::String(arcstr::ArcStr::from(out)))
 }
 
 #[harn_builtin(sig = "uppercase_first(text: string?) -> string", category = "strings")]
 fn uppercase_first_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let s = args.first().map(|a| a.display()).unwrap_or_default();
-    Ok(VmValue::String(std::sync::Arc::from(uppercase_first_str(
+    Ok(VmValue::String(arcstr::ArcStr::from(uppercase_first_str(
         &s,
     ))))
 }
@@ -630,7 +630,7 @@ fn uppercase_first_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, 
 #[harn_builtin(sig = "lowercase_first(text: string?) -> string", category = "strings")]
 fn lowercase_first_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let s = args.first().map(|a| a.display()).unwrap_or_default();
-    Ok(VmValue::String(std::sync::Arc::from(lowercase_first_str(
+    Ok(VmValue::String(arcstr::ArcStr::from(lowercase_first_str(
         &s,
     ))))
 }
@@ -640,10 +640,10 @@ fn dirname_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError>
     let path = args.first().map(|a| a.display()).unwrap_or_default();
     let p = std::path::Path::new(&path);
     match p.parent() {
-        Some(parent) => Ok(VmValue::String(std::sync::Arc::from(
+        Some(parent) => Ok(VmValue::String(arcstr::ArcStr::from(
             parent.to_string_lossy().as_ref(),
         ))),
-        None => Ok(VmValue::String(std::sync::Arc::from(""))),
+        None => Ok(VmValue::String(arcstr::ArcStr::from(""))),
     }
 }
 
@@ -652,10 +652,10 @@ fn basename_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError
     let path = args.first().map(|a| a.display()).unwrap_or_default();
     let p = std::path::Path::new(&path);
     match p.file_name() {
-        Some(name) => Ok(VmValue::String(std::sync::Arc::from(
+        Some(name) => Ok(VmValue::String(arcstr::ArcStr::from(
             name.to_string_lossy().as_ref(),
         ))),
-        None => Ok(VmValue::String(std::sync::Arc::from(""))),
+        None => Ok(VmValue::String(arcstr::ArcStr::from(""))),
     }
 }
 
@@ -664,11 +664,11 @@ fn extname_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError>
     let path = args.first().map(|a| a.display()).unwrap_or_default();
     let p = std::path::Path::new(&path);
     match p.extension() {
-        Some(ext) => Ok(VmValue::String(std::sync::Arc::from(format!(
+        Some(ext) => Ok(VmValue::String(arcstr::ArcStr::from(format!(
             ".{}",
             ext.to_string_lossy()
         )))),
-        None => Ok(VmValue::String(std::sync::Arc::from(""))),
+        None => Ok(VmValue::String(arcstr::ArcStr::from(""))),
     }
 }
 
@@ -762,12 +762,12 @@ fn repeat_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> 
     let s = args.first().map(|a| a.display()).unwrap_or_default();
     let count = args.get(1).and_then(VmValue::as_int).unwrap_or(0);
     if count <= 0 {
-        return Ok(VmValue::String(std::sync::Arc::from("")));
+        return Ok(VmValue::String(arcstr::ArcStr::from("")));
     }
     // Reject pathological sizes so a typo doesn't try to allocate
     // multi-gigabyte strings (or panic `capacity overflow`) inside a script.
     let repeated = crate::limits::checked_repeat(&s, count as usize)?;
-    Ok(VmValue::String(std::sync::Arc::from(repeated)))
+    Ok(VmValue::String(arcstr::ArcStr::from(repeated)))
 }
 
 #[harn_builtin(
@@ -781,7 +781,7 @@ fn indent_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> 
         .map(|a| a.display())
         .unwrap_or_else(|| "  ".to_string());
     if prefix.is_empty() || text.is_empty() {
-        return Ok(VmValue::String(std::sync::Arc::from(text)));
+        return Ok(VmValue::String(arcstr::ArcStr::from(text)));
     }
     let mut out = String::with_capacity(text.len() + prefix.len() * 4);
     for line in text.split_inclusive('\n') {
@@ -794,13 +794,13 @@ fn indent_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> 
         }
         out.push_str(line);
     }
-    Ok(VmValue::String(std::sync::Arc::from(out)))
+    Ok(VmValue::String(arcstr::ArcStr::from(out)))
 }
 
 #[harn_builtin(sig = "dedent(text: string?) -> string", category = "strings")]
 fn dedent_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let text = args.first().map(|a| a.display()).unwrap_or_default();
-    Ok(VmValue::String(std::sync::Arc::from(dedent_str(&text))))
+    Ok(VmValue::String(arcstr::ArcStr::from(dedent_str(&text))))
 }
 
 #[harn_builtin(
@@ -810,7 +810,7 @@ fn dedent_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> 
 fn word_wrap_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let text = args.first().map(|a| a.display()).unwrap_or_default();
     let width = args.get(1).and_then(VmValue::as_int).unwrap_or(80).max(1) as usize;
-    Ok(VmValue::String(std::sync::Arc::from(word_wrap_str(
+    Ok(VmValue::String(arcstr::ArcStr::from(word_wrap_str(
         &text, width,
     ))))
 }
@@ -991,7 +991,7 @@ mod tests {
     #[test]
     fn index_of_is_char_indexed_with_from_and_miss() {
         use crate::value::VmValue;
-        let s = |v: &str| VmValue::String(std::sync::Arc::from(v));
+        let s = |v: &str| VmValue::String(arcstr::ArcStr::from(v));
         let call = |args: Vec<VmValue>| -> i64 {
             let mut out = String::new();
             match super::index_of_impl(&args, &mut out).unwrap() {
@@ -1011,7 +1011,7 @@ mod tests {
     #[test]
     fn substring_builtin_uses_start_end_semantics() {
         use crate::value::VmValue;
-        let s = |v: &str| VmValue::String(std::sync::Arc::from(v));
+        let s = |v: &str| VmValue::String(arcstr::ArcStr::from(v));
         let call = |args: Vec<VmValue>| -> String {
             let mut out = String::new();
             match super::substring_impl(&args, &mut out).unwrap() {

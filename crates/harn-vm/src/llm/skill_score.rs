@@ -80,20 +80,20 @@ fn candidate_to_vm(candidate: SkillCandidate) -> VmValue {
     VmValue::dict(BTreeMap::from([
         (
             "id".to_string(),
-            VmValue::String(std::sync::Arc::from(candidate.id.clone())),
+            VmValue::String(arcstr::ArcStr::from(candidate.id.clone())),
         ),
         (
             "name".to_string(),
-            VmValue::String(std::sync::Arc::from(candidate.id)),
+            VmValue::String(arcstr::ArcStr::from(candidate.id)),
         ),
         ("score".to_string(), VmValue::Float(candidate.score)),
         (
             "trigger".to_string(),
-            VmValue::String(std::sync::Arc::from(candidate.trigger.clone())),
+            VmValue::String(arcstr::ArcStr::from(candidate.trigger.clone())),
         ),
         (
             "reason".to_string(),
-            VmValue::String(std::sync::Arc::from(candidate.trigger)),
+            VmValue::String(arcstr::ArcStr::from(candidate.trigger)),
         ),
     ]))
 }

@@ -584,7 +584,7 @@ impl crate::vm::Vm {
             return Ok(Some(NetPolicyOutcome::Allow));
         }
         let Some(url) = args.first().and_then(|v| match v {
-            VmValue::String(s) => Some(s.as_ref().to_string()),
+            VmValue::String(s) => Some(s.as_str().to_string()),
             _ => None,
         }) else {
             // No URL argument — let the underlying method surface its
@@ -612,7 +612,7 @@ impl crate::vm::Vm {
                     match self.call_closure_pub(&closure, &[request]).await {
                         Ok(value) => match value {
                             VmValue::String(s) => {
-                                let outcome = OnViolation::parse_str(s.as_ref())?;
+                                let outcome = OnViolation::parse_str(s.as_str())?;
                                 return self.apply_callback_outcome(handle, audit, outcome).await;
                             }
                             other => {
@@ -1062,12 +1062,12 @@ impl crate::vm::Vm {
                 }
             },
             "summary" => match args.first() {
-                Some(state) => Ok(VmValue::String(std::sync::Arc::from(
+                Some(state) => Ok(VmValue::String(arcstr::ArcStr::from(
                     state_counts(state)?.summary().as_str(),
                 ))),
                 None => {
                     let snapshot = crate::orchestration::unsettled_state_snapshot_async().await;
-                    Ok(VmValue::String(std::sync::Arc::from(snapshot.summary())))
+                    Ok(VmValue::String(arcstr::ArcStr::from(snapshot.summary())))
                 }
             },
             "resume_subagent" => {
@@ -1119,7 +1119,7 @@ impl crate::vm::Vm {
             }
             "current_pipeline_id" => Ok(crate::orchestration::current_mutation_session()
                 .and_then(|session| session.run_id.or(Some(session.session_id)))
-                .map(|id| VmValue::String(std::sync::Arc::from(id)))
+                .map(|id| VmValue::String(arcstr::ArcStr::from(id)))
                 .unwrap_or(VmValue::Nil)),
             "handoff_to" => Ok(record_handoff_envelope(args)),
             "emit_audit" => {
@@ -1732,7 +1732,7 @@ fn json_receipt(status: &str, method: &str, reason: &str) -> VmValue {
 
 fn vm_value_string(value: &VmValue) -> String {
     match value {
-        VmValue::String(text) => text.as_ref().to_string(),
+        VmValue::String(text) => text.as_str().to_string(),
         other => other.display(),
     }
 }
@@ -1749,7 +1749,7 @@ async fn record_emit_audit_with_hooks(
     let kind = args
         .first()
         .map(|v| match v {
-            VmValue::String(s) => s.as_ref().to_string(),
+            VmValue::String(s) => s.as_str().to_string(),
             other => other.display(),
         })
         .unwrap_or_default();
@@ -1962,7 +1962,7 @@ fn record_handoff_envelope(args: &[VmValue]) -> VmValue {
         }));
     };
     let target = match target_value {
-        VmValue::String(s) => s.as_ref().to_string(),
+        VmValue::String(s) => s.as_str().to_string(),
         other => other.display(),
     };
     let payload = args
@@ -2017,7 +2017,7 @@ const HARN_CAP_201_CODE: &str = "HARN-CAP-201";
 fn is_egress_blocked_dict(dict: &crate::value::DictMap) -> bool {
     matches!(
         dict.get("type"),
-        Some(VmValue::String(value)) if value.as_ref() == "EgressBlocked"
+        Some(VmValue::String(value)) if value.as_str() == "EgressBlocked"
     )
 }
 
@@ -2027,7 +2027,7 @@ fn tag_egress_dict(
     let mut next = (*dict).clone();
     if matches!(
         next.get("code"),
-        Some(VmValue::String(value)) if value.as_ref() == HARN_CAP_201_CODE
+        Some(VmValue::String(value)) if value.as_str() == HARN_CAP_201_CODE
     ) {
         return std::sync::Arc::new(next);
     }
@@ -2151,7 +2151,7 @@ fn sleep_ms_arg(args: &[VmValue]) -> Result<i64, VmError> {
 
 fn string_arg<'a>(args: &'a [VmValue], index: usize, callee: &str) -> Result<&'a str, VmError> {
     match args.get(index) {
-        Some(VmValue::String(value)) => Ok(value.as_ref()),
+        Some(VmValue::String(value)) => Ok(value.as_str()),
         Some(other) => Err(VmError::TypeError(format!(
             "{callee} expects string argument {}, got {}",
             index + 1,
@@ -2171,7 +2171,7 @@ fn optional_string_arg<'a>(
 ) -> Result<&'a str, VmError> {
     match args.get(index) {
         None | Some(VmValue::Nil) => Ok(""),
-        Some(VmValue::String(value)) => Ok(value.as_ref()),
+        Some(VmValue::String(value)) => Ok(value.as_str()),
         Some(other) => Err(VmError::TypeError(format!(
             "{callee} expects string argument {}, got {}",
             index + 1,
@@ -2225,7 +2225,7 @@ fn secret_value_from_vm(
     field: &str,
 ) -> Result<crate::secrets::SecretBytes, VmError> {
     match value {
-        VmValue::String(text) => Ok(crate::secrets::SecretBytes::from(text.as_ref())),
+        VmValue::String(text) => Ok(crate::secrets::SecretBytes::from(text.as_str())),
         VmValue::Bytes(bytes) => Ok(crate::secrets::SecretBytes::from(bytes.as_slice())),
         other => Err(VmError::TypeError(format!(
             "{}.{method} expects {field}: string or bytes, got {}",
@@ -2240,12 +2240,12 @@ fn secret_scope_arg(value: Option<&VmValue>) -> Result<crate::secrets::SecretSco
         None | Some(VmValue::Nil) => Ok(crate::secrets::SecretScope::tenant(
             crate::harness_tenant::current_tenant_id().map(|tenant| tenant.0),
         )),
-        Some(VmValue::String(scope)) => parse_secret_scope_string(scope.as_ref()),
+        Some(VmValue::String(scope)) => parse_secret_scope_string(scope.as_str()),
         Some(VmValue::Dict(dict)) => {
             let kind = dict
                 .get("kind")
                 .and_then(|value| match value {
-                    VmValue::String(kind) => Some(kind.as_ref()),
+                    VmValue::String(kind) => Some(kind.as_str()),
                     _ => None,
                 })
                 .ok_or_else(|| {
@@ -2540,7 +2540,7 @@ fn mock_read_line_value(state: &crate::harness::MockHarnessState, args: &[VmValu
                 out.put_str("value", line);
                 VmValue::dict(out)
             } else {
-                VmValue::String(std::sync::Arc::from(line))
+                VmValue::String(arcstr::ArcStr::from(line))
             }
         }
         None => {

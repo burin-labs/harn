@@ -205,7 +205,7 @@ fn pending_row_to_value(row: PendingHitlRow) -> VmValue {
         VmValue::List(std::sync::Arc::new(
             row.approvers
                 .into_iter()
-                .map(|value| VmValue::String(std::sync::Arc::from(value)))
+                .map(|value| VmValue::String(arcstr::ArcStr::from(value)))
                 .collect(),
         )),
     );

@@ -63,7 +63,7 @@ fn rebuild(registry: &BuiltinRegistry, root: &std::path::Path) {
         "hostlib_code_index_rebuild",
         dict(&[(
             "root",
-            VmValue::String(Arc::from(root.to_string_lossy().as_ref())),
+            VmValue::String(arcstr::ArcStr::from(root.to_string_lossy().as_ref())),
         )]),
     );
 }
@@ -79,7 +79,7 @@ fn cypher_returns_function_by_name() {
         "hostlib_code_index_cypher",
         dict(&[(
             "query",
-            VmValue::String(Arc::from(
+            VmValue::String(arcstr::ArcStr::from(
                 "MATCH (f:Function {name: 'alpha'}) RETURN f.path AS path",
             )),
         )]),
@@ -108,13 +108,16 @@ fn branch_overlay_create_then_query_reports_reuse() {
         &reg,
         "hostlib_code_index_branch_overlay",
         dict(&[
-            ("action", VmValue::String(Arc::from("create"))),
-            ("branch", VmValue::String(Arc::from("topic/test"))),
+            ("action", VmValue::String(arcstr::ArcStr::from("create"))),
+            (
+                "branch",
+                VmValue::String(arcstr::ArcStr::from("topic/test")),
+            ),
         ]),
     );
     let d = extract_dict(&result);
     match d.get("active").unwrap() {
-        VmValue::String(s) => assert_eq!(s.as_ref(), "topic/test"),
+        VmValue::String(s) => assert_eq!(s.as_str(), "topic/test"),
         other => panic!("expected active branch string, got {other:?}"),
     }
     let reuse = match d.get("reuse_fraction").unwrap() {
@@ -128,7 +131,10 @@ fn branch_overlay_create_then_query_reports_reuse() {
     let result = call(
         &reg,
         "hostlib_code_index_branch_overlay",
-        dict(&[("action", VmValue::String(Arc::from("deactivate")))]),
+        dict(&[(
+            "action",
+            VmValue::String(arcstr::ArcStr::from("deactivate")),
+        )]),
     );
     let d = extract_dict(&result);
     assert!(matches!(d.get("active").unwrap(), VmValue::Nil));
@@ -144,7 +150,7 @@ fn freshness_detects_post_index_edits() {
     let result = call(
         &reg,
         "hostlib_code_index_freshness",
-        dict(&[("path", VmValue::String(Arc::from("src/a.rs")))]),
+        dict(&[("path", VmValue::String(arcstr::ArcStr::from("src/a.rs")))]),
     );
     let d = extract_dict(&result);
     assert!(matches!(d.get("known").unwrap(), VmValue::Bool(true)));
@@ -159,7 +165,7 @@ fn freshness_detects_post_index_edits() {
     let result = call(
         &reg,
         "hostlib_code_index_freshness",
-        dict(&[("path", VmValue::String(Arc::from("src/a.rs")))]),
+        dict(&[("path", VmValue::String(arcstr::ArcStr::from("src/a.rs")))]),
     );
     let d = extract_dict(&result);
     assert!(matches!(d.get("stale").unwrap(), VmValue::Bool(true)));
@@ -174,7 +180,10 @@ fn freshness_reports_unknown_for_unindexed_paths() {
     let result = call(
         &reg,
         "hostlib_code_index_freshness",
-        dict(&[("path", VmValue::String(Arc::from("src/does-not-exist.rs")))]),
+        dict(&[(
+            "path",
+            VmValue::String(arcstr::ArcStr::from("src/does-not-exist.rs")),
+        )]),
     );
     let d = extract_dict(&result);
     assert!(matches!(d.get("known").unwrap(), VmValue::Bool(false)));

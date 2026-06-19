@@ -243,11 +243,11 @@ mod tests {
         let raw = std::collections::BTreeMap::from([
             (
                 "source".to_string(),
-                VmValue::String(std::sync::Arc::from("fn foo() {")),
+                VmValue::String(arcstr::ArcStr::from("fn foo() {")),
             ),
             (
                 "language".to_string(),
-                VmValue::String(std::sync::Arc::from("rust")),
+                VmValue::String(arcstr::ArcStr::from("rust")),
             ),
         ]);
         let payload = VmValue::dict(raw);

@@ -74,7 +74,7 @@ async fn self_certainty_builtin(
 
     let prompt = format!("{SELF_CERTAINTY_PROMPT_PREFIX}{text}{SELF_CERTAINTY_PROMPT_SUFFIX}");
     let opts = super::helpers::extract_llm_options(&[
-        VmValue::String(std::sync::Arc::from(prompt)),
+        VmValue::String(arcstr::ArcStr::from(prompt)),
         VmValue::Nil,
         VmValue::dict(call_options),
     ])?;

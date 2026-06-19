@@ -90,7 +90,7 @@ pub(crate) async fn call_mcp_tool_with_hint(
 
     if result.get("isError").and_then(|v| v.as_bool()) == Some(true) {
         let error_text = extract_content_text(&result);
-        return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+        return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
             error_text,
         ))));
     }
@@ -207,7 +207,7 @@ pub fn register_mcp_builtins(vm: &mut Vm) {
     vm.register_async_builtin("mcp_connect", |_ctx, args| async move {
         let command = args.first().map(|a| a.display()).unwrap_or_default();
         if command.is_empty() {
-            return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+            return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
                 "mcp_connect: command is required",
             ))));
         }
@@ -239,7 +239,7 @@ pub fn register_mcp_builtins(vm: &mut Vm) {
             None => String::new(),
         };
         if name.is_empty() {
-            return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+            return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
                 "mcp_ensure_active: server name is required",
             ))));
         }
@@ -255,7 +255,7 @@ pub fn register_mcp_builtins(vm: &mut Vm) {
             Some(VmValue::String(s)) => s.to_string(),
             Some(other) => other.display(),
             None => {
-                return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+                return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
                     "mcp_release: server name is required",
                 ))));
             }
@@ -310,7 +310,7 @@ pub fn register_mcp_builtins(vm: &mut Vm) {
             Some(VmValue::String(s)) => s.to_string(),
             Some(other) => other.display(),
             None => {
-                return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+                return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
                     "mcp_server_card: server name, URL, or path is required",
                 ))));
             }
@@ -333,7 +333,7 @@ pub fn register_mcp_builtins(vm: &mut Vm) {
                 Some(reg) => match reg.card {
                     Some(card) => card,
                     None => {
-                        return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+                        return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
                             format!(
                             "mcp_server_card: server '{target}' has no 'card' field in harn.toml"
                         ),
@@ -341,7 +341,7 @@ pub fn register_mcp_builtins(vm: &mut Vm) {
                     }
                 },
                 None => {
-                    return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+                    return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
                         format!(
                         "mcp_server_card: no MCP server '{target}' registered (check harn.toml) \
                          — pass a URL or path directly instead"
@@ -354,7 +354,7 @@ pub fn register_mcp_builtins(vm: &mut Vm) {
         let card = crate::mcp_card::fetch_server_card(&source, None)
             .await
             .map_err(|e| {
-                VmError::Thrown(VmValue::String(std::sync::Arc::from(format!(
+                VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
                     "mcp_server_card: {e}"
                 ))))
             })?;
@@ -365,7 +365,7 @@ pub fn register_mcp_builtins(vm: &mut Vm) {
         let client = match args.first() {
             Some(VmValue::McpClient(c)) => c.clone(),
             _ => {
-                return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+                return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
                     "mcp_list_tools: argument must be an MCP client",
                 ))));
             }
@@ -403,7 +403,7 @@ pub fn register_mcp_builtins(vm: &mut Vm) {
         let client = match args.first() {
             Some(VmValue::McpClient(c)) => c.clone(),
             _ => {
-                return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+                return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
                     "mcp_call: first argument must be an MCP client",
                 ))));
             }
@@ -411,7 +411,7 @@ pub fn register_mcp_builtins(vm: &mut Vm) {
 
         let tool_name = args.get(1).map(|a| a.display()).unwrap_or_default();
         if tool_name.is_empty() {
-            return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+            return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
                 "mcp_call: tool name is required",
             ))));
         }
@@ -436,7 +436,7 @@ pub fn register_mcp_builtins(vm: &mut Vm) {
         let client = match args.first() {
             Some(VmValue::McpClient(c)) => c.clone(),
             _ => {
-                return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+                return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
                     "mcp_server_info: argument must be an MCP client",
                 ))));
             }
@@ -486,7 +486,7 @@ pub fn register_mcp_builtins(vm: &mut Vm) {
         let client = match args.first() {
             Some(VmValue::McpClient(c)) => c.clone(),
             _ => {
-                return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+                return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
                     "mcp_disconnect: argument must be an MCP client",
                 ))));
             }
@@ -500,7 +500,7 @@ pub fn register_mcp_builtins(vm: &mut Vm) {
         let client = match args.first() {
             Some(VmValue::McpClient(c)) => c.clone(),
             _ => {
-                return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+                return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
                     "mcp_list_resources: argument must be an MCP client",
                 ))));
             }
@@ -522,7 +522,7 @@ pub fn register_mcp_builtins(vm: &mut Vm) {
         let client = match args.first() {
             Some(VmValue::McpClient(c)) => c.clone(),
             _ => {
-                return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+                return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
                     "mcp_read_resource: first argument must be an MCP client",
                 ))));
             }
@@ -530,7 +530,7 @@ pub fn register_mcp_builtins(vm: &mut Vm) {
 
         let uri = args.get(1).map(|a| a.display()).unwrap_or_default();
         if uri.is_empty() {
-            return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+            return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
                 "mcp_read_resource: URI is required",
             ))));
         }
@@ -548,7 +548,7 @@ pub fn register_mcp_builtins(vm: &mut Vm) {
 
         if contents.len() == 1 {
             if let Some(text) = contents[0].get("text").and_then(|t| t.as_str()) {
-                return Ok(VmValue::String(std::sync::Arc::from(text)));
+                return Ok(VmValue::String(arcstr::ArcStr::from(text)));
             }
         }
 
@@ -565,7 +565,7 @@ pub fn register_mcp_builtins(vm: &mut Vm) {
         let client = match args.first() {
             Some(VmValue::McpClient(c)) => c.clone(),
             _ => {
-                return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+                return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
                     "mcp_list_resource_templates: argument must be an MCP client",
                 ))));
             }
@@ -592,7 +592,7 @@ pub fn register_mcp_builtins(vm: &mut Vm) {
         let client = match args.first() {
             Some(VmValue::McpClient(c)) => c.clone(),
             _ => {
-                return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+                return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
                     "mcp_list_prompts: argument must be an MCP client",
                 ))));
             }
@@ -615,7 +615,7 @@ pub fn register_mcp_builtins(vm: &mut Vm) {
         let client = match args.first() {
             Some(VmValue::McpClient(c)) => c.clone(),
             _ => {
-                return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+                return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
                     "mcp_get_prompt: first argument must be an MCP client",
                 ))));
             }
@@ -623,7 +623,7 @@ pub fn register_mcp_builtins(vm: &mut Vm) {
 
         let name = args.get(1).map(|a| a.display()).unwrap_or_default();
         if name.is_empty() {
-            return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+            return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
                 "mcp_get_prompt: prompt name is required",
             ))));
         }
@@ -666,23 +666,23 @@ pub(crate) fn register_harn_mcp_namespace(vm: &mut Vm) {
     let mcp_namespace = VmValue::dict(BTreeMap::from([
         (
             "_namespace".to_string(),
-            VmValue::String(std::sync::Arc::from("harn.mcp")),
+            VmValue::String(arcstr::ArcStr::from("harn.mcp")),
         ),
         (
             "roots".to_string(),
-            VmValue::BuiltinRef(std::sync::Arc::from("harn.mcp.roots")),
+            VmValue::BuiltinRef(arcstr::ArcStr::from("harn.mcp.roots")),
         ),
         (
             "configure".to_string(),
-            VmValue::BuiltinRef(std::sync::Arc::from("harn.mcp.configure")),
+            VmValue::BuiltinRef(arcstr::ArcStr::from("harn.mcp.configure")),
         ),
         (
             "file_input".to_string(),
-            VmValue::BuiltinRef(std::sync::Arc::from("harn.mcp.file_input")),
+            VmValue::BuiltinRef(arcstr::ArcStr::from("harn.mcp.file_input")),
         ),
         (
             "upload_file".to_string(),
-            VmValue::BuiltinRef(std::sync::Arc::from("harn.mcp.upload_file")),
+            VmValue::BuiltinRef(arcstr::ArcStr::from("harn.mcp.upload_file")),
         ),
         // Supervised host primitive (#2504, A.7). spawn/tools/call/stop
         // route to `crate::mcp_host` and add restart-budget, circuit
@@ -690,35 +690,35 @@ pub(crate) fn register_harn_mcp_namespace(vm: &mut Vm) {
         // the lazy-boot `mcp_registry` they share.
         (
             "spawn".to_string(),
-            VmValue::BuiltinRef(std::sync::Arc::from("harn.mcp.spawn")),
+            VmValue::BuiltinRef(arcstr::ArcStr::from("harn.mcp.spawn")),
         ),
         (
             "tools".to_string(),
-            VmValue::BuiltinRef(std::sync::Arc::from("harn.mcp.tools")),
+            VmValue::BuiltinRef(arcstr::ArcStr::from("harn.mcp.tools")),
         ),
         (
             "call".to_string(),
-            VmValue::BuiltinRef(std::sync::Arc::from("harn.mcp.call")),
+            VmValue::BuiltinRef(arcstr::ArcStr::from("harn.mcp.call")),
         ),
         (
             "stop".to_string(),
-            VmValue::BuiltinRef(std::sync::Arc::from("harn.mcp.stop")),
+            VmValue::BuiltinRef(arcstr::ArcStr::from("harn.mcp.stop")),
         ),
         (
             "discover".to_string(),
-            VmValue::BuiltinRef(std::sync::Arc::from("harn.mcp.discover")),
+            VmValue::BuiltinRef(arcstr::ArcStr::from("harn.mcp.discover")),
         ),
         (
             "reload".to_string(),
-            VmValue::BuiltinRef(std::sync::Arc::from("harn.mcp.reload")),
+            VmValue::BuiltinRef(arcstr::ArcStr::from("harn.mcp.reload")),
         ),
         (
             "status".to_string(),
-            VmValue::BuiltinRef(std::sync::Arc::from("harn.mcp.status")),
+            VmValue::BuiltinRef(arcstr::ArcStr::from("harn.mcp.status")),
         ),
         (
             "reauth_expired".to_string(),
-            VmValue::BuiltinRef(std::sync::Arc::from("harn.mcp.reauth_expired")),
+            VmValue::BuiltinRef(arcstr::ArcStr::from("harn.mcp.reauth_expired")),
         ),
     ]));
     vm.set_global(
@@ -726,11 +726,11 @@ pub(crate) fn register_harn_mcp_namespace(vm: &mut Vm) {
         VmValue::dict(BTreeMap::from([
             (
                 "_namespace".to_string(),
-                VmValue::String(std::sync::Arc::from("harn")),
+                VmValue::String(arcstr::ArcStr::from("harn")),
             ),
             (
                 "mcp_roots".to_string(),
-                VmValue::BuiltinRef(std::sync::Arc::from("harn.mcp.roots")),
+                VmValue::BuiltinRef(arcstr::ArcStr::from("harn.mcp.roots")),
             ),
             ("mcp".to_string(), mcp_namespace),
         ])),
@@ -757,7 +757,7 @@ pub(crate) fn register_supervised_mcp_host_builtins(vm: &mut Vm) {
             _ => Default::default(),
         };
         let name = crate::mcp_host::spawn(spec, options).await?;
-        Ok(VmValue::String(std::sync::Arc::from(name)))
+        Ok(VmValue::String(arcstr::ArcStr::from(name)))
     });
 
     vm.register_async_builtin("harn.mcp.tools", |_ctx, args| async move {

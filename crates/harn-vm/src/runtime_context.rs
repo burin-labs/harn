@@ -326,7 +326,7 @@ fn debug_context_value(vm: &crate::vm::Vm, cancelled: bool) -> VmValue {
         VmValue::List(std::sync::Arc::new(
             vm.spawned_tasks
                 .keys()
-                .map(|id| VmValue::String(std::sync::Arc::from(id.as_str())))
+                .map(|id| VmValue::String(arcstr::ArcStr::from(id.as_str())))
                 .collect(),
         )),
     );
@@ -345,7 +345,7 @@ fn insert_string(values: &mut crate::value::DictMap, key: &str, value: Option<St
     values.insert(
         key.to_string(),
         value
-            .map(|value| VmValue::String(std::sync::Arc::from(value)))
+            .map(|value| VmValue::String(arcstr::ArcStr::from(value)))
             .unwrap_or(VmValue::Nil),
     );
 }

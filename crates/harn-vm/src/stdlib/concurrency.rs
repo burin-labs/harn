@@ -108,14 +108,14 @@ fn require_channel_list(args: &[VmValue], builtin: &str) -> Result<Vec<VmValue>,
         Some(VmValue::List(items)) => {
             for item in items.iter() {
                 if !matches!(item, VmValue::Channel(_)) {
-                    return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+                    return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
                         format!("{builtin}: channel list must contain only channels"),
                     ))));
                 }
             }
             Ok(items.as_ref().clone())
         }
-        _ => Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+        _ => Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
             format!("{builtin}: first argument must be a list of channels"),
         )))),
     }
@@ -145,7 +145,7 @@ fn try_poll_channels(channels: &[VmValue]) -> (Option<(usize, VmValue, String)>,
 }
 
 fn cancelled_vm_error() -> VmError {
-    VmError::Thrown(VmValue::String(std::sync::Arc::from(
+    VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
         "kind:cancelled:VM cancelled by host",
     )))
 }
@@ -154,19 +154,19 @@ fn channel_closed_error(operation: &str, channel_name: &str) -> VmError {
     VmError::Thrown(VmValue::dict(BTreeMap::from([
         (
             "type".to_string(),
-            VmValue::String(std::sync::Arc::from("ChannelClosed")),
+            VmValue::String(arcstr::ArcStr::from("ChannelClosed")),
         ),
         (
             "kind".to_string(),
-            VmValue::String(std::sync::Arc::from("ChannelClosed")),
+            VmValue::String(arcstr::ArcStr::from("ChannelClosed")),
         ),
         (
             "category".to_string(),
-            VmValue::String(std::sync::Arc::from("channel_closed")),
+            VmValue::String(arcstr::ArcStr::from("channel_closed")),
         ),
         (
             "message".to_string(),
-            VmValue::String(std::sync::Arc::from(format!(
+            VmValue::String(arcstr::ArcStr::from(format!(
                 "{operation}: channel '{channel_name}' is closed"
             ))),
         ),
@@ -582,7 +582,7 @@ async fn shared_scope_id_builtin(
     let vm = current_async_vm(&ctx, "shared_scope_id");
     let options = args.get(1).and_then(VmValue::as_dict);
     let raw_scope = args.first().map(VmValue::display);
-    Ok(VmValue::String(std::sync::Arc::from(resolve_shared_scope(
+    Ok(VmValue::String(arcstr::ArcStr::from(resolve_shared_scope(
         &vm,
         raw_scope.as_deref(),
         options,
@@ -1091,7 +1091,7 @@ fn channel_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErr
 )]
 fn close_channel_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     if args.is_empty() {
-        return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+        return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
             "close_channel: requires a channel",
         ))));
     }
@@ -1102,7 +1102,7 @@ fn close_channel_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue,
         }
         Ok(VmValue::Nil)
     } else {
-        Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+        Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
             "close_channel: first argument must be a channel",
         ))))
     }
@@ -1116,7 +1116,7 @@ fn close_channel_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue,
 fn channel_is_closed_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     match args.first() {
         Some(VmValue::Channel(ch)) => Ok(VmValue::Bool(ch.is_closed())),
-        _ => Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+        _ => Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
             "channel_is_closed: first argument must be a channel",
         )))),
     }
@@ -1129,7 +1129,7 @@ fn channel_is_closed_builtin(args: &[VmValue], _out: &mut String) -> Result<VmVa
 )]
 fn try_receive_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     if args.is_empty() {
-        return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+        return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
             "try_receive: requires a channel",
         ))));
     }
@@ -1142,7 +1142,7 @@ fn try_receive_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, V
             Err(_) => Ok(VmValue::Nil),
         }
     } else {
-        Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+        Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
             "try_receive: first argument must be a channel",
         ))))
     }
@@ -1293,7 +1293,7 @@ async fn send_builtin(
     args: Vec<VmValue>,
 ) -> Result<VmValue, VmError> {
     if args.len() < 2 {
-        return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+        return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
             "send: requires channel and value",
         ))));
     }
@@ -1330,7 +1330,7 @@ async fn send_builtin(
             }
         }
     } else {
-        Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+        Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
             "send: first argument must be a channel",
         ))))
     }
@@ -1347,7 +1347,7 @@ async fn receive_builtin(
     args: Vec<VmValue>,
 ) -> Result<VmValue, VmError> {
     if args.is_empty() {
-        return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+        return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
             "receive: requires a channel",
         ))));
     }
@@ -1419,7 +1419,7 @@ async fn receive_builtin(
             }
         }
     } else {
-        Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+        Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
             "receive: first argument must be a channel",
         ))))
     }
@@ -1436,13 +1436,13 @@ async fn select_builtin(
     args: Vec<VmValue>,
 ) -> Result<VmValue, VmError> {
     if args.is_empty() {
-        return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+        return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
             "select: requires at least one channel",
         ))));
     }
     for arg in &args {
         if !matches!(arg, VmValue::Channel(_)) {
-            return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+            return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
                 "select: all arguments must be channels",
             ))));
         }
@@ -1475,14 +1475,14 @@ async fn select_timeout_builtin(
     args: Vec<VmValue>,
 ) -> Result<VmValue, VmError> {
     if args.len() < 2 {
-        return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+        return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
             "__select_timeout: requires channel list and timeout",
         ))));
     }
     let channels = match &args[0] {
         VmValue::List(items) => (**items).clone(),
         _ => {
-            return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+            return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
                 "__select_timeout: first argument must be a list of channels",
             ))));
         }
@@ -1512,14 +1512,14 @@ async fn select_try_builtin(
     args: Vec<VmValue>,
 ) -> Result<VmValue, VmError> {
     if args.is_empty() {
-        return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+        return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
             "__select_try: requires channel list",
         ))));
     }
     let channels = match &args[0] {
         VmValue::List(items) => (**items).clone(),
         _ => {
-            return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+            return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
                 "__select_try: first argument must be a list of channels",
             ))));
         }
@@ -1543,14 +1543,14 @@ async fn select_list_builtin(
     args: Vec<VmValue>,
 ) -> Result<VmValue, VmError> {
     if args.is_empty() {
-        return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+        return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
             "__select_list: requires channel list",
         ))));
     }
     let channels = match &args[0] {
         VmValue::List(items) => (**items).clone(),
         _ => {
-            return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+            return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
                 "__select_list: first argument must be a list of channels",
             ))));
         }
@@ -1650,7 +1650,7 @@ fn circuit_breaker_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValu
             },
         );
     });
-    Ok(VmValue::String(std::sync::Arc::from(name)))
+    Ok(VmValue::String(arcstr::ArcStr::from(name)))
 }
 
 fn optional_positive_usize_arg(
@@ -1714,7 +1714,7 @@ fn circuit_check_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue,
             }
         }
     });
-    Ok(VmValue::String(std::sync::Arc::from(state)))
+    Ok(VmValue::String(arcstr::ArcStr::from(state)))
 }
 
 #[harn_builtin(
@@ -1790,7 +1790,7 @@ fn timer_end_builtin(args: &[VmValue], out: &mut String) -> Result<VmValue, VmEr
     let timer = match args.first() {
         Some(VmValue::Dict(d)) => d,
         _ => {
-            return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+            return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
                 "timer_end: argument must be a timer dict from timer_start",
             ))));
         }
@@ -1827,7 +1827,7 @@ mod tests {
     }
 
     fn s(v: &str) -> VmValue {
-        VmValue::String(std::sync::Arc::from(v))
+        VmValue::String(arcstr::ArcStr::from(v))
     }
 
     #[test]

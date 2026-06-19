@@ -801,7 +801,7 @@ fn row_to_value(
                 let text = std::str::from_utf8(bytes).map_err(|error| {
                     runtime_error(format!("{builtin}: text column is not UTF-8: {error}"))
                 })?;
-                VmValue::String(Arc::from(text.to_string()))
+                VmValue::String(arcstr::ArcStr::from(text.to_string()))
             }
             ValueRef::Blob(bytes) => VmValue::Bytes(Arc::new(bytes.to_vec())),
         };
@@ -1030,7 +1030,7 @@ fn dir_arg(dict: &crate::value::DictMap, key: &str) -> Result<PathBuf, VmError> 
         ))
     })?;
     match value {
-        VmValue::String(text) => Ok(PathBuf::from(text.as_ref())),
+        VmValue::String(text) => Ok(PathBuf::from(text.as_str())),
         _ => Err(runtime_error(format!(
             "sqlite_migrate: option `{key}` must be a string path"
         ))),
@@ -1116,7 +1116,7 @@ fn string_list(values: Vec<String>) -> VmValue {
     VmValue::List(Arc::new(
         values
             .into_iter()
-            .map(|value| VmValue::String(Arc::from(value)))
+            .map(|value| VmValue::String(arcstr::ArcStr::from(value)))
             .collect(),
     ))
 }
@@ -1134,7 +1134,7 @@ mod tests {
     use super::*;
 
     fn s(value: &str) -> VmValue {
-        VmValue::String(Arc::from(value))
+        VmValue::String(arcstr::ArcStr::from(value))
     }
 
     fn dict(pairs: &[(&str, VmValue)]) -> VmValue {

@@ -24,7 +24,7 @@ pub(crate) fn register_transcript_builtins(vm: &mut Vm) {
                 VmValue::Dict(dict) => dict
                     .get("kind")
                     .and_then(|v| match v {
-                        VmValue::String(s) => Some(s.as_ref()),
+                        VmValue::String(s) => Some(s.as_str()),
                         _ => None,
                     })
                     .map(|s| s == kind)

@@ -69,7 +69,7 @@ fn test_params_to_json_schema_preserves_file_input_descriptor() {
     file_descriptor.insert(
         "accept".to_string(),
         VmValue::List(std::sync::Arc::new(vec![VmValue::String(
-            std::sync::Arc::from("text/*"),
+            arcstr::ArcStr::from("text/*"),
         )])),
     );
     file_descriptor.insert("maxSize".to_string(), VmValue::Int(64));
@@ -115,7 +115,7 @@ fn test_tool_registry_to_mcp_tools_empty() {
     let mut registry = crate::value::DictMap::new();
     registry.insert(
         "_type".into(),
-        VmValue::String(std::sync::Arc::from("tool_registry")),
+        VmValue::String(arcstr::ArcStr::from("tool_registry")),
     );
     registry.insert(
         "tools".into(),
@@ -137,24 +137,24 @@ fn test_tool_registry_to_mcp_tools_preserves_metadata() {
         let mut icon = crate::value::DictMap::new();
         icon.insert(
             "src".into(),
-            VmValue::String(std::sync::Arc::from("https://example.com/tool.png")),
+            VmValue::String(arcstr::ArcStr::from("https://example.com/tool.png")),
         );
         icon.insert(
             "mimeType".into(),
-            VmValue::String(std::sync::Arc::from("image/png")),
+            VmValue::String(arcstr::ArcStr::from("image/png")),
         );
         icon
     });
 
     let mut tool = crate::value::DictMap::new();
-    tool.insert("name".into(), VmValue::String(std::sync::Arc::from("echo")));
+    tool.insert("name".into(), VmValue::String(arcstr::ArcStr::from("echo")));
     tool.insert(
         "title".into(),
-        VmValue::String(std::sync::Arc::from("Echo")),
+        VmValue::String(arcstr::ArcStr::from("Echo")),
     );
     tool.insert(
         "description".into(),
-        VmValue::String(std::sync::Arc::from("Echo input")),
+        VmValue::String(arcstr::ArcStr::from("Echo input")),
     );
     tool.insert("handler".into(), handler);
     tool.insert(
@@ -172,7 +172,7 @@ fn test_tool_registry_to_mcp_tools_preserves_metadata() {
             let mut schema = crate::value::DictMap::new();
             schema.insert(
                 "type".into(),
-                VmValue::String(std::sync::Arc::from("string")),
+                VmValue::String(arcstr::ArcStr::from("string")),
             );
             schema
         }),
@@ -181,7 +181,7 @@ fn test_tool_registry_to_mcp_tools_preserves_metadata() {
     let mut registry = crate::value::DictMap::new();
     registry.insert(
         "_type".into(),
-        VmValue::String(std::sync::Arc::from("tool_registry")),
+        VmValue::String(arcstr::ArcStr::from("tool_registry")),
     );
     registry.insert(
         "tools".into(),
@@ -202,7 +202,7 @@ fn test_tool_registry_to_mcp_tools_preserves_metadata() {
 
 #[test]
 fn test_prompt_value_to_messages_string() {
-    let msgs = prompt_value_to_messages(&VmValue::String(std::sync::Arc::from("hello")));
+    let msgs = prompt_value_to_messages(&VmValue::String(arcstr::ArcStr::from("hello")));
     assert_eq!(msgs.len(), 1);
     assert_eq!(msgs[0]["role"], "user");
     assert_eq!(msgs[0]["content"]["text"], "hello");
@@ -213,10 +213,10 @@ fn test_prompt_value_to_messages_list() {
     let items = vec![
         VmValue::dict({
             let mut d = crate::value::DictMap::new();
-            d.insert("role".into(), VmValue::String(std::sync::Arc::from("user")));
+            d.insert("role".into(), VmValue::String(arcstr::ArcStr::from("user")));
             d.insert(
                 "content".into(),
-                VmValue::String(std::sync::Arc::from("hi")),
+                VmValue::String(arcstr::ArcStr::from("hi")),
             );
             d
         }),
@@ -224,11 +224,11 @@ fn test_prompt_value_to_messages_list() {
             let mut d = crate::value::DictMap::new();
             d.insert(
                 "role".into(),
-                VmValue::String(std::sync::Arc::from("assistant")),
+                VmValue::String(arcstr::ArcStr::from("assistant")),
             );
             d.insert(
                 "content".into(),
-                VmValue::String(std::sync::Arc::from("hello")),
+                VmValue::String(arcstr::ArcStr::from("hello")),
             );
             d
         }),
@@ -244,19 +244,19 @@ fn test_prompt_value_to_messages_preserves_image_content() {
         let mut image = crate::value::DictMap::new();
         image.insert(
             "type".into(),
-            VmValue::String(std::sync::Arc::from("image")),
+            VmValue::String(arcstr::ArcStr::from("image")),
         );
         image.insert(
             "data".into(),
-            VmValue::String(std::sync::Arc::from("ZmFrZQ==")),
+            VmValue::String(arcstr::ArcStr::from("ZmFrZQ==")),
         );
         image.insert(
             "mimeType".into(),
-            VmValue::String(std::sync::Arc::from("image/png")),
+            VmValue::String(arcstr::ArcStr::from("image/png")),
         );
 
         let mut message = crate::value::DictMap::new();
-        message.insert("role".into(), VmValue::String(std::sync::Arc::from("user")));
+        message.insert("role".into(), VmValue::String(arcstr::ArcStr::from("user")));
         message.insert("content".into(), VmValue::dict(image));
         message
     })];
@@ -290,7 +290,7 @@ fn test_annotations_to_json() {
     let mut d = crate::value::DictMap::new();
     d.insert(
         "title".into(),
-        VmValue::String(std::sync::Arc::from("My Tool")),
+        VmValue::String(arcstr::ArcStr::from("My Tool")),
     );
     d.insert("readOnlyHint".into(), VmValue::Bool(true));
     d.insert("destructiveHint".into(), VmValue::Bool(false));

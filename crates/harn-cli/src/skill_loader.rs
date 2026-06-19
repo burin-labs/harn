@@ -417,7 +417,7 @@ fn provenance_to_vm(report: &VerificationReport) -> VmValue {
                 .endorsements
                 .iter()
                 .map(|endorsement| {
-                    VmValue::String(std::sync::Arc::from(
+                    VmValue::String(arcstr::ArcStr::from(
                         endorsement.endorser_fingerprint.as_str(),
                     ))
                 })

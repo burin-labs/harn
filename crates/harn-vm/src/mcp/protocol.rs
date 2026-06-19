@@ -16,7 +16,7 @@ pub(crate) fn jsonrpc_error_to_vm_error(error: &serde_json::Value) -> VmError {
         .and_then(|v| v.as_str())
         .unwrap_or("Unknown MCP error");
     let code = error.get("code").and_then(|v| v.as_i64()).unwrap_or(-1);
-    VmError::Thrown(VmValue::String(std::sync::Arc::from(format!(
+    VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
         "MCP error ({code}): {message}"
     ))))
 }

@@ -346,7 +346,7 @@ fn record_skill_loaded_event(
 }
 
 pub fn vm_error(message: impl Into<String>) -> VmError {
-    VmError::Thrown(VmValue::String(std::sync::Arc::from(message.into())))
+    VmError::Thrown(VmValue::String(arcstr::ArcStr::from(message.into())))
 }
 
 pub fn tool_rejected_error(message: impl Into<String>) -> VmError {
@@ -364,7 +364,7 @@ mod tests {
     use std::sync::Arc;
 
     fn string(value: &str) -> VmValue {
-        VmValue::String(std::sync::Arc::from(value))
+        VmValue::String(arcstr::ArcStr::from(value))
     }
 
     fn registry_with_entry(entry: crate::value::DictMap) -> VmValue {

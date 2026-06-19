@@ -484,7 +484,7 @@ fn json_to_vm(jv: &serde_json::Value) -> VmValue {
                 VmValue::Float(n.as_f64().unwrap_or(0.0))
             }
         }
-        serde_json::Value::String(s) => VmValue::String(std::sync::Arc::from(s.as_str())),
+        serde_json::Value::String(s) => VmValue::String(arcstr::ArcStr::from(s.as_str())),
         serde_json::Value::Array(arr) => {
             VmValue::List(std::sync::Arc::new(arr.iter().map(json_to_vm).collect()))
         }
@@ -889,7 +889,7 @@ fn metadata_stale_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, 
             {
                 let current_hash = compute_structure_hash(&full_dir);
                 if current_hash != stored_hash {
-                    tier1_stale.push(VmValue::String(std::sync::Arc::from(dir.as_str())));
+                    tier1_stale.push(VmValue::String(arcstr::ArcStr::from(dir.as_str())));
                     continue;
                 }
             }
@@ -901,7 +901,7 @@ fn metadata_stale_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, 
             {
                 let current_hash = compute_content_hash_for_dir(&full_dir);
                 if current_hash != stored_hash {
-                    tier2_stale.push(VmValue::String(std::sync::Arc::from(dir.as_str())));
+                    tier2_stale.push(VmValue::String(arcstr::ArcStr::from(dir.as_str())));
                 }
             }
         }
@@ -966,7 +966,7 @@ fn metadata_status_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, 
         let mut missing_structure_hash = Vec::new();
         let mut missing_content_hash = Vec::new();
         for (dir, meta) in &st.entries {
-            directories.push(VmValue::String(std::sync::Arc::from(
+            directories.push(VmValue::String(arcstr::ArcStr::from(
                 normalize_directory_key(dir),
             )));
             for ns in meta.namespaces.keys() {
@@ -983,12 +983,12 @@ fn metadata_status_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, 
                 .or_else(|| meta.namespaces.get("classification"));
             if let Some(fields) = relevant {
                 if !fields.contains_key("structureHash") && full_dir.exists() {
-                    missing_structure_hash.push(VmValue::String(std::sync::Arc::from(
+                    missing_structure_hash.push(VmValue::String(arcstr::ArcStr::from(
                         normalize_directory_key(dir),
                     )));
                 }
                 if !fields.contains_key("contentHash") && full_dir.exists() {
-                    missing_content_hash.push(VmValue::String(std::sync::Arc::from(
+                    missing_content_hash.push(VmValue::String(arcstr::ArcStr::from(
                         normalize_directory_key(dir),
                     )));
                 }
@@ -1010,7 +1010,7 @@ fn metadata_status_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, 
                 namespaces
                     .keys()
                     .cloned()
-                    .map(|name| VmValue::String(std::sync::Arc::from(name)))
+                    .map(|name| VmValue::String(arcstr::ArcStr::from(name)))
                     .collect(),
             )),
         );
@@ -1044,7 +1044,7 @@ fn compute_content_hash_impl(args: &[VmValue], _out: &mut String) -> Result<VmVa
             st.base_dir.join(&dir)
         };
         let hash = compute_content_hash_for_dir(&full_dir);
-        Ok(VmValue::String(std::sync::Arc::from(hash)))
+        Ok(VmValue::String(arcstr::ArcStr::from(hash)))
     })
 }
 
@@ -1311,7 +1311,7 @@ fn metadata_stale_value(state: &MetadataState, base_dir: &Path) -> VmValue {
         {
             let current_hash = compute_structure_hash(&full_dir);
             if current_hash != stored_hash {
-                tier1_stale.push(VmValue::String(std::sync::Arc::from(
+                tier1_stale.push(VmValue::String(arcstr::ArcStr::from(
                     normalize_directory_key(dir),
                 )));
                 continue;
@@ -1325,7 +1325,7 @@ fn metadata_stale_value(state: &MetadataState, base_dir: &Path) -> VmValue {
         {
             let current_hash = compute_content_hash_for_dir(&full_dir);
             if current_hash != stored_hash {
-                tier2_stale.push(VmValue::String(std::sync::Arc::from(
+                tier2_stale.push(VmValue::String(arcstr::ArcStr::from(
                     normalize_directory_key(dir),
                 )));
             }

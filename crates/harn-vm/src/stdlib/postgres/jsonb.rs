@@ -31,7 +31,7 @@ async fn pg_jsonb_path_impl(
     let path = required_string(&args, 2, "pg.jsonb.path", "jsonpath")?;
     let params = [
         document.clone(),
-        VmValue::String(Arc::from(path.to_string())),
+        VmValue::String(arcstr::ArcStr::from(path.to_string())),
     ];
     let rows = query_rows(target, JSONB_PATH_SQL, &params, QueryRouting::Primary).await?;
     rows.into_iter()
@@ -130,8 +130,20 @@ mod tests {
 
     #[test]
     fn required_jsonpath_must_be_non_empty_string() {
-        assert!(required_string(&[VmValue::String(Arc::from("$.items"))], 0, "pg", "path").is_ok());
-        assert!(required_string(&[VmValue::String(Arc::from(""))], 0, "pg", "path").is_err());
+        assert!(required_string(
+            &[VmValue::String(arcstr::ArcStr::from("$.items"))],
+            0,
+            "pg",
+            "path"
+        )
+        .is_ok());
+        assert!(required_string(
+            &[VmValue::String(arcstr::ArcStr::from(""))],
+            0,
+            "pg",
+            "path"
+        )
+        .is_err());
         assert!(required_string(&[VmValue::Int(1)], 0, "pg", "path").is_err());
     }
 }

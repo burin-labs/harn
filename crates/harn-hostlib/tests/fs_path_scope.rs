@@ -11,7 +11,6 @@
 
 use std::fs;
 use std::path::Path;
-use std::sync::Arc;
 
 use harn_hostlib::tools::permissions;
 use harn_hostlib::{
@@ -73,7 +72,7 @@ fn dict_arg(entries: &[(&str, VmValue)]) -> Vec<VmValue> {
 }
 
 fn vm_string(s: &str) -> VmValue {
-    VmValue::String(Arc::from(s))
+    VmValue::String(arcstr::ArcStr::from(s))
 }
 
 fn path_string(p: &Path) -> String {

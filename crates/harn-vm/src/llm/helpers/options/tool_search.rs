@@ -33,7 +33,7 @@ pub(super) fn parse_tool_search_option(
             "bm25" => Ok(ToolSearchVariant::Bm25),
             "regex" => Ok(ToolSearchVariant::Regex),
             "hybrid" => Ok(ToolSearchVariant::Hybrid),
-            other => Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+            other => Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
                 format!(
                     "tool_search.variant: expected \"bm25\", \"regex\", or \"hybrid\", got \"{other}\""
                 ),
@@ -45,7 +45,7 @@ pub(super) fn parse_tool_search_option(
             "auto" => Ok(ToolSearchMode::Auto),
             "native" => Ok(ToolSearchMode::Native),
             "client" => Ok(ToolSearchMode::Client),
-            other => Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+            other => Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
                 format!(
                 "tool_search.mode: expected \"auto\" | \"native\" | \"client\", got \"{other}\""
             ),
@@ -55,7 +55,7 @@ pub(super) fn parse_tool_search_option(
     let validate_strategy = |s: &str| -> Result<(), VmError> {
         match s {
             "bm25" | "regex" | "hybrid" => Ok(()),
-            other => Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+            other => Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
                 format!(
                     "tool_search.strategy: expected \"bm25\" | \"regex\" | \"hybrid\", got \"{other}\""
                 ),
@@ -68,23 +68,23 @@ pub(super) fn parse_tool_search_option(
         VmValue::Bool(false) => Ok(None),
         VmValue::Bool(true) => Ok(Some(ToolSearchConfig::default_bm25_auto())),
         VmValue::String(s) => Ok(Some(ToolSearchConfig {
-            variant: variant_from_short(s.as_ref())?,
+            variant: variant_from_short(s.as_str())?,
             mode: ToolSearchMode::Auto,
         })),
         VmValue::Dict(d) => {
             let variant = match d.get("variant") {
-                Some(VmValue::String(s)) => variant_from_short(s.as_ref())?,
+                Some(VmValue::String(s)) => variant_from_short(s.as_str())?,
                 Some(_) => {
-                    return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+                    return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
                         "tool_search.variant: expected a string",
                     ))));
                 }
                 None => ToolSearchVariant::Bm25,
             };
             let mode = match d.get("mode") {
-                Some(VmValue::String(s)) => mode_from_short(s.as_ref())?,
+                Some(VmValue::String(s)) => mode_from_short(s.as_str())?,
                 Some(_) => {
-                    return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+                    return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
                         "tool_search.mode: expected a string",
                     ))));
                 }
@@ -93,14 +93,14 @@ pub(super) fn parse_tool_search_option(
             match d.get("always_loaded") {
                 Some(VmValue::List(_)) | None => {}
                 Some(_) => {
-                    return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+                    return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
                         "tool_search.always_loaded: expected a list of tool names",
                     ))));
                 }
             }
             let custom_strategy = match d.get("strategy") {
                 Some(VmValue::String(s)) => {
-                    validate_strategy(s.as_ref())?;
+                    validate_strategy(s.as_str())?;
                     false
                 }
                 Some(VmValue::Closure(_)) => true,
@@ -108,26 +108,26 @@ pub(super) fn parse_tool_search_option(
                     if matches!(strategy.get("handler"), Some(VmValue::Closure(_))) {
                         true
                     } else {
-                        return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+                        return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
                             "tool_search.strategy: expected \"bm25\" | \"regex\" | \"hybrid\", a scorer closure, or {handler: closure}",
                         ))));
                     }
                 }
                 Some(_) => {
-                    return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+                    return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
                         "tool_search.strategy: expected \"bm25\" | \"regex\" | \"hybrid\", a scorer closure, or {handler: closure}",
                     ))));
                 }
                 None => false,
             };
             if custom_strategy && matches!(mode, ToolSearchMode::Native) {
-                return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+                return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
                     "tool_search.strategy: custom scorers are client-only; set mode: \"client\" or \"auto\"",
                 ))));
             }
             match d.get("name") {
                 Some(VmValue::String(s)) => {
-                    let s = s.as_ref().trim();
+                    let s = s.as_str().trim();
                     if s.is_empty() {
                         None
                     } else {
@@ -136,7 +136,7 @@ pub(super) fn parse_tool_search_option(
                 }
                 Some(VmValue::Nil) | None => None,
                 Some(_) => {
-                    return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+                    return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
                         "tool_search.name: expected a string",
                     ))));
                 }
@@ -150,7 +150,7 @@ pub(super) fn parse_tool_search_option(
                 mode,
             }))
         }
-        _ => Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+        _ => Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
             "tool_search: expected bool, string (\"bm25\"/\"regex\"/\"hybrid\"), or dict \
              ({variant, mode, strategy, always_loaded, name})",
         )))),

@@ -132,7 +132,7 @@ impl super::super::Vm {
                 if *idx < keys.len() {
                     let key = &keys[*idx];
                     let value = entries.get(key).cloned().unwrap_or(VmValue::Nil);
-                    let entry_key = VmValue::String(std::sync::Arc::from(key.as_str()));
+                    let entry_key = VmValue::String(arcstr::ArcStr::from(key.as_str()));
                     *idx += 1;
                     self.stack
                         .push(VmValue::dict(crate::value::DictMap::from_iter([

@@ -401,13 +401,13 @@ pub(crate) fn build_llm_error_dict(err: &VmError, provider: &str, model: &str) -
     if let VmError::Thrown(VmValue::Dict(existing)) = err {
         let mut dict = existing.as_ref().clone();
         dict.entry("category".to_string())
-            .or_insert_with(|| VmValue::String(std::sync::Arc::from(category.as_str())));
+            .or_insert_with(|| VmValue::String(arcstr::ArcStr::from(category.as_str())));
         dict.entry("kind".to_string())
-            .or_insert_with(|| VmValue::String(std::sync::Arc::from(llm_error.kind.as_str())));
+            .or_insert_with(|| VmValue::String(arcstr::ArcStr::from(llm_error.kind.as_str())));
         dict.entry("reason".to_string())
-            .or_insert_with(|| VmValue::String(std::sync::Arc::from(llm_error.reason.as_str())));
+            .or_insert_with(|| VmValue::String(arcstr::ArcStr::from(llm_error.reason.as_str())));
         dict.entry("message".to_string())
-            .or_insert_with(|| VmValue::String(std::sync::Arc::from(message.as_str())));
+            .or_insert_with(|| VmValue::String(arcstr::ArcStr::from(message.as_str())));
         dict.put_str("provider", provider);
         dict.put_str("model", model);
         return VmValue::dict(dict);
@@ -887,10 +887,10 @@ pub(crate) fn rewrite_structured_args(args: Vec<VmValue>) -> Result<Vec<VmValue>
         });
     options
         .entry("response_format".to_string())
-        .or_insert(VmValue::String(std::sync::Arc::from("json")));
+        .or_insert(VmValue::String(arcstr::ArcStr::from("json")));
     options
         .entry("output_validation".to_string())
-        .or_insert(VmValue::String(std::sync::Arc::from("error")));
+        .or_insert(VmValue::String(arcstr::ArcStr::from("error")));
 
     Ok(vec![
         prompt,
@@ -1004,11 +1004,11 @@ mod schema_stream_abort_retry_tests {
             std::sync::Arc::new(crate::value::DictMap::from_iter([
                 (
                     "provider".to_string(),
-                    VmValue::String(std::sync::Arc::from("fake")),
+                    VmValue::String(arcstr::ArcStr::from("fake")),
                 ),
                 (
                     "model".to_string(),
-                    VmValue::String(std::sync::Arc::from("fake-stream")),
+                    VmValue::String(arcstr::ArcStr::from("fake-stream")),
                 ),
             ])),
         )]));
@@ -1034,7 +1034,7 @@ mod schema_stream_abort_retry_tests {
         for spelling in ["max_tokens", "MAX_TOKENS", "length", "LENGTH"] {
             let dict = VmValue::dict(crate::value::DictMap::from_iter([(
                 "stop_reason".to_string(),
-                VmValue::String(std::sync::Arc::from(spelling)),
+                VmValue::String(arcstr::ArcStr::from(spelling)),
             )]));
             let errors = structured_output_errors(&dict, &opts);
             assert!(
@@ -1045,7 +1045,7 @@ mod schema_stream_abort_retry_tests {
         // A non-truncation stop_reason must NOT add the token-limit error.
         let dict = VmValue::dict(crate::value::DictMap::from_iter([(
             "stop_reason".to_string(),
-            VmValue::String(std::sync::Arc::from("stop")),
+            VmValue::String(arcstr::ArcStr::from("stop")),
         )]));
         let errors = structured_output_errors(&dict, &opts);
         assert!(

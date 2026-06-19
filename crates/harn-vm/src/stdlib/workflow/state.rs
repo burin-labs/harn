@@ -108,7 +108,7 @@ pub(super) fn string_list_to_vm(values: &[String]) -> VmValue {
     VmValue::List(std::sync::Arc::new(
         values
             .iter()
-            .map(|value| VmValue::String(std::sync::Arc::from(value.as_str())))
+            .map(|value| VmValue::String(arcstr::ArcStr::from(value.as_str())))
             .collect(),
     ))
 }
@@ -679,7 +679,7 @@ fn workflow_stage_plan_to_vm(scope: &StageExecutionScope) -> Result<VmValue, VmE
                     prepared
                         .system
                         .as_ref()
-                        .map(|system| VmValue::String(std::sync::Arc::from(system.as_str())))
+                        .map(|system| VmValue::String(arcstr::ArcStr::from(system.as_str())))
                         .unwrap_or(VmValue::Nil),
                 );
                 dict.insert(

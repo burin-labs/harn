@@ -1055,13 +1055,15 @@ pub(super) fn run_freshness(
         ("stale", VmValue::Bool(stale)),
         (
             "indexed_hash",
-            VmValue::String(Arc::from(format!("{:016x}", file.content_hash).as_str())),
+            VmValue::String(arcstr::ArcStr::from(
+                format!("{:016x}", file.content_hash).as_str(),
+            )),
         ),
         ("indexed_mtime_ms", VmValue::Int(file.mtime_ms)),
         (
             "disk_hash",
             match disk_hash {
-                Some(h) => VmValue::String(Arc::from(format!("{h:016x}").as_str())),
+                Some(h) => VmValue::String(arcstr::ArcStr::from(format!("{h:016x}").as_str())),
                 None => VmValue::Nil,
             },
         ),

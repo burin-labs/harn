@@ -114,11 +114,11 @@ pub(super) fn summary_message(summary: &str) -> VmValue {
     VmValue::dict(BTreeMap::from([
         (
             "role".to_string(),
-            VmValue::String(std::sync::Arc::from("user".to_string())),
+            VmValue::String(arcstr::ArcStr::from("user".to_string())),
         ),
         (
             "content".to_string(),
-            VmValue::String(std::sync::Arc::from(summary.to_string())),
+            VmValue::String(arcstr::ArcStr::from(summary.to_string())),
         ),
     ]))
 }

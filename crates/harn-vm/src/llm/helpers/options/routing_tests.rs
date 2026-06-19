@@ -153,11 +153,11 @@ fn extract_with_policy(policy: &str) -> crate::llm::api::LlmCallOptions {
     options.insert(
         "fallback_chain".to_string(),
         VmValue::List(std::sync::Arc::new(vec![VmValue::String(
-            std::sync::Arc::from("fast".to_string()),
+            arcstr::ArcStr::from("fast".to_string()),
         )])),
     );
     extract_llm_options(&[
-        VmValue::String(std::sync::Arc::from("hello".to_string())),
+        VmValue::String(arcstr::ArcStr::from("hello".to_string())),
         VmValue::Nil,
         VmValue::dict(options),
     ])
@@ -185,7 +185,7 @@ fn extract_with_options(
     opts: crate::value::DictMap,
 ) -> Result<crate::llm::api::LlmCallOptions, VmError> {
     extract_llm_options(&[
-        VmValue::String(std::sync::Arc::from("hello".to_string())),
+        VmValue::String(arcstr::ArcStr::from("hello".to_string())),
         VmValue::Nil,
         VmValue::dict(opts),
     ])
@@ -194,7 +194,7 @@ fn extract_with_options(
 fn model_role_options(role: &str) -> crate::value::DictMap {
     crate::value::DictMap::from_iter([(
         "model_role".to_string(),
-        VmValue::String(std::sync::Arc::from(role.to_string())),
+        VmValue::String(arcstr::ArcStr::from(role.to_string())),
     )])
 }
 
@@ -467,14 +467,14 @@ fn preference_list_cheapest_first_sets_route_fallbacks() {
     policy.insert(
         "prefer".to_string(),
         VmValue::List(std::sync::Arc::new(vec![
-            VmValue::String(std::sync::Arc::from("fast-mid")),
-            VmValue::String(std::sync::Arc::from("cheap-mid")),
+            VmValue::String(arcstr::ArcStr::from("fast-mid")),
+            VmValue::String(arcstr::ArcStr::from("cheap-mid")),
         ])),
     );
     let mut options = crate::value::DictMap::new();
     options.insert("route_policy".to_string(), VmValue::dict(policy));
     let opts = extract_llm_options(&[
-        VmValue::String(std::sync::Arc::from("hello".to_string())),
+        VmValue::String(arcstr::ArcStr::from("hello".to_string())),
         VmValue::Nil,
         VmValue::dict(options),
     ])
@@ -497,11 +497,11 @@ fn equivalent_failover_builds_catalog_backed_routing_policy() {
     let opts = extract_with_options(crate::value::DictMap::from_iter([
         (
             "provider".to_string(),
-            VmValue::String(std::sync::Arc::from("primary")),
+            VmValue::String(arcstr::ArcStr::from("primary")),
         ),
         (
             "model".to_string(),
-            VmValue::String(std::sync::Arc::from("primary-model")),
+            VmValue::String(arcstr::ArcStr::from("primary-model")),
         ),
         ("equivalent_failover".to_string(), VmValue::dict(failover)),
     ]))
@@ -536,11 +536,11 @@ fn equivalent_failover_enables_no_dispatch_failover_when_requested() {
     let opts = extract_with_options(crate::value::DictMap::from_iter([
         (
             "provider".to_string(),
-            VmValue::String(std::sync::Arc::from("primary")),
+            VmValue::String(arcstr::ArcStr::from("primary")),
         ),
         (
             "model".to_string(),
-            VmValue::String(std::sync::Arc::from("primary-model")),
+            VmValue::String(arcstr::ArcStr::from("primary-model")),
         ),
         ("equivalent_failover".to_string(), VmValue::dict(failover)),
     ]))
@@ -560,17 +560,17 @@ fn equivalent_failover_rejects_non_bool_no_dispatch_option() {
     let mut failover = crate::value::DictMap::new();
     failover.insert(
         "on_no_dispatch".to_string(),
-        VmValue::String(std::sync::Arc::from("yes")),
+        VmValue::String(arcstr::ArcStr::from("yes")),
     );
 
     let err = match extract_with_options(crate::value::DictMap::from_iter([
         (
             "provider".to_string(),
-            VmValue::String(std::sync::Arc::from("primary")),
+            VmValue::String(arcstr::ArcStr::from("primary")),
         ),
         (
             "model".to_string(),
-            VmValue::String(std::sync::Arc::from("primary-model")),
+            VmValue::String(arcstr::ArcStr::from("primary-model")),
         ),
         ("equivalent_failover".to_string(), VmValue::dict(failover)),
     ])) {
@@ -599,11 +599,11 @@ fn equivalent_failover_rejects_explicit_routing_policy() {
         std::sync::Arc::new(crate::value::DictMap::from_iter([
             (
                 "provider".to_string(),
-                VmValue::String(std::sync::Arc::from("primary")),
+                VmValue::String(arcstr::ArcStr::from("primary")),
             ),
             (
                 "model".to_string(),
-                VmValue::String(std::sync::Arc::from("primary-model")),
+                VmValue::String(arcstr::ArcStr::from("primary-model")),
             ),
         ])),
     )]));
@@ -616,11 +616,11 @@ fn equivalent_failover_rejects_explicit_routing_policy() {
     let err = match extract_with_options(crate::value::DictMap::from_iter([
         (
             "provider".to_string(),
-            VmValue::String(std::sync::Arc::from("primary")),
+            VmValue::String(arcstr::ArcStr::from("primary")),
         ),
         (
             "model".to_string(),
-            VmValue::String(std::sync::Arc::from("primary-model")),
+            VmValue::String(arcstr::ArcStr::from("primary-model")),
         ),
         ("routing".to_string(), routing),
         ("equivalent_failover".to_string(), VmValue::Bool(true)),
@@ -663,7 +663,7 @@ fn thinking_dict_enabled_false_disables_thinking() {
         )])),
     );
     let opts = extract_llm_options(&[
-        VmValue::String(std::sync::Arc::from("hello".to_string())),
+        VmValue::String(arcstr::ArcStr::from("hello".to_string())),
         VmValue::Nil,
         VmValue::dict(options),
     ])
@@ -681,13 +681,13 @@ fn thinking_dict_enabled_budget_parses_typed_config() {
         VmValue::dict(crate::value::DictMap::from_iter([
             (
                 "mode".to_string(),
-                VmValue::String(std::sync::Arc::from("enabled".to_string())),
+                VmValue::String(arcstr::ArcStr::from("enabled".to_string())),
             ),
             ("budget_tokens".to_string(), VmValue::Int(8000)),
         ])),
     );
     let opts = extract_llm_options(&[
-        VmValue::String(std::sync::Arc::from("hello".to_string())),
+        VmValue::String(arcstr::ArcStr::from("hello".to_string())),
         VmValue::Nil,
         VmValue::dict(options),
     ])
@@ -712,10 +712,10 @@ fn anthropic_beta_features_parse_and_dedupe_with_interleaved_flag() {
     options.insert(
         "anthropic_beta_features".to_string(),
         VmValue::List(std::sync::Arc::new(vec![
-            VmValue::String(std::sync::Arc::from(
+            VmValue::String(arcstr::ArcStr::from(
                 "fine-grained-tool-streaming-2025-05-14",
             )),
-            VmValue::String(std::sync::Arc::from(
+            VmValue::String(arcstr::ArcStr::from(
                 crate::llm::providers::anthropic::ANTHROPIC_INTERLEAVED_THINKING_BETA,
             )),
         ])),
@@ -723,7 +723,7 @@ fn anthropic_beta_features_parse_and_dedupe_with_interleaved_flag() {
     options.insert("interleaved_thinking".to_string(), VmValue::Bool(true));
 
     let opts = extract_llm_options(&[
-        VmValue::String(std::sync::Arc::from("hello".to_string())),
+        VmValue::String(arcstr::ArcStr::from("hello".to_string())),
         VmValue::Nil,
         VmValue::dict(options),
     ])
@@ -742,20 +742,20 @@ fn anthropic_beta_features_reject_invalid_header_names() {
     let options = crate::value::DictMap::from_iter([
         (
             "provider".to_string(),
-            VmValue::String(std::sync::Arc::from("mock".to_string())),
+            VmValue::String(arcstr::ArcStr::from("mock".to_string())),
         ),
         (
             "model".to_string(),
-            VmValue::String(std::sync::Arc::from("claude-opus-4-6".to_string())),
+            VmValue::String(arcstr::ArcStr::from("claude-opus-4-6".to_string())),
         ),
         (
             "anthropic_beta_features".to_string(),
-            VmValue::String(std::sync::Arc::from("bad\r\nheader".to_string())),
+            VmValue::String(arcstr::ArcStr::from("bad\r\nheader".to_string())),
         ),
     ]);
 
     let err = match extract_llm_options(&[
-        VmValue::String(std::sync::Arc::from("hello".to_string())),
+        VmValue::String(arcstr::ArcStr::from("hello".to_string())),
         VmValue::Nil,
         VmValue::dict(options),
     ]) {
@@ -775,16 +775,16 @@ fn thinking_effort_parses_typed_level() {
         VmValue::dict(crate::value::DictMap::from_iter([
             (
                 "mode".to_string(),
-                VmValue::String(std::sync::Arc::from("effort".to_string())),
+                VmValue::String(arcstr::ArcStr::from("effort".to_string())),
             ),
             (
                 "level".to_string(),
-                VmValue::String(std::sync::Arc::from("high".to_string())),
+                VmValue::String(arcstr::ArcStr::from("high".to_string())),
             ),
         ])),
     );
     let opts = extract_llm_options(&[
-        VmValue::String(std::sync::Arc::from("hello".to_string())),
+        VmValue::String(arcstr::ArcStr::from("hello".to_string())),
         VmValue::Nil,
         VmValue::dict(options),
     ])
@@ -801,18 +801,18 @@ fn unsupported_local_options(extra: Vec<(&str, VmValue)>) -> VmError {
     let mut options = crate::value::DictMap::from_iter([
         (
             "provider".to_string(),
-            VmValue::String(std::sync::Arc::from("local".to_string())),
+            VmValue::String(arcstr::ArcStr::from("local".to_string())),
         ),
         (
             "model".to_string(),
-            VmValue::String(std::sync::Arc::from("unsupported-model".to_string())),
+            VmValue::String(arcstr::ArcStr::from("unsupported-model".to_string())),
         ),
     ]);
     for (key, value) in extra {
         options.insert(key.to_string(), value);
     }
     match extract_llm_options(&[
-        VmValue::String(std::sync::Arc::from("hello".to_string())),
+        VmValue::String(arcstr::ArcStr::from("hello".to_string())),
         VmValue::Nil,
         VmValue::dict(options),
     ]) {
@@ -841,11 +841,11 @@ fn one_tool_list() -> VmValue {
         std::sync::Arc::new(crate::value::DictMap::from_iter([
             (
                 "name".to_string(),
-                VmValue::String(std::sync::Arc::from("lookup")),
+                VmValue::String(arcstr::ArcStr::from("lookup")),
             ),
             (
                 "description".to_string(),
-                VmValue::String(std::sync::Arc::from("Look something up")),
+                VmValue::String(arcstr::ArcStr::from("Look something up")),
             ),
             (
                 "parameters".to_string(),
@@ -886,7 +886,7 @@ fn unsupported_capability_options_error_with_provider_matrix_hint() {
         "output_format",
         vec![(
             "output_format",
-            VmValue::String(std::sync::Arc::from("json_object".to_string())),
+            VmValue::String(arcstr::ArcStr::from("json_object".to_string())),
         )],
     );
     assert_unsupported_local_option(
@@ -894,7 +894,7 @@ fn unsupported_capability_options_error_with_provider_matrix_hint() {
         vec![
             (
                 "tool_format",
-                VmValue::String(std::sync::Arc::from("native".to_string())),
+                VmValue::String(arcstr::ArcStr::from("native".to_string())),
             ),
             ("tools", one_tool_list()),
         ],
@@ -908,7 +908,7 @@ fn unsupported_capability_options_error_with_provider_matrix_hint() {
         "reasoning_effort",
         vec![(
             "reasoning_effort",
-            VmValue::String(std::sync::Arc::from("high".to_string())),
+            VmValue::String(arcstr::ArcStr::from("high".to_string())),
         )],
     );
     assert_unsupported_local_option(
@@ -930,19 +930,19 @@ fn tool_choice_accepted_on_text_tool_routes() {
     let options = crate::value::DictMap::from_iter([
         (
             "provider".to_string(),
-            VmValue::String(std::sync::Arc::from("ollama".to_string())),
+            VmValue::String(arcstr::ArcStr::from("ollama".to_string())),
         ),
         (
             "model".to_string(),
-            VmValue::String(std::sync::Arc::from("devstral-small-2:24b".to_string())),
+            VmValue::String(arcstr::ArcStr::from("devstral-small-2:24b".to_string())),
         ),
         (
             "tool_choice".to_string(),
-            VmValue::String(std::sync::Arc::from("none".to_string())),
+            VmValue::String(arcstr::ArcStr::from("none".to_string())),
         ),
     ]);
     extract_llm_options(&[
-        VmValue::String(std::sync::Arc::from("hello".to_string())),
+        VmValue::String(arcstr::ArcStr::from("hello".to_string())),
         VmValue::Nil,
         VmValue::dict(options),
     ])
@@ -958,20 +958,20 @@ fn text_tool_format_does_not_emit_native_provider_tools() {
     let options = crate::value::DictMap::from_iter([
         (
             "provider".to_string(),
-            VmValue::String(std::sync::Arc::from("ollama".to_string())),
+            VmValue::String(arcstr::ArcStr::from("ollama".to_string())),
         ),
         (
             "model".to_string(),
-            VmValue::String(std::sync::Arc::from("devstral-small-2:24b".to_string())),
+            VmValue::String(arcstr::ArcStr::from("devstral-small-2:24b".to_string())),
         ),
         (
             "tool_format".to_string(),
-            VmValue::String(std::sync::Arc::from("text".to_string())),
+            VmValue::String(arcstr::ArcStr::from("text".to_string())),
         ),
         ("tools".to_string(), one_tool_list()),
     ]);
     let opts = extract_llm_options(&[
-        VmValue::String(std::sync::Arc::from("hello".to_string())),
+        VmValue::String(arcstr::ArcStr::from("hello".to_string())),
         VmValue::Nil,
         VmValue::dict(options),
     ])
@@ -986,20 +986,20 @@ fn standalone_reasoning_effort_maps_to_thinking_effort_when_supported() {
     let options = crate::value::DictMap::from_iter([
         (
             "provider".to_string(),
-            VmValue::String(std::sync::Arc::from("mock".to_string())),
+            VmValue::String(arcstr::ArcStr::from("mock".to_string())),
         ),
         (
             "model".to_string(),
-            VmValue::String(std::sync::Arc::from("o3".to_string())),
+            VmValue::String(arcstr::ArcStr::from("o3".to_string())),
         ),
         (
             "reasoning_effort".to_string(),
-            VmValue::String(std::sync::Arc::from("high".to_string())),
+            VmValue::String(arcstr::ArcStr::from("high".to_string())),
         ),
     ]);
 
     let opts = extract_llm_options(&[
-        VmValue::String(std::sync::Arc::from("hello".to_string())),
+        VmValue::String(arcstr::ArcStr::from("hello".to_string())),
         VmValue::Nil,
         VmValue::dict(options),
     ])
@@ -1018,20 +1018,20 @@ fn standalone_reasoning_effort_accepts_minimal_when_supported() {
     let options = crate::value::DictMap::from_iter([
         (
             "provider".to_string(),
-            VmValue::String(std::sync::Arc::from("mock".to_string())),
+            VmValue::String(arcstr::ArcStr::from("mock".to_string())),
         ),
         (
             "model".to_string(),
-            VmValue::String(std::sync::Arc::from("o3".to_string())),
+            VmValue::String(arcstr::ArcStr::from("o3".to_string())),
         ),
         (
             "reasoning_effort".to_string(),
-            VmValue::String(std::sync::Arc::from("minimal".to_string())),
+            VmValue::String(arcstr::ArcStr::from("minimal".to_string())),
         ),
     ]);
 
     let opts = extract_llm_options(&[
-        VmValue::String(std::sync::Arc::from("hello".to_string())),
+        VmValue::String(arcstr::ArcStr::from("hello".to_string())),
         VmValue::Nil,
         VmValue::dict(options),
     ])
@@ -1050,20 +1050,20 @@ fn reasoning_policy_maps_to_provider_aware_thinking_when_explicit() {
     let options = crate::value::DictMap::from_iter([
         (
             "provider".to_string(),
-            VmValue::String(std::sync::Arc::from("mock".to_string())),
+            VmValue::String(arcstr::ArcStr::from("mock".to_string())),
         ),
         (
             "model".to_string(),
-            VmValue::String(std::sync::Arc::from("gpt-5.5".to_string())),
+            VmValue::String(arcstr::ArcStr::from("gpt-5.5".to_string())),
         ),
         (
             "reasoning_policy".to_string(),
-            VmValue::String(std::sync::Arc::from("off".to_string())),
+            VmValue::String(arcstr::ArcStr::from("off".to_string())),
         ),
     ]);
 
     let opts = extract_llm_options(&[
-        VmValue::String(std::sync::Arc::from("hello".to_string())),
+        VmValue::String(arcstr::ArcStr::from("hello".to_string())),
         VmValue::Nil,
         VmValue::dict(options),
     ])
@@ -1088,16 +1088,16 @@ fn session_pinned_reasoning_policy_is_llm_call_default() {
     let options = crate::value::DictMap::from_iter([
         (
             "provider".to_string(),
-            VmValue::String(std::sync::Arc::from("mock".to_string())),
+            VmValue::String(arcstr::ArcStr::from("mock".to_string())),
         ),
         (
             "model".to_string(),
-            VmValue::String(std::sync::Arc::from("o3".to_string())),
+            VmValue::String(arcstr::ArcStr::from("o3".to_string())),
         ),
     ]);
 
     let opts = extract_llm_options(&[
-        VmValue::String(std::sync::Arc::from("hello".to_string())),
+        VmValue::String(arcstr::ArcStr::from("hello".to_string())),
         VmValue::Nil,
         VmValue::dict(options),
     ])
@@ -1126,17 +1126,17 @@ fn explicit_thinking_wins_over_session_pinned_reasoning_policy() {
     let options = crate::value::DictMap::from_iter([
         (
             "provider".to_string(),
-            VmValue::String(std::sync::Arc::from("mock".to_string())),
+            VmValue::String(arcstr::ArcStr::from("mock".to_string())),
         ),
         (
             "model".to_string(),
-            VmValue::String(std::sync::Arc::from("o3".to_string())),
+            VmValue::String(arcstr::ArcStr::from("o3".to_string())),
         ),
         ("thinking".to_string(), VmValue::Bool(false)),
     ]);
 
     let opts = extract_llm_options(&[
-        VmValue::String(std::sync::Arc::from("hello".to_string())),
+        VmValue::String(arcstr::ArcStr::from("hello".to_string())),
         VmValue::Nil,
         VmValue::dict(options),
     ])
@@ -1157,20 +1157,20 @@ fn standalone_reasoning_effort_accepts_none_and_xhigh_when_supported() {
         let options = crate::value::DictMap::from_iter([
             (
                 "provider".to_string(),
-                VmValue::String(std::sync::Arc::from("mock".to_string())),
+                VmValue::String(arcstr::ArcStr::from("mock".to_string())),
             ),
             (
                 "model".to_string(),
-                VmValue::String(std::sync::Arc::from("gpt-5.5".to_string())),
+                VmValue::String(arcstr::ArcStr::from("gpt-5.5".to_string())),
             ),
             (
                 "reasoning_effort".to_string(),
-                VmValue::String(std::sync::Arc::from(raw.to_string())),
+                VmValue::String(arcstr::ArcStr::from(raw.to_string())),
             ),
         ]);
 
         let opts = extract_llm_options(&[
-            VmValue::String(std::sync::Arc::from("hello".to_string())),
+            VmValue::String(arcstr::ArcStr::from("hello".to_string())),
             VmValue::Nil,
             VmValue::dict(options),
         ])
@@ -1189,18 +1189,18 @@ fn standalone_reasoning_effort_rejects_cerebras_gpt_oss_unsupported_levels() {
     for (key, value) in [
         (
             "reasoning_effort",
-            VmValue::String(std::sync::Arc::from("none".to_string())),
+            VmValue::String(arcstr::ArcStr::from("none".to_string())),
         ),
         (
             "thinking",
             VmValue::dict(crate::value::DictMap::from_iter([
                 (
                     "mode".to_string(),
-                    VmValue::String(std::sync::Arc::from("effort".to_string())),
+                    VmValue::String(arcstr::ArcStr::from("effort".to_string())),
                 ),
                 (
                     "level".to_string(),
-                    VmValue::String(std::sync::Arc::from("minimal".to_string())),
+                    VmValue::String(arcstr::ArcStr::from("minimal".to_string())),
                 ),
             ])),
         ),
@@ -1208,11 +1208,11 @@ fn standalone_reasoning_effort_rejects_cerebras_gpt_oss_unsupported_levels() {
         let options = crate::value::DictMap::from_iter([
             (
                 "provider".to_string(),
-                VmValue::String(std::sync::Arc::from("cerebras".to_string())),
+                VmValue::String(arcstr::ArcStr::from("cerebras".to_string())),
             ),
             (
                 "model".to_string(),
-                VmValue::String(std::sync::Arc::from("gpt-oss-120b".to_string())),
+                VmValue::String(arcstr::ArcStr::from("gpt-oss-120b".to_string())),
             ),
             (key.to_string(), value),
         ]);
@@ -1235,20 +1235,20 @@ fn standalone_reasoning_effort_none_disables_thinking_without_effort_capability(
     let options = crate::value::DictMap::from_iter([
         (
             "provider".to_string(),
-            VmValue::String(std::sync::Arc::from("local".to_string())),
+            VmValue::String(arcstr::ArcStr::from("local".to_string())),
         ),
         (
             "model".to_string(),
-            VmValue::String(std::sync::Arc::from("no-effort-model".to_string())),
+            VmValue::String(arcstr::ArcStr::from("no-effort-model".to_string())),
         ),
         (
             "reasoning_effort".to_string(),
-            VmValue::String(std::sync::Arc::from("none".to_string())),
+            VmValue::String(arcstr::ArcStr::from("none".to_string())),
         ),
     ]);
 
     let opts = extract_llm_options(&[
-        VmValue::String(std::sync::Arc::from("hello".to_string())),
+        VmValue::String(arcstr::ArcStr::from("hello".to_string())),
         VmValue::Nil,
         VmValue::dict(options),
     ])
@@ -1277,11 +1277,11 @@ thinking_modes = ["effort"]
     let err = unsupported_local_options(vec![
         (
             "model",
-            VmValue::String(std::sync::Arc::from("thinking-effort-only".to_string())),
+            VmValue::String(arcstr::ArcStr::from("thinking-effort-only".to_string())),
         ),
         (
             "reasoning_effort",
-            VmValue::String(std::sync::Arc::from("high".to_string())),
+            VmValue::String(arcstr::ArcStr::from("high".to_string())),
         ),
     ]);
 
@@ -1298,21 +1298,21 @@ fn image_content_sets_vision_and_requires_capability() {
     let image_block = VmValue::dict(crate::value::DictMap::from_iter([
         (
             "type".to_string(),
-            VmValue::String(std::sync::Arc::from("image")),
+            VmValue::String(arcstr::ArcStr::from("image")),
         ),
         (
             "base64".to_string(),
-            VmValue::String(std::sync::Arc::from("iVBORw0KGgo=")),
+            VmValue::String(arcstr::ArcStr::from("iVBORw0KGgo=")),
         ),
         (
             "media_type".to_string(),
-            VmValue::String(std::sync::Arc::from("image/png")),
+            VmValue::String(arcstr::ArcStr::from("image/png")),
         ),
     ]));
     let message = VmValue::dict(crate::value::DictMap::from_iter([
         (
             "role".to_string(),
-            VmValue::String(std::sync::Arc::from("user")),
+            VmValue::String(arcstr::ArcStr::from("user")),
         ),
         (
             "content".to_string(),
@@ -1322,11 +1322,11 @@ fn image_content_sets_vision_and_requires_capability() {
     let options = VmValue::dict(crate::value::DictMap::from_iter([
         (
             "provider".to_string(),
-            VmValue::String(std::sync::Arc::from("mock")),
+            VmValue::String(arcstr::ArcStr::from("mock")),
         ),
         (
             "model".to_string(),
-            VmValue::String(std::sync::Arc::from("gpt-4o")),
+            VmValue::String(arcstr::ArcStr::from("gpt-4o")),
         ),
         (
             "messages".to_string(),
@@ -1334,7 +1334,7 @@ fn image_content_sets_vision_and_requires_capability() {
         ),
     ]));
     let opts = extract_llm_options(&[
-        VmValue::String(std::sync::Arc::from("")),
+        VmValue::String(arcstr::ArcStr::from("")),
         VmValue::Nil,
         options,
     ])
@@ -1344,11 +1344,11 @@ fn image_content_sets_vision_and_requires_capability() {
     let bad_options = VmValue::dict(crate::value::DictMap::from_iter([
         (
             "provider".to_string(),
-            VmValue::String(std::sync::Arc::from("mock")),
+            VmValue::String(arcstr::ArcStr::from("mock")),
         ),
         (
             "model".to_string(),
-            VmValue::String(std::sync::Arc::from("gpt-3.5-turbo")),
+            VmValue::String(arcstr::ArcStr::from("gpt-3.5-turbo")),
         ),
         (
             "messages".to_string(),
@@ -1356,7 +1356,7 @@ fn image_content_sets_vision_and_requires_capability() {
         ),
     ]));
     let err = extract_llm_options(&[
-        VmValue::String(std::sync::Arc::from("")),
+        VmValue::String(arcstr::ArcStr::from("")),
         VmValue::Nil,
         bad_options,
     ])
@@ -1367,21 +1367,21 @@ fn image_content_sets_vision_and_requires_capability() {
     let url_image = VmValue::dict(crate::value::DictMap::from_iter([
         (
             "type".to_string(),
-            VmValue::String(std::sync::Arc::from("image")),
+            VmValue::String(arcstr::ArcStr::from("image")),
         ),
         (
             "url".to_string(),
-            VmValue::String(std::sync::Arc::from("https://example.com/image.png")),
+            VmValue::String(arcstr::ArcStr::from("https://example.com/image.png")),
         ),
         (
             "media_type".to_string(),
-            VmValue::String(std::sync::Arc::from("image/png")),
+            VmValue::String(arcstr::ArcStr::from("image/png")),
         ),
     ]));
     let url_message = VmValue::dict(crate::value::DictMap::from_iter([
         (
             "role".to_string(),
-            VmValue::String(std::sync::Arc::from("user")),
+            VmValue::String(arcstr::ArcStr::from("user")),
         ),
         (
             "content".to_string(),
@@ -1391,11 +1391,11 @@ fn image_content_sets_vision_and_requires_capability() {
     let ollama_options = VmValue::dict(crate::value::DictMap::from_iter([
         (
             "provider".to_string(),
-            VmValue::String(std::sync::Arc::from("ollama")),
+            VmValue::String(arcstr::ArcStr::from("ollama")),
         ),
         (
             "model".to_string(),
-            VmValue::String(std::sync::Arc::from("llava:latest")),
+            VmValue::String(arcstr::ArcStr::from("llava:latest")),
         ),
         (
             "messages".to_string(),
@@ -1403,7 +1403,7 @@ fn image_content_sets_vision_and_requires_capability() {
         ),
     ]));
     let err = extract_llm_options(&[
-        VmValue::String(std::sync::Arc::from("")),
+        VmValue::String(arcstr::ArcStr::from("")),
         VmValue::Nil,
         ollama_options,
     ])
@@ -1417,31 +1417,31 @@ fn pdf_and_audio_content_require_capabilities() {
     let pdf_block = VmValue::dict(crate::value::DictMap::from_iter([
         (
             "type".to_string(),
-            VmValue::String(std::sync::Arc::from("pdf")),
+            VmValue::String(arcstr::ArcStr::from("pdf")),
         ),
         (
             "file_id".to_string(),
-            VmValue::String(std::sync::Arc::from("file_123")),
+            VmValue::String(arcstr::ArcStr::from("file_123")),
         ),
     ]));
     let audio_block = VmValue::dict(crate::value::DictMap::from_iter([
         (
             "type".to_string(),
-            VmValue::String(std::sync::Arc::from("audio")),
+            VmValue::String(arcstr::ArcStr::from("audio")),
         ),
         (
             "base64".to_string(),
-            VmValue::String(std::sync::Arc::from("UklGRg==")),
+            VmValue::String(arcstr::ArcStr::from("UklGRg==")),
         ),
         (
             "media_type".to_string(),
-            VmValue::String(std::sync::Arc::from("audio/wav")),
+            VmValue::String(arcstr::ArcStr::from("audio/wav")),
         ),
     ]));
     let message = VmValue::dict(crate::value::DictMap::from_iter([
         (
             "role".to_string(),
-            VmValue::String(std::sync::Arc::from("user")),
+            VmValue::String(arcstr::ArcStr::from("user")),
         ),
         (
             "content".to_string(),
@@ -1451,11 +1451,11 @@ fn pdf_and_audio_content_require_capabilities() {
     let options = VmValue::dict(crate::value::DictMap::from_iter([
         (
             "provider".to_string(),
-            VmValue::String(std::sync::Arc::from("mock")),
+            VmValue::String(arcstr::ArcStr::from("mock")),
         ),
         (
             "model".to_string(),
-            VmValue::String(std::sync::Arc::from("claude-sonnet-4-7")),
+            VmValue::String(arcstr::ArcStr::from("claude-sonnet-4-7")),
         ),
         (
             "messages".to_string(),
@@ -1463,7 +1463,7 @@ fn pdf_and_audio_content_require_capabilities() {
         ),
     ]));
     let opts = extract_llm_options(&[
-        VmValue::String(std::sync::Arc::from("")),
+        VmValue::String(arcstr::ArcStr::from("")),
         VmValue::Nil,
         options,
     ])
@@ -1475,11 +1475,11 @@ fn pdf_and_audio_content_require_capabilities() {
     let bad_options = VmValue::dict(crate::value::DictMap::from_iter([
         (
             "provider".to_string(),
-            VmValue::String(std::sync::Arc::from("mock")),
+            VmValue::String(arcstr::ArcStr::from("mock")),
         ),
         (
             "model".to_string(),
-            VmValue::String(std::sync::Arc::from("gpt-3.5-turbo")),
+            VmValue::String(arcstr::ArcStr::from("gpt-3.5-turbo")),
         ),
         (
             "messages".to_string(),
@@ -1487,7 +1487,7 @@ fn pdf_and_audio_content_require_capabilities() {
         ),
     ]));
     let err = extract_llm_options(&[
-        VmValue::String(std::sync::Arc::from("")),
+        VmValue::String(arcstr::ArcStr::from("")),
         VmValue::Nil,
         bad_options,
     ])
@@ -1509,21 +1509,21 @@ video_supported = true
     let video_block = VmValue::dict(crate::value::DictMap::from_iter([
         (
             "type".to_string(),
-            VmValue::String(std::sync::Arc::from("video")),
+            VmValue::String(arcstr::ArcStr::from("video")),
         ),
         (
             "base64".to_string(),
-            VmValue::String(std::sync::Arc::from("AAAA")),
+            VmValue::String(arcstr::ArcStr::from("AAAA")),
         ),
         (
             "media_type".to_string(),
-            VmValue::String(std::sync::Arc::from("video/mp4")),
+            VmValue::String(arcstr::ArcStr::from("video/mp4")),
         ),
     ]));
     let message = VmValue::dict(crate::value::DictMap::from_iter([
         (
             "role".to_string(),
-            VmValue::String(std::sync::Arc::from("user")),
+            VmValue::String(arcstr::ArcStr::from("user")),
         ),
         (
             "content".to_string(),
@@ -1533,11 +1533,11 @@ video_supported = true
     let options = VmValue::dict(crate::value::DictMap::from_iter([
         (
             "provider".to_string(),
-            VmValue::String(std::sync::Arc::from("local")),
+            VmValue::String(arcstr::ArcStr::from("local")),
         ),
         (
             "model".to_string(),
-            VmValue::String(std::sync::Arc::from("video-model")),
+            VmValue::String(arcstr::ArcStr::from("video-model")),
         ),
         (
             "messages".to_string(),
@@ -1545,7 +1545,7 @@ video_supported = true
         ),
     ]));
     extract_llm_options(&[
-        VmValue::String(std::sync::Arc::from("")),
+        VmValue::String(arcstr::ArcStr::from("")),
         VmValue::Nil,
         options,
     ])
@@ -1555,11 +1555,11 @@ video_supported = true
     let bad_options = VmValue::dict(crate::value::DictMap::from_iter([
         (
             "provider".to_string(),
-            VmValue::String(std::sync::Arc::from("mock")),
+            VmValue::String(arcstr::ArcStr::from("mock")),
         ),
         (
             "model".to_string(),
-            VmValue::String(std::sync::Arc::from("gpt-4o")),
+            VmValue::String(arcstr::ArcStr::from("gpt-4o")),
         ),
         (
             "messages".to_string(),
@@ -1567,7 +1567,7 @@ video_supported = true
         ),
     ]));
     let err = extract_llm_options(&[
-        VmValue::String(std::sync::Arc::from("")),
+        VmValue::String(arcstr::ArcStr::from("")),
         VmValue::Nil,
         bad_options,
     ])

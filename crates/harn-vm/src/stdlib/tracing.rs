@@ -16,7 +16,7 @@ pub fn finish_span_from_args(args: &[VmValue]) -> Result<(String, String, String
     let span = match args.first() {
         Some(VmValue::Dict(d)) => d,
         _ => {
-            return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+            return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
                 "trace_end: argument must be a span dict from trace_start",
             ))));
         }
@@ -121,7 +121,7 @@ fn trace_end_impl(args: &[VmValue], out: &mut String) -> Result<VmValue, VmError
 #[harn_builtin(sig = "trace_id(...args: any) -> string?", category = "tracing")]
 fn trace_id_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     match current_trace_context().map(|context| context.0) {
-        Some(trace_id) => Ok(VmValue::String(std::sync::Arc::from(trace_id))),
+        Some(trace_id) => Ok(VmValue::String(arcstr::ArcStr::from(trace_id))),
         None => Ok(VmValue::Nil),
     }
 }
@@ -163,7 +163,7 @@ fn trace_spans_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmE
 
 #[harn_builtin(sig = "trace_summary(...args: any) -> string", category = "tracing")]
 fn trace_summary_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
-    Ok(VmValue::String(std::sync::Arc::from(
+    Ok(VmValue::String(arcstr::ArcStr::from(
         crate::tracing::format_summary(),
     )))
 }

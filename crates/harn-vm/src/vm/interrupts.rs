@@ -44,7 +44,7 @@ impl Vm {
                 VmValue::List(std::sync::Arc::new(
                     signals
                         .into_iter()
-                        .map(|signal| VmValue::String(std::sync::Arc::from(signal)))
+                        .map(|signal| VmValue::String(arcstr::ArcStr::from(signal)))
                         .collect(),
                 )),
             ),
@@ -217,13 +217,13 @@ impl Vm {
     }
 
     pub(crate) fn interrupted_error(signal: &str) -> VmError {
-        VmError::Thrown(VmValue::String(std::sync::Arc::from(format!(
+        VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
             "kind:interrupted:{signal}"
         ))))
     }
 
     pub(crate) fn interrupt_handler_timeout_error() -> VmError {
-        VmError::Thrown(VmValue::String(std::sync::Arc::from(
+        VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
             "kind:interrupted:handler_timeout",
         )))
     }

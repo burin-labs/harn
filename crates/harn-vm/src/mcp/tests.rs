@@ -1347,7 +1347,7 @@ async fn write_http_empty(stream: &mut TcpStream, status: &str) -> Result<(), st
 
 #[test]
 fn test_vm_value_to_serde_string() {
-    let val = VmValue::String(std::sync::Arc::from("hello"));
+    let val = VmValue::String(arcstr::ArcStr::from("hello"));
     let json = vm_value_to_serde(&val);
     assert_eq!(json, serde_json::json!("hello"));
 }

@@ -53,7 +53,7 @@ pub const REGISTRY_TYPE: &str = "tool_hooks_registry";
 const VALID_SEVERITIES: &[&str] = &["error", "warning", "info"];
 
 fn err(message: impl Into<String>) -> VmError {
-    VmError::Thrown(VmValue::String(std::sync::Arc::from(message.into())))
+    VmError::Thrown(VmValue::String(arcstr::ArcStr::from(message.into())))
 }
 
 fn require_dict<'a>(
@@ -78,7 +78,7 @@ fn require_tagged<'a>(
 ) -> Result<&'a crate::value::DictMap, VmError> {
     let dict = require_dict(value, builtin, role)?;
     match dict.get("_type") {
-        Some(VmValue::String(t)) if t.as_ref() == expected => Ok(dict),
+        Some(VmValue::String(t)) if t.as_str() == expected => Ok(dict),
         Some(VmValue::String(t)) => Err(err(format!(
             "{builtin}: {role} must be a {expected} (created with the matching constructor), got {t}"
         ))),
@@ -183,7 +183,7 @@ fn validate_pattern(value: &VmValue, builtin: &str) -> Result<(), VmError> {
 fn validate_severity(value: Option<&VmValue>, builtin: &str) -> Result<String, VmError> {
     match value {
         Some(VmValue::String(s)) => {
-            if VALID_SEVERITIES.iter().any(|valid| *valid == s.as_ref()) {
+            if VALID_SEVERITIES.iter().any(|valid| *valid == s.as_str()) {
                 Ok(s.to_string())
             } else {
                 Err(err(format!(
@@ -238,7 +238,7 @@ fn validate_rule_dict(
         VmValue::List(std::sync::Arc::new(
             applies_to
                 .into_iter()
-                .map(|stack| VmValue::String(std::sync::Arc::from(stack.as_str())))
+                .map(|stack| VmValue::String(arcstr::ArcStr::from(stack.as_str())))
                 .collect(),
         )),
     );
@@ -252,7 +252,7 @@ fn validate_rule_dict(
         config
             .get("explanation")
             .cloned()
-            .unwrap_or_else(|| VmValue::String(std::sync::Arc::from(""))),
+            .unwrap_or_else(|| VmValue::String(arcstr::ArcStr::from(""))),
     );
     rule.insert(
         "references".to_string(),
@@ -283,7 +283,7 @@ fn extract_rules(raw_rules: Option<&VmValue>, builtin: &str) -> Result<Vec<VmVal
                     VmValue::Dict(d)
                         if matches!(
                             d.get("_type"),
-                            Some(VmValue::String(t)) if t.as_ref() == TOOL_RULE_TYPE
+                            Some(VmValue::String(t)) if t.as_str() == TOOL_RULE_TYPE
                         ) =>
                     {
                         d.as_ref().clone()
@@ -447,7 +447,7 @@ async fn invoke_rule_pattern(
         }
         callable if Vm::is_callable_value(callable) => {
             let mut vm = ctx.child_vm();
-            let command = VmValue::String(std::sync::Arc::from(command));
+            let command = VmValue::String(arcstr::ArcStr::from(command));
             let result = vm.call_callable_two(callable, &command, context).await?;
             ctx.forward_output(&vm.take_output());
             Ok(result.is_truthy())
@@ -463,11 +463,11 @@ fn make_match_record(catalogue: &crate::value::DictMap, rule: &crate::value::Dic
     let catalogue_id = catalogue
         .get("id")
         .cloned()
-        .unwrap_or_else(|| VmValue::String(std::sync::Arc::from("")));
+        .unwrap_or_else(|| VmValue::String(arcstr::ArcStr::from("")));
     let stack = catalogue
         .get("stack")
         .cloned()
-        .unwrap_or_else(|| VmValue::String(std::sync::Arc::from("")));
+        .unwrap_or_else(|| VmValue::String(arcstr::ArcStr::from("")));
     let mut out = crate::value::DictMap::new();
     out.insert("catalogue_id".to_string(), catalogue_id);
     out.insert("stack".to_string(), stack);
@@ -477,7 +477,7 @@ fn make_match_record(catalogue: &crate::value::DictMap, rule: &crate::value::Dic
         "explanation".to_string(),
         rule.get("explanation")
             .cloned()
-            .unwrap_or_else(|| VmValue::String(std::sync::Arc::from(""))),
+            .unwrap_or_else(|| VmValue::String(arcstr::ArcStr::from(""))),
     );
     out.insert(
         "references".to_string(),
@@ -575,7 +575,7 @@ fn tool_hooks_register_impl(args: &[VmValue], _out: &mut String) -> Result<VmVal
             let id_match = dict
                 .get("id")
                 .and_then(|v| match v {
-                    VmValue::String(s) => Some(s.as_ref() == new_id),
+                    VmValue::String(s) => Some(s.as_str() == new_id),
                     _ => None,
                 })
                 .unwrap_or(false);
@@ -628,7 +628,7 @@ fn tool_hooks_unregister_impl(args: &[VmValue], _out: &mut String) -> Result<VmV
             if let VmValue::Dict(dict) = entry {
                 dict.get("id")
                     .and_then(|v| match v {
-                        VmValue::String(s) => Some(s.as_ref() != target_id.as_str()),
+                        VmValue::String(s) => Some(s.as_str() != target_id.as_str()),
                         _ => None,
                     })
                     .unwrap_or(true)
@@ -696,7 +696,7 @@ fn tool_hooks_filter_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue
                     // Catalogues with no declared stack act as "match any" —
                     // they ship rules that aren't language-specific.
                     Some(VmValue::String(s)) if !s.is_empty() => {
-                        stacks.iter().any(|requested| requested == s.as_ref())
+                        stacks.iter().any(|requested| requested == s.as_str())
                     }
                     _ => true,
                 },
@@ -1137,7 +1137,7 @@ mod tests {
         config.insert(
             "applies_to".to_string(),
             VmValue::List(std::sync::Arc::new(vec![VmValue::String(
-                std::sync::Arc::from("rust"),
+                arcstr::ArcStr::from("rust"),
             )])),
         );
         config.put_str("severity", "warning");
@@ -1251,7 +1251,7 @@ mod tests {
             "tool_hooks_unregister",
             &[
                 registered,
-                VmValue::String(std::sync::Arc::from("harn-canon/rust")),
+                VmValue::String(arcstr::ArcStr::from("harn-canon/rust")),
             ],
         )
         .expect("unregister");
@@ -1268,14 +1268,14 @@ mod tests {
         let dict_form = VmValue::dict(crate::value::DictMap::from_iter([(
             "stacks".to_string(),
             VmValue::List(std::sync::Arc::new(vec![VmValue::String(
-                std::sync::Arc::from("rust"),
+                arcstr::ArcStr::from("rust"),
             )])),
         )]));
         assert_eq!(context_stacks(Some(&dict_form)), vec!["rust".to_string()]);
 
         let dict_string = VmValue::dict(crate::value::DictMap::from_iter([(
             "stacks".to_string(),
-            VmValue::String(std::sync::Arc::from("python")),
+            VmValue::String(arcstr::ArcStr::from("python")),
         )]));
         assert_eq!(
             context_stacks(Some(&dict_string)),
@@ -1283,15 +1283,15 @@ mod tests {
         );
 
         let list_form = VmValue::List(std::sync::Arc::new(vec![
-            VmValue::String(std::sync::Arc::from("typescript")),
-            VmValue::String(std::sync::Arc::from("rust")),
+            VmValue::String(arcstr::ArcStr::from("typescript")),
+            VmValue::String(arcstr::ArcStr::from("rust")),
         ]));
         assert_eq!(
             context_stacks(Some(&list_form)),
             vec!["typescript".to_string(), "rust".to_string()]
         );
 
-        let raw_string = VmValue::String(std::sync::Arc::from("swift"));
+        let raw_string = VmValue::String(arcstr::ArcStr::from("swift"));
         assert_eq!(context_stacks(Some(&raw_string)), vec!["swift".to_string()]);
 
         assert!(context_stacks(None).is_empty());
@@ -1347,7 +1347,7 @@ mod tests {
             &[
                 r3,
                 VmValue::List(std::sync::Arc::new(vec![VmValue::String(
-                    std::sync::Arc::from("rust"),
+                    arcstr::ArcStr::from("rust"),
                 )])),
             ],
         )
@@ -1403,7 +1403,7 @@ mod tests {
         options.insert(
             "tags".to_string(),
             VmValue::List(std::sync::Arc::new(vec![VmValue::String(
-                std::sync::Arc::from(tag),
+                arcstr::ArcStr::from(tag),
             )])),
         );
         options.insert("ttl_turns".to_string(), VmValue::Int(ttl));
@@ -1419,7 +1419,7 @@ mod tests {
             &vm,
             "tool_hooks_emit_audit",
             &[
-                VmValue::String(std::sync::Arc::from("tool_rewrite")),
+                VmValue::String(arcstr::ArcStr::from("tool_rewrite")),
                 audit_payload("rust.cargo.target_dir", "cargo build"),
             ],
         )
@@ -1441,7 +1441,7 @@ mod tests {
         let result = call_sync(
             &vm,
             "tool_hooks_emit_audit",
-            &[VmValue::String(std::sync::Arc::from("")), VmValue::Nil],
+            &[VmValue::String(arcstr::ArcStr::from("")), VmValue::Nil],
         );
         let Err(VmError::Thrown(VmValue::String(message))) = result else {
             panic!("expected thrown error, got {result:?}");
@@ -1490,7 +1490,7 @@ mod tests {
         options.insert(
             "tags".to_string(),
             VmValue::List(std::sync::Arc::new(vec![VmValue::String(
-                std::sync::Arc::from("x"),
+                arcstr::ArcStr::from("x"),
             )])),
         );
         let result = call_sync(&vm, "tool_hooks_inject_reminder", &[VmValue::dict(options)]);
@@ -1518,7 +1518,7 @@ mod tests {
             &vm,
             "__tool_hooks_classifier_cache_put",
             &[
-                VmValue::String(std::sync::Arc::from("scope:hashA")),
+                VmValue::String(arcstr::ArcStr::from("scope:hashA")),
                 verdict_value("rewrite"),
                 VmValue::Int(0),
                 VmValue::Nil,
@@ -1530,7 +1530,7 @@ mod tests {
             &vm,
             "__tool_hooks_classifier_cache_get",
             &[
-                VmValue::String(std::sync::Arc::from("scope:hashA")),
+                VmValue::String(arcstr::ArcStr::from("scope:hashA")),
                 VmValue::Int(0),
             ],
         )
@@ -1547,7 +1547,7 @@ mod tests {
             &vm,
             "__tool_hooks_classifier_cache_put",
             &[
-                VmValue::String(std::sync::Arc::from("scope:expiring")),
+                VmValue::String(arcstr::ArcStr::from("scope:expiring")),
                 verdict_value("deny"),
                 VmValue::Int(1_000),
                 VmValue::Int(500), // 500ms TTL → expires at 1_500.
@@ -1559,7 +1559,7 @@ mod tests {
             &vm,
             "__tool_hooks_classifier_cache_get",
             &[
-                VmValue::String(std::sync::Arc::from("scope:expiring")),
+                VmValue::String(arcstr::ArcStr::from("scope:expiring")),
                 VmValue::Int(1_200),
             ],
         )
@@ -1570,7 +1570,7 @@ mod tests {
             &vm,
             "__tool_hooks_classifier_cache_get",
             &[
-                VmValue::String(std::sync::Arc::from("scope:expiring")),
+                VmValue::String(arcstr::ArcStr::from("scope:expiring")),
                 VmValue::Int(1_600),
             ],
         )
@@ -1584,7 +1584,7 @@ mod tests {
         let result = call_sync(
             &vm,
             "__tool_hooks_classifier_cache_get",
-            &[VmValue::String(std::sync::Arc::from("")), VmValue::Int(0)],
+            &[VmValue::String(arcstr::ArcStr::from("")), VmValue::Int(0)],
         );
         let Err(VmError::Thrown(VmValue::String(message))) = result else {
             panic!("expected thrown error, got {result:?}");

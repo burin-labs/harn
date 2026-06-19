@@ -139,12 +139,12 @@ fn register_stream_namespace(vm: &mut Vm) {
         VmValue::dict(
             std::iter::once((
                 "_namespace".to_string(),
-                VmValue::String(std::sync::Arc::from("stream")),
+                VmValue::String(arcstr::ArcStr::from("stream")),
             ))
             .chain(names.into_iter().map(|name| {
                 (
                     name.to_string(),
-                    VmValue::BuiltinRef(std::sync::Arc::from(format!("stream.{name}"))),
+                    VmValue::BuiltinRef(arcstr::ArcStr::from(format!("stream.{name}"))),
                 )
             }))
             .collect::<BTreeMap<_, _>>(),

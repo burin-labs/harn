@@ -1504,7 +1504,7 @@ async fn execute_run_inner(inputs: ExecuteRunInputs<'_>) -> RunOutcome {
     // Always set so scripts can rely on `len(argv)`.
     let argv_values: Vec<harn_vm::VmValue> = script_argv
         .iter()
-        .map(|s| harn_vm::VmValue::String(std::sync::Arc::from(s.as_str())))
+        .map(|s| harn_vm::VmValue::String(arcstr::ArcStr::from(s.as_str())))
         .collect();
     vm.set_global(
         "argv",

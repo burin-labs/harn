@@ -293,7 +293,7 @@ fn sse_event_value(event: &MockStreamEvent) -> VmValue {
         event
             .id
             .as_deref()
-            .map(|id| VmValue::String(std::sync::Arc::from(id)))
+            .map(|id| VmValue::String(arcstr::ArcStr::from(id)))
             .unwrap_or(VmValue::Nil),
     );
     dict.insert(
@@ -326,19 +326,19 @@ fn default_sse_response_headers() -> crate::value::DictMap {
     crate::value::DictMap::from_iter([
         (
             "content-type".to_string(),
-            VmValue::String(std::sync::Arc::from("text/event-stream; charset=utf-8")),
+            VmValue::String(arcstr::ArcStr::from("text/event-stream; charset=utf-8")),
         ),
         (
             "cache-control".to_string(),
-            VmValue::String(std::sync::Arc::from("no-cache")),
+            VmValue::String(arcstr::ArcStr::from("no-cache")),
         ),
         (
             "connection".to_string(),
-            VmValue::String(std::sync::Arc::from("keep-alive")),
+            VmValue::String(arcstr::ArcStr::from("keep-alive")),
         ),
         (
             "x-accel-buffering".to_string(),
-            VmValue::String(std::sync::Arc::from("no")),
+            VmValue::String(arcstr::ArcStr::from("no")),
         ),
     ])
 }
@@ -350,7 +350,7 @@ fn sse_response_headers(options: &crate::value::DictMap) -> crate::value::DictMa
             headers.retain(|existing, _| !existing.eq_ignore_ascii_case(name));
             headers.insert(
                 name.clone(),
-                VmValue::String(std::sync::Arc::from(value.display())),
+                VmValue::String(arcstr::ArcStr::from(value.display())),
             );
         }
     }
@@ -573,7 +573,7 @@ fn sse_server_status_value(id: &str, handle: &SseServerHandle) -> VmValue {
         handle
             .cancel_reason
             .as_deref()
-            .map(|reason| VmValue::String(std::sync::Arc::from(reason)))
+            .map(|reason| VmValue::String(arcstr::ArcStr::from(reason)))
             .unwrap_or(VmValue::Nil),
     );
     dict.insert(
@@ -858,21 +858,21 @@ fn transport_mock_call_value(call: &TransportMockCall) -> VmValue {
         "handle".to_string(),
         call.handle
             .as_deref()
-            .map(|handle| VmValue::String(std::sync::Arc::from(handle)))
+            .map(|handle| VmValue::String(arcstr::ArcStr::from(handle)))
             .unwrap_or(VmValue::Nil),
     );
     dict.insert(
         "type".to_string(),
         call.message_type
             .as_deref()
-            .map(|message_type| VmValue::String(std::sync::Arc::from(message_type)))
+            .map(|message_type| VmValue::String(arcstr::ArcStr::from(message_type)))
             .unwrap_or(VmValue::Nil),
     );
     dict.insert(
         "data".to_string(),
         call.data
             .as_deref()
-            .map(|data| VmValue::String(std::sync::Arc::from(data)))
+            .map(|data| VmValue::String(arcstr::ArcStr::from(data)))
             .unwrap_or(VmValue::Nil),
     );
     VmValue::dict(dict)
@@ -918,7 +918,7 @@ pub(super) async fn vm_sse_connect(
             message_type: None,
             data: None,
         });
-        return Ok(VmValue::String(std::sync::Arc::from(id)));
+        return Ok(VmValue::String(arcstr::ArcStr::from(id)));
     }
 
     if !url.starts_with("http://") && !url.starts_with("https://") {
@@ -964,7 +964,7 @@ pub(super) async fn vm_sse_connect(
         handles.insert(id.clone(), handle);
         Ok(())
     })?;
-    Ok(VmValue::String(std::sync::Arc::from(id)))
+    Ok(VmValue::String(arcstr::ArcStr::from(id)))
 }
 
 pub(super) async fn vm_sse_receive(stream_id: &str, timeout_ms: u64) -> Result<VmValue, VmError> {
@@ -1084,7 +1084,7 @@ pub(super) fn register_http_streaming_builtins(vm: &mut Vm) {
             return Err(vm_error("sse_event: requires event data or an event dict"));
         };
         let options = get_options_arg(args, 1);
-        Ok(VmValue::String(std::sync::Arc::from(vm_sse_event_frame(
+        Ok(VmValue::String(arcstr::ArcStr::from(vm_sse_event_frame(
             event, &options,
         )?)))
     });

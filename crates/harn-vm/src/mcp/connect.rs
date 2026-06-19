@@ -16,7 +16,7 @@ pub(crate) async fn mcp_connect_stdio_impl(
     cmd.kill_on_drop(true);
 
     let mut child = cmd.spawn().map_err(|e| {
-        VmError::Thrown(VmValue::String(std::sync::Arc::from(format!(
+        VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
             "mcp_connect: failed to spawn '{command}': {e}"
         ))))
     })?;

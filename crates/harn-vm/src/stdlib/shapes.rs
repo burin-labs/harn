@@ -15,7 +15,7 @@ fn keys_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     match args.first().cloned().unwrap_or(VmValue::Nil) {
         VmValue::Dict(map) => Ok(VmValue::List(std::sync::Arc::new(
             map.keys()
-                .map(|k| VmValue::String(std::sync::Arc::from(k.as_str())))
+                .map(|k| VmValue::String(arcstr::ArcStr::from(k.as_str())))
                 .collect(),
         ))),
         _ => Ok(VmValue::List(std::sync::Arc::new(Vec::new()))),
@@ -41,7 +41,7 @@ fn entries_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError>
                     VmValue::dict(BTreeMap::from([
                         (
                             "key".to_string(),
-                            VmValue::String(std::sync::Arc::from(k.as_str())),
+                            VmValue::String(arcstr::ArcStr::from(k.as_str())),
                         ),
                         ("value".to_string(), v.clone()),
                     ]))
@@ -62,7 +62,10 @@ fn __assert_interface(args: &[VmValue], _out: &mut String) -> Result<VmValue, Vm
     let methods_csv = args.get(3).map(|a| a.display()).unwrap_or_default();
 
     let struct_name = match &val {
-        VmValue::StructInstance { layout, .. } => layout.struct_name().to_string(),
+        VmValue::StructInstance(si) => {
+            let layout = &si.layout;
+            layout.struct_name().to_string()
+        }
         _ => {
             return Err(VmError::TypeError(format!(
                 "parameter '{}': expected value satisfying interface '{}', got {}",

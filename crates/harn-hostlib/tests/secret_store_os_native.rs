@@ -17,7 +17,6 @@
 #![cfg(any(target_os = "macos", target_os = "windows"))]
 
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::Arc;
 
 use harn_hostlib::{secret_store::SecretStoreCapability, BuiltinRegistry, HostlibCapability};
 use harn_vm::VmValue;
@@ -37,7 +36,7 @@ fn dict_arg(entries: &[(&str, VmValue)]) -> Vec<VmValue> {
 }
 
 fn vm_string(s: &str) -> VmValue {
-    VmValue::String(Arc::from(s))
+    VmValue::String(arcstr::ArcStr::from(s))
 }
 
 fn dict_get<'a>(value: &'a VmValue, key: &str) -> &'a VmValue {
@@ -49,7 +48,7 @@ fn dict_get<'a>(value: &'a VmValue, key: &str) -> &'a VmValue {
 
 fn as_string(value: &VmValue) -> &str {
     match value {
-        VmValue::String(s) => s.as_ref(),
+        VmValue::String(s) => s.as_str(),
         other => panic!("not a string: {other:?}"),
     }
 }

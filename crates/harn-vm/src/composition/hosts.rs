@@ -60,7 +60,7 @@ impl CompositionToolHost for ClosureCompositionToolHost {
     async fn call(&self, binding: &BindingManifestEntry, input: Value) -> CompositionToolOutput {
         let mut vm = self.ctx.child_vm();
         let args = vec![
-            VmValue::String(std::sync::Arc::from(binding.name.as_str())),
+            VmValue::String(arcstr::ArcStr::from(binding.name.as_str())),
             crate::json_to_vm_value(&input),
         ];
         let result = vm.call_closure_pub(&self.closure, &args).await;

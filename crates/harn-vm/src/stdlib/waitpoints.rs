@@ -564,7 +564,7 @@ fn ensure_waitpoint_event_log() -> std::sync::Arc<AnyEventLog> {
 }
 
 fn cancelled_vm_error() -> VmError {
-    VmError::Thrown(VmValue::String(std::sync::Arc::from(
+    VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
         "kind:cancelled:VM cancelled by host",
     )))
 }

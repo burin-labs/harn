@@ -77,7 +77,7 @@ fn assert_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> 
             .get(1)
             .map(|a| a.display())
             .unwrap_or_else(|| "Assertion failed".to_string());
-        return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(msg))));
+        return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(msg))));
     }
     Ok(VmValue::Nil)
 }
@@ -96,11 +96,11 @@ fn assert_eq_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErro
                     args[0].display()
                 )
             });
-            return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(msg))));
+            return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(msg))));
         }
         Ok(VmValue::Nil)
     } else {
-        Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+        Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
             "assert_eq requires at least 2 arguments",
         ))))
     }
@@ -119,11 +119,11 @@ fn assert_ne_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErro
                     args[0].display()
                 )
             });
-            return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(msg))));
+            return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(msg))));
         }
         Ok(VmValue::Nil)
     } else {
-        Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+        Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
             "assert_ne requires at least 2 arguments",
         ))))
     }
@@ -138,15 +138,15 @@ fn error_category_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, V
                 .get("category")
                 .map(|v| v.display())
                 .unwrap_or_else(|| "generic".to_string());
-            Ok(VmValue::String(std::sync::Arc::from(cat)))
+            Ok(VmValue::String(arcstr::ArcStr::from(cat)))
         }
         VmValue::String(s) => {
             let err = VmError::Runtime(s.to_string());
-            Ok(VmValue::String(std::sync::Arc::from(
+            Ok(VmValue::String(arcstr::ArcStr::from(
                 error_to_category(&err).as_str(),
             )))
         }
-        _ => Ok(VmValue::String(std::sync::Arc::from("generic"))),
+        _ => Ok(VmValue::String(arcstr::ArcStr::from("generic"))),
     }
 }
 
@@ -245,7 +245,7 @@ mod tests {
     fn dict_err(category: &str) -> VmValue {
         VmValue::dict(std::collections::BTreeMap::from([(
             "category".to_string(),
-            VmValue::String(std::sync::Arc::from(category)),
+            VmValue::String(arcstr::ArcStr::from(category)),
         )]))
     }
 
@@ -258,7 +258,7 @@ mod tests {
 
     fn error_is(error: VmValue, category: &str) -> Result<VmValue, VmError> {
         let mut out = String::new();
-        let args = [error, VmValue::String(std::sync::Arc::from(category))];
+        let args = [error, VmValue::String(arcstr::ArcStr::from(category))];
         error_is_impl(&args, &mut out)
     }
 

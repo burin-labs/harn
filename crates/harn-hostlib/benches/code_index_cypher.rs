@@ -16,7 +16,6 @@
 use std::fs;
 use std::hint::black_box;
 use std::path::PathBuf;
-use std::sync::Arc;
 
 use criterion::{criterion_group, criterion_main, Criterion};
 use harn_hostlib::{
@@ -72,7 +71,7 @@ fn build_corpus() -> (tempfile::TempDir, PathBuf) {
 }
 
 fn cypher_query(reg: &BuiltinRegistry, query: &str) {
-    let payload = dict(&[("query", VmValue::String(Arc::from(query)))]);
+    let payload = dict(&[("query", VmValue::String(arcstr::ArcStr::from(query)))]);
     let response = call(reg, "hostlib_code_index_cypher", payload);
     black_box(response);
 }
@@ -87,7 +86,7 @@ fn bench_cypher(c: &mut Criterion) {
         "hostlib_code_index_rebuild",
         dict(&[(
             "root",
-            VmValue::String(Arc::from(root.to_string_lossy().as_ref())),
+            VmValue::String(arcstr::ArcStr::from(root.to_string_lossy().as_ref())),
         )]),
     );
 

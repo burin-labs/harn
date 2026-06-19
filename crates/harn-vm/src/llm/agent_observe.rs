@@ -1582,7 +1582,7 @@ mod retry_tests {
     use crate::value::{ErrorCategory, VmError, VmValue};
 
     fn thrown(s: &str) -> VmError {
-        VmError::Thrown(VmValue::String(std::sync::Arc::from(s)))
+        VmError::Thrown(VmValue::String(arcstr::ArcStr::from(s)))
     }
 
     fn categorized(msg: &str, category: ErrorCategory) -> VmError {
@@ -1671,7 +1671,7 @@ mod retry_tests {
                         .collect::<crate::value::DictMap>(),
                 )
             };
-            let s = |v: &str| VmValue::String(std::sync::Arc::from(v));
+            let s = |v: &str| VmValue::String(arcstr::ArcStr::from(v));
             let run_tool = dict(&[
                 ("name", s("run")),
                 ("description", s("Run a shell command.")),
@@ -2041,11 +2041,11 @@ mod retry_tests {
         let transient = VmError::Thrown(VmValue::dict(std::collections::BTreeMap::from([
             (
                 "kind".to_string(),
-                VmValue::String(std::sync::Arc::from("transient")),
+                VmValue::String(arcstr::ArcStr::from("transient")),
             ),
             (
                 "reason".to_string(),
-                VmValue::String(std::sync::Arc::from("network_error")),
+                VmValue::String(arcstr::ArcStr::from("network_error")),
             ),
         ])));
         assert!(is_retryable_llm_error(&transient));
@@ -2053,11 +2053,11 @@ mod retry_tests {
         let terminal = VmError::Thrown(VmValue::dict(std::collections::BTreeMap::from([
             (
                 "kind".to_string(),
-                VmValue::String(std::sync::Arc::from("terminal")),
+                VmValue::String(arcstr::ArcStr::from("terminal")),
             ),
             (
                 "reason".to_string(),
-                VmValue::String(std::sync::Arc::from("context_overflow")),
+                VmValue::String(arcstr::ArcStr::from("context_overflow")),
             ),
         ])));
         assert!(!is_retryable_llm_error(&terminal));

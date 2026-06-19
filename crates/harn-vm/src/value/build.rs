@@ -2,7 +2,7 @@
 //! `VmValue::Dict`.
 //!
 //! Harn builtins assemble result dicts by hand, and the raw
-//! `map.insert("key".to_string(), VmValue::String(std::sync::Arc::from(v)))`
+//! `map.insert("key".to_string(), VmValue::String(arcstr::ArcStr::from(v)))`
 //! spelling is both verbose and — once rustfmt wraps it — four lines per
 //! field. [`VmDictExt`] collapses each field to a single call while keeping
 //! the receiver, so the common shapes read as `dict.put_str("key", v)` /
@@ -116,7 +116,7 @@ mod tests {
         let mut dict = BTreeMap::new();
         dict.put_str("k", "v");
         match dict.get("k") {
-            Some(VmValue::String(s)) => assert_eq!(s.as_ref(), "v"),
+            Some(VmValue::String(s)) => assert_eq!(s.as_str(), "v"),
             other => panic!("expected string value, got {other:?}"),
         }
     }

@@ -41,7 +41,7 @@ impl From<HttpMockResponse> for MockResponse {
             headers: value
                 .headers
                 .into_iter()
-                .map(|(key, value)| (key, VmValue::String(std::sync::Arc::from(value))))
+                .map(|(key, value)| (key, VmValue::String(arcstr::ArcStr::from(value))))
                 .collect(),
         }
     }
@@ -155,7 +155,7 @@ pub(super) fn http_mock_calls_value(redact_sensitive: bool) -> Vec<VmValue> {
                 dict.insert(
                     "body".to_string(),
                     match &call.body {
-                        Some(body) => VmValue::String(std::sync::Arc::from(body.as_str())),
+                        Some(body) => VmValue::String(arcstr::ArcStr::from(body.as_str())),
                         None => VmValue::Nil,
                     },
                 );
@@ -299,7 +299,7 @@ pub(super) fn mock_call_headers_value(
         .iter()
         .map(|(key, value)| {
             let value = if policy.header_is_sensitive(key) {
-                VmValue::String(std::sync::Arc::from(crate::redact::REDACTED_PLACEHOLDER))
+                VmValue::String(arcstr::ArcStr::from(crate::redact::REDACTED_PLACEHOLDER))
             } else {
                 value.clone()
             };

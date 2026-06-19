@@ -8,7 +8,7 @@ use crate::orchestration::{
 use super::*;
 
 fn vm_string(value: &str) -> VmValue {
-    VmValue::String(std::sync::Arc::from(value))
+    VmValue::String(arcstr::ArcStr::from(value))
 }
 
 fn vm_dict(pairs: Vec<(&str, VmValue)>) -> VmValue {
@@ -51,7 +51,7 @@ fn worker_snapshot_round_trip_preserves_resume_fields() {
             artifacts: Vec::new(),
             transcript: Some(VmValue::dict(crate::value::DictMap::from_iter([(
                 "_type".to_string(),
-                VmValue::String(std::sync::Arc::from("transcript")),
+                VmValue::String(arcstr::ArcStr::from("transcript")),
             )]))),
         },
         handle: None,
@@ -79,7 +79,7 @@ fn worker_snapshot_round_trip_preserves_resume_fields() {
         latest_error: None,
         transcript: Some(VmValue::dict(crate::value::DictMap::from_iter([(
             "_type".to_string(),
-            VmValue::String(std::sync::Arc::from("transcript")),
+            VmValue::String(arcstr::ArcStr::from("transcript")),
         )]))),
         artifacts: vec![ArtifactRecord {
             type_name: "artifact".to_string(),
@@ -370,41 +370,41 @@ async fn compact_transcript_mode_reduces_carried_messages() {
         VmValue::dict(crate::value::DictMap::from_iter([
             (
                 "role".to_string(),
-                VmValue::String(std::sync::Arc::from("user")),
+                VmValue::String(arcstr::ArcStr::from("user")),
             ),
             (
                 "content".to_string(),
-                VmValue::String(std::sync::Arc::from("one")),
+                VmValue::String(arcstr::ArcStr::from("one")),
             ),
         ])),
         VmValue::dict(crate::value::DictMap::from_iter([
             (
                 "role".to_string(),
-                VmValue::String(std::sync::Arc::from("assistant")),
+                VmValue::String(arcstr::ArcStr::from("assistant")),
             ),
             (
                 "content".to_string(),
-                VmValue::String(std::sync::Arc::from("two")),
+                VmValue::String(arcstr::ArcStr::from("two")),
             ),
         ])),
         VmValue::dict(crate::value::DictMap::from_iter([
             (
                 "role".to_string(),
-                VmValue::String(std::sync::Arc::from("user")),
+                VmValue::String(arcstr::ArcStr::from("user")),
             ),
             (
                 "content".to_string(),
-                VmValue::String(std::sync::Arc::from("three")),
+                VmValue::String(arcstr::ArcStr::from("three")),
             ),
         ])),
         VmValue::dict(crate::value::DictMap::from_iter([
             (
                 "role".to_string(),
-                VmValue::String(std::sync::Arc::from("assistant")),
+                VmValue::String(arcstr::ArcStr::from("assistant")),
             ),
             (
                 "content".to_string(),
-                VmValue::String(std::sync::Arc::from("four")),
+                VmValue::String(arcstr::ArcStr::from("four")),
             ),
         ])),
     ];
@@ -453,7 +453,7 @@ fn worker_policy_inherits_parent_ceiling_when_unspecified() {
 
     let dict = crate::value::DictMap::from_iter([(
         "task".to_string(),
-        VmValue::String(std::sync::Arc::from("draft note")),
+        VmValue::String(arcstr::ArcStr::from("draft note")),
     )]);
     let resolved = super::policy::resolve_worker_policy(&dict).unwrap();
 
@@ -480,22 +480,22 @@ fn worker_policy_intersects_explicit_policy_and_tools_shorthand() {
     let dict = crate::value::DictMap::from_iter([
         (
             "task".to_string(),
-            VmValue::String(std::sync::Arc::from("draft note")),
+            VmValue::String(arcstr::ArcStr::from("draft note")),
         ),
         (
             "policy".to_string(),
             VmValue::dict(crate::value::DictMap::from_iter([(
                 "tools".to_string(),
                 VmValue::List(std::sync::Arc::new(vec![
-                    VmValue::String(std::sync::Arc::from("read")),
-                    VmValue::String(std::sync::Arc::from("write")),
+                    VmValue::String(arcstr::ArcStr::from("read")),
+                    VmValue::String(arcstr::ArcStr::from("write")),
                 ])),
             )])),
         ),
         (
             "tools".to_string(),
             VmValue::List(std::sync::Arc::new(vec![VmValue::String(
-                std::sync::Arc::from("read"),
+                arcstr::ArcStr::from("read"),
             )])),
         ),
     ]);

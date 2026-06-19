@@ -4,10 +4,10 @@ use crate::chunk::{AdaptiveBinaryOp, Chunk, Constant};
 use crate::value::{VmError, VmValue};
 
 impl super::super::Vm {
-    fn constant_name_rc(chunk: &Chunk, idx: usize, fallback: &str) -> Arc<str> {
+    fn constant_name_rc(chunk: &Chunk, idx: usize, fallback: &str) -> arcstr::ArcStr {
         chunk
             .constant_string_rc(idx)
-            .unwrap_or_else(|| Arc::from(fallback))
+            .unwrap_or_else(|| arcstr::ArcStr::from(fallback))
     }
 
     pub(super) fn execute_constant(&mut self) -> Result<(), VmError> {
@@ -18,14 +18,14 @@ impl super::super::Vm {
             Constant::Int(n) => VmValue::Int(*n),
             Constant::Float(n) => VmValue::Float(*n),
             Constant::String(_) => {
-                // Route through the chunk's lazy `Arc<str>` cache so
-                // repeated pushes of the same string constant share a
-                // single allocation instead of materializing a fresh
-                // `Arc<str>` per execution.
+                // Route through the chunk's lazy `HarnStr` cache so repeated
+                // pushes of the same string constant share a single
+                // allocation — the push is then a refcount bump, not a fresh
+                // materialization, per execution.
                 let rc = frame
                     .chunk
                     .constant_string_rc(idx)
-                    .expect("Constant::String idx must resolve to an Arc<str>");
+                    .expect("Constant::String idx must resolve to a HarnStr");
                 VmValue::String(rc)
             }
             Constant::Bool(b) => VmValue::Bool(*b),

@@ -108,7 +108,7 @@ impl OffthreadLlmError {
                 message: self.message,
                 category,
             },
-            None => VmError::Thrown(VmValue::String(std::sync::Arc::from(self.message))),
+            None => VmError::Thrown(VmValue::String(arcstr::ArcStr::from(self.message))),
         }
     }
 }
@@ -184,7 +184,7 @@ pub(crate) async fn vm_call_llm_full_streaming_offthread(
     if !cached && !intercepted && replay_mode == LlmReplayMode::Replay {
         let hash = fixture_hash(&request.model, &request.messages, request.system.as_deref());
         if load_fixture(&hash).is_none() {
-            return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+            return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
                 format!("No fixture found for LLM call (hash: {hash}). Run with --record first."),
             ))));
         }
@@ -198,7 +198,7 @@ pub(crate) async fn vm_call_llm_full_streaming_offthread(
     })
     .await
     .map_err(|join_err| {
-        VmError::Thrown(VmValue::String(std::sync::Arc::from(format!(
+        VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
             "llm_call background task failed: {join_err}"
         ))))
     })?
@@ -270,7 +270,7 @@ async fn vm_call_llm_full_inner_request(
             super::trigger_predicate::note_result(request, &result);
             return Ok(result);
         }
-        return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+        return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
             format!("No fixture found for LLM call (hash: {hash}). Run with --record first."),
         ))));
     }

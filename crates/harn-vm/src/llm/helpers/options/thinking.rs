@@ -2,7 +2,7 @@ use super::output::*;
 use super::*;
 
 pub(super) fn thinking_error(message: impl Into<String>) -> VmError {
-    VmError::Thrown(VmValue::String(std::sync::Arc::from(message.into())))
+    VmError::Thrown(VmValue::String(arcstr::ArcStr::from(message.into())))
 }
 
 pub(super) fn parse_reasoning_effort_field(
@@ -86,14 +86,14 @@ pub(super) fn parse_thinking_option(
         VmValue::Bool(true) => Ok(ThinkingConfig::Enabled {
             budget_tokens: None,
         }),
-        VmValue::String(s) => match s.as_ref() {
+        VmValue::String(s) => match s.as_str() {
             "disabled" | "off" | "none" => Ok(ThinkingConfig::Disabled),
             "enabled" | "on" | "true" => Ok(ThinkingConfig::Enabled {
                 budget_tokens: None,
             }),
             "adaptive" => Ok(ThinkingConfig::Adaptive),
             "minimal" | "low" | "medium" | "high" | "xhigh" => Ok(ThinkingConfig::Effort {
-                level: parse_reasoning_effort(s.as_ref())?,
+                level: parse_reasoning_effort(s.as_str())?,
             }),
             other => Err(thinking_error(format!(
                 "thinking: expected bool, dict, or one of \"enabled\" | \"adaptive\" | \"minimal\" | \"low\" | \"medium\" | \"high\" | \"xhigh\", got \"{other}\""
@@ -107,7 +107,7 @@ pub(super) fn parse_thinking_option(
             let mode = d
                 .get("mode")
                 .and_then(|value| match value {
-                    VmValue::String(s) => Some(s.as_ref()),
+                    VmValue::String(s) => Some(s.as_str()),
                     _ => None,
                 })
                 .unwrap_or("enabled");
@@ -122,7 +122,7 @@ pub(super) fn parse_thinking_option(
                     let level = d
                         .get("level")
                         .and_then(|value| match value {
-                            VmValue::String(s) => Some(s.as_ref()),
+                            VmValue::String(s) => Some(s.as_str()),
                             _ => None,
                         })
                         .ok_or_else(|| {
@@ -195,7 +195,7 @@ pub(super) fn validate_reasoning_effort_level_supported(
         return Ok(());
     }
     let supported = caps.reasoning_effort_levels.join(", ");
-    Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(format!(
+    Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
         "option `{option_name}` level `{raw}` is not supported for provider `{provider}` model `{model}`; supported reasoning_effort values: {supported}"
     )))))
 }
@@ -212,7 +212,7 @@ pub(super) fn parse_anthropic_beta_features_option(
         match raw {
             VmValue::Nil | VmValue::Bool(false) => {}
             VmValue::String(feature) => {
-                let feature = feature.as_ref().trim();
+                let feature = feature.as_str().trim();
                 if !feature.is_empty() {
                     validate_anthropic_beta_feature_name(feature)?;
                     crate::llm::api::push_unique_anthropic_beta_feature(&mut features, feature);
@@ -222,7 +222,7 @@ pub(super) fn parse_anthropic_beta_features_option(
                 for item in list.iter() {
                     match item {
                         VmValue::String(feature) => {
-                            let feature = feature.as_ref().trim();
+                            let feature = feature.as_str().trim();
                             if !feature.is_empty() {
                                 validate_anthropic_beta_feature_name(feature)?;
                                 crate::llm::api::push_unique_anthropic_beta_feature(
@@ -232,7 +232,7 @@ pub(super) fn parse_anthropic_beta_features_option(
                             }
                         }
                         other => {
-                            return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+                            return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
                                 format!(
                                     "anthropic_beta_features: expected list<string>, got {}",
                                     other.type_name()
@@ -243,7 +243,7 @@ pub(super) fn parse_anthropic_beta_features_option(
                 }
             }
             other => {
-                return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+                return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
                     format!(
                         "anthropic_beta_features: expected string or list<string>, got {}",
                         other.type_name()
@@ -292,7 +292,7 @@ pub(super) fn validate_anthropic_beta_feature_name(feature: &str) -> Result<(), 
     {
         return Ok(());
     }
-    Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(format!(
+    Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
         "anthropic_beta_features: invalid beta feature name `{feature}`; expected ASCII letters, digits, '-' or '_'"
     )))))
 }

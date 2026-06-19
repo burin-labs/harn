@@ -195,7 +195,7 @@ fn ensure_mocked_capability(
         })
         .unwrap_or_default();
     if !ops.iter().any(|value| value.display() == operation_name) {
-        ops.push(VmValue::String(std::sync::Arc::from(
+        ops.push(VmValue::String(arcstr::ArcStr::from(
             operation_name.to_string(),
         )));
     }
@@ -237,7 +237,7 @@ fn capability(description: &str, ops: &[(String, VmValue)]) -> VmValue {
         "ops".to_string(),
         VmValue::List(std::sync::Arc::new(
             ops.iter()
-                .map(|(name, _)| VmValue::String(std::sync::Arc::from(name.as_str())))
+                .map(|(name, _)| VmValue::String(arcstr::ArcStr::from(name.as_str())))
                 .collect(),
         )),
     );
@@ -255,7 +255,7 @@ pub(crate) fn require_param(params: &crate::value::DictMap, key: &str) -> Result
         .map(|v| v.display())
         .filter(|v| !v.is_empty())
         .ok_or_else(|| {
-            VmError::Thrown(VmValue::String(std::sync::Arc::from(format!(
+            VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
                 "host_call: missing required parameter '{key}'"
             ))))
         })
@@ -266,7 +266,7 @@ fn render_template(
     bindings: Option<&crate::value::DictMap>,
 ) -> Result<String, VmError> {
     let asset = crate::stdlib::template::TemplateAsset::render_target(path).map_err(|msg| {
-        VmError::Thrown(VmValue::String(std::sync::Arc::from(format!(
+        VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
             "host_call template.render: {msg}"
         ))))
     })?;
@@ -291,7 +291,7 @@ fn parse_host_mock(args: &[VmValue]) -> Result<HostMock, VmError> {
         .unwrap_or_default();
     let operation = args.get(1).map(|value| value.display()).unwrap_or_default();
     if capability.is_empty() || operation.is_empty() {
-        return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+        return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
             "host_mock: capability and operation are required",
         ))));
     }
@@ -371,7 +371,7 @@ pub(crate) fn dispatch_mock_host_call(
 
     record_mock_call(capability, operation, params);
     if let Some(error) = matched.error {
-        return Some(Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+        return Some(Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
             error,
         )))));
     }
@@ -502,7 +502,7 @@ pub(crate) async fn dispatch_host_tool_call_with_ctx(
     }
 
     let Some(bridge) = current_vm_host_bridge(ctx) else {
-        return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+        return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
             "host_tool_call: no host bridge is attached",
         ))));
     };
@@ -591,7 +591,7 @@ async fn dispatch_builtin_host_operation(
         ("template", "render") => {
             let path = require_param(params, "path")?;
             let bindings = params.get("bindings").and_then(|v| v.as_dict());
-            Ok(VmValue::String(std::sync::Arc::from(render_template(
+            Ok(VmValue::String(arcstr::ArcStr::from(render_template(
                 &path, bindings,
             )?)))
         }
@@ -602,7 +602,7 @@ async fn dispatch_builtin_host_operation(
             let _ = std::io::Write::flush(&mut std::io::stdout());
             let mut input = String::new();
             if std::io::stdin().lock().read_line(&mut input).is_ok() {
-                Ok(VmValue::String(std::sync::Arc::from(input.trim_end())))
+                Ok(VmValue::String(arcstr::ArcStr::from(input.trim_end())))
             } else {
                 Ok(VmValue::Nil)
             }
@@ -611,7 +611,7 @@ async fn dispatch_builtin_host_operation(
         // an embedder's JSON-RPC bridge. `runtime.task` lets a debugger or
         // CLI invocation read the pipeline input from `HARN_TASK` without
         // the host explicitly wiring a callback for every op.
-        ("runtime", "task") => Ok(VmValue::String(std::sync::Arc::from(
+        ("runtime", "task") => Ok(VmValue::String(arcstr::ArcStr::from(
             std::env::var("HARN_TASK").unwrap_or_default(),
         ))),
         ("runtime", "set_result") => {
@@ -628,15 +628,15 @@ async fn dispatch_builtin_host_operation(
                     .map(|p| p.display().to_string())
                     .unwrap_or_default()
             });
-            Ok(VmValue::String(std::sync::Arc::from(path)))
+            Ok(VmValue::String(arcstr::ArcStr::from(path)))
         }
         ("workspace", "cwd") => {
             let path = std::env::current_dir()
                 .map(|p| p.display().to_string())
                 .unwrap_or_default();
-            Ok(VmValue::String(std::sync::Arc::from(path)))
+            Ok(VmValue::String(arcstr::ArcStr::from(path)))
         }
-        _ => Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+        _ => Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
             format!("host_call: unsupported operation {capability}.{operation}"),
         )))),
     }
@@ -1012,7 +1012,7 @@ fn split_argv(mut argv: Vec<String>) -> Result<(String, Vec<String>), VmError> {
 /// orchestration policy.
 pub(crate) fn push_sandbox_profile_override(value: &str) -> Result<SandboxProfileGuard, VmError> {
     let profile = crate::orchestration::SandboxProfile::parse(value).ok_or_else(|| {
-        VmError::Thrown(VmValue::String(std::sync::Arc::from(format!(
+        VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
             "host_call process.exec: unknown sandbox_profile {value:?}; expected one of \"unrestricted\", \"worktree\", \"os_hardened\", \"wasi\""
         ))))
     })?;
@@ -1130,7 +1130,7 @@ fn host_mock_push_scope_builtin(_args: &[VmValue], _out: &mut String) -> Result<
 #[harn_builtin(sig = "host_mock_pop_scope() -> nil", category = "host")]
 fn host_mock_pop_scope_builtin(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     if !pop_host_mock_scope() {
-        return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+        return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
             "host_mock_pop_scope: no scope to pop",
         ))));
     }
@@ -1187,7 +1187,7 @@ async fn host_call_builtin(
         .cloned()
         .unwrap_or_default();
     let Some((capability, operation)) = name.split_once('.') else {
-        return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+        return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
             format!("host_call: unsupported operation name '{name}'"),
         ))));
     };
@@ -1213,7 +1213,7 @@ async fn host_tool_call_builtin(
 ) -> Result<VmValue, VmError> {
     let name = args.first().map(|a| a.display()).unwrap_or_default();
     if name.is_empty() {
-        return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+        return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
             "host_tool_call: tool name is required",
         ))));
     }
@@ -1311,14 +1311,14 @@ mod tests {
             capability: "project".to_string(),
             operation: "metadata_get".to_string(),
             params: None,
-            result: Some(VmValue::String(std::sync::Arc::from("fallback"))),
+            result: Some(VmValue::String(arcstr::ArcStr::from("fallback"))),
             error: None,
         });
         push_host_mock(HostMock {
             capability: "project".to_string(),
             operation: "metadata_get".to_string(),
             params: Some(exact_params),
-            result: Some(VmValue::String(std::sync::Arc::from("facts"))),
+            result: Some(VmValue::String(arcstr::ArcStr::from("facts"))),
             error: None,
         });
 
@@ -1352,7 +1352,7 @@ mod tests {
         let result = dispatch_mock_host_call("project", "metadata_get", &params)
             .expect("expected mock result");
         match result {
-            Err(VmError::Thrown(VmValue::String(message))) => assert_eq!(message.as_ref(), "boom"),
+            Err(VmError::Thrown(VmValue::String(message))) => assert_eq!(message.as_str(), "boom"),
             other => panic!("unexpected result: {other:?}"),
         }
         reset_host_state();
@@ -1375,11 +1375,11 @@ mod tests {
             let tool = VmValue::dict(crate::value::DictMap::from_iter([
                 (
                     "name".to_string(),
-                    VmValue::String(std::sync::Arc::from("Read".to_string())),
+                    VmValue::String(arcstr::ArcStr::from("Read".to_string())),
                 ),
                 (
                     "description".to_string(),
-                    VmValue::String(std::sync::Arc::from(
+                    VmValue::String(arcstr::ArcStr::from(
                         "Read a file from the host".to_string(),
                     )),
                 ),
@@ -1387,7 +1387,7 @@ mod tests {
                     "schema".to_string(),
                     VmValue::dict(crate::value::DictMap::from_iter([(
                         "type".to_string(),
-                        VmValue::String(std::sync::Arc::from("object".to_string())),
+                        VmValue::String(arcstr::ArcStr::from("object".to_string())),
                     )])),
                 ),
                 ("deprecated".to_string(), VmValue::Bool(false)),
@@ -1404,7 +1404,7 @@ mod tests {
                 .and_then(|dict| dict.get("path"))
                 .map(|value| value.display())
                 .unwrap_or_default();
-            Ok(Some(VmValue::String(std::sync::Arc::from(format!(
+            Ok(Some(VmValue::String(arcstr::ArcStr::from(format!(
                 "read:{path}"
             )))))
         }
@@ -1428,7 +1428,7 @@ mod tests {
             Ok(Some(VmValue::dict(crate::value::DictMap::from_iter([
                 (
                     "status".to_string(),
-                    VmValue::String(std::sync::Arc::from("completed".to_string())),
+                    VmValue::String(arcstr::ArcStr::from("completed".to_string())),
                 ),
                 ("exit_code".to_string(), VmValue::Int(0)),
                 ("success".to_string(), VmValue::Bool(true)),
@@ -1475,7 +1475,7 @@ mod tests {
             set_host_call_bridge(Arc::new(TestHostToolBridge));
             let args = VmValue::dict(crate::value::DictMap::from_iter([(
                 "path".to_string(),
-                VmValue::String(std::sync::Arc::from("README.md".to_string())),
+                VmValue::String(arcstr::ArcStr::from("README.md".to_string())),
             )]));
             let value = dispatch_host_tool_call("Read", &args)
                 .await
@@ -1510,11 +1510,11 @@ mod tests {
                 &crate::value::DictMap::from_iter([
                     (
                         "mode".to_string(),
-                        VmValue::String(std::sync::Arc::from("shell")),
+                        VmValue::String(arcstr::ArcStr::from("shell")),
                     ),
                     (
                         "command".to_string(),
-                        VmValue::String(std::sync::Arc::from("cat Cargo.toml")),
+                        VmValue::String(arcstr::ArcStr::from("cat Cargo.toml")),
                     ),
                 ]),
             )
@@ -1552,16 +1552,16 @@ mod tests {
         let mut params = crate::value::DictMap::from_iter([
             (
                 "mode".to_string(),
-                VmValue::String(std::sync::Arc::from("argv")),
+                VmValue::String(arcstr::ArcStr::from("argv")),
             ),
             (
                 "argv".to_string(),
                 VmValue::List(std::sync::Arc::new(vec![
                     // Absolute path so the spawn does not depend on PATH,
                     // which the `replace` case intentionally clears.
-                    VmValue::String(std::sync::Arc::from("/bin/sh")),
-                    VmValue::String(std::sync::Arc::from("-c")),
-                    VmValue::String(std::sync::Arc::from(
+                    VmValue::String(arcstr::ArcStr::from("/bin/sh")),
+                    VmValue::String(arcstr::ArcStr::from("-c")),
+                    VmValue::String(arcstr::ArcStr::from(
                         "printf '%s|%s' \"$PARENT_VAR\" \"$CHILD_VAR\"",
                     )),
                 ])),
@@ -1589,7 +1589,7 @@ mod tests {
             // the inherited parent environment (the env-clear footgun fix).
             let child_env = VmValue::dict(crate::value::DictMap::from_iter([(
                 "CHILD_VAR".to_string(),
-                VmValue::String(std::sync::Arc::from("provided")),
+                VmValue::String(arcstr::ArcStr::from("provided")),
             )]));
             let (parent, child) = process_exec_env_probe(child_env, None).await;
             assert_eq!(
@@ -1612,7 +1612,7 @@ mod tests {
             // fully replace the environment when intentionally requested.
             let child_env = VmValue::dict(crate::value::DictMap::from_iter([(
                 "CHILD_VAR".to_string(),
-                VmValue::String(std::sync::Arc::from("provided")),
+                VmValue::String(arcstr::ArcStr::from("provided")),
             )]));
             let (parent, child) = process_exec_env_probe(child_env, Some("replace")).await;
             assert_eq!(parent, "", "explicit replace must clear parent env");
@@ -1630,24 +1630,24 @@ mod tests {
             let params = crate::value::DictMap::from_iter([
                 (
                     "mode".to_string(),
-                    VmValue::String(std::sync::Arc::from("argv")),
+                    VmValue::String(arcstr::ArcStr::from("argv")),
                 ),
                 (
                     "argv".to_string(),
                     VmValue::List(std::sync::Arc::new(vec![VmValue::String(
-                        std::sync::Arc::from("true"),
+                        arcstr::ArcStr::from("true"),
                     )])),
                 ),
                 (
                     "env".to_string(),
                     VmValue::dict(crate::value::DictMap::from_iter([(
                         "CHILD_VAR".to_string(),
-                        VmValue::String(std::sync::Arc::from("x")),
+                        VmValue::String(arcstr::ArcStr::from("x")),
                     )])),
                 ),
                 (
                     "env_mode".to_string(),
-                    VmValue::String(std::sync::Arc::from("bogus")),
+                    VmValue::String(arcstr::ArcStr::from("bogus")),
                 ),
             ]);
             let err = super::dispatch_process_exec(&params, serde_json::Value::Null)

@@ -844,7 +844,7 @@ fn register_composition_map_bounded_builtin(vm: &mut Vm, runtime: CompositionRun
                         results[index] = Some(VmValue::enum_variant(
                             "Result",
                             "Err",
-                            vec![VmValue::String(std::sync::Arc::from(error.to_string()))],
+                            vec![VmValue::String(arcstr::ArcStr::from(error.to_string()))],
                         ));
                     }
                 }
@@ -869,7 +869,7 @@ fn register_composition_map_bounded_builtin(vm: &mut Vm, runtime: CompositionRun
                                 VmValue::enum_variant(
                                     "Result",
                                     "Err",
-                                    vec![VmValue::String(std::sync::Arc::from(
+                                    vec![VmValue::String(arcstr::ArcStr::from(
                                         "map_bounded: task did not produce a result",
                                     ))],
                                 )
@@ -1155,7 +1155,7 @@ pub fn register_composition_builtins(vm: &mut Vm) {
                     "composition_typescript_declarations: invalid manifest: {error}"
                 ))
             })?;
-        Ok(VmValue::String(std::sync::Arc::from(
+        Ok(VmValue::String(arcstr::ArcStr::from(
             composition_typescript_declarations(&manifest),
         )))
     });
@@ -1169,7 +1169,7 @@ pub fn register_composition_builtins(vm: &mut Vm) {
             serde_json::from_value(manifest_value).map_err(|error| {
                 VmError::Runtime(format!("composition_harn_api: invalid manifest: {error}"))
             })?;
-        Ok(VmValue::String(std::sync::Arc::from(composition_harn_api(
+        Ok(VmValue::String(arcstr::ArcStr::from(composition_harn_api(
             &manifest,
         ))))
     });

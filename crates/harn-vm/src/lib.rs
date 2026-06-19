@@ -530,7 +530,7 @@ mod reset_leak_tests {
         config.insert(
             "chain".to_string(),
             VmValue::List(std::sync::Arc::new(vec![VmValue::String(
-                std::sync::Arc::from("mock:mock"),
+                arcstr::ArcStr::from("mock:mock"),
             )])),
         );
         llm::routing::build_routing_policy(&config).expect("intern a routing policy");

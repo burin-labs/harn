@@ -412,7 +412,7 @@ async fn host_agent_session_init(
     control.insert(
         "system".to_string(),
         system
-            .map(|s| VmValue::String(std::sync::Arc::from(s)))
+            .map(|s| VmValue::String(arcstr::ArcStr::from(s)))
             .unwrap_or(VmValue::Nil),
     );
     control.insert("max_iterations".to_string(), VmValue::Int(max_iterations));
@@ -529,7 +529,7 @@ fn agent_init_control_done(
     control.insert(
         "system".to_string(),
         system
-            .map(|s| VmValue::String(std::sync::Arc::from(s.to_string())))
+            .map(|s| VmValue::String(arcstr::ArcStr::from(s.to_string())))
             .unwrap_or(VmValue::Nil),
     );
     control.insert("max_iterations".to_string(), VmValue::Int(0));
@@ -1185,7 +1185,7 @@ fn host_agent_session_record_tool_results_builtin(
             _ => match dict_get(result, "success") {
                 Some(VmValue::Bool(value)) => *value,
                 _ => match dict_get(result, "status") {
-                    Some(VmValue::String(s)) => s.as_ref() == "ok",
+                    Some(VmValue::String(s)) => s.as_str() == "ok",
                     _ => true,
                 },
             },
@@ -2866,7 +2866,7 @@ async fn host_agent_session_push_bridge_injection(
         .map_err(|message| {
             VmError::Runtime(format!("{HOST_SESSION_PUSH_BRIDGE_INJECTION}: {message}"))
         })?;
-    Ok(VmValue::String(std::sync::Arc::from(reminder_id)))
+    Ok(VmValue::String(arcstr::ArcStr::from(reminder_id)))
 }
 
 /// Return a FIFO snapshot of pending bridge user-message and reminder injections.
@@ -3176,7 +3176,7 @@ fn install_session_nested_budget(
     let kind =
         NestedExecutionKind::parse_or_default(opts_map.get(NESTED_KIND_OPTION_KEY).and_then(|v| {
             match v {
-                VmValue::String(text) => Some(text.as_ref()),
+                VmValue::String(text) => Some(text.as_str()),
                 _ => None,
             }
         }));

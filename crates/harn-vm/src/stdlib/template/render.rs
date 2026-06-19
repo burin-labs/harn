@@ -526,7 +526,7 @@ fn eval_expr(
         Expr::Bool(b) => Ok(VmValue::Bool(*b)),
         Expr::Int(n) => Ok(VmValue::Int(*n)),
         Expr::Float(f) => Ok(VmValue::Float(*f)),
-        Expr::Str(s) => Ok(VmValue::String(std::sync::Arc::from(s.as_str()))),
+        Expr::Str(s) => Ok(VmValue::String(arcstr::ArcStr::from(s.as_str()))),
         Expr::Path(segs) => Ok(resolve_path(segs, scope)),
         Expr::Unary(UnOp::Not, inner) => {
             let v = eval_expr(inner, scope, line, col)?;
@@ -591,7 +591,7 @@ fn resolve_path(segs: &[PathSeg], scope: &Scope<'_>) -> VmValue {
                 if idx < 0 || (idx as usize) >= chars.len() {
                     VmValue::Nil
                 } else {
-                    VmValue::String(std::sync::Arc::from(chars[idx as usize].to_string()))
+                    VmValue::String(arcstr::ArcStr::from(chars[idx as usize].to_string()))
                 }
             }
             _ => VmValue::Nil,
@@ -637,7 +637,7 @@ fn compare(a: &VmValue, b: &VmValue) -> Option<std::cmp::Ordering> {
         (VmValue::Float(x), VmValue::Float(y)) => x.partial_cmp(y),
         (VmValue::Int(x), VmValue::Float(y)) => (*x as f64).partial_cmp(y),
         (VmValue::Float(x), VmValue::Int(y)) => x.partial_cmp(&(*y as f64)),
-        (VmValue::String(x), VmValue::String(y)) => Some(x.as_ref().cmp(y.as_ref())),
+        (VmValue::String(x), VmValue::String(y)) => Some(x.as_str().cmp(y.as_str())),
         _ => None,
     }
 }
@@ -651,7 +651,7 @@ fn iterable_items(v: &VmValue) -> Result<Vec<(VmValue, VmValue)>, String> {
             .collect()),
         VmValue::Dict(d) => Ok(d
             .iter()
-            .map(|(k, v)| (VmValue::String(std::sync::Arc::from(k.as_str())), v.clone()))
+            .map(|(k, v)| (VmValue::String(arcstr::ArcStr::from(k.as_str())), v.clone()))
             .collect()),
         VmValue::Set(items) => Ok(items
             .iter()

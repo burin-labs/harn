@@ -135,10 +135,10 @@ pub fn normalize_command_policy_value(config: &VmValue) -> Result<VmValue, VmErr
     let mut normalized = (*map).clone();
     normalized
         .entry("_type".to_string())
-        .or_insert_with(|| VmValue::String(std::sync::Arc::from("command_policy")));
+        .or_insert_with(|| VmValue::String(arcstr::ArcStr::from("command_policy")));
     normalized
         .entry("default_shell_mode".to_string())
-        .or_insert_with(|| VmValue::String(std::sync::Arc::from(DEFAULT_SHELL_MODE)));
+        .or_insert_with(|| VmValue::String(arcstr::ArcStr::from(DEFAULT_SHELL_MODE)));
     normalized
         .entry("workspace_roots".to_string())
         .or_insert_with(|| VmValue::List(std::sync::Arc::new(Vec::new())));
@@ -603,7 +603,7 @@ enum ParsedPreHookAction {
 fn parse_pre_hook_action(value: VmValue) -> Result<ParsedPreHookAction, VmError> {
     match value {
         VmValue::Nil => Ok(ParsedPreHookAction::Allow),
-        VmValue::String(text) if text.as_ref() == "allow" => Ok(ParsedPreHookAction::Allow),
+        VmValue::String(text) if text.as_str() == "allow" => Ok(ParsedPreHookAction::Allow),
         VmValue::Dict(map) => {
             if truthy(map.get("allow")) || map.get("action").is_some_and(|v| v.display() == "allow")
             {
@@ -1164,7 +1164,7 @@ fn redacted_vm_request(params: &crate::value::DictMap) -> crate::value::DictMap 
             if key == "env" || key == "stdin" {
                 (
                     key.clone(),
-                    VmValue::String(std::sync::Arc::from("<redacted>")),
+                    VmValue::String(arcstr::ArcStr::from("<redacted>")),
                 )
             } else {
                 (key.clone(), value.clone())

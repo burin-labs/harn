@@ -114,7 +114,7 @@ pub(super) async fn host_workflow_stage_complete_builtin(
     dict.insert(
         "branch".to_string(),
         branch
-            .map(|branch| VmValue::String(std::sync::Arc::from(branch)))
+            .map(|branch| VmValue::String(arcstr::ArcStr::from(branch)))
             .unwrap_or(VmValue::Nil),
     );
     Ok(VmValue::dict(dict))

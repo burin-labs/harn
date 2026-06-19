@@ -94,12 +94,12 @@ fn register_step_namespace(vm: &mut Vm) {
         VmValue::dict(
             std::iter::once((
                 "_namespace".to_string(),
-                VmValue::String(std::sync::Arc::from("step")),
+                VmValue::String(arcstr::ArcStr::from("step")),
             ))
             .chain(names.into_iter().map(|name| {
                 (
                     name.to_string(),
-                    VmValue::BuiltinRef(std::sync::Arc::from(format!("step.{name}"))),
+                    VmValue::BuiltinRef(arcstr::ArcStr::from(format!("step.{name}"))),
                 )
             }))
             .collect::<BTreeMap<_, _>>(),
@@ -494,7 +494,7 @@ mod tests {
     use super::*;
 
     fn vm_str(value: &str) -> VmValue {
-        VmValue::String(std::sync::Arc::from(value))
+        VmValue::String(arcstr::ArcStr::from(value))
     }
 
     #[test]

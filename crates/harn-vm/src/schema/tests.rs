@@ -12,7 +12,7 @@ use super::{
 };
 
 fn s(v: &str) -> VmValue {
-    VmValue::String(std::sync::Arc::from(v))
+    VmValue::String(arcstr::ArcStr::from(v))
 }
 
 fn make_dict(pairs: Vec<(&str, VmValue)>) -> crate::value::DictMap {

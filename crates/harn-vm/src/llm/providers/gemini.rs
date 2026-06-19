@@ -191,7 +191,7 @@ impl GeminiProvider {
             .json(&body);
         let req = crate::llm::api::apply_auth_headers(req, &request.api_key, pdef.as_ref());
         let response = req.send().await.map_err(|error| {
-            VmError::Thrown(VmValue::String(std::sync::Arc::from(format!(
+            VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
                 "gemini API error: {error}"
             ))))
         })?;
@@ -199,7 +199,7 @@ impl GeminiProvider {
             let status = response.status();
             let retry_after = crate::llm::api::retry_after_header(response.headers());
             let body = response.text().await.unwrap_or_default();
-            return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+            return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
                 crate::llm::api::classify_provider_http_error(
                     "gemini",
                     status,
@@ -210,7 +210,7 @@ impl GeminiProvider {
             ))));
         }
         let json: serde_json::Value = response.json().await.map_err(|error| {
-            VmError::Thrown(VmValue::String(std::sync::Arc::from(format!(
+            VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
                 "gemini response parse error: {error}"
             ))))
         })?;
@@ -365,7 +365,7 @@ fn parse_response(
         .and_then(|error| error.get("message"))
         .and_then(|value| value.as_str())
     {
-        return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+        return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
             format!("gemini API error: {message}"),
         ))));
     }

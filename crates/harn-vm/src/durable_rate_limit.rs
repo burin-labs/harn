@@ -415,7 +415,7 @@ where
     let mut waited_ms = 0_u64;
     loop {
         if is_cancelled() {
-            return Err(VmError::Thrown(VmValue::String(Arc::from(
+            return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
                 "kind:cancelled:VM cancelled by host",
             ))));
         }
@@ -580,7 +580,7 @@ fn bucket_list_value(buckets: &[RateBucket]) -> VmValue {
                 VmValue::dict(BTreeMap::from([
                     (
                         "key".to_string(),
-                        VmValue::String(Arc::from(bucket.key.as_str())),
+                        VmValue::String(arcstr::ArcStr::from(bucket.key.as_str())),
                     ),
                     ("limit".to_string(), VmValue::Int(u64_to_i64(bucket.limit))),
                     ("units".to_string(), VmValue::Int(u64_to_i64(bucket.units))),

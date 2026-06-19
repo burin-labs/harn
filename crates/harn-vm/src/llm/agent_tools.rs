@@ -774,7 +774,7 @@ mod tests {
             .map(|(name, mut entry)| {
                 entry
                     .entry("name".to_string())
-                    .or_insert_with(|| VmValue::String(std::sync::Arc::from(name.to_string())));
+                    .or_insert_with(|| VmValue::String(arcstr::ArcStr::from(name.to_string())));
                 VmValue::dict(entry)
             })
             .collect();

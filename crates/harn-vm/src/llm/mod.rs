@@ -653,7 +653,7 @@ async fn llm_completion_builtin(
         }
     });
     let opts = extract_llm_options(&[
-        VmValue::String(std::sync::Arc::from(prefix.clone())),
+        VmValue::String(arcstr::ArcStr::from(prefix.clone())),
         args.get(2).cloned().unwrap_or(VmValue::Nil),
         args.get(3).cloned().unwrap_or(VmValue::Nil),
     ])?;
@@ -846,17 +846,17 @@ mod tests {
         let result = VmValue::dict(std::collections::BTreeMap::from([
             (
                 "text".to_string(),
-                VmValue::String(std::sync::Arc::from("Analyzing the task")),
+                VmValue::String(arcstr::ArcStr::from("Analyzing the task")),
             ),
             (
                 "protocol_violations".to_string(),
                 VmValue::List(std::sync::Arc::new(vec![VmValue::String(
-                    std::sync::Arc::from("stray text outside response tags"),
+                    arcstr::ArcStr::from("stray text outside response tags"),
                 )])),
             ),
             (
                 "stop_reason".to_string(),
-                VmValue::String(std::sync::Arc::from("length")),
+                VmValue::String(arcstr::ArcStr::from("length")),
             ),
         ]));
 

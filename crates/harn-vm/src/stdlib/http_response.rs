@@ -152,7 +152,7 @@ fn http_reply_from_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, 
     let headers = parse_headers(result.get("headers"), "http_reply_from")?;
     let body_kind = match result.get("body_kind") {
         None | Some(VmValue::Nil) => None,
-        Some(VmValue::String(kind)) => Some(kind.as_ref()),
+        Some(VmValue::String(kind)) => Some(kind.as_str()),
         Some(other) => {
             return Err(thrown_err(format!(
                 "http_reply_from: body_kind must be a string (got {})",
@@ -314,7 +314,7 @@ fn envelope_map(
     let mut map = crate::value::DictMap::new();
     map.insert(
         HTTP_RESPONSE_TAG_KEY.to_string(),
-        VmValue::String(std::sync::Arc::from(HTTP_RESPONSE_TAG_VERSION)),
+        VmValue::String(arcstr::ArcStr::from(HTTP_RESPONSE_TAG_VERSION)),
     );
     map.insert("status".to_string(), VmValue::Int(status));
     map.put_str("body_kind", body_kind);
@@ -429,7 +429,7 @@ async fn drain_to_list(value: VmValue, fn_name: &str) -> Result<Vec<VmValue>, Vm
 }
 
 fn thrown_err(message: impl Into<String>) -> VmError {
-    VmError::Thrown(VmValue::String(std::sync::Arc::from(message.into())))
+    VmError::Thrown(VmValue::String(arcstr::ArcStr::from(message.into())))
 }
 
 /// Return `Some(envelope)` if the JSON value is a tagged HTTP response.
@@ -574,7 +574,7 @@ fn http_etag_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErro
     let mut hasher = Sha256::new();
     hasher.update(&bytes);
     let digest = hasher.finalize();
-    Ok(VmValue::String(std::sync::Arc::from(format!(
+    Ok(VmValue::String(arcstr::ArcStr::from(format!(
         "\"{}\"",
         hex::encode(digest)
     ))))
@@ -600,7 +600,7 @@ fn http_choose_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmEr
         None | Some("") | Some("*/*") => default,
         Some(header) => negotiate_accept(header, &offers).unwrap_or(default),
     };
-    Ok(VmValue::String(std::sync::Arc::from(chosen)))
+    Ok(VmValue::String(arcstr::ArcStr::from(chosen)))
 }
 
 fn optional_string_arg(
@@ -693,7 +693,7 @@ fn http_push_hints_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, 
     for item in paths.iter() {
         match item {
             VmValue::String(text) => {
-                let path = text.as_ref();
+                let path = text.as_str();
                 if path.is_empty() {
                     return Err(thrown_err(
                         "http_push_hints: paths must not contain empty strings",
@@ -730,7 +730,7 @@ fn http_push_hints_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, 
     combined.extend(
         new_links
             .into_iter()
-            .map(|link| VmValue::String(std::sync::Arc::from(link))),
+            .map(|link| VmValue::String(arcstr::ArcStr::from(link))),
     );
 
     headers.insert(
@@ -744,7 +744,7 @@ fn http_push_hints_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, 
 fn is_http_response_envelope(map: &crate::value::DictMap) -> bool {
     matches!(
         map.get(HTTP_RESPONSE_TAG_KEY),
-        Some(VmValue::String(tag)) if tag.as_ref() == HTTP_RESPONSE_TAG_VERSION,
+        Some(VmValue::String(tag)) if tag.as_str() == HTTP_RESPONSE_TAG_VERSION,
     )
 }
 
@@ -853,7 +853,7 @@ fn http_upgrade_ws_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, 
             map.insert(
                 "subprotocol".to_string(),
                 match &negotiated {
-                    Some(name) => VmValue::String(std::sync::Arc::from(name.clone())),
+                    Some(name) => VmValue::String(arcstr::ArcStr::from(name.clone())),
                     None => VmValue::Nil,
                 },
             );
@@ -862,7 +862,7 @@ fn http_upgrade_ws_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, 
                 VmValue::List(std::sync::Arc::new(
                     offered_subprotocols
                         .iter()
-                        .map(|s| VmValue::String(std::sync::Arc::from(s.clone())))
+                        .map(|s| VmValue::String(arcstr::ArcStr::from(s.clone())))
                         .collect(),
                 )),
             );
@@ -1044,12 +1044,12 @@ mod tests {
 
     #[test]
     fn http_ok_produces_tagged_envelope() {
-        let body = VmValue::String(std::sync::Arc::from("hello"));
+        let body = VmValue::String(arcstr::ArcStr::from("hello"));
         let response = http_ok_impl(&[body], &mut String::new()).expect("ok");
         let map = dict(&response);
         assert_eq!(
             map.get(HTTP_RESPONSE_TAG_KEY).and_then(|v| match v {
-                VmValue::String(s) => Some(s.as_ref()),
+                VmValue::String(s) => Some(s.as_str()),
                 _ => None,
             }),
             Some(HTTP_RESPONSE_TAG_VERSION)
@@ -1065,9 +1065,9 @@ mod tests {
     fn http_created_sets_location_header() {
         let body = VmValue::dict(crate::value::DictMap::from_iter([(
             "id".to_string(),
-            VmValue::String(std::sync::Arc::from("sess_1")),
+            VmValue::String(arcstr::ArcStr::from("sess_1")),
         )]));
-        let location = VmValue::String(std::sync::Arc::from("/v1/sessions/sess_1"));
+        let location = VmValue::String(arcstr::ArcStr::from("/v1/sessions/sess_1"));
         let response = http_created_impl(&[body, location], &mut String::new()).expect("created");
         let map = dict(&response);
         assert!(matches!(map.get("status"), Some(VmValue::Int(201))));
@@ -1089,7 +1089,7 @@ mod tests {
         assert!(map.get("body").is_none());
         assert_eq!(
             map.get("body_kind").and_then(|v| match v {
-                VmValue::String(s) => Some(s.as_ref()),
+                VmValue::String(s) => Some(s.as_str()),
                 _ => None,
             }),
             Some(BODY_KIND_NONE)
@@ -1101,8 +1101,8 @@ mod tests {
         let response = http_error_impl(
             &[
                 VmValue::Int(422),
-                VmValue::String(std::sync::Arc::from("invalid_input")),
-                VmValue::String(std::sync::Arc::from("bad payload")),
+                VmValue::String(arcstr::ArcStr::from("invalid_input")),
+                VmValue::String(arcstr::ArcStr::from("bad payload")),
                 VmValue::Nil,
             ],
             &mut String::new(),
@@ -1130,8 +1130,8 @@ mod tests {
         let err = http_error_impl(
             &[
                 VmValue::Int(200),
-                VmValue::String(std::sync::Arc::from("x")),
-                VmValue::String(std::sync::Arc::from("y")),
+                VmValue::String(arcstr::ArcStr::from("x")),
+                VmValue::String(arcstr::ArcStr::from("y")),
             ],
             &mut String::new(),
         )
@@ -1161,14 +1161,14 @@ mod tests {
         let bytes = VmValue::Bytes(std::sync::Arc::new(vec![0x00, 0xff, 0xfe, 0x80]));
         let headers = VmValue::dict(crate::value::DictMap::from_iter([(
             "Content-Type".to_string(),
-            VmValue::String(std::sync::Arc::from("application/octet-stream")),
+            VmValue::String(arcstr::ArcStr::from("application/octet-stream")),
         )]));
         let response =
             http_reply_impl(&[VmValue::Int(200), bytes, headers], &mut String::new()).unwrap();
         let map = dict(&response);
         assert_eq!(
             map.get("body_kind").and_then(|v| match v {
-                VmValue::String(s) => Some(s.as_ref()),
+                VmValue::String(s) => Some(s.as_str()),
                 _ => None,
             }),
             Some(BODY_KIND_BYTES)
@@ -1196,7 +1196,7 @@ mod tests {
         assert!(matches!(map.get("status"), Some(VmValue::Int(202))));
         assert_eq!(
             map.get("body_kind").and_then(|v| match v {
-                VmValue::String(s) => Some(s.as_ref()),
+                VmValue::String(s) => Some(s.as_str()),
                 _ => None,
             }),
             Some(BODY_KIND_STREAM)
@@ -1246,7 +1246,7 @@ mod tests {
         let map = dict(&response);
         assert_eq!(
             map.get("body_kind").and_then(|v| match v {
-                VmValue::String(s) => Some(s.as_ref()),
+                VmValue::String(s) => Some(s.as_str()),
                 _ => None,
             }),
             Some(BODY_KIND_BYTES)
@@ -1287,7 +1287,7 @@ mod tests {
         let map = dict(&response);
         assert_eq!(
             map.get("body_kind").and_then(|v| match v {
-                VmValue::String(s) => Some(s.as_ref()),
+                VmValue::String(s) => Some(s.as_str()),
                 _ => None,
             }),
             Some(BODY_KIND_JSON)
@@ -1316,15 +1316,15 @@ mod tests {
     #[test]
     fn http_stream_buffers_list_source() {
         let items = vec![
-            VmValue::String(std::sync::Arc::from("a")),
-            VmValue::String(std::sync::Arc::from("b")),
+            VmValue::String(arcstr::ArcStr::from("a")),
+            VmValue::String(arcstr::ArcStr::from("b")),
         ];
         let response = run_sync(|| {
             http_stream_impl(
                 crate::vm::AsyncBuiltinCtx::for_test(Vm::new()),
                 vec![
                     VmValue::List(std::sync::Arc::new(items.clone())),
-                    VmValue::String(std::sync::Arc::from("text/plain")),
+                    VmValue::String(arcstr::ArcStr::from("text/plain")),
                 ],
             )
         })
@@ -1332,7 +1332,7 @@ mod tests {
         let map = dict(&response);
         assert_eq!(
             map.get("body_kind").and_then(|v| match v {
-                VmValue::String(s) => Some(s.as_ref()),
+                VmValue::String(s) => Some(s.as_str()),
                 _ => None,
             }),
             Some(BODY_KIND_STREAM)
@@ -1358,7 +1358,7 @@ mod tests {
     fn http_sse_sets_event_stream_headers_and_optional_retry() {
         let events = vec![VmValue::dict(crate::value::DictMap::from_iter([(
             "data".to_string(),
-            VmValue::String(std::sync::Arc::from("ping")),
+            VmValue::String(arcstr::ArcStr::from("ping")),
         )]))];
         let response = run_sync(|| {
             http_sse_impl(
@@ -1391,11 +1391,11 @@ mod tests {
         let response = http_error_impl(
             &[
                 VmValue::Int(404),
-                VmValue::String(std::sync::Arc::from("not_found")),
-                VmValue::String(std::sync::Arc::from("missing")),
+                VmValue::String(arcstr::ArcStr::from("not_found")),
+                VmValue::String(arcstr::ArcStr::from("missing")),
                 VmValue::dict(crate::value::DictMap::from_iter([(
                     "id".to_string(),
-                    VmValue::String(std::sync::Arc::from("sess_404")),
+                    VmValue::String(arcstr::ArcStr::from("sess_404")),
                 )])),
             ],
             &mut String::new(),
@@ -1418,12 +1418,12 @@ mod tests {
 
     #[test]
     fn http_etag_is_quoted_hex_sha256_of_payload() {
-        let value = VmValue::String(std::sync::Arc::from("hello"));
+        let value = VmValue::String(arcstr::ArcStr::from("hello"));
         let etag = http_etag_impl(&[value], &mut String::new()).expect("etag");
         match etag {
             VmValue::String(text) => {
                 assert_eq!(
-                    text.as_ref(),
+                    text.as_str(),
                     "\"2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824\""
                 );
             }
@@ -1434,7 +1434,7 @@ mod tests {
     #[test]
     fn http_etag_stable_across_string_and_bytes_for_same_payload() {
         let from_string = http_etag_impl(
-            &[VmValue::String(std::sync::Arc::from("hello"))],
+            &[VmValue::String(arcstr::ArcStr::from("hello"))],
             &mut String::new(),
         )
         .unwrap();
@@ -1448,12 +1448,12 @@ mod tests {
 
     #[test]
     fn http_choose_returns_best_q_match() {
-        let accept = VmValue::String(std::sync::Arc::from(
+        let accept = VmValue::String(arcstr::ArcStr::from(
             "application/xml;q=0.5, application/json;q=0.9",
         ));
         let offers = VmValue::List(std::sync::Arc::new(vec![
-            VmValue::String(std::sync::Arc::from("application/xml")),
-            VmValue::String(std::sync::Arc::from("application/json")),
+            VmValue::String(arcstr::ArcStr::from("application/xml")),
+            VmValue::String(arcstr::ArcStr::from("application/json")),
         ]));
         let chosen = http_choose_impl(&[accept, offers], &mut String::new()).unwrap();
         assert_eq!(chosen.display(), "application/json");
@@ -1461,10 +1461,10 @@ mod tests {
 
     #[test]
     fn http_choose_prefers_specific_over_wildcard() {
-        let accept = VmValue::String(std::sync::Arc::from("text/*;q=0.5, application/json"));
+        let accept = VmValue::String(arcstr::ArcStr::from("text/*;q=0.5, application/json"));
         let offers = VmValue::List(std::sync::Arc::new(vec![
-            VmValue::String(std::sync::Arc::from("text/plain")),
-            VmValue::String(std::sync::Arc::from("application/json")),
+            VmValue::String(arcstr::ArcStr::from("text/plain")),
+            VmValue::String(arcstr::ArcStr::from("application/json")),
         ]));
         let chosen = http_choose_impl(&[accept, offers], &mut String::new()).unwrap();
         assert_eq!(chosen.display(), "application/json");
@@ -1473,8 +1473,8 @@ mod tests {
     #[test]
     fn http_choose_returns_default_for_no_accept() {
         let offers = VmValue::List(std::sync::Arc::new(vec![
-            VmValue::String(std::sync::Arc::from("text/plain")),
-            VmValue::String(std::sync::Arc::from("application/json")),
+            VmValue::String(arcstr::ArcStr::from("text/plain")),
+            VmValue::String(arcstr::ArcStr::from("application/json")),
         ]));
         let chosen = http_choose_impl(&[VmValue::Nil, offers], &mut String::new()).unwrap();
         assert_eq!(chosen.display(), "text/plain");
@@ -1483,14 +1483,14 @@ mod tests {
     #[test]
     fn http_choose_overrides_default_with_explicit() {
         let offers = VmValue::List(std::sync::Arc::new(vec![
-            VmValue::String(std::sync::Arc::from("text/plain")),
-            VmValue::String(std::sync::Arc::from("application/json")),
+            VmValue::String(arcstr::ArcStr::from("text/plain")),
+            VmValue::String(arcstr::ArcStr::from("application/json")),
         ]));
         let chosen = http_choose_impl(
             &[
                 VmValue::Nil,
                 offers,
-                VmValue::String(std::sync::Arc::from("application/json")),
+                VmValue::String(arcstr::ArcStr::from("application/json")),
             ],
             &mut String::new(),
         )
@@ -1501,10 +1501,10 @@ mod tests {
     #[test]
     fn http_choose_wildcard_accept_yields_default() {
         let offers = VmValue::List(std::sync::Arc::new(vec![VmValue::String(
-            std::sync::Arc::from("application/json"),
+            arcstr::ArcStr::from("application/json"),
         )]));
         let chosen = http_choose_impl(
-            &[VmValue::String(std::sync::Arc::from("*/*")), offers],
+            &[VmValue::String(arcstr::ArcStr::from("*/*")), offers],
             &mut String::new(),
         )
         .unwrap();
@@ -1513,7 +1513,7 @@ mod tests {
 
     #[test]
     fn http_not_modified_envelope_carries_etag() {
-        let etag = VmValue::String(std::sync::Arc::from("\"abc\""));
+        let etag = VmValue::String(arcstr::ArcStr::from("\"abc\""));
         let response = http_not_modified_impl(&[etag, VmValue::Nil], &mut String::new()).unwrap();
         let map = dict(&response);
         assert!(matches!(map.get("status"), Some(VmValue::Int(304))));
@@ -1535,12 +1535,12 @@ mod tests {
         )
         .unwrap();
         let paths = VmValue::List(std::sync::Arc::new(vec![
-            VmValue::String(std::sync::Arc::from("/main.css")),
-            VmValue::String(std::sync::Arc::from("/app.js")),
-            VmValue::String(std::sync::Arc::from("/hero.webp")),
-            VmValue::String(std::sync::Arc::from("/inter.woff2")),
-            VmValue::String(std::sync::Arc::from("/manifest.json")),
-            VmValue::String(std::sync::Arc::from("/unknown.xyz")),
+            VmValue::String(arcstr::ArcStr::from("/main.css")),
+            VmValue::String(arcstr::ArcStr::from("/app.js")),
+            VmValue::String(arcstr::ArcStr::from("/hero.webp")),
+            VmValue::String(arcstr::ArcStr::from("/inter.woff2")),
+            VmValue::String(arcstr::ArcStr::from("/manifest.json")),
+            VmValue::String(arcstr::ArcStr::from("/unknown.xyz")),
         ]));
         let response =
             http_push_hints_impl(&[envelope, paths], &mut String::new()).expect("push_hints");
@@ -1577,7 +1577,7 @@ mod tests {
     fn http_push_hints_handles_querystring_in_path() {
         let envelope = http_ok_impl(&[VmValue::Nil], &mut String::new()).unwrap();
         let paths = VmValue::List(std::sync::Arc::new(vec![VmValue::String(
-            std::sync::Arc::from("/static/app.js?v=42"),
+            arcstr::ArcStr::from("/static/app.js?v=42"),
         )]));
         let response =
             http_push_hints_impl(&[envelope, paths], &mut String::new()).expect("push_hints");
@@ -1603,7 +1603,7 @@ mod tests {
             VmValue::Int(200),
         )]));
         let paths = VmValue::List(std::sync::Arc::new(vec![VmValue::String(
-            std::sync::Arc::from("/main.css"),
+            arcstr::ArcStr::from("/main.css"),
         )]));
         let result = http_push_hints_impl(&[plain, paths], &mut String::new());
         assert!(
@@ -1620,14 +1620,14 @@ mod tests {
                 VmValue::dict(crate::value::DictMap::new()),
                 VmValue::dict(crate::value::DictMap::from_iter([(
                     "Link".to_string(),
-                    VmValue::String(std::sync::Arc::from("</legacy.css>; rel=preload; as=style")),
+                    VmValue::String(arcstr::ArcStr::from("</legacy.css>; rel=preload; as=style")),
                 )])),
             ],
             &mut String::new(),
         )
         .unwrap();
         let paths = VmValue::List(std::sync::Arc::new(vec![VmValue::String(
-            std::sync::Arc::from("/app.js"),
+            arcstr::ArcStr::from("/app.js"),
         )]));
         let response = http_push_hints_impl(&[envelope, paths], &mut String::new()).unwrap();
         let map = dict(&response);
@@ -1650,14 +1650,14 @@ mod tests {
             "headers".to_string(),
             VmValue::dict(crate::value::DictMap::from_iter([(
                 "Sec-WebSocket-Protocol".to_string(),
-                VmValue::String(std::sync::Arc::from("v0.harn, v1.harn")),
+                VmValue::String(arcstr::ArcStr::from("v0.harn, v1.harn")),
             )])),
         )]));
         let options = VmValue::dict(crate::value::DictMap::from_iter([(
             "subprotocols".to_string(),
             VmValue::List(std::sync::Arc::new(vec![
-                VmValue::String(std::sync::Arc::from("v1.harn")),
-                VmValue::String(std::sync::Arc::from("v2.harn")),
+                VmValue::String(arcstr::ArcStr::from("v1.harn")),
+                VmValue::String(arcstr::ArcStr::from("v2.harn")),
             ])),
         )]));
         let response = http_upgrade_ws_impl(&[req, options], &mut String::new()).unwrap();
@@ -1702,14 +1702,14 @@ mod tests {
             "headers".to_string(),
             VmValue::dict(crate::value::DictMap::from_iter([(
                 "Sec-WebSocket-Protocol".to_string(),
-                VmValue::String(std::sync::Arc::from("v2.harn, v1.harn")),
+                VmValue::String(arcstr::ArcStr::from("v2.harn, v1.harn")),
             )])),
         )]));
         let options = VmValue::dict(crate::value::DictMap::from_iter([(
             "subprotocols".to_string(),
             VmValue::List(std::sync::Arc::new(vec![
-                VmValue::String(std::sync::Arc::from("v1.harn")),
-                VmValue::String(std::sync::Arc::from("v2.harn")),
+                VmValue::String(arcstr::ArcStr::from("v1.harn")),
+                VmValue::String(arcstr::ArcStr::from("v2.harn")),
             ])),
         )]));
         let response = http_upgrade_ws_impl(&[req, options], &mut String::new()).unwrap();
@@ -1729,14 +1729,14 @@ mod tests {
             "headers".to_string(),
             VmValue::dict(crate::value::DictMap::from_iter([(
                 "Sec-WebSocket-Protocol".to_string(),
-                VmValue::String(std::sync::Arc::from("v1.harn")),
+                VmValue::String(arcstr::ArcStr::from("v1.harn")),
             )])),
         )]));
         let options = VmValue::dict(crate::value::DictMap::from_iter([
             (
                 "subprotocols".to_string(),
                 VmValue::List(std::sync::Arc::new(vec![VmValue::String(
-                    std::sync::Arc::from("v1.harn"),
+                    arcstr::ArcStr::from("v1.harn"),
                 )])),
             ),
             ("idle_ping_ms".to_string(), VmValue::Int(15_000)),

@@ -176,7 +176,7 @@ fn response_headers(headers: &reqwest::header::HeaderMap) -> crate::value::DictM
         if let Ok(v) = value.to_str() {
             resp_headers.insert(
                 name.as_str().to_string(),
-                VmValue::String(std::sync::Arc::from(v)),
+                VmValue::String(arcstr::ArcStr::from(v)),
             );
         }
     }
@@ -337,7 +337,7 @@ async fn http_verb_handler(
 ) -> Result<VmValue, VmError> {
     let url = args.first().map(|a| a.display()).unwrap_or_default();
     if url.is_empty() {
-        return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+        return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
             format!("http_{}: URL is required", method.to_ascii_lowercase()),
         ))));
     }
@@ -793,7 +793,7 @@ pub(super) fn parse_http_request_parts(
                 let hv = reqwest::header::HeaderValue::from_str(s)
                     .map_err(|e| vm_error(format!("http: invalid auth header value: {e}")))?;
                 header_map.insert(reqwest::header::AUTHORIZATION, hv);
-                recorded_headers.put_str("authorization", s.as_ref());
+                recorded_headers.put_str("authorization", s.as_str());
             }
             VmValue::Dict(d) => {
                 if let Some(bearer) = d.get("bearer") {
@@ -832,7 +832,7 @@ pub(super) fn parse_http_request_parts(
             header_map.insert(name, val);
             recorded_headers.insert(
                 k.to_ascii_lowercase(),
-                VmValue::String(std::sync::Arc::from(v.display())),
+                VmValue::String(arcstr::ArcStr::from(v.display())),
             );
         }
     }
@@ -1457,7 +1457,7 @@ pub(super) async fn vm_http_stream_open(
             streams.insert(id.clone(), handle);
             Ok(())
         })?;
-        return Ok(VmValue::String(std::sync::Arc::from(id)));
+        return Ok(VmValue::String(arcstr::ArcStr::from(id)));
     }
 
     if !final_url.starts_with("http://") && !final_url.starts_with("https://") {
@@ -1512,7 +1512,7 @@ pub(super) async fn vm_http_stream_open(
         streams.insert(id.clone(), handle);
         Ok(())
     })?;
-    Ok(VmValue::String(std::sync::Arc::from(id)))
+    Ok(VmValue::String(arcstr::ArcStr::from(id)))
 }
 
 pub(super) async fn vm_http_stream_read(
@@ -1610,13 +1610,13 @@ pub(super) fn register_http_client_builtins(vm: &mut Vm) {
             .unwrap_or_default()
             .to_uppercase();
         if method.is_empty() {
-            return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+            return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
                 "http_request: method is required",
             ))));
         }
         let url = args.get(1).map(|a| a.display()).unwrap_or_default();
         if url.is_empty() {
-            return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+            return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
                 "http_request: URL is required",
             ))));
         }
@@ -1694,7 +1694,7 @@ pub(super) fn register_http_client_builtins(vm: &mut Vm) {
             sessions.insert(id.clone(), HttpSession { client, options });
             Ok(())
         })?;
-        Ok(VmValue::String(std::sync::Arc::from(id)))
+        Ok(VmValue::String(arcstr::ArcStr::from(id)))
     });
 
     vm.register_async_builtin("http_session_request", |_ctx, args| async move {
@@ -1734,18 +1734,18 @@ mod tests {
         crate::value::DictMap::from_iter([
             (
                 "proxy".to_string(),
-                VmValue::String(std::sync::Arc::from("http://proxy.local:8080")),
+                VmValue::String(arcstr::ArcStr::from("http://proxy.local:8080")),
             ),
             (
                 "proxy_auth".to_string(),
                 VmValue::dict(crate::value::DictMap::from_iter([
                     (
                         "user".to_string(),
-                        VmValue::String(std::sync::Arc::from("alice")),
+                        VmValue::String(arcstr::ArcStr::from("alice")),
                     ),
                     (
                         "pass".to_string(),
-                        VmValue::String(std::sync::Arc::from(password)),
+                        VmValue::String(arcstr::ArcStr::from(password)),
                     ),
                 ])),
             ),

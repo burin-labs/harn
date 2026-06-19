@@ -34,7 +34,7 @@ pub(super) fn vm_dict(pairs: &[(&str, VmValue)]) -> VmValue {
 }
 
 pub(super) fn vm_str(s: &str) -> VmValue {
-    VmValue::String(std::sync::Arc::from(s))
+    VmValue::String(arcstr::ArcStr::from(s))
 }
 
 pub(super) fn vm_bool(b: bool) -> VmValue {

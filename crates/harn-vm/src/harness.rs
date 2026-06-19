@@ -783,7 +783,7 @@ fn paused_clock_at_unix_ms(unix_ms: i64) -> Arc<PausedClock> {
 }
 
 pub(crate) fn vm_string(value: impl Into<String>) -> crate::VmValue {
-    crate::VmValue::String(std::sync::Arc::from(value.into()))
+    crate::VmValue::String(arcstr::ArcStr::from(value.into()))
 }
 
 impl Default for Harness {

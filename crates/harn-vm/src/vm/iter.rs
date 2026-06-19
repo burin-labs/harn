@@ -70,7 +70,7 @@ pub enum VmIter {
         idx: usize,
     },
     /// Unicode scalar iteration over a string.
-    Chars { s: Arc<str>, byte_idx: usize },
+    Chars { s: arcstr::ArcStr, byte_idx: usize },
     /// Drains a generator's yield channel.
     Gen { gen: Arc<VmGenerator> },
     /// Drains a stream's emit channel.
@@ -224,7 +224,7 @@ impl VmIter {
                     let v = entries.get(k).cloned().unwrap_or(VmValue::Nil);
                     *idx += 1;
                     Ok(Some(VmValue::Pair(std::sync::Arc::new((
-                        VmValue::String(std::sync::Arc::from(k.as_str())),
+                        VmValue::String(arcstr::ArcStr::from(k.as_str())),
                         v,
                     )))))
                 } else {
@@ -242,7 +242,7 @@ impl VmIter {
                     *byte_idx += c.len_utf8();
                     let mut buf = [0u8; 4];
                     let encoded = c.encode_utf8(&mut buf);
-                    Ok(Some(VmValue::String(std::sync::Arc::from(&*encoded))))
+                    Ok(Some(VmValue::String(arcstr::ArcStr::from(&*encoded))))
                 } else {
                     *self = VmIter::Exhausted;
                     Ok(None)

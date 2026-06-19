@@ -1541,7 +1541,7 @@ pub(crate) fn result_to_vm(result: &ProjectionResult, policy: &ProjectionPolicy)
             result
                 .roots_consulted
                 .iter()
-                .map(|label| VmValue::String(std::sync::Arc::from(label.clone())))
+                .map(|label| VmValue::String(arcstr::ArcStr::from(label.clone())))
                 .collect(),
         )),
     );
@@ -2033,7 +2033,7 @@ mod tests {
     #[test]
     fn parse_policy_accepts_string_shorthand() {
         let policy =
-            parse_projection_options(&VmValue::String(std::sync::Arc::from("clean_tool_repair")))
+            parse_projection_options(&VmValue::String(arcstr::ArcStr::from("clean_tool_repair")))
                 .unwrap();
         assert_eq!(policy.kind, PolicyKind::CleanToolRepair);
     }
@@ -2041,7 +2041,7 @@ mod tests {
     #[test]
     fn parse_policy_rejects_unknown_kind() {
         let err =
-            parse_projection_options(&VmValue::String(std::sync::Arc::from("bogus"))).unwrap_err();
+            parse_projection_options(&VmValue::String(arcstr::ArcStr::from("bogus"))).unwrap_err();
         match err {
             VmError::Runtime(msg) => assert!(msg.contains("bogus")),
             _ => panic!("expected runtime error"),

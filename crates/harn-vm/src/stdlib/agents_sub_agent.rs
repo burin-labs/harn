@@ -634,7 +634,7 @@ fn collect_transcript_fallbacks(transcript: &VmValue) -> TranscriptFallbacks {
 fn option_requests_structured_output(options: &crate::value::DictMap) -> bool {
     matches!(
         options.get("response_format"),
-        Some(VmValue::String(value)) if value.as_ref() == "json"
+        Some(VmValue::String(value)) if value.as_str() == "json"
     ) || options.contains_key("output_format")
         || options.contains_key("json_schema")
         || options.contains_key("output_schema")
@@ -740,10 +740,10 @@ pub(super) async fn execute_sub_agent(
     let mut loop_options = spec.options.clone();
     loop_options.put_str("session_id", spec.session_id.clone());
     let args = vec![
-        VmValue::String(std::sync::Arc::from(spec.task.clone())),
+        VmValue::String(arcstr::ArcStr::from(spec.task.clone())),
         spec.system
             .as_ref()
-            .map(|system| VmValue::String(std::sync::Arc::from(system.clone())))
+            .map(|system| VmValue::String(arcstr::ArcStr::from(system.clone())))
             .unwrap_or(VmValue::Nil),
         VmValue::dict(loop_options),
     ];
@@ -1001,11 +1001,11 @@ mod tests {
         VmValue::dict(crate::value::DictMap::from_iter([
             (
                 "role".to_string(),
-                VmValue::String(std::sync::Arc::from("assistant")),
+                VmValue::String(arcstr::ArcStr::from("assistant")),
             ),
             (
                 "content".to_string(),
-                VmValue::String(std::sync::Arc::from(text)),
+                VmValue::String(arcstr::ArcStr::from(text)),
             ),
         ]))
     }
@@ -1014,11 +1014,11 @@ mod tests {
         let mut request = crate::value::DictMap::from_iter([
             (
                 "_type".to_string(),
-                VmValue::String(std::sync::Arc::from("sub_agent_request")),
+                VmValue::String(arcstr::ArcStr::from("sub_agent_request")),
             ),
             (
                 "task".to_string(),
-                VmValue::String(std::sync::Arc::from("summarize")),
+                VmValue::String(arcstr::ArcStr::from("summarize")),
             ),
         ]);
         for (key, value) in extra {
@@ -1046,7 +1046,7 @@ mod tests {
     fn parse_sub_agent_request_preserves_session_id_whitespace() {
         let request = normalized_request(vec![(
             "session_id",
-            VmValue::String(std::sync::Arc::from("  child-session  ")),
+            VmValue::String(arcstr::ArcStr::from("  child-session  ")),
         )]);
 
         let parsed = parse_sub_agent_request(&[request]).unwrap();
@@ -1060,26 +1060,26 @@ mod tests {
             roots.push(VmValue::dict(crate::value::DictMap::from_iter([
                 (
                     "path".to_string(),
-                    VmValue::String(std::sync::Arc::from(path)),
+                    VmValue::String(arcstr::ArcStr::from(path)),
                 ),
                 (
                     "mount_mode".to_string(),
-                    VmValue::String(std::sync::Arc::from(mount_mode)),
+                    VmValue::String(arcstr::ArcStr::from(mount_mode)),
                 ),
                 (
                     "mounted_at".to_string(),
-                    VmValue::String(std::sync::Arc::from("2026-05-24T00:00:00Z")),
+                    VmValue::String(arcstr::ArcStr::from("2026-05-24T00:00:00Z")),
                 ),
             ])));
         }
         let mut anchor = crate::value::DictMap::from_iter([
             (
                 "primary".to_string(),
-                VmValue::String(std::sync::Arc::from(primary)),
+                VmValue::String(arcstr::ArcStr::from(primary)),
             ),
             (
                 "anchored_at".to_string(),
-                VmValue::String(std::sync::Arc::from("2026-05-24T00:00:00Z")),
+                VmValue::String(arcstr::ArcStr::from("2026-05-24T00:00:00Z")),
             ),
         ]);
         if !roots.is_empty() {
@@ -1281,11 +1281,11 @@ mod tests {
             options: crate::value::DictMap::from_iter([
                 (
                     "provider".to_string(),
-                    VmValue::String(std::sync::Arc::from("mock")),
+                    VmValue::String(arcstr::ArcStr::from("mock")),
                 ),
                 (
                     "model".to_string(),
-                    VmValue::String(std::sync::Arc::from("mock")),
+                    VmValue::String(arcstr::ArcStr::from("mock")),
                 ),
                 ("max_iterations".to_string(), VmValue::Int(1)),
             ]),
@@ -1357,11 +1357,11 @@ mod tests {
         let mut options = crate::value::DictMap::from_iter([
             (
                 "provider".to_string(),
-                VmValue::String(std::sync::Arc::from("mock")),
+                VmValue::String(arcstr::ArcStr::from("mock")),
             ),
             (
                 "model".to_string(),
-                VmValue::String(std::sync::Arc::from("mock")),
+                VmValue::String(arcstr::ArcStr::from("mock")),
             ),
             ("max_iterations".to_string(), VmValue::Int(1)),
         ]);
