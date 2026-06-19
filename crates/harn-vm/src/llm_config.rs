@@ -1226,10 +1226,11 @@ pub fn resolve_model_info(selector: &str) -> ResolvedModel {
     if let Some(alias) = config.aliases.get(selector) {
         let id = alias.id.clone();
         let provider = alias.provider.clone();
-        let tool_format = alias
+        let requested = alias
             .tool_format
             .clone()
             .unwrap_or_else(|| default_tool_format_with_config(&config, &id, &provider));
+        let tool_format = guard_tool_format(&provider, &id, &requested, Some(selector));
         return ResolvedModel {
             tier: model_tier_with_config(&config, &id),
             family: model_family_with_config(&config, &provider, &id),
@@ -1245,7 +1246,8 @@ pub fn resolve_model_info(selector: &str) -> ResolvedModel {
     let inference = infer_provider_with_config(&config, selector);
     let source = inference.source;
     let provider = inference.provider;
-    let tool_format = default_tool_format_with_config(&config, &id, &provider);
+    let requested = default_tool_format_with_config(&config, &id, &provider);
+    let tool_format = guard_tool_format(&provider, &id, &requested, None);
     let tier = model_tier_with_config(&config, &id);
     let family = model_family_with_inference_source(&config, &provider, &id, source);
     let lineage = model_lineage_with_inference_source(&config, &provider, &id, source);
@@ -1258,6 +1260,24 @@ pub fn resolve_model_info(selector: &str) -> ResolvedModel {
         family,
         lineage,
     }
+}
+
+/// Run the requested `tool_format` through the capability registry's
+/// dialect-validity gate, returning the safe format to actually use. When the
+/// registry auto-corrects a known-broken combo (e.g. a `native` pin on a
+/// `native_unreliable` route that silently drops to unparsed DSML text), the
+/// correction is logged once at resolution time so a harness developer sees
+/// *why* their pinned format was not honored — never a silent vanishing.
+fn guard_tool_format(provider: &str, model: &str, requested: &str, alias: Option<&str>) -> String {
+    let decision = crate::llm::capabilities::validate_tool_format(provider, model, requested);
+    if let Some(reason) = &decision.correction {
+        tracing::warn!(
+            target: "harn::llm::tool_format",
+            alias = alias.unwrap_or(""),
+            "{reason}"
+        );
+    }
+    decision.effective
 }
 
 /// Infer provider from a model ID using inference rules.
@@ -2637,6 +2657,38 @@ mod tests {
     use super::*;
 
     fn reset_overrides() {
+        clear_user_overrides();
+    }
+
+    #[test]
+    fn resolve_model_info_guards_bad_native_pin_on_unreliable_route() {
+        reset_overrides();
+        // An alias that pins tool_format = "native" for DeepSeek V3.2 on
+        // OpenRouter — a route the capability registry knows is
+        // native_unreliable (drops to unparsed DSML text). Before the
+        // footgun-removal gate this bad pin survived resolution verbatim and
+        // produced vanishing tool calls; now it is steered to the route's safe
+        // text-channel format.
+        let overlay = parse_config_toml(
+            "[aliases.guard-ds]\nid = \"deepseek/deepseek-v3.2\"\nprovider = \"openrouter\"\ntool_format = \"native\"\n",
+        )
+        .expect("overlay parses");
+        set_user_overrides(Some(overlay));
+        let resolved = resolve_model_info("guard-ds");
+        assert_eq!(
+            resolved.tool_format, "text",
+            "a native pin on a native_unreliable route must be auto-corrected to text"
+        );
+        clear_user_overrides();
+
+        // A safe native pin (a route with no adverse parity) is untouched.
+        let overlay_ok = parse_config_toml(
+            "[aliases.guard-ds-ok]\nid = \"deepseek/deepseek-v3-base\"\nprovider = \"openrouter\"\ntool_format = \"native\"\n",
+        )
+        .expect("overlay parses");
+        set_user_overrides(Some(overlay_ok));
+        let resolved_ok = resolve_model_info("guard-ds-ok");
+        assert_eq!(resolved_ok.tool_format, "native");
         clear_user_overrides();
     }
 
