@@ -12,6 +12,39 @@ trap 'rm -f "$changed" "$harn_format_files" "$harn_lint_files" "$changed_package
 hook_write_push_files "$changed"
 hook_disable_cargo_incremental_if_release_bump "push $(hook_push_base)"
 
+# Signature guard (cheapest gate — local, no network). main enforces the
+# required_signatures ruleset server-side; an unsigned commit is rejected at
+# merge with the misleading "base branch policy prohibits the merge", so catch
+# it here at push-time instead. A pre-COMMIT check can't gate this: --no-verify
+# skips all hooks and no git config blocks an explicit `-c commit.gpgsign=false`.
+# We reject only `N` (no signature — the gpgsign=false / forgot-to-sign mistake)
+# and `B` (bad signature). Everything with a present signature (G/U/E/X/Y/R) is
+# accepted and left for GitHub to adjudicate, so a signed-but-locally-
+# unverifiable commit (e.g. `%G?=E`, a key not in allowed_signers) is never
+# false-blocked. Intentional override: git push --no-verify.
+# `for` over rev-list + `if` (not a nested `case` inside `$(while …)`, which
+# trips a `;;`-in-command-substitution parse error in POSIX sh). Commit SHAs
+# never contain whitespace, so word-splitting the rev-list output is safe.
+unsigned_found=0
+for commit in $(git rev-list "$(hook_push_base)..HEAD" 2>/dev/null); do
+  sig=$(git log -1 --format='%G?' "$commit" 2>/dev/null)
+  if [ "$sig" = "N" ] || [ "$sig" = "B" ]; then
+    if [ "$unsigned_found" -eq 0 ]; then
+      echo "" >&2
+      echo "error: refusing to push unsigned commit(s) — main enforces required_signatures:" >&2
+      unsigned_found=1
+    fi
+    echo "  $commit (%G?=$sig) $(git log -1 --format='%s' "$commit" 2>/dev/null)" >&2
+  fi
+done
+if [ "$unsigned_found" -ne 0 ]; then
+  echo "" >&2
+  echo "  Re-sign : git commit --amend --no-edit --no-verify   (signs via commit.gpgsign=true)" >&2
+  echo "  Bulk    : git rebase --exec 'git commit --amend --no-edit --no-verify' <base>" >&2
+  echo "  NEVER pass -c commit.gpgsign=false. Intentional override: git push --no-verify." >&2
+  exit 1
+fi
+
 # Merge-queue guard. GitHub does not reject pushes to a PR that's already
 # in the merge queue — it just keeps using the snapshot it took when the
 # PR was enqueued. Any commit pushed after that point is silently dropped
