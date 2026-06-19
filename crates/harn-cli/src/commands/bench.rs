@@ -73,17 +73,10 @@ pub(crate) async fn run_bench(path: &str, iterations: usize, profile: RunProfile
         eprintln!("error: {error}");
         process::exit(1);
     }
-    let graph = harn_modules::build(&[file_path.to_path_buf()]);
-    let mut checker = harn_parser::TypeChecker::new();
-    if let Some(imported) = graph.imported_names_for_file(file_path) {
-        checker = checker.with_imported_names(imported);
-    }
-    if let Some(imported) = graph.imported_type_declarations_for_file(file_path) {
-        checker = checker.with_imported_type_decls(imported);
-    }
-    if let Some(imported) = graph.imported_callable_declarations_for_file(file_path) {
-        checker = checker.with_imported_callable_decls(imported);
-    }
+    let checker = crate::typecheck_imports::checker_with_resolved_imports(
+        harn_parser::TypeChecker::new(),
+        file_path,
+    );
     let type_diagnostics = checker.check_with_source(&program, &source);
     let mut had_type_error = false;
     for diag in &type_diagnostics {

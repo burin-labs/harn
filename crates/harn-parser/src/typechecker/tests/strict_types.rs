@@ -258,6 +258,29 @@ fn test_cross_module_imported_call_is_allowed() {
 }
 
 #[test]
+fn test_imported_name_shadows_same_named_builtin() {
+    // `render` is a builtin (`template.render(path: string?, bindings: dict)`),
+    // but here it is imported from a module (e.g. `std/disclosure`, which
+    // exports a 3-arg `render`). The import must shadow the builtin so the
+    // call is not checked against the builtin's signature — otherwise
+    // precompile reports phantom arity/argument-type errors that `harn run`
+    // never hits.
+    let diags = check_source_with_imports(
+        r#"pipeline t(task) { render({sub: "user:k"}, "github", {project: false}) }"#,
+        &["render"],
+    );
+    let noise: Vec<&String> = diags
+        .iter()
+        .filter(|d| d.message.contains("render"))
+        .map(|d| &d.message)
+        .collect();
+    assert!(
+        noise.is_empty(),
+        "imported `render` must shadow the builtin, got: {noise:?}"
+    );
+}
+
+#[test]
 fn test_renamed_stdlib_call_suggests_replacement() {
     let diags = check_source_with_imports(
         r"pipeline t(task) { retry_with_backoff(1, 0, fn() { return true }) }",

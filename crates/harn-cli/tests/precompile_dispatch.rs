@@ -89,6 +89,44 @@ fn directory_dispatch_emits_artifacts_for_every_source() {
     assert_eq!(sort_lines(&harn.stdout), sort_lines(&rust.stdout));
 }
 
+/// A pipeline that calls a stdlib export whose name collides with a
+/// builtin (`std/disclosure::render` vs the `template.render` builtin)
+/// must precompile. Regression for the import-graph resolution that
+/// `precompile_one` was missing: without it the call was checked against
+/// the builtin signature and failed with phantom type errors, even though
+/// `harn run` resolves the import correctly.
+#[test]
+fn precompiles_call_to_builtin_colliding_stdlib_import() {
+    let workdir = tempfile::tempdir().expect("workdir");
+    let source = workdir.path().join("disclose.harn");
+    std::fs::write(
+        &source,
+        r#"import { render } from "std/disclosure"
+
+pipeline default(task) {
+  let chain = {sub: "user:k", act: {sub: "agent:b"}}
+  log(render(chain, "git", {project: false, env: false, config: {}}))
+}
+"#,
+    )
+    .expect("write disclose.harn");
+
+    let outcome = run_precompile(
+        &[source.to_string_lossy().as_ref()],
+        &[("HARN_CLI_IMPL", "rust")],
+    );
+    assert_eq!(
+        outcome.exit_code, 0,
+        "precompile should succeed; stderr:\n{}",
+        outcome.stderr
+    );
+    assert!(
+        outcome.stderr.contains("1 succeeded, 0 failed"),
+        "stderr should report 1/0; got:\n{}",
+        outcome.stderr
+    );
+}
+
 #[test]
 fn out_directory_mirrors_source_tree_under_target() {
     let workdir = tempfile::tempdir().expect("workdir");

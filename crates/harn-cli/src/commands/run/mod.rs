@@ -432,17 +432,10 @@ fn typecheck_with_imports(
         eprintln!("error: {error}");
         process::exit(1);
     }
-    let graph = harn_modules::build(&[path.to_path_buf()]);
-    let mut checker = harn_parser::TypeChecker::new();
-    if let Some(imported) = graph.imported_names_for_file(path) {
-        checker = checker.with_imported_names(imported);
-    }
-    if let Some(imported) = graph.imported_type_declarations_for_file(path) {
-        checker = checker.with_imported_type_decls(imported);
-    }
-    if let Some(imported) = graph.imported_callable_declarations_for_file(path) {
-        checker = checker.with_imported_callable_decls(imported);
-    }
+    let checker = crate::typecheck_imports::checker_with_resolved_imports(
+        harn_parser::TypeChecker::new(),
+        path,
+    );
     checker.check_with_source(program, source)
 }
 
