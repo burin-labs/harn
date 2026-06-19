@@ -8,6 +8,55 @@ highlights live in [CHANGELOG-pre-0.6.md](CHANGELOG-pre-0.6.md).
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.8.123
+
+### Added
+
+- **`harness.secrets` now exposes host-owned secret management primitives
+  (#499).** Embedders can attach a `SecretProvider` that backs scoped
+  read/write/rotate/lease operations while Harn supplies the typed VM surface,
+  audit context propagation, and binary-safe variants.
+
+### Changed
+
+- **Scalar integer arithmetic now promotes to float on `i64` overflow instead
+  of silently wrapping.** `a + b`, `a - b`, `a * b`, `a ** b`, and unary `-a`
+  previously wrapped two's-complement (e.g. `i64::MAX + 1` became a large
+  negative number); they now promote to `float`, matching the language's own
+  aggregate policy — `sum`/`abs` already promote on overflow. In-range integer
+  arithmetic is unchanged. The compile-time constant folder defers the same
+  overflow cases to the runtime so folded and unfolded expressions agree.
+- **Regex builtin docs and conformance now pin flag and capture semantics.**
+  `regex_match`, `regex_replace`, and `regex_captures` document and test
+  inline `(?is)` flags, trailing `i`/`s` flags, newline-spanning lazy captures,
+  and the exact `regex_captures` result shape.
+
+### Fixed
+
+- **OpenRouter GPT-OSS now defaults to JSON text-channel tools.** The provider
+  capability matrix no longer advertises native tool calls for
+  `openrouter/openai/gpt-oss-*`, while direct Cerebras, DeepInfra, and Groq
+  GPT-OSS routes stay on native tools.
+- **`harn precompile` now resolves imports before type-checking, so an
+  imported symbol that shares a name with a builtin no longer reports phantom
+  type errors.** Calling `render` imported from `std/disclosure` (or any
+  stdlib/user export colliding with a builtin such as the `render` template
+  helper) compiled and ran fine under `harn run` but failed `harn precompile`,
+  because the precompiler checked the call against the builtin's signature
+  instead of the import. Precompile now derives the import graph like
+  `harn run`/`harn check`, and an imported name shadows a same-named builtin in
+  the type checker.
+- **Exhaustive `match` on a `bool` no longer reports a false "can fall
+  through" error.** A `match` over a `bool` scrutinee that covers both `true`
+  and `false` with returning arms is now recognized as exhaustive and
+  terminating, matching how Rust and Swift treat a `match`/`switch` over a
+  boolean — no wildcard arm required.
+- **`harn check` now type-checks expressions inside string interpolation.**
+  Holes in `"... ${expr} ..."` are re-parsed and run through the normal
+  checker, so undefined calls, argument-type mismatches, and other static
+  errors inside `${...}` are caught at check time instead of slipping through
+  to a runtime crash.
+
 ## v0.8.122
 
 ### Fixed
